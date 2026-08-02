@@ -1,9 +1,10 @@
 /**
  * The READ-ONLY Phase-B selector probe orchestrator, driven offline over fake seams (no browser, no NAVER).
  * It locks that the walk (a) visits exactly the screens that carry a highlight target, (b) measures each
- * target's calibrated fixed-label matchCount + `canHighlight` read-only, (c) counts calibrated uniqueness
- * honestly (open_app is uncalibrated and never counts), (d) recovers on abort/timeout, and (e) emits ONLY
- * value-free integers/booleans/enums — never a selector, label, value, or URL.
+ * highlighted control's calibrated fixed-label matchCount + `canHighlight` read-only, (c) counts calibrated
+ * uniqueness honestly, (d) recovers on abort/timeout, and (e) emits ONLY value-free integers/booleans/enums —
+ * never a selector, label, value, or URL. (`open_app` is navigation guidance, not a highlighted control, so it
+ * is never probed here.)
  */
 import { describe, it, expect } from "vitest";
 import type { ApiCenterPageCategory } from "../../src/cli/observe-api-center";
@@ -16,10 +17,9 @@ import {
 } from "../../src/cli/probe-issuance-selectors";
 import type { IssuanceHighlightTarget } from "../../src/action-window/api-issuance-calibration/issuance-highlight-selectors";
 
-/** Calibrated live-confirmed targets resolve uniquely; open_app's structural anchor defaults to non-unique here. */
+/** Every calibrated highlight target resolves uniquely by default. */
 const DEFAULT_MATCHES: Record<IssuanceHighlightTarget, { matchCount: number; canHighlight: boolean }> = {
   create_app: { matchCount: 1, canHighlight: true },
-  open_app: { matchCount: 4, canHighlight: false }, // structural anchor non-unique (e.g. a too-broad row selector)
   api_group: { matchCount: 1, canHighlight: true },
   credentials: { matchCount: 1, canHighlight: true },
 };
@@ -49,7 +49,8 @@ function fakeDeps(o: FakeOptions = {}): { deps: SelectorProbeDeps; probed: Issua
 describe("issuance selector probe — screen selection", () => {
   it("walks exactly the screens that carry a highlight target (app_list, api_group, credentials — never app_detail)", () => {
     expect(issuanceProbeScreens()).toEqual(["app_list", "api_group", "credentials"]);
-    expect(targetsForScreen("app_list")).toEqual(["create_app", "open_app"]);
+    // app_list now carries only create_app — open_app is navigation guidance, not a highlighted control.
+    expect(targetsForScreen("app_list")).toEqual(["create_app"]);
     expect(targetsForScreen("api_group")).toEqual(["api_group"]);
     expect(targetsForScreen("credentials")).toEqual(["credentials"]);
     expect(targetsForScreen("app_detail")).toEqual([]);
@@ -57,35 +58,22 @@ describe("issuance selector probe — screen selection", () => {
 });
 
 describe("issuance selector probe — read-only walk", () => {
-  it("measures every target on every screen and tallies calibrated uniqueness honestly", async () => {
+  it("measures every highlighted control on every screen and tallies calibrated uniqueness honestly", async () => {
     const { deps, probed } = fakeDeps();
     const result = await runSelectorProbeSession(deps);
 
     expect(result.aborted).toBe(false);
     expect(result.screensProbed).toBe(3);
     expect(result.screens.map((s) => s.screen)).toEqual(["app_list", "api_group", "credentials"]);
-    // Every highlight target was measured (open_app included, honestly reported uncalibrated).
-    expect(probed).toEqual(["create_app", "open_app", "api_group", "credentials"]);
+    // Every highlighted control was measured — open_app is not among them (it is navigation guidance).
+    expect(probed).toEqual(["create_app", "api_group", "credentials"]);
 
     const appList = result.screens[0]!;
     expect(appList.targets).toEqual([
       { target: "create_app", status: "live_confirmed", matchCount: 1, canHighlight: true },
-      { target: "open_app", status: "structural_candidate", matchCount: 4, canHighlight: false },
     ]);
-    // Only the 3 calibrated targets count toward calibrated uniqueness; open_app is tallied separately as a
-    // structural candidate (probed here, but non-unique so not a promotion candidate this run).
     expect(result.uniqueCalibrated).toBe(3);
     expect(result.nonUniqueCalibrated).toBe(0);
-    expect(result.structuralCandidatesProbed).toBe(1);
-    expect(result.structuralCandidatesUnique).toBe(0);
-  });
-
-  it("tallies a structural candidate that resolved UNIQUELY as a promotion candidate", async () => {
-    const { deps } = fakeDeps({ matches: { open_app: { matchCount: 1, canHighlight: true } } });
-    const result = await runSelectorProbeSession(deps);
-    expect(result.structuralCandidatesProbed).toBe(1);
-    expect(result.structuralCandidatesUnique).toBe(1); // open_app's app-entry-row anchor resolved to exactly one
-    expect(result.uniqueCalibrated).toBe(3); // still only the 3 fixed-label targets count as calibrated
   });
 
   it("flags a calibrated target that drifted to a non-unique match (nonUniqueCalibrated)", async () => {

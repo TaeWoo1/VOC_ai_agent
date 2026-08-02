@@ -20,6 +20,12 @@ import type { LocateResult } from "../engine";
 export interface IssuanceFixtureScript {
   /** The surface probe result. Missing → an app_list page (`ok:true`). A login page parks the run. */
   probe?: IssuanceSurfaceProbe;
+  /**
+   * The page category the seller LANDS on after opening their existing app (the `open_app` navigation the
+   * engine re-probes to verify). Missing → the app detail page (`app_detail`), the happy existing-app landing.
+   * Set to a non-detail category (e.g. `unknown`, or `login`) to model a wrong page / expired session.
+   */
+  openAppLanding?: IssuanceSurfaceProbe;
   /** The applications read. Missing → one entry row (existing). Set `applicationEntryRowCount:0` for empty. */
   applications?: ApplicationsRead;
   /** Per-target locate results. Missing → a single match with a deterministic signature. */
@@ -41,6 +47,7 @@ function sigFor(target: IssuanceTarget): string {
 }
 
 const DEFAULT_APP_LIST_PROBE: IssuanceSurfaceProbe = { ok: true, pageCategory: "app_list" };
+const DEFAULT_APP_DETAIL_LANDING: IssuanceSurfaceProbe = { ok: true, pageCategory: "app_detail" };
 const EMPTY_CENSUS: ApiCenterStructuralCensus = {
   passwordFieldPresent: false,
   submitAffordancePresent: false,
@@ -56,6 +63,8 @@ export class IssuanceFixtureDriver implements IssuanceProbeDriver {
   readonly calls: string[] = [];
   private cleanedUp = 0;
   private closeResolve: (() => void) | null = null;
+  /** Latches once the seller has "opened" their existing app, so the next probe reports the landing page. */
+  private openedApp = false;
 
   constructor(script: IssuanceFixtureScript = {}) {
     this.script = script;
@@ -63,6 +72,9 @@ export class IssuanceFixtureDriver implements IssuanceProbeDriver {
 
   async probeSurface(): Promise<IssuanceSurfaceProbe> {
     this.calls.push("probeSurface");
+    // After the seller opens their existing app, the surface IS the landing page (app_detail by default) — this
+    // is what the engine's VERIFY_OPEN re-probe reads to confirm the detail page before reusing api_group.
+    if (this.openedApp) return this.script.openAppLanding ?? DEFAULT_APP_DETAIL_LANDING;
     return this.script.probe ?? DEFAULT_APP_LIST_PROBE;
   }
 
@@ -93,7 +105,11 @@ export class IssuanceFixtureDriver implements IssuanceProbeDriver {
 
   async observeUserAction(target: IssuanceTarget): Promise<boolean> {
     this.calls.push(`wait:${target}`);
-    return this.script.action?.[target] ?? true;
+    const acted = this.script.action?.[target] ?? true;
+    // `open_app` is observed as a NAVIGATION: once the seller "acts" (opens their app), the surface becomes the
+    // landing page, so the engine's next probe (VERIFY_OPEN) sees app_detail rather than the applications list.
+    if (target === "open_app" && acted) this.openedApp = true;
+    return acted;
   }
 
   async cleanup(): Promise<void> {

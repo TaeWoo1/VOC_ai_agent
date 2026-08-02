@@ -91,14 +91,16 @@ function emptyCensus() {
 }
 
 describe("issuance session — the app-exists path", () => {
-  it("walks login-clear → open app → api group → credentials → return → complete, never clicking", async () => {
+  it("walks read → open-app guidance → VERIFY app_detail → api group → credentials → return → complete, never clicking", async () => {
     const { io, engine, driver, session } = build(EXISTING);
     startRun(io);
     await session.whenSettled();
 
     expect(engine.currentStage()).toBe("guidance_complete");
     expect(io.lastView()?.status).toBe("COMPLETED");
-    // Every control was located, highlighted, armed and awaited — in order, and never "clicked" by the runtime.
+    // Step 2 (open the existing app) is guidance + an OBSERVED navigation: after the seller opens their app
+    // (wait:open_app), the runtime RE-PROBES (probeSurface) to verify the app_detail landing before reusing the
+    // calibrated api_group highlight. No control is "clicked" by the runtime.
     expect(driver.calls).toEqual([
       "probeSurface",
       "readApplications",
@@ -106,6 +108,7 @@ describe("issuance session — the app-exists path", () => {
       "highlight:open_app",
       "observe:open_app",
       "wait:open_app",
+      "probeSurface", // VERIFY_OPEN: confirm the seller reached app_detail
       "locate:api_group",
       "highlight:api_group",
       "observe:api_group",
@@ -197,14 +200,17 @@ describe("issuance session — login wait", () => {
     await session.whenSettled();
 
     expect(engine.currentStage()).toBe("guidance_complete");
-    expect(driver.calls.filter((c) => c === "probeSurface")).toHaveLength(2);
+    // Three probes: the initial login park, the re-probe after login, and the VERIFY_OPEN app_detail check.
+    expect(driver.calls.filter((c) => c === "probeSurface")).toHaveLength(3);
     expect(io.lastView()?.blocker).toBeUndefined();
   });
 });
 
 describe("issuance session — recoverable parks", () => {
-  it("parks on target_not_found when a control cannot be located, and stays recoverable", async () => {
-    const { io, engine, driver, session } = build({ ...EXISTING, locate: { open_app: { count: 0 } } });
+  it("parks on target_not_found when a highlighted control cannot be located, and stays recoverable", async () => {
+    // The existing-app open step succeeds (guidance + app_detail), then the calibrated api_group control fails
+    // to locate → recoverable target_not_found.
+    const { io, engine, driver, session } = build({ ...EXISTING, locate: { api_group: { count: 0 } } });
     startRun(io);
     await session.whenSettled();
 
@@ -213,7 +219,7 @@ describe("issuance session — recoverable parks", () => {
     expect(io.lastView()?.status).toBe("WAITING_FOR_HUMAN");
     expect(io.eventTypes()).not.toContain("RUN_FAILED");
     // Never highlighted (locate failed first).
-    expect(driver.calls).not.toContain("highlight:open_app");
+    expect(driver.calls).not.toContain("highlight:api_group");
   });
 
   it("parks on page_mismatch when the probed page is not where the tutorial expects", async () => {
@@ -227,11 +233,38 @@ describe("issuance session — recoverable parks", () => {
     expect(io.eventTypes()).not.toContain("RUN_FAILED");
   });
 
+  it("parks on page_mismatch when the seller opens the WRONG page (open_app verify is not app_detail)", async () => {
+    // The seller navigated off the applications list, but did not reach the app detail (a wrong page / multiple
+    // transitions). The VERIFY_OPEN re-probe finds a non-detail page → recoverable page_mismatch, step 2 NOT done.
+    const { io, engine, session } = build({ ...EXISTING, openAppLanding: { ok: true, pageCategory: "unknown" } });
+    startRun(io);
+    await session.whenSettled();
+
+    expect(engine.currentStage()).toBe("page_mismatch");
+    expect(io.blockers()).toContainEqual({ code: "UI_DRIFT", recoverable: true });
+    expect(io.lastView()?.status).toBe("WAITING_FOR_HUMAN");
+    expect(io.eventTypes()).not.toContain("RUN_FAILED");
+    // Step 2 never completed and api_group was never reached (no premature highlight on the wrong page).
+    expect(io.eventTypes().filter((t) => t === "STEP_COMPLETED")).toHaveLength(1); // only step 1 (reach list)
+  });
+
+  it("parks on waiting_login when the session expires mid-open (open_app verify is a login page)", async () => {
+    const { io, engine, session } = build({
+      ...EXISTING,
+      openAppLanding: { ok: false, pageCategory: "login", blockerCode: "LOGIN_REQUIRED" },
+    });
+    startRun(io);
+    await session.whenSettled();
+
+    expect(engine.currentStage()).toBe("waiting_login");
+    expect(io.blockers()).toContainEqual({ code: "LOGIN_REQUIRED", recoverable: true });
+  });
+
   it("parks on page_mismatch when the unique match drifts between locate and highlight", async () => {
     const { io, engine, session } = build({
       ...EXISTING,
-      locate: { open_app: { count: 1, sig: "1111111111111111" } },
-      highlight: { open_app: { count: 1, sig: "2222222222222222" } },
+      locate: { api_group: { count: 1, sig: "1111111111111111" } },
+      highlight: { api_group: { count: 1, sig: "2222222222222222" } },
     });
     startRun(io);
     await session.whenSettled();
@@ -334,7 +367,14 @@ describe("issuance session — contract validity + privacy", () => {
   it("emits only contract-VALID v2 events and views, with no prohibited fields, across every path", async () => {
     // Each script reaches a settled state (complete, or a non-spinning recoverable park) — no barrier is
     // left open, so no background re-arm loop leaks past the assertions.
-    for (const script of [EXISTING, EMPTY, { ...EXISTING, probe: { ok: false, pageCategory: "login" as const, blockerCode: "LOGIN_REQUIRED" as const } }, { ...EXISTING, locate: { open_app: { count: 0 } } }, { ...EXISTING, probe: { ok: true, pageCategory: "unknown" as const } }]) {
+    for (const script of [
+      EXISTING,
+      EMPTY,
+      { ...EXISTING, probe: { ok: false, pageCategory: "login" as const, blockerCode: "LOGIN_REQUIRED" as const } },
+      { ...EXISTING, locate: { api_group: { count: 0 } } },
+      { ...EXISTING, openAppLanding: { ok: true, pageCategory: "unknown" as const } },
+      { ...EXISTING, probe: { ok: true, pageCategory: "unknown" as const } },
+    ]) {
       const { io, session } = build(script);
       startRun(io);
       await session.whenSettled();

@@ -41,6 +41,12 @@ import {
 export type IssuanceEffect =
   | "PROBE"
   | "READ_APPS"
+  /**
+   * Re-probe the surface to VERIFY the seller reached the app detail page after the `open_app` navigation
+   * guidance — the existing-app step 2 completes only on a confirmed `app_detail`; a wrong page / multiple
+   * transitions park recoverably. Distinct from `PROBE` (which expects the applications list at the top).
+   */
+  | "VERIFY_OPEN"
   /** Locate → highlight → arm the barrier for one control, as a single batched step in the session. */
   | { guide: IssuanceTarget }
   | { observe: IssuanceTarget }
@@ -248,15 +254,46 @@ export class IssuanceEngine {
    */
   onUserActionObserved(target: IssuanceTarget): IssuanceEffect {
     if (this.currentTarget !== target || this.stage !== TARGET_BARRIER[target]) return "NONE";
+    // `open_app` is NAVIGATION guidance: the driver observed the seller LEAVE the applications list, but the
+    // step is not done until we re-probe and confirm they reached the app DETAIL page. Defer the observation /
+    // completion events to `onOpenAppVerified` so a wrong page / multiple transitions parks instead of advancing.
+    if (target === "open_app") return "VERIFY_OPEN";
     this.emit("USER_ACTION_OBSERVED", { stepId: this.stepId(), observed: true });
     this.completedSteps = this.activeStepIndex;
     this.emit("STEP_COMPLETED", { stepId: this.stepId(), stepStatus: "COMPLETED" });
     return this.advanceAfterBarrier(target);
   }
 
+  /**
+   * Verify the seller reached the app DETAIL page after opening their existing application (the `VERIFY_OPEN`
+   * re-probe). Only meaningful while still resting on the `open_app` (`guiding_app_detail`) barrier.
+   *   - `app_detail` → step 2 (open the app) is truly done: emit the observation + completion and reuse the
+   *     calibrated `api_group` highlight.
+   *   - `login` → the session expired mid-open; park recoverably on `waiting_login`.
+   *   - anything else (still on the list, a wrong page, or a multi-hop landing) → recoverable `page_mismatch`.
+   */
+  onOpenAppVerified(probe: IssuanceSurfaceProbe): IssuanceEffect {
+    if (isIssuanceTerminal(this.stage)) return "NONE";
+    if (this.stage !== TARGET_BARRIER.open_app || this.currentTarget !== "open_app") return "NONE";
+    if (!probe.ok || probe.blockerCode === "LOGIN_REQUIRED" || probe.pageCategory === "login") {
+      return this.park("waiting_login", "LOGIN_REQUIRED");
+    }
+    if (probe.pageCategory === "app_detail") {
+      this.emit("USER_ACTION_OBSERVED", { stepId: this.stepId(), observed: true });
+      this.completedSteps = this.activeStepIndex; // step 2 (open the existing application)
+      this.emit("STEP_COMPLETED", { stepId: this.stepId(), stepStatus: "COMPLETED" });
+      this.currentTarget = "api_group";
+      return { guide: "api_group" };
+    }
+    // Wrong page / multiple transitions → recoverable park; a REQUEST_STEP_RECHECK re-probes from the top.
+    return this.park("page_mismatch", "UI_DRIFT");
+  }
+
   /** Where the run goes once a barrier's control has been acted on. */
   private advanceAfterBarrier(target: IssuanceTarget): IssuanceEffect {
     switch (target) {
+      // `open_app` never reaches here — its barrier advances via `onOpenAppVerified` (app_detail verification),
+      // not this observed-click path. The case is kept only so the switch stays exhaustive over IssuanceTarget.
       case "create_app":
       case "open_app":
         this.currentTarget = "api_group";

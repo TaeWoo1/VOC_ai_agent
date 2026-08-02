@@ -12,9 +12,9 @@
  * candidates the calibrated fixed-label locator matches and whether it resolves uniquely (`canHighlight`). The
  * output is value-free integers + booleans + a sanitized page category — never a selector, label, value, or URL.
  *
- * This is the read-only evidence that must pass before `SELECTORS_CALIBRATED` may ever flip: it confirms the
- * driver's locate resolves each calibrated target to exactly one element live (and honestly reports the
- * uncalibrated `open_app` as not highlightable). It NEVER highlights or observes a click — that is Phase B.
+ * This is the read-only evidence that confirms the driver's locate resolves each calibrated highlight target to
+ * exactly one element live. (`open_app` is NAVIGATION guidance, not a highlighted control, so it is not probed
+ * here — only the three fixed-label controls are.) It NEVER highlights or observes a click — that is Phase B.
  *
  * Gating mirrors `run-api-issuance-live-naver` / `calibrate-api-center`: refuses without
  * `--i-understand-this-opens-live-naver` (`hasLiveRunApproval`); `screenApiCenterUrl`-fail-closed BEFORE Chrome
@@ -76,10 +76,6 @@ export interface SelectorProbeResult {
   uniqueCalibrated: number;
   /** How many calibrated targets did NOT resolve uniquely (drift signal; sanitized count). */
   nonUniqueCalibrated: number;
-  /** How many STRUCTURAL-candidate targets (open_app) were probed this run (sanitized count). */
-  structuralCandidatesProbed: number;
-  /** How many structural candidates resolved UNIQUELY live (⇒ a promotion candidate; sanitized count). */
-  structuralCandidatesUnique: number;
 }
 
 /** Injected seams so the whole read-only walk is unit-tested offline over fakes (no browser). */
@@ -106,8 +102,6 @@ export async function runSelectorProbeSession(deps: SelectorProbeDeps): Promise<
   let screensProbed = 0;
   let uniqueCalibrated = 0;
   let nonUniqueCalibrated = 0;
-  let structuralCandidatesProbed = 0;
-  let structuralCandidatesUnique = 0;
 
   for (const screen of issuanceProbeScreens()) {
     const targets = targetsForScreen(screen);
@@ -125,27 +119,14 @@ export async function runSelectorProbeSession(deps: SelectorProbeDeps): Promise<
       const status = selectorSpecFor(target).status;
       const { matchCount, canHighlight } = await deps.probeTarget(target);
       targetResults.push({ target, status, matchCount, canHighlight });
-      if (status === "live_confirmed") {
-        if (canHighlight) uniqueCalibrated += 1;
-        else nonUniqueCalibrated += 1;
-      } else if (status === "structural_candidate") {
-        structuralCandidatesProbed += 1;
-        if (canHighlight) structuralCandidatesUnique += 1;
-      }
+      if (canHighlight) uniqueCalibrated += 1;
+      else nonUniqueCalibrated += 1;
     }
     screens.push({ screen, pageCategory, targets: targetResults });
     screensProbed += 1;
   }
 
-  return {
-    screens,
-    aborted,
-    screensProbed,
-    uniqueCalibrated,
-    nonUniqueCalibrated,
-    structuralCandidatesProbed,
-    structuralCandidatesUnique,
-  };
+  return { screens, aborted, screensProbed, uniqueCalibrated, nonUniqueCalibrated };
 }
 
 /* ────────────────────────────── sentinels + live wiring (inert on import) ────────────────────────────── */
@@ -290,8 +271,6 @@ async function main(): Promise<void> {
           screensProbed: result.screensProbed,
           uniqueCalibrated: result.uniqueCalibrated,
           nonUniqueCalibrated: result.nonUniqueCalibrated,
-          structuralCandidatesProbed: result.structuralCandidatesProbed,
-          structuralCandidatesUnique: result.structuralCandidatesUnique,
           screens: result.screens,
         },
         null,
@@ -305,8 +284,6 @@ async function main(): Promise<void> {
       screensProbed: result.screensProbed,
       uniqueCalibrated: result.uniqueCalibrated,
       nonUniqueCalibrated: result.nonUniqueCalibrated,
-      structuralCandidatesProbed: result.structuralCandidatesProbed,
-      structuralCandidatesUnique: result.structuralCandidatesUnique,
     });
   } finally {
     removeSentinel(readyPath);

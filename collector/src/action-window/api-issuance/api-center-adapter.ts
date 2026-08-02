@@ -34,21 +34,22 @@ export const LIVE_DOM_CALIBRATION_PENDING = "LIVE_DOM_CALIBRATION_PENDING" as co
 
 /**
  * **Whether the issuance highlight driver's control selectors are calibrated against the REAL API center —
- * `true`, SCOPED TO THE NEW-APP PATH.**
+ * `true`, covering BOTH onboarding paths.**
  *
  * The LIVE `NaverIssuanceDriver` no longer highlights via {@link CANDIDATE_TARGET_SELECTORS} (those remain ONLY
  * as the synthetic fixture-driver markers, below). It highlights via the calibrated FIXED-LABEL registry in
- * `api-issuance-calibration/issuance-highlight-selectors`. This flag is `true` because the NEW-APP path —
- * `create_app` (애플리케이션 등록), `api_group` (API 그룹), `credentials` (애플리케이션 ID) — is calibrated and
- * LIVE-PROVEN: two READ-ONLY `API_ISSUANCE_SELECTOR_PROBE` runs on the real API center each resolved all three
- * to `matchCount===1` via the driver's own locate mechanism.
+ * `api-issuance-calibration/issuance-highlight-selectors`. This flag is `true` because the three highlighted
+ * controls — `create_app` (애플리케이션 등록), `api_group` (API 그룹), `credentials` (애플리케이션 ID) — are
+ * calibrated and LIVE-PROVEN: two READ-ONLY `API_ISSUANCE_SELECTOR_PROBE` runs on the real API center each
+ * resolved all three to `matchCount===1` via the driver's own locate mechanism. They are the ONLY highlighted
+ * controls on either path.
  *
- * **`open_app` (the EXISTING-app path) is deliberately OUT OF v1 SCOPE and NOT calibrated.** Opening a specific
- * app depends on its identity (no fixed label); its value-free structural-row anchor measured NON-unique live
- * (44 matches), so it stays a `structural_candidate`. The `isGuidedHighlightTarget` gate makes the guided walk
- * FAIL CLOSED on it (`target_not_found` park) — it never highlights an uncalibrated control. So flipping this
- * flag enables the Phase-B highlight proof for the new-app (create) branch only; an existing-app store parks on
- * `open_app` recoverably. The approval-prerequisite gate reads this to allow `API_ISSUANCE_HIGHLIGHT_PROOF`.
+ * **The EXISTING-app step (`open_app`) is NAVIGATION guidance, not a highlighted control.** Opening a specific
+ * app depends on its identity (no fixed label; a broad structural-row anchor measured NON-unique live), so the
+ * driver shows text guidance and OBSERVES the seller's own `app_list → app_detail` navigation; the engine
+ * verifies the detail page before reusing the calibrated `api_group` / `credentials` highlights. So both the
+ * new-app (create) and existing-app (open) branches are guidable — the existing-app branch adds no new selector
+ * to calibrate. The approval-prerequisite gate reads this flag to allow `API_ISSUANCE_HIGHLIGHT_PROOF`.
  */
 export const SELECTORS_CALIBRATED = true;
 

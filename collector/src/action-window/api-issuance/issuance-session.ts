@@ -144,6 +144,15 @@ export class IssuanceGuidanceSession {
         this.publishState();
         return this.drive(next);
       }
+      case "VERIFY_OPEN": {
+        // The seller opened their existing app (a navigation the driver observed). Re-read the sanitized page
+        // category and let the engine confirm it is app_detail before reusing the api_group highlight — a wrong
+        // page / multiple transitions parks recoverably rather than highlighting on a page with no api_group.
+        const probe = await this.driver.probeSurface();
+        const next = this.engine.onOpenAppVerified(probe);
+        this.publishState();
+        return this.drive(next);
+      }
       case "CLEAR_HIGHLIGHT": {
         await this.driver.clearHighlight();
         return;

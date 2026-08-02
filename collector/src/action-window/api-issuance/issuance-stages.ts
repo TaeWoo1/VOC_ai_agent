@@ -45,7 +45,11 @@ export type IssuanceStage =
   | "guiding_create"
   /** Seller barrier: they press the API-group control on the application detail page. */
   | "guiding_api_group"
-  /** Seller barrier: they open their existing application to reach its detail page (existing branch). */
+  /**
+   * Seller barrier (existing branch): guided by TEXT ("open your app yourself"), they open their existing
+   * application to reach its detail page. The runtime observes the `app_list → app_detail` navigation and
+   * verifies the landing page — it highlights no specific app row (that would need the app's identity).
+   */
   | "guiding_app_detail"
   /** Seller barrier: they reach the issued Application ID / Secret to copy them. */
   | "guiding_credentials"

@@ -10,9 +10,11 @@
  *   - the driver never invokes a marketplace action (the fake's `click` spy stays at 0).
  *
  * **Calibration reality this file pins (see `issuance-highlight-selectors`):** the NEW-app path
- * (create_app → api_group → credentials → return) is calibrated by fixed labels and completes; the
- * EXISTING-app path is NOT ready — `open_app` has no fixed label, so it parks `target_not_found`
- * recoverably. `return` is guidance-only (a fixed synthetic signature; no NAVER control queried).
+ * (create_app → api_group → credentials → return) is calibrated by fixed labels and completes. The
+ * EXISTING-app path also completes: `open_app` is NAVIGATION guidance — the driver shows text guidance and
+ * OBSERVES the seller's own `app_list → app_detail` transition (a page-category poll, no highlighted row),
+ * the engine verifies the detail page, then reuses the calibrated api_group/credentials highlights. A wrong
+ * landing page parks recoverably. `return` is guidance-only (a fixed synthetic signature; no NAVER control).
  */
 import { describe, expect, it } from "vitest";
 import type { Page } from "playwright";
@@ -41,15 +43,23 @@ const APP_LIST_CENSUS: ApiCenterStructuralCensus = {
   listLikeContainerCount: 1, // list-like present, nothing else → app_list
 };
 const LOGIN_CENSUS: ApiCenterStructuralCensus = { ...APP_LIST_CENSUS, passwordFieldPresent: true };
+// editable input present (no read-only) → app_detail: the page the seller lands on after opening their app.
+const APP_DETAIL_CENSUS: ApiCenterStructuralCensus = { ...APP_LIST_CENSUS, listLikeContainerCount: 0, editableTextInputCount: 1 };
+// nothing recognizable → unknown: a wrong page the seller might reach instead of the app detail.
+const UNKNOWN_CENSUS: ApiCenterStructuralCensus = { ...APP_LIST_CENSUS, listLikeContainerCount: 0 };
 
 interface FakePageOptions {
   url?: string;
   census?: ApiCenterStructuralCensus;
   locate?: LocateResult;
-  /** Override the result of the value-free STRUCTURAL locate (open_app's app-entry-row anchor). Defaults to `locate`. */
-  structuralLocate?: LocateResult;
   appEntryCount?: number;
   observed?: boolean;
+  /**
+   * The census reported AFTER the seller opens their existing app (i.e. once the app-entry rows have been read).
+   * Models the `app_list → app_detail` navigation the `open_app` step observes. Defaults to app_detail (the
+   * happy landing); set to `UNKNOWN_CENSUS` / `LOGIN_CENSUS` to model a wrong page / expired session.
+   */
+  postOpenCensus?: ApiCenterStructuralCensus;
 }
 
 /** A scripted, browser-free Page: records every evaluate, returns scripted values, and spies on `click`. */
@@ -57,9 +67,11 @@ class FakePage {
   urlValue: string;
   census: ApiCenterStructuralCensus;
   locate: LocateResult;
-  structuralLocate: LocateResult;
   appEntryCount: number;
   observed: boolean;
+  postOpenCensus: ApiCenterStructuralCensus;
+  /** Latches once the app-entry rows have been read — the seller then opens their app, so census → postOpen. */
+  private opened = false;
 
   readonly scripts: string[] = [];
   clickCalls = 0;
@@ -69,9 +81,9 @@ class FakePage {
     this.urlValue = o.url ?? API_CENTER_URL;
     this.census = o.census ?? APP_LIST_CENSUS;
     this.locate = o.locate ?? { count: 1, sig: "abcd1234abcd1234" };
-    this.structuralLocate = o.structuralLocate ?? this.locate;
     this.appEntryCount = o.appEntryCount ?? 0; // default = EMPTY app list → the calibrated new-app (create) path
     this.observed = o.observed ?? true;
+    this.postOpenCensus = o.postOpenCensus ?? APP_DETAIL_CENSUS;
   }
 
   url(): string {
@@ -84,10 +96,14 @@ class FakePage {
     const s = typeof fnOrStr === "string" ? fnOrStr : `[fn] ${String(fnOrStr)}`;
     this.scripts.push(s);
     if (typeof fnOrStr !== "string") return undefined; // overlay/observer function-form → no-op
-    if (s.includes("passwordFieldPresent")) return this.census; // EXTRACT_API_CENTER_CENSUS
-    if (s.includes("issuance-appcount")) return this.appEntryCount;
+    // Once the applications list has been read, the seller opens their app → the surface becomes the detail page
+    // (or a scripted wrong page). This is what the open_app navigation observe + VERIFY_OPEN re-probe read.
+    if (s.includes("passwordFieldPresent")) return this.opened ? this.postOpenCensus : this.census; // census
+    if (s.includes("issuance-appcount")) {
+      this.opened = true;
+      return this.appEntryCount;
+    }
     if (s.includes("issuance-fixed-label-tag") || s.includes("issuance-fixed-label-locate")) return this.locate;
-    if (s.includes("issuance-structural-tag") || s.includes("issuance-structural-locate")) return this.structuralLocate;
     if (s.includes("issuance-cleartag")) return true;
     return undefined;
   }
@@ -265,22 +281,40 @@ describe("NaverIssuanceDriver over a fake Page — the calibrated NEW-app (creat
   });
 });
 
-describe("NaverIssuanceDriver — the EXISTING-app branch fails closed on open_app's UNMEASURED structural candidate", () => {
-  it("parks target_not_found at open_app (a structural_candidate is not guided-highlightable), never a wrong highlight or click", async () => {
-    // One app in the list → step 2 is OPEN. Even if the structural anchor WOULD resolve to a single row
-    // (fake default count:1), the GUIDED walk must not highlight an unconfirmed candidate — it parks.
+describe("NaverIssuanceDriver — the EXISTING-app branch (open_app = navigation guidance) completes", () => {
+  it("guides the seller to open their app, OBSERVES the app_detail transition, then reuses api_group/credentials to COMPLETE", async () => {
+    // One app in the list → step 2 is OPEN. The driver highlights NO app row — it shows guidance and observes
+    // the seller's own app_list → app_detail navigation (postOpenCensus defaults to app_detail), verifies it,
+    // and reuses the calibrated highlights. The whole walk completes without ever clicking.
     const { io, engine, session, page } = build({ appEntryCount: 1 });
     startRun(io);
     await session.whenSettled();
 
     const step2 = io.views().find((v) => v.currentStep?.stepNumber === 2)?.currentStep;
     expect(step2?.copyParams?.targetKind).toBe("open_app");
-    expect(engine.currentStage()).toBe("target_not_found");
-    expect(io.lastView()?.blocker).toEqual({ code: "TARGET_NOT_FOUND", recoverable: true });
+    expect(engine.currentStage()).toBe("guidance_complete");
+    expect(io.lastView()?.status).toBe("COMPLETED");
     expect(io.events().map((e) => e.type)).not.toContain("RUN_FAILED");
-    // Nothing was highlighted and — crucially — the guided walk never even ran the structural locate script.
-    expect(io.events().some((e) => e.type === "TARGET_HIGHLIGHTED")).toBe(false);
+    // open_app never located/highlighted a NAVER control (no fixed-label or structural locate ran for it) — the
+    // only fixed-label locates are for api_group + credentials, plus the guidance overlays.
+    const highlightedSteps = io.events().filter((e) => e.type === "TARGET_HIGHLIGHTED").map((e) => e.payload.stepId);
+    expect(highlightedSteps).toContain("aw.issuance_api_group");
+    expect(highlightedSteps).toContain("aw.issuance_credentials");
     expect(page.scripts.some((s) => s.includes("issuance-structural"))).toBe(false);
+    expect(page.clickCalls).toBe(0);
+  });
+
+  it("parks recoverably on page_mismatch when the seller lands on the WRONG page (not app_detail)", async () => {
+    // The seller navigates off the applications list but not to the app detail (postOpenCensus = unknown). The
+    // VERIFY_OPEN re-probe finds a non-detail page → recoverable page_mismatch, and api_group is never reached.
+    const { io, engine, session, page } = build({ appEntryCount: 1, postOpenCensus: UNKNOWN_CENSUS });
+    startRun(io);
+    await session.whenSettled();
+
+    expect(engine.currentStage()).toBe("page_mismatch");
+    expect(io.lastView()?.blocker).toEqual({ code: "UI_DRIFT", recoverable: true });
+    expect(io.events().map((e) => e.type)).not.toContain("RUN_FAILED");
+    expect(io.events().some((e) => e.type === "TARGET_HIGHLIGHTED" && e.payload.stepId === "aw.issuance_api_group")).toBe(false);
     expect(page.clickCalls).toBe(0);
   });
 });
@@ -364,24 +398,6 @@ describe("NaverIssuanceDriver — read-only probeTargetMatch (Phase-B selector p
     expect(page.scripts.some((s) => s.includes("issuance-fixed-label-tag"))).toBe(false);
     expect(page.scripts.some((s) => s.includes("scrollIntoView"))).toBe(false);
     expect(page.clickCalls).toBe(0);
-  });
-
-  it("measures open_app's value-free STRUCTURAL anchor read-only (unique → highlightable)", async () => {
-    const page = new FakePage({ structuralLocate: { count: 1, sig: "abcd1234abcd1234" } });
-    const driver = new NaverIssuanceDriver(asPage(page));
-    const res = await driver.probeTargetMatch("open_app");
-    expect(res).toEqual({ matchCount: 1, canHighlight: true });
-    // It ran the value-free STRUCTURAL locate (no fixed label, no text read) and never the tag/overlay path.
-    expect(page.scripts.some((s) => s.includes("issuance-structural-locate"))).toBe(true);
-    expect(page.scripts.some((s) => s.includes("issuance-structural-tag"))).toBe(false);
-    expect(page.clickCalls).toBe(0);
-  });
-
-  it("reports open_app as not highlightable when its structural anchor is non-unique", async () => {
-    const page = new FakePage({ structuralLocate: { count: 5 } });
-    const driver = new NaverIssuanceDriver(asPage(page));
-    const res = await driver.probeTargetMatch("open_app");
-    expect(res).toEqual({ matchCount: 5, canHighlight: false });
   });
 
   it("reports a non-unique match as not highlightable", async () => {

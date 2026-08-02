@@ -12,7 +12,26 @@
 
 ---
 
-## 2026-08-02 부록 (4) — SELECTORS_CALIBRATED=true(new-app 한정) + Phase B 신규-앱 범위 (현행)
+## 2026-08-02 부록 (5) — Existing-App Guided Connection: open_app = NAVIGATION 안내, 두 경로 모두 ready_candidate (현행)
+
+> `NAVER Existing-App Guided Connection v1`. 기존 앱 판매자도 issuance 튜토리얼을 완료하게 함. 세부: 슬라이스 §0.2.9.
+
+- **`open_app`을 강조가 아닌 NAVIGATION 안내로 재정의(강조·selector 제거).** 강조 컨트롤은 `create_app`/`api_group`/
+  `credentials` 3개뿐. `open_app` 구조 앵커 기계(`OPEN_APP_STRUCTURAL_SELECTOR`/`structuralSelectorFor`/
+  `buildStructuralLocateScript`/`structural_candidate`) **전부 삭제**.
+- **런타임:** 기존 앱 → step2에서 안내 문구만 표시(합성 sig, NAVER 질의 0) → 드라이버가 `app_list→app_detail` **전환만
+  관찰**(sanitized 카테고리 폴링) → 엔진 `VERIFY_OPEN` 재-probe로 app_detail 검증 후에만 step2 완료 + calibrated
+  `api_group`/`credentials` 강조 **재사용**. **잘못된 페이지·다중 전환 = recoverable park**(page_mismatch/waiting_login).
+- **두 경로 모두 `ready_candidate`**(existing-app의 강조 타깃 2개 live_confirmed; open_app은 강조 없는 안내 단계).
+  `SELECTORS_CALIBRATED` 계속 `true`(existing-app이 새 selector 추가 안 함). FE 정적 위저드 이미 기존-앱 단계 보유 →
+  계약 enum 불변, FE 변경 없음.
+- collector typecheck + **6144 tests** 그린; 독립 리뷰 HIGH=0 MED=0. **라이브 highlight·클릭·credential·push/PR 없음.**
+  완료 후 existing-app live-proof runtime을 **PREPARED까지만** 만들고 승인 대기. new-app Phase B highlight proof는
+  여전히 PENDING(부록(4)).
+
+---
+
+## 2026-08-02 부록 (4) — SELECTORS_CALIBRATED=true(new-app 한정) + Phase B 신규-앱 범위
 
 > issuance highlight calibration의 **현행** 상태(부록(3) 갱신). 세부: 슬라이스 §0.2.8.
 

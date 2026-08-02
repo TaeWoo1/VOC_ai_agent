@@ -420,6 +420,33 @@ new-app(신규 앱 생성) 경로로 한정**하고 `SELECTORS_CALIBRATED`를 �
 - **향후 open_app 재개 시:** app_list-with-app 구조 관찰로 좁고 안정적인 value-free 앵커 확정 → 재-probe → 유일하면
   승격(existing-app 경로 복귀). 현재는 new-app 한정.
 
+### 0.2.9 개정 — **`NAVER Existing-App Guided Connection v1`: open_app = 강조가 아닌 NAVIGATION 안내, 두 경로 모두 `ready_candidate`** ⭐ 현행 issuance 상태
+
+0.2.8은 `open_app`(기존 앱 열기)을 라이브에서 유일 해석 실패(44 매칭)한 구조 앵커 후보로 두고 existing-app 경로를
+`not_ready`로 남겼다. 본 단위는 **접근을 바꿔** 기존 앱 판매자도 튜토리얼을 완료하게 한다: **특정 앱 행을 강조하려는
+시도를 폐기**하고, `open_app`을 **강조 타깃이 아닌 NAVIGATION 안내**로 재정의한다.
+
+- **`open_app` = NAVIGATION 안내(강조·selector 제거).** `ISSUANCE_HIGHLIGHT_TARGETS`에서 제거 → 이제 강조 컨트롤은
+  `create_app`/`api_group`/`credentials` 3개뿐. `OPEN_APP_STRUCTURAL_SELECTOR`·`structuralSelectorFor`·
+  `buildStructuralLocateScript`·`structural_candidate` 상태 **전부 삭제**(코드에서 미측정 구조 앵커 기계 제거). `open_app`은
+  `ISSUANCE_GUIDANCE_ONLY_TARGETS`(+`ISSUANCE_NAVIGATION_TARGETS`)에 편입.
+- **런타임 흐름(engine/driver/session):** 기존 앱 존재 → step2에서 **안내 문구**("연결할 애플리케이션을 직접 열어주세요")
+  오버레이만 표시(합성 `OPEN_APP_GUIDANCE_SIG`, NAVER DOM 질의 0). 드라이버는 **판매자의 `app_list → app_detail`
+  전환만 관찰**(sanitized 페이지 CATEGORY 폴링; 클릭·태그·값읽기 0). 관찰 후 엔진이 **`VERIFY_OPEN` 재-probe**로
+  app_detail을 **검증한 뒤에만** step2 완료 처리하고 **calibrated `api_group`/`credentials` 강조 흐름을 재사용**.
+- **잘못된 페이지·다중 전환 = recoverable park.** `VERIFY_OPEN`이 app_detail이 아니면 `page_mismatch`(login이면
+  `waiting_login`) 회복 park — step2 미완료, api_group 미강조. `REQUEST_STEP_RECHECK`로 상단부터 재-probe 복구.
+- **두 경로 모두 readiness 반영:** `issuancePathReadiness`가 이제 **`new_app`·`existing_app` 모두 `ready_candidate`**
+  (existing-app의 강조 타깃 api_group/credentials가 live_confirmed; open_app은 강조 없는 안내 단계라 보정 대상 아님).
+  `SELECTORS_CALIBRATED`는 계속 `true`(강조 컨트롤 3개가 유일 근거) — existing-app이 **새 selector를 추가하지 않음**.
+  FE는 정적 위저드(`NAVER_EXISTING_APP_TUTORIAL`)가 이미 기존-앱 단계를 보유 → 계약 enum(stepId/copyKey/targetKind)
+  불변, FE 변경 없음.
+- **게이트·리뷰:** collector typecheck 그린 + 전체 **6144 tests 그린**. 독립 적대적 리뷰 HIGH=0 MED=0. **라이브
+  highlight·클릭·credential 값읽기·push/PR 없음.** 완료 후 existing-app live-proof runtime을 **PREPARED까지만** 만들고
+  승인 대기.
+- **정직한 한계(라이브 미검증):** `open_app`의 실제 `app_list→app_detail` 관찰은 **오프라인 fake로만 증명**; 라이브
+  전환 관찰·타이밍은 미확인(별도 gated 승인 필요). new-app 경로의 Phase B highlight proof도 여전히 PENDING(0.2.8).
+
 ---
 
 ## 0. v1 비준 (Ratification 2026-07-19) — 오프라인 구현 착수
