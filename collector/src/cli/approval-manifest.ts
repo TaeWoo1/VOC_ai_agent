@@ -16,10 +16,13 @@
  *    manifest that declares `HIGHLIGHT_REAL_CONTROL` is a phase/capability mismatch and is refused. It also
  *    requires a defined capture hotkey and a gitignored raw-artifact path (`ARTIFACT_PATH_UNSAFE` otherwise).
  *  - `API_ISSUANCE_HIGHLIGHT_PROOF` (Phase B) — the `NaverIssuanceDriver` Action Window that highlights real
- *    controls and observes the operator's own click. It requires `SELECTORS_CALIBRATED`, now `true` SCOPED TO
- *    THE NEW-APP PATH (create_app/api_group/credentials, live-proven `matchCount===1`). The existing-app
- *    `open_app` target is uncalibrated and fails closed (guided gate → `target_not_found`), so this phase's
- *    proof is meaningful on an EMPTY-app store (the create branch), not an existing-app one.
+ *    controls and observes the operator's own click / navigation. It requires `SELECTORS_CALIBRATED` (now
+ *    `true`): the three highlighted controls (create_app/api_group/credentials) are live-proven
+ *    `matchCount===1`. Both onboarding branches are provable: the NEW-app (create) branch highlights create_app
+ *    then api_group/credentials; the EXISTING-app branch guides the operator to open their app by TEXT and
+ *    observes the `app_list → app_detail` transition (open_app is navigation guidance, not a highlighted row),
+ *    then reuses the same api_group/credentials highlights. The empty-app (create) branch remains provable only
+ *    on a store with no application; the existing-app branch on a store that already has one.
  *  - `API_ISSUANCE_SELECTOR_PROBE` (Phase-B calibration) — a READ-ONLY run of the SAME `NaverIssuanceDriver`
  *    that only COUNTS how many candidates each highlight target's calibrated fixed-label locator matches (a
  *    value-free integer + a highlightable boolean); it never highlights, tags, clicks, or reads a value. It is
@@ -244,7 +247,7 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
     entrypointCommandId: "run-api-issuance-live-naver",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 강조된 실제 컨트롤을 직접 클릭하면 SellerOps가 관찰합니다. " +
-      "(신규 앱 생성 경로 기준 — 기존 앱이 있으면 open_app에서 fail-closed park.)",
+      "(신규 앱은 생성, 기존 앱은 직접 열면 — SellerOps가 상세 화면 진입을 관찰한 뒤 API 그룹·자격증명을 강조합니다.)",
     emitsFrontendUrl: false,
   },
   API_CENTER_VISUAL_RECON: {

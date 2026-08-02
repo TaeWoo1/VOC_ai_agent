@@ -64,7 +64,7 @@ export function runApprovalManifestCli(): number {
       ? "API Center structure observation"
       : phase === "API_ISSUANCE_SELECTOR_PROBE"
         ? "API issuance read-only selector probe"
-        : "API issuance highlight proof (new-app path)";
+        : "API issuance highlight proof (new-app or existing-app)";
   const defaultMaxActions = isVisualRecon
     ? "1 redacted visual recon session"
     : isStructureObs
