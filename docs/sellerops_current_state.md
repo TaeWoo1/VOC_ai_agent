@@ -10,6 +10,35 @@
 > Everything below is preserved unchanged for historical lineage. Do not rely on its paths,
 > commit SHAs, scope-lock versions, or 구현됨/미구현 claims as current.
 
+---
+
+## 2026-08-02 부록 — NAVER API센터 Visual Recon calibration (현행, HEAD `a256c91`)
+
+> 최신 current-state 부록. 아래 본문(2026-07-08 스냅샷)이 아니라 이 블록이 이 주제의 현행 상태다.
+> 제품·전략 정본은 여전히 [`docs/sellerops_canonical_reference.md`](sellerops_canonical_reference.md),
+> 세부 계약은 [`docs/slices/naver-guided-connection.md`](slices/naver-guided-connection.md) §0.2.5.
+
+- **Visual Recon(redacted-screenshot) 라이브 검증 완료** — 실제 NAVER API센터. redaction: 계정 핸들 / API호출 IP /
+  Client ID 가림, **공개 스토어명·앱 설명 노출**; 뷰포트 밖·미렌더 노드는 캡처 대상 아님으로 HALT 없음; 캡처 직후
+  오버레이 제거; `app_detail/api_group/credentials`는 동일 페이지 viewport checkpoint.
+- **6개 fixed-label target 모두 live `matchCount=1`:** `애플리케이션 등록`, `애플리케이션 ID`(app_detail 섹션 앵커),
+  `API 그룹`, `애플리케이션 ID`(credentials 라벨), `보기`, `복사`.
+- **`다시사용`(reactivate)은 미검증** — 일시중단 앱이 없어 register-state에서 `0`. 일시중단 앱에서 별도 측정 필요.
+- **채택:** 위 6개를 `collector/src/action-window/api-issuance-calibration/visual-recon-adopted.ts`에 채택
+  (candidate 선택자 재사용·드리프트 방지, frozen `evaluateSelectorCandidate`로 채택 가능성 기계 증명). `다시사용`·
+  `시크릿` 라벨은 제외(각각 0 live·CREDENTIAL_VALUE_TARGET 차단).
+- **이 selector들은 reviewer/tutorial용 Playwright `role=`/`text=` selector**이며, Phase B issuance highlight
+  driver의 **CSS/클릭 대상 selector**(`CANDIDATE_TARGET_SELECTORS`: create_app/open_app/api_group/credentials/
+  return)와는 **별개**다(open_app·return 미측정, selector 엔진도 다름).
+- **따라서 `SELECTORS_CALIBRATED=false`가 정확한 현재 상태** — 그 플래그는 issuance highlight 계약용이며 이 채택은
+  이를 건드리지 않는다(`api-center-adapter.ts` 무변경).
+- **아직 미완료:** ① create_app/open_app/api_group/credentials/return용 **실제 CSS(클릭 대상) selector 보정**,
+  ② **Phase B highlight proof**(`API_ISSUANCE_HIGHLIGHT_PROOF`). 이 둘을 완료하는 커밋에서만
+  `SELECTORS_CALIBRATED=true`.
+- **다음 큰 개발 단위 = `NAVER API Issuance Highlight Selector Calibration`.**
+
+---
+
 # SellerOps — Current State (living handoff)
 
 > **Living handoff document — not a strategy document.** 이 문서는 "지금 어디까지 됐는가"의 단일

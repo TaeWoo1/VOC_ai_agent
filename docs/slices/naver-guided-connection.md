@@ -303,6 +303,33 @@ manifest 생성 후 새 단일-사용 승인 필요.**
 - **미수행(명시):** 라이브 runtime·스크린샷·API센터 접속·selector 채택·`SELECTORS_CALIBRATED=true`·push/PR 없음.
   라이브 준비(격리 DB/backend/frontend/bootstrap/preflight·전용 Chrome)는 **다음 턴** + 새 single-use 승인.
 
+### 0.2.5 개정 — **Visual Recon LIVE 검증 완료 + 6개 fixed-label selector 채택** ⭐ 현행 calibration 상태 (HEAD `a256c91`)
+
+실제 NAVER API센터에서 Visual Recon(redacted-screenshot) 라이브 검증을 완료했다. 최종 결과·결정만 기록한다.
+
+- **redaction 계약 real-NAVER 검증 완료:** 계정 핸들 / API호출 IP / Client ID(애플리케이션 ID 값)는 가려지고,
+  **공개 스토어명·일반 앱 설명은 노출**된다. 뷰포트 밖 요소·미렌더 노드(접힌 계정 메뉴)는 캡처 대상 아님으로
+  처리해 오탐 HALT 없음. 캡처 직후 오버레이 자동 제거. `app_detail/api_group/credentials`는 동일 페이지의
+  viewport checkpoint, `app_list`만 별도 페이지로 안내.
+- **6개 fixed-label target 모두 live `matchCount=1`:** `애플리케이션 등록`(register), `애플리케이션 ID`(app_detail
+  섹션 앵커), `API 그룹`(섹션), `애플리케이션 ID`(credentials 라벨), `보기`, `복사`. `app_detail` 섹션은 본문
+  `애플리케이션` heading이 사이드바 그룹라벨+브레드크럼과 3중복이라, 고유한 `애플리케이션 ID` 라벨로 앵커한다.
+- **`다시사용`(reactivate)은 미검증:** 측정 시점에 일시중단 앱이 없어 register-state로 `0`. 일시중단 앱에서 별도 측정 필요.
+- **채택:** 위 6개를 `collector/src/action-window/api-issuance-calibration/visual-recon-adopted.ts`에 **채택**했다
+  (선택자는 candidate 제안을 그대로 재사용해 드리프트 방지, frozen `evaluateSelectorCandidate` 게이트로 채택 가능성
+  기계 증명). `다시사용`(0 live)·`시크릿` 라벨(CREDENTIAL_VALUE_TARGET 차단)은 제외.
+- **경계(핵심):** 이 6개는 **reviewer/tutorial용 Playwright `role=`/`text=` selector**다. Phase B issuance
+  highlight driver(`NaverIssuanceDriver`)가 쓰는 `CANDIDATE_TARGET_SELECTORS`(create_app/open_app/api_group/
+  credentials/return)는 **CSS `querySelectorAll` 기반의 클릭 대상 selector**로 **완전히 별개**이며, `open_app`·
+  `return`은 아직 미측정이다. 따라서 이 채택은 issuance selector를 보정하지 않는다.
+  → **`SELECTORS_CALIBRATED=false`가 정확한 현재 상태**(그 플래그는 issuance highlight 계약용). 채택은
+  `api-center-adapter.ts`/`CANDIDATE_TARGET_SELECTORS`를 건드리지 않았다.
+- **미완료(명시):** ① create_app/open_app/api_group/credentials/return용 **실제 CSS(클릭 대상) selector 보정**,
+  ② **Phase B `API_ISSUANCE_HIGHLIGHT_PROOF`**(highlight proof). 이 둘을 완료하는 커밋에서만
+  `SELECTORS_CALIBRATED=true`로 전환한다.
+- **다음 큰 개발 단위 = `NAVER API Issuance Highlight Selector Calibration`** (issuance CSS/clickable selector
+  라이브 보정 → CANDIDATE_TARGET_SELECTORS 교체 + 같은 커밋에서 `SELECTORS_CALIBRATED=true` → Phase B highlight proof).
+
 ---
 
 ## 0. v1 비준 (Ratification 2026-07-19) — 오프라인 구현 착수
