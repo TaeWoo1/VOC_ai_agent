@@ -76,6 +76,10 @@ export interface SelectorProbeResult {
   uniqueCalibrated: number;
   /** How many calibrated targets did NOT resolve uniquely (drift signal; sanitized count). */
   nonUniqueCalibrated: number;
+  /** How many STRUCTURAL-candidate targets (open_app) were probed this run (sanitized count). */
+  structuralCandidatesProbed: number;
+  /** How many structural candidates resolved UNIQUELY live (⇒ a promotion candidate; sanitized count). */
+  structuralCandidatesUnique: number;
 }
 
 /** Injected seams so the whole read-only walk is unit-tested offline over fakes (no browser). */
@@ -102,6 +106,8 @@ export async function runSelectorProbeSession(deps: SelectorProbeDeps): Promise<
   let screensProbed = 0;
   let uniqueCalibrated = 0;
   let nonUniqueCalibrated = 0;
+  let structuralCandidatesProbed = 0;
+  let structuralCandidatesUnique = 0;
 
   for (const screen of issuanceProbeScreens()) {
     const targets = targetsForScreen(screen);
@@ -122,13 +128,24 @@ export async function runSelectorProbeSession(deps: SelectorProbeDeps): Promise<
       if (status === "live_confirmed") {
         if (canHighlight) uniqueCalibrated += 1;
         else nonUniqueCalibrated += 1;
+      } else if (status === "structural_candidate") {
+        structuralCandidatesProbed += 1;
+        if (canHighlight) structuralCandidatesUnique += 1;
       }
     }
     screens.push({ screen, pageCategory, targets: targetResults });
     screensProbed += 1;
   }
 
-  return { screens, aborted, screensProbed, uniqueCalibrated, nonUniqueCalibrated };
+  return {
+    screens,
+    aborted,
+    screensProbed,
+    uniqueCalibrated,
+    nonUniqueCalibrated,
+    structuralCandidatesProbed,
+    structuralCandidatesUnique,
+  };
 }
 
 /* ────────────────────────────── sentinels + live wiring (inert on import) ────────────────────────────── */
@@ -273,6 +290,8 @@ async function main(): Promise<void> {
           screensProbed: result.screensProbed,
           uniqueCalibrated: result.uniqueCalibrated,
           nonUniqueCalibrated: result.nonUniqueCalibrated,
+          structuralCandidatesProbed: result.structuralCandidatesProbed,
+          structuralCandidatesUnique: result.structuralCandidatesUnique,
           screens: result.screens,
         },
         null,
@@ -286,6 +305,8 @@ async function main(): Promise<void> {
       screensProbed: result.screensProbed,
       uniqueCalibrated: result.uniqueCalibrated,
       nonUniqueCalibrated: result.nonUniqueCalibrated,
+      structuralCandidatesProbed: result.structuralCandidatesProbed,
+      structuralCandidatesUnique: result.structuralCandidatesUnique,
     });
   } finally {
     removeSentinel(readyPath);

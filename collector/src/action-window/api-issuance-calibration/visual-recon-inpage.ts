@@ -428,3 +428,33 @@ export function buildFixedLabelLocateScript(input: { candidateQuery: string; exa
   return { count: 1, sig: sig(el.tagName + ':' + idx, 'children:' + el.childElementCount) };
 })()`;
 }
+
+/**
+ * A READ-ONLY STRUCTURAL LOCATE (+ optional read-only TAG) script — the value-free OUTPUT half of a highlight
+ * target that has NO fixed label (only `open_app`: opening a specific application depends on that app's identity,
+ * so no fixed NAVER label resolves it). It matches a plain STRUCTURAL `querySelectorAll(selector)` — never a
+ * value/text — and resolves ONLY when exactly one element matches (fail-closed on 0 or many, e.g. multiple apps).
+ * Returns `{ count, sig }` (sig = opaque structural hash from tag + document position + child count); with `tag`
+ * true it moves the read-only `data-aw-target` marker onto the sole match. It reads NO element text at all (even
+ * safer than the fixed-label locate). Kept ES5-plain + string-form so esbuild's `__name` shim is never referenced.
+ */
+export function buildStructuralLocateScript(input: { selector: string; tag: boolean }): string {
+  return `(function () {
+  /* issuance-structural-${input.tag ? "tag" : "locate"} (value-free OUTPUT: { count, sig? }) */
+  var sig = ${IN_PAGE_SIG_FACTORY};
+  var slice = Function.prototype.call.bind(Array.prototype.slice);
+  var nodes; try { nodes = slice(document.querySelectorAll(${JSON.stringify(input.selector)})); } catch (e) { nodes = []; }
+  if (nodes.length !== 1) { return { count: nodes.length }; }
+  var el = nodes[0];
+  ${
+    input.tag
+      ? `var prior = slice(document.querySelectorAll('[data-aw-target]'));
+  for (var p = 0; p < prior.length; p++) { prior[p].removeAttribute('data-aw-target'); }
+  el.setAttribute('data-aw-target', '');`
+      : ``
+  }
+  var all = slice(document.querySelectorAll('*'));
+  var idx = all.indexOf(el);
+  return { count: 1, sig: sig(el.tagName + ':' + idx, 'children:' + el.childElementCount) };
+})()`;
+}

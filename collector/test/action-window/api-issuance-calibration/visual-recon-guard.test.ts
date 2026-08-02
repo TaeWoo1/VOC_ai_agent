@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { buildFixedLabelLocateScript, buildRedactionScript, EXTRACT_VISUAL_CONTROLS, REDACT_OVERLAY_ATTR } from "../../../src/action-window/api-issuance-calibration/visual-recon-inpage";
+import { buildFixedLabelLocateScript, buildStructuralLocateScript, buildRedactionScript, EXTRACT_VISUAL_CONTROLS, REDACT_OVERLAY_ATTR } from "../../../src/action-window/api-issuance-calibration/visual-recon-inpage";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const INPAGE = join(__dirname, "..", "..", "..", "src", "action-window", "api-issuance-calibration", "visual-recon-inpage.ts");
@@ -93,6 +93,21 @@ describe("visual-recon-inpage.ts — value-free OUTPUT", () => {
     // The TAG variant writes the read-only marker; the LOCATE variant does not mutate the page at all.
     expect(buildFixedLabelLocateScript({ candidateQuery: "*", exactText: "x", tag: true })).toContain("setAttribute('data-aw-target'");
     expect(buildFixedLabelLocateScript({ candidateQuery: "*", exactText: "x", tag: false })).not.toContain("setAttribute");
+  });
+
+  it("the STRUCTURAL locate script (open_app anchor) is value-free AND reads NO text at all (count/sig only)", () => {
+    for (const tag of [true, false]) {
+      const script = buildStructuralLocateScript({ selector: "table tbody tr, ul li, ol li, [role='row']", tag });
+      const returns = [...script.matchAll(/return\s*\{[^;]*?\};?/g)].map((m) => m[0]!);
+      expect(returns.some((r) => /return\s*\{\s*count:\s*nodes\.length\s*\}/.test(r))).toBe(true);
+      expect(returns.some((r) => /return\s*\{\s*count:\s*1,\s*sig:/.test(r))).toBe(true);
+      // No text/value read AT ALL (stronger than the fixed-label locate) and no click/type.
+      for (const forbidden of ["textContent", "getAttribute", ".value", ".click(", ".type(", "inputValue", "clipboard", ".screenshot("]) {
+        expect(script.includes(forbidden), `structural locate must not ${forbidden}`).toBe(false);
+      }
+    }
+    expect(buildStructuralLocateScript({ selector: "*", tag: true })).toContain("setAttribute('data-aw-target'");
+    expect(buildStructuralLocateScript({ selector: "*", tag: false })).not.toContain("setAttribute");
   });
 
   it("the census script never reads a value/text (structure + attributes only)", () => {

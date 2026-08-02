@@ -10,8 +10,11 @@ import {
   ISSUANCE_HIGHLIGHT_TARGETS,
   ISSUANCE_GUIDANCE_ONLY_TARGETS,
   ISSUANCE_TARGET_SELECTORS,
+  OPEN_APP_STRUCTURAL_SELECTOR,
   isIssuanceHighlightTarget,
+  isGuidedHighlightTarget,
   locatorFor,
+  structuralSelectorFor,
   selectorSpecFor,
   issuancePathReadiness,
   evaluateIssuanceHighlightSelectors,
@@ -19,6 +22,7 @@ import {
 import { VISUAL_RECON_LABEL_PROBES } from "../../../src/action-window/api-issuance-calibration/visual-recon-candidates";
 import { ADOPTED_TARGET_IDS } from "../../../src/action-window/api-issuance-calibration/visual-recon-adopted";
 import { ISSUANCE_TARGETS } from "../../../src/action-window/api-issuance/issuance-driver";
+import { CANDIDATE_APP_ENTRY_SELECTOR } from "../../../src/action-window/naver-issuance-driver";
 
 describe("issuance highlight-target selector registry", () => {
   it("covers exactly the 4 real NAVER controls as highlight targets — `return` is guidance-only, never highlighted", () => {
@@ -65,12 +69,29 @@ describe("issuance highlight-target selector registry", () => {
     }
   });
 
-  it("marks open_app as UNCALIBRATED (no fixed label) with no locator — the existing-app path is not_ready", () => {
+  it("gives open_app a value-free STRUCTURAL anchor candidate (no fixed label) — existing-app path still not_ready", () => {
     const openApp = selectorSpecFor("open_app");
-    expect(openApp.status).toBe("no_fixed_label");
-    expect(openApp.locator).toBeUndefined();
+    expect(openApp.status).toBe("structural_candidate");
+    expect(openApp.kind).toBe("structural");
+    expect(openApp.locator).toBeUndefined(); // not a fixed-label target
     expect(locatorFor("open_app")).toBeNull();
+    expect(openApp.structuralSelector).toBe(OPEN_APP_STRUCTURAL_SELECTOR);
+    expect(structuralSelectorFor("open_app")).toBe(OPEN_APP_STRUCTURAL_SELECTOR);
     expect(openApp.paths).toEqual(["existing_app"]);
+    // The anchor is purely structural (tags/roles), never a value pin / app name / credential token.
+    expect(/\[\s*value\s*=|시크릿|secret|애플리케이션/i.test(OPEN_APP_STRUCTURAL_SELECTOR)).toBe(false);
+  });
+
+  it("pins the open_app structural anchor to the SAME app-entry-row hypothesis the driver counts rows with", () => {
+    expect(OPEN_APP_STRUCTURAL_SELECTOR).toBe(CANDIDATE_APP_ENTRY_SELECTOR);
+  });
+
+  it("only live_confirmed targets are GUIDED-highlightable — the open_app candidate is NOT (probe measures it, guide won't)", () => {
+    expect(isGuidedHighlightTarget("create_app")).toBe(true);
+    expect(isGuidedHighlightTarget("api_group")).toBe(true);
+    expect(isGuidedHighlightTarget("credentials")).toBe(true);
+    // The unmeasured structural candidate must never be highlighted by the guided walk until it is promoted.
+    expect(isGuidedHighlightTarget("open_app")).toBe(false);
   });
 
   it("splits path readiness: new_app = ready_candidate, existing_app = not_ready", () => {
@@ -88,7 +109,9 @@ describe("issuance highlight-target selector registry", () => {
     }
     const openApp = byTarget.get("open_app")!;
     expect(openApp.adoptable).toBe(false);
+    // Unmeasured AND not-yet-screenshot-confirmed as the open control → honestly unadoptable on both counts.
     expect(openApp.reasons).toContain("NOT_UNIQUE");
+    expect(openApp.reasons).toContain("SCREENSHOT_TARGET_UNCONFIRMED");
   });
 
   it("api_group and credentials are reached on BOTH paths; create_app only on new_app", () => {

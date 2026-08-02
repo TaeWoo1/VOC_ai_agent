@@ -31,9 +31,11 @@
  * each highlightable target is resolved by a FIXED NAVER label (a structural candidate query + an exact label
  * such as "애플리케이션 등록"), derived without drift from the live-confirmed visual-recon adopted set. NAVER's
  * API-center controls expose no aria-label/id, so a fixed label is the only value-free anchor. Boundaries:
- *   - **`open_app` is UNCALIBRATED** (opening a specific app needs its identity — no fixed label): its locate
- *     fails closed with `count:0`, so the EXISTING-app branch parks `target_not_found` recoverably. The NEW-app
- *     branch (create_app → api_group → credentials) is calibrated.
+ *   - **`open_app` has a value-free STRUCTURAL anchor CANDIDATE** (opening a specific app needs its identity —
+ *     no fixed label): the sole application-entry ROW, matched by `querySelectorAll` COUNT (no text/value read).
+ *     It is a `structural_candidate` HYPOTHESIS (unmeasured), so it is NOT guided-highlightable: the guided
+ *     existing-app walk fails closed (`target_not_found`) rather than highlight an unconfirmed anchor. Only the
+ *     READ-ONLY {@link NaverIssuanceDriver.probeTargetMatch} measures it (that is how it earns promotion later).
  *   - **`return` is guidance-only** — never a located NAVER control. Its locate/highlight show the "return to
  *     SellerOps" overlay and return a fixed, synthetic guidance signature (not derived from any page element).
  *   - `CANDIDATE_APP_ENTRY_SELECTOR` remains a `LIVE_DOM_CALIBRATION_PENDING` COUNT-only hypothesis. A selector /
@@ -49,10 +51,12 @@ import {
   type ApiCenterStructuralCensus,
 } from "../cli/observe-api-center";
 import { pageCategoryFromCensus } from "./api-issuance/api-center-adapter";
-import { buildFixedLabelLocateScript } from "./api-issuance-calibration/visual-recon-inpage";
+import { buildFixedLabelLocateScript, buildStructuralLocateScript } from "./api-issuance-calibration/visual-recon-inpage";
 import {
+  isGuidedHighlightTarget,
   isIssuanceHighlightTarget,
   locatorFor,
+  structuralSelectorFor,
   type IssuanceHighlightTarget,
 } from "./api-issuance-calibration/issuance-highlight-selectors";
 import { ISSUANCE_TOTAL_STEPS } from "./api-issuance/issuance-stages";
@@ -124,14 +128,29 @@ export interface NaverIssuanceDriverOptions {
 const RETURN_GUIDANCE_SIG = "5e11e40b5e11e40b";
 
 /**
- * The value-free fixed-label locate/tag script for a highlightable target — or null when the target has no
- * calibrated locator (`open_app`, which no fixed label resolves). When `tag` is true it also moves the
- * read-only `data-aw-target` annotation onto the unique match. The script (in `visual-recon-inpage`) reads text
- * ONLY to compare against the KNOWN fixed label and returns only `{ count, sig? }` — never any text/value.
+ * The value-free locate/tag script for a highlightable target: a FIXED-LABEL match for the three label targets,
+ * or a value-free STRUCTURAL match (`open_app` — the sole app-entry row, no text read at all). When `tag` is
+ * true it also moves the read-only `data-aw-target` annotation onto the unique match. Both scripts (in
+ * `visual-recon-inpage`) return only `{ count, sig? }` — never any text/value. Null only if a target somehow
+ * carries neither locator (unreachable — every highlight target has exactly one).
  */
 function issuanceLocateScript(target: IssuanceHighlightTarget, tag: boolean): string | null {
   const loc = locatorFor(target);
-  return loc ? buildFixedLabelLocateScript({ candidateQuery: loc.candidateQuery, exactText: loc.exactText, tag }) : null;
+  if (loc) return buildFixedLabelLocateScript({ candidateQuery: loc.candidateQuery, exactText: loc.exactText, tag });
+  const structural = structuralSelectorFor(target);
+  if (structural) return buildStructuralLocateScript({ selector: structural, tag });
+  return null;
+}
+
+/**
+ * The locate/tag script the GUIDED highlight walk may run for a target — null unless the target is
+ * {@link isGuidedHighlightTarget} (a `live_confirmed`, calibrated control). This is what fails the existing-app
+ * walk closed on `open_app`'s UNMEASURED structural candidate: the guided walk never highlights it (it parks
+ * `target_not_found`), even though {@link NaverIssuanceDriver.probeTargetMatch} — which calls
+ * {@link issuanceLocateScript} directly — can still MEASURE the candidate read-only. Measuring ≠ highlighting.
+ */
+function guidedLocateScript(target: IssuanceHighlightTarget, tag: boolean): string | null {
+  return isGuidedHighlightTarget(target) ? issuanceLocateScript(target, tag) : null;
 }
 
 /** Remove every read-only `data-aw-target` annotation. Value-free; safe on a page with none. */
@@ -223,8 +242,10 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
     if (target === "return") return { count: 1, sig: RETURN_GUIDANCE_SIG };
     // Only the four real controls are highlightable; `open_app` has no calibrated locator (fail-closed count:0).
     if (!isIssuanceHighlightTarget(target)) return { count: 0 };
-    const script = issuanceLocateScript(target, false);
-    if (!script) return { count: 0 }; // uncalibrated (open_app) → engine parks target_not_found (fail-closed)
+    const script = guidedLocateScript(target, false);
+    // Not guided-highlightable (open_app is a structural_candidate — unmeasured) → fail closed so the guided
+    // walk parks target_not_found instead of highlighting an unconfirmed anchor. The read-only probe still measures it.
+    if (!script) return { count: 0 };
     const res = await this.evalStr<LocateResult>(this.activePage(), script);
     return res.count === 1 && res.sig ? { count: 1, sig: res.sig } : { count: res.count };
   }
@@ -237,8 +258,8 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
       return { count: 1, sig: RETURN_GUIDANCE_SIG };
     }
     if (!isIssuanceHighlightTarget(target)) return { count: 0 };
-    const script = issuanceLocateScript(target, true);
-    if (!script) return { count: 0 }; // uncalibrated (open_app) → engine parks (fail-closed), never a wrong highlight
+    const script = guidedLocateScript(target, true);
+    if (!script) return { count: 0 }; // not guided-highlightable (open_app candidate) → park, never a wrong highlight
     // Anti-drift: RE-locate AND tag in one in-page pass. The engine compares this sig against the locate sig
     // and parks on page_mismatch if the unique match drifted between the two reads.
     const res = await this.evalStr<LocateResult>(page, script);
@@ -272,7 +293,8 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
     if (target === "return" || !isIssuanceHighlightTarget(target)) return;
     const page = this.activePage();
     // Re-tag the control (a resume/recheck may arm without a fresh highlight) then arm the read-only observer.
-    const script = issuanceLocateScript(target, true);
+    // Only a guided-highlightable target is ever re-tagged (open_app's unmeasured candidate is never armed here).
+    const script = guidedLocateScript(target, true);
     if (script) await this.evalStr(page, script).catch(() => undefined);
     await armObserver(page);
   }
@@ -288,15 +310,16 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
   }
 
   /**
-   * READ-ONLY: measure how many candidates a highlight target's calibrated fixed-label locator matches on the
-   * CURRENT page, and whether it can be highlighted uniquely (matchCount===1). Value-free — it runs the locate
-   * script WITHOUT tagging (no `data-aw-target` write) and mounts NO overlay, so it never mutates the page,
-   * clicks, types, or reads any value. `open_app` (no calibrated locator) reports `matchCount:0, canHighlight:false`.
-   * This is what the read-only `API_ISSUANCE_SELECTOR_PROBE` phase calls to confirm the driver's own mechanism.
+   * READ-ONLY: measure how many candidates a highlight target's locator matches on the CURRENT page, and whether
+   * it resolves uniquely (matchCount===1). Value-free — it runs the locate script WITHOUT tagging (no
+   * `data-aw-target` write) and mounts NO overlay, so it never mutates the page, clicks, types, or reads a value.
+   * It uses {@link issuanceLocateScript} DIRECTLY (not the guided gate), so it also measures `open_app`'s
+   * structural candidate — measuring is how that candidate earns promotion, and is not highlighting. This is
+   * what the read-only `API_ISSUANCE_SELECTOR_PROBE` phase calls to confirm the driver's own mechanism.
    */
   async probeTargetMatch(target: IssuanceHighlightTarget): Promise<{ matchCount: number; canHighlight: boolean }> {
     const script = issuanceLocateScript(target, false);
-    if (!script) return { matchCount: 0, canHighlight: false }; // uncalibrated (open_app)
+    if (!script) return { matchCount: 0, canHighlight: false }; // no locator at all (unreachable — all 4 have one)
     const res = await this.evalStr<LocateResult>(this.activePage(), script);
     const matchCount = typeof res?.count === "number" && res.count >= 0 ? res.count : 0;
     return { matchCount, canHighlight: matchCount === 1 };

@@ -12,6 +12,22 @@
 
 ---
 
+## 2026-08-02 부록 (3) — selector-probe LIVE 검증 + open_app 구조 앵커 후보 (현행)
+
+> issuance highlight calibration의 **현행** 상태(부록(2)를 갱신). 세부: 슬라이스 §0.2.7.
+
+- **selector-probe LIVE 검증(실제 NAVER, 읽기 전용, 승인 소비):** driver 자체 fixed-label locate 메커니즘이
+  `create_app`/`api_group`/`credentials`를 라이브 `matchCount=1`로 해석(uniqueCalibrated:3). `open_app`=0 당시.
+  강조·클릭·값읽기·credential 0, sanitized 정수만. → 플래그 전환 선결 ①(driver 메커니즘 라이브 확인) = 3개 충족.
+- **`open_app` = value-free 구조 앵커 후보:** 고정 라벨 없음 → 단일 앱-엔트리 ROW를 구조 COUNT로 매칭(텍스트/값
+  읽기 없음), `status:"structural_candidate"`(미측정, unadoptable). existing-app 경로 **여전히 not_ready**.
+- **가이드 vs 측정 분리:** `structural_candidate`는 guided-highlightable 아님 — 라이브 guided walk는 미확정 앵커를
+  절대 강조하지 않고 fail-closed park; 읽기전용 probe만 측정(승격 근거). (독립 리뷰 MEDIUM을 이 게이트로 해소.)
+- **`SELECTORS_CALIBRATED` 여전히 false, `api-center-adapter.ts` 무변경.** 전환 선결 ②(open_app 라이브 유일성 확인
+  → 승격)만 남음. collector typecheck + 6144 tests 그린; 독립 리뷰 HIGH=0. 라이브 highlight·클릭·credential·push/PR 없음.
+
+---
+
 ## 2026-08-02 부록 (2) — Phase-B highlight selector 보정 + read-only selector-probe 단계 (현행)
 
 > 이 블록이 issuance highlight calibration의 **현행** 상태다(바로 아래 부록(1)의 selector 서술을 갱신).

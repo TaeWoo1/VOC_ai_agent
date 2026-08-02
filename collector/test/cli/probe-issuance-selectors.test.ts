@@ -16,10 +16,10 @@ import {
 } from "../../src/cli/probe-issuance-selectors";
 import type { IssuanceHighlightTarget } from "../../src/action-window/api-issuance-calibration/issuance-highlight-selectors";
 
-/** Calibrated live-confirmed targets resolve uniquely; the uncalibrated open_app returns nothing. */
+/** Calibrated live-confirmed targets resolve uniquely; open_app's structural anchor defaults to non-unique here. */
 const DEFAULT_MATCHES: Record<IssuanceHighlightTarget, { matchCount: number; canHighlight: boolean }> = {
   create_app: { matchCount: 1, canHighlight: true },
-  open_app: { matchCount: 0, canHighlight: false },
+  open_app: { matchCount: 4, canHighlight: false }, // structural anchor non-unique (e.g. a too-broad row selector)
   api_group: { matchCount: 1, canHighlight: true },
   credentials: { matchCount: 1, canHighlight: true },
 };
@@ -70,11 +70,22 @@ describe("issuance selector probe — read-only walk", () => {
     const appList = result.screens[0]!;
     expect(appList.targets).toEqual([
       { target: "create_app", status: "live_confirmed", matchCount: 1, canHighlight: true },
-      { target: "open_app", status: "no_fixed_label", matchCount: 0, canHighlight: false },
+      { target: "open_app", status: "structural_candidate", matchCount: 4, canHighlight: false },
     ]);
-    // Only the 3 calibrated targets count toward uniqueness; open_app (uncalibrated) never does.
+    // Only the 3 calibrated targets count toward calibrated uniqueness; open_app is tallied separately as a
+    // structural candidate (probed here, but non-unique so not a promotion candidate this run).
     expect(result.uniqueCalibrated).toBe(3);
     expect(result.nonUniqueCalibrated).toBe(0);
+    expect(result.structuralCandidatesProbed).toBe(1);
+    expect(result.structuralCandidatesUnique).toBe(0);
+  });
+
+  it("tallies a structural candidate that resolved UNIQUELY as a promotion candidate", async () => {
+    const { deps } = fakeDeps({ matches: { open_app: { matchCount: 1, canHighlight: true } } });
+    const result = await runSelectorProbeSession(deps);
+    expect(result.structuralCandidatesProbed).toBe(1);
+    expect(result.structuralCandidatesUnique).toBe(1); // open_app's app-entry-row anchor resolved to exactly one
+    expect(result.uniqueCalibrated).toBe(3); // still only the 3 fixed-label targets count as calibrated
   });
 
   it("flags a calibrated target that drifted to a non-unique match (nonUniqueCalibrated)", async () => {

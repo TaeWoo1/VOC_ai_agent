@@ -46,6 +46,8 @@ interface FakePageOptions {
   url?: string;
   census?: ApiCenterStructuralCensus;
   locate?: LocateResult;
+  /** Override the result of the value-free STRUCTURAL locate (open_app's app-entry-row anchor). Defaults to `locate`. */
+  structuralLocate?: LocateResult;
   appEntryCount?: number;
   observed?: boolean;
 }
@@ -55,6 +57,7 @@ class FakePage {
   urlValue: string;
   census: ApiCenterStructuralCensus;
   locate: LocateResult;
+  structuralLocate: LocateResult;
   appEntryCount: number;
   observed: boolean;
 
@@ -66,6 +69,7 @@ class FakePage {
     this.urlValue = o.url ?? API_CENTER_URL;
     this.census = o.census ?? APP_LIST_CENSUS;
     this.locate = o.locate ?? { count: 1, sig: "abcd1234abcd1234" };
+    this.structuralLocate = o.structuralLocate ?? this.locate;
     this.appEntryCount = o.appEntryCount ?? 0; // default = EMPTY app list → the calibrated new-app (create) path
     this.observed = o.observed ?? true;
   }
@@ -83,6 +87,7 @@ class FakePage {
     if (s.includes("passwordFieldPresent")) return this.census; // EXTRACT_API_CENTER_CENSUS
     if (s.includes("issuance-appcount")) return this.appEntryCount;
     if (s.includes("issuance-fixed-label-tag") || s.includes("issuance-fixed-label-locate")) return this.locate;
+    if (s.includes("issuance-structural-tag") || s.includes("issuance-structural-locate")) return this.structuralLocate;
     if (s.includes("issuance-cleartag")) return true;
     return undefined;
   }
@@ -260,20 +265,22 @@ describe("NaverIssuanceDriver over a fake Page — the calibrated NEW-app (creat
   });
 });
 
-describe("NaverIssuanceDriver — the EXISTING-app branch is NOT calibrated (open_app has no fixed label)", () => {
-  it("parks target_not_found recoverably at open_app (never a wrong highlight, never a click)", async () => {
+describe("NaverIssuanceDriver — the EXISTING-app branch fails closed on open_app's UNMEASURED structural candidate", () => {
+  it("parks target_not_found at open_app (a structural_candidate is not guided-highlightable), never a wrong highlight or click", async () => {
+    // One app in the list → step 2 is OPEN. Even if the structural anchor WOULD resolve to a single row
+    // (fake default count:1), the GUIDED walk must not highlight an unconfirmed candidate — it parks.
     const { io, engine, session, page } = build({ appEntryCount: 1 });
     startRun(io);
     await session.whenSettled();
 
-    // Existing application → step 2 is OPEN, which is uncalibrated → the run parks recoverably, not a failure.
     const step2 = io.views().find((v) => v.currentStep?.stepNumber === 2)?.currentStep;
     expect(step2?.copyParams?.targetKind).toBe("open_app");
     expect(engine.currentStage()).toBe("target_not_found");
     expect(io.lastView()?.blocker).toEqual({ code: "TARGET_NOT_FOUND", recoverable: true });
     expect(io.events().map((e) => e.type)).not.toContain("RUN_FAILED");
-    // No control was highlighted (open_app never resolved), and nothing was clicked.
+    // Nothing was highlighted and — crucially — the guided walk never even ran the structural locate script.
     expect(io.events().some((e) => e.type === "TARGET_HIGHLIGHTED")).toBe(false);
+    expect(page.scripts.some((s) => s.includes("issuance-structural"))).toBe(false);
     expect(page.clickCalls).toBe(0);
   });
 });
@@ -359,12 +366,22 @@ describe("NaverIssuanceDriver — read-only probeTargetMatch (Phase-B selector p
     expect(page.clickCalls).toBe(0);
   });
 
-  it("reports the uncalibrated open_app as not highlightable, querying NOTHING on the page", async () => {
-    const page = new FakePage();
+  it("measures open_app's value-free STRUCTURAL anchor read-only (unique → highlightable)", async () => {
+    const page = new FakePage({ structuralLocate: { count: 1, sig: "abcd1234abcd1234" } });
     const driver = new NaverIssuanceDriver(asPage(page));
     const res = await driver.probeTargetMatch("open_app");
-    expect(res).toEqual({ matchCount: 0, canHighlight: false });
-    expect(page.scripts.length).toBe(0); // uncalibrated → no page query at all
+    expect(res).toEqual({ matchCount: 1, canHighlight: true });
+    // It ran the value-free STRUCTURAL locate (no fixed label, no text read) and never the tag/overlay path.
+    expect(page.scripts.some((s) => s.includes("issuance-structural-locate"))).toBe(true);
+    expect(page.scripts.some((s) => s.includes("issuance-structural-tag"))).toBe(false);
+    expect(page.clickCalls).toBe(0);
+  });
+
+  it("reports open_app as not highlightable when its structural anchor is non-unique", async () => {
+    const page = new FakePage({ structuralLocate: { count: 5 } });
+    const driver = new NaverIssuanceDriver(asPage(page));
+    const res = await driver.probeTargetMatch("open_app");
+    expect(res).toEqual({ matchCount: 5, canHighlight: false });
   });
 
   it("reports a non-unique match as not highlightable", async () => {

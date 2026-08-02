@@ -366,6 +366,34 @@ manifest 생성 후 새 단일-사용 승인 필요.**
   클릭·credential 입력·push/PR 없음.** 완료 후 **fresh `API_ISSUANCE_SELECTOR_PROBE` runtime을 PREPARED**까지만
   만들고 승인 대기.
 
+### 0.2.7 개정 — **selector-probe LIVE 검증(3개 fixed-label) + open_app 구조 앵커 후보** ⭐ 현행 calibration 상태
+
+`API_ISSUANCE_SELECTOR_PROBE`를 실제 NAVER API센터에서 라이브 실행하고(단일-사용 승인 소비), `open_app`에 value-free
+구조 앵커 후보를 추가했다. **`SELECTORS_CALIBRATED`는 여전히 false, `api-center-adapter.ts` 무변경.**
+
+- **selector-probe LIVE 검증 완료(2026-08-02, 실제 NAVER, 읽기 전용):** 운영자 승인("Seated and ready.") 하에
+  gated 읽기전용 probe를 3개 화면에서 실행. **driver 자체 fixed-label locate 메커니즘이 각 calibrated target을
+  라이브 `matchCount=1`로 해석**: `create_app`(애플리케이션 등록)=1, `api_group`(API 그룹)=1, `credentials`(애플리케이션
+  ID)=1 (`uniqueCalibrated:3 nonUniqueCalibrated:0`). `open_app`=0(당시 미보정). **강조·태깅·클릭·값 읽기·credential
+  입력 0**, sanitized 정수 출력만, host category만, 브라우저 종료·아티팩트 0. → 플래그 전환 선결 ①(probe가 driver
+  메커니즘으로 calibrated target 라이브 확인) = create_app/api_group/credentials에 대해 **충족**.
+- **`open_app` = value-free 구조 앵커 후보(불확정):** 기존 앱 열기는 그 앱 정체성에 의존이라 고정 라벨 없음 → 대신
+  **단일 애플리케이션-엔트리 ROW**(`OPEN_APP_STRUCTURAL_SELECTOR` = driver의 app-entry row 가설과 동일, 테스트로 핀)를
+  **구조 selector COUNT**로 매칭(텍스트/값 읽기 전혀 없음). NAVER 1-앱/스토어면 유일. `status:"structural_candidate"`
+  (`LIVE_DOM_CALIBRATION_PENDING`, screenshot 미확인 → 채택 게이트에서 `NOT_UNIQUE`+`SCREENSHOT_TARGET_UNCONFIRMED`로
+  unadoptable). **existing-app 경로는 여전히 `not_ready`.**
+- **가이드 vs 측정 분리(핵심 안전 경계):** `structural_candidate`는 **guided-highlightable 아님**(`isGuidedHighlightTarget`
+  = live_confirmed만). 라이브 guided walk(`NaverIssuanceDriver.locate/highlight/armObserve`)는 미확정 앵커를 **절대
+  강조하지 않고** `open_app`에서 fail-closed park(`target_not_found`)한다 — 구조 locate 스크립트조차 실행 안 함. **읽기전용
+  `probeTargetMatch`만** 후보를 측정(측정 ≠ 강조; 이것이 후보의 승격 근거). 독립 리뷰 MEDIUM(라이브 guided runner가
+  미측정 앵커를 강조할 수 있음)을 이 게이트로 해소.
+- **미완료:** ② `open_app` 앵커의 라이브 유일성 확인(다음 probe run이 `structuralCandidatesUnique`로 측정) → 유일하면
+  승격 → 그 뒤에만 플래그 전환 + Phase B highlight proof. broad row selector가 라이브에서 다수 매칭될 가능성 있음(그때는
+  구조 관찰로 앵커 정밀화 또는 new-app 전용 범위).
+- **게이트·리뷰:** collector 전체(typecheck + 6144 tests) 그린; 독립 적대적 리뷰 HIGH=0, MEDIUM(guided 미측정 앵커
+  강조)= **수정 완료**. **라이브 highlight·클릭·credential·push/PR 없음.** 완료 후 fresh `API_ISSUANCE_SELECTOR_PROBE`
+  runtime을 PREPARED(이제 `open_app` 구조 앵커도 측정)까지만 만들고 승인 대기.
+
 ---
 
 ## 0. v1 비준 (Ratification 2026-07-19) — 오프라인 구현 착수
