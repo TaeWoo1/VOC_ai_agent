@@ -23,8 +23,11 @@
   `api_group`/`credentials`는 읽기전용 probe 2회로 라이브 `matchCount=1` 증명.
 - **`open_app`/existing-app = v1 범위 제외:** `structural_candidate`(not_ready), guided gate로 fail-closed park.
   Phase B highlight proof는 **빈-앱 스토어(생성 분기)에서만 유의미**.
-- **미완료 = Phase B highlight proof(`API_ISSUANCE_HIGHLIGHT_PROOF`):** 실제 컨트롤 강조 + 클릭 관찰(READ_ONLY,
-  마켓 변경 0); 빈-앱 스토어 + 자체 단일-사용 승인 필요. collector typecheck + 6144 tests 그린. push/PR 없음.
+- **Phase B highlight proof(`API_ISSUANCE_HIGHLIGHT_PROOF`) = implementation complete / live proof PENDING —
+  requires empty-app store.** new-app 경로 구현 완료(플래그 전환 + guided highlight 준비). 라이브 proof **보류**:
+  NAVER 앱 삭제 불가 → 빈-앱 스토어 없음. PREPARED manifest/임시 runtime **회수**(grant 미소비); 향후 라이브는
+  빈-앱 스토어 + 새 bootstrap + 새 단일-사용 승인 필요. **existing-app 경로 계속 `not_ready`.** collector typecheck +
+  6145 tests 그린; 독립 리뷰(플래그 전환) PASS HIGH=0 MED=0. 우회 proof·push/PR 없음.
 
 ---
 

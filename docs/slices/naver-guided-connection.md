@@ -409,11 +409,14 @@ new-app(신규 앱 생성) 경로로 한정**하고 `SELECTORS_CALIBRATED`를 �
 - **`open_app`/existing-app 경로 = v1 범위 제외:** `structural_candidate`(44 non-unique) 유지, `not_ready`.
   `isGuidedHighlightTarget` 게이트로 라이브 guided walk는 open_app에서 **fail-closed park**(강조 0). ⇒ **Phase B
   highlight proof는 빈-앱 스토어(생성 분기)에서만 유의미**; 기존 앱 있으면 open_app park.
-- **미완료 = Phase B highlight proof(`API_ISSUANCE_HIGHLIGHT_PROOF`):** 실제 컨트롤 강조 + 운영자 클릭 관찰(READ_ONLY
-  모드, 마켓 상태 변경 0). **빈-앱 스토어 필요**(NAVER는 앱 삭제 불가/비활성화만 → 새 테스트 스토어 또는 앱 없는 상태
-  필요). 자체 단일-사용 승인 필요. 완료 후 PREPARED까지만.
-- **게이트·리뷰:** collector typecheck + 6144 tests 그린; 독립 리뷰(플래그 전환) 예정. **라이브 highlight·클릭·
-  credential·push/PR 없음.**
+- **Phase B highlight proof(`API_ISSUANCE_HIGHLIGHT_PROOF`) = implementation complete / live proof PENDING —
+  requires empty-app store.** new-app 경로 구현·보정 완료(플래그 전환 + guided highlight 준비). **라이브 proof는
+  보류**: NAVER는 앱 삭제 불가(비활성화만)라 **빈-앱 스토어가 없어** 생성 분기를 실증할 수 없다. PREPARED manifest/
+  임시 runtime은 **회수**(단일-사용 grant **미소비**); 향후 라이브는 **빈-앱 스토어 + 새 bootstrap + 새 단일-사용
+  승인** 필요. 우회 proof 없음.
+- **existing-app 경로는 계속 `not_ready`**(open_app `structural_candidate` 44 non-unique, v1 범위 제외).
+- **게이트·리뷰:** collector typecheck + 6145 tests 그린; 독립 리뷰(플래그 전환) **PASS HIGH=0 MED=0**(1 LOW 반영:
+  플래그 값 핀). **라이브 highlight·클릭·credential·push/PR 없음.**
 - **향후 open_app 재개 시:** app_list-with-app 구조 관찰로 좁고 안정적인 value-free 앵커 확정 → 재-probe → 유일하면
   승격(existing-app 경로 복귀). 현재는 new-app 한정.
 
