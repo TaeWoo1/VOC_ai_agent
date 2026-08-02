@@ -27,10 +27,11 @@
  *     measure it live before it can be promoted, so the EXISTING-app path stays `not_ready` while the NEW-app
  *     path is `ready_candidate` (see {@link issuancePathReadiness}). The driver still fails closed on it — a
  *     non-unique match (e.g. multiple apps, or a too-broad row selector) parks rather than highlighting a guess.
- *   - **These are Playwright fixed-label locators for the driver — NOT the same thing as flipping
- *     `SELECTORS_CALIBRATED`.** That flag additionally requires the driver's OWN locate+tag+overlay mechanism
- *     to be live-probed (the read-only `API_ISSUANCE_SELECTOR_PROBE` phase) and `open_app` calibrated. It stays
- *     `false`; this module never touches it.
+ *   - **These are the driver's fixed-label locators — the `SELECTORS_CALIBRATED` flag is owned by
+ *     `api-center-adapter`, not here.** That flag is now `true`, SCOPED TO THE NEW-APP PATH (the three
+ *     live_confirmed targets were live-probed at `matchCount===1` by the read-only `API_ISSUANCE_SELECTOR_PROBE`
+ *     phase, twice). `open_app` remains an uncalibrated `structural_candidate` (existing-app path out of v1
+ *     scope), so the guided gate fails closed on it. This module never reads or writes the flag.
  *
  * Pure: no I/O, no browser, no wall-clock.
  */
@@ -194,8 +195,9 @@ export type PathReadiness = "ready_candidate" | "not_ready";
 
 /**
  * Whether an onboarding path's highlight targets are all live-confirmed. `ready_candidate` (never a bare
- * "ready") because the driver's OWN highlight mechanism has not yet been live-probed — the read-only
- * `API_ISSUANCE_SELECTOR_PROBE` phase does that, and only then may `SELECTORS_CALIBRATED` flip.
+ * "ready") because the end-to-end Phase-B highlight PROOF (highlight + observe the operator's click) has not
+ * yet run — the read-only `API_ISSUANCE_SELECTOR_PROBE` has live-confirmed the new-app targets' matchCount=1
+ * (twice) and `SELECTORS_CALIBRATED` is now flipped for that path, but the guided walk itself is the last step.
  *   - `new_app` (create_app → api_group → credentials): all live_confirmed ⇒ `ready_candidate`.
  *   - `existing_app` (open_app → api_group → credentials): open_app is a structural_candidate (unmeasured) ⇒
  *     `not_ready` until a live probe confirms its anchor resolves uniquely.

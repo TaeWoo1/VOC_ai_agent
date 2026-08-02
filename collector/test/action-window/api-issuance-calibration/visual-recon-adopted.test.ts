@@ -6,13 +6,13 @@
  * that flag gates a DIFFERENT (issuance highlight) selector set and stays false.
  */
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   ADOPTED_TARGET_IDS,
   ADOPTED_VISUAL_RECON_SELECTORS,
   evaluateAdopted,
 } from "../../../src/action-window/api-issuance-calibration/visual-recon-adopted";
 import { VISUAL_RECON_CANDIDATES } from "../../../src/action-window/api-issuance-calibration/visual-recon-candidates";
-import { SELECTORS_CALIBRATED } from "../../../src/action-window/api-issuance/api-center-adapter";
 
 describe("adopted visual-recon selectors", () => {
   it("adopts exactly the 6 fixed-label controls confirmed matchCount=1 live (not 다시사용/시크릿-label)", () => {
@@ -57,7 +57,14 @@ describe("adopted visual-recon selectors", () => {
     }
   });
 
-  it("adoption did NOT flip the issuance highlight flag — SELECTORS_CALIBRATED stays false (different subsystem)", () => {
-    expect(SELECTORS_CALIBRATED).toBe(false);
+  it("this ADOPTION module never touches the issuance highlight flag — it imports nothing from api-center-adapter", () => {
+    // The visual-recon adoption is isolated from `SELECTORS_CALIBRATED`: this module neither reads nor flips it.
+    // (The flag was later flipped to `true` in a SEPARATE, explicitly-authorized step — the new-app-scoped
+    // highlight calibration — so its VALUE is not this module's concern; its ISOLATION is what this asserts.)
+    const src = readFileSync(new URL("../../../src/action-window/api-issuance-calibration/visual-recon-adopted.ts", import.meta.url), "utf8");
+    // Only the JSDoc may mention the flag; no executable import/reference of it exists.
+    const codeOnly = src.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").filter((l) => !l.trim().startsWith("*")).join("\n");
+    expect(codeOnly.includes("SELECTORS_CALIBRATED")).toBe(false);
+    expect(codeOnly.includes("api-center-adapter")).toBe(false);
   });
 });

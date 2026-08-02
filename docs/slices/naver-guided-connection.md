@@ -394,6 +394,29 @@ manifest 생성 후 새 단일-사용 승인 필요.**
   강조)= **수정 완료**. **라이브 highlight·클릭·credential·push/PR 없음.** 완료 후 fresh `API_ISSUANCE_SELECTOR_PROBE`
   runtime을 PREPARED(이제 `open_app` 구조 앵커도 측정)까지만 만들고 승인 대기.
 
+### 0.2.8 개정 — **`SELECTORS_CALIBRATED=true`(new-app 경로 한정) + Phase B는 신규 앱 경로로 범위 확정** ⭐ 현행 calibration 상태
+
+2차 selector-probe 라이브 결과로 `open_app` 구조 앵커가 유일하지 않음이 확인되어, **제품 오너 결정: Phase B를
+new-app(신규 앱 생성) 경로로 한정**하고 `SELECTORS_CALIBRATED`를 그 범위에서 전환했다.
+
+- **2차 probe 라이브(2026-08-02, 실제 NAVER, 읽기 전용, 승인 소비):** 3개 fixed-label 재확인 `matchCount=1`
+  (uniqueCalibrated:3). **`open_app` 구조 앵커 = 44 매칭(non-unique) → `structuralCandidatesUnique:0`.** broad
+  app-entry-row selector가 페이지의 nav/menu/list 행 44개를 잡아 **유일 해석 실패**. guided gate로 강조 0.
+- **`SELECTORS_CALIBRATED` = `false`→`true`(new-app 한정, `api-center-adapter.ts`):** 라이브 driver는 더 이상
+  `CANDIDATE_TARGET_SELECTORS`(합성 fixture 마커로 강등)로 강조하지 않고 calibrated fixed-label registry로 강조한다.
+  `create_app`/`api_group`/`credentials`는 **읽기전용 probe 2회로 라이브 `matchCount=1` 증명** → 이 3개에 한해 플래그
+  전환. **플래그 전환 선결 ①②를 new-app 경로에 대해 충족**으로 간주(② open_app은 범위 제외).
+- **`open_app`/existing-app 경로 = v1 범위 제외:** `structural_candidate`(44 non-unique) 유지, `not_ready`.
+  `isGuidedHighlightTarget` 게이트로 라이브 guided walk는 open_app에서 **fail-closed park**(강조 0). ⇒ **Phase B
+  highlight proof는 빈-앱 스토어(생성 분기)에서만 유의미**; 기존 앱 있으면 open_app park.
+- **미완료 = Phase B highlight proof(`API_ISSUANCE_HIGHLIGHT_PROOF`):** 실제 컨트롤 강조 + 운영자 클릭 관찰(READ_ONLY
+  모드, 마켓 상태 변경 0). **빈-앱 스토어 필요**(NAVER는 앱 삭제 불가/비활성화만 → 새 테스트 스토어 또는 앱 없는 상태
+  필요). 자체 단일-사용 승인 필요. 완료 후 PREPARED까지만.
+- **게이트·리뷰:** collector typecheck + 6144 tests 그린; 독립 리뷰(플래그 전환) 예정. **라이브 highlight·클릭·
+  credential·push/PR 없음.**
+- **향후 open_app 재개 시:** app_list-with-app 구조 관찰로 좁고 안정적인 value-free 앵커 확정 → 재-probe → 유일하면
+  승격(existing-app 경로 복귀). 현재는 new-app 한정.
+
 ---
 
 ## 0. v1 비준 (Ratification 2026-07-19) — 오프라인 구현 착수

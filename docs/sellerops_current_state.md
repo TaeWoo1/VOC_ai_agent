@@ -12,6 +12,22 @@
 
 ---
 
+## 2026-08-02 부록 (4) — SELECTORS_CALIBRATED=true(new-app 한정) + Phase B 신규-앱 범위 (현행)
+
+> issuance highlight calibration의 **현행** 상태(부록(3) 갱신). 세부: 슬라이스 §0.2.8.
+
+- **2차 selector-probe 라이브:** 3개 fixed-label 재확인 `matchCount=1`; **`open_app` 구조 앵커 = 44(non-unique)**
+  → 유일 해석 실패(broad row selector). guided gate로 강조 0.
+- **제품 오너 결정 = Phase B를 new-app(신규 앱 생성) 경로로 한정.** `SELECTORS_CALIBRATED` **false→true(new-app 한정)**:
+  라이브 driver는 calibrated fixed-label registry로 강조(`CANDIDATE_TARGET_SELECTORS`는 fixture 마커로 강등). `create_app`/
+  `api_group`/`credentials`는 읽기전용 probe 2회로 라이브 `matchCount=1` 증명.
+- **`open_app`/existing-app = v1 범위 제외:** `structural_candidate`(not_ready), guided gate로 fail-closed park.
+  Phase B highlight proof는 **빈-앱 스토어(생성 분기)에서만 유의미**.
+- **미완료 = Phase B highlight proof(`API_ISSUANCE_HIGHLIGHT_PROOF`):** 실제 컨트롤 강조 + 클릭 관찰(READ_ONLY,
+  마켓 변경 0); 빈-앱 스토어 + 자체 단일-사용 승인 필요. collector typecheck + 6144 tests 그린. push/PR 없음.
+
+---
+
 ## 2026-08-02 부록 (3) — selector-probe LIVE 검증 + open_app 구조 앵커 후보 (현행)
 
 > issuance highlight calibration의 **현행** 상태(부록(2)를 갱신). 세부: 슬라이스 §0.2.7.

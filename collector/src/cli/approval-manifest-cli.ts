@@ -45,30 +45,33 @@ export function runApprovalManifestCli(): number {
   // Dry-validate the run command: the exact CLI entrypoint file must exist.
   const cliExists = existsSync(resolve(COLLECTOR_ROOT, spec.cli));
 
-  // Only the hotkey calibrator phase (Phase A) captures from a keypress + writes a per-run RAW selector artifact.
-  // The visual-recon phase has no hotkey and writes its redacted PNG + sanitized summary under the gitignored
-  // `.calibration/visual/` sink. The read-only selector probe has NEITHER — it emits only sanitized integers to
-  // the console, so it carries no hotkey and no raw-artifact path (a misleading one would over-claim capability).
+  // ONLY the hotkey calibrator phase (Phase A, `API_CENTER_STRUCTURE_OBSERVATION`) captures from a keypress and
+  // writes a per-run RAW selector artifact. The visual-recon phase has no hotkey and writes its redacted PNG +
+  // sanitized summary under the gitignored `.calibration/visual/` sink. The read-only selector probe and the
+  // highlight proof have NEITHER — they carry no hotkey and no raw-artifact path (a misleading one would
+  // over-claim a capability the phase's driver does not have).
   const isVisualRecon = phase === "API_CENTER_VISUAL_RECON";
-  const isSelectorProbe = phase === "API_ISSUANCE_SELECTOR_PROBE";
-  const hotkey = isVisualRecon || isSelectorProbe ? undefined : (env("SELLEROPS_CALIBRATION_HOTKEY") ?? "Ctrl+Shift+K");
+  const isStructureObs = phase === "API_CENTER_STRUCTURE_OBSERVATION";
+  const hotkey = isStructureObs ? (env("SELLEROPS_CALIBRATION_HOTKEY") ?? "Ctrl+Shift+K") : undefined;
   const artifactPath = isVisualRecon
     ? VISUAL_RECON_ARTIFACT_CATEGORY
-    : isSelectorProbe
-      ? undefined
-      : (env("SELLEROPS_CALIBRATION_ARTIFACT") ?? `.calibration/api-center-${env("WALKTHROUGH_RUN_ID") ?? "unknown"}.json`);
+    : isStructureObs
+      ? (env("SELLEROPS_CALIBRATION_ARTIFACT") ?? `.calibration/api-center-${env("WALKTHROUGH_RUN_ID") ?? "unknown"}.json`)
+      : undefined;
   const defaultOperation = isVisualRecon
     ? "API Center redacted visual recon"
-    : isSelectorProbe
-      ? "API issuance read-only selector probe"
-      : phase === "API_CENTER_STRUCTURE_OBSERVATION"
-        ? "API Center structure observation"
-        : "API issuance highlight proof";
+    : isStructureObs
+      ? "API Center structure observation"
+      : phase === "API_ISSUANCE_SELECTOR_PROBE"
+        ? "API issuance read-only selector probe"
+        : "API issuance highlight proof (new-app path)";
   const defaultMaxActions = isVisualRecon
     ? "1 redacted visual recon session"
-    : isSelectorProbe
-      ? "1 read-only selector probe session"
-      : "1 calibration session";
+    : isStructureObs
+      ? "1 calibration session"
+      : phase === "API_ISSUANCE_SELECTOR_PROBE"
+        ? "1 read-only selector probe session"
+        : "1 highlight proof session";
 
   const input: ApprovalPrereqInput = {
     phase,

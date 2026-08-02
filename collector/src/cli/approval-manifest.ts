@@ -16,9 +16,10 @@
  *    manifest that declares `HIGHLIGHT_REAL_CONTROL` is a phase/capability mismatch and is refused. It also
  *    requires a defined capture hotkey and a gitignored raw-artifact path (`ARTIFACT_PATH_UNSAFE` otherwise).
  *  - `API_ISSUANCE_HIGHLIGHT_PROOF` (Phase B) — the `NaverIssuanceDriver` Action Window that highlights real
- *    controls and observes the operator's own click. It is refused until the control selectors have actually
- *    been calibrated against the live API center (`SELECTORS_CALIBRATED`), because the fixture markers park
- *    every highlight `target_not_found`.
+ *    controls and observes the operator's own click. It requires `SELECTORS_CALIBRATED`, now `true` SCOPED TO
+ *    THE NEW-APP PATH (create_app/api_group/credentials, live-proven `matchCount===1`). The existing-app
+ *    `open_app` target is uncalibrated and fails closed (guided gate → `target_not_found`), so this phase's
+ *    proof is meaningful on an EMPTY-app store (the create branch), not an existing-app one.
  *  - `API_ISSUANCE_SELECTOR_PROBE` (Phase-B calibration) — a READ-ONLY run of the SAME `NaverIssuanceDriver`
  *    that only COUNTS how many candidates each highlight target's calibrated fixed-label locator matches (a
  *    value-free integer + a highlightable boolean); it never highlights, tags, clicks, or reads a value. It is
@@ -242,7 +243,8 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
     cli: "src/cli/run-api-issuance-live-naver.ts",
     entrypointCommandId: "run-api-issuance-live-naver",
     operatorActionSummary:
-      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 강조된 실제 컨트롤을 직접 클릭하면 SellerOps가 관찰합니다.",
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 강조된 실제 컨트롤을 직접 클릭하면 SellerOps가 관찰합니다. " +
+      "(신규 앱 생성 경로 기준 — 기존 앱이 있으면 open_app에서 fail-closed park.)",
     emitsFrontendUrl: false,
   },
   API_CENTER_VISUAL_RECON: {

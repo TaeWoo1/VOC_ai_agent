@@ -33,26 +33,32 @@ import type { IssuanceTarget } from "./issuance-driver";
 export const LIVE_DOM_CALIBRATION_PENDING = "LIVE_DOM_CALIBRATION_PENDING" as const;
 
 /**
- * **CANDIDATE / unverified — calibrate live.** The selector each highlightable control is EXPECTED to carry.
+ * **Whether the issuance highlight driver's control selectors are calibrated against the REAL API center —
+ * `true`, SCOPED TO THE NEW-APP PATH.**
  *
- * These are hypotheses matching the synthetic fixtures' `[data-aw-target]` markers; a live run must confirm
- * the real API-center controls. They are DATA: counted/used only by the synthetic fixture driver, and NEVER
- * emitted on the wire (the wire carries an opaque 16-hex signature, never a selector).
- */
-/**
- * **Whether the control selectors below have been calibrated against the REAL API center.**
+ * The LIVE `NaverIssuanceDriver` no longer highlights via {@link CANDIDATE_TARGET_SELECTORS} (those remain ONLY
+ * as the synthetic fixture-driver markers, below). It highlights via the calibrated FIXED-LABEL registry in
+ * `api-issuance-calibration/issuance-highlight-selectors`. This flag is `true` because the NEW-APP path —
+ * `create_app` (애플리케이션 등록), `api_group` (API 그룹), `credentials` (애플리케이션 ID) — is calibrated and
+ * LIVE-PROVEN: two READ-ONLY `API_ISSUANCE_SELECTOR_PROBE` runs on the real API center each resolved all three
+ * to `matchCount===1` via the driver's own locate mechanism.
  *
- * `false` while {@link CANDIDATE_TARGET_SELECTORS} are the synthetic `[data-aw-target]` fixture markers —
- * they do NOT match the live NAVER API center, so a live highlight run parks `target_not_found`. The
- * approval-prerequisite gate reads this: the highlight-proof phase (`API_ISSUANCE_HIGHLIGHT_PROOF`) is
- * refused until this is `true`, which happens only after a Phase-A structure-observation run informs real
- * selectors and they replace the fixture markers here. Flip to `true` in the SAME commit that lands the
- * calibrated selectors — never before.
+ * **`open_app` (the EXISTING-app path) is deliberately OUT OF v1 SCOPE and NOT calibrated.** Opening a specific
+ * app depends on its identity (no fixed label); its value-free structural-row anchor measured NON-unique live
+ * (44 matches), so it stays a `structural_candidate`. The `isGuidedHighlightTarget` gate makes the guided walk
+ * FAIL CLOSED on it (`target_not_found` park) — it never highlights an uncalibrated control. So flipping this
+ * flag enables the Phase-B highlight proof for the new-app (create) branch only; an existing-app store parks on
+ * `open_app` recoverably. The approval-prerequisite gate reads this to allow `API_ISSUANCE_HIGHLIGHT_PROOF`.
  */
-export const SELECTORS_CALIBRATED = false;
+export const SELECTORS_CALIBRATED = true;
 
+/**
+ * **CANDIDATE / synthetic fixture markers ONLY.** The `[data-aw-target]` selector the synthetic fixture driver
+ * uses to find its markers. The LIVE driver does NOT use these (it uses the calibrated fixed-label registry) —
+ * they are DATA counted only by the fixture driver, NEVER emitted on the wire (the wire carries an opaque
+ * 16-hex signature, never a selector).
+ */
 export const CANDIDATE_TARGET_SELECTORS: Readonly<Record<IssuanceTarget, string>> = {
-  // CANDIDATE / unverified, calibrate live — none of these is a confirmed API-center control.
   create_app: "[data-aw-target='create_app']",
   open_app: "[data-aw-target='open_app']",
   api_group: "[data-aw-target='api_group']",

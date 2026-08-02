@@ -23,6 +23,7 @@ import { VISUAL_RECON_LABEL_PROBES } from "../../../src/action-window/api-issuan
 import { ADOPTED_TARGET_IDS } from "../../../src/action-window/api-issuance-calibration/visual-recon-adopted";
 import { ISSUANCE_TARGETS } from "../../../src/action-window/api-issuance/issuance-driver";
 import { CANDIDATE_APP_ENTRY_SELECTOR } from "../../../src/action-window/naver-issuance-driver";
+import { SELECTORS_CALIBRATED } from "../../../src/action-window/api-issuance/api-center-adapter";
 
 describe("issuance highlight-target selector registry", () => {
   it("covers exactly the 4 real NAVER controls as highlight targets — `return` is guidance-only, never highlighted", () => {
@@ -91,6 +92,18 @@ describe("issuance highlight-target selector registry", () => {
     expect(isGuidedHighlightTarget("api_group")).toBe(true);
     expect(isGuidedHighlightTarget("credentials")).toBe(true);
     // The unmeasured structural candidate must never be highlighted by the guided walk until it is promoted.
+    expect(isGuidedHighlightTarget("open_app")).toBe(false);
+  });
+
+  it("SELECTORS_CALIBRATED is true (new-app scope) AND that flip is honest: every guided-highlightable target is live_confirmed", () => {
+    // Pins the flag's VALUE (catches a silent revert) AND ties it to the honest scope: the flag may be true
+    // only because the new-app path is live_confirmed while open_app stays a non-guided-highlightable candidate.
+    expect(SELECTORS_CALIBRATED).toBe(true);
+    for (const spec of ISSUANCE_TARGET_SELECTORS) {
+      if (isGuidedHighlightTarget(spec.target)) expect(spec.status).toBe("live_confirmed");
+    }
+    // The new-app path is fully guided-highlightable; open_app (existing-app) is not — that is the v1 scope.
+    for (const t of ["create_app", "api_group", "credentials"] as const) expect(isGuidedHighlightTarget(t)).toBe(true);
     expect(isGuidedHighlightTarget("open_app")).toBe(false);
   });
 
