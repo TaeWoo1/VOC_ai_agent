@@ -38,10 +38,14 @@ describe("리포트 — honest workspace copy", () => {
 // error strings (now replaced with seller-facing recovery copy); English
 // "backend" in code identifiers/comments is a different token and is not matched.
 // Scans every page, component, and lib source (test files excluded).
+// Recursive on purpose. The globs used to be flat (`./*.tsx`, `../components/*.tsx`,
+// `../lib/*.{ts,tsx}`), which silently exempted every feature subfolder — including the public
+// product surface, where copy discipline matters most. Widening them is what makes the guard
+// mean what its name says.
 const sources = {
-  ...import.meta.glob("./*.tsx", { query: "?raw", import: "default", eager: true }),
-  ...import.meta.glob("../components/*.tsx", { query: "?raw", import: "default", eager: true }),
-  ...import.meta.glob("../lib/*.{ts,tsx}", { query: "?raw", import: "default", eager: true }),
+  ...import.meta.glob("./**/*.tsx", { query: "?raw", import: "default", eager: true }),
+  ...import.meta.glob("../components/**/*.tsx", { query: "?raw", import: "default", eager: true }),
+  ...import.meta.glob("../lib/**/*.{ts,tsx}", { query: "?raw", import: "default", eager: true }),
 } as Record<string, string>;
 
 describe("셀러향 오류 문구 — no developer backend instructions", () => {
