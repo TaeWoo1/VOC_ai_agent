@@ -28,6 +28,12 @@ import type {
   OperatorVocItemPage,
   OrderSummaryResponse,
   OperatorOutcomeName,
+  IssueChangeKind,
+  IssueChangeView,
+  IssueEvidenceView,
+  IssueStateEventView,
+  ReviewIssueDetailView,
+  ReviewIssueView,
   ReviewReplyApproval,
   ReviewReplyApprovalResponse,
   ReviewReplyApprovalStateName,
@@ -1714,4 +1720,254 @@ export function mockReviewImports(limit?: number): ReviewImport[] {
     },
   ];
   return limit == null ? rows : rows.slice(0, limit);
+}
+
+// --- Review Issue Memory (demo only) -----------------------------------------
+//
+// These exist so the demo app can show its central screen instead of an empty one.
+//
+// The original rule on these endpoints was "no mock at all", because a seeded answer to "has
+// something changed in what customers are telling you" is a fabricated answer AND — the deciding
+// clause — "the operator cannot tell the difference". That last condition no longer holds: the v2
+// shell renders a permanent, non-dismissible demo notice whenever `VITE_USE_MOCKS` is on. What has
+// NOT changed is the part that mattered: these reads still never fall back to seeded data when a
+// real backend fails. A dead backend still fails, loudly. Only the explicit demo flag is honored.
+//
+// Evidence `reviewId`s deliberately match `mockInbox()` rows so the memory → inbox links resolve to
+// real rows in the demo rather than dead-ending on "항목을 찾을 수 없습니다".
+
+function changeView(
+  kinds: IssueChangeKind[],
+  labelsKo: string[],
+  surge?: { windowCount: number; baselineWeekly: number },
+): IssueChangeView {
+  return {
+    kinds,
+    labelsKo,
+    highSurge: kinds.includes("SURGING"),
+    surgeWindowCount: surge?.windowCount ?? 0,
+    surgeBaselineWeekly: surge?.baselineWeekly ?? 0,
+  };
+}
+
+function demoIssues(): ReviewIssueView[] {
+  return [
+    {
+      id: "mock-issue-adhesion",
+      title: "접착력이 약하다는 이야기가 늘고 있어요",
+      aspect: "접착",
+      problem: "부착 후 떨어짐",
+      severity: "HIGH",
+      lifecycleState: "NEEDS_REVIEW",
+      lifecycleLabelKo: "확인 필요",
+      evidenceCount: 6,
+      firstEvidenceOn: "2026-06-18",
+      lastEvidenceOn: "2026-08-02",
+      dominantProductId: "p-1",
+      dominantProductName: "전선몰딩 1호 (백색)",
+      dismissed: false,
+      extractorKind: "RULE_BASED",
+      change: changeView(["SURGING", "CONCENTRATED"], ["증가 중", "특정 상품 집중"], {
+        windowCount: 4,
+        baselineWeekly: 0.6,
+      }),
+    },
+    {
+      id: "mock-issue-install",
+      title: "설치 방법을 묻는 문의가 계속 들어와요",
+      aspect: "설치",
+      problem: "시공 방법 확인 필요",
+      severity: "NORMAL",
+      lifecycleState: "NEEDS_REVIEW",
+      lifecycleLabelKo: "확인 필요",
+      evidenceCount: 5,
+      firstEvidenceOn: "2026-05-30",
+      lastEvidenceOn: "2026-08-01",
+      dominantProductId: null,
+      dominantProductName: null,
+      dismissed: false,
+      extractorKind: "RULE_BASED",
+      change: changeView(["PERSISTENT"], ["계속 발생"]),
+    },
+    {
+      id: "mock-issue-color",
+      title: "색상이 사진과 다르다는 이야기가 이어져요",
+      aspect: "색상",
+      problem: "실물과 이미지 차이",
+      severity: "NORMAL",
+      lifecycleState: "ACTING",
+      lifecycleLabelKo: "조치 중",
+      evidenceCount: 3,
+      firstEvidenceOn: "2026-06-02",
+      lastEvidenceOn: "2026-07-24",
+      dominantProductId: "p-3",
+      dominantProductName: "전선몰딩 2호 (아이보리)",
+      dismissed: false,
+      extractorKind: "RULE_BASED",
+      change: changeView(["PERSISTENT", "CONCENTRATED"], ["계속 발생", "특정 상품 집중"]),
+    },
+    {
+      id: "mock-issue-cutting",
+      title: "재단 중 파손 이야기가 줄었어요",
+      aspect: "내구성",
+      problem: "재단 시 파손",
+      severity: "LOW",
+      lifecycleState: "VERIFYING",
+      lifecycleLabelKo: "개선 확인 중",
+      evidenceCount: 2,
+      firstEvidenceOn: "2026-04-11",
+      lastEvidenceOn: "2026-06-20",
+      dominantProductId: null,
+      dominantProductName: null,
+      dismissed: false,
+      extractorKind: "RULE_BASED",
+      change: changeView(["IMPROVED"], ["개선됨"]),
+    },
+  ];
+}
+
+const DEMO_EVIDENCE: Record<string, IssueEvidenceView[]> = {
+  "mock-issue-adhesion": [
+    {
+      reviewId: "mock-rev-1",
+      unitOrdinal: 1,
+      occurredOn: "2026-08-02",
+      productId: "p-1",
+      productName: "전선몰딩 1호 (백색)",
+      rating: 1,
+      quote: "부착 후 며칠 지나니 접착력이 약해서 떨어졌어요.",
+    },
+    {
+      reviewId: "mock-rev-5",
+      unitOrdinal: 1,
+      occurredOn: "2026-07-28",
+      productId: "p-1",
+      productName: "전선몰딩 1호 (백색)",
+      rating: 2,
+      quote: "여름 되니까 한쪽이 들뜹니다.",
+    },
+    {
+      reviewId: "mock-rev-3",
+      unitOrdinal: 2,
+      occurredOn: "2026-07-19",
+      productId: "p-1",
+      productName: "전선몰딩 1호 (백색)",
+      rating: 2,
+      // Suppressed by the sanitizer — surfaced as a count, never as an empty quote.
+      quote: null,
+    },
+  ],
+  "mock-issue-install": [
+    {
+      reviewId: "mock-inq-2",
+      unitOrdinal: 1,
+      occurredOn: "2026-08-01",
+      productId: null,
+      productName: null,
+      rating: null,
+      quote: "곡면 벽에도 시공 가능한가요?",
+    },
+    {
+      reviewId: "mock-inq-3",
+      unitOrdinal: 1,
+      occurredOn: "2026-07-26",
+      productId: null,
+      productName: null,
+      rating: null,
+      quote: "추가 양면테이프는 따로 사야 하나요?",
+    },
+  ],
+  "mock-issue-color": [
+    {
+      reviewId: "mock-rev-5",
+      unitOrdinal: 2,
+      occurredOn: "2026-07-24",
+      productId: "p-3",
+      productName: "전선몰딩 2호 (아이보리)",
+      rating: 2,
+      quote: "사진이랑 색이 조금 달라요. 실물이 더 누런 느낌입니다.",
+    },
+  ],
+  "mock-issue-cutting": [
+    {
+      reviewId: "mock-rev-3",
+      unitOrdinal: 1,
+      occurredOn: "2026-06-20",
+      productId: null,
+      productName: null,
+      rating: 2,
+      quote: "재단하다가 모서리가 깨졌습니다.",
+    },
+  ],
+};
+
+const DEMO_HISTORY: Record<string, IssueStateEventView[]> = {
+  "mock-issue-color": [
+    {
+      fromState: null,
+      toState: "OBSERVING",
+      toStateLabelKo: "지켜보는 중",
+      actor: "SYSTEM",
+      reason: "EVIDENCE_FOUND",
+      note: null,
+      at: "2026-06-02T00:00:00Z",
+    },
+    {
+      fromState: "OBSERVING",
+      toState: "NEEDS_REVIEW",
+      toStateLabelKo: "확인 필요",
+      actor: "SYSTEM",
+      reason: "THRESHOLD_REACHED",
+      note: null,
+      at: "2026-07-01T00:00:00Z",
+    },
+    {
+      fromState: "NEEDS_REVIEW",
+      toState: "ACTING",
+      toStateLabelKo: "조치 중",
+      actor: "OPERATOR",
+      reason: "OPERATOR_STARTED",
+      note: "상세페이지 색상 안내 문구 보완 중",
+      at: "2026-07-20T00:00:00Z",
+    },
+  ],
+};
+
+/** Mutable demo state so a state transition in the demo actually sticks while the tab is open. */
+const demoIssueState = new Map<string, ReviewIssueView>();
+
+function demoIssue(issueId: string): ReviewIssueView | undefined {
+  return demoIssueState.get(issueId) ?? demoIssues().find((issue) => issue.id === issueId);
+}
+
+export function mockReviewIssues(dismissed = false): ReviewIssueView[] {
+  return demoIssues()
+    .map((issue) => demoIssueState.get(issue.id) ?? issue)
+    .filter((issue) => issue.dismissed === dismissed);
+}
+
+export function mockReviewIssueDetail(issueId: string): ReviewIssueDetailView {
+  const issue = demoIssue(issueId);
+  if (!issue) {
+    // Mirrors the real 404 so the page's not-found path is exercised in the demo too.
+    throw new Error(`unknown demo issue: ${issueId}`);
+  }
+  return {
+    issue,
+    evidence: DEMO_EVIDENCE[issueId] ?? [],
+    history: DEMO_HISTORY[issueId] ?? [],
+  };
+}
+
+export function mockUpdateReviewIssue(
+  issueId: string,
+  patch: Partial<ReviewIssueView>,
+): ReviewIssueView {
+  const current = demoIssue(issueId);
+  if (!current) {
+    throw new Error(`unknown demo issue: ${issueId}`);
+  }
+  const next = { ...current, ...patch };
+  demoIssueState.set(issueId, next);
+  return next;
 }
