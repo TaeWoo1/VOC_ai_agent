@@ -86,6 +86,14 @@ export type TargetCalibrationStatus =
 export interface IssuanceFixedLabelLocator {
   candidateQuery: string;
   exactText: string;
+  /**
+   * Optional STRUCTURAL ancestor selector (e.g. `"tr"`). When set, the read-only highlight tag is promoted from
+   * the matched fixed-label cell to its nearest ancestor matching this selector (`closest()`), so the overlay
+   * boxes the whole row instead of just the label cell. The label ANCHOR (candidateQuery + exactText) and the
+   * anti-drift signature are unchanged — only the tagged/highlighted element moves. Falls back to the label when
+   * no such ancestor exists. Reads structure only (no `<td>` value / text).
+   */
+  tagAncestor?: string;
 }
 
 export interface IssuanceTargetSelectorSpec {
@@ -127,6 +135,17 @@ const TARGET_SCREEN: Readonly<Record<IssuanceHighlightTarget, VisualReconScreen>
   credentials: "credentials",
 };
 
+/**
+ * Which highlight targets promote their read-only tag to a structural ancestor. `credentials`'s fixed label is
+ * the `<th>애플리케이션 ID</th>` cell of a key/value `<tr>`, so tagging its parent `<tr>` boxes the whole row
+ * (label + value cell) instead of just the label cell — the `<td>` value is never read, only its bounding box via
+ * the promoted row. `create_app` (a button) and `api_group` (a heading) are single-element targets, so they have
+ * no ancestor promotion and their highlight is unchanged.
+ */
+const TAG_ANCESTOR: Readonly<Partial<Record<IssuanceHighlightTarget, string>>> = {
+  credentials: "tr",
+};
+
 /** The fixed-label probe for an adopted target — the single source the locator's query+text is reused from. */
 function probeFor(id: VisualReconTargetId): FixedLabelProbe {
   const p = VISUAL_RECON_LABEL_PROBES.find((x) => x.targetId === id);
@@ -152,7 +171,11 @@ export const ISSUANCE_TARGET_SELECTORS: readonly IssuanceTargetSelectorSpec[] = 
     paths: TARGET_PATHS[target],
     status: "live_confirmed",
     derivesFrom,
-    locator: { candidateQuery: probe.candidateQuery, exactText: probe.exactText },
+    locator: {
+      candidateQuery: probe.candidateQuery,
+      exactText: probe.exactText,
+      ...(TAG_ANCESTOR[target] ? { tagAncestor: TAG_ANCESTOR[target] } : {}),
+    },
   };
 });
 

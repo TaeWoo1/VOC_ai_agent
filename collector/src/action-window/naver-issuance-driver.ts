@@ -281,7 +281,14 @@ const OPEN_APP_GUIDANCE_SIG = "09a90b1109a90b11";
  */
 function issuanceLocateScript(target: IssuanceHighlightTarget, tag: boolean): string {
   const loc = locatorFor(target);
-  return buildFixedLabelLocateScript({ candidateQuery: loc.candidateQuery, exactText: loc.exactText, tag });
+  // `tagAncestor` (credentials → "tr") promotes the read-only tag from the label cell to its row; anti-drift sig
+  // stays on the label. Only meaningful when tagging; harmless (unread) on a pure locate.
+  return buildFixedLabelLocateScript({
+    candidateQuery: loc.candidateQuery,
+    exactText: loc.exactText,
+    tag,
+    tagAncestor: loc.tagAncestor,
+  });
 }
 
 /**

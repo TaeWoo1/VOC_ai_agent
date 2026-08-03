@@ -45,14 +45,28 @@ describe("issuance highlight-target selector registry", () => {
     expect(isIssuanceNavigationTarget("create_app")).toBe(false);
   });
 
-  it("derives each live_confirmed locator VERBATIM from its adopted visual-recon fixed-label probe (no drift)", () => {
+  it("derives each live_confirmed locator's ANCHOR (query+label) VERBATIM from its adopted probe (no drift)", () => {
     for (const spec of ISSUANCE_TARGET_SELECTORS) {
       expect(spec.status).toBe("live_confirmed");
       expect(ADOPTED_TARGET_IDS as readonly string[]).toContain(spec.derivesFrom);
       const probe = VISUAL_RECON_LABEL_PROBES.find((p) => p.targetId === spec.derivesFrom);
       expect(probe).toBeDefined();
-      expect(spec.locator).toEqual({ candidateQuery: probe!.candidateQuery, exactText: probe!.exactText });
+      // The label ANCHOR (candidateQuery + exactText) is pinned verbatim to the probe. `tagAncestor` is a highlight
+      // presentation concern (which element to box), NOT part of the anchor — so it is asserted separately below.
+      expect(spec.locator.candidateQuery).toBe(probe!.candidateQuery);
+      expect(spec.locator.exactText).toBe(probe!.exactText);
     }
+  });
+
+  it("promotes ONLY credentials' highlight tag to its parent `<tr>` — create_app/api_group box their own element", () => {
+    // credentials' fixed label is the `<th>애플리케이션 ID</th>` cell of a key/value row; the tag is promoted to
+    // the parent `<tr>` so the overlay boxes the whole row (label + value cell). The ANCHOR is unchanged.
+    expect(selectorSpecFor("credentials").locator.tagAncestor).toBe("tr");
+    // Single-element targets (a button / a heading) have no ancestor promotion — highlight is unchanged.
+    expect(selectorSpecFor("create_app").locator.tagAncestor).toBeUndefined();
+    expect(selectorSpecFor("api_group").locator.tagAncestor).toBeUndefined();
+    // The promotion selector is purely STRUCTURAL — never a value pin / credential token.
+    expect(/\[\s*value\s*=|시크릿|secret|애플리케이션 ID/i.test(selectorSpecFor("credentials").locator.tagAncestor!)).toBe(false);
   });
 
   it("uses ONLY fixed NAVER labels — never an app name, credential value, or [value=] pin", () => {

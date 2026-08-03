@@ -12,6 +12,21 @@
 
 ---
 
+## 2026-08-04 부록 (15) — NAVER Credentials Row Highlight v1: credentials 하이라이트를 라벨 `<th>` → 부모 `<tr>`로 승격 (오프라인+실chromium 완료, 라이브 대기)
+
+> 부록(14) 라이브 재검증 #2가 확정한 COVERAGE 갭(credentials overlay가 `<th>` "애플리케이션 ID" 라벨 셀만 감싸고 값 `<td>` 포함 행 전체 아님)을 정본 구현. 세부: 슬라이스 §0.2.19. **collector 3파일만; 백엔드·FE·selector 앵커·상태기계·bridge·runner·telemetry 불변.**
+
+- **앵커 불변 / 태그 대상만 승격**: credentials 고정라벨 앵커(candidateQuery+exactText)는 adopted probe에서 무드리프트 파생 그대로. 읽기전용 태그 `data-aw-target`를 매칭 라벨 셀에서 `el.closest("tr")`로 이동 → overlay가 행 전체(라벨+값 셀) 박싱. **값 `<td>` 미판독**(closest=구조 탐색만, 값 문자열/innerText/textContent/.value 미판독; 스크립트는 여전히 `{count, sig?}`만 반환).
+- **anti-drift sig 불변**: sig는 라벨 `el` 기준 계속 계산(승격 조상 `tr` 아님) → locate(태그 없음)↔highlight(태그+승격) 시그니처 일치 byte-불변. locate 경로(tag=false)는 승격 블록 미방출.
+- **fallback / 타깃 격리**: `<tr>` 부재 시 라벨 셀 유지(조용한 드롭 없음). create_app(버튼)·api_group(헤딩)은 `tagAncestor` 없음 → 태그 로직 byte-불변. credentials만 `TAG_ANCESTOR={credentials:"tr"}`.
+- **3파일**: `visual-recon-inpage.ts`(`buildFixedLabelLocateScript` 옵션 `tagAncestor`), `issuance-highlight-selectors.ts`(`IssuanceFixedLabelLocator.tagAncestor?`+`TAG_ANCESTOR` 배선), `naver-issuance-driver.ts`(`issuanceLocateScript` 통과).
+- **테스트**: 헤르메틱 스크립트-텍스트(closest("tr")+fallback+sig on el+값-미판독, create_app/api_group closest 부재) + **실 chromium**(RUN_INTEGRATION) 실 KV 테이블에서 `data-aw-target`가 `<tr>` 안착·UUID값 미반환·`<tr>`부재 fallback·api_group 승격 없음 + 갱신 selector 레지스트리(credentials만 tagAncestor:"tr", 앵커는 필드별 단언으로 드리프트 마스킹 방지).
+- **게이트**: collector typecheck green; 전체 **6312 passed**/138 skip/0 fail; 실 chromium tag-promotion **7/7**(RUN_INTEGRATION) green. `git diff --check` 클린, package/lock 불변.
+- **독립 리뷰 = HIGH 0 / MEDIUM 0.** 7 하드 제약 확인 + overlay 소비 안전(sig 무재계산, `closest`=라벨 자기 행). LOW 1(반영·코드 무변경): `closest("tr")`는 단일 key/value 행 전제 — 부록11 관측 shape(`<tr><th>애플리케이션 ID</th><td>값</td></tr>`)+ID/Secret probe 분리가 행-분리 레이아웃 시사 → 코드 무변경, 라이브에서 행 shape 함께 확인.
+- **상태**: 오프라인/실-chromium 완료. **credentials 행 커버리지 확인용 fresh PREPARED까지, 라이브 대기.** 이 변화는 값 미판독 → 라이브는 육안 커버리지 확인용(값·Secret·스크린샷·클립보드 미판독). push/PR 없음.
+
+---
+
 ## 2026-08-04 부록 (14) — Overlay Mount Fix v1: overlay mount의 esbuild `__name` 심 누수 제거 (현행 issuance 상태, 오프라인+실chromium+라이브 재검증 완료)
 
 > `Overlay Mount Fix v1`. 부록(13)이 확정한 원인(`position_overlay`/`SYMBOL_NOT_DEFINED`)을 오프라인 재확인 후 수정. 세부: 슬라이스 §0.2.18. **overlay 1파일(`overlay.ts`)만; selector·상태기계·bridge·runner·telemetry 불변.**

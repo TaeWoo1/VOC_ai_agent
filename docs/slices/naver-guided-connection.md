@@ -803,7 +803,43 @@ bridge·runner 불변, 제어 흐름 불변**(관측 seam은 동일 error를 그
     드라이버가 그 태그된 요소를 박싱하기 때문(“highlight 대상 = 행 `<tr>` 권장”은 **미구현**). **mount 수정 범위 아님**(overlay는 정상 렌더).
     후속 UX 후보 = credentials highlight를 라벨 `<th>`가 아니라 행 `<tr>`로 확장(값이 박스 안에 보이게). **이번 단위에서 수정 안 함**(코드 변경 없음).
 - **결론**: 3단위 4진단 1수정에 걸친 api_group/credentials highlight overlay 미표시 blocker **최종 종결(라이브 증명, credentials까지)**. 남은
-  것은 highlight COVERAGE(credentials 행 확장) 후속 UX 후보뿐 — mount/렌더는 완결.
+  것은 highlight COVERAGE(credentials 행 확장) 후속 UX 후보뿐 — mount/렌더는 완결. → **0.2.19에서 그 후속 UX 후보 구현.**
+
+### 0.2.19 개정 — **`NAVER Credentials Row Highlight v1`: credentials 하이라이트를 라벨 `<th>` → 부모 `<tr>`로 승격 (오프라인 완료, 라이브 대기)** ⭐
+
+0.2.18 라이브 재검증 #2에서 확정한 COVERAGE 갭(credentials overlay가 `<th>` "애플리케이션 ID" 라벨 셀만 감싸고 값 `<td>`를 포함한 행 전체는
+아님)을 **정본 구현**. 부록11 calibration이 이미 "highlight 대상 = 행 `<tr>` 권장(미구현)"으로 기록했던 항목. **collector 3파일만; 백엔드·FE·
+selector 앵커·상태기계·bridge·runner·telemetry 불변.**
+
+- **앵커 불변 / 태그 대상만 승격**: credentials 고정라벨 앵커(candidateQuery `th,td,dt,label,span,div` + exactText `애플리케이션 ID`)는
+  adopted visual-recon probe에서 **그대로** 파생(무드리프트). 승격은 **읽기전용 태그(`data-aw-target`)를 매칭된 라벨 셀에서 `el.closest("tr")`로
+  이동**시키는 것뿐 — overlay가 라벨 셀이 아니라 **행 전체(라벨+값 셀)**를 박싱.
+- **값 `<td>` 미판독**: `closest("tr")`은 **구조(selector) 탐색만** — 값 문자열/`innerText`/`textContent`/`.value` 미판독. 값 셀은 승격된 행의
+  bounding box **안에 들어올 뿐** 그 텍스트는 페이지를 떠나지 않음(스크립트는 여전히 `{ count, sig? }`만 반환).
+- **anti-drift 시그니처 불변**: sig는 **라벨 `el`** 기준으로 계속 계산(`sig(el.tagName+':'+idx, 'children:'+el.childElementCount)`) — 승격된 조상
+  `tr`이 아님. 따라서 engine의 locate(태그 없음)↔highlight(태그+승격) 시그니처 일치 검사가 **byte-불변**. locate 경로(tag=false)는 승격 블록 자체를
+  방출하지 않음.
+- **`<tr>` 부재 시 fallback**: `el.closest("tr")`가 null이면 라벨 셀에 태그를 그대로 유지(**절대 조용히 드롭 안 함**).
+- **다른 타깃 불변**: `create_app`(버튼)·`api_group`(헤딩)은 단일-요소 타깃 → `tagAncestor` 없음 → 태그 로직 byte-불변(무해한 `var tagEl = el;`
+  개명만). credentials만 `TAG_ANCESTOR = { credentials: "tr" }`.
+- **구현 위치(3파일)**: `visual-recon-inpage.ts`(`buildFixedLabelLocateScript`에 옵션 `tagAncestor` 추가 — tag일 때만 `el.closest(sel)` 승격),
+  `issuance-highlight-selectors.ts`(`IssuanceFixedLabelLocator.tagAncestor?` 타입 + `TAG_ANCESTOR` credentials→`"tr"` 배선),
+  `naver-issuance-driver.ts`(`issuanceLocateScript`가 `loc.tagAncestor` 통과).
+- **테스트**: (1) 헤르메틱 스크립트-텍스트 단언 — credentials가 `el.closest("tr")`+fallback+`data-aw-target` 태그, sig는 `el` 기준, `.value`/
+  `innerText`/`innerHTML` 미추가, create_app/api_group은 `.closest(` 부재; (2) **실 chromium DOM**(RUN_INTEGRATION) — 실제 KV 테이블
+  `<tr><th>애플리케이션 ID</th><td>UUID값</td></tr>`에서 `data-aw-target`가 **`<tr>`에 안착**(값 셀 박싱)·UUID값 미반환, `<tr>` 부재 시 라벨로
+  fallback, api_group은 헤딩에 승격 없이 태그; (3) 갱신된 selector 레지스트리 테스트 — credentials만 `tagAncestor:"tr"`, 앵커는 probe 무드리프트
+  (전-객체 동치 → 앵커 필드별 단언으로 교체해 드리프트 마스킹 방지).
+- **게이트**: collector typecheck green; 전체 **6312 passed**/138 skip/0 fail; **실 chromium** tag-promotion 7/7(RUN_INTEGRATION) green.
+  `git diff --check` 클린, package/lock 불변, 추가 코드에 금칙 토큰 없음.
+- **독립 리뷰 = HIGH 0 / MEDIUM 0.** 7개 하드 제약 모두 확인(앵커 불변·값 미판독·타깃 격리·fallback·sig on `el`·클로저 무도입/`__name` 무누수·
+  `{count,sig?}` 반환). overlay 소비 안전 확인(`mountOverlay`/`reposition`은 `[data-aw-target]`의 bounding box만, sig 무재계산; `closest`는 라벨의
+  **자기 행**만 상향 탐색). LOW 1(반영·코드 무변경): `closest("tr")`는 ID/값이 **단일 key/value 행**임을 전제 — NAVER가 ID+Secret을 한 다열 행에
+  렌더하면 Secret 값 셀까지 박싱될 수 있음(안전 위반 아님 — 값 미판독). 부록11 calibration 관측 shape가 `<tr><th>애플리케이션 ID</th><td>값</td></tr>`
+  단일 key/value 행이고, ID(`text="애플리케이션 ID"`)/Secret(`text="애플리케이션 시크릿"`) probe가 분리되어 **행-분리 레이아웃**을 강하게 시사 → 코드
+  무변경, **라이브 커버리지 확인 시 행 shape(ID·Secret 별도 행) 함께 확인**.
+- **상태**: 오프라인/실-chromium 완료. **credentials 행 커버리지만 확인하는 fresh PREPARED까지 생성, 라이브 실행은 대기** — mount 수정과 달리
+  이 변화는 값을 읽지 않으므로 라이브는 육안 커버리지 확인용(값·Secret·스크린샷·클립보드 미판독). push/PR 없음.
 
 ---
 

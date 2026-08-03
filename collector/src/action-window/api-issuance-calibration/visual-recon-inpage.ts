@@ -392,13 +392,24 @@ export function buildFixedLabelProbeScript(probes: readonly { targetId: string; 
  * ALSO moves the read-only `data-aw-target` annotation onto that single match (clearing any prior tag first) so
  * the reused overlay/observer can attach to it. When zero or many match it returns only `{ count }`.
  *
+ * **`tagAncestor` (optional, tag only).** When set to a STRUCTURAL selector (e.g. `"tr"`), the read-only tag is
+ * promoted from the matched LABEL element to its nearest ancestor matching that selector (`el.closest(sel)`), so
+ * the highlight boxes the whole row rather than just the label cell — falling back to the label itself when no
+ * such ancestor exists. `closest()` reads STRUCTURE only (no text/value); the anti-drift `sig` stays computed on
+ * the LABEL `el`, never the promoted ancestor, so the locate↔highlight signature is unchanged.
+ *
  * **Value-free OUTPUT, like {@link buildFixedLabelProbeScript}.** Element text is read SOLELY to compare against
  * the caller's KNOWN fixed label (`accName(el) === want`); the matched text is NEVER returned — only a count and,
  * for a unique match, the structural signature. It NEVER clicks, types, reads a field value, or mutates anything
  * beyond the read-only `data-aw-target` marker. Kept ES5-plain + string-form so esbuild's `__name` shim is never
  * referenced in the page.
  */
-export function buildFixedLabelLocateScript(input: { candidateQuery: string; exactText: string; tag: boolean }): string {
+export function buildFixedLabelLocateScript(input: {
+  candidateQuery: string;
+  exactText: string;
+  tag: boolean;
+  tagAncestor?: string;
+}): string {
   return `(function () {
   /* issuance-fixed-label-${input.tag ? "tag" : "locate"} (value-free OUTPUT: { count, sig? }) */
   var sig = ${IN_PAGE_SIG_FACTORY};
@@ -420,11 +431,20 @@ export function buildFixedLabelLocateScript(input: { candidateQuery: string; exa
     input.tag
       ? `var prior = slice(document.querySelectorAll('[data-aw-target]'));
   for (var p = 0; p < prior.length; p++) { prior[p].removeAttribute('data-aw-target'); }
-  el.setAttribute('data-aw-target', '');`
+  var tagEl = el;${
+    input.tagAncestor
+      ? `
+  /* promote the read-only tag to the nearest structural ancestor (no text/value read); fall back to the label. */
+  var anc = el.closest ? el.closest(${JSON.stringify(input.tagAncestor)}) : null;
+  if (anc) { tagEl = anc; }`
+      : ``
+  }
+  tagEl.setAttribute('data-aw-target', '');`
       : ``
   }
   var all = slice(document.querySelectorAll('*'));
   var idx = all.indexOf(el);
+  /* sig stays on the LABEL el (never the promoted ancestor) so the locate↔highlight anti-drift check is stable. */
   return { count: 1, sig: sig(el.tagName + ':' + idx, 'children:' + el.childElementCount) };
 })()`;
 }
