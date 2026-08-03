@@ -788,13 +788,22 @@ bridge·runner 불변, 제어 흐름 불변**(관측 seam은 동일 error를 그
 - **게이트**: collector typecheck green; 전체 **6307 passed**/135 skip/0 fail; **실 chromium** overlay 테스트(RUN_INTEGRATION,
   fixture-browser 10/10 — overlay mount+reposition 실동작) green. 독립 리뷰 **HIGH 없음**; MEDIUM 1(가드가 mountOverlay만 커버 → 전 evaluate
   스캔으로 일반화) **반영**, LOW 2(주석 TS2695 명시·positive-control 정규식 완화) 반영.
-- **라이브 재검증 확정 (2026-08-04, gated `apr-fa311753d4d8`/`wt-e2bb0c9bb568`/`17cb404`, 실제 NAVER 존재-앱 상세, 소진·클린):**
+- **라이브 재검증 확정 #1 (2026-08-04, gated `apr-fa311753d4d8`/`wt-e2bb0c9bb568`/`17cb404`, 실제 NAVER 존재-앱 상세, 소진·클린):**
   자연 존재-앱 흐름(app_list 착지 → START_RUN step1 app_list✓ → step2 open_app 관찰-무장 → 조작자가 앱 열기 → app_detail 검증 →
   step3 api_group highlight)으로 mount 1회 구동 → **`aw_issuance_stage_ok{target:"api_group", attempt:0, tagged:true, mounted:true}`
-  확정**(attempt 0, 재시도 0), **mount fault 전무**(`aw_issuance_mount_substage_fault`·`stage_fault{stage:"mount"}` 없음). **조작자
-  육안 확인: "보여. api 그룹 위에 떠있는데"** = overlay(파란 하이라이트 박스+배지)가 API 그룹 섹션 위에 실제 렌더. 부록12/13의 결정적
-  `position_overlay`/`SYMBOL_NOT_DEFINED` fault가 **완전히 해소됨**. credentials·"다음"·추가 checkpoint 없이 성공 즉시 teardown, 코드 미변경.
-- **결론**: 3단위 4진단 1수정에 걸친 api_group highlight overlay 미표시 blocker **최종 종결(라이브 증명)**. 다음은 후속 슬라이스 판단.
+  확정**(attempt 0, 재시도 0), **mount fault 전무**. **조작자 육안: "보여. api 그룹 위에 떠있는데"** = overlay(파란 박스+배지)가 API 그룹
+  섹션 위에 실제 렌더. 부록12/13의 결정적 `position_overlay`/`SYMBOL_NOT_DEFINED` fault **완전 해소**.
+- **라이브 재검증 확정 #2 — credentials checkpoint까지 (2026-08-04, gated `apr-4aaf216197e7`/`wt-663cdce2afba`/`8fb5513`(overlay=17cb404
+  동일), 소진·클린):** api_group `mounted:true` 확인 후 **조작자-확인 기반 `REQUEST_STEP_RECHECK` 1회**로 step3→step4 진행 →
+  **`aw_issuance_stage_ok{target:"credentials", attempt:0, tagged:true, mounted:true}` 확정, mount fault 전무.** 두 체크포인트(api_group+
+  credentials) 모두 overlay 렌더. credentials 값(Client ID/Secret)·스크린샷·클립보드 **미판독**(구조 시그니처만), return·추가 "다음" 없이
+  즉시 teardown, 코드 미변경.
+  - **[신규 발견 — highlight COVERAGE 갭, mount와 별개]** 조작자 육안: credentials overlay가 **`<th>` "애플리케이션 ID" 라벨 셀만** 감싸고
+    **행 `<tr>` 전체(우측 값 `<td>` 포함)는 아님**. 이는 부록11 calibration의 기록과 정확히 일치 — credentials 앵커가 고정라벨 `<th>`에 매칭,
+    드라이버가 그 태그된 요소를 박싱하기 때문(“highlight 대상 = 행 `<tr>` 권장”은 **미구현**). **mount 수정 범위 아님**(overlay는 정상 렌더).
+    후속 UX 후보 = credentials highlight를 라벨 `<th>`가 아니라 행 `<tr>`로 확장(값이 박스 안에 보이게). **이번 단위에서 수정 안 함**(코드 변경 없음).
+- **결론**: 3단위 4진단 1수정에 걸친 api_group/credentials highlight overlay 미표시 blocker **최종 종결(라이브 증명, credentials까지)**. 남은
+  것은 highlight COVERAGE(credentials 행 확장) 후속 UX 후보뿐 — mount/렌더는 완결.
 
 ---
 
