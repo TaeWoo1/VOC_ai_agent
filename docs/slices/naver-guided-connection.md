@@ -653,10 +653,28 @@ DevTools 증거로** 확정한다.
 - **선택**: 라벨 요소를 고른다(값 필드가 아님). 스니펫은 잘못 선택 시에도 값을 흘리지 않도록 allowlist가 백스톱.
 - **산출(보고만)**: ① 두 요소의 **안정 앵커 후보**, ② 하이라이트 대상이 **라벨인지 부모 섹션인지**, ③ **frame/surface 구조**,
   ④ **다음 최소 수정안**. 이 단위는 **selector·상태 기계·overlay·bridge·runner를 변경하지 않는다** — 순수 진단.
-- **오프라인 상태(현행)**: CLI + 가드(63) + 스니펫 doc 완성, collector typecheck·전체 스위트 green(6267 passed), 독립 리뷰
+- **오프라인 상태**: CLI + 가드(63) + 스니펫 doc 완성, collector typecheck·전체 스위트 green(6267 passed), 독립 리뷰
   1 HIGH(스니펫 음성-필터 우회 → allowlist+positive-shape로 전환)·1 MEDIUM(가드 토큰 공백 보강)·1 LOW(SIGINT 메시지) **모두
-  반영**, 스니펫 누출 테스트 LEAKS=NONE. **라이브 진단은 fresh bootstrap + 단일-사용 승인 대기(미실행)** — 자동 클릭·입력·
-  다음-단계·push/PR 없음.
+  반영**, 스니펫 누출 테스트 LEAKS=NONE.
+
+**라이브 확정 결과 (2026-08-03, gated 실행 `apr-9c358c356136`/`wt-e6cccae6b69a`/`3d4d1a2`, 조작자 DevTools 증거, 값 미수신·마스킹, 소진·클린):**
+- **페이지 = Angular emulated-encapsulation SPA (top-frame, iframe 없음).** 모든 요소에 `_ngcontent-qfb-*` 빌드-스코프 속성이
+  붙고(재배포마다 회전) 클래스는 일반형(`sub-title`/`title-area`/`content-developer`) → **고정 한글 라벨 텍스트가 두 타깃의 유일한
+  durable value-free 앵커**. `_ngcontent-*`·이 클래스들·부모 컨테이너에 앵커를 걸면 rot. (현행 fixed-label 설계가 옳음을 확정.)
+- **`api_group` = `<h4 class="sub-title">API 그룹</h4>`** — id/role/data/aria 없음. 부모 `div.title-area`(제목 래퍼)·조부모
+  `div.content-developer`(콘텐츠 전체 래퍼) 모두 안정 섹션 컨테이너 아님. → **하이라이트 대상 = 라벨 헤딩 자체**(부모 섹션 아님),
+  앵커 = `h4.sub-title` + 정확 텍스트 `^\s*API 그룹\s*$`(섹션 헤딩은 "API 그룹" vs "애플리케이션" 두 개뿐 → exact-match 유일).
+- **`credentials`(애플리케이션 ID) = `<th>애플리케이션 ID</th>`** — `<tr><th>애플리케이션 ID</th><td>[값]</td></tr>` 테이블 **행**의
+  헤더 셀(제목 아님). th/tr/td에 class/id/role/data/aria 없음(오직 `_ngcontent-*`). → 앵커 = **정확 텍스트 "애플리케이션 ID" on
+  `<th>`** (credentials 후보 쿼리에 **`th` 필수**; "애플리케이션" 헤딩과 exact-match로 구분 → 유일). **하이라이트 대상 = 행 `<tr>`**
+  권장(라벨+값 행을 박스 → "오른쪽 값을 복사" UX; `<td>` 값은 읽지 않고 시각 박스만) — 단, 라벨 `<th>`만 박싱해도 안정.
+- **앵커는 건전(둘 다 exact fixed-text로 matchCount=1, top-frame)** → 오버레이 미표시는 **앵커 문제가 아님**(Reset 부록10과 일치:
+  throw 지점 tag/signature/mount/visibility-verify 중 미확정). **다음 최소 수정 = `Overlay Root-Cause Isolation v1` 그대로**(단계별
+  safe telemetry로 실패 단계 특정). 이 calibration이 그 단위에 넘길 **가설(확정 아님)** 2개: (a) `scrollIntoView`가 Angular
+  change-detection/lazy 재렌더를 유발해 직후 raw `page.evaluate`의 컨텍스트를 파괴 → scroll 후 settle 뒤 evaluate, 또는
+  locator-native `boundingBox()` 위치잡기로 우회 검증; (b) credentials는 `<th>` 대신 부모 `<tr>` boundingBox로 박스. **캘리브레이션
+  메모**: 분류기 app_detail 마커 스캔은 `th` 제외(unit-2 MEDIUM) → "애플리케이션 ID"(`<th>`)는 분류기 마커로 못 씀, app_detail 감지는
+  "API 그룹"(h4) 단독 의존(1개면 충분·fail-safe). **selector·상태 기계·overlay·bridge·runner 미변경 — 순수 진단·보고. push/PR 없음.**
 
 ---
 

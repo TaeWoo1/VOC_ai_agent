@@ -23,7 +23,8 @@
 - **증거 = 조작자 DevTools 스니펫**(value-scoped): api_group 라벨·애플리케이션 ID 라벨을 `$0`로 선택→ sanitized 구조만(tag/role/class/attr **이름**/테스트-훅 값/labelMatch/frame).
   **allowlist+positive-shape** 설계 — 값·outerHTML·쿠키·토큰·자유형 속성값(aria-label/상점명) 출력 불가. 누출 테스트 LEAKS=NONE.
 - **보고 산출만**: 안정 앵커 후보 / 하이라이트 대상=라벨 vs 부모 섹션 / frame·surface 구조 / 다음 최소 수정안. **selector·상태 기계·overlay·bridge·runner 불변.**
-- **상태**: 오프라인 완성(가드 63, collector typecheck+전체 6267 green), 독립 리뷰 HIGH·MEDIUM·LOW 전부 반영. **라이브 진단은 fresh bootstrap + 단일-사용 승인 대기(미실행)** — 자동 클릭·입력·다음-단계·push/PR 없음.
+- **상태**: 오프라인 완성(가드 63, collector typecheck+전체 6267 green), 독립 리뷰 HIGH·MEDIUM·LOW 전부 반영.
+- **라이브 확정(2026-08-03, gated `apr-9c358c356136`/`wt-e6cccae6b69a`/`3d4d1a2`, 조작자 DevTools 증거, 값 미수신·소진·클린):** 페이지=Angular SPA(top-frame). `api_group`=`h4.sub-title`("API 그룹"), `credentials`(애플리케이션 ID)=테이블 행 `<tr><th>애플리케이션 ID</th><td>값</td></tr>`의 `<th>`. 둘 다 **id/role/data/aria 없음, `_ngcontent-*`(회전)+일반 클래스뿐 → 고정 한글 텍스트가 유일 앵커**(현행 fixed-label 설계 옳음 확정). 하이라이트 = api_group은 라벨 헤딩 자체, credentials는 행 `<tr>` 권장. **앵커 건전(matchCount=1) → 오버레이 미표시는 앵커 문제 아님** → 다음 단위 `Overlay Root-Cause Isolation v1` 그대로(가설: scrollIntoView가 Angular 재렌더로 직후 raw evaluate 컨텍스트 파괴 — 확정 아님). selector/상태기계/overlay/bridge/runner 미변경, push/PR 없음.
 
 ---
 
