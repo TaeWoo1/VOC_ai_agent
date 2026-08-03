@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 // Raw source imports (Vite ?raw, no new deps) — pure string scan, no DOM.
-import reports from "./Reports.tsx?raw";
+import reports from "./app/ReportsV2.tsx?raw";
 
 // Guard the 리포트 page against roadmap / coming-soon placeholder copy and keep it
 // anchored to honest, data-grounded wording. (The standalone AI 검색 page was
@@ -24,11 +24,19 @@ describe("리포트 — honest workspace copy", () => {
   });
 
   it("anchors the page to honest, data-grounded copy", () => {
-    expect(reports).toContain("수집된 리뷰·문의 데이터를 기준으로");
+    expect(reports).toContain("수집된 문의·리뷰를 기준으로");
   });
 
   it("no longer depends on the deleted ComingSoon placeholder component", () => {
     expect(reports).not.toContain("ComingSoon");
+  });
+
+  it("asserts no business outcome it cannot measure", () => {
+    // A report that claims 매출/전환율/만족도 improvement teaches the reader to distrust the rows
+    // that ARE true. Nothing in the data measures any of them.
+    for (const claim of ["매출 향상", "매출 증가", "전환율", "만족도", "성과 개선"]) {
+      expect(reports, `리포트에 "${claim}" 주장이 있으면 안 됩니다`).not.toContain(claim);
+    }
   });
 });
 
@@ -38,10 +46,14 @@ describe("리포트 — honest workspace copy", () => {
 // error strings (now replaced with seller-facing recovery copy); English
 // "backend" in code identifiers/comments is a different token and is not matched.
 // Scans every page, component, and lib source (test files excluded).
+// Recursive on purpose. The globs used to be flat (`./*.tsx`, `../components/*.tsx`,
+// `../lib/*.{ts,tsx}`), which silently exempted every feature subfolder — including the public
+// product surface, where copy discipline matters most. Widening them is what makes the guard
+// mean what its name says.
 const sources = {
-  ...import.meta.glob("./*.tsx", { query: "?raw", import: "default", eager: true }),
-  ...import.meta.glob("../components/*.tsx", { query: "?raw", import: "default", eager: true }),
-  ...import.meta.glob("../lib/*.{ts,tsx}", { query: "?raw", import: "default", eager: true }),
+  ...import.meta.glob("./**/*.tsx", { query: "?raw", import: "default", eager: true }),
+  ...import.meta.glob("../components/**/*.tsx", { query: "?raw", import: "default", eager: true }),
+  ...import.meta.glob("../lib/**/*.{ts,tsx}", { query: "?raw", import: "default", eager: true }),
 } as Record<string, string>;
 
 describe("셀러향 오류 문구 — no developer backend instructions", () => {
