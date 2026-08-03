@@ -74,6 +74,7 @@ npm run probe-same-session -- --i-understand-this-opens-live-naver      # READ-O
 npm run probe-export-same-session -- --i-understand-this-opens-live-naver  # READ-ONLY frame-aware export-area probe (top doc + every child frame); same sentinel flow; no export/click/download
 npm run classify-export-same-session -- --i-understand-this-opens-live-naver  # STRICT NO-CLICK export-layout classifier (sync/async/unrecognized from structure only); same sentinel flow; never triggers/captures
 npx tsx src/cli/observe-api-center.ts --i-understand-this-opens-live-naver  # GUIDED-TUTORIAL ONLY API-center page-category observer (NAVER v1 onboarding); reads a SANITIZED page category to show the next tutorial step; NEVER logs in / issues / links / clicks / types / submits / autofills, and NEVER reads any value incl. Client ID / Secret; the seller creates/opens the app and copies Client ID/Secret manually
+npx tsx src/cli/issuance-live-proof.ts --i-understand-this-opens-live-naver  # OFFICIAL reusable API-issuance guided-walk LIVE-PROOF driver (bridge CLIENT, not a browser driver); connects to the local /bridge/ws that run-api-issuance-live-naver already opened, adopts its issuance run, and drives it like the FE: sends ONLY START_RUN + REQUEST_STEP_RECHECK ("다음", one per explicit sentinel-file touch — NO auto-recheck), prints SANITIZED frames only; never touches NAVER / reads a value; gated + inert-on-import
 npm run upload -- /abs/path/to/export.xlsx                              # offline manual upload check (needs backend)
 ```
 

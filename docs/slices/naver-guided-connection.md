@@ -526,6 +526,53 @@ execution-context-destroyed로 throw**됐다: NAVER app_detail SPA가 `networkid
   없음). **FE 변경 없음.** **라이브 실행·push/PR 없음.** api_group/credentials의 existing-app 라이브 증명은 이 재설계 뒤에도
   **미증명(다음 gated 승인 필요)**.
 
+### 0.2.12 개정 — **`NAVER SPA-Stable Guidance Runtime v1`: fixed-label 탐색을 `page.evaluate` 문자열 → Playwright locator 기반으로** ⭐ 현행 issuance 상태
+
+0.2.11의 checkpoint 모델은 라이브에서 **회복(recoverable park + in-place 재-guide)까지 증명**됐으나, `api_group`
+locate가 **`settle(networkidle)` + `evalWithSettleRetry`(3회)를 뚫고도 지속적으로** execution-context-destroyed로
+throw(라이브 #4에서 2회, 한 번은 settle 47초 뒤) → **오버레이가 끝내 mount 안 됨**. 근본 원인: **raw `page.evaluate`는
+SPA의 client-side(soft) navigation을 넘어 재-resolve하지 못한다** — 대형 `document.querySelectorAll` IIFE가 soft-nav에
+걸리면 컨텍스트가 파괴되며 즉시 throw. 이번 단위는 **탐색(resolution) 자체를 Playwright locator로 이관**해 봉합한다.
+
+- **SPA-안정 탐색(`naver-issuance-driver.ts`, `resolveFixedLabelTarget`):** `page.evaluate` 문자열 방식의 탐색을
+  제거하고 **locator 기반**으로 교체 — ① `page.locator(candidateQuery, { hasText: exactLabelRegex(label) })`로 fixed
+  라벨을 좁혀 **`first().waitFor({ state:"attached", timeout: LOCATOR_TIMEOUT_MS })`**(auto-wait, soft-nav를 넘어
+  재-resolve — **실제 봉합점**) ② **`count()`로 유일성** 강제(≠1 → `{count}` → target_not_found park) ③
+  **`scrollIntoViewIfNeeded()`**(읽기 전용, 클릭 아님)로 섹션 표시 ④ **그제서야** 감사된 value-free tag+sig IIFE
+  (`buildFixedLabelLocateScript`)를 이미 resolve된 유일 요소에 실행(bounded 재시도) → 오버레이 tag를 안정적으로 연결.
+  **매 attempt마다 `activePage()` 재-resolve**(새 탭 등 context/frame 변경 추종). locator **timeout → `{count:0}`**
+  (bounded target_not_found park, 무한 대기 없음); tag IIFE가 계속 throw하면 마지막 오류 전파 → `onDriveFault` recoverable
+  page_mismatch. **매칭 의미 불변**(정확 라벨 = 정규화 텍스트 exact) + **anti-drift sig 불변**(locate/highlight sig 비교
+  유지) + **value-free OUTPUT 불변**(텍스트/값은 감사 IIFE 안에서만).
+- **VERIFY_OPEN bounded polling(`probeSurfaceSettled`):** app_detail SPA가 hydration 중 **일시적 `unknown`**으로
+  분류되어 **첫 read에서 오분류→park**하던 라이브 #4 플레이크를 봉합. 이제 sanitized 페이지 category를 **정본 landing**
+  또는 bounded 횟수(`VERIFY_MAX_POLLS`)까지 폴링 후 결정. 끝내 정착 안 하면 마지막 probe 반환 → 엔진 recoverable
+  page_mismatch(무한 대기·잘못된 통과 없음, fail-closed 유지). 세션 `VERIFY_OPEN` 드라이브가 `probeSurfaceSettled ??
+  probeSurface`를 사용(드라이버 없는 스크립트 픽스처는 단일 read로 폴백 — 엔진 결정 불변, 타이밍만).
+  - **[독립 리뷰 H1 반영] `credential_issuance`를 정본 성공 landing으로 수용.** existing 앱의 상세 페이지는 이미 발급된
+    Application ID/Secret을 **read-only로** 표시 → 공유 분류기 precedence상 `app_detail`이 아니라 **`credential_issuance`**
+    로 분류(read-only가 editable를 이김, `observe-api-center` §precedence). 엔진 `onOpenAppVerified`가 `app_detail`만
+    받으면 **existing-app 셀러를 dead-end**시키므로, **`app_detail` 또는 `credential_issuance`** 둘 다 상세 페이지 도달로
+    수용(하류 api_group locate가 fail-closed라 페이지가 틀리면 recoverable park). `isVerifyResolved`도 두 category +
+    `login`에서 폴 종료.
+  - **[독립 리뷰 H1 반영] 폴당 15초 settle 스톨 제거.** `probeSurfaceSettled`가 매 폴마다 15초 `settle(networkidle)`을
+    돌려 never-idle SPA에서 최대 ~3분 무응답이 되던 문제를 **최초 1회만 settle → 이후 짧은 간격의 경량 `readSurface`(settle
+    없음) 재읽기**로 수정.
+- **공식 재사용 live-proof CLI(`src/cli/issuance-live-proof.ts`, 신규):** 스크래치패드 `issuance-*-runner.mjs`(임시
+  브리지 클라이언트)를 **커밋된 게이트 CLI로 정리**. 브라우저 드라이버가 **아님** — `run-api-issuance-live-naver`가 이미
+  연 로컬 `/bridge/ws`에 붙어(페어→ws-ticket→ws) issuance 런을 adopt하고 FE처럼 구동: **START_RUN + '다음'
+  (REQUEST_STEP_RECHECK) 두 개의 무해 가이드 명령만** 전송, **sanitized 프레임(status/step/blocker)만** 출력. 진행은
+  **명시적 sentinel 파일**(조작자가 오버레이를 본 뒤 touch)당 **'다음' 1회** — **auto-recheck 없음**(0.2.11 요구 계승).
+  `hasLiveRunApproval` 게이트 + import-시 inert(직접 실행에서만 main). 소스 가드 추가(값/URL/셀렉터 무유출, 마켓 액션 없음).
+- **게이트·리뷰:** collector typecheck 그린 + 전체 **6195 tests 그린**(+locator-timeout bounded park, +unknown→app_detail
+  hydration VERIFY, +credential_issuance landing 완료, +live-proof CLI 소스 가드; 기존 회귀 갱신). 독립 적대적 리뷰
+  **HIGH 1건(H1: credential_issuance landing이 오분류·스톨) 반영**(위 두 bullet) + **MEDIUM 1건(M2: `count()`가 retry
+  try 밖) 반영**(모든 locator op을 단일 try에 넣어 soft-nav 재시도) + LOW 반영(L3: 오해 소지 픽스처 시퀀스 제거). L4
+  (hasText vs accName)/L5(probeTargetMatch 미하드닝)/L6(CLI)는 안전(park-only/비회귀)으로 관측 기록. **계약 불변**(새
+  stage/status/enum/마이그레이션 없음), **FE 변경 없음**, **라이브 실행·push/PR 없음.** api_group/credentials의 existing-app
+  **오버레이 렌더링 라이브 증명은 이 봉합 뒤에도 미증명(다음 gated 승인 필요)** — 이번엔 탐색이 locator 기반이라 soft-nav에
+  강함.
+
 ---
 
 ## 0. v1 비준 (Ratification 2026-07-19) — 오프라인 구현 착수

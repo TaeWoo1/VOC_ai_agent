@@ -85,16 +85,35 @@ export const DEFAULT_ISSUANCE_OBSERVE_TIMEOUT_MS = 10 * 60_000;
 const SETTLE_TIMEOUT_MS = 15_000;
 
 /**
- * Bounded IN-PAGE retry for a locate/highlight read: the NAVER app-detail SPA can re-render/hydrate for a beat
- * AFTER `networkidle`, destroying the execution context under a fixed-label `.evaluate` (the live-proof failure).
- * So a locate/highlight settles then reads, and on an execution-context error it settles again and retries — up
- * to this many EXTRA attempts before it gives up and throws (→ the engine parks recoverably). Small: a page that
- * keeps destroying the context on every read is a genuine fault, not a transient beat.
+ * Bounded retry for the value-free TAG+SIG in-page annotation that runs AFTER the locator has already resolved a
+ * unique, in-view element: a NAVER app-detail SPA soft-navigation can still destroy the execution context under
+ * that final `.evaluate`. It is a tiny window now (the locator confirmed a stable unique match first), so a small
+ * number of extra attempts covers a transient beat; if every attempt throws the last error propagates and the
+ * engine parks recoverably (`onDriveFault`). The RESOLUTION itself (find/uniqueness/scroll) no longer runs through
+ * `.evaluate` at all — it is Playwright-locator based (auto-waiting), which is what survives the SPA soft-navs.
  */
 const MAX_INPAGE_RETRIES = 2;
 
-/** Pause between in-page retries — lets a one-off post-navigation re-render land before the next read. */
+/** Pause between annotation retries — lets a one-off soft-navigation re-render land before the next tag read. */
 const INPAGE_RETRY_MS = 400;
+
+/**
+ * Bounded auto-wait for the Playwright LOCATOR to resolve the fixed-label section. Unlike a raw `page.evaluate`,
+ * a locator re-resolves across the SPA's client-side navigations, so this is the primitive that actually survives
+ * the "execution context was destroyed" the live proof hit. On timeout the driver returns `{ count: 0 }` and the
+ * engine parks `target_not_found` recoverably — a bounded miss, never an infinite wait.
+ */
+const LOCATOR_TIMEOUT_MS = 8_000;
+
+/**
+ * VERIFY_OPEN bounded polling: after the seller opens their existing app, the app-detail SPA hydrates for a beat
+ * and can classify as a transient `unknown` before it settles to `app_detail`. So the verify probe polls the
+ * sanitized page category up to {@link VERIFY_MAX_POLLS} times ({@link VERIFY_POLL_MS} apart) and returns as soon
+ * as it reaches a DEFINITIVE landing (`app_detail` success, or `login` = session lost). If it never settles
+ * within the bound it returns the last probe — the engine then parks `page_mismatch` recoverably, never hangs.
+ */
+const VERIFY_MAX_POLLS = 12;
+const VERIFY_POLL_MS = 500;
 
 /** Poll interval while observing the seller's own `app_list → app_detail` navigation for `open_app`. */
 const OPEN_NAV_POLL_MS = 1_000;
@@ -102,6 +121,42 @@ const OPEN_NAV_POLL_MS = 1_000;
 /** Bounded sleep between navigation-observe polls (no wall-clock read; timer only). */
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Escape a fixed label for use inside a RegExp (the label is a calibrated constant, never page-derived text). */
+function escapeForRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * A whitespace-tolerant EXACT-match RegExp for a FIXED NAVER label, for a locator's `hasText` filter. Playwright
+ * normalizes an element's text before testing, so anchoring `^…$` (with optional surrounding whitespace) matches
+ * the SAME "candidates whose normalized accessible name equals the label" the audited in-page script asserts —
+ * keeping the locator's narrowing consistent with the value-free tag+sig script that follows it.
+ */
+function exactLabelRegex(label: string): RegExp {
+  return new RegExp(`^\\s*${escapeForRegExp(label)}\\s*$`);
+}
+
+/** True for a Playwright locator TIMEOUT (a bounded miss → recoverable park), by error NAME only (never message). */
+function isTimeout(e: unknown): boolean {
+  return e instanceof Error && e.name === "TimeoutError";
+}
+
+/**
+ * A DEFINITIVE `open_app` landing category for VERIFY_OPEN polling — the categories that STOP the poll because
+ * they will not change under further hydration:
+ *   - `app_detail` / `credential_issuance` — the seller reached their application's own detail page (an existing
+ *     app shows its issued Application ID / Secret read-only, which the shared classifier calls
+ *     `credential_issuance`); both are a SUCCESS landing the engine accepts.
+ *   - `login` — the session expired mid-open (a recoverable park).
+ * Transient hydration states (`unknown`, still-`app_list`) are NOT definitive — keep polling until one settles or
+ * the bound elapses. The engine (`onOpenAppVerified`) owns the MEANING of each category; this only decides when
+ * the category has stopped moving enough to stop polling (so a legitimate `credential_issuance` landing no longer
+ * spins the poll to the bound before the engine accepts it).
+ */
+function isVerifyResolved(category: ApiCenterPageCategory): boolean {
+  return category === "app_detail" || category === "credential_issuance" || category === "login";
 }
 
 /** The overlay step number per barrier (dev diagnostic badge only — cosmetic, mirrors the engine's plan). */
@@ -143,6 +198,8 @@ export interface NaverIssuanceDriverOptions {
   context?: IssuanceContextLike;
   /** Pause between in-page locate/highlight retries. Defaults to {@link INPAGE_RETRY_MS}; tests set 0. */
   inpageRetryMs?: number;
+  /** Pause between VERIFY_OPEN settle-polls. Defaults to {@link VERIFY_POLL_MS}; tests set 0. */
+  verifyPollMs?: number;
 }
 
 /**
@@ -251,19 +308,53 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
   }
 
   /**
-   * SETTLE then run an in-page locate/highlight read, retrying on an execution-context error (the app-detail SPA
-   * re-rendered under the `.evaluate` right after `networkidle`). Bounded by {@link MAX_INPAGE_RETRIES}: each
-   * retry re-settles and pauses so a one-off post-navigation re-render can land, then re-reads. If every attempt
-   * throws, the last error propagates — the engine then parks recoverably (`onDriveFault`), so a genuinely broken
-   * page fails closed rather than looping. Value-free: it only runs the caller's value-free script.
+   * **The SPA-stable resolution of a fixed-label highlight target — Playwright LOCATOR based, not `.evaluate`.**
+   *
+   * The live-proof failure was a raw `page.evaluate(querySelectorAll…)` throwing "execution context was destroyed"
+   * on the NAVER app-detail SPA — a raw evaluate does not survive the SPA's client-side (soft) navigations. So the
+   * SEARCH now runs through a Playwright locator, which auto-waits and RE-RESOLVES across those navigations:
+   *   1. Build a locator narrowing the structural candidate query to the FIXED NAVER label (exact, whitespace-
+   *      tolerant) and wait (bounded) for it to be ATTACHED — this is the primitive that rides out the soft-navs.
+   *   2. Enforce UNIQUENESS with `locator.count()` (the calibrated targets are matchCount===1); anything else is a
+   *      recoverable park upstream.
+   *   3. `scrollIntoViewIfNeeded` (read-only; scrolling is not a click) so the section is on screen before tagging.
+   *   4. ONLY THEN run the AUDITED value-free tag+sig IIFE ({@link buildFixedLabelLocateScript}) on the now-settled,
+   *      unique, in-view element — wrapped in a small bounded retry for a soft-nav that lands mid-annotation. This
+   *      keeps the value-free OUTPUT + exact-label match + structural anti-drift signature byte-for-byte unchanged.
+   *
+   * Re-reads {@link activePage} on every attempt so a context/frame change (a newly-opened tab) is picked up. On a
+   * locator TIMEOUT it returns `{ count: 0 }` (→ `target_not_found` park, recoverable, bounded — never an infinite
+   * wait); on a non-unique match `{ count }`; if the final annotation keeps throwing, the last error propagates and
+   * the session's `onDriveError → engine.onDriveFault` parks `page_mismatch` recoverably.
    */
-  private async evalWithSettleRetry<R>(page: Page, script: string): Promise<R> {
+  private async resolveFixedLabelTarget(target: IssuanceHighlightTarget, tag: boolean): Promise<LocateResult> {
+    const loc = locatorFor(target);
+    const hasText = exactLabelRegex(loc.exactText);
+    const script = guidedLocateScript(target, tag);
+    if (!script) return { count: 0 }; // fail closed rather than resolve a non-calibrated control
     let lastErr: unknown;
     for (let attempt = 0; attempt <= MAX_INPAGE_RETRIES; attempt++) {
-      await this.settle(page);
+      // Re-resolve the active page/frame each attempt so a context change (new tab) is followed, not stale-bound.
+      const page = this.activePage();
+      const located = page.locator(loc.candidateQuery, { hasText });
       try {
-        return await this.evalStr<R>(page, script);
+        // Auto-waiting resolution that survives the SPA's soft-navigations (the actual live fix). EVERY locator op
+        // (waitFor / count / scroll) AND the audited `.evaluate` share this one try, so a soft-nav that destroys the
+        // context under ANY of them is retried up to the bound rather than escaping unbounded.
+        await located.first().waitFor({ state: "attached", timeout: LOCATOR_TIMEOUT_MS });
+        const matchCount = await located.count();
+        if (matchCount !== 1) return { count: matchCount }; // non-unique → engine parks target_not_found (recoverable)
+        // Read-only: bring the section into view (never a click) so the tag lands on an on-screen element. Scroll is
+        // best-effort — a scroll timeout/miss must not fail the resolve, so it never reaches the catch below.
+        await located.first().scrollIntoViewIfNeeded({ timeout: LOCATOR_TIMEOUT_MS }).catch(() => undefined);
+        // The ONLY remaining `.evaluate` — the audited value-free tag+sig on the already-resolved unique element.
+        const res = await this.evalStr<LocateResult>(page, script);
+        return res.count === 1 && res.sig ? { count: 1, sig: res.sig } : { count: res.count };
       } catch (e) {
+        // A locator TIMEOUT is a bounded miss (the label never rendered) → recoverable target_not_found, returned
+        // WITHOUT retrying (retrying a timeout would just wait another full window). Any other error (a soft-nav
+        // destroying the context under count/evaluate) is retried up to the bound, then propagates → onDriveFault.
+        if (isTimeout(e)) return { count: 0 };
         lastErr = e;
         if (attempt < MAX_INPAGE_RETRIES) await sleep(this.opts.inpageRetryMs ?? INPAGE_RETRY_MS);
       }
@@ -272,8 +363,19 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
   }
 
   async probeSurface(): Promise<IssuanceSurfaceProbe> {
+    await this.settle(this.activePage());
+    return this.readSurface();
+  }
+
+  /**
+   * Classify the CURRENT surface WITHOUT settling — the value-free census + host-category read that
+   * {@link probeSurface} runs after its settle. Split out so VERIFY_OPEN's poll can re-read the category cheaply
+   * between short delays: a settle waits `networkidle` up to {@link SETTLE_TIMEOUT_MS} (15 s), and running it on
+   * every one of {@link VERIFY_MAX_POLLS} polls of a never-idle SPA would stall VERIFY for minutes. The poll
+   * settles ONCE up front (via the first `probeSurface`) then quick-reads here.
+   */
+  private async readSurface(): Promise<IssuanceSurfaceProbe> {
     const page = this.activePage();
-    await this.settle(page);
     const census = await this.evalStr<ApiCenterStructuralCensus>(page, EXTRACT_API_CENTER_CENSUS);
     // The raw URL is reduced to a host CATEGORY and never logged/emitted; only the enum is used.
     const urlCategory = classifyUrlCategory(page.url());
@@ -284,6 +386,27 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
     }
     log("aw_issuance_probe", { pageCategory, ok: true });
     return { ok: true, pageCategory, signals };
+  }
+
+  /**
+   * VERIFY_OPEN's bounded-polling probe: after the seller opens their existing app the app-detail SPA hydrates for
+   * a beat and can classify as a transient `unknown` (or briefly still `app_list`) before it settles. Rather than
+   * fail the verify on that first transient read (the live-proof flake), poll {@link probeSurface} up to
+   * {@link VERIFY_MAX_POLLS} times ({@link VERIFY_POLL_MS} apart) and return as soon as a DEFINITIVE landing is
+   * reached — `app_detail` (success) or `login` (session lost, recoverable). If it never settles within the bound,
+   * return the LAST probe unchanged: the engine then parks `page_mismatch` recoverably. Value-free and bounded — no
+   * wall-clock read, only the sanitized category, and it can never wait forever.
+   */
+  async probeSurfaceSettled(): Promise<IssuanceSurfaceProbe> {
+    const pollMs = this.opts.verifyPollMs ?? VERIFY_POLL_MS;
+    // Settle ONCE up front (give the just-started navigation a beat), then quick-read the category between short
+    // delays — NOT a full 15 s settle per poll, which would stall VERIFY for minutes on a never-idle SPA.
+    let last = await this.probeSurface();
+    for (let i = 1; i < VERIFY_MAX_POLLS && !isVerifyResolved(last.pageCategory); i++) {
+      if (pollMs > 0) await sleep(pollMs); // pollMs 0 (tests) stays microtask-only; live waits a real beat
+      last = await this.readSurface();
+    }
+    return last;
   }
 
   async readApplications(): Promise<ApplicationsRead> {
@@ -303,11 +426,8 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
     if (target === "open_app") return { count: 1, sig: OPEN_APP_GUIDANCE_SIG };
     // Only the fixed-label controls are highlightable.
     if (!isIssuanceHighlightTarget(target)) return { count: 0 };
-    const script = guidedLocateScript(target, false);
-    if (!script) return { count: 0 }; // fail closed rather than highlight a non-calibrated control
-    // Settle + bounded retry: the fixed-label read must not race a still-settling post-navigation re-render.
-    const res = await this.evalWithSettleRetry<LocateResult>(this.activePage(), script);
-    return res.count === 1 && res.sig ? { count: 1, sig: res.sig } : { count: res.count };
+    // SPA-stable: the search is Playwright-locator based (auto-waiting, survives soft-navs), not a raw `.evaluate`.
+    return this.resolveFixedLabelTarget(target, false);
   }
 
   async highlightTarget(target: IssuanceTarget): Promise<LocateResult> {
@@ -323,11 +443,10 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
       return { count: 1, sig: OPEN_APP_GUIDANCE_SIG };
     }
     if (!isIssuanceHighlightTarget(target)) return { count: 0 };
-    const script = guidedLocateScript(target, true);
-    if (!script) return { count: 0 }; // fail closed → park, never a wrong highlight
-    // Anti-drift: RE-locate AND tag in one in-page pass (settle + bounded retry against a post-nav re-render). The
-    // engine compares this sig against the locate sig and parks on page_mismatch if the unique match drifted.
-    const res = await this.evalWithSettleRetry<LocateResult>(page, script);
+    // Anti-drift: the locator RE-resolves the unique match (surviving soft-navs) and scrolls it into view, then the
+    // audited script RE-tags + re-signs it. The engine compares this sig against the locate sig and parks on
+    // page_mismatch if the unique match drifted between the two passes.
+    const res = await this.resolveFixedLabelTarget(target, true);
     if (res.count === 1 && res.sig) {
       // Same-page viewport checkpoint: mount the reused overlay, which SCROLLS the tagged section into the
       // viewport centre (see `overlay.ts`) and shows the "여기입니다" pointer — the operator sees where the API

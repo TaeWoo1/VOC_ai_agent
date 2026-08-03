@@ -12,6 +12,34 @@
 
 ---
 
+## 2026-08-03 부록 (8) — SPA-Stable Guidance Runtime: fixed-label 탐색을 Playwright locator 기반으로 (현행)
+
+> `NAVER SPA-Stable Guidance Runtime v1`. 부록(7) checkpoint 모델은 회복까지 라이브 증명됐으나 `api_group` locate가
+> `settle`+bounded-retry를 뚫고도 execution-context-destroyed로 계속 throw(오버레이 mount 실패). 근본 원인: raw
+> `page.evaluate`는 SPA soft-navigation을 넘어 재-resolve 못 함. 봉합: **탐색 자체를 Playwright locator로 이관.** 세부:
+> 슬라이스 §0.2.12. **라이브 실행 없음.**
+
+- **SPA-안정 탐색(`resolveFixedLabelTarget`):** fixed-label 탐색을 `page.evaluate` 문자열 → **locator 기반**으로 교체 —
+  `page.locator(query,{hasText})` → `first().waitFor({state:"attached"})`(auto-wait, soft-nav 넘어 재-resolve = 실제
+  봉합) → `count()` 유일성 → `scrollIntoViewIfNeeded()`(읽기전용) → **그제서야** 감사된 value-free tag+sig IIFE로 이미
+  resolve된 요소에 tag(bounded 재시도). 매 attempt `activePage()` 재-resolve(context/frame 변경 추종). locator timeout →
+  `{count:0}`(bounded target_not_found park). **매칭 의미·anti-drift sig·value-free OUTPUT 모두 불변.**
+- **VERIFY_OPEN bounded polling(`probeSurfaceSettled`):** hydration 중 일시적 `unknown`을 첫 read에서 오분류→park하던
+  플레이크 봉합. sanitized category를 정본 landing 또는 bounded 횟수까지 폴링 후 결정; 끝내 정착 안 하면 recoverable
+  page_mismatch(fail-closed 유지). **[리뷰 H1] `credential_issuance`를 정본 성공 landing으로 수용** — existing 앱 상세는
+  발급된 ID/Secret을 read-only로 보여 분류기가 `app_detail`이 아닌 `credential_issuance`로 분류(read-only>editable);
+  엔진이 `app_detail`만 받으면 existing-app dead-end → 둘 다 수용(하류 fail-closed). **[리뷰 H1] 폴당 15초 settle 스톨
+  제거**(최초 1회 settle → 이후 경량 `readSurface` 재읽기). 세션이 `probeSurfaceSettled ?? probeSurface` 사용.
+- **공식 재사용 live-proof CLI(`src/cli/issuance-live-proof.ts`):** 스크래치패드 `issuance-*-runner.mjs`를 커밋된 게이트
+  브리지-클라이언트 CLI로 정리 — 브라우저 드라이버 아님, 열린 `/bridge/ws`에 붙어 **START_RUN + '다음'만** 전송, sanitized
+  프레임만 출력, **명시적 sentinel당 '다음' 1회(auto-recheck 없음)**, `hasLiveRunApproval` 게이트 + import-inert + 소스 가드.
+- **계약·범위:** 새 stage/status/enum/마이그레이션 **없음**; **FE 변경 없음.** collector typecheck + 전체 **6195 tests** 그린.
+  독립 적대적 리뷰 **HIGH 1(H1)·MEDIUM 1(M2: count() retry 밖) 반영, LOW 반영(L3 픽스처 정리)**; L4/L5/L6 안전 관측.
+  **라이브 실행·credential 값읽기·push/PR 없음.** api_group/credentials existing-app **오버레이 렌더링 라이브 증명은 여전히
+  미증명(PENDING, 다음 gated 승인 필요)** — 이번엔 탐색이 locator 기반이라 soft-nav에 강함.
+
+---
+
 ## 2026-08-02 부록 (7) — Existing-App Same-Page Guidance: api_group·credentials = viewport CHECKPOINT (현행)
 
 > `NAVER Existing-App Same-Page Guidance v1`. 부록(6)의 라이브 재시도에서 `api_group` locate가 settle 뒤에도

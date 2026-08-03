@@ -93,6 +93,16 @@ export interface IssuanceProbeDriver {
   probeSurface(): Promise<IssuanceSurfaceProbe>;
 
   /**
+   * Optional: the BOUNDED-POLLING probe VERIFY_OPEN uses. After the seller opens their existing app the detail
+   * SPA hydrates for a beat and can classify as a transient `unknown` before it settles to `app_detail`; this
+   * polls the sanitized page category until a DEFINITIVE landing (`app_detail` / `login`) or a bounded number of
+   * attempts, so a mid-hydration read no longer parks the run on the first transient. Returns the same sanitized
+   * probe shape as {@link probeSurface}. A driver with no real page (every scripted test driver) may omit it —
+   * the session then falls back to {@link probeSurface}, so it changes no engine decision, only the read timing.
+   */
+  probeSurfaceSettled?(): Promise<IssuanceSurfaceProbe>;
+
+  /**
    * Read the applications list structurally: the census plus a CANDIDATE entry-row count, so the engine can
    * branch existing-vs-empty. Reads counts only — never an application name, id, or any value.
    */

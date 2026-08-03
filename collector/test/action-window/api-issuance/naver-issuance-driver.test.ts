@@ -47,6 +47,9 @@ const LOGIN_CENSUS: ApiCenterStructuralCensus = { ...APP_LIST_CENSUS, passwordFi
 const APP_DETAIL_CENSUS: ApiCenterStructuralCensus = { ...APP_LIST_CENSUS, listLikeContainerCount: 0, editableTextInputCount: 1 };
 // nothing recognizable → unknown: a wrong page the seller might reach instead of the app detail.
 const UNKNOWN_CENSUS: ApiCenterStructuralCensus = { ...APP_LIST_CENSUS, listLikeContainerCount: 0 };
+// read-only fields present → credential_issuance: an EXISTING app's detail page shows its issued Application ID /
+// Secret read-only, so the classifier's precedence (read-only wins over editable) lands it here, not app_detail.
+const CREDENTIAL_CENSUS: ApiCenterStructuralCensus = { ...APP_LIST_CENSUS, listLikeContainerCount: 0, readonlyFieldCount: 1 };
 
 interface FakePageOptions {
   url?: string;
@@ -60,8 +63,39 @@ interface FakePageOptions {
    * happy landing); set to `UNKNOWN_CENSUS` / `LOGIN_CENSUS` to model a wrong page / expired session.
    */
   postOpenCensus?: ApiCenterStructuralCensus;
-  /** Throw an execution-context error on the first N fixed-label locate/tag reads (models a post-nav re-render). */
+  /**
+   * A HYDRATION sequence of censuses reported on successive reads AFTER the app is opened (last entry sticks).
+   * Models the app-detail SPA classifying as a transient `unknown` for a beat before it settles to `app_detail`,
+   * so VERIFY_OPEN's bounded polling can be proven to ride out the transient. Overrides `postOpenCensus`.
+   */
+  postOpenCensusSequence?: ApiCenterStructuralCensus[];
+  /** Throw an execution-context error on the first N fixed-label tag/sig reads (models a soft-nav mid-annotation). */
   throwLocateTimes?: number;
+  /** When true, the Playwright locator's `waitFor` always TIMES OUT (models a label that never renders → park). */
+  locatorTimeout?: boolean;
+}
+
+/** A minimal fake Playwright Locator: enough of the surface the SPA-stable resolver uses (never a click/type). */
+class FakeLocator {
+  /** How many times `waitFor` was invoked — lets a test prove the locator wait is BOUNDED. */
+  static waitForCalls = 0;
+  constructor(private readonly page: FakePage) {}
+  first(): FakeLocator {
+    return this;
+  }
+  async waitFor(_opts?: unknown): Promise<void> {
+    FakeLocator.waitForCalls += 1;
+    if (this.page.locatorTimeout) {
+      throw Object.assign(new Error("locator waitFor timeout"), { name: "TimeoutError" });
+    }
+  }
+  async count(): Promise<number> {
+    return typeof this.page.locate.count === "number" ? this.page.locate.count : 1;
+  }
+  async scrollIntoViewIfNeeded(_opts?: unknown): Promise<void> {
+    // Read-only native scroll (not a click). Recorded so a test can prove the resolver scrolled the section.
+    this.page.scripts.push("[locator] scrollIntoViewIfNeeded");
+  }
 }
 
 /** A scripted, browser-free Page: records every evaluate, returns scripted values, and spies on `click`. */
@@ -72,8 +106,12 @@ class FakePage {
   appEntryCount: number;
   observed: boolean;
   postOpenCensus: ApiCenterStructuralCensus;
+  postOpenCensusSequence: ApiCenterStructuralCensus[] | undefined;
+  locatorTimeout: boolean;
   /** Latches once the app-entry rows have been read — the seller then opens their app, so census → postOpen. */
   private opened = false;
+  /** Index into `postOpenCensusSequence` — advances per post-open census read (last entry sticks). */
+  private postOpenPoll = 0;
 
   readonly scripts: string[] = [];
   clickCalls = 0;
@@ -87,11 +125,29 @@ class FakePage {
     this.appEntryCount = o.appEntryCount ?? 0; // default = EMPTY app list → the calibrated new-app (create) path
     this.observed = o.observed ?? true;
     this.postOpenCensus = o.postOpenCensus ?? APP_DETAIL_CENSUS;
+    this.postOpenCensusSequence = o.postOpenCensusSequence;
+    this.locatorTimeout = o.locatorTimeout ?? false;
     this.throwLocateLeft = o.throwLocateTimes ?? 0;
   }
 
   url(): string {
     return this.urlValue;
+  }
+
+  /** The SPA-stable resolver's Playwright entrypoint — returns a fake Locator over this page. */
+  locator(_selector: string, _opts?: unknown): FakeLocator {
+    return new FakeLocator(this);
+  }
+
+  /** The census reported after the app is opened — a hydration sequence if scripted, else the single postOpen. */
+  private postOpenCensusRead(): ApiCenterStructuralCensus {
+    const seq = this.postOpenCensusSequence;
+    if (seq && seq.length > 0) {
+      const c = seq[Math.min(this.postOpenPoll, seq.length - 1)]!;
+      this.postOpenPoll += 1;
+      return c;
+    }
+    return this.postOpenCensus;
   }
 
   async evaluate(fnOrStr: unknown, _arg?: unknown): Promise<unknown> {
@@ -102,7 +158,7 @@ class FakePage {
     if (typeof fnOrStr !== "string") return undefined; // overlay/observer function-form → no-op
     // Once the applications list has been read, the seller opens their app → the surface becomes the detail page
     // (or a scripted wrong page). This is what the open_app navigation observe + VERIFY_OPEN re-probe read.
-    if (s.includes("passwordFieldPresent")) return this.opened ? this.postOpenCensus : this.census; // census
+    if (s.includes("passwordFieldPresent")) return this.opened ? this.postOpenCensusRead() : this.census; // census
     if (s.includes("issuance-appcount")) {
       this.opened = true;
       return this.appEntryCount;
@@ -184,6 +240,8 @@ function build(o: BuildOptions = {}) {
   const engine = new IssuanceEngine({ runId: RUN_ID, channelCode: "naver" }, { clock: makeIssuanceClock() });
   const driver = new NaverIssuanceDriver(asPage(page), {
     observeTimeoutMs: o.observeTimeoutMs ?? 50,
+    inpageRetryMs: 0,
+    verifyPollMs: 0,
     ...(o.context ? { context: o.context } : {}),
   });
   const session = new IssuanceGuidanceSession(engine, driver, io.transport, { rearmDelayMs: 1 });
@@ -336,6 +394,23 @@ describe("NaverIssuanceDriver — the EXISTING-app branch (open_app = navigation
     expect(page.clickCalls).toBe(0);
   });
 
+  it("COMPLETES when the existing-app detail page classifies as credential_issuance (issued keys shown read-only)", async () => {
+    // The seller opens their EXISTING app; its detail page already shows the issued Application ID/Secret read-only,
+    // so the shared classifier lands it on `credential_issuance` (read-only wins over the editable app_detail
+    // signal). VERIFY_OPEN must accept that as the app-detail landing — rejecting it would dead-end exactly the
+    // existing-app seller this path serves — then reuse api_group/credentials to COMPLETE.
+    const { io, engine, session } = build({ appEntryCount: 1, postOpenCensus: CREDENTIAL_CENSUS });
+    startRun(io);
+    await session.whenSettled();
+    await pressNextToComplete(io, engine, session);
+
+    expect(engine.currentStage()).toBe("guidance_complete");
+    expect(io.lastView()?.status).toBe("COMPLETED");
+    expect(io.events().map((e) => e.type)).not.toContain("RUN_FAILED");
+    const step2 = io.views().find((v) => v.currentStep?.stepNumber === 2)?.currentStep;
+    expect(step2?.copyParams?.targetKind).toBe("open_app");
+  });
+
   it("parks recoverably on page_mismatch when the seller lands on the WRONG page (not app_detail)", async () => {
     // The seller navigates off the applications list but not to the app detail (postOpenCensus = unknown). The
     // VERIFY_OPEN re-probe finds a non-detail page → recoverable page_mismatch, and api_group is never reached.
@@ -459,5 +534,54 @@ describe("NaverIssuanceDriver — bounded in-page retry on an execution-context 
     await expect(driver.locateTarget("api_group")).rejects.toThrow();
     // Bounded: MAX_INPAGE_RETRIES(2) + 1 = 3 attempts, never more.
     expect(page.scripts.filter((s) => s.includes("issuance-fixed-label")).length).toBe(3);
+  });
+
+  it("a locator that never resolves the label TIMES OUT to a bounded target_not_found (count 0), no infinite wait", async () => {
+    // The SPA-stable resolution is Playwright-locator based: when the fixed label never renders, the locator's
+    // bounded `waitFor` TIMES OUT and the driver returns `{ count: 0 }` (→ engine parks target_not_found,
+    // recoverable) rather than running the audited `.evaluate` blind or waiting forever.
+    FakeLocator.waitForCalls = 0;
+    const page = new FakePage({ locatorTimeout: true });
+    const driver = new NaverIssuanceDriver(asPage(page), { inpageRetryMs: 0 });
+    const res = await driver.locateTarget("api_group");
+    expect(res).toEqual({ count: 0 });
+    // A timeout is a bounded miss, returned on the FIRST attempt — the resolver does not retry a timeout.
+    expect(FakeLocator.waitForCalls).toBe(1);
+    // The audited fixed-label `.evaluate` never ran (the locator gated it): resolution stayed off `.evaluate`.
+    expect(page.scripts.some((s) => s.includes("issuance-fixed-label"))).toBe(false);
+  });
+});
+
+describe("NaverIssuanceDriver — VERIFY_OPEN rides out a mid-hydration unknown (bounded polling)", () => {
+  it("completes step 2 when the app-detail SPA hydrates unknown → unknown → app_detail (no premature park)", async () => {
+    // The seller opens their existing app; the detail SPA classifies as a transient `unknown` for two reads before
+    // it settles to `app_detail`. The old single-read VERIFY would have parked page_mismatch on the first unknown;
+    // the bounded-polling probe rides it out and step 2 completes, then "다음" walks the checkpoints to COMPLETED.
+    const { io, engine, session } = build({
+      appEntryCount: 1,
+      postOpenCensusSequence: [UNKNOWN_CENSUS, UNKNOWN_CENSUS, APP_DETAIL_CENSUS],
+    });
+    startRun(io);
+    await session.whenSettled();
+    await pressNextToComplete(io, engine, session);
+
+    expect(engine.currentStage()).toBe("guidance_complete");
+    expect(io.lastView()?.status).toBe("COMPLETED");
+    // It did NOT dead-end on the transient unknown: no RUN_FAILED, and step 2 (open) did complete.
+    expect(io.events().map((e) => e.type)).not.toContain("RUN_FAILED");
+    const step2 = io.views().find((v) => v.currentStep?.stepNumber === 2)?.currentStep;
+    expect(step2?.copyParams?.targetKind).toBe("open_app");
+  });
+
+  it("still parks recoverably when the landing NEVER settles to app_detail (stable wrong page)", async () => {
+    // A wrong page that stays `unknown` for the whole bounded window must still park page_mismatch (fail-closed) —
+    // the polling adds latency, never a false pass. `postOpenCensus` (single stable unknown) drives every poll.
+    const { io, engine, session } = build({ appEntryCount: 1, postOpenCensus: UNKNOWN_CENSUS });
+    startRun(io);
+    await session.whenSettled();
+
+    expect(engine.currentStage()).toBe("page_mismatch");
+    expect(io.lastView()?.blocker).toEqual({ code: "UI_DRIFT", recoverable: true });
+    expect(io.events().map((e) => e.type)).not.toContain("RUN_FAILED");
   });
 });

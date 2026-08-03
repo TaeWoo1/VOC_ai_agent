@@ -105,6 +105,9 @@ export class IssuanceFixtureDriver implements IssuanceProbeDriver {
     if (this.openedApp) return this.script.openAppLanding ?? DEFAULT_APP_DETAIL_LANDING;
     return this.script.probe ?? DEFAULT_APP_LIST_PROBE;
   }
+  // No `probeSurfaceSettled` override: the fixture models one landing per open, and the real bounded polling
+  // (transient-hydration ride-out) is a live-driver timing concern proven against the FakePage in
+  // `naver-issuance-driver.test.ts`. The session falls back to `probeSurface` here (interface method is optional).
 
   async readApplications(): Promise<ApplicationsRead> {
     this.calls.push("readApplications");

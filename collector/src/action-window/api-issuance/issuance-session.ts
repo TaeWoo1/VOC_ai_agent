@@ -162,7 +162,9 @@ export class IssuanceGuidanceSession {
         // The seller opened their existing app (a navigation the driver observed). Re-read the sanitized page
         // category and let the engine confirm it is app_detail before reusing the api_group highlight — a wrong
         // page / multiple transitions parks recoverably rather than highlighting on a page with no api_group.
-        const probe = await this.driver.probeSurface();
+        // BOUNDED POLLING: the app-detail SPA can classify as a transient `unknown` mid-hydration, so use the
+        // driver's settled probe (poll until app_detail / login / bounded) rather than failing on the first read.
+        const probe = await (this.driver.probeSurfaceSettled?.() ?? this.driver.probeSurface());
         const next = this.engine.onOpenAppVerified(probe);
         this.publishState();
         return this.drive(next);

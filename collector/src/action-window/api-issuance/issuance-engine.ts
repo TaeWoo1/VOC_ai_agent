@@ -314,10 +314,16 @@ export class IssuanceEngine {
   }
 
   /**
-   * Verify the seller reached the app DETAIL page after opening their existing application (the `VERIFY_OPEN`
-   * re-probe). Only meaningful while still resting on the `open_app` (`guiding_app_detail`) barrier.
-   *   - `app_detail` → step 2 (open the app) is truly done: emit the observation + completion and reuse the
-   *     calibrated `api_group` highlight.
+   * Verify the seller reached their application's DETAIL page after opening their existing application (the
+   * `VERIFY_OPEN` re-probe). Only meaningful while still resting on the `open_app` (`guiding_app_detail`) barrier.
+   *   - `app_detail` OR `credential_issuance` → the seller is on their application's own detail/credentials page:
+   *     step 2 (open the app) is done — emit the observation + completion and reuse the calibrated `api_group`
+   *     highlight. Both categories are the SAME surface: an EXISTING app's detail page already shows its issued
+   *     Application ID / Secret read-only, and the shared classifier's precedence (`observe-api-center`) then
+   *     classifies that page as `credential_issuance` (read-only fields win over the editable-input `app_detail`
+   *     signal). Rejecting `credential_issuance` would dead-end exactly the existing-app seller this path serves;
+   *     accepting it stays fail-closed downstream — if the page is not really the detail page, the `api_group`
+   *     fixed-label locate finds nothing and parks `target_not_found` recoverably.
    *   - `login` → the session expired mid-open; park recoverably on `waiting_login`.
    *   - anything else (still on the list, a wrong page, or a multi-hop landing) → recoverable `page_mismatch`.
    */
@@ -327,7 +333,7 @@ export class IssuanceEngine {
     if (!probe.ok || probe.blockerCode === "LOGIN_REQUIRED" || probe.pageCategory === "login") {
       return this.park("waiting_login", "LOGIN_REQUIRED");
     }
-    if (probe.pageCategory === "app_detail") {
+    if (probe.pageCategory === "app_detail" || probe.pageCategory === "credential_issuance") {
       this.emit("USER_ACTION_OBSERVED", { stepId: this.stepId(), observed: true });
       this.completedSteps = this.activeStepIndex; // step 2 (open the existing application)
       this.emit("STEP_COMPLETED", { stepId: this.stepId(), stepStatus: "COMPLETED" });

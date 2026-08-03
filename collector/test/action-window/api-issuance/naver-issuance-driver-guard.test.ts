@@ -16,6 +16,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const DRIVER = resolve(HERE, "../../../src/action-window/naver-issuance-driver.ts");
 const CLI = resolve(HERE, "../../../src/cli/run-api-issuance-live-naver.ts");
 const PROBE_CLI = resolve(HERE, "../../../src/cli/probe-issuance-selectors.ts");
+const LIVE_PROOF_CLI = resolve(HERE, "../../../src/cli/issuance-live-proof.ts");
 
 /** Strip block comments and comment/JSDoc lines so prose mentioning a forbidden token never trips. */
 function codeOnly(path: string): string {
@@ -182,6 +183,44 @@ describe("probe-issuance-selectors CLI — source guard (gated, read-only, no cl
   it("is gated on the explicit live-run approval flag and fails closed on a bad URL before launch", () => {
     expect(code).toContain("hasLiveRunApproval");
     expect(code).toContain("screenApiCenterUrl");
+    expect(code).toContain("import.meta.url === pathToFileURL(process.argv[1]).href");
+  });
+});
+
+describe("issuance-live-proof CLI — source guard (gated bridge client, no marketplace action, no value read)", () => {
+  const code = codeOnly(LIVE_PROOF_CLI);
+
+  it.each(NO_ACTION_TOKENS)("never contains %s", (token) => {
+    expect(code).not.toContain(token);
+  });
+
+  it.each(NO_VALUE_READ_TOKENS)("never reads a field value / clipboard / screenshot (%s)", (token) => {
+    expect(code).not.toContain(token);
+  });
+
+  it("is not a browser driver at all — it never navigates a page (no .goto / no Playwright page)", () => {
+    expect(code).not.toContain(".goto(");
+    expect(code).not.toContain("launchNaverContext");
+    expect(code).not.toContain("NaverIssuanceDriver");
+  });
+
+  it("sends ONLY the two benign guidance commands — START_RUN and REQUEST_STEP_RECHECK — never any other", () => {
+    expect(code).toContain("START_RUN");
+    expect(code).toContain("REQUEST_STEP_RECHECK");
+    // No mutating/marketplace command types leak in from a copy-paste of another client.
+    for (const forbidden of ["REPLY", "SUBMIT", "EXPORT", "DOWNLOAD", "AUTOFILL"]) {
+      expect(code).not.toContain(forbidden);
+    }
+  });
+
+  it("advances only on an EXPLICIT operator sentinel — there is no timer-driven auto-recheck", () => {
+    // The only REQUEST_STEP_RECHECK send is `sendNext`, and it fires solely from the sentinel-file poll.
+    expect(code).toContain("ISSUANCE_NEXT_SIGNAL");
+    expect(code).toContain("sendNext");
+  });
+
+  it("is gated on the explicit live-run approval flag and is inert on import (main only when invoked directly)", () => {
+    expect(code).toContain("hasLiveRunApproval");
     expect(code).toContain("import.meta.url === pathToFileURL(process.argv[1]).href");
   });
 });
