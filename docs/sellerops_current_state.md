@@ -12,6 +12,26 @@
 
 ---
 
+## 2026-08-04 부록 (17) — NAVER Connection Lifecycle State v1: 실제 test·sync 결과로 `connection_status` 전이 (backend, offline)
+
+> 튜토리얼 감사(부록16 / 슬라이스 §0.2.21)에서 최대 공백으로 지목된 **§8 NAVER 계정레벨 상태머신 부재**(`connection_status` PENDING 고착)를
+> 종결. backend만, **마이그레이션·contract·FE·issuance·bridge 변경 없음.** live 없음. 세부: 슬라이스 §0.2.22.
+
+- **두-신호 게이트**: NAVER는 CONNECTED를 **명시적 credential test 성공 AND 첫 `ORDER_SUMMARY` sync 수집** 둘 다 확인돼야만 얻는다(어느 한쪽만으로는 안 됨). Cafe24(단일 OAuth 콜백→CONNECTED)와 달라 별도 라이프사이클.
+- **새 클래스 `NaverConnectionLifecycle`**(`connector/naver/onboarding/`)이 `seller_accounts.connection_status`의 유일 전이 authority. 세 이벤트: `onCredentialTestVerified` / `onOrderSyncCollected` / `onCredentialRejected`.
+  - test 성공 → PENDING **→ PREPARING**("검증됨·첫 주문 sync 대기" 기록; **절대 CONNECTED 직행 아님**).
+  - 수집(SUCCESS|PARTIAL) `ORDER_SUMMARY` sync → **PREPARING이던 계정만** CONNECTED. **PENDING(미검증)은 그대로 — sync 단독은 절대 CONNECTED 안 됨.**
+  - credential이 **명확히 invalid/unauthorized로 분류**(verify `INVALID_CREDENTIAL`)될 때만 → **RECONNECT_REQUIRED**. timeout·network·5xx·rate-limit·일반 sync FAILED = **상태 무변경**.
+- **불변식(독립 리뷰 H1 반영):** CONNECTED = "**검증된 credential 상태에서 주문 sync가 수집됨**". 두 신호는 순서로 묶여 — 검증이 PREPARING을 기록하고 **그 뒤 수집된** sync가 확정한다. test는 **과거 sync로 소급 연결하지 않음**(폐기된 credential의 stale sync가 갓 검증한 credential을 보증 금지). **reconnect도 PREPARING으로 재무장**해 새 sync를 다시 증명. 라이프사이클은 SyncJob 이력을 안 읽음("수집 vs FAILED" 판정은 `SyncRunExecutor.runPages`의 `collected` 가드가 내리고 그때만 훅 호출).
+- **멱등·CONNECTED 불흔들**: 중복 성공 이벤트가 CONNECTED를 흔들지 않음. 각 전이는 `SellerAccountRepository.findByIdForUpdate`(PESSIMISTIC_WRITE)로 계정 행을 잠그고 자체 트랜잭션에서 재평가 → 동시 test/sync 이벤트 직렬화·수렴. 목표 상태가 현재와 같으면 저장 안 함.
+- **scope·안전**: NAVER API 계정 한정(다른 채널·file-upload·cross-org = no-op; Cafe24 라이프사이클 불변). `connection_status`만 기록 — credential·secret·timestamp·provider·PII 무판독/무기록.
+- **통합 지점**: `CollectControlService.testConnection`(verify SUCCESS→verified, `INVALID_CREDENTIAL`→rejected; transient는 호출 안 함) + `SyncRunExecutor.runPages`(updateHealth 뒤, 수집된 NAVER `ORDER_SUMMARY`만 `onOrderSyncCollected`). `CollectControlService`의 stale "verifier 미구현/unreachable" 주석 de-stale.
+- **독립 리뷰**: **H1(HIGH)** reconnect+stale sync로 test 단독 CONNECTED → 이력 읽기 제거로 **수정**(회귀 테스트 추가). **M1(MEDIUM)** PREPARING="준비 중" 카드 라벨 → FE는 PREPARING을 actionable(`manage`, 미비활성)로 렌더해 **기능 차단 없음**(코드 확인); 라벨 정밀화는 FE 워크스트림 소관, 본 단위는 FE 무변경.
+- **게이트**: backend **1895 tests / 0 fail / 0 error / 6 skip**(NaverConnectionLifecycleTest 11 + verifier 통합 4 + SyncRunExecutor 배선 3 신규). 마이그레이션 0.
+- **PREPARING 선택 근거**: sync가 쓰지 않는 유일 컬럼이 `connection_status`이고, health 테이블은 sync가 state/last_success_at를 덮어써 test-성공을 별도로 담을 수 없음 → 마이그레이션 없이 test 성공을 durable히 기록하는 유일한 자리. `NaverCapabilityEvaluator`는 `connection_status`를 통과만 시킬 뿐 capability 주장에 쓰지 않아 안전(FE 변경 불필요).
+
+---
+
 ## 2026-08-04 부록 (16, 정정) — `Existing-App API-Center Guidance Subflow`만 LIVE-PROVEN — 상위 `NAVER First Connection Tutorial v1`은 OPEN ⚠️
 
 > **정정:** 이전 판은 이를 "NAVER Existing-App Phase B **CLOSED**"로 적어 **튜토리얼 전체 종결처럼** 읽혔다(과대 주장). 실제 라이브 증명은

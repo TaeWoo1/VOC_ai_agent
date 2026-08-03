@@ -1,12 +1,26 @@
 package com.sellerops.selleraccount;
 
+import jakarta.persistence.LockModeType;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface SellerAccountRepository extends JpaRepository<SellerAccount, UUID> {
     List<SellerAccount> findAllByOrgId(UUID orgId);
+
+    /**
+     * Load a seller-account row under a {@code PESSIMISTIC_WRITE} lock (SELECT … FOR UPDATE) — the
+     * serialization point for the NAVER connection lifecycle. Concurrent test / order-sync events for
+     * one account take the lock one at a time, so the PENDING → PREPARING → CONNECTED transition is
+     * evaluated on a consistent row and converges idempotently instead of racing into a lost update.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select a from SellerAccount a where a.id = :id")
+    Optional<SellerAccount> findByIdForUpdate(@Param("id") UUID id);
 
     Optional<SellerAccount> findByOrgIdAndChannelId(UUID orgId, UUID channelId);
 
