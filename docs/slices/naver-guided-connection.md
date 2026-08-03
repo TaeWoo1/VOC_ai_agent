@@ -751,6 +751,24 @@ bridge·runner 불변, 제어 흐름 불변**(관측 seam은 동일 error를 그
   `aw_issuance_mount_substage_fault`의 `subStage`+(`UNKNOWN`이면)`message`로 **mount 내부 정확한 라인·원인 확정**. **수정은 그 다음
   단위** — 자동클릭·다음단계·실제 overlay 수정·push/PR 없음.
 
+**라이브 확정 결과 (2026-08-03, gated `apr-12fa19dfb4e6`/`wt-e40f5a50b070`/`43c56ff`, 실제 NAVER 존재-앱 상세, 소진·클린):**
+- **mount 내부 실패 하위단계 = `position_overlay` (확정).** 자연 존재-앱 흐름(조작자 app_list 착지 → START_RUN step1 app_list✓ →
+  step2 open_app 관찰-무장 → 조작자가 앱 열기 → app_detail 관찰·검증 → step3 api_group highlight)으로 api_group mount 1회 구동.
+  `aw_issuance_stage_ok{api_group, tagged:false, mounted:false}`(locate 성공) 직후 `aw_issuance_mount_substage_fault
+  {target:"api_group", subStage:"position_overlay", reason:"SYMBOL_NOT_DEFINED", errorName:"Error"}`가 **3/3 내부 재시도 모두
+  결정적**(highlight 1회 호출의 bounded retry — 별도 재구동 아님) → recoverable park. **mount의 find/remove/reveal/create/inject/
+  append 하위단계는 전부 통과, 오직 마지막 `position_overlay`(최초 `reposition()`+scroll/resize 리스너 배선)에서 throw.**
+- **fingerprint = `SYMBOL_NOT_DEFINED` (확정) → 부록12의 `reason=OTHER`를 정밀화.** "… is not defined" 계열 = 심볼 미정의 참조.
+  이 단위의 신설 fingerprint가 이를 잡아, 이전 coarse `classifyFaultReason`(SYMBOL 버킷 없음 → OTHER로 낙하)의 모호함을 해소. **인식된
+  fingerprint이므로(UNKNOWN 아님) sanitized message는 수집하지 않음**(계약·조작자 지시대로).
+- **강한 가설(다음 FIX 단위에서 확정/수정 대상 — 아직 사실로 기록 안 함)**: `position_overlay`는 IIFE 유일의 named 함수식
+  `const reposition = () => {…}`을 정의·사용(`reposition()`, `addEventListener("scroll", reposition, …)`)하는 지점. `tsx`/esbuild(keepNames)가
+  named 함수를 `__name(() => {…}, "reposition")`로 감싸는데, 페이지 실행 컨텍스트엔 `__name`이 없음 → `ReferenceError: __name is not
+  defined`(Playwright가 generic Error로 표면화). 즉 **function-form `page.evaluate`에 esbuild `__name` 심이 새는 것** — 드라이버가
+  `evalStr`(string-evaluate)로 회피해온 바로 그 계열이나 `mountOverlay`는 function-form을 씀.
+- **다음 단위 = `Overlay Mount Fix v1`**(수정): mount evaluate가 esbuild 심을 참조하지 않게(후보: mountOverlay를 string-evaluate로,
+  또는 named 내부 클로저 제거, 또는 `__name` no-op 주입) — selector·상태기계·bridge·runner 불변. **이 단위는 식별까지**; 수정은 다음.
+
 ---
 
 ## 0. v1 비준 (Ratification 2026-07-19) — 오프라인 구현 착수
