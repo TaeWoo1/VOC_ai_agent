@@ -848,6 +848,27 @@ selector 앵커·상태기계·bridge·runner·telemetry 불변.**
   스크린샷·클립보드 **미판독**, return·step5·추가 "다음" 없이 즉시 teardown, :47615 free, 코드 미변경, 그랜트 소진.
 - **상태**: **오프라인/실-chromium/라이브 모두 완료 — 커버리지 목표 라이브 증명.** 부록14의 credentials 행-커버리지 갭 **종결**. push/PR 없음.
 
+### 0.2.20 — **`NAVER Existing-App Phase B` 완료 종결 (CLOSED 2026-08-04)** ✅
+
+기존-앱 가이드 하이라이트 경로(existing_app: open_app → api_group → credentials)의 Phase B(하이라이트 렌더 + 관찰 증명)를 **완료 상태로 종결**한다.
+아래는 종결 시점 정본 확정 사실(추가 코드·live·push/PR 없이 상태 확인만):
+
+- **브랜치/트리**: `feat/naver-api-issuance-tutorial-reliability-v1`, HEAD `a17d1cc`, **working tree clean**(추적 대상 없음; `node_modules/`만 미추적).
+- **구현 commit `048c1b8`**(credentials 태그 `<th>`→`<tr>` 승격) + **live 결과 docs commit `a17d1cc`**(라이브 커버리지 증명). 둘 다 로컬(NOT pushed/PR'd).
+- **게이트 최종**: collector typecheck green; 전체 **6312 passed / 138 skip / 0 fail**.
+- **existing-app 경로 = LIVE-PROVEN**: 이 blocker 계보 전체가 라이브로 닫힘 — `NAVER Element Calibration`(앵커 건전) → `Overlay Root-Cause
+  Isolation`(stage=mount) → `Overlay Mount Fault Identification`(position_overlay/SYMBOL_NOT_DEFINED) → `Overlay Mount Fix`(esbuild `__name`
+  심; array-index 수정, 라이브 재검증 #1 api_group + #2 credentials까지) → `Credentials Row Highlight`(행 `<tr>` 승격, 라이브 커버리지 증명).
+  open_app(관찰 안내)·api_group·credentials 세 체크포인트 모두 실제 NAVER 기존-앱에서 overlay 렌더·`mounted:true`·mount fault 전무.
+- **new-app 경로 = PENDING (blocker 아님)**: create_app 하이라이트의 라이브 증명은 **empty-app 테스트 스토어 부재**로 미실행(기존 스토어에는 이미
+  앱이 있어 "애플리케이션 등록" 신규-앱 진입 화면을 라이브로 태그·관찰할 수 없음). create_app 셀렉터는 `live_confirmed`(matchCount=1 2회) +
+  `SELECTORS_CALIBRATED` 상태이며, mount 경로는 api_group/credentials와 **동일 코드**로 이미 라이브 증명됨 → 잔여는 **환경(빈 스토어) 확보뿐**,
+  코드 공백 아님. empty-app 스토어 확보 시 별도 단일-사용 승인으로 1회 걸으면 종결.
+- **남은 blocker 없음**: existing-app Phase B의 렌더/마운트/커버리지 결함은 전부 라이브로 종결. new-app은 코드가 아니라 테스트 환경 대기.
+
+> **RULED — `NAVER Existing-App Phase B` CLOSED (existing-app live-proven; new-app pending empty-app store, not a blocker).** 다음 후보는
+> 별도 지시로 결정(예: new-app empty-store 라이브 보정, 또는 v1 통합). 본 종결은 **상태 확정 문서**이며 추가 코드/live/push/PR을 포함하지 않는다.
+
 ---
 
 ## 0. v1 비준 (Ratification 2026-07-19) — 오프라인 구현 착수

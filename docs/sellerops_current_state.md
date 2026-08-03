@@ -12,7 +12,20 @@
 
 ---
 
-## 2026-08-04 부록 (15) — NAVER Credentials Row Highlight v1: credentials 하이라이트를 라벨 `<th>` → 부모 `<tr>`로 승격 (오프라인+실chromium 완료, 라이브 대기)
+## 2026-08-04 부록 (16) — NAVER Existing-App Phase B 완료 종결 (CLOSED) ✅
+
+> 기존-앱 가이드 하이라이트 경로(open_app → api_group → credentials)의 Phase B를 **완료 종결**. 세부: 슬라이스 §0.2.20. 추가 코드·live·push/PR 없이 상태 확정만.
+
+- **브랜치/트리**: `feat/naver-api-issuance-tutorial-reliability-v1`, HEAD `a17d1cc`, **working tree clean**(`node_modules/`만 미추적).
+- **구현 `048c1b8`**(credentials 태그 `<th>`→`<tr>` 승격) + **live 결과 docs `a17d1cc`**. 둘 다 로컬(NOT pushed/PR'd).
+- **게이트 최종**: collector typecheck green; 전체 **6312 passed / 138 skip / 0 fail**.
+- **existing-app = LIVE-PROVEN**: Calibration→Root-Cause Isolation→Fault Identification(position_overlay/SYMBOL_NOT_DEFINED)→Mount Fix(`__name` 심, array-index; api_group+credentials 라이브 재검증)→Credentials Row Highlight(행 `<tr>` 승격 라이브 커버리지) 전 계보 종결. open_app·api_group·credentials 세 체크포인트 모두 실 NAVER 기존-앱에서 overlay 렌더·`mounted:true`·mount fault 전무.
+- **new-app = PENDING (blocker 아님)**: create_app 하이라이트 라이브 증명은 **empty-app 테스트 스토어 부재**로만 미실행. 셀렉터 `live_confirmed`+`SELECTORS_CALIBRATED`, mount 경로는 api_group/credentials와 동일 코드로 이미 라이브 증명 → 잔여는 환경(빈 스토어) 확보뿐, 코드 공백 아님.
+- **남은 blocker 없음.** 다음 후보는 별도 지시(예: new-app empty-store 라이브 보정, 또는 v1 통합).
+
+---
+
+## 2026-08-04 부록 (15) — NAVER Credentials Row Highlight v1: credentials 하이라이트를 라벨 `<th>` → 부모 `<tr>`로 승격 (오프라인+실chromium+라이브 커버리지 증명 완료)
 
 > 부록(14) 라이브 재검증 #2가 확정한 COVERAGE 갭(credentials overlay가 `<th>` "애플리케이션 ID" 라벨 셀만 감싸고 값 `<td>` 포함 행 전체 아님)을 정본 구현. 세부: 슬라이스 §0.2.19. **collector 3파일만; 백엔드·FE·selector 앵커·상태기계·bridge·runner·telemetry 불변.**
 
