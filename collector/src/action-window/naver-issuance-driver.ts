@@ -45,7 +45,15 @@
  */
 import type { Page } from "playwright";
 import { log } from "../log";
-import { mountOverlay, unmountOverlay, overlayMounted } from "./overlay";
+import {
+  mountOverlay,
+  unmountOverlay,
+  overlayMounted,
+  readMountSubStage,
+  fingerprintMountFault,
+  sanitizeMountMessage,
+  type MountSubStage,
+} from "./overlay";
 import { disarmObserver } from "./observer";
 import {
   EXTRACT_API_CENTER_CENSUS,
@@ -567,15 +575,42 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
     return { count: res.count, ...(res.count === 1 && res.sig ? { sig: res.sig } : {}) };
   }
 
-  /** Mount the reused read-only step overlay for one target's operator-legible dev badge. Never clicks/types. */
-  private mountStepOverlay(page: Page, target: IssuanceTarget): Promise<void> {
-    return mountOverlay(page, {
-      stepNumber: OVERLAY_STEP[target],
-      totalSteps: ISSUANCE_TOTAL_STEPS,
-      copyKey: `actionWindow.issuance.step.${target}`,
-      label: OPERATOR_STEP_LABELS[target],
-      guidanceEnabled: this.opts.guidanceEnabled ?? true,
-    });
+  /**
+   * Mount the reused read-only step overlay for one target's operator-legible dev badge. Never clicks/types.
+   *
+   * OBSERVATION SEAM (Overlay Mount Fault Identification): the `Overlay Root-Cause Isolation` unit pinned the
+   * live highlight fault to the `mount` stage with `reason=OTHER`, but not to WHICH internal step of the mount.
+   * So on a mount throw we localize it — read the in-page sub-stage breadcrumb ({@link readMountSubStage}) and
+   * CODE-FINGERPRINT the error ({@link fingerprintMountFault}) — log the sanitized `{subStage, reason, errorName}`
+   * (adding a scrubbed `message` ONLY when the fingerprint is `UNKNOWN`), then RE-THROW the SAME error. Control
+   * flow is byte-identical: the identical error still propagates, so `resolveFixedLabelTarget`'s `mount`-stage
+   * catch and every downstream recovery path behave exactly as before — this only observes on the way out.
+   */
+  private async mountStepOverlay(page: Page, target: IssuanceTarget): Promise<void> {
+    try {
+      await mountOverlay(page, {
+        stepNumber: OVERLAY_STEP[target],
+        totalSteps: ISSUANCE_TOTAL_STEPS,
+        copyKey: `actionWindow.issuance.step.${target}`,
+        label: OPERATOR_STEP_LABELS[target],
+        guidanceEnabled: this.opts.guidanceEnabled ?? true,
+      });
+    } catch (e) {
+      // Localize the mount fault to a sub-stage + fixed reason (both sanitized) — the evidence the next unit needs.
+      // The breadcrumb read is best-effort: if the very fault destroyed the context, it reads back `unknown`.
+      const subStage = await readMountSubStage(page).catch(() => "unknown" as MountSubStage);
+      const reason = fingerprintMountFault(e);
+      log("aw_issuance_mount_substage_fault", {
+        target,
+        subStage,
+        reason,
+        errorName: errName(e),
+        // A scrubbed FRAMEWORK message (never page content) ONLY for a cause with no known fingerprint — the exact
+        // case the one gated live diagnostic must reveal. A recognized cause rides out as the fixed enum alone.
+        ...(reason === "UNKNOWN" ? { message: sanitizeMountMessage(e) } : {}),
+      });
+      throw e; // re-throw the SAME error — control flow unchanged for every caller
+    }
   }
 
   async clearHighlight(): Promise<void> {

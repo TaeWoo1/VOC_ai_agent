@@ -12,7 +12,19 @@
 
 ---
 
-## 2026-08-03 부록 (12) — Overlay Root-Cause Isolation v1: highlight 경로 단계별 sanitized stage telemetry (현행 진단 단위, 오프라인 완성/라이브 대기)
+## 2026-08-03 부록 (13) — Overlay Mount Fault Identification v1: mount 내부 하위단계 + 코드기반 fingerprint (현행 진단 단위, 오프라인 완성/라이브 대기)
+
+> `Overlay Mount Fault Identification v1`. 부록(12)이 실패 단계를 `mount`/`reason=OTHER`로 확정했으나 **mount 내부 어느 라인**인지 미확정으로 남긴 공백을 좁힌다. **아직 overlay 동작 미수정**(수정은 다음 단위). `mountOverlay()` 내부를 하위단계로 분리, mount가 던지는 Error를 **먼저 코드기반 fingerprint로 분류**, **UNKNOWN일 때만** 진단 전용 sanitized message 부착. 세부: 슬라이스 §0.2.17. **상태 기계·selector·scroll·tag·bridge·runner 불변, 제어 흐름 불변**(관측 seam은 동일 error re-throw).
+
+- **mount 하위단계**(`overlay.ts` in-page IIFE `__aw_mount_stage__` breadcrumb, **엄격 코드순·단조**): `find_tagged_target|remove_previous|reveal_target|create_overlay|inject_style|append_overlay|position_overlay|unknown`. 성공/no-op 시 breadcrumb **`delete`** → 이후 mount가 본문 실행 전 reject되면 stale 대신 `unknown`.
+- **고정 fingerprint**(`fingerprintMountFault`, 순수, 원문 무유출): `CONTEXT_DESTROYED|FRAME_DETACHED|TARGET_CLOSED|SYMBOL_NOT_DEFINED|NULL_PROPERTY_ACCESS|NOT_A_FUNCTION|DOM_EXCEPTION|TYPE_ERROR|UNKNOWN`. **UNKNOWN일 때만** `sanitizeMountMessage`(URL·따옴표구간·숫자런 제거, 120자 캡; 프레임워크 문자열=페이지콘텐츠 아님).
+- **관측 seam**(제어흐름 불변): 드라이버 `mountStepOverlay`가 mount throw catch → `readMountSubStage`(best-effort→`unknown`)+fingerprint → `aw_issuance_mount_substage_fault{target,subStage,reason,errorName[,message(UNKNOWN만)]}` → **동일 error 그대로 re-throw**. 상위 `stage:"mount"` catch·recovery byte-불변.
+- **테스트(전부 offline)**: 드라이버 5 + 순수 헬퍼(모든 fingerprint 분기·null modern/legacy·DOMException-by-name·scrub·길이캡). collector typecheck + 전체 **6303 passed**. 독립 리뷰 **HIGH·MEDIUM 없음**(초기 MEDIUM 2 = `reveal_target` 단조화 + 성공시 clear, 전부 반영; LOW 2 문서 반영).
+- **다음 = 단일 gated 라이브 진단 1회**(fresh PREPARED 준비 완료): 존재-앱 상세 api_group mount 1회 → `subStage`+(`UNKNOWN`이면)`message`로 **mount 내부 라인·원인 확정**. 수정은 그 다음 단위 — 자동클릭·다음단계·overlay 수정·push/PR 없음.
+
+---
+
+## 2026-08-03 부록 (12) — Overlay Root-Cause Isolation v1: highlight 경로 단계별 sanitized stage telemetry (직전 진단 단위 — 라이브 확정 완료)
 
 > `Overlay Root-Cause Isolation v1`. 부록(10) Reset의 "throw 지점 UNDETERMINED"를 **단 한 번의 gated 라이브 진단으로 정확한 실패 단계만** 확정하기 위해 driver highlight 경로에 **순수 관측** 추가. 세부: 슬라이스 §0.2.16. **상태 기계·selector·bridge·runner·overlay 로직 불변 — `naver-issuance-driver.ts` 한 파일.**
 

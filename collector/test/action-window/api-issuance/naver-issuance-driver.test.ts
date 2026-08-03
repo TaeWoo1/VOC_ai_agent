@@ -33,6 +33,8 @@ import type { LocateResult } from "../../../src/action-window/engine";
 
 const RUN_ID = "run_issuance_live01";
 const HEX16 = /^[0-9a-f]{16}$/;
+/** overlay.ts caps a sanitized mount message at 120 chars; the truncation ellipsis adds at most one. */
+const MAX_MOUNT_MESSAGE_ASSERT = 121;
 const API_CENTER_URL = "https://apicenter.commerce.naver.com/";
 
 const APP_LIST_CENSUS: ApiCenterStructuralCensus = {
@@ -89,6 +91,17 @@ interface FakePageOptions {
   /** The locator's `scrollIntoViewIfNeeded` REJECTS (best-effort scroll fault) — models a scroll that can't complete. */
   scrollThrows?: boolean;
   /**
+   * The first N api_group OVERLAY MOUNTS throw a NON-TRANSIENT generic `Error` (name "Error") carrying
+   * {@link apiGroupMountFaultMessage} — models the live `reason=OTHER` mount fault the identification unit
+   * localizes (a generic Error that is NOT a soft-nav context-destroy). The driver's mount-fault observation
+   * seam must localize it (sub-stage + fingerprint) and re-throw unchanged.
+   */
+  apiGroupMountFaultTimes?: number;
+  /** The message the non-transient api_group mount fault throws (default a truly unrecognized string). */
+  apiGroupMountFaultMessage?: string;
+  /** The sub-stage breadcrumb the in-page `readMountSubStage` probe reads back after a mount fault. */
+  mountSubStage?: string;
+  /**
    * Decouples the in-page TAG count from the locator's uniqueness count: the fixed-label tag/locate script returns
    * this result even though the locator resolved uniquely (count 1). Models real drift where the Playwright locator
    * narrows to one match but the in-page exact-label scan counts differently → the `tag`-stage non-unique path.
@@ -134,6 +147,8 @@ class FakePage {
   locatorTimeout: boolean;
   scrollThrows: boolean;
   tagResult: LocateResult | undefined;
+  apiGroupMountFaultMessage: string;
+  mountSubStage: string | undefined;
   /** Latches once the app-entry rows have been read — the seller then opens their app, so census → postOpen. */
   private opened = false;
   /** Index into `postOpenCensusSequence` — advances per post-open census read (last entry sticks). */
@@ -144,6 +159,7 @@ class FakePage {
   private throwLocateLeft: number;
   private apiGroupMountThrowLeft: number;
   private apiGroupMountNoPaintLeft: number;
+  private apiGroupMountFaultLeft: number;
   /** Whether the most recent overlay mount actually PAINTED — what the driver's `overlayMounted` verify reads. */
   private overlayPainted = false;
   private readonly closeHandlers: Array<() => void> = [];
@@ -159,9 +175,12 @@ class FakePage {
     this.locatorTimeout = o.locatorTimeout ?? false;
     this.scrollThrows = o.scrollThrows ?? false;
     this.tagResult = o.tagResult;
+    this.apiGroupMountFaultMessage = o.apiGroupMountFaultMessage ?? "boom weird mount failure";
+    this.mountSubStage = o.mountSubStage;
     this.throwLocateLeft = o.throwLocateTimes ?? 0;
     this.apiGroupMountThrowLeft = o.apiGroupMountThrowTimes ?? 0;
     this.apiGroupMountNoPaintLeft = o.apiGroupMountNoPaintTimes ?? 0;
+    this.apiGroupMountFaultLeft = o.apiGroupMountFaultTimes ?? 0;
   }
 
   url(): string {
@@ -195,10 +214,19 @@ class FakePage {
       // one carrying getElementById WITHOUT scrollIntoView/untrack. Model the api_group mount's live failure modes.
       const isMount = s.includes("scrollIntoView");
       const isOverlayVerify = s.includes("getElementById") && !s.includes("scrollIntoView") && !s.includes("untrack");
+      // The `readMountSubStage` probe is the ONE function-form evaluate that reads the mount breadcrumb global
+      // WITHOUT being the mount itself (the mount also references the global, but it carries scrollIntoView).
+      const isSubStageRead = s.includes("__aw_mount_stage__") && !isMount;
       if (isMount) {
         if (copyKey.includes("api_group") && this.apiGroupMountThrowLeft > 0) {
           this.apiGroupMountThrowLeft -= 1;
           throw new Error("Execution context was destroyed, most likely because of a navigation");
+        }
+        // A NON-TRANSIENT generic Error (name "Error", not a soft-nav message) — the live `reason=OTHER` shape the
+        // identification unit localizes. The driver must observe (sub-stage + fingerprint) and re-throw unchanged.
+        if (copyKey.includes("api_group") && this.apiGroupMountFaultLeft > 0) {
+          this.apiGroupMountFaultLeft -= 1;
+          throw new Error(this.apiGroupMountFaultMessage);
         }
         if (copyKey.includes("api_group") && this.apiGroupMountNoPaintLeft > 0) {
           this.apiGroupMountNoPaintLeft -= 1;
@@ -208,6 +236,7 @@ class FakePage {
         this.overlayPainted = true; // a real mount paints the overlay
         return undefined;
       }
+      if (isSubStageRead) return this.mountSubStage; // the driver's post-fault readMountSubStage(page) breadcrumb read
       if (isOverlayVerify) return this.overlayPainted; // the driver's post-mount overlayMounted(page) read
       return undefined; // other overlay/observer function-form → no-op
     }
@@ -807,5 +836,97 @@ describe("NaverIssuanceDriver — Overlay Root-Cause Isolation: per-stage saniti
     const nonunique = getLogSink().filter((e) => e.event === "aw_issuance_stage_nonunique");
     expect(nonunique.length).toBe(1);
     expect(nonunique[0]!.meta).toMatchObject({ target: "api_group", stage: "tag", count: 2 });
+  });
+});
+
+describe("NaverIssuanceDriver — Overlay Mount Fault Identification: sub-stage + fingerprinted mount fault", () => {
+  const substageFaults = () => getLogSink().filter((e) => e.event === "aw_issuance_mount_substage_fault");
+
+  it("localizes a generic mount fault to its sub-stage breadcrumb + a fixed fingerprint (control flow unchanged)", async () => {
+    clearLogSink();
+    // A NON-TRANSIENT generic Error whose message IS a recognized shape ("… is not defined") thrown from the
+    // append_overlay sub-stage — models the live reason=OTHER mount fault, now localizable.
+    const page = new FakePage({
+      apiGroupMountFaultTimes: 99,
+      apiGroupMountFaultMessage: "__name is not defined",
+      mountSubStage: "reveal_target",
+    });
+    const driver = new NaverIssuanceDriver(asPage(page), { inpageRetryMs: 0 });
+    await expect(driver.highlightTarget("api_group")).rejects.toThrow(); // SAME rejection as before — unchanged
+
+    const subs = substageFaults();
+    expect(subs.length).toBeGreaterThanOrEqual(1);
+    expect(subs.every((e) => e.meta.target === "api_group")).toBe(true);
+    expect(subs.every((e) => e.meta.subStage === "reveal_target")).toBe(true); // monotonic breadcrumb localized it
+    expect(subs.every((e) => e.meta.reason === "SYMBOL_NOT_DEFINED")).toBe(true); // code-fingerprinted, not "OTHER"
+    expect(subs.every((e) => e.meta.errorName === "Error")).toBe(true);
+    // A RECOGNIZED fingerprint never attaches a message — the enum alone carries the cause.
+    expect(subs.every((e) => !("message" in e.meta))).toBe(true);
+
+    // Control flow byte-unchanged: the OUTER stage telemetry still fires (stage=mount) and the run still rejects.
+    const stageFaults = getLogSink().filter((e) => e.event === "aw_issuance_stage_fault");
+    expect(stageFaults.length).toBeGreaterThanOrEqual(1);
+    expect(stageFaults.every((e) => e.meta.stage === "mount")).toBe(true);
+  });
+
+  it("attaches a SANITIZED message ONLY for an UNKNOWN cause — digits/URL/quoted spans all scrubbed", async () => {
+    clearLogSink();
+    const page = new FakePage({
+      apiGroupMountFaultTimes: 99,
+      apiGroupMountFaultMessage: "kaboom at line 42 https://apicenter.commerce.naver.com/x 'div.secret-value'",
+      mountSubStage: "position_overlay",
+    });
+    const driver = new NaverIssuanceDriver(asPage(page), { inpageRetryMs: 0 });
+    await expect(driver.highlightTarget("api_group")).rejects.toThrow();
+
+    const subs = substageFaults();
+    expect(subs.length).toBeGreaterThanOrEqual(1);
+    for (const e of subs) {
+      expect(e.meta.reason).toBe("UNKNOWN"); // no known fingerprint → the one case that may carry a message
+      expect(e.meta.subStage).toBe("position_overlay");
+      const msg = e.meta.message as string;
+      expect(typeof msg).toBe("string");
+      // Sanitized: the raw URL, the digits, and the quoted (potentially value-bearing) span are all gone.
+      expect(msg).not.toContain("42");
+      expect(msg).not.toContain("http");
+      expect(msg).not.toContain("apicenter");
+      expect(msg).not.toContain("secret-value");
+      expect(msg).not.toContain("naver");
+      expect(msg.length).toBeLessThanOrEqual(MAX_MOUNT_MESSAGE_ASSERT);
+      // The framework shape survives so the diagnostic is still useful.
+      expect(msg).toContain("kaboom");
+    }
+  });
+
+  it("a transient context-destroy mount fault is fingerprinted CONTEXT_DESTROYED (still no message)", async () => {
+    clearLogSink();
+    const page = new FakePage({ apiGroupMountThrowTimes: 99, mountSubStage: "append_overlay" });
+    const driver = new NaverIssuanceDriver(asPage(page), { inpageRetryMs: 0 });
+    await expect(driver.highlightTarget("api_group")).rejects.toThrow();
+
+    const subs = substageFaults();
+    expect(subs.length).toBeGreaterThanOrEqual(1);
+    expect(subs.every((e) => e.meta.reason === "CONTEXT_DESTROYED")).toBe(true);
+    expect(subs.every((e) => !("message" in e.meta))).toBe(true);
+  });
+
+  it("reads back `unknown` when the breadcrumb is unreadable (fault predated the first stamp / context gone)", async () => {
+    clearLogSink();
+    const page = new FakePage({ apiGroupMountFaultTimes: 99, mountSubStage: undefined });
+    const driver = new NaverIssuanceDriver(asPage(page), { inpageRetryMs: 0 });
+    await expect(driver.highlightTarget("api_group")).rejects.toThrow();
+
+    const subs = substageFaults();
+    expect(subs.length).toBeGreaterThanOrEqual(1);
+    expect(subs.every((e) => e.meta.subStage === "unknown")).toBe(true);
+  });
+
+  it("emits NO mount-substage fault on the calibrated happy path", async () => {
+    clearLogSink();
+    const { io, engine, session } = build({ appEntryCount: 0 });
+    startRun(io);
+    await session.whenSettled();
+    await pressNextToComplete(io, engine, session);
+    expect(substageFaults().length).toBe(0);
   });
 });

@@ -676,7 +676,7 @@ DevTools 증거로** 확정한다.
   메모**: 분류기 app_detail 마커 스캔은 `th` 제외(unit-2 MEDIUM) → "애플리케이션 ID"(`<th>`)는 분류기 마커로 못 씀, app_detail 감지는
   "API 그룹"(h4) 단독 의존(1개면 충분·fail-safe). **selector·상태 기계·overlay·bridge·runner 미변경 — 순수 진단·보고. push/PR 없음.**
 
-### 0.2.16 개정 — **`Overlay Root-Cause Isolation v1`: highlight 경로 단계별 sanitized stage telemetry (현행 진단 단위)** ⭐ 현행 issuance 상태
+### 0.2.16 개정 — **`Overlay Root-Cause Isolation v1`: highlight 경로 단계별 sanitized stage telemetry (직전 진단 단위 — 라이브 확정 완료)**
 
 0.2.14 Reset이 "throw 지점 UNDETERMINED(tag/signature/mount/visibility-verify)"로 남긴 공백을, **단 한 번의 gated 라이브
 진단으로 정확한 실패 단계만** 확정하기 위해 driver highlight 경로에 **순수 관측(telemetry)**만 추가. **상태 기계·selector·
@@ -715,10 +715,41 @@ bridge·runner·overlay 로직은 불변** — `naver-issuance-driver.ts` 한 �
   범위상 미수집**(enum만) → *왜* OTHER인지는 아직 미확정(가설로도 기록 안 함).
 - **부수 확정**: resolve+scroll+tag가 실제 Angular 페이지에서 성공(앵커·태그 건전 — 부록11 calibration과 일치); swallowed-scroll
   이벤트 없음(scroll 정상); visible_check 미도달(mount가 먼저 throw). 값/텍스트/URL/셀렉터/원문 무유출.
-- **다음 단위 = `Overlay Mount Fault Message Capture & Fix v1`**: (a) mount 단계의 `reason:"OTHER"` fault에 **sanitized error
-  MESSAGE 캡처** 추가(overlay/Playwright 프레임워크 message = 페이지 콘텐츠 없음 — 안전; name-only의 한계를 이 한 지점만 보강),
-  (b) 단일 gated 라이브 진단 1회로 mount가 던지는 일반 Error의 **정확한 원인 message 확정**, (c) 그 원인에 맞춰 overlay mount 수정
-  (예: locator-native 위치/mount 경로, 또는 원인별 대응). **selector·상태 기계·bridge·runner 불변 유지.**
+- **다음 단위 = `Overlay Mount Fault Identification v1`**(아래 0.2.17에서 오프라인 구현 완료 — 라이브 진단 대기).
+
+### 0.2.17 개정 — **`Overlay Mount Fault Identification v1`: mount 내부 하위단계 + 코드기반 fingerprint (현행 진단 단위, 오프라인 완료)** ⭐ 현행 issuance 상태
+
+0.2.16이 실패 단계를 `mount`/`reason=OTHER`로 확정했으나 **mount 내부의 어느 라인**인지는 미확정으로 남긴 공백을 좁힌다. **아직
+overlay 동작은 수정하지 않는다**(수정은 다음 단위). `mountOverlay()` 내부를 하위단계로 분리하고, mount가 던지는 Error를 **먼저
+코드기반 fingerprint로 분류**하며, **UNKNOWN일 때만** 진단 전용 sanitized message를 붙인다. **상태 기계·selector·scroll·tag·
+bridge·runner 불변, 제어 흐름 불변**(관측 seam은 동일 error를 그대로 re-throw).
+
+- **mount 하위단계 어휘**(`overlay.ts`의 in-page IIFE에 `__aw_mount_stage__` breadcrumb, **엄격한 코드순·단조**):
+  `MountSubStage = find_tagged_target | remove_previous | reveal_target | create_overlay | inject_style | append_overlay
+  | position_overlay | unknown`. (`find_tagged_target`=`querySelector([data-aw-target])`+이전 overlay lookup, `remove_previous`
+  =이전 box 제거+tracker teardown, `reveal_target`=`target.scrollIntoView`(지목된 유력 용의 라인), `create_overlay`=box/badge
+  생성, `inject_style`=`cssText` 주입, `append_overlay`=`document.body.appendChild`(실제 DOM 삽입), `position_overlay`=최초
+  `reposition()`+scroll/resize 리스너). **성공 완료·`if(!target) return` no-op 시 breadcrumb를 `delete`** → 이후 mount가 본문
+  실행 전 reject되면(soft-nav) 이전 mount의 stale 값이 아니라 `unknown`으로 읽힘(독립 리뷰 M-2 반영).
+- **고정 reason fingerprint**(`fingerprintMountFault(e)`, 순수, 원문 message 무유출): `MountFaultReason = CONTEXT_DESTROYED |
+  FRAME_DETACHED | TARGET_CLOSED | SYMBOL_NOT_DEFINED | NULL_PROPERTY_ACCESS | NOT_A_FUNCTION | DOM_EXCEPTION | TYPE_ERROR
+  | UNKNOWN`. error name/message shape로 **분류만**(예 `… is not defined`→SYMBOL_NOT_DEFINED, modern+legacy
+  `Cannot read propert(y|ies) … of null|undefined`→NULL_PROPERTY_ACCESS). **인식된 원인은 enum만** 유출.
+- **UNKNOWN 전용 sanitized message**(`sanitizeMountMessage(e)`): fingerprint가 **UNKNOWN일 때만** 부착. URL·따옴표 구간(셀렉터/
+  텍스트 운반 가능 shape)·숫자런 제거, 공백 축약, 120자 캡. 프레임워크(JS엔진/Playwright) 문자열 = 페이지 콘텐츠 아님; URL·따옴표·
+  수치 무유출(잔여 unquoted 식별자는 DOM/JS 심볼명, credential 아님).
+- **관측 seam(제어흐름 불변)**: 드라이버 `mountStepOverlay`가 mount throw를 catch → `readMountSubStage(page)`(best-effort,
+  실패 시 `unknown`) + `fingerprintMountFault` → `aw_issuance_mount_substage_fault {target, subStage, reason, errorName
+  [, message(UNKNOWN만)]}` 로그 → **동일 error 그대로 re-throw**. 상위 `resolveFixedLabelTarget`의 `stage:"mount"` catch·recovery
+  전부 byte-불변.
+- **테스트(전부 offline)**: 드라이버 5테스트(하위단계 localize + SYMBOL_NOT_DEFINED no-message / UNKNOWN→scrub된 message /
+  transient→CONTEXT_DESTROYED no-message / breadcrumb-미판독→unknown / happy=fault 0) + 순수 헬퍼 테스트(모든 fingerprint 분기
+  + null modern/legacy + DOMException-by-name + non-Error→UNKNOWN + scrub 클래스별 + 길이캡). collector typecheck + 전체
+  **6303 passed** green. 독립 리뷰 **HIGH 없음**; MEDIUM 2(하위단계 비단조 → `reveal_target` 신설·단조화; stale breadcrumb →
+  성공시 clear) **모두 반영**, LOW 2 문서 반영.
+- **다음 = 단일 gated 라이브 진단 1회**(fresh PREPARED 준비 완료): 존재-앱 상세에서 api_group mount를 1회 구동 →
+  `aw_issuance_mount_substage_fault`의 `subStage`+(`UNKNOWN`이면)`message`로 **mount 내부 정확한 라인·원인 확정**. **수정은 그 다음
+  단위** — 자동클릭·다음단계·실제 overlay 수정·push/PR 없음.
 
 ---
 
