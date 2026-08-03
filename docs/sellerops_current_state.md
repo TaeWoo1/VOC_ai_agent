@@ -23,7 +23,8 @@
 - **테스트**: 헤르메틱 스크립트-텍스트(closest("tr")+fallback+sig on el+값-미판독, create_app/api_group closest 부재) + **실 chromium**(RUN_INTEGRATION) 실 KV 테이블에서 `data-aw-target`가 `<tr>` 안착·UUID값 미반환·`<tr>`부재 fallback·api_group 승격 없음 + 갱신 selector 레지스트리(credentials만 tagAncestor:"tr", 앵커는 필드별 단언으로 드리프트 마스킹 방지).
 - **게이트**: collector typecheck green; 전체 **6312 passed**/138 skip/0 fail; 실 chromium tag-promotion **7/7**(RUN_INTEGRATION) green. `git diff --check` 클린, package/lock 불변.
 - **독립 리뷰 = HIGH 0 / MEDIUM 0.** 7 하드 제약 확인 + overlay 소비 안전(sig 무재계산, `closest`=라벨 자기 행). LOW 1(반영·코드 무변경): `closest("tr")`는 단일 key/value 행 전제 — 부록11 관측 shape(`<tr><th>애플리케이션 ID</th><td>값</td></tr>`)+ID/Secret probe 분리가 행-분리 레이아웃 시사 → 코드 무변경, 라이브에서 행 shape 함께 확인.
-- **상태**: 오프라인/실-chromium 완료. **credentials 행 커버리지 확인용 fresh PREPARED까지, 라이브 대기.** 이 변화는 값 미판독 → 라이브는 육안 커버리지 확인용(값·Secret·스크린샷·클립보드 미판독). push/PR 없음.
+- **라이브 커버리지 확정(2026-08-04, gated `apr-68de4dbfe24a`/`wt-0abd156b646f`/`048c1b8`, 실제 NAVER 기존-앱 상세, 소진·클린):** 자연 존재-앱 흐름으로 api_group `aw_issuance_stage_ok{mounted:true}`(조작자 "보여") → 조작자-확인 `REQUEST_STEP_RECHECK` 1회 → `aw_issuance_stage_ok{credentials, attempt:0, tagged:true, mounted:true}`, 두 곳 mount fault 전무. **조작자 육안(값 미판독): "행 전체 감싸고 있어. id와 시크릿은 별도의 행이고"** = credentials 하이라이트가 라벨 `<th>` 아닌 **행 `<tr>` 전체(값 셀 포함)** 박싱 **라이브 증명**; 리뷰 LOW(다열 과박싱) 라이브 배제(ID/Secret 행-분리 확정). 값·Secret·스크린샷·클립보드 미판독, return·step5·추가 "다음" 없이 즉시 teardown, :47615 free, 코드 미변경, 그랜트 소진.
+- **상태**: **오프라인/실-chromium/라이브 모두 완료 — 커버리지 목표 라이브 증명.** 부록14 credentials 행-커버리지 갭 종결. push/PR 없음.
 
 ---
 

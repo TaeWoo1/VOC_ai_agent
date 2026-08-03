@@ -838,8 +838,15 @@ selector 앵커·상태기계·bridge·runner·telemetry 불변.**
   렌더하면 Secret 값 셀까지 박싱될 수 있음(안전 위반 아님 — 값 미판독). 부록11 calibration 관측 shape가 `<tr><th>애플리케이션 ID</th><td>값</td></tr>`
   단일 key/value 행이고, ID(`text="애플리케이션 ID"`)/Secret(`text="애플리케이션 시크릿"`) probe가 분리되어 **행-분리 레이아웃**을 강하게 시사 → 코드
   무변경, **라이브 커버리지 확인 시 행 shape(ID·Secret 별도 행) 함께 확인**.
-- **상태**: 오프라인/실-chromium 완료. **credentials 행 커버리지만 확인하는 fresh PREPARED까지 생성, 라이브 실행은 대기** — mount 수정과 달리
-  이 변화는 값을 읽지 않으므로 라이브는 육안 커버리지 확인용(값·Secret·스크린샷·클립보드 미판독). push/PR 없음.
+- **라이브 커버리지 확정 (2026-08-04, gated `apr-68de4dbfe24a`/`wt-0abd156b646f`/`048c1b8`, 실제 NAVER 기존-앱 상세, 소진·클린):** 동일 apparatus
+  (run-api-issuance-live-naver 호스트 + issuance-live-proof 클라이언트), 자연 존재-앱 흐름(app_list → START_RUN step1 app_list✓ → step2 open_app
+  관찰-무장 → 조작자가 앱 열기 → app_detail 검증 → step3 api_group). **PASS**: `aw_issuance_stage_ok{api_group, attempt:0, tagged:true,
+  mounted:true}` + mount fault 전무 → 조작자 "api group위에 떴어. 보여." → **조작자-확인 `REQUEST_STEP_RECHECK` 1회**로 step3→step4 →
+  `aw_issuance_stage_ok{credentials, attempt:0, tagged:true, mounted:true}` + mount fault 전무. **조작자 육안(값 미판독): "행 전체 감싸고 있어.
+  id와 시크릿은 별도의 행이고."** = 이번 수정 목표(credentials 하이라이트가 라벨 `<th>`가 아니라 **행 `<tr>` 전체(값 셀 포함)** 박싱) **라이브
+  증명**. 리뷰 LOW(다열 단일 행 과박싱 우려)도 **라이브 배제** — ID/Secret **행-분리** 확정(부록11 관측 shape 재확인). credentials 값·Secret·
+  스크린샷·클립보드 **미판독**, return·step5·추가 "다음" 없이 즉시 teardown, :47615 free, 코드 미변경, 그랜트 소진.
+- **상태**: **오프라인/실-chromium/라이브 모두 완료 — 커버리지 목표 라이브 증명.** 부록14의 credentials 행-커버리지 갭 **종결**. push/PR 없음.
 
 ---
 
