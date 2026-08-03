@@ -768,7 +768,7 @@ bridge·runner 불변, 제어 흐름 불변**(관측 seam은 동일 error를 그
   `evalStr`(string-evaluate)로 회피해온 바로 그 계열이나 `mountOverlay`는 function-form을 씀.
 - **다음 단위 = `Overlay Mount Fix v1`**(수정): 아래 0.2.18에서 완료.
 
-### 0.2.18 개정 — **`Overlay Mount Fix v1`: overlay mount의 esbuild `__name` 심 누수 제거 (현행 issuance 상태, 오프라인 완료)** ⭐
+### 0.2.18 개정 — **`Overlay Mount Fix v1`: overlay mount의 esbuild `__name` 심 누수 제거 (현행 issuance 상태, 오프라인 + 라이브 재검증 완료)** ⭐
 
 0.2.17이 확정한 원인(`position_overlay`/`SYMBOL_NOT_DEFINED` = `tsx`/esbuild keepNames가 `mountOverlay`의 in-page 콜백 내
 `const reposition = () => {…}`을 `__name(() => {…}, "reposition")`로 감싸는데, `page.evaluate`는 콜백 **본문만** 페이지로 직렬화 →
@@ -788,8 +788,13 @@ bridge·runner 불변, 제어 흐름 불변**(관측 seam은 동일 error를 그
 - **게이트**: collector typecheck green; 전체 **6307 passed**/135 skip/0 fail; **실 chromium** overlay 테스트(RUN_INTEGRATION,
   fixture-browser 10/10 — overlay mount+reposition 실동작) green. 독립 리뷰 **HIGH 없음**; MEDIUM 1(가드가 mountOverlay만 커버 → 전 evaluate
   스캔으로 일반화) **반영**, LOW 2(주석 TS2695 명시·positive-control 정규식 완화) 반영.
-- **다음 = 단일 gated 라이브 재검증 1회**(fresh PREPARED): 존재-앱 상세에서 api_group mount 1회 → **overlay가 실제로 렌더**되고
-  `aw_issuance_stage_ok{mounted:true}`(mount fault 없음)를 확인. 이 단위는 수정+오프라인·실chromium 증명까지; 라이브 재검증은 새 승인 필요.
+- **라이브 재검증 확정 (2026-08-04, gated `apr-fa311753d4d8`/`wt-e2bb0c9bb568`/`17cb404`, 실제 NAVER 존재-앱 상세, 소진·클린):**
+  자연 존재-앱 흐름(app_list 착지 → START_RUN step1 app_list✓ → step2 open_app 관찰-무장 → 조작자가 앱 열기 → app_detail 검증 →
+  step3 api_group highlight)으로 mount 1회 구동 → **`aw_issuance_stage_ok{target:"api_group", attempt:0, tagged:true, mounted:true}`
+  확정**(attempt 0, 재시도 0), **mount fault 전무**(`aw_issuance_mount_substage_fault`·`stage_fault{stage:"mount"}` 없음). **조작자
+  육안 확인: "보여. api 그룹 위에 떠있는데"** = overlay(파란 하이라이트 박스+배지)가 API 그룹 섹션 위에 실제 렌더. 부록12/13의 결정적
+  `position_overlay`/`SYMBOL_NOT_DEFINED` fault가 **완전히 해소됨**. credentials·"다음"·추가 checkpoint 없이 성공 즉시 teardown, 코드 미변경.
+- **결론**: 3단위 4진단 1수정에 걸친 api_group highlight overlay 미표시 blocker **최종 종결(라이브 증명)**. 다음은 후속 슬라이스 판단.
 
 ---
 

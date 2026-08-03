@@ -12,7 +12,7 @@
 
 ---
 
-## 2026-08-04 부록 (14) — Overlay Mount Fix v1: overlay mount의 esbuild `__name` 심 누수 제거 (현행 issuance 상태, 오프라인+실chromium 완료/라이브 재검증 대기)
+## 2026-08-04 부록 (14) — Overlay Mount Fix v1: overlay mount의 esbuild `__name` 심 누수 제거 (현행 issuance 상태, 오프라인+실chromium+라이브 재검증 완료)
 
 > `Overlay Mount Fix v1`. 부록(13)이 확정한 원인(`position_overlay`/`SYMBOL_NOT_DEFINED`)을 오프라인 재확인 후 수정. 세부: 슬라이스 §0.2.18. **overlay 1파일(`overlay.ts`)만; selector·상태기계·bridge·runner·telemetry 불변.**
 
@@ -20,7 +20,7 @@
 - **수정**: `const reposition = [ () => {…} ][0]!` — 배열-리터럴 index initializer는 name-inferable 아님 → esbuild가 `__name` 래퍼 미방출, 런타임 동작 동일(stable ref 유지). `(0,…)` sequence는 tsc TS2695 거부 → 배열-index 채택.
 - **회귀 테스트**: `overlay-mount-shim.test.ts`(transform-레벨, 권위): esbuild(keepNames) 변환 후 **파일 내 모든 `page.evaluate` 콜백**(balanced-paren 추출)에 `__name(` 부재 단언 + positive control + reposition 참조 유지. 미래 어느 evaluate 콜백에라도 name-inferable 클로저 추가 시 라이브 아니라 이 테스트에서 실패.
 - **게이트**: collector typecheck green; 전체 **6307 passed**/135 skip/0 fail; 실 chromium overlay(RUN_INTEGRATION fixture-browser 10/10, mount+reposition 실동작) green. 독립 리뷰 **HIGH 없음**; MEDIUM 1(가드 전 evaluate 일반화)·LOW 2(TS2695 명시·정규식 완화) 반영.
-- **다음 = 단일 gated 라이브 재검증 1회**(fresh PREPARED): 존재-앱 상세 api_group mount 1회 → overlay 실제 렌더 + `aw_issuance_stage_ok{mounted:true}`(fault 없음) 확인. 라이브 재검증은 새 승인 필요. push/PR·자동클릭 없음.
+- **라이브 재검증 확정(2026-08-04, gated `apr-fa311753d4d8`/`wt-e2bb0c9bb568`/`17cb404`, 실제 NAVER 존재-앱 상세, 소진·클린):** 자연 존재-앱 흐름으로 api_group mount 1회 → **`aw_issuance_stage_ok{api_group, attempt:0, tagged:true, mounted:true}` 확정 + mount fault 전무** + **조작자 육안 "보여. api 그룹 위에 떠있는데"**(overlay 실제 렌더). 부록12/13의 `position_overlay`/`SYMBOL_NOT_DEFINED` 결정적 fault **완전 해소**. 성공 즉시 teardown, 코드 미변경. → api_group highlight overlay 미표시 blocker **최종 종결(라이브 증명)**.
 
 ---
 
