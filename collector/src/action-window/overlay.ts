@@ -198,16 +198,32 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
     // so it must be recomputed on every scroll/resize or it drifts off the control the moment the
     // operator scrolls — the other half of the same finding. The tracker recomputes from the target's
     // own getBoundingClientRect (read-only) and is torn down by unmountOverlay / the next mount.
-    const reposition = () => {
-      const el = document.querySelector("[data-aw-target]");
-      const b = document.getElementById("__aw_overlay__");
-      if (!el || !b) return;
-      const r = (el as Element).getBoundingClientRect();
-      b.style.left = `${r.left - 6}px`;
-      b.style.top = `${r.top - 6}px`;
-      b.style.width = `${r.width + 12}px`;
-      b.style.height = `${r.height + 12}px`;
-    };
+    //
+    // ⚠ The `[ … ][0]` array-index initializer is LOAD-BEARING, not a stylistic quirk. Under `tsx`/esbuild
+    // (`keepNames`, the default), a plain `const reposition = () => {…}` compiles to
+    // `const reposition = __name(() => {…}, "reposition")` to preserve `fn.name`. But `page.evaluate`
+    // serializes only THIS function's BODY to the page — esbuild's module-scope `__name` helper is NOT
+    // shipped — so that wrapper threw `ReferenceError: __name is not defined` here, which is EXACTLY the
+    // live-confirmed `subStage: position_overlay` / `reason: SYMBOL_NOT_DEFINED` mount fault (`reposition`
+    // was the only name-inferable closure in the mount IIFE). Wrapping the arrow in an array literal and
+    // indexing it means the initializer is not a name-inferable binding, so esbuild emits NO `__name`
+    // wrapper and the closure ships clean — while staying valid TypeScript (unlike a `(0, …)` sequence,
+    // which tsc rejects with TS2695 "Left side of comma operator is unused and has no side effects").
+    // `reposition` still needs a stable reference for
+    // add/removeEventListener, so it cannot simply be inlined. (A transform-level regression test asserts
+    // the shipped mountOverlay page body contains no `__name(`.)
+    const reposition = [
+      () => {
+        const el = document.querySelector("[data-aw-target]");
+        const b = document.getElementById("__aw_overlay__");
+        if (!el || !b) return;
+        const r = (el as Element).getBoundingClientRect();
+        b.style.left = `${r.left - 6}px`;
+        b.style.top = `${r.top - 6}px`;
+        b.style.width = `${r.width + 12}px`;
+        b.style.height = `${r.height + 12}px`;
+      },
+    ][0]!;
     reposition();
     // `capture:true` catches scrolls on any nested scroller, not just the window.
     window.addEventListener("scroll", reposition, true);

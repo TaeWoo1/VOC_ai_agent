@@ -766,8 +766,30 @@ bridge·runner 불변, 제어 흐름 불변**(관측 seam은 동일 error를 그
   named 함수를 `__name(() => {…}, "reposition")`로 감싸는데, 페이지 실행 컨텍스트엔 `__name`이 없음 → `ReferenceError: __name is not
   defined`(Playwright가 generic Error로 표면화). 즉 **function-form `page.evaluate`에 esbuild `__name` 심이 새는 것** — 드라이버가
   `evalStr`(string-evaluate)로 회피해온 바로 그 계열이나 `mountOverlay`는 function-form을 씀.
-- **다음 단위 = `Overlay Mount Fix v1`**(수정): mount evaluate가 esbuild 심을 참조하지 않게(후보: mountOverlay를 string-evaluate로,
-  또는 named 내부 클로저 제거, 또는 `__name` no-op 주입) — selector·상태기계·bridge·runner 불변. **이 단위는 식별까지**; 수정은 다음.
+- **다음 단위 = `Overlay Mount Fix v1`**(수정): 아래 0.2.18에서 완료.
+
+### 0.2.18 개정 — **`Overlay Mount Fix v1`: overlay mount의 esbuild `__name` 심 누수 제거 (현행 issuance 상태, 오프라인 완료)** ⭐
+
+0.2.17이 확정한 원인(`position_overlay`/`SYMBOL_NOT_DEFINED` = `tsx`/esbuild keepNames가 `mountOverlay`의 in-page 콜백 내
+`const reposition = () => {…}`을 `__name(() => {…}, "reposition")`로 감싸는데, `page.evaluate`는 콜백 **본문만** 페이지로 직렬화 →
+모듈스코프 `__name` 헬퍼 미전달 → 페이지에서 `ReferenceError: __name is not defined`)을 **오프라인에서 재확인 후 수정**. **overlay 1개
+파일(`overlay.ts`)만; selector·상태기계·bridge·runner·telemetry 불변.**
+
+- **오프라인 원인 재확인(라이브 불필요)**: `overlay.ts`를 tsx와 동일하게(esbuild `keepNames`) 변환 → `mountOverlay`의 직렬화 page 본문에
+  `const reposition = /* @__PURE__ */ __name(() => {…}, "reposition")` 정확히 확인. `reposition`이 mount IIFE의 유일한 name-inferable
+  클로저(untrack teardown은 `(window…)["__aw_overlay_untrack__"] = () => {…}` = computed-assignment → **name-inferable 아님, 이미 clean**).
+- **수정 = name-inferable 아닌 initializer**: `const reposition = [ () => {…} ][0]!`. 배열 리터럴을 index → esbuild가 이름을 추론할 수
+  없어 `__name` 래퍼를 **방출하지 않음**, 런타임 동작 동일(같은 클로저, add/removeEventListener·untrack가 참조하는 stable ref 유지). `(0, …)`
+  sequence는 tsc가 TS2695로 거부하므로 배열-index 채택(둘 다 esbuild-clean, 배열-index만 tsc-valid). 상세 주석으로 "load-bearing" 명시.
+- **회귀 테스트(transform-레벨, 권위 있음)**: `overlay-mount-shim.test.ts` — `overlay.ts`를 esbuild(keepNames)로 변환해 **파일 내 모든
+  `page.evaluate` 콜백**(balanced-paren로 추출; 모듈스코프 `__name(fn,…)` 네이밍은 Node 실행·무해 → 영역 밖이라 제외)에 `__name(` 부재를 단언 +
+  **positive control**(위험 shape가 실제로 `__name(`를 방출함을 증명) + reposition이 여전히 add/removeEventListener로 참조됨 확인. 미래에
+  `mountOverlay`뿐 아니라 **어느 evaluate 콜백**에라도 name-inferable 클로저가 추가되면 라이브가 아니라 이 테스트에서 실패(독립 리뷰 MEDIUM 반영).
+- **게이트**: collector typecheck green; 전체 **6307 passed**/135 skip/0 fail; **실 chromium** overlay 테스트(RUN_INTEGRATION,
+  fixture-browser 10/10 — overlay mount+reposition 실동작) green. 독립 리뷰 **HIGH 없음**; MEDIUM 1(가드가 mountOverlay만 커버 → 전 evaluate
+  스캔으로 일반화) **반영**, LOW 2(주석 TS2695 명시·positive-control 정규식 완화) 반영.
+- **다음 = 단일 gated 라이브 재검증 1회**(fresh PREPARED): 존재-앱 상세에서 api_group mount 1회 → **overlay가 실제로 렌더**되고
+  `aw_issuance_stage_ok{mounted:true}`(mount fault 없음)를 확인. 이 단위는 수정+오프라인·실chromium 증명까지; 라이브 재검증은 새 승인 필요.
 
 ---
 

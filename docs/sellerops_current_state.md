@@ -12,7 +12,19 @@
 
 ---
 
-## 2026-08-03 부록 (13) — Overlay Mount Fault Identification v1: mount 내부 하위단계 + 코드기반 fingerprint (현행 진단 단위, 오프라인 완성/라이브 대기)
+## 2026-08-04 부록 (14) — Overlay Mount Fix v1: overlay mount의 esbuild `__name` 심 누수 제거 (현행 issuance 상태, 오프라인+실chromium 완료/라이브 재검증 대기)
+
+> `Overlay Mount Fix v1`. 부록(13)이 확정한 원인(`position_overlay`/`SYMBOL_NOT_DEFINED`)을 오프라인 재확인 후 수정. 세부: 슬라이스 §0.2.18. **overlay 1파일(`overlay.ts`)만; selector·상태기계·bridge·runner·telemetry 불변.**
+
+- **원인 오프라인 재확인(라이브 불필요)**: `overlay.ts`를 tsx와 동일(esbuild `keepNames`)하게 변환 → `mountOverlay`의 직렬화 page 본문에 `const reposition = __name(() => {…}, "reposition")` 정확히 확인. `page.evaluate`는 콜백 본문만 페이지로 보내는데 모듈스코프 `__name` 헬퍼는 미전달 → 페이지에서 `ReferenceError: __name is not defined`. `reposition`이 mount IIFE 유일 name-inferable 클로저(untrack `obj[key]=()=>{}` = computed-assignment는 이미 clean).
+- **수정**: `const reposition = [ () => {…} ][0]!` — 배열-리터럴 index initializer는 name-inferable 아님 → esbuild가 `__name` 래퍼 미방출, 런타임 동작 동일(stable ref 유지). `(0,…)` sequence는 tsc TS2695 거부 → 배열-index 채택.
+- **회귀 테스트**: `overlay-mount-shim.test.ts`(transform-레벨, 권위): esbuild(keepNames) 변환 후 **파일 내 모든 `page.evaluate` 콜백**(balanced-paren 추출)에 `__name(` 부재 단언 + positive control + reposition 참조 유지. 미래 어느 evaluate 콜백에라도 name-inferable 클로저 추가 시 라이브 아니라 이 테스트에서 실패.
+- **게이트**: collector typecheck green; 전체 **6307 passed**/135 skip/0 fail; 실 chromium overlay(RUN_INTEGRATION fixture-browser 10/10, mount+reposition 실동작) green. 독립 리뷰 **HIGH 없음**; MEDIUM 1(가드 전 evaluate 일반화)·LOW 2(TS2695 명시·정규식 완화) 반영.
+- **다음 = 단일 gated 라이브 재검증 1회**(fresh PREPARED): 존재-앱 상세 api_group mount 1회 → overlay 실제 렌더 + `aw_issuance_stage_ok{mounted:true}`(fault 없음) 확인. 라이브 재검증은 새 승인 필요. push/PR·자동클릭 없음.
+
+---
+
+## 2026-08-03 부록 (13) — Overlay Mount Fault Identification v1: mount 내부 하위단계 + 코드기반 fingerprint (직전 진단 단위, 라이브 확정 완료)
 
 > `Overlay Mount Fault Identification v1`. 부록(12)이 실패 단계를 `mount`/`reason=OTHER`로 확정했으나 **mount 내부 어느 라인**인지 미확정으로 남긴 공백을 좁힌다. **아직 overlay 동작 미수정**(수정은 다음 단위). `mountOverlay()` 내부를 하위단계로 분리, mount가 던지는 Error를 **먼저 코드기반 fingerprint로 분류**, **UNKNOWN일 때만** 진단 전용 sanitized message 부착. 세부: 슬라이스 §0.2.17. **상태 기계·selector·scroll·tag·bridge·runner 불변, 제어 흐름 불변**(관측 seam은 동일 error re-throw).
 
