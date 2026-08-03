@@ -20,6 +20,7 @@
 - **제어흐름 등가**(독립 리뷰 확정): scroll catch undefined 반환·early-return·timeout·retry·throw 모두 byte-불변, 추가 await 없음.
 - **가드**: 드라이버 소스가드 144 green(금지 토큰 미추가). 오프라인 테스트: 5단계 stage·reason 확정 + sanitization + happy stage_ok + swallowed/nonunique 분기. collector typecheck + 전체 **6275 passed**. 독립 리뷰 **HIGH·MEDIUM 없음**, LOW 3 전부 반영.
 - **다음 = 단일 gated 라이브 진단**(존재-앱 상세에서 api_group highlight 1회 → stage+reason으로 실패 단계 확정). 수정·자동클릭·다음단계·push/PR 없음.
+- **라이브 확정(2026-08-03, gated `apr-086d54491b64`/`wt-6866cb9cd980`/`77f83f4`, 실제 NAVER 존재-앱 상세, 소진·클린):** **실패 단계 = `mount` 확정.** app_detail 검증 후 `aw_issuance_stage_ok{api_group,tagged:false,mounted:false}`(resolve+scroll+tag 라이브 성공) 직후 `aw_issuance_stage_fault{stage:"mount",reason:"OTHER",errorName:"Error"}`가 **3/3 결정적** → park. reason OTHER = CONTEXT_DESTROYED/NO_PAINT/TIMEOUT 전부 아님 → **기존 "scroll→Angular 재렌더 context 파괴" 가설 반증.** mount evaluate가 미분류 일반 Error를 결정적으로 throw(원문 message는 범위상 미수집 → *왜*는 미확정). 다음 단위=`Overlay Mount Fault Message Capture & Fix v1`(mount OTHER fault에 sanitized message 캡처 → 1회 진단으로 원인 확정 → overlay mount 수정; selector/상태기계/bridge/runner 불변).
 
 ---
 

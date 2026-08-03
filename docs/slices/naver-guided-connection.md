@@ -704,6 +704,22 @@ bridge·runner·overlay 로직은 불변** — `naver-issuance-driver.ts` 한 �
 - **다음 = 단일 gated 라이브 진단**: 존재-앱 상세에서 api_group highlight를 1회 구동 → `aw_issuance_stage_fault`의 `stage`+`reason`
   으로 **정확한 실패 단계 확정**(수정은 그 다음 단위). **수정·자동클릭·다음단계·push/PR 없음.**
 
+**라이브 확정 결과 (2026-08-03, gated `apr-086d54491b64`/`wt-6866cb9cd980`/`77f83f4`, 실제 NAVER 존재-앱 상세, 소진·클린):**
+- **실패 단계 = `mount` (확정).** fully-loaded app_detail 검증 후 api_group highlight 구동 → `aw_issuance_stage_ok
+  {target:api_group, tagged:false, mounted:false}` (= anti-drift locate: **resolve+scroll+tag 라이브 성공**) 직후,
+  highlight의 `aw_issuance_stage_fault {stage:"mount", reason:"OTHER", errorName:"Error", timeout:false}`가 **3/3 시도 모두
+  결정적(deterministic)** 발생 → recoverable page_mismatch park. **resolve/scroll/tag/visible_check 아님 — overlay MOUNT 단계.**
+- **reason = `OTHER` (확정).** CONTEXT_DESTROYED/NO_PAINT/TIMEOUT/FRAME_DETACHED/TARGET_CLOSED **전부 아님** → 지금까지의
+  가설(scrollIntoView가 Angular 재렌더로 context 파괴 = CONTEXT_DESTROYED)은 **반증됨**. errorName="Error"(일반 Error, ReferenceError/
+  TimeoutError 아님). mount evaluate가 **분류되지 않은 일반 Error를 결정적으로 throw**한다는 것이 확정 사실. **원문 message는 이 단위
+  범위상 미수집**(enum만) → *왜* OTHER인지는 아직 미확정(가설로도 기록 안 함).
+- **부수 확정**: resolve+scroll+tag가 실제 Angular 페이지에서 성공(앵커·태그 건전 — 부록11 calibration과 일치); swallowed-scroll
+  이벤트 없음(scroll 정상); visible_check 미도달(mount가 먼저 throw). 값/텍스트/URL/셀렉터/원문 무유출.
+- **다음 단위 = `Overlay Mount Fault Message Capture & Fix v1`**: (a) mount 단계의 `reason:"OTHER"` fault에 **sanitized error
+  MESSAGE 캡처** 추가(overlay/Playwright 프레임워크 message = 페이지 콘텐츠 없음 — 안전; name-only의 한계를 이 한 지점만 보강),
+  (b) 단일 gated 라이브 진단 1회로 mount가 던지는 일반 Error의 **정확한 원인 message 확정**, (c) 그 원인에 맞춰 overlay mount 수정
+  (예: locator-native 위치/mount 경로, 또는 원인별 대응). **selector·상태 기계·bridge·runner 불변 유지.**
+
 ---
 
 ## 0. v1 비준 (Ratification 2026-07-19) — 오프라인 구현 착수
