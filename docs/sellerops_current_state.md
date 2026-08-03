@@ -12,6 +12,30 @@
 
 ---
 
+## 2026-08-03 부록 (9) — Overlay-Mount SPA Hardening: overlay mount SPA-safe + app-detail 구조 분류 (현행)
+
+> `NAVER Overlay-Mount SPA Hardening v1`. 부록(8) 뒤 라이브 #5에서 탐색(locator)은 성공했으나 `mountOverlay`의 raw
+> function-form `page.evaluate`가 soft-nav에 걸려 throw → api_group 오버레이 mount 실패. 또한 존재-앱 상세가 로딩 중
+> `app_list`로 오분류. 세부: 슬라이스 §0.2.13. **라이브 실행 없음.**
+
+- **overlay mount SPA-safe(`overlay.ts`):** `mountOverlay`의 `page.evaluate`를 `runEvaluateResilient`(bounded 재시도
+  `MOUNT_EVAL_RETRIES=2`, transient nav 오류만 재시도, 메시지 substring은 제어용·무유출)로 감쌈. 각 mount는 이전 오버레이 제거→중복 없음.
+- **atomic tag→mount + paint 검증(`naver-issuance-driver.ts`):** `resolveFixedLabelTarget` `afterTag` 콜백 → `highlightTarget`이
+  mount를 같은 retried try·재해결 active page에서 원자 수행. tag↔mount 사이 context drift 시 **재-tag+재-mount**(stale tag에 mount
+  안 함). **[리뷰 HIGH] mount 뒤 `overlayMounted` 검증** — `mountOverlay`의 silent `if(!target) return` no-op(오버레이 없이
+  "성공" 보고 = fail-open)을 잡아 재-tag+재-mount 강제, 소진 시 recoverable page_mismatch(fail-closed). anti-drift sig 유지.
+- **whenSettled refcount(`issuance-session.ts`):** `autoBusy` boolean→`busyCount` refcount(START_RUN 드라이브+detached
+  watchBarrier 동시 소유의 clobber 제거 — overlay mount 재시도가 macrotask sleep span 시 표면화됐던 조기 반환 봉합). 테스트 훅; 프로덕션 동작 불변.
+- **app-detail 구조 분류(`observe-api-center.ts`):** census value-free boolean `appDetailMarkerPresent`(요소 accessible-name을
+  KNOWN 고정 라벨 `["API 그룹","애플리케이션 ID"]`과 EXACT 비교, boolean만 방출; **[리뷰 MEDIUM] marker candidate에서 th/a/button
+  제외** — 리스트 컬럼 헤더/앱-이름 링크의 false-match 방지) + classifier precedence에 marker→app_detail(editable 다음, app_list
+  앞). 존재-앱 상세가 평문(폼 입력 없음)이어도 app_detail. 잔여 false-match는 하류 target_not_found park로 fail-closed.
+- **계약·범위:** 새 stage/status/enum/마이그레이션 **없음**; **FE 변경 없음.** collector typecheck + 전체 **6204 tests** 그린.
+  독립 적대적 리뷰 **HIGH 1(mount no-op fail-open)·MEDIUM 1(marker th/a/button) 반영, LOW 기록**. **라이브 실행·credential
+  값읽기·push/PR 없음.** 존재-앱 오버레이 렌더링 라이브 증명은 이 봉합으로 기대되나 **여전히 미증명(PENDING, 다음 gated 승인 필요)**.
+
+---
+
 ## 2026-08-03 부록 (8) — SPA-Stable Guidance Runtime: fixed-label 탐색을 Playwright locator 기반으로 (현행)
 
 > `NAVER SPA-Stable Guidance Runtime v1`. 부록(7) checkpoint 모델은 회복까지 라이브 증명됐으나 `api_group` locate가

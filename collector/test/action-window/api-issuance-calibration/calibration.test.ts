@@ -50,6 +50,7 @@ const SIGNALS: ApiCenterSignals = {
   editableTextInputCountBucket: "none",
   readonlyFieldCountBucket: "none",
   listLikeContainerCountBucket: "few",
+  appDetailMarkerPresent: false,
 };
 
 describe("4-stage contract (return_path removed)", () => {

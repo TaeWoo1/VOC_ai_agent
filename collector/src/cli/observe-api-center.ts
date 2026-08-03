@@ -71,7 +71,27 @@ export interface ApiCenterStructuralCensus {
   readonlyFieldCount: number;
   /** table / ul / ol / [role=grid|table] containers with ≥2 children (list-like). */
   listLikeContainerCount: number;
+  /**
+   * STRUCTURAL app-detail marker: whether the page carries a fixed, live-confirmed API-application detail
+   * label (the API-group section heading / the Application-ID label — {@link APP_DETAIL_MARKER_LABELS}). Value-
+   * free: computed IN-PAGE by comparing an element's accessible name against those KNOWN fixed labels and
+   * returning only a boolean (the same value-free pattern as the fixed-label probe) — never any page text. Lets
+   * the classifier recognize the existing-app detail page even when it exposes NO editable/read-only form
+   * inputs (its ID/Secret rendered as plain text), which otherwise mis-reads as `app_list` while loading.
+   * Optional so the 28 existing census literals need no change; absent ⇒ treated as `false` (prior behavior).
+   */
+  appDetailMarkerPresent?: boolean;
 }
+
+/**
+ * FIXED, live-confirmed API-application detail-page marker labels — the API-group section heading and the
+ * Application-ID label. Reused verbatim from the calibrated issuance highlight targets' `exactText` (api_group /
+ * credentials), so the classifier's structural detail signal can never drift from the labels the driver already
+ * highlights. Matching is EXACT accessible-name (value-free): only a boolean leaves the page. A false match on
+ * an app-list page (e.g. an "애플리케이션 ID" column header) is fail-closed downstream — the api_group fixed-label
+ * locate then finds nothing on that page and parks `target_not_found` recoverably, never a wrong highlight.
+ */
+export const APP_DETAIL_MARKER_LABELS = ["API 그룹", "애플리케이션 ID"] as const;
 
 /** Sanitized signals the classifier consumes: the url category + bucketized census. */
 export interface ApiCenterSignals {
@@ -82,6 +102,8 @@ export interface ApiCenterSignals {
   editableTextInputCountBucket: CountBucket;
   readonlyFieldCountBucket: CountBucket;
   listLikeContainerCountBucket: CountBucket;
+  /** Whether a fixed, live-confirmed app-detail marker label is present (see census `appDetailMarkerPresent`). */
+  appDetailMarkerPresent: boolean;
 }
 
 export interface ApiCenterObservation {
@@ -136,6 +158,7 @@ export function toSignals(urlCategory: ApiCenterUrlCategory, census: ApiCenterSt
     editableTextInputCountBucket: countBucket(census.editableTextInputCount),
     readonlyFieldCountBucket: countBucket(census.readonlyFieldCount),
     listLikeContainerCountBucket: countBucket(census.listLikeContainerCount),
+    appDetailMarkerPresent: census.appDetailMarkerPresent ?? false,
   };
 }
 
@@ -154,8 +177,13 @@ export function toSignals(urlCategory: ApiCenterUrlCategory, census: ApiCenterSt
  *     detail/edit page commonly ALSO contains many list-like containers (live G3-C.2 finding — the app
  *     detail page classified as `app_list` because list-like was checked first), so editable inputs must
  *     take precedence over the list signal.
- *  4. **app_list** — a list-like container present, and no detail/credential signal (no read-only, no
- *     editable input). Only the pure list view lands here.
+ *  3b. **app_detail (by STRUCTURE)** — a fixed app-detail marker label present ({@link APP_DETAIL_MARKER_LABELS}:
+ *     the API-group heading / Application-ID label). Also wins over `app_list`: the live existing-app detail
+ *     page renders its ID/Secret as PLAIN TEXT (no editable/read-only inputs), so without this it mis-reads as
+ *     `app_list` while loading (the live-#5 finding). Fail-closed: a false marker match on a list page just
+ *     parks `target_not_found` downstream (the api_group locate finds nothing there), never a wrong highlight.
+ *  4. **app_list** — a list-like container present, and no detail/credential/marker signal (no read-only, no
+ *     editable input, no detail marker). Only the pure list view lands here.
  *  5. otherwise → **unknown** (fail-closed, `AMBIGUOUS_SIGNALS`).
  *
  * `unknown` also when the host is off-target (`OFF_TARGET_HOST`) — the harness refuses to classify a page
@@ -172,6 +200,10 @@ export function classifyApiCenterPage(signals: ApiCenterSignals): { pageCategory
   if (signals.passwordFieldPresent) return { pageCategory: "login", blockers };
   if (signals.readonlyFieldCountBucket !== "none") return { pageCategory: "credential_issuance", blockers };
   if (signals.editableTextInputCountBucket !== "none") return { pageCategory: "app_detail", blockers };
+  // Structural app-detail marker (API-group heading / Application-ID label) wins over the list signal: the live
+  // existing-app detail page shows its keys as plain text, so it has no editable/read-only input to fall through
+  // on and would otherwise mis-read as `app_list`. Fail-closed downstream if it ever fires on a real list page.
+  if (signals.appDetailMarkerPresent) return { pageCategory: "app_detail", blockers };
   if (signals.listLikeContainerCountBucket !== "none") return { pageCategory: "app_list", blockers };
 
   blockers.push("AMBIGUOUS_SIGNALS");
@@ -443,13 +475,34 @@ export const EXTRACT_API_CENTER_CENSUS = `(function () {
   for (i = 0; i < containers.length; i++) {
     if (containers[i].childElementCount >= 2) listLikeContainerCount++;
   }
+  /* STRUCTURAL app-detail marker (value-free OUTPUT: a single boolean). Compares an element's accessible name
+     against the KNOWN fixed labels ONLY — the matched text is never returned. Same value-free pattern as the
+     fixed-label probe. Skips <script>/<style>. Bounded scan so a pathological page cannot spin. */
+  var MARKERS = ${JSON.stringify(APP_DETAIL_MARKER_LABELS)};
+  function nrm(s) { return String(s == null ? '' : s).replace(/\\s+/g, ' ').trim(); }
+  function accNm(el) {
+    var al = el.getAttribute ? el.getAttribute('aria-label') : null;
+    if (al && nrm(al).length) { return nrm(al); }
+    return nrm(el.textContent || '');
+  }
+  /* Heading/label-like candidates ONLY — deliberately NO table cell (th/td), link, or button: an app-LIST is a
+     table whose column header could read exactly "애플리케이션 ID"/"API 그룹", and an app row is a link/button whose
+     NAME is user data; matching those would mis-classify the list as app_detail (and could even highlight a column
+     header). A real detail-page section marker is a heading/label. */
+  var markerCands = slice(document.querySelectorAll("h1,h2,h3,h4,h5,h6,[role='heading'],dt,dd,label,legend,strong,b,span,div,p"));
+  var appDetailMarkerPresent = false, mi, mm, nm;
+  for (mi = 0; mi < markerCands.length && mi < 6000 && !appDetailMarkerPresent; mi++) {
+    nm = accNm(markerCands[mi]);
+    for (mm = 0; mm < MARKERS.length; mm++) { if (nm === MARKERS[mm]) { appDetailMarkerPresent = true; break; } }
+  }
   return {
     passwordFieldPresent: document.querySelector("input[type='password']") != null,
     submitAffordancePresent: document.querySelector("button[type='submit'], input[type='submit']") != null,
     formCount: document.querySelectorAll('form').length,
     editableTextInputCount: editableTextInputCount,
     readonlyFieldCount: readonlyFieldCount,
-    listLikeContainerCount: listLikeContainerCount
+    listLikeContainerCount: listLikeContainerCount,
+    appDetailMarkerPresent: appDetailMarkerPresent
   };
 })()`;
 

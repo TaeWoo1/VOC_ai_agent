@@ -73,6 +73,18 @@ interface FakePageOptions {
   throwLocateTimes?: number;
   /** When true, the Playwright locator's `waitFor` always TIMES OUT (models a label that never renders → park). */
   locatorTimeout?: boolean;
+  /**
+   * Throw a TRANSIENT nav error on the first N api_group OVERLAY MOUNTS (the function-form overlay `evaluate`,
+   * targeted by its `api_group` copyKey) — models the SPA destroying the context under the mount (the live-#5
+   * blocker). The overlay's own bounded retry absorbs a few; past that the driver's atomic re-tag+re-mount does.
+   */
+  apiGroupMountThrowTimes?: number;
+  /**
+   * The first N api_group mounts RUN WITHOUT THROWING but PAINT NOTHING — models `mountOverlay`'s silent
+   * `if(!target) return` no-op when the tag was lost to a soft-nav (the review's HIGH: a fail-OPEN success). The
+   * driver's post-mount `overlayMounted` verify must catch this and force the atomic re-tag+re-mount.
+   */
+  apiGroupMountNoPaintTimes?: number;
 }
 
 /** A minimal fake Playwright Locator: enough of the surface the SPA-stable resolver uses (never a click/type). */
@@ -116,6 +128,10 @@ class FakePage {
   readonly scripts: string[] = [];
   clickCalls = 0;
   private throwLocateLeft: number;
+  private apiGroupMountThrowLeft: number;
+  private apiGroupMountNoPaintLeft: number;
+  /** Whether the most recent overlay mount actually PAINTED — what the driver's `overlayMounted` verify reads. */
+  private overlayPainted = false;
   private readonly closeHandlers: Array<() => void> = [];
 
   constructor(o: FakePageOptions = {}) {
@@ -128,6 +144,8 @@ class FakePage {
     this.postOpenCensusSequence = o.postOpenCensusSequence;
     this.locatorTimeout = o.locatorTimeout ?? false;
     this.throwLocateLeft = o.throwLocateTimes ?? 0;
+    this.apiGroupMountThrowLeft = o.apiGroupMountThrowTimes ?? 0;
+    this.apiGroupMountNoPaintLeft = o.apiGroupMountNoPaintTimes ?? 0;
   }
 
   url(): string {
@@ -155,7 +173,28 @@ class FakePage {
     // so a single sweep proves no evaluate ever reads a credential value.
     const s = typeof fnOrStr === "string" ? fnOrStr : `[fn] ${String(fnOrStr)}`;
     this.scripts.push(s);
-    if (typeof fnOrStr !== "string") return undefined; // overlay/observer function-form → no-op
+    if (typeof fnOrStr !== "string") {
+      const copyKey = (_arg as { copyKey?: string } | undefined)?.copyKey ?? "";
+      // The overlay MOUNT is the function-form evaluate carrying scrollIntoView; the `overlayMounted` verify is the
+      // one carrying getElementById WITHOUT scrollIntoView/untrack. Model the api_group mount's live failure modes.
+      const isMount = s.includes("scrollIntoView");
+      const isOverlayVerify = s.includes("getElementById") && !s.includes("scrollIntoView") && !s.includes("untrack");
+      if (isMount) {
+        if (copyKey.includes("api_group") && this.apiGroupMountThrowLeft > 0) {
+          this.apiGroupMountThrowLeft -= 1;
+          throw new Error("Execution context was destroyed, most likely because of a navigation");
+        }
+        if (copyKey.includes("api_group") && this.apiGroupMountNoPaintLeft > 0) {
+          this.apiGroupMountNoPaintLeft -= 1;
+          this.overlayPainted = false; // ran without throwing, but painted nothing (tag lost) — the fail-open case
+          return undefined;
+        }
+        this.overlayPainted = true; // a real mount paints the overlay
+        return undefined;
+      }
+      if (isOverlayVerify) return this.overlayPainted; // the driver's post-mount overlayMounted(page) read
+      return undefined; // other overlay/observer function-form → no-op
+    }
     // Once the applications list has been read, the seller opens their app → the surface becomes the detail page
     // (or a scripted wrong page). This is what the open_app navigation observe + VERIFY_OPEN re-probe read.
     if (s.includes("passwordFieldPresent")) return this.opened ? this.postOpenCensusRead() : this.census; // census
@@ -351,11 +390,17 @@ describe("NaverIssuanceDriver over a fake Page — the calibrated NEW-app (creat
       for (const tok of [".value", "inputValue", "clipboard", "readText(", ".screenshot("]) {
         expect(s, `leaked ${tok}`).not.toContain(tok);
       }
-      // Any evaluated snippet that reads element TEXT must be the AUDITED value-free fixed-label locate script
-      // (guarded for value-free OUTPUT in visual-recon-guard) — never some other, unaudited text read. This
-      // catches a future driver change that started reading DOM text outside that one audited path.
+      // Any evaluated snippet that reads element TEXT must be one of the AUDITED value-free label-comparison
+      // scripts — never some other, unaudited text read. Two are allowed, both of which read text SOLELY to
+      // compare against KNOWN fixed labels and emit ONLY a count/sig/boolean (their value-free OUTPUT is guarded
+      // separately — the fixed-label locate in visual-recon-guard, the census in observe-api-center's
+      // "emits only enums/buckets/booleans" test):
+      //   - the fixed-label locate/tag script (`issuance-fixed-label`), and
+      //   - the API-center census (`appDetailMarkerPresent` — the structural app-detail marker, a boolean).
+      // This still catches a future driver change that started reading DOM text outside those audited paths.
       if (!s.startsWith("[fn]") && (s.includes(".textContent") || s.includes(".getAttribute("))) {
-        expect(s, "text read must be the audited fixed-label locate script").toContain("issuance-fixed-label");
+        const audited = s.includes("issuance-fixed-label") || s.includes("appDetailMarkerPresent");
+        expect(audited, "text read must be an audited value-free label-comparison script").toBe(true);
       }
     }
   });
@@ -549,6 +594,66 @@ describe("NaverIssuanceDriver — bounded in-page retry on an execution-context 
     expect(FakeLocator.waitForCalls).toBe(1);
     // The audited fixed-label `.evaluate` never ran (the locator gated it): resolution stayed off `.evaluate`.
     expect(page.scripts.some((s) => s.includes("issuance-fixed-label"))).toBe(false);
+  });
+});
+
+describe("NaverIssuanceDriver — SPA-safe overlay mount (api_group overlay renders despite a soft-nav)", () => {
+  it("recovers a transient context-destroy during the api_group OVERLAY MOUNT → overlay renders, run completes", async () => {
+    // The overlay mount was the remaining raw `.evaluate` that raced the SPA soft-nav (live-#5). THREE transient
+    // throws exhaust the overlay's own bounded retry, so the driver's ATOMIC re-tag + re-mount must recover — the
+    // api_group section is highlighted (its overlay mounts) and the walk completes, instead of parking with no overlay.
+    const { io, engine, session } = build({ appEntryCount: 1, apiGroupMountThrowTimes: 3 });
+    startRun(io);
+    await session.whenSettled();
+    await pressNextToComplete(io, engine, session);
+
+    expect(engine.currentStage()).toBe("guidance_complete");
+    expect(io.lastView()?.status).toBe("COMPLETED");
+    expect(io.events().map((e) => e.type)).not.toContain("RUN_FAILED");
+    // api_group WAS highlighted (its overlay mounted) despite the transient mount throws — not a page_mismatch park.
+    expect(io.events().some((e) => e.type === "TARGET_HIGHLIGHTED" && e.payload.stepId === "aw.issuance_api_group")).toBe(true);
+  });
+
+  it("a PERMANENT overlay-mount fault parks recoverably (never loops, never RUN_FAILED)", async () => {
+    // A page that destroys the context on EVERY api_group mount is a genuine fault: after the overlay retry AND
+    // the driver's bounded re-tag+re-mount both exhaust, it parks page_mismatch (recoverable), never a dead loop.
+    const { io, engine, session } = build({ appEntryCount: 1, apiGroupMountThrowTimes: 99 });
+    startRun(io);
+    await session.whenSettled();
+
+    expect(engine.currentStage()).toBe("page_mismatch");
+    expect(io.lastView()?.blocker).toEqual({ code: "UI_DRIFT", recoverable: true });
+    expect(io.events().map((e) => e.type)).not.toContain("RUN_FAILED");
+  });
+
+  it("a SILENT no-op mount (ran, painted nothing) is CAUGHT by the overlayMounted verify → atomic re-mount recovers", async () => {
+    // The review's HIGH: the mount can run WITHOUT throwing yet paint nothing (mountOverlay's `if(!target) return`
+    // when the tag was lost to a soft-nav — including when the mount's own retry ran against a fresh context). The
+    // post-mount `overlayMounted` verify must catch that and force the atomic re-tag+re-mount, so the run does NOT
+    // report a highlighted control with no overlay (fail-OPEN). Two silent no-ops, then it paints and completes.
+    const { io, engine, session } = build({ appEntryCount: 1, apiGroupMountNoPaintTimes: 2 });
+    startRun(io);
+    await session.whenSettled();
+    await pressNextToComplete(io, engine, session);
+
+    expect(engine.currentStage()).toBe("guidance_complete");
+    expect(io.lastView()?.status).toBe("COMPLETED");
+    // api_group WAS truly highlighted (overlay painted) only after the verify forced a re-mount — not fail-open.
+    expect(io.events().some((e) => e.type === "TARGET_HIGHLIGHTED" && e.payload.stepId === "aw.issuance_api_group")).toBe(true);
+  });
+
+  it("a PERMANENT silent no-op mount parks recoverably — never a fail-OPEN highlight with no overlay", async () => {
+    // If the mount NEVER paints, the verify keeps failing; after the bounded re-tag+re-mount exhausts it parks
+    // page_mismatch (recoverable) rather than emitting TARGET_HIGHLIGHTED for a control with no overlay on screen.
+    const { io, engine, session } = build({ appEntryCount: 1, apiGroupMountNoPaintTimes: 99 });
+    startRun(io);
+    await session.whenSettled();
+
+    expect(engine.currentStage()).toBe("page_mismatch");
+    expect(io.lastView()?.blocker).toEqual({ code: "UI_DRIFT", recoverable: true });
+    // Fail-CLOSED: api_group was NOT reported highlighted, because its overlay never painted.
+    expect(io.events().some((e) => e.type === "TARGET_HIGHLIGHTED" && e.payload.stepId === "aw.issuance_api_group")).toBe(false);
+    expect(io.events().map((e) => e.type)).not.toContain("RUN_FAILED");
   });
 });
 

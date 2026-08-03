@@ -126,6 +126,57 @@ describe("classifyApiCenterPage — structural, fail-closed, always calibration-
     const r = classifyApiCenterPage(onTarget({ readonlyFieldCount: 2, editableTextInputCount: 2, listLikeContainerCount: 5 }));
     expect(r.pageCategory).toBe("credential_issuance");
   });
+
+  // Live-#5 regression: the EXISTING-app detail page renders its ID/Secret as PLAIN TEXT (no editable/read-only
+  // inputs), so it has ONLY list-like containers and mis-read as `app_list`. The structural app-detail marker
+  // (API-group heading / Application-ID label) must classify it as app_detail even with a list and no inputs.
+  it("app-detail marker present + list, no inputs → app_detail (structural detail detection, not app_list)", () => {
+    const r = classifyApiCenterPage(onTarget({ appDetailMarkerPresent: true, listLikeContainerCount: 5 }));
+    expect(r.pageCategory).toBe("app_detail");
+  });
+
+  it("precedence: read-only still wins over the app-detail marker → credential_issuance", () => {
+    const r = classifyApiCenterPage(onTarget({ appDetailMarkerPresent: true, readonlyFieldCount: 2 }));
+    expect(r.pageCategory).toBe("credential_issuance");
+  });
+
+  it("no marker + only a list → still app_list (marker is required to override the list signal)", () => {
+    const r = classifyApiCenterPage(onTarget({ appDetailMarkerPresent: false, listLikeContainerCount: 5 }));
+    expect(r.pageCategory).toBe("app_list");
+  });
+});
+
+describe("EXTRACT_API_CENTER_CENSUS — app-detail marker is value-free (boolean-only)", () => {
+  it("detects a fixed API-group heading label as the app-detail marker (only a boolean leaves)", () => {
+    // A detail-like DOM: no inputs/forms, but an element whose accessible name is EXACTLY the API-group label.
+    const doc = {
+      querySelector: () => null, // no password / submit
+      querySelectorAll: (sel: string) => {
+        if (sel === "input" || sel === "form") return [];
+        if (sel === "table, ul, ol, [role='grid'], [role='table']") return [];
+        // the marker candidate query → one element whose text is exactly the API-group label
+        return [{ getAttribute: () => null, textContent: "API 그룹" }];
+      },
+    };
+    const census = new Function("document", `return ${EXTRACT_API_CENTER_CENSUS}`)(doc) as ApiCenterStructuralCensus;
+    expect(census.appDetailMarkerPresent).toBe(true);
+    // Value-free: the census output carries only the boolean, never the matched label text.
+    expect(JSON.stringify(census)).not.toContain("그룹");
+    // End-to-end: a plain-text detail page (marker, no inputs, no list) classifies as app_detail, not app_list.
+    expect(observeFrom("api_center_host", census).pageCategory).toBe("app_detail");
+  });
+
+  it("does NOT mark a page whose labels do not exactly match (fail-closed to no-marker)", () => {
+    const doc = {
+      querySelector: () => null,
+      querySelectorAll: (sel: string) => {
+        if (sel === "input" || sel === "form" || sel === "table, ul, ol, [role='grid'], [role='table']") return [];
+        return [{ getAttribute: () => null, textContent: "API 그룹 관리 및 설정" }]; // a superstring, not exact
+      },
+    };
+    const census = new Function("document", `return ${EXTRACT_API_CENTER_CENSUS}`)(doc) as ApiCenterStructuralCensus;
+    expect(census.appDetailMarkerPresent).toBe(false);
+  });
 });
 
 describe("screenApiCenterUrl — pre-launch fail-closed gate", () => {
@@ -185,6 +236,7 @@ describe("EXTRACT_API_CENTER_CENSUS — browser-context safe (regression for the
       editableTextInputCount: 1, // the text input; the password input is not counted as editable
       readonlyFieldCount: 0,
       listLikeContainerCount: 0,
+      appDetailMarkerPresent: false, // the login DOM carries no API-group/Application-ID marker label
     });
     // And it classifies as a login page end-to-end.
     expect(observeFrom("api_center_host", census).pageCategory).toBe("login");
@@ -510,6 +562,7 @@ describe("observeFrom — end-to-end sanitized shape leaks no value/URL/DOM", ()
         editableTextInputCountBucket: "none",
         readonlyFieldCountBucket: "many",
         listLikeContainerCountBucket: "none",
+        appDetailMarkerPresent: false,
       },
       blockers: ["LIVE_DOM_CALIBRATION_PENDING"],
     });

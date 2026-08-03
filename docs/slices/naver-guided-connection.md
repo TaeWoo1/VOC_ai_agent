@@ -573,6 +573,44 @@ SPA의 client-side(soft) navigation을 넘어 재-resolve하지 못한다** — 
   **오버레이 렌더링 라이브 증명은 이 봉합 뒤에도 미증명(다음 gated 승인 필요)** — 이번엔 탐색이 locator 기반이라 soft-nav에
   강함.
 
+### 0.2.13 개정 — **`NAVER Overlay-Mount SPA Hardening v1`: overlay MOUNT를 SPA-safe로 + app-detail 구조 분류 보강** ⭐ 현행 issuance 상태
+
+라이브 #5(0.2.12 뒤)에서 **탐색(locator)은 성공했으나 `mountOverlay`의 raw function-form `page.evaluate`가 soft-nav에
+걸려 throw** → api_group 오버레이가 끝내 mount 안 됨(빠른 ~85ms un-retried throw = 탐색 아님, mount임을 타이밍으로 진단).
+또한 존재-앱 상세 페이지가 **로딩 중 `app_list`로 오분류**(폼 입력 신호 없음, ID/Secret이 평문). 이 단위가 둘 다 봉합.
+
+- **overlay mount SPA-safe(`overlay.ts`):** `mountOverlay`의 `page.evaluate`를 **`runEvaluateResilient`(bounded 재시도
+  `MOUNT_EVAL_RETRIES=2`)**로 감쌈 — transient nav 오류(`isTransientNavError`: "Execution context was destroyed"/frame
+  detached/target closed 메시지 substring, 제어용으로만 읽고 로깅/방출 없음)면 짧게 쉬고 재시도, 비-transient는 즉시 전파.
+  모든 mount는 이전 오버레이를 제거하므로 **중복 없음**.
+- **atomic tag→mount + paint 검증(`naver-issuance-driver.ts`):** `resolveFixedLabelTarget`에 `afterTag` 콜백 추가 →
+  `highlightTarget`이 오버레이 mount를 afterTag로 넘겨 **tag와 mount를 같은 retried try·같은 재해결된 active page에서
+  원자적으로** 수행. tag와 mount 사이 soft-nav로 context가 파괴되면 그 attempt가 **재-tag+재-mount**(stale/lost tag에 mount
+  안 함). **[리뷰 HIGH] mount 뒤 `overlayMounted(page)` 검증**: `mountOverlay`는 tag가 사라지면 `if(!target) return`으로
+  **조용히 no-op**(그리고 mount의 내부 재시도가 fresh context에서 실행되면 throw를 그 no-op으로 바꿔버림) → 오버레이 없이
+  "highlight 성공"으로 보고되는 **fail-OPEN**. paint 안 됐으면 retryable 오류를 던져 원자 재-tag+재-mount 강제, 소진 시
+  `onDriveFault` recoverable page_mismatch (fail-CLOSED, `naver-live-import-driver`의 `verifyOverlayVisible` 패턴 차용).
+  locator timeout→`{count:0}`(target_not_found park). anti-drift sig 유지.
+- **whenSettled refcount(`issuance-session.ts`):** `autoBusy` boolean→**`busyCount` refcount**. START_RUN 드라이브와 그것이
+  spawn한 detached `watchBarrier`가 동시에 "busy"를 소유 → boolean은 먼저 끝난 쪽이 지워버려(overlay mount의 bounded 재시도가
+  실제 macrotask sleep을 span하자 표면화된 플레이크) `whenSettled`가 조기 반환. 각 소유자가 진입 시 ++ / finally에서 -- 하는
+  카운터로 **전체 체인이 정착해야 0** → 결정적. (테스트 결정성 훅; 프로덕션 동작 불변.)
+- **app-detail 구조 분류(`observe-api-center.ts`, 리뷰 finding #1):** census에 **value-free boolean `appDetailMarkerPresent`**
+  추가 — 요소 accessible-name을 **KNOWN 고정 라벨**(`APP_DETAIL_MARKER_LABELS = ["API 그룹","애플리케이션 ID"]`,
+  calibrated api_group/credentials exactText 재사용)과 EXACT 비교해 **boolean만** 반환(매치 텍스트 유출 없음; fixed-label
+  probe와 동일 패턴, OUTPUT은 observe-api-center "emits only enums/buckets/booleans" 테스트로 별도 가드). **[리뷰 MEDIUM]
+  marker candidate set에서 `th`/`a`/`button` 제외** — app-LIST는 테이블이라 컬럼 헤더(`th`)가 정확히 "애플리케이션 ID"/"API
+  그룹"일 수 있고 앱 행은 이름이 user data인 링크/버튼 → 리스트를 app_detail로 오분류(심하면 컬럼 헤더를 highlight)할 수 있어
+  heading/label류(`h*`/`dt`/`dd`/`label`/`legend`/`span`/`div`…)로 한정. `classifyApiCenterPage` precedence에
+  **marker→app_detail**(editable 다음, app_list 앞) 브랜치 추가 → 존재-앱 상세가 폼 입력 없이 평문이어도 app_detail로 분류.
+  잔여 false-match도 fail-closed(하류 api_group locate가 못 찾아 target_not_found park).
+- **게이트·리뷰:** collector typecheck + 전체 **6204 tests** 그린(+overlay-mount 회복·영구실패 park·**silent no-op fail-open
+  검증·영구 no-op park** 4, +classifier marker 3, +census marker value-free 2; 회귀 갱신). 독립 적대적 리뷰 **HIGH 1(mount가
+  no-op으로 fail-open) 반영**(overlayMounted 검증) + **MEDIUM 1(marker th/a/button false-match) 반영**(candidate 한정) + LOW
+  기록(runEvaluateResilient trailing dead-throw·공유 mountOverlay 스코프·watchBarrier pre-acted 미처리 rejection = 기존/무해).
+  **계약 불변**(새 stage/status/enum/마이그레이션 없음), **FE 변경 없음**, **라이브 실행·push/PR 없음.** 존재-앱 오버레이 렌더링
+  라이브 증명은 이 봉합으로 **기대되나 여전히 미증명(다음 gated 승인 필요)**.
+
 ---
 
 ## 0. v1 비준 (Ratification 2026-07-19) — 오프라인 구현 착수

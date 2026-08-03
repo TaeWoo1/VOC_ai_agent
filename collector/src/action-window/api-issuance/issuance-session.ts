@@ -39,7 +39,14 @@ export class IssuanceGuidanceSession {
 
   private started = false;
   private publishedSeq = 0;
-  private autoBusy = false;
+  /**
+   * Refcount of automatic drives in flight — NOT a boolean. The START_RUN drive and a detached `watchBarrier`
+   * (which it spawns) run concurrently and each own a unit of "busy"; a boolean let whichever finished first
+   * clear it while the other was still mid-flight (the flake surfaced once the overlay mount's bounded retry
+   * spanned real macrotask sleeps). A counter that each owner increments on entry and decrements in `finally`
+   * only reaches 0 when EVERY drive has settled, so `whenSettled` waits for the whole chain, not just the first.
+   */
+  private busyCount = 0;
   private unsubscribe: (() => void) | null = null;
   private surfaceCloseToken = 0;
 
@@ -68,7 +75,7 @@ export class IssuanceGuidanceSession {
   async whenSettled(): Promise<void> {
     for (let i = 0; i < 100_000; i++) {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      if (!this.autoBusy) return;
+      if (this.busyCount === 0) return;
     }
     throw new Error("issuance session: whenSettled did not converge");
   }
@@ -105,11 +112,11 @@ export class IssuanceGuidanceSession {
     this.publishState();
     if (command.type === "START_RUN" && outcome.ok) this.started = true;
     if (outcome.ok && "effect" in outcome && !isNoop(outcome.effect)) {
-      this.autoBusy = true;
+      this.busyCount += 1;
       void this.drive(outcome.effect)
         .catch((e) => this.onDriveError(e))
         .finally(() => {
-          this.autoBusy = false;
+          this.busyCount -= 1;
         });
     }
   }
@@ -221,7 +228,7 @@ export class IssuanceGuidanceSession {
       await this.driver.armObserve(target);
       acted = await this.driver.observeUserAction(target);
     }
-    this.autoBusy = true;
+    this.busyCount += 1;
     try {
       const next = this.engine.onUserActionObserved(target);
       // Publish the observation (USER_ACTION_OBSERVED / STEP_COMPLETED / RUN_COMPLETED) before driving on —
@@ -233,7 +240,7 @@ export class IssuanceGuidanceSession {
     } catch (e) {
       await this.onDriveError(e);
     } finally {
-      this.autoBusy = false;
+      this.busyCount -= 1;
     }
   }
 
@@ -259,11 +266,11 @@ export class IssuanceGuidanceSession {
     const effect = this.engine.onSurfaceClosed();
     this.publishState();
     if (!isNoop(effect)) {
-      this.autoBusy = true;
+      this.busyCount += 1;
       void this.drive(effect)
         .catch((e) => this.onDriveError(e))
         .finally(() => {
-          this.autoBusy = false;
+          this.busyCount -= 1;
         });
     }
   }

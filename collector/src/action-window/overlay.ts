@@ -31,8 +31,63 @@ export interface OverlayOptions {
 
 const OVERLAY_ID = "__aw_overlay__";
 
+/**
+ * How many EXTRA times a mount `evaluate` is retried when it throws a transient navigation error (the SPA
+ * destroyed the execution context under it — the NAVER app-detail case). Small: a page that keeps destroying
+ * the context on every mount is a genuine fault the caller's own recovery must handle, not this cosmetic layer.
+ */
+const MOUNT_EVAL_RETRIES = 2;
+const MOUNT_EVAL_GAP_MS = 150;
+
+/**
+ * A transient SPA navigation error under an `evaluate` — the execution context was destroyed / the frame
+ * detached mid-call because the single-page app soft-navigated. Detected by MESSAGE substring only (Playwright
+ * gives these a generic `Error` name, so the name cannot distinguish them). Read for control flow only — never
+ * logged or emitted, so no page content leaks.
+ */
+function isTransientNavError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : "";
+  return (
+    msg.includes("Execution context was destroyed") ||
+    msg.includes("context was destroyed") ||
+    msg.includes("frame was detached") ||
+    msg.includes("Frame was detached") ||
+    msg.includes("Target closed") ||
+    msg.includes("Target page, context or browser has been closed")
+  );
+}
+
+const overlaySleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Run one overlay `evaluate` (passed as a thunk) SPA-safely: on a transient navigation error (context destroyed
+ * / frame detached), pause briefly and retry — bounded by {@link MOUNT_EVAL_RETRIES}. A non-transient error
+ * propagates immediately; if every retry still hits the transient error, the last one propagates so the caller's
+ * own recovery can react. Re-runs the SAME `evaluate` on the SAME page/frame — the caller (e.g. the issuance
+ * driver) owns re-resolving a NEW active page/frame and re-tagging the target, so a full re-render is recovered
+ * one level up, not masked here. A thunk (not a `(page, fn, arg)` helper) keeps Playwright's `evaluate` overload
+ * inference intact for the inline page-function.
+ */
+async function runEvaluateResilient(run: () => Promise<unknown>): Promise<void> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= MOUNT_EVAL_RETRIES; attempt++) {
+    try {
+      await run();
+      return;
+    } catch (e) {
+      lastErr = e;
+      if (isTransientNavError(e) && attempt < MOUNT_EVAL_RETRIES) {
+        await overlaySleep(MOUNT_EVAL_GAP_MS);
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastErr;
+}
+
 export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Promise<void> {
-  await page.evaluate((o) => {
+  await runEvaluateResilient(() => page.evaluate((o) => {
     const target = document.querySelector("[data-aw-target]");
     const prev = document.getElementById("__aw_overlay__");
     if (prev) prev.remove();
@@ -86,7 +141,7 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
       window.removeEventListener("resize", reposition);
       delete (window as unknown as Record<string, unknown>)["__aw_overlay_untrack__"];
     };
-  }, opts);
+  }, opts));
 }
 
 /** Recompute the overlay position after layout movement. */

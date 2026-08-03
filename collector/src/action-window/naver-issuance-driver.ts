@@ -45,7 +45,7 @@
  */
 import type { Page } from "playwright";
 import { log } from "../log";
-import { mountOverlay, unmountOverlay } from "./overlay";
+import { mountOverlay, unmountOverlay, overlayMounted } from "./overlay";
 import { disarmObserver } from "./observer";
 import {
   EXTRACT_API_CENTER_CENSUS,
@@ -327,7 +327,11 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
    * wait); on a non-unique match `{ count }`; if the final annotation keeps throwing, the last error propagates and
    * the session's `onDriveError → engine.onDriveFault` parks `page_mismatch` recoverably.
    */
-  private async resolveFixedLabelTarget(target: IssuanceHighlightTarget, tag: boolean): Promise<LocateResult> {
+  private async resolveFixedLabelTarget(
+    target: IssuanceHighlightTarget,
+    tag: boolean,
+    afterTag?: (page: Page) => Promise<void>,
+  ): Promise<LocateResult> {
     const loc = locatorFor(target);
     const hasText = exactLabelRegex(loc.exactText);
     const script = guidedLocateScript(target, tag);
@@ -339,21 +343,41 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
       const located = page.locator(loc.candidateQuery, { hasText });
       try {
         // Auto-waiting resolution that survives the SPA's soft-navigations (the actual live fix). EVERY locator op
-        // (waitFor / count / scroll) AND the audited `.evaluate` share this one try, so a soft-nav that destroys the
-        // context under ANY of them is retried up to the bound rather than escaping unbounded.
+        // (waitFor / count / scroll), the audited tag `.evaluate`, AND the overlay mount (afterTag) share this one
+        // try, so a soft-nav that destroys the context under ANY of them is retried up to the bound rather than
+        // escaping unbounded.
         await located.first().waitFor({ state: "attached", timeout: LOCATOR_TIMEOUT_MS });
         const matchCount = await located.count();
         if (matchCount !== 1) return { count: matchCount }; // non-unique → engine parks target_not_found (recoverable)
         // Read-only: bring the section into view (never a click) so the tag lands on an on-screen element. Scroll is
         // best-effort — a scroll timeout/miss must not fail the resolve, so it never reaches the catch below.
         await located.first().scrollIntoViewIfNeeded({ timeout: LOCATOR_TIMEOUT_MS }).catch(() => undefined);
-        // The ONLY remaining `.evaluate` — the audited value-free tag+sig on the already-resolved unique element.
+        // The audited value-free tag+sig on the already-resolved unique element.
         const res = await this.evalStr<LocateResult>(page, script);
-        return res.count === 1 && res.sig ? { count: 1, sig: res.sig } : { count: res.count };
+        if (res.count !== 1 || !res.sig) return { count: res.count };
+        // ATOMIC tag → overlay mount, in the SAME try on the SAME re-resolved page: mounting the overlay reads the
+        // `[data-aw-target]` this tag just set, so doing it here (not after resolve returns) means a soft-nav
+        // between the tag and the mount destroys the context under the mount → this attempt retries and RE-TAGS +
+        // RE-MOUNTS on the fresh context, instead of mounting against a stale/lost tag. This is the live fix for the
+        // api_group overlay never rendering (the mount was the remaining un-retried `.evaluate`).
+        if (afterTag) {
+          await afterTag(page);
+          // VERIFY the overlay actually PAINTED. `mountOverlay` silently no-ops (`if(!target) return`) when the tag
+          // was lost to a soft-nav between the tag and the mount — and the mount's own bounded retry can even
+          // convert a context-destroyed throw INTO that silent no-op (its retry runs against a fresh context whose
+          // DOM no longer carries `[data-aw-target]`). Without this check that reads back as a highlighted control
+          // with NO overlay on screen — a fail-OPEN success, the exact bug this unit fixes. If it did not paint,
+          // throw a retryable (non-timeout) error so THIS attempt's outer loop RE-TAGS + RE-MOUNTS on the current
+          // context; on exhaustion it propagates → `onDriveFault` → recoverable page_mismatch (fail-closed).
+          if (!(await overlayMounted(page))) {
+            throw new Error("overlay produced no painted overlay (tag lost to a soft-nav before mount)");
+          }
+        }
+        return { count: 1, sig: res.sig };
       } catch (e) {
         // A locator TIMEOUT is a bounded miss (the label never rendered) → recoverable target_not_found, returned
         // WITHOUT retrying (retrying a timeout would just wait another full window). Any other error (a soft-nav
-        // destroying the context under count/evaluate) is retried up to the bound, then propagates → onDriveFault.
+        // destroying the context under count/tag/mount) is retried up to the bound, then propagates → onDriveFault.
         if (isTimeout(e)) return { count: 0 };
         lastErr = e;
         if (attempt < MAX_INPAGE_RETRIES) await sleep(this.opts.inpageRetryMs ?? INPAGE_RETRY_MS);
@@ -443,18 +467,14 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
       return { count: 1, sig: OPEN_APP_GUIDANCE_SIG };
     }
     if (!isIssuanceHighlightTarget(target)) return { count: 0 };
-    // Anti-drift: the locator RE-resolves the unique match (surviving soft-navs) and scrolls it into view, then the
-    // audited script RE-tags + re-signs it. The engine compares this sig against the locate sig and parks on
-    // page_mismatch if the unique match drifted between the two passes.
-    const res = await this.resolveFixedLabelTarget(target, true);
-    if (res.count === 1 && res.sig) {
-      // Same-page viewport checkpoint: mount the reused overlay, which SCROLLS the tagged section into the
-      // viewport centre (see `overlay.ts`) and shows the "여기입니다" pointer — the operator sees where the API
-      // group / Application ID is without any NAVER click being awaited (`REVEAL_SECTION_IN_VIEWPORT`).
-      await this.mountStepOverlay(page, target);
-      return { count: 1, sig: res.sig };
-    }
-    return { count: res.count };
+    // Anti-drift + SPA-safe mount: the locator RE-resolves the unique match (surviving soft-navs) and scrolls it
+    // into view, then the audited script RE-tags + re-signs it, and — in the SAME retried attempt — the overlay is
+    // mounted on that fresh tag (see `resolveFixedLabelTarget`'s `afterTag`). Mounting the reused overlay SCROLLS
+    // the tagged section into the viewport centre (see `overlay.ts`) and shows the "여기입니다" pointer, so the
+    // operator sees where the API group / Application ID is with no NAVER click awaited (`REVEAL_SECTION_IN_VIEWPORT`).
+    // The engine still compares this sig against the locate sig and parks page_mismatch if the match drifted.
+    const res = await this.resolveFixedLabelTarget(target, true, (activePage) => this.mountStepOverlay(activePage, target));
+    return { count: res.count, ...(res.count === 1 && res.sig ? { sig: res.sig } : {}) };
   }
 
   /** Mount the reused read-only step overlay for one target's operator-legible dev badge. Never clicks/types. */
