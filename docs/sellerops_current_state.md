@@ -12,6 +12,25 @@
 
 ---
 
+## 2026-08-03 부록 (10) — API Issuance Live Runtime Reset: 확정된 라이브 사실 baseline (현행)
+
+> `API Issuance Live Runtime Reset`. 누적된 라이브 시도(부록 5–9) 뒤 정본을 **확정 사실만** 담는 clean baseline로 리셋.
+> 아래 외의 원인·진단은 **가설**이며 확정 원인으로 기록하지 않는다. 세부·다음 단위: 슬라이스 §0.2.14. **문서-only, 라이브 실행 없음.**
+
+**확정된 라이브 사실:**
+- **open_app 전환 라이브 성공** (존재-앱: app_list→app_detail 관찰 + step 2 완료).
+- **app_detail 분류는 fully-loaded 상태에서 성공** (로딩 중엔 app_list/unknown 가능).
+- **api_group / credentials matchCount=1** (캘리브레이션 fixed-label 유일 해석).
+- **Playwright locator search 정상** (comma-list candidateQuery + hasText; 합성 진단 확인) — 탐색은 실패 지점 아님.
+- **overlay 아직 라이브 표시 성공 0회.**
+- **throw 지점 미확정** — tag / signature / mount / visibility-verify 중 어디인지 아직 미확정.
+
+**다음 단위 = `Overlay Root-Cause Isolation v1`:** resolve→scroll→tag→mount→visible-check 단계별 safe stage telemetry(오류
+name + 민감정보 없는 고정 reason enum만); 상태 기계·selector·bridge·runner 불변(순수 관측 추가); 단 한 번의 gated 라이브
+진단으로 정확한 실패 단계만 확정.
+
+---
+
 ## 2026-08-03 부록 (9) — Overlay-Mount SPA Hardening: overlay mount SPA-safe + app-detail 구조 분류 (현행)
 
 > `NAVER Overlay-Mount SPA Hardening v1`. 부록(8) 뒤 라이브 #5에서 탐색(locator)은 성공했으나 `mountOverlay`의 raw

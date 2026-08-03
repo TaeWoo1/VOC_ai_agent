@@ -611,6 +611,25 @@ SPA의 client-side(soft) navigation을 넘어 재-resolve하지 못한다** — 
   **계약 불변**(새 stage/status/enum/마이그레이션 없음), **FE 변경 없음**, **라이브 실행·push/PR 없음.** 존재-앱 오버레이 렌더링
   라이브 증명은 이 봉합으로 **기대되나 여전히 미증명(다음 gated 승인 필요)**.
 
+### 0.2.14 개정 — **`API Issuance Live Runtime Reset`: 확정된 라이브 사실 baseline (현행)** ⭐ 현행 issuance 상태
+
+누적된 라이브 시도(0.2.10–0.2.13, 여러 gated 세션·소진된 grant) 뒤, 정본을 **확정된 사실만** 담는 clean baseline로 리셋한다.
+아래 목록 외의 원인·진단은 **가설**이며 정본에 확정 원인으로 기록하지 않는다.
+
+**확정된 라이브 사실:**
+- **open_app 전환은 라이브 성공** — 존재-앱 브랜치에서 SellerOps가 seller의 `app_list → app_detail` 전환을 관찰하고 step 2를 완료한다.
+- **app_detail 분류는 페이지가 fully-loaded일 때 성공** — 상세 페이지가 완전히 로드된 뒤 sanitized category가 `app_detail`로 확정된다(로딩 중에는 `app_list`/`unknown`로 읽힐 수 있음).
+- **api_group / credentials 하이라이트 타깃은 matchCount=1** — 캘리브레이션된 fixed-label 타깃이 유일하게 해석된다.
+- **Playwright locator search는 정상** — comma-list candidateQuery + `hasText` 조합이 정상 동작함(합성 Playwright 진단으로 확인). 탐색 메커니즘은 실패 지점이 아니다.
+- **overlay는 아직 라이브 표시 성공 0회** — api_group/credentials 오버레이가 실제 화면에 렌더된 적이 없다.
+- **throw 지점 미확정** — api_group guide의 오류가 **tag / signature / mount / visibility-verify** 단계 중 어디서 발생하는지 **아직 확정되지 않음**.
+
+**다음 단위 = `Overlay Root-Cause Isolation v1` (오프라인 구현 → 단일 라이브 진단):**
+- resolve → scroll → tag → mount → visible-check **각 단계에 safe stage telemetry** 추가.
+- 각 단계는 **오류 name + 민감정보 없는 고정 reason enum만** 기록(페이지 값/텍스트/URL/셀렉터 무유출).
+- **상태 기계 · selector · bridge · runner는 변경하지 않는다**(순수 관측 추가만).
+- 목표: **단 한 번의 gated 라이브 진단**으로 정확한 실패 단계만 확정한다(수정은 그 다음 단위에서).
+
 ---
 
 ## 0. v1 비준 (Ratification 2026-07-19) — 오프라인 구현 착수
