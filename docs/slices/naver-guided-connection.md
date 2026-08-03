@@ -630,6 +630,34 @@ SPA의 client-side(soft) navigation을 넘어 재-resolve하지 못한다** — 
 - **상태 기계 · selector · bridge · runner는 변경하지 않는다**(순수 관측 추가만).
 - 목표: **단 한 번의 gated 라이브 진단**으로 정확한 실패 단계만 확정한다(수정은 그 다음 단위에서).
 
+### 0.2.15 개정 — **`NAVER Element Calibration Diagnostic`: 실제 app-detail의 api_group·애플리케이션 ID 안정 앵커를 조작자 DevTools 증거로 확정 (현행 진단 단위)** ⭐ 현행 issuance 상태
+
+0.2.14 Reset이 남긴 결정적 공백: **안정 DOM 앵커 자체가 측정되지 않았다**(세 번의 존재-앱 하이라이트 실패의 뿌리). `Overlay
+Root-Cause Isolation v1`보다 먼저, 실제 상세 페이지에서 두 요소의 앵커를 **자동 DOM 스크레이핑이 아니라 조작자 본인의
+DevTools 증거로** 확정한다.
+
+- **런타임 = 의도적으로 얇은 READ-ONLY CLI** (`collector/src/cli/calibrate-element-anchors.ts`): seller의 dedicated
+  persistent-profile Chrome를 **한 번** 열고(사전-스크리닝된 API-center base로 goto 1회) **대기(idle)**만 한다. **페이지를
+  일절 읽지 않는다** — `.evaluate` 없음, 속성/텍스트/값 읽기 없음, 클릭·입력·재-내비게이션·하이라이트·태그 없음. 소스 가드가
+  `.evaluate*`/`.$eval*`/`.$$*`/`allTextContents`/`addInitScript` 등 페이지-읽기·in-page 스크립트 토큰 전부와 값-읽기·액션·
+  writer·backend 토큰을 금지해 "아무것도 읽지 않음"을 증명한다.
+- **게이트**: **READ-ONLY 승인 플래그**(`--i-understand-this-inspects-live-naver-read-only`)만 허용, **모든 MUTATING 플래그
+  (export/reply/no-ingest/session-recovery/classify-only)는 거부**(약한 프로브에 강한 grant = 중단 사유). `screenApiCenterUrl`
+  fail-closed(런치 전), `NODE_ENV=production` 거부, goto 정확히 1회, 항상 `ctx.close()`, import 시 inert.
+- **증거 수집 = 조작자 DevTools** (`docs/slices/naver-element-calibration-snippet.md`의 value-scoped 스니펫): 조작자가
+  Elements에서 **api_group 헤딩 라벨**과 **애플리케이션 ID 라벨**을 각각 선택(`$0`)하고 Console에서 스니펫 실행 → **sanitized
+  구조만** 반환: tag / role / class 이름 / data-·aria- 속성 **이름** / (테스트-훅 허용목록에 한해) 구조적 값 / labelMatch 분류 /
+  top-vs-iframe. **allowlist + positive-shape** 설계(“비밀처럼 보이면 제외”가 아님) — Client ID/Secret 값·입력값·전체
+  `outerHTML`·쿠키·스토리지·토큰·자유형 속성값(aria-label 텍스트·상점/판매자명)은 **구조적으로 출력 불가**. 조작자가 두 JSON을
+  SellerOps 세션에 붙여넣으면 분석.
+- **선택**: 라벨 요소를 고른다(값 필드가 아님). 스니펫은 잘못 선택 시에도 값을 흘리지 않도록 allowlist가 백스톱.
+- **산출(보고만)**: ① 두 요소의 **안정 앵커 후보**, ② 하이라이트 대상이 **라벨인지 부모 섹션인지**, ③ **frame/surface 구조**,
+  ④ **다음 최소 수정안**. 이 단위는 **selector·상태 기계·overlay·bridge·runner를 변경하지 않는다** — 순수 진단.
+- **오프라인 상태(현행)**: CLI + 가드(63) + 스니펫 doc 완성, collector typecheck·전체 스위트 green(6267 passed), 독립 리뷰
+  1 HIGH(스니펫 음성-필터 우회 → allowlist+positive-shape로 전환)·1 MEDIUM(가드 토큰 공백 보강)·1 LOW(SIGINT 메시지) **모두
+  반영**, 스니펫 누출 테스트 LEAKS=NONE. **라이브 진단은 fresh bootstrap + 단일-사용 승인 대기(미실행)** — 자동 클릭·입력·
+  다음-단계·push/PR 없음.
+
 ---
 
 ## 0. v1 비준 (Ratification 2026-07-19) — 오프라인 구현 착수

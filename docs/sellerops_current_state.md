@@ -12,7 +12,22 @@
 
 ---
 
-## 2026-08-03 부록 (10) — API Issuance Live Runtime Reset: 확정된 라이브 사실 baseline (현행)
+## 2026-08-03 부록 (11) — NAVER Element Calibration Diagnostic: app-detail 안정 앵커를 조작자 DevTools 증거로 확정 (현행 진단 단위, 오프라인 완성/라이브 대기)
+
+> `NAVER Element Calibration Diagnostic`. 부록(10) Reset이 남긴 공백(**안정 DOM 앵커 미측정** — 존재-앱 하이라이트 실패의 뿌리)을,
+> `Overlay Root-Cause Isolation`보다 먼저, **조작자 본인 DevTools 증거로** 확정한다. 세부: 슬라이스 §0.2.15 + `docs/slices/naver-element-calibration-snippet.md`.
+
+- **얇은 READ-ONLY 런타임** `collector/src/cli/calibrate-element-anchors.ts`: dedicated Chrome를 한 번 열고(스크리닝된 base로 goto 1회) **대기만** —
+  `.evaluate` 없음, 값/텍스트/속성 읽기 없음, 클릭·입력·재-내비게이션·하이라이트·태그 없음. 가드가 "아무것도 읽지 않음"을 증명.
+- **게이트**: READ-ONLY 플래그(`--i-understand-this-inspects-live-naver-read-only`)만 허용; 모든 MUTATING 플래그 거부; URL fail-closed; production 거부; import inert.
+- **증거 = 조작자 DevTools 스니펫**(value-scoped): api_group 라벨·애플리케이션 ID 라벨을 `$0`로 선택→ sanitized 구조만(tag/role/class/attr **이름**/테스트-훅 값/labelMatch/frame).
+  **allowlist+positive-shape** 설계 — 값·outerHTML·쿠키·토큰·자유형 속성값(aria-label/상점명) 출력 불가. 누출 테스트 LEAKS=NONE.
+- **보고 산출만**: 안정 앵커 후보 / 하이라이트 대상=라벨 vs 부모 섹션 / frame·surface 구조 / 다음 최소 수정안. **selector·상태 기계·overlay·bridge·runner 불변.**
+- **상태**: 오프라인 완성(가드 63, collector typecheck+전체 6267 green), 독립 리뷰 HIGH·MEDIUM·LOW 전부 반영. **라이브 진단은 fresh bootstrap + 단일-사용 승인 대기(미실행)** — 자동 클릭·입력·다음-단계·push/PR 없음.
+
+---
+
+## 2026-08-03 부록 (10) — API Issuance Live Runtime Reset: 확정된 라이브 사실 baseline (직전)
 
 > `API Issuance Live Runtime Reset`. 누적된 라이브 시도(부록 5–9) 뒤 정본을 **확정 사실만** 담는 clean baseline로 리셋.
 > 아래 외의 원인·진단은 **가설**이며 확정 원인으로 기록하지 않는다. 세부·다음 단위: 슬라이스 §0.2.14. **문서-only, 라이브 실행 없음.**
