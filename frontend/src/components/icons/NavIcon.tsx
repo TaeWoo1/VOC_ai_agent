@@ -83,6 +83,24 @@ const NAV_ICON_PATHS: Record<string, ReactElement> = {
       <circle cx="19" cy="12" r="1.4" />
     </>
   ),
+  // Customer-operations memory: an archive of what has already been seen, not a warning.
+  memory: (
+    <>
+      <rect x="3.5" y="5" width="17" height="14" rx="2" />
+      <path d="M3.5 9.5h17" />
+      <path d="M9.5 13.5h5" />
+    </>
+  ),
+  settings: (
+    <>
+      <path d="M4 7h9M17 7h3" />
+      <path d="M4 12h3M11 12h9" />
+      <path d="M4 17h9M17 17h3" />
+      <circle cx="15" cy="7" r="2" />
+      <circle cx="9" cy="12" r="2" />
+      <circle cx="15" cy="17" r="2" />
+    </>
+  ),
   agent: (
     <>
       <rect x="5" y="8" width="14" height="10" rx="2" />
