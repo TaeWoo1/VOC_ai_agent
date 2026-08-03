@@ -144,6 +144,55 @@ function isTimeout(e: unknown): boolean {
 }
 
 /**
+ * The ordered stages of one fixed-label highlight attempt in {@link NaverIssuanceDriver.resolveFixedLabelTarget}.
+ * Emitted as sanitized stage telemetry so a SINGLE gated live diagnostic can name the EXACT stage a drive fault
+ * came from (the `API Issuance Live Runtime Reset` left this UNDETERMINED). Observation only — the stage marker
+ * changes no control flow.
+ *   - `resolve`       — the Playwright locator's bounded `waitFor(attached)` + uniqueness `count()`.
+ *   - `scroll`        — `scrollIntoViewIfNeeded` (best-effort; its own error is swallowed, logged separately).
+ *   - `tag`           — the audited value-free fixed-label tag+sig `.evaluate`.
+ *   - `mount`         — the overlay mount (`afterTag`).
+ *   - `visible_check` — the post-mount `overlayMounted` paint verify.
+ */
+type IssuanceStage = "resolve" | "scroll" | "tag" | "mount" | "visible_check";
+
+/**
+ * A FIXED, sanitized reason enum for a highlight fault — the ONLY failure detail emitted alongside the stage and
+ * the error NAME. Classified by branching on the error name/message, but the raw message is NEVER logged: only
+ * this closed enum leaves the driver, so no page value / text / URL / selector can ride out. Playwright's own
+ * fault messages ("Execution context was destroyed", "Target closed", …) carry no page content, but we still
+ * reduce them to this enum rather than emit them, per the calibration scope's "고정 reason enum만 기록".
+ */
+type IssuanceFaultReason =
+  | "TIMEOUT"
+  | "CONTEXT_DESTROYED"
+  | "FRAME_DETACHED"
+  | "TARGET_CLOSED"
+  | "NO_PAINT"
+  | "OTHER";
+
+/** The error's constructor NAME only (never its message) — the one identity token the telemetry may carry. */
+function errName(e: unknown): string {
+  return e instanceof Error ? e.name || "Error" : typeof e;
+}
+
+/**
+ * Map a thrown value to the fixed {@link IssuanceFaultReason}. Branches on the message for control flow ONLY;
+ * the message itself is never returned or logged. `NO_PAINT` matches this driver's own overlay-not-painted throw
+ * so a visible-check failure is distinct from a context-destroyed one — the exact distinction the root-cause
+ * isolation needs.
+ */
+function classifyFaultReason(e: unknown): IssuanceFaultReason {
+  if (e instanceof Error && e.name === "TimeoutError") return "TIMEOUT";
+  const msg = e instanceof Error ? e.message : "";
+  if (msg.includes("no painted overlay")) return "NO_PAINT";
+  if (msg.includes("context was destroyed") || msg.includes("Execution context was destroyed")) return "CONTEXT_DESTROYED";
+  if (msg.includes("frame was detached") || msg.includes("Frame was detached")) return "FRAME_DETACHED";
+  if (msg.includes("Target closed") || msg.includes("Target page, context or browser has been closed")) return "TARGET_CLOSED";
+  return "OTHER";
+}
+
+/**
  * A DEFINITIVE `open_app` landing category for VERIFY_OPEN polling — the categories that STOP the poll because
  * they will not change under further hydration:
  *   - `app_detail` / `credential_issuance` — the seller reached their application's own detail page (an existing
@@ -341,26 +390,52 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
       // Re-resolve the active page/frame each attempt so a context change (new tab) is followed, not stale-bound.
       const page = this.activePage();
       const located = page.locator(loc.candidateQuery, { hasText });
+      // Stage telemetry (observation only — never alters control flow): the stage that is CURRENTLY executing, so
+      // the catch can report the EXACT stage a fault came from. Advanced as each stage begins.
+      let stage: IssuanceStage = "resolve";
       try {
         // Auto-waiting resolution that survives the SPA's soft-navigations (the actual live fix). EVERY locator op
         // (waitFor / count / scroll), the audited tag `.evaluate`, AND the overlay mount (afterTag) share this one
         // try, so a soft-nav that destroys the context under ANY of them is retried up to the bound rather than
         // escaping unbounded.
+        stage = "resolve";
         await located.first().waitFor({ state: "attached", timeout: LOCATOR_TIMEOUT_MS });
         const matchCount = await located.count();
         if (matchCount !== 1) return { count: matchCount }; // non-unique → engine parks target_not_found (recoverable)
         // Read-only: bring the section into view (never a click) so the tag lands on an on-screen element. Scroll is
-        // best-effort — a scroll timeout/miss must not fail the resolve, so it never reaches the catch below.
-        await located.first().scrollIntoViewIfNeeded({ timeout: LOCATOR_TIMEOUT_MS }).catch(() => undefined);
+        // best-effort — a scroll timeout/miss must not fail the resolve, so it never reaches the catch below. But we
+        // DO record a swallowed scroll fault (a live hypothesis is that this scroll triggers a re-render that then
+        // destroys the context under the FOLLOWING tag): sanitized stage+name+reason only, no behaviour change.
+        stage = "scroll";
+        await located
+          .first()
+          .scrollIntoViewIfNeeded({ timeout: LOCATOR_TIMEOUT_MS })
+          .catch((e) => {
+            // A DISTINCT event (not `aw_issuance_stage_fault`) so counting terminal faults never conflates this
+            // harmless-but-informative swallowed scroll error with an actual drive fault. The scroll stays
+            // best-effort — this callback returns undefined, so the resolve is unaffected.
+            log("aw_issuance_stage_scroll_swallowed", {
+              target,
+              stage: "scroll",
+              attempt,
+              errorName: errName(e),
+              reason: classifyFaultReason(e),
+            });
+          });
         // The audited value-free tag+sig on the already-resolved unique element.
+        stage = "tag";
         const res = await this.evalStr<LocateResult>(page, script);
-        if (res.count !== 1 || !res.sig) return { count: res.count };
+        if (res.count !== 1 || !res.sig) {
+          log("aw_issuance_stage_nonunique", { target, stage: "tag", count: res.count });
+          return { count: res.count };
+        }
         // ATOMIC tag → overlay mount, in the SAME try on the SAME re-resolved page: mounting the overlay reads the
         // `[data-aw-target]` this tag just set, so doing it here (not after resolve returns) means a soft-nav
         // between the tag and the mount destroys the context under the mount → this attempt retries and RE-TAGS +
         // RE-MOUNTS on the fresh context, instead of mounting against a stale/lost tag. This is the live fix for the
         // api_group overlay never rendering (the mount was the remaining un-retried `.evaluate`).
         if (afterTag) {
+          stage = "mount";
           await afterTag(page);
           // VERIFY the overlay actually PAINTED. `mountOverlay` silently no-ops (`if(!target) return`) when the tag
           // was lost to a soft-nav between the tag and the mount — and the mount's own bounded retry can even
@@ -369,12 +444,27 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
           // with NO overlay on screen — a fail-OPEN success, the exact bug this unit fixes. If it did not paint,
           // throw a retryable (non-timeout) error so THIS attempt's outer loop RE-TAGS + RE-MOUNTS on the current
           // context; on exhaustion it propagates → `onDriveFault` → recoverable page_mismatch (fail-closed).
+          stage = "visible_check";
           if (!(await overlayMounted(page))) {
             throw new Error("overlay produced no painted overlay (tag lost to a soft-nav before mount)");
           }
         }
+        // The whole attempt succeeded — record which stages ran so the diagnostic distinguishes a locate-only
+        // resolve from a full tag→mount→paint. Sanitized: target enum + booleans only.
+        log("aw_issuance_stage_ok", { target, attempt, tagged: tag, mounted: !!afterTag });
         return { count: 1, sig: res.sig };
       } catch (e) {
+        // SANITIZED stage telemetry: the EXACT stage this attempt was in when it threw, the error NAME, and the
+        // fixed reason enum — the evidence that pins the root cause in ONE gated live diagnostic. No message, value,
+        // text, URL, or selector is emitted. This is pure observation; the control flow below is byte-unchanged.
+        log("aw_issuance_stage_fault", {
+          target,
+          stage,
+          attempt,
+          errorName: errName(e),
+          reason: classifyFaultReason(e),
+          timeout: isTimeout(e),
+        });
         // A locator TIMEOUT is a bounded miss (the label never rendered) → recoverable target_not_found, returned
         // WITHOUT retrying (retrying a timeout would just wait another full window). Any other error (a soft-nav
         // destroying the context under count/tag/mount) is retried up to the bound, then propagates → onDriveFault.

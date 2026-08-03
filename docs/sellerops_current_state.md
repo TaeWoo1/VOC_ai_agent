@@ -12,7 +12,18 @@
 
 ---
 
-## 2026-08-03 부록 (11) — NAVER Element Calibration Diagnostic: app-detail 안정 앵커를 조작자 DevTools 증거로 확정 (현행 진단 단위, 오프라인 완성/라이브 대기)
+## 2026-08-03 부록 (12) — Overlay Root-Cause Isolation v1: highlight 경로 단계별 sanitized stage telemetry (현행 진단 단위, 오프라인 완성/라이브 대기)
+
+> `Overlay Root-Cause Isolation v1`. 부록(10) Reset의 "throw 지점 UNDETERMINED"를 **단 한 번의 gated 라이브 진단으로 정확한 실패 단계만** 확정하기 위해 driver highlight 경로에 **순수 관측** 추가. 세부: 슬라이스 §0.2.16. **상태 기계·selector·bridge·runner·overlay 로직 불변 — `naver-issuance-driver.ts` 한 파일.**
+
+- **5단계 telemetry** `resolve|scroll|tag|mount|visible_check` + **고정 reason enum** `TIMEOUT|CONTEXT_DESTROYED|FRAME_DETACHED|TARGET_CLOSED|NO_PAINT|OTHER`(원문 message는 분기만·무기록). catch → `aw_issuance_stage_fault{target,stage,attempt,errorName(name-only),reason,timeout}`; swallowed scroll=별도 이벤트; tag 비유일=`_nonunique`; 성공=`_ok`. 값/텍스트/URL/셀렉터/원문 무유출.
+- **제어흐름 등가**(독립 리뷰 확정): scroll catch undefined 반환·early-return·timeout·retry·throw 모두 byte-불변, 추가 await 없음.
+- **가드**: 드라이버 소스가드 144 green(금지 토큰 미추가). 오프라인 테스트: 5단계 stage·reason 확정 + sanitization + happy stage_ok + swallowed/nonunique 분기. collector typecheck + 전체 **6275 passed**. 독립 리뷰 **HIGH·MEDIUM 없음**, LOW 3 전부 반영.
+- **다음 = 단일 gated 라이브 진단**(존재-앱 상세에서 api_group highlight 1회 → stage+reason으로 실패 단계 확정). 수정·자동클릭·다음단계·push/PR 없음.
+
+---
+
+## 2026-08-03 부록 (11) — NAVER Element Calibration Diagnostic: app-detail 안정 앵커를 조작자 DevTools 증거로 확정 (직전 진단 단위)
 
 > `NAVER Element Calibration Diagnostic`. 부록(10) Reset이 남긴 공백(**안정 DOM 앵커 미측정** — 존재-앱 하이라이트 실패의 뿌리)을,
 > `Overlay Root-Cause Isolation`보다 먼저, **조작자 본인 DevTools 증거로** 확정한다. 세부: 슬라이스 §0.2.15 + `docs/slices/naver-element-calibration-snippet.md`.

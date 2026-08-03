@@ -676,6 +676,34 @@ DevTools 증거로** 확정한다.
   메모**: 분류기 app_detail 마커 스캔은 `th` 제외(unit-2 MEDIUM) → "애플리케이션 ID"(`<th>`)는 분류기 마커로 못 씀, app_detail 감지는
   "API 그룹"(h4) 단독 의존(1개면 충분·fail-safe). **selector·상태 기계·overlay·bridge·runner 미변경 — 순수 진단·보고. push/PR 없음.**
 
+### 0.2.16 개정 — **`Overlay Root-Cause Isolation v1`: highlight 경로 단계별 sanitized stage telemetry (현행 진단 단위)** ⭐ 현행 issuance 상태
+
+0.2.14 Reset이 "throw 지점 UNDETERMINED(tag/signature/mount/visibility-verify)"로 남긴 공백을, **단 한 번의 gated 라이브
+진단으로 정확한 실패 단계만** 확정하기 위해 driver highlight 경로에 **순수 관측(telemetry)**만 추가. **상태 기계·selector·
+bridge·runner·overlay 로직은 불변** — `naver-issuance-driver.ts` 한 파일에 stage 마커 + sanitized 로그만.
+
+- **단계 어휘**: `resolveFixedLabelTarget` 한 시도의 5단계 `IssuanceStage = resolve | scroll | tag | mount | visible_check`
+  (`resolve`=locator waitFor+count, `scroll`=scrollIntoViewIfNeeded[best-effort], `tag`=audited fixed-label tag+sig
+  `.evaluate`, `mount`=overlay mount, `visible_check`=post-mount `overlayMounted` paint 검증).
+- **고정 reason enum** `IssuanceFaultReason = TIMEOUT | CONTEXT_DESTROYED | FRAME_DETACHED | TARGET_CLOSED | NO_PAINT
+  | OTHER`: `classifyFaultReason(e)`가 error name/message로 **분기만** 하고 **원문 message는 반환·기록 안 함** — 닫힌 enum만
+  유출. `NO_PAINT`은 드라이버 자신의 "no painted overlay" throw에 키잉되어 visible_check 실패를 context-destroy와 구분.
+- **텔레메트리(사이드이펙트 전용, 제어흐름 불변)**: catch에서 `aw_issuance_stage_fault {target, stage, attempt, errorName(=name
+  only), reason, timeout}`; swallowed scroll은 **별도 이벤트** `aw_issuance_stage_scroll_swallowed`(터미널 fault 카운트와 혼동
+  방지); tag 비유일은 `aw_issuance_stage_nonunique`; 성공은 `aw_issuance_stage_ok {target, attempt, tagged, mounted}`.
+  값/텍스트/URL/셀렉터/원문 message 무유출(`safeMeta` + 닫힌 enum + name-only).
+- **제어흐름 등가 확정**(독립 리뷰): scroll `.catch`는 여전히 undefined 반환(resolve 영향 없음), 비유일 early-return·timeout
+  `{count:0}`·retry bound·`throw lastErr` 모두 byte-불변, 추가 await 없음(whenSettled refcount 무영향).
+- **가드**: 드라이버 소스가드(144) green — 금지 토큰(`.value`/`.getAttribute(`/`.click(`/…) 미추가. `e.message` 분기는 페이지
+  읽기 아님.
+- **테스트(전부 offline)**: 5단계 각각 stage·reason 확정(resolve/TIMEOUT, tag/CONTEXT_DESTROYED×3, mount/CONTEXT_DESTROYED,
+  visible_check/NO_PAINT) + sanitization(원문 message 무유출, errorName="Error") + happy-path stage_ok + swallowed-scroll
+  별도 이벤트 + tag-nonunique 기록. collector typecheck + 전체 **6275 passed** green. 독립 리뷰 **HIGH·MEDIUM 없음**, LOW 3(스크롤
+  이벤트 분리·미커버 분기 2개 → **모두 반영**: 별도 이벤트명 + 두 분기 테스트 추가; errorName name-only 신뢰는 기존 `isTimeout`과
+  동일 전제).
+- **다음 = 단일 gated 라이브 진단**: 존재-앱 상세에서 api_group highlight를 1회 구동 → `aw_issuance_stage_fault`의 `stage`+`reason`
+  으로 **정확한 실패 단계 확정**(수정은 그 다음 단위). **수정·자동클릭·다음단계·push/PR 없음.**
+
 ---
 
 ## 0. v1 비준 (Ratification 2026-07-19) — 오프라인 구현 착수

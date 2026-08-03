@@ -27,6 +27,7 @@ import type { ActionWindowRunView } from "../../../../contracts/action-window/v2
 import { IssuanceEngine, makeIssuanceClock } from "../../../src/action-window/api-issuance/issuance-engine";
 import { IssuanceGuidanceSession } from "../../../src/action-window/api-issuance/issuance-session";
 import { NaverIssuanceDriver } from "../../../src/action-window/naver-issuance-driver";
+import { getLogSink, clearLogSink } from "../../../src/log";
 import type { ApiCenterStructuralCensus } from "../../../src/cli/observe-api-center";
 import type { LocateResult } from "../../../src/action-window/engine";
 
@@ -85,6 +86,14 @@ interface FakePageOptions {
    * driver's post-mount `overlayMounted` verify must catch this and force the atomic re-tag+re-mount.
    */
   apiGroupMountNoPaintTimes?: number;
+  /** The locator's `scrollIntoViewIfNeeded` REJECTS (best-effort scroll fault) — models a scroll that can't complete. */
+  scrollThrows?: boolean;
+  /**
+   * Decouples the in-page TAG count from the locator's uniqueness count: the fixed-label tag/locate script returns
+   * this result even though the locator resolved uniquely (count 1). Models real drift where the Playwright locator
+   * narrows to one match but the in-page exact-label scan counts differently → the `tag`-stage non-unique path.
+   */
+  tagResult?: LocateResult;
 }
 
 /** A minimal fake Playwright Locator: enough of the surface the SPA-stable resolver uses (never a click/type). */
@@ -107,6 +116,9 @@ class FakeLocator {
   async scrollIntoViewIfNeeded(_opts?: unknown): Promise<void> {
     // Read-only native scroll (not a click). Recorded so a test can prove the resolver scrolled the section.
     this.page.scripts.push("[locator] scrollIntoViewIfNeeded");
+    if (this.page.scrollThrows) {
+      throw new Error("Execution context was destroyed, most likely because of a navigation");
+    }
   }
 }
 
@@ -120,6 +132,8 @@ class FakePage {
   postOpenCensus: ApiCenterStructuralCensus;
   postOpenCensusSequence: ApiCenterStructuralCensus[] | undefined;
   locatorTimeout: boolean;
+  scrollThrows: boolean;
+  tagResult: LocateResult | undefined;
   /** Latches once the app-entry rows have been read — the seller then opens their app, so census → postOpen. */
   private opened = false;
   /** Index into `postOpenCensusSequence` — advances per post-open census read (last entry sticks). */
@@ -143,6 +157,8 @@ class FakePage {
     this.postOpenCensus = o.postOpenCensus ?? APP_DETAIL_CENSUS;
     this.postOpenCensusSequence = o.postOpenCensusSequence;
     this.locatorTimeout = o.locatorTimeout ?? false;
+    this.scrollThrows = o.scrollThrows ?? false;
+    this.tagResult = o.tagResult;
     this.throwLocateLeft = o.throwLocateTimes ?? 0;
     this.apiGroupMountThrowLeft = o.apiGroupMountThrowTimes ?? 0;
     this.apiGroupMountNoPaintLeft = o.apiGroupMountNoPaintTimes ?? 0;
@@ -208,6 +224,8 @@ class FakePage {
         this.throwLocateLeft -= 1;
         throw new Error("execution context was destroyed");
       }
+      // Decoupled tag count (drift): the in-page exact-label scan may count differently than the locator did.
+      if (this.tagResult) return this.tagResult;
       return this.locate;
     }
     if (s.includes("issuance-cleartag")) return true;
@@ -688,5 +706,106 @@ describe("NaverIssuanceDriver — VERIFY_OPEN rides out a mid-hydration unknown 
     expect(engine.currentStage()).toBe("page_mismatch");
     expect(io.lastView()?.blocker).toEqual({ code: "UI_DRIFT", recoverable: true });
     expect(io.events().map((e) => e.type)).not.toContain("RUN_FAILED");
+  });
+});
+
+describe("NaverIssuanceDriver — Overlay Root-Cause Isolation: per-stage sanitized fault telemetry", () => {
+  const REASONS = ["TIMEOUT", "CONTEXT_DESTROYED", "FRAME_DETACHED", "TARGET_CLOSED", "NO_PAINT", "OTHER"];
+  const faults = () => getLogSink().filter((e) => e.event === "aw_issuance_stage_fault");
+
+  it("names stage=resolve reason=TIMEOUT on a locator timeout — behaviour still count 0 (bounded miss)", async () => {
+    clearLogSink();
+    const page = new FakePage({ locatorTimeout: true });
+    const driver = new NaverIssuanceDriver(asPage(page), { inpageRetryMs: 0 });
+    const res = await driver.locateTarget("api_group");
+    expect(res).toEqual({ count: 0 }); // unchanged control flow
+    const f = faults();
+    expect(f.length).toBe(1); // a timeout is not retried
+    expect(f[0]!.meta).toMatchObject({ target: "api_group", stage: "resolve", reason: "TIMEOUT", timeout: true });
+  });
+
+  it("names stage=tag reason=CONTEXT_DESTROYED when the fixed-label evaluate loses its context (every attempt)", async () => {
+    clearLogSink();
+    const page = new FakePage({ throwLocateTimes: 99 });
+    const driver = new NaverIssuanceDriver(asPage(page), { inpageRetryMs: 0 });
+    await expect(driver.locateTarget("api_group")).rejects.toThrow();
+    const f = faults();
+    expect(f.length).toBe(3); // MAX_INPAGE_RETRIES(2) + 1
+    for (const e of f) expect(e.meta).toMatchObject({ stage: "tag", reason: "CONTEXT_DESTROYED" });
+  });
+
+  it("names stage=mount reason=CONTEXT_DESTROYED when the OVERLAY MOUNT loses its context", async () => {
+    clearLogSink();
+    const page = new FakePage({ apiGroupMountThrowTimes: 99 });
+    const driver = new NaverIssuanceDriver(asPage(page), { inpageRetryMs: 0 });
+    await expect(driver.highlightTarget("api_group")).rejects.toThrow();
+    const f = faults();
+    expect(f.length).toBeGreaterThanOrEqual(1);
+    expect(f.every((e) => e.meta.stage === "mount")).toBe(true);
+    expect(f.every((e) => e.meta.reason === "CONTEXT_DESTROYED")).toBe(true);
+  });
+
+  it("names stage=visible_check reason=NO_PAINT for a silent no-op mount — DISTINCT from a context-destroy", async () => {
+    clearLogSink();
+    const page = new FakePage({ apiGroupMountNoPaintTimes: 99 });
+    const driver = new NaverIssuanceDriver(asPage(page), { inpageRetryMs: 0 });
+    await expect(driver.highlightTarget("api_group")).rejects.toThrow();
+    const f = faults();
+    expect(f.length).toBeGreaterThanOrEqual(1);
+    expect(f.every((e) => e.meta.stage === "visible_check")).toBe(true);
+    expect(f.every((e) => e.meta.reason === "NO_PAINT")).toBe(true);
+  });
+
+  it("telemetry is SANITIZED: closed reason enum + error NAME only, never a raw fault message", async () => {
+    clearLogSink();
+    const page = new FakePage({ apiGroupMountThrowTimes: 99 });
+    const driver = new NaverIssuanceDriver(asPage(page), { inpageRetryMs: 0 });
+    await expect(driver.highlightTarget("api_group")).rejects.toThrow();
+    for (const e of faults()) {
+      expect(REASONS).toContain(e.meta.reason as string);
+      expect(e.meta.errorName).toBe("Error"); // NAME only — no message
+      const blob = JSON.stringify(e.meta);
+      // The raw Playwright message ("…most likely because of a navigation") must never ride out in the meta.
+      expect(blob).not.toContain("most likely");
+      expect(blob).not.toContain("navigation");
+    }
+  });
+
+  it("emits stage_ok (no stage_fault) on the calibrated happy path", async () => {
+    clearLogSink();
+    const { io, engine, session } = build({ appEntryCount: 0 });
+    startRun(io);
+    await session.whenSettled();
+    await pressNextToComplete(io, engine, session);
+    expect(getLogSink().some((e) => e.event === "aw_issuance_stage_ok")).toBe(true);
+    expect(faults().length).toBe(0);
+  });
+
+  it("a swallowed SCROLL fault emits a DISTINCT event (not a terminal fault) and the resolve still succeeds", async () => {
+    clearLogSink();
+    // Scroll rejects, but it is best-effort: the resolve proceeds to tag+ok. The scroll fault is recorded under
+    // its own event so a diagnostic counting `aw_issuance_stage_fault` never conflates it with a drive fault.
+    const page = new FakePage({ scrollThrows: true });
+    const driver = new NaverIssuanceDriver(asPage(page), { inpageRetryMs: 0 });
+    const res = await driver.locateTarget("api_group");
+    expect(res).toEqual({ count: 1, sig: "abcd1234abcd1234" }); // resolve unaffected by the swallowed scroll
+    expect(faults().length).toBe(0); // NOT counted as a terminal fault
+    const swallowed = getLogSink().filter((e) => e.event === "aw_issuance_stage_scroll_swallowed");
+    expect(swallowed.length).toBe(1);
+    expect(swallowed[0]!.meta).toMatchObject({ target: "api_group", stage: "scroll", reason: "CONTEXT_DESTROYED" });
+  });
+
+  it("a tag-stage non-unique result is recorded (aw_issuance_stage_nonunique) and returned as count, not a fault", async () => {
+    clearLogSink();
+    // Locator resolved uniquely, but the in-page exact-label scan counted 2 → the tag-stage non-unique path: a
+    // sanitized nonunique record + a plain {count:2} return (engine parks target_not_found), never a stage fault.
+    const page = new FakePage({ tagResult: { count: 2 } });
+    const driver = new NaverIssuanceDriver(asPage(page), { inpageRetryMs: 0 });
+    const res = await driver.locateTarget("api_group");
+    expect(res).toEqual({ count: 2 });
+    expect(faults().length).toBe(0);
+    const nonunique = getLogSink().filter((e) => e.event === "aw_issuance_stage_nonunique");
+    expect(nonunique.length).toBe(1);
+    expect(nonunique[0]!.meta).toMatchObject({ target: "api_group", stage: "tag", count: 2 });
   });
 });
