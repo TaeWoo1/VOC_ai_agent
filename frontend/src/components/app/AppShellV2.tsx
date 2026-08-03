@@ -32,6 +32,14 @@ export function AppShellV2() {
 
   return (
     <div className="flex h-full flex-col">
+      {/* Without this, a keyboard user tabs through all seven nav destinations and the sign-out
+          button before reaching page content — on every screen. Hidden until focused. */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-xl focus:bg-brand-700 focus:px-4 focus:py-2 focus:text-base focus:font-semibold focus:text-white"
+      >
+        본문으로 건너뛰기
+      </a>
       <DemoRibbon />
 
       <div className="flex min-h-0 flex-1">
@@ -39,7 +47,11 @@ export function AppShellV2() {
         <div className="flex min-w-0 flex-1 flex-col">
           <AppTopBar />
           {/* pb-28 on mobile keeps content clear of the fixed tab bar. */}
-          <main className="flex-1 overflow-y-auto px-4 pb-28 pt-6 md:px-8 md:pb-10">
+          <main
+            id="main-content"
+            tabIndex={-1}
+            className="flex-1 overflow-y-auto px-4 pb-28 pt-6 outline-none md:px-8 md:pb-10"
+          >
             <div className="mx-auto max-w-6xl space-y-6">
               {AGENT_PROJECTION_ENABLED && <ProjectionView />}
               <Outlet />

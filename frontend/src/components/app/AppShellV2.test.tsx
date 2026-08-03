@@ -64,6 +64,20 @@ describe("AppShellV2 — navigation surfaces", () => {
     renderShell();
     expect(screen.getByText("페이지 내용")).toBeInTheDocument();
   });
+
+  it("lets a keyboard user skip the nav", () => {
+    // Browser walkthrough measured it: without this, the first eight tab stops on every screen are
+    // the seven nav destinations and the sign-out button, before any page content.
+    const { container } = renderShell();
+    const skip = screen.getByRole("link", { name: "본문으로 건너뛰기" });
+    expect(skip).toHaveAttribute("href", "#main-content");
+    // It is the FIRST focusable thing in the document, or it cannot do its job.
+    const focusable = container.querySelectorAll("a[href], button, [tabindex]");
+    expect(focusable[0]).toBe(skip);
+    const main = container.querySelector("#main-content");
+    expect(main?.tagName.toLowerCase()).toBe("main");
+    expect(main).toHaveAttribute("tabindex", "-1");
+  });
 });
 
 describe("AppShellV2 — 더보기 drawer", () => {
