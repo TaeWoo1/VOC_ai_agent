@@ -12,16 +12,16 @@
 
 ---
 
-## 2026-08-04 부록 (16) — NAVER Existing-App Phase B 완료 종결 (CLOSED) ✅
+## 2026-08-04 부록 (16, 정정) — `Existing-App API-Center Guidance Subflow`만 LIVE-PROVEN — 상위 `NAVER First Connection Tutorial v1`은 OPEN ⚠️
 
-> 기존-앱 가이드 하이라이트 경로(open_app → api_group → credentials)의 Phase B를 **완료 종결**. 세부: 슬라이스 §0.2.20. 추가 코드·live·push/PR 없이 상태 확정만.
+> **정정:** 이전 판은 이를 "NAVER Existing-App Phase B **CLOSED**"로 적어 **튜토리얼 전체 종결처럼** 읽혔다(과대 주장). 실제 라이브 증명은
+> **API 센터 안의 하이라이트 렌더 하위 흐름(`Existing-App API-Center Guidance Subflow`) 하나뿐**이고, 상위 **`NAVER First Connection Tutorial v1`은 OPEN**이다.
+> 항목별 감사(DONE/PARTIAL/NOT STARTED)는 슬라이스 **§0.2.21**을 정본으로 본다. 추가 코드·live·push/PR 없이 상태 정정만.
 
 - **브랜치/트리**: `feat/naver-api-issuance-tutorial-reliability-v1`, HEAD `a17d1cc`, **working tree clean**(`node_modules/`만 미추적).
-- **구현 `048c1b8`**(credentials 태그 `<th>`→`<tr>` 승격) + **live 결과 docs `a17d1cc`**. 둘 다 로컬(NOT pushed/PR'd).
-- **게이트 최종**: collector typecheck green; 전체 **6312 passed / 138 skip / 0 fail**.
-- **existing-app = LIVE-PROVEN**: Calibration→Root-Cause Isolation→Fault Identification(position_overlay/SYMBOL_NOT_DEFINED)→Mount Fix(`__name` 심, array-index; api_group+credentials 라이브 재검증)→Credentials Row Highlight(행 `<tr>` 승격 라이브 커버리지) 전 계보 종결. open_app·api_group·credentials 세 체크포인트 모두 실 NAVER 기존-앱에서 overlay 렌더·`mounted:true`·mount fault 전무.
-- **new-app = PENDING (blocker 아님)**: create_app 하이라이트 라이브 증명은 **empty-app 테스트 스토어 부재**로만 미실행. 셀렉터 `live_confirmed`+`SELECTORS_CALIBRATED`, mount 경로는 api_group/credentials와 동일 코드로 이미 라이브 증명 → 잔여는 환경(빈 스토어) 확보뿐, 코드 공백 아님.
-- **남은 blocker 없음.** 다음 후보는 별도 지시(예: new-app empty-store 라이브 보정, 또는 v1 통합).
+- **라이브 증명된 것 = API-center 하이라이트 하위 흐름만**: Calibration→Root-Cause Isolation→Fault Identification(position_overlay/SYMBOL_NOT_DEFINED)→Mount Fix(`__name` 심, array-index; api_group+credentials 라이브 재검증)→Credentials Row Highlight(행 `<tr>` 승격 라이브 커버리지). open_app·api_group·credentials 세 체크포인트가 실 NAVER 기존-앱에서 overlay 렌더·`mounted:true`·mount fault 전무. 구현 `048c1b8` + docs `a17d1cc`(둘 다 로컬). 게이트: collector typecheck green, 전체 **6312 passed / 138 skip / 0 fail**.
+- **튜토리얼 종결 감사(§0.2.21 요약)**: DONE = §1 시작화면·§2 분기·§3 복귀·§4 secure handoff·§6 암호화 영속; PARTIAL = §5 credential validation(intake 미강제·flag-off·라이브 미증명)·§7 계정 바인딩(DB unique 백스톱 부재)·§8 상태(NAVER 계정 상태머신 부재·`connection_status` PENDING 고착)·§9 초기 sync handoff(FE 오케스트레이션만·backend 자동 훅 없음)·§10 new-app(create_app 하이라이트 라이브 PENDING). NOT STARTED = 없음(모두 골격 존재).
+- **다음 구현 단위 제안**: `NAVER Connection Lifecycle State v1`(backend `connection_status` 전이 + stale 주석 de-stale, 오프라인·마이그레이션 없음). 튜토리얼 종결에 이후 남는 것: §7 DB unique(마이그레이션+PO), 가이드-FE 라이브 e2e 워크(실 스토어+fresh 승인), §10 create_app 하이라이트(빈-앱 스토어).
 
 ---
 

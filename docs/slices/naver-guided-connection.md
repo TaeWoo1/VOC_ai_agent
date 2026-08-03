@@ -848,10 +848,15 @@ selector 앵커·상태기계·bridge·runner·telemetry 불변.**
   스크린샷·클립보드 **미판독**, return·step5·추가 "다음" 없이 즉시 teardown, :47615 free, 코드 미변경, 그랜트 소진.
 - **상태**: **오프라인/실-chromium/라이브 모두 완료 — 커버리지 목표 라이브 증명.** 부록14의 credentials 행-커버리지 갭 **종결**. push/PR 없음.
 
-### 0.2.20 — **`NAVER Existing-App Phase B` 완료 종결 (CLOSED 2026-08-04)** ✅
+### 0.2.20 — **`Existing-App API-Center Guidance Subflow` LIVE-PROVEN — 상위 `NAVER First Connection Tutorial v1`은 여전히 OPEN (정정 2026-08-04)** ⚠️ 정정
 
-기존-앱 가이드 하이라이트 경로(existing_app: open_app → api_group → credentials)의 Phase B(하이라이트 렌더 + 관찰 증명)를 **완료 상태로 종결**한다.
-아래는 종결 시점 정본 확정 사실(추가 코드·live·push/PR 없이 상태 확인만):
+> **정정 사유:** 이전 판은 이 항목을 "`NAVER Existing-App Phase B` **CLOSED**"로 적어, **상위 튜토리얼 전체가 종결된 것처럼** 읽혔다. 이는 과대 주장이다.
+> 실제로 라이브 증명된 것은 **`Existing-App API-Center Guidance Subflow`(NAVER API 센터 안에서의 하이라이트 렌더 하위 흐름) 하나뿐**이며, 이를 감싸는
+> **`NAVER First Connection Tutorial v1`(연결 시작 화면 → 분기 → NAVER 안내 → 복귀 → credential handoff → validation → 암호화 영속 → 계정 바인딩 → 상태 → 초기 sync)은 OPEN**이다.
+> 하위 흐름별 DONE/PARTIAL/NOT STARTED 감사는 **§0.2.21**을 정본으로 본다.
+
+**라이브 증명 완료 = `Existing-App API-Center Guidance Subflow`만.** 기존-앱 API 센터 하이라이트 경로(existing_app: open_app 관찰 → api_group → credentials)의
+하이라이트 렌더 + 관찰 하위 흐름만 종결. 아래는 그 **하위 흐름** 확정 사실(추가 코드·live·push/PR 없이 상태 확인만):
 
 - **브랜치/트리**: `feat/naver-api-issuance-tutorial-reliability-v1`, HEAD `a17d1cc`, **working tree clean**(추적 대상 없음; `node_modules/`만 미추적).
 - **구현 commit `048c1b8`**(credentials 태그 `<th>`→`<tr>` 승격) + **live 결과 docs commit `a17d1cc`**(라이브 커버리지 증명). 둘 다 로컬(NOT pushed/PR'd).
@@ -864,10 +869,35 @@ selector 앵커·상태기계·bridge·runner·telemetry 불변.**
   앱이 있어 "애플리케이션 등록" 신규-앱 진입 화면을 라이브로 태그·관찰할 수 없음). create_app 셀렉터는 `live_confirmed`(matchCount=1 2회) +
   `SELECTORS_CALIBRATED` 상태이며, mount 경로는 api_group/credentials와 **동일 코드**로 이미 라이브 증명됨 → 잔여는 **환경(빈 스토어) 확보뿐**,
   코드 공백 아님. empty-app 스토어 확보 시 별도 단일-사용 승인으로 1회 걸으면 종결.
-- **남은 blocker 없음**: existing-app Phase B의 렌더/마운트/커버리지 결함은 전부 라이브로 종결. new-app은 코드가 아니라 테스트 환경 대기.
+- **이 하위 흐름 한정 남은 blocker 없음**: existing-app API-center 하이라이트의 렌더/마운트/커버리지 결함은 전부 라이브로 종결. new-app 하이라이트만 테스트 환경(빈 스토어) 대기.
+  **단, 이는 상위 튜토리얼의 종결을 뜻하지 않는다** — 튜토리얼 남은 범위는 §0.2.21 참조.
 
-> **RULED — `NAVER Existing-App Phase B` CLOSED (existing-app live-proven; new-app pending empty-app store, not a blocker).** 다음 후보는
-> 별도 지시로 결정(예: new-app empty-store 라이브 보정, 또는 v1 통합). 본 종결은 **상태 확정 문서**이며 추가 코드/live/push/PR을 포함하지 않는다.
+> **RULED — `Existing-App API-Center Guidance Subflow` LIVE-PROVEN; 상위 `NAVER First Connection Tutorial v1` OPEN.** 하이라이트 하위 흐름만 라이브 종결이며,
+> 튜토리얼 전체 범위(§0.2.21 감사)는 미종결. 다음 구현 단위는 §0.2.21 말미 제안 참조. 본 기록은 **상태 정정 문서**이며 추가 코드/live/push/PR을 포함하지 않는다.
+
+### 0.2.21 — **`NAVER First Connection Tutorial v1` 종결 범위 감사 (2026-08-04)** — 항목별 DONE / PARTIAL / NOT STARTED
+
+두 독립 감사(frontend 흐름 + backend credential/영속/바인딩/sync)로 각 단계를 검증. 근거는 `frontend/`·`backend/` 실제 코드(파일:라인). **live·push/PR 없음.**
+
+| # | 단계 | 상태 | 근거 / 잔여 |
+|---|------|------|------------|
+| 1 | SellerOps 연결 시작 화면 | **DONE** | `Channels.tsx:166` connect-naver CTA → `App.tsx:92` `/connect/naver` → `ConnectNaver.tsx` + `state.ts` `check_saved_credential` 진입 포크 |
+| 2 | existing / new-app 분기 | **DONE** | `application_path_choice` 3-way(`GuidedConnectionWizard.tsx:84`) + app-absence 게이트(`state.ts:169-188`); "1앱/스토어·삭제불가" 가드레일 반영 |
+| 3 | NAVER 안내 후 SellerOps 복귀 | **DONE** | 텍스트 튜토리얼 `return_to_sellerops`(`tutorial.ts:78`) + 새 탭 severed(`noopener`) + refresh-resume(`persistence.ts:26`, phase/path만·secret 무영속) + walkthrough 3-way runId 핸드셰이크(옵션) |
+| 4 | ID/Secret secure handoff | **DONE** | `SecureCredentialForm`(password·autoComplete off·제출 즉시 clear·reducer 우회 → 곧장 vault, `ConnectNaver.tsx:282`) + backend AES-256-GCM 봉투암호화 vault |
+| 5 | credential validation | **PARTIAL** | 라이브 토큰 검증 `NaverTokenClient.verify()`(`:133`) 존재·`ConnectionVerifier`로 `POST test-connection`에서 도달 가능. **그러나** intake(`storeCredential`)에서 자동 실행 안 함(별도 operator 액션); `sellerops.connector.naver.enabled` 기본 off; fake-HTTP 테스트만(라이브 미증명); `CollectControlService` 내 "verifier 미구현" 주석 stale |
+| 6 | encrypted persistence | **DONE** | `EnvelopeCipher`(per-cred DEK, master-wrap, GCM)·`CredentialVault` 유일 R/W·엔티티 암호문 컬럼만(`V3` `connector_credentials`, seller_account_id UNIQUE). **KMS는 명시적 후속**(현재 env master key), 앱계층 한정 |
+| 7 | seller account / shop 바인딩 | **PARTIAL** | `POST seller-accounts/api-channel` find-or-create idempotent + 채널행 PESSIMISTIC_WRITE 락 + credential seller_account_id UNIQUE. **그러나** `seller_accounts (org_id, channel_id, is_file_upload)` DB unique 백스톱 **부재**(락+방어적 findFirst 의존); 락 테스트는 H2 구조 검증만(런타임 FOR-UPDATE 미증명) — standing UNCERTAIN_MULTI_ACCOUNT 후속(마이그레이션+PO 필요) |
+| 8 | 성공 / 오류 / 재시도 상태 | **PARTIAL** | FE는 success/test-fail/sync-fail/recovery/terminal 전부 렌더 + retry. **그러나** ① FE `permission_review_required`·`call_environment_mismatch`는 backend가 사유코드를 아직 안 내보내 도달 불가(G3-C 의도적 fail-closed 유예); ② **NAVER 계정레벨 상태머신 부재** — `registerApiChannel`가 `connection_status=PENDING` 설정 후 이를 CONNECTED/RECONNECT_REQUIRED로 옮기는 경로 없음(health 테이블·rotation·retry는 존재하나 `SellerAccount.connectionStatus`는 PENDING 고착; Cafe24엔 온보딩 상태머신 있음, NAVER엔 없음); disconnect/revoke 엔드포인트 없음 |
+| 9 | 초기 sync handoff | **PARTIAL** | FE가 test SUCCESS → `runFirstSync()` → `api.manualSync(ORDER_SUMMARY)` → `first_order_sync` → `completed` 자동 체이닝(`ConnectNaver.tsx:244`). **그러나** 이는 **클라이언트 오케스트레이션**이며 backend 연결완료 훅으로 자동 first-sync를 트리거하지 않음; ORDER 라이브 경로는 flag-gated + A5 백엔드 경계 baseline만 라이브 증명(가이드-FE e2e 워크 미증명) |
+| 10 | new-app 경로 | **PARTIAL** | FE new-app 분기(`application_path_choice`="new" → issuance 튜토리얼/가이드 walkthrough) DONE. **그러나** create_app 하이라이트 라이브 증명은 empty-app 테스트 스토어 부재로 PENDING; 가이드 Action Window issuance **라이브 run**은 런타임 호스팅 의존(cross-workstream) |
+
+**종결 판정:** **`NAVER First Connection Tutorial v1` = OPEN.** DONE 4(§1·2·3·4·6 중 FE/vault) / PARTIAL 5(§5·7·8·9·10) / NOT STARTED 0(모든 항목에 최소 골격 존재; §9 backend 자동 트리거만 완전 부재). 라이브 증명은 **API-center 하이라이트 하위 흐름 하나뿐**.
+
+**다음 구현 단위 제안 (오프라인, 마이그레이션 없음): `NAVER Connection Lifecycle State v1`.**
+- **범위:** backend `SellerAccount.connectionStatus`를 실제 연결 결과로 전이 — test-connection OK + 첫 ORDER_SUMMARY sync SUCCESS → `PENDING→CONNECTED`, verify INVALID/실패 누적 → `RECONNECT_REQUIRED`(Cafe24 `Cafe24OnboardingService` 미러). `CollectControlService`의 stale "verifier 미구현" 주석 de-stale. capability/completed 상태가 **실제 영속 계정상태**를 반영하게 함(§8 FE 상태를 장식이 아닌 사실로).
+- **왜 먼저:** FE는 이미 성숙 — 최대 레버리지는 **backend 연결 라이프사이클 공백(§8)** 종결. §5 credential validation을 intake에 강제하는 대신 test를 명시 액션으로 유지(Action Window/승인 모델과 정합). 오프라인 단위테스트 가능, **live·마이그레이션·contract 변경 없음**.
+- **이 단위 뒤 튜토리얼 종결에 남는 것:** (a) §7 DB unique 백스톱(마이그레이션+PO), (b) 가이드-FE **라이브 end-to-end 연결 워크**(실 NAVER 스토어 + fresh 단일-사용 승인), (c) §10 new-app create_app 하이라이트 라이브 증명(빈-앱 스토어). 모두 별도 지시/승인 대기.
 
 ---
 
