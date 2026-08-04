@@ -12,6 +12,21 @@
 
 ---
 
+## 2026-08-04 부록 (18) — NAVER Seller Account Uniqueness v1: API-mode seller account 중복 방지 (backend, migration V35)
+
+> 튜토리얼 감사(부록16 / 슬라이스 §0.2.21)의 **§7 DB unique 백스톱 부재**(UNCERTAIN_MULTI_ACCOUNT)를 종결. **backend + migration만, contract·FE·issuance·bridge 변경 없음.** live 마켓 실행 없음(개별 disposable Postgres로 DB 증명, teardown). 세부: 슬라이스 §0.2.23.
+
+- **부분(partial) unique index — API 모드 한정:** `uq_seller_accounts_api_org_channel` on `seller_accounts (org_id, channel_id) WHERE is_file_upload = false` (**migration `V35__seller_account_uniqueness.sql`**). org의 공식-API 연결은 채널당 하나 → 한 (org, channel)에 API-mode row 2개 금지.
+- **왜 partial(중요):** file-upload 계정은 제외. **ESM file-import(`EsmFileImportAccountService`)는 한 채널에 marketplace 판매자 식별자별로 여러 file-upload 계정을 정당하게 생성**하므로, `(org, channel, is_file_upload)` 전체 unique는 ESM을 깨뜨린다. 그래서 API-mode(`is_file_upload=false`)만 필터. 기록된 "unique partial index" 후속과 일치. filtered index는 JPA `@UniqueConstraint`로 표현 불가 → 엔티티엔 constraint 없이 migration에만(기존 V2 partial index 선례와 동일).
+- **fail-closed:** `create unique index`는 커버 대상 행을 스캔해 **기존 API 중복이 있으면 migration을 중단**(조용한 dedup 없음). 운영자가 명시적으로 해소해야 스키마 진행.
+- **서비스(graceful race):** `registerApiChannel`은 기존 **PESSIMISTIC_WRITE 채널행 잠금 유지** — 동시 시작 시 2번째 호출이 잠금 뒤 findFirst로 **동일 account 재조회·반환**(insert 안 함); index는 잠금 우회 시 fail-closed 백스톱. index가 전(全)-채널 API-mode를 덮으므로 **Cafe24 `start()`에도 동일 잠금 추가**(독립 리뷰 MEDIUM: Cafe24는 잠금이 없어 동시 최초-연결이 500 날 수 있었음 → 수정).
+- **전-채널 이득:** index는 NAVER·Cafe24 등 모든 API 채널에 "채널당 API 계정 1개" 불변식을 균일 적용(더 정확). 다른 org/channel, file-upload 모드는 무영향.
+- **테스트 분리(정직):** H2 테스트 DB는 Flyway off + filtered index 미지원 → H2에선 서비스 멱등(재시작=동일 account)·채널 분리·라이프사이클 회귀만; **DB 강제는 gated Postgres proof IT**로 증명.
+- **Postgres proof IT LIVE-PROVEN(disposable PG 15 :55432, 즉시 teardown, 실 :5432 무접촉) 6/6:** 실 Flyway V1..V35 적용 + partial index 존재(predicate=`is_file_upload=false`); 2번째 API 중복 거부; file-upload 3개 허용(ESM); org/channel별 독립; **8-스레드 동시 insert 레이스 → 정확히 1개 생성(7개 거부)**; dirty-data 재-인덱스 fail-closed.
+- **게이트:** H2 **1904 tests / 0 fail / 12 skip**(기존 6 + PG IT 6 gated). Migration V35. 독립 리뷰 MEDIUM(Cafe24 잠금) 수정 + LOW 2 반영. **⚠ V35는 미병합 #371도 예약 → 둘 중 나중 병합이 renumber.**
+
+---
+
 ## 2026-08-04 부록 (17) — NAVER Connection Lifecycle State v1: 실제 test·sync 결과로 `connection_status` 전이 (backend, offline)
 
 > 튜토리얼 감사(부록16 / 슬라이스 §0.2.21)에서 최대 공백으로 지목된 **§8 NAVER 계정레벨 상태머신 부재**(`connection_status` PENDING 고착)를

@@ -72,8 +72,12 @@ public class SellerAccountService {
     public SellerAccountResponse registerApiChannel(UUID orgId, ApiChannelRequest req) {
         // Lock the channel row FIRST (SELECT … FOR UPDATE) so concurrent connection starts on the same
         // channel serialize here: the find-or-create below is then atomic and two tabs / a retried request
-        // cannot both insert a PENDING API account. The lock — not the defensive findFirst read — is what
-        // guarantees a single (org, channel, fileUpload=false) row on the normal create path.
+        // cannot both insert a PENDING API account. The lock is what makes a race return the SAME account —
+        // the second caller, once it holds the lock, re-reads via findFirst and returns the first caller's
+        // row instead of inserting. The partial unique index uq_seller_accounts_api_org_channel
+        // (V35, on (org_id, channel_id) WHERE is_file_upload = false) is the fail-closed backstop: if the
+        // lock is ever bypassed the duplicate API-mode insert is rejected rather than silently creating a
+        // second row. (File-upload accounts are not covered — ESM holds several per channel by identity.)
         Channel channel = channels.findByIdForUpdate(req.channelId())
                 .orElseThrow(() -> ApiException.notFound("채널을 찾을 수 없습니다."));
 

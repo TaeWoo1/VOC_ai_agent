@@ -932,6 +932,20 @@ selector 앵커·상태기계·bridge·runner·telemetry 불변.**
 - **독립 리뷰 반영:** **H1(HIGH)** — reconnect + stale 이력 sync로 test 단독 CONNECTED 되던 결함 → 이력 읽기 제거·검증 뒤 sync만 확정으로 **수정**(전용 회귀 테스트 `reconnectAfterRejectionReArmsAndRequiresAFreshSync`). **M1(MEDIUM, PREPARING="준비 중" 카드 라벨)** — FE `channelCardAction`은 PREPARING 계정을 `intent:"manage", disabled:false`(actionable)로 렌더 → **기능 차단 없음**을 코드로 확인, 라벨은 전이 창(FE 위저드 내 test→자동 sync로 수초)에서만 일시적. 라벨 정밀화는 FE 워크스트림 소관(본 backend 단위는 `frontend/CLAUDE.md`+스펙상 FE 무변경). L3/L4 반영.
 - **테스트:** `NaverConnectionLifecycleTest`(11: test/sync 단독 불연결·검증 뒤 수집 CONNECTED·검증 전 sync 미소급·**H1 reconnect 재무장 회귀**·rejected 전-상태·CONNECTED 불흔들·재처리 수렴·scope guard 3종) + `CollectControlServiceNaverVerifierTest` 통합 4(PENDING→PREPARING·INVALID→RECONNECT_REQUIRED·transient 무변경·기존 SUCCESS) + `SyncRunExecutorTest` 배선 3(수집 NAVER ORDER_SUMMARY가 PREPARING→CONNECTED·PENDING 유지·non-NAVER no-op). **backend 1895/0 fail/0 error/6 skip. 마이그레이션 0. live·push/PR 없음.**
 
+### 0.2.23 — **`NAVER Seller Account Uniqueness v1` 구현 (backend + migration V35) — §0.2.21 §7 공백 종결** ✅
+
+§0.2.21 감사의 **§7 DB unique 백스톱 부재**(standing UNCERTAIN_MULTI_ACCOUNT: `seller_accounts`에 `(org, channel, mode)` DB 유일성 없음 — 락+방어적 findFirst만 의존)를 종결. **backend + migration만, contract·FE·issuance·bridge 변경 없음.** live 마켓 실행 없음.
+
+- **부분 unique index — API 모드 한정(핵심 설계):** `create unique index uq_seller_accounts_api_org_channel on seller_accounts (org_id, channel_id) where is_file_upload = false;` (**`V35__seller_account_uniqueness.sql`**). 한 (org, channel)당 API-mode seller account 1개.
+- **왜 (org,channel,mode) 전체가 아니라 partial(API-only)인가 — 조사로 발견:** 초기엔 사용자 지시대로 `(org_id, channel_id, is_file_upload)` 전체 unique(엔티티 `@UniqueConstraint` 포함)로 구현 → **전체 테스트 9개 실패**가 드러냄: **ESM file-import(`EsmFileImportAccountService`)는 한 채널에 marketplace 판매자 식별자별로 여러 file-upload 계정을 정당하게 생성**한다(`sameMarketplaceDifferentSellerIdCreatesADistinctAccount` 등). 전체 constraint는 이를 깨뜨림 → **API-mode(`is_file_upload=false`)만 필터**로 축소. 이는 기록된 "unique partial index" 후속과 일치하며, filtered index는 JPA `@UniqueConstraint`로 표현 불가·H2 미지원이라 **엔티티엔 constraint 없이 migration에만**(기존 V2 dedup partial index 선례 동일). 엔티티엔 근거 javadoc만.
+- **fail-closed(중복 존재 시 명확히 실패):** unique index 생성이 커버 대상 행을 스캔해 **기존 API 중복이 있으면 migration 중단**(조용한 dedup 없음). PG proof IT #6가 index drop→중복 2개 insert→재생성 실패로 증명.
+- **서비스 graceful race:** `registerApiChannel`은 **PESSIMISTIC_WRITE 채널행 잠금 유지** — 동시 시작의 2번째 호출이 잠금 뒤 findFirst로 동일 account 재조회·반환(그래서 정상 경로에선 index 위반이 발생조차 안 함); index는 잠금 우회 시 fail-closed 백스톱.
+- **독립 리뷰 MEDIUM 수정 — Cafe24도 잠금:** partial index가 전-채널 API-mode를 덮으므로 **Cafe24 `Cafe24OnboardingService.start()`에도 동일 `findByIdForUpdate` 채널 잠금 추가**(Cafe24는 락이 없어 동시 최초-연결 시 index 위반이 500으로 표면화될 수 있었음; sanitized 500이라 정보유출은 없으나 graceful reuse로 교정). reconnect는 기존 CONNECTED 재사용이라 무영향.
+- **테스트 분리(정직):** H2 테스트 DB = Flyway off + filtered index 미지원 → `SellerAccountUniquenessTest`(H2 3: 재시작=동일 account·채널별 distinct·라이프사이클 PENDING→PREPARING→CONNECTED 회귀). **DB 강제·동시성은 gated Postgres proof IT**로.
+- **`SellerAccountUniquenessPostgresProofIT`(`@EnabledIfEnvironmentVariable SELLEROPS_PG_PROOF=1`) — disposable Postgres 15에서 LIVE-PROVEN 6/6, teardown 완료(실 :5432 무접촉):** ① 실 Flyway V1..V35 + partial index 존재/predicate 확인, ② 2번째 API 중복 거부, ③ file-upload 여러 개 허용(ESM 안전), ④ org/channel별 독립, ⑤ **8-스레드 동시 insert 레이스 → ok=1·rejected=7·row=1**(동시 생성 race에서도 account 1개), ⑥ dirty-data 재-인덱스 fail-closed(finally에서 스키마 복원).
+- **게이트:** H2 **1904 tests / 0 fail / 12 skip**(기존 6 + PG IT 6 gated) + PG IT 6/6(disposable). Migration V35. 독립 리뷰 MEDIUM(Cafe24 잠금) 수정 + LOW 2(H2 테스트 문구·fail-closed 순차실행 주석) 반영. **live·push/PR 없음.**
+- **⚠ 마이그레이션 번호 충돌:** V35는 미병합 **PR #371**도 예약(기록됨). 본 브랜치와 #371 중 **나중 병합되는 쪽이 renumber**. #371은 건드리지 않음.
+
 ---
 
 ## 0. v1 비준 (Ratification 2026-07-19) — 오프라인 구현 착수
