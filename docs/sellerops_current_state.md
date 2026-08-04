@@ -55,7 +55,7 @@
 - **전-채널 이득:** index는 NAVER·Cafe24 등 모든 API 채널에 "채널당 API 계정 1개" 불변식을 균일 적용(더 정확). 다른 org/channel, file-upload 모드는 무영향.
 - **테스트 분리(정직):** H2 테스트 DB는 Flyway off + filtered index 미지원 → H2에선 서비스 멱등(재시작=동일 account)·채널 분리·라이프사이클 회귀만; **DB 강제는 gated Postgres proof IT**로 증명.
 - **Postgres proof IT LIVE-PROVEN(disposable PG 15 :55432, 즉시 teardown, 실 :5432 무접촉) 6/6:** 실 Flyway V1..V35 적용 + partial index 존재(predicate=`is_file_upload=false`); 2번째 API 중복 거부; file-upload 3개 허용(ESM); org/channel별 독립; **8-스레드 동시 insert 레이스 → 정확히 1개 생성(7개 거부)**; dirty-data 재-인덱스 fail-closed.
-- **게이트:** H2 **1904 tests / 0 fail / 12 skip**(기존 6 + PG IT 6 gated). Migration V35. 독립 리뷰 MEDIUM(Cafe24 잠금) 수정 + LOW 2 반영. **⚠ V35는 미병합 #371도 예약 → 둘 중 나중 병합이 renumber.**
+- **게이트:** H2 **1904 tests / 0 fail / 12 skip**(기존 6 + PG IT 6 gated). Migration V35. 독립 리뷰 MEDIUM(Cafe24 잠금) 수정 + LOW 2 반영. **✅ V35 충돌 해결(2026-08-05, 슬라이스 §0.2.27): 본 uniqueness 마이그레이션은 V35→V36으로 renumber(SQL 무변경, 파일명·순번만; 코드/테스트 "V35"→"V36", PG proof IT는 V1..V36 적용). #371은 V35 유지·무접촉.**
 
 ---
 

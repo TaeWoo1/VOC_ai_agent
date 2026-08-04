@@ -944,7 +944,7 @@ selector 앵커·상태기계·bridge·runner·telemetry 불변.**
 - **테스트 분리(정직):** H2 테스트 DB = Flyway off + filtered index 미지원 → `SellerAccountUniquenessTest`(H2 3: 재시작=동일 account·채널별 distinct·라이프사이클 PENDING→PREPARING→CONNECTED 회귀). **DB 강제·동시성은 gated Postgres proof IT**로.
 - **`SellerAccountUniquenessPostgresProofIT`(`@EnabledIfEnvironmentVariable SELLEROPS_PG_PROOF=1`) — disposable Postgres 15에서 LIVE-PROVEN 6/6, teardown 완료(실 :5432 무접촉):** ① 실 Flyway V1..V35 + partial index 존재/predicate 확인, ② 2번째 API 중복 거부, ③ file-upload 여러 개 허용(ESM 안전), ④ org/channel별 독립, ⑤ **8-스레드 동시 insert 레이스 → ok=1·rejected=7·row=1**(동시 생성 race에서도 account 1개), ⑥ dirty-data 재-인덱스 fail-closed(finally에서 스키마 복원).
 - **게이트:** H2 **1904 tests / 0 fail / 12 skip**(기존 6 + PG IT 6 gated) + PG IT 6/6(disposable). Migration V35. 독립 리뷰 MEDIUM(Cafe24 잠금) 수정 + LOW 2(H2 테스트 문구·fail-closed 순차실행 주석) 반영. **live·push/PR 없음.**
-- **⚠ 마이그레이션 번호 충돌:** V35는 미병합 **PR #371**도 예약(기록됨). 본 브랜치와 #371 중 **나중 병합되는 쪽이 renumber**. #371은 건드리지 않음.
+- **⚠ 마이그레이션 번호 충돌 → 해결(§0.2.26):** V35는 미병합 **PR #371**도 예약. **본 브랜치가 V35→V36으로 renumber**하여 충돌을 제거(main은 V34가 최상단, #371은 V35 유지·무접촉). 위 문구·테스트의 "V35" 참조는 §0.2.26에서 모두 V36으로 갱신됨(SQL 내용 무변경, 파일명·순번만).
 
 ### 0.2.24 — **`NAVER Existing-App First Connection E2E Readiness v1` 감사 = READY (코드 변경 0) + disposable 환경/genuine PREPARED 준비** ✅
 
@@ -1048,6 +1048,19 @@ Frontend Spec §16.10의 6단계를 **모두** 통과해야 성공이다. **키 
 5. **첫 실주문 데이터 수집**을 수행한다.
 6. SellerOps에 수집 결과를 표시한다.
 > 완료 전이는 **③ 등록 성공 + ④ 테스트 통과 + ⑤ 수집 결과**가 모두 성립할 때만(§8 completed, §12).
+
+### 0.2.27 — **`NAVER First-Connection Hardening + Branch Consolidation v1` (backend+frontend, offline, 마이그레이션 renumber) — connect-test 오진 종결 + advertised egress 배선 + V35 충돌 해결** ✅
+
+신규 판매자가 **credential 오류 / 주문 권한 부족 / 호출 IP 미등록**을 구분해 해결할 수 있도록 connect-test를 강화하고, advertised egress IP를 설정→계약→튜토리얼로 배선하며, V35 마이그레이션 충돌을 해결한다. **live 마켓 실행·production AWS 프로비저닝·문의 수집 구현·실제 IP/secret commit·근거 없는 error code 하드코딩 없음.**
+
+- **connect-test 오진 종결(backend):** 기존 `verifyConnection`은 토큰 mint만 하여 모든 4xx를 `INVALID_CREDENTIAL`로 뭉갰고, 권한/IP 결함은 첫 sync에서야 `SYNC_FAILED`로 표면화됐다. 이제 **토큰 OK 뒤 read-only 주문 접근 프로브**(`NaverOrdersClient.probeOrderAccess`)를 1회 실행: `GET last-changed-statuses`, **5분 window·PAYED·상세 POST 없음·커서 저장 없음·ingest 없음**, 응답은 상태(그리고 403일 때만 sanitized `code`)만 읽고 폐기. 분류 = 200→CONFIRMED, 429→RATE_LIMITED, 5xx/네트워크/기타 4xx(400·401 등)→UNAVAILABLE(**유효 credential 무차단**), **403→ACCESS_DENIED**.
+- **정직 경계(추정 금지):** 403 = 접근 거부는 **HTTP 표준 의미**로 판정(추정 아님). 이를 **권한 vs 호출 IP로 분리하는 `GW.*` 코드는 라이브 캡처 전까지 UNKNOWN → whitelist(`PERMISSION_DENIED_CODES`/`CALL_IP_DENIED_CODES`)는 빈 `Set.of()`**. 미인식 403 = hedged `ORDER_ACCESS_DENIED`(권한·IP 둘 다 확인 안내). 라이브로 코드가 확정되면 whitelist에 추가만으로 `PERMISSION_INSUFFICIENT`/`CALL_ENVIRONMENT_MISMATCH`로 승격(배선 완료·휴면).
+- **reason 어휘 = FE 기존 계약에 정렬:** FE는 이미 `PERMISSION_INSUFFICIENT`·`CALL_ENVIRONMENT_MISMATCH`(호출 IP 안내 포함)를 모델링해 두었으나 backend가 방출하지 않았다. backend를 그 어휘에 맞추고(발명 대신 정렬), 새 hedged `ORDER_ACCESS_DENIED`만 FE에 추가(reason+phase `order_access_denied`, 재-test 가능, `TEMPORARY`로 오추락 방지). credential 유효(403)이므로 `onCredentialRejected` 미호출 → **RECONNECT_REQUIRED로 오강등 안 함**(상태 PENDING 유지, 재시도).
+- **advertised egress 배선(config→setup API→튜토리얼):** `sellerops.connector.naver.advertised-egress-ips`(**기본 빈값, env/secret에서만 주입**, ≤3 IPv4, IPv4 검증·trim·중복제거 sanitize, 부재⇒빈 리스트 fail-safe, **실제 IP 무커밋**) → **deployment-global setup 엔드포인트 `GET /api/connect/naver/setup`**(계정 무관·인증 필요, `NaverAdvertisedEgress` 컴포넌트가 sanitize) → FE가 계정 생성 전 `getNaverSetup`으로 로드 → 정적 튜토리얼 신규 스텝 `register_call_ip`(API 그룹 직후·credential 전, 양 walk) **+ 화면-안내(guided) walk의 상시 'API 호출 IP 등록' 안내** + 표시 IP 복사(공유 `AdvertisedCallIpPanel`; 값이 secret 아님·부재 시 표시 없이 일반 안내). 인프라(고정 egress 프로비저닝·deploy-time verify gate)는 [[naver-fixed-egress-provisioning-v1]] pilot 트리거까지 연기.
+- **독립 리뷰 반영(H1/M2):** 초기 배선은 IP를 **계정-스코프·완료 시점** capability view에 실어 issuance 중(계정 부재) 항상 빈값이었음(H1) + 기본 guided walk에 IP 스텝 부재(M2). → **deployment-global setup 엔드포인트로 이관**(capability view 필드 원복)하여 계정 전에도 표시 + guided walk에 상시 IP 안내 패널 추가. L3(connect-test 토큰 2회 mint)는 무해(페이싱·저빈도)로 기록만.
+- **V35 충돌 해결(§0.2.23):** `V35__seller_account_uniqueness.sql` → **`V36`**로 renumber(main 최상단 V34, #371은 V35 예약·무접촉). SQL 내용 무변경(파일명·순번만); 코드/테스트의 "V35" 참조·PG proof IT 메서드명(`flywayAppliedV36…`)·`V1..V36` 전부 갱신. H2 Flyway가 V1..V36 clean 적용(전체 스위트 green).
+- **게이트:** backend **1930/0 fail/0 error/14 skip**, collector **6354/0**(무변경 확인), frontend **1309/0** + typecheck + prod build. 신규 테스트: 프로브 6종(read-only·403·429·5xx/400/401/네트워크·무유출·window 비영/포맷) + connect-test 통합(주문접근 확인 SUCCESS·403 ORDER_ACCESS_DENIED·inconclusive SUCCESS·프로브 토큰 실패 SUCCESS·RECONNECT_REQUIRED 미강등) + egress sanitize + FE reason/튜토리얼/IP패널. 독립 리뷰 반영.
+- **경계:** NAVER live write·production AWS 프로비저닝·문의 수집 구현·실제 IP/secret commit·근거 없는 GW code 하드코딩 **없음**.
 
 ## 3. 현행 저장소 증거 (Current repository evidence)
 
