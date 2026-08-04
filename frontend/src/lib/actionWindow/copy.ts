@@ -216,6 +216,47 @@ export const CONNECTION_VIEW: Record<Exclude<SourceConnection, "connected">, Con
 export const CONNECTION_RETRY_FAILED_NOTE =
   "아직 연결할 수 없어요. 로컬 에이전트가 실행 중인지 확인해 주세요.";
 
+// Pilot-Ready Local Agent Runtime v1 — FE-owned copy for the runtime self-check recovery keys the agent
+// emits (backend/bridge/origin/version/capability). Each is a real situation name + exactly ONE recovery
+// action, never a raw enum. Keyed by the agent's sanitized recovery-action key (see
+// collector/src/runtime/self-check.ts RUNTIME_SELF_CHECK_RECOVERY). FE owns the final wording; the agent
+// carries only the key.
+export type RuntimeRecoveryKey =
+  | "START_BACKEND"
+  | "SET_BRIDGE_ORIGINS"
+  | "ALIGN_BRIDGE_ORIGIN"
+  | "UPDATE_AGENT"
+  | "SET_REVIEW_URL"
+  | "INSTALL_CHROME"
+  | "FIX_DATA_DIR_PERMISSIONS";
+
+export interface RuntimeRecoveryView {
+  /** The situation, in a real screen name — never an enum. */
+  title: string;
+  /** Exactly one recovery action. */
+  action: string;
+}
+
+export const RUNTIME_RECOVERY_VIEW: Record<RuntimeRecoveryKey, RuntimeRecoveryView> = {
+  START_BACKEND: { title: "SellerOps 서버에 연결할 수 없어요", action: "인터넷 연결을 확인한 뒤 잠시 후 다시 시도해 주세요." },
+  SET_BRIDGE_ORIGINS: { title: "웹앱 연결 설정이 비어 있어요", action: "설정에서 웹앱 주소를 등록해 주세요." },
+  ALIGN_BRIDGE_ORIGIN: { title: "웹앱 주소가 허용 목록과 달라요", action: "설정의 웹앱 주소를 지금 쓰는 주소와 맞춰 주세요." },
+  UPDATE_AGENT: { title: "도우미 업데이트가 필요해요", action: "최신 버전으로 업데이트해 주세요." },
+  SET_REVIEW_URL: { title: "리뷰 페이지 주소가 없어요", action: "설정에서 리뷰 관리 페이지 주소를 등록해 주세요." },
+  INSTALL_CHROME: { title: "Chrome이 필요해요", action: "Chrome 브라우저를 설치한 뒤 도우미를 다시 시작해 주세요." },
+  FIX_DATA_DIR_PERMISSIONS: { title: "저장 폴더에 쓸 수 없어요", action: "도우미 데이터 폴더의 권한을 확인해 주세요." },
+};
+
+/** Resolve a runtime recovery key to copy, falling back safely (never leaks the raw key). */
+export function runtimeRecoveryView(key: string): RuntimeRecoveryView {
+  return (
+    (RUNTIME_RECOVERY_VIEW as Record<string, RuntimeRecoveryView>)[key] ?? {
+      title: COPY_FALLBACK,
+      action: CONNECTION_RETRY_FAILED_NOTE,
+    }
+  );
+}
+
 // Safe FE copy when a source rejects a command — never a raw reason code.
 export const COMMAND_REJECTED_COPY: Record<CommandRejectionReason, string> = {
   "not-allowed": "지금은 할 수 없는 동작이라 무시했어요.",

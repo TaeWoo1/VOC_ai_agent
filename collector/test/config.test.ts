@@ -32,14 +32,17 @@ describe("loadConfig — ESM+ review discovery (model-C)", () => {
     expect(cfg.esmProfileDir).toBe("/some/where/.profile/esm-test");
   });
 
-  it("profileBaseDir is the fixed `.profile` base (the connection-owned ESM profile root) — not env-overridable", () => {
+  it("profileBaseDir defaults to the in-tree `.profile` base but relocates via COLLECTOR_PROFILE_BASE_DIR (pilot)", () => {
     const cfg = loadConfig({});
     expect(cfg.profileBaseDir.endsWith("/.profile")).toBe(true);
     // The dedicated NAVER/ESM profiles live directly under it.
     expect(cfg.profileDir.startsWith(cfg.profileBaseDir + "/")).toBe(true);
-    // Deliberately NOT externalized: a COLLECTOR_ESM_PROFILE_DIR override does not move the base.
-    const overridden = loadConfig({ COLLECTOR_ESM_PROFILE_DIR: "/some/where/.profile/esm-test" });
-    expect(overridden.profileBaseDir).toBe(cfg.profileBaseDir);
+    // A COLLECTOR_ESM_PROFILE_DIR override does NOT move the base — only the explicit base override does.
+    const otherOverride = loadConfig({ COLLECTOR_ESM_PROFILE_DIR: "/some/where/.profile/esm-test" });
+    expect(otherOverride.profileBaseDir).toBe(cfg.profileBaseDir);
+    // The pilot runtime relocates the base to the per-user data root so an update preserves the login.
+    const relocated = loadConfig({ COLLECTOR_PROFILE_BASE_DIR: "/data/root/profiles" });
+    expect(relocated.profileBaseDir).toBe("/data/root/profiles");
   });
 
   it("esmFrameOriginAllowlist is empty by default (fail-closed: no cross-origin scan)", () => {
@@ -59,6 +62,6 @@ describe("loadConfig — ESM+ review discovery (model-C)", () => {
     // The default lives inside the collector tree, so the shared guard accepts it...
     expect(() => resolveProfileDir(loadConfig({}).esmProfileDir)).not.toThrow();
     // ...but an escaping ESM profile dir is rejected, exactly like the NAVER one.
-    expect(() => resolveProfileDir("/tmp/evil-esm-profile")).toThrow(/inside the collector/);
+    expect(() => resolveProfileDir("/tmp/evil-esm-profile")).toThrow(/controlled profile base/);
   });
 });

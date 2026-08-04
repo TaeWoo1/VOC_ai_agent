@@ -163,7 +163,8 @@ describe("browser launch reachability", () => {
    * first is the fix, and this pins it.
    */
   it("decides the import mode before the connections gate", () => {
-    const gateAt = cli.indexOf("const importGate = resolveImportMode(args, process.env)");
+    // The gate is now `decideImportBoot` (production consent OR the dev flag path), still decided first.
+    const gateAt = cli.indexOf("const importBoot = decideImportBoot(");
     const connectionsAt = cli.indexOf('const connectionsPath = flagValue(args, "--connections")');
     expect(gateAt).toBeGreaterThan(-1);
     expect(connectionsAt).toBeGreaterThan(-1);
@@ -171,8 +172,8 @@ describe("browser launch reachability", () => {
   });
 
   it("returns from its own boot rather than falling through to the connector path", () => {
-    expect(cli).toContain("await runImportOnlyBoot(args, process.env);");
-    const gateAt = cli.indexOf("if (importGate.host) {");
+    expect(cli).toContain("await runImportOnlyBoot(args, process.env, pilot);");
+    const gateAt = cli.indexOf("if (importBoot.host) {");
     const returnAt = cli.indexOf("return;", gateAt);
     expect(gateAt).toBeGreaterThan(-1);
     expect(returnAt).toBeGreaterThan(gateAt);

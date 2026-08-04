@@ -136,7 +136,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
     naverExpectedStoreFingerprint: env.NAVER_EXPECTED_STORE_FINGERPRINT,
     naverExpectedContinueCardFingerprint: env.NAVER_EXPECTED_CONTINUE_CARD_FINGERPRINT,
     profileDir: env.COLLECTOR_PROFILE_DIR ?? resolve(root, ".profile/naver"),
-    profileBaseDir: resolve(root, ".profile"),
+    // The account-scoped profile base. Fixed to the in-tree `.profile` for dev, but relocatable via
+    // `COLLECTOR_PROFILE_BASE_DIR` so the PILOT runtime can place profiles under the per-user data root
+    // (`%LOCALAPPDATA%\SellerOps\Agent\profiles`) — where an in-place update does not erase the NAVER login.
+    // The profile path guard (`resolveProfileDir`) permits this relocated base too, so the isolation guarantee
+    // is unchanged: profiles still live under exactly one controlled base, just a durable one.
+    profileBaseDir: env.COLLECTOR_PROFILE_BASE_DIR
+      ? resolve(env.COLLECTOR_PROFILE_BASE_DIR)
+      : resolve(root, ".profile"),
     esmProfileDir: env.COLLECTOR_ESM_PROFILE_DIR ?? resolve(root, ".profile/esm"),
     esmFrameOriginAllowlist: parseHostAllowlist(env.ESM_FRAME_ORIGIN_ALLOWLIST),
     downloadDir: env.COLLECTOR_DOWNLOAD_DIR ?? resolve(root, "downloads"),
