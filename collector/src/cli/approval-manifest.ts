@@ -53,6 +53,13 @@ export const CALIBRATION_PHASES = [
   "API_ISSUANCE_HIGHLIGHT_PROOF",
   "API_CENTER_VISUAL_RECON",
   "API_ISSUANCE_SELECTOR_PROBE",
+  // Not a calibration phase — the FE-run-host live proof of the existing-app guided issuance tutorial. It is
+  // listed here because this is the set of phases the approval gate can emit + prerequisite-check. Unlike the
+  // four calibration phases (CLI-launched dedicated window), its OPERATOR entrypoint is the bound FE URL: the
+  // SellerOps FE (`/connect/naver`) is the SOLE run client and sends START_RUN exactly once; the CLI-launched
+  // Local Agent host provides the dedicated Chrome + bridge carrier but sends NO START_RUN, and no standalone
+  // proof client may run. READ-ONLY (zero credential/test/sync). See PHASE_SPECS + FE_LIVE_PROOF_* below.
+  "API_ISSUANCE_FE_LIVE_PROOF",
 ] as const;
 export type CalibrationPhase = (typeof CALIBRATION_PHASES)[number];
 
@@ -81,6 +88,22 @@ export type ApprovalAction = (typeof APPROVAL_ACTIONS)[number];
 
 const HIGHLIGHT_ACTIONS: readonly ApprovalAction[] = ["HIGHLIGHT_REAL_CONTROL"];
 
+/**
+ * The immutable FE-run-host issuance-proof contract (`API_ISSUANCE_FE_LIVE_PROOF`). The SellerOps FE is the
+ * SOLE run client: the CLI-launched Local Agent host opens the dedicated NAVER Chrome + bridge carrier but
+ * sends NO START_RUN, and no standalone `issuance-live-proof.ts` client may run. READ-ONLY — START_RUN fires
+ * exactly once from the FE, and there is zero credential / test / sync. These constants are the ONLY accepted
+ * values; the gate refuses any manifest whose declared contract diverges (so the invariants cannot be softened
+ * by a caller).
+ */
+export const FE_LIVE_PROOF_START_RUN_OWNER = "FRONTEND" as const;
+export const FE_LIVE_PROOF_MAX_START_RUN = 1 as const;
+export const FE_LIVE_PROOF_SUPPORTING_SURFACE = [
+  "Local Agent host",
+  "dedicated NAVER Chrome",
+  "bridge carrier",
+] as const;
+
 export interface PhaseSpec {
   phase: CalibrationPhase;
   /** The EXACT CLI entrypoint (repo-relative) this phase runs. */
@@ -91,6 +114,13 @@ export interface PhaseSpec {
   capableActions: readonly ApprovalAction[];
   /** Whether this phase highlights a real control (⇒ requires calibrated selectors). */
   allowsHighlight: boolean;
+  /**
+   * Whether this phase is the FE-run-host issuance live proof — the FE is the sole run client (START_RUN once),
+   * the CLI-launched host is a SUPPORTING surface only. When true the gate additionally enforces the immutable
+   * FE_LIVE_PROOF_* contract (owner=FRONTEND, maxStartRun=1, zero credential/test/sync, supporting surface
+   * present, host sends no START_RUN, no standalone proof client, FE URL bound to this run id).
+   */
+  requiresFeRunHostContract?: boolean;
   mode: "READ_ONLY";
   /** Visual-recon only: the fixed, closed set of API-center screens the redacted-screenshot recon may capture. */
   captureScreens?: readonly string[];
@@ -161,6 +191,26 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     screenshotPolicy: VISUAL_RECON_SCREENSHOT_POLICY,
     structuralSummaryPolicy: VISUAL_RECON_SUMMARY_POLICY,
   },
+  API_ISSUANCE_FE_LIVE_PROOF: {
+    phase: "API_ISSUANCE_FE_LIVE_PROOF",
+    // The SUPPORTING host: it opens the dedicated NAVER Chrome + `/bridge/ws` carrier so the FE can attach and
+    // drive. It sends NO START_RUN (verified: the CLI carries no START_RUN / issuance-live-proof / spawn path).
+    cli: "src/cli/run-api-issuance-live-naver.ts",
+    driver: "NaverIssuanceDriver (Action Window highlight/observe) — hosted; the SellerOps FE run-host is the sole run client",
+    // Same live capability as the highlight proof (existing-app branch): observe the app_list→detail
+    // transition (open_app), then reveal + highlight the order API group and the Application ID/Secret section.
+    capableActions: [
+      "OPEN_DEDICATED_WINDOW",
+      "WAIT_OPERATOR_LOGIN_NAV",
+      "CLASSIFY_SANITIZED_PAGE_CATEGORY",
+      "HIGHLIGHT_REAL_CONTROL",
+      "REVEAL_SECTION_IN_VIEWPORT",
+      "OBSERVE_USER_CLICK_TRANSITION",
+    ],
+    allowsHighlight: true, // ⇒ requires SELECTORS_CALIBRATED (selector readiness)
+    mode: "READ_ONLY",
+    requiresFeRunHostContract: true,
+  },
   API_ISSUANCE_SELECTOR_PROBE: {
     phase: "API_ISSUANCE_SELECTOR_PROBE",
     cli: "src/cli/probe-issuance-selectors.ts",
@@ -203,6 +253,16 @@ export const APPROVAL_PREREQ_CAUSES = [
   "ENTRYPOINT_CLI_MISMATCH",
   "FRONTEND_URL_IN_CLI_ENTRYPOINT",
   "CLI_DESC_IN_FRONTEND_ENTRYPOINT",
+  // FE-run-host issuance live proof (`API_ISSUANCE_FE_LIVE_PROOF`): the FE is the sole START_RUN owner and the
+  // run is strictly READ-only over a supporting (never-START_RUN) host.
+  "MISSING_FE_RUN_HOST_CONTRACT",
+  "START_RUN_OWNER_NOT_FRONTEND",
+  "START_RUN_CAP_NOT_ONE",
+  "WRITE_ACTIONS_NOT_ZERO",
+  "MISSING_SUPPORTING_SURFACE",
+  "HOST_SENDS_START_RUN",
+  "PROOF_CLIENT_NOT_FORBIDDEN",
+  "RUNID_URL_MISMATCH",
 ] as const;
 export type ApprovalPrereqCause = (typeof APPROVAL_PREREQ_CAUSES)[number];
 
@@ -215,12 +275,15 @@ export type ApprovalPrereqCause = (typeof APPROVAL_PREREQ_CAUSES)[number];
 export const ENTRYPOINT_TYPES = ["CLI_LAUNCHED_DEDICATED_WINDOW", "FRONTEND_URL"] as const;
 export type EntrypointType = (typeof ENTRYPOINT_TYPES)[number];
 
-/** The phases that carry an operator entrypoint: the three calibration phases + the guided order connection. */
+/** The phases that carry an operator entrypoint: the calibration phases, the FE-run-host issuance proof, and
+ *  the guided order connection. Two of these emit a bound frontend URL (the FE-run-host proof + the guided
+ *  order connection); the four calibration phases open a CLI-launched dedicated window. */
 export const ENTRYPOINT_PHASES = [
   "API_CENTER_STRUCTURE_OBSERVATION",
   "API_ISSUANCE_HIGHLIGHT_PROOF",
   "API_CENTER_VISUAL_RECON",
   "API_ISSUANCE_SELECTOR_PROBE",
+  "API_ISSUANCE_FE_LIVE_PROOF",
   "NAVER_GUIDED_CONNECTION",
 ] as const;
 export type EntrypointPhase = (typeof ENTRYPOINT_PHASES)[number];
@@ -275,6 +338,18 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 직접 로그인·이동한 뒤 각 화면에서 준비되면 ready 를 보내세요. SellerOps는 강조 없이 각 대상의 고정 라벨 일치 수만 읽습니다(클릭·입력·값 읽기 없음).",
     emitsFrontendUrl: false,
+  },
+  // The FE-run-host issuance live proof: the operator's ONE action is opening the bound FE wizard URL. The
+  // supporting CLI-launched host (dedicated Chrome + bridge) is NOT the operator entrypoint and is declared in
+  // the manifest's `supportingSurface` — so this summary carries NO CLI-only marker (it must pass the
+  // FRONTEND_URL contract). The FE is the sole run client; START_RUN fires once from this screen.
+  API_ISSUANCE_FE_LIVE_PROOF: {
+    entrypointType: "FRONTEND_URL",
+    cli: "",
+    entrypointCommandId: "frontend-connect-naver-issuance",
+    operatorActionSummary:
+      "브라우저 새 창에서 아래 연결 마법사 주소를 여세요. 기존 앱을 선택하고 '화면을 보며 확인'을 누르면, SellerOps가 안내를 준비한 뒤 화면 안내를 시작합니다(안내 시작은 이 화면에서 한 번만).",
+    emitsFrontendUrl: true,
   },
   NAVER_GUIDED_CONNECTION: {
     entrypointType: "FRONTEND_URL",
@@ -352,6 +427,29 @@ export interface ApprovalPrereqInput {
   maxActions: string;
   surface: string;
   operation: string;
+  /**
+   * FE-run-host issuance-proof contract (required ONLY for `API_ISSUANCE_FE_LIVE_PROOF`; ignored otherwise).
+   * Every field is validated against the immutable FE_LIVE_PROOF_* constants, so a caller cannot soften the
+   * invariants — the gate refuses on any divergence.
+   */
+  startRunContract?: {
+    /** Must be `FRONTEND` — the FE is the sole run client. */
+    soleStartRunOwner: string;
+    /** Must be 1 — START_RUN fires exactly once. */
+    maxStartRun: number;
+    /** Must all be 0 — READ-only proof. */
+    credential: number;
+    test: number;
+    sync: number;
+    /** Must include every FE_LIVE_PROOF_SUPPORTING_SURFACE member (host + Chrome + bridge). */
+    supportingSurface: readonly string[];
+    /** Must be false — the CLI-launched host never sends START_RUN. */
+    hostSendsStartRun: boolean;
+    /** Must be true — no standalone `issuance-live-proof.ts` client may drive the run. */
+    forbidStandaloneProofClient: boolean;
+    /** The bound FE wizard path; must carry `walkthroughRun=<this run id>`. */
+    boundFrontendPath: string;
+  };
 }
 
 /** The sanitized manifest — no raw URL (host category only), no secret, no raw account/store id. */
@@ -389,6 +487,18 @@ export interface ApprovalManifest {
   screenshotPolicy?: string;
   /** Visual-recon only: the structural summary policy — sanitized closed-vocabulary only. */
   structuralSummaryPolicy?: string;
+  // FE-run-host issuance proof only (`API_ISSUANCE_FE_LIVE_PROOF`): the run-client + supporting-surface facts
+  // the operator approves. Absent on every other phase.
+  /** The supporting surface (CLI-launched host + dedicated Chrome + bridge) — NOT the run client. */
+  supportingSurface?: readonly string[];
+  /** The sole run client that may send START_RUN — always `FRONTEND` here. */
+  soleStartRunOwner?: string;
+  /** The hard cap on START_RUN — always 1 here. */
+  maxStartRun?: number;
+  /** The zero write budget — credential/test/sync are all 0 on a READ-only proof. */
+  writeBudget?: { credential: number; test: number; sync: number };
+  /** The bound FE wizard path carrying this run's id (`/connect/naver?walkthroughRun=<runId>`). */
+  boundFrontendPath?: string;
   expiresAt: "process-lifetime";
   gitSha: string;
 }
@@ -521,11 +631,62 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
     }
   }
 
-  // 10) The operator entrypoint must match the phase. Both calibration phases are CLI-launched dedicated windows,
-  // so a calibration manifest may NEVER carry a frontend URL as the operator action (that was the defect).
+  // 10) The operator entrypoint must match the phase. The four calibration phases are CLI-launched dedicated
+  // windows (a calibration manifest may NEVER carry a frontend URL — that was the defect); the FE-run-host
+  // issuance proof + the guided order connection are the only FRONTEND_URL entrypoints. This same guard makes
+  // the cross combinations fail closed: the FE proof with a CLI entrypoint, or the highlight proof with a
+  // frontend URL, both mismatch their canonical entrypoint and are refused here.
   const entrypoint = PHASE_ENTRYPOINTS[spec.phase];
   const entryCheck = validateEntrypointContract(spec.phase, entrypoint);
   if (!entryCheck.ok) return fail(entryCheck.cause, entryCheck.reason);
+
+  // 11) FE-run-host issuance live proof: the FE is the SOLE run client. Enforce the immutable FE_LIVE_PROOF_*
+  // contract so no manifest can soften it — owner=FRONTEND, exactly one START_RUN, zero credential/test/sync,
+  // the supporting (host + Chrome + bridge) surface present, the host sends no START_RUN, no standalone proof
+  // client, and the bound FE URL carries THIS run's id. Order-stable so the refusal cause is deterministic.
+  if (spec.requiresFeRunHostContract) {
+    const c = input.startRunContract;
+    if (!c) return fail("MISSING_FE_RUN_HOST_CONTRACT", `${spec.phase} requires the FE-run-host START_RUN contract`);
+    if (c.soleStartRunOwner !== FE_LIVE_PROOF_START_RUN_OWNER) {
+      return fail("START_RUN_OWNER_NOT_FRONTEND", `the sole START_RUN owner must be ${FE_LIVE_PROOF_START_RUN_OWNER} (the FE run-host)`);
+    }
+    if (c.maxStartRun !== FE_LIVE_PROOF_MAX_START_RUN) {
+      return fail("START_RUN_CAP_NOT_ONE", `maxStartRun must be exactly ${FE_LIVE_PROOF_MAX_START_RUN}`);
+    }
+    if (c.credential !== 0 || c.test !== 0 || c.sync !== 0) {
+      return fail("WRITE_ACTIONS_NOT_ZERO", "credential/test/sync must all be 0 — the FE live proof is READ-only");
+    }
+    if (c.hostSendsStartRun !== false) {
+      return fail("HOST_SENDS_START_RUN", "the CLI-launched host must send NO START_RUN — the FE is the sole run client");
+    }
+    if (c.forbidStandaloneProofClient !== true) {
+      return fail("PROOF_CLIENT_NOT_FORBIDDEN", "a standalone issuance-live-proof client must be forbidden — the FE is the sole run client");
+    }
+    // EXACT set — the supporting surface is precisely the three canonical members, no more (no extra
+    // caller free-text can ride into the manifest) and no fewer.
+    if (
+      !Array.isArray(c.supportingSurface) ||
+      c.supportingSurface.length !== FE_LIVE_PROOF_SUPPORTING_SURFACE.length ||
+      !FE_LIVE_PROOF_SUPPORTING_SURFACE.every((s) => c.supportingSurface.includes(s))
+    ) {
+      return fail(
+        "MISSING_SUPPORTING_SURFACE",
+        `the supporting surface must be exactly ${FE_LIVE_PROOF_SUPPORTING_SURFACE.join(", ")} (host + dedicated Chrome + bridge)`,
+      );
+    }
+    // The bound FE URL must be the order-connection wizard path AND its walkthroughRun must EQUAL this run's
+    // id — not a prefix, not a decoy param. Parse the query and compare exactly so a crafted/colliding path
+    // (`…walkthroughRun=<runId>999`, or `…walkthroughRun=OTHER&x=walkthroughRun=<runId>`) fails closed.
+    const path = c.boundFrontendPath ?? "";
+    const query = path.includes("?") ? path.slice(path.indexOf("?") + 1) : "";
+    const runParam = query
+      .split("&")
+      .map((kv) => kv.split("="))
+      .find(([k]) => k === "walkthroughRun")?.[1];
+    if (!path.startsWith("/connect/naver?") || runParam !== input.runId) {
+      return fail("RUNID_URL_MISMATCH", "the bound FE URL must be /connect/naver?… with walkthroughRun EXACTLY equal to this run's id");
+    }
+  }
 
   const manifest: ApprovalManifest = {
     approvalId: input.approvalId,
@@ -556,6 +717,21 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
           artifactCategory: spec.artifactCategory,
           screenshotPolicy: spec.screenshotPolicy,
           structuralSummaryPolicy: spec.structuralSummaryPolicy,
+        }
+      : {}),
+    // FE-run-host issuance proof only: surface the sole run client, the START_RUN cap, the zero write budget,
+    // the supporting (never-START_RUN) surface, and the bound FE URL so the operator approves exactly this.
+    // Validation above forced every field to equal the immutable FE_LIVE_PROOF_* constants (owner/cap/zero
+    // budget/surface), so emit the CONSTANTS — the manifest is then structurally incapable of carrying a
+    // softened value even if a future edit reorders the checks. Only the run-specific bound path is passthrough
+    // (already validated to be /connect/naver with walkthroughRun === this run id).
+    ...(spec.requiresFeRunHostContract && input.startRunContract
+      ? {
+          supportingSurface: [...FE_LIVE_PROOF_SUPPORTING_SURFACE],
+          soleStartRunOwner: FE_LIVE_PROOF_START_RUN_OWNER,
+          maxStartRun: FE_LIVE_PROOF_MAX_START_RUN,
+          writeBudget: { credential: 0, test: 0, sync: 0 },
+          boundFrontendPath: input.startRunContract.boundFrontendPath,
         }
       : {}),
     expiresAt: "process-lifetime",

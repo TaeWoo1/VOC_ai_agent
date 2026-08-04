@@ -18,6 +18,9 @@ import {
   ENTRYPOINT_PHASES,
   validateEntrypointContract,
   VISUAL_RECON_ARTIFACT_CATEGORY,
+  FE_LIVE_PROOF_SUPPORTING_SURFACE,
+  FE_LIVE_PROOF_START_RUN_OWNER,
+  FE_LIVE_PROOF_MAX_START_RUN,
   type ApprovalPrereqInput,
   type EntrypointSpec,
 } from "../../src/cli/approval-manifest";
@@ -74,6 +77,34 @@ function baseHighlight(selectorsCalibrated: boolean): ApprovalPrereqInput {
     declaredActions: HL.capableActions,
     selectorsCalibrated,
     operation: "API issuance highlight proof",
+  };
+}
+
+const FE = PHASE_SPECS.API_ISSUANCE_FE_LIVE_PROOF;
+
+/** A fully-valid FE-run-host live-proof input; individual tests override one field to prove a refusal. */
+function baseFeLiveProof(): ApprovalPrereqInput {
+  const runId = baseObservation().runId;
+  return {
+    ...baseObservation(),
+    phase: FE.phase,
+    cli: FE.cli,
+    driver: FE.driver,
+    declaredActions: FE.capableActions,
+    selectorsCalibrated: true,
+    operation: "existing-app guided issuance tutorial — FE-run-host READ-only live proof",
+    maxActions: "1 READ-only FE-run-host session",
+    startRunContract: {
+      soleStartRunOwner: FE_LIVE_PROOF_START_RUN_OWNER,
+      maxStartRun: FE_LIVE_PROOF_MAX_START_RUN,
+      credential: 0,
+      test: 0,
+      sync: 0,
+      supportingSurface: [...FE_LIVE_PROOF_SUPPORTING_SURFACE],
+      hostSendsStartRun: false,
+      forbidStandaloneProofClient: true,
+      boundFrontendPath: `/connect/naver?walkthroughRun=${runId}`,
+    },
   };
 }
 
@@ -360,14 +391,19 @@ describe("per-phase operator ENTRYPOINT contract — one true action, never a wr
     }
   });
 
-  it("ONLY the guided-connection phase emits a bound frontend URL; both calibration phases do not", () => {
+  it("only the guided-connection + FE-run-host issuance proof emit a bound frontend URL; calibration phases do not", () => {
     expect(PHASE_ENTRYPOINTS.NAVER_GUIDED_CONNECTION.entrypointType).toBe("FRONTEND_URL");
     expect(PHASE_ENTRYPOINTS.NAVER_GUIDED_CONNECTION.emitsFrontendUrl).toBe(true);
+    expect(PHASE_ENTRYPOINTS.API_ISSUANCE_FE_LIVE_PROOF.entrypointType).toBe("FRONTEND_URL");
+    expect(PHASE_ENTRYPOINTS.API_ISSUANCE_FE_LIVE_PROOF.emitsFrontendUrl).toBe(true);
+    // The four calibration phases stay CLI-launched — no frontend URL.
     expect(PHASE_ENTRYPOINTS.API_CENTER_STRUCTURE_OBSERVATION.emitsFrontendUrl).toBe(false);
     expect(PHASE_ENTRYPOINTS.API_ISSUANCE_HIGHLIGHT_PROOF.emitsFrontendUrl).toBe(false);
-    // Exactly one entrypoint phase emits a frontend URL.
+    expect(PHASE_ENTRYPOINTS.API_CENTER_VISUAL_RECON.emitsFrontendUrl).toBe(false);
+    expect(PHASE_ENTRYPOINTS.API_ISSUANCE_SELECTOR_PROBE.emitsFrontendUrl).toBe(false);
+    // Exactly these two entrypoint phases emit a frontend URL.
     const urlPhases = ENTRYPOINT_PHASES.filter((p) => PHASE_ENTRYPOINTS[p].emitsFrontendUrl);
-    expect(urlPhases).toEqual(["NAVER_GUIDED_CONNECTION"]);
+    expect(urlPhases).toEqual(["API_ISSUANCE_FE_LIVE_PROOF", "NAVER_GUIDED_CONNECTION"]);
   });
 
   it("every canonical phase entrypoint passes its own contract (no drift in the table)", () => {
@@ -416,5 +452,171 @@ describe("per-phase operator ENTRYPOINT contract — one true action, never a wr
     const r2 = validateEntrypointContract("API_CENTER_STRUCTURE_OBSERVATION", wrongCli);
     expect(r2.ok).toBe(false);
     if (!r2.ok) expect(r2.cause).toBe("ENTRYPOINT_CLI_MISMATCH");
+  });
+});
+
+describe("FE-run-host issuance live proof (API_ISSUANCE_FE_LIVE_PROOF)", () => {
+  it("a PREPARED manifest is a bound-FE-URL entrypoint with the host as a SUPPORTING surface (FE = sole run client)", () => {
+    const r = validateApprovalPrerequisites(baseFeLiveProof());
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const m = r.manifest;
+      expect(m.phase).toBe("API_ISSUANCE_FE_LIVE_PROOF");
+      expect(m.mode).toBe("READ_ONLY");
+      // Entrypoint is the bound FE URL (NOT a CLI-launched dedicated window).
+      expect(m.entrypointType).toBe("FRONTEND_URL");
+      expect(m.entrypointCommandId).toBe("frontend-connect-naver-issuance");
+      // The FE is the sole START_RUN owner; the CLI host is a supporting surface only.
+      expect(m.soleStartRunOwner).toBe("FRONTEND");
+      expect(m.maxStartRun).toBe(1);
+      expect(m.writeBudget).toEqual({ credential: 0, test: 0, sync: 0 });
+      expect(m.supportingSurface).toEqual(["Local Agent host", "dedicated NAVER Chrome", "bridge carrier"]);
+      // The bound FE URL carries THIS run's id.
+      expect(m.boundFrontendPath).toBe("/connect/naver?walkthroughRun=wt-testrun0001");
+      // Same live capability as the highlight proof (existing-app branch), and selectors must be calibrated.
+      expect(m.allowedActions).toContain("HIGHLIGHT_REAL_CONTROL");
+      expect(m.allowedActions).toContain("OBSERVE_USER_CLICK_TRANSITION");
+      expect(m.allowedActions).toContain("REVEAL_SECTION_IN_VIEWPORT");
+      expect(m.selectorsCalibrated).toBe(true);
+      // The supporting host tool is disclosed as the cli, but it is never the operator entrypoint.
+      expect(m.cli).toBe("src/cli/run-api-issuance-live-naver.ts");
+      // Sanitized: the raw API-center URL never enters the manifest.
+      expect(JSON.stringify(m)).not.toContain("apicenter.commerce.naver.com");
+      expect(m.apiCenterHost).toBe("api_center_host");
+    }
+  });
+
+  it("is REFUSED until selectors are calibrated (it highlights real controls)", () => {
+    const r = validateApprovalPrerequisites({ ...baseFeLiveProof(), selectorsCalibrated: false });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("SELECTORS_NOT_CALIBRATED");
+  });
+
+  it("the START_RUN contract is missing entirely → FAIL", () => {
+    const r = validateApprovalPrerequisites({ ...baseFeLiveProof(), startRunContract: undefined });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("MISSING_FE_RUN_HOST_CONTRACT");
+  });
+
+  it("a non-FRONTEND START_RUN owner → FAIL", () => {
+    const b = baseFeLiveProof();
+    const r = validateApprovalPrerequisites({ ...b, startRunContract: { ...b.startRunContract!, soleStartRunOwner: "CLI" } });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("START_RUN_OWNER_NOT_FRONTEND");
+  });
+
+  it("a START_RUN cap other than 1 → FAIL", () => {
+    const b = baseFeLiveProof();
+    for (const maxStartRun of [0, 2, 5]) {
+      const r = validateApprovalPrerequisites({ ...b, startRunContract: { ...b.startRunContract!, maxStartRun } });
+      expect(r.ok, String(maxStartRun)).toBe(false);
+      if (!r.ok) expect(r.cause).toBe("START_RUN_CAP_NOT_ONE");
+    }
+  });
+
+  it("any non-zero credential/test/sync budget → FAIL (READ-only)", () => {
+    const b = baseFeLiveProof();
+    for (const patch of [{ credential: 1 }, { test: 1 }, { sync: 1 }]) {
+      const r = validateApprovalPrerequisites({ ...b, startRunContract: { ...b.startRunContract!, ...patch } });
+      expect(r.ok, JSON.stringify(patch)).toBe(false);
+      if (!r.ok) expect(r.cause).toBe("WRITE_ACTIONS_NOT_ZERO");
+    }
+  });
+
+  it("a host that sends START_RUN → FAIL (the FE is the sole run client)", () => {
+    const b = baseFeLiveProof();
+    const r = validateApprovalPrerequisites({ ...b, startRunContract: { ...b.startRunContract!, hostSendsStartRun: true } });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("HOST_SENDS_START_RUN");
+  });
+
+  it("a contract that does not forbid the standalone proof client → FAIL", () => {
+    const b = baseFeLiveProof();
+    const r = validateApprovalPrerequisites({ ...b, startRunContract: { ...b.startRunContract!, forbidStandaloneProofClient: false } });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("PROOF_CLIENT_NOT_FORBIDDEN");
+  });
+
+  it("a supporting surface that is not EXACTLY host + Chrome + bridge → FAIL (missing OR extra)", () => {
+    const b = baseFeLiveProof();
+    const cases = [
+      [],
+      ["Local Agent host"],
+      ["Local Agent host", "dedicated NAVER Chrome"],
+      // An EXTRA caller-supplied entry (potential free-text leak) is refused — the set must be exact.
+      ["Local Agent host", "dedicated NAVER Chrome", "bridge carrier", "acc-4451190 leaked id"],
+    ];
+    for (const surface of cases) {
+      const r = validateApprovalPrerequisites({ ...b, startRunContract: { ...b.startRunContract!, supportingSurface: surface } });
+      expect(r.ok, JSON.stringify(surface)).toBe(false);
+      if (!r.ok) expect(r.cause).toBe("MISSING_SUPPORTING_SURFACE");
+    }
+  });
+
+  it("a bound FE URL whose walkthroughRun is not EXACTLY the runId → FAIL (prefix collision, decoy param, wrong path)", () => {
+    const b = baseFeLiveProof();
+    const paths = [
+      "/connect/naver?walkthroughRun=wt-someoneelse",
+      "/connect/naver", // no param
+      "", // empty
+      // Prefix collision: substring-contains the runId but the exact param value differs.
+      "/connect/naver?walkthroughRun=wt-testrun0001999",
+      // Decoy: the FIRST walkthroughRun (what the FE parses) is a DIFFERENT run; the real id is only a later decoy key.
+      "/connect/naver?walkthroughRun=wt-other&x=walkthroughRun=wt-testrun0001",
+      // Right param, wrong path — not the order-connection wizard.
+      "/evil/phish?walkthroughRun=wt-testrun0001",
+      // Lookalike path prefix (must be exactly /connect/naver?…, not /connect/naver-evil).
+      "/connect/naver-evil?walkthroughRun=wt-testrun0001",
+    ];
+    for (const path of paths) {
+      const r = validateApprovalPrerequisites({ ...b, startRunContract: { ...b.startRunContract!, boundFrontendPath: path } });
+      expect(r.ok, path).toBe(false);
+      if (!r.ok) expect(r.cause).toBe("RUNID_URL_MISMATCH");
+    }
+    // The exact, correct path passes.
+    const ok = validateApprovalPrerequisites(b);
+    expect(ok.ok).toBe(true);
+  });
+
+  it("entrypoint cross-combos fail closed: FE proof with a CLI entrypoint, and the highlight proof with a frontend URL", () => {
+    // The FE-run-host proof forced onto a CLI-launched dedicated window → mismatch.
+    const feAsCli: EntrypointSpec = {
+      ...PHASE_ENTRYPOINTS.API_ISSUANCE_FE_LIVE_PROOF,
+      entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
+      emitsFrontendUrl: false,
+    };
+    const r = validateEntrypointContract("API_ISSUANCE_FE_LIVE_PROOF", feAsCli);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("ENTRYPOINT_TYPE_MISMATCH");
+
+    // The CLI-driver highlight proof forced onto a bound frontend URL → still refused (guard unchanged).
+    const hlAsFrontend: EntrypointSpec = {
+      ...PHASE_ENTRYPOINTS.API_ISSUANCE_HIGHLIGHT_PROOF,
+      entrypointType: "FRONTEND_URL",
+      cli: "",
+      emitsFrontendUrl: true,
+    };
+    const r2 = validateEntrypointContract("API_ISSUANCE_HIGHLIGHT_PROOF", hlAsFrontend);
+    expect(r2.ok).toBe(false);
+    if (!r2.ok) expect(r2.cause).toBe("ENTRYPOINT_TYPE_MISMATCH");
+  });
+
+  it("the CLI-driver highlight proof is UNCHANGED — still CLI-launched, no frontend URL, no FE-proof fields", () => {
+    const r = validateApprovalPrerequisites(baseHighlight(true));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const m = r.manifest;
+      expect(m.entrypointType).toBe("CLI_LAUNCHED_DEDICATED_WINDOW");
+      expect(m.entrypointCommandId).toBe("run-api-issuance-live-naver");
+      // The FE-proof-only fields never leak onto the highlight manifest.
+      expect(m.soleStartRunOwner).toBeUndefined();
+      expect(m.maxStartRun).toBeUndefined();
+      expect(m.writeBudget).toBeUndefined();
+      expect(m.supportingSurface).toBeUndefined();
+      expect(m.boundFrontendPath).toBeUndefined();
+      for (const tok of ["/connect/naver", "?walkthroughRun="]) {
+        expect(JSON.stringify(m).includes(tok), `highlight manifest must not contain "${tok}"`).toBe(false);
+      }
+    }
   });
 });

@@ -67,9 +67,15 @@ scheduler, NAVER flag, baseline counts, smoke result — no secret/token/credent
 The operator's action after approval depends on the **phase**, and the preflight prints only the one true action:
 
 - **Guided order connection** (default, no `SELLEROPS_APPROVAL_PHASE`) → the operator opens the bound
-  `http://localhost:5173/connect/naver?walkthroughRun=<id>` URL. This is the ONLY phase that prints a frontend URL.
+  `http://localhost:5173/connect/naver?walkthroughRun=<id>` URL.
+- **FE-run-host issuance live proof** (`SELLEROPS_APPROVAL_PHASE=API_ISSUANCE_FE_LIVE_PROOF`) → also a bound
+  `…/connect/naver?walkthroughRun=<id>` URL, but READ_ONLY: the FE is the **sole run client** (START_RUN once),
+  the CLI-launched Local Agent host + dedicated NAVER Chrome + bridge are a **supporting surface** that sends no
+  START_RUN, and the manifest carries `soleStartRunOwner=FRONTEND` / `maxStartRun=1` / zero credential·test·sync /
+  `supportingSurface` / `boundFrontendPath`. Preflight fails closed if a standalone `issuance-live-proof.ts`
+  client is running. (These two are the ONLY phases that print a frontend URL.)
 - **Calibration phases** (`SELLEROPS_APPROVAL_PHASE=API_CENTER_STRUCTURE_OBSERVATION`,
-  `API_ISSUANCE_HIGHLIGHT_PROOF`, or `API_CENTER_VISUAL_RECON`) → the operator action is a **CLI-launched
+  `API_ISSUANCE_HIGHLIGHT_PROOF`, `API_CENTER_VISUAL_RECON`, or `API_ISSUANCE_SELECTOR_PROBE`) → the operator action is a **CLI-launched
   dedicated Chrome window** that SellerOps opens on approval; there is **no frontend URL**. The preflight prints
   the dedicated-window action instead, and the manifest carries
   `entrypointType`/`entrypointCommandId`/`operatorActionSummary`. A manifest whose phase and entrypoint disagree

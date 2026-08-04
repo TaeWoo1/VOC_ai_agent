@@ -117,6 +117,17 @@ else
     || fail "backend /context git ('$CTX_GIT') != bootstrap ('$RUN_GIT')"
 fi
 
+# 9b. FE-run-host proof ONLY: a standalone issuance-live-proof client must NOT be running. That phase makes the
+# SellerOps FE the SOLE run client (START_RUN once); a standalone `issuance-live-proof.ts` client could send
+# START_RUN behind the FE, so its presence fails preflight closed.
+if [ "${SELLEROPS_APPROVAL_PHASE:-}" = "API_ISSUANCE_FE_LIVE_PROOF" ]; then
+  if pgrep -f "issuance-live-proof.ts" >/dev/null 2>&1; then
+    fail "a standalone issuance-live-proof client is running — the FE must be the SOLE run client; stop it before preflight"
+  else
+    pass "no standalone issuance-live-proof client running (FE is the sole run client)"
+  fi
+fi
+
 # 10. MANDATORY env-binding browser run — clean context, exact URL, banner run id, gate matched, 0 NAVER calls.
 echo "  running env-binding browser smoke (clean context, exact URL)…"
 if SELLEROPS_FRONTEND_ORIGIN="$FRONTEND_ORIGIN" SMOKE_RUN_ID="$RUN_ID" SMOKE_EXPECT="matched" \
@@ -254,6 +265,16 @@ if [ "$FAILED" = "0" ]; then
     VR_SINK="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT')).get('artifactCategory',''))" 2>/dev/null || echo)"
     echo "  visual recon: redact-then-capture — screens: $VR_SCREENS"
     echo "  artifacts: redacted PNG + sanitized closed-vocab JSON → $VR_SINK (gitignored); any uncovered sensitive region ⇒ HALT, no screenshot"
+  fi
+  # FE-run-host issuance proof: surface the sole run client + supporting surface so the operator approves that
+  # the FE (not the CLI host) drives the run, START_RUN fires once, and there is zero credential/test/sync.
+  if [ "$APPROVAL_PHASE" = "API_ISSUANCE_FE_LIVE_PROOF" ]; then
+    FE_OWNER="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT')).get('soleStartRunOwner',''))" 2>/dev/null || echo)"
+    FE_MAX="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT')).get('maxStartRun',''))" 2>/dev/null || echo)"
+    FE_SURFACE="$(python3 -c "import json;print(', '.join(json.load(open('$MANIFEST_OUT')).get('supportingSurface',[])))" 2>/dev/null || echo)"
+    FE_PATH="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT')).get('boundFrontendPath',''))" 2>/dev/null || echo)"
+    echo "  FE run-host proof: sole START_RUN owner=$FE_OWNER (max $FE_MAX) · credential/test/sync=0 · host sends NO START_RUN · no standalone proof client"
+    echo "  supporting surface: $FE_SURFACE (CLI-launched host; NOT a run client) · bound FE path: $FE_PATH"
   fi
   echo "  Standing Safety Contract + full scope: docs/sellerops_live_approval_contract.md"
   echo

@@ -243,6 +243,35 @@ Both phases are `READ_ONLY`. A WRITE step (guided reply submission; credential e
 test + first sync) is a **different manifest with `mode: WRITE`** and always needs its own explicit
 approval (§3). Switching phase/tool `REVOKED`s the current manifest (§4).
 
+### Phase B-FE — `API_ISSUANCE_FE_LIVE_PROOF` (READ_ONLY, FE-run-host live proof)
+
+The same existing-app highlight capability as Phase B, but **driven by the SellerOps FE run-host**
+rather than the CLI driver. Its approval shape differs on exactly one axis — the **run client** — so
+it is a separate phase (Phase B's CLI-launched-dedicated-window entrypoint guard is left intact and
+never weakened):
+
+- **entrypoint = bound FE URL** (`/connect/naver?walkthroughRun=<runId>`), `entrypointType:
+  FRONTEND_URL`. The operator opens the wizard, picks the existing-app path, and `화면을 보며 확인`.
+- **supporting surface** (declared in the manifest, NOT the entrypoint): the CLI-launched Local Agent
+  host + dedicated NAVER Chrome + `/bridge/ws` carrier. The host opens the window and hosts the run
+  but **sends no START_RUN**.
+- **`soleStartRunOwner: FRONTEND`**, **`maxStartRun: 1`** — the FE resyncs, confirms the agent is
+  idle, and sends START_RUN exactly once. No standalone `issuance-live-proof.ts` client may run
+  (preflight fails closed if one is).
+- **`writeBudget: {credential:0, test:0, sync:0}`** — READ-only; no credential entry / test / sync.
+- Requires `SELECTORS_CALIBRATED` (it highlights real controls), like Phase B.
+
+The gate (`collector/src/cli/approval-manifest.ts`) refuses any manifest that diverges: a CLI
+entrypoint on this phase, a `FRONTEND_URL` on Phase B, a non-FRONTEND START_RUN owner, a cap ≠ 1, a
+non-zero credential/test/sync, a missing supporting surface, a host that sends START_RUN, or a bound
+FE URL whose `walkthroughRun` ≠ the manifest `runId`.
+
+Approval UX:
+```
+NAVER · existing-app guided issuance tutorial (FE-run-host READ-only proof) · READ_ONLY · run <prefix>
+→ operator: Seated and ready.
+```
+
 ---
 
 ## 8. Consolidation pointers (this file is canonical)

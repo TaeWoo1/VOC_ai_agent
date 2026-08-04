@@ -18,6 +18,9 @@ import {
   PHASE_SPECS,
   validateApprovalPrerequisites,
   VISUAL_RECON_ARTIFACT_CATEGORY,
+  FE_LIVE_PROOF_SUPPORTING_SURFACE,
+  FE_LIVE_PROOF_START_RUN_OWNER,
+  FE_LIVE_PROOF_MAX_START_RUN,
   type CalibrationPhase,
   type ApprovalPrereqInput,
 } from "./approval-manifest";
@@ -52,6 +55,7 @@ export function runApprovalManifestCli(): number {
   // over-claim a capability the phase's driver does not have).
   const isVisualRecon = phase === "API_CENTER_VISUAL_RECON";
   const isStructureObs = phase === "API_CENTER_STRUCTURE_OBSERVATION";
+  const isFeLiveProof = phase === "API_ISSUANCE_FE_LIVE_PROOF";
   const hotkey = isStructureObs ? (env("SELLEROPS_CALIBRATION_HOTKEY") ?? "Ctrl+Shift+K") : undefined;
   const artifactPath = isVisualRecon
     ? VISUAL_RECON_ARTIFACT_CATEGORY
@@ -64,14 +68,34 @@ export function runApprovalManifestCli(): number {
       ? "API Center structure observation"
       : phase === "API_ISSUANCE_SELECTOR_PROBE"
         ? "API issuance read-only selector probe"
-        : "API issuance highlight proof (new-app or existing-app)";
+        : isFeLiveProof
+          ? "existing-app guided issuance tutorial — FE-run-host READ-only live proof (open_app→api_group→credentials→return)"
+          : "API issuance highlight proof (new-app or existing-app)";
   const defaultMaxActions = isVisualRecon
     ? "1 redacted visual recon session"
     : isStructureObs
       ? "1 calibration session"
       : phase === "API_ISSUANCE_SELECTOR_PROBE"
         ? "1 read-only selector probe session"
-        : "1 highlight proof session";
+        : isFeLiveProof
+          ? "1 READ-only FE-run-host session: FE-origin START_RUN=1; NO credential/test/sync; NO value/clipboard/screenshot read"
+          : "1 highlight proof session";
+
+  // FE-run-host issuance proof: build the immutable START_RUN contract (validated against FE_LIVE_PROOF_* in the
+  // gate). The bound FE URL carries THIS run's id; the CLI-launched host is a supporting surface, not a client.
+  const startRunContract = isFeLiveProof
+    ? {
+        soleStartRunOwner: FE_LIVE_PROOF_START_RUN_OWNER,
+        maxStartRun: FE_LIVE_PROOF_MAX_START_RUN,
+        credential: 0,
+        test: 0,
+        sync: 0,
+        supportingSurface: [...FE_LIVE_PROOF_SUPPORTING_SURFACE],
+        hostSendsStartRun: false,
+        forbidStandaloneProofClient: true,
+        boundFrontendPath: `/connect/naver?walkthroughRun=${env("WALKTHROUGH_RUN_ID") ?? "unknown"}`,
+      }
+    : undefined;
 
   const input: ApprovalPrereqInput = {
     phase,
@@ -92,6 +116,7 @@ export function runApprovalManifestCli(): number {
     maxActions: env("SELLEROPS_APPROVAL_MAX") ?? defaultMaxActions,
     surface: env("SELLEROPS_APPROVAL_SURFACE") ?? "Commerce API Center",
     operation: env("SELLEROPS_APPROVAL_OPERATION") ?? defaultOperation,
+    startRunContract,
   };
 
   const res = validateApprovalPrerequisites(input);
