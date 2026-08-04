@@ -70,6 +70,14 @@ sellerops:
       # is unconfirmed — 300 is the commonly cited ceiling, so values above it
       # are rejected at startup; 100 is a conservative default.
       order-detail-batch-size: ${SELLEROPS_CONNECTOR_NAVER_ORDER_DETAIL_BATCH_SIZE:100}
+      # The fixed public egress IPv4(s) the backend makes NAVER API calls from —
+      # the value a seller registers in their app's 'API 호출 IP'. This DECLARES an
+      # infra-guaranteed value for the setup tutorial to display; it does NOT pin
+      # or change the actual egress. Comma-separated, ≤3 (NAVER's per-app cap).
+      # DEFAULT EMPTY: no real IP is committed — the value is injected only from the
+      # environment/secret manager per deployment, and an empty value fails safe (the
+      # tutorial shows generic guidance, never a fabricated IP).
+      advertised-egress-ips: ${SELLEROPS_CONNECTOR_NAVER_ADVERTISED_EGRESS_IPS:}
     coupang:
       # Coupang WING Open API connector (Phase 3D-2 auth skeleton). Off by
       # default — beans absent, COUPANG keeps resolving to the mock connector.
