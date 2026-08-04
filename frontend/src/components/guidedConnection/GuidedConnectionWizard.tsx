@@ -5,7 +5,6 @@ import type {
 } from "../../lib/types";
 import { relativeTime } from "../../lib/format";
 import { ConnectionCapabilityPanel } from "./ConnectionCapabilityPanel";
-import { ExistingAppGuidanceOffer } from "./ExistingAppGuidanceOffer";
 import { NaverIssuanceTutorial } from "./NaverIssuanceTutorial";
 import { NaverIssuanceModeChoice } from "./NaverIssuanceModeChoice";
 import { NaverIssuanceGuidedWalkthrough } from "./NaverIssuanceGuidedWalkthrough";
@@ -254,10 +253,10 @@ export function GuidedConnectionWizard({
         {phase === "existing_credential_entry" &&
           (template ? (
             <div className="space-y-4">
-              {/* Optional screen guidance offer (text stays the default: the checklist + form below render
-                  immediately). Guided → the shared Action Window walkthrough, which routes BACK here. */}
-              <ExistingAppGuidanceOffer dispatch={dispatch} busy={busy} />
-              {/* Existing app: confirm the app's order API group + read ID/Secret — never a second app. */}
+              {/* Reached AFTER the guided walk (or a re-entry). The seller has just found the two values, so
+                  this is the input screen — no guided/text choice here (guided is the default entry). */}
+              <p className="text-sm text-ink break-keep">방금 복사한 애플리케이션 ID와 시크릿을 입력해 주세요.</p>
+              {/* Supplementary help if the seller returned without the values (collapsed by default). */}
               <details className="rounded-lg border border-line px-4 py-3">
                 <summary className="cursor-pointer select-none text-sm font-medium text-ink">
                   기존 앱에서 어디를 확인하나요?

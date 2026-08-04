@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useBridge } from "../../hooks/useBridge";
 import type { ActionWindowRunView, CommandType } from "../../lib/actionWindow/contract";
 import { blockerView, issuanceStepDetail } from "../../lib/actionWindow/copy";
@@ -81,28 +81,38 @@ export function NaverIssuanceGuidedWalkthrough({
   reuseExistingApp = false,
   busy,
 }: NaverIssuanceGuidedWalkthroughProps) {
-  // The bridge is confined to this component (this phase). Enabled unconditionally here so pairing can begin;
-  // the order connection never mounts it.
-  const bridge = useBridge(true);
+  // GUIDED-FIRST start gate. Guided is the default path, so the seller reaches here without a guided/text
+  // choice; a single CTA ("네이버 연결 안내 시작") begins pairing + hosting. Pairing is deferred until the
+  // seller starts, so the dedicated NAVER window / agent handshake only begins on an explicit action. Fixture
+  // renders (a `run` prop) start immediately — they drive the surfaces directly, not the live start flow.
+  const controlled = run !== undefined;
+  const [started, setStarted] = useState(controlled);
+
+  // The bridge is confined to this component (this phase). Enabled ONLY after the seller starts, and the order
+  // connection never mounts it.
+  const bridge = useBridge(started);
   const phase = bridge.state.phase;
   const paired = phase === "paired";
   // The agent cannot guide and pairing will not fix it → the seller should switch to text. `incompatible_version`
   // needs an app update (AgentPairingPanel renders nothing for it); a denial/revocation is an explicit refusal.
   const cannotPair = phase === "incompatible_version" || phase === "pairing_denied" || phase === "revoked";
+  // The agent is simply not there (off / not installed / LNA-blocked). AgentPairingPanel already offers a retry;
+  // we ALSO surface the text fallback here, because a seller with no Local Agent must have a way forward.
+  const agentUnreachable = phase === "unreachable";
 
   // Live issuance run host — the shared host for BOTH onboarding paths (the runtime picks open-vs-create by
   // observing the API center, so the host carries no path). Inert until `attach()` is called.
-  const controlled = run !== undefined;
   const issuance = useGuidedIssuance(hostRuntime);
   const attach = issuance.attach;
-  // Attach exactly once, and only once the agent is paired — a ref keeps StrictMode's double-invoke and any
-  // re-render from opening a second socket or starting a second walk (the host also guards START_RUN itself).
+  // Attach exactly once, and only once the seller has started AND the agent is paired — a ref keeps StrictMode's
+  // double-invoke and any re-render from opening a second socket or starting a second walk (the host also guards
+  // START_RUN itself).
   const attachedRef = useRef(false);
   useEffect(() => {
-    if (controlled || !paired || attachedRef.current) return;
+    if (controlled || !started || !paired || attachedRef.current) return;
     attachedRef.current = true;
     void attach();
-  }, [controlled, paired, attach]);
+  }, [controlled, started, paired, attach]);
 
   // The view and command sink: the controlled prop in fixture mode, the live host otherwise. The host publishes
   // the v2-typed run view; the shared AW surfaces here consume the v1 shape. v2 is structurally v1 plus an
@@ -115,12 +125,34 @@ export function NaverIssuanceGuidedWalkthrough({
   // The host refused (wrong carrier / unreachable / START_RUN rejected) → guidance can't run; point at text.
   const hostRefused = !controlled && issuance.unavailable !== null;
   const cannotGuide = cannotPair || hostRefused;
+  // Text is a FALLBACK, never a co-equal choice: it is offered ONLY when guidance cannot run — the agent can't
+  // pair (incompatible/denied/revoked), the host refused, or the agent is unreachable. On the healthy paired
+  // path it never appears.
+  const offerTextFallback = cannotGuide || agentUnreachable;
+
+  // The runtime reveals existing-vs-new by OBSERVING NAVER's application list; it surfaces that to the FE as
+  // the step-2 copy key (open-app for an existing app, create-app for an empty store). Read it once and set the
+  // journey path so completion routes correctly — the seller never pre-declares have/new (guided-first).
+  const branchObservedRef = useRef(false);
+  const stepCopyKey = effectiveRun?.currentStep?.copyKey;
+  useEffect(() => {
+    if (branchObservedRef.current) return;
+    const branch =
+      stepCopyKey === "actionWindow.issuance.openApp"
+        ? "existing"
+        : stepCopyKey === "actionWindow.issuance.createApp"
+          ? "new"
+          : null;
+    if (!branch) return;
+    branchObservedRef.current = true;
+    dispatch({ type: "ISSUANCE_APP_BRANCH_OBSERVED", branch });
+  }, [stepCopyKey, dispatch]);
 
   // The commands this walkthrough surfaces from the run's `allowedCommands` — the same curation the import
   // sibling uses (`GuidedImportCard.OFFERED_COMMANDS`). A barrier's raw `allowedCommands` also includes
   // PAUSE/RESUME, SET_GUIDANCE_ENABLED, FIND_CURRENT_STEP, and SWITCH_TO_MANUAL; SET_GUIDANCE_ENABLED/
-  // FIND_CURRENT_STEP are inert here, and SWITCH_TO_MANUAL has ONE home — the persistent text button below,
-  // which both aborts the guided run AND advances the FE journey to the checklist. So only these two render.
+  // FIND_CURRENT_STEP are inert here, and SWITCH_TO_MANUAL is reached only through the failure-only text
+  // fallback (`toText`), which aborts the run cleanly before advancing to text. So only these two render.
   const OFFERED_COMMANDS: readonly CommandType[] = ["REQUEST_STEP_RECHECK", "CANCEL_RUN"];
   const controlExclude = effectiveRun
     ? effectiveRun.allowedCommands.filter((c) => !OFFERED_COMMANDS.includes(c))
@@ -136,6 +168,28 @@ export function NaverIssuanceGuidedWalkthrough({
     dispatch({ type: "APPLICATION_ISSUANCE_MODE", mode: "text" });
   };
 
+  // GUIDED-FIRST start screen: one CTA begins the walk. No guided/text choice — text is a failure-only
+  // fallback surfaced later. The dedicated NAVER window / pairing only starts on this explicit action.
+  if (!started) {
+    return (
+      <div className="space-y-3" aria-label="네이버 연결 안내 시작">
+        <p className="text-sm text-ink break-keep">네이버 API 센터에서 연결 정보를 확인하도록 안내해 드릴게요.</p>
+        <p className="text-sm text-muted break-keep">
+          시작하면 전용 NAVER 창이 열립니다. 로그인·클릭·복사는 직접 하시면 되고, SellerOps는 어디를 봐야
+          하는지 화면으로 안내만 합니다 — 값·클립보드·화면을 읽지 않습니다.
+        </p>
+        <button
+          type="button"
+          className="btn-primary block w-full"
+          onClick={() => setStarted(true)}
+          disabled={busy}
+        >
+          네이버 연결 안내 시작
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4" aria-label={reuseExistingApp ? "화면 안내" : "화면 안내 발급"}>
       {/* Pairing (guided path only). AgentPairingPanel self-hides when paired or on an incompatible version. */}
@@ -148,11 +202,19 @@ export function NaverIssuanceGuidedWalkthrough({
         />
       )}
 
-      {/* The agent can't guide (needs update / declined) — say so and point at text, which always works. */}
+      {/* The agent can't guide (needs update / declined) — say so and point at text. */}
       {cannotGuide && (
         <p className="rounded-xl bg-warn/10 px-4 py-3 text-sm text-ink break-keep" role="status">
           화면 안내를 사용할 수 없어요. 텍스트로 진행해 주세요.
         </p>
+      )}
+
+      {/* Text is a FALLBACK, shown ONLY when guidance cannot run (can't pair / host refused / agent
+          unreachable). On the healthy paired path it never appears. */}
+      {offerTextFallback && (
+        <button type="button" className="btn-ghost text-sm" onClick={toText} disabled={busy}>
+          텍스트로 직접 진행하기
+        </button>
       )}
 
       {/* Paired but no run yet: the agent is connected; the guidance run is starting. */}
@@ -207,11 +269,6 @@ export function NaverIssuanceGuidedWalkthrough({
           )}
         </>
       )}
-
-      {/* Persistent text fallback — always available, whatever the bridge state. */}
-      <button type="button" className="btn-ghost text-sm" onClick={toText} disabled={busy}>
-        텍스트로 직접 진행하기
-      </button>
     </div>
   );
 }

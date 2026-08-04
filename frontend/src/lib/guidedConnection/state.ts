@@ -173,8 +173,12 @@ export function guidedConnectionReducer(
         // refresh never mints a token or a sync job; the seller presses the CTA to verify.
         return state("connection_testing", { ...m, registered: true }, null, "saved");
       }
-      // No stored key → the three-path fork, no agent/login gate.
-      return state("application_path_choice", m, null, "unknown");
+      // No stored key → GUIDED-FIRST (product decision 2026-08-04). Instead of asking the seller to
+      // pre-declare have/new in a three-path fork, enter the Action Window guided walkthrough directly with
+      // an UNDETERMINED path: the runtime observes NAVER's application list and reveals existing-vs-new
+      // (surfaced to the FE as `ISSUANCE_APP_BRANCH_OBSERVED`, which sets the path). The old
+      // `application_path_choice` fork remains a valid phase (reachable/tested) but is no longer the entry.
+      return state("application_issuance_guided", m, null, "unknown");
     }
     return prev;
   }
@@ -222,17 +226,32 @@ export function guidedConnectionReducer(
       return prev;
 
     case "application_issuance_guided":
-      // Guidance finished (COMPLETED) or the seller fell back to text. The DESTINATION is path-aware: an
-      // existing/saved-app seller was only being SHOWN where their app's order API group + ID/Secret live,
-      // so both events return them to the existing-credential entry; a new-app seller issued a fresh app, so
-      // completion is the credential-issued hand-off and text drops to the static issuance checklist. The
-      // shared walkthrough carries NO path — the reducer alone routes, so one event serves both onboarding
-      // paths. The guided walkthrough never reads or stores a credential itself; nothing here mints one.
+      // Guidance finished (COMPLETED) or the seller fell back to text. The DESTINATION is path-aware, and the
+      // path comes from the RUNTIME (it observes NAVER's application list and emits ISSUANCE_APP_BRANCH_OBSERVED)
+      // — the seller never pre-declares it (guided-first entry starts path="unknown"):
+      //   • existing/saved → the existing-credential reuse entry (only SHOWN where the app's order API group +
+      //     ID/Secret live; no second app is issued);
+      //   • new           → completion is the credential-issued hand-off, text drops to the static checklist;
+      //   • UNKNOWN (the runtime never revealed the branch — agent unavailable, or a refresh lost the ephemeral
+      //     step-2 signal) → fail SAFE to the self-declare fork, NEVER assume "new" (§17.2: an existing-app
+      //     seller must never be nudged into a forbidden second app, and must keep the secret-recovery exit).
+      // The guided walkthrough never reads or stores a credential itself; nothing here mints one.
+      if (event.type === "ISSUANCE_APP_BRANCH_OBSERVED") {
+        return state("application_issuance_guided", m, null, event.branch === "existing" ? "existing" : "new");
+      }
       if (event.type === "ISSUANCE_COMPLETE") {
-        return state(reusesExistingApp(p) ? "existing_credential_entry" : "credential_issued", m, null, p);
+        if (reusesExistingApp(p)) return state("existing_credential_entry", m, null, p);
+        if (p === "new") return state("credential_issued", m, null, p);
+        // path still UNKNOWN → the runtime never revealed the branch (agent unavailable, or a refresh lost the
+        // ephemeral step-2 signal). Fall back to the self-declare fork — NEVER assume "new", which would push an
+        // existing-app seller to issue a forbidden second app and strand them without secret recovery (§17.2).
+        return state("application_path_choice", m, null, "unknown");
       }
       if (event.type === "APPLICATION_ISSUANCE_MODE" && event.mode === "text") {
-        return state(reusesExistingApp(p) ? "existing_credential_entry" : "application_issuance", m, null, p);
+        if (reusesExistingApp(p)) return state("existing_credential_entry", m, null, p);
+        if (p === "new") return state("application_issuance", m, null, p);
+        // Same fail-safe: an undetermined branch asks (the fork), rather than defaulting to new-app issuance.
+        return state("application_path_choice", m, null, "unknown");
       }
       return prev;
 

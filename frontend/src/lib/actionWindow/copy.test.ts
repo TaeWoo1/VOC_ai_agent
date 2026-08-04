@@ -80,13 +80,16 @@ describe("FE-owned copy registry", () => {
       }
     });
 
-    it("the api-group detail names the order/seller groups; credentials detail states SellerOps never reads the value", () => {
+    it("the api-group detail names the order/seller groups; credentials detail says copy BOTH values, read NONE", () => {
       expect(issuanceStepDetail("actionWindow.issuance.apiGroup")).toMatch(/주문/);
       expect(issuanceStepDetail("actionWindow.issuance.apiGroup")).toMatch(/판매자/);
       const cred = issuanceStepDetail("actionWindow.issuance.credentials") ?? "";
-      expect(cred).toMatch(/애플리케이션 ID/);
-      expect(cred).toMatch(/시크릿/);
-      expect(cred).toMatch(/읽지 않/); // SellerOps never reads the value
+      expect(cred).toMatch(/Application ID/); // copy the ID directly
+      expect(cred).toMatch(/Application Secret|시크릿/); // copy the Secret directly
+      expect(cred).toMatch(/직접 복사/);
+      expect(cred).toMatch(/읽지 않/); // SellerOps reads no value / clipboard / screen
+      const ret = issuanceStepDetail("actionWindow.issuance.return") ?? "";
+      expect(ret).toMatch(/두 값을 복사했다면/);
     });
 
     it("returns null for a step with no detail mapping (never leaks the raw key)", () => {

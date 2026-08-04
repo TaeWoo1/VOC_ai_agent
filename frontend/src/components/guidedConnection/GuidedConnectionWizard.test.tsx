@@ -82,11 +82,12 @@ describe("GuidedConnectionWizard — per-phase actions dispatch sanitized events
     expect(props.dispatch).toHaveBeenCalledWith({ type: "ISSUANCE_COMPLETE" });
   });
 
-  it("application_issuance_guided → renders the Action Window walkthrough with a persistent text fallback", async () => {
-    const { props } = renderWizard(stateAt("application_issuance_guided"));
-    // The walkthrough's persistent text fallback returns to the checklist path (works even with no agent).
-    await userEvent.click(screen.getByRole("button", { name: "텍스트로 직접 진행하기" }));
-    expect(props.dispatch).toHaveBeenCalledWith({ type: "APPLICATION_ISSUANCE_MODE", mode: "text" });
+  it("application_issuance_guided → renders the guided walkthrough START gate (guided is the default; no co-equal text)", () => {
+    renderWizard(stateAt("application_issuance_guided"));
+    expect(screen.getByRole("button", { name: "네이버 연결 안내 시작" })).toBeInTheDocument();
+    // Text is a failure-only fallback, never an upfront co-equal choice.
+    expect(screen.queryByRole("button", { name: "텍스트로 직접 진행하기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "화면을 보며 확인" })).toBeNull();
   });
 
   it("credential_issued → dispatches BEGIN_CREDENTIAL_ENTRY", async () => {
@@ -239,21 +240,16 @@ describe("GuidedConnectionWizard — discovery / reuse / recovery phases", () =>
     expect(props.dispatch).toHaveBeenCalledWith({ type: "SECRET_UNAVAILABLE" });
   });
 
-  it("existing_credential_entry → optional guided offer; 화면을 보며 확인 dispatches into the shared walkthrough", async () => {
-    const { props } = renderWizard(stateAt("existing_credential_entry"));
-    // The form (text default) renders alongside the offer.
+  it("existing_credential_entry → the POST-guided input screen: the form + input copy, NO guided/text offer", () => {
+    renderWizard(stateAt("existing_credential_entry"));
+    // Reached after the guided walk found the values — this is the input screen.
+    expect(screen.getByText("방금 복사한 애플리케이션 ID와 시크릿을 입력해 주세요.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "연결 정보 저장" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "화면을 보며 확인" }));
-    expect(props.dispatch).toHaveBeenCalledWith({ type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
-  });
-
-  it("existing_credential_entry → 텍스트로 직접 확인 dismisses the offer but keeps the form (no reducer event)", async () => {
-    const { props } = renderWizard(stateAt("existing_credential_entry"));
-    await userEvent.click(screen.getByRole("button", { name: "텍스트로 직접 확인" }));
+    // The removed co-equal offer must not resurface here.
     expect(screen.queryByRole("button", { name: "화면을 보며 확인" })).toBeNull();
-    // The secure form stays — text was always the default.
-    expect(screen.getByRole("button", { name: "연결 정보 저장" })).toBeInTheDocument();
-    expect(props.dispatch).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "텍스트로 직접 확인" })).toBeNull();
+    // The Secret-recovery exit stays.
+    expect(screen.getByRole("button", { name: "시크릿을 찾지 못했어요" })).toBeInTheDocument();
   });
 
   it("credential_recovery_required → recover by re-viewing/reissuing the Secret; NO app-delete option is offered", async () => {

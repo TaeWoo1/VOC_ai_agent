@@ -51,9 +51,9 @@ const ISSUANCE_STEP_DETAIL: Record<string, string> = {
   "actionWindow.issuance.apiGroup":
     "이 애플리케이션에 상품·주문(판매자) 관련 API 그룹이 포함돼 있는지 확인하고, 없으면 추가하세요. 정확한 그룹 이름은 화면마다 다를 수 있으니 '주문'·'판매자'가 포함된 항목을 찾아 선택하면 됩니다.",
   "actionWindow.issuance.credentials":
-    "애플리케이션 상세에서 애플리케이션 ID와 시크릿(클라이언트 시크릿)을 확인하세요. SellerOps는 이 값을 읽지 않습니다 — 시크릿은 눈으로만 확인하고, 다음 화면의 SellerOps 보안 입력란에 직접 입력하세요. 확인이 어려우면 시크릿 재발급이 필요할 수 있습니다.",
+    "애플리케이션 상세에서 ① Application ID를 직접 복사하고, ② Application Secret(클라이언트 시크릿)을 직접 복사하세요. SellerOps는 이 값도, 클립보드도, 화면도 읽지 않습니다 — 복사는 직접 하시고, 다음 화면의 보안 입력란에 직접 붙여넣으세요. 시크릿 확인이 어려우면 재발급이 필요할 수 있습니다.",
   "actionWindow.issuance.return":
-    "확인한 애플리케이션 ID와 시크릿을 들고 SellerOps로 돌아오세요. 안내가 끝나면 연결 정보 입력 화면으로 이동합니다.",
+    "두 값을 복사했다면 SellerOps로 돌아가 주세요. 안내가 끝나면 연결 정보 입력 화면으로 이동합니다.",
 };
 
 /** The FULL per-step instruction for a guided issuance step, or null when the step has no detail mapping. */

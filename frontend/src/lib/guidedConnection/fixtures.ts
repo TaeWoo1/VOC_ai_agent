@@ -37,15 +37,14 @@ export const NAVER_LIKE_TEMPLATE: CredentialTemplateView = {
 };
 
 /**
- * No stored key → the three-path fork; the seller chooses to issue a NEW app. Choosing "new" first routes
- * through the app-absence check (one app per store, no delete) — issuance proceeds only once the seller
- * confirms the store has no application (`APPLICATION_LIST_RESULT{ found: false }`). No readiness gate.
+ * No stored key → GUIDED-FIRST (2026-08-04): the seller enters the guided walkthrough directly, and the
+ * runtime — by observing NAVER's application list — reveals an EMPTY store (`ISSUANCE_APP_BRANCH_OBSERVED
+ * {branch:"new"}` sets path="new"). Guidance finishing hands off to the issued-credential entry. The seller
+ * never pre-declares have/new; there is no path-choice fork and no readiness gate.
  */
 const NEW_APP_ISSUANCE: GuidedEvent[] = [
   { type: "RESUME_FROM_CAPABILITY", credentialPresent: false, completed: false },
-  { type: "APPLICATION_PATH", choice: "new" },
-  { type: "APPLICATION_LIST_RESULT", found: false },
-  { type: "ACCOUNT_STORE_RESOLVED" },
+  { type: "ISSUANCE_APP_BRANCH_OBSERVED", branch: "new" },
   { type: "ISSUANCE_COMPLETE" },
   { type: "BEGIN_CREDENTIAL_ENTRY" },
 ];
@@ -82,19 +81,23 @@ export const SAVED_KEY_INCOMPLETE_EVENTS: GuidedEvent[] = [
   { type: "SYNC_RESULT", status: "SUCCESS" },
 ];
 
-/** Existing app, no stored key: fork → "have" → enter existing key → register → test → sync (§flow 3). */
+/** Existing app, no stored key (guided-first): enter guidance → the runtime OBSERVES an existing app
+ *  (`branch:"existing"` → path="existing") → finish → enter the existing key → register → test → sync (§flow 3). */
 export const EXISTING_APP_EVENTS: GuidedEvent[] = [
   { type: "RESUME_FROM_CAPABILITY", credentialPresent: false, completed: false },
-  { type: "APPLICATION_PATH", choice: "have" },
+  { type: "ISSUANCE_APP_BRANCH_OBSERVED", branch: "existing" },
+  { type: "ISSUANCE_COMPLETE" },
   { type: "SUBMIT_CREDENTIALS" },
   { type: "CREDENTIAL_REGISTERED" },
   { type: "TEST_RESULT", status: "SUCCESS", reasonCode: null },
   { type: "SYNC_RESULT", status: "SUCCESS" },
 ];
 
-/** Existing app but the Secret cannot be produced → credential recovery (§flow 4). */
+/** Existing app but the Secret cannot be produced → credential recovery (§flow 4). Guided-first: the runtime
+ *  observes the existing app, guidance finishes to the existing-credential entry, then the Secret is missing. */
 export const SECRET_LOST_EVENTS: GuidedEvent[] = [
   { type: "RESUME_FROM_CAPABILITY", credentialPresent: false, completed: false },
-  { type: "APPLICATION_PATH", choice: "have" },
+  { type: "ISSUANCE_APP_BRANCH_OBSERVED", branch: "existing" },
+  { type: "ISSUANCE_COMPLETE" },
   { type: "SECRET_UNAVAILABLE" },
 ];

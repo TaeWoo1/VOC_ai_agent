@@ -22,6 +22,37 @@ vi.mock("../hooks/useBridge", () => ({
   useBridge: () => ({ state: h.bridge, requestPairing: () => {}, revoke: () => {}, retry: () => {} }),
 }));
 
+// Stub the guided walkthrough (its live pairing/host/branch internals are covered by its own suite). Here it
+// exposes drivers so the PAGE flow can be exercised: the runtime-observed branch + completion, and the
+// failure-only text fallback. This is what makes guided-first testable at the page level without a live agent.
+vi.mock("../components/guidedConnection/NaverIssuanceGuidedWalkthrough", () => ({
+  NaverIssuanceGuidedWalkthrough: ({ dispatch }: { dispatch: (e: { type: string; branch?: string; mode?: string }) => void }) => (
+    <div data-testid="guided-walkthrough-stub">
+      <button
+        type="button"
+        onClick={() => {
+          dispatch({ type: "ISSUANCE_APP_BRANCH_OBSERVED", branch: "existing" });
+          dispatch({ type: "ISSUANCE_COMPLETE" });
+        }}
+      >
+        stub: 기존앱 안내 완료
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          dispatch({ type: "ISSUANCE_APP_BRANCH_OBSERVED", branch: "new" });
+          dispatch({ type: "ISSUANCE_COMPLETE" });
+        }}
+      >
+        stub: 신규앱 안내 완료
+      </button>
+      <button type="button" onClick={() => dispatch({ type: "APPLICATION_ISSUANCE_MODE", mode: "text" })}>
+        stub: 텍스트 fallback
+      </button>
+    </div>
+  ),
+}));
+
 vi.mock("../lib/apiClient", () => ({
   api: {
     getChannelsStrict: vi.fn(),
@@ -121,16 +152,16 @@ function renderPage() {
   );
 }
 
-// New-app path with NO login/agent step: fork "new" → app-absence check → issuance mode choice → the TEXT
-// checklist (the Local-Agent-free path) → entry. The guided (Action Window) mode is the alternative primary,
-// proven separately in the component tests; the order connection here stays text-only and Agent-free.
+// GUIDED-FIRST: no stored key → the page enters the guided walkthrough directly (no path fork). The runtime
+// OBSERVES the store's application list to branch. New app → the runtime saw an empty store → issued hand-off
+// → begin entry. (The walkthrough is stubbed; these buttons stand in for the runtime-observed completion.)
 async function newAppPath() {
-  await userEvent.click(await screen.findByRole("button", { name: "처음 발급할게요" }));
-  await userEvent.click(await screen.findByRole("button", { name: "애플리케이션이 없어요" }));
-  await userEvent.click(await screen.findByRole("button", { name: /계정·스토어를 선택/ }));
-  await userEvent.click(await screen.findByRole("button", { name: "텍스트로 직접 진행하기" }));
-  await userEvent.click(await screen.findByRole("button", { name: "발급을 완료했어요" }));
+  await userEvent.click(await screen.findByRole("button", { name: "stub: 신규앱 안내 완료" }));
   await userEvent.click(await screen.findByRole("button", { name: /발급된 정보를 입력/ }));
+}
+// Existing app: the runtime observed an existing app → return straight to existing-credential entry.
+async function guidedExisting() {
+  await userEvent.click(await screen.findByRole("button", { name: "stub: 기존앱 안내 완료" }));
 }
 async function enterCredentials(secret = SECRET) {
   await userEvent.type(await screen.findByLabelText(/Client ID/), "app-id-1");
@@ -143,7 +174,9 @@ describe("ConnectNaver — Local-Agent-free order connection", () => {
     h.bridge = AGENT_DOWN;
     mockTestAndSyncSuccess();
     renderPage();
-    expect(await screen.findByRole("button", { name: "처음 발급할게요" })).toBeInTheDocument();
+    // Guided-first: no path-choice fork, no login/readiness gate — straight into the guided walkthrough.
+    expect(await screen.findByTestId("guided-walkthrough-stub")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "처음 발급할게요" })).toBeNull();
     expect(screen.queryByRole("button", { name: "로그인했어요" })).toBeNull();
     await newAppPath();
     await enterCredentials();
@@ -238,68 +271,72 @@ describe("ConnectNaver — page load / refresh is READ-ONLY (no test/sync re-run
     expect(api.manualSync).not.toHaveBeenCalled();
   });
 
-  it("capability read fails on load → fail-safe to the fork; never a false completion, never an auto-sync", async () => {
+  it("capability read fails on load → fail-safe to guided entry; never a false completion, never an auto-sync", async () => {
     vi.mocked(api.getConnectionCapabilityStrict).mockRejectedValue(new Error("backend down"));
     renderPage();
-    expect(await screen.findByRole("button", { name: "처음 발급할게요" })).toBeInTheDocument();
+    expect(await screen.findByTestId("guided-walkthrough-stub")).toBeInTheDocument();
     expect(api.testConnection).not.toHaveBeenCalled();
     expect(api.manualSync).not.toHaveBeenCalled();
   });
 });
 
-describe("ConnectNaver — API issuance mode choice + text checklist (Local-Agent-free)", () => {
-  it("offers guided vs text at issuance; the text checklist opens the official center in a NEW TAB (no auto-click)", async () => {
+describe("ConnectNaver — text fallback (Local Agent unavailable) is fail-safe, then reaches the static checklist", () => {
+  it("an UNDETERMINED-branch text fallback ASKS have/new (never silently a new app); 'have' → existing entry", async () => {
+    mockTestAndSyncSuccess();
     renderPage();
+    // Guided couldn't determine existing-vs-new (agent unavailable) → the text fallback must NOT assume new.
+    await userEvent.click(await screen.findByRole("button", { name: "stub: 텍스트 fallback" }));
+    // It asks (the self-declare fork), NOT the new-app issuance checklist.
+    expect(await screen.findByRole("button", { name: "이미 애플리케이션이 있어요" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "애플리케이션 발급" })).toBeNull();
+    // An existing-app seller reaches their reuse entry (with secret recovery) — never a forced second app.
+    await userEvent.click(screen.getByRole("button", { name: "이미 애플리케이션이 있어요" }));
+    expect(await screen.findByRole("heading", { name: "기존 연결 정보 입력" })).toBeInTheDocument();
+  });
+
+  it("choosing to issue a new app from the fallback fork opens the static checklist + the official center in a NEW TAB", async () => {
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "stub: 텍스트 fallback" }));
     await userEvent.click(await screen.findByRole("button", { name: "처음 발급할게요" }));
     await userEvent.click(await screen.findByRole("button", { name: "애플리케이션이 없어요" }));
     await userEvent.click(await screen.findByRole("button", { name: /계정·스토어를 선택/ }));
-    // The mode fork is the primary experience; both choices are offered.
     expect(await screen.findByRole("heading", { name: "애플리케이션 발급" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "화면을 보며 안내받기" })).toBeInTheDocument();
-    // Choose the text path → the existing static checklist renders in place, unchanged behavior.
     await userEvent.click(screen.getByRole("button", { name: "텍스트로 직접 진행하기" }));
     expect(screen.getAllByRole("checkbox").length).toBeGreaterThanOrEqual(3);
 
     const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
     await userEvent.click(screen.getByRole("button", { name: /API 센터 열기/ }));
     expect(openSpy).toHaveBeenCalledWith(expect.stringContaining("commerce.naver.com"), "_blank", "noopener,noreferrer");
-    expect(screen.getByRole("button", { name: "발급을 완료했어요" })).toBeInTheDocument(); // checklist still on screen
+    expect(screen.getByRole("button", { name: "발급을 완료했어요" })).toBeInTheDocument();
     openSpy.mockRestore();
   });
 });
 
 describe("ConnectNaver — reuse an existing connection / application (§discovery)", () => {
-  it("existing app, no stored key: 'have' → enter the existing key → completed (never a new app)", async () => {
+  it("existing app (runtime-observed): guided returns to existing entry → enter the key → completed (never a new app)", async () => {
     mockTestAndSyncSuccess();
     renderPage();
-    await userEvent.click(await screen.findByRole("button", { name: "이미 애플리케이션이 있어요" }));
+    await guidedExisting();
     expect(await screen.findByRole("heading", { name: "기존 연결 정보 입력" })).toBeInTheDocument();
-    expect(screen.getByText("기존 앱에서 어디를 확인하나요?")).toBeInTheDocument();
+    // The post-guided input copy, not a guided/text choice.
+    expect(screen.getByText("방금 복사한 애플리케이션 ID와 시크릿을 입력해 주세요.")).toBeInTheDocument();
     await enterCredentials();
     expect(await screen.findByRole("heading", { name: "주문 연결 완료" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "발급을 완료했어요" })).toBeNull();
-  });
-
-  it("unsure: 'unknown' → self-check NAVER's list → 'found' → existing-credential entry", async () => {
-    renderPage();
-    await userEvent.click(await screen.findByRole("button", { name: "있는지 잘 모르겠어요" }));
-    expect(await screen.findByRole("heading", { name: "애플리케이션 목록 확인" })).toBeInTheDocument();
-    await userEvent.click(await screen.findByRole("button", { name: /찾았어요/ }));
-    expect(await screen.findByRole("heading", { name: "기존 연결 정보 입력" })).toBeInTheDocument();
   });
 });
 
 describe("ConnectNaver — credential recovery when the Secret is lost (§flow 4) — reissue, never delete", () => {
   it("Secret lost: existing entry → 'secret not found' → recovery (never a forced new app)", async () => {
     renderPage();
-    await userEvent.click(await screen.findByRole("button", { name: "이미 애플리케이션이 있어요" }));
+    await guidedExisting();
     await userEvent.click(await screen.findByRole("button", { name: "시크릿을 찾지 못했어요" }));
     expect(await screen.findByRole("heading", { name: "시크릿 재확인 필요" })).toBeInTheDocument();
   });
 
   it("recovery offers NO app-delete; re-obtaining the Secret returns to existing entry", async () => {
     renderPage();
-    await userEvent.click(await screen.findByRole("button", { name: "이미 애플리케이션이 있어요" }));
+    await guidedExisting();
     await userEvent.click(await screen.findByRole("button", { name: "시크릿을 찾지 못했어요" }));
     expect(await screen.findByRole("heading", { name: "시크릿 재확인 필요" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /삭제/ })).toBeNull();
@@ -331,7 +368,7 @@ describe("ConnectNaver — connection start creates the account when a first-tim
 
   it("does NOT create when an API account already exists (idempotent entry)", async () => {
     renderPage();
-    await screen.findByRole("button", { name: "처음 발급할게요" });
+    await screen.findByTestId("guided-walkthrough-stub");
     expect(api.createApiChannelAccount).not.toHaveBeenCalled();
   });
 });
@@ -442,18 +479,18 @@ describe("ConnectNaver — connection test and first sync are separated (distinc
 });
 
 describe("ConnectNaver — refresh recovery (secret-free step restore)", () => {
-  it("restores a mid-issuance step after a page refresh WITHOUT re-choice and WITHOUT a stored secret", async () => {
+  it("restores the post-guided existing-entry step after a page refresh WITHOUT re-choice and WITHOUT a stored secret", async () => {
     const first = renderPage();
-    await userEvent.click(await screen.findByRole("button", { name: "처음 발급할게요" }));
-    await userEvent.click(await screen.findByRole("button", { name: "애플리케이션이 없어요" }));
-    await userEvent.click(await screen.findByRole("button", { name: /계정·스토어를 선택/ }));
-    expect(await screen.findByRole("heading", { name: "애플리케이션 발급" })).toBeInTheDocument();
+    // existing_credential_entry (reached after the guided walk) is a restorable, secret-free step.
+    await guidedExisting();
+    expect(await screen.findByRole("heading", { name: "기존 연결 정보 입력" })).toBeInTheDocument();
 
     first.unmount();
     renderPage();
 
-    expect(await screen.findByRole("heading", { name: "애플리케이션 발급" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "처음 발급할게요" })).toBeNull();
+    // Restored verbatim (phase+path) — no guided re-entry, and the transient guided phase is never resurfaced.
+    expect(await screen.findByRole("heading", { name: "기존 연결 정보 입력" })).toBeInTheDocument();
+    expect(screen.queryByTestId("guided-walkthrough-stub")).toBeNull();
     const raw = sessionStorage.getItem("naver_guided_connection_v1")!;
     expect(Object.keys(JSON.parse(raw)).sort()).toEqual(["path", "phase"]);
   });
@@ -676,8 +713,8 @@ describe("ConnectNaver — walkthrough environment binding (VITE_WALKTHROUGH_MOD
     vi.mocked(api.walkthroughHandshake).mockResolvedValue({ runMatched: true, originMatched: true, timestamp: "t" });
     renderPage();
     expect(await screen.findByRole("note", { name: "Disposable NAVER Walkthrough" })).toHaveTextContent(RUN.slice(0, 8));
-    // Gate opened → the wizard's fork is reachable, and NO account was bootstrapped just by loading.
-    expect(await screen.findByRole("button", { name: "처음 발급할게요" })).toBeInTheDocument();
+    // Gate opened → the guided wizard is reachable, and NO account was bootstrapped just by loading.
+    expect(await screen.findByTestId("guided-walkthrough-stub")).toBeInTheDocument();
     // The handshake sent the run id from the TAB'S URL (not the /context echo) + this tab's origin.
     expect(api.walkthroughHandshake).toHaveBeenCalledWith(
       expect.objectContaining({ walkthroughRunId: RUN, origin: window.location.origin }),
@@ -693,7 +730,7 @@ describe("ConnectNaver — walkthrough environment binding (VITE_WALKTHROUGH_MOD
     vi.mocked(api.getWalkthroughContext).mockResolvedValue(walkthroughContext());
     renderPage();
     expect(await screen.findByRole("alert", { name: "WALKTHROUGH_ENVIRONMENT_MISMATCH" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "처음 발급할게요" })).toBeNull();
+    expect(screen.queryByTestId("guided-walkthrough-stub")).toBeNull();
     expect(api.walkthroughHandshake).not.toHaveBeenCalled();
     expect(api.createApiChannelAccount).not.toHaveBeenCalled();
   });
@@ -726,7 +763,7 @@ describe("ConnectNaver — walkthrough environment binding (VITE_WALKTHROUGH_MOD
     vi.mocked(api.walkthroughHandshake).mockResolvedValue({ runMatched: false, originMatched: true, timestamp: "t" });
     renderPage();
     expect(await screen.findByRole("alert", { name: "WALKTHROUGH_ENVIRONMENT_MISMATCH" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "처음 발급할게요" })).toBeNull();
+    expect(screen.queryByTestId("guided-walkthrough-stub")).toBeNull();
   });
 
   it("context endpoint 404/unreachable → MISMATCH (never a silent proceed)", async () => {

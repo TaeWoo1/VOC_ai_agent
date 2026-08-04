@@ -22,9 +22,13 @@ const STORAGE_KEY = "naver_guided_connection_v1";
 
 const NO_MILESTONES: GuidedMilestones = { registered: false, tested: false, synced: false };
 
-/** Pre-registration, seller-input phases that are safe to restore verbatim after a refresh. */
+/** Pre-registration, seller-input phases that are safe to restore verbatim after a refresh.
+ *  `application_path_choice` is deliberately NOT restorable: guided-first (2026-08-04) no longer enters the
+ *  three-path fork, so a stale saved fork must fall back to INITIAL_STATE and re-derive the guided entry
+ *  rather than resurface a 3-way choice the current flow never shows. The transient
+ *  `application_issuance_guided` is likewise non-restorable (fail-closed: a refresh re-derives from the
+ *  backend rather than silently re-opening a hosted run). */
 const RESTORABLE_PHASES: ReadonlySet<GuidedPhase> = new Set<GuidedPhase>([
-  "application_path_choice",
   "application_status_unknown",
   "account_store_choice_required",
   "application_issuance",

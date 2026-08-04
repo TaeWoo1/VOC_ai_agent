@@ -151,6 +151,13 @@ export type GuidedEvent =
    * including when the Local Agent is unavailable. It never carries a credential or an account id.
    */
   | { type: "APPLICATION_ISSUANCE_MODE"; mode: "guided" | "text" }
+  /**
+   * The RUNTIME determined, by observing NAVER's application list, whether the seller has an existing app
+   * ("existing") or an empty store needing a new one ("new"). The FE reads this from the hosted guided run's
+   * step-2 copy key (open-app vs create-app) — the seller never pre-declares it. It sets the guided journey's
+   * `path` so completion routes correctly (existing → existing-credential entry, new → the issued hand-off).
+   */
+  | { type: "ISSUANCE_APP_BRANCH_OBSERVED"; branch: "existing" | "new" }
   | { type: "ISSUANCE_COMPLETE" }
   | { type: "BEGIN_CREDENTIAL_ENTRY" }
   | { type: "SUBMIT_CREDENTIALS" }

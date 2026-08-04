@@ -4,7 +4,7 @@
 // cannot guide, and never renders a credential/selector/url/account id. The bridge (useBridge) is mocked so the
 // component renders with no live bridge.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, act } from "@testing-library/react";
+import { render, act, fireEvent } from "@testing-library/react";
 import { screen, userEvent } from "../../test/renderWithRouter";
 import { expectNoAxeViolations } from "../../test/axe";
 import type { BridgeState } from "../../lib/bridge/bridgeClient";
@@ -112,7 +112,7 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
         onCommand={vi.fn()}
       />,
     );
-    expect(screen.getByText(/SellerOps는 이 값을 읽지 않습니다/)).toBeInTheDocument();
+    expect(screen.getByText(/SellerOps는 이 값도, 클립보드도, 화면도 읽지 않습니다/)).toBeInTheDocument();
   });
 
   it("shows the abort (CANCEL_RUN) control when allowed, and the recheck control", () => {
@@ -188,14 +188,12 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
     expect(screen.getByLabelText("화면 안내")).toBeInTheDocument();
   });
 
-  it("the persistent text-fallback button dispatches APPLICATION_ISSUANCE_MODE{mode:'text'} (with a live run)", async () => {
-    const dispatch = vi.fn();
-    render(<NaverIssuanceGuidedWalkthrough dispatch={dispatch} run={issuanceRun()} onCommand={vi.fn()} />);
-    await userEvent.click(screen.getByRole("button", { name: "텍스트로 직접 진행하기" }));
-    expect(dispatch).toHaveBeenCalledWith({ type: "APPLICATION_ISSUANCE_MODE", mode: "text" });
+  it("guided is the default: a HEALTHY run shows NO text button (text is failure-only, not co-equal)", () => {
+    render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} run={issuanceRun()} onCommand={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "텍스트로 직접 진행하기" })).toBeNull();
   });
 
-  it("agent incompatible (pairing won't help) → text affordance + persistent text fallback", async () => {
+  it("agent incompatible (pairing won't help) → the text FALLBACK appears and dispatches mode:'text'", async () => {
     h.bridge = { phase: "incompatible_version", maybeNeedsLocalNetworkAccess: false } as BridgeState;
     const dispatch = vi.fn();
     render(<NaverIssuanceGuidedWalkthrough dispatch={dispatch} run={null} onCommand={vi.fn()} />);
@@ -204,12 +202,19 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
     expect(dispatch).toHaveBeenCalledWith({ type: "APPLICATION_ISSUANCE_MODE", mode: "text" });
   });
 
-  it("agent not paired → the pairing panel is shown (guided path only)", () => {
+  it("agent unreachable (not installed / off) → pairing panel retry PLUS a text fallback", () => {
+    h.bridge = { phase: "unreachable", maybeNeedsLocalNetworkAccess: false } as BridgeState;
+    render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} run={null} onCommand={vi.fn()} />);
+    expect(screen.getByTestId("agent-pairing")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "텍스트로 직접 진행하기" })).toBeInTheDocument();
+  });
+
+  it("agent not paired (handshake in progress) → the pairing panel is shown, NO text button yet", () => {
     h.bridge = { phase: "unpaired", maybeNeedsLocalNetworkAccess: false } as BridgeState;
     render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} run={null} onCommand={vi.fn()} />);
     expect(screen.getByTestId("agent-pairing")).toBeInTheDocument();
-    // Text fallback is still available while unpaired.
-    expect(screen.getByRole("button", { name: "텍스트로 직접 진행하기" })).toBeInTheDocument();
+    // Plain unpaired is not a failure — no co-equal text button.
+    expect(screen.queryByRole("button", { name: "텍스트로 직접 진행하기" })).toBeNull();
   });
 
   it("never renders a selector, url, secret, or account id (sanitized copy keys/codes only)", () => {
@@ -230,23 +235,46 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
     await expectNoAxeViolations(container);
   });
 
+  describe("guided-first start gate", () => {
+    it("the start gate has no accessibility violations", async () => {
+      const { container } = render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} />);
+      expect(screen.getByRole("button", { name: "네이버 연결 안내 시작" })).toBeInTheDocument();
+      await expectNoAxeViolations(container);
+    });
+
+    it("shows a single start CTA and does NOT pair/attach until the seller starts", () => {
+      const host = fakeHost();
+      render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} hostRuntime={host.runtime} />);
+      expect(screen.getByRole("button", { name: "네이버 연결 안내 시작" })).toBeInTheDocument();
+      // No pairing panel and no host attach before the CTA — and no guided/text co-equal choice.
+      expect(screen.queryByTestId("agent-pairing")).toBeNull();
+      expect(host.ensureCalls()).toBe(0);
+      expect(screen.queryByRole("button", { name: "텍스트로 직접 진행하기" })).toBeNull();
+    });
+  });
+
   describe("live host wiring (no run prop → the shared issuance host)", () => {
+    // Guided-first: the live host only begins after the seller clicks the start CTA.
+    const start = () => act(() => fireEvent.click(screen.getByRole("button", { name: "네이버 연결 안내 시작" })));
+
     it("does NOT attach (START_RUN 0) before the agent is paired", () => {
       h.bridge = { phase: "unpaired", maybeNeedsLocalNetworkAccess: false } as BridgeState;
       const host = fakeHost();
       render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} hostRuntime={host.runtime} />);
+      start();
       expect(host.ensureCalls()).toBe(0);
     });
 
-    it("attaches exactly once once paired (START_RUN proxy fires once), even across a re-render", () => {
+    it("attaches exactly once once started AND paired (START_RUN proxy fires once), even across a re-render", () => {
       const host = fakeHost(); // bridge defaults to paired in beforeEach
       const { rerender } = render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} hostRuntime={host.runtime} />);
+      start();
       expect(host.ensureCalls()).toBe(1);
       rerender(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} hostRuntime={host.runtime} />);
       expect(host.ensureCalls()).toBe(1);
     });
 
-    it("a controlled `run` prop bypasses the host entirely (no attach)", () => {
+    it("a controlled `run` prop bypasses the start gate + host entirely (no attach)", () => {
       const host = fakeHost();
       render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} run={issuanceRun()} hostRuntime={host.runtime} />);
       expect(host.ensureCalls()).toBe(0);
@@ -255,7 +283,8 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
     it("renders the AW surfaces from a host-published view, and forwards commands to the host", async () => {
       const host = fakeHost();
       render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} hostRuntime={host.runtime} />);
-      // Before any frame: paired, no run yet → the preparing line.
+      start();
+      // After start: paired, no run yet → the preparing line.
       expect(screen.getByText("도우미가 연결됐어요. NAVER API 센터 안내를 준비하고 있어요.")).toBeInTheDocument();
       // A published view drives the shared timeline + controls.
       act(() => host.publish(issuanceRun()));
@@ -264,9 +293,44 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
       expect(host.sent).toContain("REQUEST_STEP_RECHECK");
     });
 
+    it("the runtime branch is observed from the step-2 copy key → dispatches ISSUANCE_APP_BRANCH_OBSERVED", () => {
+      const dispatch = vi.fn();
+      const host = fakeHost();
+      render(<NaverIssuanceGuidedWalkthrough dispatch={dispatch} hostRuntime={host.runtime} />);
+      start();
+      // Existing app: the runtime drives the open-app step → the FE reads "existing".
+      act(() =>
+        host.publish(
+          issuanceRun({
+            currentStep: { stepId: "aw.issuance_open_or_create_app", stepNumber: 2, totalSteps: 6, copyKey: "actionWindow.issuance.openApp", status: "AWAITING_USER" },
+          }),
+        ),
+      );
+      expect(dispatch).toHaveBeenCalledWith({ type: "ISSUANCE_APP_BRANCH_OBSERVED", branch: "existing" });
+    });
+
+    it("a create-app step is observed as branch 'new' (once)", () => {
+      const dispatch = vi.fn();
+      const host = fakeHost();
+      render(<NaverIssuanceGuidedWalkthrough dispatch={dispatch} hostRuntime={host.runtime} />);
+      start();
+      act(() =>
+        host.publish(
+          issuanceRun({
+            currentStep: { stepId: "aw.issuance_open_or_create_app", stepNumber: 2, totalSteps: 6, copyKey: "actionWindow.issuance.createApp", status: "AWAITING_USER" },
+          }),
+        ),
+      );
+      expect(dispatch).toHaveBeenCalledWith({ type: "ISSUANCE_APP_BRANCH_OBSERVED", branch: "new" });
+      // Latched: a later same-branch frame does not re-dispatch.
+      act(() => host.publish(issuanceRun({ currentStep: { stepId: "aw.issuance_open_or_create_app", stepNumber: 2, totalSteps: 6, copyKey: "actionWindow.issuance.createApp", status: "AWAITING_USER" } })));
+      expect(dispatch.mock.calls.filter((c) => c[0]?.type === "ISSUANCE_APP_BRANCH_OBSERVED")).toHaveLength(1);
+    });
+
     it("curates the control panel — a barrier's full allowedCommands renders only recheck + cancel", () => {
       const host = fakeHost();
       render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} hostRuntime={host.runtime} />);
+      start();
       // A real barrier offers six commands; the walkthrough must surface only the two meaningful ones.
       act(() =>
         host.publish(
@@ -284,22 +348,19 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
       );
       expect(screen.getByRole("button", { name: "확인 완료" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "취소" })).toBeInTheDocument();
-      // Inert / dead-ending controls are NOT surfaced (SWITCH_TO_MANUAL has one home: the text button).
+      // Inert / dead-ending controls are NOT surfaced; SWITCH_TO_MANUAL is reached only via the failure-only text fallback.
       expect(screen.queryByRole("button", { name: "직접 진행" })).toBeNull();
       expect(screen.queryByRole("button", { name: "안내 켜기·끄기" })).toBeNull();
       expect(screen.queryByRole("button", { name: "현재 단계 다시 찾기" })).toBeNull();
       expect(screen.queryByRole("button", { name: "일시정지" })).toBeNull();
     });
 
-    it("the text button aborts a live run via SWITCH_TO_MANUAL (when allowed) AND advances the journey to text", async () => {
+    it("a HEALTHY hosted run shows NO text button (text is failure-only)", () => {
       const host = fakeHost();
-      const dispatch = vi.fn();
-      render(<NaverIssuanceGuidedWalkthrough dispatch={dispatch} hostRuntime={host.runtime} />);
-      act(() => host.publish(issuanceRun({ allowedCommands: ["REQUEST_STEP_RECHECK", "SWITCH_TO_MANUAL"] })));
-      await userEvent.click(screen.getByRole("button", { name: "텍스트로 직접 진행하기" }));
-      // The run is told to stand down (not orphaned), then the FE journey switches to the checklist.
-      expect(host.sent).toContain("SWITCH_TO_MANUAL");
-      expect(dispatch).toHaveBeenCalledWith({ type: "APPLICATION_ISSUANCE_MODE", mode: "text" });
+      render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} hostRuntime={host.runtime} />);
+      start();
+      act(() => host.publish(issuanceRun()));
+      expect(screen.queryByRole("button", { name: "텍스트로 직접 진행하기" })).toBeNull();
     });
   });
 });
