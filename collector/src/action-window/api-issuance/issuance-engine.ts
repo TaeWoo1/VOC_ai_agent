@@ -84,11 +84,16 @@ const TARGET_BARRIER = TARGET_BARRIER_STAGE;
 const TARGET_STEP: Readonly<Record<IssuanceTarget, number>> = {
   create_app: 2,
   open_app: 2,
-  api_group: 3,
-  application_id: 4,
-  application_secret: 5,
-  return: 6,
+  // Step 3 is the target-less usage-state advisory (`guiding_app_usage_check`); the highlightable controls
+  // resume at step 4.
+  api_group: 4,
+  application_id: 5,
+  application_secret: 6,
+  return: 7,
 };
+
+/** The 1-based step number of the text-only usage-state advisory barrier (no target — highlights nothing). */
+const APP_USAGE_CHECK_STEP = 3;
 
 export class IssuanceEngine {
   private readonly runId: string;
@@ -116,7 +121,7 @@ export class IssuanceEngine {
   private targetSig: Partial<Record<IssuanceTarget, string>> = {};
   private blockerCode: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT" | null = null;
   private blockerRecoverable = false;
-  /** A pause is an overlay on a barrier, not a 15th stage — the product's stage list is exactly 14. */
+  /** A pause is an overlay on a barrier, not a 16th stage — the product's stage list is exactly 15. */
   private paused = false;
   private readonly log: EventEnvelope[] = [];
 
@@ -176,6 +181,10 @@ export class IssuanceEngine {
    * </ul>
    */
   private recheck(): IssuanceEffect {
+    // The text-only usage-state advisory (step 3) rests on no target — a "다음" here is the seller confirming
+    // they checked their app is usable, so COMPLETE it and guide the first same-page checkpoint (api_group).
+    // Handled before the barrier branch below, which keys off `currentTarget` (null at this stage).
+    if (this.stage === "guiding_app_usage_check") return this.advanceAppUsageCheck();
     if (isIssuancePark(this.stage)) {
       if (this.currentTarget && isCheckpointTarget(this.currentTarget)) {
         const target = this.currentTarget;
@@ -220,6 +229,42 @@ export class IssuanceEngine {
     this.completedSteps = this.activeStepIndex;
     this.emit("STEP_COMPLETED", { stepId: this.stepId(), stepStatus: "COMPLETED" });
     return this.advanceAfterBarrier(target);
+  }
+
+  /**
+   * Enter the text-only usage-state advisory barrier (step 3), reached the instant step 2 (open/create the app)
+   * completes. It highlights nothing, locates nothing, and arms no NAVER observation — the seller reads the copy,
+   * confirms their app is usable (pressing NAVER's own `다시사용` themselves if shown), and advances with "다음"
+   * (a `REQUEST_STEP_RECHECK`, handled in {@link recheck}). `currentTarget` is cleared to `null`: there is no
+   * control resting under this barrier, and a recheck/resume must not re-guide one. Returns `NONE` — nothing for
+   * the session to drive; it simply publishes the barrier view and idles until the seller advances.
+   */
+  private enterAppUsageCheck(): IssuanceEffect {
+    this.stage = "guiding_app_usage_check";
+    this.activeStepIndex = APP_USAGE_CHECK_STEP;
+    this.currentTarget = null;
+    this.emit("STEP_READY", { stepId: this.stepId(), stepStatus: "READY" });
+    this.emit("HUMAN_ACTION_REQUIRED", { stepId: this.stepId() });
+    this.emit("RUN_STATUS_CHANGED", { status: "WAITING_FOR_HUMAN" });
+    return "NONE";
+  }
+
+  /**
+   * "다음" at the usage-state advisory: the seller confirmed they checked their app. No NAVER action was
+   * observed (this barrier watches none), so COMPLETE step 3 and guide the first same-page checkpoint,
+   * `api_group`. Only meaningful while still resting on the advisory barrier.
+   */
+  private advanceAppUsageCheck(): IssuanceEffect {
+    // Guard on BOTH stage AND target (as `advanceCheckpoint` does): the stage stays `guiding_app_usage_check`
+    // until the async `guide` chain lands `api_group`'s highlight, so a second "다음" pressed against the fresh
+    // revision during that window would otherwise re-enter and DOUBLE-guide api_group (duplicate STEP_COMPLETED
+    // + a second overlay annotation). The first advance sets `currentTarget` non-null, so the repeat resolves to
+    // NONE — the same idempotency the checkpoint and park-recovery paths already guarantee.
+    if (this.stage !== "guiding_app_usage_check" || this.currentTarget !== null) return "NONE";
+    this.completedSteps = this.activeStepIndex; // step 3
+    this.emit("STEP_COMPLETED", { stepId: this.stepId(), stepStatus: "COMPLETED" });
+    this.currentTarget = "api_group";
+    return { guide: "api_group" };
   }
 
   /* ── automatic-drive callbacks ────────────────────────────────────────────── */
@@ -349,8 +394,8 @@ export class IssuanceEngine {
       this.emit("USER_ACTION_OBSERVED", { stepId: this.stepId(), observed: true });
       this.completedSteps = this.activeStepIndex; // step 2 (open the existing application)
       this.emit("STEP_COMPLETED", { stepId: this.stepId(), stepStatus: "COMPLETED" });
-      this.currentTarget = "api_group";
-      return { guide: "api_group" };
+      // Step 3 is the text-only usage-state advisory (rest until the seller confirms), THEN api_group.
+      return this.enterAppUsageCheck();
     }
     // Wrong page / multiple transitions → recoverable park; a REQUEST_STEP_RECHECK re-probes from the top.
     return this.park("page_mismatch", "UI_DRIFT");
@@ -361,10 +406,10 @@ export class IssuanceEngine {
     switch (target) {
       // `open_app` never reaches here — its barrier advances via `onOpenAppVerified` (app_detail verification),
       // not this observed-click path. The case is kept only so the switch stays exhaustive over IssuanceTarget.
+      // After step 2 (open/create the app) comes step 3, the text-only usage-state advisory, THEN api_group.
       case "create_app":
       case "open_app":
-        this.currentTarget = "api_group";
-        return { guide: "api_group" };
+        return this.enterAppUsageCheck();
       case "api_group":
         this.currentTarget = "application_id";
         return { guide: "application_id" };

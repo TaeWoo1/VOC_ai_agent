@@ -216,14 +216,17 @@ function isVerifyResolved(category: ApiCenterPageCategory): boolean {
   return category === "app_detail" || category === "credential_issuance" || category === "login";
 }
 
-/** The overlay step number per barrier (dev diagnostic badge only — cosmetic, mirrors the engine's plan). */
+/**
+ * The overlay step number per barrier (dev diagnostic badge only — cosmetic, mirrors the engine's plan).
+ * Step 3 is the target-less usage-state advisory (no overlay), so the highlightable controls resume at step 4.
+ */
 const OVERLAY_STEP: Readonly<Record<IssuanceTarget, number>> = {
   create_app: 2,
   open_app: 2,
-  api_group: 3,
-  application_id: 4,
-  application_secret: 5,
-  return: 6,
+  api_group: 4,
+  application_id: 5,
+  application_secret: 6,
+  return: 7,
 };
 
 /**

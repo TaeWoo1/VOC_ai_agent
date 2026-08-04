@@ -100,6 +100,22 @@ async function pressNextToComplete(
   }
 }
 
+/**
+ * Clear the text-only usage-state advisory barrier (step 3): after step 2 (open/create the app) the run RESTS
+ * on `guiding_app_usage_check` — no control highlighted, no NAVER observation armed — until the seller presses
+ * "다음". This helper asserts the run is at that barrier, presses once, and settles onto the first same-page
+ * checkpoint (api_group). Used by every EXISTING/EMPTY test that reaches the api_group tail via auto-drive.
+ */
+async function passUsageCheck(
+  io: ReturnType<typeof loopback>,
+  engine: IssuanceEngine,
+  session: IssuanceGuidanceSession,
+): Promise<void> {
+  expect(engine.currentStage()).toBe("guiding_app_usage_check");
+  command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision, "usage");
+  await session.whenSettled();
+}
+
 /** existing → 1 entry row; empty → 0 rows. */
 const EXISTING: IssuanceFixtureScript = { applications: { census: emptyCensus(), applicationEntryRowCount: 1 } };
 const EMPTY: IssuanceFixtureScript = { applications: { census: emptyCensus(), applicationEntryRowCount: 0 } };
@@ -143,14 +159,101 @@ describe("issuance session — the app-exists path", () => {
     expect(step2?.copyParams?.targetKind).toBe("open_app");
   });
 
-  it("keeps totalSteps a fixed 6 for the whole run, carrying the issuance intent on every view", async () => {
+  it("keeps totalSteps a fixed 7 for the whole run, carrying the issuance intent on every view", async () => {
     const { io, session } = build(EXISTING);
     startRun(io);
     await session.whenSettled();
     const totals = new Set(io.views().map((v) => v.currentStep!.totalSteps));
-    expect(totals).toEqual(new Set([6]));
+    expect(totals).toEqual(new Set([7]));
     for (const v of io.views()) expect(v.intent).toBe("API_ISSUANCE_GUIDANCE");
     for (const v of io.views()) expect(v.channelCode).toBe("naver");
+  });
+});
+
+describe("issuance session — the text-only usage-state advisory (step 3)", () => {
+  it("rests on the advisory after open_app (existing) — highlighting/observing NOTHING — and blocks api_group until 다음", async () => {
+    const { io, engine, driver, session } = build(EXISTING);
+    startRun(io);
+    await session.whenSettled();
+
+    // After the observed open_app transition + VERIFY_OPEN, the run RESTS on the text advisory (step 3): no
+    // control was located/highlighted for it, and api_group has NOT been reached.
+    expect(engine.currentStage()).toBe("guiding_app_usage_check");
+    const step = io.lastView()?.currentStep;
+    expect(step?.stepNumber).toBe(3);
+    expect(step?.copyKey).toBe("actionWindow.issuance.appUsageCheck");
+    expect(step?.copyParams).toBeUndefined(); // text-only — no targetKind to highlight
+    expect(io.lastView()?.status).toBe("WAITING_FOR_HUMAN");
+    // The advisory arms nothing on NAVER: no locate/highlight/observe/wait for api_group yet.
+    expect(driver.calls).not.toContain("locate:api_group");
+    expect(driver.calls).not.toContain("highlight:api_group");
+
+    // "다음" completes step 3 and only THEN guides api_group (step 4).
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("guiding_api_group");
+    expect(driver.calls).toContain("highlight:api_group");
+    const completed = io.events().filter((e) => e.type === "STEP_COMPLETED").map((e) => e.payload.stepId);
+    expect(completed).toContain("aw.issuance_app_usage_check");
+  });
+
+  it("shows the NEW-app advisory copy for an empty store (still step 3, still text-only, still blocks api_group)", async () => {
+    const { io, engine, session } = build(EMPTY);
+    startRun(io);
+    await session.whenSettled();
+    // create_app is a checkpoint; "다음" completes it and lands on the advisory.
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision, "create-next");
+    await session.whenSettled();
+
+    expect(engine.currentStage()).toBe("guiding_app_usage_check");
+    const step = io.lastView()?.currentStep;
+    expect(step?.stepNumber).toBe(3);
+    expect(step?.copyKey).toBe("actionWindow.issuance.appUsageCheckNew");
+    expect(step?.copyParams).toBeUndefined();
+  });
+
+  it("is idempotent to a double-다음 within the guide window: the second press does NOT double-advance api_group", () => {
+    // Drive the engine DIRECTLY (no session) to the advisory via the empty/create path, leaving the api_group
+    // `guide` effect PENDING (never executed) — so the stage is still `guiding_app_usage_check` when a second
+    // "다음" arrives against the fresh revision, exactly the SPA-slow-mount race. The second must be a no-op.
+    const engine = new IssuanceEngine({ runId: RUN_ID, channelCode: "naver" }, { clock: makeIssuanceClock() });
+    engine.command({ type: "START_RUN", expectedRevision: 0 });
+    engine.onSurfaceProbed({ ok: true, pageCategory: "app_list" });
+    engine.onApplicationsRead({ census: emptyCensus(), applicationEntryRowCount: 0 }); // empty → guide create_app
+    engine.onTargetLocated("create_app", { count: 1, sig: "aaaaaaaaaaaaaaaa" });
+    engine.onTargetHighlighted("create_app", { count: 1, sig: "aaaaaaaaaaaaaaaa" }); // barrier guiding_create
+    // "다음" at create_app completes step 2 and enters the text-only advisory (step 3).
+    engine.command({ type: "REQUEST_STEP_RECHECK", expectedRevision: engine.view().revision });
+    expect(engine.currentStage()).toBe("guiding_app_usage_check");
+
+    // First "다음" completes step 3 and returns a PENDING guide for api_group (stage stays until it lands).
+    const first = engine.command({ type: "REQUEST_STEP_RECHECK", expectedRevision: engine.view().revision });
+    expect(first).toEqual({ ok: true, idempotent: false, effect: { guide: "api_group" } });
+    expect(engine.currentStage()).toBe("guiding_app_usage_check");
+
+    // Second "다음" against the fresh revision, BEFORE the guide lands → must be a NONE no-op (no re-guide).
+    const second = engine.command({ type: "REQUEST_STEP_RECHECK", expectedRevision: engine.view().revision });
+    expect(second).toEqual({ ok: true, idempotent: false, effect: "NONE" });
+
+    // Exactly ONE STEP_COMPLETED for the advisory across both presses — never a duplicate.
+    const usageCompletes = engine.events().filter((e) => e.type === "STEP_COMPLETED" && e.payload.stepId === "aw.issuance_app_usage_check");
+    expect(usageCompletes).toHaveLength(1);
+  });
+
+  it("survives a resync at the advisory barrier: the reattaching client sees step 3 + appBranch, not api_group", async () => {
+    const { io, engine, session } = build(EXISTING);
+    startRun(io);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("guiding_app_usage_check");
+
+    // A refresh resyncs from sequence 0; the republished view is the advisory barrier, branch-aware and valid.
+    io.send({ kind: "aw_resync", runId: RUN_ID, sinceSequence: 0 });
+    const resync = io.sent.filter((f) => f.kind === "aw_resync_result").at(-1) as { view: ActionWindowRunView | null };
+    expect(resync.view?.currentStep?.stepNumber).toBe(3);
+    expect(resync.view?.currentStep?.copyKey).toBe("actionWindow.issuance.appUsageCheck");
+    expect(resync.view?.appBranch).toBe("existing");
+    expect(validateRunView(resync.view!)).toEqual({ ok: true });
+    expect(findProhibitedFields(resync.view!)).toEqual([]);
   });
 });
 
@@ -230,10 +333,11 @@ describe("issuance session — the API-group barrier", () => {
     const { io, engine, driver, session } = build({ ...EXISTING, action: { api_group: false } });
     startRun(io);
     await session.whenSettled();
+    await passUsageCheck(io, engine, session); // clear the step-3 advisory to reach the api_group barrier
 
     expect(engine.currentStage()).toBe("guiding_api_group");
     expect(io.lastView()?.status).toBe("WAITING_FOR_HUMAN");
-    // The api_group control was highlighted for step 3, and no later control was ever located.
+    // The api_group control was highlighted for step 4, and no later control was ever located.
     const highlighted = io.events().filter((e) => e.type === "TARGET_HIGHLIGHTED").map((e) => e.payload.stepId);
     expect(highlighted).toContain("aw.issuance_api_group");
     expect(driver.calls).not.toContain("locate:application_id"); // the next step was never reached
@@ -281,6 +385,7 @@ describe("issuance session — recoverable parks", () => {
     const { io, engine, driver, session } = build({ ...EXISTING, locate: { api_group: { count: 0 } } });
     startRun(io);
     await session.whenSettled();
+    await passUsageCheck(io, engine, session); // clear the step-3 advisory; then the api_group locate fails → park
 
     expect(engine.currentStage()).toBe("target_not_found");
     expect(io.blockers()).toContainEqual({ code: "TARGET_NOT_FOUND", recoverable: true });
@@ -336,6 +441,7 @@ describe("issuance session — recoverable parks", () => {
     });
     startRun(io);
     await session.whenSettled();
+    await passUsageCheck(io, engine, session); // clear the step-3 advisory; then the api_group match drifts → park
 
     expect(engine.currentStage()).toBe("page_mismatch");
     expect(io.blockers()).toContainEqual({ code: "UI_DRIFT", recoverable: true });
@@ -347,6 +453,7 @@ describe("issuance session — same-page viewport checkpoints (다음-driven)", 
     const { io, engine, driver, session } = build(EXISTING);
     startRun(io);
     await session.whenSettled();
+    await passUsageCheck(io, engine, session); // clear the step-3 advisory to reach the api_group checkpoint
 
     // After the observed open_app transition, the run RESTS at the api_group checkpoint: highlighted, waiting,
     // but with NO observer armed and NO NAVER-click wait.
@@ -381,13 +488,14 @@ describe("issuance session — same-page viewport checkpoints (다음-driven)", 
   it("a checkpoint completes its step on 다음 without a USER_ACTION_OBSERVED (no NAVER click was observed)", async () => {
     const { io, engine, session } = build(EXISTING);
     startRun(io);
-    await session.whenSettled(); // rests at api_group checkpoint
+    await session.whenSettled();
+    await passUsageCheck(io, engine, session); // clear the step-3 advisory → rests at api_group checkpoint
 
     command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision); // 다음
     await session.whenSettled();
 
     const completed = io.events().filter((e) => e.type === "STEP_COMPLETED").map((e) => e.payload.stepId);
-    expect(completed).toContain("aw.issuance_api_group"); // step 3 completed by 다음
+    expect(completed).toContain("aw.issuance_api_group"); // step 4 completed by 다음
     // USER_ACTION_OBSERVED is emitted only for the ONE observed target (open_app, step 2), never a checkpoint.
     const observed = io.events().filter((e) => e.type === "USER_ACTION_OBSERVED").map((e) => e.payload.stepId);
     expect(observed).toContain("aw.issuance_open_or_create_app");
@@ -417,6 +525,7 @@ describe("issuance session — post-navigation highlight reliability", () => {
     const { io, engine, driver, session } = build({ ...EXISTING, locateThrows: { api_group: 1 } });
     startRun(io);
     await session.whenSettled();
+    await passUsageCheck(io, engine, session); // clear the step-3 advisory; the api_group locate then races → park
 
     expect(engine.currentStage()).toBe("page_mismatch");
     expect(io.blockers()).toContainEqual({ code: "UI_DRIFT", recoverable: true });
@@ -434,6 +543,7 @@ describe("issuance session — post-navigation highlight reliability", () => {
     const { io, engine, driver, session } = build({ ...EXISTING, locateThrows: { api_group: 1 } });
     startRun(io);
     await session.whenSettled();
+    await passUsageCheck(io, engine, session); // clear the step-3 advisory; the api_group locate then races → park
     expect(engine.currentStage()).toBe("page_mismatch");
 
     // "다음": the first recheck re-settles + re-guides the SAME control on the now-stable page; the rest advance
@@ -454,6 +564,7 @@ describe("issuance session — post-navigation highlight reliability", () => {
     const { io, engine, driver, session } = build({ ...EXISTING, highlightThrows: { api_group: 1 } });
     startRun(io);
     await session.whenSettled();
+    await passUsageCheck(io, engine, session); // clear the step-3 advisory; the api_group highlight then races → park
     expect(engine.currentStage()).toBe("page_mismatch");
     expect(driver.calls).toContain("clearHighlight");
 
@@ -481,6 +592,7 @@ describe("issuance session — post-navigation highlight reliability", () => {
     const { io, engine, driver, session } = build({ ...EXISTING, locateThrows: { api_group: 1 } });
     startRun(io);
     await session.whenSettled();
+    await passUsageCheck(io, engine, session); // clear the step-3 advisory; the api_group locate then races → park
     expect(engine.currentStage()).toBe("page_mismatch");
     const probesBefore = driver.calls.filter((c) => c === "probeSurface").length;
     const locatesBefore = driver.calls.filter((c) => c === "locate:api_group").length; // 1 (the thrown attempt)
@@ -509,6 +621,7 @@ describe("issuance session — post-navigation highlight reliability", () => {
     const { io, engine, driver, session } = build({ ...EXISTING, locateThrows: { api_group: 99 } });
     startRun(io);
     await session.whenSettled();
+    await passUsageCheck(io, engine, session); // clear the step-3 advisory; the api_group locate then races → park
     expect(engine.currentStage()).toBe("page_mismatch");
 
     const probesBefore = driver.calls.filter((c) => c === "probeSurface").length;
@@ -533,6 +646,7 @@ describe("issuance session — post-navigation highlight reliability", () => {
     const { io, engine, driver, session } = build({ ...EXISTING, locate: { api_group: { count: 0 } } });
     startRun(io);
     await session.whenSettled();
+    await passUsageCheck(io, engine, session); // clear the step-3 advisory; the api_group locate then misses → park
     expect(engine.currentStage()).toBe("target_not_found");
     const probesBefore = driver.calls.filter((c) => c === "probeSurface").length;
     const locatesBefore = driver.calls.filter((c) => c === "locate:api_group").length;

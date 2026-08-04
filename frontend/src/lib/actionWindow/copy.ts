@@ -28,6 +28,8 @@ const COPY: Record<string, string> = {
   "actionWindow.issuance.reachApplications": "애플리케이션 관리 영역으로 이동",
   "actionWindow.issuance.createApp": "애플리케이션 만들기 (스토어당 1개)",
   "actionWindow.issuance.openApp": "발급한 애플리케이션 열기",
+  "actionWindow.issuance.appUsageCheck": "애플리케이션 상태 확인",
+  "actionWindow.issuance.appUsageCheckNew": "생성 직후 상태 확인",
   "actionWindow.issuance.apiGroup": "주문·판매자 관련 API 그룹 추가",
   "actionWindow.issuance.applicationId": "애플리케이션 ID 복사",
   "actionWindow.issuance.applicationSecret": "애플리케이션 시크릿 확인·복사",
@@ -49,6 +51,13 @@ const ISSUANCE_STEP_DETAIL: Record<string, string> = {
     "새 애플리케이션을 하나 만드세요. 스토어당 애플리케이션은 1개만 만들 수 있고 삭제할 수 없으니, 이미 만든 앱이 있으면 새로 만들지 말고 그 앱을 사용하세요.",
   "actionWindow.issuance.openApp":
     "이미 만들어 둔 애플리케이션의 상세 화면을 여세요. 새 애플리케이션을 만들지 마세요 — 스토어당 1개만 가능하고 삭제할 수 없습니다.",
+  // Text-only usage-state advisory (no highlight): the seller checks their app is usable BEFORE the API-group
+  // step, so a suspended app doesn't fail later. SellerOps does not read the app's state and never asserts it is
+  // active — absence of a reactivate button is NOT treated as active. The seller reactivates it themselves if shown.
+  "actionWindow.issuance.appUsageCheck":
+    "애플리케이션 상태를 확인해 주세요. 화면에 '다시사용' 버튼이 보인다면 직접 눌러 앱을 활성화해 주세요. 버튼이 보이지 않더라도 SellerOps가 활성 상태라고 단정하지 않습니다. 확인했다면 다음으로 진행해 주세요.",
+  "actionWindow.issuance.appUsageCheckNew":
+    "방금 만든 애플리케이션의 상태를 확인해 주세요. 새로 만든 앱은 보통 바로 사용할 수 있지만, 혹시 화면에 '다시사용' 버튼이 보이면 직접 눌러 활성화해 주세요. 버튼이 보이지 않더라도 SellerOps가 활성 상태라고 단정하지 않습니다. 확인했다면 다음으로 진행해 주세요.",
   "actionWindow.issuance.apiGroup":
     "이 애플리케이션에 상품·주문(판매자) 관련 API 그룹이 포함돼 있는지 확인하고, 없으면 추가하세요. 정확한 그룹 이름은 화면마다 다를 수 있으니 '주문'·'판매자'가 포함된 항목을 찾아 선택하면 됩니다.",
   "actionWindow.issuance.applicationId":

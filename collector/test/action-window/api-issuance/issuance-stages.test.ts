@@ -23,6 +23,7 @@ const ALL_STAGES: IssuanceStage[] = [
   "guiding_create",
   "guiding_api_group",
   "guiding_app_detail",
+  "guiding_app_usage_check",
   "guiding_application_id",
   "guiding_application_secret",
   "return_to_sellerops",
@@ -42,6 +43,7 @@ describe("issuance stages — run-status projection", () => {
     guiding_create: "WAITING_FOR_HUMAN",
     guiding_api_group: "WAITING_FOR_HUMAN",
     guiding_app_detail: "WAITING_FOR_HUMAN",
+    guiding_app_usage_check: "WAITING_FOR_HUMAN",
     guiding_application_id: "WAITING_FOR_HUMAN",
     guiding_application_secret: "WAITING_FOR_HUMAN",
     return_to_sellerops: "WAITING_FOR_HUMAN",
@@ -65,6 +67,7 @@ describe("issuance stages — step-status projection", () => {
     guiding_create: "AWAITING_USER",
     guiding_api_group: "AWAITING_USER",
     guiding_app_detail: "AWAITING_USER",
+    guiding_app_usage_check: "AWAITING_USER",
     guiding_application_id: "AWAITING_USER",
     guiding_application_secret: "AWAITING_USER",
     return_to_sellerops: "AWAITING_USER",
@@ -97,7 +100,7 @@ describe("issuance stages — allowed commands", () => {
   });
 
   it("guiding barriers offer recheck + PAUSE + cancel + manual", () => {
-    for (const stage of ["guiding_create", "guiding_app_detail", "guiding_api_group", "guiding_application_id", "guiding_application_secret", "return_to_sellerops"] as IssuanceStage[]) {
+    for (const stage of ["guiding_create", "guiding_app_detail", "guiding_app_usage_check", "guiding_api_group", "guiding_application_id", "guiding_application_secret", "return_to_sellerops"] as IssuanceStage[]) {
       const cmds = issuanceAllowedCommands(stage);
       expect(cmds).toContain("REQUEST_STEP_RECHECK");
       expect(cmds).toContain("PAUSE_RUN");
@@ -115,29 +118,38 @@ describe("issuance stages — allowed commands", () => {
   });
 });
 
-describe("issuance stages — the fixed 6-step plan", () => {
-  it("is always six steps, whichever branch step 2 takes", () => {
-    expect(ISSUANCE_TOTAL_STEPS).toBe(6);
-    expect(issuanceStepPlan(true)).toHaveLength(6);
-    expect(issuanceStepPlan(false)).toHaveLength(6);
+describe("issuance stages — the fixed 7-step plan", () => {
+  it("is always seven steps, whichever branch steps 2/3 take", () => {
+    expect(ISSUANCE_TOTAL_STEPS).toBe(7);
+    expect(issuanceStepPlan(true)).toHaveLength(7);
+    expect(issuanceStepPlan(false)).toHaveLength(7);
   });
 
-  it("branches ONLY step 2's copy key and target kind (same stepId, same slot)", () => {
+  it("branches ONLY step 2's target/copy and step 3's copy (same stepIds, same slots)", () => {
     const existing = issuanceStepPlan(true);
     const empty = issuanceStepPlan(false);
-    expect(existing[1]!.stepId).toBe(empty[1]!.stepId); // same slot id
+    // Step 2 (the app): same slot id, different copy key + highlighted control.
+    expect(existing[1]!.stepId).toBe(empty[1]!.stepId);
     expect(existing[1]!.copyKey).toBe("actionWindow.issuance.openApp");
     expect(empty[1]!.copyKey).toBe("actionWindow.issuance.createApp");
     expect(existing[1]!.copyParams?.targetKind).toBe("open_app");
     expect(empty[1]!.copyParams?.targetKind).toBe("create_app");
-    // Steps 1, 3, 4, 5, 6 are identical across branches.
-    for (const i of [0, 2, 3, 4, 5]) expect(existing[i]).toEqual(empty[i]);
+    // Step 3 (usage-state advisory): same slot id, branch-appropriate copy, and NO targetKind on either branch
+    // (text-only — the runtime highlights nothing).
+    expect(existing[2]!.stepId).toBe(empty[2]!.stepId);
+    expect(existing[2]!.copyKey).toBe("actionWindow.issuance.appUsageCheck");
+    expect(empty[2]!.copyKey).toBe("actionWindow.issuance.appUsageCheckNew");
+    expect(existing[2]!.copyParams).toBeUndefined();
+    expect(empty[2]!.copyParams).toBeUndefined();
+    // Steps 1, 4, 5, 6, 7 are identical across branches.
+    for (const i of [0, 3, 4, 5, 6]) expect(existing[i]).toEqual(empty[i]);
   });
 
   it("uses the exact product-required stepIds and copy keys", () => {
     expect(issuanceStepPlan(false).map((s) => s.stepId)).toEqual([
       "aw.issuance_reach_applications",
       "aw.issuance_open_or_create_app",
+      "aw.issuance_app_usage_check",
       "aw.issuance_api_group",
       "aw.issuance_application_id",
       "aw.issuance_application_secret",

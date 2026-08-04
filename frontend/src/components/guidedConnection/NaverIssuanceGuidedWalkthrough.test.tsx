@@ -68,13 +68,13 @@ function issuanceRun(over: Partial<ActionWindowRunView> & { appBranch?: "existin
     currentStep: {
       stepId: "aw.issuance_create_app",
       stepNumber: 2,
-      totalSteps: 6,
+      totalSteps: 7,
       copyKey: "actionWindow.issuance.createApp",
       status: "AWAITING_USER",
     },
     guidanceEnabled: true,
     allowedCommands: ["REQUEST_STEP_RECHECK", "CANCEL_RUN"],
-    progress: { completedSteps: 1, totalSteps: 6 },
+    progress: { completedSteps: 1, totalSteps: 7 },
     updatedAt: "2026-01-01T00:00:00.000003Z",
     ...over,
   };
@@ -96,7 +96,7 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
     expect(screen.getByRole("region", { name: "가능한 동작" })).toBeInTheDocument();
     // Step 2's copy resolved from its key (FE-owned), not runtime prose.
     expect(screen.getByText("애플리케이션 만들기 (스토어당 1개)")).toBeInTheDocument();
-    expect(screen.getByText("1 / 6")).toBeInTheDocument();
+    expect(screen.getByText("1 / 7")).toBeInTheDocument();
   });
 
   it("renders the FULL per-step instruction under the timeline (self-sufficient — no need to decode the highlight)", () => {
@@ -109,11 +109,43 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
     render(
       <NaverIssuanceGuidedWalkthrough
         dispatch={vi.fn()}
-        run={issuanceRun({ currentStep: { stepId: "aw.issuance_application_secret", stepNumber: 5, totalSteps: 6, copyKey: "actionWindow.issuance.applicationSecret", status: "AWAITING_USER" } })}
+        run={issuanceRun({ currentStep: { stepId: "aw.issuance_application_secret", stepNumber: 6, totalSteps: 7, copyKey: "actionWindow.issuance.applicationSecret", status: "AWAITING_USER" } })}
         onCommand={vi.fn()}
       />,
     );
     expect(screen.getByText(/SellerOps는 시크릿 값도, 클립보드도 읽지 않습니다/)).toBeInTheDocument();
+  });
+
+  it("the usage-state advisory step (step 3) shows the reactivate guidance and never claims the app is active", () => {
+    // Existing-app branch: the step-3 advisory copy resolves from its key — it points at '다시사용' but does NOT
+    // assert the app is active (absence ≠ active). It is text-only (no highlight to decode).
+    render(
+      <NaverIssuanceGuidedWalkthrough
+        dispatch={vi.fn()}
+        run={issuanceRun({
+          appBranch: "existing",
+          currentStep: { stepId: "aw.issuance_app_usage_check", stepNumber: 3, totalSteps: 7, copyKey: "actionWindow.issuance.appUsageCheck", status: "AWAITING_USER" },
+        })}
+        onCommand={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/'다시사용' 버튼이 보인다면 직접 눌러/)).toBeInTheDocument();
+    expect(screen.getByText(/활성 상태라고 단정하지 않습니다/)).toBeInTheDocument();
+  });
+
+  it("the NEW-app usage-state advisory (step 3) uses the just-created copy", () => {
+    render(
+      <NaverIssuanceGuidedWalkthrough
+        dispatch={vi.fn()}
+        run={issuanceRun({
+          appBranch: "new",
+          currentStep: { stepId: "aw.issuance_app_usage_check", stepNumber: 3, totalSteps: 7, copyKey: "actionWindow.issuance.appUsageCheckNew", status: "AWAITING_USER" },
+        })}
+        onCommand={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/방금 만든 애플리케이션의 상태를 확인/)).toBeInTheDocument();
+    expect(screen.getByText(/활성 상태라고 단정하지 않습니다/)).toBeInTheDocument();
   });
 
   it("shows the abort (CANCEL_RUN) control when allowed, and the recheck control", () => {
@@ -326,7 +358,7 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
       act(() =>
         host.publish(
           issuanceRun({
-            currentStep: { stepId: "aw.issuance_open_or_create_app", stepNumber: 2, totalSteps: 6, copyKey: "actionWindow.issuance.openApp", status: "AWAITING_USER" },
+            currentStep: { stepId: "aw.issuance_open_or_create_app", stepNumber: 2, totalSteps: 7, copyKey: "actionWindow.issuance.openApp", status: "AWAITING_USER" },
           }),
         ),
       );
@@ -344,7 +376,7 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
         host.publish(
           issuanceRun({
             appBranch: "existing",
-            currentStep: { stepId: "aw.issuance_open_or_create_app", stepNumber: 2, totalSteps: 6, copyKey: "actionWindow.issuance.createApp", status: "AWAITING_USER" },
+            currentStep: { stepId: "aw.issuance_open_or_create_app", stepNumber: 2, totalSteps: 7, copyKey: "actionWindow.issuance.createApp", status: "AWAITING_USER" },
           }),
         ),
       );

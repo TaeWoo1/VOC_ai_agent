@@ -668,6 +668,9 @@ describe("NaverIssuanceDriver — SPA-safe overlay mount (api_group overlay rend
     const { io, engine, session } = build({ appEntryCount: 1, apiGroupMountThrowTimes: 99 });
     startRun(io);
     await session.whenSettled();
+    // Clear the text-only step-3 usage-state advisory so the api_group guide (which mount-throws) is reached.
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision, "usage");
+    await session.whenSettled();
 
     expect(engine.currentStage()).toBe("page_mismatch");
     expect(io.lastView()?.blocker).toEqual({ code: "UI_DRIFT", recoverable: true });
@@ -695,6 +698,9 @@ describe("NaverIssuanceDriver — SPA-safe overlay mount (api_group overlay rend
     // page_mismatch (recoverable) rather than emitting TARGET_HIGHLIGHTED for a control with no overlay on screen.
     const { io, engine, session } = build({ appEntryCount: 1, apiGroupMountNoPaintTimes: 99 });
     startRun(io);
+    await session.whenSettled();
+    // Clear the text-only step-3 usage-state advisory so the api_group guide (which never paints) is reached.
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision, "usage");
     await session.whenSettled();
 
     expect(engine.currentStage()).toBe("page_mismatch");

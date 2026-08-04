@@ -10,7 +10,7 @@
  *
  * A `{ guide }` effect is handled here as ONE batched unit — locate, then (if the control was found) highlight
  * — publishing only once, so the frontend never sees a half-armed intermediate view for a control that has no
- * dedicated RUNNING stage in the 14-stage machine.
+ * dedicated RUNNING stage in the 15-stage machine.
  */
 import { validateCommandEnvelope } from "../../../../contracts/action-window/v2/index";
 import type { AwClientFrame, AwServerTransport } from "../../../../contracts/action-window/v2/transport";
