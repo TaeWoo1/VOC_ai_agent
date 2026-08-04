@@ -19,9 +19,12 @@ import { NAVER_ISSUANCE_TUTORIAL, type GuidedEvent } from "../../lib/guidedConne
 export function NaverIssuanceModeChoice({
   dispatch,
   busy,
+  advertisedEgressIps,
 }: {
   dispatch: (event: GuidedEvent) => void;
   busy?: boolean;
+  /** SellerOps' advertised fixed call IP(s), forwarded to the text checklist's register-call-IP step. */
+  advertisedEgressIps?: readonly string[];
 }) {
   const [showText, setShowText] = useState(false);
 
@@ -33,6 +36,7 @@ export function NaverIssuanceModeChoice({
           onComplete={() => dispatch({ type: "ISSUANCE_COMPLETE" })}
           completeLabel="발급을 완료했어요"
           busy={busy}
+          advertisedEgressIps={advertisedEgressIps}
         />
         <button type="button" className="btn-ghost text-sm" onClick={() => setShowText(false)}>
           화면 안내로 다시 보기

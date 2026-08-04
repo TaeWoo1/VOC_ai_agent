@@ -99,6 +99,26 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
     expect(screen.getByText("1 / 7")).toBeInTheDocument();
   });
 
+  it("shows a persistent call-IP advisory with the advertised IP (M2: guided path, not only the text checklist)", () => {
+    render(
+      <NaverIssuanceGuidedWalkthrough
+        dispatch={vi.fn()}
+        run={issuanceRun()}
+        onCommand={vi.fn()}
+        advertisedEgressIps={["203.0.113.10"]}
+      />,
+    );
+    expect(screen.getByRole("region", { name: "API 호출 IP 등록 안내" })).toBeInTheDocument();
+    expect(screen.getByText("203.0.113.10")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "복사" })).toBeInTheDocument();
+  });
+
+  it("call-IP advisory fails safe with no advertised IP: generic note, never a fabricated IP", () => {
+    render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} run={issuanceRun()} onCommand={vi.fn()} />);
+    expect(screen.getByText(/등록할 고정 IP가 아직 표시되지 않습니다/)).toBeInTheDocument();
+    expect(screen.queryByText(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)).toBeNull();
+  });
+
   it("renders the FULL per-step instruction under the timeline (self-sufficient — no need to decode the highlight)", () => {
     // createApp step → its complete instruction, not just the terse title.
     render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} run={issuanceRun()} onCommand={vi.fn()} />);

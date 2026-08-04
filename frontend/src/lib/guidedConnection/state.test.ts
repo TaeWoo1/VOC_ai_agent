@@ -397,6 +397,14 @@ describe("test-connection result mapping (§12, §5)", () => {
     expect(reduce(env, { type: "TEST_RESULT", status: "SUCCESS", reasonCode: null }).phase).toBe("first_order_sync");
   });
 
+  it("ORDER_ACCESS_DENIED routes to the hedged order-access state and re-tests (not a transient retry)", () => {
+    const denied = reduce(run(toTest), { type: "TEST_RESULT", status: "FAILED", reasonCode: "ORDER_ACCESS_DENIED" });
+    expect(denied.phase).toBe("order_access_denied");
+    expect(denied.failureReason).toBe("ORDER_ACCESS_DENIED");
+    // Re-testable after the seller fixes permission/IP; a later SUCCESS advances to the first sync.
+    expect(reduce(denied, { type: "TEST_RESULT", status: "SUCCESS", reasonCode: null }).phase).toBe("first_order_sync");
+  });
+
   it("an UNCLASSIFIED failure stays a transient retry on the test step (fail-closed — no guessed cause)", () => {
     const unavailable = reduce(run(toTest), { type: "TEST_RESULT", status: "FAILED", reasonCode: "PROVIDER_UNAVAILABLE" });
     expect(unavailable.phase).toBe("connection_testing");

@@ -92,6 +92,9 @@ export function ConnectNaver() {
   const [resolveError, setResolveError] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatusView | null>(null);
   const [capability, setCapability] = useState<ConnectionCapabilityView | null>(null);
+  // Deployment-global advertised call IP(s) for the issuance tutorial — fetched WITHOUT an account so
+  // the guided walkthrough can show them at first-time connection. Fail-safe: [] on any fetch failure.
+  const [advertisedEgressIps, setAdvertisedEgressIps] = useState<readonly string[]>([]);
 
   // NAVER-affecting calls this tab has initiated (test + first sync). 0 until an explicit credential submit.
   const [naverCalls, setNaverCalls] = useState(0);
@@ -181,6 +184,24 @@ export function ConnectNaver() {
   // Resolve the connection context — reads ONLY (find the existing NAVER account + template + channel id).
   // It NEVER creates an account (that is deferred to an explicit credential submit), so a page load/refresh
   // is a 0-write operation. Gated on the environment binding: in walkthrough mode it waits for the gate.
+  // Deployment-global setup facts (advertised call IP). Isolated + fail-safe: a failure here must never
+  // break the connect page — the tutorial then shows generic guidance, never a fabricated IP.
+  useEffect(() => {
+    if (!ready) return;
+    let alive = true;
+    (async () => {
+      try {
+        const setup = await api.getNaverSetup();
+        if (alive) setAdvertisedEgressIps(setup.advertisedEgressIps ?? []);
+      } catch {
+        if (alive) setAdvertisedEgressIps([]);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [ready]);
+
   useEffect(() => {
     if (!ready) return;
     let alive = true;
@@ -510,6 +531,7 @@ export function ConnectNaver() {
             busy={busy}
             connectionStatus={connectionStatus}
             capability={displayCapability}
+            advertisedEgressIps={advertisedEgressIps}
             reviewImportReady={agentPaired}
             dispatch={dispatch}
             onSubmitCredentials={onSubmitCredentials}

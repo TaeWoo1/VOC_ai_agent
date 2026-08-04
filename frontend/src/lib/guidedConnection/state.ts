@@ -46,6 +46,7 @@ const ACTOR_BY_PHASE: Record<GuidedPhase, GuidedActor> = {
   connection_testing: "SELLEROPS_AUTOMATED",
   permission_review_required: "USER_REQUIRED",
   call_environment_mismatch: "USER_REQUIRED",
+  order_access_denied: "USER_REQUIRED",
   first_order_sync: "SELLEROPS_AUTOMATED",
   completed: "SELLEROPS_AUTOMATED",
   review_export_readiness: "SELLEROPS_GUIDED",
@@ -108,6 +109,12 @@ function afterTestFailure(
   if (reasonCode === "CALL_ENVIRONMENT_MISMATCH") {
     return state("call_environment_mismatch", cleared, "CALL_ENVIRONMENT_MISMATCH", path);
   }
+  // The order-access probe refused (403) but the cause could not be split into permission vs call-IP.
+  // Emitted by the backend today (unlike the two above, which stay dormant pending a live-captured code):
+  // route to the hedged, re-testable state that guides checking BOTH — never a silent transient retry.
+  if (reasonCode === "ORDER_ACCESS_DENIED") {
+    return state("order_access_denied", cleared, "ORDER_ACCESS_DENIED", path);
+  }
   const reason: GuidedFailureReason =
     reasonCode === "PROVIDER_UNAVAILABLE" ? "PROVIDER_UNAVAILABLE" : "TEMPORARY_PROVIDER_ERROR";
   return state("connection_testing", cleared, reason, path);
@@ -118,6 +125,7 @@ const TEST_RESULT_PHASES: ReadonlySet<GuidedPhase> = new Set<GuidedPhase>([
   "connection_testing",
   "permission_review_required",
   "call_environment_mismatch",
+  "order_access_denied",
 ]);
 
 /**

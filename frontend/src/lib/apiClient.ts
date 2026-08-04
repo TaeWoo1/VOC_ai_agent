@@ -11,6 +11,7 @@ import type {
   ChannelResponse,
   ConnectionInfoView,
   ConnectionCapabilityView,
+  NaverSetupView,
   ConnectionStatusView,
   ConnectionTestResultView,
   ConnectorAlertView,
@@ -222,6 +223,13 @@ export const api = {
     const { data } = await http.get<ConnectionCapabilityView>(
       `/api/seller-accounts/${accountId}/connection-capability`,
     );
+    return data;
+  },
+  // Deployment-global NAVER setup facts (advertised call IP(s)) for the issuance tutorial — available
+  // WITHOUT an account so the guided walkthrough can show them during first-time connection. Read-only
+  // GET, no account scope, no secret (the advertised IP is a value the seller registers publicly).
+  async getNaverSetup(): Promise<NaverSetupView> {
+    const { data } = await http.get<NaverSetupView>("/api/connect/naver/setup");
     return data;
   },
   // Walkthrough environment-identity: the read-only runtime context (walkthrough mode only; a 404 in

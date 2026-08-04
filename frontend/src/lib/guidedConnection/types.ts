@@ -52,6 +52,10 @@ export type GuidedPhase =
   // fail-closed pending live NAVER recon (G3-C, §4/§20-2); nothing guesses its way into them.
   | "permission_review_required"
   | "call_environment_mismatch"
+  // The credential is valid but the order endpoint refused access (HTTP 403) and the cause could not
+  // be split into permission vs call-IP without a live-captured provider code — the hedged state that
+  // guides the seller to check BOTH the order API group permission and the 'API 호출 IP' registration.
+  | "order_access_denied"
   | "first_order_sync"
   | "completed"
   | "review_export_readiness"
@@ -82,6 +86,7 @@ export type GuidedFailureReason =
   | "INVALID_CREDENTIAL"
   | "PERMISSION_INSUFFICIENT"
   | "CALL_ENVIRONMENT_MISMATCH"
+  | "ORDER_ACCESS_DENIED"
   | "SECRET_UNRECOVERABLE"
   | "TEMPORARY_PROVIDER_ERROR"
   | "PROVIDER_UNAVAILABLE"

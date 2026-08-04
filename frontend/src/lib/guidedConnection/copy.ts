@@ -65,6 +65,10 @@ export const PHASE_COPY: Record<GuidedPhase, { title: string; body: string }> = 
     title: "호출 환경 확인 필요",
     body: "허용된 호출 환경(예: 호출 IP)과 일치하지 않을 수 있습니다. NAVER 커머스 API 센터에서 애플리케이션의 호출 IP 설정을 확인한 뒤 다시 시도해 주세요.",
   },
+  order_access_denied: {
+    title: "주문 API 접근 확인 필요",
+    body: "연결 정보는 정상이지만 주문 API 접근이 거부되었습니다. 애플리케이션에 주문 관련 API 그룹 권한이 있는지, 그리고 SellerOps 고정 호출 IP가 'API 호출 IP'에 등록되어 있는지 두 가지를 모두 확인한 뒤 다시 시도해 주세요.",
+  },
   first_order_sync: {
     title: "첫 주문 수집 중",
     body: "주문 요약 데이터를 처음으로 가져오고 있습니다.",
@@ -184,6 +188,7 @@ export const FAILURE_COPY: Record<GuidedFailureReason, string> = {
   INVALID_CREDENTIAL: "연결 정보가 올바르지 않습니다. 애플리케이션 ID와 시크릿을 다시 확인해 주세요.",
   PERMISSION_INSUFFICIENT: "연결에 필요한 권한이 부족할 수 있습니다. 애플리케이션의 API 그룹·권한을 확인해 주세요.",
   CALL_ENVIRONMENT_MISMATCH: "허용된 호출 환경과 일치하지 않을 수 있습니다. 애플리케이션의 호출 IP 설정을 확인해 주세요.",
+  ORDER_ACCESS_DENIED: "주문 API 접근이 거부되었습니다. 주문 API 그룹 권한과 SellerOps 고정 호출 IP 등록을 함께 확인해 주세요.",
   SECRET_UNRECOVERABLE: "시크릿을 확보하지 못했습니다. 기존 애플리케이션의 시크릿을 다시 확인하거나, 확인이 어려우면 시크릿을 재발급해 주세요. (앱 삭제는 필요하지 않으며 NAVER도 제공하지 않습니다. 단, 재발급은 같은 앱을 쓰는 모든 프로그램의 연결을 함께 끊습니다.)",
   TEMPORARY_PROVIDER_ERROR: "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
   PROVIDER_UNAVAILABLE: "NAVER 서비스에 일시적으로 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.",

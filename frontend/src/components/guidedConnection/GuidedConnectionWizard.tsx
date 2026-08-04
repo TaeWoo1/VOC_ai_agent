@@ -50,6 +50,9 @@ export interface GuidedConnectionWizardProps {
   capability: ConnectionCapabilityView | null;
   /** Whether the Local Agent is paired — drives ONLY the REVIEW_IMPORT setup card copy, never the order flow. */
   reviewImportReady: boolean;
+  /** Deployment-global advertised call IP(s) for the register-call-IP tutorial step (all issuance paths).
+   *  Empty ⇒ the tutorial shows generic guidance, never a fabricated IP. Available before an account exists. */
+  advertisedEgressIps?: readonly string[];
   dispatch: (event: GuidedEvent) => void;
   onSubmitCredentials: (secrets: Record<string, string>) => void;
   onRetryTest: () => void;
@@ -131,6 +134,7 @@ export function GuidedConnectionWizard({
   connectionStatus,
   capability,
   reviewImportReady,
+  advertisedEgressIps = [],
   dispatch,
   onSubmitCredentials,
   onRetryTest,
@@ -221,13 +225,20 @@ export function GuidedConnectionWizard({
           </button>
         )}
 
-        {phase === "application_issuance" && <NaverIssuanceModeChoice dispatch={dispatch} busy={busy} />}
+        {phase === "application_issuance" && (
+          <NaverIssuanceModeChoice
+            dispatch={dispatch}
+            busy={busy}
+            advertisedEgressIps={advertisedEgressIps}
+          />
+        )}
 
         {phase === "application_issuance_guided" && (
           <NaverIssuanceGuidedWalkthrough
             dispatch={dispatch}
             reuseExistingApp={reusesExistingApp(state.path)}
             busy={busy}
+            advertisedEgressIps={advertisedEgressIps}
           />
         )}
 
@@ -262,7 +273,10 @@ export function GuidedConnectionWizard({
                   기존 앱에서 어디를 확인하나요?
                 </summary>
                 <div className="mt-3">
-                  <NaverIssuanceTutorial steps={NAVER_EXISTING_APP_TUTORIAL} />
+                  <NaverIssuanceTutorial
+                    steps={NAVER_EXISTING_APP_TUTORIAL}
+                    advertisedEgressIps={advertisedEgressIps}
+                  />
                 </div>
               </details>
               <SecureCredentialForm template={template} onSubmit={onSubmitCredentials} submitting={busy} />
@@ -322,6 +336,15 @@ export function GuidedConnectionWizard({
             <p className="text-muted">{PHASE_COPY.call_environment_mismatch.body}</p>
             <button type="button" className="btn-primary" onClick={onRetryTest} disabled={busy}>
               호출 환경을 확인했어요, 다시 시도
+            </button>
+          </div>
+        )}
+
+        {phase === "order_access_denied" && (
+          <div className="space-y-3">
+            <p className="text-muted">{PHASE_COPY.order_access_denied.body}</p>
+            <button type="button" className="btn-primary" onClick={onRetryTest} disabled={busy}>
+              권한·호출 IP를 확인했어요, 다시 시도
             </button>
           </div>
         )}

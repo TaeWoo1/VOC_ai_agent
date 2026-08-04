@@ -7,6 +7,7 @@ import { OperationRunTimeline } from "../actionWindow/OperationRunTimeline";
 import { ActionWindowControlPanel } from "../actionWindow/ActionWindowControlPanel";
 import { BlockerNotice } from "../actionWindow/BlockerNotice";
 import { AgentPairingPanel } from "../reviewImport/AgentPairingPanel";
+import { AdvertisedCallIpPanel } from "./AdvertisedCallIpPanel";
 import { useGuidedIssuance } from "../../lib/actionWindow/issuance/useGuidedIssuance";
 import type { GuidedIssuanceRuntime } from "../../lib/actionWindow/issuance/issuanceRuntime";
 import type { GuidedEvent } from "../../lib/guidedConnection";
@@ -83,6 +84,10 @@ export interface NaverIssuanceGuidedWalkthroughProps {
    */
   reuseExistingApp?: boolean;
   busy?: boolean;
+  /** Deployment-global advertised call IP(s) shown as a persistent advisory during the guided walk, so
+   *  the guided path (not just the text checklist) tells the seller to register the fixed call IP.
+   *  Empty ⇒ generic guidance, never a fabricated IP. */
+  advertisedEgressIps?: readonly string[];
 }
 
 export function NaverIssuanceGuidedWalkthrough({
@@ -92,6 +97,7 @@ export function NaverIssuanceGuidedWalkthrough({
   hostRuntime,
   reuseExistingApp = false,
   busy,
+  advertisedEgressIps = [],
 }: NaverIssuanceGuidedWalkthroughProps) {
   // GUIDED-FIRST start gate. Guided is the default path, so the seller reaches here without a guided/text
   // choice; a single CTA ("네이버 연결 안내 시작") begins pairing + hosting. Pairing is deferred until the
@@ -198,6 +204,17 @@ export function NaverIssuanceGuidedWalkthrough({
 
   return (
     <div className="space-y-4" aria-label={reuseExistingApp ? "화면 안내" : "화면 안내 발급"}>
+      {/* Persistent advisory: the guided path must also tell the seller to register the fixed call IP
+          (the API-center walkthrough covers the app/API-group/credentials, not the 'API 호출 IP' field). */}
+      <section className="space-y-1 rounded-lg border border-line px-4 py-3" aria-label="API 호출 IP 등록 안내">
+        <p className="text-sm font-medium text-ink">API 호출 IP 등록</p>
+        <p className="text-xs text-muted">
+          애플리케이션 설정의 'API 호출 IP'에 SellerOps 고정 호출 IP를 등록하세요. 등록하지 않으면 첫 주문 수집이
+          호출 IP 오류로 실패할 수 있습니다.
+        </p>
+        <AdvertisedCallIpPanel ips={advertisedEgressIps} />
+      </section>
+
       {/* Pairing (guided path only). AgentPairingPanel self-hides when paired or on an incompatible version. */}
       {!paired && (
         <AgentPairingPanel

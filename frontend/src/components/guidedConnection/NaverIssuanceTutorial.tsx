@@ -4,6 +4,10 @@ import {
   TUTORIAL_HINT_QUALIFIER,
   type TutorialStep,
 } from "../../lib/guidedConnection";
+import { AdvertisedCallIpPanel } from "./AdvertisedCallIpPanel";
+
+/** The tutorial step at which the seller registers SellerOps' fixed call IP in their NAVER app. */
+const CALL_IP_STEP_ID = "register_call_ip";
 
 /**
  * Step-by-step NAVER Commerce API issuance tutorial (used for both the new-app issuance walk and the
@@ -24,9 +28,18 @@ export interface NaverIssuanceTutorialProps {
   onComplete?: () => void;
   completeLabel?: string;
   busy?: boolean;
+  /** SellerOps' advertised fixed egress IPv4(s) to register in the app's 'API 호출 IP'. Shown at the
+   *  register-call-IP step. Empty/absent ⇒ fail-safe generic note, never a fabricated IP. */
+  advertisedEgressIps?: readonly string[];
 }
 
-export function NaverIssuanceTutorial({ steps, onComplete, completeLabel, busy }: NaverIssuanceTutorialProps) {
+export function NaverIssuanceTutorial({
+  steps,
+  onComplete,
+  completeLabel,
+  busy,
+  advertisedEgressIps = [],
+}: NaverIssuanceTutorialProps) {
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
 
   const toggle = (id: string) =>
@@ -71,6 +84,8 @@ export function NaverIssuanceTutorial({ steps, onComplete, completeLabel, busy }
               <summary className="cursor-pointer select-none text-warn">어디를 눌러야 하나요?</summary>
               <p className="mt-1">{step.hint}</p>
             </details>
+
+            {step.id === CALL_IP_STEP_ID && <AdvertisedCallIpPanel ips={advertisedEgressIps} />}
 
             {step.opensCenter && (
               <button type="button" className="btn-ghost mt-2 text-sm" onClick={openCenter}>

@@ -110,6 +110,16 @@ export interface ConnectionCapabilityView {
 }
 
 /**
+ * Deployment-global NAVER setup facts (mirrors the backend NaverSetupView), available WITHOUT an
+ * account so the issuance tutorial can show them during first-time connection. `advertisedEgressIps`
+ * is the fixed public egress IPv4(s) to register in the app's 'API 호출 IP' — sanitized, not a secret,
+ * and EMPTY when none is configured (the UI then shows generic guidance, never a fabricated IP).
+ */
+export interface NaverSetupView {
+  advertisedEgressIps: string[];
+}
+
+/**
  * Sanitized identity of a disposable walkthrough runtime (mirrors the backend WalkthroughContextView).
  * Carries a per-bootstrap opaque run id (an environment identifier, NOT a credential/token), git commit,
  * origins, a DB alias (never the full URL), flags, coarse baseline counts, and a start time. Used to prove

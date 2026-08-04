@@ -76,6 +76,11 @@ export const NAVER_ISSUANCE_TUTORIAL: readonly TutorialStep[] = [
     hint: "애플리케이션에 상품·주문(판매자) 관련 API 그룹을 추가/허용합니다. 정확한 그룹 이름은 화면에서 '주문'·'판매자'가 포함된 항목을 찾아 선택하세요.",
   },
   {
+    id: "register_call_ip",
+    title: "API 호출 IP에 SellerOps 고정 IP 등록",
+    hint: "SellerOps는 고정된 서버 IP에서 NAVER API를 호출합니다. 애플리케이션의 'API 호출 IP' 설정에 아래에 표시된 고정 IP를 그대로 등록하세요. 표시된 IP가 없으면 아직 준비 중이므로 이 단계는 건너뛰고 담당자에게 문의하세요. (등록하지 않으면 첫 주문 수집이 호출 IP 오류로 실패할 수 있습니다.)",
+  },
+  {
     id: "view_credentials",
     title: "애플리케이션 ID와 시크릿 확인",
     hint: "애플리케이션 상세 화면에서 애플리케이션 ID와 시크릿(클라이언트 시크릿)을 확인합니다. 시크릿은 화면에서 눈으로 확인만 하고, 다음 단계에서 SellerOps 보안 입력란에 직접 입력하세요.",
@@ -113,6 +118,11 @@ export const NAVER_EXISTING_APP_TUTORIAL: readonly TutorialStep[] = [
     id: "verify_api_group",
     title: "주문 조회 API 그룹 확인",
     hint: "이 애플리케이션에 상품·주문(판매자) 관련 API 그룹이 포함되어 있는지 확인하고, 없으면 추가합니다.",
+  },
+  {
+    id: "register_call_ip",
+    title: "API 호출 IP에 SellerOps 고정 IP 등록",
+    hint: "SellerOps는 고정된 서버 IP에서 NAVER API를 호출합니다. 애플리케이션의 'API 호출 IP' 설정에 아래에 표시된 고정 IP가 등록되어 있는지 확인하고, 없으면 그대로 등록하세요. 표시된 IP가 없으면 아직 준비 중이므로 이 단계는 건너뛰고 담당자에게 문의하세요.",
   },
   {
     id: "view_credentials",

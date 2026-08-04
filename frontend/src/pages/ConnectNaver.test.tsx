@@ -64,6 +64,7 @@ vi.mock("../lib/apiClient", () => ({
     testConnection: vi.fn(),
     manualSync: vi.fn(),
     getConnectionCapabilityStrict: vi.fn(),
+    getNaverSetup: vi.fn(),
     getWalkthroughContext: vi.fn(),
     walkthroughHandshake: vi.fn(),
   },
@@ -137,6 +138,8 @@ beforeEach(() => {
   });
   // Default: a fresh account → mount resumes to the fork.
   vi.mocked(api.getConnectionCapabilityStrict).mockResolvedValue(freshCapability());
+  // Deployment-global setup: default none advertised (the tutorial then shows generic guidance).
+  vi.mocked(api.getNaverSetup).mockResolvedValue({ advertisedEgressIps: [] });
 });
 
 afterEach(() => {
@@ -170,6 +173,21 @@ async function enterCredentials(secret = SECRET) {
 }
 
 describe("ConnectNaver — Local-Agent-free order connection", () => {
+  it("fetches deployment-global setup (advertised call IP) on load, so the issuance tutorial can show it", async () => {
+    // H1 regression: the advertised IP must be delivered via a NON-account-scoped read available at
+    // issuance time — not the completion-gated capability view — or the tutorial never shows it.
+    vi.mocked(api.getNaverSetup).mockResolvedValue({ advertisedEgressIps: ["203.0.113.10"] });
+    renderPage();
+    await waitFor(() => expect(api.getNaverSetup).toHaveBeenCalled());
+  });
+
+  it("a setup fetch failure fails safe (no crash; tutorial falls back to generic guidance)", async () => {
+    vi.mocked(api.getNaverSetup).mockRejectedValue(new Error("setup unavailable"));
+    renderPage();
+    // The page still loads to the guided walkthrough despite the setup read failing.
+    expect(await screen.findByTestId("guided-walkthrough-stub")).toBeInTheDocument();
+  });
+
   it("with the local agent DOWN, the whole order connection still completes (no readiness gate)", async () => {
     h.bridge = AGENT_DOWN;
     mockTestAndSyncSuccess();

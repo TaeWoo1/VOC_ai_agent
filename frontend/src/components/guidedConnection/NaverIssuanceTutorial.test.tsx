@@ -45,6 +45,27 @@ describe("NaverIssuanceTutorial", () => {
     expect(screen.queryByRole("button", { name: /발급을 완료/ })).toBeNull();
   });
 
+  it("shows the advertised fixed call IP(s) with a copy affordance at the register-call-IP step", () => {
+    render(
+      <NaverIssuanceTutorial
+        steps={NAVER_ISSUANCE_TUTORIAL}
+        advertisedEgressIps={["203.0.113.10", "203.0.113.11"]}
+      />,
+    );
+    expect(screen.getByText("203.0.113.10")).toBeInTheDocument();
+    expect(screen.getByText("203.0.113.11")).toBeInTheDocument();
+    // A copy affordance exists per IP (value is not a secret — the seller must register it publicly).
+    expect(screen.getAllByRole("button", { name: "복사" })).toHaveLength(2);
+  });
+
+  it("fails safe when no IP is advertised: generic guidance, never a fabricated IP", () => {
+    render(<NaverIssuanceTutorial steps={NAVER_ISSUANCE_TUTORIAL} advertisedEgressIps={[]} />);
+    expect(screen.getByText(/등록할 고정 IP가 아직 표시되지 않습니다/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "복사" })).toBeNull();
+    // No dotted-quad fabricated anywhere in the rendered checklist.
+    expect(screen.queryByText(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/)).toBeNull();
+  });
+
   it("has no accessibility violations", async () => {
     const { container } = render(
       <NaverIssuanceTutorial steps={NAVER_ISSUANCE_TUTORIAL} onComplete={vi.fn()} completeLabel="발급을 완료했어요" />,

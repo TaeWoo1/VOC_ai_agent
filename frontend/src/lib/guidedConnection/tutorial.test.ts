@@ -18,7 +18,7 @@ describe("NAVER issuance tutorial content", () => {
     expect(NAVER_ISSUANCE_TUTORIAL[0]?.opensCenter).toBe(true);
   });
 
-  it("covers the full issuance path (open → login → app list → create → usage check → API group → credentials → return)", () => {
+  it("covers the full issuance path (open → login → app list → create → usage check → API group → call IP → credentials → return)", () => {
     const ids = NAVER_ISSUANCE_TUTORIAL.map((s) => s.id);
     expect(ids).toEqual([
       "open_center",
@@ -27,9 +27,26 @@ describe("NAVER issuance tutorial content", () => {
       "create_app",
       "app_usage_check",
       "select_api_group",
+      "register_call_ip",
       "view_credentials",
       "return_to_sellerops",
     ]);
+  });
+
+  it("both walks put the call-IP registration step right after the API-group step, before reading credentials", () => {
+    for (const walk of [NAVER_ISSUANCE_TUTORIAL, NAVER_EXISTING_APP_TUTORIAL]) {
+      const ids = walk.map((s) => s.id);
+      const apiGroup = ids.findIndex((id) => id === "select_api_group" || id === "verify_api_group");
+      const callIp = ids.indexOf("register_call_ip");
+      const credentials = ids.indexOf("view_credentials");
+      expect(callIp).toBe(apiGroup + 1); // immediately after the API-group step
+      expect(callIp).toBeLessThan(credentials); // before reading the ID/Secret
+      // Honest + non-fabricating: it references the displayed fixed IP and hedges when none is shown.
+      const step = walk.find((s) => s.id === "register_call_ip")!;
+      expect(step.hint).toMatch(/API 호출 IP/);
+      expect(step.hint).toMatch(/표시된 (고정 )?IP가 없으면|담당자에게 문의/);
+      expect(step.opensCenter).not.toBe(true);
+    }
   });
 
   it("the existing-app walk never tells the seller to create a second app", () => {
