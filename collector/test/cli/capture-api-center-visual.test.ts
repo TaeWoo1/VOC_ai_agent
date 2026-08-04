@@ -104,6 +104,16 @@ describe("runVisualReconSession — screenshot only after redaction verifies", (
     ]);
   });
 
+  it("a narrowed capture SCOPE walks ONLY the requested screens (app_list + app_detail), never api_group / credentials", async () => {
+    // Two ready screens + two signals; the scope is the 2-screen subset, so the loop must stop after app_detail
+    // and never touch api_group / credentials even if more signals were queued.
+    const h = harness({ signals: ["ready", "ready", "ready", "ready"], applyQ: [PASS, PASS], verifyQ: [PASS, PASS, PASS, PASS] });
+    const r = await runVisualReconSession(h.deps, ["app_list", "app_detail"]);
+    expect(r.screensWalked).toBe(2);
+    expect(h.calls.probed).toEqual(["app_list", "app_detail"]); // never api_group / credentials
+    expect(h.calls.screenshot).toEqual(["app_list", "app_detail"]);
+  });
+
   it("HALTS at the apply verdict — no screenshot, records a screenshot-less summary", async () => {
     const h = harness({ signals: ["ready", "skip", "skip", "skip"], applyQ: [FAIL], verifyQ: [] });
     const r = await runVisualReconSession(h.deps);

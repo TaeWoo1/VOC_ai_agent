@@ -11,6 +11,8 @@ import {
   sanitizeVisualSummary,
   verifyRedaction,
   VISUAL_RECON_SCREENS,
+  resolveVisualReconScope,
+  isCanonicalVisualReconSubset,
   type RawRedactionReport,
   type RawVisualControl,
   type RawVisualSummary,
@@ -275,5 +277,46 @@ describe("evaluateSelectorCandidate — the five adoption conditions", () => {
 describe("VISUAL_RECON_SCREENS", () => {
   it("covers the four onboarding screens in order", () => {
     expect(VISUAL_RECON_SCREENS).toEqual(["app_list", "app_detail", "api_group", "credentials"]);
+  });
+});
+
+describe("resolveVisualReconScope — fail-closed per-run capture scope", () => {
+  it("absent / empty / whitespace ⇒ the full fixed set (backward-compatible)", () => {
+    for (const raw of [undefined, null, "", "   ", " , "]) {
+      const r = resolveVisualReconScope(raw);
+      expect(r.ok, String(raw)).toBe(true);
+      if (r.ok) expect(r.screens).toEqual([...VISUAL_RECON_SCREENS]);
+    }
+  });
+
+  it("narrows to a canonical subset (app_list + app_detail), regardless of input order / spacing / dupes", () => {
+    for (const raw of ["app_list,app_detail", "app_detail, app_list", " app_list , app_detail , app_list "]) {
+      const r = resolveVisualReconScope(raw);
+      expect(r.ok, raw).toBe(true);
+      if (r.ok) expect(r.screens).toEqual(["app_list", "app_detail"]); // canonical registry order, de-duplicated
+    }
+  });
+
+  it("fails closed on ANY unknown screen (never silently drops, never over-captures)", () => {
+    const r = resolveVisualReconScope("app_list,api_grp");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain("api_grp");
+  });
+
+  it("a single-screen scope is allowed", () => {
+    const r = resolveVisualReconScope("app_list");
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.screens).toEqual(["app_list"]);
+  });
+});
+
+describe("isCanonicalVisualReconSubset", () => {
+  it("accepts a non-empty canonical-ordered subset, rejects empty / re-ordered / unknown / duplicate", () => {
+    expect(isCanonicalVisualReconSubset(["app_list", "app_detail"])).toBe(true);
+    expect(isCanonicalVisualReconSubset([...VISUAL_RECON_SCREENS])).toBe(true);
+    expect(isCanonicalVisualReconSubset([])).toBe(false);
+    expect(isCanonicalVisualReconSubset(["app_detail", "app_list"])).toBe(false); // not canonical order
+    expect(isCanonicalVisualReconSubset(["app_list", "nope"])).toBe(false);
+    expect(isCanonicalVisualReconSubset(["app_list", "app_list"])).toBe(false); // duplicate
   });
 });

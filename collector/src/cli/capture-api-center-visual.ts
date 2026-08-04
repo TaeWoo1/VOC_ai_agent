@@ -41,6 +41,7 @@ import {
   sanitizeVisualSummary,
   verifyRedaction,
   VISUAL_RECON_SCREENS,
+  resolveVisualReconScope,
   type FixedLabelMatch,
   type RawRedactionReport,
   type RawVisualControl,
@@ -106,7 +107,10 @@ export interface VisualReconSessionResult {
  * injected, so a fake drives the whole walk offline. A HALT on a screen skips the screenshot but still records a
  * sanitized (screenshot-less) summary so the run is honest about what was and was not captured.
  */
-export async function runVisualReconSession(deps: VisualReconSessionDeps): Promise<VisualReconSessionResult> {
+export async function runVisualReconSession(
+  deps: VisualReconSessionDeps,
+  screens: readonly VisualReconScreen[] = VISUAL_RECON_SCREENS,
+): Promise<VisualReconSessionResult> {
   const summaries: SanitizedVisualSummary[] = [];
   let aborted = false;
   let screensWalked = 0;
@@ -114,7 +118,9 @@ export async function runVisualReconSession(deps: VisualReconSessionDeps): Promi
   let screensHalted = 0;
   let screensSkipped = 0;
 
-  for (const screen of VISUAL_RECON_SCREENS) {
+  // The capture SCOPE — the full fixed set by default, or the narrower per-run subset the manifest approved.
+  // Walking only these screens is what keeps the capture consistent with the scope the operator approved.
+  for (const screen of screens) {
     deps.announceScreen?.(screen);
 
     let signal: VisualCheckpointSignal = "timeout";
@@ -359,6 +365,33 @@ async function main(): Promise<void> {
     return;
   }
   const urlCategory = screen.urlCategory;
+  // Per-run capture SCOPE — resolved from the SAME env the manifest gate reads, so the capture can only ever
+  // walk the screens the approved manifest declared. A LIVE capture NEVER defaults its scope: the env must be
+  // set EXPLICITLY (to the exact set the manifest approved — a subset like `app_list,app_detail`, or all four).
+  // Failing closed here — rather than silently defaulting to the full set — is what stops a narrowed manifest
+  // from being paired with a wider capture. (The manifest-generator may default to the full set; a real capture
+  // may not.)
+  const rawScope = process.env.SELLEROPS_VISUAL_RECON_SCREENS;
+  // Require at least one REAL screen token — not just a non-empty string. A degenerate value ("," / " , ")
+  // would otherwise resolve to the full set via the generator's empty⇒full default; a live capture must name
+  // its screens explicitly, so an empty token list fails closed exactly like an absent env.
+  const scopeTokens = (rawScope ?? "").split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+  if (scopeTokens.length === 0) {
+    console.error(
+      "Refusing to launch: set SELLEROPS_VISUAL_RECON_SCREENS to the EXACT capture scope approved in the manifest " +
+        `(a subset like 'app_list,app_detail', or all: '${VISUAL_RECON_SCREENS.join(",")}'). A live capture never defaults its scope. No browser launched.`,
+    );
+    process.exit(2);
+    return;
+  }
+  const scope = resolveVisualReconScope(rawScope);
+  if (!scope.ok) {
+    console.error(`Refusing to launch: SELLEROPS_VISUAL_RECON_SCREENS invalid (${scope.reason}). No browser launched.`);
+    process.exit(2);
+    return;
+  }
+  const captureScreens = scope.screens;
+  console.error(`Capture scope: ${captureScreens.join(", ")} (${captureScreens.length}/${VISUAL_RECON_SCREENS.length} screens) — must match the approved manifest.`);
   const cfg = loadConfig();
   const runId = mintRunId();
 
@@ -485,7 +518,7 @@ async function main(): Promise<void> {
   };
 
   try {
-    const result = await runVisualReconSession(deps);
+    const result = await runVisualReconSession(deps, captureScreens);
     console.error("");
     console.error("Visual-recon walk complete. 이제 SellerOps 탭으로 직접 돌아가세요.");
 

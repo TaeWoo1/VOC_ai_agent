@@ -80,6 +80,48 @@ export function checkpointFor(screen: VisualReconScreen): VisualReconCheckpoint 
   return VISUAL_RECON_CHECKPOINTS.find((c) => c.screen === screen) ?? { screen, page: "application_list", kind: "page", navigation: "navigate" };
 }
 
+export type VisualReconScopeResult = { ok: true; screens: VisualReconScreen[] } | { ok: false; reason: string };
+
+/**
+ * Resolve a per-run visual-recon capture SCOPE from a comma-separated request, fail-closed. A scoped recon
+ * lets one investigation capture only the screens it needs (e.g. the app usage-state check needs `app_list` +
+ * `app_detail`, not `api_group` / `credentials`) — strictly NARROWER than the full fixed set, never wider.
+ *
+ * <ul>
+ *   <li>Absent / empty ⇒ the FULL fixed set (`VISUAL_RECON_SCREENS`) — backward-compatible with an unscoped run.</li>
+ *   <li>Every requested token must be a known screen; ANY unknown token fails closed (never silently dropped,
+ *       never over-captures a screen outside the fixed set).</li>
+ *   <li>The result is returned in the canonical registry order and de-duplicated, so the manifest and the
+ *       capture loop agree on the exact screens regardless of the order/duplication the request was written in.</li>
+ * </ul>
+ *
+ * This is the SINGLE source both the approval-manifest gate and the capture CLI resolve their scope through, so a
+ * manifest can never declare a set the capture would not honor (or vice-versa).
+ */
+export function resolveVisualReconScope(raw: string | undefined | null): VisualReconScopeResult {
+  const trimmed = (raw ?? "").trim();
+  if (!trimmed) return { ok: true, screens: [...VISUAL_RECON_SCREENS] };
+  const requested = trimmed.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+  if (requested.length === 0) return { ok: true, screens: [...VISUAL_RECON_SCREENS] };
+  const known = VISUAL_RECON_SCREENS as readonly string[];
+  const unknown = requested.filter((s) => !known.includes(s));
+  if (unknown.length > 0) return { ok: false, reason: `unknown visual-recon screen(s): ${unknown.join(", ")}` };
+  // Canonical order + dedup: filter the fixed set by membership so app_list always precedes app_detail, etc.
+  const screens = VISUAL_RECON_SCREENS.filter((s) => requested.includes(s));
+  return { ok: true, screens };
+}
+
+/**
+ * Whether `screens` is a valid, NON-EMPTY, canonical-ordered subset of the fixed recon set (the shape the
+ * manifest gate accepts). Canonical-ordered means it equals `VISUAL_RECON_SCREENS` filtered by membership —
+ * so no unknown screen, no duplicate, and no re-ordering can slip through.
+ */
+export function isCanonicalVisualReconSubset(screens: readonly string[]): boolean {
+  if (screens.length === 0) return false;
+  const canonical = VISUAL_RECON_SCREENS.filter((s) => (screens as readonly string[]).includes(s));
+  return canonical.length === screens.length && canonical.every((s, i) => s === screens[i]);
+}
+
 /** A read-only fixed-label match result: how many elements a fixed NAVER-label probe matched (value-free). */
 export interface FixedLabelMatch {
   /** A stable, sanitized target id — never a selector, never user data. */

@@ -25,6 +25,7 @@ import {
   type ApprovalPrereqInput,
 } from "./approval-manifest";
 import { CALIBRATION_PHASES } from "./approval-manifest";
+import { resolveVisualReconScope } from "../action-window/api-issuance-calibration/visual-recon";
 
 const COLLECTOR_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -54,6 +55,17 @@ export function runApprovalManifestCli(): number {
   // highlight proof have NEITHER — they carry no hotkey and no raw-artifact path (a misleading one would
   // over-claim a capability the phase's driver does not have).
   const isVisualRecon = phase === "API_CENTER_VISUAL_RECON";
+  // Visual-recon ONLY: an optional per-run capture SCOPE (comma list) that NARROWS the fixed screen set to just
+  // the screens this investigation needs. Absent ⇒ the full fixed set. Fail closed on any unknown screen.
+  let requestedCaptureScreens: readonly string[] | undefined;
+  if (isVisualRecon) {
+    const scope = resolveVisualReconScope(env("SELLEROPS_VISUAL_RECON_SCREENS"));
+    if (!scope.ok) {
+      process.stderr.write(`PREFLIGHT FAIL: approval_prerequisite (VISUAL_SCREENS_MISMATCH): ${scope.reason}\n`);
+      return 1;
+    }
+    requestedCaptureScreens = scope.screens;
+  }
   const isStructureObs = phase === "API_CENTER_STRUCTURE_OBSERVATION";
   const isFeLiveProof = phase === "API_ISSUANCE_FE_LIVE_PROOF";
   const hotkey = isStructureObs ? (env("SELLEROPS_CALIBRATION_HOTKEY") ?? "Ctrl+Shift+K") : undefined;
@@ -110,6 +122,7 @@ export function runApprovalManifestCli(): number {
     declaredActions: spec.capableActions,
     hotkey,
     artifactPath,
+    requestedCaptureScreens,
     runId: env("WALKTHROUGH_RUN_ID") ?? "unknown",
     approvalId: env("WALKTHROUGH_APPROVAL_ID") ?? "unknown",
     gitSha: env("WALKTHROUGH_GIT_COMMIT") ?? "unknown",

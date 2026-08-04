@@ -37,7 +37,7 @@
  * (the CLI entrypoint file exists) and env reads; `preflight.sh` calls it.
  */
 import { SELECTORS_CALIBRATED } from "../action-window/api-issuance/api-center-adapter";
-import { VISUAL_RECON_SCREENS } from "../action-window/api-issuance-calibration/visual-recon";
+import { VISUAL_RECON_SCREENS, isCanonicalVisualReconSubset } from "../action-window/api-issuance-calibration/visual-recon";
 import { screenApiCenterUrl } from "./observe-api-center";
 
 /**
@@ -421,6 +421,13 @@ export interface ApprovalPrereqInput {
   hotkey?: string;
   /** The gitignored raw-artifact path (Phase A only) — must resolve under the `.calibration/` dir. */
   artifactPath?: string;
+  /**
+   * Visual-recon ONLY (ignored otherwise): the per-run capture SCOPE — a non-empty subset of the phase's fixed
+   * `captureScreens`, letting one investigation narrow the recon to just the screens it needs. Absent ⇒ the full
+   * fixed set. Validated as a canonical subset (known screens only, no wider than the fixed set), so scoping can
+   * only ever REDUCE what is captured.
+   */
+  requestedCaptureScreens?: readonly string[];
   runId: string;
   approvalId: string;
   gitSha: string;
@@ -597,8 +604,10 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
   }
 
   // 7c) The visual-recon phase has NO hotkey (it never calibrates a control from a keypress). Its redacted PNG +
-  // sanitized summary must land ONLY under the gitignored `.calibration/visual/` sink, and the screens it
-  // declares must be exactly the driver's fixed screen set (a self-consistency guard against contract drift).
+  // sanitized summary must land ONLY under the gitignored `.calibration/visual/` sink; its fixed screen set is a
+  // self-consistency guard against contract drift, and a per-run scope may only NARROW it. The resolved capture
+  // scope the manifest declares (full set, or a canonical subset) is carried here.
+  let visualCaptureScreens: readonly string[] | undefined;
   if (spec.phase === "API_CENTER_VISUAL_RECON") {
     const artifact = (input.artifactPath ?? "").replace(/\\/g, "/");
     if (!artifact || !isSafeCalibrationArtifactPath(artifact) || !artifact.startsWith(VISUAL_RECON_ARTIFACT_CATEGORY)) {
@@ -606,9 +615,17 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
     }
     // Defense-in-depth: today `spec.captureScreens` IS the `VISUAL_RECON_SCREENS` reference, so this holds by
     // construction; it exists to fail closed if a future hand-edit hardcodes a different literal into the spec.
-    const screens = spec.captureScreens ?? [];
-    if (screens.length !== VISUAL_RECON_SCREENS.length || !VISUAL_RECON_SCREENS.every((s, i) => screens[i] === s)) {
-      return fail("VISUAL_SCREENS_MISMATCH", `visual-recon capture screens must be exactly ${VISUAL_RECON_SCREENS.join(", ")}`);
+    const specScreens = spec.captureScreens ?? [];
+    if (specScreens.length !== VISUAL_RECON_SCREENS.length || !VISUAL_RECON_SCREENS.every((s, i) => specScreens[i] === s)) {
+      return fail("VISUAL_SCREENS_MISMATCH", `the visual-recon phase's fixed screen set must be exactly ${VISUAL_RECON_SCREENS.join(", ")}`);
+    }
+    // A per-run scope may NARROW the capture to a subset (e.g. app_list + app_detail for the usage-state check);
+    // absent ⇒ the full fixed set. It is validated as a canonical, non-empty subset — known screens only, no
+    // re-order, no duplicate — so scoping can never widen the capture beyond the fixed set, only reduce it. The
+    // manifest declares (and the capture CLI honors) exactly this set.
+    visualCaptureScreens = input.requestedCaptureScreens ?? specScreens;
+    if (!isCanonicalVisualReconSubset(visualCaptureScreens)) {
+      return fail("VISUAL_SCREENS_MISMATCH", `visual-recon capture scope must be a non-empty canonical subset of ${VISUAL_RECON_SCREENS.join(", ")}`);
     }
   }
 
@@ -713,7 +730,9 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
     // so the operator approves exactly what the recon may capture and where it lands.
     ...(spec.phase === "API_CENTER_VISUAL_RECON"
       ? {
-          captureScreens: spec.captureScreens,
+          // The RESOLVED capture scope (full fixed set, or the narrower per-run subset) — exactly what the
+          // capture CLI will honor. Validated as a canonical subset above.
+          captureScreens: visualCaptureScreens ?? spec.captureScreens,
           artifactCategory: spec.artifactCategory,
           screenshotPolicy: spec.screenshotPolicy,
           structuralSummaryPolicy: spec.structuralSummaryPolicy,

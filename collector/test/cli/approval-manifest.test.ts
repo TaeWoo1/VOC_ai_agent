@@ -279,6 +279,39 @@ describe("visual-recon phase — redacted-screenshot recon manifest", () => {
     }
   });
 
+  it("a per-run capture SCOPE narrows the manifest to a canonical subset (app_list + app_detail)", () => {
+    const r = validateApprovalPrerequisites({ ...baseVisualRecon(), requestedCaptureScreens: ["app_list", "app_detail"] });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      // The manifest declares exactly the narrowed set — the api_group / credentials screens are NOT captured.
+      expect(r.manifest.captureScreens).toEqual(["app_list", "app_detail"]);
+      expect(r.manifest.captureScreens).not.toContain("api_group");
+      expect(r.manifest.captureScreens).not.toContain("credentials");
+    }
+  });
+
+  it("an out-of-order scope is normalized to canonical registry order", () => {
+    const r = validateApprovalPrerequisites({ ...baseVisualRecon(), requestedCaptureScreens: ["app_detail", "app_list"] });
+    // The gate accepts only a canonical-ordered subset; the CLI resolver normalizes order, but a hand-built
+    // out-of-order input must be rejected here so the manifest can never disagree with the resolver.
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("VISUAL_SCREENS_MISMATCH");
+  });
+
+  it("absent scope keeps the full fixed set (backward-compatible)", () => {
+    const r = validateApprovalPrerequisites({ ...baseVisualRecon(), requestedCaptureScreens: undefined });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.manifest.captureScreens).toEqual([...VISUAL_RECON_SCREENS]);
+  });
+
+  it("a scope with an unknown / duplicate / empty screen set → FAIL (VISUAL_SCREENS_MISMATCH)", () => {
+    for (const requestedCaptureScreens of [["app_list", "nope"], ["app_list", "app_list"], [] as string[]]) {
+      const r = validateApprovalPrerequisites({ ...baseVisualRecon(), requestedCaptureScreens });
+      expect(r.ok, JSON.stringify(requestedCaptureScreens)).toBe(false);
+      if (!r.ok) expect(r.cause).toBe("VISUAL_SCREENS_MISMATCH");
+    }
+  });
+
   it("declaring a highlight action in the visual-recon phase → FAIL (its driver only observes/redacts)", () => {
     const r = validateApprovalPrerequisites({
       ...baseVisualRecon(),

@@ -91,12 +91,20 @@ element and pressing a hotkey, SellerOps captures a **redacted screenshot** of e
 operator navigated to, plus a sanitized structural summary, and a HUMAN reviewer reads that redacted image to
 identify controls and later propose selector candidates. It is a first-class approval **phase**
 (`SELLEROPS_APPROVAL_PHASE=API_CENTER_VISUAL_RECON`), so the same preflight gate prepares a sanitized PREPARED
-manifest for it (driver `capture-api-center-visual`, the four capture screens, the gitignored sink, and the
+manifest for it (driver `capture-api-center-visual`, the capture screens, the gitignored sink, and the
 redacted-viewport / sanitized-summary policies) — the run stays fully gated, never adopts a selector, and never
-flips `SELECTORS_CALIBRATED`. Live entry (gated, human-attended):
+flips `SELECTORS_CALIBRATED`.
+
+**Capture SCOPE (`SELLEROPS_VISUAL_RECON_SCREENS`).** A per-run scope may NARROW the recon to just the screens
+an investigation needs (e.g. `app_list,app_detail` for the app usage-state check) — never wider than the fixed
+four (`app_list,app_detail,api_group,credentials`). Export the SAME value for BOTH the manifest gate and the
+capture, so the manifest declares exactly what the capture will walk. The manifest generator defaults an absent
+scope to the full four; the **live capture requires it to be set EXPLICITLY** (a subset, or all four) and fails
+closed otherwise — a real capture never defaults its scope. Live entry (gated, human-attended):
 
 ```
 set -a && . ./.env && set +a          # NAVER_API_CENTER_URL (operator-owned; never logged)
+export SELLEROPS_VISUAL_RECON_SCREENS=app_list,app_detail   # the EXACT scope the manifest approved (or all four)
 npx tsx collector/src/cli/capture-api-center-visual.ts -- --i-understand-this-opens-live-naver
 npx tsx collector/src/cli/capture-api-center-visual.ts -- --cleanup   # delete recon artifacts, launch nothing
 ```
