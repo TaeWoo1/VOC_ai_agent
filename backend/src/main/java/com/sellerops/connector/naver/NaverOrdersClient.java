@@ -11,6 +11,7 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -20,6 +21,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
@@ -62,6 +64,26 @@ public class NaverOrdersClient {
     static final String DETAIL_QUERY_PATH = "/external/v1/pay-order/seller/product-orders/query";
     /** Only payment-completed transitions feed the sales summary. */
     static final String LAST_CHANGED_TYPE = "PAYED";
+    /**
+     * The connect-test order-access probe reads one recent, deliberately narrow
+     * window — enough to exercise the order endpoint's authorization without pulling
+     * a meaningful volume of changed orders (which are discarded regardless).
+     */
+    static final Duration PROBE_WINDOW = Duration.ofMinutes(5);
+    /**
+     * Provider error codes that positively identify a MISSING-ORDER-PERMISSION cause.
+     * Intentionally EMPTY: the exact NAVER {@code GW.*} string for this cause has not
+     * been captured from a real gateway response, and it is never guessed. A 403 whose
+     * code is unrecognized is reported as the hedged {@link OrderAccessProbe#ACCESS_DENIED},
+     * not misattributed. Fill only from an approved live capture.
+     */
+    private static final Set<String> PERMISSION_DENIED_CODES = Set.of();
+    /**
+     * Provider error codes that positively identify an UNREGISTERED-CALL-IP cause.
+     * Intentionally EMPTY for the same reason as {@link #PERMISSION_DENIED_CODES}
+     * — the distinguishing {@code GW.*} string is unknown and never guessed.
+     */
+    private static final Set<String> CALL_IP_DENIED_CODES = Set.of();
     /** Seller business timezone; Naver timestamps already carry +09:00. */
     static final ZoneId KST = ZoneId.of("Asia/Seoul");
     /**
@@ -128,6 +150,106 @@ public class NaverOrdersClient {
                 summaries(merged, countable.touchedDates()),
                 perOrderRecords(countable.items(), amounts),
                 serialize(next), hasMore, NaverApiConnector.KIND);
+    }
+
+    /**
+     * Status-aware result of the connect-test order-access probe. The connect test
+     * mints a token (credential proof) and then calls this to answer the SEPARATE
+     * question the token can never answer: does this app actually have order-API
+     * access, or will the first sync fail on a permission / call-IP wall?
+     */
+    public enum OrderAccessProbe {
+        /** HTTP 200 — the order endpoint granted access (data, if any, is discarded). */
+        CONFIRMED,
+        /** HTTP 429 — throttled; inconclusive, never a credential verdict. */
+        RATE_LIMITED,
+        /** 5xx / network / a we-side 4xx (400/401/…) — inconclusive, never blocks a valid credential. */
+        UNAVAILABLE,
+        /** 403 with a live-captured permission code — the app lacks the order API group. */
+        PERMISSION_DENIED,
+        /** 403 with a live-captured call-IP code — the caller IP is not registered. */
+        CALL_IP_DENIED,
+        /** 403 whose code is unrecognized — access denied, cause not distinguishable (hedged). */
+        ACCESS_DENIED
+    }
+
+    /**
+     * Read-only connect-test probe: one {@code GET last-changed-statuses} over a
+     * narrow recent window, classified by HTTP status (and, for 403 only, a
+     * sanitized envelope {@code code}). Persists no cursor, ingests nothing, and
+     * makes no detail call — the response body is read only for its status and, on
+     * 403, its {@code code}, then discarded. Never throws for an HTTP outcome; a
+     * transport failure is reported as {@link OrderAccessProbe#UNAVAILABLE}.
+     *
+     * <p><b>Honesty boundary.</b> A 403 is order-access-denied by the HTTP-standard
+     * meaning of the status — that is not a guess. Splitting it into permission vs
+     * call-IP requires a real {@code GW.*} code that has not been captured, so an
+     * unrecognized 403 is the hedged {@link OrderAccessProbe#ACCESS_DENIED}. Any
+     * other 4xx (a malformed-parameter 400, an at-resource 401) is a we-side or
+     * transient condition that must never block a credential the token step already
+     * accepted — it is {@link OrderAccessProbe#UNAVAILABLE} (inconclusive).
+     */
+    public OrderAccessProbe probeOrderAccess(String accessToken) {
+        NaverOrdersCursor window = NaverOrdersCursor.probeWindow(clock.instant(), KST, PROBE_WINDOW);
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("lastChangedFrom", window.windowFrom());
+        params.put("lastChangedTo", window.windowTo());
+        params.put("lastChangedType", LAST_CHANGED_TYPE);
+
+        NaverHttpClient.Response response;
+        try {
+            response = http.get(uri(LAST_CHANGED_PATH, params), accessToken);
+        } catch (IllegalStateException e) {
+            // JdkNaverHttpClient wraps network/interrupt failures — inconclusive, not a denial.
+            return OrderAccessProbe.UNAVAILABLE;
+        }
+
+        int status = response.statusCode();
+        if (status == 200) {
+            return OrderAccessProbe.CONFIRMED;
+        }
+        if (status == 429) {
+            return OrderAccessProbe.RATE_LIMITED;
+        }
+        if (status >= 500) {
+            return OrderAccessProbe.UNAVAILABLE;
+        }
+        if (status == 403) {
+            String code = errorEnvelopeCode(response.body());
+            if (code != null && PERMISSION_DENIED_CODES.contains(code)) {
+                return OrderAccessProbe.PERMISSION_DENIED;
+            }
+            if (code != null && CALL_IP_DENIED_CODES.contains(code)) {
+                return OrderAccessProbe.CALL_IP_DENIED;
+            }
+            return OrderAccessProbe.ACCESS_DENIED;
+        }
+        // Other 4xx (400 malformed param, 401 at resource, 404, …): the token step
+        // already accepted the credential, so a we-side/transient request error here
+        // must not be reported as a denial.
+        return OrderAccessProbe.UNAVAILABLE;
+    }
+
+    /**
+     * The sanitized envelope {@code code} scalar only (never the body, never PII),
+     * or null when absent/unparseable — mirrors {@link NaverRateLimitedException#classify}.
+     * Used solely to look up a 403 cause in the never-guessed code whitelists.
+     */
+    private String errorEnvelopeCode(String body) {
+        if (body == null || body.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode root = mapper.readTree(body);
+            JsonNode code = root == null ? null : root.get("code");
+            if (code == null || !code.isValueNode()) {
+                return null;
+            }
+            String value = code.asText();
+            return value.isBlank() ? null : value;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**

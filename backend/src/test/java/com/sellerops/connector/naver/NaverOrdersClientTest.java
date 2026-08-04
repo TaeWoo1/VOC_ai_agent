@@ -572,6 +572,101 @@ class NaverOrdersClientTest {
                 .hasMessageNotContaining("buyerName");
     }
 
+    // --- read-only order-access probe (connect-test) ---
+
+    @Test
+    void probeConfirmsOnOkWithOneReadOnlyGetAndNoDetailCall() {
+        http.enqueue(FakeNaverHttpClient.ok(lcsBody(null, lcsItem("PO1", "O1",
+                "2026-06-12T14:59:00+09:00"))));
+
+        NaverOrdersClient.OrderAccessProbe probe = client.probeOrderAccess(TOKEN);
+
+        assertThat(probe).isEqualTo(NaverOrdersClient.OrderAccessProbe.CONFIRMED);
+        // Exactly one GET (last-changed), never a detail POST, never a persisted cursor.
+        assertThat(http.sent).hasSize(1);
+        assertThat(http.sent.get(0).method()).isEqualTo("GET");
+        String uri = http.sent.get(0).uri().toString();
+        assertThat(uri).contains("last-changed-statuses");
+        assertThat(uri).contains("lastChangedType=PAYED");
+    }
+
+    @Test
+    void probeWindowIsNonZeroAndUsesTheConfirmedWireFormat() {
+        http.enqueue(FakeNaverHttpClient.ok(lcsBody(null)));
+
+        client.probeOrderAccess(TOKEN);
+
+        String query = http.sent.get(0).uri().getQuery(); // decoded
+        String from = firstGroup(query, "lastChangedFrom=([^&]+)");
+        String to = firstGroup(query, "lastChangedTo=([^&]+)");
+        String millisOffset = "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\+09:00";
+        // 3-digit-millisecond ISO offset — the same format the proven first-collection call uses.
+        assertThat(from).matches(millisOffset);
+        assertThat(to).matches(millisOffset);
+        // A zero-width window is what Naver rejects with HTTP 400; the probe must span time.
+        assertThat(OffsetDateTime.parse(from).toInstant()).isBefore(OffsetDateTime.parse(to).toInstant());
+    }
+
+    private static String firstGroup(String haystack, String regex) {
+        Matcher m = Pattern.compile(regex).matcher(haystack);
+        assertThat(m.find()).as("matches %s", regex).isTrue();
+        return m.group(1);
+    }
+
+    @Test
+    void probeReturnsAccessDeniedOnForbiddenWithUnrecognizedCode() {
+        // 403 is order-access-denied by HTTP-standard meaning; the code cannot yet be
+        // split into permission vs call-IP, so the hedged verdict is returned — never guessed.
+        http.enqueue(new NaverHttpClient.Response(403,
+                "{\"code\":\"GW.FORBIDDEN\",\"message\":\"권한이 없습니다\"}", Map.of()));
+
+        assertThat(client.probeOrderAccess(TOKEN))
+                .isEqualTo(NaverOrdersClient.OrderAccessProbe.ACCESS_DENIED);
+    }
+
+    @Test
+    void probeIsRateLimitedOn429() {
+        http.enqueue(FakeNaverHttpClient.rateLimited429());
+
+        assertThat(client.probeOrderAccess(TOKEN))
+                .isEqualTo(NaverOrdersClient.OrderAccessProbe.RATE_LIMITED);
+    }
+
+    @Test
+    void probeIsUnavailableOnServerErrorMalformedParamAndNetworkFailure() {
+        http.enqueue(new NaverHttpClient.Response(500, "{\"code\":\"GW.INTERNAL\"}", Map.of()));
+        assertThat(client.probeOrderAccess(TOKEN))
+                .isEqualTo(NaverOrdersClient.OrderAccessProbe.UNAVAILABLE);
+
+        // A malformed-param 400 is a we-side error, not a denial — inconclusive.
+        http.enqueue(new NaverHttpClient.Response(400,
+                "{\"code\":\"GW.INVALID_PARAM\",\"message\":\"형식 오류\"}", Map.of()));
+        assertThat(client.probeOrderAccess(TOKEN))
+                .isEqualTo(NaverOrdersClient.OrderAccessProbe.UNAVAILABLE);
+
+        // An at-resource 401 despite a minted token is transient, not a denial.
+        http.enqueue(new NaverHttpClient.Response(401, "{\"code\":\"GW.UNAUTHORIZED\"}", Map.of()));
+        assertThat(client.probeOrderAccess(TOKEN))
+                .isEqualTo(NaverOrdersClient.OrderAccessProbe.UNAVAILABLE);
+
+        http.enqueueNetworkFailure();
+        assertThat(client.probeOrderAccess(TOKEN))
+                .isEqualTo(NaverOrdersClient.OrderAccessProbe.UNAVAILABLE);
+    }
+
+    @Test
+    void probeNeverEchoesTokenOrProviderBodyOnForbidden() {
+        // The probe returns only a classification enum — no throw, no message carrying the
+        // token or the (potentially PII-bearing) provider body.
+        http.enqueue(new NaverHttpClient.Response(403,
+                "{\"code\":\"GW.FORBIDDEN\",\"data\":{\"buyerName\":\"홍길동\"}}", Map.of()));
+
+        NaverOrdersClient.OrderAccessProbe probe = client.probeOrderAccess(TOKEN);
+
+        assertThat(probe).isEqualTo(NaverOrdersClient.OrderAccessProbe.ACCESS_DENIED);
+        assertThat(http.sent.get(0).bearer()).isEqualTo(TOKEN); // token used as bearer, never in output
+    }
+
     @Test
     void successfulResponseBodyIsNeverRoutedThroughErrorDiagnostics() {
         // A 200 body carrying a "message" field is parsed as data, never surfaced as an

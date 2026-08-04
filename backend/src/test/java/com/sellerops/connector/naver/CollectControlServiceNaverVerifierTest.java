@@ -50,10 +50,11 @@ import org.springframework.test.context.ActiveProfiles;
 /**
  * Service-level proof that a real {@link NaverApiConnector} (not a fake verifier)
  * plugs into {@link CollectControlService#testConnection} and returns a safe
- * SUCCESS via an auth-only token mint — no order fetch, no ingestion, no sync
- * job, and zero real network (the fake HTTP boundary serves the token). Lives in
- * the naver test package to reuse {@link FakeNaverHttpClient} without widening
- * its visibility, keeping the generic CollectControlServiceTest clean.
+ * SUCCESS via a token mint plus a single read-only order-access probe — no order
+ * ingestion, no sync job, no persisted cursor, and zero real network (the fake
+ * HTTP boundary serves the token and the probe's last-changed page). Lives in the
+ * naver test package to reuse {@link FakeNaverHttpClient} without widening its
+ * visibility, keeping the generic CollectControlServiceTest clean.
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -117,6 +118,8 @@ class CollectControlServiceNaverVerifierTest {
         vault.store(org, acc.getId(), "API", "OAUTH2",
                 Map.of("client_id", "test-client-id", "client_secret", clientSecret), null, null, null);
         http.enqueue(FakeNaverHttpClient.tokenOk("naver-access-token-CANARY", 3000));
+        http.enqueue(FakeNaverHttpClient.tokenOk("naver-probe-token-CANARY", 3000));
+        http.enqueue(FakeNaverHttpClient.ok("{\"data\":{\"lastChangeStatuses\":[]}}"));
 
         ConnectionTestResultView result = service.testConnection(org, acc.getId());
 
@@ -125,9 +128,10 @@ class CollectControlServiceNaverVerifierTest {
         assertThat(result.message()).isEqualTo("연결 정보가 확인되었습니다.");
         assertThat(result.checkedAt()).isNotNull();
 
-        // Auth-only: exactly one token mint, no order calls.
-        assertThat(http.sent).hasSize(1);
+        // Token proof + a single read-only order-access GET — never a detail POST.
+        assertThat(http.sent).hasSize(3);
         assertThat(http.sent.get(0).method()).isEqualTo("POST_FORM");
+        assertThat(http.sent.get(2).method()).isEqualTo("GET");
 
         // No sync job, no ingestion / data persistence.
         assertThat(syncJobs.count()).isZero();
@@ -151,6 +155,8 @@ class CollectControlServiceNaverVerifierTest {
         vault.store(org, acc.getId(), "API", "OAUTH2",
                 Map.of("client_id", "test-client-id", "client_secret", clientSecret), null, null, null);
         http.enqueue(FakeNaverHttpClient.tokenOk("naver-access-token", 3000));
+        http.enqueue(FakeNaverHttpClient.tokenOk("naver-probe-token", 3000));
+        http.enqueue(FakeNaverHttpClient.ok("{\"data\":{\"lastChangeStatuses\":[]}}"));
 
         ConnectionTestResultView result = service.testConnection(org, acc.getId());
 
@@ -174,6 +180,30 @@ class CollectControlServiceNaverVerifierTest {
         assertThat(result.reasonCode()).isEqualTo("INVALID_CREDENTIAL");
         assertThat(sellerAccounts.findById(acc.getId()).orElseThrow().getConnectionStatus())
                 .isEqualTo(ChannelStatus.RECONNECT_REQUIRED);
+    }
+
+    @Test
+    void testConnectionWithValidCredentialButDeniedOrderAccessDoesNotRecallForReconnect() {
+        // The credential is valid (token accepted) but the order endpoint refuses (403).
+        // This is NOT a credential failure: the account must NOT be recalled to
+        // RECONNECT_REQUIRED, and the operator gets an actionable order-access reason
+        // instead of the old INVALID_CREDENTIAL misdiagnosis or a silent PREPARING.
+        SellerAccount acc = naverAccount(ChannelStatus.PENDING);
+        vault.store(org, acc.getId(), "API", "OAUTH2",
+                Map.of("client_id", "test-client-id", "client_secret", clientSecret), null, null, null);
+        http.enqueue(FakeNaverHttpClient.tokenOk("naver-access-token", 3000));
+        http.enqueue(FakeNaverHttpClient.tokenOk("naver-probe-token", 3000));
+        http.enqueue(new NaverHttpClient.Response(403,
+                "{\"code\":\"GW.FORBIDDEN\",\"message\":\"권한이 없습니다\"}", Map.of()));
+
+        ConnectionTestResultView result = service.testConnection(org, acc.getId());
+
+        assertThat(result.status()).isEqualTo("FAILED");
+        assertThat(result.reasonCode()).isEqualTo("ORDER_ACCESS_DENIED");
+        assertThat(result.message()).contains("주문 API");
+        // Credential is fine → status must not move to RECONNECT_REQUIRED (nor PREPARING).
+        assertThat(sellerAccounts.findById(acc.getId()).orElseThrow().getConnectionStatus())
+                .isEqualTo(ChannelStatus.PENDING);
     }
 
     @Test

@@ -403,6 +403,15 @@ public class CollectControlService {
         if (VerifyOutcome.REASON_TEMPORARY_PROVIDER_ERROR.equals(reasonCode)) {
             return "일시적인 채널 응답 오류입니다.";
         }
+        if (VerifyOutcome.REASON_PERMISSION_INSUFFICIENT.equals(reasonCode)) {
+            return "연결에 필요한 주문 API 권한이 부족할 수 있습니다. 애플리케이션의 주문 API 그룹 권한을 확인해 주세요.";
+        }
+        if (VerifyOutcome.REASON_CALL_ENVIRONMENT_MISMATCH.equals(reasonCode)) {
+            return "허용된 호출 환경(호출 IP)과 일치하지 않을 수 있습니다. 애플리케이션의 API 호출 IP 등록을 확인해 주세요.";
+        }
+        if (VerifyOutcome.REASON_ORDER_ACCESS_DENIED.equals(reasonCode)) {
+            return "주문 API 접근이 거부되었습니다. 애플리케이션의 주문 API 그룹 권한과 API 호출 IP 등록을 확인해 주세요.";
+        }
         // PROVIDER_UNAVAILABLE and any unknown code → generic safe failure.
         return "채널 API 연결 확인에 실패했습니다.";
     }
