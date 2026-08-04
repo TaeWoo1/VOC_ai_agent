@@ -4,7 +4,7 @@
 // cannot guide, and never renders a credential/selector/url/account id. The bridge (useBridge) is mocked so the
 // component renders with no live bridge.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render } from "@testing-library/react";
+import { render, act } from "@testing-library/react";
 import { screen, userEvent } from "../../test/renderWithRouter";
 import { expectNoAxeViolations } from "../../test/axe";
 import type { BridgeState } from "../../lib/bridge/bridgeClient";
@@ -20,6 +20,39 @@ vi.mock("../../hooks/useBridge", () => ({
 }));
 
 import { NaverIssuanceGuidedWalkthrough } from "./NaverIssuanceGuidedWalkthrough";
+import type { GuidedIssuanceRuntime } from "../../lib/actionWindow/issuance/issuanceRuntime";
+
+/** A fake issuance host runtime — records ensureStarted() (the START_RUN proxy) and lets a test publish views. */
+function fakeHost() {
+  const listeners = new Set<(v: ActionWindowRunView | null) => void>();
+  let latest: ActionWindowRunView | null = null;
+  let ensureCalls = 0;
+  const sent: string[] = [];
+  const runtime = {
+    view: () => latest,
+    subscribe(l: (v: ActionWindowRunView | null) => void) {
+      listeners.add(l);
+      return () => listeners.delete(l);
+    },
+    ensureStarted() {
+      ensureCalls += 1;
+    },
+    send(t: string) {
+      sent.push(t);
+    },
+    resync() {},
+    dispose() {},
+  } as unknown as GuidedIssuanceRuntime;
+  return {
+    runtime,
+    ensureCalls: () => ensureCalls,
+    sent,
+    publish(v: ActionWindowRunView | null) {
+      latest = v;
+      for (const l of [...listeners]) l(v);
+    },
+  };
+}
 
 /** A sanitized issuance run view — copy KEYS only, no prose/selector/url/credential/account id. */
 function issuanceRun(over: Partial<ActionWindowRunView> = {}): ActionWindowRunView {
@@ -148,5 +181,40 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
       <NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} run={issuanceRun()} onCommand={vi.fn()} />,
     );
     await expectNoAxeViolations(container);
+  });
+
+  describe("live host wiring (no run prop → the shared issuance host)", () => {
+    it("does NOT attach (START_RUN 0) before the agent is paired", () => {
+      h.bridge = { phase: "unpaired", maybeNeedsLocalNetworkAccess: false } as BridgeState;
+      const host = fakeHost();
+      render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} hostRuntime={host.runtime} />);
+      expect(host.ensureCalls()).toBe(0);
+    });
+
+    it("attaches exactly once once paired (START_RUN proxy fires once), even across a re-render", () => {
+      const host = fakeHost(); // bridge defaults to paired in beforeEach
+      const { rerender } = render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} hostRuntime={host.runtime} />);
+      expect(host.ensureCalls()).toBe(1);
+      rerender(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} hostRuntime={host.runtime} />);
+      expect(host.ensureCalls()).toBe(1);
+    });
+
+    it("a controlled `run` prop bypasses the host entirely (no attach)", () => {
+      const host = fakeHost();
+      render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} run={issuanceRun()} hostRuntime={host.runtime} />);
+      expect(host.ensureCalls()).toBe(0);
+    });
+
+    it("renders the AW surfaces from a host-published view, and forwards commands to the host", async () => {
+      const host = fakeHost();
+      render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} hostRuntime={host.runtime} />);
+      // Before any frame: paired, no run yet → the preparing line.
+      expect(screen.getByText("도우미가 연결됐어요. NAVER API 센터 안내를 준비하고 있어요.")).toBeInTheDocument();
+      // A published view drives the shared timeline + controls.
+      act(() => host.publish(issuanceRun()));
+      expect(screen.getByText("애플리케이션 만들기 (스토어당 1개)")).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "확인 완료" }));
+      expect(host.sent).toContain("REQUEST_STEP_RECHECK");
+    });
   });
 });

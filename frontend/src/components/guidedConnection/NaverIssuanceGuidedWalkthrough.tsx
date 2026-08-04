@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useBridge } from "../../hooks/useBridge";
 import type { ActionWindowRunView, CommandType } from "../../lib/actionWindow/contract";
 import { blockerView } from "../../lib/actionWindow/copy";
@@ -5,6 +6,8 @@ import { OperationRunTimeline } from "../actionWindow/OperationRunTimeline";
 import { ActionWindowControlPanel } from "../actionWindow/ActionWindowControlPanel";
 import { BlockerNotice } from "../actionWindow/BlockerNotice";
 import { AgentPairingPanel } from "../reviewImport/AgentPairingPanel";
+import { useGuidedIssuance } from "../../lib/actionWindow/issuance/useGuidedIssuance";
+import type { GuidedIssuanceRuntime } from "../../lib/actionWindow/issuance/issuanceRuntime";
 import type { GuidedEvent } from "../../lib/guidedConnection";
 
 /**
@@ -33,25 +36,38 @@ import type { GuidedEvent } from "../../lib/guidedConnection";
  * `credential_issued` (the secure-entry hand-off), NOT a stored credential. This component never renders or
  * requests a credential value, and it surfaces no selector, url, or account id — only sanitized copy keys/codes.
  *
- * ## Offline-testable
+ * ## Live host + offline-testable
  *
- * The issuance run view is a prop (`run`), fed by fixture views in tests and by a live session in production; the
- * component does not require a reachable bridge to render. `useBridge` is mocked in the component's own tests.
+ * In production the run view is sourced from the live issuance host (`useGuidedIssuance`): once the agent is
+ * paired the component attaches ONCE, the host resyncs and sends `START_RUN` exactly once (or reattaches to a
+ * run already in flight after a refresh), and its published `ActionWindowRunView`s drive these surfaces. The host
+ * is the SHARED infrastructure for both onboarding paths — the runtime decides open-vs-create by observing the
+ * API center, so this component carries no path. A supplied `run` prop (fixture tests) or `hostRuntime` (a test
+ * seam runtime) overrides the live host, so the component renders with no reachable bridge; `useBridge` is
+ * likewise mocked in the component's own tests.
  */
 export interface NaverIssuanceGuidedWalkthroughProps {
   /** Journey events (the text fallback + the completion hand-off). Never carries a credential. */
   dispatch: (event: GuidedEvent) => void;
-  /** The sanitized issuance run view, or null before a run is being hosted. Fixture-fed in tests. */
+  /**
+   * CONTROLLED seam. When a `run` prop is supplied (including `null`) the component renders that view and does
+   * NOT open a live host — this is the fixture path the component's own tests drive. When the prop is OMITTED
+   * (production), the run is sourced from the live issuance host (`useGuidedIssuance`), which attaches once the
+   * agent is paired. `undefined` ⇒ live; `null`/a view ⇒ controlled.
+   */
   run?: ActionWindowRunView | null;
-  /** Forward an operator command to the hosted run. Only ever called with a command from `allowedCommands`. */
+  /** Forward an operator command to the hosted run (controlled seam). Live mode forwards to the host instead. */
   onCommand?: (type: CommandType) => void;
+  /** Test seam: an already-built host runtime, so a component test needs no bridge socket. */
+  hostRuntime?: GuidedIssuanceRuntime;
   busy?: boolean;
 }
 
 export function NaverIssuanceGuidedWalkthrough({
   dispatch,
-  run = null,
+  run,
   onCommand,
+  hostRuntime,
   busy,
 }: NaverIssuanceGuidedWalkthroughProps) {
   // The bridge is confined to this component (this phase). Enabled unconditionally here so pairing can begin;
@@ -61,7 +77,33 @@ export function NaverIssuanceGuidedWalkthrough({
   const paired = phase === "paired";
   // The agent cannot guide and pairing will not fix it → the seller should switch to text. `incompatible_version`
   // needs an app update (AgentPairingPanel renders nothing for it); a denial/revocation is an explicit refusal.
-  const cannotGuide = phase === "incompatible_version" || phase === "pairing_denied" || phase === "revoked";
+  const cannotPair = phase === "incompatible_version" || phase === "pairing_denied" || phase === "revoked";
+
+  // Live issuance run host — the shared host for BOTH onboarding paths (the runtime picks open-vs-create by
+  // observing the API center, so the host carries no path). Inert until `attach()` is called.
+  const controlled = run !== undefined;
+  const issuance = useGuidedIssuance(hostRuntime);
+  const attach = issuance.attach;
+  // Attach exactly once, and only once the agent is paired — a ref keeps StrictMode's double-invoke and any
+  // re-render from opening a second socket or starting a second walk (the host also guards START_RUN itself).
+  const attachedRef = useRef(false);
+  useEffect(() => {
+    if (controlled || !paired || attachedRef.current) return;
+    attachedRef.current = true;
+    void attach();
+  }, [controlled, paired, attach]);
+
+  // The view and command sink: the controlled prop in fixture mode, the live host otherwise. The host publishes
+  // the v2-typed run view; the shared AW surfaces here consume the v1 shape. v2 is structurally v1 plus an
+  // optional `intent`, and every enum value an issuance run uses is one these surfaces already render (the
+  // fixture tests build v1 issuance views), so the view is adapted with a single documented cast — the same
+  // codec-equivalence `issuanceSession.asV2Transport` rests on, in the one place downstream needs v1.
+  const liveView = issuance.view as unknown as ActionWindowRunView | null;
+  const effectiveRun = controlled ? (run ?? null) : liveView;
+  const effectiveCommand = controlled ? onCommand : issuance.send;
+  // The host refused (wrong carrier / unreachable / START_RUN rejected) → guidance can't run; point at text.
+  const hostRefused = !controlled && issuance.unavailable !== null;
+  const cannotGuide = cannotPair || hostRefused;
 
   const toText = () => dispatch({ type: "APPLICATION_ISSUANCE_MODE", mode: "text" });
 
@@ -85,26 +127,26 @@ export function NaverIssuanceGuidedWalkthrough({
       )}
 
       {/* Paired but no run yet: the agent is connected; the guidance run is starting. */}
-      {paired && !run && (
+      {paired && !effectiveRun && !cannotGuide && (
         <p className="rounded-xl bg-canvas px-4 py-3 text-sm text-muted break-keep" role="status">
           도우미가 연결됐어요. NAVER API 센터 안내를 준비하고 있어요.
         </p>
       )}
 
       {/* A hosted run → the shared Action Window surfaces. */}
-      {run && (
+      {effectiveRun && (
         <>
-          <OperationRunTimeline run={run} />
-          {run.blocker && (
+          <OperationRunTimeline run={effectiveRun} />
+          {effectiveRun.blocker && (
             <BlockerNotice
-              title={blockerView(run.blocker.code).title}
-              body={blockerView(run.blocker.code).body}
-              recoverable={run.blocker.recoverable}
+              title={blockerView(effectiveRun.blocker.code).title}
+              body={blockerView(effectiveRun.blocker.code).body}
+              recoverable={effectiveRun.blocker.recoverable}
               variant="standalone"
             />
           )}
-          <ActionWindowControlPanel run={run} onCommand={(type) => onCommand?.(type)} />
-          {run.status === "COMPLETED" && (
+          <ActionWindowControlPanel run={effectiveRun} onCommand={(type) => effectiveCommand?.(type)} />
+          {effectiveRun.status === "COMPLETED" && (
             <button
               type="button"
               className="btn-primary block w-full"
