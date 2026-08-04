@@ -16,8 +16,9 @@
  *    terminal — where "completed" means the GUIDANCE finished, not that a credential was stored.
  *  - **It has a one-time branch at step 2.** A seller with an existing application OPENS it; a seller with
  *    none CREATES one. The branch changes only step 2's copy and highlighted control, never the step count —
- *    `totalSteps` is a fixed 5 either way, exactly like import's always-present `CONFIRM_RANGE` slot, so a
- *    frontend showing "5단계 중 2" never sees the total shift under it.
+ *    `totalSteps` is a fixed 6 either way, exactly like import's always-present `CONFIRM_RANGE` slot, so a
+ *    frontend showing "6단계 중 2" never sees the total shift under it. (The credential section is two steps —
+ *    Application ID, then Application Secret — so the total is 6, still branch-invariant.)
  *  - **Its parks recover by re-probing.** A login gate, a control it cannot find, or a page it did not expect
  *    all PARK recoverably; a `REQUEST_STEP_RECHECK` re-reads the page category from the top (mirroring import's
  *    `SESSION_BLOCKED → PREPARE`). None of them is a failure.
@@ -45,14 +46,16 @@ export type IssuanceStage =
   | "guiding_create"
   /** Seller barrier: they press the API-group control on the application detail page. */
   | "guiding_api_group"
+  /** Seller barrier: they read + COPY the Application ID (its highlighted row). The runtime reads no value. */
+  | "guiding_application_id"
+  /** Seller barrier: they view + COPY the Application Secret (its highlighted view/copy controls). No value read. */
+  | "guiding_application_secret"
   /**
    * Seller barrier (existing branch): guided by TEXT ("open your app yourself"), they open their existing
    * application to reach its detail page. The runtime observes the `app_list → app_detail` navigation and
    * verifies the landing page — it highlights no specific app row (that would need the app's identity).
    */
   | "guiding_app_detail"
-  /** Seller barrier: they reach the issued Application ID / Secret to copy them. */
-  | "guiding_credentials"
   /** Seller barrier: they return to SellerOps to paste the credential into the masked form. */
   | "return_to_sellerops"
   /** Terminal: the guidance walk finished (NOT that a credential was stored or a connection made). */
@@ -71,7 +74,8 @@ export const ISSUANCE_BARRIER_STAGES: readonly IssuanceStage[] = [
   "guiding_create",
   "guiding_app_detail",
   "guiding_api_group",
-  "guiding_credentials",
+  "guiding_application_id",
+  "guiding_application_secret",
   "return_to_sellerops",
 ];
 
@@ -91,7 +95,7 @@ export function isIssuanceTerminal(stage: IssuanceStage): boolean {
   return ISSUANCE_TERMINAL_STAGES.includes(stage);
 }
 
-/* ────────────────────────────── the fixed 5-step plan ────────────────────────────── */
+/* ────────────────────────────── the fixed 6-step plan ────────────────────────────── */
 
 export interface IssuanceStepMeta {
   stepNumber: number;
@@ -104,11 +108,12 @@ export interface IssuanceStepMeta {
 export const ISSUANCE_RUN_COPY_KEY = "actionWindow.issuance.run";
 
 /**
- * The step plan. Exactly five steps, always — the existing-vs-empty branch reuses the step-2 slot rather
+ * The step plan. Exactly SIX steps, always — the existing-vs-empty branch reuses the step-2 slot rather
  * than adding or removing one, so `totalSteps` is stable from the frontend's first view onward.
  *
  * Step 2 is the ONLY branch: an existing application is OPENED (`open_app`), an absent one is CREATED
- * (`create_app`). Same `stepId`, same slot — different copy key and highlighted control.
+ * (`create_app`). Same `stepId`, same slot — different copy key and highlighted control. Steps 4 and 5 are the
+ * credential section split in two: copy the Application ID (step 4), then view + copy the Secret (step 5).
  */
 export function issuanceStepPlan(hasExistingApp: boolean): readonly IssuanceStepMeta[] {
   return [
@@ -117,12 +122,14 @@ export function issuanceStepPlan(hasExistingApp: boolean): readonly IssuanceStep
       ? { stepNumber: 2, stepId: "aw.issuance_open_or_create_app", copyKey: "actionWindow.issuance.openApp", mode: "ACTION_WINDOW", copyParams: { targetKind: "open_app" } }
       : { stepNumber: 2, stepId: "aw.issuance_open_or_create_app", copyKey: "actionWindow.issuance.createApp", mode: "ACTION_WINDOW", copyParams: { targetKind: "create_app" } },
     { stepNumber: 3, stepId: "aw.issuance_api_group", copyKey: "actionWindow.issuance.apiGroup", mode: "ACTION_WINDOW", copyParams: { targetKind: "api_group" } },
-    { stepNumber: 4, stepId: "aw.issuance_credentials", copyKey: "actionWindow.issuance.credentials", mode: "ACTION_WINDOW", copyParams: { targetKind: "credentials" } },
-    { stepNumber: 5, stepId: "aw.issuance_return", copyKey: "actionWindow.issuance.return", mode: "ACTION_WINDOW", copyParams: { targetKind: "return" } },
+    // The credential section is TWO steps: copy the Application ID, then view+copy the Application Secret.
+    { stepNumber: 4, stepId: "aw.issuance_application_id", copyKey: "actionWindow.issuance.applicationId", mode: "ACTION_WINDOW", copyParams: { targetKind: "application_id" } },
+    { stepNumber: 5, stepId: "aw.issuance_application_secret", copyKey: "actionWindow.issuance.applicationSecret", mode: "ACTION_WINDOW", copyParams: { targetKind: "application_secret" } },
+    { stepNumber: 6, stepId: "aw.issuance_return", copyKey: "actionWindow.issuance.return", mode: "ACTION_WINDOW", copyParams: { targetKind: "return" } },
   ];
 }
 
-/** The fixed total — five, whichever branch step 2 takes. */
+/** The fixed total — six, whichever branch step 2 takes. */
 export const ISSUANCE_TOTAL_STEPS = issuanceStepPlan(false).length;
 
 /** Step metadata at a 1-based index, clamped so a park/terminal view never reads past the plan. */
@@ -147,7 +154,8 @@ export function issuanceStageToRunStatus(stage: IssuanceStage): RunStatus {
     case "guiding_create":
     case "guiding_app_detail":
     case "guiding_api_group":
-    case "guiding_credentials":
+    case "guiding_application_id":
+    case "guiding_application_secret":
     case "return_to_sellerops":
     case "target_not_found":
     case "page_mismatch":
@@ -172,7 +180,8 @@ export function issuanceStageToStepStatus(stage: IssuanceStage): StepStatus {
     case "guiding_create":
     case "guiding_app_detail":
     case "guiding_api_group":
-    case "guiding_credentials":
+    case "guiding_application_id":
+    case "guiding_application_secret":
     case "return_to_sellerops":
     case "target_not_found":
     case "page_mismatch":

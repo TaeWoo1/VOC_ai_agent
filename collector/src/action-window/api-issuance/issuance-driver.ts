@@ -19,10 +19,14 @@ import type { ApiCenterPageCategory, ApiCenterSignals, ApiCenterStructuralCensus
 import type { LocateResult } from "../engine";
 import type { IssuanceStage } from "./issuance-stages";
 
-/** A control the runtime may highlight and then watch. Never a selector — a semantic role. */
-export type IssuanceTarget = "create_app" | "open_app" | "api_group" | "credentials" | "return";
+/**
+ * A control the runtime may highlight and then watch. Never a selector — a semantic role. The credential
+ * section is TWO separate steps: `application_id` (highlight the ID row) then `application_secret` (highlight
+ * the Secret view/copy controls) — the seller copies each value itself; the runtime reads neither.
+ */
+export type IssuanceTarget = "create_app" | "open_app" | "api_group" | "application_id" | "application_secret" | "return";
 
-export const ISSUANCE_TARGETS: readonly IssuanceTarget[] = ["create_app", "open_app", "api_group", "credentials", "return"];
+export const ISSUANCE_TARGETS: readonly IssuanceTarget[] = ["create_app", "open_app", "api_group", "application_id", "application_secret", "return"];
 
 /**
  * The ONE target for which SellerOps observes a real NAVER click / page TRANSITION: opening (or creating and
@@ -41,7 +45,7 @@ export const ISSUANCE_TRANSITION_OBSERVE_TARGET: IssuanceTarget = "open_app";
  * the app themselves, then presses "다음" — the following `api_group` checkpoint's own locate gates that they
  * actually reached the detail page. `return` is a guidance-only checkpoint (no NAVER section to locate).
  */
-export const ISSUANCE_CHECKPOINT_TARGETS: readonly IssuanceTarget[] = ["create_app", "api_group", "credentials", "return"];
+export const ISSUANCE_CHECKPOINT_TARGETS: readonly IssuanceTarget[] = ["create_app", "api_group", "application_id", "application_secret", "return"];
 
 /** True for a same-page viewport checkpoint (advance on operator "다음"); false only for {@link ISSUANCE_TRANSITION_OBSERVE_TARGET}. */
 export function isCheckpointTarget(target: IssuanceTarget): boolean {
@@ -56,7 +60,8 @@ export const TARGET_BARRIER_STAGE: Readonly<Record<IssuanceTarget, IssuanceStage
   create_app: "guiding_create",
   open_app: "guiding_app_detail",
   api_group: "guiding_api_group",
-  credentials: "guiding_credentials",
+  application_id: "guiding_application_id",
+  application_secret: "guiding_application_secret",
   return: "return_to_sellerops",
 };
 

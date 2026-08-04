@@ -391,10 +391,10 @@ describe("NaverIssuanceDriver over a fake Page — the calibrated NEW-app (creat
     const step2 = io.views().find((v) => v.currentStep?.stepNumber === 2)?.currentStep;
     expect(step2?.copyParams?.targetKind).toBe("create_app");
 
-    // Every highlighted target ref is an opaque 16-hex — never a selector or value. Four barriers highlight:
-    // create_app, api_group, credentials, and the guidance-only `return`.
+    // Every highlighted target ref is an opaque 16-hex — never a selector or value. Five barriers highlight:
+    // create_app, api_group, application_id, application_secret, and the guidance-only `return`.
     const refs = io.events().filter((e) => e.type === "TARGET_HIGHLIGHTED").map((e) => e.payload.targetRef as string);
-    expect(refs.length).toBe(4);
+    expect(refs.length).toBe(5);
     for (const ref of refs) expect(ref).toMatch(HEX16);
 
     // AUTOMATIC ACTION = 0: the driver never invoked the page's click.
@@ -481,7 +481,8 @@ describe("NaverIssuanceDriver — the EXISTING-app branch (open_app = navigation
     // only fixed-label locates are for api_group + credentials, plus the guidance overlays.
     const highlightedSteps = io.events().filter((e) => e.type === "TARGET_HIGHLIGHTED").map((e) => e.payload.stepId);
     expect(highlightedSteps).toContain("aw.issuance_api_group");
-    expect(highlightedSteps).toContain("aw.issuance_credentials");
+    expect(highlightedSteps).toContain("aw.issuance_application_id");
+    expect(highlightedSteps).toContain("aw.issuance_application_secret");
     expect(page.scripts.some((s) => s.includes("issuance-structural"))).toBe(false);
     expect(page.clickCalls).toBe(0);
   });

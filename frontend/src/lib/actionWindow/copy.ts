@@ -29,7 +29,8 @@ const COPY: Record<string, string> = {
   "actionWindow.issuance.createApp": "애플리케이션 만들기 (스토어당 1개)",
   "actionWindow.issuance.openApp": "발급한 애플리케이션 열기",
   "actionWindow.issuance.apiGroup": "주문·판매자 관련 API 그룹 추가",
-  "actionWindow.issuance.credentials": "애플리케이션 ID·시크릿 확인",
+  "actionWindow.issuance.applicationId": "애플리케이션 ID 복사",
+  "actionWindow.issuance.applicationSecret": "애플리케이션 시크릿 확인·복사",
   "actionWindow.issuance.return": "SellerOps로 돌아와 입력",
 };
 
@@ -50,8 +51,10 @@ const ISSUANCE_STEP_DETAIL: Record<string, string> = {
     "이미 만들어 둔 애플리케이션의 상세 화면을 여세요. 새 애플리케이션을 만들지 마세요 — 스토어당 1개만 가능하고 삭제할 수 없습니다.",
   "actionWindow.issuance.apiGroup":
     "이 애플리케이션에 상품·주문(판매자) 관련 API 그룹이 포함돼 있는지 확인하고, 없으면 추가하세요. 정확한 그룹 이름은 화면마다 다를 수 있으니 '주문'·'판매자'가 포함된 항목을 찾아 선택하면 됩니다.",
-  "actionWindow.issuance.credentials":
-    "애플리케이션 상세에서 ① Application ID를 직접 복사하고, ② Application Secret(클라이언트 시크릿)을 직접 복사하세요. SellerOps는 이 값도, 클립보드도, 화면도 읽지 않습니다 — 복사는 직접 하시고, 다음 화면의 보안 입력란에 직접 붙여넣으세요. 시크릿 확인이 어려우면 재발급이 필요할 수 있습니다.",
+  "actionWindow.issuance.applicationId":
+    "애플리케이션 ID를 복사해 주세요. 표시된 애플리케이션 ID 행에서 값을 직접 복사하시면 됩니다. SellerOps는 이 값을 읽지 않습니다 — 복사는 직접 하시고, 마지막에 SellerOps 보안 입력란에 붙여넣으세요.",
+  "actionWindow.issuance.applicationSecret":
+    "애플리케이션 시크릿을 확인하고 복사해 주세요. 표시된 '보기/복사' 컨트롤에서 시크릿을 직접 확인·복사하시면 됩니다. SellerOps는 시크릿 값도, 클립보드도 읽지 않습니다. 확인이 어려우면 시크릿 재발급이 필요할 수 있습니다.",
   "actionWindow.issuance.return":
     "두 값을 복사했다면 SellerOps로 돌아가 주세요. 안내가 끝나면 연결 정보 입력 화면으로 이동합니다.",
 };

@@ -63,7 +63,8 @@ export const CANDIDATE_TARGET_SELECTORS: Readonly<Record<IssuanceTarget, string>
   create_app: "[data-aw-target='create_app']",
   open_app: "[data-aw-target='open_app']",
   api_group: "[data-aw-target='api_group']",
-  credentials: "[data-aw-target='credentials']",
+  application_id: "[data-aw-target='application_id']",
+  application_secret: "[data-aw-target='application_secret']",
   return: "[data-aw-target='return']",
 };
 

@@ -67,7 +67,8 @@ describe("FE-owned copy registry", () => {
       "actionWindow.issuance.createApp",
       "actionWindow.issuance.openApp",
       "actionWindow.issuance.apiGroup",
-      "actionWindow.issuance.credentials",
+      "actionWindow.issuance.applicationId",
+      "actionWindow.issuance.applicationSecret",
       "actionWindow.issuance.return",
     ] as const;
 
@@ -80,14 +81,18 @@ describe("FE-owned copy registry", () => {
       }
     });
 
-    it("the api-group detail names the order/seller groups; credentials detail says copy BOTH values, read NONE", () => {
+    it("api-group names the order/seller groups; the ID + Secret are now SEPARATE steps, each read-free", () => {
       expect(issuanceStepDetail("actionWindow.issuance.apiGroup")).toMatch(/주문/);
       expect(issuanceStepDetail("actionWindow.issuance.apiGroup")).toMatch(/판매자/);
-      const cred = issuanceStepDetail("actionWindow.issuance.credentials") ?? "";
-      expect(cred).toMatch(/Application ID/); // copy the ID directly
-      expect(cred).toMatch(/Application Secret|시크릿/); // copy the Secret directly
-      expect(cred).toMatch(/직접 복사/);
-      expect(cred).toMatch(/읽지 않/); // SellerOps reads no value / clipboard / screen
+      // ID step: copy the ID, SellerOps reads no value.
+      const id = issuanceStepDetail("actionWindow.issuance.applicationId") ?? "";
+      expect(id).toMatch(/애플리케이션 ID를 복사/);
+      expect(id).toMatch(/이 값을 읽지 않습니다/);
+      expect(id).not.toMatch(/시크릿/); // the ID step must not conflate the Secret
+      // Secret step: view + copy the Secret, SellerOps reads no value / clipboard.
+      const sec = issuanceStepDetail("actionWindow.issuance.applicationSecret") ?? "";
+      expect(sec).toMatch(/시크릿을 확인하고 복사/);
+      expect(sec).toMatch(/시크릿 값도, 클립보드도 읽지 않습니다/);
       const ret = issuanceStepDetail("actionWindow.issuance.return") ?? "";
       expect(ret).toMatch(/두 값을 복사했다면/);
     });

@@ -22,7 +22,7 @@ function tagScript(target: IssuanceHighlightTarget): string {
 
 describe("fixed-label tag ancestor-promotion — script text (hermetic)", () => {
   it("credentials promotes the tag to el.closest('tr'), falling back to the label", () => {
-    const s = tagScript("credentials");
+    const s = tagScript("application_id");
     expect(s).toContain('el.closest("tr")');
     // Fallback: the ancestor is applied only when found; otherwise the label cell keeps the tag.
     expect(s).toContain("var tagEl = el;");
@@ -41,7 +41,7 @@ describe("fixed-label tag ancestor-promotion — script text (hermetic)", () => 
   });
 
   it("the anti-drift sig stays computed on the LABEL el, never the promoted ancestor", () => {
-    const s = tagScript("credentials");
+    const s = tagScript("application_id");
     // sig is derived from `el` (the label) — not `tagEl`/`anc` — so the locate↔highlight signature is stable.
     expect(s).toContain("sig(el.tagName + ':' + idx, 'children:' + el.childElementCount)");
     expect(s.includes("sig(tagEl")).toBe(false);
@@ -49,7 +49,7 @@ describe("fixed-label tag ancestor-promotion — script text (hermetic)", () => 
   });
 
   it("value-free: promotion reads STRUCTURE only — no <td> value / innerText / value read is added", () => {
-    const s = tagScript("credentials");
+    const s = tagScript("application_id");
     // The only text read is the existing label comparison via `textContent` in `accName` (the label, not the value).
     // The promotion path introduces no `.value`, `.innerText`, `.innerHTML`, or child-cell text read.
     expect(/\.value\b/.test(s)).toBe(false);
@@ -88,7 +88,7 @@ describe.skipIf(!RUN)("fixed-label tag ancestor-promotion — real Chromium DOM"
     try {
       const page = await ctx.newPage();
       await page.setContent(KV_TABLE);
-      const res = (await page.evaluate(tagScript("credentials"))) as { count: number; sig?: string };
+      const res = (await page.evaluate(tagScript("application_id"))) as { count: number; sig?: string };
       expect(res.count).toBe(1);
       expect(typeof res.sig).toBe("string");
       // The tag landed on the ROW, not the label cell or the value cell.
@@ -107,7 +107,7 @@ describe.skipIf(!RUN)("fixed-label tag ancestor-promotion — real Chromium DOM"
     try {
       const page = await ctx.newPage();
       await page.setContent(BARE_LABEL);
-      const res = (await page.evaluate(tagScript("credentials"))) as { count: number };
+      const res = (await page.evaluate(tagScript("application_id"))) as { count: number };
       expect(res.count).toBe(1);
       // No <tr> ancestor → tag stays on the matched label element, never silently dropped.
       expect(await page.evaluate(() => document.querySelector("[data-aw-target]")?.id)).toBe("lbl");

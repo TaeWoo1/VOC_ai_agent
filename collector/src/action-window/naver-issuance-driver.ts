@@ -37,7 +37,7 @@
  *     the seller's own `app_list → app_detail` navigation ({@link NaverIssuanceDriver.observeUserAction} polls
  *     the sanitized page CATEGORY and returns once the list is left). No NAVER control is located, tagged, or
  *     highlighted; the engine verifies the seller reached the detail page before reusing the calibrated
- *     `api_group` / `credentials` highlights. Its locate/highlight return a fixed synthetic guidance signature.
+ *     `api_group` / `application_id` / `application_secret` highlights. Its locate/highlight return a fixed synthetic guidance signature.
  *   - **`return` is guidance-only** — never a located NAVER control. Its locate/highlight show the "return to
  *     SellerOps" overlay and return a fixed, synthetic guidance signature (not derived from any page element).
  *   - `CANDIDATE_APP_ENTRY_SELECTOR` remains a `LIVE_DOM_CALIBRATION_PENDING` COUNT-only hypothesis (used to
@@ -221,8 +221,9 @@ const OVERLAY_STEP: Readonly<Record<IssuanceTarget, number>> = {
   create_app: 2,
   open_app: 2,
   api_group: 3,
-  credentials: 4,
-  return: 5,
+  application_id: 4,
+  application_secret: 5,
+  return: 6,
 };
 
 /**
@@ -234,7 +235,8 @@ const OPERATOR_STEP_LABELS: Readonly<Record<IssuanceTarget, string>> = {
   create_app: "표시된 'API 애플리케이션 등록' 위치입니다. 직접 생성한 뒤 SellerOps에서 '다음'을 누르세요.",
   open_app: "기존 API 애플리케이션을 직접 여세요. (SellerOps가 상세 화면 진입을 관찰합니다.)",
   api_group: "표시된 '커머스 API' 그룹 위치를 확인한 뒤 SellerOps에서 '다음'을 누르세요.",
-  credentials: "표시된 애플리케이션 ID/Secret 위치를 확인한 뒤 SellerOps에서 '다음'을 누르세요 (도구는 값을 읽지 않습니다).",
+  application_id: "표시된 애플리케이션 ID 행을 직접 복사한 뒤 SellerOps에서 '다음'을 누르세요 (도구는 값을 읽지 않습니다).",
+  application_secret: "표시된 시크릿 보기/복사 위치에서 직접 확인·복사한 뒤 SellerOps에서 '다음'을 누르세요 (도구는 값을 읽지 않습니다).",
   return: "SellerOps로 돌아와 '다음'을 누르세요.",
 };
 

@@ -9,7 +9,7 @@
  * credential value, or a bare coordinate. NAVER's API-center controls expose NO aria-label / id / name (the
  * run-#3 census proved it), so a fixed *label* is the only stable, value-free way to resolve them.
  *
- * **Single source of truth (no drift).** The three live-confirmed locators are DERIVED from the visual-recon
+ * **Single source of truth (no drift).** The four live-confirmed locators are DERIVED from the visual-recon
  * adopted set ({@link ADOPTED_TARGET_IDS} / {@link VISUAL_RECON_LABEL_PROBES}) — the same `candidateQuery` +
  * `exactText` that was measured at `matchCount===1` on the real API center (runs #4/#5/#6). A locator can never
  * drift from the evidence that justified it, and {@link evaluateIssuanceHighlightSelectors} re-scores each one
@@ -26,9 +26,9 @@
  *     애플리케이션을 직접 열어주세요") and the driver OBSERVES the seller's own `app_list → app_detail`
  *     navigation. It is a {@link ISSUANCE_NAVIGATION_TARGET}: guidance + observed transition, never a
  *     highlighted control. Once the detail page is reached, the walk reuses the calibrated `api_group` /
- *     `credentials` fixed-label highlights — so BOTH onboarding paths are `ready_candidate`.
+ *     `application_id` / `application_secret` fixed-label highlights — so BOTH onboarding paths are `ready_candidate`.
  *   - **These are the driver's fixed-label locators — the `SELECTORS_CALIBRATED` flag is owned by
- *     `api-center-adapter`, not here.** That flag is `true`: the three live_confirmed targets were live-probed
+ *     `api-center-adapter`, not here.** That flag is `true`: the live_confirmed targets were live-probed
  *     at `matchCount===1` by the read-only `API_ISSUANCE_SELECTOR_PROBE` phase (twice), and they are the only
  *     highlighted controls on either path. This module never reads or writes the flag.
  *
@@ -42,9 +42,9 @@ import type { IssuanceTarget } from "../api-issuance/issuance-driver";
 /**
  * The issuance targets that are a REAL, highlightable API-center control. `open_app` is deliberately NOT here:
  * an existing app is opened by NAVIGATION guidance (see {@link ISSUANCE_NAVIGATION_TARGETS}), and `return` is
- * terminal text guidance, so the only highlighted controls are the three fixed-label ones below.
+ * terminal text guidance, so the only highlighted controls are the four fixed-label ones below (create_app, api_group, application_id, application_secret).
  */
-export const ISSUANCE_HIGHLIGHT_TARGETS = ["create_app", "api_group", "credentials"] as const satisfies readonly IssuanceTarget[];
+export const ISSUANCE_HIGHLIGHT_TARGETS = ["create_app", "api_group", "application_id", "application_secret"] as const satisfies readonly IssuanceTarget[];
 export type IssuanceHighlightTarget = (typeof ISSUANCE_HIGHLIGHT_TARGETS)[number];
 
 /**
@@ -115,7 +115,8 @@ export interface IssuanceTargetSelectorSpec {
 const DERIVES_FROM: Readonly<Record<IssuanceHighlightTarget, VisualReconTargetId>> = {
   create_app: "app_list.register_application", // 애플리케이션 등록 (register button) — #4/#5
   api_group: "api_group.section", // API 그룹 (section heading) — #4/#5
-  credentials: "credentials.application_id_label", // 애플리케이션 ID (credential section label) — #4/#5
+  application_id: "credentials.application_id_label", // 애플리케이션 ID (label cell → its row) — #4/#5
+  application_secret: "credentials.secret_view_button", // 시크릿 보기 (view control → its row) — #4/#5
 };
 
 /**
@@ -125,14 +126,16 @@ const DERIVES_FROM: Readonly<Record<IssuanceHighlightTarget, VisualReconTargetId
 const TARGET_PATHS: Readonly<Record<IssuanceHighlightTarget, readonly IssuancePath[]>> = {
   create_app: ["new_app"],
   api_group: ["new_app", "existing_app"],
-  credentials: ["new_app", "existing_app"],
+  application_id: ["new_app", "existing_app"],
+  application_secret: ["new_app", "existing_app"],
 };
 
 /** The screen each highlight target sits on (mirrors the visual-recon checkpoints). */
 const TARGET_SCREEN: Readonly<Record<IssuanceHighlightTarget, VisualReconScreen>> = {
   create_app: "app_list",
   api_group: "api_group",
-  credentials: "credentials",
+  application_id: "credentials",
+  application_secret: "credentials",
 };
 
 /**
@@ -143,7 +146,10 @@ const TARGET_SCREEN: Readonly<Record<IssuanceHighlightTarget, VisualReconScreen>
  * no ancestor promotion and their highlight is unchanged.
  */
 const TAG_ANCESTOR: Readonly<Partial<Record<IssuanceHighlightTarget, string>>> = {
-  credentials: "tr",
+  // Both credential targets' fixed labels sit in a key/value/control `<tr>`; tagging the parent row boxes the
+  // whole row (ID label+value; Secret label + view/copy controls) without ever reading a `<td>` value.
+  application_id: "tr",
+  application_secret: "tr",
 };
 
 /** The fixed-label probe for an adopted target — the single source the locator's query+text is reused from. */
@@ -208,9 +214,9 @@ export type PathReadiness = "ready_candidate" | "not_ready";
  * end-to-end Phase-B highlight PROOF — highlighting + observing the operator's own click on a live store — has
  * not yet run; the read-only `API_ISSUANCE_SELECTOR_PROBE` has live-confirmed the fixed-label targets'
  * matchCount=1 (twice) and `SELECTORS_CALIBRATED` is flipped, but the guided walk itself is the last step.
- *   - `new_app` (create_app → api_group → credentials): all highlight targets live_confirmed ⇒ `ready_candidate`.
- *   - `existing_app` (open_app → api_group → credentials): `open_app` is NAVIGATION guidance (no highlight to
- *     calibrate); its two highlight targets (api_group, credentials) are live_confirmed ⇒ `ready_candidate`.
+ *   - `new_app` (create_app → api_group → application_id → application_secret): all highlight targets live_confirmed ⇒ `ready_candidate`.
+ *   - `existing_app` (open_app → api_group → application_id → application_secret): `open_app` is NAVIGATION guidance (no highlight to
+ *     calibrate); its three highlight targets (api_group, application_id, application_secret) are live_confirmed ⇒ `ready_candidate`.
  * A path is `ready_candidate` only when every highlight target it reaches is live_confirmed.
  */
 export function issuancePathReadiness(path: IssuancePath): PathReadiness {

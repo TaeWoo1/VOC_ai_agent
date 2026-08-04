@@ -179,7 +179,7 @@ describe("issuance adapter — stays UNVERIFIED (every rule carries LIVE_DOM_CAL
   });
 
   it("the CANDIDATE selector map is DATA (opaque to the wire) and covers every target", () => {
-    expect(Object.keys(CANDIDATE_TARGET_SELECTORS).sort()).toEqual(["api_group", "create_app", "credentials", "open_app", "return"]);
+    expect(Object.keys(CANDIDATE_TARGET_SELECTORS).sort()).toEqual(["api_group", "application_id", "application_secret", "create_app", "open_app", "return"]);
     for (const sel of Object.values(CANDIDATE_TARGET_SELECTORS)) expect(sel).toContain("data-aw-target");
   });
 });

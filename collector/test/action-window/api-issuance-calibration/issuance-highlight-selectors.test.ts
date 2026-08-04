@@ -26,8 +26,8 @@ import { ISSUANCE_TARGETS } from "../../../src/action-window/api-issuance/issuan
 import { SELECTORS_CALIBRATED } from "../../../src/action-window/api-issuance/api-center-adapter";
 
 describe("issuance highlight-target selector registry", () => {
-  it("covers exactly the 3 highlighted NAVER controls — `open_app` and `return` are guidance-only", () => {
-    expect([...ISSUANCE_HIGHLIGHT_TARGETS]).toEqual(["create_app", "api_group", "credentials"]);
+  it("covers exactly the 4 highlighted NAVER controls — `open_app` and `return` are guidance-only", () => {
+    expect([...ISSUANCE_HIGHLIGHT_TARGETS]).toEqual(["create_app", "api_group", "application_id", "application_secret"]);
     // `open_app` (existing-app step 2) and `return` (final step) are both guidance-only, never highlighted.
     expect([...ISSUANCE_GUIDANCE_ONLY_TARGETS]).toEqual(["open_app", "return"]);
     // Highlight ∪ guidance-only == the whole issuance target set (nothing dropped, nothing double-counted).
@@ -58,20 +58,23 @@ describe("issuance highlight-target selector registry", () => {
     }
   });
 
-  it("promotes ONLY credentials' highlight tag to its parent `<tr>` — create_app/api_group box their own element", () => {
-    // credentials' fixed label is the `<th>애플리케이션 ID</th>` cell of a key/value row; the tag is promoted to
-    // the parent `<tr>` so the overlay boxes the whole row (label + value cell). The ANCHOR is unchanged.
-    expect(selectorSpecFor("credentials").locator.tagAncestor).toBe("tr");
+  it("promotes BOTH credential targets' highlight tag to their parent `<tr>` — create_app/api_group box their own element", () => {
+    // Each credential target's fixed label sits in a key/value/control row; the tag is promoted to the parent
+    // `<tr>` so the overlay boxes the whole row. The ANCHOR is unchanged.
+    expect(selectorSpecFor("application_id").locator.tagAncestor).toBe("tr");
+    expect(selectorSpecFor("application_secret").locator.tagAncestor).toBe("tr");
     // Single-element targets (a button / a heading) have no ancestor promotion — highlight is unchanged.
     expect(selectorSpecFor("create_app").locator.tagAncestor).toBeUndefined();
     expect(selectorSpecFor("api_group").locator.tagAncestor).toBeUndefined();
     // The promotion selector is purely STRUCTURAL — never a value pin / credential token.
-    expect(/\[\s*value\s*=|시크릿|secret|애플리케이션 ID/i.test(selectorSpecFor("credentials").locator.tagAncestor!)).toBe(false);
+    for (const t of ["application_id", "application_secret"] as const) {
+      expect(/\[\s*value\s*=|시크릿|secret|애플리케이션 ID/i.test(selectorSpecFor(t).locator.tagAncestor!)).toBe(false);
+    }
   });
 
   it("uses ONLY fixed NAVER labels — never an app name, credential value, or [value=] pin", () => {
     for (const spec of ISSUANCE_TARGET_SELECTORS) {
-      expect(spec.locator.exactText).toMatch(/애플리케이션 등록|API 그룹|애플리케이션 ID/);
+      expect(spec.locator.exactText).toMatch(/애플리케이션 등록|API 그룹|애플리케이션 ID|보기/);
       // BOTH halves of the locator are pinned: the FIXED label AND the STRUCTURAL candidate query must carry no
       // value pin / credential-value token, so a future edit to either half in the source probe trips a guard.
       for (const half of [spec.locator.exactText, spec.locator.candidateQuery]) {
@@ -84,7 +87,8 @@ describe("issuance highlight-target selector registry", () => {
     const EXPECTED_CANDIDATE_QUERY: Record<string, string> = {
       create_app: "button, a, [role='button']",
       api_group: "h1,h2,h3,h4,h5,h6,[role='heading']",
-      credentials: "th,td,dt,label,span,div",
+      application_id: "th,td,dt,label,span,div",
+      application_secret: "button, a, [role='button']",
     };
     for (const spec of ISSUANCE_TARGET_SELECTORS) {
       expect(spec.locator.candidateQuery).toBe(EXPECTED_CANDIDATE_QUERY[spec.target]);
@@ -96,10 +100,11 @@ describe("issuance highlight-target selector registry", () => {
     expect(() => selectorSpecFor("open_app" as never)).toThrow();
   });
 
-  it("all three highlight targets are GUIDED-highlightable (live_confirmed); guidance targets are not", () => {
+  it("all four highlight targets are GUIDED-highlightable (live_confirmed); guidance targets are not", () => {
     expect(isGuidedHighlightTarget("create_app")).toBe(true);
     expect(isGuidedHighlightTarget("api_group")).toBe(true);
-    expect(isGuidedHighlightTarget("credentials")).toBe(true);
+    expect(isGuidedHighlightTarget("application_id")).toBe(true);
+    expect(isGuidedHighlightTarget("application_secret")).toBe(true);
   });
 
   it("SELECTORS_CALIBRATED is true AND that flip is honest: every guided-highlightable target is live_confirmed", () => {
@@ -110,7 +115,7 @@ describe("issuance highlight-target selector registry", () => {
     for (const spec of ISSUANCE_TARGET_SELECTORS) {
       if (isGuidedHighlightTarget(spec.target)) expect(spec.status).toBe("live_confirmed");
     }
-    for (const t of ["create_app", "api_group", "credentials"] as const) expect(isGuidedHighlightTarget(t)).toBe(true);
+    for (const t of ["create_app", "api_group", "application_id", "application_secret"] as const) expect(isGuidedHighlightTarget(t)).toBe(true);
   });
 
   it("splits path readiness: BOTH new_app and existing_app are ready_candidate (existing-app open is guidance)", () => {
@@ -123,7 +128,7 @@ describe("issuance highlight-target selector registry", () => {
   it("every live_confirmed locator is machine-proven ADOPTABLE through the frozen gate", () => {
     const evals = evaluateIssuanceHighlightSelectors();
     const byTarget = new Map(evals.map((e) => [e.target, e]));
-    for (const t of ["create_app", "api_group", "credentials"] as const) {
+    for (const t of ["create_app", "api_group", "application_id", "application_secret"] as const) {
       const e = byTarget.get(t)!;
       expect(e.adoptable, `${t}: ${e.reasons.join(",")}`).toBe(true);
       expect(e.reasons).toEqual([]);
@@ -132,9 +137,10 @@ describe("issuance highlight-target selector registry", () => {
     expect(byTarget.has("open_app" as never)).toBe(false);
   });
 
-  it("api_group and credentials are reached on BOTH paths; create_app only on new_app", () => {
+  it("api_group + both credential targets are reached on BOTH paths; create_app only on new_app", () => {
     expect(selectorSpecFor("create_app").paths).toEqual(["new_app"]);
     expect(selectorSpecFor("api_group").paths).toEqual(["new_app", "existing_app"]);
-    expect(selectorSpecFor("credentials").paths).toEqual(["new_app", "existing_app"]);
+    expect(selectorSpecFor("application_id").paths).toEqual(["new_app", "existing_app"]);
+    expect(selectorSpecFor("application_secret").paths).toEqual(["new_app", "existing_app"]);
   });
 });

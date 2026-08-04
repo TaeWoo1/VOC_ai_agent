@@ -129,8 +129,10 @@ describe("issuance session — the app-exists path", () => {
       "probeSurface", // VERIFY_OPEN: confirm the seller reached app_detail
       "locate:api_group",
       "highlight:api_group", // checkpoint — rest (no observe/wait); "다음" advances
-      "locate:credentials",
-      "highlight:credentials", // checkpoint
+      "locate:application_id",
+      "highlight:application_id", // checkpoint — copy the Application ID
+      "locate:application_secret",
+      "highlight:application_secret", // checkpoint — view + copy the Secret
       "locate:return",
       "highlight:return", // checkpoint
       "cleanup",
@@ -141,12 +143,12 @@ describe("issuance session — the app-exists path", () => {
     expect(step2?.copyParams?.targetKind).toBe("open_app");
   });
 
-  it("keeps totalSteps a fixed 5 for the whole run, carrying the issuance intent on every view", async () => {
+  it("keeps totalSteps a fixed 6 for the whole run, carrying the issuance intent on every view", async () => {
     const { io, session } = build(EXISTING);
     startRun(io);
     await session.whenSettled();
     const totals = new Set(io.views().map((v) => v.currentStep!.totalSteps));
-    expect(totals).toEqual(new Set([5]));
+    expect(totals).toEqual(new Set([6]));
     for (const v of io.views()) expect(v.intent).toBe("API_ISSUANCE_GUIDANCE");
     for (const v of io.views()) expect(v.channelCode).toBe("naver");
   });
@@ -168,7 +170,7 @@ describe("issuance session — the no-app path", () => {
     expect(step2?.copyKey).toBe("actionWindow.issuance.createApp");
     expect(step2?.copyParams?.targetKind).toBe("create_app");
     // Then it converges on the same api_group → credentials → return tail.
-    for (const t of ["api_group", "credentials", "return"]) expect(driver.calls).toContain(`locate:${t}`);
+    for (const t of ["api_group", "application_id", "application_secret", "return"]) expect(driver.calls).toContain(`locate:${t}`);
   });
 });
 
@@ -183,7 +185,7 @@ describe("issuance session — the API-group barrier", () => {
     // The api_group control was highlighted for step 3, and no later control was ever located.
     const highlighted = io.events().filter((e) => e.type === "TARGET_HIGHLIGHTED").map((e) => e.payload.stepId);
     expect(highlighted).toContain("aw.issuance_api_group");
-    expect(driver.calls).not.toContain("locate:credentials");
+    expect(driver.calls).not.toContain("locate:application_id"); // the next step was never reached
     // The highlighted target ref is an opaque 16-hex, never a selector.
     const ref = io.events().find((e) => e.type === "TARGET_HIGHLIGHTED" && e.payload.stepId === "aw.issuance_api_group")!.payload.targetRef;
     expect(ref).toMatch(/^[0-9a-f]{16}$/);
@@ -306,9 +308,9 @@ describe("issuance session — same-page viewport checkpoints (다음-driven)", 
     // "다음" ADVANCES to the next checkpoint (credentials) — it does not complete the run on its own.
     command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
     await session.whenSettled();
-    expect(engine.currentStage()).toBe("guiding_credentials");
-    expect(driver.calls).toContain("highlight:credentials");
-    expect(driver.calls).not.toContain("observe:credentials");
+    expect(engine.currentStage()).toBe("guiding_application_id");
+    expect(driver.calls).toContain("highlight:application_id");
+    expect(driver.calls).not.toContain("observe:application_id");
   });
 
   it("observes a NAVER click/transition ONLY for open_app — never for a viewport checkpoint", async () => {
@@ -319,7 +321,7 @@ describe("issuance session — same-page viewport checkpoints (다음-driven)", 
 
     expect(driver.calls).toContain("observe:open_app");
     expect(driver.calls).toContain("wait:open_app");
-    for (const t of ["api_group", "credentials", "return", "create_app"]) {
+    for (const t of ["api_group", "application_id", "application_secret", "return", "create_app"]) {
       expect(driver.calls, `observe:${t}`).not.toContain(`observe:${t}`);
       expect(driver.calls, `wait:${t}`).not.toContain(`wait:${t}`);
     }

@@ -85,8 +85,9 @@ const TARGET_STEP: Readonly<Record<IssuanceTarget, number>> = {
   create_app: 2,
   open_app: 2,
   api_group: 3,
-  credentials: 4,
-  return: 5,
+  application_id: 4,
+  application_secret: 5,
+  return: 6,
 };
 
 export class IssuanceEngine {
@@ -354,9 +355,14 @@ export class IssuanceEngine {
         this.currentTarget = "api_group";
         return { guide: "api_group" };
       case "api_group":
-        this.currentTarget = "credentials";
-        return { guide: "credentials" };
-      case "credentials":
+        this.currentTarget = "application_id";
+        return { guide: "application_id" };
+      // The credential section is two steps: copy the Application ID, then view+copy the Secret. `return` is
+      // reachable only after BOTH — the seller cannot skip the Secret step.
+      case "application_id":
+        this.currentTarget = "application_secret";
+        return { guide: "application_secret" };
+      case "application_secret":
         this.currentTarget = "return";
         return { guide: "return" };
       case "return":

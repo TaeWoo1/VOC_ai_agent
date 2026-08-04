@@ -23,7 +23,8 @@ const ALL_STAGES: IssuanceStage[] = [
   "guiding_create",
   "guiding_api_group",
   "guiding_app_detail",
-  "guiding_credentials",
+  "guiding_application_id",
+  "guiding_application_secret",
   "return_to_sellerops",
   "guidance_complete",
   "target_not_found",
@@ -41,7 +42,8 @@ describe("issuance stages — run-status projection", () => {
     guiding_create: "WAITING_FOR_HUMAN",
     guiding_api_group: "WAITING_FOR_HUMAN",
     guiding_app_detail: "WAITING_FOR_HUMAN",
-    guiding_credentials: "WAITING_FOR_HUMAN",
+    guiding_application_id: "WAITING_FOR_HUMAN",
+    guiding_application_secret: "WAITING_FOR_HUMAN",
     return_to_sellerops: "WAITING_FOR_HUMAN",
     guidance_complete: "COMPLETED",
     target_not_found: "WAITING_FOR_HUMAN",
@@ -63,7 +65,8 @@ describe("issuance stages — step-status projection", () => {
     guiding_create: "AWAITING_USER",
     guiding_api_group: "AWAITING_USER",
     guiding_app_detail: "AWAITING_USER",
-    guiding_credentials: "AWAITING_USER",
+    guiding_application_id: "AWAITING_USER",
+    guiding_application_secret: "AWAITING_USER",
     return_to_sellerops: "AWAITING_USER",
     guidance_complete: "COMPLETED",
     target_not_found: "AWAITING_USER",
@@ -94,7 +97,7 @@ describe("issuance stages — allowed commands", () => {
   });
 
   it("guiding barriers offer recheck + PAUSE + cancel + manual", () => {
-    for (const stage of ["guiding_create", "guiding_app_detail", "guiding_api_group", "guiding_credentials", "return_to_sellerops"] as IssuanceStage[]) {
+    for (const stage of ["guiding_create", "guiding_app_detail", "guiding_api_group", "guiding_application_id", "guiding_application_secret", "return_to_sellerops"] as IssuanceStage[]) {
       const cmds = issuanceAllowedCommands(stage);
       expect(cmds).toContain("REQUEST_STEP_RECHECK");
       expect(cmds).toContain("PAUSE_RUN");
@@ -112,11 +115,11 @@ describe("issuance stages — allowed commands", () => {
   });
 });
 
-describe("issuance stages — the fixed 5-step plan", () => {
-  it("is always five steps, whichever branch step 2 takes", () => {
-    expect(ISSUANCE_TOTAL_STEPS).toBe(5);
-    expect(issuanceStepPlan(true)).toHaveLength(5);
-    expect(issuanceStepPlan(false)).toHaveLength(5);
+describe("issuance stages — the fixed 6-step plan", () => {
+  it("is always six steps, whichever branch step 2 takes", () => {
+    expect(ISSUANCE_TOTAL_STEPS).toBe(6);
+    expect(issuanceStepPlan(true)).toHaveLength(6);
+    expect(issuanceStepPlan(false)).toHaveLength(6);
   });
 
   it("branches ONLY step 2's copy key and target kind (same stepId, same slot)", () => {
@@ -127,8 +130,8 @@ describe("issuance stages — the fixed 5-step plan", () => {
     expect(empty[1]!.copyKey).toBe("actionWindow.issuance.createApp");
     expect(existing[1]!.copyParams?.targetKind).toBe("open_app");
     expect(empty[1]!.copyParams?.targetKind).toBe("create_app");
-    // Steps 1, 3, 4, 5 are identical across branches.
-    for (const i of [0, 2, 3, 4]) expect(existing[i]).toEqual(empty[i]);
+    // Steps 1, 3, 4, 5, 6 are identical across branches.
+    for (const i of [0, 2, 3, 4, 5]) expect(existing[i]).toEqual(empty[i]);
   });
 
   it("uses the exact product-required stepIds and copy keys", () => {
@@ -136,7 +139,8 @@ describe("issuance stages — the fixed 5-step plan", () => {
       "aw.issuance_reach_applications",
       "aw.issuance_open_or_create_app",
       "aw.issuance_api_group",
-      "aw.issuance_credentials",
+      "aw.issuance_application_id",
+      "aw.issuance_application_secret",
       "aw.issuance_return",
     ]);
   });

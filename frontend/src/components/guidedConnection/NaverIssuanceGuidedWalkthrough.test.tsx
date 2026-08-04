@@ -104,15 +104,15 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
     expect(screen.getByText(/스토어당 애플리케이션은 1개만 만들 수 있고 삭제할 수 없/)).toBeInTheDocument();
   });
 
-  it("the credentials step detail states SellerOps never reads the value", () => {
+  it("the application-secret step detail states SellerOps reads no secret value / clipboard", () => {
     render(
       <NaverIssuanceGuidedWalkthrough
         dispatch={vi.fn()}
-        run={issuanceRun({ currentStep: { stepId: "aw.issuance_credentials", stepNumber: 5, totalSteps: 6, copyKey: "actionWindow.issuance.credentials", status: "AWAITING_USER" } })}
+        run={issuanceRun({ currentStep: { stepId: "aw.issuance_application_secret", stepNumber: 5, totalSteps: 6, copyKey: "actionWindow.issuance.applicationSecret", status: "AWAITING_USER" } })}
         onCommand={vi.fn()}
       />,
     );
-    expect(screen.getByText(/SellerOps는 이 값도, 클립보드도, 화면도 읽지 않습니다/)).toBeInTheDocument();
+    expect(screen.getByText(/SellerOps는 시크릿 값도, 클립보드도 읽지 않습니다/)).toBeInTheDocument();
   });
 
   it("shows the abort (CANCEL_RUN) control when allowed, and the recheck control", () => {

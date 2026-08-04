@@ -21,7 +21,8 @@ import type { IssuanceHighlightTarget } from "../../src/action-window/api-issuan
 const DEFAULT_MATCHES: Record<IssuanceHighlightTarget, { matchCount: number; canHighlight: boolean }> = {
   create_app: { matchCount: 1, canHighlight: true },
   api_group: { matchCount: 1, canHighlight: true },
-  credentials: { matchCount: 1, canHighlight: true },
+  application_id: { matchCount: 1, canHighlight: true },
+  application_secret: { matchCount: 1, canHighlight: true },
 };
 
 interface FakeOptions {
@@ -52,7 +53,7 @@ describe("issuance selector probe — screen selection", () => {
     // app_list now carries only create_app — open_app is navigation guidance, not a highlighted control.
     expect(targetsForScreen("app_list")).toEqual(["create_app"]);
     expect(targetsForScreen("api_group")).toEqual(["api_group"]);
-    expect(targetsForScreen("credentials")).toEqual(["credentials"]);
+    expect(targetsForScreen("credentials")).toEqual(["application_id", "application_secret"]);
     expect(targetsForScreen("app_detail")).toEqual([]);
   });
 });
@@ -66,20 +67,20 @@ describe("issuance selector probe — read-only walk", () => {
     expect(result.screensProbed).toBe(3);
     expect(result.screens.map((s) => s.screen)).toEqual(["app_list", "api_group", "credentials"]);
     // Every highlighted control was measured — open_app is not among them (it is navigation guidance).
-    expect(probed).toEqual(["create_app", "api_group", "credentials"]);
+    expect(probed).toEqual(["create_app", "api_group", "application_id", "application_secret"]);
 
     const appList = result.screens[0]!;
     expect(appList.targets).toEqual([
       { target: "create_app", status: "live_confirmed", matchCount: 1, canHighlight: true },
     ]);
-    expect(result.uniqueCalibrated).toBe(3);
+    expect(result.uniqueCalibrated).toBe(4);
     expect(result.nonUniqueCalibrated).toBe(0);
   });
 
   it("flags a calibrated target that drifted to a non-unique match (nonUniqueCalibrated)", async () => {
     const { deps } = fakeDeps({ matches: { api_group: { matchCount: 2, canHighlight: false } } });
     const result = await runSelectorProbeSession(deps);
-    expect(result.uniqueCalibrated).toBe(2); // create_app + credentials
+    expect(result.uniqueCalibrated).toBe(3); // create_app + application_id + application_secret
     expect(result.nonUniqueCalibrated).toBe(1); // api_group drifted
   });
 
