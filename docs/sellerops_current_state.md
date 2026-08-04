@@ -12,6 +12,25 @@
 
 ---
 
+## 2026-08-04 부록 (19) — NAVER Existing-App First Connection E2E: 기능 evidence PASS(라이브) — **단, approval-compliant clean E2E는 미증명 · 튜토리얼 최종 종결 아님** ⚠️(정정)
+
+> existing-app 첫 연결 전체 흐름을 감사(READY, 코드 변경 0)한 뒤 동일 세션에서 운영자 주도로 실제 네이버 스토어에 대해 **기능적 라이브 증거는 PASS**했으나, **승인 상한을 초과**해 **approval-compliant clean E2E는 아직 미증명**이다. **이 결과를 전체 튜토리얼 최종 종결로 표기하지 말 것.** 세부·감사: 슬라이스 §0.2.24.
+>
+> **🟢 기능적 라이브 증거 PASS 2026-08-04 (disposable :55432/naver_walkthrough, gitSha `7fdd4d4`, approval `apr-b9f78dcc95bc`/run `wt-7dd6b953f748`, 실 :5432 무접촉, 즉시 teardown):** 비활성 앱 credential → **`RECONNECT_REQUIRED`**(네이버 4xx, 코드 결함 아님 — 백엔드가 `223.130.196.241:443`=`api.commerce.naver.com`로 실제 연결한 read-only 네트워크 캡처로 확정; 거짓 CONNECTED 없음) → 앱 재활성 후 **test SUCCESS → `PREPARING`** → 첫 `ORDER_SUMMARY` sync **SUCCESS → `CONNECTED`**(13:07:45) → **backend 재시작 후 `connection_status=CONNECTED` 지속**(FE view CONNECTED). credential AES-256-GCM 저장, 로그 secret/token leak **0건**, `naver_accounts=1`(중복 없음, V35), NAVER 마켓 write 0. window에 최근 24h `PAYED` 주문 0건 → `channel_orders=0`(빈-성공 sync는 설계상 CONNECTED 정당; 실주문 ingest>0은 별도 관측).
+>
+> **🔴 정정 — approval-compliant clean E2E는 미증명:** approval manifest 상한은 **credential=1 / test=1 / sync=1**이었으나 실제로는 (비활성 앱 구간의) **반복 credential 등록·test**와 **ORDER_SUMMARY sync 2건**이 발생했다. 즉 승인된 상한을 넘겼고, **상한 내 clean E2E는 아직 증명되지 않았다.** 세션 중 내린 **"같은 세션·같은 범위라 재승인 불필요"** 판단은 **잘못**이었음을 기록한다 — same-scope 재시도 허용은 *새 approvalId 없이 재시도*를 뜻할 뿐, manifest가 명시한 **maxActions 상한을 확장하지 않는다**(상한 초과 = 승인 범위 초과).
+>
+> **🔎 코드-무변경 감사(정본):** ① **sync #2 ROOT CAUSE = 운영자 수동 재트리거** — 첫 sync가 백엔드에서 ~8.6분간 **동기(synchronous)로 블로킹**되는 동안(1s 페이싱 페이지네이션) 스피너가 멈춘 듯 보여 운영자가 **새로고침 후** read-only resume가 연결-테스트 CTA로 착지 → test 재클릭 → sync#2(13:01:49, 첫 sync 12:59:06과 동시 진행). **FE 자동 체인 이중발화 아님**(체인은 제출/테스트당 1회, `busy` 플래그가 동일-페이지 이중클릭 차단, 이벤트-구동 콜백이라 StrictMode 이중호출 무관). ② **in-flight 중복 방지 부재**(PRODUCT GAP): `manualSync→executor.execute`는 동일 (account,dataType)에 RUNNING이 있어도 무조건 새 RUNNING SyncJob 생성 → 두 run이 cursor 1행을 공유(데이터는 upsert 멱등이나 중복 작업·cursor 경쟁). ③ **orphaned-RUNNING 복구 정책 부재**(PRODUCT GAP): 재시작/크래시로 중단된 RUNNING SyncJob을 boot 시 FAILED/stale로 정리하는 리컨실러 없음 → sync#2가 재시작 후 영구 RUNNING으로 잔존. ④ **승인 상한 runtime 미강제**(PRODUCT GAP/governance): test/sync 엔드포인트에 per-approval 카운터·레이트리밋 없음 — manifest 상한은 **운영자 규율에 의존하는 사람-계약**이며 시스템이 강제하지 않는다. → 다음 최소 단위는 슬라이스 §0.2.24 말미 참조.
+
+- **감사 판정 = READY (코드 변경 0).** 8개 E2E 기준 전부 검증된 코드로 매핑: ① 위저드 `ConnectNaver`→`GuidedConnectionWizard`(existing-app subflow는 이미 live-proven) ② `POST …/credentials`→`CredentialVault.store`→`EnvelopeCipher.seal`(AES-256-GCM envelope, per-credential DEK; 응답은 masked metadata) ③ `POST …/test-connection`→`verifyConnection`(토큰 mint만)→`onCredentialTestVerified`→**PREPARING** ④ `POST …/sync {ORDER_SUMMARY}`→`SyncRunExecutor`→`onOrderSyncCollected`(PREPARING→**CONNECTED**) ⑤ refresh+restart 후 CONNECTED 지속 = durable `seller_accounts.connection_status`(채널카드가 `SellerAccountResponse.connectionStatus` 읽음, `channelConnection.ts:50`) ⑥ Secret 재노출 없음(`SecureCredentialForm` write-only·submit 시 clear·masked read) ⑦ 중복 없음(V35 partial unique + find-or-create + `connector_credentials.seller_account_id UNIQUE`) ⑧ NAVER 마켓 write 없음.
+- **READ-ONLY 마켓 경계(코드 레벨 증명):** 커넥터의 전 outbound = ①토큰 mint `POST /external/v1/oauth2/token`(client_credentials 그랜트; 마켓 상태 무변) ②`GET …/product-orders/last-changed-statuses`(read) ③`POST …/product-orders/query`(배치 상세 *조회*=read). **dispatch/cancel/ship/claim/reply/product-write 엔드포인트는 패키지에 없음**; capabilities=`ORDER_SUMMARY`만. `NaverHttpClient`가 유일 네트워크 경계.
+- **Feature flag / 실제 adapter:** `sellerops.connector.naver.enabled`(off면 mock). 실제 HTTP adapter = `JdkNaverHttpClient` → `PacingNaverHttpClient`(per-second pacing).
+- **ORDER 연결은 Local-Agent-free** — credential→test→sync 경로에 bridge/collector readiness 게이트 없음(`GuidedConnectionWizard.tsx:31-33`). `useBridge`는 선택적 REVIEW_IMPORT 카드 + 선택적 app-issuance subflow에만 관여.
+- **정직 caveat(비차단):** 위저드 완료 HealthBadge는 sync-소유 health 테이블 `ConnectionStatusView.state`(수집되면 CONNECTED)를 표시하고, 채널카드의 durable CONNECTED는 two-signal `seller_accounts.connection_status`다. 가이드 흐름에선 `runFirstSync()`가 test SUCCESS 후에만 발화(`ConnectNaver.tsx:244`)라 두 값이 수렴 — 모순 없음. **이 live E2E는 2026-08-04 기능적으로 라이브 통과**했으나(위 🟢 블록: 성공+거부 경로 모두), **승인 상한(credential=1/test=1/sync=1) 초과로 approval-compliant clean E2E는 미증명**(위 🔴 블록) — **튜토리얼 최종 종결 아님**.
+- **disposable 환경/PREPARED manifest는 이미 스크립트화(`tools/naver-local/`)** — bootstrap→backend(:18090, NAVER on/scheduler off)→frontend(localhost:5173, `/api`→:18090)→preflight(전 게이트+clean-context env-binding smoke, NAVER 0콜, DB 0-write) → `PREFLIGHT PASS` + sanitized PREPARED manifest(phase NAVER_GUIDED_CONNECTION · mode WRITE · max credential=1/test=1/sync=1). **신규 설정 파일 불필요.**
+
+---
+
 ## 2026-08-04 부록 (18) — NAVER Seller Account Uniqueness v1: API-mode seller account 중복 방지 (backend, migration V35)
 
 > 튜토리얼 감사(부록16 / 슬라이스 §0.2.21)의 **§7 DB unique 백스톱 부재**(UNCERTAIN_MULTI_ACCOUNT)를 종결. **backend + migration만, contract·FE·issuance·bridge 변경 없음.** live 마켓 실행 없음(개별 disposable Postgres로 DB 증명, teardown). 세부: 슬라이스 §0.2.23.
