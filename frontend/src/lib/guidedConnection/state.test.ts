@@ -53,6 +53,41 @@ describe("read-only capability resume (§flow 1) — no readiness gate, no re-ru
     expect(s.path).toBe("saved");
   });
 
+  it("a first sync still RUNNING → restore the in-progress sync screen (registered+tested), never a re-test", () => {
+    const s = reduce(INITIAL_STATE, {
+      type: "RESUME_FROM_CAPABILITY",
+      credentialPresent: true,
+      completed: false,
+      syncing: true,
+    });
+    expect(s.phase).toBe("first_order_sync");
+    expect(s.milestones).toEqual({ registered: true, tested: true, synced: false });
+    expect(s.path).toBe("saved");
+    expect(s.failureReason).toBeNull();
+  });
+
+  it("syncing is subordinate to completed — a completed snapshot restores completed, not the progress screen", () => {
+    const s = reduce(INITIAL_STATE, {
+      type: "RESUME_FROM_CAPABILITY",
+      credentialPresent: true,
+      completed: true,
+      syncing: true,
+    });
+    expect(s.phase).toBe("completed");
+  });
+
+  it("from the resumed running-sync screen, a SUCCESS settles to completed (the observed poll result)", () => {
+    const running = reduce(INITIAL_STATE, {
+      type: "RESUME_FROM_CAPABILITY",
+      credentialPresent: true,
+      completed: false,
+      syncing: true,
+    });
+    const done = reduce(running, { type: "SYNC_RESULT", status: "SUCCESS" });
+    expect(done.phase).toBe("completed");
+    expect(done.milestones).toEqual({ registered: true, tested: true, synced: true });
+  });
+
   it("no stored key → the three-path fork DIRECTLY (no agent/renderer/login step in between)", () => {
     expect(fork.phase).toBe("application_path_choice");
     expect(fork.milestones.registered).toBe(false);

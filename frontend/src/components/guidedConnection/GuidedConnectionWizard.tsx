@@ -15,6 +15,7 @@ import {
   NAVER_EXISTING_APP_TUTORIAL,
   PHASE_COPY,
   REVIEW_SETUP_COPY,
+  SYNC_PROGRESS_COPY,
   type GuidedConnectionState,
   type GuidedEvent,
 } from "../../lib/guidedConnection";
@@ -53,6 +54,73 @@ export interface GuidedConnectionWizardProps {
   onRetryTest: () => void;
   onRetrySync: () => void;
   onGoToReviewExport: () => void;
+  /**
+   * Live first-sync progress while a sync is being watched — the initial run OR a resumed RUNNING job.
+   * `null` when no sync is in flight. Carries only `elapsedMs` (real elapsed, NO percentage — the backend
+   * exposes no progress fraction) and a `stalled` flag (the poll timed out). Drives the in-progress screen
+   * so a long first sync never reads as "stuck", and a refresh resumes the same run rather than re-triggering.
+   */
+  syncProgress?: { elapsedMs: number; stalled: boolean } | null;
+  /** Re-check the running sync ONCE more (read-only poll — NEVER starts a new sync). Used by the stalled UI. */
+  onRecheckSync?: () => void;
+}
+
+/** Elapsed as m:ss — honest wall-clock, never a fabricated completion percentage. */
+function formatElapsed(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+/** How long before the in-progress screen adds a "taking longer than usual" note (still no percentage). */
+const SYNC_SLOW_AFTER_MS = 3 * 60_000;
+
+/**
+ * First ORDER_SUMMARY sync in-progress screen. Shows the honest elapsed time (aria-hidden so a per-second
+ * tick never spams the live region) plus a static, screen-reader-announced reassurance that refreshing
+ * resumes the same run. On a poll timeout (`stalled`) it offers a manual re-check that only polls — it
+ * never starts a second collection (the backend single-flight would coalesce it anyway).
+ */
+function FirstSyncProgress({
+  progress,
+  onRecheck,
+}: {
+  progress: { elapsedMs: number; stalled: boolean };
+  onRecheck?: () => void;
+}) {
+  if (progress.stalled) {
+    return (
+      <div className="space-y-2">
+        <p className="text-sm font-medium text-ink">{SYNC_PROGRESS_COPY.stalledTitle}</p>
+        <p className="text-muted">{SYNC_PROGRESS_COPY.stalledBody}</p>
+        <p className="text-sm text-muted" aria-hidden="true">
+          {SYNC_PROGRESS_COPY.elapsedLabel}: {formatElapsed(progress.elapsedMs)}
+        </p>
+        {onRecheck && (
+          <button type="button" className="btn-primary" onClick={onRecheck}>
+            {SYNC_PROGRESS_COPY.recheckCta}
+          </button>
+        )}
+      </div>
+    );
+  }
+  const slow = progress.elapsedMs >= SYNC_SLOW_AFTER_MS;
+  return (
+    <div className="space-y-2">
+      <p className="text-muted">{SYNC_PROGRESS_COPY.body}</p>
+      <div className="flex items-center gap-2" aria-hidden="true">
+        <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-current text-muted" />
+        <span className="text-sm text-muted">
+          {SYNC_PROGRESS_COPY.elapsedLabel}: {formatElapsed(progress.elapsedMs)}
+        </span>
+      </div>
+      <p className="text-sm text-muted">{SYNC_PROGRESS_COPY.reassurance}</p>
+      {slow && (
+        <p className="rounded-lg bg-canvas px-3 py-2 text-sm text-muted">{SYNC_PROGRESS_COPY.slowNote}</p>
+      )}
+    </div>
+  );
 }
 
 export function GuidedConnectionWizard({
@@ -67,6 +135,8 @@ export function GuidedConnectionWizard({
   onRetryTest,
   onRetrySync,
   onGoToReviewExport,
+  syncProgress = null,
+  onRecheckSync,
 }: GuidedConnectionWizardProps) {
   const { phase, failureReason } = state;
 
@@ -250,11 +320,20 @@ export function GuidedConnectionWizard({
 
         {phase === "first_order_sync" && (
           <div className="space-y-3" role="status" aria-live="polite">
-            <p className="text-muted">{PHASE_COPY.first_order_sync.body}</p>
-            {failureReason && (
-              <button type="button" className="btn-ghost" onClick={onRetrySync} disabled={busy}>
-                다시 시도
-              </button>
+            {failureReason ? (
+              // A settled failure: the safe reason is in the status panel; offer an explicit retry.
+              <>
+                <p className="text-muted">{PHASE_COPY.first_order_sync.body}</p>
+                <button type="button" className="btn-ghost" onClick={onRetrySync} disabled={busy}>
+                  다시 시도
+                </button>
+              </>
+            ) : syncProgress ? (
+              // Actively running (initial run or a resumed RUNNING job): show progress, never a retry — a
+              // second trigger here would only duplicate work the single-flight backend already coalesces.
+              <FirstSyncProgress progress={syncProgress} onRecheck={onRecheckSync} />
+            ) : (
+              <p className="text-muted">{PHASE_COPY.first_order_sync.body}</p>
             )}
           </div>
         )}

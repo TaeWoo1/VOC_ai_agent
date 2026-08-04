@@ -122,13 +122,16 @@ export type GuidedSyncStatus = "SUCCESS" | "PARTIAL" | "FAILED" | "RUNNING";
  */
 export type GuidedEvent =
   /**
-   * Read-only resume from the backend capability snapshot on page load (§flow 1). Carries only two derived
+   * Read-only resume from the backend capability snapshot on page load (§flow 1). Carries only derived
    * booleans — never a secret. `completed` (a prior first ORDER_SUMMARY sync actually succeeded) restores
-   * the completed screen with NO re-test/re-sync; `credentialPresent` (a stored key, not yet completed)
-   * lands on the connection test as a USER CTA (still no auto-run); neither → the three-path fork. This is
-   * the ONLY event that may reach `completed` directly, and only because the backend read already proved it.
+   * the completed screen with NO re-test/re-sync; `syncing` (a first sync is currently RUNNING) restores the
+   * in-progress sync screen so the page RESUMES OBSERVING the same run (poll only — never a re-test/re-sync,
+   * never a second job); `credentialPresent` (a stored key, not yet completed) lands on the connection test
+   * as a USER CTA (still no auto-run); none → the three-path fork. `completed` is the ONLY status that may
+   * reach `completed` directly, and only because the backend read already proved it. `syncing` is optional
+   * (absent ⇒ false) so callers/fixtures that predate progress-resume stay valid.
    */
-  | { type: "RESUME_FROM_CAPABILITY"; credentialPresent: boolean; completed: boolean }
+  | { type: "RESUME_FROM_CAPABILITY"; credentialPresent: boolean; completed: boolean; syncing?: boolean }
   /** The seller's answer to "do you already have a NAVER API app?" (§discovery three-path fork). */
   | { type: "APPLICATION_PATH"; choice: "have" | "unknown" | "new" }
   /** The seller's self-check of NAVER's application list when they were unsure (§flow 7). */

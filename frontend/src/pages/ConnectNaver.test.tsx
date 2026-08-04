@@ -6,7 +6,7 @@
 // (refresh / re-entry) is READ-ONLY: it NEVER re-runs the connection test or the first sync.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { StrictMode } from "react";
-import { render } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { screen, userEvent, waitFor } from "../test/renderWithRouter";
 import { NAVER_LIKE_TEMPLATE } from "../lib/guidedConnection";
@@ -81,6 +81,12 @@ const freshCapability = (accountId = "acc-1") =>
 /** A stored key that never completed → resume lands on the connection test as a user CTA. */
 const savedKeyIncompleteCapability = (accountId = "acc-1") =>
   capabilityView(accountId, { credentialPresent: true, identityConfirmed: false, firstSyncStatus: "NONE", overall: "NEEDS_ATTENTION", reason: "FIRST_SYNC_REQUIRED" });
+/** A first sync currently RUNNING → resume/observe the in-progress screen and poll for the outcome. */
+const runningCapability = (accountId = "acc-1") =>
+  capabilityView(accountId, { credentialPresent: true, identityConfirmed: false, firstSyncStatus: "RUNNING", overall: "NEEDS_ATTENTION", reason: "SYNC_IN_PROGRESS" });
+/** A first sync that ended in FAILED (as seen by the poll). */
+const failedSyncCapability = (accountId = "acc-1") =>
+  capabilityView(accountId, { credentialPresent: true, identityConfirmed: false, firstSyncStatus: "FAILED", overall: "NEEDS_ATTENTION", reason: "SYNC_FAILED" });
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -104,6 +110,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.useRealTimers(); // isolate any test that opted into fake timers
 });
 
 function renderPage() {
@@ -466,6 +473,173 @@ describe("ConnectNaver — StrictMode double-invocation is safe", () => {
     expect(headings).toHaveLength(1);
     expect(api.testConnection).not.toHaveBeenCalled();
     expect(api.manualSync).not.toHaveBeenCalled();
+  });
+});
+
+describe("ConnectNaver — first-sync progress + resume (NAVER First Sync Progress + Resume UX v1)", () => {
+  const POLL = 5000;
+  // Flush the multi-hop async mount (resolve → capability resume) under fake timers — a single 0-advance
+  // only drains one hop, so pump a few cycles until the resumed state settles.
+  const settle = async () => {
+    for (let i = 0; i < 6; i++) await vi.advanceTimersByTimeAsync(1);
+  };
+
+  it("refresh while a first sync is RUNNING → resume OBSERVING (no test/sync POST), poll → completed", async () => {
+    vi.useFakeTimers();
+    try {
+      // Capability: RUNNING on the resume read + first poll, then SUCCESS.
+      vi.mocked(api.getConnectionCapabilityStrict)
+        .mockResolvedValueOnce(runningCapability())
+        .mockResolvedValueOnce(runningCapability())
+        .mockResolvedValue(capabilityView());
+      renderPage();
+      await settle(); // flush mount resolve + resume
+
+      // In-progress screen restored from the RUNNING snapshot — NOT completed, and nothing was re-triggered.
+      expect(screen.getByRole("heading", { name: "첫 주문 수집 중" })).toBeInTheDocument();
+      expect(screen.getByText(/경과 시간/)).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "주문 연결 완료" })).toBeNull();
+      expect(api.testConnection).not.toHaveBeenCalled();
+      expect(api.manualSync).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(POLL); // poll 1: still RUNNING
+      expect(screen.queryByRole("heading", { name: "주문 연결 완료" })).toBeNull();
+      await vi.advanceTimersByTimeAsync(POLL); // poll 2: SUCCESS → completed
+
+      expect(screen.getByRole("heading", { name: "주문 연결 완료" })).toBeInTheDocument();
+      // The whole resume + poll cycle made ZERO test/sync POSTs — the exact duplicate-sync fix.
+      expect(api.testConnection).not.toHaveBeenCalled();
+      expect(api.manualSync).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("resume observing → poll returns FAILED → error + explicit retry CTA (no auto new sync)", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(api.getConnectionCapabilityStrict)
+        .mockResolvedValueOnce(runningCapability())
+        .mockResolvedValue(failedSyncCapability());
+      renderPage();
+      await settle();
+      expect(screen.getByRole("heading", { name: "첫 주문 수집 중" })).toBeInTheDocument();
+
+      await vi.advanceTimersByTimeAsync(POLL); // poll → FAILED
+      expect(screen.getByRole("alert")).toHaveTextContent(/첫 주문 수집에 실패/);
+      expect(screen.getByRole("button", { name: "다시 시도" })).toBeInTheDocument();
+      expect(api.manualSync).not.toHaveBeenCalled(); // failure surfaced by the poll, not a new sync
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("initial first sync returns RUNNING (coalesced) → progress screen, then poll → completed (one manualSync)", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(api.getConnectionCapabilityStrict)
+        .mockResolvedValueOnce(savedKeyIncompleteCapability()) // resume → connection-test CTA
+        .mockResolvedValue(capabilityView()); // poll → SUCCESS
+      vi.mocked(api.testConnection).mockResolvedValue({ sellerAccountId: "acc-1", status: "SUCCESS", checkedAt: "", message: "", reasonCode: null });
+      vi.mocked(api.manualSync).mockResolvedValue(syncRun("acc-1", { status: "RUNNING" })); // coalesced
+      renderPage();
+      await settle();
+
+      // Native click (userEvent's internal delays deadlock under fake timers) + flush the test→sync chain.
+      await act(async () => {
+        screen.getByRole("button", { name: "연결 확인" }).click();
+        await settle();
+      });
+
+      // Coalesced RUNNING is NOT treated as success — the progress screen shows and one sync was fired.
+      expect(screen.getByRole("heading", { name: "첫 주문 수집 중" })).toBeInTheDocument();
+      expect(screen.getByText(/경과 시간/)).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "주문 연결 완료" })).toBeNull();
+      expect(api.manualSync).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(POLL); // poll → SUCCESS → completed
+      expect(screen.getByRole("heading", { name: "주문 연결 완료" })).toBeInTheDocument();
+      expect(api.manualSync).toHaveBeenCalledTimes(1); // the poll never starts a second sync
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("polling past the timeout → stalled screen with a re-check that only polls (never a new sync)", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(api.getConnectionCapabilityStrict).mockResolvedValue(runningCapability()); // always RUNNING
+      renderPage();
+      await settle();
+      expect(screen.getByRole("heading", { name: "첫 주문 수집 중" })).toBeInTheDocument();
+
+      // Advance past the 12-min poll timeout → stalled screen (no new sync ever created).
+      await vi.advanceTimersByTimeAsync(13 * 60_000);
+      expect(screen.getByText(/새 수집을 만들지 않고/)).toBeInTheDocument();
+      const recheck = screen.getByRole("button", { name: "진행 상태 다시 확인" });
+
+      // Re-check re-enters polling on the SAME run; still no manualSync/testConnection POST.
+      // Re-check RESUMES polling the SAME run — with the sync now settled, the next poll completes it. That
+      // it reaches completion proves the re-check re-polled; and it NEVER started a new sync. (Flush the click
+      // in its own act first so the re-opened poll interval is scheduled BEFORE we advance the clock.)
+      vi.mocked(api.getConnectionCapabilityStrict).mockResolvedValue(capabilityView());
+      await act(async () => {
+        recheck.click();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3 * POLL);
+      });
+      expect(screen.getByRole("heading", { name: "주문 연결 완료" })).toBeInTheDocument();
+      expect(api.manualSync).not.toHaveBeenCalled();
+      expect(api.testConnection).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("initial sync request dropped mid-run but the job is RUNNING → observe (no spurious failure), poll → completed", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(api.getConnectionCapabilityStrict)
+        .mockResolvedValueOnce(savedKeyIncompleteCapability()) // resume → connection-test CTA
+        .mockResolvedValueOnce(runningCapability()) // catch-path disambiguation: job is actually RUNNING
+        .mockResolvedValue(capabilityView()); // poll → SUCCESS
+      vi.mocked(api.testConnection).mockResolvedValue({ sellerAccountId: "acc-1", status: "SUCCESS", checkedAt: "", message: "", reasonCode: null });
+      vi.mocked(api.manualSync).mockRejectedValue(new Error("gateway timeout")); // held request cut by infra
+      renderPage();
+      await settle();
+
+      await act(async () => {
+        screen.getByRole("button", { name: "연결 확인" }).click();
+        await settle();
+      });
+
+      // The dropped request did NOT surface as a failure — the job is RUNNING, so we observe instead.
+      expect(screen.getByRole("heading", { name: "첫 주문 수집 중" })).toBeInTheDocument();
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(api.manualSync).toHaveBeenCalledTimes(1); // and it is never re-fired
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3 * POLL); // poll → SUCCESS → completed
+      });
+      expect(screen.getByRole("heading", { name: "주문 연결 완료" })).toBeInTheDocument();
+      expect(api.manualSync).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("double-click on the connection-test CTA fires exactly one test + one sync (client single-flight)", async () => {
+    vi.mocked(api.getConnectionCapabilityStrict).mockResolvedValue(savedKeyIncompleteCapability());
+    // Terminal SUCCESS so no polling is needed — this test is purely about the double-click guard.
+    mockTestAndSyncSuccess();
+    renderPage();
+    const btn = await screen.findByRole("button", { name: "연결 확인" });
+    // Two rapid clicks before the first chain settles — the guard must collapse them to one run.
+    await Promise.all([userEvent.click(btn), userEvent.click(btn)]);
+    expect(await screen.findByRole("heading", { name: "주문 연결 완료" })).toBeInTheDocument();
+    expect(api.testConnection).toHaveBeenCalledTimes(1);
+    expect(api.manualSync).toHaveBeenCalledTimes(1);
   });
 });
 

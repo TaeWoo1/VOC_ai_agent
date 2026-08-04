@@ -164,6 +164,22 @@ export const SYNC_STATUS_COPY: Record<string, string> = {
   RUNNING: "첫 주문 수집 진행 중",
 };
 
+/**
+ * First-sync in-progress copy (NAVER First Sync Progress + Resume UX v1). Honest: NO fake percentage — the
+ * backend exposes no progress fraction, so we show only elapsed time and reassure the seller that refreshing
+ * resumes the SAME run (never a second sync). `slowNote` appears once the run passes a soft threshold; the
+ * `stalled*` copy is for a poll timeout, where we offer a re-check (poll only) — never a new collection.
+ */
+export const SYNC_PROGRESS_COPY = {
+  body: "주문 요약 데이터를 처음으로 가져오고 있습니다. 주문 수에 따라 몇 분 정도 걸릴 수 있어요.",
+  reassurance: "이 화면을 그대로 두셔도 되고, 새로고침해도 같은 수집이 이어집니다. 수집이 다시 시작되지 않아요.",
+  elapsedLabel: "경과 시간",
+  slowNote: "예상보다 오래 걸리고 있어요. 수집은 계속 진행 중이니 잠시만 더 기다려 주세요.",
+  stalledTitle: "아직 진행 중일 수 있어요",
+  stalledBody: "수집이 아직 끝나지 않았습니다. 새 수집을 만들지 않고 현재 진행 상태만 다시 확인합니다.",
+  recheckCta: "진행 상태 다시 확인",
+} as const;
+
 export const FAILURE_COPY: Record<GuidedFailureReason, string> = {
   INVALID_CREDENTIAL: "연결 정보가 올바르지 않습니다. 애플리케이션 ID와 시크릿을 다시 확인해 주세요.",
   PERMISSION_INSUFFICIENT: "연결에 필요한 권한이 부족할 수 있습니다. 애플리케이션의 API 그룹·권한을 확인해 주세요.",

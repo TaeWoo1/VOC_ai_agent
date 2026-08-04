@@ -147,6 +147,16 @@ export function guidedConnectionReducer(
         // completed screen re-reads capability/health read-only. Never reached without the backend proof.
         return state("completed", { registered: true, tested: true, synced: true }, null, "saved");
       }
+      if (event.syncing && event.credentialPresent) {
+        // A first ORDER_SUMMARY sync is currently RUNNING (backend-verified via the capability snapshot).
+        // A running sync proves the credential is stored AND the connection test already passed (sync only
+        // runs after a SUCCESS test), so restore the in-progress sync screen with registered+tested. The
+        // page RESUMES OBSERVING this same run by polling the read-only capability — it never re-runs the
+        // test or starts a second sync, and `completed` is still reached only when the sync actually settles.
+        // The `credentialPresent` conjunct is belt-and-suspenders: a running sync implies a stored key, so we
+        // never claim `tested` from `syncing` alone (matching the `completed` branch's stricter preconditions).
+        return state("first_order_sync", { registered: true, tested: true, synced: false }, null, "saved");
+      }
       if (event.credentialPresent) {
         // A stored key exists but the connection was never completed. Land on the connection test as a
         // USER-triggered step (registered milestone only) — the page does NOT auto-run it on load, so a

@@ -129,6 +129,28 @@ describe("GuidedConnectionWizard — per-phase actions dispatch sanitized events
     expect(props.onRetrySync).toHaveBeenCalledOnce();
   });
 
+  it("first_order_sync in progress → shows elapsed + resume reassurance, NO retry (never a percentage)", () => {
+    renderWizard(stateAt("first_order_sync"), { syncProgress: { elapsedMs: 42_000, stalled: false } });
+    expect(screen.getByText(/경과 시간: 0:42/)).toBeInTheDocument();
+    expect(screen.getByText(/새로고침해도 같은 수집이 이어집니다/)).toBeInTheDocument();
+    expect(screen.queryByText(/%/)).toBeNull();
+    // While actively running, there is no retry button (a second trigger would only duplicate work).
+    expect(screen.queryByRole("button", { name: "다시 시도" })).toBeNull();
+  });
+
+  it("first_order_sync in progress past the soft threshold → adds a 'taking longer' note", () => {
+    renderWizard(stateAt("first_order_sync"), { syncProgress: { elapsedMs: 4 * 60_000, stalled: false } });
+    expect(screen.getByText(/예상보다 오래 걸리고 있어요/)).toBeInTheDocument();
+  });
+
+  it("first_order_sync stalled → offers a re-check that only polls (onRecheckSync), never a new sync", async () => {
+    const onRecheckSync = vi.fn();
+    renderWizard(stateAt("first_order_sync"), { syncProgress: { elapsedMs: 12 * 60_000, stalled: true }, onRecheckSync });
+    expect(screen.getByText(/새 수집을 만들지 않고/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "진행 상태 다시 확인" }));
+    expect(onRecheckSync).toHaveBeenCalledOnce();
+  });
+
   it("review_export_readiness → navigates via onGoToReviewExport (handoff, not in-wizard collection)", async () => {
     const { props } = renderWizard(stateAt("review_export_readiness"));
     await userEvent.click(screen.getByRole("button", { name: "리뷰 내보내기로 이동" }));
@@ -250,6 +272,21 @@ describe("GuidedConnectionWizard — accessibility", () => {
 
   it("has no violations at the completed step", async () => {
     const { container } = renderWizard(stateAt("completed"));
+    await expectNoAxeViolations(container);
+  });
+
+  it("has no violations on the in-progress sync screen", async () => {
+    const { container } = renderWizard(stateAt("first_order_sync"), {
+      syncProgress: { elapsedMs: 90_000, stalled: false },
+    });
+    await expectNoAxeViolations(container);
+  });
+
+  it("has no violations on the stalled sync screen", async () => {
+    const { container } = renderWizard(stateAt("first_order_sync"), {
+      syncProgress: { elapsedMs: 12 * 60_000, stalled: true },
+      onRecheckSync: () => {},
+    });
     await expectNoAxeViolations(container);
   });
 });
