@@ -17,6 +17,7 @@ import {
   PHASE_COPY,
   REVIEW_SETUP_COPY,
   SYNC_PROGRESS_COPY,
+  reusesExistingApp,
   type GuidedConnectionState,
   type GuidedEvent,
 } from "../../lib/guidedConnection";
@@ -224,7 +225,11 @@ export function GuidedConnectionWizard({
         {phase === "application_issuance" && <NaverIssuanceModeChoice dispatch={dispatch} busy={busy} />}
 
         {phase === "application_issuance_guided" && (
-          <NaverIssuanceGuidedWalkthrough dispatch={dispatch} busy={busy} />
+          <NaverIssuanceGuidedWalkthrough
+            dispatch={dispatch}
+            reuseExistingApp={reusesExistingApp(state.path)}
+            busy={busy}
+          />
         )}
 
         {phase === "credential_issued" && (

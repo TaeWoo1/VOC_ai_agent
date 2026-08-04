@@ -79,8 +79,10 @@ function entryPhaseFor(path: GuidedPath): GuidedPhase {
 /** Existing/saved-app sellers reuse their store's single app; the guided walk only SHOWS them where its
  *  order API group + Application ID/Secret live — it issues nothing. So from the shared walkthrough both
  *  completion and the text fallback return an existing/saved seller to existing-credential entry, while a
- *  new-app seller advances into the issuance credential hand-off / static issuance checklist. */
-function reusesExistingApp(path: GuidedPath): boolean {
+ *  new-app seller advances into the issuance credential hand-off / static issuance checklist. Exported so
+ *  the UI can pick path-aware completion copy ("기존 애플리케이션 확인 완료" vs "애플리케이션 발급 완료")
+ *  without re-deriving the rule — routing itself stays path-agnostic in the reducer. */
+export function reusesExistingApp(path: GuidedPath): boolean {
   return path === "existing" || path === "saved";
 }
 

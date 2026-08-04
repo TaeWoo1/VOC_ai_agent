@@ -128,7 +128,7 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
     expect(screen.getByText("다시 로그인이 필요해요")).toBeInTheDocument();
   });
 
-  it("COMPLETED guidance surfaces the input CTA → ISSUANCE_COMPLETE (never a stored credential)", async () => {
+  it("COMPLETED guidance surfaces the common input CTA → ISSUANCE_COMPLETE (never a stored credential)", async () => {
     const dispatch = vi.fn();
     render(
       <NaverIssuanceGuidedWalkthrough
@@ -137,8 +137,38 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
         onCommand={vi.fn()}
       />,
     );
-    await userEvent.click(screen.getByRole("button", { name: "발급 안내가 끝났어요, 이제 입력할게요" }));
+    await userEvent.click(screen.getByRole("button", { name: "SellerOps로 돌아가 연결 정보 입력하기" }));
     expect(dispatch).toHaveBeenCalledWith({ type: "ISSUANCE_COMPLETE" });
+  });
+
+  it("new-app completion reads 발급 완료 (default path)", () => {
+    render(
+      <NaverIssuanceGuidedWalkthrough
+        dispatch={vi.fn()}
+        run={issuanceRun({ status: "COMPLETED", allowedCommands: [] })}
+        onCommand={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("애플리케이션 발급 완료")).toBeInTheDocument();
+    // The shared CTA is path-agnostic.
+    expect(screen.getByRole("button", { name: "SellerOps로 돌아가 연결 정보 입력하기" })).toBeInTheDocument();
+  });
+
+  it("existing/saved completion reads 확인 완료 with NO '발급' anywhere on the completion screen", () => {
+    const { container } = render(
+      <NaverIssuanceGuidedWalkthrough
+        dispatch={vi.fn()}
+        run={issuanceRun({ status: "COMPLETED", allowedCommands: [] })}
+        onCommand={vi.fn()}
+        reuseExistingApp
+      />,
+    );
+    expect(screen.getByText("기존 애플리케이션 확인 완료")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "SellerOps로 돌아가 연결 정보 입력하기" })).toBeInTheDocument();
+    // The existing-app guided completion never says 발급 (label, CTA, or the container aria-label).
+    expect(container.textContent ?? "").not.toContain("발급");
+    expect(screen.queryByLabelText("화면 안내 발급")).toBeNull();
+    expect(screen.getByLabelText("화면 안내")).toBeInTheDocument();
   });
 
   it("the persistent text-fallback button dispatches APPLICATION_ISSUANCE_MODE{mode:'text'} (with a live run)", async () => {

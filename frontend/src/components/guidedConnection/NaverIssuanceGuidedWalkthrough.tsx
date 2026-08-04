@@ -31,10 +31,14 @@ import type { GuidedEvent } from "../../lib/guidedConnection";
  *
  * ## Never a credential
  *
- * Guidance FINISHING (`run.status === "COMPLETED"`) does not connect anything: it surfaces a "발급 안내가
- * 끝났어요, 이제 입력할게요" CTA that fires `onComplete` → `ISSUANCE_COMPLETE`, which the reducer maps to
- * `credential_issued` (the secure-entry hand-off), NOT a stored credential. This component never renders or
- * requests a credential value, and it surfaces no selector, url, or account id — only sanitized copy keys/codes.
+ * Guidance FINISHING (`run.status === "COMPLETED"`) does not connect anything: it surfaces a completion label
+ * plus a "SellerOps로 돌아가 연결 정보 입력하기" CTA that fires `ISSUANCE_COMPLETE`, which the reducer maps to
+ * `credential_issued` for a new-app seller (the secure-entry hand-off) or back to `existing_credential_entry`
+ * for an existing/saved seller — NEVER a stored credential. The completion label alone is path-aware (via the
+ * `reuseExistingApp` copy prop): a new-app seller just issued an app ("애플리케이션 발급 완료"), an existing/saved
+ * seller only CONFIRMED where their existing app's fields live, so no "발급" is shown ("기존 애플리케이션 확인
+ * 완료"). Routing stays path-agnostic — the reducer decides the destination from `path`, not this component. It
+ * never renders or requests a credential value, and surfaces no selector, url, or account id — sanitized keys only.
  *
  * ## Live host + offline-testable
  *
@@ -60,6 +64,12 @@ export interface NaverIssuanceGuidedWalkthroughProps {
   onCommand?: (type: CommandType) => void;
   /** Test seam: an already-built host runtime, so a component test needs no bridge socket. */
   hostRuntime?: GuidedIssuanceRuntime;
+  /**
+   * COPY ONLY. An existing/saved-app seller reuses their store's single app, so the completion label reads
+   * "기존 애플리케이션 확인 완료" (no "발급"); a new-app seller ("false", the default) reads "애플리케이션 발급
+   * 완료". This never changes routing — the reducer routes `ISSUANCE_COMPLETE` from `path`, not from this flag.
+   */
+  reuseExistingApp?: boolean;
   busy?: boolean;
 }
 
@@ -68,6 +78,7 @@ export function NaverIssuanceGuidedWalkthrough({
   run,
   onCommand,
   hostRuntime,
+  reuseExistingApp = false,
   busy,
 }: NaverIssuanceGuidedWalkthroughProps) {
   // The bridge is confined to this component (this phase). Enabled unconditionally here so pairing can begin;
@@ -126,7 +137,7 @@ export function NaverIssuanceGuidedWalkthrough({
   };
 
   return (
-    <div className="space-y-4" aria-label="화면 안내 발급">
+    <div className="space-y-4" aria-label={reuseExistingApp ? "화면 안내" : "화면 안내 발급"}>
       {/* Pairing (guided path only). AgentPairingPanel self-hides when paired or on an incompatible version. */}
       {!paired && (
         <AgentPairingPanel
@@ -169,14 +180,19 @@ export function NaverIssuanceGuidedWalkthrough({
             onCommand={(type) => effectiveCommand?.(type)}
           />
           {effectiveRun.status === "COMPLETED" && (
-            <button
-              type="button"
-              className="btn-primary block w-full"
-              onClick={() => dispatch({ type: "ISSUANCE_COMPLETE" })}
-              disabled={busy}
-            >
-              발급 안내가 끝났어요, 이제 입력할게요
-            </button>
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-ink break-keep" role="status">
+                {reuseExistingApp ? "기존 애플리케이션 확인 완료" : "애플리케이션 발급 완료"}
+              </p>
+              <button
+                type="button"
+                className="btn-primary block w-full"
+                onClick={() => dispatch({ type: "ISSUANCE_COMPLETE" })}
+                disabled={busy}
+              >
+                SellerOps로 돌아가 연결 정보 입력하기
+              </button>
+            </div>
           )}
         </>
       )}

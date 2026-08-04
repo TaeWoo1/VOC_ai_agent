@@ -3,7 +3,8 @@
 // Owns ONE connection attempt (`attach`) and holds the session for the life of the walk — a guided issuance is a
 // single run, not a sequence, so unlike the import binding there is no per-segment re-arm. Unmounting releases
 // both the runtime and the socket; reaching a terminal state releases the socket early while KEEPING the last
-// view, so the walkthrough's "발급 안내가 끝났어요" completion CTA still renders after the agent has gone quiet.
+// view, so the walkthrough's completion label + "돌아가 연결 정보 입력하기" CTA still render after the agent
+// has gone quiet.
 //
 // **Attach is inert until called.** The hook opens no socket on mount — it connects only when the walkthrough
 // calls `attach()` (which it does once the agent is paired). So a controlled/fixture render (the component given
