@@ -105,7 +105,25 @@ export function NaverIssuanceGuidedWalkthrough({
   const hostRefused = !controlled && issuance.unavailable !== null;
   const cannotGuide = cannotPair || hostRefused;
 
-  const toText = () => dispatch({ type: "APPLICATION_ISSUANCE_MODE", mode: "text" });
+  // The commands this walkthrough surfaces from the run's `allowedCommands` — the same curation the import
+  // sibling uses (`GuidedImportCard.OFFERED_COMMANDS`). A barrier's raw `allowedCommands` also includes
+  // PAUSE/RESUME, SET_GUIDANCE_ENABLED, FIND_CURRENT_STEP, and SWITCH_TO_MANUAL; SET_GUIDANCE_ENABLED/
+  // FIND_CURRENT_STEP are inert here, and SWITCH_TO_MANUAL has ONE home — the persistent text button below,
+  // which both aborts the guided run AND advances the FE journey to the checklist. So only these two render.
+  const OFFERED_COMMANDS: readonly CommandType[] = ["REQUEST_STEP_RECHECK", "CANCEL_RUN"];
+  const controlExclude = effectiveRun
+    ? effectiveRun.allowedCommands.filter((c) => !OFFERED_COMMANDS.includes(c))
+    : [];
+
+  const toText = () => {
+    // Switching to text IS the manual path: if a guided run is live and the runtime accepts it, tell the
+    // runtime first (SWITCH_TO_MANUAL → the run aborts cleanly) so it is not left orphaned when this host
+    // unmounts, then advance the FE journey to the static checklist. Best-effort + gated by allowedCommands.
+    if (!controlled && effectiveRun?.allowedCommands.includes("SWITCH_TO_MANUAL")) {
+      effectiveCommand?.("SWITCH_TO_MANUAL");
+    }
+    dispatch({ type: "APPLICATION_ISSUANCE_MODE", mode: "text" });
+  };
 
   return (
     <div className="space-y-4" aria-label="화면 안내 발급">
@@ -145,7 +163,11 @@ export function NaverIssuanceGuidedWalkthrough({
               variant="standalone"
             />
           )}
-          <ActionWindowControlPanel run={effectiveRun} onCommand={(type) => effectiveCommand?.(type)} />
+          <ActionWindowControlPanel
+            run={effectiveRun}
+            exclude={controlExclude}
+            onCommand={(type) => effectiveCommand?.(type)}
+          />
           {effectiveRun.status === "COMPLETED" && (
             <button
               type="button"

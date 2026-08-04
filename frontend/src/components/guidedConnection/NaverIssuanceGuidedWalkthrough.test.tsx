@@ -216,5 +216,43 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
       await userEvent.click(screen.getByRole("button", { name: "확인 완료" }));
       expect(host.sent).toContain("REQUEST_STEP_RECHECK");
     });
+
+    it("curates the control panel — a barrier's full allowedCommands renders only recheck + cancel", () => {
+      const host = fakeHost();
+      render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} hostRuntime={host.runtime} />);
+      // A real barrier offers six commands; the walkthrough must surface only the two meaningful ones.
+      act(() =>
+        host.publish(
+          issuanceRun({
+            allowedCommands: [
+              "REQUEST_STEP_RECHECK",
+              "PAUSE_RUN",
+              "CANCEL_RUN",
+              "SWITCH_TO_MANUAL",
+              "SET_GUIDANCE_ENABLED",
+              "FIND_CURRENT_STEP",
+            ],
+          }),
+        ),
+      );
+      expect(screen.getByRole("button", { name: "확인 완료" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "취소" })).toBeInTheDocument();
+      // Inert / dead-ending controls are NOT surfaced (SWITCH_TO_MANUAL has one home: the text button).
+      expect(screen.queryByRole("button", { name: "직접 진행" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "안내 켜기·끄기" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "현재 단계 다시 찾기" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "일시정지" })).toBeNull();
+    });
+
+    it("the text button aborts a live run via SWITCH_TO_MANUAL (when allowed) AND advances the journey to text", async () => {
+      const host = fakeHost();
+      const dispatch = vi.fn();
+      render(<NaverIssuanceGuidedWalkthrough dispatch={dispatch} hostRuntime={host.runtime} />);
+      act(() => host.publish(issuanceRun({ allowedCommands: ["REQUEST_STEP_RECHECK", "SWITCH_TO_MANUAL"] })));
+      await userEvent.click(screen.getByRole("button", { name: "텍스트로 직접 진행하기" }));
+      // The run is told to stand down (not orphaned), then the FE journey switches to the checklist.
+      expect(host.sent).toContain("SWITCH_TO_MANUAL");
+      expect(dispatch).toHaveBeenCalledWith({ type: "APPLICATION_ISSUANCE_MODE", mode: "text" });
+    });
   });
 });
