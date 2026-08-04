@@ -109,7 +109,7 @@ class SyncRunSingleFlightPostgresProofIT {
     @Test
     void concurrentStartsOnDifferentAccountsAreIndependent() throws Exception {
         UUID org = seedOrg();
-        // Distinct channels: the V35 partial unique index allows only one API account per (org,
+        // Distinct channels: the V36 partial unique index allows only one API account per (org,
         // channel), and single-flight keys on (account, dataType) regardless of channel anyway.
         UUID accountA = seedAccount(org, seedChannel("SF-INDEP-A"));
         UUID accountB = seedAccount(org, seedChannel("SF-INDEP-B"));

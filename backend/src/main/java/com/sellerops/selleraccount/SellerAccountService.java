@@ -75,7 +75,7 @@ public class SellerAccountService {
         // cannot both insert a PENDING API account. The lock is what makes a race return the SAME account —
         // the second caller, once it holds the lock, re-reads via findFirst and returns the first caller's
         // row instead of inserting. The partial unique index uq_seller_accounts_api_org_channel
-        // (V35, on (org_id, channel_id) WHERE is_file_upload = false) is the fail-closed backstop: if the
+        // (V36, on (org_id, channel_id) WHERE is_file_upload = false) is the fail-closed backstop: if the
         // lock is ever bypassed the duplicate API-mode insert is rejected rather than silently creating a
         // second row. (File-upload accounts are not covered — ESM holds several per channel by identity.)
         Channel channel = channels.findByIdForUpdate(req.channelId())

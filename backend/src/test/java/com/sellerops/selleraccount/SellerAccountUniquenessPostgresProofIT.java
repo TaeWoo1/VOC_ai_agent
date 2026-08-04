@@ -27,9 +27,9 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 /**
- * Disposable-Postgres proof for the seller-account uniqueness hardening (V35). The H2 suite cannot host
+ * Disposable-Postgres proof for the seller-account uniqueness hardening (V36). The H2 suite cannot host
  * a filtered index and runs with Flyway off, so the actual DB enforcement is proven here: boot the real
- * context against a throwaway PostgreSQL where <b>real Flyway applies V1..V35</b> and assert the partial
+ * context against a throwaway PostgreSQL where <b>real Flyway applies V1..V36</b> and assert the partial
  * unique index {@code uq_seller_accounts_api_org_channel} behaves — one API-mode account per
  * (org, channel), file-upload accounts unrestricted (ESM), independent per org/channel, a true concurrent
  * insert race collapsing to a single row, and a fail-closed migration on pre-existing duplicates.
@@ -63,9 +63,9 @@ class SellerAccountUniquenessPostgresProofIT {
     @Autowired OrganizationRepository organizations;
     @Autowired JdbcTemplate jdbc;
 
-    // 1 — real Flyway applied V35 and the partial unique index exists on Postgres.
+    // 1 — real Flyway applied V36 and the partial unique index exists on Postgres.
     @Test
-    void flywayAppliedV35AndPartialIndexExists() {
+    void flywayAppliedV36AndPartialIndexExists() {
         Integer maxVersion = jdbc.queryForObject(
                 "select max(cast(version as integer)) from flyway_schema_history where success", Integer.class);
         assertThat(maxVersion).isGreaterThanOrEqualTo(35);
@@ -183,7 +183,7 @@ class SellerAccountUniquenessPostgresProofIT {
             accounts.saveAndFlush(account(org, channel, false));
             accounts.saveAndFlush(account(org, channel, false));
 
-            // Re-adding the migration's index (as V35 does) must ABORT on the duplicate, not silently dedup.
+            // Re-adding the migration's index (as V36 does) must ABORT on the duplicate, not silently dedup.
             assertThatThrownBy(() -> jdbc.execute("create unique index " + INDEX
                     + " on seller_accounts (org_id, channel_id) where is_file_upload = false"))
                     .isInstanceOf(DataAccessException.class);

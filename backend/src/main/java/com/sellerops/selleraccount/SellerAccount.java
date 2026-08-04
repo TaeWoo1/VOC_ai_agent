@@ -18,7 +18,7 @@ import lombok.Setter;
  * <p><b>At most one API-mode account per (org, channel).</b> An org's official-API connection to a
  * channel is singular, so a duplicate is prevented by a <b>partial</b> unique index —
  * {@code uq_seller_accounts_api_org_channel} on {@code (org_id, channel_id) WHERE is_file_upload =
- * false} (Flyway migration V35). File-upload accounts are deliberately NOT covered: ESM file-import
+ * false} (Flyway migration V36). File-upload accounts are deliberately NOT covered: ESM file-import
  * legitimately holds several file-upload rows on one channel, one per marketplace seller identity
  * ({@code EsmFileImportAccountService}). The index is filtered, which JPA's {@code @UniqueConstraint}
  * cannot express, so it lives in the migration only (like the existing V2 partial unique indexes) and

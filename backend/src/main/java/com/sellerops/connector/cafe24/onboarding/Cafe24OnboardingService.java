@@ -115,7 +115,7 @@ public class Cafe24OnboardingService {
             // Lock the channel row FIRST (SELECT … FOR UPDATE) so concurrent first-time connects on this
             // channel serialize: a double-clicked / retried start then re-reads and reuses the same API-mode
             // account instead of racing a second insert. Without this the partial unique index
-            // uq_seller_accounts_api_org_channel (V35, one API row per (org, channel)) would surface the
+            // uq_seller_accounts_api_org_channel (V36, one API row per (org, channel)) would surface the
             // race as a fail-closed error rather than a graceful reuse — the same guarantee NAVER's
             // SellerAccountService.registerApiChannel already relies on.
             channels.findByIdForUpdate(channel.getId());
