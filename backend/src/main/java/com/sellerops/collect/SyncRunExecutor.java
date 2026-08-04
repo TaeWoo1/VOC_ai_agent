@@ -85,6 +85,12 @@ public class SyncRunExecutor {
     /** Optional: advances a NAVER account PREPARING → CONNECTED after its first ORDER_SUMMARY sync
      *  collects. Null in the bridge-less test constructor (the transition is then simply not applied). */
     private final NaverConnectionLifecycle naverLifecycle;
+    /**
+     * Optional single-flight + orphaned-run recovery gate. Non-null in production (Spring injects it);
+     * null in the older test constructors, where the legacy "always create a new run" path is kept so
+     * existing unit tests are unaffected. See {@link SyncRunGate}.
+     */
+    private final SyncRunGate runGate;
 
     @Autowired
     public SyncRunExecutor(SellerAccountRepository sellerAccounts, ChannelRepository channels,
@@ -94,7 +100,8 @@ public class SyncRunExecutor {
                            ChannelConnectionStatusRepository connectionStatus,
                            Cafe24ReviewIssueBridge reviewIssueBridge,
                            Cafe24ReviewPromotionReconciler reviewIssueReconciler,
-                           NaverConnectionLifecycle naverLifecycle) {
+                           NaverConnectionLifecycle naverLifecycle,
+                           SyncRunGate runGate) {
         this.sellerAccounts = sellerAccounts;
         this.channels = channels;
         this.registry = registry;
@@ -106,13 +113,31 @@ public class SyncRunExecutor {
         this.reviewIssueBridge = reviewIssueBridge;
         this.reviewIssueReconciler = reviewIssueReconciler;
         this.naverLifecycle = naverLifecycle;
+        this.runGate = runGate;
+    }
+
+    /**
+     * Bridge-only convenience constructor (no run gate) — delegates with a null gate, keeping the
+     * legacy single-run behavior for callers/tests that do not exercise single-flight.
+     */
+    public SyncRunExecutor(SellerAccountRepository sellerAccounts, ChannelRepository channels,
+                           ConnectorRegistry registry, IngestionService ingestionService,
+                           ChannelOrderIngestionService orderIngestionService,
+                           SyncJobRepository syncJobs, SyncCursorRepository cursors,
+                           ChannelConnectionStatusRepository connectionStatus,
+                           Cafe24ReviewIssueBridge reviewIssueBridge,
+                           Cafe24ReviewPromotionReconciler reviewIssueReconciler,
+                           NaverConnectionLifecycle naverLifecycle) {
+        this(sellerAccounts, channels, registry, ingestionService, orderIngestionService,
+                syncJobs, cursors, connectionStatus, reviewIssueBridge, reviewIssueReconciler,
+                naverLifecycle, null);
     }
 
     /**
      * Bridge-less constructor for tests (and any caller) that do not exercise the Cafe24
-     * review→issue-memory bridge/reconciler or the NAVER connection lifecycle. Delegates with nulls,
-     * which the ingest and post-run paths null-guard. Production uses the {@code @Autowired}
-     * constructor above.
+     * review→issue-memory bridge/reconciler, the NAVER connection lifecycle, or the single-flight
+     * gate. Delegates with nulls, which the ingest and post-run paths null-guard. Production uses the
+     * {@code @Autowired} constructor above.
      */
     public SyncRunExecutor(SellerAccountRepository sellerAccounts, ChannelRepository channels,
                            ConnectorRegistry registry, IngestionService ingestionService,
@@ -120,7 +145,7 @@ public class SyncRunExecutor {
                            SyncJobRepository syncJobs, SyncCursorRepository cursors,
                            ChannelConnectionStatusRepository connectionStatus) {
         this(sellerAccounts, channels, registry, ingestionService, orderIngestionService,
-                syncJobs, cursors, connectionStatus, null, null, null);
+                syncJobs, cursors, connectionStatus, null, null, null, null);
     }
 
     /**
@@ -173,7 +198,22 @@ public class SyncRunExecutor {
             backfillSeed = seed.get();
         }
 
-        SyncJob job = startJob(orgId, account, dataType, trigger, connector.kind());
+        // Single-flight admission: one run per (account, data type) at a time. The gate reclaims an
+        // orphaned RUNNING run and, if a fresh one is already in flight, returns it instead of starting
+        // a duplicate (the long pagination below never runs twice for the same account+type). Older test
+        // constructors pass a null gate and keep the legacy "always start a new run" behavior.
+        SyncJob job;
+        if (runGate != null) {
+            SyncRunGate.RunStart start = runGate.beginRunOrCoalesce(account.getId(), dataType,
+                    () -> startJob(orgId, account, dataType, trigger, connector.kind()));
+            if (start.coalesced()) {
+                // A run for this (account, data type) is already in flight — return it, do not re-run.
+                return start.job();
+            }
+            job = start.job();
+        } else {
+            job = startJob(orgId, account, dataType, trigger, connector.kind());
+        }
         SyncJob finished = runPages(job, connector, orgId, account, channel, dataType, backfillSeed);
         reconcileCafe24ReviewIssueMemory(finished, orgId, account, channel, dataType, backfill);
         return finished;

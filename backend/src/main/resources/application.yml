@@ -37,6 +37,15 @@ sellerops:
     # polls until ops flips this; the file-upload path is unaffected either way.
     scheduler-enabled: ${SELLEROPS_COLLECT_SCHEDULER_ENABLED:false}
     poll-interval-ms: ${SELLEROPS_COLLECT_POLL_INTERVAL_MS:60000}
+    # Single-flight orphaned-run recovery (SyncRunGate): a RUNNING sync older than
+    # this is treated as abandoned (crash/restart mid-run) and failed closed the next
+    # time a run for the same (account, data type) starts, so it never blocks forever.
+    # Chosen well ABOVE any legitimate single-run wall-time — per-request HTTP timeout
+    # is 20s so no run hangs indefinitely; a real manual run was observed at ~8.6 min;
+    # the scheduler's floor interval is 15 min. 60 min is a wide safety margin (a live
+    # run is never falsely reclaimed) while still recovering an orphan within the hour.
+    # Raise it for stores whose syncs legitimately run longer.
+    sync-stale-after-minutes: ${SELLEROPS_COLLECT_SYNC_STALE_AFTER_MINUTES:60}
   admin:
     inquiry-dismissal:
       # Operator-only bulk inquiry-dismissal admin endpoints (audited spam set-aside

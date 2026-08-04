@@ -159,7 +159,16 @@ public class CollectControlService {
         requireAccount(orgId, sellerAccountId);
         DataType dataType = parseDataType(dataTypeRaw);
         BackfillWindow window = BackfillWindow.of(startDate, endDate);
-        return SyncRunView.from(executor.execute(orgId, sellerAccountId, dataType, "MANUAL", window));
+        SyncJob run = executor.execute(orgId, sellerAccountId, dataType, "MANUAL", window);
+        // Single-flight can coalesce this backfill onto an already in-flight run (it returns that
+        // RUNNING run). A backfill carries a specific window the in-flight run did NOT collect, so we
+        // must not report it as done — fail closed and let the operator retry once the run finishes,
+        // rather than silently dropping the window or racing the shared cursor.
+        if ("RUNNING".equals(run.getStatus())) {
+            throw ApiException.conflict(
+                    "이미 수집이 진행 중입니다. 진행 중인 수집이 끝난 뒤 기간 지정 백필을 다시 시도해 주세요.");
+        }
+        return SyncRunView.from(run);
     }
 
     /** Operator re-run of a FAILED/PARTIAL pull run, with the attempt counter advanced. */
@@ -174,6 +183,13 @@ public class CollectControlService {
         }
         SyncJob rerun = executor.execute(orgId, original.getSellerAccountId(),
                 parseDataType(original.getDataType()), "RETRY");
+        // Single-flight can coalesce this retry onto an already in-flight run (returned as RUNNING).
+        // That job belongs to the executor thread currently running it — do NOT bump its attempt or
+        // save the (detached, stale) snapshot, which would race and clobber the live run's status and
+        // cursor. Return it as-is: the operator sees the run already in progress.
+        if ("RUNNING".equals(rerun.getStatus())) {
+            return SyncRunView.from(rerun);
+        }
         rerun.setAttempt(original.getAttempt() + 1);
         return SyncRunView.from(syncJobs.save(rerun));
     }

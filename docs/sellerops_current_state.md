@@ -12,6 +12,19 @@
 
 ---
 
+## 2026-08-04 부록 (20) — Sync Single-Flight + Orphaned-RUNNING Recovery v1 (backend-only, 마이그레이션 없음) — 부록(19) sync #2 중복 원인 종결 ✅
+
+> 부록(19)/슬라이스 §0.2.24 감사가 지목한 PRODUCT GAP ②(in-flight 중복 방지 부재)·③(orphaned-RUNNING 복구 부재)를 종결. **backend만, 마이그레이션·FE·API contract 변경 없음, live 마켓 실행 없음.** 세부: 슬라이스 §0.2.25.
+
+- **Single-flight(신규 `SyncRunGate`):** 한 (seller account, data type)당 동시 1 run. 시작 시 seller account 행을 `PESSIMISTIC_WRITE` 잠금 → 임계구역에서 stale 정리 + 동일 (account,dataType) RUNNING 조회 → 있으면 새 job 없이 기존 in-flight 반환(coalesce), 없으면 새 RUNNING 생성. 잠금은 job 생성 즉시 해제, 긴 `runPages`는 잠금 밖. `execute()`의 RUNNING 반환 = coalesced 판별자(실제 실행 run은 항상 terminal). 다른 account/dataType 독립.
+- **Orphaned 복구(lazy, boot 스윕 없음):** 다중 인스턴스 가능성(`SyncScheduleClaimer` 주석) 때문에 **boot-wide 스윕 금지** — 위 잠금에서 lazy로, RUNNING이 stale 임계(`startedAt`, null이면 `createdAt` fallback) 초과 시에만 FAILED fail-close(`finishedAt`+안정 sanitized 메시지). **fresh RUNNING 절대 미회수.** 시간 기준이라 임계>최장 정상 run이면 live run을 안 죽임.
+- **stale 임계 = 60분(설정 가능 `sellerops.collect.sync-stale-after-minutes`):** per-request HTTP 타임아웃 20s + 관측 실제 run ~8.6분 + 스케줄러 최소 15분 → 60분은 오판 없는 마진이면서 1시간 내 orphan 회수.
+- **독립 리뷰 지적 실제 수정:** retry()가 coalesce된 라이브 run을 attempt/status/cursor로 덮어쓰던 lost-update(MEDIUM-1) → RUNNING이면 무-훼손 반환; manualBackfill()이 coalesce로 window 조용히 유실(MEDIUM-2) → **HTTP 409 fail-close**; null `startedAt` 영구 미회수(LOW-3) → `createdAt` fallback. `manualSync` 증분 경로는 coalesce 시 RUNNING view 그대로(window 없음, 의도 비대칭).
+- **게이트:** 전체 backend **1917 tests / 0 fail / 0 error / 14 skip** + gated Postgres proof IT `SyncRunSingleFlightPostgresProofIT` **2/2 LIVE-PROVEN**(disposable PG 15 :55432, teardown): **8-스레드 동시 시작 → 정확히 1 job(7 coalesce), RUNNING 1행** + 다른 account 독립. 마이그레이션 0. 독립 리뷰 **HIGH=0 MEDIUM=0**(2 LOW non-blocking). **push/PR 없음.**
+- **남은 FE 공백(범위 밖):** 백엔드가 coalesce 시 RUNNING view를 줄 수 있으나 FE에 "이미 진행 중" 상태 없음 + ~8.6분 동기 sync 스피너 그대로 → 별도 frontend 단위.
+
+---
+
 ## 2026-08-04 부록 (19) — NAVER Existing-App First Connection E2E: 기능 evidence PASS(라이브) — **단, approval-compliant clean E2E는 미증명 · 튜토리얼 최종 종결 아님** ⚠️(정정)
 
 > existing-app 첫 연결 전체 흐름을 감사(READY, 코드 변경 0)한 뒤 동일 세션에서 운영자 주도로 실제 네이버 스토어에 대해 **기능적 라이브 증거는 PASS**했으나, **승인 상한을 초과**해 **approval-compliant clean E2E는 아직 미증명**이다. **이 결과를 전체 튜토리얼 최종 종결로 표기하지 말 것.** 세부·감사: 슬라이스 §0.2.24.
