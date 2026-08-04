@@ -189,6 +189,59 @@ describe("issuance mode — guided (Action Window) vs text, same completion hand
   });
 });
 
+describe("existing-app guided confirmation — the SAME walk, but it RETURNS to existing-credential entry", () => {
+  // Existing-app entry (path="existing"): the seller has the store's one app and only needs to be shown
+  // where its order API group + ID/Secret live. Text is the default (the checklist + form already render).
+  const existing = reduce(fork, { type: "APPLICATION_PATH", choice: "have" });
+
+  it("APPLICATION_ISSUANCE_MODE{guided} at existing entry → the shared walkthrough, path preserved", () => {
+    expect(existing.phase).toBe("existing_credential_entry");
+    expect(existing.path).toBe("existing");
+    const guided = reduce(existing, { type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
+    expect(guided.phase).toBe("application_issuance_guided");
+    expect(guided.actor).toBe("SUPERVISED_ACTION");
+    expect(guided.path).toBe("existing"); // NOT re-pathed to "new" — no second app is ever issued
+  });
+
+  it("guided + ISSUANCE_COMPLETE returns an existing-app seller to existing_credential_entry (never credential_issued)", () => {
+    const guided = reduce(existing, { type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
+    const done = reduce(guided, { type: "ISSUANCE_COMPLETE" });
+    expect(done.phase).toBe("existing_credential_entry");
+    expect(done.path).toBe("existing");
+    expect(done.milestones).toEqual({ registered: false, tested: false, synced: false }); // nothing minted
+  });
+
+  it("guided + APPLICATION_ISSUANCE_MODE{text} returns an existing-app seller to existing_credential_entry (never application_issuance)", () => {
+    const guided = reduce(existing, { type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
+    const back = reduce(guided, { type: "APPLICATION_ISSUANCE_MODE", mode: "text" });
+    expect(back.phase).toBe("existing_credential_entry");
+    expect(back.path).toBe("existing");
+  });
+
+  it("a saved-path seller who fell back to existing entry gets the SAME return routing", () => {
+    // A saved key that failed its test lands on existing_credential_entry with path="saved".
+    const saved = reduce(
+      reduce(INITIAL_STATE, { type: "RESUME_FROM_CAPABILITY", credentialPresent: true, completed: false }),
+      { type: "TEST_RESULT", status: "FAILED", reasonCode: "INVALID_CREDENTIAL" },
+    );
+    expect(saved.phase).toBe("existing_credential_entry");
+    expect(saved.path).toBe("saved");
+    const guided = reduce(saved, { type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
+    expect(guided.phase).toBe("application_issuance_guided");
+    expect(reduce(guided, { type: "ISSUANCE_COMPLETE" }).phase).toBe("existing_credential_entry");
+    expect(reduce(guided, { type: "APPLICATION_ISSUANCE_MODE", mode: "text" }).phase).toBe("existing_credential_entry");
+  });
+
+  it("the existing-app entry still submits and still exits to recovery (no regression)", () => {
+    expect(reduce(existing, { type: "SUBMIT_CREDENTIALS" }).phase).toBe("credential_registration");
+    expect(reduce(existing, { type: "SECRET_UNAVAILABLE" }).phase).toBe("credential_recovery_required");
+  });
+
+  it("existing entry stays inert to a stray mode{text} (text is already the rendered default)", () => {
+    expect(reduce(existing, { type: "APPLICATION_ISSUANCE_MODE", mode: "text" })).toBe(existing);
+  });
+});
+
 describe("full journeys → completed only after registered ∧ tested ∧ synced (§12)", () => {
   it("new-app happy path walks to completed", () => {
     const s = run(HAPPY_PATH_EVENTS);

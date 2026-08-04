@@ -31,7 +31,17 @@ describe("guidedConnection persistence", () => {
 
   it("restores the existing-credential entry step (reuse path) without re-walking the gate", () => {
     saveGuidedProgress(at("existing_credential_entry", "existing"));
-    expect(loadGuidedInitialState().phase).toBe("existing_credential_entry");
+    const restored = loadGuidedInitialState();
+    expect(restored.phase).toBe("existing_credential_entry");
+    // A refresh keeps the seller on the EXISTING path, so the guided offer + return routing stay correct.
+    expect(restored.path).toBe("existing");
+  });
+
+  it("does NOT restore the transient guided walkthrough (fail-closed: a refresh re-derives from the backend)", () => {
+    // `application_issuance_guided` hosts a live agent run; a hard refresh drops it and the page's own
+    // saved-credential re-check drives recovery, rather than silently re-opening a walkthrough.
+    saveGuidedProgress(at("application_issuance_guided", "existing"));
+    expect(loadGuidedInitialState()).toEqual(INITIAL_STATE);
   });
 
   it.each<GuidedPhase>([

@@ -239,6 +239,23 @@ describe("GuidedConnectionWizard — discovery / reuse / recovery phases", () =>
     expect(props.dispatch).toHaveBeenCalledWith({ type: "SECRET_UNAVAILABLE" });
   });
 
+  it("existing_credential_entry → optional guided offer; 화면을 보며 확인 dispatches into the shared walkthrough", async () => {
+    const { props } = renderWizard(stateAt("existing_credential_entry"));
+    // The form (text default) renders alongside the offer.
+    expect(screen.getByRole("button", { name: "연결 정보 저장" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "화면을 보며 확인" }));
+    expect(props.dispatch).toHaveBeenCalledWith({ type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
+  });
+
+  it("existing_credential_entry → 텍스트로 직접 확인 dismisses the offer but keeps the form (no reducer event)", async () => {
+    const { props } = renderWizard(stateAt("existing_credential_entry"));
+    await userEvent.click(screen.getByRole("button", { name: "텍스트로 직접 확인" }));
+    expect(screen.queryByRole("button", { name: "화면을 보며 확인" })).toBeNull();
+    // The secure form stays — text was always the default.
+    expect(screen.getByRole("button", { name: "연결 정보 저장" })).toBeInTheDocument();
+    expect(props.dispatch).not.toHaveBeenCalled();
+  });
+
   it("credential_recovery_required → recover by re-viewing/reissuing the Secret; NO app-delete option is offered", async () => {
     const { props } = renderWizard(stateAt("credential_recovery_required", "SECRET_UNRECOVERABLE"));
     await userEvent.click(screen.getByRole("button", { name: "시크릿을 다시 확인했거나 재발급했어요" }));

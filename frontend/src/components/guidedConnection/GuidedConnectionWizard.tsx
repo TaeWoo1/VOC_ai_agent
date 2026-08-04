@@ -5,6 +5,7 @@ import type {
 } from "../../lib/types";
 import { relativeTime } from "../../lib/format";
 import { ConnectionCapabilityPanel } from "./ConnectionCapabilityPanel";
+import { ExistingAppGuidanceOffer } from "./ExistingAppGuidanceOffer";
 import { NaverIssuanceTutorial } from "./NaverIssuanceTutorial";
 import { NaverIssuanceModeChoice } from "./NaverIssuanceModeChoice";
 import { NaverIssuanceGuidedWalkthrough } from "./NaverIssuanceGuidedWalkthrough";
@@ -248,6 +249,9 @@ export function GuidedConnectionWizard({
         {phase === "existing_credential_entry" &&
           (template ? (
             <div className="space-y-4">
+              {/* Optional screen guidance offer (text stays the default: the checklist + form below render
+                  immediately). Guided → the shared Action Window walkthrough, which routes BACK here. */}
+              <ExistingAppGuidanceOffer dispatch={dispatch} busy={busy} />
               {/* Existing app: confirm the app's order API group + read ID/Secret — never a second app. */}
               <details className="rounded-lg border border-line px-4 py-3">
                 <summary className="cursor-pointer select-none text-sm font-medium text-ink">

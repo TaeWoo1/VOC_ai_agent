@@ -76,6 +76,14 @@ function entryPhaseFor(path: GuidedPath): GuidedPhase {
   return path === "existing" || path === "saved" ? "existing_credential_entry" : "sellerops_credential_entry";
 }
 
+/** Existing/saved-app sellers reuse their store's single app; the guided walk only SHOWS them where its
+ *  order API group + Application ID/Secret live — it issues nothing. So from the shared walkthrough both
+ *  completion and the text fallback return an existing/saved seller to existing-credential entry, while a
+ *  new-app seller advances into the issuance credential hand-off / static issuance checklist. */
+function reusesExistingApp(path: GuidedPath): boolean {
+  return path === "existing" || path === "saved";
+}
+
 /** Map a non-SUCCESS `test-connection` result to the next safe phase (§12, §5). */
 function afterTestFailure(
   status: Exclude<ConnectionTestStatus, "SUCCESS">,
@@ -212,12 +220,17 @@ export function guidedConnectionReducer(
       return prev;
 
     case "application_issuance_guided":
-      // Guidance finished (COMPLETED) → the same credential-entry hand-off as the text path; the guided
-      // walkthrough never reads or stores a credential itself. `mode:"text"` is the fallback back to the
-      // static checklist (incl. when the Local Agent is unavailable). Anything else is a no-op.
-      if (event.type === "ISSUANCE_COMPLETE") return state("credential_issued", m, null, p);
+      // Guidance finished (COMPLETED) or the seller fell back to text. The DESTINATION is path-aware: an
+      // existing/saved-app seller was only being SHOWN where their app's order API group + ID/Secret live,
+      // so both events return them to the existing-credential entry; a new-app seller issued a fresh app, so
+      // completion is the credential-issued hand-off and text drops to the static issuance checklist. The
+      // shared walkthrough carries NO path — the reducer alone routes, so one event serves both onboarding
+      // paths. The guided walkthrough never reads or stores a credential itself; nothing here mints one.
+      if (event.type === "ISSUANCE_COMPLETE") {
+        return state(reusesExistingApp(p) ? "existing_credential_entry" : "credential_issued", m, null, p);
+      }
       if (event.type === "APPLICATION_ISSUANCE_MODE" && event.mode === "text") {
-        return state("application_issuance", m, null, p);
+        return state(reusesExistingApp(p) ? "existing_credential_entry" : "application_issuance", m, null, p);
       }
       return prev;
 
@@ -230,6 +243,13 @@ export function guidedConnectionReducer(
       return prev;
 
     case "existing_credential_entry":
+      // Optional guidance: an existing/saved-app seller may switch into the SAME Action Window walkthrough to
+      // be SHOWN where the order API group + Application ID/Secret live on their existing app (no second app is
+      // issued — NAVER allows one app per store). Path is preserved, so the walk RETURNS here on finish/text
+      // (see `application_issuance_guided`). Text stays the default: the static checklist + form already render.
+      if (event.type === "APPLICATION_ISSUANCE_MODE" && event.mode === "guided") {
+        return state("application_issuance_guided", m, null, p);
+      }
       if (event.type === "SUBMIT_CREDENTIALS") return state("credential_registration", m, null, p);
       // The seller has the app but cannot produce the Secret → recovery (never a forced new app, §flow 4).
       if (event.type === "SECRET_UNAVAILABLE") {
