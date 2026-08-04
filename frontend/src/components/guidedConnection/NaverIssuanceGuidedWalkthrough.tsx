@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useBridge } from "../../hooks/useBridge";
 import type { ActionWindowRunView, CommandType } from "../../lib/actionWindow/contract";
+import type { IssuanceAppBranch } from "../../../../contracts/action-window/v2/index";
 import { blockerView, issuanceStepDetail } from "../../lib/actionWindow/copy";
 import { OperationRunTimeline } from "../actionWindow/OperationRunTimeline";
 import { ActionWindowControlPanel } from "../actionWindow/ActionWindowControlPanel";
@@ -50,6 +51,17 @@ import type { GuidedEvent } from "../../lib/guidedConnection";
  * seam runtime) overrides the live host, so the component renders with no reachable bridge; `useBridge` is
  * likewise mocked in the component's own tests.
  */
+/**
+ * Read the sanitized issuance app-branch off a run view. `appBranch` is a v2 ISSUANCE-only field, so it is
+ * not declared on the v1-shaped view type the shared Action Window surfaces consume here — but the live host
+ * publishes the v2 view, and a fixture may supply it. Read it structurally and VALIDATE the value, so a
+ * missing / unexpected field just reads as "not yet observed" (null) rather than mis-routing the journey.
+ */
+function readIssuanceAppBranch(view: ActionWindowRunView | null): IssuanceAppBranch | null {
+  const branch = (view as { appBranch?: unknown } | null)?.appBranch;
+  return branch === "existing" || branch === "new" ? branch : null;
+}
+
 export interface NaverIssuanceGuidedWalkthroughProps {
   /** Journey events (the text fallback + the completion hand-off). Never carries a credential. */
   dispatch: (event: GuidedEvent) => void;
@@ -130,23 +142,17 @@ export function NaverIssuanceGuidedWalkthrough({
   // path it never appears.
   const offerTextFallback = cannotGuide || agentUnreachable;
 
-  // The runtime reveals existing-vs-new by OBSERVING NAVER's application list; it surfaces that to the FE as
-  // the step-2 copy key (open-app for an existing app, create-app for an empty store). Read it once and set the
-  // journey path so completion routes correctly — the seller never pre-declares have/new (guided-first).
+  // The runtime reveals existing-vs-new by OBSERVING NAVER's application list, and publishes that as the
+  // sanitized `appBranch` on the issuance run view (contract). Read it once and set the journey path so
+  // completion routes correctly — the seller never pre-declares have/new (guided-first), and the FE no longer
+  // decodes the step-2 copy key. `appBranch` absent ⇒ not yet observed ⇒ the path stays `unknown` (fail-safe).
   const branchObservedRef = useRef(false);
-  const stepCopyKey = effectiveRun?.currentStep?.copyKey;
+  const observedBranch = readIssuanceAppBranch(effectiveRun);
   useEffect(() => {
-    if (branchObservedRef.current) return;
-    const branch =
-      stepCopyKey === "actionWindow.issuance.openApp"
-        ? "existing"
-        : stepCopyKey === "actionWindow.issuance.createApp"
-          ? "new"
-          : null;
-    if (!branch) return;
+    if (branchObservedRef.current || !observedBranch) return;
     branchObservedRef.current = true;
-    dispatch({ type: "ISSUANCE_APP_BRANCH_OBSERVED", branch });
-  }, [stepCopyKey, dispatch]);
+    dispatch({ type: "ISSUANCE_APP_BRANCH_OBSERVED", branch: observedBranch });
+  }, [observedBranch, dispatch]);
 
   // The commands this walkthrough surfaces from the run's `allowedCommands` — the same curation the import
   // sibling uses (`GuidedImportCard.OFFERED_COMMANDS`). A barrier's raw `allowedCommands` also includes

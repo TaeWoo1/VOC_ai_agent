@@ -159,6 +159,20 @@ export const VERIFICATION_STATES = ["UNVERIFIED"] as const;
 export type VerificationState = (typeof VERIFICATION_STATES)[number];
 
 /**
+ * v2, ISSUANCE-SCOPED. Which application branch the API-issuance guidance runtime OBSERVED on the seller's
+ * API-center application list — `existing` (the store already holds its one Commerce app, so the walk OPENS
+ * it) or `new` (the store has none, so the walk CREATES one). It exists so the frontend routes the
+ * guided-first onboarding journey on an explicit sanitized signal instead of decoding the step-2 copy key.
+ *
+ * It rides ONLY the issuance run view (`ActionWindowRunView.appBranch`), and only on an
+ * `API_ISSUANCE_GUIDANCE` run: it is absent until the list is observed, and never present on any other run
+ * or on any command/event payload. It is a single sanitized bit — it carries NO app name, store name,
+ * account id, url, or selector.
+ */
+export const ISSUANCE_APP_BRANCHES = ["existing", "new"] as const;
+export type IssuanceAppBranch = (typeof ISSUANCE_APP_BRANCHES)[number];
+
+/**
  * Why a run stopped.
  *
  * <p>The last two are import-run additions, and both close a real hole rather than adding vocabulary:
@@ -317,6 +331,14 @@ export interface ActionWindowRunView {
   executionMode: ExecutionMode;
   /** v2: the run's intent. Absent ⇒ EXPORT (v1-compatible). REPLY_SUBMISSION drives the guided post. */
   intent?: RunIntent;
+  /**
+   * v2, ISSUANCE-ONLY. The application branch the API-issuance runtime observed on the seller's application
+   * list (`existing` → open the one existing app; `new` → create one). Absent until the list is observed, and
+   * present ONLY on an `API_ISSUANCE_GUIDANCE` run (`validateRunView` rejects it on any other intent). Never an
+   * app/store/account identity — one sanitized bit the FE routes the guided-first journey on, so it no longer
+   * has to decode the step-2 copy key.
+   */
+  appBranch?: IssuanceAppBranch;
 
   currentStep?: {
     stepId: string;
@@ -586,6 +608,14 @@ export function validateRunView(input: unknown): ValidationResult {
   if (!(RUN_STATUSES as readonly string[]).includes(input.status as string)) e.push(err("UNKNOWN_ENUM", "$.status"));
   if (!(EXECUTION_MODES as readonly string[]).includes(input.executionMode as string)) e.push(err("UNKNOWN_ENUM", "$.executionMode"));
   if (input.intent !== undefined && !(RUN_INTENTS as readonly string[]).includes(input.intent as string)) e.push(err("UNKNOWN_ENUM", "$.intent"));
+  // appBranch is issuance-scoped: a known member, and ONLY on an API_ISSUANCE_GUIDANCE run (never on export /
+  // reply / import). This keeps the sanitized branch bit from riding a run it has no meaning on.
+  if (input.appBranch !== undefined) {
+    if (!(ISSUANCE_APP_BRANCHES as readonly string[]).includes(input.appBranch as string)) {
+      e.push(err("UNKNOWN_ENUM", "$.appBranch"));
+    }
+    if (input.intent !== "API_ISSUANCE_GUIDANCE") e.push(err("CONSTRAINT_VIOLATION", "$.appBranch"));
+  }
   if (typeof input.guidanceEnabled !== "boolean") e.push(err("MISSING_FIELD", "$.guidanceEnabled"));
 
   // allowedCommands ⊆ COMMAND_TYPES

@@ -54,8 +54,9 @@ function fakeHost() {
   };
 }
 
-/** A sanitized issuance run view — copy KEYS only, no prose/selector/url/credential/account id. */
-function issuanceRun(over: Partial<ActionWindowRunView> = {}): ActionWindowRunView {
+/** A sanitized issuance run view — copy KEYS only, no prose/selector/url/credential/account id. `appBranch`
+ *  is the v2 issuance-only signal the runtime publishes once it has observed the application list. */
+function issuanceRun(over: Partial<ActionWindowRunView> & { appBranch?: "existing" | "new" } = {}): ActionWindowRunView {
   return {
     protocolVersion: 1,
     runId: "run_issue01issue01",
@@ -293,12 +294,35 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
       expect(host.sent).toContain("REQUEST_STEP_RECHECK");
     });
 
-    it("the runtime branch is observed from the step-2 copy key → dispatches ISSUANCE_APP_BRANCH_OBSERVED", () => {
+    it("the branch is observed from the run view's appBranch → dispatches ISSUANCE_APP_BRANCH_OBSERVED", () => {
       const dispatch = vi.fn();
       const host = fakeHost();
       render(<NaverIssuanceGuidedWalkthrough dispatch={dispatch} hostRuntime={host.runtime} />);
       start();
-      // Existing app: the runtime drives the open-app step → the FE reads "existing".
+      // Existing app: the runtime published appBranch:"existing" → the FE routes on it (not the copy key).
+      act(() => host.publish(issuanceRun({ appBranch: "existing" })));
+      expect(dispatch).toHaveBeenCalledWith({ type: "ISSUANCE_APP_BRANCH_OBSERVED", branch: "existing" });
+    });
+
+    it("an empty store is observed as branch 'new' (once)", () => {
+      const dispatch = vi.fn();
+      const host = fakeHost();
+      render(<NaverIssuanceGuidedWalkthrough dispatch={dispatch} hostRuntime={host.runtime} />);
+      start();
+      act(() => host.publish(issuanceRun({ appBranch: "new" })));
+      expect(dispatch).toHaveBeenCalledWith({ type: "ISSUANCE_APP_BRANCH_OBSERVED", branch: "new" });
+      // Latched: a later same-branch frame does not re-dispatch.
+      act(() => host.publish(issuanceRun({ appBranch: "new" })));
+      expect(dispatch.mock.calls.filter((c) => c[0]?.type === "ISSUANCE_APP_BRANCH_OBSERVED")).toHaveLength(1);
+    });
+
+    it("branch comes from appBranch, NOT the copy key — a view with no appBranch dispatches nothing", () => {
+      const dispatch = vi.fn();
+      const host = fakeHost();
+      render(<NaverIssuanceGuidedWalkthrough dispatch={dispatch} hostRuntime={host.runtime} />);
+      start();
+      // A step-2 view whose copy key would once have implied a branch, but with NO appBranch yet → no dispatch
+      // (the runtime has not observed the list; the journey stays path-unknown, fail-safe).
       act(() =>
         host.publish(
           issuanceRun({
@@ -306,25 +330,25 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
           }),
         ),
       );
-      expect(dispatch).toHaveBeenCalledWith({ type: "ISSUANCE_APP_BRANCH_OBSERVED", branch: "existing" });
+      expect(dispatch.mock.calls.filter((c) => c[0]?.type === "ISSUANCE_APP_BRANCH_OBSERVED")).toHaveLength(0);
     });
 
-    it("a create-app step is observed as branch 'new' (once)", () => {
+    it("appBranch wins over a contradictory copy key (copy-key inference is fully removed)", () => {
       const dispatch = vi.fn();
       const host = fakeHost();
       render(<NaverIssuanceGuidedWalkthrough dispatch={dispatch} hostRuntime={host.runtime} />);
       start();
+      // Deliberately mismatched: appBranch says "existing" while the copy key is create-app. The FE must follow
+      // the explicit signal, proving it no longer decodes the copy key.
       act(() =>
         host.publish(
           issuanceRun({
+            appBranch: "existing",
             currentStep: { stepId: "aw.issuance_open_or_create_app", stepNumber: 2, totalSteps: 6, copyKey: "actionWindow.issuance.createApp", status: "AWAITING_USER" },
           }),
         ),
       );
-      expect(dispatch).toHaveBeenCalledWith({ type: "ISSUANCE_APP_BRANCH_OBSERVED", branch: "new" });
-      // Latched: a later same-branch frame does not re-dispatch.
-      act(() => host.publish(issuanceRun({ currentStep: { stepId: "aw.issuance_open_or_create_app", stepNumber: 2, totalSteps: 6, copyKey: "actionWindow.issuance.createApp", status: "AWAITING_USER" } })));
-      expect(dispatch.mock.calls.filter((c) => c[0]?.type === "ISSUANCE_APP_BRANCH_OBSERVED")).toHaveLength(1);
+      expect(dispatch).toHaveBeenCalledWith({ type: "ISSUANCE_APP_BRANCH_OBSERVED", branch: "existing" });
     });
 
     it("curates the control panel — a barrier's full allowedCommands renders only recheck + cancel", () => {

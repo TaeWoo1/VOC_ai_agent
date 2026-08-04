@@ -119,6 +119,14 @@ event.
 `COMPLETED` cannot expose an active blocker; `allowedCommands` is supplied by Runtime (FE does not
 infer permissions).
 
+**`appBranch` (v2, issuance-only).** An optional sanitized `IssuanceAppBranch` (`existing` | `new`)
+the API-issuance runtime publishes once it has OBSERVED the seller's API-center application list —
+`existing` (the store already holds its one Commerce app, so the walk opens it) or `new` (the store
+has none, so the walk creates one). It is **absent until the list is observed**, and `validateRunView`
+rejects it on any run whose `intent` is not `API_ISSUANCE_GUIDANCE`. It carries no app/store/account
+identity — a single branch bit, derived from the same fact that picks the step-2 copy key, so the FE
+routes the guided-first onboarding journey on an explicit signal instead of decoding that copy key.
+
 **Copy ownership.** Runtime sends only semantic identifiers — a sanitized `channelCode`, dotted
 semantic copy keys (`runCopyKey`, step `copyKey`), and sanitized primitive `runCopyParams` /
 `copyParams`. **FE owns all final end-user copy and localization** and derives blocker wording from

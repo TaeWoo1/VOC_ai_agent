@@ -174,6 +174,57 @@ describe("issuance session — the no-app path", () => {
   });
 });
 
+describe("issuance session — the observed appBranch signal", () => {
+  it("has NO appBranch until the application list is observed, then existing for an app-holding store", async () => {
+    const { io, session } = build(EXISTING);
+    startRun(io);
+    await session.whenSettled();
+
+    // The very first published view is the PREPARING/READING frame — before readApplications — so it must not
+    // carry appBranch yet (the runtime has not observed the list).
+    const first = io.views()[0]!;
+    expect(first.appBranch).toBeUndefined();
+    // Once observed, every later frame carries the sanitized branch, stable to the terminal view.
+    expect(io.lastView()?.appBranch).toBe("existing");
+    const branches = new Set(io.views().map((v) => v.appBranch).filter(Boolean));
+    expect(branches).toEqual(new Set(["existing"]));
+  });
+
+  it("observes new for an empty store", async () => {
+    const { io, session } = build(EMPTY);
+    startRun(io);
+    await session.whenSettled();
+    expect(io.lastView()?.appBranch).toBe("new");
+    expect(new Set(io.views().map((v) => v.appBranch).filter(Boolean))).toEqual(new Set(["new"]));
+  });
+
+  it("appBranch can never disagree with the step-2 copy key (both derive from the same fact)", async () => {
+    // Prove the invariant on BOTH populations: existing↔open-app, new↔create-app. If the two ever came from
+    // different sources this would catch a drift; here they share `hasExistingApp`, so it holds structurally.
+    for (const [script, branch, copyKey] of [
+      [EXISTING, "existing", "actionWindow.issuance.openApp"],
+      [EMPTY, "new", "actionWindow.issuance.createApp"],
+    ] as const) {
+      const { io, session } = build(script);
+      startRun(io);
+      await session.whenSettled();
+      const step2 = io.views().find((v) => v.currentStep?.stepNumber === 2);
+      expect(step2?.appBranch).toBe(branch);
+      expect(step2?.currentStep?.copyKey).toBe(copyKey);
+    }
+  });
+
+  it("every published view stays a valid v2 run view with the appBranch field", async () => {
+    const { io, session } = build(EXISTING);
+    startRun(io);
+    await session.whenSettled();
+    for (const v of io.views()) {
+      expect(validateRunView(v)).toEqual({ ok: true });
+      expect(findProhibitedFields(v)).toEqual([]);
+    }
+  });
+});
+
 describe("issuance session — the API-group barrier", () => {
   it("highlights the api_group control and rests at guiding_api_group until the seller acts", async () => {
     const { io, engine, driver, session } = build({ ...EXISTING, action: { api_group: false } });

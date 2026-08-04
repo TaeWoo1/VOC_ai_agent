@@ -24,6 +24,7 @@ import {
   INTENT_REQUIRED_REF,
   OPERATOR_OUTCOMES,
   VERIFICATION_STATES,
+  ISSUANCE_APP_BRANCHES,
   validateRunView,
   validateEventEnvelope,
   validateCommandEnvelope,
@@ -94,6 +95,7 @@ describe("Action Window v2 — enum completeness & no duplicates", () => {
     RunStatus: RUN_STATUSES, StepStatus: STEP_STATUSES, ExecutionMode: EXECUTION_MODES,
     BlockerCode: BLOCKER_CODES, CommandType: COMMAND_TYPES, EventType: EVENT_TYPES,
     RunIntent: RUN_INTENTS, OperatorOutcome: OPERATOR_OUTCOMES, VerificationState: VERIFICATION_STATES,
+    IssuanceAppBranch: ISSUANCE_APP_BRANCHES,
   };
   it("has no duplicate members", () => {
     for (const [name, arr] of Object.entries(enums)) {
@@ -308,6 +310,51 @@ describe("Action Window v2 — API-issuance guidance binding rules", () => {
     expect(new Set([AW_CARRIER_EXPORT, AW_CARRIER_REPLY, AW_CARRIER_IMPORT, AW_CARRIER_ISSUANCE]).size).toBe(4);
     expect(parseAwCarrierKind("api-issuance")).toBeNull(); // fail closed on anything unrecognised
   });
+
+  // appBranch is the sanitized "existing vs new app" bit the runtime observes on the application list. It is
+  // OPTIONAL and issuance-scoped: absent before the list is read, a known member when present, and legal ONLY
+  // on an API_ISSUANCE_GUIDANCE run — so the FE routes the guided-first journey on it instead of the copy key.
+  const issuanceView = (over: Record<string, unknown> = {}) => ({
+    protocolVersion: 2, runId: "r", revision: 4, channelCode: "naver",
+    runCopyKey: "actionWindow.issuance.run", status: "WAITING_FOR_HUMAN", executionMode: "ACTION_WINDOW",
+    intent: "API_ISSUANCE_GUIDANCE", guidanceEnabled: true,
+    allowedCommands: ["REQUEST_STEP_RECHECK"],
+    currentStep: { stepId: "aw.issuance_open_or_create_app", stepNumber: 2, totalSteps: 6, copyKey: "actionWindow.issuance.openApp", status: "AWAITING_USER" },
+    progress: { completedSteps: 1, totalSteps: 6 }, updatedAt: "2026-08-04T00:00:00Z", ...over,
+  });
+
+  it("an issuance run view MAY omit appBranch (before the application list is observed)", () => {
+    expect(validateRunView(issuanceView())).toEqual({ ok: true });
+  });
+
+  it.each(["existing", "new"] as const)("an issuance run view accepts appBranch=%s", (branch) => {
+    expect(validateRunView(issuanceView({ appBranch: branch }))).toEqual({ ok: true });
+  });
+
+  it("rejects an unknown appBranch value", () => {
+    expect(errorCodes(validateRunView(issuanceView({ appBranch: "reactivate" })))).toContain("UNKNOWN_ENUM");
+  });
+
+  it("rejects appBranch on a non-issuance run (it is issuance-scoped)", () => {
+    const exportView = {
+      protocolVersion: 2, runId: "r", revision: 3, channelCode: "naver",
+      runCopyKey: "actionWindow.review.run", status: "RUNNING", executionMode: "AUTOMATIC_OPERATION",
+      intent: "EXPORT", appBranch: "existing", guidanceEnabled: true, allowedCommands: [],
+      progress: { completedSteps: 0, totalSteps: 3 }, updatedAt: "2026-08-04T00:00:00Z",
+    };
+    expect(errorCodes(validateRunView(exportView))).toContain("CONSTRAINT_VIOLATION");
+  });
+
+  it("rejects appBranch when intent is absent (absent ⇒ EXPORT, not issuance)", () => {
+    // No intent field at all: appBranch cannot ride an (implicitly EXPORT) run.
+    const noIntent = issuanceView({ appBranch: "new" }) as Record<string, unknown>;
+    delete noIntent.intent;
+    expect(errorCodes(validateRunView(noIntent))).toContain("CONSTRAINT_VIOLATION");
+  });
+
+  it("appBranch is not final prose / identity — it survives the privacy sweep", () => {
+    expect(findProhibitedFields(issuanceView({ appBranch: "existing" }))).toEqual([]);
+  });
 });
 
 describe("Action Window v2 — schema ↔ TypeScript consistency (mechanical)", () => {
@@ -316,6 +363,7 @@ describe("Action Window v2 — schema ↔ TypeScript consistency (mechanical)", 
     ["RunStatus", RUN_STATUSES], ["StepStatus", STEP_STATUSES], ["ExecutionMode", EXECUTION_MODES],
     ["BlockerCode", BLOCKER_CODES], ["CommandType", COMMAND_TYPES], ["EventType", EVENT_TYPES],
     ["RunIntent", RUN_INTENTS], ["OperatorOutcome", OPERATOR_OUTCOMES], ["VerificationState", VERIFICATION_STATES],
+    ["IssuanceAppBranch", ISSUANCE_APP_BRANCHES],
   ];
   it.each(pairs)("schema $defs.%s.enum equals the TS const array", (name, tsArr) => {
     expect(schema.$defs[name]?.enum).toEqual([...tsArr]);

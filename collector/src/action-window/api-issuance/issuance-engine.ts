@@ -18,7 +18,7 @@
  *
  * Pure: no I/O, no browser, no wall-clock.
  */
-import type { ActionWindowRunView, EventEnvelope, EventPayload, EventType, RunStatus } from "../../../../contracts/action-window/v2/index";
+import type { ActionWindowRunView, EventEnvelope, EventPayload, EventType, IssuanceAppBranch, RunStatus } from "../../../../contracts/action-window/v2/index";
 import { branchAfterProbe, classifyAppListPopulation } from "./api-center-adapter";
 import { TARGET_BARRIER_STAGE, isCheckpointTarget, type ApplicationsRead, type IssuanceSurfaceProbe, type IssuanceTarget } from "./issuance-driver";
 import type { LocateResult } from "../engine";
@@ -103,6 +103,14 @@ export class IssuanceEngine {
   private completedSteps = 0;
   private guidanceEnabled = true;
   private hasExistingApp = false;
+  /**
+   * The sanitized application branch the runtime OBSERVED on the application list — `null` until the list is
+   * read, then `existing` / `new`. It is derived from the SAME `hasExistingApp` fact that picks the step-2
+   * copy key (open-app vs create-app), so the two can never disagree; it is surfaced on the run view
+   * (`appBranch`) so the FE routes the guided-first journey on it instead of decoding the copy key. Once set
+   * it never changes — the list is read once — so every later frame (barrier, park, terminal, resync) carries it.
+   */
+  private appBranch: IssuanceAppBranch | null = null;
   /** The control the current barrier/checkpoint rests on, so a recheck/resume re-guides the right section. */
   private currentTarget: IssuanceTarget | null = null;
   private targetSig: Partial<Record<IssuanceTarget, string>> = {};
@@ -250,6 +258,9 @@ export class IssuanceEngine {
     this.emit("STEP_COMPLETED", { stepId: this.stepIdFor(1), stepStatus: "COMPLETED" });
     const { population } = classifyAppListPopulation(read.applicationEntryRowCount);
     this.hasExistingApp = population === "existing";
+    // Surface the observed branch on the run view (from the SAME fact the step-2 copy key uses, so they cannot
+    // disagree). Set once, here, when the list is first read — never before, never reset.
+    this.appBranch = this.hasExistingApp ? "existing" : "new";
     this.activeStepIndex = 2;
     if (this.hasExistingApp) {
       this.stage = "existing_app";
@@ -491,6 +502,8 @@ export class IssuanceEngine {
       // invariant satisfied for every barrier/park stage (validateRunView requires it).
       executionMode: "ACTION_WINDOW",
       intent: "API_ISSUANCE_GUIDANCE",
+      // Emitted only once the application list has been observed (never before) — the sanitized branch bit.
+      ...(this.appBranch ? { appBranch: this.appBranch } : {}),
       currentStep: {
         stepId: meta.stepId,
         stepNumber: meta.stepNumber,
