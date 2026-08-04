@@ -8,7 +8,7 @@ import type { WalkthroughMismatchReason } from "../../lib/guidedConnection";
  * re-open the exact URL the preflight issued. Fail-closed by design.
  */
 const REASON_COPY: Record<WalkthroughMismatchReason | "HANDSHAKE_FAILED", string> = {
-  MISSING_URL_RUN: "이 탭의 주소에 walkthrough 실행 ID가 없습니다. preflight가 출력한 정확한 URL로 다시 열어 주세요.",
+  MISSING_URL_RUN: "이 탭의 주소에 walkthrough 실행 ID가 없습니다. 아래 버튼으로 정확한 주소를 다시 여세요.",
   MISSING_FRONTEND_RUN: "이 프론트엔드 빌드에 walkthrough 실행 ID가 설정되어 있지 않습니다. bootstrap으로 다시 시작해 주세요.",
   MISSING_CONTEXT: "연결된 백엔드가 walkthrough 실행 정보를 제공하지 않습니다. 승인된 백엔드가 아닐 수 있습니다.",
   RUN_MISMATCH: "주소·프론트엔드·백엔드의 walkthrough 실행 ID가 서로 다릅니다. 다른 실행이나 오래된 탭일 수 있습니다.",
@@ -37,8 +37,16 @@ export function WalkthroughMismatch({
       </ul>
       {expectedUrl && (
         <div className="rounded-lg bg-canvas px-4 py-3 text-sm">
-          <p className="text-muted">preflight가 출력한 정확한 URL을 새 창에서 다시 열어 주세요:</p>
+          <p className="text-muted">
+            preflight가 출력한 정확한 주소는 이미 확인했습니다. 아래 버튼으로 바로 다시 열면 됩니다:
+          </p>
           <p className="mt-1 break-all font-mono text-ink">{expectedUrl}</p>
+          {/* One-click recovery: navigate THIS tab to the bound URL — a full load re-runs the environment-binding
+              check at the correct address. Still fail-closed: it never proceeds here, it only re-opens the bound
+              URL where the same guard re-checks. `expectedUrl` is the same-origin frontend address from /context. */}
+          <a href={expectedUrl} className="btn-primary mt-3 inline-block text-sm">
+            정확한 주소로 다시 열기
+          </a>
         </div>
       )}
     </section>

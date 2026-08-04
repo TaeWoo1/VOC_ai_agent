@@ -12,6 +12,7 @@ import {
   CHANNEL_FALLBACK,
   CONNECTION_VIEW,
   CONNECTION_RETRY_FAILED_NOTE,
+  issuanceStepDetail,
 } from "./copy";
 
 describe("FE-owned copy registry", () => {
@@ -57,6 +58,51 @@ describe("FE-owned copy registry", () => {
     expect(CONNECTION_RETRY_FAILED_NOTE.length).toBeGreaterThan(0);
     expect(CONNECTION_RETRY_FAILED_NOTE).not.toContain("aw_");
     expect(CONNECTION_RETRY_FAILED_NOTE).not.toContain("offline");
+  });
+
+  describe("issuance step detail — the guided surface is self-sufficient", () => {
+    const ISSUANCE_STEP_KEYS = [
+      "actionWindow.issuance.run",
+      "actionWindow.issuance.reachApplications",
+      "actionWindow.issuance.createApp",
+      "actionWindow.issuance.openApp",
+      "actionWindow.issuance.apiGroup",
+      "actionWindow.issuance.credentials",
+      "actionWindow.issuance.return",
+    ] as const;
+
+    it("every issuance step key has a FULL, non-trivial instruction (longer than the terse title)", () => {
+      for (const key of ISSUANCE_STEP_KEYS) {
+        const detail = issuanceStepDetail(key);
+        expect(detail, key).toBeTruthy();
+        // The detail is a complete instruction, not the short step label.
+        expect((detail ?? "").length, key).toBeGreaterThan(resolveCopy(key).length);
+      }
+    });
+
+    it("the api-group detail names the order/seller groups; credentials detail states SellerOps never reads the value", () => {
+      expect(issuanceStepDetail("actionWindow.issuance.apiGroup")).toMatch(/주문/);
+      expect(issuanceStepDetail("actionWindow.issuance.apiGroup")).toMatch(/판매자/);
+      const cred = issuanceStepDetail("actionWindow.issuance.credentials") ?? "";
+      expect(cred).toMatch(/애플리케이션 ID/);
+      expect(cred).toMatch(/시크릿/);
+      expect(cred).toMatch(/읽지 않/); // SellerOps never reads the value
+    });
+
+    it("returns null for a step with no detail mapping (never leaks the raw key)", () => {
+      expect(issuanceStepDetail("actionWindow.review.run")).toBeNull();
+      expect(issuanceStepDetail("actionWindow.issuance.unknownStep")).toBeNull();
+      expect(issuanceStepDetail(null)).toBeNull();
+      expect(issuanceStepDetail(undefined)).toBeNull();
+    });
+
+    it("no detail leaks a raw selector / url / credential value", () => {
+      for (const key of ISSUANCE_STEP_KEYS) {
+        const detail = issuanceStepDetail(key) ?? "";
+        expect(detail).not.toMatch(/https?:\/\//);
+        expect(detail).not.toMatch(/client_secret|clientSecret|#|\.css-|\[data-/);
+      }
+    });
   });
 });
 

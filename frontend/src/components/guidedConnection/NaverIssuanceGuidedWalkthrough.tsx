@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useBridge } from "../../hooks/useBridge";
 import type { ActionWindowRunView, CommandType } from "../../lib/actionWindow/contract";
-import { blockerView } from "../../lib/actionWindow/copy";
+import { blockerView, issuanceStepDetail } from "../../lib/actionWindow/copy";
 import { OperationRunTimeline } from "../actionWindow/OperationRunTimeline";
 import { ActionWindowControlPanel } from "../actionWindow/ActionWindowControlPanel";
 import { BlockerNotice } from "../actionWindow/BlockerNotice";
@@ -166,6 +166,17 @@ export function NaverIssuanceGuidedWalkthrough({
       {effectiveRun && (
         <>
           <OperationRunTimeline run={effectiveRun} />
+          {/* FULL instruction for the current step, so this screen is self-sufficient and the seller does not
+              have to decode the in-NAVER highlight (which only points at a control). FE-owned copy by step key;
+              a step with no detail renders nothing. */}
+          {(() => {
+            const detail = issuanceStepDetail(effectiveRun.currentStep?.copyKey);
+            return detail ? (
+              <p className="rounded-lg bg-canvas px-4 py-3 text-sm text-ink break-keep" role="note">
+                {detail}
+              </p>
+            ) : null;
+          })()}
           {effectiveRun.blocker && (
             <BlockerNotice
               title={blockerView(effectiveRun.blocker.code).title}

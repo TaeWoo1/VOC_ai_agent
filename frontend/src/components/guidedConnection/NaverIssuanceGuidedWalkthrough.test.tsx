@@ -98,6 +98,23 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
     expect(screen.getByText("1 / 6")).toBeInTheDocument();
   });
 
+  it("renders the FULL per-step instruction under the timeline (self-sufficient — no need to decode the highlight)", () => {
+    // createApp step → its complete instruction, not just the terse title.
+    render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} run={issuanceRun()} onCommand={vi.fn()} />);
+    expect(screen.getByText(/스토어당 애플리케이션은 1개만 만들 수 있고 삭제할 수 없/)).toBeInTheDocument();
+  });
+
+  it("the credentials step detail states SellerOps never reads the value", () => {
+    render(
+      <NaverIssuanceGuidedWalkthrough
+        dispatch={vi.fn()}
+        run={issuanceRun({ currentStep: { stepId: "aw.issuance_credentials", stepNumber: 5, totalSteps: 6, copyKey: "actionWindow.issuance.credentials", status: "AWAITING_USER" } })}
+        onCommand={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/SellerOps는 이 값을 읽지 않습니다/)).toBeInTheDocument();
+  });
+
   it("shows the abort (CANCEL_RUN) control when allowed, and the recheck control", () => {
     render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} run={issuanceRun()} onCommand={vi.fn()} />);
     expect(screen.getByRole("button", { name: "취소" })).toBeInTheDocument();
