@@ -118,7 +118,9 @@ class CollectControlServiceTest {
         return new CollectControlService(sellerAccounts, channels, schedules, syncJobs,
                 connectionStatus, capabilities, registry, executor, vault,
                 new AccountSessionSlotService(accountSlotRepo),
-                new NaverConnectionLifecycle(sellerAccounts, channels, txManager));
+                new NaverConnectionLifecycle(sellerAccounts, channels, txManager),
+                new com.sellerops.connector.coupang.onboarding.CoupangConnectionLifecycle(
+                        sellerAccounts, channels, txManager));
     }
 
     private CredentialVault vaultWithKey(String masterKeyBase64) {
@@ -608,7 +610,9 @@ class CollectControlServiceTest {
         return new CollectControlService(sellerAccounts, channels, schedules, syncJobs,
                 connectionStatus, capabilities, reg, executor, vault,
                 new AccountSessionSlotService(accountSlotRepo),
-                new NaverConnectionLifecycle(sellerAccounts, channels, txManager));
+                new NaverConnectionLifecycle(sellerAccounts, channels, txManager),
+                new com.sellerops.connector.coupang.onboarding.CoupangConnectionLifecycle(
+                        sellerAccounts, channels, txManager));
     }
 
     /**

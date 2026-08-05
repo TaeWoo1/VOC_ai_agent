@@ -97,7 +97,7 @@ class CollectControlServiceSingleFlightTest {
                 new com.sellerops.order.ChannelOrderIngestionService(channelOrders, channelOrderStatusEvents, txManager);
         SyncRunGate gate = new SyncRunGate(sellerAccounts, syncJobs, txManager, 60);
         SyncRunExecutor executor = new SyncRunExecutor(sellerAccounts, channels, registry, ingestion,
-                orderIngestion, syncJobs, cursors, connectionStatus, null, null, null, gate);
+                orderIngestion, syncJobs, cursors, connectionStatus, null, null, null, null, gate);
         byte[] key = new byte[32];
         new SecureRandom().nextBytes(key);
         CredentialVault vault = new CredentialVault(credentials, new ObjectMapper(),
@@ -105,7 +105,9 @@ class CollectControlServiceSingleFlightTest {
         service = new CollectControlService(sellerAccounts, channels, schedules, syncJobs,
                 connectionStatus, capabilities, registry, executor, vault,
                 new AccountSessionSlotService(accountSlotRepo),
-                new NaverConnectionLifecycle(sellerAccounts, channels, txManager));
+                new NaverConnectionLifecycle(sellerAccounts, channels, txManager),
+                new com.sellerops.connector.coupang.onboarding.CoupangConnectionLifecycle(
+                        sellerAccounts, channels, txManager));
     }
 
     @Test

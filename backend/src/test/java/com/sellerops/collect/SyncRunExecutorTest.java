@@ -339,33 +339,6 @@ class SyncRunExecutorTest {
     }
 
     @Test
-    void coupangSkeletonStopsAtCapabilityGateBeforeAnyFetchOrHttp() {
-        // Phase 3D-2: the Coupang skeleton advertises no collectable data type,
-        // so even with the dedicated connector resolved (flag-on equivalent) a
-        // manual ORDER_SUMMARY sync must die at the capability gate — config
-        // failure, no fetch, no vault access, no HTTP, no health row.
-        SellerAccount acc = account("COUPANG");
-        com.sellerops.connector.coupang.CoupangHttpClient neverCalled = (uri, headers) -> {
-            throw new AssertionError("must not reach the HTTP boundary");
-        };
-        com.sellerops.connector.coupang.CoupangApiConnector coupang =
-                new com.sellerops.connector.coupang.CoupangApiConnector(neverCalled, null);
-        ConnectorRegistry registry = new ConnectorRegistry(List.of(coupang, mock));
-        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
-        SyncRunExecutor coupangExecutor = new SyncRunExecutor(
-                sellerAccounts, channels, registry, ingestion, orderIngestion, syncJobs, cursors, connectionStatus);
-
-        SyncJob job = coupangExecutor.execute(org, acc.getId(), DataType.ORDER_SUMMARY, "MANUAL");
-
-        assertThat(job.getStatus()).isEqualTo("FAILED");
-        assertThat(job.getErrorMessage()).contains("지원되지");
-        assertThat(job.getJobType()).isEqualTo("COUPANG_API"); // routed to the dedicated connector
-        assertThat(orders.count()).isZero();
-        // A config issue, not a connectivity failure → no health row touched.
-        assertThat(connectionStatus.findBySellerAccountId(acc.getId())).isEmpty();
-    }
-
-    @Test
     void cafe24UnsupportedDataTypeStopsAtCapabilityGateBeforeAnyFetchOrHttp() {
         // Cafe24 now collects ORDER_SUMMARY plus REVIEW/INQUIRY articles, but a still-
         // unsupported type (PRODUCT) is killed at the config gate before fetch — no

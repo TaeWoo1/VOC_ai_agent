@@ -21,6 +21,7 @@ import com.sellerops.connector.DataType;
 import com.sellerops.connector.PullConnector;
 import com.sellerops.connector.VerifyContext;
 import com.sellerops.connector.VerifyOutcome;
+import com.sellerops.connector.coupang.onboarding.CoupangConnectionLifecycle;
 import com.sellerops.connector.naver.onboarding.NaverConnectionLifecycle;
 import com.sellerops.credential.CredentialIntakeValidator;
 import com.sellerops.credential.CredentialIntakeValidator.ValidatedCredential;
@@ -84,6 +85,7 @@ public class CollectControlService {
     private final CredentialVault vault;
     private final AccountSessionSlotService accountSlots;
     private final NaverConnectionLifecycle naverLifecycle;
+    private final CoupangConnectionLifecycle coupangLifecycle;
 
     public CollectControlService(SellerAccountRepository sellerAccounts, ChannelRepository channels,
                                  SyncScheduleRepository schedules, SyncJobRepository syncJobs,
@@ -91,7 +93,8 @@ public class CollectControlService {
                                  ConnectorCapabilityRepository capabilities, ConnectorRegistry registry,
                                  SyncRunExecutor executor, CredentialVault vault,
                                  AccountSessionSlotService accountSlots,
-                                 NaverConnectionLifecycle naverLifecycle) {
+                                 NaverConnectionLifecycle naverLifecycle,
+                                 CoupangConnectionLifecycle coupangLifecycle) {
         this.sellerAccounts = sellerAccounts;
         this.channels = channels;
         this.schedules = schedules;
@@ -103,6 +106,7 @@ public class CollectControlService {
         this.vault = vault;
         this.accountSlots = accountSlots;
         this.naverLifecycle = naverLifecycle;
+        this.coupangLifecycle = coupangLifecycle;
     }
 
     public List<ScheduleView> listSchedules(UUID orgId, UUID sellerAccountId) {
@@ -376,11 +380,15 @@ public class CollectControlService {
         VerifyOutcome outcome = verifier.verifyConnection(
                 new VerifyContext(orgId, sellerAccountId, channel.getCode()));
         if (outcome.status() == VerifyOutcome.Status.SUCCESS) {
+            // Each lifecycle is guarded to its own channel and no-ops for the others, so calling both
+            // is safe — the account's channel decides which one records the PREPARING transition.
             naverLifecycle.onCredentialTestVerified(orgId, sellerAccountId);
+            coupangLifecycle.onCredentialTestVerified(orgId, sellerAccountId);
             return testResult(sellerAccountId, TEST_STATUS_SUCCESS, null, "연결 정보가 확인되었습니다.");
         }
         if (VerifyOutcome.REASON_INVALID_CREDENTIAL.equals(outcome.reasonCode())) {
             naverLifecycle.onCredentialRejected(orgId, sellerAccountId);
+            coupangLifecycle.onCredentialRejected(orgId, sellerAccountId);
         }
         return testResult(sellerAccountId, TEST_STATUS_FAILED, outcome.reasonCode(),
                 failureMessage(outcome.reasonCode()));

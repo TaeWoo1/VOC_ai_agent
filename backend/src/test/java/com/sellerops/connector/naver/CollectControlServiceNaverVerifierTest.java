@@ -108,7 +108,9 @@ class CollectControlServiceNaverVerifierTest {
         service = new CollectControlService(sellerAccounts, channels, schedules, syncJobs,
                 connectionStatus, capabilities, registry, executor, vault,
                 new com.sellerops.selleraccount.AccountSessionSlotService(accountSlotRepo),
-                naverLifecycle);
+                naverLifecycle,
+                new com.sellerops.connector.coupang.onboarding.CoupangConnectionLifecycle(
+                        sellerAccounts, channels, txManager));
     }
 
     @Test

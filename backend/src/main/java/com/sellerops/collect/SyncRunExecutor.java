@@ -6,6 +6,8 @@ import com.sellerops.common.ApiException;
 import com.sellerops.connector.ConnectorRegistry;
 import com.sellerops.connector.DataType;
 import com.sellerops.connector.naver.NaverApiConnector;
+import com.sellerops.connector.coupang.CoupangApiConnector;
+import com.sellerops.connector.coupang.onboarding.CoupangConnectionLifecycle;
 import com.sellerops.connector.naver.onboarding.NaverConnectionLifecycle;
 import com.sellerops.connector.FetchPage;
 import com.sellerops.connector.FetchRequest;
@@ -85,6 +87,9 @@ public class SyncRunExecutor {
     /** Optional: advances a NAVER account PREPARING → CONNECTED after its first ORDER_SUMMARY sync
      *  collects. Null in the bridge-less test constructor (the transition is then simply not applied). */
     private final NaverConnectionLifecycle naverLifecycle;
+    /** Optional: advances a Coupang account PREPARING → CONNECTED after its first ORDER_SUMMARY sync
+     *  collects. Null in the bridge-less test constructor (the transition is then simply not applied). */
+    private final CoupangConnectionLifecycle coupangLifecycle;
     /**
      * Optional single-flight + orphaned-run recovery gate. Non-null in production (Spring injects it);
      * null in the older test constructors, where the legacy "always create a new run" path is kept so
@@ -101,6 +106,7 @@ public class SyncRunExecutor {
                            Cafe24ReviewIssueBridge reviewIssueBridge,
                            Cafe24ReviewPromotionReconciler reviewIssueReconciler,
                            NaverConnectionLifecycle naverLifecycle,
+                           CoupangConnectionLifecycle coupangLifecycle,
                            SyncRunGate runGate) {
         this.sellerAccounts = sellerAccounts;
         this.channels = channels;
@@ -113,6 +119,7 @@ public class SyncRunExecutor {
         this.reviewIssueBridge = reviewIssueBridge;
         this.reviewIssueReconciler = reviewIssueReconciler;
         this.naverLifecycle = naverLifecycle;
+        this.coupangLifecycle = coupangLifecycle;
         this.runGate = runGate;
     }
 
@@ -130,7 +137,7 @@ public class SyncRunExecutor {
                            NaverConnectionLifecycle naverLifecycle) {
         this(sellerAccounts, channels, registry, ingestionService, orderIngestionService,
                 syncJobs, cursors, connectionStatus, reviewIssueBridge, reviewIssueReconciler,
-                naverLifecycle, null);
+                naverLifecycle, null, null);
     }
 
     /**
@@ -145,7 +152,7 @@ public class SyncRunExecutor {
                            SyncJobRepository syncJobs, SyncCursorRepository cursors,
                            ChannelConnectionStatusRepository connectionStatus) {
         this(sellerAccounts, channels, registry, ingestionService, orderIngestionService,
-                syncJobs, cursors, connectionStatus, null, null, null, null);
+                syncJobs, cursors, connectionStatus, null, null, null, null, null);
     }
 
     /**
@@ -332,6 +339,12 @@ public class SyncRunExecutor {
         if (naverLifecycle != null && dataType == DataType.ORDER_SUMMARY && collected
                 && NaverApiConnector.CHANNEL_CODE.equals(channel.getCode())) {
             naverLifecycle.onOrderSyncCollected(orgId, account.getId());
+        }
+        // Symmetric Coupang two-signal completion: a first collected ORDER_SUMMARY sync advances an
+        // already-verified (PREPARING) Coupang account to CONNECTED. Guarded to Coupang only.
+        if (coupangLifecycle != null && dataType == DataType.ORDER_SUMMARY && collected
+                && CoupangApiConnector.CHANNEL_CODE.equals(channel.getCode())) {
+            coupangLifecycle.onOrderSyncCollected(orgId, account.getId());
         }
         return job;
     }
