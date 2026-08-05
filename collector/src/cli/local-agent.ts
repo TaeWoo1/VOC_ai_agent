@@ -42,7 +42,8 @@ import {
 import { humanSignalPathFor } from "../agent/local-agent-human-signal";
 import type { UserActionCategory } from "../agent/progressive-reconnect";
 import type { ConnectorOrchestratorObserver, ConnectorStartupResult } from "../connector/connector-orchestrator";
-import { createAgentBridge, type AgentActionWindowConfig, type AgentImportConfig, type AgentReplySubmissionConfig } from "../agent/agent-bridge";
+import { createAgentBridge, type AgentActionWindowConfig, type AgentApiIssuanceConfig, type AgentImportConfig, type AgentReplySubmissionConfig } from "../agent/agent-bridge";
+import { IssuanceFixtureDriver } from "../action-window/api-issuance/issuance-fixture-driver";
 import { NaverLiveProbeDriver } from "../action-window/naver-live-driver";
 import { createNaverActionWindowImportDriver } from "../action-window/naver-acquisition-adapter";
 import { defaultImportRunDirFor } from "../action-window/initial-import/import-dispatch";
@@ -212,6 +213,34 @@ export const ACTION_WINDOW_REPLY_FLAG = "--dev-action-window-reply";
 export function resolveReplySubmissionChannel(args: readonly string[], env: NodeJS.ProcessEnv): boolean {
   if (env.NODE_ENV === "production") return false;
   return args.includes(ACTION_WINDOW_REPLY_FLAG);
+}
+
+/**
+ * DEV/TEST ONLY: host the ISOLATED API-issuance guidance channel (v2) on the Bridge, so the FE dev-bridge
+ * can dispatch a real `API_ISSUANCE_GUIDANCE` run and receive a real `run_<hex>` runId — OFFLINE, over a
+ * synthetic fixture driver (no browser, no live NAVER, never reads a credential). Never honored under
+ * NODE_ENV=production. Mutually exclusive with the other carriers (an agent hosts one). The LIVE driver is
+ * NOT wired here — it is supplied only by the gated live entrypoint (`run-api-issuance-live-naver.ts`).
+ */
+export const ACTION_WINDOW_ISSUANCE_FLAG = "--dev-action-window-issuance";
+
+/** Pure gate: should the agent host the API-issuance guidance channel? Never under production. */
+export function resolveApiIssuanceChannel(args: readonly string[], env: NodeJS.ProcessEnv): boolean {
+  if (env.NODE_ENV === "production") return false;
+  return args.includes(ACTION_WINDOW_ISSUANCE_FLAG);
+}
+
+/**
+ * Build the {@link AgentApiIssuanceConfig} for the dev issuance channel — a SYNTHETIC fixture driver (no
+ * browser, no live NAVER, no credential read). Run identity is Runtime-assigned (opaque random suffix). No
+ * persistence: an issuance walk is read-only guidance with nothing to recover.
+ */
+export function buildApiIssuanceConfig(): AgentApiIssuanceConfig {
+  return {
+    runId: `run_${randomBytes(6).toString("hex")}`,
+    channelCode: "naver",
+    createDriver: () => new IssuanceFixtureDriver(),
+  };
 }
 
 /**
@@ -995,11 +1024,13 @@ async function main(): Promise<void> {
   // only the export or reply carrier. Keeping the mutual exclusion visible anyway would be dead code that
   // implies a case that cannot occur.
   const hostReply = resolveReplySubmissionChannel(args, process.env);
-  const awChannel = hostReply ? null : resolveActionWindowChannel(args, process.env);
+  const hostIssuance = !hostReply && resolveApiIssuanceChannel(args, process.env);
+  const awChannel = hostReply || hostIssuance ? null : resolveActionWindowChannel(args, process.env);
   const actionWindow: AgentActionWindowConfig | undefined = awChannel
     ? buildActionWindowConfig(awChannel, args, process.env)
     : undefined;
   const replySubmission: AgentReplySubmissionConfig | undefined = hostReply ? buildReplySubmissionConfig() : undefined;
+  const apiIssuance: AgentApiIssuanceConfig | undefined = hostIssuance ? buildApiIssuanceConfig() : undefined;
   // Approval-presenter wiring lives HERE and only here — never as a `createAgentBridge` default (see
   // `decideApprovalPresenter`). `none` means no human channel exists on this host, so pairing fails closed.
   const approvalKind = decideApprovalPresenter(process.env, process.platform);
@@ -1008,11 +1039,12 @@ async function main(): Promise<void> {
     approvalPresenter: createApprovalPresenterFor(approvalKind),
     ...(actionWindow ? { actionWindow } : {}),
     ...(replySubmission ? { replySubmission } : {}),
+    ...(apiIssuance ? { apiIssuance } : {}),
   });
   const bridgeListen = await bridge.listen();
   // Sanitized: the presenter KIND only (an enum) — never a code, origin, or pairing detail. Makes it visible
   // that this host can (or cannot) show an approval code, which decides whether pairing can succeed at all.
-  console.log(JSON.stringify({ event: "BRIDGE", ...bridgeListen, actionWindow: actionWindow !== undefined, replySubmission: replySubmission !== undefined, approvalPresenter: approvalKind, ...(awChannel ? { actionWindowChannel: awChannel } : {}) }));
+  console.log(JSON.stringify({ event: "BRIDGE", ...bridgeListen, actionWindow: actionWindow !== undefined, replySubmission: replySubmission !== undefined, apiIssuance: apiIssuance !== undefined, approvalPresenter: approvalKind, ...(awChannel ? { actionWindowChannel: awChannel } : {}) }));
   bridge.seed(decision.parsed.connections.map((c) => c.connectionId));
 
   // ONE observer into the startup: keep the sanitized stdout printer AND feed the bridge snapshot/events.

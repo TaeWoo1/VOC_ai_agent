@@ -12,6 +12,7 @@ import com.sellerops.collect.dto.ConnectionTestResultView;
 import com.sellerops.connector.ChannelConnectionStatusRepository;
 import com.sellerops.connector.ConnectorCapabilityRepository;
 import com.sellerops.connector.ConnectorRegistry;
+import com.sellerops.connector.naver.onboarding.NaverConnectionLifecycle;
 import com.sellerops.credential.ConnectorCredentialRepository;
 import com.sellerops.credential.CredentialVault;
 import com.sellerops.ingest.IngestionService;
@@ -49,10 +50,11 @@ import org.springframework.test.context.ActiveProfiles;
 /**
  * Service-level proof that a real {@link NaverApiConnector} (not a fake verifier)
  * plugs into {@link CollectControlService#testConnection} and returns a safe
- * SUCCESS via an auth-only token mint — no order fetch, no ingestion, no sync
- * job, and zero real network (the fake HTTP boundary serves the token). Lives in
- * the naver test package to reuse {@link FakeNaverHttpClient} without widening
- * its visibility, keeping the generic CollectControlServiceTest clean.
+ * SUCCESS via a token mint plus a single read-only order-access probe — no order
+ * ingestion, no sync job, no persisted cursor, and zero real network (the fake
+ * HTTP boundary serves the token and the probe's last-changed page). Lives in the
+ * naver test package to reuse {@link FakeNaverHttpClient} without widening its
+ * visibility, keeping the generic CollectControlServiceTest clean.
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -101,9 +103,12 @@ class CollectControlServiceNaverVerifierTest {
                 new com.sellerops.order.ChannelOrderIngestionService(channelOrders, channelOrderStatusEvents, txManager);
         SyncRunExecutor executor = new SyncRunExecutor(
                 sellerAccounts, channels, registry, ingestion, orderIngestion, syncJobs, cursors, connectionStatus);
+        NaverConnectionLifecycle naverLifecycle = new NaverConnectionLifecycle(
+                sellerAccounts, channels, txManager);
         service = new CollectControlService(sellerAccounts, channels, schedules, syncJobs,
                 connectionStatus, capabilities, registry, executor, vault,
-                new com.sellerops.selleraccount.AccountSessionSlotService(accountSlotRepo));
+                new com.sellerops.selleraccount.AccountSessionSlotService(accountSlotRepo),
+                naverLifecycle);
     }
 
     @Test
@@ -113,6 +118,8 @@ class CollectControlServiceNaverVerifierTest {
         vault.store(org, acc.getId(), "API", "OAUTH2",
                 Map.of("client_id", "test-client-id", "client_secret", clientSecret), null, null, null);
         http.enqueue(FakeNaverHttpClient.tokenOk("naver-access-token-CANARY", 3000));
+        http.enqueue(FakeNaverHttpClient.tokenOk("naver-probe-token-CANARY", 3000));
+        http.enqueue(FakeNaverHttpClient.ok("{\"data\":{\"lastChangeStatuses\":[]}}"));
 
         ConnectionTestResultView result = service.testConnection(org, acc.getId());
 
@@ -121,9 +128,10 @@ class CollectControlServiceNaverVerifierTest {
         assertThat(result.message()).isEqualTo("연결 정보가 확인되었습니다.");
         assertThat(result.checkedAt()).isNotNull();
 
-        // Auth-only: exactly one token mint, no order calls.
-        assertThat(http.sent).hasSize(1);
+        // Token proof + a single read-only order-access GET — never a detail POST.
+        assertThat(http.sent).hasSize(3);
         assertThat(http.sent.get(0).method()).isEqualTo("POST_FORM");
+        assertThat(http.sent.get(2).method()).isEqualTo("GET");
 
         // No sync job, no ingestion / data persistence.
         assertThat(syncJobs.count()).isZero();
@@ -139,23 +147,104 @@ class CollectControlServiceNaverVerifierTest {
                 "access_token", "client_secret");
     }
 
+    @Test
+    void testConnectionOnPendingAccountRecordsPreparing_notYetConnected() {
+        // A fresh (PENDING) account: a verified test records the credential test success as PREPARING,
+        // but CONNECTED is withheld until the first order sync — test alone never connects.
+        SellerAccount acc = naverAccount(ChannelStatus.PENDING);
+        vault.store(org, acc.getId(), "API", "OAUTH2",
+                Map.of("client_id", "test-client-id", "client_secret", clientSecret), null, null, null);
+        http.enqueue(FakeNaverHttpClient.tokenOk("naver-access-token", 3000));
+        http.enqueue(FakeNaverHttpClient.tokenOk("naver-probe-token", 3000));
+        http.enqueue(FakeNaverHttpClient.ok("{\"data\":{\"lastChangeStatuses\":[]}}"));
+
+        ConnectionTestResultView result = service.testConnection(org, acc.getId());
+
+        assertThat(result.status()).isEqualTo("SUCCESS");
+        assertThat(sellerAccounts.findById(acc.getId()).orElseThrow().getConnectionStatus())
+                .isEqualTo(ChannelStatus.PREPARING);
+        assertThat(syncJobs.count()).isZero();
+    }
+
+    @Test
+    void testConnectionWithInvalidCredentialRecallsForReconnect() {
+        SellerAccount acc = naverAccount(ChannelStatus.PENDING);
+        vault.store(org, acc.getId(), "API", "OAUTH2",
+                Map.of("client_id", "test-client-id", "client_secret", clientSecret), null, null, null);
+        // A 401 → the token endpoint rejected the credential (an authentication failure).
+        http.enqueue(new NaverHttpClient.Response(401, "{\"code\":\"UNAUTHORIZED\"}", Map.of()));
+
+        ConnectionTestResultView result = service.testConnection(org, acc.getId());
+
+        assertThat(result.status()).isEqualTo("FAILED");
+        assertThat(result.reasonCode()).isEqualTo("INVALID_CREDENTIAL");
+        assertThat(sellerAccounts.findById(acc.getId()).orElseThrow().getConnectionStatus())
+                .isEqualTo(ChannelStatus.RECONNECT_REQUIRED);
+    }
+
+    @Test
+    void testConnectionWithValidCredentialButDeniedOrderAccessDoesNotRecallForReconnect() {
+        // The credential is valid (token accepted) but the order endpoint refuses (403).
+        // This is NOT a credential failure: the account must NOT be recalled to
+        // RECONNECT_REQUIRED, and the operator gets an actionable order-access reason
+        // instead of the old INVALID_CREDENTIAL misdiagnosis or a silent PREPARING.
+        SellerAccount acc = naverAccount(ChannelStatus.PENDING);
+        vault.store(org, acc.getId(), "API", "OAUTH2",
+                Map.of("client_id", "test-client-id", "client_secret", clientSecret), null, null, null);
+        http.enqueue(FakeNaverHttpClient.tokenOk("naver-access-token", 3000));
+        http.enqueue(FakeNaverHttpClient.tokenOk("naver-probe-token", 3000));
+        http.enqueue(new NaverHttpClient.Response(403,
+                "{\"code\":\"GW.FORBIDDEN\",\"message\":\"권한이 없습니다\"}", Map.of()));
+
+        ConnectionTestResultView result = service.testConnection(org, acc.getId());
+
+        assertThat(result.status()).isEqualTo("FAILED");
+        assertThat(result.reasonCode()).isEqualTo("ORDER_ACCESS_DENIED");
+        assertThat(result.message()).contains("주문 API");
+        // Credential is fine → status must not move to RECONNECT_REQUIRED (nor PREPARING).
+        assertThat(sellerAccounts.findById(acc.getId()).orElseThrow().getConnectionStatus())
+                .isEqualTo(ChannelStatus.PENDING);
+    }
+
+    @Test
+    void testConnectionWithTransientProviderErrorLeavesStatusUnchanged() {
+        SellerAccount acc = naverAccount(ChannelStatus.PENDING);
+        vault.store(org, acc.getId(), "API", "OAUTH2",
+                Map.of("client_id", "test-client-id", "client_secret", clientSecret), null, null, null);
+        // A network failure → provider-unavailable (transient), never a credential verdict.
+        http.enqueueNetworkFailure();
+
+        ConnectionTestResultView result = service.testConnection(org, acc.getId());
+
+        assertThat(result.status()).isEqualTo("FAILED");
+        // A transient failure must not move the connection status.
+        assertThat(sellerAccounts.findById(acc.getId()).orElseThrow().getConnectionStatus())
+                .isEqualTo(ChannelStatus.PENDING);
+    }
+
     private SellerAccount naverAccount() {
-        Channel ch = new Channel();
-        ch.setCode("NAVER");
-        ch.setNameKo("네이버");
-        ch.setStatus(ChannelStatus.AVAILABLE);
-        ch.setSupportsInquiry(true);
-        ch.setSupportsReview(true);
-        ch.setSupportsOrder(true);
-        ch.setSupportsSales(true);
-        ch.setSupportsProduct(true);
-        ch.setSortOrder(0);
-        channels.save(ch);
+        return naverAccount(ChannelStatus.CONNECTED);
+    }
+
+    private SellerAccount naverAccount(ChannelStatus status) {
+        Channel ch = channels.findByCode("NAVER").orElseGet(() -> {
+            Channel c = new Channel();
+            c.setCode("NAVER");
+            c.setNameKo("네이버");
+            c.setStatus(ChannelStatus.AVAILABLE);
+            c.setSupportsInquiry(true);
+            c.setSupportsReview(true);
+            c.setSupportsOrder(true);
+            c.setSupportsSales(true);
+            c.setSupportsProduct(true);
+            c.setSortOrder(0);
+            return channels.save(c);
+        });
 
         SellerAccount acc = new SellerAccount();
         acc.setOrgId(org);
         acc.setChannelId(ch.getId());
-        acc.setConnectionStatus(ChannelStatus.CONNECTED);
+        acc.setConnectionStatus(status);
         acc.setFileUpload(false);
         return sellerAccounts.save(acc);
     }

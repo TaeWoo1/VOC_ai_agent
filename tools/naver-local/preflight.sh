@@ -1,0 +1,299 @@
+#!/usr/bin/env bash
+#
+# NAVER guided-connection walkthrough PREFLIGHT. Run this AFTER bootstrap.sh + the backend + frontend, and
+# BEFORE opening the browser. Health + proxy alone can NEVER pass — the gate ends in a real clean-context
+# browser run that proves the operator's tab is bound to THIS bootstrapped run (URL run id == frontend run
+# id == backend /context run id, matching origin, matching git commit), plus that a page load writes NOTHING
+# and makes no NAVER call. This closes the gap where a green /health looked like a working walkthrough while
+# the operator's tab was actually a stale/different environment.
+#
+# It reads only local state + logs into the disposable demo account; it enters NO NAVER credential and runs
+# NO NAVER call. On the browser gate failing it exits `PREFLIGHT FAIL: browser_login`.
+#
+set -uo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUN_ENV="$HERE/.run/current.env"
+MANIFEST_OUT="${SELLEROPS_MANIFEST_OUT:-${TMPDIR:-/tmp}/naver-runtime-manifest.json}"
+SMOKE_EMAIL="${SMOKE_EMAIL:-demo@sellerops.ai}"
+SMOKE_PASSWORD="${SMOKE_PASSWORD:-demo1234}"
+
+FAILED=0
+BROWSER_LOGIN_FAILED=0
+SMOKE_RESULT="not_run"
+pass() { echo "  PASS  $*"; }
+fail() { echo "  FAIL  $*"; FAILED=1; }
+http_status() { curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$@" 2>/dev/null || echo "000"; }
+
+# ---- run identity (required; from bootstrap.sh) -------------------------------
+if [ ! -f "$RUN_ENV" ]; then
+  echo "PREFLIGHT FAIL — no run env at $RUN_ENV. Run tools/naver-local/bootstrap.sh first."
+  exit 1
+fi
+# shellcheck disable=SC1090
+set -a; . "$RUN_ENV"; set +a
+RUN_ID="$WALKTHROUGH_RUN_ID"
+RUN_GIT="$WALKTHROUGH_GIT_COMMIT"
+BACKEND_ORIGIN="${SELLEROPS_BACKEND_ORIGIN:-$WALKTHROUGH_BACKEND_ORIGIN}"
+FRONTEND_ORIGIN="${SELLEROPS_FRONTEND_ORIGIN:-$WALKTHROUGH_FRONTEND_ORIGIN}"
+DB_ALIAS="$WALKTHROUGH_DB_ALIAS"
+FRONTEND_DIR="${SELLEROPS_FRONTEND_DIR:-$(cd "$HERE/../../frontend" && pwd)}"
+FRONTEND_ENV_FILES=("$FRONTEND_DIR/.env" "$FRONTEND_DIR/.env.local" "$FRONTEND_DIR/.env.development" "$FRONTEND_DIR/.env.development.local")
+
+PGHOST="${PGHOST:-127.0.0.1}"; PGPORT="${PGPORT:-55432}"; PGDATABASE="${PGDATABASE:-naver_walkthrough}"; PGUSER="${PGUSER:-sellerops}"
+export PGHOST PGPORT PGDATABASE PGUSER
+[ -n "${PGPASSWORD:-}" ] && export PGPASSWORD
+PSQL="$(command -v psql || echo /opt/homebrew/opt/postgresql@15/bin/psql)"
+q() { "$PSQL" -tAc "$1" 2>/dev/null | tr -d '[:space:]'; }
+naver_accts() { q "select count(*) from seller_accounts sa join channels c on c.id=sa.channel_id where c.code='NAVER'"; }
+
+echo "NAVER walkthrough preflight — run=$RUN_ID git=$RUN_GIT db=$DB_ALIAS@$PGHOST:$PGPORT"
+echo "backend=$BACKEND_ORIGIN frontend=$FRONTEND_ORIGIN — read-only checks + a clean-context env-binding browser run"
+echo
+
+# 0. Approved frontend origin (must be localhost:5173 — the sole CORS-allowed origin).
+[ "$FRONTEND_ORIGIN" = "http://localhost:5173" ] && pass "frontend origin is the approved http://localhost:5173" \
+  || fail "frontend origin must be http://localhost:5173 (got $FRONTEND_ORIGIN) — 127.0.0.1 is CORS-rejected"
+
+# 1. Backend health.
+[ "$(http_status "$BACKEND_ORIGIN/health")" = "200" ] && pass "backend /health UP" || fail "backend /health not UP at $BACKEND_ORIGIN"
+
+# 2. Frontend /api reachable via proxy.
+FE_API_STATUS="$(http_status -X POST -H 'Content-Type: application/json' -d '{}' "$FRONTEND_ORIGIN/api/auth/login")"
+[ "$FE_API_STATUS" != "000" ] && pass "frontend /api reachable (HTTP $FE_API_STATUS via proxy)" || fail "frontend /api unreachable at $FRONTEND_ORIGIN"
+
+# 3. Single base URL + proxy target.
+STALE_BASE=""
+for f in "${FRONTEND_ENV_FILES[@]}"; do
+  if [ -f "$f" ] && grep -qE '^[[:space:]]*VITE_API_BASE_URL=[^[:space:]]' "$f"; then
+    fail "$f sets an absolute VITE_API_BASE_URL — remove it and use the same-origin /api proxy"; STALE_BASE="1"
+  fi
+done
+[ -z "$STALE_BASE" ] && pass "frontend uses same-origin /api proxy (no absolute VITE_API_BASE_URL)"
+# The frontend proxies to the bootstrapped backend (WALKTHROUGH_BACKEND_ORIGIN); it must equal the backend
+# we are health-checking. An operator override that diverges (health-check a different backend than the
+# frontend actually talks to) FAILs — no silent mid-run divergence.
+PROXY_TARGET="$WALKTHROUGH_BACKEND_ORIGIN"
+[ "$PROXY_TARGET" = "$BACKEND_ORIGIN" ] && pass "dev proxy target matches backend origin ($BACKEND_ORIGIN)" \
+  || fail "dev proxy target ($PROXY_TARGET) != checked backend origin ($BACKEND_ORIGIN)"
+
+# 4-6. Disposable DB / scheduler off / NAVER flag on.
+case "${SPRING_DATASOURCE_URL:-jdbc:postgresql://$PGHOST:$PGPORT/$PGDATABASE}" in
+  *:5432/*sellerops*) fail "datasource looks like the REAL sellerops DB" ;;
+  *) pass "datasource is disposable ($DB_ALIAS@$PGHOST:$PGPORT)" ;;
+esac
+[ "${SELLEROPS_COLLECT_SCHEDULER_ENABLED:-false}" = "false" ] && pass "collection scheduler OFF" || fail "scheduler must be OFF"
+[ "${SELLEROPS_CONNECTOR_NAVER_ENABLED:-false}" = "true" ] && pass "NAVER connector flag ON" || fail "NAVER connector flag must be ON"
+
+# 7. Pristine baseline.
+CREDS="$(q 'select count(*) from connector_credentials')"; SYNCS="$(q 'select count(*) from sync_jobs')"
+ORDERS="$(q 'select count(*) from channel_orders')"; NAVER_ACCTS="$(naver_accts)"
+if [ -z "$CREDS$SYNCS$ORDERS$NAVER_ACCTS" ]; then
+  fail "could not query the disposable DB ($PGHOST:$PGPORT/$PGDATABASE)"; CREDS="?"; SYNCS="?"; ORDERS="?"; NAVER_ACCTS="?"
+else
+  echo "  baseline: credentials=$CREDS sync_jobs=$SYNCS channel_orders=$ORDERS naver_accounts=$NAVER_ACCTS"
+  { [ "$CREDS" = 0 ] && [ "$SYNCS" = 0 ] && [ "$ORDERS" = 0 ] && [ "$NAVER_ACCTS" = 0 ]; } \
+    && pass "pristine baseline (all zero)" || fail "baseline not pristine — reset the disposable DB"
+fi
+
+# 8. Git drift — the working tree must still be the commit this run was bootstrapped at.
+CUR_GIT="$(git -C "$HERE" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+[ "$CUR_GIT" = "$RUN_GIT" ] && pass "git commit unchanged since bootstrap ($CUR_GIT)" \
+  || fail "git commit changed ($RUN_GIT → $CUR_GIT) — re-bootstrap the run"
+
+# 9. Backend /context run-id + git match (login → token → read-only context).
+TOKEN="$(curl -s --max-time 8 -X POST -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$SMOKE_EMAIL\",\"password\":\"$SMOKE_PASSWORD\"}" "$FRONTEND_ORIGIN/api/auth/login" \
+  | python3 -c "import json,sys;print(json.load(sys.stdin).get('token',''))" 2>/dev/null)"
+if [ -z "$TOKEN" ]; then
+  fail "could not log in to read /context (demo login failed)"
+else
+  CTX="$(curl -s --max-time 8 -H "Authorization: Bearer $TOKEN" "$FRONTEND_ORIGIN/api/walkthrough/context" 2>/dev/null)"
+  CTX_RUN="$(printf '%s' "$CTX" | python3 -c "import json,sys;print(json.load(sys.stdin).get('walkthroughRunId',''))" 2>/dev/null || echo)"
+  CTX_GIT="$(printf '%s' "$CTX" | python3 -c "import json,sys;print(json.load(sys.stdin).get('gitCommit',''))" 2>/dev/null || echo)"
+  [ "$CTX_RUN" = "$RUN_ID" ] && pass "backend /context run id matches bootstrap ($RUN_ID)" \
+    || fail "backend /context run id ('$CTX_RUN') != bootstrap ('$RUN_ID') — wrong backend / stale run"
+  [ "$CTX_GIT" = "$RUN_GIT" ] && pass "backend /context git commit matches bootstrap ($RUN_GIT)" \
+    || fail "backend /context git ('$CTX_GIT') != bootstrap ('$RUN_GIT')"
+fi
+
+# 9b. FE-run-host proof ONLY: a standalone issuance-live-proof client must NOT be running. That phase makes the
+# SellerOps FE the SOLE run client (START_RUN once); a standalone `issuance-live-proof.ts` client could send
+# START_RUN behind the FE, so its presence fails preflight closed.
+if [ "${SELLEROPS_APPROVAL_PHASE:-}" = "API_ISSUANCE_FE_LIVE_PROOF" ]; then
+  if pgrep -f "issuance-live-proof.ts" >/dev/null 2>&1; then
+    fail "a standalone issuance-live-proof client is running — the FE must be the SOLE run client; stop it before preflight"
+  else
+    pass "no standalone issuance-live-proof client running (FE is the sole run client)"
+  fi
+fi
+
+# 10. MANDATORY env-binding browser run — clean context, exact URL, banner run id, gate matched, 0 NAVER calls.
+echo "  running env-binding browser smoke (clean context, exact URL)…"
+if SELLEROPS_FRONTEND_ORIGIN="$FRONTEND_ORIGIN" SMOKE_RUN_ID="$RUN_ID" SMOKE_EXPECT="matched" \
+   SMOKE_EMAIL="$SMOKE_EMAIL" SMOKE_PASSWORD="$SMOKE_PASSWORD" \
+   node "$HERE/env-binding-smoke.mjs" 2>&1 | sed 's/^/    /'; then
+  SMOKE_RESULT="pass"; pass "env-binding browser run (banner run id + wizard reachable, 0 NAVER calls)"
+else
+  SMOKE_RESULT="fail"; BROWSER_LOGIN_FAILED=1; fail "env-binding browser run FAILED"
+fi
+
+# 11. Page-load wrote NOTHING — the smoke opened /connect/naver; the FULL baseline must be unchanged
+# (accounts + credentials + sync jobs + orders). Only meaningful if the step-7 baseline actually queried.
+NAVER_ACCTS_AFTER="$(naver_accts)"; CREDS_AFTER="$(q 'select count(*) from connector_credentials')"
+SYNCS_AFTER="$(q 'select count(*) from sync_jobs')"; ORDERS_AFTER="$(q 'select count(*) from channel_orders')"
+if [ "$NAVER_ACCTS" = "?" ] || [ -z "$NAVER_ACCTS_AFTER" ]; then
+  fail "cannot verify page-load 0-write (baseline query unavailable)"
+elif [ "$NAVER_ACCTS_AFTER" = "$NAVER_ACCTS" ] && [ "$CREDS_AFTER" = "$CREDS" ] \
+     && [ "$SYNCS_AFTER" = "$SYNCS" ] && [ "$ORDERS_AFTER" = "$ORDERS" ]; then
+  pass "page load created 0 DB writes (accounts/credentials/sync_jobs/orders all unchanged)"
+else
+  fail "page load mutated the DB (accts $NAVER_ACCTS→$NAVER_ACCTS_AFTER, creds $CREDS→$CREDS_AFTER, syncs $SYNCS→$SYNCS_AFTER, orders $ORDERS→$ORDERS_AFTER)"
+fi
+
+# ---- Approval Manifest ---------------------------------------------------------
+# PREPARED means the approved run is IMMEDIATELY executable with no further operator input
+# (docs/sellerops_live_approval_contract.md §2/§3). Two paths:
+#   * Calibration run (SELLEROPS_APPROVAL_PHASE set) → the tested prerequisite gate
+#     `collector/src/cli/approval-manifest-cli.ts` is the SOLE manifest source. It confirms the exact
+#     CLI+driver for the phase, screens the API-center URL, checks actions match the driver's real
+#     capability, and refuses the highlight phase until selectors are calibrated. Any missing prerequisite
+#     ⇒ `PREFLIGHT FAIL: approval_prerequisite (<cause>)` and NO manifest / NO approval request.
+#   * Order-connection walkthrough (no phase) → the inline WRITE manifest, unchanged.
+COLLECTOR_DIR="${SELLEROPS_COLLECTOR_DIR:-$(cd "$HERE/../../collector" && pwd)}"
+APPROVAL_ID="${WALKTHROUGH_APPROVAL_ID:-unknown}"
+
+if [ -n "${SELLEROPS_APPROVAL_PHASE:-}" ]; then
+  if ! ( cd "$COLLECTOR_DIR" && npx --no-install tsx src/cli/approval-manifest-cli.ts ) > "$MANIFEST_OUT" 2> "$MANIFEST_OUT.err"; then
+    echo; cat "$MANIFEST_OUT.err" >&2 2>/dev/null || true
+    rm -f "$MANIFEST_OUT" "$MANIFEST_OUT.err"
+    echo "PREFLIGHT FAIL — approval prerequisites not met; no manifest prepared, no approval requested."
+    exit 1
+  fi
+  rm -f "$MANIFEST_OUT.err"
+  # Derive the display fields from the tested manifest (never re-typed; raw URL never in it — host only).
+  APPROVAL_CHANNEL="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT'))['channel'])")"
+  APPROVAL_OPERATION="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT'))['operation'])")"
+  APPROVAL_MODE="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT'))['mode'])")"
+  APPROVAL_ACCOUNT="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT'))['accountBinding'])")"
+  APPROVAL_MAX="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT'))['maxActions'])")"
+  APPROVAL_PHASE="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT'))['phase'])")"
+  # The phase's ONE operator entrypoint — drives what the PASS block tells the operator to do (a calibration
+  # phase is a CLI-launched dedicated window, NEVER a frontend URL). Sourced from the tested manifest, not re-typed.
+  APPROVAL_ENTRYPOINT_TYPE="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT'))['entrypointType'])")"
+  APPROVAL_OPERATOR_ACTION="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT'))['operatorActionSummary'])")"
+else
+  APPROVAL_PHASE="NAVER_GUIDED_CONNECTION"
+  # The guided order connection is the ONE phase whose operator action IS a bound frontend URL.
+  APPROVAL_ENTRYPOINT_TYPE="FRONTEND_URL"
+  APPROVAL_OPERATOR_ACTION="브라우저 새 창에서 아래 연결 마법사 주소를 여세요."
+  APPROVAL_CHANNEL="${SELLEROPS_APPROVAL_CHANNEL:-NAVER}"
+  APPROVAL_SURFACE="${SELLEROPS_APPROVAL_SURFACE:-connect/naver}"
+  APPROVAL_OPERATION="${SELLEROPS_APPROVAL_OPERATION:-guided order connection}"
+  APPROVAL_MODE="${SELLEROPS_APPROVAL_MODE:-WRITE}"
+  APPROVAL_ACCOUNT="${SELLEROPS_APPROVAL_ACCOUNT:-operator-owned NAVER seller/API account (test)}"
+  APPROVAL_MAX="${SELLEROPS_APPROVAL_MAX:-credential=1, test=1, sync=1}"
+  # The account binding must be a sanitized DESCRIPTION, never a raw internal id/token (contract §2). Fail
+  # closed if an override looks like a bare id — pure digits (≥4) or a long hex/token (≥16).
+  if printf '%s' "$APPROVAL_ACCOUNT" | grep -Eq '^[0-9]{4,}$|^[0-9a-fA-F]{16,}$'; then
+    echo "PREFLIGHT FAIL: SELLEROPS_APPROVAL_ACCOUNT looks like a raw id/token — the manifest carries only a sanitized description, never a raw account/store id. Refusing before emitting the manifest."
+    exit 1
+  fi
+  cat > "$MANIFEST_OUT" <<JSON
+{
+  "approvalId": "$APPROVAL_ID",
+  "walkthroughRunId": "$RUN_ID",
+  "gitCommit": "$CUR_GIT",
+  "phase": "$APPROVAL_PHASE",
+  "entrypointType": "$APPROVAL_ENTRYPOINT_TYPE",
+  "entrypointCommandId": "frontend-connect-naver",
+  "operatorActionSummary": "$APPROVAL_OPERATOR_ACTION",
+  "frontendOrigin": "$FRONTEND_ORIGIN",
+  "backendOrigin": "$BACKEND_ORIGIN",
+  "dbAlias": "$DB_ALIAS@$PGHOST:$PGPORT",
+  "scheduler": "${SELLEROPS_COLLECT_SCHEDULER_ENABLED:-false}",
+  "naverFlag": "${SELLEROPS_CONNECTOR_NAVER_ENABLED:-false}",
+  "baseline": { "credentials": "$CREDS", "syncJobs": "$SYNCS", "channelOrders": "$ORDERS", "naverAccounts": "$NAVER_ACCTS" },
+  "envBindingSmoke": "$SMOKE_RESULT",
+  "approval": {
+    "channel": "$APPROVAL_CHANNEL",
+    "surface": "$APPROVAL_SURFACE",
+    "operation": "$APPROVAL_OPERATION",
+    "mode": "$APPROVAL_MODE",
+    "accountBinding": "$APPROVAL_ACCOUNT",
+    "maxActions": "$APPROVAL_MAX",
+    "operatorPresenceRequired": true,
+    "expiresAt": "process-lifetime"
+  }
+}
+JSON
+fi
+echo
+echo "runtime + approval manifest (sanitized) → $MANIFEST_OUT"; cat "$MANIFEST_OUT" | sed 's/^/  /'
+
+echo
+if [ "$FAILED" = "0" ]; then
+  echo "PREFLIGHT PASS"
+  # The operator performs exactly ONE action, and it differs by phase (docs/sellerops_live_approval_contract.md
+  # §3/§6). A calibration phase is a CLI-launched dedicated Chrome window with NO frontend URL; only the guided
+  # connection phase hands the operator a bound frontend URL. Print the one true action for THIS phase — never both.
+  if [ "$APPROVAL_ENTRYPOINT_TYPE" = "FRONTEND_URL" ]; then
+    echo "  operator URL   : $FRONTEND_ORIGIN/connect/naver?walkthroughRun=$RUN_ID"
+  else
+    echo "  operator action: $APPROVAL_OPERATOR_ACTION"
+  fi
+  echo "  expected run   : ${RUN_ID:0:8}…"
+  echo "  expected git   : $CUR_GIT"
+  echo "  expected db    : $DB_ALIAS"
+  echo
+  # ---- Approval Manifest (short, screen/CLI) — the operator approves THIS, in one line -----------
+  # The Standing Safety Contract (§1) is NOT re-listed here — it always holds; the long allow/deny scope lives
+  # in that doc's "detailed safety scope".
+  echo "  ── APPROVAL MANIFEST (sanitized) ──"
+  echo "  $APPROVAL_CHANNEL · $APPROVAL_OPERATION · $APPROVAL_MODE · run ${RUN_ID:0:8}… · approval ${APPROVAL_ID:0:8}… · max: $APPROVAL_MAX"
+  if [ "$APPROVAL_ENTRYPOINT_TYPE" = "FRONTEND_URL" ]; then
+    echo "  phase: $APPROVAL_PHASE · entrypoint: bound frontend URL (operator opens the wizard address above)"
+  else
+    echo "  phase: $APPROVAL_PHASE (tested prerequisite gate — cli/driver/url/selectors confirmed)"
+    echo "  entrypoint: SellerOps opens a dedicated Chrome window on approval — no frontend URL"
+  fi
+  echo "  account: $APPROVAL_ACCOUNT · operator presence: required · expires: process-lifetime · git $CUR_GIT"
+  # Visual-recon phase: surface the redact-then-capture gate, the fixed screen set, and the gitignored sink so the
+  # operator approves exactly what the recon may capture and where it lands (values read from the tested manifest).
+  if [ "$APPROVAL_PHASE" = "API_CENTER_VISUAL_RECON" ]; then
+    VR_SCREENS="$(python3 -c "import json;print(', '.join(json.load(open('$MANIFEST_OUT')).get('captureScreens',[])))" 2>/dev/null || echo)"
+    VR_SINK="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT')).get('artifactCategory',''))" 2>/dev/null || echo)"
+    echo "  visual recon: redact-then-capture — screens: $VR_SCREENS"
+    echo "  artifacts: redacted PNG + sanitized closed-vocab JSON → $VR_SINK (gitignored); any uncovered sensitive region ⇒ HALT, no screenshot"
+  fi
+  # FE-run-host issuance proof: surface the sole run client + supporting surface so the operator approves that
+  # the FE (not the CLI host) drives the run, START_RUN fires once, and there is zero credential/test/sync.
+  if [ "$APPROVAL_PHASE" = "API_ISSUANCE_FE_LIVE_PROOF" ]; then
+    FE_OWNER="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT')).get('soleStartRunOwner',''))" 2>/dev/null || echo)"
+    FE_MAX="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT')).get('maxStartRun',''))" 2>/dev/null || echo)"
+    FE_SURFACE="$(python3 -c "import json;print(', '.join(json.load(open('$MANIFEST_OUT')).get('supportingSurface',[])))" 2>/dev/null || echo)"
+    FE_PATH="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT')).get('boundFrontendPath',''))" 2>/dev/null || echo)"
+    echo "  FE run-host proof: sole START_RUN owner=$FE_OWNER (max $FE_MAX) · credential/test/sync=0 · host sends NO START_RUN · no standalone proof client"
+    echo "  supporting surface: $FE_SURFACE (CLI-launched host; NOT a run client) · bound FE path: $FE_PATH"
+  fi
+  echo "  Standing Safety Contract + full scope: docs/sellerops_live_approval_contract.md"
+  echo
+  if [ "$APPROVAL_ENTRYPOINT_TYPE" = "FRONTEND_URL" ]; then
+    echo "  Open EXACTLY that URL in a fresh window. If this manifest is correct and displayed, the operator's"
+    echo "  entire single-use approval is one line:  Seated and ready."
+    echo "  (A WRITE step — credential entry / test / sync / reply submission — is authorized by mode=WRITE above;"
+    echo "   a READ_ONLY manifest never authorizes it. Re-bootstrap ⇒ new approval id ⇒ old approval is dead.)"
+  else
+    echo "  승인 후 SellerOps가 전용 Chrome 창을 엽니다 (열어야 할 별도 브라우저 URL 없음). 이 manifest가 맞다면"
+    echo "  operator의 단일-사용 승인은 한 줄:  Seated and ready."
+    echo "  (READ_ONLY manifest는 credential/test/sync/reply 같은 WRITE 단계를 절대 승인하지 않음. 코드/브랜치/런"
+    echo "   변경 ⇒ 새 approval id 필요 ⇒ 기존 승인 폐기.)"
+  fi
+  exit 0
+elif [ "$BROWSER_LOGIN_FAILED" = "1" ]; then
+  echo "PREFLIGHT FAIL: browser_login — the env-binding browser run did not pass. Do NOT open the browser."
+  exit 1
+else
+  echo "PREFLIGHT FAIL — do NOT open the browser until every check passes."
+  exit 1
+fi

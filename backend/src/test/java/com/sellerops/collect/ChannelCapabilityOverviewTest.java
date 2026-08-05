@@ -35,7 +35,9 @@ class ChannelCapabilityOverviewTest {
     private CollectControlService serviceWith(ConnectorRegistry registry) {
         // Only channels + registry are touched by channelCapabilityOverview; the rest
         // are unused for this read and may be null.
-        return new CollectControlService(null, channels, null, null, null, null, registry, null, null, null);
+        // naverLifecycle (last arg) is null: this test exercises channelCapabilityOverview only, never
+        // the testConnection path that would call it.
+        return new CollectControlService(null, channels, null, null, null, null, registry, null, null, null, null);
     }
 
     @Test

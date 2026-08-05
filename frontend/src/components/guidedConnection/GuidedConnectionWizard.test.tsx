@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 // Wizard rendering + intent-dispatch tests. The wizard is controlled: given a phase it renders one
 // step and emits sanitized events. Logic (which phase follows which) is covered by state.test.ts.
+// The order connection is Local-Agent-free — there are NO agent/renderer/NAVER-login phases to render.
 import { describe, it, expect, vi } from "vitest";
 import { render } from "@testing-library/react";
 import { screen, userEvent } from "../../test/renderWithRouter";
 import { expectNoAxeViolations } from "../../test/axe";
 import { GuidedConnectionWizard, type GuidedConnectionWizardProps } from "./GuidedConnectionWizard";
-import { actorFor, DISCONNECT_GUARDRAIL_COPY, NAVER_LIKE_TEMPLATE } from "../../lib/guidedConnection";
+import { actorFor, DISCONNECT_GUARDRAIL_COPY, NAVER_LIKE_TEMPLATE, REVIEW_SETUP_COPY } from "../../lib/guidedConnection";
 import type { GuidedConnectionState, GuidedFailureReason, GuidedPhase } from "../../lib/guidedConnection";
 
 function stateAt(phase: GuidedPhase, failureReason: GuidedFailureReason | null = null): GuidedConnectionState {
@@ -15,7 +16,6 @@ function stateAt(phase: GuidedPhase, failureReason: GuidedFailureReason | null =
     actor: actorFor(phase),
     failureReason,
     milestones: { registered: false, tested: false, synced: false },
-    sessionSource: "none",
     path: "unknown",
   };
 }
@@ -29,9 +29,9 @@ function renderWizard(
     template: NAVER_LIKE_TEMPLATE,
     busy: false,
     connectionStatus: null,
+    capability: null,
+    reviewImportReady: false,
     dispatch: vi.fn(),
-    onRecheck: vi.fn(),
-    onConfirmLogin: vi.fn(),
     onSubmitCredentials: vi.fn(),
     onRetryTest: vi.fn(),
     onRetrySync: vi.fn(),
@@ -43,59 +43,51 @@ function renderWizard(
 
 describe("GuidedConnectionWizard — status panel", () => {
   it("shows the phase title, the actor, and a safe failure reason when present", () => {
-    renderWizard(stateAt("naver_login_required", "NAVER_LOGIN_REQUIRED"));
-    expect(screen.getByRole("heading", { name: "NAVER 로그인 필요" })).toBeInTheDocument();
+    renderWizard(stateAt("permission_review_required", "PERMISSION_INSUFFICIENT"));
+    expect(screen.getByRole("heading", { name: "권한 확인 필요" })).toBeInTheDocument();
     expect(screen.getByText("고객님이 진행")).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent(/NAVER 로그인이 필요/);
+    expect(screen.getByRole("alert")).toHaveTextContent(/권한이 부족/);
+  });
+
+  it("renders NO Local-Agent / NAVER-login gate phase (they no longer exist in the order flow)", () => {
+    // The order connection carries no agent/login step; the fork is reached directly.
+    renderWizard(stateAt("application_path_choice"));
+    expect(screen.queryByRole("button", { name: "로그인했어요" })).toBeNull();
+    expect(screen.queryByText(/로컬 에이전트/)).toBeNull();
   });
 });
 
 describe("GuidedConnectionWizard — per-phase actions dispatch sanitized events", () => {
-  it("agent_unavailable → 다시 확인 calls onRecheck", async () => {
-    const { props } = renderWizard(stateAt("agent_unavailable", "AGENT_UNAVAILABLE"));
-    await userEvent.click(screen.getByRole("button", { name: "다시 확인" }));
-    expect(props.onRecheck).toHaveBeenCalledOnce();
-  });
-
-  it("naver_login_required → 로그인했어요 attests login (onConfirmLogin), not a bypass", async () => {
-    const { props } = renderWizard(stateAt("naver_login_required", "NAVER_LOGIN_REQUIRED"));
-    await userEvent.click(screen.getByRole("button", { name: "로그인했어요" }));
-    expect(props.onConfirmLogin).toHaveBeenCalledOnce();
-  });
-
-  it("naver_login_required with DETECTED source → re-check, not attest (detection outranks attestation)", async () => {
-    const detectedLogin: GuidedConnectionState = {
-      ...stateAt("naver_login_required", "NAVER_LOGIN_REQUIRED"),
-      sessionSource: "detected",
-    };
-    const { props } = renderWizard(detectedLogin);
-    expect(screen.queryByRole("button", { name: "로그인했어요" })).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: "로그인 후 다시 확인" }));
-    expect(props.onRecheck).toHaveBeenCalledOnce();
-    expect(props.onConfirmLogin).not.toHaveBeenCalled();
-  });
-
-  it("naver_reconnect_required → tells the seller to re-login inside the dedicated window; recheck re-detects", async () => {
-    const { props } = renderWizard(stateAt("naver_reconnect_required", "RECONNECT_REQUIRED"));
-    // Copy must direct the seller to the DEDICATED window (B4 profile-mismatch explanation).
-    expect(screen.getAllByText(/전용 작업 창/).length).toBeGreaterThan(0);
-    await userEvent.click(screen.getByRole("button", { name: "로그인 후 다시 확인" }));
-    // A detected reconnect is cleared by re-detection (onRecheck), NOT by bare attestation.
-    expect(props.onRecheck).toHaveBeenCalledOnce();
-    expect(props.onConfirmLogin).not.toHaveBeenCalled();
-  });
-
   it("account_store_choice_required → dispatches ACCOUNT_STORE_RESOLVED", async () => {
     const { props } = renderWizard(stateAt("account_store_choice_required"));
     await userEvent.click(screen.getByRole("button", { name: /계정·스토어를 선택/ }));
     expect(props.dispatch).toHaveBeenCalledWith({ type: "ACCOUNT_STORE_RESOLVED" });
   });
 
-  it("application_issuance → lists guidance steps and dispatches ISSUANCE_COMPLETE", async () => {
+  it("application_issuance → mode fork; guided choice dispatches APPLICATION_ISSUANCE_MODE{guided}", async () => {
     const { props } = renderWizard(stateAt("application_issuance"));
+    await userEvent.click(screen.getByRole("button", { name: "화면을 보며 안내받기" }));
+    expect(props.dispatch).toHaveBeenCalledWith({ type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
+  });
+
+  it("application_issuance → text choice reveals the static checklist in place and dispatches ISSUANCE_COMPLETE", async () => {
+    const { props } = renderWizard(stateAt("application_issuance"));
+    await userEvent.click(screen.getByRole("button", { name: "텍스트로 직접 진행하기" }));
     expect(screen.getAllByRole("listitem").length).toBeGreaterThanOrEqual(3);
+    // Each step exposes a "어디를 눌러야 하나요?" help and a checkbox; the center opens in a new tab.
+    expect(screen.getAllByText("어디를 눌러야 하나요?").length).toBeGreaterThanOrEqual(3);
+    expect(screen.getAllByRole("checkbox").length).toBeGreaterThanOrEqual(3);
+    expect(screen.getByRole("button", { name: /API 센터 열기/ })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "발급을 완료했어요" }));
     expect(props.dispatch).toHaveBeenCalledWith({ type: "ISSUANCE_COMPLETE" });
+  });
+
+  it("application_issuance_guided → renders the guided walkthrough START gate (guided is the default; no co-equal text)", () => {
+    renderWizard(stateAt("application_issuance_guided"));
+    expect(screen.getByRole("button", { name: "네이버 연결 안내 시작" })).toBeInTheDocument();
+    // Text is a failure-only fallback, never an upfront co-equal choice.
+    expect(screen.queryByRole("button", { name: "텍스트로 직접 진행하기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "화면을 보며 확인" })).toBeNull();
   });
 
   it("credential_issued → dispatches BEGIN_CREDENTIAL_ENTRY", async () => {
@@ -121,10 +113,15 @@ describe("GuidedConnectionWizard — per-phase actions dispatch sanitized events
     expect(screen.getByText(/불러오는 중/)).toBeInTheDocument();
   });
 
-  it("connection_testing failure → 다시 확인 calls onRetryTest", async () => {
+  it("connection_testing (idle) → shows a user CTA '연결 확인' that calls onRetryTest (no auto-run)", async () => {
     const { props } = renderWizard(stateAt("connection_testing", "TEMPORARY_PROVIDER_ERROR"));
-    await userEvent.click(screen.getByRole("button", { name: "다시 확인" }));
+    await userEvent.click(screen.getByRole("button", { name: "연결 확인" }));
     expect(props.onRetryTest).toHaveBeenCalledOnce();
+  });
+
+  it("connection_testing while BUSY → progress only, NO CTA (the in-session test is actually running)", () => {
+    renderWizard(stateAt("connection_testing"), { busy: true });
+    expect(screen.queryByRole("button", { name: "연결 확인" })).toBeNull();
   });
 
   it("first_order_sync failure → 다시 시도 calls onRetrySync", async () => {
@@ -133,13 +130,43 @@ describe("GuidedConnectionWizard — per-phase actions dispatch sanitized events
     expect(props.onRetrySync).toHaveBeenCalledOnce();
   });
 
-  it("completed → dispatches CONTINUE_TO_REVIEW_EXPORT (the review handoff)", async () => {
-    const { props } = renderWizard(stateAt("completed"));
-    await userEvent.click(screen.getByRole("button", { name: "과거 리뷰 가져오기로 이동" }));
-    expect(props.dispatch).toHaveBeenCalledWith({ type: "CONTINUE_TO_REVIEW_EXPORT" });
+  it("first_order_sync in progress → shows elapsed + resume reassurance, NO retry (never a percentage)", () => {
+    renderWizard(stateAt("first_order_sync"), { syncProgress: { elapsedMs: 42_000, stalled: false } });
+    expect(screen.getByText(/경과 시간: 0:42/)).toBeInTheDocument();
+    expect(screen.getByText(/새로고침해도 같은 수집이 이어집니다/)).toBeInTheDocument();
+    expect(screen.queryByText(/%/)).toBeNull();
+    // While actively running, there is no retry button (a second trigger would only duplicate work).
+    expect(screen.queryByRole("button", { name: "다시 시도" })).toBeNull();
   });
 
-  it("completed → shows the connection health + last successful collection time when a status is read", () => {
+  it("first_order_sync in progress past the soft threshold → adds a 'taking longer' note", () => {
+    renderWizard(stateAt("first_order_sync"), { syncProgress: { elapsedMs: 4 * 60_000, stalled: false } });
+    expect(screen.getByText(/예상보다 오래 걸리고 있어요/)).toBeInTheDocument();
+  });
+
+  it("first_order_sync stalled → offers a re-check that only polls (onRecheckSync), never a new sync", async () => {
+    const onRecheckSync = vi.fn();
+    renderWizard(stateAt("first_order_sync"), { syncProgress: { elapsedMs: 12 * 60_000, stalled: true }, onRecheckSync });
+    expect(screen.getByText(/새 수집을 만들지 않고/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "진행 상태 다시 확인" }));
+    expect(onRecheckSync).toHaveBeenCalledOnce();
+  });
+
+  it("review_export_readiness → navigates via onGoToReviewExport (handoff, not in-wizard collection)", async () => {
+    const { props } = renderWizard(stateAt("review_export_readiness"));
+    await userEvent.click(screen.getByRole("button", { name: "리뷰 내보내기로 이동" }));
+    expect(props.onGoToReviewExport).toHaveBeenCalledOnce();
+  });
+
+  it("unsupported_state → dispatches RESUME (recover to the safe phase)", async () => {
+    const { props } = renderWizard(stateAt("unsupported_state", "UNKNOWN_STATE"));
+    await userEvent.click(screen.getByRole("button", { name: /화면을 확인했어요/ }));
+    expect(props.dispatch).toHaveBeenCalledWith({ type: "RESUME" });
+  });
+});
+
+describe("GuidedConnectionWizard — completed screen (order done, review import is a separate step)", () => {
+  it("shows the connection health + last successful collection time when a status is read", () => {
     renderWizard(stateAt("completed"), {
       connectionStatus: {
         sellerAccountId: "acc-1",
@@ -156,22 +183,32 @@ describe("GuidedConnectionWizard — per-phase actions dispatch sanitized events
     expect(screen.getByText(/마지막 성공 수집: .*분 전/)).toBeInTheDocument();
   });
 
-  it("completed with no status read yet → the summary block is omitted, CTA still shows", () => {
+  it("with no status read yet → the summary block is omitted, the review-setup CTA still shows", () => {
     renderWizard(stateAt("completed"), { connectionStatus: null });
     expect(screen.queryByText("연결 상태")).toBeNull();
-    expect(screen.getByRole("button", { name: "과거 리뷰 가져오기로 이동" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: REVIEW_SETUP_COPY.cta })).toBeInTheDocument();
   });
 
-  it("review_export_readiness → navigates via onGoToReviewExport (handoff, not in-wizard collection)", async () => {
-    const { props } = renderWizard(stateAt("review_export_readiness"));
-    await userEvent.click(screen.getByRole("button", { name: "리뷰 내보내기로 이동" }));
-    expect(props.onGoToReviewExport).toHaveBeenCalledOnce();
+  it("review-setup card: NOT paired → SETUP_REQUIRED copy (local agent needed) + CTA dispatches the handoff", async () => {
+    const { props } = renderWizard(stateAt("completed"), { reviewImportReady: false });
+    const card = screen.getByRole("note", { name: "리뷰 가져오기 설정" });
+    expect(card).toHaveTextContent(/로컬 에이전트/); // the review step is the only place the agent appears
+    await userEvent.click(screen.getByRole("button", { name: REVIEW_SETUP_COPY.cta }));
+    expect(props.dispatch).toHaveBeenCalledWith({ type: "CONTINUE_TO_REVIEW_EXPORT" });
   });
 
-  it("unsupported_state → dispatches RESUME (recover to the safe phase)", async () => {
-    const { props } = renderWizard(stateAt("unsupported_state", "UNKNOWN_STATE"));
-    await userEvent.click(screen.getByRole("button", { name: /화면을 확인했어요/ }));
-    expect(props.dispatch).toHaveBeenCalledWith({ type: "RESUME" });
+  it("review-setup card: paired → GUIDED_CONFIRMATION 'ready' copy (no setup-required framing)", () => {
+    renderWizard(stateAt("completed"), { reviewImportReady: true });
+    const card = screen.getByRole("note", { name: "리뷰 가져오기 설정" });
+    expect(card).toHaveTextContent(REVIEW_SETUP_COPY.readyBody.slice(0, 12));
+  });
+
+  it("surfaces the disconnect≠NAVER-deactivation guardrail (remove SellerOps credential, not the NAVER app)", () => {
+    renderWizard(stateAt("completed"));
+    const notes = screen.getAllByRole("note");
+    const guardrail = notes.find((n) => n.textContent?.includes(DISCONNECT_GUARDRAIL_COPY.title));
+    expect(guardrail).toBeTruthy();
+    expect(guardrail?.textContent ?? "").toMatch(/비활성화/);
   });
 });
 
@@ -194,11 +231,25 @@ describe("GuidedConnectionWizard — discovery / reuse / recovery phases", () =>
     expect(props.dispatch).toHaveBeenCalledWith({ type: "APPLICATION_LIST_RESULT", found: false });
   });
 
-  it("existing_credential_entry → the secure form, plus a 'secret not found' exit to recovery", async () => {
+  it("existing_credential_entry → the secure form, existing-app guidance, and a 'secret not found' exit", async () => {
     const { props } = renderWizard(stateAt("existing_credential_entry"));
     expect(screen.getByRole("button", { name: "연결 정보 저장" })).toBeInTheDocument();
+    // Existing-app guidance: check the existing app's API group (never nudged to create a second app).
+    expect(screen.getByText("기존 앱에서 어디를 확인하나요?")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "시크릿을 찾지 못했어요" }));
     expect(props.dispatch).toHaveBeenCalledWith({ type: "SECRET_UNAVAILABLE" });
+  });
+
+  it("existing_credential_entry → the POST-guided input screen: the form + input copy, NO guided/text offer", () => {
+    renderWizard(stateAt("existing_credential_entry"));
+    // Reached after the guided walk found the values — this is the input screen.
+    expect(screen.getByText("방금 복사한 애플리케이션 ID와 시크릿을 입력해 주세요.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "연결 정보 저장" })).toBeInTheDocument();
+    // The removed co-equal offer must not resurface here.
+    expect(screen.queryByRole("button", { name: "화면을 보며 확인" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "텍스트로 직접 확인" })).toBeNull();
+    // The Secret-recovery exit stays.
+    expect(screen.getByRole("button", { name: "시크릿을 찾지 못했어요" })).toBeInTheDocument();
   });
 
   it("credential_recovery_required → recover by re-viewing/reissuing the Secret; NO app-delete option is offered", async () => {
@@ -208,14 +259,6 @@ describe("GuidedConnectionWizard — discovery / reuse / recovery phases", () =>
     // The delete-then-reissue path is gone — no delete affordance should exist (NAVER offers no app delete).
     expect(screen.queryByRole("button", { name: /삭제/ })).toBeNull();
     expect(screen.queryByRole("checkbox")).toBeNull();
-  });
-
-  it("completed → surfaces the disconnect≠NAVER-deactivation guardrail (remove SellerOps credential, not the NAVER app)", () => {
-    renderWizard(stateAt("completed"));
-    const note = screen.getByRole("note");
-    expect(note).toHaveTextContent(DISCONNECT_GUARDRAIL_COPY.title);
-    // The guardrail must tell the seller NOT to deactivate/delete the NAVER app to leave SellerOps.
-    expect(note.textContent ?? "").toMatch(/비활성화/);
   });
 
   it("permission_review_required / call_environment_mismatch → re-test after the seller fixes it at NAVER", async () => {
@@ -235,8 +278,28 @@ describe("GuidedConnectionWizard — accessibility", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("has no violations at the issuance-tutorial step", async () => {
+    const { container } = renderWizard(stateAt("application_issuance"));
+    await expectNoAxeViolations(container);
+  });
+
   it("has no violations at the completed step", async () => {
     const { container } = renderWizard(stateAt("completed"));
+    await expectNoAxeViolations(container);
+  });
+
+  it("has no violations on the in-progress sync screen", async () => {
+    const { container } = renderWizard(stateAt("first_order_sync"), {
+      syncProgress: { elapsedMs: 90_000, stalled: false },
+    });
+    await expectNoAxeViolations(container);
+  });
+
+  it("has no violations on the stalled sync screen", async () => {
+    const { container } = renderWizard(stateAt("first_order_sync"), {
+      syncProgress: { elapsedMs: 12 * 60_000, stalled: true },
+      onRecheckSync: () => {},
+    });
     await expectNoAxeViolations(container);
   });
 });

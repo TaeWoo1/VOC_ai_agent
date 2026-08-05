@@ -29,7 +29,7 @@
  * (`createAgentBridge` throws when both are configured), so this reports a fact about the agent, not
  * a menu to choose from.
  */
-export const AW_CARRIER_KINDS = ["export", "reply", "import"] as const;
+export const AW_CARRIER_KINDS = ["export", "reply", "import", "issuance"] as const;
 
 export type AwCarrierKind = (typeof AW_CARRIER_KINDS)[number];
 
@@ -58,6 +58,24 @@ export const AW_CARRIER_REPLY = "reply";
  * <p>Unannotated for the same reason as {@link AW_CARRIER_EXPORT}.
  */
 export const AW_CARRIER_IMPORT = "import";
+
+/**
+ * The v2 **API-issuance guidance** carrier — the NAVER Commerce API-center onboarding world.
+ *
+ * <p>It speaks v2 envelopes like `reply` and `import`, so version alone cannot separate the three: a
+ * client attaching to an issuance agent while expecting one of the others would build a correctly-versioned
+ * client and then sit dormant — the failure this field exists to make impossible. An issuance run is
+ * read-only guidance choreography over the API center (open → observe page category → highlight the
+ * control the seller must press → observe the seller's own click → advance), reaching the ordinary
+ * `COMPLETED` terminal. It NEVER logs in, clicks, submits, auto-creates an application, selects an API
+ * group, or reads the Application ID / Secret; the seller performs every real step and copies the
+ * credential into SellerOps's own masked form themselves. Collapsing it into `import` would misdescribe
+ * what the agent does — an import downloads and ingests a file; issuance touches nothing and produces no
+ * artifact.
+ *
+ * <p>Unannotated for the same reason as {@link AW_CARRIER_EXPORT}.
+ */
+export const AW_CARRIER_ISSUANCE = "issuance";
 
 /**
  * Narrow an announced value to a known carrier, or `null` when it is absent or unrecognised.

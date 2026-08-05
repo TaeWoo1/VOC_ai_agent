@@ -31,7 +31,7 @@ test pass/fail as the proxy), never by writing the values down.
 
 | | |
 |---|---|
-| Approval | fresh, single-use, in-turn G6 naming channel / account / date / operator; §14 policy clarification on record. A plan is never authorization. |
+| Approval | per canonical contract `docs/sellerops_live_approval_contract.md` (single-use; default one-line `Seated and ready.` against a prepared Approval Manifest); §14 policy clarification on record. |
 | Flag | `sellerops.connector.naver.enabled` = ON **only for the disposable live session**. Never in production; revert after. |
 | Backend | disposable, name-guarded (e.g. `sellerops_naver_gapi_live_*`), never the persistent `sellerops`. No new Flyway migration. |
 | Seed | one org/user + one NAVER channel; the connect flow creates the PENDING API-mode seller account itself (`POST /api/seller-accounts/api-channel`). |

@@ -32,8 +32,8 @@
     },
     "RunIntent": {
       "type": "string",
-      "description": "v2: selects the step plan. EXPORT is the v1 read chain; REPLY_SUBMISSION is the guided human-performed reply post. INITIAL_REVIEW_IMPORT_DISCOVERY finds the historical range the marketplace currently allows (no plan exists yet, so it binds a discoveryRef); INITIAL_REVIEW_IMPORT_SEGMENT guides one already-planned segment to a downloaded, ingested file (binds an importRef). Both import intents are read-only export choreography and reach the ordinary COMPLETED terminal.",
-      "enum": ["EXPORT", "REPLY_SUBMISSION", "INITIAL_REVIEW_IMPORT_DISCOVERY", "INITIAL_REVIEW_IMPORT_SEGMENT"]
+      "description": "v2: selects the step plan. EXPORT is the v1 read chain; REPLY_SUBMISSION is the guided human-performed reply post. INITIAL_REVIEW_IMPORT_DISCOVERY finds the historical range the marketplace currently allows (no plan exists yet, so it binds a discoveryRef); INITIAL_REVIEW_IMPORT_SEGMENT guides one already-planned segment to a downloaded, ingested file (binds an importRef). API_ISSUANCE_GUIDANCE is the NAVER Commerce API-center onboarding walk — read-only guidance choreography that highlights the control the seller must press next and observes their own click until the Application ID/Secret is on screen for them to copy into SellerOps's masked form (never logging in, clicking, submitting, auto-creating an app, selecting an API group, or reading a credential value); it binds no ref (like EXPORT). All non-reply intents reach the ordinary COMPLETED terminal.",
+      "enum": ["EXPORT", "REPLY_SUBMISSION", "INITIAL_REVIEW_IMPORT_DISCOVERY", "INITIAL_REVIEW_IMPORT_SEGMENT", "API_ISSUANCE_GUIDANCE"]
     },
     "OperatorOutcome": {
       "type": "string",
@@ -44,6 +44,11 @@
       "type": "string",
       "description": "v2: what SellerOps confirmed. Only UNVERIFIED is reachable (a reply post has no read-back oracle); VERIFIED is reserved but absent.",
       "enum": ["UNVERIFIED"]
+    },
+    "IssuanceAppBranch": {
+      "type": "string",
+      "description": "v2, issuance-scoped: the application branch the API-issuance runtime observed on the seller's application list — existing (open the one existing Commerce app) or new (create one). Rides ONLY the issuance run view (ActionWindowRunView.appBranch) on an API_ISSUANCE_GUIDANCE run; absent until the list is observed and never on any other run/payload. A single sanitized bit — no app/store/account identity.",
+      "enum": ["existing", "new"]
     },
     "OpaqueRef": {
       "type": "string",
@@ -138,6 +143,7 @@
         "status": { "$ref": "#/$defs/RunStatus" },
         "executionMode": { "$ref": "#/$defs/ExecutionMode" },
         "intent": { "$ref": "#/$defs/RunIntent" },
+        "appBranch": { "$ref": "#/$defs/IssuanceAppBranch" },
         "currentStep": {
           "type": "object",
           "additionalProperties": false,

@@ -37,6 +37,15 @@ sellerops:
     # polls until ops flips this; the file-upload path is unaffected either way.
     scheduler-enabled: ${SELLEROPS_COLLECT_SCHEDULER_ENABLED:false}
     poll-interval-ms: ${SELLEROPS_COLLECT_POLL_INTERVAL_MS:60000}
+    # Single-flight orphaned-run recovery (SyncRunGate): a RUNNING sync older than
+    # this is treated as abandoned (crash/restart mid-run) and failed closed the next
+    # time a run for the same (account, data type) starts, so it never blocks forever.
+    # Chosen well ABOVE any legitimate single-run wall-time — per-request HTTP timeout
+    # is 20s so no run hangs indefinitely; a real manual run was observed at ~8.6 min;
+    # the scheduler's floor interval is 15 min. 60 min is a wide safety margin (a live
+    # run is never falsely reclaimed) while still recovering an orphan within the hour.
+    # Raise it for stores whose syncs legitimately run longer.
+    sync-stale-after-minutes: ${SELLEROPS_COLLECT_SYNC_STALE_AFTER_MINUTES:60}
   admin:
     inquiry-dismissal:
       # Operator-only bulk inquiry-dismissal admin endpoints (audited spam set-aside
@@ -61,6 +70,14 @@ sellerops:
       # is unconfirmed — 300 is the commonly cited ceiling, so values above it
       # are rejected at startup; 100 is a conservative default.
       order-detail-batch-size: ${SELLEROPS_CONNECTOR_NAVER_ORDER_DETAIL_BATCH_SIZE:100}
+      # The fixed public egress IPv4(s) the backend makes NAVER API calls from —
+      # the value a seller registers in their app's 'API 호출 IP'. This DECLARES an
+      # infra-guaranteed value for the setup tutorial to display; it does NOT pin
+      # or change the actual egress. Comma-separated, ≤3 (NAVER's per-app cap).
+      # DEFAULT EMPTY: no real IP is committed — the value is injected only from the
+      # environment/secret manager per deployment, and an empty value fails safe (the
+      # tutorial shows generic guidance, never a fabricated IP).
+      advertised-egress-ips: ${SELLEROPS_CONNECTOR_NAVER_ADVERTISED_EGRESS_IPS:}
     coupang:
       # Coupang WING Open API connector (Phase 3D-2 auth skeleton). Off by
       # default — beans absent, COUPANG keeps resolving to the mock connector.
@@ -190,6 +207,17 @@ sellerops:
     exp-minutes: ${SELLEROPS_JWT_EXP_MINUTES:720}
   cors:
     origin: ${SELLEROPS_CORS_ORIGIN:http://localhost:5173}
+  walkthrough:
+    # Disposable NAVER walkthrough environment-identity endpoints (context + operator-tab handshake).
+    # OFF by default → the WalkthroughController bean and its routes do not exist in production (any
+    # request there is a fail-closed 404). The bootstrap turns this on and injects a per-run opaque id
+    # so the operator's tab can be proven bound to THIS backend/DB/runtime. run-id is NOT a secret.
+    enabled: ${SELLEROPS_WALKTHROUGH_MODE:false}
+    run-id: ${SELLEROPS_WALKTHROUGH_RUN_ID:}
+    git-commit: ${SELLEROPS_WALKTHROUGH_GIT_COMMIT:unknown}
+    db-alias: ${SELLEROPS_WALKTHROUGH_DB_ALIAS:unknown}
+    frontend-origin: ${SELLEROPS_WALKTHROUGH_FRONTEND_ORIGIN:http://localhost:5173}
+    backend-origin: ${SELLEROPS_WALKTHROUGH_BACKEND_ORIGIN:http://127.0.0.1:18090}
   seed:
     enabled: true
     # Demo content (products/reviews/inquiries/order-summaries) is opt-in and OFF

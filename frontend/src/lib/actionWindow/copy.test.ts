@@ -12,6 +12,7 @@ import {
   CHANNEL_FALLBACK,
   CONNECTION_VIEW,
   CONNECTION_RETRY_FAILED_NOTE,
+  issuanceStepDetail,
 } from "./copy";
 
 describe("FE-owned copy registry", () => {
@@ -57,6 +58,59 @@ describe("FE-owned copy registry", () => {
     expect(CONNECTION_RETRY_FAILED_NOTE.length).toBeGreaterThan(0);
     expect(CONNECTION_RETRY_FAILED_NOTE).not.toContain("aw_");
     expect(CONNECTION_RETRY_FAILED_NOTE).not.toContain("offline");
+  });
+
+  describe("issuance step detail — the guided surface is self-sufficient", () => {
+    const ISSUANCE_STEP_KEYS = [
+      "actionWindow.issuance.run",
+      "actionWindow.issuance.reachApplications",
+      "actionWindow.issuance.createApp",
+      "actionWindow.issuance.openApp",
+      "actionWindow.issuance.apiGroup",
+      "actionWindow.issuance.applicationId",
+      "actionWindow.issuance.applicationSecret",
+      "actionWindow.issuance.return",
+    ] as const;
+
+    it("every issuance step key has a FULL, non-trivial instruction (longer than the terse title)", () => {
+      for (const key of ISSUANCE_STEP_KEYS) {
+        const detail = issuanceStepDetail(key);
+        expect(detail, key).toBeTruthy();
+        // The detail is a complete instruction, not the short step label.
+        expect((detail ?? "").length, key).toBeGreaterThan(resolveCopy(key).length);
+      }
+    });
+
+    it("api-group names the order/seller groups; the ID + Secret are now SEPARATE steps, each read-free", () => {
+      expect(issuanceStepDetail("actionWindow.issuance.apiGroup")).toMatch(/주문/);
+      expect(issuanceStepDetail("actionWindow.issuance.apiGroup")).toMatch(/판매자/);
+      // ID step: copy the ID, SellerOps reads no value.
+      const id = issuanceStepDetail("actionWindow.issuance.applicationId") ?? "";
+      expect(id).toMatch(/애플리케이션 ID를 복사/);
+      expect(id).toMatch(/이 값을 읽지 않습니다/);
+      expect(id).not.toMatch(/시크릿/); // the ID step must not conflate the Secret
+      // Secret step: view + copy the Secret, SellerOps reads no value / clipboard.
+      const sec = issuanceStepDetail("actionWindow.issuance.applicationSecret") ?? "";
+      expect(sec).toMatch(/시크릿을 확인하고 복사/);
+      expect(sec).toMatch(/시크릿 값도, 클립보드도 읽지 않습니다/);
+      const ret = issuanceStepDetail("actionWindow.issuance.return") ?? "";
+      expect(ret).toMatch(/두 값을 복사했다면/);
+    });
+
+    it("returns null for a step with no detail mapping (never leaks the raw key)", () => {
+      expect(issuanceStepDetail("actionWindow.review.run")).toBeNull();
+      expect(issuanceStepDetail("actionWindow.issuance.unknownStep")).toBeNull();
+      expect(issuanceStepDetail(null)).toBeNull();
+      expect(issuanceStepDetail(undefined)).toBeNull();
+    });
+
+    it("no detail leaks a raw selector / url / credential value", () => {
+      for (const key of ISSUANCE_STEP_KEYS) {
+        const detail = issuanceStepDetail(key) ?? "";
+        expect(detail).not.toMatch(/https?:\/\//);
+        expect(detail).not.toMatch(/client_secret|clientSecret|#|\.css-|\[data-/);
+      }
+    });
   });
 });
 

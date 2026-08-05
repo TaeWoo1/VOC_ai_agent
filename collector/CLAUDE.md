@@ -74,6 +74,7 @@ npm run probe-same-session -- --i-understand-this-opens-live-naver      # READ-O
 npm run probe-export-same-session -- --i-understand-this-opens-live-naver  # READ-ONLY frame-aware export-area probe (top doc + every child frame); same sentinel flow; no export/click/download
 npm run classify-export-same-session -- --i-understand-this-opens-live-naver  # STRICT NO-CLICK export-layout classifier (sync/async/unrecognized from structure only); same sentinel flow; never triggers/captures
 npx tsx src/cli/observe-api-center.ts --i-understand-this-opens-live-naver  # GUIDED-TUTORIAL ONLY API-center page-category observer (NAVER v1 onboarding); reads a SANITIZED page category to show the next tutorial step; NEVER logs in / issues / links / clicks / types / submits / autofills, and NEVER reads any value incl. Client ID / Secret; the seller creates/opens the app and copies Client ID/Secret manually
+npx tsx src/cli/issuance-live-proof.ts --i-understand-this-opens-live-naver  # OFFICIAL reusable API-issuance guided-walk LIVE-PROOF driver (bridge CLIENT, not a browser driver); connects to the local /bridge/ws that run-api-issuance-live-naver already opened, adopts its issuance run, and drives it like the FE: sends ONLY START_RUN + REQUEST_STEP_RECHECK ("다음", one per explicit sentinel-file touch — NO auto-recheck), prints SANITIZED frames only; never touches NAVER / reads a value; gated + inert-on-import
 npm run upload -- /abs/path/to/export.xlsx                              # offline manual upload check (needs backend)
 ```
 
@@ -215,13 +216,17 @@ guidelines.
 
 1. **Live NAVER runs require explicit, per-run operator approval.** Every live
    CLI refuses to act without the `--i-understand-this-opens-live-naver` flag
-   (`cli/live-run-approval.ts`, pure + unit-tested). Never run a live action
-   during planning or implementation, never on a schedule, never on standing
-   authorization. A human always performs login / 2FA / CAPTCHA — the collector
-   never types NAVER credentials and never bypasses auth. User-owned **test**
-   seller account only. **Current standing state: NAVER live work is paused** —
-   do not launch a browser, log in, or run discovery until the operator approves
-   a specific run in a stable environment.
+   (`cli/live-run-approval.ts`, `hasLiveRunApproval`, pure + unit-tested). Never
+   run a live action during planning or implementation, never on a schedule,
+   never on standing authorization. A human always performs login / 2FA /
+   CAPTCHA — the collector never types NAVER credentials and never bypasses auth.
+   User-owned **test** seller account only. **Current standing state: NAVER live
+   work is paused** — do not launch a browser, log in, or run discovery until the
+   operator approves a specific run in a stable environment.
+   Approval contract: `docs/sellerops_live_approval_contract.md` (default
+   one-line `Seated and ready.` against a prepared Approval Manifest; READ vs
+   WRITE flags are non-substitutable — this READ flag never authorizes the
+   `--i-understand-this-posts-a-live-naver-reply` WRITE path).
 2. **Milestone-1 = discovery, not ingestion.** Run discovery `--classify-only`
    (alias `--no-upload`): classify the export mechanism with no SellerOps login,
    no channel resolve, no `/api/uploads`, no `saveAs` of a real file. The backend

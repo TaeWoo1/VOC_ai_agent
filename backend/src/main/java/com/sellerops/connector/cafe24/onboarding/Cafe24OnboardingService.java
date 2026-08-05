@@ -112,6 +112,13 @@ public class Cafe24OnboardingService {
                 .orElseThrow(() -> ApiException.notFound("채널을 찾을 수 없습니다."));
 
         return tx.execute(status -> {
+            // Lock the channel row FIRST (SELECT … FOR UPDATE) so concurrent first-time connects on this
+            // channel serialize: a double-clicked / retried start then re-reads and reuses the same API-mode
+            // account instead of racing a second insert. Without this the partial unique index
+            // uq_seller_accounts_api_org_channel (V36, one API row per (org, channel)) would surface the
+            // race as a fail-closed error rather than a graceful reuse — the same guarantee NAVER's
+            // SellerAccountService.registerApiChannel already relies on.
+            channels.findByIdForUpdate(channel.getId());
             // Mode-scoped lookup: an org may now hold BOTH an API-mode and a file-upload account on one
             // channel (the file-channel/API-channel flows keep separate rows), so the unscoped single-result
             // finder would throw on a non-unique result. Cafe24 onboarding owns the API-mode row only.

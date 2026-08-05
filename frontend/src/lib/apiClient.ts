@@ -10,6 +10,8 @@ import type {
   ChannelCapabilityOverview,
   ChannelResponse,
   ConnectionInfoView,
+  ConnectionCapabilityView,
+  NaverSetupView,
   ConnectionStatusView,
   ConnectionTestResultView,
   ConnectorAlertView,
@@ -56,6 +58,8 @@ import type {
   SyncRunView,
   UploadType,
   UserView,
+  WalkthroughContextView,
+  WalkthroughHandshakeResult,
   ReviewIssueView,
   ReviewIssueDetailView,
 } from "./types";
@@ -99,7 +103,12 @@ import {
   mockVocItemTriage,
 } from "./mocks";
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
+// Default to a SAME-ORIGIN relative base ("") so `/api/*` requests go through the Vite dev proxy (see
+// vite.config.ts) to whatever backend the dev server targets. This removes the two failure modes that
+// once cost a live run an hour (see loginError.ts): a stale absolute `VITE_API_BASE_URL` port, and a
+// cross-origin CORS rejection between localhost/127.0.0.1. Set VITE_API_BASE_URL explicitly only for a
+// deployment where the API is served from a different origin than the app.
+const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === "true";
 const TOKEN_KEY = "sellerops_token";
 
@@ -206,6 +215,39 @@ export const api = {
     const { data } = await http.get<ConnectionStatusView>(
       `/api/seller-accounts/${accountId}/connection-status`,
     );
+    return data;
+  },
+  // Read-only NAVER guided-connection capability result (wizard completion screen). GET — the
+  // backend derives it from persisted state (credential presence + latest order-sync outcome) with
+  // NO live provider call. NO mock fallback: a dead backend must never render a fake "verified"
+  // capability (fail closed). The response is fully sanitized (no token, id, order id, or personal
+  // data); the seller's identity is only the `identityConfirmed` boolean.
+  async getConnectionCapabilityStrict(accountId: string): Promise<ConnectionCapabilityView> {
+    const { data } = await http.get<ConnectionCapabilityView>(
+      `/api/seller-accounts/${accountId}/connection-capability`,
+    );
+    return data;
+  },
+  // Deployment-global NAVER setup facts (advertised call IP(s)) for the issuance tutorial — available
+  // WITHOUT an account so the guided walkthrough can show them during first-time connection. Read-only
+  // GET, no account scope, no secret (the advertised IP is a value the seller registers publicly).
+  async getNaverSetup(): Promise<NaverSetupView> {
+    const { data } = await http.get<NaverSetupView>("/api/connect/naver/setup");
+    return data;
+  },
+  // Walkthrough environment-identity: the read-only runtime context (walkthrough mode only; a 404 in
+  // production/normal mode means "not a walkthrough runtime"). No DB write, no secret.
+  async getWalkthroughContext(): Promise<WalkthroughContextView> {
+    const { data } = await http.get<WalkthroughContextView>("/api/walkthrough/context");
+    return data;
+  },
+  // Operator-tab handshake — proves this tab is bound to the bootstrapped run + origin. No DB write.
+  async walkthroughHandshake(req: {
+    walkthroughRunId: string;
+    tabNonce: string;
+    origin: string;
+  }): Promise<WalkthroughHandshakeResult> {
+    const { data } = await http.post<WalkthroughHandshakeResult>("/api/walkthrough/handshake", req);
     return data;
   },
   // Read-only masked connection-info (credential metadata) for one seller account

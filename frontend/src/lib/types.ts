@@ -83,6 +83,67 @@ export interface Cafe24CapabilityView {
   features: Cafe24CapabilityFeatureView[];
 }
 
+/**
+ * Sanitized result of the read-only NAVER guided-connection capability check (mirrors the backend
+ * ConnectionCapabilityView). Carries no token, client id/secret, order id, or personal data — the
+ * seller's identity is reported ONLY as {@link identityConfirmed} (the credential authenticated and
+ * a first order sync reached this seller; NAVER exposes no whoami). Every string is a closed
+ * vocabulary or a fixed backend code; the wizard maps each code to Korean copy.
+ */
+export interface ConnectionCapabilityFeatureView {
+  feature: string; // ORDER_READ | REVIEW_IMPORT | REVIEW_REPLY | INQUIRY_READ
+  state: string; // AVAILABLE | SETUP_REQUIRED | GUIDED_CONFIRMATION | NOT_ENABLED | INTEGRATION_PENDING | NEEDS_ATTENTION
+  label: string;
+  reason: string | null;
+}
+
+export interface ConnectionCapabilityView {
+  sellerAccountId: string;
+  channelCode: string;
+  connectionStatus: string | null;
+  credentialPresent: boolean;
+  identityConfirmed: boolean;
+  firstSyncStatus: string; // NONE | SUCCESS | PARTIAL | FAILED | RUNNING
+  overall: string; // AVAILABLE | NEEDS_ATTENTION
+  reason: string | null;
+  features: ConnectionCapabilityFeatureView[];
+}
+
+/**
+ * Deployment-global NAVER setup facts (mirrors the backend NaverSetupView), available WITHOUT an
+ * account so the issuance tutorial can show them during first-time connection. `advertisedEgressIps`
+ * is the fixed public egress IPv4(s) to register in the app's 'API 호출 IP' — sanitized, not a secret,
+ * and EMPTY when none is configured (the UI then shows generic guidance, never a fabricated IP).
+ */
+export interface NaverSetupView {
+  advertisedEgressIps: string[];
+}
+
+/**
+ * Sanitized identity of a disposable walkthrough runtime (mirrors the backend WalkthroughContextView).
+ * Carries a per-bootstrap opaque run id (an environment identifier, NOT a credential/token), git commit,
+ * origins, a DB alias (never the full URL), flags, coarse baseline counts, and a start time. Used to prove
+ * the operator's tab is bound to THIS backend/DB/runtime.
+ */
+export interface WalkthroughContextView {
+  walkthroughRunId: string;
+  gitCommit: string;
+  frontendOrigin: string;
+  backendOrigin: string;
+  dbAlias: string;
+  schedulerEnabled: boolean;
+  naverConnectorEnabled: boolean;
+  baseline: { credentials: number; syncJobs: number; channelOrders: number; naverAccounts: number };
+  startedAt: string;
+}
+
+/** Sanitized operator-tab handshake outcome (mirrors the backend result). */
+export interface WalkthroughHandshakeResult {
+  runMatched: boolean;
+  originMatched: boolean;
+  timestamp: string;
+}
+
 export interface SellerAccountResponse {
   id: string;
   channelId: string;

@@ -108,17 +108,80 @@ class NaverApiConnectorTest {
     // --- test-connection: auth-only verifyConnection (no orders, no collection) ---
 
     @Test
-    void verifyConnectionSucceedsWhenTokenMintSucceeds() {
+    void verifyConnectionSucceedsWhenTokenMintSucceedsAndOrderAccessConfirmed() {
         storeNaverCredential();
+        // verify() token mint, then the probe's token mint, then the read-only order probe (200).
         http.enqueue(FakeNaverHttpClient.tokenOk("token-1", 3000));
+        http.enqueue(FakeNaverHttpClient.tokenOk("token-2", 3000));
+        http.enqueue(FakeNaverHttpClient.ok("{\"data\":{\"lastChangeStatuses\":[]}}"));
 
         VerifyOutcome outcome = connector.verifyConnection(verifyContext());
 
         assertThat(outcome.status()).isEqualTo(VerifyOutcome.Status.SUCCESS);
         assertThat(outcome.reasonCode()).isNull();
-        // Auth-only: a single token mint, no order calls.
-        assertThat(http.sent).hasSize(1);
+        // Credential proof (token) then a single read-only order-access GET — never a detail POST.
+        assertThat(http.sent).hasSize(3);
         assertThat(http.sent.get(0).method()).isEqualTo("POST_FORM");
+        assertThat(http.sent.get(1).method()).isEqualTo("POST_FORM");
+        assertThat(http.sent.get(2).method()).isEqualTo("GET");
+        assertThat(http.sent.get(2).uri().toString()).contains("last-changed-statuses");
+        assertThat(http.sent.get(2).uri().toString()).contains("lastChangedType=PAYED");
+    }
+
+    @Test
+    void verifyConnectionFailsOrderAccessDeniedOnForbiddenProbe() {
+        storeNaverCredential();
+        http.enqueue(FakeNaverHttpClient.tokenOk("token-1", 3000));
+        http.enqueue(FakeNaverHttpClient.tokenOk("token-2", 3000));
+        // A 403 whose code we cannot yet split into permission vs call-IP → hedged denial,
+        // NOT a credential verdict (the token was accepted).
+        http.enqueue(new NaverHttpClient.Response(403,
+                "{\"code\":\"GW.FORBIDDEN\",\"message\":\"권한이 없습니다\"}", Map.of()));
+
+        VerifyOutcome outcome = connector.verifyConnection(verifyContext());
+
+        assertThat(outcome.status()).isEqualTo(VerifyOutcome.Status.FAILED);
+        assertThat(outcome.reasonCode()).isEqualTo(VerifyOutcome.REASON_ORDER_ACCESS_DENIED);
+    }
+
+    @Test
+    void verifyConnectionSucceedsWhenOrderProbeIsInconclusive() {
+        // A valid credential (token accepted) must not be blocked by a transient/we-side
+        // order-side condition: 429, 5xx, and a malformed-param 400 all degrade to SUCCESS.
+        storeNaverCredential();
+        for (NaverHttpClient.Response probeResponse : new NaverHttpClient.Response[] {
+                FakeNaverHttpClient.rateLimited429(),
+                new NaverHttpClient.Response(503, "{\"code\":\"GW.TEMPORARY\"}", Map.of()),
+                new NaverHttpClient.Response(400, "{\"code\":\"GW.INVALID_PARAM\"}", Map.of())}) {
+            FakeNaverHttpClient localHttp = new FakeNaverHttpClient();
+            NaverApiConnector localConnector = new NaverApiConnector(
+                    new NaverTokenClient(localHttp, clock, "https://fake.naver.test"),
+                    new NaverOrdersClient(localHttp, clock, "https://fake.naver.test", 100),
+                    vault);
+            localHttp.enqueue(FakeNaverHttpClient.tokenOk("token-1", 3000));
+            localHttp.enqueue(FakeNaverHttpClient.tokenOk("token-2", 3000));
+            localHttp.enqueue(probeResponse);
+
+            VerifyOutcome outcome = localConnector.verifyConnection(verifyContext());
+
+            assertThat(outcome.status())
+                    .as("inconclusive probe %s must not block a valid credential", probeResponse.statusCode())
+                    .isEqualTo(VerifyOutcome.Status.SUCCESS);
+        }
+    }
+
+    @Test
+    void verifyConnectionSucceedsWhenProbeTokenMintFailsTransiently() {
+        storeNaverCredential();
+        // verify() accepts the credential, but the probe's own token mint then hits a 429 —
+        // inconclusive, so the already-proven credential is not blocked.
+        http.enqueue(FakeNaverHttpClient.tokenOk("token-1", 3000));
+        http.enqueue(FakeNaverHttpClient.rateLimited429());
+
+        VerifyOutcome outcome = connector.verifyConnection(verifyContext());
+
+        assertThat(outcome.status()).isEqualTo(VerifyOutcome.Status.SUCCESS);
+        assertThat(outcome.reasonCode()).isNull();
     }
 
     @Test

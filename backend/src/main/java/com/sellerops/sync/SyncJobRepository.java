@@ -59,4 +59,15 @@ public interface SyncJobRepository extends JpaRepository<SyncJob, UUID> {
      */
     Optional<SyncJob> findFirstByOrgIdAndSellerAccountIdAndDataTypeOrderByCreatedAtDesc(
             UUID orgId, UUID sellerAccountId, String dataType);
+
+    /**
+     * The in-flight ({@code RUNNING}) runs for one (seller account, data type) — the single-flight
+     * gate ({@code SyncRunGate}) reads this under the account row lock to decide whether to coalesce a
+     * new run into an existing one or fail an orphaned one. Oldest first so a stale sweep is
+     * deterministic. Normally 0 or 1 rows; more only if a prior crash left several.
+     */
+    @Query("select j from SyncJob j where j.sellerAccountId = :sellerAccountId "
+            + "and j.dataType = :dataType and j.status = 'RUNNING' order by j.startedAt asc")
+    List<SyncJob> findRunningBySellerAccountIdAndDataType(
+            @Param("sellerAccountId") UUID sellerAccountId, @Param("dataType") String dataType);
 }

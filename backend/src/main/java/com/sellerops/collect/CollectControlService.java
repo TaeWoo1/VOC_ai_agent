@@ -21,6 +21,7 @@ import com.sellerops.connector.DataType;
 import com.sellerops.connector.PullConnector;
 import com.sellerops.connector.VerifyContext;
 import com.sellerops.connector.VerifyOutcome;
+import com.sellerops.connector.naver.onboarding.NaverConnectionLifecycle;
 import com.sellerops.credential.CredentialIntakeValidator;
 import com.sellerops.credential.CredentialIntakeValidator.ValidatedCredential;
 import com.sellerops.credential.CredentialMetadata;
@@ -82,13 +83,15 @@ public class CollectControlService {
     private final SyncRunExecutor executor;
     private final CredentialVault vault;
     private final AccountSessionSlotService accountSlots;
+    private final NaverConnectionLifecycle naverLifecycle;
 
     public CollectControlService(SellerAccountRepository sellerAccounts, ChannelRepository channels,
                                  SyncScheduleRepository schedules, SyncJobRepository syncJobs,
                                  ChannelConnectionStatusRepository connectionStatus,
                                  ConnectorCapabilityRepository capabilities, ConnectorRegistry registry,
                                  SyncRunExecutor executor, CredentialVault vault,
-                                 AccountSessionSlotService accountSlots) {
+                                 AccountSessionSlotService accountSlots,
+                                 NaverConnectionLifecycle naverLifecycle) {
         this.sellerAccounts = sellerAccounts;
         this.channels = channels;
         this.schedules = schedules;
@@ -99,6 +102,7 @@ public class CollectControlService {
         this.executor = executor;
         this.vault = vault;
         this.accountSlots = accountSlots;
+        this.naverLifecycle = naverLifecycle;
     }
 
     public List<ScheduleView> listSchedules(UUID orgId, UUID sellerAccountId) {
@@ -155,7 +159,16 @@ public class CollectControlService {
         requireAccount(orgId, sellerAccountId);
         DataType dataType = parseDataType(dataTypeRaw);
         BackfillWindow window = BackfillWindow.of(startDate, endDate);
-        return SyncRunView.from(executor.execute(orgId, sellerAccountId, dataType, "MANUAL", window));
+        SyncJob run = executor.execute(orgId, sellerAccountId, dataType, "MANUAL", window);
+        // Single-flight can coalesce this backfill onto an already in-flight run (it returns that
+        // RUNNING run). A backfill carries a specific window the in-flight run did NOT collect, so we
+        // must not report it as done — fail closed and let the operator retry once the run finishes,
+        // rather than silently dropping the window or racing the shared cursor.
+        if ("RUNNING".equals(run.getStatus())) {
+            throw ApiException.conflict(
+                    "이미 수집이 진행 중입니다. 진행 중인 수집이 끝난 뒤 기간 지정 백필을 다시 시도해 주세요.");
+        }
+        return SyncRunView.from(run);
     }
 
     /** Operator re-run of a FAILED/PARTIAL pull run, with the attempt counter advanced. */
@@ -170,6 +183,13 @@ public class CollectControlService {
         }
         SyncJob rerun = executor.execute(orgId, original.getSellerAccountId(),
                 parseDataType(original.getDataType()), "RETRY");
+        // Single-flight can coalesce this retry onto an already in-flight run (returned as RUNNING).
+        // That job belongs to the executor thread currently running it — do NOT bump its attempt or
+        // save the (detached, stale) snapshot, which would race and clobber the live run's status and
+        // cursor. Return it as-is: the operator sees the run already in progress.
+        if ("RUNNING".equals(rerun.getStatus())) {
+            return SyncRunView.from(rerun);
+        }
         rerun.setAttempt(original.getAttempt() + 1);
         return SyncRunView.from(syncJobs.save(rerun));
     }
@@ -311,10 +331,12 @@ public class CollectControlService {
      * Manual, explicit auth/connectivity check for a stored credential — never
      * collection. Ordered so nothing privileged happens before org scoping, and
      * structured so only a connector that opts into {@link ConnectionVerifier}
-     * (none yet) can produce a real SUCCESS/FAILED; every other path resolves to
-     * a safe UNSUPPORTED/NOT_CONFIGURED result. Issues no provider HTTP, runs no
-     * sync, creates no job, persists nothing, and returns no secret/provider
-     * detail.
+     * (NAVER does) can produce a real SUCCESS/FAILED; every other path resolves to
+     * a safe UNSUPPORTED/NOT_CONFIGURED result. Runs no sync, creates no job, and
+     * returns no secret/provider detail. A real SUCCESS / clearly-invalid outcome
+     * is recorded through {@link NaverConnectionLifecycle} (a NAVER
+     * {@code connection_status} transition only — never a secret); it issues no
+     * provider HTTP of its own beyond the verifier's auth check.
      */
     public ConnectionTestResultView testConnection(UUID orgId, UUID sellerAccountId) {
         // 1. Org scoping first — a cross-org id reads as 404, before any vault/connector touch.
@@ -336,7 +358,7 @@ public class CollectControlService {
 
         // 4. Only a connector that opts into ConnectionVerifier can run a real auth check.
         //    The generic mock fallback does not implement it, so it can never report a
-        //    verified success — it falls here as UNSUPPORTED.
+        //    verified success — it falls here as UNSUPPORTED. NAVER opts in.
         ConnectionVerifier verifier = registry.resolvePullConnector(channel.getCode())
                 .filter(ConnectionVerifier.class::isInstance)
                 .map(ConnectionVerifier.class::cast)
@@ -346,12 +368,19 @@ public class CollectControlService {
                     "이 채널의 연결 확인은 아직 제공되지 않습니다.");
         }
 
-        // 5. Real verification (no connector implements this yet → unreachable this slice).
-        //    The verifier opens the vault itself; secrets never pass through here.
+        // 5. Real verification (NAVER implements this). The verifier opens the vault itself; secrets
+        //    never pass through here. The outcome then drives the account's connection lifecycle: a
+        //    verified test records the credential test success (NAVER only; a no-op for others), and a
+        //    clearly-invalid credential recalls the account for reconnect. Transient failures never move
+        //    the status.
         VerifyOutcome outcome = verifier.verifyConnection(
                 new VerifyContext(orgId, sellerAccountId, channel.getCode()));
         if (outcome.status() == VerifyOutcome.Status.SUCCESS) {
+            naverLifecycle.onCredentialTestVerified(orgId, sellerAccountId);
             return testResult(sellerAccountId, TEST_STATUS_SUCCESS, null, "연결 정보가 확인되었습니다.");
+        }
+        if (VerifyOutcome.REASON_INVALID_CREDENTIAL.equals(outcome.reasonCode())) {
+            naverLifecycle.onCredentialRejected(orgId, sellerAccountId);
         }
         return testResult(sellerAccountId, TEST_STATUS_FAILED, outcome.reasonCode(),
                 failureMessage(outcome.reasonCode()));
@@ -373,6 +402,15 @@ public class CollectControlService {
         }
         if (VerifyOutcome.REASON_TEMPORARY_PROVIDER_ERROR.equals(reasonCode)) {
             return "일시적인 채널 응답 오류입니다.";
+        }
+        if (VerifyOutcome.REASON_PERMISSION_INSUFFICIENT.equals(reasonCode)) {
+            return "연결에 필요한 주문 API 권한이 부족할 수 있습니다. 애플리케이션의 주문 API 그룹 권한을 확인해 주세요.";
+        }
+        if (VerifyOutcome.REASON_CALL_ENVIRONMENT_MISMATCH.equals(reasonCode)) {
+            return "허용된 호출 환경(호출 IP)과 일치하지 않을 수 있습니다. 애플리케이션의 API 호출 IP 등록을 확인해 주세요.";
+        }
+        if (VerifyOutcome.REASON_ORDER_ACCESS_DENIED.equals(reasonCode)) {
+            return "주문 API 접근이 거부되었습니다. 애플리케이션의 주문 API 그룹 권한과 API 호출 IP 등록을 확인해 주세요.";
         }
         // PROVIDER_UNAVAILABLE and any unknown code → generic safe failure.
         return "채널 API 연결 확인에 실패했습니다.";

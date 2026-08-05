@@ -89,6 +89,19 @@ record NaverOrdersCursor(
         }
     }
 
+    /**
+     * A minimal read-only window {@code [now - span, now]} for the connect-test
+     * order-access probe. Reuses the authoritative wire format ({@link #iso}) so a
+     * probe request can never fail as a malformed-parameter 400 — the format is the
+     * same one the proven first-collection call uses. No cursor built here is ever
+     * persisted; the probe reads a single page's status and discards it.
+     */
+    static NaverOrdersCursor probeWindow(Instant now, ZoneId zone, Duration span) {
+        Instant from = now.minus(span);
+        return new NaverOrdersCursor(
+                iso(from, zone), iso(now, zone), null, null, Map.of(), List.of(), List.of());
+    }
+
     /** First-ever cursor: one backfill window ending now. */
     static NaverOrdersCursor initial(Instant now, ZoneId zone) {
         Instant from = now.minus(INITIAL_BACKFILL);

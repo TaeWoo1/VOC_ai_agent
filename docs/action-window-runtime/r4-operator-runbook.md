@@ -20,7 +20,9 @@ backend `SUCCESS` 55/55/0/0). Written from that run's observations plus the code
 
 ## 1. Before you start
 
-- The run is authorized by a **filled export-scoped G6** in the dispatching turn — not by this file.
+- The run is authorized per the canonical contract `docs/sellerops_live_approval_contract.md`
+  (single-use; export = READ_ONLY manifest; default one-line `Seated and ready.` against a prepared,
+  displayed Approval Manifest) in the dispatching turn — not by this file.
 - Read [`r4-preparation.md`](r4-preparation.md) §4 (live-action safety boundary). In one line: **you**
   log in, choose account/store/period, and perform the real export action; **the Runtime** only prepares,
   highlights, observes, verifies, detects read-only, validates, and ingests. **The Runtime never performs

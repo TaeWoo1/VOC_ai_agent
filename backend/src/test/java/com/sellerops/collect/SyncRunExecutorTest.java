@@ -85,26 +85,37 @@ class SyncRunExecutorTest {
                 channelOrders, channelOrderStatusEvents, txManager);
         ConnectorRegistry registry = new ConnectorRegistry(List.of(mock));
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
-        executor = new SyncRunExecutor(sellerAccounts, channels, registry, ingestion, orderIngestion, syncJobs, cursors, connectionStatus);
+        // Wire the NAVER connection lifecycle so the runPages → onOrderSyncCollected hook is exercised. It
+        // fires only for a collected NAVER ORDER_SUMMARY run, so every other test here is unaffected.
+        com.sellerops.connector.naver.onboarding.NaverConnectionLifecycle naverLifecycle =
+                new com.sellerops.connector.naver.onboarding.NaverConnectionLifecycle(sellerAccounts, channels, txManager);
+        executor = new SyncRunExecutor(sellerAccounts, channels, registry, ingestion, orderIngestion,
+                syncJobs, cursors, connectionStatus, null, null, naverLifecycle);
     }
 
     private SellerAccount account(String channelCode) {
-        Channel ch = new Channel();
-        ch.setCode(channelCode);
-        ch.setNameKo(channelCode);
-        ch.setStatus(ChannelStatus.AVAILABLE);
-        ch.setSupportsInquiry(true);
-        ch.setSupportsReview(true);
-        ch.setSupportsOrder(true);
-        ch.setSupportsSales(true);
-        ch.setSupportsProduct(true);
-        ch.setSortOrder(0);
-        channels.save(ch);
+        return account(channelCode, ChannelStatus.CONNECTED);
+    }
+
+    private SellerAccount account(String channelCode, ChannelStatus status) {
+        Channel ch = channels.findByCode(channelCode).orElseGet(() -> {
+            Channel c = new Channel();
+            c.setCode(channelCode);
+            c.setNameKo(channelCode);
+            c.setStatus(ChannelStatus.AVAILABLE);
+            c.setSupportsInquiry(true);
+            c.setSupportsReview(true);
+            c.setSupportsOrder(true);
+            c.setSupportsSales(true);
+            c.setSupportsProduct(true);
+            c.setSortOrder(0);
+            return channels.save(c);
+        });
 
         SellerAccount acc = new SellerAccount();
         acc.setOrgId(org);
         acc.setChannelId(ch.getId());
-        acc.setConnectionStatus(ChannelStatus.CONNECTED);
+        acc.setConnectionStatus(status);
         acc.setFileUpload(false);
         return sellerAccounts.save(acc);
     }
@@ -135,6 +146,41 @@ class SyncRunExecutorTest {
         var health = connectionStatus.findBySellerAccountId(acc.getId()).orElseThrow();
         assertThat(health.getState()).isEqualTo("CONNECTED");
         assertThat(health.getConsecutiveFailures()).isZero();
+    }
+
+    @Test
+    void collectedNaverOrderSyncAdvancesVerifiedAccountToConnected() {
+        // A verified (PREPARING) NAVER account: its first collected ORDER_SUMMARY sync is the second gate
+        // signal, so the run advances it to CONNECTED through the runPages → onOrderSyncCollected hook.
+        SellerAccount acc = account("NAVER", ChannelStatus.PREPARING);
+
+        SyncJob job = executor.execute(org, acc.getId(), DataType.ORDER_SUMMARY, "MANUAL");
+
+        assertThat(job.getStatus()).isEqualTo("SUCCESS");
+        assertThat(sellerAccounts.findById(acc.getId()).orElseThrow().getConnectionStatus())
+                .isEqualTo(ChannelStatus.CONNECTED);
+    }
+
+    @Test
+    void collectedNaverOrderSyncOnUntestedAccountStaysPending() {
+        // No explicit credential test yet (PENDING) → a collected order sync alone must not connect.
+        SellerAccount acc = account("NAVER", ChannelStatus.PENDING);
+
+        executor.execute(org, acc.getId(), DataType.ORDER_SUMMARY, "MANUAL");
+
+        assertThat(sellerAccounts.findById(acc.getId()).orElseThrow().getConnectionStatus())
+                .isEqualTo(ChannelStatus.PENDING);
+    }
+
+    @Test
+    void collectedNonNaverOrderSyncDoesNotTriggerTheNaverLifecycle() {
+        // The hook is NAVER-scoped: a collected order sync on any other channel leaves the status alone.
+        SellerAccount acc = account("GMARKET", ChannelStatus.PREPARING);
+
+        executor.execute(org, acc.getId(), DataType.ORDER_SUMMARY, "MANUAL");
+
+        assertThat(sellerAccounts.findById(acc.getId()).orElseThrow().getConnectionStatus())
+                .isEqualTo(ChannelStatus.PREPARING);
     }
 
     @Test

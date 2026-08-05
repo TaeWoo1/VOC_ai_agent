@@ -287,8 +287,8 @@ VOC 감지 · 긴급/위험 점수 · **답변 초안(draft) 제안** · 지연 
   §4.7), **자동 로그인·마켓플레이스 클릭·2FA·CAPTCHA 없음**, **신규 FE 화면 없음**(기존 `GuidedImportCard` 완료
   박스 + `ReviewIssueSection` + `ConnectionStatusView` projection만 확장), **두 번째 채널 어댑터·프로필 업로드/동기화
   없음**. issue-memory 판정은 THRESHOLDS **DRAFT**이므로 언제나 "검증되지 않은 이슈 후보·운영 신호"로만 표현한다.
-  라이브 NAVER 검증은 **fresh·single-use·in-turn 승인**(채널/계정/날짜/운영자)에서만 — 이 문서는 라이브 승인을
-  부여하지 않는다.
+  라이브 승인은 정본 계약 `docs/sellerops_live_approval_contract.md` (Approval Manifest 표시 시 기본 한 줄
+  `Seated and ready.`; READ_ONLY vs WRITE 구분)에 따른다 — 이 문서는 라이브 승인을 부여하지 않는다.
 - **carve-out 확장 (2026-07-27, 제품 오너 승인 — Guided Acquisition Reliability):** 위 "NAVER 리뷰 운영 루프"
   carve-out이 허용한 ④ 복구를, 이미 라이브 검증된 guided-import 세로 스택의 **신뢰성 하드닝**으로 구체화한다 —
   즉 과거 리뷰 연동 진입부터 로그인·가이드 표시·다운로드 감지·ingest 완료까지 셀러가 **침묵·복구 불가 상태**를
@@ -303,8 +303,9 @@ VOC 감지 · 긴급/위험 점수 · **답변 초안(draft) 제안** · 지연 
   `launchRef` 재사용만), **신규 FE 화면 없음**(기존 `GuidedImportCard`/in-page 패널 copy만 확장), **자동 로그인·
   마켓플레이스 클릭·2FA·CAPTCHA 없음**(export는 §4.7 human-driven 유지), **두 번째 채널 없음**. 라이브 원인
   분석은 controlled adversarial loop(계정·프로필·pack·진입점 고정, run당 변수 하나, runId+sessionId+surfaceId
-  격리, 동시 1개 run, 종료 상태 필수, 단일 축 귀속 실패 시 폐기)로 수행하며, 라이브 검증은 **fresh·single-use·
-  in-turn 승인**에서만.
+  격리, 동시 1개 run, 종료 상태 필수, 단일 축 귀속 실패 시 폐기)로 수행하며, 라이브 검증 승인은 정본 계약
+  `docs/sellerops_live_approval_contract.md` (Approval Manifest 표시 시 기본 한 줄 `Seated and ready.`;
+  READ_ONLY vs WRITE 구분)에 따른다.
 
 ### 1.8 기본 일상 경험 · 알림 · Session Readiness (v1.7 신설)
 

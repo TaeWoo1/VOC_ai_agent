@@ -32,6 +32,10 @@ import { InitialImportEndpoint } from "../bridge/initial-import-endpoint";
 import { makeImportRunMarker, recoverImportRuns } from "../action-window/initial-import/import-dispatch";
 import type { ImportProbeDriver } from "../action-window/initial-import/import-driver";
 import { ImportSegmentHost, type ResolvedLaunchScope, type SegmentAdmission } from "../action-window/initial-import/import-host";
+import { ApiIssuanceEndpoint } from "../bridge/api-issuance-endpoint";
+import { IssuanceEngine } from "../action-window/api-issuance/issuance-engine";
+import { IssuanceGuidanceSession } from "../action-window/api-issuance/issuance-session";
+import type { IssuanceProbeDriver } from "../action-window/api-issuance/issuance-driver";
 import type { AwCarrierEndpoint } from "../bridge/aw-carrier";
 import type { ConnectorOrchestratorObserver } from "../connector/connector-orchestrator";
 import { log } from "../log";
@@ -139,6 +143,25 @@ export interface AgentImportConfig {
   persistDir?: string;
 }
 
+/**
+ * Optional ISOLATED API-issuance guidance session hosting (v2). Mutually exclusive with the other three
+ * carriers — an agent hosts ONE, and `issuance` is its own carrier kind precisely so a frontend cannot
+ * attach to the wrong one.
+ *
+ * Simpler than import: it hosts exactly ONE run for the agent's lifetime, with no launch ref, no scope
+ * resolution, and no host. There is deliberately NO `persistDir` — an issuance walk is read-only guidance
+ * that touches nothing and produces no artifact, so an interrupted run has nothing to recover or park; a
+ * reboot simply mints a fresh guidance run. The driver factory is injected so the default/dev boot stays
+ * synthetic (no browser); the LIVE driver is supplied only by the gated live entrypoint.
+ */
+export interface AgentApiIssuanceConfig {
+  /** Opaque run identity announced to paired clients (assigned by the Runtime, never by the FE). */
+  runId: string;
+  /** Sanitized channel identity (SEMANTIC_CODE, e.g. `naver`). */
+  channelCode: string;
+  createDriver: () => IssuanceProbeDriver;
+}
+
 export interface AgentBridgeConfig {
   port: number;
   allowedOrigins: string[];
@@ -163,6 +186,8 @@ export interface AgentBridgeConfig {
   replySubmission?: AgentReplySubmissionConfig;
   /** When present, hosts one ISOLATED import segment (v2). Mutually exclusive with the other two. */
   initialImport?: AgentImportConfig;
+  /** When present, hosts one ISOLATED API-issuance guidance run (v2). Mutually exclusive with the other three. */
+  apiIssuance?: AgentApiIssuanceConfig;
   /**
    * Called when SellerOps asked to be connected to this agent — a pairing approved, or an authenticated tab
    * attaching. Passed straight through to {@link BridgeServer}; see its note for why the import mode brings the
@@ -194,13 +219,16 @@ export interface AgentBridge {
   readonly replySubmissionSession: ReplySubmitSession | undefined;
   /** The import segment host, when this agent hosts the import carrier. Assembles one run per segment. */
   readonly importHost: ImportSegmentHost | undefined;
+  /** Test-only access to the hosted API-issuance guidance session (undefined unless configured). */
+  readonly apiIssuanceSession: IssuanceGuidanceSession | undefined;
 }
 
 export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
-  // An agent hosts EITHER an export run OR a reply-submission run — never both (one carrier slot).
+  // An agent hosts EXACTLY ONE carrier — export, reply, import, or issuance — never more (one carrier slot).
   // Fail fast before any I/O.
-  if (cfg.actionWindow && cfg.replySubmission) {
-    throw new Error("agent-bridge: actionWindow and replySubmission are mutually exclusive");
+  const carriersConfigured = [cfg.actionWindow, cfg.replySubmission, cfg.initialImport, cfg.apiIssuance].filter(Boolean).length;
+  if (carriersConfigured > 1) {
+    throw new Error("agent-bridge: actionWindow, replySubmission, initialImport, and apiIssuance are mutually exclusive — an agent hosts exactly one carrier");
   }
   const store = new FilePairingStore(cfg.pairingFile, { now: cfg.now ?? (() => Date.now()) });
   // Make durable-pairing restart recovery observable exactly once at boot. Sanitized: a coarse status enum
@@ -307,10 +335,28 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
     log("aw_import_host_ready", {});
   }
 
+  // ISOLATED API-issuance guidance hosting (v2). The simplest carrier: ONE run for the agent's lifetime,
+  // no launch ref / scope / host / persistence — an issuance walk touches nothing and produces no artifact,
+  // so an interrupted run has nothing to recover (a reboot mints a fresh guidance run). The driver is
+  // injected (synthetic by default — no browser); the runtime never clicks, submits, or reads a credential.
+  let apiIssuanceEndpoint: ApiIssuanceEndpoint | undefined;
+  let apiIssuanceSession: IssuanceGuidanceSession | undefined;
+  if (cfg.apiIssuance) {
+    const ai = cfg.apiIssuance;
+    apiIssuanceEndpoint = new ApiIssuanceEndpoint({ runId: ai.runId, channelCode: ai.channelCode });
+    apiIssuanceSession = new IssuanceGuidanceSession(
+      new IssuanceEngine({ runId: ai.runId, channelCode: ai.channelCode }),
+      ai.createDriver(),
+      apiIssuanceEndpoint.transport,
+    );
+    apiIssuanceSession.attach();
+    log("aw_issuance_run_hosted", {});
+  }
+
   // ONE carrier per agent. The order states the precedence explicitly rather than relying on which
-  // config the CLI happened to build: import wins over reply, reply over export. The CLI already refuses
-  // to build more than one, so this is defence in depth, not the decision point.
-  const carrier: AwCarrierEndpoint | undefined = importEndpoint ?? replyEndpoint ?? actionWindow;
+  // config the CLI happened to build: import wins over reply, reply over issuance, issuance over export.
+  // The CLI already refuses to build more than one, so this is defence in depth, not the decision point.
+  const carrier: AwCarrierEndpoint | undefined = importEndpoint ?? replyEndpoint ?? apiIssuanceEndpoint ?? actionWindow;
   const server = new BridgeServer({
     store,
     allowedOrigins: cfg.allowedOrigins,
@@ -330,6 +376,7 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
     actionWindowSession,
     replySubmissionSession,
     importHost,
+    apiIssuanceSession,
     observer: { onConnectionSettled: (r) => settle.onConnectionSettled(r) },
     async listen(): Promise<AgentBridgeListenResult> {
       try {

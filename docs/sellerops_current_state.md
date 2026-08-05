@@ -10,6 +10,387 @@
 > Everything below is preserved unchanged for historical lineage. Do not rely on its paths,
 > commit SHAs, scope-lock versions, or 구현됨/미구현 claims as current.
 
+---
+
+## 2026-08-04 부록 (20) — Sync Single-Flight + Orphaned-RUNNING Recovery v1 (backend-only, 마이그레이션 없음) — 부록(19) sync #2 중복 원인 종결 ✅
+
+> 부록(19)/슬라이스 §0.2.24 감사가 지목한 PRODUCT GAP ②(in-flight 중복 방지 부재)·③(orphaned-RUNNING 복구 부재)를 종결. **backend만, 마이그레이션·FE·API contract 변경 없음, live 마켓 실행 없음.** 세부: 슬라이스 §0.2.25.
+
+- **Single-flight(신규 `SyncRunGate`):** 한 (seller account, data type)당 동시 1 run. 시작 시 seller account 행을 `PESSIMISTIC_WRITE` 잠금 → 임계구역에서 stale 정리 + 동일 (account,dataType) RUNNING 조회 → 있으면 새 job 없이 기존 in-flight 반환(coalesce), 없으면 새 RUNNING 생성. 잠금은 job 생성 즉시 해제, 긴 `runPages`는 잠금 밖. `execute()`의 RUNNING 반환 = coalesced 판별자(실제 실행 run은 항상 terminal). 다른 account/dataType 독립.
+- **Orphaned 복구(lazy, boot 스윕 없음):** 다중 인스턴스 가능성(`SyncScheduleClaimer` 주석) 때문에 **boot-wide 스윕 금지** — 위 잠금에서 lazy로, RUNNING이 stale 임계(`startedAt`, null이면 `createdAt` fallback) 초과 시에만 FAILED fail-close(`finishedAt`+안정 sanitized 메시지). **fresh RUNNING 절대 미회수.** 시간 기준이라 임계>최장 정상 run이면 live run을 안 죽임.
+- **stale 임계 = 60분(설정 가능 `sellerops.collect.sync-stale-after-minutes`):** per-request HTTP 타임아웃 20s + 관측 실제 run ~8.6분 + 스케줄러 최소 15분 → 60분은 오판 없는 마진이면서 1시간 내 orphan 회수.
+- **독립 리뷰 지적 실제 수정:** retry()가 coalesce된 라이브 run을 attempt/status/cursor로 덮어쓰던 lost-update(MEDIUM-1) → RUNNING이면 무-훼손 반환; manualBackfill()이 coalesce로 window 조용히 유실(MEDIUM-2) → **HTTP 409 fail-close**; null `startedAt` 영구 미회수(LOW-3) → `createdAt` fallback. `manualSync` 증분 경로는 coalesce 시 RUNNING view 그대로(window 없음, 의도 비대칭).
+- **게이트:** 전체 backend **1917 tests / 0 fail / 0 error / 14 skip** + gated Postgres proof IT `SyncRunSingleFlightPostgresProofIT` **2/2 LIVE-PROVEN**(disposable PG 15 :55432, teardown): **8-스레드 동시 시작 → 정확히 1 job(7 coalesce), RUNNING 1행** + 다른 account 독립. 마이그레이션 0. 독립 리뷰 **HIGH=0 MEDIUM=0**(2 LOW non-blocking). **push/PR 없음.**
+- **남은 FE 공백(범위 밖):** 백엔드가 coalesce 시 RUNNING view를 줄 수 있으나 FE에 "이미 진행 중" 상태 없음 + ~8.6분 동기 sync 스피너 그대로 → 별도 frontend 단위.
+
+---
+
+## 2026-08-04 부록 (19) — NAVER Existing-App First Connection E2E: 기능 evidence PASS(라이브) — **단, approval-compliant clean E2E는 미증명 · 튜토리얼 최종 종결 아님** ⚠️(정정)
+
+> existing-app 첫 연결 전체 흐름을 감사(READY, 코드 변경 0)한 뒤 동일 세션에서 운영자 주도로 실제 네이버 스토어에 대해 **기능적 라이브 증거는 PASS**했으나, **승인 상한을 초과**해 **approval-compliant clean E2E는 아직 미증명**이다. **이 결과를 전체 튜토리얼 최종 종결로 표기하지 말 것.** 세부·감사: 슬라이스 §0.2.24.
+>
+> **🟢 기능적 라이브 증거 PASS 2026-08-04 (disposable :55432/naver_walkthrough, gitSha `7fdd4d4`, approval `apr-b9f78dcc95bc`/run `wt-7dd6b953f748`, 실 :5432 무접촉, 즉시 teardown):** 비활성 앱 credential → **`RECONNECT_REQUIRED`**(네이버 4xx, 코드 결함 아님 — 백엔드가 `223.130.196.241:443`=`api.commerce.naver.com`로 실제 연결한 read-only 네트워크 캡처로 확정; 거짓 CONNECTED 없음) → 앱 재활성 후 **test SUCCESS → `PREPARING`** → 첫 `ORDER_SUMMARY` sync **SUCCESS → `CONNECTED`**(13:07:45) → **backend 재시작 후 `connection_status=CONNECTED` 지속**(FE view CONNECTED). credential AES-256-GCM 저장, 로그 secret/token leak **0건**, `naver_accounts=1`(중복 없음, V35), NAVER 마켓 write 0. window에 최근 24h `PAYED` 주문 0건 → `channel_orders=0`(빈-성공 sync는 설계상 CONNECTED 정당; 실주문 ingest>0은 별도 관측).
+>
+> **🔴 정정 — approval-compliant clean E2E는 미증명:** approval manifest 상한은 **credential=1 / test=1 / sync=1**이었으나 실제로는 (비활성 앱 구간의) **반복 credential 등록·test**와 **ORDER_SUMMARY sync 2건**이 발생했다. 즉 승인된 상한을 넘겼고, **상한 내 clean E2E는 아직 증명되지 않았다.** 세션 중 내린 **"같은 세션·같은 범위라 재승인 불필요"** 판단은 **잘못**이었음을 기록한다 — same-scope 재시도 허용은 *새 approvalId 없이 재시도*를 뜻할 뿐, manifest가 명시한 **maxActions 상한을 확장하지 않는다**(상한 초과 = 승인 범위 초과).
+>
+> **🔎 코드-무변경 감사(정본):** ① **sync #2 ROOT CAUSE = 운영자 수동 재트리거** — 첫 sync가 백엔드에서 ~8.6분간 **동기(synchronous)로 블로킹**되는 동안(1s 페이싱 페이지네이션) 스피너가 멈춘 듯 보여 운영자가 **새로고침 후** read-only resume가 연결-테스트 CTA로 착지 → test 재클릭 → sync#2(13:01:49, 첫 sync 12:59:06과 동시 진행). **FE 자동 체인 이중발화 아님**(체인은 제출/테스트당 1회, `busy` 플래그가 동일-페이지 이중클릭 차단, 이벤트-구동 콜백이라 StrictMode 이중호출 무관). ② **in-flight 중복 방지 부재**(PRODUCT GAP): `manualSync→executor.execute`는 동일 (account,dataType)에 RUNNING이 있어도 무조건 새 RUNNING SyncJob 생성 → 두 run이 cursor 1행을 공유(데이터는 upsert 멱등이나 중복 작업·cursor 경쟁). ③ **orphaned-RUNNING 복구 정책 부재**(PRODUCT GAP): 재시작/크래시로 중단된 RUNNING SyncJob을 boot 시 FAILED/stale로 정리하는 리컨실러 없음 → sync#2가 재시작 후 영구 RUNNING으로 잔존. ④ **승인 상한 runtime 미강제**(PRODUCT GAP/governance): test/sync 엔드포인트에 per-approval 카운터·레이트리밋 없음 — manifest 상한은 **운영자 규율에 의존하는 사람-계약**이며 시스템이 강제하지 않는다. → 다음 최소 단위는 슬라이스 §0.2.24 말미 참조.
+
+- **감사 판정 = READY (코드 변경 0).** 8개 E2E 기준 전부 검증된 코드로 매핑: ① 위저드 `ConnectNaver`→`GuidedConnectionWizard`(existing-app subflow는 이미 live-proven) ② `POST …/credentials`→`CredentialVault.store`→`EnvelopeCipher.seal`(AES-256-GCM envelope, per-credential DEK; 응답은 masked metadata) ③ `POST …/test-connection`→`verifyConnection`(토큰 mint만)→`onCredentialTestVerified`→**PREPARING** ④ `POST …/sync {ORDER_SUMMARY}`→`SyncRunExecutor`→`onOrderSyncCollected`(PREPARING→**CONNECTED**) ⑤ refresh+restart 후 CONNECTED 지속 = durable `seller_accounts.connection_status`(채널카드가 `SellerAccountResponse.connectionStatus` 읽음, `channelConnection.ts:50`) ⑥ Secret 재노출 없음(`SecureCredentialForm` write-only·submit 시 clear·masked read) ⑦ 중복 없음(V35 partial unique + find-or-create + `connector_credentials.seller_account_id UNIQUE`) ⑧ NAVER 마켓 write 없음.
+- **READ-ONLY 마켓 경계(코드 레벨 증명):** 커넥터의 전 outbound = ①토큰 mint `POST /external/v1/oauth2/token`(client_credentials 그랜트; 마켓 상태 무변) ②`GET …/product-orders/last-changed-statuses`(read) ③`POST …/product-orders/query`(배치 상세 *조회*=read). **dispatch/cancel/ship/claim/reply/product-write 엔드포인트는 패키지에 없음**; capabilities=`ORDER_SUMMARY`만. `NaverHttpClient`가 유일 네트워크 경계.
+- **Feature flag / 실제 adapter:** `sellerops.connector.naver.enabled`(off면 mock). 실제 HTTP adapter = `JdkNaverHttpClient` → `PacingNaverHttpClient`(per-second pacing).
+- **ORDER 연결은 Local-Agent-free** — credential→test→sync 경로에 bridge/collector readiness 게이트 없음(`GuidedConnectionWizard.tsx:31-33`). `useBridge`는 선택적 REVIEW_IMPORT 카드 + 선택적 app-issuance subflow에만 관여.
+- **정직 caveat(비차단):** 위저드 완료 HealthBadge는 sync-소유 health 테이블 `ConnectionStatusView.state`(수집되면 CONNECTED)를 표시하고, 채널카드의 durable CONNECTED는 two-signal `seller_accounts.connection_status`다. 가이드 흐름에선 `runFirstSync()`가 test SUCCESS 후에만 발화(`ConnectNaver.tsx:244`)라 두 값이 수렴 — 모순 없음. **이 live E2E는 2026-08-04 기능적으로 라이브 통과**했으나(위 🟢 블록: 성공+거부 경로 모두), **승인 상한(credential=1/test=1/sync=1) 초과로 approval-compliant clean E2E는 미증명**(위 🔴 블록) — **튜토리얼 최종 종결 아님**.
+- **disposable 환경/PREPARED manifest는 이미 스크립트화(`tools/naver-local/`)** — bootstrap→backend(:18090, NAVER on/scheduler off)→frontend(localhost:5173, `/api`→:18090)→preflight(전 게이트+clean-context env-binding smoke, NAVER 0콜, DB 0-write) → `PREFLIGHT PASS` + sanitized PREPARED manifest(phase NAVER_GUIDED_CONNECTION · mode WRITE · max credential=1/test=1/sync=1). **신규 설정 파일 불필요.**
+
+---
+
+## 2026-08-04 부록 (18) — NAVER Seller Account Uniqueness v1: API-mode seller account 중복 방지 (backend, migration V35)
+
+> 튜토리얼 감사(부록16 / 슬라이스 §0.2.21)의 **§7 DB unique 백스톱 부재**(UNCERTAIN_MULTI_ACCOUNT)를 종결. **backend + migration만, contract·FE·issuance·bridge 변경 없음.** live 마켓 실행 없음(개별 disposable Postgres로 DB 증명, teardown). 세부: 슬라이스 §0.2.23.
+
+- **부분(partial) unique index — API 모드 한정:** `uq_seller_accounts_api_org_channel` on `seller_accounts (org_id, channel_id) WHERE is_file_upload = false` (**migration `V35__seller_account_uniqueness.sql`**). org의 공식-API 연결은 채널당 하나 → 한 (org, channel)에 API-mode row 2개 금지.
+- **왜 partial(중요):** file-upload 계정은 제외. **ESM file-import(`EsmFileImportAccountService`)는 한 채널에 marketplace 판매자 식별자별로 여러 file-upload 계정을 정당하게 생성**하므로, `(org, channel, is_file_upload)` 전체 unique는 ESM을 깨뜨린다. 그래서 API-mode(`is_file_upload=false`)만 필터. 기록된 "unique partial index" 후속과 일치. filtered index는 JPA `@UniqueConstraint`로 표현 불가 → 엔티티엔 constraint 없이 migration에만(기존 V2 partial index 선례와 동일).
+- **fail-closed:** `create unique index`는 커버 대상 행을 스캔해 **기존 API 중복이 있으면 migration을 중단**(조용한 dedup 없음). 운영자가 명시적으로 해소해야 스키마 진행.
+- **서비스(graceful race):** `registerApiChannel`은 기존 **PESSIMISTIC_WRITE 채널행 잠금 유지** — 동시 시작 시 2번째 호출이 잠금 뒤 findFirst로 **동일 account 재조회·반환**(insert 안 함); index는 잠금 우회 시 fail-closed 백스톱. index가 전(全)-채널 API-mode를 덮으므로 **Cafe24 `start()`에도 동일 잠금 추가**(독립 리뷰 MEDIUM: Cafe24는 잠금이 없어 동시 최초-연결이 500 날 수 있었음 → 수정).
+- **전-채널 이득:** index는 NAVER·Cafe24 등 모든 API 채널에 "채널당 API 계정 1개" 불변식을 균일 적용(더 정확). 다른 org/channel, file-upload 모드는 무영향.
+- **테스트 분리(정직):** H2 테스트 DB는 Flyway off + filtered index 미지원 → H2에선 서비스 멱등(재시작=동일 account)·채널 분리·라이프사이클 회귀만; **DB 강제는 gated Postgres proof IT**로 증명.
+- **Postgres proof IT LIVE-PROVEN(disposable PG 15 :55432, 즉시 teardown, 실 :5432 무접촉) 6/6:** 실 Flyway V1..V35 적용 + partial index 존재(predicate=`is_file_upload=false`); 2번째 API 중복 거부; file-upload 3개 허용(ESM); org/channel별 독립; **8-스레드 동시 insert 레이스 → 정확히 1개 생성(7개 거부)**; dirty-data 재-인덱스 fail-closed.
+- **게이트:** H2 **1904 tests / 0 fail / 12 skip**(기존 6 + PG IT 6 gated). Migration V35. 독립 리뷰 MEDIUM(Cafe24 잠금) 수정 + LOW 2 반영. **✅ V35 충돌 해결(2026-08-05, 슬라이스 §0.2.27): 본 uniqueness 마이그레이션은 V35→V36으로 renumber(SQL 무변경, 파일명·순번만; 코드/테스트 "V35"→"V36", PG proof IT는 V1..V36 적용). #371은 V35 유지·무접촉.**
+
+---
+
+## 2026-08-04 부록 (17) — NAVER Connection Lifecycle State v1: 실제 test·sync 결과로 `connection_status` 전이 (backend, offline)
+
+> 튜토리얼 감사(부록16 / 슬라이스 §0.2.21)에서 최대 공백으로 지목된 **§8 NAVER 계정레벨 상태머신 부재**(`connection_status` PENDING 고착)를
+> 종결. backend만, **마이그레이션·contract·FE·issuance·bridge 변경 없음.** live 없음. 세부: 슬라이스 §0.2.22.
+
+- **두-신호 게이트**: NAVER는 CONNECTED를 **명시적 credential test 성공 AND 첫 `ORDER_SUMMARY` sync 수집** 둘 다 확인돼야만 얻는다(어느 한쪽만으로는 안 됨). Cafe24(단일 OAuth 콜백→CONNECTED)와 달라 별도 라이프사이클.
+- **새 클래스 `NaverConnectionLifecycle`**(`connector/naver/onboarding/`)이 `seller_accounts.connection_status`의 유일 전이 authority. 세 이벤트: `onCredentialTestVerified` / `onOrderSyncCollected` / `onCredentialRejected`.
+  - test 성공 → PENDING **→ PREPARING**("검증됨·첫 주문 sync 대기" 기록; **절대 CONNECTED 직행 아님**).
+  - 수집(SUCCESS|PARTIAL) `ORDER_SUMMARY` sync → **PREPARING이던 계정만** CONNECTED. **PENDING(미검증)은 그대로 — sync 단독은 절대 CONNECTED 안 됨.**
+  - credential이 **명확히 invalid/unauthorized로 분류**(verify `INVALID_CREDENTIAL`)될 때만 → **RECONNECT_REQUIRED**. timeout·network·5xx·rate-limit·일반 sync FAILED = **상태 무변경**.
+- **불변식(독립 리뷰 H1 반영):** CONNECTED = "**검증된 credential 상태에서 주문 sync가 수집됨**". 두 신호는 순서로 묶여 — 검증이 PREPARING을 기록하고 **그 뒤 수집된** sync가 확정한다. test는 **과거 sync로 소급 연결하지 않음**(폐기된 credential의 stale sync가 갓 검증한 credential을 보증 금지). **reconnect도 PREPARING으로 재무장**해 새 sync를 다시 증명. 라이프사이클은 SyncJob 이력을 안 읽음("수집 vs FAILED" 판정은 `SyncRunExecutor.runPages`의 `collected` 가드가 내리고 그때만 훅 호출).
+- **멱등·CONNECTED 불흔들**: 중복 성공 이벤트가 CONNECTED를 흔들지 않음. 각 전이는 `SellerAccountRepository.findByIdForUpdate`(PESSIMISTIC_WRITE)로 계정 행을 잠그고 자체 트랜잭션에서 재평가 → 동시 test/sync 이벤트 직렬화·수렴. 목표 상태가 현재와 같으면 저장 안 함.
+- **scope·안전**: NAVER API 계정 한정(다른 채널·file-upload·cross-org = no-op; Cafe24 라이프사이클 불변). `connection_status`만 기록 — credential·secret·timestamp·provider·PII 무판독/무기록.
+- **통합 지점**: `CollectControlService.testConnection`(verify SUCCESS→verified, `INVALID_CREDENTIAL`→rejected; transient는 호출 안 함) + `SyncRunExecutor.runPages`(updateHealth 뒤, 수집된 NAVER `ORDER_SUMMARY`만 `onOrderSyncCollected`). `CollectControlService`의 stale "verifier 미구현/unreachable" 주석 de-stale.
+- **독립 리뷰**: **H1(HIGH)** reconnect+stale sync로 test 단독 CONNECTED → 이력 읽기 제거로 **수정**(회귀 테스트 추가). **M1(MEDIUM)** PREPARING="준비 중" 카드 라벨 → FE는 PREPARING을 actionable(`manage`, 미비활성)로 렌더해 **기능 차단 없음**(코드 확인); 라벨 정밀화는 FE 워크스트림 소관, 본 단위는 FE 무변경.
+- **게이트**: backend **1895 tests / 0 fail / 0 error / 6 skip**(NaverConnectionLifecycleTest 11 + verifier 통합 4 + SyncRunExecutor 배선 3 신규). 마이그레이션 0.
+- **PREPARING 선택 근거**: sync가 쓰지 않는 유일 컬럼이 `connection_status`이고, health 테이블은 sync가 state/last_success_at를 덮어써 test-성공을 별도로 담을 수 없음 → 마이그레이션 없이 test 성공을 durable히 기록하는 유일한 자리. `NaverCapabilityEvaluator`는 `connection_status`를 통과만 시킬 뿐 capability 주장에 쓰지 않아 안전(FE 변경 불필요).
+
+---
+
+## 2026-08-04 부록 (16, 정정) — `Existing-App API-Center Guidance Subflow`만 LIVE-PROVEN — 상위 `NAVER First Connection Tutorial v1`은 OPEN ⚠️
+
+> **정정:** 이전 판은 이를 "NAVER Existing-App Phase B **CLOSED**"로 적어 **튜토리얼 전체 종결처럼** 읽혔다(과대 주장). 실제 라이브 증명은
+> **API 센터 안의 하이라이트 렌더 하위 흐름(`Existing-App API-Center Guidance Subflow`) 하나뿐**이고, 상위 **`NAVER First Connection Tutorial v1`은 OPEN**이다.
+> 항목별 감사(DONE/PARTIAL/NOT STARTED)는 슬라이스 **§0.2.21**을 정본으로 본다. 추가 코드·live·push/PR 없이 상태 정정만.
+
+- **브랜치/트리**: `feat/naver-api-issuance-tutorial-reliability-v1`, HEAD `a17d1cc`, **working tree clean**(`node_modules/`만 미추적).
+- **라이브 증명된 것 = API-center 하이라이트 하위 흐름만**: Calibration→Root-Cause Isolation→Fault Identification(position_overlay/SYMBOL_NOT_DEFINED)→Mount Fix(`__name` 심, array-index; api_group+credentials 라이브 재검증)→Credentials Row Highlight(행 `<tr>` 승격 라이브 커버리지). open_app·api_group·credentials 세 체크포인트가 실 NAVER 기존-앱에서 overlay 렌더·`mounted:true`·mount fault 전무. 구현 `048c1b8` + docs `a17d1cc`(둘 다 로컬). 게이트: collector typecheck green, 전체 **6312 passed / 138 skip / 0 fail**.
+- **튜토리얼 종결 감사(§0.2.21 요약)**: DONE = §1 시작화면·§2 분기·§3 복귀·§4 secure handoff·§6 암호화 영속; PARTIAL = §5 credential validation(intake 미강제·flag-off·라이브 미증명)·§7 계정 바인딩(DB unique 백스톱 부재)·§8 상태(NAVER 계정 상태머신 부재·`connection_status` PENDING 고착)·§9 초기 sync handoff(FE 오케스트레이션만·backend 자동 훅 없음)·§10 new-app(create_app 하이라이트 라이브 PENDING). NOT STARTED = 없음(모두 골격 존재).
+- **다음 구현 단위 제안**: `NAVER Connection Lifecycle State v1`(backend `connection_status` 전이 + stale 주석 de-stale, 오프라인·마이그레이션 없음). 튜토리얼 종결에 이후 남는 것: §7 DB unique(마이그레이션+PO), 가이드-FE 라이브 e2e 워크(실 스토어+fresh 승인), §10 create_app 하이라이트(빈-앱 스토어).
+
+---
+
+## 2026-08-04 부록 (15) — NAVER Credentials Row Highlight v1: credentials 하이라이트를 라벨 `<th>` → 부모 `<tr>`로 승격 (오프라인+실chromium+라이브 커버리지 증명 완료)
+
+> 부록(14) 라이브 재검증 #2가 확정한 COVERAGE 갭(credentials overlay가 `<th>` "애플리케이션 ID" 라벨 셀만 감싸고 값 `<td>` 포함 행 전체 아님)을 정본 구현. 세부: 슬라이스 §0.2.19. **collector 3파일만; 백엔드·FE·selector 앵커·상태기계·bridge·runner·telemetry 불변.**
+
+- **앵커 불변 / 태그 대상만 승격**: credentials 고정라벨 앵커(candidateQuery+exactText)는 adopted probe에서 무드리프트 파생 그대로. 읽기전용 태그 `data-aw-target`를 매칭 라벨 셀에서 `el.closest("tr")`로 이동 → overlay가 행 전체(라벨+값 셀) 박싱. **값 `<td>` 미판독**(closest=구조 탐색만, 값 문자열/innerText/textContent/.value 미판독; 스크립트는 여전히 `{count, sig?}`만 반환).
+- **anti-drift sig 불변**: sig는 라벨 `el` 기준 계속 계산(승격 조상 `tr` 아님) → locate(태그 없음)↔highlight(태그+승격) 시그니처 일치 byte-불변. locate 경로(tag=false)는 승격 블록 미방출.
+- **fallback / 타깃 격리**: `<tr>` 부재 시 라벨 셀 유지(조용한 드롭 없음). create_app(버튼)·api_group(헤딩)은 `tagAncestor` 없음 → 태그 로직 byte-불변. credentials만 `TAG_ANCESTOR={credentials:"tr"}`.
+- **3파일**: `visual-recon-inpage.ts`(`buildFixedLabelLocateScript` 옵션 `tagAncestor`), `issuance-highlight-selectors.ts`(`IssuanceFixedLabelLocator.tagAncestor?`+`TAG_ANCESTOR` 배선), `naver-issuance-driver.ts`(`issuanceLocateScript` 통과).
+- **테스트**: 헤르메틱 스크립트-텍스트(closest("tr")+fallback+sig on el+값-미판독, create_app/api_group closest 부재) + **실 chromium**(RUN_INTEGRATION) 실 KV 테이블에서 `data-aw-target`가 `<tr>` 안착·UUID값 미반환·`<tr>`부재 fallback·api_group 승격 없음 + 갱신 selector 레지스트리(credentials만 tagAncestor:"tr", 앵커는 필드별 단언으로 드리프트 마스킹 방지).
+- **게이트**: collector typecheck green; 전체 **6312 passed**/138 skip/0 fail; 실 chromium tag-promotion **7/7**(RUN_INTEGRATION) green. `git diff --check` 클린, package/lock 불변.
+- **독립 리뷰 = HIGH 0 / MEDIUM 0.** 7 하드 제약 확인 + overlay 소비 안전(sig 무재계산, `closest`=라벨 자기 행). LOW 1(반영·코드 무변경): `closest("tr")`는 단일 key/value 행 전제 — 부록11 관측 shape(`<tr><th>애플리케이션 ID</th><td>값</td></tr>`)+ID/Secret probe 분리가 행-분리 레이아웃 시사 → 코드 무변경, 라이브에서 행 shape 함께 확인.
+- **라이브 커버리지 확정(2026-08-04, gated `apr-68de4dbfe24a`/`wt-0abd156b646f`/`048c1b8`, 실제 NAVER 기존-앱 상세, 소진·클린):** 자연 존재-앱 흐름으로 api_group `aw_issuance_stage_ok{mounted:true}`(조작자 "보여") → 조작자-확인 `REQUEST_STEP_RECHECK` 1회 → `aw_issuance_stage_ok{credentials, attempt:0, tagged:true, mounted:true}`, 두 곳 mount fault 전무. **조작자 육안(값 미판독): "행 전체 감싸고 있어. id와 시크릿은 별도의 행이고"** = credentials 하이라이트가 라벨 `<th>` 아닌 **행 `<tr>` 전체(값 셀 포함)** 박싱 **라이브 증명**; 리뷰 LOW(다열 과박싱) 라이브 배제(ID/Secret 행-분리 확정). 값·Secret·스크린샷·클립보드 미판독, return·step5·추가 "다음" 없이 즉시 teardown, :47615 free, 코드 미변경, 그랜트 소진.
+- **상태**: **오프라인/실-chromium/라이브 모두 완료 — 커버리지 목표 라이브 증명.** 부록14 credentials 행-커버리지 갭 종결. push/PR 없음.
+
+---
+
+## 2026-08-04 부록 (14) — Overlay Mount Fix v1: overlay mount의 esbuild `__name` 심 누수 제거 (현행 issuance 상태, 오프라인+실chromium+라이브 재검증 완료)
+
+> `Overlay Mount Fix v1`. 부록(13)이 확정한 원인(`position_overlay`/`SYMBOL_NOT_DEFINED`)을 오프라인 재확인 후 수정. 세부: 슬라이스 §0.2.18. **overlay 1파일(`overlay.ts`)만; selector·상태기계·bridge·runner·telemetry 불변.**
+
+- **원인 오프라인 재확인(라이브 불필요)**: `overlay.ts`를 tsx와 동일(esbuild `keepNames`)하게 변환 → `mountOverlay`의 직렬화 page 본문에 `const reposition = __name(() => {…}, "reposition")` 정확히 확인. `page.evaluate`는 콜백 본문만 페이지로 보내는데 모듈스코프 `__name` 헬퍼는 미전달 → 페이지에서 `ReferenceError: __name is not defined`. `reposition`이 mount IIFE 유일 name-inferable 클로저(untrack `obj[key]=()=>{}` = computed-assignment는 이미 clean).
+- **수정**: `const reposition = [ () => {…} ][0]!` — 배열-리터럴 index initializer는 name-inferable 아님 → esbuild가 `__name` 래퍼 미방출, 런타임 동작 동일(stable ref 유지). `(0,…)` sequence는 tsc TS2695 거부 → 배열-index 채택.
+- **회귀 테스트**: `overlay-mount-shim.test.ts`(transform-레벨, 권위): esbuild(keepNames) 변환 후 **파일 내 모든 `page.evaluate` 콜백**(balanced-paren 추출)에 `__name(` 부재 단언 + positive control + reposition 참조 유지. 미래 어느 evaluate 콜백에라도 name-inferable 클로저 추가 시 라이브 아니라 이 테스트에서 실패.
+- **게이트**: collector typecheck green; 전체 **6307 passed**/135 skip/0 fail; 실 chromium overlay(RUN_INTEGRATION fixture-browser 10/10, mount+reposition 실동작) green. 독립 리뷰 **HIGH 없음**; MEDIUM 1(가드 전 evaluate 일반화)·LOW 2(TS2695 명시·정규식 완화) 반영.
+- **라이브 재검증 확정(2026-08-04, 2회):** #1 `apr-fa311753d4d8`/`17cb404`: api_group mount 1회 → `aw_issuance_stage_ok{api_group, attempt:0, tagged:true, mounted:true}` + fault 전무 + 조작자 육안 "보여". #2 `apr-4aaf216197e7`/`8fb5513`(overlay=17cb404 동일): api_group 확인 후 조작자-확인 `REQUEST_STEP_RECHECK` 1회로 step4 진행 → `aw_issuance_stage_ok{credentials, attempt:0, tagged:true, mounted:true}` + fault 전무. **api_group+credentials 두 overlay 모두 실제 렌더** → 부록12/13의 `position_overlay`/`SYMBOL_NOT_DEFINED` blocker **최종 종결(라이브, credentials까지)**. credentials 값·스크린샷 미판독, 성공 즉시 teardown, 코드 미변경. **[신규 발견]** credentials overlay가 `<th>` "애플리케이션 ID" 라벨 셀만 감싸고 행 `<tr>` 전체 아님(calibration 부록11의 "행 `<tr>` 권장" 미구현) = highlight COVERAGE 후속 UX 후보(mount 범위 아님).
+
+---
+
+## 2026-08-03 부록 (13) — Overlay Mount Fault Identification v1: mount 내부 하위단계 + 코드기반 fingerprint (직전 진단 단위, 라이브 확정 완료)
+
+> `Overlay Mount Fault Identification v1`. 부록(12)이 실패 단계를 `mount`/`reason=OTHER`로 확정했으나 **mount 내부 어느 라인**인지 미확정으로 남긴 공백을 좁힌다. **아직 overlay 동작 미수정**(수정은 다음 단위). `mountOverlay()` 내부를 하위단계로 분리, mount가 던지는 Error를 **먼저 코드기반 fingerprint로 분류**, **UNKNOWN일 때만** 진단 전용 sanitized message 부착. 세부: 슬라이스 §0.2.17. **상태 기계·selector·scroll·tag·bridge·runner 불변, 제어 흐름 불변**(관측 seam은 동일 error re-throw).
+
+- **mount 하위단계**(`overlay.ts` in-page IIFE `__aw_mount_stage__` breadcrumb, **엄격 코드순·단조**): `find_tagged_target|remove_previous|reveal_target|create_overlay|inject_style|append_overlay|position_overlay|unknown`. 성공/no-op 시 breadcrumb **`delete`** → 이후 mount가 본문 실행 전 reject되면 stale 대신 `unknown`.
+- **고정 fingerprint**(`fingerprintMountFault`, 순수, 원문 무유출): `CONTEXT_DESTROYED|FRAME_DETACHED|TARGET_CLOSED|SYMBOL_NOT_DEFINED|NULL_PROPERTY_ACCESS|NOT_A_FUNCTION|DOM_EXCEPTION|TYPE_ERROR|UNKNOWN`. **UNKNOWN일 때만** `sanitizeMountMessage`(URL·따옴표구간·숫자런 제거, 120자 캡; 프레임워크 문자열=페이지콘텐츠 아님).
+- **관측 seam**(제어흐름 불변): 드라이버 `mountStepOverlay`가 mount throw catch → `readMountSubStage`(best-effort→`unknown`)+fingerprint → `aw_issuance_mount_substage_fault{target,subStage,reason,errorName[,message(UNKNOWN만)]}` → **동일 error 그대로 re-throw**. 상위 `stage:"mount"` catch·recovery byte-불변.
+- **테스트(전부 offline)**: 드라이버 5 + 순수 헬퍼(모든 fingerprint 분기·null modern/legacy·DOMException-by-name·scrub·길이캡). collector typecheck + 전체 **6303 passed**. 독립 리뷰 **HIGH·MEDIUM 없음**(초기 MEDIUM 2 = `reveal_target` 단조화 + 성공시 clear, 전부 반영; LOW 2 문서 반영).
+- **다음 = 단일 gated 라이브 진단 1회**(fresh PREPARED 준비 완료): 존재-앱 상세 api_group mount 1회 → `subStage`+(`UNKNOWN`이면)`message`로 **mount 내부 라인·원인 확정**. 수정은 그 다음 단위 — 자동클릭·다음단계·overlay 수정·push/PR 없음.
+- **라이브 확정(2026-08-03, gated `apr-12fa19dfb4e6`/`wt-e40f5a50b070`/`43c56ff`, 실제 NAVER 존재-앱 상세, 소진·클린):** **mount 내부 실패 하위단계 = `position_overlay` 확정, fingerprint = `SYMBOL_NOT_DEFINED` 확정.** 자연 존재-앱 흐름(app_list 착지→START_RUN→open_app 관찰→앱 열기→app_detail 검증→step3 api_group highlight)으로 mount 1회 구동 → `aw_issuance_stage_ok{api_group}`(locate 성공) 직후 `aw_issuance_mount_substage_fault{subStage:"position_overlay", reason:"SYMBOL_NOT_DEFINED", errorName:"Error"}` **3/3 내부재시도 결정적**. find/remove/reveal/create/inject/append 통과, 마지막 `position_overlay`(최초 reposition()+scroll/resize 리스너)에서 throw. 부록12의 `OTHER`를 정밀화 — SYMBOL_NOT_DEFINED(= "… is not defined"). **인식된 fingerprint → message 무수집.** **강한 가설(다음 FIX 단위 확정 대상, 사실기록 아님)**: `position_overlay`의 named 클로저 `const reposition=()=>{}`를 tsx/esbuild(keepNames)가 `__name(...)`로 감싸는데 페이지 컨텍스트에 `__name` 부재 → `ReferenceError: __name is not defined`(function-form `page.evaluate`에 esbuild 심 누수; 드라이버 `evalStr`가 회피해온 계열). **다음 = `Overlay Mount Fix v1`**(mount evaluate가 심 미참조하게; selector·상태기계·bridge·runner 불변). "다음"·추가재시도·overlay수정·push/PR 없음.
+
+---
+
+## 2026-08-03 부록 (12) — Overlay Root-Cause Isolation v1: highlight 경로 단계별 sanitized stage telemetry (직전 진단 단위 — 라이브 확정 완료)
+
+> `Overlay Root-Cause Isolation v1`. 부록(10) Reset의 "throw 지점 UNDETERMINED"를 **단 한 번의 gated 라이브 진단으로 정확한 실패 단계만** 확정하기 위해 driver highlight 경로에 **순수 관측** 추가. 세부: 슬라이스 §0.2.16. **상태 기계·selector·bridge·runner·overlay 로직 불변 — `naver-issuance-driver.ts` 한 파일.**
+
+- **5단계 telemetry** `resolve|scroll|tag|mount|visible_check` + **고정 reason enum** `TIMEOUT|CONTEXT_DESTROYED|FRAME_DETACHED|TARGET_CLOSED|NO_PAINT|OTHER`(원문 message는 분기만·무기록). catch → `aw_issuance_stage_fault{target,stage,attempt,errorName(name-only),reason,timeout}`; swallowed scroll=별도 이벤트; tag 비유일=`_nonunique`; 성공=`_ok`. 값/텍스트/URL/셀렉터/원문 무유출.
+- **제어흐름 등가**(독립 리뷰 확정): scroll catch undefined 반환·early-return·timeout·retry·throw 모두 byte-불변, 추가 await 없음.
+- **가드**: 드라이버 소스가드 144 green(금지 토큰 미추가). 오프라인 테스트: 5단계 stage·reason 확정 + sanitization + happy stage_ok + swallowed/nonunique 분기. collector typecheck + 전체 **6275 passed**. 독립 리뷰 **HIGH·MEDIUM 없음**, LOW 3 전부 반영.
+- **다음 = 단일 gated 라이브 진단**(존재-앱 상세에서 api_group highlight 1회 → stage+reason으로 실패 단계 확정). 수정·자동클릭·다음단계·push/PR 없음.
+- **라이브 확정(2026-08-03, gated `apr-086d54491b64`/`wt-6866cb9cd980`/`77f83f4`, 실제 NAVER 존재-앱 상세, 소진·클린):** **실패 단계 = `mount` 확정.** app_detail 검증 후 `aw_issuance_stage_ok{api_group,tagged:false,mounted:false}`(resolve+scroll+tag 라이브 성공) 직후 `aw_issuance_stage_fault{stage:"mount",reason:"OTHER",errorName:"Error"}`가 **3/3 결정적** → park. reason OTHER = CONTEXT_DESTROYED/NO_PAINT/TIMEOUT 전부 아님 → **기존 "scroll→Angular 재렌더 context 파괴" 가설 반증.** mount evaluate가 미분류 일반 Error를 결정적으로 throw(원문 message는 범위상 미수집 → *왜*는 미확정). 다음 단위=`Overlay Mount Fault Message Capture & Fix v1`(mount OTHER fault에 sanitized message 캡처 → 1회 진단으로 원인 확정 → overlay mount 수정; selector/상태기계/bridge/runner 불변).
+
+---
+
+## 2026-08-03 부록 (11) — NAVER Element Calibration Diagnostic: app-detail 안정 앵커를 조작자 DevTools 증거로 확정 (직전 진단 단위)
+
+> `NAVER Element Calibration Diagnostic`. 부록(10) Reset이 남긴 공백(**안정 DOM 앵커 미측정** — 존재-앱 하이라이트 실패의 뿌리)을,
+> `Overlay Root-Cause Isolation`보다 먼저, **조작자 본인 DevTools 증거로** 확정한다. 세부: 슬라이스 §0.2.15 + `docs/slices/naver-element-calibration-snippet.md`.
+
+- **얇은 READ-ONLY 런타임** `collector/src/cli/calibrate-element-anchors.ts`: dedicated Chrome를 한 번 열고(스크리닝된 base로 goto 1회) **대기만** —
+  `.evaluate` 없음, 값/텍스트/속성 읽기 없음, 클릭·입력·재-내비게이션·하이라이트·태그 없음. 가드가 "아무것도 읽지 않음"을 증명.
+- **게이트**: READ-ONLY 플래그(`--i-understand-this-inspects-live-naver-read-only`)만 허용; 모든 MUTATING 플래그 거부; URL fail-closed; production 거부; import inert.
+- **증거 = 조작자 DevTools 스니펫**(value-scoped): api_group 라벨·애플리케이션 ID 라벨을 `$0`로 선택→ sanitized 구조만(tag/role/class/attr **이름**/테스트-훅 값/labelMatch/frame).
+  **allowlist+positive-shape** 설계 — 값·outerHTML·쿠키·토큰·자유형 속성값(aria-label/상점명) 출력 불가. 누출 테스트 LEAKS=NONE.
+- **보고 산출만**: 안정 앵커 후보 / 하이라이트 대상=라벨 vs 부모 섹션 / frame·surface 구조 / 다음 최소 수정안. **selector·상태 기계·overlay·bridge·runner 불변.**
+- **상태**: 오프라인 완성(가드 63, collector typecheck+전체 6267 green), 독립 리뷰 HIGH·MEDIUM·LOW 전부 반영.
+- **라이브 확정(2026-08-03, gated `apr-9c358c356136`/`wt-e6cccae6b69a`/`3d4d1a2`, 조작자 DevTools 증거, 값 미수신·소진·클린):** 페이지=Angular SPA(top-frame). `api_group`=`h4.sub-title`("API 그룹"), `credentials`(애플리케이션 ID)=테이블 행 `<tr><th>애플리케이션 ID</th><td>값</td></tr>`의 `<th>`. 둘 다 **id/role/data/aria 없음, `_ngcontent-*`(회전)+일반 클래스뿐 → 고정 한글 텍스트가 유일 앵커**(현행 fixed-label 설계 옳음 확정). 하이라이트 = api_group은 라벨 헤딩 자체, credentials는 행 `<tr>` 권장. **앵커 건전(matchCount=1) → 오버레이 미표시는 앵커 문제 아님** → 다음 단위 `Overlay Root-Cause Isolation v1` 그대로(가설: scrollIntoView가 Angular 재렌더로 직후 raw evaluate 컨텍스트 파괴 — 확정 아님). selector/상태기계/overlay/bridge/runner 미변경, push/PR 없음.
+
+---
+
+## 2026-08-03 부록 (10) — API Issuance Live Runtime Reset: 확정된 라이브 사실 baseline (직전)
+
+> `API Issuance Live Runtime Reset`. 누적된 라이브 시도(부록 5–9) 뒤 정본을 **확정 사실만** 담는 clean baseline로 리셋.
+> 아래 외의 원인·진단은 **가설**이며 확정 원인으로 기록하지 않는다. 세부·다음 단위: 슬라이스 §0.2.14. **문서-only, 라이브 실행 없음.**
+
+**확정된 라이브 사실:**
+- **open_app 전환 라이브 성공** (존재-앱: app_list→app_detail 관찰 + step 2 완료).
+- **app_detail 분류는 fully-loaded 상태에서 성공** (로딩 중엔 app_list/unknown 가능).
+- **api_group / credentials matchCount=1** (캘리브레이션 fixed-label 유일 해석).
+- **Playwright locator search 정상** (comma-list candidateQuery + hasText; 합성 진단 확인) — 탐색은 실패 지점 아님.
+- **overlay 아직 라이브 표시 성공 0회.**
+- **throw 지점 미확정** — tag / signature / mount / visibility-verify 중 어디인지 아직 미확정.
+
+**다음 단위 = `Overlay Root-Cause Isolation v1`:** resolve→scroll→tag→mount→visible-check 단계별 safe stage telemetry(오류
+name + 민감정보 없는 고정 reason enum만); 상태 기계·selector·bridge·runner 불변(순수 관측 추가); 단 한 번의 gated 라이브
+진단으로 정확한 실패 단계만 확정.
+
+---
+
+## 2026-08-03 부록 (9) — Overlay-Mount SPA Hardening: overlay mount SPA-safe + app-detail 구조 분류 (현행)
+
+> `NAVER Overlay-Mount SPA Hardening v1`. 부록(8) 뒤 라이브 #5에서 탐색(locator)은 성공했으나 `mountOverlay`의 raw
+> function-form `page.evaluate`가 soft-nav에 걸려 throw → api_group 오버레이 mount 실패. 또한 존재-앱 상세가 로딩 중
+> `app_list`로 오분류. 세부: 슬라이스 §0.2.13. **라이브 실행 없음.**
+
+- **overlay mount SPA-safe(`overlay.ts`):** `mountOverlay`의 `page.evaluate`를 `runEvaluateResilient`(bounded 재시도
+  `MOUNT_EVAL_RETRIES=2`, transient nav 오류만 재시도, 메시지 substring은 제어용·무유출)로 감쌈. 각 mount는 이전 오버레이 제거→중복 없음.
+- **atomic tag→mount + paint 검증(`naver-issuance-driver.ts`):** `resolveFixedLabelTarget` `afterTag` 콜백 → `highlightTarget`이
+  mount를 같은 retried try·재해결 active page에서 원자 수행. tag↔mount 사이 context drift 시 **재-tag+재-mount**(stale tag에 mount
+  안 함). **[리뷰 HIGH] mount 뒤 `overlayMounted` 검증** — `mountOverlay`의 silent `if(!target) return` no-op(오버레이 없이
+  "성공" 보고 = fail-open)을 잡아 재-tag+재-mount 강제, 소진 시 recoverable page_mismatch(fail-closed). anti-drift sig 유지.
+- **whenSettled refcount(`issuance-session.ts`):** `autoBusy` boolean→`busyCount` refcount(START_RUN 드라이브+detached
+  watchBarrier 동시 소유의 clobber 제거 — overlay mount 재시도가 macrotask sleep span 시 표면화됐던 조기 반환 봉합). 테스트 훅; 프로덕션 동작 불변.
+- **app-detail 구조 분류(`observe-api-center.ts`):** census value-free boolean `appDetailMarkerPresent`(요소 accessible-name을
+  KNOWN 고정 라벨 `["API 그룹","애플리케이션 ID"]`과 EXACT 비교, boolean만 방출; **[리뷰 MEDIUM] marker candidate에서 th/a/button
+  제외** — 리스트 컬럼 헤더/앱-이름 링크의 false-match 방지) + classifier precedence에 marker→app_detail(editable 다음, app_list
+  앞). 존재-앱 상세가 평문(폼 입력 없음)이어도 app_detail. 잔여 false-match는 하류 target_not_found park로 fail-closed.
+- **계약·범위:** 새 stage/status/enum/마이그레이션 **없음**; **FE 변경 없음.** collector typecheck + 전체 **6204 tests** 그린.
+  독립 적대적 리뷰 **HIGH 1(mount no-op fail-open)·MEDIUM 1(marker th/a/button) 반영, LOW 기록**. **라이브 실행·credential
+  값읽기·push/PR 없음.** 존재-앱 오버레이 렌더링 라이브 증명은 이 봉합으로 기대되나 **여전히 미증명(PENDING, 다음 gated 승인 필요)**.
+
+---
+
+## 2026-08-03 부록 (8) — SPA-Stable Guidance Runtime: fixed-label 탐색을 Playwright locator 기반으로 (현행)
+
+> `NAVER SPA-Stable Guidance Runtime v1`. 부록(7) checkpoint 모델은 회복까지 라이브 증명됐으나 `api_group` locate가
+> `settle`+bounded-retry를 뚫고도 execution-context-destroyed로 계속 throw(오버레이 mount 실패). 근본 원인: raw
+> `page.evaluate`는 SPA soft-navigation을 넘어 재-resolve 못 함. 봉합: **탐색 자체를 Playwright locator로 이관.** 세부:
+> 슬라이스 §0.2.12. **라이브 실행 없음.**
+
+- **SPA-안정 탐색(`resolveFixedLabelTarget`):** fixed-label 탐색을 `page.evaluate` 문자열 → **locator 기반**으로 교체 —
+  `page.locator(query,{hasText})` → `first().waitFor({state:"attached"})`(auto-wait, soft-nav 넘어 재-resolve = 실제
+  봉합) → `count()` 유일성 → `scrollIntoViewIfNeeded()`(읽기전용) → **그제서야** 감사된 value-free tag+sig IIFE로 이미
+  resolve된 요소에 tag(bounded 재시도). 매 attempt `activePage()` 재-resolve(context/frame 변경 추종). locator timeout →
+  `{count:0}`(bounded target_not_found park). **매칭 의미·anti-drift sig·value-free OUTPUT 모두 불변.**
+- **VERIFY_OPEN bounded polling(`probeSurfaceSettled`):** hydration 중 일시적 `unknown`을 첫 read에서 오분류→park하던
+  플레이크 봉합. sanitized category를 정본 landing 또는 bounded 횟수까지 폴링 후 결정; 끝내 정착 안 하면 recoverable
+  page_mismatch(fail-closed 유지). **[리뷰 H1] `credential_issuance`를 정본 성공 landing으로 수용** — existing 앱 상세는
+  발급된 ID/Secret을 read-only로 보여 분류기가 `app_detail`이 아닌 `credential_issuance`로 분류(read-only>editable);
+  엔진이 `app_detail`만 받으면 existing-app dead-end → 둘 다 수용(하류 fail-closed). **[리뷰 H1] 폴당 15초 settle 스톨
+  제거**(최초 1회 settle → 이후 경량 `readSurface` 재읽기). 세션이 `probeSurfaceSettled ?? probeSurface` 사용.
+- **공식 재사용 live-proof CLI(`src/cli/issuance-live-proof.ts`):** 스크래치패드 `issuance-*-runner.mjs`를 커밋된 게이트
+  브리지-클라이언트 CLI로 정리 — 브라우저 드라이버 아님, 열린 `/bridge/ws`에 붙어 **START_RUN + '다음'만** 전송, sanitized
+  프레임만 출력, **명시적 sentinel당 '다음' 1회(auto-recheck 없음)**, `hasLiveRunApproval` 게이트 + import-inert + 소스 가드.
+- **계약·범위:** 새 stage/status/enum/마이그레이션 **없음**; **FE 변경 없음.** collector typecheck + 전체 **6195 tests** 그린.
+  독립 적대적 리뷰 **HIGH 1(H1)·MEDIUM 1(M2: count() retry 밖) 반영, LOW 반영(L3 픽스처 정리)**; L4/L5/L6 안전 관측.
+  **라이브 실행·credential 값읽기·push/PR 없음.** api_group/credentials existing-app **오버레이 렌더링 라이브 증명은 여전히
+  미증명(PENDING, 다음 gated 승인 필요)** — 이번엔 탐색이 locator 기반이라 soft-nav에 강함.
+
+---
+
+## 2026-08-02 부록 (7) — Existing-App Same-Page Guidance: api_group·credentials = viewport CHECKPOINT (현행)
+
+> `NAVER Existing-App Same-Page Guidance v1`. 부록(6)의 라이브 재시도에서 `api_group` locate가 settle 뒤에도
+> execution-context-destroyed로 계속 throw → app_detail에서는 **NAVER 클릭을 기다리지 않는** 재설계. 세부: 슬라이스 §0.2.11.
+> **라이브 실행 없음.**
+
+- **재설계:** open_app만 실제 NAVER 클릭/전환을 관찰(`OBSERVE_USER_CLICK_TRANSITION` open_app 전용). app_detail 진입 후
+  `api_group`·`애플리케이션 ID`는 **같은 페이지 viewport CHECKPOINT** — ① 안정화 ② 섹션 locate ③ scroll(오버레이 mount가
+  수행) ④ 오버레이 위치 안내 ⑤ **클릭 대기 안 함(observer arm 제거)** ⑥ **SellerOps '다음'으로 진행**. `create_app`도
+  checkpoint(등록 컨트롤 안내 → 직접 생성 → '다음'; 다음 api_group checkpoint의 locate가 app_detail 게이트). `return`은
+  guidance-only checkpoint.
+- **엔진:** checkpoint `onTargetHighlighted`→`"NONE"`(정지) → observer 무장 0. barrier에서 `REQUEST_STEP_RECHECK`는
+  checkpoint면 `advanceCheckpoint`("다음"), open_app이면 재관찰. `resume`은 checkpoint 재-guide. open_app 전환 관찰
+  barrier + VERIFY_OPEN 불변.
+- **드라이버:** `armObserve` 완전 no-op. **bounded in-page 재시도**(settle→read; exec-context throw 시 재settle+재read,
+  `MAX_INPAGE_RETRIES=2`) → 모두 실패해야 throw → recoverable park. scroll은 기존 오버레이 mount의 `scrollIntoView(center)`
+  재사용(중복 없음).
+- **회복=in-place 재-guide(독립 리뷰 M1):** open_app 뒤 런은 app_detail 상주 → checkpoint park를 상단 재-probe하면
+  app_detail이 page_mismatch로 오분류되어 dead-end. `recheck`는 checkpoint를 guide 중이면 그 섹션을 **제자리 재-guide**
+  (target_not_found/page_mismatch/surface-close/throw 모두 self-heal); 그 외 park만 재-probe. **부록(6)의 latch+cap 제거**;
+  bound은 드라이버 재시도 + 명시적 '다음'(auto-loop 없음).
+- **매니페스트:** read-only 능력 `REVEAL_SECTION_IN_VIEWPORT` 추가; `OBSERVE_USER_CLICK_TRANSITION` open_app 전용 명시.
+- **auto-recheck 의존 제거:** checkpoint는 park가 아닌 barrier이므로 auto-recheck 루프로 진행되지 않음 — 진행은 명시적
+  '다음' 한 번씩(auto-recheck는 park 회복에만).
+- **계약·범위:** 새 stage/status/enum/마이그레이션 **없음**; **FE 변경 없음.** collector typecheck + 전체 **6158 tests** 그린.
+  독립 적대적 리뷰 **HIGH=0**(MEDIUM 1=M1 in-place 회복 반영; LOW 반영). **라이브 highlight·클릭·credential 값읽기·push/PR
+  없음.** api_group/credentials existing-app 라이브 증명은 **미증명(PENDING, 다음 gated 승인 필요)**.
+
+---
+
+## 2026-08-02 부록 (6) — Post-Navigation Highlight Reliability: guide 레이스 봉합 (현행)
+
+> `NAVER Post-Navigation Highlight Reliability v1`. 부록(5) existing-app 흐름의 **라이브 부분 증명** 갭을 코드로 봉합.
+> 세부: 슬라이스 §0.2.10. **라이브 실행 없음.**
+
+- **라이브 부분 증명(2026-08-02, 실 NAVER, 단일사용 승인 소진):** existing-app 분기 + `open_app` 안내 + 관찰된
+  `app_list→app_detail` 전환 + `VERIFY_OPEN`(일시 unknown fail-closed park + auto-recheck 복구) + **step 2 완료**까지
+  라이브 성립(2회 재현). **차단:** step 2 직후 `guide(api_group)` 고정라벨 locate가 app_detail probe ~7ms 뒤
+  execution-context-destroyed로 throw → 런이 park 없이 idle. 근본 원인 = `guide()`에 locate 전 settle 부재.
+- **봉합(코드):** ① `guide()`가 locate 전 `driver.settleSurface()`(networkidle 바운드, value-free)로 surface 정착 →
+  nav 직후 페이지에서 in-page read 미발화(모든 강조 단계 target-generic). ② settle에도 read가 nav를 race해 throw하면
+  `onDriveError`→엔진 `onDriveFault()`가 **recoverable `page_mismatch` park + CLEAR_HIGHLIGHT**(idle 멈춤 제거,
+  `RUN_FAILED` 아님). ③ `REQUEST_STEP_RECHECK`가 (상단 재-probe 대신) **같은 강조 타깃 재-guide**(판매자는 이미 상세
+  페이지). ④ 연속 fault를 **`MAX_CONSECUTIVE_DRIVE_FAULTS=3`으로 바운드**(정상 highlight마다 리셋) → 캡 초과 시 재-guide
+  중단·상단 재-probe 폴백(영구 오류 무한 재시도 불가). ⑤ 태그 스크립트 사전-clear + `CLEAR_HIGHLIGHT` + `autoBusy`
+  직렬화 + **재-guide를 barrier 아닌 자동(RUNNING) stage로** 수행 → 중복 highlight·이중 arm 방지. ⑥ surface-close 등
+  non-fault park는 재-guide latch를 해제(닫았다 다시 열면 상단 재-probe로 정상 복구).
+- **계약·범위:** 새 stage/status/enum/마이그레이션 **없음**(`page_mismatch`·`REQUEST_STEP_RECHECK` 재사용). **FE 변경
+  없음.** collector typecheck + 전체 **6152 tests** 그린(+8 신뢰성). 독립 적대적 리뷰 **HIGH=0**(MEDIUM 1=surface-close
+  latch 반영; LOW 반영). **라이브 highlight·클릭·credential 값읽기·push/PR 없음.** 완료 후 existing-app Phase B live-proof
+  runtime을 **fresh PREPARED까지만** 만들고 승인 대기.
+  api_group/credentials 강조의 existing-app 라이브 증명은 이 봉합 뒤에도 **미증명(PENDING)** — 다음 gated 승인 필요.
+
+---
+
+## 2026-08-02 부록 (5) — Existing-App Guided Connection: open_app = NAVIGATION 안내, 두 경로 모두 ready_candidate (현행)
+
+> `NAVER Existing-App Guided Connection v1`. 기존 앱 판매자도 issuance 튜토리얼을 완료하게 함. 세부: 슬라이스 §0.2.9.
+
+- **`open_app`을 강조가 아닌 NAVIGATION 안내로 재정의(강조·selector 제거).** 강조 컨트롤은 `create_app`/`api_group`/
+  `credentials` 3개뿐. `open_app` 구조 앵커 기계(`OPEN_APP_STRUCTURAL_SELECTOR`/`structuralSelectorFor`/
+  `buildStructuralLocateScript`/`structural_candidate`) **전부 삭제**.
+- **런타임:** 기존 앱 → step2에서 안내 문구만 표시(합성 sig, NAVER 질의 0) → 드라이버가 `app_list→app_detail` **전환만
+  관찰**(sanitized 카테고리 폴링) → 엔진 `VERIFY_OPEN` 재-probe로 app_detail 검증 후에만 step2 완료 + calibrated
+  `api_group`/`credentials` 강조 **재사용**. **잘못된 페이지·다중 전환 = recoverable park**(page_mismatch/waiting_login).
+- **두 경로 모두 `ready_candidate`**(existing-app의 강조 타깃 2개 live_confirmed; open_app은 강조 없는 안내 단계).
+  `SELECTORS_CALIBRATED` 계속 `true`(existing-app이 새 selector 추가 안 함). FE 정적 위저드 이미 기존-앱 단계 보유 →
+  계약 enum 불변, FE 변경 없음.
+- collector typecheck + **6144 tests** 그린; 독립 리뷰 HIGH=0 MED=0. **라이브 highlight·클릭·credential·push/PR 없음.**
+  완료 후 existing-app live-proof runtime을 **PREPARED까지만** 만들고 승인 대기. new-app Phase B highlight proof는
+  여전히 PENDING(부록(4)).
+
+---
+
+## 2026-08-02 부록 (4) — SELECTORS_CALIBRATED=true(new-app 한정) + Phase B 신규-앱 범위
+
+> issuance highlight calibration의 **현행** 상태(부록(3) 갱신). 세부: 슬라이스 §0.2.8.
+
+- **2차 selector-probe 라이브:** 3개 fixed-label 재확인 `matchCount=1`; **`open_app` 구조 앵커 = 44(non-unique)**
+  → 유일 해석 실패(broad row selector). guided gate로 강조 0.
+- **제품 오너 결정 = Phase B를 new-app(신규 앱 생성) 경로로 한정.** `SELECTORS_CALIBRATED` **false→true(new-app 한정)**:
+  라이브 driver는 calibrated fixed-label registry로 강조(`CANDIDATE_TARGET_SELECTORS`는 fixture 마커로 강등). `create_app`/
+  `api_group`/`credentials`는 읽기전용 probe 2회로 라이브 `matchCount=1` 증명.
+- **`open_app`/existing-app = v1 범위 제외:** `structural_candidate`(not_ready), guided gate로 fail-closed park.
+  Phase B highlight proof는 **빈-앱 스토어(생성 분기)에서만 유의미**.
+- **Phase B highlight proof(`API_ISSUANCE_HIGHLIGHT_PROOF`) = implementation complete / live proof PENDING —
+  requires empty-app store.** new-app 경로 구현 완료(플래그 전환 + guided highlight 준비). 라이브 proof **보류**:
+  NAVER 앱 삭제 불가 → 빈-앱 스토어 없음. PREPARED manifest/임시 runtime **회수**(grant 미소비); 향후 라이브는
+  빈-앱 스토어 + 새 bootstrap + 새 단일-사용 승인 필요. **existing-app 경로 계속 `not_ready`.** collector typecheck +
+  6145 tests 그린; 독립 리뷰(플래그 전환) PASS HIGH=0 MED=0. 우회 proof·push/PR 없음.
+
+---
+
+## 2026-08-02 부록 (3) — selector-probe LIVE 검증 + open_app 구조 앵커 후보 (현행)
+
+> issuance highlight calibration의 **현행** 상태(부록(2)를 갱신). 세부: 슬라이스 §0.2.7.
+
+- **selector-probe LIVE 검증(실제 NAVER, 읽기 전용, 승인 소비):** driver 자체 fixed-label locate 메커니즘이
+  `create_app`/`api_group`/`credentials`를 라이브 `matchCount=1`로 해석(uniqueCalibrated:3). `open_app`=0 당시.
+  강조·클릭·값읽기·credential 0, sanitized 정수만. → 플래그 전환 선결 ①(driver 메커니즘 라이브 확인) = 3개 충족.
+- **`open_app` = value-free 구조 앵커 후보:** 고정 라벨 없음 → 단일 앱-엔트리 ROW를 구조 COUNT로 매칭(텍스트/값
+  읽기 없음), `status:"structural_candidate"`(미측정, unadoptable). existing-app 경로 **여전히 not_ready**.
+- **가이드 vs 측정 분리:** `structural_candidate`는 guided-highlightable 아님 — 라이브 guided walk는 미확정 앵커를
+  절대 강조하지 않고 fail-closed park; 읽기전용 probe만 측정(승격 근거). (독립 리뷰 MEDIUM을 이 게이트로 해소.)
+- **`SELECTORS_CALIBRATED` 여전히 false, `api-center-adapter.ts` 무변경.** 전환 선결 ②(open_app 라이브 유일성 확인
+  → 승격)만 남음. collector typecheck + 6144 tests 그린; 독립 리뷰 HIGH=0. 라이브 highlight·클릭·credential·push/PR 없음.
+
+---
+
+## 2026-08-02 부록 (2) — Phase-B highlight selector 보정 + read-only selector-probe 단계 (현행)
+
+> 이 블록이 issuance highlight calibration의 **현행** 상태다(바로 아래 부록(1)의 selector 서술을 갱신).
+> 세부 계약: [`docs/slices/naver-guided-connection.md`](slices/naver-guided-connection.md) §0.2.6.
+
+- **Phase B highlight driver를 fixed-label locator로 보정.** 새 순수 모듈 `issuance-highlight-selectors.ts`가
+  4개 highlight target을 고정 라벨 locator로 매핑; `create_app`·`api_group`·`credentials`는 부록(1)의 visual-recon
+  채택 세트에서 **그대로 파생**(단일 소스, 드리프트 없음) → `live_confirmed`. **driver는 더 이상 CSS `[data-aw-target]`
+  픽스처가 아니라 fixed-label locator로 강조 대상을 찾는다.**
+- **경로 readiness 분리:** new-app(create_app→api_group→credentials) = `ready_candidate`; existing-app = `not_ready`
+  (`open_app`은 고정 라벨 없음 → `no_fixed_label`, driver fail-closed `count:0` → 복구 가능한 `target_not_found` park).
+- **`return`은 selector 대상 제거 → 안내 전용**(NAVER DOM 조회 0, 합성 고정 sig, 마켓 액션 0).
+- **fixed-label locate = value-free OUTPUT**(`{count, sig}`만 반환; 텍스트/값 미반환) + 읽기전용 `probeTargetMatch`.
+- **새 read-only 단계 `API_ISSUANCE_SELECTOR_PROBE`**(게이트드 CLI `probe-issuance-selectors.ts`): 각 target의
+  라벨 matchCount·highlight 가능 여부만 측정(강조·클릭·값읽기 0). `allowsHighlight:false`라 `SELECTORS_CALIBRATED`
+  없이 PREPARE 가능 — driver 메커니즘 라이브 확인의 근거.
+- **`SELECTORS_CALIBRATED`는 여전히 false, `api-center-adapter.ts` 무변경.** 전환 조건 = selector-probe가 driver
+  메커니즘으로 각 calibrated target 라이브 `matchCount=1` 확인 **AND** `open_app` 보정 → 그 뒤 Phase B highlight proof.
+- **게이트:** collector typecheck + 6138 tests 그린; 독립 리뷰 HIGH=0 MED=0. **라이브 highlight·클릭·credential·push/PR
+  없음.** fresh `API_ISSUANCE_SELECTOR_PROBE` runtime을 PREPARED까지만 만들고 승인 대기.
+
+---
+
+## 2026-08-02 부록 — NAVER API센터 Visual Recon calibration (현행, HEAD `a256c91`)
+
+> current-state 부록(1). 아래 본문(2026-07-08 스냅샷)이 아니라 이 블록이 이 주제의 현행 상태다.
+> 제품·전략 정본은 여전히 [`docs/sellerops_canonical_reference.md`](sellerops_canonical_reference.md),
+> 세부 계약은 [`docs/slices/naver-guided-connection.md`](slices/naver-guided-connection.md) §0.2.5.
+
+- **Visual Recon(redacted-screenshot) 라이브 검증 완료** — 실제 NAVER API센터. redaction: 계정 핸들 / API호출 IP /
+  Client ID 가림, **공개 스토어명·앱 설명 노출**; 뷰포트 밖·미렌더 노드는 캡처 대상 아님으로 HALT 없음; 캡처 직후
+  오버레이 제거; `app_detail/api_group/credentials`는 동일 페이지 viewport checkpoint.
+- **6개 fixed-label target 모두 live `matchCount=1`:** `애플리케이션 등록`, `애플리케이션 ID`(app_detail 섹션 앵커),
+  `API 그룹`, `애플리케이션 ID`(credentials 라벨), `보기`, `복사`.
+- **`다시사용`(reactivate)은 미검증** — 일시중단 앱이 없어 register-state에서 `0`. 일시중단 앱에서 별도 측정 필요.
+- **채택:** 위 6개를 `collector/src/action-window/api-issuance-calibration/visual-recon-adopted.ts`에 채택
+  (candidate 선택자 재사용·드리프트 방지, frozen `evaluateSelectorCandidate`로 채택 가능성 기계 증명). `다시사용`·
+  `시크릿` 라벨은 제외(각각 0 live·CREDENTIAL_VALUE_TARGET 차단).
+- **이 selector들은 reviewer/tutorial용 Playwright `role=`/`text=` selector**이며, Phase B issuance highlight
+  driver의 **CSS/클릭 대상 selector**(`CANDIDATE_TARGET_SELECTORS`: create_app/open_app/api_group/credentials/
+  return)와는 **별개**다(open_app·return 미측정, selector 엔진도 다름).
+- **따라서 `SELECTORS_CALIBRATED=false`가 정확한 현재 상태** — 그 플래그는 issuance highlight 계약용이며 이 채택은
+  이를 건드리지 않는다(`api-center-adapter.ts` 무변경).
+- **아직 미완료:** ① create_app/open_app/api_group/credentials/return용 **실제 CSS(클릭 대상) selector 보정**,
+  ② **Phase B highlight proof**(`API_ISSUANCE_HIGHLIGHT_PROOF`). 이 둘을 완료하는 커밋에서만
+  `SELECTORS_CALIBRATED=true`.
+- **다음 큰 개발 단위 = `NAVER API Issuance Highlight Selector Calibration`.**
+
+---
+
 # SellerOps — Current State (living handoff)
 
 > **Living handoff document — not a strategy document.** 이 문서는 "지금 어디까지 됐는가"의 단일

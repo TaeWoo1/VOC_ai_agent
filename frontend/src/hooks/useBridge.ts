@@ -6,8 +6,12 @@ import { BridgeClient, makeBridgeClient, type BridgeState } from "../lib/bridge/
  * a confirmation is pending, and auto-reconnects after a drop or while the agent is unreachable. Reconnect
  * after a page refresh happens naturally: a fresh client reads the stored pairing token on mount and
  * restores the snapshot (slice acceptance criterion — refresh reconnects + restores state).
+ *
+ * `enabled` (default true) gates the whole client lifecycle. When false, NO client is created and NO poll
+ * runs, so a surface that does not use the bridge (e.g. the Local-Agent-free NAVER order connection when
+ * the bridge feature flag is off) never opens a local connection or triggers a Local-Network-Access prompt.
  */
-export function useBridge(): {
+export function useBridge(enabled = true): {
   state: BridgeState;
   requestPairing: () => void;
   revoke: () => void;
@@ -17,6 +21,12 @@ export function useBridge(): {
   const [state, setState] = useState<BridgeState>({ phase: "connecting", maybeNeedsLocalNetworkAccess: false });
 
   useEffect(() => {
+    if (!enabled) {
+      // Disabled: no client, no polling. Report a stable inert state (never "paired").
+      clientRef.current = null;
+      setState({ phase: "disconnected", maybeNeedsLocalNetworkAccess: false });
+      return;
+    }
     const client = makeBridgeClient();
     clientRef.current = client;
     const unsubscribe = client.subscribe(setState);
@@ -34,7 +44,7 @@ export function useBridge(): {
       client.stop();
       clientRef.current = null;
     };
-  }, []);
+  }, [enabled]);
 
   return {
     state,

@@ -103,12 +103,22 @@ export type ExecutionMode = (typeof EXECUTION_MODES)[number];
  *
  * Both are read-only export choreography — the seller clicks every marketplace control — so they reach
  * the ordinary `COMPLETED` terminal, unlike `REPLY_SUBMISSION`.
+ *
+ * `API_ISSUANCE_GUIDANCE` is the NAVER Commerce API-center onboarding walk: open the API center, observe
+ * which page category the seller is on, highlight the one control they must press next, observe their own
+ * click, and advance — until the Application ID / Secret is on screen for them to copy into SellerOps's
+ * masked form. It is read-only guidance choreography (the runtime never logs in, clicks, submits,
+ * auto-creates an application, selects an API group, or reads a credential value), so it too reaches the
+ * ordinary `COMPLETED` terminal — where "completed" means the ISSUANCE GUIDANCE finished, NOT that a
+ * credential was stored or a connection made. It binds to no approved marketplace work, so it carries no
+ * ref (like `EXPORT`).
  */
 export const RUN_INTENTS = [
   "EXPORT",
   "REPLY_SUBMISSION",
   "INITIAL_REVIEW_IMPORT_DISCOVERY",
   "INITIAL_REVIEW_IMPORT_SEGMENT",
+  "API_ISSUANCE_GUIDANCE",
 ] as const;
 export type RunIntent = (typeof RUN_INTENTS)[number];
 
@@ -125,6 +135,9 @@ export const INTENT_REQUIRED_REF: Readonly<Record<RunIntent, "submissionRef" | "
   REPLY_SUBMISSION: "submissionRef",
   INITIAL_REVIEW_IMPORT_DISCOVERY: "discoveryRef",
   INITIAL_REVIEW_IMPORT_SEGMENT: "importRef",
+  // API-issuance guidance binds to no approved marketplace work — it is a tutorial over the seller's own
+  // API center, authorized by the guided-connection flow, not by a minted ref. So it carries none.
+  API_ISSUANCE_GUIDANCE: null,
 };
 
 /** Every binding ref a `START_RUN` payload may carry (exactly one, chosen by intent). */
@@ -144,6 +157,20 @@ export type OperatorOutcome = (typeof OPERATOR_OUTCOMES)[number];
  */
 export const VERIFICATION_STATES = ["UNVERIFIED"] as const;
 export type VerificationState = (typeof VERIFICATION_STATES)[number];
+
+/**
+ * v2, ISSUANCE-SCOPED. Which application branch the API-issuance guidance runtime OBSERVED on the seller's
+ * API-center application list — `existing` (the store already holds its one Commerce app, so the walk OPENS
+ * it) or `new` (the store has none, so the walk CREATES one). It exists so the frontend routes the
+ * guided-first onboarding journey on an explicit sanitized signal instead of decoding the step-2 copy key.
+ *
+ * It rides ONLY the issuance run view (`ActionWindowRunView.appBranch`), and only on an
+ * `API_ISSUANCE_GUIDANCE` run: it is absent until the list is observed, and never present on any other run
+ * or on any command/event payload. It is a single sanitized bit — it carries NO app name, store name,
+ * account id, url, or selector.
+ */
+export const ISSUANCE_APP_BRANCHES = ["existing", "new"] as const;
+export type IssuanceAppBranch = (typeof ISSUANCE_APP_BRANCHES)[number];
 
 /**
  * Why a run stopped.
@@ -304,6 +331,14 @@ export interface ActionWindowRunView {
   executionMode: ExecutionMode;
   /** v2: the run's intent. Absent ⇒ EXPORT (v1-compatible). REPLY_SUBMISSION drives the guided post. */
   intent?: RunIntent;
+  /**
+   * v2, ISSUANCE-ONLY. The application branch the API-issuance runtime observed on the seller's application
+   * list (`existing` → open the one existing app; `new` → create one). Absent until the list is observed, and
+   * present ONLY on an `API_ISSUANCE_GUIDANCE` run (`validateRunView` rejects it on any other intent). Never an
+   * app/store/account identity — one sanitized bit the FE routes the guided-first journey on, so it no longer
+   * has to decode the step-2 copy key.
+   */
+  appBranch?: IssuanceAppBranch;
 
   currentStep?: {
     stepId: string;
@@ -573,6 +608,14 @@ export function validateRunView(input: unknown): ValidationResult {
   if (!(RUN_STATUSES as readonly string[]).includes(input.status as string)) e.push(err("UNKNOWN_ENUM", "$.status"));
   if (!(EXECUTION_MODES as readonly string[]).includes(input.executionMode as string)) e.push(err("UNKNOWN_ENUM", "$.executionMode"));
   if (input.intent !== undefined && !(RUN_INTENTS as readonly string[]).includes(input.intent as string)) e.push(err("UNKNOWN_ENUM", "$.intent"));
+  // appBranch is issuance-scoped: a known member, and ONLY on an API_ISSUANCE_GUIDANCE run (never on export /
+  // reply / import). This keeps the sanitized branch bit from riding a run it has no meaning on.
+  if (input.appBranch !== undefined) {
+    if (!(ISSUANCE_APP_BRANCHES as readonly string[]).includes(input.appBranch as string)) {
+      e.push(err("UNKNOWN_ENUM", "$.appBranch"));
+    }
+    if (input.intent !== "API_ISSUANCE_GUIDANCE") e.push(err("CONSTRAINT_VIOLATION", "$.appBranch"));
+  }
   if (typeof input.guidanceEnabled !== "boolean") e.push(err("MISSING_FIELD", "$.guidanceEnabled"));
 
   // allowedCommands ⊆ COMMAND_TYPES

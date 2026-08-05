@@ -1,14 +1,14 @@
 // Guided-connection state-machine unit tests (§18). Pure/node-env — no DOM, no live NAVER.
 // Each block ties back to an acceptance criterion in docs/slices/naver-guided-connection.md §17 or the
-// discovery/reuse/recovery flows (§discovery). The journey now starts at the saved-credential check, then
-// the browser gate (only if no stored key), then a three-path fork (existing app / unknown / new).
+// discovery/reuse/recovery flows (§discovery). The journey is Local-Agent-free: it starts at the
+// saved-credential check and, with no stored key, goes STRAIGHT to the three-path fork — there is NO
+// readiness/agent/renderer/NAVER-login gate.
 import { describe, it, expect } from "vitest";
 import {
   INITIAL_STATE,
   actorFor,
   guidedConnectionReducer as reduce,
   isComplete,
-  resolveNaverSession,
   resumeFromMilestones,
 } from "./state";
 import type { GuidedConnectionState, GuidedEvent } from "./types";
@@ -16,32 +16,32 @@ import {
   EXISTING_APP_EVENTS,
   HAPPY_PATH_EVENTS,
   INVALID_CREDENTIAL_EVENTS,
-  READY_SIGNAL,
   SAVED_CREDENTIAL_REUSE_EVENTS,
+  SAVED_KEY_INCOMPLETE_EVENTS,
   SECRET_LOST_EVENTS,
 } from "./fixtures";
 
 const run = (events: GuidedEvent[], from: GuidedConnectionState = INITIAL_STATE): GuidedConnectionState =>
   events.reduce(reduce, from);
 
-/** A READINESS event with sensible defaults (paired, renderer up, logged-in via attestation). */
-const readiness = (
-  o: Partial<Omit<Extract<GuidedEvent, { type: "READINESS" }>, "type">> = {},
-): GuidedEvent => ({
-  type: "READINESS",
-  agentPaired: true,
-  rendererAvailable: true,
-  naverSession: "logged_in",
-  sessionSource: "attested",
-  ...o,
-});
+const NO_MILESTONES = { registered: false, tested: false, synced: false } as const;
 
-/** Entry into the browser gate: the saved-credential check found no stored key. */
-const NO_SAVED: GuidedEvent = { type: "SAVED_CREDENTIAL_CHECKED", hasSavedCredential: false };
-const gateEntry = reduce(INITIAL_STATE, NO_SAVED); // readiness_checking
+/** Construct a phase directly (for phases no longer reached from the guided-first entry but whose transitions
+ *  are unchanged and still exercised — e.g. the retained `application_path_choice` fork + `application_issuance`). */
+function at(
+  phase: GuidedConnectionState["phase"],
+  path: GuidedConnectionState["path"] = "unknown",
+): GuidedConnectionState {
+  return { phase, actor: actorFor(phase), failureReason: null, milestones: NO_MILESTONES, path };
+}
+
+/** The read-only capability snapshot showed no stored key → guided-first entry. */
+const NO_SAVED: GuidedEvent = { type: "RESUME_FROM_CAPABILITY", credentialPresent: false, completed: false };
+/** The retained three-path fork phase (no longer the entry, but its transitions are still valid + tested). */
+const fork = at("application_path_choice", "unknown");
 
 describe("INITIAL_STATE", () => {
-  it("starts at check_saved_credential (Vault check first, before the browser gate)", () => {
+  it("starts at check_saved_credential (Vault check first)", () => {
     expect(INITIAL_STATE.phase).toBe("check_saved_credential");
     expect(INITIAL_STATE.milestones).toEqual({ registered: false, tested: false, synced: false });
     expect(INITIAL_STATE.actor).toBe("SELLEROPS_AUTOMATED");
@@ -50,17 +50,107 @@ describe("INITIAL_STATE", () => {
   });
 });
 
-describe("saved-credential check (§flow 1)", () => {
-  it("a stored key → reuse: straight to the connection test (registered), no re-entry, no gate", () => {
-    const s = reduce(INITIAL_STATE, { type: "SAVED_CREDENTIAL_CHECKED", hasSavedCredential: true });
-    expect(s.phase).toBe("connection_testing");
-    expect(s.milestones.registered).toBe(true);
+describe("read-only capability resume (§flow 1) — no readiness gate, no re-run on load", () => {
+  it("a prior successful sync → restore completed DIRECTLY, milestones all true (re-runs nothing)", () => {
+    const s = reduce(INITIAL_STATE, { type: "RESUME_FROM_CAPABILITY", credentialPresent: true, completed: true });
+    expect(s.phase).toBe("completed");
+    expect(s.milestones).toEqual({ registered: true, tested: true, synced: true });
     expect(s.path).toBe("saved");
   });
 
-  it("no stored key → enter the browser gate", () => {
-    expect(gateEntry.phase).toBe("readiness_checking");
-    expect(gateEntry.milestones.registered).toBe(false);
+  it("a stored key but NOT completed → the connection test as a USER CTA (registered only, no auto-run)", () => {
+    const s = reduce(INITIAL_STATE, { type: "RESUME_FROM_CAPABILITY", credentialPresent: true, completed: false });
+    expect(s.phase).toBe("connection_testing");
+    expect(s.milestones).toEqual({ registered: true, tested: false, synced: false });
+    expect(s.path).toBe("saved");
+  });
+
+  it("a first sync still RUNNING → restore the in-progress sync screen (registered+tested), never a re-test", () => {
+    const s = reduce(INITIAL_STATE, {
+      type: "RESUME_FROM_CAPABILITY",
+      credentialPresent: true,
+      completed: false,
+      syncing: true,
+    });
+    expect(s.phase).toBe("first_order_sync");
+    expect(s.milestones).toEqual({ registered: true, tested: true, synced: false });
+    expect(s.path).toBe("saved");
+    expect(s.failureReason).toBeNull();
+  });
+
+  it("syncing is subordinate to completed — a completed snapshot restores completed, not the progress screen", () => {
+    const s = reduce(INITIAL_STATE, {
+      type: "RESUME_FROM_CAPABILITY",
+      credentialPresent: true,
+      completed: true,
+      syncing: true,
+    });
+    expect(s.phase).toBe("completed");
+  });
+
+  it("from the resumed running-sync screen, a SUCCESS settles to completed (the observed poll result)", () => {
+    const running = reduce(INITIAL_STATE, {
+      type: "RESUME_FROM_CAPABILITY",
+      credentialPresent: true,
+      completed: false,
+      syncing: true,
+    });
+    const done = reduce(running, { type: "SYNC_RESULT", status: "SUCCESS" });
+    expect(done.phase).toBe("completed");
+    expect(done.milestones).toEqual({ registered: true, tested: true, synced: true });
+  });
+
+  it("no stored key → GUIDED-FIRST: straight into the guided walkthrough (no three-path fork, path undetermined)", () => {
+    const entry = reduce(INITIAL_STATE, NO_SAVED);
+    expect(entry.phase).toBe("application_issuance_guided");
+    expect(entry.milestones.registered).toBe(false);
+    expect(entry.path).toBe("unknown"); // the runtime, not the seller, will reveal existing-vs-new
+    expect(entry.failureReason).toBeNull();
+  });
+
+  it("the runtime reveals the branch: ISSUANCE_APP_BRANCH_OBSERVED sets path (existing / new), staying in guided", () => {
+    const entry = reduce(INITIAL_STATE, NO_SAVED);
+    const existing = reduce(entry, { type: "ISSUANCE_APP_BRANCH_OBSERVED", branch: "existing" });
+    expect(existing.phase).toBe("application_issuance_guided");
+    expect(existing.path).toBe("existing");
+    const fresh = reduce(entry, { type: "ISSUANCE_APP_BRANCH_OBSERVED", branch: "new" });
+    expect(fresh.phase).toBe("application_issuance_guided");
+    expect(fresh.path).toBe("new");
+  });
+
+  it("guided-first completion routes by the observed branch: existing → existing entry, new → issued hand-off", () => {
+    const entry = reduce(INITIAL_STATE, NO_SAVED);
+    const existingDone = reduce(
+      reduce(entry, { type: "ISSUANCE_APP_BRANCH_OBSERVED", branch: "existing" }),
+      { type: "ISSUANCE_COMPLETE" },
+    );
+    expect(existingDone.phase).toBe("existing_credential_entry");
+    expect(existingDone.path).toBe("existing");
+    const newDone = reduce(
+      reduce(entry, { type: "ISSUANCE_APP_BRANCH_OBSERVED", branch: "new" }),
+      { type: "ISSUANCE_COMPLETE" },
+    );
+    expect(newDone.phase).toBe("credential_issued");
+    expect(newDone.path).toBe("new");
+  });
+
+  it("an UNDETERMINED branch fails SAFE to the self-declare fork — never assumes 'new' (no forced second app, §17.2)", () => {
+    const entry = reduce(INITIAL_STATE, NO_SAVED); // path unknown, the runtime never revealed the branch
+    // Completion with no observed branch: ask (the fork), do NOT route to the new-app issued hand-off.
+    const done = reduce(entry, { type: "ISSUANCE_COMPLETE" });
+    expect(done.phase).toBe("application_path_choice");
+    expect(done.phase).not.toBe("credential_issued");
+    // Text fallback with no observed branch: same fail-safe — the fork, NOT the new-app issuance checklist.
+    const text = reduce(entry, { type: "APPLICATION_ISSUANCE_MODE", mode: "text" });
+    expect(text.phase).toBe("application_path_choice");
+    expect(text.phase).not.toBe("application_issuance");
+    // And from the fork the existing-app seller reaches their reuse entry (with secret recovery) — never a 2nd app.
+    expect(reduce(done, { type: "APPLICATION_PATH", choice: "have" }).phase).toBe("existing_credential_entry");
+  });
+
+  it("RESUME_FROM_CAPABILITY is honored ONLY at the entry — never clobbers later journey progress", () => {
+    const testing = run(HAPPY_PATH_EVENTS.slice(0, 6)); // connection_testing
+    expect(reduce(testing, { type: "RESUME_FROM_CAPABILITY", credentialPresent: true, completed: true })).toBe(testing);
   });
 
   it("a stray sync in check_saved_credential is a no-op (cannot jump ahead, §17.2)", () => {
@@ -69,35 +159,7 @@ describe("saved-credential check (§flow 1)", () => {
   });
 });
 
-describe("readiness gate — fail-closed (§17.3)", () => {
-  it("no agent → agent_unavailable", () => {
-    const s = reduce(gateEntry, readiness({ agentPaired: false }));
-    expect(s.phase).toBe("agent_unavailable");
-    expect(s.failureReason).toBe("AGENT_UNAVAILABLE");
-  });
-
-  it("agent but no renderer → renderer_unavailable", () => {
-    expect(reduce(gateEntry, readiness({ rendererAvailable: false })).phase).toBe("renderer_unavailable");
-  });
-
-  it("logged_out → naver_login_required", () => {
-    expect(reduce(gateEntry, readiness({ naverSession: "logged_out" })).phase).toBe("naver_login_required");
-  });
-
-  it("unknown session fails closed to naver_login_required (never assumes a live session)", () => {
-    expect(reduce(gateEntry, readiness({ naverSession: "unknown", sessionSource: "none" })).phase).toBe("naver_login_required");
-  });
-
-  it("all clear → application_path_choice (the three-path fork, NOT straight to issuance)", () => {
-    const s = reduce(gateEntry, READY_SIGNAL);
-    expect(s.phase).toBe("application_path_choice");
-    expect(s.failureReason).toBeNull();
-  });
-});
-
 describe("three-path fork — reuse first, issue only when there is no app (§flow 3/6/7)", () => {
-  const fork = reduce(gateEntry, READY_SIGNAL); // application_path_choice
-
   it("'have' → existing_credential_entry (reuse the app, never a forced new one)", () => {
     const s = reduce(fork, { type: "APPLICATION_PATH", choice: "have" });
     expect(s.phase).toBe("existing_credential_entry");
@@ -130,6 +192,109 @@ describe("three-path fork — reuse first, issue only when there is no app (§fl
   });
 });
 
+describe("issuance mode — guided (Action Window) vs text, same completion hand-off", () => {
+  const issuance = at("application_issuance", "new"); // reached via the retained fork / text fallback
+
+  it("APPLICATION_ISSUANCE_MODE{guided} at issuance → application_issuance_guided (SUPERVISED_ACTION)", () => {
+    expect(issuance.phase).toBe("application_issuance");
+    const guided = reduce(issuance, { type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
+    expect(guided.phase).toBe("application_issuance_guided");
+    expect(guided.actor).toBe("SUPERVISED_ACTION");
+    expect(guided.path).toBe("new"); // path threaded unchanged
+    expect(actorFor("application_issuance_guided")).toBe("SUPERVISED_ACTION");
+  });
+
+  it("APPLICATION_ISSUANCE_MODE{text} at issuance is a NO-OP (the checklist already renders in place)", () => {
+    expect(reduce(issuance, { type: "APPLICATION_ISSUANCE_MODE", mode: "text" })).toBe(issuance);
+  });
+
+  it("the TEXT path is unchanged: ISSUANCE_COMPLETE at issuance → credential_issued", () => {
+    expect(reduce(issuance, { type: "ISSUANCE_COMPLETE" }).phase).toBe("credential_issued");
+  });
+
+  it("guided + ISSUANCE_COMPLETE → credential_issued (same hand-off as text; never a stored credential)", () => {
+    const guided = reduce(issuance, { type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
+    const done = reduce(guided, { type: "ISSUANCE_COMPLETE" });
+    expect(done.phase).toBe("credential_issued");
+    expect(done.milestones).toEqual({ registered: false, tested: false, synced: false }); // no credential minted
+  });
+
+  it("guided + APPLICATION_ISSUANCE_MODE{text} → application_issuance (the text fallback / agent unavailable)", () => {
+    const guided = reduce(issuance, { type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
+    const back = reduce(guided, { type: "APPLICATION_ISSUANCE_MODE", mode: "text" });
+    expect(back.phase).toBe("application_issuance");
+    expect(back.path).toBe("new");
+  });
+
+  it("guided is otherwise inert: an unmodeled event is a no-op (cannot skip ahead)", () => {
+    const guided = reduce(issuance, { type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
+    expect(reduce(guided, { type: "BEGIN_CREDENTIAL_ENTRY" })).toBe(guided);
+    expect(reduce(guided, { type: "SYNC_RESULT", status: "SUCCESS" })).toBe(guided);
+  });
+
+  it("guided ⇄ text ⇄ guided round-trips without touching milestones or path", () => {
+    const g1 = reduce(issuance, { type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
+    const t1 = reduce(g1, { type: "APPLICATION_ISSUANCE_MODE", mode: "text" });
+    const g2 = reduce(t1, { type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
+    expect(g2.phase).toBe("application_issuance_guided");
+    expect(g2.milestones).toEqual(issuance.milestones);
+    expect(g2.path).toBe(issuance.path);
+  });
+});
+
+describe("existing-app guided confirmation — the SAME walk, but it RETURNS to existing-credential entry", () => {
+  // Existing-app entry (path="existing"): the seller has the store's one app and only needs to be shown
+  // where its order API group + ID/Secret live. Text is the default (the checklist + form already render).
+  const existing = reduce(fork, { type: "APPLICATION_PATH", choice: "have" });
+
+  it("APPLICATION_ISSUANCE_MODE{guided} at existing entry → the shared walkthrough, path preserved", () => {
+    expect(existing.phase).toBe("existing_credential_entry");
+    expect(existing.path).toBe("existing");
+    const guided = reduce(existing, { type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
+    expect(guided.phase).toBe("application_issuance_guided");
+    expect(guided.actor).toBe("SUPERVISED_ACTION");
+    expect(guided.path).toBe("existing"); // NOT re-pathed to "new" — no second app is ever issued
+  });
+
+  it("guided + ISSUANCE_COMPLETE returns an existing-app seller to existing_credential_entry (never credential_issued)", () => {
+    const guided = reduce(existing, { type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
+    const done = reduce(guided, { type: "ISSUANCE_COMPLETE" });
+    expect(done.phase).toBe("existing_credential_entry");
+    expect(done.path).toBe("existing");
+    expect(done.milestones).toEqual({ registered: false, tested: false, synced: false }); // nothing minted
+  });
+
+  it("guided + APPLICATION_ISSUANCE_MODE{text} returns an existing-app seller to existing_credential_entry (never application_issuance)", () => {
+    const guided = reduce(existing, { type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
+    const back = reduce(guided, { type: "APPLICATION_ISSUANCE_MODE", mode: "text" });
+    expect(back.phase).toBe("existing_credential_entry");
+    expect(back.path).toBe("existing");
+  });
+
+  it("a saved-path seller who fell back to existing entry gets the SAME return routing", () => {
+    // A saved key that failed its test lands on existing_credential_entry with path="saved".
+    const saved = reduce(
+      reduce(INITIAL_STATE, { type: "RESUME_FROM_CAPABILITY", credentialPresent: true, completed: false }),
+      { type: "TEST_RESULT", status: "FAILED", reasonCode: "INVALID_CREDENTIAL" },
+    );
+    expect(saved.phase).toBe("existing_credential_entry");
+    expect(saved.path).toBe("saved");
+    const guided = reduce(saved, { type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
+    expect(guided.phase).toBe("application_issuance_guided");
+    expect(reduce(guided, { type: "ISSUANCE_COMPLETE" }).phase).toBe("existing_credential_entry");
+    expect(reduce(guided, { type: "APPLICATION_ISSUANCE_MODE", mode: "text" }).phase).toBe("existing_credential_entry");
+  });
+
+  it("the existing-app entry still submits and still exits to recovery (no regression)", () => {
+    expect(reduce(existing, { type: "SUBMIT_CREDENTIALS" }).phase).toBe("credential_registration");
+    expect(reduce(existing, { type: "SECRET_UNAVAILABLE" }).phase).toBe("credential_recovery_required");
+  });
+
+  it("existing entry stays inert to a stray mode{text} (text is already the rendered default)", () => {
+    expect(reduce(existing, { type: "APPLICATION_ISSUANCE_MODE", mode: "text" })).toBe(existing);
+  });
+});
+
 describe("full journeys → completed only after registered ∧ tested ∧ synced (§12)", () => {
   it("new-app happy path walks to completed", () => {
     const s = run(HAPPY_PATH_EVENTS);
@@ -144,11 +309,21 @@ describe("full journeys → completed only after registered ∧ tested ∧ synce
     expect(s.path).toBe("existing");
   });
 
-  it("saved-credential reuse (no re-entry, no gate) walks to completed", () => {
+  it("saved-credential reuse (prior sync succeeded) restores completed on load, no re-run", () => {
     const s = run(SAVED_CREDENTIAL_REUSE_EVENTS);
     expect(s.phase).toBe("completed");
     expect(s.path).toBe("saved");
     expect(s.milestones).toEqual({ registered: true, tested: true, synced: true });
+  });
+
+  it("stored-key-but-incomplete resumes to the test CTA, then a user-triggered test+sync completes", () => {
+    const s = run(SAVED_KEY_INCOMPLETE_EVENTS);
+    expect(s.phase).toBe("completed");
+    expect(s.path).toBe("saved");
+    // The intermediate phase after resume was the user-CTA connection test (registered, not yet tested).
+    const afterResume = reduce(INITIAL_STATE, SAVED_KEY_INCOMPLETE_EVENTS[0]!);
+    expect(afterResume.phase).toBe("connection_testing");
+    expect(afterResume.milestones).toEqual({ registered: true, tested: false, synced: false });
   });
 });
 
@@ -168,8 +343,6 @@ describe("credential recovery when the Secret is lost (§flow 4) — reissue on 
   });
 
   it("recovery never leaves the existing app: an unmodeled event is a no-op (no delete-reissue branch exists)", () => {
-    // The former BEGIN_DELETE_REISSUE / CONFIRM_NO_OTHER_PROGRAM / CANCEL_DELETE_REISSUE events are gone;
-    // recovery advances ONLY by re-obtaining the Secret. Any other event stays put (fail-closed).
     expect(reduce(recovery, { type: "ISSUANCE_COMPLETE" })).toBe(recovery);
     expect(reduce(recovery, { type: "ACCOUNT_STORE_RESOLVED" })).toBe(recovery);
   });
@@ -177,22 +350,21 @@ describe("credential recovery when the Secret is lost (§flow 4) — reissue on 
 
 describe("the seller's decisions cannot be skipped (§17.2)", () => {
   it("cannot skip account/store resolution on the new path", () => {
-    // new → app-absence check → (no app) account_store_choice_required; issuance must not be skippable here.
-    const fork = reduce(reduce(gateEntry, READY_SIGNAL), { type: "APPLICATION_PATH", choice: "new" });
-    const store = reduce(fork, { type: "APPLICATION_LIST_RESULT", found: false });
+    const newFork = reduce(fork, { type: "APPLICATION_PATH", choice: "new" });
+    const store = reduce(newFork, { type: "APPLICATION_LIST_RESULT", found: false });
     expect(store.phase).toBe("account_store_choice_required");
     expect(reduce(store, { type: "ISSUANCE_COMPLETE" })).toBe(store); // no-op
   });
 
   it("cannot skip issuance", () => {
-    const issuance = run(HAPPY_PATH_EVENTS.slice(0, 5)); // application_issuance
+    const issuance = at("application_issuance", "new");
     expect(issuance.phase).toBe("application_issuance");
     expect(reduce(issuance, { type: "BEGIN_CREDENTIAL_ENTRY" })).toBe(issuance); // no-op
   });
 });
 
 describe("test-connection result mapping (§12, §5)", () => {
-  const toTest = HAPPY_PATH_EVENTS.slice(0, 9); // reach connection_testing (…CREDENTIAL_REGISTERED)
+  const toTest = HAPPY_PATH_EVENTS.slice(0, 6); // reach connection_testing (…CREDENTIAL_REGISTERED)
 
   it("reaches connection_testing after registration, tested still false", () => {
     const s = run(toTest);
@@ -225,6 +397,14 @@ describe("test-connection result mapping (§12, §5)", () => {
     expect(reduce(env, { type: "TEST_RESULT", status: "SUCCESS", reasonCode: null }).phase).toBe("first_order_sync");
   });
 
+  it("ORDER_ACCESS_DENIED routes to the hedged order-access state and re-tests (not a transient retry)", () => {
+    const denied = reduce(run(toTest), { type: "TEST_RESULT", status: "FAILED", reasonCode: "ORDER_ACCESS_DENIED" });
+    expect(denied.phase).toBe("order_access_denied");
+    expect(denied.failureReason).toBe("ORDER_ACCESS_DENIED");
+    // Re-testable after the seller fixes permission/IP; a later SUCCESS advances to the first sync.
+    expect(reduce(denied, { type: "TEST_RESULT", status: "SUCCESS", reasonCode: null }).phase).toBe("first_order_sync");
+  });
+
   it("an UNCLASSIFIED failure stays a transient retry on the test step (fail-closed — no guessed cause)", () => {
     const unavailable = reduce(run(toTest), { type: "TEST_RESULT", status: "FAILED", reasonCode: "PROVIDER_UNAVAILABLE" });
     expect(unavailable.phase).toBe("connection_testing");
@@ -242,7 +422,7 @@ describe("test-connection result mapping (§12, §5)", () => {
 });
 
 describe("first sync — 0-count SUCCESS vs failure (§12, §17.9)", () => {
-  const toSync = HAPPY_PATH_EVENTS.slice(0, 10); // reach first_order_sync
+  const toSync = HAPPY_PATH_EVENTS.slice(0, 7); // reach first_order_sync
 
   it("SUCCESS (incl. zero new orders) → completed", () => {
     expect(reduce(run(toSync), { type: "SYNC_RESULT", status: "SUCCESS" }).phase).toBe("completed");
@@ -259,67 +439,19 @@ describe("first sync — 0-count SUCCESS vs failure (§12, §17.9)", () => {
   });
 });
 
-describe("global regressions preserve milestones for resume (§13)", () => {
-  const midJourney = run(HAPPY_PATH_EVENTS.slice(0, 10)); // first_order_sync, registered+tested
+describe("global fail-closed regressions preserve milestones for resume (§13)", () => {
+  const midJourney = run(HAPPY_PATH_EVENTS.slice(0, 7)); // first_order_sync, registered+tested
 
-  it("AGENT_LOST → agent_unavailable, milestones kept", () => {
-    const s = reduce(midJourney, { type: "AGENT_LOST" });
-    expect(s.phase).toBe("agent_unavailable");
-    expect(s.milestones).toEqual({ registered: true, tested: true, synced: false });
-  });
-
-  it("UI_DRIFT → recoverable_ui_drift; UNKNOWN_STATE → unsupported_state", () => {
-    expect(reduce(midJourney, { type: "UI_DRIFT" }).phase).toBe("recoverable_ui_drift");
+  it("UI_DRIFT → recoverable_ui_drift; UNKNOWN_STATE → unsupported_state, milestones kept", () => {
+    const drift = reduce(midJourney, { type: "UI_DRIFT" });
+    expect(drift.phase).toBe("recoverable_ui_drift");
+    expect(drift.milestones).toEqual({ registered: true, tested: true, synced: false });
     expect(reduce(midJourney, { type: "UNKNOWN_STATE" }).phase).toBe("unsupported_state");
   });
-});
 
-describe("READINESS does not clobber journey progress past the gate", () => {
-  it("a readiness signal during connection_testing is a no-op (regress only via AGENT_LOST)", () => {
-    const testing = run(HAPPY_PATH_EVENTS.slice(0, 9));
-    expect(testing.phase).toBe("connection_testing");
-    const s = reduce(testing, readiness({ agentPaired: false, rendererAvailable: false, naverSession: "logged_out", sessionSource: "detected" }));
-    expect(s).toBe(testing); // unchanged
-  });
-});
-
-describe("B4 — dedicated-profile session continuity", () => {
-  const issuance = run(HAPPY_PATH_EVENTS.slice(0, 5)); // application_issuance (session-sensitive)
-  const completed = run(HAPPY_PATH_EVENTS);
-
-  it("resolveNaverSession: live detection outranks attestation, and there is no conflict", () => {
-    expect(resolveNaverSession(true, "reconnect_required")).toEqual({ signal: "reconnect_required", source: "detected" });
-    expect(resolveNaverSession(false, "logged_in")).toEqual({ signal: "logged_in", source: "detected" });
-    expect(resolveNaverSession(true, null)).toEqual({ signal: "logged_in", source: "attested" });
-    expect(resolveNaverSession(false, null)).toEqual({ signal: "unknown", source: "none" });
-  });
-
-  it("a cold-launched dedicated profile (detected reconnect_required) → naver_reconnect_required, not fatal", () => {
-    const s = reduce(gateEntry, readiness({ naverSession: "reconnect_required", sessionSource: "detected" }));
-    expect(s.phase).toBe("naver_reconnect_required");
-    expect(s.failureReason).toBe("RECONNECT_REQUIRED");
-    expect(s.actor).toBe("USER_REQUIRED");
-    expect(s.sessionSource).toBe("detected");
-  });
-
-  it("attestation cannot clear a DETECTED reconnect; only a detected logged_in clears it → the fork", () => {
-    const reconnect = reduce(gateEntry, readiness({ naverSession: "reconnect_required", sessionSource: "detected" }));
-    const stillReconnect = reduce(reconnect, readiness({ naverSession: "logged_in", sessionSource: "attested" }));
-    expect(stillReconnect.phase).toBe("naver_reconnect_required");
-    const cleared = reduce(reconnect, readiness({ naverSession: "logged_in", sessionSource: "detected" }));
-    expect(cleared.phase).toBe("application_path_choice");
-  });
-
-  it("completed onboarding does not imply permanent login: a later session drop does not un-complete it", () => {
-    expect(completed.phase).toBe("completed");
-    expect(reduce(completed, { type: "NAVER_RECONNECT_REQUIRED" }).phase).toBe("completed");
-    expect(reduce(completed, { type: "NAVER_LOGGED_OUT" }).phase).toBe("completed");
-  });
-
-  it("a NAVER session drop regresses ONLY from session-sensitive phases", () => {
-    expect(reduce(issuance, { type: "NAVER_LOGGED_OUT" }).phase).toBe("naver_login_required"); // sensitive
-    const testing = run(HAPPY_PATH_EVENTS.slice(0, 9)); // connection_testing — backend, not session-sensitive
-    expect(reduce(testing, { type: "NAVER_LOGGED_OUT" })).toBe(testing); // no-op
+  it("RESUME recovers to the furthest safe phase", () => {
+    const drift = reduce(midJourney, { type: "UI_DRIFT" });
+    expect(reduce(drift, { type: "RESUME" }).phase).toBe("first_order_sync");
   });
 });
 
@@ -328,7 +460,7 @@ describe("resumeFromMilestones (§13)", () => {
     expect(resumeFromMilestones({ registered: true, tested: true, synced: true }).phase).toBe("completed");
     expect(resumeFromMilestones({ registered: true, tested: true, synced: false }).phase).toBe("first_order_sync");
     expect(resumeFromMilestones({ registered: true, tested: false, synced: false }).phase).toBe("connection_testing");
-    // Not yet registered → re-run the saved-credential check from scratch (Vault/agent are live).
+    // Not yet registered → re-run the saved-credential check from scratch (the Vault is live).
     expect(resumeFromMilestones({ registered: false, tested: false, synced: false }).phase).toBe("check_saved_credential");
   });
 });
@@ -338,7 +470,7 @@ describe("misc invariants", () => {
     expect(reduce(run(HAPPY_PATH_EVENTS), { type: "RESET" })).toEqual(INITIAL_STATE);
   });
 
-  it("actorFor reflects the §6 boundary, incl. the new phases", () => {
+  it("actorFor reflects the §6 boundary — no agent/login phases exist to have an actor", () => {
     expect(actorFor("check_saved_credential")).toBe("SELLEROPS_AUTOMATED");
     expect(actorFor("application_path_choice")).toBe("USER_REQUIRED");
     expect(actorFor("existing_credential_entry")).toBe("USER_REQUIRED");
@@ -347,7 +479,7 @@ describe("misc invariants", () => {
   });
 
   it("is pure — does not mutate the previous state's milestones", () => {
-    const before = run(HAPPY_PATH_EVENTS.slice(0, 8)); // credential_registration
+    const before = run(HAPPY_PATH_EVENTS.slice(0, 5)); // credential_registration
     const snapshot = JSON.stringify(before);
     reduce(before, { type: "CREDENTIAL_REGISTERED" });
     expect(JSON.stringify(before)).toBe(snapshot);
@@ -358,5 +490,14 @@ describe("misc invariants", () => {
     const handoff = reduce(completed, { type: "CONTINUE_TO_REVIEW_EXPORT" });
     expect(handoff.phase).toBe("review_export_readiness");
     expect(reduce(handoff, { type: "ISSUANCE_COMPLETE" })).toBe(handoff);
+  });
+
+  it("a completed connection is durable — no session/agent event exists that could un-complete it", () => {
+    const completed = run(HAPPY_PATH_EVENTS);
+    // The order connection carries no session concept at all; UI_DRIFT is the only global pause, and it
+    // preserves the completion milestones for an immediate RESUME back to completed.
+    const paused = reduce(completed, { type: "UI_DRIFT" });
+    expect(paused.milestones).toEqual({ registered: true, tested: true, synced: true });
+    expect(reduce(paused, { type: "RESUME" }).phase).toBe("completed");
   });
 });

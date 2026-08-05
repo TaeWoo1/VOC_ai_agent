@@ -21,6 +21,7 @@ import com.sellerops.connector.ConnectorCapabilities;
 import com.sellerops.connector.ConnectorCapability;
 import com.sellerops.connector.ConnectorCapabilityRepository;
 import com.sellerops.connector.ConnectorRegistry;
+import com.sellerops.connector.naver.onboarding.NaverConnectionLifecycle;
 import com.sellerops.connector.FetchPage;
 import com.sellerops.connector.FetchRequest;
 import com.sellerops.connector.MockApiConnector;
@@ -116,7 +117,8 @@ class CollectControlServiceTest {
     private CollectControlService serviceWith(CredentialVault vault) {
         return new CollectControlService(sellerAccounts, channels, schedules, syncJobs,
                 connectionStatus, capabilities, registry, executor, vault,
-                new AccountSessionSlotService(accountSlotRepo));
+                new AccountSessionSlotService(accountSlotRepo),
+                new NaverConnectionLifecycle(sellerAccounts, channels, txManager));
     }
 
     private CredentialVault vaultWithKey(String masterKeyBase64) {
@@ -605,7 +607,8 @@ class CollectControlServiceTest {
     private CollectControlService serviceWith(ConnectorRegistry reg, CredentialVault vault) {
         return new CollectControlService(sellerAccounts, channels, schedules, syncJobs,
                 connectionStatus, capabilities, reg, executor, vault,
-                new AccountSessionSlotService(accountSlotRepo));
+                new AccountSessionSlotService(accountSlotRepo),
+                new NaverConnectionLifecycle(sellerAccounts, channels, txManager));
     }
 
     /**

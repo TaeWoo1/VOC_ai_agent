@@ -106,11 +106,16 @@ public class NaverApiConnector implements PullConnector, ConnectionVerifier {
     }
 
     /**
-     * Auth/connectivity-only check for the stored credential — never collects.
-     * Fail-closed ordering mirrors {@code fetch}: vault open → secret-shape check
-     * (no HTTP if a field is missing) → a single live token mint (no orders, no
-     * cache). The provider's HTTP status is mapped to a safe outcome; no token,
-     * secret, or provider body is ever returned.
+     * Auth <b>and order-access</b> check for the stored credential — never collects,
+     * never writes. Fail-closed ordering mirrors {@code fetch}: vault open →
+     * secret-shape check (no HTTP if a field is missing) → a single live token mint
+     * (no cache) → <b>only when the token is accepted</b>, one read-only order-access
+     * probe ({@link NaverOrdersClient#probeOrderAccess}). The token alone proves the
+     * credential; it can NEVER prove the app holds the order-API permission or that
+     * the caller IP is allowed — those first surface at the order endpoint, so the
+     * probe is what lets the connect test distinguish a bad credential from a missing
+     * order permission / an unregistered call IP, instead of passing to PREPARING and
+     * failing silently at first sync. No token, secret, or provider body is returned.
      */
     @Override
     public VerifyOutcome verifyConnection(VerifyContext context) {
@@ -123,10 +128,42 @@ public class NaverApiConnector implements PullConnector, ConnectionVerifier {
             return VerifyOutcome.failed(VerifyOutcome.REASON_INVALID_CREDENTIAL);
         }
         return switch (tokenClient.verify(clientId, clientSecret)) {
-            case OK -> VerifyOutcome.success();
+            // Credential accepted — now answer the separate order-access question.
+            case OK -> orderAccessOutcome(clientId, clientSecret);
             case INVALID -> VerifyOutcome.failed(VerifyOutcome.REASON_INVALID_CREDENTIAL);
             case RATE_LIMITED -> VerifyOutcome.failed(VerifyOutcome.REASON_TEMPORARY_PROVIDER_ERROR);
             case UNAVAILABLE -> VerifyOutcome.failed(VerifyOutcome.REASON_PROVIDER_UNAVAILABLE);
+        };
+    }
+
+    /**
+     * The order-access half of the connect test, reached only when the credential is
+     * already proven. Obtains a token for the probe (the throwaway verify token is
+     * not returned) and maps the read-only probe result to a safe reason code.
+     *
+     * <p>Only a genuine access denial (HTTP 403) fails the test; every inconclusive
+     * outcome — throttling, provider 5xx, a we-side 4xx, or an inability to even mint
+     * the probe token — degrades to {@code success()}, because the credential the
+     * token step just accepted must not be blocked by a transient order-side condition
+     * (this preserves the pre-probe behavior for those cases; the sync path surfaces
+     * any residual order issue). PERMISSION/CALL-IP verdicts fire only behind the
+     * never-guessed code whitelists; today an unrecognized 403 is the hedged
+     * {@code ORDER_ACCESS_DENIED}.
+     */
+    private VerifyOutcome orderAccessOutcome(String clientId, String clientSecret) {
+        String accessToken;
+        try {
+            accessToken = tokenClient.accessToken(clientId, clientSecret);
+        } catch (NaverRateLimitedException | IllegalStateException e) {
+            // Could not obtain a probe token though verify accepted the credential —
+            // inconclusive. Do not block a credential that was just proven valid.
+            return VerifyOutcome.success();
+        }
+        return switch (ordersClient.probeOrderAccess(accessToken)) {
+            case CONFIRMED, RATE_LIMITED, UNAVAILABLE -> VerifyOutcome.success();
+            case PERMISSION_DENIED -> VerifyOutcome.failed(VerifyOutcome.REASON_PERMISSION_INSUFFICIENT);
+            case CALL_IP_DENIED -> VerifyOutcome.failed(VerifyOutcome.REASON_CALL_ENVIRONMENT_MISMATCH);
+            case ACCESS_DENIED -> VerifyOutcome.failed(VerifyOutcome.REASON_ORDER_ACCESS_DENIED);
         };
     }
 

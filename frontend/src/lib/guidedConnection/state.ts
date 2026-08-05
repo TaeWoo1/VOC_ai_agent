@@ -2,17 +2,20 @@
 //
 // A total, DOM-free reducer over sanitized `GuidedEvent`s. Design invariants, each pinned by a
 // test in `state.test.ts` and traceable to `docs/slices/naver-guided-connection.md`:
-//   • completed ⇐ registered ∧ tested ∧ synced ONLY (§12). No event jumps to completed.
-//   • the seller's decisions (login, path, account/store, issuance, consent) cannot be skipped (§17.2).
+//   • completed ⇐ registered ∧ tested ∧ synced ONLY (§12). The ONLY event that reaches `completed`
+//     directly is `RESUME_FROM_CAPABILITY{completed:true}`, and only because a read-only backend snapshot
+//     already proved a prior first sync succeeded — it re-runs nothing. No in-journey event skips ahead.
+//   • the seller's decisions (path, account/store, issuance, consent) cannot be skipped (§17.2).
 //   • unknown/low-confidence evidence fails closed to `unsupported_state`, never "proceed" (§17.3).
 //   • milestones persist across regressions so resume restores safe progress (§13).
 //   • it holds no secret, selector, url, or account id — only phase/actor/reason/milestone/path flags.
 //
-// Discovery/reuse/recovery front (§discovery): the journey starts at `check_saved_credential`, not the
-// browser gate — a returning seller with a stored key reuses it (no re-entry, no agent/login friction)
-// and goes straight to the connection test. Only when there is no stored key does the browser gate run,
-// then a three-path fork (existing app / unknown / new). An existing-app seller is NEVER auto-nudged
-// into issuing a second app.
+// **Local-Agent-free initial connection (product decision 2026-07-31).** There is NO readiness gate:
+// the NAVER API *order* connection completes with no bridge/renderer/NAVER-login step. `check_saved_credential`
+// hands straight to the three-path fork (`application_path_choice`) when there is no stored key, or reuses a
+// stored key and goes to the connection test. The Local Agent is required only later for REVIEW_IMPORT setup,
+// which lives on a separate track (the review-export page) — never here. An existing-app seller is NEVER
+// auto-nudged into issuing a second app.
 import type { ConnectionTestStatus } from "../types";
 import type {
   GuidedActor,
@@ -22,8 +25,6 @@ import type {
   GuidedMilestones,
   GuidedPath,
   GuidedPhase,
-  NaverSessionSignal,
-  NaverSessionSource,
 } from "./types";
 
 const NO_MILESTONES: GuidedMilestones = { registered: false, tested: false, synced: false };
@@ -31,15 +32,12 @@ const NO_MILESTONES: GuidedMilestones = { registered: false, tested: false, sync
 /** The static actor for each phase (§6 actor boundary). */
 const ACTOR_BY_PHASE: Record<GuidedPhase, GuidedActor> = {
   check_saved_credential: "SELLEROPS_AUTOMATED",
-  readiness_checking: "SELLEROPS_AUTOMATED",
-  agent_unavailable: "USER_REQUIRED",
-  renderer_unavailable: "USER_REQUIRED",
-  naver_login_required: "USER_REQUIRED",
-  naver_reconnect_required: "USER_REQUIRED",
   application_path_choice: "USER_REQUIRED",
   application_status_unknown: "USER_REQUIRED",
   account_store_choice_required: "USER_REQUIRED",
   application_issuance: "USER_REQUIRED",
+  // The Action Window: SellerOps highlights the control step-by-step, the seller performs every real click.
+  application_issuance_guided: "SUPERVISED_ACTION",
   credential_issued: "SELLEROPS_GUIDED",
   sellerops_credential_entry: "USER_REQUIRED",
   existing_credential_entry: "USER_REQUIRED",
@@ -48,6 +46,7 @@ const ACTOR_BY_PHASE: Record<GuidedPhase, GuidedActor> = {
   connection_testing: "SELLEROPS_AUTOMATED",
   permission_review_required: "USER_REQUIRED",
   call_environment_mismatch: "USER_REQUIRED",
+  order_access_denied: "USER_REQUIRED",
   first_order_sync: "SELLEROPS_AUTOMATED",
   completed: "SELLEROPS_AUTOMATED",
   review_export_readiness: "SELLEROPS_GUIDED",
@@ -55,38 +54,6 @@ const ACTOR_BY_PHASE: Record<GuidedPhase, GuidedActor> = {
   unsupported_state: "USER_REQUIRED",
   terminal_failure: "USER_REQUIRED",
 };
-
-/** Readiness-gate phases: only here does a `READINESS` signal (re-)derive the gate. Past the
- *  gate, regressions arrive as explicit `AGENT_LOST` / `NAVER_LOGGED_OUT` / `NAVER_RECONNECT_REQUIRED`
- *  events (§13). */
-const GATE_PHASES: ReadonlySet<GuidedPhase> = new Set<GuidedPhase>([
-  "readiness_checking",
-  "agent_unavailable",
-  "renderer_unavailable",
-  "naver_login_required",
-  "naver_reconnect_required",
-]);
-
-/**
- * Phases where a live NAVER **browser** session is actually in use — the gate plus the API-center
- * discovery/issuance walk (B4). A NAVER session drop regresses ONLY from here; once the seller has moved
- * on to typing credentials, the remaining steps are backend calls and `completed` is durable, so a
- * browser-session change there is a no-op (login is never assumed permanent). Credential entry and recovery
- * are past the value-reading point, so — like the original `sellerops_credential_entry` — they are NOT
- * session-sensitive.
- */
-const SESSION_SENSITIVE_PHASES: ReadonlySet<GuidedPhase> = new Set<GuidedPhase>([
-  "readiness_checking",
-  "agent_unavailable",
-  "renderer_unavailable",
-  "naver_login_required",
-  "naver_reconnect_required",
-  "application_path_choice",
-  "application_status_unknown",
-  "account_store_choice_required",
-  "application_issuance",
-  "credential_issued",
-]);
 
 /** The public actor for a phase — exported so the UI never re-derives it. */
 export function actorFor(phase: GuidedPhase): GuidedActor {
@@ -97,55 +64,27 @@ function state(
   phase: GuidedPhase,
   milestones: GuidedMilestones,
   failureReason: GuidedFailureReason | null = null,
-  sessionSource: NaverSessionSource = "none",
   path: GuidedPath = "unknown",
 ): GuidedConnectionState {
-  return { phase, actor: ACTOR_BY_PHASE[phase], failureReason, milestones, sessionSource, path };
+  return { phase, actor: ACTOR_BY_PHASE[phase], failureReason, milestones, path };
 }
 
 export const INITIAL_STATE: GuidedConnectionState = state("check_saved_credential", NO_MILESTONES);
-
-/**
- * Compose the seller's login attestation with any live detection into one signal + its provenance (B4).
- * **Live detection always wins when present** — a detected `reconnect_required`/`logged_out` can never be
- * attested past (fail-closed), and a detected `logged_in` outranks attestation — so the two can never
- * conflict. With no detection available (the offline G3-A/B path), the seller's attestation is used.
- */
-export function resolveNaverSession(
-  attested: boolean,
-  detected: NaverSessionSignal | null,
-): { signal: NaverSessionSignal; source: NaverSessionSource } {
-  if (detected !== null) return { signal: detected, source: "detected" };
-  if (attested) return { signal: "logged_in", source: "attested" };
-  return { signal: "unknown", source: "none" };
-}
-
-/** Derive the readiness-gate phase from a sanitized readiness signal, fail-closed. On success the gate
- *  hands off to the three-path fork (`application_path_choice`), NOT straight to issuance. */
-function deriveReadiness(
-  ev: Extract<GuidedEvent, { type: "READINESS" }>,
-  prevPhase: GuidedPhase,
-  milestones: GuidedMilestones,
-  path: GuidedPath,
-): GuidedConnectionState {
-  if (!ev.agentPaired) return state("agent_unavailable", milestones, "AGENT_UNAVAILABLE", "none", path);
-  if (!ev.rendererAvailable) return state("renderer_unavailable", milestones, "RENDERER_UNAVAILABLE", "none", path);
-  if (ev.naverSession === "reconnect_required") {
-    return state("naver_reconnect_required", milestones, "RECONNECT_REQUIRED", ev.sessionSource, path);
-  }
-  if (ev.naverSession === "logged_out" || ev.naverSession === "unknown") {
-    return state("naver_login_required", milestones, "NAVER_LOGIN_REQUIRED", ev.sessionSource, path);
-  }
-  if (prevPhase === "naver_reconnect_required" && ev.sessionSource !== "detected") {
-    return state("naver_reconnect_required", milestones, "RECONNECT_REQUIRED", "detected", path);
-  }
-  return state("application_path_choice", milestones, null, ev.sessionSource, path);
-}
 
 /** The credential-entry phase for a given path: an existing/saved-app seller re-enters at the EXISTING
  *  entry (framed as reusing their app), a new-app seller at the issuance-entry. */
 function entryPhaseFor(path: GuidedPath): GuidedPhase {
   return path === "existing" || path === "saved" ? "existing_credential_entry" : "sellerops_credential_entry";
+}
+
+/** Existing/saved-app sellers reuse their store's single app; the guided walk only SHOWS them where its
+ *  order API group + Application ID/Secret live — it issues nothing. So from the shared walkthrough both
+ *  completion and the text fallback return an existing/saved seller to existing-credential entry, while a
+ *  new-app seller advances into the issuance credential hand-off / static issuance checklist. Exported so
+ *  the UI can pick path-aware completion copy ("기존 애플리케이션 확인 완료" vs "애플리케이션 발급 완료")
+ *  without re-deriving the rule — routing itself stays path-agnostic in the reducer. */
+export function reusesExistingApp(path: GuidedPath): boolean {
+  return path === "existing" || path === "saved";
 }
 
 /** Map a non-SUCCESS `test-connection` result to the next safe phase (§12, §5). */
@@ -157,22 +96,28 @@ function afterTestFailure(
 ): GuidedConnectionState {
   const entry = entryPhaseFor(path);
   const cleared = { ...milestones, tested: false };
-  if (status === "NOT_CONFIGURED") return state(entry, cleared, "NOT_CONFIGURED", "none", path);
-  if (status === "UNSUPPORTED") return state("unsupported_state", cleared, "TEST_UNSUPPORTED", "none", path);
+  if (status === "NOT_CONFIGURED") return state(entry, cleared, "NOT_CONFIGURED", path);
+  if (status === "UNSUPPORTED") return state("unsupported_state", cleared, "TEST_UNSUPPORTED", path);
   // status === "FAILED": branch on the safe reason code.
-  if (reasonCode === "INVALID_CREDENTIAL") return state(entry, cleared, "INVALID_CREDENTIAL", "none", path);
+  if (reasonCode === "INVALID_CREDENTIAL") return state(entry, cleared, "INVALID_CREDENTIAL", path);
   // Distinct user states (§5). These reason codes are MODELED but not emitted by the current backend —
   // classifying insufficient-permission vs a call-environment/IP mismatch needs live NAVER recon (G3-C,
   // §4/§20-2). Fail-closed: only an explicit code routes here; an unclassified failure is a transient retry.
   if (reasonCode === "PERMISSION_INSUFFICIENT") {
-    return state("permission_review_required", cleared, "PERMISSION_INSUFFICIENT", "none", path);
+    return state("permission_review_required", cleared, "PERMISSION_INSUFFICIENT", path);
   }
   if (reasonCode === "CALL_ENVIRONMENT_MISMATCH") {
-    return state("call_environment_mismatch", cleared, "CALL_ENVIRONMENT_MISMATCH", "none", path);
+    return state("call_environment_mismatch", cleared, "CALL_ENVIRONMENT_MISMATCH", path);
+  }
+  // The order-access probe refused (403) but the cause could not be split into permission vs call-IP.
+  // Emitted by the backend today (unlike the two above, which stay dormant pending a live-captured code):
+  // route to the hedged, re-testable state that guides checking BOTH — never a silent transient retry.
+  if (reasonCode === "ORDER_ACCESS_DENIED") {
+    return state("order_access_denied", cleared, "ORDER_ACCESS_DENIED", path);
   }
   const reason: GuidedFailureReason =
     reasonCode === "PROVIDER_UNAVAILABLE" ? "PROVIDER_UNAVAILABLE" : "TEMPORARY_PROVIDER_ERROR";
-  return state("connection_testing", cleared, reason, "none", path);
+  return state("connection_testing", cleared, reason, path);
 }
 
 /** Phases that consume a `TEST_RESULT` (the test step + the two recoverable env failures that re-test). */
@@ -180,6 +125,7 @@ const TEST_RESULT_PHASES: ReadonlySet<GuidedPhase> = new Set<GuidedPhase>([
   "connection_testing",
   "permission_review_required",
   "call_environment_mismatch",
+  "order_access_denied",
 ]);
 
 /**
@@ -198,23 +144,10 @@ export function guidedConnectionReducer(
   switch (event.type) {
     case "RESET":
       return INITIAL_STATE;
-    case "AGENT_LOST":
-      // Agent loss is runtime-liveness (the local agent process is gone), so it surfaces from anywhere.
-      return state("agent_unavailable", m, "AGENT_UNAVAILABLE", "none", p);
-    case "NAVER_LOGGED_OUT":
-      // A NAVER browser-session drop matters only while a browser session is in use (B4). Past that
-      // (credential entry onward, completed) it is a no-op — login is never assumed permanent.
-      return SESSION_SENSITIVE_PHASES.has(prev.phase)
-        ? state("naver_login_required", m, "NAVER_LOGIN_REQUIRED", "detected", p)
-        : prev;
-    case "NAVER_RECONNECT_REQUIRED":
-      return SESSION_SENSITIVE_PHASES.has(prev.phase)
-        ? state("naver_reconnect_required", m, "RECONNECT_REQUIRED", "detected", p)
-        : prev;
     case "UI_DRIFT":
-      return state("recoverable_ui_drift", m, "UI_DRIFT", "none", p);
+      return state("recoverable_ui_drift", m, "UI_DRIFT", p);
     case "UNKNOWN_STATE":
-      return state("unsupported_state", m, "UNKNOWN_STATE", "none", p);
+      return state("unsupported_state", m, "UNKNOWN_STATE", p);
     case "RESUME":
       // Recover from a fail-closed pause (drift/unsupported) to the furthest SAFE phase (§13).
       return resumeFromMilestones(m, p);
@@ -222,34 +155,45 @@ export function guidedConnectionReducer(
       break;
   }
 
-  // Saved-credential check (the entry, before the browser gate).
+  // Read-only resume from the backend capability snapshot (the journey entry). No external NAVER call, no
+  // test, no sync happens here — the reducer only maps the persisted facts the page already read to a phase.
   if (prev.phase === "check_saved_credential") {
-    if (event.type === "SAVED_CREDENTIAL_CHECKED") {
-      // A stored credential means registration already happened — reuse it: go straight to the test,
-      // no re-entry, no agent/login gate (a backend auth check needs neither).
-      return event.hasSavedCredential
-        ? state("connection_testing", { ...m, registered: true }, null, "none", "saved")
-        : state("readiness_checking", m, null, "none", p);
+    if (event.type === "RESUME_FROM_CAPABILITY") {
+      if (event.completed) {
+        // A prior first ORDER_SUMMARY sync already succeeded (backend-verified) — restore the completed
+        // screen directly. This is the sole sanctioned jump to `completed`; it re-runs nothing, and the
+        // completed screen re-reads capability/health read-only. Never reached without the backend proof.
+        return state("completed", { registered: true, tested: true, synced: true }, null, "saved");
+      }
+      if (event.syncing && event.credentialPresent) {
+        // A first ORDER_SUMMARY sync is currently RUNNING (backend-verified via the capability snapshot).
+        // A running sync proves the credential is stored AND the connection test already passed (sync only
+        // runs after a SUCCESS test), so restore the in-progress sync screen with registered+tested. The
+        // page RESUMES OBSERVING this same run by polling the read-only capability — it never re-runs the
+        // test or starts a second sync, and `completed` is still reached only when the sync actually settles.
+        // The `credentialPresent` conjunct is belt-and-suspenders: a running sync implies a stored key, so we
+        // never claim `tested` from `syncing` alone (matching the `completed` branch's stricter preconditions).
+        return state("first_order_sync", { registered: true, tested: true, synced: false }, null, "saved");
+      }
+      if (event.credentialPresent) {
+        // A stored key exists but the connection was never completed. Land on the connection test as a
+        // USER-triggered step (registered milestone only) — the page does NOT auto-run it on load, so a
+        // refresh never mints a token or a sync job; the seller presses the CTA to verify.
+        return state("connection_testing", { ...m, registered: true }, null, "saved");
+      }
+      // No stored key → GUIDED-FIRST (product decision 2026-08-04). Instead of asking the seller to
+      // pre-declare have/new in a three-path fork, enter the Action Window guided walkthrough directly with
+      // an UNDETERMINED path: the runtime observes NAVER's application list and reveals existing-vs-new
+      // (surfaced to the FE as `ISSUANCE_APP_BRANCH_OBSERVED`, which sets the path). The old
+      // `application_path_choice` fork remains a valid phase (reachable/tested) but is no longer the entry.
+      return state("application_issuance_guided", m, null, "unknown");
     }
     return prev;
   }
 
-  if (event.type === "READINESS") {
-    // Only advance/regress the gate while inside it; never clobber later journey progress.
-    if (!GATE_PHASES.has(prev.phase)) return prev;
-    const next = deriveReadiness(event, prev.phase, m, p);
-    // Idempotent: an unchanged gate result returns the SAME reference, so a reactive effect can
-    // re-dispatch READINESS on every bridge tick without looping (useReducer bails on identity).
-    return next.phase === prev.phase &&
-      next.failureReason === prev.failureReason &&
-      next.sessionSource === prev.sessionSource
-      ? prev
-      : next;
-  }
-
   // The three-path fork and the test-retry phases handle TEST_RESULT uniformly.
   if (TEST_RESULT_PHASES.has(prev.phase) && event.type === "TEST_RESULT") {
-    if (event.status === "SUCCESS") return state("first_order_sync", { ...m, tested: true }, null, "none", p);
+    if (event.status === "SUCCESS") return state("first_order_sync", { ...m, tested: true }, null, p);
     return afterTestFailure(event.status, event.reasonCode, m, p);
   }
 
@@ -259,8 +203,8 @@ export function guidedConnectionReducer(
         // "have" reuses the existing app. Both "new" and "unknown" must FIRST verify the store has no app:
         // NAVER allows one app per store and offers no app-delete, so a store that already holds an app can
         // never issue a second — issuance is reachable only after an explicit app-absence check (§flow 6/7).
-        if (event.choice === "have") return state("existing_credential_entry", m, null, "none", "existing");
-        return state("application_status_unknown", m, null, "none", "unknown");
+        if (event.choice === "have") return state("existing_credential_entry", m, null, "existing");
+        return state("application_status_unknown", m, null, "unknown");
       }
       return prev;
 
@@ -270,32 +214,75 @@ export function guidedConnectionReducer(
       // then may issuance proceed.
       if (event.type === "APPLICATION_LIST_RESULT") {
         return event.found
-          ? state("existing_credential_entry", m, null, "none", "existing")
-          : state("account_store_choice_required", m, null, "none", "new");
+          ? state("existing_credential_entry", m, null, "existing")
+          : state("account_store_choice_required", m, null, "new");
       }
       return prev;
 
     case "account_store_choice_required":
-      if (event.type === "ACCOUNT_STORE_RESOLVED") return state("application_issuance", m, null, "none", p);
+      if (event.type === "ACCOUNT_STORE_RESOLVED") return state("application_issuance", m, null, p);
       return prev;
 
     case "application_issuance":
-      if (event.type === "ISSUANCE_COMPLETE") return state("credential_issued", m, null, "none", p);
+      // The seller may switch the issuance INTO the Action Window guided walkthrough. `mode:"text"` here is
+      // a deliberate no-op — the static checklist already renders in place — so the only effect is entering
+      // the guided phase. The completion event is identical on both paths (guidance finished → enter credential).
+      if (event.type === "APPLICATION_ISSUANCE_MODE" && event.mode === "guided") {
+        return state("application_issuance_guided", m, null, p);
+      }
+      if (event.type === "ISSUANCE_COMPLETE") return state("credential_issued", m, null, p);
+      return prev;
+
+    case "application_issuance_guided":
+      // Guidance finished (COMPLETED) or the seller fell back to text. The DESTINATION is path-aware, and the
+      // path comes from the RUNTIME (it observes NAVER's application list and emits ISSUANCE_APP_BRANCH_OBSERVED)
+      // — the seller never pre-declares it (guided-first entry starts path="unknown"):
+      //   • existing/saved → the existing-credential reuse entry (only SHOWN where the app's order API group +
+      //     ID/Secret live; no second app is issued);
+      //   • new           → completion is the credential-issued hand-off, text drops to the static checklist;
+      //   • UNKNOWN (the runtime never revealed the branch — agent unavailable, or a refresh lost the ephemeral
+      //     step-2 signal) → fail SAFE to the self-declare fork, NEVER assume "new" (§17.2: an existing-app
+      //     seller must never be nudged into a forbidden second app, and must keep the secret-recovery exit).
+      // The guided walkthrough never reads or stores a credential itself; nothing here mints one.
+      if (event.type === "ISSUANCE_APP_BRANCH_OBSERVED") {
+        return state("application_issuance_guided", m, null, event.branch === "existing" ? "existing" : "new");
+      }
+      if (event.type === "ISSUANCE_COMPLETE") {
+        if (reusesExistingApp(p)) return state("existing_credential_entry", m, null, p);
+        if (p === "new") return state("credential_issued", m, null, p);
+        // path still UNKNOWN → the runtime never revealed the branch (agent unavailable, or a refresh lost the
+        // ephemeral step-2 signal). Fall back to the self-declare fork — NEVER assume "new", which would push an
+        // existing-app seller to issue a forbidden second app and strand them without secret recovery (§17.2).
+        return state("application_path_choice", m, null, "unknown");
+      }
+      if (event.type === "APPLICATION_ISSUANCE_MODE" && event.mode === "text") {
+        if (reusesExistingApp(p)) return state("existing_credential_entry", m, null, p);
+        if (p === "new") return state("application_issuance", m, null, p);
+        // Same fail-safe: an undetermined branch asks (the fork), rather than defaulting to new-app issuance.
+        return state("application_path_choice", m, null, "unknown");
+      }
       return prev;
 
     case "credential_issued":
-      if (event.type === "BEGIN_CREDENTIAL_ENTRY") return state("sellerops_credential_entry", m, null, "none", p);
+      if (event.type === "BEGIN_CREDENTIAL_ENTRY") return state("sellerops_credential_entry", m, null, p);
       return prev;
 
     case "sellerops_credential_entry":
-      if (event.type === "SUBMIT_CREDENTIALS") return state("credential_registration", m, null, "none", p);
+      if (event.type === "SUBMIT_CREDENTIALS") return state("credential_registration", m, null, p);
       return prev;
 
     case "existing_credential_entry":
-      if (event.type === "SUBMIT_CREDENTIALS") return state("credential_registration", m, null, "none", p);
+      // Optional guidance: an existing/saved-app seller may switch into the SAME Action Window walkthrough to
+      // be SHOWN where the order API group + Application ID/Secret live on their existing app (no second app is
+      // issued — NAVER allows one app per store). Path is preserved, so the walk RETURNS here on finish/text
+      // (see `application_issuance_guided`). Text stays the default: the static checklist + form already render.
+      if (event.type === "APPLICATION_ISSUANCE_MODE" && event.mode === "guided") {
+        return state("application_issuance_guided", m, null, p);
+      }
+      if (event.type === "SUBMIT_CREDENTIALS") return state("credential_registration", m, null, p);
       // The seller has the app but cannot produce the Secret → recovery (never a forced new app, §flow 4).
       if (event.type === "SECRET_UNAVAILABLE") {
-        return state("credential_recovery_required", m, "SECRET_UNRECOVERABLE", "none", p);
+        return state("credential_recovery_required", m, "SECRET_UNRECOVERABLE", p);
       }
       return prev;
 
@@ -303,15 +290,15 @@ export function guidedConnectionReducer(
       // Recovery for a lost Secret is to obtain it again on the SAME existing app — re-view it, or reissue
       // it at NAVER (which rotates the store-wide Secret for every consumer). There is NO delete-then-recreate
       // path: NAVER provides no app-delete (live-confirmed 2026-07-29), and the store already holds its one app.
-      if (event.type === "SECRET_RECHECKED") return state("existing_credential_entry", m, null, "none", p);
+      if (event.type === "SECRET_RECHECKED") return state("existing_credential_entry", m, null, p);
       return prev;
 
     case "credential_registration":
       if (event.type === "CREDENTIAL_REGISTERED") {
-        return state("connection_testing", { ...m, registered: true }, null, "none", p);
+        return state("connection_testing", { ...m, registered: true }, null, p);
       }
       if (event.type === "REGISTRATION_FAILED") {
-        return state(entryPhaseFor(p), m, "INVALID_CREDENTIAL", "none", p);
+        return state(entryPhaseFor(p), m, "INVALID_CREDENTIAL", p);
       }
       return prev;
 
@@ -321,17 +308,17 @@ export function guidedConnectionReducer(
         if (event.status === "SUCCESS" || event.status === "PARTIAL") {
           const milestones = { ...m, synced: true };
           return isComplete(milestones)
-            ? state("completed", milestones, null, "none", p)
+            ? state("completed", milestones, null, p)
             : // Defensive: reaching sync without registered∧tested is structurally impossible,
               // but if it ever happened we fail closed rather than falsely claim completion.
-              state("unsupported_state", milestones, "UNKNOWN_STATE", "none", p);
+              state("unsupported_state", milestones, "UNKNOWN_STATE", p);
         }
-        if (event.status === "FAILED") return state("first_order_sync", m, "SYNC_FAILED", "none", p);
+        if (event.status === "FAILED") return state("first_order_sync", m, "SYNC_FAILED", p);
       }
       return prev;
 
     case "completed":
-      if (event.type === "CONTINUE_TO_REVIEW_EXPORT") return state("review_export_readiness", m, null, "none", p);
+      if (event.type === "CONTINUE_TO_REVIEW_EXPORT") return state("review_export_readiness", m, null, p);
       return prev;
 
     default:
@@ -346,13 +333,13 @@ export function isComplete(milestones: GuidedMilestones): boolean {
 
 /**
  * Resume to the safe phase implied by persisted milestones (§13): a refresh/reconnect restores
- * the furthest *safe* progress, never a claim beyond what was actually achieved. Readiness and the
- * saved-credential check must be re-established from scratch (agent/session/Vault are live), so
- * anything short of `registered` restarts at `check_saved_credential`.
+ * the furthest *safe* progress, never a claim beyond what was actually achieved. The saved-credential
+ * check must be re-established from scratch (the Vault is live), so anything short of `registered`
+ * restarts at `check_saved_credential`.
  */
 export function resumeFromMilestones(milestones: GuidedMilestones, path: GuidedPath = "unknown"): GuidedConnectionState {
-  if (isComplete(milestones)) return state("completed", milestones, null, "none", path);
-  if (milestones.registered && milestones.tested) return state("first_order_sync", milestones, null, "none", path);
-  if (milestones.registered) return state("connection_testing", milestones, null, "none", path);
+  if (isComplete(milestones)) return state("completed", milestones, null, path);
+  if (milestones.registered && milestones.tested) return state("first_order_sync", milestones, null, path);
+  if (milestones.registered) return state("connection_testing", milestones, null, path);
   return state("check_saved_credential", NO_MILESTONES);
 }

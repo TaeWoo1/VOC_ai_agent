@@ -49,8 +49,9 @@
   `docs/multi-channel-connector-roadmap.md` §4.1; lessons are `docs/channel_capability_ledger.md`.
 - Never check a box to a level higher than §4.1 supports. "Live-verified once" ≠ "operational."
 - Action Window review paths sit behind a **market-policy-clarification gate** and a live-run gate
-  (fresh, single-use, in-turn approval naming channel/account/date/operator). A plan is never
-  authorization (`CLAUDE.md`).
+  governed by the canonical contract `docs/sellerops_live_approval_contract.md` (default one-line
+  `Seated and ready.` against a prepared Approval Manifest; single-use; §1.5 — a plan or a restored
+  environment is never authorization).
 - No auto export/download/submit. The seller performs the platform action; SellerOps detects,
   validates, processes (`docs/product_operating_model.md` §4, §8).
 
@@ -357,8 +358,9 @@ Append a dated entry; never rewrite prior entries — correct forward.
   it can be without live evidence; the next step that changes capability truth is a **bounded,
   human-in-the-loop NAVER live proof** (real export → ingest → reply state → guided handoff,
   submitting no public reply). With the operator environment restored (2026-07-24) that proof is now
-  eligible, but only under a fresh single-use in-turn **G3/G6** approval naming
-  channel/account/date/operator — a plan or a restored environment is never authorization. The
+  eligible, but only under the canonical contract `docs/sellerops_live_approval_contract.md`
+  (single-use approval against a prepared Approval Manifest; §1.5 — a plan or a restored environment
+  is never authorization). The
   standing alternatives that need no live contact are **GENERALIZE** (select the second channel) and
   the **`rules-v2`** body-polarity detector (needs the gated labeling session first).
 
@@ -797,7 +799,7 @@ Append a dated entry; never rewrite prior entries — correct forward.
 | Gate | What it blocks | Current state |
 |---|---|---|
 | Market-policy clarification | Any seller-facing / production review acquisition via Action Window | _[open — see §4.1 note]_ |
-| Live-run approval | Any live marketplace run | Requires fresh, single-use, in-turn approval (channel/account/date/operator) |
+| Live-run approval | Any live marketplace run | Per canonical contract `docs/sellerops_live_approval_contract.md` (single-use; default one-line `Seated and ready.` against a prepared Approval Manifest) |
 | Reply-submission gate (v1.6) | Guided review-reply going live | Offline; gate-locked (`contracts/action-window/v2/`) |
 
 ---
