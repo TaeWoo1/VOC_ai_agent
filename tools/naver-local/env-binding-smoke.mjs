@@ -69,19 +69,17 @@ async function main() {
 
     // Race the two terminal outcomes.
     const mismatch = page.getByRole("alert", { name: "WALKTHROUGH_ENVIRONMENT_MISMATCH" });
-    const wizard = page.getByRole("heading", { name: "NAVER 연결 마법사" }); // section aria-label on the wizard
+    // The wizard's stable anchor is its section REGION (aria-label), present in EVERY phase — unlike the
+    // phase-specific buttons/heading this previously keyed on, which the FE v2 guided-journey rewrite
+    // reshaped. Role "region" matches the <section aria-label="NAVER 연결 마법사"> wrapper in
+    // GuidedConnectionWizard, so "wizard reachable" is detected independent of which phase it lands in.
+    const wizard = page.getByRole("region", { name: "NAVER 연결 마법사" });
     await Promise.race([
       mismatch.waitFor({ timeout: TIMEOUT }).catch(() => {}),
       wizard.waitFor({ timeout: TIMEOUT }).catch(() => {}),
-      page.getByRole("button", { name: "처음 발급할게요" }).waitFor({ timeout: TIMEOUT }).catch(() => {}),
     ]);
     const isMismatch = await mismatch.isVisible().catch(() => false);
-    const isMatched = !isMismatch && (
-      (await page.getByRole("button", { name: "처음 발급할게요" }).isVisible().catch(() => false)) ||
-      (await page.getByRole("button", { name: "이미 애플리케이션이 있어요" }).isVisible().catch(() => false)) ||
-      (await page.getByRole("button", { name: "연결 확인" }).isVisible().catch(() => false)) ||
-      (await page.getByRole("heading", { name: "주문 연결 완료" }).isVisible().catch(() => false))
-    );
+    const isMatched = !isMismatch && (await wizard.isVisible().catch(() => false));
 
     if (EXPECT === "matched") {
       check("gate MATCHED → wizard reachable (no mismatch screen)", isMatched && !isMismatch);

@@ -8,6 +8,7 @@ export * from "./persistence";
 export * from "./tutorial";
 export * from "./reviewCapability";
 export * from "./walkthrough";
+export * from "./agentEnv";
 export {
   NAVER_LIKE_TEMPLATE,
   HAPPY_PATH_EVENTS,

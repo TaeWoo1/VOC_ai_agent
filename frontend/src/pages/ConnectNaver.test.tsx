@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { StrictMode } from "react";
 import { act, render } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { screen, userEvent, waitFor } from "../test/renderWithRouter";
 import { NAVER_LIKE_TEMPLATE } from "../lib/guidedConnection";
 import type { BridgeState } from "../lib/bridge/bridgeClient";
@@ -741,6 +741,30 @@ describe("ConnectNaver — walkthrough environment binding (VITE_WALKTHROUGH_MOD
     expect(api.createApiChannelAccount).not.toHaveBeenCalled();
     expect(api.testConnection).not.toHaveBeenCalled();
     expect(api.manualSync).not.toHaveBeenCalled();
+  });
+
+  it("internal navigation (review-import CTA) PRESERVES the walkthroughRun — a later return re-passes binding", async () => {
+    // The env-binding fails closed on a missing URL run id, so an internal move that dropped the param would
+    // strand the operator on the mismatch screen. The review-export hand-off must carry the run id along.
+    enterWalkthrough(RUN);
+    vi.mocked(api.getWalkthroughContext).mockResolvedValue(walkthroughContext());
+    vi.mocked(api.walkthroughHandshake).mockResolvedValue({ runMatched: true, originMatched: true, timestamp: "t" });
+    mockTestAndSyncSuccess();
+    const LocationProbe = () => <div data-testid="probe-search">{useLocation().search}</div>;
+    render(
+      <MemoryRouter initialEntries={["/connect/naver"]}>
+        <Routes>
+          <Route path="/connect/naver" element={<ConnectNaver />} />
+          <Route path="/settings/review-import" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await newAppPath();
+    await enterCredentials();
+    await screen.findByRole("heading", { name: "주문 연결 완료" });
+    await userEvent.click(screen.getByRole("button", { name: "리뷰 가져오기 설정으로 이동" }));
+    await userEvent.click(await screen.findByRole("button", { name: "리뷰 내보내기로 이동" }));
+    expect(await screen.findByTestId("probe-search")).toHaveTextContent(`walkthroughRun=${RUN}`);
   });
 
   it("missing URL run id → MISMATCH screen, wizard + handshake blocked", async () => {
