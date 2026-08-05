@@ -35,10 +35,19 @@ final class FakeCoupangHttpClient implements CoupangHttpClient {
     }
 
     final List<Sent> sent = new ArrayList<>();
-    private final Deque<Response> responses = new ArrayDeque<>();
+    // Each queued item is either a Response or a RuntimeException to throw (a transport failure).
+    private final Deque<Object> responses = new ArrayDeque<>();
 
     void enqueue(Response response) {
         responses.add(response);
+    }
+
+    /**
+     * Enqueue a transport failure — the real HTTP client surfaces a connect/timeout/TLS error as an
+     * {@link IllegalStateException}, which the probes catch and classify as a transport (no-status) outcome.
+     */
+    void enqueueTransportFailure() {
+        responses.add(new IllegalStateException("simulated transport failure"));
     }
 
     @Override
@@ -47,6 +56,10 @@ final class FakeCoupangHttpClient implements CoupangHttpClient {
         if (responses.isEmpty()) {
             throw new AssertionError("Unexpected HTTP call: GET " + uri);
         }
-        return responses.pop();
+        Object next = responses.pop();
+        if (next instanceof RuntimeException failure) {
+            throw failure;
+        }
+        return (Response) next;
     }
 }

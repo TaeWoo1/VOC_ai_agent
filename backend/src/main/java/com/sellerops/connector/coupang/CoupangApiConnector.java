@@ -10,11 +10,17 @@ import com.sellerops.connector.UnsupportedDataTypeException;
 import com.sellerops.connector.UnsupportedScope;
 import com.sellerops.connector.VerifyContext;
 import com.sellerops.connector.VerifyOutcome;
+import com.sellerops.connector.coupang.CoupangOrdersClient.CredentialProbe;
+import com.sellerops.connector.coupang.CoupangOrdersClient.CredentialProbeResult;
+import com.sellerops.connector.coupang.CoupangOrdersClient.OrderAccessProbe;
+import com.sellerops.connector.coupang.CoupangOrdersClient.OrderAccessResult;
 import com.sellerops.credential.CredentialVault;
 import com.sellerops.credential.DecryptedCredential;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The real Coupang WING Open API connector. ORDER_SUMMARY is collectable through the
@@ -42,6 +48,8 @@ public class CoupangApiConnector implements PullConnector, ConnectionVerifier {
     public static final String KIND = "COUPANG_API";
     public static final String CONNECTOR_CLASS = "API";
     public static final String CHANNEL_CODE = "COUPANG";
+
+    private static final Logger log = LoggerFactory.getLogger(CoupangApiConnector.class);
 
     private final CoupangOrdersClient ordersClient;
     private final CredentialVault vault;
@@ -117,7 +125,14 @@ public class CoupangApiConnector implements PullConnector, ConnectionVerifier {
         if (isBlank(accessKey) || isBlank(secretKey) || isBlank(vendorId)) {
             return VerifyOutcome.failed(VerifyOutcome.REASON_INVALID_CREDENTIAL);
         }
-        return switch (ordersClient.credentialProbe(accessKey, secretKey, vendorId)) {
+        CredentialProbeResult credential = ordersClient.credentialProbe(accessKey, secretKey, vendorId);
+        if (credential.classification() != CredentialProbe.OK) {
+            // Diagnosis only: endpoint name + the numeric HTTP status + the safe category. NEVER the
+            // provider body/header, the Authorization signature, or any credential.
+            log.warn("Coupang credential probe not-OK: endpoint=returnShippingCenters httpStatus={} category={}",
+                    credential.httpStatus(), credential.classification());
+        }
+        return switch (credential.classification()) {
             // Credential + IP accepted — now answer the separate order-access question.
             case OK -> orderAccessOutcome(accessKey, secretKey, vendorId);
             // A non-IP 403 means the signature WAS accepted (else 401); the credential is valid, so
@@ -126,7 +141,14 @@ public class CoupangApiConnector implements PullConnector, ConnectionVerifier {
             case INVALID -> VerifyOutcome.failed(VerifyOutcome.REASON_INVALID_CREDENTIAL);
             case IP_DENIED -> VerifyOutcome.failed(VerifyOutcome.REASON_CALL_ENVIRONMENT_MISMATCH);
             case RATE_LIMITED -> VerifyOutcome.failed(VerifyOutcome.REASON_TEMPORARY_PROVIDER_ERROR);
-            case UNAVAILABLE -> VerifyOutcome.failed(VerifyOutcome.REASON_PROVIDER_UNAVAILABLE);
+            // returnShippingCenters gave no authoritative auth verdict (a non-401/403 4xx, a 5xx, or —
+            // for TRANSPORT_ERROR — no response at all). The credential may still be valid, so consult
+            // the endpoint we actually need (ordersheets) as an auxiliary read-only probe rather than
+            // blocking on an endpoint that may simply be unsuitable for this vendor.
+            case CLIENT_ERROR, SERVER_ERROR -> auxiliaryOrderAccessOutcome(accessKey, secretKey, vendorId);
+            // A transport failure is systemic (the gateway was unreachable) — the auxiliary probe would
+            // hit the same wall. Report it honestly rather than issuing a second doomed call.
+            case TRANSPORT_ERROR -> VerifyOutcome.failed(VerifyOutcome.REASON_PROVIDER_UNAVAILABLE);
         };
     }
 
@@ -139,11 +161,39 @@ public class CoupangApiConnector implements PullConnector, ConnectionVerifier {
      * verdict; any other 403 is the hedged {@code ORDER_ACCESS_DENIED}.
      */
     private VerifyOutcome orderAccessOutcome(String accessKey, String secretKey, String vendorId) {
-        return switch (ordersClient.probeOrderAccess(accessKey, secretKey, vendorId)) {
+        return switch (orderAccessProbe(accessKey, secretKey, vendorId).classification()) {
             case CONFIRMED, RATE_LIMITED, UNAVAILABLE -> VerifyOutcome.success();
             case CALL_IP_DENIED -> VerifyOutcome.failed(VerifyOutcome.REASON_CALL_ENVIRONMENT_MISMATCH);
             case ACCESS_DENIED -> VerifyOutcome.failed(VerifyOutcome.REASON_ORDER_ACCESS_DENIED);
         };
+    }
+
+    /**
+     * Auxiliary order-access probe — the fallback when {@code returnShippingCenters} gave no
+     * authoritative credential verdict (a 400/404 or a 5xx), because that endpoint may be unsuitable
+     * for this vendor. Here the credential is NOT yet proven, so — unlike {@link #orderAccessOutcome}
+     * — an inconclusive order probe must NOT be upgraded to success: only a real {@code ordersheets}
+     * 200 proves the HMAC credential the return-centers endpoint couldn't. A 403 still yields the
+     * authoritative call-IP / hedged order-access verdict; a throttle / 5xx / transport failure stays
+     * the honest {@code PROVIDER_UNAVAILABLE} (never fabricated into a success or an INVALID_CREDENTIAL).
+     */
+    private VerifyOutcome auxiliaryOrderAccessOutcome(String accessKey, String secretKey, String vendorId) {
+        return switch (orderAccessProbe(accessKey, secretKey, vendorId).classification()) {
+            case CONFIRMED -> VerifyOutcome.success();
+            case CALL_IP_DENIED -> VerifyOutcome.failed(VerifyOutcome.REASON_CALL_ENVIRONMENT_MISMATCH);
+            case ACCESS_DENIED -> VerifyOutcome.failed(VerifyOutcome.REASON_ORDER_ACCESS_DENIED);
+            case RATE_LIMITED, UNAVAILABLE -> VerifyOutcome.failed(VerifyOutcome.REASON_PROVIDER_UNAVAILABLE);
+        };
+    }
+
+    /** Run the read-only order-access probe and log its outcome sanitized (status + category only). */
+    private OrderAccessResult orderAccessProbe(String accessKey, String secretKey, String vendorId) {
+        OrderAccessResult order = ordersClient.probeOrderAccess(accessKey, secretKey, vendorId);
+        if (order.classification() != OrderAccessProbe.CONFIRMED) {
+            log.warn("Coupang order-access probe not-confirmed: endpoint=ordersheets httpStatus={} category={}",
+                    order.httpStatus(), order.classification());
+        }
+        return order;
     }
 
     private Credential openAndValidate(java.util.UUID orgId, java.util.UUID sellerAccountId) {

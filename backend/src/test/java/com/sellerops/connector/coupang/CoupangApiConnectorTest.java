@@ -368,4 +368,126 @@ class CoupangApiConnectorTest {
         // A throttled order probe must not block a credential the gateway just accepted.
         assertThat(outcome.status()).isEqualTo(VerifyOutcome.Status.SUCCESS);
     }
+
+    // --- diagnostic hardening: status-carrying probes + ordersheets auxiliary fallback --------
+
+    @Test
+    void credentialProbeClassifiesEachStatusAndCarriesRawHttpStatus() {
+        // The credential probe is split so a 400/404 (client), a 5xx (server) and a transport failure
+        // are distinguishable — each carrying the exact (safe) HTTP status for diagnosis.
+        http.enqueue(json(200, "{\"code\":200,\"data\":[]}"));
+        assertThat(ordersClient.credentialProbe("AK", "SK", "A00012345"))
+                .isEqualTo(new CoupangOrdersClient.CredentialProbeResult(
+                        CoupangOrdersClient.CredentialProbe.OK, 200));
+
+        http.enqueue(json(401, "{\"message\":\"invalid signature\"}"));
+        assertThat(ordersClient.credentialProbe("AK", "SK", "A00012345"))
+                .isEqualTo(new CoupangOrdersClient.CredentialProbeResult(
+                        CoupangOrdersClient.CredentialProbe.INVALID, 401));
+
+        http.enqueue(json(429, "{\"code\":429}"));
+        assertThat(ordersClient.credentialProbe("AK", "SK", "A00012345"))
+                .isEqualTo(new CoupangOrdersClient.CredentialProbeResult(
+                        CoupangOrdersClient.CredentialProbe.RATE_LIMITED, 429));
+
+        http.enqueue(json(404, "{\"message\":\"not found\"}"));
+        assertThat(ordersClient.credentialProbe("AK", "SK", "A00012345"))
+                .isEqualTo(new CoupangOrdersClient.CredentialProbeResult(
+                        CoupangOrdersClient.CredentialProbe.CLIENT_ERROR, 404));
+
+        http.enqueue(json(400, "{\"message\":\"bad request\"}"));
+        assertThat(ordersClient.credentialProbe("AK", "SK", "A00012345"))
+                .isEqualTo(new CoupangOrdersClient.CredentialProbeResult(
+                        CoupangOrdersClient.CredentialProbe.CLIENT_ERROR, 400));
+
+        http.enqueue(json(503, "{\"message\":\"service unavailable\"}"));
+        assertThat(ordersClient.credentialProbe("AK", "SK", "A00012345"))
+                .isEqualTo(new CoupangOrdersClient.CredentialProbeResult(
+                        CoupangOrdersClient.CredentialProbe.SERVER_ERROR, 503));
+
+        // 403 with the IP marker vs a bare 403 stay authoritative (unchanged), still carrying the status.
+        http.enqueue(json(403,
+                "{\"message\":\"[FORBIDDEN] Not allowed IP. Please contact the Coupang seller call center.\"}"));
+        assertThat(ordersClient.credentialProbe("AK", "SK", "A00012345"))
+                .isEqualTo(new CoupangOrdersClient.CredentialProbeResult(
+                        CoupangOrdersClient.CredentialProbe.IP_DENIED, 403));
+
+        http.enqueueTransportFailure();
+        assertThat(ordersClient.credentialProbe("AK", "SK", "A00012345"))
+                .isEqualTo(new CoupangOrdersClient.CredentialProbeResult(
+                        CoupangOrdersClient.CredentialProbe.TRANSPORT_ERROR,
+                        CoupangOrdersClient.CredentialProbeResult.NO_HTTP_STATUS));
+    }
+
+    @Test
+    void verifyRescuesValidCredentialViaOrdersheetsWhenReturnCentersReturnsClientError() {
+        // Reproduces the live first-connection failure: returnShippingCenters answered with a
+        // non-401/403 4xx (here 404) → PROVIDER_UNAVAILABLE under the old collapse-everything logic.
+        // The credential is actually valid, so the ordersheets auxiliary probe (200) now confirms it.
+        storeCoupangCredential();
+        http.enqueue(json(404, "{\"message\":\"not found\"}")); // returnShippingCenters — unsuitable
+        http.enqueue(json(200, emptyPage()));                   // ordersheets — order access CONFIRMED
+
+        VerifyOutcome outcome = connector.verifyConnection(new VerifyContext(org, account, "COUPANG"));
+
+        assertThat(outcome.status()).isEqualTo(VerifyOutcome.Status.SUCCESS);
+        assertThat(http.sent).hasSize(2);
+        assertThat(http.sent.get(0).uri().toString()).contains("/returnShippingCenters");
+        assertThat(http.sent.get(1).uri().toString()).contains("/ordersheets");
+    }
+
+    @Test
+    void verifyRescuesValidCredentialViaOrdersheetsWhenReturnCentersReturnsServerError() {
+        storeCoupangCredential();
+        http.enqueue(json(503, "{\"message\":\"unavailable\"}")); // returnShippingCenters 5xx
+        http.enqueue(json(200, emptyPage()));                     // ordersheets 200 → confirmed
+
+        VerifyOutcome outcome = connector.verifyConnection(new VerifyContext(org, account, "COUPANG"));
+
+        assertThat(outcome.status()).isEqualTo(VerifyOutcome.Status.SUCCESS);
+        assertThat(http.sent).hasSize(2);
+    }
+
+    @Test
+    void verifyStaysProviderUnavailableWhenReturnCentersAndOrdersheetsAreBothInconclusive() {
+        // The auxiliary probe must NOT fabricate success from an inconclusive order probe (the
+        // credential was never proven). returnShippingCenters 404 + ordersheets 500 → PROVIDER_UNAVAILABLE.
+        storeCoupangCredential();
+        http.enqueue(json(404, "{\"message\":\"not found\"}"));
+        http.enqueue(json(500, "{\"message\":\"server error\"}"));
+
+        VerifyOutcome outcome = connector.verifyConnection(new VerifyContext(org, account, "COUPANG"));
+
+        assertThat(outcome.status()).isEqualTo(VerifyOutcome.Status.FAILED);
+        assertThat(outcome.reasonCode()).isEqualTo(VerifyOutcome.REASON_PROVIDER_UNAVAILABLE);
+        assertThat(http.sent).hasSize(2);
+    }
+
+    @Test
+    void verifySurfacesOrderAccessDeniedViaAuxiliaryProbeWhenReturnCentersClientErrors() {
+        // returnShippingCenters unsuitable (404); ordersheets 403 without the IP marker → the signature
+        // was accepted (credential valid) but the order scope is denied → hedged ORDER_ACCESS_DENIED.
+        storeCoupangCredential();
+        http.enqueue(json(404, "{\"message\":\"not found\"}"));
+        http.enqueue(json(403, "{\"message\":\"forbidden\"}"));
+
+        VerifyOutcome outcome = connector.verifyConnection(new VerifyContext(org, account, "COUPANG"));
+
+        assertThat(outcome.status()).isEqualTo(VerifyOutcome.Status.FAILED);
+        assertThat(outcome.reasonCode()).isEqualTo(VerifyOutcome.REASON_ORDER_ACCESS_DENIED);
+    }
+
+    @Test
+    void verifyReportsProviderUnavailableOnCredentialTransportFailureWithoutAuxiliaryProbe() {
+        // A transport failure is systemic — the connector must NOT issue a second doomed call
+        // (exactly one HTTP attempt) and reports the honest PROVIDER_UNAVAILABLE.
+        storeCoupangCredential();
+        http.enqueueTransportFailure();
+
+        VerifyOutcome outcome = connector.verifyConnection(new VerifyContext(org, account, "COUPANG"));
+
+        assertThat(outcome.status()).isEqualTo(VerifyOutcome.Status.FAILED);
+        assertThat(outcome.reasonCode()).isEqualTo(VerifyOutcome.REASON_PROVIDER_UNAVAILABLE);
+        assertThat(http.sent).hasSize(1);
+    }
 }
