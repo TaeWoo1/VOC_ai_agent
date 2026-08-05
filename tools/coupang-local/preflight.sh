@@ -77,7 +77,7 @@ BACKEND_PREFIX="$(printf '%s' "$SETUP" | jget "['liveApproval']['approvalIdPrefi
 [ "$APPROVAL_ARMED" = "True" ] && pass "backend live-call interlock is ARMED" \
   || fail "backend live-call interlock NOT armed — run-backend-local.sh must arm this run's approval id"
 if [ -n "$BACKEND_PREFIX" ] && [ "$BACKEND_PREFIX" = "$EXPECTED_PREFIX" ]; then
-  pass "armed approval id prefix matches this run ($EXPECTED_PREFIX…)"
+  pass "armed approval id prefix matches this run (${EXPECTED_PREFIX})"
 else
   fail "armed approval id ('$BACKEND_PREFIX') != this run's ('$EXPECTED_PREFIX') — wrong/stale backend; re-bootstrap + re-run backend"
 fi
