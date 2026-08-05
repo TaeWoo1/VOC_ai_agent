@@ -96,6 +96,14 @@ public class Cafe24ConnectionCapabilityService {
                 // message nor the account id is logged (sanitized coarse outcome only).
                 authProbe = AuthProbe.PROVIDER_ERROR;
                 log.info("Cafe24 capability probe rate-limited (transient)");
+            } catch (Cafe24OAuthException oauthError) {
+                // Classified OAuth failure. Insufficient scope is a distinct, non-reconnect cause
+                // (a missing permission, not a dead credential); invalid_grant / unknown collapse
+                // to reconnect. Only the sanitized kind is logged — never the mall or provider text.
+                authProbe = oauthError.kind() == Cafe24OAuthException.Kind.INSUFFICIENT_SCOPE
+                        ? AuthProbe.SCOPE_INSUFFICIENT
+                        : AuthProbe.AUTH_FAILED;
+                log.info("Cafe24 capability probe OAuth failure (kind={})", oauthError.kind());
             } catch (RuntimeException authFailed) {
                 // Credential/config could not authorize (bad refresh token, missing key, shape).
                 // Fail closed: reconnect. Neither the exception message nor the account id is logged.

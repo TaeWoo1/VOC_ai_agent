@@ -29,8 +29,9 @@
 - **Cafe24 callback = backend 수신.** `SELLEROPS_CONNECTOR_CAFE24_REDIRECT_URI`
   (기본 `http://localhost:8080/api/connect/cafe24/callback`) + `SELLEROPS_CONNECTOR_CAFE24_RESULT_URL`
   (기본 `http://localhost:3000/connect/cafe24/result`) (`backend/src/main/resources/application.yml`).
-  제품 backend는 `/api/connect/cafe24/callback`을 쓴다(미추적 dev 도구 `tools/cafe24-callback`의
-  `/cafe24/callback`과 상이 — `docs/sellerops_canonical_reference.md` D18).
+  제품 backend는 `/api/connect/cafe24/callback`을 쓴다. git-추적되는 dev 도구
+  `tools/cafe24-callback`은 `/cafe24/callback`을 쓰며 — 이는 코드를 교환하지 않는 dev 수신기이므로
+  **의도적으로 제품 경로와 다르다**(README에 명시; `docs/sellerops_canonical_reference.md` D18 참고).
 - **현행 라이브 증거:** Cafe24 first-connection·inquiry live proof는 **운영자의 공개 터널**로 callback을
   수신하고 redirect_uri를 등록값과 byte-match했다(`docs/sellerops_cafe24_first_connection_tutorial_live_proof.md:13`).
   NAVER 라이브 증거는 모두 **운영자 로컬 backend egress**를 테스트 앱에 수동 allow-list한 것이다.

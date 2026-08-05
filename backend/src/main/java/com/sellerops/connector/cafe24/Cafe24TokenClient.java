@@ -61,6 +61,9 @@ public class Cafe24TokenClient {
      * Exchange the stored refresh token for a fresh access token.
      *
      * @throws Cafe24RateLimitedException on HTTP 429 from the token endpoint
+     * @throws Cafe24OAuthException on any other non-200 response, classified by the RFC 6749
+     *     standard {@code error} field ({@code invalid_grant} = reconnect, {@code invalid_scope}/
+     *     {@code insufficient_scope} = missing permission, anything else = generic/unknown)
      */
     public Cafe24TokenResult refresh(String mallId, String clientId, String clientSecret,
                                      String refreshToken) {
@@ -79,8 +82,10 @@ public class Cafe24TokenClient {
             throw Cafe24RateLimitedException.fromResponse(response);
         }
         if (response.statusCode() != 200) {
-            throw new IllegalStateException(
-                    "카페24 인증 토큰 갱신에 실패했습니다 (HTTP " + response.statusCode() + ").");
+            // Classify by the OAuth2-standard error code so a dead token (reconnect) and an
+            // insufficient scope (missing permission) are distinguishable downstream. The body
+            // is parsed only for the standard `error` field; nothing else reaches the message.
+            throw Cafe24OAuthException.fromTokenError(response.statusCode(), response.body(), mapper);
         }
 
         TokenResponse token = parse(response.body());

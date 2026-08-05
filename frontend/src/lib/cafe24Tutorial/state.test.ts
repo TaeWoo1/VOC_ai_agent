@@ -128,6 +128,13 @@ describe("interpretCapability", () => {
       .toEqual({ kind: "failed", failure: "reconnect_required" });
   });
 
+  it("scope_insufficient is its own cause, distinct from reconnect", () => {
+    // A missing read permission is not a dead credential — it maps to its own failure so the
+    // seller gets scope-specific guidance rather than a re-consent loop.
+    expect(interpretCapability(capability({ reason: "SCOPE_INSUFFICIENT" })))
+      .toEqual({ kind: "failed", failure: "scope_insufficient" });
+  });
+
   it("board_mapping when a board feature mismatched", () => {
     const view = capability({
       reason: null,

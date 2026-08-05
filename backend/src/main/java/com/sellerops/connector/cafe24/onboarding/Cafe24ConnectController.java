@@ -61,8 +61,11 @@ public class Cafe24ConnectController {
     @GetMapping("/callback")
     public ResponseEntity<Void> callback(@RequestParam(required = false) String code,
                                          @RequestParam(required = false) String state,
-                                         @RequestParam(required = false) String error) {
-        CompletionResult result = onboarding.complete(state, code, error);
+                                         @RequestParam(required = false) String error,
+                                         @RequestParam(name = "mall_id", required = false) String mallId) {
+        // mall_id is opportunistic: Cafe24 may append it to the redirect. When present it is
+        // asserted against the intended mall (fail closed on mismatch); when absent it is ignored.
+        CompletionResult result = onboarding.complete(state, code, error, mallId);
         UriComponentsBuilder location = UriComponentsBuilder.fromUriString(resultRedirectUrl)
                 .queryParam("status", result.status().name().toLowerCase());
         if (result.sellerAccountId() != null) {

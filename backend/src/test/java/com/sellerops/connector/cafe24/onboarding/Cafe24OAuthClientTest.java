@@ -67,7 +67,7 @@ class Cafe24OAuthClientTest {
 
         assertThatThrownBy(() -> client.exchangeAuthorizationCode(
                 "samplemall", "cid", "csecret", "secret-code", "http://cb"))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(com.sellerops.connector.cafe24.Cafe24OAuthException.class)
                 .hasMessageContaining("HTTP 400")
                 .hasMessageNotContaining("secret-code")
                 .hasMessageNotContaining("leak");

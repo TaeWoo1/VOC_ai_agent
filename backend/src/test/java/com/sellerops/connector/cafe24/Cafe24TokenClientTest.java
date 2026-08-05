@@ -94,14 +94,49 @@ class Cafe24TokenClientTest {
     }
 
     @Test
-    void non200FailsWithoutLeakingTheBody() {
+    void invalidGrantIsClassifiedWithoutLeakingTheBody() {
+        // A dead/revoked refresh token → RFC 6749 invalid_grant → reconnect. The message carries
+        // only the HTTP status and the standard code, never the (possibly token-bearing) body.
         http.enqueue(new Cafe24HttpClient.Response(401,
-                "{\"error\":\"invalid_grant\",\"hint\":\"" + OLD_REFRESH + "\"}", Map.of()));
+                "{\"error\":\"invalid_grant\",\"error_description\":\"" + OLD_REFRESH + "\"}", Map.of()));
 
         assertThatThrownBy(() -> client.refresh(MALL_ID, CLIENT_ID, CLIENT_SECRET, OLD_REFRESH))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage("카페24 인증 토큰 갱신에 실패했습니다 (HTTP 401).")
+                .isInstanceOf(Cafe24OAuthException.class)
+                .satisfies(e -> {
+                    assertThat(((Cafe24OAuthException) e).kind())
+                            .isEqualTo(Cafe24OAuthException.Kind.INVALID_GRANT);
+                    assertThat(((Cafe24OAuthException) e).statusCode()).isEqualTo(401);
+                })
                 .hasMessageNotContaining(OLD_REFRESH);
+    }
+
+    @Test
+    void insufficientScopeIsClassifiedDistinctlyFromInvalidGrant() {
+        // Both invalid_scope and insufficient_scope (RFC 6749 / RFC 6750) map to INSUFFICIENT_SCOPE.
+        for (String code : new String[] {"invalid_scope", "insufficient_scope"}) {
+            http.enqueue(new Cafe24HttpClient.Response(403,
+                    "{\"error\":\"" + code + "\"}", Map.of()));
+
+            assertThatThrownBy(() -> client.refresh(MALL_ID, CLIENT_ID, CLIENT_SECRET, OLD_REFRESH))
+                    .isInstanceOf(Cafe24OAuthException.class)
+                    .satisfies(e -> assertThat(((Cafe24OAuthException) e).kind())
+                            .isEqualTo(Cafe24OAuthException.Kind.INSUFFICIENT_SCOPE));
+        }
+    }
+
+    @Test
+    void unrecognizedOrMissingErrorCodeIsUnknownNotGuessed() {
+        // A non-standard / absent error value must NOT be force-fit to a known kind — it stays
+        // UNKNOWN so downstream treats it as a generic provider failure (assumes nothing).
+        for (String body : new String[] {
+                "{\"error\":\"some_cafe24_specific_code\"}", "{\"message\":\"nope\"}", "not-json"}) {
+            http.enqueue(new Cafe24HttpClient.Response(400, body, Map.of()));
+
+            assertThatThrownBy(() -> client.refresh(MALL_ID, CLIENT_ID, CLIENT_SECRET, OLD_REFRESH))
+                    .isInstanceOf(Cafe24OAuthException.class)
+                    .satisfies(e -> assertThat(((Cafe24OAuthException) e).kind())
+                            .isEqualTo(Cafe24OAuthException.Kind.UNKNOWN));
+        }
     }
 
     @Test

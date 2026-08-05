@@ -7,12 +7,20 @@ secret. Separate from the SellerOps backend/collector — nothing here deploys t
 
 Callback path (always): **`/cafe24/callback`**
 
+> **Not the product callback.** This dev receiver's path (`/cafe24/callback`) is
+> deliberately different from the SellerOps product endpoint
+> (`GET /api/connect/cafe24/callback`, which *does* exchange the code and persist the
+> credential). They are two separate things: this tool only confirms the redirect
+> arrived during a gated live check; the product backend owns the real flow. Register
+> whichever redirect URI matches the target you are testing — never mix the two.
+
 ## Safety guarantees (both options)
 - Shows **only** booleans: was `code` received, was `state` received.
 - Never displays/logs values: no `client_secret`, `refresh_token`, `access_token`,
   `mall_id`, `order` IDs, customer data, raw payloads, or `req.url`.
 - **Does not exchange the authorization code.** Token exchange stays a separate,
-  local, manual step (protocol §P7).
+  local, manual step of the gated live-run procedure (kept outside this repo, not an
+  in-repo protocol document).
 
 ---
 
@@ -58,8 +66,8 @@ exact string (from `PUBLIC_BASE_URL`) on startup and on the callback page.
 The same string (scheme, host, port if any, path, no trailing slash) must be used in:
 
 1. **Cafe24 Developers** → app settings → Redirect URI(s).
-2. The **authorize URL** `redirect_uri=...` the mall operator opens (protocol §P5).
-3. The **token-exchange** `redirect_uri=...` in the local code→token POST (§P7).
+2. The **authorize URL** `redirect_uri=...` the mall operator opens.
+3. The **token-exchange** `redirect_uri=...` in the local code→token POST.
 
 Any mismatch → Cafe24 rejects the authorize or token call.
 

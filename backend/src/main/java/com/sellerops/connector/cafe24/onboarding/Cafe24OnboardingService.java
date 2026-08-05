@@ -167,11 +167,14 @@ public class Cafe24OnboardingService {
 
     /**
      * Complete the flow from the OAuth callback. {@code error} is Cafe24's optional
-     * denial marker. The state is single-use: consumed on first callback (even when
-     * expired), so it can never be replayed; a second callback with the same state is
-     * rejected as INVALID without touching any account.
+     * denial marker. {@code callbackMallId} is the mall id Cafe24 <i>may</i> append to
+     * the redirect — often absent (the per-mall host is not reliably in the callback),
+     * so its <b>absence is not a signal</b>; only a present-and-mismatched value fails
+     * closed. The state is single-use: consumed on first callback (even when expired),
+     * so it can never be replayed; a second callback with the same state is rejected as
+     * INVALID without touching any account.
      */
-    public CompletionResult complete(String rawState, String code, String error) {
+    public CompletionResult complete(String rawState, String code, String error, String callbackMallId) {
         Instant now = clock.instant();
         return tx.execute(status -> {
             Optional<Cafe24OAuthState> found = (rawState == null || rawState.isBlank())
@@ -204,6 +207,27 @@ public class Cafe24OnboardingService {
             boolean channelOk = channel != null && channel.getId().equals(state.getChannelId());
             boolean denied = error != null && !error.isBlank();
             boolean noCode = code == null || code.isBlank();
+
+            // Identity gate — fail closed on a mall mismatch BEFORE any code exchange, and never
+            // downgrade an existing working connection. The intended mall id must still be shape-
+            // valid at callback time (start-time validation ran against the original input only),
+            // and any mall_id Cafe24 appended to the callback must resolve to the same mall.
+            //
+            // Fail closed ONLY on a positive, unambiguous mismatch: the callback value is normalized
+            // to a bare mall label (lower-cased, host suffix like ".cafe24.com" stripped) because the
+            // exact echoed format is not live-verified; a value we cannot resolve to a valid label is
+            // treated as ABSENT, not as a mismatch (Cafe24 commonly omits the mall entirely). This
+            // keeps a legitimate connect from being rejected on an unverified format while still
+            // catching a genuinely different shop. A mismatch is INVALID, not a retryable RECONNECT.
+            String intendedMallId = state.getMallId();
+            String callbackLabel = normalizeMallLabel(callbackMallId);
+            boolean identityMismatch =
+                    !Cafe24OAuthClient.isValidMallId(intendedMallId)
+                    || (callbackLabel != null && !callbackLabel.equals(intendedMallId));
+            if (identityMismatch) {
+                // No credential written, no status change — a working connection survives untouched.
+                return new CompletionResult(CompletionStatus.INVALID, account.getId());
+            }
 
             if (expired || denied || noCode || !channelOk) {
                 return failAttempt(account, wasConnected);
@@ -242,6 +266,26 @@ public class Cafe24OnboardingService {
             accounts.save(account);
         }
         return new CompletionResult(CompletionStatus.RECONNECT_REQUIRED, account.getId());
+    }
+
+    /**
+     * Normalize a callback-supplied mall value to a bare, comparable mall label, or {@code null}
+     * when it cannot be resolved to a valid one. The exact format Cafe24 echoes on the redirect is
+     * not live-verified, so this is deliberately tolerant: it lower-cases and drops any host suffix
+     * (e.g. {@code samplemall.cafe24.com} → {@code samplemall}) before shape-validating. An
+     * unresolvable value returns {@code null} and is treated by the caller as "no mall supplied"
+     * (never as a mismatch), so an unexpected format can never wrongly reject a legitimate connect.
+     */
+    static String normalizeMallLabel(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String label = raw.trim().toLowerCase(Locale.ROOT);
+        int dot = label.indexOf('.');
+        if (dot >= 0) {
+            label = label.substring(0, dot);
+        }
+        return Cafe24OAuthClient.isValidMallId(label) ? label : null;
     }
 
     private static String randomState() {
