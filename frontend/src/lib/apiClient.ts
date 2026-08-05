@@ -82,6 +82,9 @@ import {
   mockCredentialTemplate,
   mockDecideReviewReplyApproval,
   mockRecordReviewReplyOutcome,
+  mockReviewIssues,
+  mockReviewIssueDetail,
+  mockUpdateReviewIssue,
   mockReviewReplyPrep,
   mockSaveReviewReplyDraft,
   mockStartReviewReplySubmissionRun,
@@ -1066,11 +1069,17 @@ export const api = {
 
   // --- Review Issue Memory ---------------------------------------------------
   //
-  // STRICT ONLY, no mock fallback. These endpoints answer "has something changed
-  // in what customers are telling you", and a seeded mock would be a fabricated
-  // answer to that question — worse than an error, because the operator cannot
-  // tell the difference. The global VITE_USE_MOCKS demo switch is deliberately
-  // not honored here for the same reason.
+  // STRICT: no mock FALLBACK. These endpoints answer "has something changed in
+  // what customers are telling you", and seeded data standing in for a failed
+  // read would be a fabricated answer to that question. A dead backend still
+  // fails here, loudly — that rule is unchanged.
+  //
+  // The explicit `VITE_USE_MOCKS` demo switch IS now honored, which it was not
+  // before. The original reason for excluding it was that "the operator cannot
+  // tell the difference"; the v2 shell renders a permanent, non-dismissible demo
+  // notice whenever that flag is on, so they can. The distinction that matters is
+  // preserved: opting into a demo is a choice, silently substituting seeded data
+  // for a broken read is not.
 
   /**
    * The working list, or the 중요하지 않음 list when `dismissed` is true. Two calls rather than one
@@ -1086,6 +1095,9 @@ export const api = {
     if (options.dismissed) {
       params.set("dismissed", "true");
     }
+    if (USE_MOCKS) {
+      return mockReviewIssues(options.dismissed === true);
+    }
     const query = params.toString() ? `?${params.toString()}` : "";
     const { data } = await http.get<ReviewIssueView[]>(`/api/review-issues${query}`);
     return data;
@@ -1095,6 +1107,9 @@ export const api = {
     issueId: string,
     referenceDate?: string,
   ): Promise<ReviewIssueDetailView> {
+    if (USE_MOCKS) {
+      return mockReviewIssueDetail(issueId);
+    }
     const query = referenceDate ? `?referenceDate=${encodeURIComponent(referenceDate)}` : "";
     const { data } = await http.get<ReviewIssueDetailView>(
       `/api/review-issues/${encodeURIComponent(issueId)}${query}`,
@@ -1104,6 +1119,9 @@ export const api = {
 
   /** 확인 필요 → 조치 중. The note is the operator's own record of what they are doing. */
   async startReviewIssueAction(issueId: string, note?: string): Promise<ReviewIssueView> {
+    if (USE_MOCKS) {
+      return mockUpdateReviewIssue(issueId, { lifecycleState: "ACTING", lifecycleLabelKo: "조치 중" });
+    }
     const { data } = await http.post<ReviewIssueView>(
       `/api/review-issues/${encodeURIComponent(issueId)}/acting`,
       { note: note ?? null },
@@ -1117,6 +1135,12 @@ export const api = {
    * observed evidence rather than on someone asserting it.
    */
   async markReviewIssueRemediated(issueId: string, note?: string): Promise<ReviewIssueView> {
+    if (USE_MOCKS) {
+      return mockUpdateReviewIssue(issueId, {
+        lifecycleState: "VERIFYING",
+        lifecycleLabelKo: "개선 확인 중",
+      });
+    }
     const { data } = await http.post<ReviewIssueView>(
       `/api/review-issues/${encodeURIComponent(issueId)}/remediated`,
       { note: note ?? null },
@@ -1125,6 +1149,9 @@ export const api = {
   },
 
   async dismissReviewIssue(issueId: string): Promise<ReviewIssueView> {
+    if (USE_MOCKS) {
+      return mockUpdateReviewIssue(issueId, { dismissed: true });
+    }
     const { data } = await http.post<ReviewIssueView>(
       `/api/review-issues/${encodeURIComponent(issueId)}/dismiss`,
       {},
@@ -1133,6 +1160,9 @@ export const api = {
   },
 
   async restoreReviewIssue(issueId: string): Promise<ReviewIssueView> {
+    if (USE_MOCKS) {
+      return mockUpdateReviewIssue(issueId, { dismissed: false });
+    }
     const { data } = await http.post<ReviewIssueView>(
       `/api/review-issues/${encodeURIComponent(issueId)}/restore`,
       {},
