@@ -1,9 +1,10 @@
 # Coupang Ordersheets Response Contract Hardening v1
 
-> **Status:** implementation complete (offline); **live re-verification pending** its own fresh
-> single-use approval. Fixes the first-`ORDER_SUMMARY`-sync blocker found during the Coupang live
-> first-connection proof: the connect test passed, but the first sync failed because the
-> `ordersheets` **HTTP 200 body did not deserialize into `OrdersheetEnvelope`** for the live vendor.
+> **Status:** implementation complete **and live-verified** on a disposable environment. Fixes the
+> first-`ORDER_SUMMARY`-sync blocker found during the Coupang live first-connection proof: the connect
+> test passed, but the first sync failed because the `ordersheets` **HTTP 200 body did not deserialize
+> into `OrdersheetEnvelope`** for the live vendor. Under a fresh single-use approval, the same failing
+> sync now **succeeds** on this fix against the retained credential (details below).
 >
 > Canonical live-run rules: [`sellerops_live_approval_contract.md`](./sellerops_live_approval_contract.md).
 > Predecessor (the connect-test fix, proven live): [`coupang_connection_failure_diagnostic_hardening_v1.md`](./coupang_connection_failure_diagnostic_hardening_v1.md).
@@ -78,10 +79,25 @@ so the exact failing field is actionable from the run record alone.
   unparseable body (`data` as object → value-free path `위치=data`), and a money object without
   `units` (fail closed at the exact value-free path `위치=data[0].orderItems[0].orderPrice`). Full
   backend suite green.
-- **Live** (pending): under a fresh single-use approval, re-run the same failing sync against the
-  retained credential. On success — status-sweep evidence, parsed row count, cursor persistence,
-  `PREPARING → CONNECTED`, `channel_orders` count + distinct external id. On failure — the shape-only
-  diagnostic + Jackson path only, then stop and tear down (no repeated live iteration).
+- **Live (verified, 2026-08-06).** Disposable `:55432/coupang_proof`, backend `:18091` running **this
+  branch's code** (`984d067`), real gateway, interlock armed with a fresh single-use approval
+  (`apr-5669c7c8…` / run `cp-466d21…`), operator `Seated and ready.`. The exact sync that had failed on
+  `main` was re-run **once** against the **retained** credential (no re-entry):
+
+  | signal | old run `37bb19c4` (main) | new run `1b7ccbb7` (this fix) |
+  | --- | --- | --- |
+  | status / rows | FAILED · 0 | **SUCCESS · 50 / 50 / 0** |
+  | `connection_status` | PREPARING | **CONNECTED** |
+  | `channel_orders` (total / distinct ext id) | 0 | **50 / 50** (zero dup) |
+  | `order_daily_summaries` | — | 7 days · 50 orders |
+  | `sync_cursor` | none | `{"initialized":true,"throughDate":"2026-08-06"}` |
+  | status sweep | — | FINAL_DELIVERY 30 · DELIVERING 13 · ACCEPT 7 |
+
+  The multi-status sweep populated three statuses (proving the sweep ran); the shape-only parse
+  diagnostic fired **zero** times (the 200 body now binds cleanly). Log leakage grep (Authorization /
+  secret / access_key / Bearer / signature / `orderer` / `receiver` / PII) = **0**. Only the single
+  approved sync ran (idempotent re-sync is deferred to the landing on a pristine DB). Env torn down;
+  interlock disarmed.
 
 ## Scope / prohibitions honored
 
