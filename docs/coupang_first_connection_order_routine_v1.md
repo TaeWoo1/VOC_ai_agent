@@ -28,6 +28,22 @@
 - **No collector work** — Coupang order sync is backend-only; the collector keeps COUPANG `SKIPPED`.
 - **No migration** — reuses `channel_orders` (V32); Flyway top unchanged (V36).
 
+## What shipped (frontend)
+
+- **`GET /api/connect/coupang/setup` consumption** — `apiClient.getCoupangSetup()` + `CoupangSetupView`
+  (mirrors the NAVER setup contract).
+- **`ConnectCoupang` page (`/connect/coupang`)** — reached from the channel list when a Coupang channel
+  has no account (`connect-coupang` intent). Shows the official **prerequisites** (issue the WING Open
+  API key = access/secret/vendor; confirm order-API access; register the deployment calling IP via the
+  reused `AdvertisedCallIpPanel`), then hosts credential entry + the connection test (reusing
+  `SecureCredentialForm` → `createApiChannelAccount` → `storeCredential` → `testConnection`).
+- **Honest by construction** — a page load is 0-write (the account is created lazily only on an explicit
+  submit); the secret flows straight to the Vault, never into storage/logs/events; the advertised IP is
+  never fabricated (empty ⇒ "not yet advertised"); a passing test verifies the credential but does **not**
+  claim a completed connection (the first collected order sync completes the two-signal path).
+- **Order display** — already channel-generic (`/api/orders/summary`); Coupang orders surface with no FE
+  order-display work once ingested.
+
 ## Official API basis (developers.coupang.com — no endpoint/error guessed)
 
 | Concern | Official fact | Source |
@@ -59,9 +75,10 @@ never misreported as an IP problem or vice versa — the misdiagnosis lesson fro
 - **Routine window** — status changes for orders older than the routine look-back are not re-swept
   (documented bound, not a gap); the daily summary for any swept day is complete.
 - **Cancel/return** — Coupang's separate Return API is out of v1 scope.
-- **Account-scoped guided-capability screen** — the NAVER-style per-account capability wizard view is
-  NAVER-only; a Coupang analog is a documented follow-up (the connector `capabilities()` + setup +
-  channel capability overview already deliver "connector capability + setup contract").
+- **Account-scoped guided-capability screen** — the NAVER-style per-account capability *wizard* view
+  (`/api/seller-accounts/{id}/connection-capability`) is NAVER-only; a Coupang analog is a documented
+  follow-up. The `ConnectCoupang` page delivers the first-connection prerequisites + credential + test;
+  the connector `capabilities()` + setup + channel capability overview deliver "connector capability".
 - **Amount** — `orderPrice` (gross "price to be paid"); `discountPrice`/claim-net refinement deferred.
 
 ## Verification
@@ -71,3 +88,7 @@ never misreported as an IP problem or vice versa — the misdiagnosis lesson fro
   `CollectControlService*`, `SyncRunExecutor*`, `CollectControlServiceNaverVerifierTest`).
 - Supplementary tests: `CoupangOrdersCursorTest`, `CoupangSetupControllerTest`,
   `CoupangRateLimitedExceptionTest`, `CoupangConnectionLifecycleTest`.
+- **Full backend suite green** (`--no-daemon`).
+- **Frontend**: typecheck clean, full suite green (**1726** tests), `vite build` OK. New FE tests:
+  `channelConnection` (COUPANG→`connect-coupang` intent) + `ConnectCoupang` page (prerequisites +
+  advertised-IP present/absent, lazy create→store→test success, safe failure message).
