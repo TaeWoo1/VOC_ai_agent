@@ -45,6 +45,8 @@ sellerops (`:5432/sellerops`).
    ```
    tools/naver-local/run-frontend-local.sh
    ```
+   The Local Agent (화면 안내) pairing UI is OFF by default. To OFFER it (never require it), set
+   `SELLEROPS_WALK_ENABLE_AGENT_BRIDGE=true` and launch `run-agent-local.sh` (see below).
 4. **Preflight** — run BEFORE opening the browser; it must print `PREFLIGHT PASS` and echo exactly one URL:
    ```
    SELLEROPS_COLLECT_SCHEDULER_ENABLED=false SELLEROPS_CONNECTOR_NAVER_ENABLED=true \
@@ -143,6 +145,46 @@ tools/naver-local/preflight-selfcheck.sh
 Cases: `WRONG_HOST` / `STALE_OVERRIDE` / `WRONG_PROXY` / `BAD_LOGIN` → FAIL; `ENV_BINDING_WRONG` /
 `ENV_BINDING_MISSING` (a wrong/absent URL run id) → blocked at the mismatch screen; `NORMAL` → PASS with 0
 NAVER calls.
+
+## Optional: the Local Agent (화면 안내) guided path
+
+The order connection needs no Local Agent. The agent is used only by the OPTIONAL API-issuance guided
+walkthrough (`NaverIssuanceGuidedWalkthrough`), and a seller who has no helper — or declines pairing — can
+always finish issuance with the text path. This scaffolding keeps that boundary:
+
+- `run-frontend-local.sh` leaves `VITE_ENABLE_AGENT_BRIDGE` off unless you opt in
+  (`SELLEROPS_WALK_ENABLE_AGENT_BRIDGE=true`). Enabling it only OFFERS the pairing UI.
+- `run-agent-local.sh` brings up the agent's **issuance guidance carrier** (`--dev-action-window-issuance`)
+  on the loopback bridge `127.0.0.1:47615` — the exact endpoint the frontend's bridge client uses — with
+  this run's frontend origin on the bridge allow-list. It is a FIXTURE driver: **no browser, no NAVER call,
+  no credential**, so it needs no live approval. A hard fence refuses any live/browser/import carrier flag.
+  ```
+  # terminal A
+  SELLEROPS_WALK_ENABLE_AGENT_BRIDGE=true tools/naver-local/run-frontend-local.sh
+  # terminal B
+  tools/naver-local/run-agent-local.sh            # interactive pairing (code printed to THIS terminal)
+  AGENT_AUTO_APPROVE=true tools/naver-local/run-agent-local.sh   # unattended: bypasses the pairing confirmation
+  ```
+- `agent-bridge-verify.mjs` probes `GET /bridge/health` exactly as the frontend does and prints a sanitized
+  `AGENT-BRIDGE-VERIFY PASS/FAIL` — reachability only, no pairing, no socket, no NAVER host.
+  ```
+  node tools/naver-local/agent-bridge-verify.mjs
+  ```
+
+**Two honesty notes (both are collector facts, not tooling gaps):**
+
+1. **"Same run" = same environment, not a shared id.** The agent mints its OWN opaque carrier id
+   (`run_<hex>`) and announces it per connection; the frontend adopts it. There is no way — by env or flag —
+   to bind the agent to the walkthrough run id (`wt-<hex>`), and no agent↔walkthrough run linkage exists. The
+   launcher binds the agent to the same loopback bridge + frontend origin as this run; it never guesses or
+   injects a run id.
+2. **A browser-free boot is TRANSIENT.** The collector holds the bridge resident only while a browser
+   connection is held for a WAITING/HUMAN handoff (`local-agent.ts`, `managedConnectionIds().length === 0` →
+   clean exit). A browser-free connections set has nothing to hold, so the agent boots the bridge, reports the
+   carrier, and exits — enough to VALIDATE configuration (port · origin · presenter · `apiIssuance` carrier),
+   but it will not stay up for pairing. A persistent, pair-able guided session requires a resident connection,
+   i.e. the collector's separately-approved live issuance path (which opens a marketplace browser) — out of
+   scope for this NAVER-free tool. Do not add a browser connection here to force persistence.
 
 ## Operator vs server boundary
 

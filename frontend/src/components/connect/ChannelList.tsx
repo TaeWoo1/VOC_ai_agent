@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { channelSupportDisplay } from "../../lib/channelSupport";
 import { channelCardAction, selectChannelAccount } from "../../lib/channelConnection";
 import { CAFE24_CONNECT_ROUTE } from "../../lib/cafe24Connect";
+import { frontendRunId, isWalkthroughMode, withWalkthroughRun } from "../../lib/guidedConnection/walkthrough";
 import { relativeTime } from "../../lib/format";
 import type {
   ChannelResponse,
@@ -58,7 +59,12 @@ function ChannelRow({
         navigate(CAFE24_CONNECT_ROUTE);
         return;
       case "connect-naver":
-        navigate("/connect/naver");
+        // Preserve the disposable walkthrough run id when one is bound to this frontend build. A bare
+        // navigate("/connect/naver") would land the guided page with no `?walkthroughRun=`, which the
+        // env-binding reads as `MISSING_URL_RUN` and fail-closes — the campaign's first in-app entry then
+        // dead-ends at the mismatch screen. `frontendRunId()` is the build-injected id (never a guess), and
+        // `withWalkthroughRun` is a no-op outside walkthrough mode, so normal sellers still get the bare path.
+        navigate(withWalkthroughRun("/connect/naver", isWalkthroughMode() ? frontendRunId() : null));
         return;
       case "upload":
         navigate(`/connect/upload?channelId=${channel.id}`);
