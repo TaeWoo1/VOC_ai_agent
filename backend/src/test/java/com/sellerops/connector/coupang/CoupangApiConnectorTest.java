@@ -277,6 +277,140 @@ class CoupangApiConnectorTest {
     }
 
     @Test
+    void fetchParsesOrderPriceRenderedAsAUnitsNanosMoneyObject() {
+        // The official contract can present a monetary field as a {currencyCode, units, nanos} object.
+        // The money-tolerant deserializer canonicalizes units(+nanos) to a KRW-won Long: 12000 + 3000.
+        storeCoupangCredential();
+        String data = "{\"shipmentBoxId\":100001,\"orderId\":5001,\"status\":\"ACCEPT\""
+                + ",\"orderedAt\":\"2026-08-05T10:00:00+09:00\",\"paidAt\":\"2026-08-05T10:01:00+09:00\""
+                + ",\"orderItems\":["
+                + "{\"orderPrice\":{\"currencyCode\":\"KRW\",\"units\":12000,\"nanos\":0}},"
+                + "{\"orderPrice\":{\"currencyCode\":\"KRW\",\"units\":3000,\"nanos\":0}}]}";
+        http.enqueue(json(200, "{\"code\":200,\"message\":\"OK\",\"data\":[" + data + "],\"nextToken\":null}"));
+        enqueueRemainingStatusesEmpty(1);
+
+        FetchPage page = connector.fetch(request(DataType.ORDER_SUMMARY));
+
+        List<CanonicalOrder> orders = page.orders().stream().map(CanonicalOrder.class::cast).toList();
+        assertThat(orders).singleElement().satisfies(o -> {
+            assertThat(o.externalOrderId()).isEqualTo("100001");
+            assertThat(o.paymentAmount()).isEqualTo(15000L);
+        });
+    }
+
+    @Test
+    void fetchRoundsAMoneyObjectNanosSubUnitToTheNearestWon() {
+        // nanos is billionths of a unit; a non-zero nanos must round into the canonical won
+        // (defensive — KRW real data is nanos=0). units=12000 + 0.6 won → 12001.
+        storeCoupangCredential();
+        String data = "{\"shipmentBoxId\":100001,\"orderId\":5001,\"status\":\"ACCEPT\""
+                + ",\"orderedAt\":\"2026-08-05T10:00:00+09:00\",\"paidAt\":\"2026-08-05T10:01:00+09:00\""
+                + ",\"orderItems\":[{\"orderPrice\":{\"currencyCode\":\"KRW\",\"units\":12000,\"nanos\":600000000}}]}";
+        http.enqueue(json(200, "{\"code\":200,\"data\":[" + data + "],\"nextToken\":null}"));
+        enqueueRemainingStatusesEmpty(1);
+
+        FetchPage page = connector.fetch(request(DataType.ORDER_SUMMARY));
+
+        List<CanonicalOrder> orders = page.orders().stream().map(CanonicalOrder.class::cast).toList();
+        assertThat(orders).singleElement()
+                .satisfies(o -> assertThat(o.paymentAmount()).isEqualTo(12001L));
+    }
+
+    @Test
+    void empty200OrderBodyFailsClosedWithoutNpe() {
+        // A 200 with a blank body must fail closed with a specific, value-free message — not NPE out
+        // of readValue past the shape-only catch.
+        storeCoupangCredential();
+        http.enqueue(json(200, ""));
+
+        assertThatThrownBy(() -> connector.fetch(request(DataType.ORDER_SUMMARY)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("쿠팡 주문 목록 응답이 비어 있습니다");
+    }
+
+    @Test
+    void fetchToleratesUnknownAdditiveAndNullableContractFields() {
+        // Forward compatibility: unknown additive fields (top-level, nested objects, and per-item),
+        // nullable optional fields (discountPrice/remotePrice), a scalar-vs-object variance on the
+        // unused code/message fields, and a blank-string nextToken must all bind without breaking.
+        storeCoupangCredential();
+        String data = "{\"shipmentBoxId\":100001,\"orderId\":5001,\"status\":\"ACCEPT\""
+                + ",\"orderedAt\":\"2026-08-05T10:00:00+09:00\",\"paidAt\":\"2026-08-05T10:01:00+09:00\""
+                + ",\"orderer\":{\"name\":\"x\"},\"receiver\":{\"addr\":\"y\"}"   // unknown nested objects
+                + ",\"overseaShippingInfoDto\":null"                              // nullable unknown object
+                + ",\"orderItems\":[{\"orderPrice\":9000,\"discountPrice\":null,\"remotePrice\":null"
+                + ",\"vendorItemName\":\"unused\",\"futureField\":42}]}";
+        // code/message rendered as OBJECTS (not the usual scalar) — must not break a field we never read.
+        http.enqueue(json(200, "{\"code\":{\"value\":200},\"message\":{\"text\":\"OK\"}"
+                + ",\"totallyNewTopLevelField\":true,\"data\":[" + data + "],\"nextToken\":\"\"}"));
+        enqueueRemainingStatusesEmpty(1);
+
+        FetchPage page = connector.fetch(request(DataType.ORDER_SUMMARY));
+
+        List<CanonicalOrder> orders = page.orders().stream().map(CanonicalOrder.class::cast).toList();
+        assertThat(orders).singleElement().satisfies(o -> {
+            assertThat(o.externalOrderId()).isEqualTo("100001");
+            assertThat(o.paymentAmount()).isEqualTo(9000L);
+        });
+        // A blank-string nextToken is terminal — exactly one call per status, no extra page.
+        assertThat(http.sent).hasSize(CoupangOrdersClient.STATUSES.size());
+    }
+
+    @Test
+    void fetchToleratesA64BitShipmentBoxIdRenderedAsAString() {
+        // 64-bit ids beyond int range, and an id rendered as a numeric string, must still bind.
+        storeCoupangCredential();
+        String data = "{\"shipmentBoxId\":\"9007199254740993\",\"orderId\":9007199254740994"
+                + ",\"status\":\"ACCEPT\",\"orderedAt\":\"2026-08-05T10:00:00+09:00\""
+                + ",\"paidAt\":\"2026-08-05T10:01:00+09:00\",\"orderItems\":[{\"orderPrice\":1000}]}";
+        http.enqueue(json(200, "{\"code\":200,\"data\":[" + data + "],\"nextToken\":null}"));
+        enqueueRemainingStatusesEmpty(1);
+
+        FetchPage page = connector.fetch(request(DataType.ORDER_SUMMARY));
+
+        List<CanonicalOrder> orders = page.orders().stream().map(CanonicalOrder.class::cast).toList();
+        assertThat(orders).singleElement().satisfies(o -> {
+            assertThat(o.externalOrderId()).isEqualTo("9007199254740993");
+            assertThat(o.parentOrderId()).isEqualTo("9007199254740994");
+        });
+    }
+
+    @Test
+    void unparseableOrderBodyFailsWithASafeShapeOnlyDiagnosticAndNoValues() {
+        // A 200 whose `data` is an object (not the contract array) fails binding. The operator-facing
+        // message must name the Jackson PATH (schema) but leak no response VALUE or raw body.
+        storeCoupangCredential();
+        http.enqueue(json(200,
+                "{\"code\":200,\"message\":\"OK\",\"data\":{\"unexpectedValue\":\"secretShape\"},\"nextToken\":null}"));
+
+        assertThatThrownBy(() -> connector.fetch(request(DataType.ORDER_SUMMARY)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("쿠팡 주문 목록 응답을 해석할 수 없습니다")
+                .hasMessageContaining("위치=data")           // the binding path (field name) is actionable
+                .hasMessageNotContaining("unexpectedValue")  // never a response key beyond the path
+                .hasMessageNotContaining("secretShape");     // never a response value
+    }
+
+    @Test
+    void orderPriceMoneyObjectWithoutUnitsFailsClosedAtItsExactValueFreePath() {
+        // A money object that carries no numeric `units` cannot be canonicalized — fail the page
+        // closed (never emit a wrong 0 total). The deserializer's fail-closed is wrapped by Jackson,
+        // so the diagnostic pinpoints the exact nested binding path — with no value ("123"/"KRW").
+        storeCoupangCredential();
+        String data = "{\"shipmentBoxId\":100001,\"orderId\":5001,\"status\":\"ACCEPT\""
+                + ",\"orderedAt\":\"2026-08-05T10:00:00+09:00\",\"paidAt\":\"2026-08-05T10:01:00+09:00\""
+                + ",\"orderItems\":[{\"orderPrice\":{\"currencyCode\":\"KRW\",\"nanos\":123}}]}";
+        http.enqueue(json(200, "{\"code\":200,\"data\":[" + data + "],\"nextToken\":null}"));
+
+        assertThatThrownBy(() -> connector.fetch(request(DataType.ORDER_SUMMARY)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("쿠팡 주문 목록 응답을 해석할 수 없습니다")
+                .hasMessageContaining("위치=data[0].orderItems[0].orderPrice")
+                .hasMessageNotContaining("123")
+                .hasMessageNotContaining("KRW");
+    }
+
+    @Test
     void rateLimitedFetchReturnsRateLimitedPageWithCursorUnchanged() {
         storeCoupangCredential();
         String priorCursor = "{\"initialized\":true,\"throughDate\":\"2026-08-04\"}";

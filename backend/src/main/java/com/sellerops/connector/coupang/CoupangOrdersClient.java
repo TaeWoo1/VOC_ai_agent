@@ -1,12 +1,20 @@
 package com.sellerops.connector.coupang;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationContext;
+import com.fasterxml.jackson.databind.JsonDeserializer;
+import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import com.sellerops.connector.DataType;
 import com.sellerops.connector.FetchPage;
 import com.sellerops.ingest.canonical.CanonicalOrder;
 import com.sellerops.ingest.canonical.CanonicalOrderSummary;
+import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -20,8 +28,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.StringJoiner;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The officially documented Coupang WING Open API order collection flow
@@ -54,6 +65,8 @@ import java.util.stream.Collectors;
  * A 429 throws {@link CoupangRateLimitedException} (cursor unchanged on retry).
  */
 public class CoupangOrdersClient {
+
+    private static final Logger log = LoggerFactory.getLogger(CoupangOrdersClient.class);
 
     static final String ORDERSHEETS_PATH_FMT =
             "/v2/providers/openapi/apis/api/v5/vendors/%s/ordersheets";
@@ -176,7 +189,25 @@ public class CoupangOrdersClient {
                     "쿠팡 주문 목록 조회에 실패했습니다 (HTTP " + response.statusCode() + ")"
                             + httpErrorDetail(response.body()) + ".");
         }
-        return read(response.body(), OrdersheetEnvelope.class, "쿠팡 주문 목록 응답을 해석할 수 없습니다.");
+        String body = response.body();
+        if (body == null || body.isBlank()) {
+            // A 200 with no body can't bind (and would NPE inside readValue, escaping the catch below).
+            // Fail closed with a specific, value-free message — length only, never content.
+            log.warn("Coupang ordersheets 200-body was empty: contentType={} length={}",
+                    contentTypeFamily(response), body == null ? 0 : body.length());
+            throw new IllegalStateException("쿠팡 주문 목록 응답이 비어 있습니다.");
+        }
+        try {
+            return mapper.readValue(body, OrdersheetEnvelope.class);
+        } catch (JsonProcessingException e) {
+            // A 200 whose body doesn't fit the envelope. Emit a SHAPE-ONLY diagnostic — JSON node
+            // types, object KEY-NAME sets (schema, not values), array counts, the Jackson binding path
+            // and target type. No response VALUE, buyer PII, id, secret, header, or raw body is recorded.
+            log.warn("Coupang ordersheets 200-body did not fit the envelope: {}",
+                    ordersheetShapeDiagnostic(response, e));
+            throw new IllegalStateException(
+                    "쿠팡 주문 목록 응답을 해석할 수 없습니다" + mappingPathSuffix(e) + ".");
+        }
     }
 
     // --- connect-test probes ----------------------------------------------
@@ -543,14 +574,117 @@ public class CoupangOrdersClient {
         }
     }
 
+    // --- shape-only parse diagnostics (schema, never values) --------------
+
+    /**
+     * A safe, SHAPE-ONLY description of why a 200 ordersheets body failed to bind — the exact
+     * information needed to correct the DTO without a live re-run leaking anything. It records only:
+     * the response {@code Content-Type} family, the Jackson binding path (field NAMES / array indices)
+     * and target type, the root JSON node type, the root object's KEY-NAME set, the {@code data} node
+     * type and element count, and the first element's KEY-NAME set. Object keys are API schema, not
+     * data. <b>No response value, buyer PII, order id, amount, secret, header, or raw body appears.</b>
+     */
+    private String ordersheetShapeDiagnostic(CoupangHttpClient.Response response, JsonProcessingException cause) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("contentType=").append(contentTypeFamily(response));
+        if (cause instanceof JsonMappingException mapping) {
+            sb.append(" path=").append(mappingPath(mapping));
+            if (cause instanceof MismatchedInputException mismatch && mismatch.getTargetType() != null) {
+                sb.append(" targetType=").append(mismatch.getTargetType().getSimpleName());
+            }
+        }
+        try {
+            JsonNode root = mapper.readTree(response.body());
+            sb.append(" root=").append(nodeType(root));
+            if (root != null && root.isObject()) {
+                sb.append(" rootKeys=").append(fieldNames(root));
+                JsonNode data = root.get("data");
+                sb.append(" data=").append(nodeType(data));
+                if (data != null && data.isArray()) {
+                    sb.append(" dataCount=").append(data.size());
+                    if (!data.isEmpty()) {
+                        sb.append(" itemKeys=").append(fieldNames(data.get(0)));
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+            // Body was not even well-formed JSON; length only (still no content).
+            sb.append(" root=non-json(").append(response.body() == null ? 0 : response.body().length())
+                    .append("chars)");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * The Jackson binding path as a compact {@code field[index].field} string built ONLY from
+     * {@link JsonMappingException.Reference} field names and array indices — never a bound value.
+     * Surfaced (via {@link #mappingPathSuffix}) in the operator-facing error so the failing field is
+     * actionable without the log.
+     */
+    private static String mappingPath(JsonMappingException mapping) {
+        StringBuilder sb = new StringBuilder();
+        for (JsonMappingException.Reference ref : mapping.getPath()) {
+            if (ref.getFieldName() != null) {
+                if (sb.length() > 0) {
+                    sb.append('.');
+                }
+                sb.append(ref.getFieldName());
+            } else if (ref.getIndex() >= 0) {
+                sb.append('[').append(ref.getIndex()).append(']');
+            }
+        }
+        return sb.length() == 0 ? "<root>" : sb.toString();
+    }
+
+    /** The safe {@code (path=…, 타입=…)} suffix for the operator-facing message — names/types only. */
+    private static String mappingPathSuffix(JsonProcessingException cause) {
+        if (!(cause instanceof JsonMappingException mapping)) {
+            return "";
+        }
+        String path = mappingPath(mapping);
+        String type = cause instanceof MismatchedInputException mismatch && mismatch.getTargetType() != null
+                ? ", 타입=" + mismatch.getTargetType().getSimpleName() : "";
+        return " (위치=" + path + type + ")";
+    }
+
+    private static String contentTypeFamily(CoupangHttpClient.Response response) {
+        String raw = response.header("Content-Type").orElse(null);
+        if (raw == null || raw.isBlank()) {
+            return "<none>";
+        }
+        // Media type only (drop any charset/boundary params — never values).
+        int semicolon = raw.indexOf(';');
+        return (semicolon >= 0 ? raw.substring(0, semicolon) : raw).trim();
+    }
+
+    private static String nodeType(JsonNode node) {
+        return node == null ? "absent" : node.getNodeType().name();
+    }
+
+    /** The object's KEY names (schema), never its values. */
+    private static String fieldNames(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return "[]";
+        }
+        StringJoiner joiner = new StringJoiner(",", "[", "]");
+        node.fieldNames().forEachRemaining(joiner::add);
+        return joiner.toString();
+    }
+
     // --- response DTOs (officially confirmed field names only) ------------
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record OrdersheetEnvelope(Integer code, String message, List<Ordersheet> data, String nextToken) {
+    record OrdersheetEnvelope(JsonNode code, JsonNode message, List<Ordersheet> data, String nextToken) {
         List<Ordersheet> dataOrEmpty() {
             return data != null ? data : List.of();
         }
     }
+
+    // {@code code}/{@code message} are documented but unused by collection; typed as {@link JsonNode}
+    // so a scalar-vs-object variance on a field we never read can never break the whole page's binding
+    // (a strict {@code Integer}/{@code String} would). {@code data}/{@code nextToken} keep their real
+    // contract types. {@code shipmentBoxId}/{@code orderId} are 64-bit ({@link Long}); Jackson coerces a
+    // numeric string to Long by default, so an id rendered as a string still binds.
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     record Ordersheet(
@@ -562,8 +696,83 @@ public class CoupangOrdersClient {
             List<OrderItem> orderItems) {
     }
 
-    /** Amount basis: orderPrice (= salesPrice × shippingCount, "price to be paid"). */
+    /**
+     * Amount basis: {@code orderPrice} (= {@code salesPrice} × {@code shippingCount}, "price to be
+     * paid"). Bound through {@link MoneyAmountDeserializer} so it tolerates both the plain-number form
+     * and a {@code {currencyCode, units, nanos}} money object, canonicalized to a KRW-won {@code Long}.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record OrderItem(Long orderPrice) {
+    record OrderItem(@JsonDeserialize(using = MoneyAmountDeserializer.class) Long orderPrice) {
+    }
+
+    /**
+     * Binds a monetary field to a canonical KRW-won {@code Long}, tolerating the shapes the official
+     * contract can present without ever failing the whole envelope on a field-type variance:
+     * <ul>
+     *   <li>an integral number → itself;</li>
+     *   <li>a fractional number or a numeric string → rounded to the nearest won;</li>
+     *   <li>a {@code {currencyCode, units, nanos}} money object → {@code units} plus the {@code nanos}
+     *       sub-unit fraction rounded to the nearest won (0 for KRW);</li>
+     *   <li>{@code null} / empty → {@code null} (the caller's {@code orderAmount} fails the page closed
+     *       on a missing amount rather than emitting a wrong total).</li>
+     * </ul>
+     * An object without a numeric {@code units}, or any other non-numeric shape, fails closed with a
+     * value-free message — surfaced as the honest Jackson binding path, never a fabricated amount.
+     */
+    static final class MoneyAmountDeserializer extends JsonDeserializer<Long> {
+        @Override
+        public Long deserialize(JsonParser parser, DeserializationContext context) throws IOException {
+            return canonicalWon(context.readTree(parser));
+        }
+
+        @Override
+        public Long getNullValue(DeserializationContext context) {
+            return null;
+        }
+
+        private static Long canonicalWon(JsonNode node) {
+            if (node == null || node.isNull() || node.isMissingNode()) {
+                return null;
+            }
+            if (node.isNumber()) {
+                return node.isIntegralNumber() ? node.longValue() : Math.round(node.doubleValue());
+            }
+            if (node.isTextual()) {
+                String text = node.textValue().trim();
+                if (text.isEmpty()) {
+                    return null;
+                }
+                try {
+                    return Long.parseLong(text);
+                } catch (NumberFormatException notLong) {
+                    try {
+                        return Math.round(Double.parseDouble(text));
+                    } catch (NumberFormatException notNumber) {
+                        throw new IllegalStateException("쿠팡 주문 금액을 숫자로 해석할 수 없습니다.");
+                    }
+                }
+            }
+            if (node.isObject()) {
+                JsonNode units = node.get("units");
+                if (units == null || !(units.isNumber() || units.isTextual())) {
+                    throw new IllegalStateException("쿠팡 주문 금액 객체에 units 값이 없습니다.");
+                }
+                long won = units.isNumber() ? units.longValue() : parseLongOrThrow(units.asText());
+                JsonNode nanos = node.get("nanos");
+                if (nanos != null && nanos.isNumber() && nanos.longValue() != 0) {
+                    won += Math.round(nanos.doubleValue() / 1_000_000_000.0);
+                }
+                return won;
+            }
+            throw new IllegalStateException("쿠팡 주문 금액 형식을 해석할 수 없습니다.");
+        }
+
+        private static long parseLongOrThrow(String text) {
+            try {
+                return Long.parseLong(text.trim());
+            } catch (NumberFormatException notLong) {
+                throw new IllegalStateException("쿠팡 주문 금액 객체의 units를 숫자로 해석할 수 없습니다.");
+            }
+        }
     }
 }
