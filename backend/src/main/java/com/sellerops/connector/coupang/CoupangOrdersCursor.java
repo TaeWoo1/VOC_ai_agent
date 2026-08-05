@@ -22,8 +22,12 @@ import java.time.format.DateTimeFormatter;
  *       first run reaches back {@link #INITIAL_BACKFILL_DAYS}; later routine runs use
  *       the lighter {@link #ROUTINE_OVERLAP_DAYS} re-sweep.</li>
  *   <li>{@code throughDate} — the last KST date swept (observability + gap recovery).
- *       If the scheduler was down for a while, the next window reaches back far enough
- *       to cover the gap, still clamped to the official {@link #MAX_WINDOW_DAYS}.</li>
+ *       If the scheduler was down, the next window reaches back toward {@code throughDate} —
+ *       but only up to the official {@link #MAX_WINDOW_DAYS} cap. An outage LONGER than that cap
+ *       (~29 days once the routine overlap is subtracted) leaves a permanent hole: orders created
+ *       before {@code today - MAX_WINDOW_DAYS} are never swept, and {@code throughDate} still advances
+ *       to today. This is inherent to Coupang's 31-day query limit, not a bug — but it is a real bound,
+ *       not "always covered."</li>
  * </ul>
  *
  * <p>Re-sweeping recent days each routine run re-fetches those orders; ingestion is

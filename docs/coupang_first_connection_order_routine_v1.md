@@ -74,7 +74,15 @@ never misreported as an IP problem or vice versa — the misdiagnosis lesson fro
   + the deployment egress IP registered in the seller's Coupang app, under a separate fresh approval.
 - **Routine window** — status changes for orders older than the routine look-back are not re-swept
   (documented bound, not a gap); the daily summary for any swept day is complete.
-- **Cancel/return** — Coupang's separate Return API is out of v1 scope.
+- **Cancel/return** — Coupang's separate Return API is out of v1 scope. A consequence: the daily
+  summary counts shipment boxes in the swept `status` set, so it is **not monotonic / not
+  reconciliation-authoritative** — an order that later leaves the set (cancelled/returned) drops from a
+  re-sweep, and a previously-complete day's count can decrease or go stale.
+- **Long outage** — the rolling window is clamped to the official 31-day cap, so a scheduler outage
+  longer than ~29 days leaves a permanent hole (orders older than `today - 31d` are never swept); the
+  cursor's `throughDate` still advances. Inherent to the API limit, documented — not silent.
+- **Query format** — `createdAt` dates are sent with the KST offset in the exact official portal-example
+  form (`…%2B09:00`), verified against the docs but **not yet live-exercised** (offline slice).
 - **Account-scoped guided-capability screen** — the NAVER-style per-account capability *wizard* view
   (`/api/seller-accounts/{id}/connection-capability`) is NAVER-only; a Coupang analog is a documented
   follow-up. The `ConnectCoupang` page delivers the first-connection prerequisites + credential + test;

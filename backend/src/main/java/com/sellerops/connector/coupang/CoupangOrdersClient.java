@@ -78,9 +78,20 @@ public class CoupangOrdersClient {
     static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final String MARKET = "KR";
     /**
+     * The KST offset appended to the {@code createdAt} query dates, in the official portal-example form:
+     * {@code +} pre-encoded as {@code %2B}, {@code :} left raw (e.g. {@code 2026-08-05%2B09:00}).
+     */
+    private static final String KST_QUERY_OFFSET = "%2B09:00";
+    /**
      * The exact, fixed system string in Coupang's 403 IP body ("[FORBIDDEN] Not allowed IP.
      * …", official article). Matched case-insensitively to split an IP denial from other
      * 403s; the body is read ONLY for this marker and never surfaced.
+     *
+     * <p>This is the officially documented English gateway string; a Korean/reworded variant is not
+     * guessed here (never fabricate a provider string). When the marker does NOT match, a 403 on an
+     * authenticated call falls back to the hedged {@code ORDER_ACCESS_DENIED}, whose operator message
+     * guides the seller to check BOTH the order-API permission AND the calling-IP registration — so a
+     * missed marker degrades the specificity, never the correctness, of the remediation.
      */
     private static final String IP_DENIED_MARKER = "not allowed ip";
 
@@ -124,15 +135,9 @@ public class CoupangOrdersClient {
             String nextToken = null;
             int pages = 0;
             do {
-                Map<String, String> params = new LinkedHashMap<>();
-                params.put("createdAtFrom", window.fromParam());
-                params.put("createdAtTo", window.toParam());
-                params.put("status", status);
-                params.put("maxPerPage", Integer.toString(MAX_PER_PAGE));
-                if (nextToken != null && !nextToken.isBlank()) {
-                    params.put("nextToken", nextToken);
-                }
-                OrdersheetEnvelope envelope = getOrdersheets(accessKey, secretKey, vendorId, path, params);
+                String query = ordersheetsQuery(window.fromParam(), window.toParam(), status,
+                        MAX_PER_PAGE, nextToken);
+                OrdersheetEnvelope envelope = getOrdersheets(accessKey, secretKey, vendorId, path, query);
                 for (Ordersheet item : envelope.dataOrEmpty()) {
                     OrderRow row = toRow(item);
                     collected.putIfAbsent(row.externalOrderId(), row);
@@ -153,8 +158,8 @@ public class CoupangOrdersClient {
     }
 
     private OrdersheetEnvelope getOrdersheets(String accessKey, String secretKey, String vendorId,
-                                              String path, Map<String, String> params) {
-        CoupangHttpClient.Response response = signedGet(path, params, accessKey, secretKey, vendorId);
+                                              String path, String query) {
+        CoupangHttpClient.Response response = signedGet(path, query, accessKey, secretKey, vendorId);
         if (response.statusCode() == 429) {
             throw CoupangRateLimitedException.fromResponse(response);
         }
@@ -200,13 +205,10 @@ public class CoupangOrdersClient {
      */
     public CredentialProbe credentialProbe(String accessKey, String secretKey, String vendorId) {
         String path = String.format(RETURN_CENTERS_PATH_FMT, vendorId);
-        Map<String, String> params = new LinkedHashMap<>();
-        params.put("pageNum", "1");
-        params.put("pageSize", "1");
 
         CoupangHttpClient.Response response;
         try {
-            response = signedGet(path, params, accessKey, secretKey, vendorId);
+            response = signedGet(path, "pageNum=1&pageSize=1", accessKey, secretKey, vendorId);
         } catch (IllegalStateException e) {
             return CredentialProbe.UNAVAILABLE;
         }
@@ -263,15 +265,11 @@ public class CoupangOrdersClient {
     public OrderAccessProbe probeOrderAccess(String accessKey, String secretKey, String vendorId) {
         LocalDate today = LocalDate.ofInstant(clock.instant(), KST);
         String path = String.format(ORDERSHEETS_PATH_FMT, vendorId);
-        Map<String, String> params = new LinkedHashMap<>();
-        params.put("createdAtFrom", today.minusDays(1).toString());
-        params.put("createdAtTo", today.toString());
-        params.put("status", "ACCEPT");
-        params.put("maxPerPage", "1");
+        String query = ordersheetsQuery(today.minusDays(1).toString(), today.toString(), "ACCEPT", 1, null);
 
         CoupangHttpClient.Response response;
         try {
-            response = signedGet(path, params, accessKey, secretKey, vendorId);
+            response = signedGet(path, query, accessKey, secretKey, vendorId);
         } catch (IllegalStateException e) {
             return OrderAccessProbe.UNAVAILABLE;
         }
@@ -379,11 +377,10 @@ public class CoupangOrdersClient {
 
     // --- signed transport -------------------------------------------------
 
-    private CoupangHttpClient.Response signedGet(String path, Map<String, String> params,
+    private CoupangHttpClient.Response signedGet(String path, String query,
                                                  String accessKey, String secretKey, String vendorId) {
-        String query = buildQuery(params);
-        // The signer stamps a single signed-date and signs signedDate+method+path+query; the
-        // SAME encoded query string is what we send, so the signature always matches the request.
+        // The signer stamps a single signed-date and signs signedDate+method+path+query; the SAME
+        // query string is what we send, so the signature always matches the request byte-for-byte.
         String authorization = signer.authorization(accessKey, secretKey, "GET", path, query);
         Map<String, String> headers = new LinkedHashMap<>();
         headers.put("Authorization", authorization);
@@ -393,15 +390,25 @@ public class CoupangOrdersClient {
         return http.get(uri, headers);
     }
 
-    private static String buildQuery(Map<String, String> params) {
-        StringBuilder query = new StringBuilder();
-        for (Map.Entry<String, String> entry : params.entrySet()) {
-            if (query.length() > 0) {
-                query.append('&');
-            }
-            query.append(URLEncoder.encode(entry.getKey(), StandardCharsets.UTF_8))
-                    .append('=')
-                    .append(URLEncoder.encode(entry.getValue(), StandardCharsets.UTF_8));
+    /**
+     * Build the ordersheets query string in the EXACT official form
+     * (developers.coupang.com example: {@code createdAtFrom=2025-07-21%2B09:00&createdAtTo=…&maxPerPage=2&status=INSTRUCT}).
+     * The {@code createdAt} dates carry the KST offset {@code +09:00} — the {@code +} pre-encoded as
+     * {@code %2B} (else a query {@code +} is read as a space) and the {@code :} left raw, matching the
+     * portal's own example. A bare date without the offset is the Coupang analogue of NAVER's
+     * malformed-datetime HTTP 400. {@code status}/{@code maxPerPage} are URL-safe literals;
+     * {@code nextToken} (opaque, may carry {@code +}/{@code /}/{@code =}) is percent-encoded. This one
+     * string is used for BOTH the signature and the sent URI, so they can never diverge.
+     */
+    private static String ordersheetsQuery(String fromDate, String toDate, String status,
+                                           int maxPerPage, String nextToken) {
+        StringBuilder query = new StringBuilder()
+                .append("createdAtFrom=").append(fromDate).append(KST_QUERY_OFFSET)
+                .append("&createdAtTo=").append(toDate).append(KST_QUERY_OFFSET)
+                .append("&status=").append(status)
+                .append("&maxPerPage=").append(maxPerPage);
+        if (nextToken != null && !nextToken.isBlank()) {
+            query.append("&nextToken=").append(URLEncoder.encode(nextToken, StandardCharsets.UTF_8));
         }
         return query.toString();
     }

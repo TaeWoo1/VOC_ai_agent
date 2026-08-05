@@ -203,7 +203,13 @@ class CoupangApiConnectorTest {
             assertThat(sent.headers()).containsKey("Authorization");
             assertThat(sent.headers()).containsEntry("X-Requested-By", "A00012345");
             assertThat(sent.headers()).containsEntry("X-MARKET", "KR");
-            assertThat(sent.uri().toString()).contains("/vendors/A00012345/ordersheets");
+            String uri = sent.uri().toString();
+            assertThat(uri).contains("/vendors/A00012345/ordersheets");
+            // The createdAt dates carry the official KST offset (+09:00, '+' encoded as %2B) — a bare
+            // date without it is the Coupang analogue of NAVER's malformed-datetime HTTP 400.
+            assertThat(uri).contains("createdAtFrom=2026-07-29%2B09:00");
+            assertThat(uri).contains("createdAtTo=2026-08-05%2B09:00");
+            assertThat(uri).contains("maxPerPage=50");
         });
 
         List<CanonicalOrder> orders = page.orders().stream().map(CanonicalOrder.class::cast).toList();
@@ -274,6 +280,20 @@ class CoupangApiConnectorTest {
         assertThat(http.sent).hasSize(2);
         assertThat(http.sent.get(0).uri().toString()).contains("/returnShippingCenters");
         assertThat(http.sent.get(1).uri().toString()).contains("/ordersheets");
+    }
+
+    @Test
+    void verifyWithBlankCredentialFailsInvalidWithZeroHttp() {
+        // A Coupang-shaped credential missing a required field must fail the shape check as
+        // INVALID_CREDENTIAL before any probe call — symmetric with fetch()'s fail-closed ordering.
+        vault.store(org, account, "API", "HMAC",
+                Map.of("access_key", "AK-1", "secret_key", "SK-1"), null, null, null); // no vendor_id
+
+        VerifyOutcome outcome = connector.verifyConnection(new VerifyContext(org, account, "COUPANG"));
+
+        assertThat(outcome.status()).isEqualTo(VerifyOutcome.Status.FAILED);
+        assertThat(outcome.reasonCode()).isEqualTo(VerifyOutcome.REASON_INVALID_CREDENTIAL);
+        assertThat(http.sent).isEmpty();
     }
 
     @Test
