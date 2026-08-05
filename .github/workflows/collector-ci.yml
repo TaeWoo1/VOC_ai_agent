@@ -29,6 +29,9 @@ on:
       # The review-import cards build the guidance pack the runtime renders inside the marketplace page, so
       # they are contract consumers too (2026-07-26).
       - 'frontend/src/components/reviewImport/**'
+      # The guided-connection walkthrough (NAVER issuance) renders from the shared Action Window run view, so
+      # it consumes the contract directly (2026-08-05).
+      - 'frontend/src/components/guidedConnection/**'
       - 'tools/ci/check-contract-importers.sh'
       - '.github/workflows/collector-ci.yml'
   push:
@@ -40,6 +43,7 @@ on:
       - 'frontend/src/components/actionWindow/**'
       - 'frontend/src/components/bridge/**'
       - 'frontend/src/components/reviewImport/**'
+      - 'frontend/src/components/guidedConnection/**'
       - 'tools/ci/check-contract-importers.sh'
       - '.github/workflows/collector-ci.yml'
 

@@ -26,6 +26,9 @@ FILTERED_PREFIXES=(
   # Added 2026-07-26: the review-import cards compose the guidance pack the runtime renders inside the
   # marketplace page, so they consume the shared contract directly.
   "frontend/src/components/reviewImport/"
+  # Added 2026-08-05: the guided-connection walkthrough (NAVER issuance) renders from the shared Action
+  # Window run view, so it imports the contract directly and must be a filtered path too.
+  "frontend/src/components/guidedConnection/"
 )
 
 echo "== every frontend contract importer must sit under a filtered path =="
