@@ -31,6 +31,10 @@ export interface NaverIssuanceTutorialProps {
   /** SellerOps' advertised fixed egress IPv4(s) to register in the app's 'API 호출 IP'. Shown at the
    *  register-call-IP step. Empty/absent ⇒ fail-safe generic note, never a fabricated IP. */
   advertisedEgressIps?: readonly string[];
+  /** COPY ONLY. An existing-app seller CONFIRMS their store's one app (no "발급"); a new-app seller issues
+   *  one. The region heading follows the same path-aware convention as the completion label. Default false
+   *  (new-app issuance). Never changes the step list — the caller passes the correct `steps`. */
+  reuseExistingApp?: boolean;
 }
 
 export function NaverIssuanceTutorial({
@@ -39,6 +43,7 @@ export function NaverIssuanceTutorial({
   completeLabel,
   busy,
   advertisedEgressIps = [],
+  reuseExistingApp = false,
 }: NaverIssuanceTutorialProps) {
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
 
@@ -57,7 +62,7 @@ export function NaverIssuanceTutorial({
   const doneCount = steps.filter((s) => checked.has(s.id)).length;
 
   return (
-    <div className="space-y-4" aria-label="NAVER API 발급 안내">
+    <div className="space-y-4" aria-label={reuseExistingApp ? "NAVER API 확인 안내" : "NAVER API 발급 안내"}>
       <p className="rounded-lg bg-canvas px-3 py-2 text-xs text-muted" role="note">
         {TUTORIAL_HINT_QUALIFIER}
       </p>

@@ -276,6 +276,7 @@ export function GuidedConnectionWizard({
                   <NaverIssuanceTutorial
                     steps={NAVER_EXISTING_APP_TUTORIAL}
                     advertisedEgressIps={advertisedEgressIps}
+                    reuseExistingApp
                   />
                 </div>
               </details>

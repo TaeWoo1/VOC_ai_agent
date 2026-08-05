@@ -11,6 +11,16 @@ import { NAVER_EXISTING_APP_TUTORIAL, NAVER_ISSUANCE_TUTORIAL } from "../../lib/
 afterEach(() => vi.restoreAllMocks());
 
 describe("NaverIssuanceTutorial", () => {
+  it("heading is path-aware: new-app issues (발급), existing-app confirms (확인) — same convention as the completion label", () => {
+    const { unmount } = render(<NaverIssuanceTutorial steps={NAVER_ISSUANCE_TUTORIAL} />);
+    expect(screen.getByLabelText("NAVER API 발급 안내")).toBeInTheDocument();
+    expect(screen.queryByLabelText("NAVER API 확인 안내")).toBeNull();
+    unmount();
+    render(<NaverIssuanceTutorial steps={NAVER_EXISTING_APP_TUTORIAL} reuseExistingApp />);
+    expect(screen.getByLabelText("NAVER API 확인 안내")).toBeInTheDocument();
+    expect(screen.queryByLabelText("NAVER API 발급 안내")).toBeNull();
+  });
+
   it("renders one checklist item per step, each with a checkbox and a '어디를 눌러야 하나요?' help", () => {
     render(<NaverIssuanceTutorial steps={NAVER_ISSUANCE_TUTORIAL} onComplete={vi.fn()} completeLabel="발급을 완료했어요" />);
     expect(screen.getAllByRole("listitem")).toHaveLength(NAVER_ISSUANCE_TUTORIAL.length);

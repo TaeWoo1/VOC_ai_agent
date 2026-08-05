@@ -1,7 +1,14 @@
 // Walkthrough environment-binding logic (pure). The 3-way run match + origin check is the machine proof
 // that the operator's tab is bound to the bootstrapped run; every failure mode must fail closed.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { evaluateBinding, frontendRunId, isWalkthroughMode, readUrlRunId } from "./walkthrough";
+import {
+  evaluateBinding,
+  expectedWalkthroughUrl,
+  frontendRunId,
+  isWalkthroughMode,
+  readUrlRunId,
+  withWalkthroughRun,
+} from "./walkthrough";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -62,6 +69,55 @@ describe("readUrlRunId", () => {
     expect(readUrlRunId("?x=1")).toBeNull();
     expect(readUrlRunId("")).toBeNull();
     expect(readUrlRunId("?walkthroughRun=")).toBeNull();
+  });
+});
+
+describe("expectedWalkthroughUrl — the one tested reopen-URL constructor", () => {
+  it("builds <origin>/connect/naver?walkthroughRun=<runId>", () => {
+    expect(expectedWalkthroughUrl(ORIGIN, "wt-abc123")).toBe(
+      "http://localhost:5173/connect/naver?walkthroughRun=wt-abc123",
+    );
+  });
+
+  it("the produced query param round-trips through readUrlRunId (symmetric encode/decode)", () => {
+    const url = expectedWalkthroughUrl(ORIGIN, "wt-abc123");
+    const search = url.slice(url.indexOf("?"));
+    expect(readUrlRunId(search)).toBe("wt-abc123");
+  });
+
+  it("carries the EXACT run id — a different run id is not silently produced", () => {
+    const url = expectedWalkthroughUrl(ORIGIN, "wt-REALRUN");
+    expect(new URL(url).searchParams.get("walkthroughRun")).toBe("wt-REALRUN");
+  });
+});
+
+describe("withWalkthroughRun — preserve the run id across an internal navigation", () => {
+  it("appends walkthroughRun to a bare internal path", () => {
+    expect(withWalkthroughRun("/settings/review-import", "wt-1")).toBe(
+      "/settings/review-import?walkthroughRun=wt-1",
+    );
+  });
+
+  it("uses & when the path already has a query", () => {
+    expect(withWalkthroughRun("/x?a=1", "wt-1")).toBe("/x?a=1&walkthroughRun=wt-1");
+  });
+
+  it("null/empty run id (not in a bound walkthrough) → path unchanged", () => {
+    expect(withWalkthroughRun("/settings/review-import", null)).toBe("/settings/review-import");
+    expect(withWalkthroughRun("/settings/review-import", "")).toBe("/settings/review-import");
+  });
+
+  it("idempotent — never doubles an already-present walkthroughRun", () => {
+    const once = withWalkthroughRun("/connect/naver", "wt-1");
+    expect(withWalkthroughRun(once, "wt-1")).toBe(once);
+    expect(withWalkthroughRun("/connect/naver?walkthroughRun=wt-1", "wt-2")).toBe(
+      "/connect/naver?walkthroughRun=wt-1",
+    );
+  });
+
+  it("the preserved param reads back as the same run id via readUrlRunId", () => {
+    const path = withWalkthroughRun("/settings/review-import", "wt-keep");
+    expect(readUrlRunId(path.slice(path.indexOf("?")))).toBe("wt-keep");
   });
 });
 

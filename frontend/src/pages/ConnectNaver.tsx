@@ -10,6 +10,7 @@ import { selectChannelAccount } from "../lib/channelConnection";
 import {
   clearGuidedProgress,
   evaluateBinding,
+  expectedWalkthroughUrl,
   frontendRunId,
   guidedConnectionReducer,
   isWalkthroughMode,
@@ -18,6 +19,7 @@ import {
   readUrlRunId,
   saveGuidedProgress,
   tabNonce,
+  withWalkthroughRun,
   type WalkthroughMismatchReason,
 } from "../lib/guidedConnection";
 import type {
@@ -487,8 +489,12 @@ export function ConnectNaver() {
 
   const onGoToReviewExport = useCallback(() => {
     clearGuidedProgress();
-    navigate("/settings/review-import");
-  }, [navigate]);
+    // Preserve the bound run id across this internal navigation so the disposable walkthrough run is not
+    // dropped from the URL (a plain navigate would strip `?walkthroughRun=`). Outside walkthrough mode the
+    // run id is null and the path is returned unchanged.
+    const runId = walkthrough ? readUrlRunId(window.location.search) : null;
+    navigate(withWalkthroughRun("/settings/review-import", runId));
+  }, [navigate, walkthrough]);
 
   const credentialUnavailable = useMemo(
     () => !loading && !resolveError && !template,
@@ -507,7 +513,7 @@ export function ConnectNaver() {
   );
 
   const expectedUrl = wtContext
-    ? `${wtContext.frontendOrigin}/connect/naver?walkthroughRun=${wtContext.walkthroughRunId}`
+    ? expectedWalkthroughUrl(wtContext.frontendOrigin, wtContext.walkthroughRunId)
     : null;
 
   const wizardBlock = (

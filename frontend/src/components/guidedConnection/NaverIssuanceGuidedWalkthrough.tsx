@@ -7,10 +7,11 @@ import { OperationRunTimeline } from "../actionWindow/OperationRunTimeline";
 import { ActionWindowControlPanel } from "../actionWindow/ActionWindowControlPanel";
 import { BlockerNotice } from "../actionWindow/BlockerNotice";
 import { AgentPairingPanel } from "../reviewImport/AgentPairingPanel";
+import { AgentEnvNotice } from "./AgentEnvNotice";
 import { AdvertisedCallIpPanel } from "./AdvertisedCallIpPanel";
 import { useGuidedIssuance } from "../../lib/actionWindow/issuance/useGuidedIssuance";
 import type { GuidedIssuanceRuntime } from "../../lib/actionWindow/issuance/issuanceRuntime";
-import type { GuidedEvent } from "../../lib/guidedConnection";
+import { classifyAgentEnv, type AgentEnvStatus, type GuidedEvent } from "../../lib/guidedConnection";
 
 /**
  * The Action Window guided walkthrough for NAVER API-center issuance (`application_issuance_guided`).
@@ -141,8 +142,18 @@ export function NaverIssuanceGuidedWalkthrough({
   const effectiveRun = controlled ? (run ?? null) : liveView;
   const effectiveCommand = controlled ? onCommand : issuance.send;
   // The host refused (wrong carrier / unreachable / START_RUN rejected) → guidance can't run; point at text.
-  const hostRefused = !controlled && issuance.unavailable !== null;
+  const hostRefusal = controlled ? null : issuance.unavailable;
+  const hostRefused = hostRefusal !== null;
   const cannotGuide = cannotPair || hostRefused;
+  // Classify the host-refusal into a DISTINCT situation so "the agent is hosting a different run/session"
+  // (carrier-mismatch → SESSION_MISMATCH) is guided differently from "cannot host" or "not running" — never
+  // the old single catch-all. `start-refused` is an issuance-level (not a bridge) reason: the agent is paired
+  // but the run would not start, i.e. it cannot host right now. Derived only from existing signals.
+  const hostAgentEnv: AgentEnvStatus | null = !hostRefused
+    ? null
+    : hostRefusal === "start-refused"
+      ? { code: "HOST_UNAVAILABLE", fault: "agent", canRetry: true, offerTextFallback: true }
+      : classifyAgentEnv({ bridgePhase: phase, hostRefusal });
   // Text is a FALLBACK, never a co-equal choice: it is offered ONLY when guidance cannot run — the agent can't
   // pair (incompatible/denied/revoked), the host refused, or the agent is unreachable. On the healthy paired
   // path it never appears.
@@ -169,6 +180,17 @@ export function NaverIssuanceGuidedWalkthrough({
   const controlExclude = effectiveRun
     ? effectiveRun.allowedCommands.filter((c) => !OFFERED_COMMANDS.includes(c))
     : [];
+
+  // Retry for a HOST refusal (agent paired but hosting a different run / cannot host right now). The bridge is
+  // already paired, so re-detecting it (`bridge.retry`) is not the fix — the issuance HOST must be re-attached.
+  // Reset the attach once-guard and re-attach: a successful reattach clears `issuance.unavailable`
+  // (useGuidedIssuance sets it back to null), recovering the guided walk; a still-refusing agent simply
+  // re-sets the same reason (the notice persists, fail-closed). `attach()` is idempotent, so this cannot open
+  // a second socket. This is what makes "restart the agent, then retry" (the SESSION_MISMATCH copy) actually work.
+  const retryHost = () => {
+    attachedRef.current = false;
+    void attach();
+  };
 
   const toText = () => {
     // Switching to text IS the manual path: if a guided run is live and the runtime accepts it, tell the
@@ -225,12 +247,17 @@ export function NaverIssuanceGuidedWalkthrough({
         />
       )}
 
-      {/* The agent can't guide (needs update / declined) — say so and point at text. */}
-      {cannotGuide && (
+      {/* Pairing itself won't help (needs an update / declined / revoked) — the generic guidance to text. */}
+      {cannotPair && (
         <p className="rounded-xl bg-warn/10 px-4 py-3 text-sm text-ink break-keep" role="status">
           화면 안내를 사용할 수 없어요. 텍스트로 진행해 주세요.
         </p>
       )}
+
+      {/* Agent paired but the host refused → a DISTINCT notice: "hosting a different run/session"
+          (carrier-mismatch → restart the agent, then retry) vs "cannot host right now" — never conflated
+          with "the agent is not running". */}
+      {hostAgentEnv && <AgentEnvNotice status={hostAgentEnv} onRetry={retryHost} />}
 
       {/* Text is a FALLBACK, shown ONLY when guidance cannot run (can't pair / host refused / agent
           unreachable). On the healthy paired path it never appears. */}
