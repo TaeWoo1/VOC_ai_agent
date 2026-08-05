@@ -1,0 +1,7 @@
+[
+  {
+    "_comment": "Browser-free stub so run-agent-local.sh can host the issuance GUIDANCE carrier without launching Chrome or making any NAVER call. COUPANG is a DISCOVERY_REQUIRED channel (strategy null) → the connector registry returns a SKIPPED handle → no browser service is ever constructed (see collector/src/connector/channel-registry.ts + local-agent-connector-startup.ts isRunnableBrowserConnection). Contains NO credential, store id, cookie, token, or real URL — copy it to your own path and point AGENT_CONNECTIONS at it if you want a different one.",
+    "connectionId": "issuance-guidance-local-fixture",
+    "channel": "COUPANG"
+  }
+]

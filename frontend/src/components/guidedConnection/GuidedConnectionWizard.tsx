@@ -5,11 +5,13 @@ import type {
 } from "../../lib/types";
 import { relativeTime } from "../../lib/format";
 import { ConnectionCapabilityPanel } from "./ConnectionCapabilityPanel";
+import { AdvertisedCallIpPanel } from "./AdvertisedCallIpPanel";
 import { NaverIssuanceTutorial } from "./NaverIssuanceTutorial";
 import { NaverIssuanceModeChoice } from "./NaverIssuanceModeChoice";
 import { NaverIssuanceGuidedWalkthrough } from "./NaverIssuanceGuidedWalkthrough";
 import {
   ACTOR_COPY,
+  CALL_IP_COPY,
   DISCONNECT_GUARDRAIL_COPY,
   FAILURE_COPY,
   NAVER_EXISTING_APP_TUTORIAL,
@@ -335,6 +337,9 @@ export function GuidedConnectionWizard({
         {phase === "call_environment_mismatch" && (
           <div className="space-y-3">
             <p className="text-muted">{PHASE_COPY.call_environment_mismatch.body}</p>
+            {/* Show WHICH IP to register (or the honest "not configured yet" note), and let a seller who
+                already registered acknowledge it and retry. The retry re-runs the test — the real gate. */}
+            <AdvertisedCallIpPanel ips={advertisedEgressIps} showRegisteredAck />
             <button type="button" className="btn-primary" onClick={onRetryTest} disabled={busy}>
               호출 환경을 확인했어요, 다시 시도
             </button>
@@ -344,6 +349,7 @@ export function GuidedConnectionWizard({
         {phase === "order_access_denied" && (
           <div className="space-y-3">
             <p className="text-muted">{PHASE_COPY.order_access_denied.body}</p>
+            <AdvertisedCallIpPanel ips={advertisedEgressIps} showRegisteredAck />
             <button type="button" className="btn-primary" onClick={onRetryTest} disabled={busy}>
               권한·호출 IP를 확인했어요, 다시 시도
             </button>
@@ -372,6 +378,14 @@ export function GuidedConnectionWizard({
 
         {phase === "completed" && (
           <div className="space-y-4">
+            {/* Reaching completion means the first ORDER_SUMMARY sync succeeded (the state machine reaches
+                `completed` only after a real synced run), which genuinely proves order-API access — and thus
+                that the fixed call IP is allowed. So close the IP loop positively here. (Attributed to the
+                successful sync, NOT the connection test alone: that test's probe reports success even for a
+                rate-limited/unavailable response, so it does not by itself prove the IP is allowed.) */}
+            <p className="rounded-lg bg-good/10 px-4 py-3 text-sm text-ink break-keep" role="status">
+              {CALL_IP_COPY.readyConfirmed}
+            </p>
             {capability && <ConnectionCapabilityPanel capability={capability} />}
             <ConnectionSummary status={connectionStatus} />
             <ReviewSetupCard

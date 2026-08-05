@@ -115,7 +115,7 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
 
   it("call-IP advisory fails safe with no advertised IP: generic note, never a fabricated IP", () => {
     render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} run={issuanceRun()} onCommand={vi.fn()} />);
-    expect(screen.getByText(/등록할 고정 IP가 아직 표시되지 않습니다/)).toBeInTheDocument();
+    expect(screen.getByText(/아직 설정되지 않았습니다/)).toBeInTheDocument();
     expect(screen.queryByText(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)).toBeNull();
   });
 

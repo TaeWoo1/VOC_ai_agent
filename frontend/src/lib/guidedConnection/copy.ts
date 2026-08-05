@@ -115,6 +115,35 @@ export const DISCONNECT_GUARDRAIL_COPY = {
 } as const;
 
 /**
+ * 'API 호출 IP' registration copy — kept in one place so the tutorial step, the guided-walk advisory, and the
+ * connection-test failure-recovery phases all say the same thing, and so two DIFFERENT root causes never read
+ * as one:
+ *
+ *  • `advertisedUnset*` — **SellerOps has not configured a fixed egress IP yet** (`advertisedEgressIps` empty).
+ *    This is OUR side, not the seller's fault: we literally cannot show a value to register. It must never be
+ *    phrased as "you failed to register", and it must NOT block a seller who already registered a call IP out
+ *    of band — hence the acknowledgment path.
+ *  • `registerTitle` — the advertised IP IS known, so what remains is the SELLER registering it in the NAVER
+ *    API center (their action).
+ *
+ * The acknowledgment (`alreadyRegistered*`) is a purely local reassurance — it stores NO IP and is NEVER a
+ * gate. The connection test + the first order sync stay the authoritative checks; `readyConfirmed` is shown
+ * only at `completed`, which the state machine reaches ONLY after a successful first ORDER_SUMMARY sync — the
+ * step that genuinely proves order-API access (and thus that the call IP is allowed). It is deliberately NOT
+ * attributed to the connection test alone: that test's order-access probe reports success for rate-limited /
+ * temporarily-unavailable responses too, so a passing test does not by itself prove the IP is allowed.
+ */
+export const CALL_IP_COPY = {
+  registerTitle: "아래 고정 IP를 애플리케이션의 'API 호출 IP'에 등록하세요.",
+  advertisedUnsetTitle: "SellerOps 고정 호출 IP가 아직 설정되지 않았습니다.",
+  advertisedUnsetBody:
+    "준비되면 이 자리에 표시되며, 그때 애플리케이션의 'API 호출 IP'에 등록하면 됩니다. 이미 직접 등록하셨다면 아래에서 확인 표시 후 계속 진행할 수 있어요. 급하면 담당자에게 문의하세요.",
+  alreadyRegisteredCta: "이미 API 호출 IP를 등록했어요",
+  acknowledgedNote: "호출 IP 등록을 확인함으로 표시했어요. 실제 등록 여부는 연결 테스트로 최종 확인됩니다.",
+  readyConfirmed: "호출 IP·주문 API 접근 정상 — 첫 주문 수집까지 완료되었습니다.",
+} as const;
+
+/**
  * Post-completion REVIEW_IMPORT setup card copy. The order connection is complete and Local-Agent-free;
  * review import is a SEPARATE, later step that DOES need the Local Agent (pairing + NAVER seller-center
  * login + the Action Window guided export). The card explains the honest state by pairing readiness:
