@@ -103,13 +103,21 @@ public class CoupangOrdersClient {
     private final CoupangSigner signer;
     private final Clock clock;
     private final String baseUrl;
+    /**
+     * The armed live-run approval id (env-binding token, never a credential). Blank ⇒ a live call to a
+     * real Coupang gateway host is refused fail-closed by {@link CoupangLiveCallGuard}; an offline/loopback
+     * base URL never consults it. See {@code docs/sellerops_live_approval_contract.md}.
+     */
+    private final String liveApprovalId;
     private final ObjectMapper mapper = new ObjectMapper();
 
-    public CoupangOrdersClient(CoupangHttpClient http, CoupangSigner signer, Clock clock, String baseUrl) {
+    public CoupangOrdersClient(CoupangHttpClient http, CoupangSigner signer, Clock clock, String baseUrl,
+                               String liveApprovalId) {
         this.http = http;
         this.signer = signer;
         this.clock = clock;
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        this.liveApprovalId = liveApprovalId;
     }
 
     // --- order collection -------------------------------------------------
@@ -379,6 +387,10 @@ public class CoupangOrdersClient {
 
     private CoupangHttpClient.Response signedGet(String path, String query,
                                                  String accessKey, String secretKey, String vendorId) {
+        // Live-run approval interlock — the single backend choke point for EVERY Coupang request. A real
+        // gateway host without an armed approval id fails closed here, before any signing or socket
+        // (docs/sellerops_live_approval_contract.md). Offline/loopback base URLs are exempt.
+        CoupangLiveCallGuard.ensureLiveCallAllowed(baseUrl, liveApprovalId);
         // The signer stamps a single signed-date and signs signedDate+method+path+query; the SAME
         // query string is what we send, so the signature always matches the request byte-for-byte.
         String authorization = signer.authorization(accessKey, secretKey, "GET", path, query);

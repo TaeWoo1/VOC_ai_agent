@@ -2,11 +2,17 @@ package com.sellerops.connector.coupang.setup;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.sellerops.connector.coupang.setup.CoupangSetupView.LiveApprovalReadiness;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/** Unit tests for the deployment-global Coupang setup surface: config sanitization + the endpoint shape. */
+/** Unit tests for the deployment-global Coupang setup surface: config sanitization, the endpoint shape,
+ *  and the sanitized live-run approval readiness (binding proof for a live-proof preflight). */
 class CoupangSetupControllerTest {
+
+    private static CoupangSetupController controller(String ips, boolean enabled, String approvalId) {
+        return new CoupangSetupController(new CoupangAdvertisedEgress(ips), enabled, approvalId);
+    }
 
     @Test
     void sanitizeTrimsKeepsIpV4OnlyDeDupesAndCaps() {
@@ -26,19 +32,45 @@ class CoupangSetupControllerTest {
 
     @Test
     void setupEndpointReturnsTheSanitizedAdvertisedIps() {
-        CoupangSetupController controller =
-                new CoupangSetupController(new CoupangAdvertisedEgress("203.0.113.20, 203.0.113.21"));
-
-        CoupangSetupView view = controller.setup();
+        CoupangSetupView view = controller("203.0.113.20, 203.0.113.21", false, "").setup();
 
         assertThat(view.advertisedEgressIps()).containsExactly("203.0.113.20", "203.0.113.21");
     }
 
     @Test
     void setupEndpointEmptyByDefaultAndViewNeverNull() {
-        assertThat(new CoupangSetupController(new CoupangAdvertisedEgress("")).setup().advertisedEgressIps())
-                .isEmpty();
-        // The view normalizes a null list to empty so a client never sees null.
-        assertThat(new CoupangSetupView(null).advertisedEgressIps()).isEmpty();
+        assertThat(controller("", false, "").setup().advertisedEgressIps()).isEmpty();
+        // The view normalizes a null list to empty and a null readiness to a not-armed value.
+        CoupangSetupView view = new CoupangSetupView(null, null);
+        assertThat(view.advertisedEgressIps()).isEmpty();
+        assertThat(view.liveApproval()).isNotNull();
+        assertThat(view.liveApproval().approvalArmed()).isFalse();
+        assertThat(view.liveApproval().approvalIdPrefix()).isNull();
+    }
+
+    @Test
+    void liveApprovalIsArmedOnlyWhenEnabledAndIdPresent_andSurfacesOnlyAShortPrefix() {
+        CoupangSetupView armed = controller("", true, "apr-0123456789abcdef-secret-tail").setup();
+        assertThat(armed.liveApproval().connectorEnabled()).isTrue();
+        assertThat(armed.liveApproval().approvalArmed()).isTrue();
+        // Only a short, non-revealing prefix crosses the wire — never the full env-binding id.
+        assertThat(armed.liveApproval().approvalIdPrefix())
+                .isEqualTo("apr-01234567")
+                .hasSize(LiveApprovalReadiness.PREFIX_LENGTH);
+    }
+
+    @Test
+    void liveApprovalUnarmedWhenFlagOffEvenWithId_orWhenFlagOnButNoId() {
+        // Flag off + id present → NOT armed (COUPANG is the mock; no live path wired).
+        CoupangSetupView flagOff = controller("", false, "apr-abcdef123456").setup();
+        assertThat(flagOff.liveApproval().connectorEnabled()).isFalse();
+        assertThat(flagOff.liveApproval().approvalArmed()).isFalse();
+        assertThat(flagOff.liveApproval().approvalIdPrefix()).isNull();
+
+        // Flag on + blank id → NOT armed (a real-gateway call would fail closed).
+        CoupangSetupView noId = controller("", true, "   ").setup();
+        assertThat(noId.liveApproval().connectorEnabled()).isTrue();
+        assertThat(noId.liveApproval().approvalArmed()).isFalse();
+        assertThat(noId.liveApproval().approvalIdPrefix()).isNull();
     }
 }

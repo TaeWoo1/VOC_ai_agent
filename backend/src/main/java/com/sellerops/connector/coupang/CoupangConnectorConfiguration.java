@@ -36,8 +36,11 @@ public class CoupangConnectorConfiguration {
     @Bean
     CoupangOrdersClient coupangOrdersClient(
             CoupangHttpClient http, CoupangSigner signer,
-            @Value("${sellerops.connector.coupang.base-url:https://api-gateway.coupang.com}") String baseUrl) {
-        return new CoupangOrdersClient(http, signer, Clock.systemUTC(), baseUrl);
+            @Value("${sellerops.connector.coupang.base-url:https://api-gateway.coupang.com}") String baseUrl,
+            @Value("${sellerops.connector.coupang.live-approval-id:}") String liveApprovalId) {
+        // liveApprovalId arms the backend live-call interlock (CoupangLiveCallGuard). Empty by default →
+        // a real-gateway call fails closed; an operator-approved run injects the bootstrapped id.
+        return new CoupangOrdersClient(http, signer, Clock.systemUTC(), baseUrl, liveApprovalId);
     }
 
     @Bean
