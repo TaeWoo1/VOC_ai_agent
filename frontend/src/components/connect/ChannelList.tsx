@@ -66,6 +66,9 @@ function ChannelRow({
         // `withWalkthroughRun` is a no-op outside walkthrough mode, so normal sellers still get the bare path.
         navigate(withWalkthroughRun("/connect/naver", isWalkthroughMode() ? frontendRunId() : null));
         return;
+      case "connect-coupang":
+        navigate("/connect/coupang");
+        return;
       case "upload":
         navigate(`/connect/upload?channelId=${channel.id}`);
         return;

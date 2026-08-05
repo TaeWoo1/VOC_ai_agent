@@ -10,6 +10,7 @@ export type ChannelCardIntent =
   | "reconnect" // Cafe24: (re-)run the OAuth flow, reusing the existing account
   | "connect-cafe24" // no account yet: start the Cafe24 OAuth flow
   | "connect-naver" // no account yet: start the NAVER guided-connection wizard (/connect/naver)
+  | "connect-coupang" // no account yet: open the Coupang connection setup (/connect/coupang)
   | "upload" // file-upload channel
   | "notice"; // no auto-connect path: show a guidance notice
 
@@ -85,6 +86,12 @@ export function channelCardAction(
     // orders via the official API and hands off to Action Window review export. Upload stays
     // reachable from the channel detail.
     return { label: channel.actionLabel, intent: "connect-naver", disabled: prepping };
+  }
+  if (channel.code === "COUPANG") {
+    // First-time Coupang: the connection setup surface shows the official prerequisites (issue the WING
+    // API key, grant order-API access, register the deployment calling IP) then hosts credential entry +
+    // the connection test. Orders connect via the official Coupang Open API.
+    return { label: channel.actionLabel, intent: "connect-coupang", disabled: prepping };
   }
   if (canUpload) {
     return { label: channel.actionLabel, intent: "upload", disabled: false };

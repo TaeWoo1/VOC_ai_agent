@@ -87,6 +87,19 @@ describe("channelCardAction — driven by real account status", () => {
       true,
     );
   });
+
+  it("no Coupang account → connect-coupang (the Coupang connection setup surface)", () => {
+    const coupang = { code: "COUPANG", status: "AVAILABLE" as ChannelStatus, actionLabel: "연결하기" };
+    expect(channelCardAction(coupang, null, false, false)).toEqual({
+      label: "연결하기",
+      intent: "connect-coupang",
+      disabled: false,
+    });
+    // PREPARING disables the button like the other channels.
+    expect(
+      channelCardAction({ ...coupang, status: "PREPARING" }, null, false, false).disabled,
+    ).toBe(true);
+  });
 });
 
 describe("selectChannelAccount — picks the real API-mode connection", () => {
