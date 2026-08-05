@@ -120,6 +120,17 @@ export interface NaverSetupView {
 }
 
 /**
+ * Deployment-global Coupang setup facts (mirrors the backend CoupangSetupView), available WITHOUT an
+ * account so the connection surface can show them during first-time connection. `advertisedEgressIps`
+ * is the fixed public egress IPv4(s) to register in the Coupang app's calling-IP allowlist — sanitized,
+ * not a secret, and EMPTY when none is configured (the UI then shows generic guidance, never a
+ * fabricated IP).
+ */
+export interface CoupangSetupView {
+  advertisedEgressIps: string[];
+}
+
+/**
  * Sanitized identity of a disposable walkthrough runtime (mirrors the backend WalkthroughContextView).
  * Carries a per-bootstrap opaque run id (an environment identifier, NOT a credential/token), git commit,
  * origins, a DB alias (never the full URL), flags, coarse baseline counts, and a start time. Used to prove

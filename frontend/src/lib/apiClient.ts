@@ -12,6 +12,7 @@ import type {
   ConnectionInfoView,
   ConnectionCapabilityView,
   NaverSetupView,
+  CoupangSetupView,
   ConnectionStatusView,
   ConnectionTestResultView,
   ConnectorAlertView,
@@ -233,6 +234,13 @@ export const api = {
   // GET, no account scope, no secret (the advertised IP is a value the seller registers publicly).
   async getNaverSetup(): Promise<NaverSetupView> {
     const { data } = await http.get<NaverSetupView>("/api/connect/naver/setup");
+    return data;
+  },
+  // Deployment-global Coupang setup facts (advertised calling IP(s)) for the connection surface —
+  // available WITHOUT an account so a first-time seller sees the prerequisite before connecting.
+  // Read-only GET, no account scope, no secret (the advertised IP is a value the seller registers publicly).
+  async getCoupangSetup(): Promise<CoupangSetupView> {
+    const { data } = await http.get<CoupangSetupView>("/api/connect/coupang/setup");
     return data;
   },
   // Walkthrough environment-identity: the read-only runtime context (walkthrough mode only; a 404 in

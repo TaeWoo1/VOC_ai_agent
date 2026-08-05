@@ -74,7 +74,7 @@ class SyncRunExecutorSingleFlightTest {
                 new com.sellerops.order.ChannelOrderIngestionService(channelOrders, channelOrderStatusEvents, txManager);
         SyncRunGate gate = new SyncRunGate(sellerAccounts, syncJobs, txManager, 60);
         executor = new SyncRunExecutor(sellerAccounts, channels, registry, ingestion, orderIngestion,
-                syncJobs, cursors, connectionStatus, null, null, null, gate);
+                syncJobs, cursors, connectionStatus, null, null, null, null, gate);
     }
 
     @Test
