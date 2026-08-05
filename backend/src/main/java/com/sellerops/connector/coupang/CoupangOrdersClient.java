@@ -195,8 +195,17 @@ public class CoupangOrdersClient {
         IP_DENIED,
         /** HTTP 429 — throttled; inconclusive. */
         RATE_LIMITED,
-        /** 5xx / network / other we-side error — inconclusive. */
-        UNAVAILABLE,
+        /** HTTP 5xx — a provider-side error; inconclusive for the credential. */
+        SERVER_ERROR,
+        /**
+         * A non-authoritative 4xx (e.g. 400/404) — NOT 401/403/429. The signature was accepted
+         * (else the gateway returns 401), so this is an endpoint-shape / resource condition on
+         * {@code returnShippingCenters} that may be unsuitable for this vendor, NOT a credential
+         * verdict; the order-access probe answers authoritatively.
+         */
+        CLIENT_ERROR,
+        /** No HTTP response — a transport failure (connect / timeout / TLS / DNS). Inconclusive. */
+        TRANSPORT_ERROR,
         /**
          * HTTP 403 that is NOT the IP marker — the signature was accepted (else 401), so the
          * credential is valid but this resource is forbidden. Inconclusive for CREDENTIAL
@@ -206,37 +215,56 @@ public class CoupangOrdersClient {
     }
 
     /**
+     * A credential-probe outcome plus the raw HTTP status that produced it. The status is a safe
+     * scalar (a number, never a body/header/signature), surfaced only for diagnosis/logging; it is
+     * {@link #NO_HTTP_STATUS} when a transport failure produced no response.
+     */
+    public record CredentialProbeResult(CredentialProbe classification, int httpStatus) {
+        /** Sentinel status for a transport failure (no HTTP response was received). */
+        public static final int NO_HTTP_STATUS = -1;
+
+        static CredentialProbeResult transport() {
+            return new CredentialProbeResult(CredentialProbe.TRANSPORT_ERROR, NO_HTTP_STATUS);
+        }
+    }
+
+    /**
      * Credential + call-environment check: one signed {@code returnShippingCenters} GET,
      * classified by HTTP status (and, for 403, the fixed IP marker). Reads nothing into the
      * product, persists nothing. Never throws for an HTTP outcome; a transport failure is
-     * {@link CredentialProbe#UNAVAILABLE}.
+     * {@link CredentialProbe#TRANSPORT_ERROR}. The exact HTTP status rides along in the result so a
+     * non-authoritative outcome (a 400/404 vs a 5xx vs a transport failure) is distinguishable for
+     * diagnosis instead of collapsing into one opaque bucket.
      */
-    public CredentialProbe credentialProbe(String accessKey, String secretKey, String vendorId) {
+    public CredentialProbeResult credentialProbe(String accessKey, String secretKey, String vendorId) {
         String path = String.format(RETURN_CENTERS_PATH_FMT, vendorId);
 
         CoupangHttpClient.Response response;
         try {
             response = signedGet(path, "pageNum=1&pageSize=1", accessKey, secretKey, vendorId);
         } catch (IllegalStateException e) {
-            return CredentialProbe.UNAVAILABLE;
+            return CredentialProbeResult.transport();
         }
         int status = response.statusCode();
+        CredentialProbe classification;
         if (status == 200) {
-            return CredentialProbe.OK;
+            classification = CredentialProbe.OK;
+        } else if (status == 401) {
+            classification = CredentialProbe.INVALID;
+        } else if (status == 429) {
+            classification = CredentialProbe.RATE_LIMITED;
+        } else if (status == 403) {
+            classification = isIpDenied(response.body())
+                    ? CredentialProbe.IP_DENIED : CredentialProbe.INCONCLUSIVE_FORBIDDEN;
+        } else if (status >= 500) {
+            classification = CredentialProbe.SERVER_ERROR;
+        } else {
+            // Any other non-authoritative status (a 400/404, or an unexpected 2xx-non-200 / 3xx): the
+            // returnShippingCenters endpoint gave no auth verdict. Kept distinct from 5xx so the (safe)
+            // status shows the exact code; both defer to the ordersheets auxiliary probe upstream.
+            classification = CredentialProbe.CLIENT_ERROR;
         }
-        if (status == 401) {
-            return CredentialProbe.INVALID;
-        }
-        if (status == 429) {
-            return CredentialProbe.RATE_LIMITED;
-        }
-        if (status >= 500) {
-            return CredentialProbe.UNAVAILABLE;
-        }
-        if (status == 403) {
-            return isIpDenied(response.body()) ? CredentialProbe.IP_DENIED : CredentialProbe.INCONCLUSIVE_FORBIDDEN;
-        }
-        return CredentialProbe.UNAVAILABLE;
+        return new CredentialProbeResult(classification, status);
     }
 
     /**
@@ -258,10 +286,25 @@ public class CoupangOrdersClient {
     }
 
     /**
+     * An order-access-probe outcome plus the raw HTTP status (a safe scalar) that produced it,
+     * surfaced only for diagnosis/logging. {@link #httpStatus} is {@link #NO_HTTP_STATUS} on a
+     * transport failure. No provider body, header, signature, or credential is carried.
+     */
+    public record OrderAccessResult(OrderAccessProbe classification, int httpStatus) {
+        /** Sentinel status for a transport failure (no HTTP response was received). */
+        public static final int NO_HTTP_STATUS = -1;
+
+        static OrderAccessResult transport() {
+            return new OrderAccessResult(OrderAccessProbe.UNAVAILABLE, NO_HTTP_STATUS);
+        }
+    }
+
+    /**
      * Read-only order-access probe: one signed {@code ordersheets} GET over a deliberately
      * narrow recent window ({@code status=ACCEPT}, {@code maxPerPage=1}), classified by HTTP
      * status (and, for 403, the fixed IP marker). Persists nothing, ingests nothing; the body
-     * is read only for its status/marker then discarded. Never throws for an HTTP outcome.
+     * is read only for its status/marker then discarded. Never throws for an HTTP outcome. The
+     * exact status rides along in the result for diagnosis.
      *
      * <p><b>Honesty boundary.</b> A 403 is order-access-denied by the HTTP-standard meaning of
      * the status. Coupang's IP denial carries a fixed body marker, so an IP cause IS
@@ -270,7 +313,7 @@ public class CoupangOrdersClient {
      * (the credential was already checked separately) or any other 4xx is a we-side/transient
      * condition that must not block a proven credential — {@link OrderAccessProbe#UNAVAILABLE}.
      */
-    public OrderAccessProbe probeOrderAccess(String accessKey, String secretKey, String vendorId) {
+    public OrderAccessResult probeOrderAccess(String accessKey, String secretKey, String vendorId) {
         LocalDate today = LocalDate.ofInstant(clock.instant(), KST);
         String path = String.format(ORDERSHEETS_PATH_FMT, vendorId);
         String query = ordersheetsQuery(today.minusDays(1).toString(), today.toString(), "ACCEPT", 1, null);
@@ -279,22 +322,22 @@ public class CoupangOrdersClient {
         try {
             response = signedGet(path, query, accessKey, secretKey, vendorId);
         } catch (IllegalStateException e) {
-            return OrderAccessProbe.UNAVAILABLE;
+            return OrderAccessResult.transport();
         }
         int status = response.statusCode();
+        OrderAccessProbe classification;
         if (status == 200) {
-            return OrderAccessProbe.CONFIRMED;
+            classification = OrderAccessProbe.CONFIRMED;
+        } else if (status == 429) {
+            classification = OrderAccessProbe.RATE_LIMITED;
+        } else if (status == 403) {
+            classification = isIpDenied(response.body())
+                    ? OrderAccessProbe.CALL_IP_DENIED : OrderAccessProbe.ACCESS_DENIED;
+        } else {
+            // 5xx / a we-side 4xx (400/401/…) / unexpected — inconclusive, never blocks a valid credential.
+            classification = OrderAccessProbe.UNAVAILABLE;
         }
-        if (status == 429) {
-            return OrderAccessProbe.RATE_LIMITED;
-        }
-        if (status >= 500) {
-            return OrderAccessProbe.UNAVAILABLE;
-        }
-        if (status == 403) {
-            return isIpDenied(response.body()) ? OrderAccessProbe.CALL_IP_DENIED : OrderAccessProbe.ACCESS_DENIED;
-        }
-        return OrderAccessProbe.UNAVAILABLE;
+        return new OrderAccessResult(classification, status);
     }
 
     // --- mapping ----------------------------------------------------------
