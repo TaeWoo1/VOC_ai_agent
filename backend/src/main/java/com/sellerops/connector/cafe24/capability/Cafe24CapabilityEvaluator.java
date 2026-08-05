@@ -42,6 +42,7 @@ public final class Cafe24CapabilityEvaluator {
     public static final String REASON_NOT_CONNECTED = "NOT_CONNECTED";
     public static final String REASON_CONNECTION_INCOMPLETE = "CONNECTION_INCOMPLETE";
     public static final String REASON_RECONNECT_REQUIRED = "RECONNECT_REQUIRED";
+    public static final String REASON_SCOPE_INSUFFICIENT = "SCOPE_INSUFFICIENT";
     public static final String REASON_CREDENTIAL_MISSING = "CREDENTIAL_MISSING";
     public static final String REASON_PROVIDER_ERROR = "PROVIDER_ERROR";
     public static final String REASON_BOARD_MAPPING_MISMATCH = "BOARD_MAPPING_MISMATCH";
@@ -64,6 +65,15 @@ public final class Cafe24CapabilityEvaluator {
         OK,
         /** Credential/config could not authorize — the seller must reconnect. */
         AUTH_FAILED,
+        /**
+         * The credential authorizes but the granted scopes do not cover the read, as reported by a
+         * standard OAuth2 {@code invalid_scope}/{@code insufficient_scope} on the <b>token endpoint</b>.
+         * Distinct from AUTH_FAILED: re-consenting with the same scopes will not fix it — a permission
+         * is missing. Note: a scope denial that surfaces only on a <i>resource</i> call (e.g. a 403 on
+         * board discovery) is NOT classified here — without a live-verified scope-error body we do not
+         * guess, so it stays AUTH_FAILED/RECONNECT_REQUIRED (a known, conservative follow-up).
+         */
+        SCOPE_INSUFFICIENT,
         /** A transient provider error (e.g. rate limit) — retry later, do not reconnect. */
         PROVIDER_ERROR,
         /** Probe was not run (connection not ready). */
@@ -118,6 +128,7 @@ public final class Cafe24CapabilityEvaluator {
                     blockReason = null;
                 }
                 case PROVIDER_ERROR -> blockReason = REASON_PROVIDER_ERROR;
+                case SCOPE_INSUFFICIENT -> blockReason = REASON_SCOPE_INSUFFICIENT;
                 case AUTH_FAILED -> blockReason = REASON_RECONNECT_REQUIRED;
                 default -> blockReason = REASON_CONNECTION_INCOMPLETE;
             }

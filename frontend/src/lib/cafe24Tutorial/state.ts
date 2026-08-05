@@ -21,6 +21,7 @@ export type TutorialPhase =
 export type TutorialFailure =
   | "invalid_request" // OAuth state expired or redirect/callback mismatch (backend: invalid)
   | "reconnect_required" // credential/auth could not authorize; also covers decrypt failure
+  | "scope_insufficient" // credential authorizes but a required read permission (scope) is missing
   | "credential_decrypt" // reserved: surfaced as reconnect_required by the backend today
   | "board_mapping" // review/inquiry board mapping mismatch
   | "first_sync_failed" // ORDER_SUMMARY first sync failed
@@ -149,9 +150,12 @@ function retryTarget(prev: TutorialState): TutorialState {
       return { ...prev, phase: "first_sync", failure: null };
     case "board_mapping":
     case "reconnect_required":
+    case "scope_insufficient":
     case "credential_decrypt":
     case "verify_unavailable":
       // Re-run verification when we still have the account; otherwise restart the connect.
+      // (scope_insufficient re-verifies too — if the seller fixed the app's granted scopes, the
+      // next probe passes; if not, it fails closed again with the same guidance.)
       return prev.accountId
         ? { ...prev, phase: "verify", failure: null, verifyRetryable: false }
         : { ...INITIAL_STATE, phase: "mall_confirm", mallId: prev.mallId };
@@ -186,6 +190,11 @@ export function interpretCapability(view: Cafe24CapabilityView): CapabilityInter
   }
   if (view.reason === "PROVIDER_ERROR") {
     return { kind: "retry" };
+  }
+  if (view.reason === "SCOPE_INSUFFICIENT") {
+    // Distinct from reconnect: the credential is valid but a read scope is missing. Re-consenting
+    // with the same app scopes will not fix it — surface it as its own cause with its own copy.
+    return { kind: "failed", failure: "scope_insufficient" };
   }
   if (
     view.reason === "RECONNECT_REQUIRED" ||
@@ -259,6 +268,8 @@ export const FAILURE_COPY: Record<TutorialFailure, string> = {
     "요청이 만료되었거나 리디렉션 정보가 일치하지 않습니다. 처음부터 다시 연결해 주세요.",
   reconnect_required:
     "연결 정보를 확인하지 못했습니다. 카페24 동의를 다시 진행해 연결을 갱신해 주세요.",
+  scope_insufficient:
+    "연결은 되었지만 주문·문의·리뷰를 읽을 권한(스코프)이 부족합니다. 카페24 앱의 읽기 권한 설정을 확인한 뒤 다시 검증해 주세요.",
   credential_decrypt:
     "저장된 연결 정보를 확인하지 못했습니다. 카페24 동의를 다시 진행해 주세요.",
   board_mapping:

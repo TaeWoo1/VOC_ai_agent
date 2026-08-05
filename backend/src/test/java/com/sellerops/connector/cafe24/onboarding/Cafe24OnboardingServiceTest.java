@@ -101,7 +101,7 @@ class Cafe24OnboardingServiceTest {
     private UUID connect(String refreshToken) {
         String raw = startAndGetRawState();
         http.respondWith(200, RecordingCafe24HttpClient.tokenBody("access", refreshToken));
-        CompletionResult r = service.complete(raw, "the-auth-code", null);
+        CompletionResult r = service.complete(raw, "the-auth-code", null, null);
         assertThat(r.status()).isEqualTo(CompletionStatus.CONNECTED);
         return r.sellerAccountId();
     }
@@ -176,7 +176,7 @@ class Cafe24OnboardingServiceTest {
         String raw = startAndGetRawState();
         http.respondWith(200, RecordingCafe24HttpClient.tokenBody("access-1", "refresh-1"));
 
-        CompletionResult result = service.complete(raw, "the-auth-code", null);
+        CompletionResult result = service.complete(raw, "the-auth-code", null, null);
 
         assertThat(result.status()).isEqualTo(CompletionStatus.CONNECTED);
         assertThat(statusOf(result.sellerAccountId())).isEqualTo(ChannelStatus.CONNECTED);
@@ -190,7 +190,7 @@ class Cafe24OnboardingServiceTest {
 
     @Test
     void unknownStateIsInvalidAndWritesNothing() {
-        CompletionResult result = service.complete("no-such-state", "code", null);
+        CompletionResult result = service.complete("no-such-state", "code", null, null);
 
         assertThat(result.status()).isEqualTo(CompletionStatus.INVALID);
         assertThat(result.sellerAccountId()).isNull();
@@ -206,7 +206,7 @@ class Cafe24OnboardingServiceTest {
         states.save(state);
         http.respondWith(200, RecordingCafe24HttpClient.tokenBody("a", "r"));
 
-        CompletionResult result = service.complete(raw, "the-auth-code", null);
+        CompletionResult result = service.complete(raw, "the-auth-code", null, null);
 
         assertThat(result.status()).isEqualTo(CompletionStatus.RECONNECT_REQUIRED);
         assertThat(statusOf(result.sellerAccountId())).isEqualTo(ChannelStatus.RECONNECT_REQUIRED);
@@ -218,7 +218,7 @@ class Cafe24OnboardingServiceTest {
     void deniedInitialConsentFailsClosedNoCredential() {
         String raw = startAndGetRawState();
 
-        CompletionResult result = service.complete(raw, null, "access_denied");
+        CompletionResult result = service.complete(raw, null, "access_denied", null);
 
         assertThat(result.status()).isEqualTo(CompletionStatus.RECONNECT_REQUIRED);
         assertThat(statusOf(result.sellerAccountId())).isEqualTo(ChannelStatus.RECONNECT_REQUIRED);
@@ -231,7 +231,7 @@ class Cafe24OnboardingServiceTest {
         String raw = startAndGetRawState();
         http.respondWith(400, "{\"error\":\"invalid_grant\"}");
 
-        CompletionResult result = service.complete(raw, "the-auth-code", null);
+        CompletionResult result = service.complete(raw, "the-auth-code", null, null);
 
         assertThat(result.status()).isEqualTo(CompletionStatus.RECONNECT_REQUIRED);
         assertThat(statusOf(result.sellerAccountId())).isEqualTo(ChannelStatus.RECONNECT_REQUIRED);
@@ -242,10 +242,10 @@ class Cafe24OnboardingServiceTest {
     void replayingAConsumedStateIsInvalidAndDoesNotTouchTheConnectedAccount() {
         String raw = startAndGetRawState();
         http.respondWith(200, RecordingCafe24HttpClient.tokenBody("a", "r"));
-        CompletionResult first = service.complete(raw, "the-auth-code", null);
+        CompletionResult first = service.complete(raw, "the-auth-code", null, null);
         assertThat(first.status()).isEqualTo(CompletionStatus.CONNECTED);
 
-        CompletionResult replay = service.complete(raw, "the-auth-code", null);
+        CompletionResult replay = service.complete(raw, "the-auth-code", null, null);
 
         assertThat(replay.status()).isEqualTo(CompletionStatus.INVALID);
         assertThat(statusOf(first.sellerAccountId())).isEqualTo(ChannelStatus.CONNECTED);
@@ -258,7 +258,7 @@ class Cafe24OnboardingServiceTest {
         String newer = startAndGetRawState(); // supersedes the older attempt
         assertThat(older).isNotEqualTo(newer);
 
-        CompletionResult result = service.complete(older, "the-auth-code", null);
+        CompletionResult result = service.complete(older, "the-auth-code", null, null);
 
         assertThat(result.status()).isEqualTo(CompletionStatus.INVALID);
         // The account stays PENDING; nothing exchanged, nothing stored.
@@ -273,10 +273,10 @@ class Cafe24OnboardingServiceTest {
         String older = startAndGetRawState();
         String newer = startAndGetRawState();
         http.respondWith(200, RecordingCafe24HttpClient.tokenBody("access", "refresh-new"));
-        CompletionResult ok = service.complete(newer, "the-auth-code", null);
+        CompletionResult ok = service.complete(newer, "the-auth-code", null, null);
         assertThat(ok.status()).isEqualTo(CompletionStatus.CONNECTED);
 
-        CompletionResult stale = service.complete(older, "the-auth-code", null);
+        CompletionResult stale = service.complete(older, "the-auth-code", null, null);
 
         assertThat(stale.status()).isEqualTo(CompletionStatus.INVALID);
         assertThat(statusOf(ok.sellerAccountId())).isEqualTo(ChannelStatus.CONNECTED);
@@ -290,7 +290,7 @@ class Cafe24OnboardingServiceTest {
         String raw = startAndGetRawState();
         assertThat(statusOf(accountId)).isEqualTo(ChannelStatus.CONNECTED); // preserved during attempt
 
-        CompletionResult result = service.complete(raw, null, "access_denied");
+        CompletionResult result = service.complete(raw, null, "access_denied", null);
 
         assertThat(result.status()).isEqualTo(CompletionStatus.RECONNECT_REQUIRED);
         assertThat(statusOf(accountId)).isEqualTo(ChannelStatus.CONNECTED); // not downgraded
@@ -303,7 +303,7 @@ class Cafe24OnboardingServiceTest {
         String raw = startAndGetRawState();
         http.respondWith(400, "{\"error\":\"invalid_grant\"}");
 
-        CompletionResult result = service.complete(raw, "the-auth-code", null);
+        CompletionResult result = service.complete(raw, "the-auth-code", null, null);
 
         assertThat(result.status()).isEqualTo(CompletionStatus.RECONNECT_REQUIRED);
         assertThat(statusOf(accountId)).isEqualTo(ChannelStatus.CONNECTED); // still connected
@@ -316,7 +316,7 @@ class Cafe24OnboardingServiceTest {
 
         String raw = startAndGetRawState();
         http.respondWith(200, RecordingCafe24HttpClient.tokenBody("access-2", "refresh-2"));
-        CompletionResult result = service.complete(raw, "the-auth-code", null);
+        CompletionResult result = service.complete(raw, "the-auth-code", null, null);
 
         assertThat(result.status()).isEqualTo(CompletionStatus.CONNECTED);
         assertThat(statusOf(accountId)).isEqualTo(ChannelStatus.CONNECTED);
@@ -329,5 +329,76 @@ class Cafe24OnboardingServiceTest {
         assertThatThrownBy(() -> build("mall.read_community,mall.write_community"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("읽기 전용");
+    }
+
+    @Test
+    void callbackMallIdMismatchFailsClosedAsInvalidAndNeverExchangesOrStores() {
+        String raw = startAndGetRawState(); // intended mall = samplemall
+        http.respondWith(200, RecordingCafe24HttpClient.tokenBody("access", "refresh")); // would succeed if reached
+
+        // Cafe24 returned a mall_id that is not the one the seller started with → a different-shop
+        // consent. Fail closed BEFORE any code exchange.
+        CompletionResult result = service.complete(raw, "the-auth-code", null, "othermall");
+
+        assertThat(result.status()).isEqualTo(CompletionStatus.INVALID);
+        assertThat(credentials.findAll()).isEmpty();
+        assertThat(http.posts).isEmpty(); // never exchanged the code
+        // A fresh account is not promoted; it stays PENDING (not RECONNECT_REQUIRED).
+        assertThat(statusOf(result.sellerAccountId())).isEqualTo(ChannelStatus.PENDING);
+    }
+
+    @Test
+    void callbackMallIdMatchingTheIntendedMallProceedsToConnected() {
+        String raw = startAndGetRawState(); // intended mall = samplemall
+        http.respondWith(200, RecordingCafe24HttpClient.tokenBody("access", "refresh"));
+
+        // When Cafe24 does echo the mall_id and it matches, the connect proceeds normally.
+        CompletionResult result = service.complete(raw, "the-auth-code", null, "samplemall");
+
+        assertThat(result.status()).isEqualTo(CompletionStatus.CONNECTED);
+        assertThat(statusOf(result.sellerAccountId())).isEqualTo(ChannelStatus.CONNECTED);
+    }
+
+    @Test
+    void callbackMallIdInAQualifiedOrDifferentlyCasedFormStillConnects() {
+        // The exact echoed format is not live-verified, so a qualified host or different case for the
+        // SAME mall must NOT be read as a mismatch (that would wrongly reject a legitimate connect).
+        for (String echoed : new String[] {"samplemall", "SAMPLEMALL", "samplemall.cafe24.com", "Samplemall.CAFE24.com"}) {
+            String raw = startAndGetRawState(); // intended mall = samplemall
+            http.respondWith(200, RecordingCafe24HttpClient.tokenBody("access", "refresh-" + echoed.hashCode()));
+
+            CompletionResult result = service.complete(raw, "the-auth-code", null, echoed);
+
+            assertThat(result.status())
+                    .as("echoed mall_id '%s' resolves to the intended mall", echoed)
+                    .isEqualTo(CompletionStatus.CONNECTED);
+        }
+    }
+
+    @Test
+    void anUnresolvableCallbackMallIdIsTreatedAsAbsentNotAMismatch() {
+        // A value we cannot resolve to a valid mall label is inconclusive, not a positive mismatch —
+        // it falls back to today's host-bound behavior (connect proceeds), never a false rejection.
+        String raw = startAndGetRawState();
+        http.respondWith(200, RecordingCafe24HttpClient.tokenBody("access", "refresh"));
+
+        CompletionResult result = service.complete(raw, "the-auth-code", null, "!!not-a-mall!!");
+
+        assertThat(result.status()).isEqualTo(CompletionStatus.CONNECTED);
+    }
+
+    @Test
+    void callbackMallIdMismatchOnReconnectNeverDowngradesTheWorkingConnection() {
+        UUID accountId = connect("refresh-1"); // an established, working connection to samplemall
+        int postsAfterConnect = http.posts.size(); // the initial connect already exchanged once
+        String raw = startAndGetRawState();
+        http.respondWith(200, RecordingCafe24HttpClient.tokenBody("access-2", "refresh-2"));
+
+        CompletionResult result = service.complete(raw, "the-auth-code", null, "othermall");
+
+        assertThat(result.status()).isEqualTo(CompletionStatus.INVALID);
+        assertThat(statusOf(accountId)).isEqualTo(ChannelStatus.CONNECTED); // untouched
+        assertThat(refreshTokenOf(accountId)).isEqualTo("refresh-1"); // credential intact
+        assertThat(http.posts).hasSize(postsAfterConnect); // the mismatch attempt never exchanged
     }
 }

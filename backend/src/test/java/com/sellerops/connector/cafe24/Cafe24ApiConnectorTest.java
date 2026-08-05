@@ -274,10 +274,12 @@ class Cafe24ApiConnectorTest {
         http.enqueue(new Cafe24HttpClient.Response(401, "{\"error\":\"invalid_grant\"}", Map.of()));
 
         assertThatThrownBy(() -> connector.fetch(request(DataType.ORDER_SUMMARY, null)))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(Cafe24OAuthException.class)
                 .hasMessageContaining("HTTP 401");
 
-        // The old token survives a failed refresh — nothing was written back.
+        // The old token survives a failed refresh — nothing was written back. (invalid_grant with no
+        // concurrent rotation is a genuinely dead token: the guard re-reads, sees the same token, and
+        // propagates rather than retrying.)
         assertThat(vault.open(org, account).secrets().get("refresh_token"))
                 .isEqualTo("old-refresh-token");
         assertThat(vault.readMasked(org, account).lastRotatedAt()).isNull();

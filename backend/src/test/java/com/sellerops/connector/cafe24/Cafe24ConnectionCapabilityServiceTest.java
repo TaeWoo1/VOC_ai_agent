@@ -155,6 +155,41 @@ class Cafe24ConnectionCapabilityServiceTest {
     }
 
     @Test
+    void insufficientScopeIsADistinctReasonNotReconnect() {
+        SellerAccount account = cafe24Account(ChannelStatus.CONNECTED, false);
+        when(accounts.findByIdAndOrgId(accountId, orgId)).thenReturn(Optional.of(account));
+        stubCafe24Channel();
+        when(vault.hasCredential(orgId, accountId)).thenReturn(true);
+        // The credential authorizes but a required read scope is missing → a permission problem,
+        // not a dead credential. It must NOT collapse to RECONNECT_REQUIRED.
+        when(authorizer.authorize(orgId, accountId)).thenThrow(
+                Cafe24OAuthException.fromTokenError(403, "{\"error\":\"insufficient_scope\"}",
+                        new com.fasterxml.jackson.databind.ObjectMapper()));
+
+        Cafe24ConnectionCapabilityView view = service.check(orgId, accountId);
+
+        assertThat(view.reason()).isEqualTo(Cafe24CapabilityEvaluator.REASON_SCOPE_INSUFFICIENT);
+        assertThat(view.credentialDecryptable()).isFalse();
+        verify(discovery, never()).discover(any(), any());
+    }
+
+    @Test
+    void invalidGrantStillCollapsesToReconnect() {
+        SellerAccount account = cafe24Account(ChannelStatus.CONNECTED, false);
+        when(accounts.findByIdAndOrgId(accountId, orgId)).thenReturn(Optional.of(account));
+        stubCafe24Channel();
+        when(vault.hasCredential(orgId, accountId)).thenReturn(true);
+        // A dead/revoked token → reconnect, exactly as before (the split does not change this case).
+        when(authorizer.authorize(orgId, accountId)).thenThrow(
+                Cafe24OAuthException.fromTokenError(401, "{\"error\":\"invalid_grant\"}",
+                        new com.fasterxml.jackson.databind.ObjectMapper()));
+
+        Cafe24ConnectionCapabilityView view = service.check(orgId, accountId);
+
+        assertThat(view.reason()).isEqualTo(Cafe24CapabilityEvaluator.REASON_RECONNECT_REQUIRED);
+    }
+
+    @Test
     void pendingConnectionSkipsLiveProbe() {
         SellerAccount account = cafe24Account(ChannelStatus.PENDING, false);
         when(accounts.findByIdAndOrgId(accountId, orgId)).thenReturn(Optional.of(account));

@@ -139,6 +139,18 @@ class Cafe24CapabilityEvaluatorTest {
     }
 
     @Test
+    void scopeInsufficientIsItsOwnReasonDistinctFromReconnect() {
+        Cafe24ConnectionCapabilityView view =
+                eval(ChannelStatus.CONNECTED, true, AuthProbe.SCOPE_INSUFFICIENT, null, OrderProbe.OK);
+
+        // A missing permission, not a dead credential — a distinct, non-reconnect reason.
+        assertThat(view.reason()).isEqualTo(Cafe24CapabilityEvaluator.REASON_SCOPE_INSUFFICIENT);
+        assertThat(view.reason()).isNotEqualTo(Cafe24CapabilityEvaluator.REASON_RECONNECT_REQUIRED);
+        assertThat(view.credentialDecryptable()).isFalse();
+        assertThat(view.connectionVerified()).isFalse();
+    }
+
+    @Test
     void missingCredentialWhenConnected() {
         Cafe24ConnectionCapabilityView view =
                 eval(ChannelStatus.CONNECTED, false, AuthProbe.NOT_ATTEMPTED, null, OrderProbe.NONE);

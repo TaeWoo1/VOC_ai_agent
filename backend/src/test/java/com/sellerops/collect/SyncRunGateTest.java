@@ -161,6 +161,41 @@ class SyncRunGateTest {
         assertThat(review.coalesced()).isFalse();
     }
 
+    @Test
+    void cafe24ThreeStreamsAreEachSingleFlightAndIndependentlyOrphanRecovered() {
+        // Cafe24 routine collection runs through this same channel-agnostic gate. Prove the three
+        // Cafe24 data types (ORDER_SUMMARY / REVIEW / INQUIRY) single-flight independently and that
+        // an orphaned run in one stream is reclaimed without disturbing the others — the reliability
+        // guarantee scheduled collection relies on. (The gate keys on (account, dataType); the CAFE24
+        // channel here documents intent — it does not change the keying.)
+        UUID cafe24 = account(channel("CAFE24").getId()).getId();
+
+        // REVIEW: a fresh RUNNING run → a second start coalesces (never a duplicate scheduler run).
+        SyncJob reviewInFlight = newRunning(cafe24, DataType.REVIEW, Instant.now());
+        SyncRunGate.RunStart review = gate.beginRunOrCoalesce(
+                cafe24, DataType.REVIEW, () -> newRunning(cafe24, DataType.REVIEW, Instant.now()));
+        assertThat(review.coalesced()).isTrue();
+        assertThat(review.job().getId()).isEqualTo(reviewInFlight.getId());
+
+        // INQUIRY: an orphaned stale RUNNING run → reclaimed, a fresh one starts (crash recovery).
+        SyncJob inquiryOrphan = newRunning(cafe24, DataType.INQUIRY,
+                Instant.now().minus(Duration.ofMinutes(STALE_MINUTES + 5)));
+        SyncRunGate.RunStart inquiry = gate.beginRunOrCoalesce(
+                cafe24, DataType.INQUIRY, () -> newRunning(cafe24, DataType.INQUIRY, Instant.now()));
+        assertThat(inquiry.coalesced()).isFalse();
+        assertThat(syncJobs.findById(inquiryOrphan.getId()).orElseThrow().getStatus()).isEqualTo("FAILED");
+
+        // ORDER_SUMMARY: independent of the other two — nothing in flight, so it simply starts.
+        SyncRunGate.RunStart order = gate.beginRunOrCoalesce(
+                cafe24, DataType.ORDER_SUMMARY, () -> newRunning(cafe24, DataType.ORDER_SUMMARY, Instant.now()));
+        assertThat(order.coalesced()).isFalse();
+
+        // Each stream ends with exactly one RUNNING run — the REVIEW coalesce spawned no second run.
+        assertThat(runningCount(cafe24, DataType.REVIEW)).isEqualTo(1);
+        assertThat(runningCount(cafe24, DataType.INQUIRY)).isEqualTo(1);
+        assertThat(runningCount(cafe24, DataType.ORDER_SUMMARY)).isEqualTo(1);
+    }
+
     // --- helpers ---
 
     private int runningCount(UUID account, DataType dataType) {

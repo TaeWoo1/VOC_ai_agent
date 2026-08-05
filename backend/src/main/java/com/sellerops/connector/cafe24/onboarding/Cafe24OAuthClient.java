@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sellerops.connector.cafe24.Cafe24HttpClient;
+import com.sellerops.connector.cafe24.Cafe24OAuthException;
 import com.sellerops.connector.cafe24.Cafe24TokenResult;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -76,7 +77,9 @@ public class Cafe24OAuthClient {
     /**
      * Exchange an authorization code for tokens. Never echoes the code or body.
      *
-     * @throws IllegalStateException on a non-200 / unparseable response
+     * @throws Cafe24OAuthException on a non-200 response, classified by the RFC 6749 standard
+     *     {@code error} field (parsed for the standard code only; body never reaches the message)
+     * @throws IllegalStateException on a 200 whose body is unparseable / missing tokens
      */
     public Cafe24TokenResult exchangeAuthorizationCode(String mallId, String clientId,
                                                        String clientSecret, String code,
@@ -95,9 +98,9 @@ public class Cafe24OAuthClient {
 
         Cafe24HttpClient.Response response = http.postForm(tokenUri, headers, form);
         if (response.statusCode() != 200) {
-            // The body stays out of the message — it may carry token material.
-            throw new IllegalStateException(
-                    "카페24 인증 코드 교환에 실패했습니다 (HTTP " + response.statusCode() + ").");
+            // The body stays out of the message — it may carry token material. Classified by the
+            // standard `error` field only, mirroring the run-time refresh path.
+            throw Cafe24OAuthException.fromTokenError(response.statusCode(), response.body(), mapper);
         }
         TokenResponse token = parse(response.body());
         if (token.accessToken() == null || token.accessToken().isBlank()
