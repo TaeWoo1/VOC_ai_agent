@@ -79,15 +79,22 @@ sellerops:
       # tutorial shows generic guidance, never a fabricated IP).
       advertised-egress-ips: ${SELLEROPS_CONNECTOR_NAVER_ADVERTISED_EGRESS_IPS:}
     coupang:
-      # Coupang WING Open API connector (Phase 3D-2 auth skeleton). Off by
-      # default — beans absent, COUPANG keeps resolving to the mock connector.
-      # The skeleton exposes no collectable data type, so even flag-on cannot
-      # reach HTTP. Seller credentials never live here: they enter via the
-      # credential intake API into the vault, per seller account.
+      # Coupang WING Open API order connector. Off by default — beans absent,
+      # COUPANG keeps resolving to the mock connector and runtime is byte-identical.
+      # Flag-on wires the real ORDER_SUMMARY connector; a live call then still needs
+      # a valid stored credential AND (see live-approval-id below) an armed operator
+      # approval. Seller credentials never live here: they enter via the credential
+      # intake API into the vault, per seller account.
       enabled: ${SELLEROPS_CONNECTOR_COUPANG_ENABLED:false}
       # Official gateway host (verified 2026-06-12 from the PO-list endpoint
-      # doc on developers.coupangcorp.com). Unused until the order slice.
+      # doc on developers.coupangcorp.com).
       base-url: ${SELLEROPS_CONNECTOR_COUPANG_BASE_URL:https://api-gateway.coupang.com}
+      # Backend live-run approval interlock (docs/sellerops_live_approval_contract.md).
+      # Empty by default: a live call to a REAL Coupang gateway host fail-closes
+      # (CoupangLiveApprovalRequiredException) unless an operator-minted approval id is
+      # armed by tools/coupang-local/run-backend-local.sh. Loopback / *.test / *.local
+      # base URLs (offline tests, stubs) never require it. Env-binding token, not a secret.
+      live-approval-id: ${SELLEROPS_CONNECTOR_COUPANG_LIVE_APPROVAL_ID:}
       # Official throttle threshold: >5 calls/second per vendorId triggers
       # 429s, whole-API scope (verified 2026-06-12). Reserved for request
       # pacing in the order-collection slice.

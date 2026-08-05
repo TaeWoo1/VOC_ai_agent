@@ -49,8 +49,13 @@ class CoupangApiConnectorTest {
     private final FakeCoupangHttpClient http = new FakeCoupangHttpClient();
     // A fixed clock so the swept window and probe window are deterministic (KST 2026-08-05).
     private final Clock clock = Clock.fixed(Instant.parse("2026-08-05T02:00:00Z"), ZoneOffset.UTC);
+    // The stub points at the real gateway HOST (so URL/signature assertions are realistic), so the live-call
+    // guard requires an armed approval id — this test run is "armed" with a test env-binding token. The guard's
+    // own fail-closed behavior (real host, blank id) is proven in CoupangLiveCallGuardTest + the unarmed case below.
+    private static final String TEST_APPROVAL_ID = "apr-test-approval";
     private final CoupangOrdersClient ordersClient =
-            new CoupangOrdersClient(http, new CoupangSigner(clock), clock, "https://api-gateway.coupang.com");
+            new CoupangOrdersClient(http, new CoupangSigner(clock), clock, "https://api-gateway.coupang.com",
+                    TEST_APPROVAL_ID);
     private final String masterKey = randomKeyBase64();
 
     private CredentialVault vault;
@@ -183,6 +188,26 @@ class CoupangApiConnectorTest {
         assertThatThrownBy(() -> connector.fetch(request(DataType.ORDER_SUMMARY)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("vendor_id");
+        assertThat(http.sent).isEmpty();
+    }
+
+    @Test
+    void liveCallToRealGatewayWithoutArmedApprovalFailsClosedBeforeAnyHttp() {
+        storeCoupangCredential();
+        // Real gateway host but NO armed approval id → the backend live-run interlock refuses the call
+        // before signing or opening a socket. A valid credential is present, so this proves the guard —
+        // not a credential gate — is what stops it.
+        CoupangOrdersClient unarmed = new CoupangOrdersClient(
+                http, new CoupangSigner(clock), clock, "https://api-gateway.coupang.com", "");
+        CoupangApiConnector unarmedConnector = new CoupangApiConnector(unarmed, vault);
+
+        assertThatThrownBy(() -> unarmedConnector.fetch(request(DataType.ORDER_SUMMARY)))
+                .isInstanceOf(CoupangLiveApprovalRequiredException.class);
+        assertThat(http.sent).isEmpty();
+
+        // The connect test's credential probe is guarded at the same choke point — also zero HTTP.
+        assertThatThrownBy(() -> unarmedConnector.verifyConnection(new VerifyContext(org, account, "COUPANG")))
+                .isInstanceOf(CoupangLiveApprovalRequiredException.class);
         assertThat(http.sent).isEmpty();
     }
 
