@@ -51,8 +51,12 @@ set -a; . "$RUN_ENV"; set +a
 export SELLEROPS_CONNECTOR_COUPANG_LIVE_APPROVAL_ID="$COUPANG_APPROVAL_ID"
 
 # ---- refuse to boot against the real sellerops DB -----------------------------
+# Catch both the default prod port (:5432/…sellerops…) AND a 'sellerops' database name reached on any
+# port / with the default port omitted (…/sellerops or …/sellerops?params). The disposable DB is
+# coupang_proof, which matches none of these.
 case "$SPRING_DATASOURCE_URL" in
-  *:5432/*sellerops*) die "SPRING_DATASOURCE_URL looks like the REAL sellerops DB. Use a disposable database." ;;
+  *:5432/*sellerops*|*/sellerops|*/sellerops\?*)
+    die "SPRING_DATASOURCE_URL looks like the REAL sellerops DB. Use a disposable database (e.g. coupang_proof)." ;;
 esac
 
 # ---- load master key from Keychain (fail closed if absent) --------------------

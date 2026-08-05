@@ -90,7 +90,7 @@ echo "        IP is registered in the Coupang app BEFORE approving — an unregi
 
 # 5. Disposable DB / scheduler off / git drift.
 case "${SPRING_DATASOURCE_URL:-jdbc:postgresql://$PGHOST:$PGPORT/$PGDATABASE}" in
-  *:5432/*sellerops*) fail "datasource looks like the REAL sellerops DB" ;;
+  *:5432/*sellerops*|*/sellerops|*/sellerops\?*) fail "datasource looks like the REAL sellerops DB (name 'sellerops')" ;;
   *) pass "datasource is disposable ($DB_ALIAS@$PGHOST:$PGPORT)" ;;
 esac
 [ "${SELLEROPS_COLLECT_SCHEDULER_ENABLED:-false}" = "false" ] && pass "collection scheduler OFF (this shell)" \
@@ -122,7 +122,12 @@ if printf '%s' "$APPROVAL_ACCOUNT" | grep -Eq '^[0-9]{4,}$|^[0-9a-fA-F]{16,}$'; 
   echo "PREFLIGHT FAIL: SELLEROPS_APPROVAL_ACCOUNT looks like a raw id/token — the manifest carries only a sanitized description."
   exit 1
 fi
-cat > "$MANIFEST_OUT" <<JSON
+echo
+if [ "$FAILED" = "0" ]; then
+  echo "PREFLIGHT PASS"
+  # Emit the manifest ONLY on PASS — a manifest is prepared/displayed only when the run is immediately
+  # executable (contract §2). On FAIL no manifest is written or shown.
+  cat > "$MANIFEST_OUT" <<JSON
 {
   "approvalId": "$APPROVAL_ID",
   "runId": "$RUN_ID",
@@ -145,12 +150,8 @@ cat > "$MANIFEST_OUT" <<JSON
   "expiresAt": "process-lifetime"
 }
 JSON
-echo
-echo "runtime + approval manifest (sanitized) → $MANIFEST_OUT"; sed 's/^/  /' "$MANIFEST_OUT"
-
-echo
-if [ "$FAILED" = "0" ]; then
-  echo "PREFLIGHT PASS"
+  echo "runtime + approval manifest (sanitized) → $MANIFEST_OUT"; sed 's/^/  /' "$MANIFEST_OUT"
+  echo
   echo "  operator URL   : $FRONTEND_ORIGIN/connect/coupang"
   echo "  expected run   : ${RUN_ID:0:8}…"
   echo "  expected git   : $CUR_GIT"
