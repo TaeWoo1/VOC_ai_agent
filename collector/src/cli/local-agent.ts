@@ -42,8 +42,9 @@ import {
 import { humanSignalPathFor } from "../agent/local-agent-human-signal";
 import type { UserActionCategory } from "../agent/progressive-reconnect";
 import type { ConnectorOrchestratorObserver, ConnectorStartupResult } from "../connector/connector-orchestrator";
-import { createAgentBridge, type AgentActionWindowConfig, type AgentApiIssuanceConfig, type AgentImportConfig, type AgentReplySubmissionConfig } from "../agent/agent-bridge";
+import { createAgentBridge, type AgentActionWindowConfig, type AgentApiIssuanceConfig, type AgentCoupangIssuanceConfig, type AgentImportConfig, type AgentReplySubmissionConfig } from "../agent/agent-bridge";
 import { IssuanceFixtureDriver } from "../action-window/api-issuance/issuance-fixture-driver";
+import { CoupangIssuanceFixtureDriver } from "../action-window/coupang-issuance/coupang-issuance-fixture-driver";
 import { NaverLiveProbeDriver } from "../action-window/naver-live-driver";
 import { createNaverActionWindowImportDriver } from "../action-window/naver-acquisition-adapter";
 import { defaultImportRunDirFor } from "../action-window/initial-import/import-dispatch";
@@ -240,6 +241,38 @@ export function buildApiIssuanceConfig(): AgentApiIssuanceConfig {
     runId: `run_${randomBytes(6).toString("hex")}`,
     channelCode: "naver",
     createDriver: () => new IssuanceFixtureDriver(),
+  };
+}
+
+/**
+ * DEV/TEST ONLY: host the ISOLATED Coupang WING issuance guidance channel (v2) on the Bridge, so the FE
+ * dev-bridge can dispatch a real `API_ISSUANCE_GUIDANCE` run on `channelCode: "coupang"` and receive a real
+ * `run_<hex>` runId — OFFLINE, over the SYNTHETIC {@link CoupangIssuanceFixtureDriver} (no browser, no live
+ * WING, never reads a credential). This is the exact mirror of {@link ACTION_WINDOW_ISSUANCE_FLAG} for the
+ * Coupang carrier: it lets the browser product path (SellerOps `/connect/coupang` guided walkthrough →
+ * pairing → START_RUN → REQUEST_STEP_RECHECK) be driven end-to-end without opening real WING or a CLI client.
+ * Never honored under `NODE_ENV=production`. Mutually exclusive with the other carriers (an agent hosts one).
+ * The LIVE WING driver is NOT wired here — it is supplied only by the gated live entrypoint
+ * (`run-coupang-wing-issuance-live.ts`).
+ */
+export const ACTION_WINDOW_COUPANG_ISSUANCE_FLAG = "--dev-action-window-coupang-issuance";
+
+/** Pure gate: should the agent host the Coupang issuance guidance channel? Never under production. */
+export function resolveCoupangIssuanceChannel(args: readonly string[], env: NodeJS.ProcessEnv): boolean {
+  if (env.NODE_ENV === "production") return false;
+  return args.includes(ACTION_WINDOW_COUPANG_ISSUANCE_FLAG);
+}
+
+/**
+ * Build the {@link AgentCoupangIssuanceConfig} for the dev Coupang issuance channel — a SYNTHETIC fixture
+ * driver (no browser, no live WING, no credential read). Run identity is Runtime-assigned (opaque random
+ * suffix). No persistence: an issuance walk is read-only guidance with nothing to recover.
+ */
+export function buildCoupangIssuanceConfig(): AgentCoupangIssuanceConfig {
+  return {
+    runId: `run_${randomBytes(6).toString("hex")}`,
+    channelCode: "coupang",
+    createDriver: () => new CoupangIssuanceFixtureDriver(),
   };
 }
 
@@ -1025,12 +1058,14 @@ async function main(): Promise<void> {
   // implies a case that cannot occur.
   const hostReply = resolveReplySubmissionChannel(args, process.env);
   const hostIssuance = !hostReply && resolveApiIssuanceChannel(args, process.env);
-  const awChannel = hostReply || hostIssuance ? null : resolveActionWindowChannel(args, process.env);
+  const hostCoupangIssuance = !hostReply && !hostIssuance && resolveCoupangIssuanceChannel(args, process.env);
+  const awChannel = hostReply || hostIssuance || hostCoupangIssuance ? null : resolveActionWindowChannel(args, process.env);
   const actionWindow: AgentActionWindowConfig | undefined = awChannel
     ? buildActionWindowConfig(awChannel, args, process.env)
     : undefined;
   const replySubmission: AgentReplySubmissionConfig | undefined = hostReply ? buildReplySubmissionConfig() : undefined;
   const apiIssuance: AgentApiIssuanceConfig | undefined = hostIssuance ? buildApiIssuanceConfig() : undefined;
+  const coupangIssuance: AgentCoupangIssuanceConfig | undefined = hostCoupangIssuance ? buildCoupangIssuanceConfig() : undefined;
   // Approval-presenter wiring lives HERE and only here — never as a `createAgentBridge` default (see
   // `decideApprovalPresenter`). `none` means no human channel exists on this host, so pairing fails closed.
   const approvalKind = decideApprovalPresenter(process.env, process.platform);
@@ -1040,11 +1075,12 @@ async function main(): Promise<void> {
     ...(actionWindow ? { actionWindow } : {}),
     ...(replySubmission ? { replySubmission } : {}),
     ...(apiIssuance ? { apiIssuance } : {}),
+    ...(coupangIssuance ? { coupangIssuance } : {}),
   });
   const bridgeListen = await bridge.listen();
   // Sanitized: the presenter KIND only (an enum) — never a code, origin, or pairing detail. Makes it visible
   // that this host can (or cannot) show an approval code, which decides whether pairing can succeed at all.
-  console.log(JSON.stringify({ event: "BRIDGE", ...bridgeListen, actionWindow: actionWindow !== undefined, replySubmission: replySubmission !== undefined, apiIssuance: apiIssuance !== undefined, approvalPresenter: approvalKind, ...(awChannel ? { actionWindowChannel: awChannel } : {}) }));
+  console.log(JSON.stringify({ event: "BRIDGE", ...bridgeListen, actionWindow: actionWindow !== undefined, replySubmission: replySubmission !== undefined, apiIssuance: apiIssuance !== undefined, coupangIssuance: coupangIssuance !== undefined, approvalPresenter: approvalKind, ...(awChannel ? { actionWindowChannel: awChannel } : {}) }));
   bridge.seed(decision.parsed.connections.map((c) => c.connectionId));
 
   // ONE observer into the startup: keep the sanitized stdout printer AND feed the bridge snapshot/events.

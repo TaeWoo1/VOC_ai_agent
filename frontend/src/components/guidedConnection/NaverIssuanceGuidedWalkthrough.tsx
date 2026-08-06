@@ -242,6 +242,7 @@ export function NaverIssuanceGuidedWalkthrough({
         <AgentPairingPanel
           phase={phase}
           confirmationCode={bridge.state.confirmationCode ?? null}
+          maybeNeedsLocalNetworkAccess={bridge.state.maybeNeedsLocalNetworkAccess}
           onConnect={bridge.requestPairing}
           onRetry={bridge.retry}
         />

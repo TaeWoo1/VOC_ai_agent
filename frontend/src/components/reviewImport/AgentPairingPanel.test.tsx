@@ -14,13 +14,17 @@ import { AgentPairingPanel } from "./AgentPairingPanel";
 
 afterEach(cleanup);
 
-function renderPanel(phase: string, extra: { confirmationCode?: string | null } = {}) {
+function renderPanel(
+  phase: string,
+  extra: { confirmationCode?: string | null; maybeNeedsLocalNetworkAccess?: boolean } = {},
+) {
   const onConnect = vi.fn();
   const onRetry = vi.fn();
   render(
     <AgentPairingPanel
       phase={phase}
       confirmationCode={extra.confirmationCode ?? null}
+      maybeNeedsLocalNetworkAccess={extra.maybeNeedsLocalNetworkAccess}
       onConnect={onConnect}
       onRetry={onRetry}
     />,
@@ -49,6 +53,24 @@ describe("AgentPairingPanel", () => {
       expect(onConnect).not.toHaveBeenCalled();
     },
   );
+
+  /**
+   * A helper that IS running but is blocked by Chrome's Local Network Access permission looks identical to
+   * "not running" at the socket layer. When the origin makes that plausible (secure, non-loopback), the panel
+   * adds the permission hint on top of the "run the helper" line — otherwise the seller is only ever told to
+   * start a helper that is already started.
+   */
+  it("adds the Local Network Access hint when the browser permission may be blocking the helper", () => {
+    renderPanel("unreachable", { maybeNeedsLocalNetworkAccess: true });
+    expect(screen.getByTestId("agent-pairing-local-network-hint")).toHaveTextContent(/로컬 네트워크 접근/);
+    // The "run the helper" line is still present — the hint is additive, not a replacement.
+    expect(screen.getByTestId("agent-pairing")).toHaveTextContent(/도우미를 실행/);
+  });
+
+  it("omits the Local Network Access hint when the origin makes a permission block implausible", () => {
+    renderPanel("unreachable", { maybeNeedsLocalNetworkAccess: false });
+    expect(screen.queryByTestId("agent-pairing-local-network-hint")).toBeNull();
+  });
 
   /**
    * The approval happens in the agent's own window on the seller's machine. The panel shows the code to match
