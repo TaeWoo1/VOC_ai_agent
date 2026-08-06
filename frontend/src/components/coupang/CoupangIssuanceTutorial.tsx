@@ -3,6 +3,7 @@ import {
   COUPANG_ISSUANCE_TUTORIAL,
   COUPANG_WING_URL,
   TUTORIAL_HINT_QUALIFIER,
+  type TutorialStep,
 } from "../../lib/guidedConnection";
 import { AdvertisedCallIpPanel } from "../guidedConnection/AdvertisedCallIpPanel";
 
@@ -24,6 +25,8 @@ export function CoupangIssuanceTutorial({
   completeLabel = "발급을 완료했어요",
   busy,
   advertisedEgressIps = [],
+  steps = COUPANG_ISSUANCE_TUTORIAL,
+  ariaLabel = "쿠팡 Open API 키 발급 안내",
 }: {
   /** Advance the journey once the seller confirms they finished at WING (→ credential entry). */
   onComplete: () => void;
@@ -32,6 +35,10 @@ export function CoupangIssuanceTutorial({
   /** SellerOps' advertised fixed egress IPv4(s) to register in the app's 'API 호출 IP'. Shown at the
    *  register-call-IP step. Empty/absent ⇒ fail-safe generic note, never a fabricated IP. */
   advertisedEgressIps?: readonly string[];
+  /** The checklist steps. Defaults to the issuance checklist; the renewal path passes its own steps. */
+  steps?: readonly TutorialStep[];
+  /** Accessible label for the checklist region (defaults to the issuance wording). */
+  ariaLabel?: string;
 }) {
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
 
@@ -47,16 +54,16 @@ export function CoupangIssuanceTutorial({
     // New tab, severed from this opener (no window.opener handle back into SellerOps).
     window.open(COUPANG_WING_URL, "_blank", "noopener,noreferrer");
 
-  const doneCount = COUPANG_ISSUANCE_TUTORIAL.filter((s) => checked.has(s.id)).length;
+  const doneCount = steps.filter((s) => checked.has(s.id)).length;
 
   return (
-    <div className="space-y-4" aria-label="쿠팡 Open API 키 발급 안내">
+    <div className="space-y-4" aria-label={ariaLabel}>
       <p className="rounded-lg bg-canvas px-3 py-2 text-xs text-muted" role="note">
         {TUTORIAL_HINT_QUALIFIER}
       </p>
 
       <ol className="space-y-3">
-        {COUPANG_ISSUANCE_TUTORIAL.map((step, i) => (
+        {steps.map((step, i) => (
           <li key={step.id} className="space-y-2 rounded-lg border border-line px-4 py-3">
             {/* Label wraps ONLY the checkbox + title (valid phrasing nesting); the help is a sibling so
                 opening it never toggles the checkbox. */}
@@ -91,7 +98,7 @@ export function CoupangIssuanceTutorial({
 
       <div className="flex items-center justify-between gap-3">
         <span className="text-xs text-muted" role="status" aria-live="polite">
-          체크리스트 {doneCount}/{COUPANG_ISSUANCE_TUTORIAL.length}
+          체크리스트 {doneCount}/{steps.length}
         </span>
         <button type="button" className="btn-primary" onClick={onComplete} disabled={busy}>
           {completeLabel}

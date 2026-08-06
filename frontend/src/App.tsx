@@ -32,6 +32,7 @@ import { Cafe24ConnectResult } from "./pages/Cafe24ConnectResult";
 import { Cafe24Tutorial } from "./pages/Cafe24Tutorial";
 import { ConnectNaver } from "./pages/ConnectNaver";
 import { ConnectCoupang } from "./pages/ConnectCoupang";
+import { ConnectCoupangRenewal } from "./pages/ConnectCoupangRenewal";
 import { Agent } from "./pages/Agent";
 import { NotFound } from "./pages/NotFound";
 
@@ -106,6 +107,7 @@ export function App() {
         <Route path="/connect/cafe24/result" element={<Cafe24ConnectResult />} />
         <Route path="/connect/naver" element={<ConnectNaver />} />
         <Route path="/connect/coupang" element={<ConnectCoupang />} />
+        <Route path="/connect/coupang/renew/:accountId" element={<ConnectCoupangRenewal />} />
 
         <Route path="/settings" element={<SettingsHome />} />
         <Route path="/settings/alerts" element={<AlertSettings />} />

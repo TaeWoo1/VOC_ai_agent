@@ -47,6 +47,18 @@ const COPY: Record<string, string> = {
   "actionWindow.coupangIssuance.issueCheckpoint": "발급 버튼 직접 누르기",
   "actionWindow.coupangIssuance.copyKeys": "액세스 키·시크릿 키·업체코드 복사",
   "actionWindow.coupangIssuance.return": "SellerOps로 돌아와 입력",
+
+  // Coupang WING Open API key RENEWAL guidance (Action Window). Entered from an already-connected account
+  // whose credential is expiring. The renewal step plan reuses the issuance runtime but highlights 유효기간
+  // (check the current key's expiry) + 재발급 (with the same human checkpoint before pressing 재발급). Same
+  // shared step copy keys with the collector runtime — the runtime sends only the key, this FE owns the
+  // wording; the seller performs each step in the guided WING window; SellerOps reads no key value.
+  "actionWindow.coupangRenewal.run": "쿠팡 API 키 갱신 화면 안내",
+  "actionWindow.coupangRenewal.reachOpenApi": "판매자정보 › 오픈API 키 발급으로 이동",
+  "actionWindow.coupangRenewal.checkExpiry": "현재 키의 유효기간 확인",
+  "actionWindow.coupangRenewal.reissueCheckpoint": "재발급 버튼 직접 누르기",
+  "actionWindow.coupangRenewal.copyKeys": "새 액세스 키·시크릿 키·업체코드 복사",
+  "actionWindow.coupangRenewal.return": "SellerOps로 돌아와 새 키 입력",
 };
 
 // Per-step FULL instruction for the guided issuance walkthrough — so the SellerOps screen is self-sufficient
@@ -106,6 +118,31 @@ const ISSUANCE_STEP_DETAIL: Record<string, string> = {
 export function issuanceStepDetail(copyKey: string | null | undefined): string | null {
   if (!copyKey) return null;
   return ISSUANCE_STEP_DETAIL[copyKey] ?? null;
+}
+
+// Coupang WING key RENEWAL — FULL per-step instruction. Same hedged, position/role wording (exact WING
+// labels differ by screen version) and the same privacy invariant — SellerOps never logs in, clicks, or
+// reads a key value; the seller checks 유효기간 and clicks 재발급 themselves. Keyed by the SAME
+// `actionWindow.coupangRenewal.*` keys the runtime emits; an unmapped step renders no detail.
+const RENEWAL_STEP_DETAIL: Record<string, string> = {
+  "actionWindow.coupangRenewal.run":
+    "현재 키의 유효기간이 다가와 새 키로 갱신하는 안내입니다. 각 단계는 열린 쿠팡 윙 창에서 직접 진행하시고, 이 화면의 설명을 따라가세요. SellerOps는 로그인·클릭·입력을 하지 않고 어떤 값도 읽지 않습니다.",
+  "actionWindow.coupangRenewal.reachOpenApi":
+    "쿠팡 윙에서 '판매자정보'의 오픈API 키 발급 영역으로 이동하세요. 정확한 메뉴 이름은 화면 버전에 따라 다를 수 있으니 '오픈API'·'키 발급'이 포함된 항목을 찾아 주세요.",
+  "actionWindow.coupangRenewal.checkExpiry":
+    "현재 발급된 키의 유효기간(만료일)을 확인해 주세요. 유효기간이 얼마 남지 않았거나 이미 지났다면 새 키를 재발급해야 합니다. 이 만료일은 뒤에서 직접 입력하실 값이니 함께 확인해 두세요. SellerOps는 이 화면의 값을 읽지 않습니다.",
+  "actionWindow.coupangRenewal.reissueCheckpoint":
+    "이제 재발급 버튼을 누르기 직전 단계입니다. 재발급 버튼은 반드시 직접 눌러 주세요 — SellerOps는 대신 재발급하지 않습니다. 재발급하면 새 키가 생성되며, 기존 키는 쿠팡 정책에 따라 처리됩니다.",
+  "actionWindow.coupangRenewal.copyKeys":
+    "재발급된 새 액세스 키(Access Key), 시크릿 키(Secret Key), 업체코드(Vendor ID)를 직접 복사하세요. 시크릿 키는 재발급 시 한 번만 표시되니 안전하게 보관하세요. SellerOps는 이 값들을 읽지 않습니다 — 복사는 직접 하시고, 마지막에 SellerOps 보안 입력란에 붙여넣으세요.",
+  "actionWindow.coupangRenewal.return":
+    "새 키 세 값과 확인한 만료일을 들고 SellerOps로 돌아와 주세요. 안내가 끝나면 새 키로 교체하는 입력 화면으로 이동합니다.",
+};
+
+/** The FULL per-step instruction for a guided renewal step, or null when the step has no detail mapping. */
+export function renewalStepDetail(copyKey: string | null | undefined): string | null {
+  if (!copyKey) return null;
+  return RENEWAL_STEP_DETAIL[copyKey] ?? null;
 }
 
 function interpolate(template: string, params?: CopyParams): string {

@@ -7,6 +7,7 @@ import com.sellerops.collect.dto.ChannelCapabilityOverview;
 import com.sellerops.collect.dto.ConnectionStatusView;
 import com.sellerops.collect.dto.ConnectionTestResultView;
 import com.sellerops.collect.dto.CredentialIntakeRequest;
+import com.sellerops.collect.dto.CredentialReplaceResultView;
 import com.sellerops.collect.dto.SchedulePutRequest;
 import com.sellerops.collect.dto.ScheduleView;
 import com.sellerops.collect.dto.SyncRunView;
@@ -14,6 +15,7 @@ import com.sellerops.common.ApiException;
 import com.sellerops.connector.ChannelConnectionStatus;
 import com.sellerops.connector.ChannelConnectionStatusRepository;
 import com.sellerops.connector.ConnectionVerifier;
+import com.sellerops.connector.ConnectorAlertService;
 import com.sellerops.connector.ConnectorCapabilities;
 import com.sellerops.connector.ConnectorCapabilityRepository;
 import com.sellerops.connector.ConnectorRegistry;
@@ -21,6 +23,7 @@ import com.sellerops.connector.DataType;
 import com.sellerops.connector.PullConnector;
 import com.sellerops.connector.VerifyContext;
 import com.sellerops.connector.VerifyOutcome;
+import com.sellerops.connector.coupang.CoupangCredentialExpiryStatus;
 import com.sellerops.connector.coupang.onboarding.CoupangConnectionLifecycle;
 import com.sellerops.connector.naver.onboarding.NaverConnectionLifecycle;
 import com.sellerops.credential.CredentialIntakeValidator;
@@ -29,6 +32,7 @@ import com.sellerops.credential.CredentialMetadata;
 import com.sellerops.credential.CredentialTemplates;
 import com.sellerops.credential.CredentialTemplates.CredentialTemplate;
 import com.sellerops.credential.CredentialVault;
+import com.sellerops.credential.DecryptedCredential;
 import com.sellerops.selleraccount.AccountSessionSlot;
 import com.sellerops.selleraccount.AccountSessionSlotService;
 import com.sellerops.selleraccount.SellerAccount;
@@ -86,6 +90,7 @@ public class CollectControlService {
     private final AccountSessionSlotService accountSlots;
     private final NaverConnectionLifecycle naverLifecycle;
     private final CoupangConnectionLifecycle coupangLifecycle;
+    private final ConnectorAlertService alertService;
 
     public CollectControlService(SellerAccountRepository sellerAccounts, ChannelRepository channels,
                                  SyncScheduleRepository schedules, SyncJobRepository syncJobs,
@@ -94,7 +99,8 @@ public class CollectControlService {
                                  SyncRunExecutor executor, CredentialVault vault,
                                  AccountSessionSlotService accountSlots,
                                  NaverConnectionLifecycle naverLifecycle,
-                                 CoupangConnectionLifecycle coupangLifecycle) {
+                                 CoupangConnectionLifecycle coupangLifecycle,
+                                 ConnectorAlertService alertService) {
         this.sellerAccounts = sellerAccounts;
         this.channels = channels;
         this.schedules = schedules;
@@ -107,6 +113,7 @@ public class CollectControlService {
         this.accountSlots = accountSlots;
         this.naverLifecycle = naverLifecycle;
         this.coupangLifecycle = coupangLifecycle;
+        this.alertService = alertService;
     }
 
     public List<ScheduleView> listSchedules(UUID orgId, UUID sellerAccountId) {
@@ -213,6 +220,23 @@ public class CollectControlService {
         String sessionReadiness =
                 (slot != null ? slot.getReadinessState() : SessionReadinessState.UNOBSERVED_EXTERNAL).name();
         Instant sessionObservedAt = slot != null ? slot.getLastObservedAt() : null;
+
+        // Credential-expiry axis — computed (never stored) from the stored expiry date vs now plus the
+        // auth-failing health signal. No credential on file ⇒ no date ⇒ UNKNOWN. Never reads a secret:
+        // the vault's masked metadata carries the expiry date only.
+        Instant expiresAt = vault.hasCredential(orgId, sellerAccountId)
+                ? vault.readMasked(orgId, sellerAccountId).tokenExpiresAt()
+                : null;
+        boolean authFailing = health != null && health.getConsecutiveFailures() > 0;
+        CoupangCredentialExpiryStatus credentialExpiry =
+                CoupangCredentialExpiryStatus.compute(expiresAt, Instant.now(), authFailing);
+
+        // Reading the connection status is where the expiry alert is (idempotently) refreshed — no
+        // scheduler. Scoped to Coupang accounts so the COUPANG_* alert types never attach elsewhere.
+        if (isCoupangAccount(account)) {
+            alertService.evaluateCoupangExpiryAlert(orgId, sellerAccountId, credentialExpiry);
+        }
+
         return new ConnectionStatusView(
                 sellerAccountId,
                 health != null ? health.getState() : "NOT_COLLECTED",
@@ -222,7 +246,18 @@ public class CollectControlService {
                 account.getLastSyncedAt(),
                 nextScheduledAt,
                 sessionReadiness,
-                sessionObservedAt);
+                sessionObservedAt,
+                credentialExpiry);
+    }
+
+    private boolean isCoupangAccount(SellerAccount account) {
+        if (account.isFileUpload()) {
+            return false;
+        }
+        return channels.findById(account.getChannelId())
+                .map(Channel::getCode)
+                .filter(com.sellerops.connector.coupang.CoupangApiConnector.CHANNEL_CODE::equals)
+                .isPresent();
     }
 
     /**
@@ -329,6 +364,116 @@ public class CollectControlService {
     public CredentialMetadata readCredential(UUID orgId, UUID sellerAccountId) {
         requireAccount(orgId, sellerAccountId);
         return vault.readMasked(orgId, sellerAccountId);
+    }
+
+    /**
+     * Operator-confirmation of the credential's exact expiry date when it was unknown (WING's `유효기간` could
+     * not be read). Updates ONLY the stored expiry — touches no secret material — and never accepts an estimate
+     * (the caller supplies the exact date, or null to clear it). The expiry status/alerts recompute on the next
+     * connection-status read. Org-scoped + fails closed on a missing credential.
+     */
+    public CredentialMetadata confirmCredentialExpiry(UUID orgId, UUID sellerAccountId, Instant tokenExpiresAt) {
+        requireAccount(orgId, sellerAccountId);
+        return vault.setTokenExpiresAt(orgId, sellerAccountId, tokenExpiresAt);
+    }
+
+    // Safe reason codes for the atomic credential-replacement result (never a provider body).
+    static final String REPLACE_STATUS_SUCCESS = "SUCCESS";
+    static final String REPLACE_STATUS_FAILED = "FAILED";
+    static final String REPLACE_REASON_NO_EXISTING = "NO_EXISTING_CREDENTIAL";
+    static final String REPLACE_REASON_VERIFY_UNSUPPORTED = "VERIFY_UNSUPPORTED";
+
+    /**
+     * Atomic guided-renewal credential replacement with rollback. Replaces the stored secrets +
+     * expiry date in place, verifies the new credential (connection test + order-access probe), and:
+     * <ul>
+     *   <li><b>SUCCESS</b> — keeps the new credential; the account row, collected orders, and sync
+     *       cursors are left <b>untouched</b> (only the credential row changed); any paused per-account
+     *       schedule is resumed.</li>
+     *   <li><b>FAILURE</b> — <b>restores the captured OLD credential</b> (secrets + its expiry) so the
+     *       existing, working credential is never destroyed by a bad renewal, and returns a safe failure.</li>
+     * </ul>
+     * The captured old secrets live in memory only for the duration of the swap — never logged,
+     * persisted elsewhere, or returned. Never auto re-issues / deletes / resets a key; never reads or
+     * returns the Secret Key. The new expiry date is the WING-read / operator-confirmed exact date from
+     * the request; if absent it is stored as {@code null} (unknown) — never an estimate.
+     */
+    public CredentialReplaceResultView replaceCredential(UUID orgId, UUID sellerAccountId,
+                                                         CredentialIntakeRequest request, UUID actorUserId) {
+        // 1. Org scoping first — a cross-org id reads as 404 before any vault/connector touch.
+        SellerAccount account = requireAccount(orgId, sellerAccountId);
+        Channel channel = channels.findById(account.getChannelId())
+                .orElseThrow(() -> ApiException.notFound("채널을 찾을 수 없습니다."));
+        CredentialTemplate template = CredentialTemplates.find(channel.getCode())
+                .orElseThrow(() -> ApiException.badRequest(
+                        "이 채널은 API 연결 정보 저장을 지원하지 않습니다. 파일 업로드를 이용해 주세요."));
+
+        // 2. Replacement requires an existing credential to roll back to; a first-time store is /credentials.
+        if (!vault.hasCredential(orgId, sellerAccountId)) {
+            return new CredentialReplaceResultView(sellerAccountId, REPLACE_STATUS_FAILED,
+                    REPLACE_REASON_NO_EXISTING, "교체할 기존 연결 정보가 없습니다. 먼저 연결 정보를 저장해 주세요.", null);
+        }
+
+        // 3. Validate the new payload against the channel contract (server-derived class/authType).
+        ValidatedCredential valid = CredentialIntakeValidator.validate(template, request);
+
+        // 4. Capture the OLD credential IN MEMORY only — never logged, persisted elsewhere, or returned.
+        DecryptedCredential old = vault.open(orgId, sellerAccountId);
+
+        // 5. Store the NEW secrets + expiry (atomic in-place upsert; stamps last_rotated_at).
+        vault.store(orgId, sellerAccountId, valid.connectorClass(), valid.authType(),
+                valid.secrets(), request.refreshToken(), request.tokenExpiresAt(), actorUserId);
+
+        // 6. Verify the new credential (connection test + order-access probe) WITHOUT driving the
+        //    connection lifecycle — the account row must stay untouched on the replace path.
+        VerifyOutcome outcome = verifyStored(orgId, sellerAccountId, channel.getCode());
+        if (outcome != null && outcome.status() == VerifyOutcome.Status.SUCCESS) {
+            // 7a. Keep the new credential. Account / channel_orders / sync_cursors are all left untouched;
+            //     only resume any paused per-account schedule so collection can continue.
+            resumePausedSchedules(orgId, sellerAccountId);
+            return new CredentialReplaceResultView(sellerAccountId, REPLACE_STATUS_SUCCESS, null,
+                    "연결 정보가 갱신되었습니다.", request.tokenExpiresAt());
+        }
+
+        // 7b. FAILURE → RESTORE the captured OLD credential (secrets + its exact expiry). The existing
+        //     credential is not destroyed; account / orders / cursors were never touched.
+        vault.store(orgId, sellerAccountId, old.connectorClass(), old.authType(),
+                old.secrets(), old.refreshToken(), old.tokenExpiresAt(), actorUserId);
+        String reasonCode = outcome != null ? outcome.reasonCode() : REPLACE_REASON_VERIFY_UNSUPPORTED;
+        String message = outcome != null
+                ? failureMessage(outcome.reasonCode())
+                : "이 채널의 연결 확인은 아직 제공되지 않습니다.";
+        return new CredentialReplaceResultView(sellerAccountId, REPLACE_STATUS_FAILED, reasonCode,
+                message, old.tokenExpiresAt());
+    }
+
+    /**
+     * Resolve the channel's {@link ConnectionVerifier} and run its read-only auth + order-access
+     * check. Returns {@code null} when the resolved connector cannot verify (e.g. the mock fallback
+     * with the real connector flag off) so the caller fails closed. Unlike {@link #testConnection}
+     * this drives NO connection lifecycle — the replace path must not move the account row.
+     */
+    private VerifyOutcome verifyStored(UUID orgId, UUID sellerAccountId, String channelCode) {
+        ConnectionVerifier verifier = registry.resolvePullConnector(channelCode)
+                .filter(ConnectionVerifier.class::isInstance)
+                .map(ConnectionVerifier.class::cast)
+                .orElse(null);
+        if (verifier == null) {
+            return null;
+        }
+        return verifier.verifyConnection(new VerifyContext(orgId, sellerAccountId, channelCode));
+    }
+
+    /** Resume any system-paused per-account schedule (재개) — an operator-disabled one is left off. */
+    private void resumePausedSchedules(UUID orgId, UUID sellerAccountId) {
+        schedules.findByOrgIdAndSellerAccountId(orgId, sellerAccountId).stream()
+                .filter(s -> s.getPausedReason() != null)
+                .forEach(s -> {
+                    s.setEnabled(true);
+                    s.setPausedReason(null);
+                    s.setNextRunAt(Instant.now());
+                    schedules.save(s);
+                });
     }
 
     /**

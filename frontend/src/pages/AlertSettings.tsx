@@ -33,6 +33,19 @@ const TYPE_META: Record<string, { label: string; tone: Tone; action: string }> =
     tone: "warn",
     action: "잠시 후 자동으로 다시 시도합니다. 반복되면 점검이 필요합니다.",
   },
+  // Coupang credential-expiry alerts. Expiring reads as 갱신 필요 (actionable, not a failure); expired is
+  // 재발급 필요 (the connection has stopped). The escalation D-30→D-14→D-7→D-1 is shown by the status
+  // display, not a new alert per bucket — a single unacked alert per type (backend dedup), ack silences it.
+  COUPANG_CREDENTIAL_EXPIRING: {
+    label: "키 갱신 필요",
+    tone: "warn",
+    action: "쿠팡 API 키 유효기간이 다가옵니다. 채널에서 'WING에서 API 키 갱신하기'로 갱신해 주세요.",
+  },
+  COUPANG_CREDENTIAL_EXPIRED: {
+    label: "키 재발급 필요",
+    tone: "bad",
+    action: "쿠팡 API 키가 만료되어 연동이 중단되었습니다. 채널에서 키를 갱신해 주세요.",
+  },
 };
 
 function metaFor(alert: ConnectorAlertView): { label: string; tone: Tone; action: string } {

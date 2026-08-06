@@ -192,3 +192,44 @@ export const COUPANG_ISSUANCE_TUTORIAL: readonly TutorialStep[] = [
     hint: "복사한 세 값을 들고 이 탭으로 돌아옵니다. 아래 '발급을 완료했어요'를 누르면 SellerOps 보안 입력 단계로 넘어갑니다.",
   },
 ] as const;
+
+/**
+ * Coupang WING Open API key RENEWAL text-fallback checklist. Same pattern as {@link COUPANG_ISSUANCE_TUTORIAL}
+ * but WORDED FOR RENEWAL (the seller already has a connected key that is expiring): reach the Open API key
+ * screen, check the current key's 유효기간, click 재발급 THEMSELVES (SellerOps never re-issues), copy the NEW
+ * Access Key / Secret Key / Vendor ID and note the new expiry date, then return to SellerOps to paste them
+ * into the masked REPLACE form. Progress is transient checkbox state that NEVER holds a key value.
+ */
+export const COUPANG_RENEWAL_TUTORIAL: readonly TutorialStep[] = [
+  {
+    id: "open_wing",
+    title: "쿠팡 윙 열기",
+    hint: "아래 버튼을 누르면 쿠팡 판매자센터(쿠팡 윙)가 새 탭으로 열립니다. 이 SellerOps 화면은 그대로 남아 있으니, 확인 후 다시 이 탭으로 돌아오세요.",
+    opensCenter: true,
+  },
+  {
+    id: "reach_open_api",
+    title: "오픈API 키 발급 화면으로 이동",
+    hint: "쿠팡 윙에서 '판매자정보'의 오픈API 키 발급 영역으로 이동합니다. 정확한 메뉴 이름은 화면 버전에 따라 다를 수 있으니 '오픈API'·'키 발급'이 포함된 항목을 찾으세요.",
+  },
+  {
+    id: "check_expiry",
+    title: "현재 키의 유효기간 확인",
+    hint: "현재 발급된 키의 유효기간(만료일)을 확인합니다. 얼마 남지 않았거나 이미 지났다면 새 키를 재발급해야 합니다. 이 만료일은 뒤에서 SellerOps에 직접 입력할 값이니 함께 확인해 두세요.",
+  },
+  {
+    id: "reissue_checkpoint",
+    title: "재발급 버튼 직접 누르기",
+    hint: "입력한 내용을 한 번 더 확인한 뒤, 재발급 버튼을 직접 누르세요. SellerOps는 대신 재발급하지 않습니다 — 재발급은 반드시 판매자 본인이 진행합니다.",
+  },
+  {
+    id: "copy_keys",
+    title: "새 액세스 키·시크릿 키·업체코드 복사",
+    hint: "재발급된 새 액세스 키(Access Key), 시크릿 키(Secret Key), 업체코드(Vendor ID)를 복사합니다. 시크릿 키는 재발급 시 한 번만 표시되니 안전하게 보관하세요. 값은 눈으로 확인·복사만 하고, 다음 단계에서 SellerOps 보안 입력란에 직접 붙여넣으세요.",
+  },
+  {
+    id: "return_to_sellerops",
+    title: "SellerOps로 돌아와 새 키 입력",
+    hint: "복사한 새 값과 확인한 만료일을 들고 이 탭으로 돌아옵니다. 아래 '재발급을 완료했어요'를 누르면 새 키로 교체하는 입력 단계로 넘어갑니다.",
+  },
+] as const;

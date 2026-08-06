@@ -124,6 +124,19 @@ public class CredentialVault {
         return mask(credentials.save(row));
     }
 
+    /**
+     * Set (or clear) ONLY the credential's expiry date on an existing row — a metadata update that touches no
+     * secret material: the encrypted payload, IV, key id, and refresh-token slot are left exactly as they are,
+     * and no master key is needed. This is the operator-confirmation path for the credential's expiry (the
+     * WING-read or operator-entered exact date) when it was unknown at connection time — never an estimate.
+     * Passing {@code null} clears it back to unknown. Fails closed on a missing/foreign row (org-scoped 404).
+     */
+    public CredentialMetadata setTokenExpiresAt(UUID orgId, UUID sellerAccountId, Instant tokenExpiresAt) {
+        ConnectorCredential row = load(orgId, sellerAccountId);
+        row.setTokenExpiresAt(tokenExpiresAt);
+        return mask(credentials.save(row));
+    }
+
     /** Metadata only — what an API or UI may show about a stored credential. */
     public CredentialMetadata readMasked(UUID orgId, UUID sellerAccountId) {
         return mask(load(orgId, sellerAccountId));

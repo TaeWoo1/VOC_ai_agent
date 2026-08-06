@@ -3,6 +3,7 @@ import { relativeTime } from "../../lib/format";
 import { HealthBadge } from "../HealthBadge";
 import { SecureCredentialForm } from "../guidedConnection/SecureCredentialForm";
 import { AdvertisedCallIpPanel } from "../guidedConnection/AdvertisedCallIpPanel";
+import { CoupangExpiryPanel } from "./CoupangExpiryPanel";
 import {
   COUPANG_TUTORIAL_COPY as C,
   recoveryCopy,
@@ -36,6 +37,10 @@ export interface CoupangConnectTutorialProps {
   onRecheckSync: () => void;
   onGoToOrders: () => void;
   onViewChannelRuns: () => void;
+  /** Enter guided renewal from the completion screen's expiry panel (renewRecommended). */
+  onRenew?: () => void;
+  /** Store an operator-confirmed key expiry date (ISO) when the expiry state is UNKNOWN. */
+  onConfirmExpiry?: (tokenExpiresAtIso: string) => void;
 }
 
 /** Elapsed as m:ss — honest wall-clock, never a fabricated completion percentage. */
@@ -62,6 +67,8 @@ export function CoupangConnectTutorial({
   onRecheckSync,
   onGoToOrders,
   onViewChannelRuns,
+  onRenew,
+  onConfirmExpiry,
 }: CoupangConnectTutorialProps) {
   const { phase } = state;
   const steps = stepModel(phase);
@@ -102,6 +109,9 @@ export function CoupangConnectTutorial({
             connectionStatus={connectionStatus}
             onGoToOrders={onGoToOrders}
             onViewChannelRuns={onViewChannelRuns}
+            onRenew={onRenew}
+            onConfirmExpiry={onConfirmExpiry}
+            busy={busy}
           />
         )}
       </div>
@@ -338,10 +348,16 @@ function Connected({
   connectionStatus,
   onGoToOrders,
   onViewChannelRuns,
+  onRenew,
+  onConfirmExpiry,
+  busy,
 }: {
   connectionStatus: ConnectionStatusView | null;
   onGoToOrders: () => void;
   onViewChannelRuns: () => void;
+  onRenew?: () => void;
+  onConfirmExpiry?: (tokenExpiresAtIso: string) => void;
+  busy?: boolean;
 }) {
   return (
     <div className="space-y-4" data-testid="coupang-connected">
@@ -349,6 +365,17 @@ function Connected({
         <p className="font-semibold text-ink">{C.connectedTitle}</p>
         <p className="mt-1 text-sm text-muted break-keep">{C.connectedBody}</p>
       </div>
+
+      {/* Credential-expiry: the date (or the operator-confirm path when UNKNOWN) + the renewal CTA from
+          WARN_14. Rendered only when the backend supplies the expiry sub-view. */}
+      {connectionStatus?.expiry && (
+        <CoupangExpiryPanel
+          expiry={connectionStatus.expiry}
+          onRenew={onRenew}
+          onConfirmExpiry={onConfirmExpiry}
+          busy={busy}
+        />
+      )}
 
       {connectionStatus && (
         <div className="space-y-2 rounded-lg bg-canvas px-4 py-3" role="status">
