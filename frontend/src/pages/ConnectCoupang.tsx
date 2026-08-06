@@ -4,6 +4,17 @@ import { api } from "../lib/apiClient";
 import { selectChannelAccount } from "../lib/channelConnection";
 import { CoupangConnectTutorial } from "../components/coupang/CoupangConnectTutorial";
 import { CoupangIssuanceGuidedWalkthrough } from "../components/coupang/CoupangIssuanceGuidedWalkthrough";
+import { WalkthroughBanner } from "../components/guidedConnection/WalkthroughBanner";
+import { WalkthroughMismatch } from "../components/guidedConnection/WalkthroughMismatch";
+import {
+  evaluateBinding,
+  expectedWalkthroughUrl,
+  frontendRunId,
+  isWalkthroughMode,
+  readUrlRunId,
+  tabNonce,
+  type WalkthroughMismatchReason,
+} from "../lib/guidedConnection/walkthrough";
 import {
   COUPANG_TUTORIAL_COPY as C,
   INITIAL_COUPANG_STATE,
@@ -13,7 +24,16 @@ import {
   syncStatusFromRun,
   type CoupangSyncStatus,
 } from "../lib/coupangTutorial";
-import type { ChannelStatus, ConnectionStatusView, CredentialTemplateView, SyncRunView } from "../lib/types";
+import type {
+  ChannelStatus,
+  ConnectionStatusView,
+  CredentialTemplateView,
+  SyncRunView,
+  WalkthroughContextView,
+} from "../lib/types";
+
+/** The channel this page connects — used for the sanitized walkthrough banner + mismatch re-open path. */
+const COUPANG_CONNECT_PATH = "/connect/coupang";
 
 /**
  * Coupang first-connection tutorial + guided initial sync (thin wiring layer over the pure engine in
@@ -50,6 +70,17 @@ export function ConnectCoupang() {
   const navigate = useNavigate();
   const [state, dispatch] = useReducer(coupangTutorialReducer, INITIAL_COUPANG_STATE);
 
+  // Walkthrough environment binding. Outside walkthrough mode the gate opens immediately (`matched`) so the
+  // page behaves exactly as before; in walkthrough mode it stays `checking` until the 3-way run/origin match
+  // + operator-tab handshake prove this tab is bound to the bootstrapped run. Mismatch fails closed.
+  const walkthrough = isWalkthroughMode();
+  const [gate, setGate] = useState<"checking" | "matched" | "mismatch">(walkthrough ? "checking" : "matched");
+  const [wtContext, setWtContext] = useState<WalkthroughContextView | null>(null);
+  const [mismatchReasons, setMismatchReasons] = useState<Array<WalkthroughMismatchReason | "HANDSHAKE_FAILED">>([]);
+  const ready = gate === "matched";
+  // Coupang-affecting calls this tab has initiated (connection test + first sync). 0 until an explicit submit.
+  const [coupangCalls, setCoupangCalls] = useState(0);
+
   const [loading, setLoading] = useState(true);
   const [resolveError, setResolveError] = useState(false);
   const [template, setTemplate] = useState<CredentialTemplateView | null>(null);
@@ -73,9 +104,66 @@ export function ConnectCoupang() {
     syncWatchRef.current = syncWatch;
   }, [syncWatch]);
 
-  // Deployment-global setup (advertised calling IP). Isolated + fail-safe: a failure here must never break
-  // the page — it then shows generic guidance, never a fabricated IP.
+  // Prove the environment binding (walkthrough mode only) BEFORE anything else runs. This is the only backend
+  // contact allowed before the gate opens: read-only /context + a 0-DB-write handshake. Mirrors ConnectNaver.
   useEffect(() => {
+    if (!walkthrough) return;
+    let alive = true;
+    (async () => {
+      let ctx: WalkthroughContextView | null = null;
+      try {
+        ctx = await api.getWalkthroughContext();
+      } catch {
+        ctx = null;
+      }
+      if (!alive) return;
+      setWtContext(ctx);
+      const urlRunId = readUrlRunId(window.location.search);
+      const binding = evaluateBinding({
+        urlRunId,
+        frontendRunId: frontendRunId(),
+        contextRunId: ctx?.walkthroughRunId ?? null,
+        contextFrontendOrigin: ctx?.frontendOrigin ?? null,
+        currentOrigin: window.location.origin,
+      });
+      if (binding.status === "mismatch") {
+        setMismatchReasons(binding.reasons);
+        setGate("mismatch");
+        return;
+      }
+      // Binding matched → the operator-tab handshake (0 DB writes). Send the run id from THIS TAB'S URL (the
+      // address bar), NOT the /context echo — so the backend cross-checks its authoritative run id against
+      // what the tab actually carries, from a different source than /context.
+      try {
+        const hs = await api.walkthroughHandshake({
+          walkthroughRunId: urlRunId!, // present: a matched binding requires a non-null URL run id
+          tabNonce: tabNonce(),
+          origin: window.location.origin,
+        });
+        if (!alive) return;
+        if (hs.runMatched && hs.originMatched) {
+          setGate("matched");
+        } else {
+          setMismatchReasons(["HANDSHAKE_FAILED"]);
+          setGate("mismatch");
+        }
+      } catch {
+        if (alive) {
+          setMismatchReasons(["HANDSHAKE_FAILED"]);
+          setGate("mismatch");
+        }
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [walkthrough]);
+
+  // Deployment-global setup (advertised calling IP). Isolated + fail-safe: a failure here must never break
+  // the page — it then shows generic guidance, never a fabricated IP. Gated on the binding: in walkthrough
+  // mode it waits for the gate to open (no Coupang-adjacent read before the tab is proven bound).
+  useEffect(() => {
+    if (!ready) return;
     let alive = true;
     (async () => {
       try {
@@ -88,12 +176,15 @@ export function ConnectCoupang() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [ready]);
 
   // Resolve the landing phase — reads ONLY (channel + existing account + template; if an account exists, its
   // credential presence + latest ORDER_SUMMARY run). Never creates an account, so a load/refresh writes
-  // nothing. This is the whole of refresh/leave recovery: the phase is derived from persisted state.
+  // nothing. This is the whole of refresh/leave recovery: the phase is derived from persisted state. Gated on
+  // the binding: in walkthrough mode it waits for the gate, and the same server-authoritative resolvePhase
+  // (incl. reattaching a running sync) still drives refresh/agent-reconnect recovery once the gate opens.
   useEffect(() => {
+    if (!ready) return;
     let alive = true;
     (async () => {
       try {
@@ -111,7 +202,7 @@ export function ConnectCoupang() {
         accountIdRef.current = id;
         setAccountId(id);
 
-        const ready = Boolean(tmpl && coupang);
+        const channelReady = Boolean(tmpl && coupang);
         const connStatus: ChannelStatus | null = existing?.connectionStatus ?? null;
         let credentialPresent = false;
         let latestSyncStatus: CoupangSyncStatus | null = null;
@@ -129,7 +220,7 @@ export function ConnectCoupang() {
           latestSyncStatus = latestRun ? syncStatusFromRun(latestRun) : null;
         }
 
-        const phase = resolvePhase({ ready, connectionStatus: connStatus, credentialPresent, latestSyncStatus });
+        const phase = resolvePhase({ ready: channelReady, connectionStatus: connStatus, credentialPresent, latestSyncStatus });
         // Resuming a sync already RUNNING server-side → observe it (never re-trigger). Anchor the displayed
         // elapsed to the run's real start so a mid-sync refresh shows true elapsed, not 0:00; anchor the
         // stall window to now so an already-old run does not read as instantly stalled.
@@ -148,7 +239,7 @@ export function ConnectCoupang() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [ready]);
 
   // The first ORDER_SUMMARY sync STEP (no guard of its own — the guarded public entries own that). Triggers
   // the sync ONCE. A terminal result advances the journey; a RUNNING result means the backend single-flight
@@ -158,6 +249,7 @@ export function ConnectCoupang() {
     const fresh = { startedAt: now, observeStartedAt: now, polling: true as const, stalled: false };
     setSyncWatch({ ...fresh, polling: false });
     setSyncNow(now);
+    setCoupangCalls((n) => n + 1);
     try {
       const run = await api.manualSync(id, ORDER_SUMMARY);
       const status = syncStatusFromRun(run);
@@ -194,6 +286,7 @@ export function ConnectCoupang() {
   // The connection-test STEP (unguarded); on SUCCESS it lands on PREPARING (NO auto-sync — the seller starts
   // the first sync explicitly via the CTA).
   const testStep = useCallback(async (id: string) => {
+    setCoupangCalls((n) => n + 1);
     try {
       const result = await api.testConnection(id);
       dispatch({ type: "TEST_RESULT", status: result.status === "SUCCESS" ? "SUCCESS" : "FAILED", reasonCode: result.reasonCode });
@@ -359,73 +452,103 @@ export function ConnectCoupang() {
     [syncWatch, syncNow],
   );
 
-  if (loading || state.phase === "resolving") {
-    return (
-      <div className="mx-auto max-w-2xl px-5 py-10">
-        <p className="text-base text-muted">{C.loading}</p>
-      </div>
-    );
-  }
+  // The Coupang journey — identical to the pre-walkthrough page. Outside walkthrough mode it is returned
+  // as-is (nothing changes); in walkthrough mode it renders ONLY once the environment-binding gate is open.
+  const journey = (() => {
+    if (loading || state.phase === "resolving") {
+      return (
+        <div className="mx-auto max-w-2xl px-5 py-10">
+          <p className="text-base text-muted">{C.loading}</p>
+        </div>
+      );
+    }
 
-  if (resolveError) {
+    if (resolveError) {
+      return (
+        <div className="mx-auto max-w-2xl px-5 py-10">
+          <h1 className="text-xl font-bold text-ink">{C.pageTitle}</h1>
+          <p className="mt-3 text-base text-bad" role="alert">
+            {C.resolveError}
+          </p>
+          <button type="button" className="btn-secondary mt-5" onClick={() => navigate("/connect")}>
+            {C.backToChannels}
+          </button>
+        </div>
+      );
+    }
+
+    if (state.phase === "unavailable") {
+      return (
+        <div className="mx-auto max-w-2xl px-5 py-10">
+          <h1 className="text-xl font-bold text-ink">{C.unavailableTitle}</h1>
+          <p className="mt-3 text-base text-muted">{C.unavailableBody}</p>
+          <button type="button" className="btn-secondary mt-5" onClick={() => navigate("/connect")}>
+            {C.backToChannels}
+          </button>
+        </div>
+      );
+    }
+
     return (
-      <div className="mx-auto max-w-2xl px-5 py-10">
+      <div className="mx-auto max-w-2xl px-5 py-8">
         <h1 className="text-xl font-bold text-ink">{C.pageTitle}</h1>
-        <p className="mt-3 text-base text-bad" role="alert">
-          {C.resolveError}
-        </p>
-        <button type="button" className="btn-secondary mt-5" onClick={() => navigate("/connect")}>
-          {C.backToChannels}
-        </button>
+        <p className="mt-2 text-base text-muted break-keep">{C.pageIntro}</p>
+
+        <div className="mt-6">
+          {state.phase === "issuance" ? (
+            // Agent-driven WING Open API key issuance walkthrough — the first journey phase, before credential
+            // entry. It hosts the Action Window issuance run (channelCode announced by the agent) and hands off
+            // to the credential form on completion / text-checklist done / "이미 키가 있어요".
+            <CoupangIssuanceGuidedWalkthrough
+              onIssued={onIssued}
+              busy={busy}
+              advertisedEgressIps={advertisedEgressIps}
+            />
+          ) : (
+            <CoupangConnectTutorial
+              state={state}
+              template={template}
+              busy={busy}
+              advertisedEgressIps={advertisedEgressIps}
+              connectionStatus={connectionStatus}
+              syncProgress={syncProgress}
+              onSubmitCredentials={onSubmitCredentials}
+              onRetest={onRetest}
+              onReenter={onReenter}
+              onRunSync={onRunSync}
+              onRecheckSync={onRecheckSync}
+              onGoToOrders={onGoToOrders}
+              onViewChannelRuns={onViewChannelRuns}
+            />
+          )}
+        </div>
       </div>
     );
-  }
+  })();
 
-  if (state.phase === "unavailable") {
-    return (
-      <div className="mx-auto max-w-2xl px-5 py-10">
-        <h1 className="text-xl font-bold text-ink">{C.unavailableTitle}</h1>
-        <p className="mt-3 text-base text-muted">{C.unavailableBody}</p>
-        <button type="button" className="btn-secondary mt-5" onClick={() => navigate("/connect")}>
-          {C.backToChannels}
-        </button>
-      </div>
-    );
-  }
+  // Outside walkthrough mode the page is EXACTLY as before — no banner, no gate, no extra wrapper.
+  if (!walkthrough) return journey;
 
+  const expectedUrl = wtContext
+    ? expectedWalkthroughUrl(wtContext.frontendOrigin, wtContext.walkthroughRunId, COUPANG_CONNECT_PATH)
+    : null;
+
+  // Walkthrough mode: an always-visible disposable-run banner (the human check against the CLI preflight),
+  // the fail-closed mismatch screen on any binding failure, and the Coupang journey ONLY once `ready`.
   return (
-    <div className="mx-auto max-w-2xl px-5 py-8">
-      <h1 className="text-xl font-bold text-ink">{C.pageTitle}</h1>
-      <p className="mt-2 text-base text-muted break-keep">{C.pageIntro}</p>
-
-      <div className="mt-6">
-        {state.phase === "issuance" ? (
-          // Agent-driven WING Open API key issuance walkthrough — the first journey phase, before credential
-          // entry. It hosts the Action Window issuance run (channelCode announced by the agent) and hands off
-          // to the credential form on completion / text-checklist done / "이미 키가 있어요".
-          <CoupangIssuanceGuidedWalkthrough
-            onIssued={onIssued}
-            busy={busy}
-            advertisedEgressIps={advertisedEgressIps}
-          />
-        ) : (
-          <CoupangConnectTutorial
-            state={state}
-            template={template}
-            busy={busy}
-            advertisedEgressIps={advertisedEgressIps}
-            connectionStatus={connectionStatus}
-            syncProgress={syncProgress}
-            onSubmitCredentials={onSubmitCredentials}
-            onRetest={onRetest}
-            onReenter={onReenter}
-            onRunSync={onRunSync}
-            onRecheckSync={onRecheckSync}
-            onGoToOrders={onGoToOrders}
-            onViewChannelRuns={onViewChannelRuns}
-          />
-        )}
-      </div>
+    <div className="mx-auto max-w-2xl px-5 pt-6">
+      <WalkthroughBanner context={wtContext} channelCode="COUPANG" channelCalls={coupangCalls} />
+      {gate === "checking" && (
+        <p className="mt-4 text-muted" role="status">
+          walkthrough 환경을 확인하는 중입니다…
+        </p>
+      )}
+      {gate === "mismatch" && (
+        <div className="mt-4">
+          <WalkthroughMismatch reasons={mismatchReasons} expectedUrl={expectedUrl} />
+        </div>
+      )}
+      {ready && journey}
     </div>
   );
 }

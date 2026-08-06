@@ -38,7 +38,9 @@ import {
   EXTRACT_WING_CENSUS,
   LIVE_DOM_CALIBRATION_PENDING,
   classifyWingUrlCategory,
+  observeFrom,
   wingPageCategoryFromCensus,
+  type WingObservation,
   type WingPageCategory,
   type WingStructuralCensus,
 } from "../cli/coupang-wing-classifier";
@@ -255,6 +257,37 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     const res = await this.evalStr<LocateResult>(page, script);
     if (res.count !== 1 || !res.sig) return { count: res.count };
     return { count: 1, sig: res.sig };
+  }
+
+  /**
+   * READ-ONLY: the full sanitized {@link WingObservation} of the CURRENT surface — page category + bucketized
+   * signals + calibration blockers (always carries `LIVE_DOM_CALIBRATION_PENDING`). Built from the value-free
+   * census + host-category read, exactly like {@link readSurface}, so nothing here reads a value/URL/text. This
+   * is what the read-only selector recorder prints alongside each target's matchCount so the later live run
+   * yields a machine-checkable calibration record.
+   */
+  async observeSurface(): Promise<WingObservation> {
+    const page = this.activePage();
+    await this.settle(page);
+    const census = await this.evalStr<WingStructuralCensus>(page, EXTRACT_WING_CENSUS);
+    // Raw URL reduced to a host CATEGORY (never logged/emitted); only the enum feeds the classifier.
+    const urlCategory = classifyWingUrlCategory(page.url());
+    return observeFrom(urlCategory, census);
+  }
+
+  /**
+   * READ-ONLY selector-recorder seam (mirrors {@link NaverIssuanceDriver.probeTargetMatch}): measure how many
+   * candidates a highlight target's fixed-label locator matches on the CURRENT page, whether it resolves uniquely
+   * (`matchCount === 1`), and — for a unique match — its opaque 16-hex structural signature. It runs the SAME
+   * value-free {@link resolveFixedLabelTarget} locate WITHOUT tagging (no `data-aw-target` write) and mounts NO
+   * overlay, so it never mutates the page, clicks, types, or reads a field value (incl. Access Key / Secret Key /
+   * 업체코드). The `sig` is computed in-page from tag + position + child count only — never any value/attribute.
+   */
+  async probeTargetMatch(target: WingHighlightTarget): Promise<{ matchCount: number; canHighlight: boolean; sig?: string }> {
+    const res = await this.resolveFixedLabelTarget(target, false);
+    const matchCount = typeof res?.count === "number" && res.count >= 0 ? res.count : 0;
+    const canHighlight = matchCount === 1;
+    return canHighlight && res.sig ? { matchCount, canHighlight, sig: res.sig } : { matchCount, canHighlight };
   }
 
   async locateTarget(target: CoupangIssuanceTarget): Promise<LocateResult> {

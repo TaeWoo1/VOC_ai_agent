@@ -75,6 +75,8 @@ const h = vi.hoisted(() => ({
   testConnection: vi.fn(async () => h.testResult),
   manualSync: vi.fn(async (_id: string, _dt: string) => h.syncRun),
   getSyncRuns: vi.fn(async () => h.runs),
+  getWalkthroughContext: vi.fn(),
+  walkthroughHandshake: vi.fn(),
 }));
 
 vi.mock("../lib/apiClient", () => ({
@@ -98,6 +100,8 @@ vi.mock("../lib/apiClient", () => ({
     storeCredential: h.storeCredential,
     testConnection: h.testConnection,
     manualSync: h.manualSync,
+    getWalkthroughContext: h.getWalkthroughContext,
+    walkthroughHandshake: h.walkthroughHandshake,
   },
 }));
 
@@ -417,5 +421,123 @@ describe("ConnectCoupang tutorial — async polling (fake timers)", () => {
     expect(screen.queryByTestId("coupang-connected")).not.toBeInTheDocument();
     expect(screen.queryByTestId("coupang-sync-error")).not.toBeInTheDocument();
     expect(h.manualSync).not.toHaveBeenCalled();
+  });
+});
+
+// The walkthrough-mode env-binding gate (VITE_WALKTHROUGH_MODE) — the Coupang page must prove its tab is
+// bound to the bootstrapped run (URL run id == frontend build run id == /context run id + origin) and pass
+// the 0-write handshake BEFORE the journey renders. Any failure fails closed to the mismatch screen.
+describe("ConnectCoupang — walkthrough environment binding (VITE_WALKTHROUGH_MODE)", () => {
+  const RUN = "wt-cp-1234";
+  const ORIGIN = window.location.origin;
+
+  function walkthroughContext(over: Record<string, unknown> = {}) {
+    return {
+      walkthroughRunId: RUN,
+      gitCommit: "abc1234",
+      frontendOrigin: ORIGIN,
+      backendOrigin: "http://127.0.0.1:18090",
+      dbAlias: "coupang_walkthrough",
+      schedulerEnabled: false,
+      channelCode: "COUPANG",
+      connectorEnabled: true,
+      baseline: { credentials: 0, syncJobs: 0, channelOrders: 0, channelAccounts: 0 },
+      startedAt: "2026-08-01T00:00:00Z",
+      ...over,
+    };
+  }
+  function enterWalkthrough(urlRun: string | null) {
+    vi.stubEnv("VITE_WALKTHROUGH_MODE", "true");
+    vi.stubEnv("VITE_WALKTHROUGH_RUN_ID", RUN);
+    window.history.pushState({}, "", `/connect/coupang${urlRun ? `?walkthroughRun=${urlRun}` : ""}`);
+  }
+
+  beforeEach(() => {
+    h.advertisedEgressIps = ["203.0.113.20"];
+    h.accounts = [];
+    h.connectionInfo = null;
+    h.runs = [];
+    navigateSpy.mockClear();
+    h.createApiChannelAccount.mockClear();
+    h.testConnection.mockClear();
+    h.manualSync.mockClear();
+    h.getWalkthroughContext.mockReset();
+    h.walkthroughHandshake.mockReset();
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    window.history.pushState({}, "", "/");
+  });
+
+  it("exact-run URL + matching context + handshake → banner + journey render, NO page-load account write", async () => {
+    enterWalkthrough(RUN);
+    h.getWalkthroughContext.mockResolvedValue(walkthroughContext());
+    h.walkthroughHandshake.mockResolvedValue({ runMatched: true, originMatched: true, timestamp: "t" });
+    renderPage();
+    // Channel-neutral banner shows the run prefix (the human check against the CLI preflight).
+    expect(await screen.findByRole("note", { name: "Disposable COUPANG Walkthrough" })).toHaveTextContent(
+      RUN.slice(0, 8),
+    );
+    // Gate opened → a fresh seller's journey (WING issuance start) renders; no account bootstrapped by loading.
+    expect(await screen.findByRole("button", { name: "쿠팡 연결 안내 시작" })).toBeInTheDocument();
+    // The handshake sent the run id from the TAB'S URL (not the /context echo) + this tab's origin.
+    expect(h.walkthroughHandshake).toHaveBeenCalledWith(
+      expect.objectContaining({ walkthroughRunId: RUN, origin: window.location.origin }),
+    );
+    expect(screen.queryByRole("alert", { name: "WALKTHROUGH_ENVIRONMENT_MISMATCH" })).toBeNull();
+    expect(h.createApiChannelAccount).not.toHaveBeenCalled();
+    expect(h.testConnection).not.toHaveBeenCalled();
+    expect(h.manualSync).not.toHaveBeenCalled();
+  });
+
+  it("missing URL run id → MISMATCH screen, journey + handshake blocked, no bootstrap", async () => {
+    enterWalkthrough(null);
+    h.getWalkthroughContext.mockResolvedValue(walkthroughContext());
+    renderPage();
+    expect(await screen.findByRole("alert", { name: "WALKTHROUGH_ENVIRONMENT_MISMATCH" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "쿠팡 연결 안내 시작" })).toBeNull();
+    expect(h.walkthroughHandshake).not.toHaveBeenCalled();
+    expect(h.createApiChannelAccount).not.toHaveBeenCalled();
+  });
+
+  it("wrong URL run id (stale/different run) → MISMATCH, no handshake", async () => {
+    enterWalkthrough("wt-STALE-999");
+    h.getWalkthroughContext.mockResolvedValue(walkthroughContext());
+    renderPage();
+    expect(await screen.findByRole("alert", { name: "WALKTHROUGH_ENVIRONMENT_MISMATCH" })).toBeInTheDocument();
+    expect(h.walkthroughHandshake).not.toHaveBeenCalled();
+  });
+
+  it("backend context run id differs (different backend) → MISMATCH", async () => {
+    enterWalkthrough(RUN);
+    h.getWalkthroughContext.mockResolvedValue(walkthroughContext({ walkthroughRunId: "wt-OTHER-BACKEND" }));
+    renderPage();
+    expect(await screen.findByRole("alert", { name: "WALKTHROUGH_ENVIRONMENT_MISMATCH" })).toBeInTheDocument();
+  });
+
+  it("handshake does not match (backend rejects the tab) → MISMATCH, journey blocked", async () => {
+    enterWalkthrough(RUN);
+    h.getWalkthroughContext.mockResolvedValue(walkthroughContext());
+    h.walkthroughHandshake.mockResolvedValue({ runMatched: false, originMatched: true, timestamp: "t" });
+    renderPage();
+    expect(await screen.findByRole("alert", { name: "WALKTHROUGH_ENVIRONMENT_MISMATCH" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "쿠팡 연결 안내 시작" })).toBeNull();
+  });
+
+  it("context endpoint unreachable → MISMATCH (never a silent proceed); banner still renders", async () => {
+    enterWalkthrough(RUN);
+    h.getWalkthroughContext.mockRejectedValue(new Error("404"));
+    renderPage();
+    expect(await screen.findByRole("alert", { name: "WALKTHROUGH_ENVIRONMENT_MISMATCH" })).toBeInTheDocument();
+    expect(screen.getByRole("note", { name: "Disposable COUPANG Walkthrough" })).toBeInTheDocument();
+  });
+
+  it("non-walkthrough mode → NO banner, NO gate; the page renders exactly as before", async () => {
+    // No VITE_WALKTHROUGH_MODE stub → the gate opens immediately and the /context path is never touched.
+    renderPage();
+    expect(await screen.findByRole("button", { name: "쿠팡 연결 안내 시작" })).toBeInTheDocument();
+    expect(screen.queryByRole("note", { name: "Disposable COUPANG Walkthrough" })).toBeNull();
+    expect(h.getWalkthroughContext).not.toHaveBeenCalled();
+    expect(h.walkthroughHandshake).not.toHaveBeenCalled();
   });
 });

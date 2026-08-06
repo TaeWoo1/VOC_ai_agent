@@ -42,7 +42,8 @@ public class WalkthroughController {
     private final String frontendOrigin;
     private final String backendOrigin;
     private final boolean schedulerEnabled;
-    private final boolean naverConnectorEnabled;
+    private final String channelCode;
+    private final boolean connectorEnabled;
     private final String startedAt = Instant.now().toString();
 
     private final ConnectorCredentialRepository credentials;
@@ -58,7 +59,9 @@ public class WalkthroughController {
             @Value("${sellerops.walkthrough.frontend-origin:http://localhost:5173}") String frontendOrigin,
             @Value("${sellerops.walkthrough.backend-origin:http://127.0.0.1:18090}") String backendOrigin,
             @Value("${sellerops.collect.scheduler-enabled:false}") boolean schedulerEnabled,
+            @Value("${sellerops.walkthrough.channel-code:NAVER}") String channelCode,
             @Value("${sellerops.connector.naver.enabled:false}") boolean naverConnectorEnabled,
+            @Value("${sellerops.connector.coupang.enabled:false}") boolean coupangConnectorEnabled,
             ConnectorCredentialRepository credentials,
             SyncJobRepository syncJobs,
             ChannelOrderRepository channelOrders,
@@ -70,7 +73,9 @@ public class WalkthroughController {
         this.frontendOrigin = frontendOrigin;
         this.backendOrigin = backendOrigin;
         this.schedulerEnabled = schedulerEnabled;
-        this.naverConnectorEnabled = naverConnectorEnabled;
+        this.channelCode = sanitizeChannelCode(channelCode);
+        this.connectorEnabled = resolveConnectorEnabled(
+                this.channelCode, naverConnectorEnabled, coupangConnectorEnabled);
         this.credentials = credentials;
         this.syncJobs = syncJobs;
         this.channelOrders = channelOrders;
@@ -81,16 +86,42 @@ public class WalkthroughController {
     /** Read-only runtime identity + coarse baseline. No DB write; no secret/token/raw id. */
     @GetMapping("/context")
     public WalkthroughContextView context() {
-        long naverAccounts = channels.findByCode("NAVER")
+        long channelAccounts = channels.findByCode(channelCode)
                 .map(c -> sellerAccounts.findAll().stream()
                         .filter(a -> c.getId().equals(a.getChannelId()))
                         .count())
                 .orElse(0L);
         WalkthroughContextView.Baseline baseline = new WalkthroughContextView.Baseline(
-                credentials.count(), syncJobs.count(), channelOrders.count(), naverAccounts);
+                credentials.count(), syncJobs.count(), channelOrders.count(), channelAccounts);
         return new WalkthroughContextView(
                 runId, gitCommit, frontendOrigin, backendOrigin, dbAlias,
-                schedulerEnabled, naverConnectorEnabled, baseline, startedAt);
+                schedulerEnabled, channelCode, connectorEnabled, baseline, startedAt);
+    }
+
+    /**
+     * Normalize the configured target channel code to a sanitized upper-case token. A blank/null value
+     * falls back to the default {@code NAVER} so the existing NAVER walkthrough behavior is unchanged.
+     */
+    private static String sanitizeChannelCode(String channelCode) {
+        if (channelCode == null || channelCode.isBlank()) {
+            return "NAVER";
+        }
+        return channelCode.trim().toUpperCase(java.util.Locale.ROOT);
+    }
+
+    /**
+     * Select the connector feature flag for the configured channel. The two flags live under different
+     * property keys ({@code sellerops.connector.naver.enabled}, {@code sellerops.connector.coupang.enabled}),
+     * so both are injected and picked by the sanitized channel code. An unknown code fails closed to
+     * {@code false} — never surfacing a connector as enabled for a channel the walkthrough does not target.
+     */
+    private static boolean resolveConnectorEnabled(
+            String channelCode, boolean naverConnectorEnabled, boolean coupangConnectorEnabled) {
+        return switch (channelCode) {
+            case "NAVER" -> naverConnectorEnabled;
+            case "COUPANG" -> coupangConnectorEnabled;
+            default -> false;
+        };
     }
 
     /**

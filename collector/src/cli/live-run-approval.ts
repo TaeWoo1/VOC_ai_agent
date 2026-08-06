@@ -7,6 +7,15 @@
 export const APPROVAL_FLAG = "--i-understand-this-opens-live-naver";
 
 /**
+ * Coupang WING live-run approval flag — the deliberate per-run gate for opening a live Coupang WING seller-center
+ * session (issuance guidance + the read-only selector recorder). Deliberately SEPARATE from {@link APPROVAL_FLAG}:
+ * authorization names the surface it authorizes, so a NAVER grant never opens a Coupang window and vice-versa. The
+ * Coupang CLIs refuse without it and never accept the NAVER flag in its place. Pure + unit-tested; opening a live
+ * WING session must be a per-run decision by a human who performs every real step (login / 2FA / CAPTCHA / 발급).
+ */
+export const COUPANG_WING_APPROVAL_FLAG = "--i-understand-this-opens-live-coupang-wing";
+
+/**
  * Classify-only (a.k.a. no-upload) mode **of the DISCOVERY CLIs**: discover/classify the export
  * mechanism WITHOUT ingesting a real seller-center export into SellerOps. This is the milestone-1
  * discovery mode — no SellerOps login, no channel resolve, no upload, and LAST_SUCCESS stays
@@ -136,6 +145,29 @@ export function mutatingFlagOnReadOnlyProbeMessage(flag: string): string {
 /** Did the operator pass the explicit live-run approval flag? */
 export function hasLiveRunApproval(args: string[]): boolean {
   return args.includes(APPROVAL_FLAG);
+}
+
+/** Did the operator pass the explicit Coupang WING live-run approval flag? (Its own flag — the NAVER flag never counts.) */
+export function hasCoupangWingRunApproval(args: string[]): boolean {
+  return args.includes(COUPANG_WING_APPROVAL_FLAG);
+}
+
+/** Operator-facing refusal shown when the Coupang WING approval flag is missing. */
+export function coupangWingApprovalRequiredMessage(): string {
+  return [
+    "Refusing to open a LIVE Coupang WING session without explicit per-run approval.",
+    "",
+    "  - This opens or navigates a live Coupang WING seller-center session.",
+    "  - A human must handle login / 2FA / CAPTCHA and presses 발급 (issue) themselves.",
+    "  - No CAPTCHA/2FA bypass is allowed; the tool never types, clicks, submits, issues a key,",
+    "    or reads any value (incl. Access Key / Secret Key / 업체코드).",
+    "  - Use only a user-owned test seller account.",
+    "  - This requires explicit per-run approval — a NAVER grant does NOT authorize a WING run.",
+    "",
+    "Re-run with the Coupang WING approval flag:",
+    `  npx tsx src/cli/run-coupang-wing-issuance-live.ts -- ${COUPANG_WING_APPROVAL_FLAG}`,
+    `  npx tsx src/cli/probe-wing-issuance-selectors.ts -- ${COUPANG_WING_APPROVAL_FLAG}`,
+  ].join("\n");
 }
 
 /** Did the operator pass the explicit reply-submission approval flag? */

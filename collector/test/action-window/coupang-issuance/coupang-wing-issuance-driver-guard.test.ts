@@ -128,8 +128,10 @@ describe("run-coupang-wing-issuance-live CLI — source guard (gated, no click/t
     expect(code.split("page.goto(").length - 1).toBe(1);
   });
 
-  it("is gated on the explicit live-run approval flag and fails closed on a bad URL before launch", () => {
-    expect(code).toContain("hasLiveRunApproval");
+  it("is gated on the explicit Coupang WING live-run approval flag and fails closed on a bad URL before launch", () => {
+    expect(code).toContain("hasCoupangWingRunApproval");
+    // A NAVER grant must never open WING — the CLI must not reach for the shared NAVER-only gate.
+    expect(code).not.toContain("hasLiveRunApproval");
     expect(code).toContain("screenWingUrl");
     // main() runs only when invoked directly — inert on import.
     expect(code).toContain("import.meta.url === pathToFileURL(process.argv[1]).href");

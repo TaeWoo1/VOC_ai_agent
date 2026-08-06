@@ -559,7 +559,7 @@ export function ConnectNaver() {
         description="주문은 공식 API로 연결합니다. 로컬 에이전트 없이 진행할 수 있고, 리뷰 가져오기는 연결 후 별도로 설정합니다."
       />
 
-      {walkthrough && <WalkthroughBanner context={wtContext} naverCalls={naverCalls} />}
+      {walkthrough && <WalkthroughBanner context={wtContext} channelCode="NAVER" channelCalls={naverCalls} />}
 
       {walkthrough && gate === "checking" && (
         <p className="text-muted" role="status">

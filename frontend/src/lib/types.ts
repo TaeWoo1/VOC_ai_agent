@@ -143,8 +143,11 @@ export interface WalkthroughContextView {
   backendOrigin: string;
   dbAlias: string;
   schedulerEnabled: boolean;
-  naverConnectorEnabled: boolean;
-  baseline: { credentials: number; syncJobs: number; channelOrders: number; naverAccounts: number };
+  /** The sanitized target channel this disposable run is bootstrapped for (e.g. "NAVER", "COUPANG"). */
+  channelCode: string;
+  /** Channel-neutral: whether the target channel's connector is enabled in this runtime. */
+  connectorEnabled: boolean;
+  baseline: { credentials: number; syncJobs: number; channelOrders: number; channelAccounts: number };
   startedAt: string;
 }
 

@@ -32,12 +32,19 @@ export function readUrlRunId(search: string): string | null {
 
 /**
  * The exact bound wizard URL the preflight issues and the mismatch screen re-opens:
- * `<frontendOrigin>/connect/naver?walkthroughRun=<runId>`. Kept as the ONE tested constructor so the
+ * `<frontendOrigin><channelPath>?walkthroughRun=<runId>`. Kept as the ONE tested constructor so the
  * reopen button's query param cannot silently drift from what `readUrlRunId` expects to read back (they
  * are symmetric: this encodes, `readUrlRunId` decodes). Carries no secret — only the opaque run id.
+ *
+ * `channelPath` is the channel-neutral connect path (default `"/connect/naver"` to preserve every existing
+ * NAVER caller); a Coupang page passes `"/connect/coupang"` so its mismatch screen re-opens the right page.
  */
-export function expectedWalkthroughUrl(frontendOrigin: string, runId: string): string {
-  return `${frontendOrigin}/connect/naver?walkthroughRun=${encodeURIComponent(runId)}`;
+export function expectedWalkthroughUrl(
+  frontendOrigin: string,
+  runId: string,
+  channelPath: string = "/connect/naver",
+): string {
+  return `${frontendOrigin}${channelPath}?walkthroughRun=${encodeURIComponent(runId)}`;
 }
 
 /**

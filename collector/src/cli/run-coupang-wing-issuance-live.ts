@@ -2,7 +2,7 @@
  * Live, GATED, human-attended Coupang WING **API-issuance guidance** entrypoint (ISOLATED, v2 — READ-ONLY).
  *
  *   set -a && . ./.env && set +a          # COUPANG_WING_URL (operator-owned; never logged)
- *   npx tsx src/cli/run-coupang-wing-issuance-live.ts -- --i-understand-this-opens-live-naver
+ *   npx tsx src/cli/run-coupang-wing-issuance-live.ts -- --i-understand-this-opens-live-coupang-wing
  *
  * The ONLY entrypoint that fills the Coupang issuance carrier's `createDriver` with the REAL
  * {@link CoupangWingIssuanceDriver} (the default/dev boot never hosts Coupang). It opens the seller's dedicated
@@ -12,8 +12,8 @@
  * performs every real step, and SellerOps only reads a sanitized page category, highlights the next control
  * read-only, and observes the seller's own navigation.
  *
- * Gating mirrors `run-api-issuance-live-naver`:
- *   - refuses without `--i-understand-this-opens-live-naver` (`hasLiveRunApproval` — the shared live-run flag);
+ * Gating mirrors `run-api-issuance-live-naver`, but on its OWN Coupang surface flag (a NAVER grant never opens WING):
+ *   - refuses without `--i-understand-this-opens-live-coupang-wing` (`hasCoupangWingRunApproval`);
  *   - reads the operator-owned `COUPANG_WING_URL` (never logged) and `screenWingUrl`-fail-closed BEFORE launching
  *     Chrome, so the browser only ever opens the WING / auth host;
  *   - always closes the context.
@@ -36,7 +36,7 @@ import {
   resolveAgentBridgeConfig,
 } from "./local-agent";
 import { screenWingUrl } from "./coupang-wing-classifier";
-import { approvalRequiredMessage, hasLiveRunApproval } from "./live-run-approval";
+import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from "./live-run-approval";
 
 const CHANNEL_CODE = "coupang";
 
@@ -69,8 +69,8 @@ async function waitForShutdown(bridge: AgentBridge): Promise<void> {
 async function main(): Promise<void> {
   banner();
   const args = process.argv.slice(2);
-  if (!hasLiveRunApproval(args)) {
-    console.error(approvalRequiredMessage());
+  if (!hasCoupangWingRunApproval(args)) {
+    console.error(coupangWingApprovalRequiredMessage());
     process.exit(3);
     return;
   }
