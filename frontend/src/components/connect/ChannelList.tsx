@@ -67,7 +67,10 @@ function ChannelRow({
         navigate(withWalkthroughRun("/connect/naver", isWalkthroughMode() ? frontendRunId() : null));
         return;
       case "connect-coupang":
-        navigate("/connect/coupang");
+        // Same disposable-run preservation as NAVER: carry the bound run id into the Coupang connect page so
+        // its env-binding gate reads a matching `?walkthroughRun=` instead of fail-closing on MISSING_URL_RUN.
+        // No-op outside walkthrough mode, so normal sellers still get the bare `/connect/coupang`.
+        navigate(withWalkthroughRun("/connect/coupang", isWalkthroughMode() ? frontendRunId() : null));
         return;
       case "upload":
         navigate(`/connect/upload?channelId=${channel.id}`);

@@ -22,7 +22,9 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
  * The walkthrough endpoints are the environment-identity binding: {@code /context} reports a sanitized
  * runtime identity from read-only counts, and {@code /handshake} proves the operator's tab is bound to
  * THIS run + origin with no DB access. This also pins the fail-closed wiring (the routes exist only when
- * the walkthrough flag is on) so they are a 404 in production.
+ * the walkthrough flag is on) so they are a 404 in production. The binding is channel-neutral: the same
+ * run-id hosts a NAVER, Coupang WING, or any other channel's guided walkthrough, and {@code /context}
+ * reports which channel it is bound to.
  */
 class WalkthroughControllerTest {
 
@@ -35,43 +37,101 @@ class WalkthroughControllerTest {
     private static final String RUN = "run-abc123";
     private static final String FE = "http://localhost:5173";
 
-    private WalkthroughController controller() {
+    /**
+     * @param channelCode              the configured target channel (default "NAVER")
+     * @param naverConnectorEnabled    value of {@code sellerops.connector.naver.enabled}
+     * @param coupangConnectorEnabled  value of {@code sellerops.connector.coupang.enabled}
+     */
+    private WalkthroughController controller(
+            String channelCode, boolean naverConnectorEnabled, boolean coupangConnectorEnabled) {
         return new WalkthroughController(
-                RUN, "abcdef0", "naver_walkthrough", FE, "http://127.0.0.1:18090",
-                false, true, credentials, syncJobs, channelOrders, sellerAccounts, channels);
+                RUN, "abcdef0", "walkthrough", FE, "http://127.0.0.1:18090",
+                false, channelCode, naverConnectorEnabled, coupangConnectorEnabled,
+                credentials, syncJobs, channelOrders, sellerAccounts, channels);
+    }
+
+    /** The default NAVER walkthrough with its connector flag on. */
+    private WalkthroughController naverController() {
+        return controller("NAVER", true, false);
+    }
+
+    /** Stub one account on the given channel code and one on an unrelated channel. */
+    private void stubOneAccountOnChannel(String channelCode) {
+        UUID channelId = UUID.randomUUID();
+        Channel ch = mock(Channel.class);
+        when(ch.getId()).thenReturn(channelId);
+        when(channels.findByCode(channelCode)).thenReturn(Optional.of(ch));
+        SellerAccount onChannel = mock(SellerAccount.class);
+        when(onChannel.getChannelId()).thenReturn(channelId);
+        SellerAccount other = mock(SellerAccount.class);
+        when(other.getChannelId()).thenReturn(UUID.randomUUID());
+        when(sellerAccounts.findAll()).thenReturn(List.of(onChannel, other));
+        when(credentials.count()).thenReturn(0L);
+        when(syncJobs.count()).thenReturn(0L);
+        when(channelOrders.count()).thenReturn(0L);
     }
 
     @Test
     void contextReportsSanitizedIdentityAndBaselineCounts() {
-        UUID naverChannel = UUID.randomUUID();
-        Channel ch = mock(Channel.class);
-        when(ch.getId()).thenReturn(naverChannel);
-        when(channels.findByCode("NAVER")).thenReturn(Optional.of(ch));
-        SellerAccount naver = mock(SellerAccount.class);
-        when(naver.getChannelId()).thenReturn(naverChannel);
-        SellerAccount other = mock(SellerAccount.class);
-        when(other.getChannelId()).thenReturn(UUID.randomUUID());
-        when(sellerAccounts.findAll()).thenReturn(List.of(naver, other));
-        when(credentials.count()).thenReturn(0L);
-        when(syncJobs.count()).thenReturn(0L);
-        when(channelOrders.count()).thenReturn(0L);
+        stubOneAccountOnChannel("NAVER");
 
-        WalkthroughContextView view = controller().context();
+        WalkthroughContextView view = naverController().context();
 
         assertThat(view.walkthroughRunId()).isEqualTo(RUN);
         assertThat(view.gitCommit()).isEqualTo("abcdef0");
-        assertThat(view.dbAlias()).isEqualTo("naver_walkthrough");
+        assertThat(view.dbAlias()).isEqualTo("walkthrough");
         assertThat(view.frontendOrigin()).isEqualTo(FE);
-        assertThat(view.naverConnectorEnabled()).isTrue();
+        assertThat(view.channelCode()).isEqualTo("NAVER");
+        assertThat(view.connectorEnabled()).isTrue();
         assertThat(view.schedulerEnabled()).isFalse();
         assertThat(view.startedAt()).isNotBlank();
         assertThat(view.baseline().credentials()).isZero();
-        assertThat(view.baseline().naverAccounts()).isEqualTo(1L); // only the NAVER-channel account counts
+        assertThat(view.baseline().channelAccounts()).isEqualTo(1L); // only the target-channel account counts
+    }
+
+    @Test
+    void contextResolvesConnectorAndBaselineForTheConfiguredCoupangChannel() {
+        // channel-code=COUPANG + sellerops.connector.coupang.enabled=true; NAVER flag is irrelevant here.
+        stubOneAccountOnChannel("COUPANG");
+
+        WalkthroughContextView view = controller("COUPANG", false, true).context();
+
+        assertThat(view.channelCode()).isEqualTo("COUPANG");
+        assertThat(view.connectorEnabled()).isTrue(); // resolved from the Coupang flag, not NAVER
+        assertThat(view.baseline().channelAccounts()).isEqualTo(1L); // COUPANG-channel account counts
+    }
+
+    @Test
+    void connectorEnabledIsSelectedPerChannelSoTheWrongChannelsFlagIsIgnored() {
+        // COUPANG target but only the NAVER flag is on → connector reports NOT enabled.
+        when(channels.findByCode("COUPANG")).thenReturn(Optional.empty());
+        assertThat(controller("COUPANG", true, false).context().connectorEnabled()).isFalse();
+        // NAVER target but only the Coupang flag is on → connector reports NOT enabled.
+        when(channels.findByCode("NAVER")).thenReturn(Optional.empty());
+        assertThat(controller("NAVER", false, true).context().connectorEnabled()).isFalse();
+    }
+
+    @Test
+    void anUnknownChannelCodeFailsClosedToConnectorDisabled() {
+        when(channels.findByCode("MYSTERY")).thenReturn(Optional.empty());
+        WalkthroughContextView view = controller("MYSTERY", true, true).context();
+        assertThat(view.channelCode()).isEqualTo("MYSTERY");
+        assertThat(view.connectorEnabled()).isFalse(); // fail-closed for an unknown channel
+        assertThat(view.baseline().channelAccounts()).isZero(); // no matching channel → 0
+    }
+
+    @Test
+    void aBlankChannelCodeDefaultsToNaverKeepingExistingBehavior() {
+        stubOneAccountOnChannel("NAVER");
+        WalkthroughContextView view = controller("", true, false).context();
+        assertThat(view.channelCode()).isEqualTo("NAVER");
+        assertThat(view.connectorEnabled()).isTrue();
+        assertThat(view.baseline().channelAccounts()).isEqualTo(1L);
     }
 
     @Test
     void handshakeMatchesOnlyTheExactRunAndOrigin() {
-        WalkthroughController c = controller();
+        WalkthroughController c = naverController();
 
         WalkthroughHandshake.Result ok = c.handshake(new WalkthroughHandshake.Request(RUN, "nonce-1", FE));
         assertThat(ok.runMatched()).isTrue();
@@ -86,14 +146,14 @@ class WalkthroughControllerTest {
 
     @Test
     void handshakeNeverTouchesTheDatabase() {
-        controller().handshake(new WalkthroughHandshake.Request(RUN, "nonce", FE));
+        naverController().handshake(new WalkthroughHandshake.Request(RUN, "nonce", FE));
         verifyNoInteractions(credentials, syncJobs, channelOrders, sellerAccounts, channels);
     }
 
     @Test
     void aBlankRunIdNeverMatches() {
         WalkthroughController blank = new WalkthroughController(
-                "", "g", "db", FE, "http://127.0.0.1:18090", false, true,
+                "", "g", "db", FE, "http://127.0.0.1:18090", false, "NAVER", true, false,
                 credentials, syncJobs, channelOrders, sellerAccounts, channels);
         assertThat(blank.handshake(new WalkthroughHandshake.Request("", "n", FE)).runMatched()).isFalse();
     }

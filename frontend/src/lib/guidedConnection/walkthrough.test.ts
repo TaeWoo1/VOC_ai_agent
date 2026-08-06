@@ -73,10 +73,21 @@ describe("readUrlRunId", () => {
 });
 
 describe("expectedWalkthroughUrl — the one tested reopen-URL constructor", () => {
-  it("builds <origin>/connect/naver?walkthroughRun=<runId>", () => {
+  it("builds <origin>/connect/naver?walkthroughRun=<runId> (default channel path)", () => {
     expect(expectedWalkthroughUrl(ORIGIN, "wt-abc123")).toBe(
       "http://localhost:5173/connect/naver?walkthroughRun=wt-abc123",
     );
+  });
+
+  it("channelizes the connect path — a Coupang caller re-opens /connect/coupang", () => {
+    expect(expectedWalkthroughUrl(ORIGIN, "wt-abc123", "/connect/coupang")).toBe(
+      "http://localhost:5173/connect/coupang?walkthroughRun=wt-abc123",
+    );
+  });
+
+  it("the channelized query param still round-trips through readUrlRunId", () => {
+    const url = expectedWalkthroughUrl(ORIGIN, "wt-cp-1", "/connect/coupang");
+    expect(readUrlRunId(url.slice(url.indexOf("?")))).toBe("wt-cp-1");
   });
 
   it("the produced query param round-trips through readUrlRunId (symmetric encode/decode)", () => {

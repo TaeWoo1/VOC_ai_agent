@@ -36,6 +36,9 @@ import { ApiIssuanceEndpoint } from "../bridge/api-issuance-endpoint";
 import { IssuanceEngine } from "../action-window/api-issuance/issuance-engine";
 import { IssuanceGuidanceSession } from "../action-window/api-issuance/issuance-session";
 import type { IssuanceProbeDriver } from "../action-window/api-issuance/issuance-driver";
+import { CoupangIssuanceEngine } from "../action-window/coupang-issuance/coupang-issuance-engine";
+import { CoupangIssuanceGuidanceSession } from "../action-window/coupang-issuance/coupang-issuance-session";
+import type { CoupangIssuanceProbeDriver } from "../action-window/coupang-issuance/coupang-issuance-driver";
 import type { AwCarrierEndpoint } from "../bridge/aw-carrier";
 import type { ConnectorOrchestratorObserver } from "../connector/connector-orchestrator";
 import { log } from "../log";
@@ -162,6 +165,26 @@ export interface AgentApiIssuanceConfig {
   createDriver: () => IssuanceProbeDriver;
 }
 
+/**
+ * Optional ISOLATED Coupang WING API-issuance guidance session hosting (v2). Mutually exclusive with the other
+ * carriers — an agent hosts ONE, and it announces the SAME `issuance` carrier kind (over the reused
+ * {@link ApiIssuanceEndpoint}, channelCode `coupang`), so a frontend attaches on the sanitized channelCode.
+ *
+ * A separate slot from {@link AgentApiIssuanceConfig} because the Coupang walk is a DIFFERENT choreography (a
+ * fixed 7-step line, no app-list branch) driven by the isolated {@link CoupangIssuanceEngine} +
+ * {@link CoupangIssuanceGuidanceSession} + {@link CoupangIssuanceProbeDriver} — the NAVER issuance path stays
+ * byte-for-byte untouched. Like NAVER's, it hosts exactly ONE read-only guidance run for the agent's lifetime
+ * with no launch ref / scope / host / persistence; a reboot mints a fresh run. The driver factory is injected so
+ * the default/dev boot stays synthetic (no browser); the LIVE driver is supplied only by the gated live entry.
+ */
+export interface AgentCoupangIssuanceConfig {
+  /** Opaque run identity announced to paired clients (assigned by the Runtime, never by the FE). */
+  runId: string;
+  /** Sanitized channel identity (SEMANTIC_CODE) — always `coupang`. */
+  channelCode: string;
+  createDriver: () => CoupangIssuanceProbeDriver;
+}
+
 export interface AgentBridgeConfig {
   port: number;
   allowedOrigins: string[];
@@ -188,6 +211,8 @@ export interface AgentBridgeConfig {
   initialImport?: AgentImportConfig;
   /** When present, hosts one ISOLATED API-issuance guidance run (v2). Mutually exclusive with the other three. */
   apiIssuance?: AgentApiIssuanceConfig;
+  /** When present, hosts one ISOLATED Coupang WING issuance guidance run (v2). Mutually exclusive with the rest. */
+  coupangIssuance?: AgentCoupangIssuanceConfig;
   /**
    * Called when SellerOps asked to be connected to this agent — a pairing approved, or an authenticated tab
    * attaching. Passed straight through to {@link BridgeServer}; see its note for why the import mode brings the
@@ -221,14 +246,16 @@ export interface AgentBridge {
   readonly importHost: ImportSegmentHost | undefined;
   /** Test-only access to the hosted API-issuance guidance session (undefined unless configured). */
   readonly apiIssuanceSession: IssuanceGuidanceSession | undefined;
+  /** Test-only access to the hosted Coupang WING issuance guidance session (undefined unless configured). */
+  readonly coupangIssuanceSession: CoupangIssuanceGuidanceSession | undefined;
 }
 
 export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
   // An agent hosts EXACTLY ONE carrier — export, reply, import, or issuance — never more (one carrier slot).
   // Fail fast before any I/O.
-  const carriersConfigured = [cfg.actionWindow, cfg.replySubmission, cfg.initialImport, cfg.apiIssuance].filter(Boolean).length;
+  const carriersConfigured = [cfg.actionWindow, cfg.replySubmission, cfg.initialImport, cfg.apiIssuance, cfg.coupangIssuance].filter(Boolean).length;
   if (carriersConfigured > 1) {
-    throw new Error("agent-bridge: actionWindow, replySubmission, initialImport, and apiIssuance are mutually exclusive — an agent hosts exactly one carrier");
+    throw new Error("agent-bridge: actionWindow, replySubmission, initialImport, apiIssuance, and coupangIssuance are mutually exclusive — an agent hosts exactly one carrier");
   }
   const store = new FilePairingStore(cfg.pairingFile, { now: cfg.now ?? (() => Date.now()) });
   // Make durable-pairing restart recovery observable exactly once at boot. Sanitized: a coarse status enum
@@ -353,10 +380,29 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
     log("aw_issuance_run_hosted", {});
   }
 
+  // ISOLATED Coupang WING issuance guidance hosting (v2). Same shape as NAVER's carrier — ONE run for the
+  // agent's lifetime, no launch ref / scope / host / persistence — but a DIFFERENT engine/session (a fixed
+  // 7-step line, no app-list branch). It REUSES the ApiIssuanceEndpoint (channelCode `coupang`), so the NAVER
+  // issuance path above is untouched. The driver is injected (synthetic by default — no browser); the runtime
+  // never logs in, clicks, submits, issues a key, or reads a credential.
+  let coupangIssuanceEndpoint: ApiIssuanceEndpoint | undefined;
+  let coupangIssuanceSession: CoupangIssuanceGuidanceSession | undefined;
+  if (cfg.coupangIssuance) {
+    const ci = cfg.coupangIssuance;
+    coupangIssuanceEndpoint = new ApiIssuanceEndpoint({ runId: ci.runId, channelCode: ci.channelCode });
+    coupangIssuanceSession = new CoupangIssuanceGuidanceSession(
+      new CoupangIssuanceEngine({ runId: ci.runId, channelCode: ci.channelCode }),
+      ci.createDriver(),
+      coupangIssuanceEndpoint.transport,
+    );
+    coupangIssuanceSession.attach();
+    log("aw_coupang_issuance_run_hosted", {});
+  }
+
   // ONE carrier per agent. The order states the precedence explicitly rather than relying on which
-  // config the CLI happened to build: import wins over reply, reply over issuance, issuance over export.
-  // The CLI already refuses to build more than one, so this is defence in depth, not the decision point.
-  const carrier: AwCarrierEndpoint | undefined = importEndpoint ?? replyEndpoint ?? apiIssuanceEndpoint ?? actionWindow;
+  // config the CLI happened to build: import wins over reply, reply over issuance (NAVER, then Coupang),
+  // issuance over export. The CLI already refuses to build more than one, so this is defence in depth.
+  const carrier: AwCarrierEndpoint | undefined = importEndpoint ?? replyEndpoint ?? apiIssuanceEndpoint ?? coupangIssuanceEndpoint ?? actionWindow;
   const server = new BridgeServer({
     store,
     allowedOrigins: cfg.allowedOrigins,
@@ -377,6 +423,7 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
     replySubmissionSession,
     importHost,
     apiIssuanceSession,
+    coupangIssuanceSession,
     observer: { onConnectionSettled: (r) => settle.onConnectionSettled(r) },
     async listen(): Promise<AgentBridgeListenResult> {
       try {

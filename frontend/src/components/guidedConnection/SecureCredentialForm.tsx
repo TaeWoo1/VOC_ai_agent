@@ -19,10 +19,16 @@ export function SecureCredentialForm({
   template,
   onSubmit,
   submitting,
+  heading = "애플리케이션 ID·시크릿 입력",
+  idPrefix = "naver-cred",
 }: {
   template: CredentialTemplateView;
   onSubmit: (secrets: Record<string, string>) => void;
   submitting: boolean;
+  /** Form heading — defaults to the NAVER wording; other channels (e.g. Coupang) pass their own. */
+  heading?: string;
+  /** Input id namespace so multiple channels' forms never collide on element ids. */
+  idPrefix?: string;
 }) {
   const [values, setValues] = useState<Record<string, string>>({});
 
@@ -46,15 +52,15 @@ export function SecureCredentialForm({
 
   return (
     <form className="space-y-4 rounded-xl border border-line bg-canvas/40 p-4" onSubmit={submit}>
-      <h3 className="text-base font-bold text-ink">애플리케이션 ID·시크릿 입력</h3>
+      <h3 className="text-base font-bold text-ink">{heading}</h3>
       {template.fields.map((field) => (
         <div key={field.key}>
-          <label htmlFor={`naver-cred-${field.key}`} className="mb-1.5 block text-base font-semibold text-ink">
+          <label htmlFor={`${idPrefix}-${field.key}`} className="mb-1.5 block text-base font-semibold text-ink">
             {field.label}
             {field.required ? null : <span className="ml-2 text-sm font-normal text-muted">(선택)</span>}
           </label>
           <input
-            id={`naver-cred-${field.key}`}
+            id={`${idPrefix}-${field.key}`}
             type={field.secret ? "password" : "text"}
             value={values[field.key] ?? ""}
             onChange={(e) => setValues((prev) => ({ ...prev, [field.key]: e.target.value }))}

@@ -710,8 +710,9 @@ describe("ConnectNaver — walkthrough environment binding (VITE_WALKTHROUGH_MOD
       backendOrigin: "http://127.0.0.1:18090",
       dbAlias: "naver_walkthrough",
       schedulerEnabled: false,
-      naverConnectorEnabled: true,
-      baseline: { credentials: 0, syncJobs: 0, channelOrders: 0, naverAccounts: 0 },
+      channelCode: "NAVER",
+      connectorEnabled: true,
+      baseline: { credentials: 0, syncJobs: 0, channelOrders: 0, channelAccounts: 0 },
       startedAt: "2026-08-01T00:00:00Z",
       ...over,
     };

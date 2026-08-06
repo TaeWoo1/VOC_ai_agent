@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   APPROVAL_FLAG,
+  COUPANG_WING_APPROVAL_FLAG,
   SESSION_RECOVERY_FLAG,
   approvalRequiredMessage,
+  coupangWingApprovalRequiredMessage,
+  hasCoupangWingRunApproval,
   hasLiveRunApproval,
   hasSessionRecovery,
   isClassifyOnly,
@@ -80,6 +83,43 @@ describe("isClassifyOnly", () => {
 
   it("is order-independent", () => {
     expect(isClassifyOnly(["--no-upload", "--discover"])).toBe(true);
+  });
+});
+
+describe("hasCoupangWingRunApproval", () => {
+  it("is false with no args / no flag", () => {
+    expect(hasCoupangWingRunApproval([])).toBe(false);
+    expect(hasCoupangWingRunApproval(["--login"])).toBe(false);
+  });
+
+  it("is true when the Coupang WING flag is present", () => {
+    expect(hasCoupangWingRunApproval([COUPANG_WING_APPROVAL_FLAG])).toBe(true);
+  });
+
+  it("is order-independent", () => {
+    expect(hasCoupangWingRunApproval(["--foo", COUPANG_WING_APPROVAL_FLAG, "--bar"])).toBe(true);
+  });
+
+  it("is not fooled by a similar-looking flag", () => {
+    expect(hasCoupangWingRunApproval(["--i-understand-this-opens-live-coupang"])).toBe(false);
+  });
+
+  it("does NOT accept the NAVER approval flag (a NAVER grant never opens WING)", () => {
+    expect(hasCoupangWingRunApproval([APPROVAL_FLAG])).toBe(false);
+  });
+
+  it("and the NAVER gate does NOT accept the Coupang WING flag (surfaces are non-substitutable)", () => {
+    expect(hasLiveRunApproval([COUPANG_WING_APPROVAL_FLAG])).toBe(false);
+  });
+
+  it("refusal message names the WING surface, the human-driven steps, and the exact flag", () => {
+    const msg = coupangWingApprovalRequiredMessage();
+    expect(msg).toMatch(/live Coupang WING seller-center session/i);
+    expect(msg).toMatch(/2FA\s*\/\s*CAPTCHA/i);
+    expect(msg).toMatch(/user-owned test seller account/i);
+    expect(msg).toContain(COUPANG_WING_APPROVAL_FLAG);
+    // It must never leak the NAVER flag as an alternative.
+    expect(msg).not.toContain(APPROVAL_FLAG);
   });
 });
 
