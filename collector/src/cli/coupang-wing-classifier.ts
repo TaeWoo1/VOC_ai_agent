@@ -63,15 +63,31 @@ export interface WingStructuralCensus {
    * Optional so a caller need not always supply it; absent ⇒ treated as `false`.
    */
   openApiMarkerPresent?: boolean;
+  /**
+   * STRUCTURAL already-issued signal: whether the page carries the live-CONFIRMED credential-region anchor
+   * ({@link WING_CREDENTIAL_ANCHOR_LABELS}, e.g. the "Access Key" heading) — present when the open-API keys are
+   * DISPLAYED (an already-issued account). Value-free (a boolean only; the key VALUE is never read). Optional;
+   * absent ⇒ `false`.
+   */
+  credentialAnchorPresent?: boolean;
 }
 
 /**
- * FIXED, live-confirmed open-API issuance-page marker labels (the issuance section heading). Matching is EXACT
- * accessible-name (value-free): only a boolean leaves the page. LIVE_DOM_CALIBRATION_PENDING — a live WING walk
- * must confirm these before they are trusted; a false match just fails closed downstream (the fixed-label locate
- * finds nothing on that page and parks recoverably), never a wrong classification that acts.
+ * FIXED open-API issuance-page marker labels (the issuance-FORM section heading). Matching is EXACT
+ * accessible-name (value-free): only a boolean leaves the page. LIVE_DOM_CALIBRATION_PENDING — these were NOT
+ * matched on the observed already-issued page (its real heading text is sanitized-out, so they are not retuned
+ * speculatively). A false match just fails closed downstream (the fixed-label locate finds nothing and parks),
+ * never a wrong classification that acts.
  */
 export const WING_OPEN_API_MARKER_LABELS = ["오픈API 키 발급", "오픈API 개발"] as const;
+
+/**
+ * LIVE-CONFIRMED credential-region anchor label(s). The 2026-08-06 observe-only recorder run resolved the
+ * "Access Key" credential region UNIQUELY (matchCount=1) on the real already-issued open-API page, so an exact
+ * accessible-name match on this label is a grounded signal that the page IS the open-API page in the
+ * issued/credential-shown (already-issued) state. Value-free: only a boolean leaves the page — never the key.
+ */
+export const WING_CREDENTIAL_ANCHOR_LABELS = ["Access Key"] as const;
 
 /** Sanitized signals the classifier consumes: the url category + bucketized census. */
 export interface WingSignals {
@@ -83,6 +99,8 @@ export interface WingSignals {
   readonlyFieldCountBucket: CountBucket;
   listLikeContainerCountBucket: CountBucket;
   openApiMarkerPresent: boolean;
+  /** Live-CONFIRMED credential-region anchor present ⇒ the open-API page in the issued/already-issued state. */
+  credentialAnchorPresent: boolean;
 }
 
 export interface WingObservation {
@@ -137,6 +155,7 @@ export function toWingSignals(urlCategory: WingUrlCategory, census: WingStructur
     readonlyFieldCountBucket: countBucket(census.readonlyFieldCount),
     listLikeContainerCountBucket: countBucket(census.listLikeContainerCount),
     openApiMarkerPresent: census.openApiMarkerPresent ?? false,
+    credentialAnchorPresent: census.credentialAnchorPresent ?? false,
   };
 }
 
@@ -169,9 +188,11 @@ export function classifyWingPage(signals: WingSignals): { pageCategory: WingPage
   }
 
   if (signals.passwordFieldPresent) return { pageCategory: "login", blockers };
-  // The specific issuance-form marker beats the generic read-only-field heuristic (see precedence note above),
-  // so the guided reach never dead-ends on an issuance page that happens to show a read-only field.
-  if (signals.openApiMarkerPresent) return { pageCategory: "open_api_issuance", blockers };
+  // The issuance-form marker OR the live-CONFIRMED credential-region anchor identifies the open-API page — the
+  // latter is what the 2026-08-06 live run proved present (matchCount=1) on the already-issued page, whose form
+  // marker was absent. Either beats the generic read-only-field heuristic, so the guided reach recognizes the
+  // already-issued open-API page instead of dead-ending on `wing_home`.
+  if (signals.openApiMarkerPresent || signals.credentialAnchorPresent) return { pageCategory: "open_api_issuance", blockers };
   if (signals.readonlyFieldCountBucket !== "none") return { pageCategory: "credential_shown", blockers };
   if (signals.listLikeContainerCountBucket !== "none") return { pageCategory: "wing_home", blockers };
 
@@ -321,17 +342,19 @@ export const EXTRACT_WING_CENSUS = `(function () {
   /* STRUCTURAL open-API-issuance marker (value-free OUTPUT: a single boolean). Compares an element's accessible
      name against the KNOWN fixed labels ONLY — the matched text is never returned. Bounded scan. */
   var MARKERS = ${JSON.stringify(WING_OPEN_API_MARKER_LABELS)};
+  var CRED = ${JSON.stringify(WING_CREDENTIAL_ANCHOR_LABELS)};
   function nrm(s) { return String(s == null ? '' : s).replace(/\\s+/g, ' ').trim(); }
   function accNm(el) {
     var al = el.getAttribute ? el.getAttribute('aria-label') : null;
     if (al && nrm(al).length) { return nrm(al); }
     return nrm(el.textContent || '');
   }
-  var markerCands = slice(document.querySelectorAll("h1,h2,h3,h4,h5,h6,[role='heading'],dt,dd,label,legend,strong,b,span,div,p"));
-  var openApiMarkerPresent = false, mi, mm, nm;
-  for (mi = 0; mi < markerCands.length && mi < 6000 && !openApiMarkerPresent; mi++) {
+  var markerCands = slice(document.querySelectorAll("h1,h2,h3,h4,h5,h6,[role='heading'],dt,dd,label,legend,strong,b,span,div,p,th"));
+  var openApiMarkerPresent = false, credentialAnchorPresent = false, mi, mm, nm;
+  for (mi = 0; mi < markerCands.length && mi < 6000 && (!openApiMarkerPresent || !credentialAnchorPresent); mi++) {
     nm = accNm(markerCands[mi]);
-    for (mm = 0; mm < MARKERS.length; mm++) { if (nm === MARKERS[mm]) { openApiMarkerPresent = true; break; } }
+    if (!openApiMarkerPresent) { for (mm = 0; mm < MARKERS.length; mm++) { if (nm === MARKERS[mm]) { openApiMarkerPresent = true; break; } } }
+    if (!credentialAnchorPresent) { for (mm = 0; mm < CRED.length; mm++) { if (nm === CRED[mm]) { credentialAnchorPresent = true; break; } } }
   }
   return {
     passwordFieldPresent: document.querySelector("input[type='password']") != null,
@@ -340,6 +363,7 @@ export const EXTRACT_WING_CENSUS = `(function () {
     editableTextInputCount: editableTextInputCount,
     readonlyFieldCount: readonlyFieldCount,
     listLikeContainerCount: listLikeContainerCount,
-    openApiMarkerPresent: openApiMarkerPresent
+    openApiMarkerPresent: openApiMarkerPresent,
+    credentialAnchorPresent: credentialAnchorPresent
   };
 })()`;

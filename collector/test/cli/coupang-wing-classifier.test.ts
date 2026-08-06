@@ -73,6 +73,20 @@ describe("classifyWingPage — structural, fail-closed, always calibration-pendi
     ).toBe("login");
   });
 
+  it("open_api_issuance (already-issued) via the live-CONFIRMED credential anchor, even with no form marker", () => {
+    // The 2026-08-06 live run: the already-issued open-API page had NO form marker + NO readonly inputs, but the
+    // "Access Key" credential region resolved uniquely. The credential anchor now identifies that page — so the
+    // guided reach recognizes it (and detects already-issued) instead of dead-ending on wing_home.
+    expect(
+      classifyWingPage(onTarget({ credentialAnchorPresent: true, openApiMarkerPresent: false, listLikeContainerCount: 9 }))
+        .pageCategory,
+    ).toBe("open_api_issuance");
+    // Login still wins over the credential anchor (a login page never mis-reads as issued).
+    expect(
+      classifyWingPage(onTarget({ credentialAnchorPresent: true, passwordFieldPresent: true })).pageCategory,
+    ).toBe("login");
+  });
+
   it("open_api_issuance = the form marker present, winning over a read-only field + list (no dead-end)", () => {
     // The specific issuance-form marker beats the generic read-only-field heuristic, so an issuance page that
     // pre-fills 업체코드 read-only (or carries a disabled submit) is still recognized as the issuance page.

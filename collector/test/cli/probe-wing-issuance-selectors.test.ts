@@ -125,6 +125,7 @@ const OBS: WingObservation = {
     readonlyFieldCountBucket: "none",
     listLikeContainerCountBucket: "few",
     openApiMarkerPresent: true,
+    credentialAnchorPresent: false,
   },
   blockers: ["LIVE_DOM_CALIBRATION_PENDING"],
 };
