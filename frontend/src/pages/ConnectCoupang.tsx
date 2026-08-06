@@ -1,43 +1,79 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/apiClient";
 import { selectChannelAccount } from "../lib/channelConnection";
-import { AdvertisedCallIpPanel } from "../components/guidedConnection/AdvertisedCallIpPanel";
-import { SecureCredentialForm } from "../components/guidedConnection/SecureCredentialForm";
-import type { ConnectionTestResultView, CredentialTemplateView } from "../lib/types";
+import { CoupangConnectTutorial } from "../components/coupang/CoupangConnectTutorial";
+import {
+  COUPANG_TUTORIAL_COPY as C,
+  INITIAL_COUPANG_STATE,
+  coupangTutorialReducer,
+  latestOrderRun,
+  resolvePhase,
+  syncStatusFromRun,
+  type CoupangSyncStatus,
+} from "../lib/coupangTutorial";
+import type { ChannelStatus, ConnectionStatusView, CredentialTemplateView, SyncRunView } from "../lib/types";
 
 /**
- * The first-time Coupang connection surface. It shows the official PREREQUISITES a new seller must
- * complete before connecting — issue the Coupang WING Open API key (access key / secret key / vendor
- * code), confirm the key has order-API access, and register the deployment's calling IP — then hosts
- * credential entry and the connection test.
+ * Coupang first-connection tutorial + guided initial sync (thin wiring layer over the pure engine in
+ * `lib/coupangTutorial`). A first-time seller completes API prep → credential → connection test →
+ * PREPARING → first ORDER_SUMMARY sync → CONNECTED → Operations entirely in the UI.
  *
- * <p>Honest by construction:
- * <ul>
- *   <li>The advertised calling IP comes ONLY from the backend setup endpoint; an empty value shows
- *       generic guidance, never a fabricated IP (see {@link AdvertisedCallIpPanel}).</li>
- *   <li>Secrets flow straight from {@link SecureCredentialForm} to the backend Vault via
- *       {@code storeCredential} — never into local storage, a log, or an event.</li>
- *   <li>A successful test verifies the credential but does NOT claim a completed connection: Coupang
- *       (like NAVER) connects on a two-signal path — the first collected order sync completes it.</li>
- * </ul>
+ * <p>Server-authoritative recovery: the landing phase is DERIVED from persisted, channel-agnostic reads
+ * (the account's two-signal `connectionStatus`, whether a credential is on file, the latest ORDER_SUMMARY
+ * run), so a refresh/return re-lands on the correct step and a sync already RUNNING server-side is resumed
+ * (observed), never re-triggered.
  *
- * <p>A page load is a 0-write operation: the seller account is created lazily only on an explicit
- * credential submit.
+ * <p>No page-load writes: the seller account is created lazily only on an explicit credential submit.
+ *
+ * <p>Honest by construction: the secret keys flow straight from the form to the backend Vault via
+ * `storeCredential`; a passing connection test is NOT a completed connection (PREPARING); the internal
+ * returnShippingCenters→ordersheets test fallback is never surfaced (the backend hides it behind sanitized
+ * reason codes).
  */
+
+const ORDER_SUMMARY = "ORDER_SUMMARY";
+/** How often the in-progress screen polls the read-only sync-run list for the running sync's terminal status. */
+const SYNC_POLL_INTERVAL_MS = 5000;
+/** After this long still RUNNING, stop auto-polling and offer a manual re-check — NEVER a new sync. */
+const SYNC_POLL_TIMEOUT_MS = 12 * 60_000;
+
+// `startedAt` anchors the DISPLAYED elapsed clock (the sync's real start when resuming an existing run,
+// so a mid-sync refresh reports true elapsed, not time-since-observation). `observeStartedAt` anchors the
+// poll-window stall timeout (always when THIS tab began observing) — kept separate so resuming an
+// already-old run does not instantly read as stalled, and a manual re-check reopens the window without
+// resetting the elapsed display.
+type SyncWatch = { startedAt: number; observeStartedAt: number; polling: boolean; stalled: boolean };
+
 export function ConnectCoupang() {
   const navigate = useNavigate();
-  const [phase, setPhase] = useState<"loading" | "ready" | "unavailable">("loading");
+  const [state, dispatch] = useReducer(coupangTutorialReducer, INITIAL_COUPANG_STATE);
+
+  const [loading, setLoading] = useState(true);
+  const [resolveError, setResolveError] = useState(false);
   const [template, setTemplate] = useState<CredentialTemplateView | null>(null);
   const [coupangChannelId, setCoupangChannelId] = useState<string | null>(null);
   const [advertisedEgressIps, setAdvertisedEgressIps] = useState<readonly string[]>([]);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatusView | null>(null);
   const [busy, setBusy] = useState(false);
-  const [testResult, setTestResult] = useState<ConnectionTestResultView | null>(null);
-  const accountIdRef = useRef<string | null>(null);
-  const inFlightRef = useRef(false);
 
-  // Deployment-global setup (advertised calling IP). Isolated + fail-safe: a failure here must never
-  // break the page — it then shows generic guidance, never a fabricated IP.
+  const [accountId, setAccountId] = useState<string | null>(null);
+  const accountIdRef = useRef<string | null>(null); // synchronous mirror so a just-created id is usable at once
+
+  // First-sync progress. `inFlightRef` is the AUTHORITATIVE synchronous guard against a double-fire of any
+  // action; `syncWatchRef` blocks a new trigger while a sync is observed (lags one render, but no trigger is
+  // rendered during a watch, so inFlightRef alone already closes the window). The backend single-flight is
+  // the real enforcement — this is the client half so the UI never even attempts a duplicate run.
+  const [syncWatch, setSyncWatch] = useState<SyncWatch | null>(null);
+  const [syncNow, setSyncNow] = useState(0);
+  const syncWatchRef = useRef<SyncWatch | null>(null);
+  const inFlightRef = useRef(false);
+  useEffect(() => {
+    syncWatchRef.current = syncWatch;
+  }, [syncWatch]);
+
+  // Deployment-global setup (advertised calling IP). Isolated + fail-safe: a failure here must never break
+  // the page — it then shows generic guidance, never a fabricated IP.
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -53,8 +89,9 @@ export function ConnectCoupang() {
     };
   }, []);
 
-  // Resolve context — reads ONLY (Coupang channel + existing account + credential template). Never
-  // creates an account, so a page load/refresh writes nothing.
+  // Resolve the landing phase — reads ONLY (channel + existing account + template; if an account exists, its
+  // credential presence + latest ORDER_SUMMARY run). Never creates an account, so a load/refresh writes
+  // nothing. This is the whole of refresh/leave recovery: the phase is derived from persisted state.
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -65,14 +102,46 @@ export function ConnectCoupang() {
           api.getCredentialTemplateStrict("COUPANG"),
         ]);
         if (!alive) return;
+        setTemplate(tmpl);
         const coupang = channels.find((c) => c.code === "COUPANG") ?? null;
         setCoupangChannelId(coupang?.id ?? null);
         const existing = coupang ? selectChannelAccount(accounts, coupang.id) : null;
-        accountIdRef.current = existing?.id ?? null;
-        setTemplate(tmpl);
-        setPhase(tmpl && coupang ? "ready" : "unavailable");
+        const id = existing?.id ?? null;
+        accountIdRef.current = id;
+        setAccountId(id);
+
+        const ready = Boolean(tmpl && coupang);
+        const connStatus: ChannelStatus | null = existing?.connectionStatus ?? null;
+        let credentialPresent = false;
+        let latestSyncStatus: CoupangSyncStatus | null = null;
+        let latestRun: SyncRunView | null = null;
+
+        if (id) {
+          // Credential presence (404 → null) and the latest ORDER_SUMMARY run, both read-only + sanitized.
+          const [info, runs] = await Promise.all([
+            api.getConnectionInfoStrict(id).catch(() => null),
+            api.getSyncRunsStrict({ sellerAccountId: id, dataType: ORDER_SUMMARY }).catch(() => [] as SyncRunView[]),
+          ]);
+          if (!alive) return;
+          credentialPresent = info != null;
+          latestRun = latestOrderRun(runs, id);
+          latestSyncStatus = latestRun ? syncStatusFromRun(latestRun) : null;
+        }
+
+        const phase = resolvePhase({ ready, connectionStatus: connStatus, credentialPresent, latestSyncStatus });
+        // Resuming a sync already RUNNING server-side → observe it (never re-trigger). Anchor the displayed
+        // elapsed to the run's real start so a mid-sync refresh shows true elapsed, not 0:00; anchor the
+        // stall window to now so an already-old run does not read as instantly stalled.
+        if (phase === "syncing") {
+          const startedAt = Date.parse(latestRun?.startedAt ?? "") || Date.now();
+          setSyncWatch({ startedAt, observeStartedAt: Date.now(), polling: true, stalled: false });
+          setSyncNow(Date.now());
+        }
+        dispatch({ type: "RESOLVED", phase });
       } catch {
-        if (alive) setPhase("unavailable");
+        if (alive) setResolveError(true);
+      } finally {
+        if (alive) setLoading(false);
       }
     })();
     return () => {
@@ -80,139 +149,265 @@ export function ConnectCoupang() {
     };
   }, []);
 
-  const onSubmit = useCallback(
-    async (secrets: Record<string, string>) => {
-      if (!template || inFlightRef.current) return;
-      inFlightRef.current = true;
-      setBusy(true);
-      setTestResult(null);
+  // The first ORDER_SUMMARY sync STEP (no guard of its own — the guarded public entries own that). Triggers
+  // the sync ONCE. A terminal result advances the journey; a RUNNING result means the backend single-flight
+  // coalesced this onto an in-flight run — switch to polling the read-only run list for the real status.
+  const firstSyncStep = useCallback(async (id: string) => {
+    const now = Date.now();
+    const fresh = { startedAt: now, observeStartedAt: now, polling: true as const, stalled: false };
+    setSyncWatch({ ...fresh, polling: false });
+    setSyncNow(now);
+    try {
+      const run = await api.manualSync(id, ORDER_SUMMARY);
+      const status = syncStatusFromRun(run);
+      if (status === "RUNNING") {
+        setSyncWatch((w) => (w ? { ...w, polling: true } : fresh));
+      } else {
+        setSyncWatch(null);
+        dispatch({ type: "SYNC_RESULT", status });
+      }
+    } catch {
+      // The long-held initial sync request may be cut by an infra idle-timeout while the job keeps running.
+      // Disambiguate via the read-only run list before surfacing a failure: an actually-RUNNING job → keep
+      // observing; an already-settled job → reflect it; only a genuinely failed/absent run fails closed.
       try {
-        // Create the seller account lazily HERE — the first and only DB write, on an explicit action.
+        const runs = await api.getSyncRunsStrict({ sellerAccountId: id, dataType: ORDER_SUMMARY });
+        const st = syncStatusFromRun(latestOrderRun(runs, id));
+        if (st === "RUNNING") {
+          setSyncWatch((w) => (w ? { ...w, polling: true } : fresh));
+          return;
+        }
+        if (st === "SUCCESS" || st === "PARTIAL") {
+          setSyncWatch(null);
+          dispatch({ type: "SYNC_RESULT", status: st });
+          return;
+        }
+      } catch {
+        /* run-list read also failed → fall through to the fail-closed result below */
+      }
+      setSyncWatch(null);
+      dispatch({ type: "SYNC_RESULT", status: "FAILED" });
+    }
+  }, []);
+
+  // The connection-test STEP (unguarded); on SUCCESS it lands on PREPARING (NO auto-sync — the seller starts
+  // the first sync explicitly via the CTA).
+  const testStep = useCallback(async (id: string) => {
+    try {
+      const result = await api.testConnection(id);
+      dispatch({ type: "TEST_RESULT", status: result.status === "SUCCESS" ? "SUCCESS" : "FAILED", reasonCode: result.reasonCode });
+    } catch {
+      dispatch({ type: "SUBMIT_FAILED" });
+    }
+  }, []);
+
+  // Public entry: submit the credential (lazy account-create → store → test). Guarded single-flight.
+  const onSubmitCredentials = useCallback(
+    async (secrets: Record<string, string>) => {
+      if (!template || inFlightRef.current || syncWatchRef.current) return;
+      inFlightRef.current = true;
+      dispatch({ type: "SUBMIT" });
+      setBusy(true);
+      try {
         let id = accountIdRef.current;
         if (!id) {
           if (!coupangChannelId) throw new Error("no COUPANG channel");
           const created = await api.createApiChannelAccount(coupangChannelId);
           id = created.id;
           accountIdRef.current = id;
+          setAccountId(id);
         }
         await api.storeCredential(id, {
           connectorClass: template.connectorClass,
           authType: template.authType,
           secrets,
         });
-        setTestResult(await api.testConnection(id));
+        await testStep(id);
       } catch {
-        // A transport/store failure — a safe generic message; never echo the secret or a raw error.
-        setTestResult({
-          sellerAccountId: accountIdRef.current ?? "",
-          status: "FAILED",
-          checkedAt: "",
-          message: "연결 정보를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.",
-          reasonCode: null,
-        });
+        dispatch({ type: "SUBMIT_FAILED" });
       } finally {
         inFlightRef.current = false;
         setBusy(false);
       }
     },
-    [template, coupangChannelId],
+    [template, coupangChannelId, testStep],
   );
 
-  if (phase === "loading") {
+  // Public entry: re-verify the stored credential without re-typing the secret (recovery screen).
+  const onRetest = useCallback(async () => {
+    const id = accountIdRef.current;
+    if (!id || inFlightRef.current || syncWatchRef.current) return;
+    inFlightRef.current = true;
+    dispatch({ type: "RETEST" });
+    setBusy(true);
+    try {
+      await testStep(id);
+    } finally {
+      inFlightRef.current = false;
+      setBusy(false);
+    }
+  }, [testStep]);
+
+  const onReenter = useCallback(() => dispatch({ type: "REENTER" }), []);
+
+  // Public entry: run the first sync (the "첫 주문 불러오기" CTA and the sync-retry). Guarded so a
+  // double-click / an in-flight or being-observed sync never fires a second job.
+  const onRunSync = useCallback(async () => {
+    const id = accountIdRef.current;
+    if (!id || inFlightRef.current || syncWatchRef.current) return;
+    inFlightRef.current = true;
+    dispatch({ type: "RUN_SYNC" });
+    setBusy(true);
+    try {
+      await firstSyncStep(id);
+    } finally {
+      inFlightRef.current = false;
+      setBusy(false);
+    }
+  }, [firstSyncStep]);
+
+  // Re-check a stalled sync — re-opens the poll window on the SAME run WITHOUT resetting the displayed
+  // elapsed (only the stall anchor moves). NEVER starts a new sync.
+  const onRecheckSync = useCallback(() => {
+    const now = Date.now();
+    setSyncNow(now);
+    setSyncWatch((w) =>
+      w && w.stalled ? { ...w, observeStartedAt: now, polling: true, stalled: false } : w,
+    );
+  }, []);
+
+  // Elapsed clock: tick once a second while a sync is actively watched (frozen once stalled).
+  useEffect(() => {
+    if (!syncWatch || syncWatch.stalled) return;
+    setSyncNow(Date.now());
+    const id = window.setInterval(() => setSyncNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [syncWatch]);
+
+  // Progress poller: while polling a RUNNING sync, read the READ-ONLY run list for its terminal status. No
+  // Coupang outbound and no write — it only observes. A terminal status advances the journey; a timeout
+  // stops polling and surfaces a manual re-check (never an auto-created sync).
+  useEffect(() => {
+    if (!syncWatch || !syncWatch.polling || syncWatch.stalled || !accountId) return;
+    let alive = true;
+    let reading = false;
+    const observeStartedAt = syncWatch.observeStartedAt;
+    const id = window.setInterval(async () => {
+      if (!alive || reading) return;
+      if (Date.now() - observeStartedAt >= SYNC_POLL_TIMEOUT_MS) {
+        setSyncNow(Date.now());
+        setSyncWatch((w) => (w ? { ...w, polling: false, stalled: true } : w));
+        return;
+      }
+      reading = true;
+      try {
+        const runs = await api.getSyncRunsStrict({ sellerAccountId: accountId, dataType: ORDER_SUMMARY });
+        if (!alive) return;
+        const st = syncStatusFromRun(latestOrderRun(runs, accountId));
+        if (st === "SUCCESS" || st === "PARTIAL") {
+          setSyncWatch(null);
+          dispatch({ type: "SYNC_RESULT", status: st });
+        } else if (st === "FAILED") {
+          setSyncWatch(null);
+          dispatch({ type: "SYNC_RESULT", status: "FAILED" });
+        }
+        // RUNNING → keep polling.
+      } catch {
+        /* transient read error → retry on the next tick (no new sync, no state change) */
+      } finally {
+        reading = false;
+      }
+    }, SYNC_POLL_INTERVAL_MS);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, [syncWatch, accountId]);
+
+  // On completion, read the real connection health (read-only) for the summary line.
+  useEffect(() => {
+    if (state.phase !== "connected" || !accountId) return;
+    let alive = true;
+    (async () => {
+      try {
+        const status = await api.getConnectionStatusStrict(accountId);
+        if (alive) setConnectionStatus(status);
+      } catch {
+        /* summary omitted on failure — the completion stands regardless */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [state.phase, accountId]);
+
+  const onGoToOrders = useCallback(() => navigate("/orders"), [navigate]);
+  const onViewChannelRuns = useCallback(() => {
+    if (accountId) navigate(`/connect/channels/${accountId}`);
+    else navigate("/connect");
+  }, [navigate, accountId]);
+
+  const syncProgress = useMemo(
+    () => (syncWatch ? { elapsedMs: Math.max(0, syncNow - syncWatch.startedAt), stalled: syncWatch.stalled } : null),
+    [syncWatch, syncNow],
+  );
+
+  if (loading || state.phase === "resolving") {
     return (
       <div className="mx-auto max-w-2xl px-5 py-10">
-        <p className="text-base text-muted">쿠팡 연결 준비 정보를 불러오는 중…</p>
+        <p className="text-base text-muted">{C.loading}</p>
       </div>
     );
   }
 
-  if (phase === "unavailable") {
+  if (resolveError) {
     return (
       <div className="mx-auto max-w-2xl px-5 py-10">
-        <h1 className="text-xl font-bold text-ink">쿠팡 연결</h1>
-        <p className="mt-3 text-base text-muted">
-          지금은 쿠팡 API 연결을 준비할 수 없습니다. 잠시 후 다시 시도해 주세요.
+        <h1 className="text-xl font-bold text-ink">{C.pageTitle}</h1>
+        <p className="mt-3 text-base text-bad" role="alert">
+          {C.resolveError}
         </p>
         <button type="button" className="btn-secondary mt-5" onClick={() => navigate("/connect")}>
-          채널 목록으로
+          {C.backToChannels}
         </button>
       </div>
     );
   }
 
-  const success = testResult?.status === "SUCCESS";
+  if (state.phase === "unavailable") {
+    return (
+      <div className="mx-auto max-w-2xl px-5 py-10">
+        <h1 className="text-xl font-bold text-ink">{C.unavailableTitle}</h1>
+        <p className="mt-3 text-base text-muted">{C.unavailableBody}</p>
+        <button type="button" className="btn-secondary mt-5" onClick={() => navigate("/connect")}>
+          {C.backToChannels}
+        </button>
+      </div>
+    );
+  }
 
   return (
-    <div className="mx-auto max-w-2xl px-5 py-8" data-testid="connect-coupang">
-      <h1 className="text-xl font-bold text-ink">쿠팡 연결</h1>
-      <p className="mt-2 text-base text-muted">
-        쿠팡 판매자센터(쿠팡 윙)에서 발급한 Open API 키로 주문을 연동합니다. 아래 준비사항을 먼저 확인해 주세요.
-      </p>
+    <div className="mx-auto max-w-2xl px-5 py-8">
+      <h1 className="text-xl font-bold text-ink">{C.pageTitle}</h1>
+      <p className="mt-2 text-base text-muted break-keep">{C.pageIntro}</p>
 
-      <section className="mt-6" data-testid="coupang-prereqs" aria-label="쿠팡 연결 준비사항">
-        <h2 className="text-base font-bold text-ink">연결 전 준비사항</h2>
-        <ol className="mt-3 space-y-4">
-          <li className="rounded-xl border border-line bg-canvas/40 p-4">
-            <p className="font-semibold text-ink">1. 쿠팡 윙에서 Open API 키 발급</p>
-            <p className="mt-1 text-sm text-muted">
-              액세스 키(access key), 시크릿 키(secret key), 업체 코드(vendor ID) 세 가지가 필요합니다.
-            </p>
-          </li>
-          <li className="rounded-xl border border-line bg-canvas/40 p-4">
-            <p className="font-semibold text-ink">2. 주문 API 접근 권한 확인</p>
-            <p className="mt-1 text-sm text-muted">
-              발급한 키에 주문(발주서) 조회 권한이 포함되어 있어야 첫 주문 수집이 가능합니다.
-            </p>
-          </li>
-          <li className="rounded-xl border border-line bg-canvas/40 p-4">
-            <p className="font-semibold text-ink">3. API 호출 IP 등록</p>
-            <p className="mt-1 text-sm text-muted">
-              쿠팡은 등록된 호출 IP에서만 API 요청을 허용합니다. 아래 IP를 쿠팡 앱의 호출 IP에 등록해 주세요.
-            </p>
-            <div className="mt-3">
-              <AdvertisedCallIpPanel ips={advertisedEgressIps} />
-            </div>
-          </li>
-        </ol>
-      </section>
-
-      <section className="mt-8" aria-label="쿠팡 연결 정보 입력">
-        <h2 className="text-base font-bold text-ink">연결 정보 입력</h2>
-        <p className="mt-1 text-sm text-muted">
-          입력한 키는 암호화되어 저장되고, 즉시 연결 확인(테스트)만 수행합니다. 주문 상태를 바꾸거나 어떤 것도 전송하지 않습니다.
-        </p>
-        <div className="mt-3">
-          <SecureCredentialForm template={template!} onSubmit={onSubmit} submitting={busy} />
-        </div>
-      </section>
-
-      {testResult && (
-        <section className="mt-6">
-          {success ? (
-            <div
-              className="rounded-xl border border-brand/40 bg-brand/5 p-4 text-base text-ink"
-              data-testid="coupang-test-success"
-            >
-              <p className="font-semibold">연결 정보가 확인되었습니다.</p>
-              <p className="mt-1 text-sm text-muted">
-                첫 주문 수집이 완료되면 연결이 완료됩니다. (연결 확인만으로는 아직 완료 상태가 아닙니다.)
-              </p>
-              <button type="button" className="btn-primary mt-4" onClick={() => navigate("/connect")}>
-                채널 목록으로
-              </button>
-            </div>
-          ) : (
-            <div
-              className="rounded-xl border border-danger/40 bg-danger/5 p-4 text-base text-ink"
-              data-testid="coupang-test-failed"
-              role="alert"
-            >
-              <p className="font-semibold">연결을 확인하지 못했습니다.</p>
-              <p className="mt-1 text-sm text-muted">{testResult.message}</p>
-            </div>
-          )}
-        </section>
-      )}
+      <div className="mt-6">
+        <CoupangConnectTutorial
+          state={state}
+          template={template}
+          busy={busy}
+          advertisedEgressIps={advertisedEgressIps}
+          connectionStatus={connectionStatus}
+          syncProgress={syncProgress}
+          onSubmitCredentials={onSubmitCredentials}
+          onRetest={onRetest}
+          onReenter={onReenter}
+          onRunSync={onRunSync}
+          onRecheckSync={onRecheckSync}
+          onGoToOrders={onGoToOrders}
+          onViewChannelRuns={onViewChannelRuns}
+        />
+      </div>
     </div>
   );
 }
