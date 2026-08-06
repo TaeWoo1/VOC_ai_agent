@@ -83,6 +83,7 @@ class CollectControlServiceSingleFlightTest {
     @Autowired com.sellerops.connector.ConnectorCapabilityRepository capabilities;
     @Autowired AccountSessionSlotRepository accountSlotRepo;
     @Autowired ConnectorCredentialRepository credentials;
+    @Autowired com.sellerops.connector.ConnectorAlertRepository alerts;
 
     private final UUID org = UUID.randomUUID();
     private CollectControlService service;
@@ -107,7 +108,8 @@ class CollectControlServiceSingleFlightTest {
                 new AccountSessionSlotService(accountSlotRepo),
                 new NaverConnectionLifecycle(sellerAccounts, channels, txManager),
                 new com.sellerops.connector.coupang.onboarding.CoupangConnectionLifecycle(
-                        sellerAccounts, channels, txManager));
+                        sellerAccounts, channels, txManager),
+                new com.sellerops.connector.ConnectorAlertService(alerts, sellerAccounts, channels));
     }
 
     @Test

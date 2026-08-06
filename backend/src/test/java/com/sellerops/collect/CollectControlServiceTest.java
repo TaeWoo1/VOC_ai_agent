@@ -95,6 +95,7 @@ class CollectControlServiceTest {
     @Autowired ConnectorCapabilityRepository capabilities;
     @Autowired AccountSessionSlotRepository accountSlotRepo;
     @Autowired ConnectorCredentialRepository credentials;
+    @Autowired com.sellerops.connector.ConnectorAlertRepository alerts;
 
     private MockApiConnector mock;
     private ConnectorRegistry registry;
@@ -120,7 +121,8 @@ class CollectControlServiceTest {
                 new AccountSessionSlotService(accountSlotRepo),
                 new NaverConnectionLifecycle(sellerAccounts, channels, txManager),
                 new com.sellerops.connector.coupang.onboarding.CoupangConnectionLifecycle(
-                        sellerAccounts, channels, txManager));
+                        sellerAccounts, channels, txManager),
+                new com.sellerops.connector.ConnectorAlertService(alerts, sellerAccounts, channels));
     }
 
     private CredentialVault vaultWithKey(String masterKeyBase64) {
@@ -612,7 +614,8 @@ class CollectControlServiceTest {
                 new AccountSessionSlotService(accountSlotRepo),
                 new NaverConnectionLifecycle(sellerAccounts, channels, txManager),
                 new com.sellerops.connector.coupang.onboarding.CoupangConnectionLifecycle(
-                        sellerAccounts, channels, txManager));
+                        sellerAccounts, channels, txManager),
+                new com.sellerops.connector.ConnectorAlertService(alerts, sellerAccounts, channels));
     }
 
     /**

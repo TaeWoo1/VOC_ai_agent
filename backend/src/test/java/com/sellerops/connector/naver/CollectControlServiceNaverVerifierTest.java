@@ -79,6 +79,7 @@ class CollectControlServiceNaverVerifierTest {
     @Autowired SyncScheduleRepository schedules;
     @Autowired ConnectorCapabilityRepository capabilities;
     @Autowired ConnectorCredentialRepository credentials;
+    @Autowired com.sellerops.connector.ConnectorAlertRepository alerts;
     @Autowired com.sellerops.selleraccount.AccountSessionSlotRepository accountSlotRepo;
 
     private final UUID org = UUID.randomUUID();
@@ -110,7 +111,8 @@ class CollectControlServiceNaverVerifierTest {
                 new com.sellerops.selleraccount.AccountSessionSlotService(accountSlotRepo),
                 naverLifecycle,
                 new com.sellerops.connector.coupang.onboarding.CoupangConnectionLifecycle(
-                        sellerAccounts, channels, txManager));
+                        sellerAccounts, channels, txManager),
+                new com.sellerops.connector.ConnectorAlertService(alerts, sellerAccounts, channels));
     }
 
     @Test

@@ -38,7 +38,7 @@ class ChannelCapabilityOverviewTest {
         // naver/coupang lifecycle (last two args) are null: this test exercises channelCapabilityOverview
         // only, never the testConnection path that would call them.
         return new CollectControlService(
-                null, channels, null, null, null, null, registry, null, null, null, null, null);
+                null, channels, null, null, null, null, registry, null, null, null, null, null, null);
     }
 
     @Test

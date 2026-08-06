@@ -303,6 +303,37 @@ export interface ConnectionStatusView {
   lastError: string | null;
   lastSyncedAt: string | null;
   nextScheduledAt: string | null;
+  /** Credential-expiry sub-view (Coupang credential-expiry slice). Present only when the backend computes
+   *  it for the channel; absent/null for channels without a token-expiry concept. Sanitized primitives
+   *  only — no secret, token, or provider body. See {@link CoupangExpiryStatusView}. */
+  expiry?: CoupangExpiryStatusView | null;
+}
+
+/** The credential-expiry state the backend computes PURELY from token_expires_at vs a reference `now` plus
+ *  an auth-failure signal — never stored. `UNKNOWN` = no expiry date on file (offer the operator-confirm
+ *  path; never auto-estimate). Buckets escalate by days remaining; a passed date splits DATE_PASSED
+ *  (soft — "verify") vs EXPIRED (strong — a date passed AND auth is failing). */
+export type CoupangExpiryState =
+  | "UNKNOWN"
+  | "OK"
+  | "WARN_30"
+  | "WARN_14"
+  | "WARN_7"
+  | "WARN_1"
+  | "DATE_PASSED"
+  | "EXPIRED";
+
+/** Sanitized credential-expiry sub-view (mirrors the backend CoupangExpiryStatus). Primitives only. */
+export interface CoupangExpiryStatusView {
+  /** ISO instant the credential token expires, or null when unknown (→ UNKNOWN, operator-confirm path). */
+  expiresAt: string | null;
+  /** Whole days until expiry (ceil), or null when unknown. Negative once the date has passed. */
+  daysRemaining: number | null;
+  state: CoupangExpiryState;
+  /** The connection is currently failing auth (consecutiveFailures>0 or a just-failed test). */
+  authFailing: boolean;
+  /** The backend recommends renewal now — state in {WARN_14,WARN_7,WARN_1,DATE_PASSED,EXPIRED}. */
+  renewRecommended: boolean;
 }
 
 // Masked, read-only view of a stored connection credential. Mirrors the backend
@@ -367,6 +398,31 @@ export interface ConnectionTestResultView {
   checkedAt: string;
   message: string;
   reasonCode: string | null;
+}
+
+// Write payload for the guided-renewal atomic credential REPLACE (POST
+// .../credentials/replace), mirroring the backend request. Carries the NEW credential
+// secrets (keyed by CredentialFieldView.key) plus the operator-confirmed new token
+// expiry. Secrets flow straight from the masked form to this call — never into a
+// reducer/event/storage. `tokenExpiresAt` is optional (the operator may not have
+// confirmed the new key's expiry date yet; the backend then leaves it UNKNOWN, never
+// estimated).
+export interface CredentialReplaceRequest {
+  connectorClass: string;
+  authType: string;
+  secrets: Record<string, string>;
+  tokenExpiresAt?: string;
+}
+
+// Safe result of an atomic credential REPLACE. On FAILURE the backend has already
+// rolled back to the OLD credential (the connection is not destroyed). Safe fields
+// only — NEVER a token, secret, ciphertext, IV, provider body, or header. `message`
+// is a fixed operator-safe backend string; `reasonCode` is a safe machine code (or
+// null) and is not rendered raw.
+export interface CredentialReplaceResultView {
+  status: string; // SUCCESS | FAILED
+  reasonCode: string | null;
+  message: string;
 }
 
 export interface ConnectorAlertView {

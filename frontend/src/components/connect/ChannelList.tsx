@@ -4,6 +4,8 @@ import { channelCardAction, selectChannelAccount } from "../../lib/channelConnec
 import { CAFE24_CONNECT_ROUTE } from "../../lib/cafe24Connect";
 import { frontendRunId, isWalkthroughMode, withWalkthroughRun } from "../../lib/guidedConnection/walkthrough";
 import { relativeTime } from "../../lib/format";
+import { expiryNeedsAttention, shouldOfferRenewal } from "../../lib/coupangExpiry";
+import { ExpiryChip, RENEW_CTA_LABEL } from "../coupang/CoupangExpiryPanel";
 import type {
   ChannelResponse,
   ConnectionStatusView,
@@ -43,6 +45,13 @@ function ChannelRow({
   const lastCollected = health?.lastSyncedAt ?? channel.lastSyncedAt;
   const failing = !!health && (health.consecutiveFailures > 0 || !!health.lastError);
   const action = channelCardAction(channel, account, canUpload, failing);
+
+  // Credential-expiry surfacing (Coupang). The backend supplies the expiry sub-view on the health read;
+  // WARN_* / DATE_PASSED / EXPIRED flag "만료 예정·조치 필요", and from WARN_14 (renewRecommended) the row
+  // offers the guided-renewal CTA. Absent expiry ⇒ nothing shown (channels without a token-expiry concept).
+  const expiry = health?.expiry ?? null;
+  const expiryFlagged = !!expiry && expiryNeedsAttention(expiry.state);
+  const offerRenewal = !!account && shouldOfferRenewal(expiry);
 
   // Route targets updated to the v2 IA; the decision logic itself is untouched.
   function handleAction() {
@@ -105,6 +114,22 @@ function ChannelRow({
           <p className="mt-1 break-keep text-sm font-medium text-warn">
             최근 수집에서 확인이 필요한 문제가 있었습니다.
           </p>
+        ) : null}
+        {expiryFlagged && expiry ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="channel-expiry">
+            <ExpiryChip state={expiry.state} />
+            <span className="break-keep text-sm font-medium text-warn">만료 예정·조치 필요</span>
+          </div>
+        ) : null}
+        {offerRenewal && account ? (
+          <Btn
+            size="sm"
+            variant="outline"
+            className="mt-2"
+            onClick={() => navigate(`/connect/coupang/renew/${account.id}`)}
+          >
+            {RENEW_CTA_LABEL}
+          </Btn>
         ) : null}
       </div>
       <Btn

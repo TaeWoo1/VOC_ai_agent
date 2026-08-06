@@ -447,6 +447,38 @@ export function ConnectCoupang() {
     else navigate("/connect");
   }, [navigate, accountId]);
 
+  // Enter guided renewal from the completion screen's expiry panel (renewRecommended). The renewal page
+  // replaces the credential in place — it creates no account and starts no sync (the existing account /
+  // orders / cursor are kept).
+  const onRenew = useCallback(() => {
+    if (accountId) navigate(`/connect/coupang/renew/${accountId}`);
+  }, [navigate, accountId]);
+
+  // Operator-confirmed key expiry (state UNKNOWN — Coupang WING expiry is not machine-readable). Stored via
+  // the credential intake's `tokenExpiresAt` (a NON-secret date), never auto-estimated; then re-read the
+  // connection status so the panel reflects the freshly stored date. No secrets are sent.
+  const onConfirmExpiry = useCallback(
+    async (tokenExpiresAtIso: string) => {
+      const id = accountIdRef.current;
+      if (!id || !template || inFlightRef.current) return;
+      inFlightRef.current = true;
+      setBusy(true);
+      try {
+        // Dedicated expiry-only endpoint — the credential intake rejects secret-less updates by design, so a
+        // date confirmation sends ONLY the date (no secret), stored exactly (never an estimate).
+        await api.confirmCredentialExpiry(id, tokenExpiresAtIso);
+        const status = await api.getConnectionStatusStrict(id);
+        setConnectionStatus(status);
+      } catch {
+        /* fail-soft: the completion stands; the panel keeps offering the confirm path */
+      } finally {
+        inFlightRef.current = false;
+        setBusy(false);
+      }
+    },
+    [template],
+  );
+
   const syncProgress = useMemo(
     () => (syncWatch ? { elapsedMs: Math.max(0, syncNow - syncWatch.startedAt), stalled: syncWatch.stalled } : null),
     [syncWatch, syncNow],
@@ -519,6 +551,8 @@ export function ConnectCoupang() {
               onRecheckSync={onRecheckSync}
               onGoToOrders={onGoToOrders}
               onViewChannelRuns={onViewChannelRuns}
+              onRenew={onRenew}
+              onConfirmExpiry={onConfirmExpiry}
             />
           )}
         </div>

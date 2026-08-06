@@ -1,5 +1,7 @@
 package com.sellerops.collect.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.sellerops.connector.coupang.CoupangCredentialExpiryStatus;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -16,6 +18,11 @@ import java.util.UUID;
  * have an expired login, and vice versa — and defaults to
  * {@code UNOBSERVED_EXTERNAL} when no probe has run, never a guessed READY.
  * {@code sessionObservedAt} is when that reading was last written.
+ *
+ * <p>{@code credentialExpiry} is the sanitized, computed credential-expiry model
+ * (never a secret): the exact expiry date, days remaining, the coarse state bucket,
+ * whether auth is failing, and whether renewal is recommended. It is computed, not
+ * stored, and is {@code UNKNOWN} when no expiry date is on file.
  */
 public record ConnectionStatusView(
         UUID sellerAccountId,
@@ -26,5 +33,8 @@ public record ConnectionStatusView(
         Instant lastSyncedAt,
         Instant nextScheduledAt,
         String sessionReadiness,
-        Instant sessionObservedAt) {
+        Instant sessionObservedAt,
+        // Serialized as "expiry" — the sanitized credential-expiry sub-view the FE reads
+        // (ConnectionStatusView.expiry). Kept as a distinct Java name for clarity at the call site.
+        @JsonProperty("expiry") CoupangCredentialExpiryStatus credentialExpiry) {
 }

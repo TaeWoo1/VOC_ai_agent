@@ -64,6 +64,36 @@ class CredentialVaultTest {
     }
 
     @Test
+    void setTokenExpiresAtUpdatesOnlyTheExpiry_secretsUntouched() {
+        // Store with no expiry (operator-confirm path: date unknown at connection time).
+        vault.store(org, account, "API", "HMAC", secrets, null, null, null);
+        Instant confirmed = Instant.parse("2027-02-14T00:00:00Z");
+
+        vault.setTokenExpiresAt(org, account, confirmed);
+
+        // The expiry is now stored, and NO secret material changed (open still returns the same secrets).
+        assertThat(vault.readMasked(org, account).tokenExpiresAt()).isEqualTo(confirmed);
+        DecryptedCredential opened = vault.open(org, account);
+        assertThat(opened.secrets()).isEqualTo(secrets);
+        assertThat(opened.tokenExpiresAt()).isEqualTo(confirmed);
+
+        // Clearing back to unknown (null) is allowed.
+        vault.setTokenExpiresAt(org, account, null);
+        assertThat(vault.readMasked(org, account).tokenExpiresAt()).isNull();
+        assertThat(vault.open(org, account).secrets()).isEqualTo(secrets);
+    }
+
+    @Test
+    void setTokenExpiresAtFailsClosedForMissingOrForeignCredential() {
+        assertThatThrownBy(() -> vault.setTokenExpiresAt(org, account, Instant.now()))
+                .isInstanceOf(ApiException.class);
+        vault.store(org, account, "API", "HMAC", secrets, null, null, null);
+        // A different org reading the same account id must 404 (no cross-org write).
+        assertThatThrownBy(() -> vault.setTokenExpiresAt(UUID.randomUUID(), account, Instant.now()))
+                .isInstanceOf(ApiException.class);
+    }
+
+    @Test
     void storedRowContainsNoPlaintext() {
         vault.store(org, account, "API", "HMAC", secrets, "refresh-token-789", null, null);
 

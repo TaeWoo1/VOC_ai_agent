@@ -17,6 +17,8 @@ import type {
   ConnectionTestResultView,
   ConnectorAlertView,
   CredentialIntakeRequest,
+  CredentialReplaceRequest,
+  CredentialReplaceResultView,
   CredentialTemplateView,
   DashboardSummaryResponse,
   IngestResult,
@@ -332,6 +334,32 @@ export const api = {
       `/api/seller-accounts/${accountId}/test-connection`,
     );
     return data;
+  },
+  // Mutating: atomic guided-renewal credential REPLACE. POSTs the NEW credential
+  // secrets + the operator-confirmed new token expiry to the backend, which captures
+  // the OLD credential in memory, upserts the new one in place (account/order/cursor
+  // untouched), re-tests the connection + ordersheets access, and — on SUCCESS keeps
+  // the new credential + resumes the schedule, on FAILURE restores the OLD credential
+  // (rollback, the existing connection is never destroyed). The body IS the result
+  // (safe {status, reasonCode, message} only — never a token/secret/provider body), so
+  // it is consumed and returned. No mock fallback: a dead backend must fail closed, so
+  // the renewal never claims a fake success. Secrets flow straight from the masked form
+  // to this call and never enter a reducer/event/storage.
+  async replaceCredential(
+    accountId: string,
+    request: CredentialReplaceRequest,
+  ): Promise<CredentialReplaceResultView> {
+    const { data } = await http.post<CredentialReplaceResultView>(
+      `/api/seller-accounts/${accountId}/credentials/replace`,
+      request,
+    );
+    return data;
+  },
+  // Operator-confirmation of the credential's exact expiry date (when WING's 유효기간 could not be read).
+  // Sends ONLY the date — no secret — to a dedicated endpoint (the credential intake rejects secret-less
+  // updates by design). Never an estimate. No mock fallback: a dead backend fails closed.
+  async confirmCredentialExpiry(accountId: string, tokenExpiresAt: string): Promise<void> {
+    await http.post(`/api/seller-accounts/${accountId}/credentials/expiry`, { tokenExpiresAt });
   },
   // Mutating-intent: begin the Cafe24 OAuth connect flow. NO mock fallback — this
   // requires a live backend, and a dead endpoint must fail closed (never a fake

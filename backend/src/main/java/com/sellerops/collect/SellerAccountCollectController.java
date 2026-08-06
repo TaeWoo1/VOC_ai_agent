@@ -4,7 +4,9 @@ import com.sellerops.auth.AuthPrincipal;
 import com.sellerops.collect.dto.BackfillRequest;
 import com.sellerops.collect.dto.ConnectionStatusView;
 import com.sellerops.collect.dto.ConnectionTestResultView;
+import com.sellerops.collect.dto.CredentialExpiryConfirmRequest;
 import com.sellerops.collect.dto.CredentialIntakeRequest;
+import com.sellerops.collect.dto.CredentialReplaceResultView;
 import com.sellerops.collect.dto.ManualSyncRequest;
 import com.sellerops.collect.dto.SchedulePutRequest;
 import com.sellerops.collect.dto.ScheduleView;
@@ -97,5 +99,30 @@ public class SellerAccountCollectController {
     public CredentialMetadata readCredential(@AuthenticationPrincipal AuthPrincipal principal,
                                              @PathVariable UUID accountId) {
         return service.readCredential(principal.orgId(), accountId);
+    }
+
+    /**
+     * Operator-confirmation of the credential's exact expiry date (when WING's `유효기간` could not be read).
+     * Updates ONLY the stored expiry — no secret is sent or touched — and never an estimate. Responds with
+     * masked metadata (which carries the stored {@code tokenExpiresAt}), never a secret.
+     */
+    @PostMapping("/credentials/expiry")
+    public CredentialMetadata confirmCredentialExpiry(@AuthenticationPrincipal AuthPrincipal principal,
+                                                      @PathVariable UUID accountId,
+                                                      @RequestBody CredentialExpiryConfirmRequest request) {
+        return service.confirmCredentialExpiry(principal.orgId(), accountId, request.tokenExpiresAt());
+    }
+
+    /**
+     * Atomic guided-renewal credential replacement with rollback. Stores the new secrets + expiry,
+     * verifies them (connection test + order-access probe), and on failure restores the previous
+     * credential so it is never destroyed. Account, collected orders, and sync cursors are untouched;
+     * the response is a safe result only (no secret, no provider body).
+     */
+    @PostMapping("/credentials/replace")
+    public CredentialReplaceResultView replaceCredential(@AuthenticationPrincipal AuthPrincipal principal,
+                                                         @PathVariable UUID accountId,
+                                                         @Valid @RequestBody CredentialIntakeRequest request) {
+        return service.replaceCredential(principal.orgId(), accountId, request, principal.userId());
     }
 }
