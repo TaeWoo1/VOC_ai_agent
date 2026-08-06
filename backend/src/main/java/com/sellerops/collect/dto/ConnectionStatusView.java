@@ -1,5 +1,6 @@
 package com.sellerops.collect.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.sellerops.connector.coupang.CoupangCredentialExpiryStatus;
 import java.time.Instant;
 import java.util.UUID;
@@ -33,5 +34,7 @@ public record ConnectionStatusView(
         Instant nextScheduledAt,
         String sessionReadiness,
         Instant sessionObservedAt,
-        CoupangCredentialExpiryStatus credentialExpiry) {
+        // Serialized as "expiry" — the sanitized credential-expiry sub-view the FE reads
+        // (ConnectionStatusView.expiry). Kept as a distinct Java name for clarity at the call site.
+        @JsonProperty("expiry") CoupangCredentialExpiryStatus credentialExpiry) {
 }

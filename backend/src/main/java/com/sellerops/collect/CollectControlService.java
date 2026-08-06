@@ -382,6 +382,7 @@ public class CollectControlService {
     static final String REPLACE_STATUS_FAILED = "FAILED";
     static final String REPLACE_REASON_NO_EXISTING = "NO_EXISTING_CREDENTIAL";
     static final String REPLACE_REASON_VERIFY_UNSUPPORTED = "VERIFY_UNSUPPORTED";
+    static final String REPLACE_REASON_ERROR = "REPLACE_ERROR";
 
     /**
      * Atomic guided-renewal credential replacement with rollback. Replaces the stored secrets +
@@ -425,26 +426,49 @@ public class CollectControlService {
                 valid.secrets(), request.refreshToken(), request.tokenExpiresAt(), actorUserId);
 
         // 6. Verify the new credential (connection test + order-access probe) WITHOUT driving the
-        //    connection lifecycle — the account row must stay untouched on the replace path.
-        VerifyOutcome outcome = verifyStored(orgId, sellerAccountId, channel.getCode());
+        //    connection lifecycle — the account row must stay untouched on the replace path. An UNEXPECTED
+        //    throw here must not leave the unverified new credential in place: restore the old, fail closed
+        //    (the "existing credential is never destroyed" guarantee stays airtight even on an error).
+        VerifyOutcome outcome;
+        try {
+            outcome = verifyStored(orgId, sellerAccountId, channel.getCode());
+        } catch (RuntimeException e) {
+            restoreCredential(orgId, sellerAccountId, old, actorUserId);
+            return new CredentialReplaceResultView(sellerAccountId, REPLACE_STATUS_FAILED, REPLACE_REASON_ERROR,
+                    "연결 정보 교체 중 오류가 발생했습니다. 기존 연결 정보를 유지합니다.", old.tokenExpiresAt());
+        }
+
         if (outcome != null && outcome.status() == VerifyOutcome.Status.SUCCESS) {
-            // 7a. Keep the new credential. Account / channel_orders / sync_cursors are all left untouched;
-            //     only resume any paused per-account schedule so collection can continue.
-            resumePausedSchedules(orgId, sellerAccountId);
+            // 7a. Keep the VERIFIED new credential. Account / channel_orders / sync_cursors are all left
+            //     untouched; resuming a paused schedule is best-effort — a scheduling hiccup must NEVER roll
+            //     back a credential that already verified.
+            try {
+                resumePausedSchedules(orgId, sellerAccountId);
+                // The renewed credential's expiry is fresh — clear the stale expiring/expired nudges so a
+                // future cycle can raise a new one. Best-effort; never rolls back a verified credential.
+                alertService.clearCoupangExpiryAlerts(sellerAccountId);
+            } catch (RuntimeException ignore) {
+                /* best-effort: the credential is valid and stays; the schedule can be resumed later */
+            }
             return new CredentialReplaceResultView(sellerAccountId, REPLACE_STATUS_SUCCESS, null,
                     "연결 정보가 갱신되었습니다.", request.tokenExpiresAt());
         }
 
-        // 7b. FAILURE → RESTORE the captured OLD credential (secrets + its exact expiry). The existing
-        //     credential is not destroyed; account / orders / cursors were never touched.
-        vault.store(orgId, sellerAccountId, old.connectorClass(), old.authType(),
-                old.secrets(), old.refreshToken(), old.tokenExpiresAt(), actorUserId);
+        // 7b. Verification FAILED → RESTORE the captured OLD credential (secrets + its exact expiry). The
+        //     existing credential is not destroyed; account / orders / cursors were never touched.
+        restoreCredential(orgId, sellerAccountId, old, actorUserId);
         String reasonCode = outcome != null ? outcome.reasonCode() : REPLACE_REASON_VERIFY_UNSUPPORTED;
         String message = outcome != null
                 ? failureMessage(outcome.reasonCode())
                 : "이 채널의 연결 확인은 아직 제공되지 않습니다.";
         return new CredentialReplaceResultView(sellerAccountId, REPLACE_STATUS_FAILED, reasonCode,
                 message, old.tokenExpiresAt());
+    }
+
+    /** Restore a previously-captured credential in place (rollback) — secrets + its exact expiry. */
+    private void restoreCredential(UUID orgId, UUID sellerAccountId, DecryptedCredential old, UUID actorUserId) {
+        vault.store(orgId, sellerAccountId, old.connectorClass(), old.authType(),
+                old.secrets(), old.refreshToken(), old.tokenExpiresAt(), actorUserId);
     }
 
     /**

@@ -123,10 +123,30 @@ public class ConnectorAlertService {
         // OK / WARN_30 / UNKNOWN: no alert.
     }
 
-    /** Open a new alert only when no unacknowledged alert of this type is already on file (dedup). */
+    /**
+     * Clear an account's credential-expiry alerts (both types) — called on a successful renewal so the stale
+     * "expiring/expired" nudges disappear and a future credential cycle can raise a fresh one. Idempotent.
+     */
+    public void clearCoupangExpiryAlerts(UUID sellerAccountId) {
+        if (sellerAccountId == null) {
+            return;
+        }
+        var stale = alerts.findBySellerAccountIdAndTypeIn(
+                sellerAccountId, List.of(TYPE_COUPANG_CREDENTIAL_EXPIRING, TYPE_COUPANG_CREDENTIAL_EXPIRED));
+        if (!stale.isEmpty()) {
+            alerts.deleteAll(stale);
+        }
+    }
+
+    /**
+     * Open a new expiry alert only when NO alert of this type exists yet — acknowledged OR not — so
+     * acknowledging one durably silences it (the every-read evaluation never re-opens it) until it is
+     * cleared on renewal ({@link #clearCoupangExpiryAlerts}). This is stronger than the connector-failure
+     * dedup (unacked-only): an expiry nudge the operator dismissed must stay dismissed.
+     */
     private void openOnce(UUID orgId, UUID sellerAccountId, String type, String severity, String message) {
-        if (alerts.existsBySellerAccountIdAndTypeAndAcknowledgedAtIsNull(sellerAccountId, type)) {
-            return; // one open alert of a type per account — no spam.
+        if (alerts.existsBySellerAccountIdAndType(sellerAccountId, type)) {
+            return; // one alert of a type per account per credential cycle — ack durably silences it.
         }
         ConnectorAlert alert = new ConnectorAlert();
         alert.setOrgId(orgId);

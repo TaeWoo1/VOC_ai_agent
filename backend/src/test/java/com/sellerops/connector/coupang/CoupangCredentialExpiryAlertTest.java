@@ -92,23 +92,31 @@ class CoupangCredentialExpiryAlertTest {
     }
 
     @Test
-    void acknowledgedExpiringAlertReopensOnNextRead() {
+    void acknowledgedExpiringAlertStaysSilencedUntilRenewalClearsIt() {
         SellerAccount acc = coupangAccount();
         storeCredential(acc, Instant.now().plus(Duration.ofDays(7)));
 
         service.connectionStatus(org, acc.getId());
         ConnectorAlert first = alerts.findBySellerAccountIdOrderByCreatedAtDesc(acc.getId()).get(0);
-        // Acknowledge (idempotent) — silences the existing alert.
+        // Acknowledge — durably silences the alert.
         alertService.acknowledge(org, first.getId());
         assertThat(alerts.findById(first.getId()).orElseThrow().getAcknowledgedAt()).isNotNull();
 
-        // Still renew-recommended → a fresh occurrence opens again after ack.
+        // Still renew-recommended, but a re-read must NOT re-open a fresh alert (ack durably silences).
         service.connectionStatus(org, acc.getId());
-        long unacked = alerts.findBySellerAccountIdOrderByCreatedAtDesc(acc.getId()).stream()
-                .filter(a -> a.getType().equals(ConnectorAlertService.TYPE_COUPANG_CREDENTIAL_EXPIRING)
-                        && a.getAcknowledgedAt() == null)
-                .count();
-        assertThat(unacked).isEqualTo(1);
+        service.connectionStatus(org, acc.getId());
+        List<ConnectorAlert> after = alerts.findBySellerAccountIdOrderByCreatedAtDesc(acc.getId());
+        assertThat(after).hasSize(1);
+        assertThat(after.get(0).getAcknowledgedAt()).isNotNull();
+
+        // A renewal clears the stale nudge, so a future cycle can raise a fresh one.
+        alertService.clearCoupangExpiryAlerts(acc.getId());
+        assertThat(alerts.findBySellerAccountIdOrderByCreatedAtDesc(acc.getId())).isEmpty();
+        service.connectionStatus(org, acc.getId());
+        List<ConnectorAlert> reopened = alerts.findBySellerAccountIdOrderByCreatedAtDesc(acc.getId());
+        assertThat(reopened).hasSize(1);
+        assertThat(reopened.get(0).getType()).isEqualTo(ConnectorAlertService.TYPE_COUPANG_CREDENTIAL_EXPIRING);
+        assertThat(reopened.get(0).getAcknowledgedAt()).isNull();
     }
 
     @Test
