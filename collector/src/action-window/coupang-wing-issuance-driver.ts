@@ -1,0 +1,356 @@
+/**
+ * **Coupang WING API-issuance guided-walk driver — LIVE surface core (SCAFFOLD, NEVER run this unit).**
+ *
+ * The live sibling of `./coupang-issuance/coupang-issuance-fixture-driver.ts`: a
+ * {@link CoupangIssuanceProbeDriver} that drives the guided WING open-API issuance walk over a REAL Playwright
+ * `Page` the seller navigated to, instead of a data fixture. It composes the SAME sanitized classifiers the
+ * fixture path uses (`coupang-wing-classifier`'s census + `wingPageCategoryFromCensus`, so the two can never
+ * disagree) and the SAME generic real-page seams the export/reply/NAVER-issuance drivers already use
+ * (`overlay`), differing only in how it obtains the surface: it reads `page.url()` (reduced to a host CATEGORY,
+ * never logged raw) and runs the value-free census in-page.
+ *
+ * LOCATION IS DELIBERATELY OUTSIDE `coupang-issuance/` (like `naver-issuance-driver.ts`) because it legitimately
+ * uses `.evaluate` for the census / overlay / read-only tagging. The pure `coupang-issuance/` runtime carries a
+ * strict source guard that forbids `.evaluate` entirely; keeping this driver out of that directory keeps that
+ * guard intact. This module has its OWN guard (`coupang-wing-issuance-driver-guard.test.ts`) that allows
+ * `.evaluate` / `setAttribute` but still forbids every click/type/submit/issue and every field-VALUE read.
+ *
+ * HARD BOUNDARIES (enforced by that source guard):
+ *   - **No login, click, type, submit, issue, or select.** The SELLER performs every real step in their own
+ *     window — including pressing the 발급 (issue) button themselves. This driver only reads a sanitized page
+ *     category, resolves + annotates a fixed-label section read-only, and reacts to a reported action.
+ *   - **No credential read — region PRESENCE only.** For the `credentials` target it detects that a
+ *     credential region/control exists (a count + a STRUCTURAL signature); it NEVER reads the Access Key /
+ *     Secret Key / 업체코드 value. No `.inputValue`, no value read, no clipboard, no screenshot, no
+ *     `page.content()`. The structural signature is computed IN-PAGE from an element's tag + position + child
+ *     count only — never from any value/attribute content.
+ *   - **Sanitized outputs only.** Counts, booleans, fixed category enums, and an opaque 16-hex signature.
+ *
+ * ⚠ **CALIBRATION PENDING (LIVE_DOM_CALIBRATION_PENDING) — NOT calibrated.** {@link WING_HIGHLIGHT_LABELS} are
+ * PROPOSED fixed-label candidates derived from WING's Korean UI (자체개발 / 업체명 / 호출 IP / 발급 / Access Key).
+ * They are NOT proven against the real WING DOM. This driver is a scaffold gated behind the live-run approval
+ * and is NEVER run in this unit; a live WING walk must confirm each label resolves uniquely before it is trusted.
+ */
+import type { Page } from "playwright";
+import { log } from "../log";
+import { mountOverlay, unmountOverlay, overlayMounted } from "./overlay";
+import {
+  EXTRACT_WING_CENSUS,
+  LIVE_DOM_CALIBRATION_PENDING,
+  classifyWingUrlCategory,
+  wingPageCategoryFromCensus,
+  type WingPageCategory,
+  type WingStructuralCensus,
+} from "../cli/coupang-wing-classifier";
+import { buildFixedLabelLocateScript } from "./api-issuance-calibration/visual-recon-inpage";
+import { COUPANG_ISSUANCE_TOTAL_STEPS } from "./coupang-issuance/coupang-issuance-stages";
+import type {
+  CoupangIssuanceProbeDriver,
+  CoupangIssuanceTarget,
+  WingSurfaceProbe,
+} from "./coupang-issuance/coupang-issuance-driver";
+import type { LocateResult } from "./engine";
+
+/** The highlightable fixed-label targets (everything except the guidance-only `reach_open_api` / `return`). */
+export type WingHighlightTarget = "self_dev" | "vendor_info" | "call_ip" | "issue" | "credentials";
+
+/**
+ * **CANDIDATE / LIVE_DOM_CALIBRATION_PENDING.** Proposed fixed WING labels for each highlightable target. WING's
+ * issuance controls expose no stable aria-label/id, so a fixed Korean label is the only value-free anchor. These
+ * are PROPOSALS from the visible WING UI — a live walk must confirm each resolves to exactly one element.
+ */
+/**
+ * Whether {@link WING_HIGHLIGHT_LABELS} are calibrated against the REAL WING DOM — `LIVE_DOM_CALIBRATION_PENDING`
+ * (i.e. NOT calibrated). A code-level marker (not just prose) so the source guard can assert this scaffold never
+ * claims a proven detector; a live WING walk must confirm each label resolves uniquely before this flips.
+ */
+export const WING_HIGHLIGHT_CALIBRATION = LIVE_DOM_CALIBRATION_PENDING;
+
+export const WING_HIGHLIGHT_LABELS: Readonly<Record<WingHighlightTarget, { candidateQuery: string; exactText: string; tagAncestor?: string }>> = {
+  self_dev: { candidateQuery: "label,button,span,div,a,legend", exactText: "자체개발" },
+  vendor_info: { candidateQuery: "label,span,div,dt,th,strong", exactText: "업체명" },
+  call_ip: { candidateQuery: "label,span,div,dt,th,strong", exactText: "호출 IP" },
+  issue: { candidateQuery: "button,a,span,div", exactText: "발급" },
+  credentials: { candidateQuery: "label,span,div,dt,th,strong", exactText: "Access Key", tagAncestor: "tr" },
+};
+
+function isWingHighlightTarget(target: CoupangIssuanceTarget): target is WingHighlightTarget {
+  return target === "self_dev" || target === "vendor_info" || target === "call_ip" || target === "issue" || target === "credentials";
+}
+
+/** Default seated-operator observe window (the seller works in the WING window). Tests override to instant. */
+export const DEFAULT_WING_OBSERVE_TIMEOUT_MS = 10 * 60_000;
+const SETTLE_TIMEOUT_MS = 15_000;
+const LOCATOR_SETTLE_MS = 400;
+const VERIFY_MAX_POLLS = 12;
+const VERIFY_POLL_MS = 500;
+const OPEN_NAV_POLL_MS = 1_000;
+
+/** Bounded sleep between navigation-observe polls (no wall-clock read; timer only). */
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * A DEFINITIVE reach landing category for VERIFY_REACH polling — the categories that STOP the poll because they
+ * will not change under further hydration: `open_api_issuance` (success), `credential_shown` (already past issue),
+ * or `login` (session lost, recoverable). Transient hydration states (`unknown`, still-`wing_home`) keep polling.
+ */
+function isVerifyResolved(category: WingPageCategory): boolean {
+  return category === "open_api_issuance" || category === "credential_shown" || category === "login";
+}
+
+/** The overlay step number per barrier (dev diagnostic badge only — cosmetic, mirrors the engine's plan). */
+const OVERLAY_STEP: Readonly<Record<CoupangIssuanceTarget, number>> = {
+  reach_open_api: 1,
+  self_dev: 2,
+  vendor_info: 3,
+  call_ip: 4,
+  issue: 5,
+  credentials: 6,
+  return: 7,
+};
+
+/**
+ * Operator-legible dev-overlay labels for the headed live run (no product FE is present, so the badge is the
+ * only in-window guidance). Diagnostic aid only — NOT the product FE's localized copy. The SELLER performs every
+ * step; SellerOps never presses 발급 and never reads the Access Key / Secret Key / 업체코드.
+ */
+const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string>> = {
+  reach_open_api: "WING 홈에서 '오픈API 키 발급' 페이지로 직접 이동하세요. (SellerOps가 이동을 관찰합니다.)",
+  self_dev: "표시된 '자체개발' 옵션을 직접 선택한 뒤 SellerOps에서 '다음'을 누르세요.",
+  vendor_info: "표시된 '업체명' 정보를 확인한 뒤 SellerOps에서 '다음'을 누르세요.",
+  call_ip: "표시된 '호출 IP' 위치에 직접 입력한 뒤 SellerOps에서 '다음'을 누르세요.",
+  issue: "표시된 '발급' 버튼을 직접 누르세요. SellerOps는 대신 누르지 않습니다. 발급 후 '다음'을 누르세요.",
+  credentials: "표시된 Access Key / Secret Key / 업체코드를 직접 복사한 뒤 SellerOps에서 '다음'을 누르세요 (도구는 값을 읽지 않습니다).",
+  return: "SellerOps로 돌아와 '다음'을 누르세요.",
+};
+
+/** A browser context whose newest tab may hold the step the seller opened. Structural subset of Playwright's. */
+export interface WingContextLike {
+  pages(): Page[];
+  on?(event: "close", handler: () => void): void;
+}
+
+export interface CoupangWingIssuanceDriverOptions {
+  /** Bounded window for the seller to act on a highlighted control. Defaults to {@link DEFAULT_WING_OBSERVE_TIMEOUT_MS}. */
+  observeTimeoutMs?: number;
+  guidanceEnabled?: boolean;
+  /** Optional context so the driver reads the NEWEST tab (the seller may open a step in a new tab). */
+  context?: WingContextLike;
+  /** Pause between VERIFY_REACH settle-polls. Defaults to {@link VERIFY_POLL_MS}; tests set 0. */
+  verifyPollMs?: number;
+}
+
+/**
+ * FIXED, synthetic guidance signatures for the two guidance-only targets (`reach_open_api`, `return`). Neither is
+ * a WING control — they are text guidance — so these are NOT derived from any page element. Stable opaque 16-hex
+ * constants so the engine's locate↔highlight anti-drift check (which requires the two sigs to match) still passes.
+ */
+const REACH_OPEN_API_GUIDANCE_SIG = "c0a9b17ec0a9b17e";
+const RETURN_GUIDANCE_SIG = "5e11e40b5e11e40b";
+
+/** Remove every read-only `data-aw-target` annotation. Value-free; safe on a page with none. */
+const IN_PAGE_CLEAR_TAG = `(function () {
+  /* coupang-issuance-cleartag */
+  var slice = Function.prototype.call.bind(Array.prototype.slice);
+  var els = slice(document.querySelectorAll('[data-aw-target]'));
+  for (var i = 0; i < els.length; i++) { els[i].removeAttribute('data-aw-target'); }
+  return true;
+})()`;
+
+export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
+  private readonly page: Page;
+  private readonly opts: CoupangWingIssuanceDriverOptions;
+  private readonly closed: Promise<void>;
+
+  constructor(page: Page, opts: CoupangWingIssuanceDriverOptions = {}) {
+    this.page = page;
+    this.opts = opts;
+    this.closed = new Promise<void>((resolve) => {
+      let done = false;
+      const fire = (): void => {
+        if (!done) {
+          done = true;
+          resolve();
+        }
+      };
+      page.on("close", fire);
+      opts.context?.on?.("close", fire);
+    });
+  }
+
+  /** The page all surface work runs against: the newest tab when a context is injected, else the single page. */
+  private activePage(): Page {
+    const pages = this.opts.context?.pages() ?? [];
+    return pages.length > 0 ? pages[pages.length - 1]! : this.page;
+  }
+
+  /** Evaluate a STRING snippet (not a function) so esbuild's `__name` shim is never referenced in the page. */
+  private evalStr<R>(page: Page, script: string): Promise<R> {
+    return (page as unknown as { evaluate<T>(s: string): Promise<T> }).evaluate<R>(script);
+  }
+
+  /** Best-effort settle; a page without `waitForLoadState` (offline fake) is left as-is. */
+  private async settle(page: Page): Promise<void> {
+    const p = page as unknown as { waitForLoadState?: (s: string, o?: { timeout?: number }) => Promise<void> };
+    if (typeof p.waitForLoadState !== "function") return;
+    try {
+      await p.waitForLoadState("networkidle", { timeout: SETTLE_TIMEOUT_MS });
+    } catch {
+      /* timeout is fine — the classifier fails closed on thin signals */
+    }
+  }
+
+  async settleSurface(): Promise<void> {
+    await this.settle(this.activePage());
+  }
+
+  async probeSurface(): Promise<WingSurfaceProbe> {
+    await this.settle(this.activePage());
+    return this.readSurface();
+  }
+
+  /** Classify the CURRENT surface WITHOUT settling — the value-free census + host-category read. */
+  private async readSurface(): Promise<WingSurfaceProbe> {
+    const page = this.activePage();
+    const census = await this.evalStr<WingStructuralCensus>(page, EXTRACT_WING_CENSUS);
+    // The raw URL is reduced to a host CATEGORY and never logged/emitted; only the enum is used.
+    const urlCategory = classifyWingUrlCategory(page.url());
+    const { pageCategory, signals } = wingPageCategoryFromCensus(urlCategory, census);
+    if (pageCategory === "login") {
+      log("aw_coupang_issuance_probe", { pageCategory, ok: false });
+      return { ok: false, pageCategory: "login", blockerCode: "LOGIN_REQUIRED" };
+    }
+    log("aw_coupang_issuance_probe", { pageCategory, ok: true });
+    return { ok: true, pageCategory, signals };
+  }
+
+  /** VERIFY_REACH's bounded-polling probe: ride out a transient mid-hydration `unknown` before it settles. */
+  async probeSurfaceSettled(): Promise<WingSurfaceProbe> {
+    const pollMs = this.opts.verifyPollMs ?? VERIFY_POLL_MS;
+    let last = await this.probeSurface();
+    for (let i = 1; i < VERIFY_MAX_POLLS && !isVerifyResolved(last.pageCategory); i++) {
+      if (pollMs > 0) await sleep(pollMs);
+      last = await this.readSurface();
+    }
+    return last;
+  }
+
+  /**
+   * Resolve a fixed-label highlight target read-only, and (when `tag`) move the `data-aw-target` annotation onto
+   * the unique match. Delegates ALL text reading to the audited value-free {@link buildFixedLabelLocateScript}
+   * (returns only `{ count, sig? }`) — this driver's own source reads no text/attribute/value. `count !== 1`
+   * parks upstream (`target_not_found` recoverable).
+   */
+  private async resolveFixedLabelTarget(target: WingHighlightTarget, tag: boolean): Promise<LocateResult> {
+    const spec = WING_HIGHLIGHT_LABELS[target];
+    const script = buildFixedLabelLocateScript({
+      candidateQuery: spec.candidateQuery,
+      exactText: spec.exactText,
+      tag,
+      ...(spec.tagAncestor ? { tagAncestor: spec.tagAncestor } : {}),
+    });
+    const page = this.activePage();
+    const res = await this.evalStr<LocateResult>(page, script);
+    if (res.count !== 1 || !res.sig) return { count: res.count };
+    return { count: 1, sig: res.sig };
+  }
+
+  async locateTarget(target: CoupangIssuanceTarget): Promise<LocateResult> {
+    // `reach_open_api` and `return` are GUIDANCE, not queried WING controls — each resolves to a fixed synthetic
+    // signature (reach = "go to the open-API page yourself"; return = "go back to SellerOps").
+    if (target === "reach_open_api") return { count: 1, sig: REACH_OPEN_API_GUIDANCE_SIG };
+    if (target === "return") return { count: 1, sig: RETURN_GUIDANCE_SIG };
+    if (!isWingHighlightTarget(target)) return { count: 0 };
+    return this.resolveFixedLabelTarget(target, false);
+  }
+
+  async highlightTarget(target: CoupangIssuanceTarget): Promise<LocateResult> {
+    const page = this.activePage();
+    if (target === "reach_open_api") {
+      await this.mountStepOverlay(page, "reach_open_api");
+      return { count: 1, sig: REACH_OPEN_API_GUIDANCE_SIG };
+    }
+    if (target === "return") {
+      await this.mountStepOverlay(page, "return");
+      return { count: 1, sig: RETURN_GUIDANCE_SIG };
+    }
+    if (!isWingHighlightTarget(target)) return { count: 0 };
+    const res = await this.resolveFixedLabelTarget(target, true);
+    if (res.count !== 1 || !res.sig) return { count: res.count };
+    // Give the just-set tag a beat to land, then mount the reused read-only overlay on it (scroll into view +
+    // "여기입니다" pointer). Never a WING click awaited.
+    await sleep(LOCATOR_SETTLE_MS);
+    await this.mountStepOverlay(page, target);
+    if (!(await overlayMounted(page))) return { count: 0 };
+    return { count: 1, sig: res.sig };
+  }
+
+  /** Mount the reused read-only step overlay for one target's operator-legible dev badge. Never clicks/types. */
+  private async mountStepOverlay(page: Page, target: CoupangIssuanceTarget): Promise<void> {
+    await mountOverlay(page, {
+      stepNumber: OVERLAY_STEP[target],
+      totalSteps: COUPANG_ISSUANCE_TOTAL_STEPS,
+      copyKey: `actionWindow.coupangIssuance.step.${target}`,
+      label: OPERATOR_STEP_LABELS[target],
+      guidanceEnabled: this.opts.guidanceEnabled ?? true,
+    });
+  }
+
+  async clearHighlight(): Promise<void> {
+    const page = this.activePage();
+    await unmountOverlay(page).catch(() => undefined);
+    await this.evalStr(page, IN_PAGE_CLEAR_TAG).catch(() => undefined);
+  }
+
+  async armObserve(_target: CoupangIssuanceTarget): Promise<void> {
+    // No click observer is EVER armed for Coupang issuance. The only observed target — `reach_open_api` — is
+    // watched as a page CATEGORY transition (see `observeUserAction`), not a click on a tagged control; the
+    // same-page viewport checkpoints advance on the operator's own SellerOps "다음". So arming is a no-op.
+    return;
+  }
+
+  async observeUserAction(target: CoupangIssuanceTarget): Promise<boolean> {
+    // `reach_open_api` is the ONE observed target: it completes when the seller navigates from the WING home to
+    // the open-API issuance page — an OBSERVED page-category transition. The engine then re-probes (VERIFY_REACH).
+    if (target === "reach_open_api") return this.observeLeftWingHome();
+    // Every other target is a same-page viewport checkpoint (or `return` guidance): SellerOps never waits for a
+    // WING action — the operator advances with "다음" — so this is never armed. Return true as a safe default.
+    return true;
+  }
+
+  /**
+   * Observe the seller's own `wing_home → open_api_issuance` navigation for `reach_open_api`, value-free: poll the
+   * sanitized page CATEGORY and resolve `true` the moment the page is no longer the WING home. NEVER clicks,
+   * tags, or reads a value; only a coarse category enum is inspected. On timeout (still on the home) it returns
+   * `false` so the session re-arms; the engine's VERIFY_REACH decides whether the landing is correct.
+   */
+  private async observeLeftWingHome(): Promise<boolean> {
+    const timeoutMs = this.opts.observeTimeoutMs ?? DEFAULT_WING_OBSERVE_TIMEOUT_MS;
+    const maxPolls = Math.max(1, Math.ceil(timeoutMs / OPEN_NAV_POLL_MS));
+    for (let i = 0; i < maxPolls; i++) {
+      const category = await this.readPageCategory(this.activePage()).catch(() => "wing_home" as WingPageCategory);
+      if (category !== "wing_home") return true;
+      if (i < maxPolls - 1) await sleep(OPEN_NAV_POLL_MS);
+    }
+    return false;
+  }
+
+  /** The sanitized page CATEGORY of a page (census + host-category only — never a URL or DOM value). */
+  private async readPageCategory(page: Page): Promise<WingPageCategory> {
+    const census = await this.evalStr<WingStructuralCensus>(page, EXTRACT_WING_CENSUS);
+    const urlCategory = classifyWingUrlCategory(page.url());
+    return wingPageCategoryFromCensus(urlCategory, census).pageCategory;
+  }
+
+  async cleanup(): Promise<void> {
+    const page = this.activePage();
+    await unmountOverlay(page).catch(() => undefined);
+    await this.evalStr(page, IN_PAGE_CLEAR_TAG).catch(() => undefined);
+  }
+
+  whenSurfaceClosed(): Promise<void> {
+    return this.closed;
+  }
+}

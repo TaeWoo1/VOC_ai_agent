@@ -34,6 +34,19 @@ const COPY: Record<string, string> = {
   "actionWindow.issuance.applicationId": "애플리케이션 ID 복사",
   "actionWindow.issuance.applicationSecret": "애플리케이션 시크릿 확인·복사",
   "actionWindow.issuance.return": "SellerOps로 돌아와 입력",
+
+  // Coupang WING Open API key issuance guidance (Action Window). Shared step copy keys with the collector
+  // runtime — the runtime sends only the key, this FE owns the wording. Hedged, position/role based: exact
+  // WING menu/button labels differ by screen version, so no label is asserted as fact. SellerOps never logs
+  // in, clicks, or reads a key value; the seller performs each step in the guided WING window.
+  "actionWindow.coupangIssuance.run": "쿠팡 Open API 키 발급 화면 안내",
+  "actionWindow.coupangIssuance.reachOpenApi": "판매자정보 › 오픈API 키 발급으로 이동",
+  "actionWindow.coupangIssuance.selfDev": "연동 방식 '자체개발' 선택",
+  "actionWindow.coupangIssuance.vendorInfo": "업체명·URL 정보 입력",
+  "actionWindow.coupangIssuance.callIp": "API 호출 IP 등록",
+  "actionWindow.coupangIssuance.issueCheckpoint": "발급 버튼 직접 누르기",
+  "actionWindow.coupangIssuance.copyKeys": "액세스 키·시크릿 키·업체코드 복사",
+  "actionWindow.coupangIssuance.return": "SellerOps로 돌아와 입력",
 };
 
 // Per-step FULL instruction for the guided issuance walkthrough — so the SellerOps screen is self-sufficient
@@ -66,6 +79,27 @@ const ISSUANCE_STEP_DETAIL: Record<string, string> = {
     "애플리케이션 시크릿을 확인하고 복사해 주세요. 표시된 '보기/복사' 컨트롤에서 시크릿을 직접 확인·복사하시면 됩니다. SellerOps는 시크릿 값도, 클립보드도 읽지 않습니다. 확인이 어려우면 시크릿 재발급이 필요할 수 있습니다.",
   "actionWindow.issuance.return":
     "두 값을 복사했다면 SellerOps로 돌아가 주세요. 안내가 끝나면 연결 정보 입력 화면으로 이동합니다.",
+
+  // Coupang WING Open API key issuance — FULL per-step instruction. Same hedged, position/role wording
+  // (exact WING labels differ by screen version, so none is asserted as fact) and the same privacy
+  // invariant — SellerOps never logs in, clicks, or reads a key value; the seller performs each step and
+  // clicks 발급 themselves. Keyed by the SAME `actionWindow.coupangIssuance.*` keys the runtime emits.
+  "actionWindow.coupangIssuance.run":
+    "SellerOps가 화면에서 어디를 봐야 하는지 안내합니다. 각 단계는 열린 쿠팡 윙 창에서 직접 진행하시고, 이 화면의 설명을 따라가세요. SellerOps는 로그인·클릭·입력을 하지 않고 어떤 값도 읽지 않습니다.",
+  "actionWindow.coupangIssuance.reachOpenApi":
+    "쿠팡 윙에서 '판매자정보'의 오픈API 키 발급 영역으로 이동하세요. 정확한 메뉴 이름은 화면 버전에 따라 다를 수 있으니 '오픈API'·'키 발급'이 포함된 항목을 찾아 주세요.",
+  "actionWindow.coupangIssuance.selfDev":
+    "연동 방식은 '자체개발'을 선택하세요. 솔루션사(대행) 연동이 아니라 내 시스템에서 직접 호출하는 방식이며, 별도 심사 없이 바로 발급할 수 있습니다.",
+  "actionWindow.coupangIssuance.vendorInfo":
+    "발급 화면에 필요한 업체명과 URL 정보를 입력하세요. 안전하게 입력하는 값이며, 화면에 표시된 항목만 채우면 됩니다. SellerOps는 입력값을 읽지 않습니다.",
+  "actionWindow.coupangIssuance.callIp":
+    "쿠팡은 등록된 호출 IP에서만 API 요청을 허용합니다. 아래에 표시된 SellerOps 고정 호출 IP를 발급 화면의 'API 호출 IP'에 그대로 등록하세요. 등록하지 않으면 첫 주문 수집이 호출 IP 오류로 실패할 수 있습니다.",
+  "actionWindow.coupangIssuance.issueCheckpoint":
+    "이제 발급 버튼을 누르기 직전 단계입니다. 발급 버튼은 반드시 직접 눌러 주세요 — SellerOps는 대신 발급하지 않습니다. 입력한 내용을 한 번 더 확인한 뒤 발급을 진행하세요.",
+  "actionWindow.coupangIssuance.copyKeys":
+    "발급된 액세스 키(Access Key), 시크릿 키(Secret Key), 업체코드(Vendor ID)를 직접 복사하세요. 시크릿 키는 발급 시 한 번만 표시되니 안전하게 보관하세요. SellerOps는 이 값들을 읽지 않습니다 — 복사는 직접 하시고, 마지막에 SellerOps 보안 입력란에 붙여넣으세요.",
+  "actionWindow.coupangIssuance.return":
+    "세 값을 복사했다면 SellerOps로 돌아와 주세요. 안내가 끝나면 연결 정보 입력 화면으로 이동합니다.",
 };
 
 /** The FULL per-step instruction for a guided issuance step, or null when the step has no detail mapping. */
@@ -99,6 +133,7 @@ export function hasCopy(key: string): boolean {
 export const CHANNEL_FALLBACK = "알 수 없는 채널";
 const CHANNEL_LABELS: Record<string, string> = {
   esm_plus: "ESM (지마켓·옥션)",
+  coupang: "쿠팡",
 };
 export function channelLabel(code: string): string {
   return CHANNEL_LABELS[code] ?? CHANNEL_FALLBACK;
