@@ -35,7 +35,7 @@ import {
   decideApprovalPresenter,
   resolveAgentBridgeConfig,
 } from "./local-agent";
-import { screenWingUrl } from "./coupang-wing-classifier";
+import { resolveWingUrl, screenWingUrl } from "./coupang-wing-classifier";
 import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from "./live-run-approval";
 
 const CHANNEL_CODE = "coupang";
@@ -74,14 +74,11 @@ async function main(): Promise<void> {
     process.exit(3);
     return;
   }
-  const url = process.env.COUPANG_WING_URL;
-  if (!url) {
-    console.error("Set COUPANG_WING_URL (operator-owned; never logged) to the WING page first.");
-    process.exit(2);
-    return;
-  }
-  // Fail closed BEFORE launching Chrome: reject placeholders, unparseable URLs, and off-target hosts, so the
-  // browser only ever opens the WING / auth host (the raw URL is never printed — only a reason enum).
+  // Public WING host is not a secret: default to the WING root, or take an explicit `--url <u>` / positional /
+  // COUPANG_WING_URL. The seller logs in + navigates themselves. Fail closed BEFORE launching Chrome: reject
+  // placeholders, unparseable URLs, and off-target hosts, so the browser only ever opens the WING / auth host
+  // (the raw URL is never printed — only a reason enum + host category).
+  const url = resolveWingUrl(args, process.env);
   const screen = screenWingUrl(url);
   if (!screen.ok) {
     console.error(

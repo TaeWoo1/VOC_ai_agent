@@ -5,6 +5,8 @@
  */
 import { describe, it, expect } from "vitest";
 import {
+  WING_DEFAULT_URL,
+  resolveWingUrl,
   branchAfterWingProbe,
   classifyWingPage,
   classifyWingUrlCategory,
@@ -138,5 +140,21 @@ describe("screenWingUrl — fail-closed pre-launch screen (reason enum + host ca
     expect(screenWingUrl("https://example.com/your-wing")).toMatchObject({ ok: false, reason: "placeholder" });
     expect(screenWingUrl("COUPANG_WING_URL")).toMatchObject({ ok: false, reason: "placeholder" });
     expect(screenWingUrl("https://naver.com/")).toMatchObject({ ok: false, reason: "off_target" });
+  });
+
+  it("resolveWingUrl: --url / positional / env / public default precedence (public host is not a secret)", () => {
+    // No input → the public WING root (screens ok as the wing host).
+    expect(resolveWingUrl([], {})).toBe(WING_DEFAULT_URL);
+    expect(screenWingUrl(resolveWingUrl([], {}))).toMatchObject({ ok: true, urlCategory: "wing_host" });
+    // Explicit --url wins over env; a bare positional URL wins over env; env wins over the default.
+    expect(resolveWingUrl(["--url", "https://wing.coupang.com/a"], { COUPANG_WING_URL: "https://wing.coupang.com/b" })).toBe(
+      "https://wing.coupang.com/a",
+    );
+    expect(resolveWingUrl(["https://wing.coupang.com/p"], { COUPANG_WING_URL: "https://wing.coupang.com/e" })).toBe(
+      "https://wing.coupang.com/p",
+    );
+    expect(resolveWingUrl([], { COUPANG_WING_URL: "https://wing.coupang.com/e" })).toBe("https://wing.coupang.com/e");
+    // An off-host arg still fails closed at screenWingUrl (resolve does not validate; screen does).
+    expect(screenWingUrl(resolveWingUrl(["--url", "https://evil.example/"], {}))).toMatchObject({ ok: false });
   });
 });

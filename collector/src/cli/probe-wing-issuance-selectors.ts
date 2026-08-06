@@ -41,6 +41,7 @@ import {
 } from "../action-window/coupang-wing-issuance-driver";
 import {
   LIVE_DOM_CALIBRATION_PENDING,
+  resolveWingUrl,
   screenWingUrl,
   type WingObservation,
 } from "./coupang-wing-classifier";
@@ -75,6 +76,25 @@ export const WING_TARGET_ROLE: Readonly<Record<WingHighlightTarget, string>> = {
 };
 
 /** One candidate's sanitized calibration row. Value-free: a count, a boolean, our own fixed label/role, an opaque sig. */
+/**
+ * Closed, sanitized fault fingerprints for a live capture step whose read-only Playwright/DOM read threw. The
+ * raw error message is inspected LOCALLY to pick the enum and is NEVER emitted — only which KIND of failure, so
+ * a live failure is diagnosable (e.g. a real WING page navigating/closing under the read) without leaking any
+ * message, selector, value, or URL. Mirrors the NAVER driver's sanitized fault fingerprinting.
+ */
+export const WING_FAULT_FINGERPRINTS = ["CONTEXT_DESTROYED", "TARGET_CLOSED", "TIMEOUT", "EVAL_FAILED", "UNKNOWN"] as const;
+export type WingFaultFingerprint = (typeof WING_FAULT_FINGERPRINTS)[number];
+
+export function wingFaultFingerprint(err: unknown): WingFaultFingerprint {
+  const m = (err instanceof Error && typeof err.message === "string" ? err.message : "").toLowerCase();
+  if (m.includes("execution context was destroyed") || m.includes("context was destroyed")) return "CONTEXT_DESTROYED";
+  if (m.includes("target page, context or browser has been closed") || m.includes("target closed") || m.includes("has been closed"))
+    return "TARGET_CLOSED";
+  if (m.includes("timeout") || m.includes("timed out")) return "TIMEOUT";
+  if (m.includes("evaluation failed") || m.includes("failed to evaluate") || m.includes("evaluate")) return "EVAL_FAILED";
+  return "UNKNOWN";
+}
+
 export interface WingSelectorRecord {
   target: WingHighlightTarget;
   /** How many candidates the fixed WING label matched live (integer only). */
@@ -87,12 +107,16 @@ export interface WingSelectorRecord {
   label: string;
   /** Opaque 16-hex structural signature of the unique match (tag+position+child-count in-page), else null. */
   sig16: string | null;
+  /** Sanitized fingerprint when this candidate's read-only probe THREW (else null). Never a raw message. */
+  fault: WingFaultFingerprint | null;
 }
 
 /** The machine-checkable calibration record the recorder prints. Integers/booleans/fixed-labels/roles/sigs only. */
 export interface WingSelectorRecordResult {
-  /** Sanitized surface observation (pageCategory + bucketized signals + blockers). Null when the run never reached ready. */
+  /** Sanitized surface observation (pageCategory + bucketized signals + blockers). Null when the run never reached ready OR the observe read threw. */
   observation: WingObservation | null;
+  /** Sanitized fingerprint when the surface observation THREW (else null) — so a failed observe is diagnosable, not an opaque fatal. */
+  observationFault: WingFaultFingerprint | null;
   targets: WingSelectorRecord[];
   /** How many candidates resolved uniquely this run (sanitized count). */
   uniqueCandidates: number;
@@ -127,6 +151,7 @@ export async function runWingSelectorRecord(deps: WingSelectorRecordDeps): Promi
   if (signal !== "ready") {
     return {
       observation: null,
+      observationFault: null,
       targets: [],
       uniqueCandidates: 0,
       nonUniqueCandidates: 0,
@@ -135,13 +160,31 @@ export async function runWingSelectorRecord(deps: WingSelectorRecordDeps): Promi
     };
   }
 
-  const observation = await deps.observeSurface();
+  // Each read-only step is isolated: a real WING page that navigates/closes under one read yields a sanitized
+  // fingerprint for THAT step, not an opaque top-level fatal that loses the whole record. The recorder captures
+  // everything it can and reports where it could not.
+  let observation: WingObservation | null = null;
+  let observationFault: WingFaultFingerprint | null = null;
+  try {
+    observation = await deps.observeSurface();
+  } catch (e) {
+    observationFault = wingFaultFingerprint(e);
+  }
+
   const targets: WingSelectorRecord[] = [];
   let uniqueCandidates = 0;
   let nonUniqueCandidates = 0;
 
   for (const target of WING_RECORD_TARGETS) {
-    const { matchCount, canHighlight, sig } = await deps.probeTarget(target);
+    let matchCount = 0;
+    let canHighlight = false;
+    let sig: string | undefined;
+    let fault: WingFaultFingerprint | null = null;
+    try {
+      ({ matchCount, canHighlight, sig } = await deps.probeTarget(target));
+    } catch (e) {
+      fault = wingFaultFingerprint(e);
+    }
     targets.push({
       target,
       matchCount,
@@ -149,6 +192,7 @@ export async function runWingSelectorRecord(deps: WingSelectorRecordDeps): Promi
       role: WING_TARGET_ROLE[target],
       label: WING_HIGHLIGHT_LABELS[target].exactText,
       sig16: canHighlight && sig ? sig : null,
+      fault,
     });
     if (canHighlight) uniqueCandidates += 1;
     else nonUniqueCandidates += 1;
@@ -156,6 +200,7 @@ export async function runWingSelectorRecord(deps: WingSelectorRecordDeps): Promi
 
   return {
     observation,
+    observationFault,
     targets,
     uniqueCandidates,
     nonUniqueCandidates,
@@ -232,14 +277,11 @@ async function main(): Promise<void> {
     process.exit(3);
     return;
   }
-  const url = process.env.COUPANG_WING_URL;
-  if (!url) {
-    console.error("Set COUPANG_WING_URL (operator-owned; never logged) to the WING page first.");
-    process.exit(2);
-    return;
-  }
-  // Fail closed BEFORE launching Chrome: reject placeholders, unparseable URLs, and off-target hosts. The raw URL
-  // is never printed — only a reason enum + host category. The recorder does NOT navigate; the seller does.
+  // Public WING host is not a secret: default to the WING root, or take an explicit `--url <u>` / positional /
+  // COUPANG_WING_URL. The operator logs in + navigates to the target screen themselves (this recorder never
+  // `.goto`s). Fail closed BEFORE launching Chrome: reject placeholders, unparseable URLs, and off-target hosts.
+  // The raw URL is never printed — only a reason enum + host category.
+  const url = resolveWingUrl(args, process.env);
   const screen = screenWingUrl(url);
   if (!screen.ok) {
     console.error(

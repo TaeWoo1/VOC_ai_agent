@@ -14,6 +14,7 @@ import {
   WING_RECORD_TARGETS,
   WING_TARGET_ROLE,
   runWingSelectorRecord,
+  wingFaultFingerprint,
   type WingRecordSignal,
   type WingSelectorRecordDeps,
 } from "../../src/cli/probe-wing-issuance-selectors";
@@ -197,6 +198,47 @@ describe("wing selector recorder — read-only walk", () => {
       expect(result.aborted).toBe(signal === "abort");
       expect(result.calibration).toBe("LIVE_DOM_CALIBRATION_PENDING");
     }
+  });
+
+  it("is RESILIENT: a read-only step that throws on real WING yields a sanitized fingerprint, never an opaque fatal", async () => {
+    // A real page navigating/closing under the observe read → CONTEXT_DESTROYED fingerprint, observation null,
+    // and the candidate probes still run (the record is not lost). A candidate probe that throws → per-target
+    // fault, matchCount 0, and the loop continues to the rest.
+    const probed: WingHighlightTarget[] = [];
+    const deps: WingSelectorRecordDeps = {
+      waitForReady: async () => "ready",
+      observeSurface: async () => {
+        throw new Error("Execution context was destroyed, most likely because of a navigation.");
+      },
+      probeTarget: async (target) => {
+        probed.push(target);
+        if (target === "issue") throw new Error("Target page, context or browser has been closed");
+        return UNIQUE;
+      },
+      announce: () => undefined,
+    };
+    const result = await runWingSelectorRecord(deps);
+    expect(result.observation).toBeNull();
+    expect(result.observationFault).toBe("CONTEXT_DESTROYED");
+    // Every candidate was still attempted despite the observe failure + one probe throwing.
+    expect(probed).toEqual(["self_dev", "vendor_info", "call_ip", "issue", "credentials"]);
+    const issue = result.targets.find((t) => t.target === "issue")!;
+    expect(issue.fault).toBe("TARGET_CLOSED");
+    expect(issue.matchCount).toBe(0);
+    expect(issue.canHighlight).toBe(false);
+    // A clean candidate carries no fault.
+    expect(result.targets.find((t) => t.target === "self_dev")!.fault).toBeNull();
+    // Still honest.
+    expect(result.calibration).toBe("LIVE_DOM_CALIBRATION_PENDING");
+  });
+
+  it("fingerprints map known Playwright phrases to closed enums, never a raw message", () => {
+    expect(wingFaultFingerprint(new Error("Execution context was destroyed"))).toBe("CONTEXT_DESTROYED");
+    expect(wingFaultFingerprint(new Error("Target closed"))).toBe("TARGET_CLOSED");
+    expect(wingFaultFingerprint(new Error("Timeout 30000ms exceeded"))).toBe("TIMEOUT");
+    expect(wingFaultFingerprint(new Error("Evaluation failed: ReferenceError"))).toBe("EVAL_FAILED");
+    expect(wingFaultFingerprint(new Error("something else entirely"))).toBe("UNKNOWN");
+    expect(wingFaultFingerprint("not an error")).toBe("UNKNOWN");
   });
 
   it("carries the credentials candidate anchor as the LABEL heading (never a value) — the anchor is 'Access Key'", async () => {

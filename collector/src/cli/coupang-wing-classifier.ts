@@ -265,6 +265,28 @@ function looksLikePlaceholder(url: string): boolean {
  * values, unparseable URLs, and any host that is not the Coupang WING or auth host. Reads the URL; emits only a
  * reason enum + host category (never the raw URL).
  */
+/** The public Coupang WING root. Not a secret — the default the recorder / guided run opens when the
+ *  operator gives no URL. A specific page can still be passed explicitly (see {@link resolveWingUrl}). */
+export const WING_DEFAULT_URL = "https://wing.coupang.com/";
+
+/**
+ * Resolve which WING URL to open WITHOUT treating the public host as a secret: an explicit `--url <u>` or a
+ * bare `http(s)://…` positional arg wins; then `COUPANG_WING_URL` for operators who still prefer env; else the
+ * public WING root {@link WING_DEFAULT_URL}. The caller still {@link screenWingUrl}-validates the host, so an
+ * off-target host fails closed BEFORE any browser launch. Only the resulting host-category is ever logged —
+ * the raw URL is never printed.
+ */
+export function resolveWingUrl(argv: readonly string[], env: Record<string, string | undefined>): string {
+  const flagIdx = argv.indexOf("--url");
+  const flagVal = flagIdx >= 0 ? argv[flagIdx + 1] : undefined;
+  if (flagVal && flagVal.trim()) return flagVal.trim();
+  const positional = argv.find((a) => /^https?:\/\//i.test(a));
+  if (positional) return positional;
+  const fromEnv = env.COUPANG_WING_URL;
+  if (fromEnv && fromEnv.trim()) return fromEnv.trim();
+  return WING_DEFAULT_URL;
+}
+
 export function screenWingUrl(url: string): { ok: boolean; reason: WingUrlScreenReason; urlCategory: WingUrlCategory } {
   const urlCategory = classifyWingUrlCategory(url);
   if (looksLikePlaceholder(url)) return { ok: false, reason: "placeholder", urlCategory };
