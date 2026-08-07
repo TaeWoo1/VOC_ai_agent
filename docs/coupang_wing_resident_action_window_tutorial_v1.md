@@ -37,11 +37,13 @@ explicit human checkpoint: the button is highlighted, the run rests, the seller 
 
 ## Changes
 
-- **`collector/src/action-window/overlay.ts`** — optional `advance: { buttonLabel, token }`. When present,
-  mountOverlay draws a fixed-position guidance panel (product copy + advance button, `pointer-events:auto`)
-  SEPARATE from the ring (which stays `pointer-events:none`). A click copies the step's opaque in-page token
-  into a latch; helpers `resetOverlayAdvance` / `readOverlayAdvancePressed` re-arm and read it value-free.
-  Advance is optional, so the shared NAVER driver is byte-for-byte unchanged.
+- **`collector/src/action-window/overlay.ts`** — an explicit `residentPanel` opt-in draws a fixed-position
+  guidance panel (product copy + an optional `advance` button, `pointer-events:auto`) SEPARATE from the ring
+  (which stays `pointer-events:none`). A click copies the step's opaque in-page token into a latch; helpers
+  `resetOverlayAdvance` / `readOverlayAdvancePressed` re-arm and read it value-free. The panel is gated on the
+  explicit opt-in, **never inferred from `label`**, so every other caller (NAVER review export / NAVER issuance
+  / Coupang renewal — all of which pass a diagnostic `label`) keeps the classic ring+badge and is unchanged
+  (locked by a RUN_INTEGRATION regression test).
 - **`collector/src/action-window/coupang-wing-issuance-driver.ts`** — the overlay copy is now the product
   guidance (references the on-page button, not "SellerOps에서 다음"); `mountStepOverlay` passes the advance
   affordance for checkpoints; `armObserve` re-arms the latch; `observeUserAction` polls the value-free latch

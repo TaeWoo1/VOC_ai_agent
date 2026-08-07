@@ -278,7 +278,7 @@ export function CoupangIssuanceGuidedWalkthrough({
                 진행되고, 이 화면은 진행 상태만 보여줍니다.
               </p>
               {effectiveRun.progress && (
-                <p className="text-xs text-muted" aria-label="진행 상황">
+                <p className="text-xs text-muted">
                   {effectiveRun.progress.completedSteps} / {effectiveRun.progress.totalSteps} 단계 완료
                 </p>
               )}

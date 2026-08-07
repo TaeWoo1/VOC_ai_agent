@@ -28,15 +28,24 @@ export interface OverlayOptions {
   label?: string;
   guidanceEnabled: boolean;
   /**
-   * Optional WING-RESIDENT guidance panel + advance affordance. When present, mountOverlay draws a
-   * fixed-position guidance panel (product copy + a single advance button) SEPARATE from the
-   * `pointer-events:none` spotlight ring, so the seller reads the guidance and advances the walk ON
-   * the marketplace page itself — never bouncing back to the SellerOps tab to press "다음". Only the
-   * panel button is interactive (`pointer-events:auto`); it can never sit over or intercept a WING
-   * control. The button click sets an in-page value-free LATCH (`__aw_advance_pressed__ = token`) that
-   * the driver polls with {@link readOverlayAdvancePressed}; the `token` is opaque and per-step so a
-   * stale press from a prior step can never skip the next one. Absent ⇒ the classic ring+badge only
-   * (the NAVER driver passes nothing, so its behavior is unchanged).
+   * Explicit opt-in for the WING-RESIDENT guidance panel. When `true`, mountOverlay draws a
+   * fixed-position guidance panel (the {@link label} product copy + an optional advance button) SEPARATE
+   * from the `pointer-events:none` spotlight ring, so the seller reads the guidance and advances the walk
+   * ON the marketplace page itself — never bouncing back to the SellerOps tab to press "다음".
+   *
+   * <p>This is a DELIBERATE opt-in, NOT inferred from {@link label}: every overlay caller (NAVER review
+   * export / NAVER issuance / Coupang renewal) passes a `label` for the diagnostic badge, so gating the
+   * panel on `label` would inject a new interactive fixed element onto those pages. Only the Coupang
+   * WING-resident issuance driver sets this flag, so all other flows keep the classic ring+badge only and
+   * their behavior is unchanged.
+   */
+  residentPanel?: boolean;
+  /**
+   * Optional advance affordance for a WING-RESIDENT step (only meaningful with {@link residentPanel}). When
+   * present the guidance panel gains a single advance button; its click sets an in-page value-free LATCH
+   * (`__aw_advance_pressed__ = token`) the driver polls with {@link readOverlayAdvancePressed}. The `token`
+   * is opaque and per-step so a stale press from a prior step can never skip the next one. Absent ⇒ a
+   * guidance-only panel (e.g. the reach step, which auto-advances on a page-category transition).
    */
   advance?: OverlayAdvance;
 }
@@ -264,7 +273,10 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
     if (prevPanel) prevPanel.remove();
     G["__aw_advance_token__"] = o.advance ? o.advance.token : "";
     delete G["__aw_advance_pressed__"];
-    if (o.guidanceEnabled && (o.label != null || o.advance)) {
+    // The WING-resident panel is drawn ONLY on an explicit opt-in (residentPanel) — never inferred from a
+    // label — so callers that pass only a diagnostic label (NAVER export / NAVER issuance / Coupang renewal)
+    // keep the classic ring+badge and never get a new interactive fixed element on their marketplace page.
+    if (o.guidanceEnabled && o.residentPanel && o.label != null) {
       const panel = document.createElement("div");
       panel.id = "__aw_advance_panel__";
       panel.setAttribute("role", "note");

@@ -82,6 +82,7 @@ describe.skipIf(!RUN)("WING-resident overlay — advance affordance on a real DO
       copyKey: "actionWindow.coupangIssuance.step.self_dev",
       label: "표시된 '자체개발' 옵션을 선택하세요.",
       guidanceEnabled: true,
+      residentPanel: true,
       advance: { buttonLabel: "다음", token: "tok-step-2" },
     });
 
@@ -111,7 +112,7 @@ describe.skipIf(!RUN)("WING-resident overlay — advance affordance on a real DO
     await page.close();
   });
 
-  it("a guidance-only step (no advance button) still shows the panel copy but exposes no button", async () => {
+  it("a guidance-only step (residentPanel, no advance button) still shows the panel copy but exposes no button", async () => {
     const page = await browser.newPage();
     await page.setContent(`<!doctype html><html><body><button data-aw-target>여기</button></body></html>`);
     await mountOverlay(page, {
@@ -120,9 +121,29 @@ describe.skipIf(!RUN)("WING-resident overlay — advance affordance on a real DO
       copyKey: "actionWindow.coupangIssuance.step.reach_open_api",
       label: "오픈API 키 발급 페이지로 이동하세요.",
       guidanceEnabled: true,
+      residentPanel: true,
     });
     expect(await advancePanelMounted(page)).toBe(true);
     expect(await page.locator("#__aw_advance_panel__ button[data-aw-advance]").count()).toBe(0);
+    await page.close();
+  });
+
+  it("a NAVER-style mount (a label but NO residentPanel opt-in) draws NO panel — only the classic ring+badge", async () => {
+    // Regression guard: every non-Coupang-issuance caller (NAVER export / NAVER issuance / Coupang renewal)
+    // passes a diagnostic `label` but never `residentPanel`. The panel must NOT be inferred from `label`, so
+    // those live marketplace pages get no new interactive fixed element (no click-occlusion risk).
+    const page = await browser.newPage();
+    await page.setContent(`<!doctype html><html><body><button data-aw-target>여기</button></body></html>`);
+    await mountOverlay(page, {
+      stepNumber: 3,
+      totalSteps: 6,
+      copyKey: "actionWindow.naverIssuance.step.open_app",
+      label: "이 항목을 확인하세요.",
+      guidanceEnabled: true,
+    });
+    // The classic ring + badge still mount; the WING-resident panel does NOT.
+    expect(await overlayMounted(page)).toBe(true);
+    expect(await advancePanelMounted(page)).toBe(false);
     await page.close();
   });
 });

@@ -112,7 +112,9 @@ const ADVANCE_BUTTON_LABEL: Readonly<Partial<Record<CoupangIssuanceTarget, strin
   call_ip: "다음",
   issue: "발급 완료 · 다음",
   credentials: "복사했어요 · 다음",
-  return: "SellerOps에서 키 입력하기",
+  // The return step hands focus back to SellerOps; the SellerOps tab then owns the "enter keys" CTA, so this
+  // on-page button is purely "go back" (avoids two near-identical "enter keys" buttons across the two windows).
+  return: "SellerOps로 돌아가기",
 };
 
 /** Bounded sleep between navigation-observe polls (no wall-clock read; timer only). */
@@ -154,7 +156,7 @@ const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string>> = {
   call_ip: "표시된 '호출 IP' 위치에 직접 입력하세요. 완료하면 아래 '다음'을 누르세요.",
   issue: "표시된 '발급' 버튼을 직접 누르세요. SellerOps는 대신 누르지 않습니다. 발급이 끝나면 아래 버튼을 누르세요.",
   credentials: "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요. SellerOps는 값을 읽지 않습니다. 복사했으면 아래 버튼을 누르세요.",
-  return: "이제 SellerOps로 돌아가 복사한 키를 입력하면 연결이 완료됩니다. 아래 버튼을 누르세요.",
+  return: "이제 아래 버튼을 눌러 SellerOps로 돌아가세요. 돌아가면 복사한 키를 입력해 연결을 마칠 수 있어요.",
 };
 
 /** A browser context whose newest tab may hold the step the seller opened. Structural subset of Playwright's. */
@@ -363,6 +365,9 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
       copyKey: `actionWindow.coupangIssuance.step.${target}`,
       label: OPERATOR_STEP_LABELS[target],
       guidanceEnabled: this.opts.guidanceEnabled ?? true,
+      // Opt in to the WING-resident guidance panel (this driver is the only one that does); the button is
+      // added only for a checkpoint (a target with an advance label). The reach step gets a copy-only panel.
+      residentPanel: true,
       ...(buttonLabel ? { advance: { buttonLabel, token: advanceToken(target) } } : {}),
     });
   }
