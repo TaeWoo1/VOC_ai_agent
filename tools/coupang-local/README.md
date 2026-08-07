@@ -98,15 +98,31 @@ tools/coupang-local/wing-probe-preflight.sh
 
 # 3. on PREFLIGHT PASS the operator reads the manifest and grants in one line: "Seated and ready."
 #    then run the probe with the approved scope, exactly as the preflight prints it:
-cd collector && SELLEROPS_WING_PROBE_TARGETS=delete \
+cd collector && SELLEROPS_WING_PROBE_TARGETS=delete SELLEROPS_WING_APPROVED_TARGETS=delete \
   npx tsx src/cli/probe-wing-issuance-selectors.ts -- --i-understand-this-opens-live-coupang-wing
 ```
 
 The scope must travel with the run: a probe whose targets differ from the approved manifest is an
-out-of-scope run (contract §1.3), and because an **empty** `SELLEROPS_WING_PROBE_TARGETS` means *all six*
-targets rather than none, every way of losing it **widens** the run. Two things stop that: the preflight
-writes the **resolved** scope back into the run env (so sourcing it can only reproduce what was displayed),
-and it prints the run command with the scope **inline**. Use the printed command.
+out-of-scope run (contract §1.3). **The live probe now enforces that itself** — it refuses before Chrome
+launches unless both variables are set, non-empty, canonical, and equal:
+
+| Variable | Means |
+|---|---|
+| `SELLEROPS_WING_PROBE_TARGETS` | what this run will measure |
+| `SELLEROPS_WING_APPROVED_TARGETS` | what the displayed manifest said, bound by the preflight |
+
+Two variables rather than one is the point: a single variable cannot detect a run that measures something
+other than what was approved. On the live path an **unset** scope is a refusal, not "all six targets" — the
+old default meant every way of *losing* the scope silently **widened** the run.
+
+What that does and does not buy, stated precisely: a scope that was **dropped, forgotten, or never bound** is
+refused, and so is one that **disagrees** with the approval binding. It does **not** prove the preflight was
+used — a hand-typed pair of equal values passes, because neither variable is tied to the `approvalId`. The
+gate closes accidental widening, not a determined operator, which is why the table above still lists "that the
+operator will use the printed run command" as something the preflight cannot prove.
+
+The manifest side is unchanged and still treats an absent request as the full fixed set — correct there,
+because the manifest then *displays* all six for the operator to approve.
 
 ### What the WING preflight proves (and cannot)
 

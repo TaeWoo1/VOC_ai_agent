@@ -152,7 +152,8 @@ if [ -z "$TREE_DIRTY" ]; then
   run_case "NORMAL         · manifest phase" 0 "COUPANG_WING_SELECTOR_PROBE" "$FIXTURES/normal.env"
   run_case "NORMAL         · READ_ONLY mode" 0 "READ_ONLY" "$FIXTURES/normal.env"
   run_case "NORMAL         · one-line grant offered" 0 "Seated and ready." "$FIXTURES/normal.env"
-  run_case "NORMAL         · run command carries the approved scope" 0 "SELLEROPS_WING_PROBE_TARGETS=delete" "$FIXTURES/normal.env"
+  # Trailing space matters: a bare substring would also match a widened `…=delete,issue`.
+  run_case "NORMAL         · run command carries the approved scope" 0 "SELLEROPS_WING_PROBE_TARGETS=delete " "$FIXTURES/normal.env"
   out="$(SELLEROPS_WING_PROBE_RUN_ENV="$FIXTURES/normal.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1)"
   # The historical defect this guards: a calibration phase must NEVER hand the operator a frontend URL.
   if grep -qF "localhost:5173" <<<"$out" || grep -qF "/connect/" <<<"$out"; then
@@ -165,15 +166,26 @@ if [ -z "$TREE_DIRTY" ]; then
   else
     echo "  FAIL  NORMAL         · manifest probeTargets missing the delete-only scope"; FAILED=1
   fi
-  # The approved scope must be bound to the run env, so sourcing it cannot reproduce a wider set.
-  if grep -qE "^SELLEROPS_WING_PROBE_TARGETS='delete'$" "$FIXTURES/normal.env"; then
-    echo "  PASS  NORMAL         · approved scope written back to the run env"
+  # The approved scope must be bound to the run env, so sourcing it cannot reproduce a wider set — as BOTH
+  # the run scope and the independent approval binding the live probe compares it against.
+  if grep -qE "^SELLEROPS_WING_PROBE_TARGETS='delete'$" "$FIXTURES/normal.env" \
+     && grep -qE "^SELLEROPS_WING_APPROVED_TARGETS='delete'$" "$FIXTURES/normal.env"; then
+    echo "  PASS  NORMAL         · approved scope bound to the run env (run + approval)"
   else
-    echo "  FAIL  NORMAL         · approved scope not bound to the run env"; FAILED=1
+    echo "  FAIL  NORMAL         · approved scope not bound to the run env as both variables"; FAILED=1
   fi
+  # Re-running must not accumulate duplicate assignments of either variable.
+  DUPES="$(grep -cE "^SELLEROPS_WING_(PROBE|APPROVED)_TARGETS=" "$FIXTURES/normal.env")"
+  if [ "$DUPES" = "2" ]; then
+    echo "  PASS  NORMAL         · scope binding is idempotent across re-runs"
+  else
+    echo "  FAIL  NORMAL         · expected exactly 2 scope assignments, found $DUPES"; FAILED=1
+  fi
+  run_case "NORMAL         · run command carries the approval binding" 0 "SELLEROPS_WING_APPROVED_TARGETS=delete " "$FIXTURES/normal.env"
   # …and an empty request must be bound as the RESOLVED full set, not left empty for the run to re-widen.
-  if grep -qE "^SELLEROPS_WING_PROBE_TARGETS='self_dev,vendor_info,call_ip,issue,credentials,delete'$" "$FIXTURES/emptyscope.env"; then
-    echo "  PASS  EMPTY_SCOPE    · resolved full set bound to the run env"
+  if grep -qE "^SELLEROPS_WING_PROBE_TARGETS='self_dev,vendor_info,call_ip,issue,credentials,delete'$" "$FIXTURES/emptyscope.env" \
+     && grep -qE "^SELLEROPS_WING_APPROVED_TARGETS='self_dev,vendor_info,call_ip,issue,credentials,delete'$" "$FIXTURES/emptyscope.env"; then
+    echo "  PASS  EMPTY_SCOPE    · resolved full set bound to the run env (run + approval)"
   else
     echo "  FAIL  EMPTY_SCOPE    · empty scope left unbound in the run env"; FAILED=1
   fi

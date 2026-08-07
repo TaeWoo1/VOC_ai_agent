@@ -21,6 +21,14 @@
  * screened to a host CATEGORY, never logged). `LIVE_DOM_CALIBRATION_PENDING` is always reported — this recorder
  * MEASURES uniqueness so a later live run can flip the calibration; it never flips a `SELECTORS_CALIBRATED` flag.
  *
+ * SCOPE IS GATED, NOT DEFAULTED. A live run refuses unless BOTH `SELLEROPS_WING_PROBE_TARGETS` (what this run
+ * measures) and `SELLEROPS_WING_APPROVED_TARGETS` (what the displayed manifest said, bound by
+ * `tools/coupang-local/wing-probe-preflight.sh`) are explicit, non-empty, canonical, and EQUAL — checked BEFORE
+ * Chrome launches. An unset scope would otherwise widen the run to every target, so every way of losing it
+ * (forgotten export, hand-typed command, dropped run env) would widen past what was approved. A direct manual
+ * invocation carries neither variable and is refused. This closes ACCIDENTAL widening (a dropped or forgotten
+ * scope); it does not prove the preflight was used, since a hand-typed equal pair also passes.
+ *
  * Gating mirrors `run-coupang-wing-issuance-live`: refuses without `--i-understand-this-opens-live-coupang-wing`
  * (`hasCoupangWingRunApproval` — a NAVER grant never opens WING); `screenWingUrl`-fail-closed BEFORE Chrome
  * launches; the recorder NEVER navigates (the seller does — read-only); always `ctx.close()`. `main()` runs ONLY
@@ -43,10 +51,11 @@ import {
 } from "../action-window/coupang-wing-issuance-driver";
 import {
   LIVE_DOM_CALIBRATION_PENDING,
-  resolveWingProbeScope,
+  resolveGatedWingProbeScope,
   resolveWingUrl,
   screenWingUrl,
   type WingObservation,
+  type WingProbeScopeRefusal,
 } from "./coupang-wing-classifier";
 import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from "./live-run-approval";
 
@@ -231,6 +240,27 @@ export async function runWingSelectorRecord(
   };
 }
 
+/**
+ * The exact targets the recorder will measure, given the gate's APPROVED set. Extracted (and exported) so the
+ * one line standing between "approved" and "measured" is directly unit-testable: an in-place edit here — say
+ * back to the full fixed set — is the whole failure this gate exists to prevent, and a source guard cannot
+ * see it. Order-stable; never adds a target the gate did not return.
+ */
+export function scopedRecordTargetsFor(approved: readonly WingRecordTarget[]): WingRecordTarget[] {
+  return WING_RECORD_TARGETS.filter((t) => approved.includes(t));
+}
+
+/**
+ * The operator-facing refusal line. Pure + exported so a test can prove no raw env value reaches it: the only
+ * inputs are the closed refusal enum and the gate's own reason, which reports COUNTS for unrecognized tokens.
+ */
+export function scopeRefusalMessage(refusal: WingProbeScopeRefusal, reason: string): string {
+  return (
+    `Refusing to launch: WING probe scope is not approved (${refusal}). ${reason}. ` +
+    "Prepare the run with tools/coupang-local/wing-probe-preflight.sh and use the command it prints. No browser launched."
+  );
+}
+
 /* ────────────────────────────── sentinels + live wiring (inert on import) ────────────────────────────── */
 
 /** Readiness sentinel filename (cleared at startup + after use). */
@@ -314,6 +344,20 @@ async function main(): Promise<void> {
     return;
   }
 
+  // The per-run TARGET scope, gated BEFORE Chrome launches (it used to be resolved after, inside the run).
+  // A live run never defaults to the full target set: both the requested scope and the preflight-bound
+  // APPROVED scope must be explicit, canonical, and equal, so neither a forgotten export nor a hand-typed
+  // command can widen past what the operator saw. (What a refusal prints is described at the branch below.)
+  const probeScope = resolveGatedWingProbeScope(process.env);
+  if (!probeScope.ok) {
+    // stderr only, and only the closed enum + the gate's own token-free reason — the raw env value may hold
+    // whatever the operator mistyped. stdout stays reserved for the sanitized calibration record.
+    console.error(scopeRefusalMessage(probeScope.refusal, probeScope.reason));
+    process.exitCode = 2;
+    return;
+  }
+  const scopedTargets = scopedRecordTargetsFor(probeScope.targets);
+
   const cfg = loadConfig();
   const runId = mintRunId();
   const readyPath = recordSentinelPathFor(cfg.statusFile);
@@ -351,15 +395,7 @@ async function main(): Promise<void> {
   };
 
   try {
-    // Optional per-run TARGET scope (e.g. `delete` for the delete-selector calibration). Fail closed on an unknown
-    // target — never silently probe the full set when a narrower one was requested. Absent ⇒ the full fixed set.
-    const probeScope = resolveWingProbeScope(process.env.SELLEROPS_WING_PROBE_TARGETS);
-    if (!probeScope.ok) {
-      console.error(`Refusing: SELLEROPS_WING_PROBE_TARGETS is invalid (${probeScope.reason}). No target probed.`);
-      process.exitCode = 2;
-      return;
-    }
-    const scopedTargets = WING_RECORD_TARGETS.filter((t) => probeScope.targets.includes(t));
+    // `scopedTargets` was fixed by the approved-scope gate above, before the browser launched.
     const result = await runWingSelectorRecord(deps, scopedTargets);
     console.error("");
     console.error("WING selector recorder complete. 이제 SellerOps 탭으로 직접 돌아가세요.");

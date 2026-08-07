@@ -349,6 +349,123 @@ export function resolveWingProbeScope(raw: string | undefined | null): WingProbe
   return { ok: true, targets };
 }
 
+/**
+ * The env var carrying the scope the OPERATOR APPROVED — written by the preflight from the prepared manifest,
+ * independently of the scope the run requests. Two separate variables is the point: a single one cannot detect
+ * a run that measures something other than what was displayed.
+ */
+export const WING_APPROVED_TARGETS_ENV = "SELLEROPS_WING_APPROVED_TARGETS" as const;
+/** The env var carrying the scope THIS RUN requests. */
+export const WING_RUN_TARGETS_ENV = "SELLEROPS_WING_PROBE_TARGETS" as const;
+
+/** Closed set of reasons a LIVE probe run is refused before it can measure anything. */
+export const WING_PROBE_SCOPE_REFUSALS = [
+  "MISSING_RUN_SCOPE",
+  "EMPTY_RUN_SCOPE",
+  "UNKNOWN_RUN_TARGET",
+  "MISSING_APPROVED_SCOPE",
+  "EMPTY_APPROVED_SCOPE",
+  "UNKNOWN_APPROVED_TARGET",
+  "SCOPE_APPROVAL_MISMATCH",
+] as const;
+export type WingProbeScopeRefusal = (typeof WING_PROBE_SCOPE_REFUSALS)[number];
+
+export type GatedWingProbeScopeResult =
+  | { ok: true; targets: WingProbeTargetName[] }
+  | { ok: false; refusal: WingProbeScopeRefusal; reason: string };
+
+/** Parse a comma list into canonical order, WITHOUT the "empty means everything" default. */
+function parseCanonicalTargets(raw: string): { ok: true; targets: WingProbeTargetName[] } | { ok: false; unknown: string[] } {
+  const requested = raw.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+  const known = WING_PROBE_TARGET_NAMES as readonly string[];
+  const unknown = requested.filter((s) => !known.includes(s));
+  if (unknown.length > 0) return { ok: false, unknown };
+  return { ok: true, targets: WING_PROBE_TARGET_NAMES.filter((t) => requested.includes(t)) };
+}
+
+/**
+ * The LIVE probe's scope gate — deliberately stricter than {@link resolveWingProbeScope}, which the approval
+ * MANIFEST uses and where an absent request legitimately means "the full fixed set".
+ *
+ * On a live run that default is the wrong way round: an unset variable would silently WIDEN the run past what
+ * the operator approved, and every way of losing the scope (a forgotten export, a hand-typed command, a
+ * dropped run env) widens rather than narrows. So a live run requires BOTH scopes to be explicit, non-empty,
+ * canonical, and EQUAL:
+ *
+ *   - {@link WING_RUN_TARGETS_ENV} — what this run will measure;
+ *   - {@link WING_APPROVED_TARGETS_ENV} — what the displayed manifest said, bound by the preflight.
+ *
+ * What this does and does not prove: a run whose scope was DROPPED, forgotten, or never bound is refused, and
+ * so is one that disagrees with the approval binding. It does NOT prove the operator used the preflight — a
+ * hand-typed pair of equal values passes, because neither variable is bound to the `approvalId`/`runId`. The
+ * gate closes accidental widening, not a deliberate operator. Pure: no I/O, no clock, no process state.
+ */
+export function resolveGatedWingProbeScope(env: Record<string, string | undefined>): GatedWingProbeScopeResult {
+  // OWN properties only, and strings only: an inherited key must not satisfy the gate, and a non-string must
+  // refuse rather than throw on `.trim()`.
+  const own = (k: string): string | undefined => {
+    if (!Object.prototype.hasOwnProperty.call(env, k)) return undefined;
+    const v = (env as Record<string, unknown>)[k];
+    return typeof v === "string" ? v : undefined;
+  };
+  const rawRun = own(WING_RUN_TARGETS_ENV);
+  const rawApproved = own(WING_APPROVED_TARGETS_ENV);
+
+  if (rawRun === undefined) {
+    return {
+      ok: false,
+      refusal: "MISSING_RUN_SCOPE",
+      reason: `${WING_RUN_TARGETS_ENV} is not set — a live probe never defaults to every target; set the approved scope explicitly`,
+    };
+  }
+  if (rawRun.trim().length === 0) {
+    return { ok: false, refusal: "EMPTY_RUN_SCOPE", reason: `${WING_RUN_TARGETS_ENV} is empty — an empty scope is not "all targets" on a live run` };
+  }
+  if (rawApproved === undefined) {
+    return {
+      ok: false,
+      refusal: "MISSING_APPROVED_SCOPE",
+      reason: `${WING_APPROVED_TARGETS_ENV} is not set — run the preflight so the approved scope is bound to this run`,
+    };
+  }
+  if (rawApproved.trim().length === 0) {
+    return { ok: false, refusal: "EMPTY_APPROVED_SCOPE", reason: `${WING_APPROVED_TARGETS_ENV} is empty — re-run the preflight to bind a real approved scope` };
+  }
+
+  // The unrecognized TOKENS are never echoed — they come from an env value the operator may have mistyped a
+  // credential, seller id, or path into, and this reason reaches stderr. A count is enough to act on.
+  const run = parseCanonicalTargets(rawRun);
+  if (!run.ok) {
+    return { ok: false, refusal: "UNKNOWN_RUN_TARGET", reason: `${WING_RUN_TARGETS_ENV} names ${run.unknown.length} unrecognized target(s)` };
+  }
+  if (run.targets.length === 0) {
+    return { ok: false, refusal: "EMPTY_RUN_SCOPE", reason: `${WING_RUN_TARGETS_ENV} names no target` };
+  }
+
+  const approved = parseCanonicalTargets(rawApproved);
+  if (!approved.ok) {
+    return {
+      ok: false,
+      refusal: "UNKNOWN_APPROVED_TARGET",
+      reason: `${WING_APPROVED_TARGETS_ENV} names ${approved.unknown.length} unrecognized target(s)`,
+    };
+  }
+  if (approved.targets.length === 0) {
+    return { ok: false, refusal: "EMPTY_APPROVED_SCOPE", reason: `${WING_APPROVED_TARGETS_ENV} names no target` };
+  }
+
+  // Both are canonical-ordered and de-duplicated here, so this compares SETS, not typing order.
+  const same = run.targets.length === approved.targets.length && run.targets.every((t, i) => t === approved.targets[i]);
+  if (!same) {
+    return {
+      ok: false,
+      refusal: "SCOPE_APPROVAL_MISMATCH",
+      reason: `this run would measure [${run.targets.join(",")}] but the approved scope is [${approved.targets.join(",")}]`,
+    };
+  }
+  return { ok: true, targets: run.targets };
+}
+
 /** Whether `targets` is a valid, NON-EMPTY, canonical-ordered subset of the fixed WING probe target set. */
 export function isCanonicalWingProbeSubset(targets: readonly string[]): boolean {
   if (targets.length === 0) return false;
