@@ -18,6 +18,7 @@ import {
   WING_PROBE_TARGET_NAMES,
   WING_RUN_TARGETS_ENV,
 } from "../../src/cli/coupang-wing-classifier";
+import { scopedRecordTargetsFor, scopeRefusalMessage, WING_RECORD_TARGETS } from "../../src/cli/probe-wing-issuance-selectors";
 
 /** Both env vars set to the same scope — the shape the preflight binds. */
 function approved(scope: string, run: string = scope): Record<string, string | undefined> {
@@ -65,6 +66,34 @@ describe("live WING probe scope gate — fails closed", () => {
     const app = resolveGatedWingProbeScope({ [WING_RUN_TARGETS_ENV]: "delete", [WING_APPROVED_TARGETS_ENV]: "delete,nope" });
     expect(app.ok).toBe(false);
     if (!app.ok) expect(app.refusal).toBe("UNKNOWN_APPROVED_TARGET");
+  });
+
+  it("never echoes the unrecognized TOKEN — the env value may hold whatever was mistyped into it", () => {
+    // A realistic mistype: a credential-shaped string in the scope variable. The refusal must count, not quote.
+    const SENTINEL = "AKIA-SELLERID-88213-SECRETLIKE";
+    for (const env of [
+      { ...approved("delete"), [WING_RUN_TARGETS_ENV]: SENTINEL },
+      { [WING_RUN_TARGETS_ENV]: "delete", [WING_APPROVED_TARGETS_ENV]: SENTINEL },
+    ]) {
+      const r = resolveGatedWingProbeScope(env);
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.reason).not.toContain(SENTINEL);
+        expect(scopeRefusalMessage(r.refusal, r.reason)).not.toContain(SENTINEL);
+        expect(r.reason).toMatch(/1 unrecognized target/);
+      }
+    }
+  });
+
+  it("reads OWN string properties only — an inherited or non-string value cannot satisfy the gate", () => {
+    const inherited = Object.create({ [WING_RUN_TARGETS_ENV]: "delete", [WING_APPROVED_TARGETS_ENV]: "delete" });
+    const r = resolveGatedWingProbeScope(inherited as Record<string, string | undefined>);
+    expect(r.ok).toBe(false);
+
+    // A non-string must REFUSE, not throw on .trim().
+    const nonString = { [WING_RUN_TARGETS_ENV]: 42, [WING_APPROVED_TARGETS_ENV]: "delete" } as unknown as Record<string, string | undefined>;
+    expect(() => resolveGatedWingProbeScope(nonString)).not.toThrow();
+    expect(resolveGatedWingProbeScope(nonString).ok).toBe(false);
   });
 
   it("refuses when the run would measure something other than what was approved", () => {
@@ -154,17 +183,46 @@ describe("the live CLI wires the gate, not the manifest resolver", () => {
     expect(code).not.toContain("resolveWingProbeScope(");
   });
 
-  it("gates the scope BEFORE the browser launches", () => {
-    // Compare CALL SITES, not the import lines (both symbols appear in the import block first).
-    const gateAt = code.indexOf("resolveGatedWingProbeScope(process.env)");
-    const launchAt = code.indexOf("await launchNaverContext(");
-    expect(gateAt).toBeGreaterThan(-1);
-    expect(launchAt).toBeGreaterThan(-1);
-    expect(gateAt).toBeLessThan(launchAt);
+  it("derives the measured set from the GATE's targets, not from the fixed set", () => {
+    // The tested derivation is only worth anything if the CLI actually feeds it the approved targets.
+    expect(code).toContain("scopedRecordTargetsFor(probeScope.targets)");
+    expect(code).toContain("runWingSelectorRecord(deps, scopedTargets)");
   });
 
-  it("prints only the refusal enum, never a raw env value", () => {
-    expect(code).toContain("probeScope.refusal");
-    expect(code).not.toContain("process.env.SELLEROPS_WING_PROBE_TARGETS");
+  it("gates the scope BEFORE the browser launches AND before any side effect", () => {
+    // Compare CALL SITES, not the import lines (both symbols appear in the import block first). The gate must
+    // precede the filesystem/profile work too, not merely the launch — a refusal should touch nothing.
+    const gateAt = code.indexOf("resolveGatedWingProbeScope(process.env)");
+    expect(gateAt).toBeGreaterThan(-1);
+    // Each string must be a CALL inside main(), not a definition earlier in the file.
+    for (const sideEffect of ["loadConfig()", "mkdirSync(", "removeSentinel(readyPath)", "process.on(", "await launchNaverContext("]) {
+      const at = code.indexOf(sideEffect);
+      expect(at, `${sideEffect} should exist`).toBeGreaterThan(-1);
+      expect(gateAt, `gate must precede ${sideEffect}`).toBeLessThan(at);
+    }
+  });
+});
+
+/**
+ * The one line standing between "approved" and "measured". A source guard cannot see an in-place edit here
+ * (widening it back to the full fixed set leaves every text assertion green), so it is tested directly.
+ */
+describe("scopedRecordTargetsFor — the approved set is what gets measured", () => {
+  it("returns exactly the approved set, in canonical order, for every subset", () => {
+    expect(scopedRecordTargetsFor(["delete"])).toEqual(["delete"]);
+    expect(scopedRecordTargetsFor(["credentials", "issue"])).toEqual(["issue", "credentials"]);
+    expect(scopedRecordTargetsFor([...WING_RECORD_TARGETS])).toEqual([...WING_RECORD_TARGETS]);
+  });
+
+  it("never adds a target the gate did not approve", () => {
+    for (const approvedSet of [["delete"], ["issue"], ["self_dev", "delete"], ["issue", "credentials"]] as const) {
+      const measured = scopedRecordTargetsFor([...approvedSet]);
+      expect(measured.length).toBe(approvedSet.length);
+      for (const t of measured) expect(approvedSet).toContain(t);
+    }
+  });
+
+  it("an empty approved set measures nothing (it can never mean 'everything')", () => {
+    expect(scopedRecordTargetsFor([])).toEqual([]);
   });
 });

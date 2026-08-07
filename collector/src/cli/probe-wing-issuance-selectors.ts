@@ -26,7 +26,8 @@
  * `tools/coupang-local/wing-probe-preflight.sh`) are explicit, non-empty, canonical, and EQUAL — checked BEFORE
  * Chrome launches. An unset scope would otherwise widen the run to every target, so every way of losing it
  * (forgotten export, hand-typed command, dropped run env) would widen past what was approved. A direct manual
- * invocation carries neither variable and is refused, so the harness cannot be sidestepped by hand.
+ * invocation carries neither variable and is refused. This closes ACCIDENTAL widening (a dropped or forgotten
+ * scope); it does not prove the preflight was used, since a hand-typed equal pair also passes.
  *
  * Gating mirrors `run-coupang-wing-issuance-live`: refuses without `--i-understand-this-opens-live-coupang-wing`
  * (`hasCoupangWingRunApproval` — a NAVER grant never opens WING); `screenWingUrl`-fail-closed BEFORE Chrome
@@ -238,6 +239,27 @@ export async function runWingSelectorRecord(
   };
 }
 
+/**
+ * The exact targets the recorder will measure, given the gate's APPROVED set. Extracted (and exported) so the
+ * one line standing between "approved" and "measured" is directly unit-testable: an in-place edit here — say
+ * back to the full fixed set — is the whole failure this gate exists to prevent, and a source guard cannot
+ * see it. Order-stable; never adds a target the gate did not return.
+ */
+export function scopedRecordTargetsFor(approved: readonly WingRecordTarget[]): WingRecordTarget[] {
+  return WING_RECORD_TARGETS.filter((t) => approved.includes(t));
+}
+
+/**
+ * The operator-facing refusal line. Pure + exported so a test can prove no raw env value reaches it: the only
+ * inputs are the closed refusal enum and the gate's own reason, which reports COUNTS for unrecognized tokens.
+ */
+export function scopeRefusalMessage(refusal: string, reason: string): string {
+  return (
+    `Refusing to launch: WING probe scope is not approved (${refusal}). ${reason}. ` +
+    "Prepare the run with tools/coupang-local/wing-probe-preflight.sh and use the command it prints. No browser launched."
+  );
+}
+
 /* ────────────────────────────── sentinels + live wiring (inert on import) ────────────────────────────── */
 
 /** Readiness sentinel filename (cleared at startup + after use). */
@@ -327,15 +349,13 @@ async function main(): Promise<void> {
   // command can widen past what the operator saw. Only the refusal enum is printed, never a raw env value.
   const probeScope = resolveGatedWingProbeScope(process.env);
   if (!probeScope.ok) {
-    console.error(
-      `Refusing to launch: WING probe scope is not approved (${probeScope.refusal}). ${probeScope.reason}. ` +
-        "Prepare the run with tools/coupang-local/wing-probe-preflight.sh and use the command it prints. No browser launched.",
-    );
-    log("aw_coupang_selector_record_refused", { refusal: probeScope.refusal }, "warn");
-    process.exit(2);
+    // stderr only, and only the closed enum + the gate's own token-free reason — the raw env value may hold
+    // whatever the operator mistyped. stdout stays reserved for the sanitized calibration record.
+    console.error(scopeRefusalMessage(probeScope.refusal, probeScope.reason));
+    process.exitCode = 2;
     return;
   }
-  const scopedTargets = WING_RECORD_TARGETS.filter((t) => probeScope.targets.includes(t));
+  const scopedTargets = scopedRecordTargetsFor(probeScope.targets);
 
   const cfg = loadConfig();
   const runId = mintRunId();

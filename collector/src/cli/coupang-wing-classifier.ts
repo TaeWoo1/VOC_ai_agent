@@ -395,12 +395,21 @@ function parseCanonicalTargets(raw: string): { ok: true; targets: WingProbeTarge
  *   - {@link WING_RUN_TARGETS_ENV} — what this run will measure;
  *   - {@link WING_APPROVED_TARGETS_ENV} — what the displayed manifest said, bound by the preflight.
  *
- * A direct manual invocation carries neither and is refused, so the harness cannot be bypassed by running the
- * CLI by hand. Pure and order-stable: no I/O, no clock, no process state.
+ * What this does and does not prove: a run whose scope was DROPPED, forgotten, or never bound is refused, and
+ * so is one that disagrees with the approval binding. It does NOT prove the operator used the preflight — a
+ * hand-typed pair of equal values passes, because neither variable is bound to the `approvalId`/`runId`. The
+ * gate closes accidental widening, not a deliberate operator. Pure: no I/O, no clock, no process state.
  */
 export function resolveGatedWingProbeScope(env: Record<string, string | undefined>): GatedWingProbeScopeResult {
-  const rawRun = env[WING_RUN_TARGETS_ENV];
-  const rawApproved = env[WING_APPROVED_TARGETS_ENV];
+  // OWN properties only, and strings only: an inherited key must not satisfy the gate, and a non-string must
+  // refuse rather than throw on `.trim()`.
+  const own = (k: string): string | undefined => {
+    if (!Object.prototype.hasOwnProperty.call(env, k)) return undefined;
+    const v = (env as Record<string, unknown>)[k];
+    return typeof v === "string" ? v : undefined;
+  };
+  const rawRun = own(WING_RUN_TARGETS_ENV);
+  const rawApproved = own(WING_APPROVED_TARGETS_ENV);
 
   if (rawRun === undefined) {
     return {
@@ -423,15 +432,23 @@ export function resolveGatedWingProbeScope(env: Record<string, string | undefine
     return { ok: false, refusal: "EMPTY_APPROVED_SCOPE", reason: `${WING_APPROVED_TARGETS_ENV} is empty — re-run the preflight to bind a real approved scope` };
   }
 
+  // The unrecognized TOKENS are never echoed — they come from an env value the operator may have mistyped a
+  // credential, seller id, or path into, and this reason reaches stderr. A count is enough to act on.
   const run = parseCanonicalTargets(rawRun);
-  if (!run.ok) return { ok: false, refusal: "UNKNOWN_RUN_TARGET", reason: `unknown WING probe target(s): ${run.unknown.join(", ")}` };
+  if (!run.ok) {
+    return { ok: false, refusal: "UNKNOWN_RUN_TARGET", reason: `${WING_RUN_TARGETS_ENV} names ${run.unknown.length} unrecognized target(s)` };
+  }
   if (run.targets.length === 0) {
     return { ok: false, refusal: "EMPTY_RUN_SCOPE", reason: `${WING_RUN_TARGETS_ENV} names no target` };
   }
 
   const approved = parseCanonicalTargets(rawApproved);
   if (!approved.ok) {
-    return { ok: false, refusal: "UNKNOWN_APPROVED_TARGET", reason: `unknown approved WING probe target(s): ${approved.unknown.join(", ")}` };
+    return {
+      ok: false,
+      refusal: "UNKNOWN_APPROVED_TARGET",
+      reason: `${WING_APPROVED_TARGETS_ENV} names ${approved.unknown.length} unrecognized target(s)`,
+    };
   }
   if (approved.targets.length === 0) {
     return { ok: false, refusal: "EMPTY_APPROVED_SCOPE", reason: `${WING_APPROVED_TARGETS_ENV} names no target` };

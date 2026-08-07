@@ -152,7 +152,8 @@ if [ -z "$TREE_DIRTY" ]; then
   run_case "NORMAL         · manifest phase" 0 "COUPANG_WING_SELECTOR_PROBE" "$FIXTURES/normal.env"
   run_case "NORMAL         · READ_ONLY mode" 0 "READ_ONLY" "$FIXTURES/normal.env"
   run_case "NORMAL         · one-line grant offered" 0 "Seated and ready." "$FIXTURES/normal.env"
-  run_case "NORMAL         · run command carries the approved scope" 0 "SELLEROPS_WING_PROBE_TARGETS=delete" "$FIXTURES/normal.env"
+  # Trailing space matters: a bare substring would also match a widened `…=delete,issue`.
+  run_case "NORMAL         · run command carries the approved scope" 0 "SELLEROPS_WING_PROBE_TARGETS=delete " "$FIXTURES/normal.env"
   out="$(SELLEROPS_WING_PROBE_RUN_ENV="$FIXTURES/normal.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1)"
   # The historical defect this guards: a calibration phase must NEVER hand the operator a frontend URL.
   if grep -qF "localhost:5173" <<<"$out" || grep -qF "/connect/" <<<"$out"; then
@@ -180,7 +181,7 @@ if [ -z "$TREE_DIRTY" ]; then
   else
     echo "  FAIL  NORMAL         · expected exactly 2 scope assignments, found $DUPES"; FAILED=1
   fi
-  run_case "NORMAL         · run command carries the approval binding" 0 "SELLEROPS_WING_APPROVED_TARGETS=delete" "$FIXTURES/normal.env"
+  run_case "NORMAL         · run command carries the approval binding" 0 "SELLEROPS_WING_APPROVED_TARGETS=delete " "$FIXTURES/normal.env"
   # …and an empty request must be bound as the RESOLVED full set, not left empty for the run to re-widen.
   if grep -qE "^SELLEROPS_WING_PROBE_TARGETS='self_dev,vendor_info,call_ip,issue,credentials,delete'$" "$FIXTURES/emptyscope.env" \
      && grep -qE "^SELLEROPS_WING_APPROVED_TARGETS='self_dev,vendor_info,call_ip,issue,credentials,delete'$" "$FIXTURES/emptyscope.env"; then

@@ -113,8 +113,13 @@ launches unless both variables are set, non-empty, canonical, and equal:
 
 Two variables rather than one is the point: a single variable cannot detect a run that measures something
 other than what was approved. On the live path an **unset** scope is a refusal, not "all six targets" — the
-old default meant every way of *losing* the scope silently **widened** the run. A direct manual invocation
-carries neither variable and is refused, so the harness cannot be sidestepped by hand.
+old default meant every way of *losing* the scope silently **widened** the run.
+
+What that does and does not buy, stated precisely: a scope that was **dropped, forgotten, or never bound** is
+refused, and so is one that **disagrees** with the approval binding. It does **not** prove the preflight was
+used — a hand-typed pair of equal values passes, because neither variable is tied to the `approvalId`. The
+gate closes accidental widening, not a determined operator, which is why the table above still lists "that the
+operator will use the printed run command" as something the preflight cannot prove.
 
 The manifest side is unchanged and still treats an absent request as the full fixed set — correct there,
 because the manifest then *displays* all six for the operator to approve.
