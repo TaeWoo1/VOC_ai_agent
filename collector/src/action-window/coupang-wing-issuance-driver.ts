@@ -100,6 +100,14 @@ export const WING_DELETION_LABELS: Readonly<Record<WingDeletionTarget, { candida
   delete: { candidateQuery: "button,a,span,div", exactText: "삭제" },
 };
 
+/**
+ * Whether the `delete` (삭제) fixed label is calibrated against the REAL WING DOM. **FALSE** until a live read-only
+ * delete selector probe confirms it resolves uniquely (`matchCount === 1`) on the already-issued page. The
+ * deletion driver and its gated live CLI REFUSE to highlight or enter the delete phase while this is false — the
+ * destructive walk fails closed on calibration, exactly like the manifest gate's `SELECTORS_NOT_CALIBRATED`.
+ */
+export const WING_DELETION_SELECTORS_CALIBRATED = false;
+
 /** Default seated-operator observe window (the seller works in the WING window). Tests override to instant. */
 export const DEFAULT_WING_OBSERVE_TIMEOUT_MS = 10 * 60_000;
 const SETTLE_TIMEOUT_MS = 15_000;

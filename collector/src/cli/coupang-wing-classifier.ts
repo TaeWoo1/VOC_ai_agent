@@ -318,6 +318,44 @@ export function screenWingUrl(url: string): { ok: boolean; reason: WingUrlScreen
   return { ok: true, reason: "ok", urlCategory };
 }
 
+/* ────────────────────────────── WING selector-probe target scope ────────────────────────────── */
+
+/**
+ * The canonical WING selector-probe target names, in fixed order. The single source of truth the approval gate
+ * validates a per-run probe SCOPE against (kept in this pure zero-import leaf so the gate need not import the
+ * heavy recorder). A drift guard test ties this to the recorder's `WING_RECORD_TARGETS` so the two never diverge.
+ * `delete` is the 삭제 control on the already-issued page — probeable read-only alongside `issue` / `credentials`.
+ */
+export const WING_PROBE_TARGET_NAMES = ["self_dev", "vendor_info", "call_ip", "issue", "credentials", "delete"] as const;
+export type WingProbeTargetName = (typeof WING_PROBE_TARGET_NAMES)[number];
+
+export type WingProbeScopeResult = { ok: true; targets: WingProbeTargetName[] } | { ok: false; reason: string };
+
+/**
+ * Resolve a per-run WING selector-probe SCOPE from a comma-separated request, fail-closed. A scoped probe lets one
+ * calibration run measure only the targets it needs (e.g. `delete` alone, for the delete-selector calibration) —
+ * strictly NARROWER than the full fixed set, never wider. Absent/empty ⇒ the full fixed set. Any unknown token
+ * fails closed. The result is in canonical order + de-duplicated, so the manifest and the recorder agree exactly.
+ */
+export function resolveWingProbeScope(raw: string | undefined | null): WingProbeScopeResult {
+  const trimmed = (raw ?? "").trim();
+  if (!trimmed) return { ok: true, targets: [...WING_PROBE_TARGET_NAMES] };
+  const requested = trimmed.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+  if (requested.length === 0) return { ok: true, targets: [...WING_PROBE_TARGET_NAMES] };
+  const known = WING_PROBE_TARGET_NAMES as readonly string[];
+  const unknown = requested.filter((s) => !known.includes(s));
+  if (unknown.length > 0) return { ok: false, reason: `unknown WING probe target(s): ${unknown.join(", ")}` };
+  const targets = WING_PROBE_TARGET_NAMES.filter((t) => requested.includes(t));
+  return { ok: true, targets };
+}
+
+/** Whether `targets` is a valid, NON-EMPTY, canonical-ordered subset of the fixed WING probe target set. */
+export function isCanonicalWingProbeSubset(targets: readonly string[]): boolean {
+  if (targets.length === 0) return false;
+  const canonical = WING_PROBE_TARGET_NAMES.filter((t) => (targets as readonly string[]).includes(t));
+  return canonical.length === targets.length && canonical.every((t, i) => t === targets[i]);
+}
+
 /**
  * The in-page structural sweep, as a **string** IIFE evaluated in the browser (generic HTML only — no WING
  * selectors, no value reads). It MUST be a string, not a passed function: tsx/esbuild instruments named/module

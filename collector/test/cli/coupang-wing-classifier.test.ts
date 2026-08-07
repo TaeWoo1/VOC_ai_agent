@@ -16,6 +16,9 @@ import {
   screenWingUrl,
   toWingSignals,
   wingPageCategoryFromCensus,
+  WING_PROBE_TARGET_NAMES,
+  resolveWingProbeScope,
+  isCanonicalWingProbeSubset,
   type WingStructuralCensus,
 } from "../../src/cli/coupang-wing-classifier";
 
@@ -170,5 +173,34 @@ describe("screenWingUrl — fail-closed pre-launch screen (reason enum + host ca
     expect(resolveWingUrl([], { COUPANG_WING_URL: "https://wing.coupang.com/e" })).toBe("https://wing.coupang.com/e");
     // An off-host arg still fails closed at screenWingUrl (resolve does not validate; screen does).
     expect(screenWingUrl(resolveWingUrl(["--url", "https://evil.example/"], {}))).toMatchObject({ ok: false });
+  });
+});
+
+describe("WING selector-probe target scope", () => {
+  it("absent / empty ⇒ the full fixed target set", () => {
+    expect(resolveWingProbeScope(undefined)).toEqual({ ok: true, targets: [...WING_PROBE_TARGET_NAMES] });
+    expect(resolveWingProbeScope("")).toEqual({ ok: true, targets: [...WING_PROBE_TARGET_NAMES] });
+    expect(resolveWingProbeScope("  ")).toEqual({ ok: true, targets: [...WING_PROBE_TARGET_NAMES] });
+  });
+
+  it("narrows to a canonical, de-duplicated, order-stable subset (delete-only calibration)", () => {
+    expect(resolveWingProbeScope("delete")).toEqual({ ok: true, targets: ["delete"] });
+    // Re-ordered + duplicated request still resolves to canonical order, de-duplicated.
+    expect(resolveWingProbeScope("delete, issue, issue")).toEqual({ ok: true, targets: ["issue", "delete"] });
+  });
+
+  it("fails closed on any unknown target — never silently drops it", () => {
+    const r = resolveWingProbeScope("delete,nope");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain("nope");
+  });
+
+  it("isCanonicalWingProbeSubset accepts only non-empty, canonical-ordered, de-duplicated subsets", () => {
+    expect(isCanonicalWingProbeSubset(["delete"])).toBe(true);
+    expect(isCanonicalWingProbeSubset([...WING_PROBE_TARGET_NAMES])).toBe(true);
+    expect(isCanonicalWingProbeSubset([])).toBe(false);
+    expect(isCanonicalWingProbeSubset(["delete", "delete"])).toBe(false);
+    expect(isCanonicalWingProbeSubset(["issue", "self_dev"])).toBe(false); // wrong order
+    expect(isCanonicalWingProbeSubset(["nope"])).toBe(false);
   });
 });

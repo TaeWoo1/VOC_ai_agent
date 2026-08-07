@@ -19,7 +19,7 @@ import {
   type WingRecordTarget,
   type WingSelectorRecordDeps,
 } from "../../src/cli/probe-wing-issuance-selectors";
-import type { WingObservation } from "../../src/cli/coupang-wing-classifier";
+import { WING_PROBE_TARGET_NAMES, type WingObservation } from "../../src/cli/coupang-wing-classifier";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = resolve(HERE, "../../src/cli/probe-wing-issuance-selectors.ts");
@@ -176,6 +176,18 @@ describe("wing selector recorder — read-only walk", () => {
     expect(issue.role).toBe(WING_TARGET_ROLE.issue);
     expect(issue.label).toBe("발급");
     expect(issue.sig16).toBe("a1b2c3d4e5f60718");
+  });
+
+  it("WING_RECORD_TARGETS stays in lock-step with the gate's canonical WING_PROBE_TARGET_NAMES (drift guard)", () => {
+    expect([...WING_RECORD_TARGETS]).toEqual([...WING_PROBE_TARGET_NAMES]);
+  });
+
+  it("honors a narrowed target scope — a delete-only run probes ONLY the delete control", async () => {
+    const { deps, probed } = fakeDeps();
+    const result = await runWingSelectorRecord(deps, ["delete"]);
+    expect(probed).toEqual(["delete"]);
+    expect(result.targets.map((t) => t.target)).toEqual(["delete"]);
+    expect(result.uniqueCandidates + result.nonUniqueCandidates).toBe(1);
   });
 
   it("measures the 삭제 (delete) control read-only as a button candidate on the already-issued page", async () => {

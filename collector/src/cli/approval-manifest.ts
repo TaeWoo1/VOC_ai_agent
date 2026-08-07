@@ -41,7 +41,7 @@ import { VISUAL_RECON_SCREENS, isCanonicalVisualReconSubset } from "../action-wi
 import { screenApiCenterUrl } from "./observe-api-center";
 // Pure leaf (zero imports): the Coupang WING host screen for the WING selector-probe phase. Screening the
 // entry URL to the WING host (not the NAVER API-center host) is the ONLY channel-specific step in this gate.
-import { screenWingUrl } from "./coupang-wing-classifier";
+import { screenWingUrl, isCanonicalWingProbeSubset, WING_PROBE_TARGET_NAMES } from "./coupang-wing-classifier";
 
 /**
  * The calibration phases. Their driver capabilities differ, so their manifests/approvals are separate:
@@ -370,6 +370,8 @@ export const APPROVAL_PREREQ_CAUSES = [
   // irreversible operator deletion, so its immutable descriptor must be present and exactly the canonical values.
   "MISSING_DESTRUCTIVE_ACTION_CONTRACT",
   "DESTRUCTIVE_ACTION_CONTRACT_MISMATCH",
+  // The WING selector-probe per-run target scope must be a non-empty canonical subset of the fixed target set.
+  "WING_PROBE_TARGETS_MISMATCH",
 ] as const;
 export type ApprovalPrereqCause = (typeof APPROVAL_PREREQ_CAUSES)[number];
 
@@ -562,6 +564,12 @@ export interface ApprovalPrereqInput {
    * only ever REDUCE what is captured.
    */
   requestedCaptureScreens?: readonly string[];
+  /**
+   * WING selector-probe ONLY (ignored otherwise): the per-run TARGET scope — a non-empty canonical subset of the
+   * fixed WING probe target set (e.g. `["delete"]` for the delete-selector calibration). Absent ⇒ the full set.
+   * Validated as a canonical subset, so scoping can only ever REDUCE what the probe measures, never widen it.
+   */
+  requestedProbeTargets?: readonly string[];
   runId: string;
   approvalId: string;
   gitSha: string;
@@ -628,6 +636,8 @@ export interface ApprovalManifest {
   artifactPath: string;
   /** Visual-recon only: the fixed, closed set of screens the redacted-screenshot recon may capture. */
   captureScreens?: readonly string[];
+  /** WING selector probe only: the RESOLVED per-run target scope the read-only probe measures (full set or subset). */
+  probeTargets?: readonly string[];
   /** Visual-recon only: the gitignored sink category for the redacted PNG + sanitized JSON summary. */
   artifactCategory?: string;
   /** Visual-recon only: the screenshot policy — a redacted viewport only. */
@@ -788,6 +798,18 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
     }
   }
 
+  // 7d) The WING selector probe may carry a per-run TARGET scope (e.g. `["delete"]` for the delete-selector
+  // calibration). Absent ⇒ the full fixed set; otherwise it must be a non-empty canonical subset (known targets
+  // only, no re-order, no duplicate) so scoping can only NARROW the probe, never widen it. The manifest declares
+  // (and the recorder honors) exactly this set.
+  let wingProbeTargets: readonly string[] | undefined;
+  if (spec.phase === "COUPANG_WING_SELECTOR_PROBE") {
+    wingProbeTargets = input.requestedProbeTargets ?? [...WING_PROBE_TARGET_NAMES];
+    if (!isCanonicalWingProbeSubset(wingProbeTargets)) {
+      return fail("WING_PROBE_TARGETS_MISMATCH", `WING probe target scope must be a non-empty canonical subset of ${WING_PROBE_TARGET_NAMES.join(", ")}`);
+    }
+  }
+
   // 8) The account binding must be a sanitized DESCRIPTION — never a raw internal id/token. Guarded HERE (the
   // single gate every caller — phased CLI and inline preflight alike — passes through) so no path can echo a
   // raw account/store/org id into the manifest.
@@ -924,6 +946,9 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
           structuralSummaryPolicy: spec.structuralSummaryPolicy,
         }
       : {}),
+    // WING selector probe only: surface the RESOLVED per-run target scope (full set or the narrower subset, e.g.
+    // just `["delete"]`) so the operator approves exactly which targets the read-only probe measures.
+    ...(spec.phase === "COUPANG_WING_SELECTOR_PROBE" ? { probeTargets: wingProbeTargets ?? [...WING_PROBE_TARGET_NAMES] } : {}),
     // FE-run-host issuance proof only: surface the sole run client, the START_RUN cap, the zero write budget,
     // the supporting (never-START_RUN) surface, and the bound FE URL so the operator approves exactly this.
     // Validation above forced every field to equal the immutable FE_LIVE_PROOF_* constants (owner/cap/zero
