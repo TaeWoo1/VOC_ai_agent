@@ -189,6 +189,13 @@ describe("the live CLI wires the gate, not the manifest resolver", () => {
     expect(code).toContain("runWingSelectorRecord(deps, scopedTargets)");
   });
 
+  it("keeps the refusal branch — deleting it must not need the typechecker to be caught", () => {
+    // Without this, removing `if (!probeScope.ok) { … }` is caught only by `tsc` (the discriminated union
+    // stops compiling), so `npm test` alone would stay green on a deleted safety branch.
+    expect(code).toMatch(/if \(!probeScope\.ok\) \{/);
+    expect(code).toContain("process.exitCode = 2");
+  });
+
   it("gates the scope BEFORE the browser launches AND before any side effect", () => {
     // Compare CALL SITES, not the import lines (both symbols appear in the import block first). The gate must
     // precede the filesystem/profile work too, not merely the launch — a refusal should touch nothing.

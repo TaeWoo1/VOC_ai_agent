@@ -55,6 +55,7 @@ import {
   resolveWingUrl,
   screenWingUrl,
   type WingObservation,
+  type WingProbeScopeRefusal,
 } from "./coupang-wing-classifier";
 import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from "./live-run-approval";
 
@@ -253,7 +254,7 @@ export function scopedRecordTargetsFor(approved: readonly WingRecordTarget[]): W
  * The operator-facing refusal line. Pure + exported so a test can prove no raw env value reaches it: the only
  * inputs are the closed refusal enum and the gate's own reason, which reports COUNTS for unrecognized tokens.
  */
-export function scopeRefusalMessage(refusal: string, reason: string): string {
+export function scopeRefusalMessage(refusal: WingProbeScopeRefusal, reason: string): string {
   return (
     `Refusing to launch: WING probe scope is not approved (${refusal}). ${reason}. ` +
     "Prepare the run with tools/coupang-local/wing-probe-preflight.sh and use the command it prints. No browser launched."
@@ -346,7 +347,7 @@ async function main(): Promise<void> {
   // The per-run TARGET scope, gated BEFORE Chrome launches (it used to be resolved after, inside the run).
   // A live run never defaults to the full target set: both the requested scope and the preflight-bound
   // APPROVED scope must be explicit, canonical, and equal, so neither a forgotten export nor a hand-typed
-  // command can widen past what the operator saw. Only the refusal enum is printed, never a raw env value.
+  // command can widen past what the operator saw. (What a refusal prints is described at the branch below.)
   const probeScope = resolveGatedWingProbeScope(process.env);
   if (!probeScope.ok) {
     // stderr only, and only the closed enum + the gate's own token-free reason — the raw env value may hold
