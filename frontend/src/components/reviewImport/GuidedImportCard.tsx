@@ -82,7 +82,13 @@ export interface GuidedImportCardProps {
    * Passed in rather than hooked here so the pairing action can appear ON this card without a second bridge
    * client on the same screen — the entry point the live run found missing entirely (finding 14).
    */
-  pairing?: { phase: string; confirmationCode?: string | null; onConnect: () => void; onRetry: () => void };
+  pairing?: {
+    phase: string;
+    confirmationCode?: string | null;
+    maybeNeedsLocalNetworkAccess?: boolean;
+    onConnect: () => void;
+    onRetry: () => void;
+  };
   /** Called once the seller's chosen period has become a plan, so the page can re-read it. */
   onPlanCreated?: (plan: ReviewImportPlanDetailView) => void;
   /** Called after a launch is authorized, so the page can refresh plan state. */
@@ -380,6 +386,7 @@ export function GuidedImportCard({
         <AgentPairingPanel
           phase={pairing.phase}
           confirmationCode={pairing.confirmationCode ?? null}
+          maybeNeedsLocalNetworkAccess={pairing.maybeNeedsLocalNetworkAccess}
           onConnect={pairing.onConnect}
           onRetry={pairing.onRetry}
         />

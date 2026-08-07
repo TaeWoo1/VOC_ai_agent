@@ -144,6 +144,7 @@ export function ReviewImportPage() {
           pairing={{
             phase: bridge.state.phase,
             confirmationCode: "confirmationCode" in bridge.state ? bridge.state.confirmationCode : null,
+            maybeNeedsLocalNetworkAccess: bridge.state.maybeNeedsLocalNetworkAccess,
             onConnect: bridge.requestPairing,
             onRetry: bridge.retry,
           }}

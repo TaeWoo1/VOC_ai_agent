@@ -67,6 +67,20 @@ describe("bridge client state machine", () => {
     expect(client.getState().maybeNeedsLocalNetworkAccess).toBe(false);
   });
 
+  it("clears a stale LNA hint once health recovers (it must not linger into a reachable state)", async () => {
+    // A mutable route table: unreachable first (LNA hint set on a deployed origin), then the agent comes back.
+    const routes: Record<string, () => { status: number; body: unknown }> = {};
+    const { client } = make({ routes, secureNonLoopback: true });
+    await client.refresh();
+    expect(client.getState()).toMatchObject({ phase: "unreachable", maybeNeedsLocalNetworkAccess: true });
+
+    // Health now succeeds (no token → unpaired). The hint must reset — LNA is provably not the blocker anymore.
+    Object.assign(routes, HEALTH_OK);
+    await client.refresh();
+    expect(client.getState().phase).toBe("unpaired");
+    expect(client.getState().maybeNeedsLocalNetworkAccess).toBe(false);
+  });
+
   it("is unpaired when the agent is reachable but no token is stored", async () => {
     const { client } = make({ routes: HEALTH_OK });
     await client.refresh();

@@ -126,7 +126,11 @@ export class BridgeClient {
   /** Detect the agent and, if we already hold a pairing token, reconnect + restore the snapshot. */
   async refresh(): Promise<void> {
     if (this.stopped) return;
-    this.set({ phase: "connecting" });
+    // Reset the LNA hint on entry: it is set only on a proven-unreachable transition below, so it must not
+    // linger from a prior `unreachable` into a recovery where health has since succeeded (the panel keeps the
+    // `connecting`/`connecting_ws` phases in its searching branch, and a stale-true flag would tell a seller to
+    // allow a permission that is provably not the blocker).
+    this.set({ phase: "connecting", maybeNeedsLocalNetworkAccess: false });
     let present = false;
     try {
       // Minimal presence check only — health carries NO pairing state (slice §E). A stale/revoked token is
@@ -218,7 +222,7 @@ export class BridgeClient {
 
   /** Mint a single-use ticket and open the authenticated WebSocket. */
   private async connectWs(token: string): Promise<void> {
-    this.set({ phase: "connecting_ws" });
+    this.set({ phase: "connecting_ws", maybeNeedsLocalNetworkAccess: false });
     let ticket: string;
     try {
       const res = await this.d.fetchFn(`${this.d.httpBase}/bridge/ws-ticket`, {

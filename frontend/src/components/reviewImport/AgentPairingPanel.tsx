@@ -29,11 +29,24 @@ export interface AgentPairingPanelProps {
   phase: string;
   /** The code the seller must match in the agent's own approval window, when one is pending. */
   confirmationCode?: string | null;
+  /**
+   * `useBridge().state.maybeNeedsLocalNetworkAccess` — true when the page is served from a secure, non-loopback
+   * origin and the bridge is unreachable, which on Chrome is indistinguishable from a blocked Local Network
+   * Access permission. When set, the searching branch adds the "허용해 주세요" hint so a seller whose helper IS
+   * running but is being blocked by the browser permission is told what to do, rather than only "run the helper".
+   */
+  maybeNeedsLocalNetworkAccess?: boolean;
   onConnect: () => void;
   onRetry: () => void;
 }
 
-export function AgentPairingPanel({ phase, confirmationCode, onConnect, onRetry }: AgentPairingPanelProps) {
+export function AgentPairingPanel({
+  phase,
+  confirmationCode,
+  maybeNeedsLocalNetworkAccess,
+  onConnect,
+  onRetry,
+}: AgentPairingPanelProps) {
   // Nothing to offer: either it is connected, or the fix is not pairing (a version mismatch needs an update).
   if (phase === "paired" || phase === "incompatible_version") return null;
 
@@ -63,6 +76,16 @@ export function AgentPairingPanel({ phase, confirmationCode, onConnect, onRetry 
           <p className="text-sm text-ink break-keep">
             내 PC의 SellerOps 도우미를 찾지 못했어요. 도우미를 실행한 뒤 다시 시도해 주세요.
           </p>
+          {/* Helper running but blocked by the browser permission looks identical to "not running" at the socket
+              layer — so when the origin makes that plausible, tell the seller how to allow it. The second
+              sentence covers the likeliest running-but-blocked state: a seller who ALREADY denied the permission,
+              whom the browser will not prompt again — so "when asked" alone would be dead advice. */}
+          {maybeNeedsLocalNetworkAccess ? (
+            <p className="text-sm text-muted break-keep" data-testid="agent-pairing-local-network-hint">
+              브라우저에서 <strong className="text-ink">로컬 네트워크 접근</strong> 권한을 물어보면 허용해 주세요.
+              이미 거부했다면 주소창의 사이트 설정에서 권한을 허용할 수 있어요.
+            </p>
+          ) : null}
           <button
             type="button"
             onClick={onRetry}
