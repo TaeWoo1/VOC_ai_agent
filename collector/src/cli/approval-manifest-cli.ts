@@ -26,6 +26,8 @@ import {
 } from "./approval-manifest";
 import { CALIBRATION_PHASES } from "./approval-manifest";
 import { resolveVisualReconScope } from "../action-window/api-issuance-calibration/visual-recon";
+// The public WING host default for the Coupang WING selector-probe phase (pure leaf; no per-run input needed).
+import { WING_DEFAULT_URL } from "./coupang-wing-classifier";
 
 const COLLECTOR_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -43,8 +45,14 @@ export function runApprovalManifestCli(): number {
   }
   const spec = PHASE_SPECS[phase as CalibrationPhase];
 
-  // The URL is the public base constant unless the operator preset an account deep link; screened in validate.
-  const apiCenterUrl = env("NAVER_API_CENTER_URL") ?? NAVER_API_CENTER_BASE_URL;
+  // The Coupang WING selector probe screens its entry URL to the WING host; every NAVER phase screens to the
+  // API-center host. Like NAVER's public base constant, the WING host defaults to the public WING root (so no
+  // per-run operator input is needed to reach PREPARED) unless the operator preset a deep link; screened in
+  // `validateApprovalPrerequisites`. The raw URL is never printed — only its host category enters the manifest.
+  const isWingSelectorProbe = phase === "COUPANG_WING_SELECTOR_PROBE";
+  const apiCenterUrl = isWingSelectorProbe
+    ? (env("COUPANG_WING_URL") ?? WING_DEFAULT_URL)
+    : (env("NAVER_API_CENTER_URL") ?? NAVER_API_CENTER_BASE_URL);
 
   // Dry-validate the run command: the exact CLI entrypoint file must exist.
   const cliExists = existsSync(resolve(COLLECTOR_ROOT, spec.cli));
@@ -74,7 +82,9 @@ export function runApprovalManifestCli(): number {
     : isStructureObs
       ? (env("SELLEROPS_CALIBRATION_ARTIFACT") ?? `.calibration/api-center-${env("WALKTHROUGH_RUN_ID") ?? "unknown"}.json`)
       : undefined;
-  const defaultOperation = isVisualRecon
+  const defaultOperation = isWingSelectorProbe
+    ? "WING open-API read-only selector probe"
+    : isVisualRecon
     ? "API Center redacted visual recon"
     : isStructureObs
       ? "API Center structure observation"
@@ -83,7 +93,9 @@ export function runApprovalManifestCli(): number {
         : isFeLiveProof
           ? "existing-app guided issuance tutorial — FE-run-host READ-only live proof (open_app→api_group→credentials→return)"
           : "API issuance highlight proof (new-app or existing-app)";
-  const defaultMaxActions = isVisualRecon
+  const defaultMaxActions = isWingSelectorProbe
+    ? "1 read-only WING selector probe session"
+    : isVisualRecon
     ? "1 redacted visual recon session"
     : isStructureObs
       ? "1 calibration session"
@@ -111,8 +123,10 @@ export function runApprovalManifestCli(): number {
 
   const input: ApprovalPrereqInput = {
     phase,
-    channel: env("SELLEROPS_APPROVAL_CHANNEL") ?? "NAVER",
-    accountBinding: env("SELLEROPS_APPROVAL_ACCOUNT") ?? "operator-owned test store",
+    channel: env("SELLEROPS_APPROVAL_CHANNEL") ?? (isWingSelectorProbe ? "COUPANG" : "NAVER"),
+    accountBinding:
+      env("SELLEROPS_APPROVAL_ACCOUNT") ??
+      (isWingSelectorProbe ? "operator-owned Coupang WING test account" : "operator-owned test store"),
     mode: spec.mode,
     apiCenterUrl,
     // Confirm the EXACT cli/driver from the spec — but only if the entrypoint really exists on disk.
@@ -127,7 +141,7 @@ export function runApprovalManifestCli(): number {
     approvalId: env("WALKTHROUGH_APPROVAL_ID") ?? "unknown",
     gitSha: env("WALKTHROUGH_GIT_COMMIT") ?? "unknown",
     maxActions: env("SELLEROPS_APPROVAL_MAX") ?? defaultMaxActions,
-    surface: env("SELLEROPS_APPROVAL_SURFACE") ?? "Commerce API Center",
+    surface: env("SELLEROPS_APPROVAL_SURFACE") ?? (isWingSelectorProbe ? "Coupang WING Open API" : "Commerce API Center"),
     operation: env("SELLEROPS_APPROVAL_OPERATION") ?? defaultOperation,
     startRunContract,
   };
