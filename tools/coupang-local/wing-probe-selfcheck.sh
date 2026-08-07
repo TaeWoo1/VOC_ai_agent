@@ -102,6 +102,19 @@ sed -i '' "s/PLACEHOLDER/$CUR_GIT/" "$FIXTURES/nostamp.env" 2>/dev/null || sed -
 run_case "AMBIENT_STAMP  (caller's env cannot supply a missing key)" nonzero "bootstrap timestamp missing or malformed" \
   "$FIXTURES/nostamp.env" "WING_PROBE_BOOTSTRAP_EPOCH=$NOW"
 
+# A line-wise `grep` guard would accept this (its SECOND line is a valid epoch) and then abort the arithmetic,
+# unwinding the enclosing `if` and deleting the freshness check with no verdict printed.
+cat > "$FIXTURES/multiline.env" <<ENV
+WALKTHROUGH_RUN_ID='wt-selfcheck10'
+WALKTHROUGH_APPROVAL_ID='apr-selfcheck10'
+WALKTHROUGH_GIT_COMMIT='$CUR_GIT'
+WING_PROBE_BOOTSTRAP_EPOCH='junk
+$NOW'
+SELLEROPS_APPROVAL_PHASE='COUPANG_WING_SELECTOR_PROBE'
+SELLEROPS_WING_PROBE_TARGETS='delete'
+ENV
+run_case "MULTILINE_STAMP (newline cannot slip past the shape check)" nonzero "bootstrap timestamp missing or malformed" "$FIXTURES/multiline.env"
+
 write_env "$FIXTURES/wrongphase.env" "$CUR_GIT" "COUPANG_WING_KEY_DELETION" "delete" "wt-selfcheck01" "apr-selfcheck01"
 run_case "WRONG_PHASE    (destructive phase refused here)" nonzero "phase must be COUPANG_WING_SELECTOR_PROBE" "$FIXTURES/wrongphase.env"
 
@@ -190,6 +203,19 @@ if [ -z "$TREE_DIRTY" ]; then
 
   # The one caveat the operator most needs before granting must be on the summary line, not only in the JSON.
   run_case "NORMAL         · selectorsCalibrated disclosed" 0 "selectors calibrated: false" "$FIXTURES/normal.env"
+
+  # The prose the operator reads must come from the phase spec, never from the surrounding shell — an ambient
+  # override changes no enforced capability, but it can describe the run as something it is not.
+  out="$(env SELLEROPS_APPROVAL_OPERATION="AMBIENT-PROSE-MUST-NOT-APPEAR" \
+             SELLEROPS_APPROVAL_MAX="AMBIENT-MAX-MUST-NOT-APPEAR" \
+             SELLEROPS_APPROVAL_ACCOUNT="AMBIENT-ACCOUNT-MUST-NOT-APPEAR" \
+             SELLEROPS_WING_PROBE_RUN_ENV="$FIXTURES/normal.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" \
+             bash "$PREFLIGHT" 2>&1)"
+  if grep -qF "MUST-NOT-APPEAR" <<<"$out"; then
+    echo "  FAIL  AMBIENT_PROSE  · shell env reached the displayed manifest"; FAILED=1
+  else
+    echo "  PASS  AMBIENT_PROSE  · manifest prose comes from the phase spec, not the shell"
+  fi
 else
   run_case "DIRTY_TREE     (uncommitted change refused)" nonzero "working tree is dirty" "$FIXTURES/normal.env"
   echo "  SKIP  NORMAL / GIT_DIR_HIJACK / UNTRACKED_HIDE — the working tree is dirty, which the preflight"

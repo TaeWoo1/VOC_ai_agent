@@ -69,9 +69,17 @@ if [ ! -f "$RUN_ENV" ]; then
   exit 1
 fi
 # Sourcing only OVERRIDES what the file names, so a run env missing a key would let the caller's ambient
-# value stand in for a bootstrapped one. Clear the identity variables first: they must come from the file.
+# value stand in for a bootstrapped one. Clear every variable that feeds the manifest first.
+#
+# That includes the manifest's free-text fields. They change no enforced capability — phase, cli, driver,
+# mode, allowedActions, probeTargets and selectorsCalibrated are all derived from the phase spec — but they
+# ARE the prose the operator reads before saying "Seated and ready.", and an ambient
+# SELLEROPS_APPROVAL_OPERATION could describe the run as something it is not. Everything displayed comes
+# from the spec or from this run's env file; nothing from the surrounding shell.
 unset WALKTHROUGH_RUN_ID WALKTHROUGH_APPROVAL_ID WALKTHROUGH_GIT_COMMIT WING_PROBE_BOOTSTRAP_EPOCH \
-      SELLEROPS_APPROVAL_PHASE SELLEROPS_WING_PROBE_TARGETS
+      SELLEROPS_APPROVAL_PHASE SELLEROPS_WING_PROBE_TARGETS \
+      SELLEROPS_APPROVAL_OPERATION SELLEROPS_APPROVAL_MAX SELLEROPS_APPROVAL_ACCOUNT \
+      SELLEROPS_APPROVAL_SURFACE SELLEROPS_APPROVAL_CHANNEL
 # shellcheck disable=SC1090
 set -a; . "$RUN_ENV"; set +a
 
@@ -99,12 +107,21 @@ done
 
 # 2. The identity must be FRESH. A grant is single-use and process-lifetime (contract §1.5/§2): a run env
 #    left behind by an earlier session must not silently re-authorize a new one.
-# The shape is pinned to a plausible 10–11 digit epoch, NOT a loose ^[0-9]+$. A leading zero would make bash
-# parse the stamp as octal, and an invalid octal literal is an arithmetic ERROR that unwinds this whole `if` —
-# skipping both branches, leaving FAILED untouched, and silently deleting the freshness check.
-if ! printf '%s' "$BOOTSTRAP_EPOCH" | grep -qE '^[1-9][0-9]{9,10}$'; then
+# `case`, not `grep -E`: grep matches LINE-wise, so a multi-line stamp whose second line is a valid epoch
+# satisfies an anchored pattern and then puts a non-numeric token into the arithmetic below. An arithmetic
+# ERROR unwinds this whole `if` — skipping both branches, leaving FAILED untouched, and silently deleting the
+# freshness check. The leading-zero rejection matters for the same reason: bash would parse it as octal.
+EPOCH_OK=1
+case "$BOOTSTRAP_EPOCH" in
+  ""|*[!0-9]*|0*) EPOCH_OK=0 ;;
+esac
+if [ "$EPOCH_OK" = "1" ] && { [ "${#BOOTSTRAP_EPOCH}" -lt 10 ] || [ "${#BOOTSTRAP_EPOCH}" -gt 11 ]; }; then
+  EPOCH_OK=0
+fi
+if [ "$EPOCH_OK" != "1" ]; then
   fail "bootstrap timestamp missing or malformed in the run env — re-run wing-probe-bootstrap.sh"
 else
+  # Digits only, 10–11 of them, no leading zero: the arithmetic below cannot error.
   AGE=$(( $(date +%s) - 10#$BOOTSTRAP_EPOCH ))
   if [ "$AGE" -lt 0 ] || [ "$AGE" -gt "$IDENTITY_TTL_SECONDS" ]; then
     fail "run identity is stale (${AGE}s old, max ${IDENTITY_TTL_SECONDS}s) — re-bootstrap for a fresh approval id"
@@ -256,9 +273,14 @@ lines = [l for l in open(path).read().splitlines() if not l.startswith("SELLEROP
 quoted = "'\''" + resolved.replace("'\''", "'\''\"'\''\"'\''") + "'\''"
 lines.append("SELLEROPS_WING_PROBE_TARGETS=" + quoted)
 fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)))
-with os.fdopen(fd, "w") as f:
-    f.write("\n".join(lines) + "\n")
-os.replace(tmp, path)' "$RUN_ENV" "$M_TARGETS"; then
+try:
+    with os.fdopen(fd, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    os.replace(tmp, path)
+except BaseException:
+    if os.path.exists(tmp):
+        os.unlink(tmp)
+    raise' "$RUN_ENV" "$M_TARGETS" 2>/dev/null; then
   # This is the binding, not a convenience: without it, sourcing the run env can still reproduce a wider
   # scope than the one displayed. Refuse rather than pass with the binding silently skipped.
   echo "PREFLIGHT FAIL — could not bind the approved scope to $RUN_ENV; refusing to present a manifest whose scope the run may not honor."
