@@ -21,7 +21,29 @@ function engine() {
   return new CoupangIssuanceEngine({ runId: "run_c", channelCode: "coupang" }, { clock: makeCoupangIssuanceClock() });
 }
 
-/** Drive one checkpoint: 다음 (REQUEST_STEP_RECHECK) → guide → locate → highlight → rest at the next barrier. */
+const BARRIER: Record<string, string> = {
+  self_dev: "guiding_self_dev",
+  vendor_info: "guiding_vendor_info",
+  call_ip: "guiding_call_ip",
+  issue: "checkpoint_before_issue",
+  credentials: "guiding_copy_keys",
+  return: "return_to_sellerops",
+};
+
+/** Drive one WING-resident checkpoint: locate → highlight (arms an observation + rests at THIS barrier) → the
+ * seller's observed on-page advance press returns the next guide (or CLEANUP for the final return). This is the
+ * PRIMARY path — no FE 다음 involved. The stage only advances to the NEXT barrier once that control is highlighted
+ * (the next driveCheckpoint call), mirroring how the session drives the returned `{ guide }`. */
+function driveCheckpoint(eng: CoupangIssuanceEngine, target: string, nextTarget: string | null): void {
+  eng.onTargetLocated(target as never, { count: 1, sig: SIG[target]! });
+  // A same-page checkpoint arms a WING-resident observation (its on-page advance button), not a rest-for-FE-다음.
+  expect(eng.onTargetHighlighted(target as never, { count: 1, sig: SIG[target]! })).toEqual({ observe: target });
+  expect(eng.currentStage()).toBe(BARRIER[target]);
+  const out = eng.onUserActionObserved(target as never);
+  expect(out).toEqual(nextTarget ? { guide: nextTarget } : "CLEANUP");
+}
+
+/** Drive one checkpoint via the FALLBACK path (FE 다음 = REQUEST_STEP_RECHECK) → guide → locate → highlight. */
 function pressNext(eng: CoupangIssuanceEngine, nextTarget: string | null): void {
   const out = eng.command({ type: "REQUEST_STEP_RECHECK", expectedRevision: eng.view().revision });
   if (!nextTarget) return; // completing checkpoint (return → complete)
@@ -31,40 +53,46 @@ function pressNext(eng: CoupangIssuanceEngine, nextTarget: string | null): void 
 }
 
 describe("coupang issuance engine — the linear walkthrough from the WING home", () => {
-  it("reach_open_api transition → verify → self_dev → vendor_info → call_ip → issue → credentials → return → complete", () => {
+  it("reach_open_api transition → verify → self_dev → … → return → complete, advancing each checkpoint WING-RESIDENT", () => {
     const eng = engine();
     expect(eng.command({ type: "START_RUN", expectedRevision: 0 })).toEqual({ ok: true, idempotent: false, effect: "PROBE" });
 
     // WING home → guide the reach_open_api transition-observe (step 1).
     expect(eng.onSurfaceProbed({ ok: true, pageCategory: "wing_home" })).toEqual({ guide: "reach_open_api" });
     eng.onTargetLocated("reach_open_api", { count: 1, sig: SIG.reach_open_api! });
-    // reach_open_api is a transition-observe target (NOT a checkpoint), so highlight arms an observation.
+    // reach_open_api is a transition-observe target: highlight arms an observation of the seller's navigation.
     expect(eng.onTargetHighlighted("reach_open_api", { count: 1, sig: SIG.reach_open_api! })).toEqual({ observe: "reach_open_api" });
     expect(eng.currentStage()).toBe("reaching_open_api");
 
     // The seller navigated off the home; the engine re-probes to VERIFY the issuance page before step 1 completes.
     expect(eng.onUserActionObserved("reach_open_api")).toBe("VERIFY_REACH");
     expect(eng.onReachVerified({ ok: true, pageCategory: "open_api_issuance" })).toEqual({ guide: "self_dev" });
-    eng.onTargetLocated("self_dev", { count: 1, sig: SIG.self_dev! });
-    // self_dev is a same-page checkpoint — highlight RESTS (no observe), advance on 다음.
-    expect(eng.onTargetHighlighted("self_dev", { count: 1, sig: SIG.self_dev! })).toBe("NONE");
-    expect(eng.currentStage()).toBe("guiding_self_dev");
 
-    pressNext(eng, "vendor_info");
-    expect(eng.currentStage()).toBe("guiding_vendor_info");
-    pressNext(eng, "call_ip");
-    expect(eng.currentStage()).toBe("guiding_call_ip");
-    pressNext(eng, "issue");
-    expect(eng.currentStage()).toBe("checkpoint_before_issue");
-    pressNext(eng, "credentials");
-    expect(eng.currentStage()).toBe("guiding_copy_keys");
-    pressNext(eng, "return");
-    expect(eng.currentStage()).toBe("return_to_sellerops");
-    // The final 다음 completes the return checkpoint and finishes the guidance.
-    expect(eng.command({ type: "REQUEST_STEP_RECHECK", expectedRevision: eng.view().revision })).toEqual({ ok: true, idempotent: false, effect: "CLEANUP" });
+    // Every same-page checkpoint now advances ON THE WING PAGE — the seller presses its on-page advance button and
+    // the driver reports it (onUserActionObserved). No REQUEST_STEP_RECHECK from the FE is needed. Each call
+    // asserts the run rested at that step's barrier before the observed press moved it on.
+    driveCheckpoint(eng, "self_dev", "vendor_info");
+    driveCheckpoint(eng, "vendor_info", "call_ip");
+    driveCheckpoint(eng, "call_ip", "issue");
+    driveCheckpoint(eng, "issue", "credentials");
+    driveCheckpoint(eng, "credentials", "return");
+    // The return checkpoint's observed on-page press completes the guidance.
+    driveCheckpoint(eng, "return", null);
     expect(eng.currentStage()).toBe("guidance_complete");
     expect(eng.view().status).toBe("COMPLETED");
     expect(eng.view().progress).toEqual({ completedSteps: 7, totalSteps: 7 });
+  });
+
+  it("a FE REQUEST_STEP_RECHECK still advances a checkpoint as a fallback/recovery (never the primary driver)", () => {
+    const eng = engine();
+    eng.command({ type: "START_RUN", expectedRevision: 0 });
+    eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" }); // → guide self_dev
+    eng.onTargetLocated("self_dev", { count: 1, sig: SIG.self_dev! });
+    eng.onTargetHighlighted("self_dev", { count: 1, sig: SIG.self_dev! });
+    expect(eng.currentStage()).toBe("guiding_self_dev");
+    // The fallback path (FE 다음) still completes the checkpoint and guides the next control.
+    pressNext(eng, "vendor_info");
+    expect(eng.currentStage()).toBe("guiding_vendor_info");
   });
 
   it("skips the reach transition when the seller is ALREADY on the open-API issuance page (step 1 auto-completes)", () => {
@@ -90,7 +118,7 @@ describe("coupang issuance engine — the 발급 (issue) HUMAN CHECKPOINT never 
     return eng;
   }
 
-  it("rests at checkpoint_before_issue with the 발급 button highlighted (opaque 16-hex ref), arming NO observer", () => {
+  it("rests at checkpoint_before_issue with the 발급 button highlighted (opaque 16-hex ref) and does not auto-advance", () => {
     const eng = toIssueBarrier();
     expect(eng.currentStage()).toBe("checkpoint_before_issue");
     expect(eng.view().status).toBe("WAITING_FOR_HUMAN");
@@ -98,17 +126,24 @@ describe("coupang issuance engine — the 발급 (issue) HUMAN CHECKPOINT never 
     expect(eng.view().currentStep?.copyParams?.targetKind).toBe("issue");
     const ref = eng.events().find((e) => e.type === "TARGET_HIGHLIGHTED" && e.payload.stepId === "aw.coupang_issuance_issue_checkpoint")!.payload.targetRef;
     expect(ref).toMatch(/^[0-9a-f]{16}$/);
+    // The checkpoint RESTS: no completion is emitted for the ISSUE step until the seller reports pressing 발급. The
+    // driver enforces the human checkpoint by not observing an advance until the seller presses the on-page
+    // button — the engine never presses 발급 itself and there is no auto-advance timer here.
+    const completedStepIds = eng.events().filter((e) => e.type === "STEP_COMPLETED").map((e) => e.payload.stepId);
+    expect(completedStepIds).not.toContain("aw.coupang_issuance_issue_checkpoint");
   });
 
-  it("an observed action on `issue` is a NO-OP — the checkpoint completes ONLY on the operator's 다음", () => {
+  it("advances the 발급 checkpoint ONLY on the seller's observed on-page press (they issue the key themselves)", () => {
     const eng = toIssueBarrier();
-    // Even if something reported a WING action on issue, the engine never auto-completes it (checkpoints advance
-    // only on 다음). The seller presses 발급 themselves; the runtime never clicks it.
-    expect(eng.onUserActionObserved("issue")).toBe("NONE");
-    expect(eng.currentStage()).toBe("checkpoint_before_issue");
-    // 다음 advances it to the credentials checkpoint.
-    const out = eng.command({ type: "REQUEST_STEP_RECHECK", expectedRevision: eng.view().revision });
-    expect(out).toEqual({ ok: true, idempotent: false, effect: { guide: "credentials" } });
+    // The seller pressed the WING-resident '발급 완료 · 다음' button AFTER issuing the key in their own window; the
+    // driver reports that observed press and the engine advances to the copy-keys checkpoint. SellerOps still
+    // never clicks 발급 and reads no credential value — it only reacts to what the seller reports doing.
+    expect(eng.onUserActionObserved("issue")).toEqual({ guide: "credentials" });
+    // The issue step completed and the run is now guiding the copy-keys checkpoint (its stage advances once the
+    // credentials control is highlighted — here we assert the target moved and the step completed).
+    expect(eng.activeTarget()).toBe("credentials");
+    const completed = eng.events().filter((e) => e.type === "STEP_COMPLETED").map((e) => e.payload.stepId);
+    expect(completed).toContain("aw.coupang_issuance_issue_checkpoint");
   });
 });
 

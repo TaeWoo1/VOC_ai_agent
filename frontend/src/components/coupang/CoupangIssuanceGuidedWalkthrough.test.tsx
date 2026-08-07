@@ -90,41 +90,15 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("CoupangIssuanceGuidedWalkthrough", () => {
-  it("renders the AW timeline + controls from a fixture issuance run view (step copy by key)", () => {
+  it("renders the WING-RESIDENT status + progress from a fixture run view — the FE does not mirror or drive the steps", () => {
     render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} run={issuanceRun()} onCommand={vi.fn()} />);
-    expect(screen.getByRole("region", { name: "진행 단계" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "가능한 동작" })).toBeInTheDocument();
-    // Step 2's copy resolved from its key (FE-owned), not runtime prose.
-    expect(screen.getByText("판매자정보 › 오픈API 키 발급으로 이동")).toBeInTheDocument();
-    expect(screen.getByText("1 / 8")).toBeInTheDocument();
-  });
-
-  it("renders the FULL per-step instruction under the timeline (self-sufficient — no need to decode the highlight)", () => {
-    // copyKeys step → its complete instruction stating SellerOps reads none of the values.
-    render(
-      <CoupangIssuanceGuidedWalkthrough
-        onIssued={vi.fn()}
-        run={issuanceRun({
-          currentStep: { stepId: "aw.coupang_copy_keys", stepNumber: 7, totalSteps: 8, copyKey: "actionWindow.coupangIssuance.copyKeys", status: "AWAITING_USER" },
-        })}
-        onCommand={vi.fn()}
-      />,
-    );
-    expect(screen.getByText(/SellerOps는 이 값들을 읽지 않습니다/)).toBeInTheDocument();
-  });
-
-  it("the issue-checkpoint step detail states the seller clicks 발급 (the agent never issues)", () => {
-    render(
-      <CoupangIssuanceGuidedWalkthrough
-        onIssued={vi.fn()}
-        run={issuanceRun({
-          currentStep: { stepId: "aw.coupang_issue", stepNumber: 6, totalSteps: 8, copyKey: "actionWindow.coupangIssuance.issueCheckpoint", status: "AWAITING_USER" },
-        })}
-        onCommand={vi.fn()}
-      />,
-    );
-    expect(screen.getByText(/발급 버튼은 반드시 직접 눌러 주세요/)).toBeInTheDocument();
-    expect(screen.getByText(/SellerOps는 대신 발급하지 않습니다/)).toBeInTheDocument();
+    // A status surface (not a step-by-step timeline): the seller follows the WING overlay; this shows progress only.
+    expect(screen.getByText("쿠팡(윙) 창에서 화면 안내를 따라 진행하세요")).toBeInTheDocument();
+    expect(screen.getByText("1 / 8 단계 완료")).toBeInTheDocument();
+    // No per-step "다음/확인 완료" on a healthy barrier — advance happens ON the WING page (the overlay button).
+    expect(screen.queryByRole("button", { name: "확인 완료" })).toBeNull();
+    // The FE no longer renders the per-step instruction (it now lives on the WING overlay).
+    expect(screen.queryByText("판매자정보 › 오픈API 키 발급으로 이동")).toBeNull();
   });
 
   it("shows a persistent call-IP advisory with the advertised IP (guided path, not only the text checklist)", () => {
@@ -147,17 +121,23 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
     expect(screen.queryByText(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)).toBeNull();
   });
 
-  it("shows the abort (CANCEL_RUN) and recheck controls when allowed", () => {
+  it("a healthy barrier surfaces ONLY the escape (취소) — never a per-step 다음/확인 완료", () => {
     render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} run={issuanceRun()} onCommand={vi.fn()} />);
     expect(screen.getByRole("button", { name: "취소" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "확인 완료" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "확인 완료" })).toBeNull();
   });
 
-  it("commands come ONLY from allowedCommands — a view without CANCEL_RUN shows no abort", () => {
+  it("a recoverable blocker adds the recovery control (확인 완료) alongside 취소 — recovery is the FE's job", () => {
+    render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} run={blocked("LOGIN_REQUIRED")} onCommand={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "확인 완료" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "취소" })).toBeInTheDocument();
+  });
+
+  it("commands come ONLY from allowedCommands — a blocked view without CANCEL_RUN shows recovery but no abort", () => {
     render(
       <CoupangIssuanceGuidedWalkthrough
         onIssued={vi.fn()}
-        run={issuanceRun({ allowedCommands: ["REQUEST_STEP_RECHECK"] })}
+        run={issuanceRun({ blocker: { code: "LOGIN_REQUIRED", recoverable: true }, allowedCommands: ["REQUEST_STEP_RECHECK"] })}
         onCommand={vi.fn()}
       />,
     );
@@ -165,9 +145,9 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
     expect(screen.getByRole("button", { name: "확인 완료" })).toBeInTheDocument();
   });
 
-  it("forwards a command from the control panel to onCommand (recheck reports intent, never completes)", async () => {
+  it("forwards the recovery command from a blocker to onCommand (recheck reports intent, never completes)", async () => {
     const onCommand = vi.fn();
-    render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} run={issuanceRun()} onCommand={onCommand} />);
+    render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} run={blocked("LOGIN_REQUIRED")} onCommand={onCommand} />);
     await userEvent.click(screen.getByRole("button", { name: "확인 완료" }));
     expect(onCommand).toHaveBeenCalledWith("REQUEST_STEP_RECHECK");
   });
@@ -292,14 +272,18 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
       expect(host.ensureCalls()).toBe(0);
     });
 
-    it("renders the AW surfaces from a host-published view, and forwards commands to the host", async () => {
+    it("renders the WING-resident status from a host-published view, and forwards a recovery command at a blocker", async () => {
       const host = fakeHost();
       render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} />);
       start();
       // After start: paired, no run yet → the preparing line.
       expect(screen.getByText("도우미가 연결됐어요. 쿠팡 윙 안내를 준비하고 있어요.")).toBeInTheDocument();
       act(() => host.publish(issuanceRun()));
-      expect(screen.getByText("판매자정보 › 오픈API 키 발급으로 이동")).toBeInTheDocument();
+      // A healthy barrier shows the WING-resident status (not a step-by-step timeline / 다음).
+      expect(screen.getByText("쿠팡(윙) 창에서 화면 안내를 따라 진행하세요")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "확인 완료" })).toBeNull();
+      // At a recoverable blocker the recovery control forwards REQUEST_STEP_RECHECK to the host.
+      act(() => host.publish(blocked("LOGIN_REQUIRED")));
       await userEvent.click(screen.getByRole("button", { name: "확인 완료" }));
       expect(host.sent).toContain("REQUEST_STEP_RECHECK");
     });

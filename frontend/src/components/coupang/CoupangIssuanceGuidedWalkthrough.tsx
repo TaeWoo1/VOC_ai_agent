@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useBridge } from "../../hooks/useBridge";
 import type { ActionWindowRunView, CommandType } from "../../lib/actionWindow/contract";
-import { blockerView, issuanceStepDetail } from "../../lib/actionWindow/copy";
-import { OperationRunTimeline } from "../actionWindow/OperationRunTimeline";
+import { blockerView } from "../../lib/actionWindow/copy";
 import { ActionWindowControlPanel } from "../actionWindow/ActionWindowControlPanel";
 import { BlockerNotice } from "../actionWindow/BlockerNotice";
 import { AgentPairingPanel } from "../reviewImport/AgentPairingPanel";
@@ -135,11 +134,15 @@ export function CoupangIssuanceGuidedWalkthrough({
   // it never appears.
   const offerTextFallback = cannotGuide || agentUnreachable;
 
-  // The commands this walkthrough surfaces from the run's `allowedCommands` — the same curation the NAVER
-  // sibling uses. A barrier's raw `allowedCommands` also includes PAUSE/RESUME, SET_GUIDANCE_ENABLED,
-  // FIND_CURRENT_STEP, and SWITCH_TO_MANUAL; only these two render (SWITCH_TO_MANUAL is reached only via the
-  // failure-only text fallback, which aborts the run cleanly before advancing to text).
-  const OFFERED_COMMANDS: readonly CommandType[] = ["REQUEST_STEP_RECHECK", "CANCEL_RUN"];
+  // WING-RESIDENT walk: the FE is NOT the per-step controller. Step advance happens ON the WING page (the
+  // overlay's own "다음" button), so this screen surfaces NO per-step recheck control during a healthy barrier —
+  // only an escape (CANCEL_RUN). When the run is PARKED on a recoverable blocker, recovery is the FE's job, so it
+  // additionally surfaces REQUEST_STEP_RECHECK ("다시 확인" — re-probe/re-guide; it never completes a step). This
+  // is the one place `REQUEST_STEP_RECHECK` is offered, and only for recovery.
+  const isBlocked = !!effectiveRun?.blocker;
+  const OFFERED_COMMANDS: readonly CommandType[] = isBlocked
+    ? ["REQUEST_STEP_RECHECK", "CANCEL_RUN"]
+    : ["CANCEL_RUN"];
   const controlExclude = effectiveRun
     ? effectiveRun.allowedCommands.filter((c) => !OFFERED_COMMANDS.includes(c))
     : [];
@@ -255,21 +258,35 @@ export function CoupangIssuanceGuidedWalkthrough({
         </p>
       )}
 
-      {/* A hosted run → the shared Action Window surfaces. */}
+      {/* A hosted run → the WING-resident status surface. The seller's primary screen is the 쿠팡 윙 창; this
+          screen shows live status + progress and only steps in for recovery or the final hand-off. */}
       {effectiveRun && (
         <>
-          <OperationRunTimeline run={effectiveRun} />
-          {/* FULL instruction for the current step, so this screen is self-sufficient and the seller does
-              not have to decode the in-WING highlight (which only points at a control). FE-owned copy by
-              step key; a step with no detail renders nothing. */}
-          {(() => {
-            const detail = issuanceStepDetail(effectiveRun.currentStep?.copyKey);
-            return detail ? (
-              <p className="rounded-lg bg-canvas px-4 py-3 text-sm text-ink break-keep" role="note">
-                {detail}
+          {/* Healthy barrier: STATUS ONLY. The step-by-step guidance and the "다음" button live ON the WING page
+              (the overlay), not here — so this screen never mirrors or drives the walk step by step. */}
+          {effectiveRun.status !== "COMPLETED" && !effectiveRun.blocker && (
+            <section
+              className="space-y-1 rounded-xl bg-canvas px-4 py-3"
+              role="status"
+              aria-label="화면 안내 진행 상태"
+            >
+              <p className="text-sm font-medium text-ink break-keep">
+                쿠팡(윙) 창에서 화면 안내를 따라 진행하세요
               </p>
-            ) : null;
-          })()}
+              <p className="text-xs text-muted break-keep">
+                열린 쿠팡 윙 창의 안내(하이라이트와 '다음' 버튼)를 따라가시면 됩니다. 각 단계는 윙 화면에서 직접
+                진행되고, 이 화면은 진행 상태만 보여줍니다.
+              </p>
+              {effectiveRun.progress && (
+                <p className="text-xs text-muted" aria-label="진행 상황">
+                  {effectiveRun.progress.completedSteps} / {effectiveRun.progress.totalSteps} 단계 완료
+                </p>
+              )}
+            </section>
+          )}
+
+          {/* Recovery is the FE's job: at a recoverable blocker, surface the blocker + the recovery control
+              ("다시 확인" / 취소). REQUEST_STEP_RECHECK re-probes/re-guides; it never completes a step. */}
           {effectiveRun.blocker && (
             <BlockerNotice
               title={blockerView(effectiveRun.blocker.code).title}
@@ -278,11 +295,14 @@ export function CoupangIssuanceGuidedWalkthrough({
               variant="standalone"
             />
           )}
-          <ActionWindowControlPanel
-            run={effectiveRun}
-            exclude={controlExclude}
-            onCommand={(type) => effectiveCommand?.(type)}
-          />
+          {effectiveRun.status !== "COMPLETED" && (
+            <ActionWindowControlPanel
+              run={effectiveRun}
+              exclude={controlExclude}
+              onCommand={(type) => effectiveCommand?.(type)}
+            />
+          )}
+
           {effectiveRun.status === "COMPLETED" && (
             <div className="space-y-2">
               <p className="text-sm font-medium text-ink break-keep" role="status">

@@ -232,7 +232,10 @@ async function openClient(handle: CoupangBridgeHandle, token?: string, label = "
   return { client, token: t, runId };
 }
 
-/** Press "다음" (REQUEST_STEP_RECHECK) through the checkpoints until the view is COMPLETED. */
+/** FALLBACK/RECOVERY drive: press "다음" (REQUEST_STEP_RECHECK) to release a HELD checkpoint (one whose WING-
+ * resident press the test suppressed with `action:false`); the remaining checkpoints then complete on their own
+ * default WING-resident presses. In the product path the seller advances on the WING page — this is only used
+ * here to finish a run the test deliberately parked, and to prove the FE fallback still advances a checkpoint. */
 async function driveToCompleted(client: CoupangWireClient, session: { whenSettled(): Promise<void> }): Promise<void> {
   for (let i = 0; i < 16 && client.view?.status !== "COMPLETED"; i++) {
     const before = client.view?.revision ?? -1;
@@ -269,32 +272,40 @@ describe("Coupang issuance carrier over the real Bridge WS (dev-host boot wiring
     expect(runId).toBe(handle.runId);
   });
 
-  it("drives the full guided walk to COMPLETED over the wire: START_RUN → 다음… → complete, sanitized throughout", async () => {
+  it("drives the full guided walk to COMPLETED over the wire on WING-RESIDENT advances ALONE (a single START_RUN, no FE 다음), sanitized throughout", async () => {
     const handle = await bootCoupangBridge();
     const session = handle.bridge.coupangIssuanceSession!;
     const { client } = await openClient(handle);
     await waitFor(() => client.announcement);
 
-    // 1) FE START_RUN with the agent-announced channel → the runtime auto-drives to the first checkpoint.
+    // A SINGLE FE START_RUN — the runtime then drives the whole walk (reach → 자체개발 → 업체명 → 호출 IP → 발급 →
+    // copy keys → return) to COMPLETED as the seller presses each WING-RESIDENT advance button on the WING page
+    // (the synthetic driver's default). No REQUEST_STEP_RECHECK is ever sent: the FE never drives a step.
     client.startRun();
     await session.whenSettled();
-    await waitFor(() => client.view?.status === "WAITING_FOR_HUMAN");
-    expect(client.view?.channelCode).toBe("coupang");
-    expect(client.view?.intent).toBe("API_ISSUANCE_GUIDANCE");
-    expect(client.view?.executionMode).toBe("ACTION_WINDOW");
-
-    // 2) 다음 through the checkpoints (self_dev → vendor_info → call_ip → 발급 → credentials → return) to done.
-    await driveToCompleted(client, session);
+    await waitFor(() => client.view?.status === "COMPLETED");
     expect(client.view?.status).toBe("COMPLETED");
     expect(client.view?.blocker).toBeUndefined();
     expect(client.view?.intent).toBe("API_ISSUANCE_GUIDANCE");
+    expect(client.view?.channelCode).toBe("coupang");
+    expect(client.view?.executionMode).toBe("ACTION_WINDOW");
+
+    // On its way to COMPLETED the run rested at the WAITING_FOR_HUMAN checkpoints (each step waited for the seller).
+    const statuses = client.serverFrames
+      .filter((f) => f.kind === "aw_view")
+      .map((f) => (f as { view: ActionWindowRunView }).view.status);
+    expect(statuses).toContain("WAITING_FOR_HUMAN");
+    // PROOF the FE never drove a step: the ONLY command it sent (and got a result for) was the single START_RUN.
+    expect(client.commandResults).toHaveLength(1);
 
     // Every frame that crossed the real (serialize/deserialize) wire is contract-valid and value-free.
     assertSanitizedWire(client, "coupang-ws-happy");
   });
 
   it("reattaches a refreshed/reconnected client to the SAME run — never a duplicate run, never a splice", async () => {
-    const handle = await bootCoupangBridge();
+    // Hold the walk at the 호출 IP checkpoint (suppress its WING-resident press) so there is a stable mid-run state
+    // to reattach to — otherwise the walk would auto-complete before the tab could refresh.
+    const handle = await bootCoupangBridge({ action: { call_ip: false } });
     const session = handle.bridge.coupangIssuanceSession!;
     const { client, token, runId } = await openClient(handle);
     await waitFor(() => client.announcement);
@@ -326,7 +337,9 @@ describe("Coupang issuance carrier over the real Bridge WS (dev-host boot wiring
   });
 
   it("a replayed START_RUN is idempotent — the same run, no revision jump, no second run", async () => {
-    const handle = await bootCoupangBridge();
+    // Hold the walk at the first checkpoint (자체개발) so the run rests at a stable revision the duplicate
+    // START_RUN can be checked against (otherwise it would auto-complete before the replay).
+    const handle = await bootCoupangBridge({ action: { self_dev: false } });
     const session = handle.bridge.coupangIssuanceSession!;
     const { client, runId } = await openClient(handle);
     await waitFor(() => client.announcement);
