@@ -97,28 +97,46 @@ tools/coupang-local/wing-probe-bootstrap.sh
 tools/coupang-local/wing-probe-preflight.sh
 
 # 3. on PREFLIGHT PASS the operator reads the manifest and grants in one line: "Seated and ready."
-#    then, in a shell bound to this run:
-set -a; . tools/coupang-local/.run/wing-probe.env; set +a
-cd collector && npx tsx src/cli/probe-wing-issuance-selectors.ts -- --i-understand-this-opens-live-coupang-wing
+#    then run the probe with the approved scope, exactly as the preflight prints it:
+cd collector && SELLEROPS_WING_PROBE_TARGETS=delete \
+  npx tsx src/cli/probe-wing-issuance-selectors.ts -- --i-understand-this-opens-live-coupang-wing
 ```
 
-Sourcing the run env in step 3 is not optional: it carries `SELLEROPS_WING_PROBE_TARGETS`, and a probe run
-whose scope differs from the approved manifest is an out-of-scope run (contract §1.3).
+The scope must travel with the run: a probe whose targets differ from the approved manifest is an
+out-of-scope run (contract §1.3), and because an **empty** `SELLEROPS_WING_PROBE_TARGETS` means *all six*
+targets rather than none, every way of losing it **widens** the run. Two things stop that: the preflight
+writes the **resolved** scope back into the run env (so sourcing it can only reproduce what was displayed),
+and it prints the run command with the scope **inline**. Use the printed command.
 
 ### What the WING preflight proves (and cannot)
 
 | Proves | Cannot prove |
 |---|---|
-| Run identity is bootstrapped and bound; the phase is the READ_ONLY selector probe, never the destructive deletion phase | That the seller's WING account is in the already-issued state the 삭제 target needs |
-| **No code drift**: HEAD equals the bootstrap commit **and** the working tree is clean, so the manifest's `gitSHA` names the code that will actually run | Whether the WING page layout changed since the last calibration (that is what the probe measures) |
-| The probe is immediately executable: collector deps installed, entrypoint present, dedicated profile inside the collector tree, a launchable browser | That the operator can log in (human-only auth — no CAPTCHA/2FA is ever touched) |
-| The manifest carries the exact per-run probe scope, so the operator approves which targets are measured | — |
+| Run identity is bootstrapped, bound, and **fresh** (a run env older than 2h is refused, so a previous session's identity cannot re-authorize a new one) | That the seller's WING account is in the already-issued state the 삭제 target needs |
+| The phase is the READ_ONLY selector probe, never the destructive deletion phase — checked before the manifest is requested, and again on the manifest itself | Whether the WING page layout changed since the last calibration (that is what the probe measures) |
+| **No code drift**: HEAD equals the bootstrap commit **and** the working tree is clean, so the manifest's `gitSHA` names the code that will actually run | That the operator can log in (human-only auth — no CAPTCHA/2FA is ever touched) |
+| The probe is immediately executable: collector deps installed, entrypoint present, dedicated profile inside the collector tree, a launchable browser | That the operator will use the printed run command rather than typing a different one |
+| The manifest carries the exact per-run probe scope, and that scope is bound back into the run | — |
+
+Two hardening details worth knowing, because both were live bypasses before review:
+
+- **The git checks ignore the ambient git environment.** `GIT_DIR` / `GIT_WORK_TREE` could otherwise point
+  the drift check at a clean decoy repository, and `GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n` could force
+  `status.showUntrackedFiles=no` to hide a dirty tree. Both are stripped, the repository toplevel is asserted,
+  and a `git status` that *fails* is refused rather than read as "clean".
+- **The profile check refuses rather than reassures when it cannot see the truth.** It resolves symlinks
+  (stricter than the purely lexical guard in `collector/src/profile.ts`), but the probe's documented
+  invocation sources `collector/.env`, whose values this preflight must never read. So if `.env` sets
+  `COLLECTOR_PROFILE_DIR` at all, the preflight **fails closed** instead of validating a path the run would
+  not use. Only the key is looked for; no `.env` value is read, printed, or logged.
 
 `wing-probe-selfcheck.sh` regression-tests all of the above **hermetically** (no browser, no backend, no
-Coupang call): missing run env, unbound identity, wrong phase, git drift, dirty tree, non-canonical probe
-scope, and the PASS path — including the guard that a CLI-launched phase never hands the operator a frontend
-URL. Its `NORMAL` case is skipped while the working tree is dirty, because a dirty tree is refused by design;
-commit or stash first to exercise the PASS path.
+Coupang call): missing run env, unbound identity, stale identity, wrong phase, git drift, unknown probe
+target, scope normalization and the empty-means-all widening, dirty tree, the `GIT_DIR` hijack, the
+untracked-hiding config injection, and the PASS path — including the guard that a CLI-launched phase never
+hands the operator a frontend URL, and that the approved scope is bound back into the run env. Cases needing
+a clean tree are skipped while the tree is dirty (a dirty tree is refused by design); commit or stash first
+to exercise them.
 
 The probe measures counts only: **no highlight, no click, no input, no value read** (never Access Key /
 Secret Key / 업체코드), no 발급 / 재발급 / 삭제, and it never navigates the window — the seller does.
