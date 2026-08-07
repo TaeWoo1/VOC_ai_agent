@@ -77,7 +77,7 @@ fi
 # SELLEROPS_APPROVAL_OPERATION could describe the run as something it is not. Everything displayed comes
 # from the spec or from this run's env file; nothing from the surrounding shell.
 unset WALKTHROUGH_RUN_ID WALKTHROUGH_APPROVAL_ID WALKTHROUGH_GIT_COMMIT WING_PROBE_BOOTSTRAP_EPOCH \
-      SELLEROPS_APPROVAL_PHASE SELLEROPS_WING_PROBE_TARGETS \
+      SELLEROPS_APPROVAL_PHASE SELLEROPS_WING_PROBE_TARGETS SELLEROPS_WING_APPROVED_TARGETS \
       SELLEROPS_APPROVAL_OPERATION SELLEROPS_APPROVAL_MAX SELLEROPS_APPROVAL_ACCOUNT \
       SELLEROPS_APPROVAL_SURFACE SELLEROPS_APPROVAL_CHANNEL
 # shellcheck disable=SC1090
@@ -267,11 +267,15 @@ fi
 # could leave a half-written run env, and %r is Python repr, not shell quoting.
 if ! python3 -c 'import os, sys, tempfile
 path, resolved = sys.argv[1], sys.argv[2]
-lines = [l for l in open(path).read().splitlines() if not l.startswith("SELLEROPS_WING_PROBE_TARGETS=")]
+drop = ("SELLEROPS_WING_PROBE_TARGETS=", "SELLEROPS_WING_APPROVED_TARGETS=")
+lines = [l for l in open(path).read().splitlines() if not l.startswith(drop)]
 # Always single-quoted, matching what bootstrap writes: shlex.quote would leave a bare word unquoted, so the
 # file style would depend on the value. The escape below is the POSIX one and is correct for any content.
 quoted = "'\''" + resolved.replace("'\''", "'\''\"'\''\"'\''") + "'\''"
+# TWO variables, deliberately: the run scope and the APPROVED scope. The live probe requires both and refuses
+# unless they are equal, so a run that measures something other than the displayed manifest cannot start.
 lines.append("SELLEROPS_WING_PROBE_TARGETS=" + quoted)
+lines.append("SELLEROPS_WING_APPROVED_TARGETS=" + quoted)
 fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)))
 try:
     with os.fdopen(fd, "w") as f:
@@ -308,8 +312,9 @@ echo
 echo "  If this manifest is correct and displayed, the operator's entire single-use grant is one line:"
 echo "    Seated and ready."
 echo
-echo "  On approval, run the probe with the APPROVED scope inline (it must match the manifest):"
-echo "    cd $COLLECTOR_DIR && SELLEROPS_WING_PROBE_TARGETS=$M_TARGETS \\"
+echo "  On approval, run the probe with the APPROVED scope inline. The probe refuses unless BOTH variables"
+echo "  are set and equal — an unset scope can no longer widen the run to every target:"
+echo "    cd $COLLECTOR_DIR && SELLEROPS_WING_PROBE_TARGETS=$M_TARGETS SELLEROPS_WING_APPROVED_TARGETS=$M_TARGETS \\"
 echo "      npx tsx $M_CLI -- --i-understand-this-opens-live-coupang-wing"
 echo
 echo "  (Re-bootstrap ⇒ new approval id ⇒ the old approval is dead. A code/branch/run/scope change ⇒ REVOKED.)"
