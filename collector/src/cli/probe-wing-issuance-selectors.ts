@@ -43,6 +43,7 @@ import {
 } from "../action-window/coupang-wing-issuance-driver";
 import {
   LIVE_DOM_CALIBRATION_PENDING,
+  resolveWingProbeScope,
   resolveWingUrl,
   screenWingUrl,
   type WingObservation,
@@ -163,7 +164,10 @@ export interface WingSelectorRecordDeps {
  * value — every measurement is `probeTarget` (count + opaque sig only). Abort/timeout return the empty sanitized
  * record. `label`/`role` are recorder/driver constants; `sig16` is null unless the candidate resolved uniquely.
  */
-export async function runWingSelectorRecord(deps: WingSelectorRecordDeps): Promise<WingSelectorRecordResult> {
+export async function runWingSelectorRecord(
+  deps: WingSelectorRecordDeps,
+  probeTargets: readonly WingRecordTarget[] = WING_RECORD_TARGETS,
+): Promise<WingSelectorRecordResult> {
   deps.announce?.();
   const signal = await deps.waitForReady();
   if (signal !== "ready") {
@@ -193,7 +197,7 @@ export async function runWingSelectorRecord(deps: WingSelectorRecordDeps): Promi
   let uniqueCandidates = 0;
   let nonUniqueCandidates = 0;
 
-  for (const target of WING_RECORD_TARGETS) {
+  for (const target of probeTargets) {
     let matchCount = 0;
     let canHighlight = false;
     let sig: string | undefined;
@@ -347,7 +351,16 @@ async function main(): Promise<void> {
   };
 
   try {
-    const result = await runWingSelectorRecord(deps);
+    // Optional per-run TARGET scope (e.g. `delete` for the delete-selector calibration). Fail closed on an unknown
+    // target — never silently probe the full set when a narrower one was requested. Absent ⇒ the full fixed set.
+    const probeScope = resolveWingProbeScope(process.env.SELLEROPS_WING_PROBE_TARGETS);
+    if (!probeScope.ok) {
+      console.error(`Refusing: SELLEROPS_WING_PROBE_TARGETS is invalid (${probeScope.reason}). No target probed.`);
+      process.exitCode = 2;
+      return;
+    }
+    const scopedTargets = WING_RECORD_TARGETS.filter((t) => probeScope.targets.includes(t));
+    const result = await runWingSelectorRecord(deps, scopedTargets);
     console.error("");
     console.error("WING selector recorder complete. 이제 SellerOps 탭으로 직접 돌아가세요.");
     // SANITIZED calibration record → stdout. Integers/booleans/fixed-labels/roles/opaque sigs + the sanitized
@@ -357,6 +370,7 @@ async function main(): Promise<void> {
         {
           runId,
           urlCategory: screen.urlCategory,
+          probeTargets: scopedTargets,
           aborted: result.aborted,
           uniqueCandidates: result.uniqueCandidates,
           nonUniqueCandidates: result.nonUniqueCandidates,

@@ -27,7 +27,7 @@ import {
 import { CALIBRATION_PHASES } from "./approval-manifest";
 import { resolveVisualReconScope } from "../action-window/api-issuance-calibration/visual-recon";
 // The public WING host default for the Coupang WING selector-probe phase (pure leaf; no per-run input needed).
-import { WING_DEFAULT_URL } from "./coupang-wing-classifier";
+import { WING_DEFAULT_URL, resolveWingProbeScope } from "./coupang-wing-classifier";
 import { COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION } from "./approval-manifest";
 
 const COLLECTOR_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -76,6 +76,18 @@ export function runApprovalManifestCli(): number {
       return 1;
     }
     requestedCaptureScreens = scope.screens;
+  }
+  // WING selector probe ONLY: an optional per-run TARGET scope (comma list) that NARROWS the fixed WING target set
+  // to just the targets this calibration needs (e.g. `delete` for the delete-selector calibration). Absent ⇒ the
+  // full set. Fail closed on any unknown target.
+  let requestedProbeTargets: readonly string[] | undefined;
+  if (isWingSelectorProbe) {
+    const scope = resolveWingProbeScope(env("SELLEROPS_WING_PROBE_TARGETS"));
+    if (!scope.ok) {
+      process.stderr.write(`PREFLIGHT FAIL: approval_prerequisite (WING_PROBE_TARGETS_MISMATCH): ${scope.reason}\n`);
+      return 1;
+    }
+    requestedProbeTargets = scope.targets;
   }
   const isStructureObs = phase === "API_CENTER_STRUCTURE_OBSERVATION";
   const isFeLiveProof = phase === "API_ISSUANCE_FE_LIVE_PROOF";
@@ -144,6 +156,7 @@ export function runApprovalManifestCli(): number {
     hotkey,
     artifactPath,
     requestedCaptureScreens,
+    requestedProbeTargets,
     runId: env("WALKTHROUGH_RUN_ID") ?? "unknown",
     approvalId: env("WALKTHROUGH_APPROVAL_ID") ?? "unknown",
     gitSha: env("WALKTHROUGH_GIT_COMMIT") ?? "unknown",

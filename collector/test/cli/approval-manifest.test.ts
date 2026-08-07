@@ -28,7 +28,7 @@ import {
   type OperatorDestructiveAction,
 } from "../../src/cli/approval-manifest";
 import { VISUAL_RECON_SCREENS } from "../../src/action-window/api-issuance-calibration/visual-recon";
-import { WING_DEFAULT_URL } from "../../src/cli/coupang-wing-classifier";
+import { WING_DEFAULT_URL, WING_PROBE_TARGET_NAMES } from "../../src/cli/coupang-wing-classifier";
 
 const OBS = PHASE_SPECS.API_CENTER_STRUCTURE_OBSERVATION;
 const HL = PHASE_SPECS.API_ISSUANCE_HIGHLIGHT_PROOF;
@@ -363,6 +363,28 @@ describe("Coupang WING selector-probe phase (COUPANG_WING_SELECTOR_PROBE)", () =
   });
 });
 
+describe("Coupang WING selector-probe target scope (probeTargets)", () => {
+  it("defaults to the full fixed target set when no scope is requested", () => {
+    const r = validateApprovalPrerequisites(baseWingSelectorProbe());
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.manifest.probeTargets).toEqual([...WING_PROBE_TARGET_NAMES]);
+  });
+
+  it("narrows to a canonical subset — the delete-only calibration scope surfaces probeTargets = [delete]", () => {
+    const r = validateApprovalPrerequisites({ ...baseWingSelectorProbe(), requestedProbeTargets: ["delete"] });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.manifest.probeTargets).toEqual(["delete"]);
+  });
+
+  it("rejects an unknown / empty / non-canonical scope (WING_PROBE_TARGETS_MISMATCH)", () => {
+    for (const scope of [["nope"], [], ["delete", "delete"], ["issue", "self_dev"] /* wrong order */]) {
+      const r = validateApprovalPrerequisites({ ...baseWingSelectorProbe(), requestedProbeTargets: scope });
+      expect(r.ok, JSON.stringify(scope)).toBe(false);
+      if (!r.ok) expect(r.cause).toBe("WING_PROBE_TARGETS_MISMATCH");
+    }
+  });
+});
+
 describe("Coupang WING key-deletion destructive phase (COUPANG_WING_KEY_DELETION)", () => {
   it("FAILS CLOSED by default (SELECTORS_NOT_CALIBRATED): a destructive highlight cannot PREPARE while WING is uncalibrated", () => {
     // The headline fail-closed proof: the phase highlights the 삭제 control, WING is LIVE_DOM_CALIBRATION_PENDING,
@@ -463,6 +485,14 @@ describe("Coupang WING key-deletion destructive phase (COUPANG_WING_KEY_DELETION
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.cause).toBe("CLI_DRIVER_UNCONFIRMED");
+  });
+
+  it("a stale / unbound identity (unknown approvalId / runId / gitSha) → FAIL (UNBOUND_IDENTITY)", () => {
+    for (const key of ["approvalId", "runId", "gitSha"] as const) {
+      const r = validateApprovalPrerequisites({ ...baseWingKeyDeletion(), selectorsCalibrated: true, [key]: "unknown" });
+      expect(r.ok, key).toBe(false);
+      if (!r.ok) expect(r.cause).toBe("UNBOUND_IDENTITY");
+    }
   });
 
   it("the deletion entrypoint is a CLI-launched window (never a frontend URL) and validates", () => {
