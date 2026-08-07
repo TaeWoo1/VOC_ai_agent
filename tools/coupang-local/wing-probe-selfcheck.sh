@@ -216,6 +216,24 @@ if [ -z "$TREE_DIRTY" ]; then
   # The one caveat the operator most needs before granting must be on the summary line, not only in the JSON.
   run_case "NORMAL         · selectorsCalibrated disclosed" 0 "selectors calibrated: false" "$FIXTURES/normal.env"
 
+  # EVERY case above overrides SELLEROPS_MANIFEST_OUT, so the DEFAULT manifest path had no coverage at all —
+  # and that is exactly where a broken mktemp template hid until the first real operator run. Exercise it,
+  # twice, so a template that collides with its own previous output is caught here instead of at the gate.
+  DEFAULT_OK=1
+  for attempt in 1 2; do
+    out="$(env SELLEROPS_WING_PROBE_RUN_ENV="$FIXTURES/normal.env" bash "$PREFLIGHT" 2>&1)" || DEFAULT_OK=0
+    grep -qF "PREFLIGHT PASS" <<<"$out" || DEFAULT_OK=0
+    grep -qF "probe targets: delete" <<<"$out" || DEFAULT_OK=0
+    # A failed temp-path creation used to surface as python tracebacks under a broken run.
+    grep -qF "Traceback" <<<"$out" && DEFAULT_OK=0
+    grep -qiF "mktemp" <<<"$out" && DEFAULT_OK=0
+  done
+  if [ "$DEFAULT_OK" = "1" ]; then
+    echo "  PASS  DEFAULT_OUT    · default manifest path works, and works twice in a row"
+  else
+    echo "  FAIL  DEFAULT_OUT    · default manifest path is broken"; echo "$out" | tail -6 | sed 's/^/        | /'; FAILED=1
+  fi
+
   # The prose the operator reads must come from the phase spec, never from the surrounding shell — an ambient
   # override changes no enforced capability, but it can describe the run as something it is not.
   out="$(env SELLEROPS_APPROVAL_OPERATION="AMBIENT-PROSE-MUST-NOT-APPEAR" \
