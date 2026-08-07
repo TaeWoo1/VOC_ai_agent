@@ -53,10 +53,12 @@ the locator does not filter on it.
 - `CoupangWingDeletionDriver.probeDeleteMatch()` surfaces the signature only as sanitized probe output.
 - `highlightDeleteCheckpoint()` returns it, but `run-coupang-wing-deletion-live.ts` checks `count` and
   **discards the sig**. `verifyDeletion()` compares nothing — it reads a page-category enum.
-- The deletion driver is not wired to `engine.ts` / `session.ts`, the only places a signature is compared
-  (`UI_DRIFT`). Even there the comparison is locate-vs-verify **within one run**, both sides computed live —
-  never against a stored constant. The only hardcoded 16-hex sigs in `src/` are synthetic constants for
-  guidance-only targets that have no DOM element.
+- The deletion driver imports `engine.ts` **type-only** and is not wired to `engine.ts` / `session.ts` /
+  `verifier.ts`, the only places a signature is compared (`UI_DRIFT`). Even there the comparison is
+  locate-vs-verify **within one run**, both sides computed live — never against a stored constant. Every
+  hardcoded 16-hex literal in `src/` is a synthetic guidance signature or a fixture/artifact default, and none
+  is compared against a live delete-path signature. (`esm-candidate-signature.ts` does compare a persisted
+  signature, but that is the ESM review-scheduling subsystem — unreachable from the deletion path.)
 
 **Consequence:** no code path requires the signature to be stable across runs, so **one capture is a complete
 basis** for the uniqueness claim, and a second capture was not required for this landing.
@@ -85,10 +87,22 @@ unit — a second independent delete-only capture under a fresh grant — not an
 
 The approval gate **still defaults every WING phase to uncalibrated** and never imports the driver flag — the
 caller must state the calibration, so a caller that forgets it gets `SELECTORS_NOT_CALIBRATED` rather than
-inheriting another surface's calibration. Withdrawing the flag closes the whole destructive path in one place;
-that direction is tested.
+inheriting another surface's calibration. Two callers state it, both from the same constant: the runtime CLI
+`run-coupang-wing-deletion-live.ts` and the manifest **display** CLI `approval-manifest-cli.ts`. That pairing is
+required — without it the run would be executable while the manifest the grant binds to could never be printed.
+Withdrawing the flag closes both at the same instant; that direction is tested.
 
 Agent marketplace click / type / submit budget remains **zero**. `PREPARED` is not `APPROVED`.
+
+## The checkpoint renders in the resident panel
+
+`highlightDeleteCheckpoint` mounts the overlay with `residentPanel: true` and **no advance button**. This is a
+safety requirement, not styling: without the resident panel the ~130-character irreversible warning renders in
+the spotlight ring's single-line `nowrap` badge and runs off the viewport — the operator would press an
+irreversible 삭제 having never read the checkpoint the manifest's `explicitCheckpointRequired: true` promises.
+No advance button is added because this walk advances on the operator's sentinel file, so the checkpoint
+introduces no interactive element onto the marketplace page. A test asserts the overlay's actual content
+(warning copy, `residentPanel`, no `advance`) and that **no refused path mounts an overlay at all**.
 
 ## Not established by this unit
 
@@ -100,6 +114,21 @@ Agent marketplace click / type / submit budget remains **zero**. `PREPARED` is n
    [`coupang_wing_live_calibration_v1.md`](./coupang_wing_live_calibration_v1.md) left them, and
    `WING_HIGHLIGHT_CALIBRATION` stays `LIVE_DOM_CALIBRATION_PENDING`.
 4. **The full guided deletion walk end-to-end live.** Offline-synthetic-verified only.
+
+## Known gaps in the destructive path (pre-existing; NOT closed by this unit)
+
+Surfaced by the review of this landing. Neither is introduced here, but both become live on the destructive
+phase now that it is executable, and both should be closed before `Coupang WING Key Deletion Live v1`:
+
+1. **Identity binding is presence-only, not freshness.** `validateApprovalPrerequisites` accepts any non-empty,
+   non-`"unknown"` `runId` / `approvalId` / `gitSha`; nothing compares `WALKTHROUGH_GIT_COMMIT` to actual HEAD
+   or checks a clean tree. The WING *probe* has that protection in `wing-probe-preflight.sh`; the deletion
+   entrypoint has **no equivalent preflight harness**, so a leftover `.env` from a consumed approval can reach
+   PREPARED with a `gitSha` that does not describe the running code — which the approval contract treats as
+   `REVOKED`.
+2. **`channel` / `surface` / `operation` / `maxActions` come from unvalidated env.** Only `accountBinding` is
+   screened. A stale `SELLEROPS_APPROVAL_CHANNEL=NAVER` would produce a destructive manifest naming the wrong
+   channel — the exact field the operator's grant binds to.
 
 ## Next unit
 

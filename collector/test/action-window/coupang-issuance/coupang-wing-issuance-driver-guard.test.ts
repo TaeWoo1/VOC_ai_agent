@@ -10,6 +10,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { WING_HIGHLIGHT_CALIBRATION } from "../../../src/action-window/coupang-wing-issuance-driver";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DRIVER = resolve(HERE, "../../../src/action-window/coupang-wing-issuance-driver.ts");
@@ -104,8 +105,12 @@ describe("CoupangWingIssuanceDriver — source guard (no click/type/submit/issue
     expect(code).toContain("RETURN_GUIDANCE_SIG");
   });
 
-  it("marks its fixed-label candidates LIVE_DOM_CALIBRATION_PENDING (a NEVER-run scaffold, not calibrated)", () => {
-    expect(code).toContain("LIVE_DOM_CALIBRATION_PENDING");
+  it("keeps its ISSUANCE fixed-label candidates LIVE_DOM_CALIBRATION_PENDING (the 삭제 landing did not widen)", () => {
+    // The module now ALSO declares the live-confirmed delete calibration, so a bare token grep would pass on the
+    // wrong constant. Assert the issuance marker's actual value: only the 삭제 target was live-calibrated, and
+    // this flag must not drift along with it.
+    expect(WING_HIGHLIGHT_CALIBRATION).toBe("LIVE_DOM_CALIBRATION_PENDING");
+    expect(code).toContain("export const WING_HIGHLIGHT_CALIBRATION = LIVE_DOM_CALIBRATION_PENDING;");
   });
 });
 

@@ -166,11 +166,48 @@ describe("삭제 calibration landing — the flip cannot outrun its evidence", (
         "WING_DELETION_CALIBRATION_EVIDENCE",
       );
       expect(src, `${name} must not compare a signature against a recorded constant`).not.toContain("sig16");
+      expect(src, `${name} must not carry a hardcoded 16-hex signature literal`).not.toMatch(/["'][0-9a-f]{16}["']/);
     }
+  });
+
+  /**
+   * The token greps above are necessary but NOT sufficient: a one-line indirection
+   * (`export const RECORDED_DELETE_ANCHOR = WING_DELETION_CALIBRATION_EVIDENCE.sig16` in the provenance module,
+   * imported into the driver) sails past all of them. This test closes that hole from both ends — an ALLOWLIST of
+   * what the deletion path may import from the provenance module, plus a check that the module exports nothing
+   * signature-shaped for a future caller to reach for.
+   */
+  it("the deletion path imports ONLY the label + flag from the provenance module (no derived sig anchor)", () => {
+    const ALLOWED = new Set(["WING_DELETION_LABELS", "WING_DELETION_SELECTORS_CALIBRATED"]);
+    for (const [name, path] of [["driver", DRIVER], ["cli", CLI]] as const) {
+      const src = readFileSync(path, "utf8");
+      const importRe = /import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+["'][^"']*coupang-wing-issuance-driver["']/g;
+      for (let m = importRe.exec(src); m !== null; m = importRe.exec(src)) {
+        for (const raw of m[1]!.split(",")) {
+          const sym = raw.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0]!.trim();
+          if (sym.length === 0) continue;
+          expect(ALLOWED.has(sym), `${name} imports ${sym} from the provenance module — not on the allowlist`).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("the provenance module exports NO signature-shaped constant a runtime gate could adopt", () => {
+    // `sig16` may exist only as a field of the evidence record and its interface — never as a standalone export
+    // that reads like an anchor. Anything matching /SIG|ANCHOR/ in an export name here is a tripwire.
+    const src = codeOnly(LABELS_MODULE);
+    const exportRe = /export\s+const\s+([A-Za-z0-9_]+)/g;
+    const offenders: string[] = [];
+    for (let m = exportRe.exec(src); m !== null; m = exportRe.exec(src)) {
+      const name = m[1]!;
+      if (/DELETE.*(SIG|ANCHOR)|(SIG|ANCHOR).*DELETE/i.test(name)) offenders.push(name);
+    }
+    expect(offenders, "a delete-signature anchor export needs a SECOND live capture first").toEqual([]);
   });
 
   it("the recorded sig16 literal appears ONLY in the provenance module, never in a runtime comparison", () => {
     const literal = WING_DELETION_CALIBRATION_EVIDENCE.sig16;
+    expect(literal).toMatch(/^[0-9a-f]{16}$/); // the assertion below is only meaningful for a real 16-hex token
     expect(codeOnly(LABELS_MODULE)).toContain(literal);
     for (const path of [DRIVER, CLI]) expect(codeOnly(path)).not.toContain(literal);
   });

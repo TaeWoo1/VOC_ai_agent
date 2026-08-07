@@ -159,7 +159,7 @@ async function main(): Promise<void> {
     console.error(`Refusing to start the WING key-DELETION run: approval_prerequisite (${refusal}). No browser launched.`);
     console.error(
       refusal === "SELECTORS_NOT_CALIBRATED"
-        ? "  The 삭제 control is LIVE_DOM_CALIBRATION_PENDING. Run the READ-ONLY delete selector probe first."
+        ? "  The 삭제 selector calibration is withdrawn. Restore it only from a fresh READ-ONLY delete selector probe."
         : "  Re-bootstrap a valid identity + destructive Approval Manifest, then retry.",
     );
     process.exit(4);

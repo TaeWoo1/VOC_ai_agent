@@ -227,7 +227,7 @@ export class CoupangWingDeletionDriver {
    */
   async highlightDeleteCheckpoint(): Promise<LocateResult> {
     if (!this.isCalibrated()) {
-      throw new Error("refusing to highlight the 삭제 control: delete selector is LIVE_DOM_CALIBRATION_PENDING (not calibrated)");
+      throw new Error("refusing to highlight the 삭제 control: the delete selector is not calibrated (WING_DELETION_SELECTORS_CALIBRATED is false)");
     }
     if (this.phase !== "classified") {
       throw new Error("classify the already-issued page before highlighting the 삭제 control");
@@ -242,6 +242,12 @@ export class CoupangWingDeletionDriver {
       copyKey: "actionWindow.coupangDeletion.checkpoint",
       label: WING_DELETION_WARNING_LABEL,
       guidanceEnabled: this.opts.guidanceEnabled ?? true,
+      // The WING-RESIDENT panel is REQUIRED here, not cosmetic. Without it the warning renders in the spotlight
+      // ring's small single-line `nowrap` badge, where ~130 characters of Korean run off the viewport — the
+      // operator would press an irreversible 삭제 having never read the checkpoint the destructive manifest
+      // promises (`explicitCheckpointRequired: true`). NO advance button: this walk advances on the operator's
+      // sentinel file, so the panel is copy-only and adds no interactive element to the marketplace page.
+      residentPanel: true,
     });
     this.phase = "highlighted";
     log("aw_coupang_deletion_highlight", { highlighted: true });

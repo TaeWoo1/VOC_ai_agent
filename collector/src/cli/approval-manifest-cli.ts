@@ -29,6 +29,12 @@ import { resolveVisualReconScope } from "../action-window/api-issuance-calibrati
 // The public WING host default for the Coupang WING selector-probe phase (pure leaf; no per-run input needed).
 import { WING_DEFAULT_URL, resolveWingProbeScope } from "./coupang-wing-classifier";
 import { COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION } from "./approval-manifest";
+// The 삭제 selector calibration flag — the SAME constant `run-coupang-wing-deletion-live.ts` feeds the gate.
+// `approval-manifest.ts` deliberately never imports it (WING phases default to uncalibrated there), so the
+// display CLI must state it explicitly or the destructive phase could never produce the manifest the operator
+// is supposed to approve. Binding both to ONE constant keeps the withdraw path single: set it false and the
+// manifest stops being emittable at the same instant the run stops being executable.
+import { WING_DELETION_SELECTORS_CALIBRATED } from "../action-window/coupang-wing-issuance-driver";
 
 const COLLECTOR_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -165,9 +171,13 @@ export function runApprovalManifestCli(): number {
     operation: env("SELLEROPS_APPROVAL_OPERATION") ?? defaultOperation,
     startRunContract,
     // The WING key-deletion phase is scoped around an operator-performed irreversible action — carry its immutable
-    // descriptor so the gate can enforce it. (The run still fails closed today: the planned deletion CLI is absent
-    // ⇒ CLI_DRIVER_UNCONFIRMED, and WING selectors are uncalibrated ⇒ SELECTORS_NOT_CALIBRATED.)
+    // descriptor so the gate can enforce it. Both original blockers are resolved (the deletion CLI exists; the
+    // 삭제 selector is live-calibrated), so this phase CAN now reach PREPARED and print a destructive manifest for
+    // the operator to read. PREPARED is not APPROVED — the single-use grant is still a separate human step.
     operatorDestructiveAction: isWingKeyDeletion ? COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION : undefined,
+    // Stated only for the WING deletion phase, from the single calibration constant. Every other phase leaves
+    // this undefined so the gate applies its own default (NAVER's adapter flag; uncalibrated for WING).
+    ...(isWingKeyDeletion ? { selectorsCalibrated: WING_DELETION_SELECTORS_CALIBRATED } : {}),
   };
 
   const res = validateApprovalPrerequisites(input);

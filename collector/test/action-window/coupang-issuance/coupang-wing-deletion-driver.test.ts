@@ -11,11 +11,15 @@
  * so the tests below exercise the real default rather than a test-only override.
  */
 import { describe, expect, it } from "vitest";
-import { CoupangWingDeletionDriver } from "../../../src/action-window/coupang-wing-deletion-driver";
+import {
+  CoupangWingDeletionDriver,
+  WING_DELETION_WARNING_LABEL,
+} from "../../../src/action-window/coupang-wing-deletion-driver";
 import {
   WING_DELETION_CALIBRATION_EVIDENCE,
   WING_DELETION_SELECTORS_CALIBRATED,
 } from "../../../src/action-window/coupang-wing-issuance-driver";
+import type { OverlayOptions } from "../../../src/action-window/overlay";
 import type { WingStructuralCensus } from "../../../src/cli/coupang-wing-classifier";
 
 const ISSUED: WingStructuralCensus = {
@@ -65,12 +69,21 @@ class FakePage {
   }
 }
 
-function makeDriver(page: FakePage, opts: Record<string, unknown> = {}): CoupangWingDeletionDriver {
+/** Records every overlay mount so the CHECKPOINT can be asserted on its content, not merely on a phase change. */
+type OverlayCall = OverlayOptions;
+
+function makeDriver(
+  page: FakePage,
+  opts: Record<string, unknown> = {},
+  overlayCalls: OverlayCall[] = [],
+): CoupangWingDeletionDriver {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new CoupangWingDeletionDriver(page as any, {
     locatorSettleMs: 0,
     verifyPollMs: 0,
-    mountOverlayFn: async () => undefined,
+    mountOverlayFn: async (_page, o) => {
+      overlayCalls.push(o);
+    },
     ...opts,
   });
 }
@@ -163,6 +176,42 @@ describe("CoupangWingDeletionDriver — fail-closed calibration + checkpoint-fir
     expect(v.deleted).toBe(true);
     expect(v.pageCategory).toBe("wing_home");
     expect(driver.currentPhase()).toBe("done");
+  });
+
+  it("the checkpoint actually RENDERS the irreversible warning, legibly, with no advance button", async () => {
+    // Phase state is not the checkpoint — the operator reading the warning is. Assert the overlay CONTENT:
+    // the irreversible-warning copy, and `residentPanel` so it renders in the readable resident panel rather
+    // than the spotlight ring's single-line nowrap badge (where ~130 Korean chars run off the viewport).
+    // `advance` must be absent: this walk advances on the operator's sentinel file, so the checkpoint adds no
+    // interactive element to the marketplace page.
+    const calls: OverlayCall[] = [];
+    const driver = makeDriver(new FakePage(ISSUED, { count: 1, sig: "0123456789abcdef" }), {}, calls);
+    await driver.classifyAlreadyIssued();
+    await driver.highlightDeleteCheckpoint();
+
+    expect(calls).toHaveLength(1);
+    const o = calls[0]!;
+    expect(o.label).toBe(WING_DELETION_WARNING_LABEL);
+    expect(o.residentPanel).toBe(true);
+    expect(o.guidanceEnabled).toBe(true);
+    expect(o.advance).toBeUndefined();
+    // The warning must state BOTH facts the operator needs before an irreversible press.
+    expect(String(o.label)).toContain("되돌릴 수 없");
+    expect(String(o.label)).toContain("무효화");
+  });
+
+  it("NO overlay is mounted on any refused path — a fail-closed run never shows a checkpoint", async () => {
+    for (const [label, opts, page] of [
+      ["withdrawn calibration", { calibrated: false }, new FakePage(ISSUED, { count: 1, sig: "0123456789abcdef" })],
+      ["zero match", {}, new FakePage(ISSUED, { count: 0 })],
+      ["multiple matches", {}, new FakePage(ISSUED, { count: 5 })],
+    ] as const) {
+      const calls: OverlayCall[] = [];
+      const driver = makeDriver(page, opts, calls);
+      await driver.classifyAlreadyIssued();
+      await driver.highlightDeleteCheckpoint().catch(() => undefined);
+      expect(calls, `${label} must not mount a checkpoint`).toHaveLength(0);
+    }
   });
 
   it("CALIBRATED + ZERO match → fails closed: never highlighted, operator-action step unreachable", async () => {
