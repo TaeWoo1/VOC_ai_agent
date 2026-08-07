@@ -32,7 +32,7 @@
 import type { BrowserContext, Page } from "playwright";
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig } from "../config";
 import { log } from "../log";
 import { launchNaverContext } from "../profile";
@@ -49,9 +49,12 @@ import {
   type ApprovalPrereqInput,
 } from "./approval-manifest";
 import { resolveWingUrl, screenWingUrl } from "./coupang-wing-classifier";
+import { verifyRepoIdentity } from "./repo-identity";
 import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from "./live-run-approval";
 
 const WKD = PHASE_SPECS.COUPANG_WING_KEY_DELETION;
+/** The repository this run must be reading — derived from this file's location, never from the environment. */
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
 function env(name: string): string | undefined {
   const v = process.env[name];
@@ -76,7 +79,15 @@ function banner(): void {
  * choke point: unbound identity, a softened/missing descriptor, an off-target host, or an uncalibrated selector
  * all refuse HERE, before any browser opens.
  */
-function gateRefusalCause(apiCenterUrl: string): string | null {
+export function gateRefusalCause(
+  apiCenterUrl: string,
+  /**
+   * Repository-identity verifier seam. Production uses the real check against this checkout; tests inject a
+   * stub so the composition (gate first, then identity) is asserted on BEHAVIOUR rather than by grepping the
+   * source. The DEFAULT is the real check — a caller that forgets to inject gets the strict behaviour.
+   */
+  verifyIdentity: typeof verifyRepoIdentity = verifyRepoIdentity,
+): string | null {
   // The four scope fields come from the phase spec, NOT the environment: the operator's grant binds to them, so
   // a stale `.env` must never be able to make a destructive manifest describe a different run. The gate pins
   // them too (`DESTRUCTIVE_SCOPE_MISMATCH`) — this side just stops feeding it anything else.
@@ -100,7 +111,14 @@ function gateRefusalCause(apiCenterUrl: string): string | null {
     operatorDestructiveAction: COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION,
   };
   const res = validateApprovalPrerequisites(input);
-  return res.ok ? null : res.cause;
+  if (!res.ok) return res.cause;
+  // The gate is pure and only proves the identity is BOUND. Prove it is also TRUE: HEAD must be the commit the
+  // bootstrap pinned, in this repository, with a clean tree. Without this a leftover `.env` from a consumed
+  // approval reaches PREPARED carrying a SHA that does not describe the running code — `REVOKED` by contract
+  // §1.6. The display CLI performs the identical check, so the manifest the operator approved and the run they
+  // approved it for cannot describe different code.
+  const identity = verifyIdentity({ expectedSha: input.gitSha, repoRoot: REPO_ROOT });
+  return identity.ok ? null : `${identity.cause}: ${identity.reason}`;
 }
 
 /* ────────────────────────────── sentinels (operator readiness + completion) ────────────────────────────── */
@@ -156,16 +174,22 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Approval gate — the destructive run must reach a PREPARED manifest for THIS bootstrapped identity. A missing/
-  // softened destructive descriptor, an unbound identity, an off-target host, or a withdrawn calibration flag
-  // (SELECTORS_NOT_CALIBRATED) all refuse here. NOTHING launches on refusal.
+  // Approval gate + repository identity — the destructive run must reach a PREPARED manifest for THIS
+  // bootstrapped identity, AND the running code must be the commit that identity pins. A missing/softened
+  // destructive descriptor, an unbound identity, an off-target host, a withdrawn calibration flag
+  // (SELECTORS_NOT_CALIBRATED), a re-described scope (DESTRUCTIVE_SCOPE_MISMATCH), a drifted HEAD, or a dirty
+  // tree all refuse here. NOTHING launches on refusal.
   const refusal = gateRefusalCause(url);
   if (refusal) {
     console.error(`Refusing to start the WING key-DELETION run: approval_prerequisite (${refusal}). No browser launched.`);
     console.error(
       refusal === "SELECTORS_NOT_CALIBRATED"
         ? "  The 삭제 selector calibration is withdrawn. Restore it only from a fresh READ-ONLY delete selector probe."
-        : "  Re-bootstrap a valid identity + destructive Approval Manifest, then retry.",
+        : refusal.startsWith("HEAD_DRIFT") || refusal.startsWith("DIRTY_TREE")
+          ? "  The running code is not the commit this approval names — the grant is REVOKED (contract §1.6). Commit or stash, then re-bootstrap."
+          : refusal.startsWith("WRONG_REPOSITORY") || refusal.startsWith("GIT_UNREADABLE")
+            ? "  Repository state could not be verified — refusing rather than assuming the code is unchanged."
+            : "  Re-bootstrap a valid identity + destructive Approval Manifest, then retry.",
     );
     process.exit(4);
     return;
