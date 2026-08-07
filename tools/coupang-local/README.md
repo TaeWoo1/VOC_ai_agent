@@ -71,3 +71,54 @@ credential and trigger the connect-test → first sync → idempotent re-sync.
 
 Re-running `bootstrap.sh` mints a **new** approval id; the old one is dead and any prior grant is `REVOKED`.
 A code / branch / run / scope change after preflight also `REVOKED`s the approval — re-bootstrap and re-run.
+
+---
+
+## The WING selector probe — a second, browser-only harness
+
+`wing-probe-bootstrap.sh` / `wing-probe-preflight.sh` prepare a **different** kind of run: the read-only
+Coupang WING **selector probe** (`collector/src/cli/probe-wing-issuance-selectors.ts`), which opens the
+seller's dedicated Chrome window and measures each target's fixed-label **match count** on the page the
+seller navigated to themselves.
+
+It shares nothing with the order-routine proof above: **no backend, no DB, no frontend, no credential, no
+Coupang API call** — which is exactly why it needs its own bootstrap/preflight rather than the backend
+armed-binding gate. The manifest is produced by the same tested source of truth as every calibration phase,
+`collector/src/cli/approval-manifest-cli.ts`; these scripts only prove the prerequisites that gate cannot
+see.
+
+```bash
+# 1. mint the run identity + fix the probe scope (default: the delete-selector calibration scope)
+tools/coupang-local/wing-probe-bootstrap.sh
+#    a different scope is a different approval:
+#    SELLEROPS_WING_PROBE_TARGETS=issue,credentials tools/coupang-local/wing-probe-bootstrap.sh
+
+# 2. preflight: local checks + the sanitized Approval Manifest (no browser, no Coupang call)
+tools/coupang-local/wing-probe-preflight.sh
+
+# 3. on PREFLIGHT PASS the operator reads the manifest and grants in one line: "Seated and ready."
+#    then, in a shell bound to this run:
+set -a; . tools/coupang-local/.run/wing-probe.env; set +a
+cd collector && npx tsx src/cli/probe-wing-issuance-selectors.ts -- --i-understand-this-opens-live-coupang-wing
+```
+
+Sourcing the run env in step 3 is not optional: it carries `SELLEROPS_WING_PROBE_TARGETS`, and a probe run
+whose scope differs from the approved manifest is an out-of-scope run (contract §1.3).
+
+### What the WING preflight proves (and cannot)
+
+| Proves | Cannot prove |
+|---|---|
+| Run identity is bootstrapped and bound; the phase is the READ_ONLY selector probe, never the destructive deletion phase | That the seller's WING account is in the already-issued state the 삭제 target needs |
+| **No code drift**: HEAD equals the bootstrap commit **and** the working tree is clean, so the manifest's `gitSHA` names the code that will actually run | Whether the WING page layout changed since the last calibration (that is what the probe measures) |
+| The probe is immediately executable: collector deps installed, entrypoint present, dedicated profile inside the collector tree, a launchable browser | That the operator can log in (human-only auth — no CAPTCHA/2FA is ever touched) |
+| The manifest carries the exact per-run probe scope, so the operator approves which targets are measured | — |
+
+`wing-probe-selfcheck.sh` regression-tests all of the above **hermetically** (no browser, no backend, no
+Coupang call): missing run env, unbound identity, wrong phase, git drift, dirty tree, non-canonical probe
+scope, and the PASS path — including the guard that a CLI-launched phase never hands the operator a frontend
+URL. Its `NORMAL` case is skipped while the working tree is dirty, because a dirty tree is refused by design;
+commit or stash first to exercise the PASS path.
+
+The probe measures counts only: **no highlight, no click, no input, no value read** (never Access Key /
+Secret Key / 업체코드), no 발급 / 재발급 / 삭제, and it never navigates the window — the seller does.
