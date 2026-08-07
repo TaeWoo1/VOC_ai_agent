@@ -16,9 +16,9 @@ import {
   runWingSelectorRecord,
   wingFaultFingerprint,
   type WingRecordSignal,
+  type WingRecordTarget,
   type WingSelectorRecordDeps,
 } from "../../src/cli/probe-wing-issuance-selectors";
-import type { WingHighlightTarget } from "../../src/action-window/coupang-wing-issuance-driver";
 import type { WingObservation } from "../../src/cli/coupang-wing-classifier";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -133,12 +133,12 @@ const OBS: WingObservation = {
 const UNIQUE = { matchCount: 1, canHighlight: true, sig: "a1b2c3d4e5f60718" };
 
 interface FakeOptions {
-  matches?: Partial<Record<WingHighlightTarget, { matchCount: number; canHighlight: boolean; sig?: string }>>;
+  matches?: Partial<Record<WingRecordTarget, { matchCount: number; canHighlight: boolean; sig?: string }>>;
   signal?: WingRecordSignal;
 }
 
-function fakeDeps(o: FakeOptions = {}): { deps: WingSelectorRecordDeps; probed: WingHighlightTarget[] } {
-  const probed: WingHighlightTarget[] = [];
+function fakeDeps(o: FakeOptions = {}): { deps: WingSelectorRecordDeps; probed: WingRecordTarget[] } {
+  const probed: WingRecordTarget[] = [];
   const deps: WingSelectorRecordDeps = {
     waitForReady: async () => o.signal ?? "ready",
     observeSurface: async () => OBS,
@@ -152,12 +152,12 @@ function fakeDeps(o: FakeOptions = {}): { deps: WingSelectorRecordDeps; probed: 
 }
 
 describe("wing selector recorder — read-only walk", () => {
-  it("probes exactly the highlightable candidates (never the guidance-only reach_open_api/return)", async () => {
+  it("probes exactly the highlightable candidates + the delete control (never the guidance-only reach_open_api/return)", async () => {
     const { deps, probed } = fakeDeps();
     await runWingSelectorRecord(deps);
-    expect(probed).toEqual(["self_dev", "vendor_info", "call_ip", "issue", "credentials"]);
-    expect(WING_RECORD_TARGETS).not.toContain("reach_open_api" as WingHighlightTarget);
-    expect(WING_RECORD_TARGETS).not.toContain("return" as WingHighlightTarget);
+    expect(probed).toEqual(["self_dev", "vendor_info", "call_ip", "issue", "credentials", "delete"]);
+    expect(WING_RECORD_TARGETS).not.toContain("reach_open_api" as WingRecordTarget);
+    expect(WING_RECORD_TARGETS).not.toContain("return" as WingRecordTarget);
   });
 
   it("records each candidate's matchCount + role + fixed-label + sig16, and tallies uniqueness honestly", async () => {
@@ -166,7 +166,7 @@ describe("wing selector recorder — read-only walk", () => {
 
     expect(result.aborted).toBe(false);
     expect(result.observation).toEqual(OBS);
-    expect(result.uniqueCandidates).toBe(5);
+    expect(result.uniqueCandidates).toBe(6);
     expect(result.nonUniqueCandidates).toBe(0);
     expect(result.calibration).toBe("LIVE_DOM_CALIBRATION_PENDING");
 
@@ -178,10 +178,23 @@ describe("wing selector recorder — read-only walk", () => {
     expect(issue.sig16).toBe("a1b2c3d4e5f60718");
   });
 
+  it("measures the 삭제 (delete) control read-only as a button candidate on the already-issued page", async () => {
+    // The delete candidate rides the SAME already-issued page as issue/credentials; the recorder COUNTS it
+    // value-free (so a later live run can calibrate 삭제) — it is never highlighted or pressed here.
+    const { deps } = fakeDeps({ matches: { delete: { matchCount: 1, canHighlight: true, sig: "dede1234dede5678" } } });
+    const result = await runWingSelectorRecord(deps);
+    const del = result.targets.find((t) => t.target === "delete")!;
+    expect(del.role).toBe("button");
+    expect(del.label).toBe("삭제");
+    expect(del.matchCount).toBe(1);
+    expect(del.canHighlight).toBe(true);
+    expect(del.sig16).toBe("dede1234dede5678");
+  });
+
   it("flags a candidate that did not resolve uniquely (sig16 null, counted as non-unique)", async () => {
     const { deps } = fakeDeps({ matches: { call_ip: { matchCount: 3, canHighlight: false } } });
     const result = await runWingSelectorRecord(deps);
-    expect(result.uniqueCandidates).toBe(4);
+    expect(result.uniqueCandidates).toBe(5);
     expect(result.nonUniqueCandidates).toBe(1);
     const callIp = result.targets.find((t) => t.target === "call_ip")!;
     expect(callIp.matchCount).toBe(3);
@@ -205,7 +218,7 @@ describe("wing selector recorder — read-only walk", () => {
     // A real page navigating/closing under the observe read → CONTEXT_DESTROYED fingerprint, observation null,
     // and the candidate probes still run (the record is not lost). A candidate probe that throws → per-target
     // fault, matchCount 0, and the loop continues to the rest.
-    const probed: WingHighlightTarget[] = [];
+    const probed: WingRecordTarget[] = [];
     const deps: WingSelectorRecordDeps = {
       waitForReady: async () => "ready",
       observeSurface: async () => {
@@ -222,7 +235,7 @@ describe("wing selector recorder — read-only walk", () => {
     expect(result.observation).toBeNull();
     expect(result.observationFault).toBe("CONTEXT_DESTROYED");
     // Every candidate was still attempted despite the observe failure + one probe throwing.
-    expect(probed).toEqual(["self_dev", "vendor_info", "call_ip", "issue", "credentials"]);
+    expect(probed).toEqual(["self_dev", "vendor_info", "call_ip", "issue", "credentials", "delete"]);
     const issue = result.targets.find((t) => t.target === "issue")!;
     expect(issue.fault).toBe("TARGET_CLOSED");
     expect(issue.matchCount).toBe(0);

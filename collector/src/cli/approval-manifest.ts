@@ -63,6 +63,14 @@ export const CALIBRATION_PHASES = [
   // WING selector uniqueness (always `LIVE_DOM_CALIBRATION_PENDING`) so a later live run can flip calibration —
   // so it does NOT itself require calibrated selectors. Its entry URL is screened to the WING host (§ step 4).
   "COUPANG_WING_SELECTOR_PROBE",
+  // The Coupang WING key-DELETION destructive phase. The AGENT stays READ_ONLY (it highlights the 삭제 control
+  // and rests at a checkpoint; it NEVER clicks/deletes); the DESTRUCTIVE, IRREVERSIBLE action is the OPERATOR's
+  // (deleting their WING self-developed Open API key — which immediately invalidates the existing Access/Secret
+  // Key and is NOT recoverable). It highlights a real control ⇒ `allowsHighlight: true` ⇒ it FAILS CLOSED
+  // (`SELECTORS_NOT_CALIBRATED`) while WING is `LIVE_DOM_CALIBRATION_PENDING`; and it also requires the immutable
+  // operator-destructive-action contract (§ steps 7 + destructive-action check). Its scope is a marketplace
+  // mutation the operator performs, so it is the FIRST phase to carry an `operatorDestructiveAction` descriptor.
+  "COUPANG_WING_KEY_DELETION",
   // Not a calibration phase — the FE-run-host live proof of the existing-app guided issuance tutorial. It is
   // listed here because this is the set of phases the approval gate can emit + prerequisite-check. Unlike the
   // four calibration phases (CLI-launched dedicated window), its OPERATOR entrypoint is the bound FE URL: the
@@ -114,6 +122,40 @@ export const FE_LIVE_PROOF_SUPPORTING_SURFACE = [
   "bridge carrier",
 ] as const;
 
+/**
+ * **The operator-performed DESTRUCTIVE marketplace action a phase is scoped around** (first used by
+ * `COUPANG_WING_KEY_DELETION`). The distinction this encodes: the AGENT never mutates the marketplace — its
+ * `mode` stays `READ_ONLY` (it highlights the control and rests at a checkpoint). The destructive, IRREVERSIBLE
+ * change is the OPERATOR's own click, and the run's SCOPE authorizes exactly that. This mirrors how the
+ * coupang-local harness's `mode: WRITE` names writes to *our* system while marketplace calls stay read-only —
+ * here the marketplace-destructive action is named explicitly, as the operator's, with a mandatory checkpoint and
+ * a zero credential-value-read budget. Every field is an immutable literal; the gate refuses any manifest whose
+ * declared contract diverges, so a caller can never soften the invariant.
+ */
+export const COUPANG_WING_KEY_DELETION_OPERATION = "DELETE_WING_OPEN_API_KEY" as const;
+export interface OperatorDestructiveAction {
+  /** The destructive operation the OPERATOR performs (never the agent). */
+  operation: typeof COUPANG_WING_KEY_DELETION_OPERATION;
+  /** The deleted key cannot be restored — a NEW key must be issued to recover. */
+  irreversible: true;
+  /** Deleting immediately invalidates the existing Access/Secret Key (every signed call auth-fails). */
+  invalidatesExistingCredentialImmediately: true;
+  /** The agent highlights the control only; it never clicks/deletes — the operator does. */
+  agentPerformsAction: false;
+  /** A mandatory operator checkpoint (irreversibility warning) precedes the destructive action. */
+  explicitCheckpointRequired: true;
+  /** Zero credential-value reads (Access Key / Secret Key / 업체코드) during the run. */
+  credentialValueReadBudget: 0;
+}
+export const COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION: OperatorDestructiveAction = {
+  operation: COUPANG_WING_KEY_DELETION_OPERATION,
+  irreversible: true,
+  invalidatesExistingCredentialImmediately: true,
+  agentPerformsAction: false,
+  explicitCheckpointRequired: true,
+  credentialValueReadBudget: 0,
+};
+
 export interface PhaseSpec {
   phase: CalibrationPhase;
   /** The EXACT CLI entrypoint (repo-relative) this phase runs. */
@@ -131,6 +173,14 @@ export interface PhaseSpec {
    * present, host sends no START_RUN, no standalone proof client, FE URL bound to this run id).
    */
   requiresFeRunHostContract?: boolean;
+  /**
+   * Whether this phase's run is scoped around an operator-performed DESTRUCTIVE marketplace action. When true the
+   * gate additionally enforces the immutable {@link OperatorDestructiveAction} contract (operation, irreversible,
+   * immediate credential invalidation, agent-performs-nothing, mandatory checkpoint, zero value read).
+   */
+  requiresOperatorDestructiveAction?: boolean;
+  /** The canonical destructive-action descriptor emitted into the manifest (present iff the flag above is set). */
+  operatorDestructiveAction?: OperatorDestructiveAction;
   mode: "READ_ONLY";
   /** Visual-recon only: the fixed, closed set of API-center screens the redacted-screenshot recon may capture. */
   captureScreens?: readonly string[];
@@ -258,6 +308,30 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     allowsHighlight: false,
     mode: "READ_ONLY",
   },
+  COUPANG_WING_KEY_DELETION: {
+    phase: "COUPANG_WING_KEY_DELETION",
+    // PLANNED driver/CLI — deliberately NOT yet built. It cannot be honestly validated until the 삭제 control is
+    // live-calibrated (WING is `LIVE_DOM_CALIBRATION_PENDING`), so referencing it here makes the run fail closed
+    // at the CLI layer too (`CLI_DRIVER_UNCONFIRMED`: the entrypoint file is absent) IN ADDITION to
+    // `SELECTORS_NOT_CALIBRATED`. Both must be resolved (build the driver AND calibrate 삭제) before a PREPARED
+    // destructive manifest is ever emittable.
+    cli: "src/cli/run-coupang-wing-deletion-live.ts",
+    driver: "CoupangWingDeletionDriver (Action Window highlight/observe — the operator deletes; the agent never clicks)",
+    // AGENT capability is READ_ONLY highlight/observe: open the window, wait for the operator to reach the
+    // already-issued page, classify it, reveal + highlight the 삭제 control, and rest at the checkpoint. It NEVER
+    // clicks/deletes and reads no value — the destructive click is the operator's (see operatorDestructiveAction).
+    capableActions: [
+      "OPEN_DEDICATED_WINDOW",
+      "WAIT_OPERATOR_LOGIN_NAV",
+      "CLASSIFY_SANITIZED_PAGE_CATEGORY",
+      "REVEAL_SECTION_IN_VIEWPORT",
+      "HIGHLIGHT_REAL_CONTROL",
+    ],
+    allowsHighlight: true, // ⇒ requires calibrated WING selectors (LIVE_DOM_CALIBRATION_PENDING ⇒ fails closed)
+    mode: "READ_ONLY", // AGENT mode — the destructive marketplace action is the OPERATOR's (operatorDestructiveAction)
+    requiresOperatorDestructiveAction: true,
+    operatorDestructiveAction: COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION,
+  },
 };
 
 /** Why the prerequisites were not met. Each maps to a `PREFLIGHT FAIL: approval_prerequisite (<cause>)`. */
@@ -292,6 +366,10 @@ export const APPROVAL_PREREQ_CAUSES = [
   "HOST_SENDS_START_RUN",
   "PROOF_CLIENT_NOT_FORBIDDEN",
   "RUNID_URL_MISMATCH",
+  // Operator-performed DESTRUCTIVE marketplace action (`COUPANG_WING_KEY_DELETION`): the run is scoped around an
+  // irreversible operator deletion, so its immutable descriptor must be present and exactly the canonical values.
+  "MISSING_DESTRUCTIVE_ACTION_CONTRACT",
+  "DESTRUCTIVE_ACTION_CONTRACT_MISMATCH",
 ] as const;
 export type ApprovalPrereqCause = (typeof APPROVAL_PREREQ_CAUSES)[number];
 
@@ -313,6 +391,7 @@ export const ENTRYPOINT_PHASES = [
   "API_CENTER_VISUAL_RECON",
   "API_ISSUANCE_SELECTOR_PROBE",
   "COUPANG_WING_SELECTOR_PROBE",
+  "COUPANG_WING_KEY_DELETION",
   "API_ISSUANCE_FE_LIVE_PROOF",
   "NAVER_GUIDED_CONNECTION",
 ] as const;
@@ -378,6 +457,20 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
     entrypointCommandId: "probe-wing-issuance-selectors",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 오픈API 발급 화면에서 준비되면 ready 를 보내세요. SellerOps는 강조 없이 각 대상의 고정 라벨 일치 수만 읽습니다(클릭·입력·값 읽기 없음).",
+    emitsFrontendUrl: false,
+  },
+  // The Coupang WING key-DELETION phase: a CLI-launched dedicated Chrome (never a frontend URL). The seller logs
+  // in to WING + reaches the already-issued open-API page themselves; SellerOps highlights ONLY the 삭제 control
+  // location and RESTS at an explicit checkpoint that warns the deletion is irreversible and immediately
+  // invalidates the existing key. The operator deletes themselves — SellerOps never clicks/deletes, and reads no
+  // value (Access Key / Secret Key / 업체코드).
+  COUPANG_WING_KEY_DELETION: {
+    entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
+    cli: "src/cli/run-coupang-wing-deletion-live.ts",
+    entrypointCommandId: "run-coupang-wing-deletion-live",
+    operatorActionSummary:
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 이미 발급된 오픈API 화면에서 준비되면 ready 를 보내세요. " +
+      "SellerOps는 삭제 버튼 위치만 강조하고 멈춥니다. 삭제는 되돌릴 수 없고 기존 키가 즉시 무효화됩니다 — 삭제는 직접 누르세요(클릭·입력·값 읽기 없음).",
     emitsFrontendUrl: false,
   },
   // The FE-run-host issuance live proof: the operator's ONE action is opening the bound FE wizard URL. The
@@ -498,6 +591,12 @@ export interface ApprovalPrereqInput {
     /** The bound FE wizard path; must carry `walkthroughRun=<this run id>`. */
     boundFrontendPath: string;
   };
+  /**
+   * Operator-performed DESTRUCTIVE marketplace action descriptor (required ONLY for a phase with
+   * `requiresOperatorDestructiveAction`, e.g. `COUPANG_WING_KEY_DELETION`; ignored otherwise). Validated field-by-
+   * field against the immutable {@link OperatorDestructiveAction} constant, so a caller cannot soften it.
+   */
+  operatorDestructiveAction?: OperatorDestructiveAction;
 }
 
 /** The sanitized manifest — no raw URL (host category only), no secret, no raw account/store id. */
@@ -547,6 +646,12 @@ export interface ApprovalManifest {
   writeBudget?: { credential: number; test: number; sync: number };
   /** The bound FE wizard path carrying this run's id (`/connect/naver?walkthroughRun=<runId>`). */
   boundFrontendPath?: string;
+  /**
+   * The operator-performed DESTRUCTIVE marketplace action this run is scoped around (present ONLY on a phase with
+   * `requiresOperatorDestructiveAction`). The agent's `mode` stays `READ_ONLY`; this block is what makes the
+   * irreversible operator action explicit in what the operator approves. Absent on every non-destructive phase.
+   */
+  operatorDestructiveAction?: OperatorDestructiveAction;
   expiresAt: "process-lifetime";
   gitSha: string;
 }
@@ -601,7 +706,7 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
   // API-center host. Both return the same `{ ok, reason, urlCategory }` shape, so the manifest's `apiCenterHost`
   // (a host CATEGORY enum, never the raw URL) is filled uniformly below.
   const screen =
-    spec.phase === "COUPANG_WING_SELECTOR_PROBE"
+    spec.phase === "COUPANG_WING_SELECTOR_PROBE" || spec.phase === "COUPANG_WING_KEY_DELETION"
       ? screenWingUrl(input.apiCenterUrl)
       : screenApiCenterUrl(input.apiCenterUrl);
   if (!screen.ok) {
@@ -631,11 +736,13 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
 
   // 7) The highlight-proof phase requires the control selectors to be calibrated for real (not fixtures).
   // `SELECTORS_CALIBRATED` is the NAVER API-center adapter flag; it is NOT the Coupang WING calibration status.
-  // The WING selector probe is precisely the step that MEASURES WING uniqueness (always
-  // `LIVE_DOM_CALIBRATION_PENDING`), so its manifest reports `false` — honest, and it never highlights so the
-  // gate below is skipped anyway.
-  const calibrated =
-    input.selectorsCalibrated ?? (spec.phase === "COUPANG_WING_SELECTOR_PROBE" ? false : SELECTORS_CALIBRATED);
+  // EVERY Coupang WING phase is `LIVE_DOM_CALIBRATION_PENDING` (no WING selector has ever been live-calibrated),
+  // so a WING phase reports `false` unless the caller explicitly overrides. This is what makes the WING key-
+  // deletion phase (which HIGHLIGHTS the 삭제 control) FAIL CLOSED with `SELECTORS_NOT_CALIBRATED` today: it can
+  // only reach PREPARED once a live read-only probe confirms the 삭제 control resolves uniquely and the override
+  // is set. The read-only WING selector probe never highlights, so the gate below is skipped for it regardless.
+  const isWingPhase = spec.phase === "COUPANG_WING_SELECTOR_PROBE" || spec.phase === "COUPANG_WING_KEY_DELETION";
+  const calibrated = input.selectorsCalibrated ?? (isWingPhase ? false : SELECTORS_CALIBRATED);
   if (spec.allowsHighlight && !calibrated) {
     return fail(
       "SELECTORS_NOT_CALIBRATED",
@@ -757,6 +864,33 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
     }
   }
 
+  // 12) Operator-performed DESTRUCTIVE marketplace action. When the phase is scoped around an irreversible
+  // operator action (e.g. WING key deletion), its immutable descriptor MUST be present and EXACTLY the canonical
+  // values — so a caller can never soften irreversibility, claim the agent performs the action, drop the
+  // mandatory checkpoint, or open a credential-value-read budget. Order-stable ⇒ deterministic refusal cause.
+  // NOTE: this runs AFTER the selectors gate (step 7), so an uncalibrated WING deletion phase fails closed with
+  // `SELECTORS_NOT_CALIBRATED` first — the destructive descriptor cannot mask the calibration requirement.
+  if (spec.requiresOperatorDestructiveAction) {
+    const d = input.operatorDestructiveAction;
+    if (!d) {
+      return fail("MISSING_DESTRUCTIVE_ACTION_CONTRACT", `${spec.phase} requires the operator-destructive-action descriptor`);
+    }
+    const canon = spec.operatorDestructiveAction ?? COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION;
+    if (
+      d.operation !== canon.operation ||
+      d.irreversible !== true ||
+      d.invalidatesExistingCredentialImmediately !== true ||
+      d.agentPerformsAction !== false ||
+      d.explicitCheckpointRequired !== true ||
+      d.credentialValueReadBudget !== 0
+    ) {
+      return fail(
+        "DESTRUCTIVE_ACTION_CONTRACT_MISMATCH",
+        `the destructive-action descriptor must be exactly {operation:${canon.operation}, irreversible:true, invalidatesExistingCredentialImmediately:true, agentPerformsAction:false, explicitCheckpointRequired:true, credentialValueReadBudget:0}`,
+      );
+    }
+  }
+
   const manifest: ApprovalManifest = {
     approvalId: input.approvalId,
     walkthroughRunId: input.runId,
@@ -804,6 +938,13 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
           writeBudget: { credential: 0, test: 0, sync: 0 },
           boundFrontendPath: input.startRunContract.boundFrontendPath,
         }
+      : {}),
+    // Destructive phase only: surface the operator-performed irreversible action so the operator approves exactly
+    // it. Validation above forced the input to equal the immutable constant, so emit the CONSTANT from the spec —
+    // the manifest is then structurally incapable of carrying a softened value even if a future edit reorders the
+    // checks.
+    ...(spec.requiresOperatorDestructiveAction && spec.operatorDestructiveAction
+      ? { operatorDestructiveAction: spec.operatorDestructiveAction }
       : {}),
     expiresAt: "process-lifetime",
     gitSha: input.gitSha,

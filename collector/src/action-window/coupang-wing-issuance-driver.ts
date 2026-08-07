@@ -81,6 +81,25 @@ function isWingHighlightTarget(target: CoupangIssuanceTarget): target is WingHig
   return target === "self_dev" || target === "vendor_info" || target === "call_ip" || target === "issue" || target === "credentials";
 }
 
+/**
+ * The key-DELETION fixed-label target, kept DELIBERATELY SEPARATE from {@link WingHighlightTarget} /
+ * `CoupangIssuanceTarget`: deleting is NOT a step in the issuance walk, so it must not leak into the issuance
+ * target union (which drives the guided sequence). It is a highlightable WING label the read-only selector
+ * recorder can COUNT on the already-issued page, so a later live run can calibrate the 삭제 control before any
+ * highlight-delete phase is ever allowed to reach a PREPARED manifest.
+ */
+export type WingDeletionTarget = "delete";
+
+/**
+ * **CANDIDATE / LIVE_DOM_CALIBRATION_PENDING.** Proposed fixed WING label for the 삭제 (delete) control on the
+ * already-issued open-API page. Like {@link WING_HIGHLIGHT_LABELS} this is a PROPOSAL from the visible WING UI —
+ * a live read-only probe must confirm it resolves to exactly one element before it is ever trusted/highlighted.
+ */
+export const WING_DELETION_CALIBRATION = LIVE_DOM_CALIBRATION_PENDING;
+export const WING_DELETION_LABELS: Readonly<Record<WingDeletionTarget, { candidateQuery: string; exactText: string; tagAncestor?: string }>> = {
+  delete: { candidateQuery: "button,a,span,div", exactText: "삭제" },
+};
+
 /** Default seated-operator observe window (the seller works in the WING window). Tests override to instant. */
 export const DEFAULT_WING_OBSERVE_TIMEOUT_MS = 10 * 60_000;
 const SETTLE_TIMEOUT_MS = 15_000;
@@ -277,7 +296,19 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
    * parks upstream (`target_not_found` recoverable).
    */
   private async resolveFixedLabelTarget(target: WingHighlightTarget, tag: boolean): Promise<LocateResult> {
-    const spec = WING_HIGHLIGHT_LABELS[target];
+    return this.resolveFixedLabelSpec(WING_HIGHLIGHT_LABELS[target], tag);
+  }
+
+  /**
+   * The generic value-free fixed-label locate: run the audited {@link buildFixedLabelLocateScript} for ANY fixed
+   * WING label spec (issuance target OR the deletion target), returning only `{ count, sig? }`. Shared by
+   * {@link resolveFixedLabelTarget} and {@link probeFixedLabelMatch} so the deletion probe uses the exact same
+   * value-free path as the issuance probe — no new text/attribute/value read is introduced.
+   */
+  private async resolveFixedLabelSpec(
+    spec: { candidateQuery: string; exactText: string; tagAncestor?: string },
+    tag: boolean,
+  ): Promise<LocateResult> {
     const script = buildFixedLabelLocateScript({
       candidateQuery: spec.candidateQuery,
       exactText: spec.exactText,
@@ -315,7 +346,23 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
    * 업체코드). The `sig` is computed in-page from tag + position + child count only — never any value/attribute.
    */
   async probeTargetMatch(target: WingHighlightTarget): Promise<{ matchCount: number; canHighlight: boolean; sig?: string }> {
-    const res = await this.resolveFixedLabelTarget(target, false);
+    return this.probeFixedLabelMatch(WING_HIGHLIGHT_LABELS[target]);
+  }
+
+  /**
+   * READ-ONLY selector-recorder seam for ANY fixed WING label spec (issuance targets AND the deletion 삭제
+   * target): measure how many candidates the fixed-label locator matches on the CURRENT page, whether it resolves
+   * uniquely (`matchCount === 1`), and — for a unique match — its opaque 16-hex structural signature. Runs the same
+   * value-free {@link resolveFixedLabelSpec} locate WITHOUT tagging and mounts NO overlay, so it never mutates the
+   * page, clicks, types, or reads a field value (incl. Access Key / Secret Key / 업체코드). Lets the recorder
+   * calibrate the 삭제 control on the already-issued page without ever pressing or highlighting it.
+   */
+  async probeFixedLabelMatch(spec: {
+    candidateQuery: string;
+    exactText: string;
+    tagAncestor?: string;
+  }): Promise<{ matchCount: number; canHighlight: boolean; sig?: string }> {
+    const res = await this.resolveFixedLabelSpec(spec, false);
     const matchCount = typeof res?.count === "number" && res.count >= 0 ? res.count : 0;
     const canHighlight = matchCount === 1;
     return canHighlight && res.sig ? { matchCount, canHighlight, sig: res.sig } : { matchCount, canHighlight };
