@@ -25,10 +25,12 @@ import {
   type EntrypointSpec,
 } from "../../src/cli/approval-manifest";
 import { VISUAL_RECON_SCREENS } from "../../src/action-window/api-issuance-calibration/visual-recon";
+import { WING_DEFAULT_URL } from "../../src/cli/coupang-wing-classifier";
 
 const OBS = PHASE_SPECS.API_CENTER_STRUCTURE_OBSERVATION;
 const HL = PHASE_SPECS.API_ISSUANCE_HIGHLIGHT_PROOF;
 const VR = PHASE_SPECS.API_CENTER_VISUAL_RECON;
+const WSP = PHASE_SPECS.COUPANG_WING_SELECTOR_PROBE;
 
 /** A fully-valid visual-recon input; individual tests override one field to prove a refusal. */
 function baseVisualRecon(): ApprovalPrereqInput {
@@ -105,6 +107,26 @@ function baseFeLiveProof(): ApprovalPrereqInput {
       forbidStandaloneProofClient: true,
       boundFrontendPath: `/connect/naver?walkthroughRun=${runId}`,
     },
+  };
+}
+
+/** A fully-valid Coupang WING selector-probe input; individual tests override one field to prove a refusal. */
+function baseWingSelectorProbe(): ApprovalPrereqInput {
+  return {
+    ...baseObservation(),
+    phase: WSP.phase,
+    channel: "COUPANG",
+    accountBinding: "operator-owned Coupang WING test account",
+    apiCenterUrl: WING_DEFAULT_URL,
+    cli: WSP.cli,
+    driver: WSP.driver,
+    declaredActions: WSP.capableActions,
+    // The WING probe carries NO hotkey and writes NO raw artifact (like the NAVER selector probe).
+    hotkey: undefined,
+    artifactPath: undefined,
+    surface: "Coupang WING Open API",
+    operation: "WING open-API read-only selector probe",
+    maxActions: "1 read-only WING selector probe session",
   };
 }
 
@@ -236,6 +258,78 @@ describe("calibration phase separation", () => {
       expect(r.manifest.phase).toBe("API_ISSUANCE_HIGHLIGHT_PROOF");
       expect(r.manifest.allowedActions).toContain("HIGHLIGHT_REAL_CONTROL");
       expect(r.manifest.selectorsCalibrated).toBe(true);
+    }
+  });
+});
+
+describe("Coupang WING selector-probe phase (COUPANG_WING_SELECTOR_PROBE)", () => {
+  it("PREPARED manifest: READ-only, no highlight, WING host category, CLI-launched window", () => {
+    const r = validateApprovalPrerequisites(baseWingSelectorProbe());
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const m = r.manifest;
+      expect(m.phase).toBe("COUPANG_WING_SELECTOR_PROBE");
+      expect(m.channel).toBe("COUPANG");
+      expect(m.cli).toBe("src/cli/probe-wing-issuance-selectors.ts");
+      expect(m.driver).toBe(WSP.driver);
+      expect(m.mode).toBe("READ_ONLY");
+      expect(m.selectorsCalibrated).toBe(false); // WING is LIVE_DOM_CALIBRATION_PENDING; the probe does not need it
+      expect(m.allowedActions).not.toContain("HIGHLIGHT_REAL_CONTROL");
+      expect(m.allowedActions).toContain("PROBE_TARGET_MATCHCOUNT");
+      // Entry URL is reduced to a WING host CATEGORY — the raw WING URL never enters the manifest.
+      expect(m.apiCenterHost).toBe("wing_host");
+      expect(JSON.stringify(m)).not.toContain("wing.coupang.com");
+      // CLI-launched dedicated window — never a frontend URL.
+      expect(m.entrypointType).toBe("CLI_LAUNCHED_DEDICATED_WINDOW");
+      expect(m.entrypointCommandId).toBe("probe-wing-issuance-selectors");
+    }
+  });
+
+  it("does NOT require calibrated selectors (it is what measures uniqueness)", () => {
+    // Unlike the NAVER highlight proof, the WING probe never highlights, so a false selectorsCalibrated is fine.
+    const r = validateApprovalPrerequisites({ ...baseWingSelectorProbe(), selectorsCalibrated: false });
+    expect(r.ok).toBe(true);
+  });
+
+  it("declaring a highlight action → FAIL (the probe's driver only counts, never highlights)", () => {
+    const r = validateApprovalPrerequisites({
+      ...baseWingSelectorProbe(),
+      declaredActions: [...WSP.capableActions, "HIGHLIGHT_REAL_CONTROL"],
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("HIGHLIGHT_ACTION_IN_OBSERVATION_PHASE");
+  });
+
+  it("a non-WING (NAVER API-center) URL → FAIL (INVALID_HOST): a NAVER host never screens for the WING probe", () => {
+    const r = validateApprovalPrerequisites({ ...baseWingSelectorProbe(), apiCenterUrl: NAVER_API_CENTER_BASE_URL });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("INVALID_HOST");
+  });
+
+  it("an off-target / missing URL → FAIL", () => {
+    expect(validateApprovalPrerequisites({ ...baseWingSelectorProbe(), apiCenterUrl: "https://evil.example.com/x" }).ok).toBe(false);
+    const r = validateApprovalPrerequisites({ ...baseWingSelectorProbe(), apiCenterUrl: undefined });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("MISSING_URL");
+  });
+
+  it("wrong cli/driver (e.g. the NAVER probe) → FAIL (CLI_DRIVER_UNCONFIRMED)", () => {
+    const r = validateApprovalPrerequisites({ ...baseWingSelectorProbe(), cli: "src/cli/probe-issuance-selectors.ts" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("CLI_DRIVER_UNCONFIRMED");
+  });
+
+  it("the WING probe entrypoint is a CLI-launched window and carries no frontend URL", () => {
+    const FRONTEND_URL_TOKENS = ["/connect/naver", "?walkthroughRun=", "http://", "https://"];
+    expect(PHASE_ENTRYPOINTS.COUPANG_WING_SELECTOR_PROBE.entrypointType).toBe("CLI_LAUNCHED_DEDICATED_WINDOW");
+    expect(PHASE_ENTRYPOINTS.COUPANG_WING_SELECTOR_PROBE.emitsFrontendUrl).toBe(false);
+    expect(validateEntrypointContract("COUPANG_WING_SELECTOR_PROBE", PHASE_ENTRYPOINTS.COUPANG_WING_SELECTOR_PROBE).ok).toBe(true);
+    const r = validateApprovalPrerequisites(baseWingSelectorProbe());
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      for (const tok of FRONTEND_URL_TOKENS) {
+        expect(JSON.stringify(r.manifest).includes(tok), `WING probe manifest must not contain "${tok}"`).toBe(false);
+      }
     }
   });
 });

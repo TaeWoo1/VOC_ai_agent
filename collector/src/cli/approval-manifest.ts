@@ -39,6 +39,9 @@
 import { SELECTORS_CALIBRATED } from "../action-window/api-issuance/api-center-adapter";
 import { VISUAL_RECON_SCREENS, isCanonicalVisualReconSubset } from "../action-window/api-issuance-calibration/visual-recon";
 import { screenApiCenterUrl } from "./observe-api-center";
+// Pure leaf (zero imports): the Coupang WING host screen for the WING selector-probe phase. Screening the
+// entry URL to the WING host (not the NAVER API-center host) is the ONLY channel-specific step in this gate.
+import { screenWingUrl } from "./coupang-wing-classifier";
 
 /**
  * The calibration phases. Their driver capabilities differ, so their manifests/approvals are separate:
@@ -53,6 +56,13 @@ export const CALIBRATION_PHASES = [
   "API_ISSUANCE_HIGHLIGHT_PROOF",
   "API_CENTER_VISUAL_RECON",
   "API_ISSUANCE_SELECTOR_PROBE",
+  // The Coupang WING analog of `API_ISSUANCE_SELECTOR_PROBE`: a READ-ONLY run of the CoupangWingIssuanceDriver's
+  // OWN fixed-label matchCount probe against the real WING open-API issuance page. It COUNTS how many candidates
+  // each highlight target's fixed WING label matches (value-free integer + a highlightable boolean + an opaque
+  // structural sig) and NEVER highlights, tags, clicks, types, or reads a value. It is the step that MEASURES
+  // WING selector uniqueness (always `LIVE_DOM_CALIBRATION_PENDING`) so a later live run can flip calibration —
+  // so it does NOT itself require calibrated selectors. Its entry URL is screened to the WING host (§ step 4).
+  "COUPANG_WING_SELECTOR_PROBE",
   // Not a calibration phase — the FE-run-host live proof of the existing-app guided issuance tutorial. It is
   // listed here because this is the set of phases the approval gate can emit + prerequisite-check. Unlike the
   // four calibration phases (CLI-launched dedicated window), its OPERATOR entrypoint is the bound FE URL: the
@@ -229,6 +239,25 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     allowsHighlight: false,
     mode: "READ_ONLY",
   },
+  COUPANG_WING_SELECTOR_PROBE: {
+    phase: "COUPANG_WING_SELECTOR_PROBE",
+    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    driver: "CoupangWingIssuanceDriver (read-only fixed-label matchCount probe)",
+    // Read-only: open the dedicated window, wait for the operator to log in + navigate to the WING open-API
+    // issuance page, classify + census the sanitized page, then COUNT how many candidates each highlight
+    // target's fixed WING label matches (a value-free integer + a highlightable boolean). It NEVER highlights,
+    // tags, clicks, or reads a value — it validates the WING driver's own locate mechanism so a later live run
+    // can flip `LIVE_DOM_CALIBRATION_PENDING`; it therefore does NOT itself require calibrated selectors.
+    capableActions: [
+      "OPEN_DEDICATED_WINDOW",
+      "WAIT_OPERATOR_LOGIN_NAV",
+      "CLASSIFY_SANITIZED_PAGE_CATEGORY",
+      "STRUCTURAL_CENSUS",
+      "PROBE_TARGET_MATCHCOUNT",
+    ],
+    allowsHighlight: false,
+    mode: "READ_ONLY",
+  },
 };
 
 /** Why the prerequisites were not met. Each maps to a `PREFLIGHT FAIL: approval_prerequisite (<cause>)`. */
@@ -283,6 +312,7 @@ export const ENTRYPOINT_PHASES = [
   "API_ISSUANCE_HIGHLIGHT_PROOF",
   "API_CENTER_VISUAL_RECON",
   "API_ISSUANCE_SELECTOR_PROBE",
+  "COUPANG_WING_SELECTOR_PROBE",
   "API_ISSUANCE_FE_LIVE_PROOF",
   "NAVER_GUIDED_CONNECTION",
 ] as const;
@@ -337,6 +367,17 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
     entrypointCommandId: "probe-issuance-selectors",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 직접 로그인·이동한 뒤 각 화면에서 준비되면 ready 를 보내세요. SellerOps는 강조 없이 각 대상의 고정 라벨 일치 수만 읽습니다(클릭·입력·값 읽기 없음).",
+    emitsFrontendUrl: false,
+  },
+  // The Coupang WING selector probe: a CLI-launched dedicated Chrome (never a frontend URL). The seller logs in
+  // to WING + reaches the open-API 발급 page themselves; SellerOps reads only each target's fixed-label match
+  // count — no highlight, no click, no input, no value read.
+  COUPANG_WING_SELECTOR_PROBE: {
+    entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
+    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    entrypointCommandId: "probe-wing-issuance-selectors",
+    operatorActionSummary:
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 오픈API 발급 화면에서 준비되면 ready 를 보내세요. SellerOps는 강조 없이 각 대상의 고정 라벨 일치 수만 읽습니다(클릭·입력·값 읽기 없음).",
     emitsFrontendUrl: false,
   },
   // The FE-run-host issuance live proof: the operator's ONE action is opening the bound FE wizard URL. The
@@ -556,9 +597,15 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
   if (!input.apiCenterUrl || input.apiCenterUrl.length === 0) {
     return fail("MISSING_URL", "the API-center URL is required and must be present before the manifest is prepared");
   }
-  const screen = screenApiCenterUrl(input.apiCenterUrl);
+  // The WING selector probe screens its entry URL to the Coupang WING host; every NAVER phase screens to the
+  // API-center host. Both return the same `{ ok, reason, urlCategory }` shape, so the manifest's `apiCenterHost`
+  // (a host CATEGORY enum, never the raw URL) is filled uniformly below.
+  const screen =
+    spec.phase === "COUPANG_WING_SELECTOR_PROBE"
+      ? screenWingUrl(input.apiCenterUrl)
+      : screenApiCenterUrl(input.apiCenterUrl);
   if (!screen.ok) {
-    return fail("INVALID_HOST", `API-center URL failed screening (reason=${screen.reason}); must be the API-center/auth host`);
+    return fail("INVALID_HOST", `entry URL failed screening (reason=${screen.reason}); must be the run's API-center / WING / auth host`);
   }
 
   // 5) Required env must all be present.
@@ -583,7 +630,12 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
   }
 
   // 7) The highlight-proof phase requires the control selectors to be calibrated for real (not fixtures).
-  const calibrated = input.selectorsCalibrated ?? SELECTORS_CALIBRATED;
+  // `SELECTORS_CALIBRATED` is the NAVER API-center adapter flag; it is NOT the Coupang WING calibration status.
+  // The WING selector probe is precisely the step that MEASURES WING uniqueness (always
+  // `LIVE_DOM_CALIBRATION_PENDING`), so its manifest reports `false` — honest, and it never highlights so the
+  // gate below is skipped anyway.
+  const calibrated =
+    input.selectorsCalibrated ?? (spec.phase === "COUPANG_WING_SELECTOR_PROBE" ? false : SELECTORS_CALIBRATED);
   if (spec.allowsHighlight && !calibrated) {
     return fail(
       "SELECTORS_NOT_CALIBRATED",
