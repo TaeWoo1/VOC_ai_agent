@@ -25,6 +25,11 @@
 #   DEFAULT_OUT       → PASS twice in a row on the default temp path
 #   BOOTSTRAP_DIRTY   → FAIL (the bootstrap itself refuses to pin a SHA against a dirty tree)
 #   GIT_STATUS_FAIL   → FAIL (an unreadable `git status` must never be read as "clean")
+#   HOME_IGNORE_HIDE  → FAIL ($HOME/.config/git/ignore is a DEFAULT PATH no config pin suppresses)
+#   HOME_CONFIG_HIDE  → FAIL (a hostile $HOME/.gitconfig core.excludesFile must not hide dirt)
+#   ASSUME_UNCHANGED  → FAIL (an index-hidden path needs no env var, so env stripping never reaches it)
+#   LSFILES_FAIL      → FAIL (an unreadable index must not read as "nothing is hidden")
+#   COLLECTOR_ESCAPE  → FAIL (an out-of-repo collector would verify one tree and describe another)
 #   DESCRIPTOR        → the canonical descriptor is accepted, every softening and an absent one refused, and
 #                       the preflight ACTS on that verdict (fixture-driven: the gate makes a softened
 #                       descriptor unproducible through the CLI, so end-to-end cannot reach this)
@@ -44,7 +49,12 @@ DIRT_FILE="$REPO_ROOT/.wing-deletion-selfcheck-dirty.tmp"
 # Remove any residue from a previous crashed run BEFORE reading the tree state — otherwise a leftover marker
 # would report the tree as dirty forever and silently skip the PASS-path cases.
 rm -f "$DIRT_FILE"
-cleanup() { rm -rf "$FIXTURES"; rm -f "$DIRT_FILE"; }
+# The assume-unchanged case marks a tracked file; clearing it in the trap means an interrupted run cannot
+# leave the repository in a state where a later real preflight refuses for a reason nobody remembers.
+cleanup() {
+  rm -rf "$FIXTURES"; rm -f "$DIRT_FILE"
+  git -C "$REPO_ROOT" update-index --no-assume-unchanged tools/coupang-local/README.md 2>/dev/null || true
+}
 trap cleanup EXIT INT TERM
 
 CUR_GIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
@@ -269,6 +279,47 @@ if [ -z "$TREE_DIRTY" ]; then
   fi
   rm -f "$DIRT_FILE"
 
+  # $HOME/.config/git/ignore is read from a DEFAULT PATH, not through core.excludesFile — so pinning the config
+  # files does NOT close it and a prepared HOME hides untracked files with no config involved. (Review
+  # demonstrated exactly this surviving the config pin.) Only the `-c core.excludesFile=/dev/null` closes it.
+  : > "$DIRT_FILE"
+  HOSTILE_HOME="$FIXTURES/hostile-home"; mkdir -p "$HOSTILE_HOME/.config/git"
+  printf '%s\n' ".wing-deletion-selfcheck-dirty.tmp" > "$HOSTILE_HOME/.config/git/ignore"
+  run_case "HOME_IGNORE_HIDE (\$HOME/.config/git/ignore ignored)" nonzero "working tree is dirty" "$FIXTURES/normal.env" \
+    "HOME=$HOSTILE_HOME"
+  # …and the same via a hostile global gitconfig, which the config pin is what closes.
+  printf '[core]\n\texcludesFile = %s/ex\n' "$HOSTILE_HOME" > "$HOSTILE_HOME/.gitconfig"
+  printf '%s\n' ".wing-deletion-selfcheck-dirty.tmp" > "$HOSTILE_HOME/ex"
+  run_case "HOME_CONFIG_HIDE (\$HOME/.gitconfig excludesFile ignored)" nonzero "working tree is dirty" "$FIXTURES/normal.env" \
+    "HOME=$HOSTILE_HOME"
+  rm -f "$DIRT_FILE"
+
+  # `--assume-unchanged` needs NO environment variable, so stripping the git env never reaches it: a modified
+  # tracked file simply stops appearing in `status --porcelain`. Marked on a file the run does not depend on,
+  # and cleared immediately afterwards whether the case passes or fails.
+  MARKED_PATH="tools/coupang-local/README.md"
+  git -C "$REPO_ROOT" update-index --assume-unchanged "$MARKED_PATH" 2>/dev/null
+  run_case "ASSUME_UNCHANGED (index-hidden path refused)" nonzero "invisible to git status" "$FIXTURES/normal.env"
+  git -C "$REPO_ROOT" --no-optional-locks update-index --no-assume-unchanged "$MARKED_PATH" 2>/dev/null
+
+  # An unreadable INDEX must not read as "nothing is hidden" — the same fail-open shape as a failing `status`.
+  # Piping `ls-files -v` straight into `grep -c` prints 0 on error and would render as "working tree clean".
+  LSBIN="$FIXTURES/lsbin"; mkdir -p "$LSBIN"
+  cat > "$LSBIN/git" <<FAKE
+#!/usr/bin/env bash
+for a in "\$@"; do [ "\$a" = "ls-files" ] && exit 128; done
+exec "$(command -v git)" "\$@"
+FAKE
+  chmod +x "$LSBIN/git"
+  run_case "LSFILES_FAIL    (unreadable index is not \"nothing hidden\")" nonzero "could not read the git index" \
+    "$FIXTURES/normal.env" "PATH=$LSBIN:$PATH"
+
+  # The collector must be THIS repository's collector, or the drift check verifies one checkout while the
+  # manifest is built from another and the displayed provenance line describes a tree nothing looked at.
+  OTHER_COLLECTOR="$FIXTURES/other/collector"; mkdir -p "$OTHER_COLLECTOR"
+  run_case "COLLECTOR_ESCAPE (out-of-repo collector refused)" nonzero "points outside this repository" \
+    "$FIXTURES/normal.env" "SELLEROPS_COLLECTOR_DIR=$OTHER_COLLECTOR"
+
   # A git that FAILS must never be read as "clean". No other case produces this, because a healthy checkout
   # never errors — so it is injected: a `git` earlier on PATH that forwards everything except `status`, which
   # exits 128. Without the guard the empty stdout looks exactly like a clean tree.
@@ -300,7 +351,9 @@ FAKE
 else
   run_case "DIRTY_TREE      (uncommitted change refused)" nonzero "working tree is dirty" "$FIXTURES/normal.env"
   echo "  SKIP  NORMAL / SCOPE_OVERRIDE / GIT_DIR_HIJACK / UNTRACKED_HIDE / EXCLUDES_HIDE / BOOTSTRAP_DIRTY /"
-  echo "        GIT_STATUS_FAIL / DEFAULT_OUT — the working tree is dirty, which the preflight refuses by design."
+  echo "        GIT_STATUS_FAIL / HOME_IGNORE_HIDE / HOME_CONFIG_HIDE / ASSUME_UNCHANGED / LSFILES_FAIL /"
+  echo "        COLLECTOR_ESCAPE / DEFAULT_OUT — the working tree is dirty, which the preflight refuses by"
+  echo "        design."
   echo "        Commit or stash, then re-run to exercise the PASS path."
 fi
 

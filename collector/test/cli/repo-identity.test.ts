@@ -8,8 +8,12 @@
  * and the failure modes can be produced exactly rather than approximated.
  */
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 import {
   PINNED_GIT_ENV,
+  hardenedGitFlags,
   REPO_IDENTITY_CAUSES,
   STRIPPED_GIT_ENV_VARS,
   sanitizedGitEnv,
@@ -266,6 +270,53 @@ describe("verifyRepoIdentity — dirt hidden WITHOUT an env var is still caught"
     const r = verify({ ...WITH_LSFILES, "ls-files -v": { status: 128, stdout: "" } });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.cause).toBe("GIT_UNREADABLE");
+  });
+});
+
+describe("repo-identity — the shell harness mirrors this module", () => {
+  // Both files assert in prose that "the two must not be able to read different trees". Prose is not a test:
+  // the shell copy could quietly lose a variable or a `-c` flag and nothing would notice, because the shell
+  // selfcheck can only exercise the bypasses someone thought to write a case for. This asserts the mirror.
+  const SHELL = resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    "../../../tools/coupang-local/wing-harness-common.sh",
+  );
+  const src = readFileSync(SHELL, "utf8");
+  const hardened = src.slice(src.indexOf("git_hardened() {"), src.indexOf("\n}", src.indexOf("git_hardened() {")));
+
+  it("strips every variable this module strips", () => {
+    for (const v of STRIPPED_GIT_ENV_VARS) {
+      if (v in PINNED_GIT_ENV) continue; // pinned below, not unset
+      expect(hardened, `${v} must be stripped in git_hardened`).toContain(`-u ${v}`);
+    }
+  });
+
+  it("pins every config file this module pins", () => {
+    for (const [k, v] of Object.entries(PINNED_GIT_ENV)) {
+      expect(hardened, `${k} must be pinned in git_hardened`).toContain(`${k}=${v}`);
+    }
+  });
+
+  it("carries every hardened -c flag, including the ones an env pin cannot cover", () => {
+    // `core.excludesFile` has a DEFAULT PATH ($HOME/.config/git/ignore) that no config-file pin suppresses —
+    // review demonstrated the bypass surviving the pin alone. `safe.directory` is pinned because pinning the
+    // global config removes the operator's own entry.
+    for (const flag of ["status.showUntrackedFiles=normal", "core.excludesFile=/dev/null", "safe.directory="]) {
+      expect(hardened, `git_hardened must pass -c ${flag}`).toContain(flag);
+    }
+    for (const flag of hardenedGitFlags("/repo")) {
+      if (flag === "-c") continue;
+      const key = flag.split("=")[0]!;
+      expect(hardened, `git_hardened is missing ${key}`).toContain(key);
+    }
+  });
+
+  it("also checks the index bits — a marked path is invisible to `status` in either layer", () => {
+    expect(src).toContain("ls-files -v");
+    // …and captures git's exit status instead of piping into `grep -c`, which prints 0 on failure and would
+    // render an unreadable index as "working tree clean".
+    expect(src).toContain("marked_rc=$?");
+    expect(src).not.toMatch(/ls-files -v 2>\/dev\/null \| grep/);
   });
 });
 

@@ -40,7 +40,14 @@ import { realpathSync } from "node:fs";
  * Stripping `GIT_CONFIG_GLOBAL` is NOT sufficient on its own: git then falls back to `$XDG_CONFIG_HOME/git/config`
  * and `$HOME/.gitconfig`, so a hostile `HOME` re-opens exactly the `core.excludesFile` hole. The config files are
  * therefore PINNED to /dev/null by {@link sanitizedGitEnv} rather than merely unset — see {@link PINNED_GIT_ENV}.
- * This mirrors the harness's `git_hardened`, deliberately: the two must not be able to read different trees.
+ *
+ * And pinning the config files is STILL not sufficient, because `$XDG_CONFIG_HOME/git/ignore` (default
+ * `$HOME/.config/git/ignore`) is read from a DEFAULT PATH, not through any config key — so the same hostile
+ * `HOME` hides untracked files with no config involved at all. That one is closed by the explicit
+ * `-c core.excludesFile=/dev/null` in {@link runGitHardened}, which overrides the default path without
+ * suppressing the repository's own tracked `.gitignore`.
+ * This mirrors the harness's `git_hardened`, deliberately: the two must not be able to read different trees,
+ * and `repo-identity.test.ts` asserts the shell script carries every one of these flags.
  */
 export const STRIPPED_GIT_ENV_VARS = [
   "GIT_DIR",
@@ -71,7 +78,14 @@ export type GitRunner = (args: readonly string[]) => GitRunResult;
  * to `$XDG_CONFIG_HOME/git/config` → `$HOME/.gitconfig`, so an operator shell with a prepared `HOME` could
  * still supply a `core.excludesFile` that hides untracked files from `status --porcelain` — the same bypass
  * `GIT_CONFIG_PARAMETERS` was stripped to close. Pointing both at /dev/null closes it without unsetting `HOME`
- * (which git needs for other things). Repo-local config still applies, and must: it is part of the checkout.
+ * (which git needs for other things). It is only HALF the fix — `$HOME/.config/git/ignore` is a default PATH,
+ * not a config key, and is closed by the `-c core.excludesFile=/dev/null` in {@link hardenedGitFlags}.
+ *
+ * **Residual surface, stated honestly:** repo-LOCAL state is still trusted — `.git/config`, `.git/info/exclude`,
+ * and index bits. `.git/config` is NOT committed, so this is a deliberate trust decision, not a property of the
+ * checkout: someone with write access to `.git/` can hide dirt from these checks. The index bits are the one
+ * part of that we DO close (the `ls-files -v` step in {@link verifyRepoIdentity}), because a single ordinary
+ * command sets them. The rest takes deliberate action inside the repository, not an inherited variable.
  */
 export const PINNED_GIT_ENV: Readonly<Record<string, string>> = Object.freeze({
   GIT_CONFIG_GLOBAL: "/dev/null",
@@ -94,10 +108,28 @@ export function sanitizedGitEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return { ...out, ...PINNED_GIT_ENV };
 }
 
+/**
+ * Command-line `-c` overrides applied to every hardened git call. These close what the ENVIRONMENT alone
+ * cannot: `core.excludesFile` has a DEFAULT PATH (`$XDG_CONFIG_HOME/git/ignore`, i.e. `$HOME/.config/git/ignore`)
+ * that no config-file pin suppresses, and `safe.directory` would otherwise be read from the now-pinned global
+ * config — so a repo owned by another uid (sudo clone, shared volume, some container mounts) would abort with
+ * `dubious ownership` and surface only as an opaque "not reading this repository".
+ */
+export function hardenedGitFlags(repoRoot: string): readonly string[] {
+  return [
+    "-c",
+    "status.showUntrackedFiles=normal",
+    "-c",
+    "core.excludesFile=/dev/null",
+    "-c",
+    `safe.directory=${repoRoot}`,
+  ];
+}
+
 /** The production runner: git in `repoRoot`, ambient git env stripped, untracked reporting forced on. */
 export function runGitHardened(repoRoot: string): GitRunner {
   return (args) => {
-    const res = spawnSync("git", ["-C", repoRoot, "-c", "status.showUntrackedFiles=normal", ...args], {
+    const res = spawnSync("git", ["-C", repoRoot, ...hardenedGitFlags(repoRoot), ...args], {
       encoding: "utf8",
       env: sanitizedGitEnv(process.env),
     });
@@ -220,7 +252,9 @@ export function verifyRepoIdentity(input: VerifyRepoIdentityInput): RepoIdentity
     return {
       ok: false,
       cause: "DIRTY_TREE",
-      reason: `${hidden.length} path(s) marked assume-unchanged/skip-worktree — changes there are invisible to git status`,
+      reason:
+        `${hidden.length} path(s) marked assume-unchanged/skip-worktree — changes there are invisible to git ` +
+        "status; clear the marks, or run from a full (non-sparse) checkout",
     };
   }
   return { ok: true, head: headSha };

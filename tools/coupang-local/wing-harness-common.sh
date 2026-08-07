@@ -28,14 +28,23 @@ fail() { echo "  FAIL  $*"; FAILED=1; }
 # The config files are PINNED to /dev/null rather than merely unset. Unsetting GIT_CONFIG_GLOBAL makes git fall
 # back to $XDG_CONFIG_HOME/git/config → $HOME/.gitconfig, so a prepared HOME re-opens exactly that
 # core.excludesFile hole. Pinning closes it without unsetting HOME, which git needs for other things.
-# Mirrors `sanitizedGitEnv` / `PINNED_GIT_ENV` in collector/src/cli/repo-identity.ts — the TS gate performs the
-# same verification independently, and the two must not be able to read different trees.
+#
+# Pinning the config FILES is still only half of it: $XDG_CONFIG_HOME/git/ignore (default
+# $HOME/.config/git/ignore) is read from a DEFAULT PATH, not through any config key, so the same prepared HOME
+# hides untracked files with no config involved. `-c core.excludesFile=/dev/null` overrides that default path
+# without suppressing the repository's own tracked .gitignore. `-c safe.directory` is pinned too: with the
+# global config gone, a repo owned by another uid would abort with "dubious ownership" and surface only as an
+# opaque "not reading this repository".
+# Mirrors `sanitizedGitEnv` / `PINNED_GIT_ENV` / `hardenedGitFlags` in collector/src/cli/repo-identity.ts — the
+# TS gate performs the same verification independently, and the two must not be able to read different trees.
+# `repo-identity.test.ts` asserts THIS FILE carries every one of those variables and flags.
 git_hardened() {
   env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY \
       -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_COMMON_DIR -u GIT_CEILING_DIRECTORIES \
       -u GIT_CONFIG_COUNT -u GIT_CONFIG_NOSYSTEM -u GIT_CONFIG_PARAMETERS \
       GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
-      git -C "$REPO_ROOT" -c status.showUntrackedFiles=normal "$@"
+      git -C "$REPO_ROOT" -c status.showUntrackedFiles=normal -c core.excludesFile=/dev/null \
+          -c "safe.directory=$REPO_ROOT" "$@"
 }
 
 # Resolve a path through symlinks; empty on failure (callers MUST treat empty as a refusal, never as a match).
@@ -133,12 +142,21 @@ check_no_code_drift() {
   elif [ -z "$dirt" ]; then
     # `status` alone does not prove it: `--assume-unchanged` / `--skip-worktree` hide a modified tracked file
     # with no environment variable at all. `ls-files -v` tags those paths lowercase (assume-unchanged) or `S`.
-    local marked
-    marked="$(git_hardened ls-files -v 2>/dev/null | grep -cE '^[a-z]|^S ')"
-    if [ "${marked:-0}" != "0" ]; then
-      fail "$marked path(s) marked assume-unchanged/skip-worktree — changes there are invisible to git status; clear them and re-bootstrap"
+    #
+    # The output is captured BEFORE it is counted, deliberately. Piping straight into `grep -c` discards git's
+    # exit status and prints `0` when git errors — the same fail-OPEN shape the `status` check above refuses,
+    # and it would render as "working tree clean".
+    local marked_out marked_rc marked
+    marked_out="$(git_hardened ls-files -v 2>/dev/null)"; marked_rc=$?
+    if [ "$marked_rc" != "0" ]; then
+      fail "could not read the git index (exit $marked_rc) — refusing rather than assuming nothing is hidden"
     else
-      pass "working tree clean — the running code IS commit $CUR_GIT"
+      marked="$(printf '%s\n' "$marked_out" | grep -cE '^[a-z]|^S ')"
+      if [ "${marked:-0}" != "0" ]; then
+        fail "$marked path(s) marked assume-unchanged/skip-worktree — changes there are invisible to git status; clear the marks, or run from a full (non-sparse) checkout"
+      else
+        pass "working tree clean — the running code IS commit $CUR_GIT"
+      fi
     fi
   else
     fail "working tree is dirty — commit or stash first, then re-bootstrap (the manifest's gitSHA must name the code that runs):"
