@@ -22,7 +22,17 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 COLLECTOR_DIR="${SELLEROPS_COLLECTOR_DIR:-$REPO_ROOT/collector}"
 RUN_ENV="${SELLEROPS_WING_PROBE_RUN_ENV:-$HERE/.run/wing-probe.env}"
-MANIFEST_OUT="${SELLEROPS_MANIFEST_OUT:-$(mktemp "${TMPDIR:-/tmp}/coupang-wing-probe-manifest.XXXXXX.json")}"
+# BSD mktemp substitutes only TRAILING X's: a `.XXXXXX.json` template creates a file named literally that,
+# which then collides on the next run. Take a temp DIRECTORY and name the file inside it instead.
+MANIFEST_OUT="${SELLEROPS_MANIFEST_OUT:-}"
+if [ -z "$MANIFEST_OUT" ]; then
+  MANIFEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/coupang-wing-probe.XXXXXX")" || MANIFEST_DIR=""
+  MANIFEST_OUT="${MANIFEST_DIR:+$MANIFEST_DIR/manifest.json}"
+fi
+if [ -z "$MANIFEST_OUT" ]; then
+  echo "PREFLIGHT FAIL — could not create a manifest path under ${TMPDIR:-/tmp}. No manifest prepared, no approval requested."
+  exit 1
+fi
 # A bootstrapped identity authorizes preparation only for the session that minted it (contract §2:
 # `expiresAt: process-lifetime`). Two hours is the outer bound for one seated calibration session.
 IDENTITY_TTL_SECONDS=7200
@@ -60,7 +70,7 @@ elif isinstance(v, list):
     v = ",".join(v)
 if v is None or v == "":
     sys.exit(1)
-print(v)' "$MANIFEST_OUT" "$1"
+print(v)' "$MANIFEST_OUT" "$1" 2>/dev/null
 }
 
 # ---- 0. run identity (required; from wing-probe-bootstrap.sh) -----------------
