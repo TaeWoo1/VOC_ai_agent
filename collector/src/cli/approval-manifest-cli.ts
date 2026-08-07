@@ -28,6 +28,7 @@ import { CALIBRATION_PHASES } from "./approval-manifest";
 import { resolveVisualReconScope } from "../action-window/api-issuance-calibration/visual-recon";
 // The public WING host default for the Coupang WING selector-probe phase (pure leaf; no per-run input needed).
 import { WING_DEFAULT_URL } from "./coupang-wing-classifier";
+import { COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION } from "./approval-manifest";
 
 const COLLECTOR_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -50,7 +51,9 @@ export function runApprovalManifestCli(): number {
   // per-run operator input is needed to reach PREPARED) unless the operator preset a deep link; screened in
   // `validateApprovalPrerequisites`. The raw URL is never printed — only its host category enters the manifest.
   const isWingSelectorProbe = phase === "COUPANG_WING_SELECTOR_PROBE";
-  const apiCenterUrl = isWingSelectorProbe
+  const isWingKeyDeletion = phase === "COUPANG_WING_KEY_DELETION";
+  const isWingPhase = isWingSelectorProbe || isWingKeyDeletion;
+  const apiCenterUrl = isWingPhase
     ? (env("COUPANG_WING_URL") ?? WING_DEFAULT_URL)
     : (env("NAVER_API_CENTER_URL") ?? NAVER_API_CENTER_BASE_URL);
 
@@ -82,7 +85,9 @@ export function runApprovalManifestCli(): number {
     : isStructureObs
       ? (env("SELLEROPS_CALIBRATION_ARTIFACT") ?? `.calibration/api-center-${env("WALKTHROUGH_RUN_ID") ?? "unknown"}.json`)
       : undefined;
-  const defaultOperation = isWingSelectorProbe
+  const defaultOperation = isWingKeyDeletion
+    ? "WING open-API key deletion (operator-performed, irreversible; agent highlights only)"
+    : isWingSelectorProbe
     ? "WING open-API read-only selector probe"
     : isVisualRecon
     ? "API Center redacted visual recon"
@@ -93,7 +98,9 @@ export function runApprovalManifestCli(): number {
         : isFeLiveProof
           ? "existing-app guided issuance tutorial — FE-run-host READ-only live proof (open_app→api_group→credentials→return)"
           : "API issuance highlight proof (new-app or existing-app)";
-  const defaultMaxActions = isWingSelectorProbe
+  const defaultMaxActions = isWingKeyDeletion
+    ? "1 highlight-only session: SellerOps highlights the 삭제 control + rests at the irreversible-delete checkpoint; the OPERATOR deletes; 0 agent click/type/value read"
+    : isWingSelectorProbe
     ? "1 read-only WING selector probe session"
     : isVisualRecon
     ? "1 redacted visual recon session"
@@ -123,10 +130,10 @@ export function runApprovalManifestCli(): number {
 
   const input: ApprovalPrereqInput = {
     phase,
-    channel: env("SELLEROPS_APPROVAL_CHANNEL") ?? (isWingSelectorProbe ? "COUPANG" : "NAVER"),
+    channel: env("SELLEROPS_APPROVAL_CHANNEL") ?? (isWingPhase ? "COUPANG" : "NAVER"),
     accountBinding:
       env("SELLEROPS_APPROVAL_ACCOUNT") ??
-      (isWingSelectorProbe ? "operator-owned Coupang WING test account" : "operator-owned test store"),
+      (isWingPhase ? "operator-owned Coupang WING test account" : "operator-owned test store"),
     mode: spec.mode,
     apiCenterUrl,
     // Confirm the EXACT cli/driver from the spec — but only if the entrypoint really exists on disk.
@@ -141,9 +148,13 @@ export function runApprovalManifestCli(): number {
     approvalId: env("WALKTHROUGH_APPROVAL_ID") ?? "unknown",
     gitSha: env("WALKTHROUGH_GIT_COMMIT") ?? "unknown",
     maxActions: env("SELLEROPS_APPROVAL_MAX") ?? defaultMaxActions,
-    surface: env("SELLEROPS_APPROVAL_SURFACE") ?? (isWingSelectorProbe ? "Coupang WING Open API" : "Commerce API Center"),
+    surface: env("SELLEROPS_APPROVAL_SURFACE") ?? (isWingPhase ? "Coupang WING Open API" : "Commerce API Center"),
     operation: env("SELLEROPS_APPROVAL_OPERATION") ?? defaultOperation,
     startRunContract,
+    // The WING key-deletion phase is scoped around an operator-performed irreversible action — carry its immutable
+    // descriptor so the gate can enforce it. (The run still fails closed today: the planned deletion CLI is absent
+    // ⇒ CLI_DRIVER_UNCONFIRMED, and WING selectors are uncalibrated ⇒ SELECTORS_NOT_CALIBRATED.)
+    operatorDestructiveAction: isWingKeyDeletion ? COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION : undefined,
   };
 
   const res = validateApprovalPrerequisites(input);

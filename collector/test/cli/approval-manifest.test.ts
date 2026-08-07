@@ -21,8 +21,11 @@ import {
   FE_LIVE_PROOF_SUPPORTING_SURFACE,
   FE_LIVE_PROOF_START_RUN_OWNER,
   FE_LIVE_PROOF_MAX_START_RUN,
+  COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION,
+  COUPANG_WING_KEY_DELETION_OPERATION,
   type ApprovalPrereqInput,
   type EntrypointSpec,
+  type OperatorDestructiveAction,
 } from "../../src/cli/approval-manifest";
 import { VISUAL_RECON_SCREENS } from "../../src/action-window/api-issuance-calibration/visual-recon";
 import { WING_DEFAULT_URL } from "../../src/cli/coupang-wing-classifier";
@@ -31,6 +34,7 @@ const OBS = PHASE_SPECS.API_CENTER_STRUCTURE_OBSERVATION;
 const HL = PHASE_SPECS.API_ISSUANCE_HIGHLIGHT_PROOF;
 const VR = PHASE_SPECS.API_CENTER_VISUAL_RECON;
 const WSP = PHASE_SPECS.COUPANG_WING_SELECTOR_PROBE;
+const WKD = PHASE_SPECS.COUPANG_WING_KEY_DELETION;
 
 /** A fully-valid visual-recon input; individual tests override one field to prove a refusal. */
 function baseVisualRecon(): ApprovalPrereqInput {
@@ -127,6 +131,31 @@ function baseWingSelectorProbe(): ApprovalPrereqInput {
     surface: "Coupang WING Open API",
     operation: "WING open-API read-only selector probe",
     maxActions: "1 read-only WING selector probe session",
+  };
+}
+
+/**
+ * The WING key-deletion destructive phase. It HIGHLIGHTS the 삭제 control ⇒ requires calibrated WING selectors,
+ * which are `LIVE_DOM_CALIBRATION_PENDING` — so it fails closed UNLESS a test explicitly sets
+ * `selectorsCalibrated: true` (standing in for a future live 삭제 calibration). Carries the immutable
+ * operator-destructive-action descriptor.
+ */
+function baseWingKeyDeletion(): ApprovalPrereqInput {
+  return {
+    ...baseObservation(),
+    phase: WKD.phase,
+    channel: "COUPANG",
+    accountBinding: "operator-owned Coupang WING test account",
+    apiCenterUrl: WING_DEFAULT_URL,
+    cli: WKD.cli,
+    driver: WKD.driver,
+    declaredActions: WKD.capableActions,
+    hotkey: undefined,
+    artifactPath: undefined,
+    surface: "Coupang WING Open API",
+    operation: "WING open-API key deletion (operator-performed, irreversible; agent highlights only)",
+    maxActions: "1 highlight-only session; the OPERATOR deletes; 0 agent click/type/value read",
+    operatorDestructiveAction: COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION,
   };
 }
 
@@ -331,6 +360,125 @@ describe("Coupang WING selector-probe phase (COUPANG_WING_SELECTOR_PROBE)", () =
         expect(JSON.stringify(r.manifest).includes(tok), `WING probe manifest must not contain "${tok}"`).toBe(false);
       }
     }
+  });
+});
+
+describe("Coupang WING key-deletion destructive phase (COUPANG_WING_KEY_DELETION)", () => {
+  it("FAILS CLOSED by default (SELECTORS_NOT_CALIBRATED): a destructive highlight cannot PREPARE while WING is uncalibrated", () => {
+    // The headline fail-closed proof: the phase highlights the 삭제 control, WING is LIVE_DOM_CALIBRATION_PENDING,
+    // so with no explicit override the gate refuses — a PREPARED destructive manifest is IMPOSSIBLE today.
+    const r = validateApprovalPrerequisites(baseWingKeyDeletion());
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("SELECTORS_NOT_CALIBRATED");
+  });
+
+  it("the destructive descriptor does NOT mask the calibration requirement (selectors gate runs first)", () => {
+    // Even with a perfectly-formed destructive contract, an uncalibrated WING deletion phase still fails at the
+    // selectors gate — the descriptor can never buy past the calibration requirement.
+    const r = validateApprovalPrerequisites({
+      ...baseWingKeyDeletion(),
+      operatorDestructiveAction: COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("SELECTORS_NOT_CALIBRATED");
+  });
+
+  it("PREPARED destructive manifest shape once 삭제 is (stand-in) calibrated: agent READ_ONLY + operator irreversible action", () => {
+    // selectorsCalibrated:true stands in for a future live 삭제 calibration. The manifest then carries the exact
+    // destructive descriptor: agent performs nothing, irreversible, immediate invalidation, mandatory checkpoint,
+    // zero value read — and the AGENT mode stays READ_ONLY (the destructive click is the operator's).
+    const r = validateApprovalPrerequisites({ ...baseWingKeyDeletion(), selectorsCalibrated: true });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const m = r.manifest;
+      expect(m.phase).toBe("COUPANG_WING_KEY_DELETION");
+      expect(m.channel).toBe("COUPANG");
+      expect(m.mode).toBe("READ_ONLY"); // AGENT mode — never a marketplace WRITE by the agent
+      expect(m.allowedActions).toContain("HIGHLIGHT_REAL_CONTROL");
+      expect(m.apiCenterHost).toBe("wing_host");
+      expect(m.selectorsCalibrated).toBe(true);
+      expect(m.entrypointType).toBe("CLI_LAUNCHED_DEDICATED_WINDOW");
+      expect(m.entrypointCommandId).toBe("run-coupang-wing-deletion-live");
+      // The operator-performed destructive descriptor, exactly the immutable canonical values.
+      expect(m.operatorDestructiveAction).toEqual({
+        operation: COUPANG_WING_KEY_DELETION_OPERATION,
+        irreversible: true,
+        invalidatesExistingCredentialImmediately: true,
+        agentPerformsAction: false,
+        explicitCheckpointRequired: true,
+        credentialValueReadBudget: 0,
+      });
+      // The manifest never leaks the raw WING URL.
+      expect(JSON.stringify(m)).not.toContain("wing.coupang.com");
+    }
+  });
+
+  it("MISSING the destructive descriptor → FAIL (MISSING_DESTRUCTIVE_ACTION_CONTRACT) even when calibrated", () => {
+    const r = validateApprovalPrerequisites({
+      ...baseWingKeyDeletion(),
+      selectorsCalibrated: true,
+      operatorDestructiveAction: undefined,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("MISSING_DESTRUCTIVE_ACTION_CONTRACT");
+  });
+
+  it("a SOFTENED destructive descriptor → FAIL (DESTRUCTIVE_ACTION_CONTRACT_MISMATCH)", () => {
+    // Each divergence from the immutable contract is refused — a caller cannot claim the agent deletes, deny
+    // irreversibility, drop the checkpoint, or open a value-read budget.
+    const softenings: Array<Partial<OperatorDestructiveAction>> = [
+      { agentPerformsAction: true as unknown as false },
+      { irreversible: false as unknown as true },
+      { invalidatesExistingCredentialImmediately: false as unknown as true },
+      { explicitCheckpointRequired: false as unknown as true },
+      { credentialValueReadBudget: 1 as unknown as 0 },
+      { operation: "DELETE_SOMETHING_ELSE" as unknown as typeof COUPANG_WING_KEY_DELETION_OPERATION },
+    ];
+    for (const soft of softenings) {
+      const r = validateApprovalPrerequisites({
+        ...baseWingKeyDeletion(),
+        selectorsCalibrated: true,
+        operatorDestructiveAction: { ...COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION, ...soft },
+      });
+      expect(r.ok, `softening ${JSON.stringify(soft)} must be refused`).toBe(false);
+      if (!r.ok) expect(r.cause).toBe("DESTRUCTIVE_ACTION_CONTRACT_MISMATCH");
+    }
+  });
+
+  it("a non-WING (NAVER API-center) URL → FAIL (INVALID_HOST)", () => {
+    const r = validateApprovalPrerequisites({
+      ...baseWingKeyDeletion(),
+      selectorsCalibrated: true,
+      apiCenterUrl: NAVER_API_CENTER_BASE_URL,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("INVALID_HOST");
+  });
+
+  it("wrong cli/driver → FAIL (CLI_DRIVER_UNCONFIRMED)", () => {
+    const r = validateApprovalPrerequisites({
+      ...baseWingKeyDeletion(),
+      selectorsCalibrated: true,
+      cli: "src/cli/probe-wing-issuance-selectors.ts",
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("CLI_DRIVER_UNCONFIRMED");
+  });
+
+  it("the deletion entrypoint is a CLI-launched window (never a frontend URL) and validates", () => {
+    expect(ENTRYPOINT_PHASES).toContain("COUPANG_WING_KEY_DELETION");
+    expect(PHASE_ENTRYPOINTS.COUPANG_WING_KEY_DELETION.entrypointType).toBe("CLI_LAUNCHED_DEDICATED_WINDOW");
+    expect(PHASE_ENTRYPOINTS.COUPANG_WING_KEY_DELETION.emitsFrontendUrl).toBe(false);
+    expect(validateEntrypointContract("COUPANG_WING_KEY_DELETION", PHASE_ENTRYPOINTS.COUPANG_WING_KEY_DELETION).ok).toBe(true);
+  });
+
+  it("the phase spec models the operator action, not an agent write: mode READ_ONLY, allowsHighlight, destructive contract", () => {
+    expect(WKD.mode).toBe("READ_ONLY");
+    expect(WKD.allowsHighlight).toBe(true);
+    expect(WKD.requiresOperatorDestructiveAction).toBe(true);
+    expect(WKD.operatorDestructiveAction).toEqual(COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION);
+    // The planned deletion driver/CLI is deliberately not yet built — the real CLI wrapper double-fails-closed.
+    expect(WKD.cli).toBe("src/cli/run-coupang-wing-deletion-live.ts");
   });
 });
 

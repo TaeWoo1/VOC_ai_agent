@@ -36,7 +36,9 @@ import { log } from "../log";
 import { launchNaverContext } from "../profile";
 import {
   CoupangWingIssuanceDriver,
+  WING_DELETION_LABELS,
   WING_HIGHLIGHT_LABELS,
+  type WingDeletionTarget,
   type WingHighlightTarget,
 } from "../action-window/coupang-wing-issuance-driver";
 import {
@@ -51,15 +53,25 @@ import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from ".
 export type WingRecordSignal = "ready" | "abort" | "timeout";
 
 /**
- * The highlightable fixed-label targets the recorder measures, in guided-walk order. The guidance-only targets
- * (`reach_open_api`, `return`) are NOT queried WING controls — they are text guidance — so they are never probed.
+ * Every fixed-label target the recorder measures: the highlightable issuance candidates AND the 삭제 (delete)
+ * control on the already-issued page. All are measured read-only on the CURRENT page — the delete candidate rides
+ * the SAME already-issued page as `issue` / `credentials`, so one recorder run can calibrate 삭제 alongside them
+ * (setting up the deletion path) WITHOUT ever highlighting or pressing it.
  */
-export const WING_RECORD_TARGETS: readonly WingHighlightTarget[] = [
+export type WingRecordTarget = WingHighlightTarget | WingDeletionTarget;
+
+/**
+ * The targets the recorder measures. The guidance-only targets (`reach_open_api`, `return`) are NOT queried WING
+ * controls — they are text guidance — so they are never probed. `delete` is the 삭제 control on the already-issued
+ * page (a value-free count only; never pressed).
+ */
+export const WING_RECORD_TARGETS: readonly WingRecordTarget[] = [
   "self_dev",
   "vendor_info",
   "call_ip",
   "issue",
   "credentials",
+  "delete",
 ] as const;
 
 /**
@@ -67,13 +79,19 @@ export const WING_RECORD_TARGETS: readonly WingHighlightTarget[] = [
  * the calibration record says what KIND of control each fixed label is meant to resolve to. It is descriptive
  * evidence only; the live `matchCount` is what proves the candidate resolves uniquely.
  */
-export const WING_TARGET_ROLE: Readonly<Record<WingHighlightTarget, string>> = {
+export const WING_TARGET_ROLE: Readonly<Record<WingRecordTarget, string>> = {
   self_dev: "option",
   vendor_info: "field-label",
   call_ip: "field-label",
   issue: "button",
   credentials: "readonly-region",
+  delete: "button",
 };
+
+/** The fixed-label spec for a record target — issuance labels, plus the deletion 삭제 label (decoupled union). */
+export function wingRecordLabelSpec(target: WingRecordTarget): { candidateQuery: string; exactText: string; tagAncestor?: string } {
+  return target === "delete" ? WING_DELETION_LABELS.delete : WING_HIGHLIGHT_LABELS[target];
+}
 
 /** One candidate's sanitized calibration row. Value-free: a count, a boolean, our own fixed label/role, an opaque sig. */
 /**
@@ -96,7 +114,7 @@ export function wingFaultFingerprint(err: unknown): WingFaultFingerprint {
 }
 
 export interface WingSelectorRecord {
-  target: WingHighlightTarget;
+  target: WingRecordTarget;
   /** How many candidates the fixed WING label matched live (integer only). */
   matchCount: number;
   /** Whether it resolves uniquely (matchCount === 1) and can therefore be highlighted. */
@@ -134,7 +152,7 @@ export interface WingSelectorRecordDeps {
   /** The sanitized surface observation (pageCategory + signals + blockers) — reused from the driver's own probe. */
   observeSurface(): Promise<WingObservation>;
   /** Read-only fixed-label match for one candidate (never tags/highlights/clicks/reads a value). */
-  probeTarget(target: WingHighlightTarget): Promise<{ matchCount: number; canHighlight: boolean; sig?: string }>;
+  probeTarget(target: WingRecordTarget): Promise<{ matchCount: number; canHighlight: boolean; sig?: string }>;
   /** Print sanitized instructions (noop in tests). */
   announce?(): void;
 }
@@ -190,7 +208,7 @@ export async function runWingSelectorRecord(deps: WingSelectorRecordDeps): Promi
       matchCount,
       canHighlight,
       role: WING_TARGET_ROLE[target],
-      label: WING_HIGHLIGHT_LABELS[target].exactText,
+      label: wingRecordLabelSpec(target).exactText,
       sig16: canHighlight && sig ? sig : null,
       fault,
     });
@@ -324,7 +342,7 @@ async function main(): Promise<void> {
       return "timeout";
     },
     observeSurface: () => driver.observeSurface(),
-    probeTarget: (target) => driver.probeTargetMatch(target),
+    probeTarget: (target) => driver.probeFixedLabelMatch(wingRecordLabelSpec(target)),
     announce: () => printInstructions(readyPath, abortPath),
   };
 
