@@ -85,6 +85,23 @@ run_case "UNBOUND_RUN    (identity is \"unknown\")" nonzero "PREFLIGHT FAIL" "$F
 write_env "$FIXTURES/stale.env" "$CUR_GIT" "COUPANG_WING_SELECTOR_PROBE" "delete" "wt-selfcheck07" "apr-selfcheck07" "$((NOW - 86400))"
 run_case "STALE_IDENTITY (a day-old run env)" nonzero "run identity is stale" "$FIXTURES/stale.env"
 
+# A stamp that passes a loose ^[0-9]+$ but is an invalid OCTAL literal used to abort the arithmetic, unwind
+# the enclosing `if`, and delete the freshness check entirely — reaching PREFLIGHT PASS with no verdict.
+write_env "$FIXTURES/octal.env" "$CUR_GIT" "COUPANG_WING_SELECTOR_PROBE" "delete" "wt-selfcheck08" "apr-selfcheck08" "0000000001999999999"
+run_case "OCTAL_EPOCH    (malformed stamp cannot skip the check)" nonzero "bootstrap timestamp missing or malformed" "$FIXTURES/octal.env"
+
+# The run env must be the ONLY source of identity: a key it omits must not fall through to the caller's shell.
+cat > "$FIXTURES/nostamp.env" <<'ENV'
+WALKTHROUGH_RUN_ID='wt-selfcheck09'
+WALKTHROUGH_APPROVAL_ID='apr-selfcheck09'
+WALKTHROUGH_GIT_COMMIT='PLACEHOLDER'
+SELLEROPS_APPROVAL_PHASE='COUPANG_WING_SELECTOR_PROBE'
+SELLEROPS_WING_PROBE_TARGETS='delete'
+ENV
+sed -i '' "s/PLACEHOLDER/$CUR_GIT/" "$FIXTURES/nostamp.env" 2>/dev/null || sed -i "s/PLACEHOLDER/$CUR_GIT/" "$FIXTURES/nostamp.env"
+run_case "AMBIENT_STAMP  (caller's env cannot supply a missing key)" nonzero "bootstrap timestamp missing or malformed" \
+  "$FIXTURES/nostamp.env" "WING_PROBE_BOOTSTRAP_EPOCH=$NOW"
+
 write_env "$FIXTURES/wrongphase.env" "$CUR_GIT" "COUPANG_WING_KEY_DELETION" "delete" "wt-selfcheck01" "apr-selfcheck01"
 run_case "WRONG_PHASE    (destructive phase refused here)" nonzero "phase must be COUPANG_WING_SELECTOR_PROBE" "$FIXTURES/wrongphase.env"
 
@@ -158,7 +175,21 @@ if [ -z "$TREE_DIRTY" ]; then
   # A config injection must not hide untracked files.
   run_case "UNTRACKED_HIDE (status config override ignored)" nonzero "working tree is dirty" "$FIXTURES/normal.env" \
     "GIT_CONFIG_COUNT=1" "GIT_CONFIG_KEY_0=status.showUntrackedFiles" "GIT_CONFIG_VALUE_0=no"
+  # `-c status.showUntrackedFiles=normal` does NOT counter an excludes file injected via GIT_CONFIG_PARAMETERS,
+  # so that variable has to be stripped too.
+  printf '%s\n' ".wing-probe-selfcheck-dirty.tmp" > "$FIXTURES/excludes"
+  run_case "EXCLUDES_HIDE  (GIT_CONFIG_PARAMETERS ignored)" nonzero "working tree is dirty" "$FIXTURES/normal.env" \
+    "GIT_CONFIG_PARAMETERS='core.excludesFile=$FIXTURES/excludes'"
   rm -f "$DIRT_FILE"
+
+  # The scope binding is a hard requirement, not a convenience: if it cannot be written, no manifest is shown.
+  cp "$FIXTURES/normal.env" "$FIXTURES/readonly.env"
+  RO_DIR="$FIXTURES/ro"; mkdir -p "$RO_DIR"; cp "$FIXTURES/normal.env" "$RO_DIR/run.env"; chmod 500 "$RO_DIR"
+  run_case "SCOPE_BIND_FAIL (unwritable run env refused)" nonzero "could not bind the approved scope" "$RO_DIR/run.env"
+  chmod 700 "$RO_DIR"
+
+  # The one caveat the operator most needs before granting must be on the summary line, not only in the JSON.
+  run_case "NORMAL         · selectorsCalibrated disclosed" 0 "selectors calibrated: false" "$FIXTURES/normal.env"
 else
   run_case "DIRTY_TREE     (uncommitted change refused)" nonzero "working tree is dirty" "$FIXTURES/normal.env"
   echo "  SKIP  NORMAL / GIT_DIR_HIJACK / UNTRACKED_HIDE — the working tree is dirty, which the preflight"

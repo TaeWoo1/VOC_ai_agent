@@ -35,10 +35,13 @@ fail() { echo "  FAIL  $*"; FAILED=1; }
 # GIT_DIR / GIT_WORK_TREE can point the drift check at a clean decoy repository, and
 # GIT_CONFIG_COUNT/KEY_n/VALUE_n (or a repo-level status.showUntrackedFiles=no) can hide a dirty tree —
 # either of which turns "the running code IS this commit" into a false claim.
+# GIT_CONFIG_PARAMETERS is in the list for its own reason: `-c status.showUntrackedFiles=normal` does NOT
+# counter a `core.excludesFile` injected through it, which hides untracked files just as effectively.
 git_hardened() {
   env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY \
       -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_COMMON_DIR -u GIT_CEILING_DIRECTORIES \
       -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_SYSTEM -u GIT_CONFIG_COUNT -u GIT_CONFIG_NOSYSTEM \
+      -u GIT_CONFIG_PARAMETERS \
       git -C "$REPO_ROOT" -c status.showUntrackedFiles=normal "$@"
 }
 
@@ -51,7 +54,9 @@ k = sys.argv[2]
 if k not in d:
     sys.exit(1)
 v = d[k]
-if isinstance(v, list):
+if isinstance(v, bool):
+    v = "true" if v else "false"
+elif isinstance(v, list):
     v = ",".join(v)
 if v is None or v == "":
     sys.exit(1)
@@ -63,6 +68,10 @@ if [ ! -f "$RUN_ENV" ]; then
   echo "PREFLIGHT FAIL — no run env at $RUN_ENV. Run tools/coupang-local/wing-probe-bootstrap.sh first."
   exit 1
 fi
+# Sourcing only OVERRIDES what the file names, so a run env missing a key would let the caller's ambient
+# value stand in for a bootstrapped one. Clear the identity variables first: they must come from the file.
+unset WALKTHROUGH_RUN_ID WALKTHROUGH_APPROVAL_ID WALKTHROUGH_GIT_COMMIT WING_PROBE_BOOTSTRAP_EPOCH \
+      SELLEROPS_APPROVAL_PHASE SELLEROPS_WING_PROBE_TARGETS
 # shellcheck disable=SC1090
 set -a; . "$RUN_ENV"; set +a
 
@@ -90,10 +99,13 @@ done
 
 # 2. The identity must be FRESH. A grant is single-use and process-lifetime (contract §1.5/§2): a run env
 #    left behind by an earlier session must not silently re-authorize a new one.
-if ! printf '%s' "$BOOTSTRAP_EPOCH" | grep -qE '^[0-9]+$'; then
-  fail "no bootstrap timestamp in the run env — re-run wing-probe-bootstrap.sh"
+# The shape is pinned to a plausible 10–11 digit epoch, NOT a loose ^[0-9]+$. A leading zero would make bash
+# parse the stamp as octal, and an invalid octal literal is an arithmetic ERROR that unwinds this whole `if` —
+# skipping both branches, leaving FAILED untouched, and silently deleting the freshness check.
+if ! printf '%s' "$BOOTSTRAP_EPOCH" | grep -qE '^[1-9][0-9]{9,10}$'; then
+  fail "bootstrap timestamp missing or malformed in the run env — re-run wing-probe-bootstrap.sh"
 else
-  AGE=$(( $(date +%s) - BOOTSTRAP_EPOCH ))
+  AGE=$(( $(date +%s) - 10#$BOOTSTRAP_EPOCH ))
   if [ "$AGE" -lt 0 ] || [ "$AGE" -gt "$IDENTITY_TTL_SECONDS" ]; then
     fail "run identity is stale (${AGE}s old, max ${IDENTITY_TTL_SECONDS}s) — re-bootstrap for a fresh approval id"
   else
@@ -150,12 +162,17 @@ PROBE_CLI="src/cli/probe-wing-issuance-selectors.ts"
 #    .env values. So if .env sets COLLECTOR_PROFILE_DIR at all, the check below would be validating a
 #    different path than the run uses — and it refuses instead of reassuring. Only the KEY is looked for; no
 #    .env value is ever read, printed, or logged.
-if [ -f "$COLLECTOR_DIR/.env" ] && grep -qE '^[[:space:]]*(export[[:space:]]+)?COLLECTOR_PROFILE_DIR=' "$COLLECTOR_DIR/.env"; then
+if [ -f "$COLLECTOR_DIR/.env" ] && grep -qE '(^|[[:space:]])(export[[:space:]]+)?COLLECTOR_PROFILE_DIR=' "$COLLECTOR_DIR/.env"; then
   fail "collector/.env sets COLLECTOR_PROFILE_DIR — this preflight cannot verify a path it must not read. Unset it there (or export it in this shell) and re-run"
 else
   PROFILE_DIR_RAW="${COLLECTOR_PROFILE_DIR:-$COLLECTOR_DIR/.profile/naver}"
   PROFILE_DIR="$(python3 -c "import os,sys;print(os.path.realpath(sys.argv[1]))" "$PROFILE_DIR_RAW" 2>/dev/null || echo "")"
   COLLECTOR_REAL="$(python3 -c "import os,sys;print(os.path.realpath(sys.argv[1]))" "$COLLECTOR_DIR" 2>/dev/null || echo "")"
+  # Both must be non-empty before the comparison: an empty COLLECTOR_REAL would degrade the pattern below to
+  # `/*`, which matches every absolute path and would turn this guard into a rubber stamp.
+  if [ -z "$PROFILE_DIR" ] || [ -z "$COLLECTOR_REAL" ]; then
+    fail "could not resolve the profile or collector path — refusing rather than comparing empty paths"
+  else
   case "$PROFILE_DIR" in
     "$COLLECTOR_REAL"/*)
       [ -d "$PROFILE_DIR" ] && pass "dedicated Chrome profile present inside the collector tree" \
@@ -163,6 +180,7 @@ else
     *)
       fail "profile directory resolves OUTSIDE the collector tree ($PROFILE_DIR_RAW) — the launch path guard will refuse it" ;;
   esac
+  fi
 fi
 
 # 7. A browser must actually be launchable: the bundled Chromium (default) or the configured channel.
@@ -210,6 +228,9 @@ M_PHASE="$(jget phase)" || FIELD_FAIL=1
 M_CLI="$(jget cli)" || FIELD_FAIL=1
 M_HOST="$(jget apiCenterHost)" || FIELD_FAIL=1
 M_TARGETS="$(jget probeTargets)" || FIELD_FAIL=1
+# The central caveat of every WING phase: no WING selector has been live-calibrated yet. It belongs on the
+# line the operator actually reads before granting, not only in the JSON dump.
+M_CALIBRATED="$(jget selectorsCalibrated)" || FIELD_FAIL=1
 M_ENTRY_TYPE="$(jget entrypointType)" || FIELD_FAIL=1
 M_OPERATOR_ACTION="$(jget operatorActionSummary)" || FIELD_FAIL=1
 if [ "$FIELD_FAIL" != "0" ]; then
@@ -225,13 +246,25 @@ fi
 # Bind the APPROVED scope to the run: rewrite this run's env with the RESOLVED target list from the manifest,
 # so sourcing it can only reproduce what was displayed. (The gate normalizes order and de-duplicates, and an
 # empty request means ALL targets — writing the resolved value back removes that asymmetry from the run.)
-python3 -c 'import sys
+# Written atomically via a temp file + os.replace, and shell-quoted properly — a truncating in-place write
+# could leave a half-written run env, and %r is Python repr, not shell quoting.
+if ! python3 -c 'import os, sys, tempfile
 path, resolved = sys.argv[1], sys.argv[2]
 lines = [l for l in open(path).read().splitlines() if not l.startswith("SELLEROPS_WING_PROBE_TARGETS=")]
-lines.append("SELLEROPS_WING_PROBE_TARGETS=%r" % resolved)
-open(path, "w").write("\n".join(lines) + "\n")' "$RUN_ENV" "$M_TARGETS" \
-  && pass "approved scope written back to the run env ($M_TARGETS)" \
-  || echo "  WARN  could not write the approved scope back to $RUN_ENV — pass it inline on the run command below"
+# Always single-quoted, matching what bootstrap writes: shlex.quote would leave a bare word unquoted, so the
+# file style would depend on the value. The escape below is the POSIX one and is correct for any content.
+quoted = "'\''" + resolved.replace("'\''", "'\''\"'\''\"'\''") + "'\''"
+lines.append("SELLEROPS_WING_PROBE_TARGETS=" + quoted)
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)))
+with os.fdopen(fd, "w") as f:
+    f.write("\n".join(lines) + "\n")
+os.replace(tmp, path)' "$RUN_ENV" "$M_TARGETS"; then
+  # This is the binding, not a convenience: without it, sourcing the run env can still reproduce a wider
+  # scope than the one displayed. Refuse rather than pass with the binding silently skipped.
+  echo "PREFLIGHT FAIL — could not bind the approved scope to $RUN_ENV; refusing to present a manifest whose scope the run may not honor."
+  exit 1
+fi
+pass "approved scope bound to the run env ($M_TARGETS)"
 
 echo
 echo "PREFLIGHT PASS"
@@ -240,7 +273,7 @@ echo
 echo "  ── APPROVAL MANIFEST (sanitized) ──"
 echo "  $M_CHANNEL · $M_OPERATION"
 echo "  $M_MODE · run ${RUN_ID:0:8}… · approval ${APPROVAL_ID:0:8}… · max: $M_MAX"
-echo "  phase: $M_PHASE · probe targets: $M_TARGETS"
+echo "  phase: $M_PHASE · probe targets: $M_TARGETS · selectors calibrated: $M_CALIBRATED"
 echo "  account: $M_ACCOUNT · host: $M_HOST · operator presence: required · expires: process-lifetime · git $CUR_GIT"
 echo "  Standing Safety Contract + full scope: docs/sellerops_live_approval_contract.md"
 echo

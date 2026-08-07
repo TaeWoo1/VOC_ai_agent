@@ -32,6 +32,7 @@ git_hardened() {
   env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY \
       -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_COMMON_DIR -u GIT_CEILING_DIRECTORIES \
       -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_SYSTEM -u GIT_CONFIG_COUNT -u GIT_CONFIG_NOSYSTEM \
+      -u GIT_CONFIG_PARAMETERS \
       git -C "$REPO_ROOT" "$@"
 }
 
@@ -39,11 +40,14 @@ git_hardened() {
 # (WING_PROBE_TARGET_NAMES). This script does NOT decide which are valid — the manifest gate fails closed with
 # WING_PROBE_TARGETS_MISMATCH on anything that is not a canonical subset. It DOES enforce the character shape,
 # because this value is written into a file the preflight later sources: an unvalidated `$(…)` would execute.
+#    `case` rather than `grep -E`: grep matches LINE-wise, so an embedded newline would slip past an anchored
+#    pattern and inject a second assignment into the file below.
 PROBE_TARGETS="${SELLEROPS_WING_PROBE_TARGETS:-delete}"
-if ! printf '%s' "$PROBE_TARGETS" | grep -qE '^[a-z_]+(,[a-z_]+)*$'; then
-  echo "BOOTSTRAP FAIL — SELLEROPS_WING_PROBE_TARGETS must be a comma-separated list of lowercase target names."
-  exit 1
-fi
+case "$PROBE_TARGETS" in
+  ""|*[!a-z_,]*|,*|*,|*,,*)
+    echo "BOOTSTRAP FAIL — SELLEROPS_WING_PROBE_TARGETS must be a comma-separated list of lowercase target names."
+    exit 1 ;;
+esac
 
 RUN_ID="wt-$(openssl rand -hex 6)"
 APPROVAL_ID="apr-$(openssl rand -hex 6)"

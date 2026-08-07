@@ -121,9 +121,12 @@ and it prints the run command with the scope **inline**. Use the printed command
 Two hardening details worth knowing, because both were live bypasses before review:
 
 - **The git checks ignore the ambient git environment.** `GIT_DIR` / `GIT_WORK_TREE` could otherwise point
-  the drift check at a clean decoy repository, and `GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n` could force
-  `status.showUntrackedFiles=no` to hide a dirty tree. Both are stripped, the repository toplevel is asserted,
-  and a `git status` that *fails* is refused rather than read as "clean".
+  the drift check at a clean decoy repository; `GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n` could force
+  `status.showUntrackedFiles=no`; and `GIT_CONFIG_PARAMETERS` could inject a `core.excludesFile` that hides a
+  dirty tree even against a forced `-c status.showUntrackedFiles=normal`. All are stripped, the repository
+  toplevel is asserted, and a `git status` that *fails* is refused rather than read as "clean". What remains
+  is local repo state (`.git/info/exclude`, `--assume-unchanged`), which takes deliberate action, not an
+  inherited variable.
 - **The profile check refuses rather than reassures when it cannot see the truth.** It resolves symlinks
   (stricter than the purely lexical guard in `collector/src/profile.ts`), but the probe's documented
   invocation sources `collector/.env`, whose values this preflight must never read. So if `.env` sets
