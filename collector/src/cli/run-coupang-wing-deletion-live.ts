@@ -10,15 +10,21 @@
  * THEMSELVES. SellerOps never logs in, clicks, types, submits, deletes, or reads a value — it reads only a
  * sanitized page category to confirm the page changed.
  *
- * **Fails closed in FOUR layers, so it cannot act today:**
+ * **Fails closed in FOUR layers.** The 삭제 selector is now live-calibrated
+ * (`WING_DELETION_CALIBRATION_EVIDENCE`), so layers 3–4 no longer refuse on calibration and this entrypoint is
+ * EXECUTABLE — but only under all four, and it still deletes nothing itself:
  *   1. refuses without `--i-understand-this-opens-live-coupang-wing` (`hasCoupangWingRunApproval` — a NAVER grant
  *      never opens WING);
  *   2. `screenWingUrl`-fail-closed BEFORE Chrome launches (only the WING / auth host);
  *   3. the approval gate: {@link validateApprovalPrerequisites} for `COUPANG_WING_KEY_DELETION` must return a
  *      PREPARED manifest — so a MISSING/MODIFIED operator-destructive descriptor, an UNBOUND identity
- *      (`WALKTHROUGH_*`), or an off-target host all refuse; and while the delete selector is uncalibrated it
- *      refuses with `SELECTORS_NOT_CALIBRATED` (the state today);
- *   4. the driver additionally refuses to highlight while {@link WING_DELETION_SELECTORS_CALIBRATED} is false.
+ *      (`WALKTHROUGH_*`), or an off-target host all refuse; and it refuses with `SELECTORS_NOT_CALIBRATED`
+ *      whenever the calibration flag is withdrawn;
+ *   4. the driver additionally refuses to highlight while {@link WING_DELETION_SELECTORS_CALIBRATED} is false,
+ *      refuses a non-unique 삭제 match, and refuses the operator-action step before the irreversible checkpoint.
+ *
+ * A calibrated selector is NOT an approval. Running this requires a fresh, single-use operator grant against a
+ * displayed destructive Approval Manifest (`docs/sellerops_live_approval_contract.md`).
  *
  * The seller navigates themselves (this CLI never `.goto`s), signals readiness + completion via sentinel files, and
  * the context is always closed. `main()` runs ONLY when invoked directly (inert on import) so tests launch nothing.
@@ -38,6 +44,7 @@ import { WING_DELETION_SELECTORS_CALIBRATED } from "../action-window/coupang-win
 import {
   PHASE_SPECS,
   COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION,
+  COUPANG_WING_KEY_DELETION_SCOPE,
   validateApprovalPrerequisites,
   type ApprovalPrereqInput,
 } from "./approval-manifest";
@@ -70,10 +77,14 @@ function banner(): void {
  * all refuse HERE, before any browser opens.
  */
 function gateRefusalCause(apiCenterUrl: string): string | null {
+  // The four scope fields come from the phase spec, NOT the environment: the operator's grant binds to them, so
+  // a stale `.env` must never be able to make a destructive manifest describe a different run. The gate pins
+  // them too (`DESTRUCTIVE_SCOPE_MISMATCH`) — this side just stops feeding it anything else.
+  const scope = WKD.destructiveScope ?? COUPANG_WING_KEY_DELETION_SCOPE;
   const input: ApprovalPrereqInput = {
     phase: WKD.phase,
-    channel: env("SELLEROPS_APPROVAL_CHANNEL") ?? "COUPANG",
-    accountBinding: env("SELLEROPS_APPROVAL_ACCOUNT") ?? "operator-owned Coupang WING test account",
+    channel: scope.channel,
+    accountBinding: scope.accountBinding,
     mode: WKD.mode,
     apiCenterUrl,
     cli: WKD.cli,
@@ -83,9 +94,9 @@ function gateRefusalCause(apiCenterUrl: string): string | null {
     runId: env("WALKTHROUGH_RUN_ID") ?? "unknown",
     approvalId: env("WALKTHROUGH_APPROVAL_ID") ?? "unknown",
     gitSha: env("WALKTHROUGH_GIT_COMMIT") ?? "unknown",
-    maxActions: "1 highlight-only session; the OPERATOR deletes; 0 agent click/type/value read",
-    surface: "Coupang WING Open API",
-    operation: "WING open-API key deletion (operator-performed, irreversible; agent highlights only)",
+    maxActions: scope.maxActions,
+    surface: scope.surface,
+    operation: scope.operation,
     operatorDestructiveAction: COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION,
   };
   const res = validateApprovalPrerequisites(input);
@@ -145,24 +156,24 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Approval gate — the destructive run must reach a PREPARED manifest for THIS bootstrapped identity. Today the
-  // delete selector is uncalibrated, so this refuses with SELECTORS_NOT_CALIBRATED; a missing/softened destructive
-  // descriptor or an unbound identity refuses too. NOTHING launches on refusal.
+  // Approval gate — the destructive run must reach a PREPARED manifest for THIS bootstrapped identity. A missing/
+  // softened destructive descriptor, an unbound identity, an off-target host, or a withdrawn calibration flag
+  // (SELECTORS_NOT_CALIBRATED) all refuse here. NOTHING launches on refusal.
   const refusal = gateRefusalCause(url);
   if (refusal) {
     console.error(`Refusing to start the WING key-DELETION run: approval_prerequisite (${refusal}). No browser launched.`);
     console.error(
       refusal === "SELECTORS_NOT_CALIBRATED"
-        ? "  The 삭제 control is LIVE_DOM_CALIBRATION_PENDING. Run the READ-ONLY delete selector probe first."
+        ? "  The 삭제 selector calibration is withdrawn. Restore it only from a fresh READ-ONLY delete selector probe."
         : "  Re-bootstrap a valid identity + destructive Approval Manifest, then retry.",
     );
     process.exit(4);
     return;
   }
 
-  // Unreachable today (the gate refuses above). When the delete selector is calibrated and a PREPARED destructive
-  // manifest exists, this drives the guided deletion: the SELLER navigates + presses 삭제; SellerOps highlights +
-  // reads a sanitized category only.
+  // Past the gate: a PREPARED destructive manifest exists for this identity and the 삭제 selector is calibrated.
+  // This drives the guided deletion — the SELLER navigates + presses 삭제; SellerOps highlights the control, rests
+  // at the irreversible-warning checkpoint, and reads a sanitized page category only.
   const cfg = loadConfig();
   const readyPath = sentinelPath(cfg.statusFile, DELETION_READY_FILENAME);
   const donePath = sentinelPath(cfg.statusFile, DELETION_DONE_FILENAME);
@@ -196,7 +207,11 @@ async function main(): Promise<void> {
     }
     const highlight = await driver.highlightDeleteCheckpoint();
     if (highlight.count !== 1) {
-      console.log(JSON.stringify({ event: "COUPANG_DELETION", outcome: "DELETE_TARGET_NOT_FOUND", matchCount: highlight.count }));
+      // Two distinct fail-closed causes share `count: 0` — the 삭제 control had no unique match, or it did and
+      // the irreversible-warning checkpoint failed to paint. Report them apart so the operator is not told the
+      // control is missing when it was found.
+      const outcome = driver.didCheckpointFailToPaint() ? "CHECKPOINT_NOT_PAINTED" : "DELETE_TARGET_NOT_FOUND";
+      console.log(JSON.stringify({ event: "COUPANG_DELETION", outcome, matchCount: highlight.count }));
       return;
     }
     console.error("");

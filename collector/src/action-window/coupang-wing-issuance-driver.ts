@@ -90,23 +90,96 @@ function isWingHighlightTarget(target: CoupangIssuanceTarget): target is WingHig
  */
 export type WingDeletionTarget = "delete";
 
+/** The live-confirmed counterpart of {@link LIVE_DOM_CALIBRATION_PENDING} — set only from a real live capture. */
+export const LIVE_DOM_CALIBRATION_CONFIRMED = "LIVE_DOM_CALIBRATION_CONFIRMED" as const;
+
 /**
- * **CANDIDATE / LIVE_DOM_CALIBRATION_PENDING.** Proposed fixed WING label for the 삭제 (delete) control on the
- * already-issued open-API page. Like {@link WING_HIGHLIGHT_LABELS} this is a PROPOSAL from the visible WING UI —
- * a live read-only probe must confirm it resolves to exactly one element before it is ever trusted/highlighted.
+ * **LIVE-CONFIRMED** (see {@link WING_DELETION_CALIBRATION_EVIDENCE}). The fixed WING label for the 삭제 (delete)
+ * control on the already-issued open-API page.
+ *
+ * The spec below is **byte-for-byte the one the calibration probe measured** — a live capture found it resolves to
+ * exactly one element. Retuning `candidateQuery` / `exactText` (e.g. narrowing to the observed `role: "button"`)
+ * would DISCARD the evidence that justifies the calibrated flag, because the uniqueness was measured against
+ * *this* spec and no other. Any change here invalidates the calibration and must re-run the read-only probe.
  */
-export const WING_DELETION_CALIBRATION = LIVE_DOM_CALIBRATION_PENDING;
+export const WING_DELETION_CALIBRATION = LIVE_DOM_CALIBRATION_CONFIRMED;
 export const WING_DELETION_LABELS: Readonly<Record<WingDeletionTarget, { candidateQuery: string; exactText: string; tagAncestor?: string }>> = {
   delete: { candidateQuery: "button,a,span,div", exactText: "삭제" },
 };
 
 /**
- * Whether the `delete` (삭제) fixed label is calibrated against the REAL WING DOM. **FALSE** until a live read-only
- * delete selector probe confirms it resolves uniquely (`matchCount === 1`) on the already-issued page. The
- * deletion driver and its gated live CLI REFUSE to highlight or enter the delete phase while this is false — the
- * destructive walk fails closed on calibration, exactly like the manifest gate's `SELECTORS_NOT_CALIBRATED`.
+ * PROVENANCE for the 삭제 calibration — the sanitized live evidence that justifies
+ * {@link WING_DELETION_SELECTORS_CALIBRATED}. It exists so the flip is auditable from the code rather than only
+ * from a doc, and so its honest limits travel with it.
+ *
+ * `signatureRole: "EVIDENCE_ONLY"` is the load-bearing field. `sig16` is recorded provenance, **not** a runtime
+ * safety anchor: no code path compares a live signature against this constant. The only signature comparisons in
+ * the runtime (`engine.ts` `UI_DRIFT`, `session.ts`, `verifier.ts`) are locate-vs-verify **within one run**, both
+ * sides computed live, and the deletion driver is not wired to any of them — its CLI reads `count` and discards
+ * the sig. That is precisely why ONE capture suffices to calibrate: nothing requires the signature to be stable
+ * across runs, so `captureCount: 1` is a complete basis for the uniqueness claim being made.
+ *
+ * The corollary is a constraint, enforced by `coupang-wing-deletion-driver-guard.test.ts`: introducing a
+ * cross-run signature-anchor comparison would CREATE a stability requirement that one capture cannot honestly
+ * satisfy. A second independent delete-only capture is a prerequisite for that change — not for this one.
  */
-export const WING_DELETION_SELECTORS_CALIBRATED = false;
+export interface WingDeletionCalibrationEvidence {
+  readonly status: typeof LIVE_DOM_CALIBRATION_CONFIRMED;
+  /** Date of the live read-only capture (KST). */
+  readonly capturedOn: string;
+  /** The commit the probe ran on — the code that produced this measurement. */
+  readonly gitSha: string;
+  /** The probe's sanitized record id (no account / seller / URL identity). */
+  readonly recordId: string;
+  /** The sanitized page category the 삭제 control was measured on. */
+  readonly pageCategory: "open_api_issuance";
+  /** The measured uniqueness — the whole basis of the calibration. */
+  readonly matchCount: 1;
+  readonly canHighlight: true;
+  /** The candidate's accessible role, as measured (informational; the locator does NOT filter on it). */
+  readonly role: "button";
+  /** Our own fixed label — the same string as {@link WING_DELETION_LABELS}.delete.exactText. */
+  readonly label: "삭제";
+  /** Opaque 16-hex structural signature. Provenance only — see `signatureRole`. */
+  readonly sig16: string;
+  /** How many independent live captures back this record. */
+  readonly captureCount: 1;
+  /** Honest limit: a single capture cannot demonstrate cross-run signature stability. */
+  readonly signatureStability: "SINGLE_CAPTURE_NOT_ESTABLISHED";
+  /** What `sig16` is allowed to be used for. `EVIDENCE_ONLY` ⇒ no runtime gate may read it. */
+  readonly signatureRole: "EVIDENCE_ONLY";
+}
+
+export const WING_DELETION_CALIBRATION_EVIDENCE: WingDeletionCalibrationEvidence = {
+  status: LIVE_DOM_CALIBRATION_CONFIRMED,
+  capturedOn: "2026-08-07",
+  gitSha: "a666ad1",
+  recordId: "wingrec_c01e673ebc61",
+  pageCategory: "open_api_issuance",
+  matchCount: 1,
+  canHighlight: true,
+  role: "button",
+  label: "삭제",
+  sig16: "3562cb60c496e220",
+  captureCount: 1,
+  signatureStability: "SINGLE_CAPTURE_NOT_ESTABLISHED",
+  signatureRole: "EVIDENCE_ONLY",
+};
+
+/**
+ * Whether the `delete` (삭제) fixed label is calibrated against the REAL WING DOM. **TRUE** since the live
+ * read-only delete-selector probe confirmed it resolves uniquely (`matchCount === 1`) on the already-issued page
+ * — see {@link WING_DELETION_CALIBRATION_EVIDENCE} for the provenance and its limits.
+ *
+ * This flag ONLY asserts selector readiness. It is not an authorization: a WING key-deletion run still needs the
+ * `--i-understand-this-opens-live-coupang-wing` flag, URL screening, a PREPARED destructive Approval Manifest
+ * bound to a fresh `WALKTHROUGH_*` identity, the driver's checkpoint-first invariant, and the operator's own
+ * press of 삭제. The agent's click/type/submit budget on the marketplace remains ZERO.
+ *
+ * Setting this to `false` must keep the destructive walk fully fail-closed — the deletion driver refuses to
+ * highlight and the manifest gate refuses with `SELECTORS_NOT_CALIBRATED`. That direction is tested explicitly.
+ */
+export const WING_DELETION_SELECTORS_CALIBRATED = true;
 
 /** Default seated-operator observe window (the seller works in the WING window). Tests override to instant. */
 export const DEFAULT_WING_OBSERVE_TIMEOUT_MS = 10 * 60_000;

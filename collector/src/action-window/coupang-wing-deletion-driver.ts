@@ -19,14 +19,17 @@
  *   - No value/text/clipboard/screenshot/`page.content()` read — the structural signature is computed IN-PAGE
  *     from tag + position + child count only.
  *
- * ⚠ **DELETE selector is `LIVE_DOM_CALIBRATION_PENDING` — NOT calibrated.** {@link WING_DELETION_LABELS} carries a
- * PROPOSED 삭제 label; {@link WING_DELETION_SELECTORS_CALIBRATED} is `false` until a live read-only delete probe
- * confirms it resolves uniquely. This driver REFUSES to highlight while uncalibrated (fail closed, defense-in-
- * depth), and its gated CLI additionally refuses through the approval gate's `SELECTORS_NOT_CALIBRATED`.
+ * **DELETE selector is LIVE-CONFIRMED** (`WING_DELETION_CALIBRATION_EVIDENCE` in `./coupang-wing-issuance-driver`
+ * carries the sanitized provenance and its limits): a live read-only probe
+ * measured {@link WING_DELETION_LABELS}`.delete` resolving to exactly one element on the already-issued page, so
+ * {@link WING_DELETION_SELECTORS_CALIBRATED} is `true`. Calibration is SELECTOR READINESS ONLY — it authorizes
+ * nothing. This driver still REFUSES to highlight if the flag is false (fail closed, defense-in-depth), still
+ * refuses a non-unique match at runtime, still enforces classify-then-checkpoint-then-operator-action, and its
+ * gated CLI still requires a PREPARED destructive manifest. The 삭제 press remains the operator's.
  */
 import type { Page } from "playwright";
 import { log } from "../log";
-import { mountOverlay, unmountOverlay } from "./overlay";
+import { advancePanelMounted, mountOverlay, unmountOverlay } from "./overlay";
 import {
   EXTRACT_WING_CENSUS,
   classifyWingUrlCategory,
@@ -74,15 +77,16 @@ export interface CoupangWingDeletionDriverOptions {
   context?: WingContextLike;
   guidanceEnabled?: boolean;
   /**
-   * Whether the delete selector is calibrated. Defaults to the code-level {@link WING_DELETION_SELECTORS_CALIBRATED}
-   * (false) so production ALWAYS fails closed on highlight; a test may pass `true` to exercise the highlight +
-   * checkpoint + verify flow over a fake page.
+   * Whether the delete selector is calibrated. Defaults to the code-level {@link WING_DELETION_SELECTORS_CALIBRATED};
+   * a test may pass `false` to prove the highlight path still fails closed when calibration is withdrawn.
    */
   calibrated?: boolean;
   locatorSettleMs?: number;
   verifyPollMs?: number;
   /** Overlay-mount seam (defaults to the real {@link mountOverlay}); tests inject a stub to stay overlay-agnostic. */
   mountOverlayFn?: typeof mountOverlay;
+  /** Paint-VERIFY seam (defaults to {@link advancePanelMounted}); tests inject a stub that reports no paint. */
+  checkpointPaintedFn?: typeof advancePanelMounted;
 }
 
 /**
@@ -116,6 +120,12 @@ export class CoupangWingDeletionDriver {
   private readonly opts: CoupangWingDeletionDriverOptions;
   private readonly closed: Promise<void>;
   private phase: WingDeletionPhase = "init";
+  /**
+   * Whether the last highlight attempt located the 삭제 control uniquely but the checkpoint failed to PAINT.
+   * Both outcomes return `{count: 0}` and both fail closed, but they are different faults and the operator
+   * should not be told "삭제 not found" when the control was found and the warning simply did not render.
+   */
+  private checkpointPaintFailed = false;
 
   constructor(page: Page, opts: CoupangWingDeletionDriverOptions = {}) {
     this.page = page;
@@ -140,6 +150,11 @@ export class CoupangWingDeletionDriver {
 
   currentPhase(): WingDeletionPhase {
     return this.phase;
+  }
+
+  /** Value-free fault discriminator for the CLI's sanitized outcome (see {@link checkpointPaintFailed}). */
+  didCheckpointFailToPaint(): boolean {
+    return this.checkpointPaintFailed;
   }
 
   private activePage(): Page {
@@ -225,7 +240,7 @@ export class CoupangWingDeletionDriver {
    */
   async highlightDeleteCheckpoint(): Promise<LocateResult> {
     if (!this.isCalibrated()) {
-      throw new Error("refusing to highlight the 삭제 control: delete selector is LIVE_DOM_CALIBRATION_PENDING (not calibrated)");
+      throw new Error("refusing to highlight the 삭제 control: the delete selector is not calibrated (WING_DELETION_SELECTORS_CALIBRATED is false)");
     }
     if (this.phase !== "classified") {
       throw new Error("classify the already-issued page before highlighting the 삭제 control");
@@ -240,7 +255,28 @@ export class CoupangWingDeletionDriver {
       copyKey: "actionWindow.coupangDeletion.checkpoint",
       label: WING_DELETION_WARNING_LABEL,
       guidanceEnabled: this.opts.guidanceEnabled ?? true,
+      // The WING-RESIDENT panel is REQUIRED here, not cosmetic. Without it the warning renders in the spotlight
+      // ring's small single-line `nowrap` badge, where ~130 characters of Korean run off the viewport — the
+      // operator would press an irreversible 삭제 having never read the checkpoint the destructive manifest
+      // promises (`explicitCheckpointRequired: true`). NO advance button: this walk advances on the operator's
+      // sentinel file, so the panel is copy-only and adds no interactive element to the marketplace page.
+      residentPanel: true,
     });
+    // VERIFY the checkpoint actually painted before advancing. `mountOverlay` returns silently when the tagged
+    // element is gone (the SPA re-rendered during the settle sleep, or `activePage()` now resolves to a tab the
+    // tag was never applied to), so awaiting it proves nothing. Without this the phase would reach `highlighted`
+    // — the ONLY precondition `verifyDeletion` checks — with no ring and no warning on screen, and the operator
+    // would face an irreversible 삭제 while the manifest asserts `explicitCheckpointRequired: true`. Mirrors the
+    // issuance driver's guard. Fail closed: report a non-unique/absent target rather than a phantom checkpoint.
+    // Check the RESIDENT PANEL, not just the spotlight ring. The ring box is appended even when guidance is
+    // disabled (it only differs by `display:none`), so `overlayMounted` alone would report a painted checkpoint
+    // for a run showing nothing legible — the very failure this guard exists to catch, one option away. The
+    // panel is the element that carries the irreversible warning, so it is the thing that must exist.
+    if (!(await (this.opts.checkpointPaintedFn ?? advancePanelMounted)(page))) {
+      this.checkpointPaintFailed = true;
+      log("aw_coupang_deletion_checkpoint_unmounted", { highlighted: false });
+      return { count: 0 };
+    }
     this.phase = "highlighted";
     log("aw_coupang_deletion_highlight", { highlighted: true });
     return { count: 1, sig: res.sig };

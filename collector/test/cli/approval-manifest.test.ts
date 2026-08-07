@@ -23,11 +23,13 @@ import {
   FE_LIVE_PROOF_MAX_START_RUN,
   COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION,
   COUPANG_WING_KEY_DELETION_OPERATION,
+  COUPANG_WING_KEY_DELETION_SCOPE,
   type ApprovalPrereqInput,
   type EntrypointSpec,
   type OperatorDestructiveAction,
 } from "../../src/cli/approval-manifest";
 import { VISUAL_RECON_SCREENS } from "../../src/action-window/api-issuance-calibration/visual-recon";
+import { WING_DELETION_SELECTORS_CALIBRATED } from "../../src/action-window/coupang-wing-issuance-driver";
 import { WING_DEFAULT_URL, WING_PROBE_TARGET_NAMES } from "../../src/cli/coupang-wing-classifier";
 
 const OBS = PHASE_SPECS.API_CENTER_STRUCTURE_OBSERVATION;
@@ -135,26 +137,29 @@ function baseWingSelectorProbe(): ApprovalPrereqInput {
 }
 
 /**
- * The WING key-deletion destructive phase. It HIGHLIGHTS the 삭제 control ⇒ requires calibrated WING selectors,
- * which are `LIVE_DOM_CALIBRATION_PENDING` — so it fails closed UNLESS a test explicitly sets
- * `selectorsCalibrated: true` (standing in for a future live 삭제 calibration). Carries the immutable
- * operator-destructive-action descriptor.
+ * The WING key-deletion destructive phase. It HIGHLIGHTS the 삭제 control ⇒ requires calibrated WING selectors.
+ * The 삭제 control IS live-calibrated now, but this module never assumes a WING calibration — the caller must
+ * state it — so the base input (which omits the field) still fails closed. Tests that want the calibrated path
+ * pass the real `WING_DELETION_SELECTORS_CALIBRATED`, exactly as `run-coupang-wing-deletion-live.ts` does.
+ * Carries the immutable operator-destructive-action descriptor.
  */
 function baseWingKeyDeletion(): ApprovalPrereqInput {
   return {
     ...baseObservation(),
     phase: WKD.phase,
-    channel: "COUPANG",
-    accountBinding: "operator-owned Coupang WING test account",
+    accountBinding: COUPANG_WING_KEY_DELETION_SCOPE.accountBinding,
     apiCenterUrl: WING_DEFAULT_URL,
     cli: WKD.cli,
     driver: WKD.driver,
     declaredActions: WKD.capableActions,
     hotkey: undefined,
     artifactPath: undefined,
-    surface: "Coupang WING Open API",
-    operation: "WING open-API key deletion (operator-performed, irreversible; agent highlights only)",
-    maxActions: "1 highlight-only session; the OPERATOR deletes; 0 agent click/type/value read",
+    // The destructive run scope is PINNED to the phase — the operator's grant binds to these four fields, so the
+    // gate refuses any deviation rather than displaying a manifest that describes a different run.
+    channel: COUPANG_WING_KEY_DELETION_SCOPE.channel,
+    surface: COUPANG_WING_KEY_DELETION_SCOPE.surface,
+    operation: COUPANG_WING_KEY_DELETION_SCOPE.operation,
+    maxActions: COUPANG_WING_KEY_DELETION_SCOPE.maxActions,
     operatorDestructiveAction: COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION,
   };
 }
@@ -405,8 +410,48 @@ describe("Coupang WING key-deletion destructive phase (COUPANG_WING_KEY_DELETION
     if (!r.ok) expect(r.cause).toBe("SELECTORS_NOT_CALIBRATED");
   });
 
-  it("PREPARED destructive manifest shape once 삭제 is (stand-in) calibrated: agent READ_ONLY + operator irreversible action", () => {
-    // selectorsCalibrated:true stands in for a future live 삭제 calibration. The manifest then carries the exact
+  it("fed exactly what the runtime CLI feeds, the gate emits what the calibration flag implies", () => {
+    // This is the calibration landing: fed exactly what `run-coupang-wing-deletion-live.ts` feeds, the gate emits
+    // a PREPARED destructive manifest. PREPARED is still not APPROVED — the operator's single-use grant against
+    // the displayed manifest is a separate step, and the agent deletes nothing either way. Branching on the
+    // constant keeps the emergency-withdrawal lever from turning this red (see the driver suite's intent marker).
+    const r = validateApprovalPrerequisites({
+      ...baseWingKeyDeletion(),
+      selectorsCalibrated: WING_DELETION_SELECTORS_CALIBRATED,
+    });
+    if (!WING_DELETION_SELECTORS_CALIBRATED) {
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.cause).toBe("SELECTORS_NOT_CALIBRATED");
+      return;
+    }
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.manifest.selectorsCalibrated).toBe(true);
+      expect(r.manifest.mode).toBe("READ_ONLY"); // the AGENT never mutates the marketplace
+      expect(r.manifest.operatorDestructiveAction?.agentPerformsAction).toBe(false);
+      // The manifest describes the run the grant authorizes — pinned, never env-supplied.
+      expect(r.manifest.channel).toBe(COUPANG_WING_KEY_DELETION_SCOPE.channel);
+      expect(r.manifest.maxActions).toBe(COUPANG_WING_KEY_DELETION_SCOPE.maxActions);
+    }
+  });
+
+  it("WITHDRAWING the calibration closes the destructive path again (SELECTORS_NOT_CALIBRATED)", () => {
+    // The flip must be reversible in one place: set the flag false and the phase cannot reach PREPARED at all.
+    const r = validateApprovalPrerequisites({ ...baseWingKeyDeletion(), selectorsCalibrated: false });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("SELECTORS_NOT_CALIBRATED");
+  });
+
+  it("the gate never INHERITS a calibration — omitting the field fails closed despite the flag being true", () => {
+    // `approval-manifest.ts` deliberately does not import the WING driver flag. A caller that forgets to state
+    // the calibration gets a refusal, not another surface's calibration.
+    const r = validateApprovalPrerequisites(baseWingKeyDeletion());
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("SELECTORS_NOT_CALIBRATED");
+  });
+
+  it("PREPARED destructive manifest shape once 삭제 is calibrated: agent READ_ONLY + operator irreversible action", () => {
+    // The manifest then carries the exact
     // destructive descriptor: agent performs nothing, irreversible, immediate invalidation, mandatory checkpoint,
     // zero value read — and the AGENT mode stays READ_ONLY (the destructive click is the operator's).
     const r = validateApprovalPrerequisites({ ...baseWingKeyDeletion(), selectorsCalibrated: true });
@@ -433,6 +478,66 @@ describe("Coupang WING key-deletion destructive phase (COUPANG_WING_KEY_DELETION
       // The manifest never leaks the raw WING URL.
       expect(JSON.stringify(m)).not.toContain("wing.coupang.com");
     }
+  });
+
+  it("a destructive manifest may NOT describe a different run (DESTRUCTIVE_SCOPE_MISMATCH)", () => {
+    // The operator's one-line grant binds to channel / surface / operation / maxActions. A stale
+    // `SELLEROPS_APPROVAL_CHANNEL=NAVER` from another run previously produced a PREPARED destructive manifest
+    // reading "NAVER · read-only probe" for a run that guides an irreversible Coupang WING key deletion — the
+    // grant would bind to a description the run does not honor. Every deviation now refuses.
+    const deviations: Array<Partial<ApprovalPrereqInput>> = [
+      { channel: "NAVER" },
+      { accountBinding: "operator-owned NAVER SmartStore test store" },
+      { surface: "Commerce API Center" },
+      { operation: "WING open-API read-only selector probe" },
+      { maxActions: "0 actions" },
+      { maxActions: "1 highlight-only session; the OPERATOR deletes; 0 agent click/type/value read" }, // near-miss
+    ];
+    for (const dev of deviations) {
+      const r = validateApprovalPrerequisites({
+        ...baseWingKeyDeletion(),
+        selectorsCalibrated: true, // stated explicitly: this asserts the SCOPE gate, not the calibration gate
+        ...dev,
+      });
+      expect(r.ok, `deviation ${JSON.stringify(dev)} must be refused`).toBe(false);
+      if (!r.ok) expect(r.cause).toBe("DESTRUCTIVE_SCOPE_MISMATCH");
+    }
+  });
+
+  it("the pinned scope cannot be reassigned or cleared at runtime", () => {
+    // A frozen constant and a readonly spec field: otherwise `PHASE_SPECS.…destructiveScope = undefined` would
+    // typecheck and silently skip the whole scope gate (`if (scope)`), and mutating the constant would make the
+    // gate validate against the attacker's values.
+    expect(Object.isFrozen(COUPANG_WING_KEY_DELETION_SCOPE)).toBe(true);
+    expect(() => {
+      "use strict";
+      (COUPANG_WING_KEY_DELETION_SCOPE as { channel: string }).channel = "NAVER";
+    }).toThrow();
+    expect(COUPANG_WING_KEY_DELETION_SCOPE.channel).toBe("COUPANG");
+    // The spec still carries the scope, so the gate above is reached rather than skipped.
+    expect(PHASE_SPECS.COUPANG_WING_KEY_DELETION.destructiveScope).toBe(COUPANG_WING_KEY_DELETION_SCOPE);
+  });
+
+  it("an uncalibrated WING phase names the WING probe as the remediation, never a NAVER phase", () => {
+    const r = validateApprovalPrerequisites({ ...baseWingKeyDeletion(), selectorsCalibrated: false });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.cause).toBe("SELECTORS_NOT_CALIBRATED");
+      expect(r.reason).toContain("COUPANG_WING_SELECTOR_PROBE");
+      expect(r.reason).not.toContain("API_CENTER");
+    }
+  });
+
+  it("the calibration gate runs BEFORE the scope gate — a withdrawn calibration is the reported cause", () => {
+    // Order stability: whichever field is wrong, an uncalibrated destructive run must report the calibration
+    // refusal, so the operator is never told "scope mismatch" for a phase that could not run at all.
+    const r = validateApprovalPrerequisites({
+      ...baseWingKeyDeletion(),
+      selectorsCalibrated: false,
+      channel: "NAVER",
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("SELECTORS_NOT_CALIBRATED");
   });
 
   it("MISSING the destructive descriptor → FAIL (MISSING_DESTRUCTIVE_ACTION_CONTRACT) even when calibrated", () => {
