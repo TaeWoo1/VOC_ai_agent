@@ -144,3 +144,6 @@ tests/discord_outreach_bot/__pycache__/
 
 # NAVER walkthrough runtime run-identity (never commit)
 tools/naver-local/.run/
+
+# Coupang live-proof + WING selector-probe run-identity (never commit)
+tools/coupang-local/.run/
