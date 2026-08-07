@@ -90,7 +90,7 @@ function makeDriver(
       overlayCalls.push(o);
     },
     // Default: the checkpoint painted. A test overrides this to prove a SILENT mount failure fails closed.
-    overlayMountedFn: async () => true,
+    checkpointPaintedFn: async () => true,
     ...opts,
   });
 }
@@ -227,13 +227,23 @@ describe("CoupangWingDeletionDriver — fail-closed calibration + checkpoint-fir
     // reach an irreversible 삭제 with no ring and no warning painted, while the manifest asserts
     // `explicitCheckpointRequired: true`.
     const driver = makeDriver(new FakePage(ISSUED, { count: 1, sig: "0123456789abcdef" }), {
-      overlayMountedFn: async () => false,
+      checkpointPaintedFn: async () => false,
     });
     await driver.classifyAlreadyIssued();
     const hl = await driver.highlightDeleteCheckpoint();
     expect(hl).toEqual({ count: 0 });
     expect(driver.currentPhase()).toBe("classified"); // NOT highlighted
     await expect(driver.verifyDeletion()).rejects.toThrow(/checkpoint required/);
+    // …and the CAUSE is distinguishable: the control WAS found; only the warning failed to render. Reporting
+    // this as "삭제 not found" would send the operator hunting for a control that is right there.
+    expect(driver.didCheckpointFailToPaint()).toBe(true);
+  });
+
+  it("a genuine zero-match is NOT reported as a paint failure", async () => {
+    const driver = makeDriver(new FakePage(ISSUED, { count: 0 }));
+    await driver.classifyAlreadyIssued();
+    await driver.highlightDeleteCheckpoint();
+    expect(driver.didCheckpointFailToPaint()).toBe(false);
   });
 
   it("NO overlay is mounted on any refused path — a fail-closed run never shows a checkpoint", async () => {

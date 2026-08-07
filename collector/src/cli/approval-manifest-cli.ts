@@ -154,9 +154,10 @@ export function runApprovalManifestCli(): number {
     channel: isWingKeyDeletion
       ? COUPANG_WING_KEY_DELETION_SCOPE.channel
       : (env("SELLEROPS_APPROVAL_CHANNEL") ?? (isWingPhase ? "COUPANG" : "NAVER")),
-    accountBinding:
-      env("SELLEROPS_APPROVAL_ACCOUNT") ??
-      (isWingPhase ? "operator-owned Coupang WING test account" : "operator-owned test store"),
+    accountBinding: isWingKeyDeletion
+      ? COUPANG_WING_KEY_DELETION_SCOPE.accountBinding
+      : (env("SELLEROPS_APPROVAL_ACCOUNT") ??
+        (isWingPhase ? "operator-owned Coupang WING test account" : "operator-owned test store")),
     mode: spec.mode,
     apiCenterUrl,
     // Confirm the EXACT cli/driver from the spec — but only if the entrypoint really exists on disk.

@@ -32,6 +32,9 @@ const TOUCHED = [
   "WALKTHROUGH_GIT_COMMIT",
   "SELLEROPS_APPROVAL_CHANNEL",
   "SELLEROPS_APPROVAL_ACCOUNT",
+  "SELLEROPS_APPROVAL_SURFACE",
+  "SELLEROPS_APPROVAL_OPERATION",
+  "SELLEROPS_APPROVAL_MAX",
   "SELLEROPS_WING_PROBE_TARGETS",
   "COUPANG_WING_URL",
 ] as const;
@@ -121,15 +124,20 @@ describe("approval-manifest-cli — the destructive WING deletion phase can be D
       SELLEROPS_APPROVAL_PHASE: "COUPANG_WING_KEY_DELETION",
       ...IDENTITY,
       SELLEROPS_APPROVAL_CHANNEL: "NAVER",
+      SELLEROPS_APPROVAL_ACCOUNT: "operator-owned NAVER SmartStore test store",
     });
     const { code, out } = run();
     if (!WING_DELETION_SELECTORS_CALIBRATED) return; // withdrawn ⇒ refused earlier, covered above
     expect(code).toBe(0);
     const m = JSON.parse(out) as Record<string, unknown>;
     expect(m.channel).toBe("COUPANG");
+    expect(m.accountBinding).toBe("operator-owned Coupang WING test account");
     expect(m.surface).toBe("Coupang WING Open API");
     expect(String(m.maxActions)).toContain("the OPERATOR deletes");
+    // Every grant-bearing field the root CLAUDE.md names — channel / account / surface / operation / mode /
+    // allowed actions — now describes this run, so no trace of the stale env survives into the manifest.
     expect(JSON.stringify(m)).not.toContain("NAVER");
+    expect(JSON.stringify(m)).not.toContain("SmartStore");
   });
 
   it("an UNBOUND identity still fails closed with no manifest printed", () => {

@@ -84,7 +84,7 @@ function gateRefusalCause(apiCenterUrl: string): string | null {
   const input: ApprovalPrereqInput = {
     phase: WKD.phase,
     channel: scope.channel,
-    accountBinding: env("SELLEROPS_APPROVAL_ACCOUNT") ?? "operator-owned Coupang WING test account",
+    accountBinding: scope.accountBinding,
     mode: WKD.mode,
     apiCenterUrl,
     cli: WKD.cli,
@@ -207,7 +207,11 @@ async function main(): Promise<void> {
     }
     const highlight = await driver.highlightDeleteCheckpoint();
     if (highlight.count !== 1) {
-      console.log(JSON.stringify({ event: "COUPANG_DELETION", outcome: "DELETE_TARGET_NOT_FOUND", matchCount: highlight.count }));
+      // Two distinct fail-closed causes share `count: 0` — the 삭제 control had no unique match, or it did and
+      // the irreversible-warning checkpoint failed to paint. Report them apart so the operator is not told the
+      // control is missing when it was found.
+      const outcome = driver.didCheckpointFailToPaint() ? "CHECKPOINT_NOT_PAINTED" : "DELETE_TARGET_NOT_FOUND";
+      console.log(JSON.stringify({ event: "COUPANG_DELETION", outcome, matchCount: highlight.count }));
       return;
     }
     console.error("");

@@ -29,7 +29,7 @@
  */
 import type { Page } from "playwright";
 import { log } from "../log";
-import { mountOverlay, overlayMounted, unmountOverlay } from "./overlay";
+import { advancePanelMounted, mountOverlay, unmountOverlay } from "./overlay";
 import {
   EXTRACT_WING_CENSUS,
   classifyWingUrlCategory,
@@ -85,8 +85,8 @@ export interface CoupangWingDeletionDriverOptions {
   verifyPollMs?: number;
   /** Overlay-mount seam (defaults to the real {@link mountOverlay}); tests inject a stub to stay overlay-agnostic. */
   mountOverlayFn?: typeof mountOverlay;
-  /** Mount-VERIFY seam (defaults to the real {@link overlayMounted}); tests inject a stub that reports no paint. */
-  overlayMountedFn?: typeof overlayMounted;
+  /** Paint-VERIFY seam (defaults to {@link advancePanelMounted}); tests inject a stub that reports no paint. */
+  checkpointPaintedFn?: typeof advancePanelMounted;
 }
 
 /**
@@ -120,6 +120,12 @@ export class CoupangWingDeletionDriver {
   private readonly opts: CoupangWingDeletionDriverOptions;
   private readonly closed: Promise<void>;
   private phase: WingDeletionPhase = "init";
+  /**
+   * Whether the last highlight attempt located the 삭제 control uniquely but the checkpoint failed to PAINT.
+   * Both outcomes return `{count: 0}` and both fail closed, but they are different faults and the operator
+   * should not be told "삭제 not found" when the control was found and the warning simply did not render.
+   */
+  private checkpointPaintFailed = false;
 
   constructor(page: Page, opts: CoupangWingDeletionDriverOptions = {}) {
     this.page = page;
@@ -144,6 +150,11 @@ export class CoupangWingDeletionDriver {
 
   currentPhase(): WingDeletionPhase {
     return this.phase;
+  }
+
+  /** Value-free fault discriminator for the CLI's sanitized outcome (see {@link checkpointPaintFailed}). */
+  didCheckpointFailToPaint(): boolean {
+    return this.checkpointPaintFailed;
   }
 
   private activePage(): Page {
@@ -257,7 +268,12 @@ export class CoupangWingDeletionDriver {
     // — the ONLY precondition `verifyDeletion` checks — with no ring and no warning on screen, and the operator
     // would face an irreversible 삭제 while the manifest asserts `explicitCheckpointRequired: true`. Mirrors the
     // issuance driver's guard. Fail closed: report a non-unique/absent target rather than a phantom checkpoint.
-    if (!(await (this.opts.overlayMountedFn ?? overlayMounted)(page))) {
+    // Check the RESIDENT PANEL, not just the spotlight ring. The ring box is appended even when guidance is
+    // disabled (it only differs by `display:none`), so `overlayMounted` alone would report a painted checkpoint
+    // for a run showing nothing legible — the very failure this guard exists to catch, one option away. The
+    // panel is the element that carries the irreversible warning, so it is the thing that must exist.
+    if (!(await (this.opts.checkpointPaintedFn ?? advancePanelMounted)(page))) {
+      this.checkpointPaintFailed = true;
       log("aw_coupang_deletion_checkpoint_unmounted", { highlighted: false });
       return { count: 0 };
     }

@@ -173,18 +173,21 @@ export const COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION: OperatorDestructiveAc
  */
 export interface DestructiveRunScope {
   readonly channel: string;
+  readonly accountBinding: string;
   readonly surface: string;
   readonly operation: string;
   readonly maxActions: string;
 }
-export const COUPANG_WING_KEY_DELETION_SCOPE: DestructiveRunScope = {
+/** Frozen: the pinned scope must not be reassignable at runtime, or the gate below would validate against it. */
+export const COUPANG_WING_KEY_DELETION_SCOPE: DestructiveRunScope = Object.freeze({
   channel: "COUPANG",
+  accountBinding: "operator-owned Coupang WING test account",
   surface: "Coupang WING Open API",
   operation: "WING open-API key deletion (operator-performed, irreversible; agent highlights only)",
   maxActions:
     "1 highlight-only session: SellerOps highlights the 삭제 control + rests at the irreversible-delete " +
     "checkpoint; the OPERATOR deletes; 0 agent click/type/value read",
-};
+});
 
 export interface PhaseSpec {
   phase: CalibrationPhase;
@@ -211,8 +214,11 @@ export interface PhaseSpec {
   requiresOperatorDestructiveAction?: boolean;
   /** The canonical destructive-action descriptor emitted into the manifest (present iff the flag above is set). */
   operatorDestructiveAction?: OperatorDestructiveAction;
-  /** The immutable run scope a destructive phase's grant binds to; any caller deviation is refused. */
-  destructiveScope?: DestructiveRunScope;
+  /**
+   * The immutable run scope a destructive phase's grant binds to; any caller deviation is refused. `readonly`
+   * so no code path can clear it and silently skip the scope gate.
+   */
+  readonly destructiveScope?: DestructiveRunScope;
   mode: "READ_ONLY";
   /** Visual-recon only: the fixed, closed set of API-center screens the redacted-screenshot recon may capture. */
   captureScreens?: readonly string[];
@@ -792,10 +798,11 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
   const isWingPhase = spec.phase === "COUPANG_WING_SELECTOR_PROBE" || spec.phase === "COUPANG_WING_KEY_DELETION";
   const calibrated = input.selectorsCalibrated ?? (isWingPhase ? false : SELECTORS_CALIBRATED);
   if (spec.allowsHighlight && !calibrated) {
-    return fail(
-      "SELECTORS_NOT_CALIBRATED",
-      `${spec.phase} needs calibrated control selectors; run ${PHASE_SPECS.API_CENTER_STRUCTURE_OBSERVATION.phase} first and land the real selectors`,
-    );
+    // Name the remediation for THIS surface: a WING phase is not fixed by a NAVER API-center observation.
+    const remediation = isWingPhase
+      ? `run ${PHASE_SPECS.COUPANG_WING_SELECTOR_PROBE.phase} (READ-ONLY) and land the real selectors`
+      : `run ${PHASE_SPECS.API_CENTER_STRUCTURE_OBSERVATION.phase} first and land the real selectors`;
+    return fail("SELECTORS_NOT_CALIBRATED", `${spec.phase} needs calibrated control selectors; ${remediation}`);
   }
 
   // 7b) The calibration OBSERVATION phase must carry a defined capture hotkey and a gitignored raw-artifact
@@ -957,6 +964,9 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
     if (scope) {
       for (const [field, expected, actual] of [
         ["channel", scope.channel, input.channel],
+        // `account` is one of the six fields the root CLAUDE.md names as the grant's binding — pinned for the
+        // same reason as the rest: a stale env must not print a destructive manifest naming another account.
+        ["accountBinding", scope.accountBinding, input.accountBinding],
         ["surface", scope.surface, input.surface],
         ["operation", scope.operation, input.operation],
         ["maxActions", scope.maxActions, input.maxActions],

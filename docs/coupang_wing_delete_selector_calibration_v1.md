@@ -85,10 +85,12 @@ unit — a second independent delete-only capture under a fresh grant — not an
 | Already-issued page classification, then a **unique** 삭제 match, then a **verified-painted** irreversible-warning checkpoint | driver |
 | The operator's own press of 삭제 | operator |
 
-The destructive manifest's `channel` / `surface` / `operation` / `maxActions` are **pinned to the phase spec**
-(`COUPANG_WING_KEY_DELETION_SCOPE`) and no longer read from the environment; any deviation is refused with
-`DESTRUCTIVE_SCOPE_MISMATCH`. The operator's one-line grant binds to exactly those fields, so a leftover `.env`
-from another run must not be able to print a destructive manifest that describes a different run. Pinning also
+The destructive manifest's `channel` / `accountBinding` / `surface` / `operation` / `maxActions` are **pinned to
+the phase spec** (`COUPANG_WING_KEY_DELETION_SCOPE`, frozen) and no longer read from the environment; any
+deviation is refused with `DESTRUCTIVE_SCOPE_MISMATCH`, ordered after the calibration gate so a withdrawn
+calibration still reports its own cause. The operator's one-line grant binds to exactly those fields
+(root `CLAUDE.md`: channel / account / surface / operation / mode / allowed actions), so a leftover `.env` from
+another run must not be able to print a destructive manifest that describes a different one. Pinning also
 resolved a real drift: the runtime CLI and the display CLI had been declaring **different** action budgets.
 
 The approval gate **still defaults every WING phase to uncalibrated** and never imports the driver flag — the
@@ -113,8 +115,12 @@ introduces no interactive element onto the marketplace page — and a panel with
 The mount is also **verified**, not assumed. `mountOverlay` returns silently when the tagged element is gone
 (the SPA re-rendered during the settle sleep, or `activePage()` resolved to a newly-opened tab), so awaiting it
 proves nothing; without a check the phase would reach `highlighted` — the only precondition `verifyDeletion`
-tests — with no ring and no warning painted. The driver now asks `overlayMounted` and reports `count: 0` rather
-than advancing on a phantom checkpoint.
+tests — with no warning painted. The driver now asks `advancePanelMounted` and reports `count: 0` rather than
+advancing on a phantom checkpoint. It checks the **panel**, not the spotlight ring: the ring box is appended
+even when guidance is disabled, so checking it would pass for a run showing nothing legible. Because a genuine
+zero-match and a paint failure both surface as `count: 0`, the CLI reports them apart
+(`DELETE_TARGET_NOT_FOUND` vs `CHECKPOINT_NOT_PAINTED`) rather than telling the operator a control that was
+found is missing.
 
 Tests assert the overlay's actual content (warning copy, `residentPanel`, no `advance`), that a silently
 unmounted checkpoint fails closed, and that **no refused path mounts an overlay at all**.

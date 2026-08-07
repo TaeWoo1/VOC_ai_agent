@@ -189,13 +189,20 @@ describe("삭제 calibration landing — the flip cannot outrun its evidence", (
       const src = readFileSync(path, "utf8");
       // Only BRACED named imports are permitted from the provenance module — a namespace or dynamic import
       // would hand the deletion path the whole module (including the evidence) past the allowlist below.
+      // `(\.js)?` matters: under `moduleResolution: "Bundler"` a `.js` specifier resolves the same module, and
+      // an exact-anchored pattern would silently stop matching — disabling the allowlist below along with it.
       expect(src, `${name} must not namespace-import the provenance module`).not.toMatch(
-        /import\s+\*\s+as\s+\w+\s+from\s+["'][^"']*coupang-wing-issuance-driver["']/,
+        /import\s+\*\s+as\s+\w+\s+from\s+["'][^"']*coupang-wing-issuance-driver(\.js)?["']/,
       );
       for (const dynamic of [/\bawait\s+import\s*\(/, /\bimport\s*\(\s*["']/, /\brequire\s*\(/]) {
         expect(src, `${name} must not load modules dynamically (it would bypass the import allowlist)`).not.toMatch(dynamic);
       }
-      const importRe = /import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+["'][^"']*coupang-wing-issuance-driver["']/g;
+      const importRe = /import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+["'][^"']*coupang-wing-issuance-driver(?:\.js)?["']/g;
+      expect(
+        src.includes("coupang-wing-issuance-driver") ? importRe.test(src) : true,
+        `${name} references the provenance module but no braced named import matched — the allowlist below would be vacuous`,
+      ).toBe(true);
+      importRe.lastIndex = 0;
       for (let m = importRe.exec(src); m !== null; m = importRe.exec(src)) {
         for (const raw of m[1]!.split(",")) {
           const sym = raw.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0]!.trim();
@@ -224,17 +231,19 @@ describe("삭제 calibration landing — the flip cannot outrun its evidence", (
     expect(offenders, "the calibration evidence must stay in its declaring module").toEqual([]);
   });
 
-  it("the provenance module exports NO signature-shaped constant a runtime gate could adopt", () => {
-    // `sig16` may exist only as a field of the evidence record and its interface — never as a standalone export
-    // that reads like an anchor. Anything matching /SIG|ANCHOR/ in an export name here is a tripwire.
+  it("the provenance module DERIVES no second export from the evidence — no anchor to reach for", () => {
+    // Name-pattern matching was too narrow (a `…RECORDED_FINGERPRINT` export sailed past a /SIG|ANCHOR/ test).
+    // Match on the DERIVATION instead: exactly ONE statement in the module may mention the evidence — its own
+    // declaration. Any other export computed from it (whatever it is called) is the tripwire.
     const src = codeOnly(LABELS_MODULE);
-    const exportRe = /export\s+const\s+([A-Za-z0-9_]+)/g;
-    const offenders: string[] = [];
-    for (let m = exportRe.exec(src); m !== null; m = exportRe.exec(src)) {
-      const name = m[1]!;
-      if (/DELETE.*(SIG|ANCHOR)|(SIG|ANCHOR).*DELETE/i.test(name)) offenders.push(name);
-    }
-    expect(offenders, "a delete-signature anchor export needs a SECOND live capture first").toEqual([]);
+    const mentions = src
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.includes("WING_DELETION_CALIBRATION_EVIDENCE"));
+    expect(
+      mentions,
+      "only the evidence's own declaration may mention it; a derived export needs a SECOND live capture first",
+    ).toEqual(["export const WING_DELETION_CALIBRATION_EVIDENCE: WingDeletionCalibrationEvidence = {"]);
   });
 
   it("the recorded sig16 literal appears ONLY in the provenance module, never in a runtime comparison", () => {
@@ -250,6 +259,12 @@ describe("삭제 calibration landing — the flip cannot outrun its evidence", (
     // breaking "manual progress always remains available". The spotlight ring is already `pointer-events:none`
     // for the same reason; the panel must match whenever there is nothing in it to click.
     const overlay = codeOnly(resolve(HERE, "../../../src/action-window/overlay.ts"));
+    // The paint check must target the PANEL (which carries the warning), not the spotlight ring — the ring box
+    // is appended even when guidance is disabled, so checking it would pass for a run showing nothing legible.
+    expect(codeOnly(DRIVER)).toContain("advancePanelMounted");
+    expect(codeOnly(DRIVER), "checking the ring instead of the panel would pass with nothing legible painted").not.toContain(
+      "overlayMounted",
+    );
     expect(overlay).toContain('const panelPointerEvents = o.advance ? "auto" : "none";');
     expect(overlay).toContain("pointer-events:${panelPointerEvents}");
     // …and the deletion driver must not smuggle in an advance button, which would flip it back to `auto`.

@@ -147,7 +147,7 @@ function baseWingKeyDeletion(): ApprovalPrereqInput {
   return {
     ...baseObservation(),
     phase: WKD.phase,
-    accountBinding: "operator-owned Coupang WING test account",
+    accountBinding: COUPANG_WING_KEY_DELETION_SCOPE.accountBinding,
     apiCenterUrl: WING_DEFAULT_URL,
     cli: WKD.cli,
     driver: WKD.driver,
@@ -487,6 +487,7 @@ describe("Coupang WING key-deletion destructive phase (COUPANG_WING_KEY_DELETION
     // grant would bind to a description the run does not honor. Every deviation now refuses.
     const deviations: Array<Partial<ApprovalPrereqInput>> = [
       { channel: "NAVER" },
+      { accountBinding: "operator-owned NAVER SmartStore test store" },
       { surface: "Commerce API Center" },
       { operation: "WING open-API read-only selector probe" },
       { maxActions: "0 actions" },
@@ -500,6 +501,30 @@ describe("Coupang WING key-deletion destructive phase (COUPANG_WING_KEY_DELETION
       });
       expect(r.ok, `deviation ${JSON.stringify(dev)} must be refused`).toBe(false);
       if (!r.ok) expect(r.cause).toBe("DESTRUCTIVE_SCOPE_MISMATCH");
+    }
+  });
+
+  it("the pinned scope cannot be reassigned or cleared at runtime", () => {
+    // A frozen constant and a readonly spec field: otherwise `PHASE_SPECS.…destructiveScope = undefined` would
+    // typecheck and silently skip the whole scope gate (`if (scope)`), and mutating the constant would make the
+    // gate validate against the attacker's values.
+    expect(Object.isFrozen(COUPANG_WING_KEY_DELETION_SCOPE)).toBe(true);
+    expect(() => {
+      "use strict";
+      (COUPANG_WING_KEY_DELETION_SCOPE as { channel: string }).channel = "NAVER";
+    }).toThrow();
+    expect(COUPANG_WING_KEY_DELETION_SCOPE.channel).toBe("COUPANG");
+    // The spec still carries the scope, so the gate above is reached rather than skipped.
+    expect(PHASE_SPECS.COUPANG_WING_KEY_DELETION.destructiveScope).toBe(COUPANG_WING_KEY_DELETION_SCOPE);
+  });
+
+  it("an uncalibrated WING phase names the WING probe as the remediation, never a NAVER phase", () => {
+    const r = validateApprovalPrerequisites({ ...baseWingKeyDeletion(), selectorsCalibrated: false });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.cause).toBe("SELECTORS_NOT_CALIBRATED");
+      expect(r.reason).toContain("COUPANG_WING_SELECTOR_PROBE");
+      expect(r.reason).not.toContain("API_CENTER");
     }
   });
 
