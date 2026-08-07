@@ -28,6 +28,7 @@ import {
   type OperatorDestructiveAction,
 } from "../../src/cli/approval-manifest";
 import { VISUAL_RECON_SCREENS } from "../../src/action-window/api-issuance-calibration/visual-recon";
+import { WING_DELETION_SELECTORS_CALIBRATED } from "../../src/action-window/coupang-wing-issuance-driver";
 import { WING_DEFAULT_URL, WING_PROBE_TARGET_NAMES } from "../../src/cli/coupang-wing-classifier";
 
 const OBS = PHASE_SPECS.API_CENTER_STRUCTURE_OBSERVATION;
@@ -135,10 +136,11 @@ function baseWingSelectorProbe(): ApprovalPrereqInput {
 }
 
 /**
- * The WING key-deletion destructive phase. It HIGHLIGHTS the 삭제 control ⇒ requires calibrated WING selectors,
- * which are `LIVE_DOM_CALIBRATION_PENDING` — so it fails closed UNLESS a test explicitly sets
- * `selectorsCalibrated: true` (standing in for a future live 삭제 calibration). Carries the immutable
- * operator-destructive-action descriptor.
+ * The WING key-deletion destructive phase. It HIGHLIGHTS the 삭제 control ⇒ requires calibrated WING selectors.
+ * The 삭제 control IS live-calibrated now, but this module never assumes a WING calibration — the caller must
+ * state it — so the base input (which omits the field) still fails closed. Tests that want the calibrated path
+ * pass the real `WING_DELETION_SELECTORS_CALIBRATED`, exactly as `run-coupang-wing-deletion-live.ts` does.
+ * Carries the immutable operator-destructive-action descriptor.
  */
 function baseWingKeyDeletion(): ApprovalPrereqInput {
   return {
@@ -405,8 +407,40 @@ describe("Coupang WING key-deletion destructive phase (COUPANG_WING_KEY_DELETION
     if (!r.ok) expect(r.cause).toBe("SELECTORS_NOT_CALIBRATED");
   });
 
-  it("PREPARED destructive manifest shape once 삭제 is (stand-in) calibrated: agent READ_ONLY + operator irreversible action", () => {
-    // selectorsCalibrated:true stands in for a future live 삭제 calibration. The manifest then carries the exact
+  it("with the REAL production calibration flag the destructive phase reaches PREPARED (executable-ready)", () => {
+    // This is the calibration landing: fed exactly what `run-coupang-wing-deletion-live.ts` feeds, the gate now
+    // emits a PREPARED destructive manifest. PREPARED is still not APPROVED — the operator's single-use grant
+    // against the displayed manifest is a separate step, and the agent deletes nothing either way.
+    expect(WING_DELETION_SELECTORS_CALIBRATED).toBe(true);
+    const r = validateApprovalPrerequisites({
+      ...baseWingKeyDeletion(),
+      selectorsCalibrated: WING_DELETION_SELECTORS_CALIBRATED,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.manifest.selectorsCalibrated).toBe(true);
+      expect(r.manifest.mode).toBe("READ_ONLY"); // the AGENT never mutates the marketplace
+      expect(r.manifest.operatorDestructiveAction?.agentPerformsAction).toBe(false);
+    }
+  });
+
+  it("WITHDRAWING the calibration closes the destructive path again (SELECTORS_NOT_CALIBRATED)", () => {
+    // The flip must be reversible in one place: set the flag false and the phase cannot reach PREPARED at all.
+    const r = validateApprovalPrerequisites({ ...baseWingKeyDeletion(), selectorsCalibrated: false });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("SELECTORS_NOT_CALIBRATED");
+  });
+
+  it("the gate never INHERITS a calibration — omitting the field fails closed despite the flag being true", () => {
+    // `approval-manifest.ts` deliberately does not import the WING driver flag. A caller that forgets to state
+    // the calibration gets a refusal, not another surface's calibration.
+    const r = validateApprovalPrerequisites(baseWingKeyDeletion());
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("SELECTORS_NOT_CALIBRATED");
+  });
+
+  it("PREPARED destructive manifest shape once 삭제 is calibrated: agent READ_ONLY + operator irreversible action", () => {
+    // The manifest then carries the exact
     // destructive descriptor: agent performs nothing, irreversible, immediate invalidation, mandatory checkpoint,
     // zero value read — and the AGENT mode stays READ_ONLY (the destructive click is the operator's).
     const r = validateApprovalPrerequisites({ ...baseWingKeyDeletion(), selectorsCalibrated: true });

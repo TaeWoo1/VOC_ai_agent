@@ -19,10 +19,13 @@
  *   - No value/text/clipboard/screenshot/`page.content()` read — the structural signature is computed IN-PAGE
  *     from tag + position + child count only.
  *
- * ⚠ **DELETE selector is `LIVE_DOM_CALIBRATION_PENDING` — NOT calibrated.** {@link WING_DELETION_LABELS} carries a
- * PROPOSED 삭제 label; {@link WING_DELETION_SELECTORS_CALIBRATED} is `false` until a live read-only delete probe
- * confirms it resolves uniquely. This driver REFUSES to highlight while uncalibrated (fail closed, defense-in-
- * depth), and its gated CLI additionally refuses through the approval gate's `SELECTORS_NOT_CALIBRATED`.
+ * **DELETE selector is LIVE-CONFIRMED** (`WING_DELETION_CALIBRATION_EVIDENCE` in `./coupang-wing-issuance-driver`
+ * carries the sanitized provenance and its limits): a live read-only probe
+ * measured {@link WING_DELETION_LABELS}`.delete` resolving to exactly one element on the already-issued page, so
+ * {@link WING_DELETION_SELECTORS_CALIBRATED} is `true`. Calibration is SELECTOR READINESS ONLY — it authorizes
+ * nothing. This driver still REFUSES to highlight if the flag is false (fail closed, defense-in-depth), still
+ * refuses a non-unique match at runtime, still enforces classify-then-checkpoint-then-operator-action, and its
+ * gated CLI still requires a PREPARED destructive manifest. The 삭제 press remains the operator's.
  */
 import type { Page } from "playwright";
 import { log } from "../log";
@@ -74,9 +77,8 @@ export interface CoupangWingDeletionDriverOptions {
   context?: WingContextLike;
   guidanceEnabled?: boolean;
   /**
-   * Whether the delete selector is calibrated. Defaults to the code-level {@link WING_DELETION_SELECTORS_CALIBRATED}
-   * (false) so production ALWAYS fails closed on highlight; a test may pass `true` to exercise the highlight +
-   * checkpoint + verify flow over a fake page.
+   * Whether the delete selector is calibrated. Defaults to the code-level {@link WING_DELETION_SELECTORS_CALIBRATED};
+   * a test may pass `false` to prove the highlight path still fails closed when calibration is withdrawn.
    */
   calibrated?: boolean;
   locatorSettleMs?: number;

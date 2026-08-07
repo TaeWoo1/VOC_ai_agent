@@ -10,10 +10,15 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import {
+  WING_DELETION_CALIBRATION_EVIDENCE,
+  WING_DELETION_LABELS,
+} from "../../../src/action-window/coupang-wing-issuance-driver";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DRIVER = resolve(HERE, "../../../src/action-window/coupang-wing-deletion-driver.ts");
 const CLI = resolve(HERE, "../../../src/cli/run-coupang-wing-deletion-live.ts");
+const LABELS_MODULE = resolve(HERE, "../../../src/action-window/coupang-wing-issuance-driver.ts");
 
 function codeOnly(path: string): string {
   const raw = readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
@@ -126,5 +131,55 @@ describe("run-coupang-wing-deletion-live CLI — source guard (gated, fail-close
 
   it("main() runs only when invoked directly — inert on import", () => {
     expect(code).toContain("import.meta.url === pathToFileURL(process.argv[1]).href");
+  });
+});
+
+/**
+ * The calibration landing's own guards. The 삭제 selector is now live-confirmed, which makes the destructive path
+ * EXECUTABLE — so these lock the two things that could quietly make the flip dishonest: retuning the selector the
+ * evidence was measured against, and promoting the recorded `sig16` into a runtime anchor that one capture cannot
+ * support.
+ */
+describe("삭제 calibration landing — the flip cannot outrun its evidence", () => {
+  it("the calibrated locator spec is EXACTLY the one the live probe measured", () => {
+    // The uniqueness evidence (matchCount=1) was measured against this spec and no other. Narrowing
+    // `candidateQuery` to the observed role, or editing `exactText`, discards that evidence — re-run the
+    // READ-ONLY delete probe and update WING_DELETION_CALIBRATION_EVIDENCE before changing this.
+    expect(WING_DELETION_LABELS.delete).toEqual({ candidateQuery: "button,a,span,div", exactText: "삭제" });
+    expect(WING_DELETION_CALIBRATION_EVIDENCE.label).toBe(WING_DELETION_LABELS.delete.exactText);
+  });
+
+  it("the recorded role is provenance only — the locator does NOT filter on it", () => {
+    // The capture observed role=button, but the locator still counts every candidate in `candidateQuery`. If it
+    // filtered on role it would be measuring something different from what was calibrated.
+    expect(WING_DELETION_CALIBRATION_EVIDENCE.role).toBe("button");
+    expect(WING_DELETION_LABELS.delete.candidateQuery).toContain("a,span,div");
+  });
+
+  it("NO runtime path reads the recorded evidence — sig16 is not a drift/safety anchor", () => {
+    // This is the invariant that makes ONE capture a sufficient basis: nothing compares a live signature against
+    // the recorded one, so cross-run signature stability is not required. Wiring such a comparison in would
+    // CREATE that requirement — and a second independent delete-only live capture becomes a prerequisite.
+    for (const [name, path] of [["driver", DRIVER], ["cli", CLI]] as const) {
+      const src = codeOnly(path);
+      expect(src, `${name} must not read the calibration evidence at runtime`).not.toContain(
+        "WING_DELETION_CALIBRATION_EVIDENCE",
+      );
+      expect(src, `${name} must not compare a signature against a recorded constant`).not.toContain("sig16");
+    }
+  });
+
+  it("the recorded sig16 literal appears ONLY in the provenance module, never in a runtime comparison", () => {
+    const literal = WING_DELETION_CALIBRATION_EVIDENCE.sig16;
+    expect(codeOnly(LABELS_MODULE)).toContain(literal);
+    for (const path of [DRIVER, CLI]) expect(codeOnly(path)).not.toContain(literal);
+  });
+
+  it("the CLI still feeds the calibration flag to the gate rather than asserting calibration itself", () => {
+    // Calibration must remain a value the approval gate checks, not something the destructive CLI declares true
+    // inline — otherwise withdrawing the flag would no longer close the path.
+    const code = codeOnly(CLI);
+    expect(code).toContain("selectorsCalibrated: WING_DELETION_SELECTORS_CALIBRATED");
+    expect(code).not.toContain("selectorsCalibrated: true");
   });
 });

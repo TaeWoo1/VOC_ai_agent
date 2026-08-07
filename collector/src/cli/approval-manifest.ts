@@ -67,7 +67,8 @@ export const CALIBRATION_PHASES = [
   // and rests at a checkpoint; it NEVER clicks/deletes); the DESTRUCTIVE, IRREVERSIBLE action is the OPERATOR's
   // (deleting their WING self-developed Open API key — which immediately invalidates the existing Access/Secret
   // Key and is NOT recoverable). It highlights a real control ⇒ `allowsHighlight: true` ⇒ it FAILS CLOSED
-  // (`SELECTORS_NOT_CALIBRATED`) while WING is `LIVE_DOM_CALIBRATION_PENDING`; and it also requires the immutable
+  // (`SELECTORS_NOT_CALIBRATED`) unless the caller states the 삭제 calibration (live-confirmed since 2026-08-07;
+  // this module never assumes it — see § step 7); and it also requires the immutable
   // operator-destructive-action contract (§ steps 7 + destructive-action check). Its scope is a marketplace
   // mutation the operator performs, so it is the FIRST phase to carry an `operatorDestructiveAction` descriptor.
   "COUPANG_WING_KEY_DELETION",
@@ -310,11 +311,11 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   },
   COUPANG_WING_KEY_DELETION: {
     phase: "COUPANG_WING_KEY_DELETION",
-    // PLANNED driver/CLI — deliberately NOT yet built. It cannot be honestly validated until the 삭제 control is
-    // live-calibrated (WING is `LIVE_DOM_CALIBRATION_PENDING`), so referencing it here makes the run fail closed
-    // at the CLI layer too (`CLI_DRIVER_UNCONFIRMED`: the entrypoint file is absent) IN ADDITION to
-    // `SELECTORS_NOT_CALIBRATED`. Both must be resolved (build the driver AND calibrate 삭제) before a PREPARED
-    // destructive manifest is ever emittable.
+    // Both original blockers are now resolved: the driver + CLI are built, and the 삭제 control is live-calibrated
+    // (`WING_DELETION_CALIBRATION_EVIDENCE`). A PREPARED destructive manifest is therefore emittable — but only
+    // when the CALLER passes `selectorsCalibrated: true` (see below: this module still defaults every WING phase
+    // to `false`, so a caller who omits it fails closed), the destructive descriptor matches the immutable
+    // canonical values exactly, and the `WALKTHROUGH_*` identity is bound. PREPARED is still not APPROVED.
     cli: "src/cli/run-coupang-wing-deletion-live.ts",
     driver: "CoupangWingDeletionDriver (Action Window highlight/observe — the operator deletes; the agent never clicks)",
     // AGENT capability is READ_ONLY highlight/observe: open the window, wait for the operator to reach the
@@ -746,11 +747,13 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
 
   // 7) The highlight-proof phase requires the control selectors to be calibrated for real (not fixtures).
   // `SELECTORS_CALIBRATED` is the NAVER API-center adapter flag; it is NOT the Coupang WING calibration status.
-  // EVERY Coupang WING phase is `LIVE_DOM_CALIBRATION_PENDING` (no WING selector has ever been live-calibrated),
-  // so a WING phase reports `false` unless the caller explicitly overrides. This is what makes the WING key-
-  // deletion phase (which HIGHLIGHTS the 삭제 control) FAIL CLOSED with `SELECTORS_NOT_CALIBRATED` today: it can
-  // only reach PREPARED once a live read-only probe confirms the 삭제 control resolves uniquely and the override
-  // is set. The read-only WING selector probe never highlights, so the gate below is skipped for it regardless.
+  // This module deliberately does NOT import the WING driver's calibration flag: WING phases default to `false`
+  // and the WING calibration state must be passed IN by the caller (`run-coupang-wing-deletion-live.ts` feeds
+  // `WING_DELETION_SELECTORS_CALIBRATED`). That keeps the default fail-closed — a caller who forgets the field
+  // gets `SELECTORS_NOT_CALIBRATED` rather than silently inheriting another surface's calibration. The 삭제
+  // control IS live-calibrated now, so the deletion phase reaches PREPARED when the caller states it; withdraw
+  // the flag and the whole destructive path closes again. The read-only WING selector probe never highlights, so
+  // the gate below is skipped for it regardless.
   const isWingPhase = spec.phase === "COUPANG_WING_SELECTOR_PROBE" || spec.phase === "COUPANG_WING_KEY_DELETION";
   const calibrated = input.selectorsCalibrated ?? (isWingPhase ? false : SELECTORS_CALIBRATED);
   if (spec.allowsHighlight && !calibrated) {
