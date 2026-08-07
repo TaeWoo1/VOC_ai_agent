@@ -33,7 +33,7 @@
  */
 import type { Page } from "playwright";
 import { log } from "../log";
-import { mountOverlay, unmountOverlay, overlayMounted } from "./overlay";
+import { mountOverlay, unmountOverlay, overlayMounted, resetOverlayAdvance, readOverlayAdvancePressed } from "./overlay";
 import {
   EXTRACT_WING_CENSUS,
   LIVE_DOM_CALIBRATION_PENDING,
@@ -51,6 +51,7 @@ import type {
   CoupangIssuanceTarget,
   WingSurfaceProbe,
 } from "./coupang-issuance/coupang-issuance-driver";
+import { isCoupangCheckpointTarget } from "./coupang-issuance/coupang-issuance-driver";
 import type { LocateResult } from "./engine";
 
 /** The highlightable fixed-label targets (everything except the guidance-only `reach_open_api` / `return`). */
@@ -87,6 +88,34 @@ const LOCATOR_SETTLE_MS = 400;
 const VERIFY_MAX_POLLS = 12;
 const VERIFY_POLL_MS = 500;
 const OPEN_NAV_POLL_MS = 1_000;
+const OVERLAY_ADVANCE_POLL_MS = 500;
+
+/**
+ * The opaque per-step latch token for a checkpoint's WING-resident advance button. Value-free — a fixed derived
+ * string, compared only for equality, never a page value. Distinct per target so a stale press from a prior step
+ * can never satisfy the next one's poll.
+ */
+function advanceToken(target: CoupangIssuanceTarget): string {
+  return `coupang-issuance-advance:${target}`;
+}
+
+/**
+ * The WING-resident advance button caption per checkpoint — the button the seller presses ON THE WING PAGE to
+ * advance the guided walk (so they never bounce back to the SellerOps tab to press "다음"). `reach_open_api` has
+ * NO button: it is the one step that auto-advances on the observed `wing_home → open_api_issuance` navigation.
+ * `issue` and `credentials` deliberately confirm the seller's own manual act (press 발급 / copy the keys) — the
+ * driver still presses nothing and reads no value.
+ */
+const ADVANCE_BUTTON_LABEL: Readonly<Partial<Record<CoupangIssuanceTarget, string>>> = {
+  self_dev: "다음",
+  vendor_info: "다음",
+  call_ip: "다음",
+  issue: "발급 완료 · 다음",
+  credentials: "복사했어요 · 다음",
+  // The return step hands focus back to SellerOps; the SellerOps tab then owns the "enter keys" CTA, so this
+  // on-page button is purely "go back" (avoids two near-identical "enter keys" buttons across the two windows).
+  return: "SellerOps로 돌아가기",
+};
 
 /** Bounded sleep between navigation-observe polls (no wall-clock read; timer only). */
 function sleep(ms: number): Promise<void> {
@@ -114,18 +143,20 @@ const OVERLAY_STEP: Readonly<Record<CoupangIssuanceTarget, number>> = {
 };
 
 /**
- * Operator-legible dev-overlay labels for the headed live run (no product FE is present, so the badge is the
- * only in-window guidance). Diagnostic aid only — NOT the product FE's localized copy. The SELLER performs every
- * step; SellerOps never presses 발급 and never reads the Access Key / Secret Key / 업체코드.
+ * The WING-RESIDENT guidance copy shown in the on-page panel for each step — this IS the seller-facing guidance
+ * during the walk, rendered ON the WING page next to the advance button, so the seller's primary screen stays
+ * WING (no bounce back to the SellerOps tab per step). Every step is the SELLER's own act: SellerOps never
+ * presses 발급 and never reads the Access Key / Secret Key / 업체코드. `reach_open_api` auto-advances on the
+ * observed navigation (no button); every other step advances on the seller pressing THIS panel's button.
  */
 const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string>> = {
-  reach_open_api: "WING 홈에서 '오픈API 키 발급' 페이지로 직접 이동하세요. (SellerOps가 이동을 관찰합니다.)",
-  self_dev: "표시된 '자체개발' 옵션을 직접 선택한 뒤 SellerOps에서 '다음'을 누르세요.",
-  vendor_info: "표시된 '업체명' 정보를 확인한 뒤 SellerOps에서 '다음'을 누르세요.",
-  call_ip: "표시된 '호출 IP' 위치에 직접 입력한 뒤 SellerOps에서 '다음'을 누르세요.",
-  issue: "표시된 '발급' 버튼을 직접 누르세요. SellerOps는 대신 누르지 않습니다. 발급 후 '다음'을 누르세요.",
-  credentials: "표시된 Access Key / Secret Key / 업체코드를 직접 복사한 뒤 SellerOps에서 '다음'을 누르세요 (도구는 값을 읽지 않습니다).",
-  return: "SellerOps로 돌아와 '다음'을 누르세요.",
+  reach_open_api: "WING 홈에서 '오픈API 키 발급' 페이지로 직접 이동하세요. 이동을 감지하면 자동으로 다음 단계로 넘어갑니다.",
+  self_dev: "표시된 '자체개발' 옵션을 직접 선택하세요. 완료하면 아래 '다음'을 누르세요.",
+  vendor_info: "표시된 '업체명' 정보를 확인하세요. 완료하면 아래 '다음'을 누르세요.",
+  call_ip: "표시된 '호출 IP' 위치에 직접 입력하세요. 완료하면 아래 '다음'을 누르세요.",
+  issue: "표시된 '발급' 버튼을 직접 누르세요. SellerOps는 대신 누르지 않습니다. 발급이 끝나면 아래 버튼을 누르세요.",
+  credentials: "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요. SellerOps는 값을 읽지 않습니다. 복사했으면 아래 버튼을 누르세요.",
+  return: "이제 아래 버튼을 눌러 SellerOps로 돌아가세요. 돌아가면 복사한 키를 입력해 연결을 마칠 수 있어요.",
 };
 
 /** A browser context whose newest tab may hold the step the seller opened. Structural subset of Playwright's. */
@@ -320,14 +351,24 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     return { count: 1, sig: res.sig };
   }
 
-  /** Mount the reused read-only step overlay for one target's operator-legible dev badge. Never clicks/types. */
+  /**
+   * Mount the WING-resident step overlay for one target: the read-only spotlight ring + the guidance panel
+   * (product copy) and, for a checkpoint, its advance button. `reach_open_api` gets NO button (it auto-advances
+   * on the observed navigation). The button only records the seller's press into an in-page value-free latch;
+   * the driver never clicks/types and reads no field value.
+   */
   private async mountStepOverlay(page: Page, target: CoupangIssuanceTarget): Promise<void> {
+    const buttonLabel = ADVANCE_BUTTON_LABEL[target];
     await mountOverlay(page, {
       stepNumber: OVERLAY_STEP[target],
       totalSteps: COUPANG_ISSUANCE_TOTAL_STEPS,
       copyKey: `actionWindow.coupangIssuance.step.${target}`,
       label: OPERATOR_STEP_LABELS[target],
       guidanceEnabled: this.opts.guidanceEnabled ?? true,
+      // Opt in to the WING-resident guidance panel (this driver is the only one that does); the button is
+      // added only for a checkpoint (a target with an advance label). The reach step gets a copy-only panel.
+      residentPanel: true,
+      ...(buttonLabel ? { advance: { buttonLabel, token: advanceToken(target) } } : {}),
     });
   }
 
@@ -337,20 +378,41 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     await this.evalStr(page, IN_PAGE_CLEAR_TAG).catch(() => undefined);
   }
 
-  async armObserve(_target: CoupangIssuanceTarget): Promise<void> {
-    // No click observer is EVER armed for Coupang issuance. The only observed target — `reach_open_api` — is
-    // watched as a page CATEGORY transition (see `observeUserAction`), not a click on a tagged control; the
-    // same-page viewport checkpoints advance on the operator's own SellerOps "다음". So arming is a no-op.
-    return;
+  async armObserve(target: CoupangIssuanceTarget): Promise<void> {
+    // A same-page checkpoint is advanced by the seller pressing THIS step's WING-resident overlay button. Re-arm
+    // the value-free latch (set this step's opaque token, drop any prior press) so a stale press from an earlier
+    // step or arm window can never be misread as this step's advance. `reach_open_api` arms nothing here — it is
+    // watched as a page-CATEGORY transition in `observeUserAction`, not a button press.
+    if (isCoupangCheckpointTarget(target)) {
+      await resetOverlayAdvance(this.activePage(), advanceToken(target)).catch(() => undefined);
+    }
   }
 
   async observeUserAction(target: CoupangIssuanceTarget): Promise<boolean> {
-    // `reach_open_api` is the ONE observed target: it completes when the seller navigates from the WING home to
-    // the open-API issuance page — an OBSERVED page-category transition. The engine then re-probes (VERIFY_REACH).
+    // `reach_open_api` is watched as a NAVIGATION: it completes when the seller moves from the WING home to the
+    // open-API issuance page — an OBSERVED page-category transition. The engine then re-probes (VERIFY_REACH).
     if (target === "reach_open_api") return this.observeLeftWingHome();
-    // Every other target is a same-page viewport checkpoint (or `return` guidance): SellerOps never waits for a
-    // WING action — the operator advances with "다음" — so this is never armed. Return true as a safe default.
+    // Every same-page checkpoint advances WING-resident: poll this step's value-free advance latch until the
+    // seller presses the on-page button (or the observe window elapses, so the session re-arms). No value read.
+    if (isCoupangCheckpointTarget(target)) return this.observeOverlayAdvance(target);
     return true;
+  }
+
+  /**
+   * Await the seller's press of this checkpoint's WING-resident advance button, value-free: poll the in-page
+   * advance latch for THIS step's opaque token and resolve `true` the moment it matches. NEVER clicks, types, or
+   * reads a field value — only compares an opaque token. On timeout it returns `false` so the session re-arms.
+   */
+  private async observeOverlayAdvance(target: CoupangIssuanceTarget): Promise<boolean> {
+    const timeoutMs = this.opts.observeTimeoutMs ?? DEFAULT_WING_OBSERVE_TIMEOUT_MS;
+    const maxPolls = Math.max(1, Math.ceil(timeoutMs / OVERLAY_ADVANCE_POLL_MS));
+    const token = advanceToken(target);
+    for (let i = 0; i < maxPolls; i++) {
+      const pressed = await readOverlayAdvancePressed(this.activePage(), token).catch(() => false);
+      if (pressed) return true;
+      if (i < maxPolls - 1) await sleep(OVERLAY_ADVANCE_POLL_MS);
+    }
+    return false;
   }
 
   /**

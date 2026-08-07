@@ -54,12 +54,13 @@ export const COUPANG_ISSUANCE_TRANSITION_OBSERVE_TARGET: CoupangIssuanceTarget =
 
 /**
  * **Same-page VIEWPORT CHECKPOINTS.** Once the seller has reached the issuance page, 자체개발 / 업체명 / 호출 IP /
- * 발급 / 키 복사 / return are NOT controls the runtime waits for a WING click on — they are SECTIONS on the one
- * page the seller is already looking at. A checkpoint STABILIZES the page, LOCATES its section, SCROLLS it into
- * view, and OVERLAYS a "여기입니다" pointer; it never arms a click observer and never waits for a WING interaction.
- * The seller reads/acts on the section, then advances with SellerOps's own "다음" (a `REQUEST_STEP_RECHECK`).
- * `issue` is here too — the 발급 button is highlighted and the seller presses it themselves, then "다음";
- * `return` is a guidance-only checkpoint (no WING section to locate).
+ * 발급 / 키 복사 / return are SECTIONS on the one page the seller is already looking at. A checkpoint STABILIZES
+ * the page, LOCATES its section, SCROLLS it into view, and OVERLAYS a WING-resident guidance panel with the
+ * step copy and a "다음" advance button. The seller reads/acts on the section, then presses that on-page button;
+ * the driver OBSERVES the value-free press and the checkpoint advances — the seller never bounces back to the
+ * SellerOps tab. (A FE `REQUEST_STEP_RECHECK` stays valid as a fallback/recovery path — e.g. at a park.) `issue`
+ * is here too — the 발급 button is highlighted and the seller presses it themselves, then the on-page "다음";
+ * `return` hands focus back to SellerOps (its panel button is "돌아가기", no WING section to locate).
  */
 export const COUPANG_ISSUANCE_CHECKPOINT_TARGETS: readonly CoupangIssuanceTarget[] = [
   "self_dev",

@@ -281,10 +281,13 @@ export class CoupangIssuanceEngine {
     this.emit("HUMAN_ACTION_REQUIRED", { stepId: this.stepId() });
     this.emit("TARGET_HIGHLIGHTED", { stepId: this.stepId(), targetRef: res.sig });
     this.emit("RUN_STATUS_CHANGED", { status: "WAITING_FOR_HUMAN" });
-    // A same-page VIEWPORT CHECKPOINT (자체개발 / 업체명 / 호출 IP / 발급 / keys / return) does NOT arm a WING
-    // observation — the section is highlighted + scrolled into view and the run RESTS until the operator presses
-    // "다음". Only the transition-observe target (reach_open_api) arms an observation of the seller's navigation.
-    return isCoupangCheckpointTarget(target) ? "NONE" : { observe: target };
+    // WING-RESIDENT advance: every step now arms an observation the driver reports ON the WING page, so the seller
+    // never bounces back to the SellerOps tab to press "다음". A same-page VIEWPORT CHECKPOINT (자체개발 / 업체명 /
+    // 호출 IP / 발급 / keys / return) arms an observation of its WING-resident advance button (highlighted +
+    // scrolled into view, the run RESTS until the seller presses it); the transition-observe target
+    // (reach_open_api) arms an observation of the seller's navigation. A `REQUEST_STEP_RECHECK` from the FE stays
+    // valid as a fallback/recovery — `advanceCheckpoint` guards against double-advance either way.
+    return { observe: target };
   }
 
   /**
@@ -296,9 +299,10 @@ export class CoupangIssuanceEngine {
     // The driver observed the seller LEAVE the WING home, but step 1 is not done until we re-probe and confirm
     // they reached the open-API issuance page. Defer completion to `onReachVerified` so a wrong page parks.
     if (target === "reach_open_api") return "VERIFY_REACH";
-    // A viewport CHECKPOINT never completes on an observed WING action — it advances only on the operator's "다음"
-    // (`advanceCheckpoint`). Unreachable today (no checkpoint arms an observer); FAIL CLOSED here if one ever did.
-    return "NONE";
+    // A same-page CHECKPOINT completes when the driver observes the seller press its WING-resident advance button.
+    // `advanceCheckpoint` re-checks target + stage, so a late or duplicated observation (or a racing FE
+    // `REQUEST_STEP_RECHECK`) cannot skip a step or advance the wrong one — the second caller resolves to NONE.
+    return this.advanceCheckpoint(target);
   }
 
   /**

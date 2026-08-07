@@ -163,4 +163,13 @@ export class CoupangIssuanceFixtureDriver implements CoupangIssuanceProbeDriver 
   setProbe(probe: WingSurfaceProbe): void {
     this.script.probe = probe;
   }
+
+  /**
+   * Test helper: model the seller (not) having acted on a checkpoint yet — i.e. whether the WING-resident advance
+   * button for `target` has been pressed. Flipping it to `true` mid-run lets a test hold the run at a checkpoint
+   * (e.g. the 발급 human checkpoint) and then release it, exactly as the seller pressing the on-page button would.
+   */
+  setAction(target: CoupangIssuanceTarget, acted: boolean): void {
+    this.script.action = { ...(this.script.action ?? {}), [target]: acted };
+  }
 }

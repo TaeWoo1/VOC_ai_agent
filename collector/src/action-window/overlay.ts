@@ -27,7 +27,38 @@ export interface OverlayOptions {
    */
   label?: string;
   guidanceEnabled: boolean;
+  /**
+   * Explicit opt-in for the WING-RESIDENT guidance panel. When `true`, mountOverlay draws a
+   * fixed-position guidance panel (the {@link label} product copy + an optional advance button) SEPARATE
+   * from the `pointer-events:none` spotlight ring, so the seller reads the guidance and advances the walk
+   * ON the marketplace page itself — never bouncing back to the SellerOps tab to press "다음".
+   *
+   * <p>This is a DELIBERATE opt-in, NOT inferred from {@link label}: every overlay caller (NAVER review
+   * export / NAVER issuance / Coupang renewal) passes a `label` for the diagnostic badge, so gating the
+   * panel on `label` would inject a new interactive fixed element onto those pages. Only the Coupang
+   * WING-resident issuance driver sets this flag, so all other flows keep the classic ring+badge only and
+   * their behavior is unchanged.
+   */
+  residentPanel?: boolean;
+  /**
+   * Optional advance affordance for a WING-RESIDENT step (only meaningful with {@link residentPanel}). When
+   * present the guidance panel gains a single advance button; its click sets an in-page value-free LATCH
+   * (`__aw_advance_pressed__ = token`) the driver polls with {@link readOverlayAdvancePressed}. The `token`
+   * is opaque and per-step so a stale press from a prior step can never skip the next one. Absent ⇒ a
+   * guidance-only panel (e.g. the reach step, which auto-advances on a page-category transition).
+   */
+  advance?: OverlayAdvance;
 }
+
+/** The WING-resident advance affordance (a labelled button + its opaque per-step latch token). */
+export interface OverlayAdvance {
+  /** The button caption the seller presses to advance (e.g. "다음", "발급 완료 · 다음"). */
+  buttonLabel: string;
+  /** Opaque per-step latch token — never a page value; only compared for equality. */
+  token: string;
+}
+
+const ADVANCE_PANEL_ID = "__aw_advance_panel__";
 
 const OVERLAY_ID = "__aw_overlay__";
 
@@ -233,6 +264,44 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
       window.removeEventListener("resize", reposition);
       delete (window as unknown as Record<string, unknown>)["__aw_overlay_untrack__"];
     };
+    // WING-RESIDENT guidance panel + advance latch. Drawn as a SEPARATE fixed element from the ring, so the
+    // interactive advance button (pointer-events:auto) can never overlap or intercept a WING control (the ring
+    // stays pointer-events:none). Re-latch this step: set THIS step's opaque token and drop any prior press, so a
+    // stale press from an earlier step cannot skip the current one. The button, when present, records the press
+    // by copying the in-page token into `__aw_advance_pressed__` — a value-free equality latch the driver polls.
+    const prevPanel = document.getElementById("__aw_advance_panel__");
+    if (prevPanel) prevPanel.remove();
+    G["__aw_advance_token__"] = o.advance ? o.advance.token : "";
+    delete G["__aw_advance_pressed__"];
+    // The WING-resident panel is drawn ONLY on an explicit opt-in (residentPanel) — never inferred from a
+    // label — so callers that pass only a diagnostic label (NAVER export / NAVER issuance / Coupang renewal)
+    // keep the classic ring+badge and never get a new interactive fixed element on their marketplace page.
+    if (o.guidanceEnabled && o.residentPanel && o.label != null) {
+      const panel = document.createElement("div");
+      panel.id = "__aw_advance_panel__";
+      panel.setAttribute("role", "note");
+      panel.setAttribute("aria-live", "polite");
+      panel.style.cssText =
+        "position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:2147483001;pointer-events:auto;box-sizing:border-box;max-width:min(560px,92vw);background:#0b1f4d;color:#fff;font:14px system-ui,-apple-system,sans-serif;padding:14px 16px;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,0.38);display:flex;gap:14px;align-items:center";
+      const text = document.createElement("div");
+      text.textContent = o.label != null ? o.label : o.copyKey;
+      text.style.cssText = "flex:1 1 auto;line-height:1.45";
+      panel.appendChild(text);
+      if (o.advance) {
+        const btn = document.createElement("button");
+        btn.setAttribute("type", "button");
+        btn.setAttribute("data-aw-advance", "");
+        btn.textContent = o.advance.buttonLabel;
+        btn.style.cssText =
+          "flex:0 0 auto;background:#2b6cff;color:#fff;border:0;border-radius:8px;padding:10px 18px;font:600 14px system-ui,-apple-system,sans-serif;cursor:pointer";
+        btn.addEventListener("click", function () {
+          const w = window as unknown as Record<string, unknown>;
+          w["__aw_advance_pressed__"] = w["__aw_advance_token__"];
+        });
+        panel.appendChild(btn);
+      }
+      document.body.appendChild(panel);
+    }
     // Mount SUCCEEDED — clear the breadcrumb so a subsequent mount that rejects BEFORE its body runs (a transient
     // soft-nav) reads back `unknown`, never this completed mount's stale stage (which would read as a false locus).
     delete G["__aw_mount_stage__"];
@@ -329,7 +398,43 @@ export async function unmountOverlay(page: PageOrFrame): Promise<void> {
     if (typeof untrack === "function") (untrack as () => void)();
     const box = document.getElementById("__aw_overlay__");
     if (box) box.remove();
+    // Also tear down the WING-resident guidance panel and clear the advance latch so a stale press can never be
+    // read back after the walk moves on / cleans up.
+    const panel = document.getElementById("__aw_advance_panel__");
+    if (panel) panel.remove();
+    const g = window as unknown as Record<string, unknown>;
+    delete g["__aw_advance_pressed__"];
+    delete g["__aw_advance_token__"];
   });
+}
+
+/**
+ * Re-arm the WING-resident advance latch for one step WITHOUT a full re-mount: set THIS step's opaque token and
+ * drop any prior press. The driver calls this each time it (re-)arms an observation on a checkpoint, so a press
+ * left over from a prior step or a prior arm window can never be misread as this step's advance. Value-free — it
+ * only writes an opaque token and deletes a boolean-ish latch; it reads no page content.
+ */
+export async function resetOverlayAdvance(page: PageOrFrame, token: string): Promise<void> {
+  await page.evaluate((t) => {
+    const g = window as unknown as Record<string, unknown>;
+    g["__aw_advance_token__"] = t;
+    delete g["__aw_advance_pressed__"];
+  }, token);
+}
+
+/**
+ * Did the seller press THIS step's WING-resident advance button? A value-free equality poll: it returns whether
+ * the in-page latch `__aw_advance_pressed__` equals the step's opaque `token`. It reads no field value, no DOM
+ * text, no attribute — only the opaque token the panel button copied on click. A non-matching / absent latch
+ * (a stale press from a prior step, or no press yet) reads back `false`.
+ */
+export async function readOverlayAdvancePressed(page: PageOrFrame, token: string): Promise<boolean> {
+  return page.evaluate((t) => (window as unknown as Record<string, unknown>)["__aw_advance_pressed__"] === t, token);
+}
+
+/** Test/QA helper: is the WING-resident advance panel currently mounted? (sanitized boolean) */
+export async function advancePanelMounted(page: PageOrFrame): Promise<boolean> {
+  return page.evaluate(() => !!document.getElementById("__aw_advance_panel__"));
 }
 
 /** Test/QA helper: is the overlay currently mounted? (sanitized boolean) */
@@ -345,4 +450,4 @@ export async function overlayTop(page: PageOrFrame): Promise<number> {
   });
 }
 
-export { OVERLAY_ID };
+export { OVERLAY_ID, ADVANCE_PANEL_ID };

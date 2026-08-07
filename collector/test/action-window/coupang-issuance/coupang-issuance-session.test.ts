@@ -94,13 +94,13 @@ async function pressNextToComplete(io: ReturnType<typeof loopback>, engine: Coup
 }
 
 describe("coupang issuance session — the full linear walkthrough (offline)", () => {
-  it("reach transition → verify → self_dev → vendor_info → call_ip → issue → credentials → return → complete, never clicking", async () => {
+  it("reach → verify → self_dev → … → return → complete on WING-resident advances ALONE (a single START_RUN, no FE 다음)", async () => {
     const { io, engine, driver, session } = build();
     startRun(io);
     await session.whenSettled();
-    // After START, the run auto-drives the reach_open_api transition-observe (the ONE observed target), the
-    // VERIFY_REACH re-probe, and guides self_dev, then RESTS at that checkpoint. 다음 advances the rest.
-    await pressNextToComplete(io, engine, session);
+    // The WHOLE walk drives to completion from a single START_RUN: the reach_open_api navigation is observed, then
+    // every same-page checkpoint advances when the driver reports the seller pressed its WING-RESIDENT advance
+    // button (the fixture's default action) — no REQUEST_STEP_RECHECK from the FE is ever sent.
 
     expect(engine.currentStage()).toBe("guidance_complete");
     expect(io.lastView()?.status).toBe("COMPLETED");
@@ -112,24 +112,34 @@ describe("coupang issuance session — the full linear walkthrough (offline)", (
       "wait:reach_open_api",
       "probeSurface", // VERIFY_REACH: confirm the seller reached the open-API issuance page
       "locate:self_dev",
-      "highlight:self_dev", // checkpoint — rest (no observe/wait); 다음 advances
+      "highlight:self_dev",
+      "observe:self_dev", // WING-resident: arm the on-page advance-button observation
+      "wait:self_dev", // …and advance when the seller presses it
       "locate:vendor_info",
       "highlight:vendor_info",
+      "observe:vendor_info",
+      "wait:vendor_info",
       "locate:call_ip",
       "highlight:call_ip",
+      "observe:call_ip",
+      "wait:call_ip",
       "locate:issue",
       "highlight:issue", // the 발급 button — highlighted, the seller presses it themselves
+      "observe:issue",
+      "wait:issue",
       "locate:credentials",
       "highlight:credentials", // copy the Access Key / Secret Key / 업체코드
+      "observe:credentials",
+      "wait:credentials",
       "locate:return",
       "highlight:return",
+      "observe:return",
+      "wait:return",
       "cleanup",
     ]);
-    // The runtime observed/awaited ONLY the reach transition — never a checkpoint control (incl. 발급).
-    for (const t of ["self_dev", "vendor_info", "call_ip", "issue", "credentials", "return"]) {
-      expect(driver.calls, `observe:${t}`).not.toContain(`observe:${t}`);
-      expect(driver.calls, `wait:${t}`).not.toContain(`wait:${t}`);
-    }
+    // PROOF the FE never drove a step: the ONLY command the session received was the single START_RUN.
+    const commandResults = io.sent.filter((f) => f.kind === "aw_command_result");
+    expect(commandResults).toHaveLength(1);
   });
 
   it("keeps totalSteps a fixed 7, carrying the coupang channel + issuance intent + NO appBranch on every view", async () => {
@@ -159,41 +169,43 @@ describe("coupang issuance session — the full linear walkthrough (offline)", (
 });
 
 describe("coupang issuance session — the 발급 (issue) human checkpoint", () => {
-  it("rests at checkpoint_before_issue with the 발급 button highlighted, arms NO observer, and 다음 advances", async () => {
-    // Rest at each checkpoint so the run stops on issue: never advance issue itself here.
-    const { io, engine, driver, session } = build();
+  it("rests at checkpoint_before_issue with 발급 highlighted, arms the WING-resident observer, and advances only on the seller's press", async () => {
+    // The seller has NOT yet pressed the WING-resident '발급 완료 · 다음' button — model that with action:issue=false
+    // so the run reaches the 발급 checkpoint and RESTS there (the earlier checkpoints advance on their default press).
+    const { io, engine, driver, session } = build({ action: { issue: false } });
     startRun(io);
     await session.whenSettled();
-    // 다음 through self_dev, vendor_info, call_ip to land on the issue checkpoint.
-    for (const _ of ["self_dev→vendor", "vendor→call_ip", "call_ip→issue"]) {
-      command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
-      await session.whenSettled();
-    }
     expect(engine.currentStage()).toBe("checkpoint_before_issue");
     expect(io.lastView()?.status).toBe("WAITING_FOR_HUMAN");
     expect(io.lastView()?.currentStep?.stepNumber).toBe(5);
-    // The 발급 section was highlighted (opaque 16-hex), and NO click observer was armed for it.
+    // The 발급 section was highlighted (opaque 16-hex), and a WING-resident observation WAS armed — the run waits
+    // for the seller's own on-page press (it never auto-advances the human checkpoint, and never presses 발급).
     const ref = io.events().find((e) => e.type === "TARGET_HIGHLIGHTED" && e.payload.stepId === "aw.coupang_issuance_issue_checkpoint")!.payload.targetRef;
     expect(ref).toMatch(/^[0-9a-f]{16}$/);
     expect(driver.calls).toContain("highlight:issue");
-    expect(driver.calls).not.toContain("observe:issue");
-    expect(driver.calls).not.toContain("wait:issue");
+    expect(driver.calls).toContain("observe:issue");
+    // It has NOT completed the issue step while the seller has not pressed the button.
+    expect(io.eventTypes().filter((_t) => true)).not.toContain("RUN_COMPLETED");
 
-    // 다음 advances (does not complete the run on its own) — the seller pressed 발급 themselves, the tool did not.
-    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
+    // The seller issues the key themselves, then presses the WING-resident advance button → the driver observes it.
+    driver.setAction("issue", true);
+    for (let i = 0; i < 100 && engine.currentStage() === "checkpoint_before_issue"; i++) {
+      await new Promise<void>((r) => setTimeout(r, 2));
+    }
     await session.whenSettled();
-    expect(engine.currentStage()).toBe("guiding_copy_keys");
+    // Advancing the checkpoint runs the rest of the walk (copy keys → return) on the same WING-resident presses.
+    expect(engine.currentStage()).toBe("guidance_complete");
+    expect(io.lastView()?.status).toBe("COMPLETED");
   });
 });
 
 describe("coupang issuance session — TARGET RE-FIND after a navigation race", () => {
-  it("a checkpoint locate that throws PARKS recoverably, then a 다음 re-guides IN PLACE and the run completes", async () => {
+  it("a checkpoint locate that throws PARKS recoverably, then a re-check re-guides IN PLACE and the walk completes", async () => {
     // Model the wing_home→open_api race hitting the vendor_info locate: it throws once (execution-context-destroyed).
+    // self_dev advances on its own WING-resident press and drives straight into the vendor_info guide, which races
+    // and throws → recoverable page_mismatch park (no FE 다음 was needed to get here).
     const { io, engine, driver, session } = build({ locateThrows: { vendor_info: 1 } });
     startRun(io);
-    await session.whenSettled();
-    // 다음 from self_dev tries to guide vendor_info; the locate races and throws → recoverable page_mismatch park.
-    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision, "self-next");
     await session.whenSettled();
     expect(engine.currentStage()).toBe("page_mismatch");
     expect(io.blockers()).toContainEqual({ code: "UI_DRIFT", recoverable: true });
