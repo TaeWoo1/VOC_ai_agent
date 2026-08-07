@@ -281,8 +281,12 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
       panel.id = "__aw_advance_panel__";
       panel.setAttribute("role", "note");
       panel.setAttribute("aria-live", "polite");
+      // A panel with no advance button has nothing to click, so it takes NO pointer events — otherwise a
+      // copy-only panel (the deletion checkpoint, the reach step) could sit over the very control the seller
+      // must press on a short page and block their manual progress. With a button it must stay clickable.
+      const panelPointerEvents = o.advance ? "auto" : "none";
       panel.style.cssText =
-        "position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:2147483001;pointer-events:auto;box-sizing:border-box;max-width:min(560px,92vw);background:#0b1f4d;color:#fff;font:14px system-ui,-apple-system,sans-serif;padding:14px 16px;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,0.38);display:flex;gap:14px;align-items:center";
+        `position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:2147483001;pointer-events:${panelPointerEvents};box-sizing:border-box;max-width:min(560px,92vw);background:#0b1f4d;color:#fff;font:14px system-ui,-apple-system,sans-serif;padding:14px 16px;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,0.38);display:flex;gap:14px;align-items:center`;
       const text = document.createElement("div");
       text.textContent = o.label != null ? o.label : o.copyKey;
       text.style.cssText = "flex:1 1 auto;line-height:1.45";

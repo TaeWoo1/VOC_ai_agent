@@ -157,6 +157,35 @@ export const COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION: OperatorDestructiveAc
   credentialValueReadBudget: 0,
 };
 
+/**
+ * **The immutable run SCOPE a destructive phase's grant binds to.** The descriptor above pins *what* the
+ * operator does; this pins *what run they are approving*. Both matter, because the operator's one-line
+ * `Seated and ready.` binds to the manifest's channel / surface / operation / action budget
+ * (`docs/sellerops_live_approval_contract.md` §2–3).
+ *
+ * The gap this closes: those four fields reached the manifest as unvalidated caller/env passthrough, so a stale
+ * `SELLEROPS_APPROVAL_CHANNEL=NAVER` (left over from another run) would print a destructive manifest reading
+ * "NAVER · read-only probe" while the run it authorizes is an irreversible Coupang WING key deletion — the
+ * operator would grant against a description the run does not honor. Latent before the 삭제 calibration landed
+ * (the phase could never reach PREPARED), live the moment it did. A destructive phase now refuses any deviation
+ * instead of displaying it. It also forces the runtime CLI and the display CLI to declare the SAME budget
+ * string; they had drifted apart.
+ */
+export interface DestructiveRunScope {
+  readonly channel: string;
+  readonly surface: string;
+  readonly operation: string;
+  readonly maxActions: string;
+}
+export const COUPANG_WING_KEY_DELETION_SCOPE: DestructiveRunScope = {
+  channel: "COUPANG",
+  surface: "Coupang WING Open API",
+  operation: "WING open-API key deletion (operator-performed, irreversible; agent highlights only)",
+  maxActions:
+    "1 highlight-only session: SellerOps highlights the 삭제 control + rests at the irreversible-delete " +
+    "checkpoint; the OPERATOR deletes; 0 agent click/type/value read",
+};
+
 export interface PhaseSpec {
   phase: CalibrationPhase;
   /** The EXACT CLI entrypoint (repo-relative) this phase runs. */
@@ -182,6 +211,8 @@ export interface PhaseSpec {
   requiresOperatorDestructiveAction?: boolean;
   /** The canonical destructive-action descriptor emitted into the manifest (present iff the flag above is set). */
   operatorDestructiveAction?: OperatorDestructiveAction;
+  /** The immutable run scope a destructive phase's grant binds to; any caller deviation is refused. */
+  destructiveScope?: DestructiveRunScope;
   mode: "READ_ONLY";
   /** Visual-recon only: the fixed, closed set of API-center screens the redacted-screenshot recon may capture. */
   captureScreens?: readonly string[];
@@ -332,6 +363,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     mode: "READ_ONLY", // AGENT mode — the destructive marketplace action is the OPERATOR's (operatorDestructiveAction)
     requiresOperatorDestructiveAction: true,
     operatorDestructiveAction: COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION,
+    destructiveScope: COUPANG_WING_KEY_DELETION_SCOPE,
   },
 };
 
@@ -371,6 +403,9 @@ export const APPROVAL_PREREQ_CAUSES = [
   // irreversible operator deletion, so its immutable descriptor must be present and exactly the canonical values.
   "MISSING_DESTRUCTIVE_ACTION_CONTRACT",
   "DESTRUCTIVE_ACTION_CONTRACT_MISMATCH",
+  // A destructive phase's manifest must describe the run it authorizes — channel / surface / operation / action
+  // budget are pinned to the phase, never taken from caller env.
+  "DESTRUCTIVE_SCOPE_MISMATCH",
   // The WING selector-probe per-run target scope must be a non-empty canonical subset of the fixed target set.
   "WING_PROBE_TARGETS_MISMATCH",
 ] as const;
@@ -913,6 +948,26 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
         "DESTRUCTIVE_ACTION_CONTRACT_MISMATCH",
         `the destructive-action descriptor must be exactly {operation:${canon.operation}, irreversible:true, invalidatesExistingCredentialImmediately:true, agentPerformsAction:false, explicitCheckpointRequired:true, credentialValueReadBudget:0}`,
       );
+    }
+    // 12b) …and the manifest must DESCRIBE that run. The operator's one-line grant binds to these four fields,
+    // so a destructive phase pins them to the phase spec rather than accepting caller/env values. A stale
+    // `SELLEROPS_APPROVAL_CHANNEL` from another run now refuses instead of printing a destructive manifest that
+    // names the wrong channel/surface/operation/budget.
+    const scope = spec.destructiveScope;
+    if (scope) {
+      for (const [field, expected, actual] of [
+        ["channel", scope.channel, input.channel],
+        ["surface", scope.surface, input.surface],
+        ["operation", scope.operation, input.operation],
+        ["maxActions", scope.maxActions, input.maxActions],
+      ] as const) {
+        if (actual !== expected) {
+          return fail(
+            "DESTRUCTIVE_SCOPE_MISMATCH",
+            `${spec.phase} pins ${field} to the phase scope; a destructive manifest may not describe a different run`,
+          );
+        }
+      }
     }
   }
 

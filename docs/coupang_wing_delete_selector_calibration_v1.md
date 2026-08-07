@@ -82,8 +82,14 @@ unit — a second independent delete-only capture under a fresh grant — not an
 | A PREPARED destructive Approval Manifest for a bound, fresh `WALKTHROUGH_*` identity | `validateApprovalPrerequisites` |
 | The immutable operator-destructive descriptor (irreversible, agent-performs-nothing, checkpoint required, 0 value reads) | approval gate |
 | A fresh, single-use operator grant against the displayed manifest | operator |
-| Already-issued page classification, then a **unique** 삭제 match, then the irreversible-warning checkpoint | driver |
+| Already-issued page classification, then a **unique** 삭제 match, then a **verified-painted** irreversible-warning checkpoint | driver |
 | The operator's own press of 삭제 | operator |
+
+The destructive manifest's `channel` / `surface` / `operation` / `maxActions` are **pinned to the phase spec**
+(`COUPANG_WING_KEY_DELETION_SCOPE`) and no longer read from the environment; any deviation is refused with
+`DESTRUCTIVE_SCOPE_MISMATCH`. The operator's one-line grant binds to exactly those fields, so a leftover `.env`
+from another run must not be able to print a destructive manifest that describes a different run. Pinning also
+resolved a real drift: the runtime CLI and the display CLI had been declaring **different** action budgets.
 
 The approval gate **still defaults every WING phase to uncalibrated** and never imports the driver flag — the
 caller must state the calibration, so a caller that forgets it gets `SELECTORS_NOT_CALIBRATED` rather than
@@ -101,8 +107,17 @@ safety requirement, not styling: without the resident panel the ~130-character i
 the spotlight ring's single-line `nowrap` badge and runs off the viewport — the operator would press an
 irreversible 삭제 having never read the checkpoint the manifest's `explicitCheckpointRequired: true` promises.
 No advance button is added because this walk advances on the operator's sentinel file, so the checkpoint
-introduces no interactive element onto the marketplace page. A test asserts the overlay's actual content
-(warning copy, `residentPanel`, no `advance`) and that **no refused path mounts an overlay at all**.
+introduces no interactive element onto the marketplace page — and a panel with no button now takes
+`pointer-events: none`, so it can never sit over the control the operator must press.
+
+The mount is also **verified**, not assumed. `mountOverlay` returns silently when the tagged element is gone
+(the SPA re-rendered during the settle sleep, or `activePage()` resolved to a newly-opened tab), so awaiting it
+proves nothing; without a check the phase would reach `highlighted` — the only precondition `verifyDeletion`
+tests — with no ring and no warning painted. The driver now asks `overlayMounted` and reports `count: 0` rather
+than advancing on a phantom checkpoint.
+
+Tests assert the overlay's actual content (warning copy, `residentPanel`, no `advance`), that a silently
+unmounted checkpoint fails closed, and that **no refused path mounts an overlay at all**.
 
 ## Not established by this unit
 
@@ -117,18 +132,25 @@ introduces no interactive element onto the marketplace page. A test asserts the 
 
 ## Known gaps in the destructive path (pre-existing; NOT closed by this unit)
 
-Surfaced by the review of this landing. Neither is introduced here, but both become live on the destructive
-phase now that it is executable, and both should be closed before `Coupang WING Key Deletion Live v1`:
+Surfaced by review of this landing. Latent before it (the destructive phase could never reach PREPARED, so no
+destructive manifest could be mis-described); live the moment it landed. The scope-pinning gap was closed here;
+this one was not, and it should close before `Coupang WING Key Deletion Live v1`:
 
-1. **Identity binding is presence-only, not freshness.** `validateApprovalPrerequisites` accepts any non-empty,
-   non-`"unknown"` `runId` / `approvalId` / `gitSha`; nothing compares `WALKTHROUGH_GIT_COMMIT` to actual HEAD
-   or checks a clean tree. The WING *probe* has that protection in `wing-probe-preflight.sh`; the deletion
-   entrypoint has **no equivalent preflight harness**, so a leftover `.env` from a consumed approval can reach
-   PREPARED with a `gitSha` that does not describe the running code — which the approval contract treats as
-   `REVOKED`.
-2. **`channel` / `surface` / `operation` / `maxActions` come from unvalidated env.** Only `accountBinding` is
-   screened. A stale `SELLEROPS_APPROVAL_CHANNEL=NAVER` would produce a destructive manifest naming the wrong
-   channel — the exact field the operator's grant binds to.
+- **Identity binding is presence-only, not freshness.** `validateApprovalPrerequisites` accepts any non-empty,
+  non-`"unknown"` `runId` / `approvalId` / `gitSha`; nothing compares `WALKTHROUGH_GIT_COMMIT` to actual HEAD
+  or checks a clean tree. The WING *probe* has that protection in `wing-probe-preflight.sh`; the deletion
+  entrypoint has **no equivalent preflight harness**, so a leftover `.env` from a consumed approval can reach
+  PREPARED with a `gitSha` that does not describe the running code — which the approval contract treats as
+  `REVOKED`. A deletion preflight harness (the probe harness's destructive sibling) is the obvious fix and is
+  a unit of its own.
+
+## Withdrawing the calibration
+
+`WING_DELETION_SELECTORS_CALIBRATED = false` is the single emergency lever: it closes the runtime CLI and the
+manifest display CLI at the same instant. Pulling it costs **exactly one** deliberate red test — the intent
+marker in `coupang-wing-deletion-driver.test.ts` — which exists as the confirmation prompt. Every other test
+either states its own calibration or branches on the constant, so nobody has to edit tests under pressure to
+close the destructive path.
 
 ## Next unit
 

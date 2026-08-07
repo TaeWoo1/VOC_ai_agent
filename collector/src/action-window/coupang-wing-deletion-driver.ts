@@ -29,7 +29,7 @@
  */
 import type { Page } from "playwright";
 import { log } from "../log";
-import { mountOverlay, unmountOverlay } from "./overlay";
+import { mountOverlay, overlayMounted, unmountOverlay } from "./overlay";
 import {
   EXTRACT_WING_CENSUS,
   classifyWingUrlCategory,
@@ -85,6 +85,8 @@ export interface CoupangWingDeletionDriverOptions {
   verifyPollMs?: number;
   /** Overlay-mount seam (defaults to the real {@link mountOverlay}); tests inject a stub to stay overlay-agnostic. */
   mountOverlayFn?: typeof mountOverlay;
+  /** Mount-VERIFY seam (defaults to the real {@link overlayMounted}); tests inject a stub that reports no paint. */
+  overlayMountedFn?: typeof overlayMounted;
 }
 
 /**
@@ -249,6 +251,16 @@ export class CoupangWingDeletionDriver {
       // sentinel file, so the panel is copy-only and adds no interactive element to the marketplace page.
       residentPanel: true,
     });
+    // VERIFY the checkpoint actually painted before advancing. `mountOverlay` returns silently when the tagged
+    // element is gone (the SPA re-rendered during the settle sleep, or `activePage()` now resolves to a tab the
+    // tag was never applied to), so awaiting it proves nothing. Without this the phase would reach `highlighted`
+    // — the ONLY precondition `verifyDeletion` checks — with no ring and no warning on screen, and the operator
+    // would face an irreversible 삭제 while the manifest asserts `explicitCheckpointRequired: true`. Mirrors the
+    // issuance driver's guard. Fail closed: report a non-unique/absent target rather than a phantom checkpoint.
+    if (!(await (this.opts.overlayMountedFn ?? overlayMounted)(page))) {
+      log("aw_coupang_deletion_checkpoint_unmounted", { highlighted: false });
+      return { count: 0 };
+    }
     this.phase = "highlighted";
     log("aw_coupang_deletion_highlight", { highlighted: true });
     return { count: 1, sig: res.sig };

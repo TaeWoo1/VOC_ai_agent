@@ -79,11 +79,18 @@ function makeDriver(
 ): CoupangWingDeletionDriver {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new CoupangWingDeletionDriver(page as any, {
+    // Behavioral tests state the calibration EXPLICITLY rather than leaning on the production default, so that
+    // withdrawing `WING_DELETION_SELECTORS_CALIBRATED` — the documented emergency lever — costs exactly one
+    // deliberate red test (the intent marker below) instead of a broken suite. The coupling between the default
+    // and the constant is asserted separately.
+    calibrated: true,
     locatorSettleMs: 0,
     verifyPollMs: 0,
     mountOverlayFn: async (_page, o) => {
       overlayCalls.push(o);
     },
+    // Default: the checkpoint painted. A test overrides this to prove a SILENT mount failure fails closed.
+    overlayMountedFn: async () => true,
     ...opts,
   });
 }
@@ -137,9 +144,22 @@ describe("CoupangWingDeletionDriver — fail-closed calibration + checkpoint-fir
     await expect(driver.highlightDeleteCheckpoint()).rejects.toThrow(/CALIBRATION_PENDING|calibrated/);
   });
 
-  it("requires classifying the already-issued page before highlighting (DEFAULT calibration)", async () => {
+  it("requires classifying the already-issued page before highlighting", async () => {
     const driver = makeDriver(new FakePage(ISSUED, { count: 1, sig: "0123456789abcdef" }));
     await expect(driver.highlightDeleteCheckpoint()).rejects.toThrow(/classify/);
+  });
+
+  it("the DEFAULT (no option) tracks the production constant — highlight follows the flag, both ways", async () => {
+    // The option is a test seam; production reads the constant. Whichever way the constant is set, the default
+    // driver must agree with it — so this passes before AND after an emergency withdrawal.
+    const driver = makeDriver(new FakePage(ISSUED, { count: 1, sig: "0123456789abcdef" }), { calibrated: undefined });
+    await driver.classifyAlreadyIssued();
+    const attempt = driver.highlightDeleteCheckpoint();
+    if (WING_DELETION_SELECTORS_CALIBRATED) {
+      await expect(attempt).resolves.toEqual({ count: 1, sig: "0123456789abcdef" });
+    } else {
+      await expect(attempt).rejects.toThrow(/calibrated/);
+    }
   });
 
   it("the operator-action step (verifyDeletion) is UNREACHABLE without the checkpoint", async () => {
@@ -198,6 +218,22 @@ describe("CoupangWingDeletionDriver — fail-closed calibration + checkpoint-fir
     // The warning must state BOTH facts the operator needs before an irreversible press.
     expect(String(o.label)).toContain("되돌릴 수 없");
     expect(String(o.label)).toContain("무효화");
+  });
+
+  it("a SILENTLY UNMOUNTED checkpoint fails closed — the phase must not advance on a phantom warning", async () => {
+    // `mountOverlay` returns without throwing when the tagged element is gone (SPA re-render during the settle
+    // sleep, or a newly-opened tab becoming `activePage()`), so awaiting it proves nothing. If the phase advanced
+    // anyway, `verifyDeletion` — whose ONLY precondition is `phase === "highlighted"` — would let the operator
+    // reach an irreversible 삭제 with no ring and no warning painted, while the manifest asserts
+    // `explicitCheckpointRequired: true`.
+    const driver = makeDriver(new FakePage(ISSUED, { count: 1, sig: "0123456789abcdef" }), {
+      overlayMountedFn: async () => false,
+    });
+    await driver.classifyAlreadyIssued();
+    const hl = await driver.highlightDeleteCheckpoint();
+    expect(hl).toEqual({ count: 0 });
+    expect(driver.currentPhase()).toBe("classified"); // NOT highlighted
+    await expect(driver.verifyDeletion()).rejects.toThrow(/checkpoint required/);
   });
 
   it("NO overlay is mounted on any refused path — a fail-closed run never shows a checkpoint", async () => {
@@ -268,8 +304,14 @@ describe("CoupangWingDeletionDriver — fail-closed calibration + checkpoint-fir
 });
 
 describe("삭제 calibration evidence — the flip is backed by a real live capture, and states its limits", () => {
-  it("the calibrated flag is TRUE and carries matching live provenance", () => {
+  it("INTENT MARKER — the calibration is currently landed (this is the ONE test an emergency withdrawal turns red)", () => {
+    // Deliberately the only assertion on the constant's value. If you withdrew the calibration on purpose, this
+    // single failure is the confirmation prompt; update it in the same commit. Nothing else in the suite should
+    // need touching — every other test states its own calibration or branches on the constant.
     expect(WING_DELETION_SELECTORS_CALIBRATED).toBe(true);
+  });
+
+  it("the flag carries matching live provenance", () => {
     const e = WING_DELETION_CALIBRATION_EVIDENCE;
     expect(e.status).toBe("LIVE_DOM_CALIBRATION_CONFIRMED");
     expect(e.matchCount).toBe(1);

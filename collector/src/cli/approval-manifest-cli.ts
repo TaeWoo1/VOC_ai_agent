@@ -28,7 +28,7 @@ import { CALIBRATION_PHASES } from "./approval-manifest";
 import { resolveVisualReconScope } from "../action-window/api-issuance-calibration/visual-recon";
 // The public WING host default for the Coupang WING selector-probe phase (pure leaf; no per-run input needed).
 import { WING_DEFAULT_URL, resolveWingProbeScope } from "./coupang-wing-classifier";
-import { COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION } from "./approval-manifest";
+import { COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION, COUPANG_WING_KEY_DELETION_SCOPE } from "./approval-manifest";
 // The 삭제 selector calibration flag — the SAME constant `run-coupang-wing-deletion-live.ts` feeds the gate.
 // `approval-manifest.ts` deliberately never imports it (WING phases default to uncalibrated there), so the
 // display CLI must state it explicitly or the destructive phase could never produce the manifest the operator
@@ -104,7 +104,7 @@ export function runApprovalManifestCli(): number {
       ? (env("SELLEROPS_CALIBRATION_ARTIFACT") ?? `.calibration/api-center-${env("WALKTHROUGH_RUN_ID") ?? "unknown"}.json`)
       : undefined;
   const defaultOperation = isWingKeyDeletion
-    ? "WING open-API key deletion (operator-performed, irreversible; agent highlights only)"
+    ? COUPANG_WING_KEY_DELETION_SCOPE.operation
     : isWingSelectorProbe
     ? "WING open-API read-only selector probe"
     : isVisualRecon
@@ -117,7 +117,7 @@ export function runApprovalManifestCli(): number {
           ? "existing-app guided issuance tutorial — FE-run-host READ-only live proof (open_app→api_group→credentials→return)"
           : "API issuance highlight proof (new-app or existing-app)";
   const defaultMaxActions = isWingKeyDeletion
-    ? "1 highlight-only session: SellerOps highlights the 삭제 control + rests at the irreversible-delete checkpoint; the OPERATOR deletes; 0 agent click/type/value read"
+    ? COUPANG_WING_KEY_DELETION_SCOPE.maxActions
     : isWingSelectorProbe
     ? "1 read-only WING selector probe session"
     : isVisualRecon
@@ -148,7 +148,12 @@ export function runApprovalManifestCli(): number {
 
   const input: ApprovalPrereqInput = {
     phase,
-    channel: env("SELLEROPS_APPROVAL_CHANNEL") ?? (isWingPhase ? "COUPANG" : "NAVER"),
+    // The destructive phase pins channel/surface/operation/maxActions to its phase scope — the operator's grant
+    // binds to exactly these, so a leftover env from another run must not be able to re-describe the run. The
+    // gate refuses a deviation anyway (`DESTRUCTIVE_SCOPE_MISMATCH`); this stops feeding it one.
+    channel: isWingKeyDeletion
+      ? COUPANG_WING_KEY_DELETION_SCOPE.channel
+      : (env("SELLEROPS_APPROVAL_CHANNEL") ?? (isWingPhase ? "COUPANG" : "NAVER")),
     accountBinding:
       env("SELLEROPS_APPROVAL_ACCOUNT") ??
       (isWingPhase ? "operator-owned Coupang WING test account" : "operator-owned test store"),
@@ -166,9 +171,11 @@ export function runApprovalManifestCli(): number {
     runId: env("WALKTHROUGH_RUN_ID") ?? "unknown",
     approvalId: env("WALKTHROUGH_APPROVAL_ID") ?? "unknown",
     gitSha: env("WALKTHROUGH_GIT_COMMIT") ?? "unknown",
-    maxActions: env("SELLEROPS_APPROVAL_MAX") ?? defaultMaxActions,
-    surface: env("SELLEROPS_APPROVAL_SURFACE") ?? (isWingPhase ? "Coupang WING Open API" : "Commerce API Center"),
-    operation: env("SELLEROPS_APPROVAL_OPERATION") ?? defaultOperation,
+    maxActions: isWingKeyDeletion ? defaultMaxActions : (env("SELLEROPS_APPROVAL_MAX") ?? defaultMaxActions),
+    surface: isWingKeyDeletion
+      ? COUPANG_WING_KEY_DELETION_SCOPE.surface
+      : (env("SELLEROPS_APPROVAL_SURFACE") ?? (isWingPhase ? "Coupang WING Open API" : "Commerce API Center")),
+    operation: isWingKeyDeletion ? defaultOperation : (env("SELLEROPS_APPROVAL_OPERATION") ?? defaultOperation),
     startRunContract,
     // The WING key-deletion phase is scoped around an operator-performed irreversible action — carry its immutable
     // descriptor so the gate can enforce it. Both original blockers are resolved (the deletion CLI exists; the

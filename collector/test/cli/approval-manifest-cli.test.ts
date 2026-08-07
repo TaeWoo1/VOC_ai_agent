@@ -68,10 +68,25 @@ function run(): { code: number; out: string; err: string } {
   }
 }
 
+/**
+ * These tests are written against the CURRENT value of `WING_DELETION_SELECTORS_CALIBRATED` rather than
+ * hardcoding `true`, so withdrawing the calibration — the documented single-lever emergency close — leaves the
+ * suite green here and costs exactly ONE deliberate red test (the intent marker in the deletion-driver suite).
+ * A lever that turns the build red pushes whoever pulls it into editing tests under pressure. The withdraw
+ * DIRECTION is therefore covered too: with the flag false these same tests assert the refusal.
+ */
 describe("approval-manifest-cli — the destructive WING deletion phase can be DISPLAYED for approval", () => {
-  it("prints a PREPARED destructive manifest when the identity is bound", () => {
+  it("emits exactly what the calibration flag implies: PREPARED when calibrated, a refusal when withdrawn", () => {
     setEnv({ SELLEROPS_APPROVAL_PHASE: "COUPANG_WING_KEY_DELETION", ...IDENTITY });
     const { code, out, err } = run();
+
+    if (!WING_DELETION_SELECTORS_CALIBRATED) {
+      // Withdrawn: the display CLI must close in lockstep with the runtime CLI — no manifest to grant against.
+      expect(code).toBe(1);
+      expect(out).toBe("");
+      expect(err).toContain("SELECTORS_NOT_CALIBRATED");
+      return;
+    }
     expect(err, "the destructive phase must not fail closed on its own calibration").toBe("");
     expect(code).toBe(0);
 
@@ -98,13 +113,33 @@ describe("approval-manifest-cli — the destructive WING deletion phase can be D
     }
   });
 
+  it("a stale env from ANOTHER run cannot re-describe the destructive manifest", () => {
+    // The scenario the review demonstrated: sourcing a leftover NAVER `.env` used to print an exit-0 destructive
+    // manifest reading "NAVER · Commerce API Center · read-only probe · 0 actions" for a run that guides an
+    // irreversible WING key deletion. The four grant-bearing fields are now pinned to the phase.
+    setEnv({
+      SELLEROPS_APPROVAL_PHASE: "COUPANG_WING_KEY_DELETION",
+      ...IDENTITY,
+      SELLEROPS_APPROVAL_CHANNEL: "NAVER",
+    });
+    const { code, out } = run();
+    if (!WING_DELETION_SELECTORS_CALIBRATED) return; // withdrawn ⇒ refused earlier, covered above
+    expect(code).toBe(0);
+    const m = JSON.parse(out) as Record<string, unknown>;
+    expect(m.channel).toBe("COUPANG");
+    expect(m.surface).toBe("Coupang WING Open API");
+    expect(String(m.maxActions)).toContain("the OPERATOR deletes");
+    expect(JSON.stringify(m)).not.toContain("NAVER");
+  });
+
   it("an UNBOUND identity still fails closed with no manifest printed", () => {
     for (const key of ["WALKTHROUGH_RUN_ID", "WALKTHROUGH_APPROVAL_ID", "WALKTHROUGH_GIT_COMMIT"] as const) {
       setEnv({ SELLEROPS_APPROVAL_PHASE: "COUPANG_WING_KEY_DELETION", ...IDENTITY, [key]: undefined });
       const { code, out, err } = run();
       expect(code, key).toBe(1);
       expect(out, `${key}: nothing may be displayed on a refusal`).toBe("");
-      expect(err).toContain("UNBOUND_IDENTITY");
+      // With the calibration withdrawn the gate refuses one step earlier; either way nothing is displayed.
+      expect(err).toContain(WING_DELETION_SELECTORS_CALIBRATED ? "UNBOUND_IDENTITY" : "SELECTORS_NOT_CALIBRATED");
     }
   });
 
@@ -115,7 +150,6 @@ describe("approval-manifest-cli — the destructive WING deletion phase can be D
     const src = readFileSync(CLI_SRC, "utf8");
     expect(src).toContain("selectorsCalibrated: WING_DELETION_SELECTORS_CALIBRATED");
     expect(src).not.toContain("selectorsCalibrated: true");
-    expect(WING_DELETION_SELECTORS_CALIBRATED).toBe(true);
   });
 
   it("only the deletion phase states a calibration — other phases keep the gate's own default", () => {

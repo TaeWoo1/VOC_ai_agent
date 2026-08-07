@@ -44,6 +44,7 @@ import { WING_DELETION_SELECTORS_CALIBRATED } from "../action-window/coupang-win
 import {
   PHASE_SPECS,
   COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION,
+  COUPANG_WING_KEY_DELETION_SCOPE,
   validateApprovalPrerequisites,
   type ApprovalPrereqInput,
 } from "./approval-manifest";
@@ -76,9 +77,13 @@ function banner(): void {
  * all refuse HERE, before any browser opens.
  */
 function gateRefusalCause(apiCenterUrl: string): string | null {
+  // The four scope fields come from the phase spec, NOT the environment: the operator's grant binds to them, so
+  // a stale `.env` must never be able to make a destructive manifest describe a different run. The gate pins
+  // them too (`DESTRUCTIVE_SCOPE_MISMATCH`) — this side just stops feeding it anything else.
+  const scope = WKD.destructiveScope ?? COUPANG_WING_KEY_DELETION_SCOPE;
   const input: ApprovalPrereqInput = {
     phase: WKD.phase,
-    channel: env("SELLEROPS_APPROVAL_CHANNEL") ?? "COUPANG",
+    channel: scope.channel,
     accountBinding: env("SELLEROPS_APPROVAL_ACCOUNT") ?? "operator-owned Coupang WING test account",
     mode: WKD.mode,
     apiCenterUrl,
@@ -89,9 +94,9 @@ function gateRefusalCause(apiCenterUrl: string): string | null {
     runId: env("WALKTHROUGH_RUN_ID") ?? "unknown",
     approvalId: env("WALKTHROUGH_APPROVAL_ID") ?? "unknown",
     gitSha: env("WALKTHROUGH_GIT_COMMIT") ?? "unknown",
-    maxActions: "1 highlight-only session; the OPERATOR deletes; 0 agent click/type/value read",
-    surface: "Coupang WING Open API",
-    operation: "WING open-API key deletion (operator-performed, irreversible; agent highlights only)",
+    maxActions: scope.maxActions,
+    surface: scope.surface,
+    operation: scope.operation,
     operatorDestructiveAction: COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION,
   };
   const res = validateApprovalPrerequisites(input);
