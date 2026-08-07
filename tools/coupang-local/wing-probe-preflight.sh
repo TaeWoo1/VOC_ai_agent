@@ -22,13 +22,14 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 COLLECTOR_DIR="${SELLEROPS_COLLECTOR_DIR:-$REPO_ROOT/collector}"
 RUN_ENV="${SELLEROPS_WING_PROBE_RUN_ENV:-$HERE/.run/wing-probe.env}"
-# BSD mktemp substitutes only TRAILING X's: a `.XXXXXX.json` template creates a file named literally that,
-# which then collides on the next run. Take a temp DIRECTORY and name the file inside it instead.
-MANIFEST_OUT="${SELLEROPS_MANIFEST_OUT:-}"
-if [ -z "$MANIFEST_OUT" ]; then
-  MANIFEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/coupang-wing-probe.XXXXXX")" || MANIFEST_DIR=""
-  MANIFEST_OUT="${MANIFEST_DIR:+$MANIFEST_DIR/manifest.json}"
-fi
+
+FAILED=0
+# The shared checks — identical hardening to the DESTRUCTIVE deletion harness, deliberately one copy:
+# git_hardened / jget_from / identity / freshness / drift / toolchain / profile / browser / manifest path.
+# shellcheck source=./wing-harness-common.sh
+. "$HERE/wing-harness-common.sh"
+
+MANIFEST_OUT="$(resolve_manifest_out coupang-wing-probe)"
 if [ -z "$MANIFEST_OUT" ]; then
   echo "PREFLIGHT FAIL — could not create a manifest path under ${TMPDIR:-/tmp}. No manifest prepared, no approval requested."
   exit 1
@@ -37,41 +38,8 @@ fi
 # `expiresAt: process-lifetime`). Two hours is the outer bound for one seated calibration session.
 IDENTITY_TTL_SECONDS=7200
 
-FAILED=0
-pass() { echo "  PASS  $*"; }
-fail() { echo "  FAIL  $*"; FAILED=1; }
-
-# Git, with the ambient git environment stripped and untracked-file reporting forced on. Without this,
-# GIT_DIR / GIT_WORK_TREE can point the drift check at a clean decoy repository, and
-# GIT_CONFIG_COUNT/KEY_n/VALUE_n (or a repo-level status.showUntrackedFiles=no) can hide a dirty tree —
-# either of which turns "the running code IS this commit" into a false claim.
-# GIT_CONFIG_PARAMETERS is in the list for its own reason: `-c status.showUntrackedFiles=normal` does NOT
-# counter a `core.excludesFile` injected through it, which hides untracked files just as effectively.
-git_hardened() {
-  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY \
-      -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_COMMON_DIR -u GIT_CEILING_DIRECTORIES \
-      -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_SYSTEM -u GIT_CONFIG_COUNT -u GIT_CONFIG_NOSYSTEM \
-      -u GIT_CONFIG_PARAMETERS \
-      git -C "$REPO_ROOT" -c status.showUntrackedFiles=normal "$@"
-}
-
-# Read one field from the prepared manifest. Fails LOUDLY: a renamed/missing key must never render as a blank
-# line under a PREFLIGHT PASS banner. The path is passed via argv, never interpolated into the program.
-jget() {
-  python3 -c 'import json,sys
-d = json.load(open(sys.argv[1]))
-k = sys.argv[2]
-if k not in d:
-    sys.exit(1)
-v = d[k]
-if isinstance(v, bool):
-    v = "true" if v else "false"
-elif isinstance(v, list):
-    v = ",".join(v)
-if v is None or v == "":
-    sys.exit(1)
-print(v)' "$MANIFEST_OUT" "$1" 2>/dev/null
-}
+# The probe's manifest reader binds the shared helper to THIS run's manifest path.
+jget() { jget_from "$MANIFEST_OUT" "$1"; }
 
 # ---- 0. run identity (required; from wing-probe-bootstrap.sh) -----------------
 if [ ! -f "$RUN_ENV" ]; then
@@ -104,41 +72,10 @@ echo "Coupang WING selector-probe preflight — run=${RUN_ID:-?} git=${RUN_GIT:-
 echo "read-only local checks only — no browser, no Coupang call, no credential read"
 echo
 
-# 1. The identity must be a real bootstrapped value. The manifest gate refuses "unknown" too
-#    (UNBOUND_IDENTITY); catching it here gives the operator the actionable message instead.
-IDENTITY_OK=1
-for pair in "run id:$RUN_ID" "approval id:$APPROVAL_ID" "git commit:$RUN_GIT"; do
-  name="${pair%%:*}"; value="${pair#*:}"
-  if [ -z "$value" ] || [ "$value" = "unknown" ]; then
-    fail "$name is empty or \"unknown\" — re-run wing-probe-bootstrap.sh"; IDENTITY_OK=0
-  fi
-done
-[ "$IDENTITY_OK" = "1" ] && pass "run identity bound (run ${RUN_ID:0:8}… · approval ${APPROVAL_ID:0:8}…)"
-
-# 2. The identity must be FRESH. A grant is single-use and process-lifetime (contract §1.5/§2): a run env
-#    left behind by an earlier session must not silently re-authorize a new one.
-# `case`, not `grep -E`: grep matches LINE-wise, so a multi-line stamp whose second line is a valid epoch
-# satisfies an anchored pattern and then puts a non-numeric token into the arithmetic below. An arithmetic
-# ERROR unwinds this whole `if` — skipping both branches, leaving FAILED untouched, and silently deleting the
-# freshness check. The leading-zero rejection matters for the same reason: bash would parse it as octal.
-EPOCH_OK=1
-case "$BOOTSTRAP_EPOCH" in
-  ""|*[!0-9]*|0*) EPOCH_OK=0 ;;
-esac
-if [ "$EPOCH_OK" = "1" ] && { [ "${#BOOTSTRAP_EPOCH}" -lt 10 ] || [ "${#BOOTSTRAP_EPOCH}" -gt 11 ]; }; then
-  EPOCH_OK=0
-fi
-if [ "$EPOCH_OK" != "1" ]; then
-  fail "bootstrap timestamp missing or malformed in the run env — re-run wing-probe-bootstrap.sh"
-else
-  # Digits only, 10–11 of them, no leading zero: the arithmetic below cannot error.
-  AGE=$(( $(date +%s) - 10#$BOOTSTRAP_EPOCH ))
-  if [ "$AGE" -lt 0 ] || [ "$AGE" -gt "$IDENTITY_TTL_SECONDS" ]; then
-    fail "run identity is stale (${AGE}s old, max ${IDENTITY_TTL_SECONDS}s) — re-bootstrap for a fresh approval id"
-  else
-    pass "run identity is fresh (${AGE}s old)"
-  fi
-fi
+# 1–2. The identity must be a real bootstrapped value, and FRESH (a run env left behind by an earlier session
+#      must not silently re-authorize a new one). Shared with the destructive harness.
+check_identity_bound "$RUN_ID" "$APPROVAL_ID" "$RUN_GIT"
+check_identity_fresh "$BOOTSTRAP_EPOCH" "$IDENTITY_TTL_SECONDS"
 
 # 3. The phase must be the WING selector probe. This harness prepares that phase and no other — the
 #    destructive deletion phase has its own gate and is not approvable from here.
@@ -148,80 +85,14 @@ fi
 
 # 4. No code drift since bootstrap. The manifest records a git SHA; if HEAD moved, or the working tree
 #    carries uncommitted/untracked changes, the code that would run is NOT the code that SHA names —
-#    the manifest would over-claim and the approval is REVOKED by contract §1.6.
-TOPLEVEL="$(git_hardened rev-parse --show-toplevel 2>/dev/null || echo "")"
-TOPLEVEL_REAL="$(python3 -c "import os,sys;print(os.path.realpath(sys.argv[1]) if sys.argv[1] else '')" "$TOPLEVEL" 2>/dev/null || echo "")"
-REPO_REAL="$(python3 -c "import os,sys;print(os.path.realpath(sys.argv[1]))" "$REPO_ROOT" 2>/dev/null || echo "")"
-if [ -n "$TOPLEVEL_REAL" ] && [ "$TOPLEVEL_REAL" = "$REPO_REAL" ]; then
-  pass "git checks are reading this repository ($REPO_REAL)"
-else
-  fail "git is not reading this repository (got '${TOPLEVEL:-none}', expected $REPO_REAL) — refusing"
-fi
+#    the manifest would over-claim and the approval is REVOKED by contract §1.6. Sets CUR_GIT.
+check_no_code_drift "$RUN_GIT"
 
-CUR_GIT="$(git_hardened rev-parse --short HEAD 2>/dev/null || echo unknown)"
-[ "$CUR_GIT" != "unknown" ] && [ "$CUR_GIT" = "$RUN_GIT" ] && pass "git commit unchanged since bootstrap ($CUR_GIT)" \
-  || fail "git commit changed or unreadable ($RUN_GIT → $CUR_GIT) — re-bootstrap the run"
-
-DIRT="$(git_hardened status --porcelain 2>/dev/null)"; DIRT_RC=$?
-if [ "$DIRT_RC" != "0" ]; then
-  # An unreadable status must never render as "clean" — that is the fail-open shape this guards.
-  fail "could not read git status (exit $DIRT_RC) — refusing rather than assuming a clean tree"
-elif [ -z "$DIRT" ]; then
-  pass "working tree clean — the running code IS commit $CUR_GIT"
-else
-  fail "working tree is dirty — commit or stash first, then re-bootstrap (the manifest's gitSHA must name the code that runs):"
-  printf '%s\n' "$DIRT" | head -5 | sed 's/^/        | /'
-fi
-
-# 5. The local toolchain must be able to start the probe with nothing more installed or asked.
-[ -x "$COLLECTOR_DIR/node_modules/.bin/tsx" ] && pass "collector toolchain present (tsx resolvable)" \
-  || fail "collector dependencies missing — run 'npm install' in $COLLECTOR_DIR"
-PROBE_CLI="src/cli/probe-wing-issuance-selectors.ts"
-[ -f "$COLLECTOR_DIR/$PROBE_CLI" ] && pass "probe entrypoint present ($PROBE_CLI)" \
-  || fail "probe entrypoint missing: $COLLECTOR_DIR/$PROBE_CLI"
-
-# 6. The dedicated Chrome profile must exist AND resolve inside the collector tree — the boundary
-#    collector/src/profile.ts enforces at launch, applied here through realpath (so an in-tree path that
-#    symlinks out, which the launch guard's purely lexical check would accept, is refused).
-#
-#    LIMIT, stated honestly: this checks the EFFECTIVE value only when it comes from the environment or the
-#    default. The probe's documented invocation sources `collector/.env` first, and this preflight never reads
-#    .env values. So if .env sets COLLECTOR_PROFILE_DIR at all, the check below would be validating a
-#    different path than the run uses — and it refuses instead of reassuring. Only the KEY is looked for; no
-#    .env value is ever read, printed, or logged.
-if [ -f "$COLLECTOR_DIR/.env" ] && grep -qE '(^|[[:space:]])(export[[:space:]]+)?COLLECTOR_PROFILE_DIR=' "$COLLECTOR_DIR/.env"; then
-  fail "collector/.env sets COLLECTOR_PROFILE_DIR — this preflight cannot verify a path it must not read. Unset it there (or export it in this shell) and re-run"
-else
-  PROFILE_DIR_RAW="${COLLECTOR_PROFILE_DIR:-$COLLECTOR_DIR/.profile/naver}"
-  PROFILE_DIR="$(python3 -c "import os,sys;print(os.path.realpath(sys.argv[1]))" "$PROFILE_DIR_RAW" 2>/dev/null || echo "")"
-  COLLECTOR_REAL="$(python3 -c "import os,sys;print(os.path.realpath(sys.argv[1]))" "$COLLECTOR_DIR" 2>/dev/null || echo "")"
-  # Both must be non-empty before the comparison: an empty COLLECTOR_REAL would degrade the pattern below to
-  # `/*`, which matches every absolute path and would turn this guard into a rubber stamp.
-  if [ -z "$PROFILE_DIR" ] || [ -z "$COLLECTOR_REAL" ]; then
-    fail "could not resolve the profile or collector path — refusing rather than comparing empty paths"
-  else
-  case "$PROFILE_DIR" in
-    "$COLLECTOR_REAL"/*)
-      [ -d "$PROFILE_DIR" ] && pass "dedicated Chrome profile present inside the collector tree" \
-        || fail "dedicated Chrome profile directory does not exist: $PROFILE_DIR" ;;
-    *)
-      fail "profile directory resolves OUTSIDE the collector tree ($PROFILE_DIR_RAW) — the launch path guard will refuse it" ;;
-  esac
-  fi
-fi
-
-# 7. A browser must actually be launchable: the bundled Chromium (default) or the configured channel.
-CHANNEL="${COLLECTOR_BROWSER_CHANNEL:-}"
-if [ -z "$CHANNEL" ]; then
-  PW_CACHE="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/Library/Caches/ms-playwright}"
-  ls -d "$PW_CACHE"/chromium-* >/dev/null 2>&1 && pass "bundled Chromium installed (Playwright cache)" \
-    || fail "no bundled Chromium in $PW_CACHE — run 'npx playwright install chromium' in $COLLECTOR_DIR"
-elif [ "$CHANNEL" = "chrome" ]; then
-  [ -d "/Applications/Google Chrome.app" ] && pass "browser channel 'chrome' installed" \
-    || fail "COLLECTOR_BROWSER_CHANNEL=chrome but Google Chrome is not installed"
-else
-  pass "browser channel '$CHANNEL' configured (installation not verifiable here)"
-fi
+# 5–7. The local toolchain must be able to start the probe with nothing more installed or asked; the dedicated
+#      Chrome profile must resolve inside the collector tree; a browser must be launchable.
+check_toolchain "$COLLECTOR_DIR" "src/cli/probe-wing-issuance-selectors.ts" "probe"
+check_dedicated_profile "$COLLECTOR_DIR"
+check_browser_launchable
 
 # ---- Approval Manifest --------------------------------------------------------
 # Prepared ONLY when every check above passed — a manifest is displayed only when the run is immediately

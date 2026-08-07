@@ -12,7 +12,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { runApprovalManifestCli } from "../../src/cli/approval-manifest-cli";
+import { runApprovalManifestCli, type ApprovalManifestCliOptions } from "../../src/cli/approval-manifest-cli";
 import { WING_DELETION_SELECTORS_CALIBRATED } from "../../src/action-window/coupang-wing-issuance-driver";
 import { COUPANG_WING_KEY_DELETION_OPERATION } from "../../src/cli/approval-manifest";
 
@@ -53,6 +53,18 @@ afterEach(() => {
   saved.clear();
 });
 
+/**
+ * The repository-identity verifier the CLI uses. Default: a stub reporting a verified checkout, so the suite
+ * does not require running from a clean tree at one specific commit. Individual tests swap in a refusal to
+ * exercise the drift/dirty paths. Reset after every test so a swap cannot leak.
+ */
+type IdentityVerifier = NonNullable<ApprovalManifestCliOptions["verifyIdentity"]>;
+const VERIFIED: IdentityVerifier = () => ({ ok: true, head: "abc1234" });
+let identityStub: IdentityVerifier = VERIFIED;
+afterEach(() => {
+  identityStub = VERIFIED;
+});
+
 /** Run the CLI capturing its stdout/stderr instead of letting it write to the test runner's streams. */
 function run(): { code: number; out: string; err: string } {
   let out = "";
@@ -64,7 +76,7 @@ function run(): { code: number; out: string; err: string } {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (process.stderr as any).write = (s: string): boolean => ((err += s), true);
   try {
-    return { code: runApprovalManifestCli(), out, err };
+    return { code: runApprovalManifestCli({ verifyIdentity: identityStub }), out, err };
   } finally {
     process.stdout.write = realOut;
     process.stderr.write = realErr;
@@ -163,6 +175,68 @@ describe("approval-manifest-cli — the destructive WING deletion phase can be D
   it("only the deletion phase states a calibration — other phases keep the gate's own default", () => {
     const src = readFileSync(CLI_SRC, "utf8");
     expect(src).toContain("isWingKeyDeletion ? { selectorsCalibrated: WING_DELETION_SELECTORS_CALIBRATED } : {}");
+  });
+});
+
+describe("approval-manifest-cli — a destructive manifest must describe the RUNNING code", () => {
+  const REFUSALS = [
+    { cause: "HEAD_DRIFT" as const, reason: "HEAD is deadbee but the run was bootstrapped at abc1234 — re-bootstrap" },
+    { cause: "DIRTY_TREE" as const, reason: "3 uncommitted or untracked change(s) — the running code is not commit abc1234" },
+    { cause: "WRONG_REPOSITORY" as const, reason: "git is not reading the expected repository" },
+    { cause: "GIT_UNREADABLE" as const, reason: "could not read git status — refusing to assume a clean tree" },
+  ];
+
+  it.each(REFUSALS)("$cause → no manifest printed, exit 1", ({ cause, reason }) => {
+    // The gap this closes: `gitSha` used to be checked for PRESENCE only, so a leftover `.env` from a consumed
+    // approval reached PREPARED carrying a SHA that did not describe the running code — REVOKED by contract
+    // §1.6. Nothing may be displayed for the operator to grant against.
+    identityStub = () => ({ ok: false, cause, reason });
+    setEnv({ SELLEROPS_APPROVAL_PHASE: "COUPANG_WING_KEY_DELETION", ...IDENTITY });
+    const { code, out, err } = run();
+    expect(code).toBe(1);
+    expect(out, "a refused run must display nothing").toBe("");
+    expect(err).toContain("repo_identity");
+    expect(err).toContain(cause);
+  });
+
+  it("the identity check runs AFTER the approval gate — a wrong-phase run reports its own cause", () => {
+    // Order matters for the operator's next action: "your tree is dirty" is unhelpful advice for a run that
+    // could never have been approved in the first place.
+    identityStub = () => ({ ok: false, cause: "DIRTY_TREE", reason: "dirty" });
+    setEnv({ SELLEROPS_APPROVAL_PHASE: "COUPANG_WING_KEY_DELETION", ...IDENTITY, WALKTHROUGH_RUN_ID: undefined });
+    const { code, err } = run();
+    expect(code).toBe(1);
+    expect(err).toContain("UNBOUND_IDENTITY");
+    expect(err).not.toContain("repo_identity");
+  });
+
+  it("NON-destructive phases are not subjected to the check (it would refuse a normal dev checkout)", () => {
+    // Only a destructive run demands that the tree be clean at one exact commit. A refusing stub must make no
+    // difference to the read-only probe.
+    identityStub = () => ({ ok: false, cause: "DIRTY_TREE", reason: "dirty" });
+    setEnv({
+      SELLEROPS_APPROVAL_PHASE: "COUPANG_WING_SELECTOR_PROBE",
+      SELLEROPS_WING_PROBE_TARGETS: "delete",
+      ...IDENTITY,
+    });
+    const { code, out } = run();
+    expect(code).toBe(0);
+    expect(JSON.parse(out).phase).toBe("COUPANG_WING_SELECTOR_PROBE");
+  });
+
+  it("the DEFAULT verifier is the real one — a test that forgets to inject gets the strict behaviour", () => {
+    // A seam that defaults to "skip the check" would silently disable it in production the first time someone
+    // called the CLI without options.
+    const src = readFileSync(CLI_SRC, "utf8");
+    expect(src).toContain("(opts.verifyIdentity ?? verifyRepoIdentity)");
+    expect(src).toContain("spec.requiresOperatorDestructiveAction");
+  });
+
+  it("the repo root is derived from the source file, never from the environment", () => {
+    // A `SELLEROPS_REPO_ROOT`-style override would let a caller point the check at a clean decoy checkout.
+    const src = readFileSync(CLI_SRC, "utf8");
+    expect(src).toContain('const REPO_ROOT = resolve(COLLECTOR_ROOT, "..")');
+    expect(src).not.toMatch(/REPO_ROOT\s*=\s*(env|process\.env)/);
   });
 });
 

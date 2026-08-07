@@ -29,6 +29,7 @@ import { resolveVisualReconScope } from "../action-window/api-issuance-calibrati
 // The public WING host default for the Coupang WING selector-probe phase (pure leaf; no per-run input needed).
 import { WING_DEFAULT_URL, resolveWingProbeScope } from "./coupang-wing-classifier";
 import { COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION, COUPANG_WING_KEY_DELETION_SCOPE } from "./approval-manifest";
+import { verifyRepoIdentity } from "./repo-identity";
 // The 삭제 selector calibration flag — the SAME constant `run-coupang-wing-deletion-live.ts` feeds the gate.
 // `approval-manifest.ts` deliberately never imports it (WING phases default to uncalibrated there), so the
 // display CLI must state it explicitly or the destructive phase could never produce the manifest the operator
@@ -37,13 +38,25 @@ import { COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION, COUPANG_WING_KEY_DELETION
 import { WING_DELETION_SELECTORS_CALIBRATED } from "../action-window/coupang-wing-issuance-driver";
 
 const COLLECTOR_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+/** The repository a destructive run must be reading — derived from this file, never from the environment. */
+const REPO_ROOT = resolve(COLLECTOR_ROOT, "..");
 
 function env(name: string): string | undefined {
   const v = process.env[name];
   return v !== undefined && v.length > 0 ? v : undefined;
 }
 
-export function runApprovalManifestCli(): number {
+export interface ApprovalManifestCliOptions {
+  /**
+   * Repository-identity verifier seam. Production uses the real {@link verifyRepoIdentity} against this
+   * checkout; tests inject a stub so they can exercise the destructive path without requiring the suite to run
+   * from a clean tree at one specific commit. The DEFAULT is the real check — a test that forgets to inject
+   * gets the strict behaviour, never a disabled one.
+   */
+  verifyIdentity?: typeof verifyRepoIdentity;
+}
+
+export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): number {
   const phase = env("SELLEROPS_APPROVAL_PHASE") ?? "";
   // Fail closed on an unknown phase before deriving anything from a missing spec.
   if (!(CALIBRATION_PHASES as readonly string[]).includes(phase)) {
@@ -192,6 +205,20 @@ export function runApprovalManifestCli(): number {
   if (!res.ok) {
     process.stderr.write(`PREFLIGHT FAIL: approval_prerequisite (${res.cause}): ${res.reason}\n`);
     return 1;
+  }
+
+  // A DESTRUCTIVE phase additionally proves the running code IS the commit the manifest names. The gate above
+  // only checks the identity is present and bound; it is pure and does no I/O, so the HEAD/clean-tree
+  // comparison lives here — and in `run-coupang-wing-deletion-live.ts`, which performs the same check, so a
+  // hand-typed invocation that skips the preflight script cannot skip this. Ordered AFTER the gate so a
+  // wrong-phase / uncalibrated / mis-scoped run reports its own cause first, and BEFORE the manifest is
+  // printed so a drifted or dirty run displays nothing to approve.
+  if (spec.requiresOperatorDestructiveAction) {
+    const identity = (opts.verifyIdentity ?? verifyRepoIdentity)({ expectedSha: input.gitSha, repoRoot: REPO_ROOT });
+    if (!identity.ok) {
+      process.stderr.write(`PREFLIGHT FAIL: repo_identity (${identity.cause}): ${identity.reason}\n`);
+      return 1;
+    }
   }
   // PREPARED: print the sanitized manifest JSON (no raw URL). preflight displays it.
   process.stdout.write(JSON.stringify(res.manifest, null, 2) + "\n");

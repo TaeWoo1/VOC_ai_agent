@@ -159,3 +159,81 @@ to exercise them.
 
 The probe measures counts only: **no highlight, no click, no input, no value read** (never Access Key /
 Secret Key / 업체코드), no 발급 / 재발급 / 삭제, and it never navigates the window — the seller does.
+
+---
+
+## The WING key-DELETION harness — the destructive sibling
+
+`wing-deletion-bootstrap.sh` / `wing-deletion-preflight.sh` prepare a `COUPANG_WING_KEY_DELETION` run: the
+seller reaches their already-issued open-API page, SellerOps highlights **only** the 삭제 control and rests at
+an irreversible-warning checkpoint, and **the seller presses 삭제 themselves**. Nothing in this harness — and
+nothing in the agent — ever deletes.
+
+```bash
+tools/coupang-local/wing-deletion-bootstrap.sh   # mint identity + PIN HEAD (refuses a dirty tree)
+tools/coupang-local/wing-deletion-preflight.sh   # checks + destructive manifest + disclosure (no browser)
+# on "Seated and ready.":
+cd collector && npx tsx src/cli/run-coupang-wing-deletion-live.ts -- --i-understand-this-opens-live-coupang-wing
+```
+
+Both harnesses share `wing-harness-common.sh` (ambient-git stripping, identity/freshness, drift + clean-tree,
+toolchain, profile, browser, manifest path). One copy, deliberately: the destructive path must not drift away
+from hardening the read-only path already has.
+
+### What it adds over the probe harness
+
+| | Probe | Deletion |
+|---|---|---|
+| Identity TTL | 2h | **1h** — acting on a stale identity here costs an unrecoverable key |
+| Bootstrap on a dirty tree | allowed (preflight refuses later) | **refused at bootstrap** |
+| Per-run scope | operator-chosen probe targets | **none** — channel/account/surface/operation/budget are pinned in the phase spec |
+| Manifest gate | phase + scope | + immutable destructive descriptor, `selectorsCalibrated`, `DESTRUCTIVE_SCOPE_MISMATCH` |
+| Disclosure | scope line | **five-point irreversibility disclosure**, shown above the grant line |
+
+### `gitSha` is verified, not just present
+
+The approval gate only ever checked that `runId` / `approvalId` / `gitSha` were **present** and not
+`"unknown"`. For a destructive run that is not enough: a leftover `.env` from a consumed approval reached
+PREPARED carrying a SHA that did not describe the running code — `REVOKED` by contract §1.6.
+
+`collector/src/cli/repo-identity.ts` closes that. It verifies, with the ambient git environment stripped, that
+git is reading **this** repository (by realpath), that HEAD is **exactly** the pinned commit, and that the tree
+is **clean** — refusing on any git command that fails rather than reading silence as "clean". It is called by
+**both** the manifest display CLI and the destructive runtime CLI, so a hand-typed invocation that skips the
+preflight script does not skip the check. The shell copies in the harness exist to give an actionable message
+first; they are defense in depth, not the enforcement.
+
+Two hardening details, both found by review demonstrating the bypass rather than arguing about it:
+
+- **The git config files are PINNED to `/dev/null`, not merely unset.** Unsetting `GIT_CONFIG_GLOBAL` makes git
+  fall back to `$XDG_CONFIG_HOME/git/config` → `$HOME/.gitconfig`, so a prepared `HOME` re-opens exactly the
+  `core.excludesFile` hole that stripping `GIT_CONFIG_PARAMETERS` was meant to close — and
+  `-c status.showUntrackedFiles=normal` does not counter it. Pinning closes it without unsetting `HOME`.
+  Repo-local config still applies, and must: it is part of the checkout.
+- **`--assume-unchanged` / `--skip-worktree` need no environment variable at all**, so stripping the git env
+  never reached them: a modified tracked file simply stops appearing in `status --porcelain`. Both layers now
+  also read `git ls-files -v` and refuse when any path is marked.
+
+The preflight additionally refuses when `SELLEROPS_COLLECTOR_DIR` points outside this repository — otherwise
+the drift check verifies one checkout while `approval-manifest-cli.ts` (which derives its own repo root from
+its file location) builds the manifest from another, and the displayed provenance line would describe a tree
+the gate never looked at.
+
+### What the deletion preflight proves (and cannot)
+
+| Proves | Cannot prove |
+|---|---|
+| Identity bootstrapped, bound, **fresh** (1h), and pinned to a commit | That the seller's account is in the already-issued state the 삭제 target needs |
+| **The running code IS the pinned commit** — right repository, HEAD unmoved, tree clean, ambient git env stripped | Whether the WING page layout changed since calibration (the run's unique-match check answers that) |
+| The phase is exactly `COUPANG_WING_KEY_DELETION`; no other phase is approvable here | That the operator can log in (human-only auth — no CAPTCHA/2FA is ever touched) |
+| The destructive descriptor is the canonical contract, verified before it is displayed | That the operator will read the disclosure they are shown |
+| The 삭제 selector is calibrated, and the manifest says so on the line the operator reads | — |
+| channel / account / surface / operation / action budget are the pinned ones, not ambient env | — |
+
+`wing-deletion-selfcheck.sh` regression-tests all of it hermetically — stale/unbound/malformed identity, wrong
+phase (three of them), HEAD drift, dirty tree, the `GIT_DIR` hijack, both config-injection dirty-hides, ambient
+scope override, the full disclosure text, the descriptor in the displayed manifest, the default temp path twice
+over, and the bootstrap's own dirty-tree refusal. Cases needing a clean tree skip while the tree is dirty.
+
+**This harness authorizes nothing.** It prepares and displays; the operator's single-use `Seated and ready.`
+is a separate human step, and the 삭제 press is theirs.
