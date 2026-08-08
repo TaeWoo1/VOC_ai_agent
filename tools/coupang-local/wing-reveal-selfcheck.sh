@@ -260,8 +260,13 @@ if [ -z "$TREE_DIRTY" ]; then
 
   # ── refusals must not leak ────────────────────────────────────────────────────
   # A refusal is printed at the moment things are going wrong, which is exactly when a diagnostic dump is
-  # tempting. Neither the run env's VALUES nor the caller's ambient env may appear in one. The run env below
-  # carries a decoy that looks like a credential; the preflight must never read or echo it.
+  # tempting. The run env below carries a decoy that looks like a credential; the preflight must never read or
+  # echo it, and the caller's ambient env must not reach the output either.
+  #
+  # What is NOT asserted, deliberately: the run id. The header line prints it in full BY DESIGN — it is a
+  # locally-minted environment identifier, not a secret, the bootstrap prints it, and the operator needs it to
+  # tell which run a refusal belongs to. The approval id IS asserted: it is what the single-use grant binds to,
+  # and on the refusal path it has no reason to appear at all.
   cat > "$FIXTURES/leaky.env" <<ENV
 WALKTHROUGH_RUN_ID='wt-LEAKCANARY-RUNID'
 WALKTHROUGH_APPROVAL_ID='apr-LEAKCANARY-APPROVAL'
@@ -278,11 +283,11 @@ ENV
   [ "$rc" = "0" ] && { echo "  FAIL  NO_LEAK         · the drifted-HEAD fixture was not refused"; LEAK_OK=0; FAILED=1; }
   grep -qF "LEAKCANARY-SECRET-VALUE" <<<"$out" && { echo "  FAIL  NO_LEAK         · a run-env credential-shaped value reached the output"; LEAK_OK=0; FAILED=1; }
   grep -qF "LEAKCANARY-AMBIENT" <<<"$out" && { echo "  FAIL  NO_LEAK         · an ambient env value reached the output"; LEAK_OK=0; FAILED=1; }
-  # The ids are the ONE identity the operator must be able to match against the manifest, and the preflight shows
-  # them truncated. A refusal must not print them in full.
-  grep -qF "wt-LEAKCANARY-RUNID" <<<"$out" && { echo "  FAIL  NO_LEAK         · a full run id reached the output"; LEAK_OK=0; FAILED=1; }
-  grep -qF "apr-LEAKCANARY-APPROVAL" <<<"$out" && { echo "  FAIL  NO_LEAK         · a full approval id reached the output"; LEAK_OK=0; FAILED=1; }
-  [ "$LEAK_OK" = "1" ] && echo "  PASS  NO_LEAK         · refusal carries no run-env value, no ambient value, no full identity"
+  grep -qF "apr-LEAKCANARY-APPROVAL" <<<"$out" && { echo "  FAIL  NO_LEAK         · the approval id reached a refusal"; LEAK_OK=0; FAILED=1; }
+  # …and the run env is never echoed wholesale. A dump of the file would carry every key at once, including the
+  # ones no check above thought to name.
+  grep -qF "WALKTHROUGH_APPROVAL_ID='" <<<"$out" && { echo "  FAIL  NO_LEAK         · the run env file was echoed verbatim"; LEAK_OK=0; FAILED=1; }
+  [ "$LEAK_OK" = "1" ] && echo "  PASS  NO_LEAK         · refusal carries no credential-shaped value, no ambient value, no approval id, no run-env dump"
 
   # ── the demonstrated git-environment bypasses ────────────────────────────────
   : > "$DIRT_FILE"
