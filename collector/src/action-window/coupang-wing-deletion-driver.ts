@@ -1,5 +1,13 @@
 /**
- * **Coupang WING open-API key-DELETION guided driver — LIVE surface core (SCAFFOLD, NEVER run this unit).**
+ * **Coupang WING open-API key-DELETION guided driver — LIVE surface core.**
+ *
+ * **INTERNAL DIAGNOSTIC TOOLING — NOT A PRODUCT FEATURE, AND FEATURE-FROZEN** (product-owner decision,
+ * 2026-08-08; `docs/product-scope-v1.md` §7.19). Ran once on real WING (2026-08-08,
+ * `docs/coupang_wing_key_deletion_live_v1.md`) for one purpose: to put an operator-owned test account into a real
+ * no-key state so the new-seller issuance form could be calibrated live. Seller onboarding never deletes a key —
+ * its four states are key 없음 ⇒ guided issuance · key 있음 ⇒ connect · expiry ⇒ guided renewal · invalid ⇒
+ * re-auth/reissue recovery. Do not import this from a seller-facing tree (a fence test fails the build), do not
+ * label it a capability, and do not extend it; regression protection only.
  *
  * The destructive sibling of `./coupang-wing-issuance-driver.ts` / `./coupang-wing-renewal-driver.ts`: it guides
  * an operator to DELETE their existing WING self-developed Open API key, on a REAL Playwright `Page` the seller

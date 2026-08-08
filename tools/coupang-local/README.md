@@ -164,6 +164,14 @@ Secret Key / 업체코드), no 발급 / 재발급 / 삭제, and it never navigat
 
 ## The WING key-DELETION harness — the destructive sibling
 
+> **Internal diagnostics only — feature-frozen (2026-08-08 product-owner decision).** This harness exists to
+> put an operator-owned test account into a real no-key state for live calibration. It is **not** a SellerOps
+> onboarding feature: no seller-facing surface may reference it, it is never labelled a capability, and it
+> gets no further feature work — regression protection only. Seller onboarding has four states (key 없음 /
+> key 있음 / expiry·renewal / credential invalid) and deletion is not one of them. Rule:
+> `docs/product-scope-v1.md` §7.19; fence:
+> `collector/test/crossstack/deletion-tooling-not-product-surface.test.ts`.
+
 `wing-deletion-bootstrap.sh` / `wing-deletion-preflight.sh` prepare a `COUPANG_WING_KEY_DELETION` run: the
 seller reaches their already-issued open-API page, SellerOps highlights **only** the 삭제 control and rests at
 an irreversible-warning checkpoint, and **the seller presses 삭제 themselves**. Nothing in this harness — and
