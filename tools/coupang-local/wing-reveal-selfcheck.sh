@@ -184,7 +184,10 @@ open(sys.argv[3], "w").write(json.dumps(d))' "$CANON" "$soft" "$FIXTURES/desc-so
     echo "  FAIL  DESCRIPTOR · fixture generation FAILED for: $soft"; DESC_OK=0; FAILED=1
     continue
   fi
-  if cmp -s "$FIXTURES/desc-ok.json" "$FIXTURES/desc-soft.json"; then
+  # Parsed, not byte-compared: desc-ok is compact `printf` output and desc-soft is `json.dumps` with ", " / ": "
+  # separators, so a byte compare can NEVER match and the branch was dead.
+  if python3 -c 'import json,sys
+sys.exit(0 if json.load(open(sys.argv[1])) == json.load(open(sys.argv[2])) else 1)' "$FIXTURES/desc-ok.json" "$FIXTURES/desc-soft.json"; then
     echo "  FAIL  DESCRIPTOR · fixture is identical to canonical, so it tests nothing: $soft"; DESC_OK=0; FAILED=1
     continue
   fi
@@ -209,11 +212,15 @@ fi
 
 # …and the preflight must ACT on that verdict. The gate makes a softened descriptor unproducible through the
 # CLI, so no end-to-end case can distinguish "checked and refused" from "checked and ignored".
-if grep -qF 'if ! verify_reveal_descriptor "$MANIFEST_OUT"; then' "$PREFLIGHT" \
-   && grep -qF "Refusing to display it for approval" "$PREFLIGHT"; then
-  echo "  PASS  DESCRIPTOR    · the preflight refuses on the verifier's verdict (not merely calls it)"
+# BLOCK-scoped, not two independent substrings. Both greps stay true if `exit 1` is deleted — execution then
+# falls through to the PASS line, the full manifest dump and "Seated and ready.", so a descriptor carrying
+# keyCreationRuledOut: true would be DISPLAYED for approval. That is the exact failure this function exists to
+# prevent, so the guard has to read the refusal body, not just its first and last lines.
+DESC_BLOCK="$(awk '/^if ! verify_reveal_descriptor "\$MANIFEST_OUT"; then$/,/^fi$/' "$PREFLIGHT")"
+if [ -n "$DESC_BLOCK" ] && grep -qF "Refusing to display it for approval" <<<"$DESC_BLOCK" && grep -qE '^ *exit 1$' <<<"$DESC_BLOCK"; then
+  echo "  PASS  DESCRIPTOR    · the preflight EXITS on the verifier's verdict (not merely prints)"
 else
-  echo "  FAIL  DESCRIPTOR    · the preflight does not act on the descriptor verdict"; FAILED=1
+  echo "  FAIL  DESCRIPTOR    · the descriptor refusal does not exit — a softened manifest would be displayed"; FAILED=1
 fi
 
 # ── the clean/dirty pair ────────────────────────────────────────────────────────

@@ -168,7 +168,6 @@ for soft in \
   '"agentPerformsAction":"false"' \
   '"credentialValueReadBudget":"0"'
 do
-  key="${soft%%:*}"
   # A generator that throws writes no file; the verifier then fails on a missing path and the loop reads that as
   # "softening refused" — every case would PASS while testing nothing. Mirrors the reveal selfcheck's guard.
   rm -f "$FIXTURES/desc-soft.json"
@@ -181,7 +180,10 @@ open(sys.argv[3], "w").write(json.dumps(d))' "$CANON" "$soft" "$FIXTURES/desc-so
     echo "  FAIL  DESCRIPTOR · fixture generation FAILED for: $soft"; DESC_OK=0; FAILED=1
     continue
   fi
-  if cmp -s "$FIXTURES/desc-ok.json" "$FIXTURES/desc-soft.json"; then
+  # Parsed, not byte-compared: desc-ok is compact `printf` output and desc-soft is `json.dumps` with ", " / ": "
+  # separators, so a byte compare can NEVER match and the branch was dead.
+  if python3 -c 'import json,sys
+sys.exit(0 if json.load(open(sys.argv[1])) == json.load(open(sys.argv[2])) else 1)' "$FIXTURES/desc-ok.json" "$FIXTURES/desc-soft.json"; then
     echo "  FAIL  DESCRIPTOR · fixture is identical to canonical, so it tests nothing: $soft"; DESC_OK=0; FAILED=1
     continue
   fi
@@ -198,11 +200,13 @@ fi
 # …and the preflight must ACT on that verdict. The gate makes a softened descriptor unproducible through the
 # CLI, so no end-to-end case can distinguish "checked and refused" from "checked and ignored" — the wiring is
 # therefore asserted on the source. Without this, deleting the `if !` would break nothing observable.
-if grep -qF 'if ! verify_destructive_descriptor "$MANIFEST_OUT"; then' "$PREFLIGHT" \
-   && grep -qF "Refusing to display it for approval" "$PREFLIGHT"; then
-  echo "  PASS  DESCRIPTOR    · the preflight refuses on the verifier's verdict (not merely calls it)"
+# BLOCK-scoped: both substrings stay true if `exit 1` is deleted, and execution then falls through to the PASS
+# line and the manifest dump — a softened DESTRUCTIVE descriptor displayed under a grant line.
+DESC_BLOCK="$(awk '/^if ! verify_destructive_descriptor "\$MANIFEST_OUT"; then$/,/^fi$/' "$PREFLIGHT")"
+if [ -n "$DESC_BLOCK" ] && grep -qF "Refusing to display it for approval" <<<"$DESC_BLOCK" && grep -qE '^ *exit 1$' <<<"$DESC_BLOCK"; then
+  echo "  PASS  DESCRIPTOR    · the preflight EXITS on the verifier's verdict (not merely prints)"
 else
-  echo "  FAIL  DESCRIPTOR    · the preflight does not act on the descriptor verdict"; FAILED=1
+  echo "  FAIL  DESCRIPTOR    · the descriptor refusal does not exit — a softened manifest would be displayed"; FAILED=1
 fi
 
 # ── the clean/dirty pair, and the demonstrated git-environment bypasses ─────────

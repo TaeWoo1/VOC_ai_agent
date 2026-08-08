@@ -16,6 +16,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  banner,
   gateRefusalCause,
   REVEAL_ABORT_FILENAME,
   REVEAL_BANNER_LINES,
@@ -228,9 +229,25 @@ describe("reveal CLI — structurally incapable of acting on WING", () => {
     expect(printed).toContain("overlayClearedBeforeObservation: result.overlayClearedBeforeObservation");
   });
 
+  it("banner() actually PRINTS every line — the constant is not the disclosure, the printing is", () => {
+    // The mutation this closes: `for (const l of REVEAL_BANNER_LINES.slice(0, 4))`, which drops exactly the two
+    // claim lines while every assertion about the constant stays true.
+    const seen: string[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => void seen.push(args.map(String).join(" "));
+    try {
+      banner();
+    } finally {
+      console.error = original;
+    }
+    for (const line of REVEAL_BANNER_LINES) {
+      expect(seen, `banner() must print: ${line.trim().slice(0, 40)}…`).toContain(line);
+    }
+  });
+
   it("the operator banner states BOTH non-collapsible claims at the moment a live window opens", () => {
-    // Deleting either sentence changed nothing any test could see. This is the run-time twin of the manifest's
-    // two claims, shown to the person about to press a real control on a real marketplace.
+    // The run-time twin of the manifest's two claims, shown to the person about to press a real control on a
+    // real marketplace. (That they REACH the terminal is the test above.)
     const banner = REVEAL_BANNER_LINES.join(" ");
     expect(banner).toContain("NOT confirmed");
     expect(banner).toContain("unrecognized outcome STOPS the run");

@@ -413,10 +413,12 @@ export function makeRevealIo(
 }
 
 /**
- * The operator-facing banner, as a constant so its two load-bearing sentences can be asserted. It is the
- * RUN-TIME restatement of the pair the manifest carries — "not confirmed" and "cannot prove no key was created"
- * — shown at the moment a live window is about to open. The preflight's equivalent copy is covered by the
- * selfcheck; deleting either line here changed nothing any test could see.
+ * The operator-facing banner. It is the RUN-TIME restatement of the pair the manifest carries — "not confirmed"
+ * and "cannot prove no key was created" — shown at the moment a live window is about to open.
+ *
+ * Both the CONSTANT and the PRINTING are tested. Guarding only the constant put the guard one layer away from
+ * the thing it guards: `REVEAL_BANNER_LINES.slice(0, 4)` in `banner()` drops exactly the two claim lines and
+ * left every test green, so the operator would open a live WING window having been told neither.
  */
 export const REVEAL_BANNER_LINES: readonly string[] = [
   " LIVE Coupang WING issuance-form REVEAL — explicit per-run approval required.",
@@ -427,7 +429,7 @@ export const REVEAL_BANNER_LINES: readonly string[] = [
   " unrecognized outcome STOPS the run. It CANNOT prove no key was created; only you can see that.",
 ];
 
-function banner(): void {
+export function banner(): void {
   const line = "─".repeat(64);
   console.error(line);
   for (const l of REVEAL_BANNER_LINES) console.error(l);

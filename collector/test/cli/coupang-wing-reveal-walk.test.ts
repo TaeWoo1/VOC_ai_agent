@@ -443,10 +443,16 @@ describe("runRevealWalk — an unexpected outcome is a STOP, never a success", (
     }
   });
 
-  it("the EXPECTED outcome gets no STOP block", async () => {
+  it("the EXPECTED outcome gets no STOP block — but still tells the operator to stop", async () => {
     const { driver, io, notes } = harness({ result: result({ outcome: "CONFIGURATION_SURFACE_SUSPECTED" }) });
     await runRevealWalk(driver, io, "wing_host");
-    expect(noteText(notes)).not.toContain("UNEXPECTED OUTCOME");
+    const text = noteText(notes);
+    expect(text).not.toContain("UNEXPECTED OUTCOME");
+    // Asserting only the ABSENCE let this line be deleted silently. On the expected outcome — the one with no
+    // STOP block — it is the ONLY thing telling the seller not to continue, at the moment they are looking at a
+    // form that invites 확인.
+    expect(text).toContain("WING에서 더 진행하지 마세요");
+    expect(text).toContain("이 창은 곧 닫힙니다");
   });
 
   it("only the keys-displayed outcome gets the extra key-creation sentences", async () => {
@@ -609,6 +615,27 @@ describe("makeRevealIo — the two waits must watch DIFFERENT files", () => {
 
   it("the press hint names the completion sentinel, so the walk can disclose it at the checkpoint", () => {
     expect(ioFor([]).io.pressSignalHint).toBe("/s/pressed");
+  });
+
+  it("narration goes to stderr and the sanitized record to STDOUT — the channels are a contract", () => {
+    // Swapping them survived every test. The record is the machine-readable artifact of the run; emitting it on
+    // stderr and the prose on stdout means the record never reaches a caller capturing stdout.
+    const out: string[] = [];
+    const err: string[] = [];
+    const [oLog, oErr] = [console.log, console.error];
+    console.log = (...a: unknown[]) => void out.push(a.map(String).join(" "));
+    console.error = (...a: unknown[]) => void err.push(a.map(String).join(" "));
+    try {
+      const { io } = ioFor([]);
+      io.note("a narration line");
+      io.emit({ outcome: "SURFACE_UNCHANGED" });
+    } finally {
+      console.log = oLog;
+      console.error = oErr;
+    }
+    expect(err).toEqual(["a narration line"]);
+    expect(out).toHaveLength(1);
+    expect(JSON.parse(out[0]!)).toEqual({ outcome: "SURFACE_UNCHANGED" });
   });
 });
 

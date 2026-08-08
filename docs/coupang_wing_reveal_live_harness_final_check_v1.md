@@ -95,16 +95,23 @@ caught missing from this list.
 3. **The exit code distinguishes the outcome classes** — expected `0`, unexpected `6`, nothing observed `7`,
    failed overlay clear `8` (`revealExitCode`, tested by value). `main()` had discarded the report and exited 0
    whatever happened, which is how "the walk completed" comes to read as "the expected thing happened" to
-   anything downstream of the terminal.
+   anything downstream of the terminal. **`8` supersedes `6` and `7`** — `cleanupFailed` is tested first, so a
+   consumer keyed on "`6` = unexpected outcome" misses `CREDENTIAL_SURFACE_APPEARED` whenever the overlay clear
+   also failed. Read `8` as "this run's state is not trustworthy AND something may be left on the live page".
 4. **A failed overlay clear is now reported on every path.** `main` propagated a throwing clear on exactly ONE
    of six paths and swallowed it on the other five, so this is new rather than restored. It also required
    changing `cleanup()` to return a boolean: `clearHighlight` catches every error it can hit, so the production
    driver reports a stuck panel by RETURN VALUE and can never reject — the first version of this guarantee was
    wired to a rejection it could not produce, and only a fake could make its test go green.
-5. **`driver.cleanup()` now runs twice on a completed walk** (the walk's `finally` and `main`'s). It is
-   idempotent, so this is not a defect, but it is a change in how many times SellerOps touches the seller's live
-   page. Relatedly, a throwing clear at the checkpoint-abort path used to emit `aw_coupang_reveal_run_fatal` and
+5. **`driver.cleanup()` now runs twice on EVERY path** (the walk's `finally` and `main`'s) — the four
+   fail-closed refusals and both aborts included, not only a completed walk. It is idempotent, so this is not a
+   defect, but it is a change in how many times SellerOps touches the seller's live page. Relatedly, a throwing clear at the checkpoint-abort path used to emit `aw_coupang_reveal_run_fatal` and
    exit 1; it now exits 8 with the STOP line and no fatal log.
+
+6. **Sentinel files are CONSUMED the moment they fire.** `main` never unlinked one mid-run; `makeRevealIo` now
+   removes the ready file and the pressed file as each is observed. Operator-visible — the file they created
+   disappears — and load-bearing: it is what makes a "both waits watch the same path" mistake time out instead
+   of skipping the human checkpoint.
 
 Two fail-open shapes were fixed alongside them: `waitForSignal` clamps its poll interval (`pollMs: 0` made the
 derived budget `Infinity` — a wait with no deadline; a negative one skipped the loop body entirely, returning
