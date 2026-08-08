@@ -155,12 +155,16 @@ async function waitForSignal(readyPath: string, abortPath: string, abortFlag: { 
   return "timeout";
 }
 
+/** Upper bound on the checkpoint clear, so a blocked page cannot suppress the run's outcome. */
+const CLEAR_TIMEOUT_MS = 10_000;
+
 /** How the operator-action wait ended. */
 export type DeletionCompletionSignal = "ready" | "abort" | "timeout";
 
 /** The minimal driver surface {@link finishDeletionRun} needs, so the sequence is testable over a fake. */
 export interface DeletionRunDriver {
-  clearHighlight(): Promise<void>;
+  /** Clears the ring + panel and reports whether the page is VERIFIED free of them (never throws on page error). */
+  clearHighlight(): Promise<boolean>;
   verifyDeletion(): Promise<{ deleted: boolean; pageCategory: WingPageCategory }>;
 }
 
@@ -187,9 +191,19 @@ export async function finishDeletionRun(
   driver: DeletionRunDriver,
   signal: DeletionCompletionSignal,
 ): Promise<Record<string, unknown>> {
-  let checkpointCleared = true;
+  let checkpointCleared = false;
   try {
-    await driver.clearHighlight();
+    // The driver VERIFIES the page is free of the ring + panel; a swallowed removal error would otherwise make
+    // `checkpointCleared` a constant `true`, which is a false assurance on a destructive surface.
+    //
+    // BOUNDED, because the clear now runs BEFORE the outcome is produced: `page.evaluate` has no timeout of its
+    // own, so a page whose main thread is blocked would hang here and the operator would get no outcome at all
+    // — strictly worse than the stale overlay this fix exists to remove. On expiry the clear is abandoned (not
+    // retried) and reported as not-cleared.
+    checkpointCleared = await Promise.race([
+      driver.clearHighlight(),
+      new Promise<boolean>((r) => setTimeout(() => r(false), CLEAR_TIMEOUT_MS)),
+    ]);
   } catch {
     checkpointCleared = false;
   }
@@ -301,11 +315,13 @@ async function main(): Promise<void> {
     // guidance outlives the operator's action. See `finishDeletionRun`.
     const outcome = await finishDeletionRun(driver, second);
     console.log(JSON.stringify(outcome));
+    // Only the fields this outcome actually has: `safeMeta` renders an absent value as the literal
+    // "[undefined]", which on an ABORTED run would read as a failed deletion read rather than no read at all.
     log("aw_coupang_deletion_done", {
       outcome: outcome.outcome,
-      deleted: outcome.deleted,
-      pageCategory: outcome.pageCategory,
       checkpointCleared: outcome.checkpointCleared,
+      ...(outcome.deleted === undefined ? {} : { deleted: outcome.deleted }),
+      ...(outcome.pageCategory === undefined ? {} : { pageCategory: outcome.pageCategory }),
     });
   } finally {
     for (const p of [readyPath, donePath, abortPath]) removeSentinel(p);

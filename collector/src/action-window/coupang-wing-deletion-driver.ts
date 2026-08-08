@@ -306,10 +306,22 @@ export class CoupangWingDeletionDriver {
     return { deleted, pageCategory };
   }
 
-  async clearHighlight(): Promise<void> {
+  /**
+   * Remove the ring + the resident warning panel, and REPORT whether the page is actually free of them.
+   *
+   * The failure this closes: both removals used to swallow their errors, so a caller could only ever be told
+   * the clear "succeeded". If the SPA re-rendered the overlay host away, `unmountOverlay` fails, the
+   * irreversible-warning panel stays on screen, and the run still printed `checkpointCleared: true` — a false
+   * assurance on a destructive surface. Errors are still swallowed (a failed clear must never throw into the
+   * outcome path), but the result is now VERIFIED the same way the mount is: by asking the page.
+   */
+  async clearHighlight(): Promise<boolean> {
     const page = this.activePage();
     await unmountOverlay(page).catch(() => undefined);
     await this.evalStr(page, IN_PAGE_CLEAR_TAG).catch(() => undefined);
+    // Verified, not assumed. An unreadable page cannot confirm the clear, so it reports NOT cleared.
+    const stillMounted = await (this.opts.checkpointPaintedFn ?? advancePanelMounted)(page).catch(() => true);
+    return !stillMounted;
   }
 
   async cleanup(): Promise<void> {

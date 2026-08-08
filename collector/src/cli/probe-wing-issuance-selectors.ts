@@ -423,6 +423,10 @@ async function main(): Promise<void> {
           uniqueCandidates: result.uniqueCandidates,
           nonUniqueCandidates: result.nonUniqueCandidates,
           calibration: result.calibration,
+          // The machine-checkable issued-state verdict. Without it on the wire the operator cannot see the one
+          // field a post-delete calibration is run to obtain — the record would carry the raw signals but not
+          // the answer derived from them.
+          issuedState: result.issuedState,
           observation: result.observation,
           targets: result.targets,
         },
@@ -436,6 +440,8 @@ async function main(): Promise<void> {
       aborted: result.aborted,
       uniqueCandidates: result.uniqueCandidates,
       nonUniqueCandidates: result.nonUniqueCandidates,
+      issuedState: result.issuedState.state,
+      issuedStateReason: result.issuedState.reason,
     });
   } finally {
     removeSentinel(readyPath);

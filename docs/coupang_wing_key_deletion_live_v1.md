@@ -61,12 +61,30 @@ see below.
 | not the open-API surface | `indeterminate` |
 | no observation / observe threw | `indeterminate` |
 
-The asymmetry is deliberate and load-bearing: `not_issued` requires **positive** form-marker evidence. A page
-that failed to load, hydrated late, or rendered an error also lacks the credential anchor — treating that as
-"the key is gone" would let a broken read masquerade as deletion evidence, which is the one mistake this
-verdict must never make. `indeterminate` is the *absence* of evidence, never evidence of the opposite.
+**Corrected after review — read this before relying on the verdict.** The first version claimed the form-marker
+requirement made `not_issued` "positive evidence". It does not, on the path that matters:
+`classifyWingPage` reaches `open_api_issuance` only when marker-or-anchor is present, so on that category an
+absent anchor already *implies* the marker. The guard excludes nothing there, and the verdict reduces to
+`!credentialAnchorPresent`. It is still worth keeping — it is what makes `credential_shown` fail closed and what
+would catch a future classifier change — but it buys no resistance to a half-rendered page.
 
-The verdict is emitted on the probe record (`issuedState`), so the next live run carries it directly.
+Two real limits follow, and both are now handled honestly rather than asserted away:
+
+1. **Hydration.** WING paints its static shell — including the issuance heading — before the credential card's
+   XHR resolves. A single read in that window is marker=true / anchor=false ⇒ `not_issued` while the key still
+   exists. A single reading cannot separate "nothing to show" from "not shown yet".
+2. **A bounded, top-document, exact-match scan.** `credentialAnchorPresent` comes from a scan that stops at a
+   candidate cap and pierces no iframe or shadow root. Truncation is now reported by the census and forces
+   `indeterminate` (`SCAN_TRUNCATED`), so page size alone cannot produce a false "deleted". The iframe / shadow
+   / exact-label limits remain.
+
+**So a single `not_issued` is a signal, not proof.** `wingDeletionEvidenceFrom` requires **two independent
+readings that both say `not_issued`** before deletion evidence is recorded — the same two-capture standard the
+WING signature calibration already uses. One disagreeing reading withholds the verdict entirely; it is not a
+majority vote, because "mostly gone" is not a state worth reporting about an irreversible action.
+
+The verdict is emitted on the probe record (`issuedState`) **and in the printed JSON**, so the next live run
+carries it directly.
 
 ## Fix 2 — the checkpoint now retires on the completion signal
 
@@ -101,16 +119,24 @@ a deletion and would guarantee two non-unique candidates that muddy the signal.
 
 Success criteria for that unit:
 
-- `issuedState: not_issued` (⇒ `credentialAnchorPresent=false` with positive form-marker evidence) — this is
-  the machine-verifiable post-state evidence the deletion currently lacks
+- `issuedState: not_issued` on **two independent probe runs** (⇒ `wingDeletionEvidenceFrom` reports
+  `confirmedNotIssued: true` / `STABLE_NOT_ISSUED`) — this is the machine-verifiable post-state evidence the
+  deletion currently lacks. A single run's `not_issued` is a signal only, for the hydration reason above. Two
+  runs under one grant are fine: the probe is read-only and the scope is unchanged between them.
 - `matchCount` recorded for each of `self_dev` / `vendor_info` / `call_ip` / `issue`
 - uniqueness established for the targets a later guided walk must highlight
 - leak 0 · code change 0 during the live run · no highlight / click / input / 발급
 
-Two expectations worth setting now: `vendor_info` (업체명) matched **9×** on the already-issued page in the
-2026-08-06 calibration, so it may well fail uniqueness again on the form — that is a finding to record, not a
-selector to retune by guesswork. And the selectors must be corrected **only** from observed post-delete form
-evidence; the known issued-page results must not be used to pre-adjust them.
+Three expectations worth setting now:
+
+- `vendor_info` (업체명) matched **9×** on the already-issued page in the 2026-08-06 calibration, so it may well
+  fail uniqueness again on the form — a finding to record, not a selector to retune by guesswork.
+- The selectors must be corrected **only** from observed post-delete form evidence; the known issued-page
+  results must not be used to pre-adjust them.
+- `WING_OPEN_API_MARKER_LABELS` is itself **unvalidated** — it did *not* match on the already-issued page. Making
+  `not_issued` a success criterion therefore creates pressure to retune those labels until the criterion fires.
+  Do not. If the marker does not match the post-delete form, the correct outcome is `indeterminate` and a
+  recorded finding, exactly as with any other placeholder (collector/CLAUDE.md §6).
 
 Only after that unit: the WING-resident reissue tutorial, new key issuance, SellerOps credential replacement,
 and connection/sync recovery — each its own unit with its own grant.

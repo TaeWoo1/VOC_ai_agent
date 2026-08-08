@@ -14,12 +14,15 @@ import { finishDeletionRun, type DeletionRunDriver } from "../../src/cli/run-cou
 import type { WingPageCategory } from "../../src/cli/coupang-wing-classifier";
 
 /** Records every call in order. `clearThrows` simulates a page that closed/navigated under the clear. */
-function fakeDriver(opts: { deleted?: boolean; pageCategory?: WingPageCategory; clearThrows?: boolean } = {}) {
+function fakeDriver(
+  opts: { deleted?: boolean; pageCategory?: WingPageCategory; clearThrows?: boolean; clearReports?: boolean } = {},
+) {
   const calls: string[] = [];
   const driver: DeletionRunDriver = {
     async clearHighlight() {
       calls.push("clear");
       if (opts.clearThrows) throw new Error("page closed");
+      return opts.clearReports ?? true;
     },
     async verifyDeletion() {
       calls.push("verify");
@@ -79,12 +82,12 @@ describe("finishDeletionRun — a failed clear is reported, never hidden and nev
   it("a throwing clear is NOT retried — a retry loop on a destructive surface is its own hazard", async () => {
     let clears = 0;
     const driver: DeletionRunDriver = {
-      async clearHighlight() {
+      async clearHighlight(): Promise<boolean> {
         clears += 1;
         throw new Error("page closed");
       },
       async verifyDeletion() {
-        return { deleted: false, pageCategory: "open_api_issuance" };
+        return { deleted: false, pageCategory: "open_api_issuance" as WingPageCategory };
       },
     };
     await finishDeletionRun(driver, "ready");

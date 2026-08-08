@@ -7,13 +7,19 @@
  * post-delete issuance FORM classifies that way via the form marker). The category alone therefore said nothing
  * about the deletion in either direction, and the outcome could only be recorded as operator-attested.
  *
- * The load-bearing property is the ASYMMETRY: `not_issued` needs POSITIVE form-marker evidence, so a page that
- * failed to load — which also lacks the credential anchor — reports `indeterminate` instead of masquerading as
- * proof of deletion. These tests exist mostly to keep that asymmetry from being "simplified" away.
+ * IMPORTANT, and corrected after review: the form-marker requirement does NOT make a single reading safe.
+ * `classifyWingPage` reaches `open_api_issuance` only when marker-or-anchor is present, so on that category an
+ * absent anchor already implies the marker — the guard excludes nothing there and the verdict reduces to
+ * `!credentialAnchorPresent`. A late-hydrating page (static shell painted, credential XHR still in flight) will
+ * therefore read `not_issued` while the key still exists. What actually closes that is `wingDeletionEvidenceFrom`
+ * over TWO independent readings, tested at the bottom of this file; the truncation guard closes the other
+ * false-negative (a bounded scan that stopped before reaching the credential heading).
  */
 import { describe, it, expect } from "vitest";
 import {
   WING_ISSUED_STATES,
+  observeFrom,
+  wingDeletionEvidenceFrom,
   wingIssuedStateFrom,
   type WingObservation,
   type WingPageCategory,
@@ -32,6 +38,7 @@ function observation(over: Partial<WingSignals> & { pageCategory?: WingPageCateg
     listLikeContainerCountBucket: "few",
     openApiMarkerPresent: false,
     credentialAnchorPresent: false,
+    markerScanTruncated: false,
     ...signalOver,
   };
   return { urlCategory: signals.urlCategory, pageCategory, signals, blockers: ["LIVE_DOM_CALIBRATION_PENDING"] };
@@ -50,7 +57,10 @@ describe("wingIssuedStateFrom — ISSUED", () => {
     expect(r.state).toBe("issued");
   });
 
-  it("holds on the credential_shown surface too", () => {
+  it("holds on the credential_shown surface too — though the classifier cannot actually produce that pair", () => {
+    // Honest note: `classifyWingPage` reaches `credential_shown` only when BOTH markers are false, so this
+    // combination is hand-built and unreachable from `observeFrom`. It is asserted anyway so that if the
+    // classifier ever does route an anchored page here, the verdict does not silently become `indeterminate`.
     const r = wingIssuedStateFrom(observation({ pageCategory: "credential_shown", credentialAnchorPresent: true }));
     expect(r.state).toBe("issued");
   });
@@ -84,12 +94,18 @@ describe("wingIssuedStateFrom — INDETERMINATE is the absence of evidence, neve
     }
   });
 
-  it("an off-target host cannot produce a verdict", () => {
-    // Off-target already forces pageCategory `unknown` upstream, so it lands in the same branch — asserted so a
-    // future classifier change cannot quietly let a non-WING page answer an issued-state question.
-    const off = observation({ pageCategory: "unknown" });
-    const r = wingIssuedStateFrom({ ...off, urlCategory: "unknown", signals: { ...off.signals, urlCategory: "unknown" } });
-    expect(r.state).toBe("indeterminate");
+  it("an off-target host cannot produce a verdict — asserted through the REAL classifier, not a hand-built object", () => {
+    // A hand-built `{pageCategory:"unknown"}` would only re-test the category branch and would still pass if the
+    // upstream off-target guard were deleted. Going through `observeFrom` makes this test depend on the actual
+    // defence: `classifyWingPage` forcing `unknown` for a non-WING host.
+    const census = {
+      passwordFieldPresent: false, submitAffordancePresent: true, formCount: 1,
+      editableTextInputCount: 2, readonlyFieldCount: 0, listLikeContainerCount: 2,
+      openApiMarkerPresent: true, credentialAnchorPresent: false, markerScanTruncated: false,
+    };
+    expect(wingIssuedStateFrom(observeFrom("unknown", census)).state).toBe("indeterminate");
+    // …while the same census on the real host DOES produce a verdict, so the assertion above is about the host.
+    expect(wingIssuedStateFrom(observeFrom("wing_host", census)).state).toBe("not_issued");
   });
 
   it("every verdict is one of the three closed states, with a closed reason", () => {
@@ -126,5 +142,52 @@ describe("wingIssuedStateFrom — value-free and pure", () => {
   it("is deterministic for the same input", () => {
     const obs = observation({ openApiMarkerPresent: true });
     expect(wingIssuedStateFrom(obs)).toEqual(wingIssuedStateFrom(obs));
+  });
+});
+
+describe("wingIssuedStateFrom — a TRUNCATED scan cannot produce deletion evidence", () => {
+  it("absent anchor + truncated scan ⇒ indeterminate, never not_issued", () => {
+    // The marker/anchor scan is bounded. On a large DOM it can stop before reaching the credential heading, so
+    // "anchor absent" would mean "not found in the part we looked at" — a false 'deleted' from page size alone.
+    const r = wingIssuedStateFrom(observation({ openApiMarkerPresent: true, markerScanTruncated: true }));
+    expect(r).toEqual({ state: "indeterminate", reason: "SCAN_TRUNCATED" });
+  });
+
+  it("a FOUND anchor is still trusted from a truncated scan — truncation can only hide, never invent", () => {
+    const r = wingIssuedStateFrom(observation({ credentialAnchorPresent: true, markerScanTruncated: true }));
+    expect(r.state).toBe("issued");
+  });
+});
+
+describe("wingDeletionEvidenceFrom — one reading is a signal, two agreeing readings are evidence", () => {
+  const notIssued = observation({ openApiMarkerPresent: true, credentialAnchorPresent: false });
+  const issued = observation({ credentialAnchorPresent: true });
+
+  it("two independent not_issued readings ⇒ confirmed", () => {
+    expect(wingDeletionEvidenceFrom([notIssued, notIssued])).toEqual({
+      confirmedNotIssued: true, reason: "STABLE_NOT_ISSUED", readingCount: 2,
+    });
+  });
+
+  it("ONE reading is never enough — a hydration race looks exactly like a deleted key", () => {
+    // The failure this prevents: WING paints its static shell (including the issuance heading) before the
+    // credential card's XHR resolves. A single read in that window says `not_issued` while the key still exists.
+    expect(wingDeletionEvidenceFrom([notIssued])).toEqual({
+      confirmedNotIssued: false, reason: "SINGLE_READING_ONLY", readingCount: 1,
+    });
+    expect(wingDeletionEvidenceFrom([])).toMatchObject({ confirmedNotIssued: false, reason: "SINGLE_READING_ONLY" });
+  });
+
+  it("any disagreement withholds the verdict — NOT a majority vote", () => {
+    // On an irreversible action "mostly gone" is not a state worth reporting.
+    for (const readings of [[notIssued, issued], [notIssued, notIssued, issued], [notIssued, null], [notIssued, observation({})]]) {
+      const r = wingDeletionEvidenceFrom(readings);
+      expect(r.confirmedNotIssued, JSON.stringify(readings.map((x) => x && x.pageCategory))).toBe(false);
+      expect(r.reason).toBe("READINGS_DISAGREE");
+    }
+  });
+
+  it("readings that are all issued are not 'confirmed deleted' by any reading of the result", () => {
+    expect(wingDeletionEvidenceFrom([issued, issued]).confirmedNotIssued).toBe(false);
   });
 });

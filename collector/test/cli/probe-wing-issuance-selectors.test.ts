@@ -126,6 +126,7 @@ const OBS: WingObservation = {
     listLikeContainerCountBucket: "few",
     openApiMarkerPresent: true,
     credentialAnchorPresent: false,
+    markerScanTruncated: false,
   },
   blockers: ["LIVE_DOM_CALIBRATION_PENDING"],
 };
@@ -325,6 +326,17 @@ describe("wing selector recorder — read-only walk", () => {
       const result = await runWingSelectorRecord(deps);
       expect(result.issuedState.state, signal).toBe("indeterminate");
     }
+  });
+
+  it("the issued-state verdict reaches the WIRE, not just the returned object", () => {
+    // The gap this closes: the verdict was added to the record type and the orchestrator's return, but the CLI
+    // printed a hand-built object that omitted it — so the one field a post-delete calibration is RUN to obtain
+    // would have been invisible to the operator, while the doc claimed the record carried it.
+    const code = codeOnly(CLI);
+    expect(code).toContain("issuedState: result.issuedState");
+    // …and it is inside the JSON the CLI prints, not only in the structured log.
+    const printed = code.slice(code.indexOf("JSON.stringify("), code.indexOf("aw_coupang_selector_record_done"));
+    expect(printed).toContain("issuedState");
   });
 
   it("emits ONLY a value-free calibration record — no credential VALUE, PII, selector, host, or raw URL", async () => {
