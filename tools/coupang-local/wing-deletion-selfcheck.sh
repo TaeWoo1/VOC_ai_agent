@@ -162,13 +162,29 @@ for soft in \
   '"invalidatesExistingCredentialImmediately":false' \
   '"explicitCheckpointRequired":false' \
   '"credentialValueReadBudget":1' \
-  '"operation":"DELETE_SOMETHING_ELSE"'
+  '"operation":"DELETE_SOMETHING_ELSE"' \
+  '"irreversible":"true"' \
+  '"invalidatesExistingCredentialImmediately":"true"' \
+  '"agentPerformsAction":"false"' \
+  '"credentialValueReadBudget":"0"'
 do
   key="${soft%%:*}"
-  python3 -c 'import json,sys
+  # A generator that throws writes no file; the verifier then fails on a missing path and the loop reads that as
+  # "softening refused" — every case would PASS while testing nothing. Mirrors the reveal selfcheck's guard.
+  rm -f "$FIXTURES/desc-soft.json"
+  if ! python3 -c 'import json,sys
 d = json.loads(sys.argv[1]); k, v = json.loads("{" + sys.argv[2] + "}").popitem()
+if k not in d["operatorDestructiveAction"]:
+    sys.exit(7)
 d["operatorDestructiveAction"][k] = v
-open(sys.argv[3], "w").write(json.dumps(d))' "$CANON" "$soft" "$FIXTURES/desc-soft.json"
+open(sys.argv[3], "w").write(json.dumps(d))' "$CANON" "$soft" "$FIXTURES/desc-soft.json"; then
+    echo "  FAIL  DESCRIPTOR · fixture generation FAILED for: $soft"; DESC_OK=0; FAILED=1
+    continue
+  fi
+  if cmp -s "$FIXTURES/desc-ok.json" "$FIXTURES/desc-soft.json"; then
+    echo "  FAIL  DESCRIPTOR · fixture is identical to canonical, so it tests nothing: $soft"; DESC_OK=0; FAILED=1
+    continue
+  fi
   if verify_destructive_descriptor "$FIXTURES/desc-soft.json" >/dev/null 2>&1; then
     echo "  FAIL  DESCRIPTOR · softening accepted: $soft"; DESC_OK=0; FAILED=1
   fi
@@ -177,7 +193,7 @@ printf '%s' '{}' > "$FIXTURES/desc-absent.json"
 if verify_destructive_descriptor "$FIXTURES/desc-absent.json" >/dev/null 2>&1; then
   echo "  FAIL  DESCRIPTOR · absent descriptor accepted"; DESC_OK=0; FAILED=1
 fi
-[ "$DESC_OK" = "1" ] && echo "  PASS  DESCRIPTOR    · canonical accepted; every softening and an absent descriptor refused"
+[ "$DESC_OK" = "1" ] && echo "  PASS  DESCRIPTOR    · canonical accepted; every softening (incl. STRING-typed booleans) and an absent descriptor refused"
 
 # …and the preflight must ACT on that verdict. The gate makes a softened descriptor unproducible through the
 # CLI, so no end-to-end case can distinguish "checked and refused" from "checked and ignored" — the wiring is
