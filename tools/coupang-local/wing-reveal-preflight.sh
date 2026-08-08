@@ -66,6 +66,19 @@ check_identity_fresh "$BOOTSTRAP_EPOCH" "$IDENTITY_TTL_SECONDS"
   && pass "phase is COUPANG_WING_ISSUANCE_FORM_REVEAL (agent READ_ONLY; the OPERATOR presses 발급)" \
   || fail "phase must be COUPANG_WING_ISSUANCE_FORM_REVEAL (got '${PHASE:-unset}') — this harness prepares no other phase"
 
+# The collector must be THIS repository's collector — the check the deletion preflight has and this one did not.
+# Otherwise the drift check verifies one checkout while `approval-manifest-cli.ts` (which derives its own repo
+# root from its file location) builds the manifest from another, and the displayed `git <sha>` describes a tree
+# the gate never looked at. The selfcheck's COLLECTOR_ESCAPE case had been passing only because its fixture
+# directory was empty, so `check_toolchain` failed on a missing tsx — not because anything checked containment.
+COLLECTOR_REAL="$(realpath_of "$COLLECTOR_DIR")"
+EXPECTED_COLLECTOR="$(realpath_of "$REPO_ROOT/collector")"
+if [ -n "$COLLECTOR_REAL" ] && [ -n "$EXPECTED_COLLECTOR" ] && [ "$COLLECTOR_REAL" = "$EXPECTED_COLLECTOR" ]; then
+  pass "collector is this repository's collector (the verified tree is the one that builds the manifest)"
+else
+  fail "SELLEROPS_COLLECTOR_DIR points outside this repository — the drift check and the manifest would describe different checkouts. Unset it and re-run"
+fi
+
 check_no_code_drift "$RUN_GIT"
 check_toolchain "$COLLECTOR_DIR" "src/cli/run-coupang-wing-reveal-live.ts" "reveal"
 check_dedicated_profile "$COLLECTOR_DIR"

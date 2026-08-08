@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import {
   makeRevealIo,
   REVEAL_WALK_STOPS,
+  revealExitCode,
   runRevealWalk,
   waitForSignal,
   type RevealWalkDriverLike,
@@ -75,7 +76,10 @@ interface FakeOpts {
   highlightCount?: number;
   result?: WingRevealResult;
   observeThrows?: boolean;
+  /** cleanup() REJECTS. Possible in principle; the real driver cannot do it. */
   cleanupThrows?: boolean;
+  /** cleanup() returns false — the shape the REAL driver uses to report a panel still on the live page. */
+  cleanupReportsStuck?: boolean;
 }
 
 /**
@@ -111,6 +115,7 @@ function harness(o: FakeOpts = {}) {
     async cleanup() {
       order.push("cleanup");
       if (o.cleanupThrows) throw new Error("clear failed");
+      return !o.cleanupReportsStuck;
     },
   };
 
@@ -648,6 +653,29 @@ describe("waitForSignal — a pathological poll interval cannot disable the dead
 });
 
 describe("the report is reported — a run that exits 0 whatever happened is an all-clear", () => {
+  it("a cleanup that REPORTS a stuck panel is recorded — the shape the real driver actually uses", async () => {
+    // The finding this closes: `CoupangWingRevealDriver.clearHighlight` catches every error it can hit, so
+    // `cleanup()` cannot reject. Wiring the guarantee to a rejection made it unreachable in production while a
+    // `cleanupThrows` fake — a shape the real driver cannot produce — kept its test green.
+    const { driver, io, notes } = harness({ cleanupReportsStuck: true });
+    const report = await runRevealWalk(driver, io, "wing_host");
+    expect(report.cleanupFailed).toBe(true);
+    expect(noteText(notes)).toContain("overlay could not be cleared");
+    expect(revealExitCode(report)).toBe(8);
+  });
+
+  it("the real driver signals a stuck panel by RETURN VALUE, not by throwing", async () => {
+    // Asserted against the production class, not a fake: its cleanup() must hand back clearHighlight's verdict.
+    const { CoupangWingRevealDriver } = await import("../../src/action-window/coupang-wing-reveal-driver");
+    const src = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), "../../src/action-window/coupang-wing-reveal-driver.ts"),
+      "utf8",
+    );
+    expect(src).toContain("async cleanup(): Promise<boolean>");
+    expect(src).toContain("return this.clearHighlight();");
+    expect(typeof CoupangWingRevealDriver.prototype.cleanup).toBe("function");
+  });
+
   it("a failed cleanup is recorded on the report, not swallowed", async () => {
     // The original let a throwing overlay clear propagate → nonzero exit. Swallowing it would leave SellerOps'
     // panel and its `data-aw-target` annotation on the seller's live WING DOM with no signal anywhere.
@@ -669,15 +697,46 @@ describe("the report is reported — a run that exits 0 whatever happened is an 
     expect(report.cleanupFailed).toBe(true);
   });
 
-  it("main() reads the report and sets a DISTINCT exit code per outcome class", () => {
+  it("revealExitCode maps each outcome class to its OWN code — asserted by value", () => {
+    // The source-token version of this test was vacuous: inverting the codes so an UNEXPECTED outcome exits 0
+    // and the expected one exits 6 — the exact opposite of why they exist — passed it unchanged.
+    const base = { stop: "OBSERVED" as const, result: null, outcomeAsExpected: true, cleanupFailed: false };
+    expect(revealExitCode(base)).toBe(0);
+    expect(revealExitCode({ ...base, outcomeAsExpected: false })).toBe(6);
+    expect(revealExitCode({ ...base, stop: "ABORTED_AT_CHECKPOINT", outcomeAsExpected: false })).toBe(7);
+    expect(revealExitCode({ ...base, cleanupFailed: true })).toBe(8);
+    // …and the codes are pairwise distinct, so no two classes can be collapsed.
+    const codes = [
+      revealExitCode(base),
+      revealExitCode({ ...base, outcomeAsExpected: false }),
+      revealExitCode({ ...base, stop: "NOT_OPEN_API_SURFACE", outcomeAsExpected: false }),
+      revealExitCode({ ...base, cleanupFailed: true }),
+    ];
+    expect(new Set(codes).size).toBe(4);
+    // A stuck overlay outranks everything: it is the only one describing state left on the seller's live page.
+    expect(revealExitCode({ ...base, stop: "NOT_OPEN_API_SURFACE", cleanupFailed: true })).toBe(8);
+  });
+
+  it("main() reads the report and delegates the code to revealExitCode", () => {
     const src2 = readFileSync(SRC, "utf8");
     const body = src2.slice(src2.indexOf("async function main(): Promise<void>"));
     expect(body).toContain("const report = await runRevealWalk(");
-    // Not merely "an exit code is set somewhere": the four classes must be distinguishable, or an unexpected
-    // outcome is indistinguishable from the expected one to anything downstream of the terminal.
-    expect(body).toMatch(/process\.exitCode\s*=/);
-    expect(body).toContain("report.cleanupFailed");
-    expect(body).toContain('report.stop !== "OBSERVED"');
-    expect(body).toContain("report.outcomeAsExpected");
+    expect(body).toContain("process.exitCode = revealExitCode(report);");
+  });
+
+  it("main() wires BOTH sentinel paths and the sentinel CONSUMER — the seam tests cannot see this", () => {
+    // Review's finding 5: `makeRevealIo` is tested in both directions, but main() also joins label to file, and
+    // `SignalWaitDeps.remove` is OPTIONAL — dropping it typechecks, and the consumption test keeps passing
+    // because it injects its own `remove`. Dropping it plus pointing donePath at the ready filename reproduces
+    // the original fail-open exactly, at the one place no seam test looks.
+    const src2 = readFileSync(SRC, "utf8");
+    const body = src2.slice(src2.indexOf("async function main(): Promise<void>"));
+    expect(body).toContain("sentinelPath(cfg.statusFile, REVEAL_READY_FILENAME)");
+    expect(body).toContain("sentinelPath(cfg.statusFile, REVEAL_DONE_FILENAME)");
+    expect(body).toContain("remove: removeSentinel,");
+    // The three sentinels must come from three DIFFERENT filename constants.
+    const names = [...body.matchAll(/sentinelPath\(cfg\.statusFile, (REVEAL_\w+)\)/g)].map((m) => m[1]!);
+    expect(names).toHaveLength(3);
+    expect(new Set(names).size).toBe(3);
   });
 });

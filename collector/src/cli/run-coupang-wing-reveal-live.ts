@@ -194,7 +194,12 @@ export interface RevealWalkDriverLike {
   probeIssueMatch(): Promise<{ matchCount: number; canHighlight: boolean; sig?: string }>;
   highlightIssueCheckpoint(): Promise<{ count: number; sig?: string }>;
   observeRevealOutcome(): Promise<WingRevealResult>;
-  cleanup(): Promise<void>;
+  /**
+   * Tear down the overlay and REPORT whether the page is clean. `false` means SellerOps' panel may still be on
+   * the seller's live WING DOM — which is the failure that matters, and which the real driver signals by return
+   * value, never by throwing (it catches everything internally).
+   */
+  cleanup(): Promise<boolean>;
 }
 
 /** Where the walk stopped. Every value except `OBSERVED` means nothing was observed and nothing was pressed. */
@@ -238,9 +243,13 @@ export interface RevealWalkReport {
    */
   outcomeAsExpected: boolean;
   /**
-   * True when the overlay clear threw on the way out. The original code let that failure propagate and exit
-   * nonzero; swallowing it silently would leave SellerOps' panel and its `data-aw-target` annotation on the
-   * seller's live WING DOM with no signal at all, so it is reported instead of discarded.
+   * True when the overlay clear failed on the way out — either by rejecting, or (the shape the real driver
+   * actually uses) by returning false.
+   *
+   * The original propagated a throwing clear on exactly ONE of six paths, the explicit `await driver.cleanup()`
+   * before the checkpoint-abort return; on the other five its `finally` swallowed it and exited 0. So this is
+   * not a restoration of prior behaviour — it is new, and it is the difference between an operator learning
+   * SellerOps' panel is still on their live WING DOM and not learning it.
    */
   cleanupFailed: boolean;
 }
@@ -345,13 +354,35 @@ export async function runRevealWalk(
     // leaving SellerOps' panel and the `data-aw-target` annotation on the seller's live marketplace DOM is the
     // defect that review already caught once inside the driver.
     //
-    // A failure here is RECORDED, not swallowed. The original let it propagate and exit nonzero; discarding it
-    // would leave the panel on the seller's live page with no signal anywhere.
-    await driver.cleanup().catch(() => {
+    // A failure here is RECORDED, not swallowed. (The original propagated a throw on ONE of six paths and
+    // swallowed it on the other five.) Discarding it leaves the panel on the seller's live page with no signal.
+    // BOTH failure shapes. A throw is the obvious one; the one that actually happens is a `false` verdict —
+    // `CoupangWingRevealDriver.clearHighlight` catches every error it can hit, so the production driver reports
+    // a stuck panel by returning false and never by rejecting. Wiring this to the throw alone made the
+    // guarantee unreachable in production while a `cleanupThrows` fake kept its test green.
+    const cleared = await driver.cleanup().catch(() => false);
+    if (cleared === false) {
       if (report) report.cleanupFailed = true;
       io.note("⚠ The overlay could not be cleared. SellerOps' panel may still be on the WING page — reload it.");
-    });
+    }
   }
+}
+
+/**
+ * The process exit code for a finished walk. Extracted so it is testable by VALUE: the source-only guard that
+ * replaced it asserted four token strings were present, and an INVERSION — unexpected outcomes exiting 0 and the
+ * expected one exiting 6 — passed it unchanged. That inversion is the precise opposite of what the exit codes
+ * exist for.
+ *
+ *   0 = observed, and the outcome was the one this run was built to expect
+ *   6 = observed, but an UNEXPECTED outcome — read the STOP block, do not continue in WING
+ *   7 = nothing was observed (refused, aborted, or timed out before the operator acted)
+ *   8 = the overlay could not be cleared; SellerOps' panel may still be on the live page
+ */
+export function revealExitCode(report: RevealWalkReport): number {
+  if (report.cleanupFailed) return 8;
+  if (report.stop !== "OBSERVED") return 7;
+  return report.outcomeAsExpected ? 0 : 6;
 }
 
 /**
@@ -381,15 +412,25 @@ export function makeRevealIo(
   };
 }
 
+/**
+ * The operator-facing banner, as a constant so its two load-bearing sentences can be asserted. It is the
+ * RUN-TIME restatement of the pair the manifest carries — "not confirmed" and "cannot prove no key was created"
+ * — shown at the moment a live window is about to open. The preflight's equivalent copy is covered by the
+ * selfcheck; deleting either line here changed nothing any test could see.
+ */
+export const REVEAL_BANNER_LINES: readonly string[] = [
+  " LIVE Coupang WING issuance-form REVEAL — explicit per-run approval required.",
+  " SellerOps HIGHLIGHTS the 발급 control and RESTS. The OPERATOR presses it. SellerOps never",
+  " clicks, types, submits, selects 자체개발, fills 업체명/URL/IP, presses 확인, issues a key, or",
+  " reads any value (incl. Access Key / Secret Key / 업체코드).",
+  " The press is expected to open the API configuration step — this is NOT confirmed, so an",
+  " unrecognized outcome STOPS the run. It CANNOT prove no key was created; only you can see that.",
+];
+
 function banner(): void {
   const line = "─".repeat(64);
   console.error(line);
-  console.error(" LIVE Coupang WING issuance-form REVEAL — explicit per-run approval required.");
-  console.error(" SellerOps HIGHLIGHTS the 발급 control and RESTS. The OPERATOR presses it. SellerOps never");
-  console.error(" clicks, types, submits, selects 자체개발, fills 업체명/URL/IP, presses 확인, issues a key, or");
-  console.error(" reads any value (incl. Access Key / Secret Key / 업체코드).");
-  console.error(" The press is expected to open the API configuration step — this is NOT confirmed, so an");
-  console.error(" unrecognized outcome STOPS the run. It CANNOT prove no key was created; only you can see that.");
+  for (const l of REVEAL_BANNER_LINES) console.error(l);
   console.error(line);
 }
 
@@ -466,7 +507,7 @@ async function main(): Promise<void> {
     const report = await runRevealWalk(driver, io, screen.urlCategory);
     // The report is READ. A process that exits 0 whatever happened is how "the walk completed" comes to read as
     // "the expected thing happened" to anything downstream of a human watching the terminal.
-    process.exitCode = report.cleanupFailed ? 8 : report.stop !== "OBSERVED" ? 7 : report.outcomeAsExpected ? 0 : 6;
+    process.exitCode = revealExitCode(report);
   } finally {
     for (const p of [readyPath, donePath, abortPath]) removeSentinel(p);
     process.removeListener("SIGINT", onSigint);

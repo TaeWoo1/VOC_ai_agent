@@ -80,20 +80,31 @@ expected · a failed overlay clear passed through rather than rounded up.
 
 ## Behaviour that changed
 
-Three operator-visible changes, all from review findings. Listing them because "closes a testability gap" is not
-a licence to move a live-run guard silently.
+Listing these because "closes a testability gap" is not a licence to move a live-run guard silently. Two are net
+changes against `main`; the first is a **restoration**, and the last two are smaller notes that a later review
+caught missing from this list.
 
-1. **The completion sentinel is disclosed at the checkpoint, not at startup.** The first refactor announced it
-   before the readiness wait, which invites the operator to create it early — and a pressed sentinel that
-   already exists makes the checkpoint wait return on tick 0, skipping the human checkpoint in silence.
+1. **RESTORED, not changed: the completion sentinel is disclosed at the checkpoint.** `main` already printed it
+   there. This branch's first commit moved it to startup, which invites the operator to create it early — and a
+   pressed sentinel that already exists makes the checkpoint wait return on tick 0, skipping the human
+   checkpoint in silence. It is back where it was, now as one combined line rather than two (the only net
+   formatting change here).
 2. **Every unexpected outcome gets a STOP block**, not just `CREDENTIAL_SURFACE_APPEARED`. Five of the six
    printed the same "observation complete" line a good run prints, while the docstring promised an unrecognized
    outcome "stops, never as success".
 3. **The exit code distinguishes the outcome classes** — expected `0`, unexpected `6`, nothing observed `7`,
-   failed overlay clear `8`. `main()` had discarded the report and exited 0 whatever happened, which is how "the
-   walk completed" comes to read as "the expected thing happened" to anything downstream of the terminal. The
-   failed-clear code exists because the original propagated that error and exited nonzero; the refactor had
-   swallowed it, leaving SellerOps' panel on the seller's live WING DOM with no signal at all.
+   failed overlay clear `8` (`revealExitCode`, tested by value). `main()` had discarded the report and exited 0
+   whatever happened, which is how "the walk completed" comes to read as "the expected thing happened" to
+   anything downstream of the terminal.
+4. **A failed overlay clear is now reported on every path.** `main` propagated a throwing clear on exactly ONE
+   of six paths and swallowed it on the other five, so this is new rather than restored. It also required
+   changing `cleanup()` to return a boolean: `clearHighlight` catches every error it can hit, so the production
+   driver reports a stuck panel by RETURN VALUE and can never reject — the first version of this guarantee was
+   wired to a rejection it could not produce, and only a fake could make its test go green.
+5. **`driver.cleanup()` now runs twice on a completed walk** (the walk's `finally` and `main`'s). It is
+   idempotent, so this is not a defect, but it is a change in how many times SellerOps touches the seller's live
+   page. Relatedly, a throwing clear at the checkpoint-abort path used to emit `aw_coupang_reveal_run_fatal` and
+   exit 1; it now exits 8 with the STOP line and no fatal log.
 
 Two fail-open shapes were fixed alongside them: `waitForSignal` clamps its poll interval (`pollMs: 0` made the
 derived budget `Infinity` — a wait with no deadline; a negative one skipped the loop body entirely, returning

@@ -59,8 +59,10 @@ cleanup() { rm -rf "$FIXTURES"; rm -f "$DIRT_FILE"; }
 trap cleanup EXIT INT TERM
 
 REALGIT_FOR_SHA="$(command -v git)"
-CUR_GIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-TREE_DIRTY="$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | head -1)"
+CUR_GIT="$(git_hardened rev-parse --short HEAD 2>/dev/null || echo unknown)"
+# git_hardened, not bare git: an ambient GIT_DIR / core.excludesFile in the caller's shell would make this read
+# a dirty tree as clean and silently take the PASS branch — the same fail-open shape this file refuses elsewhere.
+TREE_DIRTY="$(git_hardened status --porcelain 2>/dev/null | head -1)"
 NOW="$(date +%s)"
 FAILED=0
 SKIPPED=0
@@ -159,10 +161,23 @@ for soft in \
   '"operation":"DELETE_WING_OPEN_API_KEY"' \
   '"forbiddenFollowOnAction":"NOTHING"'
 do
-  python3 -c 'import json,sys
+  # The fixture must be BUILT and must actually DIFFER from canonical. If the generator throws, no file is
+  # written, `verify_reveal_descriptor` fails on a missing/stale path, and the loop reads that as "refused" —
+  # all twelve softenings, including keyCreationRuledOut:true, would report PASS while testing nothing.
+  rm -f "$FIXTURES/desc-soft.json"
+  if ! python3 -c 'import json,sys
 d = json.loads(sys.argv[1]); k, v = json.loads("{" + sys.argv[2] + "}").popitem()
+if k not in d["operatorRevealAction"]:
+    sys.exit(7)
 d["operatorRevealAction"][k] = v
-open(sys.argv[3], "w").write(json.dumps(d))' "$CANON" "$soft" "$FIXTURES/desc-soft.json"
+open(sys.argv[3], "w").write(json.dumps(d))' "$CANON" "$soft" "$FIXTURES/desc-soft.json"; then
+    echo "  FAIL  DESCRIPTOR · fixture generation FAILED for: $soft"; DESC_OK=0; FAILED=1
+    continue
+  fi
+  if cmp -s "$FIXTURES/desc-ok.json" "$FIXTURES/desc-soft.json"; then
+    echo "  FAIL  DESCRIPTOR · fixture is identical to canonical, so it tests nothing: $soft"; DESC_OK=0; FAILED=1
+    continue
+  fi
   if verify_reveal_descriptor "$FIXTURES/desc-soft.json" >/dev/null 2>&1; then
     echo "  FAIL  DESCRIPTOR · tampering accepted: $soft"; DESC_OK=0; FAILED=1
   fi
@@ -180,7 +195,7 @@ fi
 if verify_destructive_descriptor "$FIXTURES/desc-ok.json" >/dev/null 2>&1; then
   echo "  FAIL  DESCRIPTOR · a REVEAL descriptor satisfied the destructive check"; DESC_OK=0; FAILED=1
 fi
-[ "$DESC_OK" = "1" ] && echo "  PASS  DESCRIPTOR    · canonical accepted; every safety-overstating softening, a re-point at key issuance, a re-point at deletion, the destructive shape, and an absent descriptor all refused"
+[ "$DESC_OK" = "1" ] && echo "  PASS  DESCRIPTOR    · canonical accepted; every safety-overstating softening (incl. STRING-typed booleans), a re-point at key issuance, a re-point at deletion, the destructive shape, and an absent descriptor all refused"
 
 # …and the preflight must ACT on that verdict. The gate makes a softened descriptor unproducible through the
 # CLI, so no end-to-end case can distinguish "checked and refused" from "checked and ignored".
@@ -362,9 +377,15 @@ FAKE
 
   # The collector must be THIS repository's collector, or the drift check verifies one checkout while the
   # manifest is built from another, and the displayed provenance describes a tree nothing looked at.
-  OTHER_COLLECTOR="$FIXTURES/other/collector"; mkdir -p "$OTHER_COLLECTOR"
-  run_case "COLLECTOR_ESCAPE (out-of-repo collector refused)" nonzero "PREFLIGHT FAIL" \
-    "$FIXTURES/normal.env" "SELLEROPS_COLLECTOR_DIR=$OTHER_COLLECTOR"
+  # POPULATED, deliberately. An empty fixture made this case pass on a missing `tsx` — `check_toolchain` — while
+  # its comment claimed it proved containment. With the toolchain and entrypoint present, the only thing that can
+  # refuse it is the containment check itself, and the marker names that check rather than "PREFLIGHT FAIL".
+  OTHER_COLLECTOR="$FIXTURES/other/collector"
+  mkdir -p "$OTHER_COLLECTOR/node_modules/.bin" "$OTHER_COLLECTOR/src/cli"
+  : > "$OTHER_COLLECTOR/node_modules/.bin/tsx"; chmod +x "$OTHER_COLLECTOR/node_modules/.bin/tsx"
+  : > "$OTHER_COLLECTOR/src/cli/run-coupang-wing-reveal-live.ts"
+  run_case "COLLECTOR_ESCAPE (out-of-repo collector refused ON CONTAINMENT)" nonzero \
+    "points outside this repository" "$FIXTURES/normal.env" "SELLEROPS_COLLECTOR_DIR=$OTHER_COLLECTOR"
 
   # A git that FAILS must never be read as "clean". A healthy checkout never errors, so it is injected: a `git`
   # earlier on PATH forwarding everything except `status`, which exits 128.
@@ -395,9 +416,11 @@ FAKE
   fi
 else
   run_case "DIRTY_TREE      (uncommitted change refused)" nonzero "working tree is dirty" "$FIXTURES/normal.env"
-  SKIPPED=9
-  echo "  SKIP  NORMAL / NO_LEAK / GIT_DIR_HIJACK / BOOTSTRAP_DIRTY / BOOTSTRAP_CLEAN / BOOTSTRAP_SHA /"
-  echo "        COLLECTOR_ESCAPE / GIT_STATUS_FAIL / DEFAULT_OUT — the working tree is dirty, which the"
+  # Derived, never hand-counted: a case added to the clean branch without touching this number would make the
+  # PARTIAL banner under-report what was skipped.
+  CLEAN_ONLY_CASES=(NORMAL NO_LEAK GIT_DIR_HIJACK BOOTSTRAP_DIRTY BOOTSTRAP_CLEAN BOOTSTRAP_SHA COLLECTOR_ESCAPE GIT_STATUS_FAIL DEFAULT_OUT)
+  SKIPPED=${#CLEAN_ONLY_CASES[@]}
+  echo "  SKIP  ${CLEAN_ONLY_CASES[*]} — the working tree is dirty, which the"
   echo "        preflight refuses by design."
   echo "        Commit or stash, then re-run to exercise the PASS path."
 fi

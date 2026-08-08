@@ -238,12 +238,20 @@ verify_destructive_descriptor() {
     "credentialValueReadBudget:0"
   do
     key="${pair%%:*}"; want="${pair#*:}"
+    # Type-exact, matching verify_reveal_descriptor: a rendered-text comparison accepts the STRING "true" for
+    # `irreversible`, and a descriptor whose irreversibility is a string is not one the runtime treats as true.
     got="$(python3 -c 'import json,sys
 d = json.load(open(sys.argv[1])).get("operatorDestructiveAction")
 if not isinstance(d, dict) or sys.argv[2] not in d:
     sys.exit(1)
-v = d[sys.argv[2]]
-print("true" if v is True else "false" if v is False else v)' "$manifest" "$key" 2>/dev/null)" || got=""
+v, want = d[sys.argv[2]], sys.argv[3]
+if want in ("true", "false"):
+    ok = v is (want == "true")
+elif want.isdigit():
+    ok = isinstance(v, int) and not isinstance(v, bool) and str(v) == want
+else:
+    ok = isinstance(v, str) and v == want
+print(want if ok else json.dumps(v))' "$manifest" "$key" "$want" 2>/dev/null)" || got=""
     if [ "$got" != "$want" ]; then
       echo "  FAIL  destructive descriptor $key is '${got:-missing}', must be '$want'"
       rc=1

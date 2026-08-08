@@ -15,7 +15,14 @@ import { readFileSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { gateRefusalCause, REVEAL_ABORT_FILENAME, REVEAL_DONE_FILENAME, REVEAL_READY_FILENAME, sentinelPath } from "../../src/cli/run-coupang-wing-reveal-live";
+import {
+  gateRefusalCause,
+  REVEAL_ABORT_FILENAME,
+  REVEAL_BANNER_LINES,
+  REVEAL_DONE_FILENAME,
+  REVEAL_READY_FILENAME,
+  sentinelPath,
+} from "../../src/cli/run-coupang-wing-reveal-live";
 import {
   WING_DEFAULT_URL,
   WING_KEY_CREATION_ACTION,
@@ -221,6 +228,26 @@ describe("reveal CLI — structurally incapable of acting on WING", () => {
     expect(printed).toContain("overlayClearedBeforeObservation: result.overlayClearedBeforeObservation");
   });
 
+  it("the operator banner states BOTH non-collapsible claims at the moment a live window opens", () => {
+    // Deleting either sentence changed nothing any test could see. This is the run-time twin of the manifest's
+    // two claims, shown to the person about to press a real control on a real marketplace.
+    const banner = REVEAL_BANNER_LINES.join(" ");
+    expect(banner).toContain("NOT confirmed");
+    expect(banner).toContain("unrecognized outcome STOPS the run");
+    expect(banner).toContain("CANNOT prove no key was created");
+    // …and it must not promise what the run cannot deliver: every mention of a key not being created has to be
+    // the CANNOT-prove one. An unqualified "no key was created" here would be the all-clear this run can never
+    // give. (The qualifier precedes the phrase, so this counts occurrences rather than using a lookahead.)
+    const mentions = banner.match(/no key was created/g)?.length ?? 0;
+    const qualified = banner.match(/CANNOT prove no key was created/g)?.length ?? 0;
+    expect(mentions).toBe(qualified);
+    expect(qualified).toBeGreaterThan(0);
+    // The agent-does-nothing list stays complete: each is an action the operator might otherwise expect of us.
+    for (const forbidden of ["자체개발", "업체명/URL/IP", "확인", "Access Key"]) {
+      expect(banner, forbidden).toContain(forbidden);
+    }
+  });
+
   it("its three sentinels are distinct — readiness, the press, and abort cannot be confused", () => {
     const names = [REVEAL_READY_FILENAME, REVEAL_DONE_FILENAME, REVEAL_ABORT_FILENAME];
     expect(new Set(names).size).toBe(3);
@@ -293,7 +320,14 @@ describe("the shell harness approves exactly what the runtime declares", () => {
       preflight.indexOf("# CHECKPOINT-COPY-END"),
     );
     expect(block, "the copy block markers must exist").toContain("echo");
+    // EVERY line between the markers must be a plain `echo "..."`. Without this, a line added as `printf`, in
+    // single quotes, or with a trailing redirect is shown to the operator and invisible to the equality check.
+    const lines = block.split("\n").slice(1).filter((l) => l.trim().length > 0);
+    for (const line of lines) {
+      expect(line, `unrecognized form inside the copy block: ${line}`).toMatch(/^echo "[^"]*"$/);
+    }
     const shown = [...block.matchAll(/^echo "(.*)"$/gm)].map((m) => m[1]!.trim()).join(" ");
+    expect(shown.length, "the copy block must not be empty").toBeGreaterThan(50);
     const collapse = (s: string): string => s.replace(/\s+/g, " ").trim();
     expect(collapse(shown)).toBe(collapse(WING_REVEAL_CHECKPOINT_LABEL));
   });

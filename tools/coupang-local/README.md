@@ -301,15 +301,18 @@ signal is identical between a real issued page and a real no-key form. `verify_r
 `wing-harness-common.sh`) refuses every softening of either, and refuses a descriptor re-pointed at
 `COMPLETE_WING_KEY_ISSUANCE` or at the deletion action.
 
-The preflight also shows the **Korean on-screen imperative verbatim** before the grant line, so nothing on the
-WING page is a surprise: `coupang-wing-reveal-gate.test.ts` asserts each fragment is a substring of
-`WING_REVEAL_CHECKPOINT_LABEL`, so the two copies cannot drift.
+The preflight also reproduces the **complete Korean on-page copy** before the grant line, so nothing on the WING
+page is a surprise: `coupang-wing-reveal-gate.test.ts` asserts the displayed block **equals**
+`WING_REVEAL_CHECKPOINT_LABEL`. Equality, not containment — a substring check sees neither an omitted sentence
+nor one added to the on-page panel that the preflight never shows.
 
 `wing-reveal-selfcheck.sh` regression-tests all of it hermetically — nothing is pressed and no key is issued.
 Beyond the identity/phase/drift cases the other two harnesses cover, it exercises the descriptor against crafted
 manifests (every safety-overstating softening, both re-points, the destructive shape, an absent descriptor), the
-approved-phase binding, the full disclosure text, and a **no-leak** case proving a refusal carries no run-env
-value, no ambient env value, and no full identity. Cases needing a clean tree skip while the tree is dirty.
+approved-phase binding, the full disclosure text, and a **no-leak** case proving a refusal carries no
+credential-shaped run-env value, no ambient env value, no FULL approval id, and no wholesale dump of the run env.
+(The run id IS printed in full, in the header, by design — it is a locally-minted environment identifier, not a
+secret, and the operator needs it to tell which run a refusal belongs to.) Cases needing a clean tree skip while the tree is dirty.
 
 **This harness authorizes nothing.** It prepares and displays; the operator's single-use `Seated and ready.`
 is a separate human step, and the `발급` press is theirs. The final `확인` — the one that creates the key — has
