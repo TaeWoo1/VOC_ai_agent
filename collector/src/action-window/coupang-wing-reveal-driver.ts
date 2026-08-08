@@ -445,7 +445,16 @@ export class CoupangWingRevealDriver {
     return !panelUp;
   }
 
-  async cleanup(): Promise<void> {
-    await this.clearHighlight();
+  /**
+   * Tear down, and REPORT whether the page is actually clean.
+   *
+   * Returns `clearHighlight`'s verdict rather than discarding it. Review found the discard was load-bearing in
+   * the wrong direction: `clearHighlight` catches every failure it can hit (`unmountOverlay`, the tag clear, the
+   * panel probe), so `cleanup()` can never reject — and the CLI's "a failed clear is reported, not swallowed"
+   * guarantee was wired to a rejection that the production driver is structurally incapable of producing. The
+   * boolean is the only signal that the panel is still on the seller's live WING DOM.
+   */
+  async cleanup(): Promise<boolean> {
+    return this.clearHighlight();
   }
 }

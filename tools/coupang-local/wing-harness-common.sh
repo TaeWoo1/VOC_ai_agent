@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
-# Shared preflight checks for the two Coupang WING harnesses — the READ-ONLY selector probe
-# (`wing-probe-preflight.sh`) and its DESTRUCTIVE sibling, the key-deletion preflight
-# (`wing-deletion-preflight.sh`).
+# Shared checks for the THREE Coupang WING harnesses — the READ-ONLY selector probe (`wing-probe-*`), the
+# DESTRUCTIVE key-deletion harness (`wing-deletion-*`), and the issuance-form REVEAL harness (`wing-reveal-*`),
+# whose operator presses a real control that is deliberately NOT key creation. Seven scripts source this file:
+# three preflights, two selfchecks (deletion and reveal — the probe selfcheck does not), and two bootstraps.
 #
 # This file exists so the destructive harness does not become a second, drifting copy of hardening that took
 # three review rounds to get right (ambient-git stripping, `case`-not-`grep` freshness parsing, a failing
@@ -238,14 +239,79 @@ verify_destructive_descriptor() {
     "credentialValueReadBudget:0"
   do
     key="${pair%%:*}"; want="${pair#*:}"
+    # Type-exact, matching verify_reveal_descriptor: a rendered-text comparison accepts the STRING "true" for
+    # `irreversible`, and a descriptor whose irreversibility is a string is not one the runtime treats as true.
     got="$(python3 -c 'import json,sys
 d = json.load(open(sys.argv[1])).get("operatorDestructiveAction")
 if not isinstance(d, dict) or sys.argv[2] not in d:
     sys.exit(1)
-v = d[sys.argv[2]]
-print("true" if v is True else "false" if v is False else v)' "$manifest" "$key" 2>/dev/null)" || got=""
+v, want = d[sys.argv[2]], sys.argv[3]
+if want in ("true", "false"):
+    ok = v is (want == "true")
+elif want.isdigit():
+    ok = isinstance(v, int) and not isinstance(v, bool) and str(v) == want
+else:
+    ok = isinstance(v, str) and v == want
+print(want if ok else json.dumps(v))' "$manifest" "$key" "$want" 2>/dev/null)" || got=""
     if [ "$got" != "$want" ]; then
       echo "  FAIL  destructive descriptor $key is '${got:-missing}', must be '$want'"
+      rc=1
+    fi
+  done
+  return $rc
+}
+
+# Verify a prepared manifest's operator-REVEAL-action descriptor is EXACTLY the canonical contract.
+# $1 = manifest path. Returns 0 when correct, 1 otherwise (printing which field is wrong).
+#
+# The mirror of verify_destructive_descriptor, and it guards the OPPOSITE direction. There, the risk is a
+# descriptor that UNDERSTATES the danger. Here it is one that OVERSTATES safety: `keyCreationRuledOut: true`
+# would tell an operator SellerOps had confirmed no key was created, which nothing can — every sanitized signal
+# is identical between an issued and a no-key surface (`NO_DISCRIMINATING_SIGNAL`). `createsKeyMaterial` and
+# `keyCreationRuledOut` are BOTH false and are not redundant: the first says the approved operation is not the
+# key-creating one, the second says this run cannot prove none happened anyway.
+#
+# `operation` and `forbiddenFollowOnAction` are checked as a PAIR, so a manifest re-pointed at key issuance or
+# at the destructive deletion is refused rather than displayed under reveal disclosure copy.
+#
+# The want-table below is mirrored from COUPANG_WING_ISSUANCE_REVEAL_ACTION in
+# collector/src/cli/approval-manifest.ts; `coupang-wing-reveal-gate.test.ts` asserts the two agree field for
+# field, so this copy cannot drift into approving semantics the runtime does not implement.
+verify_reveal_descriptor() {
+  local manifest="$1" pair key want got rc=0
+  for pair in \
+    "operation:REVEAL_WING_ISSUANCE_CONFIGURATION" \
+    "forbiddenFollowOnAction:COMPLETE_WING_KEY_ISSUANCE" \
+    "createsKeyMaterial:false" \
+    "keyCreationRuledOut:false" \
+    "irreversible:false" \
+    "agentPerformsAction:false" \
+    "explicitCheckpointRequired:true" \
+    "credentialValueReadBudget:0" \
+    "expectedOutcome:CONFIGURATION_SURFACE" \
+    "expectedOutcomeConfirmed:false" \
+    "autoAdvanceAfterReveal:false"
+  do
+    key="${pair%%:*}"; want="${pair#*:}"
+    # The JSON TYPE is part of the contract, not just the rendered text: a `keyCreationRuledOut` of the STRING
+    # "false" is not something the runtime treats as false, and a text-only comparison accepts it. So the
+    # expected type is derived from the want value — `true`/`false` demand a real bool, a digit string demands a
+    # real int (bools excluded first, since `True == 1` in Python), anything else demands a str. The comparison
+    # happens in python; the shell only reports what was actually there.
+    got="$(python3 -c 'import json,sys
+d = json.load(open(sys.argv[1])).get("operatorRevealAction")
+if not isinstance(d, dict) or sys.argv[2] not in d:
+    sys.exit(1)
+v, want = d[sys.argv[2]], sys.argv[3]
+if want in ("true", "false"):
+    ok = v is (want == "true")
+elif want.isdigit():
+    ok = isinstance(v, int) and not isinstance(v, bool) and str(v) == want
+else:
+    ok = isinstance(v, str) and v == want
+print(want if ok else json.dumps(v))' "$manifest" "$key" "$want" 2>/dev/null)" || got=""
+    if [ "$got" != "$want" ]; then
+      echo "  FAIL  reveal descriptor $key is '${got:-missing}', must be '$want'"
       rc=1
     fi
   done

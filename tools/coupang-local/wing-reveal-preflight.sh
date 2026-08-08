@@ -66,6 +66,19 @@ check_identity_fresh "$BOOTSTRAP_EPOCH" "$IDENTITY_TTL_SECONDS"
   && pass "phase is COUPANG_WING_ISSUANCE_FORM_REVEAL (agent READ_ONLY; the OPERATOR presses 발급)" \
   || fail "phase must be COUPANG_WING_ISSUANCE_FORM_REVEAL (got '${PHASE:-unset}') — this harness prepares no other phase"
 
+# The collector must be THIS repository's collector — the check the deletion preflight has and this one did not.
+# Otherwise the drift check verifies one checkout while `approval-manifest-cli.ts` (which derives its own repo
+# root from its file location) builds the manifest from another, and the displayed `git <sha>` describes a tree
+# the gate never looked at. The selfcheck's COLLECTOR_ESCAPE case had been passing only because its fixture
+# directory was empty, so `check_toolchain` failed on a missing tsx — not because anything checked containment.
+COLLECTOR_REAL="$(realpath_of "$COLLECTOR_DIR")"
+EXPECTED_COLLECTOR="$(realpath_of "$REPO_ROOT/collector")"
+if [ -n "$COLLECTOR_REAL" ] && [ -n "$EXPECTED_COLLECTOR" ] && [ "$COLLECTOR_REAL" = "$EXPECTED_COLLECTOR" ]; then
+  pass "collector is this repository's collector (the verified tree is the one that builds the manifest)"
+else
+  fail "SELLEROPS_COLLECTOR_DIR points outside this repository — the drift check and the manifest would describe different checkouts. Unset it and re-run"
+fi
+
 check_no_code_drift "$RUN_GIT"
 check_toolchain "$COLLECTOR_DIR" "src/cli/run-coupang-wing-reveal-live.ts" "reveal"
 check_dedicated_profile "$COLLECTOR_DIR"
@@ -109,30 +122,13 @@ fi
 # The reveal descriptor is the contract the operator grants against. The gate already enforces it field-by-field
 # (REVEAL_ACTION_CONTRACT_MISMATCH); it is re-read HERE so a softened one can never be DISPLAYED for approval —
 # and, unlike the destructive check, what must be verified is that it does not OVERSTATE safety.
-REVEAL_OK="$(python3 - "$MANIFEST_OUT" <<'PY' 2>/dev/null
-import json, sys
-try:
-    r = json.load(open(sys.argv[1])).get("operatorRevealAction") or {}
-except Exception:
-    print("no"); raise SystemExit
-want = {
-    "operation": "REVEAL_WING_ISSUANCE_CONFIGURATION",
-    "forbiddenFollowOnAction": "COMPLETE_WING_KEY_ISSUANCE",
-    "createsKeyMaterial": False,
-    "keyCreationRuledOut": False,
-    "irreversible": False,
-    "agentPerformsAction": False,
-    "explicitCheckpointRequired": True,
-    "credentialValueReadBudget": 0,
-    "expectedOutcome": "CONFIGURATION_SURFACE",
-    "expectedOutcomeConfirmed": False,
-    "autoAdvanceAfterReveal": False,
-}
-print("yes" if all(r.get(k) == v for k, v in want.items()) else "no")
-PY
-)"
-if [ "$REVEAL_OK" != "yes" ]; then
-  echo "PREFLIGHT FAIL — the reveal-action descriptor is missing or softened. Refusing to display it for approval."
+#
+# The check lives in wing-harness-common.sh as a function over a FILE, for the reason the destructive one does:
+# the gate makes a softened descriptor unproducible through the CLI, so inline here it would be unfalsifiable —
+# no end-to-end case could distinguish "checked" from "checked and ignored". As a function, the selfcheck calls
+# it directly against crafted manifests, including ones re-pointed at key issuance and at the deletion action.
+if ! verify_reveal_descriptor "$MANIFEST_OUT"; then
+  echo "PREFLIGHT FAIL — the reveal-action descriptor is missing, softened, or names a different operation. Refusing to display it for approval."
   exit 1
 fi
 pass "reveal descriptor is exactly the canonical contract (not key creation · key creation NOT ruled out · agent performs nothing · checkpoint required · 0 value reads · no auto-advance)"
@@ -190,6 +186,24 @@ echo "    • This press is NOT key creation. The final 확인 creates the key a
 echo "    • SellerOps CANNOT prove no key was created: every sanitized signal is identical between an issued and"
 echo "      a no-key surface. The record says so out loud (keyCreationRuledOut: false). Only you can see the screen."
 echo "    • No 자체개발 selection, no 업체명/URL/IP input, no 확인, no credential value read, no connect-test, no sync."
+echo
+# The terminal disclosure above is what the OPERATOR grants against; the copy that actually stops them mid-flow
+# is what will be on the WING page, after the panel is gone and a form invites completion. It is reproduced here
+# COMPLETE — every sentence of WING_REVEAL_CHECKPOINT_LABEL, in order — so nothing on screen is a surprise.
+#
+# It must stay complete. An earlier version showed two of the five sentences under a "verbatim" header, dropping
+# the "not confirmed" hedge, the Korean statement of keyCreationRuledOut, and "read the screen before you
+# signal". `coupang-wing-reveal-gate.test.ts` reconstructs the block between the markers below and asserts it
+# EQUALS the label — so a sentence added, removed, or reordered on either side fails, which a substring check
+# could not catch.
+echo "  WHAT YOU WILL SEE ON THE WING PAGE (the complete on-page text, Korean — this is what binds):"
+# CHECKPOINT-COPY-BEGIN
+echo "    강조 표시된 '발급' 버튼을 직접 눌러 주세요. 누르면 연동 방식 설정 화면이 열릴 것으로 예상되지만"
+echo "    확인된 사실은 아닙니다. 화면이 열리면 그대로 두고 더 진행하지 마세요. '확인'(최종 발급)은 절대"
+echo "    누르지 마세요. SellerOps는 화면 종류만 한 번 확인하고 멈추며, 키가 실제로 만들어졌는지 여부는"
+echo "    판단할 수 없습니다. 화면은 판매자만 확인할 수 있습니다. 신호를 보내면 이 창은 닫히므로 먼저"
+echo "    화면을 확인해 주세요."
+# CHECKPOINT-COPY-END
 echo
 echo "  If this manifest is correct and displayed, the operator's entire single-use grant is one line:"
 echo "    Seated and ready."

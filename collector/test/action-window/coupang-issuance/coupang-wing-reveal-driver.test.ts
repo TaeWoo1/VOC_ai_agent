@@ -453,6 +453,34 @@ describe("the operator-action step", () => {
     expect(res.outcome).toBe("OVERLAY_NOT_CLEARED");
   });
 
+  it("cleanup() RETURNS the clear verdict — false when the panel is stuck, true when it is gone", async () => {
+    // The first review's HIGH #1: `cleanupFailed` was wired to cleanup() REJECTING, which clearHighlight makes
+    // impossible. The fix made cleanup() return the verdict — and was then guarded only by a source substring,
+    // which is the same substitution of a token for a behaviour that HIGH #2 was about.
+    const stuck = fakeDriver({ panelStuck: true });
+    await stuck.driver.classifyInitialSurface();
+    await stuck.driver.highlightIssueCheckpoint();
+    expect(await stuck.driver.cleanup()).toBe(false);
+
+    const clean = fakeDriver();
+    await clean.driver.classifyInitialSurface();
+    await clean.driver.highlightIssueCheckpoint();
+    expect(await clean.driver.cleanup()).toBe(true);
+  });
+
+  it("…and still reports the verdict AFTER the observation — the only path where 발급 was actually pressed", async () => {
+    // The surviving mutation this closes: `if (this.phase === "observed") return true;` — a plausible
+    // "already cleared, skip the re-probe" line. It fires on the OBSERVED path only, so cleanupFailed would be
+    // permanently false exactly when the operator HAS pressed the button, the exit code would be 0/6 instead of
+    // 8, and SellerOps' panel could stay on the seller's live WING DOM with no signal anywhere.
+    const { driver } = fakeDriver({ panelStuck: true, censuses: [{}, { submitAffordancePresent: true }] });
+    await driver.classifyInitialSurface();
+    await driver.highlightIssueCheckpoint();
+    await driver.observeRevealOutcome();
+    expect(driver.currentPhase()).toBe("observed");
+    expect(await driver.cleanup(), "a stuck panel must still report false after observing").toBe(false);
+  });
+
   it("NEVER rules key creation out, whatever the outcome — and says why", async () => {
     for (const censuses of [[{}, { submitAffordancePresent: true }], [{}, {}], [{}, { readonlyFieldCountBucket: "few" as const }]]) {
       const { driver } = fakeDriver({ censuses });

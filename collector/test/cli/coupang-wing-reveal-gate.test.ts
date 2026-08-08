@@ -11,12 +11,26 @@
  * CLI reads the shared constant rather than hardcoding `true`) stands behind it. The driver's injectable
  * `calibrated` seam IS tested, in `coupang-wing-reveal-driver.test.ts`.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { gateRefusalCause, REVEAL_ABORT_FILENAME, REVEAL_DONE_FILENAME, REVEAL_READY_FILENAME, sentinelPath } from "../../src/cli/run-coupang-wing-reveal-live";
-import { WING_DEFAULT_URL } from "../../src/cli/coupang-wing-classifier";
+import {
+  banner,
+  gateRefusalCause,
+  REVEAL_ABORT_FILENAME,
+  REVEAL_BANNER_LINES,
+  REVEAL_DONE_FILENAME,
+  REVEAL_READY_FILENAME,
+  sentinelPath,
+} from "../../src/cli/run-coupang-wing-reveal-live";
+import {
+  WING_DEFAULT_URL,
+  WING_KEY_CREATION_ACTION,
+  WING_REVEAL_OPERATOR_ACTION,
+} from "../../src/cli/coupang-wing-classifier";
+import { COUPANG_WING_ISSUANCE_REVEAL_ACTION } from "../../src/cli/approval-manifest";
+import { WING_REVEAL_CHECKPOINT_LABEL } from "../../src/action-window/coupang-wing-reveal-driver";
 
 const CLI = resolve(dirname(fileURLToPath(import.meta.url)), "../../src/cli/run-coupang-wing-reveal-live.ts");
 const REVEAL_PHASE = "COUPANG_WING_ISSUANCE_FORM_REVEAL";
@@ -204,10 +218,51 @@ describe("reveal CLI — structurally incapable of acting on WING", () => {
   });
 
   it("prints keyCreationRuledOut in the record — a record omitting it would read as an all-clear", () => {
-    const printed = code.slice(code.indexOf("JSON.stringify("), code.indexOf("aw_coupang_reveal_run_done"));
-    expect(printed).toContain("keyCreationRuledOut");
-    expect(printed).toContain("keyCreationReason");
-    expect(printed).toContain("outcome");
+    // The record is assembled inside `runRevealWalk` (its CONTENT is asserted at runtime in
+    // coupang-wing-reveal-walk.test.ts). What this pins is that every field comes from the driver's result
+    // rather than a literal: a hardcoded `keyCreationRuledOut: false` would survive the driver ever changing
+    // its mind, and a hardcoded reason would describe a surface nothing looked at.
+    const printed = code.slice(code.indexOf("io.emit({"), code.indexOf("aw_coupang_reveal_run_done"));
+    expect(printed).toContain("keyCreationRuledOut: result.keyCreationRuledOut");
+    expect(printed).toContain("keyCreationReason: result.keyCreationReason");
+    expect(printed).toContain("outcome: result.outcome");
+    expect(printed).toContain("overlayClearedBeforeObservation: result.overlayClearedBeforeObservation");
+  });
+
+  it("banner() actually PRINTS every line — the constant is not the disclosure, the printing is", () => {
+    // The mutation this closes: `for (const l of REVEAL_BANNER_LINES.slice(0, 4))`, which drops exactly the two
+    // claim lines while every assertion about the constant stays true.
+    const seen: string[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => void seen.push(args.map(String).join(" "));
+    try {
+      banner();
+    } finally {
+      console.error = original;
+    }
+    for (const line of REVEAL_BANNER_LINES) {
+      expect(seen, `banner() must print: ${line.trim().slice(0, 40)}…`).toContain(line);
+    }
+  });
+
+  it("the operator banner states BOTH non-collapsible claims at the moment a live window opens", () => {
+    // The run-time twin of the manifest's two claims, shown to the person about to press a real control on a
+    // real marketplace. (That they REACH the terminal is the test above.)
+    const banner = REVEAL_BANNER_LINES.join(" ");
+    expect(banner).toContain("NOT confirmed");
+    expect(banner).toContain("unrecognized outcome STOPS the run");
+    expect(banner).toContain("CANNOT prove no key was created");
+    // …and it must not promise what the run cannot deliver: every mention of a key not being created has to be
+    // the CANNOT-prove one. An unqualified "no key was created" here would be the all-clear this run can never
+    // give. (The qualifier precedes the phrase, so this counts occurrences rather than using a lookahead.)
+    const mentions = banner.match(/no key was created/g)?.length ?? 0;
+    const qualified = banner.match(/CANNOT prove no key was created/g)?.length ?? 0;
+    expect(mentions).toBe(qualified);
+    expect(qualified).toBeGreaterThan(0);
+    // The agent-does-nothing list stays complete: each is an action the operator might otherwise expect of us.
+    for (const forbidden of ["자체개발", "업체명/URL/IP", "확인", "Access Key"]) {
+      expect(banner, forbidden).toContain(forbidden);
+    }
   });
 
   it("its three sentinels are distinct — readiness, the press, and abort cannot be confused", () => {
@@ -223,5 +278,117 @@ describe("reveal CLI — structurally incapable of acting on WING", () => {
     for (const foreign of ["probe-wing-issuance-selectors", "run-coupang-wing-deletion-live"]) {
       expect(code, foreign).not.toContain(foreign);
     }
+  });
+});
+
+/**
+ * The harness and the runtime must approve the SAME operation.
+ *
+ * `wing-reveal-preflight.sh` is what the operator reads before saying "Seated and ready." — and it verifies the
+ * descriptor independently, in shell, against its own copy of the canonical values. Two copies of a safety
+ * contract in two languages is exactly how a manifest comes to display semantics the runtime does not implement:
+ * the shell could keep passing while `keyCreationRuledOut` flipped in TypeScript, and the operator would grant
+ * against a claim nothing enforces. Prose in both files says they must agree; this asserts it.
+ */
+describe("the shell harness approves exactly what the runtime declares", () => {
+  const COMMON = resolve(dirname(fileURLToPath(import.meta.url)), "../../../tools/coupang-local/wing-harness-common.sh");
+  const PREFLIGHT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../tools/coupang-local/wing-reveal-preflight.sh");
+  const common = readFileSync(COMMON, "utf8");
+  const preflight = readFileSync(PREFLIGHT, "utf8");
+  const verifier = common.slice(common.indexOf("verify_reveal_descriptor() {"), common.indexOf("\n}", common.indexOf("verify_reveal_descriptor() {")));
+
+  it("checks EVERY field of the descriptor, with the same value", () => {
+    for (const [key, value] of Object.entries(COUPANG_WING_ISSUANCE_REVEAL_ACTION)) {
+      expect(verifier, `the harness must verify ${key}`).toContain(`"${key}:${String(value)}"`);
+    }
+  });
+
+  it("checks no field the runtime does not declare (a stale key would silently never match)", () => {
+    const declared = new Set(Object.keys(COUPANG_WING_ISSUANCE_REVEAL_ACTION));
+    for (const m of verifier.matchAll(/^\s+"([A-Za-z][A-Za-z0-9_]*):/gm)) {
+      expect(declared, `the harness verifies an unknown field ${m[1]}`).toContain(m[1]);
+    }
+  });
+
+  it("the two claims that must not be collapsed are BOTH verified as false", () => {
+    expect(COUPANG_WING_ISSUANCE_REVEAL_ACTION.createsKeyMaterial).toBe(false);
+    expect(COUPANG_WING_ISSUANCE_REVEAL_ACTION.keyCreationRuledOut).toBe(false);
+    expect(verifier).toContain('"createsKeyMaterial:false"');
+    expect(verifier).toContain('"keyCreationRuledOut:false"');
+  });
+
+  it("names the forbidden follow-on action, so a manifest re-pointed at key issuance is refused", () => {
+    expect(verifier).toContain(`"operation:${WING_REVEAL_OPERATOR_ACTION}"`);
+    expect(verifier).toContain(`"forbiddenFollowOnAction:${WING_KEY_CREATION_ACTION}"`);
+  });
+
+  it("the preflight REFUSES on the verifier's verdict rather than merely calling it", () => {
+    // BLOCK-scoped, like the shell selfchecks. Two independent substrings both stay true when `exit 1` is
+    // deleted — and execution then falls through to the PASS line, the manifest dump and "Seated and ready.",
+    // displaying a descriptor whose safety claims are softened. The shell selfcheck catches that, but the
+    // selfchecks are manual-only; `npm test` is the automated gate, so the TS twin has to read the body too.
+    const ifLine = 'if ! verify_reveal_descriptor "$MANIFEST_OUT"; then';
+    const start = preflight.indexOf(ifLine);
+    expect(start, "the descriptor refusal block must exist").toBeGreaterThan(-1);
+    // The terminator must be the block's OWN `fi`, matched as a line. Two weaker versions of this failed:
+    // `indexOf("\nfi\n")` returning -1 sliced to end-of-file, and merely requiring it to be > start still let a
+    // LATER `fi` close the block — either way the region swallowed the phase-binding refusal's own `exit 1` and
+    // the assertion passed on a line from an unrelated branch. Scanning to the first `fi` line, and refusing a
+    // nested `if` before it, is what actually scopes this.
+    const lines = preflight.slice(start).split("\n");
+    const endIdx = lines.findIndex((l, i) => i > 0 && /^fi\b/.test(l));
+    expect(endIdx, "the refusal block must be closed by an `fi` at column 0").toBeGreaterThan(0);
+    const inner = lines.slice(1, endIdx);
+    expect(inner.some((l) => /^if\b/.test(l)), "unexpected nested if — the slice is not this block").toBe(false);
+    const block = inner.join("\n");
+    expect(block).toContain("Refusing to display it for approval");
+    expect(block, "the refusal must EXIT, not merely print").toMatch(/^\s*exit 1$/m);
+  });
+
+  it("the on-page copy shown before the grant EQUALS the label the seller will read — not an extract of it", () => {
+    // Substring containment in one direction was not enough, and review showed why: the preflight quoted two of
+    // the label's five sentences under a "verbatim" header, silently dropping the "not confirmed" hedge, the
+    // Korean statement of keyCreationRuledOut, and "read the screen before you signal". A containment check
+    // cannot see an omission — nor a sentence ADDED to the on-page panel that the preflight never shows.
+    const block = preflight.slice(
+      preflight.indexOf("# CHECKPOINT-COPY-BEGIN"),
+      preflight.indexOf("# CHECKPOINT-COPY-END"),
+    );
+    expect(block, "the copy block markers must exist").toContain("echo");
+    // EVERY line between the markers must be a plain `echo "..."`. Without this, a line added as `printf`, in
+    // single quotes, or with a trailing redirect is shown to the operator and invisible to the equality check.
+    const lines = block.split("\n").slice(1).filter((l) => l.trim().length > 0);
+    for (const line of lines) {
+      expect(line, `unrecognized form inside the copy block: ${line}`).toMatch(/^echo "[^"]*"$/);
+    }
+    const shown = [...block.matchAll(/^echo "(.*)"$/gm)].map((m) => m[1]!.trim()).join(" ");
+    expect(shown.length, "the copy block must not be empty").toBeGreaterThan(50);
+    const collapse = (s: string): string => s.replace(/\s+/g, " ").trim();
+    expect(collapse(shown)).toBe(collapse(WING_REVEAL_CHECKPOINT_LABEL));
+  });
+
+  it("the reveal harness has a selfcheck, and it is executable", () => {
+    // The gap this unit closes: 250+ lines of the operator's entire disclosure surface, verified once by hand.
+    const selfcheck = resolve(dirname(fileURLToPath(import.meta.url)), "../../../tools/coupang-local/wing-reveal-selfcheck.sh");
+    const src = readFileSync(selfcheck, "utf8");
+    expect(statSync(selfcheck).mode & 0o111, "must be executable").toBeGreaterThan(0);
+    // It must exercise the real preflight, not re-implement its checks.
+    expect(src).toContain("wing-reveal-preflight.sh");
+    // The SOURCE line, not the `# shellcheck source=` comment above it, which also contains the filename.
+    expect(src).toContain('. "$HERE/wing-harness-common.sh"');
+  });
+
+  it("the reveal BOOTSTRAP uses the shared hardened git, not a private weaker copy", () => {
+    // It had its own: config variables UNSET rather than pinned to /dev/null, and none of the `-c` flags. Only
+    // the shared one is covered by repo-identity.test.ts's mirror assertions.
+    const bootstrap = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), "../../../tools/coupang-local/wing-reveal-bootstrap.sh"),
+      "utf8",
+    );
+    expect(bootstrap).toContain('. "$HERE/wing-harness-common.sh"');
+    expect(bootstrap).not.toContain("git_hardened() {");
+    // …and it refuses a dirty tree, like the destructive bootstrap. Pinning a SHA that already does not describe
+    // the tree just defers a guaranteed refusal behind a run env that looks valid.
+    expect(bootstrap).toContain("working tree is dirty");
   });
 });

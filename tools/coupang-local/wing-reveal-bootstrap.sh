@@ -15,24 +15,46 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
-RUN_DIR="$HERE/.run"
+# Overridable so the hermetic selfcheck can point it at a temp directory. Without this the selfcheck's
+# BOOTSTRAP_DIRTY case — which runs the REAL bootstrap — would write over the operator's live run env if the
+# dirty-tree guard ever regressed, i.e. exactly when that case is doing its job: a fresh approval id would kill
+# a pending grant and leave a run env whose approvalId no longer matches the displayed manifest.
+RUN_DIR="${SELLEROPS_WING_REVEAL_RUN_DIR:-$HERE/.run}"
 RUN_ENV="$RUN_DIR/wing-reveal.env"
 
-# Git with the ambient git environment stripped — GIT_DIR / GIT_WORK_TREE / GIT_CONFIG_* inherited from the
-# caller would otherwise decide WHICH repository this identity describes.
-git_hardened() {
-  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY \
-      -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_COMMON_DIR -u GIT_CEILING_DIRECTORIES \
-      -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_SYSTEM -u GIT_CONFIG_COUNT -u GIT_CONFIG_NOSYSTEM \
-      -u GIT_CONFIG_PARAMETERS \
-      git -C "$REPO_ROOT" "$@"
-}
+# The SHARED hardened git, not a local copy. This file had its own, and it was weaker in exactly the ways that
+# matter: it UNSET the config-file variables instead of pinning them to /dev/null (so a prepared HOME re-opens
+# the `core.excludesFile` hole), and it carried none of the `-c` flags — `status.showUntrackedFiles=normal`,
+# `core.excludesFile=/dev/null`, `safe.directory`. A drifting second copy of this hardening is the thing
+# wing-harness-common.sh exists to prevent, and `repo-identity.test.ts` only asserts the shared one.
+# shellcheck source=./wing-harness-common.sh
+. "$HERE/wing-harness-common.sh"
 
 # Refuse to pin an identity we cannot honestly pin: the CLI compares HEAD against this SHA and a clean tree, so
-# an unreadable HEAD would produce an approval that can never be honored.
-GIT_COMMIT="$(git_hardened rev-parse --short HEAD 2>/dev/null || true)"
-if [ -z "$GIT_COMMIT" ]; then
-  echo "BOOTSTRAP FAIL — could not read HEAD in $REPO_ROOT. Refusing to mint an identity that cannot be verified."
+# an unreadable HEAD would produce an approval that can never be honored. The hex shape is checked, not just
+# emptiness — `rev-parse` can succeed and print something that is not a commit.
+GIT_COMMIT="$(git_hardened rev-parse --short HEAD 2>/dev/null || echo "")"
+case "$GIT_COMMIT" in
+  ""|*[!0-9a-f]*)
+    echo "BOOTSTRAP FAIL — could not read HEAD in $REPO_ROOT. Refusing to mint an identity that cannot be verified."
+    exit 1 ;;
+esac
+
+# A real marketplace press must be bootstrapped from a CLEAN tree — the same rule as the destructive harness, and
+# it was missing here. The preflight and the CLI both check it again, but pinning a SHA that already does not
+# describe the tree just defers a guaranteed refusal, and leaves behind a run env that looks valid.
+#
+# `if ! DIRT=…`, not a bare assignment followed by `$?`: under `set -e` a failing command substitution in a
+# plain assignment trips errexit BEFORE the status can be read, so the refusal below was unreachable and an
+# unreadable `git status` exited 128 with no message at all. It still failed closed — but silently, and the
+# branch the comment advertises could never run.
+if ! DIRT="$(git_hardened status --porcelain 2>/dev/null)"; then
+  echo "BOOTSTRAP FAIL — could not read git status. Refusing rather than assuming a clean tree."
+  exit 1
+fi
+if [ -n "$DIRT" ]; then
+  echo "BOOTSTRAP FAIL — working tree is dirty. Commit or stash first: the approval must name the code that will run."
+  printf '%s\n' "$DIRT" | head -5 | sed 's/^/  | /'
   exit 1
 fi
 
@@ -55,7 +77,7 @@ echo "coupang WING issuance-form REVEAL bootstrap complete → $RUN_ENV"
 echo
 echo "  run id       : $RUN_ID"
 echo "  approval id  : $APPROVAL_ID  (binds the operator's single-use grant)"
-echo "  git commit   : $GIT_COMMIT"
+echo "  git commit   : $GIT_COMMIT  (PINNED — the run refuses if HEAD moves or the tree goes dirty)"
 echo "  phase        : COUPANG_WING_ISSUANCE_FORM_REVEAL (agent READ_ONLY; the OPERATOR presses 발급)"
 echo "  key issuance : NOT performed by this run — the final 확인 has no tooling and no phase"
 echo
