@@ -218,6 +218,30 @@ if [ -z "$TREE_DIRTY" ]; then
   else
     echo "  FAIL  RECON_NORMAL   · approved recon scope not bound to the run env"; FAILED=1
   fi
+  # The approved PHASE is bound from the MANIFEST, independently of the phase the run env already carried.
+  # Without it a phase left over in the operator shell is indistinguishable from an approved one.
+  if grep -qE "^SELLEROPS_WING_APPROVED_PHASE='COUPANG_WING_LABEL_RECON'$" "$FIXTURES/recon.env"; then
+    echo "  PASS  RECON_NORMAL   · approved PHASE bound to the run env"
+  else
+    echo "  FAIL  RECON_NORMAL   · approved PHASE not bound to the run env"; FAILED=1
+  fi
+  run_case "RECON_NORMAL   · run command carries BOTH phase variables" 0 "SELLEROPS_WING_APPROVED_PHASE=COUPANG_WING_LABEL_RECON" "$FIXTURES/recon.env"
+  # Re-running must not accumulate duplicate phase assignments either.
+  bash "$PREFLIGHT" >/dev/null 2>&1 <<<"" || true
+  SELLEROPS_WING_PROBE_RUN_ENV="$FIXTURES/recon.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" >/dev/null 2>&1 || true
+  if [ "$(grep -cE "^SELLEROPS_WING_APPROVED_PHASE=" "$FIXTURES/recon.env")" = "1" ]; then
+    echo "  PASS  RECON_NORMAL   · phase binding is idempotent across re-runs"
+  else
+    echo "  FAIL  RECON_NORMAL   · phase binding accumulated duplicates"; FAILED=1
+  fi
+
+  # The BASELINE phase gets the same binding — otherwise a recon phase left in the shell would ride along on a
+  # probe run and the recorder, seeing no approved phase, could only guess which side was stale.
+  if grep -qE "^SELLEROPS_WING_APPROVED_PHASE='COUPANG_WING_SELECTOR_PROBE'$" "$FIXTURES/normal.env"; then
+    echo "  PASS  NORMAL         · approved PHASE bound for the baseline phase too"
+  else
+    echo "  FAIL  NORMAL         · approved PHASE not bound for the baseline phase"; FAILED=1
+  fi
 
   # Re-running must not accumulate duplicate assignments of either variable.
   DUPES="$(grep -cE "^SELLEROPS_WING_(PROBE|APPROVED)_TARGETS=" "$FIXTURES/normal.env")"
