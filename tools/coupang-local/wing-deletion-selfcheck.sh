@@ -205,9 +205,13 @@ fi
 # The range END is /^fi/, not /^fi$/: a decorated `fi  # comment` does not close the strict form, so the range
 # runs on to the NEXT bare fi and swallows another refusal's `exit 1`.
 DESC_BLOCK="$(awk '/^if ! verify_destructive_descriptor "\$MANIFEST_OUT"; then$/,/^fi/' "$PREFLIGHT")"
-# `grep -qxF fi` is not decoration: an unterminated awk range runs to EOF, and the preflight's OTHER refusals
-# each carry their own `exit 1`, so the check below would pass on a line from an unrelated branch.
-if [ -n "$DESC_BLOCK" ] && grep -qxF 'fi' <<<"$DESC_BLOCK" \
+# The nested-`if` refusal is the part that scopes this. An INDENTED `fi` closes neither /^fi$/ nor /^fi/, so
+# the range runs on to the next column-0 `fi` and picks up a LATER refusal's `exit 1` — and any such widened
+# region necessarily swallowed an intervening column-0 `if`, which is the detectable signal. (A previous version
+# checked for a bare `fi` in the block instead; that cannot detect it, because an over-long block contains bare
+# `fi` lines by construction. Verified, not assumed.)
+DESC_INNER="$(sed '1d;$d' <<<"$DESC_BLOCK")"
+if [ -n "$DESC_BLOCK" ] && ! grep -qE '^if[[:space:]]' <<<"$DESC_INNER" \
    && grep -qF "Refusing to display it for approval" <<<"$DESC_BLOCK" && grep -qE '^ *exit 1$' <<<"$DESC_BLOCK"; then
   echo "  PASS  DESCRIPTOR    · the preflight EXITS on the verifier's verdict (not merely prints)"
 else
