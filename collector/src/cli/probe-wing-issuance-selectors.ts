@@ -51,6 +51,9 @@ import {
 } from "../action-window/coupang-wing-issuance-driver";
 import {
   LIVE_DOM_CALIBRATION_PENDING,
+  wingIssuedStateFrom,
+  type WingIssuedState,
+  type WingIssuedStateReason,
   resolveGatedWingProbeScope,
   resolveWingUrl,
   screenWingUrl,
@@ -151,6 +154,18 @@ export interface WingSelectorRecordResult {
   /** How many candidates did NOT resolve uniquely — the drift/calibration signal (sanitized count). */
   nonUniqueCandidates: number;
   aborted: boolean;
+  /**
+   * Sanitized ISSUED-STATE verdict derived from {@link observation} — a three-value enum plus a closed reason,
+   * no value read.
+   *
+   * **A single `not_issued` here is a SIGNAL, not proof of deletion.** On the open-API surface the verdict
+   * reduces to "no credential anchor, and the scan was not truncated", so a page that painted its shell before
+   * the credential XHR resolved reads `not_issued` while the key still exists — one reading cannot separate
+   * "nothing to show" from "not shown yet". Corroborate with `wingDeletionEvidenceFrom` over TWO independent
+   * runs before recording deletion evidence. `indeterminate` (including `SCAN_TRUNCATED`) is the absence of
+   * evidence, never evidence of the opposite. Full limits: `wingIssuedStateFrom` in `coupang-wing-classifier`.
+   */
+  issuedState: { state: WingIssuedState; reason: WingIssuedStateReason };
   /** ALWAYS present: these candidate labels are unvalidated hypotheses until a live run proves matchCount === 1. */
   calibration: typeof LIVE_DOM_CALIBRATION_PENDING;
 }
@@ -187,6 +202,7 @@ export async function runWingSelectorRecord(
       uniqueCandidates: 0,
       nonUniqueCandidates: 0,
       aborted: signal === "abort",
+      issuedState: wingIssuedStateFrom(null),
       calibration: LIVE_DOM_CALIBRATION_PENDING,
     };
   }
@@ -236,6 +252,7 @@ export async function runWingSelectorRecord(
     uniqueCandidates,
     nonUniqueCandidates,
     aborted: false,
+    issuedState: wingIssuedStateFrom(observation),
     calibration: LIVE_DOM_CALIBRATION_PENDING,
   };
 }
@@ -411,6 +428,10 @@ async function main(): Promise<void> {
           uniqueCandidates: result.uniqueCandidates,
           nonUniqueCandidates: result.nonUniqueCandidates,
           calibration: result.calibration,
+          // The machine-checkable issued-state verdict. Without it on the wire the operator cannot see the one
+          // field a post-delete calibration is run to obtain — the record would carry the raw signals but not
+          // the answer derived from them.
+          issuedState: result.issuedState,
           observation: result.observation,
           targets: result.targets,
         },
@@ -424,6 +445,8 @@ async function main(): Promise<void> {
       aborted: result.aborted,
       uniqueCandidates: result.uniqueCandidates,
       nonUniqueCandidates: result.nonUniqueCandidates,
+      issuedState: result.issuedState.state,
+      issuedStateReason: result.issuedState.reason,
     });
   } finally {
     removeSentinel(readyPath);

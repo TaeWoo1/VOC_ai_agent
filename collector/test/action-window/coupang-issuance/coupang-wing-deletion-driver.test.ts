@@ -313,6 +313,47 @@ describe("CoupangWingDeletionDriver — fail-closed calibration + checkpoint-fir
   });
 });
 
+describe("CoupangWingDeletionDriver.clearHighlight — the clear is VERIFIED, not assumed", () => {
+  it("reports TRUE only when the page is confirmed free of the checkpoint panel", async () => {
+    const driver = makeDriver(new FakePage(ISSUED, { count: 1, sig: "0123456789abcdef" }), {
+      checkpointPaintedFn: async () => false, // panel gone
+    });
+    await expect(driver.clearHighlight()).resolves.toBe(true);
+  });
+
+  it("reports FALSE when the panel is STILL mounted after the removal attempt", async () => {
+    // The failure this closes: both removals swallow their errors, so the clear could only ever be reported as
+    // succeeding. If the SPA re-rendered the overlay host away, the irreversible-warning panel stays on screen
+    // while the run prints `checkpointCleared: true` — a false assurance on a destructive surface.
+    const driver = makeDriver(new FakePage(ISSUED, { count: 1, sig: "0123456789abcdef" }), {
+      checkpointPaintedFn: async () => true, // still there
+    });
+    await expect(driver.clearHighlight()).resolves.toBe(false);
+  });
+
+  it("an unreadable page reports NOT cleared — it never claims success it cannot see", async () => {
+    const driver = makeDriver(new FakePage(ISSUED, { count: 1, sig: "0123456789abcdef" }), {
+      checkpointPaintedFn: async () => {
+        throw new Error("Target page, context or browser has been closed");
+      },
+    });
+    await expect(driver.clearHighlight()).resolves.toBe(false);
+  });
+
+  it("clearing does NOT reset the phase — removing the checkpoint's pixels cannot unwind the invariant", async () => {
+    const page = new FakePage(ISSUED, { count: 1, sig: "0123456789abcdef" });
+    const driver = makeDriver(page);
+    await driver.classifyAlreadyIssued();
+    await driver.highlightDeleteCheckpoint();
+    expect(driver.currentPhase()).toBe("highlighted");
+    await driver.clearHighlight();
+    expect(driver.currentPhase()).toBe("highlighted");
+    // …so the operator-action step stays reachable after the guidance is retired, exactly as the run needs.
+    page.census = WING_HOME;
+    await expect(driver.verifyDeletion()).resolves.toMatchObject({ deleted: true });
+  });
+});
+
 describe("삭제 calibration evidence — the flip is backed by a real live capture, and states its limits", () => {
   it("INTENT MARKER — the calibration is currently landed (this is the ONE test an emergency withdrawal turns red)", () => {
     // Deliberately the only assertion on the constant's value. If you withdrew the calibration on purpose, this

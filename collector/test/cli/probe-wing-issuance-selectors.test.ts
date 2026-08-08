@@ -126,6 +126,7 @@ const OBS: WingObservation = {
     listLikeContainerCountBucket: "few",
     openApiMarkerPresent: true,
     credentialAnchorPresent: false,
+    markerScanTruncated: false,
   },
   blockers: ["LIVE_DOM_CALIBRATION_PENDING"],
 };
@@ -275,6 +276,67 @@ describe("wing selector recorder — read-only walk", () => {
     const creds = result.targets.find((t) => t.target === "credentials")!;
     expect(creds.label).toBe("Access Key");
     expect(creds.role).toBe("readonly-region");
+  });
+
+  it("carries the ISSUED-STATE verdict, so a post-delete run answers the deletion question machine-checkably", async () => {
+    // The gap this closes: the live deletion produced pageCategory `open_api_issuance` BOTH before and after the
+    // key was deleted, so the record could not distinguish the two states and the deletion stayed
+    // operator-attested. `OBS` here is the post-delete shape — form marker present, credential anchor absent.
+    const { deps } = fakeDeps();
+    const result = await runWingSelectorRecord(deps);
+    expect(result.issuedState).toEqual({ state: "not_issued", reason: "FORM_MARKER_WITHOUT_CREDENTIAL_ANCHOR" });
+  });
+
+  it("the verdict follows the OBSERVATION, not the target measurements", async () => {
+    // A run where every selector matches uniquely must still report `issued` when the credential anchor is
+    // present: uniqueness of a fixed label says nothing about whether a key exists.
+    const issued: WingObservation = {
+      ...OBS,
+      signals: { ...OBS.signals, credentialAnchorPresent: true, openApiMarkerPresent: false },
+    };
+    const result = await runWingSelectorRecord({
+      waitForReady: async () => "ready",
+      observeSurface: async () => issued,
+      probeTarget: async () => UNIQUE,
+      announce: () => undefined,
+    });
+    expect(result.uniqueCandidates).toBeGreaterThan(0);
+    expect(result.issuedState.state).toBe("issued");
+  });
+
+  it("an observation that could not be read reports indeterminate — never 'not_issued'", async () => {
+    // A failed observe lacks the credential anchor exactly like a genuinely empty page does. Reporting that as
+    // deletion evidence is the one mistake the verdict must never make.
+    const result = await runWingSelectorRecord({
+      waitForReady: async () => "ready",
+      observeSurface: async () => {
+        throw new Error("Target page, context or browser has been closed");
+      },
+      probeTarget: async () => UNIQUE,
+      announce: () => undefined,
+    });
+    expect(result.observation).toBeNull();
+    expect(result.observationFault).not.toBeNull();
+    expect(result.issuedState).toEqual({ state: "indeterminate", reason: "NO_OBSERVATION" });
+  });
+
+  it("abort / timeout report indeterminate, not a verdict about a page never read", async () => {
+    for (const signal of ["abort", "timeout"] as const) {
+      const { deps } = fakeDeps({ signal });
+      const result = await runWingSelectorRecord(deps);
+      expect(result.issuedState.state, signal).toBe("indeterminate");
+    }
+  });
+
+  it("the issued-state verdict reaches the WIRE, not just the returned object", () => {
+    // The gap this closes: the verdict was added to the record type and the orchestrator's return, but the CLI
+    // printed a hand-built object that omitted it — so the one field a post-delete calibration is RUN to obtain
+    // would have been invisible to the operator, while the doc claimed the record carried it.
+    const code = codeOnly(CLI);
+    expect(code).toContain("issuedState: result.issuedState");
+    // …and it is inside the JSON the CLI prints, not only in the structured log.
+    const printed = code.slice(code.indexOf("JSON.stringify("), code.indexOf("aw_coupang_selector_record_done"));
+    expect(printed).toContain("issuedState");
   });
 
   it("emits ONLY a value-free calibration record — no credential VALUE, PII, selector, host, or raw URL", async () => {

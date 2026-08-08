@@ -57,6 +57,12 @@ export interface WingStructuralCensus {
   /** table / ul / ol / [role=grid|table] containers with ≥2 children (list-like). */
   listLikeContainerCount: number;
   /**
+   * Whether the bounded marker/anchor scan stopped at its cap with candidates left unexamined. When true, an
+   * ABSENT marker means "not found in the part we looked at", NOT "absent from the page" — so absence must not
+   * be read as evidence. Optional for back-compat with hand-built fixtures; absent ⇒ treated as truncated=false.
+   */
+  markerScanTruncated?: boolean;
+  /**
    * STRUCTURAL open-API-issuance marker: whether the page carries a fixed, live-confirmed open-API issuance
    * label ({@link WING_OPEN_API_MARKER_LABELS}). Value-free: computed IN-PAGE by comparing an element's
    * accessible name against those KNOWN fixed labels and returning only a boolean — never any page text.
@@ -101,6 +107,8 @@ export interface WingSignals {
   openApiMarkerPresent: boolean;
   /** Live-CONFIRMED credential-region anchor present ⇒ the open-API page in the issued/already-issued state. */
   credentialAnchorPresent: boolean;
+  /** The bounded marker/anchor scan stopped at its cap ⇒ an ABSENT marker proves nothing. */
+  markerScanTruncated: boolean;
 }
 
 export interface WingObservation {
@@ -156,6 +164,7 @@ export function toWingSignals(urlCategory: WingUrlCategory, census: WingStructur
     listLikeContainerCountBucket: countBucket(census.listLikeContainerCount),
     openApiMarkerPresent: census.openApiMarkerPresent ?? false,
     credentialAnchorPresent: census.credentialAnchorPresent ?? false,
+    markerScanTruncated: census.markerScanTruncated ?? false,
   };
 }
 
@@ -205,6 +214,135 @@ export function observeFrom(urlCategory: WingUrlCategory, census: WingStructural
   const signals = toWingSignals(urlCategory, census);
   const { pageCategory, blockers } = classifyWingPage(signals);
   return { urlCategory, pageCategory, signals, blockers };
+}
+
+/* ────────────────────────────── issued-state verdict (post-delete evidence) ────────────────────────────── */
+
+/**
+ * Whether the account's open-API key appears ISSUED, on the evidence of one sanitized observation.
+ *
+ * Why this exists. The first live deletion produced `pageCategory: open_api_issuance` both BEFORE and AFTER the
+ * operator deleted their key — because the already-issued page classifies that way via the credential anchor,
+ * and the post-delete issuance FORM classifies that way via the form marker. Same category, opposite meanings,
+ * so the category alone said nothing about the deletion in either direction, and the outcome could only be
+ * recorded as operator-attested. This is the derivation that turns the observation into machine-checkable
+ * evidence, without reading a single value.
+ */
+export const WING_ISSUED_STATES = ["issued", "not_issued", "indeterminate"] as const;
+export type WingIssuedState = (typeof WING_ISSUED_STATES)[number];
+
+/** Why the verdict came out the way it did — a closed enum, never free text. */
+export const WING_ISSUED_STATE_REASONS = [
+  /** The live-confirmed credential-region anchor is present ⇒ a key is issued and displayed. */
+  "CREDENTIAL_ANCHOR_PRESENT",
+  /** No credential anchor, and the issuance FORM marker is positively present ⇒ nothing issued to show. */
+  "FORM_MARKER_WITHOUT_CREDENTIAL_ANCHOR",
+  /** Not the open-API surface at all (login / home / off-target) — the question does not apply here. */
+  "NOT_OPEN_API_SURFACE",
+  /** On the open-API surface but neither anchor nor form marker is present — too thin to call. */
+  "THIN_SIGNALS",
+  /** The bounded marker/anchor scan stopped at its cap — an absent anchor proves nothing here. */
+  "SCAN_TRUNCATED",
+  /** No observation at all (the run never reached ready, or the observe read threw). */
+  "NO_OBSERVATION",
+] as const;
+export type WingIssuedStateReason = (typeof WING_ISSUED_STATE_REASONS)[number];
+
+/**
+ * Derive the issued-state verdict from ONE sanitized observation. Pure and value-free.
+ *
+ * **Read the limits before using this as evidence.** Review of the first version found the "positive evidence"
+ * framing over-claimed, and the correction matters more than the original claim:
+ *
+ *  - `classifyWingPage` reaches `open_api_issuance` only when `openApiMarkerPresent || credentialAnchorPresent`.
+ *    So ON THAT CATEGORY, an absent anchor already IMPLIES the form marker — requiring the marker below
+ *    excludes nothing there, and the verdict reduces to `!credentialAnchorPresent && !markerScanTruncated`. The
+ *    marker requirement is
+ *    still worth keeping (it is what stops a future classifier change from letting a thin page through, and it
+ *    is what makes `credential_shown` fail closed), but it does NOT buy resistance to a half-rendered page.
+ *  - A late-hydrating WING page paints its static shell — including the issuance heading — before the credential
+ *    card's XHR resolves. A read in that window is marker=true / anchor=false, i.e. `not_issued` while the key
+ *    still exists. A single reading CANNOT distinguish "nothing to show" from "not shown yet".
+ *  - `credentialAnchorPresent` is a bounded, top-document, exact-match scan (see `EXTRACT_WING_CENSUS`): it does
+ *    not pierce iframes or shadow roots, and it stops at a candidate cap. Truncation is now reported and forces
+ *    `indeterminate`, but the iframe/shadow/exact-label limits remain.
+ *
+ * **Therefore: a single `not_issued` is a SIGNAL, not proof of deletion.** Use {@link wingDeletionEvidenceFrom}
+ * over two independent readings before recording it as post-delete evidence — the same two-capture standard the
+ * WING signature calibration already uses. `indeterminate` is the absence of evidence, never evidence of the
+ * opposite; callers must not read it as either outcome.
+ */
+export function wingIssuedStateFrom(observation: WingObservation | null): {
+  state: WingIssuedState;
+  reason: WingIssuedStateReason;
+} {
+  if (!observation) return { state: "indeterminate", reason: "NO_OBSERVATION" };
+  const { pageCategory, signals } = observation;
+  // Only the open-API surface can answer the question. login / wing_home / unknown / off-target cannot — and an
+  // off-target host already forces `unknown` upstream, so it is covered by this same branch.
+  if (pageCategory !== "open_api_issuance" && pageCategory !== "credential_shown") {
+    return { state: "indeterminate", reason: "NOT_OPEN_API_SURFACE" };
+  }
+  // A FOUND anchor is trustworthy even from a truncated scan — truncation can only hide, never invent.
+  if (signals.credentialAnchorPresent) return { state: "issued", reason: "CREDENTIAL_ANCHOR_PRESENT" };
+  // An ABSENT anchor from a scan that stopped at its cap means "not found in the part we looked at". Reading
+  // that as deletion evidence would let a large DOM produce a false "deleted".
+  if (signals.markerScanTruncated) return { state: "indeterminate", reason: "SCAN_TRUNCATED" };
+  if (signals.openApiMarkerPresent) {
+    return { state: "not_issued", reason: "FORM_MARKER_WITHOUT_CREDENTIAL_ANCHOR" };
+  }
+  return { state: "indeterminate", reason: "THIN_SIGNALS" };
+}
+
+/* ────────────────────────────── corroborated post-delete evidence ────────────────────────────── */
+
+/** Why the corroborated verdict came out the way it did. */
+export const WING_DELETION_EVIDENCE_REASONS = [
+  /** Two or more INDEPENDENT readings all say `not_issued` — the standard for recording deletion evidence. */
+  "STABLE_NOT_ISSUED",
+  /** Fewer than two readings: a single reading cannot separate "nothing to show" from "not shown yet". */
+  "SINGLE_READING_ONLY",
+  /** The readings disagree, or at least one is not `not_issued` — no corroboration. */
+  "READINGS_DISAGREE",
+] as const;
+export type WingDeletionEvidenceReason = (typeof WING_DELETION_EVIDENCE_REASONS)[number];
+
+/**
+ * Corroborate a post-delete claim across INDEPENDENT readings. Confirmed only when there are at least two and
+ * every one of them says `not_issued`.
+ *
+ * This exists because {@link wingIssuedStateFrom} cannot, from one reading, tell an unissued page from a page
+ * that has not finished rendering — and the failure direction that matters is the false "deleted". Two readings
+ * separated in time collapse a TRANSIENT ambiguity: a hydration race does not survive a second, later look,
+ * while a genuinely unissued page reports the same thing every time. It is the same two-capture standard the
+ * WING signature calibration already applies, applied to the state claim instead of the signature.
+ *
+ * **What it does NOT collapse**, stated plainly: a PERSISTENT fault — a credential XHR that fails every time,
+ * a credential region moved into an iframe, a renamed anchor label — reproduces identically across readings and
+ * yields two agreeing false `not_issued`. Corroboration raises the bar from "one unlucky moment" to "the page
+ * consistently looks unissued"; it is not proof the key is gone.
+ *
+ * It also cannot ENFORCE independence: passing the same observation twice satisfies it. Callers must supply
+ * readings from separate runs — this function checks agreement, not provenance.
+ *
+ * Deliberately NOT a majority vote: one `issued` or one `indeterminate` among the readings withholds the
+ * verdict entirely. On an irreversible action, "mostly gone" is not a state worth reporting.
+ */
+export function wingDeletionEvidenceFrom(readings: readonly (WingObservation | null)[]): {
+  confirmedNotIssued: boolean;
+  reason: WingDeletionEvidenceReason;
+  readingCount: number;
+} {
+  const states = readings.map((r) => wingIssuedStateFrom(r).state);
+  if (states.length < 2) {
+    return { confirmedNotIssued: false, reason: "SINGLE_READING_ONLY", readingCount: states.length };
+  }
+  const allNotIssued = states.every((s) => s === "not_issued");
+  return {
+    confirmedNotIssued: allNotIssued,
+    reason: allNotIssued ? "STABLE_NOT_ISSUED" : "READINGS_DISAGREE",
+    readingCount: states.length,
+  };
 }
 
 /* ────────────────────────────── issuance-runtime seam (branch + candidate markers) ────────────────────────────── */
@@ -505,8 +643,9 @@ export const EXTRACT_WING_CENSUS = `(function () {
     return nrm(el.textContent || '');
   }
   var markerCands = slice(document.querySelectorAll("h1,h2,h3,h4,h5,h6,[role='heading'],dt,dd,label,legend,strong,b,span,div,p,th"));
+  var MARKER_SCAN_CAP = 6000;
   var openApiMarkerPresent = false, credentialAnchorPresent = false, mi, mm, nm;
-  for (mi = 0; mi < markerCands.length && mi < 6000 && (!openApiMarkerPresent || !credentialAnchorPresent); mi++) {
+  for (mi = 0; mi < markerCands.length && mi < MARKER_SCAN_CAP && (!openApiMarkerPresent || !credentialAnchorPresent); mi++) {
     nm = accNm(markerCands[mi]);
     if (!openApiMarkerPresent) { for (mm = 0; mm < MARKERS.length; mm++) { if (nm === MARKERS[mm]) { openApiMarkerPresent = true; break; } } }
     if (!credentialAnchorPresent) { for (mm = 0; mm < CRED.length; mm++) { if (nm === CRED[mm]) { credentialAnchorPresent = true; break; } } }
@@ -519,6 +658,10 @@ export const EXTRACT_WING_CENSUS = `(function () {
     readonlyFieldCount: readonlyFieldCount,
     listLikeContainerCount: listLikeContainerCount,
     openApiMarkerPresent: openApiMarkerPresent,
-    credentialAnchorPresent: credentialAnchorPresent
+    credentialAnchorPresent: credentialAnchorPresent,
+    /* The scan is BOUNDED. If it stopped at the cap with candidates still unexamined, an ABSENT marker is
+       "not found in the part we looked at" — not "not on the page". Callers that treat absence as evidence
+       must know the difference. (Stopping early because BOTH were found is not truncation.) */
+    markerScanTruncated: mi >= MARKER_SCAN_CAP && markerCands.length > MARKER_SCAN_CAP && !(openApiMarkerPresent && credentialAnchorPresent)
   };
 })()`;
