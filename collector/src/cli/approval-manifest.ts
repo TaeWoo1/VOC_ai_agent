@@ -663,7 +663,7 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
     cli: "src/cli/run-coupang-wing-reveal-live.ts",
     entrypointCommandId: "run-coupang-wing-reveal-live",
     operatorActionSummary:
-      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 오픈API 화면에서 준비되면 ready 를 보내세요. SellerOps는 발급 버튼만 표시하고 멈춥니다(클릭·입력 없음). 발급은 판매자가 직접 누릅니다. 다음 설정 화면으로 이동할 것으로 예상되지만 확인된 사실은 아니며, 실제 키 발급/최종 확인은 이번 단계에서 수행하지 않습니다. 화면 종류만 한 번 확인하고 종료합니다.",
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 오픈API 화면에서 준비되면 ready 를 보내세요. SellerOps는 '발급' 버튼을 강조 표시만 하고 멈춥니다(클릭·입력 없음). 발급은 판매자가 직접 누릅니다. 연동 방식 설정 화면이 열릴 것으로 예상되지만 확인된 사실은 아니며, 실제 키 발급/최종 '확인'은 이번 단계에서 수행하지 않습니다. 화면이 열리면 더 진행하지 마세요. SellerOps는 화면 종류만 한 번 확인하고 종료하며, 키 생성 여부는 판단할 수 없습니다.",
     emitsFrontendUrl: false,
   },
   // The Coupang WING key-DELETION phase: a CLI-launched dedicated Chrome (never a frontend URL). The seller logs

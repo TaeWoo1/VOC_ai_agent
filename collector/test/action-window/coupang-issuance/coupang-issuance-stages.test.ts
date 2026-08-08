@@ -4,6 +4,9 @@
  * projects to WAITING_FOR_HUMAN must project a step status of AWAITING_USER, or a view could not be built.
  */
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   COUPANG_ISSUANCE_TOTAL_STEPS,
   coupangIssuanceAllowedCommands,
@@ -121,6 +124,31 @@ describe("coupang issuance stages — allowed commands", () => {
       expect(cmds).toContain("REQUEST_STEP_RECHECK");
       expect(cmds).not.toContain("PAUSE_RUN");
     }
+  });
+});
+
+describe("the guided walk is FENCED OFF in code, not only in comments", () => {
+  it("the fence is ON, and its entrypoint refuses before the approval flag is even read", async () => {
+    // Review's point: the ⚠ comments saying the plan "is not safe to run" were the ONLY thing stopping it, while
+    // `run-coupang-wing-issuance-live.ts` still launched it behind just the WING flag — with no approval manifest,
+    // no phase binding, no repo-identity check, and its own `page.goto`. Lifting the fence must be a deliberate,
+    // reviewable diff, so it is a constant with a test rather than a paragraph.
+    const cli = await import("../../../src/cli/run-coupang-wing-issuance-live");
+    expect(cli.COUPANG_WING_GUIDED_ISSUANCE_FENCED).toBe(true);
+    expect(cli.COUPANG_WING_GUIDED_ISSUANCE_FENCE_REASON).toMatch(/self_dev\/call_ip match 0/);
+    expect(cli.COUPANG_WING_GUIDED_ISSUANCE_FENCE_REASON).toMatch(/no approval-manifest gate/);
+  });
+
+  it("the fence is checked FIRST in main(), ahead of the approval flag", () => {
+    const src = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), "../../../src/cli/run-coupang-wing-issuance-live.ts"),
+      "utf8",
+    );
+    const body = src.slice(src.indexOf("async function main("));
+    expect(body.indexOf("COUPANG_WING_GUIDED_ISSUANCE_FENCED")).toBeGreaterThan(-1);
+    expect(body.indexOf("COUPANG_WING_GUIDED_ISSUANCE_FENCED")).toBeLessThan(body.indexOf("hasCoupangWingRunApproval"));
+    // …and it points at the phase that produces the evidence needed to lift it.
+    expect(body).toContain("run-coupang-wing-reveal-live.ts");
   });
 });
 

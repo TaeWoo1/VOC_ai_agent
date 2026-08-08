@@ -69,8 +69,22 @@ export const WING_REVEAL_TOTAL_STEPS = 1 as const;
  * this step, so the operator does not continue on to 확인 believing SellerOps is guiding them there.
  */
 export const WING_REVEAL_CHECKPOINT_LABEL =
-  "이 버튼을 누르면 다음 API 발급 설정 화면으로 이동할 것으로 예상됩니다. 실제 키 발급/최종 확인은 이번 단계에서 하지 않습니다. " +
-  "화면이 바뀌면 SellerOps는 화면 종류만 확인하고 멈춥니다.";
+  // 1. WHICH button, said unambiguously. The panel is a fixed bottom-centre box, physically detached from the
+  //    highlight ring, so "이 버튼" had no referent where it is read.
+  "강조 표시된 '발급' 버튼을 직접 눌러 주세요. " +
+  // 2. The expectation, never a promise. 연동 방식 설정 화면 rather than "다음 API 발급 설정 화면", which could be
+  //    read as "the screen that completes issuance" — it reuses the very word on the button.
+  "누르면 연동 방식 설정 화면이 열릴 것으로 예상되지만 확인된 사실은 아닙니다. " +
+  // 3. The IMPERATIVE. Review's most important UX finding: every sentence used to describe what SellerOps would
+  //    do, and none told the seller what to do. After the press they face a form that invites completion
+  //    (자체개발 → 업체명 → URL → IP → 확인) with the panel already torn down — the natural continuation creates a
+  //    key. This is the sentence that stops that, and it must not be softened.
+  "화면이 열리면 그대로 두고 더 진행하지 마세요. '확인'(최종 발급)은 절대 누르지 마세요. " +
+  // 4. The honest limit, in Korean, on the surface the seller actually reads — it had existed only in English in
+  //    the terminal, which the person who can see the screen never looks at.
+  "SellerOps는 화면 종류만 한 번 확인하고 멈추며, 키가 실제로 만들어졌는지 여부는 판단할 수 없습니다. 화면은 판매자만 확인할 수 있습니다. " +
+  // 5. The window closes when you signal — so read the screen BEFORE signalling, not after.
+  "신호를 보내면 이 창은 닫히므로 먼저 화면을 확인해 주세요.";
 
 /**
  * What the post-press observation found. Closed enum; every member except the first is a STOP.
@@ -85,8 +99,20 @@ export const WING_REVEAL_OUTCOMES = [
   "SURFACE_UNCHANGED",
   /** Something changed, but not the shape a configuration step was expected to produce. STOP and report. */
   "SURFACE_CHANGED_UNRECOGNIZED",
+  /**
+   * The surface became `credential_shown` — the keys-displayed category. This does NOT prove a key was created
+   * (nothing can: `NO_DISCRIMINATING_SIGNAL`), but it is the strongest signal available that the press may have
+   * done more than reveal a form, so it gets its own outcome and STOPS rather than being folded into either
+   * "expected" or a generic off-surface result.
+   */
+  "CREDENTIAL_SURFACE_APPEARED",
   /** No longer the open-API surface (login / home / off-target). STOP. */
   "OFF_OPEN_API_SURFACE",
+  /**
+   * The checkpoint overlay could not be verified GONE, so the post-press census would have read SellerOps' own
+   * injected DOM as WING structure. The reading is not trustworthy and no outcome is claimed from it.
+   */
+  "OVERLAY_NOT_CLEARED",
   /** The observation itself could not be taken (the read threw, or the checkpoint was never reached). */
   "NOT_OBSERVED",
 ] as const;
@@ -140,9 +166,32 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** The open-API surfaces this walk may run on. Anything else is off-surface and stops the walk. */
-function isOpenApiSurface(observation: WingObservation): boolean {
-  return observation.pageCategory === "open_api_issuance" || observation.pageCategory === "credential_shown";
+/**
+ * Remove the read-only `data-aw-target` annotation this driver sets when it locates 발급.
+ *
+ * Review caught its absence: `clearHighlight` unmounted the overlay and left the attribute on the seller's live
+ * marketplace DOM, while the module docstring claimed both were removed. Every other WING driver (deletion,
+ * renewal, guided issuance) evaluates this. Beyond the false claim it matters because `mountOverlay` finds its
+ * ring by `document.querySelector("[data-aw-target]")` and early-returns when there is none — so a stale tag
+ * would let a LATER mount report as painted against an element this step never located.
+ */
+const IN_PAGE_CLEAR_TAG = `(function () {
+  var slice = Function.prototype.call.bind(Array.prototype.slice);
+  var tagged = slice(document.querySelectorAll('[data-aw-target]'));
+  for (var i = 0; i < tagged.length; i++) { tagged[i].removeAttribute('data-aw-target'); }
+  return tagged.length;
+})()`;
+
+/**
+ * The ONE surface this walk may run on.
+ *
+ * `credential_shown` is deliberately excluded, and review is why: it had been accepted as "still the open-API
+ * surface", so a post-press transition INTO the keys-displayed category — the single category that most suggests
+ * a key was created — came back as `CONFIGURATION_SURFACE_SUSPECTED`, the expected benign outcome. That is the
+ * worst possible input to round up.
+ */
+function isRevealSurface(observation: WingObservation): boolean {
+  return observation.pageCategory === "open_api_issuance";
 }
 
 /**
@@ -177,9 +226,15 @@ export function changedSignalNames(before: WingObservation | null, after: WingOb
 export function classifyRevealOutcome(
   before: WingObservation | null,
   after: WingObservation | null,
+  /** False when the overlay could not be verified gone — the reading is then untrustworthy, whatever it says. */
+  overlayCleared = true,
 ): WingRevealOutcome {
   if (!before || !after) return "NOT_OBSERVED";
-  if (!isOpenApiSurface(after)) return "OFF_OPEN_API_SURFACE";
+  // Ordered BEFORE every other branch: an untrusted reading must not be interpreted at all, and a
+  // keys-displayed surface must not be reachable by any path that could call it expected.
+  if (!overlayCleared) return "OVERLAY_NOT_CLEARED";
+  if (after.pageCategory === "credential_shown") return "CREDENTIAL_SURFACE_APPEARED";
+  if (!isRevealSurface(after)) return "OFF_OPEN_API_SURFACE";
   const changed = changedSignalNames(before, after);
   if (changed.length === 0) return "SURFACE_UNCHANGED";
   const submitAppeared = !before.signals.submitAffordancePresent && after.signals.submitAffordancePresent;
@@ -248,7 +303,7 @@ export class CoupangWingRevealDriver {
    */
   async classifyInitialSurface(): Promise<{ ok: boolean; observation: WingObservation }> {
     const observation = await this.observeSurface();
-    const ok = isOpenApiSurface(observation);
+    const ok = isRevealSurface(observation);
     if (ok) {
       this.before = observation;
       this.phase = "classified";
@@ -351,7 +406,9 @@ export class CoupangWingRevealDriver {
       if (after && changedSignalNames(this.before, after).length > 0) break;
       if (pollMs > 0 && i < VERIFY_MAX_POLLS - 1) await sleep(pollMs);
     }
-    const outcome = classifyRevealOutcome(this.before, after);
+    // F9: a failed clear invalidates the reading rather than being recorded beside it. The panel's own elements
+    // are counted by the census's candidate scan, so an observation taken through it is not a reading of WING.
+    const outcome = classifyRevealOutcome(this.before, after, overlayClearedBeforeObservation);
     // The classifier's own reason for why issuance cannot be ruled out, taken from the AFTER observation so the
     // record carries the reason for the surface actually being reported on.
     const keyCreationReason = wingIssuedStateFrom(after).reason;
@@ -382,6 +439,8 @@ export class CoupangWingRevealDriver {
   async clearHighlight(): Promise<boolean> {
     const page = this.activePage();
     await unmountOverlay(page).catch(() => undefined);
+    await this.evalStr(page, IN_PAGE_CLEAR_TAG).catch(() => undefined);
+    // Verified, not assumed. An unreadable page cannot confirm the clear, so it reports NOT cleared.
     const panelUp = await (this.opts.checkpointPaintedFn ?? advancePanelMounted)(page).catch(() => true);
     return !panelUp;
   }

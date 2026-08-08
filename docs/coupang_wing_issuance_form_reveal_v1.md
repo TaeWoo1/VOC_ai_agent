@@ -55,8 +55,14 @@ signature-code change between them, so `signatureRole: "EVIDENCE_ONLY"` is a har
 **`CoupangWingRevealDriver`** — on the audited deletion-driver shape: classify → probe → highlight → rest →
 operator acts → clear → observe once → stop. It refuses a non-open-API page, refuses a non-unique `발급`, refuses
 to highlight without the calibration, refuses the operator-action step without a **painted** checkpoint, and
-clears the overlay **before** observing (censusing our own panel could invent the very `submitAffordancePresent`
-flip the outcome turns on). A source guard proves the file contains no click/type/submit/navigate token at all.
+clears the overlay **and the read-only tag** before observing (censusing our own panel would read SellerOps'
+injected DOM as WING structure), and a clear it cannot verify makes the reading `OVERLAY_NOT_CLEARED` rather than a
+confident verdict with a flag beside it.
+
+On the source guard, precisely: it proves no obvious Playwright action API is called *in this file*. Review showed
+a method evaluating an in-page `HTMLElement.prototype.click.call(...)` string would pass it. So the page-side
+surface is bounded instead — a test asserts the driver evaluates **exactly three** scripts, all audited: the
+fixed-label locate builder, the census, and the tag clear.
 
 **The action is not key creation.** `REVEAL_WING_ISSUANCE_CONFIGURATION` vs `COMPLETE_WING_KEY_ISSUANCE` — and
 the separation is enforced by the **typechecker**: both are literal types, so `tsc` rejects a comparison between
@@ -82,8 +88,10 @@ even pattern-matches `NO_KEY|NOT_ISSUED|SAFE|CLEAN`.
 
 ### Fail-closed on the expectation
 
-The expected outcome is narrow on purpose: still on the open-API surface **and** `submitAffordancePresent` flipped
-false→true. That is the only delta the current census could plausibly show for "a form with a 확인 button
+The expected outcome is narrow on purpose: still on `open_api_issuance` **and** `submitAffordancePresent` flipped
+false→true. `credential_shown` — the keys-displayed category — is **excluded** and has its own outcome
+(`CREDENTIAL_SURFACE_APPEARED`, a STOP): review found it had been accepted as "still the open-API surface", so a
+transition into the one category that most suggests a key was created came back as the benign expected result. That is the only delta the current census could plausibly show for "a form with a 확인 button
 appeared" — the initial surface read `false` on every capture, while editable inputs and list containers were
 already `many` and cannot rise. If the real Stage-2 does not flip it, the honest result is
 `SURFACE_CHANGED_UNRECOGNIZED` (or `SURFACE_UNCHANGED`), which is a **STOP** and is itself the evidence the next
@@ -106,7 +114,12 @@ Behaviour, stage names, step count and step plan are untouched.
 
 ## Verification
 
-typecheck + full collector suite green · 44 new tests · harness selfchecks unchanged and passing.
+typecheck + full collector suite green. New tests: 39 (driver) + 21 (gate) + 12 (manifest phase) = **72**.
+
+**Two coverage gaps, stated rather than glossed.** The two new shell scripts are 250+ lines and are the
+operator's entire disclosure surface, and they have **no `*-selfcheck.sh`** (the probe and deletion harnesses
+each have one) — only a manual PASS-path run. And `main()` of the reveal CLI is not exported, so the sentinel
+flow, the abort paths and `ctx.close()` are unverified by tests.
 
 ## Not in this unit
 

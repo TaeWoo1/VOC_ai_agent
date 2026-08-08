@@ -17,6 +17,8 @@ type Verifier = typeof verifyRepoIdentity;
 const VERIFIED: Verifier = () => ({ ok: true, head: "abc1234" });
 
 const TOUCHED = [
+  "SELLEROPS_APPROVAL_PHASE",
+  "SELLEROPS_WING_APPROVED_PHASE",
   "WALKTHROUGH_RUN_ID",
   "WALKTHROUGH_APPROVAL_ID",
   "WALKTHROUGH_GIT_COMMIT",
@@ -37,6 +39,8 @@ function boundIdentity(): void {
     WALKTHROUGH_RUN_ID: "wt-0123456789ab",
     WALKTHROUGH_APPROVAL_ID: "apr-0123456789ab",
     WALKTHROUGH_GIT_COMMIT: "abc1234",
+    SELLEROPS_APPROVAL_PHASE: "COUPANG_WING_KEY_DELETION",
+    SELLEROPS_WING_APPROVED_PHASE: "COUPANG_WING_KEY_DELETION",
   });
 }
 afterEach(() => {
@@ -124,6 +128,8 @@ describe("deletion CLI gate — the run it authorizes is the one the manifest de
       WALKTHROUGH_RUN_ID: "wt-0123456789ab",
       WALKTHROUGH_APPROVAL_ID: "apr-0123456789ab",
       WALKTHROUGH_GIT_COMMIT: "abc1234",
+    SELLEROPS_APPROVAL_PHASE: "COUPANG_WING_KEY_DELETION",
+    SELLEROPS_WING_APPROVED_PHASE: "COUPANG_WING_KEY_DELETION",
       SELLEROPS_APPROVAL_CHANNEL: "NAVER",
       SELLEROPS_APPROVAL_ACCOUNT: "operator-owned NAVER SmartStore test store",
       SELLEROPS_APPROVAL_SURFACE: "Commerce API Center",
@@ -154,6 +160,8 @@ describe("deletion CLI gate — the run it authorizes is the one the manifest de
       WALKTHROUGH_RUN_ID: "wt-0123456789ab",
       WALKTHROUGH_APPROVAL_ID: "apr-0123456789ab",
       WALKTHROUGH_GIT_COMMIT: "abc1234",
+    SELLEROPS_APPROVAL_PHASE: "COUPANG_WING_KEY_DELETION",
+    SELLEROPS_WING_APPROVED_PHASE: "COUPANG_WING_KEY_DELETION",
       SELLEROPS_APPROVAL_ACCOUNT: "AKIAsecretlikevalue-88213",
     });
     const refusals = [

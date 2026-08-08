@@ -66,6 +66,8 @@ import {
 } from "../action-window/coupang-wing-label-recon";
 import {
   LIVE_DOM_CALIBRATION_PENDING,
+  WING_APPROVAL_PHASE_ENV,
+  WING_APPROVED_PHASE_ENV,
   WING_PROBE_TARGET_NAMES,
   wingIssuedStateFrom,
   type WingIssuedState,
@@ -367,21 +369,13 @@ async function sweepReconCandidates(
  * inline on the run command for exactly this phase and no other.
  */
 export const WING_LABEL_RECON_PHASE = "COUPANG_WING_LABEL_RECON" as const;
-/** The env var carrying the phase THIS RUN declares. */
-export const WING_APPROVAL_PHASE_ENV = "SELLEROPS_APPROVAL_PHASE" as const;
-/**
- * The env var carrying the phase the DISPLAYED MANIFEST said, written back by
- * `tools/coupang-local/wing-probe-preflight.sh` from the manifest JSON — never from the run env it sourced.
- *
- * Two phase variables, for the same reason there are two scope variables. Review found the one-variable design
- * broken in both directions: a stale `SELLEROPS_APPROVAL_PHASE=COUPANG_WING_LABEL_RECON` left exported in the
- * shell from an earlier session would arm a 12-hypothesis sweep under a manifest the operator approved for the
- * three SHIPPED labels; and the converse — approving a recon manifest, then starting the run without the phase
- * the preflight printed — would quietly measure the baselines instead and print a successful-looking record.
- * Neither is caught by the scope gate: the target set is identical in both cases. Only a second, independently
- * bound variable can tell "this run is what the manifest described" from "this shell remembers something".
- */
-export const WING_APPROVED_PHASE_ENV = "SELLEROPS_WING_APPROVED_PHASE" as const;
+// The two phase env vars are DEFINED in the pure classifier leaf (the WING action CLIs need them without
+// importing this recorder) and re-exported here, where the recon gate reads them. Two variables, for the same
+// reason there are two scope variables: review found the one-variable design broken in both directions — a stale
+// `SELLEROPS_APPROVAL_PHASE=COUPANG_WING_LABEL_RECON` from an earlier shell would arm a 12-hypothesis sweep
+// under a manifest approved for the three SHIPPED labels, and a recon manifest run without the phase the
+// preflight printed would quietly measure the baselines. The scope gate sees neither: the target set is identical.
+export { WING_APPROVAL_PHASE_ENV, WING_APPROVED_PHASE_ENV };
 
 /** Closed set of reasons a RECON pass is refused. Baseline probing is unaffected by these. */
 export const WING_RECON_REFUSALS = [

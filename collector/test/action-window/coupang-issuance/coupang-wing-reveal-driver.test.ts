@@ -71,8 +71,11 @@ function fakeDriver(o: FakeOpts = {}): {
   driver: CoupangWingRevealDriver;
   evaluated: string[];
   mounts: { label: string; residentPanel?: boolean }[];
+  /** Every page interaction, in order — the only way to assert clear-BEFORE-observe. */
+  order: string[];
 } {
   const evaluated: string[] = [];
+  const order: string[] = [];
   const mounts: { label: string; residentPanel?: boolean }[] = [];
   let censusIdx = 0;
   let paintChecks = 0;
@@ -80,10 +83,24 @@ function fakeDriver(o: FakeOpts = {}): {
     url: () => o.url ?? "https://wing.coupang.com/tenants/seller-api",
     evaluate: async (script: string): Promise<unknown> => {
       evaluated.push(script);
-      if (script.includes("visual-recon") || script.includes("issuance-fixed-label")) {
+      // ORDER MATTERS in this dispatch: the locate script with `tag: true` ALSO queries `[data-aw-target]` (to
+      // clear any prior tag), so a clear-tag check placed first swallows it and the highlight silently fails.
+      // Match on the audited scripts' own comment markers instead of on a shared substring.
+      if (script.includes("issuance-fixed-label-tag")) {
+        order.push("tag");
         const count = o.issueCount ?? 1;
         return count === 1 ? { count: 1, sig: o.issueSig ?? "abcdef0123456789" } : { count };
       }
+      if (script.includes("issuance-fixed-label-locate") || script.includes("visual-recon")) {
+        order.push("locate");
+        const count = o.issueCount ?? 1;
+        return count === 1 ? { count: 1, sig: o.issueSig ?? "abcdef0123456789" } : { count };
+      }
+      if (script.includes("data-aw-target]")) {
+        order.push("clear-tag");
+        return 0;
+      }
+      order.push("census");
       // the census
       const over = o.censuses?.[Math.min(censusIdx, (o.censuses.length ?? 1) - 1)] ?? {};
       censusIdx += 1;
@@ -105,6 +122,7 @@ function fakeDriver(o: FakeOpts = {}): {
     locatorSettleMs: 0,
     verifyPollMs: 0,
     mountOverlayFn: (async (_p: unknown, opts: { label: string; residentPanel?: boolean }) => {
+      order.push("mount");
       mounts.push({ label: opts.label, residentPanel: opts.residentPanel });
     }) as never,
     // Called TWICE with different meanings: once to verify the mount painted, once after the clear to verify it
@@ -118,7 +136,7 @@ function fakeDriver(o: FakeOpts = {}): {
       return o.panelStuck ?? false; // post-clear verification
     }) as never,
   });
-  return { driver, evaluated, mounts };
+  return { driver, evaluated, mounts, order };
 }
 
 /* ────────────────────────────── the agent acts on nothing ────────────────────────────── */
@@ -152,6 +170,22 @@ describe("source guard — the agent has no marketplace action path at all", () 
   it("never navigates — the operator does", () => {
     for (const forbidden of [".goto(", ".goBack(", ".reload(", "window.location"]) {
       expect(code, `must not contain ${forbidden}`).not.toContain(forbidden);
+    }
+  });
+
+  it("performs exactly ONE page mutation — the read-only tag — and clears it", () => {
+    // What the token denylist above does NOT establish, said plainly: it proves no obvious Playwright action API
+    // is called IN THIS FILE. A method that evaluated an in-page `HTMLElement.prototype.click.call(...)` string
+    // would pass it (review demonstrated exactly that). So the page-side surface is bounded instead: the only
+    // in-page scripts this driver may evaluate are the audited locate builder, the census, and the tag clear.
+    const evalCalls = code.match(/this\.evalStr[<(]/g) ?? [];
+    expect(evalCalls.length, "every in-page evaluation must be one of the three audited scripts").toBe(3);
+    expect(code).toContain("buildFixedLabelLocateScript");
+    expect(code).toContain("EXTRACT_WING_CENSUS");
+    expect(code).toContain("IN_PAGE_CLEAR_TAG");
+    // …and no method name suggests acting for the operator.
+    for (const bad of ["press", "confirm", "issueKey", "submitForm", "fillVendor", "selectSelfDev"]) {
+      expect(code, `no method may be named ${bad}*`).not.toMatch(new RegExp(`async\\s+${bad}`, "i"));
     }
   });
 
@@ -239,12 +273,37 @@ describe("the driver refuses before it can mislead", () => {
 /* ────────────────────────────── the checkpoint copy ────────────────────────────── */
 
 describe("the checkpoint copy tells the operator the truth about the press", () => {
-  it("states the outcome as an EXPECTATION and excludes key issuance from this step", () => {
-    expect(WING_REVEAL_CHECKPOINT_LABEL).toContain("예상됩니다");
-    expect(WING_REVEAL_CHECKPOINT_LABEL).toContain("실제 키 발급");
-    expect(WING_REVEAL_CHECKPOINT_LABEL).toContain("하지 않습니다");
-    // It must NOT promise the transition as a fact — that is the claim no live run has confirmed.
+  it("states the outcome as an EXPECTATION, never as a fact", () => {
+    expect(WING_REVEAL_CHECKPOINT_LABEL).toContain("예상되지만 확인된 사실은 아닙니다");
+    expect(WING_REVEAL_CHECKPOINT_LABEL).not.toMatch(/열립니다(?!\s*라고)/);
     expect(WING_REVEAL_CHECKPOINT_LABEL).not.toMatch(/이동합니다(?!\s*라고)/);
+  });
+
+  it("tells the SELLER what to do — an imperative to STOP, not just a description of SellerOps", () => {
+    // Review's most important UX finding. Every sentence used to describe what SellerOps would do; none told the
+    // seller what to do. After the press they face a form that invites completion (자체개발 → 업체명 → URL → IP →
+    // 확인) with the panel already torn down, so the natural continuation CREATES A KEY. These two sentences are
+    // the only thing on screen that stops that, and they must not be softened away.
+    expect(WING_REVEAL_CHECKPOINT_LABEL).toContain("더 진행하지 마세요");
+    expect(WING_REVEAL_CHECKPOINT_LABEL).toContain("절대 누르지 마세요");
+    expect(WING_REVEAL_CHECKPOINT_LABEL).toContain("확인");
+  });
+
+  it("names WHICH control, since the panel is detached from the highlight ring", () => {
+    expect(WING_REVEAL_CHECKPOINT_LABEL).toContain("강조 표시된");
+    expect(WING_REVEAL_CHECKPOINT_LABEL).toContain("발급");
+    // "이 버튼" has no referent in a fixed bottom-centre box on a page with "many" inputs.
+    expect(WING_REVEAL_CHECKPOINT_LABEL).not.toContain("이 버튼을");
+  });
+
+  it("carries the honest limit IN KOREAN — it used to exist only in English, in the terminal", () => {
+    // The person who can resolve the ambiguity by looking at the screen is the one who never reads the terminal.
+    expect(WING_REVEAL_CHECKPOINT_LABEL).toContain("판단할 수 없습니다");
+    expect(WING_REVEAL_CHECKPOINT_LABEL).toContain("판매자만 확인할 수 있습니다");
+  });
+
+  it("discloses that the window closes on the signal, so the screen is read BEFORE signalling", () => {
+    expect(WING_REVEAL_CHECKPOINT_LABEL).toContain("이 창은 닫히므로");
   });
 
   it("is mounted in the RESIDENT panel — the ring badge would truncate it off-screen", () => {
@@ -280,6 +339,31 @@ describe("classifyRevealOutcome — narrow on purpose, and every non-expected ou
     expect(classifyRevealOutcome(initialSurface(), after)).toBe("SURFACE_CHANGED_UNRECOGNIZED");
   });
 
+  it("the KEYS-DISPLAYED surface is its own outcome — never the expected one", () => {
+    // Review's second-worst finding: `credential_shown` had been accepted as "still the open-API surface", so a
+    // transition into the one category that most suggests a key WAS created came back as
+    // CONFIGURATION_SURFACE_SUSPECTED — the benign, expected result. The worst possible input to round up.
+    const after: WingObservation = {
+      ...initialSurface({ submitAffordancePresent: true, readonlyFieldCountBucket: "few" }),
+      pageCategory: "credential_shown",
+    };
+    expect(classifyRevealOutcome(initialSurface(), after)).toBe("CREDENTIAL_SURFACE_APPEARED");
+    // …and it wins even with no other change at all.
+    const quiet: WingObservation = { ...initialSurface(), pageCategory: "credential_shown" };
+    expect(classifyRevealOutcome(initialSurface(), quiet)).toBe("CREDENTIAL_SURFACE_APPEARED");
+  });
+
+  it("an UNCLEARED overlay invalidates the reading — no outcome is claimed from it", () => {
+    // The census counts our own injected panel's elements, so an observation taken through it is not a reading of
+    // WING. It is ordered before every interpretation branch, including the credential surface.
+    const after = initialSurface({ submitAffordancePresent: true });
+    expect(classifyRevealOutcome(initialSurface(), after, false)).toBe("OVERLAY_NOT_CLEARED");
+    const cred: WingObservation = { ...initialSurface(), pageCategory: "credential_shown" };
+    expect(classifyRevealOutcome(initialSurface(), cred, false)).toBe("OVERLAY_NOT_CLEARED");
+    // The default is `true`, so a caller that forgets the argument gets interpretation, not a silent skip.
+    expect(classifyRevealOutcome(initialSurface(), after)).toBe("CONFIGURATION_SURFACE_SUSPECTED");
+  });
+
   it("leaving the open-API surface is OFF_OPEN_API_SURFACE, even if a submit affordance appeared", () => {
     const after: WingObservation = { ...initialSurface({ submitAffordancePresent: true }), pageCategory: "login" };
     expect(classifyRevealOutcome(initialSurface(), after)).toBe("OFF_OPEN_API_SURFACE");
@@ -305,10 +389,49 @@ describe("classifyRevealOutcome — narrow on purpose, and every non-expected ou
     // pageCategory is not a signal but is reported alongside them.
     expect(changedSignalNames(before, { ...before, pageCategory: "credential_shown" })).toEqual(["pageCategory"]);
   });
+
+  it("compares by KEY — a signal the fixture does not know about is still reported", () => {
+    // Review: replacing the key-union with a hardcoded list of today's ten signal names left every test green,
+    // because no test ever passed an observation carrying an unknown key. This one does, in both directions.
+    const before = initialSurface();
+    const withNew = {
+      ...before,
+      signals: { ...before.signals, futureCensusField: "few" } as unknown as WingObservation["signals"],
+    };
+    expect(changedSignalNames(before, withNew)).toEqual(["futureCensusField"]);
+    expect(changedSignalNames(withNew, before)).toEqual(["futureCensusField"]);
+  });
 });
 
 describe("the operator-action step", () => {
-  it("clears the overlay BEFORE observing, and reports that it did", async () => {
+  it("clears the overlay BEFORE the post-press census — asserted on the ORDER, not just the flag", async () => {
+    // Found by review: moving the clear to AFTER the polling loop left all 29 tests green, because nothing
+    // recorded the interleaving. The census would then read SellerOps' own injected panel as WING structure.
+    const { driver, order } = fakeDriver({ censuses: [{}, { submitAffordancePresent: true }] });
+    await driver.classifyInitialSurface();
+    await driver.highlightIssueCheckpoint();
+    order.length = 0; // ignore everything up to the operator-action step
+    await driver.observeRevealOutcome();
+    const firstCensus = order.indexOf("census");
+    const clearTag = order.indexOf("clear-tag");
+    expect(clearTag, "the tag clear must happen").toBeGreaterThan(-1);
+    expect(firstCensus, "a census must happen").toBeGreaterThan(-1);
+    expect(clearTag, "the overlay/tag clear must precede the post-press census").toBeLessThan(firstCensus);
+  });
+
+  it("removes the read-only data-aw-target annotation, not just the overlay", async () => {
+    // Review found it left on the seller's live marketplace DOM while the docstring claimed both were removed.
+    // It also matters mechanically: `mountOverlay` finds its ring by `[data-aw-target]` and early-returns when
+    // there is none, so a stale tag lets a LATER mount report painted against an element it never located.
+    const { driver, order } = fakeDriver();
+    await driver.classifyInitialSurface();
+    await driver.highlightIssueCheckpoint();
+    expect(order).toContain("tag");
+    await driver.cleanup();
+    expect(order).toContain("clear-tag");
+  });
+
+  it("reports that the clear happened", async () => {
     // Observing through our own panel would census SellerOps' injected DOM as WING structure — and could invent
     // the very submit affordance the outcome is decided on.
     const { driver } = fakeDriver({ censuses: [{}, { submitAffordancePresent: true }] });
@@ -319,12 +442,15 @@ describe("the operator-action step", () => {
     expect(res.outcome).toBe("CONFIGURATION_SURFACE_SUSPECTED");
   });
 
-  it("reports a FAILED clear rather than assuming success", async () => {
+  it("a FAILED clear makes the OUTCOME untrusted, not just a flag beside a confident verdict", async () => {
+    // Review: the failure used to be recorded and then ignored — the observation proceeded through the live panel
+    // and could still report CONFIGURATION_SURFACE_SUSPECTED. It now fails closed.
     const { driver } = fakeDriver({ panelStuck: true, censuses: [{}, { submitAffordancePresent: true }] });
     await driver.classifyInitialSurface();
     await driver.highlightIssueCheckpoint();
     const res = await driver.observeRevealOutcome();
     expect(res.overlayClearedBeforeObservation).toBe(false);
+    expect(res.outcome).toBe("OVERLAY_NOT_CLEARED");
   });
 
   it("NEVER rules key creation out, whatever the outcome — and says why", async () => {

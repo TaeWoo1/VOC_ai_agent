@@ -137,7 +137,7 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     : isWingLabelRecon
     ? "WING open-API read-only CANDIDATE-LABEL recon (measure only; no selector is changed by this run)"
     : isWingReveal
-    ? "WING issuance-form reveal (operator presses 발급; no key issuance, no input, no value read)"
+    ? "WING issuance-form reveal (the OPERATOR presses 발급; this press is not the key-creating action; agent performs no click/input/value read)"
     : isVisualRecon
     ? "API Center redacted visual recon"
     : isStructureObs

@@ -45,7 +45,7 @@ import {
   validateApprovalPrerequisites,
   type ApprovalPrereqInput,
 } from "./approval-manifest";
-import { resolveWingUrl, screenWingUrl } from "./coupang-wing-classifier";
+import { resolveWingActionPhase, resolveWingUrl, screenWingUrl } from "./coupang-wing-classifier";
 import { verifyRepoIdentity } from "./repo-identity";
 import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from "./live-run-approval";
 
@@ -73,6 +73,13 @@ export function gateRefusalCause(
   /** Repository-identity verifier seam; the DEFAULT is the real check, so a caller who forgets gets strictness. */
   verifyIdentity: typeof verifyRepoIdentity = verifyRepoIdentity,
 ): string | null {
+  // The PHASE this run is authorized for, before anything else. The three `WALKTHROUGH_*` identity variables
+  // are byte-identical across WING phases, so without this an approval granted for ANOTHER WING action reaches
+  // PREPARED here — review demonstrated a reveal grant preparing the destructive deletion run. `expected` is a
+  // literal, never env-derived, so both variables must name THIS entrypoint's phase.
+  const phaseBinding = resolveWingActionPhase(process.env, "COUPANG_WING_ISSUANCE_FORM_REVEAL");
+  if (!phaseBinding.ok) return `${phaseBinding.refusal}: ${phaseBinding.reason}`;
+
   const input: ApprovalPrereqInput = {
     phase: REVEAL.phase,
     channel: "COUPANG",
@@ -90,7 +97,7 @@ export function gateRefusalCause(
     gitSha: env("WALKTHROUGH_GIT_COMMIT") ?? "unknown",
     maxActions: "1 operator-performed 발급 press + 1 sanitized observation",
     surface: "Coupang WING Open API",
-    operation: "WING issuance-form reveal (operator presses 발급; no key issuance, no input, no value read)",
+    operation: "WING issuance-form reveal (the OPERATOR presses 발급; this press is not the key-creating action; agent performs no click/input/value read)",
     operatorRevealAction: COUPANG_WING_ISSUANCE_REVEAL_ACTION,
   };
   const res = validateApprovalPrerequisites(input);
@@ -240,7 +247,7 @@ async function main(): Promise<void> {
     }
     result = await driver.observeRevealOutcome();
     console.error("");
-    console.error("Reveal observation complete. 이제 SellerOps 탭으로 직접 돌아가세요.");
+    console.error("Reveal observation complete. 이 창은 곧 닫힙니다 — WING에서 더 진행하지 마세요.");
     // SANITIZED record → stdout. Enums / booleans / buckets / signal NAMES only — never a selector, value, PII,
     // raw DOM/HTML, screenshot, or raw URL (the URL is reduced to a host category).
     console.log(

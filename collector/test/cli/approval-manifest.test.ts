@@ -430,6 +430,30 @@ describe("Coupang WING issuance-form reveal phase (COUPANG_WING_ISSUANCE_FORM_RE
     if (!r.ok) expect(r.cause).toBe("ACTION_CAPABILITY_MISMATCH");
   });
 
+  it("the EMITTED descriptor is the phase CONSTANT, not the caller's input", () => {
+    // Review: replacing the emission with `input.operatorRevealAction` left all 93 tests green, and a probe then
+    // produced a DESTRUCTIVE manifest carrying `keyCreationRuledOut: true` — the exact over-claim this unit
+    // exists to prevent. The field-by-field gate is not what protects that; this one line is.
+    //
+    // Extra fields survive the field-by-field comparison by design (it checks the 11 it knows), so an input
+    // carrying one is the cleanest way to prove the emitted object came from the constant.
+    const withExtra = { ...COUPANG_WING_ISSUANCE_REVEAL_ACTION, sneakyExtraField: "should not survive" };
+    const r = validateApprovalPrerequisites({ ...baseWingReveal(), operatorRevealAction: withExtra as never });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.manifest.operatorRevealAction).toBe(COUPANG_WING_ISSUANCE_REVEAL_ACTION);
+      expect(JSON.stringify(r.manifest)).not.toContain("sneakyExtraField");
+    }
+  });
+
+  it("a prototype-inherited descriptor cannot smuggle a softened field into the manifest", () => {
+    const hostile = Object.create({ keyCreationRuledOut: true }) as Record<string, unknown>;
+    for (const [k, v] of Object.entries(COUPANG_WING_ISSUANCE_REVEAL_ACTION)) hostile[k] = v;
+    const r = validateApprovalPrerequisites({ ...baseWingReveal(), operatorRevealAction: hostile as never });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.manifest.operatorRevealAction!.keyCreationRuledOut).toBe(false);
+  });
+
   it("no OTHER phase may carry a reveal descriptor", () => {
     for (const phase of CALIBRATION_PHASES) {
       if (phase === "COUPANG_WING_ISSUANCE_FORM_REVEAL") continue;
