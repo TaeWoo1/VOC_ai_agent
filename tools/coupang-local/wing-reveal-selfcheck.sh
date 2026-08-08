@@ -58,11 +58,6 @@ rm -f "$DIRT_FILE"
 cleanup() { rm -rf "$FIXTURES"; rm -f "$DIRT_FILE"; }
 trap cleanup EXIT INT TERM
 
-REALGIT_FOR_SHA="$(command -v git)"
-CUR_GIT="$(git_hardened rev-parse --short HEAD 2>/dev/null || echo unknown)"
-# git_hardened, not bare git: an ambient GIT_DIR / core.excludesFile in the caller's shell would make this read
-# a dirty tree as clean and silently take the PASS branch — the same fail-open shape this file refuses elsewhere.
-TREE_DIRTY="$(git_hardened status --porcelain 2>/dev/null | head -1)"
 NOW="$(date +%s)"
 FAILED=0
 SKIPPED=0
@@ -71,6 +66,21 @@ SKIPPED=0
 # softened descriptor unproducible through the CLI, so calling the function is the only way it is falsifiable.
 # shellcheck source=./wing-harness-common.sh
 . "$HERE/wing-harness-common.sh"
+
+# AFTER the source, deliberately: `git_hardened` is defined there. An earlier version read HEAD before sourcing,
+# so the function did not exist, `|| echo unknown` pinned every fixture to "unknown", and TREE_DIRTY came back
+# EMPTY — which read as "clean" and ran the whole PASS path against a SHA that matches nothing. That is the exact
+# fail-open shape this file exists to refuse, and it produced 22 confident PASS lines while proving nothing.
+REALGIT_FOR_SHA="$(command -v git)"
+CUR_GIT="$(git_hardened rev-parse --short HEAD 2>/dev/null || echo unknown)"
+if [ "$CUR_GIT" = "unknown" ]; then
+  echo "SELFCHECK ABORT — could not read HEAD. Every fixture would carry a SHA that matches nothing and the"
+  echo "                  drift cases would pass for the wrong reason."
+  exit 3
+fi
+# git_hardened, not bare git: an ambient GIT_DIR / core.excludesFile in the caller's shell would make this read a
+# dirty tree as clean and silently take the PASS branch.
+TREE_DIRTY="$(git_hardened status --porcelain 2>/dev/null | head -1)"
 
 # Write a fixture run env. $1=file $2=git commit $3=phase $4=run id $5=approval id $6=epoch
 write_env() {
