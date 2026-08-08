@@ -109,30 +109,13 @@ fi
 # The reveal descriptor is the contract the operator grants against. The gate already enforces it field-by-field
 # (REVEAL_ACTION_CONTRACT_MISMATCH); it is re-read HERE so a softened one can never be DISPLAYED for approval —
 # and, unlike the destructive check, what must be verified is that it does not OVERSTATE safety.
-REVEAL_OK="$(python3 - "$MANIFEST_OUT" <<'PY' 2>/dev/null
-import json, sys
-try:
-    r = json.load(open(sys.argv[1])).get("operatorRevealAction") or {}
-except Exception:
-    print("no"); raise SystemExit
-want = {
-    "operation": "REVEAL_WING_ISSUANCE_CONFIGURATION",
-    "forbiddenFollowOnAction": "COMPLETE_WING_KEY_ISSUANCE",
-    "createsKeyMaterial": False,
-    "keyCreationRuledOut": False,
-    "irreversible": False,
-    "agentPerformsAction": False,
-    "explicitCheckpointRequired": True,
-    "credentialValueReadBudget": 0,
-    "expectedOutcome": "CONFIGURATION_SURFACE",
-    "expectedOutcomeConfirmed": False,
-    "autoAdvanceAfterReveal": False,
-}
-print("yes" if all(r.get(k) == v for k, v in want.items()) else "no")
-PY
-)"
-if [ "$REVEAL_OK" != "yes" ]; then
-  echo "PREFLIGHT FAIL — the reveal-action descriptor is missing or softened. Refusing to display it for approval."
+#
+# The check lives in wing-harness-common.sh as a function over a FILE, for the reason the destructive one does:
+# the gate makes a softened descriptor unproducible through the CLI, so inline here it would be unfalsifiable —
+# no end-to-end case could distinguish "checked" from "checked and ignored". As a function, the selfcheck calls
+# it directly against crafted manifests, including ones re-pointed at key issuance and at the deletion action.
+if ! verify_reveal_descriptor "$MANIFEST_OUT"; then
+  echo "PREFLIGHT FAIL — the reveal-action descriptor is missing, softened, or names a different operation. Refusing to display it for approval."
   exit 1
 fi
 pass "reveal descriptor is exactly the canonical contract (not key creation · key creation NOT ruled out · agent performs nothing · checkpoint required · 0 value reads · no auto-advance)"
@@ -190,6 +173,14 @@ echo "    • This press is NOT key creation. The final 확인 creates the key a
 echo "    • SellerOps CANNOT prove no key was created: every sanitized signal is identical between an issued and"
 echo "      a no-key surface. The record says so out loud (keyCreationRuledOut: false). Only you can see the screen."
 echo "    • No 자체개발 selection, no 업체명/URL/IP input, no 확인, no credential value read, no connect-test, no sync."
+echo
+# The terminal disclosure above is what the OPERATOR grants against; the sentence that actually stops them
+# mid-flow is the one that will be on the WING page, after the panel is gone and a form invites completion. It is
+# shown here verbatim so nothing on screen is a surprise. `coupang-wing-reveal-gate.test.ts` asserts each
+# fragment is a substring of WING_REVEAL_CHECKPOINT_LABEL, so this copy cannot drift from what is displayed.
+echo "  WHAT YOU WILL SEE ON THE WING PAGE (verbatim, Korean — this is the instruction that binds):"
+echo "    강조 표시된 '발급' 버튼을 직접 눌러 주세요."
+echo "    화면이 열리면 그대로 두고 더 진행하지 마세요. '확인'(최종 발급)은 절대 누르지 마세요."
 echo
 echo "  If this manifest is correct and displayed, the operator's entire single-use grant is one line:"
 echo "    Seated and ready."

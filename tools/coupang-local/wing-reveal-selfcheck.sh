@@ -1,0 +1,346 @@
+#!/usr/bin/env bash
+#
+# Regression self-tests for the Coupang WING issuance-form REVEAL preflight. Proves it FAILS CLOSED on every way
+# the run can be wrong, and prepares + displays a reveal manifest only when it is right.
+#
+# The reveal harness was the only WING harness shipped WITHOUT one: 250+ lines carrying the entire operator-facing
+# disclosure for a real marketplace action, verified once by hand. This closes that gap. It is the third caller of
+# `wing-harness-common.sh` and adds no new checking logic of its own — every assertion below runs the real
+# preflight, or the real shared descriptor verifier, against fixtures.
+#
+# Fully HERMETIC: no browser, no backend, no Coupang call, NOTHING pressed and NO key issued. The only tree
+# mutation is a temporary untracked marker file used to produce a dirty tree, removed on exit.
+#
+# Cases:
+#   NO_RUN_ENV        → FAIL (bootstrap never ran)
+#   UNBOUND_RUN       → FAIL (identity is "unknown" — contract §2 UNBOUND_IDENTITY)
+#   STALE_IDENTITY    → FAIL (a run env from an earlier session must not re-authorize a real WING press)
+#   OCTAL_EPOCH       → FAIL (a malformed stamp must not abort the arithmetic and delete the freshness check)
+#   AMBIENT_STAMP     → FAIL (the caller's shell cannot supply a key the run env omits)
+#   WRONG_PHASE       → FAIL (neither the destructive deletion phase nor the read-only probe is approvable here)
+#   HEAD_DRIFT        → FAIL (bootstrap commit != HEAD)
+#   DIRTY_TREE        → FAIL (uncommitted/untracked change ⇒ the gitSHA would not name the running code)
+#   GIT_DIR_HIJACK    → FAIL (a decoy GIT_DIR/GIT_WORK_TREE must not redirect the drift check)
+#   COLLECTOR_ESCAPE  → FAIL (an out-of-repo collector would verify one tree and describe another)
+#   GIT_STATUS_FAIL   → FAIL (an unreadable `git status` must never be read as "clean")
+#   DESCRIPTOR        → the canonical descriptor is accepted; every SAFETY-OVERSTATING softening, a descriptor
+#                       re-pointed at KEY ISSUANCE, one re-pointed at the DESTRUCTIVE DELETION, and an absent one
+#                       are all refused — and the preflight ACTS on that verdict
+#   NORMAL            → PASS; reveal manifest, calibrated, exact descriptor, full disclosure, approved-phase bound
+#   NO_LEAK           → refusals carry no run-env VALUE and no ambient env value
+#   DEFAULT_OUT       → PASS twice in a row on the default temp path
+#
+# NORMAL and the dirty-tree cases are complementary: they need a clean tree, and print SKIP otherwise — every
+# skipped case is NAMED, because an unnamed skip under a "SELFCHECK PASS" banner reads as coverage.
+#
+set -uo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$HERE/../.." && pwd)"
+PREFLIGHT="$HERE/wing-reveal-preflight.sh"
+BOOTSTRAP="$HERE/wing-reveal-bootstrap.sh"
+FIXTURES="$(mktemp -d)"
+MANIFEST_OUT="$FIXTURES/manifest.json"
+DIRT_FILE="$REPO_ROOT/.wing-reveal-selfcheck-dirty.tmp"
+
+# Remove any residue from a previous crashed run BEFORE reading the tree state — otherwise a leftover marker
+# would report the tree as dirty forever and silently skip the PASS-path cases.
+rm -f "$DIRT_FILE"
+cleanup() { rm -rf "$FIXTURES"; rm -f "$DIRT_FILE"; }
+trap cleanup EXIT INT TERM
+
+CUR_GIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+TREE_DIRTY="$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | head -1)"
+NOW="$(date +%s)"
+FAILED=0
+
+# Sourced so the shared descriptor verifier can be exercised DIRECTLY against crafted manifests. The gate makes a
+# softened descriptor unproducible through the CLI, so calling the function is the only way it is falsifiable.
+# shellcheck source=./wing-harness-common.sh
+. "$HERE/wing-harness-common.sh"
+
+# Write a fixture run env. $1=file $2=git commit $3=phase $4=run id $5=approval id $6=epoch
+write_env() {
+  cat > "$1" <<ENV
+WALKTHROUGH_RUN_ID='$4'
+WALKTHROUGH_APPROVAL_ID='$5'
+WALKTHROUGH_GIT_COMMIT='$2'
+WING_REVEAL_BOOTSTRAP_EPOCH='${6:-$NOW}'
+SELLEROPS_APPROVAL_PHASE='$3'
+ENV
+}
+
+# $1=name $2=expected exit (0|nonzero) $3=required marker ("" to skip) $4=run env path; rest = extra env
+run_case() {
+  local name="$1" expect_exit="$2" marker="$3" run_env="$4"; shift 4
+  local out rc ok="yes"
+  out="$(env "$@" SELLEROPS_WING_REVEAL_RUN_ENV="$run_env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1)"; rc=$?
+  [ "$expect_exit" = "0" ] && [ "$rc" != "0" ] && ok="no"
+  [ "$expect_exit" = "nonzero" ] && [ "$rc" = "0" ] && ok="no"
+  [ -n "$marker" ] && ! grep -qF "$marker" <<<"$out" && ok="no"
+  if [ "$ok" = "yes" ]; then
+    echo "  PASS  $name (exit=$rc)"
+  else
+    echo "  FAIL  $name (exit=$rc, expected=$expect_exit, marker='$marker')"
+    echo "$out" | tail -12 | sed 's/^/        | /'
+    FAILED=1
+  fi
+}
+
+echo "WING issuance-form REVEAL preflight selfcheck — hermetic (no browser, no Coupang call, NOTHING pressed)"
+echo "HEAD=$CUR_GIT  tree=$([ -z "$TREE_DIRTY" ] && echo clean || echo dirty)"
+echo
+
+# ── identity ───────────────────────────────────────────────────────────────────
+run_case "NO_RUN_ENV      (bootstrap never ran)" nonzero "no run env at" "$FIXTURES/absent.env"
+
+write_env "$FIXTURES/unbound.env" "unknown" "COUPANG_WING_ISSUANCE_FORM_REVEAL" "unknown" "unknown"
+run_case "UNBOUND_RUN     (identity is \"unknown\")" nonzero "PREFLIGHT FAIL" "$FIXTURES/unbound.env"
+
+# A real marketplace press, so this harness uses the destructive 1h TTL rather than the read-only probe's.
+write_env "$FIXTURES/stale.env" "$CUR_GIT" "COUPANG_WING_ISSUANCE_FORM_REVEAL" "wt-revchk01" "apr-revchk01" "$((NOW - 7200))"
+run_case "STALE_IDENTITY  (2h-old env refused by the 1h TTL)" nonzero "run identity is stale" "$FIXTURES/stale.env"
+
+write_env "$FIXTURES/octal.env" "$CUR_GIT" "COUPANG_WING_ISSUANCE_FORM_REVEAL" "wt-revchk02" "apr-revchk02" "0000000001999999999"
+run_case "OCTAL_EPOCH     (malformed stamp cannot skip the check)" nonzero "bootstrap timestamp missing or malformed" "$FIXTURES/octal.env"
+
+cat > "$FIXTURES/nostamp.env" <<ENV
+WALKTHROUGH_RUN_ID='wt-revchk03'
+WALKTHROUGH_APPROVAL_ID='apr-revchk03'
+WALKTHROUGH_GIT_COMMIT='$CUR_GIT'
+SELLEROPS_APPROVAL_PHASE='COUPANG_WING_ISSUANCE_FORM_REVEAL'
+ENV
+run_case "AMBIENT_STAMP   (caller's env cannot supply a missing key)" nonzero "bootstrap timestamp missing or malformed" \
+  "$FIXTURES/nostamp.env" "WING_REVEAL_BOOTSTRAP_EPOCH=$NOW"
+
+# ── phase containment ──────────────────────────────────────────────────────────
+# The three `WALKTHROUGH_*` identity variables are byte-identical across WING phases, so the phase is the only
+# thing separating this harness from the others. Preparing the DESTRUCTIVE deletion phase from here would show
+# reveal disclosure copy ("not key creation · not irreversible") for an irreversible run — the exact
+# cross-phase escalation the reveal CLI's phase binding closes on the runtime side.
+for wrong in COUPANG_WING_KEY_DELETION COUPANG_WING_SELECTOR_PROBE COUPANG_WING_LABEL_RECON API_ISSUANCE_HIGHLIGHT_PROOF; do
+  write_env "$FIXTURES/wrongphase.env" "$CUR_GIT" "$wrong" "wt-revchk04" "apr-revchk04"
+  run_case "WRONG_PHASE     ($wrong refused here)" nonzero "phase must be COUPANG_WING_ISSUANCE_FORM_REVEAL" "$FIXTURES/wrongphase.env"
+done
+
+write_env "$FIXTURES/drift.env" "0000000" "COUPANG_WING_ISSUANCE_FORM_REVEAL" "wt-revchk05" "apr-revchk05"
+run_case "HEAD_DRIFT      (commit moved since bootstrap)" nonzero "git commit changed" "$FIXTURES/drift.env"
+
+# ── the descriptor: this phase's whole safety claim ────────────────────────────
+# The DISPLAY-side check. Unlike the destructive descriptor — where the risk is understating danger — every
+# softening here OVERSTATES safety, and the worst is `keyCreationRuledOut: true`: it would tell the operator
+# SellerOps had confirmed no key was created, which nothing can (NO_DISCRIMINATING_SIGNAL).
+CANON='{"operatorRevealAction":{"operation":"REVEAL_WING_ISSUANCE_CONFIGURATION","forbiddenFollowOnAction":"COMPLETE_WING_KEY_ISSUANCE","createsKeyMaterial":false,"keyCreationRuledOut":false,"irreversible":false,"agentPerformsAction":false,"explicitCheckpointRequired":true,"credentialValueReadBudget":0,"expectedOutcome":"CONFIGURATION_SURFACE","expectedOutcomeConfirmed":false,"autoAdvanceAfterReveal":false}}'
+printf '%s' "$CANON" > "$FIXTURES/desc-ok.json"
+DESC_OK=1
+verify_reveal_descriptor "$FIXTURES/desc-ok.json" >/dev/null 2>&1 || { echo "  FAIL  DESCRIPTOR · canonical descriptor rejected"; DESC_OK=0; FAILED=1; }
+for soft in \
+  '"keyCreationRuledOut":true' \
+  '"createsKeyMaterial":true' \
+  '"expectedOutcomeConfirmed":true' \
+  '"autoAdvanceAfterReveal":true' \
+  '"agentPerformsAction":true' \
+  '"explicitCheckpointRequired":false' \
+  '"credentialValueReadBudget":1' \
+  '"irreversible":true' \
+  '"expectedOutcome":"CREDENTIALS_SHOWN"' \
+  '"operation":"COMPLETE_WING_KEY_ISSUANCE"' \
+  '"operation":"DELETE_WING_OPEN_API_KEY"' \
+  '"forbiddenFollowOnAction":"NOTHING"'
+do
+  python3 -c 'import json,sys
+d = json.loads(sys.argv[1]); k, v = json.loads("{" + sys.argv[2] + "}").popitem()
+d["operatorRevealAction"][k] = v
+open(sys.argv[3], "w").write(json.dumps(d))' "$CANON" "$soft" "$FIXTURES/desc-soft.json"
+  if verify_reveal_descriptor "$FIXTURES/desc-soft.json" >/dev/null 2>&1; then
+    echo "  FAIL  DESCRIPTOR · tampering accepted: $soft"; DESC_OK=0; FAILED=1
+  fi
+done
+printf '%s' '{}' > "$FIXTURES/desc-absent.json"
+if verify_reveal_descriptor "$FIXTURES/desc-absent.json" >/dev/null 2>&1; then
+  echo "  FAIL  DESCRIPTOR · absent descriptor accepted"; DESC_OK=0; FAILED=1
+fi
+# A descriptor carrying the DESTRUCTIVE contract instead must not satisfy the reveal check either — the two
+# harnesses verify different shapes and neither may accept the other's.
+printf '%s' '{"operatorDestructiveAction":{"operation":"DELETE_WING_OPEN_API_KEY","irreversible":true,"invalidatesExistingCredentialImmediately":true,"agentPerformsAction":false,"explicitCheckpointRequired":true,"credentialValueReadBudget":0}}' > "$FIXTURES/desc-destructive.json"
+if verify_reveal_descriptor "$FIXTURES/desc-destructive.json" >/dev/null 2>&1; then
+  echo "  FAIL  DESCRIPTOR · a DESTRUCTIVE descriptor satisfied the reveal check"; DESC_OK=0; FAILED=1
+fi
+if verify_destructive_descriptor "$FIXTURES/desc-ok.json" >/dev/null 2>&1; then
+  echo "  FAIL  DESCRIPTOR · a REVEAL descriptor satisfied the destructive check"; DESC_OK=0; FAILED=1
+fi
+[ "$DESC_OK" = "1" ] && echo "  PASS  DESCRIPTOR    · canonical accepted; every safety-overstating softening, a re-point at key issuance, a re-point at deletion, the destructive shape, and an absent descriptor all refused"
+
+# …and the preflight must ACT on that verdict. The gate makes a softened descriptor unproducible through the
+# CLI, so no end-to-end case can distinguish "checked and refused" from "checked and ignored".
+if grep -qF 'if ! verify_reveal_descriptor "$MANIFEST_OUT"; then' "$PREFLIGHT" \
+   && grep -qF "Refusing to display it for approval" "$PREFLIGHT"; then
+  echo "  PASS  DESCRIPTOR    · the preflight refuses on the verifier's verdict (not merely calls it)"
+else
+  echo "  FAIL  DESCRIPTOR    · the preflight does not act on the descriptor verdict"; FAILED=1
+fi
+
+# ── the clean/dirty pair ────────────────────────────────────────────────────────
+write_env "$FIXTURES/normal.env" "$CUR_GIT" "COUPANG_WING_ISSUANCE_FORM_REVEAL" "wt-revchk06" "apr-revchk06"
+if [ -z "$TREE_DIRTY" ]; then
+  run_case "NORMAL          (reveal manifest prepared)" 0 "PREFLIGHT PASS" "$FIXTURES/normal.env"
+  run_case "NORMAL          · manifest phase" 0 "COUPANG_WING_ISSUANCE_FORM_REVEAL" "$FIXTURES/normal.env"
+  run_case "NORMAL          · agent mode stays READ_ONLY" 0 "READ_ONLY (agent)" "$FIXTURES/normal.env"
+  run_case "NORMAL          · 발급 selector calibration disclosed" 0 "selectors calibrated: true" "$FIXTURES/normal.env"
+  run_case "NORMAL          · descriptor verified before display" 0 "reveal descriptor is exactly the canonical contract" "$FIXTURES/normal.env"
+  run_case "NORMAL          · one-line grant offered" 0 "Seated and ready." "$FIXTURES/normal.env"
+  run_case "NORMAL          · run command is the REVEAL entrypoint" 0 "run-coupang-wing-reveal-live.ts" "$FIXTURES/normal.env"
+
+  out="$(env SELLEROPS_WING_REVEAL_RUN_ENV="$FIXTURES/normal.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1)"
+
+  # The operator-facing disclosure is the reason this harness exists rather than reusing the deletion preflight's.
+  # Each fact the operator must carry into a real WING press has to be ON SCREEN, not implied.
+  DISCLOSE_OK=1
+  for phrase in \
+    "You press it. The agent clicks/types/submits nothing." \
+    "That is NOT confirmed" \
+    "This press is NOT key creation" \
+    "CANNOT prove no key was created" \
+    "keyCreationRuledOut: false" \
+    "no credential value read"
+  do
+    grep -qF "$phrase" <<<"$out" || { echo "  FAIL  NORMAL          · disclosure missing: $phrase"; DISCLOSE_OK=0; FAILED=1; }
+  done
+  [ "$DISCLOSE_OK" = "1" ] && echo "  PASS  NORMAL          · full reveal disclosure shown before the grant line"
+
+  # The KOREAN imperative. The operator reads the preflight in the terminal, but the sentence that actually stops
+  # them mid-flow is the one that will be on the WING page — so it is shown here too, verbatim. A TS test
+  # (coupang-wing-reveal-gate.test.ts) asserts each fragment below is a substring of WING_REVEAL_CHECKPOINT_LABEL,
+  # so the two copies cannot drift apart.
+  KOREAN_OK=1
+  for phrase in \
+    "강조 표시된 '발급' 버튼을 직접 눌러 주세요." \
+    "화면이 열리면 그대로 두고 더 진행하지 마세요." \
+    "'확인'(최종 발급)은 절대 누르지 마세요."
+  do
+    grep -qF "$phrase" <<<"$out" || { echo "  FAIL  NORMAL          · Korean on-screen warning missing: $phrase"; KOREAN_OK=0; FAILED=1; }
+  done
+  [ "$KOREAN_OK" = "1" ] && echo "  PASS  NORMAL          · the Korean on-screen imperative is shown before the grant line"
+
+  # The approved PHASE is bound into the run env FROM THE MANIFEST — the runtime half of the cross-phase
+  # escalation fix. Without it the reveal CLI has only the `WALKTHROUGH_*` triple, which every WING phase shares.
+  if grep -qE "^SELLEROPS_WING_APPROVED_PHASE='COUPANG_WING_ISSUANCE_FORM_REVEAL'$" "$FIXTURES/normal.env"; then
+    echo "  PASS  NORMAL          · approved PHASE bound to the run env"
+  else
+    echo "  FAIL  NORMAL          · approved PHASE not bound to the run env"; FAILED=1
+  fi
+  # Re-running must not accumulate duplicate bindings (the later one would silently win on source).
+  if [ "$(grep -cE "^SELLEROPS_WING_APPROVED_PHASE=" "$FIXTURES/normal.env")" = "1" ]; then
+    echo "  PASS  NORMAL          · the binding is rewritten, not appended"
+  else
+    echo "  FAIL  NORMAL          · duplicate SELLEROPS_WING_APPROVED_PHASE lines in the run env"; FAILED=1
+  fi
+  run_case "NORMAL          · run command carries BOTH phase variables" 0 "SELLEROPS_WING_APPROVED_PHASE=COUPANG_WING_ISSUANCE_FORM_REVEAL" "$FIXTURES/normal.env"
+
+  # A calibration/action phase must NEVER hand the operator a frontend URL (the historical defect).
+  if grep -qF "localhost:5173" <<<"$out" || grep -qF "/connect/" <<<"$out"; then
+    echo "  FAIL  NORMAL          · no frontend URL (a CLI phase must not emit one)"; FAILED=1
+  else
+    echo "  PASS  NORMAL          · no frontend URL emitted"
+  fi
+  # The descriptor must reach the operator in full, not just as a PASS line — and both claims must be visible.
+  if grep -qF '"REVEAL_WING_ISSUANCE_CONFIGURATION"' <<<"$out" \
+     && grep -qF '"createsKeyMaterial": false' <<<"$out" \
+     && grep -qF '"keyCreationRuledOut": false' <<<"$out" \
+     && grep -qF '"COMPLETE_WING_KEY_ISSUANCE"' <<<"$out"; then
+    echo "  PASS  NORMAL          · manifest carries both claims and names the forbidden follow-on action"
+  else
+    echo "  FAIL  NORMAL          · reveal descriptor incomplete in the displayed manifest"; FAILED=1
+  fi
+  # This harness prepares a NON-destructive run — it must never emit the destructive descriptor or a probe scope.
+  if grep -qF '"operatorDestructiveAction"' <<<"$out" || grep -qF '"probeTargets"' <<<"$out"; then
+    echo "  FAIL  NORMAL          · the reveal manifest carries another phase's contract"; FAILED=1
+  else
+    echo "  PASS  NORMAL          · no destructive descriptor and no probe scope on the reveal manifest"
+  fi
+
+  # ── refusals must not leak ────────────────────────────────────────────────────
+  # A refusal is printed at the moment things are going wrong, which is exactly when a diagnostic dump is
+  # tempting. Neither the run env's VALUES nor the caller's ambient env may appear in one. The run env below
+  # carries a decoy that looks like a credential; the preflight must never read or echo it.
+  cat > "$FIXTURES/leaky.env" <<ENV
+WALKTHROUGH_RUN_ID='wt-LEAKCANARY-RUNID'
+WALKTHROUGH_APPROVAL_ID='apr-LEAKCANARY-APPROVAL'
+WALKTHROUGH_GIT_COMMIT='0000000'
+WING_REVEAL_BOOTSTRAP_EPOCH='$NOW'
+SELLEROPS_APPROVAL_PHASE='COUPANG_WING_ISSUANCE_FORM_REVEAL'
+COUPANG_ACCESS_KEY='LEAKCANARY-SECRET-VALUE'
+ENV
+  out="$(env SELLEROPS_APPROVAL_ACCOUNT="LEAKCANARY-AMBIENT-ACCOUNT" \
+             SELLEROPS_APPROVAL_OPERATION="LEAKCANARY-AMBIENT-OPERATION" \
+             SELLEROPS_WING_REVEAL_RUN_ENV="$FIXTURES/leaky.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" \
+             bash "$PREFLIGHT" 2>&1)"; rc=$?
+  LEAK_OK=1
+  [ "$rc" = "0" ] && { echo "  FAIL  NO_LEAK         · the drifted-HEAD fixture was not refused"; LEAK_OK=0; FAILED=1; }
+  grep -qF "LEAKCANARY-SECRET-VALUE" <<<"$out" && { echo "  FAIL  NO_LEAK         · a run-env credential-shaped value reached the output"; LEAK_OK=0; FAILED=1; }
+  grep -qF "LEAKCANARY-AMBIENT" <<<"$out" && { echo "  FAIL  NO_LEAK         · an ambient env value reached the output"; LEAK_OK=0; FAILED=1; }
+  # The ids are the ONE identity the operator must be able to match against the manifest, and the preflight shows
+  # them truncated. A refusal must not print them in full.
+  grep -qF "wt-LEAKCANARY-RUNID" <<<"$out" && { echo "  FAIL  NO_LEAK         · a full run id reached the output"; LEAK_OK=0; FAILED=1; }
+  grep -qF "apr-LEAKCANARY-APPROVAL" <<<"$out" && { echo "  FAIL  NO_LEAK         · a full approval id reached the output"; LEAK_OK=0; FAILED=1; }
+  [ "$LEAK_OK" = "1" ] && echo "  PASS  NO_LEAK         · refusal carries no run-env value, no ambient value, no full identity"
+
+  # ── the demonstrated git-environment bypasses ────────────────────────────────
+  : > "$DIRT_FILE"
+  run_case "DIRTY_TREE      (uncommitted change refused)" nonzero "working tree is dirty" "$FIXTURES/normal.env"
+  DECOY="$FIXTURES/decoy"; mkdir -p "$DECOY"
+  ( cd "$DECOY" && git init -q . && git -c user.email=s@e -c user.name=s commit -q --allow-empty -m decoy ) >/dev/null 2>&1
+  run_case "GIT_DIR_HIJACK  (decoy repo ignored)" nonzero "working tree is dirty" "$FIXTURES/normal.env" \
+    "GIT_DIR=$DECOY/.git" "GIT_WORK_TREE=$DECOY"
+
+  # The BOOTSTRAP must refuse a dirty tree too: pinning a SHA that already does not describe the tree just defers
+  # a guaranteed refusal, and leaves behind a run env that looks valid.
+  out="$(bash "$BOOTSTRAP" 2>&1)"; rc=$?
+  if [ "$rc" != "0" ] && grep -qiF "dirty" <<<"$out"; then
+    echo "  PASS  BOOTSTRAP_DIRTY · bootstrap refuses to pin a SHA against a dirty tree"
+  else
+    echo "  FAIL  BOOTSTRAP_DIRTY · bootstrap minted an identity on a dirty tree (exit=$rc)"; FAILED=1
+  fi
+  rm -f "$DIRT_FILE"
+
+  # The collector must be THIS repository's collector, or the drift check verifies one checkout while the
+  # manifest is built from another, and the displayed provenance describes a tree nothing looked at.
+  OTHER_COLLECTOR="$FIXTURES/other/collector"; mkdir -p "$OTHER_COLLECTOR"
+  run_case "COLLECTOR_ESCAPE (out-of-repo collector refused)" nonzero "PREFLIGHT FAIL" \
+    "$FIXTURES/normal.env" "SELLEROPS_COLLECTOR_DIR=$OTHER_COLLECTOR"
+
+  # A git that FAILS must never be read as "clean". A healthy checkout never errors, so it is injected: a `git`
+  # earlier on PATH forwarding everything except `status`, which exits 128.
+  FAKEBIN="$FIXTURES/fakebin"; mkdir -p "$FAKEBIN"
+  REALGIT="$(command -v git)"
+  cat > "$FAKEBIN/git" <<FAKE
+#!/usr/bin/env bash
+for a in "\$@"; do [ "\$a" = "status" ] && exit 128; done
+exec "$REALGIT" "\$@"
+FAKE
+  chmod +x "$FAKEBIN/git"
+  run_case "GIT_STATUS_FAIL (unreadable status is not \"clean\")" nonzero "refusing rather than assuming a clean tree" \
+    "$FIXTURES/normal.env" "PATH=$FAKEBIN:$PATH"
+
+  # EVERY case above overrides SELLEROPS_MANIFEST_OUT, so the DEFAULT temp path would otherwise have no coverage
+  # — which is exactly where a broken mktemp template hid on the probe harness until a real run.
+  DEFAULT_OK=1
+  for attempt in 1 2; do
+    out="$(env SELLEROPS_WING_REVEAL_RUN_ENV="$FIXTURES/normal.env" bash "$PREFLIGHT" 2>&1)" || DEFAULT_OK=0
+    grep -qF "PREFLIGHT PASS" <<<"$out" || DEFAULT_OK=0
+    grep -qF "Traceback" <<<"$out" && DEFAULT_OK=0
+    grep -qiF "mktemp" <<<"$out" && DEFAULT_OK=0
+  done
+  if [ "$DEFAULT_OK" = "1" ]; then
+    echo "  PASS  DEFAULT_OUT     · default manifest path works, and works twice in a row"
+  else
+    echo "  FAIL  DEFAULT_OUT     · default manifest path is broken"; echo "$out" | tail -6 | sed 's/^/        | /'; FAILED=1
+  fi
+else
+  run_case "DIRTY_TREE      (uncommitted change refused)" nonzero "working tree is dirty" "$FIXTURES/normal.env"
+  echo "  SKIP  NORMAL / NO_LEAK / GIT_DIR_HIJACK / BOOTSTRAP_DIRTY / COLLECTOR_ESCAPE / GIT_STATUS_FAIL /"
+  echo "        DEFAULT_OUT — the working tree is dirty, which the preflight refuses by design."
+  echo "        Commit or stash, then re-run to exercise the PASS path."
+fi
+
+echo
+if [ "$FAILED" = "0" ]; then echo "SELFCHECK PASS"; exit 0; else echo "SELFCHECK FAIL"; exit 1; fi

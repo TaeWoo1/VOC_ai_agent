@@ -252,6 +252,52 @@ print("true" if v is True else "false" if v is False else v)' "$manifest" "$key"
   return $rc
 }
 
+# Verify a prepared manifest's operator-REVEAL-action descriptor is EXACTLY the canonical contract.
+# $1 = manifest path. Returns 0 when correct, 1 otherwise (printing which field is wrong).
+#
+# The mirror of verify_destructive_descriptor, and it guards the OPPOSITE direction. There, the risk is a
+# descriptor that UNDERSTATES the danger. Here it is one that OVERSTATES safety: `keyCreationRuledOut: true`
+# would tell an operator SellerOps had confirmed no key was created, which nothing can — every sanitized signal
+# is identical between an issued and a no-key surface (`NO_DISCRIMINATING_SIGNAL`). `createsKeyMaterial` and
+# `keyCreationRuledOut` are BOTH false and are not redundant: the first says the approved operation is not the
+# key-creating one, the second says this run cannot prove none happened anyway.
+#
+# `operation` and `forbiddenFollowOnAction` are checked as a PAIR, so a manifest re-pointed at key issuance or
+# at the destructive deletion is refused rather than displayed under reveal disclosure copy.
+#
+# The want-table below is mirrored from COUPANG_WING_ISSUANCE_REVEAL_ACTION in
+# collector/src/cli/approval-manifest.ts; `coupang-wing-reveal-gate.test.ts` asserts the two agree field for
+# field, so this copy cannot drift into approving semantics the runtime does not implement.
+verify_reveal_descriptor() {
+  local manifest="$1" pair key want got rc=0
+  for pair in \
+    "operation:REVEAL_WING_ISSUANCE_CONFIGURATION" \
+    "forbiddenFollowOnAction:COMPLETE_WING_KEY_ISSUANCE" \
+    "createsKeyMaterial:false" \
+    "keyCreationRuledOut:false" \
+    "irreversible:false" \
+    "agentPerformsAction:false" \
+    "explicitCheckpointRequired:true" \
+    "credentialValueReadBudget:0" \
+    "expectedOutcome:CONFIGURATION_SURFACE" \
+    "expectedOutcomeConfirmed:false" \
+    "autoAdvanceAfterReveal:false"
+  do
+    key="${pair%%:*}"; want="${pair#*:}"
+    got="$(python3 -c 'import json,sys
+d = json.load(open(sys.argv[1])).get("operatorRevealAction")
+if not isinstance(d, dict) or sys.argv[2] not in d:
+    sys.exit(1)
+v = d[sys.argv[2]]
+print("true" if v is True else "false" if v is False else v)' "$manifest" "$key" 2>/dev/null)" || got=""
+    if [ "$got" != "$want" ]; then
+      echo "  FAIL  reveal descriptor $key is '${got:-missing}', must be '$want'"
+      rc=1
+    fi
+  done
+  return $rc
+}
+
 # Resolve the manifest output path. BSD mktemp substitutes only TRAILING X's, so a `.XXXXXX.json` template
 # creates a file named literally that, which then collides on the next run — take a temp DIRECTORY instead.
 # Echoes the path, or nothing on failure (the caller must refuse). $1=temp-dir prefix

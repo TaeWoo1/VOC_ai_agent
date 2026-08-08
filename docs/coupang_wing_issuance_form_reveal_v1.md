@@ -116,10 +116,10 @@ Behaviour, stage names, step count and step plan are untouched.
 
 typecheck + full collector suite green. New tests: 39 (driver) + 21 (gate) + 12 (manifest phase) = **72**.
 
-**Two coverage gaps, stated rather than glossed.** The two new shell scripts are 250+ lines and are the
-operator's entire disclosure surface, and they have **no `*-selfcheck.sh`** (the probe and deletion harnesses
-each have one) — only a manual PASS-path run. And `main()` of the reveal CLI is not exported, so the sentinel
-flow, the abort paths and `ctx.close()` are unverified by tests.
+**Two coverage gaps were stated here rather than glossed** — the shell harness had no `*-selfcheck.sh`, and
+`main()` was unexported, so the sentinel flow and the abort paths were unverified. Both are closed by
+`docs/coupang_wing_reveal_live_harness_final_check_v1.md`; that unit changed no product flow, selector, or
+stage structure.
 
 ## Not in this unit
 

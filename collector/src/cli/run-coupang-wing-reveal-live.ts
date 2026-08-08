@@ -45,7 +45,12 @@ import {
   validateApprovalPrerequisites,
   type ApprovalPrereqInput,
 } from "./approval-manifest";
-import { resolveWingActionPhase, resolveWingUrl, screenWingUrl } from "./coupang-wing-classifier";
+import {
+  resolveWingActionPhase,
+  resolveWingUrl,
+  screenWingUrl,
+  type WingObservation,
+} from "./coupang-wing-classifier";
 import { verifyRepoIdentity } from "./repo-identity";
 import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from "./live-run-approval";
 
@@ -134,6 +139,171 @@ function removeSentinel(path: string): void {
 /** Wait for one of the operator's sentinels. Pure-ish seam so the walk order is unit-testable offline. */
 export type RevealSignal = "ready" | "pressed" | "abort" | "timeout";
 
+/** Injectable surroundings for {@link waitForSignal} — filesystem, clock and the signal handler's flag. */
+export interface SignalWaitDeps {
+  exists(path: string): boolean;
+  sleep(ms: number): Promise<void>;
+  /** True once SIGINT/SIGTERM has been seen. Checked FIRST, so Ctrl-C wins over a sentinel that just appeared. */
+  aborted(): boolean;
+  maxTicks?: number;
+  pollMs?: number;
+}
+
+/**
+ * Wait for `target` to appear, or for an abort, or for the deadline. Exported and dependency-injected because it
+ * is the only thing standing between "the operator said they pressed 발급" and SellerOps reading a live page — and
+ * inline in `main()` it could not be tested without a browser and a 20-minute clock.
+ *
+ * Abort is checked BEFORE the target on every tick. An operator who hits Ctrl-C while the page is mid-transition
+ * must not have a sentinel that lands in the same tick override them.
+ */
+export async function waitForSignal(
+  target: string,
+  /** Which signal a hit on `target` means — `ready` before the checkpoint, `pressed` after it. */
+  kind: "ready" | "pressed",
+  abortPath: string,
+  deps: SignalWaitDeps,
+): Promise<RevealSignal> {
+  const pollMs = deps.pollMs ?? POLL_MS;
+  const maxTicks = deps.maxTicks ?? Math.ceil(WAIT_TIMEOUT_MS / pollMs);
+  for (let i = 0; i < maxTicks; i++) {
+    if (deps.aborted() || deps.exists(abortPath)) return "abort";
+    if (deps.exists(target)) return kind;
+    await deps.sleep(pollMs);
+  }
+  return "timeout";
+}
+
+/* ────────────────────────────── the walk ────────────────────────────── */
+
+/**
+ * The driver surface the walk uses. Narrowed to these five methods on purpose: the walk cannot navigate, click,
+ * type, or read a value, because nothing here can. `CoupangWingRevealDriver` satisfies it structurally.
+ */
+export interface RevealWalkDriverLike {
+  classifyInitialSurface(): Promise<{ ok: boolean; observation: WingObservation }>;
+  probeIssueMatch(): Promise<{ matchCount: number; canHighlight: boolean; sig?: string }>;
+  highlightIssueCheckpoint(): Promise<{ count: number; sig?: string }>;
+  observeRevealOutcome(): Promise<WingRevealResult>;
+  cleanup(): Promise<void>;
+}
+
+/** Where the walk stopped. Every value except `OBSERVED` means nothing was observed and nothing was pressed. */
+export const REVEAL_WALK_STOPS = [
+  "ABORTED_BEFORE_CHECKPOINT",
+  "NOT_OPEN_API_SURFACE",
+  "ISSUE_NOT_UNIQUE",
+  "CHECKPOINT_NOT_PAINTED",
+  "ABORTED_AT_CHECKPOINT",
+  "OBSERVED",
+] as const;
+export type RevealWalkStop = (typeof REVEAL_WALK_STOPS)[number];
+
+export interface RevealWalkIo {
+  /** Wait for the named sentinel. Returns what actually happened — never throws to signal an abort. */
+  waitFor(kind: "ready" | "pressed"): Promise<RevealSignal>;
+  /** Operator-facing narration (stderr). Never carries a value, a selector, or a raw URL. */
+  note(line: string): void;
+  /** The single sanitized record (stdout). Called at most once, and only on `OBSERVED`. */
+  emit(record: Record<string, unknown>): void;
+}
+
+export interface RevealWalkReport {
+  stop: RevealWalkStop;
+  result: WingRevealResult | null;
+  /**
+   * True ONLY for the one outcome this run was built to expect. Everything else — including
+   * `CREDENTIAL_SURFACE_APPEARED` — is false, and false never advances anything: the walk stops either way. It
+   * exists so a caller cannot read "the walk completed" as "the expected thing happened".
+   */
+  outcomeAsExpected: boolean;
+}
+
+/**
+ * The reveal walk, browser-free.
+ *
+ * Takes a driver and an IO seam rather than a `BrowserContext`, so every path below — the two sentinel waits,
+ * both aborts, the timeout, each fail-closed refusal, and the unexpected-outcome stop — is exercised offline.
+ * `main()` is the only thing that launches Chrome, and it does so BEFORE calling this.
+ *
+ * It never navigates and never advances past the single observation, whatever that observation says.
+ */
+export async function runRevealWalk(
+  driver: RevealWalkDriverLike,
+  io: RevealWalkIo,
+  urlCategory: string,
+): Promise<RevealWalkReport> {
+  const stopped = (stop: RevealWalkStop): RevealWalkReport => ({ stop, result: null, outcomeAsExpected: false });
+  try {
+    if ((await io.waitFor("ready")) !== "ready") {
+      io.note("Aborted or timed out before the checkpoint. Nothing was highlighted.");
+      return stopped("ABORTED_BEFORE_CHECKPOINT");
+    }
+    const classified = await driver.classifyInitialSurface();
+    if (!classified.ok) {
+      io.note(`Refusing to continue: not the open-API surface (pageCategory=${classified.observation.pageCategory}).`);
+      return stopped("NOT_OPEN_API_SURFACE");
+    }
+    const probe = await driver.probeIssueMatch();
+    if (probe.matchCount !== 1) {
+      io.note(`Refusing to highlight: the 발급 control matched ${probe.matchCount}, not 1. Nothing was highlighted.`);
+      return stopped("ISSUE_NOT_UNIQUE");
+    }
+    const located = await driver.highlightIssueCheckpoint();
+    if (located.count !== 1) {
+      io.note("The checkpoint could not be painted — refusing to hand the operator an unmarked page.");
+      return stopped("CHECKPOINT_NOT_PAINTED");
+    }
+    io.note("");
+    io.note(`CHECKPOINT — ${WING_REVEAL_CHECKPOINT_LABEL}`);
+    if ((await io.waitFor("pressed")) !== "pressed") {
+      io.note("Aborted or timed out at the checkpoint. Clearing the overlay; no observation taken.");
+      return stopped("ABORTED_AT_CHECKPOINT");
+    }
+    const result = await driver.observeRevealOutcome();
+    io.note("");
+    io.note("Reveal observation complete. 이 창은 곧 닫힙니다 — WING에서 더 진행하지 마세요.");
+    // The one outcome that suggests the press may have done more than reveal a form gets a loud, separate line.
+    // It is a STOP either way — the walk observes once and returns — but a reader scanning stderr must not have
+    // to notice an enum buried in the JSON to learn that the keys-displayed surface appeared.
+    if (result.outcome === "CREDENTIAL_SURFACE_APPEARED") {
+      io.note("");
+      io.note("⚠ UNEXPECTED OUTCOME — the surface became the keys-displayed category (CREDENTIAL_SURFACE_APPEARED).");
+      io.note("  This is NOT proof a key was created, and SellerOps cannot determine that either way. STOP here:");
+      io.note("  WING에서 더 진행하지 마세요. 화면을 직접 확인해 주세요.");
+    }
+    io.emit({
+      urlCategory,
+      phase: REVEAL.phase,
+      operatorAction: COUPANG_WING_ISSUANCE_REVEAL_ACTION.operation,
+      outcome: result.outcome,
+      changedSignals: result.changedSignals,
+      before: result.before,
+      after: result.after,
+      // Always false, with the classifier's reason. Emitted so the record cannot be read as an all-clear.
+      keyCreationRuledOut: result.keyCreationRuledOut,
+      keyCreationReason: result.keyCreationReason,
+      overlayClearedBeforeObservation: result.overlayClearedBeforeObservation,
+    });
+    log("aw_coupang_reveal_run_done", {
+      urlCategory,
+      outcome: result.outcome,
+      changedSignalCount: result.changedSignals.length,
+      keyCreationRuledOut: result.keyCreationRuledOut,
+    });
+    return {
+      stop: "OBSERVED",
+      result,
+      outcomeAsExpected: result.outcome === "CONFIGURATION_SURFACE_SUSPECTED",
+    };
+  } finally {
+    // EVERY exit path clears the overlay, including the fail-closed refusals above and a thrown observation —
+    // leaving SellerOps' panel and the `data-aw-target` annotation on the seller's live marketplace DOM is the
+    // defect that review already caught once inside the driver.
+    await driver.cleanup().catch(() => undefined);
+  }
+}
+
 function banner(): void {
   const line = "─".repeat(64);
   console.error(line);
@@ -198,83 +368,31 @@ async function main(): Promise<void> {
   process.on("SIGINT", onSigint);
   process.on("SIGTERM", onSigint);
 
-  const waitFor = async (target: string): Promise<RevealSignal> => {
-    const maxTicks = Math.ceil(WAIT_TIMEOUT_MS / POLL_MS);
-    for (let i = 0; i < maxTicks; i++) {
-      if (abortFlag.v || existsSync(abortPath)) return "abort";
-      if (existsSync(target)) return target === readyPath ? "ready" : "pressed";
-      await sleep(POLL_MS);
-    }
-    return "timeout";
+  const waitDeps: SignalWaitDeps = {
+    exists: existsSync,
+    sleep,
+    aborted: () => abortFlag.v,
+  };
+  const io: RevealWalkIo = {
+    waitFor: (kind) => waitForSignal(kind === "ready" ? readyPath : donePath, kind, abortPath, waitDeps),
+    note: (line) => console.error(line),
+    // SANITIZED record → stdout. Enums / booleans / buckets / signal NAMES only — never a selector, value, PII,
+    // raw DOM/HTML, screenshot, or raw URL (the URL is reduced to a host category).
+    emit: (record) => console.log(JSON.stringify(record, null, 2)),
   };
 
   const ctx: BrowserContext = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
   const entry = (ctx.pages()[0] ?? (await ctx.newPage())) as Page;
   const driver = new CoupangWingRevealDriver(entry, { context: ctx });
-  let result: WingRevealResult | null = null;
   try {
     console.error("");
     console.error("Navigate MANUALLY to the WING open-API screen in the opened window, then signal readiness:");
     console.error(`       ${readyPath}`);
     console.error(`     abort: ${abortPath}`);
-    if ((await waitFor(readyPath)) !== "ready") {
-      console.error("Aborted or timed out before the checkpoint. Nothing was highlighted.");
-      return;
-    }
-    const classified = await driver.classifyInitialSurface();
-    if (!classified.ok) {
-      console.error(`Refusing to continue: not the open-API surface (pageCategory=${classified.observation.pageCategory}).`);
-      return;
-    }
-    const probe = await driver.probeIssueMatch();
-    if (probe.matchCount !== 1) {
-      console.error(`Refusing to highlight: the 발급 control matched ${probe.matchCount}, not 1. Nothing was highlighted.`);
-      return;
-    }
-    const located = await driver.highlightIssueCheckpoint();
-    if (located.count !== 1) {
-      console.error("The checkpoint could not be painted — refusing to hand the operator an unmarked page.");
-      return;
-    }
     console.error("");
-    console.error(`CHECKPOINT — ${WING_REVEAL_CHECKPOINT_LABEL}`);
-    console.error("  Press 발급 YOURSELF, then signal that you pressed it:");
+    console.error("At the checkpoint, press 발급 YOURSELF, then signal that you pressed it:");
     console.error(`       ${donePath}`);
-    if ((await waitFor(donePath)) !== "pressed") {
-      console.error("Aborted or timed out at the checkpoint. Clearing the overlay; no observation taken.");
-      await driver.cleanup();
-      return;
-    }
-    result = await driver.observeRevealOutcome();
-    console.error("");
-    console.error("Reveal observation complete. 이 창은 곧 닫힙니다 — WING에서 더 진행하지 마세요.");
-    // SANITIZED record → stdout. Enums / booleans / buckets / signal NAMES only — never a selector, value, PII,
-    // raw DOM/HTML, screenshot, or raw URL (the URL is reduced to a host category).
-    console.log(
-      JSON.stringify(
-        {
-          urlCategory: screen.urlCategory,
-          phase: REVEAL.phase,
-          operatorAction: COUPANG_WING_ISSUANCE_REVEAL_ACTION.operation,
-          outcome: result.outcome,
-          changedSignals: result.changedSignals,
-          before: result.before,
-          after: result.after,
-          // Always false, with the classifier's reason. Emitted so the record cannot be read as an all-clear.
-          keyCreationRuledOut: result.keyCreationRuledOut,
-          keyCreationReason: result.keyCreationReason,
-          overlayClearedBeforeObservation: result.overlayClearedBeforeObservation,
-        },
-        null,
-        2,
-      ),
-    );
-    log("aw_coupang_reveal_run_done", {
-      urlCategory: screen.urlCategory,
-      outcome: result.outcome,
-      changedSignalCount: result.changedSignals.length,
-      keyCreationRuledOut: result.keyCreationRuledOut,
-    });
+    await runRevealWalk(driver, io, screen.urlCategory);
   } finally {
     for (const p of [readyPath, donePath, abortPath]) removeSentinel(p);
     process.removeListener("SIGINT", onSigint);
