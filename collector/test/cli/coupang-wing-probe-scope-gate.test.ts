@@ -183,10 +183,40 @@ describe("the live CLI wires the gate, not the manifest resolver", () => {
     expect(code).not.toContain("resolveWingProbeScope(");
   });
 
+  /** The body of a brace-delimited block starting at `header`, so a guard can assert what the branch DOES. */
+  function branchBody(src: string, header: string): string {
+    const at = src.indexOf(header);
+    expect(at, `branch not found: ${header}`).toBeGreaterThan(-1);
+    let depth = 0;
+    for (let i = at + header.length - 1; i < src.length; i++) {
+      if (src[i] === "{") depth++;
+      else if (src[i] === "}" && --depth === 0) return src.slice(at + header.length, i);
+    }
+    throw new Error(`unbalanced braces after ${header}`);
+  }
+
   it("derives the measured set from the GATE's targets, not from the fixed set", () => {
     // The tested derivation is only worth anything if the CLI actually feeds it the approved targets.
     expect(code).toContain("scopedRecordTargetsFor(probeScope.targets)");
     expect(code).toMatch(/runWingSelectorRecord\(deps, scopedTargets[,)]/);
+  });
+
+  it("the RECON refusal STOPS the run — it does not fall through to a baseline probe", () => {
+    // Found by review: the previous version asserted only the branch HEADER, so deleting `process.exitCode = 2;
+    // return;` left every test green. Under that deletion a run whose approved scope contains a non-sweepable
+    // target prints the refusal, launches Chrome, sweeps nothing, and prints a successful-looking baseline
+    // record for work the operator never approved.
+    expect(branchBody(code, "if (reconScope.requested && !reconScope.ok) {")).toMatch(
+      /process\.exitCode = 2;[\s\S]*return;/,
+    );
+  });
+
+  it("gates the RECON scope BEFORE the browser launches, like the scope gate above", () => {
+    const gateAt = code.indexOf("resolveWingReconScope(process.env, probeScope.targets)");
+    expect(gateAt).toBeGreaterThan(-1);
+    for (const sideEffect of ["loadConfig()", "mkdirSync(", "await launchNaverContext("]) {
+      expect(gateAt, `recon gate must precede ${sideEffect}`).toBeLessThan(code.indexOf(sideEffect));
+    }
   });
 
   it("derives the RECON scope from the same approved set, and refuses rather than downgrading", () => {
@@ -202,8 +232,10 @@ describe("the live CLI wires the gate, not the manifest resolver", () => {
   it("keeps the refusal branch — deleting it must not need the typechecker to be caught", () => {
     // Without this, removing `if (!probeScope.ok) { … }` is caught only by `tsc` (the discriminated union
     // stops compiling), so `npm test` alone would stay green on a deleted safety branch.
-    expect(code).toMatch(/if \(!probeScope\.ok\) \{/);
-    expect(code).toContain("process.exitCode = 2");
+    // Scoped to the branch BODY. `process.exitCode = 2` now also appears in the recon refusal below, so a bare
+    // substring check no longer distinguishes them — deleting this branch's body would leave it green, with the
+    // deletion caught only by `tsc`, which is exactly what this test exists to avoid relying on.
+    expect(branchBody(code, "if (!probeScope.ok) {")).toMatch(/process\.exitCode = 2;[\s\S]*return;/);
   });
 
   it("gates the scope BEFORE the browser launches AND before any side effect", () => {

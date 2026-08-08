@@ -257,6 +257,52 @@ describe("approval-manifest-cli — the read-only WING probe path is unchanged b
     expect(m.selectorsCalibrated).toBe(false);
   });
 
+  it("the RECON phase is screened against the WING host — the fourth ad-hoc chain review found", () => {
+    // `isWingPhase` here decides WING host vs NAVER API-center host. It was still spelled out by hand after the
+    // other three chains were consolidated, so a WING phase missing from it fails as `INVALID_HOST` — a cause
+    // that names the wrong thing. This exercises the recon phase end to end through that decision.
+    setEnv({
+      SELLEROPS_APPROVAL_PHASE: "COUPANG_WING_LABEL_RECON",
+      SELLEROPS_WING_PROBE_TARGETS: "self_dev,vendor_info,call_ip",
+      ...IDENTITY,
+    });
+    const { code, out } = run();
+    expect(code).toBe(0);
+    const m = JSON.parse(out) as Record<string, unknown>;
+    expect(m.phase).toBe("COUPANG_WING_LABEL_RECON");
+    expect(m.apiCenterHost).toBe("wing_host");
+    expect(m.mode).toBe("READ_ONLY");
+    expect(m.probeTargets).toEqual(["self_dev", "vendor_info", "call_ip"]);
+  });
+
+  it("an UNSET scope under the recon phase reaches the RECON default, not the full WING set", () => {
+    // Review found the gate's recon default unreachable: the CLI always resolved a scope, and an empty request
+    // means "all targets" — so the gate saw six, refused, and the documented default was fiction. It failed
+    // closed on the wrong cause. The default is now live and this is what proves it.
+    setEnv({ SELLEROPS_APPROVAL_PHASE: "COUPANG_WING_LABEL_RECON", ...IDENTITY });
+    const { code, out } = run();
+    expect(code).toBe(0);
+    expect((JSON.parse(out) as Record<string, unknown>).probeTargets).toEqual([
+      "self_dev",
+      "vendor_info",
+      "call_ip",
+    ]);
+  });
+
+  it("an unset scope under the PROBE phase still means the full fixed set — unchanged", () => {
+    setEnv({ SELLEROPS_APPROVAL_PHASE: "COUPANG_WING_SELECTOR_PROBE", ...IDENTITY });
+    const { code, out } = run();
+    expect(code).toBe(0);
+    expect((JSON.parse(out) as Record<string, unknown>).probeTargets).toEqual([
+      "self_dev",
+      "vendor_info",
+      "call_ip",
+      "issue",
+      "credentials",
+      "delete",
+    ]);
+  });
+
   it("an unknown phase fails closed before anything is derived", () => {
     setEnv({ SELLEROPS_APPROVAL_PHASE: "COUPANG_WING_KEY_DELETION_BUT_SNEAKIER", ...IDENTITY });
     const { code, out, err } = run();

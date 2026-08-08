@@ -119,9 +119,20 @@ SELLEROPS_APPROVAL_PHASE=COUPANG_WING_LABEL_RECON tools/coupang-local/wing-probe
 
 Recon fails closed twice: the manifest gate refuses a scope containing a target with no candidate set
 (`WING_RECON_TARGETS_MISMATCH` — so a manifest the run would reject is never displayed), and the recorder
-refuses the same scope again before Chrome launches. The **phase travels on the run command** for the same
-reason the scope does: without it the recorder measures the shipped baselines while the operator approved a
-candidate sweep. A recon run records evidence only — it promotes no candidate and changes no shipped selector.
+refuses the same scope again before Chrome launches.
+
+The **phase gets two variables, exactly like the scope**, and the live recorder refuses unless they agree:
+
+| Variable | Means |
+|---|---|
+| `SELLEROPS_APPROVAL_PHASE` | the phase this run declares |
+| `SELLEROPS_WING_APPROVED_PHASE` | the phase the displayed manifest said, bound by the preflight |
+
+One variable is not enough in either direction: a phase left exported in the shell from an earlier session
+would arm a candidate sweep under a manifest granted for the shipped labels, and a forgotten phase would
+downgrade an approved sweep to a baseline probe while still printing a successful-looking record. The scope
+gate cannot catch either — the target set is identical both times. A recon run records evidence only: it
+promotes no candidate and changes no shipped selector.
 
 The scope must travel with the run: a probe whose targets differ from the approved manifest is an
 out-of-scope run (contract §1.3). **The live probe now enforces that itself** — it refuses before Chrome

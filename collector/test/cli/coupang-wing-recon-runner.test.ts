@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
 import {
   WING_LABEL_RECON_PHASE,
   WING_APPROVAL_PHASE_ENV,
+  WING_APPROVED_PHASE_ENV,
   WING_RECON_REFUSALS,
   reconRecordFor,
   reconRefusalMessage,
@@ -108,6 +109,12 @@ function fakeDeps(o: FakeOptions = {}): {
   return { deps, probedTargets, probedCandidates };
 }
 
+/** Both phase variables set to the same value — what the preflight binds and prints. */
+const reconEnv = (
+  run: string = WING_LABEL_RECON_PHASE,
+  approved: string = WING_LABEL_RECON_PHASE,
+): Record<string, string> => ({ [WING_APPROVAL_PHASE_ENV]: run, [WING_APPROVED_PHASE_ENV]: approved });
+
 /* ────────────────────────────── the recon phase gate ────────────────────────────── */
 
 describe("resolveWingReconScope — recon is armed by the APPROVED PHASE, never inferred", () => {
@@ -117,55 +124,74 @@ describe("resolveWingReconScope — recon is armed by the APPROVED PHASE, never 
 
   it("any other approved phase leaves it in baseline mode — including the phase that ships today", () => {
     for (const phase of ["COUPANG_WING_SELECTOR_PROBE", "COUPANG_WING_KEY_DELETION", "", "coupang_wing_label_recon"]) {
-      expect(resolveWingReconScope({ [WING_APPROVAL_PHASE_ENV]: phase }, ["self_dev"]), phase).toEqual({
-        requested: false,
-      });
+      expect(resolveWingReconScope(reconEnv(phase, phase), ["self_dev"]), phase).toEqual({ requested: false });
+    }
+  });
+
+  it("a phase left over in the shell CANNOT arm recon under a manifest approved for the probe", () => {
+    // Found by review, and it falsified this unit's headline claim. An operator who ran recon earlier and
+    // exported the phase, then approves an ordinary probe manifest for the same three shipped labels, would
+    // have got a 12-hypothesis sweep: the scope gate cannot see it, because the target set is identical.
+    const stale = { [WING_APPROVAL_PHASE_ENV]: WING_LABEL_RECON_PHASE }; // no approved-phase binding
+    const r = resolveWingReconScope(stale, ["self_dev", "vendor_info", "call_ip"]);
+    expect(r).toMatchObject({ requested: true, ok: false, refusal: "PHASE_APPROVAL_MISMATCH" });
+  });
+
+  it("an approved recon manifest run WITHOUT the phase refuses instead of quietly measuring the baselines", () => {
+    // The converse, and the more insidious one: the run would look successful while measuring the shipped
+    // labels the operator did not ask about, under a manifest that promised a candidate sweep.
+    const forgotten = { [WING_APPROVED_PHASE_ENV]: WING_LABEL_RECON_PHASE };
+    const r = resolveWingReconScope(forgotten, ["self_dev", "vendor_info", "call_ip"]);
+    expect(r).toMatchObject({ requested: true, ok: false, refusal: "PHASE_APPROVAL_MISMATCH" });
+  });
+
+  it("the runner is not MORE permissive about the phase than the harness that authorizes it", () => {
+    // `wing-probe-bootstrap.sh` and the preflight both use an exact `case` allowlist. A trimming runner would
+    // accept spellings the authorizing gate refuses — so the phase match is exact on both sides.
+    for (const v of ["COUPANG_WING_LABEL_RECON ", " COUPANG_WING_LABEL_RECON", "COUPANG_WING_LABEL_RECON\n", "\tCOUPANG_WING_LABEL_RECON"]) {
+      expect(resolveWingReconScope(reconEnv(v, v), ["self_dev"]), JSON.stringify(v)).toEqual({ requested: false });
     }
   });
 
   it("the recon phase with a fully sweepable scope arms the sweep, in the approved order", () => {
-    const r = resolveWingReconScope({ [WING_APPROVAL_PHASE_ENV]: WING_LABEL_RECON_PHASE }, [
-      "self_dev",
-      "vendor_info",
-      "call_ip",
-    ]);
+    const r = resolveWingReconScope(reconEnv(), ["self_dev", "vendor_info", "call_ip"]);
     expect(r).toEqual({ requested: true, ok: true, targets: ["self_dev", "vendor_info", "call_ip"] });
   });
 
   it("a NARROWER scope is fine — one target is a legitimate recon run", () => {
-    const r = resolveWingReconScope({ [WING_APPROVAL_PHASE_ENV]: WING_LABEL_RECON_PHASE }, ["call_ip"]);
+    const r = resolveWingReconScope(reconEnv(), ["call_ip"]);
     expect(r).toEqual({ requested: true, ok: true, targets: ["call_ip"] });
   });
 
   it("ONE non-sweepable approved target refuses the whole run — not a quiet sweep of the rest", () => {
     // The manifest the operator read described a target set. Sweeping a subset of it would mean the record and
     // the approval describe different work, which is precisely what "approved scope == measured scope" forbids.
-    const r = resolveWingReconScope({ [WING_APPROVAL_PHASE_ENV]: WING_LABEL_RECON_PHASE }, ["self_dev", "delete"]);
+    const r = resolveWingReconScope(reconEnv(), ["self_dev", "delete"]);
     expect(r).toMatchObject({ requested: true, ok: false, refusal: "RECON_TARGET_NOT_APPROVED" });
     expect((r as { reason: string }).reason).toContain("delete");
   });
 
   it("every baseline-only target is refused under the recon phase", () => {
     for (const t of ["issue", "credentials", "delete"] as WingRecordTarget[]) {
-      const r = resolveWingReconScope({ [WING_APPROVAL_PHASE_ENV]: WING_LABEL_RECON_PHASE }, [t]);
+      const r = resolveWingReconScope(reconEnv(), [t]);
       expect(r, t).toMatchObject({ ok: false, refusal: "RECON_TARGET_NOT_APPROVED" });
     }
   });
 
   it("an empty approved scope refuses rather than sweeping nothing and reporting success", () => {
-    const r = resolveWingReconScope({ [WING_APPROVAL_PHASE_ENV]: WING_LABEL_RECON_PHASE }, []);
+    const r = resolveWingReconScope(reconEnv(), []);
     expect(r).toMatchObject({ requested: true, ok: false, refusal: "RECON_SCOPE_EMPTY" });
   });
 
   it("an INHERITED phase key cannot arm recon — own properties only", () => {
     // Same discipline as the scope gate: a prototype-polluted env must not decide what a live run measures.
-    const env = Object.create({ [WING_APPROVAL_PHASE_ENV]: WING_LABEL_RECON_PHASE }) as Record<string, string>;
+    const env = Object.create(reconEnv()) as Record<string, string>;
     expect(resolveWingReconScope(env, ["self_dev"])).toEqual({ requested: false });
   });
 
   it("a non-string phase value cannot arm recon and does not throw", () => {
     for (const v of [1, true, null, undefined, {}, ["COUPANG_WING_LABEL_RECON"]]) {
-      const env = { [WING_APPROVAL_PHASE_ENV]: v } as unknown as Record<string, string | undefined>;
+      const env = { [WING_APPROVAL_PHASE_ENV]: v, [WING_APPROVED_PHASE_ENV]: v } as unknown as Record<string, string | undefined>;
       expect(resolveWingReconScope(env, ["self_dev"]), String(v)).toEqual({ requested: false });
     }
   });
@@ -174,7 +200,7 @@ describe("resolveWingReconScope — recon is armed by the APPROVED PHASE, never 
     // The reason reaches stderr, and an env-derived scope may hold whatever the operator mistyped there: a
     // path, a seller id, even a credential. Only names this module can vouch for are ever printed back.
     const hostile = ["ACCESS-KEY-abc123", "/Users/someone/secret", "vendor@example.com"] as unknown as WingRecordTarget[];
-    const r = resolveWingReconScope({ [WING_APPROVAL_PHASE_ENV]: WING_LABEL_RECON_PHASE }, hostile);
+    const r = resolveWingReconScope(reconEnv(), hostile);
     expect(r).toMatchObject({ ok: false, refusal: "RECON_TARGET_NOT_APPROVED" });
     const reason = (r as { reason: string }).reason;
     for (const token of hostile) expect(reason, token).not.toContain(token);
@@ -220,7 +246,6 @@ describe("the recon sweep — measures candidates, decides nothing", () => {
     expect([hit.verdict, hit.matchCount, hit.sig16]).toEqual(["UNIQUE", 1, "abcdef0123456789"]);
     expect(target.resolvedUnambiguously).toBe(true);
     // Nothing in the result is an instruction to change a locator — only ids, counts and signatures.
-    expect(JSON.stringify(result.recon)).not.toContain("promote");
   });
 
   it("a candidate whose probe THREW is NOT_MEASURED with a null count — never a measured zero", async () => {

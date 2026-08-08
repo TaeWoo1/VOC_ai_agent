@@ -367,11 +367,28 @@ async function sweepReconCandidates(
  * inline on the run command for exactly this phase and no other.
  */
 export const WING_LABEL_RECON_PHASE = "COUPANG_WING_LABEL_RECON" as const;
-/** The env var carrying the approved phase — the same one the preflight validated before displaying a manifest. */
+/** The env var carrying the phase THIS RUN declares. */
 export const WING_APPROVAL_PHASE_ENV = "SELLEROPS_APPROVAL_PHASE" as const;
+/**
+ * The env var carrying the phase the DISPLAYED MANIFEST said, written back by
+ * `tools/coupang-local/wing-probe-preflight.sh` from the manifest JSON — never from the run env it sourced.
+ *
+ * Two phase variables, for the same reason there are two scope variables. Review found the one-variable design
+ * broken in both directions: a stale `SELLEROPS_APPROVAL_PHASE=COUPANG_WING_LABEL_RECON` left exported in the
+ * shell from an earlier session would arm a 12-hypothesis sweep under a manifest the operator approved for the
+ * three SHIPPED labels; and the converse — approving a recon manifest, then starting the run without the phase
+ * the preflight printed — would quietly measure the baselines instead and print a successful-looking record.
+ * Neither is caught by the scope gate: the target set is identical in both cases. Only a second, independently
+ * bound variable can tell "this run is what the manifest described" from "this shell remembers something".
+ */
+export const WING_APPROVED_PHASE_ENV = "SELLEROPS_WING_APPROVED_PHASE" as const;
 
 /** Closed set of reasons a RECON pass is refused. Baseline probing is unaffected by these. */
-export const WING_RECON_REFUSALS = ["RECON_TARGET_NOT_APPROVED", "RECON_SCOPE_EMPTY"] as const;
+export const WING_RECON_REFUSALS = [
+  "RECON_TARGET_NOT_APPROVED",
+  "RECON_SCOPE_EMPTY",
+  "PHASE_APPROVAL_MISMATCH",
+] as const;
 export type WingReconRefusal = (typeof WING_RECON_REFUSALS)[number];
 
 export type WingReconScopeResult =
@@ -401,10 +418,35 @@ export function resolveWingReconScope(
   approved: readonly WingRecordTarget[],
 ): WingReconScopeResult {
   // OWN properties + strings only, matching `resolveGatedWingProbeScope`: an inherited key must not arm recon.
-  const hasOwn = Object.prototype.hasOwnProperty.call(env, WING_APPROVAL_PHASE_ENV);
-  const rawPhase = hasOwn ? (env as Record<string, unknown>)[WING_APPROVAL_PHASE_ENV] : undefined;
-  const phase = typeof rawPhase === "string" ? rawPhase.trim() : "";
-  if (phase !== WING_LABEL_RECON_PHASE) return { requested: false };
+  const own = (k: string): string | undefined => {
+    if (!Object.prototype.hasOwnProperty.call(env, k)) return undefined;
+    const v = (env as Record<string, unknown>)[k];
+    return typeof v === "string" ? v : undefined;
+  };
+  // EXACT match, deliberately un-trimmed. `wing-probe-bootstrap.sh` and the preflight both use an exact `case`
+  // allowlist, so a trimming runner would accept phase spellings the harness that authorizes it would refuse —
+  // the runner must never be more permissive about its own authorization than the gate that grants it.
+  const runPhase = own(WING_APPROVAL_PHASE_ENV) ?? "";
+  const approvedPhase = own(WING_APPROVED_PHASE_ENV) ?? "";
+  const runIsRecon = runPhase === WING_LABEL_RECON_PHASE;
+  const approvedIsRecon = approvedPhase === WING_LABEL_RECON_PHASE;
+
+  // Neither side claims recon ⇒ an ordinary baseline probe, exactly as before recon existed.
+  if (!runIsRecon && !approvedIsRecon) return { requested: false };
+  // Exactly one side claims it ⇒ the run and the approved manifest describe different work. Refuse both ways:
+  // running a sweep the manifest did not authorize, and running a baseline under a manifest that promised one.
+  if (runIsRecon !== approvedIsRecon) {
+    return {
+      requested: true,
+      ok: false,
+      refusal: "PHASE_APPROVAL_MISMATCH",
+      reason: runIsRecon
+        ? `${WING_APPROVAL_PHASE_ENV} requests ${WING_LABEL_RECON_PHASE} but ${WING_APPROVED_PHASE_ENV} does not — ` +
+          "re-run the preflight so the approved phase is bound to this run (a phase left over from an earlier shell is not an approval)"
+        : `${WING_APPROVED_PHASE_ENV} is ${WING_LABEL_RECON_PHASE} but this run did not request it — ` +
+          "use the command the preflight printed; without the phase this run would measure the shipped labels, not the candidates",
+    };
+  }
 
   if (approved.length === 0) {
     return {

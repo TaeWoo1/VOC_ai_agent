@@ -261,6 +261,13 @@ export interface WingRealEvidence {
    * document position with the same child count on both, i.e. the two pages render the same shell.
    */
   readonly targetSignatures: Readonly<Partial<Record<WingProbeTargetName, string>>>;
+  /**
+   * Which run each SIGNATURE came from — the same provenance discipline as `targetMatchCountSource`, and for a
+   * sharper reason: in a UNION record a target's count and its signature can come from DIFFERENT runs, so
+   * "this signature belongs to a target that matched once" is only checkable against the run that produced the
+   * signature. Without this the pairing is a code comment, which is not evidence.
+   */
+  readonly targetSignatureSource: Readonly<Partial<Record<WingProbeTargetName, string>>>;
 }
 
 /**
@@ -277,9 +284,10 @@ export interface WingRealEvidence {
  * 2026-08-06/07, so no reading of it was taken. Writing `false` would manufacture a measurement — the exact
  * move this record exists to prevent.
  *
- * `fc4cbafb42c8` is not cited for `pageCategory`: it predates the `credentialAnchorPresent` signal by minutes
- * and therefore classified the same page as `wing_home`. Its buckets are still valid evidence; its category is
- * an artifact of the code at that moment.
+ * `fc4cbafb42c8` is cited for its BUCKETS ONLY. It predates the `credentialAnchorPresent` signal by minutes, so
+ * it holds no reading for that field and classified the same page as `wing_home` — its category and anchor are
+ * artifacts of the code at that moment, not of the page. `pageCategory` / `credentialAnchorPresent` /
+ * `openApiMarkerPresent` here come from the three later runs.
  */
 export const WING_REAL_EVIDENCE_ISSUED_2026_08_07: WingRealEvidence = Object.freeze({
   capturedOn: "2026-08-07",
@@ -311,11 +319,11 @@ export const WING_REAL_EVIDENCE_ISSUED_2026_08_07: WingRealEvidence = Object.fre
     credentials: "wingrec_b2e87f42abd1",
     delete: "wingrec_c01e673ebc61",
   }),
-  // From `wingrec_42985b029ddd` (2026-08-07), the last five-target issued-page capture. The 2026-08-06 runs
-  // reported DIFFERENT sigs for the same two targets (`d3f775e8…` / `2b2479a8…`) with no signature-code change
-  // in between — so sig16 tracks the page as rendered on the day, and is a drift detector rather than a
-  // cross-session identity. Do not treat an unchanged sig across sessions as an invariant.
+  // The 2026-08-06 runs reported DIFFERENT sigs for the same two targets (`d3f775e8…` / `2b2479a8…`) with no
+  // signature-code change in between — so sig16 tracks the page as rendered on the day: a drift detector, not
+  // a cross-session identity. Do not treat an unchanged sig across sessions as an invariant.
   targetSignatures: Object.freeze({ issue: "b7ba43a8e788b4a8", credentials: "de6d35788c97ce5b" }),
+  targetSignatureSource: Object.freeze({ issue: "wingrec_42985b029ddd", credentials: "wingrec_42985b029ddd" }),
 });
 
 /**
@@ -351,6 +359,7 @@ export const WING_REAL_EVIDENCE_NO_KEY_2026_08_08: WingRealEvidence = Object.fre
   // same document position with the same child count on BOTH surfaces — one more signal that does not separate
   // them, and concrete support for the shell-dominates hypothesis in `wingIssuedStateFrom`.
   targetSignatures: Object.freeze({ issue: "b7ba43a8e788b4a8" }),
+  targetSignatureSource: Object.freeze({ issue: "wingrec_b554c86c0f0b" }),
 });
 
 /* ────────────────────────────── issued-state verdict (post-delete evidence) ────────────────────────────── */
@@ -437,6 +446,12 @@ export type WingIssuedStateReason = (typeof WING_ISSUED_STATE_REASONS)[number];
  * particular `readonlyFieldCountBucket: "none"` on the ISSUED page: the displayed keys are not readonly inputs
  * at all. This is a hypothesis about why the signal is flat, not a finding — and it points at a REGION-SCOPED
  * census as the thing to measure next, rather than at any predicate over these page-global numbers.
+ *
+ * The equal `issue` signature is *consistent* with that hypothesis and no more. It cannot be strong evidence
+ * for it, because the same handful of readings show sig16 changing on the same page between 2026-08-06 and
+ * 08-07 — a quantity that unstable across sessions cannot simultaneously carry weight as a cross-session
+ * structural identity. What the row does establish is the narrow thing the table is for: one more signal that
+ * fails to separate the two surfaces.
  *
  * **`credentialAnchorPresent` is retained as a SURFACE signal.** `classifyWingPage` still uses it to reach
  * `open_api_issuance`, and that use is unaffected: both pages genuinely ARE the open-API surface. What it may

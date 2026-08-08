@@ -56,6 +56,7 @@ fi
 # from the spec or from this run's env file; nothing from the surrounding shell.
 unset WALKTHROUGH_RUN_ID WALKTHROUGH_APPROVAL_ID WALKTHROUGH_GIT_COMMIT WING_PROBE_BOOTSTRAP_EPOCH \
       SELLEROPS_APPROVAL_PHASE SELLEROPS_WING_PROBE_TARGETS SELLEROPS_WING_APPROVED_TARGETS \
+      SELLEROPS_WING_APPROVED_PHASE \
       SELLEROPS_APPROVAL_OPERATION SELLEROPS_APPROVAL_MAX SELLEROPS_APPROVAL_ACCOUNT \
       SELLEROPS_APPROVAL_SURFACE SELLEROPS_APPROVAL_CHANNEL
 # shellcheck disable=SC1090
@@ -148,6 +149,10 @@ case "$M_PHASE" in
     echo "PREFLIGHT FAIL — the prepared manifest is for phase $M_PHASE, not a READ_ONLY WING recorder phase. Refusing."
     exit 1 ;;
 esac
+# UNEXERCISED by the selfcheck, and said so deliberately: the manifest CLI derives its phase from the same
+# SELLEROPS_APPROVAL_PHASE this script sourced from the run env, so the two agree by construction and no
+# fixture can make them differ. What this still catches is the gate ECHOING BACK a different phase than it was
+# given — a narrow property, kept because it costs nothing, but do not read it as a tested guarantee.
 if [ "$M_PHASE" != "$PHASE" ]; then
   echo "PREFLIGHT FAIL — the prepared manifest is for phase $M_PHASE but this run bootstrapped $PHASE. Refusing."
   exit 1
@@ -160,15 +165,21 @@ fi
 # could leave a half-written run env, and %r is Python repr, not shell quoting.
 if ! python3 -c 'import os, sys, tempfile
 path, resolved = sys.argv[1], sys.argv[2]
-drop = ("SELLEROPS_WING_PROBE_TARGETS=", "SELLEROPS_WING_APPROVED_TARGETS=")
+drop = ("SELLEROPS_WING_PROBE_TARGETS=", "SELLEROPS_WING_APPROVED_TARGETS=", "SELLEROPS_WING_APPROVED_PHASE=")
 lines = [l for l in open(path).read().splitlines() if not l.startswith(drop)]
 # Always single-quoted, matching what bootstrap writes: shlex.quote would leave a bare word unquoted, so the
 # file style would depend on the value. The escape below is the POSIX one and is correct for any content.
-quoted = "'\''" + resolved.replace("'\''", "'\''\"'\''\"'\''") + "'\''"
+def shquote(v):
+    return "'\''" + v.replace("'\''", "'\''\"'\''\"'\''") + "'\''"
+quoted = shquote(resolved)
 # TWO variables, deliberately: the run scope and the APPROVED scope. The live probe requires both and refuses
 # unless they are equal, so a run that measures something other than the displayed manifest cannot start.
 lines.append("SELLEROPS_WING_PROBE_TARGETS=" + quoted)
 lines.append("SELLEROPS_WING_APPROVED_TARGETS=" + quoted)
+# The approved PHASE, bound the same way and for the same reason as the approved scope: with only one phase
+# variable, a stale export from an earlier shell arms a candidate sweep under a manifest granted for the
+# shipped labels, and a forgotten phase silently downgrades an approved sweep to a baseline probe.
+lines.append("SELLEROPS_WING_APPROVED_PHASE=" + shquote(sys.argv[3]))
 fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)))
 try:
     with os.fdopen(fd, "w") as f:
@@ -177,13 +188,13 @@ try:
 except BaseException:
     if os.path.exists(tmp):
         os.unlink(tmp)
-    raise' "$RUN_ENV" "$M_TARGETS" 2>/dev/null; then
+    raise' "$RUN_ENV" "$M_TARGETS" "$M_PHASE" 2>/dev/null; then
   # This is the binding, not a convenience: without it, sourcing the run env can still reproduce a wider
   # scope than the one displayed. Refuse rather than pass with the binding silently skipped.
-  echo "PREFLIGHT FAIL — could not bind the approved scope to $RUN_ENV; refusing to present a manifest whose scope the run may not honor."
+  echo "PREFLIGHT FAIL — could not bind the approved scope/phase to $RUN_ENV; refusing to present a manifest the run may not honor."
   exit 1
 fi
-pass "approved scope bound to the run env ($M_TARGETS)"
+pass "approved scope + phase bound to the run env ($M_TARGETS · $M_PHASE)"
 
 echo
 echo "PREFLIGHT PASS"
@@ -214,10 +225,10 @@ echo "    Seated and ready."
 echo
 echo "  On approval, run the probe with the APPROVED scope inline. The probe refuses unless BOTH variables"
 echo "  are set and equal — an unset scope can no longer widen the run to every target:"
-# The PHASE travels with the run command, not just in the run env: the recorder derives recon mode from it, so
-# a command missing it would silently run a baseline probe under a recon manifest. It is displayed for both
-# phases so the two commands differ in exactly the field the operator just read on the manifest.
-echo "    cd $COLLECTOR_DIR && SELLEROPS_APPROVAL_PHASE=$M_PHASE \\"
+# BOTH phase variables travel with the run command, mirroring the two scope variables. The recorder derives
+# recon mode from them and refuses unless they agree, so neither a phase left over from an earlier shell nor a
+# forgotten phase on an approved recon command can make the run measure something the manifest did not describe.
+echo "    cd $COLLECTOR_DIR && SELLEROPS_APPROVAL_PHASE=$M_PHASE SELLEROPS_WING_APPROVED_PHASE=$M_PHASE \\"
 echo "      SELLEROPS_WING_PROBE_TARGETS=$M_TARGETS SELLEROPS_WING_APPROVED_TARGETS=$M_TARGETS \\"
 echo "      npx tsx $M_CLI -- --i-understand-this-opens-live-coupang-wing"
 echo

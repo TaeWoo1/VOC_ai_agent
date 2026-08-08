@@ -164,8 +164,9 @@ export function isWingReconTarget(value: unknown): value is WingReconTarget {
 /** Thrown for an unknown target rather than crashing on `undefined` — a refusal, not a TypeError. */
 export class UnknownWingReconTargetError extends Error {
   constructor(readonly target: string) {
-    // The offending value is one of OUR identifiers or an operator-supplied scope string, never page content.
-    super(`UNKNOWN_RECON_TARGET: ${target}`);
+    // The MESSAGE is value-free: the offending value may be an operator-supplied scope string, and a message is
+    // the part that reaches a log or a stderr line. It stays on `.target` for a debugger to read deliberately.
+    super("UNKNOWN_RECON_TARGET");
     this.name = "UnknownWingReconTargetError";
   }
 }

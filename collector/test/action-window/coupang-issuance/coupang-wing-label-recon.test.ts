@@ -222,6 +222,24 @@ describe("interpretation — it records, it does not decide", () => {
     expect(isWingReconTarget("issue")).toBe(false);
   });
 
+  it("the refusal MESSAGE is value-free — the offending string stays on the property", () => {
+    // The target may be an operator-supplied scope string, and the MESSAGE is the part that reaches a log or a
+    // stderr line. `resolveWingReconScope` already refuses to echo such tokens; this error must not undo that
+    // one layer down. The value is still available on `.target` for a debugger that asks for it deliberately.
+    const hostile = "/Users/someone/ACCESS-KEY-abc123";
+    try {
+      wingReconProbes([hostile as WingReconTarget]);
+      expect.unreachable("expected a refusal");
+    } catch (e) {
+      expect(e).toBeInstanceOf(UnknownWingReconTargetError);
+      const err = e as UnknownWingReconTargetError;
+      expect(err.message).not.toContain(hostile);
+      expect(err.message).toBe("UNKNOWN_RECON_TARGET");
+      expect(String(err)).not.toContain(hostile);
+      expect(err.target).toBe(hostile);
+    }
+  });
+
   it("every verdict is from the closed enum, and the result carries only ids, ints and booleans", () => {
     const results = interpretWingRecon(ALL, raw({ "self_dev.baseline": 2 }));
     for (const r of results) for (const c of r.candidates) {

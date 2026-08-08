@@ -24,7 +24,7 @@ import {
   type CalibrationPhase,
   type ApprovalPrereqInput,
 } from "./approval-manifest";
-import { CALIBRATION_PHASES } from "./approval-manifest";
+import { CALIBRATION_PHASES, isWingCalibrationPhase } from "./approval-manifest";
 import { resolveVisualReconScope } from "../action-window/api-issuance-calibration/visual-recon";
 // The public WING host default for the Coupang WING selector-probe phase (pure leaf; no per-run input needed).
 import { WING_DEFAULT_URL, resolveWingProbeScope } from "./coupang-wing-classifier";
@@ -74,7 +74,11 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
   // probe; only what it measures (and therefore what the manifest says) differs.
   const isWingLabelRecon = phase === "COUPANG_WING_LABEL_RECON";
   const isWingKeyDeletion = phase === "COUPANG_WING_KEY_DELETION";
-  const isWingPhase = isWingSelectorProbe || isWingLabelRecon || isWingKeyDeletion;
+  // The shared list, NOT a fourth hand-maintained chain. Review caught this one still spelled out by hand after
+  // the other three were consolidated: it decides whether the entry URL is screened against the WING host or
+  // the NAVER API-center host, so a WING phase missing from it fails as `INVALID_HOST` — a refusal whose cause
+  // names the wrong thing entirely.
+  const isWingPhase = isWingCalibrationPhase(phase as CalibrationPhase);
   const apiCenterUrl = isWingPhase
     ? (env("COUPANG_WING_URL") ?? WING_DEFAULT_URL)
     : (env("NAVER_API_CENTER_URL") ?? NAVER_API_CENTER_BASE_URL);
@@ -103,8 +107,13 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
   // to just the targets this calibration needs (e.g. `delete` for the delete-selector calibration). Absent ⇒ the
   // full set. Fail closed on any unknown target.
   let requestedProbeTargets: readonly string[] | undefined;
-  if (isWingSelectorProbe || isWingLabelRecon) {
-    const scope = resolveWingProbeScope(env("SELLEROPS_WING_PROBE_TARGETS"));
+  // An UNSET scope under the recon phase is left undefined so the gate applies the RECON default. Passing the
+  // resolver output unconditionally would hand the gate the full six-target set (its "empty means all" rule),
+  // which the recon gate then refuses — so the gate default was unreachable and the documented behaviour was
+  // wrong. It failed closed, but on the wrong cause.
+  const rawScope = env("SELLEROPS_WING_PROBE_TARGETS");
+  if ((isWingSelectorProbe || isWingLabelRecon) && !(isWingLabelRecon && (rawScope ?? "").trim() === "")) {
+    const scope = resolveWingProbeScope(rawScope);
     if (!scope.ok) {
       process.stderr.write(`PREFLIGHT FAIL: approval_prerequisite (WING_PROBE_TARGETS_MISMATCH): ${scope.reason}\n`);
       return 1;

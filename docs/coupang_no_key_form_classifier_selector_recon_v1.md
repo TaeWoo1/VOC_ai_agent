@@ -68,8 +68,9 @@ indistinguishable. That is a stronger and less comfortable statement than "not k
 **Why they match — a hypothesis, not a finding.** The census counts the whole document, so the WING shell
 (navigation, search, menus) supplies most forms, inputs and list containers and the open-API region cannot move
 a coarse bucket. Note `readonlyFieldCountBucket: none` on the *issued* page: the displayed keys are not readonly
-inputs at all. The `issue` button's structural signature being byte-identical across the two surfaces points the
-same way. If correct, the fix is a **region-scoped census**, not a cleverer predicate over these numbers.
+inputs at all. The `issue` button's structural signature being byte-identical across the two surfaces is
+*consistent* with this and no more — see the sig16 caution immediately below, which is why it cannot be leaned
+on as cross-session structural evidence. If correct, the fix is a **region-scoped census**, not a cleverer predicate over these numbers.
 
 **And a caution about sig16.** The 2026-08-06 captures reported `d3f775e8…` / `2b2479a8…` for `issue` /
 `credentials`; the 2026-08-07 capture reported `b7ba43a8…` / `de6d3578…` for the same targets on the same page,
@@ -194,9 +195,21 @@ tools/coupang-local/wing-probe-preflight.sh          # prepares + displays the r
 **Recon is armed by the approved PHASE, never by a flag.** The manifest is what the operator reads before
 granting, so "measure the 3 shipped labels" and "sweep 12 hypotheses for those 3 labels" must be different
 manifests. `COUPANG_WING_LABEL_RECON` is a separate `CalibrationPhase` with its own operator summary (which
-states in Korean that the run changes no selector); the recorder derives recon mode from
-`SELLEROPS_APPROVAL_PHASE`, and the preflight prints that variable on the run command for exactly that reason —
-a command missing it would run a baseline probe under a recon manifest.
+states in Korean that the run changes no selector).
+
+**The phase is bound by TWO variables, like the scope** — `SELLEROPS_APPROVAL_PHASE` (what this run declares)
+and `SELLEROPS_WING_APPROVED_PHASE` (what the displayed manifest said, written back by the preflight from the
+manifest JSON). Independent security review found the one-variable design broken in **both** directions, and
+neither is visible to the scope gate because the target set is identical in both cases:
+
+- a stale `SELLEROPS_APPROVAL_PHASE=COUPANG_WING_LABEL_RECON` still exported from an earlier shell would arm a
+  12-hypothesis sweep under a manifest approved for the three **shipped** labels;
+- approving a recon manifest and then starting the run **without** the phase the preflight printed would
+  quietly measure the baselines and print a successful-looking record.
+
+Both now refuse with `PHASE_APPROVAL_MISMATCH`. The runner matches the phase **exactly**, un-trimmed, because
+the bootstrap and preflight use exact `case` allowlists — a runner that trimmed would accept spellings the gate
+that authorizes it would reject.
 
 Two fail-closed rules, both **before Chrome launches**:
 

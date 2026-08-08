@@ -152,18 +152,31 @@ describe("the real captures — the audit inputs, as data", () => {
   });
 
   it("the 발급 button's SIGNATURE is byte-identical across both surfaces", () => {
-    // Same document position, same child count, on a page with a key and on a page without one. It is the
-    // strongest single piece of evidence that the two surfaces render the same shell — and one more signal
-    // that cannot separate them.
+    // Same document position, same child count, on a page with a key and on a page without one — one more
+    // signal that fails to separate them. Deliberately NOT called the strongest evidence that the two surfaces
+    // share a shell: the same records show sig16 changing on one page between 2026-08-06 and 08-07, and a
+    // quantity that unstable across sessions cannot also be a strong cross-session structural identity.
     const a = WING_REAL_EVIDENCE_ISSUED_2026_08_07.targetSignatures.issue;
     const b = WING_REAL_EVIDENCE_NO_KEY_2026_08_08.targetSignatures.issue;
     expect(a).toMatch(/^[0-9a-f]{16}$/);
     expect(a).toBe(b);
-    // A signature is recorded ONLY for a target that resolved uniquely — never for a 0 or an 8.
+  });
+
+  it("every signature names the run it came from, and that run is one of the record's own", () => {
+    // Review found the previous version asserting "a signature is recorded only for a target that matched
+    // once" by checking `targetMatchCounts[target] === 1` — but in a UNION record the count and the signature
+    // can come from different runs, so that pairing established nothing. Provenance is recorded now, and the
+    // count claim is only made where both sides are sourced to the SAME run.
     for (const e of [WING_REAL_EVIDENCE_ISSUED_2026_08_07, WING_REAL_EVIDENCE_NO_KEY_2026_08_08]) {
-      for (const [target, sig] of Object.entries(e.targetSignatures)) {
-        expect(sig, target).toMatch(/^[0-9a-f]{16}$/);
-        expect(e.targetMatchCounts[target as keyof typeof e.targetMatchCounts], target).toBe(1);
+      const sigTargets = Object.keys(e.targetSignatures) as (keyof typeof e.targetSignatures)[];
+      expect(sigTargets.length, e.surface).toBeGreaterThan(0);
+      for (const t of sigTargets) {
+        expect(e.targetSignatures[t], t).toMatch(/^[0-9a-f]{16}$/);
+        const src = e.targetSignatureSource[t];
+        expect(e.recordIds, `${t} signature source`).toContain(src);
+        // Where the count came from the SAME run, the sig must belong to a unique match. Where it did not,
+        // no claim is made — which is the honest reading of a union record.
+        if (e.targetMatchCountSource[t] === src) expect(e.targetMatchCounts[t], t).toBe(1);
       }
     }
   });
