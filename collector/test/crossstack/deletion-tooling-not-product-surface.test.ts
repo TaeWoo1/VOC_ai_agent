@@ -13,6 +13,11 @@
  *
  * The scanner is exercised against a PLANTED fixture below, so a version of it that silently finds nothing
  * (a bad glob, an unreadable root, a broken matcher) fails here instead of passing vacuously.
+ *
+ * **What it does not catch, stated rather than implied:** it is a textual scan of source files, so it cannot
+ * see a reference laundered through a renamed local alias or a generated string. It matches both the module
+ * PATHS and the exported SYMBOL names, which covers a direct import and a barrel re-export; it does not
+ * attempt to be a taint analysis. It is a fence against the easy mistake, not a proof of absence.
  */
 import { describe, it, expect } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync } from "node:fs";
@@ -29,13 +34,19 @@ const PRODUCT_TREES = ["frontend/src", "backend/src", "contracts"] as const;
  * legitimately deletes drafts, uploads and connections. The fence is about the WING key-deletion feature.
  */
 const DELETION_IDENTIFIERS = [
-  "COUPANG_WING_KEY_DELETION",
+  // module paths — how an import would name it
   "run-coupang-wing-deletion-live",
   "coupang-wing-deletion-driver",
-  "WING_DELETION_LABELS",
-  "WING_DELETION_SELECTORS_CALIBRATED",
   "wing-deletion-bootstrap",
   "wing-deletion-preflight",
+  // exported symbols — so a future barrel re-export cannot launder the path away
+  "COUPANG_WING_KEY_DELETION",
+  "CoupangWingDeletionDriver",
+  "WingDeletionPhase",
+  "WING_DELETION_LABELS",
+  "WING_DELETION_SELECTORS_CALIBRATED",
+  "WING_DELETION_WARNING_LABEL",
+  "WING_DELETION_TOTAL_STEPS",
 ] as const;
 
 const SCANNED_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".java", ".kt", ".sql", ".json", ".html"];
