@@ -27,6 +27,7 @@ import {
   COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION,
   COUPANG_WING_KEY_DELETION_OPERATION,
   COUPANG_WING_KEY_DELETION_SCOPE,
+  COUPANG_WING_ISSUANCE_REVEAL_ACTION,
   type ApprovalPrereqInput,
   type EntrypointSpec,
   type OperatorDestructiveAction,
@@ -41,6 +42,7 @@ const VR = PHASE_SPECS.API_CENTER_VISUAL_RECON;
 const WSP = PHASE_SPECS.COUPANG_WING_SELECTOR_PROBE;
 const WKD = PHASE_SPECS.COUPANG_WING_KEY_DELETION;
 const WLR = PHASE_SPECS.COUPANG_WING_LABEL_RECON;
+const WFR = PHASE_SPECS.COUPANG_WING_ISSUANCE_FORM_REVEAL;
 
 /** A fully-valid visual-recon input; individual tests override one field to prove a refusal. */
 function baseVisualRecon(): ApprovalPrereqInput {
@@ -309,6 +311,139 @@ describe("calibration phase separation", () => {
       expect(r.manifest.allowedActions).toContain("HIGHLIGHT_REAL_CONTROL");
       expect(r.manifest.selectorsCalibrated).toBe(true);
     }
+  });
+});
+
+/** The WING issuance-form reveal phase — highlights 발급, the operator presses it, one observation, STOP. */
+function baseWingReveal(): ApprovalPrereqInput {
+  return {
+    ...baseWingSelectorProbe(),
+    phase: WFR.phase,
+    cli: WFR.cli,
+    driver: WFR.driver,
+    declaredActions: WFR.capableActions,
+    selectorsCalibrated: true,
+    operation: "WING issuance-form reveal (operator presses 발급; no key issuance, no input, no value read)",
+    maxActions: "1 operator-performed 발급 press + 1 sanitized observation",
+    operatorRevealAction: COUPANG_WING_ISSUANCE_REVEAL_ACTION,
+  };
+}
+
+describe("Coupang WING issuance-form reveal phase (COUPANG_WING_ISSUANCE_FORM_REVEAL)", () => {
+  it("PREPARED manifest: agent READ_ONLY, highlights, and carries the reveal descriptor", () => {
+    const r = validateApprovalPrerequisites(baseWingReveal());
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const m = r.manifest;
+      expect(m.phase).toBe("COUPANG_WING_ISSUANCE_FORM_REVEAL");
+      expect(m.mode).toBe("READ_ONLY");
+      expect(m.allowedActions).toContain("HIGHLIGHT_REAL_CONTROL");
+      expect(m.apiCenterHost).toBe("wing_host");
+      expect(m.operatorRevealAction).toEqual(COUPANG_WING_ISSUANCE_REVEAL_ACTION);
+      // The manifest must never carry the DESTRUCTIVE descriptor — this phase is not that.
+      expect(m.operatorDestructiveAction).toBeUndefined();
+    }
+  });
+
+  it("the manifest states BOTH claims: not key creation, AND not proven safe", () => {
+    // The pair is the point. `createsKeyMaterial: false` is what the operator is approving; `keyCreationRuledOut:
+    // false` admits the runtime cannot prove nothing was issued. Collapsing them would be an over-claim.
+    const r = validateApprovalPrerequisites(baseWingReveal());
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.manifest.operatorRevealAction!.createsKeyMaterial).toBe(false);
+      expect(r.manifest.operatorRevealAction!.keyCreationRuledOut).toBe(false);
+      expect(r.manifest.operatorRevealAction!.expectedOutcomeConfirmed).toBe(false);
+      expect(r.manifest.operatorRevealAction!.autoAdvanceAfterReveal).toBe(false);
+      expect(r.manifest.operatorRevealAction!.forbiddenFollowOnAction).toBe("COMPLETE_WING_KEY_ISSUANCE");
+    }
+  });
+
+  it("HIGHLIGHTS a real control ⇒ an uncalibrated caller fails closed", () => {
+    const r = validateApprovalPrerequisites({ ...baseWingReveal(), selectorsCalibrated: false });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("SELECTORS_NOT_CALIBRATED");
+  });
+
+  it("a MISSING reveal descriptor refuses before a manifest exists", () => {
+    const { operatorRevealAction: _drop, ...noDescriptor } = baseWingReveal();
+    const r = validateApprovalPrerequisites(noDescriptor);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("MISSING_REVEAL_ACTION_CONTRACT");
+  });
+
+  it("every softening of the descriptor is refused, field by field", () => {
+    // The risk here is the opposite of the destructive phase's: a caller OVERSTATING safety. Each of these would
+    // print a manifest promising more than the evidence supports.
+    const softenings: Partial<Record<string, unknown>>[] = [
+      { keyCreationRuledOut: true },
+      { createsKeyMaterial: true },
+      { expectedOutcomeConfirmed: true },
+      { autoAdvanceAfterReveal: true },
+      { explicitCheckpointRequired: false },
+      { agentPerformsAction: true },
+      { credentialValueReadBudget: 1 },
+      { irreversible: true },
+      { operation: "COMPLETE_WING_KEY_ISSUANCE" },
+      { forbiddenFollowOnAction: "REVEAL_WING_ISSUANCE_CONFIGURATION" },
+      { expectedOutcome: "CREDENTIAL_SHOWN" },
+    ];
+    for (const patch of softenings) {
+      const r = validateApprovalPrerequisites({
+        ...baseWingReveal(),
+        operatorRevealAction: { ...COUPANG_WING_ISSUANCE_REVEAL_ACTION, ...patch } as never,
+      });
+      expect(r.ok, JSON.stringify(patch)).toBe(false);
+      if (!r.ok) expect(r.cause, JSON.stringify(patch)).toBe("REVEAL_ACTION_CONTRACT_MISMATCH");
+    }
+  });
+
+  it("an uncalibrated run reports the CALIBRATION cause first — the descriptor cannot mask it", () => {
+    const { operatorRevealAction: _drop, ...noDescriptor } = baseWingReveal();
+    const r = validateApprovalPrerequisites({ ...noDescriptor, selectorsCalibrated: false });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("SELECTORS_NOT_CALIBRATED");
+  });
+
+  it("an UNBOUND identity fails closed", () => {
+    for (const field of ["runId", "approvalId", "gitSha"] as const) {
+      const r = validateApprovalPrerequisites({ ...baseWingReveal(), [field]: "unknown" });
+      expect(r.ok, field).toBe(false);
+      if (!r.ok) expect(r.cause, field).toBe("UNBOUND_IDENTITY");
+    }
+  });
+
+  it("it CANNOT prepare deletion, renewal, or actual key issuance", () => {
+    // Capability containment: the reveal phase declares no destructive action and no credential-shown/copy step,
+    // and it cannot borrow another phase's actions.
+    expect(WFR.requiresOperatorDestructiveAction).toBeUndefined();
+    expect(WFR.operatorDestructiveAction).toBeUndefined();
+    expect(WFR.destructiveScope).toBeUndefined();
+    expect(WFR.capableActions).not.toContain("REDACT_SENSITIVE_REGIONS");
+    expect(WFR.capableActions).not.toContain("CAPTURE_REDACTED_VIEWPORT");
+    // Declaring an action beyond the phase's capability is refused.
+    const r = validateApprovalPrerequisites({
+      ...baseWingReveal(),
+      declaredActions: [...WFR.capableActions, "CAPTURE_REDACTED_VIEWPORT"],
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("ACTION_CAPABILITY_MISMATCH");
+  });
+
+  it("no OTHER phase may carry a reveal descriptor", () => {
+    for (const phase of CALIBRATION_PHASES) {
+      if (phase === "COUPANG_WING_ISSUANCE_FORM_REVEAL") continue;
+      expect(PHASE_SPECS[phase].requiresOperatorRevealAction, phase).toBeFalsy();
+      expect(PHASE_SPECS[phase].operatorRevealAction, phase).toBeUndefined();
+    }
+  });
+
+  it("its operator summary states the expectation is unconfirmed and excludes key issuance", () => {
+    const summary = PHASE_ENTRYPOINTS.COUPANG_WING_ISSUANCE_FORM_REVEAL.operatorActionSummary;
+    expect(summary).toContain("예상");
+    expect(summary).toContain("확인된 사실은 아니며");
+    expect(summary).toContain("수행하지 않습니다");
+    expect(validateEntrypointContract("COUPANG_WING_ISSUANCE_FORM_REVEAL", PHASE_ENTRYPOINTS.COUPANG_WING_ISSUANCE_FORM_REVEAL).ok).toBe(true);
   });
 });
 

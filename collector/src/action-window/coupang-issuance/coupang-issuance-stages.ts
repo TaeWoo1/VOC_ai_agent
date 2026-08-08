@@ -19,6 +19,26 @@
  *    line: reach the open-API page → 자체개발 → 업체명 → 호출 IP → 발급 checkpoint → copy the keys → return.
  *  - **`발급` (issue) is an explicit HUMAN CHECKPOINT.** The runtime highlights the 발급 button and RESTS; the
  *    seller presses it themselves. The runtime never clicks it and the step never auto-advances.
+ *
+ * ⚠ **THIS PLAN IS CONTRADICTED BY LIVE EVIDENCE (2026-08-08) AND IS NOT SAFE TO RUN.** Two claims above are
+ * false against the real WING no-key surface:
+ *
+ *   1. *"자체개발 / 업체명 / 호출 IP … are SECTIONS on the one page"* — they are not. Read-only candidate sweeps on
+ *      the real no-key open-API surface matched **0 for `자체개발` and `호출 IP` in every spelling tried**, and
+ *      `업체명` never resolved uniquely (8 / 4 / 0 across structural queries). `발급` and `Access Key` each
+ *      matched exactly 1 on the same page. The form fields are on a LATER screen.
+ *   2. *"the seller presses 발급 to issue the key"* — on the official Coupang flow 발급 opens the 연동 방식 /
+ *      configuration step, and the key is created by a later `확인`. This plan therefore advances from
+ *      `checkpoint_before_issue` straight to `guiding_copy_keys`, i.e. past a barrier nobody crossed, and tells
+ *      the seller to copy keys that do not exist yet. That is fail-open on the one step that mutates
+ *      marketplace state.
+ *
+ * The plan is deliberately left BYTE-UNCHANGED for now: its 7 stage identifiers are a product requirement the
+ * frontend keys tutorial copy off, and the correct ordering cannot be written without observing the Stage-2
+ * screen. `COUPANG_WING_ISSUANCE_FORM_REVEAL` (`coupang-wing-reveal-driver.ts`) exists to observe it under its
+ * own grant, with 발급 modelled as `REVEAL_WING_ISSUANCE_CONFIGURATION` rather than as key creation. Restructure
+ * this plan only from that live evidence — never from the prose above. See
+ * `docs/coupang_wing_issuance_form_reveal_v1.md`.
  *  - **Its parks recover by re-probing / re-guiding.** A login gate, a control it cannot find, or a page it did
  *    not expect all PARK recoverably; a `REQUEST_STEP_RECHECK` re-reads the page from the top (or re-guides a
  *    same-page checkpoint in place). None of them is a failure.
@@ -53,8 +73,14 @@ export type CoupangIssuanceStage =
   | "guiding_call_ip"
   /**
    * Seller CHECKPOINT: the 발급 (issue) button is highlighted and the run RESTS. The seller presses 발급
-   * themselves to issue the key — the runtime never clicks it, and this never auto-advances. An explicit human
-   * checkpoint; the seller advances with SellerOps's own "다음".
+   * themselves — the runtime never clicks it, and this never auto-advances. An explicit human checkpoint; the
+   * seller advances with SellerOps's own "다음".
+   *
+   * ⚠ **The stage NAME is fine; the old claim that this press "issues the key" was WRONG.** On the official
+   * Coupang flow 발급 opens the configuration step and the key is created by a later `확인` — so this stage is
+   * genuinely *before* issuance, but the stage that follows it here (`guiding_copy_keys`) does not exist yet at
+   * that point. Do not treat reaching this stage as evidence that a key was created; the runtime cannot tell
+   * either way (`wingIssuedStateFrom` ⇒ `NO_DISCRIMINATING_SIGNAL`).
    */
   | "checkpoint_before_issue"
   /** Seller barrier (checkpoint): they read + COPY the Access Key / Secret Key / 업체코드 (their highlighted

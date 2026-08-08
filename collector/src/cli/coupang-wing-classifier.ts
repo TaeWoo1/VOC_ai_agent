@@ -216,6 +216,21 @@ export function observeFrom(urlCategory: WingUrlCategory, census: WingStructural
   return { urlCategory, pageCategory, signals, blockers };
 }
 
+/**
+ * The operator action this driver models — deliberately NOT `KEY_CREATION`. The operator presses 발급 once; on
+ * the official Coupang flow that opens the 연동 방식 / configuration step, and the key is created only by a later
+ * `확인`. Naming the two differently is the entire point: they are separately approvable operations, and this
+ * driver can only ever prepare the first.
+ */
+export const WING_REVEAL_OPERATOR_ACTION = "REVEAL_WING_ISSUANCE_CONFIGURATION" as const;
+
+/**
+ * The operation this driver must NEVER prepare, declared as a constant so a guard test can assert no phase spec,
+ * no manifest and no driver path in this file reaches it. Key creation is the operator's later `확인` press, and
+ * it has no tooling at all yet — by design, until Stage-2 is observed.
+ */
+export const WING_KEY_CREATION_ACTION = "COMPLETE_WING_KEY_ISSUANCE" as const;
+
 /* ────────────────────────────── recorded REAL evidence (the audit's inputs) ────────────────────────────── */
 
 /**

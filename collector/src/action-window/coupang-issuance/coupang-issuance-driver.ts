@@ -23,6 +23,9 @@ import type { CoupangIssuanceStage } from "./coupang-issuance-stages";
  *    not a highlighted DOM control.
  *  - `self_dev` / `vendor_info` / `call_ip` — the issuance-form sections the seller confirms in turn.
  *  - `issue` — the 발급 button (a CHECKPOINT: highlight it, the seller presses it themselves; never clicked here).
+ *    ⚠ Its position in this union implies the press CREATES the key. Live evidence (2026-08-08) says it opens a
+ *    configuration step instead, and that `self_dev` / `vendor_info` / `call_ip` are not on the surface where
+ *    this walk expects them. Left unchanged pending the Stage-2 observation — see `coupang-issuance-stages.ts`.
  *  - `credentials` — the region where the Access Key / Secret Key / 업체코드 appear (NEVER read any value).
  *  - `return` — guidance-only ("return to SellerOps").
  */
@@ -53,6 +56,10 @@ export const COUPANG_ISSUANCE_TARGETS: readonly CoupangIssuanceTarget[] = [
 export const COUPANG_ISSUANCE_TRANSITION_OBSERVE_TARGET: CoupangIssuanceTarget = "reach_open_api";
 
 /**
+ * ⚠ **The "same page" premise below is FALSIFIED for 자체개발 / 업체명 / 호출 IP** — they matched 0 (or never
+ * uniquely) on the real no-key open-API surface, where `발급` and `Access Key` each matched 1. They live on a
+ * later screen. Unchanged pending live Stage-2 evidence; see `coupang-issuance-stages.ts`.
+ *
  * **Same-page VIEWPORT CHECKPOINTS.** Once the seller has reached the issuance page, 자체개발 / 업체명 / 호출 IP /
  * 발급 / 키 복사 / return are SECTIONS on the one page the seller is already looking at. A checkpoint STABILIZES
  * the page, LOCATES its section, SCROLLS it into view, and OVERLAYS a WING-resident guidance panel with the

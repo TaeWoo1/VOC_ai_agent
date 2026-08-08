@@ -43,6 +43,8 @@ import { screenApiCenterUrl } from "./observe-api-center";
 // entry URL to the WING host (not the NAVER API-center host) is the ONLY channel-specific step in this gate.
 import { screenWingUrl, isCanonicalWingProbeSubset, WING_PROBE_TARGET_NAMES } from "./coupang-wing-classifier";
 import { WING_RECON_APPROVED_SCOPE } from "../action-window/coupang-wing-label-recon";
+// Pure leaf constants (no Playwright): the two operator actions the WING issuance flow must keep separate.
+import { WING_KEY_CREATION_ACTION, WING_REVEAL_OPERATOR_ACTION } from "./coupang-wing-classifier";
 
 /**
  * The calibration phases. Their driver capabilities differ, so their manifests/approvals are separate:
@@ -70,6 +72,12 @@ export const CALIBRATION_PHASES = [
   // under approval granted for the first. Same capabilities, same READ_ONLY mode, same no-highlight guarantee;
   // its probe scope is additionally confined to the unresolved recon targets (§ step 7d).
   "COUPANG_WING_LABEL_RECON",
+  // The WING issuance-form REVEAL phase. The agent highlights the live-calibrated 발급 control and RESTS; the
+  // OPERATOR presses it. It is a real marketplace action, so it needs its own grant — but it is deliberately NOT
+  // declared as key creation: on the official Coupang flow 발급 opens the configuration step and the key is
+  // created only by a later 확인. Separating the two is the whole point of the phase, because the shipped guided
+  // runtime conflates them (`checkpoint_before_issue` → `guiding_copy_keys`), which live evidence falsified.
+  "COUPANG_WING_ISSUANCE_FORM_REVEAL",
   // The Coupang WING key-DELETION destructive phase. The AGENT stays READ_ONLY (it highlights the 삭제 control
   // and rests at a checkpoint; it NEVER clicks/deletes); the DESTRUCTIVE, IRREVERSIBLE action is the OPERATOR's
   // (deleting their WING self-developed Open API key — which immediately invalidates the existing Access/Secret
@@ -165,6 +173,63 @@ export const COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION: OperatorDestructiveAc
 };
 
 /**
+ * **The immutable OPERATOR-REVEAL action contract** (`COUPANG_WING_ISSUANCE_FORM_REVEAL`). A sibling of
+ * {@link OperatorDestructiveAction}, kept as a SEPARATE interface so the destructive machinery is not loosened to
+ * accommodate a non-destructive action.
+ *
+ * Two fields look contradictory and are not. They are the two different claims this whole unit exists to keep
+ * apart:
+ *
+ *  - `createsKeyMaterial: false` — the OPERATION being approved is not the key-creating one. The key-creating
+ *    press is {@link WING_KEY_CREATION_ACTION} (the later 확인), which has no tooling at all and no phase.
+ *  - `keyCreationRuledOut: false` — and this run cannot PROVE nothing was created. Every sanitized signal is
+ *    identical between a real issued page and a real no-key form (`wingIssuedStateFrom` ⇒
+ *    `NO_DISCRIMINATING_SIGNAL`), so the runtime is structurally unable to certify non-issuance. Only the
+ *    operator, looking at the screen, can say.
+ *
+ * Collapsing those into one optimistic boolean is exactly how a manifest would come to over-claim. The manifest
+ * carries both, so the operator approves a run that says what it does not know.
+ */
+export interface OperatorRevealAction {
+  /** The operator action being approved. NOT key creation. */
+  operation: typeof WING_REVEAL_OPERATOR_ACTION;
+  /** The operation this phase must never prepare, named so the separation is machine-checkable. */
+  forbiddenFollowOnAction: typeof WING_KEY_CREATION_ACTION;
+  /** The press being approved is not the one that creates key material. */
+  createsKeyMaterial: false;
+  /** …and the runtime cannot demonstrate that none was created. See the interface docstring. */
+  keyCreationRuledOut: false;
+  /** Opening a configuration step is not destructive; nothing existing is invalidated. */
+  irreversible: false;
+  /** The agent highlights only; it never clicks/types/submits — the operator presses 발급. */
+  agentPerformsAction: false;
+  /** A mandatory operator checkpoint (the expectation copy) precedes the press. */
+  explicitCheckpointRequired: true;
+  /** Zero credential-value reads during the run. */
+  credentialValueReadBudget: 0;
+  /** What we EXPECT the press to produce — an expectation, flagged as unconfirmed below. */
+  expectedOutcome: "CONFIGURATION_SURFACE";
+  /** No live run has confirmed the expectation, so the runtime fails closed on an unrecognized outcome. */
+  expectedOutcomeConfirmed: false;
+  /** The run stops after one observation; it never advances into the configuration step. */
+  autoAdvanceAfterReveal: false;
+}
+
+export const COUPANG_WING_ISSUANCE_REVEAL_ACTION: OperatorRevealAction = {
+  operation: WING_REVEAL_OPERATOR_ACTION,
+  forbiddenFollowOnAction: WING_KEY_CREATION_ACTION,
+  createsKeyMaterial: false,
+  keyCreationRuledOut: false,
+  irreversible: false,
+  agentPerformsAction: false,
+  explicitCheckpointRequired: true,
+  credentialValueReadBudget: 0,
+  expectedOutcome: "CONFIGURATION_SURFACE",
+  expectedOutcomeConfirmed: false,
+  autoAdvanceAfterReveal: false,
+};
+
+/**
  * **The immutable run SCOPE a destructive phase's grant binds to.** The descriptor above pins *what* the
  * operator does; this pins *what run they are approving*. Both matter, because the operator's one-line
  * `Seated and ready.` binds to the manifest's channel / surface / operation / action budget
@@ -219,6 +284,14 @@ export interface PhaseSpec {
    * immediate credential invalidation, agent-performs-nothing, mandatory checkpoint, zero value read).
    */
   requiresOperatorDestructiveAction?: boolean;
+  /**
+   * Set ONLY by the WING issuance-form reveal phase. The gate enforces the immutable
+   * {@link OperatorRevealAction} contract, so a caller cannot soften "this is not key creation" or "the runtime
+   * cannot rule key creation out" into something more reassuring than the evidence supports.
+   */
+  requiresOperatorRevealAction?: boolean;
+  /** The canonical reveal-action descriptor emitted into the manifest (present iff the flag above is set). */
+  operatorRevealAction?: OperatorRevealAction;
   /** The canonical destructive-action descriptor emitted into the manifest (present iff the flag above is set). */
   operatorDestructiveAction?: OperatorDestructiveAction;
   /**
@@ -371,6 +444,27 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     allowsHighlight: false,
     mode: "READ_ONLY",
   },
+  COUPANG_WING_ISSUANCE_FORM_REVEAL: {
+    phase: "COUPANG_WING_ISSUANCE_FORM_REVEAL",
+    cli: "src/cli/run-coupang-wing-reveal-live.ts",
+    driver: "CoupangWingRevealDriver (highlight 발급 + rest; the operator presses it; one sanitized observation)",
+    // AGENT capability is highlight + observe. It HIGHLIGHTS a real control ⇒ `allowsHighlight: true` ⇒ it fails
+    // closed (`SELECTORS_NOT_CALIBRATED`) unless the caller states the `issue` calibration
+    // (`WING_ISSUE_SELECTOR_CALIBRATED`, live-confirmed on four captures across both account states). This module
+    // never assumes a WING calibration — a caller who omits it is refused.
+    capableActions: [
+      "OPEN_DEDICATED_WINDOW",
+      "WAIT_OPERATOR_LOGIN_NAV",
+      "CLASSIFY_SANITIZED_PAGE_CATEGORY",
+      "STRUCTURAL_CENSUS",
+      "HIGHLIGHT_REAL_CONTROL",
+      "OBSERVE_USER_CLICK_TRANSITION",
+    ],
+    allowsHighlight: true,
+    mode: "READ_ONLY", // AGENT mode — the 발급 press is the OPERATOR's (see operatorRevealAction)
+    requiresOperatorRevealAction: true,
+    operatorRevealAction: COUPANG_WING_ISSUANCE_REVEAL_ACTION,
+  },
   COUPANG_WING_KEY_DELETION: {
     phase: "COUPANG_WING_KEY_DELETION",
     // Both original blockers are now resolved: the driver + CLI are built, and the 삭제 control is live-calibrated
@@ -407,6 +501,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
 export const WING_PHASES: readonly CalibrationPhase[] = [
   "COUPANG_WING_SELECTOR_PROBE",
   "COUPANG_WING_LABEL_RECON",
+  "COUPANG_WING_ISSUANCE_FORM_REVEAL",
   "COUPANG_WING_KEY_DELETION",
 ];
 export function isWingCalibrationPhase(phase: CalibrationPhase): boolean {
@@ -455,6 +550,9 @@ export const APPROVAL_PREREQ_CAUSES = [
   // The WING selector-probe per-run target scope must be a non-empty canonical subset of the fixed target set.
   "WING_PROBE_TARGETS_MISMATCH",
   "WING_RECON_TARGETS_MISMATCH",
+  // The WING issuance-form REVEAL phase requires its immutable operator-reveal descriptor, exactly.
+  "MISSING_REVEAL_ACTION_CONTRACT",
+  "REVEAL_ACTION_CONTRACT_MISMATCH",
 ] as const;
 export type ApprovalPrereqCause = (typeof APPROVAL_PREREQ_CAUSES)[number];
 
@@ -477,6 +575,7 @@ export const ENTRYPOINT_PHASES = [
   "API_ISSUANCE_SELECTOR_PROBE",
   "COUPANG_WING_SELECTOR_PROBE",
   "COUPANG_WING_LABEL_RECON",
+  "COUPANG_WING_ISSUANCE_FORM_REVEAL",
   "COUPANG_WING_KEY_DELETION",
   "API_ISSUANCE_FE_LIVE_PROOF",
   "NAVER_GUIDED_CONNECTION",
@@ -554,6 +653,17 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
     entrypointCommandId: "probe-wing-issuance-selectors",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 오픈API 발급 화면에서 준비되면 ready 를 보내세요. SellerOps는 아직 확정되지 않은 대상들의 여러 후보 라벨에 대해 일치 수만 읽습니다(강조·클릭·입력·값 읽기 없음). 후보가 하나로 좁혀져도 이 실행은 선택자를 바꾸지 않습니다.",
+    emitsFrontendUrl: false,
+  },
+  // The WING issuance-form REVEAL phase: a CLI-launched dedicated Chrome. The operator presses 발급 themselves
+  // after reading the expectation copy; the summary must not promise what the press produces, because no live run
+  // has confirmed it, and must state that key creation is not part of this step.
+  COUPANG_WING_ISSUANCE_FORM_REVEAL: {
+    entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
+    cli: "src/cli/run-coupang-wing-reveal-live.ts",
+    entrypointCommandId: "run-coupang-wing-reveal-live",
+    operatorActionSummary:
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 오픈API 화면에서 준비되면 ready 를 보내세요. SellerOps는 발급 버튼만 표시하고 멈춥니다(클릭·입력 없음). 발급은 판매자가 직접 누릅니다. 다음 설정 화면으로 이동할 것으로 예상되지만 확인된 사실은 아니며, 실제 키 발급/최종 확인은 이번 단계에서 수행하지 않습니다. 화면 종류만 한 번 확인하고 종료합니다.",
     emitsFrontendUrl: false,
   },
   // The Coupang WING key-DELETION phase: a CLI-launched dedicated Chrome (never a frontend URL). The seller logs
@@ -700,6 +810,13 @@ export interface ApprovalPrereqInput {
    * field against the immutable {@link OperatorDestructiveAction} constant, so a caller cannot soften it.
    */
   operatorDestructiveAction?: OperatorDestructiveAction;
+  /**
+   * Operator-performed REVEAL action descriptor (required ONLY for `COUPANG_WING_ISSUANCE_FORM_REVEAL`; ignored
+   * otherwise). Validated field-by-field against the immutable {@link OperatorRevealAction} constant, so a caller
+   * cannot flip `createsKeyMaterial` or `keyCreationRuledOut` into a claim the runtime cannot support, nor drop
+   * the checkpoint, nor turn on auto-advance.
+   */
+  operatorRevealAction?: OperatorRevealAction;
 }
 
 /** The sanitized manifest — no raw URL (host category only), no secret, no raw account/store id. */
@@ -757,6 +874,12 @@ export interface ApprovalManifest {
    * irreversible operator action explicit in what the operator approves. Absent on every non-destructive phase.
    */
   operatorDestructiveAction?: OperatorDestructiveAction;
+  /**
+   * The operator-performed REVEAL action this run is scoped around (present ONLY on the reveal phase). It makes
+   * the 발급 press explicit in what the operator approves — including the two claims it does NOT make: that this
+   * press is not key creation, and that the runtime cannot prove no key was created.
+   */
+  operatorRevealAction?: OperatorRevealAction;
   expiresAt: "process-lifetime";
   gitSha: string;
 }
@@ -1002,6 +1125,43 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
   // mandatory checkpoint, or open a credential-value-read budget. Order-stable ⇒ deterministic refusal cause.
   // NOTE: this runs AFTER the selectors gate (step 7), so an uncalibrated WING deletion phase fails closed with
   // `SELECTORS_NOT_CALIBRATED` first — the destructive descriptor cannot mask the calibration requirement.
+  // 11b) Operator-performed REVEAL action. The same discipline as the destructive contract below, for the
+  // opposite risk: not a caller understating danger, but a caller OVERSTATING safety. `createsKeyMaterial: false`
+  // and `keyCreationRuledOut: false` must both survive exactly — the first says the approved press is not the
+  // key-creating one; the second admits the runtime cannot prove none was created. Flipping the second to `true`
+  // would print a manifest asserting a guarantee no sanitized signal can support, which is precisely what the
+  // `NO_DISCRIMINATING_SIGNAL` verdict exists to prevent. Runs AFTER the selectors gate, so an uncalibrated
+  // reveal phase reports `SELECTORS_NOT_CALIBRATED` first.
+  if (spec.requiresOperatorRevealAction) {
+    const r = input.operatorRevealAction;
+    if (!r) {
+      return fail("MISSING_REVEAL_ACTION_CONTRACT", `${spec.phase} requires the operator-reveal-action descriptor`);
+    }
+    const canon = spec.operatorRevealAction ?? COUPANG_WING_ISSUANCE_REVEAL_ACTION;
+    if (
+      r.operation !== canon.operation ||
+      r.forbiddenFollowOnAction !== canon.forbiddenFollowOnAction ||
+      r.createsKeyMaterial !== false ||
+      r.keyCreationRuledOut !== false ||
+      r.irreversible !== false ||
+      r.agentPerformsAction !== false ||
+      r.explicitCheckpointRequired !== true ||
+      r.credentialValueReadBudget !== 0 ||
+      r.expectedOutcome !== canon.expectedOutcome ||
+      r.expectedOutcomeConfirmed !== false ||
+      r.autoAdvanceAfterReveal !== false
+    ) {
+      return fail(
+        "REVEAL_ACTION_CONTRACT_MISMATCH",
+        `the reveal-action descriptor must be exactly {operation:${canon.operation}, forbiddenFollowOnAction:${canon.forbiddenFollowOnAction}, createsKeyMaterial:false, keyCreationRuledOut:false, irreversible:false, agentPerformsAction:false, explicitCheckpointRequired:true, credentialValueReadBudget:0, expectedOutcome:${canon.expectedOutcome}, expectedOutcomeConfirmed:false, autoAdvanceAfterReveal:false}`,
+      );
+    }
+    // "The reveal action and the key-creation action are distinct" needs no runtime check: both are literal types
+    // (`typeof WING_REVEAL_OPERATOR_ACTION` / `typeof WING_KEY_CREATION_ACTION`), so `tsc` rejects the comparison
+    // as having no overlap. A future edit that made them the same string would fail to compile — a stronger
+    // guarantee than a refusal at runtime, which is why there is no branch here.
+  }
+
   if (spec.requiresOperatorDestructiveAction) {
     const d = input.operatorDestructiveAction;
     if (!d) {
@@ -1105,6 +1265,11 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
     // checks.
     ...(spec.requiresOperatorDestructiveAction && spec.operatorDestructiveAction
       ? { operatorDestructiveAction: spec.operatorDestructiveAction }
+      : {}),
+    // Emit the CONSTANT, not the input — validation forced them equal, so the manifest cannot carry a softened
+    // reveal contract even if a future edit reorders the checks.
+    ...(spec.requiresOperatorRevealAction && spec.operatorRevealAction
+      ? { operatorRevealAction: spec.operatorRevealAction }
       : {}),
     expiresAt: "process-lifetime",
     gitSha: input.gitSha,
