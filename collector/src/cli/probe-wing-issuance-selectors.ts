@@ -158,12 +158,13 @@ export interface WingSelectorRecordResult {
    * Sanitized ISSUED-STATE verdict derived from {@link observation} — a three-value enum plus a closed reason,
    * no value read.
    *
-   * **A single `not_issued` here is a SIGNAL, not proof of deletion.** On the open-API surface the verdict
-   * reduces to "no credential anchor, and the scan was not truncated", so a page that painted its shell before
-   * the credential XHR resolved reads `not_issued` while the key still exists — one reading cannot separate
-   * "nothing to show" from "not shown yet". Corroborate with `wingDeletionEvidenceFrom` over TWO independent
-   * runs before recording deletion evidence. `indeterminate` (including `SCAN_TRUNCATED`) is the absence of
-   * evidence, never evidence of the opposite. Full limits: `wingIssuedStateFrom` in `coupang-wing-classifier`.
+   * **As of 2026-08-08 this is always `indeterminate` on the open-API surface, and that is correct.** The real
+   * post-delete no-key form read `credentialAnchorPresent: true`, so the anchor is a proven false positive for
+   * issued-state; no signal recorded on BOTH a real issued page and a real no-key form tells them apart. The
+   * field is still emitted — the reason distinguishes `NOT_OPEN_API_SURFACE` / `SCAN_TRUNCATED` /
+   * `NO_DISCRIMINATING_SIGNAL` / `NO_OBSERVATION`, which is real information about the reading. What it must
+   * not be read as is a state: `indeterminate` is the absence of evidence, never evidence of either outcome.
+   * Full evidence table + what would restore a verdict: `wingIssuedStateFrom` in `coupang-wing-classifier`.
    */
   issuedState: { state: WingIssuedState; reason: WingIssuedStateReason };
   /** ALWAYS present: these candidate labels are unvalidated hypotheses until a live run proves matchCount === 1. */

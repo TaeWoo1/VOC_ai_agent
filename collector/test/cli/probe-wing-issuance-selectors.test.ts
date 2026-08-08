@@ -278,30 +278,29 @@ describe("wing selector recorder — read-only walk", () => {
     expect(creds.role).toBe("readonly-region");
   });
 
-  it("carries the ISSUED-STATE verdict, so a post-delete run answers the deletion question machine-checkably", async () => {
-    // The gap this closes: the live deletion produced pageCategory `open_api_issuance` BOTH before and after the
-    // key was deleted, so the record could not distinguish the two states and the deletion stayed
-    // operator-attested. `OBS` here is the post-delete shape — form marker present, credential anchor absent.
+  it("carries the ISSUED-STATE verdict, and on the open-API surface that verdict is honestly indeterminate", async () => {
+    // Corrected 2026-08-08. This used to assert `not_issued`, on the theory that the credential anchor told an
+    // issued page from a post-delete form. The real no-key form read `credentialAnchorPresent: true` — the
+    // anchor is a false positive — so no reading of this surface can currently answer the deletion question.
+    // The record still CARRIES the verdict; what changed is that the verdict admits it does not know.
     const { deps } = fakeDeps();
     const result = await runWingSelectorRecord(deps);
-    expect(result.issuedState).toEqual({ state: "not_issued", reason: "FORM_MARKER_WITHOUT_CREDENTIAL_ANCHOR" });
+    expect(result.issuedState).toEqual({ state: "indeterminate", reason: "NO_DISCRIMINATING_SIGNAL" });
   });
 
   it("the verdict follows the OBSERVATION, not the target measurements", async () => {
-    // A run where every selector matches uniquely must still report `issued` when the credential anchor is
-    // present: uniqueness of a fixed label says nothing about whether a key exists.
-    const issued: WingObservation = {
-      ...OBS,
-      signals: { ...OBS.signals, credentialAnchorPresent: true, openApiMarkerPresent: false },
-    };
+    // Still the property worth locking: a run where every selector resolves uniquely must not let that
+    // uniqueness leak into the state verdict. Uniqueness of a fixed label says nothing about whether a key
+    // exists — so an all-unique run on an off-surface page still reports the surface reason, not a state.
+    const offSurface: WingObservation = { ...OBS, pageCategory: "wing_home" };
     const result = await runWingSelectorRecord({
       waitForReady: async () => "ready",
-      observeSurface: async () => issued,
+      observeSurface: async () => offSurface,
       probeTarget: async () => UNIQUE,
       announce: () => undefined,
     });
     expect(result.uniqueCandidates).toBeGreaterThan(0);
-    expect(result.issuedState.state).toBe("issued");
+    expect(result.issuedState).toEqual({ state: "indeterminate", reason: "NOT_OPEN_API_SURFACE" });
   });
 
   it("an observation that could not be read reports indeterminate — never 'not_issued'", async () => {

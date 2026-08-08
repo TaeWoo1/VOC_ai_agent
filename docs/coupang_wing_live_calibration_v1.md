@@ -35,9 +35,14 @@
 4. **Two fixed-label target anchors live-confirmed, with stable signatures across two captures:**
    `issue` (발급) `matchCount=1` (sig `d3f775e8…`) and `credentials` (Access Key) `matchCount=1`
    (sig `2b2479a8…`) — identical across both runs (deterministic).
-5. **Already-issued signature.** On the already-issued page the issuance-**form** controls are absent while
+5. ~~**Already-issued signature.** On the already-issued page the issuance-**form** controls are absent while
    the issued **keys** + the 발급 button are present — a coherent already-issued shape. This also confirms the
-   scope assumption that `자체개발`/`호출 IP` are form-only and not observable on an already-issued account.
+   scope assumption that `자체개발`/`호출 IP` are form-only and not observable on an already-issued account.~~
+   **WITHDRAWN 2026-08-08 — falsified by the real no-key form.** `자체개발` and `호출 IP` matched **0 on the
+   real issuance form too**, so their absence here was never evidence of form-only-ness — the labels simply
+   match nothing on either surface. The "coherent already-issued shape" conclusion rested on that inference and
+   does not survive it. See
+   [`coupang_no_key_form_classifier_selector_recon_v1.md`](./coupang_no_key_form_classifier_selector_recon_v1.md).
 
 ## SYNTHETIC-ONLY (not live-verified this unit — honest scope)
 
@@ -47,7 +52,9 @@
    fixture-driver tests).
 2. **`vendor_info` (업체명)** matched **9×** on the real page — the label is too broad to resolve uniquely. It
    cannot be narrowed without reading page text (forbidden), so it stays `LIVE_DOM_CALIBRATION_PENDING`.
-3. **`self_dev` / `call_ip`** — form-only controls, `matchCount=0` on the already-issued page; stay synthetic.
+3. **`self_dev` / `call_ip`** — `matchCount=0` on the already-issued page; stay synthetic. ~~form-only
+   controls~~ **corrected 2026-08-08:** they matched 0 on the real no-key **form** as well, so these are
+   unresolved labels, not form-only controls. Recon candidates: `coupang-wing-label-recon.ts`.
 4. **The full FE-driven guided walkthrough end-to-end** (SellerOps start → agent-hosted Action Window run →
    highlight on the real WING page → `REQUEST_STEP_RECHECK` advance → return): calibration used the read-only
    **recorder** (the driver's observation path), **not** the full guided run. The guided walkthrough remains
