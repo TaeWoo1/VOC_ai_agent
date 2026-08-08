@@ -9,6 +9,12 @@
 > Companion: [`coupang_wing_live_calibration_v1.md`](./coupang_wing_live_calibration_v1.md) (the earlier
 > `issue` / `credentials` / page-detection calibration). Approval rules:
 > [`sellerops_live_approval_contract.md`](./sellerops_live_approval_contract.md).
+>
+> **Internal tooling, not a product feature (2026-08-08).** These selectors serve
+> `COUPANG_WING_KEY_DELETION`, which is an internal live-proof / diagnostic operation — never seller-facing
+> onboarding. SellerOps does not recommend deleting a key and renders no deletion walkthrough; the tooling is
+> feature-frozen. See [`product-scope-v1.md`](./product-scope-v1.md) §7.19 and the classification block in
+> [`coupang_wing_key_deletion_live_v1.md`](./coupang_wing_key_deletion_live_v1.md).
 
 ## The capture
 

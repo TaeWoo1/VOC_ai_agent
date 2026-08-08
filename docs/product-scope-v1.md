@@ -566,6 +566,17 @@ method는 "미지원"으로 표기하거나 숨김(`no_roadmap_language_in_ui`, 
 17. **한 사용자 행동을 마켓 클릭 시퀀스로 확장** — Action Window는 사용자 직접 클릭이 기본이며, SellerOps가
     한 행동을 몰래 여러 마켓 클릭으로 번역하지 않는다(§1.5). 감독형 단일 클릭 원칙(정확히 1개, 서명 일치 시)만 예외.
 18. **OperationRun 도메인의 조기 구현** — §1.7은 방향 기록이며, 실행 모드·체크포인트 안정 전 코드 착수 금지.
+19. **API key 삭제를 제품 기능으로 다루기** (2026-08-08 제품 오너 정정) — `COUPANG_WING_KEY_DELETION`은
+    **internal live-proof / diagnostic tooling**이며 판매자 onboarding 기능이 아니다. 운영자 소유 테스트 계정을
+    실제 no-key 상태로 만들어 **신규 판매자 발급 화면을 라이브 보정**하기 위해서만 존재한다. 따라서:
+    **(a)** 정상 onboarding에서 SellerOps는 기존 API key 삭제를 **권하지 않고** 삭제 walkthrough를 노출하지 않는다,
+    **(b)** FE onboarding CTA·튜토리얼·복구 플로우 어디에도 노출하지 않는다(seller-facing 트리 진입 금지 —
+    `collector/test/crossstack/deletion-tooling-not-product-surface.test.ts`가 강제),
+    **(c)** product capability로 표기·홍보하지 않는다(§7.4·§7.15 표기 규율과 동일),
+    **(d)** deletion tooling의 **추가 기능 개발을 중단**한다(기존 도구는 진단용으로 유지·회귀 보호만).
+    정상 사용자 흐름은 네 가지뿐이다: key 없음 ⇒ 신규 발급 guided tutorial · key 있음 ⇒ 기존 credential 연결 ·
+    expiry/renewal ⇒ 재발급·갱신 guided flow · credential invalid ⇒ re-auth/reissue recovery
+    (`docs/coupang_guided_issuance_credential_lifecycle_scope_v1.md`).
 
 ---
 

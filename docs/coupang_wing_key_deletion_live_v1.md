@@ -11,6 +11,27 @@
 > Approval rules: [`sellerops_live_approval_contract.md`](./sellerops_live_approval_contract.md). Selector
 > provenance: [`coupang_wing_delete_selector_calibration_v1.md`](./coupang_wing_delete_selector_calibration_v1.md).
 
+## Product classification — internal tooling, not a feature (2026-08-08)
+
+**`COUPANG_WING_KEY_DELETION` is not a SellerOps onboarding feature and must never be presented as one.**
+
+This deletion existed for one reason: to put the operator-owned test account into a **real no-key state** so
+that the new-seller issuance form — never observable while the account held a key — could be calibrated
+live. It is an **internal live-proof / diagnostic operation**, and the reader of this document is an engineer
+or the operator, never a seller.
+
+Seller-facing Coupang onboarding has exactly four states — key 없음 ⇒ 신규 발급 guided tutorial · key 있음 ⇒
+기존 credential 연결 · expiry/renewal ⇒ 재발급·갱신 guided flow · credential invalid ⇒ re-auth/reissue
+recovery. Deleting an existing key is **not** among them, and SellerOps neither recommends it nor renders a
+walkthrough for it.
+
+Consequently the tooling described here is **feature-frozen**: kept for diagnostics and regression-protected,
+never surfaced in a frontend CTA, never labelled a capability, and not developed further. The rule is recorded
+in [`product-scope-v1.md`](./product-scope-v1.md) §7.19, the onboarding states in
+[`coupang_guided_issuance_credential_lifecycle_scope_v1.md`](./coupang_guided_issuance_credential_lifecycle_scope_v1.md),
+and the seller-facing-tree exclusion is enforced by
+`collector/test/crossstack/deletion-tooling-not-product-surface.test.ts`.
+
 ## The run
 
 Identity `wt-8a396f64610f` / `apr-07a5c5afbec2`, pinned to `e798e910` with a clean tree, verified by both the
@@ -105,6 +126,18 @@ clearing does not reset the driver's phase, so the checkpoint-before-operator-ac
 
 ## Next unit — `Coupang WING Post-Delete Issuance Form Live Calibration v1`
 
+**Primary purpose: `REAL NO-KEY WING ISSUANCE FORM CALIBRATION`** — not deletion verification (2026-08-08
+product-owner reframe). The account is now in the state that has blocked new-seller onboarding from the
+beginning: a real WING account with no Open API key. Measuring that form is the point of the unit; confirming
+the deletion is a by-product of standing in front of it.
+
+The ordering that follows from that:
+
+- **Primary** — `matchCount` + uniqueness for `self_dev` / `vendor_info` / `call_ip` / `issue`, the four
+  controls a guided first-issuance walkthrough must be able to point at.
+- **Secondary** — `credentialAnchorPresent=false` corroborated over two readings, recorded as post-delete
+  state evidence. Worth having; it is not what the unit is for, and it does not gate the unit's success.
+
 **No new phase or harness is needed.** `COUPANG_WING_SELECTOR_PROBE` already measures these targets READ_ONLY
 under a scoped, gated harness; the scope is part of what the operator approves, and the runtime refuses unless
 the approved and runtime scopes are equal.
@@ -118,15 +151,19 @@ tools/coupang-local/wing-probe-preflight.sh      # displays the READ_ONLY manife
 Scope is the four **form** targets only — deliberately not `credentials` or `delete`, which cannot exist after
 a deletion and would guarantee two non-unique candidates that muddy the signal.
 
-Success criteria for that unit:
+Success criteria for that unit — **primary (the form)**:
+
+- `matchCount` recorded for each of `self_dev` / `vendor_info` / `call_ip` / `issue`
+- uniqueness established for the targets a later guided first-issuance walk must highlight
+- leak 0 · code change 0 during the live run · no highlight / click / input / 발급
+
+**Secondary (deletion post-state, does not gate the unit):**
 
 - `issuedState: not_issued` on **two independent probe runs** (⇒ `wingDeletionEvidenceFrom` reports
-  `confirmedNotIssued: true` / `STABLE_NOT_ISSUED`) — this is the machine-verifiable post-state evidence the
-  deletion currently lacks. A single run's `not_issued` is a signal only, for the hydration reason above. Two
-  runs under one grant are fine: the probe is read-only and the scope is unchanged between them.
-- `matchCount` recorded for each of `self_dev` / `vendor_info` / `call_ip` / `issue`
-- uniqueness established for the targets a later guided walk must highlight
-- leak 0 · code change 0 during the live run · no highlight / click / input / 발급
+  `confirmedNotIssued: true` / `STABLE_NOT_ISSUED`) — the machine-verifiable post-state evidence the deletion
+  currently lacks. A single run's `not_issued` is a signal only, for the hydration reason above. Two runs
+  under one grant are fine: the probe is read-only and the scope is unchanged between them. If this comes back
+  `indeterminate`, record it and move on — the form measurement is the deliverable.
 
 Three expectations worth setting now:
 
@@ -149,8 +186,14 @@ Three expectations worth setting now:
 If both readings come back `indeterminate`, the unit still succeeds on its **selector** criteria (the four
 matchCounts); only the deletion-evidence criterion goes unmet, and it stays unmet honestly.
 
-Only after that unit: the WING-resident reissue tutorial, new key issuance, SellerOps credential replacement,
-and connection/sync recovery — each its own unit with its own grant.
+Only after that unit does the real goal become reachable — the **new-seller onboarding path**, end to end:
+
+> SellerOps start → WING-resident overlay → **operator** issues the API key → SellerOps masked credential
+> entry → connect-test → first sync → `CONNECTED`
+
+Each leg is its own unit with its own grant. Note the framing: on a no-key account this is **first issuance
+for a new seller**, not a reissue — the account reached this state through an internal proof operation, and
+that operation is not part of the path being built.
 
 ## Not done in this unit
 

@@ -26,6 +26,15 @@
  * A calibrated selector is NOT an approval. Running this requires a fresh, single-use operator grant against a
  * displayed destructive Approval Manifest (`docs/sellerops_live_approval_contract.md`).
  *
+ * **INTERNAL DIAGNOSTIC TOOLING — NOT A PRODUCT FEATURE, AND FEATURE-FROZEN** (product-owner decision,
+ * 2026-08-08; `docs/product-scope-v1.md` §7.19). This entrypoint exists to put an OPERATOR-OWNED test account
+ * into a real no-key state so the new-seller issuance form can be calibrated live. Seller onboarding has four
+ * states — key 없음 ⇒ guided issuance · key 있음 ⇒ connect · expiry ⇒ guided renewal · invalid ⇒ re-auth /
+ * reissue recovery — and deleting a key is NOT one of them: SellerOps never recommends it and renders no
+ * deletion walkthrough. So: do not import this (or the driver) from any seller-facing tree — a fence test
+ * (`test/crossstack/deletion-tooling-not-product-surface.test.ts`) fails the build if you do — do not label it
+ * a capability, and do not extend it. Regression protection only.
+ *
  * The seller navigates themselves (this CLI never `.goto`s), signals readiness + completion via sentinel files, and
  * the context is always closed. `main()` runs ONLY when invoked directly (inert on import) so tests launch nothing.
  */
