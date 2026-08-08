@@ -35,6 +35,11 @@
 4. **Two fixed-label target anchors live-confirmed, with stable signatures across two captures:**
    `issue` (발급) `matchCount=1` (sig `d3f775e8…`) and `credentials` (Access Key) `matchCount=1`
    (sig `2b2479a8…`) — identical across both runs (deterministic).
+   **Scoped 2026-08-08:** "deterministic" holds *within* that session only. The 2026-08-07 capture of the same
+   page reported `b7ba43a8…` / `de6d3578…` for the same two targets with no change to the signature code in
+   between, so sig16 tracks the page as rendered on the day — a drift detector, not a cross-session identity.
+   Do not treat an unchanged sig across sessions as an invariant. (Recovered evidence:
+   `WING_REAL_EVIDENCE_ISSUED_2026_08_07.targetSignatures`.)
 5. ~~**Already-issued signature.** On the already-issued page the issuance-**form** controls are absent while
    the issued **keys** + the 발급 button are present — a coherent already-issued shape. This also confirms the
    scope assumption that `자체개발`/`호출 IP` are form-only and not observable on an already-issued account.~~

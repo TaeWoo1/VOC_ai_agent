@@ -77,11 +77,15 @@ echo
 check_identity_bound "$RUN_ID" "$APPROVAL_ID" "$RUN_GIT"
 check_identity_fresh "$BOOTSTRAP_EPOCH" "$IDENTITY_TTL_SECONDS"
 
-# 3. The phase must be the WING selector probe. This harness prepares that phase and no other — the
-#    destructive deletion phase has its own gate and is not approvable from here.
-[ "$PHASE" = "COUPANG_WING_SELECTOR_PROBE" ] \
-  && pass "phase is COUPANG_WING_SELECTOR_PROBE (READ_ONLY)" \
-  || fail "phase must be COUPANG_WING_SELECTOR_PROBE (got '${PHASE:-unset}') — this harness prepares no other phase"
+# 3. The phase must be one of the two READ_ONLY WING recorder phases — the shipped-label selector probe, or the
+#    candidate-label recon. This harness prepares those and no others; the destructive deletion phase has its
+#    own gate and is not approvable from here.
+case "$PHASE" in
+  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON)
+    pass "phase is $PHASE (READ_ONLY)" ;;
+  *)
+    fail "phase must be COUPANG_WING_SELECTOR_PROBE or COUPANG_WING_LABEL_RECON (got '${PHASE:-unset}') — this harness prepares no other phase" ;;
+esac
 
 # 4. No code drift since bootstrap. The manifest records a git SHA; if HEAD moved, or the working tree
 #    carries uncommitted/untracked changes, the code that would run is NOT the code that SHA names —
@@ -135,9 +139,17 @@ if [ "$FIELD_FAIL" != "0" ]; then
   echo "PREFLIGHT FAIL — the prepared manifest is missing a field this display depends on; refusing to show a partial manifest."
   exit 1
 fi
-# The gate re-derives the phase itself; a manifest for any other phase must never be displayed by this harness.
-if [ "$M_PHASE" != "COUPANG_WING_SELECTOR_PROBE" ]; then
-  echo "PREFLIGHT FAIL — the prepared manifest is for phase $M_PHASE, not the READ_ONLY selector probe. Refusing."
+# The gate re-derives the phase itself; a manifest for any other phase must never be displayed by this harness,
+# AND it must be the same phase this run bootstrapped — a manifest for the OTHER read-only phase describes
+# different work (shipped labels vs candidate hypotheses) and must not be presented under this run's identity.
+case "$M_PHASE" in
+  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON) ;;
+  *)
+    echo "PREFLIGHT FAIL — the prepared manifest is for phase $M_PHASE, not a READ_ONLY WING recorder phase. Refusing."
+    exit 1 ;;
+esac
+if [ "$M_PHASE" != "$PHASE" ]; then
+  echo "PREFLIGHT FAIL — the prepared manifest is for phase $M_PHASE but this run bootstrapped $PHASE. Refusing."
   exit 1
 fi
 
@@ -187,15 +199,26 @@ echo
 echo "  operator action ($M_ENTRY_TYPE):"
 echo "    $M_OPERATOR_ACTION"
 echo
-echo "  The probe measures fixed-label match counts only — no highlight, no click, no input, no value read,"
-echo "  no 발급/재발급/삭제, and it never navigates the window (the seller does)."
+if [ "$PHASE" = "COUPANG_WING_LABEL_RECON" ]; then
+  echo "  This run sweeps CANDIDATE labels for the targets above — several unvalidated hypotheses each — and"
+  echo "  measures match counts only: no highlight, no click, no input, no value read, no 발급/재발급/삭제, and it"
+  echo "  never navigates the window (the seller does). A candidate that resolves uniquely is recorded as"
+  echo "  EVIDENCE ONLY — this run changes no shipped selector. Promotion is a later offline edit with tests."
+else
+  echo "  The probe measures fixed-label match counts only — no highlight, no click, no input, no value read,"
+  echo "  no 발급/재발급/삭제, and it never navigates the window (the seller does)."
+fi
 echo
 echo "  If this manifest is correct and displayed, the operator's entire single-use grant is one line:"
 echo "    Seated and ready."
 echo
 echo "  On approval, run the probe with the APPROVED scope inline. The probe refuses unless BOTH variables"
 echo "  are set and equal — an unset scope can no longer widen the run to every target:"
-echo "    cd $COLLECTOR_DIR && SELLEROPS_WING_PROBE_TARGETS=$M_TARGETS SELLEROPS_WING_APPROVED_TARGETS=$M_TARGETS \\"
+# The PHASE travels with the run command, not just in the run env: the recorder derives recon mode from it, so
+# a command missing it would silently run a baseline probe under a recon manifest. It is displayed for both
+# phases so the two commands differ in exactly the field the operator just read on the manifest.
+echo "    cd $COLLECTOR_DIR && SELLEROPS_APPROVAL_PHASE=$M_PHASE \\"
+echo "      SELLEROPS_WING_PROBE_TARGETS=$M_TARGETS SELLEROPS_WING_APPROVED_TARGETS=$M_TARGETS \\"
 echo "      npx tsx $M_CLI -- --i-understand-this-opens-live-coupang-wing"
 echo
 echo "  (Re-bootstrap ⇒ new approval id ⇒ the old approval is dead. A code/branch/run/scope change ⇒ REVOKED.)"

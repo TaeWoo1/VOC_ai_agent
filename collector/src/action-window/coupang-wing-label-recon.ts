@@ -11,24 +11,36 @@
  * may be promoted into the shipped labels **only** after a live reading shows it resolving uniquely — this
  * module deliberately contains no promotion path, so there is nothing here that can quietly change a locator.
  *
- * **It builds no new browser tooling.** The in-page script is the existing audited
- * {@link buildFixedLabelProbeScript} from the NAVER visual-recon calibration, whose output is
- * `{ targetId, matchCount }` and nothing else — no text, no value, no selector, no DOM, no attributes, no
- * geometry. That is also why the heavier `EXTRACT_VISUAL_CONTROLS` census is NOT reused here: it returns raw
- * attribute values and bounding boxes that then need a screening gate, which is a larger sanitization surface
- * than this question needs.
+ * **It builds no new browser tooling.** A candidate is measured through the driver's existing read-only
+ * `probeFixedLabelMatch` seam — the *same* call the shipped baseline probe already makes, running the audited
+ * `buildFixedLabelLocateScript`, whose output is `{ count, sig? }` and nothing else: no text, no value, no
+ * selector, no DOM, no attributes, no geometry. That is also why the heavier `EXTRACT_VISUAL_CONTROLS` census
+ * is NOT reused here: it returns raw attribute values and bounding boxes that then need a screening gate, which
+ * is a larger sanitization surface than this question needs.
+ *
+ * **Corrected 2026-08-08 — why not the batch `buildFixedLabelProbeScript`.** The first design shipped one batch
+ * script for the whole sweep. Two properties this module claims are unobtainable that way, so the runner uses
+ * the per-candidate locate seam instead:
+ *
+ *   1. *No signature.* The batch script returns counts only. Two candidates each matching one element is the
+ *      case this module refuses to auto-resolve — and without signatures a reviewer cannot resolve it offline
+ *      either (same element under two labels? or two different elements?), so the grant would have to be spent
+ *      again. The locate seam returns the opaque 16-hex structural sig for a unique match, which answers it.
+ *   2. *A malformed `candidateQuery` reads as a real zero.* The batch script's `try { querySelectorAll } catch
+ *      { els = [] }` emits `matchCount: 0` for a query the browser rejected — so `NOT_MEASURED` (which fires on
+ *      a MISSING row) could never catch it, and a broken query would be reported as "label confirmed absent".
+ *      The docstring below used to claim the opposite. Per-candidate probing surfaces the failure as a fault,
+ *      and every shipped `candidateQuery` is additionally proven well-formed offline by a guard test.
  *
  * A candidate label carries no operator data by construction: these are WING's own generic UI words. Nothing
  * derived from the page — no placeholder, no input value, no company or account text — may be added to a
  * candidate list, and the guard test asserts the shape that keeps it that way.
  *
- * **NOT WIRED TO A RUNNER YET.** Nothing in `src/cli` or `tools/coupang-local` calls this. The existing
- * `wing-probe-bootstrap.sh` / `probe-wing-issuance-selectors.ts` path measures `WING_HIGHLIGHT_LABELS` — the
- * BASELINES — so running it with the three recon targets re-measures what we already know and sweeps no
- * candidates. Wiring the sweep into a runner is deliberately left to the unit that actually spends the grant,
- * so this module stays a design plus its tests rather than half-connected live machinery.
+ * **Wired to a runner since 2026-08-08:** `probe-wing-issuance-selectors.ts` runs the sweep when the run's
+ * approved phase is `COUPANG_WING_LABEL_RECON` and every approved target is a recon target. It still holds no
+ * promotion path — a candidate that resolves uniquely is recorded as evidence and nothing else; changing a
+ * shipped label stays an offline edit with its own tests and PR.
  */
-import { buildFixedLabelProbeScript } from "./api-issuance-calibration/visual-recon-inpage";
 import type { WingProbeTargetName } from "../cli/coupang-wing-classifier";
 
 /** The targets that failed to resolve on the real no-key form and therefore need recon. */
@@ -106,18 +118,29 @@ export const WING_LABEL_RECON_CANDIDATES: Readonly<Record<WingReconTarget, reado
  * `NOT_MEASURED` is separate from `ABSENT` deliberately. The first version folded a missing row into
  * `matchCount: 0` / `ABSENT`, which made a partial reading byte-identical to a complete all-miss reading —
  * the same conflation of "unmeasured" with "measured zero" that this whole unit exists to correct. It matters
- * concretely: the shared in-page probe swallows a malformed `candidateQuery` and reports nothing for it, so a
- * partly-failed script would otherwise read as "all candidates confirmed absent" and send a reviewer off to
- * rewrite labels that were never tested.
+ * concretely: a candidate whose read-only probe THREW (the page navigated or closed under it) contributes no
+ * row, and a partly-failed sweep would otherwise read as "all candidates confirmed absent" and send a reviewer
+ * off to rewrite labels that were never tested.
  */
 export const WING_RECON_VERDICTS = ["UNIQUE", "ABSENT", "AMBIGUOUS", "NOT_MEASURED", "INVALID_COUNT"] as const;
 export type WingReconVerdict = (typeof WING_RECON_VERDICTS)[number];
 
 export interface WingReconCandidateResult {
   readonly id: string;
+  /**
+   * The fixed candidate label this row measured — OUR OWN constant, echoed so the record is legible without
+   * cross-referencing the source. Never page content: the allowlisted-shape guard test is what keeps it so.
+   */
+  readonly label: string;
   /** Null when the page returned nothing for this candidate — never silently coerced to 0. */
   readonly matchCount: number | null;
   readonly verdict: WingReconVerdict;
+  /**
+   * Opaque 16-hex structural signature of a UNIQUE match (tag + document position + child count, computed
+   * in-page), else null. This is what makes two simultaneously-unique candidates resolvable offline: equal
+   * signatures mean one element wearing two labels, unequal signatures mean genuinely different elements.
+   */
+  readonly sig16: string | null;
 }
 
 export interface WingReconTargetResult {
@@ -159,7 +182,12 @@ function screenTargets(targets: readonly unknown[]): WingReconTarget[] {
   return out;
 }
 
-/** The probe descriptors for one or more targets, in the shape {@link buildFixedLabelProbeScript} consumes. */
+/**
+ * The candidate probe specs for one or more targets, each in the exact shape the driver's read-only
+ * `probeFixedLabelMatch` seam consumes — so a recon pass is N invocations of the SAME call the shipped baseline
+ * probe already makes, and introduces no new in-page script. `targetId` correlates the reading back to the
+ * candidate; it is one of our own ids, never page content.
+ */
 export function wingReconProbes(
   targets: readonly WingReconTarget[],
 ): { targetId: string; candidateQuery: string; exactText: string }[] {
@@ -170,11 +198,6 @@ export function wingReconProbes(
     }
   }
   return out;
-}
-
-/** The in-page script for a recon pass. Read-only, value-free output, no mutation, no highlight. */
-export function buildWingReconScript(targets: readonly WingReconTarget[]): string {
-  return buildFixedLabelProbeScript(wingReconProbes(targets));
 }
 
 /**
@@ -190,30 +213,44 @@ function verdictFor(matchCount: number): WingReconVerdict {
 }
 
 /**
- * Fold a raw `{ targetId, matchCount }[]` reading into per-target results.
+ * Fold a raw `{ targetId, matchCount, sig? }[]` reading into per-target results.
  *
- * A candidate the page never reported becomes `NOT_MEASURED` with a null count — never `0`/`ABSENT`, which
+ * A candidate the reading never reported becomes `NOT_MEASURED` with a null count — never `0`/`ABSENT`, which
  * would make a partial reading indistinguishable from a complete all-miss one. Unknown ids in the input are
  * ignored: they belong to no target, and inventing one for them would be worse than saying nothing. A DUPLICATE
  * id in the reading is `NOT_MEASURED` too — two different counts for one candidate means the reading is not
  * trustworthy for it, and silently keeping the last would hide that.
+ *
+ * A `sig` is retained ONLY for a candidate whose verdict is `UNIQUE`. A signature alongside any other count is
+ * incoherent (the locate script emits one only for a single match), so carrying it would dress a junk or
+ * ambiguous reading in evidence it does not have.
  */
 export function interpretWingRecon(
   targets: readonly WingReconTarget[],
-  raw: readonly { targetId: string; matchCount: number }[],
+  raw: readonly { targetId: string; matchCount: number; sig?: string }[],
 ): WingReconTargetResult[] {
   const byId = new Map<string, number>();
+  const sigById = new Map<string, string>();
   const conflicting = new Set<string>();
   for (const r of raw) {
     if (byId.has(r.targetId) && byId.get(r.targetId) !== r.matchCount) conflicting.add(r.targetId);
     byId.set(r.targetId, r.matchCount);
+    if (typeof r.sig === "string" && r.sig.length > 0) sigById.set(r.targetId, r.sig);
   }
   const out: WingReconTargetResult[] = [];
   for (const target of screenTargets(targets)) {
     const candidates = WING_LABEL_RECON_CANDIDATES[target].map((c): WingReconCandidateResult => {
-      if (!byId.has(c.id) || conflicting.has(c.id)) return { id: c.id, matchCount: null, verdict: "NOT_MEASURED" };
+      if (!byId.has(c.id) || conflicting.has(c.id))
+        return { id: c.id, label: c.exactText, matchCount: null, verdict: "NOT_MEASURED", sig16: null };
       const matchCount = byId.get(c.id)!;
-      return { id: c.id, matchCount, verdict: verdictFor(matchCount) };
+      const verdict = verdictFor(matchCount);
+      return {
+        id: c.id,
+        label: c.exactText,
+        matchCount,
+        verdict,
+        sig16: verdict === "UNIQUE" ? (sigById.get(c.id) ?? null) : null,
+      };
     });
     const uniqueCandidateIds = candidates.filter((c) => c.verdict === "UNIQUE").map((c) => c.id);
     out.push({

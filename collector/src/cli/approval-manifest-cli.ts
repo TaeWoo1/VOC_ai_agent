@@ -70,8 +70,11 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
   // per-run operator input is needed to reach PREPARED) unless the operator preset a deep link; screened in
   // `validateApprovalPrerequisites`. The raw URL is never printed — only its host category enters the manifest.
   const isWingSelectorProbe = phase === "COUPANG_WING_SELECTOR_PROBE";
+  // The candidate-label recon rides the SAME CLI, host screening and probe-scope plumbing as the selector
+  // probe; only what it measures (and therefore what the manifest says) differs.
+  const isWingLabelRecon = phase === "COUPANG_WING_LABEL_RECON";
   const isWingKeyDeletion = phase === "COUPANG_WING_KEY_DELETION";
-  const isWingPhase = isWingSelectorProbe || isWingKeyDeletion;
+  const isWingPhase = isWingSelectorProbe || isWingLabelRecon || isWingKeyDeletion;
   const apiCenterUrl = isWingPhase
     ? (env("COUPANG_WING_URL") ?? WING_DEFAULT_URL)
     : (env("NAVER_API_CENTER_URL") ?? NAVER_API_CENTER_BASE_URL);
@@ -100,7 +103,7 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
   // to just the targets this calibration needs (e.g. `delete` for the delete-selector calibration). Absent ⇒ the
   // full set. Fail closed on any unknown target.
   let requestedProbeTargets: readonly string[] | undefined;
-  if (isWingSelectorProbe) {
+  if (isWingSelectorProbe || isWingLabelRecon) {
     const scope = resolveWingProbeScope(env("SELLEROPS_WING_PROBE_TARGETS"));
     if (!scope.ok) {
       process.stderr.write(`PREFLIGHT FAIL: approval_prerequisite (WING_PROBE_TARGETS_MISMATCH): ${scope.reason}\n`);
@@ -120,6 +123,8 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     ? COUPANG_WING_KEY_DELETION_SCOPE.operation
     : isWingSelectorProbe
     ? "WING open-API read-only selector probe"
+    : isWingLabelRecon
+    ? "WING open-API read-only CANDIDATE-LABEL recon (measure only; no selector is changed by this run)"
     : isVisualRecon
     ? "API Center redacted visual recon"
     : isStructureObs
@@ -133,6 +138,8 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     ? COUPANG_WING_KEY_DELETION_SCOPE.maxActions
     : isWingSelectorProbe
     ? "1 read-only WING selector probe session"
+    : isWingLabelRecon
+    ? "1 read-only WING candidate-label recon session"
     : isVisualRecon
     ? "1 redacted visual recon session"
     : isStructureObs

@@ -6,9 +6,10 @@
  *
  *  1. **It can only measure.** There is no path from a recon result to `WING_HIGHLIGHT_LABELS`. A live reading
  *     may justify promoting a candidate, but a human does that in a reviewed diff — not a function at runtime.
- *  2. **It leaks nothing.** Every string sent to the page is one we wrote; everything returned is an integer and
- *     our own candidate id. The in-page half is the already-audited `buildFixedLabelProbeScript`, reused rather
- *     than reimplemented, so there is no second value-free contract to keep in sync.
+ *  2. **It leaks nothing.** Every string sent to the page is one we wrote; everything returned is an integer, an
+ *     opaque signature, or one of our own constants. The in-page half is the already-audited
+ *     `buildFixedLabelLocateScript`, reached through the driver's existing `probeFixedLabelMatch` seam — the
+ *     same call the shipped baseline probe makes — so there is no second value-free contract to keep in sync.
  */
 import { describe, it, expect } from "vitest";
 import * as recon from "../../../src/action-window/coupang-wing-label-recon";
@@ -18,14 +19,12 @@ import {
   WING_RECON_APPROVED_SCOPE,
   WING_RECON_TARGETS,
   WING_RECON_VERDICTS,
-  buildWingReconScript,
   interpretWingRecon,
   isWingReconTarget,
   wingReconProbes,
   type WingReconTarget,
 } from "../../../src/action-window/coupang-wing-label-recon";
 import { WING_HIGHLIGHT_LABELS } from "../../../src/action-window/coupang-wing-issuance-driver";
-import { buildFixedLabelProbeScript } from "../../../src/action-window/api-issuance-calibration/visual-recon-inpage";
 
 const ALL = WING_RECON_TARGETS as readonly WingReconTarget[];
 
@@ -75,19 +74,37 @@ describe("probe construction — value-free by shape", () => {
     expect(wingReconProbes(["call_ip", "call_ip"])).toEqual(wingReconProbes(["call_ip"]));
   });
 
-  it("the in-page script IS the audited shared probe — not a second implementation", () => {
-    // If someone forks the in-page script for WING, this equality breaks and the fork must be justified.
-    expect(buildWingReconScript(ALL)).toBe(buildFixedLabelProbeScript(wingReconProbes(ALL)));
+  it("a probe spec IS a driver fixed-label spec — so recon adds no in-page script of its own", () => {
+    // The module used to export `buildWingReconScript`, a BATCH in-page script. It was dropped (2026-08-08)
+    // because it returns counts only: two simultaneously-unique candidates could then not be told apart even
+    // offline, and a `candidateQuery` the browser rejected came back as a real `0`. The sweep now goes through
+    // the driver's `probeFixedLabelMatch`, so this asserts the shape that seam consumes.
+    for (const p of wingReconProbes(ALL)) {
+      const { targetId, ...spec } = p;
+      expect(typeof targetId).toBe("string");
+      expect(Object.keys(spec).sort()).toEqual(["candidateQuery", "exactText"]);
+    }
   });
 
-  it("the script never clicks, types, mutates or returns text", () => {
-    const src = buildWingReconScript(ALL);
-    for (const forbidden of [".click(", ".type(", ".fill(", "setAttribute", "innerHTML", "outerHTML", "screenshot"]) {
-      expect(src, `must not contain ${forbidden}`).not.toContain(forbidden);
+  it("no builder for a second in-page script survives on the export surface", () => {
+    // The replacement for the removed identity assertion: if someone reintroduces a WING-specific page script,
+    // it shows up here and has to be justified rather than quietly landing beside the audited seam.
+    const builders = Object.keys(recon).filter((n) => /script|evaluate|inpage|dump/i.test(n));
+    expect(builders, `recon must build no page script of its own: ${builders.join(", ")}`).toEqual([]);
+  });
+
+  it("every candidateQuery is a plain structural tag list — a query the browser rejects reads as a real zero", () => {
+    // Neither in-page script distinguishes "querySelectorAll threw" from "nothing matched": both swallow the
+    // error and report 0. Runtime detection is therefore impossible, so validity is proven HERE instead, over
+    // constants. The allowed shape is comma-separated bare element names — everything the sets actually use.
+    const ALLOWED = /^[a-z]+(,[a-z]+)*$/;
+    for (const t of ALL) for (const c of WING_LABEL_RECON_CANDIDATES[t]) {
+      expect(ALLOWED.test(c.candidateQuery), `${c.id} = ${JSON.stringify(c.candidateQuery)}`).toBe(true);
     }
-    // It returns the count and our id, and nothing else.
-    expect(src).toContain("matchCount");
-    expect(src).not.toContain("textContent: ");
+    // Falsifiable: the shapes that would actually break, and the ones that would smuggle in attribute reads.
+    for (const bad of ["label,", ",label", "label,,span", "input[value]", "[data-x='a']", "label:has(> b)", ""]) {
+      expect(ALLOWED.test(bad), bad).toBe(false);
+    }
   });
 
   it("no candidate label can carry operator or company data — allowlisted shape, not a denylist", () => {
@@ -207,17 +224,85 @@ describe("interpretation — it records, it does not decide", () => {
 
   it("every verdict is from the closed enum, and the result carries only ids, ints and booleans", () => {
     const results = interpretWingRecon(ALL, raw({ "self_dev.baseline": 2 }));
-    const serialized = JSON.stringify(results);
     for (const r of results) for (const c of r.candidates) {
       expect(WING_RECON_VERDICTS as readonly string[]).toContain(c.verdict);
       // null only ever accompanies NOT_MEASURED — it is an explicit "no reading", never a stand-in for 0.
       if (c.matchCount === null) expect(c.verdict).toBe("NOT_MEASURED");
       else expect(Number.isInteger(c.matchCount)).toBe(true);
     }
-    // No candidate LABEL text reaches the record — ids only, so a record can be pasted into a doc safely.
-    for (const t of ALL) for (const c of WING_LABEL_RECON_CANDIDATES[t]) {
-      expect(serialized).not.toContain(c.exactText);
+  });
+
+  it("every STRING in the record is one of our own constants — an allowlist over the whole payload", () => {
+    // This replaces "no candidate label reaches the record". The runner's output spec asks for the fixed
+    // candidate label, so labels now DO appear — which makes "labels are absent" the wrong property to hold.
+    // The stronger one is asserted instead: enumerate every string the serialized record contains and require
+    // each to come from a known constant. Page content could not satisfy that whatever field it arrived in.
+    const results = interpretWingRecon(ALL, [
+      { targetId: "self_dev.baseline", matchCount: 1, sig: "0123456789abcdef" },
+      { targetId: "vendor_info.th_dt", matchCount: 4 },
+    ]);
+    const allowed = new Set<string>([
+      ...ALL,
+      ...(WING_RECON_VERDICTS as readonly string[]),
+      ...ALL.flatMap((t) => WING_LABEL_RECON_CANDIDATES[t].flatMap((c) => [c.id, c.exactText])),
+    ]);
+    const strings: string[] = [];
+    const walk = (v: unknown): void => {
+      if (typeof v === "string") strings.push(v);
+      else if (Array.isArray(v)) v.forEach(walk);
+      else if (v && typeof v === "object") Object.values(v).forEach(walk);
+    };
+    walk(results);
+    expect(strings.length).toBeGreaterThan(20); // the walk actually reached the payload
+    for (const s of strings) {
+      // The one non-constant string class is the opaque 16-hex signature, which is a structural hash.
+      if (/^[0-9a-f]{16}$/.test(s)) continue;
+      expect(allowed.has(s), `unexpected string in the record: ${JSON.stringify(s)}`).toBe(true);
     }
+  });
+
+  it("each candidate echoes ITS OWN label — a mismatch would misattribute a reading", () => {
+    for (const r of interpretWingRecon(ALL, [])) {
+      const expected = WING_LABEL_RECON_CANDIDATES[r.target];
+      expect(r.candidates.map((c) => [c.id, c.label])).toEqual(expected.map((c) => [c.id, c.exactText]));
+    }
+  });
+
+  it("a signature is retained ONLY for a UNIQUE candidate", () => {
+    // A sig alongside any other count is incoherent — the locate script emits one only for a single match — so
+    // carrying it would dress an ambiguous or junk reading in evidence it does not have.
+    const [r] = interpretWingRecon(["call_ip"], [
+      { targetId: "call_ip.baseline", matchCount: 1, sig: "aaaaaaaaaaaaaaaa" },
+      { targetId: "call_ip.nospace", matchCount: 3, sig: "bbbbbbbbbbbbbbbb" },
+      { targetId: "call_ip.lower", matchCount: 0, sig: "cccccccccccccccc" },
+      { targetId: "call_ip.ip_addr", matchCount: -1, sig: "dddddddddddddddd" },
+    ]);
+    expect(r!.candidates.map((c) => [c.verdict, c.sig16])).toEqual([
+      ["UNIQUE", "aaaaaaaaaaaaaaaa"], ["AMBIGUOUS", null], ["ABSENT", null], ["INVALID_COUNT", null],
+    ]);
+  });
+
+  it("two unique candidates with the SAME signature are still not auto-resolved — but the record can settle it", () => {
+    // Equal sigs mean one element wearing two labels; unequal means two elements. Either way the module does
+    // not choose — it just has to make the distinction VISIBLE, which counts alone could not.
+    const [r] = interpretWingRecon(["vendor_info"], [
+      { targetId: "vendor_info.label_only", matchCount: 1, sig: "1111111111111111" },
+      { targetId: "vendor_info.th_dt", matchCount: 1, sig: "1111111111111111" },
+      { targetId: "vendor_info.baseline", matchCount: 8 },
+      { targetId: "vendor_info.vendor_name", matchCount: 0 },
+    ]);
+    expect(r!.resolvedUnambiguously).toBe(false);
+    const sigs = r!.candidates.filter((c) => c.verdict === "UNIQUE").map((c) => c.sig16);
+    expect(new Set(sigs).size).toBe(1);
+  });
+
+  it("a NOT_MEASURED candidate never carries a signature", () => {
+    const [r] = interpretWingRecon(["call_ip"], [
+      { targetId: "call_ip.nospace", matchCount: 1, sig: "eeeeeeeeeeeeeeee" },
+      { targetId: "call_ip.nospace", matchCount: 5, sig: "ffffffffffffffff" },
+    ]);
+    const c = r!.candidates.find((x) => x.id === "call_ip.nospace")!;
+    expect([c.verdict, c.matchCount, c.sig16]).toEqual(["NOT_MEASURED", null, null]);
   });
 });
 
@@ -252,7 +337,7 @@ describe("the recon cannot change what ships", () => {
     expect(() => {
       (candidate as { exactText: string }).exactText = "INJECTED";
     }).toThrow(TypeError); // modules are strict mode: a frozen write throws rather than silently no-ops
-    expect(buildWingReconScript(["call_ip"])).not.toContain("INJECTED");
+    expect(wingReconProbes(["call_ip"]).some((p) => p.exactText === "INJECTED")).toBe(false);
   });
 
   it("the approved live scope is exactly the three unresolved targets — no widening by default", () => {

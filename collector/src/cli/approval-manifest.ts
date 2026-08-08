@@ -42,6 +42,7 @@ import { screenApiCenterUrl } from "./observe-api-center";
 // Pure leaf (zero imports): the Coupang WING host screen for the WING selector-probe phase. Screening the
 // entry URL to the WING host (not the NAVER API-center host) is the ONLY channel-specific step in this gate.
 import { screenWingUrl, isCanonicalWingProbeSubset, WING_PROBE_TARGET_NAMES } from "./coupang-wing-classifier";
+import { WING_RECON_APPROVED_SCOPE } from "../action-window/coupang-wing-label-recon";
 
 /**
  * The calibration phases. Their driver capabilities differ, so their manifests/approvals are separate:
@@ -63,6 +64,12 @@ export const CALIBRATION_PHASES = [
   // WING selector uniqueness (always `LIVE_DOM_CALIBRATION_PENDING`) so a later live run can flip calibration —
   // so it does NOT itself require calibrated selectors. Its entry URL is screened to the WING host (§ step 4).
   "COUPANG_WING_SELECTOR_PROBE",
+  // The same read-only recorder, sweeping CANDIDATE labels instead of the shipped ones. It is a separate phase
+  // rather than a flag because the manifest is what the operator reads: "measure the 3 shipped labels" and
+  // "measure 12 hypotheses for those 3 labels" are different work, and the second must not be able to happen
+  // under approval granted for the first. Same capabilities, same READ_ONLY mode, same no-highlight guarantee;
+  // its probe scope is additionally confined to the unresolved recon targets (§ step 7d).
+  "COUPANG_WING_LABEL_RECON",
   // The Coupang WING key-DELETION destructive phase. The AGENT stays READ_ONLY (it highlights the 삭제 control
   // and rests at a checkpoint; it NEVER clicks/deletes); the DESTRUCTIVE, IRREVERSIBLE action is the OPERATOR's
   // (deleting their WING self-developed Open API key — which immediately invalidates the existing Access/Secret
@@ -346,6 +353,24 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     allowsHighlight: false,
     mode: "READ_ONLY",
   },
+  COUPANG_WING_LABEL_RECON: {
+    phase: "COUPANG_WING_LABEL_RECON",
+    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    driver: "CoupangWingIssuanceDriver (read-only fixed-label matchCount probe, candidate-label sweep)",
+    // Identical capability to the selector probe — the sweep is N invocations of the SAME read-only
+    // `probeFixedLabelMatch` seam, differing only in which fixed label each one counts. It therefore adds no
+    // action code: still no highlight, no tag, no click, no value read. What differs is WHAT is measured
+    // (unvalidated candidate hypotheses, not the shipped locators), which is why it is separately approvable.
+    capableActions: [
+      "OPEN_DEDICATED_WINDOW",
+      "WAIT_OPERATOR_LOGIN_NAV",
+      "CLASSIFY_SANITIZED_PAGE_CATEGORY",
+      "STRUCTURAL_CENSUS",
+      "PROBE_TARGET_MATCHCOUNT",
+    ],
+    allowsHighlight: false,
+    mode: "READ_ONLY",
+  },
   COUPANG_WING_KEY_DELETION: {
     phase: "COUPANG_WING_KEY_DELETION",
     // Both original blockers are now resolved: the driver + CLI are built, and the 삭제 control is live-calibrated
@@ -372,6 +397,21 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     destructiveScope: COUPANG_WING_KEY_DELETION_SCOPE,
   },
 };
+
+/**
+ * The Coupang WING phases. Kept as ONE list because three separate `phase === … || phase === …` chains had
+ * already accumulated (host screening, calibration defaulting, remediation wording), and a fourth WING phase
+ * that was added to two of the three would screen its entry URL against the NAVER API-center host and be
+ * refused as `INVALID_HOST` — a failure whose cause names the wrong thing entirely.
+ */
+export const WING_PHASES: readonly CalibrationPhase[] = [
+  "COUPANG_WING_SELECTOR_PROBE",
+  "COUPANG_WING_LABEL_RECON",
+  "COUPANG_WING_KEY_DELETION",
+];
+export function isWingCalibrationPhase(phase: CalibrationPhase): boolean {
+  return WING_PHASES.includes(phase);
+}
 
 /** Why the prerequisites were not met. Each maps to a `PREFLIGHT FAIL: approval_prerequisite (<cause>)`. */
 export const APPROVAL_PREREQ_CAUSES = [
@@ -414,6 +454,7 @@ export const APPROVAL_PREREQ_CAUSES = [
   "DESTRUCTIVE_SCOPE_MISMATCH",
   // The WING selector-probe per-run target scope must be a non-empty canonical subset of the fixed target set.
   "WING_PROBE_TARGETS_MISMATCH",
+  "WING_RECON_TARGETS_MISMATCH",
 ] as const;
 export type ApprovalPrereqCause = (typeof APPROVAL_PREREQ_CAUSES)[number];
 
@@ -435,6 +476,7 @@ export const ENTRYPOINT_PHASES = [
   "API_CENTER_VISUAL_RECON",
   "API_ISSUANCE_SELECTOR_PROBE",
   "COUPANG_WING_SELECTOR_PROBE",
+  "COUPANG_WING_LABEL_RECON",
   "COUPANG_WING_KEY_DELETION",
   "API_ISSUANCE_FE_LIVE_PROOF",
   "NAVER_GUIDED_CONNECTION",
@@ -501,6 +543,17 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
     entrypointCommandId: "probe-wing-issuance-selectors",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 오픈API 발급 화면에서 준비되면 ready 를 보내세요. SellerOps는 강조 없이 각 대상의 고정 라벨 일치 수만 읽습니다(클릭·입력·값 읽기 없음).",
+    emitsFrontendUrl: false,
+  },
+  // The candidate-label recon: the SAME CLI and the same dedicated Chrome, so the entrypoint contract is
+  // identical. Only the operator-facing summary differs, because what gets measured differs — the operator
+  // should read "여러 후보 라벨", not "각 대상", before granting.
+  COUPANG_WING_LABEL_RECON: {
+    entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
+    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    entrypointCommandId: "probe-wing-issuance-selectors",
+    operatorActionSummary:
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 오픈API 발급 화면에서 준비되면 ready 를 보내세요. SellerOps는 아직 확정되지 않은 대상들의 여러 후보 라벨에 대해 일치 수만 읽습니다(강조·클릭·입력·값 읽기 없음). 후보가 하나로 좁혀져도 이 실행은 선택자를 바꾸지 않습니다.",
     emitsFrontendUrl: false,
   },
   // The Coupang WING key-DELETION phase: a CLI-launched dedicated Chrome (never a frontend URL). The seller logs
@@ -757,10 +810,9 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
   // The WING selector probe screens its entry URL to the Coupang WING host; every NAVER phase screens to the
   // API-center host. Both return the same `{ ok, reason, urlCategory }` shape, so the manifest's `apiCenterHost`
   // (a host CATEGORY enum, never the raw URL) is filled uniformly below.
-  const screen =
-    spec.phase === "COUPANG_WING_SELECTOR_PROBE" || spec.phase === "COUPANG_WING_KEY_DELETION"
-      ? screenWingUrl(input.apiCenterUrl)
-      : screenApiCenterUrl(input.apiCenterUrl);
+  const screen = isWingCalibrationPhase(spec.phase)
+    ? screenWingUrl(input.apiCenterUrl)
+    : screenApiCenterUrl(input.apiCenterUrl);
   if (!screen.ok) {
     return fail("INVALID_HOST", `entry URL failed screening (reason=${screen.reason}); must be the run's API-center / WING / auth host`);
   }
@@ -795,7 +847,7 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
   // control IS live-calibrated now, so the deletion phase reaches PREPARED when the caller states it; withdraw
   // the flag and the whole destructive path closes again. The read-only WING selector probe never highlights, so
   // the gate below is skipped for it regardless.
-  const isWingPhase = spec.phase === "COUPANG_WING_SELECTOR_PROBE" || spec.phase === "COUPANG_WING_KEY_DELETION";
+  const isWingPhase = isWingCalibrationPhase(spec.phase);
   const calibrated = input.selectorsCalibrated ?? (isWingPhase ? false : SELECTORS_CALIBRATED);
   if (spec.allowsHighlight && !calibrated) {
     // Name the remediation for THIS surface: a WING phase is not fixed by a NAVER API-center observation.
@@ -848,10 +900,23 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
   // only, no re-order, no duplicate) so scoping can only NARROW the probe, never widen it. The manifest declares
   // (and the recorder honors) exactly this set.
   let wingProbeTargets: readonly string[] | undefined;
-  if (spec.phase === "COUPANG_WING_SELECTOR_PROBE") {
-    wingProbeTargets = input.requestedProbeTargets ?? [...WING_PROBE_TARGET_NAMES];
+  if (spec.phase === "COUPANG_WING_SELECTOR_PROBE" || spec.phase === "COUPANG_WING_LABEL_RECON") {
+    const isRecon = spec.phase === "COUPANG_WING_LABEL_RECON";
+    // The recon phase does NOT default to every target. Its whole scope must be sweepable, and the runner
+    // refuses a mixed scope anyway — so defaulting to the full set here would only produce manifests that can
+    // never run. It defaults to the recon set; narrowing within that set stays allowed.
+    wingProbeTargets = input.requestedProbeTargets ?? (isRecon ? [...WING_RECON_APPROVED_SCOPE] : [...WING_PROBE_TARGET_NAMES]);
     if (!isCanonicalWingProbeSubset(wingProbeTargets)) {
       return fail("WING_PROBE_TARGETS_MISMATCH", `WING probe target scope must be a non-empty canonical subset of ${WING_PROBE_TARGET_NAMES.join(", ")}`);
+    }
+    // A manifest the runner would REFUSE must never be displayed: the operator would grant a run that then dies
+    // at the gate, and the natural next move when that happens is to widen the scope until it starts. Refusing
+    // here keeps the failure on the preparation side, where widening is a reviewed edit rather than a reflex.
+    if (isRecon && !wingProbeTargets.every((t) => (WING_RECON_APPROVED_SCOPE as readonly string[]).includes(t))) {
+      return fail(
+        "WING_RECON_TARGETS_MISMATCH",
+        `the candidate-label recon scope must be a non-empty subset of ${WING_RECON_APPROVED_SCOPE.join(", ")} — the other targets have no candidate sets to sweep`,
+      );
     }
   }
 
@@ -1016,7 +1081,9 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
       : {}),
     // WING selector probe only: surface the RESOLVED per-run target scope (full set or the narrower subset, e.g.
     // just `["delete"]`) so the operator approves exactly which targets the read-only probe measures.
-    ...(spec.phase === "COUPANG_WING_SELECTOR_PROBE" ? { probeTargets: wingProbeTargets ?? [...WING_PROBE_TARGET_NAMES] } : {}),
+    ...(spec.phase === "COUPANG_WING_SELECTOR_PROBE" || spec.phase === "COUPANG_WING_LABEL_RECON"
+      ? { probeTargets: wingProbeTargets ?? [...WING_PROBE_TARGET_NAMES] }
+      : {}),
     // FE-run-host issuance proof only: surface the sole run client, the START_RUN cap, the zero write budget,
     // the supporting (never-START_RUN) surface, and the bound FE URL so the operator approves exactly this.
     // Validation above forced every field to equal the immutable FE_LIVE_PROOF_* constants (owner/cap/zero

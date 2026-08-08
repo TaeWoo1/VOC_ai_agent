@@ -16,6 +16,9 @@ import {
   NAVER_API_CENTER_BASE_URL,
   PHASE_ENTRYPOINTS,
   ENTRYPOINT_PHASES,
+  CALIBRATION_PHASES,
+  WING_PHASES,
+  isWingCalibrationPhase,
   validateEntrypointContract,
   VISUAL_RECON_ARTIFACT_CATEGORY,
   FE_LIVE_PROOF_SUPPORTING_SURFACE,
@@ -37,6 +40,7 @@ const HL = PHASE_SPECS.API_ISSUANCE_HIGHLIGHT_PROOF;
 const VR = PHASE_SPECS.API_CENTER_VISUAL_RECON;
 const WSP = PHASE_SPECS.COUPANG_WING_SELECTOR_PROBE;
 const WKD = PHASE_SPECS.COUPANG_WING_KEY_DELETION;
+const WLR = PHASE_SPECS.COUPANG_WING_LABEL_RECON;
 
 /** A fully-valid visual-recon input; individual tests override one field to prove a refusal. */
 function baseVisualRecon(): ApprovalPrereqInput {
@@ -133,6 +137,18 @@ function baseWingSelectorProbe(): ApprovalPrereqInput {
     surface: "Coupang WING Open API",
     operation: "WING open-API read-only selector probe",
     maxActions: "1 read-only WING selector probe session",
+  };
+}
+
+/** The candidate-label recon phase — same CLI and window as the probe, different measurement. */
+function baseWingLabelRecon(): ApprovalPrereqInput {
+  return {
+    ...baseWingSelectorProbe(),
+    phase: WLR.phase,
+    driver: WLR.driver,
+    declaredActions: WLR.capableActions,
+    operation: "WING open-API read-only CANDIDATE-LABEL recon (measure only; no selector is changed by this run)",
+    maxActions: "1 read-only WING candidate-label recon session",
   };
 }
 
@@ -293,6 +309,77 @@ describe("calibration phase separation", () => {
       expect(r.manifest.allowedActions).toContain("HIGHLIGHT_REAL_CONTROL");
       expect(r.manifest.selectorsCalibrated).toBe(true);
     }
+  });
+});
+
+describe("Coupang WING candidate-label recon phase (COUPANG_WING_LABEL_RECON)", () => {
+  it("PREPARED manifest: READ-only, no highlight, same CLI and window as the probe", () => {
+    const r = validateApprovalPrerequisites(baseWingLabelRecon());
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const m = r.manifest;
+      expect(m.phase).toBe("COUPANG_WING_LABEL_RECON");
+      expect(m.mode).toBe("READ_ONLY");
+      expect(m.allowedActions).not.toContain("HIGHLIGHT_REAL_CONTROL");
+      expect(m.allowedActions).toContain("PROBE_TARGET_MATCHCOUNT");
+      expect(m.cli).toBe("src/cli/probe-wing-issuance-selectors.ts");
+      expect(m.apiCenterHost).toBe("wing_host");
+      expect(m.entrypointType).toBe("CLI_LAUNCHED_DEDICATED_WINDOW");
+    }
+  });
+
+  it("its capability is EXACTLY the selector probe's — the sweep adds no action, only different labels", () => {
+    // If recon ever needs a new action code, that is a real capability change and must not arrive silently.
+    expect([...WLR.capableActions]).toEqual([...WSP.capableActions]);
+    expect(WLR.allowsHighlight).toBe(false);
+    expect(WLR.mode).toBe("READ_ONLY");
+  });
+
+  it("defaults to the RECON scope, not to every WING target", () => {
+    // The probe phase defaults to the full fixed set; recon must not inherit that, because a full-set recon
+    // manifest describes a run the live gate would refuse — and the reflex when a run refuses is to widen.
+    const r = validateApprovalPrerequisites(baseWingLabelRecon());
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.manifest.probeTargets).toEqual(["self_dev", "vendor_info", "call_ip"]);
+  });
+
+  it("narrowing WITHIN the recon set is allowed", () => {
+    const r = validateApprovalPrerequisites({ ...baseWingLabelRecon(), requestedProbeTargets: ["call_ip"] });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.manifest.probeTargets).toEqual(["call_ip"]);
+  });
+
+  it("a non-sweepable target refuses BEFORE a manifest exists", () => {
+    for (const scope of [["delete"], ["self_dev", "issue"], ["credentials"]]) {
+      const r = validateApprovalPrerequisites({ ...baseWingLabelRecon(), requestedProbeTargets: scope });
+      expect(r.ok, scope.join(",")).toBe(false);
+      if (!r.ok) expect(r.cause).toBe("WING_RECON_TARGETS_MISMATCH");
+    }
+  });
+
+  it("the selector-probe phase is UNAFFECTED — it still defaults to the full fixed set and accepts delete", () => {
+    // The regression that matters: adding recon must not narrow the phase that ships today.
+    const full = validateApprovalPrerequisites(baseWingSelectorProbe());
+    expect(full.ok).toBe(true);
+    if (full.ok) expect(full.manifest.probeTargets).toEqual([...WING_PROBE_TARGET_NAMES]);
+    const del = validateApprovalPrerequisites({ ...baseWingSelectorProbe(), requestedProbeTargets: ["delete"] });
+    expect(del.ok).toBe(true);
+  });
+
+  it("every COUPANG_WING phase is in WING_PHASES — the drift that screened recon against the NAVER host", () => {
+    // Found by this unit: the recon phase was added to the probe-target and manifest-emission branches but not
+    // to the host-screening chain, so a perfectly valid WING URL came back `INVALID_HOST`. One list now.
+    const wingByName = CALIBRATION_PHASES.filter((p) => p.startsWith("COUPANG_WING"));
+    expect([...WING_PHASES].sort()).toEqual([...wingByName].sort());
+    for (const p of wingByName) expect(isWingCalibrationPhase(p), p).toBe(true);
+    expect(isWingCalibrationPhase("API_ISSUANCE_HIGHLIGHT_PROOF")).toBe(false);
+  });
+
+  it("its operator summary tells the operator that candidates are swept and nothing is promoted", () => {
+    const summary = PHASE_ENTRYPOINTS.COUPANG_WING_LABEL_RECON.operatorActionSummary;
+    expect(summary).toContain("후보");
+    expect(summary).toContain("선택자를 바꾸지 않습니다");
+    expect(validateEntrypointContract("COUPANG_WING_LABEL_RECON", PHASE_ENTRYPOINTS.COUPANG_WING_LABEL_RECON).ok).toBe(true);
   });
 });
 

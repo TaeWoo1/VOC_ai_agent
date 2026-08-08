@@ -186,7 +186,17 @@ describe("the live CLI wires the gate, not the manifest resolver", () => {
   it("derives the measured set from the GATE's targets, not from the fixed set", () => {
     // The tested derivation is only worth anything if the CLI actually feeds it the approved targets.
     expect(code).toContain("scopedRecordTargetsFor(probeScope.targets)");
-    expect(code).toContain("runWingSelectorRecord(deps, scopedTargets)");
+    expect(code).toMatch(/runWingSelectorRecord\(deps, scopedTargets[,)]/);
+  });
+
+  it("derives the RECON scope from the same approved set, and refuses rather than downgrading", () => {
+    // Recon is a second, narrower gate over the SAME approved targets — never a separately-parsed env scope,
+    // which would reintroduce exactly the two-sources-of-truth problem the approved-scope gate removed. And a
+    // refusal must stop the run: silently continuing as a baseline probe would measure something other than
+    // the manifest the operator approved, while still printing a successful-looking record.
+    expect(code).toContain("resolveWingReconScope(process.env, probeScope.targets)");
+    expect(code).toMatch(/if \(reconScope\.requested && !reconScope\.ok\) \{/);
+    expect(code).toContain("{ recon: reconTargets }");
   });
 
   it("keeps the refusal branch — deleting it must not need the typechecker to be caught", () => {

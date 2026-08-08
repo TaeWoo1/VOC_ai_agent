@@ -222,17 +222,12 @@ export function observeFrom(urlCategory: WingUrlCategory, census: WingStructural
  * The two real WING captures this module's honesty rests on, recorded as DATA so the comparison is checkable
  * rather than a claim in prose. Sanitized throughout: counts, booleans, enums and opaque signatures only.
  *
- * **`bucketsRetained: false` means NOT TRANSCRIBED, not "not measured" — and the distinction is the point.**
- * The first version of this constant said `bucketsRecorded`, and the doc claimed the issued-page buckets were
- * "genuinely unknown — unmeasured". Review checked the code at the capture commit and that was **wrong**: the
- * census already emitted `formCount`, `editableTextInputCount`, `readonlyFieldCount` and
- * `submitAffordancePresent` on 2026-08-06, and the probe CLI printed the entire observation. Those numbers
- * existed; nobody wrote them into a doc, and the run output is not in the repository.
- *
- * So the honest statement is: the issued-page side is **not available here**, and it may be **recoverable
- * without a live run** — from operator scrollback or a local run log — which should be checked before any
- * grant is spent re-measuring it. What has not changed is the consequence for code: a predicate written today
- * would still be inventing that side, because the numbers are not in hand.
+ * **`bucketsRetained: false` means NOT TRANSCRIBED, not "not measured".** That distinction, drawn when this
+ * constant was written, is what made the next step obvious: numbers that were measured but not written down may
+ * still exist somewhere. They did. On 2026-08-08 the issued-page buckets were **recovered from retained session
+ * scrollback** — four independent captures, all agreeing — and both sides of the audit are now populated. No
+ * live grant was spent. (The recovery is why `bucketsRetained` is now `true` on both records; had the search
+ * come up empty, the honest record would have been `false` with the fields left absent, never a guess.)
  */
 export interface WingRealEvidence {
   readonly capturedOn: string;
@@ -259,32 +254,68 @@ export interface WingRealEvidence {
    * into looking for counts that a differently-scoped run produced.
    */
   readonly targetMatchCountSource: Readonly<Partial<Record<WingProbeTargetName, string>>>;
+  /**
+   * Opaque 16-hex structural signature of a target that resolved UNIQUELY (tag + document position + child
+   * count). Present only for unique matches — the locate script emits none otherwise. Recorded because a
+   * signature that is EQUAL across two surfaces says something a count cannot: the element sits at the same
+   * document position with the same child count on both, i.e. the two pages render the same shell.
+   */
+  readonly targetSignatures: Readonly<Partial<Record<WingProbeTargetName, string>>>;
 }
 
 /**
- * The already-issued page. A UNION of two runs: the 2026-08-06 five-target calibration (at commit `c22cf38`)
- * and the 2026-08-07 delete-only retry (`wingrec_c01e673ebc61`, approved scope `["delete"]`). Buckets were
- * measured by both and transcribed by neither — see {@link WingRealEvidence} on what that does and does not mean.
+ * The already-issued page, from FOUR real captures across 2026-08-06/07 — `wingrec_fc4cbafb42c8` and
+ * `wingrec_b2e87f42abd1` (08-06, five-target scope), `wingrec_42985b029ddd` (08-07, five-target), and
+ * `wingrec_c01e673ebc61` (08-07, approved scope `["delete"]`). All four reported the SAME four structural
+ * buckets, and the three five-target runs reported the same per-target counts.
+ *
+ * The buckets here were **recovered from retained session scrollback on 2026-08-08**, not re-measured live: the
+ * probe CLI printed the whole observation at the time and the terminal record survived. They are transcribed
+ * verbatim from those four run outputs.
+ *
+ * `markerScanTruncated` is deliberately ABSENT rather than `false`: that field did not exist in the census on
+ * 2026-08-06/07, so no reading of it was taken. Writing `false` would manufacture a measurement — the exact
+ * move this record exists to prevent.
+ *
+ * `fc4cbafb42c8` is not cited for `pageCategory`: it predates the `credentialAnchorPresent` signal by minutes
+ * and therefore classified the same page as `wing_home`. Its buckets are still valid evidence; its category is
+ * an artifact of the code at that moment.
  */
 export const WING_REAL_EVIDENCE_ISSUED_2026_08_07: WingRealEvidence = Object.freeze({
   capturedOn: "2026-08-07",
-  recordIds: Object.freeze(["c22cf38-capture-2026-08-06", "wingrec_c01e673ebc61"]),
+  recordIds: Object.freeze([
+    "wingrec_fc4cbafb42c8",
+    "wingrec_b2e87f42abd1",
+    "wingrec_42985b029ddd",
+    "wingrec_c01e673ebc61",
+  ]),
   surface: "already_issued_page",
   surfaceAttestation: "OPERATOR_CONFIRMED",
   pageCategory: "open_api_issuance",
   credentialAnchorPresent: true,
   openApiMarkerPresent: false,
-  bucketsRetained: false,
-  buckets: Object.freeze({}),
+  bucketsRetained: true,
+  buckets: Object.freeze({
+    formCountBucket: "few",
+    editableTextInputCountBucket: "many",
+    readonlyFieldCountBucket: "none",
+    listLikeContainerCountBucket: "many",
+    submitAffordancePresent: false,
+  }),
   targetMatchCounts: Object.freeze({ self_dev: 0, vendor_info: 9, call_ip: 0, issue: 1, credentials: 1, delete: 1 }),
   targetMatchCountSource: Object.freeze({
-    self_dev: "c22cf38-capture-2026-08-06",
-    vendor_info: "c22cf38-capture-2026-08-06",
-    call_ip: "c22cf38-capture-2026-08-06",
-    issue: "c22cf38-capture-2026-08-06",
-    credentials: "c22cf38-capture-2026-08-06",
+    self_dev: "wingrec_b2e87f42abd1",
+    vendor_info: "wingrec_b2e87f42abd1",
+    call_ip: "wingrec_b2e87f42abd1",
+    issue: "wingrec_b2e87f42abd1",
+    credentials: "wingrec_b2e87f42abd1",
     delete: "wingrec_c01e673ebc61",
   }),
+  // From `wingrec_42985b029ddd` (2026-08-07), the last five-target issued-page capture. The 2026-08-06 runs
+  // reported DIFFERENT sigs for the same two targets (`d3f775e8…` / `2b2479a8…`) with no signature-code change
+  // in between — so sig16 tracks the page as rendered on the day, and is a drift detector rather than a
+  // cross-session identity. Do not treat an unchanged sig across sessions as an invariant.
+  targetSignatures: Object.freeze({ issue: "b7ba43a8e788b4a8", credentials: "de6d35788c97ce5b" }),
 });
 
 /**
@@ -316,6 +347,10 @@ export const WING_REAL_EVIDENCE_NO_KEY_2026_08_08: WingRealEvidence = Object.fre
     call_ip: "wingrec_b554c86c0f0b",
     issue: "wingrec_b554c86c0f0b",
   }),
+  // Byte-identical to the issued page's `issue` signature from the previous day. The 발급 button sits at the
+  // same document position with the same child count on BOTH surfaces — one more signal that does not separate
+  // them, and concrete support for the shell-dominates hypothesis in `wingIssuedStateFrom`.
+  targetSignatures: Object.freeze({ issue: "b7ba43a8e788b4a8" }),
 });
 
 /* ────────────────────────────── issued-state verdict (post-delete evidence) ────────────────────────────── */
@@ -378,26 +413,48 @@ export type WingIssuedStateReason = (typeof WING_ISSUED_STATE_REASONS)[number];
  * | `self_dev` / `call_ip` matchCount | 0 / 0 | 0 / 0 | no |
  * | `vendor_info` matchCount | 9 | 8 | no (non-unique on both) |
  * | `issue` matchCount | 1 | 1 | no |
- * | editable / readonly / form / submit signals | **never recorded** | recorded | unusable |
+ * | `issue` sig16 | `b7ba43a8…` | **`b7ba43a8…`** | no — byte-identical |
+ * | `formCountBucket` | `few` | `few` | no |
+ * | `editableTextInputCountBucket` | `many` | `many` | no |
+ * | `readonlyFieldCountBucket` | `none` | `none` | no |
+ * | `listLikeContainerCountBucket` | `many` | `many` | no |
+ * | `submitAffordancePresent` | `false` | `false` | no |
  *
- * Every signal captured on BOTH sides is identical, and the four that might have discriminated were never read
- * on the issued page. The previous version returned `issued` from `credentialAnchorPresent` alone; the operator
- * confirmed the 2026-08-08 page was a genuine post-delete no-key form, so that verdict was **wrong on real
- * data** — the no-key form carries the fixed text "Access Key" too. Returning `indeterminate` removes a wrong
- * answer; it does not invent a right one, because inventing one would mean guessing the issued-page side of a
- * predicate we have never measured.
+ * **The table is now complete on both sides, and every single row matches.** Until 2026-08-08 the last five
+ * rows read "never recorded" on the issued page, and `indeterminate` was a fail-closed default over missing
+ * data. The issued-page buckets were then recovered from retained scrollback (four independent captures, all
+ * agreeing) — so `NO_DISCRIMINATING_SIGNAL` is now a MEASURED result: the two surfaces are indistinguishable
+ * across every sanitized signal this recorder captures. That is a stronger and much less comfortable statement
+ * than "we do not know yet", and it is the one the evidence supports.
+ *
+ * The previous version returned `issued` from `credentialAnchorPresent` alone; the operator confirmed the
+ * 2026-08-08 page was a genuine post-delete no-key form, so that verdict was **wrong on real data** — the
+ * no-key form carries the fixed text "Access Key" too.
+ *
+ * **Why they match — the likely mechanism, stated as a hypothesis.** The census counts the WHOLE page. On a
+ * WING screen the shell (navigation, search, menus) supplies most forms, inputs and list containers, so the
+ * open-API region contributes a small minority of every count and cannot move a coarse bucket. Note in
+ * particular `readonlyFieldCountBucket: "none"` on the ISSUED page: the displayed keys are not readonly inputs
+ * at all. This is a hypothesis about why the signal is flat, not a finding — and it points at a REGION-SCOPED
+ * census as the thing to measure next, rather than at any predicate over these page-global numbers.
  *
  * **`credentialAnchorPresent` is retained as a SURFACE signal.** `classifyWingPage` still uses it to reach
  * `open_api_issuance`, and that use is unaffected: both pages genuinely ARE the open-API surface. What it may
  * no longer do is stand alone as the issued-state verdict.
  *
- * **To re-enable a real verdict**, a future run must capture, on a page KNOWN to hold a key, the signals we
- * already capture on the no-key form: `readonlyFieldCountBucket`, `editableTextInputCountBucket`,
- * `formCountBucket`, `submitAffordancePresent`, plus the `credentials` target's matchCount under its
- * `tagAncestor: "tr"` locator (a credential displayed in a table ROW is structurally different from the same
- * words as static form text — that is the most promising untested discriminator, and it is a MEASUREMENT to
- * take, not a rule to ship). That reading is only possible after the next key issuance, so it belongs to the
- * issuance unit. Until then `indeterminate` is the whole truth.
+ * **What could still restore a verdict.** Not the buckets — those are now known to be flat. Two candidates
+ * remain, both MEASUREMENTS to take rather than rules to ship:
+ *
+ *   1. **The `credentials` target on the no-key form.** It matched 1 on the issued page (role `readonly-region`,
+ *      under a `tagAncestor: "tr"` locator) and has NEVER been probed on the no-key form — that run's approved
+ *      scope was `self_dev,vendor_info,call_ip,issue`. A credential shown in a table ROW is structurally
+ *      different from the same words as static form text, so its count/role/signature may differ where the
+ *      page-global census does not. This needs no new code: `credentials` is already a probe target, so a
+ *      selector-probe run scoped to it would settle it. It is the cheapest untested discriminator we have.
+ *   2. **A region-scoped census** — the same counts taken within the open-API region instead of the whole
+ *      document. That is new code and a new sanitization review, and it should not be built before (1) is tried.
+ *
+ * Until one of those produces a real difference, `indeterminate` is the whole truth.
  */
 export function wingIssuedStateFrom(observation: WingObservation | null): {
   state: WingIssuedState;

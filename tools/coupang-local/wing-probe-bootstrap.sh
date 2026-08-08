@@ -16,6 +16,12 @@
 # change is a §1.6 scope change ⇒ re-bootstrap ⇒ a new approval id ⇒ the old grant is dead. The default is the
 # delete-selector calibration scope (`delete`), which is the one target the WING deletion path still needs.
 #
+# The PHASE is likewise fixed here, from a two-value allowlist:
+#   COUPANG_WING_SELECTOR_PROBE  (default) — measure the SHIPPED fixed labels;
+#   COUPANG_WING_LABEL_RECON               — sweep the CANDIDATE label sets for the unresolved targets.
+# They are different work under the same CLI, so they are different manifests and different grants. The recon
+# phase defaults its scope to the three unresolved targets rather than to `delete`, which it cannot sweep.
+#
 # Both ids are ENVIRONMENT identifiers, never a credential or auth token. NO browser is launched, NO Coupang
 # call is made, and no credential/env secret is read here.
 #
@@ -42,7 +48,24 @@ git_hardened() {
 # because this value is written into a file the preflight later sources: an unvalidated `$(…)` would execute.
 #    `case` rather than `grep -E`: grep matches LINE-wise, so an embedded newline would slip past an anchored
 #    pattern and inject a second assignment into the file below.
-PROBE_TARGETS="${SELLEROPS_WING_PROBE_TARGETS:-delete}"
+PHASE="${SELLEROPS_APPROVAL_PHASE:-COUPANG_WING_SELECTOR_PROBE}"
+case "$PHASE" in
+  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON) ;;
+  *)
+    echo "BOOTSTRAP FAIL — SELLEROPS_APPROVAL_PHASE must be COUPANG_WING_SELECTOR_PROBE or COUPANG_WING_LABEL_RECON."
+    echo "                 (The DESTRUCTIVE deletion phase has its own harness and is not approvable from here.)"
+    exit 1 ;;
+esac
+
+# Per-phase scope default. Recon cannot sweep `delete`/`issue`/`credentials` — they have no candidate sets — and
+# the manifest gate refuses such a scope, so defaulting to `delete` under the recon phase would only produce a
+# bootstrap that cannot reach a manifest.
+if [ "$PHASE" = "COUPANG_WING_LABEL_RECON" ]; then
+  DEFAULT_TARGETS="self_dev,vendor_info,call_ip"
+else
+  DEFAULT_TARGETS="delete"
+fi
+PROBE_TARGETS="${SELLEROPS_WING_PROBE_TARGETS:-$DEFAULT_TARGETS}"
 case "$PROBE_TARGETS" in
   ""|*[!a-z_,]*|,*|*,|*,,*)
     echo "BOOTSTRAP FAIL — SELLEROPS_WING_PROBE_TARGETS must be a comma-separated list of lowercase target names."
@@ -67,7 +90,7 @@ WALKTHROUGH_RUN_ID='$RUN_ID'
 WALKTHROUGH_APPROVAL_ID='$APPROVAL_ID'
 WALKTHROUGH_GIT_COMMIT='$GIT_COMMIT'
 WING_PROBE_BOOTSTRAP_EPOCH='$BOOTSTRAP_EPOCH'
-SELLEROPS_APPROVAL_PHASE='COUPANG_WING_SELECTOR_PROBE'
+SELLEROPS_APPROVAL_PHASE='$PHASE'
 SELLEROPS_WING_PROBE_TARGETS='$PROBE_TARGETS'
 ENV
 
@@ -76,7 +99,7 @@ echo
 echo "  run id       : $RUN_ID"
 echo "  approval id  : $APPROVAL_ID  (binds the operator's single-use grant)"
 echo "  git commit   : $GIT_COMMIT"
-echo "  phase        : COUPANG_WING_SELECTOR_PROBE (READ_ONLY)"
+echo "  phase        : $PHASE (READ_ONLY)"
 echo "  probe targets: $PROBE_TARGETS"
 echo
 echo "next: tools/coupang-local/wing-probe-preflight.sh  (prepares + displays the Approval Manifest; no browser)"
