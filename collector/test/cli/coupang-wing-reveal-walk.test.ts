@@ -124,7 +124,13 @@ function harness(o: FakeOpts = {}) {
     note(line) {
       // The checkpoint copy is tagged in the order log: its POSITION is a property under test, and a bare
       // "note" marker would make that assertion depend on counting anonymous entries.
-      order.push(line.includes(WING_REVEAL_CHECKPOINT_LABEL) ? "note:checkpoint" : "note");
+      order.push(
+        line.includes(WING_REVEAL_CHECKPOINT_LABEL)
+          ? "note:checkpoint"
+          : line.includes("/status/run-coupang-wing-reveal-live.pressed")
+            ? "note:presshint"
+            : "note",
+      );
       notes.push(line);
     },
     emit(record) {
@@ -260,6 +266,28 @@ describe("runRevealWalk — the happy path is the ONLY path that observes", () =
     expect(copyAt).toBeLessThan(order.indexOf("wait:pressed"));
     // …and after the highlight, so the copy never describes a control that was never marked.
     expect(copyAt).toBeGreaterThan(order.indexOf("highlight"));
+  });
+
+  it("the completion sentinel is disclosed AT the checkpoint — never before the readiness wait", async () => {
+    // Mutation M13 survived the first battery: moving this line to AFTER the press wait changed nothing any
+    // test could see. It is the whole point of review finding #2 — announcing the pressed sentinel early
+    // invites the operator to create it in advance, and a sentinel that already exists makes the checkpoint
+    // wait return on tick 0, skipping the human checkpoint in silence.
+    const { driver, io, order, notes } = harness();
+    await runRevealWalk(driver, io, "wing_host");
+    const hintAt = order.indexOf("note:presshint");
+    expect(hintAt, "the press hint must be shown").toBeGreaterThan(-1);
+    expect(hintAt, "it must come AFTER the readiness wait, never before").toBeGreaterThan(order.indexOf("wait:ready"));
+    expect(hintAt, "…and after the checkpoint copy").toBeGreaterThan(order.indexOf("note:checkpoint"));
+    expect(hintAt, "…and BEFORE the press wait it explains").toBeLessThan(order.indexOf("wait:pressed"));
+    expect(noteText(notes)).toContain("Press 발급 YOURSELF");
+  });
+
+  it("no sentinel path is disclosed before the readiness wait resolves", async () => {
+    // The stronger form: not just "the hint is late" but "nothing names the completion sentinel early".
+    const { driver, io, order } = harness({ signals: ["abort"] });
+    await runRevealWalk(driver, io, "wing_host");
+    expect(order, "an aborted run must never have disclosed the press sentinel").not.toContain("note:presshint");
   });
 });
 
