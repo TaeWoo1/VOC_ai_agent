@@ -51,6 +51,9 @@ import {
 } from "../action-window/coupang-wing-issuance-driver";
 import {
   LIVE_DOM_CALIBRATION_PENDING,
+  wingIssuedStateFrom,
+  type WingIssuedState,
+  type WingIssuedStateReason,
   resolveGatedWingProbeScope,
   resolveWingUrl,
   screenWingUrl,
@@ -151,6 +154,13 @@ export interface WingSelectorRecordResult {
   /** How many candidates did NOT resolve uniquely — the drift/calibration signal (sanitized count). */
   nonUniqueCandidates: number;
   aborted: boolean;
+  /**
+   * Sanitized ISSUED-STATE verdict derived from {@link observation} — the machine-checkable answer to "is a key
+   * currently issued on this surface". `not_issued` requires POSITIVE form-marker evidence plus an absent
+   * credential anchor, so a failed/thin read reports `indeterminate` rather than masquerading as deletion
+   * evidence. Absent observation ⇒ `indeterminate`. A three-value enum plus a closed reason; no value is read.
+   */
+  issuedState: { state: WingIssuedState; reason: WingIssuedStateReason };
   /** ALWAYS present: these candidate labels are unvalidated hypotheses until a live run proves matchCount === 1. */
   calibration: typeof LIVE_DOM_CALIBRATION_PENDING;
 }
@@ -187,6 +197,7 @@ export async function runWingSelectorRecord(
       uniqueCandidates: 0,
       nonUniqueCandidates: 0,
       aborted: signal === "abort",
+      issuedState: wingIssuedStateFrom(null),
       calibration: LIVE_DOM_CALIBRATION_PENDING,
     };
   }
@@ -236,6 +247,7 @@ export async function runWingSelectorRecord(
     uniqueCandidates,
     nonUniqueCandidates,
     aborted: false,
+    issuedState: wingIssuedStateFrom(observation),
     calibration: LIVE_DOM_CALIBRATION_PENDING,
   };
 }

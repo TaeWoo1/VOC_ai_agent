@@ -48,7 +48,7 @@ import {
   validateApprovalPrerequisites,
   type ApprovalPrereqInput,
 } from "./approval-manifest";
-import { resolveWingUrl, screenWingUrl } from "./coupang-wing-classifier";
+import { resolveWingUrl, screenWingUrl, type WingPageCategory } from "./coupang-wing-classifier";
 import { verifyRepoIdentity } from "./repo-identity";
 import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from "./live-run-approval";
 
@@ -155,6 +155,58 @@ async function waitForSignal(readyPath: string, abortPath: string, abortFlag: { 
   return "timeout";
 }
 
+/** How the operator-action wait ended. */
+export type DeletionCompletionSignal = "ready" | "abort" | "timeout";
+
+/** The minimal driver surface {@link finishDeletionRun} needs, so the sequence is testable over a fake. */
+export interface DeletionRunDriver {
+  clearHighlight(): Promise<void>;
+  verifyDeletion(): Promise<{ deleted: boolean; pageCategory: WingPageCategory }>;
+}
+
+/**
+ * End the guided deletion run: **retire the checkpoint FIRST**, then (only for a completion signal) read the
+ * sanitized page category.
+ *
+ * The defect this fixes, reported by the operator on the first live run: the ring and the irreversible-warning
+ * panel stayed up after they pressed 삭제 — through the verify poll and until the `finally` cleanup. On a
+ * destructive surface that is not cosmetic. The ring points at a control that may no longer exist, while the
+ * panel still reads "press 삭제" — instructing the operator to repeat an action they have already taken, on a
+ * page that may now offer 발급 in a similar position. Stale destructive guidance invites a second attempt.
+ *
+ * The driver cannot detect the click itself (it deliberately attaches no listeners to marketplace controls), so
+ * the operator's completion signal is the earliest possible moment — but it is much earlier than the old
+ * behaviour, and it happens on EVERY signal, including abort and timeout.
+ *
+ * Clearing removes DOM the agent itself added; it never clicks, confirms, or re-triggers anything. A clear that
+ * FAILS is recorded as `checkpointCleared: false` and nothing else: it must not block the outcome, must not
+ * retry the destructive action, and must not be reported as success. Clearing also does NOT reset the driver's
+ * phase, so the checkpoint-before-operator-action invariant is untouched by removing the checkpoint's pixels.
+ */
+export async function finishDeletionRun(
+  driver: DeletionRunDriver,
+  signal: DeletionCompletionSignal,
+): Promise<Record<string, unknown>> {
+  let checkpointCleared = true;
+  try {
+    await driver.clearHighlight();
+  } catch {
+    checkpointCleared = false;
+  }
+  if (signal !== "ready") {
+    return { event: "COUPANG_DELETION", outcome: signal === "abort" ? "ABORTED" : "TIMEOUT", checkpointCleared };
+  }
+  const verified = await driver.verifyDeletion();
+  // SANITIZED only — a boolean + a page category enum. No value, selector, PII, raw DOM, or URL.
+  return {
+    event: "COUPANG_DELETION",
+    outcome: "COMPLETED",
+    deleted: verified.deleted,
+    pageCategory: verified.pageCategory,
+    checkpointCleared,
+  };
+}
+
 async function main(): Promise<void> {
   banner();
   const args = process.argv.slice(2);
@@ -233,8 +285,10 @@ async function main(): Promise<void> {
     if (highlight.count !== 1) {
       // Two distinct fail-closed causes share `count: 0` — the 삭제 control had no unique match, or it did and
       // the irreversible-warning checkpoint failed to paint. Report them apart so the operator is not told the
-      // control is missing when it was found.
+      // control is missing when it was found. Clear immediately either way: a partially-painted ring must not
+      // outlive the refusal and point at a control this run has decided not to guide.
       const outcome = driver.didCheckpointFailToPaint() ? "CHECKPOINT_NOT_PAINTED" : "DELETE_TARGET_NOT_FOUND";
+      await driver.clearHighlight().catch(() => undefined);
       console.log(JSON.stringify({ event: "COUPANG_DELETION", outcome, matchCount: highlight.count }));
       return;
     }
@@ -243,14 +297,16 @@ async function main(): Promise<void> {
     console.error(`  2) After you delete the key yourself, create: ${donePath}   (or ${abortPath} to abort)`);
     removeSentinel(readyPath);
     const second = await waitForSignal(donePath, abortPath, abortFlag);
-    if (second !== "ready") {
-      console.log(JSON.stringify({ event: "COUPANG_DELETION", outcome: second === "abort" ? "ABORTED" : "TIMEOUT" }));
-      return;
-    }
-    const verified = await driver.verifyDeletion();
-    // SANITIZED only — a boolean + a page category enum. No value, selector, PII, raw DOM, or URL.
-    console.log(JSON.stringify({ event: "COUPANG_DELETION", outcome: "COMPLETED", deleted: verified.deleted, pageCategory: verified.pageCategory }));
-    log("aw_coupang_deletion_done", { deleted: verified.deleted, pageCategory: verified.pageCategory });
+    // The checkpoint is retired HERE — before the verify poll, on every signal — so no stale "press 삭제"
+    // guidance outlives the operator's action. See `finishDeletionRun`.
+    const outcome = await finishDeletionRun(driver, second);
+    console.log(JSON.stringify(outcome));
+    log("aw_coupang_deletion_done", {
+      outcome: outcome.outcome,
+      deleted: outcome.deleted,
+      pageCategory: outcome.pageCategory,
+      checkpointCleared: outcome.checkpointCleared,
+    });
   } finally {
     for (const p of [readyPath, donePath, abortPath]) removeSentinel(p);
     process.removeListener("SIGINT", onSigint);

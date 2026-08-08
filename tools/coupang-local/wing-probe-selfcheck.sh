@@ -20,6 +20,7 @@
 #   DIRTY_TREE      → FAIL (uncommitted change ⇒ the manifest's gitSHA would not name the running code)
 #   GIT_DIR_HIJACK  → FAIL (a decoy GIT_DIR/GIT_WORK_TREE must not redirect the drift check off this repo)
 #   UNTRACKED_HIDE  → FAIL (GIT_CONFIG_* forcing status.showUntrackedFiles=no must not hide a dirty tree)
+#   POSTDELETE      → PASS; the four post-delete FORM targets only (no credentials/delete), bound to the run
 #   NORMAL          → PASS; delete-only READ_ONLY scope, no frontend URL, approved scope bound to the run
 #
 # NORMAL and the three dirty-tree cases are complementary: they need a clean tree, and print SKIP otherwise.
@@ -128,6 +129,10 @@ write_env "$FIXTURES/badscope.env" "$CUR_GIT" "COUPANG_WING_SELECTOR_PROBE" "nop
 # what was requested, or a run that silently disagrees with what was displayed.
 write_env "$FIXTURES/mixedorder.env" "$CUR_GIT" "COUPANG_WING_SELECTOR_PROBE" "issue,self_dev,issue" "wt-selfcheck04" "apr-selfcheck04"
 write_env "$FIXTURES/emptyscope.env" "$CUR_GIT" "COUPANG_WING_SELECTOR_PROBE" "" "wt-selfcheck06" "apr-selfcheck06"
+# The POST-DELETE issuance-form scope: the four form targets, and deliberately NOT `credentials` or `delete`.
+# After a real deletion there is no credential region to measure and no 삭제 control to find, so including them
+# would guarantee two non-unique candidates and muddy the calibration signal.
+write_env "$FIXTURES/postdelete.env" "$CUR_GIT" "COUPANG_WING_SELECTOR_PROBE" "self_dev,vendor_info,call_ip,issue" "wt-selfcheck11" "apr-selfcheck11"
 if [ -z "$TREE_DIRTY" ]; then
   run_case "BAD_SCOPE      (unknown probe target)" nonzero "WING_PROBE_TARGETS_MISMATCH" "$FIXTURES/badscope.env"
   run_case "MIXED_ORDER    (scope normalized, not widened)" 0 "probe targets: self_dev,issue" "$FIXTURES/mixedorder.env"
@@ -140,6 +145,19 @@ if [ -z "$TREE_DIRTY" ]; then
   # An empty scope is "all targets", not "no targets" — the manifest must display the full set so the
   # operator can see the widening before granting.
   run_case "EMPTY_SCOPE    (empty ⇒ FULL fixed set, displayed)" 0 "self_dev,vendor_info,call_ip,issue,credentials,delete" "$FIXTURES/emptyscope.env"
+  # The scope the post-delete form calibration will actually request.
+  run_case "POSTDELETE     (form-only scope prepares + displays)" 0 "probe targets: self_dev,vendor_info,call_ip,issue" "$FIXTURES/postdelete.env"
+  out="$(SELLEROPS_WING_PROBE_RUN_ENV="$FIXTURES/postdelete.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1)"
+  if grep -qF '"credentials"' <<<"$out" || grep -qF '"delete"' <<<"$out"; then
+    echo "  FAIL  POSTDELETE     · form-only scope leaked credentials/delete into the manifest"; FAILED=1
+  else
+    echo "  PASS  POSTDELETE     · manifest carries the four form targets only"
+  fi
+  if grep -qE "^SELLEROPS_WING_APPROVED_TARGETS='self_dev,vendor_info,call_ip,issue'$" "$FIXTURES/postdelete.env"; then
+    echo "  PASS  POSTDELETE     · approved scope bound to the run env"
+  else
+    echo "  FAIL  POSTDELETE     · form-only scope not bound to the run env"; FAILED=1
+  fi
 else
   run_case "BAD_SCOPE      (unknown probe target)" nonzero "PREFLIGHT FAIL" "$FIXTURES/badscope.env"
   echo "  SKIP  MIXED_ORDER / EMPTY_SCOPE — dirty tree fails before the manifest gate"

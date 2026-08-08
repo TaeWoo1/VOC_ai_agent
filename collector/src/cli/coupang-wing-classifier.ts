@@ -207,6 +207,68 @@ export function observeFrom(urlCategory: WingUrlCategory, census: WingStructural
   return { urlCategory, pageCategory, signals, blockers };
 }
 
+/* ────────────────────────────── issued-state verdict (post-delete evidence) ────────────────────────────── */
+
+/**
+ * Whether the account's open-API key appears ISSUED, on the evidence of one sanitized observation.
+ *
+ * Why this exists. The first live deletion produced `pageCategory: open_api_issuance` both BEFORE and AFTER the
+ * operator deleted their key — because the already-issued page classifies that way via the credential anchor,
+ * and the post-delete issuance FORM classifies that way via the form marker. Same category, opposite meanings,
+ * so the category alone said nothing about the deletion in either direction, and the outcome could only be
+ * recorded as operator-attested. This is the derivation that turns the observation into machine-checkable
+ * evidence, without reading a single value.
+ */
+export const WING_ISSUED_STATES = ["issued", "not_issued", "indeterminate"] as const;
+export type WingIssuedState = (typeof WING_ISSUED_STATES)[number];
+
+/** Why the verdict came out the way it did — a closed enum, never free text. */
+export const WING_ISSUED_STATE_REASONS = [
+  /** The live-confirmed credential-region anchor is present ⇒ a key is issued and displayed. */
+  "CREDENTIAL_ANCHOR_PRESENT",
+  /** No credential anchor, and the issuance FORM marker is positively present ⇒ nothing issued to show. */
+  "FORM_MARKER_WITHOUT_CREDENTIAL_ANCHOR",
+  /** Not the open-API surface at all (login / home / off-target) — the question does not apply here. */
+  "NOT_OPEN_API_SURFACE",
+  /** On the open-API surface but neither anchor nor form marker is present — too thin to call. */
+  "THIN_SIGNALS",
+  /** No observation at all (the run never reached ready, or the observe read threw). */
+  "NO_OBSERVATION",
+] as const;
+export type WingIssuedStateReason = (typeof WING_ISSUED_STATE_REASONS)[number];
+
+/**
+ * Derive the issued-state verdict from a sanitized observation. Pure, value-free, and FAIL-CLOSED: the only way
+ * to reach `not_issued` is POSITIVE evidence of the issuance form together with the absence of the credential
+ * anchor.
+ *
+ * That asymmetry is the whole point. "The credential anchor is missing" on its own is exactly what a page that
+ * failed to load, hydrated late, or rendered an error looks like — reading it as "the key is gone" would let a
+ * broken read masquerade as deletion evidence, which is the one mistake this verdict must never make. Requiring
+ * the form marker means the page has positively identified itself as the issuance entry surface, which only
+ * happens when there is no issued key to display.
+ *
+ * It follows that a `not_issued` verdict is evidence, while an `indeterminate` verdict is the absence of
+ * evidence — never evidence of the opposite. Callers must not treat `indeterminate` as either outcome.
+ */
+export function wingIssuedStateFrom(observation: WingObservation | null): {
+  state: WingIssuedState;
+  reason: WingIssuedStateReason;
+} {
+  if (!observation) return { state: "indeterminate", reason: "NO_OBSERVATION" };
+  const { pageCategory, signals } = observation;
+  // Only the open-API surface can answer the question. login / wing_home / unknown / off-target cannot — and an
+  // off-target host already forces `unknown` upstream, so it is covered by this same branch.
+  if (pageCategory !== "open_api_issuance" && pageCategory !== "credential_shown") {
+    return { state: "indeterminate", reason: "NOT_OPEN_API_SURFACE" };
+  }
+  if (signals.credentialAnchorPresent) return { state: "issued", reason: "CREDENTIAL_ANCHOR_PRESENT" };
+  if (signals.openApiMarkerPresent) {
+    return { state: "not_issued", reason: "FORM_MARKER_WITHOUT_CREDENTIAL_ANCHOR" };
+  }
+  return { state: "indeterminate", reason: "THIN_SIGNALS" };
+}
+
 /* ────────────────────────────── issuance-runtime seam (branch + candidate markers) ────────────────────────────── */
 
 /** What the issuance engine should do after a WING surface probe. */
