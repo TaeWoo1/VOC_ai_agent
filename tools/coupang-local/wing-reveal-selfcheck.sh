@@ -4,8 +4,8 @@
 # the run can be wrong, and prepares + displays a reveal manifest only when it is right.
 #
 # The reveal harness was the only WING harness shipped WITHOUT one: 250+ lines carrying the entire operator-facing
-# disclosure for a real marketplace action, verified once by hand. This closes that gap. It is the third caller of
-# `wing-harness-common.sh` and adds no new checking logic of its own — every assertion below runs the real
+# disclosure for a real marketplace action, verified once by hand. This closes that gap. It reuses
+# `wing-harness-common.sh` (one of its seven callers) and adds no new checking logic of its own — every assertion below runs the real
 # preflight, or the real shared descriptor verifier, against fixtures.
 #
 # Fully HERMETIC: no browser, no backend, no Coupang call, NOTHING pressed and NO key issued. The only tree
@@ -169,7 +169,14 @@ for soft in \
   '"expectedOutcome":"CREDENTIALS_SHOWN"' \
   '"operation":"COMPLETE_WING_KEY_ISSUANCE"' \
   '"operation":"DELETE_WING_OPEN_API_KEY"' \
-  '"forbiddenFollowOnAction":"NOTHING"'
+  '"forbiddenFollowOnAction":"NOTHING"' \
+  '"keyCreationRuledOut":"false"' \
+  '"createsKeyMaterial":"false"' \
+  '"expectedOutcomeConfirmed":"false"' \
+  '"autoAdvanceAfterReveal":"false"' \
+  '"agentPerformsAction":"false"' \
+  '"explicitCheckpointRequired":"true"' \
+  '"credentialValueReadBudget":"0"'
 do
   # The fixture must be BUILT and must actually DIFFER from canonical. If the generator throws, no file is
   # written, `verify_reveal_descriptor` fails on a missing/stale path, and the loop reads that as "refused" —
@@ -230,7 +237,7 @@ if [ -z "$TREE_DIRTY" ]; then
   run_case "NORMAL          · manifest phase" 0 "COUPANG_WING_ISSUANCE_FORM_REVEAL" "$FIXTURES/normal.env"
   run_case "NORMAL          · agent mode stays READ_ONLY" 0 "READ_ONLY (agent)" "$FIXTURES/normal.env"
   run_case "NORMAL          · 발급 selector calibration disclosed" 0 "selectors calibrated: true" "$FIXTURES/normal.env"
-  run_case "NORMAL          · descriptor verified before display" 0 "reveal descriptor is exactly the canonical contract" "$FIXTURES/normal.env"
+  run_case "NORMAL          · descriptor verdict shown" 0 "reveal descriptor is exactly the canonical contract" "$FIXTURES/normal.env"
   run_case "NORMAL          · one-line grant offered" 0 "Seated and ready." "$FIXTURES/normal.env"
   run_case "NORMAL          · run command is the REVEAL entrypoint" 0 "run-coupang-wing-reveal-live.ts" "$FIXTURES/normal.env"
 
@@ -433,8 +440,9 @@ FAKE
   fi
 else
   run_case "DIRTY_TREE      (uncommitted change refused)" nonzero "working tree is dirty" "$FIXTURES/normal.env"
-  # Derived, never hand-counted: a case added to the clean branch without touching this number would make the
-  # PARTIAL banner under-report what was skipped.
+  # The COUNT is derived from the list, so it cannot drift from it. The LIST is still hand-maintained: a
+  # clean-only case added below without a matching entry here would under-report. Stated rather than implied,
+  # because the previous comment claimed the failure mode was closed and it is not.
   CLEAN_ONLY_CASES=(NORMAL NO_LEAK GIT_DIR_HIJACK BOOTSTRAP_DIRTY BOOTSTRAP_CLEAN BOOTSTRAP_SHA COLLECTOR_ESCAPE GIT_STATUS_FAIL DEFAULT_OUT)
   SKIPPED=${#CLEAN_ONLY_CASES[@]}
   echo "  SKIP  ${CLEAN_ONLY_CASES[*]} — the working tree is dirty, which the"

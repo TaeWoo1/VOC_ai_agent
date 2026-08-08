@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
-# Shared preflight checks for the two Coupang WING harnesses — the READ-ONLY selector probe
-# (`wing-probe-preflight.sh`) and its DESTRUCTIVE sibling, the key-deletion preflight
-# (`wing-deletion-preflight.sh`).
+# Shared checks for the THREE Coupang WING harnesses — the READ-ONLY selector probe (`wing-probe-*`), the
+# DESTRUCTIVE key-deletion harness (`wing-deletion-*`), and the issuance-form REVEAL harness (`wing-reveal-*`),
+# whose operator presses a real control that is deliberately NOT key creation. Seven scripts source this file:
+# three preflights, three selfchecks, and the reveal bootstrap.
 #
 # This file exists so the destructive harness does not become a second, drifting copy of hardening that took
 # three review rounds to get right (ambient-git stripping, `case`-not-`grep` freshness parsing, a failing

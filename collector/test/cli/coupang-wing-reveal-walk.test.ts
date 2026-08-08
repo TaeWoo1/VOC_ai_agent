@@ -3,8 +3,8 @@
  *
  * Everything between the approval gate and the printed record used to live inside `main()` — unexported, wired
  * directly to `launchNaverContext`, `existsSync` and a 20-minute wall clock. So the paths that decide whether
- * SellerOps touches a live marketplace page at all (both sentinel waits, both aborts, the timeout, four
- * fail-closed refusals, and the unexpected-outcome stop) had no test: the only way to reach them was to open
+ * SellerOps touches a live marketplace page at all (both sentinel waits, both aborts, the timeout, the
+ * three fail-closed refusals, and the unexpected-outcome stop) had no test: the only way to reach them was to open
  * Chrome on the seller's WING account. That is precisely backwards for the code that guards a real WING press.
  *
  * `runRevealWalk` + `waitForSignal` are now the seam. Both take their surroundings as dependencies, so every
@@ -744,6 +744,18 @@ describe("the report is reported — a run that exits 0 whatever happened is an 
     expect(revealExitCode({ ...base, stop: "NOT_OPEN_API_SURFACE", cleanupFailed: true })).toBe(8);
   });
 
+  it("main() CALLS banner() — printing it is not the same as showing it", () => {
+    // The sixth instance of this branch's dominant pattern. The guard moved from "the constant holds the two
+    // claim lines" to "banner() prints them" and stopped one layer short: deleting `banner();` from main()
+    // typechecks, keeps every suite green, and the operator opens a live WING window told none of the six lines
+    // — strictly worse than the `.slice(0, 4)` mutation the previous fix was written for.
+    const src2 = readFileSync(SRC, "utf8");
+    const body = src2.slice(src2.indexOf("async function main(): Promise<void>"));
+    expect(body).toContain("banner();");
+    // …and FIRST, before any refusal path can return early without disclosing anything.
+    expect(body.indexOf("banner();")).toBeLessThan(body.indexOf("hasCoupangWingRunApproval"));
+  });
+
   it("main() reads the report and delegates the code to revealExitCode", () => {
     const src2 = readFileSync(SRC, "utf8");
     const body = src2.slice(src2.indexOf("async function main(): Promise<void>"));
@@ -761,6 +773,17 @@ describe("the report is reported — a run that exits 0 whatever happened is an 
     expect(body).toContain("sentinelPath(cfg.statusFile, REVEAL_READY_FILENAME)");
     expect(body).toContain("sentinelPath(cfg.statusFile, REVEAL_DONE_FILENAME)");
     expect(body).toContain("remove: removeSentinel,");
+    // The sentinel sweep happens TWICE — once at startup and once in the finally — and `toContain` is satisfied
+    // by either, so it cannot see one being deleted. Counted instead, and positioned: the startup sweep must
+    // precede the browser launch. Consumption only removes sentinels THIS process observed, so a `.pressed`
+    // file left behind by a SIGKILLed run would otherwise make the checkpoint wait return on tick 0 — the
+    // branch's headline fail-open, arriving through the one door consumption does not cover.
+    const sweep = "for (const p of [readyPath, donePath, abortPath]) removeSentinel(p);";
+    const sweeps = body.split(sweep).length - 1;
+    expect(sweeps, "both the startup sweep and the teardown sweep must be present").toBe(2);
+    expect(body.indexOf(sweep), "the startup sweep must run BEFORE the browser launches").toBeLessThan(
+      body.indexOf("launchNaverContext("),
+    );
     // The three sentinels must come from three DIFFERENT filename constants.
     const names = [...body.matchAll(/sentinelPath\(cfg\.statusFile, (REVEAL_\w+)\)/g)].map((m) => m[1]!);
     expect(names).toHaveLength(3);

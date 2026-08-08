@@ -323,8 +323,16 @@ describe("the shell harness approves exactly what the runtime declares", () => {
   });
 
   it("the preflight REFUSES on the verifier's verdict rather than merely calling it", () => {
-    expect(preflight).toContain('if ! verify_reveal_descriptor "$MANIFEST_OUT"; then');
-    expect(preflight).toContain("Refusing to display it for approval");
+    // BLOCK-scoped, like the shell selfchecks. Two independent substrings both stay true when `exit 1` is
+    // deleted — and execution then falls through to the PASS line, the manifest dump and "Seated and ready.",
+    // displaying a descriptor whose safety claims are softened. The shell selfcheck catches that, but the
+    // selfchecks are manual-only; `npm test` is the automated gate, so the TS twin has to read the body too.
+    const ifLine = 'if ! verify_reveal_descriptor "$MANIFEST_OUT"; then';
+    const start = preflight.indexOf(ifLine);
+    expect(start, "the descriptor refusal block must exist").toBeGreaterThan(-1);
+    const block = preflight.slice(start, preflight.indexOf("\nfi\n", start));
+    expect(block).toContain("Refusing to display it for approval");
+    expect(block, "the refusal must EXIT, not merely print").toMatch(/^\s*exit 1$/m);
   });
 
   it("the on-page copy shown before the grant EQUALS the label the seller will read — not an extract of it", () => {

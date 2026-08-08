@@ -11,13 +11,13 @@
 | gap | why it is the wrong thing to leave untested |
 |---|---|
 | the two new shell scripts had **no `*-selfcheck.sh`** | 250+ lines carrying the operator's entire disclosure surface — the text they grant against — verified once by hand |
-| `main()` was **not exported** | every path deciding whether SellerOps touches a live page (both sentinel waits, both aborts, the timeout, four refusals, the unexpected-outcome stop) was reachable only by opening Chrome on the seller's WING account |
+| `main()` was **not exported** | every path deciding whether SellerOps touches a live page (both sentinel waits, both aborts, the timeout, three fail-closed refusals, the unexpected-outcome stop) was reachable only by opening Chrome on the seller's WING account |
 
 Both are the same shape: the code that guards a real marketplace press was the code with the least coverage.
 
 ## Goal 1 — the reveal harness selfcheck
 
-`wing-reveal-selfcheck.sh`, hermetic, the third caller of `wing-harness-common.sh`. It adds **no new checking
+`wing-reveal-selfcheck.sh`, hermetic, reusing `wing-harness-common.sh` (one of its seven callers). It adds **no new checking
 logic** — every assertion runs the real preflight, or the real shared verifier, against fixtures.
 
 Cases: no run env · unbound identity · stale identity (the 1h TTL, not the probe's) · malformed epoch · ambient
@@ -103,7 +103,7 @@ caught missing from this list.
    changing `cleanup()` to return a boolean: `clearHighlight` catches every error it can hit, so the production
    driver reports a stuck panel by RETURN VALUE and can never reject — the first version of this guarantee was
    wired to a rejection it could not produce, and only a fake could make its test go green.
-5. **`driver.cleanup()` now runs twice on EVERY path** (the walk's `finally` and `main`'s) — the four
+5. **`driver.cleanup()` now runs twice on EVERY path** (the walk's `finally` and `main`'s) — the three
    fail-closed refusals and both aborts included, not only a completed walk. It is idempotent, so this is not a
    defect, but it is a change in how many times SellerOps touches the seller's live page. Relatedly, a throwing clear at the checkpoint-abort path used to emit `aw_coupang_reveal_run_fatal` and
    exit 1; it now exits 8 with the STOP line and no fatal log.
@@ -113,7 +113,10 @@ caught missing from this list.
    disappears — and load-bearing: it is what makes a "both waits watch the same path" mistake time out instead
    of skipping the human checkpoint.
 
-Two fail-open shapes were fixed alongside them: `waitForSignal` clamps its poll interval (`pollMs: 0` made the
+Two fail-open shapes were fixed alongside them — **both introduced by this branch, neither present on `main`**
+(`POLL_MS` was a hard constant with no injection point, and `urlCategory` was not a parameter at all), so they
+are intra-branch regressions closed within the branch rather than changes against `main`: `waitForSignal` clamps
+its poll interval (`pollMs: 0` made the
 derived budget `Infinity` — a wait with no deadline; a negative one skipped the loop body entirely, returning
 `timeout` without ever checking abort or the target), and `urlCategory` is typed as the enum rather than
 `string`, under which passing the raw WING URL typechecked and printed it into the sanitized stdout record.
