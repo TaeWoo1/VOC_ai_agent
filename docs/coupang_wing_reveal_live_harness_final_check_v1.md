@@ -80,9 +80,9 @@ expected · a failed overlay clear passed through rather than rounded up.
 
 ## Behaviour that changed
 
-Listing these because "closes a testability gap" is not a licence to move a live-run guard silently. Two are net
-changes against `main`; the first is a **restoration**, and the last two are smaller notes that a later review
-caught missing from this list.
+Listing these because "closes a testability gap" is not a licence to move a live-run guard silently. Item 1 is a
+**restoration** of `main` behaviour this branch's first commit broke; items 2–6 are net changes against `main`,
+the last three of them added after later review rounds caught them missing from this list.
 
 1. **RESTORED, not changed: the completion sentinel is disclosed at the checkpoint.** `main` already printed it
    there. This branch's first commit moved it to startup, which invites the operator to create it early — and a

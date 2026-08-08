@@ -330,7 +330,17 @@ describe("the shell harness approves exactly what the runtime declares", () => {
     const ifLine = 'if ! verify_reveal_descriptor "$MANIFEST_OUT"; then';
     const start = preflight.indexOf(ifLine);
     expect(start, "the descriptor refusal block must exist").toBeGreaterThan(-1);
-    const block = preflight.slice(start, preflight.indexOf("\nfi\n", start));
+    // The terminator must be the block's OWN `fi`, matched as a line. Two weaker versions of this failed:
+    // `indexOf("\nfi\n")` returning -1 sliced to end-of-file, and merely requiring it to be > start still let a
+    // LATER `fi` close the block — either way the region swallowed the phase-binding refusal's own `exit 1` and
+    // the assertion passed on a line from an unrelated branch. Scanning to the first `fi` line, and refusing a
+    // nested `if` before it, is what actually scopes this.
+    const lines = preflight.slice(start).split("\n");
+    const endIdx = lines.findIndex((l, i) => i > 0 && /^fi\b/.test(l));
+    expect(endIdx, "the refusal block must be closed by an `fi` at column 0").toBeGreaterThan(0);
+    const inner = lines.slice(1, endIdx);
+    expect(inner.some((l) => /^if\b/.test(l)), "unexpected nested if — the slice is not this block").toBe(false);
+    const block = inner.join("\n");
     expect(block).toContain("Refusing to display it for approval");
     expect(block, "the refusal must EXIT, not merely print").toMatch(/^\s*exit 1$/m);
   });
@@ -364,7 +374,8 @@ describe("the shell harness approves exactly what the runtime declares", () => {
     expect(statSync(selfcheck).mode & 0o111, "must be executable").toBeGreaterThan(0);
     // It must exercise the real preflight, not re-implement its checks.
     expect(src).toContain("wing-reveal-preflight.sh");
-    expect(src).toContain("wing-harness-common.sh");
+    // The SOURCE line, not the `# shellcheck source=` comment above it, which also contains the filename.
+    expect(src).toContain('. "$HERE/wing-harness-common.sh"');
   });
 
   it("the reveal BOOTSTRAP uses the shared hardened git, not a private weaker copy", () => {
@@ -374,7 +385,7 @@ describe("the shell harness approves exactly what the runtime declares", () => {
       resolve(dirname(fileURLToPath(import.meta.url)), "../../../tools/coupang-local/wing-reveal-bootstrap.sh"),
       "utf8",
     );
-    expect(bootstrap).toContain("wing-harness-common.sh");
+    expect(bootstrap).toContain('. "$HERE/wing-harness-common.sh"');
     expect(bootstrap).not.toContain("git_hardened() {");
     // …and it refuses a dirty tree, like the destructive bootstrap. Pinning a SHA that already does not describe
     // the tree just defers a guaranteed refusal behind a run env that looks valid.

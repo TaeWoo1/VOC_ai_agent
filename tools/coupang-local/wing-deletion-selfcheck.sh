@@ -202,8 +202,13 @@ fi
 # therefore asserted on the source. Without this, deleting the `if !` would break nothing observable.
 # BLOCK-scoped: both substrings stay true if `exit 1` is deleted, and execution then falls through to the PASS
 # line and the manifest dump — a softened DESTRUCTIVE descriptor displayed under a grant line.
-DESC_BLOCK="$(awk '/^if ! verify_destructive_descriptor "\$MANIFEST_OUT"; then$/,/^fi$/' "$PREFLIGHT")"
-if [ -n "$DESC_BLOCK" ] && grep -qF "Refusing to display it for approval" <<<"$DESC_BLOCK" && grep -qE '^ *exit 1$' <<<"$DESC_BLOCK"; then
+# The range END is /^fi/, not /^fi$/: a decorated `fi  # comment` does not close the strict form, so the range
+# runs on to the NEXT bare fi and swallows another refusal's `exit 1`.
+DESC_BLOCK="$(awk '/^if ! verify_destructive_descriptor "\$MANIFEST_OUT"; then$/,/^fi/' "$PREFLIGHT")"
+# `grep -qxF fi` is not decoration: an unterminated awk range runs to EOF, and the preflight's OTHER refusals
+# each carry their own `exit 1`, so the check below would pass on a line from an unrelated branch.
+if [ -n "$DESC_BLOCK" ] && grep -qxF 'fi' <<<"$DESC_BLOCK" \
+   && grep -qF "Refusing to display it for approval" <<<"$DESC_BLOCK" && grep -qE '^ *exit 1$' <<<"$DESC_BLOCK"; then
   echo "  PASS  DESCRIPTOR    · the preflight EXITS on the verifier's verdict (not merely prints)"
 else
   echo "  FAIL  DESCRIPTOR    · the descriptor refusal does not exit — a softened manifest would be displayed"; FAILED=1

@@ -118,7 +118,7 @@ echo
 run_case "NO_RUN_ENV      (bootstrap never ran)" nonzero "no run env at" "$FIXTURES/absent.env"
 
 write_env "$FIXTURES/unbound.env" "unknown" "COUPANG_WING_ISSUANCE_FORM_REVEAL" "unknown" "unknown"
-run_case "UNBOUND_RUN     (identity is \"unknown\")" nonzero "PREFLIGHT FAIL" "$FIXTURES/unbound.env"
+run_case "UNBOUND_RUN     (identity is \"unknown\")" nonzero "is empty or \"unknown\"" "$FIXTURES/unbound.env"
 
 # A real marketplace press, so this harness uses the destructive 1h TTL rather than the read-only probe's.
 write_env "$FIXTURES/stale.env" "$CUR_GIT" "COUPANG_WING_ISSUANCE_FORM_REVEAL" "wt-revchk01" "apr-revchk01" "$((NOW - 7200))"
@@ -180,7 +180,7 @@ for soft in \
 do
   # The fixture must be BUILT and must actually DIFFER from canonical. If the generator throws, no file is
   # written, `verify_reveal_descriptor` fails on a missing/stale path, and the loop reads that as "refused" —
-  # all twelve softenings, including keyCreationRuledOut:true, would report PASS while testing nothing.
+  # every softening in the list below, including keyCreationRuledOut:true, would report PASS while testing nothing.
   rm -f "$FIXTURES/desc-soft.json"
   if ! python3 -c 'import json,sys
 d = json.loads(sys.argv[1]); k, v = json.loads("{" + sys.argv[2] + "}").popitem()
@@ -223,8 +223,13 @@ fi
 # falls through to the PASS line, the full manifest dump and "Seated and ready.", so a descriptor carrying
 # keyCreationRuledOut: true would be DISPLAYED for approval. That is the exact failure this function exists to
 # prevent, so the guard has to read the refusal body, not just its first and last lines.
-DESC_BLOCK="$(awk '/^if ! verify_reveal_descriptor "\$MANIFEST_OUT"; then$/,/^fi$/' "$PREFLIGHT")"
-if [ -n "$DESC_BLOCK" ] && grep -qF "Refusing to display it for approval" <<<"$DESC_BLOCK" && grep -qE '^ *exit 1$' <<<"$DESC_BLOCK"; then
+# The range END is /^fi/, not /^fi$/: a decorated `fi  # comment` does not close the strict form, so the range
+# runs on to the NEXT bare fi and swallows another refusal's `exit 1`.
+DESC_BLOCK="$(awk '/^if ! verify_reveal_descriptor "\$MANIFEST_OUT"; then$/,/^fi/' "$PREFLIGHT")"
+# `grep -qxF fi` is not decoration: an unterminated awk range runs to EOF, and the preflight's OTHER refusals
+# each carry their own `exit 1`, so the check below would pass on a line from an unrelated branch.
+if [ -n "$DESC_BLOCK" ] && grep -qxF 'fi' <<<"$DESC_BLOCK" \
+   && grep -qF "Refusing to display it for approval" <<<"$DESC_BLOCK" && grep -qE '^ *exit 1$' <<<"$DESC_BLOCK"; then
   echo "  PASS  DESCRIPTOR    · the preflight EXITS on the verifier's verdict (not merely prints)"
 else
   echo "  FAIL  DESCRIPTOR    · the descriptor refusal does not exit — a softened manifest would be displayed"; FAILED=1
@@ -362,8 +367,11 @@ ENV
   # SELLEROPS_WING_REVEAL_RUN_DIR keeps the REAL bootstrap away from the operator's live run env. Without it,
   # a regression in the very guard this case tests would mint a fresh approval id over a pending grant.
   out="$(env SELLEROPS_WING_REVEAL_RUN_DIR="$FIXTURES/run" bash "$BOOTSTRAP" 2>&1)"; rc=$?
-  if [ "$rc" != "0" ] && grep -qiF "dirty" <<<"$out"; then
-    echo "  PASS  BOOTSTRAP_DIRTY · bootstrap refuses to pin a SHA against a dirty tree"
+  # The EFFECT, not just the exit code: the reason this case exists is that a refusal AFTER the run env is
+  # written still leaves a fresh approval id on disk, killing a pending grant. Moving the dirty check below the
+  # heredoc keeps rc=1 and the word "dirty" — BOOTSTRAP_SHA already asserts its effect this way.
+  if [ "$rc" != "0" ] && grep -qiF "dirty" <<<"$out" && [ ! -f "$FIXTURES/run/wing-reveal.env" ]; then
+    echo "  PASS  BOOTSTRAP_DIRTY · refuses a dirty tree AND writes no run env (no grant is killed)"
   else
     echo "  FAIL  BOOTSTRAP_DIRTY · bootstrap minted an identity on a dirty tree (exit=$rc)"; FAILED=1
   fi
