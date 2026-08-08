@@ -219,15 +219,22 @@ if [ -z "$TREE_DIRTY" ]; then
   done
   [ "$DISCLOSE_OK" = "1" ] && echo "  PASS  NORMAL          · full reveal disclosure shown before the grant line"
 
-  # The KOREAN imperative. The operator reads the preflight in the terminal, but the sentence that actually stops
-  # them mid-flow is the one that will be on the WING page — so it is shown here too, verbatim. A TS test
-  # (coupang-wing-reveal-gate.test.ts) asserts each fragment below is a substring of WING_REVEAL_CHECKPOINT_LABEL,
-  # so the two copies cannot drift apart.
+  # The KOREAN on-page copy, COMPLETE. What actually stops the operator mid-flow is what will be on the WING
+  # page, after the panel is gone and a form invites completion — so the preflight reproduces all five sentences
+  # and this asserts each one is printed. One fragment per sentence, none spanning a wrapped output line.
+  #
+  # An earlier version showed two of the five under a "verbatim" header, dropping the "not confirmed" hedge, the
+  # Korean statement of keyCreationRuledOut, and "read the screen before you signal". This is the presence half;
+  # coupang-wing-reveal-gate.test.ts asserts the block EQUALS WING_REVEAL_CHECKPOINT_LABEL, which is the half
+  # that catches an omission or an added sentence.
   KOREAN_OK=1
   for phrase in \
     "강조 표시된 '발급' 버튼을 직접 눌러 주세요." \
+    "확인된 사실은 아닙니다." \
     "화면이 열리면 그대로 두고 더 진행하지 마세요." \
-    "'확인'(최종 발급)은 절대 누르지 마세요."
+    "'확인'(최종 발급)은 절대" \
+    "키가 실제로 만들어졌는지 여부는" \
+    "신호를 보내면 이 창은 닫히므로"
   do
     grep -qF "$phrase" <<<"$out" || { echo "  FAIL  NORMAL          · Korean on-screen warning missing: $phrase"; KOREAN_OK=0; FAILED=1; }
   done
