@@ -70,7 +70,14 @@ direction, and the outcome is recorded as **operator-attested**.
 This was predicted and disclosed *before* the grant, not discovered afterwards. It is fixed for next time —
 see below.
 
-## Fix 1 — the issued-state verdict (`wingIssuedStateFrom`)
+> **SUPERSEDED IN PART, 2026-08-08.** "Fix 1" below designed an issued-state verdict on top of
+> `credentialAnchorPresent`. The real no-key form then read `credentialAnchorPresent: true` — the anchor is a
+> **false positive** for issued-state, so that verdict was wrong on real data and has been withdrawn. The
+> deletion itself is unaffected and did succeed; only the instrument was wrong. Read
+> [`coupang_no_key_form_classifier_selector_recon_v1.md`](./coupang_no_key_form_classifier_selector_recon_v1.md)
+> before relying on anything in Fix 1. Fix 2 (the overlay cleanup) is unaffected.
+
+## Fix 1 — the issued-state verdict (`wingIssuedStateFrom`) — WITHDRAWN 2026-08-08
 
 `credentialAnchorPresent` was already in the probe's observation; nothing turned it into a verdict. Now:
 
@@ -124,7 +131,15 @@ completion signal is the earliest possible moment, but it is far earlier than be
 reported as `checkpointCleared: false`, never retried, and never allowed to block or re-trigger anything;
 clearing does not reset the driver's phase, so the checkpoint-before-operator-action invariant is untouched.
 
-## Next unit — `Coupang WING Post-Delete Issuance Form Live Calibration v1`
+## Next unit — `Coupang WING Post-Delete Issuance Form Live Calibration v1` — RAN 2026-08-08
+
+> **Outcome: `REAL_NO_KEY_WING_FORM_OBSERVED_SELECTOR_CALIBRATION_PARTIAL`.** `issue` LIVE UNIQUE (1);
+> `self_dev` 0, `call_ip` 0, `vendor_info` 8 ⇒ NEEDS RECALIBRATION. The secondary deletion-evidence criterion
+> was not met and cannot be: `credentialAnchorPresent` read `true` on the operator-confirmed no-key form, so it
+> is a **false positive** and the verdict built on it is withdrawn. Full audit + the recon design:
+> [`coupang_no_key_form_classifier_selector_recon_v1.md`](./coupang_no_key_form_classifier_selector_recon_v1.md).
+> The plan below is kept as the record of what was intended; where it conflicts with that document, that
+> document wins.
 
 **Primary purpose: `REAL NO-KEY WING ISSUANCE FORM CALIBRATION`** — not deletion verification (2026-08-08
 product-owner reframe). The account is now in the state that has blocked new-seller onboarding from the

@@ -216,6 +216,108 @@ export function observeFrom(urlCategory: WingUrlCategory, census: WingStructural
   return { urlCategory, pageCategory, signals, blockers };
 }
 
+/* ────────────────────────────── recorded REAL evidence (the audit's inputs) ────────────────────────────── */
+
+/**
+ * The two real WING captures this module's honesty rests on, recorded as DATA so the comparison is checkable
+ * rather than a claim in prose. Sanitized throughout: counts, booleans, enums and opaque signatures only.
+ *
+ * **`bucketsRetained: false` means NOT TRANSCRIBED, not "not measured" — and the distinction is the point.**
+ * The first version of this constant said `bucketsRecorded`, and the doc claimed the issued-page buckets were
+ * "genuinely unknown — unmeasured". Review checked the code at the capture commit and that was **wrong**: the
+ * census already emitted `formCount`, `editableTextInputCount`, `readonlyFieldCount` and
+ * `submitAffordancePresent` on 2026-08-06, and the probe CLI printed the entire observation. Those numbers
+ * existed; nobody wrote them into a doc, and the run output is not in the repository.
+ *
+ * So the honest statement is: the issued-page side is **not available here**, and it may be **recoverable
+ * without a live run** — from operator scrollback or a local run log — which should be checked before any
+ * grant is spent re-measuring it. What has not changed is the consequence for code: a predicate written today
+ * would still be inventing that side, because the numbers are not in hand.
+ */
+export interface WingRealEvidence {
+  readonly capturedOn: string;
+  /**
+   * The sanitized record id(s) this evidence came from. Plural because the issued-page row is a UNION of two
+   * runs with different approved scopes — see {@link WingRealEvidence.targetMatchCountSource}.
+   */
+  readonly recordIds: readonly string[];
+  readonly surface: "already_issued_page" | "no_key_issuance_form";
+  /** How the surface identity is known. The no-key form is operator-attested, not agent-derived. */
+  readonly surfaceAttestation: "OPERATOR_CONFIRMED" | "AGENT_DERIVED";
+  readonly pageCategory: WingPageCategory;
+  readonly credentialAnchorPresent: boolean;
+  readonly openApiMarkerPresent: boolean;
+  /** Whether the structural count buckets were TRANSCRIBED into this record (not whether they were measured). */
+  readonly bucketsRetained: boolean;
+  readonly buckets: Readonly<Partial<Pick<WingSignals,
+    "formCountBucket" | "editableTextInputCountBucket" | "readonlyFieldCountBucket" |
+    "listLikeContainerCountBucket" | "submitAffordancePresent" | "markerScanTruncated">>>;
+  /** Per-target fixed-label match counts on this surface. Absent key = target not in that run's approved scope. */
+  readonly targetMatchCounts: Readonly<Partial<Record<WingProbeTargetName, number>>>;
+  /**
+   * Which run each target count came from. Required because a reader auditing one record id must not be misled
+   * into looking for counts that a differently-scoped run produced.
+   */
+  readonly targetMatchCountSource: Readonly<Partial<Record<WingProbeTargetName, string>>>;
+}
+
+/**
+ * The already-issued page. A UNION of two runs: the 2026-08-06 five-target calibration (at commit `c22cf38`)
+ * and the 2026-08-07 delete-only retry (`wingrec_c01e673ebc61`, approved scope `["delete"]`). Buckets were
+ * measured by both and transcribed by neither — see {@link WingRealEvidence} on what that does and does not mean.
+ */
+export const WING_REAL_EVIDENCE_ISSUED_2026_08_07: WingRealEvidence = Object.freeze({
+  capturedOn: "2026-08-07",
+  recordIds: Object.freeze(["c22cf38-capture-2026-08-06", "wingrec_c01e673ebc61"]),
+  surface: "already_issued_page",
+  surfaceAttestation: "OPERATOR_CONFIRMED",
+  pageCategory: "open_api_issuance",
+  credentialAnchorPresent: true,
+  openApiMarkerPresent: false,
+  bucketsRetained: false,
+  buckets: Object.freeze({}),
+  targetMatchCounts: Object.freeze({ self_dev: 0, vendor_info: 9, call_ip: 0, issue: 1, credentials: 1, delete: 1 }),
+  targetMatchCountSource: Object.freeze({
+    self_dev: "c22cf38-capture-2026-08-06",
+    vendor_info: "c22cf38-capture-2026-08-06",
+    call_ip: "c22cf38-capture-2026-08-06",
+    issue: "c22cf38-capture-2026-08-06",
+    credentials: "c22cf38-capture-2026-08-06",
+    delete: "wingrec_c01e673ebc61",
+  }),
+});
+
+/**
+ * The REAL post-delete no-key issuance form (2026-08-08, `b5a52371`). The operator confirmed directly that this
+ * was the no-key form — which is what turns `credentialAnchorPresent: true` here into a proven false positive
+ * rather than a puzzle. It is NOT evidence the deletion failed.
+ */
+export const WING_REAL_EVIDENCE_NO_KEY_2026_08_08: WingRealEvidence = Object.freeze({
+  capturedOn: "2026-08-08",
+  recordIds: Object.freeze(["wingrec_b554c86c0f0b"]),
+  surface: "no_key_issuance_form",
+  surfaceAttestation: "OPERATOR_CONFIRMED",
+  pageCategory: "open_api_issuance",
+  credentialAnchorPresent: true,
+  openApiMarkerPresent: false,
+  bucketsRetained: true,
+  buckets: Object.freeze({
+    formCountBucket: "few",
+    editableTextInputCountBucket: "many",
+    readonlyFieldCountBucket: "none",
+    listLikeContainerCountBucket: "many",
+    submitAffordancePresent: false,
+    markerScanTruncated: false,
+  }),
+  targetMatchCounts: Object.freeze({ self_dev: 0, vendor_info: 8, call_ip: 0, issue: 1 }),
+  targetMatchCountSource: Object.freeze({
+    self_dev: "wingrec_b554c86c0f0b",
+    vendor_info: "wingrec_b554c86c0f0b",
+    call_ip: "wingrec_b554c86c0f0b",
+    issue: "wingrec_b554c86c0f0b",
+  }),
+});
+
 /* ────────────────────────────── issued-state verdict (post-delete evidence) ────────────────────────────── */
 
 /**
@@ -233,15 +335,26 @@ export type WingIssuedState = (typeof WING_ISSUED_STATES)[number];
 
 /** Why the verdict came out the way it did — a closed enum, never free text. */
 export const WING_ISSUED_STATE_REASONS = [
-  /** The live-confirmed credential-region anchor is present ⇒ a key is issued and displayed. */
+  /**
+   * **RETIRED as a verdict, 2026-08-08 — kept only so old records stay readable.** No code path emits it.
+   * The 2026-08-08 real no-key form read `credentialAnchorPresent: true` with the operator confirming no key
+   * existed, so the anchor is a proven FALSE POSITIVE for issued-state. See {@link wingIssuedStateFrom}.
+   */
   "CREDENTIAL_ANCHOR_PRESENT",
-  /** No credential anchor, and the issuance FORM marker is positively present ⇒ nothing issued to show. */
+  /**
+   * **RETIRED as a verdict, 2026-08-08 — kept only so old records stay readable.** No code path emits it. The
+   * form marker was `false` on the real no-key form (the labels are unvalidated), so this could only ever have
+   * fired on a page neither real capture produced.
+   */
   "FORM_MARKER_WITHOUT_CREDENTIAL_ANCHOR",
   /** Not the open-API surface at all (login / home / off-target) — the question does not apply here. */
   "NOT_OPEN_API_SURFACE",
-  /** On the open-API surface but neither anchor nor form marker is present — too thin to call. */
-  "THIN_SIGNALS",
-  /** The bounded marker/anchor scan stopped at its cap — an absent anchor proves nothing here. */
+  /**
+   * On the open-API surface, but NO recorded signal separates issued from no-key. This is the honest verdict
+   * for every real capture taken so far — see {@link wingIssuedStateFrom} for the evidence table.
+   */
+  "NO_DISCRIMINATING_SIGNAL",
+  /** The bounded marker/anchor scan stopped at its cap — the reading is incomplete, so nothing is claimed. */
   "SCAN_TRUNCATED",
   /** No observation at all (the run never reached ready, or the observe read threw). */
   "NO_OBSERVATION",
@@ -251,26 +364,40 @@ export type WingIssuedStateReason = (typeof WING_ISSUED_STATE_REASONS)[number];
 /**
  * Derive the issued-state verdict from ONE sanitized observation. Pure and value-free.
  *
- * **Read the limits before using this as evidence.** Review of the first version found the "positive evidence"
- * framing over-claimed, and the correction matters more than the original claim:
+ * **As of 2026-08-08 this function cannot return `issued` or `not_issued`, and that is the correct behaviour.**
+ * It is not a stub and not unfinished: it is fail-closed because no recorded signal separates the two states.
  *
- *  - `classifyWingPage` reaches `open_api_issuance` only when `openApiMarkerPresent || credentialAnchorPresent`.
- *    So ON THAT CATEGORY, an absent anchor already IMPLIES the form marker — requiring the marker below
- *    excludes nothing there, and the verdict reduces to `!credentialAnchorPresent && !markerScanTruncated`. The
- *    marker requirement is
- *    still worth keeping (it is what stops a future classifier change from letting a thin page through, and it
- *    is what makes `credential_shown` fail closed), but it does NOT buy resistance to a half-rendered page.
- *  - A late-hydrating WING page paints its static shell — including the issuance heading — before the credential
- *    card's XHR resolves. A read in that window is marker=true / anchor=false, i.e. `not_issued` while the key
- *    still exists. A single reading CANNOT distinguish "nothing to show" from "not shown yet".
- *  - `credentialAnchorPresent` is a bounded, top-document, exact-match scan (see `EXTRACT_WING_CENSUS`): it does
- *    not pierce iframes or shadow roots, and it stops at a candidate cap. Truncation is now reported and forces
- *    `indeterminate`, but the iframe/shadow/exact-label limits remain.
+ * The comparative audit of the only two real captures we have
+ * ({@link WING_REAL_EVIDENCE_ISSUED_2026_08_07} vs {@link WING_REAL_EVIDENCE_NO_KEY_2026_08_08}):
  *
- * **Therefore: a single `not_issued` is a SIGNAL, not proof of deletion.** Use {@link wingDeletionEvidenceFrom}
- * over two independent readings before recording it as post-delete evidence — the same two-capture standard the
- * WING signature calibration already uses. `indeterminate` is the absence of evidence, never evidence of the
- * opposite; callers must not read it as either outcome.
+ * | Signal | real ISSUED page | real NO-KEY form | separates? |
+ * |---|---|---|---|
+ * | `pageCategory` | `open_api_issuance` | `open_api_issuance` | no |
+ * | `credentialAnchorPresent` | `true` | **`true`** | **no — proven false positive** |
+ * | `openApiMarkerPresent` | `false` | `false` | no |
+ * | `self_dev` / `call_ip` matchCount | 0 / 0 | 0 / 0 | no |
+ * | `vendor_info` matchCount | 9 | 8 | no (non-unique on both) |
+ * | `issue` matchCount | 1 | 1 | no |
+ * | editable / readonly / form / submit signals | **never recorded** | recorded | unusable |
+ *
+ * Every signal captured on BOTH sides is identical, and the four that might have discriminated were never read
+ * on the issued page. The previous version returned `issued` from `credentialAnchorPresent` alone; the operator
+ * confirmed the 2026-08-08 page was a genuine post-delete no-key form, so that verdict was **wrong on real
+ * data** — the no-key form carries the fixed text "Access Key" too. Returning `indeterminate` removes a wrong
+ * answer; it does not invent a right one, because inventing one would mean guessing the issued-page side of a
+ * predicate we have never measured.
+ *
+ * **`credentialAnchorPresent` is retained as a SURFACE signal.** `classifyWingPage` still uses it to reach
+ * `open_api_issuance`, and that use is unaffected: both pages genuinely ARE the open-API surface. What it may
+ * no longer do is stand alone as the issued-state verdict.
+ *
+ * **To re-enable a real verdict**, a future run must capture, on a page KNOWN to hold a key, the signals we
+ * already capture on the no-key form: `readonlyFieldCountBucket`, `editableTextInputCountBucket`,
+ * `formCountBucket`, `submitAffordancePresent`, plus the `credentials` target's matchCount under its
+ * `tagAncestor: "tr"` locator (a credential displayed in a table ROW is structurally different from the same
+ * words as static form text — that is the most promising untested discriminator, and it is a MEASUREMENT to
+ * take, not a rule to ship). That reading is only possible after the next key issuance, so it belongs to the
+ * issuance unit. Until then `indeterminate` is the whole truth.
  */
 export function wingIssuedStateFrom(observation: WingObservation | null): {
   state: WingIssuedState;
@@ -278,20 +405,15 @@ export function wingIssuedStateFrom(observation: WingObservation | null): {
 } {
   if (!observation) return { state: "indeterminate", reason: "NO_OBSERVATION" };
   const { pageCategory, signals } = observation;
-  // Only the open-API surface can answer the question. login / wing_home / unknown / off-target cannot — and an
-  // off-target host already forces `unknown` upstream, so it is covered by this same branch.
+  // Only the open-API surface could ever answer the question. login / wing_home / unknown / off-target cannot —
+  // and an off-target host already forces `unknown` upstream, so it is covered by this same branch.
   if (pageCategory !== "open_api_issuance" && pageCategory !== "credential_shown") {
     return { state: "indeterminate", reason: "NOT_OPEN_API_SURFACE" };
   }
-  // A FOUND anchor is trustworthy even from a truncated scan — truncation can only hide, never invent.
-  if (signals.credentialAnchorPresent) return { state: "issued", reason: "CREDENTIAL_ANCHOR_PRESENT" };
-  // An ABSENT anchor from a scan that stopped at its cap means "not found in the part we looked at". Reading
-  // that as deletion evidence would let a large DOM produce a false "deleted".
+  // A truncated scan is an INCOMPLETE reading. Reported separately from "complete but undiscriminating" so the
+  // two are never conflated in a record: one may improve with a better read, the other needs new evidence.
   if (signals.markerScanTruncated) return { state: "indeterminate", reason: "SCAN_TRUNCATED" };
-  if (signals.openApiMarkerPresent) {
-    return { state: "not_issued", reason: "FORM_MARKER_WITHOUT_CREDENTIAL_ANCHOR" };
-  }
-  return { state: "indeterminate", reason: "THIN_SIGNALS" };
+  return { state: "indeterminate", reason: "NO_DISCRIMINATING_SIGNAL" };
 }
 
 /* ────────────────────────────── corroborated post-delete evidence ────────────────────────────── */
@@ -310,6 +432,13 @@ export type WingDeletionEvidenceReason = (typeof WING_DELETION_EVIDENCE_REASONS)
 /**
  * Corroborate a post-delete claim across INDEPENDENT readings. Confirmed only when there are at least two and
  * every one of them says `not_issued`.
+ *
+ * **Since 2026-08-08 this can never return `confirmedNotIssued: true`, by construction** —
+ * {@link wingIssuedStateFrom} no longer emits `not_issued` at all, because no recorded signal distinguishes an
+ * issued page from a no-key form. The corroboration RULE is still correct and worth keeping intact: the moment a
+ * real discriminator is measured, two agreeing readings remain the standard for recording deletion evidence.
+ * What is gone is the input, not the rule. A caller must therefore treat post-delete state as **unavailable**
+ * today, not as `false`.
  *
  * This exists because {@link wingIssuedStateFrom} cannot, from one reading, tell an unissued page from a page
  * that has not finished rendering — and the failure direction that matters is the false "deleted". Two readings
@@ -333,7 +462,23 @@ export function wingDeletionEvidenceFrom(readings: readonly (WingObservation | n
   reason: WingDeletionEvidenceReason;
   readingCount: number;
 } {
-  const states = readings.map((r) => wingIssuedStateFrom(r).state);
+  return corroborationVerdictFor(readings.map((r) => wingIssuedStateFrom(r).state));
+}
+
+/**
+ * The corroboration RULE itself, over already-derived states. Split out from {@link wingDeletionEvidenceFrom}
+ * for one reason: since `wingIssuedStateFrom` can no longer emit `not_issued`, the rule's `confirmedNotIssued`
+ * branch is unreachable through the public entrypoint — review confirmed that hardcoding `allNotIssued = false`
+ * passed the entire suite. A rule nothing can execute is a rule a refactor can delete silently.
+ *
+ * Exported so the rule is tested directly and stays correct for the day a real discriminator restores the
+ * input. Callers doing evidence work should use {@link wingDeletionEvidenceFrom}, not this.
+ */
+export function corroborationVerdictFor(states: readonly WingIssuedState[]): {
+  confirmedNotIssued: boolean;
+  reason: WingDeletionEvidenceReason;
+  readingCount: number;
+} {
   if (states.length < 2) {
     return { confirmedNotIssued: false, reason: "SINGLE_READING_ONLY", readingCount: states.length };
   }
