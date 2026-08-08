@@ -11,7 +11,8 @@
 #   NO_RUN_ENV      → FAIL (bootstrap never ran)
 #   UNBOUND_RUN     → FAIL (identity is "unknown" — contract §2 UNBOUND_IDENTITY)
 #   STALE_IDENTITY  → FAIL (a run env left over from an earlier session must not re-authorize a new one)
-#   WRONG_PHASE     → FAIL (this harness prepares the selector probe only, never the destructive deletion phase)
+#   WRONG_PHASE     → FAIL (this harness prepares the two READ_ONLY phases only, never destructive deletion)
+#   RECON_BAD_SCOPE → FAIL (a target with no candidate set ⇒ WING_RECON_TARGETS_MISMATCH, before any manifest)
 #   GIT_DRIFT       → FAIL (bootstrap commit != HEAD)
 #   BAD_SCOPE       → FAIL (unknown probe target ⇒ WING_PROBE_TARGETS_MISMATCH from the tested gate)
 #   MIXED_ORDER     → PASS, but the manifest shows the NORMALIZED canonical scope, never a widened one
@@ -22,6 +23,8 @@
 #   UNTRACKED_HIDE  → FAIL (GIT_CONFIG_* forcing status.showUntrackedFiles=no must not hide a dirty tree)
 #   POSTDELETE      → PASS; the four post-delete FORM targets only (no credentials/delete), bound to the run
 #   NORMAL          → PASS; delete-only READ_ONLY scope, no frontend URL, approved scope bound to the run
+#   RECON_NORMAL    → PASS; the candidate-label recon phase, its three targets, and a run command that carries
+#                     the PHASE (without it the recorder would run a baseline probe under a recon manifest)
 #
 # NORMAL and the three dirty-tree cases are complementary: they need a clean tree, and print SKIP otherwise.
 #
@@ -119,6 +122,15 @@ run_case "MULTILINE_STAMP (newline cannot slip past the shape check)" nonzero "b
 write_env "$FIXTURES/wrongphase.env" "$CUR_GIT" "COUPANG_WING_KEY_DELETION" "delete" "wt-selfcheck01" "apr-selfcheck01"
 run_case "WRONG_PHASE    (destructive phase refused here)" nonzero "phase must be COUPANG_WING_SELECTOR_PROBE" "$FIXTURES/wrongphase.env"
 
+# The recon phase refuses a target it has no candidates for. This must fail at PREPARATION, not at the live
+# gate: a displayed manifest the run would reject invites widening the scope until something starts.
+write_env "$FIXTURES/reconbadscope.env" "$CUR_GIT" "COUPANG_WING_LABEL_RECON" "delete" "wt-selfcheck12" "apr-selfcheck12"
+if [ -z "$TREE_DIRTY" ]; then
+  run_case "RECON_BAD_SCOPE (delete has no candidate set)" nonzero "WING_RECON_TARGETS_MISMATCH" "$FIXTURES/reconbadscope.env"
+else
+  run_case "RECON_BAD_SCOPE (delete has no candidate set)" nonzero "PREFLIGHT FAIL" "$FIXTURES/reconbadscope.env"
+fi
+
 write_env "$FIXTURES/drift.env" "0000000" "COUPANG_WING_SELECTOR_PROBE" "delete" "wt-selfcheck02" "apr-selfcheck02"
 run_case "GIT_DRIFT      (commit moved since bootstrap)" nonzero "git commit changed" "$FIXTURES/drift.env"
 
@@ -192,6 +204,45 @@ if [ -z "$TREE_DIRTY" ]; then
   else
     echo "  FAIL  NORMAL         · approved scope not bound to the run env as both variables"; FAILED=1
   fi
+  # ── the candidate-label recon phase ────────────────────────────────────────
+  write_env "$FIXTURES/recon.env" "$CUR_GIT" "COUPANG_WING_LABEL_RECON" "self_dev,vendor_info,call_ip" "wt-selfcheck13" "apr-selfcheck13"
+  run_case "RECON_NORMAL   (candidate-label sweep scope)" 0 "PREFLIGHT PASS" "$FIXTURES/recon.env"
+  run_case "RECON_NORMAL   · manifest phase" 0 "COUPANG_WING_LABEL_RECON" "$FIXTURES/recon.env"
+  run_case "RECON_NORMAL   · READ_ONLY mode" 0 "READ_ONLY" "$FIXTURES/recon.env"
+  # Without the PHASE on the command line the recorder derives no recon mode and quietly measures the shipped
+  # baselines instead — a run that reports a different measurement than the manifest the operator approved.
+  run_case "RECON_NORMAL   · run command carries the phase" 0 "SELLEROPS_APPROVAL_PHASE=COUPANG_WING_LABEL_RECON" "$FIXTURES/recon.env"
+  run_case "RECON_NORMAL   · operator told nothing is promoted" 0 "changes no shipped selector" "$FIXTURES/recon.env"
+  if grep -qE "^SELLEROPS_WING_APPROVED_TARGETS='self_dev,vendor_info,call_ip'$" "$FIXTURES/recon.env"; then
+    echo "  PASS  RECON_NORMAL   · approved recon scope bound to the run env"
+  else
+    echo "  FAIL  RECON_NORMAL   · approved recon scope not bound to the run env"; FAILED=1
+  fi
+  # The approved PHASE is bound from the MANIFEST, independently of the phase the run env already carried.
+  # Without it a phase left over in the operator shell is indistinguishable from an approved one.
+  if grep -qE "^SELLEROPS_WING_APPROVED_PHASE='COUPANG_WING_LABEL_RECON'$" "$FIXTURES/recon.env"; then
+    echo "  PASS  RECON_NORMAL   · approved PHASE bound to the run env"
+  else
+    echo "  FAIL  RECON_NORMAL   · approved PHASE not bound to the run env"; FAILED=1
+  fi
+  run_case "RECON_NORMAL   · run command carries BOTH phase variables" 0 "SELLEROPS_WING_APPROVED_PHASE=COUPANG_WING_LABEL_RECON" "$FIXTURES/recon.env"
+  # Re-running must not accumulate duplicate phase assignments either.
+  bash "$PREFLIGHT" >/dev/null 2>&1 <<<"" || true
+  SELLEROPS_WING_PROBE_RUN_ENV="$FIXTURES/recon.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" >/dev/null 2>&1 || true
+  if [ "$(grep -cE "^SELLEROPS_WING_APPROVED_PHASE=" "$FIXTURES/recon.env")" = "1" ]; then
+    echo "  PASS  RECON_NORMAL   · phase binding is idempotent across re-runs"
+  else
+    echo "  FAIL  RECON_NORMAL   · phase binding accumulated duplicates"; FAILED=1
+  fi
+
+  # The BASELINE phase gets the same binding — otherwise a recon phase left in the shell would ride along on a
+  # probe run and the recorder, seeing no approved phase, could only guess which side was stale.
+  if grep -qE "^SELLEROPS_WING_APPROVED_PHASE='COUPANG_WING_SELECTOR_PROBE'$" "$FIXTURES/normal.env"; then
+    echo "  PASS  NORMAL         · approved PHASE bound for the baseline phase too"
+  else
+    echo "  FAIL  NORMAL         · approved PHASE not bound for the baseline phase"; FAILED=1
+  fi
+
   # Re-running must not accumulate duplicate assignments of either variable.
   DUPES="$(grep -cE "^SELLEROPS_WING_(PROBE|APPROVED)_TARGETS=" "$FIXTURES/normal.env")"
   if [ "$DUPES" = "2" ]; then

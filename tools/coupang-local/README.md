@@ -98,9 +98,41 @@ tools/coupang-local/wing-probe-preflight.sh
 
 # 3. on PREFLIGHT PASS the operator reads the manifest and grants in one line: "Seated and ready."
 #    then run the probe with the approved scope, exactly as the preflight prints it:
-cd collector && SELLEROPS_WING_PROBE_TARGETS=delete SELLEROPS_WING_APPROVED_TARGETS=delete \
+cd collector && SELLEROPS_APPROVAL_PHASE=COUPANG_WING_SELECTOR_PROBE \
+  SELLEROPS_WING_PROBE_TARGETS=delete SELLEROPS_WING_APPROVED_TARGETS=delete \
   npx tsx src/cli/probe-wing-issuance-selectors.ts -- --i-understand-this-opens-live-coupang-wing
 ```
+
+### The same harness, two READ_ONLY phases
+
+The bootstrap takes a phase. Both are read-only and both use the same CLI and dedicated window; they differ in
+**which labels get counted**, which is why they are separate manifests and separate grants.
+
+| `SELLEROPS_APPROVAL_PHASE` | measures | default scope |
+|---|---|---|
+| `COUPANG_WING_SELECTOR_PROBE` (default) | the SHIPPED fixed labels | `delete` |
+| `COUPANG_WING_LABEL_RECON` | CANDIDATE label sets for the unresolved targets | `self_dev,vendor_info,call_ip` |
+
+```bash
+SELLEROPS_APPROVAL_PHASE=COUPANG_WING_LABEL_RECON tools/coupang-local/wing-probe-bootstrap.sh
+```
+
+Recon fails closed twice: the manifest gate refuses a scope containing a target with no candidate set
+(`WING_RECON_TARGETS_MISMATCH` — so a manifest the run would reject is never displayed), and the recorder
+refuses the same scope again before Chrome launches.
+
+The **phase gets two variables, exactly like the scope**, and the live recorder refuses unless they agree:
+
+| Variable | Means |
+|---|---|
+| `SELLEROPS_APPROVAL_PHASE` | the phase this run declares |
+| `SELLEROPS_WING_APPROVED_PHASE` | the phase the displayed manifest said, bound by the preflight |
+
+One variable is not enough in either direction: a phase left exported in the shell from an earlier session
+would arm a candidate sweep under a manifest granted for the shipped labels, and a forgotten phase would
+downgrade an approved sweep to a baseline probe while still printing a successful-looking record. The scope
+gate cannot catch either — the target set is identical both times. A recon run records evidence only: it
+promotes no candidate and changes no shipped selector.
 
 The scope must travel with the run: a probe whose targets differ from the approved manifest is an
 out-of-scope run (contract §1.3). **The live probe now enforces that itself** — it refuses before Chrome

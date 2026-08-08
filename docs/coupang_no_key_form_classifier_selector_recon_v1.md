@@ -1,7 +1,14 @@
 # Coupang No-Key Form — Classifier Correction + Selector Recon v1
 
-> **Status:** offline. Corrects a classifier verdict that was **wrong on real data**, and designs the read-only
-> recon that would narrow three unresolved WING labels. No live run, no browser, no marketplace contact.
+> **Status:** offline. Corrects a classifier verdict that was **wrong on real data**, and designs — and, since
+> 2026-08-08, **wires** — the read-only recon that would narrow three unresolved WING labels. No live run, no
+> browser, no marketplace contact.
+>
+> **Updated 2026-08-08 (Selector Recon Runner v1).** Two changes to what this document said:
+> the issued-page structural buckets, recorded here as *not transcribed*, were **recovered from retained
+> session scrollback** across four agreeing captures — so the comparative audit is now complete on both sides
+> and every row matches; and the sweep is **wired to a gated READ_ONLY runner** under its own approval phase
+> `COUPANG_WING_LABEL_RECON`, replacing the "not wired to a runner" warning below.
 >
 > Evidence status of the 2026-08-08 live probe:
 > **`REAL_NO_KEY_WING_FORM_OBSERVED_SELECTOR_CALIBRATION_PARTIAL`**
@@ -32,27 +39,43 @@ than believed.
 | `self_dev` matchCount | 0 | **0** | no |
 | `call_ip` matchCount | 0 | **0** | no |
 | `vendor_info` matchCount | 9 | 8 | no (non-unique on both) |
-| `issue` matchCount | 1 (sig `d3f775e8…`) | 1 (sig `b7ba43a8…`) | no |
-| `readonlyFieldCountBucket` | **not transcribed** | `none` | unusable |
-| `editableTextInputCountBucket` | **not transcribed** | `many` | unusable |
-| `formCountBucket` | **not transcribed** | `few` | unusable |
-| `submitAffordancePresent` | **not transcribed** | `false` | unusable |
+| `issue` matchCount | 1 | 1 | no |
+| `issue` sig16 (2026-08-07 vs 08-08) | `b7ba43a8…` | **`b7ba43a8…`** | **no — byte-identical** |
+| `readonlyFieldCountBucket` | `none` | `none` | **no** |
+| `editableTextInputCountBucket` | `many` | `many` | **no** |
+| `formCountBucket` | `few` | `few` | **no** |
+| `listLikeContainerCountBucket` | `many` | `many` | **no** |
+| `submitAffordancePresent` | `false` | `false` | **no** |
 
-**Every signal recorded on both sides is identical**, and the four that might have discriminated are not in
-hand for the issued page.
+**The table is complete on both sides, and every row matches.**
 
-### Corrected after review: "not transcribed", not "unmeasured"
+### Updated 2026-08-08 — the missing side was recovered, without a grant
 
-The first version of this document said those four were **never measured**. That was wrong, and the error is
-worth naming because it is the same mistake the document exists to correct. Checking the code at the capture
-commit shows `formCount` / `editableTextInputCount` / `readonlyFieldCount` / `submitAffordancePresent` were
-already in the census on 2026-08-06, and the probe CLI printed the whole observation to stdout. **The numbers
-existed.** Nobody wrote them into a doc, and the run output is not in the repository.
+The four bottom rows read *not transcribed* until 2026-08-08. Naming that precisely — measured, printed, never
+written down; **not** unmeasured — is what made a recovery search worth running, and the search succeeded: the
+issued-page observation survives in retained session scrollback across **four independent captures**
+(`wingrec_fc4cbafb42c8`, `wingrec_b2e87f42abd1`, `wingrec_42985b029ddd`, `wingrec_c01e673ebc61`), all reporting
+the same four buckets. No live run was needed. The values are now transcribed into
+`WING_REAL_EVIDENCE_ISSUED_2026_08_07` with `bucketsRetained: true`.
 
-So the honest statement is *not available here*, and — importantly — **possibly recoverable without a live
-run**, from operator scrollback or a local run log. That should be checked before any grant is spent
-re-measuring it. The consequence for code is unchanged: the numbers are not in hand, so a predicate written
-today would still be inventing the issued-page side.
+`markerScanTruncated` stays **absent** on the issued side rather than `false`: that census field did not exist
+in 2026-08-06/07, so there is no reading to transcribe.
+
+**What this changes.** `indeterminate / NO_DISCRIMINATING_SIGNAL` was a fail-closed default over missing data.
+It is now a **measured result**: across every sanitized signal this recorder captures, the two surfaces are
+indistinguishable. That is a stronger and less comfortable statement than "not known yet".
+
+**Why they match — a hypothesis, not a finding.** The census counts the whole document, so the WING shell
+(navigation, search, menus) supplies most forms, inputs and list containers and the open-API region cannot move
+a coarse bucket. Note `readonlyFieldCountBucket: none` on the *issued* page: the displayed keys are not readonly
+inputs at all. The `issue` button's structural signature being byte-identical across the two surfaces is
+*consistent* with this and no more — see the sig16 caution immediately below, which is why it cannot be leaned
+on as cross-session structural evidence. If correct, the fix is a **region-scoped census**, not a cleverer predicate over these numbers.
+
+**And a caution about sig16.** The 2026-08-06 captures reported `d3f775e8…` / `2b2479a8…` for `issue` /
+`credentials`; the 2026-08-07 capture reported `b7ba43a8…` / `de6d3578…` for the same targets on the same page,
+with no change to the signature code in between. sig16 tracks the page **as rendered that day** — it is a drift
+detector, not a cross-session identity. Do not build on an unchanged sig across sessions.
 
 ### A previous conclusion this falsifies
 
@@ -87,28 +110,41 @@ Three deliberate details:
 
 ### What would restore a verdict
 
-A capture on a page **known** to hold a key, recording what we already record on the no-key form:
-`readonlyFieldCountBucket`, `editableTextInputCountBucket`, `formCountBucket`, `submitAffordancePresent`, and
-the `credentials` target's matchCount under its `tagAncestor: "tr"` locator.
+Not the buckets — those are now known to be flat on both sides. Two leads remain, both **measurements to take**
+rather than rules to ship:
 
-That last one is the most promising untested lead: a credential displayed in a table **row** is structurally
-different from the same words appearing as static form text. It is a **measurement to take**, not a rule to
-ship — writing it as a predicate now would repeat exactly the mistake being corrected.
-
-**First, check whether it needs a live run at all.** Per the correction above, the 2026-08-06/07 runs printed
-these values; if that output survives in operator scrollback or a local log, the issued-page side can be
-recovered for free. Only if it does not is a fresh capture needed — and since the account now has no key, that
-capture is only possible **after the next issuance**, which puts it in the issuance unit rather than a separate
-live run.
+1. **The `credentials` target on the no-key form.** It matched 1 on the issued page (role `readonly-region`,
+   under a `tagAncestor: "tr"` locator) and has **never been probed on the no-key form** — that run's approved
+   scope was `self_dev,vendor_info,call_ip,issue`. A credential shown in a table **row** is structurally
+   different from the same words as static form text, so its count/role/signature may differ where the
+   page-global census does not. **This needs no new code**: `credentials` is already a probe target, so an
+   ordinary `COUPANG_WING_SELECTOR_PROBE` run scoped to it settles the question. It is the cheapest untested
+   discriminator available, and the account is in the no-key state *right now* — the only state in which this
+   particular reading can be taken.
+2. **A region-scoped census.** New code and a new sanitization review; it should not be built before (1) is
+   tried.
 
 ## Goal 2 — the recon design
 
 `src/action-window/coupang-wing-label-recon.ts`. Three unresolved targets become **candidate sets**, measured in
 one read-only pass: WING returns integers, and every string in the exchange is one we wrote.
 
-**No new browser tooling.** The in-page half is the existing audited `buildFixedLabelProbeScript` from the NAVER
-visual-recon calibration, whose entire output is `{ targetId, matchCount }`. A test asserts the WING recon
-script *is* that shared script, so a fork would have to be argued for.
+**No new browser tooling.** Each candidate is measured through the driver's existing read-only
+`probeFixedLabelMatch` seam — literally the same call the shipped baseline probe makes, running the audited
+`buildFixedLabelLocateScript`, whose entire output is `{ count, sig? }`. A source guard asserts the runner
+builds no in-page script of its own.
+
+> **Changed 2026-08-08 (was: the batch `buildFixedLabelProbeScript`).** The v1 design shipped one batch script
+> for the whole sweep. Two properties this module claims are unobtainable that way:
+>
+> 1. **No signature.** The batch script returns counts only, so two simultaneously-unique candidates — the case
+>    the module deliberately refuses to auto-resolve — could not be resolved offline either, and the grant
+>    would have to be spent again. The locate seam returns the opaque structural sig for a unique match.
+> 2. **A malformed `candidateQuery` reads as a real zero.** The batch script's `try { querySelectorAll } catch
+>    { els = [] }` emits `matchCount: 0` for a query the browser rejected, so `NOT_MEASURED` — which fires on a
+>    *missing row* — could never catch it. The v1 doc claimed the opposite. Neither in-page script can tell the
+>    two apart at runtime, so validity is now proven **offline** instead: a guard test requires every shipped
+>    `candidateQuery` to be a comma-separated list of bare element names.
 
 `EXTRACT_VISUAL_CONTROLS` — the heavier structural census — was considered and **rejected**: it returns raw
 attribute values and bounding boxes that then need a screening gate. That is a larger sanitization surface than
@@ -133,10 +169,11 @@ only when exactly one candidate resolves.
 
 **A candidate missing from a reading is `NOT_MEASURED`, with a null count.** The first version folded it into
 `0` / `ABSENT`, which made a partial reading byte-identical to a complete all-miss one — the same
-unmeasured-versus-measured-zero conflation corrected above, inverted. It matters concretely: the shared in-page
-probe swallows a malformed `candidateQuery` and reports nothing for it, so a partly-failed script would
-otherwise read as "all candidates confirmed absent" and send a reviewer off to rewrite labels that were never
-tested. A junk count (negative, fractional, `NaN`) is `INVALID_COUNT` for the same reason.
+unmeasured-versus-measured-zero conflation corrected above, inverted. With the sweep now probing candidates one
+at a time, this is reachable for real: a candidate whose read-only probe **throws** (the page navigated or
+closed under it) contributes no row and is recorded as `NOT_MEASURED` plus a sanitized fault fingerprint, so a
+page that moved mid-sweep cannot report the remaining labels as "confirmed absent". A junk count (negative,
+fractional, `NaN`) is `INVALID_COUNT` for the same reason.
 
 Review also found the promotion guard **could not fail**: it scanned a hardcoded list of the four exports it
 already knew about, so adding `export function promoteCandidateToShippedLabel()` passed every test. It now
@@ -144,31 +181,60 @@ scans the module's real namespace. Similarly, `Object.freeze` is shallow — eac
 individually, because otherwise `CANDIDATES.call_ip[0].exactText = <anything>` succeeds and that string is
 shipped straight into the page.
 
-## If a live recon run is wanted
+## The live recon runner (wired 2026-08-08)
 
-Not required by this unit, and not started here. It would be its own unit with a fresh bootstrap and a fresh
-grant:
+The v1 warning — *"the sweep is NOT wired to a runner; do not book a grant expecting recon results"* — is
+**resolved**. The sweep now runs under its own approval phase.
 
 ```bash
-SELLEROPS_WING_PROBE_TARGETS=self_dev,vendor_info,call_ip tools/coupang-local/wing-probe-bootstrap.sh
+SELLEROPS_APPROVAL_PHASE=COUPANG_WING_LABEL_RECON tools/coupang-local/wing-probe-bootstrap.sh
+tools/coupang-local/wing-probe-preflight.sh          # prepares + displays the recon manifest
+# then, on "Seated and ready.", the command the preflight prints — which carries the PHASE inline
 ```
 
-Scope is exactly the three unresolved targets (`WING_RECON_APPROVED_SCOPE`). READ_ONLY: no highlight, no click,
-no form input, no 발급, no credential value read.
+**Recon is armed by the approved PHASE, never by a flag.** The manifest is what the operator reads before
+granting, so "measure the 3 shipped labels" and "sweep 12 hypotheses for those 3 labels" must be different
+manifests. `COUPANG_WING_LABEL_RECON` is a separate `CalibrationPhase` with its own operator summary (which
+states in Korean that the run changes no selector).
 
-> **The sweep is NOT wired to that command yet, and the command alone would not run it.**
-> `wing-probe-bootstrap.sh` drives `probe-wing-issuance-selectors.ts`, whose labels come from
-> `WING_HIGHLIGHT_LABELS` — the **baselines**. Running it with the three recon targets re-measures
-> `self_dev 0 / vendor_info 8 / call_ip 0`, which we already have, and sweeps no candidates. Wiring the sweep
-> into a runner is deliberately left to the unit that spends the grant, so this module stays a design plus its
-> tests rather than half-connected live machinery. Do not book a grant against the command above expecting
-> recon results.
+**The phase is bound by TWO variables, like the scope** — `SELLEROPS_APPROVAL_PHASE` (what this run declares)
+and `SELLEROPS_WING_APPROVED_PHASE` (what the displayed manifest said, written back by the preflight from the
+manifest JSON). Independent security review found the one-variable design broken in **both** directions, and
+neither is visible to the scope gate because the target set is identical in both cases:
 
-**A cheaper ordering is worth considering first.** The next planned unit — the WING-resident issuance tutorial
+- a stale `SELLEROPS_APPROVAL_PHASE=COUPANG_WING_LABEL_RECON` still exported from an earlier shell would arm a
+  12-hypothesis sweep under a manifest approved for the three **shipped** labels;
+- approving a recon manifest and then starting the run **without** the phase the preflight printed would
+  quietly measure the baselines and print a successful-looking record.
+
+Both now refuse with `PHASE_APPROVAL_MISMATCH`. The runner matches the phase **exactly**, un-trimmed, because
+the bootstrap and preflight use exact `case` allowlists — a runner that trimmed would accept spellings the gate
+that authorizes it would reject.
+
+Two fail-closed rules, both **before Chrome launches**:
+
+- **Every approved target must be sweepable.** Not the intersection — the whole approved set. A scope of
+  `self_dev,delete` refuses (`RECON_TARGET_NOT_APPROVED`) rather than sweeping one target while the manifest
+  described two, so `approved scope == swept scope` stays a readable identity.
+- **The manifest gate refuses the same scope**, so a manifest the runner would reject is never displayed. The
+  reflex when an approved run dies at the gate is to widen the scope until it starts; this keeps that failure
+  on the preparation side, where widening is a reviewed edit.
+
+The phase defaults its scope to the three unresolved targets and never to the full WING set. `issue` is
+excluded: it already resolves uniquely on the real no-key form, and re-measuring it would invite retuning
+something already proven.
+
+**What the run records per candidate:** id, our own fixed label, expected role, `matchCount`, closed verdict,
+`canHighlight`, opaque sig16, and `NOT_MEASURED` distinguished from a measured zero — plus the sanitized surface
+observation. **No promotion.** A candidate that resolves uniquely is evidence; changing a shipped label is a
+later offline edit with its own tests and PR.
+
+**A cheaper ordering is still worth considering.** The next planned unit — the WING-resident issuance tutorial
 and the operator's own key issuance — must visit this same form anyway, and it produces the issued-page capture
-that Goal 1 needs. Running recon as part of that visit costs one grant instead of two. The trade-off is real
-though: a failed recon inside the issuance unit would be a distraction at a moment when the operator is trying
-to issue a key. Product-owner call.
+Goal 1 needs. Running recon as part of that visit costs one grant instead of two. The trade-off is real: a
+failed recon inside the issuance unit is a distraction at the moment the operator is trying to issue a key.
+Product-owner call. **If recon does get its own grant, add `credentials` to it** — see *What would restore a
+verdict* above; it is measurable today, only in the current no-key state, and needs no new code.
 
 ## Not done in this unit
 
@@ -176,3 +242,6 @@ No live run. No 발급 / 재발급, no form input, no credential value read, no 
 connect-test, no order sync, no marketplace write. No selector was changed: `WING_HIGHLIGHT_LABELS` is
 byte-identical, and the three unresolved labels stay exactly as they were until a live reading justifies a
 change.
+
+The recon runner is wired and gated but **has never been run against WING**. Every candidate in
+`WING_LABEL_RECON_CANDIDATES` remains an unmeasured hypothesis.

@@ -98,21 +98,30 @@ describe("the real captures — the audit inputs, as data", () => {
     }
   });
 
-  it("the issued capture RETAINS no buckets — the reason a discriminator cannot be written from what we hold", () => {
-    // Corrected after review: the buckets WERE measured on 2026-08-06 (the census emitted them and the CLI
-    // printed the whole observation) — they were simply never transcribed, and the run output is not in the
-    // repo. `bucketsRetained` says exactly that. Claiming "unmeasured" would have been the same
-    // unmeasured-vs-measured-zero conflation this unit exists to correct.
-    expect(WING_REAL_EVIDENCE_ISSUED_2026_08_07.bucketsRetained).toBe(false);
-    expect(Object.keys(WING_REAL_EVIDENCE_ISSUED_2026_08_07.buckets)).toHaveLength(0);
-    expect(WING_REAL_EVIDENCE_NO_KEY_2026_08_08.bucketsRetained).toBe(true);
+  it("BOTH captures now retain their buckets — the issued side was recovered, not re-measured", () => {
+    // The previous version of this test asserted the issued side held NO buckets, which was the honest state
+    // then: measured on 2026-08-06, never transcribed, not in the repo. Naming that precisely ("not retained",
+    // not "not measured") is what made the recovery search worth running — and it found four agreeing captures
+    // in retained scrollback, so no grant was spent. The property now worth locking is that the record is
+    // complete on both sides.
+    for (const e of [WING_REAL_EVIDENCE_ISSUED_2026_08_07, WING_REAL_EVIDENCE_NO_KEY_2026_08_08]) {
+      expect(e.bucketsRetained, e.surface).toBe(true);
+      for (const k of ["formCountBucket", "editableTextInputCountBucket", "readonlyFieldCountBucket",
+                       "listLikeContainerCountBucket", "submitAffordancePresent"] as const) {
+        expect(e.buckets[k], `${e.surface}.${k}`).toBeDefined();
+      }
+    }
+    // …and `markerScanTruncated` stays ABSENT on the issued side: the census had no such field in 2026-08-06/07,
+    // so there is no reading to transcribe. `false` would be a manufactured measurement.
+    expect(WING_REAL_EVIDENCE_ISSUED_2026_08_07.buckets.markerScanTruncated).toBeUndefined();
+    expect(WING_REAL_EVIDENCE_NO_KEY_2026_08_08.buckets.markerScanTruncated).toBe(false);
   });
 
   it("every target count names the run it came from — the issued row is a UNION of two differently-scoped runs", () => {
     // A reader auditing `wingrec_c01e673ebc61` (approved scope: ["delete"]) must not be sent looking for five
     // counts that a different run produced.
     const e = WING_REAL_EVIDENCE_ISSUED_2026_08_07;
-    expect(e.recordIds.length).toBe(2);
+    expect(e.recordIds.length).toBeGreaterThan(1);
     for (const k of Object.keys(e.targetMatchCounts)) {
       expect(e.recordIds, k).toContain(e.targetMatchCountSource[k as keyof typeof e.targetMatchCountSource]);
     }
@@ -130,6 +139,54 @@ describe("the real captures — the audit inputs, as data", () => {
     // non-unique on both, so it separates nothing either.
     expect(a.targetMatchCounts.issue).toBe(b.targetMatchCounts.issue);
     expect((a.targetMatchCounts.vendor_info ?? 0) > 1 && (b.targetMatchCounts.vendor_info ?? 0) > 1).toBe(true);
+  });
+
+  it("every BUCKET recorded on both sides is equal too — the audit conclusion is now measured, not assumed", () => {
+    // The row that used to read "never recorded". With the issued side recovered, the comparison is complete:
+    // if any of these ever diverges, `wingIssuedStateFrom` has a real discriminator and must be revisited.
+    const a = WING_REAL_EVIDENCE_ISSUED_2026_08_07.buckets;
+    const b = WING_REAL_EVIDENCE_NO_KEY_2026_08_08.buckets;
+    const shared = (Object.keys(a) as (keyof typeof a)[]).filter((k) => b[k] !== undefined);
+    expect(shared.length).toBe(5); // all five, not an accidentally empty intersection passing vacuously
+    for (const k of shared) expect(a[k], k).toBe(b[k]);
+  });
+
+  it("the 발급 button's SIGNATURE is byte-identical across both surfaces", () => {
+    // Same document position, same child count, on a page with a key and on a page without one — one more
+    // signal that fails to separate them. Deliberately NOT called the strongest evidence that the two surfaces
+    // share a shell: the same records show sig16 changing on one page between 2026-08-06 and 08-07, and a
+    // quantity that unstable across sessions cannot also be a strong cross-session structural identity.
+    const a = WING_REAL_EVIDENCE_ISSUED_2026_08_07.targetSignatures.issue;
+    const b = WING_REAL_EVIDENCE_NO_KEY_2026_08_08.targetSignatures.issue;
+    expect(a).toMatch(/^[0-9a-f]{16}$/);
+    expect(a).toBe(b);
+  });
+
+  it("every signature names the run it came from, and that run is one of the record's own", () => {
+    // Review found the previous version asserting "a signature is recorded only for a target that matched
+    // once" by checking `targetMatchCounts[target] === 1` — but in a UNION record the count and the signature
+    // can come from different runs, so that pairing established nothing. Provenance is recorded now, and the
+    // count claim is only made where both sides are sourced to the SAME run.
+    for (const e of [WING_REAL_EVIDENCE_ISSUED_2026_08_07, WING_REAL_EVIDENCE_NO_KEY_2026_08_08]) {
+      const sigTargets = Object.keys(e.targetSignatures) as (keyof typeof e.targetSignatures)[];
+      expect(sigTargets.length, e.surface).toBeGreaterThan(0);
+      for (const t of sigTargets) {
+        expect(e.targetSignatures[t], t).toMatch(/^[0-9a-f]{16}$/);
+        const src = e.targetSignatureSource[t];
+        expect(e.recordIds, `${t} signature source`).toContain(src);
+        // Where the count came from the SAME run, the sig must belong to a unique match. Where it did not,
+        // no claim is made — which is the honest reading of a union record.
+        if (e.targetMatchCountSource[t] === src) expect(e.targetMatchCounts[t], t).toBe(1);
+      }
+    }
+  });
+
+  it("the `credentials` target is the one discriminator still unmeasured on the no-key side", () => {
+    // Recorded so the next live unit does not have to rediscover it: it matched 1 on the issued page and was
+    // never in the no-key run's approved scope. Absent — not zero — which is the whole distinction.
+    expect(WING_REAL_EVIDENCE_ISSUED_2026_08_07.targetMatchCounts.credentials).toBe(1);
+    expect(WING_REAL_EVIDENCE_NO_KEY_2026_08_08.targetMatchCounts.credentials).toBeUndefined();
+    expect("credentials" in WING_REAL_EVIDENCE_NO_KEY_2026_08_08.targetMatchCountSource).toBe(false);
   });
 });
 

@@ -21,6 +21,14 @@
  * screened to a host CATEGORY, never logged). `LIVE_DOM_CALIBRATION_PENDING` is always reported — this recorder
  * MEASURES uniqueness so a later live run can flip the calibration; it never flips a `SELECTORS_CALIBRATED` flag.
  *
+ * **Two modes, both read-only.** By DEFAULT it measures the SHIPPED labels (`WING_HIGHLIGHT_LABELS` + 삭제) —
+ * the baseline calibration. Under the approved phase `COUPANG_WING_LABEL_RECON` it ALSO sweeps the CANDIDATE
+ * label sets in `coupang-wing-label-recon.ts`, which is how an unresolved label (`self_dev` and `call_ip`
+ * matched 0, `vendor_info` matched 8, on the real 2026-08-08 no-key form) gets narrowed by MEASUREMENT instead
+ * of by a guess edited into the shipped locators. The sweep probes each candidate through the very same
+ * `probeFixedLabelMatch` seam the baseline uses, so it opens no new page interaction; it has no promotion path,
+ * so a uniquely-resolving candidate is recorded as evidence and the shipped label is unchanged by the run.
+ *
  * SCOPE IS GATED, NOT DEFAULTED. A live run refuses unless BOTH `SELLEROPS_WING_PROBE_TARGETS` (what this run
  * measures) and `SELLEROPS_WING_APPROVED_TARGETS` (what the displayed manifest said, bound by
  * `tools/coupang-local/wing-probe-preflight.sh`) are explicit, non-empty, canonical, and EQUAL — checked BEFORE
@@ -50,7 +58,15 @@ import {
   type WingHighlightTarget,
 } from "../action-window/coupang-wing-issuance-driver";
 import {
+  interpretWingRecon,
+  isWingReconTarget,
+  wingReconProbes,
+  type WingReconTarget,
+  type WingReconTargetResult,
+} from "../action-window/coupang-wing-label-recon";
+import {
   LIVE_DOM_CALIBRATION_PENDING,
+  WING_PROBE_TARGET_NAMES,
   wingIssuedStateFrom,
   type WingIssuedState,
   type WingIssuedStateReason,
@@ -167,8 +183,32 @@ export interface WingSelectorRecordResult {
    * Full evidence table + what would restore a verdict: `wingIssuedStateFrom` in `coupang-wing-classifier`.
    */
   issuedState: { state: WingIssuedState; reason: WingIssuedStateReason };
+  /**
+   * The candidate-label RECON sweep, or null when the run was not a recon run (the ordinary baseline probe).
+   *
+   * **Evidence, never a decision.** A candidate resolving uniquely here does not promote it: no code path in
+   * this recorder or in `coupang-wing-label-recon` writes a shipped label, and two candidates resolving at once
+   * is deliberately left `resolvedUnambiguously: false` for an offline reviewer with the signatures in hand.
+   */
+  recon: WingReconSweep | null;
   /** ALWAYS present: these candidate labels are unvalidated hypotheses until a live run proves matchCount === 1. */
   calibration: typeof LIVE_DOM_CALIBRATION_PENDING;
+}
+
+/** One candidate's read-only probe failed; the sanitized fingerprint says WHICH KIND, never the message. */
+export interface WingReconFault {
+  id: string;
+  fault: WingFaultFingerprint;
+}
+
+export interface WingReconSweep {
+  /** Recorded so the sweep's own record states the phase that authorized it, not just the scope. */
+  phase: typeof WING_LABEL_RECON_PHASE;
+  targets: WingReconTargetResult[];
+  /** Candidates whose read-only probe THREW. Each is `NOT_MEASURED` above — never a measured zero. */
+  faults: WingReconFault[];
+  candidatesMeasured: number;
+  candidatesNotMeasured: number;
 }
 
 /** Injected seams so the whole read-only recorder is unit-tested offline over fakes (no browser, no WING). */
@@ -179,8 +219,23 @@ export interface WingSelectorRecordDeps {
   observeSurface(): Promise<WingObservation>;
   /** Read-only fixed-label match for one candidate (never tags/highlights/clicks/reads a value). */
   probeTarget(target: WingRecordTarget): Promise<{ matchCount: number; canHighlight: boolean; sig?: string }>;
+  /**
+   * Read-only fixed-label match for an ARBITRARY candidate spec — the recon sweep's only page interaction, and
+   * the SAME driver seam `probeTarget` uses (`probeFixedLabelMatch`). Required only for a recon run; a baseline
+   * run never calls it.
+   */
+  probeCandidate?(spec: { candidateQuery: string; exactText: string }): Promise<{
+    matchCount: number;
+    canHighlight: boolean;
+    sig?: string;
+  }>;
   /** Print sanitized instructions (noop in tests). */
   announce?(): void;
+}
+
+/** How the orchestrator was scoped this run. `recon` is empty for an ordinary baseline probe. */
+export interface WingSelectorRecordOptions {
+  recon?: readonly WingReconTarget[];
 }
 
 /**
@@ -192,7 +247,9 @@ export interface WingSelectorRecordDeps {
 export async function runWingSelectorRecord(
   deps: WingSelectorRecordDeps,
   probeTargets: readonly WingRecordTarget[] = WING_RECORD_TARGETS,
+  opts: WingSelectorRecordOptions = {},
 ): Promise<WingSelectorRecordResult> {
+  const reconTargets = opts.recon ?? [];
   deps.announce?.();
   const signal = await deps.waitForReady();
   if (signal !== "ready") {
@@ -204,6 +261,10 @@ export async function runWingSelectorRecord(
       nonUniqueCandidates: 0,
       aborted: signal === "abort",
       issuedState: wingIssuedStateFrom(null),
+      // An aborted/timed-out recon run measured nothing. Emitting an empty sweep would read as "swept, found
+      // nothing"; null says the sweep never happened, which is the same measured-vs-unmeasured distinction the
+      // per-candidate `NOT_MEASURED` verdict draws one level down.
+      recon: null,
       calibration: LIVE_DOM_CALIBRATION_PENDING,
     };
   }
@@ -254,7 +315,225 @@ export async function runWingSelectorRecord(
     nonUniqueCandidates,
     aborted: false,
     issuedState: wingIssuedStateFrom(observation),
+    recon: reconTargets.length > 0 ? await sweepReconCandidates(deps, reconTargets) : null,
     calibration: LIVE_DOM_CALIBRATION_PENDING,
+  };
+}
+
+/**
+ * The candidate sweep: probe every candidate of every recon target through the SAME read-only seam the baseline
+ * probe uses, then fold the reading with {@link interpretWingRecon}.
+ *
+ * A candidate whose probe THREW contributes NO row to the reading, so `interpretWingRecon` marks it
+ * `NOT_MEASURED` with a null count — the one distinction that keeps a page which navigated mid-sweep from
+ * reading as "these labels are confirmed absent". The fingerprint is recorded separately so the failure is
+ * diagnosable without a raw message. A missing `probeCandidate` dep leaves every candidate `NOT_MEASURED`
+ * rather than throwing: a recon run that could not measure must say so, not die and lose the baseline record.
+ */
+async function sweepReconCandidates(
+  deps: WingSelectorRecordDeps,
+  reconTargets: readonly WingReconTarget[],
+): Promise<WingReconSweep> {
+  const raw: { targetId: string; matchCount: number; sig?: string }[] = [];
+  const faults: WingReconFault[] = [];
+  const probe = deps.probeCandidate;
+  if (probe) {
+    for (const spec of wingReconProbes(reconTargets)) {
+      try {
+        const res = await probe({ candidateQuery: spec.candidateQuery, exactText: spec.exactText });
+        raw.push({ targetId: spec.targetId, matchCount: res.matchCount, ...(res.sig ? { sig: res.sig } : {}) });
+      } catch (e) {
+        faults.push({ id: spec.targetId, fault: wingFaultFingerprint(e) });
+      }
+    }
+  }
+  const targets = interpretWingRecon(reconTargets, raw);
+  const all = targets.flatMap((t) => t.candidates);
+  return {
+    phase: WING_LABEL_RECON_PHASE,
+    targets,
+    faults,
+    candidatesMeasured: all.filter((c) => c.verdict !== "NOT_MEASURED").length,
+    candidatesNotMeasured: all.filter((c) => c.verdict === "NOT_MEASURED").length,
+  };
+}
+
+/* ────────────────────────────── candidate-label RECON scope (a second, narrower gate) ────────────────────── */
+
+/**
+ * The approval phase that turns this recorder into a candidate-label RECON pass. It is NOT a flag: the phase is
+ * the field the operator reads on the manifest, so deriving the mode from anything else would let the run do
+ * something the displayed manifest never described. `tools/coupang-local/wing-probe-preflight.sh` prints it
+ * inline on the run command for exactly this phase and no other.
+ */
+export const WING_LABEL_RECON_PHASE = "COUPANG_WING_LABEL_RECON" as const;
+/** The env var carrying the phase THIS RUN declares. */
+export const WING_APPROVAL_PHASE_ENV = "SELLEROPS_APPROVAL_PHASE" as const;
+/**
+ * The env var carrying the phase the DISPLAYED MANIFEST said, written back by
+ * `tools/coupang-local/wing-probe-preflight.sh` from the manifest JSON — never from the run env it sourced.
+ *
+ * Two phase variables, for the same reason there are two scope variables. Review found the one-variable design
+ * broken in both directions: a stale `SELLEROPS_APPROVAL_PHASE=COUPANG_WING_LABEL_RECON` left exported in the
+ * shell from an earlier session would arm a 12-hypothesis sweep under a manifest the operator approved for the
+ * three SHIPPED labels; and the converse — approving a recon manifest, then starting the run without the phase
+ * the preflight printed — would quietly measure the baselines instead and print a successful-looking record.
+ * Neither is caught by the scope gate: the target set is identical in both cases. Only a second, independently
+ * bound variable can tell "this run is what the manifest described" from "this shell remembers something".
+ */
+export const WING_APPROVED_PHASE_ENV = "SELLEROPS_WING_APPROVED_PHASE" as const;
+
+/** Closed set of reasons a RECON pass is refused. Baseline probing is unaffected by these. */
+export const WING_RECON_REFUSALS = [
+  "RECON_TARGET_NOT_APPROVED",
+  "RECON_SCOPE_EMPTY",
+  "PHASE_APPROVAL_MISMATCH",
+] as const;
+export type WingReconRefusal = (typeof WING_RECON_REFUSALS)[number];
+
+export type WingReconScopeResult =
+  | { requested: false }
+  | { requested: true; ok: true; targets: WingReconTarget[] }
+  | { requested: true; ok: false; refusal: WingReconRefusal; reason: string };
+
+/**
+ * The RECON gate, layered on top of (never instead of) the approved-scope gate.
+ *
+ * Recon sweeps CANDIDATE labels — several unvalidated hypotheses per target — which is a materially different
+ * operation from measuring the shipped baselines, so it is gated on the approved PHASE rather than inferred.
+ * Two rules, both fail-closed:
+ *
+ *   1. Recon runs only under {@link WING_LABEL_RECON_PHASE}. Any other phase (or none) ⇒ `requested: false`,
+ *      and the recorder behaves exactly as it did before recon existed.
+ *   2. Under that phase EVERY approved target must be a recon target. Not "the intersection" — the whole
+ *      approved set. A run approved for `self_dev,delete` would otherwise sweep candidates for one target while
+ *      the manifest described a set the sweep does not cover, so the operator could not tell from the manifest
+ *      what would be measured. Refusing keeps `approved scope == swept scope` a readable identity.
+ *
+ * Pure: no I/O, no clock, no process state. What it does NOT prove is the same limit the scope gate states —
+ * a deliberate operator can hand-type the phase. It closes accidental drift, not intent.
+ */
+export function resolveWingReconScope(
+  env: Record<string, string | undefined>,
+  approved: readonly WingRecordTarget[],
+): WingReconScopeResult {
+  // OWN properties + strings only, matching `resolveGatedWingProbeScope`: an inherited key must not arm recon.
+  const own = (k: string): string | undefined => {
+    if (!Object.prototype.hasOwnProperty.call(env, k)) return undefined;
+    const v = (env as Record<string, unknown>)[k];
+    return typeof v === "string" ? v : undefined;
+  };
+  // EXACT match, deliberately un-trimmed. `wing-probe-bootstrap.sh` and the preflight both use an exact `case`
+  // allowlist, so a trimming runner would accept phase spellings the harness that authorizes it would refuse —
+  // the runner must never be more permissive about its own authorization than the gate that grants it.
+  const runPhase = own(WING_APPROVAL_PHASE_ENV) ?? "";
+  const approvedPhase = own(WING_APPROVED_PHASE_ENV) ?? "";
+  const runIsRecon = runPhase === WING_LABEL_RECON_PHASE;
+  const approvedIsRecon = approvedPhase === WING_LABEL_RECON_PHASE;
+
+  // Neither side claims recon ⇒ an ordinary baseline probe, exactly as before recon existed.
+  if (!runIsRecon && !approvedIsRecon) return { requested: false };
+  // Exactly one side claims it ⇒ the run and the approved manifest describe different work. Refuse both ways:
+  // running a sweep the manifest did not authorize, and running a baseline under a manifest that promised one.
+  if (runIsRecon !== approvedIsRecon) {
+    return {
+      requested: true,
+      ok: false,
+      refusal: "PHASE_APPROVAL_MISMATCH",
+      reason: runIsRecon
+        ? `${WING_APPROVAL_PHASE_ENV} requests ${WING_LABEL_RECON_PHASE} but ${WING_APPROVED_PHASE_ENV} does not — ` +
+          "re-run the preflight so the approved phase is bound to this run (a phase left over from an earlier shell is not an approval)"
+        : `${WING_APPROVED_PHASE_ENV} is ${WING_LABEL_RECON_PHASE} but this run did not request it — ` +
+          "use the command the preflight printed; without the phase this run would measure the shipped labels, not the candidates",
+    };
+  }
+
+  if (approved.length === 0) {
+    return {
+      requested: true,
+      ok: false,
+      refusal: "RECON_SCOPE_EMPTY",
+      reason: `the approved scope is empty — ${WING_LABEL_RECON_PHASE} sweeps candidates for approved targets and has none`,
+    };
+  }
+  const offending = approved.filter((t) => !isWingReconTarget(t));
+  if (offending.length > 0) {
+    // Echo only names this module can vouch for. `approved` normally arrives from the scope gate already
+    // filtered to `WING_PROBE_TARGET_NAMES`, but as an exported pure function it can be handed anything, and
+    // this reason reaches stderr — so an unrecognized token is reported as a COUNT, never printed back.
+    const known = offending.filter((t) => (WING_PROBE_TARGET_NAMES as readonly string[]).includes(t));
+    const unknownCount = offending.length - known.length;
+    const named = known.length > 0 ? known.join(", ") : "none";
+    return {
+      requested: true,
+      ok: false,
+      refusal: "RECON_TARGET_NOT_APPROVED",
+      reason:
+        `${WING_LABEL_RECON_PHASE} requires every approved target to be a recon target — ` +
+        `non-recon target(s): ${named}; unrecognized token(s): ${unknownCount}`,
+    };
+  }
+  // Every element passed `isWingReconTarget`, so the narrowing is sound; order follows the approved scope.
+  return { requested: true, ok: true, targets: approved.filter(isWingReconTarget) };
+}
+
+/** The operator-facing recon refusal line. Pure + exported so a test can prove no raw env value reaches it. */
+export function reconRefusalMessage(refusal: WingReconRefusal, reason: string): string {
+  return (
+    `Refusing to launch: WING candidate-label recon scope is not approved (${refusal}). ${reason}. ` +
+    "Re-bootstrap with the recon phase and scope, then use the command the preflight prints. No browser launched."
+  );
+}
+
+/** One candidate row as the sanitized record prints it. Every field is a count, a boolean, or OUR OWN constant. */
+export interface WingReconRecordRow {
+  id: string;
+  /** Our own fixed candidate label — never scraped page content. */
+  label: string;
+  /** The target's coarse EXPECTED role (a recorder constant, not a live element read). */
+  role: string;
+  matchCount: number | null;
+  verdict: string;
+  /** `matchCount === 1`. Stated explicitly because "would this label be highlightable" is the question asked. */
+  canHighlight: boolean;
+  sig16: string | null;
+}
+
+/**
+ * Shape the sweep for the printed record: flatten to candidate rows and add the two per-target constants the
+ * fold does not carry (expected role, and the highlightability the UNIQUE verdict already implies). Pure and
+ * exported so a test can prove the printed shape carries nothing beyond counts, booleans, and our own strings.
+ *
+ * `canHighlight` is derived from the VERDICT, not from a separate count comparison: `NOT_MEASURED` therefore
+ * yields `false` without ever claiming a count it does not have.
+ */
+export function reconRecordFor(sweep: WingReconSweep | null): {
+  phase: string;
+  targets: { target: string; resolvedUnambiguously: boolean; uniqueCandidateIds: readonly string[]; candidates: WingReconRecordRow[] }[];
+  faults: WingReconFault[];
+  candidatesMeasured: number;
+  candidatesNotMeasured: number;
+} | null {
+  if (!sweep) return null;
+  return {
+    phase: sweep.phase,
+    targets: sweep.targets.map((t) => ({
+      target: t.target,
+      resolvedUnambiguously: t.resolvedUnambiguously,
+      uniqueCandidateIds: t.uniqueCandidateIds,
+      candidates: t.candidates.map((c): WingReconRecordRow => ({
+        id: c.id,
+        label: c.label,
+        role: WING_TARGET_ROLE[t.target],
+        matchCount: c.matchCount,
+        verdict: c.verdict,
+        canHighlight: c.verdict === "UNIQUE",
+        sig16: c.sig16,
+      })),
+    })),
+    faults: sweep.faults,
+    candidatesMeasured: sweep.candidatesMeasured,
+    candidatesNotMeasured: sweep.candidatesNotMeasured,
   };
 }
 
@@ -376,6 +655,18 @@ async function main(): Promise<void> {
   }
   const scopedTargets = scopedRecordTargetsFor(probeScope.targets);
 
+  // The SECOND gate, also before Chrome launches. Recon sweeps candidate hypotheses rather than the shipped
+  // baselines, so it runs only under its own approved phase and only when the whole approved scope is
+  // sweepable. A refusal here stops the run outright rather than silently downgrading to a baseline probe —
+  // the operator approved a recon manifest, and quietly measuring something else is the failure this prevents.
+  const reconScope = resolveWingReconScope(process.env, probeScope.targets);
+  if (reconScope.requested && !reconScope.ok) {
+    console.error(reconRefusalMessage(reconScope.refusal, reconScope.reason));
+    process.exitCode = 2;
+    return;
+  }
+  const reconTargets = reconScope.requested && reconScope.ok ? reconScope.targets : [];
+
   const cfg = loadConfig();
   const runId = mintRunId();
   const readyPath = recordSentinelPathFor(cfg.statusFile);
@@ -409,12 +700,16 @@ async function main(): Promise<void> {
     },
     observeSurface: () => driver.observeSurface(),
     probeTarget: (target) => driver.probeFixedLabelMatch(wingRecordLabelSpec(target)),
+    // The recon sweep's ONLY page interaction — literally the same driver call as `probeTarget`, differing
+    // solely in which fixed label it counts. No new in-page script, no new read, no new mutation.
+    probeCandidate: (spec) => driver.probeFixedLabelMatch(spec),
     announce: () => printInstructions(readyPath, abortPath),
   };
 
   try {
-    // `scopedTargets` was fixed by the approved-scope gate above, before the browser launched.
-    const result = await runWingSelectorRecord(deps, scopedTargets);
+    // `scopedTargets` was fixed by the approved-scope gate above, before the browser launched; `reconTargets`
+    // is empty unless the recon phase gate armed it against that same approved scope.
+    const result = await runWingSelectorRecord(deps, scopedTargets, { recon: reconTargets });
     console.error("");
     console.error("WING selector recorder complete. 이제 SellerOps 탭으로 직접 돌아가세요.");
     // SANITIZED calibration record → stdout. Integers/booleans/fixed-labels/roles/opaque sigs + the sanitized
@@ -435,6 +730,10 @@ async function main(): Promise<void> {
           issuedState: result.issuedState,
           observation: result.observation,
           targets: result.targets,
+          // Null on an ordinary baseline run. On a recon run: per-candidate ids, OUR OWN fixed candidate
+          // labels, integer counts, closed verdicts, and opaque sigs — the same value-free classes the
+          // baseline rows already carry.
+          recon: reconRecordFor(result.recon),
         },
         null,
         2,
@@ -448,6 +747,9 @@ async function main(): Promise<void> {
       nonUniqueCandidates: result.nonUniqueCandidates,
       issuedState: result.issuedState.state,
       issuedStateReason: result.issuedState.reason,
+      reconCandidatesMeasured: result.recon?.candidatesMeasured ?? 0,
+      reconCandidatesNotMeasured: result.recon?.candidatesNotMeasured ?? 0,
+      reconTargetsResolved: result.recon?.targets.filter((t) => t.resolvedUnambiguously).length ?? 0,
     });
   } finally {
     removeSentinel(readyPath);

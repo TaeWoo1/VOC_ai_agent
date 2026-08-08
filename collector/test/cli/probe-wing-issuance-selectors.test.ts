@@ -338,6 +338,17 @@ describe("wing selector recorder — read-only walk", () => {
     expect(printed).toContain("issuedState");
   });
 
+  it("the RECON sweep reaches the WIRE too — the same gap, one field over", () => {
+    // Found by review: `recon` was added to the record type, computed by the orchestrator, and omitted from the
+    // printed payload by a one-line deletion that no test noticed. A live recon run would then spend a grant,
+    // measure twelve candidates, and print a record with none of them in it. Same failure as `issuedState`
+    // above, so it gets the same guard rather than a comment saying it could not happen.
+    const code = codeOnly(CLI);
+    const printed = code.slice(code.indexOf("JSON.stringify("), code.indexOf("aw_coupang_selector_record_done"));
+    expect(printed).toContain("recon:");
+    expect(code).toContain("reconRecordFor(result.recon)");
+  });
+
   it("emits ONLY a value-free calibration record — no credential VALUE, PII, selector, host, or raw URL", async () => {
     const { deps } = fakeDeps();
     const result = await runWingSelectorRecord(deps);

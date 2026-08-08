@@ -56,6 +56,7 @@ fi
 # from the spec or from this run's env file; nothing from the surrounding shell.
 unset WALKTHROUGH_RUN_ID WALKTHROUGH_APPROVAL_ID WALKTHROUGH_GIT_COMMIT WING_PROBE_BOOTSTRAP_EPOCH \
       SELLEROPS_APPROVAL_PHASE SELLEROPS_WING_PROBE_TARGETS SELLEROPS_WING_APPROVED_TARGETS \
+      SELLEROPS_WING_APPROVED_PHASE \
       SELLEROPS_APPROVAL_OPERATION SELLEROPS_APPROVAL_MAX SELLEROPS_APPROVAL_ACCOUNT \
       SELLEROPS_APPROVAL_SURFACE SELLEROPS_APPROVAL_CHANNEL
 # shellcheck disable=SC1090
@@ -77,11 +78,15 @@ echo
 check_identity_bound "$RUN_ID" "$APPROVAL_ID" "$RUN_GIT"
 check_identity_fresh "$BOOTSTRAP_EPOCH" "$IDENTITY_TTL_SECONDS"
 
-# 3. The phase must be the WING selector probe. This harness prepares that phase and no other — the
-#    destructive deletion phase has its own gate and is not approvable from here.
-[ "$PHASE" = "COUPANG_WING_SELECTOR_PROBE" ] \
-  && pass "phase is COUPANG_WING_SELECTOR_PROBE (READ_ONLY)" \
-  || fail "phase must be COUPANG_WING_SELECTOR_PROBE (got '${PHASE:-unset}') — this harness prepares no other phase"
+# 3. The phase must be one of the two READ_ONLY WING recorder phases — the shipped-label selector probe, or the
+#    candidate-label recon. This harness prepares those and no others; the destructive deletion phase has its
+#    own gate and is not approvable from here.
+case "$PHASE" in
+  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON)
+    pass "phase is $PHASE (READ_ONLY)" ;;
+  *)
+    fail "phase must be COUPANG_WING_SELECTOR_PROBE or COUPANG_WING_LABEL_RECON (got '${PHASE:-unset}') — this harness prepares no other phase" ;;
+esac
 
 # 4. No code drift since bootstrap. The manifest records a git SHA; if HEAD moved, or the working tree
 #    carries uncommitted/untracked changes, the code that would run is NOT the code that SHA names —
@@ -135,9 +140,21 @@ if [ "$FIELD_FAIL" != "0" ]; then
   echo "PREFLIGHT FAIL — the prepared manifest is missing a field this display depends on; refusing to show a partial manifest."
   exit 1
 fi
-# The gate re-derives the phase itself; a manifest for any other phase must never be displayed by this harness.
-if [ "$M_PHASE" != "COUPANG_WING_SELECTOR_PROBE" ]; then
-  echo "PREFLIGHT FAIL — the prepared manifest is for phase $M_PHASE, not the READ_ONLY selector probe. Refusing."
+# The gate re-derives the phase itself; a manifest for any other phase must never be displayed by this harness,
+# AND it must be the same phase this run bootstrapped — a manifest for the OTHER read-only phase describes
+# different work (shipped labels vs candidate hypotheses) and must not be presented under this run's identity.
+case "$M_PHASE" in
+  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON) ;;
+  *)
+    echo "PREFLIGHT FAIL — the prepared manifest is for phase $M_PHASE, not a READ_ONLY WING recorder phase. Refusing."
+    exit 1 ;;
+esac
+# UNEXERCISED by the selfcheck, and said so deliberately: the manifest CLI derives its phase from the same
+# SELLEROPS_APPROVAL_PHASE this script sourced from the run env, so the two agree by construction and no
+# fixture can make them differ. What this still catches is the gate ECHOING BACK a different phase than it was
+# given — a narrow property, kept because it costs nothing, but do not read it as a tested guarantee.
+if [ "$M_PHASE" != "$PHASE" ]; then
+  echo "PREFLIGHT FAIL — the prepared manifest is for phase $M_PHASE but this run bootstrapped $PHASE. Refusing."
   exit 1
 fi
 
@@ -148,15 +165,21 @@ fi
 # could leave a half-written run env, and %r is Python repr, not shell quoting.
 if ! python3 -c 'import os, sys, tempfile
 path, resolved = sys.argv[1], sys.argv[2]
-drop = ("SELLEROPS_WING_PROBE_TARGETS=", "SELLEROPS_WING_APPROVED_TARGETS=")
+drop = ("SELLEROPS_WING_PROBE_TARGETS=", "SELLEROPS_WING_APPROVED_TARGETS=", "SELLEROPS_WING_APPROVED_PHASE=")
 lines = [l for l in open(path).read().splitlines() if not l.startswith(drop)]
 # Always single-quoted, matching what bootstrap writes: shlex.quote would leave a bare word unquoted, so the
 # file style would depend on the value. The escape below is the POSIX one and is correct for any content.
-quoted = "'\''" + resolved.replace("'\''", "'\''\"'\''\"'\''") + "'\''"
+def shquote(v):
+    return "'\''" + v.replace("'\''", "'\''\"'\''\"'\''") + "'\''"
+quoted = shquote(resolved)
 # TWO variables, deliberately: the run scope and the APPROVED scope. The live probe requires both and refuses
 # unless they are equal, so a run that measures something other than the displayed manifest cannot start.
 lines.append("SELLEROPS_WING_PROBE_TARGETS=" + quoted)
 lines.append("SELLEROPS_WING_APPROVED_TARGETS=" + quoted)
+# The approved PHASE, bound the same way and for the same reason as the approved scope: with only one phase
+# variable, a stale export from an earlier shell arms a candidate sweep under a manifest granted for the
+# shipped labels, and a forgotten phase silently downgrades an approved sweep to a baseline probe.
+lines.append("SELLEROPS_WING_APPROVED_PHASE=" + shquote(sys.argv[3]))
 fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)))
 try:
     with os.fdopen(fd, "w") as f:
@@ -165,13 +188,13 @@ try:
 except BaseException:
     if os.path.exists(tmp):
         os.unlink(tmp)
-    raise' "$RUN_ENV" "$M_TARGETS" 2>/dev/null; then
+    raise' "$RUN_ENV" "$M_TARGETS" "$M_PHASE" 2>/dev/null; then
   # This is the binding, not a convenience: without it, sourcing the run env can still reproduce a wider
   # scope than the one displayed. Refuse rather than pass with the binding silently skipped.
-  echo "PREFLIGHT FAIL — could not bind the approved scope to $RUN_ENV; refusing to present a manifest whose scope the run may not honor."
+  echo "PREFLIGHT FAIL — could not bind the approved scope/phase to $RUN_ENV; refusing to present a manifest the run may not honor."
   exit 1
 fi
-pass "approved scope bound to the run env ($M_TARGETS)"
+pass "approved scope + phase bound to the run env ($M_TARGETS · $M_PHASE)"
 
 echo
 echo "PREFLIGHT PASS"
@@ -187,15 +210,26 @@ echo
 echo "  operator action ($M_ENTRY_TYPE):"
 echo "    $M_OPERATOR_ACTION"
 echo
-echo "  The probe measures fixed-label match counts only — no highlight, no click, no input, no value read,"
-echo "  no 발급/재발급/삭제, and it never navigates the window (the seller does)."
+if [ "$PHASE" = "COUPANG_WING_LABEL_RECON" ]; then
+  echo "  This run sweeps CANDIDATE labels for the targets above — several unvalidated hypotheses each — and"
+  echo "  measures match counts only: no highlight, no click, no input, no value read, no 발급/재발급/삭제, and it"
+  echo "  never navigates the window (the seller does). A candidate that resolves uniquely is recorded as"
+  echo "  EVIDENCE ONLY — this run changes no shipped selector. Promotion is a later offline edit with tests."
+else
+  echo "  The probe measures fixed-label match counts only — no highlight, no click, no input, no value read,"
+  echo "  no 발급/재발급/삭제, and it never navigates the window (the seller does)."
+fi
 echo
 echo "  If this manifest is correct and displayed, the operator's entire single-use grant is one line:"
 echo "    Seated and ready."
 echo
 echo "  On approval, run the probe with the APPROVED scope inline. The probe refuses unless BOTH variables"
 echo "  are set and equal — an unset scope can no longer widen the run to every target:"
-echo "    cd $COLLECTOR_DIR && SELLEROPS_WING_PROBE_TARGETS=$M_TARGETS SELLEROPS_WING_APPROVED_TARGETS=$M_TARGETS \\"
+# BOTH phase variables travel with the run command, mirroring the two scope variables. The recorder derives
+# recon mode from them and refuses unless they agree, so neither a phase left over from an earlier shell nor a
+# forgotten phase on an approved recon command can make the run measure something the manifest did not describe.
+echo "    cd $COLLECTOR_DIR && SELLEROPS_APPROVAL_PHASE=$M_PHASE SELLEROPS_WING_APPROVED_PHASE=$M_PHASE \\"
+echo "      SELLEROPS_WING_PROBE_TARGETS=$M_TARGETS SELLEROPS_WING_APPROVED_TARGETS=$M_TARGETS \\"
 echo "      npx tsx $M_CLI -- --i-understand-this-opens-live-coupang-wing"
 echo
 echo "  (Re-bootstrap ⇒ new approval id ⇒ the old approval is dead. A code/branch/run/scope change ⇒ REVOKED.)"
