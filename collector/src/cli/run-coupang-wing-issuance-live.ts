@@ -66,9 +66,38 @@ async function waitForShutdown(bridge: AgentBridge): Promise<void> {
   await bridge.close().catch(() => undefined);
 }
 
+/**
+ * **The guided walk this CLI drives is FENCED OFF, and the fence is code, not a comment.**
+ *
+ * `coupang-issuance-stages.ts` documents the 7-step plan as contradicted by live evidence and unsafe to run;
+ * review pointed out — correctly — that the comment was the only thing stopping it. Concretely: `self_dev` /
+ * `call_ip` match 0 and `vendor_info` never resolves on the real no-key surface, so the walk's first three
+ * checkpoints cannot be located; and the plan treats 발급 as the key-creating press, so the checkpoint after it
+ * tells the seller to copy keys that do not exist. Unlike the reveal and deletion CLIs this entrypoint also has
+ * NO approval-manifest gate, NO phase binding and NO repo-identity check, and it navigates the page itself.
+ *
+ * The fence lifts when the guided plan is redesigned from the Stage-2 observation
+ * (`COUPANG_WING_ISSUANCE_FORM_REVEAL`), not before — and lifting it means deleting this constant deliberately,
+ * which is a reviewable diff rather than a forgotten comment.
+ */
+export const COUPANG_WING_GUIDED_ISSUANCE_FENCED = true as const;
+export const COUPANG_WING_GUIDED_ISSUANCE_FENCE_REASON =
+  "the shipped 7-step guided plan is contradicted by live WING evidence (self_dev/call_ip match 0, vendor_info " +
+  "never resolves, and 발급 opens a configuration step rather than creating the key), and this entrypoint has no " +
+  "approval-manifest gate, no phase binding and no repo-identity check";
+
 async function main(): Promise<void> {
   banner();
   const args = process.argv.slice(2);
+  // The fence, checked FIRST — before the approval flag, before URL screening, before anything can open.
+  if (COUPANG_WING_GUIDED_ISSUANCE_FENCED) {
+    console.error("Refusing to start the guided WING issuance walk: FENCED.");
+    console.error(`  ${COUPANG_WING_GUIDED_ISSUANCE_FENCE_REASON}.`);
+    console.error("  Use src/cli/run-coupang-wing-reveal-live.ts (COUPANG_WING_ISSUANCE_FORM_REVEAL) to observe the");
+    console.error("  real Stage-2 surface first; the guided plan is redesigned from that evidence, not from this walk.");
+    process.exit(5);
+    return;
+  }
   if (!hasCoupangWingRunApproval(args)) {
     console.error(coupangWingApprovalRequiredMessage());
     process.exit(3);

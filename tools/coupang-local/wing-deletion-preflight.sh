@@ -51,7 +51,7 @@ fi
 # (DESTRUCTIVE_SCOPE_MISMATCH), so an ambient value cannot change what is displayed; unsetting them anyway
 # means the operator sees a refusal from their own stale shell rather than a confusing gate error.
 unset WALKTHROUGH_RUN_ID WALKTHROUGH_APPROVAL_ID WALKTHROUGH_GIT_COMMIT WING_DELETION_BOOTSTRAP_EPOCH \
-      SELLEROPS_APPROVAL_PHASE SELLEROPS_WING_PROBE_TARGETS SELLEROPS_WING_APPROVED_TARGETS \
+      SELLEROPS_WING_APPROVED_PHASE SELLEROPS_APPROVAL_PHASE SELLEROPS_WING_PROBE_TARGETS SELLEROPS_WING_APPROVED_TARGETS \
       SELLEROPS_APPROVAL_OPERATION SELLEROPS_APPROVAL_MAX SELLEROPS_APPROVAL_ACCOUNT \
       SELLEROPS_APPROVAL_SURFACE SELLEROPS_APPROVAL_CHANNEL
 # shellcheck disable=SC1090
@@ -147,6 +147,28 @@ if ! verify_destructive_descriptor "$MANIFEST_OUT"; then
 fi
 pass "destructive descriptor is exactly the canonical contract (irreversible · agent performs nothing · checkpoint required · 0 value reads)"
 
+# Bind the APPROVED PHASE into this run's env, from the MANIFEST (never from the run env it sourced). Without it
+# the three `WALKTHROUGH_*` identity variables are the only thing between a run env and a CLI — and they are
+# byte-identical across WING phases, so a grant given for one WING action would reach PREPARED in the other.
+if ! python3 -c 'import os, sys, tempfile
+path, phase = sys.argv[1], sys.argv[2]
+lines = [l for l in open(path).read().splitlines() if not l.startswith("SELLEROPS_WING_APPROVED_PHASE=")]
+q = "'"'"'"
+lines.append("SELLEROPS_WING_APPROVED_PHASE=" + q + phase.replace(q, q + chr(34) + q + chr(34) + q) + q)
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)))
+try:
+    with os.fdopen(fd, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    os.replace(tmp, path)
+except BaseException:
+    if os.path.exists(tmp):
+        os.unlink(tmp)
+    raise' "$RUN_ENV" "$M_PHASE" 2>/dev/null; then
+  echo "PREFLIGHT FAIL — could not bind the approved phase to $RUN_ENV; refusing to present a manifest the run may not honor."
+  exit 1
+fi
+pass "approved PHASE bound to the run env ($M_PHASE)"
+
 # The 삭제 selector must be calibrated. The gate refuses SELECTORS_NOT_CALIBRATED before reaching here, so this
 # can only be `true` — it is asserted anyway so a future change that lets an uncalibrated destructive manifest
 # through is caught at the display, not by the operator.
@@ -184,7 +206,11 @@ echo "  If this manifest is correct and you accept 1–5 above, the single-use g
 echo "    Seated and ready."
 echo
 echo "  On approval, run the deletion entrypoint in THIS shell (it re-verifies HEAD + a clean tree itself):"
-echo "    cd $COLLECTOR_DIR && npx tsx $M_CLI -- --i-understand-this-opens-live-coupang-wing"
+# BOTH phase variables travel on the command, like the probe harness does with its scope variables: the CLI
+# refuses unless they are present and both name this phase, so a run env from another WING action cannot
+# authorize this entrypoint even if it is still exported in the shell.
+echo "    cd $COLLECTOR_DIR && SELLEROPS_APPROVAL_PHASE=$M_PHASE SELLEROPS_WING_APPROVED_PHASE=$M_PHASE \\"
+echo "      npx tsx $M_CLI -- --i-understand-this-opens-live-coupang-wing"
 echo
 echo "  (Re-bootstrap ⇒ new approval id ⇒ the old approval is dead. A code/branch/run/scope change ⇒ REVOKED.)"
 exit 0

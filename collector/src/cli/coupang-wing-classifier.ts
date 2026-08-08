@@ -216,6 +216,111 @@ export function observeFrom(urlCategory: WingUrlCategory, census: WingStructural
   return { urlCategory, pageCategory, signals, blockers };
 }
 
+/**
+ * The operator action this driver models — deliberately NOT `KEY_CREATION`. The operator presses 발급 once; on
+ * the official Coupang flow that opens the 연동 방식 / configuration step, and the key is created only by a later
+ * `확인`. Naming the two differently is the entire point: they are separately approvable operations, and this
+ * driver can only ever prepare the first.
+ */
+export const WING_REVEAL_OPERATOR_ACTION = "REVEAL_WING_ISSUANCE_CONFIGURATION" as const;
+
+/**
+ * The operation this driver must NEVER prepare, declared as a constant so a guard test can assert no phase spec,
+ * no manifest and no driver path in this file reaches it. Key creation is the operator's later `확인` press, and
+ * it has no tooling at all yet — by design, until Stage-2 is observed.
+ */
+export const WING_KEY_CREATION_ACTION = "COMPLETE_WING_KEY_ISSUANCE" as const;
+
+/** The env var carrying the phase THIS RUN declares. */
+export const WING_APPROVAL_PHASE_ENV = "SELLEROPS_APPROVAL_PHASE" as const;
+/**
+ * The env var carrying the phase the DISPLAYED MANIFEST said, written back by that phase's preflight from the
+ * manifest JSON — never from the run env it sourced. Two phase variables exist for the same reason the probe
+ * scope has two: one variable cannot tell "this run is what the manifest described" from "this shell remembers
+ * something from an earlier session".
+ */
+export const WING_APPROVED_PHASE_ENV = "SELLEROPS_WING_APPROVED_PHASE" as const;
+
+/* ────────────────────────────── the action CLIs' phase binding ────────────────────────────── */
+
+/**
+ * **Which PHASE a live WING *action* run is authorized for — two variables, for the reason the probe scope needs
+ * two.** Both WING action CLIs pin their phase in CODE and read only `WALKTHROUGH_*` for identity, so before this
+ * existed the three identity variables were the ONLY thing standing between a run env and a CLI. They are
+ * byte-identical across phases.
+ *
+ * The escalation that closes here, demonstrated by review against the real exports: bootstrap the REVEAL phase,
+ * approve the reveal manifest ("not destructive · not key creation · one 발급 press"), source that run env into
+ * the shell as the preflight instructs — then launch `run-coupang-wing-deletion-live.ts` by mistake, stale
+ * history, or a wrong paste. The deletion gate returned PREPARED and would have highlighted 삭제 behind an
+ * irreversible-deletion checkpoint, under a grant given for a non-destructive run.
+ *
+ *   - {@link WING_APPROVAL_PHASE_ENV} — the phase THIS RUN declares (written by the phase's bootstrap);
+ *   - {@link WING_APPROVED_PHASE_ENV} — the phase the DISPLAYED MANIFEST said (written back by that phase's
+ *     preflight, from the manifest JSON — never from the run env it sourced).
+ *
+ * A CLI requires both to be present and to equal the phase it implements. What this does NOT prove is the same
+ * limit the probe scope gate states: a deliberate operator can hand-type either. It closes accidental
+ * cross-phase reuse, which is the failure that actually happens.
+ */
+export const WING_ACTION_PHASE_REFUSALS = [
+  "MISSING_RUN_PHASE",
+  "MISSING_APPROVED_PHASE",
+  "WRONG_RUN_PHASE",
+  "PHASE_APPROVAL_MISMATCH",
+] as const;
+export type WingActionPhaseRefusal = (typeof WING_ACTION_PHASE_REFUSALS)[number];
+
+export type WingActionPhaseResult = { ok: true } | { ok: false; refusal: WingActionPhaseRefusal; reason: string };
+
+/**
+ * Pure. `expected` is the phase the calling CLI implements — a compile-time constant at every call site, never
+ * env-derived, so the comparison cannot be satisfied by pointing both variables at whatever the caller wants.
+ */
+export function resolveWingActionPhase(
+  env: Record<string, string | undefined>,
+  expected: string,
+): WingActionPhaseResult {
+  const own = (k: string): string | undefined => {
+    if (!Object.prototype.hasOwnProperty.call(env, k)) return undefined;
+    const v = (env as Record<string, unknown>)[k];
+    return typeof v === "string" ? v : undefined;
+  };
+  // EXACT match, un-trimmed: the bootstraps and preflights use exact `case` allowlists, and a CLI must never be
+  // more permissive about its own authorization than the harness that grants it.
+  const runPhase = own(WING_APPROVAL_PHASE_ENV);
+  const approvedPhase = own(WING_APPROVED_PHASE_ENV);
+  if (runPhase === undefined || runPhase.length === 0) {
+    return {
+      ok: false,
+      refusal: "MISSING_RUN_PHASE",
+      reason: `${WING_APPROVAL_PHASE_ENV} is not set — a live WING action run never infers its phase from the identity variables alone`,
+    };
+  }
+  if (approvedPhase === undefined || approvedPhase.length === 0) {
+    return {
+      ok: false,
+      refusal: "MISSING_APPROVED_PHASE",
+      reason: `${WING_APPROVED_PHASE_ENV} is not set — re-run this phase's preflight so the approved phase is bound to this run`,
+    };
+  }
+  if (runPhase !== expected) {
+    return {
+      ok: false,
+      refusal: "WRONG_RUN_PHASE",
+      reason: `this entrypoint implements ${expected}, but the run env authorizes ${runPhase} — the grant does not cover this CLI`,
+    };
+  }
+  if (approvedPhase !== expected) {
+    return {
+      ok: false,
+      refusal: "PHASE_APPROVAL_MISMATCH",
+      reason: `the displayed manifest approved ${approvedPhase}, not ${expected} — a run env from another phase is not an approval for this one`,
+    };
+  }
+  return { ok: true };
+}
+
 /* ────────────────────────────── recorded REAL evidence (the audit's inputs) ────────────────────────────── */
 
 /**

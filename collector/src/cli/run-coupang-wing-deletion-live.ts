@@ -57,7 +57,7 @@ import {
   validateApprovalPrerequisites,
   type ApprovalPrereqInput,
 } from "./approval-manifest";
-import { resolveWingUrl, screenWingUrl, type WingPageCategory } from "./coupang-wing-classifier";
+import { resolveWingActionPhase, resolveWingUrl, screenWingUrl, type WingPageCategory } from "./coupang-wing-classifier";
 import { verifyRepoIdentity } from "./repo-identity";
 import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from "./live-run-approval";
 
@@ -101,6 +101,13 @@ export function gateRefusalCause(
   // a stale `.env` must never be able to make a destructive manifest describe a different run. The gate pins
   // them too (`DESTRUCTIVE_SCOPE_MISMATCH`) — this side just stops feeding it anything else.
   const scope = WKD.destructiveScope ?? COUPANG_WING_KEY_DELETION_SCOPE;
+  // The PHASE this run is authorized for, before anything else. The three `WALKTHROUGH_*` identity variables
+  // are byte-identical across WING phases, so without this an approval granted for ANOTHER WING action reaches
+  // PREPARED here — review demonstrated a reveal grant preparing the destructive deletion run. `expected` is a
+  // literal, never env-derived, so both variables must name THIS entrypoint's phase.
+  const phaseBinding = resolveWingActionPhase(process.env, "COUPANG_WING_KEY_DELETION");
+  if (!phaseBinding.ok) return `${phaseBinding.refusal}: ${phaseBinding.reason}`;
+
   const input: ApprovalPrereqInput = {
     phase: WKD.phase,
     channel: scope.channel,

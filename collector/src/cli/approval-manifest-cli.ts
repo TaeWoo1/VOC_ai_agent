@@ -24,7 +24,8 @@ import {
   type CalibrationPhase,
   type ApprovalPrereqInput,
 } from "./approval-manifest";
-import { CALIBRATION_PHASES, isWingCalibrationPhase } from "./approval-manifest";
+import { CALIBRATION_PHASES, COUPANG_WING_ISSUANCE_REVEAL_ACTION, isWingCalibrationPhase } from "./approval-manifest";
+import { WING_ISSUE_SELECTOR_CALIBRATED } from "../action-window/coupang-wing-issuance-driver";
 import { resolveVisualReconScope } from "../action-window/api-issuance-calibration/visual-recon";
 // The public WING host default for the Coupang WING selector-probe phase (pure leaf; no per-run input needed).
 import { WING_DEFAULT_URL, resolveWingProbeScope } from "./coupang-wing-classifier";
@@ -74,6 +75,7 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
   // probe; only what it measures (and therefore what the manifest says) differs.
   const isWingLabelRecon = phase === "COUPANG_WING_LABEL_RECON";
   const isWingKeyDeletion = phase === "COUPANG_WING_KEY_DELETION";
+  const isWingReveal = phase === "COUPANG_WING_ISSUANCE_FORM_REVEAL";
   // The shared list, NOT a fourth hand-maintained chain. Review caught this one still spelled out by hand after
   // the other three were consolidated: it decides whether the entry URL is screened against the WING host or
   // the NAVER API-center host, so a WING phase missing from it fails as `INVALID_HOST` — a refusal whose cause
@@ -134,6 +136,8 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     ? "WING open-API read-only selector probe"
     : isWingLabelRecon
     ? "WING open-API read-only CANDIDATE-LABEL recon (measure only; no selector is changed by this run)"
+    : isWingReveal
+    ? "WING issuance-form reveal (the OPERATOR presses 발급; this press is not the key-creating action; agent performs no click/input/value read)"
     : isVisualRecon
     ? "API Center redacted visual recon"
     : isStructureObs
@@ -149,6 +153,8 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     ? "1 read-only WING selector probe session"
     : isWingLabelRecon
     ? "1 read-only WING candidate-label recon session"
+    : isWingReveal
+    ? "1 operator-performed 발급 press + 1 sanitized observation"
     : isVisualRecon
     ? "1 redacted visual recon session"
     : isStructureObs
@@ -198,6 +204,12 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     artifactPath,
     requestedCaptureScreens,
     requestedProbeTargets,
+    // The reveal phase's immutable descriptor. Passed from the shared constant so the display CLI and the runtime
+    // CLI declare the SAME contract — the gate refuses any divergence, and the operator reads one of them.
+    ...(isWingReveal ? { operatorRevealAction: COUPANG_WING_ISSUANCE_REVEAL_ACTION } : {}),
+    // The reveal phase HIGHLIGHTS a real control, so it needs a stated calibration. From the shared constant,
+    // never a hardcoded true — withdrawing it must close the display path too, not just the runtime.
+    ...(isWingReveal ? { selectorsCalibrated: WING_ISSUE_SELECTOR_CALIBRATED } : {}),
     runId: env("WALKTHROUGH_RUN_ID") ?? "unknown",
     approvalId: env("WALKTHROUGH_APPROVAL_ID") ?? "unknown",
     gitSha: env("WALKTHROUGH_GIT_COMMIT") ?? "unknown",

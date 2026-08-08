@@ -2,7 +2,12 @@
  * **Action Window Runtime — Coupang WING API-issuance guidance engine (ISOLATED, v2).**
  *
  * A pure reducer for ONE guided Coupang WING open-API issuance walk: the seller logs in, reaches the open-API
- * issuance page, selects 자체개발, confirms 업체명, sets the 호출 IP, presses 발급 to issue the key themselves, and
+ * issuance page, selects 자체개발, confirms 업체명, sets the 호출 IP, presses 발급 themselves, and
+ * ⚠ **This sequence is FALSIFIED by live evidence and the walk it describes is FENCED OFF**
+ * (`COUPANG_WING_GUIDED_ISSUANCE_FENCED`). 자체개발 / 호출 IP match 0 and 업체명 never resolves uniquely on the
+ * real no-key surface, and 발급 opens a configuration step rather than creating the key. Left unchanged
+ * pending the Stage-2 observation — see `coupang-issuance-stages.ts`. The original wording said "presses
+ * 발급 **to issue the key**", which was the specific claim that was wrong.
  * copies the Access Key / Secret Key / 업체코드 into SellerOps's own masked form — every real step theirs. The
  * runtime observes a sanitized page category, highlights the one control to press next, watches the seller's own
  * click, and advances. It is a fixed 7-step LINE (no branch).

@@ -167,6 +167,88 @@ export const WING_DELETION_CALIBRATION_EVIDENCE: WingDeletionCalibrationEvidence
 };
 
 /**
+ * **LIVE-CONFIRMED calibration of the `issue` (발급) control**, and the narrowest possible claim about it.
+ *
+ * What is proven: {@link WING_HIGHLIGHT_LABELS}.issue resolves to EXACTLY ONE element, with role `button`, on the
+ * real WING open-API surface — measured on FOUR independent read-only captures spanning BOTH account states (an
+ * already-issued account on 2026-08-06/07, and the real post-delete no-key surface on 2026-08-08). That is a
+ * stronger basis than the single capture behind the 삭제 calibration.
+ *
+ * What is NOT proven, and must not be inferred: **what pressing it does.** The shipped guided runtime models
+ * 발급 as the press that CREATES the key (`checkpoint_before_issue` → `guiding_copy_keys`). The official Coupang
+ * flow, and our own evidence that the form fields are absent from this surface, both say it instead REVEALS a
+ * configuration step. Neither reading is live-confirmed. So this flag authorizes HIGHLIGHTING the control; it
+ * says nothing about the resulting state, and `CoupangWingRevealDriver` is deliberately built to fail closed on
+ * an outcome it does not recognize rather than to assume either one.
+ *
+ * `signatureStability` is the field to read carefully. Unlike the 삭제 evidence — where one capture simply could
+ * not establish stability — here four captures **actively contradict** it: the same control on the same page
+ * reported `d3f775e8…` on 2026-08-06 and `b7ba43a8…` on 2026-08-07 with no change to the signature code between
+ * them. sig16 tracks the page as rendered that day. That makes `signatureRole: "EVIDENCE_ONLY"` a hard
+ * requirement rather than a caution: any runtime gate comparing a live signature against this constant would be
+ * comparing against a value already observed to move.
+ */
+export interface WingIssueCalibrationEvidence {
+  readonly status: typeof LIVE_DOM_CALIBRATION_CONFIRMED;
+  readonly capturedOn: string;
+  /** The sanitized record ids backing the uniqueness claim — one per independent capture. */
+  readonly recordIds: readonly string[];
+  /** Both account states the control was measured in. Uniqueness held in each. */
+  readonly surfaces: readonly ["already_issued_page", "no_key_initial_surface"];
+  readonly pageCategory: "open_api_issuance";
+  readonly matchCount: 1;
+  readonly canHighlight: true;
+  readonly role: "button";
+  readonly label: "발급";
+  /** Every signature observed for this control, in capture order. Plural BECAUSE they differ. */
+  readonly observedSig16: readonly string[];
+  readonly captureCount: 4;
+  /** Stronger than "not established": four captures show the signature CHANGING across sessions. */
+  readonly signatureStability: "CROSS_SESSION_VARIATION_OBSERVED";
+  readonly signatureRole: "EVIDENCE_ONLY";
+  /**
+   * The explicit non-claim. Calibration covers the LOCATOR only; the effect of the press is unconfirmed, which
+   * is the whole reason the reveal phase exists and why it may not report a key-creation outcome either way.
+   */
+  readonly pressOutcome: "UNCONFIRMED";
+}
+
+export const WING_ISSUE_CALIBRATION_EVIDENCE: WingIssueCalibrationEvidence = {
+  status: LIVE_DOM_CALIBRATION_CONFIRMED,
+  capturedOn: "2026-08-08",
+  recordIds: Object.freeze([
+    "wingrec_fc4cbafb42c8",
+    "wingrec_b2e87f42abd1",
+    "wingrec_42985b029ddd",
+    "wingrec_b554c86c0f0b",
+  ]),
+  surfaces: Object.freeze(["already_issued_page", "no_key_initial_surface"]) as readonly [
+    "already_issued_page",
+    "no_key_initial_surface",
+  ],
+  pageCategory: "open_api_issuance",
+  matchCount: 1,
+  canHighlight: true,
+  role: "button",
+  label: "발급",
+  observedSig16: Object.freeze(["d3f775e83c47e9f8", "b7ba43a8e788b4a8"]),
+  captureCount: 4,
+  signatureStability: "CROSS_SESSION_VARIATION_OBSERVED",
+  signatureRole: "EVIDENCE_ONLY",
+  pressOutcome: "UNCONFIRMED",
+};
+
+/**
+ * Whether the `issue` (발급) fixed label is calibrated — TRUE, on the evidence above. Scoped to SELECTOR
+ * READINESS: it authorizes highlighting that one control under an approved phase. It is not an authorization to
+ * run, and it is emphatically not a claim about what the press does.
+ *
+ * Note what this does NOT flip: {@link WING_HIGHLIGHT_CALIBRATION} stays `LIVE_DOM_CALIBRATION_PENDING`, because
+ * `self_dev` / `vendor_info` / `call_ip` are still unresolved on every surface measured so far.
+ */
+export const WING_ISSUE_SELECTOR_CALIBRATED = true as const;
+
+/**
  * Whether the `delete` (삭제) fixed label is calibrated against the REAL WING DOM. **TRUE** since the live
  * read-only delete-selector probe confirmed it resolves uniquely (`matchCount === 1`) on the already-issued page
  * — see {@link WING_DELETION_CALIBRATION_EVIDENCE} for the provenance and its limits.

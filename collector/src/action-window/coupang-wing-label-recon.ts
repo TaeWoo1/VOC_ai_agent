@@ -267,6 +267,59 @@ export function interpretWingRecon(
   return out;
 }
 
+/* ────────────────────────────── STAGE-2 candidates (hypotheses only) ────────────────────────────── */
+
+/**
+ * **Candidate labels for the STAGE-2 configuration screen — hypotheses, and nothing has measured them.**
+ *
+ * Why they are separate from {@link WING_LABEL_RECON_CANDIDATES}: those were measured on the initial no-key
+ * surface and every one of them failed there (`자체개발` / `호출 IP` matched 0 in every spelling; `업체명` never
+ * resolved). That result is not transferable — it says those labels are absent from THAT screen, not what the
+ * Stage-2 screen contains. Measuring these needs the Stage-2 DOM, which requires the operator to press 발급
+ * (`COUPANG_WING_ISSUANCE_FORM_REVEAL`).
+ *
+ * **Where the wording comes from, since inventing it would be the forbidden move.** The product owner described
+ * the official Coupang flow as: 발급 → 연동 방식 선택 → 자체개발(직접입력) → **업체명 · URL · IP 주소** 입력 →
+ * **확인**. So `URL`, `IP 주소` and `확인` are transcribed from that description of WING's own copy, not guessed
+ * by this module. One weak corroboration exists: `IP 주소` matched **2** on the initial surface while `호출 IP`
+ * matched 0 — so the phrase is at least present in WING's vocabulary. Two is not one, and the initial surface is
+ * not Stage-2, so that is a reason to MEASURE it, not to ship it.
+ *
+ * **NOT WIRED TO ANY RUNNER, and this note is accurate.** `resolveWingReconScope` sweeps
+ * {@link WING_RECON_TARGETS} only; no code path reads this constant. It is a declared hypothesis set for the unit
+ * that observes Stage-2 — deliberately inert until there is a real DOM to measure it against.
+ */
+export const WING_STAGE2_RECON_TARGETS = ["self_dev", "vendor_info", "vendor_url", "call_ip", "confirm"] as const;
+export type WingStage2ReconTarget = (typeof WING_STAGE2_RECON_TARGETS)[number];
+
+export const WING_STAGE2_RECON_CANDIDATES: Readonly<Record<WingStage2ReconTarget, readonly WingLabelCandidate[]>> =
+  Object.freeze({
+    self_dev: Object.freeze([
+      { id: "stage2.self_dev.direct", candidateQuery: "label,span,div", exactText: "직접입력",
+        rationale: "the flow description names the self-developed option as 자체개발(직접입력); the parenthetical may be the label" },
+      { id: "stage2.self_dev.baseline", candidateQuery: "label,button,span,div,a,legend", exactText: "자체개발",
+        rationale: "the shipped label, re-measured on the screen it was always meant for" },
+    ]),
+    vendor_info: Object.freeze([
+      { id: "stage2.vendor_info.baseline", candidateQuery: "label,legend,th,dt", exactText: "업체명",
+        rationale: "on a real form the label should be a label/legend/th/dt — the query that matched 0 on the initial surface" },
+    ]),
+    vendor_url: Object.freeze([
+      { id: "stage2.vendor_url.url", candidateQuery: "label,legend,th,dt", exactText: "URL",
+        rationale: "transcribed from the official-flow description (업체명 · URL · IP 주소)" },
+    ]),
+    call_ip: Object.freeze([
+      { id: "stage2.call_ip.ip_addr", candidateQuery: "label,legend,th,dt", exactText: "IP 주소",
+        rationale: "from the flow description; matched 2 on the initial surface, so the phrase exists in WING copy" },
+      { id: "stage2.call_ip.baseline", candidateQuery: "label,span,div,dt,th,strong", exactText: "호출 IP",
+        rationale: "the shipped label, kept so the baseline is re-measured on the screen it was meant for" },
+    ]),
+    confirm: Object.freeze([
+      { id: "stage2.confirm.confirm", candidateQuery: "button,a,span,div", exactText: "확인",
+        rationale: "the final key-creating control per the flow description — measured ONLY to locate it, never pressed" },
+    ]),
+  });
+
 /** The probe scope a live recon run would need approving — the three unresolved targets and nothing else. */
 export const WING_RECON_APPROVED_SCOPE: readonly WingProbeTargetName[] = Object.freeze([
   "self_dev",
