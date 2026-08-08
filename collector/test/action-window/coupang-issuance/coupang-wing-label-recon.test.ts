@@ -11,13 +11,16 @@
  *     than reimplemented, so there is no second value-free contract to keep in sync.
  */
 import { describe, it, expect } from "vitest";
+import * as recon from "../../../src/action-window/coupang-wing-label-recon";
 import {
+  UnknownWingReconTargetError,
   WING_LABEL_RECON_CANDIDATES,
   WING_RECON_APPROVED_SCOPE,
   WING_RECON_TARGETS,
   WING_RECON_VERDICTS,
   buildWingReconScript,
   interpretWingRecon,
+  isWingReconTarget,
   wingReconProbes,
   type WingReconTarget,
 } from "../../../src/action-window/coupang-wing-label-recon";
@@ -87,13 +90,18 @@ describe("probe construction — value-free by shape", () => {
     expect(src).not.toContain("textContent: ");
   });
 
-  it("no candidate label carries operator or company data — they are WING's generic UI words", () => {
-    const labels = ALL.flatMap((t) => WING_LABEL_RECON_CANDIDATES[t].map((c) => c.exactText));
-    for (const l of labels) {
-      expect(l.length, l).toBeLessThan(12); // a field label, never a sentence or a pasted value
-      for (const forbidden of ["@", "http", ".com", "Secret", "Access Key"]) {
-        expect(l, `candidate label must not contain ${forbidden}`).not.toContain(forbidden);
-      }
+  it("no candidate label can carry operator or company data — allowlisted shape, not a denylist", () => {
+    // Strengthened after review: a denylist of "@ / http / .com / Secret" let a vendor-code-shaped string like
+    // "A0012345" through. A field label is Korean UI text (optionally with a short ASCII word like IP), so the
+    // ALLOWED shape is narrow enough to state positively — and anything identifier-shaped fails it.
+    const ALLOWED = /^[가-힣A-Za-z][가-힣A-Za-z ]{0,10}$/;
+    for (const t of ALL) for (const c of WING_LABEL_RECON_CANDIDATES[t]) {
+      expect(ALLOWED.test(c.exactText), `${c.id} = ${JSON.stringify(c.exactText)} is not label-shaped`).toBe(true);
+      expect(/\d/.test(c.exactText), `${c.id} contains a digit — codes and ids are never field labels`).toBe(false);
+    }
+    // …and the allowlist is itself falsifiable: these must all be rejected.
+    for (const bad of ["A0012345", "acme@corp.com", "https://x", "AKIA1234567890", "업체명 주식회사 가나다라마바사"]) {
+      expect(ALLOWED.test(bad) && !/\d/.test(bad), bad).toBe(false);
     }
   });
 });
@@ -133,12 +141,52 @@ describe("interpretation — it records, it does not decide", () => {
     expect(r!.candidates.every((c) => c.verdict === "ABSENT")).toBe(true);
   });
 
-  it("a candidate MISSING from the reading is recorded as ABSENT, never dropped", () => {
-    // A dropped row would make a partial reading look complete — the same class of bug as a truncated scan
-    // reading as "nothing found".
+  it("a candidate MISSING from the reading is NOT_MEASURED — never conflated with a measured zero", () => {
+    // Corrected after review. The first version recorded a missing row as matchCount 0 / ABSENT, which made a
+    // partial reading byte-identical to a complete all-miss reading. That is the same "unmeasured vs measured
+    // zero" conflation this whole unit exists to correct — inverted.
     const [r] = interpretWingRecon(["call_ip"], raw({ "call_ip.nospace": 1 }));
     expect(r!.candidates).toHaveLength(WING_LABEL_RECON_CANDIDATES.call_ip.length);
-    expect(r!.candidates.filter((c) => c.verdict === "ABSENT")).toHaveLength(3);
+    const missing = r!.candidates.filter((c) => c.verdict === "NOT_MEASURED");
+    expect(missing).toHaveLength(3);
+    for (const c of missing) expect(c.matchCount).toBeNull();
+  });
+
+  it("a PARTIAL reading is distinguishable from a complete all-miss reading", () => {
+    // The property the previous shape violated, asserted directly. A page script that silently failed for some
+    // candidates (the shared probe swallows a bad query) must not read as 'all candidates confirmed absent'.
+    const partial = interpretWingRecon(["call_ip"], []);
+    const allMiss = interpretWingRecon(["call_ip"], raw({
+      "call_ip.baseline": 0, "call_ip.nospace": 0, "call_ip.lower": 0, "call_ip.ip_addr": 0,
+    }));
+    expect(JSON.stringify(partial)).not.toBe(JSON.stringify(allMiss));
+    expect(partial[0]!.candidates.every((c) => c.verdict === "NOT_MEASURED")).toBe(true);
+    expect(allMiss[0]!.candidates.every((c) => c.verdict === "ABSENT")).toBe(true);
+  });
+
+  it("one unique candidate alongside an UNMEASURED one is not 'resolved'", () => {
+    // The unmeasured candidate might have resolved too — that is the two-unique ambiguity wearing a disguise.
+    const [r] = interpretWingRecon(["call_ip"], raw({ "call_ip.nospace": 1 }));
+    expect(r!.uniqueCandidateIds).toEqual(["call_ip.nospace"]);
+    expect(r!.resolvedUnambiguously).toBe(false);
+  });
+
+  it("a junk count is INVALID_COUNT, not folded into a real verdict", () => {
+    const [r] = interpretWingRecon(["call_ip"], raw({
+      "call_ip.baseline": -5, "call_ip.nospace": 1.5, "call_ip.lower": NaN, "call_ip.ip_addr": 2,
+    }));
+    expect(r!.candidates.map((c) => c.verdict)).toEqual([
+      "INVALID_COUNT", "INVALID_COUNT", "INVALID_COUNT", "AMBIGUOUS",
+    ]);
+    expect(r!.uniqueCandidateIds).toEqual([]);
+  });
+
+  it("a DUPLICATE id with conflicting counts is NOT_MEASURED — last-one-wins would hide the conflict", () => {
+    const [r] = interpretWingRecon(["call_ip"], [
+      { targetId: "call_ip.nospace", matchCount: 1 },
+      { targetId: "call_ip.nospace", matchCount: 7 },
+    ]);
+    expect(r!.candidates.find((c) => c.id === "call_ip.nospace")!.verdict).toBe("NOT_MEASURED");
   });
 
   it("unknown ids in the reading are ignored rather than invented into a target", () => {
@@ -146,12 +194,25 @@ describe("interpretation — it records, it does not decide", () => {
     expect(r!.candidates.map((c) => c.id).every((id) => id.startsWith("call_ip."))).toBe(true);
   });
 
+  it("an unknown TARGET is refused, not crashed on", () => {
+    // Matters the moment recon is driven from an env-derived scope: `for…of undefined` would be a raw TypeError
+    // where every other scope path in this codebase returns a closed refusal.
+    for (const bad of ["issue", "credentials", "", "__proto__"]) {
+      expect(() => wingReconProbes([bad as WingReconTarget]), bad).toThrow(UnknownWingReconTargetError);
+      expect(() => interpretWingRecon([bad as WingReconTarget], []), bad).toThrow(UnknownWingReconTargetError);
+    }
+    expect(isWingReconTarget("call_ip")).toBe(true);
+    expect(isWingReconTarget("issue")).toBe(false);
+  });
+
   it("every verdict is from the closed enum, and the result carries only ids, ints and booleans", () => {
     const results = interpretWingRecon(ALL, raw({ "self_dev.baseline": 2 }));
     const serialized = JSON.stringify(results);
     for (const r of results) for (const c of r.candidates) {
       expect(WING_RECON_VERDICTS as readonly string[]).toContain(c.verdict);
-      expect(Number.isInteger(c.matchCount)).toBe(true);
+      // null only ever accompanies NOT_MEASURED — it is an explicit "no reading", never a stand-in for 0.
+      if (c.matchCount === null) expect(c.verdict).toBe("NOT_MEASURED");
+      else expect(Number.isInteger(c.matchCount)).toBe(true);
     }
     // No candidate LABEL text reaches the record — ids only, so a record can be pasted into a doc safely.
     for (const t of ALL) for (const c of WING_LABEL_RECON_CANDIDATES[t]) {
@@ -161,19 +222,37 @@ describe("interpretation — it records, it does not decide", () => {
 });
 
 describe("the recon cannot change what ships", () => {
-  it("the module exposes no promotion/apply/write path", () => {
-    // Structural, not aspirational: if a `promote`/`apply` export ever appears, this fails and the reviewer has
-    // to argue for it explicitly.
-    const mod = { WING_LABEL_RECON_CANDIDATES, wingReconProbes, buildWingReconScript, interpretWingRecon };
-    for (const name of Object.keys(mod)) {
-      expect(/promote|apply|write|update|set|mutate/i.test(name), name).toBe(false);
-    }
+  it("the module's ACTUAL export surface contains no promotion/apply/write path", () => {
+    // Corrected after review. The first version built a hardcoded object literal of the four exports it already
+    // knew about and scanned THOSE names — so adding `export function promoteCandidateToShippedLabel()` passed
+    // every test. Scanning the real namespace is what makes the guard failable.
+    const forbidden = Object.keys(recon).filter((n) => /promote|apply|write|update|mutate/i.test(n));
+    expect(forbidden, `these exports could change shipped selectors: ${forbidden.join(", ")}`).toEqual([]);
+  });
+
+  it("importing the module does not mutate the shipped labels", () => {
+    // The companion check below snapshots AFTER import, so an import-time write would be invisible to it.
+    // Comparing against the driver's own literal catches that.
+    expect(WING_HIGHLIGHT_LABELS.call_ip.exactText).toBe("호출 IP");
+    expect(WING_HIGHLIGHT_LABELS.self_dev.exactText).toBe("자체개발");
+    expect(WING_HIGHLIGHT_LABELS.vendor_info.exactText).toBe("업체명");
   });
 
   it("running a full interpretation leaves the shipped labels byte-identical", () => {
     const before = JSON.stringify(WING_HIGHLIGHT_LABELS);
     interpretWingRecon(ALL, [{ targetId: "self_dev.spaced", matchCount: 1 }]);
     expect(JSON.stringify(WING_HIGHLIGHT_LABELS)).toBe(before);
+  });
+
+  it("a candidate object cannot be rewritten at runtime — freeze is DEEP, not just the container", () => {
+    // `Object.freeze` is shallow and TS `readonly` is erased, so without freezing each candidate the string
+    // shipped into the page is writable. Proven by attempting the write rather than by asserting isFrozen alone.
+    const candidate = WING_LABEL_RECON_CANDIDATES.call_ip[0]!;
+    expect(Object.isFrozen(candidate)).toBe(true);
+    expect(() => {
+      (candidate as { exactText: string }).exactText = "INJECTED";
+    }).toThrow(TypeError); // modules are strict mode: a frozen write throws rather than silently no-ops
+    expect(buildWingReconScript(["call_ip"])).not.toContain("INJECTED");
   });
 
   it("the approved live scope is exactly the three unresolved targets — no widening by default", () => {

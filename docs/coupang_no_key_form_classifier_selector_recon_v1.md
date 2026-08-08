@@ -33,14 +33,26 @@ than believed.
 | `call_ip` matchCount | 0 | **0** | no |
 | `vendor_info` matchCount | 9 | 8 | no (non-unique on both) |
 | `issue` matchCount | 1 (sig `d3f775e8…`) | 1 (sig `b7ba43a8…`) | no |
-| `readonlyFieldCountBucket` | **never recorded** | `none` | unusable |
-| `editableTextInputCountBucket` | **never recorded** | `many` | unusable |
-| `formCountBucket` | **never recorded** | `few` | unusable |
-| `submitAffordancePresent` | **never recorded** | `false` | unusable |
+| `readonlyFieldCountBucket` | **not transcribed** | `none` | unusable |
+| `editableTextInputCountBucket` | **not transcribed** | `many` | unusable |
+| `formCountBucket` | **not transcribed** | `few` | unusable |
+| `submitAffordancePresent` | **not transcribed** | `false` | unusable |
 
-**Every signal recorded on both sides is identical**, and the four that might have discriminated were never
-captured on the issued page. That is the finding: not "the discriminator is hard", but "the issued-page side of
-every candidate discriminator is unmeasured".
+**Every signal recorded on both sides is identical**, and the four that might have discriminated are not in
+hand for the issued page.
+
+### Corrected after review: "not transcribed", not "unmeasured"
+
+The first version of this document said those four were **never measured**. That was wrong, and the error is
+worth naming because it is the same mistake the document exists to correct. Checking the code at the capture
+commit shows `formCount` / `editableTextInputCount` / `readonlyFieldCount` / `submitAffordancePresent` were
+already in the census on 2026-08-06, and the probe CLI printed the whole observation to stdout. **The numbers
+existed.** Nobody wrote them into a doc, and the run output is not in the repository.
+
+So the honest statement is *not available here*, and — importantly — **possibly recoverable without a live
+run**, from operator scrollback or a local run log. That should be checked before any grant is spent
+re-measuring it. The consequence for code is unchanged: the numbers are not in hand, so a predicate written
+today would still be inventing the issued-page side.
 
 ### A previous conclusion this falsifies
 
@@ -83,8 +95,11 @@ That last one is the most promising untested lead: a credential displayed in a t
 different from the same words appearing as static form text. It is a **measurement to take**, not a rule to
 ship — writing it as a predicate now would repeat exactly the mistake being corrected.
 
-The account has no key, so this reading is only possible **after the next issuance**. It therefore belongs to
-the issuance unit, not to a separate live run.
+**First, check whether it needs a live run at all.** Per the correction above, the 2026-08-06/07 runs printed
+these values; if that output survives in operator scrollback or a local log, the issued-page side can be
+recovered for free. Only if it does not is a fresh capture needed — and since the account now has no key, that
+capture is only possible **after the next issuance**, which puts it in the issuance unit rather than a separate
+live run.
 
 ## Goal 2 — the recon design
 
@@ -114,8 +129,20 @@ byte-identical.
 
 **Two unique candidates is not a winner.** Two labels each matching one element says nothing about whether it is
 the *same* element, and a highlight aimed at the wrong one is a real defect — so `resolvedUnambiguously` is true
-only when exactly one candidate resolves. A candidate missing from a reading is recorded `ABSENT` rather than
-dropped, so a partial reading cannot look complete.
+only when exactly one candidate resolves.
+
+**A candidate missing from a reading is `NOT_MEASURED`, with a null count.** The first version folded it into
+`0` / `ABSENT`, which made a partial reading byte-identical to a complete all-miss one — the same
+unmeasured-versus-measured-zero conflation corrected above, inverted. It matters concretely: the shared in-page
+probe swallows a malformed `candidateQuery` and reports nothing for it, so a partly-failed script would
+otherwise read as "all candidates confirmed absent" and send a reviewer off to rewrite labels that were never
+tested. A junk count (negative, fractional, `NaN`) is `INVALID_COUNT` for the same reason.
+
+Review also found the promotion guard **could not fail**: it scanned a hardcoded list of the four exports it
+already knew about, so adding `export function promoteCandidateToShippedLabel()` passed every test. It now
+scans the module's real namespace. Similarly, `Object.freeze` is shallow — each candidate object is frozen
+individually, because otherwise `CANDIDATES.call_ip[0].exactText = <anything>` succeeds and that string is
+shipped straight into the page.
 
 ## If a live recon run is wanted
 
@@ -128,6 +155,14 @@ SELLEROPS_WING_PROBE_TARGETS=self_dev,vendor_info,call_ip tools/coupang-local/wi
 
 Scope is exactly the three unresolved targets (`WING_RECON_APPROVED_SCOPE`). READ_ONLY: no highlight, no click,
 no form input, no 발급, no credential value read.
+
+> **The sweep is NOT wired to that command yet, and the command alone would not run it.**
+> `wing-probe-bootstrap.sh` drives `probe-wing-issuance-selectors.ts`, whose labels come from
+> `WING_HIGHLIGHT_LABELS` — the **baselines**. Running it with the three recon targets re-measures
+> `self_dev 0 / vendor_info 8 / call_ip 0`, which we already have, and sweeps no candidates. Wiring the sweep
+> into a runner is deliberately left to the unit that spends the grant, so this module stays a design plus its
+> tests rather than half-connected live machinery. Do not book a grant against the command above expecting
+> recon results.
 
 **A cheaper ordering is worth considering first.** The next planned unit — the WING-resident issuance tutorial
 and the operator's own key issuance — must visit this same form anyway, and it produces the issued-page capture

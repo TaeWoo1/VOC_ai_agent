@@ -10,7 +10,8 @@
  *
  * What replaced it is nothing, on purpose. The comparative audit of the only two real captures shows every
  * signal recorded on BOTH sides is identical, and the four that might discriminate (readonly / editable / form
- * counts, submit affordance) were never recorded on the issued page. A predicate written today would be
+ * counts, submit affordance) were never TRANSCRIBED from the issued-page run — they were measured and printed,
+ * but the output is not in the repo. Either way they are not in hand, so a predicate written today would be
  * inventing the issued-page side. `indeterminate` removes a wrong answer instead of guessing a right one.
  *
  * These tests therefore assert the ABSENCE of a verdict, and — more importantly — pin the evidence that would
@@ -21,6 +22,7 @@ import {
   WING_ISSUED_STATES,
   WING_REAL_EVIDENCE_ISSUED_2026_08_07,
   WING_REAL_EVIDENCE_NO_KEY_2026_08_08,
+  corroborationVerdictFor,
   observeFrom,
   wingDeletionEvidenceFrom,
   wingIssuedStateFrom,
@@ -68,7 +70,7 @@ function observationFromEvidence(e: WingRealEvidence): WingObservation {
 describe("the real captures — the audit inputs, as data", () => {
   it("both real surfaces classify as the SAME page category — the category cannot answer the question", () => {
     for (const e of [WING_REAL_EVIDENCE_ISSUED_2026_08_07, WING_REAL_EVIDENCE_NO_KEY_2026_08_08]) {
-      expect(observationFromEvidence(e).pageCategory, e.recordId).toBe("open_api_issuance");
+      expect(observationFromEvidence(e).pageCategory, e.recordIds.join()).toBe("open_api_issuance");
     }
   });
 
@@ -91,17 +93,31 @@ describe("the real captures — the audit inputs, as data", () => {
     // matchCount=0 on the already-issued page". The real form gives 0 as well, so absence there was never
     // evidence of form-only-ness — and the "coherent already-issued shape" conclusion drawn from it is void.
     for (const e of [WING_REAL_EVIDENCE_ISSUED_2026_08_07, WING_REAL_EVIDENCE_NO_KEY_2026_08_08]) {
-      expect(e.targetMatchCounts.self_dev, e.recordId).toBe(0);
-      expect(e.targetMatchCounts.call_ip, e.recordId).toBe(0);
+      expect(e.targetMatchCounts.self_dev, e.recordIds.join()).toBe(0);
+      expect(e.targetMatchCounts.call_ip, e.recordIds.join()).toBe(0);
     }
   });
 
-  it("the issued capture has NO recorded buckets — the reason a discriminator cannot be written yet", () => {
-    // The load-bearing fact of this whole unit. If someone later fills these in from memory or inference, this
-    // test is where the fabrication should be caught: buckets may only arrive with a new real capture.
-    expect(WING_REAL_EVIDENCE_ISSUED_2026_08_07.bucketsRecorded).toBe(false);
+  it("the issued capture RETAINS no buckets — the reason a discriminator cannot be written from what we hold", () => {
+    // Corrected after review: the buckets WERE measured on 2026-08-06 (the census emitted them and the CLI
+    // printed the whole observation) — they were simply never transcribed, and the run output is not in the
+    // repo. `bucketsRetained` says exactly that. Claiming "unmeasured" would have been the same
+    // unmeasured-vs-measured-zero conflation this unit exists to correct.
+    expect(WING_REAL_EVIDENCE_ISSUED_2026_08_07.bucketsRetained).toBe(false);
     expect(Object.keys(WING_REAL_EVIDENCE_ISSUED_2026_08_07.buckets)).toHaveLength(0);
-    expect(WING_REAL_EVIDENCE_NO_KEY_2026_08_08.bucketsRecorded).toBe(true);
+    expect(WING_REAL_EVIDENCE_NO_KEY_2026_08_08.bucketsRetained).toBe(true);
+  });
+
+  it("every target count names the run it came from — the issued row is a UNION of two differently-scoped runs", () => {
+    // A reader auditing `wingrec_c01e673ebc61` (approved scope: ["delete"]) must not be sent looking for five
+    // counts that a different run produced.
+    const e = WING_REAL_EVIDENCE_ISSUED_2026_08_07;
+    expect(e.recordIds.length).toBe(2);
+    for (const k of Object.keys(e.targetMatchCounts)) {
+      expect(e.recordIds, k).toContain(e.targetMatchCountSource[k as keyof typeof e.targetMatchCountSource]);
+    }
+    expect(e.targetMatchCountSource.delete).toBe("wingrec_c01e673ebc61");
+    expect(e.targetMatchCountSource.issue).not.toBe("wingrec_c01e673ebc61");
   });
 
   it("every signal recorded on BOTH sides is equal — the audit conclusion, computed not asserted", () => {
@@ -230,10 +246,45 @@ describe("wingIssuedStateFrom — value-free and pure", () => {
     for (const e of [WING_REAL_EVIDENCE_ISSUED_2026_08_07, WING_REAL_EVIDENCE_NO_KEY_2026_08_08]) {
       const serialized = JSON.stringify(e);
       for (const forbidden of ["http", "coupang.com", "Secret", "업체코드", "/Users/"]) {
-        expect(serialized, e.recordId).not.toContain(forbidden);
+        expect(serialized, e.recordIds.join()).not.toContain(forbidden);
       }
       for (const v of Object.values(e.targetMatchCounts)) expect(typeof v).toBe("number");
     }
+  });
+});
+
+describe("corroborationVerdictFor — the rule itself, tested directly because nothing can reach it", () => {
+  // Review found that hardcoding `allNotIssued = false` inside the rule passed the ENTIRE suite: with
+  // `not_issued` no longer emitted, the confirming branch is unreachable through `wingDeletionEvidenceFrom`,
+  // and `main`'s test for it was removed along with the falsified expectations. A rule nothing executes is a
+  // rule a refactor deletes silently — so it is exercised here over states directly.
+  it("two agreeing not_issued readings ⇒ confirmed (the branch the public entrypoint can no longer reach)", () => {
+    expect(corroborationVerdictFor(["not_issued", "not_issued"])).toEqual({
+      confirmedNotIssued: true, reason: "STABLE_NOT_ISSUED", readingCount: 2,
+    });
+  });
+
+  it("any disagreement withholds the verdict — NOT a majority vote", () => {
+    for (const states of [
+      ["not_issued", "issued"], ["not_issued", "not_issued", "issued"], ["not_issued", "indeterminate"],
+    ] as const) {
+      expect(corroborationVerdictFor(states), states.join("+")).toEqual({
+        confirmedNotIssued: false, reason: "READINGS_DISAGREE", readingCount: states.length,
+      });
+    }
+  });
+
+  it("fewer than two readings is never enough — including zero", () => {
+    expect(corroborationVerdictFor([])).toEqual({
+      confirmedNotIssued: false, reason: "SINGLE_READING_ONLY", readingCount: 0,
+    });
+    expect(corroborationVerdictFor(["not_issued"])).toEqual({
+      confirmedNotIssued: false, reason: "SINGLE_READING_ONLY", readingCount: 1,
+    });
+  });
+
+  it("all-issued readings are never reported as confirmed-deleted", () => {
+    expect(corroborationVerdictFor(["issued", "issued"]).confirmedNotIssued).toBe(false);
   });
 });
 

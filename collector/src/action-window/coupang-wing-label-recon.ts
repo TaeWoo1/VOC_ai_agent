@@ -21,6 +21,12 @@
  * A candidate label carries no operator data by construction: these are WING's own generic UI words. Nothing
  * derived from the page — no placeholder, no input value, no company or account text — may be added to a
  * candidate list, and the guard test asserts the shape that keeps it that way.
+ *
+ * **NOT WIRED TO A RUNNER YET.** Nothing in `src/cli` or `tools/coupang-local` calls this. The existing
+ * `wing-probe-bootstrap.sh` / `probe-wing-issuance-selectors.ts` path measures `WING_HIGHLIGHT_LABELS` — the
+ * BASELINES — so running it with the three recon targets re-measures what we already know and sweeps no
+ * candidates. Wiring the sweep into a runner is deliberately left to the unit that actually spends the grant,
+ * so this module stays a design plus its tests rather than half-connected live machinery.
  */
 import { buildFixedLabelProbeScript } from "./api-issuance-calibration/visual-recon-inpage";
 import type { WingProbeTargetName } from "../cli/coupang-wing-classifier";
@@ -48,8 +54,20 @@ export interface WingLabelCandidate {
  * word, and the wider structural queries that a Korean form label might live in. Inventing semantically
  * different wording would be guessing at WING's copy, which is what the live measurement is for.
  */
+function deepFreezeCandidates(
+  sets: Record<WingReconTarget, readonly WingLabelCandidate[]>,
+): Readonly<Record<WingReconTarget, readonly WingLabelCandidate[]>> {
+  // `Object.freeze` is shallow, and `readonly` is erased at runtime — without freezing each candidate OBJECT,
+  // `CANDIDATES.call_ip[0].exactText = <anything>` succeeds and that string is shipped straight into the page.
+  for (const set of Object.values(sets)) {
+    Object.freeze(set);
+    for (const c of set) Object.freeze(c);
+  }
+  return Object.freeze(sets);
+}
+
 export const WING_LABEL_RECON_CANDIDATES: Readonly<Record<WingReconTarget, readonly WingLabelCandidate[]>> =
-  Object.freeze({
+  deepFreezeCandidates({
     self_dev: Object.freeze([
       { id: "self_dev.baseline", candidateQuery: "label,button,span,div,a,legend", exactText: "자체개발",
         rationale: "the shipped label — re-measured alongside every variant so the baseline is same-conditions" },
@@ -82,13 +100,23 @@ export const WING_LABEL_RECON_CANDIDATES: Readonly<Record<WingReconTarget, reado
     ]),
   });
 
-/** What a single candidate's measurement means. Closed enum — no free text, no partial credit. */
-export const WING_RECON_VERDICTS = ["UNIQUE", "ABSENT", "AMBIGUOUS"] as const;
+/**
+ * What a single candidate's measurement means. Closed enum — no free text, no partial credit.
+ *
+ * `NOT_MEASURED` is separate from `ABSENT` deliberately. The first version folded a missing row into
+ * `matchCount: 0` / `ABSENT`, which made a partial reading byte-identical to a complete all-miss reading —
+ * the same conflation of "unmeasured" with "measured zero" that this whole unit exists to correct. It matters
+ * concretely: the shared in-page probe swallows a malformed `candidateQuery` and reports nothing for it, so a
+ * partly-failed script would otherwise read as "all candidates confirmed absent" and send a reviewer off to
+ * rewrite labels that were never tested.
+ */
+export const WING_RECON_VERDICTS = ["UNIQUE", "ABSENT", "AMBIGUOUS", "NOT_MEASURED", "INVALID_COUNT"] as const;
 export type WingReconVerdict = (typeof WING_RECON_VERDICTS)[number];
 
 export interface WingReconCandidateResult {
   readonly id: string;
-  readonly matchCount: number;
+  /** Null when the page returned nothing for this candidate — never silently coerced to 0. */
+  readonly matchCount: number | null;
   readonly verdict: WingReconVerdict;
 }
 
@@ -105,15 +133,38 @@ export interface WingReconTargetResult {
   readonly resolvedUnambiguously: boolean;
 }
 
+/** Is this a target we hold candidates for? Fail-closed screening, so an env-derived scope cannot slip through. */
+export function isWingReconTarget(value: unknown): value is WingReconTarget {
+  return typeof value === "string" && (WING_RECON_TARGETS as readonly string[]).includes(value);
+}
+
+/** Thrown for an unknown target rather than crashing on `undefined` — a refusal, not a TypeError. */
+export class UnknownWingReconTargetError extends Error {
+  constructor(readonly target: string) {
+    // The offending value is one of OUR identifiers or an operator-supplied scope string, never page content.
+    super(`UNKNOWN_RECON_TARGET: ${target}`);
+    this.name = "UnknownWingReconTargetError";
+  }
+}
+
+function screenTargets(targets: readonly unknown[]): WingReconTarget[] {
+  const seen = new Set<WingReconTarget>();
+  const out: WingReconTarget[] = [];
+  for (const t of targets) {
+    if (!isWingReconTarget(t)) throw new UnknownWingReconTargetError(String(t));
+    if (seen.has(t)) continue; // a repeated target would double the page work for no new information
+    seen.add(t);
+    out.push(t);
+  }
+  return out;
+}
+
 /** The probe descriptors for one or more targets, in the shape {@link buildFixedLabelProbeScript} consumes. */
 export function wingReconProbes(
   targets: readonly WingReconTarget[],
 ): { targetId: string; candidateQuery: string; exactText: string }[] {
-  const seen = new Set<WingReconTarget>();
   const out: { targetId: string; candidateQuery: string; exactText: string }[] = [];
-  for (const t of targets) {
-    if (seen.has(t)) continue; // a repeated target would double-count and inflate nothing useful
-    seen.add(t);
+  for (const t of screenTargets(targets)) {
     for (const c of WING_LABEL_RECON_CANDIDATES[t]) {
       out.push({ targetId: c.id, candidateQuery: c.candidateQuery, exactText: c.exactText });
     }
@@ -126,7 +177,13 @@ export function buildWingReconScript(targets: readonly WingReconTarget[]): strin
   return buildFixedLabelProbeScript(wingReconProbes(targets));
 }
 
+/**
+ * A count the page could not have legitimately produced (negative, fractional, NaN, absurd) is `INVALID_COUNT`,
+ * not `AMBIGUOUS`. Folding junk into a real verdict would let a broken reading masquerade as a measurement —
+ * and `NaN` in particular serializes to `null`, quietly breaking the "integers only" property of a record.
+ */
 function verdictFor(matchCount: number): WingReconVerdict {
+  if (!Number.isSafeInteger(matchCount) || matchCount < 0) return "INVALID_COUNT";
   if (matchCount === 1) return "UNIQUE";
   if (matchCount === 0) return "ABSENT";
   return "AMBIGUOUS";
@@ -135,22 +192,27 @@ function verdictFor(matchCount: number): WingReconVerdict {
 /**
  * Fold a raw `{ targetId, matchCount }[]` reading into per-target results.
  *
- * A candidate the page never reported is recorded as `ABSENT` rather than dropped: a silently missing row would
- * make a partial reading look like a complete one. Unknown ids in the input are ignored — they cannot belong to
- * any target, and inventing a target for them would be worse than saying nothing.
+ * A candidate the page never reported becomes `NOT_MEASURED` with a null count — never `0`/`ABSENT`, which
+ * would make a partial reading indistinguishable from a complete all-miss one. Unknown ids in the input are
+ * ignored: they belong to no target, and inventing one for them would be worse than saying nothing. A DUPLICATE
+ * id in the reading is `NOT_MEASURED` too — two different counts for one candidate means the reading is not
+ * trustworthy for it, and silently keeping the last would hide that.
  */
 export function interpretWingRecon(
   targets: readonly WingReconTarget[],
   raw: readonly { targetId: string; matchCount: number }[],
 ): WingReconTargetResult[] {
-  const byId = new Map(raw.map((r) => [r.targetId, r.matchCount]));
+  const byId = new Map<string, number>();
+  const conflicting = new Set<string>();
+  for (const r of raw) {
+    if (byId.has(r.targetId) && byId.get(r.targetId) !== r.matchCount) conflicting.add(r.targetId);
+    byId.set(r.targetId, r.matchCount);
+  }
   const out: WingReconTargetResult[] = [];
-  const seen = new Set<WingReconTarget>();
-  for (const target of targets) {
-    if (seen.has(target)) continue;
-    seen.add(target);
-    const candidates = WING_LABEL_RECON_CANDIDATES[target].map((c) => {
-      const matchCount = byId.get(c.id) ?? 0;
+  for (const target of screenTargets(targets)) {
+    const candidates = WING_LABEL_RECON_CANDIDATES[target].map((c): WingReconCandidateResult => {
+      if (!byId.has(c.id) || conflicting.has(c.id)) return { id: c.id, matchCount: null, verdict: "NOT_MEASURED" };
+      const matchCount = byId.get(c.id)!;
       return { id: c.id, matchCount, verdict: verdictFor(matchCount) };
     });
     const uniqueCandidateIds = candidates.filter((c) => c.verdict === "UNIQUE").map((c) => c.id);
@@ -158,7 +220,10 @@ export function interpretWingRecon(
       target,
       candidates,
       uniqueCandidateIds,
-      resolvedUnambiguously: uniqueCandidateIds.length === 1,
+      // A target with an unmeasured candidate is NOT resolved even if exactly one other candidate was unique:
+      // the unmeasured one might have resolved too, which is the two-unique ambiguity in disguise.
+      resolvedUnambiguously:
+        uniqueCandidateIds.length === 1 && candidates.every((c) => c.verdict !== "NOT_MEASURED"),
     });
   }
   return out;

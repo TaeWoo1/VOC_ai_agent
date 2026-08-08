@@ -222,41 +222,69 @@ export function observeFrom(urlCategory: WingUrlCategory, census: WingStructural
  * The two real WING captures this module's honesty rests on, recorded as DATA so the comparison is checkable
  * rather than a claim in prose. Sanitized throughout: counts, booleans, enums and opaque signatures only.
  *
- * `bucketsRecorded: false` on the issued reading is the single most important field here. Those captures
- * predate the census buckets being written down, so the issued-page side of every candidate discriminator is
- * genuinely unknown — not zero, not absent: **unmeasured**. Any predicate built over them today would be
- * inventing that side.
+ * **`bucketsRetained: false` means NOT TRANSCRIBED, not "not measured" — and the distinction is the point.**
+ * The first version of this constant said `bucketsRecorded`, and the doc claimed the issued-page buckets were
+ * "genuinely unknown — unmeasured". Review checked the code at the capture commit and that was **wrong**: the
+ * census already emitted `formCount`, `editableTextInputCount`, `readonlyFieldCount` and
+ * `submitAffordancePresent` on 2026-08-06, and the probe CLI printed the entire observation. Those numbers
+ * existed; nobody wrote them into a doc, and the run output is not in the repository.
+ *
+ * So the honest statement is: the issued-page side is **not available here**, and it may be **recoverable
+ * without a live run** — from operator scrollback or a local run log — which should be checked before any
+ * grant is spent re-measuring it. What has not changed is the consequence for code: a predicate written today
+ * would still be inventing that side, because the numbers are not in hand.
  */
 export interface WingRealEvidence {
   readonly capturedOn: string;
-  readonly recordId: string;
+  /**
+   * The sanitized record id(s) this evidence came from. Plural because the issued-page row is a UNION of two
+   * runs with different approved scopes — see {@link WingRealEvidence.targetMatchCountSource}.
+   */
+  readonly recordIds: readonly string[];
   readonly surface: "already_issued_page" | "no_key_issuance_form";
   /** How the surface identity is known. The no-key form is operator-attested, not agent-derived. */
   readonly surfaceAttestation: "OPERATOR_CONFIRMED" | "AGENT_DERIVED";
   readonly pageCategory: WingPageCategory;
   readonly credentialAnchorPresent: boolean;
   readonly openApiMarkerPresent: boolean;
-  /** Whether the structural count buckets were written down at capture time. */
-  readonly bucketsRecorded: boolean;
+  /** Whether the structural count buckets were TRANSCRIBED into this record (not whether they were measured). */
+  readonly bucketsRetained: boolean;
   readonly buckets: Readonly<Partial<Pick<WingSignals,
     "formCountBucket" | "editableTextInputCountBucket" | "readonlyFieldCountBucket" |
     "listLikeContainerCountBucket" | "submitAffordancePresent" | "markerScanTruncated">>>;
-  /** Per-target fixed-label match counts recorded on this surface. Absent key = target not in that run's scope. */
+  /** Per-target fixed-label match counts on this surface. Absent key = target not in that run's approved scope. */
   readonly targetMatchCounts: Readonly<Partial<Record<WingProbeTargetName, number>>>;
+  /**
+   * Which run each target count came from. Required because a reader auditing one record id must not be misled
+   * into looking for counts that a differently-scoped run produced.
+   */
+  readonly targetMatchCountSource: Readonly<Partial<Record<WingProbeTargetName, string>>>;
 }
 
-/** The already-issued page (2026-08-06 `c22cf38` + the 2026-08-07 delete-selector retry). Buckets NOT recorded. */
+/**
+ * The already-issued page. A UNION of two runs: the 2026-08-06 five-target calibration (at commit `c22cf38`)
+ * and the 2026-08-07 delete-only retry (`wingrec_c01e673ebc61`, approved scope `["delete"]`). Buckets were
+ * measured by both and transcribed by neither — see {@link WingRealEvidence} on what that does and does not mean.
+ */
 export const WING_REAL_EVIDENCE_ISSUED_2026_08_07: WingRealEvidence = Object.freeze({
   capturedOn: "2026-08-07",
-  recordId: "wingrec_c01e673ebc61",
+  recordIds: Object.freeze(["c22cf38-capture-2026-08-06", "wingrec_c01e673ebc61"]),
   surface: "already_issued_page",
   surfaceAttestation: "OPERATOR_CONFIRMED",
   pageCategory: "open_api_issuance",
   credentialAnchorPresent: true,
   openApiMarkerPresent: false,
-  bucketsRecorded: false,
+  bucketsRetained: false,
   buckets: Object.freeze({}),
   targetMatchCounts: Object.freeze({ self_dev: 0, vendor_info: 9, call_ip: 0, issue: 1, credentials: 1, delete: 1 }),
+  targetMatchCountSource: Object.freeze({
+    self_dev: "c22cf38-capture-2026-08-06",
+    vendor_info: "c22cf38-capture-2026-08-06",
+    call_ip: "c22cf38-capture-2026-08-06",
+    issue: "c22cf38-capture-2026-08-06",
+    credentials: "c22cf38-capture-2026-08-06",
+    delete: "wingrec_c01e673ebc61",
+  }),
 });
 
 /**
@@ -266,13 +294,13 @@ export const WING_REAL_EVIDENCE_ISSUED_2026_08_07: WingRealEvidence = Object.fre
  */
 export const WING_REAL_EVIDENCE_NO_KEY_2026_08_08: WingRealEvidence = Object.freeze({
   capturedOn: "2026-08-08",
-  recordId: "wingrec_b554c86c0f0b",
+  recordIds: Object.freeze(["wingrec_b554c86c0f0b"]),
   surface: "no_key_issuance_form",
   surfaceAttestation: "OPERATOR_CONFIRMED",
   pageCategory: "open_api_issuance",
   credentialAnchorPresent: true,
   openApiMarkerPresent: false,
-  bucketsRecorded: true,
+  bucketsRetained: true,
   buckets: Object.freeze({
     formCountBucket: "few",
     editableTextInputCountBucket: "many",
@@ -282,6 +310,12 @@ export const WING_REAL_EVIDENCE_NO_KEY_2026_08_08: WingRealEvidence = Object.fre
     markerScanTruncated: false,
   }),
   targetMatchCounts: Object.freeze({ self_dev: 0, vendor_info: 8, call_ip: 0, issue: 1 }),
+  targetMatchCountSource: Object.freeze({
+    self_dev: "wingrec_b554c86c0f0b",
+    vendor_info: "wingrec_b554c86c0f0b",
+    call_ip: "wingrec_b554c86c0f0b",
+    issue: "wingrec_b554c86c0f0b",
+  }),
 });
 
 /* ────────────────────────────── issued-state verdict (post-delete evidence) ────────────────────────────── */
@@ -428,7 +462,23 @@ export function wingDeletionEvidenceFrom(readings: readonly (WingObservation | n
   reason: WingDeletionEvidenceReason;
   readingCount: number;
 } {
-  const states = readings.map((r) => wingIssuedStateFrom(r).state);
+  return corroborationVerdictFor(readings.map((r) => wingIssuedStateFrom(r).state));
+}
+
+/**
+ * The corroboration RULE itself, over already-derived states. Split out from {@link wingDeletionEvidenceFrom}
+ * for one reason: since `wingIssuedStateFrom` can no longer emit `not_issued`, the rule's `confirmedNotIssued`
+ * branch is unreachable through the public entrypoint — review confirmed that hardcoding `allNotIssued = false`
+ * passed the entire suite. A rule nothing can execute is a rule a refactor can delete silently.
+ *
+ * Exported so the rule is tested directly and stays correct for the day a real discriminator restores the
+ * input. Callers doing evidence work should use {@link wingDeletionEvidenceFrom}, not this.
+ */
+export function corroborationVerdictFor(states: readonly WingIssuedState[]): {
+  confirmedNotIssued: boolean;
+  reason: WingDeletionEvidenceReason;
+  readingCount: number;
+} {
   if (states.length < 2) {
     return { confirmedNotIssued: false, reason: "SINGLE_READING_ONLY", readingCount: states.length };
   }
