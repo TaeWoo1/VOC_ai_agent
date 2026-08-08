@@ -261,7 +261,7 @@ describe("the shell harness approves exactly what the runtime declares", () => {
 
   it("checks no field the runtime does not declare (a stale key would silently never match)", () => {
     const declared = new Set(Object.keys(COUPANG_WING_ISSUANCE_REVEAL_ACTION));
-    for (const m of verifier.matchAll(/^\s+"([A-Za-z]+):/gm)) {
+    for (const m of verifier.matchAll(/^\s+"([A-Za-z][A-Za-z0-9_]*):/gm)) {
       expect(declared, `the harness verifies an unknown field ${m[1]}`).toContain(m[1]);
     }
   });
@@ -283,18 +283,19 @@ describe("the shell harness approves exactly what the runtime declares", () => {
     expect(preflight).toContain("Refusing to display it for approval");
   });
 
-  it("the Korean on-screen imperative shown before the grant is the copy the seller will actually read", () => {
-    // The preflight quotes the WING-page copy verbatim. If the driver's label is reworded and the preflight is
-    // not, the operator grants against a sentence nobody will see — so the fragments must be substrings of the
-    // real label, not a paraphrase of it.
-    for (const fragment of [
-      "강조 표시된 '발급' 버튼을 직접 눌러 주세요.",
-      "화면이 열리면 그대로 두고 더 진행하지 마세요.",
-      "'확인'(최종 발급)은 절대 누르지 마세요.",
-    ]) {
-      expect(preflight, `the preflight must show: ${fragment}`).toContain(fragment);
-      expect(WING_REVEAL_CHECKPOINT_LABEL, `the checkpoint label must contain: ${fragment}`).toContain(fragment);
-    }
+  it("the on-page copy shown before the grant EQUALS the label the seller will read — not an extract of it", () => {
+    // Substring containment in one direction was not enough, and review showed why: the preflight quoted two of
+    // the label's five sentences under a "verbatim" header, silently dropping the "not confirmed" hedge, the
+    // Korean statement of keyCreationRuledOut, and "read the screen before you signal". A containment check
+    // cannot see an omission — nor a sentence ADDED to the on-page panel that the preflight never shows.
+    const block = preflight.slice(
+      preflight.indexOf("# CHECKPOINT-COPY-BEGIN"),
+      preflight.indexOf("# CHECKPOINT-COPY-END"),
+    );
+    expect(block, "the copy block markers must exist").toContain("echo");
+    const shown = [...block.matchAll(/^echo "(.*)"$/gm)].map((m) => m[1]!.trim()).join(" ");
+    const collapse = (s: string): string => s.replace(/\s+/g, " ").trim();
+    expect(collapse(shown)).toBe(collapse(WING_REVEAL_CHECKPOINT_LABEL));
   });
 
   it("the reveal harness has a selfcheck, and it is executable", () => {

@@ -50,6 +50,7 @@ import {
   resolveWingUrl,
   screenWingUrl,
   type WingObservation,
+  type WingUrlCategory,
 } from "./coupang-wing-classifier";
 import { verifyRepoIdentity } from "./repo-identity";
 import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from "./live-run-approval";
@@ -147,6 +148,11 @@ export interface SignalWaitDeps {
   aborted(): boolean;
   maxTicks?: number;
   pollMs?: number;
+  /**
+   * Consume a sentinel once it has fired. A ready file left in place is not inert: if the two waits ever end up
+   * watching the same path, the second returns on tick 0 and the human checkpoint is skipped in silence.
+   */
+  remove?(path: string): void;
 }
 
 /**
@@ -164,8 +170,11 @@ export async function waitForSignal(
   abortPath: string,
   deps: SignalWaitDeps,
 ): Promise<RevealSignal> {
-  const pollMs = deps.pollMs ?? POLL_MS;
-  const maxTicks = deps.maxTicks ?? Math.ceil(WAIT_TIMEOUT_MS / pollMs);
+  // Clamped, both of them. `pollMs: 0` makes the derived budget `Math.ceil(Infinity)` and the loop never ends —
+  // a wait with no deadline on the seam that decides when SellerOps reads a live page. A negative one makes the
+  // budget negative, so the body never runs and it returns `timeout` without ever checking abort or the target.
+  const pollMs = Math.max(1, deps.pollMs ?? POLL_MS);
+  const maxTicks = Math.max(1, deps.maxTicks ?? Math.ceil(WAIT_TIMEOUT_MS / pollMs));
   for (let i = 0; i < maxTicks; i++) {
     if (deps.aborted() || deps.exists(abortPath)) return "abort";
     if (deps.exists(target)) return kind;
@@ -206,6 +215,15 @@ export interface RevealWalkIo {
   note(line: string): void;
   /** The single sanitized record (stdout). Called at most once, and only on `OBSERVED`. */
   emit(record: Record<string, unknown>): void;
+  /**
+   * How the operator signals the press — printed AT the checkpoint, never before it.
+   *
+   * It is a field rather than a line `main()` prints up front because of where the original refactor put it:
+   * announcing the completion sentinel before the readiness wait invites the operator to create it early, and a
+   * pressed sentinel that already exists makes the checkpoint wait a no-op. The human checkpoint would then be
+   * skipped in silence, with SellerOps observing a page nobody pressed.
+   */
+  pressSignalHint: string;
 }
 
 export interface RevealWalkReport {
@@ -213,10 +231,18 @@ export interface RevealWalkReport {
   result: WingRevealResult | null;
   /**
    * True ONLY for the one outcome this run was built to expect. Everything else — including
-   * `CREDENTIAL_SURFACE_APPEARED` — is false, and false never advances anything: the walk stops either way. It
-   * exists so a caller cannot read "the walk completed" as "the expected thing happened".
+   * `CREDENTIAL_SURFACE_APPEARED` — is false, and false never advances anything: the walk stops either way.
+   *
+   * `main()` MUST read this: a process that exits 0 on every outcome is how "the walk completed" comes to read
+   * as "the expected thing happened" to anything downstream of the terminal.
    */
   outcomeAsExpected: boolean;
+  /**
+   * True when the overlay clear threw on the way out. The original code let that failure propagate and exit
+   * nonzero; swallowing it silently would leave SellerOps' panel and its `data-aw-target` annotation on the
+   * seller's live WING DOM with no signal at all, so it is reported instead of discarded.
+   */
+  cleanupFailed: boolean;
 }
 
 /**
@@ -231,9 +257,19 @@ export interface RevealWalkReport {
 export async function runRevealWalk(
   driver: RevealWalkDriverLike,
   io: RevealWalkIo,
-  urlCategory: string,
+  /**
+   * The COARSE host category, never a URL. Typed as the enum rather than `string`, because as `string` a caller
+   * passing the raw WING URL typechecked — and it would print verbatim into the sanitized stdout record.
+   */
+  urlCategory: WingUrlCategory,
 ): Promise<RevealWalkReport> {
-  const stopped = (stop: RevealWalkStop): RevealWalkReport => ({ stop, result: null, outcomeAsExpected: false });
+  // Held by reference so the `finally` can annotate the very object being returned — the cleanup runs AFTER the
+  // return value is chosen, and its failure is part of what the caller must know.
+  let report: RevealWalkReport | null = null;
+  const stopped = (stop: RevealWalkStop): RevealWalkReport => {
+    report = { stop, result: null, outcomeAsExpected: false, cleanupFailed: false };
+    return report;
+  };
   try {
     if ((await io.waitFor("ready")) !== "ready") {
       io.note("Aborted or timed out before the checkpoint. Nothing was highlighted.");
@@ -256,21 +292,32 @@ export async function runRevealWalk(
     }
     io.note("");
     io.note(`CHECKPOINT — ${WING_REVEAL_CHECKPOINT_LABEL}`);
+    // The completion sentinel is disclosed HERE and nowhere earlier. Announced before the readiness wait, it
+    // invites the operator to create it in advance — and a pressed sentinel that already exists makes the wait
+    // below return on tick 0, skipping the human checkpoint in silence.
+    io.note(`  Press 발급 YOURSELF, then signal that you pressed it:  ${io.pressSignalHint}`);
     if ((await io.waitFor("pressed")) !== "pressed") {
       io.note("Aborted or timed out at the checkpoint. Clearing the overlay; no observation taken.");
       return stopped("ABORTED_AT_CHECKPOINT");
     }
     const result = await driver.observeRevealOutcome();
+    const asExpected = result.outcome === "CONFIGURATION_SURFACE_SUSPECTED";
     io.note("");
     io.note("Reveal observation complete. 이 창은 곧 닫힙니다 — WING에서 더 진행하지 마세요.");
-    // The one outcome that suggests the press may have done more than reveal a form gets a loud, separate line.
-    // It is a STOP either way — the walk observes once and returns — but a reader scanning stderr must not have
-    // to notice an enum buried in the JSON to learn that the keys-displayed surface appeared.
-    if (result.outcome === "CREDENTIAL_SURFACE_APPEARED") {
+    // EVERY unexpected outcome gets a STOP block, not only the keys-displayed one. Six of the seven outcomes are
+    // unexpected, and the docstring's promise that an unrecognized outcome "stops, never as success" is worth
+    // nothing if five of them print the same "observation complete" line a good run prints.
+    if (!asExpected) {
       io.note("");
-      io.note("⚠ UNEXPECTED OUTCOME — the surface became the keys-displayed category (CREDENTIAL_SURFACE_APPEARED).");
-      io.note("  This is NOT proof a key was created, and SellerOps cannot determine that either way. STOP here:");
-      io.note("  WING에서 더 진행하지 마세요. 화면을 직접 확인해 주세요.");
+      io.note(`⚠ UNEXPECTED OUTCOME — ${result.outcome}. This run did NOT see what it was built to expect.`);
+      io.note("  It is not a failure to investigate away: it is the evidence. Do not re-run, and do not continue");
+      io.note("  in WING. 화면을 직접 확인하고 WING에서 더 진행하지 마세요.");
+      // The one outcome that suggests the press may have done more than reveal a form says so explicitly — a
+      // reader must not have to notice an enum buried in the JSON to learn the keys-displayed surface appeared.
+      if (result.outcome === "CREDENTIAL_SURFACE_APPEARED") {
+        io.note("  The surface became the keys-displayed category. That is NOT proof a key was created, and");
+        io.note("  SellerOps cannot determine it either way — only you, looking at the screen, can.");
+      }
     }
     io.emit({
       urlCategory,
@@ -291,17 +338,47 @@ export async function runRevealWalk(
       changedSignalCount: result.changedSignals.length,
       keyCreationRuledOut: result.keyCreationRuledOut,
     });
-    return {
-      stop: "OBSERVED",
-      result,
-      outcomeAsExpected: result.outcome === "CONFIGURATION_SURFACE_SUSPECTED",
-    };
+    report = { stop: "OBSERVED", result, outcomeAsExpected: asExpected, cleanupFailed: false };
+    return report;
   } finally {
     // EVERY exit path clears the overlay, including the fail-closed refusals above and a thrown observation —
     // leaving SellerOps' panel and the `data-aw-target` annotation on the seller's live marketplace DOM is the
     // defect that review already caught once inside the driver.
-    await driver.cleanup().catch(() => undefined);
+    //
+    // A failure here is RECORDED, not swallowed. The original let it propagate and exit nonzero; discarding it
+    // would leave the panel on the seller's live page with no signal anywhere.
+    await driver.cleanup().catch(() => {
+      if (report) report.cleanupFailed = true;
+      io.note("⚠ The overlay could not be cleared. SellerOps' panel may still be on the WING page — reload it.");
+    });
   }
+}
+
+/**
+ * Wire the walk's IO to the real filesystem sentinels and the console. Exported so a test can prove the two
+ * waits observe DIFFERENT paths: the mapping from signal kind to sentinel file is the one place `waitForSignal`'s
+ * label and its target are re-joined, and getting it wrong (both waits on the ready path) makes the checkpoint
+ * wait return on tick 0 — SellerOps would observe a page nobody pressed, and exit 0.
+ */
+export function makeRevealIo(
+  paths: { readyPath: string; donePath: string; abortPath: string },
+  deps: SignalWaitDeps,
+): RevealWalkIo {
+  return {
+    waitFor: async (kind) => {
+      const target = kind === "ready" ? paths.readyPath : paths.donePath;
+      const signal = await waitForSignal(target, kind, paths.abortPath, deps);
+      // Consume it. Leaving the ready file behind is what makes the "both waits watch the same path" mistake
+      // fail OPEN rather than time out.
+      if (signal === kind) deps.remove?.(target);
+      return signal;
+    },
+    note: (line) => console.error(line),
+    // SANITIZED record → stdout. Enums / booleans / buckets / signal NAMES only — never a selector, value, PII,
+    // raw DOM/HTML, screenshot, or raw URL (the URL is reduced to a host category).
+    emit: (record) => console.log(JSON.stringify(record, null, 2)),
+    pressSignalHint: paths.donePath,
+  };
 }
 
 function banner(): void {
@@ -372,14 +449,9 @@ async function main(): Promise<void> {
     exists: existsSync,
     sleep,
     aborted: () => abortFlag.v,
+    remove: removeSentinel,
   };
-  const io: RevealWalkIo = {
-    waitFor: (kind) => waitForSignal(kind === "ready" ? readyPath : donePath, kind, abortPath, waitDeps),
-    note: (line) => console.error(line),
-    // SANITIZED record → stdout. Enums / booleans / buckets / signal NAMES only — never a selector, value, PII,
-    // raw DOM/HTML, screenshot, or raw URL (the URL is reduced to a host category).
-    emit: (record) => console.log(JSON.stringify(record, null, 2)),
-  };
+  const io = makeRevealIo({ readyPath, donePath, abortPath }, waitDeps);
 
   const ctx: BrowserContext = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
   const entry = (ctx.pages()[0] ?? (await ctx.newPage())) as Page;
@@ -389,10 +461,12 @@ async function main(): Promise<void> {
     console.error("Navigate MANUALLY to the WING open-API screen in the opened window, then signal readiness:");
     console.error(`       ${readyPath}`);
     console.error(`     abort: ${abortPath}`);
-    console.error("");
-    console.error("At the checkpoint, press 발급 YOURSELF, then signal that you pressed it:");
-    console.error(`       ${donePath}`);
-    await runRevealWalk(driver, io, screen.urlCategory);
+    // The COMPLETION sentinel is deliberately NOT announced here — the walk discloses it at the checkpoint. See
+    // `RevealWalkIo.pressSignalHint`.
+    const report = await runRevealWalk(driver, io, screen.urlCategory);
+    // The report is READ. A process that exits 0 whatever happened is how "the walk completed" comes to read as
+    // "the expected thing happened" to anything downstream of a human watching the terminal.
+    process.exitCode = report.cleanupFailed ? 8 : report.stop !== "OBSERVED" ? 7 : report.outcomeAsExpected ? 0 : 6;
   } finally {
     for (const p of [readyPath, donePath, abortPath]) removeSentinel(p);
     process.removeListener("SIGINT", onSigint);

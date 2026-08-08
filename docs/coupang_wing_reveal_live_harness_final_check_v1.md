@@ -1,8 +1,8 @@
 # Coupang WING Reveal Live Harness Final Check v1
 
-> **Status:** offline. Closes the two coverage gaps the reveal unit stated about itself. No product flow,
-> selector, stage identifier, or FE tutorial changes; no live run, no browser, no marketplace contact. Nothing
-> pressed, no key issued.
+> **Status:** offline. Closes the two coverage gaps the reveal unit stated about itself. No selector, stage
+> identifier, guided-tutorial or FE change; no live run, no browser, no marketplace contact. Nothing pressed, no
+> key issued. It **does** change operator-visible CLI behaviour — see "Behaviour that changed" below.
 
 ## What was untested, and why it mattered
 
@@ -49,9 +49,11 @@ Writing the cases found them; neither was visible from reading the PASS path.
 
 ### The Korean imperative reaches the operator before they grant
 
-The preflight now quotes the WING-page copy verbatim, and a TS test asserts each fragment is a **substring of
-`WING_REVEAL_CHECKPOINT_LABEL`** — so a reworded label cannot leave the preflight promising a sentence nobody
-will see.
+The preflight now reproduces the WING-page copy **complete**, and a TS test asserts the block **equals**
+`WING_REVEAL_CHECKPOINT_LABEL`. Equality, not containment: the first version showed two of the label's five
+sentences under a "verbatim" header — dropping the "not confirmed" hedge, the Korean statement of
+`keyCreationRuledOut`, and "read the screen before you signal" — and a substring check can see neither an
+omission nor a sentence added to the on-page panel that the preflight never shows.
 
 ## Goal 2 — reveal CLI testability
 
@@ -59,21 +61,44 @@ will see.
 dependency-injected. `main()` stays unexported and is now wiring only: launch, hand over, tear down.
 
 Browser launch is blocked structurally, not by convention — the walk takes a **five-method driver interface**
-with nothing that can navigate, click, type, or read a value, so a test never needs Playwright and a future
-edit cannot quietly widen it. A source guard pins that `main()` does not re-implement any walk decision.
+with nothing that can navigate, click, type, or read a value, so a test never needs Playwright. A source guard
+pins that the walk calls only those five methods (an allowlist; a forbidden-token denylist cannot see a method
+that does not exist yet) and that `main()` re-implements no walk decision.
 
-One shape change worth naming: `waitForSignal` takes the signal's **kind** as a parameter. The original inferred
-it by comparing the target path to `readyPath` — under which any path that is not the ready path reports as a
-completed press.
+`waitForSignal` takes the signal's **kind** as a parameter rather than deriving it from the target path. Stated
+plainly, because review corrected an earlier version of this paragraph that called it a strict improvement: the
+original derivation was over a closed two-call-site set and **failed closed** under the mis-wiring that matters.
+Decoupling the label from the file is what makes the walk testable, and it moved the risk rather than removing
+it — so `makeRevealIo`, the one place the two are re-joined, is exported and tested directly, and a fired
+sentinel is now consumed so the "both waits watch the ready file" mistake times out instead of skipping the
+human checkpoint.
 
 Tested directly: ready · completion · abort (file and SIGINT flag) · abort winning a same-tick race · timeout ·
 tick budget · every refusal stopping before the next step · cleanup on **every** exit path including a thrown
 observation · the checkpoint copy preceding the press wait · `credential_shown` reported loudly and never as
 expected · a failed overlay clear passed through rather than rounded up.
 
-`CREDENTIAL_SURFACE_APPEARED` now gets an explicit stderr STOP block in Korean and English. It was already a
-stop — the walk observes once and returns whatever happens — but the operator had to notice an enum inside the
-JSON to learn the keys-displayed surface had appeared.
+## Behaviour that changed
+
+Three operator-visible changes, all from review findings. Listing them because "closes a testability gap" is not
+a licence to move a live-run guard silently.
+
+1. **The completion sentinel is disclosed at the checkpoint, not at startup.** The first refactor announced it
+   before the readiness wait, which invites the operator to create it early — and a pressed sentinel that
+   already exists makes the checkpoint wait return on tick 0, skipping the human checkpoint in silence.
+2. **Every unexpected outcome gets a STOP block**, not just `CREDENTIAL_SURFACE_APPEARED`. Five of the six
+   printed the same "observation complete" line a good run prints, while the docstring promised an unrecognized
+   outcome "stops, never as success".
+3. **The exit code distinguishes the outcome classes** — expected `0`, unexpected `6`, nothing observed `7`,
+   failed overlay clear `8`. `main()` had discarded the report and exited 0 whatever happened, which is how "the
+   walk completed" comes to read as "the expected thing happened" to anything downstream of the terminal. The
+   failed-clear code exists because the original propagated that error and exited nonzero; the refactor had
+   swallowed it, leaving SellerOps' panel on the seller's live WING DOM with no signal at all.
+
+Two fail-open shapes were fixed alongside them: `waitForSignal` clamps its poll interval (`pollMs: 0` made the
+derived budget `Infinity` — a wait with no deadline; a negative one skipped the loop body entirely, returning
+`timeout` without ever checking abort or the target), and `urlCategory` is typed as the enum rather than
+`string`, under which passing the raw WING URL typechecked and printed it into the sanitized stdout record.
 
 ## Not in this unit
 

@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  makeRevealIo,
   REVEAL_WALK_STOPS,
   runRevealWalk,
   waitForSignal,
@@ -130,6 +131,7 @@ function harness(o: FakeOpts = {}) {
       order.push("emit");
       emitted.push(record);
     },
+    pressSignalHint: "/status/run-coupang-wing-reveal-live.pressed",
   };
 
   return { driver, io, order, notes, emitted };
@@ -388,11 +390,37 @@ describe("runRevealWalk — an unexpected outcome is a STOP, never a success", (
     }
   });
 
-  it("the loud warning fires for credential_shown and for NOTHING else", async () => {
-    for (const outcome of ["SURFACE_UNCHANGED", "OFF_OPEN_API_SURFACE", "CONFIGURATION_SURFACE_SUSPECTED"] as const) {
+  it("EVERY unexpected outcome gets a STOP block — not only the keys-displayed one", async () => {
+    // Review's point: five of the six unexpected outcomes printed the same "observation complete" line a good
+    // run prints, while the docstring promised an unrecognized outcome "stops, never as success".
+    for (const outcome of [
+      "SURFACE_UNCHANGED",
+      "SURFACE_CHANGED_UNRECOGNIZED",
+      "OFF_OPEN_API_SURFACE",
+      "OVERLAY_NOT_CLEARED",
+      "NOT_OBSERVED",
+      "CREDENTIAL_SURFACE_APPEARED",
+    ] as const) {
       const { driver, io, notes } = harness({ result: result({ outcome }) });
       await runRevealWalk(driver, io, "wing_host");
-      expect(noteText(notes), outcome).not.toContain("UNEXPECTED OUTCOME");
+      const text = noteText(notes);
+      expect(text, outcome).toContain("UNEXPECTED OUTCOME");
+      expect(text, outcome).toContain(outcome);
+      expect(text, outcome).toContain("WING에서 더 진행하지 마세요");
+    }
+  });
+
+  it("the EXPECTED outcome gets no STOP block", async () => {
+    const { driver, io, notes } = harness({ result: result({ outcome: "CONFIGURATION_SURFACE_SUSPECTED" }) });
+    await runRevealWalk(driver, io, "wing_host");
+    expect(noteText(notes)).not.toContain("UNEXPECTED OUTCOME");
+  });
+
+  it("only the keys-displayed outcome gets the extra key-creation sentences", async () => {
+    for (const outcome of ["SURFACE_UNCHANGED", "OFF_OPEN_API_SURFACE"] as const) {
+      const { driver, io, notes } = harness({ result: result({ outcome }) });
+      await runRevealWalk(driver, io, "wing_host");
+      expect(noteText(notes), outcome).not.toContain("keys-displayed category");
     }
   });
 
@@ -422,7 +450,6 @@ describe("runRevealWalk — an unexpected outcome is a STOP, never a success", (
 
 describe("the walk cannot reach a browser, and importing the module runs nothing", () => {
   const src = readFileSync(SRC, "utf8");
-  const walk = src.slice(src.indexOf("export async function runRevealWalk("), src.indexOf("/* ────────────────────────────── sentinels"));
 
   it("the walk takes a DRIVER, so a test never needs Playwright", () => {
     // The proof is the signature: `RevealWalkDriverLike` has five methods, none of which can navigate, click,
@@ -434,15 +461,36 @@ describe("the walk cannot reach a browser, and importing the module runs nothing
   it("the walk body launches nothing and navigates nowhere", () => {
     const body = src.slice(src.indexOf("export async function runRevealWalk("));
     const fn = body.slice(0, body.indexOf("\n}\n"));
+    expect(fn.length, "the walk body must actually have been sliced").toBeGreaterThan(200);
     for (const forbidden of ["launchNaverContext", "newPage", "goto(", "loadConfig", "existsSync", "process.argv"]) {
       expect(fn, `runRevealWalk must not reference ${forbidden}`).not.toContain(forbidden);
     }
-    expect(walk.length + fn.length).toBeGreaterThan(0);
+  });
+
+  it("the walk calls ONLY the five driver methods the interface declares", () => {
+    // The forbidden-token list is a denylist, and a denylist cannot see a method that does not exist yet: review
+    // showed a seventh interface method named e.g. `pressIssueControl()` would pass every check here. So the
+    // allowlist is asserted instead — the set of `driver.` calls in the walk must be exactly the interface.
+    const iface = src.slice(src.indexOf("export interface RevealWalkDriverLike {"), src.indexOf("/** Where the walk stopped"));
+    const declared = new Set([...iface.matchAll(/^\s{2}([a-zA-Z]+)\(/gm)].map((m) => m[1]!));
+    expect(declared).toEqual(
+      new Set(["classifyInitialSurface", "probeIssueMatch", "highlightIssueCheckpoint", "observeRevealOutcome", "cleanup"]),
+    );
+    const body = src.slice(src.indexOf("export async function runRevealWalk("));
+    const fn = body.slice(0, body.indexOf("\n}\n"));
+    for (const m of fn.matchAll(/driver\.([a-zA-Z]+)\(/g)) {
+      expect(declared, `the walk calls an undeclared driver method: ${m[1]}`).toContain(m[1]);
+    }
   });
 
   it("main() is NOT exported — the only way to launch Chrome is to invoke the file", () => {
     expect(src).toContain("async function main(): Promise<void>");
     expect(src).not.toContain("export async function main");
+  });
+
+  it("the record's urlCategory is the ENUM type, so a raw URL cannot be passed", () => {
+    expect(src).toContain("urlCategory: WingUrlCategory,");
+    expect(src).not.toContain("urlCategory: string,");
   });
 
   it("importing this module launches nothing (the direct-invocation guard)", async () => {
@@ -455,11 +503,153 @@ describe("the walk cannot reach a browser, and importing the module runs nothing
 
   it("main() is wiring only — it hands the walk its dependencies rather than re-implementing them", () => {
     const body = src.slice(src.indexOf("async function main(): Promise<void>"));
-    expect(body).toContain("await runRevealWalk(driver, io,");
-    expect(body).toContain("waitForSignal(");
+    // The COARSE category, never the URL. As a bare `string` parameter, `runRevealWalk(driver, io, url)`
+    // typechecked and printed the raw WING URL into the sanitized stdout record; the parameter is now the enum,
+    // and this pins the call site too.
+    expect(body).toContain("await runRevealWalk(driver, io, screen.urlCategory)");
+    expect(body).toContain("makeRevealIo(");
     // The refusal/observation decisions must live in the tested walk, not be duplicated back into main().
     for (const decision of ["classifyInitialSurface", "probeIssueMatch", "observeRevealOutcome"]) {
       expect(body, `${decision} must not be re-implemented in main()`).not.toContain(decision);
     }
+  });
+});
+
+/* ────────────────────────────── the wiring itself ────────────────────────────── */
+
+/**
+ * `makeRevealIo` is the ONE place `waitForSignal`'s label and its target file are re-joined, and it had no test:
+ * the walk test injects `io.waitFor` wholesale, and the source guard only checked that the call site existed.
+ *
+ * Review demonstrated what that costs. Point both waits at `readyPath` — a one-token edit that typechecks and
+ * passed the entire suite — and because the ready sentinel was never consumed, the checkpoint wait returns on
+ * tick 0. SellerOps highlights 발급 and immediately takes its "post-press" observation of a page nobody pressed,
+ * emits the record, and exits 0. The human checkpoint is skipped in silence.
+ */
+describe("makeRevealIo — the two waits must watch DIFFERENT files", () => {
+  function ioFor(present: string[]) {
+    const files = new Set(present);
+    const removed: string[] = [];
+    const io = makeRevealIo(
+      { readyPath: "/s/ready", donePath: "/s/pressed", abortPath: "/s/abort" },
+      {
+        exists: (p) => files.has(p),
+        sleep: async () => undefined,
+        aborted: () => false,
+        maxTicks: 3,
+        pollMs: 1,
+        remove: (p) => {
+          files.delete(p);
+          removed.push(p);
+        },
+      },
+    );
+    return { io, removed, files };
+  }
+
+  it("the readiness wait watches the ready file", async () => {
+    expect(await ioFor(["/s/ready"]).io.waitFor("ready")).toBe("ready");
+  });
+
+  it("the press wait watches the PRESSED file — a ready sentinel does not satisfy it", async () => {
+    // The mutation this kills: `waitForSignal(readyPath, kind, …)` for both.
+    expect(await ioFor(["/s/ready"]).io.waitFor("pressed")).toBe("timeout");
+    expect(await ioFor(["/s/pressed"]).io.waitFor("pressed")).toBe("pressed");
+  });
+
+  it("the readiness wait is not satisfied by the pressed file either", async () => {
+    expect(await ioFor(["/s/pressed"]).io.waitFor("ready")).toBe("timeout");
+  });
+
+  it("a fired sentinel is CONSUMED, so it cannot satisfy the next wait", async () => {
+    const { io, removed, files } = ioFor(["/s/ready", "/s/pressed"]);
+    expect(await io.waitFor("ready")).toBe("ready");
+    expect(removed).toEqual(["/s/ready"]);
+    expect(files.has("/s/ready")).toBe(false);
+  });
+
+  it("an abort is not consumed — it must keep aborting", async () => {
+    const { io, removed } = ioFor(["/s/abort"]);
+    expect(await io.waitFor("ready")).toBe("abort");
+    expect(removed).toEqual([]);
+  });
+
+  it("the press hint names the completion sentinel, so the walk can disclose it at the checkpoint", () => {
+    expect(ioFor([]).io.pressSignalHint).toBe("/s/pressed");
+  });
+});
+
+describe("waitForSignal — a pathological poll interval cannot disable the deadline", () => {
+  const base = { exists: () => false, sleep: async () => undefined, aborted: () => false };
+
+  it("pollMs 0 does not produce an infinite wait", async () => {
+    // `Math.ceil(WAIT_TIMEOUT_MS / 0)` is Infinity: the loop would never end, on the seam that decides when
+    // SellerOps reads a live page.
+    expect(await waitForSignal("/r", "ready", "/a", { ...base, pollMs: 0 })).toBe("timeout");
+  });
+
+  it("a negative pollMs does not skip the loop body entirely", async () => {
+    // A negative budget makes the body never run: it would return `timeout` without ever checking abort or the
+    // target — including when the operator had already signalled.
+    let checked = 0;
+    const sig = await waitForSignal("/r", "ready", "/a", {
+      ...base,
+      exists: (p) => {
+        checked += 1;
+        return p === "/r";
+      },
+      pollMs: -5,
+    });
+    expect(checked).toBeGreaterThan(0);
+    expect(sig).toBe("ready");
+  });
+
+  it("a non-positive tick budget still checks at least once", async () => {
+    let checked = 0;
+    const sig = await waitForSignal("/r", "ready", "/a", {
+      ...base,
+      exists: (p) => {
+        checked += 1;
+        return p === "/r";
+      },
+      maxTicks: 0,
+    });
+    expect(checked).toBeGreaterThan(0);
+    expect(sig).toBe("ready");
+  });
+});
+
+describe("the report is reported — a run that exits 0 whatever happened is an all-clear", () => {
+  it("a failed cleanup is recorded on the report, not swallowed", async () => {
+    // The original let a throwing overlay clear propagate → nonzero exit. Swallowing it would leave SellerOps'
+    // panel and its `data-aw-target` annotation on the seller's live WING DOM with no signal anywhere.
+    const { driver, io, notes } = harness({ cleanupThrows: true });
+    const report = await runRevealWalk(driver, io, "wing_host");
+    expect(report.cleanupFailed).toBe(true);
+    expect(noteText(notes)).toContain("overlay could not be cleared");
+  });
+
+  it("a clean run reports cleanupFailed false", async () => {
+    const report = await runRevealWalk(harness().driver, harness().io, "wing_host");
+    expect(report.cleanupFailed).toBe(false);
+  });
+
+  it("a cleanup failure on a REFUSAL path is reported too", async () => {
+    const { driver, io } = harness({ cleanupThrows: true, matchCount: 0 });
+    const report = await runRevealWalk(driver, io, "wing_host");
+    expect(report.stop).toBe("ISSUE_NOT_UNIQUE");
+    expect(report.cleanupFailed).toBe(true);
+  });
+
+  it("main() reads the report and sets a DISTINCT exit code per outcome class", () => {
+    const src2 = readFileSync(SRC, "utf8");
+    const body = src2.slice(src2.indexOf("async function main(): Promise<void>"));
+    expect(body).toContain("const report = await runRevealWalk(");
+    // Not merely "an exit code is set somewhere": the four classes must be distinguishable, or an unexpected
+    // outcome is indistinguishable from the expected one to anything downstream of the terminal.
+    expect(body).toMatch(/process\.exitCode\s*=/);
+    expect(body).toContain("report.cleanupFailed");
+    expect(body).toContain('report.stop !== "OBSERVED"');
+    expect(body).toContain("report.outcomeAsExpected");
   });
 });

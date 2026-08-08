@@ -15,7 +15,11 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
-RUN_DIR="$HERE/.run"
+# Overridable so the hermetic selfcheck can point it at a temp directory. Without this the selfcheck's
+# BOOTSTRAP_DIRTY case — which runs the REAL bootstrap — would write over the operator's live run env if the
+# dirty-tree guard ever regressed, i.e. exactly when that case is doing its job: a fresh approval id would kill
+# a pending grant and leave a run env whose approvalId no longer matches the displayed manifest.
+RUN_DIR="${SELLEROPS_WING_REVEAL_RUN_DIR:-$HERE/.run}"
 RUN_ENV="$RUN_DIR/wing-reveal.env"
 
 # The SHARED hardened git, not a local copy. This file had its own, and it was weaker in exactly the ways that
@@ -39,9 +43,13 @@ esac
 # A real marketplace press must be bootstrapped from a CLEAN tree — the same rule as the destructive harness, and
 # it was missing here. The preflight and the CLI both check it again, but pinning a SHA that already does not
 # describe the tree just defers a guaranteed refusal, and leaves behind a run env that looks valid.
-DIRT="$(git_hardened status --porcelain 2>/dev/null)"; DIRT_RC=$?
-if [ "$DIRT_RC" != "0" ]; then
-  echo "BOOTSTRAP FAIL — could not read git status (exit $DIRT_RC). Refusing rather than assuming a clean tree."
+#
+# `if ! DIRT=…`, not a bare assignment followed by `$?`: under `set -e` a failing command substitution in a
+# plain assignment trips errexit BEFORE the status can be read, so the refusal below was unreachable and an
+# unreadable `git status` exited 128 with no message at all. It still failed closed — but silently, and the
+# branch the comment advertises could never run.
+if ! DIRT="$(git_hardened status --porcelain 2>/dev/null)"; then
+  echo "BOOTSTRAP FAIL — could not read git status. Refusing rather than assuming a clean tree."
   exit 1
 fi
 if [ -n "$DIRT" ]; then

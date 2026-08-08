@@ -9,7 +9,12 @@
 # preflight, or the real shared descriptor verifier, against fixtures.
 #
 # Fully HERMETIC: no browser, no backend, no Coupang call, NOTHING pressed and NO key issued. The only tree
-# mutation is a temporary untracked marker file used to produce a dirty tree, removed on exit.
+# mutation is a temporary untracked marker file used to produce a dirty tree, removed on exit. The cases that run
+# the REAL bootstrap pass SELLEROPS_WING_REVEAL_RUN_DIR so they write to a temp dir — otherwise a regression in
+# the dirty-tree guard (the thing BOOTSTRAP_DIRTY exists to catch) would mint a fresh approval id over the
+# operator's live run env, killing a pending grant at the exact moment the case was doing its job.
+#
+# Exit codes: 0 = every case ran and passed · 1 = a case failed · 2 = PARTIAL, the clean-tree half was skipped.
 #
 # Cases:
 #   NO_RUN_ENV        → FAIL (bootstrap never ran)
@@ -27,11 +32,16 @@
 #                       re-pointed at KEY ISSUANCE, one re-pointed at the DESTRUCTIVE DELETION, and an absent one
 #                       are all refused — and the preflight ACTS on that verdict
 #   NORMAL            → PASS; reveal manifest, calibrated, exact descriptor, full disclosure, approved-phase bound
-#   NO_LEAK           → refusals carry no run-env VALUE and no ambient env value
+#   NO_LEAK           → refusals carry no credential-shaped value, no ambient value, no FULL approval id
+#   BOOTSTRAP_DIRTY   → FAIL (the bootstrap itself refuses to pin a SHA against a dirty tree)
+#   BOOTSTRAP_CLEAN   → PASS (…and it does mint one on a clean tree — a bootstrap that refuses everything is not
+#                       passing BOOTSTRAP_DIRTY, it is broken)
+#   BOOTSTRAP_SHA     → FAIL (a HEAD that is not a hex commit writes no run env)
 #   DEFAULT_OUT       → PASS twice in a row on the default temp path
 #
-# NORMAL and the dirty-tree cases are complementary: they need a clean tree, and print SKIP otherwise — every
-# skipped case is NAMED, because an unnamed skip under a "SELFCHECK PASS" banner reads as coverage.
+# NORMAL and the dirty-tree cases are complementary: they need a clean tree. When it is dirty they are named and
+# skipped AND the script exits 2 under a PARTIAL banner — naming them is not enough, because a green banner with
+# exit 0 reads as coverage to whatever consumes the exit code.
 #
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,10 +58,12 @@ rm -f "$DIRT_FILE"
 cleanup() { rm -rf "$FIXTURES"; rm -f "$DIRT_FILE"; }
 trap cleanup EXIT INT TERM
 
+REALGIT_FOR_SHA="$(command -v git)"
 CUR_GIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 TREE_DIRTY="$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | head -1)"
 NOW="$(date +%s)"
 FAILED=0
+SKIPPED=0
 
 # Sourced so the shared descriptor verifier can be exercised DIRECTLY against crafted manifests. The gate makes a
 # softened descriptor unproducible through the CLI, so calling the function is the only way it is falsifiable.
@@ -219,7 +231,7 @@ if [ -z "$TREE_DIRTY" ]; then
   do
     grep -qF "$phrase" <<<"$out" || { echo "  FAIL  NORMAL          · Korean on-screen warning missing: $phrase"; KOREAN_OK=0; FAILED=1; }
   done
-  [ "$KOREAN_OK" = "1" ] && echo "  PASS  NORMAL          · the Korean on-screen imperative is shown before the grant line"
+  [ "$KOREAN_OK" = "1" ] && echo "  PASS  NORMAL          · the COMPLETE Korean on-page copy is shown before the grant line"
 
   # The approved PHASE is bound into the run env FROM THE MANIFEST — the runtime half of the cross-phase
   # escalation fix. Without it the reveal CLI has only the `WALKTHROUGH_*` triple, which every WING phase shares.
@@ -283,11 +295,13 @@ ENV
   [ "$rc" = "0" ] && { echo "  FAIL  NO_LEAK         · the drifted-HEAD fixture was not refused"; LEAK_OK=0; FAILED=1; }
   grep -qF "LEAKCANARY-SECRET-VALUE" <<<"$out" && { echo "  FAIL  NO_LEAK         · a run-env credential-shaped value reached the output"; LEAK_OK=0; FAILED=1; }
   grep -qF "LEAKCANARY-AMBIENT" <<<"$out" && { echo "  FAIL  NO_LEAK         · an ambient env value reached the output"; LEAK_OK=0; FAILED=1; }
-  grep -qF "apr-LEAKCANARY-APPROVAL" <<<"$out" && { echo "  FAIL  NO_LEAK         · the approval id reached a refusal"; LEAK_OK=0; FAILED=1; }
+  # The approval id appears TRUNCATED in the identity PASS line by design (the operator matches it against
+  # the manifest). What must never appear is the whole thing.
+  grep -qF "apr-LEAKCANARY-APPROVAL" <<<"$out" && { echo "  FAIL  NO_LEAK         · a FULL approval id reached a refusal"; LEAK_OK=0; FAILED=1; }
   # …and the run env is never echoed wholesale. A dump of the file would carry every key at once, including the
   # ones no check above thought to name.
   grep -qF "WALKTHROUGH_APPROVAL_ID='" <<<"$out" && { echo "  FAIL  NO_LEAK         · the run env file was echoed verbatim"; LEAK_OK=0; FAILED=1; }
-  [ "$LEAK_OK" = "1" ] && echo "  PASS  NO_LEAK         · refusal carries no credential-shaped value, no ambient value, no approval id, no run-env dump"
+  [ "$LEAK_OK" = "1" ] && echo "  PASS  NO_LEAK         · refusal carries no credential-shaped value, no ambient value, no FULL approval id, no run-env dump"
 
   # ── the demonstrated git-environment bypasses ────────────────────────────────
   : > "$DIRT_FILE"
@@ -299,13 +313,45 @@ ENV
 
   # The BOOTSTRAP must refuse a dirty tree too: pinning a SHA that already does not describe the tree just defers
   # a guaranteed refusal, and leaves behind a run env that looks valid.
-  out="$(bash "$BOOTSTRAP" 2>&1)"; rc=$?
+  # SELLEROPS_WING_REVEAL_RUN_DIR keeps the REAL bootstrap away from the operator's live run env. Without it,
+  # a regression in the very guard this case tests would mint a fresh approval id over a pending grant.
+  out="$(env SELLEROPS_WING_REVEAL_RUN_DIR="$FIXTURES/run" bash "$BOOTSTRAP" 2>&1)"; rc=$?
   if [ "$rc" != "0" ] && grep -qiF "dirty" <<<"$out"; then
     echo "  PASS  BOOTSTRAP_DIRTY · bootstrap refuses to pin a SHA against a dirty tree"
   else
     echo "  FAIL  BOOTSTRAP_DIRTY · bootstrap minted an identity on a dirty tree (exit=$rc)"; FAILED=1
   fi
   rm -f "$DIRT_FILE"
+
+  # …and on a clean tree it must SUCCEED, into the temp dir and nowhere near the operator's run env. A bootstrap
+  # that refuses everything would satisfy the case above while being useless.
+  out="$(env SELLEROPS_WING_REVEAL_RUN_DIR="$FIXTURES/run" bash "$BOOTSTRAP" 2>&1)"; rc=$?
+  if [ "$rc" = "0" ] && [ -f "$FIXTURES/run/wing-reveal.env" ] \
+     && grep -qE "^SELLEROPS_APPROVAL_PHASE='COUPANG_WING_ISSUANCE_FORM_REVEAL'$" "$FIXTURES/run/wing-reveal.env"; then
+    echo "  PASS  BOOTSTRAP_CLEAN · mints a reveal identity on a clean tree, into the run dir it was given"
+  else
+    echo "  FAIL  BOOTSTRAP_CLEAN · bootstrap did not mint an identity on a clean tree (exit=$rc)"; FAILED=1
+  fi
+
+  # An unreadable HEAD, and a HEAD that reads as something which is not a commit, must both refuse rather than
+  # pin an identity nothing can verify. No healthy checkout produces either, so a `git` earlier on PATH does.
+  SHABIN="$FIXTURES/shabin"; mkdir -p "$SHABIN"
+  cat > "$SHABIN/git" <<FAKE
+#!/usr/bin/env bash
+prev=""
+for a in "\$@"; do
+  [ "\$prev" = "rev-parse" ] && [ "\$a" = "--short" ] && { echo "not-a-sha!!"; exit 0; }
+  prev="\$a"
+done
+exec "$REALGIT_FOR_SHA" "\$@"
+FAKE
+  chmod +x "$SHABIN/git"
+  out="$(env PATH="$SHABIN:$PATH" SELLEROPS_WING_REVEAL_RUN_DIR="$FIXTURES/run2" bash "$BOOTSTRAP" 2>&1)"; rc=$?
+  if [ "$rc" != "0" ] && [ ! -f "$FIXTURES/run2/wing-reveal.env" ]; then
+    echo "  PASS  BOOTSTRAP_SHA   · a HEAD that is not a hex commit refuses, and writes no run env"
+  else
+    echo "  FAIL  BOOTSTRAP_SHA   · a non-hex HEAD produced a run env (exit=$rc)"; FAILED=1
+  fi
 
   # The collector must be THIS repository's collector, or the drift check verifies one checkout while the
   # manifest is built from another, and the displayed provenance describes a tree nothing looked at.
@@ -342,10 +388,24 @@ FAKE
   fi
 else
   run_case "DIRTY_TREE      (uncommitted change refused)" nonzero "working tree is dirty" "$FIXTURES/normal.env"
-  echo "  SKIP  NORMAL / NO_LEAK / GIT_DIR_HIJACK / BOOTSTRAP_DIRTY / COLLECTOR_ESCAPE / GIT_STATUS_FAIL /"
-  echo "        DEFAULT_OUT — the working tree is dirty, which the preflight refuses by design."
+  SKIPPED=9
+  echo "  SKIP  NORMAL / NO_LEAK / GIT_DIR_HIJACK / BOOTSTRAP_DIRTY / BOOTSTRAP_CLEAN / BOOTSTRAP_SHA /"
+  echo "        COLLECTOR_ESCAPE / GIT_STATUS_FAIL / DEFAULT_OUT — the working tree is dirty, which the"
+  echo "        preflight refuses by design."
   echo "        Commit or stash, then re-run to exercise the PASS path."
 fi
 
 echo
-if [ "$FAILED" = "0" ]; then echo "SELFCHECK PASS"; exit 0; else echo "SELFCHECK FAIL"; exit 1; fi
+if [ "$FAILED" != "0" ]; then
+  echo "SELFCHECK FAIL"
+  exit 1
+fi
+if [ "$SKIPPED" != "0" ]; then
+  # NOT "PASS". Naming the skipped cases is not enough: a green banner and exit 0 read as coverage to anything
+  # that consumes the exit code, and a dirty tree is the normal state while editing this harness — exactly when
+  # someone would run it. A distinct code says "the fail-closed half ran; the PASS half did not".
+  echo "SELFCHECK PARTIAL — $SKIPPED case(s) skipped (dirty tree). The PASS path was NOT exercised."
+  exit 2
+fi
+echo "SELFCHECK PASS"
+exit 0

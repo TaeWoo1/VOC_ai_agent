@@ -284,12 +284,23 @@ verify_reveal_descriptor() {
     "autoAdvanceAfterReveal:false"
   do
     key="${pair%%:*}"; want="${pair#*:}"
+    # The JSON TYPE is part of the contract, not just the rendered text: a `keyCreationRuledOut` of the STRING
+    # "false" is not something the runtime treats as false, and a text-only comparison accepts it. So the
+    # expected type is derived from the want value — `true`/`false` demand a real bool, a digit string demands a
+    # real int (bools excluded first, since `True == 1` in Python), anything else demands a str. The comparison
+    # happens in python; the shell only reports what was actually there.
     got="$(python3 -c 'import json,sys
 d = json.load(open(sys.argv[1])).get("operatorRevealAction")
 if not isinstance(d, dict) or sys.argv[2] not in d:
     sys.exit(1)
-v = d[sys.argv[2]]
-print("true" if v is True else "false" if v is False else v)' "$manifest" "$key" 2>/dev/null)" || got=""
+v, want = d[sys.argv[2]], sys.argv[3]
+if want in ("true", "false"):
+    ok = v is (want == "true")
+elif want.isdigit():
+    ok = isinstance(v, int) and not isinstance(v, bool) and str(v) == want
+else:
+    ok = isinstance(v, str) and v == want
+print(want if ok else json.dumps(v))' "$manifest" "$key" "$want" 2>/dev/null)" || got=""
     if [ "$got" != "$want" ]; then
       echo "  FAIL  reveal descriptor $key is '${got:-missing}', must be '$want'"
       rc=1

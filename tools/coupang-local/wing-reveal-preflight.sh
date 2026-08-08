@@ -174,13 +174,23 @@ echo "    • SellerOps CANNOT prove no key was created: every sanitized signal 
 echo "      a no-key surface. The record says so out loud (keyCreationRuledOut: false). Only you can see the screen."
 echo "    • No 자체개발 selection, no 업체명/URL/IP input, no 확인, no credential value read, no connect-test, no sync."
 echo
-# The terminal disclosure above is what the OPERATOR grants against; the sentence that actually stops them
-# mid-flow is the one that will be on the WING page, after the panel is gone and a form invites completion. It is
-# shown here verbatim so nothing on screen is a surprise. `coupang-wing-reveal-gate.test.ts` asserts each
-# fragment is a substring of WING_REVEAL_CHECKPOINT_LABEL, so this copy cannot drift from what is displayed.
-echo "  WHAT YOU WILL SEE ON THE WING PAGE (verbatim, Korean — this is the instruction that binds):"
-echo "    강조 표시된 '발급' 버튼을 직접 눌러 주세요."
-echo "    화면이 열리면 그대로 두고 더 진행하지 마세요. '확인'(최종 발급)은 절대 누르지 마세요."
+# The terminal disclosure above is what the OPERATOR grants against; the copy that actually stops them mid-flow
+# is what will be on the WING page, after the panel is gone and a form invites completion. It is reproduced here
+# COMPLETE — every sentence of WING_REVEAL_CHECKPOINT_LABEL, in order — so nothing on screen is a surprise.
+#
+# It must stay complete. An earlier version showed two of the five sentences under a "verbatim" header, dropping
+# the "not confirmed" hedge, the Korean statement of keyCreationRuledOut, and "read the screen before you
+# signal". `coupang-wing-reveal-gate.test.ts` reconstructs the block between the markers below and asserts it
+# EQUALS the label — so a sentence added, removed, or reordered on either side fails, which a substring check
+# could not catch.
+echo "  WHAT YOU WILL SEE ON THE WING PAGE (the complete on-page text, Korean — this is what binds):"
+# CHECKPOINT-COPY-BEGIN
+echo "    강조 표시된 '발급' 버튼을 직접 눌러 주세요. 누르면 연동 방식 설정 화면이 열릴 것으로 예상되지만"
+echo "    확인된 사실은 아닙니다. 화면이 열리면 그대로 두고 더 진행하지 마세요. '확인'(최종 발급)은 절대"
+echo "    누르지 마세요. SellerOps는 화면 종류만 한 번 확인하고 멈추며, 키가 실제로 만들어졌는지 여부는"
+echo "    판단할 수 없습니다. 화면은 판매자만 확인할 수 있습니다. 신호를 보내면 이 창은 닫히므로 먼저"
+echo "    화면을 확인해 주세요."
+# CHECKPOINT-COPY-END
 echo
 echo "  If this manifest is correct and displayed, the operator's entire single-use grant is one line:"
 echo "    Seated and ready."

@@ -118,8 +118,10 @@ typecheck + full collector suite green. New tests: 39 (driver) + 21 (gate) + 12 
 
 **Two coverage gaps were stated here rather than glossed** — the shell harness had no `*-selfcheck.sh`, and
 `main()` was unexported, so the sentinel flow and the abort paths were unverified. Both are closed by
-`docs/coupang_wing_reveal_live_harness_final_check_v1.md`; that unit changed no product flow, selector, or
-stage structure.
+`docs/coupang_wing_reveal_live_harness_final_check_v1.md`. That unit changed no selector, stage structure, or
+guided-tutorial step; it did change operator-visible CLI behaviour in three ways its own doc records (where the
+completion sentinel is disclosed, a STOP block on every unexpected outcome, and an exit code that distinguishes
+them).
 
 ## Not in this unit
 
