@@ -202,7 +202,12 @@ export async function finishDeletionRun(
     // retried) and reported as not-cleared.
     checkpointCleared = await Promise.race([
       driver.clearHighlight(),
-      new Promise<boolean>((r) => setTimeout(() => r(false), CLEAR_TIMEOUT_MS)),
+      // `unref` so the losing timer cannot hold the process open past teardown — without it every run lingered
+      // for the full bound after printing its outcome, which changes the teardown the live evidence records.
+      new Promise<boolean>((r) => {
+        const t = setTimeout(() => r(false), CLEAR_TIMEOUT_MS);
+        t.unref?.();
+      }),
     ]);
   } catch {
     checkpointCleared = false;
@@ -302,8 +307,12 @@ async function main(): Promise<void> {
       // control is missing when it was found. Clear immediately either way: a partially-painted ring must not
       // outlive the refusal and point at a control this run has decided not to guide.
       const outcome = driver.didCheckpointFailToPaint() ? "CHECKPOINT_NOT_PAINTED" : "DELETE_TARGET_NOT_FOUND";
-      await driver.clearHighlight().catch(() => undefined);
-      console.log(JSON.stringify({ event: "COUPANG_DELETION", outcome, matchCount: highlight.count }));
+      // Report the clear on this path too: it is the path whose whole concern is a partially-painted ring
+      // outliving the refusal, so "did the clear take" is exactly the question the operator has here.
+      const cleared = await driver.clearHighlight().catch(() => false);
+      console.log(
+        JSON.stringify({ event: "COUPANG_DELETION", outcome, matchCount: highlight.count, checkpointCleared: cleared }),
+      );
       return;
     }
     console.error("");

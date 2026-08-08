@@ -66,16 +66,17 @@ describe("wingIssuedStateFrom — ISSUED", () => {
   });
 });
 
-describe("wingIssuedStateFrom — NOT_ISSUED requires POSITIVE evidence", () => {
+describe("wingIssuedStateFrom — NOT_ISSUED and the marker requirement (see the header: it is NOT sufficient)", () => {
   it("form marker present + no credential anchor ⇒ not_issued (the post-delete evidence)", () => {
     const r = wingIssuedStateFrom(observation({ openApiMarkerPresent: true, credentialAnchorPresent: false }));
     expect(r).toEqual({ state: "not_issued", reason: "FORM_MARKER_WITHOUT_CREDENTIAL_ANCHOR" });
   });
 
-  it("a MISSING anchor alone is NOT enough — that is what a broken read looks like", () => {
-    // The single most important case in this file. A page that failed to load, hydrated late, or rendered an
-    // error has no credential anchor either. Reading that as "the key is gone" would let a failed read
-    // masquerade as deletion evidence — the one mistake this verdict must never make.
+  it("a missing anchor with NO marker ⇒ indeterminate — though the classifier cannot route such a page here", () => {
+    // Honest scope: `classifyWingPage` reaches `open_api_issuance` only when marker-or-anchor is present, so
+    // this combination is hand-built and unreachable from `observeFrom` (same caveat as the credential_shown
+    // case above). It guards the branch against a future classifier change; it is NOT what protects against a
+    // half-rendered page — the truncation guard and `wingDeletionEvidenceFrom` below are.
     const r = wingIssuedStateFrom(observation({ openApiMarkerPresent: false, credentialAnchorPresent: false }));
     expect(r).toEqual({ state: "indeterminate", reason: "THIN_SIGNALS" });
     expect(r.state).not.toBe("not_issued");

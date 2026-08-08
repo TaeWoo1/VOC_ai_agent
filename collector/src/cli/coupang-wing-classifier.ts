@@ -256,7 +256,8 @@ export type WingIssuedStateReason = (typeof WING_ISSUED_STATE_REASONS)[number];
  *
  *  - `classifyWingPage` reaches `open_api_issuance` only when `openApiMarkerPresent || credentialAnchorPresent`.
  *    So ON THAT CATEGORY, an absent anchor already IMPLIES the form marker — requiring the marker below
- *    excludes nothing there, and the verdict reduces to `!credentialAnchorPresent`. The marker requirement is
+ *    excludes nothing there, and the verdict reduces to `!credentialAnchorPresent && !markerScanTruncated`. The
+ *    marker requirement is
  *    still worth keeping (it is what stops a future classifier change from letting a thin page through, and it
  *    is what makes `credential_shown` fail closed), but it does NOT buy resistance to a half-rendered page.
  *  - A late-hydrating WING page paints its static shell — including the issuance heading — before the credential
@@ -312,9 +313,17 @@ export type WingDeletionEvidenceReason = (typeof WING_DELETION_EVIDENCE_REASONS)
  *
  * This exists because {@link wingIssuedStateFrom} cannot, from one reading, tell an unissued page from a page
  * that has not finished rendering — and the failure direction that matters is the false "deleted". Two readings
- * separated in time collapse that ambiguity: a hydration race does not survive a second, later look, while a
- * genuinely unissued page reports the same thing every time. It is the same two-capture standard the WING
- * signature calibration already applies, applied to the state claim instead of the signature.
+ * separated in time collapse a TRANSIENT ambiguity: a hydration race does not survive a second, later look,
+ * while a genuinely unissued page reports the same thing every time. It is the same two-capture standard the
+ * WING signature calibration already applies, applied to the state claim instead of the signature.
+ *
+ * **What it does NOT collapse**, stated plainly: a PERSISTENT fault — a credential XHR that fails every time,
+ * a credential region moved into an iframe, a renamed anchor label — reproduces identically across readings and
+ * yields two agreeing false `not_issued`. Corroboration raises the bar from "one unlucky moment" to "the page
+ * consistently looks unissued"; it is not proof the key is gone.
+ *
+ * It also cannot ENFORCE independence: passing the same observation twice satisfies it. Callers must supply
+ * readings from separate runs — this function checks agreement, not provenance.
  *
  * Deliberately NOT a majority vote: one `issued` or one `indeterminate` among the readings withholds the
  * verdict entirely. On an irreversible action, "mostly gone" is not a state worth reporting.
@@ -653,6 +662,6 @@ export const EXTRACT_WING_CENSUS = `(function () {
     /* The scan is BOUNDED. If it stopped at the cap with candidates still unexamined, an ABSENT marker is
        "not found in the part we looked at" — not "not on the page". Callers that treat absence as evidence
        must know the difference. (Stopping early because BOTH were found is not truncation.) */
-    markerScanTruncated: mi >= MARKER_SCAN_CAP && markerCands.length > MARKER_SCAN_CAP
+    markerScanTruncated: mi >= MARKER_SCAN_CAP && markerCands.length > MARKER_SCAN_CAP && !(openApiMarkerPresent && credentialAnchorPresent)
   };
 })()`;

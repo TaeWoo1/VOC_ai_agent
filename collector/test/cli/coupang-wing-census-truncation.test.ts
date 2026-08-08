@@ -75,6 +75,23 @@ describe("EXTRACT_WING_CENSUS — the bounded marker scan reports its own trunca
     expect(r.markerScanTruncated).toBe(false);
   });
 
+  it("BOTH found at the LAST examined index on an over-cap page is complete, not truncated", () => {
+    // The boundary: the loop increments past the cap on the iteration that finds the second marker, so a naive
+    // `mi >= CAP` reads as truncated even though the scan answered both questions. Harmless today (a found
+    // anchor short-circuits to `issued` before the truncation branch), but it would turn into a spurious
+    // `SCAN_TRUNCATED` the moment the branch order changed.
+    const markers = [
+      ...Array.from({ length: CAP - 2 }, () => el("filler")),
+      el("오픈API 키 발급"),
+      el("Access Key"),
+      ...Array.from({ length: 100 }, () => el("filler")),
+    ];
+    const r = runCensus(markers);
+    expect(r.openApiMarkerPresent).toBe(true);
+    expect(r.credentialAnchorPresent).toBe(true);
+    expect(r.markerScanTruncated).toBe(false);
+  });
+
   it("a page exactly at the cap is not truncated (nothing was left unexamined)", () => {
     const r = runCensus(Array.from({ length: CAP }, () => el("filler")));
     expect(r.markerScanTruncated).toBe(false);

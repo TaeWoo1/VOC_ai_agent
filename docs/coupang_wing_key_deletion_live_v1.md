@@ -58,6 +58,7 @@ see below.
 | credential anchor present | `issued` |
 | **no anchor + form marker present** | **`not_issued`** ← the machine-verifiable post-delete evidence |
 | no anchor, no form marker | `indeterminate` (`THIN_SIGNALS`) |
+| no anchor, but the bounded scan was **truncated** | `indeterminate` (`SCAN_TRUNCATED`) |
 | not the open-API surface | `indeterminate` |
 | no observation / observe threw | `indeterminate` |
 
@@ -137,6 +138,16 @@ Three expectations worth setting now:
   `not_issued` a success criterion therefore creates pressure to retune those labels until the criterion fires.
   Do not. If the marker does not match the post-delete form, the correct outcome is `indeterminate` and a
   recorded finding, exactly as with any other placeholder (collector/CLAUDE.md §6).
+- **`SCAN_TRUNCATED` may well be the NORMAL result on real WING, and that is not a failure either.** The
+  marker/anchor scan walks `h1..h6, [role=heading], dt, dd, label, legend, strong, b, span, div, p, th` and stops
+  at 6000 candidates — easily reached on an enterprise SPA. On the post-delete page the anchor is absent by
+  construction, so the loop never short-circuits and runs to the cap. Raising the cap to make `not_issued`
+  appear is the same mistake as retuning the labels: it would be tuning the instrument until it gives the
+  answer we want. If truncation is what the run reports, record it and treat the machine-verifiable
+  post-delete evidence as still outstanding.
+
+If both readings come back `indeterminate`, the unit still succeeds on its **selector** criteria (the four
+matchCounts); only the deletion-evidence criterion goes unmet, and it stays unmet honestly.
 
 Only after that unit: the WING-resident reissue tutorial, new key issuance, SellerOps credential replacement,
 and connection/sync recovery — each its own unit with its own grant.

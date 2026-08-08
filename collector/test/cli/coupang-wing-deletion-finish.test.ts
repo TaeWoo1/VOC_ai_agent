@@ -79,6 +79,23 @@ describe("finishDeletionRun — a failed clear is reported, never hidden and nev
     expect(calls).toEqual(["clear", "verify"]);
   });
 
+  it("a clear that REPORTS failure (without throwing) is propagated — the driver's verdict is not discarded", async () => {
+    // The gap this closes: every test asserted the driver's own verified boolean, or a THROWING clear. Nothing
+    // asserted that a driver saying "the panel is still up" reaches the field the operator reads — so replacing
+    // the whole race with `await clear(); checkpointCleared = true;` passed the entire suite.
+    const { driver } = fakeDriver({ clearReports: false, deleted: false });
+    const out = await finishDeletionRun(driver, "ready");
+    expect(out.checkpointCleared).toBe(false);
+    expect(out.outcome).toBe("COMPLETED"); // …and it still does not block the outcome
+  });
+
+  it("a reported-failed clear is propagated on abort and timeout too", async () => {
+    for (const signal of ["abort", "timeout"] as const) {
+      const { driver } = fakeDriver({ clearReports: false });
+      expect((await finishDeletionRun(driver, signal)).checkpointCleared, signal).toBe(false);
+    }
+  });
+
   it("a throwing clear is NOT retried — a retry loop on a destructive surface is its own hazard", async () => {
     let clears = 0;
     const driver: DeletionRunDriver = {
