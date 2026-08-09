@@ -79,10 +79,12 @@ export function gateRefusalCause(
   /** Repository-identity verifier seam; the DEFAULT is the real check, so a caller who forgets gets strictness. */
   verifyIdentity: typeof verifyRepoIdentity = verifyRepoIdentity,
   /**
-   * Calibration seam, same contract as `verifyIdentity`: the DEFAULT is the shipped constant, so a caller who
-   * forgets gets the refusal. It exists because the shipped value is now `false` — every other refusal cause in
-   * this gate would otherwise be untestable, since `SELECTORS_NOT_CALIBRATED` short-circuits ahead of them all.
-   * `main()` calls this with ONE argument; a test proves that, and a test proves the default still refuses.
+   * Calibration seam, same contract as `verifyIdentity`: the DEFAULT is the shipped constant, never a hardcoded
+   * `true`, so withdrawing the calibration closes this path again without touching the gate. It was added while
+   * the shipped value was `false` (`SELECTORS_NOT_CALIBRATED` short-circuits ahead of every other cause, so they
+   * were otherwise untestable) and it stays for the opposite direction: with the value now `true`, injecting
+   * `false` is how the withdrawal path keeps its coverage. `main()` calls this with ONE argument; a test proves
+   * that, and a test proves the default tracks the constant.
    */
   calibrated: boolean = WING_ISSUE_SELECTOR_CALIBRATED,
 ): string | null {

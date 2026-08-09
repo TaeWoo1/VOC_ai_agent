@@ -6,10 +6,10 @@
  * in that order — phase binding, then the approval gate, then the repository-identity check — so a wrong-phase run
  * reports its own cause rather than a confusing git one.
  *
- * NOT covered here, and previously over-claimed by this docstring: a WITHDRAWN `issue` calibration. It cannot be
- * exercised while `WING_ISSUE_SELECTOR_CALIBRATED` is `true as const`; only the source assertion below (that the
- * CLI reads the shared constant rather than hardcoding `true`) stands behind it. The driver's injectable
- * `calibrated` seam IS tested, in `coupang-wing-reveal-driver.test.ts`.
+ * A WITHDRAWN `issue` calibration is covered here too, through the gate's `calibrated` seam — the shipped
+ * constant is `true` again since the live probe landed, and the fail-closed direction has to stay exercisable at
+ * a commit where the default passes. What the seam cannot prove is that `main()` reads the constant rather than a
+ * hardcoded `true`; the source assertion below is what stands behind that.
  */
 import { readFileSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -119,21 +119,29 @@ describe("the PHASE binding — a grant for one WING action never authorizes ano
 });
 
 /**
- * The 발급 calibration is WITHDRAWN (refuted live on 2026-08-09), so the shipped gate short-circuits on
- * `SELECTORS_NOT_CALIBRATED` ahead of every other cause. These cases are about the OTHER causes and their
- * ordering, so they inject a calibrated gate to get past it. The two tests below hold the injection honest: the
- * uninjected default must refuse, and `main()` must call the gate with no injection at all.
+ * The 발급 calibration is LANDED (live read-only probe, 2026-08-09), so the shipped gate no longer short-circuits
+ * on `SELECTORS_NOT_CALIBRATED` and the cases below reach the causes they are about. The injection is kept
+ * explicit rather than dropped: it is the seam that keeps the WITHDRAWN direction — the one that must fail closed
+ * — exercisable at a commit where the shipped constant is `true`.
  */
 const CALIBRATED = true;
+const WITHDRAWN = false;
 
-describe("reveal gate — the withdrawn calibration closes the run", () => {
-  it("the UNINJECTED default refuses with SELECTORS_NOT_CALIBRATED, even when everything else is perfect", () => {
+describe("reveal gate — the calibration decides whether the run is reachable at all", () => {
+  it("the UNINJECTED default now REACHES PREPARED — the landed flag is what the CLI actually gets", () => {
     setEnv({ ...IDENTITY });
-    // A passing identity check and a bound identity — the only thing wrong is the thing that is wrong.
-    expect(gateRefusalCause(WING_DEFAULT_URL, okIdentity as never)).toBe("SELECTORS_NOT_CALIBRATED");
+    // `main()` passes only the URL, so this is the shipped path end to end: constant → default → gate verdict.
+    expect(gateRefusalCause(WING_DEFAULT_URL, okIdentity as never)).toBeNull();
   });
 
-  it("the refusal reaches the operator with the one instruction that resolves it", () => {
+  it("WITHDRAWING it closes the run again with SELECTORS_NOT_CALIBRATED, everything else being perfect", () => {
+    setEnv({ ...IDENTITY });
+    // The fail-closed direction, kept under test after the flip. A bound identity and a passing identity check —
+    // the calibration is the only thing wrong, and it must be enough on its own.
+    expect(gateRefusalCause(WING_DEFAULT_URL, okIdentity as never, WITHDRAWN)).toBe("SELECTORS_NOT_CALIBRATED");
+  });
+
+  it("that refusal still reaches the operator with the one instruction that resolves it", () => {
     const src = readFileSync(CLI, "utf8");
     expect(src).toContain('refusal === "SELECTORS_NOT_CALIBRATED"');
     // Restoring the flag from anything other than a live probe is how the refuted record was written.

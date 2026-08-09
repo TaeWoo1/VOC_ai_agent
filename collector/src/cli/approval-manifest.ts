@@ -450,7 +450,8 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     driver: "CoupangWingRevealDriver (highlight 발급 + rest; the operator presses it; one sanitized observation)",
     // AGENT capability is highlight + observe. It HIGHLIGHTS a real control ⇒ `allowsHighlight: true` ⇒ it fails
     // closed (`SELECTORS_NOT_CALIBRATED`) unless the caller states the `issue` calibration
-    // (`WING_ISSUE_SELECTOR_CALIBRATED`, live-confirmed on four captures across both account states). This module
+    // (`WING_ISSUE_SELECTOR_CALIBRATED`, live-confirmed on ONE read-only probe of the no-key surface — see
+    // `WING_ISSUE_CALIBRATION_EVIDENCE`, whose predecessor claimed four captures and was refuted). This module
     // never assumes a WING calibration — a caller who omits it is refused.
     capableActions: [
       "OPEN_DEDICATED_WINDOW",

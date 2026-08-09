@@ -14,7 +14,7 @@
  *  4. **It never claims a key was not created, and never auto-advances.** `keyCreationRuledOut` is structurally
  *     `false`; the outcome enum has no success-adjacent member for an unrecognized surface.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -256,14 +256,13 @@ describe("the driver refuses before it can mislead", () => {
     await expect(uncalibrated.highlightIssueCheckpoint()).rejects.toThrow(/not calibrated/);
   });
 
-  it("the UNINJECTED default is the shared constant — which is currently the refusal", async () => {
-    // Read from a driver with NO `calibrated` option, because that is the only construction the live CLI uses.
-    // The rest of this file injects `calibrated: true` to reach the walk at all; if that injection were also the
-    // default, every one of those cases would silently become the sole description of shipped behaviour.
+  it("the UNINJECTED default is the shared constant — the only construction the live CLI uses", () => {
+    // Read from a driver with NO `calibrated` option. The rest of this file injects `calibrated: true` to reach
+    // the walk; if that injection were also the sole description of shipped behaviour, withdrawing the constant
+    // would change nothing any test can see. Landed value asserted explicitly so a silent flip fails here too.
     const shipped = new CoupangWingRevealDriver({ url: () => "https://wing.coupang.com/x" } as never, {});
     expect(shipped.isCalibrated()).toBe(WING_ISSUE_SELECTOR_CALIBRATED);
-    expect(WING_ISSUE_SELECTOR_CALIBRATED).toBe(false);
-    await expect(shipped.highlightIssueCheckpoint()).rejects.toThrow(/not calibrated/);
+    expect(WING_ISSUE_SELECTOR_CALIBRATED).toBe(true);
   });
 
   it("the operator-action step requires the checkpoint — it cannot be skipped", async () => {
@@ -531,38 +530,48 @@ describe("the operator-action step", () => {
 
 /* ────────────────────────────── the calibration claim ────────────────────────────── */
 
-describe("the issue calibration was REFUTED live and is withdrawn", () => {
-  it("is REFUTED, and the selector flag is withdrawn with it", () => {
-    // A refuted record with a still-true flag would be a retraction nothing downstream reads.
-    expect(WING_ISSUE_CALIBRATION_EVIDENCE.status).toBe("LIVE_DOM_CALIBRATION_REFUTED");
-    expect(WING_ISSUE_SELECTOR_CALIBRATED).toBe(false);
+describe("the issue calibration is LIVE-CONFIRMED, on exactly one measurement", () => {
+  it("is CONFIRMED, and the selector flag lands with it", () => {
+    // A confirmed record with a still-false flag would be evidence nothing downstream reads; the reverse — a
+    // true flag over a refuted record — is what this pair existed to make impossible in the first place.
+    expect(WING_ISSUE_CALIBRATION_EVIDENCE.status).toBe("LIVE_DOM_CALIBRATION_CONFIRMED");
+    expect(WING_ISSUE_SELECTOR_CALIBRATED).toBe(true);
   });
 
-  it("the refuted spec is NOT the shipped spec — the correction is real, not just narrated", () => {
-    // The load-bearing assertion of this block. Everything else here could pass with the old, broken selector
-    // still wired in and a paragraph of prose above it explaining that it was wrong.
-    const { refutedSpec } = WING_ISSUE_CALIBRATION_EVIDENCE;
-    const live = WING_HIGHLIGHT_LABELS.issue;
-    expect(live.exactText).not.toBe(refutedSpec.exactText);
-    expect(live).not.toEqual({ candidateQuery: refutedSpec.candidateQuery, exactText: refutedSpec.exactText });
+  it("the SHIPPED spec is byte-for-byte the spec that was MEASURED", () => {
+    // The load-bearing assertion of this block, and the successor to "the refuted spec is not the shipped spec".
+    // Uniqueness was measured against THIS spec and no other, so any retune — a widened candidateQuery, a
+    // shortened label, a revert to the refuted `발급` — invalidates the evidence, and must fail here to say so.
+    expect(WING_HIGHLIGHT_LABELS.issue).toEqual(WING_ISSUE_CALIBRATION_EVIDENCE.measuredSpec);
+    expect(WING_HIGHLIGHT_LABELS.issue.exactText).toBe(WING_ISSUE_CALIBRATION_EVIDENCE.label);
+    // `exactText` compares the WHOLE normalized text — precisely what the refuted spec got wrong.
+    expect(WING_HIGHLIGHT_LABELS.issue.exactText).toContain("발급");
+    expect(WING_HIGHLIGHT_LABELS.issue.exactText).not.toBe("발급");
   });
 
-  it("the shipped spec matches the element the operator actually reported", () => {
-    // `exactText` compares the WHOLE normalized text, which is precisely what the old spec got wrong: the real
-    // button reads "API Key 발급 받기", so a bare "발급" could never have matched it.
-    const { observedElement } = WING_ISSUE_CALIBRATION_EVIDENCE;
-    expect(WING_HIGHLIGHT_LABELS.issue.exactText).toBe(observedElement.label);
-    expect(observedElement.label).toContain("발급");
-    expect(observedElement.label).not.toBe("발급");
-    // Narrowed to the real element type: a span/div satisfying a button-shaped intent is the failure mode.
+  it("adopts the visible label as the anchor — never the observed id or class", () => {
+    // The operator's sighting reported `id="policyAgreementWithAutoCategoryBtn"` and
+    // `class="wing-web-component btn-api-key-gen"`. Those were candidate evidence for correcting the label, not
+    // anchors: nobody has watched WING's generated ids or component classes across releases, so promoting one
+    // would be the same species of unmeasured stability guess that produced the refuted record.
     expect(WING_HIGHLIGHT_LABELS.issue.candidateQuery).toBe("button");
-    expect(observedElement.tag).toBe("BUTTON");
+    const wire = JSON.stringify(WING_HIGHLIGHT_LABELS);
+    for (const anchor of ["policyAgreementWithAutoCategoryBtn", "btn-api-key-gen", "wing-web-component", "#", "["]) {
+      expect(wire, anchor).not.toContain(anchor);
+    }
   });
 
-  it("claims no element property the locator cannot measure — the `role` over-claim is gone", () => {
+  it("records ONLY what the probe measured — the `role` over-claim is gone and stays gone", () => {
     // `role: "button"` was asserted by hand while `buildFixedLabelLocateScript` returned only { count, sig }. The
     // single property that would have caught the mismatch was the one the apparatus never produced.
     expect("role" in WING_ISSUE_CALIBRATION_EVIDENCE).toBe(false);
+    expect(WING_ISSUE_CALIBRATION_EVIDENCE.measured).toEqual({
+      visibleCount: 1,
+      hiddenCount: 0,
+      observedTag: "BUTTON",
+      canHighlight: true,
+      fault: null,
+    });
     const src = readFileSync(
       resolve(dirname(fileURLToPath(import.meta.url)), "../../../src/action-window/api-issuance-calibration/visual-recon-inpage.ts"),
       "utf8",
@@ -571,25 +580,105 @@ describe("the issue calibration was REFUTED live and is withdrawn", () => {
     expect(src).toContain("tag: el.tagName");
   });
 
-  it("keeps the withdrawn evidence as provenance, never as support", () => {
+  it("labels the ONE field the apparatus cannot produce — `surface` is attributed, not measured", () => {
+    // `wingIssuedStateFrom` answers NO_DISCRIMINATING_SIGNAL precisely because no sanitized signal separates a
+    // no-key page from an issued one, and `pageCategory` is `open_api_issuance` on both. So "no_key" is the
+    // operator's word. Unlabelled, it would be `role: "button"` again: a value from outside the apparatus sitting
+    // among values from inside it, in a record that certifies everything in it was observed.
+    expect(WING_ISSUE_CALIBRATION_EVIDENCE.surfaceAttribution).toBe("OPERATOR_REPORTED_NOT_MEASURED");
+    expect(WING_ISSUE_CALIBRATION_EVIDENCE.surface).toBe("no_key_initial_surface");
+    // Everything the probe DOES produce lives under `measured` and is not duplicated outside it.
+    expect(Object.keys(WING_ISSUE_CALIBRATION_EVIDENCE.measured).sort()).toEqual([
+      "canHighlight",
+      "fault",
+      "hiddenCount",
+      "observedTag",
+      "visibleCount",
+    ]);
+  });
+
+  it("the MEASURED tag AGREES with the EXPECTED role — the comparison whose absence let the failure through", async () => {
+    const { WING_TARGET_EXPECTED_ROLE } = await import("../../../src/cli/probe-wing-issuance-selectors");
+    expect(WING_TARGET_EXPECTED_ROLE.issue).toBe("button");
+    expect(WING_ISSUE_CALIBRATION_EVIDENCE.measured.observedTag.toLowerCase()).toBe(WING_TARGET_EXPECTED_ROLE.issue);
+  });
+
+  it("claims exactly ONE capture, on ONE surface, and does not launder the withdrawn four into support", () => {
+    expect(WING_ISSUE_CALIBRATION_EVIDENCE.captureCount).toBe(1);
+    expect(WING_ISSUE_CALIBRATION_EVIDENCE.surface).toBe("no_key_initial_surface");
+    expect(WING_ISSUE_CALIBRATION_EVIDENCE.signatureStability).toBe("SINGLE_CAPTURE_NOT_ESTABLISHED");
+    // The four withdrawn captures are retained as a RETRACTION, under a field that says so, and the record they
+    // support is not this one. Re-citing them as coverage is the specific regression this pins.
+    const { supersedes, recordId } = WING_ISSUE_CALIBRATION_EVIDENCE;
+    expect(supersedes.status).toBe("LIVE_DOM_CALIBRATION_REFUTED");
+    expect(supersedes.withdrawnClaim).toBe("FOUR_AGREEING_CAPTURES_WITH_AN_UNMEASURED_ROLE");
+    expect(supersedes.withdrawnRecordIds).toHaveLength(4);
+    expect(supersedes.withdrawnRecordIds).not.toContain(recordId);
+    expect(supersedes.refutedObservation).toEqual({ visibleMatchCount: 0, nonPaintingMatchCount: 1 });
+    expect(supersedes.refutedSpec.exactText).not.toBe(WING_HIGHLIGHT_LABELS.issue.exactText);
+  });
+
+  it("sig16 is EVIDENCE_ONLY — and no runtime module can read the record to make it an anchor", () => {
+    expect(WING_ISSUE_CALIBRATION_EVIDENCE.sig16).toMatch(/^[0-9a-f]{16}$/);
     expect(WING_ISSUE_CALIBRATION_EVIDENCE.signatureRole).toBe("EVIDENCE_ONLY");
-    // The signatures were the DECOY's. Retained so the history is auditable; named `withdrawn*` so no future
-    // reader mistakes them for a live baseline.
-    for (const sig of WING_ISSUE_CALIBRATION_EVIDENCE.withdrawnSig16) expect(sig).toMatch(/^[0-9a-f]{16}$/);
-    expect(WING_ISSUE_CALIBRATION_EVIDENCE.withdrawnRecordIds.length).toBeGreaterThan(0);
-    expect([...WING_ISSUE_CALIBRATION_EVIDENCE.surfaces]).toEqual(["already_issued_page", "no_key_initial_surface"]);
+    // The withdrawn signatures were the DECOY's — a live signature must never be compared against any of them.
+    for (const sig of WING_ISSUE_CALIBRATION_EVIDENCE.supersedes.withdrawnSig16) expect(sig).toMatch(/^[0-9a-f]{16}$/);
+    expect(WING_ISSUE_CALIBRATION_EVIDENCE.supersedes.withdrawnSig16).not.toContain(WING_ISSUE_CALIBRATION_EVIDENCE.sig16);
+    // One capture cannot establish cross-run stability, so a cross-run comparison must be unreachable rather than
+    // merely discouraged: no module outside the record's own file may name the record or its signature.
+    const srcRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../src");
+    // Exempt by resolved PATH, not by basename: the exemption must name one file, not every file that happens to
+    // be called that. And it is exactly one file — the record's own home.
+    const HOME = resolve(srcRoot, "action-window/coupang-wing-issuance-driver.ts");
+    // Comments legitimately discuss the record; only code may not reach it.
+    const codeOf = (p: string): string =>
+      readFileSync(p, "utf8")
+        .split("\n")
+        .filter((l) => {
+          const t = l.trim();
+          return !t.startsWith("//") && !t.startsWith("*") && !t.startsWith("/*");
+        })
+        .join("\n");
+
+    const offenders: string[] = [];
+    let scanned = 0;
+    const walk = (dir: string): void => {
+      for (const ent of readdirSync(dir, { withFileTypes: true })) {
+        const p = resolve(dir, ent.name);
+        if (ent.isDirectory()) {
+          walk(p);
+          continue;
+        }
+        if (!ent.name.endsWith(".ts") || p === HOME) continue;
+        scanned += 1;
+        const body = codeOf(p);
+        if (body.includes("WING_ISSUE_CALIBRATION_EVIDENCE") || body.includes(WING_ISSUE_CALIBRATION_EVIDENCE.sig16)) {
+          offenders.push(ent.name);
+        }
+      }
+    };
+    walk(srcRoot);
+    // A sweep that swept nothing passes for free — the exact shape of the bug this whole sequence came from.
+    expect(scanned).toBeGreaterThan(50);
+    expect(offenders).toEqual([]);
+
+    // The exemption is transitive unless it is closed here. `coupang-wing-issuance-driver.ts` is a runtime module,
+    // not a data file — it already holds signature constants the guided walk returns — so two lines inside it
+    // (`export const X = WING_ISSUE_CALIBRATION_EVIDENCE.sig16;`, consumed anywhere) would rebuild the cross-run
+    // anchor with the sweep above still green. So: inside its home, the record may be DECLARED and nothing else.
+    const home = codeOf(HOME);
+    expect(home.match(/WING_ISSUE_CALIBRATION_EVIDENCE/g) ?? []).toHaveLength(1); // the declaration, and only it
+    expect(home).not.toMatch(/WING_ISSUE_CALIBRATION_EVIDENCE\s*\./); // no member access, so no alias export
+    expect(home.match(new RegExp(WING_ISSUE_CALIBRATION_EVIDENCE.sig16, "g")) ?? []).toHaveLength(1);
   });
 
-  it("records what the refuted spec actually did: unique, and invisible", () => {
-    expect(WING_ISSUE_CALIBRATION_EVIDENCE.refutedObservation).toEqual({ visibleMatchCount: 0, nonPaintingMatchCount: 1 });
-  });
-
-  it("names a LIVE measurement as the only way back to calibrated", () => {
-    expect(WING_ISSUE_CALIBRATION_EVIDENCE.reconfirmationRequires).toBe(
-      "READ_ONLY_PROBE_VISIBLE_UNIQUE_MATCH_WITH_MEASURED_TAG",
-    );
-    // The press has still never happened; a locator fix does not and cannot imply otherwise.
+  it("says nothing about the press, and nothing about whether a key exists", () => {
+    // A calibrated LOCATOR is a claim about finding a control. It is not a claim about what pressing it does…
     expect(WING_ISSUE_CALIBRATION_EVIDENCE.pressOutcome).toBe("UNCONFIRMED");
+    // …nor about issued state. This very capture read `credentialAnchorPresent: true` on a REAL no-key surface,
+    // which is the standing reason the anchor is not a discriminator and the classifier answers indeterminate.
+    expect(WING_ISSUE_CALIBRATION_EVIDENCE.credentialAnchorPresentOnNoKeySurface).toBe(true);
+    expect(WING_ISSUE_CALIBRATION_EVIDENCE.issuedStateReason).toBe("NO_DISCRIMINATING_SIGNAL");
   });
 
   it("does NOT flip the overall WING highlight calibration — the other three targets are still unresolved", async () => {

@@ -78,7 +78,11 @@ export const WING_HIGHLIGHT_LABELS: Readonly<Record<WingHighlightTarget, { candi
   // 2026-08-09, was a non-painting node elsewhere in the document: unique, invisible, and reported as a success.
   // The query is narrowed from "button,a,span,div" to "button" for the same reason the text is corrected — the
   // control is a real `<button>`, and a span/div satisfying a button-shaped intent is the failure, not a fallback.
-  // NOT calibrated: this is one operator-reported capture of the element, not a measured uniqueness proof.
+  //
+  // LIVE-CALIBRATED. This spec is BYTE-FOR-BYTE the one the read-only probe measured (see
+  // `WING_ISSUE_CALIBRATION_EVIDENCE`, and the equality test that pins the two together). Retuning either field
+  // — even toward the observed `id`/`className`, which are NOT adopted as anchors — discards the measurement
+  // that justifies `WING_ISSUE_SELECTOR_CALIBRATED` and requires a fresh probe.
   issue: { candidateQuery: "button", exactText: "API Key 발급 받기" },
   credentials: { candidateQuery: "label,span,div,dt,th,strong", exactText: "Access Key", tagAncestor: "tr" },
 };
@@ -201,15 +205,16 @@ export const WING_DELETION_CALIBRATION_EVIDENCE: WingDeletionCalibrationEvidence
 };
 
 /**
- * **REFUTED calibration of the `issue` (발급) control.** This record used to read `LIVE_DOM_CALIBRATION_CONFIRMED`
- * and to state that {@link WING_HIGHLIGHT_LABELS}.issue resolved to exactly one element with role `button` across
- * four captures spanning both account states. A live run on 2026-08-09 disproved it on the surface it mattered on.
+ * The WITHDRAWN `issue` calibration, retained inside the live record below as {@link
+ * WingIssueCalibrationEvidence.supersedes}. It is a **retraction, never support**: no count, id or signature here
+ * adds anything to the current claim, and the live record's `captureCount` deliberately does not include them.
  *
- * **What actually happened.** On the real no-key open-API surface, the operator saw NO highlight anywhere while
- * the run logged `highlighted: true`. The real control's label is `API Key 발급 받기`; the old spec compared the
- * element's whole normalized text against `발급`, which that button's text is not. The unique match was some other,
- * non-painting node — so the tag landed on an element nobody could see, and the operator was told to press a
- * highlighted control that was not on screen. Nothing was pressed: the operator noticed and the run was aborted.
+ * **What happened.** Until 2026-08-09 this read `LIVE_DOM_CALIBRATION_CONFIRMED` and stated that the `issue`
+ * label resolved to exactly one element with role `button` across four captures spanning both account states. On
+ * the real no-key surface the operator saw NO highlight anywhere while the run logged `highlighted: true`. The
+ * real control's label is `API Key 발급 받기`; the old spec compared the element's whole normalized text against
+ * `발급`, which that button's text is not. The unique match was some other, non-painting node, so the tag landed
+ * on an element nobody could see. Nothing was pressed — the operator noticed and the run was aborted.
  *
  * **Why four captures read as confirmation.** Two independent over-claims, and neither was a lie about the count:
  *
@@ -224,102 +229,223 @@ export const WING_DELETION_CALIBRATION_EVIDENCE: WingDeletionCalibrationEvidence
  * The general form is the one this codebase keeps rediscovering: **a guard placed one layer away from the thing it
  * guards.** Uniqueness guarded identity, and does not imply it. The locator now rejects non-painting matches, so a
  * decoy of this shape returns `count: 0, hiddenCount: 1` rather than a confident `count: 1`.
- *
- * **What is required before this may be confirmed again** — and it may not be confirmed from this record alone:
- * a live READ-ONLY probe of the corrected spec on the no-key surface, reporting `count: 1`, `hiddenCount: 0`, and
- * a measured `tag: "BUTTON"`. `observedElement` below is one operator-reported capture of the element's identity,
- * not a uniqueness measurement, and the difference is exactly what this record exists to keep visible.
- *
- * What remains equally unproven, as before and for the same reasons: **what pressing it does.** No live press has
- * happened. `pressOutcome` stays `UNCONFIRMED`.
  */
-export interface WingIssueCalibrationEvidence {
+export interface WingIssueCalibrationRefutation {
   readonly status: typeof LIVE_DOM_CALIBRATION_REFUTED;
   /** When the refuting live run happened. */
   readonly refutedOn: string;
   /** When the (wrong) confirmation was recorded — kept so the gap between claim and check stays legible. */
-  readonly previouslyClaimedOn: string;
+  readonly claimedOn: string;
   /** The sanitized record ids behind the WITHDRAWN uniqueness claim. Retained as provenance, not as support. */
   readonly withdrawnRecordIds: readonly string[];
-  readonly surfaces: readonly ["already_issued_page", "no_key_initial_surface"];
-  readonly pageCategory: "open_api_issuance";
+  /** The surfaces those withdrawn captures covered. Named so nobody re-cites them as coverage. */
+  readonly withdrawnSurfaces: readonly ["already_issued_page", "no_key_initial_surface"];
   /** The spec that was believed calibrated, verbatim, so the refutation names a concrete thing. */
   readonly refutedSpec: { readonly candidateQuery: string; readonly exactText: string };
   /** What the refuted spec matched live: a unique, non-painting node. Counts only. */
   readonly refutedObservation: { readonly visibleMatchCount: 0; readonly nonPaintingMatchCount: 1 };
-  /**
-   * The real control as reported by the operator on 2026-08-09. Structural identity only — no value, no PII.
-   * ONE capture, operator-reported: enough to correct the spec, NOT enough to re-assert calibration.
-   */
-  readonly observedElement: {
-    readonly tag: "BUTTON";
-    readonly label: "API Key 발급 받기";
-    readonly id: "policyAgreementWithAutoCategoryBtn";
-    readonly className: "wing-web-component btn-api-key-gen";
-  };
   /** Signatures observed under the REFUTED spec — i.e. signatures of the decoy. Historical only; never a gate. */
   readonly withdrawnSig16: readonly string[];
-  readonly signatureRole: "EVIDENCE_ONLY";
-  /** The press has never happened. Unchanged by this refutation, and not implied by any future locator fix. */
-  readonly pressOutcome: "UNCONFIRMED";
-  /** What must be measured live before {@link WING_ISSUE_SELECTOR_CALIBRATED} may return to `true`. */
-  readonly reconfirmationRequires: "READ_ONLY_PROBE_VISIBLE_UNIQUE_MATCH_WITH_MEASURED_TAG";
+  /** The claim being retracted, named in full so restoring it requires deleting a sentence that says not to. */
+  readonly withdrawnClaim: "FOUR_AGREEING_CAPTURES_WITH_AN_UNMEASURED_ROLE";
 }
 
-export const WING_ISSUE_CALIBRATION_EVIDENCE: WingIssueCalibrationEvidence = {
+/**
+ * **LIVE-CONFIRMED calibration of the `issue` (발급) control** — the READ-ONLY probe of 2026-08-09 at `e8e62981`,
+ * on the REAL no-key open-API surface, measuring the corrected spec exactly as shipped.
+ *
+ * **Everything under {@link measured} was measured, and the two fields that were not say so in their names.**
+ * That split is the whole point of the shape. The refuted record carried `role: "button"` — a value the
+ * apparatus could not produce, nobody had observed, and nothing marked as unobserved. The locator now returns a
+ * measured `tag`, and `measured.observedTag` is that measurement, sitting beside
+ * `WING_TARGET_EXPECTED_ROLE.issue` rather than substituted for it.
+ *
+ * Be precise about what that agreement proves, because the earlier version of this comment was not. Both sides
+ * are source constants, so the assertion that they match is a guard on **this record**, not on WING: it fires if
+ * someone edits `observedTag` to disagree with the expectation, and it cannot fire because of anything on a live
+ * page. What actually constrains identity at runtime is the triple of a tag-only `candidateQuery` (`"button"`,
+ * so a match can only ever BE a button), the whole-text `exactText` compare, and the visibility filter. The
+ * measured tag is what let the 2026-08-09 failure be *diagnosed*, and it is corroboration here — not the
+ * enforcement layer. There is no runtime tag assertion, and this record must not be read as claiming one.
+ *
+ * **ONE capture. Not four.** The refuted record's four agreeing captures raised confidence in a claim none of
+ * them tested, so capture count was never the missing ingredient — measuring the right property was. This record
+ * therefore makes the weaker, true statement: on one live no-key surface, the shipped spec resolved to exactly one
+ * PAINTING element, and that element is a `BUTTON`. **No cross-surface, cross-session or stability claim is made
+ * or may be inferred**, and the already-issued surface has NOT been re-measured under the corrected spec.
+ *
+ * **The observed `id` / `className` are NOT adopted, and are not kept here at all.** The operator's 2026-08-09
+ * sighting reported them; they are written down in `docs/coupang_wing_issue_selector_calibration_landing_v2.md`
+ * and named in the test that forbids them, and deliberately nowhere in this file. Promoting either to a
+ * production anchor would be a stability guess about markup nobody has watched over time, and a constant sitting
+ * beside the selector is a standing invitation to reach for one. The anchor stays the visible Korean label,
+ * which is what the probe measured.
+ *
+ * **Still not established, unchanged by this landing:** what pressing the control DOES. `pressOutcome` stays
+ * `UNCONFIRMED` — calibration covers the LOCATOR and nothing downstream of it. And this record says nothing about
+ * whether a key exists: `credentialAnchorPresent` read `true` on this confirmed NO-KEY surface, which is exactly
+ * why `wingIssuedStateFrom` answers `indeterminate / NO_DISCRIMINATING_SIGNAL`.
+ *
+ * **`sig16` is `EVIDENCE_ONLY`**, on the same terms as the 삭제 record: one capture cannot establish cross-run
+ * stability, so no runtime path may compare a live signature against this constant. Introducing such a comparison
+ * would create a stability requirement this evidence cannot honestly satisfy.
+ */
+export interface WingIssueCalibrationEvidence {
+  readonly status: typeof LIVE_DOM_CALIBRATION_CONFIRMED;
+  /** Date of the live read-only capture (KST). */
+  readonly capturedOn: string;
+  /** The commit the probe ran on — the code that produced this measurement. */
+  readonly gitSha: string;
+  /** The probe's sanitized record id (no account / seller / URL identity). */
+  readonly recordId: string;
+  readonly pageCategory: "open_api_issuance";
+  /**
+   * The ONE surface the capture was taken on — the already-issued surface is not covered by this record.
+   *
+   * **This is OPERATOR-ATTRIBUTED, not measured**, and {@link surfaceAttribution} says so beside it. The probe
+   * structurally cannot produce it: `wingIssuedStateFrom` answers `NO_DISCRIMINATING_SIGNAL` precisely because
+   * no sanitized signal separates a no-key page from an already-issued one, and `pageCategory` is
+   * `open_api_issuance` on both. It is recorded because the calibration's coverage claim is meaningless without
+   * naming a surface — not because anything in the run verified it.
+   */
+  readonly surface: "no_key_initial_surface";
+  /**
+   * Where {@link surface} came from. The refuted record's fatal field was one the apparatus could not produce
+   * sitting unlabelled among ones it could; this is that label, so the same shape cannot recur silently.
+   */
+  readonly surfaceAttribution: "OPERATOR_REPORTED_NOT_MEASURED";
+  /** The spec measured, verbatim — pinned equal to {@link WING_HIGHLIGHT_LABELS}.issue by test. */
+  readonly measuredSpec: { readonly candidateQuery: "button"; readonly exactText: "API Key 발급 받기" };
+  /**
+   * The measurement, and ONLY the measurement. Every field is something the probe returned; nothing here is an
+   * expectation, an inference, or a property the locator cannot produce.
+   */
+  readonly measured: {
+    /**
+     * Candidates matching the fixed label that PAINT, in the sense `paints()` tests: not `display:none`, not
+     * `visibility:hidden`, non-zero client rects, non-zero box. It does NOT test `opacity`, occlusion, clipping
+     * or viewport position, so "painting" here is weaker than "a human can see it".
+     */
+    readonly visibleCount: 1;
+    /**
+     * Matches of THIS spec rejected for not painting. `0` says no non-painting `API Key 발급 받기` node exists —
+     * it is silent about the 2026-08-09 decoy, whose text was `발급` and which this spec does not match at all.
+     */
+    readonly hiddenCount: 0;
+    /** MEASURED tag of the unique match. */
+    readonly observedTag: "BUTTON";
+    /**
+     * Returned by the probe, and a restatement of `visibleCount === 1` — it resolves uniquely, so a ring could
+     * be attached. No ring was painted on this read-only run, so this is not a confirmation that a highlight is
+     * VISIBLE; that is what the operator's own confirmation in the reveal run is for.
+     */
+    readonly canHighlight: true;
+    /** No fault was raised by the probe. */
+    readonly fault: null;
+  };
+  /** Our own fixed label — the same string as `measuredSpec.exactText`. */
+  readonly label: "API Key 발급 받기";
+  /** Opaque 16-hex structural signature. Provenance only — see `signatureRole`. */
+  readonly sig16: string;
+  /** How many independent live captures back this record. Exactly one, and it is not to be padded. */
+  readonly captureCount: 1;
+  /** Honest limit: a single capture cannot demonstrate cross-run signature stability. */
+  readonly signatureStability: "SINGLE_CAPTURE_NOT_ESTABLISHED";
+  /** What `sig16` is allowed to be used for. `EVIDENCE_ONLY` ⇒ no runtime gate may read it. */
+  readonly signatureRole: "EVIDENCE_ONLY";
+  /** The press has never happened. A calibrated locator does not and cannot imply otherwise. */
+  readonly pressOutcome: "UNCONFIRMED";
+  /**
+   * `credentialAnchorPresent` read `true` on the surface this calibration comes from. The anchor reading IS
+   * measured; "no-key" is the operator attribution above, so this is corroboration of a standing conclusion
+   * rather than an independent proof of it — the anchor is NOT an issued/not-issued discriminator, and nothing
+   * in this record may be read as showing a key does or does not exist. Carried here so the conclusion travels
+   * with the evidence instead of living only in prose.
+   */
+  readonly credentialAnchorPresentOnNoKeySurface: true;
+  /** The issued-state classifier's answer on that same page. Unchanged by this landing. */
+  readonly issuedStateReason: "NO_DISCRIMINATING_SIGNAL";
+  /** The record this replaces. History and retraction — never support for the claim above. */
+  readonly supersedes: WingIssueCalibrationRefutation;
+}
+
+const WING_ISSUE_CALIBRATION_REFUTATION: WingIssueCalibrationRefutation = {
   status: LIVE_DOM_CALIBRATION_REFUTED,
   refutedOn: "2026-08-09",
-  previouslyClaimedOn: "2026-08-08",
+  claimedOn: "2026-08-08",
   withdrawnRecordIds: Object.freeze([
     "wingrec_fc4cbafb42c8",
     "wingrec_b2e87f42abd1",
     "wingrec_42985b029ddd",
     "wingrec_b554c86c0f0b",
   ]),
-  surfaces: Object.freeze(["already_issued_page", "no_key_initial_surface"]) as readonly [
+  withdrawnSurfaces: Object.freeze(["already_issued_page", "no_key_initial_surface"]) as readonly [
     "already_issued_page",
     "no_key_initial_surface",
   ],
-  pageCategory: "open_api_issuance",
   refutedSpec: Object.freeze({ candidateQuery: "button,a,span,div", exactText: "발급" }),
   refutedObservation: Object.freeze({ visibleMatchCount: 0, nonPaintingMatchCount: 1 }) as {
     readonly visibleMatchCount: 0;
     readonly nonPaintingMatchCount: 1;
   },
-  observedElement: Object.freeze({
-    tag: "BUTTON",
-    label: "API Key 발급 받기",
-    id: "policyAgreementWithAutoCategoryBtn",
-    className: "wing-web-component btn-api-key-gen",
-  }) as {
-    readonly tag: "BUTTON";
-    readonly label: "API Key 발급 받기";
-    readonly id: "policyAgreementWithAutoCategoryBtn";
-    readonly className: "wing-web-component btn-api-key-gen";
-  },
   withdrawnSig16: Object.freeze(["d3f775e83c47e9f8", "b7ba43a8e788b4a8"]),
+  withdrawnClaim: "FOUR_AGREEING_CAPTURES_WITH_AN_UNMEASURED_ROLE",
+};
+
+export const WING_ISSUE_CALIBRATION_EVIDENCE: WingIssueCalibrationEvidence = {
+  status: LIVE_DOM_CALIBRATION_CONFIRMED,
+  capturedOn: "2026-08-09",
+  gitSha: "e8e62981",
+  recordId: "wingrec_f5ff0c250e44",
+  pageCategory: "open_api_issuance",
+  surface: "no_key_initial_surface",
+  surfaceAttribution: "OPERATOR_REPORTED_NOT_MEASURED",
+  measuredSpec: Object.freeze({ candidateQuery: "button", exactText: "API Key 발급 받기" }) as {
+    readonly candidateQuery: "button";
+    readonly exactText: "API Key 발급 받기";
+  },
+  measured: Object.freeze({ visibleCount: 1, hiddenCount: 0, observedTag: "BUTTON", canHighlight: true, fault: null }) as {
+    readonly visibleCount: 1;
+    readonly hiddenCount: 0;
+    readonly observedTag: "BUTTON";
+    readonly canHighlight: true;
+    readonly fault: null;
+  },
+  label: "API Key 발급 받기",
+  sig16: "e9da2c58eb9fc190",
+  captureCount: 1,
+  signatureStability: "SINGLE_CAPTURE_NOT_ESTABLISHED",
   signatureRole: "EVIDENCE_ONLY",
   pressOutcome: "UNCONFIRMED",
-  reconfirmationRequires: "READ_ONLY_PROBE_VISIBLE_UNIQUE_MATCH_WITH_MEASURED_TAG",
+  credentialAnchorPresentOnNoKeySurface: true,
+  issuedStateReason: "NO_DISCRIMINATING_SIGNAL",
+  supersedes: WING_ISSUE_CALIBRATION_REFUTATION,
 };
 
 /**
- * Whether the `issue` (발급) fixed label is calibrated — **FALSE**, withdrawn on the refutation above.
+ * Whether the `issue` (발급) fixed label is calibrated — **TRUE**, on the live measurement recorded in
+ * {@link WING_ISSUE_CALIBRATION_EVIDENCE}: `visibleCount: 1`, `hiddenCount: 0`, `observedTag: "BUTTON"` from a
+ * READ-ONLY probe of the shipped spec on the real no-key surface. It was withdrawn between 2026-08-09 and this
+ * landing, and the withdrawal is retained on the record rather than deleted.
  *
- * The spec has been corrected to the element the operator actually reported, and the locator no longer accepts a
- * non-painting match. Neither of those is a measurement. Nobody has yet observed the corrected spec resolve on a
- * live WING page, and re-asserting `true` on the strength of a plausible fix is the identical move that produced
- * the refuted record — a claim about the live DOM written from something other than the live DOM.
+ * The correction and the visibility filter that preceded the probe were **not** measurements, which is why this
+ * flag stayed `false` through them: re-asserting `true` on the strength of a plausible fix is the identical move
+ * that produced the refuted record. What flips it is the probe, and nothing else may.
  *
- * Flipping this back requires a live READ-ONLY probe reporting `count: 1`, `hiddenCount: 0`, `tag: "BUTTON"` on
- * the no-key surface. Until then everything downstream fails closed, and that is the intended state: the manifest
- * reports `selectorsCalibrated: false`, the reveal preflight refuses to display a manifest, the gate refuses the
- * run, and the driver refuses to highlight. A reveal press cannot be reached by any path.
+ * This flag asserts SELECTOR readiness only. It is not an authorization and not a claim about the press: a reveal
+ * run still needs the WING flag, URL screening, a PREPARED manifest bound to a fresh `WALKTHROUGH_*` identity,
+ * the driver's checkpoint-first invariant, and the operator's own press. The agent's click/type/submit budget on
+ * the marketplace remains ZERO, and `pressOutcome` remains `UNCONFIRMED`.
+ *
+ * Setting it back to `false` must keep the reveal walk fully fail-closed — the manifest reports
+ * `selectorsCalibrated: false`, the preflight refuses to display a manifest, the gate refuses with
+ * `SELECTORS_NOT_CALIBRATED`, and the driver refuses to highlight. That direction is tested explicitly, and any
+ * change to {@link WING_HIGHLIGHT_LABELS}.issue invalidates this flag and requires a fresh probe.
  *
  * Note what this does NOT flip: {@link WING_HIGHLIGHT_CALIBRATION} stays `LIVE_DOM_CALIBRATION_PENDING`, because
  * `self_dev` / `vendor_info` / `call_ip` are still unresolved on every surface measured so far.
  */
-export const WING_ISSUE_SELECTOR_CALIBRATED = false as const;
+export const WING_ISSUE_SELECTOR_CALIBRATED = true as const;
 
 /**
  * Whether the `delete` (삭제) fixed label is calibrated against the REAL WING DOM. **TRUE** since the live
