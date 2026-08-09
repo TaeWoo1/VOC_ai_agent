@@ -25,7 +25,13 @@ import {
   type RevealWalkStop,
   type SignalWaitDeps,
 } from "../../src/cli/run-coupang-wing-reveal-live";
-import { WING_REVEAL_CHECKPOINT_LABEL } from "../../src/action-window/coupang-wing-reveal-driver";
+import {
+  STAGE2_DISJUNCTS,
+  WING_EMPIRICALLY_REFUTED_DISJUNCTS,
+  WING_REVEAL_CHECKPOINT_LABEL,
+  stage2DetectionEligibility,
+  stage2DisjunctsWithHeadroom,
+} from "../../src/action-window/coupang-wing-reveal-driver";
 import type { WingRevealOutcome, WingRevealResult } from "../../src/action-window/coupang-wing-reveal-driver";
 import { observeFrom, type WingObservation, type WingStructuralCensus } from "../../src/cli/coupang-wing-classifier";
 
@@ -39,6 +45,13 @@ const SRC = resolve(
 const BASE_CENSUS: WingStructuralCensus = {
   passwordFieldPresent: false,
   submitAffordancePresent: false,
+  // The three Stage-2 signals are MEASURED here, because the shipped census always emits them. A fixture that
+  // omitted them modelled a pre-repair collector, and under the eligibility gate it is a BLIND baseline — every
+  // walk test would have stopped at BLIND_INSTRUMENT, testing the gate instead of the walk. `blindObservation()`
+  // below is the deliberate version of that baseline.
+  dialogLikePresent: false,
+  choiceControlCount: 0,
+  actionControlCount: 3,
   formCount: 2,
   editableTextInputCount: 6,
   readonlyFieldCount: 0,
@@ -54,6 +67,17 @@ function observation(over: Partial<WingStructuralCensus> = {}): WingObservation 
 
 const OPEN_API = observation();
 const AFTER_FORM = observation({ submitAffordancePresent: true });
+
+/**
+ * The baseline the gate exists for: `submitAffordancePresent` is the ONLY disjunct with structural headroom, and
+ * it is the one live evidence refuted on WING. Built by omitting the three Stage-2 census fields — an
+ * unmeasured signal cannot support a transition, so it contributes no headroom, which is exactly the real
+ * pre-repair situation. Structural headroom is 1; eligible detection is 0.
+ */
+function blindObservation(): WingObservation {
+  const { dialogLikePresent: _d, choiceControlCount: _c, actionControlCount: _a, ...rest } = BASE_CENSUS;
+  return observeFrom("wing_host", rest);
+}
 
 function result(over: Partial<WingRevealResult> = {}): WingRevealResult {
   return {
@@ -728,19 +752,32 @@ describe("the report is reported — a run that exits 0 whatever happened is an 
   it("revealExitCode maps each outcome class to its OWN code — asserted by value", () => {
     // The source-token version of this test was vacuous: inverting the codes so an UNEXPECTED outcome exits 0
     // and the expected one exits 6 — the exact opposite of why they exist — passed it unchanged.
-    const base = { stop: "OBSERVED" as const, result: null, outcomeAsExpected: true, cleanupFailed: false };
+    const base = {
+      stop: "OBSERVED" as const,
+      result: null,
+      eligibility: null,
+      outcomeAsExpected: true,
+      cleanupFailed: false,
+    };
     expect(revealExitCode(base)).toBe(0);
     expect(revealExitCode({ ...base, outcomeAsExpected: false })).toBe(6);
     expect(revealExitCode({ ...base, stop: "ABORTED_AT_CHECKPOINT", outcomeAsExpected: false })).toBe(7);
     expect(revealExitCode({ ...base, cleanupFailed: true })).toBe(8);
+    expect(revealExitCode({ ...base, stop: "BLIND_INSTRUMENT", outcomeAsExpected: false })).toBe(9);
     // …and the codes are pairwise distinct, so no two classes can be collapsed.
     const codes = [
       revealExitCode(base),
       revealExitCode({ ...base, outcomeAsExpected: false }),
       revealExitCode({ ...base, stop: "NOT_OPEN_API_SURFACE", outcomeAsExpected: false }),
       revealExitCode({ ...base, cleanupFailed: true }),
+      revealExitCode({ ...base, stop: "BLIND_INSTRUMENT", outcomeAsExpected: false }),
     ];
-    expect(new Set(codes).size).toBe(4);
+    expect(new Set(codes).size).toBe(5);
+    // 9 must not collapse into the generic "nothing observed" 7. They call for opposite responses: 7 can be
+    // retried as-is, 9 cannot — the instrument, not the run, is what failed.
+    expect(revealExitCode({ ...base, stop: "BLIND_INSTRUMENT", outcomeAsExpected: false })).not.toBe(
+      revealExitCode({ ...base, stop: "ABORTED_AT_CHECKPOINT", outcomeAsExpected: false }),
+    );
     // A stuck overlay outranks everything: it is the only one describing state left on the seller's live page.
     expect(revealExitCode({ ...base, stop: "NOT_OPEN_API_SURFACE", cleanupFailed: true })).toBe(8);
   });
@@ -789,5 +826,205 @@ describe("the report is reported — a run that exits 0 whatever happened is an 
     const names = [...body.matchAll(/sentinelPath\(cfg\.statusFile, (REVEAL_\w+)\)/g)].map((m) => m[1]!);
     expect(names).toHaveLength(3);
     expect(new Set(names).size).toBe(3);
+  });
+});
+
+/* ────────────────────── the pre-press detection-eligibility gate ────────────────────── */
+
+/**
+ * The gate that decides whether the operator is asked to press 발급 at all.
+ *
+ * It exists because "this bucket is below its ceiling" and "this signal can move on WING" are different claims,
+ * and the reveal runtime was reading the first as the second. `submitAffordancePresent` has structural headroom on
+ * every WING baseline — `!false` — and live evidence says it cannot fire there, so a capability check that counts
+ * it would pass forever on the strength of the one detector proven blind.
+ *
+ * What the gate does NOT assert: that Stage-2 will be detected. Only that we do not ask for a real marketplace
+ * press when every remaining detector is already refuted.
+ */
+describe("stage2DetectionEligibility — structural headroom is not empirical detectability", () => {
+  it("splits the live-recorded blind baseline into headroom=1, refuted=1, eligible=0", () => {
+    const e = stage2DetectionEligibility(blindObservation());
+    expect(e.structuralHeadroomDisjuncts).toEqual(["submitAffordancePresent"]);
+    expect(e.empiricallyRefutedDisjuncts).toEqual(["submitAffordancePresent"]);
+    // The whole point: headroom is non-empty, and the run is still blind.
+    expect(e.structuralHeadroomDisjuncts.length).toBeGreaterThan(0);
+    expect(e.eligibleDetectionDisjuncts).toEqual([]);
+  });
+
+  it("never counts a refuted disjunct as eligible, on ANY baseline", () => {
+    // Guards the mutation that re-admits `submitAffordancePresent` to the eligible set — the precise regression
+    // that would restore the false-capability reading, and which the count-only assertions above cannot see.
+    for (const obs of [blindObservation(), OPEN_API, AFTER_FORM, observation({ dialogLikePresent: true })]) {
+      const e = stage2DetectionEligibility(obs);
+      for (const refuted of WING_EMPIRICALLY_REFUTED_DISJUNCTS) {
+        expect(e.eligibleDetectionDisjuncts).not.toContain(refuted);
+      }
+      // …and the three layers stay consistent: eligible ⊎ refuted partitions the structural headroom exactly.
+      expect([...e.eligibleDetectionDisjuncts, ...e.empiricallyRefutedDisjuncts].sort()).toEqual(
+        [...e.structuralHeadroomDisjuncts].sort(),
+      );
+    }
+  });
+
+  it("an UNMEASURED signal is not promoted to eligibility", () => {
+    // `undefined` is not a measured zero. A census that never emitted these fields cannot support a transition,
+    // so the fields must contribute nothing — not "no ceiling reached, therefore capable".
+    const e = stage2DetectionEligibility(blindObservation());
+    expect(e.structuralHeadroomDisjuncts).not.toContain("dialogLikePresent");
+    expect(e.structuralHeadroomDisjuncts).not.toContain("choiceControlCountBucket");
+    expect(e.structuralHeadroomDisjuncts).not.toContain("actionControlCountBucket");
+    expect(e.eligibleDetectionDisjuncts).toEqual([]);
+  });
+
+  it("a measured baseline with room yields real eligibility", () => {
+    const e = stage2DetectionEligibility(OPEN_API);
+    expect(e.eligibleDetectionDisjuncts).toEqual([
+      "dialogLikePresent",
+      "choiceControlCountBucket",
+      "actionControlCountBucket",
+    ]);
+  });
+
+  it("a ceilinged measured baseline is blind even though the fields WERE measured", () => {
+    // Measured is not the same as capable. Every ladder at its top ⇒ nothing can rise ⇒ eligible is empty, and
+    // the gate must refuse exactly as it does for the unmeasured case.
+    const e = stage2DetectionEligibility(
+      observation({ dialogLikePresent: true, choiceControlCount: 40, actionControlCount: 40 }),
+    );
+    expect(e.eligibleDetectionDisjuncts).toEqual([]);
+  });
+
+  it("the refuted list is a strict subset of the predicate's disjuncts", () => {
+    // A name that is not a disjunct would subtract nothing and silently weaken the gate to a no-op.
+    for (const r of WING_EMPIRICALLY_REFUTED_DISJUNCTS) expect(STAGE2_DISJUNCTS).toContain(r);
+    expect(WING_EMPIRICALLY_REFUTED_DISJUNCTS.length).toBeLessThan(STAGE2_DISJUNCTS.length);
+  });
+
+  it("refuting a disjunct removes it from eligibility WITHOUT removing it from the predicate", () => {
+    // The predicate keeps `submitAffordancePresent`: a real Stage-2 that does emit `type=submit` should still be
+    // recognised. Only the pre-press capability claim drops it.
+    expect(STAGE2_DISJUNCTS).toContain("submitAffordancePresent");
+    expect(stage2DisjunctsWithHeadroom(blindObservation())).toContain("submitAffordancePresent");
+  });
+});
+
+describe("runRevealWalk — BLIND_INSTRUMENT stops before the operator is asked to act", () => {
+  it("a blind baseline stops the walk and never highlights, checkpoints, or hints the press", async () => {
+    const { driver, io, order, notes } = harness({ classifyObservation: blindObservation() });
+    const report = await runRevealWalk(driver, io, "wing_host");
+
+    expect(report.stop).toBe("BLIND_INSTRUMENT");
+    expect(revealExitCode(report)).toBe(9);
+    // Nothing touched the page beyond the read-only classify — no tag, no overlay, no probe.
+    expect(order).not.toContain("highlight");
+    expect(order).not.toContain("probe");
+    expect(order).not.toContain("note:checkpoint");
+    expect(order).not.toContain("note:presshint");
+    // …and the operator was never asked for the press sentinel, so no press could be reported.
+    expect(order).not.toContain("wait:pressed");
+    expect(order).not.toContain("observe");
+    expect(order).not.toContain("emit");
+    // The overlay teardown still runs on this path, like every other exit.
+    expect(order).toContain("cleanup");
+    expect(noteText(notes)).toContain("BLIND_INSTRUMENT");
+  });
+
+  it("the refusal DISCLOSES all three sets, not just the verdict", async () => {
+    const { driver, io, notes } = harness({ classifyObservation: blindObservation() });
+    await runRevealWalk(driver, io, "wing_host");
+    const text = noteText(notes);
+    expect(text).toContain("structural headroom (1): submitAffordancePresent");
+    expect(text).toContain("empirically refuted on WING (1): submitAffordancePresent");
+    expect(text).toContain("ELIGIBLE detectors (0)");
+  });
+
+  it("the gate reads the ELIGIBLE set, not the structural one", async () => {
+    // The mutation this catches is a one-word swap in the gate condition. Under it the blind baseline — whose
+    // structural headroom is non-empty — sails through to the checkpoint and the operator is asked to press.
+    const { driver, order } = harness({ classifyObservation: blindObservation() });
+    const structural = stage2DisjunctsWithHeadroom(blindObservation());
+    expect(structural.length).toBeGreaterThan(0);
+    await runRevealWalk(driver, harness({ classifyObservation: blindObservation() }).io, "wing_host");
+    expect(order).not.toContain("highlight");
+  });
+
+  it("an ELIGIBLE baseline reaches the checkpoint and the press hint, in order", async () => {
+    const { driver, io, order } = harness();
+    const report = await runRevealWalk(driver, io, "wing_host");
+    expect(report.stop).toBe("OBSERVED");
+    expect(order).toContain("highlight");
+    expect(order).toContain("note:presshint");
+    // Disclosure precedes the press request — the operator learns what can be seen BEFORE being asked to act.
+    expect(order.indexOf("note:checkpoint")).toBeLessThan(order.indexOf("note:presshint"));
+    expect(order.indexOf("note:presshint")).toBeLessThan(order.indexOf("wait:pressed"));
+  });
+
+  it("the eligibility disclosure is printed before the press hint, with the eligible names", async () => {
+    const { driver, io, notes } = harness();
+    await runRevealWalk(driver, io, "wing_host");
+    const text = noteText(notes);
+    const disclosure = text.indexOf("ELIGIBLE detectors (3)");
+    expect(disclosure).toBeGreaterThan(-1);
+    expect(disclosure).toBeLessThan(text.indexOf("Press 발급 YOURSELF"));
+    expect(text).toContain("dialogLikePresent, choiceControlCountBucket, actionControlCountBucket");
+  });
+
+  it("the gate runs BEFORE the highlight even when the 발급 selector is fine", async () => {
+    // Ordering, not just presence: a gate placed after `highlightIssueCheckpoint` would tag and paint the live
+    // page before refusing — the seller sees a spotlight on a control the run then declines to watch.
+    const { driver, io, order } = harness({ classifyObservation: blindObservation(), matchCount: 1 });
+    await runRevealWalk(driver, io, "wing_host");
+    // Narration is filtered out so the assertion pins the INTERACTIONS, not how many lines the disclosure runs to.
+    expect(order.filter((o) => o !== "note")).toEqual(["wait:ready", "classify", "cleanup"]);
+  });
+
+  it("the report carries the eligibility on the refusal path", async () => {
+    const { driver, io } = harness({ classifyObservation: blindObservation() });
+    const report = await runRevealWalk(driver, io, "wing_host");
+    expect(report.eligibility?.eligibleDetectionDisjuncts).toEqual([]);
+    expect(report.eligibility?.structuralHeadroomDisjuncts).toEqual(["submitAffordancePresent"]);
+  });
+
+  it("a walk that never classifies has NO eligibility rather than an empty-looking one", async () => {
+    // `null` and "computed, and empty" are different facts. Defaulting the field to an empty object would make an
+    // aborted run read as a measured blind one.
+    const { driver, io } = harness({ signals: ["abort"] });
+    const report = await runRevealWalk(driver, io, "wing_host");
+    expect(report.stop).toBe("ABORTED_BEFORE_CHECKPOINT");
+    expect(report.eligibility).toBeNull();
+  });
+});
+
+describe("the emitted record carries the computed sets", () => {
+  it("emits all three sets, from the real computation over the run's own baseline", async () => {
+    const { driver, io, emitted } = harness();
+    await runRevealWalk(driver, io, "wing_host");
+    expect(emitted).toHaveLength(1);
+    const rec = emitted[0]!;
+    // Derived, not restated: compared against a fresh computation over the same baseline rather than a literal.
+    expect(rec.detectionEligibility).toEqual(stage2DetectionEligibility(OPEN_API));
+    const e = rec.detectionEligibility as ReturnType<typeof stage2DetectionEligibility>;
+    expect(e.eligibleDetectionDisjuncts.length).toBeGreaterThan(0);
+  });
+
+  it("a bare count is NOT the whole record — the sets themselves survive", async () => {
+    // The pre-repair shape logged `detectableDisjunctCount` and nothing else, so a `SURFACE_UNCHANGED` could not
+    // be read against what the run was able to see. A count alone must never be the only surviving evidence.
+    const { driver, io, emitted } = harness();
+    await runRevealWalk(driver, io, "wing_host");
+    const rec = emitted[0]!;
+    expect(Array.isArray((rec.detectionEligibility as { eligibleDetectionDisjuncts: unknown }).eligibleDetectionDisjuncts)).toBe(true);
+    expect(Array.isArray(rec.detectableDisjuncts)).toBe(true);
+  });
+
+  it("the emitted record stays sanitized — names and enums only", async () => {
+    const { driver, io, emitted } = harness();
+    await runRevealWalk(driver, io, "wing_host");
+    const json = JSON.stringify(emitted[0]);
+    // Disjunct names are field identifiers, never page content. Nothing here may carry a URL, selector, or text.
+    for (const forbidden of ["http", "://", "발급 받기", "querySelector", "button[", "<"]) {
+      expect(json).not.toContain(forbidden);
+    }
   });
 });

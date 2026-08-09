@@ -180,6 +180,8 @@ echo "    $M_OPERATOR_ACTION"
 echo
 echo "  WHAT THIS RUN IS, precisely:"
 echo "    • SellerOps HIGHLIGHTS the 발급 control and RESTS. You press it. The agent clicks/types/submits nothing."
+echo "    • BEFORE asking you to press, it reports which of its Stage-2 detectors are ELIGIBLE on this page. If"
+echo "      none are, it refuses (BLIND_INSTRUMENT, exit 9): nothing is highlighted and you are not asked to act."
 echo "    • The press is EXPECTED to open the API configuration step. That is NOT confirmed — an outcome"
 echo "      SellerOps does not recognize STOPS the run rather than being reported as success."
 echo "    • This press is NOT key creation. The final 확인 creates the key and has no tooling and no phase."
