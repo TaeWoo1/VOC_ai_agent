@@ -790,36 +790,86 @@ describe("the fold carries hiddenCount and containment — and never invents eit
 
 /* ══════════════════════════ the purpose-option candidates ══════════════════════════ */
 
-describe("the purpose-option candidates — traceable, frozen, and deliberately incomplete", () => {
+describe("the purpose-option candidates — traceable, frozen, and now two-thirds guesswork", () => {
   it("holds EXACTLY the wording that traces to something on the record", () => {
-    // Pinned by value. The failure this prevents is a plausible-sounding second-option label (업체연동, 대행,
-    // …) appearing here — invented wording shipped into the live page as an exact-match query, which is the
-    // speculative retuning collector/CLAUDE.md §6 forbids.
-    expect(WING_STAGE2_PURPOSE_OPTION_CANDIDATES.map((c) => c.exactText)).toEqual([
-      "자체개발",
-      "자체 개발",
-      "직접입력",
-      "직접 입력",
+    // Pinned by value, in order. The failure this prevents is unchanged: a plausible-sounding option label
+    // appearing here without a source — invented wording shipped into the live page as an exact-match query,
+    // which is the speculative retuning collector/CLAUDE.md §6 forbids. What changed is that two entries now
+    // trace to an operator reading the screen instead of to a description of it.
+    expect(WING_STAGE2_PURPOSE_OPTION_CANDIDATES.map((c) => [c.id, c.exactText, c.provenance])).toEqual([
+      ["purpose_option.self_dev", "자체개발", "PRODUCT_OWNER_FLOW_DESCRIPTION"],
+      ["purpose_option.self_dev_spaced", "자체 개발", "MECHANICAL_SPACING_VARIANT"],
+      ["purpose_option.direct_input", "직접입력", "PRODUCT_OWNER_FLOW_DESCRIPTION"],
+      ["purpose_option.direct_input_spaced", "직접 입력", "MECHANICAL_SPACING_VARIANT"],
+      ["purpose_option.open_api", "OPEN API", "OPERATOR_TRANSCRIBED"],
+      ["purpose_option.playauto_web_solution", "플레이오토 웹 솔루션", "OPERATOR_TRANSCRIBED"],
     ]);
   });
 
-  it("**does NOT contain a guess at the second radio's label** — its wording is unknown", () => {
-    // Two visible radios were measured; only one has a described counterpart in the product owner's flow
-    // account. A row reading `exactCandidateIndex: -1` for the other is the honest outcome and IS the finding.
+  it("**still contains no GUESS at either label** — the two new entries are a reading, not a hunch", () => {
+    // The previous unit refused to invent the second radio's wording and left `exactCandidateIndex: -1` on the
+    // record as the honest finding. The refusal is what this list still enforces; it is now satisfied by a
+    // transcription rather than by an absence. The guesses that were declined then must not arrive now.
     const all = WING_STAGE2_PURPOSE_OPTION_CANDIDATES.map((c) => c.exactText).join("|");
-    for (const guess of ["업체연동", "업체 연동", "대행", "위탁", "솔루션", "외부"]) {
+    for (const guess of ["업체연동", "업체 연동", "대행", "위탁", "외부"]) {
       expect(all, guess).not.toContain(guess);
     }
   });
 
-  it("every candidate carries a closed provenance, and none claims to be transcribed", () => {
+  it("every candidate carries a closed provenance, and ONLY a screen reading claims to be transcribed", () => {
     for (const c of WING_STAGE2_PURPOSE_OPTION_CANDIDATES) {
       expect(WING_PURPOSE_CANDIDATE_PROVENANCES as readonly string[]).toContain(c.provenance);
-      // OPERATOR_TRANSCRIBED is reserved for wording a human read off the live screen. Nothing here is that,
-      // and a candidate that claimed to be would be laundering a flow description into an observation.
-      expect(c.provenance).not.toBe("OPERATOR_TRANSCRIBED");
       expect(c.rationale.length).toBeGreaterThan(20);
     }
+    // The inverse of the guard this test used to carry. OPERATOR_TRANSCRIBED is reserved for wording a human
+    // read off the live screen; before 2026-08-10 nothing qualified and the test asserted nothing claimed it.
+    // Now exactly the two transcribed entries do, and re-labelling a flow description as one — laundering an
+    // account of WING's copy into an observation of it — is what fails here.
+    const transcribed = WING_STAGE2_PURPOSE_OPTION_CANDIDATES.filter((c) => c.provenance === "OPERATOR_TRANSCRIBED");
+    expect(transcribed.map((c) => c.exactText)).toEqual(["OPEN API", "플레이오토 웹 솔루션"]);
+    for (const c of transcribed) expect(c.rationale).toMatch(/2026-08-10/);
+  });
+
+  it("the transcribed pair matches the LENGTH BANDS the previous run measured, in screen order", () => {
+    // The one falsifiable check available before the calibration re-runs, and the reason the transcription is
+    // worth more than a third opinion: 2026-08-09 measured radio 0's derived name in `short` (1–8 characters)
+    // and radio 1's in `medium` (9–24), knowing nothing of the strings. A transcription that landed outside
+    // those bands would mean the operator read a different element, a different screen, or the wrong order.
+    //
+    // Corroboration, NOT identification. The bands are wide and this ties neither string to either control.
+    const [first, second] = WING_STAGE2_PURPOSE_OPTION_CANDIDATES.filter((c) => c.provenance === "OPERATOR_TRANSCRIBED");
+    expect(first!.exactText.length).toBe(8);
+    expect(first!.exactText.length).toBeGreaterThanOrEqual(1);
+    expect(first!.exactText.length).toBeLessThanOrEqual(8);
+    expect(second!.exactText.length).toBe(11);
+    expect(second!.exactText.length).toBeGreaterThanOrEqual(9);
+    expect(second!.exactText.length).toBeLessThanOrEqual(24);
+  });
+
+  it("the transcribed strings are EXACTLY what a browser would compare — NFC, ASCII spaces, no stray trim", () => {
+    // Two silent no-match modes that a reader cannot see and a review cannot catch by eye:
+    //
+    //  - Decomposed Hangul. `플레이오토` typed or pasted from some macOS sources is NFD; it renders identically
+    //    and compares unequal against the page's NFC. The script does no normalization, by design — normalizing
+    //    would make the record's "exact match" mean something other than exact.
+    //  - A non-breaking space. A label copied out of a rendered page routinely carries U+00A0 where the eye
+    //    sees a space, and the in-page matcher collapses ASCII whitespace only.
+    //
+    // Either would produce `exactCandidateIndex: -1` on a page whose label is character-for-character correct —
+    // and the run would read as a measured non-match rather than as our own bug.
+    for (const c of WING_STAGE2_PURPOSE_OPTION_CANDIDATES.filter((x) => x.provenance === "OPERATOR_TRANSCRIBED")) {
+      expect(c.exactText.normalize("NFC"), `${c.id} is not NFC`).toBe(c.exactText);
+      expect(c.exactText, `${c.id} carries a non-ASCII space`).not.toMatch(/[\u00a0\u1680\u2000-\u200b\u202f\u205f\u3000]/);
+      expect(c.exactText.trim()).toBe(c.exactText);
+      expect(c.exactText).not.toMatch(/\s\s/);
+    }
+    // Pinned by CODE POINT off the SHIPPED value — not off a literal re-typed here, which would only compare a
+    // mistake against a copy of itself. This is the assertion a "harmless" re-typing breaks.
+    const shipped = (id: string): string => WING_STAGE2_PURPOSE_OPTION_CANDIDATES.find((c) => c.id === id)!.exactText;
+    expect([...shipped("purpose_option.open_api")].map((ch) => ch.codePointAt(0))).toEqual([79, 80, 69, 78, 32, 65, 80, 73]);
+    expect([...shipped("purpose_option.playauto_web_solution")].map((ch) => ch.codePointAt(0))).toEqual([
+      0xd50c, 0xb808, 0xc774, 0xc624, 0xd1a0, 32, 0xc6f9, 32, 0xc194, 0xb8e8, 0xc158,
+    ]);
   });
 
   it("every MECHANICAL_SPACING_VARIANT really is a spacing transform of a flow-description entry", () => {
@@ -856,6 +906,51 @@ describe("the purpose-option candidates — traceable, frozen, and deliberately 
       expect(() => {
         (c as { exactText: string }).exactText = "무엇이든";
       }).toThrow();
+    }
+  });
+
+  it("PREDICTS the calibration re-run: the real script, the shipped list, a DOM as transcribed", () => {
+    // What this unit is actually for. The two strings are only worth a live grant if they turn each row's -1
+    // into an index, so the prediction is written down BEFORE the run rather than recognized after it: build a
+    // fake Stage-2 exactly as the operator described — two radios, one `name` group, one `label[for]` each,
+    // bearing the transcribed text — and run the REAL generated script against the REAL shipped candidate list.
+    //
+    // If the live run returns anything other than this, the difference is the finding, and it is not
+    // renegotiable after the fact. It cannot be a matcher bug: the same matcher produced the expectation.
+    const r0 = RADIO({ id: "p0", name: "purpose" });
+    const r1 = RADIO({ id: "p1", name: "purpose" });
+    const { sanitized } = runAssoc([r0, r1], WING_STAGE2_PURPOSE_OPTION_CANDIDATES.map((c) => c.exactText), {
+      forLabels: {
+        p0: [new Ctl("LABEL", {}, "OPEN API")],
+        p1: [new Ctl("LABEL", {}, "플레이오토 웹 솔루션")],
+      },
+    });
+    expect(sanitized.visibleChoiceControlCount).toBe(2);
+    expect(sanitized.nameGroupCount).toBe(1);
+    expect(sanitized.largestNameGroupSize).toBe(2);
+    expect(sanitized.ungroupedCount).toBe(0);
+    expect(sanitized.candidatesCompared).toBe(6);
+    expect(sanitized.rows.map((x) => [x.index, x.nameSource, x.nameLengthBucket, x.exactCandidateIndex, x.containsCandidateIndex, x.labelForCount, x.groupIndex])).toEqual([
+      [0, "LABEL_FOR", "short", 4, 4, 1, 0],
+      [1, "LABEL_FOR", "medium", 5, 5, 1, 0],
+    ]);
+    // The indices are the whole point, so tie them to the ids rather than leaving 4 and 5 as bare numerals that
+    // a reordering of the list would silently re-aim at a different candidate.
+    expect(WING_STAGE2_PURPOSE_OPTION_CANDIDATES[sanitized.rows[0]!.exactCandidateIndex]!.id).toBe("purpose_option.open_api");
+    expect(WING_STAGE2_PURPOSE_OPTION_CANDIDATES[sanitized.rows[1]!.exactCandidateIndex]!.id).toBe("purpose_option.playauto_web_solution");
+    // …and the four flow-description candidates still match NOTHING on that screen. The previous run measured
+    // that, and adding two entries must not quietly turn one of them into a hit.
+    expect(sanitized.rows.every((x) => x.exactCandidateIndex >= 4)).toBe(true);
+  });
+
+  it("the transcribed strings do not COLLIDE with the older candidates in either direction", () => {
+    // `exactCandidateIndex` takes the FIRST match, so a new entry that a flow-description entry is a substring
+    // of (or vice versa) would make the reported index depend on list order — and the docstring says order
+    // carries no claim. Checked, rather than asserted in prose.
+    const cs = WING_STAGE2_PURPOSE_OPTION_CANDIDATES.map((c) => c.exactText);
+    for (const a of cs) for (const b of cs) {
+      if (a === b) continue;
+      expect(a.includes(b), `${a} contains ${b} — the first-match rule makes the index order-dependent`).toBe(false);
     }
   });
 
@@ -1475,8 +1570,24 @@ describe("WING_STAGE2_LABEL_CALIBRATION_EVIDENCE — measured, inferred, and sti
 
   it("records the candidate NON-match across the whole set, not a partial sweep", () => {
     expect(E.purposeCandidatesMatched).toBe(0);
-    // Tied to the shipped list, so a fifth candidate cannot leave the record claiming complete coverage.
-    expect(E.candidatesCompared).toBe(WING_STAGE2_PURPOSE_OPTION_CANDIDATES.length);
+    // This read `candidatesCompared === WING_STAGE2_PURPOSE_OPTION_CANDIDATES.length` — "so a fifth candidate
+    // cannot leave the record claiming complete coverage" — and the fifth and sixth arrived. The guard was
+    // right; the equality was the wrong way to hold it, because a past run cannot own the current set. The
+    // record now NAMES its four, and what postdates it is acknowledged here by name.
+    expect(E.comparedCandidateIds).toHaveLength(E.candidatesCompared);
+    expect(new Set(E.comparedCandidateIds).size).toBe(E.candidatesCompared);
+    const shippedIds = WING_STAGE2_PURPOSE_OPTION_CANDIDATES.map((c) => c.id);
+    for (const id of E.comparedCandidateIds) expect(shippedIds).toContain(id);
+    expect(shippedIds.filter((id) => !(E.comparedCandidateIds as readonly string[]).includes(id))).toEqual([
+      // Added 2026-08-10 from the operator's verbatim transcription; this run predates both and compared neither.
+      "purpose_option.open_api",
+      "purpose_option.playauto_web_solution",
+    ]);
+    // …and every id it DID compare is a flow-description entry or a spacing variant — never a transcription.
+    // Otherwise the record's headline non-match would be reporting a failure to match what the screen says.
+    for (const id of E.comparedCandidateIds) {
+      expect(WING_STAGE2_PURPOSE_OPTION_CANDIDATES.find((c) => c.id === id)!.provenance).not.toBe("OPERATOR_TRANSCRIBED");
+    }
     for (const r of E.rows) {
       expect(r.exactCandidateIndex).toBe(-1);
       expect(r.containsCandidateIndex).toBe(-1);
@@ -1503,6 +1614,47 @@ describe("WING_STAGE2_LABEL_CALIBRATION_EVIDENCE — measured, inferred, and sti
     expect(E.visibleWordingDiffersFromFlowDescription).toEqual({ provenance: "INFERRED", tested: false });
   });
 
+  it("the record's FIELD SET is exactly the declared one — no field may be added to it", () => {
+    // The recon record has carried this guard since the denylist beside it let two purpose-option spellings and
+    // a page sentence through. This record — the bigger one, and the one holding the signature it is careful not
+    // to promote — never got it, and THIS unit is how that showed: `comparedCandidateIds` was added below and
+    // nothing objected. A field can be added to a sanitized record silently exactly once.
+    const keys = (o: object): string[] => Object.keys(o).sort();
+    expect(keys(E)).toEqual([
+      "absenceExplanationOutcome", "approvalId", "associationFault", "associationRowsTruncated",
+      "associationScanTruncated", "candidates", "candidatesCompared", "candidatesMeasured",
+      "candidatesNotMeasured", "captureCount", "choiceControlCountBucket", "comparedCandidateIds",
+      "confirmLocated", "containmentFaults", "containmentMeasured", "containmentScanTruncated",
+      "credentialAnchorPresent", "gitSha", "groupContainerCount", "hiddenChoiceControlCount",
+      "issuedStateReason", "keyCreationRuledOut", "largestNameGroupSize", "nameGroupCount", "observedOn",
+      "openApiMarkerPresent", "operatorPressedConfirm", "operatorSelectedPurpose", "precondition", "probeFaults",
+      "purposeCandidatesMatched", "purposeOptionSemanticsMeasured", "recordId", "refines", "rows", "runId",
+      "shapeCensusBucketsTruncated", "shapeCensusScanTruncated", "signatureStability", "ungroupedCount",
+      "visibleChoiceControlCount", "visibleShapes", "visibleWordingDiffersFromFlowDescription",
+    ]);
+    expect(keys(E.confirmLocated)).toEqual([
+      "effectMeasured", "hiddenExactMatchCount", "isFinalIssuanceControl", "pressed", "sig16", "signatureRole",
+      "uniquenessScope", "verdict", "visibleExactMatchCount",
+    ]);
+    expect(keys(E.absenceExplanationOutcome)).toEqual([
+      "hypothesis", "notPresentInAnyForm", "presentOnlyInNonPaintingNodes", "verdict",
+      "wholeTextMismatchOnPaintingElement",
+    ]);
+    expect(keys(E.visibleWordingDiffersFromFlowDescription)).toEqual(["provenance", "tested"]);
+    expect(keys(E.rows[0])).toEqual([
+      "ancestorLabelCount", "ariaLabelledbyRefCount", "ariaLabelledbyResolvedCount", "containsCandidateIndex",
+      "exactCandidateIndex", "groupIndex", "hasIdAttr", "index", "labelElementPaintMeasured", "labelForCount",
+      "nameLengthBucket", "nameSource",
+    ]);
+    expect(keys(E.visibleShapes[0])).toEqual(["count", "inputType", "role", "tag"]);
+    for (const q of Object.values(E.candidates)) {
+      expect(keys(q)).toEqual([
+        "deepestContainsHidden", "deepestContainsVisible", "exactHidden", "exactVisible", "hiddenMatchCount",
+        "presence",
+      ]);
+    }
+  });
+
   it("carries the full containment quad per candidate, keyed by OUR candidate ids", () => {
     // The quad is on the record because the summary below is DERIVED from it. Without it the split is a claim
     // about data nobody can see — and the first version of this record got that split backwards.
@@ -1512,7 +1664,11 @@ describe("WING_STAGE2_LABEL_CALIBRATION_EVIDENCE — measured, inferred, and sti
     // `operator_reported` marker from an id whose whole point is that it is operator-reported, not measured.
     const shipped = Object.values(WING_STAGE2_RECON_CANDIDATES).flat().map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect([...ids].sort()).toEqual([...shipped].sort());
+    for (const id of ids) expect(shipped).toContain(id);
+    // The equality this used to assert broke when the verbatim heading was added on 2026-08-10 — the same
+    // past-run-owns-the-current-set mistake as the two coverage counts. A candidate this run never probed has to
+    // be named here rather than quietly folded into its quads.
+    expect(shipped.filter((id) => !ids.includes(id))).toEqual(["stage2.purpose.operator_verbatim"]);
     // Every recon absence is present here, and so is the one candidate that was not an absence.
     for (const id of E.refines.absentCandidateIds) expect(ids).toContain(id);
     expect(ids).toContain("stage2.confirm.confirm");

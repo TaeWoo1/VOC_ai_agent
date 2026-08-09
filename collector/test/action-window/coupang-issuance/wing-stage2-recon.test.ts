@@ -135,7 +135,7 @@ describe("the Stage-2 sweep folds like the initial-surface one", () => {
   it("probes every candidate of every requested target, and nothing else", () => {
     const specs = wingStage2ReconProbes(["purpose", "confirm"]);
     const ids = specs.map((s) => s.targetId);
-    expect(ids).toEqual(["stage2.purpose.operator_reported", "stage2.confirm.confirm"]);
+    expect(ids).toEqual(["stage2.purpose.operator_reported", "stage2.purpose.operator_verbatim", "stage2.confirm.confirm"]);
     // Every string sent to the page is one WE wrote — a candidate's own frozen fields.
     for (const s of specs) {
       const all = Object.values(WING_STAGE2_RECON_CANDIDATES).flat();
@@ -539,9 +539,10 @@ describe("runWingSelectorRecord — the Stage-2 sweep in the orchestrator", () =
     const { d, probed, censusCalls } = deps();
     const r = await runWingSelectorRecord(d, [], { stage2: ["purpose", "confirm"] });
     expect(r.stage2?.precondition).toBe("OK");
-    expect(probed).toHaveLength(2);
+    // 2 purpose candidates (the 08-09 report and the 08-10 verbatim transcription) + 1 confirm.
+    expect(probed).toHaveLength(3);
     expect(censusCalls()).toBe(1);
-    expect(r.stage2?.candidatesMeasured).toBe(2);
+    expect(r.stage2?.candidatesMeasured).toBe(3);
     expect(r.stage2?.choiceControls?.visibleChoiceControlCount).toBe(2);
   });
 
@@ -816,10 +817,25 @@ describe("WING_STAGE2_RECON_EVIDENCE — measured, operator-reported, and inferr
     // asserting nothing went unmeasured. That is exactly the measured/unmeasured conflation NOT_MEASURED exists
     // to prevent.
     expect(new Set(e.absentCandidateIds).size).toBe(7);
-    // …and 8 is tied to the SET, not typed in. Adding a ninth candidate left the record claiming complete
-    // coverage of a set it did not cover.
-    const allCandidates = Object.values(WING_STAGE2_RECON_CANDIDATES).flat();
-    expect(e.candidatesMeasured).toBe(allCandidates.length);
+    // …and 8 is tied to the IDS, not typed in. This guard previously read `candidatesMeasured ===
+    // WING_STAGE2_RECON_CANDIDATES.length`, and it fired the moment a ninth candidate was added — correctly,
+    // because the record then claimed coverage of a set it had not covered. But that equality can only be kept
+    // true by editing it, and a record of a past run cannot own a property of the current set. So the record now
+    // NAMES what it measured, and the count is checked against that.
+    expect(e.measuredCandidateIds).toHaveLength(e.candidatesMeasured);
+    expect(new Set(e.measuredCandidateIds).size).toBe(e.candidatesMeasured);
+    for (const id of e.absentCandidateIds) expect(e.measuredCandidateIds).toContain(id);
+    // The one measured id that is NOT an absence is the one that resolved.
+    expect(e.measuredCandidateIds.filter((id) => !(e.absentCandidateIds as readonly string[]).includes(id))).toEqual(["stage2.confirm.confirm"]);
+    // Every id is still a real candidate, so renaming or deleting one breaks the record instead of orphaning it.
+    const all = Object.values(WING_STAGE2_RECON_CANDIDATES).flat().map((c) => c.id);
+    for (const id of e.measuredCandidateIds) expect(all).toContain(id);
+    // What the old equality was really protecting: a candidate added AFTER this run must not be silently swept
+    // under its coverage. Any addition has to be acknowledged here, by name, with the reason it postdates it.
+    expect(all.filter((id) => !(e.measuredCandidateIds as readonly string[]).includes(id))).toEqual([
+      // Added 2026-08-10 from the operator's verbatim transcription; this run predates it and never probed it.
+      "stage2.purpose.operator_verbatim",
+    ]);
   });
 
   it("every absent id is a REAL candidate id from the frozen sets", () => {
@@ -858,6 +874,7 @@ describe("WING_STAGE2_RECON_EVIDENCE — measured, operator-reported, and inferr
       "absenceBounds", "absenceExplanation", "absentCandidateIds", "bucketsTruncated", "candidatesMeasured",
       "candidatesNotMeasured", "captureCount", "confirmLocated", "gitSha",
       "groupContainerCount", "hiddenChoiceControlCount", "issuedStateReason", "keyCreationRuledOut",
+      "measuredCandidateIds",
       "observedOn", "operatorPressedConfirm", "operatorSelectedPurpose", "precedingRefusal", "precondition",
       "probeFaults", "purposeOptionSemanticsMeasured", "recordId", "runId", "scanTruncated",
       "signatureStability", "surfaceVisibility", "visibleChoiceControlCount", "visibleShapes",
