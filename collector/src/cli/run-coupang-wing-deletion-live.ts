@@ -10,9 +10,11 @@
  * THEMSELVES. SellerOps never logs in, clicks, types, submits, deletes, or reads a value — it reads only a
  * sanitized page category to confirm the page changed.
  *
- * **Fails closed in FOUR layers.** The 삭제 selector is now live-calibrated
- * (`WING_DELETION_CALIBRATION_EVIDENCE`), so layers 3–4 no longer refuse on calibration and this entrypoint is
- * EXECUTABLE — but only under all four, and it still deletes nothing itself:
+ * **Fails closed in FOUR layers, and layer 3 is currently CLOSED.** The 삭제 calibration was WITHDRAWN on
+ * 2026-08-09 (`WING_DELETION_CALIBRATION_EVIDENCE`: the capture predates the locator's visibility filter, and
+ * its `role` was never measured), so `WING_DELETION_SELECTORS_CALIBRATED` is `false` and this entrypoint is NOT
+ * executable — the gate refuses `SELECTORS_NOT_CALIBRATED` before anything launches. Nothing that worked was
+ * lost: no live deletion run has ever been performed. The four layers, in order, none of which it may skip:
  *   1. refuses without `--i-understand-this-opens-live-coupang-wing` (`hasCoupangWingRunApproval` — a NAVER grant
  *      never opens WING);
  *   2. `screenWingUrl`-fail-closed BEFORE Chrome launches (only the WING / auth host);
@@ -96,6 +98,15 @@ export function gateRefusalCause(
    * source. The DEFAULT is the real check — a caller that forgets to inject gets the strict behaviour.
    */
   verifyIdentity: typeof verifyRepoIdentity = verifyRepoIdentity,
+  /**
+   * 삭제 calibration seam, same contract as `verifyIdentity`: the DEFAULT is the shipped constant, never a
+   * hardcoded `true`, so the withdrawal closes this path without the gate being touched. It exists because
+   * `SELECTORS_NOT_CALIBRATED` short-circuits ahead of every other cause — with the calibration withdrawn the
+   * phase binding, identity, host and scope refusals would all become untestable, which is coverage being
+   * silently deleted rather than a run being closed. `main()` calls this with ONE argument; a test proves that,
+   * and a test proves the default refuses.
+   */
+  calibrated: boolean = WING_DELETION_SELECTORS_CALIBRATED,
 ): string | null {
   // The four scope fields come from the phase spec, NOT the environment: the operator's grant binds to them, so
   // a stale `.env` must never be able to make a destructive manifest describe a different run. The gate pins
@@ -117,7 +128,7 @@ export function gateRefusalCause(
     cli: WKD.cli,
     driver: WKD.driver,
     declaredActions: WKD.capableActions,
-    selectorsCalibrated: WING_DELETION_SELECTORS_CALIBRATED,
+    selectorsCalibrated: calibrated,
     runId: env("WALKTHROUGH_RUN_ID") ?? "unknown",
     approvalId: env("WALKTHROUGH_APPROVAL_ID") ?? "unknown",
     gitSha: env("WALKTHROUGH_GIT_COMMIT") ?? "unknown",

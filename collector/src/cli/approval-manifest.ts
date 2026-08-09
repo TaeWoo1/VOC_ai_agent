@@ -82,8 +82,9 @@ export const CALIBRATION_PHASES = [
   // and rests at a checkpoint; it NEVER clicks/deletes); the DESTRUCTIVE, IRREVERSIBLE action is the OPERATOR's
   // (deleting their WING self-developed Open API key — which immediately invalidates the existing Access/Secret
   // Key and is NOT recoverable). It highlights a real control ⇒ `allowsHighlight: true` ⇒ it FAILS CLOSED
-  // (`SELECTORS_NOT_CALIBRATED`) unless the caller states the 삭제 calibration (live-confirmed since 2026-08-07;
-  // this module never assumes it — see § step 7); and it also requires the immutable
+  // (`SELECTORS_NOT_CALIBRATED`) unless the caller states the 삭제 calibration — WITHDRAWN 2026-08-09, so in
+  // practice this phase currently cannot reach PREPARED at all; this module never assumes it — see § step 7);
+  // and it also requires the immutable
   // operator-destructive-action contract (§ steps 7 + destructive-action check). Its scope is a marketplace
   // mutation the operator performs, so it is the FIRST phase to carry an `operatorDestructiveAction` descriptor.
   "COUPANG_WING_KEY_DELETION",
@@ -468,11 +469,12 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   },
   COUPANG_WING_KEY_DELETION: {
     phase: "COUPANG_WING_KEY_DELETION",
-    // Both original blockers are now resolved: the driver + CLI are built, and the 삭제 control is live-calibrated
-    // (`WING_DELETION_CALIBRATION_EVIDENCE`). A PREPARED destructive manifest is therefore emittable — but only
-    // when the CALLER passes `selectorsCalibrated: true` (see below: this module still defaults every WING phase
-    // to `false`, so a caller who omits it fails closed), the destructive descriptor matches the immutable
-    // canonical values exactly, and the `WALKTHROUGH_*` identity is bound. PREPARED is still not APPROVED.
+    // The driver + CLI are built, but the 삭제 calibration was WITHDRAWN on 2026-08-09
+    // (`WING_DELETION_CALIBRATION_EVIDENCE`), so no caller currently passes `selectorsCalibrated: true` and this
+    // phase does not reach PREPARED. The shape is unchanged for when it does: a PREPARED destructive manifest
+    // needs the CALLER to state the calibration (this module still defaults every WING phase to `false`, so a
+    // caller who omits it fails closed), the destructive descriptor to match the immutable canonical values
+    // exactly, and the `WALKTHROUGH_*` identity to be bound. PREPARED is still not APPROVED.
     cli: "src/cli/run-coupang-wing-deletion-live.ts",
     driver: "CoupangWingDeletionDriver (Action Window highlight/observe — the operator deletes; the agent never clicks)",
     // AGENT capability is READ_ONLY highlight/observe: open the window, wait for the operator to reach the
@@ -968,9 +970,9 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
   // and the WING calibration state must be passed IN by the caller (`run-coupang-wing-deletion-live.ts` feeds
   // `WING_DELETION_SELECTORS_CALIBRATED`). That keeps the default fail-closed — a caller who forgets the field
   // gets `SELECTORS_NOT_CALIBRATED` rather than silently inheriting another surface's calibration. The 삭제
-  // control IS live-calibrated now, so the deletion phase reaches PREPARED when the caller states it; withdraw
-  // the flag and the whole destructive path closes again. The read-only WING selector probe never highlights, so
-  // the gate below is skipped for it regardless.
+  // calibration is currently WITHDRAWN, so no caller states it and the deletion phase does not reach PREPARED at
+  // all — the whole destructive path is closed. The read-only WING selector probe never highlights, so the gate
+  // below is skipped for it regardless.
   const isWingPhase = isWingCalibrationPhase(spec.phase);
   const calibrated = input.selectorsCalibrated ?? (isWingPhase ? false : SELECTORS_CALIBRATED);
   if (spec.allowsHighlight && !calibrated) {

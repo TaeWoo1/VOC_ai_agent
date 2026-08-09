@@ -135,9 +135,11 @@ describe("run-coupang-wing-deletion-live CLI — source guard (gated, fail-close
 });
 
 /**
- * The calibration landing's own guards. The 삭제 selector is now live-confirmed, which makes the destructive path
- * EXECUTABLE — so these lock the two things that could quietly make the flip dishonest: retuning the selector the
- * evidence was measured against, and promoting the recorded `sig16` into a runtime anchor that one capture cannot
+ * The calibration's own guards. They were written when the flip made the destructive path EXECUTABLE; the
+ * calibration is now WITHDRAWN and the path is closed, but every one of them still applies — a withdrawn selector
+ * is exactly when a "harmless" retune looks safest. They lock the two things that could quietly make a flip
+ * dishonest: retuning the selector the evidence was measured against, and promoting the recorded `sig16` into a
+ * runtime anchor that one capture cannot
  * support.
  */
 describe("삭제 calibration landing — the flip cannot outrun its evidence", () => {
@@ -149,10 +151,12 @@ describe("삭제 calibration landing — the flip cannot outrun its evidence", (
     expect(WING_DELETION_CALIBRATION_EVIDENCE.label).toBe(WING_DELETION_LABELS.delete.exactText);
   });
 
-  it("the recorded role is provenance only — the locator does NOT filter on it", () => {
-    // The capture observed role=button, but the locator still counts every candidate in `candidateQuery`. If it
-    // filtered on role it would be measuring something different from what was calibrated.
-    expect(WING_DELETION_CALIBRATION_EVIDENCE.role).toBe("button");
+  it("claims no role at all — the field that was never measured is gone, not renamed", () => {
+    // It used to read `role: "button"`, documented "as measured". It was not: the value came from
+    // `WING_TARGET_EXPECTED_ROLE.delete`, the hardcoded EXPECTED-role table, which is the identical over-claim
+    // that got the 발급 calibration refuted. The expectation already has a home; this record must not restate it.
+    expect("role" in WING_DELETION_CALIBRATION_EVIDENCE).toBe(false);
+    // The locator counts every candidate in `candidateQuery` and filters on no role, then or now.
     expect(WING_DELETION_LABELS.delete.candidateQuery).toContain("a,span,div");
   });
 
@@ -247,7 +251,7 @@ describe("삭제 calibration landing — the flip cannot outrun its evidence", (
   });
 
   it("the recorded sig16 literal appears ONLY in the provenance module, never in a runtime comparison", () => {
-    const literal = WING_DELETION_CALIBRATION_EVIDENCE.sig16;
+    const literal = WING_DELETION_CALIBRATION_EVIDENCE.withdrawnSig16;
     expect(literal).toMatch(/^[0-9a-f]{16}$/); // the assertion below is only meaningful for a real 16-hex token
     expect(codeOnly(LABELS_MODULE)).toContain(literal);
     for (const path of [DRIVER, CLI]) expect(codeOnly(path)).not.toContain(literal);
@@ -273,9 +277,16 @@ describe("삭제 calibration landing — the flip cannot outrun its evidence", (
 
   it("the CLI still feeds the calibration flag to the gate rather than asserting calibration itself", () => {
     // Calibration must remain a value the approval gate checks, not something the destructive CLI declares true
-    // inline — otherwise withdrawing the flag would no longer close the path.
+    // inline — otherwise withdrawing the flag would no longer close the path. The value now arrives through a
+    // parameter so the gate's other causes stay testable while the calibration is withdrawn, but the
+    // parameter's DEFAULT must still be the shared constant: that is what `main()` gets, since it passes only
+    // the URL.
     const code = codeOnly(CLI);
-    expect(code).toContain("selectorsCalibrated: WING_DELETION_SELECTORS_CALIBRATED");
-    expect(code).not.toContain("selectorsCalibrated: true");
+    expect(code).toMatch(/calibrated:\s*boolean\s*=\s*WING_DELETION_SELECTORS_CALIBRATED/);
+    expect(code).toContain("selectorsCalibrated: calibrated");
+    expect(code).not.toMatch(/selectorsCalibrated:\s*true/);
+    // …and `main()` must not start injecting one. `gateRefusalCause(url)` — one argument, no seam.
+    expect(code).toContain("gateRefusalCause(url)");
+    expect(code).not.toMatch(/gateRefusalCause\(url,/);
   });
 });

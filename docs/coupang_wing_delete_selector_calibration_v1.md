@@ -1,5 +1,13 @@
 # Coupang WING Delete Selector — Live Calibration Landing v1
 
+> **⚠ WITHDRAWN 2026-08-09 — this calibration no longer holds, and `WING_DELETION_SELECTORS_CALIBRATED` is
+> `false`.** The capture below was real, but it was taken at `a666ad1`, **before** `buildFixedLabelLocateScript`
+> gained its visibility filter at `a3ef479e` — so `matchCount: 1` was produced by the same locator version that,
+> on the 발급 target, reported a confident unique match against a node that does not render. And `role: "button"`
+> was never measured: it came from the hardcoded EXPECTED-role table. The record's state is
+> `LIVE_DOM_CALIBRATION_APPARATUS_UNSOUND` — unsupported, not disproved. Everything below is retained as history.
+> See `docs/coupang_wing_delete_calibration_withdrawal_v1.md`.
+
 > **Status:** `DELETE_SELECTOR_LIVE_CALIBRATION_PASS`, captured 2026-08-07 on `main @ a666ad1`. Real Coupang
 > WING, an **already-issued** account, fully sanitized. **Zero 삭제 press, zero highlight, zero click/type,
 > zero credential value read, zero raw DOM / HTML / screenshot / URL / PII.** This document is the provenance

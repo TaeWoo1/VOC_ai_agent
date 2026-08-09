@@ -51,23 +51,51 @@ afterEach(() => {
   saved.clear();
 });
 
+/**
+ * The 삭제 calibration is WITHDRAWN, so the shipped gate short-circuits on `SELECTORS_NOT_CALIBRATED` ahead of
+ * every other cause. These cases are about the OTHER causes and their ordering, so they inject a calibrated gate
+ * to reach them — otherwise the withdrawal would silently delete this file's coverage instead of closing a run.
+ * The block below holds the injection honest: the uninjected default must refuse, and `main()` must call the gate
+ * with no injection at all.
+ */
+const CALIBRATED = true;
+
+describe("deletion CLI gate — the WITHDRAWN calibration closes the destructive run", () => {
+  it("the UNINJECTED default refuses with SELECTORS_NOT_CALIBRATED, even when everything else is perfect", () => {
+    boundIdentity();
+    // A bound identity and a passing identity check — the calibration is the only thing wrong, and on an
+    // irreversible path it has to be enough on its own.
+    expect(gateRefusalCause(WING_DEFAULT_URL, VERIFIED)).toBe("SELECTORS_NOT_CALIBRATED");
+  });
+
+  it("the refusal wins over a git problem — an uncalibrated destructive run is not a commit-and-retry", () => {
+    // Ordering matters here more than on the reveal gate: "your tree is dirty" invites a retry, and this run must
+    // not become reachable by retrying anything. (An off-target HOST still wins over both — screening runs first,
+    // and pointing a destructive run at the wrong site is the more urgent thing to say.)
+    boundIdentity();
+    expect(gateRefusalCause(WING_DEFAULT_URL, () => ({ ok: false, cause: "DIRTY_TREE", reason: "d" }))).toBe(
+      "SELECTORS_NOT_CALIBRATED",
+    );
+  });
+});
+
 describe("deletion CLI gate — passes only for a bound identity on verified code", () => {
   it("a bound identity + verified repository → no refusal", () => {
     boundIdentity();
-    expect(gateRefusalCause(WING_DEFAULT_URL, VERIFIED)).toBeNull();
+    expect(gateRefusalCause(WING_DEFAULT_URL, VERIFIED, CALIBRATED)).toBeNull();
   });
 
   it("an unbound identity refuses, and the browser is never reached", () => {
     for (const key of ["WALKTHROUGH_RUN_ID", "WALKTHROUGH_APPROVAL_ID", "WALKTHROUGH_GIT_COMMIT"] as const) {
       boundIdentity();
       delete process.env[key];
-      expect(gateRefusalCause(WING_DEFAULT_URL, VERIFIED), key).toBe("UNBOUND_IDENTITY");
+      expect(gateRefusalCause(WING_DEFAULT_URL, VERIFIED, CALIBRATED), key).toBe("UNBOUND_IDENTITY");
     }
   });
 
   it("a non-WING host refuses", () => {
     boundIdentity();
-    expect(gateRefusalCause("https://example.com/whatever", VERIFIED)).toBe("INVALID_HOST");
+    expect(gateRefusalCause("https://example.com/whatever", VERIFIED, CALIBRATED)).toBe("INVALID_HOST");
   });
 });
 
@@ -81,7 +109,7 @@ describe("deletion CLI gate — the repository identity is verified, not assumed
 
   it.each(REFUSALS)("$cause refuses the run", ({ cause, reason }) => {
     boundIdentity();
-    const refusal = gateRefusalCause(WING_DEFAULT_URL, () => ({ ok: false, cause, reason }));
+    const refusal = gateRefusalCause(WING_DEFAULT_URL, () => ({ ok: false, cause, reason }), CALIBRATED);
     expect(refusal).not.toBeNull();
     expect(refusal).toContain(cause);
   });
@@ -91,7 +119,7 @@ describe("deletion CLI gate — the repository identity is verified, not assumed
     // could never have been approved. Also proves the identity check is not what is doing the refusing above.
     boundIdentity();
     delete process.env.WALKTHROUGH_RUN_ID;
-    const refusal = gateRefusalCause(WING_DEFAULT_URL, () => ({ ok: false, cause: "DIRTY_TREE", reason: "dirty" }));
+    const refusal = gateRefusalCause(WING_DEFAULT_URL, () => ({ ok: false, cause: "DIRTY_TREE", reason: "dirty" }), CALIBRATED);
     expect(refusal).toBe("UNBOUND_IDENTITY");
   });
 
@@ -103,7 +131,7 @@ describe("deletion CLI gate — the repository identity is verified, not assumed
     gateRefusalCause(WING_DEFAULT_URL, (i) => {
       seen = i.expectedSha;
       return { ok: true, head: i.expectedSha };
-    });
+    }, CALIBRATED);
     expect(seen).toBe("fedcba9");
   });
 
@@ -113,7 +141,7 @@ describe("deletion CLI gate — the repository identity is verified, not assumed
     gateRefusalCause(WING_DEFAULT_URL, (i) => {
       root = i.repoRoot;
       return { ok: true, head: "abc1234" };
-    });
+    }, CALIBRATED);
     expect(root.length).toBeGreaterThan(0);
     expect(root.endsWith("/collector")).toBe(false); // the REPOSITORY, not the package
   });
@@ -136,7 +164,7 @@ describe("deletion CLI gate — the run it authorizes is the one the manifest de
       SELLEROPS_APPROVAL_OPERATION: "read-only probe",
       SELLEROPS_APPROVAL_MAX: "0 actions",
     });
-    expect(gateRefusalCause(WING_DEFAULT_URL, VERIFIED)).toBeNull();
+    expect(gateRefusalCause(WING_DEFAULT_URL, VERIFIED, CALIBRATED)).toBeNull();
   });
 
   it("the phase spec the CLI binds to is the destructive one, with its pinned scope and descriptor", () => {
@@ -165,8 +193,8 @@ describe("deletion CLI gate — the run it authorizes is the one the manifest de
       SELLEROPS_APPROVAL_ACCOUNT: "AKIAsecretlikevalue-88213",
     });
     const refusals = [
-      gateRefusalCause("https://evil.example.com/x", VERIFIED),
-      gateRefusalCause(WING_DEFAULT_URL, () => ({ ok: false, cause: "DIRTY_TREE", reason: "2 change(s)" })),
+      gateRefusalCause("https://evil.example.com/x", VERIFIED, CALIBRATED),
+      gateRefusalCause(WING_DEFAULT_URL, () => ({ ok: false, cause: "DIRTY_TREE", reason: "2 change(s)" }), CALIBRATED),
     ];
     for (const r of refusals) {
       expect(r ?? "").not.toContain("AKIA");

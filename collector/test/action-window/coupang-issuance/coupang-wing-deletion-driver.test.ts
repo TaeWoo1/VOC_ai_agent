@@ -7,8 +7,10 @@
  * step (`verifyDeletion`) is unreachable until the irreversible-warning checkpoint has been shown; and (e) the
  * driver reads NO field value (the fake page exposes ONLY `evaluate` / `url` / `on`).
  *
- * Since the 삭제 selector is live-calibrated, the DEFAULT driver (no `calibrated` option) is the production shape,
- * so the tests below exercise the real default rather than a test-only override.
+ * The 삭제 calibration is WITHDRAWN, so the production default REFUSES to highlight — `makeDriver` therefore
+ * injects `calibrated: true` and the walk cases below exercise an override, not the shipped shape. What ships is
+ * asserted separately by the intent marker and the uncalibrated-refusal case; do not read these as describing
+ * what a real run does today.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -17,6 +19,7 @@ import {
 } from "../../../src/action-window/coupang-wing-deletion-driver";
 import {
   WING_DELETION_CALIBRATION_EVIDENCE,
+  WING_DELETION_LABELS,
   WING_DELETION_SELECTORS_CALIBRATED,
 } from "../../../src/action-window/coupang-wing-issuance-driver";
 import type { OverlayOptions } from "../../../src/action-window/overlay";
@@ -182,7 +185,8 @@ describe("CoupangWingDeletionDriver — fail-closed calibration + checkpoint-fir
   });
 
   it("CALIBRATED + unique: highlights, rests at the checkpoint, then verifies the deletion value-free", async () => {
-    // The production default now reaches this path — the whole point of the calibration landing.
+    // Reached only with `calibrated: true` INJECTED. While the calibration is withdrawn the production default
+    // refuses before this point; this case describes the walk, not today's shipped behaviour.
     const page = new FakePage(ISSUED, { count: 1, sig: "0123456789abcdef" });
     const driver = makeDriver(page);
     await driver.classifyAlreadyIssued();
@@ -354,34 +358,64 @@ describe("CoupangWingDeletionDriver.clearHighlight — the clear is VERIFIED, no
   });
 });
 
-describe("삭제 calibration evidence — the flip is backed by a real live capture, and states its limits", () => {
-  it("INTENT MARKER — the calibration is currently landed (this is the ONE test an emergency withdrawal turns red)", () => {
-    // Deliberately the only assertion on the constant's value. If you withdrew the calibration on purpose, this
-    // single failure is the confirmation prompt; update it in the same commit. Nothing else in the suite should
-    // need touching — every other test states its own calibration or branches on the constant.
-    expect(WING_DELETION_SELECTORS_CALIBRATED).toBe(true);
+describe("삭제 calibration evidence — WITHDRAWN, because the apparatus could not support the claim", () => {
+  it("INTENT MARKER — the calibration is currently WITHDRAWN (this is the ONE test a re-landing turns red)", () => {
+    // Deliberately the only assertion on the constant's value, in the direction that now matters. Restoring the
+    // flag makes this the confirmation prompt; it may be updated only in a commit that also carries a fresh live
+    // measurement. Nothing else in the suite needs touching — every other test states its own calibration or
+    // branches on the constant.
+    expect(WING_DELETION_SELECTORS_CALIBRATED).toBe(false);
   });
 
-  it("the flag carries matching live provenance", () => {
+  it("is APPARATUS_UNSOUND — not refuted, and not merely pending", () => {
+    // The three states are not interchangeable. PENDING would say nobody looked; REFUTED would say someone
+    // looked and disproved it. Someone looked, and we no longer know what they saw — which is the state most
+    // likely to be rounded up to "probably fine", on the one path that is irreversible.
     const e = WING_DELETION_CALIBRATION_EVIDENCE;
-    expect(e.status).toBe("LIVE_DOM_CALIBRATION_CONFIRMED");
-    expect(e.matchCount).toBe(1);
-    expect(e.canHighlight).toBe(true);
+    expect(e.status).toBe("LIVE_DOM_CALIBRATION_APPARATUS_UNSOUND");
+    expect(e.status).not.toBe("LIVE_DOM_CALIBRATION_REFUTED");
+    expect(e.status).not.toBe("LIVE_DOM_CALIBRATION_PENDING");
     expect(e.pageCategory).toBe("open_api_issuance");
-    expect(e.gitSha).toMatch(/^[0-9a-f]{7,40}$/);
     expect(e.capturedOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(e.withdrawnOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("records WHY the count is unsound: it predates the visibility filter, and says so with both commits", () => {
+    // This is the load-bearing assertion of the withdrawal. `matchCount: 1` was really returned — by the locator
+    // version that, on the 발급 target, reported a confident unique match against a node that does not render.
+    // The two commits are what make that checkable rather than asserted.
+    const e = WING_DELETION_CALIBRATION_EVIDENCE;
+    expect(e.withdrawnObservation).toEqual({ matchCount: 1, visibilityFiltered: false });
+    expect(e.gitSha).toMatch(/^[0-9a-f]{7,40}$/);
+    expect(e.visibilityFilterAddedIn).toBe("a3ef479e");
+    expect(e.gitSha).not.toBe(e.visibilityFilterAddedIn);
+  });
+
+  it("keeps the spec UNCHANGED — a withdrawal is not a licence to guess a new selector", () => {
+    // The capture is unsupported, not disproved. Editing the spec now would mean the eventual re-measurement
+    // measures something nobody ever observed, and would destroy the only clean comparison available.
+    expect(WING_DELETION_LABELS.delete).toEqual({ candidateQuery: "button,a,span,div", exactText: "삭제" });
+    expect(WING_DELETION_CALIBRATION_EVIDENCE.label).toBe(WING_DELETION_LABELS.delete.exactText);
+  });
+
+  it("names a LIVE measurement as the only way back, and does not claim a press ever happened", () => {
+    expect(WING_DELETION_CALIBRATION_EVIDENCE.reconfirmationRequires).toBe(
+      "READ_ONLY_PROBE_VISIBLE_UNIQUE_MATCH_WITH_MEASURED_TAG",
+    );
+    expect(WING_DELETION_CALIBRATION_EVIDENCE.deletionOutcome).toBe("NEVER_PERFORMED");
   });
 
   it("the evidence is HONEST about what one capture cannot show", () => {
     // A single capture cannot demonstrate cross-run signature stability, so the record must not claim it — and it
-    // must declare the signature is evidence, not a runtime anchor.
+    // must declare the signature is evidence, not a runtime anchor. Doubly so now: the signature is of whatever
+    // the unfiltered locator matched.
     expect(WING_DELETION_CALIBRATION_EVIDENCE.captureCount).toBe(1);
     expect(WING_DELETION_CALIBRATION_EVIDENCE.signatureStability).toBe("SINGLE_CAPTURE_NOT_ESTABLISHED");
     expect(WING_DELETION_CALIBRATION_EVIDENCE.signatureRole).toBe("EVIDENCE_ONLY");
   });
 
   it("the recorded sig16 is an OPAQUE 16-hex token — no selector, value, URL, or PII in the provenance", () => {
-    expect(WING_DELETION_CALIBRATION_EVIDENCE.sig16).toMatch(/^[0-9a-f]{16}$/);
+    expect(WING_DELETION_CALIBRATION_EVIDENCE.withdrawnSig16).toMatch(/^[0-9a-f]{16}$/);
     const serialized = JSON.stringify(WING_DELETION_CALIBRATION_EVIDENCE);
     for (const forbidden of ["coupang.com", "http", "://", "Access Key", "Secret", "업체코드", "vendor", "querySelector"]) {
       expect(serialized, `provenance must not contain ${forbidden}`).not.toContain(forbidden);

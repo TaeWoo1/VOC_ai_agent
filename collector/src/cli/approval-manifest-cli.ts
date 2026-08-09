@@ -55,6 +55,21 @@ export interface ApprovalManifestCliOptions {
    * gets the strict behaviour, never a disabled one.
    */
   verifyIdentity?: typeof verifyRepoIdentity;
+  /**
+   * 삭제 calibration seam, on exactly the same contract as {@link verifyIdentity}: the DEFAULT is the shipped
+   * {@link WING_DELETION_SELECTORS_CALIBRATED}, so a caller who omits it gets whatever the code actually claims,
+   * never a permissive constant.
+   *
+   * It exists because `SELECTORS_NOT_CALIBRATED` short-circuits ahead of every other cause, so with the
+   * calibration withdrawn the destructive phase's repo-identity coverage (HEAD drift, dirty tree, wrong
+   * repository, unreadable git) would go dormant rather than be deleted — and dormant coverage under a green
+   * suite is the failure mode this whole workstream keeps closing. Withdrawing must change what the code does,
+   * not what the tests can still see.
+   *
+   * In-process only: no environment variable reaches it, and the real entrypoint passes nothing. Both are
+   * asserted in `approval-manifest-cli.test.ts`.
+   */
+  selectorsCalibrated?: boolean;
 }
 
 export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): number {
@@ -220,13 +235,13 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     operation: isWingKeyDeletion ? defaultOperation : (env("SELLEROPS_APPROVAL_OPERATION") ?? defaultOperation),
     startRunContract,
     // The WING key-deletion phase is scoped around an operator-performed irreversible action — carry its immutable
-    // descriptor so the gate can enforce it. Both original blockers are resolved (the deletion CLI exists; the
-    // 삭제 selector is live-calibrated), so this phase CAN now reach PREPARED and print a destructive manifest for
-    // the operator to read. PREPARED is not APPROVED — the single-use grant is still a separate human step.
+    // descriptor so the gate can enforce it. The deletion CLI exists, but the 삭제 calibration is WITHDRAWN, so
+    // this phase does not currently reach PREPARED and prints no destructive manifest. When it does again,
+    // PREPARED is still not APPROVED — the single-use grant remains a separate human step.
     operatorDestructiveAction: isWingKeyDeletion ? COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION : undefined,
     // Stated only for the WING deletion phase, from the single calibration constant. Every other phase leaves
     // this undefined so the gate applies its own default (NAVER's adapter flag; uncalibrated for WING).
-    ...(isWingKeyDeletion ? { selectorsCalibrated: WING_DELETION_SELECTORS_CALIBRATED } : {}),
+    ...(isWingKeyDeletion ? { selectorsCalibrated: opts.selectorsCalibrated ?? WING_DELETION_SELECTORS_CALIBRATED } : {}),
   };
 
   const res = validateApprovalPrerequisites(input);
