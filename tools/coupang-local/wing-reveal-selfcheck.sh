@@ -61,6 +61,7 @@ trap cleanup EXIT INT TERM
 NOW="$(date +%s)"
 FAILED=0
 SKIPPED=0
+SKIP_REASON=""
 
 # Sourced so the shared descriptor verifier can be exercised DIRECTLY against crafted manifests. The gate makes a
 # softened descriptor unproducible through the CLI, so calling the function is the only way it is falsifiable.
@@ -81,6 +82,26 @@ fi
 # git_hardened, not bare git: an ambient GIT_DIR / core.excludesFile in the caller's shell would make this read a
 # dirty tree as clean and silently take the PASS branch.
 TREE_DIRTY="$(git_hardened status --porcelain 2>/dev/null | head -1)"
+
+# Is the 발급 selector calibration currently live? Read from the SHIPPED constant, never assumed, because the
+# correct behaviour of the manifest cases INVERTS with it: while the calibration is withdrawn the preflight must
+# refuse with SELECTORS_NOT_CALIBRATED, and asserting PREFLIGHT PASS would be asserting a bug.
+#
+# Derived rather than hardcoded to either state. Hardcoding the refusal would silently delete the PASS-path
+# coverage the moment a live probe restores the flag — which is precisely when that coverage matters again.
+ISSUE_CALIBRATED=0
+CALIB_SRC="$REPO_ROOT/collector/src/action-window/coupang-wing-issuance-driver.ts"
+if [ ! -f "$CALIB_SRC" ]; then
+  echo "SELFCHECK ABORT — cannot read the calibration constant at $CALIB_SRC. Refusing to guess which half to run."
+  exit 3
+fi
+if grep -qE '^export const WING_ISSUE_SELECTOR_CALIBRATED = true as const;' "$CALIB_SRC"; then
+  ISSUE_CALIBRATED=1
+elif ! grep -qE '^export const WING_ISSUE_SELECTOR_CALIBRATED = false as const;' "$CALIB_SRC"; then
+  echo "SELFCHECK ABORT — WING_ISSUE_SELECTOR_CALIBRATED is neither a literal true nor false. It gates whether a"
+  echo "                  reveal run can reach a live page; a form this script cannot read is not a safe default."
+  exit 3
+fi
 
 # Write a fixture run env. $1=file $2=git commit $3=phase $4=run id $5=approval id $6=epoch
 write_env() {
@@ -242,6 +263,9 @@ fi
 # ── the clean/dirty pair ────────────────────────────────────────────────────────
 write_env "$FIXTURES/normal.env" "$CUR_GIT" "COUPANG_WING_ISSUANCE_FORM_REVEAL" "wt-revchk06" "apr-revchk06"
 if [ -z "$TREE_DIRTY" ]; then
+  # The manifest cases require a LIVE calibration. With it withdrawn the preflight must refuse, so the two halves
+  # below are alternatives, not a pass/skip: exactly one of them is the correct behaviour at any given commit.
+  if [ "$ISSUE_CALIBRATED" = "1" ]; then
   run_case "NORMAL          (reveal manifest prepared)" 0 "PREFLIGHT PASS" "$FIXTURES/normal.env"
   run_case "NORMAL          · manifest phase" 0 "COUPANG_WING_ISSUANCE_FORM_REVEAL" "$FIXTURES/normal.env"
   run_case "NORMAL          · agent mode stays READ_ONLY" 0 "READ_ONLY (agent)" "$FIXTURES/normal.env"
@@ -323,6 +347,31 @@ if [ -z "$TREE_DIRTY" ]; then
     echo "  FAIL  NORMAL          · the reveal manifest carries another phase's contract"; FAILED=1
   else
     echo "  PASS  NORMAL          · no destructive descriptor and no probe scope on the reveal manifest"
+  fi
+
+  else
+  # ── the calibration is WITHDRAWN: the manifest path must be closed ────────────
+  # Refuted live on 2026-08-09 (an invisible 발급 highlight). Until a read-only probe re-confirms the corrected
+  # spec, reaching PREPARED here would be the defect — so this half asserts the refusal AND that nothing
+  # approval-shaped is displayed alongside it. A refusal that still printed the manifest and the grant line would
+  # pass a bare exit-code check while inviting the operator to grant against a run that cannot honour it.
+  run_case "WITHDRAWN       (uncalibrated 발급 selector refused)" nonzero "SELECTORS_NOT_CALIBRATED" "$FIXTURES/normal.env"
+  run_case "WITHDRAWN       · no manifest prepared" nonzero "no manifest prepared, no approval requested" "$FIXTURES/normal.env"
+
+  out="$(env SELLEROPS_WING_REVEAL_RUN_ENV="$FIXTURES/normal.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1)"
+  WITHDRAWN_OK=1
+  for forbidden in "Seated and ready." "APPROVAL MANIFEST" "PREFLIGHT PASS" '"operatorRevealAction"' "selectors calibrated: true"; do
+    grep -qF "$forbidden" <<<"$out" \
+      && { echo "  FAIL  WITHDRAWN       · a refusal still displayed: $forbidden"; WITHDRAWN_OK=0; FAILED=1; }
+  done
+  [ "$WITHDRAWN_OK" = "1" ] \
+    && echo "  PASS  WITHDRAWN       · no manifest, no descriptor, and no grant line reach the operator"
+  # The remedy must be the one that cannot repeat the mistake: a live measurement, not an edit.
+  if grep -qF "READ-ONLY" <<<"$out"; then
+    echo "  PASS  WITHDRAWN       · the refusal names a READ-ONLY probe as the way back"
+  else
+    echo "  FAIL  WITHDRAWN       · the refusal does not say how to restore the calibration"; FAILED=1
+  fi
   fi
 
   # ── refusals must not leak ────────────────────────────────────────────────────
@@ -437,7 +486,9 @@ FAKE
     "$FIXTURES/normal.env" "PATH=$FAKEBIN:$PATH"
 
   # EVERY case above overrides SELLEROPS_MANIFEST_OUT, so the DEFAULT temp path would otherwise have no coverage
-  # — which is exactly where a broken mktemp template hid on the probe harness until a real run.
+  # — which is exactly where a broken mktemp template hid on the probe harness until a real run. Needs a PREPARED
+  # manifest, so it runs only while the calibration is live; it is named in the PARTIAL summary when it is not.
+  if [ "$ISSUE_CALIBRATED" = "1" ]; then
   DEFAULT_OK=1
   for attempt in 1 2; do
     out="$(env SELLEROPS_WING_REVEAL_RUN_ENV="$FIXTURES/normal.env" bash "$PREFLIGHT" 2>&1)" || DEFAULT_OK=0
@@ -450,6 +501,19 @@ FAKE
   else
     echo "  FAIL  DEFAULT_OUT     · default manifest path is broken"; echo "$out" | tail -6 | sed 's/^/        | /'; FAILED=1
   fi
+  fi
+
+  # The manifest half is skipped whenever the calibration is withdrawn, so it is accounted for exactly like the
+  # dirty-tree skip: named, counted, and PARTIAL. Without this the withdrawn run would print a wall of green and
+  # exit 0 while the entire PASS path — manifest, disclosure, descriptor display, grant line — went unexercised.
+  if [ "$ISSUE_CALIBRATED" != "1" ]; then
+    WITHDRAWN_ONLY_CASES=(NORMAL DEFAULT_OUT)
+    SKIPPED=${#WITHDRAWN_ONLY_CASES[@]}
+    SKIP_REASON="발급 calibration withdrawn"
+    echo "  SKIP  ${WITHDRAWN_ONLY_CASES[*]} — WING_ISSUE_SELECTOR_CALIBRATED is false, so the"
+    echo "        preflight refuses by design and no manifest is produced to assert against."
+    echo "        Restore it from a live READ-ONLY probe, then re-run to exercise the PASS path."
+  fi
 else
   run_case "DIRTY_TREE      (uncommitted change refused)" nonzero "working tree is dirty" "$FIXTURES/normal.env"
   # The COUNT is derived from the list, so it cannot drift from it. The LIST is still hand-maintained: a
@@ -457,6 +521,7 @@ else
   # because the previous comment claimed the failure mode was closed and it is not.
   CLEAN_ONLY_CASES=(NORMAL NO_LEAK GIT_DIR_HIJACK BOOTSTRAP_DIRTY BOOTSTRAP_CLEAN BOOTSTRAP_SHA COLLECTOR_ESCAPE GIT_STATUS_FAIL DEFAULT_OUT)
   SKIPPED=${#CLEAN_ONLY_CASES[@]}
+  SKIP_REASON="dirty tree"
   echo "  SKIP  ${CLEAN_ONLY_CASES[*]} — the working tree is dirty, which the"
   echo "        preflight refuses by design."
   echo "        Commit or stash, then re-run to exercise the PASS path."
@@ -471,7 +536,7 @@ if [ "$SKIPPED" != "0" ]; then
   # NOT "PASS". Naming the skipped cases is not enough: a green banner and exit 0 read as coverage to anything
   # that consumes the exit code, and a dirty tree is the normal state while editing this harness — exactly when
   # someone would run it. A distinct code says "the fail-closed half ran; the PASS half did not".
-  echo "SELFCHECK PARTIAL — $SKIPPED case(s) skipped (dirty tree). The PASS path was NOT exercised."
+  echo "SELFCHECK PARTIAL — $SKIPPED case(s) skipped ($SKIP_REASON). The PASS path was NOT exercised."
   exit 2
 fi
 echo "SELFCHECK PASS"
