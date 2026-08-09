@@ -23,6 +23,9 @@
 #   SCOPE_OVERRIDE    → PASS, but the manifest shows the PINNED scope — ambient env cannot re-describe the run
 #   NORMAL            → PASS; destructive manifest, calibrated, exact descriptor, full disclosure
 #   DEFAULT_OUT       → PASS twice in a row on the default temp path
+#   WITHDRAWN         → FAIL, and displays NOTHING approval-shaped (runs INSTEAD of NORMAL/SCOPE_OVERRIDE/
+#                       DEFAULT_OUT while the 삭제 calibration is withdrawn — which half runs is DERIVED from
+#                       the shipped constant, never hardcoded, so neither state can be asserted as a bug)
 #   BOOTSTRAP_DIRTY   → FAIL (the bootstrap itself refuses to pin a SHA against a dirty tree)
 #   GIT_STATUS_FAIL   → FAIL (an unreadable `git status` must never be read as "clean")
 #   HOME_IGNORE_HIDE  → FAIL ($HOME/.config/git/ignore is a DEFAULT PATH no config pin suppresses)
@@ -35,7 +38,9 @@
 #                       descriptor unproducible through the CLI, so end-to-end cannot reach this)
 #
 # NORMAL and the dirty-tree cases are complementary: they need a clean tree, and print SKIP otherwise — every
-# skipped case is NAMED, because an unnamed skip under a "SELFCHECK PASS" banner reads as coverage.
+# skipped case is NAMED, because an unnamed skip under a "SELFCHECK PASS" banner reads as coverage. Naming is not
+# enough on its own either: EITHER skip reason (a withdrawn calibration, or a dirty tree) exits 2
+# (SELFCHECK PARTIAL), because a green banner and exit 0 read as coverage to anything consuming the exit code.
 #
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -61,6 +66,30 @@ CUR_GIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknow
 TREE_DIRTY="$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | head -1)"
 NOW="$(date +%s)"
 FAILED=0
+SKIPPED=0
+SKIP_REASON=""
+
+# Is the 삭제 selector calibration currently live? Read from the SHIPPED constant, never assumed, because the
+# correct behaviour of the manifest cases INVERTS with it: while the calibration is withdrawn the preflight must
+# refuse with SELECTORS_NOT_CALIBRATED, and asserting PREFLIGHT PASS would be asserting a bug.
+#
+# Derived rather than hardcoded to either state — hardcoding the refusal would silently delete the PASS-path
+# coverage the moment a live probe restores the flag, which is precisely when that coverage matters again. Same
+# derivation the reveal harness uses; the two must not drift.
+DEL_CALIBRATED=0
+CALIB_SRC="$REPO_ROOT/collector/src/action-window/coupang-wing-issuance-driver.ts"
+if [ ! -f "$CALIB_SRC" ]; then
+  echo "SELFCHECK ABORT — cannot read the calibration constant at $CALIB_SRC. Refusing to guess which half to run."
+  exit 3
+fi
+if grep -qE '^export const WING_DELETION_SELECTORS_CALIBRATED = true;' "$CALIB_SRC"; then
+  DEL_CALIBRATED=1
+elif ! grep -qE '^export const WING_DELETION_SELECTORS_CALIBRATED = false;' "$CALIB_SRC"; then
+  echo "SELFCHECK ABORT — WING_DELETION_SELECTORS_CALIBRATED is neither a literal true nor false. It gates whether"
+  echo "                  an IRREVERSIBLE deletion run can reach a live page; a form this script cannot read is"
+  echo "                  not a safe default."
+  exit 3
+fi
 
 # Sourced so the descriptor verifier can be exercised DIRECTLY against crafted manifests. The gate makes a
 # softened descriptor unproducible through the CLI, so testing that check end-to-end is impossible; calling the
@@ -221,6 +250,9 @@ fi
 # ── the clean/dirty pair, and the demonstrated git-environment bypasses ─────────
 write_env "$FIXTURES/normal.env" "$CUR_GIT" "COUPANG_WING_KEY_DELETION" "wt-selfchk07" "apr-selfchk07"
 if [ -z "$TREE_DIRTY" ]; then
+  # The manifest cases require a LIVE calibration. With it withdrawn the preflight must refuse, so the two halves
+  # below are alternatives, not a pass/skip: exactly one of them is the correct behaviour at any given commit.
+  if [ "$DEL_CALIBRATED" = "1" ]; then
   run_case "NORMAL          (destructive manifest prepared)" 0 "PREFLIGHT PASS" "$FIXTURES/normal.env"
   run_case "NORMAL          · manifest phase" 0 "COUPANG_WING_KEY_DELETION" "$FIXTURES/normal.env"
   run_case "NORMAL          · agent mode stays READ_ONLY" 0 "agent mode: READ_ONLY" "$FIXTURES/normal.env"
@@ -283,6 +315,31 @@ if [ -z "$TREE_DIRTY" ]; then
   else
     echo "  FAIL  SCOPE_OVERRIDE  · ambient env changed or blocked the destructive manifest (exit=$rc)"
     echo "$out" | tail -8 | sed 's/^/        | /'; FAILED=1
+  fi
+
+  else
+  # ── the calibration is WITHDRAWN: the destructive manifest path must be closed ─
+  # Withdrawn 2026-08-09. The 2026-08-07 capture was taken before the locator could tell a painting element from
+  # a hidden one, so `matchCount: 1` no longer supports "one visible 삭제 control". Until a read-only probe
+  # re-measures it, reaching PREPARED here would be the defect — and on an IRREVERSIBLE action, a refusal that
+  # still printed the manifest and the grant line would invite an operator to grant against a run that cannot be
+  # honoured. So this half asserts the refusal AND that nothing approval-shaped is displayed beside it.
+  run_case "WITHDRAWN       (uncalibrated 삭제 selector refused)" nonzero "SELECTORS_NOT_CALIBRATED" "$FIXTURES/normal.env"
+
+  out="$(env SELLEROPS_WING_DELETION_RUN_ENV="$FIXTURES/normal.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1)"
+  WITHDRAWN_OK=1
+  for forbidden in "Seated and ready." "APPROVAL MANIFEST" "PREFLIGHT PASS" '"operatorDestructiveAction"' "selectors calibrated: true"; do
+    grep -qF "$forbidden" <<<"$out" \
+      && { echo "  FAIL  WITHDRAWN       · a refusal still displayed: $forbidden"; WITHDRAWN_OK=0; FAILED=1; }
+  done
+  [ "$WITHDRAWN_OK" = "1" ] \
+    && echo "  PASS  WITHDRAWN       · no destructive manifest, no descriptor, and no grant line reach the operator"
+  # The remedy must be the one that cannot repeat the mistake: a live measurement, not an edit.
+  if grep -qF "READ-ONLY" <<<"$out"; then
+    echo "  PASS  WITHDRAWN       · the refusal names a READ-ONLY probe as the way back"
+  else
+    echo "  FAIL  WITHDRAWN       · the refusal does not say how to restore the calibration"; FAILED=1
+  fi
   fi
 
   : > "$DIRT_FILE"
@@ -365,6 +422,7 @@ FAKE
 
   # EVERY case above overrides SELLEROPS_MANIFEST_OUT, so the DEFAULT temp path would otherwise have no
   # coverage — which is exactly where a broken mktemp template hid on the probe harness until a real run.
+  if [ "$DEL_CALIBRATED" = "1" ]; then
   DEFAULT_OK=1
   for attempt in 1 2; do
     out="$(env SELLEROPS_WING_DELETION_RUN_ENV="$FIXTURES/normal.env" bash "$PREFLIGHT" 2>&1)" || DEFAULT_OK=0
@@ -377,14 +435,45 @@ FAKE
   else
     echo "  FAIL  DEFAULT_OUT     · default manifest path is broken"; echo "$out" | tail -6 | sed 's/^/        | /'; FAILED=1
   fi
+  fi
+
+  # The manifest half is skipped whenever the calibration is withdrawn, and it is NAMED and COUNTED rather than
+  # silently absent. Without this the withdrawn run prints a wall of green and exits 0 while the entire PASS path
+  # — manifest, irreversibility disclosure, descriptor display, pinned scope, grant line — goes unexercised.
+  if [ "$DEL_CALIBRATED" != "1" ]; then
+    WITHDRAWN_ONLY_CASES=(NORMAL SCOPE_OVERRIDE DEFAULT_OUT)
+    SKIPPED=${#WITHDRAWN_ONLY_CASES[@]}
+    SKIP_REASON="삭제 calibration withdrawn"
+    echo "  SKIP  ${WITHDRAWN_ONLY_CASES[*]} — WING_DELETION_SELECTORS_CALIBRATED is false, so"
+    echo "        the preflight refuses by design and no destructive manifest is produced to assert against."
+    echo "        Restore it from a live READ-ONLY delete probe, then re-run to exercise the PASS path."
+  fi
 else
   run_case "DIRTY_TREE      (uncommitted change refused)" nonzero "working tree is dirty" "$FIXTURES/normal.env"
-  echo "  SKIP  NORMAL / SCOPE_OVERRIDE / GIT_DIR_HIJACK / UNTRACKED_HIDE / EXCLUDES_HIDE / BOOTSTRAP_DIRTY /"
-  echo "        GIT_STATUS_FAIL / HOME_IGNORE_HIDE / HOME_CONFIG_HIDE / ASSUME_UNCHANGED / LSFILES_FAIL /"
-  echo "        COLLECTOR_ESCAPE / DEFAULT_OUT — the working tree is dirty, which the preflight refuses by"
-  echo "        design."
+  # The COUNT is derived from the list, so it cannot drift from it. The LIST is hand-maintained: a clean-only
+  # case added above without an entry here under-reports. WITHDRAWN belongs on it — it is the only end-to-end
+  # check that the destructive path is closed, and a dirty tree is the normal state while editing this harness.
+  CLEAN_ONLY_CASES=(NORMAL WITHDRAWN SCOPE_OVERRIDE GIT_DIR_HIJACK UNTRACKED_HIDE EXCLUDES_HIDE BOOTSTRAP_DIRTY
+                    GIT_STATUS_FAIL HOME_IGNORE_HIDE HOME_CONFIG_HIDE ASSUME_UNCHANGED LSFILES_FAIL
+                    COLLECTOR_ESCAPE DEFAULT_OUT)
+  SKIPPED=${#CLEAN_ONLY_CASES[@]}
+  SKIP_REASON="dirty tree"
+  echo "  SKIP  ${CLEAN_ONLY_CASES[*]} — the working tree is dirty, which the"
+  echo "        preflight refuses by design."
   echo "        Commit or stash, then re-run to exercise the PASS path."
 fi
 
 echo
-if [ "$FAILED" = "0" ]; then echo "SELFCHECK PASS"; exit 0; else echo "SELFCHECK FAIL"; exit 1; fi
+if [ "$FAILED" != "0" ]; then echo "SELFCHECK FAIL"; exit 1; fi
+if [ "$SKIPPED" != "0" ]; then
+  # NOT "PASS". Naming the skipped cases is not enough: a green banner and exit 0 read as coverage to anything
+  # that consumes the exit code. A distinct code says "the fail-closed half ran; the PASS half did not".
+  #
+  # Covers BOTH skip reasons — the withdrawn calibration and a dirty tree. An earlier draft deferred the
+  # dirty-tree half as "shared debt with wing-probe-selfcheck.sh"; review showed that was wrong. The reveal
+  # harness already closed it, and this file says elsewhere the two must not drift, so it was drift, not debt.
+  echo "SELFCHECK PARTIAL — $SKIPPED case(s) skipped ($SKIP_REASON). The PASS path was NOT exercised."
+  exit 2
+fi
+echo "SELFCHECK PASS"
+exit 0

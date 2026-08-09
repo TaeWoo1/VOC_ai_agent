@@ -132,76 +132,117 @@ export const LIVE_DOM_CALIBRATION_CONFIRMED = "LIVE_DOM_CALIBRATION_CONFIRMED" a
 export const LIVE_DOM_CALIBRATION_REFUTED = "LIVE_DOM_CALIBRATION_REFUTED" as const;
 
 /**
- * **LIVE-CONFIRMED** (see {@link WING_DELETION_CALIBRATION_EVIDENCE}). The fixed WING label for the 삭제 (delete)
- * control on the already-issued open-API page.
+ * A calibration whose measurement was real but was taken with an apparatus **later shown unable to support the
+ * claim**. A third state, and it needs to be, because the two existing ones both say something false about it:
+ * `LIVE_DOM_CALIBRATION_PENDING` says nobody looked, and `LIVE_DOM_CALIBRATION_REFUTED` says somebody looked and
+ * the claim was disproved. Here somebody looked, and we no longer know what they saw.
  *
- * The spec below is **byte-for-byte the one the calibration probe measured** — a live capture found it resolves to
- * exactly one element. Retuning `candidateQuery` / `exactText` (e.g. narrowing to the observed `role: "button"`)
- * would DISCARD the evidence that justifies the calibrated flag, because the uniqueness was measured against
- * *this* spec and no other. Any change here invalidates the calibration and must re-run the read-only probe.
+ * The obligation it carries is therefore narrower than refuted and stricter than pending: the old capture may not
+ * be re-cited, re-asserting from it is forbidden, and the only way out is a fresh measurement on the current
+ * apparatus. A claim that is *unsupported* must not be quietly filed as *probably fine*.
  */
-export const WING_DELETION_CALIBRATION = LIVE_DOM_CALIBRATION_CONFIRMED;
+export const LIVE_DOM_CALIBRATION_APPARATUS_UNSOUND = "LIVE_DOM_CALIBRATION_APPARATUS_UNSOUND" as const;
+
+/**
+ * **CALIBRATION WITHDRAWN** — see {@link WING_DELETION_CALIBRATION_EVIDENCE} for why. The fixed WING label for the
+ * 삭제 (delete) control on the already-issued open-API page.
+ *
+ * The spec below is **unchanged and deliberately so.** Withdrawing a calibration is not a reason to guess at a
+ * new selector: the 2026-08-07 capture is unsupported, not disproved, and editing the spec now would mean the
+ * eventual re-measurement measures something nobody ever observed. It stays byte-for-byte what was captured, so
+ * the re-run is a clean comparison. Any change here still invalidates the record and requires a fresh probe.
+ */
+export const WING_DELETION_CALIBRATION = LIVE_DOM_CALIBRATION_APPARATUS_UNSOUND;
 export const WING_DELETION_LABELS: Readonly<Record<WingDeletionTarget, { candidateQuery: string; exactText: string; tagAncestor?: string }>> = {
   delete: { candidateQuery: "button,a,span,div", exactText: "삭제" },
 };
 
 /**
- * PROVENANCE for the 삭제 calibration — the sanitized live evidence that justifies
- * {@link WING_DELETION_SELECTORS_CALIBRATED}. It exists so the flip is auditable from the code rather than only
- * from a doc, and so its honest limits travel with it.
+ * **WITHDRAWN PROVENANCE for the 삭제 calibration.** This record used to justify
+ * {@link WING_DELETION_SELECTORS_CALIBRATED} as `true`. It no longer justifies anything, and the flag is `false`.
  *
- * `signatureRole: "EVIDENCE_ONLY"` is the load-bearing field. `sig16` is recorded provenance, **not** a runtime
- * safety anchor: no code path compares a live signature against this constant. The only signature comparisons in
- * the runtime (`engine.ts` `UI_DRIFT`, `session.ts`, `verifier.ts`) are locate-vs-verify **within one run**, both
- * sides computed live, and the deletion driver is not wired to any of them — its CLI reads `count` and discards
- * the sig. That is precisely why ONE capture suffices to calibrate: nothing requires the signature to be stable
- * across runs, so `captureCount: 1` is a complete basis for the uniqueness claim being made.
+ * **Two grounds, and the second is the serious one.**
  *
- * The corollary is a constraint, enforced by `coupang-wing-deletion-driver-guard.test.ts`: introducing a
- * cross-run signature-anchor comparison would CREATE a stability requirement that one capture cannot honestly
- * satisfy. A second independent delete-only capture is a prerequisite for that change — not for this one.
+ *  1. `role: "button"` was never measured. It came from `WING_TARGET_EXPECTED_ROLE.delete` — the hardcoded table
+ *     of EXPECTED roles — written into a field named `role` and documented "as measured". Byte-for-byte the same
+ *     over-claim that was refuted on the 발급 target. The field is now deleted rather than renamed: the
+ *     expectation already has a home, and this record has no business restating it.
+ *
+ *  2. **The uniqueness measurement predates the visibility filter.** The capture ran at `a666ad1` on 2026-08-07;
+ *     `buildFixedLabelLocateScript` gained `paints()` at `a3ef479e` on 2026-08-09. So `matchCount: 1` was
+ *     produced by the *same* locator version that, on the 발급 target, reported a confident unique match against
+ *     a node that does not render. This is not a hypothetical resemblance: the withdrawn 발급 spec was
+ *     `{"button,a,span,div", "발급"}` and the 삭제 spec is `{"button,a,span,div", "삭제"}` — the same broad
+ *     multi-tag query with a short whole-text label, on the same page family, measured by the same unfiltered
+ *     code. Whether that `1` was a painting 삭제 button or a hidden node is **unknown**, and nothing in the
+ *     record ever distinguished the two.
+ *
+ * Hence {@link LIVE_DOM_CALIBRATION_APPARATUS_UNSOUND} rather than `REFUTED`: nobody re-ran it and found it
+ * wrong. The claim is unsupported, not disproved. That difference is worth a constant precisely because
+ * "unsupported" is the state most likely to be quietly rounded up to "fine" — and this one gates an
+ * **irreversible** deletion.
+ *
+ * What the withdrawal costs is nothing that was working: no live deletion run has ever happened.
+ *
+ * `signatureRole: "EVIDENCE_ONLY"` still holds and still matters. `withdrawnSig16` is the signature of whatever
+ * the unfiltered locator matched, so it is now doubly unusable as a baseline. No code path compares a live
+ * signature against this constant, and `coupang-wing-deletion-driver-guard.test.ts` keeps it that way.
  */
 export interface WingDeletionCalibrationEvidence {
-  readonly status: typeof LIVE_DOM_CALIBRATION_CONFIRMED;
-  /** Date of the live read-only capture (KST). */
+  readonly status: typeof LIVE_DOM_CALIBRATION_APPARATUS_UNSOUND;
+  /** When the calibration was withdrawn. */
+  readonly withdrawnOn: string;
+  /** Date of the live read-only capture that used to back it (KST). */
   readonly capturedOn: string;
-  /** The commit the probe ran on — the code that produced this measurement. */
+  /** The commit the probe ran on. Load-bearing: it is what dates the capture to the unfiltered locator. */
   readonly gitSha: string;
+  /** The commit that added `paints()` to the shared locator, making every earlier count unsound. */
+  readonly visibilityFilterAddedIn: "a3ef479e";
   /** The probe's sanitized record id (no account / seller / URL identity). */
   readonly recordId: string;
-  /** The sanitized page category the 삭제 control was measured on. */
+  /** The sanitized page category the capture was taken on. */
   readonly pageCategory: "open_api_issuance";
-  /** The measured uniqueness — the whole basis of the calibration. */
-  readonly matchCount: 1;
-  readonly canHighlight: true;
-  /** The candidate's accessible role, as measured (informational; the locator does NOT filter on it). */
-  readonly role: "button";
-  /** Our own fixed label — the same string as {@link WING_DELETION_LABELS}.delete.exactText. */
+  /**
+   * The WITHDRAWN observation. `matchCount: 1` was really returned; `visibilityFiltered: false` is why it cannot
+   * be read as "one visible 삭제 control". Both fields must stay together — the count alone is the claim that
+   * was over-trusted for two days.
+   */
+  readonly withdrawnObservation: { readonly matchCount: 1; readonly visibilityFiltered: false };
+  /** Our own fixed label — the same string as {@link WING_DELETION_LABELS}.delete.exactText, which is UNCHANGED. */
   readonly label: "삭제";
-  /** Opaque 16-hex structural signature. Provenance only — see `signatureRole`. */
-  readonly sig16: string;
-  /** How many independent live captures back this record. */
+  /** Opaque 16-hex signature of whatever the unfiltered locator matched. Historical only; never a baseline. */
+  readonly withdrawnSig16: string;
+  /** How many live captures ever backed this record. */
   readonly captureCount: 1;
-  /** Honest limit: a single capture cannot demonstrate cross-run signature stability. */
+  /** Honest limit, unchanged: a single capture cannot demonstrate cross-run signature stability. */
   readonly signatureStability: "SINGLE_CAPTURE_NOT_ESTABLISHED";
-  /** What `sig16` is allowed to be used for. `EVIDENCE_ONLY` ⇒ no runtime gate may read it. */
+  /** What the signature is allowed to be used for. `EVIDENCE_ONLY` ⇒ no runtime gate may read it. */
   readonly signatureRole: "EVIDENCE_ONLY";
+  /** The 삭제 press has never happened, and this withdrawal does not change that either way. */
+  readonly deletionOutcome: "NEVER_PERFORMED";
+  /** What must be measured live before the flag may return to `true`. Same standard the 발급 target had to meet. */
+  readonly reconfirmationRequires: "READ_ONLY_PROBE_VISIBLE_UNIQUE_MATCH_WITH_MEASURED_TAG";
 }
 
 export const WING_DELETION_CALIBRATION_EVIDENCE: WingDeletionCalibrationEvidence = {
-  status: LIVE_DOM_CALIBRATION_CONFIRMED,
+  status: LIVE_DOM_CALIBRATION_APPARATUS_UNSOUND,
+  withdrawnOn: "2026-08-09",
   capturedOn: "2026-08-07",
   gitSha: "a666ad1",
+  visibilityFilterAddedIn: "a3ef479e",
   recordId: "wingrec_c01e673ebc61",
   pageCategory: "open_api_issuance",
-  matchCount: 1,
-  canHighlight: true,
-  role: "button",
+  withdrawnObservation: Object.freeze({ matchCount: 1, visibilityFiltered: false }) as {
+    readonly matchCount: 1;
+    readonly visibilityFiltered: false;
+  },
   label: "삭제",
-  sig16: "3562cb60c496e220",
+  withdrawnSig16: "3562cb60c496e220",
   captureCount: 1,
   signatureStability: "SINGLE_CAPTURE_NOT_ESTABLISHED",
   signatureRole: "EVIDENCE_ONLY",
+  deletionOutcome: "NEVER_PERFORMED",
+  reconfirmationRequires: "READ_ONLY_PROBE_VISIBLE_UNIQUE_MATCH_WITH_MEASURED_TAG",
 };
 
 /**
@@ -448,19 +489,28 @@ export const WING_ISSUE_CALIBRATION_EVIDENCE: WingIssueCalibrationEvidence = {
 export const WING_ISSUE_SELECTOR_CALIBRATED = true as const;
 
 /**
- * Whether the `delete` (삭제) fixed label is calibrated against the REAL WING DOM. **TRUE** since the live
- * read-only delete-selector probe confirmed it resolves uniquely (`matchCount === 1`) on the already-issued page
- * — see {@link WING_DELETION_CALIBRATION_EVIDENCE} for the provenance and its limits.
+ * Whether the `delete` (삭제) fixed label is calibrated against the REAL WING DOM. **FALSE — withdrawn
+ * 2026-08-09**, see {@link WING_DELETION_CALIBRATION_EVIDENCE}. The capture that used to back it was taken with
+ * the locator version that could not tell a painting element from a hidden one, and its `role: "button"` was
+ * never measured at all. Neither the count nor the identity survives that.
  *
- * This flag ONLY asserts selector readiness. It is not an authorization: a WING key-deletion run still needs the
- * `--i-understand-this-opens-live-coupang-wing` flag, URL screening, a PREPARED destructive Approval Manifest
- * bound to a fresh `WALKTHROUGH_*` identity, the driver's checkpoint-first invariant, and the operator's own
- * press of 삭제. The agent's click/type/submit budget on the marketplace remains ZERO.
+ * The withdrawal is deliberately asymmetric with the 발급 target, which was re-landed the same week. 발급 got a
+ * fresh READ-ONLY measurement first; 삭제 has not been re-measured, and this flag must not move until it is. The
+ * asymmetry is the point — the flag tracks evidence, not confidence, and the destructive path is exactly where a
+ * plausible-but-unmeasured claim costs the most.
  *
- * Setting this to `false` must keep the destructive walk fully fail-closed — the deletion driver refuses to
- * highlight and the manifest gate refuses with `SELECTORS_NOT_CALIBRATED`. That direction is tested explicitly.
+ * The whole destructive walk is now fail-closed: the manifest gate refuses with `SELECTORS_NOT_CALIBRATED`, the
+ * preflight cannot display a destructive manifest, and the deletion driver refuses to highlight. Nothing is lost
+ * that worked — no live deletion run has ever been performed.
+ *
+ * Restoring it requires a live READ-ONLY delete probe reporting a **visible** unique match with a **measured**
+ * tag, on the unchanged spec. Editing this line from anything else is the move that produced the record above.
+ * Even then it would assert selector readiness only, never authorization: a deletion run still needs the WING
+ * flag, URL screening, a PREPARED destructive manifest bound to a fresh `WALKTHROUGH_*` identity, the driver's
+ * checkpoint-first invariant, and the operator's own press of 삭제. The agent's marketplace action budget is ZERO
+ * in every state of this flag.
  */
-export const WING_DELETION_SELECTORS_CALIBRATED = true;
+export const WING_DELETION_SELECTORS_CALIBRATED = false;
 
 /** Default seated-operator observe window (the seller works in the WING window). Tests override to instant. */
 export const DEFAULT_WING_OBSERVE_TIMEOUT_MS = 10 * 60_000;

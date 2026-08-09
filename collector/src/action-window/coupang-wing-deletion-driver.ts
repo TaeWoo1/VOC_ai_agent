@@ -27,13 +27,17 @@
  *   - No value/text/clipboard/screenshot/`page.content()` read — the structural signature is computed IN-PAGE
  *     from tag + position + child count only.
  *
- * **DELETE selector is LIVE-CONFIRMED** (`WING_DELETION_CALIBRATION_EVIDENCE` in `./coupang-wing-issuance-driver`
- * carries the sanitized provenance and its limits): a live read-only probe
- * measured {@link WING_DELETION_LABELS}`.delete` resolving to exactly one element on the already-issued page, so
- * {@link WING_DELETION_SELECTORS_CALIBRATED} is `true`. Calibration is SELECTOR READINESS ONLY — it authorizes
- * nothing. This driver still REFUSES to highlight if the flag is false (fail closed, defense-in-depth), still
- * refuses a non-unique match at runtime, still enforces classify-then-checkpoint-then-operator-action, and its
- * gated CLI still requires a PREPARED destructive manifest. The 삭제 press remains the operator's.
+ * **DELETE selector calibration is WITHDRAWN** (`WING_DELETION_CALIBRATION_EVIDENCE` in
+ * `./coupang-wing-issuance-driver` carries the withdrawn provenance and the two reasons). A live read-only probe
+ * did measure {@link WING_DELETION_LABELS}`.delete` resolving to exactly one element — but with the locator
+ * version that could not reject a non-painting match, which is the same version that produced an invisible
+ * highlight on the 발급 target. So {@link WING_DELETION_SELECTORS_CALIBRATED} is `false` and this driver refuses
+ * to highlight at all. That refusal was always here as defense-in-depth; it is now the operative one.
+ *
+ * Restoring the flag needs a fresh read-only probe, and even then would be SELECTOR READINESS ONLY — it
+ * authorizes nothing. The driver still refuses a non-unique match at runtime, still enforces
+ * classify-then-checkpoint-then-operator-action, and its gated CLI still requires a PREPARED destructive
+ * manifest. The 삭제 press remains the operator's in every state of the flag.
  */
 import type { Page } from "playwright";
 import { log } from "../log";

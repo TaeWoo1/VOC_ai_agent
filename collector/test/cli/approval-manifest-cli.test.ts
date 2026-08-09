@@ -66,7 +66,7 @@ afterEach(() => {
 });
 
 /** Run the CLI capturing its stdout/stderr instead of letting it write to the test runner's streams. */
-function run(): { code: number; out: string; err: string } {
+function run(selectorsCalibrated?: boolean): { code: number; out: string; err: string } {
   let out = "";
   let err = "";
   const realOut = process.stdout.write.bind(process.stdout);
@@ -76,12 +76,29 @@ function run(): { code: number; out: string; err: string } {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (process.stderr as any).write = (s: string): boolean => ((err += s), true);
   try {
-    return { code: runApprovalManifestCli({ verifyIdentity: identityStub }), out, err };
+    return {
+      code: runApprovalManifestCli({
+        verifyIdentity: identityStub,
+        ...(selectorsCalibrated === undefined ? {} : { selectorsCalibrated }),
+      }),
+      out,
+      err,
+    };
   } finally {
     process.stdout.write = realOut;
     process.stderr.write = realErr;
   }
 }
+
+/**
+ * The 삭제 calibration is WITHDRAWN, so `SELECTORS_NOT_CALIBRATED` short-circuits ahead of every other cause and
+ * the CLI writes ZERO bytes to stdout. Any case about what the manifest CONTAINS, or about a refusal cause that
+ * sits behind the calibration check, must therefore inject a calibrated CLI — otherwise it asserts something
+ * about an empty string and passes for free. Two things keep the injection honest: the source assertions below
+ * pin the default to the shared constant and pin the entrypoint to passing nothing, and the seam is in-process
+ * only, reachable from no env var and no shell path.
+ */
+const CALIBRATED = true;
 
 /**
  * These tests are written against the CURRENT value of `WING_DELETION_SELECTORS_CALIBRATED` rather than
@@ -121,8 +138,11 @@ describe("approval-manifest-cli — the destructive WING deletion phase can be D
   });
 
   it("the displayed manifest leaks no raw URL / host / credential wording", () => {
+    // Injected: with the calibration withdrawn the CLI prints nothing, and `expect("").not.toContain(...)` is a
+    // green assertion about an empty string. The leak this names can only be seen on a manifest that exists.
     setEnv({ SELLEROPS_APPROVAL_PHASE: "COUPANG_WING_KEY_DELETION", ...IDENTITY });
-    const { out } = run();
+    const { out } = run(CALIBRATED);
+    expect(out.length, "the case is meaningless unless a manifest was actually printed").toBeGreaterThan(0);
     for (const forbidden of ["wing.coupang.com", "https://", "Secret Key", "업체코드"]) {
       expect(out, `manifest must not contain ${forbidden}`).not.toContain(forbidden);
     }
@@ -138,8 +158,11 @@ describe("approval-manifest-cli — the destructive WING deletion phase can be D
       SELLEROPS_APPROVAL_CHANNEL: "NAVER",
       SELLEROPS_APPROVAL_ACCOUNT: "operator-owned NAVER SmartStore test store",
     });
-    const { code, out } = run();
-    if (!WING_DELETION_SELECTORS_CALIBRATED) return; // withdrawn ⇒ refused earlier, covered above
+    // Injected rather than skipped. The pinning asserted below (channel / accountBinding / surface / maxActions
+    // from the phase spec, never from the ambient env) lives in THIS CLI and is covered nowhere else — an early
+    // return would retire it for as long as the calibration stays withdrawn, which is the deferred breakage the
+    // seam exists to prevent.
+    const { code, out } = run(CALIBRATED);
     expect(code).toBe(0);
     const m = JSON.parse(out) as Record<string, unknown>;
     expect(m.channel).toBe("COUPANG");
@@ -168,13 +191,59 @@ describe("approval-manifest-cli — the destructive WING deletion phase can be D
     // executing while the manifest kept advertising a calibrated destructive phase — the approval would bind to
     // a claim the code no longer honors.
     const src = readFileSync(CLI_SRC, "utf8");
-    expect(src).toContain("selectorsCalibrated: WING_DELETION_SELECTORS_CALIBRATED");
-    expect(src).not.toContain("selectorsCalibrated: true");
+    // The seam may override it, but the DEFAULT — what the real entrypoint gets, since it passes no options —
+    // must be the shared constant.
+    expect(src).toContain("opts.selectorsCalibrated ?? WING_DELETION_SELECTORS_CALIBRATED");
+    expect(src).not.toMatch(/selectorsCalibrated:\s*true/);
   });
 
   it("only the deletion phase states a calibration — other phases keep the gate's own default", () => {
     const src = readFileSync(CLI_SRC, "utf8");
-    expect(src).toContain("isWingKeyDeletion ? { selectorsCalibrated: WING_DELETION_SELECTORS_CALIBRATED } : {}");
+    expect(src).toContain(
+      "isWingKeyDeletion ? { selectorsCalibrated: opts.selectorsCalibrated ?? WING_DELETION_SELECTORS_CALIBRATED } : {}",
+    );
+  });
+
+  it("the PREPARED shape this CLI alone produces stays covered while the calibration is withdrawn", () => {
+    // `approval-manifest.test.ts` pins the destructive manifest at the GATE level, but `entrypointCommandId` and
+    // the host category are added here. Injected so they do not go dormant with the flag.
+    setEnv({ SELLEROPS_APPROVAL_PHASE: "COUPANG_WING_KEY_DELETION", ...IDENTITY });
+    const { code, out } = run(CALIBRATED);
+    expect(code).toBe(0);
+    const m = JSON.parse(out) as Record<string, unknown>;
+    expect(m.phase).toBe("COUPANG_WING_KEY_DELETION");
+    expect(m.mode).toBe("READ_ONLY"); // AGENT mode — the destructive click is the operator's
+    expect(m.selectorsCalibrated).toBe(true); // what the INJECTION states, not what ships
+    expect(m.apiCenterHost).toBe("wing_host");
+    expect(m.entrypointCommandId).toBe("run-coupang-wing-deletion-live");
+    expect(m.operatorDestructiveAction).toMatchObject({
+      operation: COUPANG_WING_KEY_DELETION_OPERATION,
+      irreversible: true,
+      agentPerformsAction: false,
+      explicitCheckpointRequired: true,
+      credentialValueReadBudget: 0,
+    });
+  });
+
+  it("the calibration seam is IN-PROCESS only — no environment variable can assert a calibration", () => {
+    // The seam exists so the destructive phase's repo-identity cases stay exercisable while the calibration is
+    // withdrawn. It must not become a way to talk a real operator's CLI into a destructive manifest: a caller
+    // has to pass it in code, and the shipped entrypoint passes nothing.
+    const src = readFileSync(CLI_SRC, "utf8");
+    expect(src).not.toMatch(/selectorsCalibrated[^\n]*\benv\(/);
+    // No env var may name a selector calibration. (`SELLEROPS_CALIBRATION_HOTKEY`/`_ARTIFACT` are unrelated
+    // structure-observation inputs, so the pattern is anchored on SELECTORS, not on the word "calibration".)
+    expect(src).not.toMatch(/SELLEROPS_[A-Z_]*SELECTORS/);
+    // And the ENTRYPOINT must pass nothing — the half the behavioural check below cannot see, because it calls
+    // the exported function rather than the `process.exit(...)` line. Without this, `runApprovalManifestCli({
+    // selectorsCalibrated: forced })` at the entrypoint defeats every other assertion in this test and ships a
+    // destructive manifest with the calibration withdrawn. The deletion CLI carries the same guard.
+    expect(src).toContain("process.exit(runApprovalManifestCli())");
+    expect(src).not.toMatch(/runApprovalManifestCli\(\s*\{/);
+    // And the default really is the shipped constant, whatever it currently is.
+    setEnv({ SELLEROPS_APPROVAL_PHASE: "COUPANG_WING_KEY_DELETION", ...IDENTITY });
+    const { code } = run();
+    expect(code).toBe(WING_DELETION_SELECTORS_CALIBRATED ? 0 : 1);
   });
 });
 
@@ -192,7 +261,7 @@ describe("approval-manifest-cli — a destructive manifest must describe the RUN
     // §1.6. Nothing may be displayed for the operator to grant against.
     identityStub = () => ({ ok: false, cause, reason });
     setEnv({ SELLEROPS_APPROVAL_PHASE: "COUPANG_WING_KEY_DELETION", ...IDENTITY });
-    const { code, out, err } = run();
+    const { code, out, err } = run(CALIBRATED);
     expect(code).toBe(1);
     expect(out, "a refused run must display nothing").toBe("");
     expect(err).toContain("repo_identity");
@@ -204,7 +273,7 @@ describe("approval-manifest-cli — a destructive manifest must describe the RUN
     // could never have been approved in the first place.
     identityStub = () => ({ ok: false, cause: "DIRTY_TREE", reason: "dirty" });
     setEnv({ SELLEROPS_APPROVAL_PHASE: "COUPANG_WING_KEY_DELETION", ...IDENTITY, WALKTHROUGH_RUN_ID: undefined });
-    const { code, err } = run();
+    const { code, err } = run(CALIBRATED);
     expect(code).toBe(1);
     expect(err).toContain("UNBOUND_IDENTITY");
     expect(err).not.toContain("repo_identity");

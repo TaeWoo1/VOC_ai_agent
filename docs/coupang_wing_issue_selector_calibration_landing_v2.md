@@ -194,6 +194,10 @@ table, through the same `role`-named field, as the 발급 claim that was refuted
 contradict each other on that record. Deliberately not touched here (deletion tooling is out of scope for this
 unit), and a source reader who consults only the comment gets the wrong answer until it is.
 
+> **Closed in the next unit** (`docs/coupang_wing_delete_calibration_withdrawal_v1.md`), which also found the
+> harder problem: that record's `matchCount: 1` was captured at `a666ad1`, **before** the visibility filter
+> landed at `a3ef479e`. The 삭제 calibration is withdrawn and the destructive path is fail-closed.
+
 `wing-probe-selfcheck.sh` and `wing-deletion-selfcheck.sh` still print `SELFCHECK PASS` with exit 0 while skipping
 their clean-tree halves on a dirty tree — the fail-open the reveal harness closed with `PARTIAL`/exit 2. Recorded,
 not a blocker: the runtime preflight fail-closes on clean-tree and repo identity directly.
