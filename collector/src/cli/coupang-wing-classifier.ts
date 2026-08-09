@@ -45,10 +45,75 @@ export type WingBlocker =
 
 export type CountBucket = "none" | "few" | "many";
 
+/**
+ * A WIDER ladder for counts that are large on a normal page. `CountBucket` saturates at `many` above 3, which is
+ * fine for things that are normally absent and useless for things that are normally plentiful: on the live WING
+ * open-API surface `editableTextInputCount` and `listLikeContainerCount` were BOTH already `many` before the
+ * operator pressed anything, so neither could ever report an increase. A transition detector built only from
+ * saturated buckets cannot detect a transition — that is not a tuning problem, it is an arithmetic one.
+ */
+export type WideCountBucket = "none" | "few" | "some" | "many" | "very_many";
+
+/** `0 · 1–3 · 4–8 · 9–20 · >20`. Chosen so a modal or panel adding a handful of controls moves at least one step. */
+export function wideCountBucket(n: number): WideCountBucket {
+  if (n <= 0) return "none";
+  if (n <= 3) return "few";
+  if (n <= 8) return "some";
+  if (n <= 20) return "many";
+  return "very_many";
+}
+
+const COUNT_BUCKET_ORDER: readonly CountBucket[] = ["none", "few", "many"];
+const WIDE_BUCKET_ORDER: readonly WideCountBucket[] = ["none", "few", "some", "many", "very_many"];
+
+/** Rank a bucket for ORDER comparisons (did it go up?). Unknown values rank -1 so they never read as an increase. */
+export function countBucketRank(b: CountBucket | undefined): number {
+  return b === undefined ? -1 : COUNT_BUCKET_ORDER.indexOf(b);
+}
+export function wideCountBucketRank(b: WideCountBucket | undefined): number {
+  return b === undefined ? -1 : WIDE_BUCKET_ORDER.indexOf(b);
+}
+
 /** Raw structural census returned by the in-page sweep — counts/booleans only, NEVER any value/text/url. */
 export interface WingStructuralCensus {
   passwordFieldPresent: boolean;
+  /**
+   * **Reads EXACTLY `button[type='submit'], input[type='submit']` — and nothing else.** The name is broader than
+   * the measurement, and that gap cost a live run: the 2026-08-09 reveal built its entire success criterion on
+   * this flipping false→true, while WING's component library emits `<button type="button">`. The initial surface
+   * reported `false` **while displaying the very `API Key 발급 받기` button the run highlighted**, so the criterion
+   * was unreachable on WING markup, not merely unmet.
+   *
+   * It is NOT widened here: treating every `<button type="button">` as a submit affordance would make "a submit
+   * control exists" false wherever any button is. Read it as "a form-submit-typed control exists", never as "the
+   * page has an actionable control" — for that, see {@link actionControlCount}.
+   *
+   * The NAVER API-center census has a field of the SAME NAME with a byte-identical selector
+   * (`observe-api-center.ts`), but it is a SEPARATE interface with its own in-page script, so changing this one
+   * reaches none of it. An earlier version of this comment said they were shared and used that as the reason not
+   * to rename; review corrected it. The real reason to defer is that the fix is a rename on BOTH surfaces, and
+   * nobody has measured whether NAVER's controls are `type=submit` either — that surface plausibly carries the
+   * same latent defect.
+   */
   submitAffordancePresent: boolean;
+  /**
+   * A PAINTING dialog/modal container: `dialog[open]`, `[role='dialog']`, `[role='alertdialog']`, or
+   * `[aria-modal='true']`. Generic HTML/ARIA only — no WING selector, no text. Added for the Stage-2 transition,
+   * which the operator reported as a persistent surface the census could not see.
+   */
+  dialogLikePresent?: boolean;
+  /**
+   * PAINTING, enabled choice controls: `input[type=radio|checkbox]`, `[role='radio']`, `[role='option']`. A
+   * purpose-SELECTION surface is the one shape most likely to add these, and the initial surface plausibly has
+   * none — so unlike the saturated buckets, this one has room to rise. Counted, never read.
+   */
+  choiceControlCount?: number;
+  /**
+   * PAINTING, enabled interactive controls: `button`, `[role='button']`, `input[type=button|submit|reset]`,
+   * `summary`. The most shape-agnostic transition signal available — cards, buttons and radios all add controls.
+   * Bucketed with {@link wideCountBucket} rather than `countBucket` precisely because a real page has plenty.
+   */
+  actionControlCount?: number;
   formCount: number;
   /** Editable text-like inputs (NOT password), value never read. */
   editableTextInputCount: number;
@@ -99,7 +164,14 @@ export const WING_CREDENTIAL_ANCHOR_LABELS = ["Access Key"] as const;
 export interface WingSignals {
   urlCategory: WingUrlCategory;
   passwordFieldPresent: boolean;
+  /** See {@link WingStructuralCensus.submitAffordancePresent} — `type='submit'` only; NOT "an actionable control". */
   submitAffordancePresent: boolean;
+  /** A painting dialog/modal container is present. Absent on a census taken before this signal existed. */
+  dialogLikePresent?: boolean;
+  /** Painting, enabled choice controls (radio/checkbox/role=radio/role=option). */
+  choiceControlCountBucket?: CountBucket;
+  /** Painting, enabled interactive controls, on the WIDE ladder so a busy page still has headroom. */
+  actionControlCountBucket?: WideCountBucket;
   formCountBucket: CountBucket;
   editableTextInputCountBucket: CountBucket;
   readonlyFieldCountBucket: CountBucket;
@@ -158,6 +230,13 @@ export function toWingSignals(urlCategory: WingUrlCategory, census: WingStructur
     urlCategory,
     passwordFieldPresent: census.passwordFieldPresent,
     submitAffordancePresent: census.submitAffordancePresent,
+    // The three transition signals are OPTIONAL end to end: a census taken before they existed (every recorded
+    // capture up to and including the 2026-08-09 reveal run) has no value for them, and `undefined` must stay
+    // distinguishable from a measured `false`/`none`. Defaulting them would manufacture a baseline nobody read,
+    // which is the shape of every mistake this file's history is made of.
+    ...(census.dialogLikePresent === undefined ? {} : { dialogLikePresent: census.dialogLikePresent }),
+    ...(census.choiceControlCount === undefined ? {} : { choiceControlCountBucket: countBucket(census.choiceControlCount) }),
+    ...(census.actionControlCount === undefined ? {} : { actionControlCountBucket: wideCountBucket(census.actionControlCount) }),
     formCountBucket: countBucket(census.formCount),
     editableTextInputCountBucket: countBucket(census.editableTextInputCount),
     readonlyFieldCountBucket: countBucket(census.readonlyFieldCount),
@@ -947,6 +1026,29 @@ export const EXTRACT_WING_CENSUS = `(function () {
   var isEditable = function (i) { return editableTypes.indexOf(i.type) !== -1 && !i.readOnly && !i.disabled; };
   var containers = slice(document.querySelectorAll("table, ul, ol, [role='grid'], [role='table']"));
   var editableTextInputCount = 0, readonlyFieldCount = 0, listLikeContainerCount = 0, i;
+  /* Does the node RENDER? Applied ONLY to the three transition signals added in 2026-08-09's repair — the four
+     counts above keep their original unfiltered meaning on purpose, because every recorded baseline was measured
+     that way and silently changing what they count would invalidate the comparisons they exist for. */
+  function paints(node) {
+    if (!node || !node.getClientRects) { return false; }
+    var cs = window.getComputedStyle ? window.getComputedStyle(node) : null;
+    if (cs && (cs.display === 'none' || cs.visibility === 'hidden')) { return false; }
+    if (cs && cs.display === 'contents') { return node.childElementCount > 0; }
+    var rects = node.getClientRects();
+    if (!rects || rects.length === 0) { return false; }
+    var r = node.getBoundingClientRect ? node.getBoundingClientRect() : null;
+    return !!r && r.width > 0 && r.height > 0;
+  }
+  function enabled(node) { return !(node.disabled === true || (node.getAttribute && node.getAttribute('aria-disabled') === 'true')); }
+  function countVisible(sel) {
+    var els; try { els = slice(document.querySelectorAll(sel)); } catch (e) { return 0; }
+    var n = 0;
+    for (var q = 0; q < els.length; q++) { if (paints(els[q]) && enabled(els[q])) { n++; } }
+    return n;
+  }
+  var dialogLikePresent = countVisible("dialog[open], [role='dialog'], [role='alertdialog'], [aria-modal='true']") > 0;
+  var choiceControlCount = countVisible("input[type='radio'], input[type='checkbox'], [role='radio'], [role='option']");
+  var actionControlCount = countVisible("button, [role='button'], input[type='button'], input[type='submit'], input[type='reset'], summary");
   for (i = 0; i < inputs.length; i++) {
     if (isEditable(inputs[i])) editableTextInputCount++;
     if (inputs[i].readOnly || inputs[i].disabled) readonlyFieldCount++;
@@ -975,6 +1077,9 @@ export const EXTRACT_WING_CENSUS = `(function () {
   return {
     passwordFieldPresent: document.querySelector("input[type='password']") != null,
     submitAffordancePresent: document.querySelector("button[type='submit'], input[type='submit']") != null,
+    dialogLikePresent: dialogLikePresent,
+    choiceControlCount: choiceControlCount,
+    actionControlCount: actionControlCount,
     formCount: document.querySelectorAll('form').length,
     editableTextInputCount: editableTextInputCount,
     readonlyFieldCount: readonlyFieldCount,

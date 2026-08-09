@@ -60,6 +60,7 @@ function result(over: Partial<WingRevealResult> = {}): WingRevealResult {
     outcome: "CONFIGURATION_SURFACE_SUSPECTED",
     before: OPEN_API,
     after: AFTER_FORM,
+    detectableDisjuncts: ["submitAffordancePresent"],
     changedSignals: ["submitAffordancePresent"],
     keyCreationRuledOut: false,
     keyCreationReason: "NO_DISCRIMINATING_SIGNAL",

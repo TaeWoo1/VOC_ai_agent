@@ -42,7 +42,9 @@ import {
   WING_KEY_CREATION_ACTION,
   WING_REVEAL_OPERATOR_ACTION,
   classifyWingUrlCategory,
+  countBucketRank,
   observeFrom,
+  wideCountBucketRank,
   wingIssuedStateFrom,
   type WingIssuedStateReason,
   type WingObservation,
@@ -139,6 +141,12 @@ export interface WingRevealResult {
   keyCreationReason: WingIssuedStateReason;
   /** True once the checkpoint overlay was verified GONE, before the post-action observation was taken. */
   overlayClearedBeforeObservation: boolean;
+  /**
+   * Which expected-outcome disjuncts could still fire against THIS run's baseline, measured from the before
+   * observation. Empty means the run was structurally incapable of recognising a Stage-2 — the failure that
+   * cost two live runs, now reported by the run itself instead of discovered afterwards.
+   */
+  detectableDisjuncts: readonly Stage2Disjunct[];
 }
 
 export interface WingRevealContextLike {
@@ -213,15 +221,98 @@ export function changedSignalNames(before: WingObservation | null, after: WingOb
 }
 
 /**
+ * Did the surface reveal a Stage-2 / purpose-selection step? The reveal run's expected-outcome predicate, pure
+ * and exported so it is testable — and, more importantly, so it is **falsifiable against a recorded baseline**.
+ *
+ * **What this replaces, and why.** The previous predicate was `submitAffordancePresent` false→true, and it was
+ * unreachable rather than merely unmet: that field reads `button[type='submit'], input[type='submit']` only,
+ * while WING's component library emits `<button type="button">`. The 2026-08-09 live run proved it from its own
+ * baseline — the *before* census of a page that visibly contained the `API Key 발급 받기` button reported
+ * `submitAffordancePresent: false`. A criterion that cannot fire on the markup it targets is not a strict
+ * criterion; it is a broken instrument, and it returned `SURFACE_UNCHANGED` for a Stage-2 the operator was
+ * looking straight at.
+ *
+ * **What is measured now.** A disjunction, because Stage-2's actual shape is UNMEASURED — the operator saw a
+ * persistent purpose-selection surface and nothing machine-read it. Each disjunct targets a different plausible
+ * shape and each has headroom by construction (all are zero/false on a page without that shape):
+ *
+ *  - `dialogLikePresent` false→true — a modal/dialog opened
+ *  - `choiceControlCountBucket` rose — selection controls appeared (the "purpose-selection" shape)
+ *  - `actionControlCountBucket` rose — any interactive controls appeared, on the WIDE ladder so a busy page can
+ *    still register an increase. This is the shape-agnostic one: cards, buttons and radios all move it.
+ *  - `submitAffordancePresent` false→true — retained for completeness. On WING markup it is not expected to
+ *    fire, and it is explicitly NOT load-bearing; a test proves each of the others is decisive on its own.
+ *
+ * **What this still does not promise.** Stage-2 has never been measured, so no predicate written today can be
+ * guaranteed to fire on it. If none of these move but something else does, the honest answer remains
+ * `SURFACE_CHANGED_UNRECOGNIZED` — which is a STOP, and a *better* result than `SURFACE_UNCHANGED` because it
+ * means the instrument saw something. Widening this to make a live run "pass" is the speculative retuning
+ * `collector/CLAUDE.md` §6 forbids; the point of the repair is that a predicate must be *satisfiable*, not that
+ * it must succeed.
+ */
+/** The disjunct names, in predicate order. Exported so the headroom report and the predicate cannot drift apart. */
+export const STAGE2_DISJUNCTS = [
+  "dialogLikePresent",
+  "choiceControlCountBucket",
+  "actionControlCountBucket",
+  "submitAffordancePresent",
+] as const;
+export type Stage2Disjunct = (typeof STAGE2_DISJUNCTS)[number];
+
+/**
+ * Which disjuncts COULD still fire, given this baseline — the instrument reporting on its own capability.
+ *
+ * This exists because "the criterion could not fire" is the defect that produced two wasted live runs, and
+ * neither run could have told anyone. A predicate term whose baseline is already at the satisfying value, or at
+ * the top of its ladder, is dead for that run; one whose baseline was never measured cannot be compared against.
+ * Computing it from the BEFORE observation means the answer is known before the operator is asked to act.
+ *
+ * **It is not a synthetic-fixture assertion.** The unit tests can only check headroom against an assumed
+ * baseline, because nobody has measured `dialogLikePresent` / `choiceControlCount` / `actionControlCount` on the
+ * real WING surface. This function measures it on whatever surface the run is actually looking at, and an EMPTY
+ * result means the run cannot detect a Stage-2 of any recognised shape — which the caller must surface rather
+ * than discover afterwards.
+ */
+export function stage2DisjunctsWithHeadroom(before: WingObservation): Stage2Disjunct[] {
+  const b = before.signals;
+  const out: Stage2Disjunct[] = [];
+  if (b.dialogLikePresent === false) out.push("dialogLikePresent");
+  if (b.choiceControlCountBucket !== undefined && countBucketRank(b.choiceControlCountBucket) < countBucketRank("many")) {
+    out.push("choiceControlCountBucket");
+  }
+  if (
+    b.actionControlCountBucket !== undefined &&
+    wideCountBucketRank(b.actionControlCountBucket) < wideCountBucketRank("very_many")
+  ) {
+    out.push("actionControlCountBucket");
+  }
+  if (!b.submitAffordancePresent) out.push("submitAffordancePresent");
+  return out;
+}
+
+export function stage2SurfaceRevealed(before: WingObservation, after: WingObservation): boolean {
+  const b = before.signals;
+  const a = after.signals;
+  // A transition needs BOTH ends. An absent baseline (a census taken before these signals existed) is not a
+  // zero: reading `undefined → none` as "it rose" would report a reveal because the INSTRUMENT changed, which
+  // is the same species of false positive as the one this whole repair exists to remove. Both sides must be
+  // measured, or the disjunct abstains. The mutation battery found this — the first cut compared ranks with
+  // `undefined` sorted below `none`, and no test distinguished it.
+  const rose = <T>(bv: T | undefined, av: T | undefined, rank: (v: T | undefined) => number): boolean =>
+    bv !== undefined && av !== undefined && rank(av) > rank(bv);
+
+  if (b.dialogLikePresent === false && a.dialogLikePresent === true) return true;
+  if (rose(b.choiceControlCountBucket, a.choiceControlCountBucket, countBucketRank)) return true;
+  if (rose(b.actionControlCountBucket, a.actionControlCountBucket, wideCountBucketRank)) return true;
+  if (!b.submitAffordancePresent && a.submitAffordancePresent) return true;
+  return false;
+}
+
+/**
  * Classify the post-press surface. Pure and exported so the decision is testable without a browser.
  *
- * The expected shape is deliberately NARROW: still on the open-API surface, and `submitAffordancePresent` moved
- * from false to true. That is the only delta the current census can plausibly show for "a form with a 확인 button
- * appeared" — the initial surface reported `submitAffordancePresent: false` on every capture, while editable
- * inputs and list containers were already `many` and cannot rise. If the real Stage-2 does not flip it, the
- * honest result is `SURFACE_CHANGED_UNRECOGNIZED` (or `SURFACE_UNCHANGED`), which is a STOP and is itself the
- * evidence the next unit needs. Widening this predicate to make a live run "pass" would be exactly the
- * speculative retuning `collector/CLAUDE.md` §6 forbids.
+ * Order is load-bearing and unchanged: an untrusted reading is never interpreted, a keys-displayed surface can
+ * never be reached by a path that could call it expected, and anything off the open-API surface stops.
  */
 export function classifyRevealOutcome(
   before: WingObservation | null,
@@ -237,8 +328,7 @@ export function classifyRevealOutcome(
   if (!isRevealSurface(after)) return "OFF_OPEN_API_SURFACE";
   const changed = changedSignalNames(before, after);
   if (changed.length === 0) return "SURFACE_UNCHANGED";
-  const submitAppeared = !before.signals.submitAffordancePresent && after.signals.submitAffordancePresent;
-  return submitAppeared ? "CONFIGURATION_SURFACE_SUSPECTED" : "SURFACE_CHANGED_UNRECOGNIZED";
+  return stage2SurfaceRevealed(before, after) ? "CONFIGURATION_SURFACE_SUSPECTED" : "SURFACE_CHANGED_UNRECOGNIZED";
 }
 
 /**
@@ -391,8 +481,20 @@ export class CoupangWingRevealDriver {
    *
    * Order matters and is enforced: the overlay is cleared FIRST, and only then is the post-action surface
    * observed. Observing through our own overlay would census our own injected panel — SellerOps' guidance
-   * counted as WING structure, which would corrupt the one delta this run exists to measure (and could invent a
-   * `submitAffordancePresent` that is ours, not WING's).
+   * counted as WING structure, which would corrupt the very delta this run exists to measure.
+   *
+   * **What this walk actually injects, since the predicate repair made it worth stating precisely:** a spotlight
+   * ring (`div[aria-hidden]`), a badge `div`, and a copy-only panel `div[role=note]`. This step mounts the
+   * overlay WITHOUT `advance`, so `overlay.ts` never creates its `<button>` — and none of the three new signals
+   * (`dialogLikePresent`, `choiceControlCount`, `actionControlCount`) matches any of those elements. `role=note`
+   * is not a dialog.
+   *
+   * So an uncleared overlay does NOT currently fabricate a Stage-2 delta. An earlier version of this comment
+   * claimed the opposite; review caught it. That is a property of this CALL SITE, not of the overlay: adding
+   * `advance` here would put a painting, enabled `<button>` on the marketplace page, which `actionControlCount`
+   * counts — manufacturing `CONFIGURATION_SURFACE_SUSPECTED` out of SellerOps' own DOM, on top of putting a
+   * clickable SellerOps control in front of a seller mid-action. A test pins that this call passes no `advance`.
+   * `OVERLAY_NOT_CLEARED` remains ordered ahead of every interpretation regardless.
    *
    * Enforces CHECKPOINT-FIRST: throws unless {@link highlightIssueCheckpoint} reached `highlighted`, so the walk
    * can never reach the operator-action step without having shown the expectation copy.
@@ -418,6 +520,9 @@ export class CoupangWingRevealDriver {
     // F9: a failed clear invalidates the reading rather than being recorded beside it. The panel's own elements
     // are counted by the census's candidate scan, so an observation taken through it is not a reading of WING.
     const outcome = classifyRevealOutcome(this.before, after, overlayClearedBeforeObservation);
+    // Computed from the BASELINE, so it describes what this run could ever have seen — independent of what it
+    // did see. A SURFACE_UNCHANGED alongside an empty list means "the instrument was blind", not "nothing moved".
+    const detectableDisjuncts = this.before ? stage2DisjunctsWithHeadroom(this.before) : [];
     // The classifier's own reason for why issuance cannot be ruled out, taken from the AFTER observation so the
     // record carries the reason for the surface actually being reported on.
     const keyCreationReason = wingIssuedStateFrom(after).reason;
@@ -430,11 +535,13 @@ export class CoupangWingRevealDriver {
       keyCreationRuledOut: false,
       keyCreationReason,
       overlayClearedBeforeObservation,
+      detectableDisjuncts,
     };
     log("aw_coupang_reveal_outcome", {
       outcome,
       changedSignalCount: result.changedSignals.length,
       overlayCleared: overlayClearedBeforeObservation,
+      detectableDisjunctCount: detectableDisjuncts.length,
       keyCreationReason,
     });
     return result;
