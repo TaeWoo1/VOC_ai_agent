@@ -36,6 +36,9 @@ import { log } from "../log";
 import { mountOverlay, unmountOverlay, overlayMounted, resetOverlayAdvance, readOverlayAdvancePressed } from "./overlay";
 import {
   EXTRACT_WING_CENSUS,
+  EXTRACT_WING_CHOICE_CONTROL_SHAPES,
+  sanitizeChoiceControlCensus,
+  type WingChoiceControlCensus,
   LIVE_DOM_CALIBRATION_PENDING,
   classifyWingUrlCategory,
   observeFrom,
@@ -673,6 +676,21 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
   async probeSurface(): Promise<WingSurfaceProbe> {
     await this.settle(this.activePage());
     return this.readSurface();
+  }
+
+  /**
+   * READ-ONLY shape census of the surface's choice controls — counts and closed-vocabulary categories only.
+   *
+   * A DEDICATED method rather than a general `evaluate` seam on purpose. Exposing "run this string in the page"
+   * would make the driver's page-side surface unbounded and unauditable, and the set of scripts this driver may
+   * run is a property tests assert. This adds exactly one audited constant to that set.
+   */
+  async choiceControlCensus(): Promise<WingChoiceControlCensus> {
+    const page = this.activePage();
+    await this.settle(page);
+    // Re-sanitized host-side: the script maps to the allow-lists, and this guarantees the record's vocabulary
+    // even if a future edit to the script forgets to.
+    return sanitizeChoiceControlCensus(await this.evalStr<unknown>(page, EXTRACT_WING_CHOICE_CONTROL_SHAPES));
   }
 
   /** Classify the CURRENT surface WITHOUT settling — the value-free census + host-category read. */

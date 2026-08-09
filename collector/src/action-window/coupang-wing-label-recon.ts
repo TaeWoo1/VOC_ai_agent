@@ -66,12 +66,12 @@ export interface WingLabelCandidate {
  * word, and the wider structural queries that a Korean form label might live in. Inventing semantically
  * different wording would be guessing at WING's copy, which is what the live measurement is for.
  */
-function deepFreezeCandidates(
-  sets: Record<WingReconTarget, readonly WingLabelCandidate[]>,
-): Readonly<Record<WingReconTarget, readonly WingLabelCandidate[]>> {
+function deepFreezeCandidates<K extends string>(
+  sets: Record<K, readonly WingLabelCandidate[]>,
+): Readonly<Record<K, readonly WingLabelCandidate[]>> {
   // `Object.freeze` is shallow, and `readonly` is erased at runtime — without freezing each candidate OBJECT,
   // `CANDIDATES.call_ip[0].exactText = <anything>` succeeds and that string is shipped straight into the page.
-  for (const set of Object.values(sets)) {
+  for (const set of Object.values(sets) as readonly (readonly WingLabelCandidate[])[]) {
     Object.freeze(set);
     for (const c of set) Object.freeze(c);
   }
@@ -192,13 +192,49 @@ function screenTargets(targets: readonly unknown[]): WingReconTarget[] {
 export function wingReconProbes(
   targets: readonly WingReconTarget[],
 ): { targetId: string; candidateQuery: string; exactText: string }[] {
+  return probesFromCandidates(screenTargets(targets), WING_LABEL_RECON_CANDIDATES);
+}
+
+/**
+ * The same flattening over ANY candidate map. Shared so the Stage-2 sweep runs the identical code path as the
+ * initial-surface sweep rather than a parallel copy that could drift into emitting something else.
+ */
+function probesFromCandidates<K extends string>(
+  targets: readonly K[],
+  candidates: Readonly<Record<K, readonly WingLabelCandidate[]>>,
+): { targetId: string; candidateQuery: string; exactText: string }[] {
   const out: { targetId: string; candidateQuery: string; exactText: string }[] = [];
-  for (const t of screenTargets(targets)) {
-    for (const c of WING_LABEL_RECON_CANDIDATES[t]) {
+  for (const t of targets) {
+    for (const c of candidates[t] ?? []) {
       out.push({ targetId: c.id, candidateQuery: c.candidateQuery, exactText: c.exactText });
     }
   }
   return out;
+}
+
+/**
+ * Screen Stage-2 targets the way {@link screenTargets} screens the initial-surface ones: THROW on an unknown
+ * name, de-duplicate the rest. Filtering silently would be the weaker behaviour — a caller that asked for a
+ * target this module does not own would get a smaller sweep and no indication, which is the same
+ * "measured fewer things than the manifest said" failure the scope gates exist to prevent.
+ */
+function screenStage2Targets(targets: readonly unknown[]): WingStage2ReconTarget[] {
+  const seen = new Set<WingStage2ReconTarget>();
+  const out: WingStage2ReconTarget[] = [];
+  for (const t of targets) {
+    if (typeof t !== "string" || !isWingStage2ReconTarget(t)) throw new UnknownWingReconTargetError(String(t));
+    if (seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+  }
+  return out;
+}
+
+/** Stage-2 probe specs. Same shape, same seam, different (declared-inert-until-now) hypothesis set. */
+export function wingStage2ReconProbes(
+  targets: readonly WingStage2ReconTarget[],
+): { targetId: string; candidateQuery: string; exactText: string }[] {
+  return probesFromCandidates(screenStage2Targets(targets), WING_STAGE2_RECON_CANDIDATES);
 }
 
 /**
@@ -230,6 +266,35 @@ export function interpretWingRecon(
   targets: readonly WingReconTarget[],
   raw: readonly { targetId: string; matchCount: number; sig?: string }[],
 ): WingReconTargetResult[] {
+  return interpretFor(screenTargets(targets), WING_LABEL_RECON_CANDIDATES, raw);
+}
+
+/**
+ * Stage-2 reading, folded by the SAME logic — including `NOT_MEASURED` for a missing or self-conflicting row,
+ * which is the distinction that stops a partly-failed sweep reading as "these Stage-2 labels are confirmed
+ * absent". Sharing the fold rather than copying it is deliberate: a second implementation is a second place for
+ * the measured/unmeasured conflation to come back.
+ */
+export function interpretWingStage2Recon(
+  targets: readonly WingStage2ReconTarget[],
+  raw: readonly { targetId: string; matchCount: number; sig?: string }[],
+): WingStage2ReconTargetResult[] {
+  return interpretFor(screenStage2Targets(targets), WING_STAGE2_RECON_CANDIDATES, raw);
+}
+
+/** A Stage-2 target's folded reading. Same shape as the initial-surface one, over the Stage-2 target names. */
+export interface WingStage2ReconTargetResult {
+  readonly target: WingStage2ReconTarget;
+  readonly candidates: readonly WingReconCandidateResult[];
+  readonly uniqueCandidateIds: readonly string[];
+  readonly resolvedUnambiguously: boolean;
+}
+
+function interpretFor<K extends string>(
+  targets: readonly K[],
+  candidateMap: Readonly<Record<K, readonly WingLabelCandidate[]>>,
+  raw: readonly { targetId: string; matchCount: number; sig?: string }[],
+): { target: K; candidates: WingReconCandidateResult[]; uniqueCandidateIds: string[]; resolvedUnambiguously: boolean }[] {
   const byId = new Map<string, number>();
   const sigById = new Map<string, string>();
   const conflicting = new Set<string>();
@@ -238,9 +303,9 @@ export function interpretWingRecon(
     byId.set(r.targetId, r.matchCount);
     if (typeof r.sig === "string" && r.sig.length > 0) sigById.set(r.targetId, r.sig);
   }
-  const out: WingReconTargetResult[] = [];
-  for (const target of screenTargets(targets)) {
-    const candidates = WING_LABEL_RECON_CANDIDATES[target].map((c): WingReconCandidateResult => {
+  const out: { target: K; candidates: WingReconCandidateResult[]; uniqueCandidateIds: string[]; resolvedUnambiguously: boolean }[] = [];
+  for (const target of targets) {
+    const candidates = (candidateMap[target] ?? []).map((c): WingReconCandidateResult => {
       if (!byId.has(c.id) || conflicting.has(c.id))
         return { id: c.id, label: c.exactText, matchCount: null, verdict: "NOT_MEASURED", sig16: null };
       const matchCount = byId.get(c.id)!;
@@ -293,7 +358,12 @@ export const WING_STAGE2_RECON_TARGETS = ["purpose", "self_dev", "vendor_info", 
 export type WingStage2ReconTarget = (typeof WING_STAGE2_RECON_TARGETS)[number];
 
 export const WING_STAGE2_RECON_CANDIDATES: Readonly<Record<WingStage2ReconTarget, readonly WingLabelCandidate[]>> =
-  Object.freeze({
+  // deepFreeze, NOT `Object.freeze`. These were declared inert, and a shallow freeze was survivable while no
+  // code path read them; wiring them to a runner made the difference load-bearing. `Object.freeze` does not
+  // freeze the candidate OBJECTS, and `readonly` is erased at runtime — so
+  // `WING_STAGE2_RECON_CANDIDATES.purpose[0].exactText = <anything>` succeeded, and that string is shipped
+  // straight into the live page as an exact-match query. Found by this unit's own test.
+  deepFreezeCandidates({
     purpose: Object.freeze([
       { id: "stage2.purpose.operator_reported", candidateQuery: "h1,h2,h3,h4,p,span,div,label,legend", exactText: "이제 키의 사용 목적을 골라주세요.",
         rationale: "OPERATOR-REPORTED on 2026-08-09, read off the screen by a human after pressing 발급 — the ONLY description of Stage-2 that exists. It is a hypothesis and provenance, NOT measured evidence: no apparatus has matched it, the transcription may differ from the DOM in whitespace or punctuation, and it may be a heading, a toast or a dialog title. Nothing may depend on it until a read-only Stage-2 recon resolves it" },
@@ -323,6 +393,64 @@ export const WING_STAGE2_RECON_CANDIDATES: Readonly<Record<WingStage2ReconTarget
         rationale: "the final key-creating control per the flow description — measured ONLY to locate it, never pressed" },
     ]),
   });
+
+export function isWingStage2ReconTarget(name: string): name is WingStage2ReconTarget {
+  return (WING_STAGE2_RECON_TARGETS as readonly string[]).includes(name);
+}
+
+/**
+ * Resolve a Stage-2 recon scope from a comma-separated request, fail-closed. Absent/empty ⇒ the full set.
+ *
+ * Stage-2 targets are a SEPARATE namespace from {@link WingProbeTargetName} on purpose. `purpose`,
+ * `vendor_url` and `confirm` are not shipped locators and have no baseline spec, so adding them to the canonical
+ * probe names would widen what an ordinary selector probe can be pointed at — a strictly larger blast radius
+ * than this unit needs, for the convenience of one shared parser.
+ */
+export function resolveWingStage2ReconScope(
+  raw: string | undefined | null,
+): { ok: true; targets: WingStage2ReconTarget[] } | { ok: false; reason: string } {
+  const trimmed = (raw ?? "").trim();
+  if (!trimmed) return { ok: true, targets: [...WING_STAGE2_RECON_TARGETS] };
+  const requested = trimmed.split(",").map((t) => t.trim()).filter((t) => t.length > 0);
+  if (requested.length === 0) return { ok: true, targets: [...WING_STAGE2_RECON_TARGETS] };
+  const unknown = requested.filter((t) => !isWingStage2ReconTarget(t));
+  if (unknown.length > 0) {
+    // A COUNT, never the tokens: this reason reaches stderr, and echoing an arbitrary env value there is how a
+    // sanitized surface acquires an unsanitized hole.
+    return { ok: false, reason: `${unknown.length} unrecognized Stage-2 recon target name(s)` };
+  }
+  // Canonical order + de-duplicated, so the manifest and the sweep describe the same set in the same words.
+  return { ok: true, targets: WING_STAGE2_RECON_TARGETS.filter((t) => requested.includes(t)) };
+}
+
+/**
+ * **Is the surface in front of us actually Stage-2?** Fail-closed precondition for the Stage-2 recon sweep.
+ *
+ * The operator presses 발급 themselves and then signals ready, so nothing structurally prevents a sweep of
+ * Stage-2 candidate labels running against the INITIAL surface — and that is the one mistake that would be
+ * expensive, because it produces a full set of confident `ABSENT` verdicts for labels that were simply never on
+ * screen. The previous recon already learned that lesson the other way round: initial-surface misses were not
+ * transferable to Stage-2, and they would not be transferable back.
+ *
+ * The test is the one thing the reveal run actually measured: `choiceControlCountBucket` was `none` on the
+ * initial surface and `few` after the press. So a visible choice control is required. This is a NECESSARY
+ * condition, not a sufficient one — it cannot prove the surface is Stage-2, only rule out the surface we know
+ * it is not.
+ */
+export const WING_STAGE2_PRECONDITIONS = ["OK", "NOT_OPEN_API_SURFACE", "NO_VISIBLE_CHOICE_CONTROL", "NOT_OBSERVED"] as const;
+export type WingStage2Precondition = (typeof WING_STAGE2_PRECONDITIONS)[number];
+
+export function wingStage2Precondition(
+  observation: { pageCategory: string; signals: { choiceControlCountBucket?: string } } | null,
+): WingStage2Precondition {
+  if (!observation) return "NOT_OBSERVED";
+  if (observation.pageCategory !== "open_api_issuance") return "NOT_OPEN_API_SURFACE";
+  const bucket = observation.signals.choiceControlCountBucket;
+  // `undefined` is NOT "none". An unmeasured signal cannot satisfy a precondition, and it cannot fail one for
+  // the reason the caller would assume either — so it is refused as unobserved rather than as an empty Stage-2.
+  if (bucket === undefined) return "NOT_OBSERVED";
+  return bucket === "none" ? "NO_VISIBLE_CHOICE_CONTROL" : "OK";
+}
 
 /**
  * **The SUPERSEDED record: the run where Stage-2 opened and the instrument could not see it.**
