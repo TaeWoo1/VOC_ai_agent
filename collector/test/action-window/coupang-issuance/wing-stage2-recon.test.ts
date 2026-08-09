@@ -135,7 +135,7 @@ describe("the Stage-2 sweep folds like the initial-surface one", () => {
   it("probes every candidate of every requested target, and nothing else", () => {
     const specs = wingStage2ReconProbes(["purpose", "confirm"]);
     const ids = specs.map((s) => s.targetId);
-    expect(ids).toEqual(["stage2.purpose.operator_reported", "stage2.confirm.confirm"]);
+    expect(ids).toEqual(["stage2.purpose.operator_reported", "stage2.purpose.operator_verbatim", "stage2.confirm.confirm"]);
     // Every string sent to the page is one WE wrote — a candidate's own frozen fields.
     for (const s of specs) {
       const all = Object.values(WING_STAGE2_RECON_CANDIDATES).flat();
@@ -143,6 +143,23 @@ describe("the Stage-2 sweep folds like the initial-surface one", () => {
       expect(s.exactText).toBe(c.exactText);
       expect(s.candidateQuery).toBe(c.candidateQuery);
     }
+  });
+
+  it("the VERBATIM purpose heading differs from the 08-09 report by exactly 이제 and a period", () => {
+    // Found by this unit's own battery: restoring the trailing period to the verbatim entry survived every
+    // test. Its wording was pinned nowhere, and its entire justification is the DIFFERENCE from the report it
+    // corrects — the report measured ABSENT_EVERYWHERE, and "a leading 이제 and a trailing period" is the
+    // hypothesis for why. A verbatim entry drifting toward the string it exists to differ from erases that.
+    const of = (id: string): string => Object.values(WING_STAGE2_RECON_CANDIDATES).flat().find((c) => c.id === id)!.exactText;
+    const verbatim = of("stage2.purpose.operator_verbatim");
+    expect(of("stage2.purpose.operator_reported")).toBe(`이제 ${verbatim}.`);
+    // …and the verbatim one carries neither affix itself, which the equation alone does not forbid.
+    expect(verbatim.startsWith("이제")).toBe(false);
+    expect(verbatim.endsWith(".")).toBe(false);
+    // Same two silent-mismatch modes the transcribed option labels are pinned against.
+    expect(verbatim.normalize("NFC")).toBe(verbatim);
+    expect(verbatim).not.toMatch(/[\u00a0\u1680\u2000-\u200b\u202f\u205f\u3000]/);
+    expect(verbatim.trim()).toBe(verbatim);
   });
 
   it("every Stage-2 candidateQuery is a plain structural tag list", () => {
@@ -367,24 +384,40 @@ describe("the choice-control shape census — categories and integers, nothing e
       groupContainerCount: null,
       scanTruncated: "yes",
     });
-    expect(dirty.visibleChoiceControlCount).toBe(0);
-    expect(dirty.hiddenChoiceControlCount).toBe(2);
-    expect(dirty.shapes[0]).toEqual({ tag: "OTHER", inputType: "other", role: "other", count: 0 });
-    expect(dirty.groupContainerCount).toBe(0);
+    // A well-formed object with junk FIELDS is still a reading — the field coercions are the point of this
+    // function and are unchanged by the null-reading fix below.
+    expect(dirty).not.toBeNull();
+    expect(dirty!.visibleChoiceControlCount).toBe(0);
+    expect(dirty!.hiddenChoiceControlCount).toBe(2);
+    expect(dirty!.shapes[0]).toEqual({ tag: "OTHER", inputType: "other", role: "other", count: 0 });
+    expect(dirty!.groupContainerCount).toBe(0);
     // A non-boolean must not become a truthy claim of truncation.
-    expect(dirty.scanTruncated).toBe(false);
+    expect(dirty!.scanTruncated).toBe(false);
     expect(JSON.stringify(dirty)).not.toContain("img");
     expect(JSON.stringify(dirty)).not.toContain("업체명");
+  });
+
+  it("an UNUSABLE reading is null — never a complete census reporting zero choice controls", () => {
+    // The defect this workstream keeps re-committing, on the LAST of the three Stage-2 sanitizers to still have
+    // it. `null`, `undefined`, a string and an array are all "the evaluation returned something that is not a
+    // reading". Coerced, each became `visibleChoiceControlCount: 0` — indistinguishable, in the record, from a
+    // measured Stage-2 with no radios on it. The recon record's central Stage-2 claim rides on that number.
+    for (const unusable of [null, undefined, "", "{}", 0, 2, true, [], [{ tag: "INPUT" }]]) {
+      expect(sanitizeChoiceControlCensus(unusable)).toBeNull();
+    }
+    // ...and the empty OBJECT is still a reading, because that is what an empty page legitimately returns.
+    expect(sanitizeChoiceControlCensus({})).not.toBeNull();
+    expect(sanitizeChoiceControlCensus({})!.visibleChoiceControlCount).toBe(0);
   });
 
   it("bounds the number of shape buckets, and SAYS SO when it drops any", () => {
     // A silent cap makes a partial reading look complete. `scanTruncated` covers element-scan truncation only,
     // so bucket loss needs its own flag.
     const many = Array.from({ length: 200 }, () => ({ tag: "INPUT", inputType: "radio", role: "none", count: 1 }));
-    const capped = sanitizeChoiceControlCensus({ shapes: many });
+    const capped = sanitizeChoiceControlCensus({ shapes: many })!;
     expect(capped.shapes.length).toBeLessThanOrEqual(64);
     expect(capped.bucketsTruncated).toBe(true);
-    expect(sanitizeChoiceControlCensus({ shapes: [{ tag: "INPUT", inputType: "radio", role: "none", count: 1 }] }).bucketsTruncated).toBe(false);
+    expect(sanitizeChoiceControlCensus({ shapes: [{ tag: "INPUT", inputType: "radio", role: "none", count: 1 }] })!.bucketsTruncated).toBe(false);
   });
 });
 
@@ -523,9 +556,10 @@ describe("runWingSelectorRecord — the Stage-2 sweep in the orchestrator", () =
     const { d, probed, censusCalls } = deps();
     const r = await runWingSelectorRecord(d, [], { stage2: ["purpose", "confirm"] });
     expect(r.stage2?.precondition).toBe("OK");
-    expect(probed).toHaveLength(2);
+    // 2 purpose candidates (the 08-09 report and the 08-10 verbatim transcription) + 1 confirm.
+    expect(probed).toHaveLength(3);
     expect(censusCalls()).toBe(1);
-    expect(r.stage2?.candidatesMeasured).toBe(2);
+    expect(r.stage2?.candidatesMeasured).toBe(3);
     expect(r.stage2?.choiceControls?.visibleChoiceControlCount).toBe(2);
   });
 
@@ -583,6 +617,18 @@ describe("runWingSelectorRecord — the Stage-2 sweep in the orchestrator", () =
     expect(r.stage2?.candidatesMeasured).toBe(1);
   });
 
+  it("a census that returned NOTHING USABLE is a fault too — not a silent absence", async () => {
+    // The gap the test above left open, and the reason it could sit there reading "never a fabricated zero"
+    // while the fabrication happened one layer down. A THROW produced `TARGET_CLOSED`; a page that returned a
+    // non-reading produced a complete census of zero controls with `choiceControlFault: null`. Now the two
+    // unusable outcomes are distinguishable from a measurement, and only from each other.
+    const { d } = deps({ choiceControlCensus: async () => null });
+    const r = await runWingSelectorRecord(d, [], { stage2: ["confirm"] });
+    expect(r.stage2?.choiceControls).toBeNull();
+    expect(r.stage2?.choiceControlFault).toBe("UNUSABLE_READING");
+    expect(r.stage2?.candidatesMeasured).toBe(1);
+  });
+
   it("a missing census seam leaves the reading null rather than throwing", async () => {
     const { d } = deps();
     const { choiceControlCensus: _drop, ...withoutCensus } = d;
@@ -625,7 +671,8 @@ describe("CoupangWingIssuanceDriver.choiceControlCensus", () => {
     });
     const driver = new CoupangWingIssuanceDriver(page as never);
     return driver.choiceControlCensus().then((census) => {
-      expect(census.shapes[0]).toEqual({ tag: "OTHER", inputType: "other", role: "other", count: 3 });
+      expect(census).not.toBeNull();
+      expect(census!.shapes[0]).toEqual({ tag: "OTHER", inputType: "other", role: "other", count: 3 });
       const json = JSON.stringify(census);
       expect(json).not.toContain("CUSTOM-CARD");
       expect(json).not.toContain("업체명");
@@ -639,10 +686,12 @@ describe("CoupangWingIssuanceDriver.choiceControlCensus", () => {
     expect(page.evaluated).toEqual([EXTRACT_WING_CHOICE_CONTROL_SHAPES]);
   });
 
-  it("returns a safe reading rather than throwing when the page returns nothing usable", async () => {
+  it("hands back NULL, not a zeroed census, when the page returns nothing usable", async () => {
+    // This test previously asserted the opposite — `visibleChoiceControlCount: 0` — under the name "returns a
+    // safe reading". A fabricated zero is not safe: it is the seam's only Stage-2 output, and the recon record
+    // reads its headline "N visible choice controls" straight off it.
     const census = await new CoupangWingIssuanceDriver(pageReturning(null) as never).choiceControlCensus();
-    expect(census.visibleChoiceControlCount).toBe(0);
-    expect(census.shapes).toEqual([]);
+    expect(census).toBeNull();
   });
 });
 
@@ -785,10 +834,25 @@ describe("WING_STAGE2_RECON_EVIDENCE — measured, operator-reported, and inferr
     // asserting nothing went unmeasured. That is exactly the measured/unmeasured conflation NOT_MEASURED exists
     // to prevent.
     expect(new Set(e.absentCandidateIds).size).toBe(7);
-    // …and 8 is tied to the SET, not typed in. Adding a ninth candidate left the record claiming complete
-    // coverage of a set it did not cover.
-    const allCandidates = Object.values(WING_STAGE2_RECON_CANDIDATES).flat();
-    expect(e.candidatesMeasured).toBe(allCandidates.length);
+    // …and 8 is tied to the IDS, not typed in. This guard previously read `candidatesMeasured ===
+    // WING_STAGE2_RECON_CANDIDATES.length`, and it fired the moment a ninth candidate was added — correctly,
+    // because the record then claimed coverage of a set it had not covered. But that equality can only be kept
+    // true by editing it, and a record of a past run cannot own a property of the current set. So the record now
+    // NAMES what it measured, and the count is checked against that.
+    expect(e.measuredCandidateIds).toHaveLength(e.candidatesMeasured);
+    expect(new Set(e.measuredCandidateIds).size).toBe(e.candidatesMeasured);
+    for (const id of e.absentCandidateIds) expect(e.measuredCandidateIds).toContain(id);
+    // The one measured id that is NOT an absence is the one that resolved.
+    expect(e.measuredCandidateIds.filter((id) => !(e.absentCandidateIds as readonly string[]).includes(id))).toEqual(["stage2.confirm.confirm"]);
+    // Every id is still a real candidate, so renaming or deleting one breaks the record instead of orphaning it.
+    const all = Object.values(WING_STAGE2_RECON_CANDIDATES).flat().map((c) => c.id);
+    for (const id of e.measuredCandidateIds) expect(all).toContain(id);
+    // What the old equality was really protecting: a candidate added AFTER this run must not be silently swept
+    // under its coverage. Any addition has to be acknowledged here, by name, with the reason it postdates it.
+    expect(all.filter((id) => !(e.measuredCandidateIds as readonly string[]).includes(id))).toEqual([
+      // Added 2026-08-10 from the operator's verbatim transcription; this run predates it and never probed it.
+      "stage2.purpose.operator_verbatim",
+    ]);
   });
 
   it("every absent id is a REAL candidate id from the frozen sets", () => {
@@ -827,6 +891,7 @@ describe("WING_STAGE2_RECON_EVIDENCE — measured, operator-reported, and inferr
       "absenceBounds", "absenceExplanation", "absentCandidateIds", "bucketsTruncated", "candidatesMeasured",
       "candidatesNotMeasured", "captureCount", "confirmLocated", "gitSha",
       "groupContainerCount", "hiddenChoiceControlCount", "issuedStateReason", "keyCreationRuledOut",
+      "measuredCandidateIds",
       "observedOn", "operatorPressedConfirm", "operatorSelectedPurpose", "precedingRefusal", "precondition",
       "probeFaults", "purposeOptionSemanticsMeasured", "recordId", "runId", "scanTruncated",
       "signatureStability", "surfaceVisibility", "visibleChoiceControlCount", "visibleShapes",

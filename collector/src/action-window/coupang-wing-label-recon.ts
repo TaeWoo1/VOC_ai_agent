@@ -461,7 +461,9 @@ export const WING_STAGE2_RECON_CANDIDATES: Readonly<Record<WingStage2ReconTarget
   deepFreezeCandidates({
     purpose: Object.freeze([
       { id: "stage2.purpose.operator_reported", candidateQuery: "h1,h2,h3,h4,p,span,div,label,legend", exactText: "이제 키의 사용 목적을 골라주세요.",
-        rationale: "OPERATOR-REPORTED on 2026-08-09, read off the screen by a human after pressing 발급 — the ONLY description of Stage-2 that exists. It is a hypothesis and provenance, NOT measured evidence: no apparatus has matched it, the transcription may differ from the DOM in whitespace or punctuation, and it may be a heading, a toast or a dialog title. Nothing may depend on it until a read-only Stage-2 recon resolves it" },
+        rationale: "OPERATOR-REPORTED on 2026-08-09, read off the screen by a human after pressing 발급. MEASURED ABSENT_EVERYWHERE on 2026-08-10 — kept anyway, because the absence is the evidence that separates it from the verbatim entry below, and dropping it would leave that comparison unrepeatable" },
+      { id: "stage2.purpose.operator_verbatim", candidateQuery: "h1,h2,h3,h4,p,span,div,label,legend", exactText: "키의 사용 목적을 골라주세요",
+        rationale: "the SAME heading transcribed VERBATIM on 2026-08-10, which differs from the 08-09 report by a leading 이제 and a trailing period — the likeliest explanation of that report's measured absence in every form. Still a hypothesis: no apparatus has matched this string either, and it may be a heading, a dialog title or a toast" },
     ]),
     self_dev: Object.freeze([
       { id: "stage2.self_dev.direct", candidateQuery: "label,span,div", exactText: "직접입력",
@@ -520,20 +522,35 @@ export interface WingPurposeOptionCandidate {
 /**
  * **The fixed strings each visible Stage-2 choice control's derived name is compared against.**
  *
- * Every entry traces to something already on the record — the product owner's description of the official flow
- * (발급 → 연동 방식 선택 → 자체개발(직접입력) → 업체명 · URL · IP 주소 → 확인) or a mechanical spacing variant of
- * one. Nothing here is invented wording, and nothing here is measured wording.
+ * Every entry traces to something on the record: the product owner's description of the official flow
+ * (발급 → 연동 방식 선택 → 자체개발(직접입력) → 업체명 · URL · IP 주소 → 확인), a mechanical spacing variant of
+ * one, or — since 2026-08-10 — an operator reading the live Stage-2 screen. Nothing here is invented wording.
  *
- * **What this set deliberately does NOT contain: the second radio's label.** Two visible radios were measured on
- * 2026-08-09 and only one of them has a described counterpart in the flow account. Guessing the other — 업체연동,
- * 대행, whatever seems plausible — is precisely the speculative retuning `collector/CLAUDE.md` §6 forbids, and it
- * would put a fabricated string into the live page as a query. So the second option is measured *structurally*
- * (derivation, association, group, length bucket) and its wording stays unknown until an operator transcribes it
- * or an instrument reads it. A row reading `exactCandidateIndex: -1` against a `short` name is the honest
- * outcome, and it is a finding, not a gap.
+ * **The last two entries are the operator's verbatim transcription of the two visible radios**, taken on
+ * 2026-08-10 in screen order. They are what the previous unit reserved `OPERATOR_TRANSCRIBED` for and declined
+ * to guess at: it measured two radios, found `exactCandidateIndex: -1` on both, and recorded the wording as
+ * unknown rather than shipping 업체연동 / 대행 / whatever seemed plausible into the live page as a query.
  *
- * Ordered self-developed-first only because that is the order the flow description names them; ordering here
- * carries no claim about the screen. The comparison is exhaustive, so it is order-insensitive by construction.
+ * **A human reading a screen is still not a measurement**, which is why they are candidates like the rest. What
+ * it is, is a source class the other two cannot substitute for — and one that at least lands inside a bound the
+ * previous unit's measurement had already set. That run recorded radio 0's derived name in the `short` band
+ * (1–8 characters) and radio 1's in `medium` (9–24), knowing nothing of the strings. `OPEN API` is 8 and
+ * `플레이오토 웹 솔루션` is 11, in that order.
+ *
+ * **That check is weaker than it looks, and the weakness is ours.** The two bands were stated in the request
+ * that asked for the transcription, so the reading was not blind to what would satisfy them. It can still catch
+ * a gross error — the wrong screen, the wrong element, the two options reversed — but it is not independent
+ * confirmation, and the bands are wide. Nothing here ties either string to either control; producing that tie
+ * is what the calibration re-run is for.
+ *
+ * Note what the transcription settles about the flow description, before any instrument runs: **neither radio
+ * is labelled 자체개발 or 직접입력.** One option names a specific solution rather than describing an integration
+ * method. Whether `OPEN API` is the self-developed path the flow account describes, and what the other option's
+ * relationship to WING is, are product questions this module does not answer and must not assume.
+ *
+ * Ordered flow-description-first, then spacing variants, then transcriptions — the order they entered the file.
+ * Ordering carries no claim about the screen, and the comparison is exhaustive, so it is order-insensitive by
+ * construction; the indices are stable only so an earlier run's `exactCandidateIndex` stays readable.
  */
 export const WING_STAGE2_PURPOSE_OPTION_CANDIDATES: readonly WingPurposeOptionCandidate[] = Object.freeze([
   Object.freeze({
@@ -559,6 +576,18 @@ export const WING_STAGE2_PURPOSE_OPTION_CANDIDATES: readonly WingPurposeOptionCa
     exactText: "직접 입력",
     provenance: "MECHANICAL_SPACING_VARIANT" as const,
     rationale: "spacing variant of the parenthetical, for the same reason",
+  }),
+  Object.freeze({
+    id: "purpose_option.open_api",
+    exactText: "OPEN API",
+    provenance: "OPERATOR_TRANSCRIBED" as const,
+    rationale: "the FIRST visible radio's label, read off the live Stage-2 screen by the operator on 2026-08-10 and reproduced verbatim; 8 characters, which is the `short` band the 2026-08-09 run measured for radio 0",
+  }),
+  Object.freeze({
+    id: "purpose_option.playauto_web_solution",
+    exactText: "플레이오토 웹 솔루션",
+    provenance: "OPERATOR_TRANSCRIBED" as const,
+    rationale: "the SECOND visible radio's label, transcribed verbatim on 2026-08-10; 11 characters, which is the `medium` band measured for radio 1. It names a specific solution rather than describing an integration method, so nothing about it may be inferred from the flow description",
   }),
 ]);
 
@@ -871,6 +900,26 @@ export interface WingStage2ReconEvidence {
     "stage2.call_ip.ip_addr",
     "stage2.call_ip.baseline",
   ];
+  /**
+   * **Every candidate id this run actually probed** — the seven absences above plus the one that resolved.
+   *
+   * A positive statement of coverage, added on 2026-08-10 because the negative one could not survive the set
+   * growing. `candidatesNotMeasured: 0` is a fact about the run's OWN sweep, and the only thing tying it to the
+   * shipped set was a test asserting `candidatesMeasured === WING_STAGE2_RECON_CANDIDATES.length`. That guard
+   * was right to exist and right to fire — but "the record covers today's set" is not a property a record of a
+   * past run can keep. What it can keep is which ids it covered; whether the current set has outgrown that is
+   * then a question anyone can answer, instead of an equality that has to be edited to stay true.
+   */
+  readonly measuredCandidateIds: readonly [
+    "stage2.purpose.operator_reported",
+    "stage2.self_dev.direct",
+    "stage2.self_dev.baseline",
+    "stage2.vendor_info.baseline",
+    "stage2.vendor_url.url",
+    "stage2.call_ip.ip_addr",
+    "stage2.call_ip.baseline",
+    "stage2.confirm.confirm",
+  ];
   readonly candidatesMeasured: 8;
   readonly candidatesNotMeasured: 0;
   readonly probeFaults: 0;
@@ -967,6 +1016,16 @@ export const WING_STAGE2_RECON_EVIDENCE: WingStage2ReconEvidence = Object.freeze
     "stage2.call_ip.ip_addr",
     "stage2.call_ip.baseline",
   ]) as WingStage2ReconEvidence["absentCandidateIds"],
+  measuredCandidateIds: Object.freeze([
+    "stage2.purpose.operator_reported",
+    "stage2.self_dev.direct",
+    "stage2.self_dev.baseline",
+    "stage2.vendor_info.baseline",
+    "stage2.vendor_url.url",
+    "stage2.call_ip.ip_addr",
+    "stage2.call_ip.baseline",
+    "stage2.confirm.confirm",
+  ]) as WingStage2ReconEvidence["measuredCandidateIds"],
   candidatesMeasured: 8,
   candidatesNotMeasured: 0,
   probeFaults: 0,
@@ -1147,6 +1206,23 @@ export interface WingStage2LabelCalibrationEvidence {
    */
   readonly purposeCandidatesMatched: 0;
   readonly candidatesCompared: 4;
+  /**
+   * **WHICH four** — the same correction as {@link WingStage2ReconEvidence.measuredCandidateIds}, for the same
+   * reason and on the same day. `candidatesCompared: 4` was tied to `WING_STAGE2_PURPOSE_OPTION_CANDIDATES.length`
+   * by a test, and the transcription unit added the fifth and sixth entries. The run's own coverage is a fact
+   * about the run; naming it keeps that fact true while the shipped set moves.
+   *
+   * That the list has since grown is not a defect in this record — it is the point. Every id here is a
+   * flow-description entry or a spacing variant of one, and all four missed. The two entries that postdate this
+   * run are the operator's transcription of what the radios actually say, which is why the non-match below is a
+   * finding about the flow description rather than about the instrument.
+   */
+  readonly comparedCandidateIds: readonly [
+    "purpose_option.self_dev",
+    "purpose_option.self_dev_spaced",
+    "purpose_option.direct_input",
+    "purpose_option.direct_input_spaced",
+  ];
   /**
    * **INFERRED, not measured:** that the operator-visible option wording differs from the product owner's flow
    * description (자체개발(직접입력)). Measured: neither label matches those words, and those words occur only in
@@ -1336,6 +1412,12 @@ export const WING_STAGE2_LABEL_CALIBRATION_EVIDENCE: WingStage2LabelCalibrationE
   ]) as WingStage2LabelCalibrationEvidence["rows"],
   purposeCandidatesMatched: 0,
   candidatesCompared: 4,
+  comparedCandidateIds: Object.freeze([
+    "purpose_option.self_dev",
+    "purpose_option.self_dev_spaced",
+    "purpose_option.direct_input",
+    "purpose_option.direct_input_spaced",
+  ]) as WingStage2LabelCalibrationEvidence["comparedCandidateIds"],
   visibleWordingDiffersFromFlowDescription: Object.freeze({
     provenance: "INFERRED",
     tested: false,
