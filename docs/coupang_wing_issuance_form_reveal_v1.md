@@ -103,6 +103,15 @@ even pattern-matches `NO_KEY|NOT_ISSUED|SAFE|CLEAN`.
 
 ### Fail-closed on the expectation
 
+> **⚠ SUPERSEDED 2026-08-09.** The predicate described below was not merely narrow — it was **unsatisfiable on
+> WING markup**. `submitAffordancePresent` reads `button[type='submit'], input[type='submit']`, and WING's
+> component library emits `<button type="button">`; the live reveal run's own baseline reported `false` on a page
+> that visibly contained the `API Key 발급 받기` button. It returned `SURFACE_UNCHANGED` for a Stage-2 surface the
+> operator was looking at. Replaced by `stage2SurfaceRevealed` — see
+> `docs/coupang_wing_reveal_observation_predicate_repair_v1.md`. The paragraph below is retained because the
+> reasoning it contains ("that is the only delta the current census could plausibly show") is exactly the step
+> that was wrong.
+
 The expected outcome is narrow on purpose: still on `open_api_issuance` **and** `submitAffordancePresent` flipped
 false→true. `credential_shown` — the keys-displayed category — is **excluded** and has its own outcome
 (`CREDENTIAL_SURFACE_APPEARED`, a STOP): review found it had been accepted as "still the open-API surface", so a

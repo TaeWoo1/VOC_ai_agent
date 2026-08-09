@@ -289,11 +289,15 @@ export function interpretWingRecon(
  * {@link WING_RECON_TARGETS} only; no code path reads this constant. It is a declared hypothesis set for the unit
  * that observes Stage-2 — deliberately inert until there is a real DOM to measure it against.
  */
-export const WING_STAGE2_RECON_TARGETS = ["self_dev", "vendor_info", "vendor_url", "call_ip", "confirm"] as const;
+export const WING_STAGE2_RECON_TARGETS = ["purpose", "self_dev", "vendor_info", "vendor_url", "call_ip", "confirm"] as const;
 export type WingStage2ReconTarget = (typeof WING_STAGE2_RECON_TARGETS)[number];
 
 export const WING_STAGE2_RECON_CANDIDATES: Readonly<Record<WingStage2ReconTarget, readonly WingLabelCandidate[]>> =
   Object.freeze({
+    purpose: Object.freeze([
+      { id: "stage2.purpose.operator_reported", candidateQuery: "h1,h2,h3,h4,p,span,div,label,legend", exactText: "이제 키의 사용 목적을 골라주세요.",
+        rationale: "OPERATOR-REPORTED on 2026-08-09, read off the screen by a human after pressing 발급 — the ONLY description of Stage-2 that exists. It is a hypothesis and provenance, NOT measured evidence: no apparatus has matched it, the transcription may differ from the DOM in whitespace or punctuation, and it may be a heading, a toast or a dialog title. Nothing may depend on it until a read-only Stage-2 recon resolves it" },
+    ]),
     self_dev: Object.freeze([
       { id: "stage2.self_dev.direct", candidateQuery: "label,span,div", exactText: "직접입력",
         rationale: "the flow description names the self-developed option as 자체개발(직접입력); the parenthetical may be the label" },
@@ -319,6 +323,60 @@ export const WING_STAGE2_RECON_CANDIDATES: Readonly<Record<WingStage2ReconTarget
         rationale: "the final key-creating control per the flow description — measured ONLY to locate it, never pressed" },
     ]),
   });
+
+/**
+ * **PROVENANCE for the one thing anybody knows about Stage-2: that it exists.**
+ *
+ * On 2026-08-09 the reveal run (`wt-6a34bd527b2b`, grant `apr-79d628c4f334`, `0297d307`) highlighted the real
+ * `API Key 발급 받기` control, the operator confirmed the highlight visually, pressed it themselves, and reported
+ * a **persistent** purpose-selection surface. The agent's click/type/submit budget for that run was zero.
+ *
+ * Everything in this record is either a sanitized machine reading or explicitly attributed to the operator. The
+ * distinction is the entire point: the previous two calibration failures both came from an operator-sourced or
+ * expected value sitting unlabelled among measured ones.
+ *
+ * What the APPARATUS returned that day, and it was wrong about the page: `SURFACE_UNCHANGED`, `changedSignals: []`.
+ * The predicate could not fire (see `stage2SurfaceRevealed`), so the run STOPPED rather than claiming success —
+ * which is the only reason this record says "unmeasured" instead of something confident and false.
+ */
+export interface WingStage2LiveEvent {
+  readonly observedOn: string;
+  readonly gitSha: string;
+  readonly runId: string;
+  /** The surface's EXISTENCE is operator-reported. No apparatus has read it. */
+  readonly appearance: "OPERATOR_REPORTED";
+  /** Operator-reported: it stayed on screen, so a later census could in principle have seen it. */
+  readonly persistent: true;
+  /** What the instrument said, retained because the gap between it and `persistent` is the finding. */
+  readonly apparatusOutcome: "SURFACE_UNCHANGED";
+  readonly apparatusChangedSignalCount: 0;
+  /** No structural property of Stage-2 has been measured: not a tag, not a role, not a control count. */
+  readonly structuralMarkerMeasured: false;
+  /** Unchanged and unchangeable by this evidence — the classifier still cannot tell issued from no-key. */
+  readonly keyCreationRuledOut: false;
+  readonly issuedStateReason: "NO_DISCRIMINATING_SIGNAL";
+  /** Operator actions on the marketplace. Nothing was selected and no 확인 was pressed. */
+  readonly operatorSelectedPurpose: false;
+  readonly operatorPressedConfirm: false;
+  /** Where the operator's transcription of the on-screen text lives — as a candidate, never as a marker. */
+  readonly reportedTextRecordedAs: "WING_STAGE2_RECON_CANDIDATES.purpose";
+}
+
+export const WING_STAGE2_LIVE_EVENT: WingStage2LiveEvent = Object.freeze({
+  observedOn: "2026-08-09",
+  gitSha: "0297d307",
+  runId: "wt-6a34bd527b2b",
+  appearance: "OPERATOR_REPORTED",
+  persistent: true,
+  apparatusOutcome: "SURFACE_UNCHANGED",
+  apparatusChangedSignalCount: 0,
+  structuralMarkerMeasured: false,
+  keyCreationRuledOut: false,
+  issuedStateReason: "NO_DISCRIMINATING_SIGNAL",
+  operatorSelectedPurpose: false,
+  operatorPressedConfirm: false,
+  reportedTextRecordedAs: "WING_STAGE2_RECON_CANDIDATES.purpose",
+});
 
 /** The probe scope a live recon run would need approving — the three unresolved targets and nothing else. */
 export const WING_RECON_APPROVED_SCOPE: readonly WingProbeTargetName[] = Object.freeze([
