@@ -386,11 +386,18 @@ export function buildFixedLabelProbeScript(probes: readonly { targetId: string; 
 /**
  * A READ-ONLY fixed-label LOCATE (+ optional read-only TAG) script — the value-free OUTPUT half of the Phase-B
  * issuance highlight driver's locator. Given a STRUCTURAL candidate query and a FIXED NAVER UI label, it finds
- * the candidates whose accessible name (aria-label, else normalized text) EXACTLY equals that label. If exactly
- * ONE matches it returns `{ count: 1, sig }` where `sig` is an opaque 16-hex hash computed IN-PAGE from the
- * element's tag + document position + child count — never from any value/attribute/text. When `tag` is true it
- * ALSO moves the read-only `data-aw-target` annotation onto that single match (clearing any prior tag first) so
- * the reused overlay/observer can attach to it. When zero or many match it returns only `{ count }`.
+ * the candidates whose accessible name (aria-label, else normalized text) EXACTLY equals that label **and which
+ * actually paint**. If exactly ONE such match exists it returns `{ count: 1, hiddenCount, tag, sig }` where `sig`
+ * is an opaque 16-hex hash computed IN-PAGE from the element's tag + document position + child count — never from
+ * any value/attribute/text. When `tag` is true it ALSO moves the read-only `data-aw-target` annotation onto that
+ * single match (clearing any prior tag first) so the reused overlay/observer can attach to it. When zero or many
+ * paint it returns `{ count, hiddenCount }`.
+ *
+ * **`count` counts VISIBLE matches, and that is the point.** Text equality alone once let a non-rendered node be
+ * the unique match for 발급: the locate reported `count: 1`, the tag landed on an invisible element, the paint
+ * check passed on the separately-mounted panel, and the operator was told to press a highlighted control that was
+ * nowhere on screen. Uniqueness is not correctness — a match nobody can see is not a match, so a non-painting
+ * candidate is rejected here rather than counted and pointed at.
  *
  * **`tagAncestor` (optional, tag only).** When set to a STRUCTURAL selector (e.g. `"tr"`), the read-only tag is
  * promoted from the matched LABEL element to its nearest ancestor matching that selector (`el.closest(sel)`), so
@@ -421,12 +428,35 @@ export function buildFixedLabelLocateScript(input: {
     /* text read ONLY to compare against a KNOWN fixed label; only a COUNT / structural sig is returned. */
     return norm(el.textContent || '');
   }
+  /* Does this element actually PAINT? A highlight on a non-painting node is invisible to the operator while every
+     count/sig here still reports success — the exact failure observed live on 2026-08-09, where the sole textual
+     match for the 발급 label was an unrendered node and the run reported \`highlighted: true\` over a page with no
+     visible highlight anywhere. Matching text is therefore not sufficient: a match must be a thing a human can see.
+     display:none and any non-rendered ancestor collapse to zero client rects; visibility:hidden is inherited, so
+     testing the element's own computed style also covers a hidden ancestor. display:contents boxes paint through
+     their children and legitimately own no rect. STRUCTURE only — no text, value, or attribute is read or returned. */
+  function paints(node) {
+    if (!node || !node.getClientRects) { return false; }
+    var cs = window.getComputedStyle ? window.getComputedStyle(node) : null;
+    if (cs && (cs.display === 'none' || cs.visibility === 'hidden')) { return false; }
+    if (cs && cs.display === 'contents') { return node.childElementCount > 0; }
+    var rects = node.getClientRects();
+    if (!rects || rects.length === 0) { return false; }
+    var r = node.getBoundingClientRect ? node.getBoundingClientRect() : null;
+    return !!r && r.width > 0 && r.height > 0;
+  }
   var want = norm(${JSON.stringify(input.exactText)});
   var cands; try { cands = slice(document.querySelectorAll(${JSON.stringify(input.candidateQuery)})); } catch (e) { cands = []; }
   var matches = [], CAP = 4000;
   for (var i = 0; i < cands.length && i < CAP; i++) { if (accName(cands[i]) === want) { matches.push(cands[i]); } }
-  if (matches.length !== 1) { return { count: matches.length }; }
-  var el = matches[0];
+  var visible = [];
+  for (var v = 0; v < matches.length; v++) { if (paints(matches[v])) { visible.push(matches[v]); } }
+  /* hiddenCount is a COUNT of rejected non-painting matches — it names no element and carries no text. It exists
+     so "the label matched nothing visible" is distinguishable from "the label matched nothing at all" without a
+     live round trip; the two look identical in a bare count and diagnosing today's failure needed exactly this. */
+  var hiddenCount = matches.length - visible.length;
+  if (visible.length !== 1) { return { count: visible.length, hiddenCount: hiddenCount }; }
+  var el = visible[0];
   ${
     input.tag
       ? `var prior = slice(document.querySelectorAll('[data-aw-target]'));
@@ -444,7 +474,11 @@ export function buildFixedLabelLocateScript(input: {
   }
   var all = slice(document.querySelectorAll('*'));
   var idx = all.indexOf(el);
-  /* sig stays on the LABEL el (never the promoted ancestor) so the locate↔highlight anti-drift check is stable. */
-  return { count: 1, sig: sig(el.tagName + ':' + idx, 'children:' + el.childElementCount) };
+  /* sig stays on the LABEL el (never the promoted ancestor) so the locate↔highlight anti-drift check is stable.
+     \`tag\` is the MEASURED tag name of the match (e.g. 'BUTTON'). It is returned because the calibration record
+     used to assert \`role: "button"\` for the 발급 control while this script returned no such field — an element
+     property claimed by hand, from a measurement that never produced it, and wrong when finally checked. A record
+     may now only state what this returns. A tag name is structural, like the count and the sig: not content. */
+  return { count: 1, hiddenCount: hiddenCount, tag: el.tagName, sig: sig(el.tagName + ':' + idx, 'children:' + el.childElementCount) };
 })()`;
 }

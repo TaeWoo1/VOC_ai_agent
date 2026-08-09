@@ -78,6 +78,13 @@ export function gateRefusalCause(
   apiCenterUrl: string,
   /** Repository-identity verifier seam; the DEFAULT is the real check, so a caller who forgets gets strictness. */
   verifyIdentity: typeof verifyRepoIdentity = verifyRepoIdentity,
+  /**
+   * Calibration seam, same contract as `verifyIdentity`: the DEFAULT is the shipped constant, so a caller who
+   * forgets gets the refusal. It exists because the shipped value is now `false` — every other refusal cause in
+   * this gate would otherwise be untestable, since `SELECTORS_NOT_CALIBRATED` short-circuits ahead of them all.
+   * `main()` calls this with ONE argument; a test proves that, and a test proves the default still refuses.
+   */
+  calibrated: boolean = WING_ISSUE_SELECTOR_CALIBRATED,
 ): string | null {
   // The PHASE this run is authorized for, before anything else. The three `WALKTHROUGH_*` identity variables
   // are byte-identical across WING phases, so without this an approval granted for ANOTHER WING action reaches
@@ -95,9 +102,9 @@ export function gateRefusalCause(
     cli: REVEAL.cli,
     driver: REVEAL.driver,
     declaredActions: REVEAL.capableActions,
-    // The phase HIGHLIGHTS a real control, so the gate requires a calibration. Stated from the shared constant —
+    // The phase HIGHLIGHTS a real control, so the gate requires a calibration. Defaults to the shared constant —
     // never hardcoded `true` — so withdrawing the calibration closes this path with SELECTORS_NOT_CALIBRATED.
-    selectorsCalibrated: WING_ISSUE_SELECTOR_CALIBRATED,
+    selectorsCalibrated: calibrated,
     runId: env("WALKTHROUGH_RUN_ID") ?? "unknown",
     approvalId: env("WALKTHROUGH_APPROVAL_ID") ?? "unknown",
     gitSha: env("WALKTHROUGH_GIT_COMMIT") ?? "unknown",

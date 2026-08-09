@@ -375,7 +375,7 @@ describe("reconRecordFor — the printed shape carries counts, booleans and our 
     for (const t of reconRecordFor(result.recon)!.targets) {
       const expected = WING_LABEL_RECON_CANDIDATES[t.target as WingReconTarget];
       expect(t.candidates.map((c) => [c.id, c.label])).toEqual(expected.map((c) => [c.id, c.exactText]));
-      for (const c of t.candidates) expect(c.role.length, c.id).toBeGreaterThan(0);
+      for (const c of t.candidates) expect(c.expectedRole.length, c.id).toBeGreaterThan(0);
     }
   });
 

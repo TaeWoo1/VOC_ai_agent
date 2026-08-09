@@ -118,10 +118,33 @@ describe("the PHASE binding — a grant for one WING action never authorizes ano
   });
 });
 
+/**
+ * The 발급 calibration is WITHDRAWN (refuted live on 2026-08-09), so the shipped gate short-circuits on
+ * `SELECTORS_NOT_CALIBRATED` ahead of every other cause. These cases are about the OTHER causes and their
+ * ordering, so they inject a calibrated gate to get past it. The two tests below hold the injection honest: the
+ * uninjected default must refuse, and `main()` must call the gate with no injection at all.
+ */
+const CALIBRATED = true;
+
+describe("reveal gate — the withdrawn calibration closes the run", () => {
+  it("the UNINJECTED default refuses with SELECTORS_NOT_CALIBRATED, even when everything else is perfect", () => {
+    setEnv({ ...IDENTITY });
+    // A passing identity check and a bound identity — the only thing wrong is the thing that is wrong.
+    expect(gateRefusalCause(WING_DEFAULT_URL, okIdentity as never)).toBe("SELECTORS_NOT_CALIBRATED");
+  });
+
+  it("the refusal reaches the operator with the one instruction that resolves it", () => {
+    const src = readFileSync(CLI, "utf8");
+    expect(src).toContain('refusal === "SELECTORS_NOT_CALIBRATED"');
+    // Restoring the flag from anything other than a live probe is how the refuted record was written.
+    expect(src).toContain("Restore it only from a fresh READ-ONLY selector probe.");
+  });
+});
+
 describe("reveal gate — PREPARED only when everything holds", () => {
   it("reaches PREPARED with a bound identity, the WING host, and a passing identity check", () => {
     setEnv({ ...IDENTITY });
-    expect(gateRefusalCause(WING_DEFAULT_URL, okIdentity as never)).toBeNull();
+    expect(gateRefusalCause(WING_DEFAULT_URL, okIdentity as never, CALIBRATED)).toBeNull();
   });
 
   it("refuses an UNBOUND identity", () => {
@@ -129,13 +152,13 @@ describe("reveal gate — PREPARED only when everything holds", () => {
       const env: Record<string, string | undefined> = { ...IDENTITY };
       delete env[drop];
       setEnv(env);
-      expect(gateRefusalCause(WING_DEFAULT_URL, okIdentity as never), drop).toBe("UNBOUND_IDENTITY");
+      expect(gateRefusalCause(WING_DEFAULT_URL, okIdentity as never, CALIBRATED), drop).toBe("UNBOUND_IDENTITY");
     }
   });
 
   it("refuses an off-target host before anything else", () => {
     setEnv({ ...IDENTITY });
-    expect(gateRefusalCause("https://evil.example.com/wing", okIdentity as never)).toBe("INVALID_HOST");
+    expect(gateRefusalCause("https://evil.example.com/wing", okIdentity as never, CALIBRATED)).toBe("INVALID_HOST");
   });
 
   it("refuses on HEAD drift / dirty tree / wrong repository, carrying the cause AND its reason", () => {
@@ -146,7 +169,7 @@ describe("reveal gate — PREPARED only when everything holds", () => {
       ["WRONG_REPOSITORY", "git is reading another checkout"],
       ["GIT_UNREADABLE", "git exited non-zero"],
     ] as const) {
-      const got = gateRefusalCause(WING_DEFAULT_URL, failIdentity(cause, reason));
+      const got = gateRefusalCause(WING_DEFAULT_URL, failIdentity(cause, reason), CALIBRATED);
       expect(got, cause).toBe(`${cause}: ${reason}`);
     }
   });
@@ -155,13 +178,13 @@ describe("reveal gate — PREPARED only when everything holds", () => {
     // Composition asserted on behaviour: with BOTH broken, the approval cause must win, or an operator debugging
     // an uncalibrated/mis-scoped run would be sent to look at git.
     setEnv({ SELLEROPS_APPROVAL_PHASE: REVEAL_PHASE, SELLEROPS_WING_APPROVED_PHASE: REVEAL_PHASE });
-    expect(gateRefusalCause(WING_DEFAULT_URL, failIdentity("HEAD_DRIFT", "moved"))).toBe("UNBOUND_IDENTITY");
+    expect(gateRefusalCause(WING_DEFAULT_URL, failIdentity("HEAD_DRIFT", "moved"), CALIBRATED)).toBe("UNBOUND_IDENTITY");
   });
 
   it("the DEFAULT verifier is the real one — forgetting to inject gets strictness, not a pass", () => {
     setEnv({ ...IDENTITY });
     // The pinned SHA `abc1234` is not this checkout's HEAD, so the real verifier must refuse.
-    const got = gateRefusalCause(WING_DEFAULT_URL);
+    const got = gateRefusalCause(WING_DEFAULT_URL, undefined, CALIBRATED);
     expect(got).not.toBeNull();
     expect(got).toMatch(/^(HEAD_DRIFT|DIRTY_TREE|WRONG_REPOSITORY|GIT_UNREADABLE):/);
   });
@@ -209,8 +232,14 @@ describe("reveal CLI — structurally incapable of acting on WING", () => {
   });
 
   it("states the calibration from the SHARED constant — never a hardcoded true", () => {
-    expect(code).toContain("selectorsCalibrated: WING_ISSUE_SELECTOR_CALIBRATED");
+    // The value now arrives through a parameter so the gate's other causes stay testable, but the parameter's
+    // DEFAULT must still be the shared constant: that is what `main()` gets, since it passes only the URL.
+    expect(code).toMatch(/calibrated:\s*boolean\s*=\s*WING_ISSUE_SELECTOR_CALIBRATED/);
+    expect(code).toContain("selectorsCalibrated: calibrated");
     expect(code).not.toMatch(/selectorsCalibrated:\s*true/);
+    // …and main() must not start injecting one. `gateRefusalCause(url)` — one argument, no seam.
+    expect(code).toContain("gateRefusalCause(url)");
+    expect(code).not.toMatch(/gateRefusalCause\(url,/);
   });
 
   it("passes the reveal descriptor from the shared constant, so display and runtime cannot drift", () => {

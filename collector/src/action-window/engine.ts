@@ -37,9 +37,17 @@ export interface RunConfig {
 }
 
 export interface LocateResult {
+  /** Matches that ACTUALLY PAINT. A non-rendered element is not a located target — see `buildFixedLabelLocateScript`. */
   count: number;
   /** Opaque 16-hex signature of the single located target (required when count === 1). */
   sig?: string;
+  /**
+   * Matches rejected for not painting. A COUNT only — names no element, carries no text. Separates "the label
+   * matched nothing visible" from "the label matched nothing", which a bare `count` cannot distinguish.
+   */
+  hiddenCount?: number;
+  /** MEASURED tag name of the unique match (e.g. `"BUTTON"`). Structural. Lets a calibration record state a tag it actually observed. */
+  tag?: string;
 }
 export interface VerifyResult {
   /** Expected post-action state observed. */

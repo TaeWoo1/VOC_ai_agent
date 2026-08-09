@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   WING_RECORD_TARGETS,
-  WING_TARGET_ROLE,
+  WING_TARGET_EXPECTED_ROLE,
   runWingSelectorRecord,
   wingFaultFingerprint,
   type WingRecordSignal,
@@ -174,8 +174,8 @@ describe("wing selector recorder — read-only walk", () => {
     const issue = result.targets.find((t) => t.target === "issue")!;
     expect(issue.matchCount).toBe(1);
     expect(issue.canHighlight).toBe(true);
-    expect(issue.role).toBe(WING_TARGET_ROLE.issue);
-    expect(issue.label).toBe("발급");
+    expect(issue.expectedRole).toBe(WING_TARGET_EXPECTED_ROLE.issue);
+    expect(issue.label).toBe("API Key 발급 받기");
     expect(issue.sig16).toBe("a1b2c3d4e5f60718");
   });
 
@@ -197,7 +197,7 @@ describe("wing selector recorder — read-only walk", () => {
     const { deps } = fakeDeps({ matches: { delete: { matchCount: 1, canHighlight: true, sig: "dede1234dede5678" } } });
     const result = await runWingSelectorRecord(deps);
     const del = result.targets.find((t) => t.target === "delete")!;
-    expect(del.role).toBe("button");
+    expect(del.expectedRole).toBe("button");
     expect(del.label).toBe("삭제");
     expect(del.matchCount).toBe(1);
     expect(del.canHighlight).toBe(true);
@@ -275,7 +275,7 @@ describe("wing selector recorder — read-only walk", () => {
     const result = await runWingSelectorRecord(deps);
     const creds = result.targets.find((t) => t.target === "credentials")!;
     expect(creds.label).toBe("Access Key");
-    expect(creds.role).toBe("readonly-region");
+    expect(creds.expectedRole).toBe("readonly-region");
   });
 
   it("carries the ISSUED-STATE verdict, and on the open-API surface that verdict is honestly indeterminate", async () => {

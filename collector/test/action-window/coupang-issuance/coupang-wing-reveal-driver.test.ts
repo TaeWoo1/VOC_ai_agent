@@ -65,6 +65,13 @@ interface FakeOpts {
   painted?: boolean;
   /** Panel still up when `clearHighlight` re-checks ⇒ the clear failed. */
   panelStuck?: boolean;
+  /**
+   * Injected because the SHIPPED flag is now `false` (the 발급 calibration was refuted live). These cases exercise
+   * what the walk does once past the calibration gate; with the real flag every one of them would stop at the
+   * refusal and assert nothing about the behaviour it names. The gate itself is proven separately, from the
+   * uninjected default, below — so this injection cannot hide a regression in it.
+   */
+  calibrated?: boolean;
 }
 
 function fakeDriver(o: FakeOpts = {}): {
@@ -119,6 +126,7 @@ function fakeDriver(o: FakeOpts = {}): {
     },
   };
   const driver = new CoupangWingRevealDriver(page as never, {
+    calibrated: o.calibrated ?? true,
     locatorSettleMs: 0,
     verifyPollMs: 0,
     mountOverlayFn: (async (_p: unknown, opts: { label: string; residentPanel?: boolean }) => {
@@ -241,15 +249,21 @@ describe("the driver refuses before it can mislead", () => {
   });
 
   it("refuses to highlight at all when the issue calibration is withdrawn", async () => {
-    const { driver } = fakeDriver();
-    await driver.classifyInitialSurface();
     const uncalibrated = new CoupangWingRevealDriver({ url: () => "https://wing.coupang.com/x" } as never, {
       calibrated: false,
     });
     expect(uncalibrated.isCalibrated()).toBe(false);
     await expect(uncalibrated.highlightIssueCheckpoint()).rejects.toThrow(/not calibrated/);
-    // The default is the SHARED constant, never a hardcoded true.
-    expect(driver.isCalibrated()).toBe(WING_ISSUE_SELECTOR_CALIBRATED);
+  });
+
+  it("the UNINJECTED default is the shared constant — which is currently the refusal", async () => {
+    // Read from a driver with NO `calibrated` option, because that is the only construction the live CLI uses.
+    // The rest of this file injects `calibrated: true` to reach the walk at all; if that injection were also the
+    // default, every one of those cases would silently become the sole description of shipped behaviour.
+    const shipped = new CoupangWingRevealDriver({ url: () => "https://wing.coupang.com/x" } as never, {});
+    expect(shipped.isCalibrated()).toBe(WING_ISSUE_SELECTOR_CALIBRATED);
+    expect(WING_ISSUE_SELECTOR_CALIBRATED).toBe(false);
+    await expect(shipped.highlightIssueCheckpoint()).rejects.toThrow(/not calibrated/);
   });
 
   it("the operator-action step requires the checkpoint — it cannot be skipped", async () => {
@@ -517,26 +531,65 @@ describe("the operator-action step", () => {
 
 /* ────────────────────────────── the calibration claim ────────────────────────────── */
 
-describe("the issue calibration is scoped to the LOCATOR, not to what the press does", () => {
-  it("declares the press outcome UNCONFIRMED", () => {
-    expect(WING_ISSUE_CALIBRATION_EVIDENCE.pressOutcome).toBe("UNCONFIRMED");
-    expect(WING_ISSUE_CALIBRATION_EVIDENCE.matchCount).toBe(1);
-    expect(WING_ISSUE_CALIBRATION_EVIDENCE.label).toBe(WING_HIGHLIGHT_LABELS.issue.exactText);
+describe("the issue calibration was REFUTED live and is withdrawn", () => {
+  it("is REFUTED, and the selector flag is withdrawn with it", () => {
+    // A refuted record with a still-true flag would be a retraction nothing downstream reads.
+    expect(WING_ISSUE_CALIBRATION_EVIDENCE.status).toBe("LIVE_DOM_CALIBRATION_REFUTED");
+    expect(WING_ISSUE_SELECTOR_CALIBRATED).toBe(false);
   });
 
-  it("records the signature as EVIDENCE_ONLY, because four captures show it MOVING", () => {
-    // Stronger than "stability not established": the same control on the same page reported two different
-    // signatures across sessions, so any runtime gate comparing against one would compare against a moving value.
+  it("the refuted spec is NOT the shipped spec — the correction is real, not just narrated", () => {
+    // The load-bearing assertion of this block. Everything else here could pass with the old, broken selector
+    // still wired in and a paragraph of prose above it explaining that it was wrong.
+    const { refutedSpec } = WING_ISSUE_CALIBRATION_EVIDENCE;
+    const live = WING_HIGHLIGHT_LABELS.issue;
+    expect(live.exactText).not.toBe(refutedSpec.exactText);
+    expect(live).not.toEqual({ candidateQuery: refutedSpec.candidateQuery, exactText: refutedSpec.exactText });
+  });
+
+  it("the shipped spec matches the element the operator actually reported", () => {
+    // `exactText` compares the WHOLE normalized text, which is precisely what the old spec got wrong: the real
+    // button reads "API Key 발급 받기", so a bare "발급" could never have matched it.
+    const { observedElement } = WING_ISSUE_CALIBRATION_EVIDENCE;
+    expect(WING_HIGHLIGHT_LABELS.issue.exactText).toBe(observedElement.label);
+    expect(observedElement.label).toContain("발급");
+    expect(observedElement.label).not.toBe("발급");
+    // Narrowed to the real element type: a span/div satisfying a button-shaped intent is the failure mode.
+    expect(WING_HIGHLIGHT_LABELS.issue.candidateQuery).toBe("button");
+    expect(observedElement.tag).toBe("BUTTON");
+  });
+
+  it("claims no element property the locator cannot measure — the `role` over-claim is gone", () => {
+    // `role: "button"` was asserted by hand while `buildFixedLabelLocateScript` returned only { count, sig }. The
+    // single property that would have caught the mismatch was the one the apparatus never produced.
+    expect("role" in WING_ISSUE_CALIBRATION_EVIDENCE).toBe(false);
+    const src = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), "../../../src/action-window/api-issuance-calibration/visual-recon-inpage.ts"),
+      "utf8",
+    );
+    // A measured tag is only honest if the script actually returns one.
+    expect(src).toContain("tag: el.tagName");
+  });
+
+  it("keeps the withdrawn evidence as provenance, never as support", () => {
     expect(WING_ISSUE_CALIBRATION_EVIDENCE.signatureRole).toBe("EVIDENCE_ONLY");
-    expect(WING_ISSUE_CALIBRATION_EVIDENCE.signatureStability).toBe("CROSS_SESSION_VARIATION_OBSERVED");
-    expect(new Set(WING_ISSUE_CALIBRATION_EVIDENCE.observedSig16).size).toBeGreaterThan(1);
-    for (const sig of WING_ISSUE_CALIBRATION_EVIDENCE.observedSig16) expect(sig).toMatch(/^[0-9a-f]{16}$/);
+    // The signatures were the DECOY's. Retained so the history is auditable; named `withdrawn*` so no future
+    // reader mistakes them for a live baseline.
+    for (const sig of WING_ISSUE_CALIBRATION_EVIDENCE.withdrawnSig16) expect(sig).toMatch(/^[0-9a-f]{16}$/);
+    expect(WING_ISSUE_CALIBRATION_EVIDENCE.withdrawnRecordIds.length).toBeGreaterThan(0);
+    expect([...WING_ISSUE_CALIBRATION_EVIDENCE.surfaces]).toEqual(["already_issued_page", "no_key_initial_surface"]);
   });
 
-  it("is backed by one record id per capture, across BOTH account states", () => {
-    expect(WING_ISSUE_CALIBRATION_EVIDENCE.recordIds).toHaveLength(WING_ISSUE_CALIBRATION_EVIDENCE.captureCount);
-    expect(new Set(WING_ISSUE_CALIBRATION_EVIDENCE.recordIds).size).toBe(WING_ISSUE_CALIBRATION_EVIDENCE.captureCount);
-    expect([...WING_ISSUE_CALIBRATION_EVIDENCE.surfaces]).toEqual(["already_issued_page", "no_key_initial_surface"]);
+  it("records what the refuted spec actually did: unique, and invisible", () => {
+    expect(WING_ISSUE_CALIBRATION_EVIDENCE.refutedObservation).toEqual({ visibleMatchCount: 0, nonPaintingMatchCount: 1 });
+  });
+
+  it("names a LIVE measurement as the only way back to calibrated", () => {
+    expect(WING_ISSUE_CALIBRATION_EVIDENCE.reconfirmationRequires).toBe(
+      "READ_ONLY_PROBE_VISIBLE_UNIQUE_MATCH_WITH_MEASURED_TAG",
+    );
+    // The press has still never happened; a locator fix does not and cannot imply otherwise.
+    expect(WING_ISSUE_CALIBRATION_EVIDENCE.pressOutcome).toBe("UNCONFIRMED");
   });
 
   it("does NOT flip the overall WING highlight calibration — the other three targets are still unresolved", async () => {

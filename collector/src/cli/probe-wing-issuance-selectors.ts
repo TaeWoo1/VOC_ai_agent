@@ -55,6 +55,7 @@ import {
   WING_DELETION_LABELS,
   WING_HIGHLIGHT_LABELS,
   type WingDeletionTarget,
+  type WingFixedLabelProbe,
   type WingHighlightTarget,
 } from "../action-window/coupang-wing-issuance-driver";
 import {
@@ -109,8 +110,14 @@ export const WING_RECORD_TARGETS: readonly WingRecordTarget[] = [
  * Coarse, human-legible EXPECTED role for each candidate — a fixed recorder constant (NOT a live element read), so
  * the calibration record says what KIND of control each fixed label is meant to resolve to. It is descriptive
  * evidence only; the live `matchCount` is what proves the candidate resolves uniquely.
+ *
+ * **Named `EXPECTED` in full because the short name cost us a live run.** As `WING_TARGET_ROLE`, written into a
+ * record field called `role`, this constant was read downstream as an observation and summarized into
+ * `WING_ISSUE_CALIBRATION_EVIDENCE` as `role: "button"` — a measurement the recorder had never taken and which
+ * turned out to be false. An expectation and an observation must not share a name; compare this against the
+ * MEASURED `observedTag` on each record rather than trusting either alone.
  */
-export const WING_TARGET_ROLE: Readonly<Record<WingRecordTarget, string>> = {
+export const WING_TARGET_EXPECTED_ROLE: Readonly<Record<WingRecordTarget, string>> = {
   self_dev: "option",
   vendor_info: "field-label",
   call_ip: "field-label",
@@ -151,7 +158,15 @@ export interface WingSelectorRecord {
   /** Whether it resolves uniquely (matchCount === 1) and can therefore be highlighted. */
   canHighlight: boolean;
   /** Coarse EXPECTED role of the candidate (recorder constant — never a live element read). */
-  role: string;
+  expectedRole: string;
+  /**
+   * MEASURED tag name of the unique match (e.g. `"BUTTON"`), else null. The counterpart to {@link expectedRole}:
+   * when the two disagree, the fixed label resolved to something other than the kind of control it was written
+   * for — the condition that produced an invisible 발급 highlight and went unnoticed for four captures.
+   */
+  observedTag: string | null;
+  /** Matches rejected for not painting. Separates "matched nothing visible" from "matched nothing" (integer). */
+  hiddenMatchCount: number;
   /** The fixed WING label anchor the candidate probes for (our own config constant, never scraped page content). */
   label: string;
   /** Opaque 16-hex structural signature of the unique match (tag+position+child-count in-page), else null. */
@@ -220,7 +235,7 @@ export interface WingSelectorRecordDeps {
   /** The sanitized surface observation (pageCategory + signals + blockers) — reused from the driver's own probe. */
   observeSurface(): Promise<WingObservation>;
   /** Read-only fixed-label match for one candidate (never tags/highlights/clicks/reads a value). */
-  probeTarget(target: WingRecordTarget): Promise<{ matchCount: number; canHighlight: boolean; sig?: string }>;
+  probeTarget(target: WingRecordTarget): Promise<WingFixedLabelProbe>;
   /**
    * Read-only fixed-label match for an ARBITRARY candidate spec — the recon sweep's only page interaction, and
    * the SAME driver seam `probeTarget` uses (`probeFixedLabelMatch`). Required only for a recon run; a baseline
@@ -290,9 +305,14 @@ export async function runWingSelectorRecord(
     let matchCount = 0;
     let canHighlight = false;
     let sig: string | undefined;
+    let observedTag: string | undefined;
+    let hiddenMatchCount = 0;
     let fault: WingFaultFingerprint | null = null;
     try {
-      ({ matchCount, canHighlight, sig } = await deps.probeTarget(target));
+      const probe = await deps.probeTarget(target);
+      ({ matchCount, canHighlight, sig } = probe);
+      observedTag = probe.observedTag;
+      hiddenMatchCount = probe.hiddenMatchCount ?? 0;
     } catch (e) {
       fault = wingFaultFingerprint(e);
     }
@@ -300,7 +320,9 @@ export async function runWingSelectorRecord(
       target,
       matchCount,
       canHighlight,
-      role: WING_TARGET_ROLE[target],
+      expectedRole: WING_TARGET_EXPECTED_ROLE[target],
+      observedTag: canHighlight && observedTag ? observedTag : null,
+      hiddenMatchCount,
       label: wingRecordLabelSpec(target).exactText,
       sig16: canHighlight && sig ? sig : null,
       fault,
@@ -485,7 +507,7 @@ export interface WingReconRecordRow {
   /** Our own fixed candidate label — never scraped page content. */
   label: string;
   /** The target's coarse EXPECTED role (a recorder constant, not a live element read). */
-  role: string;
+  expectedRole: string;
   matchCount: number | null;
   verdict: string;
   /** `matchCount === 1`. Stated explicitly because "would this label be highlightable" is the question asked. */
@@ -518,7 +540,7 @@ export function reconRecordFor(sweep: WingReconSweep | null): {
       candidates: t.candidates.map((c): WingReconRecordRow => ({
         id: c.id,
         label: c.label,
-        role: WING_TARGET_ROLE[t.target],
+        expectedRole: WING_TARGET_EXPECTED_ROLE[t.target],
         matchCount: c.matchCount,
         verdict: c.verdict,
         canHighlight: c.verdict === "UNIQUE",
