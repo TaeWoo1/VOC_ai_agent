@@ -42,15 +42,27 @@ in the unit that has the real Stage-2 DOM.
 
 ## What landed
 
-**`WING_ISSUE_SELECTOR_CALIBRATED`** — the `issue` locator is live-confirmed: `matchCount === 1`, role `button`,
+> **⚠ WITHDRAWN 2026-08-09 — the `issue` calibration described below was REFUTED by a live run.** The claim in
+> this section was wrong. It is left in place, struck through, because the *shape* of the mistake is the useful
+> part of this record. See `docs/coupang_wing_issue_selector_recalibration_v1.md` for the refutation and the fix.
+>
+> `WING_ISSUE_SELECTOR_CALIBRATED` is now `false`; `WING_ISSUE_CALIBRATION_EVIDENCE.status` is
+> `LIVE_DOM_CALIBRATION_REFUTED`. No reveal run can reach a manifest until a live read-only probe re-confirms it.
+
+~~**`WING_ISSUE_SELECTOR_CALIBRATED`** — the `issue` locator is live-confirmed: `matchCount === 1`, role `button`,
 on **four independent captures across BOTH account states** (already-issued 2026-08-06/07, real no-key
-2026-08-08). A stronger basis than the single capture behind the 삭제 calibration.
+2026-08-08). A stronger basis than the single capture behind the 삭제 calibration.~~
+
+What actually held, and what did not: `matchCount === 1` was **true on all four captures and about the wrong
+element**. `role: "button"` was never measured at all — the locate script returned `{ count, sig }` and no role,
+so the field was asserted by hand. Four captures agreeing raised confidence in a claim none of them tested.
 
 Two things it deliberately does not do. It does **not** flip `WING_HIGHLIGHT_CALIBRATION` (the other three
 targets are still unresolved). And `pressOutcome: "UNCONFIRMED"` — calibration covers the **locator**, never what
 the press does. `signatureStability` is `CROSS_SESSION_VARIATION_OBSERVED`, which is stronger than the 삭제
 evidence's "not established": four captures show the signature **moving** (`d3f775e8…` → `b7ba43a8…`) with no
 signature-code change between them, so `signatureRole: "EVIDENCE_ONLY"` is a hard requirement, not a caution.
+(Those signatures were the decoy's, and are retained as `withdrawnSig16`.)
 
 **`CoupangWingRevealDriver`** — on the audited deletion-driver shape: classify → probe → highlight → rest →
 operator acts → clear → observe once → stop. It refuses a non-open-API page, refuses a non-unique `발급`, refuses

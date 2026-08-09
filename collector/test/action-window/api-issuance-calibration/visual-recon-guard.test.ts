@@ -72,13 +72,20 @@ describe("visual-recon-inpage.ts — value-free OUTPUT", () => {
     }
   });
 
-  it("the fixed-label LOCATE script (Phase-B highlight locator) has value-free OUTPUT — only { count, sig }", () => {
+  it("the fixed-label LOCATE script (Phase-B highlight locator) has value-free OUTPUT — only { count, hiddenCount, tag, sig }", () => {
     for (const tag of [true, false]) {
       const script = buildFixedLabelLocateScript({ candidateQuery: "button, a, [role='button']", exactText: "애플리케이션 등록", tag });
       const returns = [...script.matchAll(/return\s*\{[^;]*?\};?/g)].map((m) => m[0]!);
-      // Exactly the two known-safe return shapes: the non-unique `{ count }` and the unique `{ count, sig }`.
-      expect(returns.some((r) => /return\s*\{\s*count:\s*matches\.length\s*\}/.test(r))).toBe(true);
-      expect(returns.some((r) => /return\s*\{\s*count:\s*1,\s*sig:/.test(r))).toBe(true);
+      // Exactly the two known-safe return shapes. `count` is now the VISIBLE match count and `hiddenCount` the
+      // rejected non-painting ones — both plain counts, and `tag` a measured tag name. All structural.
+      expect(returns.some((r) => /return\s*\{\s*count:\s*visible\.length,\s*hiddenCount:\s*hiddenCount\s*\}/.test(r))).toBe(true);
+      expect(returns.some((r) => /return\s*\{\s*count:\s*1,\s*hiddenCount:\s*hiddenCount,\s*tag:\s*el\.tagName,\s*sig:/.test(r))).toBe(true);
+      // `tag` may ONLY ever be a tag name. An element's tag is structure; anything sourced from its text or value
+      // would turn this field into the leak the whole script is built to avoid.
+      for (const block of returns) {
+        const tagField = /tag:\s*([A-Za-z0-9_.]+)/.exec(block);
+        if (tagField) expect(tagField[1], "tag must be a tagName, never derived text").toBe("el.tagName");
+      }
       // Text is read ONLY to COMPARE against the caller's known fixed label — never RETURNED. The locals holding
       // accessible-name text (`want`, element `.textContent`) never appear inside a returned literal.
       for (const block of returns) {

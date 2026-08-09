@@ -329,8 +329,12 @@ export class CoupangWingRevealDriver {
       ...(spec.tagAncestor ? { tagAncestor: spec.tagAncestor } : {}),
     });
     const res = await this.evalStr<LocateResult>(this.activePage(), script);
-    if (res.count !== 1 || !res.sig) return { count: res.count };
-    return { count: 1, sig: res.sig };
+    // `hiddenCount` survives BOTH exits. On the failure exit it is the whole diagnosis: `count: 0, hiddenCount: 1`
+    // says the label matched an element that does not paint — which is what the live 발급 surface actually returns
+    // once the visibility filter is in place, and is indistinguishable from `count: 0` alone without it.
+    const hidden = typeof res?.hiddenCount === "number" ? { hiddenCount: res.hiddenCount } : {};
+    if (res.count !== 1 || !res.sig) return { count: res.count, ...hidden };
+    return { count: 1, sig: res.sig, ...hidden, ...(res.tag ? { tag: res.tag } : {}) };
   }
 
   /**
@@ -348,7 +352,12 @@ export class CoupangWingRevealDriver {
       throw new Error("classify the initial open-API surface before highlighting the 발급 control");
     }
     const res = await this.resolveIssue(true);
-    if (res.count !== 1 || !res.sig) return { count: res.count };
+    if (res.count !== 1 || !res.sig) {
+      // Say WHY, in counts. A bare refusal sent the last live attempt into a source read to find out whether the
+      // label matched nothing or matched something unrenderable; both are `count: 0` on the wire.
+      log("aw_coupang_reveal_issue_not_unique", { matchCount: res.count, hiddenCount: res.hiddenCount ?? 0 });
+      return { count: res.count, ...(typeof res.hiddenCount === "number" ? { hiddenCount: res.hiddenCount } : {}) };
+    }
     await sleep(this.opts.locatorSettleMs ?? DEFAULT_LOCATOR_SETTLE_MS);
     const page = this.activePage();
     await (this.opts.mountOverlayFn ?? mountOverlay)(page, {
