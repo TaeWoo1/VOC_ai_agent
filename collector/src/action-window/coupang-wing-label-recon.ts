@@ -1472,3 +1472,300 @@ export const WING_STAGE2_LABEL_CALIBRATION_EVIDENCE: WingStage2LabelCalibrationE
   issuedStateReason: "NO_DISCRIMINATING_SIGNAL",
   refines: WING_STAGE2_RECON_EVIDENCE,
 });
+
+/* ────────────────────── STAGE-2 purpose-OPTION IDENTIFICATION (the calibration re-run) ────────────────────── */
+
+/**
+ * **MEASURED on 2026-08-10: which radio is which.**
+ *
+ * The third Stage-2 reading, and the first that answers the question the phase is named for. The two previous
+ * records could say how the controls are labelled and that no candidate matched; this one says *what they are*,
+ * because the candidates it compared against were transcribed off the screen rather than derived from an
+ * account of it.
+ *
+ * **The reading was predicted before it was taken.** A test built a fake Stage-2 as the operator described it
+ * and ran the real generated script against the real shipped list; this record is that prediction, field for
+ * field, taken from WING. That ordering is the point — a prediction written after the fact is a description.
+ *
+ * Deliberately compact. This unit does not open a landing per screen: the earlier records already carry the
+ * bounds, the caveats and the absences, and repeating them here would create two places for one fact to drift.
+ * What is here is what this run added, plus the check that it did not contradict anything.
+ */
+export interface WingStage2OptionIdentificationEvidence {
+  readonly observedOn: "2026-08-10";
+  readonly gitSha: "f9189d89";
+  readonly runId: "wt-7ecf33125088";
+  readonly approvalId: "apr-5ad6d4a1216b";
+  readonly recordId: "wingrec_fd5caf3ca4ae";
+  readonly precondition: "OK";
+  /**
+   * **MEASURED: each visible radio's derived name equals one transcribed candidate, and the two do not
+   * collide.** `exactCandidateIndex` and `containsCandidateIndex` agree on both rows, which they must when the
+   * match is whole-text — a disagreement would mean the label is wrapped in more text than the candidate.
+   *
+   * The ids are carried beside the indices ON PURPOSE. An index is a position in a list this record does not
+   * own; the previous unit's guards exist because a reordering silently re-aims a bare numeral.
+   */
+  readonly rows: readonly [
+    {
+      readonly index: 0;
+      readonly nameSource: "LABEL_FOR";
+      readonly nameLengthBucket: "short";
+      readonly exactCandidateIndex: 4;
+      readonly containsCandidateIndex: 4;
+      readonly candidateId: "purpose_option.open_api";
+      readonly labelForCount: 1;
+      readonly ancestorLabelCount: 0;
+      readonly ariaLabelledbyRefCount: 0;
+      readonly groupIndex: 0;
+    },
+    {
+      readonly index: 1;
+      readonly nameSource: "LABEL_FOR";
+      readonly nameLengthBucket: "medium";
+      readonly exactCandidateIndex: 5;
+      readonly containsCandidateIndex: 5;
+      readonly candidateId: "purpose_option.playauto_web_solution";
+      readonly labelForCount: 1;
+      readonly ancestorLabelCount: 0;
+      readonly ariaLabelledbyRefCount: 0;
+      readonly groupIndex: 0;
+    },
+  ];
+  readonly candidatesCompared: 6;
+  readonly nameGroupCount: 1;
+  readonly largestNameGroupSize: 2;
+  readonly ungroupedCount: 0;
+  /**
+   * **MEASURED: the purpose semantics are now established** — for the two option LABELS, and nothing further.
+   *
+   * What is settled: radio 0's accessible name is the `OPEN API` candidate's text, radio 1's is the other, and
+   * both derive from a single `label[for]`. What is NOT settled by that, and is not a measurement at all: which
+   * option SellerOps should use. That is a product decision; the product owner has since made it (`OPEN API`),
+   * and a decision is not evidence. Nothing in this module selects, ranks or defaults to either.
+   */
+  readonly purposeOptionSemanticsMeasured: true;
+  readonly purposeOptionChoiceMade: "PRODUCT_OWNER_DECISION_NOT_MEASURED";
+  /**
+   * **MEASURED: the 08-09 heading report was wrong by exactly two affixes, and the verbatim one resolves.**
+   *
+   * The report `이제 키의 사용 목적을 골라주세요.` stays `ABSENT_EVERYWHERE` — all four containment integers
+   * zero — while the verbatim `키의 사용 목적을 골라주세요` matches one painting element and no hidden ones.
+   * This is the whole reason the report was kept rather than replaced.
+   */
+  readonly headingHypothesis: {
+    readonly reportedVerdict: "ABSENT_EVERYWHERE";
+    readonly verbatimVerdict: "PRESENT_VISIBLE";
+    readonly verbatimMatchCount: 1;
+    readonly verbatimHiddenMatchCount: 0;
+    readonly verbatimSig16: "f86a70f0cef03140";
+    readonly signatureRole: "EVIDENCE_ONLY";
+  };
+  /**
+   * **MEASURED: every containment quad from 2026-08-09 reproduced, integer for integer.**
+   *
+   * Eight candidates, four integers each, on a different commit and a different run. Recorded as a count rather
+   * than a re-listing — the quads live on {@link WING_STAGE2_LABEL_CALIBRATION_EVIDENCE} and copying them here
+   * would create a second place for one fact to drift. `0` disagreements is the claim; the test checks it
+   * against that record rather than against a transcription of it.
+   */
+  readonly quadsReproducedFromPreviousRun: 8;
+  readonly quadDisagreements: 0;
+  readonly structureReproduced: {
+    readonly visibleChoiceControlCount: 2;
+    readonly hiddenChoiceControlCount: 10;
+    readonly groupContainerCount: 0;
+    readonly openApiMarkerPresent: false;
+    readonly credentialAnchorPresent: true;
+  };
+  /**
+   * **`확인`'s signature now agrees across THREE runs on three commits** — `277220f7`, `ce733f78`, `f9189d89`.
+   *
+   * Unlike the pair the previous record compared, these are three separate grants and three separate captures,
+   * so the agreement is between independent readings. It still promotes nothing: a stable signature says the
+   * element's structure did not change between three observations, not that the locator is correct, and
+   * `확인`'s role remains the product owner's description. `EVIDENCE_ONLY` stands.
+   */
+  readonly confirmSig16: "c1b87128024cdec8";
+  readonly confirmAgreeingRuns: 3;
+  readonly confirmSignatureRole: "EVIDENCE_ONLY";
+  readonly confirmIsFinalIssuanceControl: "OPERATOR_FLOW_DESCRIPTION_ONLY_NOT_MEASURED";
+  readonly candidatesMeasured: 9;
+  readonly candidatesNotMeasured: 0;
+  readonly probeFaults: 0;
+  readonly containmentFaults: 0;
+  readonly associationFault: null;
+  readonly choiceControlFault: null;
+  readonly operatorSelectedPurpose: false;
+  readonly operatorPressedConfirm: false;
+  readonly agentSelections: 0;
+  readonly keyCreationRuledOut: false;
+  readonly refines: WingStage2LabelCalibrationEvidence;
+}
+
+export const WING_STAGE2_OPTION_IDENTIFICATION_EVIDENCE: WingStage2OptionIdentificationEvidence = Object.freeze({
+  observedOn: "2026-08-10",
+  gitSha: "f9189d89",
+  runId: "wt-7ecf33125088",
+  approvalId: "apr-5ad6d4a1216b",
+  recordId: "wingrec_fd5caf3ca4ae",
+  precondition: "OK",
+  rows: Object.freeze([
+    Object.freeze({
+      index: 0, nameSource: "LABEL_FOR", nameLengthBucket: "short",
+      exactCandidateIndex: 4, containsCandidateIndex: 4, candidateId: "purpose_option.open_api",
+      labelForCount: 1, ancestorLabelCount: 0, ariaLabelledbyRefCount: 0, groupIndex: 0,
+    }),
+    Object.freeze({
+      index: 1, nameSource: "LABEL_FOR", nameLengthBucket: "medium",
+      exactCandidateIndex: 5, containsCandidateIndex: 5, candidateId: "purpose_option.playauto_web_solution",
+      labelForCount: 1, ancestorLabelCount: 0, ariaLabelledbyRefCount: 0, groupIndex: 0,
+    }),
+  ]) as WingStage2OptionIdentificationEvidence["rows"],
+  candidatesCompared: 6,
+  nameGroupCount: 1,
+  largestNameGroupSize: 2,
+  ungroupedCount: 0,
+  purposeOptionSemanticsMeasured: true,
+  purposeOptionChoiceMade: "PRODUCT_OWNER_DECISION_NOT_MEASURED",
+  headingHypothesis: Object.freeze({
+    reportedVerdict: "ABSENT_EVERYWHERE",
+    verbatimVerdict: "PRESENT_VISIBLE",
+    verbatimMatchCount: 1,
+    verbatimHiddenMatchCount: 0,
+    verbatimSig16: "f86a70f0cef03140",
+    signatureRole: "EVIDENCE_ONLY",
+  }) as WingStage2OptionIdentificationEvidence["headingHypothesis"],
+  quadsReproducedFromPreviousRun: 8,
+  quadDisagreements: 0,
+  structureReproduced: Object.freeze({
+    visibleChoiceControlCount: 2,
+    hiddenChoiceControlCount: 10,
+    groupContainerCount: 0,
+    openApiMarkerPresent: false,
+    credentialAnchorPresent: true,
+  }) as WingStage2OptionIdentificationEvidence["structureReproduced"],
+  confirmSig16: "c1b87128024cdec8",
+  confirmAgreeingRuns: 3,
+  confirmSignatureRole: "EVIDENCE_ONLY",
+  confirmIsFinalIssuanceControl: "OPERATOR_FLOW_DESCRIPTION_ONLY_NOT_MEASURED",
+  candidatesMeasured: 9,
+  candidatesNotMeasured: 0,
+  probeFaults: 0,
+  containmentFaults: 0,
+  associationFault: null,
+  choiceControlFault: null,
+  operatorSelectedPurpose: false,
+  operatorPressedConfirm: false,
+  agentSelections: 0,
+  keyCreationRuledOut: false,
+  refines: WING_STAGE2_LABEL_CALIBRATION_EVIDENCE,
+});
+
+/* ────────────────────── ISSUANCE-FLOW DISCOVERY: checkpoints, and the 확인 gate ────────────────────── */
+
+/**
+ * **The ordered points in the issuance flow at which a read-only reading is taken.**
+ *
+ * Every earlier Stage-2 phase took ONE reading of ONE screen the operator had already reached. Discovery takes
+ * several, because the evidence it is after is not any single screen but the DIFFERENCE between them: the
+ * vendor-form labels already match hidden nodes on the purpose screen, so "did selecting an option reveal
+ * them" is answerable by comparing two readings of the same candidates.
+ *
+ * The names say WHO acted. The operator selects and confirms; the agent's selection budget stays 0, and no
+ * checkpoint is reachable without the operator signalling again.
+ */
+export const WING_FLOW_CHECKPOINTS = [
+  "PURPOSE_SCREEN_UNTOUCHED",
+  "PURPOSE_OPTION_SELECTED_BY_OPERATOR",
+  "AFTER_OPERATOR_CONFIRM",
+] as const;
+export type WingFlowCheckpoint = (typeof WING_FLOW_CHECKPOINTS)[number];
+
+/**
+ * **The candidates whose visibility decides what `확인` IS.**
+ *
+ * The product owner's account of the flow puts 확인 *after* 업체명 · URL · IP 주소 are filled in, which would
+ * make it the control that creates the key. Every measurement so far puts those three labels in NON-painting
+ * nodes only on the purpose screen — consistent with a form that exists in the DOM and is not yet shown.
+ *
+ * So the question is decidable by reading, and it is the one question that must be decided before anyone
+ * presses anything: if the vendor form is ALREADY on screen when the operator has selected an option, then
+ * 확인 submits it, and pressing it may issue a key.
+ */
+export const WING_VENDOR_FORM_CANDIDATE_IDS = [
+  "stage2.vendor_info.baseline",
+  "stage2.vendor_url.url",
+  "stage2.call_ip.ip_addr",
+] as const;
+
+/**
+ * Whether the run may INVITE the operator to press 확인. Closed, and fail-closed: two of the three values stop.
+ *
+ * This is not advice about safety in general — it is the specific question "is 확인 the next step of a wizard,
+ * or the submit button of a form that is already on screen", answered from the reading rather than from the
+ * flow description that has already been wrong once about this screen's wording.
+ */
+export const WING_CONFIRM_ADVISORIES = [
+  "ADVANCE_FORM_NOT_YET_REVEALED",
+  "STOP_FORM_ALREADY_VISIBLE",
+  "STOP_NOT_MEASURED",
+] as const;
+export type WingConfirmAdvisory = (typeof WING_CONFIRM_ADVISORIES)[number];
+
+/**
+ * Decide from a checkpoint reading whether 확인 may be invited. **Defaults to STOP on anything unmeasured.**
+ *
+ * A missing candidate, a `NOT_MEASURED` presence, any probe fault, or a precondition that did not pass all
+ * produce `STOP_NOT_MEASURED`. That is deliberate and it is the whole value of the function: the failure this
+ * prevents is a run that could not read the page concluding, from the absence of a signal, that pressing the
+ * key-creating control is fine.
+ */
+export function wingConfirmAdvisory(reading: {
+  readonly precondition: WingStage2Precondition;
+  readonly faultCount: number;
+  readonly candidates: readonly { readonly id: string; readonly presence: WingStage2Presence }[];
+}): WingConfirmAdvisory {
+  if (reading.precondition !== "OK") return "STOP_NOT_MEASURED";
+  if (reading.faultCount > 0) return "STOP_NOT_MEASURED";
+  const byId = new Map(reading.candidates.map((c) => [c.id, c.presence]));
+  for (const id of WING_VENDOR_FORM_CANDIDATE_IDS) {
+    const presence = byId.get(id);
+    // Absent from the reading is NOT "absent from the page". A candidate that was never probed tells us
+    // nothing about whether its field is on screen, and nothing is exactly what we must not act on.
+    if (presence === undefined || presence === "NOT_MEASURED") return "STOP_NOT_MEASURED";
+    if (presence === "PRESENT_VISIBLE") return "STOP_FORM_ALREADY_VISIBLE";
+  }
+  return "ADVANCE_FORM_NOT_YET_REVEALED";
+}
+
+/** Why a discovery run stopped early. `null` means it ran every checkpoint. */
+export const WING_FLOW_HALT_REASONS = [
+  "OPERATOR_ABORTED",
+  "OPERATOR_SIGNAL_TIMEOUT",
+  "CONFIRM_ADVISORY_STOP",
+  "PRECONDITION_FAILED",
+] as const;
+export type WingFlowHaltReason = (typeof WING_FLOW_HALT_REASONS)[number];
+
+/**
+ * Which candidates became VISIBLE between two readings — the reveal, stated as a set rather than left to a
+ * reader comparing two tables.
+ *
+ * "Became visible" is `PRESENT_VISIBLE` now and something else before. A candidate that was already visible is
+ * not a reveal, and a candidate missing from either reading is not one either: an unmeasured row cannot
+ * contribute to a claim that a form appeared.
+ */
+export function wingRevealedBetween(
+  before: readonly { readonly id: string; readonly presence: WingStage2Presence }[],
+  after: readonly { readonly id: string; readonly presence: WingStage2Presence }[],
+): string[] {
+  const prior = new Map(before.map((c) => [c.id, c.presence]));
+  return after
+    .filter((c) => {
+      const was = prior.get(c.id);
+      if (was === undefined || was === "NOT_MEASURED" || c.presence === "NOT_MEASURED") return false;
+      return c.presence === "PRESENT_VISIBLE" && was !== "PRESENT_VISIBLE";
+    })
+    .map((c) => c.id);
+}

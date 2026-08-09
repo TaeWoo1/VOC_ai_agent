@@ -74,7 +74,7 @@ PROBE_TARGETS="${SELLEROPS_WING_PROBE_TARGETS:-}"
 # their scope in the same variable; they differ only in what is measured. One predicate, used by every branch
 # below, so a third Stage-2 phase cannot be added to some of them and missed by the rest.
 is_stage2_phase() {
-  case "$1" in COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION) return 0 ;; *) return 1 ;; esac
+  case "$1" in COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION|COUPANG_WING_ISSUANCE_FLOW_DISCOVERY) return 0 ;; *) return 1 ;; esac
 }
 
 # The header must name the scope this RUN actually has. On a Stage-2 run there is no probe scope at all, and
@@ -97,10 +97,10 @@ check_identity_fresh "$BOOTSTRAP_EPOCH" "$IDENTITY_TTL_SECONDS"
 #    candidate-label recon. This harness prepares those and no others; the destructive deletion phase has its
 #    own gate and is not approvable from here.
 case "$PHASE" in
-  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION)
+  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION|COUPANG_WING_ISSUANCE_FLOW_DISCOVERY)
     pass "phase is $PHASE (READ_ONLY)" ;;
   *)
-    fail "phase must be COUPANG_WING_SELECTOR_PROBE, COUPANG_WING_LABEL_RECON, COUPANG_WING_STAGE2_RECON, or COUPANG_WING_STAGE2_LABEL_CALIBRATION (got '${PHASE:-unset}') — this harness prepares no other phase" ;;
+    fail "phase must be COUPANG_WING_SELECTOR_PROBE, COUPANG_WING_LABEL_RECON, COUPANG_WING_STAGE2_RECON, COUPANG_WING_STAGE2_LABEL_CALIBRATION, or COUPANG_WING_ISSUANCE_FLOW_DISCOVERY (got '${PHASE:-unset}') — this harness prepares no other phase" ;;
 esac
 
 # 4. No code drift since bootstrap. The manifest records a git SHA; if HEAD moved, or the working tree
@@ -165,7 +165,7 @@ fi
 # AND it must be the same phase this run bootstrapped — a manifest for the OTHER read-only phase describes
 # different work (shipped labels vs candidate hypotheses) and must not be presented under this run's identity.
 case "$M_PHASE" in
-  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION) ;;
+  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION|COUPANG_WING_ISSUANCE_FLOW_DISCOVERY) ;;
   *)
     echo "PREFLIGHT FAIL — the prepared manifest is for phase $M_PHASE, not a READ_ONLY WING recorder phase. Refusing."
     exit 1 ;;
@@ -245,7 +245,26 @@ echo
 echo "  operator action ($M_ENTRY_TYPE):"
 echo "    $M_OPERATOR_ACTION"
 echo
-if is_stage2_phase "$PHASE"; then
+if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then
+  echo "  ⚠ THIS RUN ADVANCES THE REAL FLOW, and every step of it is YOURS. SellerOps clicks, selects and types"
+  echo "  NOTHING — it has no code path that could. You press 'API Key 발급 받기', you select 'OPEN API', and you"
+  echo "  press '확인' — but only if SellerOps' own reading says you may."
+  echo "  Three checkpoints, each waiting for your signal, each instruction printed only when it is that step's"
+  echo "  turn:"
+  echo "    1) 발급 press → STOP on the purpose screen, select nothing → ready"
+  echo "    2) select 'OPEN API' → do NOT press 확인 → ready"
+  echo "    3) offered ONLY IF the step-2 reading shows the 업체명/URL/IP fields are NOT yet on screen"
+  echo "  ⚠ WHY step 3 is conditional: nobody has ever pressed '확인', and no run has measured what it does. The"
+  echo "  product owner's account of the flow puts it AFTER the vendor fields, which would make it the control"
+  echo "  that CREATES THE KEY. So SellerOps reads, at step 2, whether those fields are already visible. If they"
+  echo "  are, '확인' is a submission and the run HALTS — the instruction to press it is never printed. This is"
+  echo "  a fail-closed gate: an unreadable page, any probe fault, or a missing candidate also halts."
+  echo "  If step 3 does run, you press '확인' and STOP at whatever opens. Type nothing into it. The final"
+  echo "  issuance control is not in this run'\''s scope and this run has no tooling for it."
+  echo "  At each checkpoint SellerOps reads the same read-only things it has read all along: match counts,"
+  echo "  visible-vs-hidden, how each control is labelled, group ordinals, length bands, candidate INDICES. No"
+  echo "  page wording, no field value, no credential. Nothing measured here promotes a selector."
+elif is_stage2_phase "$PHASE"; then
   echo "  ⚠ YOU take a real WING action in this run, and SellerOps does not: you press 'API Key 발급 받기'"
   echo "  YOURSELF to open the purpose-selection screen, then STOP there. Choose no purpose, type nothing into"
   echo "  업체명/URL/IP, and NEVER press '확인' — that is the control that creates the key, and this run has no"

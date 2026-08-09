@@ -140,10 +140,11 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
   }
   const isWingStage2Recon = phase === "COUPANG_WING_STAGE2_RECON";
   const isWingStage2Calibration = phase === "COUPANG_WING_STAGE2_LABEL_CALIBRATION";
+  const isWingFlowDiscovery = phase === "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY";
   // BOTH Stage-2 phases share the scope env var, so both must resolve it. A calibration manifest that skipped
   // this would print the full six targets while the run measured whatever the env var narrowed to — the same
   // manifest-under-describes-the-run gap review already found on the recon route.
-  const isWingStage2 = isWingStage2Recon || isWingStage2Calibration;
+  const isWingStage2 = isWingStage2Recon || isWingStage2Calibration || isWingFlowDiscovery;
   // The Stage-2 scope, from its OWN env var. Without this the resolver only ever sees `undefined` and returns
   // the full six — so `SELLEROPS_WING_STAGE2_TARGETS=purpose` produced a manifest listing all six targets and a
   // run command carrying all six, while the bootstrap printed the narrower scope it was asked for. The
@@ -178,6 +179,8 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     ? "WING Stage-2 read-only recon on the purpose-selection screen (the OPERATOR presses 발급 to open it; agent counts controls and candidate-label matches only — no highlight, no selection, no input, no 확인, no value read)"
     : isWingStage2Calibration
     ? "WING Stage-2 read-only LABEL CALIBRATION on the purpose-selection screen (the OPERATOR presses 발급 to open it; agent derives how each choice control is LABELLED and compares it against fixed candidates, reporting category names and indices only — no wording recorded, no highlight, no selection, no input, no 확인, no value read)"
+    : isWingFlowDiscovery
+    ? "WING OPEN-API issuance-flow DISCOVERY across operator-advanced checkpoints (the OPERATOR presses 발급, selects the purpose option, and — ONLY if the reading after that selection shows the 업체명/URL/IP form is not yet on screen — presses 확인; the agent takes the same read-only label/association readings at each checkpoint and performs no click, selection, input, or value read. If the form IS already visible, 확인 may be the submitting action and the run halts without inviting the press. Nothing is typed into the revealed form and the final issuance control is out of scope)"
     : isWingReveal
     ? "WING issuance-form reveal (the OPERATOR presses 발급; this press is not the key-creating action; agent performs no click/input/value read)"
     : isVisualRecon
@@ -199,6 +202,8 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     ? "1 operator-performed 발급 press + 1 read-only Stage-2 recon session (candidate match counts + choice-control shape census)"
     : isWingStage2Calibration
     ? "1 operator-performed 발급 press + 1 read-only Stage-2 label-calibration session (candidate match counts + containment probe + choice-control shape and label-association census); 0 selections"
+    : isWingFlowDiscovery
+    ? "operator-performed: 1 발급 press + 1 purpose-option selection + at most 1 확인 press (gated on the measurement, and skipped entirely if it says stop); agent: 3 read-only checkpoint readings, 0 clicks, 0 selections, 0 inputs, 0 value reads"
     : isWingReveal
     ? "1 operator-performed 발급 press + 1 sanitized observation"
     : isVisualRecon

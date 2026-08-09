@@ -23,6 +23,11 @@
 #                                            the OPERATOR reaches by pressing 발급 themselves, plus a
 #                                            choice-control SHAPE census. Still read-only: no highlight, no
 #                                            click, no selection, no 확인, no value read.
+#   COUPANG_WING_ISSUANCE_FLOW_DISCOVERY   — the calibration's reads, taken at SEVERAL checkpoints while the
+#                                            OPERATOR advances the real flow (발급 → select the purpose option →
+#                                            conditionally 확인). The agent still clicks, selects and types
+#                                            nothing; the 확인 step is offered only when the reading taken after
+#                                            the selection shows the vendor form is not yet on screen.
 #   COUPANG_WING_STAGE2_LABEL_CALIBRATION  — the same surface and the same operator flow, plus two further
 #                                            read-only reads: a per-candidate CONTAINMENT probe and a
 #                                            label-ASSOCIATION census (how each control is labelled, whether the
@@ -60,9 +65,9 @@ git_hardened() {
 #    pattern and inject a second assignment into the file below.
 PHASE="${SELLEROPS_APPROVAL_PHASE:-COUPANG_WING_SELECTOR_PROBE}"
 case "$PHASE" in
-  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION) ;;
+  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION|COUPANG_WING_ISSUANCE_FLOW_DISCOVERY) ;;
   *)
-    echo "BOOTSTRAP FAIL — SELLEROPS_APPROVAL_PHASE must be COUPANG_WING_SELECTOR_PROBE, COUPANG_WING_LABEL_RECON, COUPANG_WING_STAGE2_RECON, or COUPANG_WING_STAGE2_LABEL_CALIBRATION."
+    echo "BOOTSTRAP FAIL — SELLEROPS_APPROVAL_PHASE must be COUPANG_WING_SELECTOR_PROBE, COUPANG_WING_LABEL_RECON, COUPANG_WING_STAGE2_RECON, COUPANG_WING_STAGE2_LABEL_CALIBRATION, or COUPANG_WING_ISSUANCE_FLOW_DISCOVERY."
     echo "                 (The DESTRUCTIVE deletion phase has its own harness and is not approvable from here.)"
     exit 1 ;;
 esac
@@ -73,7 +78,7 @@ esac
 # Is this either of the two STAGE-2 phases? One predicate, used by every branch below — the WING phase list
 # already learned what happens when a new phase is added to some of the `if`s and not others.
 is_stage2_phase() {
-  case "$1" in COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION) return 0 ;; *) return 1 ;; esac
+  case "$1" in COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION|COUPANG_WING_ISSUANCE_FLOW_DISCOVERY) return 0 ;; *) return 1 ;; esac
 }
 
 if [ "$PHASE" = "COUPANG_WING_LABEL_RECON" ]; then

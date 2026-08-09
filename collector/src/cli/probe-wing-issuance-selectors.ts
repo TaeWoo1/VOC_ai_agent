@@ -78,6 +78,12 @@ import {
   wingLabelCalibrationBlind,
   type WingReconRawRow,
   type WingStage2Presence,
+  WING_FLOW_CHECKPOINTS,
+  type WingFlowCheckpoint,
+  type WingFlowHaltReason,
+  type WingConfirmAdvisory,
+  wingConfirmAdvisory,
+  wingRevealedBetween,
 } from "../action-window/coupang-wing-label-recon";
 import type { FixedLabelContainmentReading } from "../action-window/api-issuance-calibration/visual-recon-inpage";
 import {
@@ -343,6 +349,12 @@ export interface WingSelectorRecordDeps {
   choiceControlCensus?(): Promise<WingChoiceControlCensus | null>;
   /** Print sanitized instructions (noop in tests). */
   announce?(): void;
+  /**
+   * Print the instruction for ONE discovery checkpoint (noop in tests). Called before each wait, so what the
+   * operator is asked to do next is decided by the loop that already knows the previous reading — never printed
+   * ahead of the gate that might forbid it.
+   */
+  announceCheckpoint?(checkpoint: WingFlowCheckpoint): void;
 }
 
 /** How the orchestrator was scoped this run. `recon` is empty for an ordinary baseline probe. */
@@ -486,7 +498,7 @@ async function sweepStage2(
   phase: WingStage2Phase,
   purposeCandidates: readonly WingPurposeOptionCandidate[],
 ): Promise<WingStage2Sweep> {
-  const calibration = phase === WING_STAGE2_LABEL_CALIBRATION_PHASE;
+  const calibration = wingPhaseCalibrates(phase);
   const precondition = wingStage2Precondition(observation);
   const empty = {
     phase,
@@ -636,6 +648,109 @@ async function sweepReconCandidates(
 }
 
 
+/* ────────────────────────────── ISSUANCE-FLOW DISCOVERY (multi-checkpoint) ────────────────────────────── */
+
+/** One checkpoint's complete reading. `stage2` is never null: a checkpoint that ran took a sweep. */
+export interface WingFlowCheckpointReading {
+  readonly checkpoint: WingFlowCheckpoint;
+  readonly observation: WingObservation | null;
+  readonly observationFault: WingFaultFingerprint | null;
+  readonly stage2: WingStage2Sweep;
+}
+
+export interface WingFlowDiscoveryResult {
+  readonly readings: readonly WingFlowCheckpointReading[];
+  /** The 확인 gate's verdict, or null when the run never reached the checkpoint that computes it. */
+  readonly advisory: WingConfirmAdvisory | null;
+  readonly halted: WingFlowHaltReason | null;
+  readonly revealedCandidateIds: readonly string[];
+  readonly aborted: boolean;
+  /** Structural, not a tally: this runner has no code path that selects anything. */
+  readonly agentSelections: 0;
+}
+
+/**
+ * **Take the same read-only reading at each point of the flow the OPERATOR advances.**
+ *
+ * The loop is deliberately dumb: wait for a signal, observe, sweep, record, decide whether a next checkpoint is
+ * permitted. Everything interesting is in what stops it.
+ *
+ * Three properties, each of which is the reason a line exists:
+ *
+ *  1. **Every checkpoint needs its own operator signal.** There is no "and then read again after a while" —
+ *     a reading only happens after a human says the screen is in the state they were asked to put it in.
+ *  2. **The 확인 gate runs before 확인 is ever mentioned.** {@link wingConfirmAdvisory} is evaluated on the
+ *     reading taken after the option is selected. Anything but `ADVANCE` halts the run, so the instruction to
+ *     press is never printed — the operator is not asked to decide something the reading already decided.
+ *  3. **A halt keeps its readings.** Stopping is a result, not an error: the checkpoints that completed are the
+ *     evidence, and discarding them would make a cautious run indistinguishable from a failed one.
+ */
+export async function runWingFlowDiscovery(
+  deps: WingSelectorRecordDeps,
+  opts: {
+    readonly targets: readonly WingStage2ReconTarget[];
+    readonly phase: WingStage2Phase;
+    readonly purposeCandidates?: readonly WingPurposeOptionCandidate[];
+    readonly checkpoints?: readonly WingFlowCheckpoint[];
+  },
+): Promise<WingFlowDiscoveryResult> {
+  const checkpoints = opts.checkpoints ?? WING_FLOW_CHECKPOINTS;
+  const candidates = opts.purposeCandidates ?? WING_STAGE2_PURPOSE_OPTION_CANDIDATES;
+  const readings: WingFlowCheckpointReading[] = [];
+  let advisory: WingConfirmAdvisory | null = null;
+  let halted: WingFlowHaltReason | null = null;
+  let aborted = false;
+
+  for (const checkpoint of checkpoints) {
+    deps.announceCheckpoint?.(checkpoint);
+    const signal = await deps.waitForReady();
+    if (signal !== "ready") {
+      aborted = signal === "abort";
+      halted = signal === "abort" ? "OPERATOR_ABORTED" : "OPERATOR_SIGNAL_TIMEOUT";
+      break;
+    }
+    let observation: WingObservation | null = null;
+    let observationFault: WingFaultFingerprint | null = null;
+    try {
+      observation = await deps.observeSurface();
+    } catch (e) {
+      observationFault = wingFaultFingerprint(e);
+    }
+    const stage2 = await sweepStage2(deps, opts.targets, observation, opts.phase, candidates);
+    readings.push({ checkpoint, observation, observationFault, stage2 });
+
+    if (stage2.precondition !== "OK") {
+      halted = "PRECONDITION_FAILED";
+      break;
+    }
+    if (checkpoint === "PURPOSE_OPTION_SELECTED_BY_OPERATOR") {
+      advisory = wingConfirmAdvisory({
+        precondition: stage2.precondition,
+        faultCount: stage2.faults.length + stage2.containmentFaults.length,
+        candidates: stage2.targets.flatMap((t) => t.candidates).map((c) => ({ id: c.id, presence: c.presence })),
+      });
+      if (advisory !== "ADVANCE_FORM_NOT_YET_REVEALED") {
+        halted = "CONFIRM_ADVISORY_STOP";
+        break;
+      }
+    }
+  }
+
+  // The reveal is first-versus-last, not first-versus-second: with a halt there may be only one reading, and
+  // comparing a reading with itself must produce nothing rather than an error.
+  const first = readings[0];
+  const last = readings[readings.length - 1];
+  const revealedCandidateIds =
+    first && last && first !== last
+      ? wingRevealedBetween(
+          first.stage2.targets.flatMap((t) => t.candidates).map((c) => ({ id: c.id, presence: c.presence })),
+          last.stage2.targets.flatMap((t) => t.candidates).map((c) => ({ id: c.id, presence: c.presence })),
+        )
+      : [];
+
+  return { readings, advisory, halted, revealedCandidateIds, aborted, agentSelections: 0 };
+}
+
 /* ────────────────────────────── STAGE-2 recon scope (a third, separate gate) ────────────────────────────── */
 
 export const WING_STAGE2_REFUSALS = ["PHASE_APPROVAL_MISMATCH", "STAGE2_SCOPE_EMPTY", "STAGE2_TARGET_UNKNOWN"] as const;
@@ -762,9 +877,45 @@ export const WING_STAGE2_RECON_PHASE = "COUPANG_WING_STAGE2_RECON" as const;
  */
 export const WING_STAGE2_LABEL_CALIBRATION_PHASE = "COUPANG_WING_STAGE2_LABEL_CALIBRATION" as const;
 
-/** The two Stage-2 phases. Same operator flow, same scope vocabulary; they differ in what is measured. */
-export const WING_STAGE2_PHASES = [WING_STAGE2_RECON_PHASE, WING_STAGE2_LABEL_CALIBRATION_PHASE] as const;
+/**
+ * The approval phase that turns the calibration pass into an ISSUANCE-FLOW DISCOVERY: the same candidate scope
+ * and the same instruments, taken at SEVERAL checkpoints while the operator advances the real flow.
+ *
+ * **This is the first WING phase in which the operator changes marketplace state.** Every earlier one asked
+ * them to reach a screen and stop; this one asks them to select a purpose option and — only if the reading
+ * permits it — press 확인. The agent's click/type/submit/selection budget is still 0, and the widening is in
+ * what the OPERATOR is invited to do, which is precisely why it needs a manifest of its own rather than a flag
+ * on the calibration: a grant given for "reach the screen and stop" cannot cover "advance the flow".
+ *
+ * What keeps that from being a key-issuance run is {@link wingConfirmAdvisory}, evaluated on the reading taken
+ * AFTER the option is selected and BEFORE 확인 is mentioned. If the vendor form is already on screen then 확인
+ * submits it, and the run halts instead of inviting the press.
+ */
+export const WING_ISSUANCE_FLOW_DISCOVERY_PHASE = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" as const;
+
+/** The Stage-2 phases. Same operator surface, same scope vocabulary; they differ in what is measured. */
+export const WING_STAGE2_PHASES = [
+  WING_STAGE2_RECON_PHASE,
+  WING_STAGE2_LABEL_CALIBRATION_PHASE,
+  WING_ISSUANCE_FLOW_DISCOVERY_PHASE,
+] as const;
 export type WingStage2Phase = (typeof WING_STAGE2_PHASES)[number];
+
+/**
+ * The phases that take the CALIBRATION instruments (containment probe + association census).
+ *
+ * Derived from a SET rather than from `phase === CALIBRATION`, because discovery needs the same two reads and
+ * the equality check would have silently downgraded it to a bare recon — a run whose whole purpose is comparing
+ * association readings across checkpoints, taking no association reading at all.
+ */
+export const WING_CALIBRATING_PHASES = [
+  WING_STAGE2_LABEL_CALIBRATION_PHASE,
+  WING_ISSUANCE_FLOW_DISCOVERY_PHASE,
+] as const;
+
+export function wingPhaseCalibrates(phase: WingStage2Phase): boolean {
+  return (WING_CALIBRATING_PHASES as readonly string[]).includes(phase);
+}
 
 function asStage2Phase(value: string): WingStage2Phase | null {
   return (WING_STAGE2_PHASES as readonly string[]).includes(value) ? (value as WingStage2Phase) : null;
@@ -1111,6 +1262,37 @@ function printStage2Instructions(readyPath: string, abortPath: string, calibrati
   console.error("  Polling… (read-only — nothing is highlighted, selected, clicked, or navigated)");
 }
 
+/**
+ * Per-checkpoint instructions for a DISCOVERY run. One block per checkpoint, printed immediately before that
+ * checkpoint's wait — never all three up front.
+ *
+ * That ordering is the safety property, not a formatting choice. The third block asks the operator to press
+ * 확인, and whether it is printed at all depends on a reading that has not been taken when the first block goes
+ * out. Printing the plan in advance would tell them to press a control the gate may be about to forbid.
+ */
+function printDiscoveryCheckpoint(checkpoint: WingFlowCheckpoint, readyPath: string, abortPath: string): void {
+  console.error("");
+  if (checkpoint === "PURPOSE_SCREEN_UNTOUCHED") {
+    console.error("DISCOVERY 1/3 — the purpose screen, UNTOUCHED (the baseline every later reading is compared against).");
+    console.error("  1) Log in and reach the open-API 키 발급 page yourself (nothing on WING is clicked for you).");
+    console.error("  2) Press 'API Key 발급 받기' YOURSELF, and STOP. Select nothing yet.");
+  } else if (checkpoint === "PURPOSE_OPTION_SELECTED_BY_OPERATOR") {
+    console.error("DISCOVERY 2/3 — select 'OPEN API' YOURSELF. Do NOT press 확인.");
+    console.error("  SellerOps does not click the radio and has no code path that could. Select it, then stop.");
+    console.error("  This reading decides whether the run may go further: if the 업체명 / URL / IP fields are");
+    console.error("  already on screen, 확인 SUBMITS them, and the run ends here rather than asking you to press it.");
+  } else {
+    console.error("DISCOVERY 3/3 — the reading permits one more step: press 확인 YOURSELF, then STOP.");
+    console.error("  The measurement said the vendor form is not on screen yet, so this 확인 advances the flow");
+    console.error("  rather than submitting it. Press it, let the next screen settle, and signal — then STOP and");
+    console.error("  type NOTHING into whatever appears. The final issuance control is not in this run's scope.");
+  }
+  console.error('  Signal by creating this file (or say "ready"):');
+  console.error(`       ${readyPath}`);
+  console.error(`     To abort the session, create: ${abortPath}  (or press Ctrl+C).`);
+  console.error("  Polling… (read-only — SellerOps highlights, clicks, selects and types nothing)");
+}
+
 function printInstructions(readyPath: string, abortPath: string): void {
   console.error("");
   console.error("WING selector recorder: navigate MANUALLY to the open-API 키 발급 page in the opened window.");
@@ -1163,7 +1345,11 @@ async function main(): Promise<void> {
   const isStage2Run = stage2Targets.length > 0;
   const stage2Phase: WingStage2Phase =
     stage2Scope.requested && stage2Scope.ok ? stage2Scope.phase : WING_STAGE2_RECON_PHASE;
-  const isCalibrationRun = isStage2Run && stage2Phase === WING_STAGE2_LABEL_CALIBRATION_PHASE;
+  // Both calibrating phases, from the shared predicate. `=== CALIBRATION` here would have let a discovery run
+  // launch past the blind gate and then take association readings its manifest described — with an empty
+  // candidate list nobody checked.
+  const isCalibrationRun = isStage2Run && wingPhaseCalibrates(stage2Phase);
+  const isDiscoveryRun = isStage2Run && stage2Phase === WING_ISSUANCE_FLOW_DISCOVERY_PHASE;
   // Refuse BEFORE Chrome launches, not at the sweep. The sweep's own blind gate stays (it is what a programmatic
   // caller hits), but an operator who is about to log in, navigate and press a real marketplace control should
   // learn that the instrument cannot answer the question before they do any of it — not after.
@@ -1259,7 +1445,60 @@ async function main(): Promise<void> {
       isStage2Run
         ? printStage2Instructions(readyPath, abortPath, isCalibrationRun)
         : printInstructions(readyPath, abortPath),
+    announceCheckpoint: (checkpoint) => printDiscoveryCheckpoint(checkpoint, readyPath, abortPath),
   };
+
+  if (isDiscoveryRun) {
+    try {
+      const flow = await runWingFlowDiscovery(deps, { targets: stage2Targets, phase: stage2Phase });
+      console.error("");
+      if (flow.halted === "CONFIRM_ADVISORY_STOP") {
+        console.error(`WING flow discovery STOPPED BY THE GATE (${flow.advisory}) — 확인 was never suggested.`);
+      } else if (flow.halted) {
+        console.error(`WING flow discovery ended early (${flow.halted}). The checkpoints it did take are below.`);
+      } else {
+        console.error("WING flow discovery complete. 이제 SellerOps 탭으로 직접 돌아가세요.");
+      }
+      console.log(
+        JSON.stringify(
+          {
+            runId,
+            urlCategory: screen.urlCategory,
+            phase: stage2Phase,
+            aborted: flow.aborted,
+            halted: flow.halted,
+            confirmAdvisory: flow.advisory,
+            agentSelections: flow.agentSelections,
+            revealedCandidateIds: flow.revealedCandidateIds,
+            checkpointsTaken: flow.readings.map((r) => r.checkpoint),
+            readings: flow.readings.map((r) => ({
+              checkpoint: r.checkpoint,
+              observation: r.observation,
+              observationFault: r.observationFault,
+              stage2: stage2RecordFor(r.stage2),
+            })),
+          },
+          null,
+          2,
+        ),
+      );
+      log("aw_coupang_flow_discovery_done", {
+        runId,
+        checkpoints: flow.readings.length,
+        halted: flow.halted ?? "none",
+        confirmAdvisory: flow.advisory ?? "not_reached",
+        revealed: flow.revealedCandidateIds.length,
+        agentSelections: flow.agentSelections,
+      });
+    } finally {
+      removeSentinel(readyPath);
+      removeSentinel(abortPath);
+      await ctx.close().catch(() => undefined);
+      process.off("SIGINT", onSigint);
+      process.off("SIGTERM", onSigint);
+    }
+    return;
+  }
 
   try {
     // `scopedTargets` was fixed by the approved-scope gate above, before the browser launched; `reconTargets`
