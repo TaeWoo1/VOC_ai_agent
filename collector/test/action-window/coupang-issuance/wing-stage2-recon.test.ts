@@ -330,6 +330,19 @@ describe("the choice-control shape census — categories and integers, nothing e
     expect(out.hiddenChoiceControlCount).toBe(2);
   });
 
+  it("reports scanTruncated when the in-page cap is hit — absence stops being evidence", () => {
+    // The script caps its loop at 4000 elements. Past the cap, "this label/shape is not present" means "not in
+    // the part we looked at", and a reading that did not say so would be read as a complete census. Untested
+    // until the mutation battery hardcoded the flag to false and nothing failed.
+    const many = Array.from({ length: 4001 }, () => new FakeEl("INPUT", {}, true, false, "radio"));
+    const out = shapes(many) as unknown as { visibleChoiceControlCount: number; scanTruncated: boolean };
+    expect(out.scanTruncated).toBe(true);
+    expect(out.visibleChoiceControlCount).toBe(4000);
+    // …and a scan that fits is NOT reported as truncated.
+    const few = shapes([new FakeEl("INPUT", {}, true, false, "radio")]) as unknown as { scanTruncated: boolean };
+    expect(few.scanTruncated).toBe(false);
+  });
+
   it("the script reads no text, no value, and no identifying attribute", () => {
     // A source guard, because the sanitization argument is about what the script CAN return, not what one
     // fixture happened to produce.

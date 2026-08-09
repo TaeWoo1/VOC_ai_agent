@@ -103,12 +103,60 @@ and this run has no tooling that could press it.
 
 ## Verification
 
-typecheck green. Full collector suite: **310 files / 7645 tests passed**, 18 files + 142 skipped (was 7603 —
-**+42**). Selfchecks: `wing-probe` 0, `wing-reveal` 0, `wing-deletion` 2 (PARTIAL by design).
+typecheck green. Full collector suite: **310 files / 7657 tests passed**, 18 files + 142 skipped (was 7603 —
+**+54**). `wing-probe-selfcheck` **PASS / exit 0 on a clean tree, 58 cases**, including 13 new Stage-2 ones;
+`wing-reveal` 0; `wing-deletion` 2 (PARTIAL by design).
 
-**Known pre-existing gap, not introduced here:** `wing-probe-selfcheck.sh` prints `SELFCHECK PASS` and exits 0
-while skipping its clean-tree half on a dirty tree — the fail-open the reveal harness already closed. It matters
-slightly more now that this harness carries a third phase. Not fixed in this unit; recorded.
+**Mutation battery: 32/32 caught.**
+
+### The capability had no output path
+
+Independent review found the blocking defect: **the Stage-2 measurement was computed and thrown away.** A live
+run under a granted manifest would sweep six candidate sets, take the shape census, fold every verdict — and
+print a record containing none of it. `result.stage2` was referenced nowhere outside the orchestrator, and no
+test covered `main()`'s emitted record, which is why the suite was green. The measurement is the entire product
+of the grant.
+
+Now emitted via `stage2RecordFor`, with the **precondition first** — every count below it is meaningless without
+it, since zero targets beside a failed precondition means "no sweep ran", never "Stage-2 is empty".
+
+### The manifest described the run as something else
+
+`approval-manifest-cli.ts` has per-phase `operation` / `maxActions` chains and the Stage-2 phase had no branch,
+so both fell through to the default. The two most prominent operator-read lines announced a read-only recon with
+`allowsHighlight: false` as **"API issuance highlight proof · max: 1 highlight proof session"**.
+
+And `SELLEROPS_WING_STAGE2_TARGETS` never reached the manifest at all: `requestedStage2Targets` had no producer,
+so the resolver always saw `undefined` and returned all six. A narrowed bootstrap printed one target while the
+preflight bound and printed six. The narrowing this document claimed was **dead on the harness route**.
+
+Both were invisible offline because the phase shipped with **zero selfcheck coverage** against seven cases for
+the label recon. There are now 13, and an end-to-end case is exactly what catches manifest wording.
+
+### The selfcheck was certifying coverage that never ran
+
+Worse: this harness printed `SELFCHECK PASS` and exited 0 while skipping every PASS-path case on a dirty tree —
+so the new Stage-2 block silently did not execute on its first run. Recorded above as pre-existing; adding cases
+made it load-bearing, so it now reports `PARTIAL` / exit 2, matching the reveal and deletion harnesses.
+
+### Three more surviving mutations
+
+- The driver's `choiceControlCensus` was **called by no test**, so deleting the host-side re-sanitization — this
+  document's central sanitization claim — was invisible.
+- The DOM double dispatched on `sel.includes("radio")` and always returned a visible computed style, so widening
+  the census query and deleting the `display:none` / `visibility:hidden` branch both survived. It now matches the
+  selector exactly and carries per-element style.
+- The promotion guard was source-text and survived appending an `adoptStage2Candidate()` writing a new
+  shipped-labels map. Replaced with the namespace-scanning form the sibling test already used — whose own comment
+  records that source text was rejected in review for this exact reason.
+
+### Claims corrected
+
+"NOT WIRED TO ANY RUNNER, and this note is accurate" (this unit wired it, and a comment ten lines below already
+contradicted it) · "the set of scripts this driver may run is a property tests assert" (true of the reveal
+driver, not this one — seven `evalStr` sites, no bound) · `hiddenChoiceControlCount` documented as not-painting
+when it is the union with disabled · `visibleChoiceControlCount` "the same rule" when this scan caps at 4000 and
+`countVisible` does not. Bucket loss now reports `bucketsTruncated` instead of dropping silently.
 
 ## Not in this unit
 
