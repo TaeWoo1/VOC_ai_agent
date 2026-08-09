@@ -449,7 +449,14 @@ function interpretFor<K extends string>(
  * the opposite, and asserted its own accuracy while a comment ten lines below already contradicted it.) It still
  * holds NO promotion path: a candidate that resolves uniquely is recorded as evidence and nothing else.
  */
-export const WING_STAGE2_RECON_TARGETS = ["purpose", "self_dev", "vendor_info", "vendor_url", "call_ip", "confirm"] as const;
+export const WING_STAGE2_RECON_TARGETS = [
+  "purpose", "self_dev", "vendor_info", "vendor_url", "call_ip", "confirm",
+  // The TERMS screen, measured for the first time on 2026-08-10. It is reached by pressing 확인 on the purpose
+  // screen, and no account of this flow predicted it: the product owner's description goes purpose → 업체명 ·
+  // URL · IP 주소 → 확인, and the live flow goes purpose → 확인 → terms. Every string below is the operator's
+  // verbatim transcription of that screen, taken the same day.
+  "terms_heading", "terms_api_agree", "terms_category_agree", "terms_cancel", "terms_issue_final",
+] as const;
 export type WingStage2ReconTarget = (typeof WING_STAGE2_RECON_TARGETS)[number];
 
 export const WING_STAGE2_RECON_CANDIDATES: Readonly<Record<WingStage2ReconTarget, readonly WingLabelCandidate[]>> =
@@ -487,7 +494,28 @@ export const WING_STAGE2_RECON_CANDIDATES: Readonly<Record<WingStage2ReconTarget
     ]),
     confirm: Object.freeze([
       { id: "stage2.confirm.confirm", candidateQuery: "button,a,span,div", exactText: "확인",
-        rationale: "the final key-creating control per the flow description — measured ONLY to locate it, never pressed" },
+        rationale: "the purpose screen's advance control. MEASURED 2026-08-10: pressing it hid the purpose screen and revealed the TERMS screen, so it is NOT the key-creating control the flow description called it — that description was wrong about the ordering, as it was already wrong about the option wording" },
+    ]),
+    // ── the TERMS screen (2026-08-10, all five OPERATOR_TRANSCRIBED verbatim) ──
+    terms_heading: Object.freeze([
+      { id: "stage3.terms.heading", candidateQuery: "h1,h2,h3,h4,legend,strong,p,span,div", exactText: "약관 동의 및 Key 발급받기",
+        rationale: "the terms screen's heading, transcribed verbatim on 2026-08-10. NOTE: character-for-character identical to the final button's label, which is why the two are separate targets with different element queries — see stage3.terms.issue_final" },
+    ]),
+    terms_api_agree: Object.freeze([
+      { id: "stage3.terms.api_agree", candidateQuery: "label,span,div,p", exactText: "API 이용 약관에 동의합니다.",
+        rationale: "the FIRST checkbox's visible label, transcribed verbatim on 2026-08-10; the trailing period is part of the transcription and is not to be trimmed" },
+    ]),
+    terms_category_agree: Object.freeze([
+      { id: "stage3.terms.category_agree", candidateQuery: "label,span,div,p", exactText: "카테고리 자동 매칭 서비스 이용에 동의합니다.",
+        rationale: "the SECOND checkbox's visible label, transcribed verbatim on 2026-08-10. A separate consent from the API terms — nothing here treats the two as one decision" },
+    ]),
+    terms_cancel: Object.freeze([
+      { id: "stage3.terms.cancel", candidateQuery: "button,a,span,div", exactText: "취소",
+        rationale: "the terms screen's cancel control, transcribed verbatim. Located so the guided tutorial can NAME the way out; nothing presses it either" },
+    ]),
+    terms_issue_final: Object.freeze([
+      { id: "stage3.terms.issue_final", candidateQuery: "button,a", exactText: "약관 동의 및 Key 발급받기",
+        rationale: "THE KEY-CREATION CONTROL. Same text as the heading, so the query is narrowed to actionable elements — and whether that narrowing makes it unique is the measurement, not an assumption. Measured ONLY to locate it: this phase has no tooling that presses it and must never acquire one" },
     ]),
   });
 
@@ -592,7 +620,58 @@ export const WING_STAGE2_PURPOSE_OPTION_CANDIDATES: readonly WingPurposeOptionCa
 ]);
 
 /**
- * **Fail-closed capability check, run BEFORE the operator is asked for anything.**
+ * **The TERMS screen's two checkbox labels**, transcribed verbatim on 2026-08-10.
+ *
+ * A separate constant from the purpose options rather than more entries in it, because they belong to a
+ * different screen and a different decision. Folding them into a list called "purpose option candidates" would
+ * make the name lie, and this workstream has spent three units fixing names that stopped matching contents.
+ *
+ * **Two consents, not one.** The API terms and the category-matching service are separate checkboxes with
+ * separate wording, and nothing in SellerOps may treat agreeing to one as agreeing to the other — or agree on
+ * the seller's behalf at all. These strings exist so a tutorial can NAME each box; the operator ticks them.
+ */
+export const WING_STAGE3_TERMS_OPTION_CANDIDATES: readonly WingPurposeOptionCandidate[] = Object.freeze([
+  Object.freeze({
+    id: "terms_option.api_agree",
+    exactText: "API 이용 약관에 동의합니다.",
+    provenance: "OPERATOR_TRANSCRIBED" as const,
+    rationale: "the FIRST terms checkbox's visible label, read off the live screen on 2026-08-10 and reproduced verbatim, trailing period included",
+  }),
+  Object.freeze({
+    id: "terms_option.category_agree",
+    exactText: "카테고리 자동 매칭 서비스 이용에 동의합니다.",
+    provenance: "OPERATOR_TRANSCRIBED" as const,
+    rationale: "the SECOND terms checkbox's visible label, transcribed verbatim on 2026-08-10; a distinct consent from the API terms and never bundled with it",
+  }),
+]);
+
+/**
+ * **Every fixed string the label-association census compares a visible choice control's derived name against.**
+ *
+ * The purpose options first, then the terms options, so the indices an earlier run recorded still mean what
+ * they meant: `OPEN API` stays 4 and `플레이오토 웹 솔루션` stays 5. Appending is the only safe way to grow this
+ * list, and the reason is on the record — the association reading is stored as an INDEX.
+ *
+ * One list rather than one-per-screen because the census takes one list per call and the run does not know
+ * which screen it is on: it knows what it read. A checkbox whose name matches a purpose option, or a radio
+ * whose name matches a terms label, would be a finding worth having rather than a lookup that silently missed.
+ */
+export const WING_CHOICE_LABEL_CANDIDATES: readonly WingPurposeOptionCandidate[] = Object.freeze([
+  ...WING_STAGE2_PURPOSE_OPTION_CANDIDATES,
+  ...WING_STAGE3_TERMS_OPTION_CANDIDATES,
+]);
+
+/**
+ * **The control that creates the key.** Named once, in the leaf, so every layer refers to the same thing.
+ *
+ * MEASURED to exist and located by text; NEVER pressed. No phase in this workstream has tooling that could
+ * press it, and the boundary is deliberate: key issuance is its own approval step, with its own manifest, and
+ * cannot be reached by continuing a discovery run one more checkpoint.
+ */
+export const WING_KEY_CREATION_CONTROL_ID = "stage3.terms.issue_final" as const;
+
+/**
+ * Fail-closed capability check, run BEFORE the operator is asked for anything.
  *
  * An association census with no candidates to compare against still measures derivation, association and
  * grouping — but it cannot answer the question the phase is named for, and every row would read
@@ -1679,8 +1758,22 @@ export const WING_FLOW_CHECKPOINTS = [
   "PURPOSE_SCREEN_UNTOUCHED",
   "PURPOSE_OPTION_SELECTED_BY_OPERATOR",
   "AFTER_OPERATOR_CONFIRM",
+  "TERMS_CHECKED_BY_OPERATOR",
 ] as const;
 export type WingFlowCheckpoint = (typeof WING_FLOW_CHECKPOINTS)[number];
+
+/**
+ * **The list ends at the terms screen, and that is a safety property, not a coincidence.**
+ *
+ * `TERMS_CHECKED_BY_OPERATOR` is last because the only thing left to do on that screen is press
+ * `약관 동의 및 Key 발급받기` — {@link WING_KEY_CREATION_CONTROL_ID}, the control that creates the key. There is
+ * no `AFTER_KEY_CREATION` and there must not be one: discovery cannot reach key issuance by adding one more
+ * step. Issuance is a separate phase, with its own manifest and its own single-use grant.
+ *
+ * Stated as a checked constant rather than a comment, because "the list happens to stop here" and "the list
+ * stops here on purpose" look identical in a diff.
+ */
+export const WING_FLOW_LAST_CHECKPOINT = "TERMS_CHECKED_BY_OPERATOR" as const;
 
 /**
  * **The candidates whose visibility decides what `확인` IS.**

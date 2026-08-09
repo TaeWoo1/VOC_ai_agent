@@ -84,6 +84,9 @@ import {
   type WingConfirmAdvisory,
   wingConfirmAdvisory,
   wingRevealedBetween,
+  WING_CHOICE_LABEL_CANDIDATES,
+  WING_FLOW_LAST_CHECKPOINT,
+  WING_KEY_CREATION_CONTROL_ID,
 } from "../action-window/coupang-wing-label-recon";
 import type { FixedLabelContainmentReading } from "../action-window/api-issuance-calibration/visual-recon-inpage";
 import {
@@ -695,14 +698,29 @@ export async function runWingFlowDiscovery(
   },
 ): Promise<WingFlowDiscoveryResult> {
   const checkpoints = opts.checkpoints ?? WING_FLOW_CHECKPOINTS;
-  const candidates = opts.purposeCandidates ?? WING_STAGE2_PURPOSE_OPTION_CANDIDATES;
+  // The UNION, not the purpose-only list. Discovery crosses screens, and a census that compared a terms
+  // checkbox's derived name against four purpose strings would report `-1` — a measured non-match — for a
+  // control whose label we transcribed ourselves.
+  const candidates = opts.purposeCandidates ?? WING_CHOICE_LABEL_CANDIDATES;
   const readings: WingFlowCheckpointReading[] = [];
   let advisory: WingConfirmAdvisory | null = null;
   let halted: WingFlowHaltReason | null = null;
   let aborted = false;
+  let pastLastCheckpoint = false;
 
   for (const checkpoint of checkpoints) {
     deps.announceCheckpoint?.(checkpoint);
+    // The hard stop, enforced rather than documented. A checkpoint list that continued past the terms screen
+    // could only be asking the operator to press the key-creation control, and this loop refuses to be the
+    // thing that asks. Throwing beats halting: a caller who added a fifth checkpoint made a mistake in code,
+    // and a mistake in code should not be reported as a cautious measurement.
+    if (pastLastCheckpoint) {
+      throw new Error(
+        `runWingFlowDiscovery: no checkpoint may follow ${WING_FLOW_LAST_CHECKPOINT} — the next control is ` +
+          `${WING_KEY_CREATION_CONTROL_ID}, which is key creation and needs its own approval`,
+      );
+    }
+    if (checkpoint === WING_FLOW_LAST_CHECKPOINT) pastLastCheckpoint = true;
     const signal = await deps.waitForReady();
     if (signal !== "ready") {
       aborted = signal === "abort";
@@ -1281,11 +1299,19 @@ function printDiscoveryCheckpoint(checkpoint: WingFlowCheckpoint, readyPath: str
     console.error("  SellerOps does not click the radio and has no code path that could. Select it, then stop.");
     console.error("  This reading decides whether the run may go further: if the 업체명 / URL / IP fields are");
     console.error("  already on screen, 확인 SUBMITS them, and the run ends here rather than asking you to press it.");
-  } else {
-    console.error("DISCOVERY 3/3 — the reading permits one more step: press 확인 YOURSELF, then STOP.");
+  } else if (checkpoint === "AFTER_OPERATOR_CONFIRM") {
+    console.error("DISCOVERY 3/4 — the reading permits one more step: press 확인 YOURSELF, then STOP.");
     console.error("  The measurement said the vendor form is not on screen yet, so this 확인 advances the flow");
     console.error("  rather than submitting it. Press it, let the next screen settle, and signal — then STOP and");
-    console.error("  type NOTHING into whatever appears. The final issuance control is not in this run's scope.");
+    console.error("  type NOTHING into whatever appears.");
+  } else {
+    console.error("DISCOVERY 4/4 — the TERMS screen. Tick the two consent boxes YOURSELF, then STOP.");
+    console.error("  ⚠ DO NOT press '약관 동의 및 Key 발급받기'. That button CREATES THE KEY, and it is the last");
+    console.error("  checkpoint's whole reason for existing: this run measures where it is and never presses it.");
+    console.error("  Key issuance is a SEPARATE approval with its own manifest — it cannot be reached from here.");
+    console.error("  Read the terms and decide for yourself. SellerOps does not read them, agree to them, or");
+    console.error("  advise on them; it reads only whether each box's label matches a string you transcribed.");
+    console.error("  Tick both (or neither — the reading is honest either way), then signal. This is the END.");
   }
   console.error('  Signal by creating this file (or say "ready"):');
   console.error(`       ${readyPath}`);

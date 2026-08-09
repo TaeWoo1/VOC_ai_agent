@@ -14,6 +14,10 @@ import {
   WING_FLOW_CHECKPOINTS,
   WING_FLOW_HALT_REASONS,
   WING_VENDOR_FORM_CANDIDATE_IDS,
+  WING_FLOW_LAST_CHECKPOINT,
+  WING_KEY_CREATION_CONTROL_ID,
+  WING_CHOICE_LABEL_CANDIDATES,
+  WING_STAGE3_TERMS_OPTION_CANDIDATES,
   WING_STAGE2_RECON_CANDIDATES,
   wingConfirmAdvisory,
   wingRevealedBetween,
@@ -171,7 +175,7 @@ const CENSUS: WingStructuralCensus = {
 function fakeFlow(over: { revealAfter?: number; signals?: readonly ("ready" | "abort" | "timeout")[]; choiceControls?: number } = {}) {
   const asked: WingFlowCheckpoint[] = [];
   let reads = 0;
-  const signals = over.signals ?? (["ready", "ready", "ready"] as const);
+  const signals = over.signals ?? (["ready", "ready", "ready", "ready"] as const);
   let waits = 0;
   const visibleNow = (): boolean => over.revealAfter !== undefined && reads > over.revealAfter;
   const deps: WingSelectorRecordDeps = {
@@ -195,6 +199,18 @@ function fakeFlow(over: { revealAfter?: number; signals?: readonly ("ready" | "a
           : { exactVisible: 0, exactHidden: 2, deepestContainsVisible: 0, deepestContainsHidden: 3, scanTruncated: false }
         : { exactVisible: 0, exactHidden: 0, deepestContainsVisible: 0, deepestContainsHidden: 0, scanTruncated: false };
     },
+    // Echoes back how many candidates it was handed — the one thing this fake needs to prove about the union.
+    choiceAssociationCensus: async (candidates) => ({
+      visibleChoiceControlCount: 2,
+      hiddenChoiceControlCount: 10,
+      rows: [],
+      rowsTruncated: false,
+      nameGroupCount: 1,
+      largestNameGroupSize: 2,
+      ungroupedCount: 0,
+      scanTruncated: false,
+      candidatesCompared: candidates.filter((c) => c.trim().length > 0).length,
+    }),
     announceCheckpoint: (c) => asked.push(c),
   };
   return { deps, asked, reads: () => reads };
@@ -209,6 +225,7 @@ describe("runWingFlowDiscovery — one reading per operator-advanced checkpoint"
     const { deps, asked } = fakeFlow({ revealAfter: 2 });
     const r = await runWingFlowDiscovery(deps, { targets: ALL_TARGETS, phase: WING_ISSUANCE_FLOW_DISCOVERY_PHASE });
     expect(r.readings.map((x) => x.checkpoint)).toEqual([...WING_FLOW_CHECKPOINTS]);
+    expect(r.readings[r.readings.length - 1]!.checkpoint).toBe(WING_FLOW_LAST_CHECKPOINT);
     expect(asked).toEqual([...WING_FLOW_CHECKPOINTS]);
     expect(r.advisory).toBe("ADVANCE_FORM_NOT_YET_REVEALED");
     expect(r.halted).toBeNull();
@@ -296,7 +313,7 @@ describe("runWingFlowDiscovery — one reading per operator-advanced checkpoint"
     };
     const r = await runWingFlowDiscovery(counted, { targets: ALL_TARGETS, phase: WING_ISSUANCE_FLOW_DISCOVERY_PHASE });
     expect(waits).toBe(r.readings.length);
-    expect(waits).toBe(3);
+    expect(waits).toBe(WING_FLOW_CHECKPOINTS.length);
   });
 
   it("takes the CALIBRATION instruments at every checkpoint, not a bare recon", async () => {
@@ -400,6 +417,125 @@ describe("the widening is in what the OPERATOR does — the agent's budget is un
     const src = readFileSync(resolve(HERE, "../../../src/action-window/coupang-wing-issuance-driver.ts"), "utf8");
     for (const f of ["check(", "selectOption(", "setChecked("]) {
       expect(src, `driver must not reach ${f}`).not.toContain(f);
+    }
+  });
+});
+
+/* ══════════════════════════ the TERMS screen ══════════════════════════ */
+
+describe("the terms screen — transcribed verbatim, and the key-creation boundary named", () => {
+  const byId = (id: string) => Object.values(WING_STAGE2_RECON_CANDIDATES).flat().find((c) => c.id === id)!;
+
+  it("holds EXACTLY the five strings the operator read, and no sixth", () => {
+    const terms = Object.values(WING_STAGE2_RECON_CANDIDATES)
+      .flat()
+      .filter((c) => c.id.startsWith("stage3.terms."));
+    expect(terms.map((c) => [c.id, c.exactText])).toEqual([
+      ["stage3.terms.heading", "약관 동의 및 Key 발급받기"],
+      ["stage3.terms.api_agree", "API 이용 약관에 동의합니다."],
+      ["stage3.terms.category_agree", "카테고리 자동 매칭 서비스 이용에 동의합니다."],
+      ["stage3.terms.cancel", "취소"],
+      ["stage3.terms.issue_final", "약관 동의 및 Key 발급받기"],
+    ]);
+  });
+
+  it("**the heading and the key-creating button carry the SAME text** — the query is what separates them", () => {
+    // The trap this screen sets. An exact-text locator for the issue button matches the heading too, so text
+    // alone cannot name the control that creates a key. The two candidates differ ONLY in their element query,
+    // and whether that narrowing yields a unique match is a MEASUREMENT this run has not taken yet — it is not
+    // an assumption, and nothing may be promoted on it.
+    expect(byId("stage3.terms.issue_final").exactText).toBe(byId("stage3.terms.heading").exactText);
+    expect(byId("stage3.terms.issue_final").candidateQuery).toBe("button,a");
+    expect(byId("stage3.terms.heading").candidateQuery).not.toBe("button,a");
+    // The issue button's query must stay narrower than the heading's, or the disambiguation is gone.
+    const issueTags = byId("stage3.terms.issue_final").candidateQuery.split(",");
+    const headingTags = byId("stage3.terms.heading").candidateQuery.split(",");
+    expect(issueTags.length).toBeLessThan(headingTags.length);
+  });
+
+  it("names the KEY-CREATION control once, and that id is a real candidate", () => {
+    expect(WING_KEY_CREATION_CONTROL_ID).toBe("stage3.terms.issue_final");
+    expect(byId(WING_KEY_CREATION_CONTROL_ID)).toBeTruthy();
+    // Its rationale must say what it is. A control that creates a key, described as "the submit button", is
+    // how a later reader promotes it into a tutorial step.
+    expect(byId(WING_KEY_CREATION_CONTROL_ID).rationale).toContain("KEY-CREATION");
+    expect(byId(WING_KEY_CREATION_CONTROL_ID).rationale).toContain("never");
+  });
+
+  it("the flow CANNOT continue past the terms screen — enforced, not documented", async () => {
+    // The structural stop. A fifth checkpoint could only be asking the operator to press the key-creating
+    // control, so the runner refuses to be the thing that asks — and it THROWS rather than halting, because a
+    // caller who added one made a mistake in code and a code mistake must not read as a cautious measurement.
+    expect(WING_FLOW_CHECKPOINTS[WING_FLOW_CHECKPOINTS.length - 1]).toBe(WING_FLOW_LAST_CHECKPOINT);
+    const { deps } = fakeFlow({ revealAfter: 99 });
+    await expect(
+      runWingFlowDiscovery(deps, {
+        targets: ALL_TARGETS,
+        phase: WING_ISSUANCE_FLOW_DISCOVERY_PHASE,
+        checkpoints: [...WING_FLOW_CHECKPOINTS, "PURPOSE_SCREEN_UNTOUCHED"],
+      }),
+    ).rejects.toThrow(/no checkpoint may follow/);
+  });
+
+  it("the last checkpoint's copy forbids the press, and says why, in the operator's own terms", () => {
+    const src = readFileSync(resolve(HERE, "../../../src/cli/probe-wing-issuance-selectors.ts"), "utf8");
+    const from = src.indexOf('console.error("DISCOVERY 4/4');
+    expect(from).toBeGreaterThan(-1);
+    const block = src.slice(from, src.indexOf("\n  }", from));
+    expect(block).toContain("DO NOT press");
+    expect(block).toContain("CREATES THE KEY");
+    expect(block).toContain("SEPARATE approval");
+    // …and it must not agree to the terms on the seller's behalf, or advise on them.
+    expect(block).toContain("SellerOps does not read them");
+    expect(block).toContain("decide for yourself");
+  });
+
+  it("the two consents are SEPARATE candidates and never bundled", () => {
+    // Two checkboxes, two decisions. A single "agreed to the terms" candidate would let a tutorial present one
+    // tick as covering both, which is a consent claim SellerOps has no standing to make.
+    expect(WING_STAGE3_TERMS_OPTION_CANDIDATES).toHaveLength(2);
+    const texts = WING_STAGE3_TERMS_OPTION_CANDIDATES.map((c) => c.exactText);
+    expect(texts).toEqual(["API 이용 약관에 동의합니다.", "카테고리 자동 매칭 서비스 이용에 동의합니다."]);
+    for (const c of WING_STAGE3_TERMS_OPTION_CANDIDATES) {
+      expect(c.provenance).toBe("OPERATOR_TRANSCRIBED");
+      // Same two silent-mismatch modes the purpose options are pinned against.
+      expect(c.exactText.normalize("NFC")).toBe(c.exactText);
+      expect(c.exactText).not.toMatch(/[   -​  　]/);
+      expect(c.exactText.trim()).toBe(c.exactText);
+      // The trailing period is part of what was read. Trimming it is the kind of "tidying" that produces a
+      // measured non-match against a character-perfect page.
+      expect(c.exactText.endsWith(".")).toBe(true);
+    }
+  });
+
+  it("the census compares against purpose AND terms labels, with the earlier indices unmoved", () => {
+    // `exactCandidateIndex` is an INDEX. The 2026-08-10 record says radio 0 matched index 4 and radio 1 index
+    // 5; prepending the terms labels would silently re-aim both.
+    expect(WING_CHOICE_LABEL_CANDIDATES.map((c) => c.id).slice(0, 6)).toEqual([
+      "purpose_option.self_dev",
+      "purpose_option.self_dev_spaced",
+      "purpose_option.direct_input",
+      "purpose_option.direct_input_spaced",
+      "purpose_option.open_api",
+      "purpose_option.playauto_web_solution",
+    ]);
+    expect(WING_CHOICE_LABEL_CANDIDATES[4]!.exactText).toBe("OPEN API");
+    expect(WING_CHOICE_LABEL_CANDIDATES[5]!.exactText).toBe("플레이오토 웹 솔루션");
+    expect(WING_CHOICE_LABEL_CANDIDATES.slice(6)).toEqual([...WING_STAGE3_TERMS_OPTION_CANDIDATES]);
+    // Unique ids and unique texts across the union — a collision would make the reported index order-dependent.
+    const ids = WING_CHOICE_LABEL_CANDIDATES.map((c) => c.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    const texts = WING_CHOICE_LABEL_CANDIDATES.map((c) => c.exactText);
+    expect(new Set(texts).size).toBe(texts.length);
+  });
+
+  it("the discovery runner compares against the UNION, not the purpose-only list", async () => {
+    // A terms checkbox measured against four purpose strings would report `-1` — a measured non-match — for a
+    // label we transcribed ourselves.
+    const { deps } = fakeFlow({ revealAfter: 99 });
+    const r = await runWingFlowDiscovery(deps, { targets: ALL_TARGETS, phase: WING_ISSUANCE_FLOW_DISCOVERY_PHASE });
+    for (const reading of r.readings) {
+      expect(reading.stage2.association?.candidatesCompared).toBe(WING_CHOICE_LABEL_CANDIDATES.length);
     }
   });
 });
