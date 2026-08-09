@@ -3,6 +3,10 @@
 **Status:** landed · offline unit · no live run
 **Trigger:** the `Coupang WING Issuance Form Reveal Live v1` attempt on 2026-08-09, aborted at the checkpoint
 **Predecessor:** `docs/coupang_wing_issuance_form_reveal_v1.md` (whose calibration claim this unit withdraws)
+**Resolved by:** `docs/coupang_wing_issue_selector_calibration_landing_v2.md` — the live READ-ONLY probe this unit
+demanded was taken on 2026-08-09 at `e8e62981` (`visibleCount: 1`, `hiddenCount: 0`, `observedTag: "BUTTON"`), and
+`WING_ISSUE_SELECTOR_CALIBRATED` is `true` again on **one** capture. Read the "Why the flag is still false"
+section below as the standard that was met, not as current state.
 
 ## What happened live
 
@@ -74,6 +78,11 @@ observed (`visibleMatchCount: 0, nonPaintingMatchCount: 1`), the operator-report
 `reconfirmationRequires`. A new constant `LIVE_DOM_CALIBRATION_REFUTED` distinguishes *measured and found wrong*
 from *never measured*: they carry different obligations.
 
+> **Superseded.** As of the landing unit, `status` is `LIVE_DOM_CALIBRATION_CONFIRMED` and the withdrawal lives
+> on `WING_ISSUE_CALIBRATION_EVIDENCE.supersedes`. `observedElement` and `reconfirmationRequires` were deleted
+> with it — the sighted `id`/`className` are now recorded only in
+> `docs/coupang_wing_issue_selector_calibration_landing_v2.md`, deliberately not in source.
+
 ## Why the flag is still false
 
 The spec is corrected and the locator is fixed. **Neither is a measurement.** Nobody has observed the corrected
@@ -109,6 +118,9 @@ real Stage-2 DOM, which does not exist, because nobody has pressed 발급.
 A **live READ-ONLY probe** of the corrected spec on the no-key surface, reporting `count: 1`, `hiddenCount: 0`,
 `observedTag: "BUTTON"`. The probe harness (`wing-probe-bootstrap.sh`) already exists and presses nothing. Only
 after that measurement may `WING_ISSUE_SELECTOR_CALIBRATED` return to `true` and the reveal run be re-attempted.
+
+**Done.** The probe ran on 2026-08-09 (record `wingrec_f5ff0c250e44`) and reported exactly that, on one capture,
+with nothing highlighted, clicked, or pressed. See `docs/coupang_wing_issue_selector_calibration_landing_v2.md`.
 
 ## Known pre-existing issue, not addressed here
 

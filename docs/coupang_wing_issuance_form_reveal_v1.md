@@ -46,8 +46,11 @@ in the unit that has the real Stage-2 DOM.
 > this section was wrong. It is left in place, struck through, because the *shape* of the mistake is the useful
 > part of this record. See `docs/coupang_wing_issue_selector_recalibration_v1.md` for the refutation and the fix.
 >
-> `WING_ISSUE_SELECTOR_CALIBRATED` is now `false`; `WING_ISSUE_CALIBRATION_EVIDENCE.status` is
-> `LIVE_DOM_CALIBRATION_REFUTED`. No reveal run can reach a manifest until a live read-only probe re-confirms it.
+> `WING_ISSUE_SELECTOR_CALIBRATED` went to `false` and `WING_ISSUE_CALIBRATION_EVIDENCE.status` to
+> `LIVE_DOM_CALIBRATION_REFUTED`. That probe has since been run: the flag is `true` again on **one** live capture
+> of a corrected spec (`docs/coupang_wing_issue_selector_calibration_landing_v2.md`), and the withdrawal is
+> retained on the record as `supersedes`. The claim struck through below is still wrong; the current claim is a
+> different, narrower one.
 
 ~~**`WING_ISSUE_SELECTOR_CALIBRATED`** — the `issue` locator is live-confirmed: `matchCount === 1`, role `button`,
 on **four independent captures across BOTH account states** (already-issued 2026-08-06/07, real no-key
