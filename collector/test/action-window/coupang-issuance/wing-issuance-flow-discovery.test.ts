@@ -374,6 +374,10 @@ describe("the discovery PHASE is wired everywhere a Stage-2 phase must be", () =
     expect(block).toContain("CREATES THE KEY");
     expect(block).toContain("HALTS");
     expect(block).toContain("fail-closed");
+    // …and it must READ as English. A shell-escaping leak (`run'\''s`) shipped into the middle of the sentence
+    // explaining why the run halts before a key-creating control — the one paragraph that has to be legible.
+    expect(block).not.toMatch(/\\'/);
+    expect(block).not.toContain("'\\''");
   });
 });
 

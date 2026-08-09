@@ -260,7 +260,7 @@ if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then
   echo "  are, '확인' is a submission and the run HALTS — the instruction to press it is never printed. This is"
   echo "  a fail-closed gate: an unreadable page, any probe fault, or a missing candidate also halts."
   echo "  If step 3 does run, you press '확인' and STOP at whatever opens. Type nothing into it. The final"
-  echo "  issuance control is not in this run'\''s scope and this run has no tooling for it."
+  echo "  issuance control is not in this run's scope and this run has no tooling for it."
   echo "  At each checkpoint SellerOps reads the same read-only things it has read all along: match counts,"
   echo "  visible-vs-hidden, how each control is labelled, group ordinals, length bands, candidate INDICES. No"
   echo "  page wording, no field value, no credential. Nothing measured here promotes a selector."
