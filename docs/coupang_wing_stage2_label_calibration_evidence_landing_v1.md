@@ -1,8 +1,8 @@
 # Coupang WING Stage-2 Label Calibration Evidence Landing v1
 
-> **Status:** offline. Lands the first measurement of how Stage-2's choice controls are LABELLED. No live run, no
-> browser, no marketplace contact. No selector promoted, no ordering changed, no tutorial redesign, no candidate
-> added. **The purpose labels are still not established, and no radio is selected.**
+> **Status:** offline **in this commit** — the evidence below comes from a granted live run; nothing here opens a
+> browser or contacts the marketplace. No selector promoted, no ordering changed, no tutorial redesign, no
+> candidate added. **The purpose labels are still not established, and no radio is selected.**
 
 ## The run
 
@@ -28,9 +28,18 @@ radio 0   LABEL_FOR · labelForCount 1 · length short (1–8)   · groupIndex 0
 radio 1   LABEL_FOR · labelForCount 1 · length medium (9–24) · groupIndex 0
 ```
 
-Neither carries an `aria-label` or an `aria-labelledby`; neither sits inside a `<label>`. Each has exactly one
-`label[for]`, and the association resolves. **The two length bands differ**, so the options are not symmetric
-wording — that is a bound on each label's size and nothing else; no character of either is recorded.
+Each has exactly one `label[for]` and no wrapping `<label>`, and neither carries an `aria-labelledby` reference.
+**The two length bands differ**, so the options are not equal-length wording — a bound on each label's size and
+nothing else; no character of either is recorded.
+
+Three things that reading does **not** establish, each of which the first draft of this document asserted:
+
+- **Not "no `aria-label`".** `LABEL_FOR` means `aria-labelledby` and `aria-label` both lost the precedence race
+  — which a whitespace-only `aria-label` also produces. Absence was never measured.
+- **Not "the association resolves".** "Resolves" is the instrument's word for `ariaLabelledbyResolvedCount`,
+  which is 0 here because there was nothing to resolve.
+- **Not "correctly wired".** Nothing checked that the `label[for]` element *paints*; the lookup does no paint
+  test. `labelElementPaintMeasured: false` is on each row.
 
 This settles the recon's one correction, and settles it the other way round. That record could say only that no
 painting `fieldset` / `[role=radiogroup]` / `[role=listbox]` existed, and a code comment over-claimed it as "the
@@ -41,41 +50,55 @@ reads. Read now — in-page, to bucket by, with only the ordinal leaving — **t
 `exactCandidateIndex` and `containsCandidateIndex` are `-1`. All four candidates were sent
 (`candidatesCompared: 4`), so this is a measured non-match across the whole set, not a partial sweep.
 
-## The recon's seven absences, split three ways
+## Where each label actually is — the full quad, per candidate
 
-The recon could produce only `ABSENT`, bounded by its own `absenceBounds` to painting whole-text matches. Every
-one of those is now resolved:
+Recorded as four integers each, because the cause split below is *derived* from them and has to be
+re-derivable. `dV` is the count of painting elements that contain the label while no painting element's whole
+text equals it — the number that decides whether the matcher was the problem.
 
-| candidate | presence | reading |
-|---|---|---|
-| `확인` | **PRESENT_VISIBLE** | 1 painting exact · **20 hidden exact** |
-| `업체명` | PRESENT_HIDDEN_ONLY | 4 hidden exact |
-| `URL` | PRESENT_HIDDEN_ONLY | 2 hidden exact |
-| `IP 주소` | PRESENT_HIDDEN_ONLY | 2 hidden exact |
-| `자체개발` | PRESENT_NOT_WHOLE_TEXT | nested text, 2 non-painting innermost containers |
-| `직접입력` | PRESENT_NOT_WHOLE_TEXT | same |
-| `호출 IP` | ABSENT_EVERYWHERE | nothing, anywhere |
-| the transcribed sentence | ABSENT_EVERYWHERE | nothing, anywhere |
+| candidate | eVis | eHid | dVis | dHid | presence | miss cause |
+|---|---|---|---|---|---|---|
+| `확인` | 1 | 20 | 1 | 22 | PRESENT_VISIBLE | — (matched) |
+| `업체명` | 0 | 4 | **1** | 6 | PRESENT_HIDDEN_ONLY | **whole-text mismatch, on screen** |
+| `URL` | 0 | 2 | 0 | 5 | PRESENT_HIDDEN_ONLY | present only in non-painting nodes |
+| `IP 주소` | 0 | 2 | 0 | 8 | PRESENT_HIDDEN_ONLY | present only in non-painting nodes |
+| `자체개발` | 0 | 0 | 0 | 2 | PRESENT_NOT_WHOLE_TEXT | present only in non-painting nodes |
+| `직접입력` | 0 | 0 | 0 | 2 | PRESENT_NOT_WHOLE_TEXT | present only in non-painting nodes |
+| `호출 IP` | 0 | 0 | 0 | 0 | ABSENT_EVERYWHERE | not present in any form |
+| the transcribed sentence | 0 | 0 | 0 | 0 | ABSENT_EVERYWHERE | not present in any form |
 
-**The recon's single INFERRED explanation was too simple.**
-`WHOLE_TEXT_EXACT_MATCH_VS_NESTED_OR_PARTIAL_TEXT` was offered for all seven. It holds for **two**. Three were
-hidden whole-text matches — a different cause entirely — and two are absent by any reading. So it is confirmed
-as *one cause of three*, not as *the* cause, and `absenceExplanation.tested: false` was the honest label on it.
+**The recon's hypothesis holds for ONE of its seven absences — and not the one this document first claimed.**
 
-The bound did its job, and this is worth stating plainly: the recon's absences were correctly described as
-counting painting matches only, which is exactly why three of them turn out to be hidden matches rather than
-absences. Nothing on that record is rewritten.
+The first version said "two", naming `자체개발` and `직접입력`, and independent review demonstrated it wrong. It
+is worth keeping the error on the page, because it is this workstream's own recurring defect committed again:
+**`presence` is a LOCATION verdict and I read it as a CAUSE verdict.**
+
+- Both self_dev candidates read `PRESENT_NOT_WHOLE_TEXT` — but their painting-container count is **zero**. The
+  text is not on screen in any form, so the matcher was never the reason it was missed. Visibility was.
+- The one candidate the hypothesis does explain is `업체명`: a painting element contains it, and no painting
+  element's whole text equals it. It reads `PRESENT_HIDDEN_ONLY`, because the fold ranks a hidden whole-text
+  match above a painting partial one — so reading causes off the enum credits the wrong candidates.
+
+Split over the seven: **1** whole-text mismatch on a painting element · **4** present only in non-painting nodes
+· **2** not present in any form. The record carries `wingStage2MissCause`, a total function over the quad, and
+the test *recomputes* the split rather than re-stating it — counting presence values per bucket, as the first
+version did, survives a swap between two candidates with all totals intact.
+
+The recon's own bound did its job, and that is worth stating: its absences were correctly described as counting
+painting matches only, which is exactly why **six** of the seven turn out to be about paint. Nothing on that
+record is rewritten.
 
 **`확인` is unique among painting elements — and there are twenty others that do not paint.** The recon recorded
 `matchCount: 1, verdict: UNIQUE` and carried no hidden count; it could not have seen them. `uniquenessScope:
 "PAINTING_ELEMENTS_ONLY"` now says so. If any of the twenty ever painted, the locator resolves to many. That is
 a property of the page, recorded — not a decision about the locator, which is still promoted to nothing.
 
-**The signature agrees across two captures.** `c1b87128024cdec8`, byte-identical to the recon's — two runs, two
-grants, two captures. Recorded as `AGREED_ACROSS_TWO_CAPTURES` and no stronger: two is not many, the sibling's
-`SINGLE_CAPTURE_NOT_ESTABLISHED` is not upgraded, and the signature stays `EVIDENCE_ONLY`. The `issue`
-calibration's original defect was a stability claim built on captures that were never independent; the fix is
-not to make the same claim off a smaller number.
+**The signature agrees with one earlier run.** `c1b87128024cdec8`, byte-identical to the recon's — a different
+run on a different commit. Recorded as `AGREES_WITH_ONE_EARLIER_RUN_NOT_ESTABLISHED`, which says the agreement
+and denies the conclusion in the same token, and `captureCount: 1` means captures taken *by this run*. Not "two
+grants": the recon record carries no `approvalId`, so that is unverifiable from here. The signature stays
+`EVIDENCE_ONLY`. The `issue` calibration's original defect was a stability claim built on captures that were
+never independent; the fix is not to make the same claim off a smaller number.
 
 ## What is deliberately NOT claimed
 
@@ -92,9 +115,10 @@ and its role continues to come from the product owner's description of the flow.
 words, and those words exist on the page only in non-painting nodes. The step to "the options are called
 something else" assumes the `LABEL_FOR`-derived name is what a sighted seller reads. Very likely; not measured.
 
-**One signal recorded without explanation.** `openApiMarkerPresent: false`, while the surface still classified
-as `open_api_issuance` — which the precondition requires. No conclusion is drawn. Dropping a signal that reads
-strangely is how a record becomes selective, and the recon record carried no such field to compare against.
+**One signal that reads oddly, recorded WITH the reading that explains it.** `openApiMarkerPresent: false`,
+while the surface still classified as `open_api_issuance`. That is not a mystery: the classifier accepts either
+disjunct, and `credentialAnchorPresent` is `true`. The first draft called it "not explained by this run" while
+omitting the second signal — which is precisely the selectivity the note claimed to be avoiding.
 
 ## Provenance, kept in three classes
 
@@ -106,24 +130,48 @@ strangely is how a record becomes selective, and the recon record carried no suc
 
 ## Verification
 
-typecheck green. Full collector suite: **311 files / 7770 tests passed**, 18 files + 142 skipped (was 7757 —
-**+13**).
+typecheck green. Full collector suite: **311 files / 7772 tests passed**, 18 files + 142 skipped (was 7757 —
+**+15**).
 
-**Mutation guards: 30/30 caught** on the new record — the run identity rewritten; the group collapsed to two
-groups or to ungrouped; the two length bands made equal; an association claimed where none was measured; a
+**Mutation guards: 49/49 caught.** Among them: the run identity or SHA rewritten; the group collapsed to two or
+to ungrouped; the two length bands made equal; a row's ordinal rewritten; an association claimed where none was
+measured; `ariaLabelledbyResolvedCount` claimed non-zero; the label element's paint claimed measured; a
 candidate match claimed; `candidatesCompared` untied from the shipped list; the purpose semantics claimed
-measured; a purpose option named; the inference upgraded to measured; the split arithmetic broken away from the
-recon's seven; a presence verdict changed without its bucket count; the old hypothesis recorded as fully
-confirmed; `확인` promoted, pressed, or its uniqueness scope widened; its twenty hidden matches dropped; the
-signature rewritten or its two-capture agreement upgraded to established stability; a faulted sweep recorded as
-clean; a truncated scan recorded as complete; the oddly-reading signal dropped to the expected value; the
-sibling's `absenceBounds` or single-capture caveat rewritten from here; and the record or its rows only
-shallow-frozen.
+measured; a purpose option named — in precomposed **and** decomposed Hangul; the inference upgraded; the split
+re-credited to the candidates the first draft wrongly named; **two candidates' quads swapped**; a candidate key
+renamed off the shipped id; either miss-cause branch removed; `확인` promoted, pressed, downgraded, or its
+uniqueness scope widened; its twenty hidden matches dropped; the signature rewritten or its agreement upgraded
+to established stability; the explaining signal rewritten; each of the four truncation flags hidden; the
+sibling's bounds or caveat rewritten from here; and the record, its rows, or its quads only shallow-frozen.
 
-The battery runs `--no-cache` and asserts every pattern is unique before applying it. This file now holds
-**four** sibling records sharing a field vocabulary (`captureCount`, `sig16`, `keyCreationRuledOut`,
-`precondition`), and an unanchored pattern in it is a false SURVIVED waiting to happen — that has already
-produced six of them across two earlier units, plus one more from a stale transform cache.
+### The first draft got the central claim backwards, and review caught it
+
+`presence` answers WHERE a label is. I read it as WHY the recon missed it. The record said the whole-text
+hypothesis was confirmed for **two** candidates, `자체개발` and `직접입력` — whose painting-container count is
+**zero**, so the matcher was never the reason. The one candidate it does explain, `업체명`, was filed under a
+different bucket entirely, because the fold ranks a hidden whole-text match above a painting partial one.
+
+It is the same defect this workstream keeps producing — a guard, or here a conclusion, one layer away from the
+thing it concerns — and my own battery could not see it: the test counted presence values per bucket, which a
+swap between two candidates satisfies with every total intact. Fixed by putting the four containment integers
+on the record and having the test **recompute** the split with `wingStage2MissCause`; the swap is now `L12c`
+and it fails.
+
+Review found **two more blocking issues and eight surviving mutations**, all verified by running them:
+
+- **`openApiMarkerPresent: false` was recorded as "not explained by this run"** while the record omitted
+  `credentialAnchorPresent: true` — the other disjunct the classifier accepts, and the actual explanation.
+  Recording the odd reading while dropping the one that explains it, under a note about not being selective.
+- **The shape census was never asserted** despite the record claiming to re-read it, so three of its numbers
+  were free. They are now pinned by value *and* tied to `refines`.
+- `confirmLocated.verdict`, each row's `index`, the presence **keys**, and `refines.runId` were all unguarded.
+- The recon record's source pin sliced to end-of-file, and this commit appended a fourth record after it — so
+  the pin's three strings could have been satisfied by a different record. Bounded, and the bound is asserted.
+
+Five over-claims corrected: "the association resolves" (that word names a field measuring 0 references), "no
+`aria-label`" (deduced from losing a precedence race, never measured), "correctly wired" (nothing checked the
+label element paints), "two separate grants" (the recon record has no `approvalId`), and a doc table headed
+"seven absences" listing eight rows.
 
 ## Not in this unit
 
