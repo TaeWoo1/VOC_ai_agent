@@ -33,10 +33,12 @@ import {
   WING_LABEL_CALIBRATION_BLIND_REASON,
   WING_PURPOSE_CANDIDATE_PROVENANCES,
   WING_STAGE2_PRESENCES,
+  WING_STAGE2_LABEL_CALIBRATION_EVIDENCE,
   WING_STAGE2_PURPOSE_OPTION_CANDIDATES,
   WING_STAGE2_RECON_CANDIDATES,
   interpretWingStage2Recon,
   wingLabelCalibrationBlind,
+  wingStage2MissCause,
   wingStage2PresenceFrom,
   type WingPurposeOptionCandidate,
 } from "../../../src/action-window/coupang-wing-label-recon";
@@ -1391,7 +1393,16 @@ describe("a calibration changes nothing that ships", () => {
     // Carrying `hiddenCount` is a capability the NEXT run has. It does not retroactively bound the seven
     // absences already on the record, and flipping this flag would rewrite what that run measured.
     const src = SRC("action-window/coupang-wing-label-recon.ts");
-    const rec = src.slice(src.indexOf("export const WING_STAGE2_RECON_EVIDENCE"));
+    // BOUNDED to that record. The slice used to run to end-of-file, and this unit appends a FOURTH sibling
+    // record after it — so the three strings below could have been satisfied by a different record entirely.
+    // Source pins slicing the wrong region are this workstream's recurring failure, and this commit widened
+    // the hazard rather than noticing it.
+    const from = src.indexOf("export const WING_STAGE2_RECON_EVIDENCE");
+    const to = src.indexOf("\n});", from);
+    expect(from).toBeGreaterThan(0);
+    expect(to).toBeGreaterThan(from);
+    const rec = src.slice(from, to);
+    expect(rec).not.toContain("WING_STAGE2_LABEL_CALIBRATION_EVIDENCE");
     expect(rec).toContain("countsPaintingMatchesOnly: true,");
     expect(rec).toContain("hiddenMatchCountCarried: false,");
     expect(rec).toContain("candidateScanTruncationReported: false,");
@@ -1401,3 +1412,232 @@ describe("a calibration changes nothing that ships", () => {
 /* Kept last: a type-level assertion that the candidate shape has not silently widened. */
 const _shape: WingPurposeOptionCandidate | undefined = WING_STAGE2_PURPOSE_OPTION_CANDIDATES[0];
 void _shape;
+
+/* ══════════════════════════ the landed calibration evidence ══════════════════════════ */
+
+describe("WING_STAGE2_LABEL_CALIBRATION_EVIDENCE — measured, inferred, and still-unmeasured kept apart", () => {
+  const E = WING_STAGE2_LABEL_CALIBRATION_EVIDENCE;
+
+  it("records the run identity by value, and as a DIFFERENT run from the one it refines", () => {
+    // Pinned by VALUE, not "different from the other record". On a sibling record that weaker form let a
+    // `wingrec_deadbeef0000` through, and review found it a second time after it had already been fixed once.
+    expect(E.gitSha).toBe("ce733f78");
+    expect(E.runId).toBe("wt-1e2ab6816bcc");
+    expect(E.approvalId).toBe("apr-848e2cfd06f2");
+    expect(E.recordId).toBe("wingrec_5497afb9eec4");
+    expect(E.observedOn).toBe("2026-08-09");
+    expect(E.precondition).toBe("OK");
+    // All three identity axes must differ — `runId` included, because the cross-run signature agreement below
+    // rests on these being two runs and nothing else on the record says so.
+    expect(E.recordId).not.toBe(E.refines.recordId);
+    expect(E.runId).not.toBe(E.refines.runId);
+    expect(E.gitSha).not.toBe(E.refines.gitSha);
+  });
+
+  it("records the shape census by value AND ties it to the recon's, since it claims to re-read it", () => {
+    // Nothing tied these to the earlier record, so "identical to the recon's" was prose over three unasserted
+    // numbers. Three mutations survived here.
+    expect(E.visibleChoiceControlCount).toBe(2);
+    expect(E.hiddenChoiceControlCount).toBe(10);
+    expect(E.groupContainerCount).toBe(0);
+    expect(E.visibleChoiceControlCount).toBe(E.refines.visibleChoiceControlCount);
+    expect(E.hiddenChoiceControlCount).toBe(E.refines.hiddenChoiceControlCount);
+    expect(E.groupContainerCount).toBe(E.refines.groupContainerCount);
+    expect(E.visibleShapes).toEqual(E.refines.visibleShapes);
+    // The bucket the precondition turned on, so the verdict does not stand in for its own evidence.
+    expect(E.choiceControlCountBucket).toBe("few");
+  });
+
+  it("records the two radios as ONE name group, with the reading each row actually produced", () => {
+    expect(E.nameGroupCount).toBe(1);
+    expect(E.largestNameGroupSize).toBe(2);
+    expect(E.ungroupedCount).toBe(0);
+    expect(E.rows).toHaveLength(2);
+    E.rows.forEach((r, i) => {
+      // The ordinal is document order and was unasserted — a row could claim any position.
+      expect(r.index).toBe(i);
+      expect(r.nameSource).toBe("LABEL_FOR");
+      expect(r.labelForCount).toBe(1);
+      expect(r.ancestorLabelCount).toBe(0);
+      expect(r.ariaLabelledbyRefCount).toBe(0);
+      expect(r.ariaLabelledbyResolvedCount).toBe(0);
+      expect(r.hasIdAttr).toBe(true);
+      expect(r.groupIndex).toBe(0);
+      // NOT measured, and said so on the record: nothing checked that the label element paints.
+      expect(r.labelElementPaintMeasured).toBe(false);
+      expect(WING_NAME_LENGTH_BUCKETS as readonly string[]).toContain(r.nameLengthBucket);
+      expect(WING_NAME_SOURCES as readonly string[]).toContain(r.nameSource);
+    });
+    // The two length bands DIFFER — that is the reading, and collapsing them would erase it.
+    expect(E.rows[0].nameLengthBucket).toBe("short");
+    expect(E.rows[1].nameLengthBucket).toBe("medium");
+  });
+
+  it("records the candidate NON-match across the whole set, not a partial sweep", () => {
+    expect(E.purposeCandidatesMatched).toBe(0);
+    // Tied to the shipped list, so a fifth candidate cannot leave the record claiming complete coverage.
+    expect(E.candidatesCompared).toBe(WING_STAGE2_PURPOSE_OPTION_CANDIDATES.length);
+    for (const r of E.rows) {
+      expect(r.exactCandidateIndex).toBe(-1);
+      expect(r.containsCandidateIndex).toBe(-1);
+    }
+  });
+
+  it("**does NOT claim the purpose semantics are known** — the whole reason the next unit exists", () => {
+    expect(E.purposeOptionSemanticsMeasured).toBe(false);
+    // Nor does it name an option. A length band plus a group ordinal is not an identification.
+    //
+    // Scoped to THIS record's own fields: `refines` embeds the recon record, whose `precedingRefusal.cause`
+    // legitimately contains 발급 and is guarded by its own test. Excluding it beats allowlisting a string —
+    // a four-item denylist is what let two wording variants through on an earlier unit.
+    //
+    // The class covers precomposed syllables AND the Jamo blocks: a decomposed 자체개발 is the same leak.
+    const HANGUL = /[\uAC00-\uD7A3\u1100-\u11FF\u3130-\u318F\uA960-\uA97F\uD7B0-\uD7FF]/;
+    const { refines: _refines, ...own } = E;
+    expect(JSON.stringify(own)).not.toMatch(HANGUL);
+    // …and the exclusion is narrow: the embedded record is the ONLY source of Hangul in the whole thing.
+    expect(JSON.stringify(E)).toMatch(HANGUL);
+  });
+
+  it("keeps the flow-description inference INFERRED and untested", () => {
+    expect(E.visibleWordingDiffersFromFlowDescription).toEqual({ provenance: "INFERRED", tested: false });
+  });
+
+  it("carries the full containment quad per candidate, keyed by OUR candidate ids", () => {
+    // The quad is on the record because the summary below is DERIVED from it. Without it the split is a claim
+    // about data nobody can see — and the first version of this record got that split backwards.
+    const ids = Object.keys(E.candidates);
+    // Keys are anchored to the shipped candidate set, so a renamed, misspelled or duplicated key fails. The
+    // earlier keying was ad-hoc prose (`purpose_transcribed_sentence`), which also dropped the
+    // `operator_reported` marker from an id whose whole point is that it is operator-reported, not measured.
+    const shipped = Object.values(WING_STAGE2_RECON_CANDIDATES).flat().map((c) => c.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect([...ids].sort()).toEqual([...shipped].sort());
+    // Every recon absence is present here, and so is the one candidate that was not an absence.
+    for (const id of E.refines.absentCandidateIds) expect(ids).toContain(id);
+    expect(ids).toContain("stage2.confirm.confirm");
+    // Each row's presence verdict must agree with its own integers — a transcribed verdict beside its inputs
+    // is a place for the two to disagree.
+    for (const [id, q] of Object.entries(E.candidates)) {
+      expect(WING_STAGE2_PRESENCES as readonly string[]).toContain(q.presence);
+      expect(q.presence, id).toBe(wingStage2PresenceFrom({ ...q, scanTruncated: false }));
+    }
+  });
+
+  it("**derives the miss-cause split from the quads — a swapped verdict cannot preserve the arithmetic**", () => {
+    // The defect this closes was mine and it was the central claim: the first draft read causes off the
+    // PRESENCE enum, which answers WHERE a label is, not WHY the recon missed it. It credited the whole-text
+    // hypothesis to 자체개발 and 직접입력 — whose painting-container count is ZERO, so the matcher was never
+    // the reason — while the one candidate the hypothesis does explain, 업체명, reads PRESENT_HIDDEN_ONLY
+    // because the fold ranks a hidden whole-text match above a painting partial one.
+    //
+    // So the test RECOMPUTES the split from the integers instead of re-stating the summary. Counting values
+    // per bucket, as the first version did, survives a swap between two candidates: the totals stay intact
+    // while the record asserts the opposite of the reading.
+    const o = E.absenceExplanationOutcome;
+    const causes = E.refines.absentCandidateIds.map((id) => wingStage2MissCause(E.candidates[id]!));
+    expect(causes).toHaveLength(7);
+    expect(causes.filter((c) => c === "WHOLE_TEXT_MISMATCH_ON_PAINTING_ELEMENT")).toHaveLength(o.wholeTextMismatchOnPaintingElement);
+    expect(causes.filter((c) => c === "PRESENT_ONLY_IN_NON_PAINTING_NODES")).toHaveLength(o.presentOnlyInNonPaintingNodes);
+    expect(causes.filter((c) => c === "NOT_PRESENT_IN_ANY_FORM")).toHaveLength(o.notPresentInAnyForm);
+    // …and the split is total over the recon's seven, with no candidate uncounted.
+    expect(o.wholeTextMismatchOnPaintingElement + o.presentOnlyInNonPaintingNodes + o.notPresentInAnyForm).toBe(
+      E.refines.absentCandidateIds.length,
+    );
+    // The hypothesis holds for ONE, and specifically for 업체명 — named by id, not by count.
+    expect(o.verdict).toBe("CONFIRMED_FOR_ONE_OF_SEVEN");
+    expect(o.hypothesis).toBe(E.refines.absenceExplanation.hypothesis);
+    expect(wingStage2MissCause(E.candidates["stage2.vendor_info.baseline"]!)).toBe("WHOLE_TEXT_MISMATCH_ON_PAINTING_ELEMENT");
+    for (const id of ["stage2.self_dev.baseline", "stage2.self_dev.direct"]) {
+      expect(wingStage2MissCause(E.candidates[id]!), id).toBe("PRESENT_ONLY_IN_NON_PAINTING_NODES");
+    }
+    // A matched candidate has no miss to explain and must not pad the split.
+    expect(wingStage2MissCause(E.candidates["stage2.confirm.confirm"]!)).toBeNull();
+  });
+
+  it("records 확인's uniqueness as PAINTING-scoped, with the twenty the recon could not see", () => {
+    const c = E.confirmLocated;
+    expect(c.visibleExactMatchCount).toBe(1);
+    expect(c.hiddenExactMatchCount).toBe(20);
+    expect(c.verdict).toBe("UNIQUE");
+    expect(c.uniquenessScope).toBe("PAINTING_ELEMENTS_ONLY");
+    // …and the summary object agrees with the quad it summarises.
+    const q = E.candidates["stage2.confirm.confirm"]!;
+    expect(c.visibleExactMatchCount).toBe(q.exactVisible);
+    expect(c.hiddenExactMatchCount).toBe(q.exactHidden);
+    // Still not promoted, on every axis the sibling record guards.
+    expect(c.pressed).toBe(false);
+    expect(c.effectMeasured).toBe(false);
+    expect(c.signatureRole).toBe("EVIDENCE_ONLY");
+    expect(c.isFinalIssuanceControl).toBe("OPERATOR_FLOW_DESCRIPTION_ONLY_NOT_MEASURED");
+  });
+
+  it("states the signature agreement as one earlier run, explicitly not established stability", () => {
+    expect(E.confirmLocated.sig16).toBe("c1b87128024cdec8");
+    // Asserted against the other record rather than restated, so a copy-paste drift in either one fails here.
+    expect(E.confirmLocated.sig16).toBe(E.refines.confirmLocated.sig16);
+    expect(E.signatureStability).toBe("AGREES_WITH_ONE_EARLIER_RUN_NOT_ESTABLISHED");
+    // Captures taken BY THIS RUN. The agreement is with a different run's capture, not a second one here.
+    expect(E.captureCount).toBe(1);
+    expect(E.refines.captureCount).toBe(1);
+    // Two runs agreeing is not established stability; the sibling's caveat is not upgraded from here.
+    expect(E.refines.signatureStability).toBe("SINGLE_CAPTURE_NOT_ESTABLISHED");
+  });
+
+  it("records a clean sweep as clean, and names each instrument's bound separately", () => {
+    expect(E.probeFaults).toBe(0);
+    expect(E.containmentFaults).toBe(0);
+    expect(E.associationFault).toBeNull();
+    expect(E.candidatesMeasured).toBe(Object.keys(E.candidates).length);
+    expect(E.candidatesNotMeasured).toBe(0);
+    expect(E.containmentMeasured).toBe(Object.keys(E.candidates).length);
+    // Three scripts, three caps. The absences are bounded by the CONTAINMENT scan — the earlier draft collapsed
+    // all of them into one flag and then reasoned from the census's.
+    expect(E.containmentScanTruncated).toBe(false);
+    expect(E.shapeCensusScanTruncated).toBe(false);
+    expect(E.shapeCensusBucketsTruncated).toBe(false);
+    expect(E.associationScanTruncated).toBe(false);
+    expect(E.associationRowsTruncated).toBe(false);
+  });
+
+  it("carries the signal that EXPLAINS the odd one, not just the odd one", () => {
+    // The marker did not fire and the surface still classified as open_api_issuance. That is explained: the
+    // classifier accepts either disjunct, and the other one is true. Recording the first while omitting the
+    // second, under a note about not being selective, was exactly that.
+    expect(E.openApiMarkerPresent).toBe(false);
+    expect(E.credentialAnchorPresent).toBe(true);
+  });
+
+  it("claims nothing about key creation or the operator's actions beyond what happened", () => {
+    expect(E.operatorSelectedPurpose).toBe(false);
+    expect(E.operatorPressedConfirm).toBe(false);
+    expect(E.keyCreationRuledOut).toBe(false);
+    expect(E.issuedStateReason).toBe("NO_DISCRIMINATING_SIGNAL");
+  });
+
+  it("does not rewrite the record it refines", () => {
+    // A new capability does not retroactively bound an older run. The recon's absences counted painting matches
+    // only, its hidden counts were discarded, and its scan reported no truncation — all still true of that run,
+    // and precisely why six of its seven absences turn out to be about paint.
+    expect(E.refines.absenceBounds).toEqual({
+      countsPaintingMatchesOnly: true,
+      hiddenMatchCountCarried: false,
+      candidateScanTruncationReported: false,
+    });
+    expect(E.refines.purposeOptionSemanticsMeasured).toBe(false);
+    expect(E.refines.absenceExplanation.tested).toBe(false);
+    expect(E.refines.confirmLocated.matchCount).toBe(1);
+  });
+
+  it("is DEEP-frozen — an evidence record that can be edited at runtime is not evidence", () => {
+    expect(Object.isFrozen(E)).toBe(true);
+    for (const nested of [E.rows, E.rows[0], E.rows[1], E.candidates, E.confirmLocated, E.visibleShapes,
+                          E.absenceExplanationOutcome, E.visibleWordingDiffersFromFlowDescription]) {
+      expect(Object.isFrozen(nested)).toBe(true);
+    }
+    for (const q of Object.values(E.candidates)) expect(Object.isFrozen(q)).toBe(true);
+    expect(() => {
+      (E.confirmLocated as { visibleExactMatchCount: number }).visibleExactMatchCount = 9;
+    }).toThrow();
+  });
+});
