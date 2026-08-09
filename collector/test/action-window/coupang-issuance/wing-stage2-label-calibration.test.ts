@@ -33,6 +33,7 @@ import {
   WING_LABEL_CALIBRATION_BLIND_REASON,
   WING_PURPOSE_CANDIDATE_PROVENANCES,
   WING_STAGE2_PRESENCES,
+  WING_STAGE2_LABEL_CALIBRATION_EVIDENCE,
   WING_STAGE2_PURPOSE_OPTION_CANDIDATES,
   WING_STAGE2_RECON_CANDIDATES,
   interpretWingStage2Recon,
@@ -1401,3 +1402,163 @@ describe("a calibration changes nothing that ships", () => {
 /* Kept last: a type-level assertion that the candidate shape has not silently widened. */
 const _shape: WingPurposeOptionCandidate | undefined = WING_STAGE2_PURPOSE_OPTION_CANDIDATES[0];
 void _shape;
+
+/* ══════════════════════════ the landed calibration evidence ══════════════════════════ */
+
+describe("WING_STAGE2_LABEL_CALIBRATION_EVIDENCE — measured, inferred, and still-unmeasured kept apart", () => {
+  const E = WING_STAGE2_LABEL_CALIBRATION_EVIDENCE;
+
+  it("records the run identity by value", () => {
+    // Pinned by VALUE, not "different from the other record". On the sibling record that weaker form let a
+    // `wingrec_deadbeef0000` through, and review found it a second time after it had already been fixed once.
+    expect(E.gitSha).toBe("ce733f78");
+    expect(E.runId).toBe("wt-1e2ab6816bcc");
+    expect(E.approvalId).toBe("apr-848e2cfd06f2");
+    expect(E.recordId).toBe("wingrec_5497afb9eec4");
+    expect(E.observedOn).toBe("2026-08-09");
+    expect(E.precondition).toBe("OK");
+    // …and it is a DIFFERENT run from the one it refines, in both directions.
+    expect(E.recordId).not.toBe(E.refines.recordId);
+    expect(E.gitSha).not.toBe(E.refines.gitSha);
+  });
+
+  it("records the two radios as ONE name group, both properly associated", () => {
+    expect(E.nameGroupCount).toBe(1);
+    expect(E.largestNameGroupSize).toBe(2);
+    expect(E.ungroupedCount).toBe(0);
+    expect(E.rows).toHaveLength(2);
+    for (const r of E.rows) {
+      expect(r.nameSource).toBe("LABEL_FOR");
+      expect(r.labelForCount).toBe(1);
+      expect(r.ancestorLabelCount).toBe(0);
+      expect(r.ariaLabelledbyRefCount).toBe(0);
+      expect(r.hasIdAttr).toBe(true);
+      expect(r.groupIndex).toBe(0);
+    }
+    // The two length bands DIFFER — that is the reading, and collapsing them would erase it.
+    expect(E.rows[0].nameLengthBucket).toBe("short");
+    expect(E.rows[1].nameLengthBucket).toBe("medium");
+    expect(E.rows[0].nameLengthBucket).not.toBe(E.rows[1].nameLengthBucket);
+    // Both bands are in the shipped closed vocabulary — a record cannot invent a band.
+    for (const r of E.rows) expect(WING_NAME_LENGTH_BUCKETS as readonly string[]).toContain(r.nameLengthBucket);
+    for (const r of E.rows) expect(WING_NAME_SOURCES as readonly string[]).toContain(r.nameSource);
+  });
+
+  it("records the candidate NON-match across the whole set, not a partial sweep", () => {
+    expect(E.purposeCandidatesMatched).toBe(0);
+    // Tied to the shipped list, so a fifth candidate cannot leave the record claiming coverage it did not have.
+    expect(E.candidatesCompared).toBe(WING_STAGE2_PURPOSE_OPTION_CANDIDATES.length);
+    for (const r of E.rows) {
+      expect(r.exactCandidateIndex).toBe(-1);
+      expect(r.containsCandidateIndex).toBe(-1);
+    }
+  });
+
+  it("**does NOT claim the purpose semantics are known** — the whole reason the next unit exists", () => {
+    expect(E.purposeOptionSemanticsMeasured).toBe(false);
+    // Nor does it name an option. A length band plus a group ordinal is not an identification.
+    //
+    // Scoped to THIS record's own fields: `refines` embeds the recon record, whose
+    // `precedingRefusal.cause` legitimately contains 발급 and is guarded by its own test. Excluding it here
+    // beats allowlisting a string, which is how the previous unit's four-item denylist let two variants through.
+    const { refines: _refines, ...own } = E;
+    expect(JSON.stringify(own)).not.toMatch(/[가-힣]/);
+    // …and the exclusion is narrow: the embedded record is the ONLY source of Hangul in the whole thing.
+    expect(JSON.stringify(E)).toMatch(/[가-힣]/);
+  });
+
+  it("keeps the flow-description inference INFERRED and untested", () => {
+    expect(E.visibleWordingDiffersFromFlowDescription).toEqual({ provenance: "INFERRED", tested: false });
+  });
+
+  it("splits every recon absence, and says the old hypothesis was one cause of three", () => {
+    const o = E.absenceExplanationOutcome;
+    expect(o.hypothesis).toBe(E.refines.absenceExplanation.hypothesis);
+    expect(o.verdict).toBe("CONFIRMED_FOR_SOME_REFUTED_AS_SOLE_CAUSE");
+    // The arithmetic is what makes the split checkable: 2 + 3 + 2 = the seven absences the recon recorded.
+    expect(o.nestedTextCandidates + o.hiddenWholeTextCandidates + o.absentByAnyReadingCandidates).toBe(
+      E.refines.absentCandidateIds.length,
+    );
+    // …and every presence value is a real verdict from the shipped vocabulary, with the counts agreeing.
+    const values = Object.values(E.presence);
+    expect(values).toHaveLength(8);
+    for (const v of values) expect(WING_STAGE2_PRESENCES as readonly string[]).toContain(v);
+    expect(values.filter((v) => v === "PRESENT_NOT_WHOLE_TEXT")).toHaveLength(o.nestedTextCandidates);
+    expect(values.filter((v) => v === "PRESENT_HIDDEN_ONLY")).toHaveLength(o.hiddenWholeTextCandidates);
+    expect(values.filter((v) => v === "ABSENT_EVERYWHERE")).toHaveLength(o.absentByAnyReadingCandidates);
+    // No candidate was left unmeasured, so none of the three buckets is hiding a gap.
+    expect(E.candidatesMeasured).toBe(values.length);
+    expect(E.candidatesNotMeasured).toBe(0);
+    expect(E.containmentMeasured).toBe(values.length);
+  });
+
+  it("records 확인's uniqueness as PAINTING-scoped, with the twenty the recon could not see", () => {
+    const c = E.confirmLocated;
+    expect(c.visibleExactMatchCount).toBe(1);
+    expect(c.hiddenExactMatchCount).toBe(20);
+    expect(c.uniquenessScope).toBe("PAINTING_ELEMENTS_ONLY");
+    // Still not promoted, on every axis the sibling record guards.
+    expect(c.pressed).toBe(false);
+    expect(c.effectMeasured).toBe(false);
+    expect(c.signatureRole).toBe("EVIDENCE_ONLY");
+    expect(c.isFinalIssuanceControl).toBe("OPERATOR_FLOW_DESCRIPTION_ONLY_NOT_MEASURED");
+  });
+
+  it("states the signature AGREEMENT as two captures, and no more", () => {
+    expect(E.confirmLocated.sig16).toBe("c1b87128024cdec8");
+    // The agreement claim is only meaningful if the two are actually equal — asserted against the other record
+    // rather than restated, so a copy-paste drift in either one fails here.
+    expect(E.confirmLocated.sig16).toBe(E.refines.confirmLocated.sig16);
+    expect(E.signatureStability).toBe("AGREED_ACROSS_TWO_CAPTURES");
+    expect(E.captureCount).toBe(1);
+    // Two runs agreeing is not established stability; the sibling's single-capture caveat is not upgraded here.
+    expect(E.refines.signatureStability).toBe("SINGLE_CAPTURE_NOT_ESTABLISHED");
+  });
+
+  it("records a clean sweep as clean, and every bound as unhit", () => {
+    expect(E.probeFaults).toBe(0);
+    expect(E.containmentFaults).toBe(0);
+    expect(E.associationFault).toBeNull();
+    expect(E.scanTruncated).toBe(false);
+    expect(E.containmentScanTruncated).toBe(false);
+    expect(E.rowsTruncated).toBe(false);
+    // An untruncated scan is what lets ABSENT_EVERYWHERE mean the whole document rather than a prefix.
+    expect(Object.values(E.presence)).toContain("ABSENT_EVERYWHERE");
+  });
+
+  it("carries the oddly-reading signal rather than omitting it", () => {
+    // The open-API marker did not fire while the surface still classified as open_api_issuance. No conclusion is
+    // drawn; dropping a signal that reads strangely is how a record becomes selective.
+    expect(E.openApiMarkerPresent).toBe(false);
+  });
+
+  it("claims nothing about key creation or the operator's actions beyond what happened", () => {
+    expect(E.operatorSelectedPurpose).toBe(false);
+    expect(E.operatorPressedConfirm).toBe(false);
+    expect(E.keyCreationRuledOut).toBe(false);
+    expect(E.issuedStateReason).toBe("NO_DISCRIMINATING_SIGNAL");
+  });
+
+  it("does not rewrite the record it refines", () => {
+    // A new capability does not retroactively bound an older run. The recon's absences counted painting matches
+    // only, its hidden counts were discarded, and its scan reported no truncation — all still true of that run,
+    // and precisely why three of its absences turn out here to be hidden matches.
+    expect(E.refines.absenceBounds).toEqual({
+      countsPaintingMatchesOnly: true,
+      hiddenMatchCountCarried: false,
+      candidateScanTruncationReported: false,
+    });
+    expect(E.refines.purposeOptionSemanticsMeasured).toBe(false);
+    expect(E.refines.absenceExplanation.tested).toBe(false);
+  });
+
+  it("is DEEP-frozen — an evidence record that can be edited at runtime is not evidence", () => {
+    expect(Object.isFrozen(E)).toBe(true);
+    for (const nested of [E.rows, E.rows[0], E.rows[1], E.presence, E.confirmLocated, E.absenceExplanationOutcome, E.visibleWordingDiffersFromFlowDescription]) {
+      expect(Object.isFrozen(nested)).toBe(true);
+    }
+    expect(() => {
+      (E.confirmLocated as { visibleExactMatchCount: number }).visibleExactMatchCount = 9;
+    }).toThrow();
+  });
+});

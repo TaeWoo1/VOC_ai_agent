@@ -995,3 +995,292 @@ export const WING_STAGE2_RECON_EVIDENCE: WingStage2ReconEvidence = Object.freeze
     cause: "OPERATOR_SIGNALLED_READY_BEFORE_PRESSING_발급",
   }) as WingStage2ReconEvidence["precedingRefusal"],
 });
+
+/* ──────────────── STAGE-2 LABEL CALIBRATION evidence (2026-08-09, live) ──────────────── */
+
+/**
+ * **What each Stage-2 choice control IS — the association measurement, and what it did NOT establish.**
+ *
+ * Run `wt-1e2ab6816bcc` / `wingrec_5497afb9eec4`, grant `apr-848e2cfd06f2`, git `ce733f78`, phase
+ * `COUPANG_WING_STAGE2_LABEL_CALIBRATION`. The operator pressed `API Key 발급 받기` themselves, left the purpose
+ * screen untouched, and signalled ready. Agent click / type / submit / highlight / tag / selection budget: zero.
+ * Eight candidates measured, eight containment readings, no probe fault, one capture.
+ *
+ * This is the sibling of {@link WingStage2ReconEvidence}, which counted the controls. This one reads how they
+ * are LABELLED. It does not read what they SAY — see {@link purposeOptionSemanticsMeasured}, still false, which
+ * is why the next unit exists and why no radio may be selected yet.
+ */
+export interface WingStage2LabelCalibrationEvidence {
+  readonly observedOn: string;
+  readonly gitSha: string;
+  readonly runId: string;
+  readonly approvalId: string;
+  readonly recordId: string;
+  readonly precondition: "OK";
+  /**
+   * MEASURED: the shape census, re-read on this run. Identical to the recon's, which is a same-conditions
+   * agreement between two separate captures and nothing stronger — neither run can speak for the other's page.
+   */
+  readonly visibleChoiceControlCount: 2;
+  /**
+   * MEASURED. The UNION of not-painting and disabled, as on both censuses — a painting-but-disabled radio lands
+   * here, so this must not be read as "not on screen".
+   */
+  readonly hiddenChoiceControlCount: 10;
+  readonly groupContainerCount: 0;
+  /**
+   * **MEASURED: the two radios share one `name` group.** This is the fact the recon could not obtain — HTML
+   * groups radios by their shared `name`, and the shape census deliberately never reads that attribute, so the
+   * earlier record could say only that no painting `fieldset` / `[role=radiogroup]` / `[role=listbox]` existed.
+   * A code comment over-claimed that as "the radios are ungrouped", and the correction turns out to run the
+   * other way: they ARE grouped, by the attribute nobody had read.
+   *
+   * The `name` VALUE was read in-page to bucket by and never left; only the ordinal did.
+   */
+  readonly nameGroupCount: 1;
+  readonly largestNameGroupSize: 2;
+  readonly ungroupedCount: 0;
+  /**
+   * MEASURED, per visible control, in document order. Both are labelled by a `label[for]` — exactly one each,
+   * no `aria-label`, no `aria-labelledby`, no wrapping `<label>`. **The association is correctly wired on both.**
+   *
+   * `nameLengthBucket` differs between them, so the two options are not symmetric wording. That is a bound on
+   * the label's SIZE and nothing else: no character of either label is recorded.
+   */
+  readonly rows: readonly [
+    {
+      readonly index: 0;
+      readonly nameSource: "LABEL_FOR";
+      readonly nameLengthBucket: "short";
+      readonly labelForCount: 1;
+      readonly ancestorLabelCount: 0;
+      readonly ariaLabelledbyRefCount: 0;
+      readonly hasIdAttr: true;
+      readonly groupIndex: 0;
+      readonly exactCandidateIndex: -1;
+      readonly containsCandidateIndex: -1;
+    },
+    {
+      readonly index: 1;
+      readonly nameSource: "LABEL_FOR";
+      readonly nameLengthBucket: "medium";
+      readonly labelForCount: 1;
+      readonly ancestorLabelCount: 0;
+      readonly ariaLabelledbyRefCount: 0;
+      readonly hasIdAttr: true;
+      readonly groupIndex: 0;
+      readonly exactCandidateIndex: -1;
+      readonly containsCandidateIndex: -1;
+    },
+  ];
+  /**
+   * **MEASURED: neither radio's derived name equals OR contains any of the four candidates.** All four were
+   * sent (`candidatesCompared: 4`), so this is a measured non-match across the whole set, not a partial sweep.
+   *
+   * Stated as a non-match and nothing more. What the labels DO say is unmeasured.
+   */
+  readonly purposeCandidatesMatched: 0;
+  readonly candidatesCompared: 4;
+  /**
+   * **INFERRED, not measured:** that the operator-visible option wording differs from the product owner's flow
+   * description (자체개발(직접입력)). The measured facts are two — neither label matches those words, and those
+   * words exist on the page only in non-painting nodes. The step from there to "the options are called something
+   * else" assumes the `LABEL_FOR`-derived name is what a sighted seller reads, which is very likely and is not
+   * a measurement. `tested: false`.
+   */
+  readonly visibleWordingDiffersFromFlowDescription: {
+    readonly provenance: "INFERRED";
+    readonly tested: false;
+  };
+  /**
+   * MEASURED per candidate: where each fixed label actually is. The recon could produce only `ABSENT`, bounded
+   * by `absenceBounds` to painting whole-text matches; this splits every one of those absences.
+   */
+  readonly presence: {
+    readonly confirm: "PRESENT_VISIBLE";
+    readonly vendor_info: "PRESENT_HIDDEN_ONLY";
+    readonly vendor_url: "PRESENT_HIDDEN_ONLY";
+    readonly call_ip_ip_addr: "PRESENT_HIDDEN_ONLY";
+    readonly self_dev_baseline: "PRESENT_NOT_WHOLE_TEXT";
+    readonly self_dev_direct: "PRESENT_NOT_WHOLE_TEXT";
+    readonly call_ip_baseline: "ABSENT_EVERYWHERE";
+    readonly purpose_transcribed_sentence: "ABSENT_EVERYWHERE";
+  };
+  /**
+   * **The recon's single INFERRED explanation was TOO SIMPLE, and this is the measurement that says so.**
+   *
+   * `WHOLE_TEXT_EXACT_MATCH_VS_NESTED_OR_PARTIAL_TEXT` was offered for all seven absences. It holds for two
+   * (`자체개발`, `직접입력` — nested text, no painting whole-text match). Three were hidden whole-text matches,
+   * which is a different cause entirely. Two are absent by any reading. So the hypothesis is confirmed as ONE
+   * cause among three, not as THE cause — and the earlier record's `absenceExplanation.tested: false` was the
+   * honest label for it.
+   *
+   * This does not rewrite {@link WING_STAGE2_RECON_EVIDENCE}. That record describes what that run measured, and
+   * its `absenceBounds` correctly said its absences counted painting matches only — which is exactly why three
+   * of them turn out to be hidden matches rather than absences. The bound did its job.
+   */
+  readonly absenceExplanationOutcome: {
+    readonly hypothesis: "WHOLE_TEXT_EXACT_MATCH_VS_NESTED_OR_PARTIAL_TEXT";
+    readonly verdict: "CONFIRMED_FOR_SOME_REFUTED_AS_SOLE_CAUSE";
+    readonly nestedTextCandidates: 2;
+    readonly hiddenWholeTextCandidates: 3;
+    readonly absentByAnyReadingCandidates: 2;
+  };
+  /**
+   * **MEASURED: `확인` matched one PAINTING element and twenty non-painting ones.**
+   *
+   * The recon recorded `matchCount: 1, verdict: UNIQUE` and carried no hidden count — it could not have seen
+   * the twenty. Its uniqueness was, and remains, uniqueness *among painting elements*: if any of those twenty
+   * ever painted, the locator resolves to many. That is a property of the page, recorded; it is not a decision
+   * about the locator, which is still not promoted to anything.
+   *
+   * Still NOT the final key-issuance control on this record. Nothing pressed it, this phase has no tooling that
+   * could, and its role continues to come from the product owner's description of the flow.
+   */
+  readonly confirmLocated: {
+    readonly visibleExactMatchCount: 1;
+    readonly hiddenExactMatchCount: 20;
+    readonly verdict: "UNIQUE";
+    readonly uniquenessScope: "PAINTING_ELEMENTS_ONLY";
+    readonly sig16: "c1b87128024cdec8";
+    readonly signatureRole: "EVIDENCE_ONLY";
+    readonly pressed: false;
+    readonly effectMeasured: false;
+    readonly isFinalIssuanceControl: "OPERATOR_FLOW_DESCRIPTION_ONLY_NOT_MEASURED";
+  };
+  /**
+   * MEASURED: the signature is byte-identical to the one the recon run recorded (`wingrec_0f296204926c`, git
+   * `277220f7`) — two separate runs, two separate captures, two separate grants.
+   *
+   * Two is not many. It is stated as agreement across exactly two captures and nothing more, and the signature
+   * stays `EVIDENCE_ONLY`: the `issue` calibration's original defect was a stability claim built on captures
+   * that were never independent, and the fix is not to make the same claim off a smaller number.
+   */
+  readonly signatureStability: "AGREED_ACROSS_TWO_CAPTURES";
+  readonly captureCount: 1;
+  /** MEASURED integrity of the sweep: every candidate probed, every containment read, nothing faulted. */
+  readonly candidatesMeasured: 8;
+  readonly candidatesNotMeasured: 0;
+  readonly containmentMeasured: 8;
+  readonly probeFaults: 0;
+  readonly containmentFaults: 0;
+  readonly associationFault: null;
+  /** MEASURED: neither scan hit its cap, so every absence above is a whole-scan absence. */
+  readonly scanTruncated: false;
+  readonly containmentScanTruncated: false;
+  readonly rowsTruncated: false;
+  /**
+   * MEASURED on this run and NOT explained by it: the open-API marker did not fire, while the surface still
+   * classified as `open_api_issuance` (which the precondition requires). Recorded because omitting a signal
+   * that reads oddly is how a record becomes selective; no conclusion is drawn, and the recon record carried
+   * no such field to compare against.
+   */
+  readonly openApiMarkerPresent: false;
+  /**
+   * **STILL FALSE, and this is the point of the record.** Shape, association, group membership and a length
+   * band are known for both radios. What either one MEANS is not. Deciding which is 자체개발 from "one is short
+   * and one is medium" would be inventing a product decision from a bucket.
+   */
+  readonly purposeOptionSemanticsMeasured: false;
+  /** Operator actions on the marketplace. Nothing was selected and no 확인 was pressed. */
+  readonly operatorSelectedPurpose: false;
+  readonly operatorPressedConfirm: false;
+  /** Unchanged and unchangeable by this evidence. */
+  readonly keyCreationRuledOut: false;
+  readonly issuedStateReason: "NO_DISCRIMINATING_SIGNAL";
+  /** The structural measurement this one builds on, kept on the record rather than restated or overwritten. */
+  readonly refines: WingStage2ReconEvidence;
+}
+
+export const WING_STAGE2_LABEL_CALIBRATION_EVIDENCE: WingStage2LabelCalibrationEvidence = Object.freeze({
+  observedOn: "2026-08-09",
+  gitSha: "ce733f78",
+  runId: "wt-1e2ab6816bcc",
+  approvalId: "apr-848e2cfd06f2",
+  recordId: "wingrec_5497afb9eec4",
+  precondition: "OK",
+  visibleChoiceControlCount: 2,
+  hiddenChoiceControlCount: 10,
+  groupContainerCount: 0,
+  nameGroupCount: 1,
+  largestNameGroupSize: 2,
+  ungroupedCount: 0,
+  rows: Object.freeze([
+    Object.freeze({
+      index: 0,
+      nameSource: "LABEL_FOR",
+      nameLengthBucket: "short",
+      labelForCount: 1,
+      ancestorLabelCount: 0,
+      ariaLabelledbyRefCount: 0,
+      hasIdAttr: true,
+      groupIndex: 0,
+      exactCandidateIndex: -1,
+      containsCandidateIndex: -1,
+    }),
+    Object.freeze({
+      index: 1,
+      nameSource: "LABEL_FOR",
+      nameLengthBucket: "medium",
+      labelForCount: 1,
+      ancestorLabelCount: 0,
+      ariaLabelledbyRefCount: 0,
+      hasIdAttr: true,
+      groupIndex: 0,
+      exactCandidateIndex: -1,
+      containsCandidateIndex: -1,
+    }),
+  ]) as WingStage2LabelCalibrationEvidence["rows"],
+  purposeCandidatesMatched: 0,
+  candidatesCompared: 4,
+  visibleWordingDiffersFromFlowDescription: Object.freeze({
+    provenance: "INFERRED",
+    tested: false,
+  }) as WingStage2LabelCalibrationEvidence["visibleWordingDiffersFromFlowDescription"],
+  presence: Object.freeze({
+    confirm: "PRESENT_VISIBLE",
+    vendor_info: "PRESENT_HIDDEN_ONLY",
+    vendor_url: "PRESENT_HIDDEN_ONLY",
+    call_ip_ip_addr: "PRESENT_HIDDEN_ONLY",
+    self_dev_baseline: "PRESENT_NOT_WHOLE_TEXT",
+    self_dev_direct: "PRESENT_NOT_WHOLE_TEXT",
+    call_ip_baseline: "ABSENT_EVERYWHERE",
+    purpose_transcribed_sentence: "ABSENT_EVERYWHERE",
+  }) as WingStage2LabelCalibrationEvidence["presence"],
+  absenceExplanationOutcome: Object.freeze({
+    hypothesis: "WHOLE_TEXT_EXACT_MATCH_VS_NESTED_OR_PARTIAL_TEXT",
+    verdict: "CONFIRMED_FOR_SOME_REFUTED_AS_SOLE_CAUSE",
+    nestedTextCandidates: 2,
+    hiddenWholeTextCandidates: 3,
+    absentByAnyReadingCandidates: 2,
+  }) as WingStage2LabelCalibrationEvidence["absenceExplanationOutcome"],
+  confirmLocated: Object.freeze({
+    visibleExactMatchCount: 1,
+    hiddenExactMatchCount: 20,
+    verdict: "UNIQUE",
+    uniquenessScope: "PAINTING_ELEMENTS_ONLY",
+    sig16: "c1b87128024cdec8",
+    signatureRole: "EVIDENCE_ONLY",
+    pressed: false,
+    effectMeasured: false,
+    isFinalIssuanceControl: "OPERATOR_FLOW_DESCRIPTION_ONLY_NOT_MEASURED",
+  }) as WingStage2LabelCalibrationEvidence["confirmLocated"],
+  signatureStability: "AGREED_ACROSS_TWO_CAPTURES",
+  captureCount: 1,
+  candidatesMeasured: 8,
+  candidatesNotMeasured: 0,
+  containmentMeasured: 8,
+  probeFaults: 0,
+  containmentFaults: 0,
+  associationFault: null,
+  scanTruncated: false,
+  containmentScanTruncated: false,
+  rowsTruncated: false,
+  openApiMarkerPresent: false,
+  purposeOptionSemanticsMeasured: false,
+  operatorSelectedPurpose: false,
+  operatorPressedConfirm: false,
+  keyCreationRuledOut: false,
+  issuedStateReason: "NO_DISCRIMINATING_SIGNAL",
+  refines: WING_STAGE2_RECON_EVIDENCE,
+});
