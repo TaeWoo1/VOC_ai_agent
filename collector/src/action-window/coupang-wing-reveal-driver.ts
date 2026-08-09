@@ -299,6 +299,12 @@ export function stage2DisjunctsWithHeadroom(before: WingObservation): Stage2Disj
  * input[type='submit']`; WING's component library emits `<button type="button">`. So `!false` gives it headroom
  * on every WING baseline forever, via a term that cannot move.
  *
+ * **CORROBORATED 2026-08-09 by Reveal Live v3** (`wt-dc2b46e93881`, `3699df9e`). The earlier evidence was that
+ * the field read `false` on a page containing a visible button — suggestive, but an argument about markup. v3 is
+ * stronger and of a different kind: a Stage-2 that demonstrably OPENED (`choiceControlCountBucket` `none → few`,
+ * the transition the run detected) left this field at `false` on both sides. It is not merely unlikely to fire on
+ * WING; it did not fire across the one real transition anybody has measured. See `WING_STAGE2_LIVE_EVENT`.
+ *
  * That distinction is the point of this list. {@link stage2DisjunctsWithHeadroom} answers "is this bucket below
  * its ceiling", which is a fact about the LADDER. Whether the signal can move on the markup in front of us is a
  * fact about the SURFACE, and no bucket arithmetic can supply it. Reading the first as the second is the same

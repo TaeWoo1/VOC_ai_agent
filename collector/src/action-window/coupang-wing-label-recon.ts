@@ -325,44 +325,27 @@ export const WING_STAGE2_RECON_CANDIDATES: Readonly<Record<WingStage2ReconTarget
   });
 
 /**
- * **PROVENANCE for the one thing anybody knows about Stage-2: that it exists.**
+ * **The SUPERSEDED record: the run where Stage-2 opened and the instrument could not see it.**
  *
- * On 2026-08-09 the reveal run (`wt-6a34bd527b2b`, grant `apr-79d628c4f334`, `0297d307`) highlighted the real
- * `API Key 발급 받기` control, the operator confirmed the highlight visually, pressed it themselves, and reported
- * a **persistent** purpose-selection surface. The agent's click/type/submit budget for that run was zero.
- *
- * Everything in this record is either a sanitized machine reading or explicitly attributed to the operator. The
- * distinction is the entire point: the previous two calibration failures both came from an operator-sourced or
- * expected value sitting unlabelled among measured ones.
- *
- * What the APPARATUS returned that day, and it was wrong about the page: `SURFACE_UNCHANGED`, `changedSignals: []`.
- * The predicate could not fire (see `stage2SurfaceRevealed`), so the run STOPPED rather than claiming success —
- * which is the only reason this record says "unmeasured" instead of something confident and false.
+ * Retained, like the `issue` calibration refutation, because the shape of the failure is the useful part. On
+ * 2026-08-09 the reveal run (`wt-6a34bd527b2b`, `0297d307`) highlighted the real `API Key 발급 받기` control, the
+ * operator pressed it themselves, and reported a **persistent** purpose-selection surface. The apparatus returned
+ * `SURFACE_UNCHANGED` with `changedSignals: []` — the predicate could not fire (see `stage2SurfaceRevealed`), so
+ * the run STOPPED rather than claiming success, which is the only reason the record said "unmeasured" instead of
+ * something confident and false.
  */
-export interface WingStage2LiveEvent {
+export interface WingStage2ApparatusFailure {
   readonly observedOn: string;
   readonly gitSha: string;
   readonly runId: string;
-  /** The surface's EXISTENCE is operator-reported. No apparatus has read it. */
   readonly appearance: "OPERATOR_REPORTED";
-  /** Operator-reported: it stayed on screen, so a later census could in principle have seen it. */
   readonly persistent: true;
-  /** What the instrument said, retained because the gap between it and `persistent` is the finding. */
   readonly apparatusOutcome: "SURFACE_UNCHANGED";
   readonly apparatusChangedSignalCount: 0;
-  /** No structural property of Stage-2 has been measured: not a tag, not a role, not a control count. */
-  readonly structuralMarkerMeasured: false;
-  /** Unchanged and unchangeable by this evidence — the classifier still cannot tell issued from no-key. */
-  readonly keyCreationRuledOut: false;
-  readonly issuedStateReason: "NO_DISCRIMINATING_SIGNAL";
-  /** Operator actions on the marketplace. Nothing was selected and no 확인 was pressed. */
-  readonly operatorSelectedPurpose: false;
-  readonly operatorPressedConfirm: false;
-  /** Where the operator's transcription of the on-screen text lives — as a candidate, never as a marker. */
-  readonly reportedTextRecordedAs: "WING_STAGE2_RECON_CANDIDATES.purpose";
+  readonly cause: "PREDICATE_UNSATISFIABLE_ON_WING_MARKUP";
 }
 
-export const WING_STAGE2_LIVE_EVENT: WingStage2LiveEvent = Object.freeze({
+const WING_STAGE2_APPARATUS_FAILURE: WingStage2ApparatusFailure = Object.freeze({
   observedOn: "2026-08-09",
   gitSha: "0297d307",
   runId: "wt-6a34bd527b2b",
@@ -370,12 +353,128 @@ export const WING_STAGE2_LIVE_EVENT: WingStage2LiveEvent = Object.freeze({
   persistent: true,
   apparatusOutcome: "SURFACE_UNCHANGED",
   apparatusChangedSignalCount: 0,
+  cause: "PREDICATE_UNSATISFIABLE_ON_WING_MARKUP",
+});
+
+/**
+ * **PROVENANCE for Stage-2, now that an instrument has finally seen one.**
+ *
+ * On 2026-08-09 the Reveal Live v3 run (`wt-dc2b46e93881`, grant `apr-3b60dacb9a69`, `3699df9e`) highlighted the
+ * real `API Key 발급 받기` control, the operator confirmed the highlight visually, pressed it themselves, and
+ * Stage-2 persisted. The agent's click/type/submit budget was zero, and it made ONE sanitized observation.
+ *
+ * The apparatus returned `CONFIGURATION_SURFACE_SUSPECTED` off exactly **one** moved signal:
+ * `choiceControlCountBucket` `none → few`. That is the purpose-selection disjunct, firing on the surface it was
+ * written for. The census this run replaced had no `choiceControlCount` at all, so **v2 could not have detected
+ * this transition** whatever the page did. That is the provable half, and it is the whole point. Whether the
+ * marketplace ALSO changed between two separate runs is not measurable from either capture, so this record does
+ * not say it did not — an earlier version of this comment asserted exactly that, under a heading promising
+ * claims at the strength the evidence supports.
+ *
+ * **Everything here is either a sanitized machine reading or explicitly attributed to the operator**, and the
+ * distinction is the whole point: both prior calibration failures came from an operator-sourced or expected
+ * value sitting unlabelled among measured ones. (Two, not three. The third failure on this surface —
+ * {@link WingStage2ApparatusFailure} — has a different cause, `PREDICATE_UNSATISFIABLE_ON_WING_MARKUP`: a
+ * predicate that could not fire, not an unlabelled value, and not a calibration.)
+ *
+ * **What is still NOT known.** No label, no role, no control identity, no wording — `structuralMarkerMeasured`
+ * stays `false`. A bucket moving from `none` to `few` says 1–3 painting, enabled choice controls appeared. It does
+ * not say what they are, what they are called, or what selecting one would do. That is the READ_ONLY Stage-2
+ * recon's job, and nothing here may substitute for it.
+ */
+export interface WingStage2LiveEvent {
+  readonly observedOn: string;
+  readonly gitSha: string;
+  readonly runId: string;
+  /**
+   * The surface's existence is operator-visible; the TRANSITION is now machine-measured. Both halves are named
+   * because neither alone is the fact: the operator can see a screen the census cannot read, and the census can
+   * read a delta without knowing what produced it.
+   */
+  readonly appearance: "OPERATOR_VISIBLE_TRANSITION_MACHINE_MEASURED";
+  /** Operator-reported: it stayed on screen. */
+  readonly persistent: true;
+  readonly apparatusOutcome: "CONFIGURATION_SURFACE_SUSPECTED";
+  readonly apparatusChangedSignalCount: 1;
+  /**
+   * The ONE sanitized delta, verbatim. Named rather than summarised so a later reader cannot mistake the
+   * strength of this evidence: one bucket, one step, on one capture.
+   */
+  readonly measuredTransition: "choiceControlCountBucket:none->few";
+  /**
+   * The three **Stage-2 predicate disjuncts** that were measured on both sides and did NOT move, plus
+   * `pageCategory` (not a signal — see `changedSignalNames` — but the coarsest thing that could have moved).
+   *
+   * Deliberately NOT the full set of unchanged signals: roughly nine more census signals also held still, as
+   * `apparatusChangedSignalCount: 1` already implies. What this list is for is the predicate's own terms, so a
+   * reader cannot assume more of the detector fired than did. An earlier doc comment called it "signals that
+   * were measured on BOTH sides and did NOT move", which was both non-exhaustive and not signals-only.
+   */
+  readonly measuredUnchanged: readonly ["dialogLikePresent:false", "actionControlCountBucket:many", "submitAffordancePresent:false", "pageCategory:open_api_issuance"];
+  /**
+   * The same `dialogLikePresent` reading as in {@link measuredUnchanged}, surfaced as its own field because it
+   * is a finding in its own right: **no dialog-contract container was painting and enabled on either side**, so
+   * Stage-2 does not use that contract and a detector built only on it would have seen nothing.
+   *
+   * The selector set lives in `EXTRACT_WING_CENSUS` and is NOT restated here — a hand-copied list drifts
+   * silently when the census changes, and a test anchors this record to the shipped script instead.
+   *
+   * Read it as exactly that and no further. It is NOT a measurement that the surface is visually non-modal: an
+   * overlay built from plain `div`s with none of those attributes reads `false` here while looking like a modal
+   * to the seller. What is measured is the markup contract, not the appearance. Nor is "absent" quite right —
+   * the census filters to painting, non-`aria-disabled` elements, so a hidden dialog node also reads `false`.
+   */
+  readonly dialogLikePresent: false;
+  /**
+   * Still `false`. A count moved; nothing named, typed, or identified any Stage-2 control. No tag, no role, no
+   * label, no wording. The recon exists precisely because this is false.
+   */
+  readonly structuralMarkerMeasured: false;
+  /** ONE capture. No stability claim, no cross-run anchor — the mistake the `issue` calibration already made. */
+  readonly captureCount: 1;
+  readonly signatureStability: "SINGLE_CAPTURE_NOT_ESTABLISHED";
+  /** Unchanged and unchangeable by this evidence — the classifier still cannot tell issued from no-key. */
+  readonly keyCreationRuledOut: false;
+  readonly issuedStateReason: "NO_DISCRIMINATING_SIGNAL";
+  /** Operator actions on the marketplace. Nothing was selected and no 확인 was pressed. */
+  readonly operatorSelectedPurpose: false;
+  readonly operatorPressedConfirm: false;
+  /**
+   * The operator's transcription of the on-screen text remains a CANDIDATE. This run measured a control *count*,
+   * never any wording, so nothing here promotes the reported sentence to a measured label.
+   */
+  readonly reportedTextRecordedAs: "WING_STAGE2_RECON_CANDIDATES.purpose";
+  readonly purposeWordingMeasured: false;
+  /** The run whose apparatus failed on this same surface, kept on the record rather than overwritten. */
+  readonly supersedes: WingStage2ApparatusFailure;
+}
+
+export const WING_STAGE2_LIVE_EVENT: WingStage2LiveEvent = Object.freeze({
+  observedOn: "2026-08-09",
+  gitSha: "3699df9e",
+  runId: "wt-dc2b46e93881",
+  appearance: "OPERATOR_VISIBLE_TRANSITION_MACHINE_MEASURED",
+  persistent: true,
+  apparatusOutcome: "CONFIGURATION_SURFACE_SUSPECTED",
+  apparatusChangedSignalCount: 1,
+  measuredTransition: "choiceControlCountBucket:none->few",
+  measuredUnchanged: Object.freeze([
+    "dialogLikePresent:false",
+    "actionControlCountBucket:many",
+    "submitAffordancePresent:false",
+    "pageCategory:open_api_issuance",
+  ]) as WingStage2LiveEvent["measuredUnchanged"],
+  dialogLikePresent: false,
   structuralMarkerMeasured: false,
+  captureCount: 1,
+  signatureStability: "SINGLE_CAPTURE_NOT_ESTABLISHED",
   keyCreationRuledOut: false,
   issuedStateReason: "NO_DISCRIMINATING_SIGNAL",
   operatorSelectedPurpose: false,
   operatorPressedConfirm: false,
   reportedTextRecordedAs: "WING_STAGE2_RECON_CANDIDATES.purpose",
+  purposeWordingMeasured: false,
+  supersedes: WING_STAGE2_APPARATUS_FAILURE,
 });
 
 /** The probe scope a live recon run would need approving — the three unresolved targets and nothing else. */
