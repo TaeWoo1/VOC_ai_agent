@@ -367,24 +367,40 @@ describe("the choice-control shape census — categories and integers, nothing e
       groupContainerCount: null,
       scanTruncated: "yes",
     });
-    expect(dirty.visibleChoiceControlCount).toBe(0);
-    expect(dirty.hiddenChoiceControlCount).toBe(2);
-    expect(dirty.shapes[0]).toEqual({ tag: "OTHER", inputType: "other", role: "other", count: 0 });
-    expect(dirty.groupContainerCount).toBe(0);
+    // A well-formed object with junk FIELDS is still a reading — the field coercions are the point of this
+    // function and are unchanged by the null-reading fix below.
+    expect(dirty).not.toBeNull();
+    expect(dirty!.visibleChoiceControlCount).toBe(0);
+    expect(dirty!.hiddenChoiceControlCount).toBe(2);
+    expect(dirty!.shapes[0]).toEqual({ tag: "OTHER", inputType: "other", role: "other", count: 0 });
+    expect(dirty!.groupContainerCount).toBe(0);
     // A non-boolean must not become a truthy claim of truncation.
-    expect(dirty.scanTruncated).toBe(false);
+    expect(dirty!.scanTruncated).toBe(false);
     expect(JSON.stringify(dirty)).not.toContain("img");
     expect(JSON.stringify(dirty)).not.toContain("업체명");
+  });
+
+  it("an UNUSABLE reading is null — never a complete census reporting zero choice controls", () => {
+    // The defect this workstream keeps re-committing, on the LAST of the three Stage-2 sanitizers to still have
+    // it. `null`, `undefined`, a string and an array are all "the evaluation returned something that is not a
+    // reading". Coerced, each became `visibleChoiceControlCount: 0` — indistinguishable, in the record, from a
+    // measured Stage-2 with no radios on it. The recon record's central Stage-2 claim rides on that number.
+    for (const unusable of [null, undefined, "", "{}", 0, 2, true, [], [{ tag: "INPUT" }]]) {
+      expect(sanitizeChoiceControlCensus(unusable)).toBeNull();
+    }
+    // ...and the empty OBJECT is still a reading, because that is what an empty page legitimately returns.
+    expect(sanitizeChoiceControlCensus({})).not.toBeNull();
+    expect(sanitizeChoiceControlCensus({})!.visibleChoiceControlCount).toBe(0);
   });
 
   it("bounds the number of shape buckets, and SAYS SO when it drops any", () => {
     // A silent cap makes a partial reading look complete. `scanTruncated` covers element-scan truncation only,
     // so bucket loss needs its own flag.
     const many = Array.from({ length: 200 }, () => ({ tag: "INPUT", inputType: "radio", role: "none", count: 1 }));
-    const capped = sanitizeChoiceControlCensus({ shapes: many });
+    const capped = sanitizeChoiceControlCensus({ shapes: many })!;
     expect(capped.shapes.length).toBeLessThanOrEqual(64);
     expect(capped.bucketsTruncated).toBe(true);
-    expect(sanitizeChoiceControlCensus({ shapes: [{ tag: "INPUT", inputType: "radio", role: "none", count: 1 }] }).bucketsTruncated).toBe(false);
+    expect(sanitizeChoiceControlCensus({ shapes: [{ tag: "INPUT", inputType: "radio", role: "none", count: 1 }] })!.bucketsTruncated).toBe(false);
   });
 });
 
@@ -583,6 +599,18 @@ describe("runWingSelectorRecord — the Stage-2 sweep in the orchestrator", () =
     expect(r.stage2?.candidatesMeasured).toBe(1);
   });
 
+  it("a census that returned NOTHING USABLE is a fault too — not a silent absence", async () => {
+    // The gap the test above left open, and the reason it could sit there reading "never a fabricated zero"
+    // while the fabrication happened one layer down. A THROW produced `TARGET_CLOSED`; a page that returned a
+    // non-reading produced a complete census of zero controls with `choiceControlFault: null`. Now the two
+    // unusable outcomes are distinguishable from a measurement, and only from each other.
+    const { d } = deps({ choiceControlCensus: async () => null });
+    const r = await runWingSelectorRecord(d, [], { stage2: ["confirm"] });
+    expect(r.stage2?.choiceControls).toBeNull();
+    expect(r.stage2?.choiceControlFault).toBe("UNUSABLE_READING");
+    expect(r.stage2?.candidatesMeasured).toBe(1);
+  });
+
   it("a missing census seam leaves the reading null rather than throwing", async () => {
     const { d } = deps();
     const { choiceControlCensus: _drop, ...withoutCensus } = d;
@@ -625,7 +653,8 @@ describe("CoupangWingIssuanceDriver.choiceControlCensus", () => {
     });
     const driver = new CoupangWingIssuanceDriver(page as never);
     return driver.choiceControlCensus().then((census) => {
-      expect(census.shapes[0]).toEqual({ tag: "OTHER", inputType: "other", role: "other", count: 3 });
+      expect(census).not.toBeNull();
+      expect(census!.shapes[0]).toEqual({ tag: "OTHER", inputType: "other", role: "other", count: 3 });
       const json = JSON.stringify(census);
       expect(json).not.toContain("CUSTOM-CARD");
       expect(json).not.toContain("업체명");
@@ -639,10 +668,12 @@ describe("CoupangWingIssuanceDriver.choiceControlCensus", () => {
     expect(page.evaluated).toEqual([EXTRACT_WING_CHOICE_CONTROL_SHAPES]);
   });
 
-  it("returns a safe reading rather than throwing when the page returns nothing usable", async () => {
+  it("hands back NULL, not a zeroed census, when the page returns nothing usable", async () => {
+    // This test previously asserted the opposite — `visibleChoiceControlCount: 0` — under the name "returns a
+    // safe reading". A fabricated zero is not safe: it is the seam's only Stage-2 output, and the recon record
+    // reads its headline "N visible choice controls" straight off it.
     const census = await new CoupangWingIssuanceDriver(pageReturning(null) as never).choiceControlCensus();
-    expect(census.visibleChoiceControlCount).toBe(0);
-    expect(census.shapes).toEqual([]);
+    expect(census).toBeNull();
   });
 });
 

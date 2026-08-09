@@ -340,7 +340,7 @@ export interface WingSelectorRecordDeps {
    * READ-ONLY choice-control SHAPE census — the one measurement this recorder gained for Stage-2. Optional for
    * the same reason `probeCandidate` is: a run that cannot take it must record that it could not, never die.
    */
-  choiceControlCensus?(): Promise<WingChoiceControlCensus>;
+  choiceControlCensus?(): Promise<WingChoiceControlCensus | null>;
   /** Print sanitized instructions (noop in tests). */
   announce?(): void;
 }
@@ -555,7 +555,12 @@ async function sweepStage2(
   let choiceControlFault: WingFaultFingerprint | null = null;
   if (deps.choiceControlCensus) {
     try {
-      choiceControls = await deps.choiceControlCensus();
+      const read = await deps.choiceControlCensus();
+      // Same rule as the containment probe and the association census, and the last of the three to get it: a
+      // null reading is a FAULT. Left as a reading it is a complete census reporting zero choice controls for a
+      // page nobody could read.
+      if (read) choiceControls = read;
+      else choiceControlFault = "UNUSABLE_READING";
     } catch (e) {
       choiceControlFault = wingFaultFingerprint(e);
     }

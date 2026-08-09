@@ -1226,9 +1226,20 @@ export const EXTRACT_WING_CHOICE_CONTROL_SHAPES = `(function () {
  * the value crossing the boundary is whatever `evaluate` returned, and a bug in the script (or a future edit
  * that forgets `pick`) would otherwise put an arbitrary page-authored string straight into a sanitized record.
  * Re-checking here means the record's vocabulary is guaranteed by code the page cannot influence at all.
+ *
+ * **`null` for an unusable reading**, like the containment and association sanitizers. This function used to
+ * coerce `null`/`undefined`/a string/an array into a complete census reading `visibleChoiceControlCount: 0` —
+ * a page that could not be read reported, with the same shape and confidence as a measurement, that Stage-2 has
+ * no choice controls. Only a THROW produced a fault; a silent nothing produced a finding. That is the defect
+ * this workstream keeps re-committing, and it was recorded on the previous unit as the next unit's first fix.
+ *
+ * Note what is deliberately NOT null: a well-formed object with junk fields. Those are the field-level coercions
+ * this function exists for, and they are unchanged. The null branch is only for "the evaluation returned
+ * something that is not a reading at all".
  */
-export function sanitizeChoiceControlCensus(raw: unknown): WingChoiceControlCensus {
-  const r = (raw ?? {}) as Record<string, unknown>;
+export function sanitizeChoiceControlCensus(raw: unknown): WingChoiceControlCensus | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
   const nat = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
   const inList = <T extends string>(list: readonly T[], v: unknown, fallback: T): T =>
     typeof v === "string" && (list as readonly string[]).includes(v) ? (v as T) : fallback;

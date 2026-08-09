@@ -698,11 +698,12 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
    * exact `evalStr` call count); this driver has seven call sites and no such bound, so an eighth would be
    * invisible. The source guard that does hold forbids every click/type/submit and every value read.
    */
-  async choiceControlCensus(): Promise<WingChoiceControlCensus> {
+  async choiceControlCensus(): Promise<WingChoiceControlCensus | null> {
     const page = this.activePage();
     await this.settle(page);
     // Re-sanitized host-side: the script maps to the allow-lists, and this guarantees the record's vocabulary
-    // even if a future edit to the script forgets to.
+    // even if a future edit to the script forgets to. `null` when the page returned nothing usable — NOT a
+    // census reporting zero choice controls, which is what this seam used to hand back.
     return sanitizeChoiceControlCensus(await this.evalStr<unknown>(page, EXTRACT_WING_CHOICE_CONTROL_SHAPES));
   }
 
