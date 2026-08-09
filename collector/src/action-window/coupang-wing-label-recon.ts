@@ -612,3 +612,208 @@ export const WING_RECON_APPROVED_SCOPE: readonly WingProbeTargetName[] = Object.
   "vendor_info",
   "call_ip",
 ]);
+
+/* ────────────────────────────── STAGE-2 RECON evidence (2026-08-09, live) ────────────────────────────── */
+
+/**
+ * **The first STRUCTURAL measurement of Stage-2.** Distinct from {@link WING_STAGE2_LIVE_EVENT}, which recorded
+ * that the surface APPEARS and that one bucket moved. This records what is ON it.
+ *
+ * Run `wt-2b984a46c298` / `wingrec_0f296204926c`, git `277220f7`, phase `COUPANG_WING_STAGE2_RECON`. The
+ * operator pressed `API Key 발급 받기` themselves, left the purpose screen untouched, and signalled ready. The
+ * agent's click / type / submit / highlight / tag budget was zero, and it took one read-only pass.
+ *
+ * **Every value below is MEASURED unless its own field says otherwise.** The three provenance classes are kept
+ * apart because collapsing them is how this workstream produced three false calibrations: what the apparatus
+ * read, what the operator saw, and what we *think* explains a reading are different kinds of thing.
+ */
+export interface WingStage2ReconEvidence {
+  readonly observedOn: string;
+  readonly gitSha: string;
+  readonly runId: string;
+  readonly recordId: string;
+  readonly precondition: "OK";
+  /** MEASURED: painting + enabled choice controls on the purpose screen. */
+  readonly visibleChoiceControlCount: 2;
+  /**
+   * MEASURED: matched the choice-control selector but were excluded (not painting, or disabled). It is the
+   * LARGER number, and it is recorded because "two radios" alone would misdescribe the DOM.
+   */
+  readonly hiddenChoiceControlCount: 10;
+  /**
+   * MEASURED: the closed-vocabulary shape of every VISIBLE choice control. Native radio inputs with no ARIA
+   * role — not role-option cards, not a listbox.
+   */
+  readonly visibleShapes: readonly [{ readonly tag: "INPUT"; readonly inputType: "radio"; readonly role: "none"; readonly count: 2 }];
+  /**
+   * MEASURED: no painting `fieldset` / `[role=radiogroup]` / `[role=listbox]` in the document.
+   *
+   * That is NOT "the radios are ungrouped", which an earlier version of this comment claimed. HTML groups radios
+   * by their shared `name` attribute, which the census deliberately never reads, and `[role=group]` is not in
+   * the selector either. What was measured is the absence of three specific painting container kinds.
+   */
+  readonly groupContainerCount: 0;
+  /**
+   * MEASURED, and scoped to the SHAPE CENSUS only: neither of that script's bounds was hit.
+   *
+   * These flags say nothing about the candidate sweep. The seven absences below come from a different in-page
+   * script (`buildFixedLabelLocateScript`), which carries its own 4000-element cap and emits **no truncation
+   * flag at all** — see {@link absenceBounds}.
+   */
+  readonly scanTruncated: false;
+  readonly bucketsTruncated: false;
+  /**
+   * MEASURED: `확인` matched exactly one painting element, with an opaque structural signature.
+   *
+   * **It is NOT recorded as the final key-issuance control.** That role comes from the product owner's
+   * description of the official flow, and nothing has measured it: no press has been performed (and this phase
+   * has no tooling that could), so what the control DOES is unmeasured. Locating a button is not learning its
+   * effect — the `발급` calibration already made the inverse of that mistake by asserting a role it never read.
+   */
+  readonly confirmLocated: {
+    readonly matchCount: 1;
+    readonly verdict: "UNIQUE";
+    readonly sig16: "c1b87128024cdec8";
+    readonly signatureRole: "EVIDENCE_ONLY";
+    readonly pressed: false;
+    readonly effectMeasured: false;
+    readonly isFinalIssuanceControl: "OPERATOR_FLOW_DESCRIPTION_ONLY_NOT_MEASURED";
+  };
+  /**
+   * MEASURED absences — seven candidates, each probed and each matching zero painting elements. These are
+   * *measured* zeros, not missing rows: `candidatesNotMeasured` is 0 and no probe faulted, so the distinction
+   * the recon's `NOT_MEASURED` verdict exists to preserve is intact here.
+   */
+  readonly absentCandidateIds: readonly [
+    "stage2.purpose.operator_reported",
+    "stage2.self_dev.direct",
+    "stage2.self_dev.baseline",
+    "stage2.vendor_info.baseline",
+    "stage2.vendor_url.url",
+    "stage2.call_ip.ip_addr",
+    "stage2.call_ip.baseline",
+  ];
+  readonly candidatesMeasured: 8;
+  readonly candidatesNotMeasured: 0;
+  readonly probeFaults: 0;
+  /**
+   * **What an ABSENT verdict does and does not bound.** Two limits, both real, neither previously stated:
+   *
+   *  1. It counts **painting** matches only. The locate script also returns a `hiddenCount`, and the Stage-2
+   *     sweep discards it — so "ABSENT" here cannot distinguish "no element carries this text" from "an element
+   *     carries it but does not paint". That is the same visible/hidden ambiguity the `issue` locator was burned
+   *     by, and the shape census carries `hiddenChoiceControlCount` precisely because of it.
+   *  2. The locate script caps its candidate scan at 4000 elements and reports no truncation, so an absence is
+   *     not provably a whole-document absence.
+   *
+   * Recorded rather than fixed: carrying `hiddenCount` through the sweep is a capability change, and this unit
+   * lands evidence. It is the first thing the label-calibration unit should close.
+   */
+  readonly absenceBounds: {
+    readonly countsPaintingMatchesOnly: true;
+    readonly hiddenMatchCountCarried: false;
+    readonly candidateScanTruncationReported: false;
+  };
+  /** ONE capture. No stability claim, no cross-run anchor. */
+  readonly captureCount: 1;
+  readonly signatureStability: "SINGLE_CAPTURE_NOT_ESTABLISHED";
+  /**
+   * **UNMEASURED, and the reason the next unit exists.** Two radios were counted; what either of them MEANS was
+   * not read. No label, no accessible name, no association. Guessing that one is 자체개발 would be inventing a
+   * product decision from a count.
+   */
+  readonly purposeOptionSemanticsMeasured: false;
+  /**
+   * **INFERRED, not measured.** `exactText` compares an element's WHOLE normalized text, so a sentence rendered
+   * across nested nodes matches nothing — the same shape as `발급` failing against `API Key 발급 받기`. It is the
+   * leading explanation for seven absences and it is a hypothesis: no apparatus has tested it.
+   */
+  readonly absenceExplanation: {
+    readonly hypothesis: "WHOLE_TEXT_EXACT_MATCH_VS_NESTED_OR_PARTIAL_TEXT";
+    readonly provenance: "INFERRED";
+    readonly tested: false;
+  };
+  /** OPERATOR_REPORTED: the screen was visibly open and persistent, and the sentence read as transcribed. */
+  readonly surfaceVisibility: "OPERATOR_REPORTED";
+  /** Operator actions on the marketplace. Nothing was selected and no 확인 was pressed. */
+  readonly operatorSelectedPurpose: false;
+  readonly operatorPressedConfirm: false;
+  /** Unchanged and unchangeable by this evidence. */
+  readonly keyCreationRuledOut: false;
+  readonly issuedStateReason: "NO_DISCRIMINATING_SIGNAL";
+  /**
+   * The attempt immediately before this one, kept on the record. The operator signalled ready BEFORE pressing
+   * 발급; the precondition read `choiceControlCountBucket: none` and refused, sweeping nothing.
+   *
+   * Retained because it is the only evidence that the gate does its job on a real surface: without it the run
+   * would have produced eight confident ABSENT verdicts for a screen nobody was looking at — indistinguishable,
+   * in the record, from the seven REAL absences measured above.
+   */
+  readonly precedingRefusal: {
+    readonly recordId: "wingrec_d799c7b60ec5";
+    readonly precondition: "NO_VISIBLE_CHOICE_CONTROL";
+    readonly candidatesMeasured: 0;
+    readonly cause: "OPERATOR_SIGNALLED_READY_BEFORE_PRESSING_발급";
+  };
+}
+
+export const WING_STAGE2_RECON_EVIDENCE: WingStage2ReconEvidence = Object.freeze({
+  observedOn: "2026-08-09",
+  gitSha: "277220f7",
+  runId: "wt-2b984a46c298",
+  recordId: "wingrec_0f296204926c",
+  precondition: "OK",
+  visibleChoiceControlCount: 2,
+  hiddenChoiceControlCount: 10,
+  visibleShapes: Object.freeze([
+    Object.freeze({ tag: "INPUT", inputType: "radio", role: "none", count: 2 }),
+  ]) as WingStage2ReconEvidence["visibleShapes"],
+  groupContainerCount: 0,
+  scanTruncated: false,
+  bucketsTruncated: false,
+  confirmLocated: Object.freeze({
+    matchCount: 1,
+    verdict: "UNIQUE",
+    sig16: "c1b87128024cdec8",
+    signatureRole: "EVIDENCE_ONLY",
+    pressed: false,
+    effectMeasured: false,
+    isFinalIssuanceControl: "OPERATOR_FLOW_DESCRIPTION_ONLY_NOT_MEASURED",
+  }) as WingStage2ReconEvidence["confirmLocated"],
+  absentCandidateIds: Object.freeze([
+    "stage2.purpose.operator_reported",
+    "stage2.self_dev.direct",
+    "stage2.self_dev.baseline",
+    "stage2.vendor_info.baseline",
+    "stage2.vendor_url.url",
+    "stage2.call_ip.ip_addr",
+    "stage2.call_ip.baseline",
+  ]) as WingStage2ReconEvidence["absentCandidateIds"],
+  candidatesMeasured: 8,
+  candidatesNotMeasured: 0,
+  probeFaults: 0,
+  absenceBounds: Object.freeze({
+    countsPaintingMatchesOnly: true,
+    hiddenMatchCountCarried: false,
+    candidateScanTruncationReported: false,
+  }) as WingStage2ReconEvidence["absenceBounds"],
+  captureCount: 1,
+  signatureStability: "SINGLE_CAPTURE_NOT_ESTABLISHED",
+  purposeOptionSemanticsMeasured: false,
+  absenceExplanation: Object.freeze({
+    hypothesis: "WHOLE_TEXT_EXACT_MATCH_VS_NESTED_OR_PARTIAL_TEXT",
+    provenance: "INFERRED",
+    tested: false,
+  }) as WingStage2ReconEvidence["absenceExplanation"],
+  surfaceVisibility: "OPERATOR_REPORTED",
+  operatorSelectedPurpose: false,
+  operatorPressedConfirm: false,
+  keyCreationRuledOut: false,
+  issuedStateReason: "NO_DISCRIMINATING_SIGNAL",
+  precedingRefusal: Object.freeze({
+    recordId: "wingrec_d799c7b60ec5",
+    precondition: "NO_VISIBLE_CHOICE_CONTROL",
+    candidatesMeasured: 0,
+    cause: "OPERATOR_SIGNALLED_READY_BEFORE_PRESSING_발급",
+  }) as WingStage2ReconEvidence["precedingRefusal"],
+});
