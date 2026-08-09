@@ -13,22 +13,23 @@ Read off the live Stage-2 screen on **2026-08-10**, verbatim, in screen order:
 | radio 0 | `OPEN API` | 8 | `short` (1–8) ✓ |
 | radio 1 | `플레이오토 웹 솔루션` | 11 | `medium` (9–24) ✓ |
 
-Also reported as visible on the same screen, and **not** probed by this unit: the heading
-`키의 사용 목적을 골라주세요`, and the buttons `취소` and `확인`.
+Also reported as visible on the same screen: the heading `키의 사용 목적을 골라주세요`, and the buttons `취소`
+and `확인`. The heading is added as a probe (below); `확인` was already one; **`취소` is probed nowhere**, because
+locating a control this workstream must never press serves nothing.
 
-**Both length checks pass, and they were falsifiable.** The 2026-08-09 run measured radio 0's derived name in
-the `short` band and radio 1's in `medium` knowing nothing of the strings; the transcription arrived
-independently and lands in both, in that order. A reading outside them would have meant the operator read a
-different element, a different screen, or the wrong order.
+**Both length checks pass, and they were falsifiable** — a reading outside the bands would have meant a
+different element, a different screen, or a flipped order.
 
-That is **corroboration across two readings, not identification**. The bands are wide, and nothing yet ties
-either string to either control. Producing that tie is the whole job of the calibration re-run.
+**But the check is weaker than it looks, and the weakness is mine.** I stated both bands in the request that
+asked for the transcription, so the reading was not blind to what would satisfy them. It catches a gross error;
+it is not independent confirmation. The bands are wide, and nothing here ties either string to either control.
+Producing that tie is the whole job of the calibration re-run.
 
 ## The finding, before any instrument runs
 
-**자체개발(직접입력) is not what the screen says.** The flow description the workstream has been carrying names
-the self-developed option as 자체개발, parenthetically 직접입력. Neither word is on the purpose screen. WING's
-actual choice is between `OPEN API` and a specific named external solution.
+**Neither radio is labelled 자체개발 or 직접입력.** The flow description the workstream has been carrying names
+the self-developed option as 자체개발, parenthetically 직접입력. Neither word labels either option. One of the
+two names a specific solution rather than describing an integration method.
 
 This retires the previous record's one `INFERRED` claim — that the visible wording differs from the flow
 description — and replaces it with an operator reading. It does **not** promote it to MEASURED: a human reading
@@ -51,7 +52,14 @@ stay, at their existing indices, so an earlier run's `exactCandidateIndex` remai
 likeliest explanation of that absence. Both are now probed: dropping the old one would make the comparison
 unrepeatable, and the absence is the evidence.
 
-`취소` is recorded here and probed nowhere. Locating a control this workstream must never press serves nothing.
+Its wording is pinned as an **equation**, not a literal: the 08-09 report must equal `이제 ` + the verbatim entry
++ `.`. This unit's own battery found the gap — restoring the trailing period to the verbatim entry survived every
+test, and that entry's whole justification is the difference from the string it corrects.
+
+**One entry left the guess denylist, and it is worth saying why.** The previous unit asserted that no shipped
+candidate contains 업체연동 / 대행 / 위탁 / **솔루션** / 외부 — plausible second-option wordings nobody had read.
+The real label contains 솔루션. The denylist was, in part, excluding a substring of the answer, which is what
+denylists of imagined wording do; the other four still hold and are still asserted.
 
 ## The prediction, written down before the run
 
@@ -108,8 +116,25 @@ that held it in place was named "returns a safe reading rather than throwing" an
 
 ## Verification
 
-typecheck green. Full collector suite: **311 files / 7779 tests passed**, 18 files + 142 skipped (was 7772 —
-**+7**).
+typecheck green. Full collector suite: **311 files / 7780 tests passed**, 18 files + 142 skipped (was 7772 —
+**+8**). Live-harness selfcheck: **75 PASS**, exit 0, on a clean tree.
+
+**Mutation guards: 33/33 caught.** Among them: `OPEN API` doubled-spaced, lowercased, trailing-spaced, or
+unspaced to 7 characters (still inside its band); the Korean label in decomposed Hangul, with a non-breaking
+space, or respaced to a length the band check still accepts; **the two transcriptions swapped in screen order**;
+either relabelled as a flow description, or a flow description relabelled as a transcription; a guessed
+candidate added back under an `OPERATOR_TRANSCRIBED` label; the verbatim heading removed, or given its trailing
+period back; the 08-09 report quietly rewritten to the verbatim string; `measuredCandidateIds` claiming the
+heading it never probed, dropping the one that resolved, or naming a candidate that does not exist;
+`comparedCandidateIds` claiming a transcription was compared; either coverage count inflated to the new set
+size; a field added to the calibration record or to a nested shape; the census sanitizer's null branch removed
+or widened to reject an empty object; the sweep dropping its `UNUSABLE_READING` fault; the driver skipping
+re-sanitization; the name-length bucket boundary moved by one; the exact-match branch degraded to a containment
+test; and radio grouping by `name` dropped.
+
+**One survived on the first pass** — the verbatim heading's wording, pinned nowhere — and it is now the equation
+above. A second entry reported an error rather than a result: its anchor text appeared twice in the file, so it
+patched nothing. That was a battery bug, not a test gap; re-aimed, it is caught.
 
 ## Not in this unit
 

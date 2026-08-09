@@ -145,6 +145,23 @@ describe("the Stage-2 sweep folds like the initial-surface one", () => {
     }
   });
 
+  it("the VERBATIM purpose heading differs from the 08-09 report by exactly 이제 and a period", () => {
+    // Found by this unit's own battery: restoring the trailing period to the verbatim entry survived every
+    // test. Its wording was pinned nowhere, and its entire justification is the DIFFERENCE from the report it
+    // corrects — the report measured ABSENT_EVERYWHERE, and "a leading 이제 and a trailing period" is the
+    // hypothesis for why. A verbatim entry drifting toward the string it exists to differ from erases that.
+    const of = (id: string): string => Object.values(WING_STAGE2_RECON_CANDIDATES).flat().find((c) => c.id === id)!.exactText;
+    const verbatim = of("stage2.purpose.operator_verbatim");
+    expect(of("stage2.purpose.operator_reported")).toBe(`이제 ${verbatim}.`);
+    // …and the verbatim one carries neither affix itself, which the equation alone does not forbid.
+    expect(verbatim.startsWith("이제")).toBe(false);
+    expect(verbatim.endsWith(".")).toBe(false);
+    // Same two silent-mismatch modes the transcribed option labels are pinned against.
+    expect(verbatim.normalize("NFC")).toBe(verbatim);
+    expect(verbatim).not.toMatch(/[\u00a0\u1680\u2000-\u200b\u202f\u205f\u3000]/);
+    expect(verbatim.trim()).toBe(verbatim);
+  });
+
   it("every Stage-2 candidateQuery is a plain structural tag list", () => {
     // Neither in-page script distinguishes "querySelectorAll threw" from "nothing matched" — both report 0 — so
     // validity is proven HERE over constants, exactly as the initial-surface sets already are. Comma-separated

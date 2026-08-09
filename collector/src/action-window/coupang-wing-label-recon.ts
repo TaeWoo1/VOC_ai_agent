@@ -532,16 +532,21 @@ export interface WingPurposeOptionCandidate {
  * unknown rather than shipping 업체연동 / 대행 / whatever seemed plausible into the live page as a query.
  *
  * **A human reading a screen is still not a measurement**, which is why they are candidates like the rest. What
- * it is, is a source class the other two cannot substitute for — and one that already survives a check the
- * previous unit's own measurement makes possible. That run recorded radio 0's derived name in the `short` band
- * (1–8 characters) and radio 1's in `medium` (9–24). `OPEN API` is 8 and `플레이오토 웹 솔루션` is 11, in that
- * order. Corroboration across two independent readings, not proof: the bands are wide, and nothing yet ties
- * either string to either control. That tie is exactly what the calibration re-run measures.
+ * it is, is a source class the other two cannot substitute for — and one that at least lands inside a bound the
+ * previous unit's measurement had already set. That run recorded radio 0's derived name in the `short` band
+ * (1–8 characters) and radio 1's in `medium` (9–24), knowing nothing of the strings. `OPEN API` is 8 and
+ * `플레이오토 웹 솔루션` is 11, in that order.
  *
- * Note what the transcription settles about the flow description, before any instrument runs: **자체개발(직접입력)
- * is not what the screen says.** The choice WING actually offers is between `OPEN API` and a named third-party
- * solution. Whether `OPEN API` is the self-developed path the flow account describes is a product question this
- * module does not answer and must not assume.
+ * **That check is weaker than it looks, and the weakness is ours.** The two bands were stated in the request
+ * that asked for the transcription, so the reading was not blind to what would satisfy them. It can still catch
+ * a gross error — the wrong screen, the wrong element, the two options reversed — but it is not independent
+ * confirmation, and the bands are wide. Nothing here ties either string to either control; producing that tie
+ * is what the calibration re-run is for.
+ *
+ * Note what the transcription settles about the flow description, before any instrument runs: **neither radio
+ * is labelled 자체개발 or 직접입력.** One option names a specific solution rather than describing an integration
+ * method. Whether `OPEN API` is the self-developed path the flow account describes, and what the other option's
+ * relationship to WING is, are product questions this module does not answer and must not assume.
  *
  * Ordered flow-description-first, then spacing variants, then transcriptions — the order they entered the file.
  * Ordering carries no claim about the screen, and the comparison is exhaustive, so it is order-insensitive by
@@ -582,7 +587,7 @@ export const WING_STAGE2_PURPOSE_OPTION_CANDIDATES: readonly WingPurposeOptionCa
     id: "purpose_option.playauto_web_solution",
     exactText: "플레이오토 웹 솔루션",
     provenance: "OPERATOR_TRANSCRIBED" as const,
-    rationale: "the SECOND visible radio's label, transcribed verbatim on 2026-08-10; 11 characters, which is the `medium` band measured for radio 1. A named third-party solution, so nothing about it may be inferred from the flow description",
+    rationale: "the SECOND visible radio's label, transcribed verbatim on 2026-08-10; 11 characters, which is the `medium` band measured for radio 1. It names a specific solution rather than describing an integration method, so nothing about it may be inferred from the flow description",
   }),
 ]);
 

@@ -831,12 +831,13 @@ describe("the purpose-option candidates — traceable, frozen, and now two-third
   });
 
   it("the transcribed pair matches the LENGTH BANDS the previous run measured, in screen order", () => {
-    // The one falsifiable check available before the calibration re-runs, and the reason the transcription is
-    // worth more than a third opinion: 2026-08-09 measured radio 0's derived name in `short` (1–8 characters)
-    // and radio 1's in `medium` (9–24), knowing nothing of the strings. A transcription that landed outside
-    // those bands would mean the operator read a different element, a different screen, or the wrong order.
+    // The one falsifiable check available before the calibration re-runs: 2026-08-09 measured radio 0's derived
+    // name in `short` (1–8 characters) and radio 1's in `medium` (9–24), knowing nothing of the strings. A
+    // transcription outside those bands would mean a different element, a different screen, or a flipped order.
     //
-    // Corroboration, NOT identification. The bands are wide and this ties neither string to either control.
+    // Weaker than it looks, and the weakness is ours: the bands were stated in the request that asked for the
+    // transcription, so the reading was not blind to what would satisfy them. It catches a gross error, not a
+    // subtle one — and it ties neither string to either control either way.
     const [first, second] = WING_STAGE2_PURPOSE_OPTION_CANDIDATES.filter((c) => c.provenance === "OPERATOR_TRANSCRIBED");
     expect(first!.exactText.length).toBe(8);
     expect(first!.exactText.length).toBeGreaterThanOrEqual(1);
