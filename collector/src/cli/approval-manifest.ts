@@ -139,7 +139,7 @@ export const APPROVAL_ACTIONS = [
   // element identity, and no geometry — and it never clicks, selects, or highlights.
   "CHOICE_CONTROL_SHAPE_CENSUS",
   // Read-only CONTAINMENT probe: for one of OUR fixed candidate labels, how many elements carry it as their whole
-  // text and how many innermost elements merely contain it, each split by whether they paint. Five integers and a
+  // text and how many innermost elements merely contain it, each split by whether they paint. Four integers and a
   // truncation flag. Element text is read solely to compare against a label we wrote; none of it is returned.
   "FIXED_LABEL_CONTAINMENT_PROBE",
   // Read-only LABEL-ASSOCIATION census: for each painting, enabled choice control, how its name is derived

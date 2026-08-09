@@ -384,7 +384,7 @@ export function buildFixedLabelProbeScript(probes: readonly { targetId: string; 
 }
 
 /**
- * What a fixed-label CONTAINMENT reading contains. Five integers and a boolean — no text, ever.
+ * What a fixed-label CONTAINMENT reading contains. Four integers and a boolean — no text, ever.
  *
  * It exists to answer a question a bare `matchCount: 0` cannot: **is this label absent from the page, or present
  * in a form the exact-whole-text matcher cannot see?** Those two readings are byte-identical today, and the
@@ -417,9 +417,19 @@ export interface FixedLabelContainmentReading {
   readonly scanTruncated: boolean;
 }
 
-/** Host-side re-validation, mirroring the WING census sanitizer: coerce every field, trust the page for nothing. */
-export function sanitizeContainmentReading(raw: unknown): FixedLabelContainmentReading {
-  const r = (raw ?? {}) as Record<string, unknown>;
+/**
+ * Host-side re-validation: coerce every field, trust the page for nothing — and **return `null` when there is
+ * nothing to coerce.**
+ *
+ * The null is the point. An earlier version folded `undefined` / `null` / a non-object into `{0,0,0,0,false}`,
+ * which is a COMPLETE reading: `wingStage2PresenceFrom` then read it as `ABSENT_EVERYWHERE` and the record
+ * counted it in `containmentMeasured`. A page that swapped under the probe, or a CSP that killed the script,
+ * would have produced a confident measured absence for a label nobody looked for. Only a THROW produced a
+ * fault; a silent nothing produced a finding.
+ */
+export function sanitizeContainmentReading(raw: unknown): FixedLabelContainmentReading | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
   const nat = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
   return Object.freeze({
     exactVisible: nat(r.exactVisible),
@@ -434,7 +444,7 @@ export function sanitizeContainmentReading(raw: unknown): FixedLabelContainmentR
  * A READ-ONLY fixed-label CONTAINMENT probe: the same value-free comparison {@link buildFixedLabelLocateScript}
  * makes, plus the one extra question that distinguishes "absent" from "unmatchable".
  *
- * **Output is five integers and a boolean.** Element text is read SOLELY to compare against the caller's own
+ * **Output is four integers and a boolean.** Element text is read SOLELY to compare against the caller's own
  * fixed label — by equality for the exact halves and by `indexOf` for the containment halves. The matched text is
  * never returned, no element is named, nothing is tagged, clicked, or mutated. That is the same contract the
  * locate and probe scripts hold, and the reason this can run under a READ_ONLY manifest.
@@ -467,17 +477,20 @@ export function buildFixedLabelContainmentScript(input: { candidateQuery: string
     return !!r && r.width > 0 && r.height > 0;
   }
   var want = norm(${JSON.stringify(input.exactText)});
-  var CAP = 8000;
+  /* CAND_CAP is the LOCATE script's cap, deliberately identical: the exact halves below are compared against
+     that script's counts, and a wider cap here would count matches it never saw while reporting agreement.
+     DOC_CAP bounds the whole-document containment scan, which is a bigger sweep and needs its own ceiling. */
+  var CAND_CAP = 4000, DOC_CAP = 8000;
   var cands; try { cands = slice(document.querySelectorAll(${JSON.stringify(input.candidateQuery)})); } catch (e) { cands = []; }
   var exactVisible = 0, exactHidden = 0, i, j;
-  for (i = 0; i < cands.length && i < CAP; i++) {
+  for (i = 0; i < cands.length && i < CAND_CAP; i++) {
     if (accName(cands[i]) === want) { if (paints(cands[i])) { exactVisible++; } else { exactHidden++; } }
   }
   var all; try { all = slice(document.querySelectorAll('*')); } catch (e2) { all = []; }
   var deepVisible = 0, deepHidden = 0;
   /* An empty label would be "contained" by every element on the page. Refuse it rather than report page size. */
   if (want.length > 0) {
-    for (i = 0; i < all.length && i < CAP; i++) {
+    for (i = 0; i < all.length && i < DOC_CAP; i++) {
       var el = all[i];
       if (norm(el.textContent || '').indexOf(want) === -1) { continue; }
       var kids = el.children || [], innermost = true;
@@ -493,7 +506,7 @@ export function buildFixedLabelContainmentScript(input: { candidateQuery: string
     exactHidden: exactHidden,
     deepestContainsVisible: deepVisible,
     deepestContainsHidden: deepHidden,
-    scanTruncated: cands.length > CAP || all.length > CAP
+    scanTruncated: cands.length > CAND_CAP || all.length > DOC_CAP
   };
 })()`;
 }

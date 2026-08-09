@@ -34,7 +34,7 @@ that run measured.
 
 ## 2 · The containment probe — absent, or unmatchable?
 
-`buildFixedLabelContainmentScript` returns five integers and a flag:
+`buildFixedLabelContainmentScript` returns four integers and a flag:
 
 ```
 exactVisible · exactHidden                 whole-text equality, split by paint
@@ -44,6 +44,11 @@ scanTruncated
 
 **Innermost only.** Every ancestor up to `<html>` also contains the text; counting them would report page depth
 rather than a finding. A direct-child test suffices — a descendant's text is a subsequence of its parent's.
+
+**Two caps, deliberately.** The candidate scan stops at 4000 — the locate script's own cap, byte for byte — so
+the exact halves are comparable with every count already on the record; a wider cap here would count matches
+that script never saw while the agreement test reported agreement. The whole-document containment scan gets its
+own 8000. Either one being hit sets `scanTruncated`.
 
 It folds to a closed presence verdict, ordered strongest-evidence-first:
 
@@ -61,6 +66,13 @@ The probe's exact-visible count is asserted to **agree with the shipped locate s
 share `norm` / `accName` / `paints` by copy, and a drift would make the calibration's exact half incomparable
 with every count already on the record.
 
+**An unusable reading is `null`, not zeros.** `sanitizeContainmentReading` returns `null` for `undefined` /
+`null` / a non-object, and the sweep records that as a `UNUSABLE_READING` fault rather than a reading. This was
+review's first BLOCKING finding and it was exactly right: `{0,0,0,0,false}` is a *complete* reading, so a page
+that swapped under the probe, or a CSP that killed the script, folded straight to `ABSENT_EVERYWHERE` and was
+counted in `containmentMeasured`. Only a **throw** produced a fault; a silent nothing produced a finding. The
+association census now has the same rule and the same fault category.
+
 ## 3 · The label-association census — what each control IS
 
 For every painting, enabled choice control, one row:
@@ -70,12 +82,19 @@ For every painting, enabled choice control, one row:
 | `nameSource` | `ARIA_LABELLEDBY · ARIA_LABEL · LABEL_FOR · LABEL_ANCESTOR · TITLE · NONE` |
 | `nameLengthBucket` | `none · short · medium · long` |
 | `exactCandidateIndex` / `containsCandidateIndex` | index into **our** candidate list, or `-1` |
-| `hasIdAttr`, `labelForCount`, `ancestorLabelCount` | whether the association is wired, and whether it is wired twice |
+| `hasIdAttr`, `labelForCount` | whether the association is wired, and whether it is wired **twice** |
+| `ancestorLabelCount` | 0-or-1 by construction — `closest()` returns the nearest wrapper, so it can never express "twice" |
 | `ariaLabelledbyRefCount` / `…ResolvedCount` | a shortfall is a broken association, and a common one |
 | `groupIndex` | **the radio-`name` group, as an ordinal** |
 
 plus `nameGroupCount`, `largestNameGroupSize`, `ungroupedCount`, `rowsTruncated`, `scanTruncated`,
 `candidatesCompared`.
+
+Two fields whose names undersell what they hold. `hiddenChoiceControlCount` is the **union** of not-painting and
+disabled, exactly as on the shape census — a painting-but-disabled radio lands here, so it must not be read as
+"not on screen". And `candidatesCompared` counts the **non-blank** candidates: the in-page loop skips a blank
+one (an empty string is contained in every name), so counting it would claim coverage the comparison never had.
+The clamp bound stays the full list length, so an index still names the right candidate.
 
 **`groupIndex` is the measurement the recon could not make.** The landing recorded "no painting
 fieldset/radiogroup/listbox" and a code comment over-claimed it as "the radios are ungrouped" — a correction this
@@ -123,11 +142,22 @@ empty candidate set refuses, twice: in `sweepStage2`, and again in `main()` **be
 an operator is about to log in, navigate and press a real marketplace control and should learn the instrument is
 blind before doing any of that. Same gate as `BLIND_INSTRUMENT` on the reveal harness, one surface over.
 
-The guard is unreachable while the shipped set is non-empty, so the candidate list is **injectable** at the
-`runWingSelectorRecord` seam and the refusal is exercised for real. A guard nothing can run is a guard nobody has
-tested — and "the constant is non-empty, therefore the branch is fine" is the one-layer-removed reasoning that
-has produced a defect in this workstream five times. A test pins that the CLI never passes the injection point,
-so production can only ever send the frozen set.
+Both gates take the candidate list as a **parameter**: the sweep's from `runWingSelectorRecord`, the launch
+gate's as `calibrationLaunchRefusal(isCalibrationRun, candidates)`. The shipped set is non-empty, so in place
+neither branch is reachable — and a guard nothing can run is a guard nobody has tested. "The constant is
+non-empty, therefore the branch is fine" is the one-layer-removed reasoning that has produced a defect in this
+workstream five times.
+
+The launch gate got there the hard way. Its first form lived inline in `main()` and was asserted by slicing the
+source for two substrings; review demonstrated **two surviving mutations** — deleting the `return` after
+`process.exitCode = 2` (the refusal prints and Chrome launches anyway), and prefixing the condition with
+`false &&`. Extracting the decision makes the second a real test. The `return` is the one line a pure function
+cannot cover, and it is now pinned to that block alone rather than to "somewhere before the launch", because
+`process.exitCode = 2; return;` appears at several gates in this file.
+
+A test pins that `main()` never passes the injection point — over the **whole** of `main()`, not a
+300-character window at the call site, because a window that size is defeated by hoisting the option into a
+variable and spreading it in.
 
 ## The phase — `COUPANG_WING_STAGE2_LABEL_CALIBRATION`
 
@@ -149,17 +179,65 @@ bootstrap and preflight — rather than a fourth `phase = …` comparison per br
 learned that lesson: three separate `||` chains had accumulated, and a phase added to two of the three was
 screened against the wrong host.
 
+That claim was **false when first written**. The preflight's embedded Python — the branch that decides whether
+the run env gets a Stage-2 scope or a probe scope, the highest-consequence Stage-2 branch in the harness — had
+its own duplicated phase list, and the test that "covered" it only asserted `is_stage2_phase` appeared
+*somewhere* in the file. The shell now evaluates the predicate and passes a yes/no in.
+
 `ApprovalManifest.stage2Targets` is now **declared**. It was emitted before it was typed, so the preflight read it
 through a JSON path while the compiler denied it existed.
 
 ## Verification
 
-typecheck green. Full collector suite: **311 files / 7738 tests passed**, 18 files + 142 skipped (was 7671 —
-**+67**). Harness selfcheck: PASS, including 17 new `STAGE2CAL` cases.
+typecheck green. Full collector suite: **311 files / 7757 tests passed**, 18 files + 142 skipped (was 7671 —
+**+86**). Harness selfcheck: PASS, including 17 new `STAGE2CAL` cases, exercised on a clean tree.
 
 Both in-page scripts are executed by tests through `new Function(...)` against a DOM double that carries a real
 computed style and answers only the exact selectors the script is contracted to ask for — so a widened query or
 a deleted `paints()` branch fails, rather than being handed the fixture regardless.
+
+**One unexplained transient.** One full-suite run reported `1 failed | 7742 passed`; the failing test's name was
+not captured, and every re-run since has been green. Recorded rather than dismissed — a
+prior unit in this workstream saw the same thing once and it is still unidentified.
+
+**Mutation guards: 76/76 caught.** Among them: an absence claimed over a truncated scan; an unreported hidden
+count folded into a measured zero; an unusable page reading coerced into a complete one; a conflicting row
+keeping its containment; the group NAME emitted beside its ordinal; the derived name emitted beside its index;
+`checked` added to the census; a page-authored category adopted verbatim; a candidate index pointing at no
+candidate; a guessed second-option label added to the list; either blind gate defeated; `main()` printing the
+refusal and launching anyway; either new read armed under the recon phase; the recon phase growing the
+calibration actions; and the landed recon evidence's own absence bounds flipped.
+
+### What the batteries and the review actually found
+
+The first pass caught 55/60, and **two of the five misses were real**:
+
+- The containment probe's `paints()` split on the *containment* half was dead weight — nothing asserted
+  `deepestContainsHidden`. A label rendered into a collapsed panel would have been reported as visibly present.
+- The `label[for]` id escaping was untested **because the test double was lenient**: its selector parser accepted
+  an unescaped quote and handed the labels back anyway, so deleting the escaping changed nothing. A real browser
+  throws on a malformed attribute selector, and the script's own `catch` turns that into zero associations. The
+  double now throws. Verified load-bearing: against the *committed* tests, both mutations still survive.
+
+Then a run reported `A6` as SURVIVED while the identical mutation applied by hand failed the suite — a **stale
+vitest transform cache**. The battery now runs `--no-cache`. A runner that can report a false survivor is as
+misleading as one that reports a false catch, and this workstream has been burned twice already by
+first-occurrence collisions doing exactly that.
+
+Independent review then found **three BLOCKING issues, ten more to fix, and eleven surviving mutations** — every
+one of them verified by actually running it. The three that mattered most are in the sections above: the
+unusable-reading coercion, the source-text-only launch gate, and the association census's own untested
+`scanTruncated`. Two of its findings duplicated what the battery had already caught, independently.
+
+Nine over-claims were corrected rather than argued with: "five integers" (it is four) in five separate places
+including an operator-facing approval-action description; `ancestorLabelCount` described as able to report
+"wired twice" when `closest()` makes it 0-or-1; `hiddenChoiceControlCount` not documented as the union of
+not-painting and disabled; `candidatesCompared` counting blanks the comparison skipped; the doc's claim that
+both Stage-2 phases route through one predicate while the preflight's embedded Python carried a duplicated phase
+list; a "carries no page-authored text" assertion measured against a stubbed record whose Hangul allowlist was
+partly built *from the record itself*; `rationale.length > 20` standing in for a provenance check that is
+genuinely mechanical; and a `probeLabelContainment` / `choiceAssociationCensus` settle asymmetry that is
+deliberate but was undocumented.
 
 ## Not in this unit
 

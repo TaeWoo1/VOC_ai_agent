@@ -716,25 +716,32 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
    * a generic escape hatch on this driver is a place where an unaudited script can later be run under a
    * READ_ONLY manifest.
    */
-  async choiceAssociationCensus(candidates: readonly string[]): Promise<WingChoiceAssociationCensus> {
+  async choiceAssociationCensus(candidates: readonly string[]): Promise<WingChoiceAssociationCensus | null> {
     const page = this.activePage();
     await this.settle(page);
     const raw = await this.evalStr<unknown>(page, buildWingChoiceAssociationScript([...candidates]));
-    return sanitizeChoiceAssociationCensus(raw, candidates.length);
+    // `null` when the page returned nothing usable — NOT a census reporting zero controls. See the sanitizer.
+    return sanitizeChoiceAssociationCensus(raw, candidates);
   }
 
   /**
    * READ-ONLY fixed-label CONTAINMENT probe for one candidate spec: the exact-match counts the locate seam
-   * already produces, split by paint, PLUS how many innermost elements merely CONTAIN the label. Five integers
+   * already produces, split by paint, PLUS how many innermost elements merely CONTAIN the label. Four integers
    * and a boolean; no text, no element identity, no mutation.
+   *
+   * Like `probeFixedLabelMatch` — and unlike the association census, which mirrors the shape census — it does
+   * NOT settle first. The two reads it is compared against are the locate seam's, taken the same way; adding a
+   * settle here would make the "agrees with the locate script" comparison hold under different conditions.
    *
    * This is what turns a `matchCount: 0` from a dead end into a diagnosis — "the label is not on this page" and
    * "the label is on this page but not as an element's whole text" are the two readings the Stage-2 recon could
    * not tell apart, and it recorded an INFERRED explanation because of it.
    */
-  async probeLabelContainment(spec: { candidateQuery: string; exactText: string }): Promise<FixedLabelContainmentReading> {
+  async probeLabelContainment(spec: { candidateQuery: string; exactText: string }): Promise<FixedLabelContainmentReading | null> {
     const page = this.activePage();
     const raw = await this.evalStr<unknown>(page, buildFixedLabelContainmentScript(spec));
+    // `null` when the page returned nothing usable. A zeroed reading here would fold to `ABSENT_EVERYWHERE` —
+    // a confident measured absence produced by a probe that measured nothing.
     return sanitizeContainmentReading(raw);
   }
 

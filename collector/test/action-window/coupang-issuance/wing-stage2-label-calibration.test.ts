@@ -24,14 +24,17 @@ import {
 import {
   buildWingChoiceAssociationScript,
   sanitizeChoiceAssociationCensus,
+  sanitizeChoiceControlCensus,
   WING_NAME_LENGTH_BUCKETS,
   WING_NAME_SOURCES,
+  type WingChoiceAssociationCensus,
 } from "../../../src/cli/coupang-wing-classifier";
 import {
   WING_LABEL_CALIBRATION_BLIND_REASON,
   WING_PURPOSE_CANDIDATE_PROVENANCES,
   WING_STAGE2_PRESENCES,
   WING_STAGE2_PURPOSE_OPTION_CANDIDATES,
+  WING_STAGE2_RECON_CANDIDATES,
   interpretWingStage2Recon,
   wingLabelCalibrationBlind,
   wingStage2PresenceFrom,
@@ -40,6 +43,7 @@ import {
 import {
   WING_STAGE2_LABEL_CALIBRATION_PHASE,
   WING_STAGE2_RECON_PHASE,
+  calibrationLaunchRefusal,
   resolveWingStage2Scope,
   runWingSelectorRecord,
   stage2RecordFor,
@@ -126,7 +130,7 @@ function runContainment(
     getComputedStyle: (el: Node2) => ({ display: el.css.display ?? "block", visibility: el.css.visibility ?? "visible" }),
   };
   const out = new Function("document", "window", `return (${buildFixedLabelContainmentScript(spec)});`)(doc, win);
-  return { out: out as FixedLabelContainmentReading, asked };
+  return { out: sanitizeContainmentReading(out)!, asked };
 }
 
 describe("the containment probe — absent, or present in a form whole-text matching cannot see", () => {
@@ -164,6 +168,18 @@ describe("the containment probe — absent, or present in a form whole-text matc
     expect(out.deepestContainsHidden).toBe(0);
   });
 
+  it("splits the innermost containers by PAINT too — a hidden one is not a visible finding", () => {
+    // Without this the `paints()` branch of the containment half is dead weight: a label rendered into a
+    // collapsed panel would be reported as visibly present, and the operator would be sent looking for
+    // something that is not on screen. That is the `발급` locator's own live failure, one instrument over.
+    const shown = new Node2("SPAN", "자체개발");
+    const hiddenLeaf = new Node2("SPAN", "자체개발", [], false);
+    const hiddenByStyle = new Node2("SPAN", "자체개발", [], true, {}, { display: "none" });
+    const out = runContainment(SPEC, { candidates: [], all: [shown, hiddenLeaf, hiddenByStyle] }).out;
+    expect(out.deepestContainsVisible).toBe(1);
+    expect(out.deepestContainsHidden).toBe(2);
+  });
+
   it("an EMPTY label reports zeros rather than the size of the page", () => {
     // `''.indexOf` is 0 for every string, so an empty candidate would "match" every element on the page and the
     // record would carry a document-size count dressed as a finding.
@@ -175,8 +191,28 @@ describe("the containment probe — absent, or present in a form whole-text matc
     expect(out.deepestContainsHidden).toBe(0);
   });
 
+  it("scans the document deep enough to find a match past the candidate cap", () => {
+    // Pins the DOC cap by value. With a smaller cap the match at index 5000 is missed and the reading reads as
+    // an absence — the truncation flag alone cannot catch that, because it is true either way at 8001 elements.
+    const filler = () => new Node2("DIV", "관계없는 텍스트");
+    const all = [...Array.from({ length: 5000 }, filler), new Node2("SPAN", "자체개발"), ...Array.from({ length: 999 }, filler)];
+    const out = runContainment(SPEC, { candidates: [], all }).out;
+    expect(out.deepestContainsVisible).toBe(1);
+    expect(out.scanTruncated).toBe(false);
+  });
+
+  it("caps the CANDIDATE scan at the locate script's own 4000, so the exact halves stay comparable", () => {
+    // A wider candidate cap here would count exact matches the locate script never saw, while the agreement
+    // test (3 nodes) reported agreement. The candidate list is truncated at 4000 and SAYS so.
+    const cands = [...Array.from({ length: 4001 }, () => new Node2("LABEL", "다른 라벨")), new Node2("LABEL", "자체개발")];
+    const out = runContainment(SPEC, { candidates: cands, all: [] }).out;
+    expect(out.exactVisible).toBe(0);
+    expect(out.scanTruncated).toBe(true);
+  });
+
   it("reports truncation, so an absence is never claimed over an unscanned document", () => {
     const many = Array.from({ length: 8001 }, () => new Node2("DIV", "관계없는 텍스트"));
+    // 8001 > DOC_CAP. The candidate list is empty here, so this pins the DOCUMENT cap specifically.
     const out = runContainment(SPEC, { candidates: [], all: many }).out;
     expect(out.scanTruncated).toBe(true);
     // …and the presence verdict degrades with it, rather than asserting a whole-document absence.
@@ -200,7 +236,7 @@ describe("the containment probe — absent, or present in a form whole-text matc
     expect(contain.exactHidden).toBe(locate.hiddenCount);
   });
 
-  it("asks for exactly the caller's query and `*`, and returns six fields and nothing else", () => {
+  it("asks for exactly the caller's query and `*`, and returns five fields and nothing else", () => {
     const { out, asked } = runContainment(SPEC, { candidates: [], all: [] });
     expect(asked).toEqual([SPEC.candidateQuery, "*"]);
     expect(Object.keys(out).sort()).toEqual(
@@ -232,7 +268,7 @@ describe("the containment probe — absent, or present in a form whole-text matc
 });
 
 describe("sanitizeContainmentReading — the host trusts the page for nothing", () => {
-  it("coerces junk to zeros and false rather than propagating it", () => {
+  it("coerces junk FIELDS to zeros and false rather than propagating them", () => {
     const r = sanitizeContainmentReading({
       exactVisible: -4,
       exactHidden: "7",
@@ -251,9 +287,16 @@ describe("sanitizeContainmentReading — the host trusts the page for nothing", 
     });
   });
 
-  it("returns a complete reading for null/undefined input rather than throwing", () => {
-    expect(sanitizeContainmentReading(null).exactVisible).toBe(0);
-    expect(sanitizeContainmentReading(undefined).scanTruncated).toBe(false);
+  it("**returns null for an unusable reading — never a complete set of zeros**", () => {
+    // The defect this closes: `{0,0,0,0,false}` is a COMPLETE reading, and a complete reading folds to
+    // `ABSENT_EVERYWHERE`. A page that swapped under the probe, or a CSP that killed the script, would have
+    // produced a confident measured absence for a label nobody looked for. Only a throw produced a fault.
+    for (const junk of [null, undefined, 42, "reading", [], true]) {
+      expect(sanitizeContainmentReading(junk), String(junk)).toBeNull();
+    }
+    expect(wingStage2PresenceFrom(sanitizeContainmentReading(null))).toBe("NOT_MEASURED");
+    // A real object with junk FIELDS is still a reading — the coercion above applies to it.
+    expect(sanitizeContainmentReading({ exactVisible: "x" })).not.toBeNull();
   });
 });
 
@@ -368,14 +411,20 @@ function runAssoc(
   controls: Ctl[],
   candidates: readonly string[],
   wiring: { forLabels?: Record<string, Ctl[]>; byId?: Record<string, Ctl> } = {},
-): { out: AssocOut; asked: string[] } {
+): { out: AssocOut; asked: string[]; sanitized: WingChoiceAssociationCensus } {
   const asked: string[] = [];
   const doc = {
     querySelectorAll(sel: string): Ctl[] {
       asked.push(sel);
       if (sel === CHOICE_SELECTOR) return controls;
-      const m = /^label\[for="(.*)"\]$/.exec(sel);
-      if (m) return wiring.forLabels?.[m[1]!.replace(/\\(["\\])/g, "$1")] ?? [];
+      if (sel.startsWith("label[for=")) {
+        // A real browser THROWS on a malformed attribute selector, and the script's own `catch` turns that into
+        // zero associations. A lenient fixture accepts an unescaped quote and hands the labels back anyway — so
+        // deleting the escaping would change nothing, and the guard would be testing its own double.
+        const m = /^label\[for="((?:[^"\\]|\\.)*)"\]$/.exec(sel);
+        if (!m) throw new SyntaxError("unparseable selector");
+        return wiring.forLabels?.[m[1]!.replace(/\\(["\\])/g, "$1")] ?? [];
+      }
       return [];
     },
     getElementById: (id: string): Ctl | null => wiring.byId?.[id] ?? null,
@@ -384,7 +433,9 @@ function runAssoc(
     getComputedStyle: (el: Ctl) => ({ display: el.css.display ?? "block", visibility: el.css.visibility ?? "visible" }),
   };
   const out = new Function("document", "window", `return (${buildWingChoiceAssociationScript([...candidates])});`)(doc, win);
-  return { out: out as AssocOut, asked };
+  const sanitized = sanitizeChoiceAssociationCensus(out, candidates);
+  expect(sanitized, "the real script must always produce a usable reading").not.toBeNull();
+  return { out: out as AssocOut, asked, sanitized: sanitized! };
 }
 
 const RADIO = (attrs: Record<string, string>, over: Partial<{ visible: boolean; disabled: boolean; ancestorLabel: Ctl | null; text: string }> = {}): Ctl =>
@@ -442,6 +493,21 @@ describe("the label-association census — how a control is labelled, never what
     expect(out.ungroupedCount).toBe(1);
   });
 
+  it("the RAW script output carries no page wording at all", () => {
+    // The host sanitizer rebuilds every row field-by-field, so an added text field would be dropped there. That
+    // is defense in depth, not the contract: the script is what runs inside the page, and a reviewer reading it
+    // must be able to see that nothing textual is in its return value. Asserted on the unsanitized output.
+    const { out } = runAssoc(
+      [RADIO({ name: "g", "aria-label": "자체개발" }), RADIO({ name: "g", "aria-label": "업체를 통한 연동" })],
+      ["자체개발"],
+    );
+    expect(JSON.stringify(out)).not.toMatch(/[가-힣]/);
+    // …and it did derive those names — otherwise the assertion above passes for the wrong reason.
+    expect(out.rows[0]!.exactCandidateIndex).toBe(0);
+    expect(out.rows[1]!.nameSource).toBe("ARIA_LABEL");
+    expect(out.rows[1]!.exactCandidateIndex).toBe(-1);
+  });
+
   it("the group NAME never leaves — only its ordinal", () => {
     const { out } = runAssoc([RADIO({ name: "purposeType", id: "secretId" })], []);
     const json = JSON.stringify(out);
@@ -485,6 +551,39 @@ describe("the label-association census — how a control is labelled, never what
     expect(out.largestNameGroupSize).toBe(1);
   });
 
+  it("reports its OWN scan truncation — a census over a prefix is not a census", () => {
+    // The host-side `rowsTruncated` was tested; the in-page `scanTruncated` was not. The guard was on the cap
+    // one layer away from the one that decides how much of the document was looked at.
+    const many = Array.from({ length: 4001 }, () => RADIO({ name: "g" }));
+    expect(runAssoc(many, []).out.scanTruncated).toBe(true);
+    expect(runAssoc([RADIO({})], []).out.scanTruncated).toBe(false);
+  });
+
+  it("excludes a NATIVELY disabled control, not only an aria-disabled one", () => {
+    // No fixture ever set the native property, so the `node.disabled === true` half of `enabled()` was unproven
+    // for this script — and a native-disabled radio is the likelier of the two on a real form.
+    const native = RADIO({ name: "g" });
+    (native as unknown as { disabled: boolean }).disabled = true;
+    const { out } = runAssoc([RADIO({ name: "g" }), native], []);
+    expect(out.visibleChoiceControlCount).toBe(1);
+    expect(out.hiddenChoiceControlCount).toBe(1);
+  });
+
+  it("reports the ancestor-label association as a COUNT, not only as a name source", () => {
+    const wrapped = RADIO({}, { ancestorLabel: new Ctl("LABEL", {}, "직접입력") });
+    const bare = RADIO({});
+    const rows = runAssoc([wrapped, bare], []).out.rows;
+    expect(rows[0]!.ancestorLabelCount).toBe(1);
+    expect(rows[1]!.ancestorLabelCount).toBe(0);
+  });
+
+  it("pins the length-bucket BOUNDARIES, not just one value per bucket", () => {
+    // The fixture lengths sat far from every boundary, so the doc's calibration argument ("a `short` name is a
+    // label like 자체개발, a `long` one is a sentence") was pinned by nothing.
+    const at = (n: number): string => runAssoc([RADIO({ "aria-label": "가".repeat(n) })], []).out.rows[0]!.nameLengthBucket;
+    expect([at(1), at(8), at(9), at(24), at(25)]).toEqual(["short", "short", "medium", "medium", "long"]);
+  });
+
   it("asks for exactly the shipped choice selector", () => {
     const { asked } = runAssoc([RADIO({})], []);
     expect(asked[0]).toBe(CHOICE_SELECTOR);
@@ -521,6 +620,18 @@ describe("the label-association census — how a control is labelled, never what
 });
 
 describe("sanitizeChoiceAssociationCensus — the record's vocabulary is guaranteed host-side", () => {
+  /** Candidate lists of a given size; the sanitizer derives both the clamp bound and the compared count. */
+  const CANDS0: string[] = [];
+  const CANDS2 = ["자체개발", "직접입력"];
+  const CANDS4 = ["자체개발", "자체 개발", "직접입력", "직접 입력"];
+
+  /** The sanitizer is nullable now; these cases all feed it a real object, so the assert is the contract. */
+  const san = (r: unknown, c: readonly string[]) => {
+    const out = sanitizeChoiceAssociationCensus(r, c);
+    expect(out).not.toBeNull();
+    return out!;
+  };
+
   const raw = (over: Partial<AssocRow> = {}): Record<string, unknown> => ({
     visibleChoiceControlCount: 2,
     hiddenChoiceControlCount: 10,
@@ -548,15 +659,15 @@ describe("sanitizeChoiceAssociationCensus — the record's vocabulary is guarant
 
   it("clamps a candidate index that points at no candidate", () => {
     // A dangling index reads as a confident identification of nothing — worse than -1, because -1 is honest.
-    expect(sanitizeChoiceAssociationCensus(raw({ exactCandidateIndex: 7 }), 2).rows[0]!.exactCandidateIndex).toBe(-1);
-    expect(sanitizeChoiceAssociationCensus(raw({ containsCandidateIndex: -3 }), 2).rows[0]!.containsCandidateIndex).toBe(-1);
-    expect(sanitizeChoiceAssociationCensus(raw({ exactCandidateIndex: 1 }), 2).rows[0]!.exactCandidateIndex).toBe(1);
+    expect(san(raw({ exactCandidateIndex: 7 }), CANDS2).rows[0]!.exactCandidateIndex).toBe(-1);
+    expect(san(raw({ containsCandidateIndex: -3 }), CANDS2).rows[0]!.containsCandidateIndex).toBe(-1);
+    expect(san(raw({ exactCandidateIndex: 1 }), CANDS2).rows[0]!.exactCandidateIndex).toBe(1);
     // …and with NO candidates sent, every index must be -1 regardless of what the page returned.
-    expect(sanitizeChoiceAssociationCensus(raw({ exactCandidateIndex: 0 }), 0).rows[0]!.exactCandidateIndex).toBe(-1);
+    expect(san(raw({ exactCandidateIndex: 0 }), CANDS0).rows[0]!.exactCandidateIndex).toBe(-1);
   });
 
   it("forces an unlisted category back into the closed vocabulary", () => {
-    const r = sanitizeChoiceAssociationCensus(raw({ nameSource: "사용목적-자체개발", nameLengthBucket: "enormous" }), 2).rows[0]!;
+    const r = san(raw({ nameSource: "사용목적-자체개발", nameLengthBucket: "enormous" }), CANDS2).rows[0]!;
     expect(r.nameSource).toBe("NONE");
     expect(r.nameLengthBucket).toBe("none");
     expect(WING_NAME_SOURCES as readonly string[]).toContain(r.nameSource);
@@ -564,30 +675,42 @@ describe("sanitizeChoiceAssociationCensus — the record's vocabulary is guarant
 
   it("re-derives the row ordinal from position — the page cannot renumber its own rows", () => {
     const two = { ...raw(), rows: [{ ...(raw().rows as AssocRow[])[0]!, index: 99 }, { ...(raw().rows as AssocRow[])[0]!, index: 99 }] };
-    expect(sanitizeChoiceAssociationCensus(two, 2).rows.map((r) => r.index)).toEqual([0, 1]);
+    expect(san(two, CANDS2).rows.map((r) => r.index)).toEqual([0, 1]);
   });
 
   it("caps the rows and SAYS it capped them", () => {
     const many = { ...raw(), rows: Array.from({ length: 40 }, () => (raw().rows as AssocRow[])[0]!) };
-    const s = sanitizeChoiceAssociationCensus(many, 2);
+    const s = san(many, CANDS2);
     expect(s.rows).toHaveLength(32);
     expect(s.rowsTruncated).toBe(true);
-    expect(sanitizeChoiceAssociationCensus(raw(), 2).rowsTruncated).toBe(false);
+    expect(san(raw(), CANDS2).rowsTruncated).toBe(false);
   });
 
   it("coerces junk counts and reports the candidate count the HOST sent, not the page's claim", () => {
     const junk = { ...raw({ labelForCount: -2, groupIndex: 1.5 }), visibleChoiceControlCount: "many", candidatesCompared: 999 };
-    const s = sanitizeChoiceAssociationCensus(junk, 4);
+    const s = san(junk, CANDS4);
     expect(s.visibleChoiceControlCount).toBe(0);
     expect(s.rows[0]!.labelForCount).toBe(0);
     expect(s.rows[0]!.groupIndex).toBe(-1);
     expect(s.candidatesCompared).toBe(4);
   });
 
-  it("survives a null reading", () => {
-    const s = sanitizeChoiceAssociationCensus(null, 2);
-    expect(s.rows).toEqual([]);
-    expect(s.visibleChoiceControlCount).toBe(0);
+  it("**returns null for an unusable reading — never a census reporting zero controls**", () => {
+    // Same defect as the containment sanitizer's: a zeroed census is a COMPLETE reading, and the record's
+    // `association: null` would then mean two different things — "the census was not taken" and "the census
+    // found nothing". Only the fault distinguishes them, and a silent nothing produced no fault.
+    for (const junk of [null, undefined, 7, "census", [], false]) {
+      expect(sanitizeChoiceAssociationCensus(junk, CANDS2), String(junk)).toBeNull();
+    }
+  });
+
+  it("counts only the candidates the comparison actually RAN against", () => {
+    // The in-page loop skips a blank candidate (an empty string is contained in every name), so counting it
+    // would claim coverage the comparison did not have — while the clamp bound stays the FULL list length, so
+    // an index still names the right candidate.
+    const withBlank = san(raw({ exactCandidateIndex: 2 }), ["자체개발", "   ", "직접입력"]);
+    expect(withBlank.candidatesCompared).toBe(2);
+    expect(withBlank.rows[0]!.exactCandidateIndex).toBe(2);
   });
 });
 
@@ -628,6 +751,25 @@ describe("the fold carries hiddenCount and containment — and never invents eit
     // 0 is a real reading and must survive — the guard rejects junk, not zero.
     const [ok] = interpretWingStage2Recon(["confirm"], [{ targetId: "stage2.confirm.confirm", matchCount: 0, hiddenCount: 0 }]);
     expect(ok!.candidates[0]!.hiddenMatchCount).toBe(0);
+  });
+
+  it("a duplicate row whose CONTAINMENT differs is a conflict too, not a last-write-wins", () => {
+    // Conflict used to be detected on the count alone, while the optional fields were written unconditionally.
+    // Two rows agreeing on the count but disagreeing on what they saw is the same untrustworthy reading.
+    const other: FixedLabelContainmentReading = { ...CONT, exactVisible: 5 };
+    const [t] = interpretWingStage2Recon(["confirm"], [
+      { targetId: "stage2.confirm.confirm", matchCount: 0, containment: CONT },
+      { targetId: "stage2.confirm.confirm", matchCount: 0, containment: other },
+    ]);
+    expect(t!.candidates[0]!.verdict).toBe("NOT_MEASURED");
+    expect(t!.candidates[0]!.presence).toBe("NOT_MEASURED");
+    // …and an identical repeat is NOT a conflict: a re-reported row that agrees is still one reading.
+    const [same] = interpretWingStage2Recon(["confirm"], [
+      { targetId: "stage2.confirm.confirm", matchCount: 0, containment: CONT, hiddenCount: 1 },
+      { targetId: "stage2.confirm.confirm", matchCount: 0, containment: CONT, hiddenCount: 1 },
+    ]);
+    expect(same!.candidates[0]!.presence).toBe("PRESENT_HIDDEN_ONLY");
+    expect(same!.candidates[0]!.hiddenMatchCount).toBe(1);
   });
 
   it("a CONFLICTING duplicate row drops the containment too, not just the count", () => {
@@ -676,6 +818,25 @@ describe("the purpose-option candidates — traceable, frozen, and deliberately 
       expect(c.provenance).not.toBe("OPERATOR_TRANSCRIBED");
       expect(c.rationale.length).toBeGreaterThan(20);
     }
+  });
+
+  it("every MECHANICAL_SPACING_VARIANT really is a spacing transform of a flow-description entry", () => {
+    // The provenance is described as "the field a reviewer must be able to check mechanically", and this is the
+    // one entry in the vocabulary that actually is. Asserting `rationale.length > 20` next to that claim was
+    // measuring prose volume.
+    const bare = (t: string): string => t.replace(/\s+/g, "");
+    const described = WING_STAGE2_PURPOSE_OPTION_CANDIDATES.filter((c) => c.provenance === "PRODUCT_OWNER_FLOW_DESCRIPTION").map((c) => bare(c.exactText));
+    const variants = WING_STAGE2_PURPOSE_OPTION_CANDIDATES.filter((c) => c.provenance === "MECHANICAL_SPACING_VARIANT");
+    expect(variants.length).toBeGreaterThan(0);
+    for (const v of variants) {
+      expect(described, `${v.id} is not a spacing transform of any described entry`).toContain(bare(v.exactText));
+      // …and it must actually DIFFER in spacing, or it is a duplicate wearing a provenance label.
+      expect(described).not.toContain(v.exactText);
+    }
+  });
+
+  it("no candidate is blank — `candidatesCompared` counts what the comparison ran against", () => {
+    for (const c of WING_STAGE2_PURPOSE_OPTION_CANDIDATES) expect(c.exactText.trim().length).toBeGreaterThan(0);
   });
 
   it("ids are unique, so an index and an id can never disagree about which candidate matched", () => {
@@ -744,18 +905,23 @@ function deps(over: Partial<WingSelectorRecordDeps> = {}): { d: WingSelectorReco
     },
     choiceAssociationCensus: async (c) => {
       calls.push(`association:${c.length}`);
-      return sanitizeChoiceAssociationCensus({ visibleChoiceControlCount: 2, rows: [], nameGroupCount: 1, largestNameGroupSize: 2 }, c.length);
+      // A REAL census over a REAL fake DOM, run through the REAL script — so the no-leak assertion downstream
+      // has page-authored Korean to catch. A stubbed `rows: []` could not leak anything whatever the script did.
+      return runAssoc(
+        [
+          RADIO({ name: "purposeType", "aria-label": "자체개발" }),
+          RADIO({ name: "purposeType", "aria-label": "업체를 통한 연동" }),
+        ],
+        c,
+      ).sanitized;
     },
     choiceControlCensus: async () => {
       calls.push("shapes");
-      return sanitizeChoiceControlCensusStub();
+      return sanitizeChoiceControlCensus({ visibleChoiceControlCount: 2, shapes: [], groupContainerCount: 0 });
     },
     ...over,
   };
   return { d, calls };
-}
-function sanitizeChoiceControlCensusStub() {
-  return sanitizeChoiceAssociationCensus(null, 0) as never;
 }
 
 describe("the sweep runs the calibration reads ONLY under the calibration phase", () => {
@@ -805,13 +971,33 @@ describe("the sweep runs the calibration reads ONLY under the calibration phase"
     expect(r.stage2!.candidatesMeasured).toBe(0);
   });
 
-  it("refuses the same way BEFORE the browser launches, not only inside the sweep", () => {
+  it("**refuses BEFORE the browser launches — the decision, not its source text**", () => {
     // The sweep's gate is what a programmatic caller hits. An operator is about to log in, navigate, and press
-    // a real marketplace control — they must learn the instrument is blind before doing any of that.
+    // a real marketplace control, and must learn the instrument is blind before doing any of that.
+    //
+    // This used to be asserted by slicing `main()`'s source for two substrings, and TWO mutations survived it:
+    // deleting the `return` after `process.exitCode = 2` (Chrome launches anyway), and prefixing the condition
+    // with `false &&`. The decision is now a pure function taking the candidate list, so both are real tests.
+    expect(calibrationLaunchRefusal(true, [])).toContain("No browser launched.");
+    expect(calibrationLaunchRefusal(true, [])).toContain(WING_LABEL_CALIBRATION_BLIND_REASON);
+    expect(calibrationLaunchRefusal(true, [])).toContain(WING_STAGE2_LABEL_CALIBRATION_PHASE);
+    // Not blind, or not a calibration run ⇒ proceed. A gate that refused a recon run would be a different bug.
+    expect(calibrationLaunchRefusal(true, WING_STAGE2_PURPOSE_OPTION_CANDIDATES)).toBeNull();
+    expect(calibrationLaunchRefusal(false, [])).toBeNull();
+  });
+
+  it("main() acts on that refusal and STOPS — the one line a pure function cannot cover", () => {
+    // Narrowly scoped on purpose: this pins the `return`, and nothing else. Sliced to the refusal block itself
+    // rather than to "somewhere before the launch", because `process.exitCode = 2;\n    return;` appears at
+    // several gates in this file and a whole-region search would pass on any of them.
     const cli = SRC("cli/probe-wing-issuance-selectors.ts");
-    const beforeLaunch = cli.slice(0, cli.indexOf("await launchNaverContext"));
-    expect(beforeLaunch).toContain("wingLabelCalibrationBlind(WING_STAGE2_PURPOSE_OPTION_CANDIDATES)");
-    expect(beforeLaunch).toContain("No browser launched.");
+    const at = cli.indexOf("const blindRefusal = calibrationLaunchRefusal(");
+    expect(at).toBeGreaterThan(0);
+    expect(at).toBeLessThan(cli.indexOf("await launchNaverContext"));
+    const block = cli.slice(at, cli.indexOf("\n\n", at));
+    expect(block).toContain("console.error(blindRefusal);");
+    expect(block).toContain("process.exitCode = 2;");
+    expect(block).toContain("return;");
   });
 
   it("a precondition failure still refuses before any calibration read", async () => {
@@ -821,6 +1007,26 @@ describe("the sweep runs the calibration reads ONLY under the calibration phase"
     expect(calls).toEqual([]);
     expect(r.stage2!.calibration).toBe(true);
     expect(r.stage2!.calibrationBlind).toBeNull();
+  });
+
+  it("**a NULL containment reading is a fault, not a measurement**", async () => {
+    // The seam returns null when the page returned nothing usable. Left as a reading it would be absent
+    // containment with no fault — indistinguishable from a run that never took the probe — and the row's
+    // presence would say NOT_MEASURED while `containmentFaults` said nothing went wrong.
+    const { d } = deps({ probeContainment: async () => null });
+    const r = await runWingSelectorRecord(d, [], { stage2: ["confirm"], stage2Phase: WING_STAGE2_LABEL_CALIBRATION_PHASE });
+    expect(r.stage2!.containmentFaults).toEqual([{ id: "stage2.confirm.confirm", fault: "UNUSABLE_READING" }]);
+    expect(r.stage2!.targets[0]!.candidates[0]!.containment).toBeNull();
+    expect(r.stage2!.targets[0]!.candidates[0]!.presence).toBe("NOT_MEASURED");
+    // The count still landed: the two reads are separate evaluations and one failing must not lose the other.
+    expect(r.stage2!.candidatesMeasured).toBe(1);
+  });
+
+  it("**a NULL association reading is a fault, not a silent absence**", async () => {
+    const { d } = deps({ choiceAssociationCensus: async () => null });
+    const r = await runWingSelectorRecord(d, [], { stage2: ["confirm"], stage2Phase: WING_STAGE2_LABEL_CALIBRATION_PHASE });
+    expect(r.stage2!.association).toBeNull();
+    expect(r.stage2!.associationFault).toBe("UNUSABLE_READING");
   });
 
   it("a THROWING containment probe faults that candidate without losing its count", async () => {
@@ -851,9 +1057,14 @@ describe("the sweep runs the calibration reads ONLY under the calibration phase"
   });
 
   it("the CLI never passes its own candidate list — production can only send the frozen set", () => {
+    // Over the WHOLE of main(), not a 300-character window at the call site. A window that size is defeated by
+    // hoisting the option into a variable and spreading it in, which leaves production running every live
+    // calibration against an empty list.
     const cli = SRC("cli/probe-wing-issuance-selectors.ts");
-    const callSite = cli.slice(cli.indexOf("const result = await runWingSelectorRecord"));
-    expect(callSite.slice(0, 300)).not.toContain("purposeOptionCandidates");
+    const main = cli.slice(cli.indexOf("async function main()"));
+    expect(main).not.toContain("purposeOptionCandidates");
+    // …and the injection point exists exactly where it is supposed to: the options type and the sweep default.
+    expect(cli.slice(0, cli.indexOf("async function main()")).match(/purposeOptionCandidates/g)?.length).toBe(2);
   });
 });
 
@@ -883,6 +1094,23 @@ describe("the emitted calibration record", () => {
     expect(row.containment).toEqual(CONTAINMENT);
   });
 
+  it("**the candidate ids come from the list that was SENT, not from the module constant**", async () => {
+    // The census returns INDICES. An index resolved against a different list than the one that was sent names
+    // the wrong candidate — silently, and with full confidence. Asserting the ids equal the shipped constant
+    // cannot see that: under the default they are the same list, which is the whole trap.
+    const only: WingPurposeOptionCandidate[] = [
+      { id: "purpose_option.only", exactText: "자체개발", provenance: "PRODUCT_OWNER_FLOW_DESCRIPTION", rationale: "the single injected candidate" },
+    ];
+    const { d, calls } = deps();
+    const r = await runWingSelectorRecord(d, [], {
+      stage2: ["confirm"],
+      stage2Phase: WING_STAGE2_LABEL_CALIBRATION_PHASE,
+      purposeOptionCandidates: only,
+    });
+    expect(calls).toContain("association:1");
+    expect(stage2RecordFor(r.stage2)!.purposeOptionCandidateIds).toEqual(["purpose_option.only"]);
+  });
+
   it("counts containment SEPARATELY from the candidate count", async () => {
     // Folding them would let a fully-faulted containment pass look like a complete calibration: the counts
     // would still add up, because they would be the same number twice.
@@ -910,15 +1138,23 @@ describe("the emitted calibration record", () => {
     for (const forbidden of ["http", "://", "querySelector", "<", "textContent", "purposeType", "aria-labelledby"]) {
       expect(json, forbidden).not.toContain(forbidden);
     }
-    // Every Hangul run in the record must be a candidate label WE wrote. An open scan, not a denylist: a
-    // four-string denylist is exactly what let two wording variants through on the previous unit.
-    const ours = new Set([
+    // Every Hangul run in the record must be a string from OUR OWN frozen constants. The allowlist is built
+    // from those constants alone — an earlier version derived half of it FROM THE RECORD, so any Hangul that
+    // arrived as a candidate `label` allowlisted itself.
+    //
+    // And the record under test is now produced by the REAL association script over a fake DOM whose controls
+    // carry Korean `aria-label`s ("자체개발", "업체를 통한 연동"). A stubbed `rows: []` could not have leaked
+    // anything whatever the script did, so this assertion had nothing to catch.
+    const ours = new Set<string>([
       ...WING_STAGE2_PURPOSE_OPTION_CANDIDATES.map((c) => c.exactText),
-      ...(json.match(/[가-힣][가-힣\s().]*/g) ?? []).filter((s) => rec.targets.some((t) => t.candidates.some((c) => c.label === s))),
+      ...Object.values(WING_STAGE2_RECON_CANDIDATES).flat().map((c) => c.exactText),
     ]);
-    for (const run of json.match(/[가-힣][가-힣\s().]*/g) ?? []) {
+    const runs = json.match(/[가-힣][가-힣\s().]*/g) ?? [];
+    for (const run of runs) {
       expect(ours.has(run), `unexpected Hangul in the record: ${run}`).toBe(true);
     }
+    // The page's own wording was in front of the instrument and did not come back.
+    expect(json).not.toContain("업체를 통한 연동");
   });
 });
 
@@ -1079,7 +1315,8 @@ describe("the driver seams — dedicated, sanitized, and actually reachable", ()
       ungroupedCount: 0,
       scanTruncated: false,
     });
-    const census = await new CoupangWingIssuanceDriver(page as never).choiceAssociationCensus(["자체개발", "직접입력"]);
+    const census = (await new CoupangWingIssuanceDriver(page as never).choiceAssociationCensus(["자체개발", "직접입력"]))!;
+    expect(census).not.toBeNull();
     expect(census.rows[0]!.nameSource).toBe("NONE");
     expect(census.rows[0]!.nameLengthBucket).toBe("none");
     // 9 is outside a two-candidate list: clamped, not carried.
@@ -1098,10 +1335,12 @@ describe("the driver seams — dedicated, sanitized, and actually reachable", ()
     expect(page.evaluated[0]).toContain("fixed-label-containment");
   });
 
-  it("both return a safe reading rather than throwing when the page returns nothing usable", async () => {
+  it("**both return null when the page returns nothing usable — not a reading of zeros**", async () => {
+    // The seam is where this matters most: the driver is the last place that can tell "the page said nothing"
+    // from "the page said nothing is there", and downstream only the first is a fault.
     const d = new CoupangWingIssuanceDriver(pageReturning(null) as never);
-    expect((await d.choiceAssociationCensus(["자체개발"])).rows).toEqual([]);
-    expect((await d.probeLabelContainment({ candidateQuery: "label", exactText: "x" })).exactVisible).toBe(0);
+    expect(await d.choiceAssociationCensus(["자체개발"])).toBeNull();
+    expect(await d.probeLabelContainment({ candidateQuery: "label", exactText: "x" })).toBeNull();
   });
 });
 

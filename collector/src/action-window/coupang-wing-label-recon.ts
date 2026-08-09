@@ -361,12 +361,18 @@ function interpretFor<K extends string>(
   raw: readonly WingReconRawRow[],
 ): { target: K; candidates: WingReconCandidateResult[]; uniqueCandidateIds: string[]; resolvedUnambiguously: boolean }[] {
   const byId = new Map<string, number>();
+  const shapeById = new Map<string, string>();
   const sigById = new Map<string, string>();
   const hiddenById = new Map<string, number>();
   const containmentById = new Map<string, FixedLabelContainmentReading>();
   const conflicting = new Set<string>();
   for (const r of raw) {
-    if (byId.has(r.targetId) && byId.get(r.targetId) !== r.matchCount) conflicting.add(r.targetId);
+    // A repeated candidate id is a conflict when ANY of its readings differ, not just the count. Comparing the
+    // count alone let two rows with the same count but different containment through, and the last one silently
+    // won — which is the same "reported twice, differently" case, one field over.
+    const shape = JSON.stringify([r.matchCount, r.sig ?? null, r.hiddenCount ?? null, r.containment ?? null]);
+    if (shapeById.has(r.targetId) && shapeById.get(r.targetId) !== shape) conflicting.add(r.targetId);
+    shapeById.set(r.targetId, shape);
     byId.set(r.targetId, r.matchCount);
     if (typeof r.sig === "string" && r.sig.length > 0) sigById.set(r.targetId, r.sig);
     // Optional readings: only a real number is recorded. `undefined` leaves the map empty and the row null —

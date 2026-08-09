@@ -1296,7 +1296,11 @@ export interface WingChoiceAssociation {
   readonly hasIdAttr: boolean;
   /** How many `label[for=<this id>]` elements exist. >1 is a real (and reportable) page defect. */
   readonly labelForCount: number;
-  /** 1 when the control is inside a `<label>` (implicit association), else 0. */
+  /**
+   * 1 when the control is inside a `<label>` (implicit association), else 0. **0-or-1 by construction** —
+   * `closest()` returns the nearest ancestor, so nested `<label>` wrappers still report 1. It cannot express
+   * "labelled twice"; only {@link labelForCount} can.
+   */
   readonly ancestorLabelCount: number;
   readonly ariaLabelledbyRefCount: number;
   /** How many of those references resolved to an element. A shortfall is a broken association, and it is common. */
@@ -1317,6 +1321,12 @@ export interface WingChoiceAssociation {
 /** The document-level association reading plus one row per visible choice control. */
 export interface WingChoiceAssociationCensus {
   readonly visibleChoiceControlCount: number;
+  /**
+   * Controls that matched the selector but were EXCLUDED — either they do not paint or they are disabled. It is
+   * the UNION, not "hidden" alone, exactly as on the shape census: the name is the shorter of the two and this
+   * is the accurate reading. A painting-but-disabled radio is counted here, so this number must not be read as
+   * "not on screen".
+   */
   readonly hiddenChoiceControlCount: number;
   readonly rows: readonly WingChoiceAssociation[];
   /** True when more visible controls existed than the record carries — never a silently short list. */
@@ -1326,6 +1336,10 @@ export interface WingChoiceAssociationCensus {
   readonly largestNameGroupSize: number;
   /** Visible controls with no `name` attribute — genuinely ungrouped, now measured rather than assumed. */
   readonly ungroupedCount: number;
+  /**
+   * True when the scan hit its element cap with controls unexamined. Reported for the same reason the shape
+   * census reports it: a census over a prefix of the document is not a census of the document.
+   */
   readonly scanTruncated: boolean;
   /** How many caller candidates the comparison ran against. A record cannot claim coverage it did not have. */
   readonly candidatesCompared: number;
@@ -1466,10 +1480,17 @@ export function buildWingChoiceAssociationScript(candidates: readonly string[]):
  * script bug (or a future edit that forgets the `-1` sentinel) can never make the record point at a candidate
  * that does not exist — a dangling index reads as a confident identification of nothing.
  */
-export function sanitizeChoiceAssociationCensus(raw: unknown, candidateCount: number): WingChoiceAssociationCensus {
-  const r = (raw ?? {}) as Record<string, unknown>;
+export function sanitizeChoiceAssociationCensus(
+  raw: unknown,
+  candidates: readonly string[],
+): WingChoiceAssociationCensus | null {
+  // `null` for an unusable reading, for the same reason the containment sanitizer returns one: a page that
+  // returned nothing must not become a complete census reporting zero controls. Only a THROW used to produce a
+  // fault; a silent nothing produced a finding.
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
   const nat = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
-  const cands = nat(candidateCount);
+  const cands = candidates.length;
   const idx = (v: unknown): number => {
     const n = typeof v === "number" && Number.isSafeInteger(v) ? v : -1;
     return n >= 0 && n < cands ? n : -1;
@@ -1503,6 +1524,8 @@ export function sanitizeChoiceAssociationCensus(raw: unknown, candidateCount: nu
     largestNameGroupSize: nat(r.largestNameGroupSize),
     ungroupedCount: nat(r.ungroupedCount),
     scanTruncated: r.scanTruncated === true,
-    candidatesCompared: cands,
+    // The candidates actually COMPARED — blanks are skipped in-page (an empty string matches every name), so
+    // counting them here would claim coverage the comparison did not have.
+    candidatesCompared: candidates.filter((c) => c.trim().length > 0).length,
   });
 }

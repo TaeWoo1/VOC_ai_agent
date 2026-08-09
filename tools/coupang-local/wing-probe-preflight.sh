@@ -198,7 +198,11 @@ quoted = shquote(resolved)
 # unless they are equal, so a run that measures something other than the displayed manifest cannot start.
 # On a STAGE-2 run the resolved scope belongs to the Stage-2 namespace, and the probe-scope pair must NOT be
 # written at all: those names would be read as a baseline scope, and the run measures no shipped locator.
-if sys.argv[3] in ("COUPANG_WING_STAGE2_RECON", "COUPANG_WING_STAGE2_LABEL_CALIBRATION"):
+# WHICH namespace is decided by the shell, via the one `is_stage2_phase` predicate every other branch uses, and
+# arrives here as a yes/no. It used to be a phase list duplicated inside this script — in the single
+# highest-consequence Stage-2 branch in the harness, the one deciding whether the run env gets a Stage-2 scope
+# or a probe scope. A third Stage-2 phase added to the predicate would have been missed here alone.
+if sys.argv[4] == "yes":
     lines.append("SELLEROPS_WING_STAGE2_TARGETS=" + quoted)
 else:
     lines.append("SELLEROPS_WING_PROBE_TARGETS=" + quoted)
@@ -215,7 +219,7 @@ try:
 except BaseException:
     if os.path.exists(tmp):
         os.unlink(tmp)
-    raise' "$RUN_ENV" "$M_TARGETS" "$M_PHASE" 2>/dev/null; then
+    raise' "$RUN_ENV" "$M_TARGETS" "$M_PHASE" "$(is_stage2_phase "$PHASE" && echo yes || echo no)" 2>/dev/null; then
   # This is the binding, not a convenience: without it, sourcing the run env can still reproduce a wider
   # scope than the one displayed. Refuse rather than pass with the binding silently skipped.
   echo "PREFLIGHT FAIL — could not bind the approved scope/phase to $RUN_ENV; refusing to present a manifest the run may not honor."

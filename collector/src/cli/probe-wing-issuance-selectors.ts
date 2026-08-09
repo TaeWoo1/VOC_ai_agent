@@ -155,7 +155,17 @@ export function wingRecordLabelSpec(target: WingRecordTarget): { candidateQuery:
  * a live failure is diagnosable (e.g. a real WING page navigating/closing under the read) without leaking any
  * message, selector, value, or URL. Mirrors the NAVER driver's sanitized fault fingerprinting.
  */
-export const WING_FAULT_FINGERPRINTS = ["CONTEXT_DESTROYED", "TARGET_CLOSED", "TIMEOUT", "EVAL_FAILED", "UNKNOWN"] as const;
+export const WING_FAULT_FINGERPRINTS = [
+  "CONTEXT_DESTROYED",
+  "TARGET_CLOSED",
+  "TIMEOUT",
+  "EVAL_FAILED",
+  // The evaluation RETURNED, and returned something no sanitizer can trust (undefined / null / a non-object).
+  // Its own category because it is not an error: nothing threw, so without this the reading would have been
+  // coerced into a complete set of zeros and recorded as a measurement.
+  "UNUSABLE_READING",
+  "UNKNOWN",
+] as const;
 export type WingFaultFingerprint = (typeof WING_FAULT_FINGERPRINTS)[number];
 
 export function wingFaultFingerprint(err: unknown): WingFaultFingerprint {
@@ -319,13 +329,13 @@ export interface WingSelectorRecordDeps {
    * READ-ONLY CONTAINMENT probe for one candidate — the label-calibration phase's first new measurement. Optional
    * for the same reason the others are: a run that cannot take it records that it could not.
    */
-  probeContainment?(spec: { candidateQuery: string; exactText: string }): Promise<FixedLabelContainmentReading>;
+  probeContainment?(spec: { candidateQuery: string; exactText: string }): Promise<FixedLabelContainmentReading | null>;
   /**
    * READ-ONLY label-ASSOCIATION census over the visible choice controls, compared against OUR fixed candidate
    * strings. The label-calibration phase's second new measurement, and the only one that touches the controls
    * themselves — still without selecting, clicking, or reading `checked`.
    */
-  choiceAssociationCensus?(candidates: readonly string[]): Promise<WingChoiceAssociationCensus>;
+  choiceAssociationCensus?(candidates: readonly string[]): Promise<WingChoiceAssociationCensus | null>;
   /**
    * READ-ONLY choice-control SHAPE census — the one measurement this recorder gained for Stage-2. Optional for
    * the same reason `probeCandidate` is: a run that cannot take it must record that it could not, never die.
@@ -519,7 +529,11 @@ async function sweepStage2(
       let containment: FixedLabelContainmentReading | undefined;
       if (containmentProbe) {
         try {
-          containment = await containmentProbe({ candidateQuery: spec.candidateQuery, exactText: spec.exactText });
+          const read = await containmentProbe({ candidateQuery: spec.candidateQuery, exactText: spec.exactText });
+          // A null reading is a FAULT, not a measurement. Left as a reading it would be zeros, and zeros fold to
+          // `ABSENT_EVERYWHERE` — the probe would report a confident absence for a page it could not read.
+          if (read) containment = read;
+          else containmentFaults.push({ id: spec.targetId, fault: "UNUSABLE_READING" });
         } catch (e) {
           containmentFaults.push({ id: spec.targetId, fault: wingFaultFingerprint(e) });
         }
@@ -550,7 +564,10 @@ async function sweepStage2(
   let associationFault: WingFaultFingerprint | null = null;
   if (calibration && deps.choiceAssociationCensus) {
     try {
-      association = await deps.choiceAssociationCensus(purposeCandidates.map((c) => c.exactText));
+      const read = await deps.choiceAssociationCensus(purposeCandidates.map((c) => c.exactText));
+      // Same rule as the containment probe: a null reading is a fault, never a census reporting zero controls.
+      if (read) association = read;
+      else associationFault = "UNUSABLE_READING";
     } catch (e) {
       associationFault = wingFaultFingerprint(e);
     }
@@ -679,6 +696,29 @@ export function resolveWingStage2Scope(env: Record<string, string | undefined>):
     return { requested: true, ok: false, refusal: "STAGE2_SCOPE_EMPTY", reason: "the Stage-2 scope resolved to no targets" };
   }
   return { requested: true, ok: true, phase: runPhase, targets: resolved.targets };
+}
+
+/**
+ * The PRE-LAUNCH blind refusal, as a pure decision: the message to print, or `null` to proceed.
+ *
+ * Extracted from `main()` because a gate that only `main()` can reach is a gate no test can run, and the
+ * shipped candidate list is non-empty — so in-place the branch was unreachable by construction and the only
+ * assertion possible was on its source text. That is the defect shape this workstream keeps rediscovering.
+ * The candidate list is a parameter for the same reason it is a parameter on the sweep.
+ *
+ * `main()` still owns the `return` that stops the launch, and a source pin covers that one line; everything
+ * about WHETHER to refuse, and WHAT the operator is told, is decided here and tested directly.
+ */
+export function calibrationLaunchRefusal(
+  isCalibrationRun: boolean,
+  candidates: readonly WingPurposeOptionCandidate[],
+): string | null {
+  if (!isCalibrationRun || !wingLabelCalibrationBlind(candidates)) return null;
+  return (
+    `Refusing to launch: ${WING_STAGE2_LABEL_CALIBRATION_PHASE} has no purpose-option candidates ` +
+    `(${WING_LABEL_CALIBRATION_BLIND_REASON}). The association census would compare every control against an ` +
+    "empty list and report no match for a reason about us, not WING. No browser launched."
+  );
 }
 
 export function stage2RefusalMessage(refusal: WingStage2Refusal, reason: string): string {
@@ -1122,12 +1162,9 @@ async function main(): Promise<void> {
   // Refuse BEFORE Chrome launches, not at the sweep. The sweep's own blind gate stays (it is what a programmatic
   // caller hits), but an operator who is about to log in, navigate and press a real marketplace control should
   // learn that the instrument cannot answer the question before they do any of it — not after.
-  if (isCalibrationRun && wingLabelCalibrationBlind(WING_STAGE2_PURPOSE_OPTION_CANDIDATES)) {
-    console.error(
-      `Refusing to launch: ${WING_STAGE2_LABEL_CALIBRATION_PHASE} has no purpose-option candidates ` +
-        `(${WING_LABEL_CALIBRATION_BLIND_REASON}). The association census would compare every control against an ` +
-        "empty list and report no match for a reason about us, not WING. No browser launched.",
-    );
+  const blindRefusal = calibrationLaunchRefusal(isCalibrationRun, WING_STAGE2_PURPOSE_OPTION_CANDIDATES);
+  if (blindRefusal) {
+    console.error(blindRefusal);
     process.exitCode = 2;
     return;
   }
