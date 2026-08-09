@@ -42,7 +42,11 @@ import { screenApiCenterUrl } from "./observe-api-center";
 // Pure leaf (zero imports): the Coupang WING host screen for the WING selector-probe phase. Screening the
 // entry URL to the WING host (not the NAVER API-center host) is the ONLY channel-specific step in this gate.
 import { screenWingUrl, isCanonicalWingProbeSubset, WING_PROBE_TARGET_NAMES } from "./coupang-wing-classifier";
-import { WING_RECON_APPROVED_SCOPE } from "../action-window/coupang-wing-label-recon";
+import {
+  WING_RECON_APPROVED_SCOPE,
+  WING_STAGE2_RECON_TARGETS,
+  resolveWingStage2ReconScope,
+} from "../action-window/coupang-wing-label-recon";
 // Pure leaf constants (no Playwright): the two operator actions the WING issuance flow must keep separate.
 import { WING_KEY_CREATION_ACTION, WING_REVEAL_OPERATOR_ACTION } from "./coupang-wing-classifier";
 
@@ -72,6 +76,11 @@ export const CALIBRATION_PHASES = [
   // under approval granted for the first. Same capabilities, same READ_ONLY mode, same no-highlight guarantee;
   // its probe scope is additionally confined to the unresolved recon targets (§ step 7d).
   "COUPANG_WING_LABEL_RECON",
+  // The STAGE-2 recon phase. Same read-only recorder again, but on a screen the operator reaches by pressing
+  // 발급 themselves first — so the manifest describes a surface from which the final, key-creating 확인 is
+  // reachable, which the two phases above never are. That difference is the whole reason it is separately
+  // approvable; the agent's capability is if anything narrower (no highlight, no shipped-label baseline).
+  "COUPANG_WING_STAGE2_RECON",
   // The WING issuance-form REVEAL phase. The agent highlights the live-calibrated 발급 control and RESTS; the
   // OPERATOR presses it. It is a real marketplace action, so it needs its own grant — but it is deliberately NOT
   // declared as key creation: on the official Coupang flow 발급 opens the configuration step and the key is
@@ -118,6 +127,10 @@ export const APPROVAL_ACTIONS = [
   // Read-only Phase-B selector probe: count how many candidates a target's FIXED-LABEL locator matches
   // (value-free integer + a highlightable boolean). It NEVER highlights, tags, clicks, or reads a value.
   "PROBE_TARGET_MATCHCOUNT",
+  // Read-only Stage-2 shape census: how many painting, enabled choice controls there are and what CATEGORY each
+  // is (closed-vocabulary tag / input-type / ARIA role + counts). It reads no text, no attribute values, no
+  // element identity, and no geometry — and it never clicks, selects, or highlights.
+  "CHOICE_CONTROL_SHAPE_CENSUS",
 ] as const;
 export type ApprovalAction = (typeof APPROVAL_ACTIONS)[number];
 
@@ -445,6 +458,26 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     allowsHighlight: false,
     mode: "READ_ONLY",
   },
+  COUPANG_WING_STAGE2_RECON: {
+    phase: "COUPANG_WING_STAGE2_RECON",
+    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    driver: "CoupangWingIssuanceDriver (read-only Stage-2 candidate sweep + choice-control shape census)",
+    // Same read-only capability as the label recon, plus ONE new measurement: the choice-control shape census
+    // (closed-vocabulary tag/type/role categories and counts — no text, no attributes, no values). What makes
+    // it separately approvable is not a stronger action but a different SURFACE: the operator has already
+    // pressed 발급, so this runs on a screen from which the final 확인 is reachable. The agent still highlights
+    // nothing, tags nothing, clicks nothing, selects no purpose, and reads no value.
+    capableActions: [
+      "OPEN_DEDICATED_WINDOW",
+      "WAIT_OPERATOR_LOGIN_NAV",
+      "CLASSIFY_SANITIZED_PAGE_CATEGORY",
+      "STRUCTURAL_CENSUS",
+      "PROBE_TARGET_MATCHCOUNT",
+      "CHOICE_CONTROL_SHAPE_CENSUS",
+    ],
+    allowsHighlight: false,
+    mode: "READ_ONLY",
+  },
   COUPANG_WING_ISSUANCE_FORM_REVEAL: {
     phase: "COUPANG_WING_ISSUANCE_FORM_REVEAL",
     cli: "src/cli/run-coupang-wing-reveal-live.ts",
@@ -504,6 +537,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
 export const WING_PHASES: readonly CalibrationPhase[] = [
   "COUPANG_WING_SELECTOR_PROBE",
   "COUPANG_WING_LABEL_RECON",
+  "COUPANG_WING_STAGE2_RECON",
   "COUPANG_WING_ISSUANCE_FORM_REVEAL",
   "COUPANG_WING_KEY_DELETION",
 ];
@@ -553,6 +587,7 @@ export const APPROVAL_PREREQ_CAUSES = [
   // The WING selector-probe per-run target scope must be a non-empty canonical subset of the fixed target set.
   "WING_PROBE_TARGETS_MISMATCH",
   "WING_RECON_TARGETS_MISMATCH",
+  "WING_STAGE2_TARGETS_MISMATCH",
   // The WING issuance-form REVEAL phase requires its immutable operator-reveal descriptor, exactly.
   "MISSING_REVEAL_ACTION_CONTRACT",
   "REVEAL_ACTION_CONTRACT_MISMATCH",
@@ -578,6 +613,7 @@ export const ENTRYPOINT_PHASES = [
   "API_ISSUANCE_SELECTOR_PROBE",
   "COUPANG_WING_SELECTOR_PROBE",
   "COUPANG_WING_LABEL_RECON",
+  "COUPANG_WING_STAGE2_RECON",
   "COUPANG_WING_ISSUANCE_FORM_REVEAL",
   "COUPANG_WING_KEY_DELETION",
   "API_ISSUANCE_FE_LIVE_PROOF",
@@ -656,6 +692,21 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
     entrypointCommandId: "probe-wing-issuance-selectors",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 오픈API 발급 화면에서 준비되면 ready 를 보내세요. SellerOps는 아직 확정되지 않은 대상들의 여러 후보 라벨에 대해 일치 수만 읽습니다(강조·클릭·입력·값 읽기 없음). 후보가 하나로 좁혀져도 이 실행은 선택자를 바꾸지 않습니다.",
+    emitsFrontendUrl: false,
+  },
+  // The STAGE-2 recon: the same CLI and the same dedicated Chrome again, so the entrypoint contract is
+  // identical. The summary is the one thing that must differ, and materially: the operator is being asked to
+  // press 발급 THEMSELVES before signalling ready, so it has to say both that SellerOps will not press it and
+  // that they must stop at the purpose screen without choosing anything or pressing 확인.
+  COUPANG_WING_STAGE2_RECON: {
+    entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
+    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    entrypointCommandId: "probe-wing-issuance-selectors",
+    operatorActionSummary:
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동한 뒤, 오픈API 화면에서 'API Key 발급 받기'를 " +
+      "직접 눌러 사용 목적 선택 화면을 여세요(SellerOps는 누르지 않습니다). 그 화면이 그대로 떠 있는 상태에서 ready 를 보내세요. " +
+      "SellerOps는 선택 항목의 개수와 종류, 그리고 미리 정해 둔 후보 라벨의 일치 수만 읽습니다. 목적을 선택하지 않고, " +
+      "업체명/URL/IP를 입력하지 않으며, '확인'(최종 발급)은 절대 누르지 않습니다(강조·클릭·입력·값 읽기 없음).",
     emitsFrontendUrl: false,
   },
   // The WING issuance-form REVEAL phase: a CLI-launched dedicated Chrome. The operator presses 발급 themselves
@@ -778,6 +829,11 @@ export interface ApprovalPrereqInput {
    * Validated as a canonical subset, so scoping can only ever REDUCE what the probe measures, never widen it.
    */
   requestedProbeTargets?: readonly string[];
+  /**
+   * Stage-2 recon scope, in its own field for the same reason it has its own namespace: a caller that meant to
+   * narrow a selector probe must not be able to narrow a Stage-2 sweep by accident, or vice versa.
+   */
+  requestedStage2Targets?: readonly string[];
   runId: string;
   approvalId: string;
   gitSha: string;
@@ -1046,6 +1102,23 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
     }
   }
 
+  // 7e) The Stage-2 recon resolves its scope from its OWN namespace. `purpose` / `vendor_url` / `confirm` are
+  // not canonical probe targets and never become them: widening `WING_PROBE_TARGET_NAMES` so one parser could
+  // be shared would let an ordinary selector probe be pointed at them too, which is a larger blast radius than
+  // this unit needs. Defaults to the full Stage-2 set; narrowing within it stays allowed; anything else refuses.
+  let wingStage2Targets: readonly string[] | undefined;
+  if (spec.phase === "COUPANG_WING_STAGE2_RECON") {
+    const requested = input.requestedStage2Targets;
+    const resolved = resolveWingStage2ReconScope(requested === undefined ? undefined : requested.join(","));
+    if (!resolved.ok) {
+      return fail("WING_STAGE2_TARGETS_MISMATCH", `the Stage-2 recon scope must be a non-empty subset of ${WING_STAGE2_RECON_TARGETS.join(", ")}`);
+    }
+    if (resolved.targets.length === 0) {
+      return fail("WING_STAGE2_TARGETS_MISMATCH", "the Stage-2 recon scope resolved to no targets");
+    }
+    wingStage2Targets = resolved.targets;
+  }
+
   // 8) The account binding must be a sanitized DESCRIPTION — never a raw internal id/token. Guarded HERE (the
   // single gate every caller — phased CLI and inline preflight alike — passes through) so no path can echo a
   // raw account/store/org id into the manifest.
@@ -1246,6 +1319,12 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
     // just `["delete"]`) so the operator approves exactly which targets the read-only probe measures.
     ...(spec.phase === "COUPANG_WING_SELECTOR_PROBE" || spec.phase === "COUPANG_WING_LABEL_RECON"
       ? { probeTargets: wingProbeTargets ?? [...WING_PROBE_TARGET_NAMES] }
+      : {}),
+    // Stage-2 recon only: the resolved candidate-target scope, in its own field. Deliberately NOT reusing
+    // `probeTargets` — these names come from a different namespace, and a reader (or a shell harness) matching
+    // on `probeTargets` must never silently pick up a Stage-2 scope it cannot validate.
+    ...(spec.phase === "COUPANG_WING_STAGE2_RECON"
+      ? { stage2Targets: wingStage2Targets ?? [...WING_STAGE2_RECON_TARGETS] }
       : {}),
     // FE-run-host issuance proof only: surface the sole run client, the START_RUN cap, the zero write budget,
     // the supporting (never-START_RUN) surface, and the bound FE URL so the operator approves exactly this.

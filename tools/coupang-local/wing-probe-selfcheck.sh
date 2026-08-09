@@ -59,6 +59,19 @@ SELLEROPS_WING_PROBE_TARGETS='$4'
 ENV
 }
 
+# A STAGE-2 run env: NO probe scope (the run measures no shipped locator) and its own scope variable, exactly
+# what wing-probe-bootstrap.sh writes for that phase.
+write_stage2_env() {
+  cat > "$1" <<ENV
+WALKTHROUGH_RUN_ID='$4'
+WALKTHROUGH_APPROVAL_ID='$5'
+WALKTHROUGH_GIT_COMMIT='$2'
+WING_PROBE_BOOTSTRAP_EPOCH='$NOW'
+SELLEROPS_APPROVAL_PHASE='COUPANG_WING_STAGE2_RECON'
+SELLEROPS_WING_STAGE2_TARGETS='$3'
+ENV
+}
+
 # $1=name $2=expected exit (0|nonzero) $3=required marker ("" to skip) $4=run env path; rest = extra env
 run_case() {
   local name="$1" expect_exit="$2" marker="$3" run_env="$4"; shift 4
@@ -226,6 +239,52 @@ if [ -z "$TREE_DIRTY" ]; then
     echo "  FAIL  RECON_NORMAL   · approved PHASE not bound to the run env"; FAILED=1
   fi
   run_case "RECON_NORMAL   · run command carries BOTH phase variables" 0 "SELLEROPS_WING_APPROVED_PHASE=COUPANG_WING_LABEL_RECON" "$FIXTURES/recon.env"
+
+  # ── the STAGE-2 recon phase ────────────────────────────────────────────────
+  # This block exists because the phase shipped with ZERO harness coverage, and the first thing an end-to-end
+  # case caught was that the manifest described the run to the operator as an "API issuance highlight proof".
+  write_stage2_env "$FIXTURES/stage2.env" "$CUR_GIT" "purpose,self_dev,vendor_info,vendor_url,call_ip,confirm" "wt-selfcheck20" "apr-selfcheck20"
+  run_case "STAGE2_NORMAL  (purpose-selection recon scope)" 0 "PREFLIGHT PASS" "$FIXTURES/stage2.env"
+  run_case "STAGE2_NORMAL  · manifest phase" 0 "COUPANG_WING_STAGE2_RECON" "$FIXTURES/stage2.env"
+  run_case "STAGE2_NORMAL  · READ_ONLY mode" 0 "READ_ONLY" "$FIXTURES/stage2.env"
+  # The operation line is what the operator reads FIRST. It described a read-only recon as a highlight proof.
+  run_case "STAGE2_NORMAL  · operation names the Stage-2 recon" 0 "WING Stage-2 read-only recon" "$FIXTURES/stage2.env"
+  run_case "STAGE2_NORMAL  · max actions names the operator press" 0 "1 operator-performed 발급 press + 1 read-only Stage-2 recon session" "$FIXTURES/stage2.env"
+  # The three things the operator must NOT do, on the screen they are being sent to.
+  run_case "STAGE2_NORMAL  · operator told to press 발급 themselves" 0 "YOURSELF" "$FIXTURES/stage2.env"
+  run_case "STAGE2_NORMAL  · operator told never to press 확인" 0 "NEVER press '확인'" "$FIXTURES/stage2.env"
+  run_case "STAGE2_NORMAL  · operator told nothing is promoted" 0 "changes no shipped selector" "$FIXTURES/stage2.env"
+  run_case "STAGE2_NORMAL  · run command carries BOTH phase variables" 0 "SELLEROPS_WING_APPROVED_PHASE=COUPANG_WING_STAGE2_RECON" "$FIXTURES/stage2.env"
+  run_case "STAGE2_NORMAL  · run command carries the Stage-2 scope" 0 "SELLEROPS_WING_STAGE2_TARGETS=" "$FIXTURES/stage2.env"
+  # A Stage-2 run has no probe scope. If the command carried one it would describe a measurement it never makes.
+  if bash "$PREFLIGHT" >/dev/null 2>&1 <<<"" ; then :; fi
+  OUT_S2="$(env SELLEROPS_WING_PROBE_RUN_ENV="$FIXTURES/stage2.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1 || true)"
+  if grep -q "SELLEROPS_WING_PROBE_TARGETS=" <<<"$OUT_S2"; then
+    echo "  FAIL  STAGE2_NORMAL  · run command must NOT carry a probe scope"; FAILED=1
+  else
+    echo "  PASS  STAGE2_NORMAL  · run command carries no probe scope"
+  fi
+  if grep -qE "^SELLEROPS_WING_APPROVED_PHASE='COUPANG_WING_STAGE2_RECON'$" "$FIXTURES/stage2.env" \
+     && grep -qE "^SELLEROPS_WING_STAGE2_TARGETS='" "$FIXTURES/stage2.env" \
+     && ! grep -q "^SELLEROPS_WING_PROBE_TARGETS=" "$FIXTURES/stage2.env"; then
+    echo "  PASS  STAGE2_NORMAL  · Stage-2 scope + phase bound, probe scope absent"
+  else
+    echo "  FAIL  STAGE2_NORMAL  · Stage-2 run env binding is wrong"; FAILED=1
+  fi
+  # NARROWING must survive the round trip. It did not: the manifest CLI never read the Stage-2 scope variable,
+  # so a one-target request came back as all six in the manifest, the run env, and the printed command.
+  write_stage2_env "$FIXTURES/stage2-narrow.env" "$CUR_GIT" "purpose" "wt-selfcheck21" "apr-selfcheck21"
+  OUT_NARROW="$(env SELLEROPS_WING_PROBE_RUN_ENV="$FIXTURES/stage2-narrow.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1 || true)"
+  # The printed command wraps, so the scope is followed by a trailing " \" — anchoring on end-of-line would
+  # fail for the wrong reason and read as "narrowing was widened" when it was not.
+  NARROW_LINE="$(grep 'SELLEROPS_WING_STAGE2_TARGETS=' <<<"$OUT_NARROW" | head -1)"
+  if grep -qE "SELLEROPS_WING_STAGE2_TARGETS=purpose( |$)" <<<"$NARROW_LINE" \
+     && ! grep -q "confirm" <<<"$NARROW_LINE" \
+     && grep -q "stage-2 targets: purpose " <<<"$OUT_NARROW"; then
+    echo "  PASS  STAGE2_NARROW  · a narrowed scope survives into the printed run command"
+  else
+    echo "  FAIL  STAGE2_NARROW  · narrowing was silently widened"; FAILED=1
+  fi
   # Re-running must not accumulate duplicate phase assignments either.
   bash "$PREFLIGHT" >/dev/null 2>&1 <<<"" || true
   SELLEROPS_WING_PROBE_RUN_ENV="$FIXTURES/recon.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" >/dev/null 2>&1 || true
@@ -317,9 +376,21 @@ if [ -z "$TREE_DIRTY" ]; then
   fi
 else
   run_case "DIRTY_TREE     (uncommitted change refused)" nonzero "working tree is dirty" "$FIXTURES/normal.env"
-  echo "  SKIP  NORMAL / GIT_DIR_HIJACK / UNTRACKED_HIDE — the working tree is dirty, which the preflight"
-  echo "        refuses by design. Commit or stash, then re-run to exercise the PASS path."
+  echo "  SKIP  NORMAL / RECON_NORMAL / STAGE2_NORMAL / GIT_DIR_HIJACK / UNTRACKED_HIDE — the working tree is"
+  echo "        dirty, which the preflight refuses by design. Commit or stash, then re-run to exercise the"
+  echo "        PASS path."
+  SKIPPED=1
 fi
 
 echo
-if [ "$FAILED" = "0" ]; then echo "SELFCHECK PASS"; exit 0; else echo "SELFCHECK FAIL"; exit 1; fi
+# A skipped half is NOT a pass. This harness printed "SELFCHECK PASS" and exited 0 while every PASS-path case —
+# including the whole Stage-2 block — never ran, which is precisely how a green selfcheck comes to certify
+# coverage that did not execute. The reveal and deletion harnesses already report PARTIAL/2 for their own skips;
+# this one was the last holdout, and adding cases to it made the gap load-bearing.
+if [ "$FAILED" != "0" ]; then
+  echo "SELFCHECK FAIL"; exit 1
+elif [ "${SKIPPED:-0}" != "0" ]; then
+  echo "SELFCHECK PARTIAL — the PASS path was NOT exercised (dirty tree). Commit or stash, then re-run."; exit 2
+else
+  echo "SELFCHECK PASS"; exit 0
+fi

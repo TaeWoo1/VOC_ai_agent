@@ -64,6 +64,14 @@ import {
   wingReconProbes,
   type WingReconTarget,
   type WingReconTargetResult,
+  type WingStage2ReconTarget,
+  type WingStage2ReconTargetResult,
+  type WingStage2Precondition,
+  interpretWingStage2Recon,
+  wingStage2ReconProbes,
+  wingStage2Precondition,
+  resolveWingStage2ReconScope,
+  WING_STAGE2_RECON_TARGETS,
 } from "../action-window/coupang-wing-label-recon";
 import {
   LIVE_DOM_CALIBRATION_PENDING,
@@ -78,6 +86,7 @@ import {
   screenWingUrl,
   type WingObservation,
   type WingProbeScopeRefusal,
+  type WingChoiceControlCensus,
 } from "./coupang-wing-classifier";
 import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from "./live-run-approval";
 
@@ -208,6 +217,8 @@ export interface WingSelectorRecordResult {
    * is deliberately left `resolvedUnambiguously: false` for an offline reviewer with the signatures in hand.
    */
   recon: WingReconSweep | null;
+  /** The Stage-2 sweep, or null when this run was not a Stage-2 recon (or aborted before measuring anything). */
+  stage2: WingStage2Sweep | null;
   /** ALWAYS present: these candidate labels are unvalidated hypotheses until a live run proves matchCount === 1. */
   calibration: typeof LIVE_DOM_CALIBRATION_PENDING;
 }
@@ -228,6 +239,23 @@ export interface WingReconSweep {
   candidatesNotMeasured: number;
 }
 
+export interface WingStage2Sweep {
+  phase: typeof WING_STAGE2_RECON_PHASE;
+  /**
+   * Whether the surface passed the Stage-2 precondition. On anything but `OK` the sweep is NOT run: measuring
+   * Stage-2 hypotheses against the initial surface produces a full set of confident ABSENT verdicts for labels
+   * that were never on screen, which is worse than no reading at all.
+   */
+  precondition: WingStage2Precondition;
+  targets: WingStage2ReconTargetResult[];
+  faults: WingReconFault[];
+  candidatesMeasured: number;
+  candidatesNotMeasured: number;
+  /** Null when the census seam was absent or threw — never a fabricated zero-control reading. */
+  choiceControls: WingChoiceControlCensus | null;
+  choiceControlFault: WingFaultFingerprint | null;
+}
+
 /** Injected seams so the whole read-only recorder is unit-tested offline over fakes (no browser, no WING). */
 export interface WingSelectorRecordDeps {
   /** Block until the operator signals ready / abort / timeout (sentinel-file only). */
@@ -246,6 +274,11 @@ export interface WingSelectorRecordDeps {
     canHighlight: boolean;
     sig?: string;
   }>;
+  /**
+   * READ-ONLY choice-control SHAPE census — the one measurement this recorder gained for Stage-2. Optional for
+   * the same reason `probeCandidate` is: a run that cannot take it must record that it could not, never die.
+   */
+  choiceControlCensus?(): Promise<WingChoiceControlCensus>;
   /** Print sanitized instructions (noop in tests). */
   announce?(): void;
 }
@@ -253,6 +286,8 @@ export interface WingSelectorRecordDeps {
 /** How the orchestrator was scoped this run. `recon` is empty for an ordinary baseline probe. */
 export interface WingSelectorRecordOptions {
   recon?: readonly WingReconTarget[];
+  /** Stage-2 sweep scope. Mutually exclusive with `recon` by construction — the phase gate picks exactly one. */
+  stage2?: readonly WingStage2ReconTarget[];
 }
 
 /**
@@ -267,6 +302,7 @@ export async function runWingSelectorRecord(
   opts: WingSelectorRecordOptions = {},
 ): Promise<WingSelectorRecordResult> {
   const reconTargets = opts.recon ?? [];
+  const stage2Targets = opts.stage2 ?? [];
   deps.announce?.();
   const signal = await deps.waitForReady();
   if (signal !== "ready") {
@@ -282,6 +318,9 @@ export async function runWingSelectorRecord(
       // nothing"; null says the sweep never happened, which is the same measured-vs-unmeasured distinction the
       // per-candidate `NOT_MEASURED` verdict draws one level down.
       recon: null,
+      // Same reasoning as `recon: null` — an aborted run swept nothing, and an empty sweep object would read as
+      // "swept, found nothing" for a Stage-2 nobody ever looked at.
+      stage2: null,
       calibration: LIVE_DOM_CALIBRATION_PENDING,
     };
   }
@@ -340,7 +379,69 @@ export async function runWingSelectorRecord(
     aborted: false,
     issuedState: wingIssuedStateFrom(observation),
     recon: reconTargets.length > 0 ? await sweepReconCandidates(deps, reconTargets) : null,
+    stage2: stage2Targets.length > 0 ? await sweepStage2(deps, stage2Targets, observation) : null,
     calibration: LIVE_DOM_CALIBRATION_PENDING,
+  };
+}
+
+/**
+ * The STAGE-2 sweep: precondition first, then the same read-only candidate seam, then the shape census.
+ *
+ * The precondition is checked BEFORE any candidate is probed, and a failure returns zero candidate rows rather
+ * than a set of `ABSENT` ones. That ordering is the point — `ABSENT` means "measured, not found", and measuring
+ * Stage-2 labels on the initial surface would produce six confident absences for a screen nobody was looking at.
+ */
+async function sweepStage2(
+  deps: WingSelectorRecordDeps,
+  targets: readonly WingStage2ReconTarget[],
+  observation: WingObservation | null,
+): Promise<WingStage2Sweep> {
+  const precondition = wingStage2Precondition(observation);
+  const empty = {
+    phase: WING_STAGE2_RECON_PHASE,
+    precondition,
+    targets: [] as WingStage2ReconTargetResult[],
+    faults: [] as WingReconFault[],
+    candidatesMeasured: 0,
+    candidatesNotMeasured: 0,
+    choiceControls: null,
+    choiceControlFault: null,
+  };
+  if (precondition !== "OK") return empty;
+
+  const raw: { targetId: string; matchCount: number; sig?: string }[] = [];
+  const faults: WingReconFault[] = [];
+  const probe = deps.probeCandidate;
+  if (probe) {
+    for (const spec of wingStage2ReconProbes(targets)) {
+      try {
+        const res = await probe({ candidateQuery: spec.candidateQuery, exactText: spec.exactText });
+        raw.push({ targetId: spec.targetId, matchCount: res.matchCount, ...(res.sig ? { sig: res.sig } : {}) });
+      } catch (e) {
+        faults.push({ id: spec.targetId, fault: wingFaultFingerprint(e) });
+      }
+    }
+  }
+  let choiceControls: WingChoiceControlCensus | null = null;
+  let choiceControlFault: WingFaultFingerprint | null = null;
+  if (deps.choiceControlCensus) {
+    try {
+      choiceControls = await deps.choiceControlCensus();
+    } catch (e) {
+      choiceControlFault = wingFaultFingerprint(e);
+    }
+  }
+  const folded = interpretWingStage2Recon(targets, raw);
+  const all = folded.flatMap((t) => t.candidates);
+  return {
+    phase: WING_STAGE2_RECON_PHASE,
+    precondition,
+    targets: folded,
+    faults,
+    candidatesMeasured: all.filter((c) => c.verdict !== "NOT_MEASURED").length,
+    candidatesNotMeasured: all.filter((c) => c.verdict === "NOT_MEASURED").length,
+    choiceControls,
+    choiceControlFault,
   };
 }
 
@@ -382,6 +483,68 @@ async function sweepReconCandidates(
   };
 }
 
+
+/* ────────────────────────────── STAGE-2 recon scope (a third, separate gate) ────────────────────────────── */
+
+export const WING_STAGE2_REFUSALS = ["PHASE_APPROVAL_MISMATCH", "STAGE2_SCOPE_EMPTY", "STAGE2_TARGET_UNKNOWN"] as const;
+export type WingStage2Refusal = (typeof WING_STAGE2_REFUSALS)[number];
+
+/** Env var carrying the per-run Stage-2 scope. Its OWN name: a probe scope must never arm a Stage-2 sweep. */
+export const WING_STAGE2_TARGETS_ENV = "SELLEROPS_WING_STAGE2_TARGETS" as const;
+
+export type WingStage2ScopeResult =
+  | { requested: false }
+  | { requested: true; ok: true; targets: WingStage2ReconTarget[] }
+  | { requested: true; ok: false; refusal: WingStage2Refusal; reason: string };
+
+/**
+ * The STAGE-2 gate. Same fail-closed shape as {@link resolveWingReconScope}, and separate from it for the same
+ * reason that one is separate from the probe-scope gate: the phase is what the operator reads on the manifest.
+ *
+ * The both-directions check matters more here than anywhere else in this file. Without it, a Stage-2 manifest
+ * whose phase failed to reach the run would fall through to an ORDINARY BASELINE PROBE — the run would measure
+ * the three shipped labels on a Stage-2 screen, print a sanitized record, exit 0, and the operator would have
+ * spent a live grant on a reading nobody asked for. Refusing on a one-sided phase makes that impossible.
+ */
+export function resolveWingStage2Scope(env: Record<string, string | undefined>): WingStage2ScopeResult {
+  const own = (k: string): string | undefined => {
+    if (!Object.prototype.hasOwnProperty.call(env, k)) return undefined;
+    const v = (env as Record<string, unknown>)[k];
+    return typeof v === "string" ? v : undefined;
+  };
+  // EXACT, un-trimmed — matching the recon gate and the shell allowlist that authorizes it.
+  const runIsStage2 = (own(WING_APPROVAL_PHASE_ENV) ?? "") === WING_STAGE2_RECON_PHASE;
+  const approvedIsStage2 = (own(WING_APPROVED_PHASE_ENV) ?? "") === WING_STAGE2_RECON_PHASE;
+  if (!runIsStage2 && !approvedIsStage2) return { requested: false };
+  if (runIsStage2 !== approvedIsStage2) {
+    return {
+      requested: true,
+      ok: false,
+      refusal: "PHASE_APPROVAL_MISMATCH",
+      reason: runIsStage2
+        ? `${WING_APPROVAL_PHASE_ENV} requests ${WING_STAGE2_RECON_PHASE} but ${WING_APPROVED_PHASE_ENV} does not — ` +
+          "re-run the preflight so the approved phase is bound to this run (a phase left over from an earlier shell is not an approval)"
+        : `${WING_APPROVED_PHASE_ENV} is ${WING_STAGE2_RECON_PHASE} but this run did not request it — ` +
+          "use the command the preflight printed; without the phase this run would measure the shipped labels on the Stage-2 screen",
+    };
+  }
+  const resolved = resolveWingStage2ReconScope(own(WING_STAGE2_TARGETS_ENV));
+  if (!resolved.ok) {
+    return { requested: true, ok: false, refusal: "STAGE2_TARGET_UNKNOWN", reason: resolved.reason };
+  }
+  if (resolved.targets.length === 0) {
+    return { requested: true, ok: false, refusal: "STAGE2_SCOPE_EMPTY", reason: "the Stage-2 scope resolved to no targets" };
+  }
+  return { requested: true, ok: true, targets: resolved.targets };
+}
+
+export function stage2RefusalMessage(refusal: WingStage2Refusal, reason: string): string {
+  return (
+    `Refusing to launch: WING Stage-2 recon scope is not approved (${refusal}). ${reason}. ` +
+    "Re-bootstrap with the Stage-2 phase, then use the command the preflight prints. No browser launched."
+  );
+}
+
 /* ────────────────────────────── candidate-label RECON scope (a second, narrower gate) ────────────────────── */
 
 /**
@@ -391,6 +554,13 @@ async function sweepReconCandidates(
  * inline on the run command for exactly this phase and no other.
  */
 export const WING_LABEL_RECON_PHASE = "COUPANG_WING_LABEL_RECON" as const;
+/**
+ * The approval phase that turns this recorder into a STAGE-2 recon pass. A separate phase for the same reason
+ * the label recon is: the manifest is what the operator reads, and "sweep candidates on the screen you reach by
+ * pressing 발급" is different work from "sweep candidates on the page you land on" — different enough that the
+ * operator is being asked to press a real marketplace control before signalling ready.
+ */
+export const WING_STAGE2_RECON_PHASE = "COUPANG_WING_STAGE2_RECON" as const;
 // The two phase env vars are DEFINED in the pure classifier leaf (the WING action CLIs need them without
 // importing this recorder) and re-exported here, where the recon gate reads them. Two variables, for the same
 // reason there are two scope variables: review found the one-variable design broken in both directions — a stale
@@ -559,6 +729,60 @@ export function reconRecordFor(sweep: WingReconSweep | null): {
  * back to the full fixed set — is the whole failure this gate exists to prevent, and a source guard cannot
  * see it. Order-stable; never adds a target the gate did not return.
  */
+/**
+ * The Stage-2 sweep's sanitized wire form.
+ *
+ * It exists because the sweep without it was **computed and thrown away**: a live run under a granted Stage-2
+ * manifest swept six candidate sets, took the shape census, folded every verdict — and printed a record
+ * carrying none of it. Review caught that, and no test covered `main()`'s emitted record, which is why the
+ * suite was green. The measurement is the entire product of the run; a run that cannot report it is a grant
+ * spent for nothing.
+ */
+export function stage2RecordFor(sweep: WingStage2Sweep | null): {
+  phase: string;
+  precondition: WingStage2Precondition;
+  targets: { target: string; resolvedUnambiguously: boolean; uniqueCandidateIds: readonly string[]; candidates: WingReconRecordRow[] }[];
+  faults: WingReconFault[];
+  candidatesMeasured: number;
+  candidatesNotMeasured: number;
+  choiceControls: WingChoiceControlCensus | null;
+  choiceControlFault: WingFaultFingerprint | null;
+} | null {
+  if (!sweep) return null;
+  return {
+    phase: sweep.phase,
+    // FIRST field after the phase, deliberately: every count below is meaningless without it. A reading with
+    // `precondition: NO_VISIBLE_CHOICE_CONTROL` and zero targets is not "Stage-2 is empty", it is "no sweep ran".
+    precondition: sweep.precondition,
+    targets: sweep.targets.map((t) => ({
+      target: t.target,
+      resolvedUnambiguously: t.resolvedUnambiguously,
+      uniqueCandidateIds: t.uniqueCandidateIds,
+      // Same value-free row shape the recon record uses: our own candidate id + our own fixed label, an integer
+      // count, a closed verdict, and an opaque sig. Nothing read from the page.
+      candidates: t.candidates.map((c) => ({
+        id: c.id,
+        label: c.label,
+        // Stage-2 targets have no shipped locator, so there is no expected role to state. Saying so explicitly
+        // beats inventing one: `role: "button"` asserted from an expectation table is the original defect of
+        // this whole workstream.
+        expectedRole: "NOT_APPLICABLE_NO_SHIPPED_LOCATOR",
+        matchCount: c.matchCount,
+        verdict: c.verdict,
+        // Derived from the VERDICT, exactly as the recon record derives it, so NOT_MEASURED can never yield a
+        // highlightability claim it has no count for.
+        canHighlight: c.verdict === "UNIQUE",
+        sig16: c.sig16,
+      })),
+    })),
+    faults: sweep.faults,
+    candidatesMeasured: sweep.candidatesMeasured,
+    candidatesNotMeasured: sweep.candidatesNotMeasured,
+    choiceControls: sweep.choiceControls,
+    choiceControlFault: sweep.choiceControlFault,
+  };
+}
+
 export function scopedRecordTargetsFor(approved: readonly WingRecordTarget[]): WingRecordTarget[] {
   return WING_RECORD_TARGETS.filter((t) => approved.includes(t));
 }
@@ -619,6 +843,22 @@ function banner(): void {
   console.error(line);
 }
 
+/**
+ * Stage-2 instructions. Separate copy, because the operator is being asked to take a REAL marketplace action
+ * before signalling ready — and the one thing they must not do (press 확인) is on the screen they are opening.
+ */
+function printStage2Instructions(readyPath: string, abortPath: string): void {
+  console.error("");
+  console.error("WING Stage-2 recon: reach the purpose-selection screen YOURSELF in the opened window.");
+  console.error("  1) Log in and reach the open-API 키 발급 page (nothing on WING is clicked for you).");
+  console.error("  2) Press 'API Key 발급 받기' YOURSELF. SellerOps does not press it and never will.");
+  console.error("  3) STOP on the purpose screen. Choose nothing. Type nothing. Do NOT press '확인'.");
+  console.error('  4) With that screen still open, signal readiness by creating this file (or say "ready"):');
+  console.error(`       ${readyPath}`);
+  console.error(`     To abort the session, create: ${abortPath}  (or press Ctrl+C).`);
+  console.error("  Polling… (read-only — nothing is highlighted, selected, clicked, or navigated)");
+}
+
 function printInstructions(readyPath: string, abortPath: string): void {
   console.error("");
   console.error("WING selector recorder: navigate MANUALLY to the open-API 키 발급 page in the opened window.");
@@ -657,11 +897,27 @@ async function main(): Promise<void> {
     return;
   }
 
+  // The STAGE-2 gate runs FIRST, before the baseline probe scope, because it decides whether a baseline probe
+  // should happen at all. A Stage-2 run measures Stage-2 candidates and the shape census and NOTHING ELSE: the
+  // shipped locators have no meaning on that screen, and probing them there would be page interaction the
+  // manifest never described.
+  const stage2Scope = resolveWingStage2Scope(process.env);
+  if (stage2Scope.requested && !stage2Scope.ok) {
+    console.error(stage2RefusalMessage(stage2Scope.refusal, stage2Scope.reason));
+    process.exitCode = 2;
+    return;
+  }
+  const stage2Targets = stage2Scope.requested && stage2Scope.ok ? stage2Scope.targets : [];
+  const isStage2Run = stage2Targets.length > 0;
+
   // The per-run TARGET scope, gated BEFORE Chrome launches (it used to be resolved after, inside the run).
   // A live run never defaults to the full target set: both the requested scope and the preflight-bound
   // APPROVED scope must be explicit, canonical, and equal, so neither a forgotten export nor a hand-typed
   // command can widen past what the operator saw. (What a refusal prints is described at the branch below.)
-  const probeScope = resolveGatedWingProbeScope(process.env);
+  // …and SKIPPED entirely on a Stage-2 run, which has no baseline targets to scope. Skipping a gate is only
+  // safe because the gate above is strict in both directions: `isStage2Run` is true only when the requested
+  // phase AND the preflight-bound approved phase both name the Stage-2 phase exactly.
+  const probeScope = isStage2Run ? ({ ok: true, targets: [] } as const) : resolveGatedWingProbeScope(process.env);
   if (!probeScope.ok) {
     // stderr only, and only the closed enum + the gate's own token-free reason — the raw env value may hold
     // whatever the operator mistyped. stdout stays reserved for the sanitized calibration record.
@@ -682,6 +938,14 @@ async function main(): Promise<void> {
     return;
   }
   const reconTargets = reconScope.requested && reconScope.ok ? reconScope.targets : [];
+  // Belt and braces: the two sweeps are mutually exclusive by phase, and a future edit that let both arm would
+  // run twelve initial-surface hypotheses against a Stage-2 screen. The phases cannot both match, so this can
+  // only fire on a code change — which is exactly when it should.
+  if (isStage2Run && reconTargets.length > 0) {
+    console.error(stage2RefusalMessage("PHASE_APPROVAL_MISMATCH", "a run cannot be both a label recon and a Stage-2 recon"));
+    process.exitCode = 2;
+    return;
+  }
 
   const cfg = loadConfig();
   const runId = mintRunId();
@@ -719,13 +983,17 @@ async function main(): Promise<void> {
     // The recon sweep's ONLY page interaction — literally the same driver call as `probeTarget`, differing
     // solely in which fixed label it counts. No new in-page script, no new read, no new mutation.
     probeCandidate: (spec) => driver.probeFixedLabelMatch(spec),
-    announce: () => printInstructions(readyPath, abortPath),
+    // The Stage-2 shape census: ONE additional read-only in-page evaluation, of an audited constant script that
+    // returns closed-vocabulary categories and integers. Re-sanitized host-side so the record's vocabulary is
+    // guaranteed by code the page cannot influence.
+    choiceControlCensus: () => driver.choiceControlCensus(),
+    announce: () => isStage2Run ? printStage2Instructions(readyPath, abortPath) : printInstructions(readyPath, abortPath),
   };
 
   try {
     // `scopedTargets` was fixed by the approved-scope gate above, before the browser launched; `reconTargets`
     // is empty unless the recon phase gate armed it against that same approved scope.
-    const result = await runWingSelectorRecord(deps, scopedTargets, { recon: reconTargets });
+    const result = await runWingSelectorRecord(deps, scopedTargets, { recon: reconTargets, stage2: stage2Targets });
     console.error("");
     console.error("WING selector recorder complete. 이제 SellerOps 탭으로 직접 돌아가세요.");
     // SANITIZED calibration record → stdout. Integers/booleans/fixed-labels/roles/opaque sigs + the sanitized
@@ -750,6 +1018,9 @@ async function main(): Promise<void> {
           // labels, integer counts, closed verdicts, and opaque sigs — the same value-free classes the
           // baseline rows already carry.
           recon: reconRecordFor(result.recon),
+          // Null on any non-Stage-2 run. On a Stage-2 run this is the ENTIRE product of the grant: the
+          // precondition, the folded candidate verdicts, and the closed-vocabulary shape census.
+          stage2: stage2RecordFor(result.stage2),
         },
         null,
         2,
@@ -766,6 +1037,10 @@ async function main(): Promise<void> {
       reconCandidatesMeasured: result.recon?.candidatesMeasured ?? 0,
       reconCandidatesNotMeasured: result.recon?.candidatesNotMeasured ?? 0,
       reconTargetsResolved: result.recon?.targets.filter((t) => t.resolvedUnambiguously).length ?? 0,
+      stage2Precondition: result.stage2?.precondition ?? "NOT_RUN",
+      stage2CandidatesMeasured: result.stage2?.candidatesMeasured ?? 0,
+      stage2TargetsResolved: result.stage2?.targets.filter((t) => t.resolvedUnambiguously).length ?? 0,
+      stage2VisibleChoiceControls: result.stage2?.choiceControls?.visibleChoiceControlCount ?? -1,
     });
   } finally {
     removeSentinel(readyPath);

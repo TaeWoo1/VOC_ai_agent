@@ -1092,3 +1092,163 @@ export const EXTRACT_WING_CENSUS = `(function () {
     markerScanTruncated: mi >= MARKER_SCAN_CAP && markerCands.length > MARKER_SCAN_CAP && !(openApiMarkerPresent && credentialAnchorPresent)
   };
 })()`;
+
+/* ────────────────────────── Stage-2 choice-control SHAPE census ────────────────────────── */
+
+/**
+ * The closed vocabularies the shape census may return. Anything the page presents that is not on these lists is
+ * counted as `OTHER` / `other` — never echoed.
+ *
+ * That is the whole sanitization argument for this measurement. An open vocabulary would let the page choose the
+ * strings in our record: a `role="사용목적-자체개발"` would arrive as page text wearing a category's clothes. A
+ * closed list can only ever emit words WE wrote, so the output is bounded no matter what the DOM contains.
+ */
+export const WING_CONTROL_TAGS = ["INPUT", "LABEL", "BUTTON", "SELECT", "OPTION", "LI", "A", "SPAN", "DIV", "OTHER"] as const;
+export type WingControlTag = (typeof WING_CONTROL_TAGS)[number];
+
+export const WING_CONTROL_INPUT_TYPES = ["radio", "checkbox", "none", "other"] as const;
+export type WingControlInputType = (typeof WING_CONTROL_INPUT_TYPES)[number];
+
+export const WING_CONTROL_ROLES = ["radio", "checkbox", "option", "radiogroup", "listbox", "button", "none", "other"] as const;
+export type WingControlRole = (typeof WING_CONTROL_ROLES)[number];
+
+/** One shape bucket: a (tag, inputType, role) triple and how many painting, enabled controls had it. */
+export interface WingControlShape {
+  readonly tag: WingControlTag;
+  readonly inputType: WingControlInputType;
+  readonly role: WingControlRole;
+  readonly count: number;
+}
+
+/**
+ * What a Stage-2 choice-control shape reading contains. Integers and closed-vocabulary category names ONLY.
+ *
+ * Deliberately NOT here, and the reason each is refused: element text or accessible names (that is the recon
+ * sweep's job, and it compares against labels WE fixed rather than returning the page's), `id` / `class` /
+ * `name` / `data-*` (site-authored strings, and the `issue` calibration already got burned adopting one),
+ * `value` / `placeholder` / `checked` (operator data, and `checked` would leak a selection), geometry, and
+ * anything screenshot-shaped.
+ */
+export interface WingChoiceControlCensus {
+  /**
+   * Painting + enabled choice controls, by the same `paints()`/`enabled()` rules `choiceControlCount` uses —
+   * with one difference worth stating: this scan is capped at 4000 elements and `countVisible` is uncapped, so
+   * the two diverge above that. {@link scanTruncated} reports when the cap was reached.
+   */
+  readonly visibleChoiceControlCount: number;
+  /**
+   * Choice controls that matched the selector but were EXCLUDED — either they do not paint or they are disabled
+   * (`disabled` / `aria-disabled`). It is the union, not "hidden" alone; the name is the shorter of the two and
+   * this is the accurate reading.
+   *
+   * Reported because "0 visible" is ambiguous without it: a Stage-2 rendered but off-screen is a different
+   * finding from a Stage-2 that is not there, and the `issue` locator's own live failure was exactly that pair
+   * being indistinguishable.
+   */
+  readonly hiddenChoiceControlCount: number;
+  /**
+   * Shape buckets for the VISIBLE controls, descending by count then by category name (stable ordering).
+   * Host-side sanitization caps this at 64 buckets and sets {@link bucketsTruncated} if it had to drop any —
+   * silent loss would make a reading look complete when it is not.
+   */
+  readonly shapes: readonly WingControlShape[];
+  /** True when more distinct shapes existed than the record carries. */
+  readonly bucketsTruncated: boolean;
+  /** Painting group containers: `fieldset`, `[role=radiogroup]`, `[role=listbox]`. Counted, never identified. */
+  readonly groupContainerCount: number;
+  /** True if the scan hit its cap with candidates unexamined — absence is then not evidence of absence. */
+  readonly scanTruncated: boolean;
+}
+
+/**
+ * **READ-ONLY shape census of Stage-2's choice controls. ES5-plain string, for the same reason as
+ * {@link EXTRACT_WING_CENSUS}: tsx/esbuild injects a `__name` helper into serialized functions.**
+ *
+ * It answers "what KIND of controls are these" — radios? role-option cards? checkboxes? — which is the one thing
+ * the reveal run's bucket delta could not say. It does not answer "what do they say"; nothing here reads text.
+ */
+export const EXTRACT_WING_CHOICE_CONTROL_SHAPES = `(function () {
+  var slice = Function.prototype.call.bind(Array.prototype.slice);
+  var TAGS = ${JSON.stringify(WING_CONTROL_TAGS)};
+  var ITYPES = ${JSON.stringify(WING_CONTROL_INPUT_TYPES)};
+  var ROLES = ${JSON.stringify(WING_CONTROL_ROLES)};
+  var CAP = 4000;
+  function paints(node) {
+    if (!node || !node.getClientRects) { return false; }
+    var cs = window.getComputedStyle ? window.getComputedStyle(node) : null;
+    if (cs && (cs.display === 'none' || cs.visibility === 'hidden')) { return false; }
+    if (cs && cs.display === 'contents') { return node.childElementCount > 0; }
+    var rects = node.getClientRects();
+    if (!rects || rects.length === 0) { return false; }
+    var r = node.getBoundingClientRect ? node.getBoundingClientRect() : null;
+    return !!r && r.width > 0 && r.height > 0;
+  }
+  function enabled(node) { return !(node.disabled === true || (node.getAttribute && node.getAttribute('aria-disabled') === 'true')); }
+  /* Closed-vocabulary mapping. An unlisted value becomes the catch-all — the page never picks our strings. */
+  function pick(list, v, fallback) { return list.indexOf(v) === -1 ? fallback : v; }
+  var els;
+  try { els = slice(document.querySelectorAll("input[type='radio'], input[type='checkbox'], [role='radio'], [role='option']")); }
+  catch (e) { els = []; }
+  var visible = 0, hidden = 0, keys = {}, i, el, tag, itype, role, key;
+  for (i = 0; i < els.length && i < CAP; i++) {
+    el = els[i];
+    if (!paints(el) || !enabled(el)) { hidden++; continue; }
+    visible++;
+    tag = pick(TAGS, String(el.tagName || '').toUpperCase(), 'OTHER');
+    itype = String(el.tagName || '').toUpperCase() === 'INPUT' ? pick(ITYPES, String(el.type || ''), 'other') : 'none';
+    role = el.getAttribute && el.getAttribute('role') ? pick(ROLES, String(el.getAttribute('role')), 'other') : 'none';
+    key = tag + '|' + itype + '|' + role;
+    keys[key] = (keys[key] || 0) + 1;
+  }
+  var shapes = [], k;
+  for (k in keys) { if (Object.prototype.hasOwnProperty.call(keys, k)) {
+    var parts = k.split('|');
+    shapes.push({ tag: parts[0], inputType: parts[1], role: parts[2], count: keys[k] });
+  } }
+  shapes.sort(function (a, b) { return b.count - a.count || (a.tag + a.inputType + a.role < b.tag + b.inputType + b.role ? -1 : 1); });
+  var groups;
+  try { groups = slice(document.querySelectorAll("fieldset, [role='radiogroup'], [role='listbox']")); } catch (e2) { groups = []; }
+  var groupContainerCount = 0;
+  for (i = 0; i < groups.length; i++) { if (paints(groups[i])) { groupContainerCount++; } }
+  return {
+    visibleChoiceControlCount: visible,
+    hiddenChoiceControlCount: hidden,
+    shapes: shapes,
+    groupContainerCount: groupContainerCount,
+    scanTruncated: els.length > CAP
+  };
+})()`;
+
+/**
+ * Re-validate a shape reading HOST-side against the same closed vocabularies, and coerce every number.
+ *
+ * The in-page script already maps to the allow-lists, so this is defense in depth — but it is the cheap kind:
+ * the value crossing the boundary is whatever `evaluate` returned, and a bug in the script (or a future edit
+ * that forgets `pick`) would otherwise put an arbitrary page-authored string straight into a sanitized record.
+ * Re-checking here means the record's vocabulary is guaranteed by code the page cannot influence at all.
+ */
+export function sanitizeChoiceControlCensus(raw: unknown): WingChoiceControlCensus {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const nat = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
+  const inList = <T extends string>(list: readonly T[], v: unknown, fallback: T): T =>
+    typeof v === "string" && (list as readonly string[]).includes(v) ? (v as T) : fallback;
+  const rawShapes = Array.isArray(r.shapes) ? r.shapes : [];
+  const MAX_BUCKETS = 64;
+  const shapes: WingControlShape[] = rawShapes.slice(0, MAX_BUCKETS).map((s) => {
+    const o = (s ?? {}) as Record<string, unknown>;
+    return Object.freeze({
+      tag: inList(WING_CONTROL_TAGS, o.tag, "OTHER"),
+      inputType: inList(WING_CONTROL_INPUT_TYPES, o.inputType, "other"),
+      role: inList(WING_CONTROL_ROLES, o.role, "other"),
+      count: nat(o.count),
+    });
+  });
+  return Object.freeze({
+    visibleChoiceControlCount: nat(r.visibleChoiceControlCount),
+    hiddenChoiceControlCount: nat(r.hiddenChoiceControlCount),
+    shapes: Object.freeze(shapes),
+    bucketsTruncated: rawShapes.length > MAX_BUCKETS,
+    groupContainerCount: nat(r.groupContainerCount),
+    scanTruncated: r.scanTruncated === true,
+  });
+}

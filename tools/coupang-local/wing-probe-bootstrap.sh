@@ -19,6 +19,10 @@
 # The PHASE is likewise fixed here, from a two-value allowlist:
 #   COUPANG_WING_SELECTOR_PROBE  (default) — measure the SHIPPED fixed labels;
 #   COUPANG_WING_LABEL_RECON               — sweep the CANDIDATE label sets for the unresolved targets.
+#   COUPANG_WING_STAGE2_RECON              — sweep the STAGE-2 candidate sets on the purpose-selection screen
+#                                            the OPERATOR reaches by pressing 발급 themselves, plus a
+#                                            choice-control SHAPE census. Still read-only: no highlight, no
+#                                            click, no selection, no 확인, no value read.
 # They are different work under the same CLI, so they are different manifests and different grants. The recon
 # phase defaults its scope to the three unresolved targets rather than to `delete`, which it cannot sweep.
 #
@@ -50,9 +54,9 @@ git_hardened() {
 #    pattern and inject a second assignment into the file below.
 PHASE="${SELLEROPS_APPROVAL_PHASE:-COUPANG_WING_SELECTOR_PROBE}"
 case "$PHASE" in
-  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON) ;;
+  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON) ;;
   *)
-    echo "BOOTSTRAP FAIL — SELLEROPS_APPROVAL_PHASE must be COUPANG_WING_SELECTOR_PROBE or COUPANG_WING_LABEL_RECON."
+    echo "BOOTSTRAP FAIL — SELLEROPS_APPROVAL_PHASE must be COUPANG_WING_SELECTOR_PROBE, COUPANG_WING_LABEL_RECON, or COUPANG_WING_STAGE2_RECON."
     echo "                 (The DESTRUCTIVE deletion phase has its own harness and is not approvable from here.)"
     exit 1 ;;
 esac
@@ -62,15 +66,33 @@ esac
 # bootstrap that cannot reach a manifest.
 if [ "$PHASE" = "COUPANG_WING_LABEL_RECON" ]; then
   DEFAULT_TARGETS="self_dev,vendor_info,call_ip"
+elif [ "$PHASE" = "COUPANG_WING_STAGE2_RECON" ]; then
+  # A Stage-2 run measures NO shipped locator, so it has no probe scope. Defaulting to `delete` wrote a
+  # meaningless scope into the run env and printed "probe targets: delete" for a run that probes none of them.
+  DEFAULT_TARGETS=""
 else
   DEFAULT_TARGETS="delete"
 fi
 PROBE_TARGETS="${SELLEROPS_WING_PROBE_TARGETS:-$DEFAULT_TARGETS}"
 case "$PROBE_TARGETS" in
-  ""|*[!a-z_,]*|,*|*,|*,,*)
+  "") [ "$PHASE" = "COUPANG_WING_STAGE2_RECON" ] || { echo "BOOTSTRAP FAIL — SELLEROPS_WING_PROBE_TARGETS must not be empty."; exit 1; } ;;
+  *[!a-z_,]*|,*|*,|*,,*)
     echo "BOOTSTRAP FAIL — SELLEROPS_WING_PROBE_TARGETS must be a comma-separated list of lowercase target names."
     exit 1 ;;
 esac
+
+# The STAGE-2 scope is a SEPARATE variable over a SEPARATE namespace (purpose / vendor_url / confirm are not
+# canonical probe targets and never become them). It is only written for the Stage-2 phase, so a probe run
+# cannot carry one and a Stage-2 run cannot be narrowed by a probe scope.
+STAGE2_TARGETS=""
+if [ "$PHASE" = "COUPANG_WING_STAGE2_RECON" ]; then
+  STAGE2_TARGETS="${SELLEROPS_WING_STAGE2_TARGETS:-purpose,self_dev,vendor_info,vendor_url,call_ip,confirm}"
+  case "$STAGE2_TARGETS" in
+    ""|*[!a-z_0-9,]*|,*|*,|*,,*)
+      echo "BOOTSTRAP FAIL — SELLEROPS_WING_STAGE2_TARGETS must be a comma-separated list of lowercase target names."
+      exit 1 ;;
+  esac
+fi
 
 RUN_ID="wt-$(openssl rand -hex 6)"
 APPROVAL_ID="apr-$(openssl rand -hex 6)"
@@ -91,8 +113,13 @@ WALKTHROUGH_APPROVAL_ID='$APPROVAL_ID'
 WALKTHROUGH_GIT_COMMIT='$GIT_COMMIT'
 WING_PROBE_BOOTSTRAP_EPOCH='$BOOTSTRAP_EPOCH'
 SELLEROPS_APPROVAL_PHASE='$PHASE'
-SELLEROPS_WING_PROBE_TARGETS='$PROBE_TARGETS'
 ENV
+if [ -n "$PROBE_TARGETS" ]; then
+  printf "SELLEROPS_WING_PROBE_TARGETS='%s'\n" "$PROBE_TARGETS" >> "$RUN_ENV"
+fi
+if [ -n "$STAGE2_TARGETS" ]; then
+  printf "SELLEROPS_WING_STAGE2_TARGETS='%s'\n" "$STAGE2_TARGETS" >> "$RUN_ENV"
+fi
 
 echo "coupang WING selector-probe bootstrap complete → $RUN_ENV"
 echo
@@ -100,7 +127,14 @@ echo "  run id       : $RUN_ID"
 echo "  approval id  : $APPROVAL_ID  (binds the operator's single-use grant)"
 echo "  git commit   : $GIT_COMMIT"
 echo "  phase        : $PHASE (READ_ONLY)"
-echo "  probe targets: $PROBE_TARGETS"
+if [ -n "$PROBE_TARGETS" ]; then
+  echo "  probe targets: $PROBE_TARGETS"
+fi
+if [ -n "$STAGE2_TARGETS" ]; then
+  echo "  stage-2 scope: $STAGE2_TARGETS"
+  echo "  NOTE         : you press 'API Key 발급 받기' YOURSELF, stop on the purpose screen, choose nothing,"
+  echo "                 and never press '확인'. SellerOps only counts and categorises what is on screen."
+fi
 echo
 echo "next: tools/coupang-local/wing-probe-preflight.sh  (prepares + displays the Approval Manifest; no browser)"
 echo "note: re-running this bootstrap mints a NEW approval id — the previous grant is dead."

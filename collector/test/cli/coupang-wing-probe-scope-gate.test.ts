@@ -226,7 +226,25 @@ describe("the live CLI wires the gate, not the manifest resolver", () => {
     // the manifest the operator approved, while still printing a successful-looking record.
     expect(code).toContain("resolveWingReconScope(process.env, probeScope.targets)");
     expect(code).toMatch(/if \(reconScope\.requested && !reconScope\.ok\) \{/);
-    expect(code).toContain("{ recon: reconTargets }");
+    // The gated variables are what reach the recorder — asserted by NAME rather than as one exact literal, so
+    // adding a second gated scope (the Stage-2 sweep) does not read as the recon scope being unwired.
+    expect(code).toMatch(/runWingSelectorRecord\(deps, scopedTargets, \{[^}]*recon: reconTargets[^}]*\}\)/);
+    expect(code).toMatch(/runWingSelectorRecord\(deps, scopedTargets, \{[^}]*stage2: stage2Targets[^}]*\}\)/);
+  });
+
+  it("a STAGE-2 run resolves an EMPTY baseline probe scope — it measures no shipped locator", () => {
+    // Tested HERE because it is decided in `main()`, which is unexported and launches Chrome. The orchestrator
+    // test passes `[]` explicitly, so it proves the recorder honours an empty scope — not that main() computes
+    // one. The mutation battery found exactly that gap: reverting this line to the unconditional resolver left
+    // every unit test green while a Stage-2 run would probe the three shipped labels on the purpose screen.
+    expect(code).toMatch(/const probeScope = isStage2Run \? \(\{ ok: true, targets: \[\] \} as const\) : resolveGatedWingProbeScope\(process\.env\)/);
+    // …and `isStage2Run` is derived from the two-sided gate, never from a single variable.
+    expect(code).toContain("const stage2Scope = resolveWingStage2Scope(process.env);");
+    expect(code).toContain("const isStage2Run = stage2Targets.length > 0;");
+    // The Stage-2 gate must be evaluated BEFORE the probe scope it overrides.
+    expect(code.indexOf("resolveWingStage2Scope(process.env)")).toBeLessThan(code.indexOf("const probeScope ="));
+    // A refusal from the Stage-2 gate stops the run rather than falling through to a baseline probe.
+    expect(code).toMatch(/if \(stage2Scope\.requested && !stage2Scope\.ok\) \{/);
   });
 
   it("keeps the refusal branch — deleting it must not need the typechecker to be caught", () => {
