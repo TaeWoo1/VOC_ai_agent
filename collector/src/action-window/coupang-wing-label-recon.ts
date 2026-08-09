@@ -645,9 +645,21 @@ export interface WingStage2ReconEvidence {
    * role — not role-option cards, not a listbox.
    */
   readonly visibleShapes: readonly [{ readonly tag: "INPUT"; readonly inputType: "radio"; readonly role: "none"; readonly count: 2 }];
-  /** MEASURED: no `fieldset` / `[role=radiogroup]` / `[role=listbox]` painted. The radios are ungrouped. */
+  /**
+   * MEASURED: no painting `fieldset` / `[role=radiogroup]` / `[role=listbox]` in the document.
+   *
+   * That is NOT "the radios are ungrouped", which an earlier version of this comment claimed. HTML groups radios
+   * by their shared `name` attribute, which the census deliberately never reads, and `[role=group]` is not in
+   * the selector either. What was measured is the absence of three specific painting container kinds.
+   */
   readonly groupContainerCount: 0;
-  /** MEASURED: neither bound was hit, so absence here IS absence — not "absent from the part we looked at". */
+  /**
+   * MEASURED, and scoped to the SHAPE CENSUS only: neither of that script's bounds was hit.
+   *
+   * These flags say nothing about the candidate sweep. The seven absences below come from a different in-page
+   * script (`buildFixedLabelLocateScript`), which carries its own 4000-element cap and emits **no truncation
+   * flag at all** — see {@link absenceBounds}.
+   */
   readonly scanTruncated: false;
   readonly bucketsTruncated: false;
   /**
@@ -684,6 +696,24 @@ export interface WingStage2ReconEvidence {
   readonly candidatesMeasured: 8;
   readonly candidatesNotMeasured: 0;
   readonly probeFaults: 0;
+  /**
+   * **What an ABSENT verdict does and does not bound.** Two limits, both real, neither previously stated:
+   *
+   *  1. It counts **painting** matches only. The locate script also returns a `hiddenCount`, and the Stage-2
+   *     sweep discards it — so "ABSENT" here cannot distinguish "no element carries this text" from "an element
+   *     carries it but does not paint". That is the same visible/hidden ambiguity the `issue` locator was burned
+   *     by, and the shape census carries `hiddenChoiceControlCount` precisely because of it.
+   *  2. The locate script caps its candidate scan at 4000 elements and reports no truncation, so an absence is
+   *     not provably a whole-document absence.
+   *
+   * Recorded rather than fixed: carrying `hiddenCount` through the sweep is a capability change, and this unit
+   * lands evidence. It is the first thing the label-calibration unit should close.
+   */
+  readonly absenceBounds: {
+    readonly countsPaintingMatchesOnly: true;
+    readonly hiddenMatchCountCarried: false;
+    readonly candidateScanTruncationReported: false;
+  };
   /** ONE capture. No stability claim, no cross-run anchor. */
   readonly captureCount: 1;
   readonly signatureStability: "SINGLE_CAPTURE_NOT_ESTABLISHED";
@@ -762,6 +792,11 @@ export const WING_STAGE2_RECON_EVIDENCE: WingStage2ReconEvidence = Object.freeze
   candidatesMeasured: 8,
   candidatesNotMeasured: 0,
   probeFaults: 0,
+  absenceBounds: Object.freeze({
+    countsPaintingMatchesOnly: true,
+    hiddenMatchCountCarried: false,
+    candidateScanTruncationReported: false,
+  }) as WingStage2ReconEvidence["absenceBounds"],
   captureCount: 1,
   signatureStability: "SINGLE_CAPTURE_NOT_ESTABLISHED",
   purposeOptionSemanticsMeasured: false,

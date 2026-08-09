@@ -732,6 +732,13 @@ describe("WING_STAGE2_RECON_EVIDENCE — measured, operator-reported, and inferr
     expect(e.hiddenChoiceControlCount).toBe(10);
     expect(e.visibleShapes).toEqual([{ tag: "INPUT", inputType: "radio", role: "none", count: 2 }]);
     expect(e.groupContainerCount).toBe(0);
+    // Named "verbatim" and omitting four measured values is the shape this repo keeps catching. Both truncation
+    // flags carry a doc claim, the date is provenance, and the signature is the evidence itself — all four
+    // survived mutation until they were asserted.
+    expect(e.observedOn).toBe("2026-08-09");
+    expect(e.scanTruncated).toBe(false);
+    expect(e.bucketsTruncated).toBe(false);
+    expect(e.confirmLocated.sig16).toBe("c1b87128024cdec8");
   });
 
   it("the shape it recorded is one the closed vocabulary can express", () => {
@@ -756,6 +763,15 @@ describe("WING_STAGE2_RECON_EVIDENCE — measured, operator-reported, and inferr
     expect(e.candidatesNotMeasured).toBe(0);
     expect(e.probeFaults).toBe(0);
     expect(e.absentCandidateIds.length + 1).toBe(e.candidatesMeasured);
+    // DISTINCT. Length 7 alone is satisfied by a duplicate — and a record listing one id twice would claim a
+    // candidate was measured absent while it was never in the list, with `candidatesNotMeasured: 0` still
+    // asserting nothing went unmeasured. That is exactly the measured/unmeasured conflation NOT_MEASURED exists
+    // to prevent.
+    expect(new Set(e.absentCandidateIds).size).toBe(7);
+    // …and 8 is tied to the SET, not typed in. Adding a ninth candidate left the record claiming complete
+    // coverage of a set it did not cover.
+    const allCandidates = Object.values(WING_STAGE2_RECON_CANDIDATES).flat();
+    expect(e.candidatesMeasured).toBe(allCandidates.length);
   });
 
   it("every absent id is a REAL candidate id from the frozen sets", () => {
@@ -782,16 +798,65 @@ describe("WING_STAGE2_RECON_EVIDENCE — measured, operator-reported, and inferr
 
   it("the two radios' MEANING is unmeasured — a count is not a semantics", () => {
     expect(WING_STAGE2_RECON_EVIDENCE.purposeOptionSemanticsMeasured).toBe(false);
-    // Nothing in the record may name a purpose option. Guessing which radio is 자체개발 from a count of two is
-    // inventing a product decision.
+  });
+
+  it("the record's FIELD SET is exactly the declared one — no field may be added to it", () => {
+    // This replaces a four-string denylist whose comment claimed "nothing in the record may name a purpose
+    // option". `업체연동` (unspaced) and `자체 개발` (spaced) both walked straight through it, as did the
+    // operator-transcribed page sentence — and so did an extra `finalIssuanceControlSig16` re-labelling the
+    // signature the record is careful not to promote. A denylist cannot express "nothing"; an exact key set can.
+    const e = WING_STAGE2_RECON_EVIDENCE as unknown as Record<string, unknown>;
+    expect(Object.keys(e).sort()).toEqual([
+      "absenceBounds", "absenceExplanation", "absentCandidateIds", "bucketsTruncated", "candidatesMeasured",
+      "candidatesNotMeasured", "captureCount", "confirmLocated", "gitSha",
+      "groupContainerCount", "hiddenChoiceControlCount", "issuedStateReason", "keyCreationRuledOut",
+      "observedOn", "operatorPressedConfirm", "operatorSelectedPurpose", "precedingRefusal", "precondition",
+      "probeFaults", "purposeOptionSemanticsMeasured", "recordId", "runId", "scanTruncated",
+      "signatureStability", "surfaceVisibility", "visibleChoiceControlCount", "visibleShapes",
+    ].sort());
+    expect(Object.keys(WING_STAGE2_RECON_EVIDENCE.confirmLocated).sort()).toEqual(
+      ["effectMeasured", "isFinalIssuanceControl", "matchCount", "pressed", "sig16", "signatureRole", "verdict"],
+    );
+    expect(Object.keys(WING_STAGE2_RECON_EVIDENCE.absenceBounds).sort()).toEqual(
+      ["candidateScanTruncationReported", "countsPaintingMatchesOnly", "hiddenMatchCountCarried"],
+    );
+    expect(Object.keys(WING_STAGE2_RECON_EVIDENCE.absenceExplanation).sort()).toEqual(["hypothesis", "provenance", "tested"]);
+    expect(Object.keys(WING_STAGE2_RECON_EVIDENCE.precedingRefusal).sort()).toEqual(
+      ["candidatesMeasured", "cause", "precondition", "recordId"],
+    );
+    expect(Object.keys(WING_STAGE2_RECON_EVIDENCE.visibleShapes[0]).sort()).toEqual(["count", "inputType", "role", "tag"]);
+  });
+
+  it("carries NO page wording anywhere — asserted over the whole record, not a sample", () => {
+    // Every Hangul run in the serialized record, against an allowlist of the one we put there deliberately.
+    // A purpose option name, a heading, or the transcribed sentence appearing anywhere fails this, whatever
+    // its spacing — which is what the sampled denylist could not do.
     const json = JSON.stringify(WING_STAGE2_RECON_EVIDENCE);
-    for (const guess of ["자체개발", "직접입력", "외부", "업체 연동"]) expect(json).not.toContain(guess);
+    const runs = json.match(/[\uAC00-\uD7A3]+/g) ?? [];
+    expect(new Set(runs)).toEqual(new Set(["발급"]));
+    // …and that one occurrence is only inside the refusal's cause enum, describing operator sequencing.
+    expect(WING_STAGE2_RECON_EVIDENCE.precedingRefusal.cause).toContain("발급");
+    const withoutCause = JSON.stringify({ ...WING_STAGE2_RECON_EVIDENCE, precedingRefusal: null });
+    expect(withoutCause.match(/[\uAC00-\uD7A3]+/g)).toBeNull();
   });
 
   it("the absence EXPLANATION is marked inferred and untested", () => {
     const x = WING_STAGE2_RECON_EVIDENCE.absenceExplanation;
     expect(x.provenance).toBe("INFERRED");
     expect(x.tested).toBe(false);
+    // The hypothesis itself, by value: unpinned, it could be rewritten into a conclusion
+    // ("MEASURED_LABELS_ARE_ABSENT_FROM_STAGE2") while the two flags above still read cautious.
+    expect(x.hypothesis).toBe("WHOLE_TEXT_EXACT_MATCH_VS_NESTED_OR_PARTIAL_TEXT");
+  });
+
+  it("states what an ABSENT verdict does NOT bound", () => {
+    // Two real limits the first version of this record left unstated: the locate script counts PAINTING matches
+    // only and its hiddenCount is discarded by the sweep, and it caps its scan at 4000 with no truncation flag.
+    // The shape census's own truncation flags bound a DIFFERENT script and cannot be read as covering these.
+    const b = WING_STAGE2_RECON_EVIDENCE.absenceBounds;
+    expect(b.countsPaintingMatchesOnly).toBe(true);
+    expect(b.hiddenMatchCountCarried).toBe(false);
+    expect(b.candidateScanTruncationReported).toBe(false);
   });
 
   it("keeps the standing non-claims and the one-capture caveat", () => {
@@ -811,7 +876,13 @@ describe("WING_STAGE2_RECON_EVIDENCE — measured, operator-reported, and inferr
     const r = WING_STAGE2_RECON_EVIDENCE.precedingRefusal;
     expect(r.precondition).toBe("NO_VISIBLE_CHOICE_CONTROL");
     expect(r.candidatesMeasured).toBe(0);
+    // By VALUE. `not.toBe(<the other id>)` left this free to become anything at all — `wingrec_deadbeef0000`
+    // passed. The sibling record's test carries a comment saying review caught precisely this shape once
+    // already; reintroducing it here was a regression of a fixed bug, not a new gap.
+    expect(r.recordId).toBe("wingrec_d799c7b60ec5");
     expect(r.recordId).not.toBe(WING_STAGE2_RECON_EVIDENCE.recordId);
+    // The CAUSE is the point of keeping the refusal: it was operator sequencing, not the agent acting.
+    expect(r.cause).toBe("OPERATOR_SIGNALLED_READY_BEFORE_PRESSING_발급");
   });
 
   it("landing the evidence promoted NO selector and changed NO ordering", () => {

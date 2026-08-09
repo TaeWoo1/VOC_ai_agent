@@ -29,11 +29,17 @@ scanTruncated               false
 bucketsTruncated            false
 ```
 
-Not role-option cards, not a listbox — plain `<input type="radio">` with no ARIA role and **no `fieldset` /
-`radiogroup` / `listbox` wrapper**. Ten further controls matched the selector but were excluded (not painting,
-or disabled); that is the larger number, and omitting it would misdescribe the DOM as containing two.
+Not role-option cards, not a listbox — plain `<input type="radio">` with no ARIA role and **no painting
+`fieldset` / `radiogroup` / `listbox` container**. Ten further controls matched the selector but were excluded
+(not painting, or disabled); that is the larger number, and omitting it would misdescribe the DOM as containing
+two.
 
-Both truncation bounds were clear, so **absence here is absence** — not "absent from the part we looked at".
+> **Not "the radios are ungrouped."** HTML groups radios by their shared `name` attribute, which the census
+> deliberately never reads, and `[role=group]` is not in the selector either. Three specific painting container
+> kinds were absent. The code comment claimed the stronger thing and has been corrected.
+
+Both of the **shape census's** bounds were clear. Those flags say nothing about the candidate sweep below — see
+the limits on ABSENT.
 
 **Candidate labels: one resolved, seven measured absent.**
 
@@ -49,6 +55,20 @@ Both truncation bounds were clear, so **absence here is absence** — not "absen
 `candidatesMeasured: 8`, `candidatesNotMeasured: 0`, `probeFaults: 0`. These are **measured zeros**, and the
 arithmetic is what proves it: 7 absent + 1 unique = 8, none unmeasured, nothing faulted. Without that, an
 `ABSENT` is indistinguishable from a probe that never ran.
+
+### What an ABSENT does NOT bound — `absenceBounds`
+
+Two real limits, neither stated in the first draft:
+
+1. **It counts painting matches only.** The locate script also returns a `hiddenCount`, and the Stage-2 sweep
+   **discards it**. So `ABSENT` cannot distinguish "no element carries this text" from "an element carries it
+   but does not paint" — the same visible/hidden ambiguity the `issue` locator was burned by, and the reason the
+   shape census carries `hiddenChoiceControlCount` at all.
+2. **The locate script caps its scan at 4000 elements and reports no truncation flag.** So an absence is not
+   provably a whole-document absence.
+
+Recorded rather than fixed: carrying `hiddenCount` through the sweep is a capability change and this unit lands
+evidence. It is the first thing the label-calibration unit should close.
 
 ## What is deliberately NOT claimed
 
@@ -96,23 +116,46 @@ That distinction is the entire reason the gate exists, and this is the run that 
 
 ## Verification
 
-typecheck green. Full collector suite: **310 files / 7668 tests passed**, 18 files + 142 skipped (was 7657 —
-**+11**).
+typecheck green. Full collector suite: **310 files / 7671 tests passed**, 18 files + 142 skipped (was 7657 —
+**+14**).
 
-**Mutation guards: 20/20 caught** — `확인` promoted to the issuing control, its effect or press claimed, the sig
+**Mutation guards: 33/33 caught** — `확인` promoted to the issuing control, its effect or press claimed, the sig
 promoted to a runtime anchor, purpose semantics claimed measured, a purpose option named, inferred upgraded to
 measured, operator-reported upgraded to measured, an unmeasured candidate counted as measured, the absence list
 padded, a fabricated candidate id, the visible count disagreeing with the shape counts, capture count inflated,
 the stability caveat upgraded, `keyCreationRuledOut` softened, the refusal rewritten as a pass, the ordering
 re-sequenced, and the record only shallow-frozen.
 
-**Five of those first reported SURVIVED, and four were the runner's fault, not the code's.** `replace(old, new, 1)`
-hit the first occurrence — which for `captureCount`, `signatureStability` and `keyCreationRuledOut` lives in the
-earlier `WING_STAGE2_LIVE_EVENT` record, and for the candidate id lives in the interface's tuple type. The
-mutation never reached the constant under test, so "SURVIVED" meant "was never applied there". The same
-mis-aim happened once before in this workstream; each pattern is now anchored on context unique to the recon
-record. The fifth was a genuinely weak mutation (adding an unused property rather than erasing anything),
-rewritten to rewrite the refusal's verdict instead.
+### The battery reported false survivors, twice
+
+Five mutations first reported SURVIVED and **four were the runner's fault**: `replace(old, new, 1)` hit the first
+occurrence, which for `captureCount`, `signatureStability` and `keyCreationRuledOut` lives in the sibling
+`WING_STAGE2_LIVE_EVENT` record and for the candidate id lives in the interface's tuple type. The mutation never
+reached the constant under test, so "SURVIVED" meant "was never applied there". After re-aiming, two more did
+the same thing on the second round. A battery that reports a false survivor is as misleading as one reporting a
+false catch, and this file now has three sibling records sharing a field vocabulary — any future
+`indexOf`-based source slicing over it is ambiguous by construction.
+
+### Twelve real survivors, found by review
+
+The first battery's 20/20 was measuring less than it claimed. Independent review demonstrated twelve mutations
+passing with the suite green, and the pattern is one shape: **tests that assert around a value instead of the
+value.**
+
+- `scanTruncated` / `bucketsTruncated` — the doc's headline bound claim rested on two flags **no test read**.
+- `sig16`, `observedOn`, the refusal's `cause`, the inferred `hypothesis` — never asserted.
+- **`precedingRefusal.recordId` was pinned only as "different from the other id"**, so `wingrec_deadbeef0000`
+  passed. This is a verbatim regression of a bug already fixed in the sibling record, whose test carries a
+  comment saying review caught exactly this shape once before. Now pinned by value.
+- **A duplicated absent id satisfied every arithmetic check** — length 7, membership, `7 + 1 = 8` — while the
+  record claimed a candidate was measured absent that was not in the list. Closed with a distinctness assertion.
+- **`candidatesMeasured: 8` was tied to nothing**; a ninth candidate left the record claiming complete coverage
+  of a set it did not cover. Now derived from the candidate set.
+- **"A test asserts no purpose wording appears anywhere in the record" was a four-string denylist.** `업체연동`
+  (unspaced) and `자체 개발` (spaced) both walked through it, as did the transcribed page sentence. Replaced with
+  an exact field-set assertion plus a Hangul scan over the whole serialized record, allowlisting the single
+  deliberate occurrence. That also catches an added field re-labelling the signature as the issuance anchor —
+  which the doc had listed as caught while it was not.
 
 ## Not in this unit
 
