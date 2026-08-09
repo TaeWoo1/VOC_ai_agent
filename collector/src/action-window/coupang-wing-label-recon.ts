@@ -350,9 +350,10 @@ function interpretFor<K extends string>(
  * matched 0 — so the phrase is at least present in WING's vocabulary. Two is not one, and the initial surface is
  * not Stage-2, so that is a reason to MEASURE it, not to ship it.
  *
- * **NOT WIRED TO ANY RUNNER, and this note is accurate.** `resolveWingReconScope` sweeps
- * {@link WING_RECON_TARGETS} only; no code path reads this constant. It is a declared hypothesis set for the unit
- * that observes Stage-2 — deliberately inert until there is a real DOM to measure it against.
+ * **WIRED TO A RUNNER since 2026-08-09.** `probe-wing-issuance-selectors.ts` sweeps this set when the run's
+ * approved phase is `COUPANG_WING_STAGE2_RECON` and the Stage-2 precondition passes. (This note previously said
+ * the opposite, and asserted its own accuracy while a comment ten lines below already contradicted it.) It still
+ * holds NO promotion path: a candidate that resolves uniquely is recorded as evidence and nothing else.
  */
 export const WING_STAGE2_RECON_TARGETS = ["purpose", "self_dev", "vendor_info", "vendor_url", "call_ip", "confirm"] as const;
 export type WingStage2ReconTarget = (typeof WING_STAGE2_RECON_TARGETS)[number];

@@ -1130,16 +1130,30 @@ export interface WingControlShape {
  * anything screenshot-shaped.
  */
 export interface WingChoiceControlCensus {
-  /** Painting + enabled choice controls, by the same rule `choiceControlCount` uses. */
+  /**
+   * Painting + enabled choice controls, by the same `paints()`/`enabled()` rules `choiceControlCount` uses —
+   * with one difference worth stating: this scan is capped at 4000 elements and `countVisible` is uncapped, so
+   * the two diverge above that. {@link scanTruncated} reports when the cap was reached.
+   */
   readonly visibleChoiceControlCount: number;
   /**
-   * Choice controls that matched the selector but do NOT paint. Reported because "0 visible" is ambiguous
-   * without it: a Stage-2 rendered but off-screen is a different finding from a Stage-2 that is not there, and
-   * the `issue` locator's own live failure was exactly that pair being indistinguishable.
+   * Choice controls that matched the selector but were EXCLUDED — either they do not paint or they are disabled
+   * (`disabled` / `aria-disabled`). It is the union, not "hidden" alone; the name is the shorter of the two and
+   * this is the accurate reading.
+   *
+   * Reported because "0 visible" is ambiguous without it: a Stage-2 rendered but off-screen is a different
+   * finding from a Stage-2 that is not there, and the `issue` locator's own live failure was exactly that pair
+   * being indistinguishable.
    */
   readonly hiddenChoiceControlCount: number;
-  /** Shape buckets for the VISIBLE controls, descending by count then by category name (stable ordering). */
+  /**
+   * Shape buckets for the VISIBLE controls, descending by count then by category name (stable ordering).
+   * Host-side sanitization caps this at 64 buckets and sets {@link bucketsTruncated} if it had to drop any —
+   * silent loss would make a reading look complete when it is not.
+   */
   readonly shapes: readonly WingControlShape[];
+  /** True when more distinct shapes existed than the record carries. */
+  readonly bucketsTruncated: boolean;
   /** Painting group containers: `fieldset`, `[role=radiogroup]`, `[role=listbox]`. Counted, never identified. */
   readonly groupContainerCount: number;
   /** True if the scan hit its cap with candidates unexamined — absence is then not evidence of absence. */
@@ -1219,7 +1233,8 @@ export function sanitizeChoiceControlCensus(raw: unknown): WingChoiceControlCens
   const inList = <T extends string>(list: readonly T[], v: unknown, fallback: T): T =>
     typeof v === "string" && (list as readonly string[]).includes(v) ? (v as T) : fallback;
   const rawShapes = Array.isArray(r.shapes) ? r.shapes : [];
-  const shapes: WingControlShape[] = rawShapes.slice(0, 64).map((s) => {
+  const MAX_BUCKETS = 64;
+  const shapes: WingControlShape[] = rawShapes.slice(0, MAX_BUCKETS).map((s) => {
     const o = (s ?? {}) as Record<string, unknown>;
     return Object.freeze({
       tag: inList(WING_CONTROL_TAGS, o.tag, "OTHER"),
@@ -1232,6 +1247,7 @@ export function sanitizeChoiceControlCensus(raw: unknown): WingChoiceControlCens
     visibleChoiceControlCount: nat(r.visibleChoiceControlCount),
     hiddenChoiceControlCount: nat(r.hiddenChoiceControlCount),
     shapes: Object.freeze(shapes),
+    bucketsTruncated: rawShapes.length > MAX_BUCKETS,
     groupContainerCount: nat(r.groupContainerCount),
     scanTruncated: r.scanTruncated === true,
   });

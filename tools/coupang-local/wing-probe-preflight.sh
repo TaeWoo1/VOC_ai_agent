@@ -70,7 +70,14 @@ BOOTSTRAP_EPOCH="${WING_PROBE_BOOTSTRAP_EPOCH:-}"
 PHASE="${SELLEROPS_APPROVAL_PHASE:-}"
 PROBE_TARGETS="${SELLEROPS_WING_PROBE_TARGETS:-}"
 
-echo "Coupang WING selector-probe preflight — run=${RUN_ID:-?} git=${RUN_GIT:-?} phase=${PHASE:-?} targets=${PROBE_TARGETS:-?}"
+# The header must name the scope this RUN actually has. On a Stage-2 run there is no probe scope at all, and
+# printing `targets=delete` (the old default) described a measurement the run does not make.
+if [ "$PHASE" = "COUPANG_WING_STAGE2_RECON" ]; then
+  HEADER_TARGETS="${SELLEROPS_WING_STAGE2_TARGETS:-?} (stage-2)"
+else
+  HEADER_TARGETS="${PROBE_TARGETS:-?}"
+fi
+echo "Coupang WING selector-probe preflight — run=${RUN_ID:-?} git=${RUN_GIT:-?} phase=${PHASE:-?} targets=${HEADER_TARGETS}"
 echo "read-only local checks only — no browser, no Coupang call, no credential read"
 echo
 
@@ -216,7 +223,11 @@ echo
 echo "  ── APPROVAL MANIFEST (sanitized) ──"
 echo "  $M_CHANNEL · $M_OPERATION"
 echo "  $M_MODE · run ${RUN_ID:0:8}… · approval ${APPROVAL_ID:0:8}… · max: $M_MAX"
-echo "  phase: $M_PHASE · probe targets: $M_TARGETS · selectors calibrated: $M_CALIBRATED"
+if [ "$PHASE" = "COUPANG_WING_STAGE2_RECON" ]; then
+  echo "  phase: $M_PHASE · stage-2 targets: $M_TARGETS · selectors calibrated: $M_CALIBRATED"
+else
+  echo "  phase: $M_PHASE · probe targets: $M_TARGETS · selectors calibrated: $M_CALIBRATED"
+fi
 echo "  account: $M_ACCOUNT · host: $M_HOST · operator presence: required · expires: process-lifetime · git $CUR_GIT"
 echo "  Standing Safety Contract + full scope: docs/sellerops_live_approval_contract.md"
 echo

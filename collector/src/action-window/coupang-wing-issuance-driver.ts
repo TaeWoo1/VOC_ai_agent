@@ -681,9 +681,14 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
   /**
    * READ-ONLY shape census of the surface's choice controls — counts and closed-vocabulary categories only.
    *
-   * A DEDICATED method rather than a general `evaluate` seam on purpose. Exposing "run this string in the page"
-   * would make the driver's page-side surface unbounded and unauditable, and the set of scripts this driver may
-   * run is a property tests assert. This adds exactly one audited constant to that set.
+   * A DEDICATED method rather than a general `evaluate` seam on purpose: exposing "run this string in the page"
+   * would make the driver's page-side surface unbounded and unauditable. This adds exactly one audited constant
+   * to the set of scripts the driver can run.
+   *
+   * Note what is NOT true of this driver, since an earlier version of this comment claimed it: the
+   * evaluated-script SET is not bounded by a test here. `CoupangWingRevealDriver` has that guard (it asserts an
+   * exact `evalStr` call count); this driver has seven call sites and no such bound, so an eighth would be
+   * invisible. The source guard that does hold forbids every click/type/submit and every value read.
    */
   async choiceControlCensus(): Promise<WingChoiceControlCensus> {
     const page = this.activePage();

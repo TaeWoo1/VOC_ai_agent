@@ -27,6 +27,7 @@ import {
 import { CALIBRATION_PHASES, COUPANG_WING_ISSUANCE_REVEAL_ACTION, isWingCalibrationPhase } from "./approval-manifest";
 import { WING_ISSUE_SELECTOR_CALIBRATED } from "../action-window/coupang-wing-issuance-driver";
 import { resolveVisualReconScope } from "../action-window/api-issuance-calibration/visual-recon";
+import { resolveWingStage2ReconScope } from "../action-window/coupang-wing-label-recon";
 // The public WING host default for the Coupang WING selector-probe phase (pure leaf; no per-run input needed).
 import { WING_DEFAULT_URL, resolveWingProbeScope } from "./coupang-wing-classifier";
 import { COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION, COUPANG_WING_KEY_DELETION_SCOPE } from "./approval-manifest";
@@ -137,6 +138,23 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     }
     requestedProbeTargets = scope.targets;
   }
+  const isWingStage2Recon = phase === "COUPANG_WING_STAGE2_RECON";
+  // The Stage-2 scope, from its OWN env var. Without this the resolver only ever sees `undefined` and returns
+  // the full six — so `SELLEROPS_WING_STAGE2_TARGETS=purpose` produced a manifest listing all six targets and a
+  // run command carrying all six, while the bootstrap printed the narrower scope it was asked for. The
+  // narrowing path documented on `resolveWingStage2ReconScope` was dead on the harness route entirely.
+  let requestedStage2Targets: readonly string[] | undefined;
+  if (isWingStage2Recon) {
+    const raw = env("SELLEROPS_WING_STAGE2_TARGETS");
+    if (raw !== undefined) {
+      const scope = resolveWingStage2ReconScope(raw);
+      if (!scope.ok) {
+        process.stderr.write(`PREFLIGHT FAIL: approval_prerequisite (WING_STAGE2_TARGETS_MISMATCH): ${scope.reason}\n`);
+        return 1;
+      }
+      requestedStage2Targets = scope.targets;
+    }
+  }
   const isStructureObs = phase === "API_CENTER_STRUCTURE_OBSERVATION";
   const isFeLiveProof = phase === "API_ISSUANCE_FE_LIVE_PROOF";
   const hotkey = isStructureObs ? (env("SELLEROPS_CALIBRATION_HOTKEY") ?? "Ctrl+Shift+K") : undefined;
@@ -151,6 +169,8 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     ? "WING open-API read-only selector probe"
     : isWingLabelRecon
     ? "WING open-API read-only CANDIDATE-LABEL recon (measure only; no selector is changed by this run)"
+    : isWingStage2Recon
+    ? "WING Stage-2 read-only recon on the purpose-selection screen (the OPERATOR presses 발급 to open it; agent counts controls and candidate-label matches only — no highlight, no selection, no input, no 확인, no value read)"
     : isWingReveal
     ? "WING issuance-form reveal (the OPERATOR presses 발급; this press is not the key-creating action; agent performs no click/input/value read)"
     : isVisualRecon
@@ -168,6 +188,8 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     ? "1 read-only WING selector probe session"
     : isWingLabelRecon
     ? "1 read-only WING candidate-label recon session"
+    : isWingStage2Recon
+    ? "1 operator-performed 발급 press + 1 read-only Stage-2 recon session (candidate match counts + choice-control shape census)"
     : isWingReveal
     ? "1 operator-performed 발급 press + 1 sanitized observation"
     : isVisualRecon
@@ -239,6 +261,10 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     // this phase does not currently reach PREPARED and prints no destructive manifest. When it does again,
     // PREPARED is still not APPROVED — the single-use grant remains a separate human step.
     operatorDestructiveAction: isWingKeyDeletion ? COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION : undefined,
+    // Stage-2 recon only: the operator-requested scope from `SELLEROPS_WING_STAGE2_TARGETS`, resolved and
+    // canonicalised. Undefined on every other phase, and undefined when the var is unset (the gate then
+    // defaults to the full Stage-2 set).
+    ...(requestedStage2Targets ? { requestedStage2Targets } : {}),
     // Stated only for the WING deletion phase, from the single calibration constant. Every other phase leaves
     // this undefined so the gate applies its own default (NAVER's adapter flag; uncalibrated for WING).
     ...(isWingKeyDeletion ? { selectorsCalibrated: opts.selectorsCalibrated ?? WING_DELETION_SELECTORS_CALIBRATED } : {}),

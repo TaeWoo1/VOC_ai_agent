@@ -729,6 +729,60 @@ export function reconRecordFor(sweep: WingReconSweep | null): {
  * back to the full fixed set — is the whole failure this gate exists to prevent, and a source guard cannot
  * see it. Order-stable; never adds a target the gate did not return.
  */
+/**
+ * The Stage-2 sweep's sanitized wire form.
+ *
+ * It exists because the sweep without it was **computed and thrown away**: a live run under a granted Stage-2
+ * manifest swept six candidate sets, took the shape census, folded every verdict — and printed a record
+ * carrying none of it. Review caught that, and no test covered `main()`'s emitted record, which is why the
+ * suite was green. The measurement is the entire product of the run; a run that cannot report it is a grant
+ * spent for nothing.
+ */
+export function stage2RecordFor(sweep: WingStage2Sweep | null): {
+  phase: string;
+  precondition: WingStage2Precondition;
+  targets: { target: string; resolvedUnambiguously: boolean; uniqueCandidateIds: readonly string[]; candidates: WingReconRecordRow[] }[];
+  faults: WingReconFault[];
+  candidatesMeasured: number;
+  candidatesNotMeasured: number;
+  choiceControls: WingChoiceControlCensus | null;
+  choiceControlFault: WingFaultFingerprint | null;
+} | null {
+  if (!sweep) return null;
+  return {
+    phase: sweep.phase,
+    // FIRST field after the phase, deliberately: every count below is meaningless without it. A reading with
+    // `precondition: NO_VISIBLE_CHOICE_CONTROL` and zero targets is not "Stage-2 is empty", it is "no sweep ran".
+    precondition: sweep.precondition,
+    targets: sweep.targets.map((t) => ({
+      target: t.target,
+      resolvedUnambiguously: t.resolvedUnambiguously,
+      uniqueCandidateIds: t.uniqueCandidateIds,
+      // Same value-free row shape the recon record uses: our own candidate id + our own fixed label, an integer
+      // count, a closed verdict, and an opaque sig. Nothing read from the page.
+      candidates: t.candidates.map((c) => ({
+        id: c.id,
+        label: c.label,
+        // Stage-2 targets have no shipped locator, so there is no expected role to state. Saying so explicitly
+        // beats inventing one: `role: "button"` asserted from an expectation table is the original defect of
+        // this whole workstream.
+        expectedRole: "NOT_APPLICABLE_NO_SHIPPED_LOCATOR",
+        matchCount: c.matchCount,
+        verdict: c.verdict,
+        // Derived from the VERDICT, exactly as the recon record derives it, so NOT_MEASURED can never yield a
+        // highlightability claim it has no count for.
+        canHighlight: c.verdict === "UNIQUE",
+        sig16: c.sig16,
+      })),
+    })),
+    faults: sweep.faults,
+    candidatesMeasured: sweep.candidatesMeasured,
+    candidatesNotMeasured: sweep.candidatesNotMeasured,
+    choiceControls: sweep.choiceControls,
+    choiceControlFault: sweep.choiceControlFault,
+  };
+}
+
 export function scopedRecordTargetsFor(approved: readonly WingRecordTarget[]): WingRecordTarget[] {
   return WING_RECORD_TARGETS.filter((t) => approved.includes(t));
 }
@@ -964,6 +1018,9 @@ async function main(): Promise<void> {
           // labels, integer counts, closed verdicts, and opaque sigs — the same value-free classes the
           // baseline rows already carry.
           recon: reconRecordFor(result.recon),
+          // Null on any non-Stage-2 run. On a Stage-2 run this is the ENTIRE product of the grant: the
+          // precondition, the folded candidate verdicts, and the closed-vocabulary shape census.
+          stage2: stage2RecordFor(result.stage2),
         },
         null,
         2,
@@ -980,6 +1037,10 @@ async function main(): Promise<void> {
       reconCandidatesMeasured: result.recon?.candidatesMeasured ?? 0,
       reconCandidatesNotMeasured: result.recon?.candidatesNotMeasured ?? 0,
       reconTargetsResolved: result.recon?.targets.filter((t) => t.resolvedUnambiguously).length ?? 0,
+      stage2Precondition: result.stage2?.precondition ?? "NOT_RUN",
+      stage2CandidatesMeasured: result.stage2?.candidatesMeasured ?? 0,
+      stage2TargetsResolved: result.stage2?.targets.filter((t) => t.resolvedUnambiguously).length ?? 0,
+      stage2VisibleChoiceControls: result.stage2?.choiceControls?.visibleChoiceControlCount ?? -1,
     });
   } finally {
     removeSentinel(readyPath);

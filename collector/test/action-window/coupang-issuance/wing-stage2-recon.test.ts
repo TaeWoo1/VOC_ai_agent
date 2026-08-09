@@ -35,8 +35,10 @@ import {
   resolveWingStage2Scope,
   runWingSelectorRecord,
   stage2RefusalMessage,
+  stage2RecordFor,
   type WingSelectorRecordDeps,
 } from "../../../src/cli/probe-wing-issuance-selectors";
+import { CoupangWingIssuanceDriver } from "../../../src/action-window/coupang-wing-issuance-driver";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -200,7 +202,15 @@ describe("the Stage-2 sweep folds like the initial-surface one", () => {
 
 /* ────────────────────────────── the shape census ────────────────────────────── */
 
-/** A DOM double good enough for the real generated script — the same approach the census tests already use. */
+/**
+ * A DOM double for the REAL generated script.
+ *
+ * Two properties matter and the first version had neither, which review demonstrated with surviving mutations.
+ * `css` carries a computed style, so the `display:none` / `visibility:hidden` branch of the script's `paints()`
+ * is load-bearing (a stub that always returned a visible style meant deleting that branch changed nothing).
+ * And the document below matches on the EXACT selector the script asks for, so widening the query to something
+ * like `"input, [role]"` fails instead of silently returning the same fixture.
+ */
 class FakeEl {
   constructor(
     public tagName: string,
@@ -208,6 +218,7 @@ class FakeEl {
     public visible = true,
     public disabled = false,
     public type = "",
+    public css: { display?: string; visibility?: string } = {},
   ) {}
   childElementCount = 1;
   getAttribute(n: string): string | null {
@@ -221,25 +232,41 @@ class FakeEl {
   }
 }
 
+/** The selectors the shape census is contracted to ask for, verbatim. */
+const CHOICE_SELECTOR = "input[type='radio'], input[type='checkbox'], [role='radio'], [role='option']";
+const GROUP_SELECTOR = "fieldset, [role='radiogroup'], [role='listbox']";
+
 function runShapeScript(nodes: FakeEl[], groups: FakeEl[] = []): unknown {
+  const asked: string[] = [];
   const doc = {
     querySelectorAll(sel: string): FakeEl[] {
-      if (sel.includes("fieldset")) return groups;
-      if (sel.includes("radio")) return nodes;
+      asked.push(sel);
+      // EXACT match. A widened or narrowed query gets an empty list, so the mutation shows up as a wrong count
+      // rather than as the fixture being handed back regardless of what was asked.
+      if (sel === GROUP_SELECTOR) return groups;
+      if (sel === CHOICE_SELECTOR) return nodes;
       return [];
     },
   };
-  const win = { getComputedStyle: () => ({ display: "block", visibility: "visible" }) };
-  return new Function("document", "window", `return (${EXTRACT_WING_CHOICE_CONTROL_SHAPES});`)(doc, win);
+  const win = {
+    getComputedStyle: (el: FakeEl) => ({ display: el.css.display ?? "block", visibility: el.css.visibility ?? "visible" }),
+  };
+  const out = new Function("document", "window", `return (${EXTRACT_WING_CHOICE_CONTROL_SHAPES});`)(doc, win);
+  return { out, asked };
+}
+
+/** Most cases only want the reading. */
+function shapes(nodes: FakeEl[], groups: FakeEl[] = []): Record<string, unknown> {
+  return (runShapeScript(nodes, groups) as { out: Record<string, unknown> }).out;
 }
 
 describe("the choice-control shape census — categories and integers, nothing else", () => {
   it("buckets by (tag, inputType, role) and counts, over the REAL shipped script", () => {
-    const out = runShapeScript([
+    const out = shapes([
       new FakeEl("INPUT", {}, true, false, "radio"),
       new FakeEl("INPUT", {}, true, false, "radio"),
       new FakeEl("DIV", { role: "option" }),
-    ]) as { visibleChoiceControlCount: number; shapes: { tag: string; inputType: string; role: string; count: number }[] };
+    ]) as unknown as { visibleChoiceControlCount: number; shapes: { tag: string; inputType: string; role: string; count: number }[] };
     expect(out.visibleChoiceControlCount).toBe(3);
     expect(out.shapes[0]).toEqual({ tag: "INPUT", inputType: "radio", role: "none", count: 2 });
     expect(out.shapes[1]).toEqual({ tag: "DIV", inputType: "none", role: "option", count: 1 });
@@ -248,20 +275,20 @@ describe("the choice-control shape census — categories and integers, nothing e
   it("separates NOT-PAINTING and DISABLED controls from visible ones", () => {
     // "0 visible" and "0 present" are different findings — indistinguishable readings are what broke the
     // `issue` locator's first calibration.
-    const out = runShapeScript([
+    const out = shapes([
       new FakeEl("INPUT", {}, false, false, "radio"),
       new FakeEl("INPUT", { "aria-disabled": "true" }, true, false, "radio"),
       new FakeEl("INPUT", {}, true, true, "checkbox"),
-    ]) as { visibleChoiceControlCount: number; hiddenChoiceControlCount: number };
+    ]) as unknown as { visibleChoiceControlCount: number; hiddenChoiceControlCount: number };
     expect(out.visibleChoiceControlCount).toBe(0);
     expect(out.hiddenChoiceControlCount).toBe(3);
   });
 
   it("maps anything off-vocabulary to the catch-all — the page never picks our strings", () => {
-    const out = runShapeScript([
+    const out = shapes([
       new FakeEl("CUSTOM-CARD", { role: "사용목적-자체개발" }),
       new FakeEl("INPUT", {}, true, false, "color"),
-    ]) as { shapes: { tag: string; inputType: string; role: string }[] };
+    ]) as unknown as { shapes: { tag: string; inputType: string; role: string }[] };
     const json = JSON.stringify(out);
     expect(json).not.toContain("CUSTOM-CARD");
     expect(json).not.toContain("사용목적");
@@ -274,10 +301,33 @@ describe("the choice-control shape census — categories and integers, nothing e
   });
 
   it("counts painting group containers", () => {
-    const out = runShapeScript([], [new FakeEl("FIELDSET"), new FakeEl("DIV", { role: "radiogroup" }, false)]) as {
+    const out = shapes([], [new FakeEl("FIELDSET"), new FakeEl("DIV", { role: "radiogroup" }, false)]) as unknown as {
       groupContainerCount: number;
     };
     expect(out.groupContainerCount).toBe(1);
+  });
+
+  it("queries EXACTLY the contracted selectors — a widened query is not a detail", () => {
+    // The fixture used to dispatch on `sel.includes("radio")`, so widening the query to `"input, [role]"` (which
+    // would sweep unrelated controls into a Stage-2 reading) returned the same nodes and every test stayed
+    // green. Review demonstrated it. The selector strings are now part of the contract.
+    const { asked } = runShapeScript([new FakeEl("INPUT", {}, true, false, "radio")]) as { asked: string[] };
+    expect(asked).toContain(CHOICE_SELECTOR);
+    expect(asked).toContain(GROUP_SELECTOR);
+    expect(asked).toHaveLength(2);
+  });
+
+  it("honours COMPUTED STYLE — display:none and visibility:hidden do not paint", () => {
+    // The old fixture always returned a visible computed style, so deleting that whole branch from the script's
+    // `paints()` changed nothing anywhere. These two nodes have rects, so ONLY the computed-style branch can
+    // exclude them.
+    const out = shapes([
+      new FakeEl("INPUT", {}, true, false, "radio", { display: "none" }),
+      new FakeEl("INPUT", {}, true, false, "radio", { visibility: "hidden" }),
+      new FakeEl("INPUT", {}, true, false, "radio"),
+    ]) as unknown as { visibleChoiceControlCount: number; hiddenChoiceControlCount: number };
+    expect(out.visibleChoiceControlCount).toBe(1);
+    expect(out.hiddenChoiceControlCount).toBe(2);
   });
 
   it("the script reads no text, no value, and no identifying attribute", () => {
@@ -313,18 +363,39 @@ describe("the choice-control shape census — categories and integers, nothing e
     expect(JSON.stringify(dirty)).not.toContain("업체명");
   });
 
-  it("bounds the number of shape buckets it will carry", () => {
+  it("bounds the number of shape buckets, and SAYS SO when it drops any", () => {
+    // A silent cap makes a partial reading look complete. `scanTruncated` covers element-scan truncation only,
+    // so bucket loss needs its own flag.
     const many = Array.from({ length: 200 }, () => ({ tag: "INPUT", inputType: "radio", role: "none", count: 1 }));
-    expect(sanitizeChoiceControlCensus({ shapes: many }).shapes.length).toBeLessThanOrEqual(64);
+    const capped = sanitizeChoiceControlCensus({ shapes: many });
+    expect(capped.shapes.length).toBeLessThanOrEqual(64);
+    expect(capped.bucketsTruncated).toBe(true);
+    expect(sanitizeChoiceControlCensus({ shapes: [{ tag: "INPUT", inputType: "radio", role: "none", count: 1 }] }).bucketsTruncated).toBe(false);
   });
 });
 
 /* ────────────────────────────── promotion stays impossible ────────────────────────────── */
 
 describe("a Stage-2 reading changes no shipped selector", () => {
-  it("the recon module still contains no promotion path", () => {
-    // Comment lines stripped first — the module DISCUSSES the shipped labels at length, and prose mentioning a
-    // symbol has produced false failures in this repo before (`collector/CLAUDE.md` §5).
+  it("the recon module exports NOTHING that could ship a Stage-2 label as a locator", async () => {
+    // The source-text form of this test was the weaker shape, and review proved it: appending an
+    // `adoptStage2Candidate()` that writes a new `WING_STAGE2_SHIPPED_LABELS` map survived it, because the
+    // module still contained neither of the two forbidden strings. `coupang-wing-label-recon.test.ts` already
+    // carried the namespace-scanning form and its own comment records that source text was rejected in review
+    // for exactly this reason. This is that form, widened to the shapes a Stage-2 promotion would take.
+    const mod = (await import("../../../src/action-window/coupang-wing-label-recon")) as Record<string, unknown>;
+    const offending = Object.keys(mod).filter(
+      (k) => /promote|adopt|apply|ship|write|update|mutate|install|set[A-Z]/i.test(k) || /_(SHIPPED|HIGHLIGHT|DELETION)_LABELS$/.test(k),
+    );
+    expect(offending, `these exports could turn a measurement into a shipped locator: ${offending.join(", ")}`).toEqual([]);
+    // Every export is a constant, a type guard, a resolver, or a pure fold — nothing that takes a candidate and
+    // writes it anywhere. Functions are allowed; functions that WRITE are what the name test above forbids.
+    for (const [k, v] of Object.entries(mod)) {
+      if (typeof v !== "function") continue;
+      expect(/^(is|resolve|interpret|wing|screen)/i.test(k) || k.endsWith("Error"), `unexpected exported function ${k}`).toBe(true);
+    }
+    // …and the shipped locator maps are still not imported here at all (comments stripped: the module discusses
+    // them at length, and prose mentioning a symbol has produced false failures in this repo before).
     const src = readFileSync(resolve(HERE, "../../../src/action-window/coupang-wing-label-recon.ts"), "utf8")
       .split("\n")
       .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
@@ -502,5 +573,134 @@ describe("runWingSelectorRecord — the Stage-2 sweep in the orchestrator", () =
     const r = await runWingSelectorRecord(withoutCensus, [], { stage2: ["confirm"] });
     expect(r.stage2?.choiceControls).toBeNull();
     expect(r.stage2?.choiceControlFault).toBeNull();
+  });
+});
+
+/* ────────────────────────────── the driver method, and the emitted record ────────────────────────────── */
+
+describe("CoupangWingIssuanceDriver.choiceControlCensus", () => {
+  /** A page double whose `evaluate` returns whatever the test wants — including junk the script would not. */
+  function pageReturning(value: unknown): { evaluate: (s: string) => Promise<unknown>; url: () => string; on: () => void; evaluated: string[] } {
+    const evaluated: string[] = [];
+    return {
+      evaluate: async (script: string) => {
+        evaluated.push(script);
+        return value;
+      },
+      url: () => "https://wing.coupang.com/",
+      // The driver registers a close listener; without this the promise rejects out of band and vitest reports
+      // an unhandled error while the assertions still pass — a green run hiding a broken double.
+      on: () => undefined,
+      evaluated,
+    };
+  }
+
+  it("RE-SANITIZES host-side — the claim that the vocabulary is guaranteed by our code, tested", () => {
+    // The mutation review found surviving: drop `sanitizeChoiceControlCensus(...)` from the driver method and
+    // return the raw evaluate value. Nothing called this method from a test, so the commit's central
+    // sanitization claim was unguarded. If the in-page mapping is ever bypassed or edited wrong, THIS is what
+    // stops page-authored strings entering the record.
+    const page = pageReturning({
+      visibleChoiceControlCount: 3,
+      hiddenChoiceControlCount: 0,
+      shapes: [{ tag: "CUSTOM-CARD", inputType: "업체명", role: "사용목적", count: 3 }],
+      groupContainerCount: 1,
+      scanTruncated: false,
+    });
+    const driver = new CoupangWingIssuanceDriver(page as never);
+    return driver.choiceControlCensus().then((census) => {
+      expect(census.shapes[0]).toEqual({ tag: "OTHER", inputType: "other", role: "other", count: 3 });
+      const json = JSON.stringify(census);
+      expect(json).not.toContain("CUSTOM-CARD");
+      expect(json).not.toContain("업체명");
+      expect(json).not.toContain("사용목적");
+    });
+  });
+
+  it("evaluates the audited constant script and nothing else", async () => {
+    const page = pageReturning({});
+    await new CoupangWingIssuanceDriver(page as never).choiceControlCensus();
+    expect(page.evaluated).toEqual([EXTRACT_WING_CHOICE_CONTROL_SHAPES]);
+  });
+
+  it("returns a safe reading rather than throwing when the page returns nothing usable", async () => {
+    const census = await new CoupangWingIssuanceDriver(pageReturning(null) as never).choiceControlCensus();
+    expect(census.visibleChoiceControlCount).toBe(0);
+    expect(census.shapes).toEqual([]);
+  });
+});
+
+describe("the emitted Stage-2 record", () => {
+  const sweep = {
+    phase: "COUPANG_WING_STAGE2_RECON" as const,
+    precondition: "OK" as const,
+    targets: [
+      {
+        target: "purpose" as const,
+        candidates: [
+          { id: "stage2.purpose.operator_reported", label: "이제 키의 사용 목적을 골라주세요.", matchCount: 1, verdict: "UNIQUE" as const, sig16: "0123456789abcdef" },
+        ],
+        uniqueCandidateIds: ["stage2.purpose.operator_reported"],
+        resolvedUnambiguously: true,
+      },
+    ],
+    faults: [],
+    candidatesMeasured: 1,
+    candidatesNotMeasured: 0,
+    choiceControls: sanitizeChoiceControlCensus({ visibleChoiceControlCount: 2, shapes: [], groupContainerCount: 1 }),
+    choiceControlFault: null,
+  };
+
+  it("carries the precondition, the verdicts, and the shape census", () => {
+    // The defect this closes: the sweep was computed and thrown away. A granted live run swept six candidate
+    // sets, took the census, folded every verdict — and printed a record containing none of it. No test covered
+    // the emitted record, which is why the suite was green.
+    const rec = stage2RecordFor(sweep)!;
+    expect(rec.precondition).toBe("OK");
+    expect(rec.candidatesMeasured).toBe(1);
+    expect(rec.targets[0]!.resolvedUnambiguously).toBe(true);
+    expect(rec.targets[0]!.candidates[0]!.sig16).toBe("0123456789abcdef");
+    expect(rec.choiceControls?.visibleChoiceControlCount).toBe(2);
+  });
+
+  it("carries the precondition even when it FAILED — the counts are meaningless without it", () => {
+    const blocked = stage2RecordFor({ ...sweep, precondition: "NO_VISIBLE_CHOICE_CONTROL", targets: [], candidatesMeasured: 0, choiceControls: null })!;
+    expect(blocked.precondition).toBe("NO_VISIBLE_CHOICE_CONTROL");
+    // Zero targets next to a failed precondition means "no sweep ran", never "Stage-2 is empty".
+    expect(blocked.targets).toEqual([]);
+    expect(blocked.choiceControls).toBeNull();
+  });
+
+  it("states NO expected role for a Stage-2 target rather than inventing one", () => {
+    // `role: "button"` asserted from an expectation table, for an element nobody measured, is this workstream's
+    // founding defect. Stage-2 targets have no shipped locator, so the record says exactly that.
+    const rec = stage2RecordFor(sweep)!;
+    expect(rec.targets[0]!.candidates[0]!.expectedRole).toBe("NOT_APPLICABLE_NO_SHIPPED_LOCATOR");
+    expect(rec.targets[0]!.candidates[0]!.canHighlight).toBe(true);
+    // …and canHighlight is derived from the VERDICT, so NOT_MEASURED never claims highlightability.
+    const unmeasured = stage2RecordFor({
+      ...sweep,
+      targets: [{ ...sweep.targets[0]!, candidates: [{ ...sweep.targets[0]!.candidates[0]!, verdict: "NOT_MEASURED", matchCount: null, sig16: null }], uniqueCandidateIds: [], resolvedUnambiguously: false }],
+    })!;
+    expect(unmeasured.targets[0]!.candidates[0]!.canHighlight).toBe(false);
+  });
+
+  it("is null on a non-Stage-2 run", () => {
+    expect(stage2RecordFor(null)).toBeNull();
+  });
+
+  it("main() EMITS it — the record is on the wire, not just computable", () => {
+    // Pinned at the call site because the defect was precisely that a correct, exported, tested sanitizer was
+    // never wired into the printed record.
+    const code = readFileSync(resolve(HERE, "../../../src/cli/probe-wing-issuance-selectors.ts"), "utf8");
+    expect(code).toContain("stage2: stage2RecordFor(result.stage2),");
+    expect(code).toContain("stage2Precondition: result.stage2?.precondition");
+  });
+
+  it("the emitted record carries no page-authored text", () => {
+    const json = JSON.stringify(stage2RecordFor(sweep));
+    for (const forbidden of ["http", "://", "querySelector", "<", "textContent"]) {
+      expect(json).not.toContain(forbidden);
+    }
   });
 });

@@ -66,12 +66,17 @@ esac
 # bootstrap that cannot reach a manifest.
 if [ "$PHASE" = "COUPANG_WING_LABEL_RECON" ]; then
   DEFAULT_TARGETS="self_dev,vendor_info,call_ip"
+elif [ "$PHASE" = "COUPANG_WING_STAGE2_RECON" ]; then
+  # A Stage-2 run measures NO shipped locator, so it has no probe scope. Defaulting to `delete` wrote a
+  # meaningless scope into the run env and printed "probe targets: delete" for a run that probes none of them.
+  DEFAULT_TARGETS=""
 else
   DEFAULT_TARGETS="delete"
 fi
 PROBE_TARGETS="${SELLEROPS_WING_PROBE_TARGETS:-$DEFAULT_TARGETS}"
 case "$PROBE_TARGETS" in
-  ""|*[!a-z_,]*|,*|*,|*,,*)
+  "") [ "$PHASE" = "COUPANG_WING_STAGE2_RECON" ] || { echo "BOOTSTRAP FAIL — SELLEROPS_WING_PROBE_TARGETS must not be empty."; exit 1; } ;;
+  *[!a-z_,]*|,*|*,|*,,*)
     echo "BOOTSTRAP FAIL — SELLEROPS_WING_PROBE_TARGETS must be a comma-separated list of lowercase target names."
     exit 1 ;;
 esac
@@ -108,8 +113,10 @@ WALKTHROUGH_APPROVAL_ID='$APPROVAL_ID'
 WALKTHROUGH_GIT_COMMIT='$GIT_COMMIT'
 WING_PROBE_BOOTSTRAP_EPOCH='$BOOTSTRAP_EPOCH'
 SELLEROPS_APPROVAL_PHASE='$PHASE'
-SELLEROPS_WING_PROBE_TARGETS='$PROBE_TARGETS'
 ENV
+if [ -n "$PROBE_TARGETS" ]; then
+  printf "SELLEROPS_WING_PROBE_TARGETS='%s'\n" "$PROBE_TARGETS" >> "$RUN_ENV"
+fi
 if [ -n "$STAGE2_TARGETS" ]; then
   printf "SELLEROPS_WING_STAGE2_TARGETS='%s'\n" "$STAGE2_TARGETS" >> "$RUN_ENV"
 fi
@@ -120,7 +127,9 @@ echo "  run id       : $RUN_ID"
 echo "  approval id  : $APPROVAL_ID  (binds the operator's single-use grant)"
 echo "  git commit   : $GIT_COMMIT"
 echo "  phase        : $PHASE (READ_ONLY)"
-echo "  probe targets: $PROBE_TARGETS"
+if [ -n "$PROBE_TARGETS" ]; then
+  echo "  probe targets: $PROBE_TARGETS"
+fi
 if [ -n "$STAGE2_TARGETS" ]; then
   echo "  stage-2 scope: $STAGE2_TARGETS"
   echo "  NOTE         : you press 'API Key 발급 받기' YOURSELF, stop on the purpose screen, choose nothing,"
