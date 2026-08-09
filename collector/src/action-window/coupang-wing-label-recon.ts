@@ -365,12 +365,17 @@ const WING_STAGE2_APPARATUS_FAILURE: WingStage2ApparatusFailure = Object.freeze(
  *
  * The apparatus returned `CONFIGURATION_SURFACE_SUSPECTED` off exactly **one** moved signal:
  * `choiceControlCountBucket` `none → few`. That is the purpose-selection disjunct, firing on the surface it was
- * written for. Under the census this run replaced, the same press on the same surface produced `SURFACE_UNCHANGED`
- * — the field did not exist. The difference was the instrument, not the marketplace.
+ * written for. The census this run replaced had no `choiceControlCount` at all, so **v2 could not have detected
+ * this transition** whatever the page did. That is the provable half, and it is the whole point. Whether the
+ * marketplace ALSO changed between two separate runs is not measurable from either capture, so this record does
+ * not say it did not — an earlier version of this comment asserted exactly that, under a heading promising
+ * claims at the strength the evidence supports.
  *
  * **Everything here is either a sanitized machine reading or explicitly attributed to the operator**, and the
- * distinction is the whole point: all three prior calibration failures came from an operator-sourced or expected
- * value sitting unlabelled among measured ones.
+ * distinction is the whole point: both prior calibration failures came from an operator-sourced or expected
+ * value sitting unlabelled among measured ones. (Two, not three. The third failure on this surface —
+ * {@link WingStage2ApparatusFailure} — has a different cause, `PREDICATE_UNSATISFIABLE_ON_WING_MARKUP`: a
+ * predicate that could not fire, not an unlabelled value, and not a calibration.)
  *
  * **What is still NOT known.** No label, no role, no control identity, no wording — `structuralMarkerMeasured`
  * stays `false`. A bucket moving from `none` to `few` says 1–3 painting, enabled choice controls appeared. It does
@@ -397,20 +402,29 @@ export interface WingStage2LiveEvent {
    */
   readonly measuredTransition: "choiceControlCountBucket:none->few";
   /**
-   * Signals that were measured on BOTH sides and did NOT move. Recorded because a non-transition is evidence
-   * too — and because omitting them would let a reader assume more fired than did.
+   * The three **Stage-2 predicate disjuncts** that were measured on both sides and did NOT move, plus
+   * `pageCategory` (not a signal — see `changedSignalNames` — but the coarsest thing that could have moved).
+   *
+   * Deliberately NOT the full set of unchanged signals: roughly nine more census signals also held still, as
+   * `apparatusChangedSignalCount: 1` already implies. What this list is for is the predicate's own terms, so a
+   * reader cannot assume more of the detector fired than did. An earlier doc comment called it "signals that
+   * were measured on BOTH sides and did NOT move", which was both non-exhaustive and not signals-only.
    */
   readonly measuredUnchanged: readonly ["dialogLikePresent:false", "actionControlCountBucket:many", "submitAffordancePresent:false", "pageCategory:open_api_issuance"];
   /**
-   * **No ARIA/HTML dialog container painted on either side** — `dialog[open]`, `[role=dialog]`,
-   * `[role=alertdialog]`, `[aria-modal=true]` all absent. So Stage-2 does not use the dialog contract, and a
-   * detector built only on that contract would have seen nothing.
+   * The same `dialogLikePresent` reading as in {@link measuredUnchanged}, surfaced as its own field because it
+   * is a finding in its own right: **no dialog-contract container was painting and enabled on either side**, so
+   * Stage-2 does not use that contract and a detector built only on it would have seen nothing.
+   *
+   * The selector set lives in `EXTRACT_WING_CENSUS` and is NOT restated here — a hand-copied list drifts
+   * silently when the census changes, and a test anchors this record to the shipped script instead.
    *
    * Read it as exactly that and no further. It is NOT a measurement that the surface is visually non-modal: an
    * overlay built from plain `div`s with none of those attributes reads `false` here while looking like a modal
-   * to the seller. What is measured is the markup contract, not the appearance.
+   * to the seller. What is measured is the markup contract, not the appearance. Nor is "absent" quite right —
+   * the census filters to painting, non-`aria-disabled` elements, so a hidden dialog node also reads `false`.
    */
-  readonly dialogContainerPresent: false;
+  readonly dialogLikePresent: false;
   /**
    * Still `false`. A count moved; nothing named, typed, or identified any Stage-2 control. No tag, no role, no
    * label, no wording. The recon exists precisely because this is false.
@@ -450,7 +464,7 @@ export const WING_STAGE2_LIVE_EVENT: WingStage2LiveEvent = Object.freeze({
     "submitAffordancePresent:false",
     "pageCategory:open_api_issuance",
   ]) as WingStage2LiveEvent["measuredUnchanged"],
-  dialogContainerPresent: false,
+  dialogLikePresent: false,
   structuralMarkerMeasured: false,
   captureCount: 1,
   signatureStability: "SINGLE_CAPTURE_NOT_ESTABLISHED",

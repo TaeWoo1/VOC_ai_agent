@@ -192,7 +192,15 @@ common in Korean marketplace UIs — match none of the three selector sets.
 
 ## Provenance: what is measured, and what is only reported
 
-`WING_STAGE2_LIVE_EVENT` records the live event with the attribution attached to each part — the distinction both
+> **⚠ SUPERSEDED 2026-08-09.** The table below describes `WING_STAGE2_LIVE_EVENT` **as it stood after this
+> unit**. That content is now the *superseded* half of the record, reachable as `WING_STAGE2_LIVE_EVENT.supersedes`
+> (`WingStage2ApparatusFailure`, `cause: PREDICATE_UNSATISFIABLE_ON_WING_MARKUP`). The live constant now records
+> the v3 run, which **did** detect Stage-2 — `apparatusOutcome: CONFIGURATION_SURFACE_SUSPECTED`,
+> `measuredTransition: choiceControlCountBucket:none->few`. See
+> `docs/coupang_wing_reveal_live_v3_evidence_landing.md`. The rows for `structuralMarkerMeasured`,
+> `keyCreationRuledOut` and `issuedStateReason` are still accurate; the first two rows are not.
+
+`WING_STAGE2_LIVE_EVENT` recorded the live event with the attribution attached to each part — the distinction both
 previous calibration failures got wrong:
 
 | | |

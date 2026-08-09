@@ -533,7 +533,12 @@ describe("what is recorded about Stage-2, and what is only reported", () => {
     expect(e.supersedes.apparatusOutcome).toBe("SURFACE_UNCHANGED");
     expect(e.supersedes.apparatusChangedSignalCount).toBe(0);
     expect(e.supersedes.cause).toBe("PREDICATE_UNSATISFIABLE_ON_WING_MARKUP");
-    // …and the two are DIFFERENT runs. A superseded record pointing at itself records nothing.
+    // Pinned by VALUE, not merely as "different from v3". `not.toBe(e.gitSha)` left the superseded sha free to
+    // become anything at all — review changed it to `deadbeef` with the suite green. Same for both dates.
+    expect(e.supersedes.gitSha).toBe("0297d307");
+    expect(e.supersedes.observedOn).toBe("2026-08-09");
+    expect(e.observedOn).toBe("2026-08-09");
+    // …and the two are DIFFERENT runs. A record superseding itself records nothing.
     expect(e.supersedes.runId).not.toBe(e.runId);
     expect(e.supersedes.gitSha).not.toBe(e.gitSha);
   });
@@ -545,30 +550,67 @@ describe("what is recorded about Stage-2, and what is only reported", () => {
     expect(e.measuredUnchanged).toContain("submitAffordancePresent:false");
     expect(e.measuredUnchanged).toContain("pageCategory:open_api_issuance");
     // The transition must not also appear among the non-transitions.
-    expect(e.measuredUnchanged as readonly string[]).not.toContain("choiceControlCountBucket:none->few");
-    // Exactly one moved: the counts have to agree with the lists.
+    // By PREFIX, not by exact string. `not.toContain("choiceControlCountBucket:none->few")` was satisfied by
+    // adding `"choiceControlCountBucket:none"` to the list — the record would then say the same signal both
+    // moved and did not move, with the suite green. Review demonstrated it.
+    expect((e.measuredUnchanged as readonly string[]).some((u) => u.startsWith("choiceControlCountBucket:"))).toBe(false);
+    // The moved signal is named exactly once, and the count agrees with the lists rather than restating a literal.
+    const movedName = e.measuredTransition.split(":")[0]!;
+    const unchangedNames = (e.measuredUnchanged as readonly string[]).map((u) => u.split(":")[0]!);
+    expect(unchangedNames).not.toContain(movedName);
+    expect(new Set(unchangedNames).size).toBe(unchangedNames.length);
     expect(e.apparatusChangedSignalCount).toBe(1);
   });
 
   it("the dialog finding is scoped to the MARKUP CONTRACT, not to visual modality", async () => {
     const { WING_STAGE2_LIVE_EVENT: e } = await import("../../../src/action-window/coupang-wing-label-recon");
-    expect(e.dialogContainerPresent).toBe(false);
-    // The field name and its doc must keep saying "container"/markup, never "not a modal". A div-built overlay
-    // with none of the ARIA attributes reads false here while looking exactly like a modal to the seller —
-    // recording this as "Stage-2 is not modal" would be an appearance claim from a markup measurement.
+    expect(e.dialogLikePresent).toBe(false);
+    // It is the SAME reading as the one in `measuredUnchanged`, not a second, differently-named measurement.
+    expect(e.measuredUnchanged).toContain(`dialogLikePresent:${e.dialogLikePresent}`);
+
+    // The field's OWN doc comment, extracted precisely — the previous version sliced 1200 characters preceding
+    // the field and asserted a substring appeared somewhere in that neighbourhood. Review showed two mutations
+    // surviving it: one inverting the caveat into the exact over-claim ("that worry is obsolete: Stage-2 is a
+    // plain inline section, NOT a modal"), and one deleting the caveat while parking the pinned sentence in an
+    // adjacent comment still inside the window.
     const src = readFileSync(
       resolve(dirname(fileURLToPath(import.meta.url)), "../../../src/action-window/coupang-wing-label-recon.ts"),
       "utf8",
     );
-    const doc = src.slice(src.indexOf("readonly dialogContainerPresent") - 1200, src.indexOf("readonly dialogContainerPresent"));
+    const decl = "readonly dialogLikePresent: false;";
+    const before = src.slice(0, src.indexOf(decl));
+    const doc = before.slice(before.lastIndexOf("/**"));
     expect(doc).toContain("NOT a measurement that the surface is visually non-modal");
+    // …and the doc must not ALSO assert the appearance claim. An inverted caveat keeps the pinned sentence and
+    // adds the conclusion it warns against, so presence alone can never be the whole guard.
+    expect(doc).not.toMatch(/is (a plain inline section|not a modal|therefore not a modal)/i);
+    expect(doc).not.toMatch(/\bobsolete\b/i);
   });
 
-  it("every empirically-refuted disjunct is corroborated by the live record's OWN unchanged list", async () => {
-    // The structural version of "corroborated by a real Stage-2 transition". A disjunct may be called refuted
-    // only if the one measured Stage-2 transition shows it did not move — so the claim is derived from the
-    // evidence record, not from a comment beside it. This also makes the refuted list unable to grow on a hunch:
-    // adding a name with no entry in `measuredUnchanged` fails here.
+  it("the dialog-contract selectors are ANCHORED to the shipped census, not transcribed", async () => {
+    // The record used to restate `dialog[open], [role=dialog], [role=alertdialog], [aria-modal=true]` by hand.
+    // Deleting one of them from the census left the suite green while the record kept asserting a live
+    // measurement that no longer happened. The selectors now live in one place and this pins the link.
+    for (const sel of ["dialog[open]", "role='dialog'", "role='alertdialog'", "aria-modal='true'"]) {
+      expect(EXTRACT_WING_CENSUS, `${sel} must remain in the census the record's dialog finding came from`).toContain(sel);
+    }
+    const src = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), "../../../src/action-window/coupang-wing-label-recon.ts"),
+      "utf8",
+    );
+    // …and the record must NOT carry its own copy of them to drift from.
+    expect(src).not.toContain("aria-modal");
+  });
+
+  it("a refuted disjunct must at minimum have held still on the one measured transition", async () => {
+    // A NECESSARY condition, not a sufficient one, and the name says so. "did not move on one capture" is also
+    // true of a perfectly capable detector whose shape simply was not present — `dialogLikePresent` is exactly
+    // that case, and it is not refuted. So this cannot establish blindness; it can only catch a refutation that
+    // the one piece of live evidence flatly contradicts.
+    //
+    // The claim "the refuted set cannot grow on a hunch" belongs to `coupang-wing-reveal-walk.test.ts`, which
+    // asserts eligibility behaviour directly. Review caught this test being credited with that property: adding
+    // `dialogLikePresent` to the refuted list passes HERE and fails THERE.
     const { WING_EMPIRICALLY_REFUTED_DISJUNCTS } = await import("../../../src/action-window/coupang-wing-reveal-driver");
     const { WING_STAGE2_LIVE_EVENT: e } = await import("../../../src/action-window/coupang-wing-label-recon");
     expect(WING_EMPIRICALLY_REFUTED_DISJUNCTS.length).toBeGreaterThan(0);
@@ -597,7 +639,11 @@ describe("what is recorded about Stage-2, and what is only reported", () => {
     );
     expect(block).toContain(e.runId);
     expect(block).toContain(e.gitSha);
-    expect(block).toContain("CORROBORATED");
+    expect(block).toMatch(/\*\*CORROBORATED/);
+    // `toContain("CORROBORATED")` passed on the NEGATION — "**NOT CORROBORATED by Reveal Live v3**" contains it,
+    // ids and all, while asserting the opposite of the refutation it sits above. Review demonstrated it.
+    expect(block).not.toMatch(/NOT\s+CORROBORATED/i);
+    expect(block).not.toMatch(/\bcontradicted\b/i);
   });
 
   it("a Stage-2 CONTROL COUNT is not a Stage-2 label — the recon is still required", async () => {
