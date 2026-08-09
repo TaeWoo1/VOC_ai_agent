@@ -34,7 +34,13 @@ import {
   type WingSelectorRecordDeps,
 } from "../../../src/cli/probe-wing-issuance-selectors";
 import { observeFrom, type WingStructuralCensus } from "../../../src/cli/coupang-wing-classifier";
-import { CALIBRATION_PHASES, WING_STAGE2_MANIFEST_PHASES, WING_PHASES } from "../../../src/cli/approval-manifest";
+import {
+  CALIBRATION_PHASES,
+  WING_STAGE2_MANIFEST_PHASES,
+  WING_PHASES,
+  PHASE_ENTRYPOINTS,
+  PHASE_SPECS,
+} from "../../../src/cli/approval-manifest";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -537,5 +543,68 @@ describe("the terms screen — transcribed verbatim, and the key-creation bounda
     for (const reading of r.readings) {
       expect(reading.stage2.association?.candidatesCompared).toBe(WING_CHOICE_LABEL_CANDIDATES.length);
     }
+  });
+});
+
+/* ══════════════════════════ the manifest must describe THIS run ══════════════════════════ */
+
+describe("the manifest cannot under-describe the flow it approves", () => {
+  const CLI_SRC = readFileSync(resolve(HERE, "../../../src/cli/approval-manifest-cli.ts"), "utf8");
+  const ENTRY = PHASE_ENTRYPOINTS.COUPANG_WING_ISSUANCE_FLOW_DISCOVERY;
+  const SPEC = PHASE_SPECS.COUPANG_WING_ISSUANCE_FLOW_DISCOVERY;
+
+  it("**states the checkpoint count from the CONSTANT, not from prose**", () => {
+    // Found by RUNNING the harness, not by reading it: the manifest said "3 read-only checkpoint readings" and
+    // the warning said "Three checkpoints" while the code had four — and the undescribed fourth is the one
+    // standing in front of the key-creating button. A hand-typed count in a safety document drifts the moment
+    // the code moves, so the guard is the TIE, not the number.
+    const branch = CLI_SRC.slice(CLI_SRC.indexOf("isWingFlowDiscovery\n    ? \"operator-performed"));
+    const maxActions = branch.slice(0, branch.indexOf("\n    : isWingReveal"));
+    expect(maxActions).toContain("${WING_FLOW_CHECKPOINTS.length} read-only checkpoint readings");
+    expect(maxActions).toContain("WING_FLOW_CHECKPOINTS.join");
+    // A literal count anywhere in that string is the defect coming back.
+    expect(maxActions).not.toMatch(/\b[0-9]+ read-only checkpoint readings/);
+  });
+
+  it("the OPERATION text names the key-creation boundary and the separate approval", () => {
+    const branch = CLI_SRC.slice(CLI_SRC.indexOf('isWingFlowDiscovery\n    ? "WING OPEN-API'));
+    const operation = branch.slice(0, branch.indexOf("\n    : isWingReveal"));
+    expect(operation).toContain("KEY-CREATION control");
+    expect(operation).toContain("never pressed");
+    expect(operation).toContain("separate phase");
+    expect(operation).toContain("TERMS screen");
+    // …and it must not consent on the seller's behalf.
+    expect(operation).toContain("does not read, evaluate, agree to, or advise on the terms");
+  });
+
+  it("the OPERATOR SUMMARY — the copy the seller actually reads — carries the same boundary", () => {
+    // The operation is for a reviewer; this is for the person at the keyboard. Both have to say it, because a
+    // run that stops one control short of key creation is only safe if the person knows which control that is.
+    expect(ENTRY.operatorActionSummary).toContain("약관 동의 및 Key 발급받기");
+    expect(ENTRY.operatorActionSummary).toContain("절대 누르지 않습니다");
+    expect(ENTRY.operatorActionSummary).toContain("별도 승인");
+    expect(ENTRY.operatorActionSummary).toContain("대신 동의하지 않습니다");
+    // Four numbered steps, matching the four checkpoints.
+    for (const marker of ["①", "②", "③", "④"]) expect(ENTRY.operatorActionSummary).toContain(marker);
+    expect(ENTRY.operatorActionSummary).not.toContain("⑤");
+  });
+
+  it("the agent's declared action list gained NOTHING for this phase", () => {
+    // The whole justification for reusing the calibration's capability set is that discovery reads the same
+    // eight things. A ninth here means the phase stopped being what its manifest says it is.
+    expect([...SPEC.capableActions]).toEqual([...PHASE_SPECS.COUPANG_WING_STAGE2_LABEL_CALIBRATION.capableActions]);
+    expect(SPEC.mode).toBe("READ_ONLY");
+    expect(SPEC.allowsHighlight).toBe(false);
+  });
+
+  it("the preflight warning counts the checkpoints the same way the manifest does", () => {
+    // Two documents, one flow. The prose said "Three" while the constant said four.
+    const src = readFileSync(resolve(HERE, "../../../../tools/coupang-local/wing-probe-preflight.sh"), "utf8");
+    const from = src.indexOf('if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then');
+    const block = src.slice(from, src.indexOf('elif is_stage2_phase "$PHASE"; then', from));
+    for (let i = 1; i <= WING_FLOW_CHECKPOINTS.length; i++) expect(block, `step ${i}`).toContain(`${i})`);
+    expect(block).not.toContain(`${WING_FLOW_CHECKPOINTS.length + 1})`);
+    expect(block).toContain("KEY-CREATION control");
+    expect(block).toContain("no fifth checkpoint");
   });
 });

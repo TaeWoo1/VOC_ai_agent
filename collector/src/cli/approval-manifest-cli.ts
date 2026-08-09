@@ -27,7 +27,10 @@ import {
 import { CALIBRATION_PHASES, COUPANG_WING_ISSUANCE_REVEAL_ACTION, isWingCalibrationPhase } from "./approval-manifest";
 import { WING_ISSUE_SELECTOR_CALIBRATED } from "../action-window/coupang-wing-issuance-driver";
 import { resolveVisualReconScope } from "../action-window/api-issuance-calibration/visual-recon";
-import { resolveWingStage2ReconScope } from "../action-window/coupang-wing-label-recon";
+import {
+  resolveWingStage2ReconScope,
+  WING_FLOW_CHECKPOINTS,
+} from "../action-window/coupang-wing-label-recon";
 // The public WING host default for the Coupang WING selector-probe phase (pure leaf; no per-run input needed).
 import { WING_DEFAULT_URL, resolveWingProbeScope } from "./coupang-wing-classifier";
 import { COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION, COUPANG_WING_KEY_DELETION_SCOPE } from "./approval-manifest";
@@ -180,7 +183,7 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     : isWingStage2Calibration
     ? "WING Stage-2 read-only LABEL CALIBRATION on the purpose-selection screen (the OPERATOR presses 발급 to open it; agent derives how each choice control is LABELLED and compares it against fixed candidates, reporting category names and indices only — no wording recorded, no highlight, no selection, no input, no 확인, no value read)"
     : isWingFlowDiscovery
-    ? "WING OPEN-API issuance-flow DISCOVERY across operator-advanced checkpoints (the OPERATOR presses 발급, selects the purpose option, and — ONLY if the reading after that selection shows the 업체명/URL/IP form is not yet on screen — presses 확인; the agent takes the same read-only label/association readings at each checkpoint and performs no click, selection, input, or value read. If the form IS already visible, 확인 may be the submitting action and the run halts without inviting the press. Nothing is typed into the revealed form and the final issuance control is out of scope)"
+    ? "WING OPEN-API issuance-flow DISCOVERY across operator-advanced checkpoints (the OPERATOR presses 발급, selects the purpose option, and — ONLY if the reading after that selection shows the 업체명/URL/IP form is not yet on screen — presses 확인, which opens the TERMS screen; the operator then ticks the two consent checkboxes themselves. The agent takes the same read-only label/association readings at each checkpoint and performs no click, selection, input, or value read. THE RUN ENDS ON THE TERMS SCREEN: the button below it, `약관 동의 및 Key 발급받기`, is the KEY-CREATION control, it is measured only to locate it, it is never pressed, and this phase has no checkpoint after the one that would ask. Key issuance is a separate phase with its own manifest and its own grant. SellerOps does not read, evaluate, agree to, or advise on the terms)"
     : isWingReveal
     ? "WING issuance-form reveal (the OPERATOR presses 발급; this press is not the key-creating action; agent performs no click/input/value read)"
     : isVisualRecon
@@ -203,7 +206,9 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     : isWingStage2Calibration
     ? "1 operator-performed 발급 press + 1 read-only Stage-2 label-calibration session (candidate match counts + containment probe + choice-control shape and label-association census); 0 selections"
     : isWingFlowDiscovery
-    ? "operator-performed: 1 발급 press + 1 purpose-option selection + at most 1 확인 press (gated on the measurement, and skipped entirely if it says stop); agent: 3 read-only checkpoint readings, 0 clicks, 0 selections, 0 inputs, 0 value reads"
+    ? "operator-performed: 1 발급 press + 1 purpose-option selection + at most 1 확인 press (gated on the measurement, and skipped entirely if it says stop) + up to 2 consent checkbox ticks; 0 presses of the key-creating 약관 동의 및 Key 발급받기 button, which this phase cannot reach. agent: " +
+      `${WING_FLOW_CHECKPOINTS.length} read-only checkpoint readings, 0 clicks, 0 selections, 0 inputs, 0 value reads` +
+      ` (checkpoints: ${WING_FLOW_CHECKPOINTS.join(" → ")})`
     : isWingReveal
     ? "1 operator-performed 발급 press + 1 sanitized observation"
     : isVisualRecon
