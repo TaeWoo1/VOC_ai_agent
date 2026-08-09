@@ -80,6 +80,24 @@ be the only surviving evidence — that shape is what made `SURFACE_UNCHANGED` u
 **The preflight** now states the refusal in the manifest disclosure, so the operator's grant is given against a
 run that may decline before asking them to act.
 
+## How often the refusal will actually fire: almost never
+
+Stated plainly, because the unit reads as a bigger behavioural change than it is.
+
+`EXTRACT_WING_CENSUS` emits all three Stage-2 fields unconditionally, so every current run measures them — and
+`dialogLikePresent === false` alone contributes an eligible detector. `BLIND_INSTRUMENT` therefore requires a
+dialog **already open** *and* `choiceControlCount > 3` *and* `actionControlCount > 20`, simultaneously, on a
+pre-press open-API page. That is not a shape anyone expects.
+
+So the shipped effect on a real v3 run is the **disclosure**, plus the fact that eligibility no longer counts
+`submitAffordancePresent`. The refusal is a backstop against a census regression or an unexpected surface, and its
+walk-level test is built by *deleting* the three census fields — a shape the shipped in-page script cannot
+produce. The branch is exercised only against a pre-repair collector.
+
+This was surfaced by independent review, not by me, and it is worth being precise about: the gate does not make
+the next live run safer than it looks. It makes the run *legible* before the press, and it removes a capability
+claim that was false.
+
 ## What this gate does NOT claim
 
 It does not assert that Stage-2 will be detected. Stage-2 has never been measured; nothing written today can
@@ -100,11 +118,11 @@ so until the gate made it fail.
 
 ## Verification
 
-typecheck green. Full collector suite: **309 files / 7594 tests passed**, 18 files + 142 tests skipped (was 7576 —
-**+18**). Selfchecks after commit: `wing-reveal` 0, `wing-probe` 0, `wing-deletion` 2 (PARTIAL by design, the
-withdrawn deletion calibration).
+typecheck green. Full collector suite: **309 files / 7596 tests passed**, 18 files + 142 tests skipped (was 7576 —
+**+20**). Selfchecks: `wing-reveal` 0, `wing-probe` 0, `wing-deletion` 2 (PARTIAL by design, the withdrawn
+deletion calibration).
 
-**Mutation battery: 16/16 caught.** The load-bearing ones:
+**Mutation battery: 20/20 caught.** The load-bearing ones:
 
 | id | mutation |
 |---|---|
@@ -114,11 +132,39 @@ withdrawn deletion calibration).
 | G8 | eligible set aliased to structural headroom — the split becomes decorative |
 | G10 | an **unmeasured** signal promoted to headroom, and so to eligibility |
 | G12 | emitted record keeps only a **count** of the eligible set |
-| G13 | emitted eligibility **fabricated** rather than computed |
+| G13b | emitted eligibility is a literal that **matches the default baseline's true answer** |
+| G17 | the driver's post-press capability report emitted empty — the two silently disagree |
+| G18 | exit-code precedence flipped — `BLIND_INSTRUMENT` outranks a stuck overlay |
 | G16 | `BLIND_INSTRUMENT` exits 0 — a refused run reads as a good one |
 
 No Chromium fixture applies: the eligibility layer is pure TypeScript over an already-computed observation and
 touches no in-page script. Stating that rather than reporting a fixture run that would prove nothing.
+
+### What the first battery missed, and independent review caught
+
+Four defects survived a 16/16 green battery. Recording them because the shape recurs:
+
+- **A false claim of mine, in code and doc.** `detectableDisjuncts` was emitted with the comment "a test asserts
+  they agree". **No such test existed** — the only assertion was `Array.isArray`. Worse, the fixture made them
+  *disagree* in every single emitted record: `result()` hand-wrote `["submitAffordancePresent"]` beside a
+  structural set of all four. The test now exists, against a non-default baseline.
+- **A mutation weaker than the property it claimed to test.** My G13 used a fabricated literal that did not match
+  the real value, so it was caught for the wrong reason. A literal matching the **default** baseline's true answer
+  survived — because `OPEN_API` was every test's classify observation, making the expected value a compile-time
+  constant. Fixed by driving the emit assertions from a baseline whose eligibility genuinely differs.
+- **Two BLIND tests that never asserted the refusal happened.** Both passed under the G1 mutation, because the
+  checkpoint path prints the same disclosure and carries the same eligibility. They asserted "some path
+  discloses", not "the run refused".
+- **A test reading an array nothing wrote to.** "the gate reads the ELIGIBLE set" destructured `order` from one
+  harness and passed a *second* harness's `io`, so no narration event ever reached the array under assertion. It
+  still caught its mutation via the driver calls, but every operator-facing property in its name was unobservable.
+
+Also fixed from review: exit-code precedence 8-vs-9 was untested (and reachable — `clearHighlight()` reports NOT
+cleared whenever the page is unreadable, including on the blind path); the `eligibility: null` docstring claimed
+"no baseline existed", which is false for `NOT_OPEN_API_SURFACE`; a comment credited the gate's ordering to
+running before the probe, when the probe was never the tagging step; and `WING_EMPIRICALLY_REFUTED_DISJUNCTS` had
+no compile-time tie to `Stage2Disjunct`, so a typo'd name would have silently made the gate a no-op — now
+`satisfies readonly Stage2Disjunct[]`.
 
 ## Not in this unit
 

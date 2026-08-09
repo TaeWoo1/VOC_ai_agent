@@ -84,7 +84,10 @@ function result(over: Partial<WingRevealResult> = {}): WingRevealResult {
     outcome: "CONFIGURATION_SURFACE_SUSPECTED",
     before: OPEN_API,
     after: AFTER_FORM,
-    detectableDisjuncts: ["submitAffordancePresent"],
+    // DERIVED from `before`, as the real driver derives it. Hand-writing `["submitAffordancePresent"]` here made
+    // every emitted record carry two capability reports over the same baseline that visibly disagreed, while the
+    // code comment claimed a test asserted they agreed. Review caught both; the test now exists, below.
+    detectableDisjuncts: stage2DisjunctsWithHeadroom(OPEN_API),
     changedSignals: ["submitAffordancePresent"],
     keyCreationRuledOut: false,
     keyCreationReason: "NO_DISCRIMINATING_SIGNAL",
@@ -780,6 +783,10 @@ describe("the report is reported — a run that exits 0 whatever happened is an 
     );
     // A stuck overlay outranks everything: it is the only one describing state left on the seller's live page.
     expect(revealExitCode({ ...base, stop: "NOT_OPEN_API_SURFACE", cleanupFailed: true })).toBe(8);
+    // Including 9. The pair is reachable — `clearHighlight()` reports NOT cleared whenever the page is
+    // unreadable, which can happen on the blind path too — and pinning 8-over-7 alone left the ordering of
+    // 8-against-9 free to flip.
+    expect(revealExitCode({ ...base, stop: "BLIND_INSTRUMENT", cleanupFailed: true, outcomeAsExpected: false })).toBe(8);
   });
 
   it("main() CALLS banner() — printing it is not the same as showing it", () => {
@@ -932,7 +939,11 @@ describe("runRevealWalk — BLIND_INSTRUMENT stops before the operator is asked 
 
   it("the refusal DISCLOSES all three sets, not just the verdict", async () => {
     const { driver, io, notes } = harness({ classifyObservation: blindObservation() });
-    await runRevealWalk(driver, io, "wing_host");
+    const report = await runRevealWalk(driver, io, "wing_host");
+    // Asserted FIRST. Without it this passes under a gate that lets the blind baseline through to the
+    // checkpoint, where the same disclosure prints the same three lines — "some path discloses" is not the
+    // property. Review caught exactly that.
+    expect(report.stop).toBe("BLIND_INSTRUMENT");
     const text = noteText(notes);
     expect(text).toContain("structural headroom (1): submitAffordancePresent");
     expect(text).toContain("empirically refuted on WING (1): submitAffordancePresent");
@@ -941,12 +952,21 @@ describe("runRevealWalk — BLIND_INSTRUMENT stops before the operator is asked 
 
   it("the gate reads the ELIGIBLE set, not the structural one", async () => {
     // The mutation this catches is a one-word swap in the gate condition. Under it the blind baseline — whose
-    // structural headroom is non-empty — sails through to the checkpoint and the operator is asked to press.
-    const { driver, order } = harness({ classifyObservation: blindObservation() });
-    const structural = stage2DisjunctsWithHeadroom(blindObservation());
-    expect(structural.length).toBeGreaterThan(0);
-    await runRevealWalk(driver, harness({ classifyObservation: blindObservation() }).io, "wing_host");
+    // structural headroom is NON-empty — sails through to the checkpoint and the operator is asked to press.
+    //
+    // The premise is asserted, not assumed: if structural headroom were empty here, both readings would refuse
+    // and the test would pass while distinguishing nothing.
+    expect(stage2DisjunctsWithHeadroom(blindObservation()).length).toBeGreaterThan(0);
+    // ONE harness. The first version destructured `order` from one and passed a second harness's `io`, so the
+    // array under assertion never received a single io event — every narration property its name claims was
+    // unobservable through it. Review caught it.
+    const { driver, io, order, notes } = harness({ classifyObservation: blindObservation() });
+    const report = await runRevealWalk(driver, io, "wing_host");
+    expect(report.stop).toBe("BLIND_INSTRUMENT");
     expect(order).not.toContain("highlight");
+    // The operator-facing property the name actually asserts: they are never invited to press.
+    expect(order).not.toContain("note:presshint");
+    expect(noteText(notes)).not.toContain("Press 발급 YOURSELF");
   });
 
   it("an ELIGIBLE baseline reaches the checkpoint and the press hint, in order", async () => {
@@ -982,6 +1002,9 @@ describe("runRevealWalk — BLIND_INSTRUMENT stops before the operator is asked 
   it("the report carries the eligibility on the refusal path", async () => {
     const { driver, io } = harness({ classifyObservation: blindObservation() });
     const report = await runRevealWalk(driver, io, "wing_host");
+    // The stop is part of the property: without it this passes under a gate that never refuses, because the
+    // checkpoint path carries the identical eligibility.
+    expect(report.stop).toBe("BLIND_INSTRUMENT");
     expect(report.eligibility?.eligibleDetectionDisjuncts).toEqual([]);
     expect(report.eligibility?.structuralHeadroomDisjuncts).toEqual(["submitAffordancePresent"]);
   });
@@ -994,18 +1017,51 @@ describe("runRevealWalk — BLIND_INSTRUMENT stops before the operator is asked 
     expect(report.stop).toBe("ABORTED_BEFORE_CHECKPOINT");
     expect(report.eligibility).toBeNull();
   });
+
+  it("an OFF-SURFACE refusal reports NO eligibility, though it does hold an observation", async () => {
+    // The docstring used to say null meant "no baseline existed". It does not: this path classified. Capability
+    // measured against a login or credential page is not a fact about the reveal surface, and reporting it as
+    // one is the same over-claim the gate exists to prevent — so it is deliberately not computed here.
+    const { driver, io } = harness({ classifyOk: false });
+    const report = await runRevealWalk(driver, io, "wing_host");
+    expect(report.stop).toBe("NOT_OPEN_API_SURFACE");
+    expect(report.eligibility).toBeNull();
+  });
 });
 
 describe("the emitted record carries the computed sets", () => {
-  it("emits all three sets, from the real computation over the run's own baseline", async () => {
-    const { driver, io, emitted } = harness();
+  it("emits all three sets, computed from THIS run's baseline — not a literal", async () => {
+    // Against the DEFAULT baseline this test was passable by a hardcoded literal: `OPEN_API` is every test's
+    // classify observation, so the expected value was a compile-time constant and a fabricated record matching
+    // it survived. Review demonstrated the surviving mutation. A non-default baseline removes the constant.
+    const baseline = observation({ choiceControlCount: 40, actionControlCount: 12 });
+    const { driver, io, emitted } = harness({
+      classifyObservation: baseline,
+      result: result({ before: baseline, detectableDisjuncts: stage2DisjunctsWithHeadroom(baseline) }),
+    });
     await runRevealWalk(driver, io, "wing_host");
     expect(emitted).toHaveLength(1);
     const rec = emitted[0]!;
-    // Derived, not restated: compared against a fresh computation over the same baseline rather than a literal.
-    expect(rec.detectionEligibility).toEqual(stage2DetectionEligibility(OPEN_API));
+    expect(rec.detectionEligibility).toEqual(stage2DetectionEligibility(baseline));
+    // …and it is NOT the default baseline's answer, so a literal keyed to `OPEN_API` cannot pass.
+    expect(rec.detectionEligibility).not.toEqual(stage2DetectionEligibility(OPEN_API));
+  });
+
+  it("the two independently-computed capability reports AGREE", async () => {
+    // The code comment claimed this test existed. It did not, and the fixture actively contradicted it: every
+    // emitted record carried a `detectableDisjuncts` of `["submitAffordancePresent"]` beside a
+    // `structuralHeadroomDisjuncts` of all four, and the only assertion on the field was `Array.isArray`.
+    // Both derive from the same baseline in the real driver, so disagreement means one of them is wrong.
+    const baseline = observation({ choiceControlCount: 40, actionControlCount: 12 });
+    const { driver, io, emitted } = harness({
+      classifyObservation: baseline,
+      result: result({ before: baseline, detectableDisjuncts: stage2DisjunctsWithHeadroom(baseline) }),
+    });
+    await runRevealWalk(driver, io, "wing_host");
+    const rec = emitted[0]!;
     const e = rec.detectionEligibility as ReturnType<typeof stage2DetectionEligibility>;
-    expect(e.eligibleDetectionDisjuncts.length).toBeGreaterThan(0);
+    expect(e.structuralHeadroomDisjuncts).toEqual(rec.detectableDisjuncts);
+    expect(e.structuralHeadroomDisjuncts.length).toBeGreaterThan(0);
   });
 
   it("a bare count is NOT the whole record — the sets themselves survive", async () => {

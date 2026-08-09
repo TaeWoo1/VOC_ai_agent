@@ -98,6 +98,9 @@ the last three of them added after later review rounds caught them missing from 
    anything downstream of the terminal. **`8` supersedes `6` and `7`** — `cleanupFailed` is tested first, so a
    consumer keyed on "`6` = unexpected outcome" misses `CREDENTIAL_SURFACE_APPEARED` whenever the overlay clear
    also failed. Read `8` as "this run's state is not trustworthy AND something may be left on the live page".
+   **Amended 2026-08-09:** a fifth code exists — `9` = `BLIND_INSTRUMENT`, refused before the highlight because
+   every remaining Stage-2 detector was already refuted (`docs/coupang_wing_reveal_headroom_gate_v1.md`). It is
+   distinct from `7` because `7` can be retried as-is and `9` cannot. `8` supersedes `9` as well.
 4. **A failed overlay clear is now reported on every path.** `main` propagated a throwing clear on exactly ONE
    of six paths and swallowed it on the other five, so this is new rather than restored. It also required
    changing `cleanup()` to return a boolean: `clearHighlight` catches every error it can hit, so the production

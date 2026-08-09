@@ -252,8 +252,12 @@ export interface RevealWalkReport {
   stop: RevealWalkStop;
   result: WingRevealResult | null;
   /**
-   * The pre-press capability split, computed from the baseline BEFORE anything was highlighted. Null only when
-   * the walk stopped before classifying a surface, i.e. when there was no baseline to compute it from.
+   * The pre-press capability split, computed from the baseline BEFORE anything was highlighted.
+   *
+   * Null on the two paths that never reach the computation: an abort/timeout before the readiness signal, and
+   * `NOT_OPEN_API_SURFACE`. The second one DOES hold an observation — it is deliberately not measured, because
+   * capability against a login or credential page is not a fact about the reveal surface and would read as one.
+   * (An earlier version of this comment said null meant "no baseline existed"; review caught it.)
    *
    * On the record because the alternative — a bare `detectableDisjunctCount` in a log line, after the press — is
    * what made two live runs unable to say whether "nothing changed" meant the surface or the instrument.
@@ -325,7 +329,9 @@ export async function runRevealWalk(
       io.note(`Refusing to continue: not the open-API surface (pageCategory=${classified.observation.pageCategory}).`);
       return stopped("NOT_OPEN_API_SURFACE");
     }
-    // BEFORE the probe, and so before anything is tagged, highlighted, or disclosed as pressable. The gate reads
+    // BEFORE the probe, and so before the highlight that tags and paints, and before anything is disclosed as
+    // pressable. (The probe itself is read-only and tags nothing — an earlier comment implied otherwise. The
+    // ordering still matters: `highlightIssueCheckpoint` is the step that mounts.) The gate reads
     // ONLY `eligibleDetectionDisjuncts`: structural headroom includes `submitAffordancePresent`, which has
     // headroom on every WING baseline and is proven blind there, so gating on the structural set would be a
     // check that passes forever on the strength of the one detector known not to work.
@@ -397,7 +403,8 @@ export async function runRevealWalk(
       // number and a set were derived from the same baseline.
       detectionEligibility: eligibility,
       // The driver's independent post-press recomputation over the same baseline. Emitted alongside rather than
-      // in place of the above so the two cannot silently diverge; a test asserts they agree.
+      // in place of the above so the two cannot silently diverge; a test asserts they AGREE, against a
+      // non-default baseline so neither side can be a literal that happens to match.
       detectableDisjuncts: result.detectableDisjuncts,
     });
     log("aw_coupang_reveal_run_done", {

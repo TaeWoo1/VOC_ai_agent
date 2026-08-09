@@ -307,7 +307,7 @@ export function stage2DisjunctsWithHeadroom(before: WingObservation): Stage2Disj
  * Membership requires live evidence of blindness, never a hunch — adding a disjunct here shrinks the eligible
  * set and makes the gate stricter, so the failure direction is a refused run, not an unwatched press.
  */
-export const WING_EMPIRICALLY_REFUTED_DISJUNCTS = ["submitAffordancePresent"] as const;
+export const WING_EMPIRICALLY_REFUTED_DISJUNCTS = ["submitAffordancePresent"] as const satisfies readonly Stage2Disjunct[];
 
 /**
  * The three-layer pre-press capability report. Separated because they answer three different questions and
