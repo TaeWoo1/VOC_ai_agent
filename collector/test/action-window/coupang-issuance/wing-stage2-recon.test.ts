@@ -19,6 +19,7 @@ import {
   wingStage2Precondition,
   wingStage2ReconProbes,
   UnknownWingReconTargetError,
+  WING_STAGE2_RECON_EVIDENCE,
 } from "../../../src/action-window/coupang-wing-label-recon";
 import {
   EXTRACT_WING_CHOICE_CONTROL_SHAPES,
@@ -715,5 +716,118 @@ describe("the emitted Stage-2 record", () => {
     for (const forbidden of ["http", "://", "querySelector", "<", "textContent"]) {
       expect(json).not.toContain(forbidden);
     }
+  });
+});
+
+/* ────────────────────────────── the landed Stage-2 recon evidence ────────────────────────────── */
+
+describe("WING_STAGE2_RECON_EVIDENCE — measured, operator-reported, and inferred kept apart", () => {
+  it("records the structural measurement verbatim", () => {
+    const e = WING_STAGE2_RECON_EVIDENCE;
+    expect(e.gitSha).toBe("277220f7");
+    expect(e.runId).toBe("wt-2b984a46c298");
+    expect(e.recordId).toBe("wingrec_0f296204926c");
+    expect(e.precondition).toBe("OK");
+    expect(e.visibleChoiceControlCount).toBe(2);
+    expect(e.hiddenChoiceControlCount).toBe(10);
+    expect(e.visibleShapes).toEqual([{ tag: "INPUT", inputType: "radio", role: "none", count: 2 }]);
+    expect(e.groupContainerCount).toBe(0);
+  });
+
+  it("the shape it recorded is one the closed vocabulary can express", () => {
+    // A record whose categories are not in the census's own allow-lists would describe a reading the instrument
+    // cannot produce — i.e. a hand-typed value wearing a measurement's clothes.
+    for (const s of WING_STAGE2_RECON_EVIDENCE.visibleShapes) {
+      expect(WING_CONTROL_TAGS as readonly string[]).toContain(s.tag);
+      expect(WING_CONTROL_INPUT_TYPES as readonly string[]).toContain(s.inputType);
+      expect(WING_CONTROL_ROLES as readonly string[]).toContain(s.role);
+    }
+    // …and the visible count agrees with the shape counts. Two numbers that can disagree usually do.
+    const summed = WING_STAGE2_RECON_EVIDENCE.visibleShapes.reduce((n, s) => n + s.count, 0);
+    expect(summed).toBe(WING_STAGE2_RECON_EVIDENCE.visibleChoiceControlCount);
+  });
+
+  it("absences are MEASURED zeros, and the counts prove it", () => {
+    const e = WING_STAGE2_RECON_EVIDENCE;
+    // 7 absent + 1 unique = 8 measured, none unmeasured, no faults. Without that arithmetic an "ABSENT" cannot
+    // be distinguished from a probe that never ran — the distinction the recon's NOT_MEASURED verdict exists for.
+    expect(e.absentCandidateIds).toHaveLength(7);
+    expect(e.candidatesMeasured).toBe(8);
+    expect(e.candidatesNotMeasured).toBe(0);
+    expect(e.probeFaults).toBe(0);
+    expect(e.absentCandidateIds.length + 1).toBe(e.candidatesMeasured);
+  });
+
+  it("every absent id is a REAL candidate id from the frozen sets", () => {
+    // An id that matches no candidate would record an absence for something never probed.
+    const known = new Set(Object.values(WING_STAGE2_RECON_CANDIDATES).flat().map((c) => c.id));
+    for (const id of WING_STAGE2_RECON_EVIDENCE.absentCandidateIds) expect(known).toContain(id);
+    expect(known.has("stage2.confirm.confirm")).toBe(true);
+    // …and the one that RESOLVED is not also listed as absent.
+    expect(WING_STAGE2_RECON_EVIDENCE.absentCandidateIds as readonly string[]).not.toContain("stage2.confirm.confirm");
+  });
+
+  it("확인 is LOCATED, and explicitly not promoted to the key-issuing control", () => {
+    // The whole risk of this landing. `확인` matched once; what it DOES is unmeasured, because nothing pressed
+    // it and this phase has no tooling that could. Recording "final issuance button" from a match count would
+    // be the `role: "button"` mistake again — a role asserted from an expectation, not a reading.
+    const c = WING_STAGE2_RECON_EVIDENCE.confirmLocated;
+    expect(c.matchCount).toBe(1);
+    expect(c.verdict).toBe("UNIQUE");
+    expect(c.signatureRole).toBe("EVIDENCE_ONLY");
+    expect(c.pressed).toBe(false);
+    expect(c.effectMeasured).toBe(false);
+    expect(c.isFinalIssuanceControl).toBe("OPERATOR_FLOW_DESCRIPTION_ONLY_NOT_MEASURED");
+  });
+
+  it("the two radios' MEANING is unmeasured — a count is not a semantics", () => {
+    expect(WING_STAGE2_RECON_EVIDENCE.purposeOptionSemanticsMeasured).toBe(false);
+    // Nothing in the record may name a purpose option. Guessing which radio is 자체개발 from a count of two is
+    // inventing a product decision.
+    const json = JSON.stringify(WING_STAGE2_RECON_EVIDENCE);
+    for (const guess of ["자체개발", "직접입력", "외부", "업체 연동"]) expect(json).not.toContain(guess);
+  });
+
+  it("the absence EXPLANATION is marked inferred and untested", () => {
+    const x = WING_STAGE2_RECON_EVIDENCE.absenceExplanation;
+    expect(x.provenance).toBe("INFERRED");
+    expect(x.tested).toBe(false);
+  });
+
+  it("keeps the standing non-claims and the one-capture caveat", () => {
+    const e = WING_STAGE2_RECON_EVIDENCE;
+    expect(e.captureCount).toBe(1);
+    expect(e.signatureStability).toBe("SINGLE_CAPTURE_NOT_ESTABLISHED");
+    expect(e.keyCreationRuledOut).toBe(false);
+    expect(e.issuedStateReason).toBe("NO_DISCRIMINATING_SIGNAL");
+    expect(e.operatorSelectedPurpose).toBe(false);
+    expect(e.operatorPressedConfirm).toBe(false);
+    expect(e.surfaceVisibility).toBe("OPERATOR_REPORTED");
+  });
+
+  it("keeps the REFUSED attempt on the record", () => {
+    // It is the only evidence the precondition fires on a real surface — and without it, eight fabricated
+    // ABSENT verdicts would be indistinguishable in the record from the seven real ones measured here.
+    const r = WING_STAGE2_RECON_EVIDENCE.precedingRefusal;
+    expect(r.precondition).toBe("NO_VISIBLE_CHOICE_CONTROL");
+    expect(r.candidatesMeasured).toBe(0);
+    expect(r.recordId).not.toBe(WING_STAGE2_RECON_EVIDENCE.recordId);
+  });
+
+  it("landing the evidence promoted NO selector and changed NO ordering", () => {
+    // The shipped Stage-2 target order is a product-facing sequence; a measurement is not a licence to reorder
+    // it, and `확인` resolving is not a licence to ship it as a locator.
+    expect([...WING_STAGE2_RECON_TARGETS]).toEqual(["purpose", "self_dev", "vendor_info", "vendor_url", "call_ip", "confirm"]);
+    const known = Object.values(WING_STAGE2_RECON_CANDIDATES).flat();
+    expect(known.find((c) => c.id === "stage2.confirm.confirm")!.exactText).toBe("확인");
+  });
+
+  it("is deeply frozen — a measurement must not be editable in place", () => {
+    const e = WING_STAGE2_RECON_EVIDENCE as unknown as Record<string, unknown>;
+    expect(Object.isFrozen(e)).toBe(true);
+    for (const k of ["visibleShapes", "confirmLocated", "absentCandidateIds", "absenceExplanation", "precedingRefusal"]) {
+      expect(Object.isFrozen(e[k]), k).toBe(true);
+    }
+    expect(Object.isFrozen(WING_STAGE2_RECON_EVIDENCE.visibleShapes[0])).toBe(true);
   });
 });
