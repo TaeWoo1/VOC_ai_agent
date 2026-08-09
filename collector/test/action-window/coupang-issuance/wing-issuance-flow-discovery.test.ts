@@ -344,6 +344,21 @@ describe("the discovery PHASE is wired everywhere a Stage-2 phase must be", () =
     }
   });
 
+  it("the BOOTSTRAP note branches too — it is the first copy the operator reads", () => {
+    // Found by running it: the bootstrap printed "choose nothing, and never press '확인'" under a discovery
+    // banner, contradicting the manifest the very next command prints. The preflight had already been fixed;
+    // the bootstrap is a second place saying the same thing, which is how one of them stays wrong.
+    const src = readFileSync(resolve(HERE, "../../../../tools/coupang-local/wing-probe-bootstrap.sh"), "utf8");
+    const branch = src.indexOf('if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then\n    # Discovery ASKS');
+    expect(branch, "the bootstrap note does not branch on the discovery phase").toBeGreaterThan(-1);
+    // Bounded at the `else`, not at the `fi` — the shared copy lives between them, and a slice that swallowed
+    // it would let the discovery branch say anything at all while this test read the branch below it.
+    const block = src.slice(branch, src.indexOf("  else", branch));
+    expect(block).toContain("YOU advance the flow");
+    expect(block).toContain("ONLY if");
+    expect(block).not.toContain("never press");
+  });
+
   it("the preflight gives discovery its OWN operator warning — the shared one FORBIDS what it asks for", () => {
     // The Stage-2 warning says "Choose no purpose … NEVER press 확인". Printed above a discovery manifest it
     // would contradict the manifest directly over it, and the operator would have to guess which is binding.

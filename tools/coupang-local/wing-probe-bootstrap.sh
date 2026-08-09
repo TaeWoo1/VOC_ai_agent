@@ -149,8 +149,17 @@ if [ -n "$PROBE_TARGETS" ]; then
 fi
 if [ -n "$STAGE2_TARGETS" ]; then
   echo "  stage-2 scope: $STAGE2_TARGETS"
-  echo "  NOTE         : you press 'API Key 발급 받기' YOURSELF, stop on the purpose screen, choose nothing,"
-  echo "                 and never press '확인'. SellerOps only counts and categorises what is on screen."
+  if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then
+    # Discovery ASKS for the two things the shared note forbids. Printing the shared copy here would tell the
+    # operator the opposite of the manifest the very next command prints — and the bootstrap is read first.
+    echo "  NOTE         : YOU advance the flow (발급 → select 'OPEN API' → 확인), one checkpoint at a time."
+    echo "                 The 확인 step is offered ONLY if the reading taken after your selection shows the"
+    echo "                 업체명/URL/IP form is not yet on screen; otherwise the run halts and never asks."
+    echo "                 SellerOps clicks, selects and types nothing at any point."
+  else
+    echo "  NOTE         : you press 'API Key 발급 받기' YOURSELF, stop on the purpose screen, choose nothing,"
+    echo "                 and never press '확인'. SellerOps only counts and categorises what is on screen."
+  fi
 fi
 echo
 echo "next: tools/coupang-local/wing-probe-preflight.sh  (prepares + displays the Approval Manifest; no browser)"
