@@ -448,7 +448,9 @@ describe("the Stage-2 phase gate — a Stage-2 manifest can never run something 
 
   it("arms only when BOTH phase variables name the Stage-2 phase", () => {
     const r = resolveWingStage2Scope({ [P]: S2, [A]: S2 });
-    expect(r).toEqual({ requested: true, ok: true, targets: [...WING_STAGE2_RECON_TARGETS] });
+    // The resolved PHASE is part of the result: two Stage-2 phases now share this gate, and a caller that could
+    // not tell which one was armed would have to re-read the env var the gate exists to interpret.
+    expect(r).toEqual({ requested: true, ok: true, phase: S2, targets: [...WING_STAGE2_RECON_TARGETS] });
   });
 
   it("is inert when neither names it — an ordinary probe run is unaffected", () => {
@@ -647,22 +649,37 @@ describe("CoupangWingIssuanceDriver.choiceControlCensus", () => {
 describe("the emitted Stage-2 record", () => {
   const sweep = {
     phase: "COUPANG_WING_STAGE2_RECON" as const,
+    calibration: false,
     precondition: "OK" as const,
     targets: [
       {
         target: "purpose" as const,
         candidates: [
-          { id: "stage2.purpose.operator_reported", label: "이제 키의 사용 목적을 골라주세요.", matchCount: 1, verdict: "UNIQUE" as const, sig16: "0123456789abcdef" },
+          {
+            id: "stage2.purpose.operator_reported",
+            label: "이제 키의 사용 목적을 골라주세요.",
+            matchCount: 1,
+            verdict: "UNIQUE" as const,
+            sig16: "0123456789abcdef",
+            hiddenMatchCount: null,
+            containment: null,
+            presence: "NOT_MEASURED" as const,
+          },
         ],
         uniqueCandidateIds: ["stage2.purpose.operator_reported"],
         resolvedUnambiguously: true,
       },
     ],
     faults: [],
+    containmentFaults: [],
     candidatesMeasured: 1,
     candidatesNotMeasured: 0,
     choiceControls: sanitizeChoiceControlCensus({ visibleChoiceControlCount: 2, shapes: [], groupContainerCount: 1 }),
     choiceControlFault: null,
+    association: null,
+    associationFault: null,
+    calibrationBlind: null,
+    purposeOptionCandidateIds: [],
   };
 
   it("carries the precondition, the verdicts, and the shape census", () => {
@@ -694,7 +711,7 @@ describe("the emitted Stage-2 record", () => {
     // …and canHighlight is derived from the VERDICT, so NOT_MEASURED never claims highlightability.
     const unmeasured = stage2RecordFor({
       ...sweep,
-      targets: [{ ...sweep.targets[0]!, candidates: [{ ...sweep.targets[0]!.candidates[0]!, verdict: "NOT_MEASURED", matchCount: null, sig16: null }], uniqueCandidateIds: [], resolvedUnambiguously: false }],
+      targets: [{ ...sweep.targets[0]!, candidates: [{ ...sweep.targets[0]!.candidates[0]!, verdict: "NOT_MEASURED" as const, matchCount: null, sig16: null }], uniqueCandidateIds: [], resolvedUnambiguously: false }],
     })!;
     expect(unmeasured.targets[0]!.candidates[0]!.canHighlight).toBe(false);
   });

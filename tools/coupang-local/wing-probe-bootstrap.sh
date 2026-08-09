@@ -23,6 +23,12 @@
 #                                            the OPERATOR reaches by pressing 발급 themselves, plus a
 #                                            choice-control SHAPE census. Still read-only: no highlight, no
 #                                            click, no selection, no 확인, no value read.
+#   COUPANG_WING_STAGE2_LABEL_CALIBRATION  — the same surface and the same operator flow, plus two further
+#                                            read-only reads: a per-candidate CONTAINMENT probe and a
+#                                            label-ASSOCIATION census (how each control is labelled, whether the
+#                                            association resolves, which radio-name group it is in). Category
+#                                            names and indices only — no page wording is recorded, and still no
+#                                            highlight, click, selection, 확인, or value read.
 # They are different work under the same CLI, so they are different manifests and different grants. The recon
 # phase defaults its scope to the three unresolved targets rather than to `delete`, which it cannot sweep.
 #
@@ -54,9 +60,9 @@ git_hardened() {
 #    pattern and inject a second assignment into the file below.
 PHASE="${SELLEROPS_APPROVAL_PHASE:-COUPANG_WING_SELECTOR_PROBE}"
 case "$PHASE" in
-  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON) ;;
+  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION) ;;
   *)
-    echo "BOOTSTRAP FAIL — SELLEROPS_APPROVAL_PHASE must be COUPANG_WING_SELECTOR_PROBE, COUPANG_WING_LABEL_RECON, or COUPANG_WING_STAGE2_RECON."
+    echo "BOOTSTRAP FAIL — SELLEROPS_APPROVAL_PHASE must be COUPANG_WING_SELECTOR_PROBE, COUPANG_WING_LABEL_RECON, COUPANG_WING_STAGE2_RECON, or COUPANG_WING_STAGE2_LABEL_CALIBRATION."
     echo "                 (The DESTRUCTIVE deletion phase has its own harness and is not approvable from here.)"
     exit 1 ;;
 esac
@@ -64,9 +70,15 @@ esac
 # Per-phase scope default. Recon cannot sweep `delete`/`issue`/`credentials` — they have no candidate sets — and
 # the manifest gate refuses such a scope, so defaulting to `delete` under the recon phase would only produce a
 # bootstrap that cannot reach a manifest.
+# Is this either of the two STAGE-2 phases? One predicate, used by every branch below — the WING phase list
+# already learned what happens when a new phase is added to some of the `if`s and not others.
+is_stage2_phase() {
+  case "$1" in COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION) return 0 ;; *) return 1 ;; esac
+}
+
 if [ "$PHASE" = "COUPANG_WING_LABEL_RECON" ]; then
   DEFAULT_TARGETS="self_dev,vendor_info,call_ip"
-elif [ "$PHASE" = "COUPANG_WING_STAGE2_RECON" ]; then
+elif is_stage2_phase "$PHASE"; then
   # A Stage-2 run measures NO shipped locator, so it has no probe scope. Defaulting to `delete` wrote a
   # meaningless scope into the run env and printed "probe targets: delete" for a run that probes none of them.
   DEFAULT_TARGETS=""
@@ -75,7 +87,7 @@ else
 fi
 PROBE_TARGETS="${SELLEROPS_WING_PROBE_TARGETS:-$DEFAULT_TARGETS}"
 case "$PROBE_TARGETS" in
-  "") [ "$PHASE" = "COUPANG_WING_STAGE2_RECON" ] || { echo "BOOTSTRAP FAIL — SELLEROPS_WING_PROBE_TARGETS must not be empty."; exit 1; } ;;
+  "") is_stage2_phase "$PHASE" || { echo "BOOTSTRAP FAIL — SELLEROPS_WING_PROBE_TARGETS must not be empty."; exit 1; } ;;
   *[!a-z_,]*|,*|*,|*,,*)
     echo "BOOTSTRAP FAIL — SELLEROPS_WING_PROBE_TARGETS must be a comma-separated list of lowercase target names."
     exit 1 ;;
@@ -85,7 +97,7 @@ esac
 # canonical probe targets and never become them). It is only written for the Stage-2 phase, so a probe run
 # cannot carry one and a Stage-2 run cannot be narrowed by a probe scope.
 STAGE2_TARGETS=""
-if [ "$PHASE" = "COUPANG_WING_STAGE2_RECON" ]; then
+if is_stage2_phase "$PHASE"; then
   STAGE2_TARGETS="${SELLEROPS_WING_STAGE2_TARGETS:-purpose,self_dev,vendor_info,vendor_url,call_ip,confirm}"
   case "$STAGE2_TARGETS" in
     ""|*[!a-z_0-9,]*|,*|*,|*,,*)

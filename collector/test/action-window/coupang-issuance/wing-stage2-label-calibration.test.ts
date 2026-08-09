@@ -1,0 +1,1164 @@
+/**
+ * **STAGE-2 LABEL CALIBRATION: what each choice control IS, measured rather than assumed.**
+ *
+ * The Stage-2 recon counted two radios and could say nothing about either. It also produced seven `ABSENT`
+ * verdicts it could not bound: the sweep discarded the locate script's `hiddenCount`, so an absence meant "no
+ * PAINTING whole-text match" and nothing more, and the leading explanation for all seven —
+ * `WHOLE_TEXT_EXACT_MATCH_VS_NESTED_OR_PARTIAL_TEXT` — was recorded as INFERRED and untested.
+ *
+ * This unit builds the two instruments that close both, and these are the properties that keep them honest:
+ * every reading is integers / booleans / closed categories / indices into OUR OWN candidate list; an unmeasured
+ * field is `null` and never a measured zero; an absence under a truncated scan says so; and nothing here selects
+ * a purpose, presses 확인, promotes a selector, or records a single character of the page's own wording.
+ */
+import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  buildFixedLabelContainmentScript,
+  buildFixedLabelLocateScript,
+  sanitizeContainmentReading,
+  type FixedLabelContainmentReading,
+} from "../../../src/action-window/api-issuance-calibration/visual-recon-inpage";
+import {
+  buildWingChoiceAssociationScript,
+  sanitizeChoiceAssociationCensus,
+  WING_NAME_LENGTH_BUCKETS,
+  WING_NAME_SOURCES,
+} from "../../../src/cli/coupang-wing-classifier";
+import {
+  WING_LABEL_CALIBRATION_BLIND_REASON,
+  WING_PURPOSE_CANDIDATE_PROVENANCES,
+  WING_STAGE2_PRESENCES,
+  WING_STAGE2_PURPOSE_OPTION_CANDIDATES,
+  interpretWingStage2Recon,
+  wingLabelCalibrationBlind,
+  wingStage2PresenceFrom,
+  type WingPurposeOptionCandidate,
+} from "../../../src/action-window/coupang-wing-label-recon";
+import {
+  WING_STAGE2_LABEL_CALIBRATION_PHASE,
+  WING_STAGE2_RECON_PHASE,
+  resolveWingStage2Scope,
+  runWingSelectorRecord,
+  stage2RecordFor,
+  type WingSelectorRecordDeps,
+} from "../../../src/cli/probe-wing-issuance-selectors";
+import { CoupangWingIssuanceDriver } from "../../../src/action-window/coupang-wing-issuance-driver";
+import {
+  PHASE_SPECS,
+  WING_PHASES,
+  isWingStage2Phase,
+  validateApprovalPrerequisites,
+  type ApprovalPrereqInput,
+} from "../../../src/cli/approval-manifest";
+import { WING_DEFAULT_URL, observeFrom, type WingStructuralCensus } from "../../../src/cli/coupang-wing-classifier";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const SRC = (p: string): string => readFileSync(resolve(HERE, "../../../src", p), "utf8");
+
+/* ══════════════════════════ the CONTAINMENT probe ══════════════════════════ */
+
+/**
+ * A DOM double for the REAL generated containment script.
+ *
+ * `text` is the element's whole `textContent`; `kids` are its direct children, which is what the script's
+ * innermost test walks. `css` is load-bearing for the same reason it is in the shape-census double: without a
+ * real computed style, deleting the `display:none` branch of `paints()` would change no outcome.
+ */
+class Node2 {
+  constructor(
+    public tagName: string,
+    public text: string,
+    public kids: Node2[] = [],
+    public visible = true,
+    private attrs: Record<string, string> = {},
+    public css: { display?: string; visibility?: string } = {},
+  ) {}
+  get children(): Node2[] {
+    return this.kids;
+  }
+  get textContent(): string {
+    return this.text;
+  }
+  get childElementCount(): number {
+    return this.kids.length;
+  }
+  getAttribute(n: string): string | null {
+    return Object.prototype.hasOwnProperty.call(this.attrs, n) ? this.attrs[n]! : null;
+  }
+  getClientRects(): { length: number }[] {
+    return this.visible ? [{ length: 1 }] : [];
+  }
+  getBoundingClientRect(): { width: number; height: number } {
+    return this.visible ? { width: 10, height: 10 } : { width: 0, height: 0 };
+  }
+}
+
+/** Flatten a tree into document order, the way `querySelectorAll('*')` returns it. */
+function flatten(roots: Node2[]): Node2[] {
+  const out: Node2[] = [];
+  const walk = (n: Node2): void => {
+    out.push(n);
+    for (const k of n.kids) walk(k);
+  };
+  for (const r of roots) walk(r);
+  return out;
+}
+
+function runContainment(
+  spec: { candidateQuery: string; exactText: string },
+  opts: { candidates: Node2[]; all: Node2[] },
+): { out: FixedLabelContainmentReading; asked: string[] } {
+  const asked: string[] = [];
+  const doc = {
+    querySelectorAll(sel: string): Node2[] {
+      asked.push(sel);
+      // EXACT match on the two queries the script is contracted to ask for. A widened or misspelled query gets
+      // an empty list, so a mutation surfaces as a wrong count rather than as the fixture answering anyway.
+      if (sel === spec.candidateQuery) return opts.candidates;
+      if (sel === "*") return opts.all;
+      return [];
+    },
+  };
+  const win = {
+    getComputedStyle: (el: Node2) => ({ display: el.css.display ?? "block", visibility: el.css.visibility ?? "visible" }),
+  };
+  const out = new Function("document", "window", `return (${buildFixedLabelContainmentScript(spec)});`)(doc, win);
+  return { out: out as FixedLabelContainmentReading, asked };
+}
+
+describe("the containment probe — absent, or present in a form whole-text matching cannot see", () => {
+  const SPEC = { candidateQuery: "label,legend", exactText: "자체개발" };
+
+  it("counts an exact whole-text match, split by whether it paints", () => {
+    const shown = new Node2("LABEL", "자체개발");
+    const hidden = new Node2("LABEL", "자체개발", [], false);
+    const out = runContainment(SPEC, { candidates: [shown, hidden], all: [shown, hidden] }).out;
+    expect(out.exactVisible).toBe(1);
+    expect(out.exactHidden).toBe(1);
+  });
+
+  it("**finds a label split across nested nodes that the exact matcher misses** — the untested hypothesis", () => {
+    // <div><span>자체</span><span>개발</span></div>. `norm(textContent)` rejoins it on the PARENT, so the
+    // parent contains the label while no child does and no element's whole text equals it. This is the exact
+    // shape recorded as INFERRED against seven Stage-2 absences, and the reading now distinguishes it.
+    const a = new Node2("SPAN", "자체");
+    const b = new Node2("SPAN", "개발");
+    const parent = new Node2("DIV", "자체개발", [a, b]);
+    const out = runContainment(SPEC, { candidates: [], all: flatten([parent]) }).out;
+    expect(out.exactVisible).toBe(0);
+    expect(out.exactHidden).toBe(0);
+    expect(out.deepestContainsVisible).toBe(1);
+    expect(wingStage2PresenceFrom(out)).toBe("PRESENT_NOT_WHOLE_TEXT");
+  });
+
+  it("counts the INNERMOST container only — an ancestor chain does not inflate the number", () => {
+    // Every ancestor up to <html> also contains the text. Counting them would report page depth, not a finding.
+    const leaf = new Node2("SPAN", "자체개발");
+    const mid = new Node2("DIV", "자체개발", [leaf]);
+    const root = new Node2("BODY", "자체개발 그리고 더", [mid]);
+    const out = runContainment(SPEC, { candidates: [], all: flatten([root]) }).out;
+    expect(out.deepestContainsVisible).toBe(1);
+    expect(out.deepestContainsHidden).toBe(0);
+  });
+
+  it("an EMPTY label reports zeros rather than the size of the page", () => {
+    // `''.indexOf` is 0 for every string, so an empty candidate would "match" every element on the page and the
+    // record would carry a document-size count dressed as a finding.
+    const out = runContainment(
+      { candidateQuery: "label", exactText: "   " },
+      { candidates: [new Node2("LABEL", "무엇이든")], all: flatten([new Node2("DIV", "무엇이든")]) },
+    ).out;
+    expect(out.deepestContainsVisible).toBe(0);
+    expect(out.deepestContainsHidden).toBe(0);
+  });
+
+  it("reports truncation, so an absence is never claimed over an unscanned document", () => {
+    const many = Array.from({ length: 8001 }, () => new Node2("DIV", "관계없는 텍스트"));
+    const out = runContainment(SPEC, { candidates: [], all: many }).out;
+    expect(out.scanTruncated).toBe(true);
+    // …and the presence verdict degrades with it, rather than asserting a whole-document absence.
+    expect(wingStage2PresenceFrom(out)).toBe("ABSENT_WITHIN_SCAN_BOUND");
+  });
+
+  it("its exact-visible count AGREES with the shipped locate script for the same spec", () => {
+    // The two scripts share `norm`, `accName` and `paints` by copy, and a drift between them would make the
+    // calibration's "exact" half incomparable with every count already on the record.
+    const nodes = [new Node2("LABEL", "자체개발"), new Node2("LABEL", "자체개발", [], false), new Node2("LEGEND", "다른 것")];
+    const doc = {
+      querySelectorAll: (sel: string): Node2[] => (sel === SPEC.candidateQuery ? nodes : []),
+    };
+    const win = { getComputedStyle: (el: Node2) => ({ display: el.css.display ?? "block", visibility: el.css.visibility ?? "visible" }) };
+    const locate = new Function("document", "window", `return (${buildFixedLabelLocateScript({ ...SPEC, tag: false })});`)(doc, win) as {
+      count: number;
+      hiddenCount: number;
+    };
+    const contain = runContainment(SPEC, { candidates: nodes, all: nodes }).out;
+    expect(contain.exactVisible).toBe(locate.count);
+    expect(contain.exactHidden).toBe(locate.hiddenCount);
+  });
+
+  it("asks for exactly the caller's query and `*`, and returns six fields and nothing else", () => {
+    const { out, asked } = runContainment(SPEC, { candidates: [], all: [] });
+    expect(asked).toEqual([SPEC.candidateQuery, "*"]);
+    expect(Object.keys(out).sort()).toEqual(
+      ["deepestContainsHidden", "deepestContainsVisible", "exactHidden", "exactVisible", "scanTruncated"].sort(),
+    );
+    for (const [k, v] of Object.entries(out)) {
+      expect(typeof v === "number" || typeof v === "boolean", `${k} = ${String(v)}`).toBe(true);
+    }
+  });
+
+  it("the label it was asked about is the ONLY page-derived string it ever holds, and it is ours", () => {
+    // The generated source embeds our own fixed label (it has to — that is the comparison). What must never
+    // appear is a path that RETURNS text: no textContent in the output object, no innerHTML, no attribute dump.
+    const src = buildFixedLabelContainmentScript(SPEC);
+    expect(src).toContain(JSON.stringify(SPEC.exactText));
+    for (const forbidden of ["innerHTML", "outerHTML", "innerText", ".value", "attributes", "screenshot"]) {
+      expect(src, forbidden).not.toContain(forbidden);
+    }
+    // textContent is READ; the returned object is built from counters only.
+    expect(src.slice(src.indexOf("return {"))).not.toContain("textContent");
+  });
+
+  it("is ES5-plain, so esbuild's `__name` shim is never referenced in the page", () => {
+    const src = buildFixedLabelContainmentScript(SPEC);
+    for (const modern of ["=>", "const ", "let ", "`", "...", "??"]) {
+      expect(src, modern).not.toContain(modern);
+    }
+  });
+});
+
+describe("sanitizeContainmentReading — the host trusts the page for nothing", () => {
+  it("coerces junk to zeros and false rather than propagating it", () => {
+    const r = sanitizeContainmentReading({
+      exactVisible: -4,
+      exactHidden: "7",
+      deepestContainsVisible: 2.9,
+      deepestContainsHidden: Number.NaN,
+      scanTruncated: "yes",
+    });
+    expect(r).toEqual({
+      exactVisible: 0,
+      exactHidden: 0,
+      deepestContainsVisible: 2,
+      deepestContainsHidden: 0,
+      // Only a literal `true` truncates. A truthy string must not, or a page could suppress an absence claim…
+      // and, more importantly, could not manufacture one either.
+      scanTruncated: false,
+    });
+  });
+
+  it("returns a complete reading for null/undefined input rather than throwing", () => {
+    expect(sanitizeContainmentReading(null).exactVisible).toBe(0);
+    expect(sanitizeContainmentReading(undefined).scanTruncated).toBe(false);
+  });
+});
+
+describe("wingStage2PresenceFrom — six outcomes, strongest evidence first", () => {
+  const R = (o: Partial<FixedLabelContainmentReading>): FixedLabelContainmentReading => ({
+    exactVisible: 0,
+    exactHidden: 0,
+    deepestContainsVisible: 0,
+    deepestContainsHidden: 0,
+    scanTruncated: false,
+    ...o,
+  });
+
+  it("maps each reading to exactly one verdict", () => {
+    expect(wingStage2PresenceFrom(R({ exactVisible: 1 }))).toBe("PRESENT_VISIBLE");
+    expect(wingStage2PresenceFrom(R({ exactHidden: 3 }))).toBe("PRESENT_HIDDEN_ONLY");
+    expect(wingStage2PresenceFrom(R({ deepestContainsVisible: 1 }))).toBe("PRESENT_NOT_WHOLE_TEXT");
+    expect(wingStage2PresenceFrom(R({ deepestContainsHidden: 1 }))).toBe("PRESENT_NOT_WHOLE_TEXT");
+    expect(wingStage2PresenceFrom(R({}))).toBe("ABSENT_EVERYWHERE");
+    expect(wingStage2PresenceFrom(R({ scanTruncated: true }))).toBe("ABSENT_WITHIN_SCAN_BOUND");
+    expect(wingStage2PresenceFrom(null)).toBe("NOT_MEASURED");
+    expect(wingStage2PresenceFrom(undefined)).toBe("NOT_MEASURED");
+  });
+
+  it("prefers a PAINTING exact match over a hidden one, and either over mere containment", () => {
+    expect(wingStage2PresenceFrom(R({ exactVisible: 1, exactHidden: 9, deepestContainsVisible: 9 }))).toBe("PRESENT_VISIBLE");
+    expect(wingStage2PresenceFrom(R({ exactHidden: 1, deepestContainsVisible: 9 }))).toBe("PRESENT_HIDDEN_ONLY");
+  });
+
+  it("a PRESENT verdict is not weakened by truncation — only an absence is", () => {
+    // Finding something under a truncated scan is still finding it; NOT finding something is the claim the
+    // bound applies to. Collapsing both into one hedge would lose the distinction the vocabulary exists for.
+    expect(wingStage2PresenceFrom(R({ exactVisible: 1, scanTruncated: true }))).toBe("PRESENT_VISIBLE");
+    expect(wingStage2PresenceFrom(R({ deepestContainsHidden: 1, scanTruncated: true }))).toBe("PRESENT_NOT_WHOLE_TEXT");
+  });
+
+  it("every verdict it can return is in the declared closed vocabulary", () => {
+    const produced = [
+      wingStage2PresenceFrom(null),
+      wingStage2PresenceFrom(R({ exactVisible: 1 })),
+      wingStage2PresenceFrom(R({ exactHidden: 1 })),
+      wingStage2PresenceFrom(R({ deepestContainsVisible: 1 })),
+      wingStage2PresenceFrom(R({})),
+      wingStage2PresenceFrom(R({ scanTruncated: true })),
+    ];
+    expect(new Set(produced).size).toBe(6);
+    for (const p of produced) expect(WING_STAGE2_PRESENCES as readonly string[]).toContain(p);
+  });
+});
+
+/* ══════════════════════════ the ASSOCIATION census ══════════════════════════ */
+
+const CHOICE_SELECTOR = "input[type='radio'], input[type='checkbox'], [role='radio'], [role='option']";
+
+/** A control double: attributes the census may read, plus the label wiring it walks. */
+class Ctl {
+  public kids: Ctl[] = [];
+  constructor(
+    public tagName: string,
+    private attrs: Record<string, string> = {},
+    public text = "",
+    public visible = true,
+    public disabled = false,
+    public ancestorLabel: Ctl | null = null,
+    public css: { display?: string; visibility?: string } = {},
+  ) {}
+  get textContent(): string {
+    return this.text;
+  }
+  get childElementCount(): number {
+    return this.kids.length;
+  }
+  getAttribute(n: string): string | null {
+    return Object.prototype.hasOwnProperty.call(this.attrs, n) ? this.attrs[n]! : null;
+  }
+  closest(sel: string): Ctl | null {
+    return sel === "label" ? this.ancestorLabel : null;
+  }
+  getClientRects(): { length: number }[] {
+    return this.visible ? [{ length: 1 }] : [];
+  }
+  getBoundingClientRect(): { width: number; height: number } {
+    return this.visible ? { width: 10, height: 10 } : { width: 0, height: 0 };
+  }
+}
+
+interface AssocRow {
+  index: number;
+  nameSource: string;
+  nameLengthBucket: string;
+  exactCandidateIndex: number;
+  containsCandidateIndex: number;
+  hasIdAttr: boolean;
+  labelForCount: number;
+  ancestorLabelCount: number;
+  ariaLabelledbyRefCount: number;
+  ariaLabelledbyResolvedCount: number;
+  groupIndex: number;
+}
+interface AssocOut {
+  visibleChoiceControlCount: number;
+  hiddenChoiceControlCount: number;
+  rows: AssocRow[];
+  nameGroupCount: number;
+  largestNameGroupSize: number;
+  ungroupedCount: number;
+  scanTruncated: boolean;
+  candidatesCompared: number;
+}
+
+function runAssoc(
+  controls: Ctl[],
+  candidates: readonly string[],
+  wiring: { forLabels?: Record<string, Ctl[]>; byId?: Record<string, Ctl> } = {},
+): { out: AssocOut; asked: string[] } {
+  const asked: string[] = [];
+  const doc = {
+    querySelectorAll(sel: string): Ctl[] {
+      asked.push(sel);
+      if (sel === CHOICE_SELECTOR) return controls;
+      const m = /^label\[for="(.*)"\]$/.exec(sel);
+      if (m) return wiring.forLabels?.[m[1]!.replace(/\\(["\\])/g, "$1")] ?? [];
+      return [];
+    },
+    getElementById: (id: string): Ctl | null => wiring.byId?.[id] ?? null,
+  };
+  const win = {
+    getComputedStyle: (el: Ctl) => ({ display: el.css.display ?? "block", visibility: el.css.visibility ?? "visible" }),
+  };
+  const out = new Function("document", "window", `return (${buildWingChoiceAssociationScript([...candidates])});`)(doc, win);
+  return { out: out as AssocOut, asked };
+}
+
+const RADIO = (attrs: Record<string, string>, over: Partial<{ visible: boolean; disabled: boolean; ancestorLabel: Ctl | null; text: string }> = {}): Ctl =>
+  new Ctl("INPUT", { type: "radio", ...attrs }, over.text ?? "", over.visible ?? true, over.disabled ?? false, over.ancestorLabel ?? null);
+
+describe("the label-association census — how a control is labelled, never what it says", () => {
+  it("derives the name in ARIA precedence order and NAMES the source", () => {
+    const labelled = RADIO({ "aria-labelledby": "r1" });
+    const ariaLabel = RADIO({ "aria-label": "자체개발" });
+    const forLabel = RADIO({ id: "x" });
+    const wrapped = RADIO({}, { ancestorLabel: new Ctl("LABEL", {}, "직접입력") });
+    const titled = RADIO({ title: "무언가" });
+    const bare = RADIO({});
+    const { out } = runAssoc([labelled, ariaLabel, forLabel, wrapped, titled, bare], ["자체개발"], {
+      byId: { r1: new Ctl("SPAN", {}, "자체개발") },
+      forLabels: { x: [new Ctl("LABEL", {}, "자체개발")] },
+    });
+    expect(out.rows.map((r) => r.nameSource)).toEqual([
+      "ARIA_LABELLEDBY",
+      "ARIA_LABEL",
+      "LABEL_FOR",
+      "LABEL_ANCESTOR",
+      "TITLE",
+      "NONE",
+    ]);
+    // …and precedence is real: a control with BOTH labelledby and aria-label reports the former.
+    const both = RADIO({ "aria-labelledby": "r1", "aria-label": "다른 것" });
+    expect(runAssoc([both], [], { byId: { r1: new Ctl("SPAN", {}, "자체개발") } }).out.rows[0]!.nameSource).toBe("ARIA_LABELLEDBY");
+  });
+
+  it("reports the candidate MATCH as an index, exact and contained separately", () => {
+    const exact = RADIO({ "aria-label": "자체개발" });
+    const wrapped = RADIO({ "aria-label": "자체개발 (직접입력)" });
+    const neither = RADIO({ "aria-label": "전혀 다른 항목" });
+    const { out } = runAssoc([exact, wrapped, neither], ["직접입력", "자체개발"]);
+    expect(out.rows[0]).toMatchObject({ exactCandidateIndex: 1, containsCandidateIndex: 1 });
+    // The wrapped one matches NO candidate exactly while CONTAINING the first in list order. That pair is the
+    // per-control form of the whole-text hypothesis, and it is why both indices are reported.
+    expect(out.rows[1]).toMatchObject({ exactCandidateIndex: -1, containsCandidateIndex: 0 });
+    expect(out.rows[2]).toMatchObject({ exactCandidateIndex: -1, containsCandidateIndex: -1 });
+    expect(out.candidatesCompared).toBe(2);
+  });
+
+  it("**groups radios by their shared `name` — the measurement the recon could not make**", () => {
+    // The Stage-2 record could only say "no painting fieldset/radiogroup/listbox", and a code comment
+    // over-claimed that as "the radios are ungrouped". HTML groups by `name`; this reads it and emits ordinals.
+    const a = RADIO({ name: "purposeType" });
+    const b = RADIO({ name: "purposeType" });
+    const c = RADIO({ name: "other" });
+    const d = RADIO({});
+    const { out } = runAssoc([a, b, c, d], []);
+    expect(out.rows.map((r) => r.groupIndex)).toEqual([0, 0, 1, -1]);
+    expect(out.nameGroupCount).toBe(2);
+    expect(out.largestNameGroupSize).toBe(2);
+    expect(out.ungroupedCount).toBe(1);
+  });
+
+  it("the group NAME never leaves — only its ordinal", () => {
+    const { out } = runAssoc([RADIO({ name: "purposeType", id: "secretId" })], []);
+    const json = JSON.stringify(out);
+    expect(json).not.toContain("purposeType");
+    expect(json).not.toContain("secretId");
+    expect(out.rows[0]!.groupIndex).toBe(0);
+    expect(out.rows[0]!.hasIdAttr).toBe(true);
+  });
+
+  it("counts a DUPLICATE label[for] and an UNRESOLVED aria-labelledby reference", () => {
+    // Both are real page defects that break the association silently, and both are invisible in a bare name.
+    const dup = RADIO({ id: "d" });
+    const dangling = RADIO({ "aria-labelledby": "gone here" });
+    const { out } = runAssoc([dup, dangling], [], {
+      forLabels: { d: [new Ctl("LABEL", {}, "하나"), new Ctl("LABEL", {}, "둘")] },
+      byId: { here: new Ctl("SPAN", {}, "존재함") },
+    });
+    expect(out.rows[0]!.labelForCount).toBe(2);
+    expect(out.rows[1]).toMatchObject({ ariaLabelledbyRefCount: 2, ariaLabelledbyResolvedCount: 1 });
+  });
+
+  it("buckets the name LENGTH coarsely, and reports `none` for an unlabelled control", () => {
+    const rows = runAssoc(
+      [RADIO({}), RADIO({ "aria-label": "짧다" }), RADIO({ "aria-label": "중간 정도 길이의 라벨입니다" }), RADIO({ "aria-label": "가".repeat(40) })],
+      [],
+    ).out.rows;
+    expect(rows.map((r) => r.nameLengthBucket)).toEqual(["none", "short", "medium", "long"]);
+    for (const r of rows) expect(WING_NAME_LENGTH_BUCKETS as readonly string[]).toContain(r.nameLengthBucket);
+  });
+
+  it("excludes non-painting and disabled controls, and counts them as hidden", () => {
+    const shown = RADIO({ name: "g" });
+    const invisible = RADIO({ name: "g" }, { visible: false });
+    const styled = new Ctl("INPUT", { type: "radio", name: "g" }, "", true, false, null, { display: "none" });
+    const off = RADIO({ name: "g", "aria-disabled": "true" });
+    const { out } = runAssoc([shown, invisible, styled, off], []);
+    expect(out.visibleChoiceControlCount).toBe(1);
+    expect(out.hiddenChoiceControlCount).toBe(3);
+    expect(out.rows).toHaveLength(1);
+    // A hidden control must not be counted into the group census either — it never became a row.
+    expect(out.largestNameGroupSize).toBe(1);
+  });
+
+  it("asks for exactly the shipped choice selector", () => {
+    const { asked } = runAssoc([RADIO({})], []);
+    expect(asked[0]).toBe(CHOICE_SELECTOR);
+  });
+
+  it("NEVER reads `checked` — the instrument cannot report a selection even if one existed", () => {
+    // The shape census refuses `checked` as a leaked selection, and this run's whole premise is that no purpose
+    // has been chosen. A source guard, because the property would be trivially easy to add later.
+    const src = buildWingChoiceAssociationScript(["자체개발"]);
+    expect(src).not.toContain("checked");
+    expect(src).not.toContain(".value");
+    for (const forbidden of ["innerHTML", "outerHTML", "innerText", "click(", "screenshot", "placeholder"]) {
+      expect(src, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  it("is ES5-plain", () => {
+    const src = buildWingChoiceAssociationScript(["자체개발"]);
+    for (const modern of ["=>", "const ", "let ", "...", "??"]) {
+      expect(src, modern).not.toContain(modern);
+    }
+  });
+
+  it("escapes an id before building the label[for] selector", () => {
+    // An id is read to FIND the label element. Interpolated raw, a quote in it would break out of the selector
+    // and — via the script's own `catch` — turn a page-authored id into a silent zero association.
+    const src = buildWingChoiceAssociationScript([]);
+    expect(src).toContain("replace(");
+    const weird = RADIO({ id: 'a"b' });
+    const { out } = runAssoc([weird], [], { forLabels: { 'a"b': [new Ctl("LABEL", {}, "라벨")] } });
+    expect(out.rows[0]!.labelForCount).toBe(1);
+    expect(out.rows[0]!.nameSource).toBe("LABEL_FOR");
+  });
+});
+
+describe("sanitizeChoiceAssociationCensus — the record's vocabulary is guaranteed host-side", () => {
+  const raw = (over: Partial<AssocRow> = {}): Record<string, unknown> => ({
+    visibleChoiceControlCount: 2,
+    hiddenChoiceControlCount: 10,
+    rows: [
+      {
+        index: 0,
+        nameSource: "LABEL_FOR",
+        nameLengthBucket: "short",
+        exactCandidateIndex: 1,
+        containsCandidateIndex: 1,
+        hasIdAttr: true,
+        labelForCount: 1,
+        ancestorLabelCount: 0,
+        ariaLabelledbyRefCount: 0,
+        ariaLabelledbyResolvedCount: 0,
+        groupIndex: 0,
+        ...over,
+      },
+    ],
+    nameGroupCount: 1,
+    largestNameGroupSize: 2,
+    ungroupedCount: 0,
+    scanTruncated: false,
+  });
+
+  it("clamps a candidate index that points at no candidate", () => {
+    // A dangling index reads as a confident identification of nothing — worse than -1, because -1 is honest.
+    expect(sanitizeChoiceAssociationCensus(raw({ exactCandidateIndex: 7 }), 2).rows[0]!.exactCandidateIndex).toBe(-1);
+    expect(sanitizeChoiceAssociationCensus(raw({ containsCandidateIndex: -3 }), 2).rows[0]!.containsCandidateIndex).toBe(-1);
+    expect(sanitizeChoiceAssociationCensus(raw({ exactCandidateIndex: 1 }), 2).rows[0]!.exactCandidateIndex).toBe(1);
+    // …and with NO candidates sent, every index must be -1 regardless of what the page returned.
+    expect(sanitizeChoiceAssociationCensus(raw({ exactCandidateIndex: 0 }), 0).rows[0]!.exactCandidateIndex).toBe(-1);
+  });
+
+  it("forces an unlisted category back into the closed vocabulary", () => {
+    const r = sanitizeChoiceAssociationCensus(raw({ nameSource: "사용목적-자체개발", nameLengthBucket: "enormous" }), 2).rows[0]!;
+    expect(r.nameSource).toBe("NONE");
+    expect(r.nameLengthBucket).toBe("none");
+    expect(WING_NAME_SOURCES as readonly string[]).toContain(r.nameSource);
+  });
+
+  it("re-derives the row ordinal from position — the page cannot renumber its own rows", () => {
+    const two = { ...raw(), rows: [{ ...(raw().rows as AssocRow[])[0]!, index: 99 }, { ...(raw().rows as AssocRow[])[0]!, index: 99 }] };
+    expect(sanitizeChoiceAssociationCensus(two, 2).rows.map((r) => r.index)).toEqual([0, 1]);
+  });
+
+  it("caps the rows and SAYS it capped them", () => {
+    const many = { ...raw(), rows: Array.from({ length: 40 }, () => (raw().rows as AssocRow[])[0]!) };
+    const s = sanitizeChoiceAssociationCensus(many, 2);
+    expect(s.rows).toHaveLength(32);
+    expect(s.rowsTruncated).toBe(true);
+    expect(sanitizeChoiceAssociationCensus(raw(), 2).rowsTruncated).toBe(false);
+  });
+
+  it("coerces junk counts and reports the candidate count the HOST sent, not the page's claim", () => {
+    const junk = { ...raw({ labelForCount: -2, groupIndex: 1.5 }), visibleChoiceControlCount: "many", candidatesCompared: 999 };
+    const s = sanitizeChoiceAssociationCensus(junk, 4);
+    expect(s.visibleChoiceControlCount).toBe(0);
+    expect(s.rows[0]!.labelForCount).toBe(0);
+    expect(s.rows[0]!.groupIndex).toBe(-1);
+    expect(s.candidatesCompared).toBe(4);
+  });
+
+  it("survives a null reading", () => {
+    const s = sanitizeChoiceAssociationCensus(null, 2);
+    expect(s.rows).toEqual([]);
+    expect(s.visibleChoiceControlCount).toBe(0);
+  });
+});
+
+/* ══════════════════════════ the fold ══════════════════════════ */
+
+describe("the fold carries hiddenCount and containment — and never invents either", () => {
+  const CONT: FixedLabelContainmentReading = {
+    exactVisible: 0,
+    exactHidden: 2,
+    deepestContainsVisible: 1,
+    deepestContainsHidden: 0,
+    scanTruncated: false,
+  };
+
+  it("carries a reported hidden count and its containment through to the row", () => {
+    const [t] = interpretWingStage2Recon(["confirm"], [{ targetId: "stage2.confirm.confirm", matchCount: 0, hiddenCount: 2, containment: CONT }]);
+    const row = t!.candidates[0]!;
+    expect(row.hiddenMatchCount).toBe(2);
+    expect(row.containment).toEqual(CONT);
+    expect(row.presence).toBe("PRESENT_HIDDEN_ONLY");
+  });
+
+  it("**an unreported hidden count stays null — it never becomes a measured zero**", () => {
+    // This is the field the Stage-2 sweep dropped entirely, which is why every landed ABSENT is bounded by
+    // `absenceBounds.hiddenMatchCountCarried: false`. Carrying it is only an improvement if absent still reads
+    // as absent: a 0 here would claim "measured: nothing hidden" on a run that measured no such thing.
+    const [t] = interpretWingStage2Recon(["confirm"], [{ targetId: "stage2.confirm.confirm", matchCount: 0 }]);
+    expect(t!.candidates[0]!.hiddenMatchCount).toBeNull();
+    expect(t!.candidates[0]!.containment).toBeNull();
+    expect(t!.candidates[0]!.presence).toBe("NOT_MEASURED");
+  });
+
+  it("rejects a junk hidden count rather than recording it", () => {
+    for (const bad of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const [t] = interpretWingStage2Recon(["confirm"], [{ targetId: "stage2.confirm.confirm", matchCount: 0, hiddenCount: bad }]);
+      expect(t!.candidates[0]!.hiddenMatchCount, String(bad)).toBeNull();
+    }
+    // 0 is a real reading and must survive — the guard rejects junk, not zero.
+    const [ok] = interpretWingStage2Recon(["confirm"], [{ targetId: "stage2.confirm.confirm", matchCount: 0, hiddenCount: 0 }]);
+    expect(ok!.candidates[0]!.hiddenMatchCount).toBe(0);
+  });
+
+  it("a CONFLICTING duplicate row drops the containment too, not just the count", () => {
+    // Two different counts for one candidate means the reading is untrustworthy for it. Keeping the containment
+    // would dress an untrusted row in evidence and let it claim a presence the count is not entitled to.
+    const [t] = interpretWingStage2Recon(["confirm"], [
+      { targetId: "stage2.confirm.confirm", matchCount: 0, containment: CONT, hiddenCount: 2 },
+      { targetId: "stage2.confirm.confirm", matchCount: 1, containment: CONT, hiddenCount: 2 },
+    ]);
+    expect(t!.candidates[0]!.verdict).toBe("NOT_MEASURED");
+    expect(t!.candidates[0]!.containment).toBeNull();
+    expect(t!.candidates[0]!.hiddenMatchCount).toBeNull();
+    expect(t!.candidates[0]!.presence).toBe("NOT_MEASURED");
+  });
+});
+
+/* ══════════════════════════ the purpose-option candidates ══════════════════════════ */
+
+describe("the purpose-option candidates — traceable, frozen, and deliberately incomplete", () => {
+  it("holds EXACTLY the wording that traces to something on the record", () => {
+    // Pinned by value. The failure this prevents is a plausible-sounding second-option label (업체연동, 대행,
+    // …) appearing here — invented wording shipped into the live page as an exact-match query, which is the
+    // speculative retuning collector/CLAUDE.md §6 forbids.
+    expect(WING_STAGE2_PURPOSE_OPTION_CANDIDATES.map((c) => c.exactText)).toEqual([
+      "자체개발",
+      "자체 개발",
+      "직접입력",
+      "직접 입력",
+    ]);
+  });
+
+  it("**does NOT contain a guess at the second radio's label** — its wording is unknown", () => {
+    // Two visible radios were measured; only one has a described counterpart in the product owner's flow
+    // account. A row reading `exactCandidateIndex: -1` for the other is the honest outcome and IS the finding.
+    const all = WING_STAGE2_PURPOSE_OPTION_CANDIDATES.map((c) => c.exactText).join("|");
+    for (const guess of ["업체연동", "업체 연동", "대행", "위탁", "솔루션", "외부"]) {
+      expect(all, guess).not.toContain(guess);
+    }
+  });
+
+  it("every candidate carries a closed provenance, and none claims to be transcribed", () => {
+    for (const c of WING_STAGE2_PURPOSE_OPTION_CANDIDATES) {
+      expect(WING_PURPOSE_CANDIDATE_PROVENANCES as readonly string[]).toContain(c.provenance);
+      // OPERATOR_TRANSCRIBED is reserved for wording a human read off the live screen. Nothing here is that,
+      // and a candidate that claimed to be would be laundering a flow description into an observation.
+      expect(c.provenance).not.toBe("OPERATOR_TRANSCRIBED");
+      expect(c.rationale.length).toBeGreaterThan(20);
+    }
+  });
+
+  it("ids are unique, so an index and an id can never disagree about which candidate matched", () => {
+    const ids = WING_STAGE2_PURPOSE_OPTION_CANDIDATES.map((c) => c.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("is DEEP-frozen — the shipped text cannot be rewritten before it reaches the page", () => {
+    // `Object.freeze` is shallow and `readonly` is erased at runtime. The Stage-2 candidate set shipped with
+    // exactly this hole, and this unit's own test found it: `exactText` was assignable, and that string is
+    // handed straight to the live page as an exact-match query.
+    expect(Object.isFrozen(WING_STAGE2_PURPOSE_OPTION_CANDIDATES)).toBe(true);
+    for (const c of WING_STAGE2_PURPOSE_OPTION_CANDIDATES) {
+      expect(Object.isFrozen(c)).toBe(true);
+      expect(() => {
+        (c as { exactText: string }).exactText = "무엇이든";
+      }).toThrow();
+    }
+  });
+
+  it("the blind check fires on an empty or blank-only set, and not on the shipped one", () => {
+    expect(wingLabelCalibrationBlind([])).toBe(true);
+    expect(wingLabelCalibrationBlind([{ id: "x", exactText: "   ", provenance: "PRODUCT_OWNER_FLOW_DESCRIPTION", rationale: "r" }])).toBe(true);
+    expect(wingLabelCalibrationBlind(WING_STAGE2_PURPOSE_OPTION_CANDIDATES)).toBe(false);
+  });
+});
+
+/* ══════════════════════════ the sweep ══════════════════════════ */
+
+const BASE: WingStructuralCensus = {
+  passwordFieldPresent: false,
+  submitAffordancePresent: false,
+  dialogLikePresent: false,
+  choiceControlCount: 2,
+  actionControlCount: 3,
+  formCount: 2,
+  editableTextInputCount: 6,
+  readonlyFieldCount: 0,
+  listLikeContainerCount: 5,
+  markerScanTruncated: false,
+  openApiMarkerPresent: true,
+  credentialAnchorPresent: true,
+};
+
+const CONTAINMENT: FixedLabelContainmentReading = {
+  exactVisible: 0,
+  exactHidden: 0,
+  deepestContainsVisible: 1,
+  deepestContainsHidden: 0,
+  scanTruncated: false,
+};
+
+function deps(over: Partial<WingSelectorRecordDeps> = {}): { d: WingSelectorRecordDeps; calls: string[] } {
+  const calls: string[] = [];
+  const d: WingSelectorRecordDeps = {
+    waitForReady: async () => "ready",
+    observeSurface: async () => observeFrom("wing_host", BASE),
+    probeTarget: async () => ({ matchCount: 0, canHighlight: false }),
+    probeCandidate: async () => {
+      calls.push("count");
+      return { matchCount: 0, canHighlight: false, hiddenMatchCount: 3 };
+    },
+    probeContainment: async () => {
+      calls.push("containment");
+      return CONTAINMENT;
+    },
+    choiceAssociationCensus: async (c) => {
+      calls.push(`association:${c.length}`);
+      return sanitizeChoiceAssociationCensus({ visibleChoiceControlCount: 2, rows: [], nameGroupCount: 1, largestNameGroupSize: 2 }, c.length);
+    },
+    choiceControlCensus: async () => {
+      calls.push("shapes");
+      return sanitizeChoiceControlCensusStub();
+    },
+    ...over,
+  };
+  return { d, calls };
+}
+function sanitizeChoiceControlCensusStub() {
+  return sanitizeChoiceAssociationCensus(null, 0) as never;
+}
+
+describe("the sweep runs the calibration reads ONLY under the calibration phase", () => {
+  it("a RECON run takes neither new measurement", async () => {
+    const { d, calls } = deps();
+    const r = await runWingSelectorRecord(d, [], { stage2: ["confirm"], stage2Phase: WING_STAGE2_RECON_PHASE });
+    expect(calls).not.toContain("containment");
+    expect(calls.some((c) => c.startsWith("association"))).toBe(false);
+    expect(r.stage2!.calibration).toBe(false);
+    expect(r.stage2!.association).toBeNull();
+    expect(r.stage2!.purposeOptionCandidateIds).toEqual([]);
+    // …but it DOES now carry the hidden count, which is a recon-phase improvement in its own right.
+    expect(r.stage2!.targets[0]!.candidates[0]!.hiddenMatchCount).toBe(3);
+    expect(r.stage2!.targets[0]!.candidates[0]!.presence).toBe("NOT_MEASURED");
+  });
+
+  it("a CALIBRATION run takes both, against the shipped candidate list", async () => {
+    const { d, calls } = deps();
+    const r = await runWingSelectorRecord(d, [], { stage2: ["confirm"], stage2Phase: WING_STAGE2_LABEL_CALIBRATION_PHASE });
+    expect(calls).toContain("containment");
+    expect(calls).toContain(`association:${WING_STAGE2_PURPOSE_OPTION_CANDIDATES.length}`);
+    expect(r.stage2!.calibration).toBe(true);
+    expect(r.stage2!.association).not.toBeNull();
+    expect(r.stage2!.purposeOptionCandidateIds).toEqual(WING_STAGE2_PURPOSE_OPTION_CANDIDATES.map((c) => c.id));
+    expect(r.stage2!.targets[0]!.candidates[0]!.presence).toBe("PRESENT_NOT_WHOLE_TEXT");
+  });
+
+  it("defaults to the RECON phase when the caller states none — never the wider read", async () => {
+    const { d, calls } = deps();
+    const r = await runWingSelectorRecord(d, [], { stage2: ["confirm"] });
+    expect(r.stage2!.phase).toBe(WING_STAGE2_RECON_PHASE);
+    expect(calls).not.toContain("containment");
+  });
+
+  it("**refuses a calibration with no candidates, BEFORE probing anything**", async () => {
+    // The BLIND gate. A census with an empty comparison list would report "matched no candidate" for every
+    // control, for a reason about us rather than about WING — and it would look like a finding.
+    const { d, calls } = deps();
+    const r = await runWingSelectorRecord(d, [], {
+      stage2: ["confirm"],
+      stage2Phase: WING_STAGE2_LABEL_CALIBRATION_PHASE,
+      purposeOptionCandidates: [],
+    });
+    expect(r.stage2!.calibrationBlind).toBe(WING_LABEL_CALIBRATION_BLIND_REASON);
+    expect(calls).toEqual([]);
+    expect(r.stage2!.targets).toEqual([]);
+    expect(r.stage2!.candidatesMeasured).toBe(0);
+  });
+
+  it("refuses the same way BEFORE the browser launches, not only inside the sweep", () => {
+    // The sweep's gate is what a programmatic caller hits. An operator is about to log in, navigate, and press
+    // a real marketplace control — they must learn the instrument is blind before doing any of that.
+    const cli = SRC("cli/probe-wing-issuance-selectors.ts");
+    const beforeLaunch = cli.slice(0, cli.indexOf("await launchNaverContext"));
+    expect(beforeLaunch).toContain("wingLabelCalibrationBlind(WING_STAGE2_PURPOSE_OPTION_CANDIDATES)");
+    expect(beforeLaunch).toContain("No browser launched.");
+  });
+
+  it("a precondition failure still refuses before any calibration read", async () => {
+    const { d, calls } = deps({ observeSurface: async () => observeFrom("wing_host", { ...BASE, choiceControlCount: 0 }) });
+    const r = await runWingSelectorRecord(d, [], { stage2: ["confirm"], stage2Phase: WING_STAGE2_LABEL_CALIBRATION_PHASE });
+    expect(r.stage2!.precondition).toBe("NO_VISIBLE_CHOICE_CONTROL");
+    expect(calls).toEqual([]);
+    expect(r.stage2!.calibration).toBe(true);
+    expect(r.stage2!.calibrationBlind).toBeNull();
+  });
+
+  it("a THROWING containment probe faults that candidate without losing its count", async () => {
+    const { d } = deps({
+      probeContainment: async () => {
+        throw new Error("navigated");
+      },
+    });
+    const r = await runWingSelectorRecord(d, [], { stage2: ["confirm"], stage2Phase: WING_STAGE2_LABEL_CALIBRATION_PHASE });
+    expect(r.stage2!.containmentFaults).toHaveLength(1);
+    expect(r.stage2!.containmentFaults[0]!.id).toBe("stage2.confirm.confirm");
+    // The count survived, and its presence is honestly unmeasured rather than a fabricated absence.
+    expect(r.stage2!.candidatesMeasured).toBe(1);
+    expect(r.stage2!.targets[0]!.candidates[0]!.presence).toBe("NOT_MEASURED");
+  });
+
+  it("a THROWING association census is a fault, never a zero-control reading", async () => {
+    const { d } = deps({
+      choiceAssociationCensus: async () => {
+        throw new Error("closed");
+      },
+    });
+    const r = await runWingSelectorRecord(d, [], { stage2: ["confirm"], stage2Phase: WING_STAGE2_LABEL_CALIBRATION_PHASE });
+    expect(r.stage2!.association).toBeNull();
+    expect(r.stage2!.associationFault).not.toBeNull();
+    // `calibration: true` next to `association: null` is what separates "lost it" from "never took it".
+    expect(r.stage2!.calibration).toBe(true);
+  });
+
+  it("the CLI never passes its own candidate list — production can only send the frozen set", () => {
+    const cli = SRC("cli/probe-wing-issuance-selectors.ts");
+    const callSite = cli.slice(cli.indexOf("const result = await runWingSelectorRecord"));
+    expect(callSite.slice(0, 300)).not.toContain("purposeOptionCandidates");
+  });
+});
+
+/* ══════════════════════════ the emitted record ══════════════════════════ */
+
+describe("the emitted calibration record", () => {
+  async function record() {
+    const { d } = deps();
+    const r = await runWingSelectorRecord(d, [], { stage2: ["confirm"], stage2Phase: WING_STAGE2_LABEL_CALIBRATION_PHASE });
+    return stage2RecordFor(r.stage2)!;
+  }
+
+  it("puts every new reading on the wire", async () => {
+    // The defect this closes is not hypothetical: the Stage-2 sweep itself was computed and thrown away once,
+    // and the suite was green because no test read the emitted record.
+    const rec = await record();
+    expect(rec.phase).toBe(WING_STAGE2_LABEL_CALIBRATION_PHASE);
+    expect(rec.calibration).toBe(true);
+    expect(rec.calibrationBlind).toBeNull();
+    expect(rec.association).not.toBeNull();
+    expect(rec.containmentMeasured).toBe(1);
+    expect(rec.containmentFaults).toEqual([]);
+    expect(rec.purposeOptionCandidateIds).toEqual(WING_STAGE2_PURPOSE_OPTION_CANDIDATES.map((c) => c.id));
+    const row = rec.targets[0]!.candidates[0]!;
+    expect(row.hiddenMatchCount).toBe(3);
+    expect(row.presence).toBe("PRESENT_NOT_WHOLE_TEXT");
+    expect(row.containment).toEqual(CONTAINMENT);
+  });
+
+  it("counts containment SEPARATELY from the candidate count", async () => {
+    // Folding them would let a fully-faulted containment pass look like a complete calibration: the counts
+    // would still add up, because they would be the same number twice.
+    const { d } = deps({
+      probeContainment: async () => {
+        throw new Error("gone");
+      },
+    });
+    const r = await runWingSelectorRecord(d, [], { stage2: ["confirm"], stage2Phase: WING_STAGE2_LABEL_CALIBRATION_PHASE });
+    const rec = stage2RecordFor(r.stage2)!;
+    expect(rec.candidatesMeasured).toBe(1);
+    expect(rec.containmentMeasured).toBe(0);
+  });
+
+  it("main() EMITS the association and the calibration flag, not just the sweep", () => {
+    const cli = SRC("cli/probe-wing-issuance-selectors.ts");
+    expect(cli).toContain("stage2: stage2RecordFor(result.stage2),");
+    expect(cli).toContain("stage2Calibration: result.stage2?.calibration");
+    expect(cli).toContain("stage2AssociationRows: result.stage2?.association?.rows.length ?? -1");
+  });
+
+  it("carries no page-authored text — only OUR candidate labels and closed categories", async () => {
+    const rec = await record();
+    const json = JSON.stringify(rec);
+    for (const forbidden of ["http", "://", "querySelector", "<", "textContent", "purposeType", "aria-labelledby"]) {
+      expect(json, forbidden).not.toContain(forbidden);
+    }
+    // Every Hangul run in the record must be a candidate label WE wrote. An open scan, not a denylist: a
+    // four-string denylist is exactly what let two wording variants through on the previous unit.
+    const ours = new Set([
+      ...WING_STAGE2_PURPOSE_OPTION_CANDIDATES.map((c) => c.exactText),
+      ...(json.match(/[가-힣][가-힣\s().]*/g) ?? []).filter((s) => rec.targets.some((t) => t.candidates.some((c) => c.label === s))),
+    ]);
+    for (const run of json.match(/[가-힣][가-힣\s().]*/g) ?? []) {
+      expect(ours.has(run), `unexpected Hangul in the record: ${run}`).toBe(true);
+    }
+  });
+});
+
+/* ══════════════════════════ the phase gate and the manifest ══════════════════════════ */
+
+describe("the calibration phase is gated and described like every other WING phase", () => {
+  const P = "SELLEROPS_APPROVAL_PHASE";
+  const A = "SELLEROPS_WING_APPROVED_PHASE";
+  const CAL = WING_STAGE2_LABEL_CALIBRATION_PHASE;
+  const RECON = WING_STAGE2_RECON_PHASE;
+
+  /** A fully-valid calibration prereq input; individual cases override one field. */
+  function baseCalibration(): ApprovalPrereqInput {
+    const spec = PHASE_SPECS[CAL]!;
+    return {
+      phase: CAL,
+      channel: "COUPANG",
+      accountBinding: "operator-owned Coupang WING test account",
+      mode: "READ_ONLY",
+      apiCenterUrl: WING_DEFAULT_URL,
+      cli: spec.cli,
+      driver: spec.driver,
+      declaredActions: spec.capableActions,
+      hotkey: undefined,
+      artifactPath: undefined,
+      runId: "wt-testrun0001",
+      approvalId: "apr-testappr01",
+      gitSha: "abc1234",
+      surface: "Coupang WING Open API",
+      operation: "WING Stage-2 read-only LABEL CALIBRATION",
+      maxActions: "1 operator-performed 발급 press + 1 read-only Stage-2 label-calibration session; 0 selections",
+    };
+  }
+
+  it("arms only when BOTH variables name it, and reports WHICH phase was armed", () => {
+    expect(resolveWingStage2Scope({ [P]: CAL, [A]: CAL })).toMatchObject({ requested: true, ok: true, phase: CAL });
+  });
+
+  it("**refuses two DIFFERENT Stage-2 phases** — the mismatch this generalization introduced", () => {
+    // A calibration run under a recon manifest takes two measurements the operator never read; a recon run
+    // under a calibration manifest returns less than the manifest promised. Neither may proceed.
+    const a = resolveWingStage2Scope({ [P]: CAL, [A]: RECON });
+    expect(a).toMatchObject({ requested: true, ok: false, refusal: "PHASE_APPROVAL_MISMATCH" });
+    if (a.requested && !a.ok) expect(a.reason).toContain("measure different things");
+    expect(resolveWingStage2Scope({ [P]: RECON, [A]: CAL })).toMatchObject({ ok: false, refusal: "PHASE_APPROVAL_MISMATCH" });
+  });
+
+  it("still refuses a one-sided phase", () => {
+    expect(resolveWingStage2Scope({ [P]: CAL })).toMatchObject({ ok: false, refusal: "PHASE_APPROVAL_MISMATCH" });
+    expect(resolveWingStage2Scope({ [A]: CAL })).toMatchObject({ ok: false, refusal: "PHASE_APPROVAL_MISMATCH" });
+  });
+
+  it("is a WING phase, a Stage-2 phase, READ_ONLY, and highlights nothing", () => {
+    expect(WING_PHASES).toContain(CAL);
+    expect(isWingStage2Phase(CAL)).toBe(true);
+    expect(isWingStage2Phase(RECON)).toBe(true);
+    expect(isWingStage2Phase("COUPANG_WING_SELECTOR_PROBE")).toBe(false);
+    const spec = PHASE_SPECS[CAL]!;
+    expect(spec.mode).toBe("READ_ONLY");
+    expect(spec.allowsHighlight).toBe(false);
+    expect(spec.capableActions).toContain("FIXED_LABEL_CONTAINMENT_PROBE");
+    expect(spec.capableActions).toContain("CHOICE_CONTROL_LABEL_ASSOCIATION_CENSUS");
+    // …and the RECON phase must NOT have grown them: that is what makes the two separately approvable.
+    expect(PHASE_SPECS[RECON]!.capableActions).not.toContain("CHOICE_CONTROL_LABEL_ASSOCIATION_CENSUS");
+    expect(PHASE_SPECS[RECON]!.capableActions).not.toContain("FIXED_LABEL_CONTAINMENT_PROBE");
+  });
+
+  it("prepares a manifest carrying the Stage-2 scope, and narrowing survives", () => {
+    const full = validateApprovalPrerequisites(baseCalibration());
+    expect(full.ok).toBe(true);
+    if (full.ok) expect(full.manifest.stage2Targets).toEqual(["purpose", "self_dev", "vendor_info", "vendor_url", "call_ip", "confirm"]);
+    const narrow = validateApprovalPrerequisites({ ...baseCalibration(), requestedStage2Targets: ["purpose"] });
+    expect(narrow.ok).toBe(true);
+    if (narrow.ok) expect(narrow.manifest.stage2Targets).toEqual(["purpose"]);
+    // A scope outside the Stage-2 namespace is refused rather than silently widened back to the full set.
+    const bad = validateApprovalPrerequisites({ ...baseCalibration(), requestedStage2Targets: ["delete"] });
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.cause).toBe("WING_STAGE2_TARGETS_MISMATCH");
+  });
+
+  it("the manifest is READ_ONLY, highlights nothing, and reduces the URL to a host category", () => {
+    const r = validateApprovalPrerequisites(baseCalibration());
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.manifest.phase).toBe(CAL);
+    expect(r.manifest.mode).toBe("READ_ONLY");
+    expect(r.manifest.allowedActions).not.toContain("HIGHLIGHT_REAL_CONTROL");
+    expect(r.manifest.allowedActions).toContain("CHOICE_CONTROL_LABEL_ASSOCIATION_CENSUS");
+    expect(r.manifest.apiCenterHost).toBe("wing_host");
+    expect(JSON.stringify(r.manifest)).not.toContain("wing.coupang.com");
+  });
+
+  it("the operator summary states the two new reads AND that nothing is selected", () => {
+    const r = validateApprovalPrerequisites(baseCalibration());
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const s = r.manifest.operatorActionSummary!;
+    expect(s).toContain("라벨 연결 방식");
+    expect(s).toContain("화면의 문구 자체는 기록되지 않습니다");
+    expect(s).toContain("목적을 선택하지 않고");
+    expect(s).toContain("'확인'(최종 발급)은 절대 누르지 않습니다");
+    // It must NOT be the recon's summary — two phases sharing one description is the manifest failing to
+    // describe the run, which is what review found when a Stage-2 run announced itself as a highlight proof.
+    const recon = validateApprovalPrerequisites({
+      ...baseCalibration(),
+      phase: RECON,
+      driver: PHASE_SPECS[RECON]!.driver,
+      declaredActions: PHASE_SPECS[RECON]!.capableActions,
+      operation: "WING Stage-2 read-only recon",
+      maxActions: "1 operator-performed 발급 press + 1 read-only Stage-2 recon session",
+    });
+    expect(recon.ok).toBe(true);
+    if (recon.ok) expect(recon.manifest.operatorActionSummary).not.toBe(s);
+  });
+
+  it("the harness allowlists it in all three scripts", () => {
+    // A phase the runtime accepts but the harness refuses cannot reach a manifest at all; a phase the harness
+    // writes but the preflight does not recognise reaches one under the wrong branch.
+    const tools = (n: string): string => readFileSync(resolve(HERE, "../../../../tools/coupang-local", n), "utf8");
+    for (const f of ["wing-probe-bootstrap.sh", "wing-probe-preflight.sh"]) {
+      expect(tools(f), f).toContain("COUPANG_WING_STAGE2_LABEL_CALIBRATION");
+      // Both scripts must route it through the SHARED Stage-2 predicate, not a fresh `=` comparison that the
+      // next Stage-2 phase would have to be added to all over again.
+      expect(tools(f), f).toContain("is_stage2_phase");
+    }
+    expect(tools("wing-probe-selfcheck.sh")).toContain("STAGE2CAL");
+  });
+});
+
+/* ══════════════════════════ the driver seams ══════════════════════════ */
+
+describe("the driver seams — dedicated, sanitized, and actually reachable", () => {
+  /** The page double the Stage-2 census tests use: records what was evaluated, returns one canned reading. */
+  function pageReturning(value: unknown): { evaluate: (s: string) => Promise<unknown>; url: () => string; on: () => void; evaluated: string[] } {
+    const evaluated: string[] = [];
+    return {
+      evaluate: async (script: string) => {
+        evaluated.push(script);
+        return value;
+      },
+      url: () => "https://wing.coupang.com/",
+      on: () => undefined,
+      evaluated,
+    };
+  }
+
+  it("choiceAssociationCensus runs the REAL script and re-sanitizes host-side", async () => {
+    // The seam existed for the shape census and no test called it — review found that, and a method nothing
+    // invokes is a method whose sanitization has never run.
+    const page = pageReturning({
+      visibleChoiceControlCount: 2,
+      hiddenChoiceControlCount: 10,
+      rows: [
+        { index: 0, nameSource: "사용목적", nameLengthBucket: "enormous", exactCandidateIndex: 9, containsCandidateIndex: 0, groupIndex: 0, labelForCount: 1 },
+      ],
+      nameGroupCount: 1,
+      largestNameGroupSize: 2,
+      ungroupedCount: 0,
+      scanTruncated: false,
+    });
+    const census = await new CoupangWingIssuanceDriver(page as never).choiceAssociationCensus(["자체개발", "직접입력"]);
+    expect(census.rows[0]!.nameSource).toBe("NONE");
+    expect(census.rows[0]!.nameLengthBucket).toBe("none");
+    // 9 is outside a two-candidate list: clamped, not carried.
+    expect(census.rows[0]!.exactCandidateIndex).toBe(-1);
+    expect(census.rows[0]!.containsCandidateIndex).toBe(0);
+    expect(census.candidatesCompared).toBe(2);
+    expect(JSON.stringify(census)).not.toContain("사용목적");
+    // The evaluated script is the generated association script, carrying OUR candidates and nothing else.
+    expect(page.evaluated[0]).toContain('["자체개발","직접입력"]');
+  });
+
+  it("probeLabelContainment runs the REAL script and coerces the reading", async () => {
+    const page = pageReturning({ exactVisible: 1, exactHidden: "junk", deepestContainsVisible: 2, deepestContainsHidden: -1, scanTruncated: true });
+    const r = await new CoupangWingIssuanceDriver(page as never).probeLabelContainment({ candidateQuery: "label", exactText: "자체개발" });
+    expect(r).toEqual({ exactVisible: 1, exactHidden: 0, deepestContainsVisible: 2, deepestContainsHidden: 0, scanTruncated: true });
+    expect(page.evaluated[0]).toContain("fixed-label-containment");
+  });
+
+  it("both return a safe reading rather than throwing when the page returns nothing usable", async () => {
+    const d = new CoupangWingIssuanceDriver(pageReturning(null) as never);
+    expect((await d.choiceAssociationCensus(["자체개발"])).rows).toEqual([]);
+    expect((await d.probeLabelContainment({ candidateQuery: "label", exactText: "x" })).exactVisible).toBe(0);
+  });
+});
+
+/* ══════════════════════════ nothing is promoted ══════════════════════════ */
+
+describe("a calibration changes nothing that ships", () => {
+  it("neither new instrument can write a selector, tag, or overlay", () => {
+    // Asserted over the GENERATED scripts, not their source region. A source slice would have to end at some
+    // marker, and the locate script's own docstring — which legitimately discusses `data-aw-target` — sits
+    // between the two functions: the guard would have failed for a reason that is about prose, not behaviour.
+    const scripts = [
+      buildFixedLabelContainmentScript({ candidateQuery: "label", exactText: "자체개발" }),
+      buildWingChoiceAssociationScript(["자체개발"]),
+    ];
+    for (const script of scripts) {
+      for (const forbidden of ["setAttribute", "removeAttribute", "data-aw-target", ".click", "dispatchEvent", "submit("]) {
+        expect(script, forbidden).not.toContain(forbidden);
+      }
+    }
+  });
+
+  it("the recon module still exports no promotion path, with the calibration surface added", () => {
+    // The same guard the Stage-2 recon carries, re-asserted because this unit added exports to that module:
+    // nothing here reaches a shipped locator map or writes an attribute.
+    //
+    // Comment lines are stripped first, per collector/CLAUDE.md §5 — this module's header docstring names
+    // `WING_HIGHLIGHT_LABELS` while explaining why editing it would be the forbidden move, and a raw scan
+    // fails on the prose that documents the rule.
+    const src = SRC("action-window/coupang-wing-label-recon.ts")
+      .split("\n")
+      .filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l))
+      .join("\n");
+    for (const forbidden of ["WING_HIGHLIGHT_LABELS", "WING_DELETION_LABELS", "setAttribute"]) {
+      expect(src, forbidden).not.toContain(forbidden);
+    }
+    // …and the strip is not so aggressive that it removes the code: the constants under test are still here.
+    expect(src).toContain("WING_STAGE2_PURPOSE_OPTION_CANDIDATES");
+  });
+
+  it("the shipped Stage-2 ordering is untouched by this unit", () => {
+    const src = SRC("action-window/coupang-wing-label-recon.ts");
+    expect(src).toContain(
+      'export const WING_STAGE2_RECON_TARGETS = ["purpose", "self_dev", "vendor_info", "vendor_url", "call_ip", "confirm"] as const;',
+    );
+  });
+
+  it("the landed recon evidence still records its own absence bounds as they were measured", () => {
+    // Carrying `hiddenCount` is a capability the NEXT run has. It does not retroactively bound the seven
+    // absences already on the record, and flipping this flag would rewrite what that run measured.
+    const src = SRC("action-window/coupang-wing-label-recon.ts");
+    const rec = src.slice(src.indexOf("export const WING_STAGE2_RECON_EVIDENCE"));
+    expect(rec).toContain("countsPaintingMatchesOnly: true,");
+    expect(rec).toContain("hiddenMatchCountCarried: false,");
+    expect(rec).toContain("candidateScanTruncationReported: false,");
+  });
+});
+
+/* Kept last: a type-level assertion that the candidate shape has not silently widened. */
+const _shape: WingPurposeOptionCandidate | undefined = WING_STAGE2_PURPOSE_OPTION_CANDIDATES[0];
+void _shape;

@@ -70,9 +70,16 @@ BOOTSTRAP_EPOCH="${WING_PROBE_BOOTSTRAP_EPOCH:-}"
 PHASE="${SELLEROPS_APPROVAL_PHASE:-}"
 PROBE_TARGETS="${SELLEROPS_WING_PROBE_TARGETS:-}"
 
+# Is this either of the two STAGE-2 phases? Both reach the same surface by the same operator flow and carry
+# their scope in the same variable; they differ only in what is measured. One predicate, used by every branch
+# below, so a third Stage-2 phase cannot be added to some of them and missed by the rest.
+is_stage2_phase() {
+  case "$1" in COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION) return 0 ;; *) return 1 ;; esac
+}
+
 # The header must name the scope this RUN actually has. On a Stage-2 run there is no probe scope at all, and
 # printing `targets=delete` (the old default) described a measurement the run does not make.
-if [ "$PHASE" = "COUPANG_WING_STAGE2_RECON" ]; then
+if is_stage2_phase "$PHASE"; then
   HEADER_TARGETS="${SELLEROPS_WING_STAGE2_TARGETS:-?} (stage-2)"
 else
   HEADER_TARGETS="${PROBE_TARGETS:-?}"
@@ -90,10 +97,10 @@ check_identity_fresh "$BOOTSTRAP_EPOCH" "$IDENTITY_TTL_SECONDS"
 #    candidate-label recon. This harness prepares those and no others; the destructive deletion phase has its
 #    own gate and is not approvable from here.
 case "$PHASE" in
-  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON)
+  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION)
     pass "phase is $PHASE (READ_ONLY)" ;;
   *)
-    fail "phase must be COUPANG_WING_SELECTOR_PROBE, COUPANG_WING_LABEL_RECON, or COUPANG_WING_STAGE2_RECON (got '${PHASE:-unset}') — this harness prepares no other phase" ;;
+    fail "phase must be COUPANG_WING_SELECTOR_PROBE, COUPANG_WING_LABEL_RECON, COUPANG_WING_STAGE2_RECON, or COUPANG_WING_STAGE2_LABEL_CALIBRATION (got '${PHASE:-unset}') — this harness prepares no other phase" ;;
 esac
 
 # 4. No code drift since bootstrap. The manifest records a git SHA; if HEAD moved, or the working tree
@@ -138,7 +145,7 @@ M_MAX="$(jget maxActions)" || FIELD_FAIL=1
 M_PHASE="$(jget phase)" || FIELD_FAIL=1
 M_CLI="$(jget cli)" || FIELD_FAIL=1
 M_HOST="$(jget apiCenterHost)" || FIELD_FAIL=1
-if [ "$PHASE" = "COUPANG_WING_STAGE2_RECON" ]; then
+if is_stage2_phase "$PHASE"; then
   # A Stage-2 manifest carries its scope in its OWN field. Reading `probeTargets` here would either fail or —
   # worse, if a future manifest ever emitted both — display a probe scope for a run that sweeps Stage-2 names.
   M_TARGETS="$(jget stage2Targets)" || FIELD_FAIL=1
@@ -158,7 +165,7 @@ fi
 # AND it must be the same phase this run bootstrapped — a manifest for the OTHER read-only phase describes
 # different work (shipped labels vs candidate hypotheses) and must not be presented under this run's identity.
 case "$M_PHASE" in
-  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON) ;;
+  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION) ;;
   *)
     echo "PREFLIGHT FAIL — the prepared manifest is for phase $M_PHASE, not a READ_ONLY WING recorder phase. Refusing."
     exit 1 ;;
@@ -191,7 +198,7 @@ quoted = shquote(resolved)
 # unless they are equal, so a run that measures something other than the displayed manifest cannot start.
 # On a STAGE-2 run the resolved scope belongs to the Stage-2 namespace, and the probe-scope pair must NOT be
 # written at all: those names would be read as a baseline scope, and the run measures no shipped locator.
-if sys.argv[3] == "COUPANG_WING_STAGE2_RECON":
+if sys.argv[3] in ("COUPANG_WING_STAGE2_RECON", "COUPANG_WING_STAGE2_LABEL_CALIBRATION"):
     lines.append("SELLEROPS_WING_STAGE2_TARGETS=" + quoted)
 else:
     lines.append("SELLEROPS_WING_PROBE_TARGETS=" + quoted)
@@ -223,7 +230,7 @@ echo
 echo "  ── APPROVAL MANIFEST (sanitized) ──"
 echo "  $M_CHANNEL · $M_OPERATION"
 echo "  $M_MODE · run ${RUN_ID:0:8}… · approval ${APPROVAL_ID:0:8}… · max: $M_MAX"
-if [ "$PHASE" = "COUPANG_WING_STAGE2_RECON" ]; then
+if is_stage2_phase "$PHASE"; then
   echo "  phase: $M_PHASE · stage-2 targets: $M_TARGETS · selectors calibrated: $M_CALIBRATED"
 else
   echo "  phase: $M_PHASE · probe targets: $M_TARGETS · selectors calibrated: $M_CALIBRATED"
@@ -234,7 +241,7 @@ echo
 echo "  operator action ($M_ENTRY_TYPE):"
 echo "    $M_OPERATOR_ACTION"
 echo
-if [ "$PHASE" = "COUPANG_WING_STAGE2_RECON" ]; then
+if is_stage2_phase "$PHASE"; then
   echo "  ⚠ YOU take a real WING action in this run, and SellerOps does not: you press 'API Key 발급 받기'"
   echo "  YOURSELF to open the purpose-selection screen, then STOP there. Choose no purpose, type nothing into"
   echo "  업체명/URL/IP, and NEVER press '확인' — that is the control that creates the key, and this run has no"
@@ -243,6 +250,13 @@ if [ "$PHASE" = "COUPANG_WING_STAGE2_RECON" ]; then
   echo "  pre-written candidate label matches. It highlights nothing, clicks nothing, selects nothing, reads no"
   echo "  text, no field value, and no credential. Every candidate that resolves is EVIDENCE ONLY — this run"
   echo "  changes no shipped selector, and the guided tutorial is not redesigned from it."
+  if [ "$PHASE" = "COUPANG_WING_STAGE2_LABEL_CALIBRATION" ]; then
+    echo "  This phase reads ONE thing more than the recon: HOW each choice control is labelled — the derivation"
+    echo "  (aria-label / label[for] / wrapping label / title / none), whether that association actually resolves,"
+    echo "  which radio-name group it belongs to (a NUMBER, never the name), a coarse length band, and whether the"
+    echo "  derived name matches a pre-written candidate (an INDEX, never the wording). The screen's own text is"
+    echo "  never recorded, and no option is selected — the point is to learn what the options ARE first."
+  fi
 elif [ "$PHASE" = "COUPANG_WING_LABEL_RECON" ]; then
   echo "  This run sweeps CANDIDATE labels for the targets above — several unvalidated hypotheses each — and"
   echo "  measures match counts only: no highlight, no click, no input, no value read, no 발급/재발급/삭제, and it"
@@ -261,7 +275,7 @@ echo "  are set and equal — an unset scope can no longer widen the run to ever
 # BOTH phase variables travel with the run command, mirroring the two scope variables. The recorder derives
 # recon mode from them and refuses unless they agree, so neither a phase left over from an earlier shell nor a
 # forgotten phase on an approved recon command can make the run measure something the manifest did not describe.
-if [ "$PHASE" = "COUPANG_WING_STAGE2_RECON" ]; then
+if is_stage2_phase "$PHASE"; then
   # A Stage-2 run carries NO probe scope: it measures no shipped locator, so there is nothing to scope. The two
   # phase variables plus the Stage-2 scope are the whole authorization surface.
   echo "    cd $COLLECTOR_DIR && SELLEROPS_APPROVAL_PHASE=$M_PHASE SELLEROPS_WING_APPROVED_PHASE=$M_PHASE \\"

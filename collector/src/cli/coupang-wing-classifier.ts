@@ -1252,3 +1252,257 @@ export function sanitizeChoiceControlCensus(raw: unknown): WingChoiceControlCens
     scanTruncated: r.scanTruncated === true,
   });
 }
+
+/* ────────────────────── Stage-2 choice-control LABEL-ASSOCIATION census ────────────────────── */
+
+/**
+ * How a control's accessible name was DERIVED. Closed vocabulary, in the precedence order the script applies —
+ * which is the ARIA accessible-name order restricted to the sources a native radio realistically uses.
+ *
+ * **This is a documented SUBSET of the accname algorithm, not the algorithm.** It does not implement
+ * `aria-labelledby` recursion, `aria-owns`, CSS `::before`/`::after` content, or the `<legend>` fallback. Saying
+ * so matters: a record that called this "the accessible name" would be claiming conformance it does not have,
+ * which is the same shape as `role: "button"` — a property named after a standard, asserted from an instrument
+ * that never computed it. What the record may say is *this* derivation, named as such.
+ */
+export const WING_NAME_SOURCES = ["ARIA_LABELLEDBY", "ARIA_LABEL", "LABEL_FOR", "LABEL_ANCESTOR", "TITLE", "NONE"] as const;
+export type WingNameSource = (typeof WING_NAME_SOURCES)[number];
+
+/**
+ * A coarse bucket for the derived name's LENGTH. Never the name.
+ *
+ * Emitted because `NONE` and "a name none of our candidates match" are very different findings, and without a
+ * magnitude the second is unactionable: a `short` name is a label like 자체개발, a `long` one is a sentence, and
+ * knowing which tells the next unit whether to look for an option word or a description. Four buckets over a
+ * character count is the same coarseness the sanitized layer already uses for counts and ratings.
+ */
+export const WING_NAME_LENGTH_BUCKETS = ["none", "short", "medium", "long"] as const;
+export type WingNameLengthBucket = (typeof WING_NAME_LENGTH_BUCKETS)[number];
+
+/** One VISIBLE choice control's association reading. Integers, booleans, closed categories — no page string. */
+export interface WingChoiceAssociation {
+  /** Document-order ordinal among the visible choice controls. Ours, not the page's. */
+  readonly index: number;
+  readonly nameSource: WingNameSource;
+  readonly nameLengthBucket: WingNameLengthBucket;
+  /** Index into the caller's OWN candidate list whose text equals the derived name, else -1. */
+  readonly exactCandidateIndex: number;
+  /**
+   * Index of the first caller candidate CONTAINED in the derived name, else -1. This is the per-control half of
+   * the whole-text hypothesis: `exact -1` with `contains 0` says the label is there, wrapped in more text.
+   */
+  readonly containsCandidateIndex: number;
+  /** Whether the control carries an `id` at all — the precondition for a `label[for]` association existing. */
+  readonly hasIdAttr: boolean;
+  /** How many `label[for=<this id>]` elements exist. >1 is a real (and reportable) page defect. */
+  readonly labelForCount: number;
+  /** 1 when the control is inside a `<label>` (implicit association), else 0. */
+  readonly ancestorLabelCount: number;
+  readonly ariaLabelledbyRefCount: number;
+  /** How many of those references resolved to an element. A shortfall is a broken association, and it is common. */
+  readonly ariaLabelledbyResolvedCount: number;
+  /**
+   * Ordinal of the radio-name group this control belongs to, assigned by first appearance; -1 when the control
+   * carries no `name`.
+   *
+   * **This is the measurement the Stage-2 recon could not make.** HTML groups radios by their shared `name`, and
+   * the shape census deliberately never reads that attribute — so "no painting fieldset/radiogroup/listbox" was
+   * recorded, and a code comment over-claimed it as "the radios are ungrouped". An ordinal answers the real
+   * question (are these two one group or two?) while emitting no site-authored string: the `name` VALUE is read
+   * in-page to bucket by, and only its bucket number ever leaves.
+   */
+  readonly groupIndex: number;
+}
+
+/** The document-level association reading plus one row per visible choice control. */
+export interface WingChoiceAssociationCensus {
+  readonly visibleChoiceControlCount: number;
+  readonly hiddenChoiceControlCount: number;
+  readonly rows: readonly WingChoiceAssociation[];
+  /** True when more visible controls existed than the record carries — never a silently short list. */
+  readonly rowsTruncated: boolean;
+  /** Distinct `name` groups among the visible controls. */
+  readonly nameGroupCount: number;
+  readonly largestNameGroupSize: number;
+  /** Visible controls with no `name` attribute — genuinely ungrouped, now measured rather than assumed. */
+  readonly ungroupedCount: number;
+  readonly scanTruncated: boolean;
+  /** How many caller candidates the comparison ran against. A record cannot claim coverage it did not have. */
+  readonly candidatesCompared: number;
+}
+
+/** Host-side row cap. A page cannot make this record grow without the truncation flag saying so. */
+const MAX_ASSOCIATION_ROWS = 32;
+
+/**
+ * **READ-ONLY label-association census over Stage-2's choice controls.** ES5-plain string, same reason as
+ * {@link EXTRACT_WING_CHOICE_CONTROL_SHAPES}.
+ *
+ * The shape census answered "what KIND of controls are these" (native radios). This answers "is each one
+ * actually LABELLED, how, and does the label match anything we already believe" — without returning a single
+ * page-authored character. Every string in the output vocabulary is one we wrote; the only page-derived values
+ * are integers, booleans, a length bucket, and indices into the caller's own candidate list.
+ *
+ * **Not measured, deliberately:** `checked`. The shape census refuses it as a leaked selection, and this run's
+ * whole premise is that no purpose has been selected — an instrument that could report one is an instrument that
+ * could report the operator's choice.
+ */
+export function buildWingChoiceAssociationScript(candidates: readonly string[]): string {
+  return `(function () {
+  var slice = Function.prototype.call.bind(Array.prototype.slice);
+  var CANDS = ${JSON.stringify(candidates)};
+  var SOURCES = ${JSON.stringify(WING_NAME_SOURCES)};
+  var CAP = 4000;
+  function norm(s) { return String(s == null ? '' : s).replace(/\\s+/g, ' ').trim(); }
+  function paints(node) {
+    if (!node || !node.getClientRects) { return false; }
+    var cs = window.getComputedStyle ? window.getComputedStyle(node) : null;
+    if (cs && (cs.display === 'none' || cs.visibility === 'hidden')) { return false; }
+    if (cs && cs.display === 'contents') { return node.childElementCount > 0; }
+    var rects = node.getClientRects();
+    if (!rects || rects.length === 0) { return false; }
+    var r = node.getBoundingClientRect ? node.getBoundingClientRect() : null;
+    return !!r && r.width > 0 && r.height > 0;
+  }
+  function enabled(node) { return !(node.disabled === true || (node.getAttribute && node.getAttribute('aria-disabled') === 'true')); }
+  function attr(el, k) { return el.getAttribute ? el.getAttribute(k) : null; }
+  function bucket(n) { if (n === 0) { return 'none'; } if (n <= 8) { return 'short'; } if (n <= 24) { return 'medium'; } return 'long'; }
+  /* Escape an id for a CSS attribute selector. Ids are read to FIND the label element and are never returned. */
+  function forLabels(id) {
+    if (!id) { return []; }
+    try { return slice(document.querySelectorAll('label[for="' + String(id).replace(/["\\\\]/g, '\\\\$&') + '"]')); }
+    catch (e) { return []; }
+  }
+  var els;
+  try { els = slice(document.querySelectorAll("input[type='radio'], input[type='checkbox'], [role='radio'], [role='option']")); }
+  catch (e0) { els = []; }
+  var rows = [], visible = 0, hidden = 0, groups = [], ungrouped = 0, i, j;
+  for (i = 0; i < els.length && i < CAP; i++) {
+    var el = els[i];
+    if (!paints(el) || !enabled(el)) { hidden++; continue; }
+    visible++;
+    /* ── derive the name, in ARIA precedence order (documented SUBSET — no labelledby recursion) ── */
+    var name = '', source = 'NONE', refCount = 0, resolved = 0;
+    var lb = attr(el, 'aria-labelledby');
+    if (lb && norm(lb).length) {
+      var ids = norm(lb).split(' '), parts = [];
+      refCount = ids.length;
+      for (j = 0; j < ids.length; j++) {
+        var ref = null; try { ref = document.getElementById(ids[j]); } catch (e1) { ref = null; }
+        if (ref) { resolved++; parts.push(norm(ref.textContent || '')); }
+      }
+      var joined = norm(parts.join(' '));
+      if (joined.length) { name = joined; source = 'ARIA_LABELLEDBY'; }
+    }
+    if (!name.length) {
+      var al = attr(el, 'aria-label');
+      if (al && norm(al).length) { name = norm(al); source = 'ARIA_LABEL'; }
+    }
+    var id = attr(el, 'id');
+    var fors = forLabels(id);
+    if (!name.length && fors.length > 0) {
+      var t = norm(fors[0].textContent || '');
+      if (t.length) { name = t; source = 'LABEL_FOR'; }
+    }
+    var anc = el.closest ? el.closest('label') : null;
+    if (!name.length && anc) {
+      var at = norm(anc.textContent || '');
+      if (at.length) { name = at; source = 'LABEL_ANCESTOR'; }
+    }
+    if (!name.length) {
+      var ti = attr(el, 'title');
+      if (ti && norm(ti).length) { name = norm(ti); source = 'TITLE'; }
+    }
+    if (SOURCES.indexOf(source) === -1) { source = 'NONE'; }
+    /* ── compare against the CALLER's own fixed candidates; only an INDEX ever leaves ── */
+    var exactIdx = -1, containsIdx = -1;
+    for (j = 0; j < CANDS.length; j++) {
+      var want = norm(CANDS[j]);
+      if (!want.length) { continue; }
+      if (exactIdx === -1 && name === want) { exactIdx = j; }
+      if (containsIdx === -1 && name.indexOf(want) !== -1) { containsIdx = j; }
+    }
+    /* ── radio grouping by the shared \`name\` attribute: bucketed in-page, only the ORDINAL is returned ── */
+    var gname = attr(el, 'name'), gidx = -1;
+    if (gname !== null && String(gname).length > 0) {
+      gidx = groups.indexOf(String(gname));
+      if (gidx === -1) { groups.push(String(gname)); gidx = groups.length - 1; }
+    } else { ungrouped++; }
+    rows.push({
+      index: visible - 1,
+      nameSource: source,
+      nameLengthBucket: bucket(name.length),
+      exactCandidateIndex: exactIdx,
+      containsCandidateIndex: containsIdx,
+      hasIdAttr: !!(id && String(id).length > 0),
+      labelForCount: fors.length,
+      ancestorLabelCount: anc ? 1 : 0,
+      ariaLabelledbyRefCount: refCount,
+      ariaLabelledbyResolvedCount: resolved,
+      groupIndex: gidx
+    });
+  }
+  var sizes = {}, largest = 0, k;
+  for (i = 0; i < rows.length; i++) { if (rows[i].groupIndex >= 0) { k = rows[i].groupIndex; sizes[k] = (sizes[k] || 0) + 1; if (sizes[k] > largest) { largest = sizes[k]; } } }
+  return {
+    visibleChoiceControlCount: visible,
+    hiddenChoiceControlCount: hidden,
+    rows: rows,
+    nameGroupCount: groups.length,
+    largestNameGroupSize: largest,
+    ungroupedCount: ungrouped,
+    scanTruncated: els.length > CAP,
+    candidatesCompared: CANDS.length
+  };
+})()`;
+}
+
+/**
+ * Re-validate an association reading HOST-side, exactly as {@link sanitizeChoiceControlCensus} does and for the
+ * same reason: the in-page script maps to the closed vocabularies, and this guarantees the record's vocabulary
+ * with code the page cannot influence at all.
+ *
+ * `candidateCount` is the caller's own list length. Both candidate indices are clamped into `[-1, count)`, so a
+ * script bug (or a future edit that forgets the `-1` sentinel) can never make the record point at a candidate
+ * that does not exist — a dangling index reads as a confident identification of nothing.
+ */
+export function sanitizeChoiceAssociationCensus(raw: unknown, candidateCount: number): WingChoiceAssociationCensus {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const nat = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
+  const cands = nat(candidateCount);
+  const idx = (v: unknown): number => {
+    const n = typeof v === "number" && Number.isSafeInteger(v) ? v : -1;
+    return n >= 0 && n < cands ? n : -1;
+  };
+  const inList = <T extends string>(list: readonly T[], v: unknown, fallback: T): T =>
+    typeof v === "string" && (list as readonly string[]).includes(v) ? (v as T) : fallback;
+  const rawRows = Array.isArray(r.rows) ? r.rows : [];
+  const rows: WingChoiceAssociation[] = rawRows.slice(0, MAX_ASSOCIATION_ROWS).map((s, i) => {
+    const o = (s ?? {}) as Record<string, unknown>;
+    return Object.freeze({
+      // The ordinal is OURS: re-derived from position so the page cannot renumber the rows it is described by.
+      index: i,
+      nameSource: inList(WING_NAME_SOURCES, o.nameSource, "NONE"),
+      nameLengthBucket: inList(WING_NAME_LENGTH_BUCKETS, o.nameLengthBucket, "none"),
+      exactCandidateIndex: idx(o.exactCandidateIndex),
+      containsCandidateIndex: idx(o.containsCandidateIndex),
+      hasIdAttr: o.hasIdAttr === true,
+      labelForCount: nat(o.labelForCount),
+      ancestorLabelCount: nat(o.ancestorLabelCount),
+      ariaLabelledbyRefCount: nat(o.ariaLabelledbyRefCount),
+      ariaLabelledbyResolvedCount: nat(o.ariaLabelledbyResolvedCount),
+      groupIndex: typeof o.groupIndex === "number" && Number.isSafeInteger(o.groupIndex) && o.groupIndex >= 0 ? o.groupIndex : -1,
+    });
+  });
+  return Object.freeze({
+    visibleChoiceControlCount: nat(r.visibleChoiceControlCount),
+    hiddenChoiceControlCount: nat(r.hiddenChoiceControlCount),
+    rows: Object.freeze(rows),
+    rowsTruncated: rawRows.length > MAX_ASSOCIATION_ROWS,
+    nameGroupCount: nat(r.nameGroupCount),
+    largestNameGroupSize: nat(r.largestNameGroupSize),
+    ungroupedCount: nat(r.ungroupedCount),
+    scanTruncated: r.scanTruncated === true,
+    candidatesCompared: cands,
+  });
+}

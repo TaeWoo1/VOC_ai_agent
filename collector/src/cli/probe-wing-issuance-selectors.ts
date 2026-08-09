@@ -72,7 +72,14 @@ import {
   wingStage2Precondition,
   resolveWingStage2ReconScope,
   WING_STAGE2_RECON_TARGETS,
+  WING_STAGE2_PURPOSE_OPTION_CANDIDATES,
+  WING_LABEL_CALIBRATION_BLIND_REASON,
+  type WingPurposeOptionCandidate,
+  wingLabelCalibrationBlind,
+  type WingReconRawRow,
+  type WingStage2Presence,
 } from "../action-window/coupang-wing-label-recon";
+import type { FixedLabelContainmentReading } from "../action-window/api-issuance-calibration/visual-recon-inpage";
 import {
   LIVE_DOM_CALIBRATION_PENDING,
   WING_APPROVAL_PHASE_ENV,
@@ -86,6 +93,7 @@ import {
   screenWingUrl,
   type WingObservation,
   type WingProbeScopeRefusal,
+  type WingChoiceAssociationCensus,
   type WingChoiceControlCensus,
 } from "./coupang-wing-classifier";
 import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from "./live-run-approval";
@@ -240,7 +248,38 @@ export interface WingReconSweep {
 }
 
 export interface WingStage2Sweep {
-  phase: typeof WING_STAGE2_RECON_PHASE;
+  /** Which Stage-2 phase authorized this sweep. The record states it; nothing infers it from the fields present. */
+  phase: WingStage2Phase;
+  /**
+   * True on a LABEL CALIBRATION run: the containment probe and the association census were attempted. It is
+   * recorded rather than derived from `association !== null`, because a census that threw also yields null and
+   * "the instrument was not run" must never look like "the instrument found nothing".
+   */
+  calibration: boolean;
+  /**
+   * The label-association census, or null when this run did not take one (every recon run) or the seam threw
+   * (see {@link associationFault}). Null is never a measured zero-control reading.
+   */
+  association: WingChoiceAssociationCensus | null;
+  associationFault: WingFaultFingerprint | null;
+  /**
+   * Candidates whose CONTAINMENT probe threw. Separate from {@link faults}: a candidate can be counted
+   * successfully and still fail the second, wider read, and folding the two would report the count as unmeasured.
+   */
+  containmentFaults: WingReconFault[];
+  /**
+   * Refused before any measurement because the calibration had nothing to compare against. Null unless the
+   * calibration phase ran with an empty purpose-option candidate list.
+   */
+  calibrationBlind: typeof WING_LABEL_CALIBRATION_BLIND_REASON | null;
+  /**
+   * OUR candidate ids, in the exact order the association census compared them. Empty on a recon run.
+   *
+   * It travels with the sweep rather than being re-read from the module constant at print time: the census
+   * returns INDICES, and an index resolved against a different list than the one that was sent names the wrong
+   * candidate — silently, and with full confidence.
+   */
+  purposeOptionCandidateIds: readonly string[];
   /**
    * Whether the surface passed the Stage-2 precondition. On anything but `OK` the sweep is NOT run: measuring
    * Stage-2 hypotheses against the initial surface produces a full set of confident ABSENT verdicts for labels
@@ -273,7 +312,20 @@ export interface WingSelectorRecordDeps {
     matchCount: number;
     canHighlight: boolean;
     sig?: string;
+    /** Text-matching but non-painting elements, when the reading carried the field. Absent ⇒ not measured. */
+    hiddenMatchCount?: number;
   }>;
+  /**
+   * READ-ONLY CONTAINMENT probe for one candidate — the label-calibration phase's first new measurement. Optional
+   * for the same reason the others are: a run that cannot take it records that it could not.
+   */
+  probeContainment?(spec: { candidateQuery: string; exactText: string }): Promise<FixedLabelContainmentReading>;
+  /**
+   * READ-ONLY label-ASSOCIATION census over the visible choice controls, compared against OUR fixed candidate
+   * strings. The label-calibration phase's second new measurement, and the only one that touches the controls
+   * themselves — still without selecting, clicking, or reading `checked`.
+   */
+  choiceAssociationCensus?(candidates: readonly string[]): Promise<WingChoiceAssociationCensus>;
   /**
    * READ-ONLY choice-control SHAPE census — the one measurement this recorder gained for Stage-2. Optional for
    * the same reason `probeCandidate` is: a run that cannot take it must record that it could not, never die.
@@ -288,6 +340,23 @@ export interface WingSelectorRecordOptions {
   recon?: readonly WingReconTarget[];
   /** Stage-2 sweep scope. Mutually exclusive with `recon` by construction — the phase gate picks exactly one. */
   stage2?: readonly WingStage2ReconTarget[];
+  /**
+   * WHICH Stage-2 phase, when `stage2` is non-empty. Defaults to the recon phase: a caller that forgets to pass
+   * it gets the NARROWER measurement, never the wider one. Widening on a default is how a run takes readings its
+   * manifest never described.
+   */
+  stage2Phase?: WingStage2Phase;
+  /**
+   * The purpose-option candidate list the association census compares against. Defaults to the frozen shipped
+   * set; the CLI never passes it (a test pins that), so a live run can only ever send strings this repository
+   * wrote and reviewed.
+   *
+   * It is injectable for one reason: the BLIND refusal is unreachable while the shipped set is non-empty, and a
+   * guard nothing can exercise is a guard nobody has tested. Asserting "the constant is non-empty, therefore the
+   * branch is fine" is the same one-layer-removed reasoning that has produced a defect in this workstream five
+   * times.
+   */
+  purposeOptionCandidates?: readonly WingPurposeOptionCandidate[];
 }
 
 /**
@@ -379,7 +448,16 @@ export async function runWingSelectorRecord(
     aborted: false,
     issuedState: wingIssuedStateFrom(observation),
     recon: reconTargets.length > 0 ? await sweepReconCandidates(deps, reconTargets) : null,
-    stage2: stage2Targets.length > 0 ? await sweepStage2(deps, stage2Targets, observation) : null,
+    stage2:
+      stage2Targets.length > 0
+        ? await sweepStage2(
+            deps,
+            stage2Targets,
+            observation,
+            opts.stage2Phase ?? WING_STAGE2_RECON_PHASE,
+            opts.purposeOptionCandidates ?? WING_STAGE2_PURPOSE_OPTION_CANDIDATES,
+          )
+        : null,
     calibration: LIVE_DOM_CALIBRATION_PENDING,
   };
 }
@@ -395,30 +473,67 @@ async function sweepStage2(
   deps: WingSelectorRecordDeps,
   targets: readonly WingStage2ReconTarget[],
   observation: WingObservation | null,
+  phase: WingStage2Phase,
+  purposeCandidates: readonly WingPurposeOptionCandidate[],
 ): Promise<WingStage2Sweep> {
+  const calibration = phase === WING_STAGE2_LABEL_CALIBRATION_PHASE;
   const precondition = wingStage2Precondition(observation);
   const empty = {
-    phase: WING_STAGE2_RECON_PHASE,
+    phase,
+    calibration,
     precondition,
     targets: [] as WingStage2ReconTargetResult[],
     faults: [] as WingReconFault[],
+    containmentFaults: [] as WingReconFault[],
     candidatesMeasured: 0,
     candidatesNotMeasured: 0,
     choiceControls: null,
     choiceControlFault: null,
+    association: null,
+    associationFault: null,
+    calibrationBlind: null,
+    purposeOptionCandidateIds: calibration ? purposeCandidates.map((c) => c.id) : [],
   };
   if (precondition !== "OK") return empty;
+  // The capability gate, BEFORE any probe: a calibration with nothing to compare against cannot produce its
+  // headline finding, and every row would read "matched no candidate" for a reason that is about us, not WING.
+  if (calibration && wingLabelCalibrationBlind(purposeCandidates)) {
+    return { ...empty, calibrationBlind: WING_LABEL_CALIBRATION_BLIND_REASON };
+  }
 
-  const raw: { targetId: string; matchCount: number; sig?: string }[] = [];
+  const raw: WingReconRawRow[] = [];
   const faults: WingReconFault[] = [];
+  const containmentFaults: WingReconFault[] = [];
   const probe = deps.probeCandidate;
+  const containmentProbe = calibration ? deps.probeContainment : undefined;
   if (probe) {
     for (const spec of wingStage2ReconProbes(targets)) {
+      let counted: { matchCount: number; sig?: string; hiddenMatchCount?: number } | null = null;
       try {
-        const res = await probe({ candidateQuery: spec.candidateQuery, exactText: spec.exactText });
-        raw.push({ targetId: spec.targetId, matchCount: res.matchCount, ...(res.sig ? { sig: res.sig } : {}) });
+        counted = await probe({ candidateQuery: spec.candidateQuery, exactText: spec.exactText });
       } catch (e) {
         faults.push({ id: spec.targetId, fault: wingFaultFingerprint(e) });
+      }
+      // The containment read is attempted even when the count succeeded and vice versa: they are two separate
+      // in-page evaluations, and a page that navigates between them must not lose the one that landed.
+      let containment: FixedLabelContainmentReading | undefined;
+      if (containmentProbe) {
+        try {
+          containment = await containmentProbe({ candidateQuery: spec.candidateQuery, exactText: spec.exactText });
+        } catch (e) {
+          containmentFaults.push({ id: spec.targetId, fault: wingFaultFingerprint(e) });
+        }
+      }
+      if (counted) {
+        raw.push({
+          targetId: spec.targetId,
+          matchCount: counted.matchCount,
+          ...(counted.sig ? { sig: counted.sig } : {}),
+          // Carried through at last. The driver seam omits the field entirely when the page returned none, so an
+          // absent hidden count stays absent rather than becoming a measured zero.
+          ...(typeof counted.hiddenMatchCount === "number" ? { hiddenCount: counted.hiddenMatchCount } : {}),
+          ...(containment ? { containment } : {}),
+        });
       }
     }
   }
@@ -431,17 +546,32 @@ async function sweepStage2(
       choiceControlFault = wingFaultFingerprint(e);
     }
   }
+  let association: WingChoiceAssociationCensus | null = null;
+  let associationFault: WingFaultFingerprint | null = null;
+  if (calibration && deps.choiceAssociationCensus) {
+    try {
+      association = await deps.choiceAssociationCensus(purposeCandidates.map((c) => c.exactText));
+    } catch (e) {
+      associationFault = wingFaultFingerprint(e);
+    }
+  }
   const folded = interpretWingStage2Recon(targets, raw);
   const all = folded.flatMap((t) => t.candidates);
   return {
-    phase: WING_STAGE2_RECON_PHASE,
+    phase,
+    calibration,
     precondition,
     targets: folded,
     faults,
+    containmentFaults,
     candidatesMeasured: all.filter((c) => c.verdict !== "NOT_MEASURED").length,
     candidatesNotMeasured: all.filter((c) => c.verdict === "NOT_MEASURED").length,
     choiceControls,
     choiceControlFault,
+    association,
+    associationFault,
+    calibrationBlind: null,
+    purposeOptionCandidateIds: calibration ? purposeCandidates.map((c) => c.id) : [],
   };
 }
 
@@ -494,7 +624,7 @@ export const WING_STAGE2_TARGETS_ENV = "SELLEROPS_WING_STAGE2_TARGETS" as const;
 
 export type WingStage2ScopeResult =
   | { requested: false }
-  | { requested: true; ok: true; targets: WingStage2ReconTarget[] }
+  | { requested: true; ok: true; phase: WingStage2Phase; targets: WingStage2ReconTarget[] }
   | { requested: true; ok: false; refusal: WingStage2Refusal; reason: string };
 
 /**
@@ -513,20 +643,33 @@ export function resolveWingStage2Scope(env: Record<string, string | undefined>):
     return typeof v === "string" ? v : undefined;
   };
   // EXACT, un-trimmed — matching the recon gate and the shell allowlist that authorizes it.
-  const runIsStage2 = (own(WING_APPROVAL_PHASE_ENV) ?? "") === WING_STAGE2_RECON_PHASE;
-  const approvedIsStage2 = (own(WING_APPROVED_PHASE_ENV) ?? "") === WING_STAGE2_RECON_PHASE;
-  if (!runIsStage2 && !approvedIsStage2) return { requested: false };
-  if (runIsStage2 !== approvedIsStage2) {
+  const runPhase = asStage2Phase(own(WING_APPROVAL_PHASE_ENV) ?? "");
+  const approvedPhase = asStage2Phase(own(WING_APPROVED_PHASE_ENV) ?? "");
+  if (runPhase === null && approvedPhase === null) return { requested: false };
+  // Both sides must name the SAME Stage-2 phase. A one-sided phase is the original mismatch; two DIFFERENT
+  // Stage-2 phases is the one this generalization introduces, and it is worse than either half alone — a
+  // calibration run under a recon manifest takes two measurements the operator never read, while a recon run
+  // under a calibration manifest silently returns less than the manifest promised. Neither may proceed.
+  if (runPhase !== approvedPhase) {
     return {
       requested: true,
       ok: false,
       refusal: "PHASE_APPROVAL_MISMATCH",
-      reason: runIsStage2
-        ? `${WING_APPROVAL_PHASE_ENV} requests ${WING_STAGE2_RECON_PHASE} but ${WING_APPROVED_PHASE_ENV} does not — ` +
-          "re-run the preflight so the approved phase is bound to this run (a phase left over from an earlier shell is not an approval)"
-        : `${WING_APPROVED_PHASE_ENV} is ${WING_STAGE2_RECON_PHASE} but this run did not request it — ` +
-          "use the command the preflight printed; without the phase this run would measure the shipped labels on the Stage-2 screen",
+      reason:
+        approvedPhase === null
+          ? `${WING_APPROVAL_PHASE_ENV} requests ${runPhase} but ${WING_APPROVED_PHASE_ENV} does not — ` +
+            "re-run the preflight so the approved phase is bound to this run (a phase left over from an earlier shell is not an approval)"
+          : runPhase === null
+            ? `${WING_APPROVED_PHASE_ENV} is ${approvedPhase} but this run did not request it — ` +
+              "use the command the preflight printed; without the phase this run would measure the shipped labels on the Stage-2 screen"
+            : `${WING_APPROVAL_PHASE_ENV} requests ${runPhase} but ${WING_APPROVED_PHASE_ENV} approved ${approvedPhase} — ` +
+              "the two Stage-2 phases measure different things; re-run the preflight for the one you mean",
     };
+  }
+  if (runPhase === null) {
+    // Unreachable: both-null returned above, and a one-sided phase was refused. Kept as a REFUSAL rather than a
+    // non-null assertion so that a future edit to either branch fails closed instead of running an unnamed phase.
+    return { requested: true, ok: false, refusal: "PHASE_APPROVAL_MISMATCH", reason: "no Stage-2 phase resolved" };
   }
   const resolved = resolveWingStage2ReconScope(own(WING_STAGE2_TARGETS_ENV));
   if (!resolved.ok) {
@@ -535,7 +678,7 @@ export function resolveWingStage2Scope(env: Record<string, string | undefined>):
   if (resolved.targets.length === 0) {
     return { requested: true, ok: false, refusal: "STAGE2_SCOPE_EMPTY", reason: "the Stage-2 scope resolved to no targets" };
   }
-  return { requested: true, ok: true, targets: resolved.targets };
+  return { requested: true, ok: true, phase: runPhase, targets: resolved.targets };
 }
 
 export function stage2RefusalMessage(refusal: WingStage2Refusal, reason: string): string {
@@ -561,6 +704,26 @@ export const WING_LABEL_RECON_PHASE = "COUPANG_WING_LABEL_RECON" as const;
  * operator is being asked to press a real marketplace control before signalling ready.
  */
 export const WING_STAGE2_RECON_PHASE = "COUPANG_WING_STAGE2_RECON" as const;
+/**
+ * The approval phase that turns the STAGE-2 pass into a LABEL CALIBRATION: the same operator flow and the same
+ * candidate scope, plus two further read-only measurements — a per-candidate containment probe and a
+ * label-association census over the visible choice controls.
+ *
+ * Its own phase, not a flag on the recon, for the reason every gate in this file is phase-derived: the manifest
+ * is what the operator reads before granting, and "count how many elements carry these labels" and "derive each
+ * radio's accessible name and compare it against a candidate list" are different measurements. A run that took
+ * the second under a manifest describing the first would be doing work nobody approved — which is exactly the
+ * finding review made about a Stage-2 run announced as an "API issuance highlight proof".
+ */
+export const WING_STAGE2_LABEL_CALIBRATION_PHASE = "COUPANG_WING_STAGE2_LABEL_CALIBRATION" as const;
+
+/** The two Stage-2 phases. Same operator flow, same scope vocabulary; they differ in what is measured. */
+export const WING_STAGE2_PHASES = [WING_STAGE2_RECON_PHASE, WING_STAGE2_LABEL_CALIBRATION_PHASE] as const;
+export type WingStage2Phase = (typeof WING_STAGE2_PHASES)[number];
+
+function asStage2Phase(value: string): WingStage2Phase | null {
+  return (WING_STAGE2_PHASES as readonly string[]).includes(value) ? (value as WingStage2Phase) : null;
+}
 // The two phase env vars are DEFINED in the pure classifier leaf (the WING action CLIs need them without
 // importing this recorder) and re-exported here, where the recon gate reads them. Two variables, for the same
 // reason there are two scope variables: review found the one-variable design broken in both directions — a stale
@@ -686,6 +849,17 @@ export interface WingReconRecordRow {
 }
 
 /**
+ * A Stage-2 candidate row. The recon row plus the three readings the label-calibration phase adds — each of
+ * which is `null` when the run did not take it, so a recon record and a calibration record are distinguishable
+ * without reading the phase, and neither can be mistaken for the other's zeros.
+ */
+export interface WingStage2RecordRow extends WingReconRecordRow {
+  hiddenMatchCount: number | null;
+  presence: WingStage2Presence;
+  containment: FixedLabelContainmentReading | null;
+}
+
+/**
  * Shape the sweep for the printed record: flatten to candidate rows and add the two per-target constants the
  * fold does not carry (expected role, and the highlightability the UNIQUE verdict already implies). Pure and
  * exported so a test can prove the printed shape carries nothing beyond counts, booleans, and our own strings.
@@ -740,17 +914,29 @@ export function reconRecordFor(sweep: WingReconSweep | null): {
  */
 export function stage2RecordFor(sweep: WingStage2Sweep | null): {
   phase: string;
+  calibration: boolean;
+  calibrationBlind: string | null;
   precondition: WingStage2Precondition;
-  targets: { target: string; resolvedUnambiguously: boolean; uniqueCandidateIds: readonly string[]; candidates: WingReconRecordRow[] }[];
+  targets: { target: string; resolvedUnambiguously: boolean; uniqueCandidateIds: readonly string[]; candidates: WingStage2RecordRow[] }[];
   faults: WingReconFault[];
+  containmentFaults: WingReconFault[];
   candidatesMeasured: number;
   candidatesNotMeasured: number;
+  containmentMeasured: number;
   choiceControls: WingChoiceControlCensus | null;
   choiceControlFault: WingFaultFingerprint | null;
+  association: WingChoiceAssociationCensus | null;
+  associationFault: WingFaultFingerprint | null;
+  /** OUR candidate ids, in the exact order the association census compared them. An index means nothing without it. */
+  purposeOptionCandidateIds: readonly string[];
 } | null {
   if (!sweep) return null;
   return {
     phase: sweep.phase,
+    // Named, not inferred. `association: null` happens on a recon run AND on a calibration run whose census
+    // threw; only this field separates "not attempted" from "attempted and lost".
+    calibration: sweep.calibration,
+    calibrationBlind: sweep.calibrationBlind,
     // FIRST field after the phase, deliberately: every count below is meaningless without it. A reading with
     // `precondition: NO_VISIBLE_CHOICE_CONTROL` and zero targets is not "Stage-2 is empty", it is "no sweep ran".
     precondition: sweep.precondition,
@@ -773,13 +959,25 @@ export function stage2RecordFor(sweep: WingStage2Sweep | null): {
         // highlightability claim it has no count for.
         canHighlight: c.verdict === "UNIQUE",
         sig16: c.sig16,
+        // The three fields this unit exists to put on the wire. `null` on any of them means unmeasured — the
+        // previous record could not say that about a hidden count at all, because it never carried one.
+        hiddenMatchCount: c.hiddenMatchCount,
+        presence: c.presence,
+        containment: c.containment,
       })),
     })),
     faults: sweep.faults,
+    containmentFaults: sweep.containmentFaults,
     candidatesMeasured: sweep.candidatesMeasured,
     candidatesNotMeasured: sweep.candidatesNotMeasured,
+    // Counted separately from `candidatesMeasured`: the two reads can disagree, and a containment count folded
+    // into the candidate count would let a fully-faulted containment pass look like a complete calibration.
+    containmentMeasured: sweep.targets.flatMap((t) => t.candidates).filter((c) => c.containment !== null).length,
     choiceControls: sweep.choiceControls,
     choiceControlFault: sweep.choiceControlFault,
+    association: sweep.association,
+    associationFault: sweep.associationFault,
+    purposeOptionCandidateIds: sweep.purposeOptionCandidateIds,
   };
 }
 
@@ -847,9 +1045,18 @@ function banner(): void {
  * Stage-2 instructions. Separate copy, because the operator is being asked to take a REAL marketplace action
  * before signalling ready — and the one thing they must not do (press 확인) is on the screen they are opening.
  */
-function printStage2Instructions(readyPath: string, abortPath: string): void {
+function printStage2Instructions(readyPath: string, abortPath: string, calibration = false): void {
   console.error("");
-  console.error("WING Stage-2 recon: reach the purpose-selection screen YOURSELF in the opened window.");
+  console.error(
+    calibration
+      ? "WING Stage-2 LABEL CALIBRATION: reach the purpose-selection screen YOURSELF in the opened window."
+      : "WING Stage-2 recon: reach the purpose-selection screen YOURSELF in the opened window.",
+  );
+  if (calibration) {
+    console.error("  It reads how each choice control is LABELLED — the derivation, the association, the group —");
+    console.error("  and compares the result against a fixed candidate list. No wording leaves the page, and no");
+    console.error("  option is selected: the whole point is to learn what the options ARE before anyone picks one.");
+  }
   console.error("  1) Log in and reach the open-API 키 발급 page (nothing on WING is clicked for you).");
   console.error("  2) Press 'API Key 발급 받기' YOURSELF. SellerOps does not press it and never will.");
   console.error("  3) STOP on the purpose screen. Choose nothing. Type nothing. Do NOT press '확인'.");
@@ -909,6 +1116,21 @@ async function main(): Promise<void> {
   }
   const stage2Targets = stage2Scope.requested && stage2Scope.ok ? stage2Scope.targets : [];
   const isStage2Run = stage2Targets.length > 0;
+  const stage2Phase: WingStage2Phase =
+    stage2Scope.requested && stage2Scope.ok ? stage2Scope.phase : WING_STAGE2_RECON_PHASE;
+  const isCalibrationRun = isStage2Run && stage2Phase === WING_STAGE2_LABEL_CALIBRATION_PHASE;
+  // Refuse BEFORE Chrome launches, not at the sweep. The sweep's own blind gate stays (it is what a programmatic
+  // caller hits), but an operator who is about to log in, navigate and press a real marketplace control should
+  // learn that the instrument cannot answer the question before they do any of it — not after.
+  if (isCalibrationRun && wingLabelCalibrationBlind(WING_STAGE2_PURPOSE_OPTION_CANDIDATES)) {
+    console.error(
+      `Refusing to launch: ${WING_STAGE2_LABEL_CALIBRATION_PHASE} has no purpose-option candidates ` +
+        `(${WING_LABEL_CALIBRATION_BLIND_REASON}). The association census would compare every control against an ` +
+        "empty list and report no match for a reason about us, not WING. No browser launched.",
+    );
+    process.exitCode = 2;
+    return;
+  }
 
   // The per-run TARGET scope, gated BEFORE Chrome launches (it used to be resolved after, inside the run).
   // A live run never defaults to the full target set: both the requested scope and the preflight-bound
@@ -987,13 +1209,24 @@ async function main(): Promise<void> {
     // returns closed-vocabulary categories and integers. Re-sanitized host-side so the record's vocabulary is
     // guaranteed by code the page cannot influence.
     choiceControlCensus: () => driver.choiceControlCensus(),
-    announce: () => isStage2Run ? printStage2Instructions(readyPath, abortPath) : printInstructions(readyPath, abortPath),
+    // The two label-calibration measurements. Wired unconditionally — `sweepStage2` calls them only under the
+    // calibration phase, so the ONE place that decides whether they run is the phase gate, not two.
+    probeContainment: (spec) => driver.probeLabelContainment(spec),
+    choiceAssociationCensus: (candidates) => driver.choiceAssociationCensus(candidates),
+    announce: () =>
+      isStage2Run
+        ? printStage2Instructions(readyPath, abortPath, isCalibrationRun)
+        : printInstructions(readyPath, abortPath),
   };
 
   try {
     // `scopedTargets` was fixed by the approved-scope gate above, before the browser launched; `reconTargets`
     // is empty unless the recon phase gate armed it against that same approved scope.
-    const result = await runWingSelectorRecord(deps, scopedTargets, { recon: reconTargets, stage2: stage2Targets });
+    const result = await runWingSelectorRecord(deps, scopedTargets, {
+      recon: reconTargets,
+      stage2: stage2Targets,
+      stage2Phase,
+    });
     console.error("");
     console.error("WING selector recorder complete. 이제 SellerOps 탭으로 직접 돌아가세요.");
     // SANITIZED calibration record → stdout. Integers/booleans/fixed-labels/roles/opaque sigs + the sanitized
@@ -1041,6 +1274,12 @@ async function main(): Promise<void> {
       stage2CandidatesMeasured: result.stage2?.candidatesMeasured ?? 0,
       stage2TargetsResolved: result.stage2?.targets.filter((t) => t.resolvedUnambiguously).length ?? 0,
       stage2VisibleChoiceControls: result.stage2?.choiceControls?.visibleChoiceControlCount ?? -1,
+      // -1 is "no reading", never 0. A calibration whose census threw and one that found no association-bearing
+      // control would otherwise log the same number.
+      stage2Calibration: result.stage2?.calibration ?? false,
+      stage2AssociationRows: result.stage2?.association?.rows.length ?? -1,
+      stage2NameGroups: result.stage2?.association?.nameGroupCount ?? -1,
+      stage2ContainmentFaults: result.stage2?.containmentFaults.length ?? 0,
     });
   } finally {
     removeSentinel(readyPath);

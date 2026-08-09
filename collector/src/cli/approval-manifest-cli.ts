@@ -139,12 +139,17 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     requestedProbeTargets = scope.targets;
   }
   const isWingStage2Recon = phase === "COUPANG_WING_STAGE2_RECON";
+  const isWingStage2Calibration = phase === "COUPANG_WING_STAGE2_LABEL_CALIBRATION";
+  // BOTH Stage-2 phases share the scope env var, so both must resolve it. A calibration manifest that skipped
+  // this would print the full six targets while the run measured whatever the env var narrowed to — the same
+  // manifest-under-describes-the-run gap review already found on the recon route.
+  const isWingStage2 = isWingStage2Recon || isWingStage2Calibration;
   // The Stage-2 scope, from its OWN env var. Without this the resolver only ever sees `undefined` and returns
   // the full six — so `SELLEROPS_WING_STAGE2_TARGETS=purpose` produced a manifest listing all six targets and a
   // run command carrying all six, while the bootstrap printed the narrower scope it was asked for. The
   // narrowing path documented on `resolveWingStage2ReconScope` was dead on the harness route entirely.
   let requestedStage2Targets: readonly string[] | undefined;
-  if (isWingStage2Recon) {
+  if (isWingStage2) {
     const raw = env("SELLEROPS_WING_STAGE2_TARGETS");
     if (raw !== undefined) {
       const scope = resolveWingStage2ReconScope(raw);
@@ -171,6 +176,8 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     ? "WING open-API read-only CANDIDATE-LABEL recon (measure only; no selector is changed by this run)"
     : isWingStage2Recon
     ? "WING Stage-2 read-only recon on the purpose-selection screen (the OPERATOR presses 발급 to open it; agent counts controls and candidate-label matches only — no highlight, no selection, no input, no 확인, no value read)"
+    : isWingStage2Calibration
+    ? "WING Stage-2 read-only LABEL CALIBRATION on the purpose-selection screen (the OPERATOR presses 발급 to open it; agent derives how each choice control is LABELLED and compares it against fixed candidates, reporting category names and indices only — no wording recorded, no highlight, no selection, no input, no 확인, no value read)"
     : isWingReveal
     ? "WING issuance-form reveal (the OPERATOR presses 발급; this press is not the key-creating action; agent performs no click/input/value read)"
     : isVisualRecon
@@ -190,6 +197,8 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     ? "1 read-only WING candidate-label recon session"
     : isWingStage2Recon
     ? "1 operator-performed 발급 press + 1 read-only Stage-2 recon session (candidate match counts + choice-control shape census)"
+    : isWingStage2Calibration
+    ? "1 operator-performed 발급 press + 1 read-only Stage-2 label-calibration session (candidate match counts + containment probe + choice-control shape and label-association census); 0 selections"
     : isWingReveal
     ? "1 operator-performed 발급 press + 1 sanitized observation"
     : isVisualRecon
