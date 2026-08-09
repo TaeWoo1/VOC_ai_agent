@@ -275,8 +275,12 @@ if [ -z "$TREE_DIRTY" ]; then
   # so a one-target request came back as all six in the manifest, the run env, and the printed command.
   write_stage2_env "$FIXTURES/stage2-narrow.env" "$CUR_GIT" "purpose" "wt-selfcheck21" "apr-selfcheck21"
   OUT_NARROW="$(env SELLEROPS_WING_PROBE_RUN_ENV="$FIXTURES/stage2-narrow.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1 || true)"
-  if grep -q "SELLEROPS_WING_STAGE2_TARGETS=purpose$" <<<"$OUT_NARROW" \
-     && ! grep -q "confirm" <<<"$(grep 'SELLEROPS_WING_STAGE2_TARGETS=' <<<"$OUT_NARROW")"; then
+  # The printed command wraps, so the scope is followed by a trailing " \" — anchoring on end-of-line would
+  # fail for the wrong reason and read as "narrowing was widened" when it was not.
+  NARROW_LINE="$(grep 'SELLEROPS_WING_STAGE2_TARGETS=' <<<"$OUT_NARROW" | head -1)"
+  if grep -qE "SELLEROPS_WING_STAGE2_TARGETS=purpose( |$)" <<<"$NARROW_LINE" \
+     && ! grep -q "confirm" <<<"$NARROW_LINE" \
+     && grep -q "stage-2 targets: purpose " <<<"$OUT_NARROW"; then
     echo "  PASS  STAGE2_NARROW  · a narrowed scope survives into the printed run command"
   else
     echo "  FAIL  STAGE2_NARROW  · narrowing was silently widened"; FAILED=1
