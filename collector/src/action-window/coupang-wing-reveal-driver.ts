@@ -290,6 +290,61 @@ export function stage2DisjunctsWithHeadroom(before: WingObservation): Stage2Disj
   return out;
 }
 
+/**
+ * Disjuncts that have structural headroom on WING and are nonetheless **known blind there**, from live evidence.
+ *
+ * `submitAffordancePresent` is the whole list, and the reason is the 2026-08-09 run: its baseline reported
+ * `false` on a page that visibly contained the `API Key 발급 받기` button, and it was STILL `false` after the
+ * operator pressed it and a purpose-selection surface appeared. The field reads `button[type='submit'],
+ * input[type='submit']`; WING's component library emits `<button type="button">`. So `!false` gives it headroom
+ * on every WING baseline forever, via a term that cannot move.
+ *
+ * That distinction is the point of this list. {@link stage2DisjunctsWithHeadroom} answers "is this bucket below
+ * its ceiling", which is a fact about the LADDER. Whether the signal can move on the markup in front of us is a
+ * fact about the SURFACE, and no bucket arithmetic can supply it. Reading the first as the second is the same
+ * defect this workstream keeps finding: a guard one layer away from the thing it guards.
+ *
+ * Membership requires live evidence of blindness, never a hunch — adding a disjunct here shrinks the eligible
+ * set and makes the gate stricter, so the failure direction is a refused run, not an unwatched press.
+ */
+export const WING_EMPIRICALLY_REFUTED_DISJUNCTS = ["submitAffordancePresent"] as const satisfies readonly Stage2Disjunct[];
+
+/**
+ * The three-layer pre-press capability report. Separated because they answer three different questions and
+ * conflating any two of them is how a blind run gets presented as a watched one.
+ */
+export interface Stage2DetectionEligibility {
+  /** Below its ceiling on this baseline, so the LADDER could still register a rise. Says nothing about WING. */
+  structuralHeadroomDisjuncts: readonly Stage2Disjunct[];
+  /** Structural headroom that live evidence has already refuted on WING markup. Capability-shaped, not capability. */
+  empiricallyRefutedDisjuncts: readonly Stage2Disjunct[];
+  /** Headroom that is not refuted. The ONLY set the pre-press gate may consider. */
+  eligibleDetectionDisjuncts: readonly Stage2Disjunct[];
+}
+
+/**
+ * Split this baseline's headroom into what could plausibly detect a Stage-2 and what only looks like it could.
+ *
+ * **What a non-empty eligible set does NOT mean.** It is not a claim that Stage-2 will be detected — Stage-2 has
+ * never been measured, so nothing written today can promise that. The gate built on this makes exactly one, much
+ * weaker assertion: *we do not ask the operator to take a real marketplace action when every remaining detector
+ * is one we have already proven blind.* `SURFACE_CHANGED_UNRECOGNIZED` stays a perfectly possible outcome of an
+ * eligible run, and remains informative.
+ *
+ * The refuted set is intersected with structural headroom rather than listed unconditionally: a disjunct already
+ * at its satisfying value has no headroom to begin with, so it is not being claimed as capability by anything and
+ * does not need to be subtracted from a claim nobody made.
+ */
+export function stage2DetectionEligibility(before: WingObservation): Stage2DetectionEligibility {
+  const structuralHeadroomDisjuncts = stage2DisjunctsWithHeadroom(before);
+  const refuted = new Set<string>(WING_EMPIRICALLY_REFUTED_DISJUNCTS);
+  return {
+    structuralHeadroomDisjuncts,
+    empiricallyRefutedDisjuncts: structuralHeadroomDisjuncts.filter((d) => refuted.has(d)),
+    eligibleDetectionDisjuncts: structuralHeadroomDisjuncts.filter((d) => !refuted.has(d)),
+  };
+}
+
 export function stage2SurfaceRevealed(before: WingObservation, after: WingObservation): boolean {
   const b = before.signals;
   const a = after.signals;

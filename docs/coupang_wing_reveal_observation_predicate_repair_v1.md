@@ -250,6 +250,14 @@ No live run, no WING window, no probe. No selector recalibration. No 7-step guid
 
 ## Next
 
+> **⚠ AMENDED 2026-08-09 — the headroom report landed here was never wired into the walk.** It was computed
+> inside `observeRevealOutcome()`, i.e. *after* the press, and surfaced only as a count in a log line, so the
+> "known before the operator is asked to act" property this document claims was not reachable from the reveal
+> CLI. Worse, gating on it directly would have been vacuous: `submitAffordancePresent` has structural headroom on
+> every WING baseline via a term live evidence proved cannot move. Closed by
+> `docs/coupang_wing_reveal_headroom_gate_v1.md`, which splits structural headroom from empirical detectability
+> and refuses **before** the highlight when only refuted detectors remain. Step 1 below now runs under that gate.
+
 1. **Live:** a fresh Reveal Live run — bootstrap, manifest, fresh grant — where the operator presses
    `API Key 발급 받기` and the corrected observer attempts to **machine-detect** Stage-2. Sanitized evidence, one
    observation, STOP. `SURFACE_CHANGED_UNRECOGNIZED` is an acceptable and informative result.

@@ -36,6 +36,8 @@ import { launchNaverContext } from "../profile";
 import {
   CoupangWingRevealDriver,
   WING_REVEAL_CHECKPOINT_LABEL,
+  stage2DetectionEligibility,
+  type Stage2DetectionEligibility,
   type WingRevealResult,
 } from "../action-window/coupang-wing-reveal-driver";
 import { WING_ISSUE_SELECTOR_CALIBRATED } from "../action-window/coupang-wing-issuance-driver";
@@ -215,6 +217,12 @@ export interface RevealWalkDriverLike {
 export const REVEAL_WALK_STOPS = [
   "ABORTED_BEFORE_CHECKPOINT",
   "NOT_OPEN_API_SURFACE",
+  /**
+   * Every detector still standing on this baseline is one live evidence has already refuted, so a press could not
+   * be observed by anything. Stops BEFORE the highlight: nothing is tagged, no overlay is mounted, and the press
+   * hint is never printed — the operator is not asked to take a real marketplace action this run cannot watch.
+   */
+  "BLIND_INSTRUMENT",
   "ISSUE_NOT_UNIQUE",
   "CHECKPOINT_NOT_PAINTED",
   "ABORTED_AT_CHECKPOINT",
@@ -243,6 +251,18 @@ export interface RevealWalkIo {
 export interface RevealWalkReport {
   stop: RevealWalkStop;
   result: WingRevealResult | null;
+  /**
+   * The pre-press capability split, computed from the baseline BEFORE anything was highlighted.
+   *
+   * Null on the two paths that never reach the computation: an abort/timeout before the readiness signal, and
+   * `NOT_OPEN_API_SURFACE`. The second one DOES hold an observation — it is deliberately not measured, because
+   * capability against a login or credential page is not a fact about the reveal surface and would read as one.
+   * (An earlier version of this comment said null meant "no baseline existed"; review caught it.)
+   *
+   * On the record because the alternative — a bare `detectableDisjunctCount` in a log line, after the press — is
+   * what made two live runs unable to say whether "nothing changed" meant the surface or the instrument.
+   */
+  eligibility: Stage2DetectionEligibility | null;
   /**
    * True ONLY for the one outcome this run was built to expect. Everything else — including
    * `CREDENTIAL_SURFACE_APPEARED` — is false, and false never advances anything: the walk stops either way.
@@ -284,9 +304,20 @@ export async function runRevealWalk(
   // Held by reference so the `finally` can annotate the very object being returned — the cleanup runs AFTER the
   // return value is chosen, and its failure is part of what the caller must know.
   let report: RevealWalkReport | null = null;
+  // Held outside `stopped` so every exit after the baseline carries it — including the fail-closed refusals,
+  // where "what could this run have seen" is exactly what the next unit needs.
+  let eligibility: Stage2DetectionEligibility | null = null;
   const stopped = (stop: RevealWalkStop): RevealWalkReport => {
-    report = { stop, result: null, outcomeAsExpected: false, cleanupFailed: false };
+    report = { stop, result: null, eligibility, outcomeAsExpected: false, cleanupFailed: false };
     return report;
+  };
+  /** NAMES and counts only — the disjuncts are field identifiers, never a value, selector, or page string. */
+  const noteEligibility = (e: Stage2DetectionEligibility): void => {
+    const fmt = (names: readonly string[]): string => (names.length ? names.join(", ") : "—");
+    io.note("  detection capability on THIS baseline (measured before you are asked to press):");
+    io.note(`    structural headroom (${e.structuralHeadroomDisjuncts.length}): ${fmt(e.structuralHeadroomDisjuncts)}`);
+    io.note(`    empirically refuted on WING (${e.empiricallyRefutedDisjuncts.length}): ${fmt(e.empiricallyRefutedDisjuncts)}`);
+    io.note(`    ELIGIBLE detectors (${e.eligibleDetectionDisjuncts.length}): ${fmt(e.eligibleDetectionDisjuncts)}`);
   };
   try {
     if ((await io.waitFor("ready")) !== "ready") {
@@ -297,6 +328,21 @@ export async function runRevealWalk(
     if (!classified.ok) {
       io.note(`Refusing to continue: not the open-API surface (pageCategory=${classified.observation.pageCategory}).`);
       return stopped("NOT_OPEN_API_SURFACE");
+    }
+    // BEFORE the probe, and so before the highlight that tags and paints, and before anything is disclosed as
+    // pressable. (The probe itself is read-only and tags nothing — an earlier comment implied otherwise. The
+    // ordering still matters: `highlightIssueCheckpoint` is the step that mounts.) The gate reads
+    // ONLY `eligibleDetectionDisjuncts`: structural headroom includes `submitAffordancePresent`, which has
+    // headroom on every WING baseline and is proven blind there, so gating on the structural set would be a
+    // check that passes forever on the strength of the one detector known not to work.
+    eligibility = stage2DetectionEligibility(classified.observation);
+    if (eligibility.eligibleDetectionDisjuncts.length === 0) {
+      io.note("");
+      io.note("⚠ BLIND_INSTRUMENT — every remaining detector for this baseline is one live evidence has refuted.");
+      noteEligibility(eligibility);
+      io.note("  Refusing to highlight 발급 or ask you to press it: this run could not observe the result.");
+      io.note("  Nothing was highlighted and nothing was pressed. WING에서 아무것도 누르지 마세요.");
+      return stopped("BLIND_INSTRUMENT");
     }
     const probe = await driver.probeIssueMatch();
     if (probe.matchCount !== 1) {
@@ -310,6 +356,9 @@ export async function runRevealWalk(
     }
     io.note("");
     io.note(`CHECKPOINT — ${WING_REVEAL_CHECKPOINT_LABEL}`);
+    // Disclosed HERE, immediately above the press request, so the operator sees what this run can and cannot
+    // observe at the moment they are asked to act — not afterwards, in a count, in a log line.
+    noteEligibility(eligibility);
     // The completion sentinel is disclosed HERE and nowhere earlier. Announced before the readiness wait, it
     // invites the operator to create it in advance — and a pressed sentinel that already exists makes the wait
     // below return on tick 0, skipping the human checkpoint in silence.
@@ -349,14 +398,23 @@ export async function runRevealWalk(
       keyCreationRuledOut: result.keyCreationRuledOut,
       keyCreationReason: result.keyCreationReason,
       overlayClearedBeforeObservation: result.overlayClearedBeforeObservation,
+      // The three sets THEMSELVES, from the pre-press computation — not a count. A `SURFACE_UNCHANGED` is only
+      // interpretable next to what this run was capable of seeing, and a reader must not have to trust that a
+      // number and a set were derived from the same baseline.
+      detectionEligibility: eligibility,
+      // The driver's independent post-press recomputation over the same baseline. Emitted alongside rather than
+      // in place of the above so the two cannot silently diverge; a test asserts they AGREE, against a
+      // non-default baseline so neither side can be a literal that happens to match.
+      detectableDisjuncts: result.detectableDisjuncts,
     });
     log("aw_coupang_reveal_run_done", {
       urlCategory,
       outcome: result.outcome,
       changedSignalCount: result.changedSignals.length,
       keyCreationRuledOut: result.keyCreationRuledOut,
+      eligibleDetectionCount: eligibility.eligibleDetectionDisjuncts.length,
     });
-    report = { stop: "OBSERVED", result, outcomeAsExpected: asExpected, cleanupFailed: false };
+    report = { stop: "OBSERVED", result, eligibility, outcomeAsExpected: asExpected, cleanupFailed: false };
     return report;
   } finally {
     // EVERY exit path clears the overlay, including the fail-closed refusals above and a thrown observation —
@@ -387,9 +445,15 @@ export async function runRevealWalk(
  *   6 = observed, but an UNEXPECTED outcome — read the STOP block, do not continue in WING
  *   7 = nothing was observed (refused, aborted, or timed out before the operator acted)
  *   8 = the overlay could not be cleared; SellerOps' panel may still be on the live page
+ *   9 = BLIND_INSTRUMENT — refused before the highlight; nothing was highlighted or pressed
+ *
+ * 9 is distinct from 7 deliberately. Both mean "nothing was observed", but 7 says the surface or the operator
+ * ended the run and 9 says SellerOps' own instrument was not fit to watch it — the difference between re-running
+ * and repairing. Folding it into 7 would hide the one result that must not be retried as-is.
  */
 export function revealExitCode(report: RevealWalkReport): number {
   if (report.cleanupFailed) return 8;
+  if (report.stop === "BLIND_INSTRUMENT") return 9;
   if (report.stop !== "OBSERVED") return 7;
   return report.outcomeAsExpected ? 0 : 6;
 }
