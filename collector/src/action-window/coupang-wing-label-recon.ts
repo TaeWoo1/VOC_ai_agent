@@ -42,6 +42,7 @@
  * shipped label stays an offline edit with its own tests and PR.
  */
 import type { WingProbeTargetName } from "../cli/coupang-wing-classifier";
+import type { FixedLabelContainmentReading } from "./api-issuance-calibration/visual-recon-inpage";
 
 /** The targets that failed to resolve on the real no-key form and therefore need recon. */
 export const WING_RECON_TARGETS = ["self_dev", "vendor_info", "call_ip"] as const;
@@ -141,6 +142,58 @@ export interface WingReconCandidateResult {
    * signatures mean one element wearing two labels, unequal signatures mean genuinely different elements.
    */
   readonly sig16: string | null;
+  /**
+   * Matches whose text was right but which do NOT paint. **`null` means the reading carried none — never 0.**
+   *
+   * The locate script has always returned this and the sweep always dropped it, so every Stage-2 `ABSENT` in the
+   * landed evidence means "zero PAINTING matches" and cannot rule out a hidden one. That limit is recorded as
+   * `absenceBounds.hiddenMatchCountCarried: false` against that run, and carrying the count here is what closes
+   * it for the next one. The distinction between null and 0 is the same one `NOT_MEASURED` draws for the count:
+   * a reading that did not report a hidden count has not measured zero of them.
+   */
+  readonly hiddenMatchCount: number | null;
+  /**
+   * The containment reading for this candidate, or null when the run did not take one (every non-calibration
+   * run). Null is not "nothing was contained" — see {@link presence}, which is `NOT_MEASURED` in that case.
+   */
+  readonly containment: FixedLabelContainmentReading | null;
+  /**
+   * What the containment reading says about this label's presence, as a closed verdict. `NOT_MEASURED` whenever
+   * no containment reading was taken, so a run without the instrument can never look like a measured absence.
+   */
+  readonly presence: WingStage2Presence;
+}
+
+/**
+ * **Where a fixed label actually is, once containment is measured.** This is the vocabulary that separates the
+ * four readings a bare `matchCount: 0` collapses into one.
+ *
+ * `ABSENT_WITHIN_SCAN_BOUND` is not a hedge — it is the only honest verdict when the scan hit its element cap,
+ * and it exists because the Stage-2 recon had to record `candidateScanTruncationReported: false` as a limit on
+ * seven absences. An absence measured over a prefix of the document is an absence from that prefix.
+ */
+export const WING_STAGE2_PRESENCES = [
+  "PRESENT_VISIBLE",
+  "PRESENT_HIDDEN_ONLY",
+  "PRESENT_NOT_WHOLE_TEXT",
+  "ABSENT_EVERYWHERE",
+  "ABSENT_WITHIN_SCAN_BOUND",
+  "NOT_MEASURED",
+] as const;
+export type WingStage2Presence = (typeof WING_STAGE2_PRESENCES)[number];
+
+/**
+ * Fold a containment reading into a presence verdict. Total, deterministic, and ordered from the strongest
+ * evidence down: a painting exact match beats a hidden one, which beats mere containment, which beats absence.
+ */
+export function wingStage2PresenceFrom(containment: FixedLabelContainmentReading | null | undefined): WingStage2Presence {
+  if (!containment) return "NOT_MEASURED";
+  if (containment.exactVisible > 0) return "PRESENT_VISIBLE";
+  if (containment.exactHidden > 0) return "PRESENT_HIDDEN_ONLY";
+  if (containment.deepestContainsVisible + containment.deepestContainsHidden > 0) return "PRESENT_NOT_WHOLE_TEXT";
+  // Absence LAST, and only unqualified when the scan was complete. A truncated scan that found nothing has not
+  // searched the document; calling that `ABSENT_EVERYWHERE` is the over-claim this vocabulary exists to refuse.
+  return containment.scanTruncated ? "ABSENT_WITHIN_SCAN_BOUND" : "ABSENT_EVERYWHERE";
 }
 
 export interface WingReconTargetResult {
@@ -264,9 +317,21 @@ function verdictFor(matchCount: number): WingReconVerdict {
  */
 export function interpretWingRecon(
   targets: readonly WingReconTarget[],
-  raw: readonly { targetId: string; matchCount: number; sig?: string }[],
+  raw: readonly WingReconRawRow[],
 ): WingReconTargetResult[] {
   return interpretFor(screenTargets(targets), WING_LABEL_RECON_CANDIDATES, raw);
+}
+
+/**
+ * One candidate's raw reading. `matchCount` is the painting exact-match count; everything else is optional
+ * because a run may not have taken it, and an absent optional must never be folded into a measured zero.
+ */
+export interface WingReconRawRow {
+  readonly targetId: string;
+  readonly matchCount: number;
+  readonly sig?: string;
+  readonly hiddenCount?: number;
+  readonly containment?: FixedLabelContainmentReading;
 }
 
 /**
@@ -277,7 +342,7 @@ export function interpretWingRecon(
  */
 export function interpretWingStage2Recon(
   targets: readonly WingStage2ReconTarget[],
-  raw: readonly { targetId: string; matchCount: number; sig?: string }[],
+  raw: readonly WingReconRawRow[],
 ): WingStage2ReconTargetResult[] {
   return interpretFor(screenStage2Targets(targets), WING_STAGE2_RECON_CANDIDATES, raw);
 }
@@ -293,29 +358,58 @@ export interface WingStage2ReconTargetResult {
 function interpretFor<K extends string>(
   targets: readonly K[],
   candidateMap: Readonly<Record<K, readonly WingLabelCandidate[]>>,
-  raw: readonly { targetId: string; matchCount: number; sig?: string }[],
+  raw: readonly WingReconRawRow[],
 ): { target: K; candidates: WingReconCandidateResult[]; uniqueCandidateIds: string[]; resolvedUnambiguously: boolean }[] {
   const byId = new Map<string, number>();
+  const shapeById = new Map<string, string>();
   const sigById = new Map<string, string>();
+  const hiddenById = new Map<string, number>();
+  const containmentById = new Map<string, FixedLabelContainmentReading>();
   const conflicting = new Set<string>();
   for (const r of raw) {
-    if (byId.has(r.targetId) && byId.get(r.targetId) !== r.matchCount) conflicting.add(r.targetId);
+    // A repeated candidate id is a conflict when ANY of its readings differ, not just the count. Comparing the
+    // count alone let two rows with the same count but different containment through, and the last one silently
+    // won — which is the same "reported twice, differently" case, one field over.
+    const shape = JSON.stringify([r.matchCount, r.sig ?? null, r.hiddenCount ?? null, r.containment ?? null]);
+    if (shapeById.has(r.targetId) && shapeById.get(r.targetId) !== shape) conflicting.add(r.targetId);
+    shapeById.set(r.targetId, shape);
     byId.set(r.targetId, r.matchCount);
     if (typeof r.sig === "string" && r.sig.length > 0) sigById.set(r.targetId, r.sig);
+    // Optional readings: only a real number is recorded. `undefined` leaves the map empty and the row null —
+    // the same measured-vs-unmeasured line the count itself draws, one field over.
+    if (typeof r.hiddenCount === "number" && Number.isSafeInteger(r.hiddenCount) && r.hiddenCount >= 0)
+      hiddenById.set(r.targetId, r.hiddenCount);
+    if (r.containment) containmentById.set(r.targetId, r.containment);
   }
   const out: { target: K; candidates: WingReconCandidateResult[]; uniqueCandidateIds: string[]; resolvedUnambiguously: boolean }[] = [];
   for (const target of targets) {
     const candidates = (candidateMap[target] ?? []).map((c): WingReconCandidateResult => {
       if (!byId.has(c.id) || conflicting.has(c.id))
-        return { id: c.id, label: c.exactText, matchCount: null, verdict: "NOT_MEASURED", sig16: null };
+        return {
+          id: c.id,
+          label: c.exactText,
+          matchCount: null,
+          verdict: "NOT_MEASURED",
+          sig16: null,
+          // A candidate the reading never reported (or reported twice, differently) has no trustworthy hidden
+          // count or containment either — carrying one from a conflicting row would dress an untrusted reading
+          // in evidence. `presence` follows the count: unmeasured.
+          hiddenMatchCount: null,
+          containment: null,
+          presence: "NOT_MEASURED",
+        };
       const matchCount = byId.get(c.id)!;
       const verdict = verdictFor(matchCount);
+      const containment = containmentById.get(c.id) ?? null;
       return {
         id: c.id,
         label: c.exactText,
         matchCount,
         verdict,
         sig16: verdict === "UNIQUE" ? (sigById.get(c.id) ?? null) : null,
+        hiddenMatchCount: hiddenById.get(c.id) ?? null,
+        containment,
+        presence: wingStage2PresenceFrom(containment),
       };
     });
     const uniqueCandidateIds = candidates.filter((c) => c.verdict === "UNIQUE").map((c) => c.id);
@@ -397,6 +491,90 @@ export const WING_STAGE2_RECON_CANDIDATES: Readonly<Record<WingStage2ReconTarget
 
 export function isWingStage2ReconTarget(name: string): name is WingStage2ReconTarget {
   return (WING_STAGE2_RECON_TARGETS as readonly string[]).includes(name);
+}
+
+/* ────────────────────── STAGE-2 purpose-OPTION candidates (label calibration) ────────────────────── */
+
+/**
+ * Where a purpose-option candidate's wording comes from. Closed, and separate from the free-text `rationale`,
+ * because provenance is the field a reviewer must be able to check mechanically.
+ *
+ * The three classes are not interchangeable. A product-owner flow description is a human's account of WING's
+ * copy; a spacing variant is a mechanical transform of one; an operator transcription is a human reading the
+ * live screen. None of them is a measurement, which is why they are all candidates and none is shipped.
+ */
+export const WING_PURPOSE_CANDIDATE_PROVENANCES = [
+  "PRODUCT_OWNER_FLOW_DESCRIPTION",
+  "MECHANICAL_SPACING_VARIANT",
+  "OPERATOR_TRANSCRIBED",
+] as const;
+export type WingPurposeCandidateProvenance = (typeof WING_PURPOSE_CANDIDATE_PROVENANCES)[number];
+
+export interface WingPurposeOptionCandidate {
+  readonly id: string;
+  readonly exactText: string;
+  readonly provenance: WingPurposeCandidateProvenance;
+  readonly rationale: string;
+}
+
+/**
+ * **The fixed strings each visible Stage-2 choice control's derived name is compared against.**
+ *
+ * Every entry traces to something already on the record — the product owner's description of the official flow
+ * (발급 → 연동 방식 선택 → 자체개발(직접입력) → 업체명 · URL · IP 주소 → 확인) or a mechanical spacing variant of
+ * one. Nothing here is invented wording, and nothing here is measured wording.
+ *
+ * **What this set deliberately does NOT contain: the second radio's label.** Two visible radios were measured on
+ * 2026-08-09 and only one of them has a described counterpart in the flow account. Guessing the other — 업체연동,
+ * 대행, whatever seems plausible — is precisely the speculative retuning `collector/CLAUDE.md` §6 forbids, and it
+ * would put a fabricated string into the live page as a query. So the second option is measured *structurally*
+ * (derivation, association, group, length bucket) and its wording stays unknown until an operator transcribes it
+ * or an instrument reads it. A row reading `exactCandidateIndex: -1` against a `short` name is the honest
+ * outcome, and it is a finding, not a gap.
+ *
+ * Ordered self-developed-first only because that is the order the flow description names them; ordering here
+ * carries no claim about the screen. The comparison is exhaustive, so it is order-insensitive by construction.
+ */
+export const WING_STAGE2_PURPOSE_OPTION_CANDIDATES: readonly WingPurposeOptionCandidate[] = Object.freeze([
+  Object.freeze({
+    id: "purpose_option.self_dev",
+    exactText: "자체개발",
+    provenance: "PRODUCT_OWNER_FLOW_DESCRIPTION" as const,
+    rationale: "the flow description's name for the self-developed option; already a Stage-2 recon candidate, which measured 0 whole-text matches",
+  }),
+  Object.freeze({
+    id: "purpose_option.self_dev_spaced",
+    exactText: "자체 개발",
+    provenance: "MECHANICAL_SPACING_VARIANT" as const,
+    rationale: "the same word with the space Korean UI copy often inserts — the single likeliest cause of an exact-match miss",
+  }),
+  Object.freeze({
+    id: "purpose_option.direct_input",
+    exactText: "직접입력",
+    provenance: "PRODUCT_OWNER_FLOW_DESCRIPTION" as const,
+    rationale: "the parenthetical in 자체개발(직접입력); the option's visible label may be the parenthetical rather than the head word",
+  }),
+  Object.freeze({
+    id: "purpose_option.direct_input_spaced",
+    exactText: "직접 입력",
+    provenance: "MECHANICAL_SPACING_VARIANT" as const,
+    rationale: "spacing variant of the parenthetical, for the same reason",
+  }),
+]);
+
+/**
+ * **Fail-closed capability check, run BEFORE the operator is asked for anything.**
+ *
+ * An association census with no candidates to compare against still measures derivation, association and
+ * grouping — but it cannot answer the question the phase is named for, and every row would read
+ * `exactCandidateIndex: -1` for the trivial reason that there was nothing to match. Spending a live grant on an
+ * instrument that cannot produce its headline finding is the same mistake `BLIND_INSTRUMENT` exists to stop on
+ * the reveal harness; this is the same gate, one surface over.
+ */
+export const WING_LABEL_CALIBRATION_BLIND_REASON = "PURPOSE_OPTION_CANDIDATES_EMPTY" as const;
+
+export function wingLabelCalibrationBlind(candidates: readonly WingPurposeOptionCandidate[]): boolean {
+  return candidates.filter((c) => c.exactText.trim().length > 0).length === 0;
 }
 
 /**

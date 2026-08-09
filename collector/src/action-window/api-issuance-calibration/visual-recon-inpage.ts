@@ -384,6 +384,134 @@ export function buildFixedLabelProbeScript(probes: readonly { targetId: string; 
 }
 
 /**
+ * What a fixed-label CONTAINMENT reading contains. Four integers and a boolean — no text, ever.
+ *
+ * It exists to answer a question a bare `matchCount: 0` cannot: **is this label absent from the page, or present
+ * in a form the exact-whole-text matcher cannot see?** Those two readings are byte-identical today, and the
+ * difference decides whether the next step is "find the real wording" or "fix the matcher". The Stage-2 recon
+ * recorded seven zeros and could only offer an INFERRED explanation for them
+ * (`WHOLE_TEXT_EXACT_MATCH_VS_NESTED_OR_PARTIAL_TEXT`); this is the instrument that tests it.
+ */
+export interface FixedLabelContainmentReading {
+  /** Candidates whose accessible name EQUALS the fixed label and which PAINT. Same rule as the locate script. */
+  readonly exactVisible: number;
+  /** Candidates whose accessible name equals it but which do NOT paint. */
+  readonly exactHidden: number;
+  /**
+   * PAINTING elements whose normalized text CONTAINS the label while no child element's does — the innermost
+   * container. Counted over the whole document, not the candidate query, because the point is to find the label
+   * wherever it lives, including split across nested nodes where `norm(textContent)` rejoins it.
+   *
+   * Innermost-only is what keeps this a small number: every ancestor up to `<html>` also contains the text, and
+   * counting them would report page depth rather than a finding. A direct-child test is sufficient — a
+   * descendant's text is a subsequence of its parent's, so no child containing it means no descendant does.
+   */
+  readonly deepestContainsVisible: number;
+  /** The same innermost containers that do not paint. */
+  readonly deepestContainsHidden: number;
+  /**
+   * True when either scan hit its element cap. An absence measured under truncation is an absence **within the
+   * scanned prefix**, not a whole-document absence — the exact bound the locate script does not report and which
+   * `absenceBounds.candidateScanTruncationReported: false` records against the Stage-2 recon.
+   */
+  readonly scanTruncated: boolean;
+}
+
+/**
+ * Host-side re-validation: coerce every field, trust the page for nothing — and **return `null` when there is
+ * nothing to coerce.**
+ *
+ * The null is the point. An earlier version folded `undefined` / `null` / a non-object into `{0,0,0,0,false}`,
+ * which is a COMPLETE reading: `wingStage2PresenceFrom` then read it as `ABSENT_EVERYWHERE` and the record
+ * counted it in `containmentMeasured`. A page that swapped under the probe, or a CSP that killed the script,
+ * would have produced a confident measured absence for a label nobody looked for. Only a THROW produced a
+ * fault; a silent nothing produced a finding.
+ */
+export function sanitizeContainmentReading(raw: unknown): FixedLabelContainmentReading | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const nat = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
+  return Object.freeze({
+    exactVisible: nat(r.exactVisible),
+    exactHidden: nat(r.exactHidden),
+    deepestContainsVisible: nat(r.deepestContainsVisible),
+    deepestContainsHidden: nat(r.deepestContainsHidden),
+    scanTruncated: r.scanTruncated === true,
+  });
+}
+
+/**
+ * A READ-ONLY fixed-label CONTAINMENT probe: the same value-free comparison {@link buildFixedLabelLocateScript}
+ * makes, plus the one extra question that distinguishes "absent" from "unmatchable".
+ *
+ * **Output is four integers and a boolean.** Element text is read SOLELY to compare against the caller's own
+ * fixed label — by equality for the exact halves and by `indexOf` for the containment halves. The matched text is
+ * never returned, no element is named, nothing is tagged, clicked, or mutated. That is the same contract the
+ * locate and probe scripts hold, and the reason this can run under a READ_ONLY manifest.
+ *
+ * **Why it is a separate script rather than a wider locate.** The locate script is on the shipped highlight path;
+ * giving it a whole-document `*` scan would make every highlight pay for a measurement only a calibration run
+ * needs, on the one code path where a slow or throwing read strands the operator mid-walkthrough.
+ *
+ * Kept ES5-plain + string-form so esbuild's `__name` shim is never referenced in the page.
+ */
+export function buildFixedLabelContainmentScript(input: { candidateQuery: string; exactText: string }): string {
+  return `(function () {
+  /* fixed-label-containment (value-free OUTPUT: 5 integers + 1 boolean) */
+  var slice = Function.prototype.call.bind(Array.prototype.slice);
+  function norm(s) { return String(s == null ? '' : s).replace(/\\s+/g, ' ').trim(); }
+  function accName(el) {
+    var al = el.getAttribute ? el.getAttribute('aria-label') : null;
+    if (al && norm(al).length) { return norm(al); }
+    /* text read ONLY to compare against a KNOWN fixed label; only COUNTS are returned, never the text. */
+    return norm(el.textContent || '');
+  }
+  function paints(node) {
+    if (!node || !node.getClientRects) { return false; }
+    var cs = window.getComputedStyle ? window.getComputedStyle(node) : null;
+    if (cs && (cs.display === 'none' || cs.visibility === 'hidden')) { return false; }
+    if (cs && cs.display === 'contents') { return node.childElementCount > 0; }
+    var rects = node.getClientRects();
+    if (!rects || rects.length === 0) { return false; }
+    var r = node.getBoundingClientRect ? node.getBoundingClientRect() : null;
+    return !!r && r.width > 0 && r.height > 0;
+  }
+  var want = norm(${JSON.stringify(input.exactText)});
+  /* CAND_CAP is the LOCATE script's cap, deliberately identical: the exact halves below are compared against
+     that script's counts, and a wider cap here would count matches it never saw while reporting agreement.
+     DOC_CAP bounds the whole-document containment scan, which is a bigger sweep and needs its own ceiling. */
+  var CAND_CAP = 4000, DOC_CAP = 8000;
+  var cands; try { cands = slice(document.querySelectorAll(${JSON.stringify(input.candidateQuery)})); } catch (e) { cands = []; }
+  var exactVisible = 0, exactHidden = 0, i, j;
+  for (i = 0; i < cands.length && i < CAND_CAP; i++) {
+    if (accName(cands[i]) === want) { if (paints(cands[i])) { exactVisible++; } else { exactHidden++; } }
+  }
+  var all; try { all = slice(document.querySelectorAll('*')); } catch (e2) { all = []; }
+  var deepVisible = 0, deepHidden = 0;
+  /* An empty label would be "contained" by every element on the page. Refuse it rather than report page size. */
+  if (want.length > 0) {
+    for (i = 0; i < all.length && i < DOC_CAP; i++) {
+      var el = all[i];
+      if (norm(el.textContent || '').indexOf(want) === -1) { continue; }
+      var kids = el.children || [], innermost = true;
+      for (j = 0; j < kids.length; j++) {
+        if (norm(kids[j].textContent || '').indexOf(want) !== -1) { innermost = false; break; }
+      }
+      if (!innermost) { continue; }
+      if (paints(el)) { deepVisible++; } else { deepHidden++; }
+    }
+  }
+  return {
+    exactVisible: exactVisible,
+    exactHidden: exactHidden,
+    deepestContainsVisible: deepVisible,
+    deepestContainsHidden: deepHidden,
+    scanTruncated: cands.length > CAND_CAP || all.length > DOC_CAP
+  };
+})()`;
+}
+
+/**
  * A READ-ONLY fixed-label LOCATE (+ optional read-only TAG) script — the value-free OUTPUT half of the Phase-B
  * issuance highlight driver's locator. Given a STRUCTURAL candidate query and a FIXED NAVER UI label, it finds
  * the candidates whose accessible name (aria-label, else normalized text) EXACTLY equals that label **and which

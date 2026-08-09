@@ -67,7 +67,7 @@ WALKTHROUGH_RUN_ID='$4'
 WALKTHROUGH_APPROVAL_ID='$5'
 WALKTHROUGH_GIT_COMMIT='$2'
 WING_PROBE_BOOTSTRAP_EPOCH='$NOW'
-SELLEROPS_APPROVAL_PHASE='COUPANG_WING_STAGE2_RECON'
+SELLEROPS_APPROVAL_PHASE='${6:-COUPANG_WING_STAGE2_RECON}'
 SELLEROPS_WING_STAGE2_TARGETS='$3'
 ENV
 }
@@ -285,6 +285,65 @@ if [ -z "$TREE_DIRTY" ]; then
   else
     echo "  FAIL  STAGE2_NARROW  · narrowing was silently widened"; FAILED=1
   fi
+  # ── the STAGE-2 LABEL CALIBRATION phase ────────────────────────────────────
+  # Same surface, same operator flow, two further read-only measurements. It gets its own end-to-end block for
+  # the reason the Stage-2 block exists at all: the last phase to ship without one described itself to the
+  # operator as an entirely different run, and no unit test could see that.
+  write_stage2_env "$FIXTURES/stage2cal.env" "$CUR_GIT" "purpose,self_dev,vendor_info,vendor_url,call_ip,confirm" \
+    "wt-selfcheck30" "apr-selfcheck30" "COUPANG_WING_STAGE2_LABEL_CALIBRATION"
+  run_case "STAGE2CAL      (label-calibration scope)" 0 "PREFLIGHT PASS" "$FIXTURES/stage2cal.env"
+  run_case "STAGE2CAL      · manifest phase" 0 "COUPANG_WING_STAGE2_LABEL_CALIBRATION" "$FIXTURES/stage2cal.env"
+  run_case "STAGE2CAL      · READ_ONLY mode" 0 "READ_ONLY" "$FIXTURES/stage2cal.env"
+  # The operation line must say CALIBRATION, not recon — they are different measurements on the same screen,
+  # and the operator is granting one of them.
+  run_case "STAGE2CAL      · operation names the label calibration" 0 "WING Stage-2 read-only LABEL CALIBRATION" "$FIXTURES/stage2cal.env"
+  run_case "STAGE2CAL      · max actions names 0 selections" 0 "0 selections" "$FIXTURES/stage2cal.env"
+  # The two new reads, and the one thing that must stay true of both: no page wording is recorded.
+  run_case "STAGE2CAL      · operator told the derivation is read" 0 "HOW each choice control is labelled" "$FIXTURES/stage2cal.env"
+  run_case "STAGE2CAL      · operator told the group is a NUMBER" 0 "a NUMBER, never the name" "$FIXTURES/stage2cal.env"
+  run_case "STAGE2CAL      · operator told no wording is recorded" 0 "an INDEX, never the wording" "$FIXTURES/stage2cal.env"
+  # Everything the Stage-2 recon promised is still promised.
+  run_case "STAGE2CAL      · operator told to press 발급 themselves" 0 "YOURSELF" "$FIXTURES/stage2cal.env"
+  run_case "STAGE2CAL      · operator told never to press 확인" 0 "NEVER press '확인'" "$FIXTURES/stage2cal.env"
+  run_case "STAGE2CAL      · operator told nothing is promoted" 0 "changes no shipped selector" "$FIXTURES/stage2cal.env"
+  run_case "STAGE2CAL      · run command carries BOTH phase variables" 0 "SELLEROPS_WING_APPROVED_PHASE=COUPANG_WING_STAGE2_LABEL_CALIBRATION" "$FIXTURES/stage2cal.env"
+  run_case "STAGE2CAL      · run command carries the Stage-2 scope" 0 "SELLEROPS_WING_STAGE2_TARGETS=" "$FIXTURES/stage2cal.env"
+  # The scope binding must land in the Stage-2 namespace here too — a calibration run measures no shipped
+  # locator either, so a probe scope in its run env would arm a baseline sweep on the purpose screen.
+  OUT_CAL="$(env SELLEROPS_WING_PROBE_RUN_ENV="$FIXTURES/stage2cal.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1 || true)"
+  if grep -q "SELLEROPS_WING_PROBE_TARGETS=" <<<"$OUT_CAL"; then
+    echo "  FAIL  STAGE2CAL      · run command must NOT carry a probe scope"; FAILED=1
+  else
+    echo "  PASS  STAGE2CAL      · run command carries no probe scope"
+  fi
+  if grep -qE "^SELLEROPS_WING_APPROVED_PHASE='COUPANG_WING_STAGE2_LABEL_CALIBRATION'$" "$FIXTURES/stage2cal.env" \
+     && grep -qE "^SELLEROPS_WING_STAGE2_TARGETS='" "$FIXTURES/stage2cal.env" \
+     && ! grep -q "^SELLEROPS_WING_PROBE_TARGETS=" "$FIXTURES/stage2cal.env"; then
+    echo "  PASS  STAGE2CAL      · Stage-2 scope + phase bound, probe scope absent"
+  else
+    echo "  FAIL  STAGE2CAL      · calibration run env binding is wrong"; FAILED=1
+  fi
+  # Narrowing must survive here too — the calibration reads the SAME scope variable, and a phase that resolved
+  # it in the run but not in the manifest is exactly the gap review found on the recon route.
+  write_stage2_env "$FIXTURES/stage2cal-narrow.env" "$CUR_GIT" "purpose" "wt-selfcheck31" "apr-selfcheck31" \
+    "COUPANG_WING_STAGE2_LABEL_CALIBRATION"
+  OUT_CAL_NARROW="$(env SELLEROPS_WING_PROBE_RUN_ENV="$FIXTURES/stage2cal-narrow.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1 || true)"
+  CAL_NARROW_LINE="$(grep 'SELLEROPS_WING_STAGE2_TARGETS=' <<<"$OUT_CAL_NARROW" | head -1)"
+  if grep -qE "SELLEROPS_WING_STAGE2_TARGETS=purpose( |$)" <<<"$CAL_NARROW_LINE" \
+     && ! grep -q "confirm" <<<"$CAL_NARROW_LINE" \
+     && grep -q "stage-2 targets: purpose " <<<"$OUT_CAL_NARROW"; then
+    echo "  PASS  STAGE2CAL_NARROW · a narrowed calibration scope survives into the printed run command"
+  else
+    echo "  FAIL  STAGE2CAL_NARROW · narrowing was silently widened"; FAILED=1
+  fi
+  # The two Stage-2 phases must stay DISTINGUISHABLE in the prose the operator reads. If the calibration copy
+  # ever collapsed into the recon copy, both would still pass every case above.
+  if grep -q "HOW each choice control is labelled" <<<"$OUT_S2"; then
+    echo "  FAIL  STAGE2CAL      · the RECON manifest shows calibration-only copy"; FAILED=1
+  else
+    echo "  PASS  STAGE2CAL      · recon and calibration manifests are distinguishable"
+  fi
+
   # Re-running must not accumulate duplicate phase assignments either.
   bash "$PREFLIGHT" >/dev/null 2>&1 <<<"" || true
   SELLEROPS_WING_PROBE_RUN_ENV="$FIXTURES/recon.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" >/dev/null 2>&1 || true
@@ -376,7 +435,7 @@ if [ -z "$TREE_DIRTY" ]; then
   fi
 else
   run_case "DIRTY_TREE     (uncommitted change refused)" nonzero "working tree is dirty" "$FIXTURES/normal.env"
-  echo "  SKIP  NORMAL / RECON_NORMAL / STAGE2_NORMAL / GIT_DIR_HIJACK / UNTRACKED_HIDE — the working tree is"
+  echo "  SKIP  NORMAL / RECON_NORMAL / STAGE2_NORMAL / STAGE2CAL / GIT_DIR_HIJACK / UNTRACKED_HIDE — the tree is"
   echo "        dirty, which the preflight refuses by design. Commit or stash, then re-run to exercise the"
   echo "        PASS path."
   SKIPPED=1

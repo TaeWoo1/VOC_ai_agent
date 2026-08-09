@@ -38,6 +38,9 @@ import {
   EXTRACT_WING_CENSUS,
   EXTRACT_WING_CHOICE_CONTROL_SHAPES,
   sanitizeChoiceControlCensus,
+  buildWingChoiceAssociationScript,
+  sanitizeChoiceAssociationCensus,
+  type WingChoiceAssociationCensus,
   type WingChoiceControlCensus,
   LIVE_DOM_CALIBRATION_PENDING,
   classifyWingUrlCategory,
@@ -47,7 +50,12 @@ import {
   type WingPageCategory,
   type WingStructuralCensus,
 } from "../cli/coupang-wing-classifier";
-import { buildFixedLabelLocateScript } from "./api-issuance-calibration/visual-recon-inpage";
+import {
+  buildFixedLabelContainmentScript,
+  buildFixedLabelLocateScript,
+  sanitizeContainmentReading,
+  type FixedLabelContainmentReading,
+} from "./api-issuance-calibration/visual-recon-inpage";
 import { COUPANG_ISSUANCE_TOTAL_STEPS } from "./coupang-issuance/coupang-issuance-stages";
 import type {
   CoupangIssuanceProbeDriver,
@@ -696,6 +704,45 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     // Re-sanitized host-side: the script maps to the allow-lists, and this guarantees the record's vocabulary
     // even if a future edit to the script forgets to.
     return sanitizeChoiceControlCensus(await this.evalStr<unknown>(page, EXTRACT_WING_CHOICE_CONTROL_SHAPES));
+  }
+
+  /**
+   * READ-ONLY label-ASSOCIATION census of the choice controls, compared against the caller's OWN fixed candidate
+   * strings. One in-page evaluation of an audited script whose entire output is integers, booleans, closed
+   * category names, and indices into the candidate list the caller supplied. It highlights nothing, tags nothing,
+   * clicks nothing, selects nothing, and reads no field value — and it deliberately does not read `checked`.
+   *
+   * A dedicated method rather than a general `evaluate` seam, for the same reason `choiceControlCensus` is one:
+   * a generic escape hatch on this driver is a place where an unaudited script can later be run under a
+   * READ_ONLY manifest.
+   */
+  async choiceAssociationCensus(candidates: readonly string[]): Promise<WingChoiceAssociationCensus | null> {
+    const page = this.activePage();
+    await this.settle(page);
+    const raw = await this.evalStr<unknown>(page, buildWingChoiceAssociationScript([...candidates]));
+    // `null` when the page returned nothing usable — NOT a census reporting zero controls. See the sanitizer.
+    return sanitizeChoiceAssociationCensus(raw, candidates);
+  }
+
+  /**
+   * READ-ONLY fixed-label CONTAINMENT probe for one candidate spec: the exact-match counts the locate seam
+   * already produces, split by paint, PLUS how many innermost elements merely CONTAIN the label. Four integers
+   * and a boolean; no text, no element identity, no mutation.
+   *
+   * Like `probeFixedLabelMatch` — and unlike the association census, which mirrors the shape census — it does
+   * NOT settle first. The two reads it is compared against are the locate seam's, taken the same way; adding a
+   * settle here would make the "agrees with the locate script" comparison hold under different conditions.
+   *
+   * This is what turns a `matchCount: 0` from a dead end into a diagnosis — "the label is not on this page" and
+   * "the label is on this page but not as an element's whole text" are the two readings the Stage-2 recon could
+   * not tell apart, and it recorded an INFERRED explanation because of it.
+   */
+  async probeLabelContainment(spec: { candidateQuery: string; exactText: string }): Promise<FixedLabelContainmentReading | null> {
+    const page = this.activePage();
+    const raw = await this.evalStr<unknown>(page, buildFixedLabelContainmentScript(spec));
+    // `null` when the page returned nothing usable. A zeroed reading here would fold to `ABSENT_EVERYWHERE` —
+    // a confident measured absence produced by a probe that measured nothing.
+    return sanitizeContainmentReading(raw);
   }
 
   /** Classify the CURRENT surface WITHOUT settling — the value-free census + host-category read. */
