@@ -56,7 +56,7 @@ fi
 # from the spec or from this run's env file; nothing from the surrounding shell.
 unset WALKTHROUGH_RUN_ID WALKTHROUGH_APPROVAL_ID WALKTHROUGH_GIT_COMMIT WING_PROBE_BOOTSTRAP_EPOCH \
       SELLEROPS_APPROVAL_PHASE SELLEROPS_WING_PROBE_TARGETS SELLEROPS_WING_APPROVED_TARGETS \
-      SELLEROPS_WING_STAGE2_TARGETS \
+      SELLEROPS_WING_STAGE2_TARGETS SELLEROPS_WING_FLOW_CHECKPOINTS \
       SELLEROPS_WING_APPROVED_PHASE \
       SELLEROPS_APPROVAL_OPERATION SELLEROPS_APPROVAL_MAX SELLEROPS_APPROVAL_ACCOUNT \
       SELLEROPS_APPROVAL_SURFACE SELLEROPS_APPROVAL_CHANNEL
@@ -246,6 +246,11 @@ echo "  operator action ($M_ENTRY_TYPE):"
 echo "    $M_OPERATOR_ACTION"
 echo
 if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then
+  if [ -n "${SELLEROPS_WING_FLOW_CHECKPOINTS:-}" ]; then
+    echo "  ⚠ THIS RUN IS NARROWED. The checkpoint plan is a PREFIX of the flow and the run ENDS after the last"
+    echo "    one listed — it does not reach the checkpoints below it:"
+    echo "      $SELLEROPS_WING_FLOW_CHECKPOINTS"
+  fi
   echo "  ⚠ THIS RUN ADVANCES THE REAL FLOW, and every step of it is YOURS. SellerOps clicks, selects and types"
   echo "  NOTHING — it has no code path that could. You press 'API Key 발급 받기', you select 'OPEN API', and you"
   echo "  press '확인' — but only if SellerOps' own reading says you may."
@@ -313,6 +318,11 @@ if is_stage2_phase "$PHASE"; then
   # phase variables plus the Stage-2 scope are the whole authorization surface.
   echo "    cd $COLLECTOR_DIR && SELLEROPS_APPROVAL_PHASE=$M_PHASE SELLEROPS_WING_APPROVED_PHASE=$M_PHASE \\"
   echo "      SELLEROPS_WING_STAGE2_TARGETS=$M_TARGETS \\"
+  if [ -n "${SELLEROPS_WING_FLOW_CHECKPOINTS:-}" ]; then
+    # The PLAN travels with the command too. Left off, the run would take the FULL flow under a manifest that
+    # described a shorter one — the same manifest-under-describes-the-run gap the scope variables exist to close.
+    echo "      SELLEROPS_WING_FLOW_CHECKPOINTS=$SELLEROPS_WING_FLOW_CHECKPOINTS \\"
+  fi
   echo "      npx tsx $M_CLI -- --i-understand-this-opens-live-coupang-wing"
 else
   echo "    cd $COLLECTOR_DIR && SELLEROPS_APPROVAL_PHASE=$M_PHASE SELLEROPS_WING_APPROVED_PHASE=$M_PHASE \\"

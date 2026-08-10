@@ -11,21 +11,33 @@
 | 1 | `wt-7ecf33125088` / `apr-5ad6d4a1216b` | `f9189d89` | `wingrec_fd5caf3ca4ae` | the two purpose options IDENTIFIED |
 | 2 | `wt-4bfd9f532ab1` / `apr-91e4ab7eb849` | `82b3e0f7`* | `wingrec_567b2fdb26c5` | 확인 opens a TERMS screen, not the vendor form |
 | 3 | `wt-4bfd9f532ab1` / `apr-778d…` | `82b3e0f7` | `wingrec_781f8ebd996d` | the terms screen measured |
+| 4 | `wt-e21e586da7d4` / `apr-…` | `769def89` | `wingrec_30ca56ad3443` | the checkbox↔consent pairing; **the gate stopped this run** |
 
-\* run 2 was granted on `38e3a0c7`; run 3 on `82b3e0f7`. Agent selections across all three: **0**. Faults: **0**.
+\* run 2 was granted on `38e3a0c7`; run 3 on `82b3e0f7`. Agent selections across all four: **0**. Faults: **0**.
 
 ## The flow, as measured
 
 ```
 발급 (operator)  →  PURPOSE screen        radio 0 = OPEN API · radio 1 = 플레이오토 웹 솔루션
-확인 (operator)  →  TERMS screen          2 checkboxes · 취소 · 약관 동의 및 Key 발급받기
+   ?             →  TERMS screen          2 checkboxes · 취소 · 약관 동의 및 Key 발급받기
                      ↑ the run stops here
 ```
+
+**WHAT CAUSES THE PURPOSE → TERMS TRANSITION IS NOT ESTABLISHED, and this document said it was.** It read
+`확인 (operator) → TERMS`. Run 2 supports that — its checkpoint 2 was still the purpose screen and checkpoint 3,
+after the operator pressed 확인, was the terms screen. But runs 3 and 4 both arrived at the terms screen at
+checkpoint 2, *before* the 확인 step, and on run 4 the operator states they pressed nothing at all: `OPEN API`
+was already the default, so they did not click the radio either. Run 3's operator action at that step is not
+recoverable.
+
+So the transition has at least two live readings the "확인 does it" account does not explain, and the honest
+status is **UNMEASURED**. A dedicated minimal run settles it: reach the purpose screen, touch nothing, press
+only 확인, and read whether the screen changes.
 
 **The product owner's account of this flow was wrong twice**, and both corrections are measured:
 
 - the options are not 자체개발 / 직접입력 — see below;
-- 확인 does not submit 업체명 · URL · IP 주소. **That form never appears.** Its three labels read
+- 확인 does not submit 업체명 · URL · IP 주소 — whatever else it does. **That form never appears.** Its three labels read
   `PRESENT_HIDDEN_ONLY` at every one of the seven checkpoint readings taken across runs 2 and 3, with identical
   quads. It exists in the DOM and is not part of this flow.
 
@@ -65,12 +77,34 @@ cancel elements. A single shipped locator would have conflated them.
 **Both checkboxes have no accessible name at all**: `nameSource: NONE`, `labelForCount: 0`,
 `ancestorLabelCount: 0`, `ariaLabelledbyRefCount: 0`, no shared `name` group. The consent sentences are on the
 page and painting, but they are not associated with the inputs by any mechanism the accname subset follows, and
-neither sentence is unique. **So which box carries which consent is UNMEASURED**, and
-`WING_TERMS_CHECKBOX_PROMOTION_BLOCKED` says so in code. The next recon measures it structurally.
+neither sentence is unique.
+
+**Run 4 established the pairing STRUCTURALLY instead** — the reason the consent-block instrument exists:
+
+```
+checkbox 0 → consent 0 (API 이용 약관)         depth 1 · 1 visible checkbox in that block
+checkbox 1 → consent 1 (카테고리 자동 매칭)     depth 1 · 1 visible checkbox in that block
+consentsMatchedExactlyOnce: 2 / 2
+```
+
+Both rows `NEAREST_BLOCK_HOLDS_EXACTLY_ONE_CONSENT`, at the **immediate parent**, and that parent holds exactly
+one visible checkbox. Each box sits in its own block with its own sentence, so this is a measured 1:1 map and
+not an inference from document order — which is precisely what the instrument's two refusal verdicts exist to
+prevent it from becoming.
+
+**It is a structural pairing, not an accessible association.** The boxes still have no accessible name. A
+tutorial may name each block; it may not claim the label is wired to the input, and
+`WING_TERMS_CHECKBOX_PROMOTION_BLOCKED` still stands for that stronger claim.
+
+**The signatures are not stable across sessions.** Run 4 read the issue button as `777499e0668e9fe8` where run 3
+read `223db3783fae8ce4`; the heading and 취소 differ too. Same page, different session — so `sig16` is evidence
+that two readings within one session saw the same element, and is not element identity. Nothing may key on it.
 
 ## The defect this unit produced, and what it cost
 
-**Run 3's gate cleared the operator to press 확인 while the browser was already on the terms screen.**
+**Run 3's gate cleared the operator to press 확인 while the browser was already on the terms screen.** Run 4 met
+the identical situation with the fix in place and **halted** — `STOP_ALREADY_PAST_THE_PURPOSE_SCREEN`, with the
+instruction never printed. The two runs are the before and after of the same defect.
 
 `wingConfirmAdvisory` asked one question — are 업체명 / URL / IP visible? — and those labels are hidden on *every*
 screen in this flow. So it answered ADVANCE regardless of where the flow was. Run 3's checkpoints 2, 3 and 4 are

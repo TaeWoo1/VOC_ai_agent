@@ -1907,6 +1907,34 @@ export const WING_CHECKPOINT_EXPECTED_SCREEN: Readonly<Record<WingFlowCheckpoint
  */
 export const WING_TERMS_CHECKBOX_PROMOTION_BLOCKED = "NO_ACCESSIBLE_ASSOCIATION_MEASURED_2026_08_10" as const;
 
+/** Env var carrying the per-run checkpoint PLAN. Its own name; a scope must never shorten a flow. */
+export const WING_FLOW_CHECKPOINTS_ENV = "SELLEROPS_WING_FLOW_CHECKPOINTS" as const;
+
+/**
+ * Resolve a per-run checkpoint PLAN, fail-closed. Absent/empty ⇒ the full flow.
+ *
+ * A plan may only be a PREFIX of {@link WING_FLOW_CHECKPOINTS}. Not a subset, not a reordering: each checkpoint
+ * describes a screen reached by the ones before it, so "start at the terms screen" is not a shorter run, it is
+ * a different one whose first reading nobody has established. A prefix ends the flow early, which is the only
+ * narrowing that stays true to what the operator is asked to do.
+ */
+export function resolveWingFlowCheckpoints(
+  raw: string | undefined | null,
+): { ok: true; checkpoints: WingFlowCheckpoint[] } | { ok: false; reason: string } {
+  const trimmed = (raw ?? "").trim();
+  if (!trimmed) return { ok: true, checkpoints: [...WING_FLOW_CHECKPOINTS] };
+  const requested = trimmed.split(",").map((t) => t.trim()).filter((t) => t.length > 0);
+  if (requested.length === 0) return { ok: true, checkpoints: [...WING_FLOW_CHECKPOINTS] };
+  const unknown = requested.filter((t) => !(WING_FLOW_CHECKPOINTS as readonly string[]).includes(t));
+  // A COUNT, never the tokens: this reason reaches stderr and the env value is whatever was typed.
+  if (unknown.length > 0) return { ok: false, reason: `${unknown.length} unrecognized checkpoint name(s)` };
+  const prefix = WING_FLOW_CHECKPOINTS.slice(0, requested.length);
+  if (requested.join(",") !== prefix.join(",")) {
+    return { ok: false, reason: "a checkpoint plan must be a PREFIX of the flow, in order" };
+  }
+  return { ok: true, checkpoints: [...prefix] };
+}
+
 /** Why a discovery run stopped early. `null` means it ran every checkpoint. */
 export const WING_FLOW_HALT_REASONS = [
   "OPERATOR_ABORTED",

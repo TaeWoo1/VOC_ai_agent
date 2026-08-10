@@ -19,6 +19,7 @@ import {
   WING_CHECKPOINT_EXPECTED_SCREEN,
   WING_TERMS_CHECKBOX_PROMOTION_BLOCKED,
   wingFlowScreenFrom,
+  resolveWingFlowCheckpoints,
   WING_FLOW_LAST_CHECKPOINT,
   WING_KEY_CREATION_CONTROL_ID,
   WING_CHOICE_LABEL_CANDIDATES,
@@ -815,5 +816,72 @@ describe("the terms checkboxes are blocked from promotion, by name", () => {
     for (const t of ["terms_api_agree", "terms_category_agree"]) {
       expect(WING_PROBE_TARGET_NAMES as readonly string[]).not.toContain(t);
     }
+  });
+});
+
+/* ══════════════════════════ the per-run checkpoint PLAN ══════════════════════════ */
+
+describe("a run may end the flow early, but never start it in the middle", () => {
+  it("accepts a PREFIX and defaults to the whole flow", () => {
+    expect(resolveWingFlowCheckpoints(undefined)).toEqual({ ok: true, checkpoints: [...WING_FLOW_CHECKPOINTS] });
+    expect(resolveWingFlowCheckpoints("  ")).toEqual({ ok: true, checkpoints: [...WING_FLOW_CHECKPOINTS] });
+    const three = resolveWingFlowCheckpoints(WING_FLOW_CHECKPOINTS.slice(0, 3).join(","));
+    expect(three).toEqual({ ok: true, checkpoints: [...WING_FLOW_CHECKPOINTS.slice(0, 3)] });
+  });
+
+  it("**refuses a subset or a reordering** — each checkpoint's screen is reached by the ones before it", () => {
+    // "Start at the terms screen" is not a shorter run; it is a different one whose first reading nobody has
+    // established. A gap in the middle is worse: the flow would be somewhere the plan never accounted for.
+    for (const bad of [
+      "AFTER_OPERATOR_CONFIRM",
+      "PURPOSE_SCREEN_UNTOUCHED,AFTER_OPERATOR_CONFIRM",
+      "PURPOSE_OPTION_SELECTED_BY_OPERATOR,PURPOSE_SCREEN_UNTOUCHED",
+      "TERMS_CHECKED_BY_OPERATOR",
+    ]) {
+      const r = resolveWingFlowCheckpoints(bad);
+      expect(r.ok, bad).toBe(false);
+      if (!r.ok) expect(r.reason).toContain("PREFIX");
+    }
+  });
+
+  it("reports a COUNT for unknown names, never the tokens", () => {
+    const r = resolveWingFlowCheckpoints("PURPOSE_SCREEN_UNTOUCHED,<script>alert(1)</script>");
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toContain("1 unrecognized");
+      expect(r.reason).not.toContain("script");
+    }
+  });
+});
+
+describe("the 확인 gate is bound to the checkpoint it GUARDS", () => {
+  it("**still fires on a plan that omits the selection checkpoint**", async () => {
+    // The gate used to be evaluated after PURPOSE_OPTION_SELECTED_BY_OPERATOR by name. A minimal plan that
+    // dropped that checkpoint would then have invited the 확인 press with no gate at all — a guard bound to
+    // its neighbour's name rather than to the thing it guards.
+    const { deps, asked } = fakeFlow({ vendorVisible: true });
+    const r = await runWingFlowDiscovery(deps, {
+      targets: ALL_TARGETS,
+      phase: WING_ISSUANCE_FLOW_DISCOVERY_PHASE,
+      checkpoints: ["PURPOSE_SCREEN_UNTOUCHED", "AFTER_OPERATOR_CONFIRM"],
+    });
+    expect(r.advisory).toBe("STOP_FORM_ALREADY_VISIBLE");
+    expect(r.halted).toBe("CONFIRM_ADVISORY_STOP");
+    expect(asked).toEqual(["PURPOSE_SCREEN_UNTOUCHED"]);
+  });
+
+  it("clears a two-checkpoint plan when the purpose screen reads clean", async () => {
+    const { deps, asked, steps } = fakeFlow({ termsFrom: 2 });
+    const r = await runWingFlowDiscovery(deps, {
+      targets: ALL_TARGETS,
+      phase: WING_ISSUANCE_FLOW_DISCOVERY_PHASE,
+      checkpoints: ["PURPOSE_SCREEN_UNTOUCHED", "AFTER_OPERATOR_CONFIRM"],
+    });
+    expect(r.advisory).toBe("ADVANCE_FORM_NOT_YET_REVEALED");
+    expect(r.halted).toBeNull();
+    expect(asked).toEqual(["PURPOSE_SCREEN_UNTOUCHED", "AFTER_OPERATOR_CONFIRM"]);
+    expect(r.readings.map((x) => x.screen)).toEqual(["PURPOSE", "TERMS"]);
+    // The step counter follows the PLAN, not the full flow — "1/2", not "1/4".
+    expect(steps).toEqual([{ index: 0, total: 2 }, { index: 1, total: 2 }]);
   });
 });

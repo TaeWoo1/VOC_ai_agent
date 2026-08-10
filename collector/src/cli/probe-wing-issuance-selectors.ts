@@ -89,6 +89,8 @@ import {
   WING_FLOW_LAST_CHECKPOINT,
   WING_KEY_CREATION_CONTROL_ID,
   WING_CHECKPOINT_EXPECTED_SCREEN,
+  WING_FLOW_CHECKPOINTS_ENV,
+  resolveWingFlowCheckpoints,
   wingFlowScreenFrom,
   type WingFlowScreen,
 } from "../action-window/coupang-wing-label-recon";
@@ -615,7 +617,10 @@ async function sweepStage2(
   let consentBlockFault: WingFaultFingerprint | null = null;
   // DISCOVERY only. The consent screen is the only place this measures anything, and taking it under a
   // calibration manifest would be a read that manifest never described.
-  if (phase === WING_ISSUANCE_FLOW_DISCOVERY_PHASE && deps.consentBlockCensus) {
+  // Phase AND scope. A run narrowed away from the consent targets is not asking about them, and re-measuring
+  // an already-established 1:1 pairing would widen a minimal run past what its manifest describes.
+  const consentInScope = targets.includes("terms_api_agree") && targets.includes("terms_category_agree");
+  if (phase === WING_ISSUANCE_FLOW_DISCOVERY_PHASE && consentInScope && deps.consentBlockCensus) {
     try {
       const read = await deps.consentBlockCensus(WING_STAGE3_TERMS_OPTION_CANDIDATES.map((c) => c.exactText));
       if (read) consentBlocks = read;
@@ -758,6 +763,21 @@ export async function runWingFlowDiscovery(
       halted = "SCREEN_NOT_AS_EXPECTED";
       break;
     }
+    // The 확인 gate, attached to the checkpoint it GUARDS rather than to the one before it. It used to fire
+    // after `PURPOSE_OPTION_SELECTED_BY_OPERATOR` — which meant a plan that omitted that checkpoint silently
+    // dropped the gate while still inviting the press. A guard bound to its neighbour's name is a guard one
+    // layer away from the thing it guards, which is the mistake this file keeps making.
+    if (checkpoint === "AFTER_OPERATOR_CONFIRM" && previous) {
+      advisory = wingConfirmAdvisory({
+        precondition: previous.stage2.precondition,
+        faultCount: previous.stage2.faults.length + previous.stage2.containmentFaults.length,
+        candidates: previous.stage2.targets.flatMap((t) => t.candidates).map((c) => ({ id: c.id, presence: c.presence })),
+      });
+      if (advisory !== "ADVANCE_FORM_NOT_YET_REVEALED") {
+        halted = "CONFIRM_ADVISORY_STOP";
+        break;
+      }
+    }
     deps.announceCheckpoint?.(checkpoint, index, checkpoints.length);
     // The hard stop, enforced rather than documented. A checkpoint list that continued past the terms screen
     // could only be asking the operator to press the key-creation control, and this loop refuses to be the
@@ -794,13 +814,6 @@ export async function runWingFlowDiscovery(
     if (stage2.precondition !== "OK") {
       halted = "PRECONDITION_FAILED";
       break;
-    }
-    if (checkpoint === "PURPOSE_OPTION_SELECTED_BY_OPERATOR") {
-      advisory = wingConfirmAdvisory(screenOf);
-      if (advisory !== "ADVANCE_FORM_NOT_YET_REVEALED") {
-        halted = "CONFIRM_ADVISORY_STOP";
-        break;
-      }
     }
   }
 
@@ -1359,10 +1372,13 @@ function printDiscoveryCheckpoint(
     console.error("  1) Log in and reach the open-API 키 발급 page yourself (nothing on WING is clicked for you).");
     console.error("  2) Press 'API Key 발급 받기' YOURSELF, and STOP. Select nothing yet.");
   } else if (checkpoint === "PURPOSE_OPTION_SELECTED_BY_OPERATOR") {
-    console.error(`${step} — select 'OPEN API' YOURSELF. Do NOT press 확인.`);
-    console.error("  SellerOps does not click the radio and has no code path that could. Select it, then stop.");
-    console.error("  This reading decides whether the run may go further: if the 업체명 / URL / IP fields are");
-    console.error("  already on screen, 확인 SUBMITS them, and the run ends here rather than asking you to press it.");
+    console.error(`${step} — make sure 'OPEN API' is the selected option. Do NOT press 확인.`);
+    console.error("  OPERATOR-REPORTED 2026-08-10: it is already the DEFAULT. If so, press nothing at all —");
+    console.error("  this checkpoint records the state, it does not require a click. SellerOps does not click");
+    console.error("  the radio and has no code path that could, and it never reads `checked`.");
+    console.error("  This reading is what the next step is gated on: if the flow has already moved past the");
+    console.error("  purpose screen, or the 업체명 / URL / IP fields are on it, the run ends here and does not");
+    console.error("  ask you to press 확인.");
   } else if (checkpoint === "AFTER_OPERATOR_CONFIRM") {
     console.error(`${step} — the reading permits one more step: press 확인 YOURSELF, then STOP.`);
     console.error("  The measurement said the vendor form is not on screen yet, so this 확인 advances the flow");
@@ -1541,8 +1557,19 @@ async function main(): Promise<void> {
   };
 
   if (isDiscoveryRun) {
+    const plan = resolveWingFlowCheckpoints(process.env[WING_FLOW_CHECKPOINTS_ENV]);
+    if (!plan.ok) {
+      console.error(`Refusing to launch: ${WING_FLOW_CHECKPOINTS_ENV} is invalid (${plan.reason}). No browser opened.`);
+      process.exitCode = 2;
+      await ctx.close().catch(() => undefined);
+      return;
+    }
     try {
-      const flow = await runWingFlowDiscovery(deps, { targets: stage2Targets, phase: stage2Phase });
+      const flow = await runWingFlowDiscovery(deps, {
+        targets: stage2Targets,
+        phase: stage2Phase,
+        checkpoints: plan.checkpoints,
+      });
       console.error("");
       if (flow.halted === "CONFIRM_ADVISORY_STOP") {
         console.error(`WING flow discovery STOPPED BY THE GATE (${flow.advisory}) — 확인 was never suggested.`);

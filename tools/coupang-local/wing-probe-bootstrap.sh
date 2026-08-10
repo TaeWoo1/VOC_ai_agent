@@ -111,6 +111,19 @@ if is_stage2_phase "$PHASE"; then
   esac
 fi
 
+# The per-run checkpoint PLAN (discovery only). A PREFIX of the flow, validated in TS; the shape check here is
+# the same one every other value written to this file gets, because the preflight sources it.
+FLOW_CHECKPOINTS=""
+if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then
+  FLOW_CHECKPOINTS="${SELLEROPS_WING_FLOW_CHECKPOINTS:-}"
+  case "$FLOW_CHECKPOINTS" in
+    "") ;;
+    *[!A-Z_,]*|,*|*,|*,,*)
+      echo "BOOTSTRAP FAIL — SELLEROPS_WING_FLOW_CHECKPOINTS must be a comma-separated list of UPPERCASE checkpoint names."
+      exit 1 ;;
+  esac
+fi
+
 RUN_ID="wt-$(openssl rand -hex 6)"
 APPROVAL_ID="apr-$(openssl rand -hex 6)"
 GIT_COMMIT="$(git_hardened rev-parse --short HEAD 2>/dev/null || echo unknown)"
@@ -137,6 +150,9 @@ fi
 if [ -n "$STAGE2_TARGETS" ]; then
   printf "SELLEROPS_WING_STAGE2_TARGETS='%s'\n" "$STAGE2_TARGETS" >> "$RUN_ENV"
 fi
+if [ -n "$FLOW_CHECKPOINTS" ]; then
+  printf "SELLEROPS_WING_FLOW_CHECKPOINTS='%s'\n" "$FLOW_CHECKPOINTS" >> "$RUN_ENV"
+fi
 
 echo "coupang WING selector-probe bootstrap complete → $RUN_ENV"
 echo
@@ -146,6 +162,9 @@ echo "  git commit   : $GIT_COMMIT"
 echo "  phase        : $PHASE (READ_ONLY)"
 if [ -n "$PROBE_TARGETS" ]; then
   echo "  probe targets: $PROBE_TARGETS"
+fi
+if [ -n "$FLOW_CHECKPOINTS" ]; then
+  echo "  checkpoints  : $FLOW_CHECKPOINTS  (a PREFIX of the flow — the run ends after the last one)"
 fi
 if [ -n "$STAGE2_TARGETS" ]; then
   echo "  stage-2 scope: $STAGE2_TARGETS"
