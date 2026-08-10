@@ -938,3 +938,62 @@ describe("the guided-walk manifest is not the fallback", () => {
     expect(max).toContain("4 text-guided");
   });
 });
+
+/* ══════════════════════════ the text-guided steps have a presentation of their own ══════════════════════════ */
+
+describe("stale spotlight — the defect the dev-host live proof surfaced", () => {
+  const DRV = readFileSync(resolve(HERE, "../../../src/action-window/coupang-wing-issuance-driver.ts"), "utf8");
+  const OVL = readFileSync(resolve(HERE, "../../../src/action-window/overlay.ts"), "utf8");
+
+  it("**a text-guided step clears the prior tag BEFORE mounting**", () => {
+    // Live-confirmed 2026-08-10: it did not, so `mountOverlay` found the PREVIOUS step's `data-aw-target` —
+    // still on `API Key 발급 받기` — removed the old box and rebuilt it in the same place with this step's
+    // text. The operator saw a ring on one control while the panel described another, three steps running.
+    const body = DRV.slice(DRV.indexOf("  async highlightTarget("));
+    const fn = body.slice(0, body.indexOf("\n  /**"));
+    const clearIdx = fn.indexOf("IN_PAGE_CLEAR_TAG");
+    const mountIdx = fn.indexOf("this.mountStepOverlay(page, target, true)");
+    expect(clearIdx).toBeGreaterThan(-1);
+    expect(mountIdx).toBeGreaterThan(-1);
+    // Order is the property: clearing AFTER the mount would leave the ring drawn for the step's whole life.
+    expect(clearIdx).toBeLessThan(mountIdx);
+  });
+
+  it("**panel-only mode does not bail on a missing anchor** — otherwise the step shows nothing at all", () => {
+    // The other half. `mountOverlay` returns early when `querySelector("[data-aw-target]")` is null, so once
+    // the tag is cleared a text-guided step would render neither ring nor panel. Clearing alone would have
+    // replaced a misplaced panel with no panel.
+    expect(OVL).toContain("if (!target && !o.dockedPanelOnly) {");
+    // …and it must IGNORE a stale anchor rather than look one up: using it is the defect.
+    expect(OVL).toContain('const target = o.dockedPanelOnly ? null : document.querySelector("[data-aw-target]");');
+  });
+
+  it("docked mode draws no ring, no dimming and no badge — it claims no location", () => {
+    const from = OVL.indexOf("if (o.dockedPanelOnly) {");
+    const block = OVL.slice(from, OVL.indexOf("}", OVL.indexOf("box.style.height", from)));
+    expect(block).toContain('box.style.border = "none"');
+    expect(block).toContain('box.style.boxShadow = "none"');
+    expect(OVL).toContain("if (o.dockedPanelOnly) badge.style.display = \"none\";");
+    // Nothing is scrolled either: moving the seller's view toward a control we cannot locate is a claim too.
+    expect(OVL).toContain("if (target) (target as Element).scrollIntoView(");
+  });
+
+  it("the mode is ADDITIVE and OFF by default — the renewal and deletion drivers are untouched", () => {
+    // `overlay.ts` is shared. Every existing caller must keep the anchored ring it has today.
+    expect(OVL).toContain("dockedPanelOnly?: boolean;");
+    for (const f of ["coupang-wing-renewal-driver.ts", "coupang-wing-deletion-driver.ts"]) {
+      const src = readFileSync(resolve(HERE, `../../../src/action-window/${f}`), "utf8");
+      expect(src, f).not.toContain("dockedPanelOnly");
+    }
+    // …and the issuance driver passes it ONLY on the text-guided path.
+    expect(DRV.split("dockedPanelOnly").length - 1).toBeLessThanOrEqual(4);
+  });
+
+  it("only CALIBRATED targets are spotlit — the two with a locator, and no others", () => {
+    const guided = DRV.slice(DRV.indexOf("const TEXT_GUIDED_SIG"), DRV.indexOf("};", DRV.indexOf("const TEXT_GUIDED_SIG")));
+    for (const t of ["purpose_option", "confirm_purpose", "terms_consent", "issue_final"]) {
+      expect(guided, t).toContain(t);
+    }
+    for (const t of ["issue:", "credentials:"]) expect(guided).not.toContain(t);
+  });
+});

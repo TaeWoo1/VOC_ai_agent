@@ -41,10 +41,15 @@ const COPY: Record<string, string> = {
   // in, clicks, or reads a key value; the seller performs each step in the guided WING window.
   "actionWindow.coupangIssuance.run": "쿠팡 Open API 키 발급 화면 안내",
   "actionWindow.coupangIssuance.reachOpenApi": "판매자정보 › 오픈API 키 발급으로 이동",
-  "actionWindow.coupangIssuance.selfDev": "연동 방식 '자체개발' 선택",
-  "actionWindow.coupangIssuance.vendorInfo": "업체명·URL 정보 입력",
-  "actionWindow.coupangIssuance.callIp": "API 호출 IP 등록",
-  "actionWindow.coupangIssuance.issueCheckpoint": "발급 버튼 직접 누르기",
+  // The 8 steps below are the MEASURED flow (five granted READ_ONLY runs + a dev-host guided walk,
+  // 2026-08-10): 발급 → 사용 목적(OPEN API, 기본 선택) → 확인 → 약관 동의 2건 → 키 생성.
+  // `selfDev` / `vendorInfo` / `callIp` were removed with the screens they named — WING shows no 자체개발
+  // option, and 업체명 / 호출 IP never appear in this flow.
+  "actionWindow.coupangIssuance.revealForm": "'API Key 발급 받기' 직접 누르기",
+  "actionWindow.coupangIssuance.purposeOption": "사용 목적 'OPEN API' 확인",
+  "actionWindow.coupangIssuance.confirmPurpose": "'확인' 직접 누르기",
+  "actionWindow.coupangIssuance.termsConsent": "약관 2건 직접 읽고 동의",
+  "actionWindow.coupangIssuance.issueCheckpoint": "'약관 동의 및 Key 발급받기' 직접 누르기 (키 생성)",
   "actionWindow.coupangIssuance.copyKeys": "액세스 키·시크릿 키·업체코드 복사",
   "actionWindow.coupangIssuance.return": "SellerOps로 돌아와 입력",
 
@@ -98,18 +103,24 @@ const ISSUANCE_STEP_DETAIL: Record<string, string> = {
   // clicks 발급 themselves. Keyed by the SAME `actionWindow.coupangIssuance.*` keys the runtime emits.
   "actionWindow.coupangIssuance.run":
     "SellerOps가 화면에서 어디를 봐야 하는지 안내합니다. 각 단계는 열린 쿠팡 윙 창에서 직접 진행하시고, 이 화면의 설명을 따라가세요. SellerOps는 로그인·클릭·입력을 하지 않고 어떤 값도 읽지 않습니다.",
+  // VERBATIM from `OPERATOR_STEP_LABELS` in collector/src/action-window/coupang-wing-issuance-driver.ts —
+  // the WING-resident panel copy an operator read on screen and confirmed correct during the 2026-08-10
+  // dev-host guided walk. Reused rather than rewritten: two places wording the same step differently is how
+  // the tutorial and the runtime drift, and this copy is the half that has actually been seen live.
   "actionWindow.coupangIssuance.reachOpenApi":
-    "쿠팡 윙에서 '판매자정보'의 오픈API 키 발급 영역으로 이동하세요. 정확한 메뉴 이름은 화면 버전에 따라 다를 수 있으니 '오픈API'·'키 발급'이 포함된 항목을 찾아 주세요.",
-  "actionWindow.coupangIssuance.selfDev":
-    "연동 방식은 '자체개발'을 선택하세요. 솔루션사(대행) 연동이 아니라 내 시스템에서 직접 호출하는 방식이며, 별도 심사 없이 바로 발급할 수 있습니다.",
-  "actionWindow.coupangIssuance.vendorInfo":
-    "발급 화면에 필요한 업체명과 URL 정보를 입력하세요. 안전하게 입력하는 값이며, 화면에 표시된 항목만 채우면 됩니다. SellerOps는 입력값을 읽지 않습니다.",
-  "actionWindow.coupangIssuance.callIp":
-    "쿠팡은 등록된 호출 IP에서만 API 요청을 허용합니다. 아래에 표시된 SellerOps 고정 호출 IP를 발급 화면의 'API 호출 IP'에 그대로 등록하세요. 등록하지 않으면 첫 주문 수집이 호출 IP 오류로 실패할 수 있습니다.",
+    "WING 홈에서 '오픈API 키 발급' 페이지로 직접 이동하세요. 이동을 감지하면 자동으로 다음 단계로 넘어갑니다.",
+  "actionWindow.coupangIssuance.revealForm":
+    "표시된 'API Key 발급 받기' 버튼을 직접 누르세요. SellerOps는 대신 누르지 않습니다. 이 버튼은 키를 만들지 않고 사용 목적 선택 화면을 엽니다. 화면이 열리면 아래 버튼을 누르세요.",
+  "actionWindow.coupangIssuance.purposeOption":
+    "사용 목적 화면에서 'OPEN API'가 선택되어 있는지 확인하세요. 보통 기본값이라 아무것도 누르지 않아도 됩니다. 확인했으면 아래 '다음'을 누르세요.",
+  "actionWindow.coupangIssuance.confirmPurpose":
+    "'확인'을 직접 누르세요. 이 버튼도 키를 만들지 않고 약관 동의 화면을 엽니다. 화면이 열리면 아래 버튼을 누르세요.",
+  "actionWindow.coupangIssuance.termsConsent":
+    "약관 내용을 직접 읽고 판단하신 뒤, 동의 체크박스 2개를 직접 선택하세요. SellerOps는 약관을 읽거나 대신 동의하지 않고, 체크 여부도 확인하지 않습니다. 완료하면 아래 버튼을 누르세요.",
   "actionWindow.coupangIssuance.issueCheckpoint":
-    "이제 발급 버튼을 누르기 직전 단계입니다. 발급 버튼은 반드시 직접 눌러 주세요 — SellerOps는 대신 발급하지 않습니다. 입력한 내용을 한 번 더 확인한 뒤 발급을 진행하세요.",
+    "⚠ 여기서 실제로 키가 생성됩니다. '약관 동의 및 Key 발급받기' 버튼을 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않습니다. 발급이 끝나면 아래 버튼을 누르세요.",
   "actionWindow.coupangIssuance.copyKeys":
-    "발급된 액세스 키(Access Key), 시크릿 키(Secret Key), 업체코드(Vendor ID)를 직접 복사하세요. 시크릿 키는 발급 시 한 번만 표시되니 안전하게 보관하세요. SellerOps는 이 값들을 읽지 않습니다 — 복사는 직접 하시고, 마지막에 SellerOps 보안 입력란에 붙여넣으세요.",
+    "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요. SellerOps는 값을 읽지 않습니다. 복사했으면 아래 버튼을 누르세요.",
   "actionWindow.coupangIssuance.return":
     "세 값을 복사했다면 SellerOps로 돌아와 주세요. 안내가 끝나면 연결 정보 입력 화면으로 이동합니다.",
 };

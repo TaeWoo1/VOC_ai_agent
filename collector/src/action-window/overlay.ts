@@ -41,6 +41,18 @@ export interface OverlayOptions {
    */
   residentPanel?: boolean;
   /**
+   * **Panel-only, DOCKED, no spotlight.** Off by default; every existing caller keeps the anchored ring.
+   *
+   * For a step whose control is MEASURED but not PROMOTED: there is no locator, so there is nothing honest to
+   * draw a ring around. Without this, `mountOverlay` finds no `[data-aw-target]` and returns having created
+   * NOTHING — which is why the Coupang walk's four text-guided steps had no presentation of their own, and why
+   * the ring the operator saw at them was the previous step's, re-labelled. (Live-confirmed 2026-08-10.)
+   *
+   * Docked to a viewport corner rather than positioned over an element, so there is no anchor to track and no
+   * claim about where the control is. The panel and its advance button behave exactly as in anchored mode.
+   */
+  dockedPanelOnly?: boolean;
+  /**
    * Optional advance affordance for a WING-RESIDENT step (only meaningful with {@link residentPanel}). When
    * present the guidance panel gains a single advance button; its click sets an in-page value-free LATCH
    * (`__aw_advance_pressed__ = token`) the driver polls with {@link readOverlayAdvancePressed}. The `token`
@@ -185,14 +197,17 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
     // localize the fault. Pure observation — a string assignment cannot throw and cannot alter the flow below.
     const G = window as unknown as Record<string, unknown>;
     G["__aw_mount_stage__"] = "find_tagged_target";
-    const target = document.querySelector("[data-aw-target]");
+    // In docked panel-only mode the anchor is deliberately absent — the step has no promoted locator — so the
+    // mount must NOT bail on a missing target. It must also not silently use a STALE tag left by an earlier
+    // step: that is the defect this mode exists to fix, so the anchor is ignored outright rather than looked up.
+    const target = o.dockedPanelOnly ? null : document.querySelector("[data-aw-target]");
     const prev = document.getElementById("__aw_overlay__");
     G["__aw_mount_stage__"] = "remove_previous";
     if (prev) prev.remove();
     // Clean any stale in-page tracker before re-mounting so listeners never accumulate.
     const stale = G["__aw_overlay_untrack__"];
     if (typeof stale === "function") (stale as () => void)();
-    if (!target) {
+    if (!target && !o.dockedPanelOnly) {
       // Clear the breadcrumb: a stale value from a PRIOR mount must not be misread as this (no-op) mount's stage.
       delete G["__aw_mount_stage__"];
       return;
@@ -201,7 +216,9 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
     // seated operator saw no highlight. Bring the control into view FIRST (read-only — scrolling is
     // not a click), then position over it. `block:"center"` keeps a comfortable margin around it.
     G["__aw_mount_stage__"] = "reveal_target";
-    (target as Element).scrollIntoView({ block: "center", inline: "center" });
+    // Nothing to reveal when there is no anchor; scrolling the page for a step whose control we cannot locate
+    // would move the seller's view for no reason we can justify.
+    if (target) (target as Element).scrollIntoView({ block: "center", inline: "center" });
     G["__aw_mount_stage__"] = "create_overlay";
     const box = document.createElement("div");
     box.id = "__aw_overlay__";
@@ -217,8 +234,19 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
       "box-shadow:0 0 0 9999px rgba(0,0,0,0.28)",
       o.guidanceEnabled ? "display:block" : "display:none",
     ].join(";");
+    if (o.dockedPanelOnly) {
+      // No ring, no dimming, no anchor geometry — the box becomes an invisible host for the panel, docked out
+      // of the way. Drawing a border here would be a claim about a control's location that nothing measured.
+      box.style.border = "none";
+      box.style.boxShadow = "none";
+      box.style.left = "0px";
+      box.style.top = "0px";
+      box.style.width = "0px";
+      box.style.height = "0px";
+    }
     const badge = document.createElement("div");
     badge.setAttribute("data-aw-badge", "");
+    if (o.dockedPanelOnly) badge.style.display = "none";
     badge.textContent = `${o.stepNumber}/${o.totalSteps} · ${o.label ?? o.copyKey}`;
     badge.style.cssText = "position:absolute;left:0;top:-28px;background:#2b6cff;color:#fff;font:12px system-ui;padding:2px 8px;border-radius:4px;white-space:nowrap";
     box.appendChild(badge);

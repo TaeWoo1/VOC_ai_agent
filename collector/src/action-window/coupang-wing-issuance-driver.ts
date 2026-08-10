@@ -937,9 +937,14 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     }
     const guided = TEXT_GUIDED_SIG[target];
     if (guided) {
-      // The guidance panel and its advance button, and NO spotlight ring: there is no promoted locator to point
-      // at, and drawing a ring somewhere plausible would be the invention this whole workstream refuses.
-      await this.mountStepOverlay(page, target);
+      // CLEAR THE PRIOR TAG FIRST. Live-confirmed 2026-08-10: without this the mount found the PREVIOUS step's
+      // `data-aw-target` — still on `API Key 발급 받기` — removed the old box and rebuilt it in the same place
+      // with this step's text. The operator saw a ring pointing at one control while the panel described
+      // another, for three consecutive steps. A step that claims no locator must leave no anchor behind.
+      await this.evalStr(page, IN_PAGE_CLEAR_TAG).catch(() => undefined);
+      // …then the panel ALONE, docked. Without `dockedPanelOnly` the mount finds no anchor and returns having
+      // created nothing, which is why these steps had no presentation of their own once the stale tag was gone.
+      await this.mountStepOverlay(page, target, true);
       return (await overlayMounted(page)) ? { count: 1, sig: guided } : { count: 0 };
     }
     if (!isWingHighlightTarget(target)) return { count: 0 };
@@ -959,9 +964,10 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
    * on the observed navigation). The button only records the seller's press into an in-page value-free latch;
    * the driver never clicks/types and reads no field value.
    */
-  private async mountStepOverlay(page: Page, target: CoupangIssuanceTarget): Promise<void> {
+  private async mountStepOverlay(page: Page, target: CoupangIssuanceTarget, dockedPanelOnly = false): Promise<void> {
     const buttonLabel = ADVANCE_BUTTON_LABEL[target];
     await mountOverlay(page, {
+      ...(dockedPanelOnly ? { dockedPanelOnly: true } : {}),
       stepNumber: OVERLAY_STEP[target],
       totalSteps: COUPANG_ISSUANCE_TOTAL_STEPS,
       copyKey: `actionWindow.coupangIssuance.step.${target}`,
