@@ -902,3 +902,39 @@ describe("the 확인 gate is bound to the checkpoint it GUARDS", () => {
     expect(steps).toEqual([{ index: 0, total: 2 }, { index: 1, total: 2 }]);
   });
 });
+
+/* ══════════════════════════ the guided-walk manifest describes THIS run ══════════════════════════ */
+
+describe("the guided-walk manifest is not the fallback", () => {
+  const CLI = readFileSync(resolve(HERE, "../../../src/cli/approval-manifest-cli.ts"), "utf8");
+
+  it("**has its own operation and maxActions branches** — it fell through to the default", () => {
+    // Fourth instance of one defect in this workstream. The phase was added everywhere the gate looks and
+    // nowhere the OPERATOR looks, so the prepared manifest read "API issuance highlight proof (new-app or
+    // existing-app)" and "1 highlight proof session" — a real, displayed, grantable manifest for a different
+    // run. Every phase that reaches the operator needs a branch in BOTH.
+    expect(CLI).toContain("isWingGuidedWalk\n    ? \"WING GUIDED ISSUANCE WALK");
+    expect(CLI).toContain("isWingGuidedWalk\n    ? \"operator-performed: the whole tutorial");
+  });
+
+  it("the operation names the boundary, the two highlight classes, and what is out of scope", () => {
+    const from = CLI.indexOf('isWingGuidedWalk\n    ? "WING GUIDED ISSUANCE WALK');
+    const op = CLI.slice(from, CLI.indexOf("\n    : isWingReveal", from));
+    expect(op).toContain("CREATES THE KEY");
+    expect(op).toContain("never pressed");
+    expect(op).toContain("separate phase");
+    expect(op).toContain("TEXT-GUIDES");
+    expect(op).toContain("drawing no ring");
+    expect(op).toContain("NAVIGATES nothing");
+    expect(op).toContain("no connect-test, no sync");
+  });
+
+  it("the maxActions budget counts zero presses of the key-creating control", () => {
+    const from = CLI.indexOf('isWingGuidedWalk\n    ? "operator-performed: the whole tutorial');
+    const max = CLI.slice(from, CLI.indexOf("\n    : isWingReveal", from));
+    expect(max).toContain("0 presses of the key-creating");
+    expect(max).toContain("0 navigations");
+    expect(max).toContain("2 highlights");
+    expect(max).toContain("4 text-guided");
+  });
+});

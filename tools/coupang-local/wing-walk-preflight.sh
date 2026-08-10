@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Coupang WING issuance-form REVEAL preflight (browser-only: no backend, no DB, no frontend).
+# Coupang WING GUIDED ISSUANCE WALK preflight (browser-only: no backend, no DB, no frontend).
 #
 # Run AFTER wing-walk-bootstrap.sh and BEFORE the live run. It proves the run is IMMEDIATELY EXECUTABLE
 # (docs/sellerops_live_approval_contract.md §2), then prepares + displays the sanitized Approval Manifest. On any
@@ -52,7 +52,7 @@ RUN_GIT="${WALKTHROUGH_GIT_COMMIT:-}"
 BOOTSTRAP_EPOCH="${WING_WALK_BOOTSTRAP_EPOCH:-}"
 PHASE="${SELLEROPS_APPROVAL_PHASE:-}"
 
-echo "Coupang WING issuance-form REVEAL preflight — run=${RUN_ID:-?} git=${RUN_GIT:-?} phase=${PHASE:-?}"
+echo "Coupang WING GUIDED ISSUANCE WALK preflight — run=${RUN_ID:-?} git=${RUN_GIT:-?} phase=${PHASE:-?}"
 echo "read-only local checks only — no browser, no Coupang call, no credential read"
 echo
 
