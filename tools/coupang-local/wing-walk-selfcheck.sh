@@ -118,7 +118,7 @@ ENV
 run_case() {
   local name="$1" expect_exit="$2" marker="$3" run_env="$4"; shift 4
   local out rc ok="yes"
-  out="$(env "$@" SELLEROPS_WING_REVEAL_RUN_ENV="$run_env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1)"; rc=$?
+  out="$(env "$@" SELLEROPS_WING_WALK_RUN_ENV="$run_env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1)"; rc=$?
   [ "$expect_exit" = "0" ] && [ "$rc" != "0" ] && ok="no"
   [ "$expect_exit" = "nonzero" ] && [ "$rc" = "0" ] && ok="no"
   [ -n "$marker" ] && ! grep -qF "$marker" <<<"$out" && ok="no"
@@ -280,7 +280,7 @@ if [ -z "$TREE_DIRTY" ]; then
   run_case "NORMAL          · one-line grant offered" 0 "Seated and ready." "$FIXTURES/normal.env"
   run_case "NORMAL          · run command is the GUIDED-WALK entrypoint" 0 "run-coupang-wing-issuance-live.ts" "$FIXTURES/normal.env"
 
-  out="$(env SELLEROPS_WING_REVEAL_RUN_ENV="$FIXTURES/normal.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1)"
+  out="$(env SELLEROPS_WING_WALK_RUN_ENV="$FIXTURES/normal.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1)"
 
   # The operator-facing disclosure is the reason this harness exists rather than reusing the deletion preflight's.
   # Each fact the operator must carry into a real WING press has to be ON SCREEN, not implied.
@@ -365,7 +365,7 @@ if [ -z "$TREE_DIRTY" ]; then
   run_case "WITHDRAWN       (uncalibrated 발급 selector refused)" nonzero "SELECTORS_NOT_CALIBRATED" "$FIXTURES/normal.env"
   run_case "WITHDRAWN       · no manifest prepared" nonzero "no manifest prepared, no approval requested" "$FIXTURES/normal.env"
 
-  out="$(env SELLEROPS_WING_REVEAL_RUN_ENV="$FIXTURES/normal.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1)"
+  out="$(env SELLEROPS_WING_WALK_RUN_ENV="$FIXTURES/normal.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1)"
   WITHDRAWN_OK=1
   for forbidden in "Seated and ready." "APPROVAL MANIFEST" "PREFLIGHT PASS" '"operatorRevealAction"' "selectors calibrated: true"; do
     grep -qF "$forbidden" <<<"$out" \
@@ -400,7 +400,7 @@ COUPANG_ACCESS_KEY='LEAKCANARY-SECRET-VALUE'
 ENV
   out="$(env SELLEROPS_APPROVAL_ACCOUNT="LEAKCANARY-AMBIENT-ACCOUNT" \
              SELLEROPS_APPROVAL_OPERATION="LEAKCANARY-AMBIENT-OPERATION" \
-             SELLEROPS_WING_REVEAL_RUN_ENV="$FIXTURES/leaky.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" \
+             SELLEROPS_WING_WALK_RUN_ENV="$FIXTURES/leaky.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" \
              bash "$PREFLIGHT" 2>&1)"; rc=$?
   LEAK_OK=1
   [ "$rc" = "0" ] && { echo "  FAIL  NO_LEAK         · the drifted-HEAD fixture was not refused"; LEAK_OK=0; FAILED=1; }
@@ -430,7 +430,7 @@ ENV
   # The EFFECT, not just the exit code: the reason this case exists is that a refusal AFTER the run env is
   # written still leaves a fresh approval id on disk, killing a pending grant. Moving the dirty check below the
   # heredoc keeps rc=1 and the word "dirty" — BOOTSTRAP_SHA already asserts its effect this way.
-  if [ "$rc" != "0" ] && grep -qiF "dirty" <<<"$out" && [ ! -f "$FIXTURES/run/wing-reveal.env" ]; then
+  if [ "$rc" != "0" ] && grep -qiF "dirty" <<<"$out" && [ ! -f "$FIXTURES/run/wing-walk.env" ]; then
     echo "  PASS  BOOTSTRAP_DIRTY · refuses a dirty tree AND writes no run env (no grant is killed)"
   else
     echo "  FAIL  BOOTSTRAP_DIRTY · bootstrap minted an identity on a dirty tree (exit=$rc)"; FAILED=1
@@ -440,8 +440,8 @@ ENV
   # …and on a clean tree it must SUCCEED, into the temp dir and nowhere near the operator's run env. A bootstrap
   # that refuses everything would satisfy the case above while being useless.
   out="$(env SELLEROPS_WING_REVEAL_RUN_DIR="$FIXTURES/run" bash "$BOOTSTRAP" 2>&1)"; rc=$?
-  if [ "$rc" = "0" ] && [ -f "$FIXTURES/run/wing-reveal.env" ] \
-     && grep -qE "^SELLEROPS_APPROVAL_PHASE='COUPANG_WING_GUIDED_ISSUANCE_WALK'$" "$FIXTURES/run/wing-reveal.env"; then
+  if [ "$rc" = "0" ] && [ -f "$FIXTURES/run/wing-walk.env" ] \
+     && grep -qE "^SELLEROPS_APPROVAL_PHASE='COUPANG_WING_GUIDED_ISSUANCE_WALK'$" "$FIXTURES/run/wing-walk.env"; then
     echo "  PASS  BOOTSTRAP_CLEAN · mints a reveal identity on a clean tree, into the run dir it was given"
   else
     echo "  FAIL  BOOTSTRAP_CLEAN · bootstrap did not mint an identity on a clean tree (exit=$rc)"; FAILED=1
@@ -461,7 +461,7 @@ exec "$REALGIT_FOR_SHA" "\$@"
 FAKE
   chmod +x "$SHABIN/git"
   out="$(env PATH="$SHABIN:$PATH" SELLEROPS_WING_REVEAL_RUN_DIR="$FIXTURES/run2" bash "$BOOTSTRAP" 2>&1)"; rc=$?
-  if [ "$rc" != "0" ] && [ ! -f "$FIXTURES/run2/wing-reveal.env" ]; then
+  if [ "$rc" != "0" ] && [ ! -f "$FIXTURES/run2/wing-walk.env" ]; then
     echo "  PASS  BOOTSTRAP_SHA   · a HEAD that is not a hex commit refuses, and writes no run env"
   else
     echo "  FAIL  BOOTSTRAP_SHA   · a non-hex HEAD produced a run env (exit=$rc)"; FAILED=1
@@ -498,7 +498,7 @@ FAKE
   if [ "$ISSUE_CALIBRATED" = "1" ]; then
   DEFAULT_OK=1
   for attempt in 1 2; do
-    out="$(env SELLEROPS_WING_REVEAL_RUN_ENV="$FIXTURES/normal.env" bash "$PREFLIGHT" 2>&1)" || DEFAULT_OK=0
+    out="$(env SELLEROPS_WING_WALK_RUN_ENV="$FIXTURES/normal.env" bash "$PREFLIGHT" 2>&1)" || DEFAULT_OK=0
     grep -qF "PREFLIGHT PASS" <<<"$out" || DEFAULT_OK=0
     grep -qF "Traceback" <<<"$out" && DEFAULT_OK=0
     grep -qiF "mktemp" <<<"$out" && DEFAULT_OK=0

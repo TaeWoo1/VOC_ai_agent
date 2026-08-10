@@ -20,7 +20,11 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 # dirty-tree guard ever regressed, i.e. exactly when that case is doing its job: a fresh approval id would kill
 # a pending grant and leave a run env whose approvalId no longer matches the displayed manifest.
 RUN_DIR="${SELLEROPS_WING_REVEAL_RUN_DIR:-$HERE/.run}"
-RUN_ENV="$RUN_DIR/wing-reveal.env"
+# Its OWN run-env path. Seeded from the reveal harness, this pointed at `wing-reveal.env`: bootstrapping a walk
+# silently destroyed a prepared reveal run and vice versa. Cross-pickup was already refused by the phase gate —
+# both preflights check the phase written into the file — but one harness overwriting another's run identity is
+# a collision, not a safe fallback.
+RUN_ENV="$RUN_DIR/wing-walk.env"
 
 # The SHARED hardened git, not a local copy. This file had its own, and it was weaker in exactly the ways that
 # matter: it UNSET the config-file variables instead of pinning them to /dev/null (so a prepared HOME re-opens

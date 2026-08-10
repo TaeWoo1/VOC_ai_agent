@@ -17,7 +17,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 COLLECTOR_DIR="${SELLEROPS_COLLECTOR_DIR:-$REPO_ROOT/collector}"
-RUN_ENV="${SELLEROPS_WING_REVEAL_RUN_ENV:-$HERE/.run/wing-reveal.env}"
+RUN_ENV="${SELLEROPS_WING_WALK_RUN_ENV:-$HERE/.run/wing-walk.env}"
 
 FAILED=0
 # shellcheck source=./wing-harness-common.sh
