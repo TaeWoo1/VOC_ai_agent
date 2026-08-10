@@ -1276,3 +1276,67 @@ describe("FE-run-host issuance live proof (API_ISSUANCE_FE_LIVE_PROOF)", () => {
     }
   });
 });
+
+/**
+ * The GUIDED ISSUANCE WALK's entrypoint is the product path: an INSTALLED launchd service, not a CLI the
+ * operator runs and not a bound frontend URL. These lock the three claims a manifest makes about it, because
+ * each one is a promise the operator grants against — and the phase's whole premise is that the run needs no
+ * terminal after the install.
+ */
+describe("the guided walk's installed-service entrypoint", () => {
+  const WALK = PHASE_ENTRYPOINTS.COUPANG_WING_GUIDED_ISSUANCE_WALK;
+
+  it("is its own entrypoint type — never the CLI-launched-window one", () => {
+    expect(WALK.entrypointType).toBe("INSTALLED_LOCAL_AGENT_SERVICE");
+    expect(WALK.emitsFrontendUrl).toBe(false);
+  });
+
+  it("names the INSTALLER as the operator's command, not the agent it installs", () => {
+    // Naming `local-agent.ts` here is exactly the regression this pins: it would print an on-approval line that
+    // starts the agent by hand, which is the non-product path.
+    expect(WALK.cli).toBe("src/cli/local-agent-service.ts");
+    expect(WALK.entrypointCommandId).toBe("local-agent-service");
+    expect(PHASE_SPECS.COUPANG_WING_GUIDED_ISSUANCE_WALK.cli).toBe("src/cli/local-agent-service.ts");
+  });
+
+  it("states where the pairing code appears and where it is confirmed", () => {
+    expect(WALK.operatorActionSummary).toContain("macOS 승인 대화상자");
+    expect(WALK.operatorActionSummary).toContain("제품 화면");
+    expect(validateEntrypointContract("COUPANG_WING_GUIDED_ISSUANCE_WALK", WALK)).toEqual({ ok: true });
+  });
+
+  it("refuses a summary that drops the pairing channel — a terminal-free claim with nothing behind it", () => {
+    const stripped: EntrypointSpec = {
+      ...WALK,
+      operatorActionSummary: "승인 후 Local Agent를 백그라운드 서비스로 설치합니다. 안내가 시작됩니다.",
+    };
+    const res = validateEntrypointContract("COUPANG_WING_GUIDED_ISSUANCE_WALK", stripped);
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.cause).toBe("MISSING_SERVICE_PAIRING_CHANNEL");
+  });
+
+  it("refuses a bound frontend URL — the operator opens SellerOps normally, with no run token in the address", () => {
+    const withUrl: EntrypointSpec = { ...WALK, emitsFrontendUrl: true };
+    const res = validateEntrypointContract("COUPANG_WING_GUIDED_ISSUANCE_WALK", withUrl);
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.cause).toBe("FRONTEND_URL_IN_CLI_ENTRYPOINT");
+  });
+
+  it("refuses the agent entrypoint substituted for the installer", () => {
+    const handRun: EntrypointSpec = { ...WALK, cli: "src/cli/local-agent.ts" };
+    const res = validateEntrypointContract("COUPANG_WING_GUIDED_ISSUANCE_WALK", handRun);
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.cause).toBe("ENTRYPOINT_CLI_MISMATCH");
+  });
+
+  it("refuses the wrong entrypoint type, so the type cannot be widened by accident", () => {
+    const asCli: EntrypointSpec = { ...WALK, entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW" };
+    const res = validateEntrypointContract("COUPANG_WING_GUIDED_ISSUANCE_WALK", asCli);
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.cause).toBe("ENTRYPOINT_TYPE_MISMATCH");
+  });
+});

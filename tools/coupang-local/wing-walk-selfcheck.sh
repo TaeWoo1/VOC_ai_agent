@@ -278,9 +278,15 @@ if [ -z "$TREE_DIRTY" ]; then
   run_case "NORMAL          · 발급 selector calibration disclosed" 0 "selectors calibrated: true" "$FIXTURES/normal.env"
   run_case "NORMAL          · descriptor verdict shown" 0 "guided-walk boundary is exactly the canonical contract" "$FIXTURES/normal.env"
   run_case "NORMAL          · one-line grant offered" 0 "Seated and ready." "$FIXTURES/normal.env"
-  # The product path boots the LOCAL AGENT, not the standalone walk CLI: the agent is what the seller already
-# runs, and it is what opens the window when SellerOps starts the guidance.
-run_case "NORMAL          · run command is the LOCAL AGENT entrypoint" 0 "local-agent.ts" "$FIXTURES/normal.env"
+  # The product path INSTALLS the agent as a service; it never tells the operator to run it. The old case
+  # asserted "local-agent.ts", which the installer command also contains as its ProgramArguments target — so it
+  # would have kept passing after a regression back to a hand-run agent. Assert the install verb instead, plus
+  # the two sentences that make the run terminal-free.
+  run_case "NORMAL          · run command INSTALLS the agent service" 0 "local-agent-service.ts install" "$FIXTURES/normal.env"
+  run_case "NORMAL          · no terminal after the install" 0 "then no terminal for the rest of the run" "$FIXTURES/normal.env"
+  run_case "NORMAL          · pairing code comes from macOS, not a console" 0 "macOS shows the approval dialog with the code" "$FIXTURES/normal.env"
+  run_case "NORMAL          · operator starts in the product UI" 0 "/connect/coupang" "$FIXTURES/normal.env"
+  run_case "NORMAL          · teardown is disclosed with the grant" 0 "uninstall" "$FIXTURES/normal.env"
 
   out="$(env SELLEROPS_WING_WALK_RUN_ENV="$FIXTURES/normal.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1)"
 

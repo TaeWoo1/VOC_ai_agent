@@ -80,9 +80,27 @@ else
 fi
 
 check_no_code_drift "$RUN_GIT"
-check_toolchain "$COLLECTOR_DIR" "src/cli/run-coupang-wing-reveal-live.ts" "reveal"
+# The entrypoint THIS phase runs, not an adjacent one. It used to name the reveal CLI — so the check passed on a
+# tree where the walk's own entrypoint had been renamed or deleted, which is the failure it exists to catch.
+check_toolchain "$COLLECTOR_DIR" "src/cli/local-agent-service.ts" "guided-walk service installer"
+[ -f "$COLLECTOR_DIR/src/cli/local-agent.ts" ] \
+  && pass "hosted agent present (src/cli/local-agent.ts — the service's ProgramArguments target)" \
+  || fail "hosted agent missing: $COLLECTOR_DIR/src/cli/local-agent.ts — the installed service would crash-loop"
 check_dedicated_profile "$COLLECTOR_DIR"
 check_browser_launchable
+
+# The product path runs the agent as a launchd user agent. On any other OS the service adapter refuses
+# (UNSUPPORTED_PLATFORM), so an operator would grant against a manifest describing a run that cannot start.
+[ "$(uname -s)" = "Darwin" ] \
+  && pass "host is macOS (the launchd service adapter and the native approval dialog both exist here)" \
+  || fail "the guided walk's product path needs macOS — launchd autostart and the native pairing dialog have no adapter on $(uname -s)"
+
+# The agent boot needs a connections file; without one it exits before hosting the carrier, and the frontend
+# would sit at "unreachable" with nothing explaining why.
+WALK_CONNECTIONS="${SELLEROPS_WALK_CONNECTIONS:-$COLLECTOR_DIR/.connections/coupang-walk.json}"
+[ -f "$WALK_CONNECTIONS" ] \
+  && pass "walk connections file present (the agent boot has a connection set to load)" \
+  || fail "no connections file at $WALK_CONNECTIONS — the agent exits at boot without one"
 
 echo
 if [ "$FAILED" != "0" ]; then
@@ -211,12 +229,22 @@ echo
 echo "  If this manifest is correct and displayed, the operator's entire single-use grant is one line:"
 echo "    Seated and ready."
 echo
-echo "  On approval:"
-# BOTH phase variables travel on the command, like the probe harness does with its scope variables: the CLI
-# refuses unless they are present and both name this phase, so a run env from another WING action cannot
-# authorize this entrypoint even if it is still exported in the shell.
-echo "    cd $COLLECTOR_DIR && SELLEROPS_APPROVAL_PHASE=$M_PHASE SELLEROPS_WING_APPROVED_PHASE=$M_PHASE \\"
-echo "      npx tsx $M_CLI -- --i-understand-this-opens-live-coupang-wing"
+echo "  On approval — ONE command, then no terminal for the rest of the run:"
+# The phase variables are NOT exported on this command line. They travel in the run-env file, which the installer
+# reads and writes into the service's own environment — so the binding survives into a launchd job that inherits
+# nothing from this shell. A variable exported here would reach the installer and never reach the agent.
+echo "    cd $COLLECTOR_DIR && npx tsx $M_CLI install --run-env $RUN_ENV \\"
+echo "      -- --connections ${WALK_CONNECTIONS#"$COLLECTOR_DIR/"} --action-window-coupang-issuance-live"
+echo
+echo "  Then, with no terminal involved:"
+echo "    1. open SellerOps and go to /connect/coupang (the frontend finds the agent on loopback by itself)"
+echo "    2. start the guidance — SellerOps requests pairing"
+echo "    3. macOS shows the approval dialog with the code; confirm it, and confirm in the SellerOps screen"
+echo "    4. the dedicated WING window opens THEN — at the run's first call, not at agent boot"
+echo
+echo "  The service is bound to THIS approval: its environment carries run=$RUN_ID approval=$APPROVAL_ID"
+echo "  git=$RUN_GIT, and the agent refuses to host the carrier if any of them stops matching the tree."
+echo "  When the run is over: cd $COLLECTOR_DIR && npx tsx $M_CLI uninstall"
 echo
 echo "  (Re-bootstrap ⇒ new approval id ⇒ the old approval is dead. A code/branch/run/scope change ⇒ REVOKED.)"
 exit 0

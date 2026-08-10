@@ -612,8 +612,11 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   },
   COUPANG_WING_GUIDED_ISSUANCE_WALK: {
     phase: "COUPANG_WING_GUIDED_ISSUANCE_WALK",
-    cli: "src/cli/local-agent.ts",
-    driver: "LazyCoupangIssuanceDriver → CoupangWingIssuanceDriver (WING-resident guided walk; the window opens on the run's first call, never at agent boot)",
+    // The operator's command INSTALLS the service; the agent it installs (`src/cli/local-agent.ts`) is then a
+    // launchd job they never invoke. Naming the agent here would print an on-approval line the product path
+    // does not use — and the whole point of this phase is that no one types that line.
+    cli: "src/cli/local-agent-service.ts",
+    driver: "launchd service → src/cli/local-agent.ts → LazyCoupangIssuanceDriver → CoupangWingIssuanceDriver (WING-resident guided walk; the window opens on the run's first call, never at agent boot)",
     // It HIGHLIGHTS two live-calibrated controls ⇒ `allowsHighlight: true` ⇒ it fails closed
     // (`SELECTORS_NOT_CALIBRATED`) unless the caller states the `issue` calibration. The other guided steps are
     // text-only and claim no locator.
@@ -764,6 +767,10 @@ export const APPROVAL_PREREQ_CAUSES = [
   // The WING issuance-form REVEAL phase requires its immutable operator-reveal descriptor, exactly.
   "MISSING_REVEAL_ACTION_CONTRACT",
   "REVEAL_ACTION_CONTRACT_MISMATCH",
+  // A service-hosted phase's operator action must state where the pairing code actually appears. The whole claim
+  // of a product-path run is that it is terminal-free; a summary that omits the OS approval dialog is describing
+  // a different run from the one that executes.
+  "MISSING_SERVICE_PAIRING_CHANNEL",
 ] as const;
 export type ApprovalPrereqCause = (typeof APPROVAL_PREREQ_CAUSES)[number];
 
@@ -773,7 +780,19 @@ export type ApprovalPrereqCause = (typeof APPROVAL_PREREQ_CAUSES)[number];
  * phase's real operator action is the CLI-launched dedicated Chrome window, never a frontend URL. Each phase
  * declares exactly ONE entrypoint so the operator is told the single true action and nothing else.
  */
-export const ENTRYPOINT_TYPES = ["CLI_LAUNCHED_DEDICATED_WINDOW", "FRONTEND_URL"] as const;
+/**
+ * `INSTALLED_LOCAL_AGENT_SERVICE` is the PRODUCT path and is deliberately its own type rather than a variant of
+ * the CLI one. The operator's action is not "run the agent" — it is "install the service, then open SellerOps":
+ * the agent is a launchd background job with no terminal, the marketplace window opens only when the run's
+ * first call needs it, and the pairing code is presented by the OS approval dialog and confirmed in the product
+ * UI. Calling that `CLI_LAUNCHED_DEDICATED_WINDOW` would tell the operator to expect a window at boot and a
+ * code in a console, neither of which happens.
+ */
+export const ENTRYPOINT_TYPES = [
+  "CLI_LAUNCHED_DEDICATED_WINDOW",
+  "INSTALLED_LOCAL_AGENT_SERVICE",
+  "FRONTEND_URL",
+] as const;
 export type EntrypointType = (typeof ENTRYPOINT_TYPES)[number];
 
 /** The phases that carry an operator entrypoint: the calibration phases, the FE-run-host issuance proof, and
@@ -936,12 +955,16 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
   // do as precisely as what it does — the four text-guided steps are not highlighted, and the last checkpoint
   // stands in front of a control this run never presses.
   COUPANG_WING_GUIDED_ISSUANCE_WALK: {
-    entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
-    cli: "src/cli/local-agent.ts",
-    entrypointCommandId: "local-agent",
+    entrypointType: "INSTALLED_LOCAL_AGENT_SERVICE",
+    cli: "src/cli/local-agent-service.ts",
+    entrypointCommandId: "local-agent-service",
     operatorActionSummary:
-      "승인 후 SellerOps Local Agent가 뜨고, SellerOps 화면에서 안내를 시작하면 전용 Chrome 창이 열립니다" +
-      "(에이전트가 켜져 있다는 이유만으로는 창이 열리지 않습니다). 연결 승인은 SellerOps 제품 화면에서 직접 하십니다. " +
+      "승인 후 Local Agent를 백그라운드 서비스로 설치합니다(launchd, 1회). 이후 터미널은 쓰지 않습니다 — " +
+      "에이전트는 로그인 세션에 상주하고, SellerOps 화면이 loopback에서 이를 찾습니다. " +
+      "연결 승인 코드는 macOS 승인 대화상자가 표시하고, 승인은 SellerOps 제품 화면에서 진행합니다" +
+      "(에이전트 터미널의 코드를 읽지 않습니다). " +
+      "SellerOps 화면에서 안내를 시작하면 그때 전용 Chrome 창이 열립니다" +
+      "(에이전트가 켜져 있다는 이유만으로는 창이 열리지 않습니다). " +
       "(SellerOps는 클릭·입력·제출을 하지 않고, 페이지를 대신 이동하지도 않습니다). 안내는 WING 화면 위에 표시되며 " +
       "각 단계에서 멈춥니다: ① 오픈API 키 발급 페이지로 직접 이동 → ② 'API Key 발급 받기'(강조 표시됨)를 직접 누름 → " +
       "③ 사용 목적 화면에서 'OPEN API' 선택 확인(기본값이면 누를 것 없음) → ④ '확인'을 직접 누름 → ⑤ 약관 2개를 " +
@@ -1002,6 +1025,8 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
 const FRONTEND_URL_MARKERS: readonly string[] = ["http://", "https://", "/connect/naver", "?walkthroughRun="];
 /** Tokens that must never appear in a FRONTEND_URL phase's operator action — it must not describe a CLI. */
 const CLI_ONLY_MARKERS: readonly string[] = ["전용 Chrome", "dedicated window", "src/cli/", ".ts"];
+/** Both halves of the terminal-free pairing claim: where the code appears, and where it is confirmed. */
+const SERVICE_PAIRING_CHANNEL_MARKERS: readonly string[] = ["macOS 승인 대화상자", "제품 화면"];
 
 export type EntrypointContractResult = { ok: true } | { ok: false; cause: ApprovalPrereqCause; reason: string };
 
@@ -1022,6 +1047,21 @@ export function validateEntrypointContract(phase: EntrypointPhase, spec: Entrypo
     }
     if (spec.emitsFrontendUrl || FRONTEND_URL_MARKERS.some((m) => summary.includes(m))) {
       return { ok: false, cause: "FRONTEND_URL_IN_CLI_ENTRYPOINT", reason: `${phase} is CLI-launched — its operator action must carry no frontend URL` };
+    }
+  } else if (spec.entrypointType === "INSTALLED_LOCAL_AGENT_SERVICE") {
+    // A service-hosted phase names the INSTALL command (not the agent it installs) and, like a CLI phase,
+    // surfaces no bound frontend URL — the operator opens SellerOps normally, with no run token in the address.
+    if (!spec.cli || spec.cli !== canonical.cli) {
+      return { ok: false, cause: "ENTRYPOINT_CLI_MISMATCH", reason: `${phase} entrypoint cli must be exactly "${canonical.cli}"` };
+    }
+    if (spec.emitsFrontendUrl || FRONTEND_URL_MARKERS.some((m) => summary.includes(m))) {
+      return { ok: false, cause: "FRONTEND_URL_IN_CLI_ENTRYPOINT", reason: `${phase} installs a service — its operator action must carry no bound frontend URL` };
+    }
+    // The positive requirement, and the reason this type exists at all: the operator must be told that the
+    // pairing code comes from the OS approval dialog. Drop that sentence and the manifest silently reverts to
+    // promising a terminal-free run while describing nothing that makes it one.
+    if (!SERVICE_PAIRING_CHANNEL_MARKERS.every((m) => summary.includes(m))) {
+      return { ok: false, cause: "MISSING_SERVICE_PAIRING_CHANNEL", reason: `${phase} runs as an installed service — its operator action must state that the pairing code is shown by the macOS approval dialog and confirmed in the SellerOps UI` };
     }
   } else {
     // A frontend-URL phase must name NO CLI and must not describe a CLI-only action.
