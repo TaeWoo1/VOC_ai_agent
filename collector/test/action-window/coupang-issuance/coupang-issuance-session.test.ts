@@ -207,27 +207,23 @@ describe("coupang issuance session — the 발급 (issue) human checkpoint", () 
 });
 
 describe("coupang issuance session — TARGET RE-FIND after a navigation race", () => {
-  it("a checkpoint locate that throws PARKS recoverably, then a re-check re-guides IN PLACE and the walk completes", async () => {
+  it("a checkpoint locate that throws recovers IN PLACE by itself and the walk completes", async () => {
     // Model the wing_home→open_api race hitting the vendor_info locate: it throws once (execution-context-destroyed).
     // self_dev advances on its own WING-resident press and drives straight into the vendor_info guide, which races
     // and throws → recoverable page_mismatch park (no FE 다음 was needed to get here).
     const { io, engine, driver, session } = build({ locateThrows: { confirm_purpose: 1 } });
     startRun(io);
     await session.whenSettled();
-    expect(engine.currentStage()).toBe("page_mismatch");
+    // The park is entered AND cleared without anyone pressing anything: the session issues the recheck the
+    // frontend button would have sent, re-locates the SAME section in place, and the walk finishes.
     expect(io.blockers()).toContainEqual({ code: "UI_DRIFT", recoverable: true });
     expect(io.eventTypes()).not.toContain("RUN_FAILED");
-    expect(driver.calls).not.toContain("highlight:confirm_purpose"); // it threw before highlighting
-
-    const probesBefore = driver.calls.filter((c) => c === "probeSurface").length;
-    const locatesBefore = driver.calls.filter((c) => c === "locate:confirm_purpose").length;
-    // 다음: re-guide the SAME section IN PLACE (re-locate, never re-probe — the seller is on the issuance page),
-    // then advance the remaining checkpoints to completion.
-    await pressNextToComplete(io, engine, session);
     expect(engine.currentStage()).toBe("guidance_complete");
-    // vendor_info was re-located (target re-find) without any re-probe of the surface.
-    expect(driver.calls.filter((c) => c === "locate:confirm_purpose").length).toBeGreaterThan(locatesBefore);
-    expect(driver.calls.filter((c) => c === "probeSurface").length).toBe(probesBefore);
+    // Re-located (target re-find) — more than the one throwing attempt.
+    expect(driver.calls.filter((c) => c === "locate:confirm_purpose").length).toBeGreaterThan(1);
+    // …and the recovery added NO surface probe: exactly the two the walk always does (the opening read and
+    // the reach verification). The seller never left the issuance page, so re-reading it would be wasted work.
+    expect(driver.calls.filter((c) => c === "probeSurface").length).toBe(2);
   });
 
   it("settles the surface before EVERY locate (a guide never locates a still-navigating page)", async () => {
@@ -275,14 +271,15 @@ describe("coupang issuance session — recoverable parks each recover via REQUES
     expect(io.eventTypes()).not.toContain("RUN_FAILED");
   });
 
-  it("page_mismatch park (wrong reach landing) → re-check re-probes from the top", async () => {
+  it("a wrong reach landing WAITS and re-probes itself — no re-check from the SellerOps tab", async () => {
     const { io, engine, session } = build({ reachLanding: { ok: true, pageCategory: "unknown" } });
     startRun(io);
     await session.whenSettled();
-    expect(engine.currentStage()).toBe("page_mismatch");
-    expect(io.blockers()).toContainEqual({ code: "UI_DRIFT", recoverable: true });
+    // A wait, not a park: no blocker is raised, nothing asks the seller to do anything, and the run keeps
+    // re-reading WING until they get to the issuance page.
+    expect(engine.currentStage()).toBe("awaiting_wing_surface");
+    expect(io.blockers()).not.toContainEqual({ code: "UI_DRIFT", recoverable: true });
     expect(io.eventTypes()).not.toContain("RUN_FAILED");
-    expect(io.lastView()?.allowedCommands).toContain("REQUEST_STEP_RECHECK");
   });
 });
 

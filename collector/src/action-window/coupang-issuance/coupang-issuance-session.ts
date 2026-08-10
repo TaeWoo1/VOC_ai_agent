@@ -15,7 +15,7 @@ import type { AwClientFrame, AwServerTransport } from "../../../../contracts/act
 import { log } from "../../log";
 import type { CoupangIssuanceEffect, CoupangIssuanceEngine } from "./coupang-issuance-engine";
 import { COUPANG_TARGET_BARRIER_STAGE, type CoupangIssuanceProbeDriver, type CoupangIssuanceTarget } from "./coupang-issuance-driver";
-import { isCoupangIssuanceTerminal } from "./coupang-issuance-stages";
+import { isCoupangIssuancePark, isCoupangIssuanceTerminal } from "./coupang-issuance-stages";
 
 export interface CoupangIssuanceSessionOptions {
   /** Fires after every published transition — the persistence hook. */
@@ -37,6 +37,8 @@ export class CoupangIssuanceGuidanceSession {
   private readonly rearmDelayMs: number;
   private readonly surfaceWaitPollMs: number;
   private readonly surfaceWaitTimeoutMs: number;
+  /** At most ONE park-recovery loop at a time — several would each issue their own recheck. */
+  private recovering = false;
 
   private started = false;
   private publishedSeq = 0;
@@ -189,6 +191,7 @@ export class CoupangIssuanceGuidanceSession {
       }
       case "CLEAR_HIGHLIGHT": {
         await this.driver.clearHighlight();
+        this.maybeRecoverPark();
         return;
       }
       case "CLEANUP": {
@@ -197,8 +200,29 @@ export class CoupangIssuanceGuidanceSession {
       }
       case "NONE":
       default:
+        this.maybeRecoverPark();
         return;
     }
+  }
+
+  /**
+   * Start the park recovery loop if the run has settled into one, and only one loop at a time.
+   *
+   * Called where a drive chain ENDS, because that is where a park becomes visible: the effect that produced it
+   * has been applied and nothing else is going to move the run.
+   */
+  private maybeRecoverPark(): void {
+    if (this.recovering) return;
+    if (!isCoupangIssuancePark(this.engine.currentStage())) return;
+    if (this.engine.isPaused()) return;
+    this.recovering = true;
+    this.busyCount += 1;
+    void this.recoverPark()
+      .catch(() => undefined)
+      .finally(() => {
+        this.recovering = false;
+        this.busyCount -= 1;
+      });
   }
 
   /**
@@ -249,6 +273,36 @@ export class CoupangIssuanceGuidanceSession {
       await this.onDriveError(e);
     } finally {
       this.busyCount -= 1;
+    }
+  }
+
+  /**
+   * Recover a RECOVERABLE PARK by itself, inside WING.
+   *
+   * The remaining parks — a control that is not on the page yet, a page that moved between the locate and the
+   * highlight, a window that was closed and reopened — all cleared only on a `REQUEST_STEP_RECHECK`, which the
+   * seller can only send from the SellerOps tab. That is the tab this walk exists to keep them out of, so each
+   * of those parks was a silent instruction to go back.
+   *
+   * A recheck is what the frontend's button would have sent; issuing it here on a timer is the same recovery
+   * without the round trip. Bounded, and it stops the moment the run leaves the park (or the engine reports
+   * there is nothing to redo), so a genuinely stuck run does not spin forever.
+   *
+   * The button remains: this removes the NEED to press it, never the ability.
+   */
+  private async recoverPark(): Promise<void> {
+    const maxPolls = Math.max(1, Math.ceil(this.surfaceWaitTimeoutMs / Math.max(1, this.surfaceWaitPollMs)));
+    for (let i = 0; i < maxPolls; i++) {
+      await new Promise<void>((resolve) => setTimeout(resolve, this.surfaceWaitPollMs));
+      if (this.engine.isPaused() || isCoupangIssuanceTerminal(this.engine.currentStage())) return;
+      if (!isCoupangIssuancePark(this.engine.currentStage())) return;
+      const outcome = this.engine.command({ type: "REQUEST_STEP_RECHECK", expectedRevision: this.engine.view().revision });
+      if (!outcome.ok) return;
+      this.publishState();
+      if ("effect" in outcome && !isNoop(outcome.effect)) {
+        await this.drive(outcome.effect);
+        // The drive either recovered the run or parked it again; either way the loop's own check decides.
+      }
     }
   }
 

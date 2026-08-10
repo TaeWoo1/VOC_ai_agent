@@ -204,7 +204,7 @@ describe("coupang issuance engine — recoverable parks (never RUN_FAILED)", () 
     expect(eng2.view().blocker).toEqual({ code: "TARGET_NOT_FOUND", recoverable: true });
   });
 
-  it("parks on page_mismatch when the reach verification lands on a non-issuance page", () => {
+  it("WAITS when the reach verification lands somewhere that is not the issuance page yet", () => {
     const eng = engine();
     eng.command({ type: "START_RUN", expectedRevision: 0 });
     eng.onSurfaceProbed({ ok: true, pageCategory: "wing_home" });
@@ -212,7 +212,7 @@ describe("coupang issuance engine — recoverable parks (never RUN_FAILED)", () 
     eng.onTargetHighlighted("reach_open_api", { count: 1, sig: SIG.reach_open_api! });
     eng.onUserActionObserved("reach_open_api");
     eng.onReachVerified({ ok: true, pageCategory: "unknown" });
-    expect(eng.currentStage()).toBe("page_mismatch");
+    expect(eng.currentStage()).toBe("awaiting_wing_surface");
     expect(eng.events().map((e) => e.type)).not.toContain("RUN_FAILED");
   });
 });

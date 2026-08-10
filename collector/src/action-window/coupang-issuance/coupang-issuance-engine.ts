@@ -335,7 +335,11 @@ export class CoupangIssuanceEngine {
     if (isCoupangIssuanceTerminal(this.stage)) return "NONE";
     if (this.stage !== TARGET_BARRIER.reach_open_api || this.currentTarget !== "reach_open_api") return "NONE";
     if (!probe.ok || probe.blockerCode === "LOGIN_REQUIRED" || probe.pageCategory === "login") {
-      return this.park("waiting_login", "LOGIN_REQUIRED");
+      // A WAIT, exactly as on the probe path. This branch was left as a park when the other one was converted,
+      // and live on 2026-08-10 it swallowed a whole run: one login reading during the seller's navigation put
+      // the walk in a park that never looked again, so reaching the issuance page changed nothing.
+      this.waitingFor("waiting_login", "LOGIN_REQUIRED");
+      return "AWAIT_SURFACE";
     }
     if (probe.pageCategory === "open_api_issuance") {
       this.emit("USER_ACTION_OBSERVED", { stepId: this.stepId(), observed: true });
@@ -344,8 +348,9 @@ export class CoupangIssuanceEngine {
       this.currentTarget = "issue";
       return { guide: "issue" };
     }
-    // Wrong page / multiple transitions → recoverable park; a REQUEST_STEP_RECHECK re-probes from the top.
-    return this.park("page_mismatch", "UI_DRIFT");
+    // Still on the way (the home, an intermediate hop, a page mid-hydration) → keep watching. The seller is
+    // moving through WING; "not there yet" is not drift, and it must not need a command from the other tab.
+    return this.awaitSurface();
   }
 
   /** Where the run goes once a barrier's control has been acted on. */
