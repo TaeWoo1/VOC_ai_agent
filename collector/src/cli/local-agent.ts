@@ -47,6 +47,7 @@ import { IssuanceFixtureDriver } from "../action-window/api-issuance/issuance-fi
 import { CoupangIssuanceFixtureDriver } from "../action-window/coupang-issuance/coupang-issuance-fixture-driver";
 import { LazyCoupangIssuanceDriver } from "../action-window/coupang-issuance/lazy-coupang-issuance-driver";
 import { verifyRepoIdentity } from "./repo-identity";
+import { screenWingUrl } from "./coupang-wing-classifier";
 import { NaverLiveProbeDriver } from "../action-window/naver-live-driver";
 import { createNaverActionWindowImportDriver } from "../action-window/naver-acquisition-adapter";
 import { defaultImportRunDirFor } from "../action-window/initial-import/import-dispatch";
@@ -323,12 +324,43 @@ export function resolveCoupangIssuanceChannel(args: readonly string[], env: Node
  * on the product path the seller reaches WING themselves, and an agent that drives the page there has taken a
  * marketplace action nobody granted.
  */
+/**
+ * Where the guided walk's dedicated window LANDS — the seller's own WING sales-info page.
+ *
+ * Chosen by the product owner on 2026-08-10 because logging in there leaves the seller one step from the
+ * open-API issuance page, whereas a blank window left them to find WING on their own and guaranteed the run's
+ * first reading was `unknown`.
+ *
+ * A landing, not a route through the flow: the walk navigates here once, at open, and never again. Every
+ * screen after this one the seller reaches themselves.
+ */
+export const COUPANG_WING_GUIDED_WALK_LANDING_URL =
+  "https://wing.coupang.com/tenants/wing-account/vendor/salesinfo?isTARegion=false&currentPlatform=DESKTOP&currentLocale=ko";
+
 export function buildCoupangIssuanceLiveConfig(): AgentCoupangIssuanceConfig {
   const cfg = loadConfig();
   const driver = new LazyCoupangIssuanceDriver({
     open: async () => {
       const context = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
       const page = (context.pages()[0] ?? (await context.newPage())) as Page;
+      // ONE navigation, at OPEN, to the seller's own WING landing — and never again.
+      //
+      // The window used to come up BLANK, which made the seller's first task "find WING yourself" and made the
+      // run's first reading `unknown` by construction. Opening a seller's own seller center is not a
+      // marketplace action: nothing is clicked, typed, submitted or selected, and every step of the walk
+      // remains theirs. It is a NAVIGATION, so the walk's budget moves from zero to exactly this one and the
+      // manifest says so — `COUPANG_WING_GUIDED_WALK_AGENT_NAVIGATIONS`.
+      //
+      // Screened BEFORE it is used, fail-closed: an off-target or malformed landing opens nothing rather than
+      // sending the seller somewhere this run cannot vouch for. A navigation failure is swallowed — the seller
+      // can always reach WING themselves, and the observed wait picks them up when they do.
+      const screened = screenWingUrl(COUPANG_WING_GUIDED_WALK_LANDING_URL);
+      if (screened.ok) {
+        log("aw_coupang_walk_landing", { urlCategory: screened.urlCategory });
+        await page.goto(COUPANG_WING_GUIDED_WALK_LANDING_URL, { waitUntil: "domcontentloaded" }).catch(() => undefined);
+      } else {
+        log("aw_coupang_walk_landing_refused", { reason: screened.reason }, "warn");
+      }
       return { context, page };
     },
   });

@@ -135,8 +135,9 @@ describe("run-coupang-wing-issuance-live CLI — source guard (gated, no click/t
     // seller reaches WING; an agent that drives the page there has taken a marketplace action nobody granted,
     // and every read-only WING entrypoint already holds that line ("this recorder never `.goto`s").
     const codeOnly = code.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    // THIS CLI still navigates nothing — the one landing lives in the Local Agent's carrier, not here.
     expect(codeOnly.split(".goto(").length - 1).toBe(0);
-    expect(code).toContain("COUPANG_WING_GUIDED_WALK_AGENT_NAVIGATIONS = 0");
+    expect(code).toContain("COUPANG_WING_GUIDED_WALK_AGENT_NAVIGATIONS = 1");
   });
 
   it("is gated on the explicit Coupang WING live-run approval flag and fails closed on a bad URL before launch", () => {

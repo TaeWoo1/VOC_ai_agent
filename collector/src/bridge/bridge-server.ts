@@ -372,12 +372,18 @@ export class BridgeServer {
     if (!minted.ok) return this.refusePairingAtCapacity(res, minted);
     // Awaited: a native presenter drives an OS dialog asynchronously so the agent's event loop keeps serving
     // every other socket while the human reads the code.
+    // Timed. "The dialog did not come up" and "the dialog came up behind the browser" look identical to the
+    // person waiting, and they need opposite fixes — one is the presenter not being reached, the other is
+    // window ordering. Without a duration there is no way to tell them apart after the fact, which is exactly
+    // where the 2026-08-10 run left off. Sanitized: a coarse millisecond count and the outcome status.
+    const presentStartedAt = Date.now();
     const shown = await this.approvalPresenter.present({
       requestId: minted.requestId,
       origin: origin!,
       workspaceLabel,
       approvalCode: minted.approvalCode!,
     });
+    log("bridge_pair_presented", { status: shown.status, elapsedMs: Date.now() - presentStartedAt });
     if (shown.status === "declined") {
       // A human was reached and REFUSED. Discard immediately — an actively-refused request must not linger
       // until its TTL. Reported distinctly from `approval_unavailable` (no channel) so the frontend can say

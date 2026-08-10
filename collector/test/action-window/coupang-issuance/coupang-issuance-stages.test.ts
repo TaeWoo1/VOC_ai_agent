@@ -161,15 +161,17 @@ describe("the fence is LIFTED, and every clause of it was answered in code", () 
     expect(body.indexOf("verifyRepoIdentity")).toBeLessThan(body.indexOf("launchNaverContext"));
   });
 
-  it("**the agent navigates NOTHING** — the `page.goto` the fence named is gone", () => {
-    // The clause that mattered most on the product path: a seller reaches WING themselves, and an agent that
-    // drives the page there has taken a marketplace action nobody granted.
+  it("**the agent navigates ONCE, to the landing** — and the RUN CLI still navigates nothing", () => {
+    // The clause that mattered most on the product path: the seller reaches every SCREEN themselves, and an
+    // agent that drives the page through the flow has taken a marketplace action nobody granted. Opening the
+    // seller's own seller center so they do not start on a blank window is not that — but it IS a navigation,
+    // so the budget says one rather than the claim being softened to "no meaningful navigation".
     // Comment lines stripped first, per collector/CLAUDE.md §5: the docstring explaining that the goto is gone
     // says "page.goto", and prose has produced this exact false failure in this repo before.
     const codeOnly = SRC.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
     expect(codeOnly).not.toContain(".goto(");
     const cliNavBudget = SRC.match(/COUPANG_WING_GUIDED_WALK_AGENT_NAVIGATIONS = (\d+)/);
-    expect(cliNavBudget?.[1]).toBe("0");
+    expect(cliNavBudget?.[1]).toBe("1");
   });
 
   it("the URL is still SCREENED even though nothing navigates to it", () => {

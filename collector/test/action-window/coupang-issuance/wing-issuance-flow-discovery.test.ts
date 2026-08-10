@@ -934,7 +934,8 @@ describe("the guided-walk manifest is not the fallback", () => {
     const from = CLI.indexOf('isWingGuidedWalk\n    ? "operator-performed: the whole tutorial');
     const max = CLI.slice(from, CLI.indexOf("\n    : isWingReveal", from));
     expect(max).toContain("0 presses of the key-creating");
-    expect(max).toContain("0 navigations");
+    // ONE navigation now — the landing — and the budget must SAY so rather than keep claiming zero.
+    expect(max).toContain("1 navigation (the landing at window open, never again)");
     expect(max).toContain("2 highlights");
     // Three since the purpose screen became one step. The budget also has to state that the runtime advances
     // itself now — a budget listing only what the SELLER presses would understate what the agent does.
@@ -1058,7 +1059,7 @@ describe("the live guided-walk carrier is gated, and never downgrades silently",
     expect(block).not.toMatch(/liveWalkRefusal[^\n]*\?\s*buildCoupangIssuanceConfig/);
   });
 
-  it("the live carrier opens NO window at agent boot, and never navigates", () => {
+  it("the live carrier opens NO window at agent boot, and navigates EXACTLY ONCE — the landing", () => {
     const src = readFileSync(resolve(HERE, "../../../src/cli/local-agent.ts"), "utf8");
     const from = src.indexOf("export function buildCoupangIssuanceLiveConfig");
     const fn = src.slice(from, src.indexOf("\nexport function buildCoupangIssuanceConfig", from));
@@ -1066,7 +1067,14 @@ describe("the live guided-walk carrier is gated, and never downgrades silently",
     expect(fn).toContain("new LazyCoupangIssuanceDriver({");
     expect(fn).toContain("open: async () =>");
     const codeOnly = fn.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
-    expect(codeOnly).not.toContain(".goto(");
+    // ONE navigation, and it is the landing: opening the seller's own seller center so they are not dropped on
+    // a blank window. Every screen after it is one they reach. More than one goto here would be a route.
+    expect(codeOnly.split(".goto(").length - 1).toBe(1);
+    expect(codeOnly).toContain("COUPANG_WING_GUIDED_WALK_LANDING_URL");
+    // Screened BEFORE it is used — an off-target landing must open nothing, not send the seller somewhere the
+    // run cannot vouch for.
+    expect(codeOnly.indexOf("screenWingUrl")).toBeLessThan(codeOnly.indexOf(".goto("));
+    expect(codeOnly).toContain("if (screened.ok)");
     // ONE driver for the carrier's lifetime — a re-attach must reuse the seller's window, not open a second.
     expect(fn).toContain("createDriver: () => driver");
   });

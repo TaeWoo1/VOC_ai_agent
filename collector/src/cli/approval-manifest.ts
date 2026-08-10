@@ -284,7 +284,8 @@ export interface GuidedWalkBoundary {
   keyCreationRuledOut: false;
   /** The agent clicks, types, submits — and NAVIGATES — nothing. The last one is new to this entrypoint. */
   agentPerformsAction: false;
-  agentNavigations: 0;
+  /** ONE: the landing the window opens on. The walk never navigates again — every screen after it is the seller's. */
+  agentNavigations: 1;
   credentialValueReadBudget: 0;
   /** No connect-test, no sync, no upload: guidance finishing is not a connection. */
   performsConnectOrSync: false;
@@ -317,7 +318,7 @@ export const COUPANG_WING_GUIDED_WALK_BOUNDARY: GuidedWalkBoundary = {
   createsKeyMaterial: false,
   keyCreationRuledOut: false,
   agentPerformsAction: false,
-  agentNavigations: 0,
+  agentNavigations: 1,
   credentialValueReadBudget: 0,
   performsConnectOrSync: false,
   highlightedControlCount: 2,
@@ -981,6 +982,7 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
       "(에이전트 터미널의 코드를 읽지 않습니다). " +
       "SellerOps 화면에서 안내를 시작하면 그때 전용 Chrome 창이 열립니다" +
       "(에이전트가 켜져 있다는 이유만으로는 창이 열리지 않습니다). " +
+      "그 창은 셀러 본인의 WING 판매정보 페이지로 한 번만 이동해 열립니다(빈 창 대신). 이후 화면 이동은 전부 셀러가 직접 합니다. " +
       "안내는 WING 화면 위에 표시되고, 한 번 WING으로 넘어간 뒤에는 SellerOps 탭으로 돌아올 필요가 없습니다 " +
       "(SellerOps는 클릭·입력·제출을 하지 않고, 페이지를 대신 이동하지도 않습니다): " +
       "① 오픈API 키 발급 페이지로 직접 이동(도착하면 자동 진행) → ② 'API Key 발급 받기'(강조 표시됨)를 직접 누름" +
