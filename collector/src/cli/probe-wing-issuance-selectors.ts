@@ -150,6 +150,21 @@ export const WING_RECORD_TARGETS: readonly WingRecordTarget[] = [
  * turned out to be false. An expectation and an observation must not share a name; compare this against the
  * MEASURED `observedTag` on each record rather than trusting either alone.
  */
+/**
+ * The LABEL_RECON targets' expected roles, kept separate now that they name no shipped locator.
+ *
+ * `self_dev` / `vendor_info` / `call_ip` were retired from the record targets on 2026-08-10: the first names an
+ * option that is not on the purpose screen, and the other two name fields this flow never shows. The recon
+ * phase that swept them is therefore unreachable — its scope gate requires every approved target to be a recon
+ * target, and no record target is one any more. That is the correct outcome and it fails closed; the constants
+ * stay so the historical records that cite them keep resolving.
+ */
+export const WING_RECON_TARGET_EXPECTED_ROLE: Readonly<Record<WingReconTarget, string>> = {
+  self_dev: "option",
+  vendor_info: "field-label",
+  call_ip: "field-label",
+};
+
 export const WING_TARGET_EXPECTED_ROLE: Readonly<Record<WingRecordTarget, string>> = {
   self_dev: "option",
   vendor_info: "field-label",
@@ -1381,9 +1396,10 @@ function printDiscoveryCheckpoint(
     console.error("  ask you to press 확인.");
   } else if (checkpoint === "AFTER_OPERATOR_CONFIRM") {
     console.error(`${step} — the reading permits one more step: press 확인 YOURSELF, then STOP.`);
-    console.error("  The measurement said the vendor form is not on screen yet, so this 확인 advances the flow");
-    console.error("  rather than submitting it. Press it, let the next screen settle, and signal — then STOP and");
-    console.error("  type NOTHING into whatever appears.");
+    console.error("  What the reading established is NARROW: 업체명 / URL / IP are not on this screen, so 확인 is");
+    console.error("  not submitting them. WHAT IT DOES is what this checkpoint measures — do not take the");
+    console.error("  instruction as a claim that it advances the flow. Press it, let whatever follows settle,");
+    console.error("  signal, and then STOP and type NOTHING into it.");
   } else {
     console.error(`${step} — the TERMS screen. Tick the two consent boxes YOURSELF, then STOP.`);
     console.error("  ⚠ DO NOT press '약관 동의 및 Key 발급받기'. That button CREATES THE KEY, and it is the last");
@@ -1600,6 +1616,10 @@ async function main(): Promise<void> {
             checkpointsTaken: flow.readings.map((r) => r.checkpoint),
             readings: flow.readings.map((r) => ({
               checkpoint: r.checkpoint,
+              // The MEASURED screen, on the reading itself. It was only in the top-level `screensSeen` array, so
+              // reading it meant zipping two lists by position — and a checkpoint's name is exactly the thing
+              // that must not stand in for what was measured.
+              screen: r.screen,
               observation: r.observation,
               observationFault: r.observationFault,
               stage2: stage2RecordFor(r.stage2),

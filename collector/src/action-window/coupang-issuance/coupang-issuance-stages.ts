@@ -8,37 +8,48 @@
  *
  * **What a Coupang issuance run is, and how it differs from NAVER's:**
  *
- *  - **It touches nothing.** The seller logs in to WING, reaches the open-API issuance page, selects 자체개발,
- *    confirms 업체명, sets the 호출 IP, presses 발급 to issue the key themselves, and copies the Access Key /
- *    Secret Key / 업체코드 into SellerOps's own masked form — every real step theirs. The runtime observes a
- *    sanitized PAGE CATEGORY, highlights the one control to press next, watches the seller's own click, and
- *    advances. It never logs in, clicks, types, submits, issues a key, or reads any credential VALUE. So, like
- *    NAVER's, it reaches the ordinary `COMPLETED` terminal — where "completed" means the GUIDANCE finished, not
- *    that a credential was stored.
- *  - **It is LINEAR — no branch.** Unlike NAVER's existing-vs-new-app fork, the Coupang walk is a fixed 7-step
- *    line: reach the open-API page → 자체개발 → 업체명 → 호출 IP → 발급 checkpoint → copy the keys → return.
- *  - **`발급` (issue) is an explicit HUMAN CHECKPOINT.** The runtime highlights the 발급 button and RESTS; the
- *    seller presses it themselves. The runtime never clicks it and the step never auto-advances.
+ *  - **It touches nothing.** The seller logs in to WING and performs every real step themselves: 발급, the
+ *    purpose option, 확인, the two consent boxes, the key-creating button, and copying the credential into
+ *    SellerOps's own masked form. The runtime observes a sanitized PAGE CATEGORY, highlights the one control to
+ *    press next, watches the seller's own click, and advances. It never logs in, clicks, types, submits, issues
+ *    a key, or reads any credential VALUE. It reaches the ordinary `COMPLETED` terminal — where "completed"
+ *    means the GUIDANCE finished, not that a credential was stored.
+ *  - **It is LINEAR — no branch.** A fixed 8-step line.
  *
- * ⚠ **THIS PLAN IS CONTRADICTED BY LIVE EVIDENCE (2026-08-08) AND IS NOT SAFE TO RUN.** Two claims above are
- * false against the real WING no-key surface:
+ * **THE FLOW, MEASURED (2026-08-10, five granted READ_ONLY runs). This replaces a plan that was wrong in three
+ * places and fail-open in one.** See `docs/coupang_wing_openapi_issuance_flow_discovery_v1.md`.
  *
- *   1. *"자체개발 / 업체명 / 호출 IP … are SECTIONS on the one page"* — they are not. Read-only candidate sweeps on
- *      the real no-key open-API surface matched **0 for `자체개발` and `호출 IP` in every spelling tried**, and
- *      `업체명` never resolved uniquely (8 / 4 / 0 across structural queries). `발급` and `Access Key` each
- *      matched exactly 1 on the same page. The form fields are on a LATER screen.
- *   2. *"the seller presses 발급 to issue the key"* — on the official Coupang flow 발급 opens the 연동 방식 /
- *      configuration step, and the key is created by a later `확인`. This plan therefore advances from
- *      `checkpoint_before_issue` straight to `guiding_copy_keys`, i.e. past a barrier nobody crossed, and tells
- *      the seller to copy keys that do not exist yet. That is fail-open on the one step that mutates
- *      marketplace state.
+ * ```
+ * open-API page  →  발급  →  PURPOSE screen  →  확인  →  TERMS screen  →  약관 동의 및 Key 발급받기  →  keys
+ *                            OPEN API (default)          2 consent boxes        ↑ THIS creates the key
+ * ```
  *
- * The plan is deliberately left BYTE-UNCHANGED for now: its 7 stage identifiers are a product requirement the
- * frontend keys tutorial copy off, and the correct ordering cannot be written without observing the Stage-2
- * screen. `COUPANG_WING_ISSUANCE_FORM_REVEAL` (`coupang-wing-reveal-driver.ts`) exists to observe it under its
- * own grant, with 발급 modelled as `REVEAL_WING_ISSUANCE_CONFIGURATION` rather than as key creation. Restructure
- * this plan only from that live evidence — never from the prose above. See
- * `docs/coupang_wing_issuance_form_reveal_v1.md`.
+ * What the old plan got wrong, each corrected from a measurement rather than from prose:
+ *
+ *   1. **`자체개발` is not on the screen.** The purpose screen offers `OPEN API` and `플레이오토 웹 솔루션`, both
+ *      measured by exact accessible-name match, and `OPEN API` is the DEFAULT selection. The stage is renamed
+ *      `guiding_purpose_option`, because a stage called `self_dev` for a screen with no 자체개발 on it is the
+ *      name-versus-meaning drift this workstream keeps having to unpick.
+ *   2. **`업체명` / `호출 IP` have no screen in this flow.** Their labels match hidden nodes only, on every
+ *      reading of every screen across five runs — they exist in the DOM and are never shown. `guiding_vendor_info`
+ *      and `guiding_call_ip` are REMOVED: a stage that parks the seller in front of fields that do not exist
+ *      cannot be completed, and the tutorial would deadlock there.
+ *   3. **발급 does not create the key, and neither does 확인.** 발급 opens the purpose screen; 확인 opens the
+ *      terms screen (measured cleanly: two readings with nothing pressed stayed on PURPOSE, and one 확인 press
+ *      moved to TERMS). The key is created by `약관 동의 및 Key 발급받기` on the terms screen — a control the old
+ *      plan had no stage for at all, which is how it advanced from `checkpoint_before_issue` straight to
+ *      `guiding_copy_keys` and told the seller to copy keys that did not exist yet.
+ *
+ * **`checkpoint_before_issue` keeps its name and finally means it.** It is the barrier in front of
+ * `약관 동의 및 Key 발급받기` — {@link WING_KEY_CREATION_CONTROL_ID} — the one control in this flow that mutates
+ * marketplace state. The runtime highlights it and RESTS; the seller presses it; nothing auto-advances.
+ *
+ * **Two consents, never bundled.** The terms screen's checkboxes carry NO accessible name — `nameSource: NONE`,
+ * no `label[for]`, no wrapping label — and neither consent sentence is unique on the page. Their pairing with
+ * the two sentences is a MEASURED structural one (each box's immediate parent holds exactly one sentence and
+ * exactly one box), not an accessible association. The tutorial may point at each block; it may not claim the
+ * label is wired to the input, and it never ticks, reads, evaluates, or agrees to anything on the seller's
+ * behalf.
  *  - **Its parks recover by re-probing / re-guiding.** A login gate, a control it cannot find, or a page it did
  *    not expect all PARK recoverably; a `REQUEST_STEP_RECHECK` re-reads the page from the top (or re-guides a
  *    same-page checkpoint in place). None of them is a failure.
@@ -65,22 +76,39 @@ export type CoupangIssuanceStage =
    * starts on the WING home; a seller already on the issuance page skips it (step 1 auto-completes).
    */
   | "reaching_open_api"
-  /** Seller barrier (checkpoint): they select the 자체개발 (self-developed) option. */
-  | "guiding_self_dev"
-  /** Seller barrier (checkpoint): they confirm the 업체명 (vendor name / business info). */
-  | "guiding_vendor_info"
-  /** Seller barrier (checkpoint): they set the 호출 IP (call IP allow-list). */
-  | "guiding_call_ip"
   /**
-   * Seller CHECKPOINT: the 발급 (issue) button is highlighted and the run RESTS. The seller presses 발급
-   * themselves — the runtime never clicks it, and this never auto-advances. An explicit human checkpoint; the
-   * seller advances with SellerOps's own "다음".
+   * Seller CHECKPOINT: the `API Key 발급 받기` control is highlighted and the run RESTS. The seller presses it
+   * themselves. MEASURED: this press opens the purpose screen. It does NOT create a key — the old plan's
+   * central error — and reaching this stage is not evidence that one exists.
+   */
+  | "checkpoint_reveal_issuance_form"
+  /**
+   * Seller barrier (checkpoint): the purpose screen. MEASURED: two radios, `OPEN API` and `플레이오토 웹 솔루션`,
+   * and `OPEN API` is already the DEFAULT — so for the SellerOps flow this step usually needs no click at all
+   * and the tutorial says so. Renamed from `guiding_self_dev`: 자체개발 is not on this screen.
+   */
+  | "guiding_purpose_option"
+  /**
+   * Seller CHECKPOINT: they press `확인`. MEASURED 2026-08-10 in isolation — two readings with nothing pressed
+   * stayed on the purpose screen, and one 확인 press moved to the terms screen. It creates no key.
+   */
+  | "checkpoint_confirm_purpose"
+  /**
+   * Seller barrier (checkpoint): the TERMS screen's two consent boxes. The seller reads the terms and decides;
+   * SellerOps does not read, evaluate, agree to, or advise on them, and never ticks a box or reads `checked`.
+   */
+  | "guiding_terms_consent"
+  /**
+   * **Seller CHECKPOINT — THE KEY-CREATION BOUNDARY.** `약관 동의 및 Key 발급받기` is highlighted and the run
+   * RESTS. The seller presses it themselves; the runtime never clicks it and this never auto-advances.
    *
-   * ⚠ **The stage NAME is fine; the old claim that this press "issues the key" was WRONG.** On the official
-   * Coupang flow 발급 opens the configuration step and the key is created by a later `확인` — so this stage is
-   * genuinely *before* issuance, but the stage that follows it here (`guiding_copy_keys`) does not exist yet at
-   * that point. Do not treat reaching this stage as evidence that a key was created; the runtime cannot tell
-   * either way (`wingIssuedStateFrom` ⇒ `NO_DISCRIMINATING_SIGNAL`).
+   * The stage kept its name through two corrections and now finally means it: this is the barrier in front of
+   * the one control in the flow that mutates marketplace state. MEASURED: that control is unique among painting
+   * elements under a `button,a` query, while sharing its exact text with the screen's heading — so it cannot be
+   * located by text alone, and the tutorial must not try.
+   *
+   * Passing it is still not proof a key was created: the runtime reads no credential value and
+   * `wingIssuedStateFrom` remains `NO_DISCRIMINATING_SIGNAL` on this surface.
    */
   | "checkpoint_before_issue"
   /** Seller barrier (checkpoint): they read + COPY the Access Key / Secret Key / 업체코드 (their highlighted
@@ -102,9 +130,10 @@ export const COUPANG_ISSUANCE_TERMINAL_STAGES: readonly CoupangIssuanceStage[] =
 /** The seller-barrier stages — the run rests on the seller until the driver observes their own click / "다음". */
 export const COUPANG_ISSUANCE_BARRIER_STAGES: readonly CoupangIssuanceStage[] = [
   "reaching_open_api",
-  "guiding_self_dev",
-  "guiding_vendor_info",
-  "guiding_call_ip",
+  "checkpoint_reveal_issuance_form",
+  "guiding_purpose_option",
+  "checkpoint_confirm_purpose",
+  "guiding_terms_consent",
   "checkpoint_before_issue",
   "guiding_copy_keys",
   "return_to_sellerops",
@@ -139,25 +168,40 @@ export interface CoupangIssuanceStepMeta {
 export const COUPANG_ISSUANCE_RUN_COPY_KEY = "actionWindow.coupangIssuance.run";
 
 /**
- * The step plan. Exactly SEVEN steps — a fixed line (no branch), so `totalSteps` is stable from the frontend's
- * first view onward. Step 1 (reach the open-API page) is AUTOMATIC_OPERATION and carries no highlighted control
- * (its reach_open_api transition-observe uses text guidance, not a DOM control). Step 5 (issue) is the human
- * checkpoint: the runtime highlights the 발급 button and the seller presses it themselves.
+ * The step plan. Exactly EIGHT steps — a fixed line (no branch), so `totalSteps` is stable from the frontend's
+ * first view onward. Step 1 is AUTOMATIC_OPERATION and carries no highlighted control (its transition-observe
+ * uses text guidance, not a DOM control). Every other step is a control the SELLER operates.
+ *
+ * **The order is the measured order**, which the previous seven-step plan was not: it put 발급 fifth, after two
+ * steps for fields this flow never shows, and had no step at all for the control that creates the key.
+ *
+ * **Step 6 is the key-creation boundary.** It is the last step SellerOps can guide without a credential
+ * existing, and the runtime rests there.
  */
 export function coupangIssuanceStepPlan(): readonly CoupangIssuanceStepMeta[] {
   return [
     { stepNumber: 1, stepId: "aw.coupang_issuance_reach_open_api", copyKey: "actionWindow.coupangIssuance.reachOpenApi", mode: "AUTOMATIC_OPERATION" },
-    { stepNumber: 2, stepId: "aw.coupang_issuance_self_dev", copyKey: "actionWindow.coupangIssuance.selfDev", mode: "ACTION_WINDOW", copyParams: { targetKind: "self_dev" } },
-    { stepNumber: 3, stepId: "aw.coupang_issuance_vendor_info", copyKey: "actionWindow.coupangIssuance.vendorInfo", mode: "ACTION_WINDOW", copyParams: { targetKind: "vendor_info" } },
-    { stepNumber: 4, stepId: "aw.coupang_issuance_call_ip", copyKey: "actionWindow.coupangIssuance.callIp", mode: "ACTION_WINDOW", copyParams: { targetKind: "call_ip" } },
-    { stepNumber: 5, stepId: "aw.coupang_issuance_issue_checkpoint", copyKey: "actionWindow.coupangIssuance.issueCheckpoint", mode: "ACTION_WINDOW", copyParams: { targetKind: "issue" } },
-    { stepNumber: 6, stepId: "aw.coupang_issuance_copy_keys", copyKey: "actionWindow.coupangIssuance.copyKeys", mode: "ACTION_WINDOW", copyParams: { targetKind: "credentials" } },
-    { stepNumber: 7, stepId: "aw.coupang_issuance_return", copyKey: "actionWindow.coupangIssuance.return", mode: "ACTION_WINDOW", copyParams: { targetKind: "return" } },
+    { stepNumber: 2, stepId: "aw.coupang_issuance_reveal_form", copyKey: "actionWindow.coupangIssuance.revealForm", mode: "ACTION_WINDOW", copyParams: { targetKind: "issue" } },
+    { stepNumber: 3, stepId: "aw.coupang_issuance_purpose_option", copyKey: "actionWindow.coupangIssuance.purposeOption", mode: "ACTION_WINDOW", copyParams: { targetKind: "purpose_option" } },
+    { stepNumber: 4, stepId: "aw.coupang_issuance_confirm_purpose", copyKey: "actionWindow.coupangIssuance.confirmPurpose", mode: "ACTION_WINDOW", copyParams: { targetKind: "confirm_purpose" } },
+    { stepNumber: 5, stepId: "aw.coupang_issuance_terms_consent", copyKey: "actionWindow.coupangIssuance.termsConsent", mode: "ACTION_WINDOW", copyParams: { targetKind: "terms_consent" } },
+    { stepNumber: 6, stepId: "aw.coupang_issuance_issue_checkpoint", copyKey: "actionWindow.coupangIssuance.issueCheckpoint", mode: "ACTION_WINDOW", copyParams: { targetKind: "issue_final" } },
+    { stepNumber: 7, stepId: "aw.coupang_issuance_copy_keys", copyKey: "actionWindow.coupangIssuance.copyKeys", mode: "ACTION_WINDOW", copyParams: { targetKind: "credentials" } },
+    { stepNumber: 8, stepId: "aw.coupang_issuance_return", copyKey: "actionWindow.coupangIssuance.return", mode: "ACTION_WINDOW", copyParams: { targetKind: "return" } },
   ];
 }
 
-/** The fixed total — seven. */
+/** The fixed total — eight. */
 export const COUPANG_ISSUANCE_TOTAL_STEPS = coupangIssuanceStepPlan().length;
+
+/**
+ * **The step at which the seller creates the key**, named once so no layer has to count.
+ *
+ * Everything before it is reversible: the seller can cancel out of the purpose or terms screen and nothing has
+ * happened. From this step on, a credential may exist on the marketplace. Any future automation, retry, or
+ * "resume from step N" has to treat this number as a wall.
+ */
+export const COUPANG_ISSUANCE_KEY_CREATION_STEP = 6;
 
 /** Step metadata at a 1-based index, clamped so a park/terminal view never reads past the plan. */
 export function coupangIssuanceStepMetaAt(plan: readonly CoupangIssuanceStepMeta[], stepNumber: number): CoupangIssuanceStepMeta {
@@ -177,9 +221,10 @@ export function coupangIssuanceStageToRunStatus(stage: CoupangIssuanceStage): Ru
       return "RUNNING";
     case "waiting_login":
     case "reaching_open_api":
-    case "guiding_self_dev":
-    case "guiding_vendor_info":
-    case "guiding_call_ip":
+    case "checkpoint_reveal_issuance_form":
+    case "guiding_purpose_option":
+    case "checkpoint_confirm_purpose":
+    case "guiding_terms_consent":
     case "checkpoint_before_issue":
     case "guiding_copy_keys":
     case "return_to_sellerops":
@@ -201,9 +246,10 @@ export function coupangIssuanceStageToStepStatus(stage: CoupangIssuanceStage): S
       return "OBSERVING";
     case "waiting_login":
     case "reaching_open_api":
-    case "guiding_self_dev":
-    case "guiding_vendor_info":
-    case "guiding_call_ip":
+    case "checkpoint_reveal_issuance_form":
+    case "guiding_purpose_option":
+    case "checkpoint_confirm_purpose":
+    case "guiding_terms_consent":
     case "checkpoint_before_issue":
     case "guiding_copy_keys":
     case "return_to_sellerops":

@@ -305,7 +305,7 @@ describe("Coupang issuance carrier over the real Bridge WS (dev-host boot wiring
   it("reattaches a refreshed/reconnected client to the SAME run — never a duplicate run, never a splice", async () => {
     // Hold the walk at the 호출 IP checkpoint (suppress its WING-resident press) so there is a stable mid-run state
     // to reattach to — otherwise the walk would auto-complete before the tab could refresh.
-    const handle = await bootCoupangBridge({ action: { call_ip: false } });
+    const handle = await bootCoupangBridge({ action: { terms_consent: false } });
     const session = handle.bridge.coupangIssuanceSession!;
     const { client, token, runId } = await openClient(handle);
     await waitFor(() => client.announcement);
@@ -339,7 +339,7 @@ describe("Coupang issuance carrier over the real Bridge WS (dev-host boot wiring
   it("a replayed START_RUN is idempotent — the same run, no revision jump, no second run", async () => {
     // Hold the walk at the first checkpoint (자체개발) so the run rests at a stable revision the duplicate
     // START_RUN can be checked against (otherwise it would auto-complete before the replay).
-    const handle = await bootCoupangBridge({ action: { self_dev: false } });
+    const handle = await bootCoupangBridge({ action: { purpose_option: false } });
     const session = handle.bridge.coupangIssuanceSession!;
     const { client, runId } = await openClient(handle);
     await waitFor(() => client.announcement);

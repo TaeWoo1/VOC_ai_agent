@@ -69,6 +69,14 @@ import { isCoupangCheckpointTarget } from "./coupang-issuance/coupang-issuance-d
 import type { LocateResult } from "./engine";
 
 /** The highlightable fixed-label targets (everything except the guidance-only `reach_open_api` / `return`). */
+/**
+ * The fixed-label targets the driver knows how to locate. Its own vocabulary, deliberately NOT the tutorial's:
+ * the guided walk stopped guiding `self_dev` / `vendor_info` / `call_ip` on 2026-08-10 (no such option, and no
+ * such screen), but the read-only selector probe may still be pointed at their labels, and the historical
+ * records cite them.
+ *
+ * What the tutorial can actually highlight is narrower still — see {@link isWingHighlightTarget}.
+ */
 export type WingHighlightTarget = "self_dev" | "vendor_info" | "call_ip" | "issue" | "credentials";
 
 /**
@@ -84,6 +92,8 @@ export type WingHighlightTarget = "self_dev" | "vendor_info" | "call_ip" | "issu
 export const WING_HIGHLIGHT_CALIBRATION = LIVE_DOM_CALIBRATION_PENDING;
 
 export const WING_HIGHLIGHT_LABELS: Readonly<Record<WingHighlightTarget, { candidateQuery: string; exactText: string; tagAncestor?: string }>> = {
+  // RETIRED FROM THE TUTORIAL 2026-08-10 — kept for the read-only probe and the records that cite them. The
+  // purpose screen offers no 자체개발, and 업체명 / 호출 IP are never shown in this flow.
   self_dev: { candidateQuery: "label,button,span,div,a,legend", exactText: "자체개발" },
   vendor_info: { candidateQuery: "label,span,div,dt,th,strong", exactText: "업체명" },
   call_ip: { candidateQuery: "label,span,div,dt,th,strong", exactText: "호출 IP" },
@@ -101,8 +111,11 @@ export const WING_HIGHLIGHT_LABELS: Readonly<Record<WingHighlightTarget, { candi
   credentials: { candidateQuery: "label,span,div,dt,th,strong", exactText: "Access Key", tagAncestor: "tr" },
 };
 
-function isWingHighlightTarget(target: CoupangIssuanceTarget): target is WingHighlightTarget {
-  return target === "self_dev" || target === "vendor_info" || target === "call_ip" || target === "issue" || target === "credentials";
+function isWingHighlightTarget(target: CoupangIssuanceTarget): target is "issue" | "credentials" {
+  // ONLY the two controls with a live-calibrated locator. The purpose radios, 확인, the consent boxes and the
+  // key-creating button are all MEASURED but NOT promoted, so the driver cannot highlight them and fails closed
+  // if asked — which is the tutorial's job to respect, not to work around.
+  return target === "issue" || target === "credentials";
 }
 
 /**
@@ -552,10 +565,12 @@ function advanceToken(target: CoupangIssuanceTarget): string {
  * driver still presses nothing and reads no value.
  */
 const ADVANCE_BUTTON_LABEL: Readonly<Partial<Record<CoupangIssuanceTarget, string>>> = {
-  self_dev: "다음",
-  vendor_info: "다음",
-  call_ip: "다음",
-  issue: "발급 완료 · 다음",
+  issue: "발급 화면이 열렸어요 · 다음",
+  purpose_option: "다음",
+  confirm_purpose: "확인을 눌렀어요 · 다음",
+  terms_consent: "동의했어요 · 다음",
+  // The key-creation step. Its caption confirms the seller's own act AFTER the fact; nothing here presses it.
+  issue_final: "발급을 눌렀어요 · 다음",
   credentials: "복사했어요 · 다음",
   // The return step hands focus back to SellerOps; the SellerOps tab then owns the "enter keys" CTA, so this
   // on-page button is purely "go back" (avoids two near-identical "enter keys" buttons across the two windows).
@@ -579,12 +594,13 @@ function isVerifyResolved(category: WingPageCategory): boolean {
 /** The overlay step number per barrier (dev diagnostic badge only — cosmetic, mirrors the engine's plan). */
 const OVERLAY_STEP: Readonly<Record<CoupangIssuanceTarget, number>> = {
   reach_open_api: 1,
-  self_dev: 2,
-  vendor_info: 3,
-  call_ip: 4,
-  issue: 5,
-  credentials: 6,
-  return: 7,
+  issue: 2,
+  purpose_option: 3,
+  confirm_purpose: 4,
+  terms_consent: 5,
+  issue_final: 6,
+  credentials: 7,
+  return: 8,
 };
 
 /**
@@ -596,10 +612,11 @@ const OVERLAY_STEP: Readonly<Record<CoupangIssuanceTarget, number>> = {
  */
 const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string>> = {
   reach_open_api: "WING 홈에서 '오픈API 키 발급' 페이지로 직접 이동하세요. 이동을 감지하면 자동으로 다음 단계로 넘어갑니다.",
-  self_dev: "표시된 '자체개발' 옵션을 직접 선택하세요. 완료하면 아래 '다음'을 누르세요.",
-  vendor_info: "표시된 '업체명' 정보를 확인하세요. 완료하면 아래 '다음'을 누르세요.",
-  call_ip: "표시된 '호출 IP' 위치에 직접 입력하세요. 완료하면 아래 '다음'을 누르세요.",
-  issue: "표시된 '발급' 버튼을 직접 누르세요. SellerOps는 대신 누르지 않습니다. 발급이 끝나면 아래 버튼을 누르세요.",
+  issue: "표시된 'API Key 발급 받기' 버튼을 직접 누르세요. SellerOps는 대신 누르지 않습니다. 이 버튼은 키를 만들지 않고 사용 목적 선택 화면을 엽니다. 화면이 열리면 아래 버튼을 누르세요.",
+  purpose_option: "사용 목적 화면에서 'OPEN API'가 선택되어 있는지 확인하세요. 보통 기본값이라 아무것도 누르지 않아도 됩니다. 확인했으면 아래 '다음'을 누르세요.",
+  confirm_purpose: "'확인'을 직접 누르세요. 이 버튼도 키를 만들지 않고 약관 동의 화면을 엽니다. 화면이 열리면 아래 버튼을 누르세요.",
+  terms_consent: "약관 내용을 직접 읽고 판단하신 뒤, 동의 체크박스 2개를 직접 선택하세요. SellerOps는 약관을 읽거나 대신 동의하지 않고, 체크 여부도 확인하지 않습니다. 완료하면 아래 버튼을 누르세요.",
+  issue_final: "⚠ 여기서 실제로 키가 생성됩니다. '약관 동의 및 Key 발급받기' 버튼을 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않습니다. 발급이 끝나면 아래 버튼을 누르세요.",
   credentials: "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요. SellerOps는 값을 읽지 않습니다. 복사했으면 아래 버튼을 누르세요.",
   return: "이제 아래 버튼을 눌러 SellerOps로 돌아가세요. 돌아가면 복사한 키를 입력해 연결을 마칠 수 있어요.",
 };

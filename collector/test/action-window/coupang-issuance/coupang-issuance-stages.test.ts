@@ -9,6 +9,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   COUPANG_ISSUANCE_TOTAL_STEPS,
+  COUPANG_ISSUANCE_KEY_CREATION_STEP,
   coupangIssuanceAllowedCommands,
   coupangIssuanceStageToRunStatus,
   coupangIssuanceStageToStepStatus,
@@ -22,9 +23,9 @@ const ALL_STAGES: CoupangIssuanceStage[] = [
   "waiting_login",
   "locating_open_api",
   "reaching_open_api",
-  "guiding_self_dev",
-  "guiding_vendor_info",
-  "guiding_call_ip",
+  "guiding_purpose_option",
+  "checkpoint_confirm_purpose",
+  "guiding_terms_consent",
   "checkpoint_before_issue",
   "guiding_copy_keys",
   "return_to_sellerops",
@@ -40,9 +41,10 @@ describe("coupang issuance stages — run-status projection", () => {
     waiting_login: "WAITING_FOR_HUMAN",
     locating_open_api: "RUNNING",
     reaching_open_api: "WAITING_FOR_HUMAN",
-    guiding_self_dev: "WAITING_FOR_HUMAN",
-    guiding_vendor_info: "WAITING_FOR_HUMAN",
-    guiding_call_ip: "WAITING_FOR_HUMAN",
+    checkpoint_reveal_issuance_form: "WAITING_FOR_HUMAN",
+    guiding_purpose_option: "WAITING_FOR_HUMAN",
+    checkpoint_confirm_purpose: "WAITING_FOR_HUMAN",
+    guiding_terms_consent: "WAITING_FOR_HUMAN",
     checkpoint_before_issue: "WAITING_FOR_HUMAN",
     guiding_copy_keys: "WAITING_FOR_HUMAN",
     return_to_sellerops: "WAITING_FOR_HUMAN",
@@ -62,9 +64,10 @@ describe("coupang issuance stages — step-status projection", () => {
     waiting_login: "AWAITING_USER",
     locating_open_api: "OBSERVING",
     reaching_open_api: "AWAITING_USER",
-    guiding_self_dev: "AWAITING_USER",
-    guiding_vendor_info: "AWAITING_USER",
-    guiding_call_ip: "AWAITING_USER",
+    checkpoint_reveal_issuance_form: "AWAITING_USER",
+    guiding_purpose_option: "AWAITING_USER",
+    checkpoint_confirm_purpose: "AWAITING_USER",
+    guiding_terms_consent: "AWAITING_USER",
     checkpoint_before_issue: "AWAITING_USER",
     guiding_copy_keys: "AWAITING_USER",
     return_to_sellerops: "AWAITING_USER",
@@ -99,9 +102,9 @@ describe("coupang issuance stages — allowed commands", () => {
   it("guiding barriers offer recheck + PAUSE + cancel + manual, and NEVER a click/submit/read command", () => {
     for (const stage of [
       "reaching_open_api",
-      "guiding_self_dev",
-      "guiding_vendor_info",
-      "guiding_call_ip",
+      "guiding_purpose_option",
+      "checkpoint_confirm_purpose",
+      "guiding_terms_consent",
       "checkpoint_before_issue",
       "guiding_copy_keys",
       "return_to_sellerops",
@@ -152,18 +155,21 @@ describe("the guided walk is FENCED OFF in code, not only in comments", () => {
   });
 });
 
-describe("coupang issuance stages — the fixed 7-step plan", () => {
-  it("is always seven steps (a fixed linear line, no branch)", () => {
-    expect(COUPANG_ISSUANCE_TOTAL_STEPS).toBe(7);
-    expect(coupangIssuanceStepPlan()).toHaveLength(7);
+describe("coupang issuance stages — the fixed 8-step plan, in the MEASURED order", () => {
+  it("is always eight steps (a fixed linear line, no branch)", () => {
+    // Seven until 2026-08-10. The old plan had two steps for screens this flow never shows and none at all for
+    // the control that creates the key — so it was both too long and too short, in the same line.
+    expect(COUPANG_ISSUANCE_TOTAL_STEPS).toBe(8);
+    expect(coupangIssuanceStepPlan()).toHaveLength(8);
   });
 
-  it("uses the exact product-required stepIds", () => {
+  it("uses the exact product-required stepIds, in flow order", () => {
     expect(coupangIssuanceStepPlan().map((s) => s.stepId)).toEqual([
       "aw.coupang_issuance_reach_open_api",
-      "aw.coupang_issuance_self_dev",
-      "aw.coupang_issuance_vendor_info",
-      "aw.coupang_issuance_call_ip",
+      "aw.coupang_issuance_reveal_form",
+      "aw.coupang_issuance_purpose_option",
+      "aw.coupang_issuance_confirm_purpose",
+      "aw.coupang_issuance_terms_consent",
       "aw.coupang_issuance_issue_checkpoint",
       "aw.coupang_issuance_copy_keys",
       "aw.coupang_issuance_return",
@@ -173,9 +179,10 @@ describe("coupang issuance stages — the fixed 7-step plan", () => {
   it("uses the exact product-required copy keys", () => {
     expect(coupangIssuanceStepPlan().map((s) => s.copyKey)).toEqual([
       "actionWindow.coupangIssuance.reachOpenApi",
-      "actionWindow.coupangIssuance.selfDev",
-      "actionWindow.coupangIssuance.vendorInfo",
-      "actionWindow.coupangIssuance.callIp",
+      "actionWindow.coupangIssuance.revealForm",
+      "actionWindow.coupangIssuance.purposeOption",
+      "actionWindow.coupangIssuance.confirmPurpose",
+      "actionWindow.coupangIssuance.termsConsent",
       "actionWindow.coupangIssuance.issueCheckpoint",
       "actionWindow.coupangIssuance.copyKeys",
       "actionWindow.coupangIssuance.return",
@@ -186,21 +193,39 @@ describe("coupang issuance stages — the fixed 7-step plan", () => {
     const plan = coupangIssuanceStepPlan();
     expect(plan.map((s) => s.mode)).toEqual([
       "AUTOMATIC_OPERATION",
-      "ACTION_WINDOW",
-      "ACTION_WINDOW",
-      "ACTION_WINDOW",
-      "ACTION_WINDOW",
-      "ACTION_WINDOW",
-      "ACTION_WINDOW",
+      ...Array.from({ length: 7 }, () => "ACTION_WINDOW"),
     ]);
     expect(plan[0]!.copyParams).toBeUndefined(); // step 1 (reach) is text guidance — no highlighted control
     expect(plan.slice(1).map((s) => s.copyParams?.targetKind)).toEqual([
-      "self_dev",
-      "vendor_info",
-      "call_ip",
       "issue",
+      "purpose_option",
+      "confirm_purpose",
+      "terms_consent",
+      "issue_final",
       "credentials",
       "return",
     ]);
+  });
+
+  it("**names the KEY-CREATION step, and it is the one before copying keys**", () => {
+    // The old plan's central error was structural, not cosmetic: it went from the 발급 press straight to
+    // "copy your keys", so the tutorial told the seller to copy credentials that did not exist. The step that
+    // creates them now exists, is named once, and sits immediately before the copy step.
+    const plan = coupangIssuanceStepPlan();
+    expect(COUPANG_ISSUANCE_KEY_CREATION_STEP).toBe(6);
+    const keyStep = plan[COUPANG_ISSUANCE_KEY_CREATION_STEP - 1]!;
+    expect(keyStep.copyParams?.targetKind).toBe("issue_final");
+    expect(plan[COUPANG_ISSUANCE_KEY_CREATION_STEP]!.copyParams?.targetKind).toBe("credentials");
+    // …and nothing before it can create a key: every earlier targetKind is a reveal, a confirmation or a read.
+    for (const s of plan.slice(0, COUPANG_ISSUANCE_KEY_CREATION_STEP - 1)) {
+      expect(s.copyParams?.targetKind).not.toBe("issue_final");
+    }
+  });
+
+  it("has NO step for a screen this flow never shows", () => {
+    // 업체명 / 호출 IP matched hidden nodes only on every reading of every screen across five granted runs. A
+    // step for either would park the seller in front of a field that is not there, and the walk would deadlock.
+    const kinds = coupangIssuanceStepPlan().map((s) => s.copyParams?.targetKind);
+    for (const gone of ["self_dev", "vendor_info", "call_ip"]) expect(kinds, gone).not.toContain(gone);
   });
 });

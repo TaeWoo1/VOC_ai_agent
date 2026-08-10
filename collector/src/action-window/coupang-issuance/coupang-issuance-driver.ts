@@ -31,19 +31,31 @@ import type { CoupangIssuanceStage } from "./coupang-issuance-stages";
  */
 export type CoupangIssuanceTarget =
   | "reach_open_api"
-  | "self_dev"
-  | "vendor_info"
-  | "call_ip"
+  /** `API Key 발급 받기` — MEASURED to open the purpose screen. It does not create a key. */
   | "issue"
+  /** The purpose radios. `OPEN API` is the DEFAULT, so this usually needs no click. */
+  | "purpose_option"
+  /** `확인` — MEASURED to open the terms screen. It does not create a key. */
+  | "confirm_purpose"
+  /** The two consent checkboxes. Never ticked, never read; the seller decides. */
+  | "terms_consent"
+  /** `약관 동의 및 Key 발급받기` — **the control that CREATES THE KEY.** Highlighted, never pressed. */
+  | "issue_final"
   | "credentials"
   | "return";
 
+/**
+ * In flow order, which is now the MEASURED order. `self_dev` / `vendor_info` / `call_ip` are gone: the first
+ * names an option that is not on the screen, and the other two name fields this flow never shows — their labels
+ * matched hidden nodes only on every reading of every screen across five granted runs.
+ */
 export const COUPANG_ISSUANCE_TARGETS: readonly CoupangIssuanceTarget[] = [
   "reach_open_api",
-  "self_dev",
-  "vendor_info",
-  "call_ip",
   "issue",
+  "purpose_option",
+  "confirm_purpose",
+  "terms_consent",
+  "issue_final",
   "credentials",
   "return",
 ];
@@ -70,10 +82,11 @@ export const COUPANG_ISSUANCE_TRANSITION_OBSERVE_TARGET: CoupangIssuanceTarget =
  * `return` hands focus back to SellerOps (its panel button is "돌아가기", no WING section to locate).
  */
 export const COUPANG_ISSUANCE_CHECKPOINT_TARGETS: readonly CoupangIssuanceTarget[] = [
-  "self_dev",
-  "vendor_info",
-  "call_ip",
   "issue",
+  "purpose_option",
+  "confirm_purpose",
+  "terms_consent",
+  "issue_final",
   "credentials",
   "return",
 ];
@@ -89,10 +102,12 @@ export function isCoupangCheckpointTarget(target: CoupangIssuanceTarget): boolea
  */
 export const COUPANG_TARGET_BARRIER_STAGE: Readonly<Record<CoupangIssuanceTarget, CoupangIssuanceStage>> = {
   reach_open_api: "reaching_open_api",
-  self_dev: "guiding_self_dev",
-  vendor_info: "guiding_vendor_info",
-  call_ip: "guiding_call_ip",
-  issue: "checkpoint_before_issue",
+  issue: "checkpoint_reveal_issuance_form",
+  purpose_option: "guiding_purpose_option",
+  confirm_purpose: "checkpoint_confirm_purpose",
+  terms_consent: "guiding_terms_consent",
+  // The key-creation boundary. `issue` used to map here, back when 발급 was believed to create the key.
+  issue_final: "checkpoint_before_issue",
   credentials: "guiding_copy_keys",
   return: "return_to_sellerops",
 };

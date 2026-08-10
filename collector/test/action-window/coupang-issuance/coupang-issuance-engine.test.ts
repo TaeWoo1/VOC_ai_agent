@@ -9,10 +9,11 @@ import { CoupangIssuanceEngine, makeCoupangIssuanceClock } from "../../../src/ac
 
 const SIG: Record<string, string> = {
   reach_open_api: "aaaaaaaaaaaaaaaa",
-  self_dev: "bbbbbbbbbbbbbbbb",
-  vendor_info: "cccccccccccccccc",
-  call_ip: "dddddddddddddddd",
+  purpose_option: "bbbbbbbbbbbbbbbb",
+  confirm_purpose: "cccccccccccccccc",
+  terms_consent: "dddddddddddddddd",
   issue: "eeeeeeeeeeeeeeee",
+  issue_final: "2222222222222222",
   credentials: "ffffffffffffffff",
   return: "1111111111111111",
 };
@@ -22,10 +23,11 @@ function engine() {
 }
 
 const BARRIER: Record<string, string> = {
-  self_dev: "guiding_self_dev",
-  vendor_info: "guiding_vendor_info",
-  call_ip: "guiding_call_ip",
-  issue: "checkpoint_before_issue",
+  issue: "checkpoint_reveal_issuance_form",
+  purpose_option: "guiding_purpose_option",
+  confirm_purpose: "checkpoint_confirm_purpose",
+  terms_consent: "guiding_terms_consent",
+  issue_final: "checkpoint_before_issue",
   credentials: "guiding_copy_keys",
   return: "return_to_sellerops",
 };
@@ -53,7 +55,7 @@ function pressNext(eng: CoupangIssuanceEngine, nextTarget: string | null): void 
 }
 
 describe("coupang issuance engine — the linear walkthrough from the WING home", () => {
-  it("reach_open_api transition → verify → self_dev → … → return → complete, advancing each checkpoint WING-RESIDENT", () => {
+  it("reach_open_api → verify → 발급 → purpose → 확인 → terms → key → … → return → complete, advancing each checkpoint WING-RESIDENT", () => {
     const eng = engine();
     expect(eng.command({ type: "START_RUN", expectedRevision: 0 })).toEqual({ ok: true, idempotent: false, effect: "PROBE" });
 
@@ -66,64 +68,69 @@ describe("coupang issuance engine — the linear walkthrough from the WING home"
 
     // The seller navigated off the home; the engine re-probes to VERIFY the issuance page before step 1 completes.
     expect(eng.onUserActionObserved("reach_open_api")).toBe("VERIFY_REACH");
-    expect(eng.onReachVerified({ ok: true, pageCategory: "open_api_issuance" })).toEqual({ guide: "self_dev" });
+    expect(eng.onReachVerified({ ok: true, pageCategory: "open_api_issuance" })).toEqual({ guide: "issue" });
 
     // Every same-page checkpoint now advances ON THE WING PAGE — the seller presses its on-page advance button and
     // the driver reports it (onUserActionObserved). No REQUEST_STEP_RECHECK from the FE is needed. Each call
     // asserts the run rested at that step's barrier before the observed press moved it on.
-    driveCheckpoint(eng, "self_dev", "vendor_info");
-    driveCheckpoint(eng, "vendor_info", "call_ip");
-    driveCheckpoint(eng, "call_ip", "issue");
-    driveCheckpoint(eng, "issue", "credentials");
+    // The MEASURED order: 발급 opens the purpose screen, 확인 opens the terms screen, and the key is created on
+    // the terms screen by `약관 동의 및 Key 발급받기`.
+    driveCheckpoint(eng, "issue", "purpose_option");
+    driveCheckpoint(eng, "purpose_option", "confirm_purpose");
+    driveCheckpoint(eng, "confirm_purpose", "terms_consent");
+    driveCheckpoint(eng, "terms_consent", "issue_final");
+    // ⚠ THE KEY-CREATION BOUNDARY: only after the seller reports pressing it can a credential exist to copy.
+    driveCheckpoint(eng, "issue_final", "credentials");
     driveCheckpoint(eng, "credentials", "return");
     // The return checkpoint's observed on-page press completes the guidance.
     driveCheckpoint(eng, "return", null);
     expect(eng.currentStage()).toBe("guidance_complete");
     expect(eng.view().status).toBe("COMPLETED");
-    expect(eng.view().progress).toEqual({ completedSteps: 7, totalSteps: 7 });
+    expect(eng.view().progress).toEqual({ completedSteps: 8, totalSteps: 8 });
   });
 
   it("a FE REQUEST_STEP_RECHECK still advances a checkpoint as a fallback/recovery (never the primary driver)", () => {
     const eng = engine();
     eng.command({ type: "START_RUN", expectedRevision: 0 });
     eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" }); // → guide self_dev
-    eng.onTargetLocated("self_dev", { count: 1, sig: SIG.self_dev! });
-    eng.onTargetHighlighted("self_dev", { count: 1, sig: SIG.self_dev! });
-    expect(eng.currentStage()).toBe("guiding_self_dev");
+    eng.onTargetLocated("issue", { count: 1, sig: SIG.issue! });
+    eng.onTargetHighlighted("issue", { count: 1, sig: SIG.issue! });
+    expect(eng.currentStage()).toBe("checkpoint_reveal_issuance_form");
     // The fallback path (FE 다음) still completes the checkpoint and guides the next control.
-    pressNext(eng, "vendor_info");
-    expect(eng.currentStage()).toBe("guiding_vendor_info");
+    pressNext(eng, "purpose_option");
+    expect(eng.currentStage()).toBe("guiding_purpose_option");
   });
 
   it("skips the reach transition when the seller is ALREADY on the open-API issuance page (step 1 auto-completes)", () => {
     const eng = engine();
     eng.command({ type: "START_RUN", expectedRevision: 0 });
-    expect(eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" })).toEqual({ guide: "self_dev" });
+    expect(eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" })).toEqual({ guide: "issue" });
     // Step 1 completed automatically without ever guiding reach_open_api.
     const completed = eng.events().filter((e) => e.type === "STEP_COMPLETED").map((e) => e.payload.stepId);
     expect(completed).toContain("aw.coupang_issuance_reach_open_api");
   });
 });
 
-describe("coupang issuance engine — the 발급 (issue) HUMAN CHECKPOINT never auto-advances", () => {
+describe("coupang issuance engine — the KEY-CREATION HUMAN CHECKPOINT never auto-advances", () => {
   function toIssueBarrier() {
     const eng = engine();
     eng.command({ type: "START_RUN", expectedRevision: 0 });
     eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" }); // → guide self_dev
-    eng.onTargetLocated("self_dev", { count: 1, sig: SIG.self_dev! });
-    eng.onTargetHighlighted("self_dev", { count: 1, sig: SIG.self_dev! });
-    pressNext(eng, "vendor_info");
-    pressNext(eng, "call_ip");
-    pressNext(eng, "issue");
+    eng.onTargetLocated("issue", { count: 1, sig: SIG.issue! });
+    eng.onTargetHighlighted("issue", { count: 1, sig: SIG.issue! });
+    pressNext(eng, "purpose_option");
+    pressNext(eng, "confirm_purpose");
+    pressNext(eng, "terms_consent");
+    pressNext(eng, "issue_final");
     return eng;
   }
 
-  it("rests at checkpoint_before_issue with the 발급 button highlighted (opaque 16-hex ref) and does not auto-advance", () => {
+  it("rests at checkpoint_before_issue with the KEY-CREATING control highlighted (opaque 16-hex ref) and does not auto-advance", () => {
     const eng = toIssueBarrier();
     expect(eng.currentStage()).toBe("checkpoint_before_issue");
     expect(eng.view().status).toBe("WAITING_FOR_HUMAN");
-    expect(eng.view().currentStep?.stepNumber).toBe(5);
-    expect(eng.view().currentStep?.copyParams?.targetKind).toBe("issue");
+    expect(eng.view().currentStep?.stepNumber).toBe(6);
+    expect(eng.view().currentStep?.copyParams?.targetKind).toBe("issue_final");
     const ref = eng.events().find((e) => e.type === "TARGET_HIGHLIGHTED" && e.payload.stepId === "aw.coupang_issuance_issue_checkpoint")!.payload.targetRef;
     expect(ref).toMatch(/^[0-9a-f]{16}$/);
     // The checkpoint RESTS: no completion is emitted for the ISSUE step until the seller reports pressing 발급. The
@@ -138,7 +145,7 @@ describe("coupang issuance engine — the 발급 (issue) HUMAN CHECKPOINT never 
     // The seller pressed the WING-resident '발급 완료 · 다음' button AFTER issuing the key in their own window; the
     // driver reports that observed press and the engine advances to the copy-keys checkpoint. SellerOps still
     // never clicks 발급 and reads no credential value — it only reacts to what the seller reports doing.
-    expect(eng.onUserActionObserved("issue")).toEqual({ guide: "credentials" });
+    expect(eng.onUserActionObserved("issue_final")).toEqual({ guide: "credentials" });
     // The issue step completed and the run is now guiding the copy-keys checkpoint (its stage advances once the
     // credentials control is highlighted — here we assert the target moved and the step completed).
     expect(eng.activeTarget()).toBe("credentials");
@@ -166,7 +173,7 @@ describe("coupang issuance engine — recoverable parks (never RUN_FAILED)", () 
     const eng2 = engine();
     eng2.command({ type: "START_RUN", expectedRevision: 0 });
     eng2.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" });
-    expect(eng2.onTargetLocated("self_dev", { count: 0 })).toBe("NONE");
+    expect(eng2.onTargetLocated("issue", { count: 0 })).toBe("NONE");
     expect(eng2.currentStage()).toBe("target_not_found");
     expect(eng2.view().blocker).toEqual({ code: "TARGET_NOT_FOUND", recoverable: true });
   });
@@ -189,15 +196,15 @@ describe("coupang issuance engine — contract validity + NO appBranch", () => {
     const eng = engine();
     eng.command({ type: "START_RUN", expectedRevision: 0 });
     eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" });
-    eng.onTargetLocated("self_dev", { count: 1, sig: SIG.self_dev! });
-    eng.onTargetHighlighted("self_dev", { count: 1, sig: SIG.self_dev! });
+    eng.onTargetLocated("issue", { count: 1, sig: SIG.issue! });
+    eng.onTargetHighlighted("issue", { count: 1, sig: SIG.issue! });
 
     const v = eng.view();
     expect(v.channelCode).toBe("coupang");
     expect(v.intent).toBe("API_ISSUANCE_GUIDANCE");
     expect(v.runCopyKey).toBe("actionWindow.coupangIssuance.run");
     expect(v.appBranch).toBeUndefined(); // linear flow — NEVER an appBranch
-    expect(v.currentStep?.totalSteps).toBe(7);
+    expect(v.currentStep?.totalSteps).toBe(8);
     expect(validateRunView(v)).toEqual({ ok: true });
     expect(findProhibitedFields(v)).toEqual([]);
     for (const e of eng.events()) {

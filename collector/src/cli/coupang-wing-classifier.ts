@@ -791,10 +791,11 @@ export function wingPageCategoryFromCensus(
  */
 export const CANDIDATE_WING_TARGET_SELECTORS = {
   reach_open_api: "[data-aw-target='reach_open_api']",
-  self_dev: "[data-aw-target='self_dev']",
-  vendor_info: "[data-aw-target='vendor_info']",
-  call_ip: "[data-aw-target='call_ip']",
   issue: "[data-aw-target='issue']",
+  purpose_option: "[data-aw-target='purpose_option']",
+  confirm_purpose: "[data-aw-target='confirm_purpose']",
+  terms_consent: "[data-aw-target='terms_consent']",
+  issue_final: "[data-aw-target='issue_final']",
   credentials: "[data-aw-target='credentials']",
   return: "[data-aw-target='return']",
 } as const;
@@ -864,6 +865,15 @@ export function screenWingUrl(url: string): { ok: boolean; reason: WingUrlScreen
  * validates a per-run probe SCOPE against (kept in this pure zero-import leaf so the gate need not import the
  * heavy recorder). A drift guard test ties this to the recorder's `WING_RECORD_TARGETS` so the two never diverge.
  * `delete` is the 삭제 control on the already-issued page — probeable read-only alongside `issue` / `credentials`.
+ */
+/**
+ * The names an ordinary selector probe may be pointed at.
+ *
+ * NOTE (2026-08-10): `self_dev` / `vendor_info` / `call_ip` no longer appear in the guided TUTORIAL — the
+ * purpose screen offers no 자체개발, and 업체명 / 호출 IP matched hidden nodes only on every reading of every
+ * screen across five granted runs. They stay HERE because this is a different vocabulary: what a read-only
+ * probe may be pointed at, not what the tutorial guides. Retiring them from this list would silently make the
+ * LABEL_RECON phase unreachable, which is a decision of its own and not a side effect of a tutorial change.
  */
 export const WING_PROBE_TARGET_NAMES = ["self_dev", "vendor_info", "call_ip", "issue", "credentials", "delete"] as const;
 export type WingProbeTargetName = (typeof WING_PROBE_TARGET_NAMES)[number];
