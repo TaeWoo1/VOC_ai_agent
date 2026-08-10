@@ -103,6 +103,7 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
   const isWingLabelRecon = phase === "COUPANG_WING_LABEL_RECON";
   const isWingKeyDeletion = phase === "COUPANG_WING_KEY_DELETION";
   const isWingReveal = phase === "COUPANG_WING_ISSUANCE_FORM_REVEAL";
+  const isWingGuidedWalk = phase === "COUPANG_WING_GUIDED_ISSUANCE_WALK";
   // The shared list, NOT a fourth hand-maintained chain. Review caught this one still spelled out by hand after
   // the other three were consolidated: it decides whether the entry URL is screened against the WING host or
   // the NAVER API-center host, so a WING phase missing from it fails as `INVALID_HOST` — a refusal whose cause
@@ -298,7 +299,10 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     ...(isWingReveal ? { operatorRevealAction: COUPANG_WING_ISSUANCE_REVEAL_ACTION } : {}),
     // The reveal phase HIGHLIGHTS a real control, so it needs a stated calibration. From the shared constant,
     // never a hardcoded true — withdrawing it must close the display path too, not just the runtime.
-    ...(isWingReveal ? { selectorsCalibrated: WING_ISSUE_SELECTOR_CALIBRATED } : {}),
+    // The walk highlights the same live-calibrated `issue` control the reveal does, and states the SAME
+    // calibration fact. Two of its six guided controls are highlighted; the other four are text-guided and
+    // claim no locator, so nothing here asserts a calibration they do not have.
+    ...(isWingReveal || isWingGuidedWalk ? { selectorsCalibrated: WING_ISSUE_SELECTOR_CALIBRATED } : {}),
     runId: env("WALKTHROUGH_RUN_ID") ?? "unknown",
     approvalId: env("WALKTHROUGH_APPROVAL_ID") ?? "unknown",
     gitSha: env("WALKTHROUGH_GIT_COMMIT") ?? "unknown",
