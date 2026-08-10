@@ -223,7 +223,7 @@ echo
 echo "  WHAT THE LAST STEP SAYS ON THE WING PAGE (complete, Korean — this is what binds):"
 # CHECKPOINT-COPY-BEGIN
 echo "    ⚠ 여기서 실제로 키가 생성됩니다. '약관 동의 및 Key 발급받기' 버튼을 직접 누르세요 — SellerOps는 이"
-echo "    버튼을 절대 누르지 않습니다. 발급이 끝나면 아래 버튼을 누르세요."
+echo "    버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다. 발급이 끝나면 아래 버튼을 누르세요."
 # CHECKPOINT-COPY-END
 echo
 echo "  ⚠ THIS PROOF STOPS BEFORE THAT PRESS. The copy above is the tutorial's own product text, shown here so"

@@ -936,7 +936,11 @@ describe("the guided-walk manifest is not the fallback", () => {
     expect(max).toContain("0 presses of the key-creating");
     expect(max).toContain("0 navigations");
     expect(max).toContain("2 highlights");
-    expect(max).toContain("4 text-guided");
+    // Three since the purpose screen became one step. The budget also has to state that the runtime advances
+    // itself now — a budget listing only what the SELLER presses would understate what the agent does.
+    expect(max).toContain("3 text-guided");
+    expect(max).toContain("4 steps advanced by OBSERVING WING");
+    expect(max).toContain("the key-creating step never");
   });
 });
 
