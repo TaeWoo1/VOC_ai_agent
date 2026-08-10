@@ -419,3 +419,31 @@ describe("coupang issuance session — observed waits recover inside WING", () =
     await session.whenSettled();
   });
 });
+
+/**
+ * The consent step's ORDER. Its panel carries the only instruction that says "read the terms and decide", so it
+ * has to be on screen before anything can advance past it — including the instant advance a seller gets when
+ * they had already ticked both boxes before the step began.
+ *
+ * Ordering only. No dwell, no timer, no extra button: if both boxes are already ticked the run moves straight
+ * to the key-creation checkpoint, which is the correct behaviour for someone who has already decided.
+ */
+describe("coupang issuance session — the consent panel is mounted before it is observed", () => {
+  it("highlights (mounts the panel) before arming the observation, for every guided step", async () => {
+    const { io, engine, driver, session } = build();
+    startRun(io);
+    await session.whenSettled();
+    await pressNextToComplete(io, engine, session).catch(() => undefined);
+    {
+      const calls = driver.calls;
+      for (const target of ["issue", "confirm_purpose", "terms_consent", "issue_final"]) {
+        const highlighted = calls.indexOf(`highlight:${target}`);
+        const observed = calls.indexOf(`observe:${target}`);
+        if (highlighted === -1 || observed === -1) continue;
+        // A step whose observation could resolve before its panel exists would advance past an instruction the
+        // seller never saw — and for consent that instruction is the whole point of the step.
+        expect(highlighted, `${target}: panel must mount before the observation arms`).toBeLessThan(observed);
+      }
+    }
+  });
+});

@@ -2012,15 +2012,76 @@ export const WING_TERMS_SCREEN_MARKER_SPECS: readonly WingFlowScreenMarkerSpec[]
 );
 
 /**
- * Whether the PURPOSE marker has ever been MATCHED on a real screen. **False** — see the candidate's own
- * rationale. Kept as a code-level flag rather than prose so a reader of the auto-advance path is told, at the
- * point of use, that this transition is expected to fall back to the seller's own advance.
+ * The live readings that flipped the two flags below. Recorded rather than summarized, because "measured" is a
+ * claim about a specific observation and the next person has to be able to check which one.
+ *
+ * Taken on 2026-08-10 during the granted `COUPANG_WING_GUIDED_ISSUANCE_WALK` run (git `30760554`), from the
+ * READ-ONLY fixed-label locate the auto-advance already runs — no extra apparatus, no extra sitting.
  */
-export const WING_PURPOSE_SCREEN_MARKER_MEASURED = false as const;
+export interface WingFlowScreenMarkerReading {
+  /** The recon candidate id that was read. */
+  readonly id: string;
+  /** Which measured screen the seller was on when it was read — a reading is only evidence about one screen. */
+  readonly screen: WingFlowScreen;
+  readonly visibleCount: number;
+  readonly hiddenCount: number;
+  /** The tag as OBSERVED. Absent when nothing painted — never an expected value. */
+  readonly observedTag?: string;
+}
+
+export interface WingFlowScreenMarkerEvidence {
+  readonly measuredOn: string;
+  readonly phase: string;
+  readonly readings: readonly WingFlowScreenMarkerReading[];
+}
+
+export const WING_FLOW_SCREEN_MARKER_EVIDENCE: WingFlowScreenMarkerEvidence = Object.freeze({
+  measuredOn: "2026-08-10",
+  phase: "COUPANG_WING_GUIDED_ISSUANCE_WALK",
+  readings: Object.freeze([
+    // On the PURPOSE screen, repeatedly, across the whole time the seller sat on it.
+    Object.freeze({ id: WING_PURPOSE_SCREEN_MARKER_ID, screen: "PURPOSE", visibleCount: 1, hiddenCount: 0, observedTag: "DIV" }),
+    // Hidden on PURPOSE, visible the moment the seller reached TERMS — the transition itself, observed.
+    Object.freeze({ id: "stage3.terms.heading", screen: "PURPOSE", visibleCount: 0, hiddenCount: 1 }),
+    Object.freeze({ id: "stage3.terms.heading", screen: "TERMS", visibleCount: 1, hiddenCount: 0, observedTag: "DIV" }),
+  ]),
+});
 
 /**
- * Whether the TERMS markers have ever been MATCHED on a real screen. **False** — they were transcribed from the
- * screen, which is not the same as an apparatus resolving them, and this repository flips a flag on a recorded
- * measurement and nothing else (see `WING_ISSUE_SELECTOR_CALIBRATED` for the shape a real one takes).
+ * Whether the PURPOSE marker has ever been MATCHED on a real screen. **TRUE** as of 2026-08-10 — see
+ * {@link WING_FLOW_SCREEN_MARKER_EVIDENCE}: `visibleCount: 1`, `hiddenCount: 0`, `observedTag: "DIV"`, read
+ * repeatedly while the seller was on the purpose screen.
+ *
+ * It was a hypothesis for a day and a half. The 08-09 transcription (`이제 …골라주세요.`) measured absent
+ * everywhere; the 08-10 verbatim re-transcription was a guess at why, and stayed marked as one until an
+ * apparatus resolved it. Editing this line from anything other than a recorded reading is the move that
+ * produced the refuted 발급 record.
  */
-export const WING_TERMS_SCREEN_MARKERS_MEASURED = false as const;
+export const WING_PURPOSE_SCREEN_MARKER_MEASURED = true as const;
+
+/**
+ * Whether the TERMS markers have been MATCHED on a real screen. **TRUE** as of 2026-08-10 for
+ * `stage3.terms.heading`, which is sufficient: `wingFlowScreenFrom` treats EITHER terms marker as identifying
+ * the screen, and the heading was read `hiddenCount: 1` on PURPOSE and `visibleCount: 1, observedTag: "DIV"`
+ * the moment the seller reached TERMS.
+ *
+ * This asserts SCREEN IDENTIFICATION only. It says nothing about {@link WING_KEY_CREATION_CONTROL_ID}, which is
+ * the other terms marker and is NOT promotable on this evidence — every reading of it came from the purpose
+ * screen, where it matches one HIDDEN node. See {@link WING_KEY_CREATION_SELECTOR_CALIBRATED}.
+ */
+export const WING_TERMS_SCREEN_MARKERS_MEASURED = true as const;
+
+/**
+ * Whether the key-creation control has a locator good enough to HIGHLIGHT. **FALSE.**
+ *
+ * The only readings that exist are `visibleCount: 0, hiddenCount: 1`, all taken on the PURPOSE screen — the
+ * `button,a` query resolves to exactly one node there and it does not paint. That is not evidence about the
+ * terms screen, where the control the seller presses actually lives. The 2026-08-10 walk could not supply it
+ * because `probeFlowScreen` short-circuited on the heading and never read this marker on TERMS; that
+ * short-circuit is gone, so the next walk records it in the same pass.
+ *
+ * Flipping this requires a reading on the TERMS screen with `visibleCount: 1`, `hiddenCount: 0`, and a MEASURED
+ * tag. A hidden unique match is exactly what invalidated the 삭제 calibration record — highlighting it would
+ * draw a ring at nothing while claiming to point at the control that creates the key.
+ */
+export const WING_KEY_CREATION_SELECTOR_CALIBRATED = false as const;

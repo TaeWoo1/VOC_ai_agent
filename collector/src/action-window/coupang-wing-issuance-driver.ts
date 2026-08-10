@@ -943,9 +943,18 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
    * before the seller has got anywhere. Callers must treat it as "not there yet", never as drift.
    */
   async probeFlowScreen(): Promise<WingFlowScreen> {
+    // EVERY terms marker is read, not just enough of them to decide. Short-circuiting on the first visible one
+    // was correct for the verdict and wrong for the evidence: `stage3.terms.heading` sits first in the array, so
+    // on the live walk of 2026-08-10 it answered TERMS and `stage3.terms.issue_final` — the key-creation control
+    // — was never read on the terms screen at all. The only readings that existed were from the PURPOSE screen,
+    // where it is hidden, so the run produced no basis for promoting it and the sitting had to be repeated.
+    //
+    // Reading both costs one extra in-page locate on the screen where the walk stops anyway.
+    let terms = false;
     for (const spec of WING_TERMS_SCREEN_MARKER_SPECS) {
-      if (await this.markerVisible(spec)) return "TERMS";
+      if (await this.markerVisible(spec)) terms = true;
     }
+    if (terms) return "TERMS";
     return (await this.markerVisible(WING_PURPOSE_SCREEN_MARKER_SPEC)) ? "PURPOSE" : "UNRECOGNIZED";
   }
 
