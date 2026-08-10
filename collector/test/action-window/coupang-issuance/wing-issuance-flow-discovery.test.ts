@@ -480,9 +480,9 @@ describe("the discovery PHASE is wired everywhere a Stage-2 phase must be", () =
     const block = src.slice(discoveryBranch, sharedBranch);
     // It has to state the conditionality, the reason, and the halt — not just "you may press 확인".
     expect(block).toContain("ADVANCES THE REAL FLOW");
-    expect(block).toContain("CREATES THE KEY");
+    expect(block).toContain("KEY-CREATION control");
     expect(block).toContain("HALTS");
-    expect(block).toContain("fail-closed");
+    expect(block).toContain("Fail-closed");
     // …and it must READ as English. A shell-escaping leak (`run'\''s`) shipped into the middle of the sentence
     // explaining why the run halts before a key-creating control — the one paragraph that has to be legible.
     expect(block).not.toMatch(/\\'/);
@@ -695,6 +695,21 @@ describe("the manifest cannot under-describe the flow it approves", () => {
     expect(block).not.toContain(`${WING_FLOW_CHECKPOINTS.length + 1})`);
     expect(block).toContain("KEY-CREATION control");
     expect(block).toContain("no fifth checkpoint");
+  });
+
+  it("the warning does not repeat a claim its own runs have since falsified", () => {
+    // It said "nobody has ever pressed 확인, and no run has measured what it does" — true when written, false
+    // after two runs pressed it and measured that it opens the terms screen. Safety copy that keeps asserting
+    // a retired unknown teaches the reader to discount it, and the paragraph it sat in is the one explaining
+    // why the run may stop before a key-creating control.
+    const src = readFileSync(resolve(HERE, "../../../../tools/coupang-local/wing-probe-preflight.sh"), "utf8");
+    const from = src.indexOf('if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then');
+    const block = src.slice(from, src.indexOf('elif is_stage2_phase "$PHASE"; then', from));
+    expect(block).not.toContain("nobody has ever pressed");
+    expect(block).not.toContain("no run has measured what it does");
+    // …and it states what IS measured, with the date, plus the defect the gate now closes.
+    expect(block).toContain("MEASURED 2026-08-10");
+    expect(block).toContain("WAS printed against the terms screen");
   });
 });
 
