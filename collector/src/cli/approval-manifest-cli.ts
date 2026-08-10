@@ -30,6 +30,8 @@ import { resolveVisualReconScope } from "../action-window/api-issuance-calibrati
 import {
   resolveWingStage2ReconScope,
   WING_FLOW_CHECKPOINTS,
+  WING_FLOW_CHECKPOINTS_ENV,
+  resolveWingFlowCheckpoints,
 } from "../action-window/coupang-wing-label-recon";
 // The public WING host default for the Coupang WING selector-probe phase (pure leaf; no per-run input needed).
 import { WING_DEFAULT_URL, resolveWingProbeScope } from "./coupang-wing-classifier";
@@ -144,6 +146,17 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
   const isWingStage2Recon = phase === "COUPANG_WING_STAGE2_RECON";
   const isWingStage2Calibration = phase === "COUPANG_WING_STAGE2_LABEL_CALIBRATION";
   const isWingFlowDiscovery = phase === "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY";
+  // The per-run checkpoint PLAN, resolved here so the manifest describes THIS run rather than the phase's
+  // longest possible one. A manifest promising four checkpoints for a three-checkpoint run is the same
+  // manifest-does-not-describe-the-run defect as promising three for four, wearing the other hat.
+  const flowPlan = isWingFlowDiscovery ? resolveWingFlowCheckpoints(env(WING_FLOW_CHECKPOINTS_ENV)) : null;
+  if (flowPlan && !flowPlan.ok) {
+    process.stderr.write(`PREFLIGHT FAIL: approval_prerequisite (WING_FLOW_CHECKPOINTS_MISMATCH): ${flowPlan.reason}\n`);
+    return 1;
+  }
+  const checkpoints = flowPlan && flowPlan.ok ? flowPlan.checkpoints : [...WING_FLOW_CHECKPOINTS];
+  const reachesTerms = checkpoints.includes("TERMS_CHECKED_BY_OPERATOR");
+  const reachesConfirm = checkpoints.includes("AFTER_OPERATOR_CONFIRM");
   // BOTH Stage-2 phases share the scope env var, so both must resolve it. A calibration manifest that skipped
   // this would print the full six targets while the run measured whatever the env var narrowed to — the same
   // manifest-under-describes-the-run gap review already found on the recon route.
@@ -182,6 +195,8 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     ? "WING Stage-2 read-only recon on the purpose-selection screen (the OPERATOR presses 발급 to open it; agent counts controls and candidate-label matches only — no highlight, no selection, no input, no 확인, no value read)"
     : isWingStage2Calibration
     ? "WING Stage-2 read-only LABEL CALIBRATION on the purpose-selection screen (the OPERATOR presses 발급 to open it; agent derives how each choice control is LABELLED and compares it against fixed candidates, reporting category names and indices only — no wording recorded, no highlight, no selection, no input, no 확인, no value read)"
+    : isWingFlowDiscovery && !reachesTerms
+    ? `WING OPEN-API issuance-flow DISCOVERY, NARROWED to ${checkpoints.length} checkpoints (${checkpoints.join(" → ")}) — the run ENDS after the last one and does not reach the terms screen's consent step. The OPERATOR presses 발급, confirms the purpose option is selected (no click needed if OPEN API is already the default)${reachesConfirm ? ", and — ONLY if the reading says the flow is still on the purpose screen and the 업체명/URL/IP form is not on it — presses 확인 so the agent can read WHETHER the screen changes" : ""}. The agent takes read-only label/presence/association readings at each checkpoint and performs no click, selection, input, or value read, and never reads \`checked\`. The key-creating 약관 동의 및 Key 발급받기 button is never pressed and no checkpoint of this run stands in front of it. SellerOps does not read, evaluate, agree to, or advise on the terms.`
     : isWingFlowDiscovery
     ? "WING OPEN-API issuance-flow DISCOVERY across operator-advanced checkpoints (the OPERATOR presses 발급, selects the purpose option, and — ONLY if the reading after that selection shows the 업체명/URL/IP form is not yet on screen — presses 확인, which opens the TERMS screen; the operator then ticks the two consent checkboxes themselves. The agent takes the same read-only label/association readings at each checkpoint, plus a CONSENT-BLOCK census on the terms screen — for each visible checkbox, whether the nearest ancestor block holding exactly one consent sentence also holds exactly one checkbox, reported as indices and counts, never as wording. It performs no click, selection, input, or value read, and never reads `checked`. THE RUN ENDS ON THE TERMS SCREEN: the button below it, `약관 동의 및 Key 발급받기`, is the KEY-CREATION control, it is measured only to locate it, it is never pressed, and this phase has no checkpoint after the one that would ask. Key issuance is a separate phase with its own manifest and its own grant. SellerOps does not read, evaluate, agree to, or advise on the terms)"
     : isWingReveal
@@ -206,9 +221,12 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     : isWingStage2Calibration
     ? "1 operator-performed 발급 press + 1 read-only Stage-2 label-calibration session (candidate match counts + containment probe + choice-control shape and label-association census); 0 selections"
     : isWingFlowDiscovery
-    ? "operator-performed: 1 발급 press + 1 purpose-option selection + at most 1 확인 press (gated on the measurement, and skipped entirely if it says stop) + up to 2 consent checkbox ticks; 0 presses of the key-creating 약관 동의 및 Key 발급받기 button, which this phase cannot reach. agent: " +
-      `${WING_FLOW_CHECKPOINTS.length} read-only checkpoint readings, 0 clicks, 0 selections, 0 inputs, 0 value reads` +
-      ` (checkpoints: ${WING_FLOW_CHECKPOINTS.join(" → ")})`
+    ? "operator-performed: 1 발급 press + 1 purpose-option selection (none needed if OPEN API is already the default)" +
+      (reachesConfirm ? " + at most 1 확인 press (gated on the measurement, and skipped entirely if it says stop)" : "") +
+      (reachesTerms ? " + up to 2 consent checkbox ticks" : "") +
+      "; 0 presses of the key-creating 약관 동의 및 Key 발급받기 button, which this phase cannot reach. agent: " +
+      `${checkpoints.length} read-only checkpoint readings, 0 clicks, 0 selections, 0 inputs, 0 value reads` +
+      ` (checkpoints: ${checkpoints.join(" → ")})`
     : isWingReveal
     ? "1 operator-performed 발급 press + 1 sanitized observation"
     : isVisualRecon

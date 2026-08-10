@@ -640,17 +640,26 @@ describe("the manifest cannot under-describe the flow it approves", () => {
   const ENTRY = PHASE_ENTRYPOINTS.COUPANG_WING_ISSUANCE_FLOW_DISCOVERY;
   const SPEC = PHASE_SPECS.COUPANG_WING_ISSUANCE_FLOW_DISCOVERY;
 
-  it("**states the checkpoint count from the CONSTANT, not from prose**", () => {
-    // Found by RUNNING the harness, not by reading it: the manifest said "3 read-only checkpoint readings" and
-    // the warning said "Three checkpoints" while the code had four — and the undescribed fourth is the one
-    // standing in front of the key-creating button. A hand-typed count in a safety document drifts the moment
-    // the code moves, so the guard is the TIE, not the number.
+  it("**states the checkpoint count from the resolved PLAN, not from prose**", () => {
+    // Found by RUNNING the harness twice, in both directions. First the manifest said "3 read-only checkpoint
+    // readings" while the code had four — the undescribed fourth being the one in front of the key-creating
+    // button. Then, once a run could be narrowed, it promised four for a three-checkpoint run. Both are one
+    // defect: a document the operator grants on, describing a run other than the one that will happen.
     const branch = CLI_SRC.slice(CLI_SRC.indexOf("isWingFlowDiscovery\n    ? \"operator-performed"));
     const maxActions = branch.slice(0, branch.indexOf("\n    : isWingReveal"));
-    expect(maxActions).toContain("${WING_FLOW_CHECKPOINTS.length} read-only checkpoint readings");
-    expect(maxActions).toContain("WING_FLOW_CHECKPOINTS.join");
+    expect(maxActions).toContain("${checkpoints.length} read-only checkpoint readings");
+    expect(maxActions).toContain("checkpoints.join");
     // A literal count anywhere in that string is the defect coming back.
     expect(maxActions).not.toMatch(/\b[0-9]+ read-only checkpoint readings/);
+    // …and steps the plan does not reach are not promised.
+    expect(maxActions).toContain("reachesTerms ?");
+    expect(maxActions).toContain("reachesConfirm ?");
+  });
+
+  it("an invalid checkpoint plan REFUSES rather than falling back to the whole flow", () => {
+    const head = CLI_SRC.slice(CLI_SRC.indexOf("const flowPlan = isWingFlowDiscovery"));
+    expect(head.slice(0, 900)).toContain("WING_FLOW_CHECKPOINTS_MISMATCH");
+    expect(head.slice(0, 900)).toContain("resolveWingFlowCheckpoints");
   });
 
   it("the OPERATION text names the key-creation boundary and the separate approval", () => {
@@ -687,13 +696,17 @@ describe("the manifest cannot under-describe the flow it approves", () => {
     expect(SPEC.allowsHighlight).toBe(false);
   });
 
-  it("the preflight warning counts the checkpoints the same way the manifest does", () => {
-    // Two documents, one flow. The prose said "Three" while the constant said four.
+  it("the preflight builds its step list FROM THE PLAN, and hard-codes no count", () => {
     const src = readFileSync(resolve(HERE, "../../../../tools/coupang-local/wing-probe-preflight.sh"), "utf8");
     const from = src.indexOf('if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then');
     const block = src.slice(from, src.indexOf('elif is_stage2_phase "$PHASE"; then', from));
-    for (let i = 1; i <= WING_FLOW_CHECKPOINTS.length; i++) expect(block, `step ${i}`).toContain(`${i})`);
-    expect(block).not.toContain(`${WING_FLOW_CHECKPOINTS.length + 1})`);
+    // Derived: it loops the plan and numbers as it goes.
+    expect(block).toContain("for CP in $PLAN");
+    expect(block).toContain("STEP_I=$((STEP_I + 1))");
+    // Every checkpoint has a copy branch, or a plan naming it prints a blank step.
+    for (const c of WING_FLOW_CHECKPOINTS) expect(block, c).toContain(`${c})`);
+    // No literal step number survives.
+    expect(block).not.toMatch(/echo "    [0-9]+\)/);
     expect(block).toContain("KEY-CREATION control");
     expect(block).toContain("no fifth checkpoint");
   });

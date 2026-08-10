@@ -254,12 +254,32 @@ if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then
   echo "  ⚠ THIS RUN ADVANCES THE REAL FLOW, and every step of it is YOURS. SellerOps clicks, selects and types"
   echo "  NOTHING — it has no code path that could. You press 'API Key 발급 받기', you select 'OPEN API', and you"
   echo "  press '확인' — but only if SellerOps' own reading says you may."
-  echo "  FOUR checkpoints, each waiting for your signal, each instruction printed only when it is that step's"
-  echo "  turn:"
-  echo "    1) 발급 press → STOP on the purpose screen, select nothing → ready"
-  echo "    2) select 'OPEN API' → do NOT press 확인 → ready"
-  echo "    3) offered ONLY IF the step-2 reading shows the 업체명/URL/IP fields are NOT yet on screen"
-  echo "    4) the TERMS screen: tick the two consent boxes yourself → ready. THIS IS THE END."
+  # The step list is BUILT FROM THE PLAN. Typed out, it promised four steps for a three-step run — the same
+  # manifest-does-not-describe-the-run defect as under-promising, and it sat directly above a narrowing banner
+  # saying the opposite.
+  PLAN="${SELLEROPS_WING_FLOW_CHECKPOINTS:-PURPOSE_SCREEN_UNTOUCHED,PURPOSE_OPTION_SELECTED_BY_OPERATOR,AFTER_OPERATOR_CONFIRM,TERMS_CHECKED_BY_OPERATOR}"
+  PLAN_N="$(printf '%s' "$PLAN" | tr ',' '\n' | grep -c .)"
+  echo "  $PLAN_N checkpoints, each waiting for your signal, each instruction printed only when it is that"
+  echo "  step's turn:"
+  STEP_I=0
+  OLD_IFS="$IFS"; IFS=','
+  for CP in $PLAN; do
+    STEP_I=$((STEP_I + 1))
+    case "$CP" in
+      PURPOSE_SCREEN_UNTOUCHED)
+        echo "    $STEP_I) 발급 press → STOP on the purpose screen, select nothing → ready" ;;
+      PURPOSE_OPTION_SELECTED_BY_OPERATOR)
+        echo "    $STEP_I) make sure 'OPEN API' is selected — it is the DEFAULT, so press nothing if it already" 
+        echo "       is. Do NOT press 확인 → ready" ;;
+      AFTER_OPERATOR_CONFIRM)
+        echo "    $STEP_I) press 확인 — offered ONLY IF the previous reading says the flow is still on the" 
+        echo "       purpose screen and the 업체명/URL/IP fields are not on it → ready" ;;
+      TERMS_CHECKED_BY_OPERATOR)
+        echo "    $STEP_I) the TERMS screen: tick the two consent boxes yourself → ready" ;;
+    esac
+  done
+  IFS="$OLD_IFS"
+  echo "    THIS IS THE END — there is no step after the last one listed."
   echo "  ⚠ WHY step 3 is conditional. MEASURED 2026-08-10: on the purpose screen '확인' opens the TERMS screen"
   echo "  and does NOT submit 업체명/URL/IP — that form never appears in this flow. So '확인' is not itself the"
   echo "  key-creating control. The gate is still there because the flow may not be where the step assumes:"
