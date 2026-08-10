@@ -39,6 +39,8 @@ describe("coupang issuance stages — run-status projection", () => {
   const expected: Record<CoupangIssuanceStage, string> = {
     opening: "PREPARING",
     waiting_login: "WAITING_FOR_HUMAN",
+    // An observed wait is the runtime WORKING (watching WING), not the seller being blocked.
+    awaiting_wing_surface: "RUNNING",
     locating_open_api: "RUNNING",
     reaching_open_api: "WAITING_FOR_HUMAN",
     checkpoint_reveal_issuance_form: "WAITING_FOR_HUMAN",
@@ -62,6 +64,7 @@ describe("coupang issuance stages — step-status projection", () => {
   const expected: Record<CoupangIssuanceStage, string> = {
     opening: "PREPARING",
     waiting_login: "AWAITING_USER",
+    awaiting_wing_surface: "OBSERVING",
     locating_open_api: "OBSERVING",
     reaching_open_api: "AWAITING_USER",
     checkpoint_reveal_issuance_form: "AWAITING_USER",

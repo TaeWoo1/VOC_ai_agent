@@ -54,6 +54,15 @@ export type CoupangIssuanceEffect =
    * recoverably. Distinct from `PROBE` (which expects the WING home / issuance page at the top).
    */
   | "VERIFY_REACH"
+  /**
+   * Keep WATCHING for a WING surface we recognize, re-probing on the session's own cadence.
+   *
+   * This replaces a park. The dedicated window opens on a blank tab, so the very FIRST probe of every run was
+   * guaranteed to be `unknown` and the run parked on `page_mismatch` — telling a seller who has not logged in
+   * yet that "화면이 바뀐 것 같아요", and then never recovering on its own. Not being there yet is the expected
+   * state at the start of a walk, not drift.
+   */
+  | "AWAIT_SURFACE"
   /** Locate → highlight → arm the barrier for one control, as a single batched step in the session. */
   | { guide: CoupangIssuanceTarget }
   | { observe: CoupangIssuanceTarget }
@@ -234,7 +243,10 @@ export class CoupangIssuanceEngine {
   onSurfaceProbed(probe: WingSurfaceProbe): CoupangIssuanceEffect {
     if (isCoupangIssuanceTerminal(this.stage)) return "NONE";
     if (!probe.ok || probe.blockerCode === "LOGIN_REQUIRED" || probe.pageCategory === "login") {
-      return this.park("waiting_login", "LOGIN_REQUIRED");
+      // A wait, not a park: the seller logs in inside the WING window and the runtime notices by itself. It used
+      // to need a `REQUEST_STEP_RECHECK` from the SellerOps tab, which is the tab they were told not to return to.
+      this.waitingFor("waiting_login", "LOGIN_REQUIRED");
+      return "AWAIT_SURFACE";
     }
     const { branch } = branchAfterWingProbe(probe.pageCategory);
     if (branch === "open_api") {
@@ -256,8 +268,9 @@ export class CoupangIssuanceEngine {
       this.currentTarget = "reach_open_api";
       return { guide: "reach_open_api" };
     }
-    // login is handled above; anything else is an unexpected page → recoverable page_mismatch park.
-    return this.park("page_mismatch", "UI_DRIFT");
+    // Anything else is a page we do not recognize YET. Watch, do not park: at run start this is the blank tab
+    // the window opened on, and mid-walk it is most often a page still settling.
+    return this.awaitSurface();
   }
 
   /** Locate result for the control being guided. Not found / not unique → recoverable target_not_found. */
@@ -437,6 +450,29 @@ export class CoupangIssuanceEngine {
    * Park recoverably at a seller-clearable stop. Emits `RUN_BLOCKED { recoverable: true }` and stops, never a
    * `RUN_FAILED`: the run is not over. A `REQUEST_STEP_RECHECK` re-probes / re-guides.
    */
+  /**
+   * Enter (or stay in) an OBSERVED WAIT: the runtime has not seen a surface it can act on and is watching for
+   * one. Idempotent, so a poll that keeps reading the same unrecognized page does not emit an event per tick.
+   *
+   * Unlike {@link park} this is not a blocker the seller has to clear from the SellerOps tab — it clears itself
+   * the moment WING shows something we recognize.
+   */
+  private waitingFor(stage: "waiting_login" | "awaiting_wing_surface", code: "LOGIN_REQUIRED" | null): void {
+    if (this.stage === stage && this.blockerCode === code) return;
+    this.paused = false;
+    this.blockerCode = code;
+    this.blockerRecoverable = code !== null;
+    this.stage = stage;
+    if (code) this.emit("RUN_BLOCKED", { code, recoverable: true });
+    this.emit("RUN_STATUS_CHANGED", { status: code ? "WAITING_FOR_HUMAN" : "RUNNING" });
+  }
+
+  /** Watch for a recognizable WING surface. Carries NO blocker — "not there yet" is not a fault. */
+  private awaitSurface(): CoupangIssuanceEffect {
+    this.waitingFor("awaiting_wing_surface", null);
+    return "AWAIT_SURFACE";
+  }
+
   private park(
     stage: "waiting_login" | "target_not_found" | "page_mismatch",
     code: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT",

@@ -65,8 +65,20 @@ import type { CommandType, CopyParams, ExecutionMode, RunStatus, StepStatus } fr
 export type CoupangIssuanceStage =
   /** Automatic: the run has just started; the surface is about to be probed. */
   | "opening"
-  /** Recoverable park: WING shows a login page. The seller logs in on their own screen. */
+  /**
+   * Observed wait: WING shows a login page. The seller logs in on their own screen and the runtime notices by
+   * itself — it no longer needs a command from the SellerOps tab to look again.
+   */
   | "waiting_login"
+  /**
+   * Observed wait: no WING surface the tutorial recognizes is on screen YET.
+   *
+   * The dedicated window opens on a blank tab, so this is where every run begins. It used to be
+   * `page_mismatch`, which told a seller who had not logged in that the screen had changed unexpectedly and
+   * then waited for a command that could only be sent from the tab they had just left. Not being there yet is
+   * the expected state, so it carries no blocker and clears itself.
+   */
+  | "awaiting_wing_surface"
   /** Automatic (RUNNING): momentary work between the probe and the first guided control. */
   | "locating_open_api"
   /**
@@ -218,6 +230,10 @@ export function coupangIssuanceStageToRunStatus(stage: CoupangIssuanceStage): Ru
     case "opening":
       return "PREPARING";
     case "locating_open_api":
+    // An observed wait is WORK the runtime is doing (watching WING), not the seller being blocked — so it reads
+    // as RUNNING. Reporting WAITING_FOR_HUMAN here would put a "do something" prompt in front of a seller whose
+    // only remaining task is to keep going in the window they are already in.
+    case "awaiting_wing_surface":
       return "RUNNING";
     case "waiting_login":
     case "reaching_open_api":
@@ -243,6 +259,7 @@ export function coupangIssuanceStageToStepStatus(stage: CoupangIssuanceStage): S
     case "opening":
       return "PREPARING";
     case "locating_open_api":
+    case "awaiting_wing_surface":
       return "OBSERVING";
     case "waiting_login":
     case "reaching_open_api":

@@ -155,20 +155,50 @@ describe("coupang issuance engine — the KEY-CREATION HUMAN CHECKPOINT never au
 });
 
 describe("coupang issuance engine — recoverable parks (never RUN_FAILED)", () => {
-  it("parks on waiting_login for a login page and stays recoverable", () => {
+  it("WAITS on a login page — the seller logs in in WING and the runtime keeps looking", () => {
     const eng = engine();
     eng.command({ type: "START_RUN", expectedRevision: 0 });
-    expect(eng.onSurfaceProbed({ ok: false, pageCategory: "login", blockerCode: "LOGIN_REQUIRED" })).toBe("NONE");
+    // `AWAIT_SURFACE`, not `NONE`: the run keeps re-probing on its own. It used to sit until a
+    // `REQUEST_STEP_RECHECK` arrived — from the SellerOps tab the seller had just been told to leave.
+    expect(eng.onSurfaceProbed({ ok: false, pageCategory: "login", blockerCode: "LOGIN_REQUIRED" })).toBe("AWAIT_SURFACE");
     expect(eng.currentStage()).toBe("waiting_login");
     expect(eng.view().blocker).toEqual({ code: "LOGIN_REQUIRED", recoverable: true });
     expect(eng.events().map((e) => e.type)).not.toContain("RUN_FAILED");
   });
 
-  it("parks on page_mismatch for an unexpected page, and on target_not_found for a missing control", () => {
+  it("re-reading the same login page emits nothing new — a poll is not an event stream", () => {
+    const eng = engine();
+    eng.command({ type: "START_RUN", expectedRevision: 0 });
+    eng.onSurfaceProbed({ ok: false, pageCategory: "login", blockerCode: "LOGIN_REQUIRED" });
+    const after = eng.events().length;
+    expect(eng.onSurfaceProbed({ ok: false, pageCategory: "login", blockerCode: "LOGIN_REQUIRED" })).toBe("AWAIT_SURFACE");
+    expect(eng.events().length).toBe(after);
+  });
+
+  it("an unrecognized page is a WAIT with no blocker — the window opens blank, which is not drift", () => {
+    const eng = engine();
+    eng.command({ type: "START_RUN", expectedRevision: 0 });
+    // Every run starts here: the dedicated window's blank tab classifies as `unknown`. Parking told a seller who
+    // had not logged in yet that the screen had changed unexpectedly, and then never recovered by itself.
+    expect(eng.onSurfaceProbed({ ok: true, pageCategory: "unknown" })).toBe("AWAIT_SURFACE");
+    expect(eng.currentStage()).toBe("awaiting_wing_surface");
+    expect(eng.view().blocker).toBeUndefined();
+    expect(eng.events().map((e) => e.type)).not.toContain("RUN_BLOCKED");
+  });
+
+  it("a wait clears itself the moment WING shows something we recognize", () => {
+    const eng = engine();
+    eng.command({ type: "START_RUN", expectedRevision: 0 });
+    eng.onSurfaceProbed({ ok: true, pageCategory: "unknown" });
+    expect(eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" })).toEqual({ guide: "issue" });
+    expect(eng.view().blocker).toBeUndefined();
+  });
+
+  it("parks on target_not_found for a missing control", () => {
     const eng = engine();
     eng.command({ type: "START_RUN", expectedRevision: 0 });
     eng.onSurfaceProbed({ ok: true, pageCategory: "credential_shown" }); // not where the tutorial starts
-    expect(eng.currentStage()).toBe("page_mismatch");
+    expect(eng.currentStage()).toBe("awaiting_wing_surface");
 
     const eng2 = engine();
     eng2.command({ type: "START_RUN", expectedRevision: 0 });

@@ -22,6 +22,10 @@ export interface CoupangIssuanceSessionOptions {
   onStatePublished?: () => void;
   /** Floor delay between barrier re-arms. A safety floor, not a tuning knob. */
   rearmDelayMs?: number;
+  /** How often an observed wait re-reads WING while the seller logs in / navigates. Tests set 0. */
+  surfaceWaitPollMs?: number;
+  /** How long an observed wait keeps looking. The seated-operator window — never unbounded. */
+  surfaceWaitTimeoutMs?: number;
 }
 
 export class CoupangIssuanceGuidanceSession {
@@ -31,6 +35,8 @@ export class CoupangIssuanceGuidanceSession {
   private readonly runId: string;
   private readonly onStatePublished: (() => void) | undefined;
   private readonly rearmDelayMs: number;
+  private readonly surfaceWaitPollMs: number;
+  private readonly surfaceWaitTimeoutMs: number;
 
   private started = false;
   private publishedSeq = 0;
@@ -53,6 +59,8 @@ export class CoupangIssuanceGuidanceSession {
     this.started = engine.isStarted();
     this.onStatePublished = opts?.onStatePublished;
     this.rearmDelayMs = opts?.rearmDelayMs ?? 250;
+    this.surfaceWaitPollMs = opts?.surfaceWaitPollMs ?? 1_000;
+    this.surfaceWaitTimeoutMs = opts?.surfaceWaitTimeoutMs ?? 10 * 60_000;
   }
 
   attach(): () => void {
@@ -157,6 +165,27 @@ export class CoupangIssuanceGuidanceSession {
         const next = this.engine.onReachVerified(probe);
         this.publishState();
         return this.drive(next);
+      }
+      case "AWAIT_SURFACE": {
+        // Keep looking, inside WING, until the seller gets somewhere we recognize. This is the loop that lets a
+        // run start on a blank tab and survive a login without anyone touching the SellerOps tab.
+        //
+        // The engine's wait states are idempotent, so re-reading the same page emits nothing; only a CHANGE
+        // produces a transition. Bounded by the same seated-operator window every other observation uses — an
+        // unbounded loop would outlive the run and keep polling a page nobody is looking at.
+        // Counted in POLLS, not in accumulated milliseconds: a zero-delay cadence (which tests use, and which a
+        // caller could pass) would advance an elapsed-time accumulator by zero and loop forever.
+        const maxPolls = Math.max(1, Math.ceil(this.surfaceWaitTimeoutMs / Math.max(1, this.surfaceWaitPollMs)));
+        for (let i = 0; i < maxPolls; i++) {
+          if (this.engine.isPaused() || isCoupangIssuanceTerminal(this.engine.currentStage())) return;
+          await new Promise<void>((resolve) => setTimeout(resolve, this.surfaceWaitPollMs));
+          if (this.engine.isPaused() || isCoupangIssuanceTerminal(this.engine.currentStage())) return;
+          const again = await this.driver.probeSurface();
+          const next = this.engine.onSurfaceProbed(again);
+          this.publishState();
+          if (next !== "AWAIT_SURFACE") return this.drive(next);
+        }
+        return;
       }
       case "CLEAR_HIGHLIGHT": {
         await this.driver.clearHighlight();

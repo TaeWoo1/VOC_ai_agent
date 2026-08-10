@@ -58,7 +58,7 @@ function build(script: CoupangIssuanceFixtureScript = {}) {
   const io = loopback();
   const engine = new CoupangIssuanceEngine({ runId: RUN_ID, channelCode: "coupang" }, { clock: makeCoupangIssuanceClock() });
   const driver = new CoupangIssuanceFixtureDriver(script);
-  const session = new CoupangIssuanceGuidanceSession(engine, driver, io.transport, { rearmDelayMs: 1 });
+  const session = new CoupangIssuanceGuidanceSession(engine, driver, io.transport, { rearmDelayMs: 1, surfaceWaitPollMs: 0, surfaceWaitTimeoutMs: 20 });
   session.attach();
   return { io, engine, driver, session };
 }
@@ -346,7 +346,7 @@ describe("coupang issuance session — loopback E2E over the real v2 transport",
     const { client, server } = createLoopbackChannel();
     const engine = new CoupangIssuanceEngine({ runId: RUN_ID, channelCode: "coupang" }, { clock: makeCoupangIssuanceClock() });
     const driver = new CoupangIssuanceFixtureDriver();
-    const session = new CoupangIssuanceGuidanceSession(engine, driver, server, { rearmDelayMs: 1 });
+    const session = new CoupangIssuanceGuidanceSession(engine, driver, server, { rearmDelayMs: 1, surfaceWaitPollMs: 0, surfaceWaitTimeoutMs: 20 });
     session.attach();
 
     const clientViews: ActionWindowRunView[] = [];
@@ -373,5 +373,56 @@ describe("coupang issuance session — loopback E2E over the real v2 transport",
     expect(last?.status).toBe("COMPLETED");
     expect(last?.intent).toBe("API_ISSUANCE_GUIDANCE");
     for (const v of clientViews) expect(validateRunView(v)).toEqual({ ok: true });
+  });
+});
+
+/**
+ * The observed waits — the reason a seller never has to go back to the SellerOps tab mid-walk. Both used to be
+ * parks that sat until a `REQUEST_STEP_RECHECK` arrived from exactly the tab they had been told to leave.
+ */
+describe("coupang issuance session — observed waits recover inside WING", () => {
+  const BLANK = { ok: true, pageCategory: "unknown" } as const;
+  const LOGIN = { ok: false, pageCategory: "login", blockerCode: "LOGIN_REQUIRED" } as const;
+  const ISSUANCE = { ok: true, pageCategory: "open_api_issuance" } as const;
+
+  it("starts on a blank tab and drives itself once the seller reaches the issuance page", async () => {
+    // The dedicated window always opens blank, so the first reading of EVERY run is `unknown`.
+    const { engine, io, session } = build({ probeSequence: [BLANK, BLANK, ISSUANCE] });
+    startRun(io);
+    await session.whenSettled();
+    // No command was sent from SellerOps — the wait noticed the page change by itself, and the walk then ran to
+    // the end on the fixture seller's own advances.
+    expect(engine.currentStage()).toBe("guidance_complete");
+    expect(engine.view().blocker).toBeUndefined();
+  });
+
+  it("holds no blocker while merely waiting — 'not there yet' is not drift", async () => {
+    const { engine, io, session } = build({ probeSequence: [BLANK] });
+    startRun(io);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("awaiting_wing_surface");
+    expect(engine.view().blocker).toBeUndefined();
+  });
+
+  it("waits through a login and picks the run up afterwards, with no command from the frontend", async () => {
+    const { engine, io, session } = build({ probeSequence: [LOGIN, LOGIN, ISSUANCE] });
+    startRun(io);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("guidance_complete");
+    // The seller WAS told to log in — that blocker is real and must have been surfaced once.
+    expect(io.blockers().map((b) => b.code)).toContain("LOGIN_REQUIRED");
+  });
+
+  it("re-reading the same page does not spam the frontend — a poll is not an event stream", async () => {
+    const { io, session } = build({ probeSequence: [LOGIN] });
+    startRun(io);
+    await session.whenSettled();
+    expect(io.blockers().filter((b) => b.code === "LOGIN_REQUIRED").length).toBe(1);
+  });
+
+  it("a zero-delay cadence terminates — an elapsed-time accumulator would have looped forever", async () => {
+    const { io, session } = build({ probeSequence: [BLANK] });
+    startRun(io);
+    await session.whenSettled();
   });
 });
