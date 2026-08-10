@@ -212,6 +212,7 @@ export function createMacOsApprovalPresenter(opts: MacOsApprovalPresenterOptions
   const available = (): boolean => platform === "darwin" && fileExists(OSASCRIPT_PATH);
 
   return {
+    channel: "os_dialog",
     available,
     async present(presentation: ApprovalPresentation): Promise<PresentResult> {
       // Re-check rather than trust the caller: never try to show a secret on an unsupported host.

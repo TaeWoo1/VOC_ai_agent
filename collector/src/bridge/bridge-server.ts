@@ -419,6 +419,9 @@ export class BridgeServer {
       workspaceLabel: view.workspaceLabel,
       confirmationCode: view.confirmationCode,
       approvalRequired: view.approvalRequired,
+      // Taken from the presenter that will have shown the code, not from a config value beside it — the two
+      // could disagree, and a disagreement here points the person at a window that does not exist.
+      ...(this.approvalPresenter.channel ? { approvalChannel: this.approvalPresenter.channel } : {}),
     }));
   }
 

@@ -337,13 +337,24 @@ if [ -z "$TREE_DIRTY" ]; then
   else
     echo "  FAIL  NORMAL          · duplicate SELLEROPS_WING_APPROVED_PHASE lines in the run env"; FAILED=1
   fi
-  run_case "NORMAL          · run command carries BOTH phase variables" 0 "SELLEROPS_WING_APPROVED_PHASE=COUPANG_WING_GUIDED_ISSUANCE_WALK" "$FIXTURES/normal.env"
-
-  # A calibration/action phase must NEVER hand the operator a frontend URL (the historical defect).
-  if grep -qF "localhost:5173" <<<"$out" || grep -qF "/connect/" <<<"$out"; then
-    echo "  FAIL  NORMAL          · no frontend URL (a CLI phase must not emit one)"; FAILED=1
+  # The phase bindings must NOT be exported on the install command line. A launchd job inherits nothing from
+  # the installing shell, so a variable set there would reach the installer and never reach the agent — the
+  # binding travels in the run-env file, which the installer reads and writes into the service's environment.
+  if grep -qF "SELLEROPS_WING_APPROVED_PHASE=" <<<"$out"; then
+    echo "  FAIL  NORMAL          · the install command exports a phase variable the launchd job cannot inherit"; FAILED=1
   else
-    echo "  PASS  NORMAL          · no frontend URL emitted"
+    echo "  PASS  NORMAL          · phase bindings travel in the run env, not on the install command line"
+  fi
+  run_case "NORMAL          · the install command passes the run env" 0 "install --run-env" "$FIXTURES/normal.env"
+
+  # A calibration/action phase must NEVER hand the operator a BOUND frontend URL — the historical defect was
+  # printing /connect/naver?walkthroughRun=<id> as the operator action for every phase, which claims a run/tab
+  # binding this run does not have. A bare product route is the opposite: it is where the seller starts, and
+  # withholding it is what forced the terminal path. Absolute URLs and run tokens stay refused.
+  if grep -qF "localhost:5173" <<<"$out" || grep -qF "walkthroughRun=" <<<"$out" || grep -qF "/connect/naver" <<<"$out"; then
+    echo "  FAIL  NORMAL          · a BOUND frontend URL was emitted (run token or absolute origin)"; FAILED=1
+  else
+    echo "  PASS  NORMAL          · no bound frontend URL emitted (bare product route only)"
   fi
   # The descriptor must reach the operator in full, not just as a PASS line — and both claims must be visible.
   if grep -qF '"WALK_WING_GUIDED_ISSUANCE_TUTORIAL"' <<<"$out" \

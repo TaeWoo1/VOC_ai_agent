@@ -87,6 +87,7 @@ export function createStderrApprovalPresenter(opts: StderrApprovalPresenterOptio
   // A non-TTY stderr is redirected — no human would see the code, so this is NOT a human channel.
   const available = (): boolean => nodeEnv !== "production" && stderr.isTTY === true;
   return {
+    channel: "terminal",
     available,
     present(presentation: ApprovalPresentation): PresentResult {
       // Re-check rather than trust the caller: never write a secret to a non-human channel.
