@@ -93,6 +93,12 @@ export const CALIBRATION_PHASES = [
   // permits — press 확인. The agent's click/type/submit/selection budget is still 0; the widening is entirely in
   // what the human is invited to do, which a capability list cannot express and a manifest must.
   "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY",
+  // The GUIDED ISSUANCE WALK. The product path, run live end-to-end for the first time: the WING-resident
+  // tutorial guides the seller from the open-API page to the terms screen, and RESTS in front of the control
+  // that creates the key. Two of its eight steps highlight a live-calibrated control; the four added by the
+  // 2026-08-10 redesign are TEXT-GUIDED, because nothing was promoted for them and drawing a ring somewhere
+  // plausible would be an invention. The agent clicks, types, submits and navigates NOTHING.
+  "COUPANG_WING_GUIDED_ISSUANCE_WALK",
   // The WING issuance-form REVEAL phase. The agent highlights the live-calibrated 발급 control and RESTS; the
   // OPERATOR presses it. It is a real marketplace action, so it needs its own grant — but it is deliberately NOT
   // declared as key creation: on the official Coupang flow 발급 opens the configuration step and the key is
@@ -258,6 +264,53 @@ export interface OperatorRevealAction {
   autoAdvanceAfterReveal: false;
 }
 
+/**
+ * **The GUIDED WALK's boundary descriptor** — its own shape, not the reveal's, because the two runs stop for
+ * different reasons and a shared descriptor would blur which.
+ *
+ * The reveal stops after one observation of an unconfirmed outcome. The walk runs the whole product tutorial
+ * and stops because the NEXT control creates a key. Every field here is machine-checkable by the harness, so
+ * the separation cannot be softened in prose alone.
+ */
+export interface GuidedWalkBoundary {
+  /** The operator action being approved: walking the tutorial, not issuing anything. */
+  operation: "WALK_WING_GUIDED_ISSUANCE_TUTORIAL";
+  /** The operation this phase must never perform or prepare. */
+  forbiddenFollowOnAction: typeof WING_KEY_CREATION_ACTION;
+  /** The control the walk rests in front of and never presses. */
+  restsBeforeControl: "약관 동의 및 Key 발급받기";
+  createsKeyMaterial: false;
+  /** …and the runtime still cannot demonstrate that none was created. Only the seller sees the screen. */
+  keyCreationRuledOut: false;
+  /** The agent clicks, types, submits — and NAVIGATES — nothing. The last one is new to this entrypoint. */
+  agentPerformsAction: false;
+  agentNavigations: 0;
+  credentialValueReadBudget: 0;
+  /** No connect-test, no sync, no upload: guidance finishing is not a connection. */
+  performsConnectOrSync: false;
+  /** How many of the walk's guided controls carry a live-calibrated locator and may be highlighted. */
+  highlightedControlCount: 2;
+  /** …and how many are guided by TEXT because nothing was promoted for them. */
+  textGuidedControlCount: 4;
+  /** A mandatory operator checkpoint precedes every step; none auto-advances. */
+  explicitCheckpointRequired: true;
+}
+
+export const COUPANG_WING_GUIDED_WALK_BOUNDARY: GuidedWalkBoundary = {
+  operation: "WALK_WING_GUIDED_ISSUANCE_TUTORIAL",
+  forbiddenFollowOnAction: WING_KEY_CREATION_ACTION,
+  restsBeforeControl: "약관 동의 및 Key 발급받기",
+  createsKeyMaterial: false,
+  keyCreationRuledOut: false,
+  agentPerformsAction: false,
+  agentNavigations: 0,
+  credentialValueReadBudget: 0,
+  performsConnectOrSync: false,
+  highlightedControlCount: 2,
+  textGuidedControlCount: 4,
+  explicitCheckpointRequired: true,
+};
+
 export const COUPANG_WING_ISSUANCE_REVEAL_ACTION: OperatorRevealAction = {
   operation: WING_REVEAL_OPERATOR_ACTION,
   forbiddenFollowOnAction: WING_KEY_CREATION_ACTION,
@@ -333,6 +386,8 @@ export interface PhaseSpec {
    * cannot rule key creation out" into something more reassuring than the evidence supports.
    */
   requiresOperatorRevealAction?: boolean;
+  /** The guided walk's boundary descriptor. Present only on that phase; the harness verifies every field. */
+  guidedWalkBoundary?: GuidedWalkBoundary;
   /** The canonical reveal-action descriptor emitted into the manifest (present iff the flag above is set). */
   operatorRevealAction?: OperatorRevealAction;
   /** The canonical destructive-action descriptor emitted into the manifest (present iff the flag above is set). */
@@ -555,6 +610,28 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     allowsHighlight: false,
     mode: "READ_ONLY",
   },
+  COUPANG_WING_GUIDED_ISSUANCE_WALK: {
+    phase: "COUPANG_WING_GUIDED_ISSUANCE_WALK",
+    cli: "src/cli/run-coupang-wing-issuance-live.ts",
+    driver: "CoupangWingIssuanceDriver (WING-resident guided walk: highlight the two calibrated controls, text-guide the rest, rest at every checkpoint)",
+    // It HIGHLIGHTS two live-calibrated controls ⇒ `allowsHighlight: true` ⇒ it fails closed
+    // (`SELECTORS_NOT_CALIBRATED`) unless the caller states the `issue` calibration. The other guided steps are
+    // text-only and claim no locator.
+    //
+    // There is no action here for pressing anything: every marketplace act is the seller's. The one that
+    // creates the key — `약관 동의 및 Key 발급받기` — is the last checkpoint's subject and is never pressed by
+    // this run, which is stated in the operation text because a capability list cannot express a refusal.
+    capableActions: [
+      "OPEN_DEDICATED_WINDOW",
+      "WAIT_OPERATOR_LOGIN_NAV",
+      "CLASSIFY_SANITIZED_PAGE_CATEGORY",
+      "HIGHLIGHT_REAL_CONTROL",
+      "OBSERVE_USER_CLICK_TRANSITION",
+    ],
+    allowsHighlight: true,
+    mode: "READ_ONLY",
+    guidedWalkBoundary: COUPANG_WING_GUIDED_WALK_BOUNDARY,
+  },
   COUPANG_WING_ISSUANCE_FORM_REVEAL: {
     phase: "COUPANG_WING_ISSUANCE_FORM_REVEAL",
     cli: "src/cli/run-coupang-wing-reveal-live.ts",
@@ -617,6 +694,7 @@ export const WING_PHASES: readonly CalibrationPhase[] = [
   "COUPANG_WING_STAGE2_RECON",
   "COUPANG_WING_STAGE2_LABEL_CALIBRATION",
   "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY",
+  "COUPANG_WING_GUIDED_ISSUANCE_WALK",
   "COUPANG_WING_ISSUANCE_FORM_REVEAL",
   "COUPANG_WING_KEY_DELETION",
 ];
@@ -711,6 +789,7 @@ export const ENTRYPOINT_PHASES = [
   "COUPANG_WING_STAGE2_RECON",
   "COUPANG_WING_STAGE2_LABEL_CALIBRATION",
   "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY",
+  "COUPANG_WING_GUIDED_ISSUANCE_WALK",
   "COUPANG_WING_ISSUANCE_FORM_REVEAL",
   "COUPANG_WING_KEY_DELETION",
   "API_ISSUANCE_FE_LIVE_PROOF",
@@ -851,6 +930,25 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
       "않습니다. SellerOps는 그 버튼의 위치만 측정하고, 그 다음 단계 자체가 존재하지 않습니다(키 발급은 별도 승인·별도 " +
       "manifest). SellerOps는 약관을 읽거나 판단하거나 대신 동의하지 않습니다. 각 시점마다 라벨 매칭 수·표시 여부·" +
       "라벨 연결 방식만 번호로 읽으며, 화면 문구·입력값·키 값은 기록하지 않습니다.",
+    emitsFrontendUrl: false,
+  },
+  // The GUIDED ISSUANCE WALK: the product path itself, live. The summary has to carry what the walk does NOT
+  // do as precisely as what it does — the four text-guided steps are not highlighted, and the last checkpoint
+  // stands in front of a control this run never presses.
+  COUPANG_WING_GUIDED_ISSUANCE_WALK: {
+    entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
+    cli: "src/cli/run-coupang-wing-issuance-live.ts",
+    entrypointCommandId: "run-coupang-wing-issuance-live",
+    operatorActionSummary:
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 로그인·페이지 이동·모든 마켓플레이스 조작은 판매자가 직접 합니다" +
+      "(SellerOps는 클릭·입력·제출을 하지 않고, 페이지를 대신 이동하지도 않습니다). 안내는 WING 화면 위에 표시되며 " +
+      "각 단계에서 멈춥니다: ① 오픈API 키 발급 페이지로 직접 이동 → ② 'API Key 발급 받기'(강조 표시됨)를 직접 누름 → " +
+      "③ 사용 목적 화면에서 'OPEN API' 선택 확인(기본값이면 누를 것 없음) → ④ '확인'을 직접 누름 → ⑤ 약관 2개를 " +
+      "직접 읽고 판단한 뒤 동의 체크 → ⑥ 여기서 멈춥니다. " +
+      "⚠ ③④⑤ 단계는 강조 표시가 없습니다. 해당 control은 측정만 되었고 selector로 승격되지 않았기 때문이며, " +
+      "SellerOps는 위치를 아는 척하지 않고 글로만 안내합니다. " +
+      "⚠ 마지막 '약관 동의 및 Key 발급받기'는 실제로 키를 생성하는 control이며, 이번 proof에서는 절대 누르지 않습니다. " +
+      "키 발급·credential 읽기·연결·동기화는 이번 run의 범위가 아닙니다.",
     emitsFrontendUrl: false,
   },
   // The WING issuance-form REVEAL phase: a CLI-launched dedicated Chrome. The operator presses 발급 themselves
@@ -1022,6 +1120,8 @@ export interface ApprovalPrereqInput {
    * the checkpoint, nor turn on auto-advance.
    */
   operatorRevealAction?: OperatorRevealAction;
+  /** The guided walk's own boundary descriptor. Present only on that phase. */
+  guidedWalkBoundary?: GuidedWalkBoundary;
 }
 
 /** The sanitized manifest — no raw URL (host category only), no secret, no raw account/store id. */
@@ -1510,6 +1610,7 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
       : {}),
     // Emit the CONSTANT, not the input — validation forced them equal, so the manifest cannot carry a softened
     // reveal contract even if a future edit reorders the checks.
+    ...(spec.guidedWalkBoundary ? { guidedWalkBoundary: spec.guidedWalkBoundary } : {}),
     ...(spec.requiresOperatorRevealAction && spec.operatorRevealAction
       ? { operatorRevealAction: spec.operatorRevealAction }
       : {}),

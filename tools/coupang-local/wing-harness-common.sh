@@ -318,6 +318,54 @@ print(want if ok else json.dumps(v))' "$manifest" "$key" "$want" 2>/dev/null)" |
   return $rc
 }
 
+# Verify the GUIDED WALK's boundary descriptor, field by field, with the JSON TYPE part of the contract — a
+# `createsKeyMaterial` of the STRING "false" is not something the runtime treats as false, and a text-only
+# comparison accepts it. Same machinery as verify_reveal_descriptor, its own field set: the two runs stop for
+# different reasons and a shared descriptor would blur which. $1=manifest path
+verify_walk_descriptor() {
+  local manifest="$1" pair key want got rc=0
+  for pair in \
+    "operation:WALK_WING_GUIDED_ISSUANCE_TUTORIAL" \
+    "forbiddenFollowOnAction:COMPLETE_WING_KEY_ISSUANCE" \
+    "createsKeyMaterial:false" \
+    "keyCreationRuledOut:false" \
+    "agentPerformsAction:false" \
+    "agentNavigations:0" \
+    "credentialValueReadBudget:0" \
+    "performsConnectOrSync:false" \
+    "highlightedControlCount:2" \
+    "textGuidedControlCount:4" \
+    "explicitCheckpointRequired:true"
+  do
+    key="${pair%%:*}"; want="${pair#*:}"
+    got="$(python3 -c 'import json,sys
+d = json.load(open(sys.argv[1])).get("guidedWalkBoundary")
+if not isinstance(d, dict) or sys.argv[2] not in d:
+    sys.exit(1)
+v, want = d[sys.argv[2]], sys.argv[3]
+if want in ("true", "false"):
+    ok = v is (want == "true")
+elif want.isdigit():
+    ok = isinstance(v, int) and not isinstance(v, bool) and str(v) == want
+else:
+    ok = isinstance(v, str) and v == want
+print(want if ok else json.dumps(v))' "$manifest" "$key" "$want" 2>/dev/null)" || got=""
+    if [ "$got" != "$want" ]; then
+      echo "  FAIL  guided-walk descriptor $key is '${got:-missing}', must be '$want'"
+      rc=1
+    fi
+  done
+  # The control it rests before is checked separately: it is the one field whose VALUE is the safety property.
+  got="$(python3 -c 'import json,sys
+d = json.load(open(sys.argv[1])).get("guidedWalkBoundary") or {}
+print(d.get("restsBeforeControl", ""))' "$manifest" 2>/dev/null)" || got=""
+  if [ "$got" != "약관 동의 및 Key 발급받기" ]; then
+    echo "  FAIL  guided-walk descriptor restsBeforeControl is '${got:-missing}' — it must name the key-creating control"
+    rc=1
+  fi
+  return $rc
+}
+
 # Resolve the manifest output path. BSD mktemp substitutes only TRAILING X's, so a `.XXXXXX.json` template
 # creates a file named literally that, which then collides on the next run — take a temp DIRECTORY instead.
 # Echoes the path, or nothing on failure (the caller must refuse). $1=temp-dir prefix

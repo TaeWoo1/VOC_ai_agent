@@ -23,7 +23,8 @@
  * a gated scaffold, never run — do not run it without a fresh, single-use, in-turn operator approval.
  */
 import { randomUUID } from "node:crypto";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 import type { Page } from "playwright";
 import { loadConfig } from "../config";
 import { log } from "../log";
@@ -37,6 +38,8 @@ import {
 } from "./local-agent";
 import { resolveWingUrl, screenWingUrl } from "./coupang-wing-classifier";
 import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from "./live-run-approval";
+import { WING_APPROVAL_PHASE_ENV, WING_APPROVED_PHASE_ENV } from "./coupang-wing-classifier";
+import { verifyRepoIdentity } from "./repo-identity";
 
 const CHANNEL_CODE = "coupang";
 
@@ -67,34 +70,59 @@ async function waitForShutdown(bridge: AgentBridge): Promise<void> {
 }
 
 /**
- * **The guided walk this CLI drives is FENCED OFF, and the fence is code, not a comment.**
+ * **The fence is LIFTED (2026-08-10), deliberately, and what replaced it is code.**
  *
- * `coupang-issuance-stages.ts` documents the 7-step plan as contradicted by live evidence and unsafe to run;
- * review pointed out — correctly — that the comment was the only thing stopping it. Concretely: `self_dev` /
- * `call_ip` match 0 and `vendor_info` never resolves on the real no-key surface, so the walk's first three
- * checkpoints cannot be located; and the plan treats 발급 as the key-creating press, so the checkpoint after it
- * tells the seller to copy keys that do not exist. Unlike the reveal and deletion CLIs this entrypoint also has
- * NO approval-manifest gate, NO phase binding and NO repo-identity check, and it navigates the page itself.
+ * It read: "the shipped 7-step guided plan is contradicted by live WING evidence … and this entrypoint has no
+ * approval-manifest gate, no phase binding and no repo-identity check". Every clause of that has been answered
+ * rather than argued away:
  *
- * The fence lifts when the guided plan is redesigned from the Stage-2 observation
- * (`COUPANG_WING_ISSUANCE_FORM_REVEAL`), not before — and lifting it means deleting this constant deliberately,
- * which is a reviewable diff rather than a forgotten comment.
+ *   - the plan was redesigned from five granted READ_ONLY runs — 발급 → PURPOSE(OPEN API, default) → 확인 →
+ *     TERMS(2 consents) → the key-creating control — and the two steps for screens this flow never shows are
+ *     gone. `self_dev` / `vendor_info` / `call_ip` are no longer guided by anything;
+ *   - 발급 is no longer treated as the key-creating press. `checkpoint_before_issue` now rests in front of
+ *     `약관 동의 및 Key 발급받기`, and no step follows it that assumes a credential exists;
+ *   - this entrypoint now REQUIRES the {@link COUPANG_WING_GUIDED_ISSUANCE_WALK_PHASE} on BOTH phase variables,
+ *     verifies repo identity, and no longer navigates the page — the seller does.
+ *
+ * Lifting it is this diff, which is the reviewable act the fence's own comment asked for.
  */
-export const COUPANG_WING_GUIDED_ISSUANCE_FENCED = true as const;
-export const COUPANG_WING_GUIDED_ISSUANCE_FENCE_REASON =
-  "the shipped 7-step guided plan is contradicted by live WING evidence (self_dev/call_ip match 0, vendor_info " +
-  "never resolves, and 발급 opens a configuration step rather than creating the key), and this entrypoint has no " +
+export const COUPANG_WING_GUIDED_ISSUANCE_WALK_PHASE = "COUPANG_WING_GUIDED_ISSUANCE_WALK" as const;
+
+/**
+ * **The agent's navigation budget on this entrypoint: zero.**
+ *
+ * It used to `page.goto(url)` after launching. On the product path the seller reaches WING themselves, and an
+ * agent that navigates has taken a marketplace action nobody granted — the same boundary every read-only WING
+ * entrypoint already holds ("this recorder never `.goto`s"). The screened URL is still resolved, because the
+ * screen is what keeps the dedicated window pointed at the WING host, but nothing drives the page to it.
+ */
+export const COUPANG_WING_GUIDED_WALK_AGENT_NAVIGATIONS = 0 as const;
   "approval-manifest gate, no phase binding and no repo-identity check";
 
 async function main(): Promise<void> {
   banner();
   const args = process.argv.slice(2);
-  // The fence, checked FIRST — before the approval flag, before URL screening, before anything can open.
-  if (COUPANG_WING_GUIDED_ISSUANCE_FENCED) {
-    console.error("Refusing to start the guided WING issuance walk: FENCED.");
-    console.error(`  ${COUPANG_WING_GUIDED_ISSUANCE_FENCE_REASON}.`);
-    console.error("  Use src/cli/run-coupang-wing-reveal-live.ts (COUPANG_WING_ISSUANCE_FORM_REVEAL) to observe the");
-    console.error("  real Stage-2 surface first; the guided plan is redesigned from that evidence, not from this walk.");
+  // The PHASE gate, checked FIRST — before the approval flag, before URL screening, before anything can open.
+  // Two variables that must agree, for the reason every WING gate uses two: with one, a phase left over from an
+  // earlier shell arms a run under a manifest granted for different work, and a forgotten phase silently runs
+  // something the operator never saw. This walk is the widest WING phase there is; it gets the strictest gate.
+  const requested = process.env[WING_APPROVAL_PHASE_ENV];
+  const approved = process.env[WING_APPROVED_PHASE_ENV];
+  if (requested !== COUPANG_WING_GUIDED_ISSUANCE_WALK_PHASE || approved !== COUPANG_WING_GUIDED_ISSUANCE_WALK_PHASE) {
+    console.error(
+      `Refusing to start the guided WING issuance walk: both ${WING_APPROVAL_PHASE_ENV} and ` +
+        `${WING_APPROVED_PHASE_ENV} must be ${COUPANG_WING_GUIDED_ISSUANCE_WALK_PHASE}. No browser launched.`,
+    );
+    process.exit(5);
+    return;
+  }
+  // Repo identity, before anything opens: the bootstrap pinned this run to a commit, and a harness pointed at a
+  // decoy repository would otherwise satisfy every later check against the wrong tree. The expected SHA travels
+  // in the run env the preflight bound, so a run whose code moved since the manifest cannot start.
+  const expectedSha = process.env.WALKTHROUGH_GIT_COMMIT ?? "";
+  const identity = verifyRepoIdentity({ expectedSha, repoRoot: resolve(dirname(fileURLToPath(import.meta.url)), "../../..") });
+  if (!identity.ok) {
+    console.error(`Refusing to start: repo identity check failed (${identity.cause}). No browser launched.`);
     process.exit(5);
     return;
   }
@@ -121,8 +149,14 @@ async function main(): Promise<void> {
   const cfg = loadConfig();
   const ctx = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
   try {
+    // The newest tab, wherever the SELLER navigated. This entrypoint never `.goto`s — see
+    // COUPANG_WING_GUIDED_WALK_AGENT_NAVIGATIONS. `url` stays resolved and screened so the dedicated window can
+    // only be opened against the WING host, but nothing drives the page there.
     const page = (ctx.pages()[0] ?? (await ctx.newPage())) as Page;
-    await page.goto(url, { waitUntil: "domcontentloaded" });
+    console.error("");
+    console.error("GUIDED WALK — log in to WING and reach the open-API 키 발급 page YOURSELF.");
+    console.error("  SellerOps does not navigate for you and presses nothing. The on-page panel guides each step.");
+    console.error("  ⚠ It STOPS in front of '약관 동의 및 Key 발급받기'. Do not press it in this run.");
 
     const runId = mintIssuanceRunId();
     const driver = new CoupangWingIssuanceDriver(page, { context: ctx });

@@ -130,8 +130,13 @@ describe("run-coupang-wing-issuance-live CLI — source guard (gated, no click/t
     expect(code).not.toContain(token);
   });
 
-  it("navigates exactly ONCE — to the pre-screened URL only", () => {
-    expect(code.split("page.goto(").length - 1).toBe(1);
+  it("**navigates ZERO times** — the seller reaches WING themselves", () => {
+    // It used to `page.goto(url)` exactly once, and this guard pinned that at one. On the product path the
+    // seller reaches WING; an agent that drives the page there has taken a marketplace action nobody granted,
+    // and every read-only WING entrypoint already holds that line ("this recorder never `.goto`s").
+    const codeOnly = code.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    expect(codeOnly.split(".goto(").length - 1).toBe(0);
+    expect(code).toContain("COUPANG_WING_GUIDED_WALK_AGENT_NAVIGATIONS = 0");
   });
 
   it("is gated on the explicit Coupang WING live-run approval flag and fails closed on a bad URL before launch", () => {

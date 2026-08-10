@@ -130,28 +130,53 @@ describe("coupang issuance stages — allowed commands", () => {
   });
 });
 
-describe("the guided walk is FENCED OFF in code, not only in comments", () => {
-  it("the fence is ON, and its entrypoint refuses before the approval flag is even read", async () => {
-    // Review's point: the ⚠ comments saying the plan "is not safe to run" were the ONLY thing stopping it, while
-    // `run-coupang-wing-issuance-live.ts` still launched it behind just the WING flag — with no approval manifest,
-    // no phase binding, no repo-identity check, and its own `page.goto`. Lifting the fence must be a deliberate,
-    // reviewable diff, so it is a constant with a test rather than a paragraph.
+describe("the fence is LIFTED, and every clause of it was answered in code", () => {
+  // The fence said: the plan is contradicted by live evidence, and this entrypoint has no approval-manifest
+  // gate, no phase binding, no repo-identity check, and navigates the page itself. Lifting it had to be a
+  // deliberate, reviewable diff — so these assert the REPLACEMENTS, not the absence.
+  const SRC = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), "../../../src/cli/run-coupang-wing-issuance-live.ts"),
+    "utf8",
+  );
+
+  it("the fence constants are GONE — not left true, not left dangling", async () => {
     const cli = await import("../../../src/cli/run-coupang-wing-issuance-live");
-    expect(cli.COUPANG_WING_GUIDED_ISSUANCE_FENCED).toBe(true);
-    expect(cli.COUPANG_WING_GUIDED_ISSUANCE_FENCE_REASON).toMatch(/self_dev\/call_ip match 0/);
-    expect(cli.COUPANG_WING_GUIDED_ISSUANCE_FENCE_REASON).toMatch(/no approval-manifest gate/);
+    expect("COUPANG_WING_GUIDED_ISSUANCE_FENCED" in cli).toBe(false);
+    expect("COUPANG_WING_GUIDED_ISSUANCE_FENCE_REASON" in cli).toBe(false);
+    expect(cli.COUPANG_WING_GUIDED_ISSUANCE_WALK_PHASE).toBe("COUPANG_WING_GUIDED_ISSUANCE_WALK");
   });
 
-  it("the fence is checked FIRST in main(), ahead of the approval flag", () => {
-    const src = readFileSync(
-      resolve(dirname(fileURLToPath(import.meta.url)), "../../../src/cli/run-coupang-wing-issuance-live.ts"),
-      "utf8",
-    );
-    const body = src.slice(src.indexOf("async function main("));
-    expect(body.indexOf("COUPANG_WING_GUIDED_ISSUANCE_FENCED")).toBeGreaterThan(-1);
-    expect(body.indexOf("COUPANG_WING_GUIDED_ISSUANCE_FENCED")).toBeLessThan(body.indexOf("hasCoupangWingRunApproval"));
-    // …and it points at the phase that produces the evidence needed to lift it.
-    expect(body).toContain("run-coupang-wing-reveal-live.ts");
+  it("**the PHASE gate is checked first — ahead of the approval flag, as the fence was**", () => {
+    const body = SRC.slice(SRC.indexOf("async function main("));
+    const phaseIdx = body.indexOf("COUPANG_WING_GUIDED_ISSUANCE_WALK_PHASE");
+    expect(phaseIdx).toBeGreaterThan(-1);
+    expect(phaseIdx).toBeLessThan(body.indexOf("hasCoupangWingRunApproval"));
+    // BOTH variables, and they must agree — one alone lets a stale export from another WING run authorize this.
+    expect(body).toContain("WING_APPROVAL_PHASE_ENV");
+    expect(body).toContain("WING_APPROVED_PHASE_ENV");
+  });
+
+  it("repo identity is verified before anything opens", () => {
+    const body = SRC.slice(SRC.indexOf("async function main("));
+    expect(body).toContain("verifyRepoIdentity");
+    expect(body.indexOf("verifyRepoIdentity")).toBeLessThan(body.indexOf("launchNaverContext"));
+  });
+
+  it("**the agent navigates NOTHING** — the `page.goto` the fence named is gone", () => {
+    // The clause that mattered most on the product path: a seller reaches WING themselves, and an agent that
+    // drives the page there has taken a marketplace action nobody granted.
+    // Comment lines stripped first, per collector/CLAUDE.md §5: the docstring explaining that the goto is gone
+    // says "page.goto", and prose has produced this exact false failure in this repo before.
+    const codeOnly = SRC.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    expect(codeOnly).not.toContain(".goto(");
+    const cliNavBudget = SRC.match(/COUPANG_WING_GUIDED_WALK_AGENT_NAVIGATIONS = (\d+)/);
+    expect(cliNavBudget?.[1]).toBe("0");
+  });
+
+  it("the URL is still SCREENED even though nothing navigates to it", () => {
+    // The screen is what keeps the dedicated window pointed at the WING host; dropping it along with the goto
+    // would have widened where the profile can be opened.
+    expect(SRC).toContain("screenWingUrl");
   });
 });
 
