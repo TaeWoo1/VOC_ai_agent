@@ -1143,7 +1143,9 @@ async function main(): Promise<void> {
   // downgrade to the fixture: the operator granted a live walk and a simulation that looks like one is worse
   // than nothing being hosted at all.
   const liveWalkRefusal = args.includes(ACTION_WINDOW_COUPANG_ISSUANCE_LIVE_FLAG)
-    ? coupangLiveWalkRefusal(args, process.env, verifyRepoIdentity, collectorRoot)
+    // The REPOSITORY root, not the collector package — `verifyRepoIdentity` compares this by realpath against
+    // git's own toplevel, so handing it a subdirectory fails every time and looks like a decoy repo.
+    ? coupangLiveWalkRefusal(args, process.env, verifyRepoIdentity, resolve(collectorRoot, ".."))
     : "PHASE_NOT_BOUND";
   const hostLiveWalk = args.includes(ACTION_WINDOW_COUPANG_ISSUANCE_LIVE_FLAG) && liveWalkRefusal === null;
   if (args.includes(ACTION_WINDOW_COUPANG_ISSUANCE_LIVE_FLAG) && !hostLiveWalk) {
