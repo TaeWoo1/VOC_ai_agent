@@ -338,11 +338,14 @@ if [ -z "$TREE_DIRTY" ]; then
     echo "  PASS  NORMAL          · no frontend URL emitted"
   fi
   # The descriptor must reach the operator in full, not just as a PASS line — and both claims must be visible.
-  if grep -qF '"REVEAL_WING_ISSUANCE_CONFIGURATION"' <<<"$out" \
+  if grep -qF '"WALK_WING_GUIDED_ISSUANCE_TUTORIAL"' <<<"$out" \
      && grep -qF '"createsKeyMaterial": false' <<<"$out" \
      && grep -qF '"keyCreationRuledOut": false' <<<"$out" \
+     && grep -qF '"agentNavigations": 0' <<<"$out" \
+     && grep -qF '"performsConnectOrSync": false' <<<"$out" \
+     && grep -qF '약관 동의 및 Key 발급받기' <<<"$out" \
      && grep -qF '"COMPLETE_WING_KEY_ISSUANCE"' <<<"$out"; then
-    echo "  PASS  NORMAL          · manifest carries both claims and names the forbidden follow-on action"
+    echo "  PASS  NORMAL          · manifest names the control it rests before, both key claims, 0 navigations and no connect/sync"
   else
     echo "  FAIL  NORMAL          · guided-walk boundary incomplete in the displayed manifest"; FAILED=1
   fi
