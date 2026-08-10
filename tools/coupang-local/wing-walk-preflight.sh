@@ -234,7 +234,9 @@ echo "  On approval — ONE command, then no terminal for the rest of the run:"
 # reads and writes into the service's own environment — so the binding survives into a launchd job that inherits
 # nothing from this shell. A variable exported here would reach the installer and never reach the agent.
 echo "    cd $COLLECTOR_DIR && npx tsx $M_CLI install --run-env $RUN_ENV \\"
-echo "      -- --connections ${WALK_CONNECTIONS#"$COLLECTOR_DIR/"} --action-window-coupang-issuance-live"
+# ABSOLUTE, not relative: a relative path would resolve only because launchd honours WorkingDirectory, and a
+# connections file that silently fails to load looks exactly like an agent that refuses for a different reason.
+echo "      -- --connections $WALK_CONNECTIONS --action-window-coupang-issuance-live"
 echo
 echo "  Then, with no terminal involved:"
 echo "    1. open SellerOps and go to /connect/coupang (the frontend finds the agent on loopback by itself)"
