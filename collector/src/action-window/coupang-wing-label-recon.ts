@@ -1793,34 +1793,77 @@ export const WING_VENDOR_FORM_CANDIDATE_IDS = [
 ] as const;
 
 /**
- * Whether the run may INVITE the operator to press 확인. Closed, and fail-closed: two of the three values stop.
+ * **WHICH SCREEN a reading is of.** Answered before anything is decided about what to press on it.
  *
- * This is not advice about safety in general — it is the specific question "is 확인 the next step of a wizard,
- * or the submit button of a form that is already on screen", answered from the reading rather than from the
- * flow description that has already been wrong once about this screen's wording.
+ * The 2026-08-10 discovery run is why this exists. Its gate asked only "are the vendor fields visible?", and
+ * those fields are hidden on EVERY screen in this flow — so it answered "advance" while the operator was
+ * already looking at the terms screen, and the run printed "press 확인" for a screen whose visible control was
+ * `약관 동의 및 Key 발급받기`. Nothing was pressed, because 확인 was no longer there to press. That is luck.
+ *
+ * A guard that reasons about what is on a screen without first establishing WHICH screen is this workstream's
+ * recurring defect, and this is its ninth instance.
+ */
+export const WING_FLOW_SCREENS = ["PURPOSE", "TERMS", "UNRECOGNIZED", "NOT_MEASURED"] as const;
+export type WingFlowScreen = (typeof WING_FLOW_SCREENS)[number];
+
+/** The candidate whose visibility identifies the purpose screen. */
+export const WING_PURPOSE_SCREEN_MARKER_ID = "stage2.purpose.operator_verbatim" as const;
+/** The candidates whose visibility identifies the TERMS screen. Either one is sufficient. */
+export const WING_TERMS_SCREEN_MARKER_IDS = ["stage3.terms.heading", WING_KEY_CREATION_CONTROL_ID] as const;
+
+export interface WingScreenReading {
+  readonly precondition: WingStage2Precondition;
+  readonly faultCount: number;
+  readonly candidates: readonly { readonly id: string; readonly presence: WingStage2Presence }[];
+}
+
+/**
+ * Identify the screen from its markers. **TERMS wins** when both families read visible.
+ *
+ * That precedence is not arbitrary: the terms screen is the one carrying the key-creation control, and a
+ * reading that could be either must resolve to the one where stopping is correct. `UNRECOGNIZED` when no marker
+ * paints — a screen we have never measured is not a screen to act on.
+ */
+export function wingFlowScreenFrom(reading: WingScreenReading): WingFlowScreen {
+  if (reading.precondition !== "OK" || reading.faultCount > 0) return "NOT_MEASURED";
+  const byId = new Map(reading.candidates.map((c) => [c.id, c.presence]));
+  const seen = (id: string): WingStage2Presence | undefined => byId.get(id);
+  const markers = [WING_PURPOSE_SCREEN_MARKER_ID, ...WING_TERMS_SCREEN_MARKER_IDS];
+  // Every marker must have been PROBED. A missing row cannot distinguish "not on this screen" from "not asked
+  // about", and screen identity is the one question that must not be answered from an absence of data.
+  for (const id of markers) {
+    const p = seen(id);
+    if (p === undefined || p === "NOT_MEASURED") return "NOT_MEASURED";
+  }
+  if (WING_TERMS_SCREEN_MARKER_IDS.some((id) => seen(id) === "PRESENT_VISIBLE")) return "TERMS";
+  if (seen(WING_PURPOSE_SCREEN_MARKER_ID) === "PRESENT_VISIBLE") return "PURPOSE";
+  return "UNRECOGNIZED";
+}
+
+/**
+ * Whether the run may INVITE the operator to press 확인. Closed, and fail-closed: four of the five values stop.
+ *
+ * **Screen identity first.** The vendor-field question is only meaningful on the purpose screen; asked anywhere
+ * else it returns a confident answer about an irrelevant fact. So the order is: is this measured, is this the
+ * purpose screen, and only then — is 확인 a step or a submission.
  */
 export const WING_CONFIRM_ADVISORIES = [
   "ADVANCE_FORM_NOT_YET_REVEALED",
   "STOP_FORM_ALREADY_VISIBLE",
+  "STOP_ALREADY_PAST_THE_PURPOSE_SCREEN",
+  "STOP_SCREEN_UNRECOGNIZED",
   "STOP_NOT_MEASURED",
 ] as const;
 export type WingConfirmAdvisory = (typeof WING_CONFIRM_ADVISORIES)[number];
 
-/**
- * Decide from a checkpoint reading whether 확인 may be invited. **Defaults to STOP on anything unmeasured.**
- *
- * A missing candidate, a `NOT_MEASURED` presence, any probe fault, or a precondition that did not pass all
- * produce `STOP_NOT_MEASURED`. That is deliberate and it is the whole value of the function: the failure this
- * prevents is a run that could not read the page concluding, from the absence of a signal, that pressing the
- * key-creating control is fine.
- */
-export function wingConfirmAdvisory(reading: {
-  readonly precondition: WingStage2Precondition;
-  readonly faultCount: number;
-  readonly candidates: readonly { readonly id: string; readonly presence: WingStage2Presence }[];
-}): WingConfirmAdvisory {
-  if (reading.precondition !== "OK") return "STOP_NOT_MEASURED";
-  if (reading.faultCount > 0) return "STOP_NOT_MEASURED";
+export function wingConfirmAdvisory(reading: WingScreenReading): WingConfirmAdvisory {
+  const screen = wingFlowScreenFrom(reading);
+  if (screen === "NOT_MEASURED") return "STOP_NOT_MEASURED";
+  // The terms screen is PAST the point 확인 belongs to, and it is where the key-creating control lives. Being
+  // here at all means the flow moved without us; continuing would issue an instruction for a screen that is
+  // not on the glass.
+  if (screen === "TERMS") return "STOP_ALREADY_PAST_THE_PURPOSE_SCREEN";
+  if (screen === "UNRECOGNIZED") return "STOP_SCREEN_UNRECOGNIZED";
   const byId = new Map(reading.candidates.map((c) => [c.id, c.presence]));
   for (const id of WING_VENDOR_FORM_CANDIDATE_IDS) {
     const presence = byId.get(id);
@@ -1832,12 +1875,48 @@ export function wingConfirmAdvisory(reading: {
   return "ADVANCE_FORM_NOT_YET_REVEALED";
 }
 
+/**
+ * **Which screen each checkpoint expects to be looking at when it is ANNOUNCED.**
+ *
+ * The generalisation of the gate. A checkpoint's instruction describes an action on a specific screen, so
+ * printing it while the browser is somewhere else tells the operator to do something they cannot do — and in
+ * the one case that matters, to press a control that is not there while a key-creating one is.
+ *
+ * The FIRST checkpoint has no expectation: nothing has been read yet, and the operator is still navigating.
+ */
+export const WING_CHECKPOINT_EXPECTED_SCREEN: Readonly<Record<WingFlowCheckpoint, WingFlowScreen | null>> =
+  Object.freeze({
+    PURPOSE_SCREEN_UNTOUCHED: null,
+    PURPOSE_OPTION_SELECTED_BY_OPERATOR: "PURPOSE",
+    AFTER_OPERATOR_CONFIRM: "PURPOSE",
+    TERMS_CHECKED_BY_OPERATOR: "TERMS",
+  });
+
+/**
+ * **The terms checkboxes have NO accessible name, so nothing about them may be promoted.**
+ *
+ * MEASURED 2026-08-10 on the live terms screen: both visible checkboxes read `nameSource: NONE`,
+ * `labelForCount: 0`, `ancestorLabelCount: 0`, `ariaLabelledbyRefCount: 0`, and no shared `name` group. The two
+ * consent sentences ARE on the page and painting — but they are not associated with the inputs by any
+ * mechanism the accname subset can follow, and neither sentence is unique (2 painting matches each).
+ *
+ * So a checkbox cannot be tied to its own consent text by association, and a consent sentence cannot be tied to
+ * a checkbox by uniqueness. Guessing the pairing from DOM order would be inventing the one fact that matters:
+ * WHICH box the seller is ticking. Until a reading establishes the relationship structurally, no locator, no
+ * tutorial step, and no ordering may depend on it.
+ */
+export const WING_TERMS_CHECKBOX_PROMOTION_BLOCKED = "NO_ACCESSIBLE_ASSOCIATION_MEASURED_2026_08_10" as const;
+
 /** Why a discovery run stopped early. `null` means it ran every checkpoint. */
 export const WING_FLOW_HALT_REASONS = [
   "OPERATOR_ABORTED",
   "OPERATOR_SIGNAL_TIMEOUT",
   "CONFIRM_ADVISORY_STOP",
   "PRECONDITION_FAILED",
+  // The flow is not where the next instruction assumes it is. Halting beats guessing: the 2026-08-10 run
+  // printed a purpose-screen instruction against the terms screen, and only the absence of the named control
+  // kept that from mattering.
+  "SCREEN_NOT_AS_EXPECTED",
 ] as const;
 export type WingFlowHaltReason = (typeof WING_FLOW_HALT_REASONS)[number];
 

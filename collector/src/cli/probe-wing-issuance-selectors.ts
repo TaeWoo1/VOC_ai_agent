@@ -87,6 +87,9 @@ import {
   WING_CHOICE_LABEL_CANDIDATES,
   WING_FLOW_LAST_CHECKPOINT,
   WING_KEY_CREATION_CONTROL_ID,
+  WING_CHECKPOINT_EXPECTED_SCREEN,
+  wingFlowScreenFrom,
+  type WingFlowScreen,
 } from "../action-window/coupang-wing-label-recon";
 import type { FixedLabelContainmentReading } from "../action-window/api-issuance-calibration/visual-recon-inpage";
 import {
@@ -357,7 +360,7 @@ export interface WingSelectorRecordDeps {
    * operator is asked to do next is decided by the loop that already knows the previous reading — never printed
    * ahead of the gate that might forbid it.
    */
-  announceCheckpoint?(checkpoint: WingFlowCheckpoint): void;
+  announceCheckpoint?(checkpoint: WingFlowCheckpoint, index: number, total: number): void;
 }
 
 /** How the orchestrator was scoped this run. `recon` is empty for an ordinary baseline probe. */
@@ -659,6 +662,8 @@ export interface WingFlowCheckpointReading {
   readonly observation: WingObservation | null;
   readonly observationFault: WingFaultFingerprint | null;
   readonly stage2: WingStage2Sweep;
+  /** WHICH screen this reading is of, derived from its own markers — never assumed from the checkpoint name. */
+  readonly screen: WingFlowScreen;
 }
 
 export interface WingFlowDiscoveryResult {
@@ -667,6 +672,8 @@ export interface WingFlowDiscoveryResult {
   readonly advisory: WingConfirmAdvisory | null;
   readonly halted: WingFlowHaltReason | null;
   readonly revealedCandidateIds: readonly string[];
+  /** Set when a checkpoint's expected screen did not match the previous reading. Names both, for the record. */
+  readonly screenMismatch: { readonly checkpoint: WingFlowCheckpoint; readonly expected: WingFlowScreen; readonly actual: WingFlowScreen } | null;
   readonly aborted: boolean;
   /** Structural, not a tally: this runner has no code path that selects anything. */
   readonly agentSelections: 0;
@@ -707,9 +714,20 @@ export async function runWingFlowDiscovery(
   let halted: WingFlowHaltReason | null = null;
   let aborted = false;
   let pastLastCheckpoint = false;
+  let screenMismatch: WingFlowDiscoveryResult["screenMismatch"] = null;
 
-  for (const checkpoint of checkpoints) {
-    deps.announceCheckpoint?.(checkpoint);
+  for (const [index, checkpoint] of checkpoints.entries()) {
+    // BEFORE the instruction is printed, not after. A checkpoint's copy describes an action on a specific
+    // screen; printing it while the browser is elsewhere tells the operator to do something they cannot — and
+    // on 2026-08-10 that meant "press 확인" against the screen holding the key-creation control.
+    const expected = WING_CHECKPOINT_EXPECTED_SCREEN[checkpoint];
+    const previous = readings[readings.length - 1];
+    if (expected !== null && previous && previous.screen !== expected) {
+      screenMismatch = { checkpoint, expected, actual: previous.screen };
+      halted = "SCREEN_NOT_AS_EXPECTED";
+      break;
+    }
+    deps.announceCheckpoint?.(checkpoint, index, checkpoints.length);
     // The hard stop, enforced rather than documented. A checkpoint list that continued past the terms screen
     // could only be asking the operator to press the key-creation control, and this loop refuses to be the
     // thing that asks. Throwing beats halting: a caller who added a fifth checkpoint made a mistake in code,
@@ -735,18 +753,19 @@ export async function runWingFlowDiscovery(
       observationFault = wingFaultFingerprint(e);
     }
     const stage2 = await sweepStage2(deps, opts.targets, observation, opts.phase, candidates);
-    readings.push({ checkpoint, observation, observationFault, stage2 });
+    const screenOf = {
+      precondition: stage2.precondition,
+      faultCount: stage2.faults.length + stage2.containmentFaults.length,
+      candidates: stage2.targets.flatMap((t) => t.candidates).map((c) => ({ id: c.id, presence: c.presence })),
+    };
+    readings.push({ checkpoint, observation, observationFault, stage2, screen: wingFlowScreenFrom(screenOf) });
 
     if (stage2.precondition !== "OK") {
       halted = "PRECONDITION_FAILED";
       break;
     }
     if (checkpoint === "PURPOSE_OPTION_SELECTED_BY_OPERATOR") {
-      advisory = wingConfirmAdvisory({
-        precondition: stage2.precondition,
-        faultCount: stage2.faults.length + stage2.containmentFaults.length,
-        candidates: stage2.targets.flatMap((t) => t.candidates).map((c) => ({ id: c.id, presence: c.presence })),
-      });
+      advisory = wingConfirmAdvisory(screenOf);
       if (advisory !== "ADVANCE_FORM_NOT_YET_REVEALED") {
         halted = "CONFIRM_ADVISORY_STOP";
         break;
@@ -766,7 +785,7 @@ export async function runWingFlowDiscovery(
         )
       : [];
 
-  return { readings, advisory, halted, revealedCandidateIds, aborted, agentSelections: 0 };
+  return { readings, advisory, halted, revealedCandidateIds, screenMismatch, aborted, agentSelections: 0 };
 }
 
 /* ────────────────────────────── STAGE-2 recon scope (a third, separate gate) ────────────────────────────── */
@@ -1288,24 +1307,34 @@ function printStage2Instructions(readyPath: string, abortPath: string, calibrati
  * 확인, and whether it is printed at all depends on a reading that has not been taken when the first block goes
  * out. Printing the plan in advance would tell them to press a control the gate may be about to forbid.
  */
-function printDiscoveryCheckpoint(checkpoint: WingFlowCheckpoint, readyPath: string, abortPath: string): void {
+function printDiscoveryCheckpoint(
+  checkpoint: WingFlowCheckpoint,
+  index: number,
+  total: number,
+  readyPath: string,
+  abortPath: string,
+): void {
+  // The step counter is COMPUTED. It was hand-typed as "1/3", "2/3", "3/3", and adding a fourth checkpoint left
+  // the first two claiming a three-step run while the manifest promised four — an operator told a different
+  // number by each document. Three separate literals is three chances to miss one; this is none.
+  const step = `DISCOVERY ${index + 1}/${total}`;
   console.error("");
   if (checkpoint === "PURPOSE_SCREEN_UNTOUCHED") {
-    console.error("DISCOVERY 1/3 — the purpose screen, UNTOUCHED (the baseline every later reading is compared against).");
+    console.error(`${step} — the purpose screen, UNTOUCHED (the baseline every later reading is compared against).`);
     console.error("  1) Log in and reach the open-API 키 발급 page yourself (nothing on WING is clicked for you).");
     console.error("  2) Press 'API Key 발급 받기' YOURSELF, and STOP. Select nothing yet.");
   } else if (checkpoint === "PURPOSE_OPTION_SELECTED_BY_OPERATOR") {
-    console.error("DISCOVERY 2/3 — select 'OPEN API' YOURSELF. Do NOT press 확인.");
+    console.error(`${step} — select 'OPEN API' YOURSELF. Do NOT press 확인.`);
     console.error("  SellerOps does not click the radio and has no code path that could. Select it, then stop.");
     console.error("  This reading decides whether the run may go further: if the 업체명 / URL / IP fields are");
     console.error("  already on screen, 확인 SUBMITS them, and the run ends here rather than asking you to press it.");
   } else if (checkpoint === "AFTER_OPERATOR_CONFIRM") {
-    console.error("DISCOVERY 3/4 — the reading permits one more step: press 확인 YOURSELF, then STOP.");
+    console.error(`${step} — the reading permits one more step: press 확인 YOURSELF, then STOP.`);
     console.error("  The measurement said the vendor form is not on screen yet, so this 확인 advances the flow");
     console.error("  rather than submitting it. Press it, let the next screen settle, and signal — then STOP and");
     console.error("  type NOTHING into whatever appears.");
   } else {
-    console.error("DISCOVERY 4/4 — the TERMS screen. Tick the two consent boxes YOURSELF, then STOP.");
+    console.error(`${step} — the TERMS screen. Tick the two consent boxes YOURSELF, then STOP.`);
     console.error("  ⚠ DO NOT press '약관 동의 및 Key 발급받기'. That button CREATES THE KEY, and it is the last");
     console.error("  checkpoint's whole reason for existing: this run measures where it is and never presses it.");
     console.error("  Key issuance is a SEPARATE approval with its own manifest — it cannot be reached from here.");
@@ -1471,7 +1500,7 @@ async function main(): Promise<void> {
       isStage2Run
         ? printStage2Instructions(readyPath, abortPath, isCalibrationRun)
         : printInstructions(readyPath, abortPath),
-    announceCheckpoint: (checkpoint) => printDiscoveryCheckpoint(checkpoint, readyPath, abortPath),
+    announceCheckpoint: (checkpoint, index, total) => printDiscoveryCheckpoint(checkpoint, index, total, readyPath, abortPath),
   };
 
   if (isDiscoveryRun) {
@@ -1480,6 +1509,12 @@ async function main(): Promise<void> {
       console.error("");
       if (flow.halted === "CONFIRM_ADVISORY_STOP") {
         console.error(`WING flow discovery STOPPED BY THE GATE (${flow.advisory}) — 확인 was never suggested.`);
+      } else if (flow.halted === "SCREEN_NOT_AS_EXPECTED" && flow.screenMismatch) {
+        const m = flow.screenMismatch;
+        console.error(
+          `WING flow discovery STOPPED — the flow is not where the next step assumes: ${m.checkpoint} expects ` +
+            `${m.expected}, the last reading was ${m.actual}. Its instruction was NOT printed.`,
+        );
       } else if (flow.halted) {
         console.error(`WING flow discovery ended early (${flow.halted}). The checkpoints it did take are below.`);
       } else {
@@ -1494,6 +1529,8 @@ async function main(): Promise<void> {
             aborted: flow.aborted,
             halted: flow.halted,
             confirmAdvisory: flow.advisory,
+            screenMismatch: flow.screenMismatch,
+            screensSeen: flow.readings.map((r) => r.screen),
             agentSelections: flow.agentSelections,
             revealedCandidateIds: flow.revealedCandidateIds,
             checkpointsTaken: flow.readings.map((r) => r.checkpoint),

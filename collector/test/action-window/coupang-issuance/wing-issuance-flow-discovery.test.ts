@@ -14,11 +14,17 @@ import {
   WING_FLOW_CHECKPOINTS,
   WING_FLOW_HALT_REASONS,
   WING_VENDOR_FORM_CANDIDATE_IDS,
+  WING_PURPOSE_SCREEN_MARKER_ID,
+  WING_TERMS_SCREEN_MARKER_IDS,
+  WING_CHECKPOINT_EXPECTED_SCREEN,
+  WING_TERMS_CHECKBOX_PROMOTION_BLOCKED,
+  wingFlowScreenFrom,
   WING_FLOW_LAST_CHECKPOINT,
   WING_KEY_CREATION_CONTROL_ID,
   WING_CHOICE_LABEL_CANDIDATES,
   WING_STAGE3_TERMS_OPTION_CANDIDATES,
   WING_STAGE2_RECON_CANDIDATES,
+  WING_STAGE2_RECON_TARGETS,
   wingConfirmAdvisory,
   wingRevealedBetween,
   type WingFlowCheckpoint,
@@ -33,7 +39,7 @@ import {
   wingPhaseCalibrates,
   type WingSelectorRecordDeps,
 } from "../../../src/cli/probe-wing-issuance-selectors";
-import { observeFrom, type WingStructuralCensus } from "../../../src/cli/coupang-wing-classifier";
+import { observeFrom, WING_PROBE_TARGET_NAMES, type WingStructuralCensus } from "../../../src/cli/coupang-wing-classifier";
 import {
   CALIBRATION_PHASES,
   WING_STAGE2_MANIFEST_PHASES,
@@ -46,8 +52,22 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 /* ══════════════════════════ the 확인 gate ══════════════════════════ */
 
-const vendorSeen = (presence: WingStage2Presence): { id: string; presence: WingStage2Presence }[] =>
-  WING_VENDOR_FORM_CANDIDATE_IDS.map((id) => ({ id, presence }));
+type Row = { id: string; presence: WingStage2Presence };
+
+/** The screen markers, in the state that identifies one screen or the other. */
+const markers = (screen: "PURPOSE" | "TERMS" | "NEITHER"): Row[] => [
+  { id: WING_PURPOSE_SCREEN_MARKER_ID, presence: screen === "PURPOSE" ? "PRESENT_VISIBLE" : "PRESENT_HIDDEN_ONLY" },
+  ...WING_TERMS_SCREEN_MARKER_IDS.map((id) => ({
+    id,
+    presence: (screen === "TERMS" ? "PRESENT_VISIBLE" : "PRESENT_HIDDEN_ONLY") as WingStage2Presence,
+  })),
+];
+
+/** A complete PURPOSE-screen reading with the vendor labels in the given state. */
+const vendorSeen = (presence: WingStage2Presence): Row[] => [
+  ...markers("PURPOSE"),
+  ...WING_VENDOR_FORM_CANDIDATE_IDS.map((id) => ({ id, presence })),
+];
 
 describe("wingConfirmAdvisory — may the run INVITE the 확인 press?", () => {
   it("advances only when every vendor-form label is measured and none of them PAINTS", () => {
@@ -99,6 +119,57 @@ describe("wingConfirmAdvisory — may the run INVITE the 확인 press?", () => {
     );
     // The degenerate input: nothing measured at all.
     expect(wingConfirmAdvisory({ precondition: "OK", faultCount: 0, candidates: [] })).toBe("STOP_NOT_MEASURED");
+    // …and a reading missing only a SCREEN MARKER is unmeasured too. Screen identity is the first question, and
+    // it must never be answered from an absence of rows.
+    for (const id of [WING_PURPOSE_SCREEN_MARKER_ID, ...WING_TERMS_SCREEN_MARKER_IDS]) {
+      expect(
+        wingConfirmAdvisory({ precondition: "OK", faultCount: 0, candidates: ok.filter((c) => c.id !== id) }),
+        id,
+      ).toBe("STOP_NOT_MEASURED");
+    }
+  });
+
+  it("**STOPS on the TERMS screen — the defect the 2026-08-10 run walked into**", () => {
+    // That run's gate asked only about the vendor fields. They are hidden on EVERY screen in this flow, so it
+    // answered "advance" while the operator was already on the terms screen, and the harness printed "press
+    // 확인" for a screen whose visible control was 약관 동의 및 Key 발급받기. Nothing was pressed only because
+    // 확인 was no longer there. The vendor answer is unchanged and irrelevant; the screen decides.
+    const onTerms: Row[] = [
+      ...markers("TERMS"),
+      ...WING_VENDOR_FORM_CANDIDATE_IDS.map((id) => ({ id, presence: "PRESENT_HIDDEN_ONLY" as const })),
+    ];
+    expect(wingConfirmAdvisory({ precondition: "OK", faultCount: 0, candidates: onTerms })).toBe(
+      "STOP_ALREADY_PAST_THE_PURPOSE_SCREEN",
+    );
+    // Either marker alone is enough — the heading OR the key-creation button.
+    for (const id of WING_TERMS_SCREEN_MARKER_IDS) {
+      const onlyOne: Row[] = [
+        ...markers("NEITHER").map((m) => (m.id === id ? { ...m, presence: "PRESENT_VISIBLE" as const } : m)),
+        ...WING_VENDOR_FORM_CANDIDATE_IDS.map((v) => ({ id: v, presence: "PRESENT_HIDDEN_ONLY" as const })),
+      ];
+      expect(wingConfirmAdvisory({ precondition: "OK", faultCount: 0, candidates: onlyOne }), id).toBe(
+        "STOP_ALREADY_PAST_THE_PURPOSE_SCREEN",
+      );
+    }
+  });
+
+  it("TERMS wins when both marker families paint, and an unknown screen stops too", () => {
+    // Ambiguity resolves to the screen where stopping is correct — the one holding the key-creation control.
+    const both: Row[] = [
+      { id: WING_PURPOSE_SCREEN_MARKER_ID, presence: "PRESENT_VISIBLE" },
+      ...WING_TERMS_SCREEN_MARKER_IDS.map((id) => ({ id, presence: "PRESENT_VISIBLE" as const })),
+      ...WING_VENDOR_FORM_CANDIDATE_IDS.map((id) => ({ id, presence: "PRESENT_HIDDEN_ONLY" as const })),
+    ];
+    expect(wingFlowScreenFrom({ precondition: "OK", faultCount: 0, candidates: both })).toBe("TERMS");
+    expect(wingConfirmAdvisory({ precondition: "OK", faultCount: 0, candidates: both })).toBe(
+      "STOP_ALREADY_PAST_THE_PURPOSE_SCREEN",
+    );
+    const nowhere: Row[] = [
+      ...markers("NEITHER"),
+      ...WING_VENDOR_FORM_CANDIDATE_IDS.map((id) => ({ id, presence: "PRESENT_HIDDEN_ONLY" as const })),
+    ];
+    expect(wingFlowScreenFrom({ precondition: "OK", faultCount: 0, candidates: nowhere })).toBe("UNRECOGNIZED");
+    expect(wingConfirmAdvisory({ precondition: "OK", faultCount: 0, candidates: nowhere })).toBe("STOP_SCREEN_UNRECOGNIZED");
   });
 
   it("only ONE of its three values lets the run continue", () => {
@@ -106,6 +177,7 @@ describe("wingConfirmAdvisory — may the run INVITE the 확인 press?", () => {
     // decide, explicitly, whether it is a go — the default must never be "proceed".
     const advancing = WING_CONFIRM_ADVISORIES.filter((a) => !a.startsWith("STOP_"));
     expect(advancing).toEqual(["ADVANCE_FORM_NOT_YET_REVEALED"]);
+    expect(WING_CONFIRM_ADVISORIES.length).toBeGreaterThan(4);
   });
 
   it("watches the three VENDOR-FORM labels, and each is a real Stage-2 candidate id", () => {
@@ -175,15 +247,26 @@ const CENSUS: WingStructuralCensus = {
 };
 
 /**
- * A fake WING whose vendor labels are hidden until `revealAfter` reads have been taken. That is the live page's
- * shape as measured three times: the form exists in the DOM and does not paint.
+ * A fake WING that models the two screens the live flow actually has. `termsFrom` is the 1-based read at which
+ * pressing 확인 has taken effect; before it the purpose heading paints, after it the terms heading and the
+ * key-creation button do. The vendor labels are hidden on BOTH, because that is what three live runs measured
+ * — and it is exactly why the gate cannot be built on them.
  */
-function fakeFlow(over: { revealAfter?: number; signals?: readonly ("ready" | "abort" | "timeout")[]; choiceControls?: number } = {}) {
+function fakeFlow(
+  over: { termsFrom?: number; vendorVisible?: boolean; signals?: readonly ("ready" | "abort" | "timeout")[]; choiceControls?: number } = {},
+) {
   const asked: WingFlowCheckpoint[] = [];
+  const steps: Array<{ index: number; total: number }> = [];
   let reads = 0;
   const signals = over.signals ?? (["ready", "ready", "ready", "ready"] as const);
   let waits = 0;
-  const visibleNow = (): boolean => over.revealAfter !== undefined && reads > over.revealAfter;
+  const termsFrom = over.termsFrom ?? 3;
+  const onTerms = (): boolean => reads >= termsFrom;
+  const PURPOSE_TEXT = "키의 사용 목적을 골라주세요";
+  const TERMS_TEXT = "약관 동의 및 Key 발급받기";
+  const VENDOR = ["업체명", "URL", "IP 주소"];
+  const paints = (t: string): boolean =>
+    VENDOR.includes(t) ? over.vendorVisible === true : t === TERMS_TEXT ? onTerms() : t === PURPOSE_TEXT ? !onTerms() : false;
   const deps: WingSelectorRecordDeps = {
     waitForReady: async () => signals[waits++] ?? "timeout",
     observeSurface: async () => {
@@ -193,18 +276,12 @@ function fakeFlow(over: { revealAfter?: number; signals?: readonly ("ready" | "a
     probeTarget: async () => {
       throw new Error("a discovery run probes no shipped locator");
     },
-    probeCandidate: async (spec) => {
-      const isVendor = ["업체명", "URL", "IP 주소"].includes(spec.exactText);
-      return isVendor && visibleNow() ? { matchCount: 1, canHighlight: true } : { matchCount: 0, canHighlight: false };
-    },
-    probeContainment: async (spec) => {
-      const isVendor = ["업체명", "URL", "IP 주소"].includes(spec.exactText);
-      return isVendor
-        ? visibleNow()
-          ? { exactVisible: 1, exactHidden: 0, deepestContainsVisible: 1, deepestContainsHidden: 0, scanTruncated: false }
-          : { exactVisible: 0, exactHidden: 2, deepestContainsVisible: 0, deepestContainsHidden: 3, scanTruncated: false }
-        : { exactVisible: 0, exactHidden: 0, deepestContainsVisible: 0, deepestContainsHidden: 0, scanTruncated: false };
-    },
+    probeCandidate: async (spec) =>
+      paints(spec.exactText) ? { matchCount: 1, canHighlight: true } : { matchCount: 0, canHighlight: false },
+    probeContainment: async (spec) =>
+      paints(spec.exactText)
+        ? { exactVisible: 1, exactHidden: 0, deepestContainsVisible: 1, deepestContainsHidden: 0, scanTruncated: false }
+        : { exactVisible: 0, exactHidden: 2, deepestContainsVisible: 0, deepestContainsHidden: 3, scanTruncated: false },
     // Echoes back how many candidates it was handed — the one thing this fake needs to prove about the union.
     choiceAssociationCensus: async (candidates) => ({
       visibleChoiceControlCount: 2,
@@ -217,18 +294,23 @@ function fakeFlow(over: { revealAfter?: number; signals?: readonly ("ready" | "a
       scanTruncated: false,
       candidatesCompared: candidates.filter((c) => c.trim().length > 0).length,
     }),
-    announceCheckpoint: (c) => asked.push(c),
+    announceCheckpoint: (c, index, total) => {
+      asked.push(c);
+      steps.push({ index, total });
+    },
   };
-  return { deps, asked, reads: () => reads };
+  return { deps, asked, steps, reads: () => reads };
 }
 
-const ALL_TARGETS = ["purpose", "self_dev", "vendor_info", "vendor_url", "call_ip", "confirm"] as const;
+// The FULL scope. A discovery run narrowed to the purpose targets would never probe the terms markers, and
+// `wingFlowScreenFrom` would read NOT_MEASURED at every checkpoint — fail-closed, but useless.
+const ALL_TARGETS = [...WING_STAGE2_RECON_TARGETS] as const;
 
 describe("runWingFlowDiscovery — one reading per operator-advanced checkpoint", () => {
   it("takes every checkpoint when the form stays hidden, and reports the reveal", async () => {
     // The form appears only at the THIRD read — i.e. 확인 opened it, which is the outcome the flow description
     // predicts and no run has yet observed.
-    const { deps, asked } = fakeFlow({ revealAfter: 2 });
+    const { deps, asked } = fakeFlow();
     const r = await runWingFlowDiscovery(deps, { targets: ALL_TARGETS, phase: WING_ISSUANCE_FLOW_DISCOVERY_PHASE });
     expect(r.readings.map((x) => x.checkpoint)).toEqual([...WING_FLOW_CHECKPOINTS]);
     expect(r.readings[r.readings.length - 1]!.checkpoint).toBe(WING_FLOW_LAST_CHECKPOINT);
@@ -236,7 +318,11 @@ describe("runWingFlowDiscovery — one reading per operator-advanced checkpoint"
     expect(r.advisory).toBe("ADVANCE_FORM_NOT_YET_REVEALED");
     expect(r.halted).toBeNull();
     expect(r.aborted).toBe(false);
-    expect([...r.revealedCandidateIds].sort()).toEqual([...WING_VENDOR_FORM_CANDIDATE_IDS].sort());
+    // What appeared between the first and last readings is the TERMS screen, not the vendor form — which is
+    // what three live runs measured and what the old fixture got wrong.
+    expect([...r.revealedCandidateIds].sort()).toEqual([...WING_TERMS_SCREEN_MARKER_IDS].sort());
+    expect(r.readings.map((x) => x.screen)).toEqual(["PURPOSE", "PURPOSE", "TERMS", "TERMS"]);
+    expect(r.screenMismatch).toBeNull();
     expect(r.agentSelections).toBe(0);
   });
 
@@ -244,7 +330,7 @@ describe("runWingFlowDiscovery — one reading per operator-advanced checkpoint"
     // The property this whole phase is built around. Not "warns", not "asks the operator to decide" — the
     // instruction to press 확인 is never printed, because printing it is the harm. An operator who is told to
     // press a button generally presses it.
-    const { deps, asked } = fakeFlow({ revealAfter: 1 });
+    const { deps, asked } = fakeFlow({ vendorVisible: true });
     const r = await runWingFlowDiscovery(deps, { targets: ALL_TARGETS, phase: WING_ISSUANCE_FLOW_DISCOVERY_PHASE });
     expect(r.advisory).toBe("STOP_FORM_ALREADY_VISIBLE");
     expect(r.halted).toBe("CONFIRM_ADVISORY_STOP");
@@ -296,7 +382,7 @@ describe("runWingFlowDiscovery — one reading per operator-advanced checkpoint"
 
   it("one reading is never compared against itself", async () => {
     // With a single checkpoint, first === last. Diffing them would report every visible label as a reveal.
-    const { deps } = fakeFlow({ revealAfter: 0 });
+    const { deps } = fakeFlow();
     const r = await runWingFlowDiscovery(deps, {
       targets: ALL_TARGETS,
       phase: WING_ISSUANCE_FLOW_DISCOVERY_PHASE,
@@ -309,7 +395,7 @@ describe("runWingFlowDiscovery — one reading per operator-advanced checkpoint"
   it("every checkpoint waits for its OWN operator signal", async () => {
     // No reading is ever taken on a timer or on the back of a previous signal: three checkpoints, three waits.
     let waits = 0;
-    const { deps } = fakeFlow({ revealAfter: 2 });
+    const { deps } = fakeFlow();
     const counted: WingSelectorRecordDeps = {
       ...deps,
       waitForReady: async () => {
@@ -325,7 +411,7 @@ describe("runWingFlowDiscovery — one reading per operator-advanced checkpoint"
   it("takes the CALIBRATION instruments at every checkpoint, not a bare recon", async () => {
     // The discovery phase compares association readings across checkpoints, so a phase gate that tested
     // `=== CALIBRATION` would have left it with no association reading to compare.
-    const { deps } = fakeFlow({ revealAfter: 2 });
+    const { deps } = fakeFlow();
     const r = await runWingFlowDiscovery(deps, { targets: ALL_TARGETS, phase: WING_ISSUANCE_FLOW_DISCOVERY_PHASE });
     for (const reading of r.readings) {
       expect(reading.stage2.calibration).toBe(true);
@@ -473,7 +559,7 @@ describe("the terms screen — transcribed verbatim, and the key-creation bounda
     // control, so the runner refuses to be the thing that asks — and it THROWS rather than halting, because a
     // caller who added one made a mistake in code and a code mistake must not read as a cautious measurement.
     expect(WING_FLOW_CHECKPOINTS[WING_FLOW_CHECKPOINTS.length - 1]).toBe(WING_FLOW_LAST_CHECKPOINT);
-    const { deps } = fakeFlow({ revealAfter: 99 });
+    const { deps } = fakeFlow();
     await expect(
       runWingFlowDiscovery(deps, {
         targets: ALL_TARGETS,
@@ -485,7 +571,7 @@ describe("the terms screen — transcribed verbatim, and the key-creation bounda
 
   it("the last checkpoint's copy forbids the press, and says why, in the operator's own terms", () => {
     const src = readFileSync(resolve(HERE, "../../../src/cli/probe-wing-issuance-selectors.ts"), "utf8");
-    const from = src.indexOf('console.error("DISCOVERY 4/4');
+    const from = src.indexOf("the TERMS screen. Tick the two consent boxes YOURSELF");
     expect(from).toBeGreaterThan(-1);
     const block = src.slice(from, src.indexOf("\n  }", from));
     expect(block).toContain("DO NOT press");
@@ -538,7 +624,7 @@ describe("the terms screen — transcribed verbatim, and the key-creation bounda
   it("the discovery runner compares against the UNION, not the purpose-only list", async () => {
     // A terms checkbox measured against four purpose strings would report `-1` — a measured non-match — for a
     // label we transcribed ourselves.
-    const { deps } = fakeFlow({ revealAfter: 99 });
+    const { deps } = fakeFlow();
     const r = await runWingFlowDiscovery(deps, { targets: ALL_TARGETS, phase: WING_ISSUANCE_FLOW_DISCOVERY_PHASE });
     for (const reading of r.readings) {
       expect(reading.stage2.association?.candidatesCompared).toBe(WING_CHOICE_LABEL_CANDIDATES.length);
@@ -606,5 +692,110 @@ describe("the manifest cannot under-describe the flow it approves", () => {
     expect(block).not.toContain(`${WING_FLOW_CHECKPOINTS.length + 1})`);
     expect(block).toContain("KEY-CREATION control");
     expect(block).toContain("no fifth checkpoint");
+  });
+});
+
+/* ══════════════════════════ screen identity gates the INSTRUCTION ══════════════════════════ */
+
+describe("no instruction is printed for a screen the flow is not on", () => {
+  it("**halts WITHOUT announcing when the flow has already moved past the checkpoint's screen**", async () => {
+    // The 2026-08-10 run's actual failure, reproduced: the flow reached the terms screen before checkpoint 2's
+    // reading, and the harness went on to print "press 확인" — for a screen where 확인 no longer exists and the
+    // key-creation button does. `termsFrom: 1` puts the very first reading on the terms screen.
+    const { deps, asked } = fakeFlow({ termsFrom: 1 });
+    const r = await runWingFlowDiscovery(deps, { targets: ALL_TARGETS, phase: WING_ISSUANCE_FLOW_DISCOVERY_PHASE });
+    expect(r.halted).toBe("SCREEN_NOT_AS_EXPECTED");
+    expect(r.screenMismatch).toEqual({
+      checkpoint: "PURPOSE_OPTION_SELECTED_BY_OPERATOR",
+      expected: "PURPOSE",
+      actual: "TERMS",
+    });
+    // The instruction for the mismatched checkpoint was never printed — that is the whole property.
+    expect(asked).toEqual(["PURPOSE_SCREEN_UNTOUCHED"]);
+    // …and the reading it did take is kept, so the halt is explainable from the record.
+    expect(r.readings).toHaveLength(1);
+    expect(r.readings[0]!.screen).toBe("TERMS");
+  });
+
+  it("halts before the TERMS checkpoint if 확인 never took effect", async () => {
+    // The mirror case: the operator signalled after pressing nothing, so the flow is still on the purpose
+    // screen when checkpoint 4 wants to talk about consent boxes. Asking them to tick boxes that are not there
+    // is the same failure wearing the other hat.
+    const { deps, asked } = fakeFlow({ termsFrom: 99 });
+    const r = await runWingFlowDiscovery(deps, { targets: ALL_TARGETS, phase: WING_ISSUANCE_FLOW_DISCOVERY_PHASE });
+    expect(r.halted).toBe("SCREEN_NOT_AS_EXPECTED");
+    expect(r.screenMismatch).toEqual({
+      checkpoint: "TERMS_CHECKED_BY_OPERATOR",
+      expected: "TERMS",
+      actual: "PURPOSE",
+    });
+    expect(asked).not.toContain("TERMS_CHECKED_BY_OPERATOR");
+  });
+
+  it("the FIRST checkpoint has no expectation — nothing has been read yet", () => {
+    // The operator is still navigating when it is printed, so an expectation there could only be a guess.
+    expect(WING_CHECKPOINT_EXPECTED_SCREEN.PURPOSE_SCREEN_UNTOUCHED).toBeNull();
+    // Every other checkpoint names one, or a future addition silently inherits "anything goes".
+    for (const c of WING_FLOW_CHECKPOINTS.slice(1)) {
+      expect(WING_CHECKPOINT_EXPECTED_SCREEN[c], c).not.toBeNull();
+    }
+  });
+
+  it("each reading carries the screen it was OF, derived from its own markers", async () => {
+    const { deps } = fakeFlow();
+    const r = await runWingFlowDiscovery(deps, { targets: ALL_TARGETS, phase: WING_ISSUANCE_FLOW_DISCOVERY_PHASE });
+    // Never assumed from the checkpoint's name: checkpoint 3 is called AFTER_OPERATOR_CONFIRM and the screen it
+    // records is measured, so a 확인 that silently did nothing shows up as PURPOSE rather than being narrated
+    // as TERMS by the label.
+    expect(r.readings.map((x) => [x.checkpoint, x.screen])).toEqual([
+      ["PURPOSE_SCREEN_UNTOUCHED", "PURPOSE"],
+      ["PURPOSE_OPTION_SELECTED_BY_OPERATOR", "PURPOSE"],
+      ["AFTER_OPERATOR_CONFIRM", "TERMS"],
+      ["TERMS_CHECKED_BY_OPERATOR", "TERMS"],
+    ]);
+  });
+});
+
+/* ══════════════════════════ the step counter, and the promotion block ══════════════════════════ */
+
+describe("the operator-facing step counter is computed, not typed", () => {
+  it("passes the index and the total to every announcement", async () => {
+    // The drift this closes: the banners read 1/3, 2/3, 3/4, 4/4 in one run — three literals, two of them
+    // stale, contradicting the manifest the operator had just granted on.
+    const { deps, steps } = fakeFlow();
+    await runWingFlowDiscovery(deps, { targets: ALL_TARGETS, phase: WING_ISSUANCE_FLOW_DISCOVERY_PHASE });
+    expect(steps).toEqual(WING_FLOW_CHECKPOINTS.map((_, i) => ({ index: i, total: WING_FLOW_CHECKPOINTS.length })));
+  });
+
+  it("the printer interpolates the counter and contains no hard-coded N/M", () => {
+    const src = readFileSync(resolve(HERE, "../../../src/cli/probe-wing-issuance-selectors.ts"), "utf8");
+    const from = src.indexOf("function printDiscoveryCheckpoint");
+    const body = src.slice(from, src.indexOf("\nfunction printInstructions", from));
+    expect(body).toContain("const step = `DISCOVERY ${index + 1}/${total}`");
+    // Any surviving literal step counter is the defect coming back.
+    expect(body).not.toMatch(/DISCOVERY [0-9]+\/[0-9]+/);
+  });
+});
+
+describe("the terms checkboxes are blocked from promotion, by name", () => {
+  it("records WHY, and the reason is a measurement", () => {
+    // Not "we have not got round to it": both boxes were measured to have no accessible name at all, and
+    // neither consent sentence is unique. The pairing is unknown, and the unknown thing is which box the
+    // seller is ticking.
+    expect(WING_TERMS_CHECKBOX_PROMOTION_BLOCKED).toBe("NO_ACCESSIBLE_ASSOCIATION_MEASURED_2026_08_10");
+    const src = readFileSync(resolve(HERE, "../../../src/action-window/coupang-wing-label-recon.ts"), "utf8");
+    const from = src.indexOf("export const WING_TERMS_CHECKBOX_PROMOTION_BLOCKED");
+    const doc = src.slice(src.lastIndexOf("/**", from), from);
+    expect(doc).toContain("nameSource: NONE");
+    expect(doc).toContain("neither sentence is unique");
+    expect(doc).toContain("no locator, no");
+  });
+
+  it("no terms checkbox candidate is a shipped locator", () => {
+    // The shipped-locator namespace is separate on purpose; this asserts the consent labels never leaked into
+    // it. `WING_PROBE_TARGET_NAMES` is what an ordinary selector probe can be pointed at.
+    for (const t of ["terms_api_agree", "terms_category_agree"]) {
+      expect(WING_PROBE_TARGET_NAMES as readonly string[]).not.toContain(t);
+    }
   });
 });
