@@ -188,7 +188,7 @@ describe("the redesigned walk can actually be walked", () => {
     // test as passed, so a local run looks green and CI does not.
     const driver = new CoupangWingIssuanceDriver(fakePage() as never);
     const sigs = new Map<string, string>();
-    for (const target of ["reach_open_api", "purpose_option", "confirm_purpose", "terms_consent", "issue_final", "return"] as const) {
+    for (const target of ["reach_open_api", "confirm_purpose", "terms_consent", "issue_final", "return"] as const) {
       const res = await driver.locateTarget(target);
       sigs.set(target, res.sig!);
     }

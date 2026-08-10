@@ -94,7 +94,7 @@ async function pressNextToComplete(io: ReturnType<typeof loopback>, engine: Coup
 }
 
 describe("coupang issuance session — the full linear walkthrough (offline)", () => {
-  it("reach → verify → 발급 → purpose → 확인 → terms → key → … → return → complete on WING-resident advances ALONE (a single START_RUN, no FE 다음)", async () => {
+  it("reach → verify → 발급 → 확인 → terms → key → … → return → complete on WING-resident advances ALONE (a single START_RUN, no FE 다음)", async () => {
     const { io, engine, driver, session } = build();
     startRun(io);
     await session.whenSettled();
@@ -118,10 +118,6 @@ describe("coupang issuance session — the full linear walkthrough (offline)", (
       "highlight:issue", // 'API Key 발급 받기' — highlighted, the seller presses it; it opens the purpose screen
       "observe:issue", // WING-resident: arm the on-page advance-button observation
       "wait:issue", // …and advance when the seller presses it
-      "locate:purpose_option",
-      "highlight:purpose_option",
-      "observe:purpose_option",
-      "wait:purpose_option",
       "locate:confirm_purpose",
       "highlight:confirm_purpose",
       "observe:confirm_purpose",
@@ -149,12 +145,12 @@ describe("coupang issuance session — the full linear walkthrough (offline)", (
     expect(commandResults).toHaveLength(1);
   });
 
-  it("keeps totalSteps a fixed 8, carrying the coupang channel + issuance intent + NO appBranch on every view", async () => {
+  it("keeps totalSteps a fixed 7, carrying the coupang channel + issuance intent + NO appBranch on every view", async () => {
     const { io, session } = build();
     startRun(io);
     await session.whenSettled();
     const totals = new Set(io.views().map((v) => v.currentStep!.totalSteps));
-    expect(totals).toEqual(new Set([8]));
+    expect(totals).toEqual(new Set([7]));
     for (const v of io.views()) {
       expect(v.intent).toBe("API_ISSUANCE_GUIDANCE");
       expect(v.channelCode).toBe("coupang");
@@ -188,7 +184,7 @@ describe("coupang issuance session — the 발급 (issue) human checkpoint", () 
     await session.whenSettled();
     expect(engine.currentStage()).toBe("checkpoint_before_issue");
     expect(io.lastView()?.status).toBe("WAITING_FOR_HUMAN");
-    expect(io.lastView()?.currentStep?.stepNumber).toBe(6);
+    expect(io.lastView()?.currentStep?.stepNumber).toBe(5);
     // The key-creating control was highlighted (opaque 16-hex), and a WING-resident observation WAS armed — the
     // run waits for the seller's own on-page press. It never auto-advances, and never presses that button.
     const ref = io.events().find((e) => e.type === "TARGET_HIGHLIGHTED" && e.payload.stepId === "aw.coupang_issuance_issue_checkpoint")!.payload.targetRef;
@@ -263,7 +259,7 @@ describe("coupang issuance session — recoverable parks each recover via REQUES
   });
 
   it("target_not_found park → re-check re-guides in place until the control appears", async () => {
-    const { io, engine, driver, session } = build({ probe: { ok: true, pageCategory: "open_api_issuance" }, locate: { purpose_option: { count: 0 } } });
+    const { io, engine, driver, session } = build({ probe: { ok: true, pageCategory: "open_api_issuance" }, locate: { confirm_purpose: { count: 0 } } });
     startRun(io);
     await session.whenSettled();
     expect(engine.currentStage()).toBe("target_not_found");
@@ -273,8 +269,8 @@ describe("coupang issuance session — recoverable parks each recover via REQUES
     command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
     await session.whenSettled();
     // Re-guided IN PLACE (re-located the control that was missing), never re-probed; still recoverable, no
-    // dead-end, no RUN_FAILED. The park is on `purpose_option` — the target the fixture makes unfindable.
-    expect(driver.calls.filter((c) => c === "locate:purpose_option").length).toBeGreaterThan(1);
+    // dead-end, no RUN_FAILED. The park is on `confirm_purpose` — the target the fixture makes unfindable.
+    expect(driver.calls.filter((c) => c === "locate:confirm_purpose").length).toBeGreaterThan(1);
     expect(driver.calls.filter((c) => c === "probeSurface").length).toBe(probesBefore);
     expect(io.eventTypes()).not.toContain("RUN_FAILED");
   });
@@ -312,7 +308,7 @@ describe("coupang issuance session — contract validity + privacy", () => {
       {},
       { probe: { ok: true, pageCategory: "open_api_issuance" as const } },
       { probe: { ok: false, pageCategory: "login" as const, blockerCode: "LOGIN_REQUIRED" as const } },
-      { locate: { purpose_option: { count: 0 } }, probe: { ok: true, pageCategory: "open_api_issuance" as const } },
+      { locate: { confirm_purpose: { count: 0 } }, probe: { ok: true, pageCategory: "open_api_issuance" as const } },
       { reachLanding: { ok: true, pageCategory: "unknown" as const } },
       { locateThrows: { confirm_purpose: 1 } },
     ]) {

@@ -23,7 +23,6 @@ const ALL_STAGES: CoupangIssuanceStage[] = [
   "waiting_login",
   "locating_open_api",
   "reaching_open_api",
-  "guiding_purpose_option",
   "checkpoint_confirm_purpose",
   "guiding_terms_consent",
   "checkpoint_before_issue",
@@ -44,7 +43,6 @@ describe("coupang issuance stages — run-status projection", () => {
     locating_open_api: "RUNNING",
     reaching_open_api: "WAITING_FOR_HUMAN",
     checkpoint_reveal_issuance_form: "WAITING_FOR_HUMAN",
-    guiding_purpose_option: "WAITING_FOR_HUMAN",
     checkpoint_confirm_purpose: "WAITING_FOR_HUMAN",
     guiding_terms_consent: "WAITING_FOR_HUMAN",
     checkpoint_before_issue: "WAITING_FOR_HUMAN",
@@ -68,7 +66,6 @@ describe("coupang issuance stages — step-status projection", () => {
     locating_open_api: "OBSERVING",
     reaching_open_api: "AWAITING_USER",
     checkpoint_reveal_issuance_form: "AWAITING_USER",
-    guiding_purpose_option: "AWAITING_USER",
     checkpoint_confirm_purpose: "AWAITING_USER",
     guiding_terms_consent: "AWAITING_USER",
     checkpoint_before_issue: "AWAITING_USER",
@@ -105,7 +102,6 @@ describe("coupang issuance stages — allowed commands", () => {
   it("guiding barriers offer recheck + PAUSE + cancel + manual, and NEVER a click/submit/read command", () => {
     for (const stage of [
       "reaching_open_api",
-      "guiding_purpose_option",
       "checkpoint_confirm_purpose",
       "guiding_terms_consent",
       "checkpoint_before_issue",
@@ -183,19 +179,19 @@ describe("the fence is LIFTED, and every clause of it was answered in code", () 
   });
 });
 
-describe("coupang issuance stages — the fixed 8-step plan, in the MEASURED order", () => {
-  it("is always eight steps (a fixed linear line, no branch)", () => {
-    // Seven until 2026-08-10. The old plan had two steps for screens this flow never shows and none at all for
-    // the control that creates the key — so it was both too long and too short, in the same line.
-    expect(COUPANG_ISSUANCE_TOTAL_STEPS).toBe(8);
-    expect(coupangIssuanceStepPlan()).toHaveLength(8);
+describe("coupang issuance stages — the fixed 7-step plan, in the MEASURED order", () => {
+  it("is always seven steps (a fixed linear line, no branch)", () => {
+    // Seven → eight on 2026-08-10 (the old plan had steps for screens this flow never shows, and none for the
+    // control that creates the key) → seven again once the purpose screen became ONE step. `OPEN API` is the
+    // default, so checking the radio and pressing 확인 are one instruction on one screen, not two advances.
+    expect(COUPANG_ISSUANCE_TOTAL_STEPS).toBe(7);
+    expect(coupangIssuanceStepPlan()).toHaveLength(7);
   });
 
   it("uses the exact product-required stepIds, in flow order", () => {
     expect(coupangIssuanceStepPlan().map((s) => s.stepId)).toEqual([
       "aw.coupang_issuance_reach_open_api",
       "aw.coupang_issuance_reveal_form",
-      "aw.coupang_issuance_purpose_option",
       "aw.coupang_issuance_confirm_purpose",
       "aw.coupang_issuance_terms_consent",
       "aw.coupang_issuance_issue_checkpoint",
@@ -208,7 +204,6 @@ describe("coupang issuance stages — the fixed 8-step plan, in the MEASURED ord
     expect(coupangIssuanceStepPlan().map((s) => s.copyKey)).toEqual([
       "actionWindow.coupangIssuance.reachOpenApi",
       "actionWindow.coupangIssuance.revealForm",
-      "actionWindow.coupangIssuance.purposeOption",
       "actionWindow.coupangIssuance.confirmPurpose",
       "actionWindow.coupangIssuance.termsConsent",
       "actionWindow.coupangIssuance.issueCheckpoint",
@@ -221,12 +216,11 @@ describe("coupang issuance stages — the fixed 8-step plan, in the MEASURED ord
     const plan = coupangIssuanceStepPlan();
     expect(plan.map((s) => s.mode)).toEqual([
       "AUTOMATIC_OPERATION",
-      ...Array.from({ length: 7 }, () => "ACTION_WINDOW"),
+      ...Array.from({ length: 6 }, () => "ACTION_WINDOW"),
     ]);
     expect(plan[0]!.copyParams).toBeUndefined(); // step 1 (reach) is text guidance — no highlighted control
     expect(plan.slice(1).map((s) => s.copyParams?.targetKind)).toEqual([
       "issue",
-      "purpose_option",
       "confirm_purpose",
       "terms_consent",
       "issue_final",
@@ -240,7 +234,7 @@ describe("coupang issuance stages — the fixed 8-step plan, in the MEASURED ord
     // "copy your keys", so the tutorial told the seller to copy credentials that did not exist. The step that
     // creates them now exists, is named once, and sits immediately before the copy step.
     const plan = coupangIssuanceStepPlan();
-    expect(COUPANG_ISSUANCE_KEY_CREATION_STEP).toBe(6);
+    expect(COUPANG_ISSUANCE_KEY_CREATION_STEP).toBe(5);
     const keyStep = plan[COUPANG_ISSUANCE_KEY_CREATION_STEP - 1]!;
     expect(keyStep.copyParams?.targetKind).toBe("issue_final");
     expect(plan[COUPANG_ISSUANCE_KEY_CREATION_STEP]!.copyParams?.targetKind).toBe("credentials");

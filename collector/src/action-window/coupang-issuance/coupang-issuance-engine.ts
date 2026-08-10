@@ -99,12 +99,11 @@ const TARGET_BARRIER = COUPANG_TARGET_BARRIER_STAGE;
 const TARGET_STEP: Readonly<Record<CoupangIssuanceTarget, number>> = {
   reach_open_api: 1,
   issue: 2,
-  purpose_option: 3,
-  confirm_purpose: 4,
-  terms_consent: 5,
-  issue_final: 6,
-  credentials: 7,
-  return: 8,
+  confirm_purpose: 3,
+  terms_consent: 4,
+  issue_final: 5,
+  credentials: 6,
+  return: 7,
 };
 
 export class CoupangIssuanceEngine {
@@ -360,10 +359,11 @@ export class CoupangIssuanceEngine {
       // MEASURED: 발급 opens the purpose screen. It does not create a key, and this hop no longer pretends it
       // does — the old plan went `issue → credentials`, i.e. straight from a press that reveals a form to
       // "copy your keys", past two screens and the control that actually issues.
+      //
+      // The purpose screen is ONE step, not two. `OPEN API` is already selected, so a separate "confirm the
+      // radio" step asked the seller to verify something nobody had asked them to change and then made them
+      // advance twice through a single screen. That check is a clause in `confirm_purpose`'s copy now.
       case "issue":
-        this.currentTarget = "purpose_option";
-        return { guide: "purpose_option" };
-      case "purpose_option":
         this.currentTarget = "confirm_purpose";
         return { guide: "confirm_purpose" };
       case "confirm_purpose":

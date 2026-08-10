@@ -33,9 +33,13 @@ export type CoupangIssuanceTarget =
   | "reach_open_api"
   /** `API Key 발급 받기` — MEASURED to open the purpose screen. It does not create a key. */
   | "issue"
-  /** The purpose radios. `OPEN API` is the DEFAULT, so this usually needs no click. */
-  | "purpose_option"
-  /** `확인` — MEASURED to open the terms screen. It does not create a key. */
+  /**
+   * `확인` — MEASURED to open the terms screen. It does not create a key.
+   *
+   * This is ALSO the purpose screen's whole step. `OPEN API` is the default selection, so a separate
+   * "check the radio" step asked the seller to confirm something they had not been asked to change, then made
+   * them advance twice through one screen. The check is now a clause in this step's copy.
+   */
   | "confirm_purpose"
   /** The two consent checkboxes. Never ticked, never read; the seller decides. */
   | "terms_consent"
@@ -52,7 +56,6 @@ export type CoupangIssuanceTarget =
 export const COUPANG_ISSUANCE_TARGETS: readonly CoupangIssuanceTarget[] = [
   "reach_open_api",
   "issue",
-  "purpose_option",
   "confirm_purpose",
   "terms_consent",
   "issue_final",
@@ -83,7 +86,6 @@ export const COUPANG_ISSUANCE_TRANSITION_OBSERVE_TARGET: CoupangIssuanceTarget =
  */
 export const COUPANG_ISSUANCE_CHECKPOINT_TARGETS: readonly CoupangIssuanceTarget[] = [
   "issue",
-  "purpose_option",
   "confirm_purpose",
   "terms_consent",
   "issue_final",
@@ -103,7 +105,6 @@ export function isCoupangCheckpointTarget(target: CoupangIssuanceTarget): boolea
 export const COUPANG_TARGET_BARRIER_STAGE: Readonly<Record<CoupangIssuanceTarget, CoupangIssuanceStage>> = {
   reach_open_api: "reaching_open_api",
   issue: "checkpoint_reveal_issuance_form",
-  purpose_option: "guiding_purpose_option",
   confirm_purpose: "checkpoint_confirm_purpose",
   terms_consent: "guiding_terms_consent",
   // The key-creation boundary. `issue` used to map here, back when 발급 was believed to create the key.

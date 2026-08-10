@@ -579,7 +579,6 @@ function advanceToken(target: CoupangIssuanceTarget): string {
  */
 const ADVANCE_BUTTON_LABEL: Readonly<Partial<Record<CoupangIssuanceTarget, string>>> = {
   issue: "발급 화면이 열렸어요 · 다음",
-  purpose_option: "다음",
   confirm_purpose: "확인을 눌렀어요 · 다음",
   terms_consent: "동의했어요 · 다음",
   // The key-creation step. Its caption confirms the seller's own act AFTER the fact; nothing here presses it.
@@ -624,12 +623,11 @@ function isVerifyResolved(category: WingPageCategory): boolean {
 const OVERLAY_STEP: Readonly<Record<CoupangIssuanceTarget, number>> = {
   reach_open_api: 1,
   issue: 2,
-  purpose_option: 3,
-  confirm_purpose: 4,
-  terms_consent: 5,
-  issue_final: 6,
-  credentials: 7,
-  return: 8,
+  confirm_purpose: 3,
+  terms_consent: 4,
+  issue_final: 5,
+  credentials: 6,
+  return: 7,
 };
 
 /**
@@ -640,12 +638,11 @@ const OVERLAY_STEP: Readonly<Record<CoupangIssuanceTarget, number>> = {
  * observed navigation (no button); every other step advances on the seller pressing THIS panel's button.
  */
 const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string>> = {
-  reach_open_api: "WING 홈에서 '오픈API 키 발급' 페이지로 직접 이동하세요. 이동을 감지하면 자동으로 다음 단계로 넘어갑니다.",
-  issue: "표시된 'API Key 발급 받기' 버튼을 직접 누르세요. SellerOps는 대신 누르지 않습니다. 이 버튼은 키를 만들지 않고 사용 목적 선택 화면을 엽니다. 화면이 열리면 아래 버튼을 누르세요.",
-  purpose_option: "사용 목적 화면에서 'OPEN API'가 선택되어 있는지 확인하세요. 보통 기본값이라 아무것도 누르지 않아도 됩니다. 확인했으면 아래 '다음'을 누르세요.",
-  confirm_purpose: "'확인'을 직접 누르세요. 이 버튼도 키를 만들지 않고 약관 동의 화면을 엽니다. 화면이 열리면 아래 버튼을 누르세요.",
-  terms_consent: "약관 내용을 직접 읽고 판단하신 뒤, 동의 체크박스 2개를 직접 선택하세요. SellerOps는 약관을 읽거나 대신 동의하지 않고, 체크 여부도 확인하지 않습니다. 완료하면 아래 버튼을 누르세요.",
-  issue_final: "⚠ 여기서 실제로 키가 생성됩니다. '약관 동의 및 Key 발급받기' 버튼을 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않습니다. 발급이 끝나면 아래 버튼을 누르세요.",
+  reach_open_api: "WING에 로그인한 뒤 '오픈API 키 발급' 페이지로 직접 이동하세요. 도착하면 자동으로 다음 단계로 넘어갑니다.",
+  issue: "표시된 'API Key 발급 받기' 버튼을 직접 누르세요. SellerOps는 대신 누르지 않습니다. 이 버튼은 키를 만들지 않고 사용 목적 선택 화면을 엽니다. 화면이 열리면 자동으로 넘어갑니다.",
+  confirm_purpose: "사용 목적이 'OPEN API'로 되어 있는지 보시고(기본값이라 대개 그대로입니다), '확인'을 직접 누르세요. 이 버튼도 키를 만들지 않고 약관 동의 화면을 엽니다. 화면이 열리면 자동으로 넘어갑니다.",
+  terms_consent: "약관 내용을 직접 읽고 판단하신 뒤, 동의 체크박스 2개를 직접 선택하세요. SellerOps는 약관을 읽거나 대신 동의하지 않고, 체크박스를 대신 누르지도 않습니다. 다만 2개가 모두 선택됐는지는 이 화면에서 확인해 자동으로 다음으로 넘어갑니다(선택 여부는 저장·전송하지 않습니다).",
+  issue_final: "⚠ 여기서 실제로 키가 생성됩니다. '약관 동의 및 Key 발급받기' 버튼을 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다. 발급이 끝나면 아래 버튼을 누르세요.",
   credentials: "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요. SellerOps는 값을 읽지 않습니다. 복사했으면 아래 버튼을 누르세요.",
   return: "이제 아래 버튼을 눌러 SellerOps로 돌아가세요. 돌아가면 복사한 키를 입력해 연결을 마칠 수 있어요.",
 };
@@ -686,7 +683,6 @@ const REACH_OPEN_API_GUIDANCE_SIG = "c0a9b17ec0a9b17e";
  * promotes NOTHING — a text-guided step gets the guidance panel and its advance button, and no spotlight ring.
  */
 const TEXT_GUIDED_SIG: Readonly<Partial<Record<CoupangIssuanceTarget, string>>> = {
-  purpose_option: "7a1c33d27a1c33d2",
   confirm_purpose: "b48e2f05b48e2f05",
   terms_consent: "16d9c7ba16d9c7ba",
   issue_final: "9f3b60e19f3b60e1",

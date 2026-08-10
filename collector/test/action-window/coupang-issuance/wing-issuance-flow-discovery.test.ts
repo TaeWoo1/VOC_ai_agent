@@ -992,7 +992,9 @@ describe("stale spotlight — the defect the dev-host live proof surfaced", () =
 
   it("only CALIBRATED targets are spotlit — the two with a locator, and no others", () => {
     const guided = DRV.slice(DRV.indexOf("const TEXT_GUIDED_SIG"), DRV.indexOf("};", DRV.indexOf("const TEXT_GUIDED_SIG")));
-    for (const t of ["purpose_option", "confirm_purpose", "terms_consent", "issue_final"]) {
+    // `purpose_option` was retired on 2026-08-10: the purpose screen is ONE step, folded into
+    // `confirm_purpose`, so there is no separate radio-check target left to guide.
+    for (const t of ["confirm_purpose", "terms_consent", "issue_final"]) {
       expect(guided, t).toContain(t);
     }
     for (const t of ["issue:", "credentials:"]) expect(guided).not.toContain(t);

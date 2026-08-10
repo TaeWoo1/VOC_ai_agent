@@ -95,12 +95,6 @@ export type CoupangIssuanceStage =
    */
   | "checkpoint_reveal_issuance_form"
   /**
-   * Seller barrier (checkpoint): the purpose screen. MEASURED: two radios, `OPEN API` and `플레이오토 웹 솔루션`,
-   * and `OPEN API` is already the DEFAULT — so for the SellerOps flow this step usually needs no click at all
-   * and the tutorial says so. Renamed from `guiding_self_dev`: 자체개발 is not on this screen.
-   */
-  | "guiding_purpose_option"
-  /**
    * Seller CHECKPOINT: they press `확인`. MEASURED 2026-08-10 in isolation — two readings with nothing pressed
    * stayed on the purpose screen, and one 확인 press moved to the terms screen. It creates no key.
    */
@@ -143,7 +137,6 @@ export const COUPANG_ISSUANCE_TERMINAL_STAGES: readonly CoupangIssuanceStage[] =
 export const COUPANG_ISSUANCE_BARRIER_STAGES: readonly CoupangIssuanceStage[] = [
   "reaching_open_api",
   "checkpoint_reveal_issuance_form",
-  "guiding_purpose_option",
   "checkpoint_confirm_purpose",
   "guiding_terms_consent",
   "checkpoint_before_issue",
@@ -180,26 +173,25 @@ export interface CoupangIssuanceStepMeta {
 export const COUPANG_ISSUANCE_RUN_COPY_KEY = "actionWindow.coupangIssuance.run";
 
 /**
- * The step plan. Exactly EIGHT steps — a fixed line (no branch), so `totalSteps` is stable from the frontend's
+ * The step plan. Exactly SEVEN steps — a fixed line (no branch), so `totalSteps` is stable from the frontend's
  * first view onward. Step 1 is AUTOMATIC_OPERATION and carries no highlighted control (its transition-observe
  * uses text guidance, not a DOM control). Every other step is a control the SELLER operates.
  *
  * **The order is the measured order**, which the previous seven-step plan was not: it put 발급 fifth, after two
  * steps for fields this flow never shows, and had no step at all for the control that creates the key.
  *
- * **Step 6 is the key-creation boundary.** It is the last step SellerOps can guide without a credential
+ * **Step 5 is the key-creation boundary.** It is the last step SellerOps can guide without a credential
  * existing, and the runtime rests there.
  */
 export function coupangIssuanceStepPlan(): readonly CoupangIssuanceStepMeta[] {
   return [
     { stepNumber: 1, stepId: "aw.coupang_issuance_reach_open_api", copyKey: "actionWindow.coupangIssuance.reachOpenApi", mode: "AUTOMATIC_OPERATION" },
     { stepNumber: 2, stepId: "aw.coupang_issuance_reveal_form", copyKey: "actionWindow.coupangIssuance.revealForm", mode: "ACTION_WINDOW", copyParams: { targetKind: "issue" } },
-    { stepNumber: 3, stepId: "aw.coupang_issuance_purpose_option", copyKey: "actionWindow.coupangIssuance.purposeOption", mode: "ACTION_WINDOW", copyParams: { targetKind: "purpose_option" } },
-    { stepNumber: 4, stepId: "aw.coupang_issuance_confirm_purpose", copyKey: "actionWindow.coupangIssuance.confirmPurpose", mode: "ACTION_WINDOW", copyParams: { targetKind: "confirm_purpose" } },
-    { stepNumber: 5, stepId: "aw.coupang_issuance_terms_consent", copyKey: "actionWindow.coupangIssuance.termsConsent", mode: "ACTION_WINDOW", copyParams: { targetKind: "terms_consent" } },
-    { stepNumber: 6, stepId: "aw.coupang_issuance_issue_checkpoint", copyKey: "actionWindow.coupangIssuance.issueCheckpoint", mode: "ACTION_WINDOW", copyParams: { targetKind: "issue_final" } },
-    { stepNumber: 7, stepId: "aw.coupang_issuance_copy_keys", copyKey: "actionWindow.coupangIssuance.copyKeys", mode: "ACTION_WINDOW", copyParams: { targetKind: "credentials" } },
-    { stepNumber: 8, stepId: "aw.coupang_issuance_return", copyKey: "actionWindow.coupangIssuance.return", mode: "ACTION_WINDOW", copyParams: { targetKind: "return" } },
+    { stepNumber: 3, stepId: "aw.coupang_issuance_confirm_purpose", copyKey: "actionWindow.coupangIssuance.confirmPurpose", mode: "ACTION_WINDOW", copyParams: { targetKind: "confirm_purpose" } },
+    { stepNumber: 4, stepId: "aw.coupang_issuance_terms_consent", copyKey: "actionWindow.coupangIssuance.termsConsent", mode: "ACTION_WINDOW", copyParams: { targetKind: "terms_consent" } },
+    { stepNumber: 5, stepId: "aw.coupang_issuance_issue_checkpoint", copyKey: "actionWindow.coupangIssuance.issueCheckpoint", mode: "ACTION_WINDOW", copyParams: { targetKind: "issue_final" } },
+    { stepNumber: 6, stepId: "aw.coupang_issuance_copy_keys", copyKey: "actionWindow.coupangIssuance.copyKeys", mode: "ACTION_WINDOW", copyParams: { targetKind: "credentials" } },
+    { stepNumber: 7, stepId: "aw.coupang_issuance_return", copyKey: "actionWindow.coupangIssuance.return", mode: "ACTION_WINDOW", copyParams: { targetKind: "return" } },
   ];
 }
 
@@ -213,7 +205,7 @@ export const COUPANG_ISSUANCE_TOTAL_STEPS = coupangIssuanceStepPlan().length;
  * happened. From this step on, a credential may exist on the marketplace. Any future automation, retry, or
  * "resume from step N" has to treat this number as a wall.
  */
-export const COUPANG_ISSUANCE_KEY_CREATION_STEP = 6;
+export const COUPANG_ISSUANCE_KEY_CREATION_STEP = 5;
 
 /** Step metadata at a 1-based index, clamped so a park/terminal view never reads past the plan. */
 export function coupangIssuanceStepMetaAt(plan: readonly CoupangIssuanceStepMeta[], stepNumber: number): CoupangIssuanceStepMeta {
@@ -238,7 +230,6 @@ export function coupangIssuanceStageToRunStatus(stage: CoupangIssuanceStage): Ru
     case "waiting_login":
     case "reaching_open_api":
     case "checkpoint_reveal_issuance_form":
-    case "guiding_purpose_option":
     case "checkpoint_confirm_purpose":
     case "guiding_terms_consent":
     case "checkpoint_before_issue":
@@ -264,7 +255,6 @@ export function coupangIssuanceStageToStepStatus(stage: CoupangIssuanceStage): S
     case "waiting_login":
     case "reaching_open_api":
     case "checkpoint_reveal_issuance_form":
-    case "guiding_purpose_option":
     case "checkpoint_confirm_purpose":
     case "guiding_terms_consent":
     case "checkpoint_before_issue":
