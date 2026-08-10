@@ -153,6 +153,11 @@ describe("run-coupang-wing-issuance-live CLI — source guard (gated, no click/t
 
 /* ══════════════════════════ every guided step must be reachable ══════════════════════════ */
 
+/** The minimum a `Page` must be for the driver's constructor: it subscribes to `close`. */
+function fakePage(): { url: () => string; on: () => void } {
+  return { url: () => "https://wing.coupang.com", on: () => undefined };
+}
+
 describe("the redesigned walk can actually be walked", () => {
   it("**every tutorial target resolves — none returns the count that parks the run**", async () => {
     // The defect this closes shipped in the 2026-08-10 redesign: four of the eight steps had no promoted
@@ -163,7 +168,10 @@ describe("the redesigned walk can actually be walked", () => {
     //
     // This asserts against the REAL driver, and it needs no page: every non-highlight target short-circuits
     // before touching one.
-    const driver = new CoupangWingIssuanceDriver({ url: () => "https://wing.coupang.com" } as never);
+    // A structurally complete stub: the constructor subscribes to the page's `close` event, so a bare object
+    // throws `page.on is not a function` — which vitest reports as an unhandled error while still counting the
+    // test as passed, so a local run looks green and CI does not.
+    const driver = new CoupangWingIssuanceDriver(fakePage() as never);
     for (const target of COUPANG_ISSUANCE_TARGETS) {
       if (target === "issue" || target === "credentials") continue; // these query the page; covered elsewhere
       const res = await driver.locateTarget(target);
@@ -175,7 +183,10 @@ describe("the redesigned walk can actually be walked", () => {
   it("the text-guided steps are exactly the MEASURED-but-unpromoted ones, and their sigs are distinct", async () => {
     // A step gets text guidance because nothing was promoted for it — not because promoting was inconvenient.
     // If one of these ever gains a calibrated locator, it leaves this list and gains a spotlight.
-    const driver = new CoupangWingIssuanceDriver({ url: () => "https://wing.coupang.com" } as never);
+    // A structurally complete stub: the constructor subscribes to the page's `close` event, so a bare object
+    // throws `page.on is not a function` — which vitest reports as an unhandled error while still counting the
+    // test as passed, so a local run looks green and CI does not.
+    const driver = new CoupangWingIssuanceDriver(fakePage() as never);
     const sigs = new Map<string, string>();
     for (const target of ["reach_open_api", "purpose_option", "confirm_purpose", "terms_consent", "issue_final", "return"] as const) {
       const res = await driver.locateTarget(target);
