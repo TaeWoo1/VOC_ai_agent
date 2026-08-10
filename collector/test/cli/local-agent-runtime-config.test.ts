@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveBrowserRuntimeConfig, decideRun, LOCAL_AGENT_APPROVAL_FLAG } from "../../src/cli/local-agent";
+import { resolveBrowserRuntimeConfig, decideRun, shouldExitAfterBoot, LOCAL_AGENT_APPROVAL_FLAG } from "../../src/cli/local-agent";
 
 const ESM_CONN = JSON.stringify([
   { connectionId: "c", channel: "ESM", loginMode: "ESM_PLUS", autoReconnectConsent: true, autoSubmitConsent: false, assistedReconnectConsent: true },
@@ -38,5 +38,25 @@ describe("local-agent browser runtime config — auth surface vs session probe",
       expect(d.config.browser?.sessionProbeUrl).toBe(PROBE);
       expect(d.config.browser?.sessionProbeUrl).not.toBe(d.config.browser?.authSurfaceUrl);
     }
+  });
+});
+
+/**
+ * The boot's exit rule. It used to ask about CONNECTIONS while the thing that must stay alive is the BRIDGE
+ * CARRIER — so a Coupang guided walk (COUPANG is DISCOVERY_REQUIRED ⇒ SKIPPED ⇒ nothing managed) shut itself
+ * down one line after announcing `coupangIssuance: true`, and the frontend found nothing on loopback.
+ */
+describe("shouldExitAfterBoot", () => {
+  it("stays resident whenever a carrier is hosted, even with nothing runnable", () => {
+    expect(shouldExitAfterBoot({ managedConnectionCount: 0, hostsBridgeCarrier: true })).toBe(false);
+  });
+
+  it("exits when nothing is runnable and no client will ever attach", () => {
+    expect(shouldExitAfterBoot({ managedConnectionCount: 0, hostsBridgeCarrier: false })).toBe(true);
+  });
+
+  it("stays resident for a runnable connection, carrier or not", () => {
+    expect(shouldExitAfterBoot({ managedConnectionCount: 1, hostsBridgeCarrier: false })).toBe(false);
+    expect(shouldExitAfterBoot({ managedConnectionCount: 1, hostsBridgeCarrier: true })).toBe(false);
   });
 });

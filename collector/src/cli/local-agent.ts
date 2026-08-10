@@ -1018,6 +1018,23 @@ export function createSignalShutdown(shutdown: () => Promise<unknown>): () => Pr
   };
 }
 
+/**
+ * Should the boot exit once startup has settled, or stay resident?
+ *
+ * The rule used to be "no runnable connection ⇒ exit", which asks about CONNECTIONS while the thing that has
+ * to stay alive is the BRIDGE CARRIER. A Coupang guided walk boots with a COUPANG connection, and COUPANG is
+ * `DISCOVERY_REQUIRED` — so it settles SKIPPED, nothing is managed, and the agent shut itself down one line
+ * after announcing `coupangIssuance: true`. The frontend then found nothing on loopback, which reads as "the
+ * helper is not running" rather than "the helper decided its own carrier did not count".
+ *
+ * A hosted carrier is exactly a promise that a client will attach later, so it keeps the process resident on
+ * its own — independently of whether any connection turned out to be runnable.
+ */
+export function shouldExitAfterBoot(input: { managedConnectionCount: number; hostsBridgeCarrier: boolean }): boolean {
+  if (input.hostsBridgeCarrier) return false;
+  return input.managedConnectionCount === 0;
+}
+
 /** A sanitized printer for each settled connection — enums / booleans / counts only. */
 const printingObserver: ConnectorOrchestratorObserver = {
   onConnectionSettled(result: ConnectorStartupResult): void {
@@ -1204,12 +1221,24 @@ async function main(): Promise<void> {
   const results = await startup.boot(decision.parsed.connections);
   bridge.markAgentStarted();
 
-  if (startup.managedConnectionIds().length === 0) {
-    // Nothing runnable is held (an all-SKIPPED / API-only / discovery-only boot) — there is no browser to
-    // keep resident for a WAITING/HUMAN handoff, so shut down cleanly and exit instead of hanging.
+  const managedConnectionCount = startup.managedConnectionIds().length;
+  const hostsBridgeCarrier =
+    actionWindow !== undefined ||
+    replySubmission !== undefined ||
+    apiIssuance !== undefined ||
+    coupangIssuance !== undefined;
+  if (shouldExitAfterBoot({ managedConnectionCount, hostsBridgeCarrier })) {
+    // Nothing runnable is held AND no carrier is hosted (an all-SKIPPED / API-only / discovery-only boot) —
+    // there is no browser to keep resident for a WAITING/HUMAN handoff and no client will attach, so shut
+    // down cleanly and exit instead of hanging.
     await guardedShutdown();
     process.exit(0);
     return;
+  }
+  if (managedConnectionCount === 0) {
+    // Resident purely for the carrier. Said out loud, because "no connection is runnable" and "the agent is
+    // up and waiting for SellerOps" are otherwise indistinguishable in the boot output.
+    log("aw_agent_resident_for_carrier", { managedConnections: 0 });
   }
 
   // Same-process human-completed re-verification: for every browser connection that settled
