@@ -727,6 +727,8 @@ describe("the emitted Stage-2 record", () => {
     choiceControlFault: null,
     association: null,
     associationFault: null,
+    consentBlocks: null,
+    consentBlockFault: null,
     calibrationBlind: null,
     purposeOptionCandidateIds: [],
   };
@@ -852,6 +854,12 @@ describe("WING_STAGE2_RECON_EVIDENCE — measured, operator-reported, and inferr
     expect(all.filter((id) => !(e.measuredCandidateIds as readonly string[]).includes(id))).toEqual([
       // Added 2026-08-10 from the operator's verbatim transcription; this run predates it and never probed it.
       "stage2.purpose.operator_verbatim",
+      // The TERMS screen, discovered 2026-08-10 by pressing 확인 — a screen this run had no idea existed.
+      "stage3.terms.heading",
+      "stage3.terms.api_agree",
+      "stage3.terms.category_agree",
+      "stage3.terms.cancel",
+      "stage3.terms.issue_final",
     ]);
   });
 
@@ -970,7 +978,9 @@ describe("WING_STAGE2_RECON_EVIDENCE — measured, operator-reported, and inferr
   it("landing the evidence promoted NO selector and changed NO ordering", () => {
     // The shipped Stage-2 target order is a product-facing sequence; a measurement is not a licence to reorder
     // it, and `확인` resolving is not a licence to ship it as a locator.
-    expect([...WING_STAGE2_RECON_TARGETS]).toEqual(["purpose", "self_dev", "vendor_info", "vendor_url", "call_ip", "confirm"]);
+    // The six purpose-flow targets, in order, at the FRONT. Later units append terms-screen targets; what must
+    // never happen is a reorder, because the sequence is product-facing and a measurement is not a licence.
+    expect([...WING_STAGE2_RECON_TARGETS].slice(0, 6)).toEqual(["purpose", "self_dev", "vendor_info", "vendor_url", "call_ip", "confirm"]);
     const known = Object.values(WING_STAGE2_RECON_CANDIDATES).flat();
     expect(known.find((c) => c.id === "stage2.confirm.confirm")!.exactText).toBe("확인");
   });

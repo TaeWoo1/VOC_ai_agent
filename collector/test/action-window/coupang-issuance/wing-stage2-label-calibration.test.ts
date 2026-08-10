@@ -1323,7 +1323,7 @@ describe("the calibration phase is gated and described like every other WING pha
   it("prepares a manifest carrying the Stage-2 scope, and narrowing survives", () => {
     const full = validateApprovalPrerequisites(baseCalibration());
     expect(full.ok).toBe(true);
-    if (full.ok) expect(full.manifest.stage2Targets).toEqual(["purpose", "self_dev", "vendor_info", "vendor_url", "call_ip", "confirm"]);
+    if (full.ok) expect(full.manifest.stage2Targets!.slice(0, 6)).toEqual(["purpose", "self_dev", "vendor_info", "vendor_url", "call_ip", "confirm"]);
     const narrow = validateApprovalPrerequisites({ ...baseCalibration(), requestedStage2Targets: ["purpose"] });
     expect(narrow.ok).toBe(true);
     if (narrow.ok) expect(narrow.manifest.stage2Targets).toEqual(["purpose"]);
@@ -1479,10 +1479,11 @@ describe("a calibration changes nothing that ships", () => {
   });
 
   it("the shipped Stage-2 ordering is untouched by this unit", () => {
+    // Pinned to the ORDER of the six this unit knew about, not to the literal line: a later unit appends
+    // terms-screen targets, and a whole-line pin would force that unit to edit a guard whose subject is
+    // "did the calibration reorder anything" — which it did not, and cannot, by appending.
     const src = SRC("action-window/coupang-wing-label-recon.ts");
-    expect(src).toContain(
-      'export const WING_STAGE2_RECON_TARGETS = ["purpose", "self_dev", "vendor_info", "vendor_url", "call_ip", "confirm"] as const;',
-    );
+    expect(src).toContain('"purpose", "self_dev", "vendor_info", "vendor_url", "call_ip", "confirm",');
   });
 
   it("the landed recon evidence still records its own absence bounds as they were measured", () => {
@@ -1669,7 +1670,16 @@ describe("WING_STAGE2_LABEL_CALIBRATION_EVIDENCE — measured, inferred, and sti
     // The equality this used to assert broke when the verbatim heading was added on 2026-08-10 — the same
     // past-run-owns-the-current-set mistake as the two coverage counts. A candidate this run never probed has to
     // be named here rather than quietly folded into its quads.
-    expect(shipped.filter((id) => !ids.includes(id))).toEqual(["stage2.purpose.operator_verbatim"]);
+    expect(shipped.filter((id) => !ids.includes(id))).toEqual([
+      "stage2.purpose.operator_verbatim",
+      // …and the whole TERMS screen, which pressing 확인 revealed on 2026-08-10. This record could not have
+      // quads for a screen nobody had reached when it was taken.
+      "stage3.terms.heading",
+      "stage3.terms.api_agree",
+      "stage3.terms.category_agree",
+      "stage3.terms.cancel",
+      "stage3.terms.issue_final",
+    ]);
     // Every recon absence is present here, and so is the one candidate that was not an absence.
     for (const id of E.refines.absentCandidateIds) expect(ids).toContain(id);
     expect(ids).toContain("stage2.confirm.confirm");

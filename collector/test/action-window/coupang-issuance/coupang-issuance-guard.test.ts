@@ -134,7 +134,7 @@ describe("coupang issuance engine — a non-opaque locate signature can never be
     const eng = new CoupangIssuanceEngine({ runId: "r", channelCode: "coupang" }, { clock: makeCoupangIssuanceClock() });
     eng.command({ type: "START_RUN", expectedRevision: 0 });
     eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" }); // → guide self_dev
-    eng.onTargetLocated("self_dev", { count: 1, sig: RAW });
+    eng.onTargetLocated("purpose_option", { count: 1, sig: RAW });
 
     expect(eng.currentStage()).toBe("target_not_found");
     for (const e of eng.events()) expect(JSON.stringify(e)).not.toContain(RAW);

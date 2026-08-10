@@ -89,12 +89,13 @@ const HEX16 = /^[0-9a-f]{16}$/;
 const TARGET_BARRIER = COUPANG_TARGET_BARRIER_STAGE;
 const TARGET_STEP: Readonly<Record<CoupangIssuanceTarget, number>> = {
   reach_open_api: 1,
-  self_dev: 2,
-  vendor_info: 3,
-  call_ip: 4,
-  issue: 5,
-  credentials: 6,
-  return: 7,
+  issue: 2,
+  purpose_option: 3,
+  confirm_purpose: 4,
+  terms_consent: 5,
+  issue_final: 6,
+  credentials: 7,
+  return: 8,
 };
 
 export class CoupangIssuanceEngine {
@@ -244,8 +245,8 @@ export class CoupangIssuanceEngine {
       this.completedSteps = 1;
       this.emit("STEP_COMPLETED", { stepId: this.stepIdFor(1), stepStatus: "COMPLETED" });
       this.activeStepIndex = 2;
-      this.currentTarget = "self_dev";
-      return { guide: "self_dev" };
+      this.currentTarget = "issue";
+      return { guide: "issue" };
     }
     if (branch === "wing_home") {
       // The seller is on the WING home — guide the reach_open_api transition-observe (step 1).
@@ -328,8 +329,8 @@ export class CoupangIssuanceEngine {
       this.emit("USER_ACTION_OBSERVED", { stepId: this.stepId(), observed: true });
       this.completedSteps = this.activeStepIndex; // step 1 (reach the open-API issuance page)
       this.emit("STEP_COMPLETED", { stepId: this.stepId(), stepStatus: "COMPLETED" });
-      this.currentTarget = "self_dev";
-      return { guide: "self_dev" };
+      this.currentTarget = "issue";
+      return { guide: "issue" };
     }
     // Wrong page / multiple transitions → recoverable park; a REQUEST_STEP_RECHECK re-probes from the top.
     return this.park("page_mismatch", "UI_DRIFT");
@@ -341,18 +342,25 @@ export class CoupangIssuanceEngine {
       // `reach_open_api` never reaches here — its barrier advances via `onReachVerified` (issuance-page
       // verification), not this checkpoint path. Kept only so the switch stays exhaustive.
       case "reach_open_api":
-        this.currentTarget = "self_dev";
-        return { guide: "self_dev" };
-      case "self_dev":
-        this.currentTarget = "vendor_info";
-        return { guide: "vendor_info" };
-      case "vendor_info":
-        this.currentTarget = "call_ip";
-        return { guide: "call_ip" };
-      case "call_ip":
         this.currentTarget = "issue";
         return { guide: "issue" };
+      // MEASURED: 발급 opens the purpose screen. It does not create a key, and this hop no longer pretends it
+      // does — the old plan went `issue → credentials`, i.e. straight from a press that reveals a form to
+      // "copy your keys", past two screens and the control that actually issues.
       case "issue":
+        this.currentTarget = "purpose_option";
+        return { guide: "purpose_option" };
+      case "purpose_option":
+        this.currentTarget = "confirm_purpose";
+        return { guide: "confirm_purpose" };
+      case "confirm_purpose":
+        this.currentTarget = "terms_consent";
+        return { guide: "terms_consent" };
+      case "terms_consent":
+        this.currentTarget = "issue_final";
+        return { guide: "issue_final" };
+      // THE KEY-CREATION BOUNDARY. Only after the seller reports pressing it can a credential exist to copy.
+      case "issue_final":
         this.currentTarget = "credentials";
         return { guide: "credentials" };
       case "credentials":

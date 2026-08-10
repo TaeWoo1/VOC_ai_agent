@@ -23,6 +23,11 @@
 #                                            the OPERATOR reaches by pressing 발급 themselves, plus a
 #                                            choice-control SHAPE census. Still read-only: no highlight, no
 #                                            click, no selection, no 확인, no value read.
+#   COUPANG_WING_ISSUANCE_FLOW_DISCOVERY   — the calibration's reads, taken at SEVERAL checkpoints while the
+#                                            OPERATOR advances the real flow (발급 → select the purpose option →
+#                                            conditionally 확인). The agent still clicks, selects and types
+#                                            nothing; the 확인 step is offered only when the reading taken after
+#                                            the selection shows the vendor form is not yet on screen.
 #   COUPANG_WING_STAGE2_LABEL_CALIBRATION  — the same surface and the same operator flow, plus two further
 #                                            read-only reads: a per-candidate CONTAINMENT probe and a
 #                                            label-ASSOCIATION census (how each control is labelled, whether the
@@ -60,9 +65,9 @@ git_hardened() {
 #    pattern and inject a second assignment into the file below.
 PHASE="${SELLEROPS_APPROVAL_PHASE:-COUPANG_WING_SELECTOR_PROBE}"
 case "$PHASE" in
-  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION) ;;
+  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION|COUPANG_WING_ISSUANCE_FLOW_DISCOVERY) ;;
   *)
-    echo "BOOTSTRAP FAIL — SELLEROPS_APPROVAL_PHASE must be COUPANG_WING_SELECTOR_PROBE, COUPANG_WING_LABEL_RECON, COUPANG_WING_STAGE2_RECON, or COUPANG_WING_STAGE2_LABEL_CALIBRATION."
+    echo "BOOTSTRAP FAIL — SELLEROPS_APPROVAL_PHASE must be COUPANG_WING_SELECTOR_PROBE, COUPANG_WING_LABEL_RECON, COUPANG_WING_STAGE2_RECON, COUPANG_WING_STAGE2_LABEL_CALIBRATION, or COUPANG_WING_ISSUANCE_FLOW_DISCOVERY."
     echo "                 (The DESTRUCTIVE deletion phase has its own harness and is not approvable from here.)"
     exit 1 ;;
 esac
@@ -73,7 +78,7 @@ esac
 # Is this either of the two STAGE-2 phases? One predicate, used by every branch below — the WING phase list
 # already learned what happens when a new phase is added to some of the `if`s and not others.
 is_stage2_phase() {
-  case "$1" in COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION) return 0 ;; *) return 1 ;; esac
+  case "$1" in COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION|COUPANG_WING_ISSUANCE_FLOW_DISCOVERY) return 0 ;; *) return 1 ;; esac
 }
 
 if [ "$PHASE" = "COUPANG_WING_LABEL_RECON" ]; then
@@ -106,6 +111,19 @@ if is_stage2_phase "$PHASE"; then
   esac
 fi
 
+# The per-run checkpoint PLAN (discovery only). A PREFIX of the flow, validated in TS; the shape check here is
+# the same one every other value written to this file gets, because the preflight sources it.
+FLOW_CHECKPOINTS=""
+if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then
+  FLOW_CHECKPOINTS="${SELLEROPS_WING_FLOW_CHECKPOINTS:-}"
+  case "$FLOW_CHECKPOINTS" in
+    "") ;;
+    *[!A-Z_,]*|,*|*,|*,,*)
+      echo "BOOTSTRAP FAIL — SELLEROPS_WING_FLOW_CHECKPOINTS must be a comma-separated list of UPPERCASE checkpoint names."
+      exit 1 ;;
+  esac
+fi
+
 RUN_ID="wt-$(openssl rand -hex 6)"
 APPROVAL_ID="apr-$(openssl rand -hex 6)"
 GIT_COMMIT="$(git_hardened rev-parse --short HEAD 2>/dev/null || echo unknown)"
@@ -132,6 +150,9 @@ fi
 if [ -n "$STAGE2_TARGETS" ]; then
   printf "SELLEROPS_WING_STAGE2_TARGETS='%s'\n" "$STAGE2_TARGETS" >> "$RUN_ENV"
 fi
+if [ -n "$FLOW_CHECKPOINTS" ]; then
+  printf "SELLEROPS_WING_FLOW_CHECKPOINTS='%s'\n" "$FLOW_CHECKPOINTS" >> "$RUN_ENV"
+fi
 
 echo "coupang WING selector-probe bootstrap complete → $RUN_ENV"
 echo
@@ -142,10 +163,22 @@ echo "  phase        : $PHASE (READ_ONLY)"
 if [ -n "$PROBE_TARGETS" ]; then
   echo "  probe targets: $PROBE_TARGETS"
 fi
+if [ -n "$FLOW_CHECKPOINTS" ]; then
+  echo "  checkpoints  : $FLOW_CHECKPOINTS  (a PREFIX of the flow — the run ends after the last one)"
+fi
 if [ -n "$STAGE2_TARGETS" ]; then
   echo "  stage-2 scope: $STAGE2_TARGETS"
-  echo "  NOTE         : you press 'API Key 발급 받기' YOURSELF, stop on the purpose screen, choose nothing,"
-  echo "                 and never press '확인'. SellerOps only counts and categorises what is on screen."
+  if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then
+    # Discovery ASKS for the two things the shared note forbids. Printing the shared copy here would tell the
+    # operator the opposite of the manifest the very next command prints — and the bootstrap is read first.
+    echo "  NOTE         : YOU advance the flow (발급 → select 'OPEN API' → 확인), one checkpoint at a time."
+    echo "                 Each step is offered ONLY if SellerOps' reading says the flow is on the screen that"
+    echo "                 step assumes; otherwise the run halts and never prints the instruction."
+    echo "                 SellerOps clicks, selects and types nothing at any point."
+  else
+    echo "  NOTE         : you press 'API Key 발급 받기' YOURSELF, stop on the purpose screen, choose nothing,"
+    echo "                 and never press '확인'. SellerOps only counts and categorises what is on screen."
+  fi
 fi
 echo
 echo "next: tools/coupang-local/wing-probe-preflight.sh  (prepares + displays the Approval Manifest; no browser)"

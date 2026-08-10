@@ -88,6 +88,11 @@ export const CALIBRATION_PHASES = [
   // radio-name group it belongs to). Separately approvable because the manifest is what the operator reads
   // before granting, and "count these labels" is not "derive each control's name and compare it to a list".
   "COUPANG_WING_STAGE2_LABEL_CALIBRATION",
+  // The ISSUANCE-FLOW DISCOVERY phase. The same eight agent reads as the calibration, taken at each of several
+  // checkpoints while the OPERATOR advances the real flow: select a purpose option, then — only if the reading
+  // permits — press 확인. The agent's click/type/submit/selection budget is still 0; the widening is entirely in
+  // what the human is invited to do, which a capability list cannot express and a manifest must.
+  "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY",
   // The WING issuance-form REVEAL phase. The agent highlights the live-calibrated 발급 control and RESTS; the
   // OPERATOR presses it. It is a real marketplace action, so it needs its own grant — but it is deliberately NOT
   // declared as key creation: on the official Coupang flow 발급 opens the configuration step and the key is
@@ -148,6 +153,13 @@ export const APPROVAL_ACTIONS = [
   // which of OUR candidate strings the derived name matches (an INDEX, never the name). It selects nothing,
   // clicks nothing, and does not read `checked`.
   "CHOICE_CONTROL_LABEL_ASSOCIATION_CENSUS",
+  // Read-only CONSENT-BLOCK census: for each painting checkbox, walk UP to the nearest ancestor whose text
+  // holds exactly one of OUR consent sentences, and report which one (an INDEX), how many levels up, and how
+  // many painting checkboxes that same block contains. Two of its three verdicts are refusals — a block holding
+  // several consents identifies nothing and says so rather than picking the first. It exists because the terms
+  // checkboxes have no accessible name at all, so the alternative to measuring the pairing is inventing it.
+  // Reads no `checked`: which box the seller ticked is not a thing this records.
+  "CONSENT_BLOCK_CENSUS",
 ] as const;
 export type ApprovalAction = (typeof APPROVAL_ACTIONS)[number];
 
@@ -517,6 +529,32 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     allowsHighlight: false,
     mode: "READ_ONLY",
   },
+  COUPANG_WING_ISSUANCE_FLOW_DISCOVERY: {
+    phase: "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY",
+    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    driver: "CoupangWingIssuanceDriver (the calibration reads plus a consent-block census, at each checkpoint the OPERATOR advances)",
+    // The calibration's eight reads plus ONE: the consent-BLOCK census, which exists only because the terms
+    // checkboxes have no accessible name and the pairing must be established structurally or not at all. It is
+    // listed because it is a real additional read; a phase quietly taking a ninth measurement under a manifest
+    // naming eight is the failure this list exists to prevent.
+    //
+    // The other widening is what the OPERATOR is invited to do — select a purpose option, and conditionally
+    // press 확인 — which a capability list cannot express, so the operation text and the operator summary carry
+    // it. `wingConfirmAdvisory` keeps the second invitation from ever being printed blind.
+    capableActions: [
+      "OPEN_DEDICATED_WINDOW",
+      "WAIT_OPERATOR_LOGIN_NAV",
+      "CLASSIFY_SANITIZED_PAGE_CATEGORY",
+      "STRUCTURAL_CENSUS",
+      "PROBE_TARGET_MATCHCOUNT",
+      "CHOICE_CONTROL_SHAPE_CENSUS",
+      "FIXED_LABEL_CONTAINMENT_PROBE",
+      "CHOICE_CONTROL_LABEL_ASSOCIATION_CENSUS",
+      "CONSENT_BLOCK_CENSUS",
+    ],
+    allowsHighlight: false,
+    mode: "READ_ONLY",
+  },
   COUPANG_WING_ISSUANCE_FORM_REVEAL: {
     phase: "COUPANG_WING_ISSUANCE_FORM_REVEAL",
     cli: "src/cli/run-coupang-wing-reveal-live.ts",
@@ -578,6 +616,7 @@ export const WING_PHASES: readonly CalibrationPhase[] = [
   "COUPANG_WING_LABEL_RECON",
   "COUPANG_WING_STAGE2_RECON",
   "COUPANG_WING_STAGE2_LABEL_CALIBRATION",
+  "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY",
   "COUPANG_WING_ISSUANCE_FORM_REVEAL",
   "COUPANG_WING_KEY_DELETION",
 ];
@@ -595,6 +634,7 @@ export function isWingCalibrationPhase(phase: CalibrationPhase): boolean {
 export const WING_STAGE2_MANIFEST_PHASES: readonly CalibrationPhase[] = [
   "COUPANG_WING_STAGE2_RECON",
   "COUPANG_WING_STAGE2_LABEL_CALIBRATION",
+  "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY",
 ];
 export function isWingStage2Phase(phase: CalibrationPhase): boolean {
   return WING_STAGE2_MANIFEST_PHASES.includes(phase);
@@ -670,6 +710,7 @@ export const ENTRYPOINT_PHASES = [
   "COUPANG_WING_LABEL_RECON",
   "COUPANG_WING_STAGE2_RECON",
   "COUPANG_WING_STAGE2_LABEL_CALIBRATION",
+  "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY",
   "COUPANG_WING_ISSUANCE_FORM_REVEAL",
   "COUPANG_WING_KEY_DELETION",
   "API_ISSUANCE_FE_LIVE_PROOF",
@@ -694,6 +735,16 @@ export interface EntrypointSpec {
  * only the guided-connection phase hands the operator a bound frontend URL. `operatorActionSummary` is
  * hotkey-agnostic (the concrete capture hotkey rides the manifest's own `hotkey` field).
  */
+/**
+ * The terms-checkpoint sentence of the discovery summary, kept separate so a NARROWED run can drop it.
+ *
+ * A phase-level constant describes the longest possible run; a manifest must describe the one about to happen.
+ * A narrowed run that still told the operator to tick consent boxes would be promising a step it never reaches
+ * — the same defect as omitting one, and the harness has now produced it in both directions.
+ */
+export const WING_DISCOVERY_TERMS_STEP_SUMMARY =
+  " ④ 약관 화면에서 내용을 직접 읽고 판단하신 뒤 동의 체크박스 2개를 직접 선택하고 ready. 여기서 실행이 끝납니다.";
+
 export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>> = {
   API_CENTER_STRUCTURE_OBSERVATION: {
     entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
@@ -779,6 +830,27 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
       "SellerOps는 각 선택 항목이 '어떻게 라벨링되어 있는지'(라벨 연결 방식·연결 성공 여부·라디오 그룹 번호·길이 구간)와, " +
       "미리 정해 둔 후보 문구와의 일치 여부만 번호로 읽습니다. 화면의 문구 자체는 기록되지 않습니다. 목적을 선택하지 않고, " +
       "업체명/URL/IP를 입력하지 않으며, '확인'(최종 발급)은 절대 누르지 않습니다(강조·클릭·입력·값 읽기 없음).",
+    emitsFrontendUrl: false,
+  },
+  // The ISSUANCE-FLOW DISCOVERY phase: same CLI and same dedicated Chrome again. The summary has to carry what
+  // no capability list can — that the OPERATOR takes two real marketplace actions, that the second one is
+  // CONDITIONAL on what the run measures after the first, and that the run ends at the screen 확인 opens rather
+  // than filling anything in. It must not promise what 확인 does: no run has ever pressed it.
+  COUPANG_WING_ISSUANCE_FLOW_DISCOVERY: {
+    entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
+    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    entrypointCommandId: "probe-wing-issuance-selectors",
+    operatorActionSummary:
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 이 단계에서는 판매자가 화면을 직접 진행합니다(SellerOps는 클릭·선택·입력을 " +
+      "일절 하지 않습니다). ① 쿠팡(윙)에 직접 로그인·이동해 'API Key 발급 받기'를 직접 누르고 사용 목적 화면에서 멈춘 뒤 ready. " +
+      "② 'OPEN API'를 직접 선택하고, '확인'은 누르지 말고 ready. 여기서 SellerOps가 업체명/URL/IP 입력란이 이미 화면에 " +
+      "나타났는지 읽습니다. 이미 나타났다면 '확인'은 최종 제출일 수 있으므로 실행은 그 자리에서 중단되고, 누르라는 안내 자체를 " +
+      "하지 않습니다. ③ 중단되지 않은 경우에만 '확인'을 직접 누르고, 다음 화면이 뜨면 아무것도 누르지 말고 ready." +
+      WING_DISCOVERY_TERMS_STEP_SUMMARY +
+      " ⚠ 약관 화면의 '약관 동의 및 Key 발급받기' 버튼은 실제로 키를 생성하는 control이며, 이번 단계에서는 절대 누르지 " +
+      "않습니다. SellerOps는 그 버튼의 위치만 측정하고, 그 다음 단계 자체가 존재하지 않습니다(키 발급은 별도 승인·별도 " +
+      "manifest). SellerOps는 약관을 읽거나 판단하거나 대신 동의하지 않습니다. 각 시점마다 라벨 매칭 수·표시 여부·" +
+      "라벨 연결 방식만 번호로 읽으며, 화면 문구·입력값·키 값은 기록하지 않습니다.",
     emitsFrontendUrl: false,
   },
   // The WING issuance-form REVEAL phase: a CLI-launched dedicated Chrome. The operator presses 발급 themselves
@@ -906,6 +978,8 @@ export interface ApprovalPrereqInput {
    * narrow a selector probe must not be able to narrow a Stage-2 sweep by accident, or vice versa.
    */
   requestedStage2Targets?: readonly string[];
+  /** Narrow the phase's operator copy to THIS run. Discovery only, and only ever to drop an unreachable step. */
+  operatorActionSummaryOverride?: string;
   runId: string;
   approvalId: string;
   gitSha: string;
@@ -1384,7 +1458,9 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
     selectorsCalibrated: calibrated,
     entrypointType: entrypoint.entrypointType,
     entrypointCommandId: entrypoint.entrypointCommandId,
-    operatorActionSummary: entrypoint.operatorActionSummary,
+    // The phase's canonical copy, unless this RUN is narrower than the phase. Only the discovery route
+    // supplies an override, and only to REMOVE a step it cannot reach — never to add or soften one.
+    operatorActionSummary: input.operatorActionSummaryOverride ?? entrypoint.operatorActionSummary,
     hotkey: input.hotkey ?? "",
     artifactPath: input.artifactPath ?? "",
     // Visual-recon only: surface the fixed screen set, the gitignored sink, and the redaction/summary policies

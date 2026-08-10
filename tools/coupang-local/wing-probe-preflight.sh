@@ -56,7 +56,7 @@ fi
 # from the spec or from this run's env file; nothing from the surrounding shell.
 unset WALKTHROUGH_RUN_ID WALKTHROUGH_APPROVAL_ID WALKTHROUGH_GIT_COMMIT WING_PROBE_BOOTSTRAP_EPOCH \
       SELLEROPS_APPROVAL_PHASE SELLEROPS_WING_PROBE_TARGETS SELLEROPS_WING_APPROVED_TARGETS \
-      SELLEROPS_WING_STAGE2_TARGETS \
+      SELLEROPS_WING_STAGE2_TARGETS SELLEROPS_WING_FLOW_CHECKPOINTS \
       SELLEROPS_WING_APPROVED_PHASE \
       SELLEROPS_APPROVAL_OPERATION SELLEROPS_APPROVAL_MAX SELLEROPS_APPROVAL_ACCOUNT \
       SELLEROPS_APPROVAL_SURFACE SELLEROPS_APPROVAL_CHANNEL
@@ -74,7 +74,7 @@ PROBE_TARGETS="${SELLEROPS_WING_PROBE_TARGETS:-}"
 # their scope in the same variable; they differ only in what is measured. One predicate, used by every branch
 # below, so a third Stage-2 phase cannot be added to some of them and missed by the rest.
 is_stage2_phase() {
-  case "$1" in COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION) return 0 ;; *) return 1 ;; esac
+  case "$1" in COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION|COUPANG_WING_ISSUANCE_FLOW_DISCOVERY) return 0 ;; *) return 1 ;; esac
 }
 
 # The header must name the scope this RUN actually has. On a Stage-2 run there is no probe scope at all, and
@@ -97,10 +97,10 @@ check_identity_fresh "$BOOTSTRAP_EPOCH" "$IDENTITY_TTL_SECONDS"
 #    candidate-label recon. This harness prepares those and no others; the destructive deletion phase has its
 #    own gate and is not approvable from here.
 case "$PHASE" in
-  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION)
+  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION|COUPANG_WING_ISSUANCE_FLOW_DISCOVERY)
     pass "phase is $PHASE (READ_ONLY)" ;;
   *)
-    fail "phase must be COUPANG_WING_SELECTOR_PROBE, COUPANG_WING_LABEL_RECON, COUPANG_WING_STAGE2_RECON, or COUPANG_WING_STAGE2_LABEL_CALIBRATION (got '${PHASE:-unset}') — this harness prepares no other phase" ;;
+    fail "phase must be COUPANG_WING_SELECTOR_PROBE, COUPANG_WING_LABEL_RECON, COUPANG_WING_STAGE2_RECON, COUPANG_WING_STAGE2_LABEL_CALIBRATION, or COUPANG_WING_ISSUANCE_FLOW_DISCOVERY (got '${PHASE:-unset}') — this harness prepares no other phase" ;;
 esac
 
 # 4. No code drift since bootstrap. The manifest records a git SHA; if HEAD moved, or the working tree
@@ -165,7 +165,7 @@ fi
 # AND it must be the same phase this run bootstrapped — a manifest for the OTHER read-only phase describes
 # different work (shipped labels vs candidate hypotheses) and must not be presented under this run's identity.
 case "$M_PHASE" in
-  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION) ;;
+  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION|COUPANG_WING_ISSUANCE_FLOW_DISCOVERY) ;;
   *)
     echo "PREFLIGHT FAIL — the prepared manifest is for phase $M_PHASE, not a READ_ONLY WING recorder phase. Refusing."
     exit 1 ;;
@@ -245,7 +245,63 @@ echo
 echo "  operator action ($M_ENTRY_TYPE):"
 echo "    $M_OPERATOR_ACTION"
 echo
-if is_stage2_phase "$PHASE"; then
+if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then
+  if [ -n "${SELLEROPS_WING_FLOW_CHECKPOINTS:-}" ]; then
+    echo "  ⚠ THIS RUN IS NARROWED. The checkpoint plan is a PREFIX of the flow and the run ENDS after the last"
+    echo "    one listed — it does not reach the checkpoints below it:"
+    echo "      $SELLEROPS_WING_FLOW_CHECKPOINTS"
+  fi
+  echo "  ⚠ THIS RUN ADVANCES THE REAL FLOW, and every step of it is YOURS. SellerOps clicks, selects and types"
+  echo "  NOTHING — it has no code path that could. You press 'API Key 발급 받기', you select 'OPEN API', and you"
+  echo "  press '확인' — but only if SellerOps' own reading says you may."
+  # The step list is BUILT FROM THE PLAN. Typed out, it promised four steps for a three-step run — the same
+  # manifest-does-not-describe-the-run defect as under-promising, and it sat directly above a narrowing banner
+  # saying the opposite.
+  PLAN="${SELLEROPS_WING_FLOW_CHECKPOINTS:-PURPOSE_SCREEN_UNTOUCHED,PURPOSE_OPTION_SELECTED_BY_OPERATOR,AFTER_OPERATOR_CONFIRM,TERMS_CHECKED_BY_OPERATOR}"
+  PLAN_N="$(printf '%s' "$PLAN" | tr ',' '\n' | grep -c .)"
+  echo "  $PLAN_N checkpoints, each waiting for your signal, each instruction printed only when it is that"
+  echo "  step's turn:"
+  STEP_I=0
+  OLD_IFS="$IFS"; IFS=','
+  for CP in $PLAN; do
+    STEP_I=$((STEP_I + 1))
+    case "$CP" in
+      PURPOSE_SCREEN_UNTOUCHED)
+        echo "    $STEP_I) 발급 press → STOP on the purpose screen, select nothing → ready" ;;
+      PURPOSE_OPTION_SELECTED_BY_OPERATOR)
+        echo "    $STEP_I) make sure 'OPEN API' is selected — it is the DEFAULT, so press nothing if it already" 
+        echo "       is. Do NOT press 확인 → ready" ;;
+      AFTER_OPERATOR_CONFIRM)
+        echo "    $STEP_I) press 확인 — offered ONLY IF the previous reading says the flow is still on the" 
+        echo "       purpose screen and the 업체명/URL/IP fields are not on it → ready" ;;
+      TERMS_CHECKED_BY_OPERATOR)
+        echo "    $STEP_I) the TERMS screen: tick the two consent boxes yourself → ready" ;;
+    esac
+  done
+  IFS="$OLD_IFS"
+  echo "    THIS IS THE END — there is no step after the last one listed."
+  echo "  ⚠ WHY the 확인 step is conditional. What '확인' DOES is not established: one run saw the terms screen"
+  echo "  appear after it, and two later runs were already on the terms screen BEFORE that step — on the most"
+  echo "  recent, with the operator reporting they pressed nothing at all. What IS measured is that 업체명/URL/IP"
+  echo "  never appear anywhere in this flow, so '확인' does not submit them. The gate stands because the flow"
+  echo "  may not be where the step assumes:"
+  echo "    · SellerOps identifies WHICH screen each reading is of before printing the next instruction;"
+  echo "    · if the flow has already moved past the purpose screen, the run HALTS and the instruction to press"
+  echo "      '확인' is never printed — on 2026-08-10 it WAS printed against the terms screen, and nothing was"
+  echo "      pressed only because '확인' was no longer there. That was luck, and this is the fix;"
+  echo "    · if the vendor form ever DID appear on the purpose screen, '확인' would be a submission — also a halt."
+  echo "  Fail-closed throughout: an unreadable page, any probe fault, or a missing marker halts as well."
+  echo "  If step 3 does run, you press '확인' and STOP at whatever opens — the TERMS screen."
+  echo "  ⚠ THE RUN ENDS THERE, and the reason is the button below those checkboxes:"
+  echo "    '약관 동의 및 Key 발급받기' is the KEY-CREATION control. This run measures where it is and NEVER"
+  echo "    presses it, and there is no fifth checkpoint that could ask you to — the code refuses to accept one."
+  echo "    Key issuance is a SEPARATE phase with its own manifest and its own single-use grant."
+  echo "  You read the terms and decide. SellerOps does not read them, evaluate them, agree to them, or advise"
+  echo "  on them — it reads only whether each checkbox's label matches a string you transcribed yourself."
+  echo "  At each checkpoint SellerOps reads the same read-only things it has read all along: match counts,"
+  echo "  visible-vs-hidden, how each control is labelled, group ordinals, length bands, candidate INDICES. No"
+  echo "  page wording, no field value, no credential. Nothing measured here promotes a selector."
+elif is_stage2_phase "$PHASE"; then
   echo "  ⚠ YOU take a real WING action in this run, and SellerOps does not: you press 'API Key 발급 받기'"
   echo "  YOURSELF to open the purpose-selection screen, then STOP there. Choose no purpose, type nothing into"
   echo "  업체명/URL/IP, and NEVER press '확인' — that is the control that creates the key, and this run has no"
@@ -284,6 +340,11 @@ if is_stage2_phase "$PHASE"; then
   # phase variables plus the Stage-2 scope are the whole authorization surface.
   echo "    cd $COLLECTOR_DIR && SELLEROPS_APPROVAL_PHASE=$M_PHASE SELLEROPS_WING_APPROVED_PHASE=$M_PHASE \\"
   echo "      SELLEROPS_WING_STAGE2_TARGETS=$M_TARGETS \\"
+  if [ -n "${SELLEROPS_WING_FLOW_CHECKPOINTS:-}" ]; then
+    # The PLAN travels with the command too. Left off, the run would take the FULL flow under a manifest that
+    # described a shorter one — the same manifest-under-describes-the-run gap the scope variables exist to close.
+    echo "      SELLEROPS_WING_FLOW_CHECKPOINTS=$SELLEROPS_WING_FLOW_CHECKPOINTS \\"
+  fi
   echo "      npx tsx $M_CLI -- --i-understand-this-opens-live-coupang-wing"
 else
   echo "    cd $COLLECTOR_DIR && SELLEROPS_APPROVAL_PHASE=$M_PHASE SELLEROPS_WING_APPROVED_PHASE=$M_PHASE \\"

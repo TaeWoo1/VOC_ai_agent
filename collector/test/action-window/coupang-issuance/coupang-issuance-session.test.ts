@@ -94,7 +94,7 @@ async function pressNextToComplete(io: ReturnType<typeof loopback>, engine: Coup
 }
 
 describe("coupang issuance session — the full linear walkthrough (offline)", () => {
-  it("reach → verify → self_dev → … → return → complete on WING-resident advances ALONE (a single START_RUN, no FE 다음)", async () => {
+  it("reach → verify → 발급 → purpose → 확인 → terms → key → … → return → complete on WING-resident advances ALONE (a single START_RUN, no FE 다음)", async () => {
     const { io, engine, driver, session } = build();
     startRun(io);
     await session.whenSettled();
@@ -111,22 +111,29 @@ describe("coupang issuance session — the full linear walkthrough (offline)", (
       "observe:reach_open_api", // transition-observe: arm the navigation watch
       "wait:reach_open_api",
       "probeSurface", // VERIFY_REACH: confirm the seller reached the open-API issuance page
-      "locate:self_dev",
-      "highlight:self_dev",
-      "observe:self_dev", // WING-resident: arm the on-page advance-button observation
-      "wait:self_dev", // …and advance when the seller presses it
-      "locate:vendor_info",
-      "highlight:vendor_info",
-      "observe:vendor_info",
-      "wait:vendor_info",
-      "locate:call_ip",
-      "highlight:call_ip",
-      "observe:call_ip",
-      "wait:call_ip",
+      // The MEASURED order since 2026-08-10: 발급 opens the purpose screen, 확인 opens the terms screen, and the
+      // key is created on the terms screen. The old sequence guided 자체개발 / 업체명 / 호출 IP here — one control
+      // that is not on the screen, and two whose screens this flow never shows.
       "locate:issue",
-      "highlight:issue", // the 발급 button — highlighted, the seller presses it themselves
-      "observe:issue",
-      "wait:issue",
+      "highlight:issue", // 'API Key 발급 받기' — highlighted, the seller presses it; it opens the purpose screen
+      "observe:issue", // WING-resident: arm the on-page advance-button observation
+      "wait:issue", // …and advance when the seller presses it
+      "locate:purpose_option",
+      "highlight:purpose_option",
+      "observe:purpose_option",
+      "wait:purpose_option",
+      "locate:confirm_purpose",
+      "highlight:confirm_purpose",
+      "observe:confirm_purpose",
+      "wait:confirm_purpose",
+      "locate:terms_consent",
+      "highlight:terms_consent",
+      "observe:terms_consent",
+      "wait:terms_consent",
+      "locate:issue_final",
+      "highlight:issue_final", // ⚠ THE KEY-CREATION CONTROL — highlighted, never pressed by SellerOps
+      "observe:issue_final",
+      "wait:issue_final", // …the seller reports pressing it; only now can a credential exist
       "locate:credentials",
       "highlight:credentials", // copy the Access Key / Secret Key / 업체코드
       "observe:credentials",
@@ -142,12 +149,12 @@ describe("coupang issuance session — the full linear walkthrough (offline)", (
     expect(commandResults).toHaveLength(1);
   });
 
-  it("keeps totalSteps a fixed 7, carrying the coupang channel + issuance intent + NO appBranch on every view", async () => {
+  it("keeps totalSteps a fixed 8, carrying the coupang channel + issuance intent + NO appBranch on every view", async () => {
     const { io, session } = build();
     startRun(io);
     await session.whenSettled();
     const totals = new Set(io.views().map((v) => v.currentStep!.totalSteps));
-    expect(totals).toEqual(new Set([7]));
+    expect(totals).toEqual(new Set([8]));
     for (const v of io.views()) {
       expect(v.intent).toBe("API_ISSUANCE_GUIDANCE");
       expect(v.channelCode).toBe("coupang");
@@ -160,35 +167,39 @@ describe("coupang issuance session — the full linear walkthrough (offline)", (
     const { io, engine, driver, session } = build({ probe: { ok: true, pageCategory: "open_api_issuance" } });
     startRun(io);
     await session.whenSettled();
-    // No reach_open_api guidance at all — step 1 auto-completed; the first guided control is self_dev.
+    // No reach_open_api guidance at all — step 1 auto-completed; the first guided control is 발급.
     expect(driver.calls).not.toContain("locate:reach_open_api");
-    expect(driver.calls[1]).toBe("locate:self_dev");
+    expect(driver.calls[1]).toBe("locate:issue");
     await pressNextToComplete(io, engine, session);
     expect(engine.currentStage()).toBe("guidance_complete");
   });
 });
 
 describe("coupang issuance session — the 발급 (issue) human checkpoint", () => {
-  it("rests at checkpoint_before_issue with 발급 highlighted, arms the WING-resident observer, and advances only on the seller's press", async () => {
-    // The seller has NOT yet pressed the WING-resident '발급 완료 · 다음' button — model that with action:issue=false
-    // so the run reaches the 발급 checkpoint and RESTS there (the earlier checkpoints advance on their default press).
-    const { io, engine, driver, session } = build({ action: { issue: false } });
+  it("rests at checkpoint_before_issue with the KEY-CREATING control highlighted, arms the WING-resident observer, and advances only on the seller's press", async () => {
+    // The seller has NOT yet pressed the WING-resident advance button on the KEY-CREATION step — model that with
+    // action:issue_final=false so the run reaches that checkpoint and RESTS there.
+    //
+    // MEASURED 2026-08-10: this checkpoint is no longer the 발급 press. 발급 opens the purpose screen and 확인
+    // opens the terms screen; the control that creates the key is `약관 동의 및 Key 발급받기`, and THAT is what
+    // `checkpoint_before_issue` now guards — the name was right all along and the target was not.
+    const { io, engine, driver, session } = build({ action: { issue_final: false } });
     startRun(io);
     await session.whenSettled();
     expect(engine.currentStage()).toBe("checkpoint_before_issue");
     expect(io.lastView()?.status).toBe("WAITING_FOR_HUMAN");
-    expect(io.lastView()?.currentStep?.stepNumber).toBe(5);
-    // The 발급 section was highlighted (opaque 16-hex), and a WING-resident observation WAS armed — the run waits
-    // for the seller's own on-page press (it never auto-advances the human checkpoint, and never presses 발급).
+    expect(io.lastView()?.currentStep?.stepNumber).toBe(6);
+    // The key-creating control was highlighted (opaque 16-hex), and a WING-resident observation WAS armed — the
+    // run waits for the seller's own on-page press. It never auto-advances, and never presses that button.
     const ref = io.events().find((e) => e.type === "TARGET_HIGHLIGHTED" && e.payload.stepId === "aw.coupang_issuance_issue_checkpoint")!.payload.targetRef;
     expect(ref).toMatch(/^[0-9a-f]{16}$/);
-    expect(driver.calls).toContain("highlight:issue");
-    expect(driver.calls).toContain("observe:issue");
+    expect(driver.calls).toContain("highlight:issue_final");
+    expect(driver.calls).toContain("observe:issue_final");
     // It has NOT completed the issue step while the seller has not pressed the button.
     expect(io.eventTypes().filter((_t) => true)).not.toContain("RUN_COMPLETED");
 
     // The seller issues the key themselves, then presses the WING-resident advance button → the driver observes it.
-    driver.setAction("issue", true);
+    driver.setAction("issue_final", true);
     for (let i = 0; i < 100 && engine.currentStage() === "checkpoint_before_issue"; i++) {
       await new Promise<void>((r) => setTimeout(r, 2));
     }
@@ -204,22 +215,22 @@ describe("coupang issuance session — TARGET RE-FIND after a navigation race", 
     // Model the wing_home→open_api race hitting the vendor_info locate: it throws once (execution-context-destroyed).
     // self_dev advances on its own WING-resident press and drives straight into the vendor_info guide, which races
     // and throws → recoverable page_mismatch park (no FE 다음 was needed to get here).
-    const { io, engine, driver, session } = build({ locateThrows: { vendor_info: 1 } });
+    const { io, engine, driver, session } = build({ locateThrows: { confirm_purpose: 1 } });
     startRun(io);
     await session.whenSettled();
     expect(engine.currentStage()).toBe("page_mismatch");
     expect(io.blockers()).toContainEqual({ code: "UI_DRIFT", recoverable: true });
     expect(io.eventTypes()).not.toContain("RUN_FAILED");
-    expect(driver.calls).not.toContain("highlight:vendor_info"); // it threw before highlighting
+    expect(driver.calls).not.toContain("highlight:confirm_purpose"); // it threw before highlighting
 
     const probesBefore = driver.calls.filter((c) => c === "probeSurface").length;
-    const locatesBefore = driver.calls.filter((c) => c === "locate:vendor_info").length;
+    const locatesBefore = driver.calls.filter((c) => c === "locate:confirm_purpose").length;
     // 다음: re-guide the SAME section IN PLACE (re-locate, never re-probe — the seller is on the issuance page),
     // then advance the remaining checkpoints to completion.
     await pressNextToComplete(io, engine, session);
     expect(engine.currentStage()).toBe("guidance_complete");
     // vendor_info was re-located (target re-find) without any re-probe of the surface.
-    expect(driver.calls.filter((c) => c === "locate:vendor_info").length).toBeGreaterThan(locatesBefore);
+    expect(driver.calls.filter((c) => c === "locate:confirm_purpose").length).toBeGreaterThan(locatesBefore);
     expect(driver.calls.filter((c) => c === "probeSurface").length).toBe(probesBefore);
   });
 
@@ -252,7 +263,7 @@ describe("coupang issuance session — recoverable parks each recover via REQUES
   });
 
   it("target_not_found park → re-check re-guides in place until the control appears", async () => {
-    const { io, engine, driver, session } = build({ probe: { ok: true, pageCategory: "open_api_issuance" }, locate: { self_dev: { count: 0 } } });
+    const { io, engine, driver, session } = build({ probe: { ok: true, pageCategory: "open_api_issuance" }, locate: { purpose_option: { count: 0 } } });
     startRun(io);
     await session.whenSettled();
     expect(engine.currentStage()).toBe("target_not_found");
@@ -261,8 +272,9 @@ describe("coupang issuance session — recoverable parks each recover via REQUES
 
     command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
     await session.whenSettled();
-    // Re-guided IN PLACE (re-located self_dev), never re-probed; still recoverable, no dead-end, no RUN_FAILED.
-    expect(driver.calls.filter((c) => c === "locate:self_dev").length).toBeGreaterThan(1);
+    // Re-guided IN PLACE (re-located the control that was missing), never re-probed; still recoverable, no
+    // dead-end, no RUN_FAILED. The park is on `purpose_option` — the target the fixture makes unfindable.
+    expect(driver.calls.filter((c) => c === "locate:purpose_option").length).toBeGreaterThan(1);
     expect(driver.calls.filter((c) => c === "probeSurface").length).toBe(probesBefore);
     expect(io.eventTypes()).not.toContain("RUN_FAILED");
   });
@@ -300,9 +312,9 @@ describe("coupang issuance session — contract validity + privacy", () => {
       {},
       { probe: { ok: true, pageCategory: "open_api_issuance" as const } },
       { probe: { ok: false, pageCategory: "login" as const, blockerCode: "LOGIN_REQUIRED" as const } },
-      { locate: { self_dev: { count: 0 } }, probe: { ok: true, pageCategory: "open_api_issuance" as const } },
+      { locate: { purpose_option: { count: 0 } }, probe: { ok: true, pageCategory: "open_api_issuance" as const } },
       { reachLanding: { ok: true, pageCategory: "unknown" as const } },
-      { locateThrows: { vendor_info: 1 } },
+      { locateThrows: { confirm_purpose: 1 } },
     ]) {
       const { io, session } = build(script as CoupangIssuanceFixtureScript);
       startRun(io);
