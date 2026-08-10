@@ -33,6 +33,14 @@
  */
 import type { Page } from "playwright";
 import { log } from "../log";
+import { buildWingConsentCompleteScript } from "../cli/coupang-wing-classifier";
+import {
+  WING_STAGE3_TERMS_OPTION_CANDIDATES,
+  WING_PURPOSE_SCREEN_MARKER_SPEC,
+  WING_TERMS_SCREEN_MARKER_SPECS,
+  type WingFlowScreen,
+  type WingFlowScreenMarkerSpec,
+} from "./coupang-wing-label-recon";
 import { mountOverlay, unmountOverlay, overlayMounted, resetOverlayAdvance, readOverlayAdvancePressed } from "./overlay";
 import {
   EXTRACT_WING_CENSUS,
@@ -541,7 +549,12 @@ export const WING_DELETION_SELECTORS_CALIBRATED = false;
 
 /** Default seated-operator observe window (the seller works in the WING window). Tests override to instant. */
 export const DEFAULT_WING_OBSERVE_TIMEOUT_MS = 10 * 60_000;
-const SETTLE_TIMEOUT_MS = 15_000;
+/**
+ * The structural settle bound. Far shorter than the old 15s `networkidle` wait because it is a real bound on a
+ * predicate that actually resolves, not a timeout that was always paid in full.
+ */
+const STRUCTURAL_SETTLE_TIMEOUT_MS = 3_000;
+const STRUCTURAL_POLL_MS = 100;
 const LOCATOR_SETTLE_MS = 400;
 const VERIFY_MAX_POLLS = 12;
 const VERIFY_POLL_MS = 500;
@@ -576,6 +589,22 @@ const ADVANCE_BUTTON_LABEL: Readonly<Partial<Record<CoupangIssuanceTarget, strin
   // on-page button is purely "go back" (avoids two near-identical "enter keys" buttons across the two windows).
   return: "SellerOps로 돌아가기",
 };
+
+/**
+ * The measured screen each checkpoint's own action makes appear. Watching for it is what removes the seller's
+ * "다음" press — the page proving the action happened is strictly better evidence than them telling us.
+ *
+ * `terms_consent` is deliberately absent: ticking two boxes changes no screen, so it is observed differently
+ * (see {@link observeConsentComplete}). `issue_final` is absent for a different reason — it is the key-creation
+ * boundary and nothing about it may auto-advance.
+ */
+const CHECKPOINT_ADVANCES_TO_SCREEN: Readonly<Partial<Record<CoupangIssuanceTarget, WingFlowScreen>>> = {
+  issue: "PURPOSE",
+  confirm_purpose: "TERMS",
+};
+
+/** How often the screen observation runs. Slower than the latch poll: it costs three in-page locates. */
+const SCREEN_OBSERVE_POLL_MS = 1_000;
 
 /** Bounded sleep between navigation-observe polls (no wall-clock read; timer only). */
 function sleep(ms: number): Promise<void> {
@@ -664,6 +693,27 @@ const TEXT_GUIDED_SIG: Readonly<Partial<Record<CoupangIssuanceTarget, string>>> 
 };
 const RETURN_GUIDANCE_SIG = "5e11e40b5e11e40b";
 
+/**
+ * Has the surface painted anything readable? An ES5-plain STRING, like every other in-page script here
+ * (tsx/esbuild injects a `__name` helper into serialized functions, which the page then throws on).
+ *
+ * Value-free by construction: it returns one boolean and reads no text, attribute, URL, or field value. It is
+ * deliberately cruder than the classifier — its only job is "is there a document with laid-out content yet",
+ * so that a read happens as soon as one exists instead of after a fixed wait.
+ */
+const WING_SURFACE_PAINTED = `(function () {
+  /* coupang-issuance-painted */
+  try {
+    if (document.readyState === "loading") return false;
+    var b = document.body;
+    if (!b) return false;
+    var r = b.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  } catch (e) {
+    return false;
+  }
+})()`;
+
 /** Remove every read-only `data-aw-target` annotation. Value-free; safe on a page with none. */
 const IN_PAGE_CLEAR_TAG = `(function () {
   /* coupang-issuance-cleartag */
@@ -706,13 +756,33 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
   }
 
   /** Best-effort settle; a page without `waitForLoadState` (offline fake) is left as-is. */
+  /**
+   * Settle the surface enough to read it — on a STRUCTURAL predicate, not on the network going quiet.
+   *
+   * `networkidle` was the wrong signal and cost the seller 15 seconds at every step. WING keeps sockets and
+   * analytics open indefinitely, so the wait never succeeded; it always burned the full timeout and returned,
+   * and two of them in one transition is the ~30s pause observed live on 2026-08-10. The page was READABLE the
+   * whole time.
+   *
+   * What replaces it asks the only question the reader actually has — has the document stopped loading and
+   * painted something — and polls it cheaply. A page that never satisfies it still proceeds after a short
+   * bound: the classifier fails closed on thin signals, so reading early is safe, while waiting is not free.
+   */
   private async settle(page: Page): Promise<void> {
     const p = page as unknown as { waitForLoadState?: (s: string, o?: { timeout?: number }) => Promise<void> };
     if (typeof p.waitForLoadState !== "function") return;
     try {
-      await p.waitForLoadState("networkidle", { timeout: SETTLE_TIMEOUT_MS });
+      // `domcontentloaded` is a real event on every navigation, unlike `networkidle`. Cheap, and it resolves
+      // immediately when the document is already past it.
+      await p.waitForLoadState("domcontentloaded", { timeout: STRUCTURAL_SETTLE_TIMEOUT_MS });
     } catch {
-      /* timeout is fine — the classifier fails closed on thin signals */
+      /* already past it, or the page is slow — the structural poll below is the real gate */
+    }
+    const deadline = STRUCTURAL_SETTLE_TIMEOUT_MS;
+    for (let waited = 0; waited < deadline; waited += STRUCTURAL_POLL_MS) {
+      const painted = await this.evalStr<boolean>(page, WING_SURFACE_PAINTED).catch(() => false);
+      if (painted === true) return;
+      await sleep(STRUCTURAL_POLL_MS);
     }
   }
 
@@ -862,6 +932,37 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
   }
 
   /**
+   * Which measured FLOW SCREEN the seller is currently on — the observation the auto-advance rests on.
+   *
+   * The coarse `pageCategory` cannot answer this: the issuance page, the purpose screen and the terms screen all
+   * classify as `open_api_issuance`, because they share the open-API marker. Screen identity comes from the
+   * markers the discovery runs measured, with the SAME precedence as {@link wingFlowScreenFrom} — **TERMS wins**
+   * a tie, because the terms screen is the one carrying the key-creation control and a reading that could be
+   * either must resolve to the one where stopping is correct.
+   *
+   * Value-free: it runs the audited fixed-label locate for each marker and looks only at the visible count. No
+   * new in-page script, no text read, no URL, no field value.
+   *
+   * `UNRECOGNIZED` is the honest answer for "not one of the screens we have measured" — including every screen
+   * before the seller has got anywhere. Callers must treat it as "not there yet", never as drift.
+   */
+  async probeFlowScreen(): Promise<WingFlowScreen> {
+    for (const spec of WING_TERMS_SCREEN_MARKER_SPECS) {
+      if (await this.markerVisible(spec)) return "TERMS";
+    }
+    return (await this.markerVisible(WING_PURPOSE_SCREEN_MARKER_SPEC)) ? "PURPOSE" : "UNRECOGNIZED";
+  }
+
+  /**
+   * Is this marker PAINTING on the current surface? A hidden match is not a screen the seller can see, which is
+   * the distinction that invalidated an earlier calibration record — so `count` alone is not the test.
+   */
+  private async markerVisible(spec: WingFlowScreenMarkerSpec): Promise<boolean> {
+    const res = await this.resolveFixedLabelSpec(spec, false).catch(() => ({ count: 0 }) as LocateResult);
+    return res.count >= 1;
+  }
+
+  /**
    * READ-ONLY: the full sanitized {@link WingObservation} of the CURRENT surface — page category + bucketized
    * signals + calibration blockers (always carries `LIVE_DOM_CALIBRATION_PENDING`). Built from the value-free
    * census + host-category read, exactly like {@link readSurface}, so nothing here reads a value/URL/text. This
@@ -1007,17 +1108,57 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
   }
 
   /**
-   * Await the seller's press of this checkpoint's WING-resident advance button, value-free: poll the in-page
-   * advance latch for THIS step's opaque token and resolve `true` the moment it matches. NEVER clicks, types, or
-   * reads a field value — only compares an opaque token. On timeout it returns `false` so the session re-arms.
+   * Has the seller finished consenting? A single aggregate boolean, computed IN THE PAGE.
+   *
+   * The one place this codebase looks at a consent checkbox's state, and it is deliberately the weakest read
+   * that answers the question: the conjunction happens page-side, so which box was ticked — or that one was and
+   * the other was not — never crosses the boundary and cannot be stored, sent, or logged by anything here.
+   *
+   * SellerOps still never ticks a box, never reads the terms, and never decides for the seller. Noticing that a
+   * human has consented is not consenting on their behalf; it is what lets the tutorial stop asking them to
+   * report what the page already shows.
+   *
+   * Fail-closed: any structural ambiguity yields `false` ("not proven complete"), and the seller's own advance
+   * button remains the way through.
+   */
+  private async observeConsentComplete(): Promise<boolean> {
+    const script = buildWingConsentCompleteScript(WING_STAGE3_TERMS_OPTION_CANDIDATES.map((c) => c.exactText));
+    return (await this.evalStr<boolean>(this.activePage(), script).catch(() => false)) === true;
+  }
+
+  /**
+   * Await this checkpoint's completion — whichever the page proves FIRST:
+   *
+   *  1. **the screen the seller's own action produces.** 발급 opens the purpose screen and 확인 opens the terms
+   *     screen, both measured. When the expected screen appears, the seller has plainly done the thing, and
+   *     asking them to confirm what the page already proves is what made this read as a tutorial rather than a
+   *     product. This is pure observation: nothing is clicked, and the seller still performs every WING action.
+   *  2. **their press of the WING-resident advance button.** Kept, and never removed: a marker that does not
+   *     resolve (the purpose heading has never been matched by any apparatus — see
+   *     `WING_PURPOSE_SCREEN_MARKER_MEASURED`) must degrade to the seller moving on, not to a stalled run. It is
+   *     also the safety fence — manual progress always remains available — and it lives in the WING overlay, so
+   *     using it still never sends anyone back to the SellerOps tab.
+   *
+   * Value-free throughout: an opaque token comparison and a visible/hidden count. No click, no type, no field
+   * value, no text. On timeout it returns `false` so the session re-arms.
    */
   private async observeOverlayAdvance(target: CoupangIssuanceTarget): Promise<boolean> {
     const timeoutMs = this.opts.observeTimeoutMs ?? DEFAULT_WING_OBSERVE_TIMEOUT_MS;
     const maxPolls = Math.max(1, Math.ceil(timeoutMs / OVERLAY_ADVANCE_POLL_MS));
     const token = advanceToken(target);
+    const expected = CHECKPOINT_ADVANCES_TO_SCREEN[target];
+    // The screen probe costs three in-page locates, so it runs on a slower cadence than the latch poll rather
+    // than on every tick. The seller pressing the button is still noticed within one latch poll.
+    const screenEvery = Math.max(1, Math.round(SCREEN_OBSERVE_POLL_MS / OVERLAY_ADVANCE_POLL_MS));
     for (let i = 0; i < maxPolls; i++) {
       const pressed = await readOverlayAdvancePressed(this.activePage(), token).catch(() => false);
       if (pressed) return true;
+      if (i % screenEvery === 0) {
+        if (expected && (await this.probeFlowScreen().catch(() => "UNRECOGNIZED" as WingFlowScreen)) === expected) return true;
+        // The consent step changes no screen, so its completion is the seller's own two ticks — observed, never
+        // performed, and never recorded (see `observeConsentComplete`).
+        if (target === "terms_consent" && (await this.observeConsentComplete())) return true;
+      }
       if (i < maxPolls - 1) await sleep(OVERLAY_ADVANCE_POLL_MS);
     }
     return false;

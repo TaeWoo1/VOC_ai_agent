@@ -1969,3 +1969,58 @@ export function wingRevealedBetween(
     })
     .map((c) => c.id);
 }
+
+/* ─────────────────── flow-screen MARKER SPECS (auto-advance observation) ─────────────────── */
+
+/**
+ * The marker specs behind {@link wingFlowScreenFrom}, resolved from the recon candidate map by id.
+ *
+ * Exported so the guided-walk driver can OBSERVE the screen the seller has reached without the strings being
+ * written down a second time. A duplicated `exactText` is how the purpose heading's 이제/period drift got
+ * measured as absent in the first place; there is exactly one copy of each of these, here.
+ *
+ * These are hypotheses with different standing, and the difference matters to anything built on them:
+ *
+ *  - the TERMS markers were transcribed VERBATIM off the real screen on 2026-08-10;
+ *  - the PURPOSE marker was transcribed the same day but **has never been matched by any apparatus**
+ *    ({@link WING_PURPOSE_SCREEN_MARKER_MEASURED}). Auto-advance built on it must degrade to the seller's own
+ *    advance rather than stall — the marker not firing is the EXPECTED case until a live run says otherwise.
+ */
+export interface WingFlowScreenMarkerSpec {
+  readonly id: string;
+  readonly candidateQuery: string;
+  readonly exactText: string;
+}
+
+function markerSpecById(id: string): WingFlowScreenMarkerSpec {
+  for (const candidates of Object.values(WING_STAGE2_RECON_CANDIDATES)) {
+    for (const c of candidates) {
+      if (c.id === id) return Object.freeze({ id: c.id, candidateQuery: c.candidateQuery, exactText: c.exactText });
+    }
+  }
+  // A marker id with no candidate behind it would make the screen observation silently blind, which reads
+  // exactly like "the seller has not got there yet" — the one failure this must not produce quietly.
+  throw new Error(`coupang-wing-label-recon: no candidate for flow-screen marker ${id}`);
+}
+
+/** The PURPOSE screen's marker spec. Visible ⇒ the seller is on the purpose screen. */
+export const WING_PURPOSE_SCREEN_MARKER_SPEC: WingFlowScreenMarkerSpec = markerSpecById(WING_PURPOSE_SCREEN_MARKER_ID);
+
+/** The TERMS screen's marker specs. EITHER visible ⇒ the seller is on the terms screen. */
+export const WING_TERMS_SCREEN_MARKER_SPECS: readonly WingFlowScreenMarkerSpec[] = Object.freeze(
+  WING_TERMS_SCREEN_MARKER_IDS.map(markerSpecById),
+);
+
+/**
+ * Whether the PURPOSE marker has ever been MATCHED on a real screen. **False** — see the candidate's own
+ * rationale. Kept as a code-level flag rather than prose so a reader of the auto-advance path is told, at the
+ * point of use, that this transition is expected to fall back to the seller's own advance.
+ */
+export const WING_PURPOSE_SCREEN_MARKER_MEASURED = false as const;
+
+/**
+ * Whether the TERMS markers have ever been MATCHED on a real screen. **False** — they were transcribed from the
+ * screen, which is not the same as an apparatus resolving them, and this repository flips a flag on a recorded
+ * measurement and nothing else (see `WING_ISSUE_SELECTOR_CALIBRATED` for the shape a real one takes).
+ */
+export const WING_TERMS_SCREEN_MARKERS_MEASURED = false as const;
