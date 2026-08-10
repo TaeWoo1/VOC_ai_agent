@@ -1540,3 +1540,174 @@ export function sanitizeChoiceAssociationCensus(
     candidatesCompared: candidates.filter((c) => c.trim().length > 0).length,
   });
 }
+
+/* ────────────────────── CONSENT-BLOCK recon: which checkbox belongs to which consent ────────────────────── */
+
+/**
+ * How a checkbox was tied to a consent sentence — or why it was not. Closed, and the failure values are the
+ * point: this instrument exists because the 2026-08-10 terms reading found NO accessible association at all,
+ * and the tempting next move is to pair box `i` with consent `i` by document order and call it measured.
+ */
+export const WING_CONSENT_BLOCK_VERDICTS = [
+  "NEAREST_BLOCK_HOLDS_EXACTLY_ONE_CONSENT",
+  "NEAREST_BLOCK_HOLDS_SEVERAL_CONSENTS",
+  "NO_ANCESTOR_HOLDS_A_CONSENT_WITHIN_BOUND",
+] as const;
+export type WingConsentBlockVerdict = (typeof WING_CONSENT_BLOCK_VERDICTS)[number];
+
+/** One VISIBLE checkbox's structural relationship to the consent sentences. Integers and categories only. */
+export interface WingConsentBlockRow {
+  /** Document-order ordinal among visible checkboxes. Ours, not the page's. */
+  readonly index: number;
+  readonly verdict: WingConsentBlockVerdict;
+  /** Index into the caller's OWN consent list, or -1. Never a page string. */
+  readonly consentIndex: number;
+  /** How many ancestors up the matching block was, or -1. A bound on how loose the association is. */
+  readonly ancestorDepth: number;
+  /**
+   * How many VISIBLE checkboxes that same block contains. **1 is the only value that makes the pairing a fact**
+   * — a block holding both boxes contains both consents too, and identifies neither.
+   */
+  readonly blockVisibleCheckboxCount: number;
+}
+
+export interface WingConsentBlockCensus {
+  readonly visibleCheckboxCount: number;
+  readonly rows: readonly WingConsentBlockRow[];
+  readonly rowsTruncated: boolean;
+  /** Consents claimed by exactly one checkbox's nearest block. Equals the consent count ⇒ a clean 1:1 map. */
+  readonly consentsMatchedExactlyOnce: number;
+  readonly consentsCompared: number;
+  readonly scanTruncated: boolean;
+  readonly depthBound: number;
+}
+
+const MAX_CONSENT_ROWS = 16;
+const CONSENT_ANCESTOR_DEPTH = 8;
+
+/**
+ * **Build the read-only consent-block probe.** Walks UP from each visible checkbox looking for the nearest
+ * ancestor whose text contains exactly one caller-supplied consent sentence.
+ *
+ * Up rather than down, and nearest rather than any, because the question is "which consent is THIS box's" and
+ * every checkbox has the whole page as an ancestor. A block that holds both consents answers nothing, and the
+ * script says so (`NEAREST_BLOCK_HOLDS_SEVERAL_CONSENTS`) instead of picking the first.
+ *
+ * Reads no `checked`, sets nothing, clicks nothing. Every value returned is an integer, a boolean, or a name
+ * from the closed vocabulary above; the consent strings go IN and only indices come back.
+ */
+export function buildWingConsentBlockScript(consents: readonly string[]): string {
+  const encoded = JSON.stringify(consents.map((c) => String(c)));
+  return `(function () {
+  var CONSENTS = ${encoded};
+  var MAX_ROWS = ${MAX_CONSENT_ROWS}, DEPTH = ${CONSENT_ANCESTOR_DEPTH}, SCAN_CAP = 4000;
+  function slice(n) { return Array.prototype.slice.call(n); }
+  function norm(s) { return String(s == null ? '' : s).replace(/\\s+/g, ' ').replace(/^ | $/g, ''); }
+  function paints(el) {
+    try {
+      var cs = window.getComputedStyle(el);
+      if (!cs || cs.display === 'none' || cs.visibility === 'hidden') { return false; }
+      if (el.getClientRects && el.getClientRects().length === 0) { return false; }
+      var r = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+      return !!r && r.width > 0 && r.height > 0;
+    } catch (e) { return false; }
+  }
+  var all;
+  try { all = slice(document.querySelectorAll("input[type='checkbox']")); } catch (e2) { all = []; }
+  var scanTruncated = all.length > SCAN_CAP;
+  if (scanTruncated) { all = all.slice(0, SCAN_CAP); }
+  var boxes = [], i, j, d;
+  for (i = 0; i < all.length; i++) { if (paints(all[i])) { boxes.push(all[i]); } }
+  var rows = [], claims = [];
+  for (j = 0; j < CONSENTS.length; j++) { claims.push(0); }
+  var capped = boxes.slice(0, MAX_ROWS);
+  for (i = 0; i < capped.length; i++) {
+    var node = capped[i], depth = -1, hit = -1, several = false;
+    for (d = 1; d <= DEPTH; d++) {
+      node = node && node.parentElement;
+      if (!node) { break; }
+      var text = norm(node.textContent || '');
+      var found = [];
+      for (j = 0; j < CONSENTS.length; j++) {
+        var want = norm(CONSENTS[j]);
+        if (want.length > 0 && text.indexOf(want) !== -1) { found.push(j); }
+      }
+      if (found.length > 0) { depth = d; hit = found[0]; several = found.length > 1; break; }
+    }
+    var blockBoxes = 0;
+    if (depth > -1) {
+      var container = capped[i];
+      for (d = 0; d < depth; d++) { container = container.parentElement; }
+      var inner;
+      try { inner = slice(container.querySelectorAll("input[type='checkbox']")); } catch (e3) { inner = []; }
+      for (d = 0; d < inner.length; d++) { if (paints(inner[d])) { blockBoxes++; } }
+    }
+    var verdict = depth === -1
+      ? 'NO_ANCESTOR_HOLDS_A_CONSENT_WITHIN_BOUND'
+      : several ? 'NEAREST_BLOCK_HOLDS_SEVERAL_CONSENTS' : 'NEAREST_BLOCK_HOLDS_EXACTLY_ONE_CONSENT';
+    if (verdict === 'NEAREST_BLOCK_HOLDS_EXACTLY_ONE_CONSENT' && blockBoxes === 1) { claims[hit] = claims[hit] + 1; }
+    rows.push({
+      index: i,
+      verdict: verdict,
+      consentIndex: several ? -1 : hit,
+      ancestorDepth: depth,
+      blockVisibleCheckboxCount: blockBoxes
+    });
+  }
+  var once = 0;
+  for (j = 0; j < claims.length; j++) { if (claims[j] === 1) { once++; } }
+  return {
+    visibleCheckboxCount: boxes.length,
+    rows: rows,
+    rowsTruncated: boxes.length > MAX_ROWS,
+    consentsMatchedExactlyOnce: once,
+    consentsCompared: CONSENTS.length,
+    scanTruncated: scanTruncated,
+    depthBound: DEPTH
+  };
+})()`;
+}
+
+/**
+ * Re-validate a consent-block reading HOST-side. `null` for an unusable reading — never a census reporting zero
+ * checkboxes, which is the coercion the other three sanitizers each had to have removed.
+ */
+export function sanitizeConsentBlockCensus(raw: unknown, consents: readonly string[]): WingConsentBlockCensus | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const nat = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
+  const count = consents.filter((c) => c.trim().length > 0).length;
+  const idx = (v: unknown): number => {
+    const n = typeof v === "number" && Number.isSafeInteger(v) ? v : -1;
+    return n >= 0 && n < count ? n : -1;
+  };
+  const rawRows = Array.isArray(r.rows) ? r.rows : [];
+  const rows: WingConsentBlockRow[] = rawRows.slice(0, MAX_CONSENT_ROWS).map((s, i) => {
+    const o = (s ?? {}) as Record<string, unknown>;
+    const verdict: WingConsentBlockVerdict =
+      typeof o.verdict === "string" && (WING_CONSENT_BLOCK_VERDICTS as readonly string[]).includes(o.verdict)
+        ? (o.verdict as WingConsentBlockVerdict)
+        : "NO_ANCESTOR_HOLDS_A_CONSENT_WITHIN_BOUND";
+    // Re-derived from position, like the association census: an index the page chose is an index we did not.
+    const depth = typeof o.ancestorDepth === "number" && Number.isSafeInteger(o.ancestorDepth) && o.ancestorDepth >= 1 && o.ancestorDepth <= CONSENT_ANCESTOR_DEPTH ? o.ancestorDepth : -1;
+    return Object.freeze({
+      index: i,
+      verdict,
+      // Only the ONE clean verdict may carry a consent index. The other two mean "we could not say which".
+      consentIndex: verdict === "NEAREST_BLOCK_HOLDS_EXACTLY_ONE_CONSENT" ? idx(o.consentIndex) : -1,
+      ancestorDepth: verdict === "NO_ANCESTOR_HOLDS_A_CONSENT_WITHIN_BOUND" ? -1 : depth,
+      blockVisibleCheckboxCount: nat(o.blockVisibleCheckboxCount),
+    });
+  });
+  const once = nat(r.consentsMatchedExactlyOnce);
+  return Object.freeze({
+    visibleCheckboxCount: nat(r.visibleCheckboxCount),
+    rows: Object.freeze(rows),
+    rowsTruncated: rawRows.length > MAX_CONSENT_ROWS || r.rowsTruncated === true,
+    // Clamped: a script bug must not be able to claim more clean pairings than there are consents.
+    consentsMatchedExactlyOnce: Math.min(once, count),
+    consentsCompared: count,
+    scanTruncated: r.scanTruncated === true,
+    depthBound: CONSENT_ANCESTOR_DEPTH,
+  });
+}

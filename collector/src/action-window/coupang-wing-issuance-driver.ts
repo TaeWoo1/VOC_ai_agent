@@ -38,6 +38,9 @@ import {
   EXTRACT_WING_CENSUS,
   EXTRACT_WING_CHOICE_CONTROL_SHAPES,
   sanitizeChoiceControlCensus,
+  buildWingConsentBlockScript,
+  sanitizeConsentBlockCensus,
+  type WingConsentBlockCensus,
   buildWingChoiceAssociationScript,
   sanitizeChoiceAssociationCensus,
   type WingChoiceAssociationCensus,
@@ -717,6 +720,21 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
    * a generic escape hatch on this driver is a place where an unaudited script can later be run under a
    * READ_ONLY manifest.
    */
+  /**
+   * READ-ONLY consent-BLOCK census: for each visible checkbox, the nearest ancestor whose text holds exactly one
+   * of the caller's consent sentences.
+   *
+   * Its own seam for the reason the other two are: this is a distinct measurement, separately described in the
+   * manifest, and a generic evaluate hatch is where an unaudited script later runs under a READ_ONLY grant. It
+   * reads no `checked` — which box the seller ticked is their business and not a thing this records.
+   */
+  async consentBlockCensus(consents: readonly string[]): Promise<WingConsentBlockCensus | null> {
+    const page = this.activePage();
+    await this.settle(page);
+    const raw = await this.evalStr<unknown>(page, buildWingConsentBlockScript([...consents]));
+    return sanitizeConsentBlockCensus(raw, consents);
+  }
+
   async choiceAssociationCensus(candidates: readonly string[]): Promise<WingChoiceAssociationCensus | null> {
     const page = this.activePage();
     await this.settle(page);
