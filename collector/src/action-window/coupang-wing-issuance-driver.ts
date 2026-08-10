@@ -955,6 +955,20 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
    */
   private async markerVisible(spec: WingFlowScreenMarkerSpec): Promise<boolean> {
     const res = await this.resolveFixedLabelSpec(spec, false).catch(() => ({ count: 0 }) as LocateResult);
+    // The MEASUREMENT, recorded. Both flow-screen markers are unproven — the purpose heading has never been
+    // matched by any apparatus, and the terms markers were transcribed off a screen rather than resolved by
+    // one — so a live walk has to be able to say which of them actually fires. Without this the auto-advance
+    // would fall back to the seller's button and look indistinguishable from having worked.
+    //
+    // Sanitized: a candidate ID and integers. No text, no URL, no value. `hiddenCount` and `tag` travel because
+    // a hidden match is not a screen the seller can see, and a tag that was expected rather than OBSERVED is
+    // how a calibration record went wrong here before.
+    log("aw_coupang_flow_marker", {
+      markerId: spec.id,
+      visibleCount: res.count,
+      ...(typeof res.hiddenCount === "number" ? { hiddenCount: res.hiddenCount } : {}),
+      ...(res.tag ? { observedTag: res.tag } : {}),
+    });
     return res.count >= 1;
   }
 
