@@ -330,7 +330,7 @@ verify_walk_descriptor() {
     "createsKeyMaterial:false" \
     "keyCreationRuledOut:false" \
     "agentPerformsAction:false" \
-    "agentNavigations:0" \
+    "agentNavigations:1" \
     "credentialValueReadBudget:0" \
     "performsConnectOrSync:false" \
     "highlightedControlCount:2" \
