@@ -291,9 +291,23 @@ export interface GuidedWalkBoundary {
   /** How many of the walk's guided controls carry a live-calibrated locator and may be highlighted. */
   highlightedControlCount: 2;
   /** …and how many are guided by TEXT because nothing was promoted for them. */
-  textGuidedControlCount: 4;
-  /** A mandatory operator checkpoint precedes every step; none auto-advances. */
-  explicitCheckpointRequired: true;
+  textGuidedControlCount: 3;
+  /**
+   * How many steps the runtime advances by OBSERVING WING rather than by the seller pressing "다음".
+   *
+   * This replaced `explicitCheckpointRequired`, which asserted that "a mandatory operator checkpoint precedes
+   * every step; none auto-advances". That stopped being true on 2026-08-10 and a field that quietly keeps
+   * saying it is worse than no field: the operator grants against this descriptor.
+   */
+  autoAdvancingStepCount: 4;
+  /** The key-creation step is NOT one of them, and never becomes one. */
+  keyCreationAutoAdvances: false;
+  /**
+   * Whether the runtime looks at the consent checkboxes' state. **True** — deliberately, to advance without
+   * asking the seller to report what the page already shows. It never ticks a box, never reads the terms, and
+   * the reading is a page-side conjunction that is never stored, transmitted, or logged.
+   */
+  sellerConsentObserved: true;
 }
 
 export const COUPANG_WING_GUIDED_WALK_BOUNDARY: GuidedWalkBoundary = {
@@ -307,8 +321,10 @@ export const COUPANG_WING_GUIDED_WALK_BOUNDARY: GuidedWalkBoundary = {
   credentialValueReadBudget: 0,
   performsConnectOrSync: false,
   highlightedControlCount: 2,
-  textGuidedControlCount: 4,
-  explicitCheckpointRequired: true,
+  textGuidedControlCount: 3,
+  autoAdvancingStepCount: 4,
+  keyCreationAutoAdvances: false,
+  sellerConsentObserved: true,
 };
 
 export const COUPANG_WING_ISSUANCE_REVEAL_ACTION: OperatorRevealAction = {

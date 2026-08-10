@@ -334,8 +334,10 @@ verify_walk_descriptor() {
     "credentialValueReadBudget:0" \
     "performsConnectOrSync:false" \
     "highlightedControlCount:2" \
-    "textGuidedControlCount:4" \
-    "explicitCheckpointRequired:true"
+    "textGuidedControlCount:3" \
+    "autoAdvancingStepCount:4" \
+    "keyCreationAutoAdvances:false" \
+    "sellerConsentObserved:true"
   do
     key="${pair%%:*}"; want="${pair#*:}"
     got="$(python3 -c 'import json,sys

@@ -174,7 +174,7 @@ run_case "HEAD_DRIFT      (commit moved since bootstrap)" nonzero "git commit ch
 # The DISPLAY-side check. Unlike the destructive descriptor — where the risk is understating danger — every
 # softening here OVERSTATES safety, and the worst is `keyCreationRuledOut: true`: it would tell the operator
 # SellerOps had confirmed no key was created, which nothing can (NO_DISCRIMINATING_SIGNAL).
-CANON='{"guidedWalkBoundary":{"operation":"WALK_WING_GUIDED_ISSUANCE_TUTORIAL","forbiddenFollowOnAction":"COMPLETE_WING_KEY_ISSUANCE","restsBeforeControl":"약관 동의 및 Key 발급받기","createsKeyMaterial":false,"keyCreationRuledOut":false,"agentPerformsAction":false,"agentNavigations":0,"credentialValueReadBudget":0,"performsConnectOrSync":false,"highlightedControlCount":2,"textGuidedControlCount":4,"explicitCheckpointRequired":true}}'
+CANON='{"guidedWalkBoundary":{"operation":"WALK_WING_GUIDED_ISSUANCE_TUTORIAL","forbiddenFollowOnAction":"COMPLETE_WING_KEY_ISSUANCE","restsBeforeControl":"약관 동의 및 Key 발급받기","createsKeyMaterial":false,"keyCreationRuledOut":false,"agentPerformsAction":false,"agentNavigations":0,"credentialValueReadBudget":0,"performsConnectOrSync":false,"highlightedControlCount":2,"textGuidedControlCount":3,"autoAdvancingStepCount":4,"keyCreationAutoAdvances":false,"sellerConsentObserved":true}}'
 printf '%s' "$CANON" > "$FIXTURES/desc-ok.json"
 DESC_OK=1
 verify_walk_descriptor "$FIXTURES/desc-ok.json" >/dev/null 2>&1 || { echo "  FAIL  DESCRIPTOR · canonical descriptor rejected"; DESC_OK=0; FAILED=1; }
@@ -183,7 +183,7 @@ for soft in \
   '"createsKeyMaterial":true' \
   '"agentPerformsAction":true' \
   '"agentNavigations":1' \
-  '"explicitCheckpointRequired":false' \
+  '"keyCreationAutoAdvances":true' \
   '"credentialValueReadBudget":1' \
   '"performsConnectOrSync":true' \
   '"highlightedControlCount":6' \
@@ -196,7 +196,7 @@ for soft in \
   '"createsKeyMaterial":"false"' \
   '"agentPerformsAction":"false"' \
   '"performsConnectOrSync":"false"' \
-  '"explicitCheckpointRequired":"true"' \
+  '"keyCreationAutoAdvances":"false"' \
   '"agentNavigations":"0"' \
   '"credentialValueReadBudget":"0"'
 do
