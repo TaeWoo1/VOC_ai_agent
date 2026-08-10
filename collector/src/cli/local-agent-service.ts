@@ -169,7 +169,13 @@ async function install(own: readonly string[], agentArgs: readonly string[]): Pr
   // code, branch, or approval change. A bootout failure is expected on a first install.
   launchctl("bootout", `${domainTarget()}/${plan.label}`);
   const boot = launchctl("bootstrap", domainTarget(), plan.plistPath);
-  if (!boot.ok) fail(`launchctl bootstrap failed (status ${boot.status}).`, 4);
+  if (!boot.ok) {
+    // Remove the file before refusing. launchd loads `~/Library/LaunchAgents` at login, so a plist left behind
+    // by a FAILED install would quietly start the agent at the seller's next login — bound to an approval that
+    // has long since been consumed, from an install nobody was told succeeded.
+    rmSync(plan.plistPath, { force: true });
+    fail(`launchctl bootstrap failed (status ${boot.status}); the plist was removed, nothing is installed.`, 4);
+  }
 
   const port = bridgePort(process.env);
   const health = await waitForHealth(port, HEALTH_TIMEOUT_MS);
