@@ -295,7 +295,7 @@ if [ -z "$TREE_DIRTY" ]; then
   DISCLOSE_OK=1
   for phrase in \
     "EVERY marketplace action is YOURS" \
-    "NAVIGATES nothing" \
+    "every screen after that is one YOU navigate to" \
     "Only TWO steps are highlighted" \
     "TEXT-GUIDED" \
     "draws no ring at" \
