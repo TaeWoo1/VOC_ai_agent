@@ -278,7 +278,7 @@ if [ -z "$TREE_DIRTY" ]; then
   run_case "NORMAL          · 발급 selector calibration disclosed" 0 "selectors calibrated: true" "$FIXTURES/normal.env"
   run_case "NORMAL          · descriptor verdict shown" 0 "guided-walk boundary is exactly the canonical contract" "$FIXTURES/normal.env"
   run_case "NORMAL          · one-line grant offered" 0 "Seated and ready." "$FIXTURES/normal.env"
-  run_case "NORMAL          · run command is the REVEAL entrypoint" 0 "run-coupang-wing-walk-live.ts" "$FIXTURES/normal.env"
+  run_case "NORMAL          · run command is the GUIDED-WALK entrypoint" 0 "run-coupang-wing-issuance-live.ts" "$FIXTURES/normal.env"
 
   out="$(env SELLEROPS_WING_REVEAL_RUN_ENV="$FIXTURES/normal.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1)"
 
@@ -286,37 +286,35 @@ if [ -z "$TREE_DIRTY" ]; then
   # Each fact the operator must carry into a real WING press has to be ON SCREEN, not implied.
   DISCLOSE_OK=1
   for phrase in \
-    "You press it. The agent clicks/types/submits nothing." \
-    "That is NOT confirmed" \
-    "This press is NOT key creation" \
-    "CANNOT prove no key was created" \
-    "keyCreationRuledOut: false" \
-    "no credential value read"
+    "EVERY marketplace action is YOURS" \
+    "NAVIGATES nothing" \
+    "Only TWO steps are highlighted" \
+    "TEXT-GUIDED" \
+    "draws no ring at" \
+    "'OPEN API' is the DEFAULT purpose option" \
+    "You read the two consent texts and decide" \
+    "That control CREATES THE KEY" \
+    "DO NOT PRESS IT in this run" \
+    "separate phase, with its own manifest and its own grant" \
+    "no connect-test, no sync, no upload"
   do
     grep -qF "$phrase" <<<"$out" || { echo "  FAIL  NORMAL          · disclosure missing: $phrase"; DISCLOSE_OK=0; FAILED=1; }
   done
-  [ "$DISCLOSE_OK" = "1" ] && echo "  PASS  NORMAL          · full reveal disclosure shown before the grant line"
+  [ "$DISCLOSE_OK" = "1" ] && echo "  PASS  NORMAL          · full guided-walk disclosure shown before the grant line"
 
-  # The KOREAN on-page copy, COMPLETE. What actually stops the operator mid-flow is what will be on the WING
-  # page, after the panel is gone and a form invites completion — so the preflight reproduces all five sentences
-  # and this asserts each one is printed. One fragment per sentence, none spanning a wrapped output line.
-  #
-  # An earlier version showed two of the five under a "verbatim" header, dropping the "not confirmed" hedge, the
-  # Korean statement of keyCreationRuledOut, and "read the screen before you signal". This is the presence half;
-  # coupang-wing-walk-gate.test.ts asserts the block EQUALS WING_REVEAL_CHECKPOINT_LABEL, which is the half
-  # that catches an omission or an added sentence.
+  # The KOREAN on-page copy of the LAST step, COMPLETE. What stops the operator mid-flow is what will be on the
+  # WING page when the key-creating button is in front of them — so the preflight reproduces every sentence of
+  # it and this asserts each is printed. One fragment per sentence, none spanning a wrapped output line.
   KOREAN_OK=1
   for phrase in \
-    "강조 표시된 '발급' 버튼을 직접 눌러 주세요." \
-    "확인된 사실은 아닙니다." \
-    "화면이 열리면 그대로 두고 더 진행하지 마세요." \
-    "'확인'(최종 발급)은 절대" \
-    "키가 실제로 만들어졌는지 여부는" \
-    "신호를 보내면 이 창은 닫히므로"
+    "여기서 실제로 키가 생성됩니다." \
+    "'약관 동의 및 Key 발급받기' 버튼을 직접 누르세요" \
+    "SellerOps는 이" \
+    "버튼을 절대 누르지 않습니다."
   do
     grep -qF "$phrase" <<<"$out" || { echo "  FAIL  NORMAL          · Korean on-screen warning missing: $phrase"; KOREAN_OK=0; FAILED=1; }
   done
-  [ "$KOREAN_OK" = "1" ] && echo "  PASS  NORMAL          · the COMPLETE Korean on-page copy is shown before the grant line"
+  [ "$KOREAN_OK" = "1" ] && echo "  PASS  NORMAL          · the COMPLETE Korean copy of the key-creation step is shown before the grant line"
 
   # The approved PHASE is bound into the run env FROM THE MANIFEST — the runtime half of the cross-phase
   # escalation fix. Without it the reveal CLI has only the `WALKTHROUGH_*` triple, which every WING phase shares.
@@ -474,7 +472,7 @@ FAKE
   OTHER_COLLECTOR="$FIXTURES/other/collector"
   mkdir -p "$OTHER_COLLECTOR/node_modules/.bin" "$OTHER_COLLECTOR/src/cli"
   : > "$OTHER_COLLECTOR/node_modules/.bin/tsx"; chmod +x "$OTHER_COLLECTOR/node_modules/.bin/tsx"
-  : > "$OTHER_COLLECTOR/src/cli/run-coupang-wing-walk-live.ts"
+  : > "$OTHER_COLLECTOR/src/cli/run-coupang-wing-issuance-live.ts"
   run_case "COLLECTOR_ESCAPE (out-of-repo collector refused ON CONTAINMENT)" nonzero \
     "points outside this repository" "$FIXTURES/normal.env" "SELLEROPS_COLLECTOR_DIR=$OTHER_COLLECTOR"
 
