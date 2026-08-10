@@ -278,7 +278,9 @@ if [ -z "$TREE_DIRTY" ]; then
   run_case "NORMAL          · 발급 selector calibration disclosed" 0 "selectors calibrated: true" "$FIXTURES/normal.env"
   run_case "NORMAL          · descriptor verdict shown" 0 "guided-walk boundary is exactly the canonical contract" "$FIXTURES/normal.env"
   run_case "NORMAL          · one-line grant offered" 0 "Seated and ready." "$FIXTURES/normal.env"
-  run_case "NORMAL          · run command is the GUIDED-WALK entrypoint" 0 "run-coupang-wing-issuance-live.ts" "$FIXTURES/normal.env"
+  # The product path boots the LOCAL AGENT, not the standalone walk CLI: the agent is what the seller already
+# runs, and it is what opens the window when SellerOps starts the guidance.
+run_case "NORMAL          · run command is the LOCAL AGENT entrypoint" 0 "local-agent.ts" "$FIXTURES/normal.env"
 
   out="$(env SELLEROPS_WING_WALK_RUN_ENV="$FIXTURES/normal.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1)"
 
