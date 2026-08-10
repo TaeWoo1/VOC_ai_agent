@@ -926,7 +926,7 @@ describe("the guided-walk manifest is not the fallback", () => {
     expect(op).toContain("separate phase");
     expect(op).toContain("TEXT-GUIDES");
     expect(op).toContain("drawing no ring");
-    expect(op).toContain("NAVIGATES nothing");
+    expect(op).toContain("navigates no further");
     expect(op).toContain("no connect-test, no sync");
   });
 
