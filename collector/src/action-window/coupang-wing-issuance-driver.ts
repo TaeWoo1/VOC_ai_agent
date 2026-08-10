@@ -643,6 +643,25 @@ export interface CoupangWingIssuanceDriverOptions {
  * constants so the engine's locate↔highlight anti-drift check (which requires the two sigs to match) still passes.
  */
 const REACH_OPEN_API_GUIDANCE_SIG = "c0a9b17ec0a9b17e";
+/**
+ * **TEXT-GUIDED steps: the ones the tutorial guides but cannot highlight.**
+ *
+ * The 2026-08-10 redesign added four such steps — the purpose radios, `확인`, the consent boxes and the
+ * key-creating button. All four are MEASURED; none is PROMOTED, so there is no locator to spotlight. The driver
+ * documented exactly that ("a tutorial step for an unpromoted control guides by TEXT") and then returned
+ * `{ count: 0 }` for them, which the engine reads as `NONE` and parks `target_not_found` — permanently, because
+ * a re-check re-locates and finds nothing again. The redesigned walk could not get past step 3.
+ *
+ * No test caught it: the session and engine suites drive a fixture driver that answers `count: 1` for every
+ * target, so the fixture stood one layer away from the thing it modelled. This constant is the repair, and it
+ * promotes NOTHING — a text-guided step gets the guidance panel and its advance button, and no spotlight ring.
+ */
+const TEXT_GUIDED_SIG: Readonly<Partial<Record<CoupangIssuanceTarget, string>>> = {
+  purpose_option: "7a1c33d27a1c33d2",
+  confirm_purpose: "b48e2f05b48e2f05",
+  terms_consent: "16d9c7ba16d9c7ba",
+  issue_final: "9f3b60e19f3b60e1",
+};
 const RETURN_GUIDANCE_SIG = "5e11e40b5e11e40b";
 
 /** Remove every read-only `data-aw-target` annotation. Value-free; safe on a page with none. */
@@ -898,6 +917,10 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     // signature (reach = "go to the open-API page yourself"; return = "go back to SellerOps").
     if (target === "reach_open_api") return { count: 1, sig: REACH_OPEN_API_GUIDANCE_SIG };
     if (target === "return") return { count: 1, sig: RETURN_GUIDANCE_SIG };
+    // Text-guided: measured, not promoted. It resolves to a fixed synthetic signature exactly as the two
+    // guidance steps above do — the page is not queried, so there is nothing to find and nothing to miss.
+    const guided = TEXT_GUIDED_SIG[target];
+    if (guided) return { count: 1, sig: guided };
     if (!isWingHighlightTarget(target)) return { count: 0 };
     return this.resolveFixedLabelTarget(target, false);
   }
@@ -911,6 +934,13 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     if (target === "return") {
       await this.mountStepOverlay(page, "return");
       return { count: 1, sig: RETURN_GUIDANCE_SIG };
+    }
+    const guided = TEXT_GUIDED_SIG[target];
+    if (guided) {
+      // The guidance panel and its advance button, and NO spotlight ring: there is no promoted locator to point
+      // at, and drawing a ring somewhere plausible would be the invention this whole workstream refuses.
+      await this.mountStepOverlay(page, target);
+      return (await overlayMounted(page)) ? { count: 1, sig: guided } : { count: 0 };
     }
     if (!isWingHighlightTarget(target)) return { count: 0 };
     const res = await this.resolveFixedLabelTarget(target, true);

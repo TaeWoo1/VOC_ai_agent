@@ -10,7 +10,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { WING_HIGHLIGHT_CALIBRATION } from "../../../src/action-window/coupang-wing-issuance-driver";
+import { WING_HIGHLIGHT_CALIBRATION, CoupangWingIssuanceDriver } from "../../../src/action-window/coupang-wing-issuance-driver";
+import { COUPANG_ISSUANCE_TARGETS } from "../../../src/action-window/coupang-issuance/coupang-issuance-driver";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DRIVER = resolve(HERE, "../../../src/action-window/coupang-wing-issuance-driver.ts");
@@ -129,8 +130,13 @@ describe("run-coupang-wing-issuance-live CLI — source guard (gated, no click/t
     expect(code).not.toContain(token);
   });
 
-  it("navigates exactly ONCE — to the pre-screened URL only", () => {
-    expect(code.split("page.goto(").length - 1).toBe(1);
+  it("**navigates ZERO times** — the seller reaches WING themselves", () => {
+    // It used to `page.goto(url)` exactly once, and this guard pinned that at one. On the product path the
+    // seller reaches WING; an agent that drives the page there has taken a marketplace action nobody granted,
+    // and every read-only WING entrypoint already holds that line ("this recorder never `.goto`s").
+    const codeOnly = code.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    expect(codeOnly.split(".goto(").length - 1).toBe(0);
+    expect(code).toContain("COUPANG_WING_GUIDED_WALK_AGENT_NAVIGATIONS = 0");
   });
 
   it("is gated on the explicit Coupang WING live-run approval flag and fails closed on a bad URL before launch", () => {
@@ -142,5 +148,64 @@ describe("run-coupang-wing-issuance-live CLI — source guard (gated, no click/t
     expect(code).toContain("import.meta.url === pathToFileURL(process.argv[1]).href");
     // Reads the operator-owned WING URL env, never a NAVER one.
     expect(code).toContain("COUPANG_WING_URL");
+  });
+});
+
+/* ══════════════════════════ every guided step must be reachable ══════════════════════════ */
+
+/** The minimum a `Page` must be for the driver's constructor: it subscribes to `close`. */
+function fakePage(): { url: () => string; on: () => void } {
+  return { url: () => "https://wing.coupang.com", on: () => undefined };
+}
+
+describe("the redesigned walk can actually be walked", () => {
+  it("**every tutorial target resolves — none returns the count that parks the run**", async () => {
+    // The defect this closes shipped in the 2026-08-10 redesign: four of the eight steps had no promoted
+    // locator, `locateTarget` returned `{ count: 0 }` for each, and the engine reads that as NONE and parks
+    // `target_not_found` — permanently, since a re-check re-locates and finds nothing again. The walk could not
+    // get past step 3, and no test saw it because the session and engine suites drive a FIXTURE driver that
+    // answers `count: 1` for every target. The fixture stood one layer away from the thing it modelled.
+    //
+    // This asserts against the REAL driver, and it needs no page: every non-highlight target short-circuits
+    // before touching one.
+    // A structurally complete stub: the constructor subscribes to the page's `close` event, so a bare object
+    // throws `page.on is not a function` — which vitest reports as an unhandled error while still counting the
+    // test as passed, so a local run looks green and CI does not.
+    const driver = new CoupangWingIssuanceDriver(fakePage() as never);
+    for (const target of COUPANG_ISSUANCE_TARGETS) {
+      if (target === "issue" || target === "credentials") continue; // these query the page; covered elsewhere
+      const res = await driver.locateTarget(target);
+      expect(res.count, `${target} would park the run at target_not_found`).toBe(1);
+      expect(res.sig, target).toMatch(/^[0-9a-f]{16}$/);
+    }
+  });
+
+  it("the text-guided steps are exactly the MEASURED-but-unpromoted ones, and their sigs are distinct", async () => {
+    // A step gets text guidance because nothing was promoted for it — not because promoting was inconvenient.
+    // If one of these ever gains a calibrated locator, it leaves this list and gains a spotlight.
+    // A structurally complete stub: the constructor subscribes to the page's `close` event, so a bare object
+    // throws `page.on is not a function` — which vitest reports as an unhandled error while still counting the
+    // test as passed, so a local run looks green and CI does not.
+    const driver = new CoupangWingIssuanceDriver(fakePage() as never);
+    const sigs = new Map<string, string>();
+    for (const target of ["reach_open_api", "purpose_option", "confirm_purpose", "terms_consent", "issue_final", "return"] as const) {
+      const res = await driver.locateTarget(target);
+      sigs.set(target, res.sig!);
+    }
+    // Distinct: a shared signature would let one step's overlay be mistaken for another's in the record.
+    expect(new Set(sigs.values()).size).toBe(sigs.size);
+  });
+
+  it("a text-guided step is never given a SPOTLIGHT — there is no promoted locator to point at", () => {
+    // Drawing a ring somewhere plausible is the invention this workstream refuses. The highlight path for these
+    // targets mounts the guidance overlay and returns; it never reaches `resolveFixedLabelTarget`.
+    const src = readFileSync(resolve(HERE, "../../../src/action-window/coupang-wing-issuance-driver.ts"), "utf8");
+    const from = src.indexOf("  async highlightTarget(");
+    const body = src.slice(from, src.indexOf("\n  /**", from));
+    const guardIdx = body.indexOf("const guided = TEXT_GUIDED_SIG[target];");
+    const resolveIdx = body.indexOf("this.resolveFixedLabelTarget(target, true)");
+    expect(guardIdx).toBeGreaterThan(-1);
+    // The text-guided branch must come FIRST, or a resolve runs before it and can tag a wrong element.
+    expect(resolveIdx).toBeGreaterThan(guardIdx);
   });
 });
