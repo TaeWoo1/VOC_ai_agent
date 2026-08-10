@@ -318,7 +318,7 @@ if [ -z "$TREE_DIRTY" ]; then
     "여기서 실제로 키가 생성됩니다." \
     "'약관 동의 및 Key 발급받기' 버튼을 직접 누르세요" \
     "SellerOps는 이" \
-    "버튼을 절대 누르지 않습니다."
+    "버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다."
   do
     grep -qF "$phrase" <<<"$out" || { echo "  FAIL  NORMAL          · Korean on-screen warning missing: $phrase"; KOREAN_OK=0; FAILED=1; }
   done
