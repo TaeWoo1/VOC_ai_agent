@@ -727,6 +727,8 @@ describe("the emitted Stage-2 record", () => {
     choiceControlFault: null,
     association: null,
     associationFault: null,
+    consentBlocks: null,
+    consentBlockFault: null,
     calibrationBlind: null,
     purposeOptionCandidateIds: [],
   };

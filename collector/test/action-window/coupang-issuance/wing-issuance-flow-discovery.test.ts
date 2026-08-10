@@ -675,10 +675,13 @@ describe("the manifest cannot under-describe the flow it approves", () => {
     expect(ENTRY.operatorActionSummary).not.toContain("⑤");
   });
 
-  it("the agent's declared action list gained NOTHING for this phase", () => {
-    // The whole justification for reusing the calibration's capability set is that discovery reads the same
-    // eight things. A ninth here means the phase stopped being what its manifest says it is.
-    expect([...SPEC.capableActions]).toEqual([...PHASE_SPECS.COUPANG_WING_STAGE2_LABEL_CALIBRATION.capableActions]);
+  it("declares EXACTLY one read beyond the calibration's, and names it", () => {
+    // Discovery reads the calibration's eight plus the consent-block census. That census is a real additional
+    // measurement, so it is declared — a phase quietly taking a ninth read under a manifest naming eight is
+    // precisely the failure the action list exists to prevent. What must not happen is a TENTH arriving
+    // unnoticed, so this pins the difference rather than the list.
+    const base = [...PHASE_SPECS.COUPANG_WING_STAGE2_LABEL_CALIBRATION.capableActions];
+    expect([...SPEC.capableActions]).toEqual([...base, "CONSENT_BLOCK_CENSUS"]);
     expect(SPEC.mode).toBe("READ_ONLY");
     expect(SPEC.allowsHighlight).toBe(false);
   });

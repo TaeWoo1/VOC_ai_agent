@@ -85,6 +85,7 @@ import {
   wingConfirmAdvisory,
   wingRevealedBetween,
   WING_CHOICE_LABEL_CANDIDATES,
+  WING_STAGE3_TERMS_OPTION_CANDIDATES,
   WING_FLOW_LAST_CHECKPOINT,
   WING_KEY_CREATION_CONTROL_ID,
   WING_CHECKPOINT_EXPECTED_SCREEN,
@@ -107,6 +108,7 @@ import {
   type WingProbeScopeRefusal,
   type WingChoiceAssociationCensus,
   type WingChoiceControlCensus,
+  type WingConsentBlockCensus,
 } from "./coupang-wing-classifier";
 import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from "./live-run-approval";
 
@@ -285,6 +287,12 @@ export interface WingStage2Sweep {
   association: WingChoiceAssociationCensus | null;
   associationFault: WingFaultFingerprint | null;
   /**
+   * The consent-BLOCK census, or null when the phase does not take it (everything but discovery), the seam was
+   * absent, or the page returned nothing usable — the last of which is a FAULT, not an empty reading.
+   */
+  consentBlocks: WingConsentBlockCensus | null;
+  consentBlockFault: WingFaultFingerprint | null;
+  /**
    * Candidates whose CONTAINMENT probe threw. Separate from {@link faults}: a candidate can be counted
    * successfully and still fail the second, wider read, and folding the two would report the count as unmeasured.
    */
@@ -348,6 +356,12 @@ export interface WingSelectorRecordDeps {
    * themselves — still without selecting, clicking, or reading `checked`.
    */
   choiceAssociationCensus?(candidates: readonly string[]): Promise<WingChoiceAssociationCensus | null>;
+  /**
+   * READ-ONLY consent-BLOCK census. Taken only under the DISCOVERY phase, because it is the only phase whose
+   * flow reaches a screen with consent checkboxes on it — and because it is a capability no earlier manifest
+   * described.
+   */
+  consentBlockCensus?(consents: readonly string[]): Promise<WingConsentBlockCensus | null>;
   /**
    * READ-ONLY choice-control SHAPE census — the one measurement this recorder gained for Stage-2. Optional for
    * the same reason `probeCandidate` is: a run that cannot take it must record that it could not, never die.
@@ -519,6 +533,8 @@ async function sweepStage2(
     choiceControlFault: null,
     association: null,
     associationFault: null,
+    consentBlocks: null,
+    consentBlockFault: null,
     calibrationBlind: null,
     purposeOptionCandidateIds: calibration ? purposeCandidates.map((c) => c.id) : [],
   };
@@ -595,6 +611,19 @@ async function sweepStage2(
       associationFault = wingFaultFingerprint(e);
     }
   }
+  let consentBlocks: WingConsentBlockCensus | null = null;
+  let consentBlockFault: WingFaultFingerprint | null = null;
+  // DISCOVERY only. The consent screen is the only place this measures anything, and taking it under a
+  // calibration manifest would be a read that manifest never described.
+  if (phase === WING_ISSUANCE_FLOW_DISCOVERY_PHASE && deps.consentBlockCensus) {
+    try {
+      const read = await deps.consentBlockCensus(WING_STAGE3_TERMS_OPTION_CANDIDATES.map((c) => c.exactText));
+      if (read) consentBlocks = read;
+      else consentBlockFault = "UNUSABLE_READING";
+    } catch (e) {
+      consentBlockFault = wingFaultFingerprint(e);
+    }
+  }
   const folded = interpretWingStage2Recon(targets, raw);
   const all = folded.flatMap((t) => t.candidates);
   return {
@@ -610,6 +639,8 @@ async function sweepStage2(
     choiceControlFault,
     association,
     associationFault,
+    consentBlocks,
+    consentBlockFault,
     calibrationBlind: null,
     purposeOptionCandidateIds: calibration ? purposeCandidates.map((c) => c.id) : [],
   };
@@ -1160,6 +1191,8 @@ export function stage2RecordFor(sweep: WingStage2Sweep | null): {
   choiceControlFault: WingFaultFingerprint | null;
   association: WingChoiceAssociationCensus | null;
   associationFault: WingFaultFingerprint | null;
+  consentBlocks: WingConsentBlockCensus | null;
+  consentBlockFault: WingFaultFingerprint | null;
   /** OUR candidate ids, in the exact order the association census compared them. An index means nothing without it. */
   purposeOptionCandidateIds: readonly string[];
 } | null {
@@ -1210,6 +1243,8 @@ export function stage2RecordFor(sweep: WingStage2Sweep | null): {
     choiceControlFault: sweep.choiceControlFault,
     association: sweep.association,
     associationFault: sweep.associationFault,
+    consentBlocks: sweep.consentBlocks,
+    consentBlockFault: sweep.consentBlockFault,
     purposeOptionCandidateIds: sweep.purposeOptionCandidateIds,
   };
 }
@@ -1496,6 +1531,8 @@ async function main(): Promise<void> {
     // calibration phase, so the ONE place that decides whether they run is the phase gate, not two.
     probeContainment: (spec) => driver.probeLabelContainment(spec),
     choiceAssociationCensus: (candidates) => driver.choiceAssociationCensus(candidates),
+    // Armed unconditionally; `sweepStage2` calls it only under the discovery phase, so ONE gate decides.
+    consentBlockCensus: (consents) => driver.consentBlockCensus(consents),
     announce: () =>
       isStage2Run
         ? printStage2Instructions(readyPath, abortPath, isCalibrationRun)

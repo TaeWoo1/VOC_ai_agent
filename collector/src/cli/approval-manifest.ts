@@ -153,6 +153,13 @@ export const APPROVAL_ACTIONS = [
   // which of OUR candidate strings the derived name matches (an INDEX, never the name). It selects nothing,
   // clicks nothing, and does not read `checked`.
   "CHOICE_CONTROL_LABEL_ASSOCIATION_CENSUS",
+  // Read-only CONSENT-BLOCK census: for each painting checkbox, walk UP to the nearest ancestor whose text
+  // holds exactly one of OUR consent sentences, and report which one (an INDEX), how many levels up, and how
+  // many painting checkboxes that same block contains. Two of its three verdicts are refusals — a block holding
+  // several consents identifies nothing and says so rather than picking the first. It exists because the terms
+  // checkboxes have no accessible name at all, so the alternative to measuring the pairing is inventing it.
+  // Reads no `checked`: which box the seller ticked is not a thing this records.
+  "CONSENT_BLOCK_CENSUS",
 ] as const;
 export type ApprovalAction = (typeof APPROVAL_ACTIONS)[number];
 
@@ -525,12 +532,15 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   COUPANG_WING_ISSUANCE_FLOW_DISCOVERY: {
     phase: "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY",
     cli: "src/cli/probe-wing-issuance-selectors.ts",
-    driver: "CoupangWingIssuanceDriver (the calibration reads, repeated at each checkpoint the OPERATOR advances)",
-    // The AGENT's capability set is IDENTICAL to the calibration's — the same eight reads, no ninth. What is
-    // wider is what the OPERATOR is invited to do: select a purpose option, and conditionally press 확인. That
-    // is why this is a separate phase and not a flag. A capability list cannot express "the human does more",
-    // so the operation text and the operator summary carry it, and the manifest is what they read before
-    // granting. `wingConfirmAdvisory` is what keeps the second invitation from ever being printed blind.
+    driver: "CoupangWingIssuanceDriver (the calibration reads plus a consent-block census, at each checkpoint the OPERATOR advances)",
+    // The calibration's eight reads plus ONE: the consent-BLOCK census, which exists only because the terms
+    // checkboxes have no accessible name and the pairing must be established structurally or not at all. It is
+    // listed because it is a real additional read; a phase quietly taking a ninth measurement under a manifest
+    // naming eight is the failure this list exists to prevent.
+    //
+    // The other widening is what the OPERATOR is invited to do — select a purpose option, and conditionally
+    // press 확인 — which a capability list cannot express, so the operation text and the operator summary carry
+    // it. `wingConfirmAdvisory` keeps the second invitation from ever being printed blind.
     capableActions: [
       "OPEN_DEDICATED_WINDOW",
       "WAIT_OPERATOR_LOGIN_NAV",
@@ -540,6 +550,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
       "CHOICE_CONTROL_SHAPE_CENSUS",
       "FIXED_LABEL_CONTAINMENT_PROBE",
       "CHOICE_CONTROL_LABEL_ASSOCIATION_CENSUS",
+      "CONSENT_BLOCK_CENSUS",
     ],
     allowsHighlight: false,
     mode: "READ_ONLY",
