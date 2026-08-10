@@ -612,8 +612,8 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   },
   COUPANG_WING_GUIDED_ISSUANCE_WALK: {
     phase: "COUPANG_WING_GUIDED_ISSUANCE_WALK",
-    cli: "src/cli/run-coupang-wing-issuance-live.ts",
-    driver: "CoupangWingIssuanceDriver (WING-resident guided walk: highlight the two calibrated controls, text-guide the rest, rest at every checkpoint)",
+    cli: "src/cli/local-agent.ts",
+    driver: "LazyCoupangIssuanceDriver → CoupangWingIssuanceDriver (WING-resident guided walk; the window opens on the run's first call, never at agent boot)",
     // It HIGHLIGHTS two live-calibrated controls ⇒ `allowsHighlight: true` ⇒ it fails closed
     // (`SELECTORS_NOT_CALIBRATED`) unless the caller states the `issue` calibration. The other guided steps are
     // text-only and claim no locator.
@@ -937,10 +937,11 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
   // stands in front of a control this run never presses.
   COUPANG_WING_GUIDED_ISSUANCE_WALK: {
     entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
-    cli: "src/cli/run-coupang-wing-issuance-live.ts",
-    entrypointCommandId: "run-coupang-wing-issuance-live",
+    cli: "src/cli/local-agent.ts",
+    entrypointCommandId: "local-agent",
     operatorActionSummary:
-      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 로그인·페이지 이동·모든 마켓플레이스 조작은 판매자가 직접 합니다" +
+      "승인 후 SellerOps Local Agent가 뜨고, SellerOps 화면에서 안내를 시작하면 전용 Chrome 창이 열립니다" +
+      "(에이전트가 켜져 있다는 이유만으로는 창이 열리지 않습니다). 연결 승인은 SellerOps 제품 화면에서 직접 하십니다. " +
       "(SellerOps는 클릭·입력·제출을 하지 않고, 페이지를 대신 이동하지도 않습니다). 안내는 WING 화면 위에 표시되며 " +
       "각 단계에서 멈춥니다: ① 오픈API 키 발급 페이지로 직접 이동 → ② 'API Key 발급 받기'(강조 표시됨)를 직접 누름 → " +
       "③ 사용 목적 화면에서 'OPEN API' 선택 확인(기본값이면 누를 것 없음) → ④ '확인'을 직접 누름 → ⑤ 약관 2개를 " +

@@ -41,6 +41,7 @@ import {
   type WingSelectorRecordDeps,
 } from "../../../src/cli/probe-wing-issuance-selectors";
 import { observeFrom, WING_PROBE_TARGET_NAMES, type WingStructuralCensus } from "../../../src/cli/coupang-wing-classifier";
+import { coupangLiveWalkRefusal } from "../../../src/cli/local-agent";
 import {
   CALIBRATION_PHASES,
   WING_STAGE2_MANIFEST_PHASES,
@@ -995,5 +996,72 @@ describe("stale spotlight — the defect the dev-host live proof surfaced", () =
       expect(guided, t).toContain(t);
     }
     for (const t of ["issue:", "credentials:"]) expect(guided).not.toContain(t);
+  });
+});
+
+/* ══════════════════════════ the PRODUCT path: the Local Agent hosts the live walk ══════════════════════════ */
+
+describe("the live guided-walk carrier is gated, and never downgrades silently", () => {
+  const PHASE = "COUPANG_WING_GUIDED_ISSUANCE_WALK";
+  const OK = { ok: true };
+  const bound = (over: Record<string, string | undefined> = {}): NodeJS.ProcessEnv => ({
+    SELLEROPS_APPROVAL_PHASE: PHASE,
+    SELLEROPS_WING_APPROVED_PHASE: PHASE,
+    WALKTHROUGH_APPROVAL_ID: "apr-46be037016a1",
+    WALKTHROUGH_GIT_COMMIT: "7b580d8e",
+    ...over,
+  });
+  const FLAG = ["--action-window-coupang-issuance-live"];
+
+  it("hosts only when EVERY binding is present", () => {
+    expect(coupangLiveWalkRefusal(FLAG, bound(), () => OK, "/repo")).toBeNull();
+  });
+
+  it("refuses a missing or mismatched phase — one variable is not enough", () => {
+    expect(coupangLiveWalkRefusal(FLAG, bound({ SELLEROPS_APPROVAL_PHASE: undefined }), () => OK, "/repo")).toBe("PHASE_NOT_BOUND");
+    expect(coupangLiveWalkRefusal(FLAG, bound({ SELLEROPS_WING_APPROVED_PHASE: undefined }), () => OK, "/repo")).toBe("PHASE_NOT_BOUND");
+    // A stale phase from another WING run must not arm this one.
+    expect(coupangLiveWalkRefusal(FLAG, bound({ SELLEROPS_WING_APPROVED_PHASE: "COUPANG_WING_ISSUANCE_FORM_REVEAL" }), () => OK, "/repo")).toBe("PHASE_NOT_BOUND");
+    // …and without the flag at all it is simply not requested.
+    expect(coupangLiveWalkRefusal([], bound(), () => OK, "/repo")).toBe("PHASE_NOT_BOUND");
+  });
+
+  it("refuses an unbootstrapped approval id or SHA — a live walk needs an approval to belong to", () => {
+    for (const bad of [undefined, "", "apr-", "not-an-id", "APR-46BE037016A1"]) {
+      expect(coupangLiveWalkRefusal(FLAG, bound({ WALKTHROUGH_APPROVAL_ID: bad }), () => OK, "/repo"), String(bad)).toBe("APPROVAL_NOT_BOUND");
+    }
+    for (const bad of [undefined, "", "zzzzzzz", "123"]) {
+      expect(coupangLiveWalkRefusal(FLAG, bound({ WALKTHROUGH_GIT_COMMIT: bad }), () => OK, "/repo"), String(bad)).toBe("APPROVAL_NOT_BOUND");
+    }
+  });
+
+  it("refuses when repo identity fails — a harness pointed at a decoy satisfies every other check", () => {
+    expect(coupangLiveWalkRefusal(FLAG, bound(), () => ({ ok: false }), "/repo")).toBe("REPO_IDENTITY_FAILED");
+  });
+
+  it("**every refusal means NOT HOSTED — never a fallback to the fixture**", () => {
+    // The failure this prevents: the operator grants a live walk, a binding is missing, and the agent hosts the
+    // SIMULATION instead. It would look identical in the UI and prove nothing about WING.
+    const src = readFileSync(resolve(HERE, "../../../src/cli/local-agent.ts"), "utf8");
+    const from = src.indexOf("const liveWalkRefusal =");
+    const block = src.slice(from, src.indexOf("const coupangIssuance:", from) + 400);
+    expect(block).toContain("hostLiveWalk");
+    expect(block).toContain("aw_coupang_live_walk_refused");
+    // The fixture is reachable ONLY through the dev flag's own gate, never as this one's fallback.
+    expect(block).toContain("hostCoupangIssuance");
+    expect(block).not.toMatch(/liveWalkRefusal[^\n]*\?\s*buildCoupangIssuanceConfig/);
+  });
+
+  it("the live carrier opens NO window at agent boot, and never navigates", () => {
+    const src = readFileSync(resolve(HERE, "../../../src/cli/local-agent.ts"), "utf8");
+    const from = src.indexOf("export function buildCoupangIssuanceLiveConfig");
+    const fn = src.slice(from, src.indexOf("\nexport function buildCoupangIssuanceConfig", from));
+    // Lazily: the launch lives inside `open()`, which the session calls, not the builder.
+    expect(fn).toContain("new LazyCoupangIssuanceDriver({");
+    expect(fn).toContain("open: async () =>");
+    const codeOnly = fn.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    expect(codeOnly).not.toContain(".goto(");
+    // ONE driver for the carrier's lifetime — a re-attach must reuse the seller's window, not open a second.
+    expect(fn).toContain("createDriver: () => driver");
   });
 });

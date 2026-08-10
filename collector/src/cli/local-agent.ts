@@ -45,6 +45,8 @@ import type { ConnectorOrchestratorObserver, ConnectorStartupResult } from "../c
 import { createAgentBridge, type AgentActionWindowConfig, type AgentApiIssuanceConfig, type AgentCoupangIssuanceConfig, type AgentImportConfig, type AgentReplySubmissionConfig } from "../agent/agent-bridge";
 import { IssuanceFixtureDriver } from "../action-window/api-issuance/issuance-fixture-driver";
 import { CoupangIssuanceFixtureDriver } from "../action-window/coupang-issuance/coupang-issuance-fixture-driver";
+import { LazyCoupangIssuanceDriver } from "../action-window/coupang-issuance/lazy-coupang-issuance-driver";
+import { verifyRepoIdentity } from "./repo-identity";
 import { NaverLiveProbeDriver } from "../action-window/naver-live-driver";
 import { createNaverActionWindowImportDriver } from "../action-window/naver-acquisition-adapter";
 import { defaultImportRunDirFor } from "../action-window/initial-import/import-dispatch";
@@ -252,10 +254,56 @@ export function buildApiIssuanceConfig(): AgentApiIssuanceConfig {
  * Coupang carrier: it lets the browser product path (SellerOps `/connect/coupang` guided walkthrough →
  * pairing → START_RUN → REQUEST_STEP_RECHECK) be driven end-to-end without opening real WING or a CLI client.
  * Never honored under `NODE_ENV=production`. Mutually exclusive with the other carriers (an agent hosts one).
- * The LIVE WING driver is NOT wired here — it is supplied only by the gated live entrypoint
- * (`run-coupang-wing-issuance-live.ts`).
+ * The LIVE WING driver is wired by {@link ACTION_WINDOW_COUPANG_ISSUANCE_LIVE_FLAG}, and only under the
+ * approval binding that flag's gate demands. This dev flag stays the FIXTURE path.
  */
 export const ACTION_WINDOW_COUPANG_ISSUANCE_FLAG = "--dev-action-window-coupang-issuance";
+
+/**
+ * **The PRODUCT path: host the guided WING walk with the REAL driver.**
+ *
+ * Separate from the dev flag because the difference is not a detail — one drives a fixture, the other opens the
+ * seller's marketplace window. It is gated on the same binding the standalone entrypoint requires, checked
+ * before the agent hosts anything:
+ *
+ *   - BOTH phase variables naming {@link COUPANG_WING_GUIDED_ISSUANCE_WALK_PHASE};
+ *   - a bootstrapped approval id and git SHA in the environment;
+ *   - repo identity against that SHA.
+ *
+ * Missing any of them, the agent boots WITHOUT the carrier rather than falling back to the fixture. A silent
+ * downgrade would be worse than a refusal: the operator granted a live walk and would get a simulation that
+ * looks like one.
+ */
+export const ACTION_WINDOW_COUPANG_ISSUANCE_LIVE_FLAG = "--action-window-coupang-issuance-live";
+
+/** Why the live guided-walk carrier was refused. Closed, and every value means "not hosted". */
+export const COUPANG_LIVE_WALK_REFUSALS = [
+  "PHASE_NOT_BOUND",
+  "APPROVAL_NOT_BOUND",
+  "REPO_IDENTITY_FAILED",
+] as const;
+export type CoupangLiveWalkRefusal = (typeof COUPANG_LIVE_WALK_REFUSALS)[number];
+
+/**
+ * Pure gate for the live carrier. Returns the refusal, or `null` when every binding is present.
+ *
+ * Pure and exported so the refusal can be tested without booting an agent or opening a window — the same
+ * reason every other WING gate in this repo is a function over inputs rather than a branch inside a boot.
+ */
+export function coupangLiveWalkRefusal(
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+  verify: (input: { expectedSha: string; repoRoot: string }) => { ok: boolean },
+  repoRoot: string,
+): CoupangLiveWalkRefusal | null {
+  if (!args.includes(ACTION_WINDOW_COUPANG_ISSUANCE_LIVE_FLAG)) return "PHASE_NOT_BOUND";
+  const phase = "COUPANG_WING_GUIDED_ISSUANCE_WALK";
+  if (env.SELLEROPS_APPROVAL_PHASE !== phase || env.SELLEROPS_WING_APPROVED_PHASE !== phase) return "PHASE_NOT_BOUND";
+  const approvalId = env.WALKTHROUGH_APPROVAL_ID ?? "";
+  const sha = env.WALKTHROUGH_GIT_COMMIT ?? "";
+  if (!/^apr-[0-9a-f]{6,}$/.test(approvalId) || !/^[0-9a-f]{7,40}$/.test(sha)) return "APPROVAL_NOT_BOUND";
+  return verify({ expectedSha: sha, repoRoot }).ok ? null : "REPO_IDENTITY_FAILED";
+}
 
 /** Pure gate: should the agent host the Coupang issuance guidance channel? Never under production. */
 export function resolveCoupangIssuanceChannel(args: readonly string[], env: NodeJS.ProcessEnv): boolean {
@@ -268,6 +316,31 @@ export function resolveCoupangIssuanceChannel(args: readonly string[], env: Node
  * driver (no browser, no live WING, no credential read). Run identity is Runtime-assigned (opaque random
  * suffix). No persistence: an issuance walk is read-only guidance with nothing to recover.
  */
+/**
+ * The PRODUCT-path carrier: the real WING driver, its window opened lazily by the session's first call.
+ *
+ * `open()` launches the dedicated persistent-profile window and takes the newest tab. It does NOT navigate —
+ * on the product path the seller reaches WING themselves, and an agent that drives the page there has taken a
+ * marketplace action nobody granted.
+ */
+export function buildCoupangIssuanceLiveConfig(): AgentCoupangIssuanceConfig {
+  const cfg = loadConfig();
+  const driver = new LazyCoupangIssuanceDriver({
+    open: async () => {
+      const context = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
+      const page = (context.pages()[0] ?? (await context.newPage())) as Page;
+      return { context, page };
+    },
+  });
+  return {
+    runId: `run_${randomBytes(6).toString("hex")}`,
+    channelCode: "coupang",
+    // ONE driver for the carrier's lifetime, so a re-attach reuses the window the seller is already in rather
+    // than opening a second one beside it.
+    createDriver: () => driver,
+  };
+}
+
 export function buildCoupangIssuanceConfig(): AgentCoupangIssuanceConfig {
   return {
     runId: `run_${randomBytes(6).toString("hex")}`,
@@ -1065,7 +1138,22 @@ async function main(): Promise<void> {
     : undefined;
   const replySubmission: AgentReplySubmissionConfig | undefined = hostReply ? buildReplySubmissionConfig() : undefined;
   const apiIssuance: AgentApiIssuanceConfig | undefined = hostIssuance ? buildApiIssuanceConfig() : undefined;
-  const coupangIssuance: AgentCoupangIssuanceConfig | undefined = hostCoupangIssuance ? buildCoupangIssuanceConfig() : undefined;
+  // The LIVE guided walk takes precedence over the dev fixture when its binding is complete; when the flag is
+  // present but the binding is not, the carrier is NOT hosted and the refusal is logged. Never a silent
+  // downgrade to the fixture: the operator granted a live walk and a simulation that looks like one is worse
+  // than nothing being hosted at all.
+  const liveWalkRefusal = args.includes(ACTION_WINDOW_COUPANG_ISSUANCE_LIVE_FLAG)
+    ? coupangLiveWalkRefusal(args, process.env, verifyRepoIdentity, collectorRoot)
+    : "PHASE_NOT_BOUND";
+  const hostLiveWalk = args.includes(ACTION_WINDOW_COUPANG_ISSUANCE_LIVE_FLAG) && liveWalkRefusal === null;
+  if (args.includes(ACTION_WINDOW_COUPANG_ISSUANCE_LIVE_FLAG) && !hostLiveWalk) {
+    log("aw_coupang_live_walk_refused", { refusal: liveWalkRefusal ?? "unknown" }, "warn");
+  }
+  const coupangIssuance: AgentCoupangIssuanceConfig | undefined = hostLiveWalk
+    ? buildCoupangIssuanceLiveConfig()
+    : hostCoupangIssuance
+      ? buildCoupangIssuanceConfig()
+      : undefined;
   // Approval-presenter wiring lives HERE and only here — never as a `createAgentBridge` default (see
   // `decideApprovalPresenter`). `none` means no human channel exists on this host, so pairing fails closed.
   const approvalKind = decideApprovalPresenter(process.env, process.platform);
