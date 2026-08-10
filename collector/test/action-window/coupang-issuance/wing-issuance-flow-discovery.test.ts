@@ -721,8 +721,12 @@ describe("the manifest cannot under-describe the flow it approves", () => {
     const block = src.slice(from, src.indexOf('elif is_stage2_phase "$PHASE"; then', from));
     expect(block).not.toContain("nobody has ever pressed");
     expect(block).not.toContain("no run has measured what it does");
-    // …and it states what IS measured, with the date, plus the defect the gate now closes.
-    expect(block).toContain("MEASURED 2026-08-10");
+    // Nor the OPPOSITE over-claim, which replaced it and was itself retracted: two later runs reached the terms
+    // screen before the 확인 step, so "확인 opens the TERMS screen" is not established either.
+    expect(block).not.toContain("'확인' opens the TERMS screen");
+    expect(block).toContain("What '확인' DOES is not established");
+    // What IS measured stays stated, and so does the defect the gate closes.
+    expect(block).toContain("never appear anywhere in this flow");
     expect(block).toContain("WAS printed against the terms screen");
   });
 });

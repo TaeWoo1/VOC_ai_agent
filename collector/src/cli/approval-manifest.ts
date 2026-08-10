@@ -735,6 +735,16 @@ export interface EntrypointSpec {
  * only the guided-connection phase hands the operator a bound frontend URL. `operatorActionSummary` is
  * hotkey-agnostic (the concrete capture hotkey rides the manifest's own `hotkey` field).
  */
+/**
+ * The terms-checkpoint sentence of the discovery summary, kept separate so a NARROWED run can drop it.
+ *
+ * A phase-level constant describes the longest possible run; a manifest must describe the one about to happen.
+ * A narrowed run that still told the operator to tick consent boxes would be promising a step it never reaches
+ * — the same defect as omitting one, and the harness has now produced it in both directions.
+ */
+export const WING_DISCOVERY_TERMS_STEP_SUMMARY =
+  " ④ 약관 화면에서 내용을 직접 읽고 판단하신 뒤 동의 체크박스 2개를 직접 선택하고 ready. 여기서 실행이 끝납니다.";
+
 export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>> = {
   API_CENTER_STRUCTURE_OBSERVATION: {
     entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
@@ -835,12 +845,12 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
       "일절 하지 않습니다). ① 쿠팡(윙)에 직접 로그인·이동해 'API Key 발급 받기'를 직접 누르고 사용 목적 화면에서 멈춘 뒤 ready. " +
       "② 'OPEN API'를 직접 선택하고, '확인'은 누르지 말고 ready. 여기서 SellerOps가 업체명/URL/IP 입력란이 이미 화면에 " +
       "나타났는지 읽습니다. 이미 나타났다면 '확인'은 최종 제출일 수 있으므로 실행은 그 자리에서 중단되고, 누르라는 안내 자체를 " +
-      "하지 않습니다. ③ 중단되지 않은 경우에만 '확인'을 직접 누르고, 약관 화면이 뜨면 아무것도 누르지 말고 ready. " +
-      "④ 약관 내용을 직접 읽고 판단하신 뒤 동의 체크박스 2개를 직접 선택하고 ready. 여기서 실행이 끝납니다. " +
-      "⚠ 마지막 '약관 동의 및 Key 발급받기' 버튼은 실제로 키를 생성하는 control이며, 이번 단계에서는 절대 누르지 않습니다. " +
-      "SellerOps는 그 버튼의 위치만 측정하고, 그 다음 단계 자체가 존재하지 않습니다(키 발급은 별도 승인·별도 manifest). " +
-      "SellerOps는 약관을 읽거나 판단하거나 대신 동의하지 않습니다. 각 시점마다 라벨 매칭 수·표시 여부·라벨 연결 방식만 " +
-      "번호로 읽으며, 화면 문구·입력값·키 값은 기록하지 않습니다.",
+      "하지 않습니다. ③ 중단되지 않은 경우에만 '확인'을 직접 누르고, 다음 화면이 뜨면 아무것도 누르지 말고 ready." +
+      WING_DISCOVERY_TERMS_STEP_SUMMARY +
+      " ⚠ 약관 화면의 '약관 동의 및 Key 발급받기' 버튼은 실제로 키를 생성하는 control이며, 이번 단계에서는 절대 누르지 " +
+      "않습니다. SellerOps는 그 버튼의 위치만 측정하고, 그 다음 단계 자체가 존재하지 않습니다(키 발급은 별도 승인·별도 " +
+      "manifest). SellerOps는 약관을 읽거나 판단하거나 대신 동의하지 않습니다. 각 시점마다 라벨 매칭 수·표시 여부·" +
+      "라벨 연결 방식만 번호로 읽으며, 화면 문구·입력값·키 값은 기록하지 않습니다.",
     emitsFrontendUrl: false,
   },
   // The WING issuance-form REVEAL phase: a CLI-launched dedicated Chrome. The operator presses 발급 themselves
@@ -968,6 +978,8 @@ export interface ApprovalPrereqInput {
    * narrow a selector probe must not be able to narrow a Stage-2 sweep by accident, or vice versa.
    */
   requestedStage2Targets?: readonly string[];
+  /** Narrow the phase's operator copy to THIS run. Discovery only, and only ever to drop an unreachable step. */
+  operatorActionSummaryOverride?: string;
   runId: string;
   approvalId: string;
   gitSha: string;
@@ -1446,7 +1458,9 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
     selectorsCalibrated: calibrated,
     entrypointType: entrypoint.entrypointType,
     entrypointCommandId: entrypoint.entrypointCommandId,
-    operatorActionSummary: entrypoint.operatorActionSummary,
+    // The phase's canonical copy, unless this RUN is narrower than the phase. Only the discovery route
+    // supplies an override, and only to REMOVE a step it cannot reach — never to add or soften one.
+    operatorActionSummary: input.operatorActionSummaryOverride ?? entrypoint.operatorActionSummary,
     hotkey: input.hotkey ?? "",
     artifactPath: input.artifactPath ?? "",
     // Visual-recon only: surface the fixed screen set, the gitignored sink, and the redaction/summary policies

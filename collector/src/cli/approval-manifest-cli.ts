@@ -24,7 +24,13 @@ import {
   type CalibrationPhase,
   type ApprovalPrereqInput,
 } from "./approval-manifest";
-import { CALIBRATION_PHASES, COUPANG_WING_ISSUANCE_REVEAL_ACTION, isWingCalibrationPhase } from "./approval-manifest";
+import {
+  CALIBRATION_PHASES,
+  COUPANG_WING_ISSUANCE_REVEAL_ACTION,
+  isWingCalibrationPhase,
+  PHASE_ENTRYPOINTS,
+  WING_DISCOVERY_TERMS_STEP_SUMMARY,
+} from "./approval-manifest";
 import { WING_ISSUE_SELECTOR_CALIBRATED } from "../action-window/coupang-wing-issuance-driver";
 import { resolveVisualReconScope } from "../action-window/api-issuance-calibration/visual-recon";
 import {
@@ -177,6 +183,15 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
       requestedStage2Targets = scope.targets;
     }
   }
+  // A narrowed discovery must not keep the terms sentence: the summary is the copy the operator reads, and it
+  // would describe a step this run cannot take.
+  const operatorSummaryOverride =
+    isWingFlowDiscovery && !reachesTerms
+      ? PHASE_ENTRYPOINTS.COUPANG_WING_ISSUANCE_FLOW_DISCOVERY.operatorActionSummary.replace(
+          WING_DISCOVERY_TERMS_STEP_SUMMARY,
+          " 여기서 실행이 끝납니다(약관 화면의 동의 체크박스 단계는 이번 run에 포함되지 않습니다).",
+        )
+      : undefined;
   const isStructureObs = phase === "API_CENTER_STRUCTURE_OBSERVATION";
   const isFeLiveProof = phase === "API_ISSUANCE_FE_LIVE_PROOF";
   const hotkey = isStructureObs ? (env("SELLEROPS_CALIBRATION_HOTKEY") ?? "Ctrl+Shift+K") : undefined;
@@ -302,6 +317,7 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     // canonicalised. Undefined on every other phase, and undefined when the var is unset (the gate then
     // defaults to the full Stage-2 set).
     ...(requestedStage2Targets ? { requestedStage2Targets } : {}),
+    ...(operatorSummaryOverride ? { operatorActionSummaryOverride: operatorSummaryOverride } : {}),
     // Stated only for the WING deletion phase, from the single calibration constant. Every other phase leaves
     // this undefined so the gate applies its own default (NAVER's adapter flag; uncalibrated for WING).
     ...(isWingKeyDeletion ? { selectorsCalibrated: opts.selectorsCalibrated ?? WING_DELETION_SELECTORS_CALIBRATED } : {}),
