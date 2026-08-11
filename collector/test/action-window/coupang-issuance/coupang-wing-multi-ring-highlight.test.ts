@@ -6,15 +6,15 @@
  * whichever tagged element `querySelector` returned first, so either step could only ever have pointed at half
  * of what its panel says.
  *
- * **Nothing in this file is reachable in production today** — all four guided-highlight targets are
- * `promoted: false` until a live reading says otherwise, so both steps stay text-guided. That is exactly why the
- * tests exist: this is the path a DATA edit turns on, in front of a seller, on the two screens either side of
- * the key-creating control. A path enabled by editing a constant is a path no green suite would otherwise cover.
+ * The promotion record is MOCKED throughout, so each case can state the shape it is about — all four promoted
+ * (what shipped on 2026-08-11), one withdrawn, all withdrawn. The shipped state is asserted in exactly one
+ * place, `guided-control-highlight-calibration.test.ts`, and a behavioural test that needed it changed could
+ * only be made green by making that assertion false.
  *
  * The mount body is executed against a hand-built DOM double rather than asserted as source text: the defect
  * being fixed was behavioural (one ring where two were tagged), and a source assertion cannot see it.
  */
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mountOverlay, unmountOverlay, refreshOverlay } from "../../../src/action-window/overlay";
 import { buildFixedLabelLocateScript } from "../../../src/action-window/api-issuance-calibration/visual-recon-inpage";
 
@@ -309,21 +309,30 @@ describe("buildFixedLabelLocateScript — additive tagging for a multi-control s
 
 /* ─────────────────────────── the driver, with a promotion simulated ─────────────────────────── */
 
+/**
+ * The promotion record, MOCKED so each case can state the shape it is about — including the one the shipped
+ * record does not currently hold (a withdrawn calibration) and the one it does (all four promoted). Mocking
+ * rather than editing the source, because the source state is itself an assertion
+ * (`guided-control-highlight-calibration.test.ts` pins exactly what is ringed today), and a test that needed
+ * the real record changed could only be made green by making that assertion false.
+ */
+const promo = vi.hoisted(() => ({
+  table: {} as Record<string, { candidateId: string | null; promoted: boolean }>,
+}));
+
+const ALL_PROMOTED: Record<string, { candidateId: string | null; promoted: boolean }> = {
+  confirm: { candidateId: "stage2.confirm.actionable", promoted: true },
+  purpose_open_api: { candidateId: "stage2.purpose_open_api.label", promoted: true },
+  consent_api: { candidateId: "stage3.terms.api_agree.label", promoted: true },
+  consent_category: { candidateId: "stage3.terms.category_agree.label", promoted: true },
+};
+
 vi.mock("../../../src/action-window/coupang-wing-label-recon", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    // The promotion the live calibration has NOT yet made. Mocked rather than edited into the source, because
-    // the source state is itself an assertion (`guided-control-highlight-calibration.test.ts` pins it), and a
-    // test that needed the real record flipped could only be made green by making that assertion false.
     wingGuidedHighlightPromotion: (t: string) => {
-      const table: Record<string, { candidateId: string | null; promoted: boolean }> = {
-        confirm: { candidateId: "stage2.confirm.actionable", promoted: true },
-        purpose_open_api: { candidateId: "stage2.purpose_open_api.label", promoted: true },
-        consent_api: { candidateId: null, promoted: false },
-        consent_category: { candidateId: "stage3.terms.category_agree.span", promoted: true },
-      };
-      const row = table[t];
+      const row = promo.table[t];
       if (!row) throw new Error(`no guided-highlight promotion entry for ${t}`);
       return { target: t, screen: "PURPOSE", blockedReason: row.promoted ? null : "TEST", ...row };
     },
@@ -361,6 +370,10 @@ class LocatePage {
 }
 
 describe("the driver's promoted ring path", () => {
+  beforeEach(() => {
+    promo.table = { ...ALL_PROMOTED };
+  });
+
   async function driver(page: LocatePage) {
     const { CoupangWingIssuanceDriver } = await import("../../../src/action-window/coupang-wing-issuance-driver");
     return new CoupangWingIssuanceDriver(page as never, { verifyPollMs: 0 });
@@ -417,17 +430,64 @@ describe("the driver's promoted ring path", () => {
     expect(res.sig).toBeUndefined();
   });
 
+  it("**the terms step rings BOTH consents**, each resolved by id from its own promotion", async () => {
+    // Two separate consents; agreeing to one is not agreeing to the other. One ring could only ever have
+    // pointed at half of what the panel says.
+    const page = new LocatePage();
+    const res = await (await driver(page)).highlightTarget("terms_consent");
+    expect(res.count).toBe(1);
+    const tagging = page.scripts.filter((s) => s.includes("issuance-fixed-label-tag"));
+    expect(tagging).toHaveLength(2);
+    // Both sentences, verbatim — resolved from the recon candidates by id, never re-typed at the ring site.
+    expect(tagging[0]).toContain("API 이용 약관에 동의합니다.");
+    expect(tagging[1]).toContain("카테고리 자동 매칭 서비스 이용에 동의합니다.");
+    // …and neither query names a checkbox INPUT: the boxes have no accessible association, so nothing here
+    // claims to know where an individual box is. The rings sit on the sentences.
+    for (const t of tagging) expect(t).not.toMatch(/querySelectorAll\("[^"]*input/);
+  });
+
   it("an UNPROMOTED sibling neither suppresses nor drags along the promoted one", async () => {
-    // `consent_api` is unpromoted in this table and `consent_category` is promoted, so the step rings exactly
-    // one control — and the one that rings is the calibrated one, promoted to primary because the planned
-    // primary was not available. A ring set with no primary would put the chip wherever document order landed.
+    // Withdrawing one calibration must not take the other's ring down with it, and must not carry an
+    // unpromoted control along. The promoted one leads, because a ring set with no primary would put the chip
+    // wherever document order landed.
+    promo.table = { ...ALL_PROMOTED, consent_api: { candidateId: null, promoted: false } };
     const page = new LocatePage();
     const res = await (await driver(page)).highlightTarget("terms_consent");
     expect(res.count).toBe(1);
     const tagging = page.scripts.filter((s) => s.includes("issuance-fixed-label-tag"));
     expect(tagging).toHaveLength(1);
     expect(tagging[0]).toContain("data-aw-primary', '')");
-    // …and it is the CATEGORY consent's narrowing, resolved by id — never a query re-typed at the ring site.
     expect(tagging[0]).toContain("카테고리 자동 매칭 서비스 이용에 동의합니다.");
+  });
+
+  it("**withdrawing a step's whole calibration falls back to TEXT-GUIDED, not to a parked run**", async () => {
+    // The direction that has to stay safe. `confirm_purpose` and `terms_consent` are still in `TEXT_GUIDED_SIG`
+    // even though promotion now wins the precedence, and this is why: if a reading is ever withdrawn the step
+    // must present its docked panel again — the state it shipped in — rather than return `{count: 0}`, which
+    // the engine reads as NONE and parks `target_not_found` permanently. That defect is exactly what the
+    // 2026-08-10 redesign shipped, and withdrawal is the path back into it.
+    promo.table = {
+      confirm: { candidateId: null, promoted: false },
+      purpose_open_api: { candidateId: null, promoted: false },
+      consent_api: { candidateId: null, promoted: false },
+      consent_category: { candidateId: null, promoted: false },
+    };
+    const page = new LocatePage();
+    const d = await driver(page);
+    for (const [target, sig] of [
+      ["confirm_purpose", "b48e2f05b48e2f05"],
+      ["terms_consent", "16d9c7ba16d9c7ba"],
+    ] as const) {
+      const located = await d.locateTarget(target);
+      expect(located, target).toEqual({ count: 1, sig });
+    }
+    // …and the highlight mounts DOCKED, having cleared the prior step's tag first — no ring is drawn at a
+    // control nothing is calibrated for.
+    const hl = new LocatePage();
+    const res = await (await driver(hl)).highlightTarget("terms_consent");
+    expect(res).toEqual({ count: 1, sig: "16d9c7ba16d9c7ba" });
+    expect(hl.scripts.filter((s) => s.includes("issuance-fixed-label-tag"))).toHaveLength(0);
+    expect(hl.scripts.filter((s) => s.includes("coupang-issuance-cleartag"))).toHaveLength(1);
+    expect(hl.mounts[0]!["dockedPanelOnly"]).toBe(true);
   });
 });

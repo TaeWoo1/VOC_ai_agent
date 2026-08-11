@@ -23,6 +23,7 @@ import {
   wingGuidedHighlightPromotion,
   wingCandidateSpecById,
   interpretWingStage2Recon,
+  WING_GUIDED_HIGHLIGHT_HIDDEN_TWIN_POLICY,
   wingScreenMarkerTargets,
   wingConfirmGateTargets,
   wingDiscoveryRequiredTargets,
@@ -74,11 +75,14 @@ describe("the guided-highlight promotion record", () => {
       // ring on nothing.
       expect(backing.length, `${p.target}: no reading of ${p.candidateId} on ${p.screen}`).toBeGreaterThan(0);
       for (const r of backing) {
+        // The whole bar: ONE painting match. A unique match nobody can see is what invalidated the 삭제 record
+        // and refuted the 발급 one, and the visibility filter is what excludes it.
         expect(r.visibleCount, p.target).toBe(1);
-        // A unique match nobody can see is what invalidated the 삭제 record and refuted the 발급 one.
-        expect(r.hiddenCount, p.target).toBe(0);
         // MEASURED, never expected. `role: "button"` entered a calibration record by hand and was wrong.
         expect(r.observedTag, p.target).toBeTruthy();
+        // …and reproduced. One observation is a reading; two agreeing checkpoints of the same screen is what
+        // separates a measurement from a moment. It is NOT a cross-session stability claim and none is made.
+        expect(r.checkpointsAgreeing, p.target).toBeGreaterThanOrEqual(2);
       }
     }
   });
@@ -152,12 +156,47 @@ describe("the guided-highlight promotion record", () => {
     }
   });
 
+  it("**a hidden twin is recorded as fragility and is NOT a bar** — and the record shows which rings carry one", () => {
+    // The bar read `hiddenCount === 0` for half a day, which was an over-generalisation from ONE reading:
+    // the key-creation control happened to measure `hidden: 0` on TERMS and measures `hidden: 1` on PURPOSE, so
+    // the same clause would have refused it on the other screen. A hidden twin is excluded from the candidate
+    // set before the count is taken, so it cannot be what a ring lands on — the visibility filter is the guard,
+    // and this count is the diagnostic that made the 발급 failure legible.
+    expect(WING_GUIDED_HIGHLIGHT_HIDDEN_TWIN_POLICY).toBe("RECORDED_AS_FRAGILITY_NOT_A_PROMOTION_BAR");
+    // Recorded, not zeroed away: three of the four promoted rings sit beside a hidden twin, and a reviewer can
+    // see which. If one ever paints the locate returns 2 and the step fails closed — a recoverable park with
+    // the seller's own control still on screen, never a misplaced ring.
+    const promotedReadings = PROMOTED.map((p) =>
+      WING_GUIDED_HIGHLIGHT_EVIDENCE.readings.find((r) => r.candidateId === p.candidateId && r.screen === p.screen)!,
+    );
+    expect(promotedReadings.filter((r) => r.hiddenCount > 0)).toHaveLength(3);
+    for (const r of promotedReadings) expect(Number.isInteger(r.hiddenCount)).toBe(true);
+  });
+
+  it("**each narrowing is legible** — its broad sibling is on the record beside it", () => {
+    // Four bare `visibleCount: 1` rows would say nothing about WHY the shipped query is the narrow one. The
+    // broad siblings are what make each promotion checkable: `.broad` measuring 2 is why `label` is a
+    // disambiguation, and the consent sentences measuring 2 visible each is why their narrowings are a nesting.
+    const byId = (id: string) => WING_GUIDED_HIGHLIGHT_EVIDENCE.readings.find((r) => r.candidateId === id)!;
+    expect(byId("stage2.purpose_open_api.broad").visibleCount).toBe(2);
+    expect(byId("stage3.terms.api_agree").visibleCount).toBe(2);
+    expect(byId("stage3.terms.category_agree").visibleCount).toBe(2);
+    // 확인 is the exception, and the record says so rather than leaving it to be assumed: the broad query
+    // resolved to the SAME element (identical signature), so nothing needed disambiguating on this page.
+    expect(byId("stage2.confirm.confirm").sig16).toBe(byId("stage2.confirm.actionable").sig16);
+    expect(byId("stage2.confirm.confirm").visibleCount).toBe(1);
+  });
+
   it("what is ringed TODAY, in one line a reviewer can read", () => {
     // Deliberately hardcoded. Every other assertion here is a rule; this one is the state, and it must be
     // edited by the same commit that lands a reading — which is exactly the review moment this unit is about.
-    expect(PROMOTED.map((p) => p.target)).toEqual([]);
-    expect(WING_GUIDED_HIGHLIGHT_EVIDENCE.readings).toEqual([]);
-    expect(WING_GUIDED_HIGHLIGHT_EVIDENCE.consentPairing).toBeNull();
+    expect(PROMOTED.map((p) => p.target)).toEqual(["purpose_open_api", "confirm", "consent_api", "consent_category"]);
+    expect(PROMOTED.map((p) => p.candidateId)).toEqual([
+      "stage2.purpose_open_api.label",
+      "stage2.confirm.actionable",
+      "stage3.terms.api_agree.label",
+      "stage3.terms.category_agree.label",
+    ]);
   });
 });
 

@@ -2271,11 +2271,40 @@ export interface WingGuidedHighlightReading {
   readonly candidateId: string;
   /** WHICH screen the reading was taken on. A locate is evidence about one screen and no other. */
   readonly screen: WingFlowScreen;
+  /** Candidates matching the fixed label that PAINT. `1` is the whole promotion bar; see the note below. */
   readonly visibleCount: number;
+  /**
+   * Text-matching elements that do NOT paint. **Recorded as FRAGILITY, never as a bar** — see
+   * {@link WING_GUIDED_HIGHLIGHT_HIDDEN_TWIN_POLICY} for why, and for what happens if one appears.
+   */
   readonly hiddenCount: number;
   /** The MEASURED tag of a unique match. Absent when nothing painted — never an expected value. */
   readonly observedTag?: string;
+  /** Opaque 16-hex structural signature of the unique match. Provenance and cross-query identity; never a gate. */
+  readonly sig16?: string;
+  /** How many of the run's checkpoints produced this reading, integer for integer. `1` is a single observation. */
+  readonly checkpointsAgreeing: number;
 }
+
+/**
+ * **A non-zero `hiddenCount` does not block a promotion, and the reason is worth stating once.**
+ *
+ * The bar this workstream actually needs is `visibleCount === 1` plus a MEASURED tag. A hidden twin — an element
+ * carrying the same whole text that does not render — is excluded from the candidate set before the count is
+ * taken, so it cannot be what the ring lands on. What stopped the 발급 decoy was the visibility filter itself;
+ * `hiddenCount` is the diagnostic that made that failure legible, not the guard.
+ *
+ * The bar briefly read `hiddenCount === 0`, which was an over-generalisation from one reading:
+ * `WING_KEY_CREATION_CONTROL_ID` happened to measure `hidden: 0` on TERMS — and measures `hidden: 1` on PURPOSE,
+ * so the same clause would have refused it on the other screen. WING's purpose screen carries 12 non-painting
+ * `확인` controls and its terms screen one hidden twin of each consent sentence; that is template markup, not
+ * ambiguity.
+ *
+ * **What it IS.** If a hidden twin ever paints, the locate returns 2, the step fails closed with
+ * `target_not_found`, and the seller's own on-page control remains — a recoverable park, not a misplaced ring.
+ * So the count is recorded on every reading and a reviewer can see which promotions carry that exposure.
+ */
+export const WING_GUIDED_HIGHLIGHT_HIDDEN_TWIN_POLICY = "RECORDED_AS_FRAGILITY_NOT_A_PROMOTION_BAR" as const;
 
 /**
  * The promotion decision for one target, and the reading it rests on.
@@ -2306,33 +2335,43 @@ export interface WingGuidedHighlightPromotion {
  * {@link WING_GUIDED_HIGHLIGHT_EVIDENCE} with `visibleCount: 1` and `hiddenCount: 0`, and `blockedReason: null`.
  */
 export const WING_GUIDED_HIGHLIGHT_PROMOTIONS: readonly WingGuidedHighlightPromotion[] = Object.freeze([
+  // The `label` narrowing, and the narrowing is the finding: the broad query measured TWO painting elements for
+  // the same string on the same screen in the same pass, so `OPEN API` is repeated on the purpose screen and
+  // only the single-tag query separates the option's own label from the other one.
   Object.freeze({
     target: "purpose_open_api" as const,
-    candidateId: null,
+    candidateId: "stage2.purpose_open_api.label",
     screen: "PURPOSE" as const,
-    promoted: false,
-    blockedReason: "NAME_MEASURED_LOCATE_NEVER_RUN",
+    promoted: true,
+    blockedReason: null,
   }),
+  // The actionable-only narrowing. Its broad sibling resolved to the SAME signature in the same pass, so unlike
+  // the key-creation control there was no identically-worded decoy to separate — the narrowing is a constraint
+  // on what a future page may match, not a disambiguation of this one.
   Object.freeze({
     target: "confirm" as const,
-    candidateId: null,
+    candidateId: "stage2.confirm.actionable",
     screen: "PURPOSE" as const,
-    promoted: false,
-    blockedReason: "ONLY_MEASURED_UNDER_THE_BROAD_QUERY_SHAPE_THAT_WAS_WITHDRAWN_ELSEWHERE",
+    promoted: true,
+    blockedReason: null,
   }),
+  // The consent SENTENCES, not the boxes. `WING_TERMS_CHECKBOX_PROMOTION_BLOCKED` still holds — the inputs have
+  // no accessible association and nothing here claims to know where an individual box is. What ties each ring to
+  // its own consent is the per-row block census on the same run: each sentence's nearest ancestor block holds
+  // exactly that one consent and exactly one visible checkbox.
   Object.freeze({
     target: "consent_api" as const,
-    candidateId: null,
+    candidateId: "stage3.terms.api_agree.label",
     screen: "TERMS" as const,
-    promoted: false,
-    blockedReason: "SENTENCE_MATCHED_TWO_PAINTING_ELEMENTS_2026_08_10",
+    promoted: true,
+    blockedReason: null,
   }),
   Object.freeze({
     target: "consent_category" as const,
-    candidateId: null,
+    candidateId: "stage3.terms.category_agree.label",
     screen: "TERMS" as const,
-    promoted: false,
-    blockedReason: "SENTENCE_MATCHED_TWO_PAINTING_ELEMENTS_2026_08_10",
+    promoted: true,
+    blockedReason: null,
   }),
 ]);
 
@@ -2388,15 +2427,116 @@ export interface WingGuidedHighlightEvidence {
   readonly priorBasis: typeof WING_CONSENT_PAIRING_LIVE_BASIS;
 }
 
-/** **NOT MEASURED.** No reading exists yet; the empty array is the claim, and it is the true one. */
+/**
+ * **LIVE-MEASURED 2026-08-11**, under the granted `COUPANG_WING_ISSUANCE_FLOW_DISCOVERY` sitting
+ * `apr-c13e4ee4a7c3` / `wt-27f2e9010f82` at git `9c314ca0` (sanitized record `wingrec_cdbf40748fe2`). Four
+ * checkpoints, no halt, screens `PURPOSE → PURPOSE → TERMS → TERMS`, zero probe faults, zero agent selections,
+ * and `약관 동의 및 Key 발급받기` never pressed.
+ *
+ * **Every promotable reading was taken TWICE**, on two checkpoints of the same screen, and agreed integer for
+ * integer including the signature. `checkpointsAgreeing` records that rather than asserting stability: two
+ * readings minutes apart in one session are not a cross-session claim, and none is made.
+ *
+ * **The broad siblings are on the record deliberately.** They promote nothing, and they are what makes each
+ * narrowing legible: `.broad` measuring 2 on the purpose screen is why the `label` query is a disambiguation,
+ * and the two consent sentences measuring 2 visible each is why their narrowings are a nesting rather than an
+ * ambiguity. Dropping them would leave four bare `visibleCount: 1` rows with nothing to compare against.
+ *
+ * **An earlier sitting the same day is NOT folded in.** `wingrec_936303e29551` measured the same purpose-screen
+ * counts and signatures, and emitted `observedTag: null` for all of them — the record emitter dropped the field
+ * (the fourth seam it was dropped at). Those readings are not cited here: a promotion resting partly on a
+ * reading that could not carry the property the bar asks for is the shape this file exists to refuse.
+ */
 export const WING_GUIDED_HIGHLIGHT_EVIDENCE: WingGuidedHighlightEvidence = Object.freeze({
-  measuredOn: null,
-  gitSha: null,
-  runId: null,
-  approvalId: null,
+  measuredOn: "2026-08-11",
+  gitSha: "9c314ca0",
+  runId: "wt-27f2e9010f82",
+  approvalId: "apr-c13e4ee4a7c3",
   phase: WING_GUIDED_HIGHLIGHT_PHASE,
-  readings: Object.freeze([]),
-  consentPairing: null,
+  readings: Object.freeze([
+    // ── PURPOSE ──
+    Object.freeze({
+      candidateId: "stage2.purpose_open_api.label",
+      screen: "PURPOSE" as const,
+      visibleCount: 1,
+      hiddenCount: 0,
+      observedTag: "LABEL",
+      sig16: "188162181dc87310",
+      checkpointsAgreeing: 2,
+    }),
+    // The broad sibling: TWO painting elements carry `OPEN API` on this screen. This is the row that makes the
+    // one above a narrowing rather than a coincidence.
+    Object.freeze({
+      candidateId: "stage2.purpose_open_api.broad",
+      screen: "PURPOSE" as const,
+      visibleCount: 2,
+      hiddenCount: 0,
+      checkpointsAgreeing: 2,
+    }),
+    Object.freeze({
+      candidateId: "stage2.confirm.actionable",
+      screen: "PURPOSE" as const,
+      visibleCount: 1,
+      // Twelve non-painting `확인` controls — template markup, not ambiguity. See the hidden-twin policy.
+      hiddenCount: 12,
+      observedTag: "BUTTON",
+      sig16: "6e49bb88190a65f8",
+      checkpointsAgreeing: 2,
+    }),
+    // The broad sibling resolved to the SAME element (identical signature), which is what says the narrowing
+    // did not pick a different one. Unlike the key-creation control, there was no decoy here to separate.
+    Object.freeze({
+      candidateId: "stage2.confirm.confirm",
+      screen: "PURPOSE" as const,
+      visibleCount: 1,
+      hiddenCount: 20,
+      observedTag: "BUTTON",
+      sig16: "6e49bb88190a65f8",
+      checkpointsAgreeing: 2,
+    }),
+    // ── TERMS ──
+    Object.freeze({
+      candidateId: "stage3.terms.api_agree.label",
+      screen: "TERMS" as const,
+      visibleCount: 1,
+      hiddenCount: 1,
+      observedTag: "LABEL",
+      sig16: "58d56b6060c57050",
+      checkpointsAgreeing: 2,
+    }),
+    Object.freeze({
+      candidateId: "stage3.terms.api_agree",
+      screen: "TERMS" as const,
+      visibleCount: 2,
+      hiddenCount: 2,
+      checkpointsAgreeing: 2,
+    }),
+    Object.freeze({
+      candidateId: "stage3.terms.category_agree.label",
+      screen: "TERMS" as const,
+      visibleCount: 1,
+      hiddenCount: 1,
+      observedTag: "LABEL",
+      sig16: "25a572e0e8a91c20",
+      checkpointsAgreeing: 2,
+    }),
+    Object.freeze({
+      candidateId: "stage3.terms.category_agree",
+      screen: "TERMS" as const,
+      visibleCount: 2,
+      hiddenCount: 3,
+      checkpointsAgreeing: 2,
+    }),
+  ]),
+  // The per-row census, run live for the FIRST time. Both boxes resolved: each one's nearest ancestor block
+  // holds exactly one consent sentence and exactly one visible checkbox, at depth 1. This is what ties a ring
+  // drawn on a SENTENCE to the box beside it without claiming to know where the box is.
+  consentPairing: Object.freeze({
+    visibleCheckboxCount: 2,
+    consentsMatchedExactlyOnce: 2,
+    consentsCompared: 2,
+    ancestorDepths: Object.freeze([1, 1]),
+  }),
   priorBasis: WING_CONSENT_PAIRING_LIVE_BASIS,
 });
 

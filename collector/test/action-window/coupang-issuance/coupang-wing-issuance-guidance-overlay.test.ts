@@ -26,8 +26,17 @@ import {
 } from "../../../src/action-window/coupang-wing-issuance-driver";
 import type { CoupangIssuanceTarget } from "../../../src/action-window/coupang-issuance/coupang-issuance-driver";
 
-/** The five steps with no promoted locator — every one must behave identically. */
-const GUIDANCE_TARGETS: readonly CoupangIssuanceTarget[] = ["reach_open_api", "confirm_purpose", "terms_consent", "return"];
+/**
+ * The steps with no promoted locator — every one must behave identically.
+ *
+ * `confirm_purpose` and `terms_consent` LEFT this list on 2026-08-11, when the guided-control calibration
+ * measured the `확인` control, the `OPEN API` option label and the two consent sentences on the live purpose and
+ * terms screens. They are now anchored, multi-ring steps, covered in
+ * `coupang-wing-multi-ring-highlight.test.ts`. What remains is the two steps that are guidance rather than a
+ * WING control at all: reaching a page, and going back to SellerOps. Their signatures are synthetic constants
+ * derived from no element, which is the property this file is really about.
+ */
+const GUIDANCE_TARGETS: readonly CoupangIssuanceTarget[] = ["reach_open_api", "return"];
 
 interface MountCall {
   dockedPanelOnly?: boolean;
