@@ -22,9 +22,15 @@ import {
   WING_STAGE2_RECON_CANDIDATES,
   wingGuidedHighlightPromotion,
   wingCandidateSpecById,
+  wingScreenMarkerTargets,
+  wingDiscoveryScopeGap,
   type WingGuidedHighlightTarget,
+  type WingStage2ReconTarget,
 } from "../../../src/action-window/coupang-wing-label-recon";
-import { WING_ISSUANCE_FLOW_DISCOVERY_PHASE } from "../../../src/cli/probe-wing-issuance-selectors";
+import {
+  WING_ISSUANCE_FLOW_DISCOVERY_PHASE,
+  discoveryScopeRefusal,
+} from "../../../src/cli/probe-wing-issuance-selectors";
 
 const PROMOTED = WING_GUIDED_HIGHLIGHT_PROMOTIONS.filter((p) => p.promoted);
 const ALL_CANDIDATE_IDS = Object.values(WING_STAGE2_RECON_CANDIDATES)
@@ -228,5 +234,61 @@ describe("the candidates the calibration will measure", () => {
       expect(byId(id).exactText.normalize("NFC")).toBe(byId(id).exactText);
       expect(byId(id).exactText).not.toMatch(/[   -​  　]/);
     }
+  });
+});
+
+/* ─────────── the scope gap that would burn the sitting this calibration needs ─────────── */
+
+describe("discoveryScopeRefusal — a scope that cannot say which screen it is on", () => {
+  const FULL = wingScreenMarkerTargets();
+
+  it("names EVERY target carrying a flow-screen marker, derived rather than listed", () => {
+    // `wingFlowScreenFrom` needs all three markers PROBED — a missing row cannot distinguish "not on this
+    // screen" from "not asked about". Derived from the marker ids so a marker moving between targets moves
+    // this set with it, instead of leaving a hand-written list quietly wrong.
+    expect(FULL).toEqual(["purpose", "terms_heading", "terms_issue_final"]);
+  });
+
+  it("**refuses BEFORE the browser launches when a marker target is missing**", () => {
+    // The gate downstream is correct and fails closed: every reading reads NOT_MEASURED and the run halts on
+    // SCREEN_NOT_AS_EXPECTED. It just halts at the SECOND checkpoint — after the operator has logged in,
+    // navigated, and pressed `API Key 발급 받기` on a real marketplace. It cannot give the sitting back.
+    const refusal = discoveryScopeRefusal(true, ["purpose", "confirm", "terms_heading"]);
+    expect(refusal).toContain("terms_issue_final");
+    expect(refusal).toContain("No browser launched");
+    // …and it tells the operator the scope that would work, rather than only what is wrong with theirs.
+    expect(refusal).toContain(FULL.join(","));
+  });
+
+  it("passes a complete scope, and narrowing that keeps the markers stays legitimate", () => {
+    // Narrowing a discovery run is what the scope is FOR. This refuses only the narrowing that removes the
+    // run's ability to say where it is.
+    expect(discoveryScopeRefusal(true, [...FULL])).toBeNull();
+    expect(discoveryScopeRefusal(true, [...FULL, "confirm", "purpose_open_api"])).toBeNull();
+  });
+
+  it("says nothing about a run that is not a discovery run", () => {
+    // The other Stage-2 phases take ONE reading of a screen the operator already reached; they never derive a
+    // screen and never gate a checkpoint on one.
+    expect(discoveryScopeRefusal(false, [])).toBeNull();
+  });
+
+  it("the scope THIS unit's calibration needs covers both the markers and the four candidates", () => {
+    // The concrete run: the three screen markers, plus the targets carrying the controls being measured.
+    const scope: readonly WingStage2ReconTarget[] = [
+      "purpose",
+      "confirm",
+      "terms_heading",
+      "terms_api_agree",
+      "terms_category_agree",
+      "terms_issue_final",
+      "purpose_open_api",
+    ];
+    expect(discoveryScopeRefusal(true, scope)).toBeNull();
+    expect(wingDiscoveryScopeGap(scope)).toEqual([]);
+    // …and the consent-BLOCK census is taken only when BOTH consent targets are in scope, which is the reading
+    // a consent ring is additionally gated on.
+    expect(scope).toContain("terms_api_agree");
+    expect(scope).toContain("terms_category_agree");
   });
 });

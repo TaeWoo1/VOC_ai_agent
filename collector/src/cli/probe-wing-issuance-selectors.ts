@@ -69,6 +69,8 @@ import {
   type WingStage2Precondition,
   interpretWingStage2Recon,
   wingStage2ReconProbes,
+  wingDiscoveryScopeGap,
+  wingScreenMarkerTargets,
   wingStage2Precondition,
   resolveWingStage2ReconScope,
   WING_STAGE2_RECON_TARGETS,
@@ -940,6 +942,33 @@ export function calibrationLaunchRefusal(
   );
 }
 
+/**
+ * **The discovery scope's OWN pre-launch refusal: a scope that cannot identify the screen it is on.**
+ *
+ * A sibling of {@link calibrationLaunchRefusal}, and it exists for the same reason. Discovery derives each
+ * reading's screen from the sweep's own rows, so a scope narrowed away from a screen marker makes every screen
+ * `NOT_MEASURED` — and the run then halts at the SECOND checkpoint with `SCREEN_NOT_AS_EXPECTED`, after the
+ * operator has logged in, navigated, and pressed `API Key 발급 받기` on a real marketplace. The downstream gate
+ * is correct and fails closed; it just cannot give the sitting back.
+ *
+ * Narrowing a discovery run is otherwise legitimate — that is what the scope is for — so this refuses only the
+ * narrowing that removes the run's ability to say where it is.
+ */
+export function discoveryScopeRefusal(
+  isDiscoveryRun: boolean,
+  targets: readonly WingStage2ReconTarget[],
+): string | null {
+  if (!isDiscoveryRun) return null;
+  const missing = wingDiscoveryScopeGap(targets);
+  if (missing.length === 0) return null;
+  return (
+    `Refusing to launch: ${WING_ISSUANCE_FLOW_DISCOVERY_PHASE} cannot identify which screen it is on with this ` +
+    `scope — ${missing.join(", ")} carr${missing.length === 1 ? "ies" : "y"} a flow-screen marker and ${missing.length === 1 ? "is" : "are"} ` +
+    "not in it. Every reading would be NOT_MEASURED and the run would halt at the second checkpoint, after you " +
+    `had already pressed a real control. Re-bootstrap with ${wingScreenMarkerTargets().join(",")} in the scope. No browser launched.`
+  );
+}
+
 export function stage2RefusalMessage(refusal: WingStage2Refusal, reason: string): string {
   return (
     `Refusing to launch: WING Stage-2 recon scope is not approved (${refusal}). ${reason}. ` +
@@ -1481,6 +1510,14 @@ async function main(): Promise<void> {
   const blindRefusal = calibrationLaunchRefusal(isCalibrationRun, WING_STAGE2_PURPOSE_OPTION_CANDIDATES);
   if (blindRefusal) {
     console.error(blindRefusal);
+    process.exitCode = 2;
+    return;
+  }
+  // …and the same courtesy for the narrowing that would leave a discovery run unable to say which screen it is
+  // reading. Same placement, same reason: before Chrome, not at the second checkpoint.
+  const scopeRefusal = discoveryScopeRefusal(isDiscoveryRun, stage2Targets);
+  if (scopeRefusal) {
+    console.error(scopeRefusal);
     process.exitCode = 2;
     return;
   }

@@ -2063,6 +2063,33 @@ function markerSpecById(id: string): WingFlowScreenMarkerSpec {
   throw new Error(`coupang-wing-label-recon: no candidate for flow-screen marker ${id}`);
 }
 
+/**
+ * **Which recon TARGETS a discovery run has to have in scope for the screen to be identifiable at all.**
+ *
+ * `wingFlowScreenFrom` derives the screen from the SWEEP's own candidate rows, and it requires every marker to
+ * have been probed — a missing row cannot distinguish "not on this screen" from "not asked about". That is the
+ * right answer, and it arrives one layer downstream of where it can still save anything: a scope that omits a
+ * marker's target produces `NOT_MEASURED` for every reading, the checkpoint gate halts on
+ * `SCREEN_NOT_AS_EXPECTED` at the second checkpoint, and the operator has already logged in, navigated and
+ * pressed a real control by then.
+ *
+ * So the same fact is available here as a set, before anyone is seated. Derived from the marker ids rather than
+ * listed, because a hand-written list is what would drift when a marker moves between targets.
+ */
+export function wingScreenMarkerTargets(): WingStage2ReconTarget[] {
+  const wanted = new Set<string>([WING_PURPOSE_SCREEN_MARKER_ID, ...WING_TERMS_SCREEN_MARKER_IDS]);
+  const out: WingStage2ReconTarget[] = [];
+  for (const target of WING_STAGE2_RECON_TARGETS) {
+    if (WING_STAGE2_RECON_CANDIDATES[target].some((c) => wanted.has(c.id))) out.push(target);
+  }
+  return out;
+}
+
+/** The screen-marker targets a requested discovery scope is MISSING. Empty ⇒ the screen will be identifiable. */
+export function wingDiscoveryScopeGap(targets: readonly WingStage2ReconTarget[]): WingStage2ReconTarget[] {
+  return wingScreenMarkerTargets().filter((t) => !targets.includes(t));
+}
+
 /** The PURPOSE screen's marker spec. Visible ⇒ the seller is on the purpose screen. */
 export const WING_PURPOSE_SCREEN_MARKER_SPEC: WingFlowScreenMarkerSpec = markerSpecById(WING_PURPOSE_SCREEN_MARKER_ID);
 
