@@ -89,8 +89,9 @@ echo "  phase        : COUPANG_WING_GUIDED_ISSUANCE_WALK (agent READ_ONLY; the O
 # autoAdvancingStepCount:4 and sellerConsentObserved:true. The manifest was right and this half of the
 # disclosure was not, which is the defect this workstream keeps having to unpick, in the sentence rather than
 # the data. `wing-walk-selfcheck.sh` now greps this output too, so it cannot drift silently again.
-echo "  navigation   : ONE — the agent opens the seller's own WING landing when the window comes up, and never"
-echo "                 navigates again. Every screen after it is one the SELLER reaches. 0 clicks, 0 inputs"
+echo "  navigation   : ONE — the agent opens the seller's own WING landing when the window comes up."
+echo "                 It never navigates again; every screen after it is one the SELLER reaches."
+echo "                 0 clicks, 0 inputs, 0 submits"
 echo "  highlights   : THREE live-calibrated controls (API Key 발급 받기 · 약관 동의 및 Key 발급받기 · the key"
 echo "                 region). The purpose radios and the consent boxes are TEXT-GUIDED — measured but not"
 echo "                 promoted, so no ring is drawn at them"
