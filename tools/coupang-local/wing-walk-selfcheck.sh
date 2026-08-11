@@ -497,13 +497,16 @@ ENV
   # Asserted BOTH ways: the current claims must be present, and the retired ones must be gone — a disclosure
   # that gained a line while keeping its contradiction is not fixed.
   BOOT_OK=1
-  for claim in "ONE" "never navigates again" "SEVEN live-calibrated" "NONE of the rings sits on an input" "FOUR steps advance" "consent boxes are ticked" "RESTS in front of" "약관 동의 및 Key 발급받기" "never ticks a box"; do
+  for claim in "ONE" "never navigates again" "SEVEN live-calibrated" "NONE of the rings sits on an input" "stay text-only" "FOUR steps advance" "consent boxes are ticked" "RESTS in front of" "약관 동의 및 Key 발급받기" "never ticks a box"; do
     grep -qF "$claim" <<<"$out" || { echo "  FAIL  BOOTSTRAP_DISCLOSE · missing claim: $claim"; BOOT_OK=0; FAILED=1; }
   done
   # Retired claims. The last three were true and are no longer: the count moved 2 → 3 → 7 as controls were
   # measured, and a disclosure that keeps stating a smaller run than the one that executes is the exact
   # manifest-honesty defect this workstream keeps having to unpick — in the sentence, not the data.
-  for stale in "the agent never navigates" "0 gotos" "ONLY the two live-calibrated" "THREE live-calibrated" "TEXT-GUIDED"; do
+  # "No guided step is text-only any more" over-claimed: `reach_open_api` and `return` name no WING control and
+  # still draw no ring. `textGuidedControlCount: 0` counts CONTROLS, and the prose beside a machine-checked
+  # field has to mean the same thing the field does.
+  for stale in "the agent never navigates" "0 gotos" "ONLY the two live-calibrated" "THREE live-calibrated" "TEXT-GUIDED" "No guided step is text-only"; do
     if grep -qF "$stale" <<<"$out"; then
       echo "  FAIL  BOOTSTRAP_DISCLOSE · retired claim still shown: $stale"; BOOT_OK=0; FAILED=1
     fi

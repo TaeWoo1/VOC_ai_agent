@@ -740,11 +740,16 @@ export const WING_CHOICE_LABEL_CANDIDATES: readonly WingPurposeOptionCandidate[]
 ]);
 
 /**
- * **The control that creates the key.** Named once, in the leaf, so every layer refers to the same thing.
+ * **The walk's LAST control.** Named once, in the leaf, so every layer refers to the same thing.
  *
- * MEASURED to exist and located by text; NEVER pressed. No phase in this workstream has tooling that could
- * press it, and the boundary is deliberate: key issuance is its own approval step, with its own manifest, and
- * cannot be reached by continuing a discovery run one more checkpoint.
+ * It read "the control that creates the key" until 2026-08-12. It is not — see
+ * {@link WING_KEY_CREATION_CONTROL_REFUTATION} directly below, which is the whole story. The id keeps its
+ * `issue_final` spelling because renaming it would touch every layer at the moment the real key-creating
+ * control is UNKNOWN, and a name that is a second guess is worse than one whose doc says what is established.
+ *
+ * MEASURED to exist and located by text; never pressed by any phase. No phase in this workstream has tooling
+ * that could press it, and the boundary is deliberate: key issuance is its own approval step, with its own
+ * manifest, and cannot be reached by continuing a discovery run one more checkpoint.
  */
 export const WING_KEY_CREATION_CONTROL_ID = "stage3.terms.issue_final" as const;
 
@@ -1928,9 +1933,12 @@ export type WingFlowCheckpoint = (typeof WING_FLOW_CHECKPOINTS)[number];
  * **The list ends at the terms screen, and that is a safety property, not a coincidence.**
  *
  * `TERMS_CHECKED_BY_OPERATOR` is last because the only thing left to do on that screen is press
- * `약관 동의 및 Key 발급받기` — {@link WING_KEY_CREATION_CONTROL_ID}, the control that creates the key. There is
- * no `AFTER_KEY_CREATION` and there must not be one: discovery cannot reach key issuance by adding one more
- * step. Issuance is a separate phase, with its own manifest and its own single-use grant.
+ * `약관 동의 및 Key 발급받기` — {@link WING_KEY_CREATION_CONTROL_ID}. That press does NOT create the key
+ * ({@link WING_KEY_CREATION_CONTROL_REFUTATION}), and the list ending here is if anything MORE load-bearing for
+ * it: what the press opens is an integration-method screen nothing has read, and the key is issued somewhere
+ * past it. There is no checkpoint after this one and there must not be — discovery cannot reach key issuance by
+ * adding one more step, and it now cannot reach it by adding two either. Issuance is a separate phase, with its
+ * own manifest and its own single-use grant.
  *
  * Stated as a checked constant rather than a comment, because "the list happens to stop here" and "the list
  * stops here on purpose" look identical in a diff.
@@ -1941,8 +1949,11 @@ export const WING_FLOW_LAST_CHECKPOINT = "TERMS_CHECKED_BY_OPERATOR" as const;
  * **The candidates whose visibility decides what `확인` IS.**
  *
  * The product owner's account of the flow puts 확인 *after* 업체명 · URL · IP 주소 are filled in, which would
- * make it the control that creates the key. Every measurement so far puts those three labels in NON-painting
- * nodes only on the purpose screen — consistent with a form that exists in the DOM and is not yet shown.
+ * make it a submission. Every measurement puts those three labels in NON-painting nodes on the purpose screen
+ * — consistent with a form that exists in the DOM and is not yet shown, which is exactly what it turned out to
+ * be: the vendor form is real and sits PAST the terms screen (2026-08-12, operator-reported). The account was
+ * right about the form and wrong only about where it sits, so this gate is still the right question to ask on
+ * the purpose screen and its answer there is still "not yet shown".
  *
  * So the question is decidable by reading, and it is the one question that must be decided before anyone
  * presses anything: if the vendor form is ALREADY on screen when the operator has selected an option, then

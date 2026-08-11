@@ -187,7 +187,15 @@ describe("the chip's title and the panel's instruction are different things", ()
     // …and it names where the key IS issued, plus the fact that SellerOps does not guide that screen — the
     // seller is about to reach a step this walk has never measured, and being told so is the point.
     expect(OPERATOR_STEP_LABELS.issue_final).toContain("그 화면의 '확인'에서 발급됩니다");
-    expect(OPERATOR_STEP_LABELS.issue_final).toContain("아직 SellerOps가 안내하지 않습니다");
+    expect(OPERATOR_STEP_LABELS.issue_final).toContain("아직 SellerOps가 안내하지 않으니 직접 진행해 주세요");
+    // **The advance is gated on the CREDENTIALS being on screen, not on the press.** The first correction ended
+    // "눌러서 다음 화면이 뜨면 아래 버튼을 누르세요" — which directs the seller to advance the moment the
+    // integration screen appears. Step 6 then locates the fixed label `Access Key`, which does not paint on
+    // that screen, so `locateTarget` returns 0 and the run parks `target_not_found` on a step the seller was
+    // just told to enter. A correction that makes a dead end reachable BY FOLLOWING IT is worse than the claim
+    // it replaced.
+    expect(OPERATOR_STEP_LABELS.issue_final).toContain("Access Key가 화면에 표시되면 아래 버튼을 누르세요");
+    expect(OPERATOR_STEP_LABELS.issue_final).not.toContain("다음 화면이 뜨면 아래 버튼");
   });
 
   it("the chip has a STRUCTURAL ceiling too — a long label is visibly cut, not lost off-screen", () => {

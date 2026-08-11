@@ -153,9 +153,10 @@ function isWingHighlightTarget(target: CoupangIssuanceTarget): target is "issue"
   // 삭제 record was withdrawn while its target stayed in a hand-written list, and only the flag being read at
   // the point of use keeps that from happening again.
   if (target === "issue_final") return WING_KEY_CREATION_SELECTOR_CALIBRATED;
-  // ONLY the two controls with a live-calibrated locator. The purpose radios, 확인, the consent boxes and the
-  // key-creating button are all MEASURED but NOT promoted, so the driver cannot highlight them and fails closed
-  // if asked — which is the tutorial's job to respect, not to work around.
+  // The two SINGLE-SPEC fixed-label targets, which is all this predicate has ever answered for. It is no
+  // longer the whole ringed set: the purpose option, 확인 and the two consent sentences were promoted on
+  // 2026-08-12 and resolve through `promotedRingSpecs`, which runs ahead of this on both the locate and the
+  // highlight path. `WING_HIGHLIGHT_LABELS` is this function's whole domain.
   return target === "issue" || target === "credentials";
 }
 
@@ -690,7 +691,7 @@ export const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string
   //
   // What the copy must still do is unchanged: this is where the guidance STOPS, SellerOps never presses it, and
   // nothing auto-advances past it. The reason is now the honest one — what follows has never been measured.
-  issue_final: "'약관 동의 및 Key 발급받기'를 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다. ⚠ 이 버튼은 키를 만들지 않습니다. 다음에 연동 방식(자체개발/연동업체)을 고르는 화면이 나오고, 키는 그 화면의 '확인'에서 발급됩니다 — 그 화면은 아직 SellerOps가 안내하지 않습니다. 눌러서 다음 화면이 뜨면 아래 버튼을 누르세요.",
+  issue_final: "'약관 동의 및 Key 발급받기'를 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다. ⚠ 이 버튼은 키를 만들지 않습니다. 다음에 연동 방식(자체개발/연동업체)을 고르는 화면이 나오고, 키는 그 화면의 '확인'에서 발급됩니다 — 그 화면은 아직 SellerOps가 안내하지 않으니 직접 진행해 주세요. Access Key가 화면에 표시되면 아래 버튼을 누르세요.",
   credentials: "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요. SellerOps는 값을 읽지 않습니다. 복사했으면 아래 버튼을 누르세요.",
   return: "아래 버튼을 눌러 SellerOps로 돌아가세요. 복사한 키를 입력하면 연결이 끝납니다.",
 };
@@ -745,8 +746,12 @@ const RETURN_GUIDANCE_SIG = "5e11e40b5e11e40b";
 /**
  * **TEXT-GUIDED steps: the ones the tutorial guides but cannot highlight.**
  *
- * The 2026-08-10 redesign added four such steps — the purpose radios, `확인`, the consent boxes and the
- * key-creating button. All four are MEASURED; none is PROMOTED, so there is no locator to spotlight. The driver
+ * The 2026-08-10 redesign added four such steps — the purpose radios, `확인`, the consent boxes and the walk's
+ * last control. All four were MEASURED and none PROMOTED, so there was no locator to spotlight. **All four have
+ * since been promoted** (the last control on 2026-08-11, the other three on 2026-08-12), so `confirm_purpose`
+ * and `terms_consent` now take the ring path and reach this map only if a calibration is WITHDRAWN. That
+ * fallback is why their entries stay: a withdrawn promotion must land on a docked panel, never back on the
+ * `{ count: 0 }` dead end described next. The driver
  * documented exactly that ("a tutorial step for an unpromoted control guides by TEXT") and then returned
  * `{ count: 0 }` for them, which the engine reads as `NONE` and parks `target_not_found` — permanently, because
  * a re-check re-locates and finds nothing again. The redesigned walk could not get past step 3.
@@ -777,9 +782,10 @@ const RETURN_GUIDANCE_SIG = "5e11e40b5e11e40b";
  * to read: pressing 확인 is what advances the purpose screen. The consents have no such asymmetry, so the first
  * one leads and the second is its equal beside it.
  *
- * **This map promotes nothing.** Every entry is resolved through {@link wingGuidedHighlightPromotion}, which is
- * `promoted: false` for all four until a live reading says otherwise — so today this map produces an empty spec
- * list and both steps stay text-guided, exactly as they are now.
+ * **This map promotes nothing by itself.** Every entry is resolved through {@link wingGuidedHighlightPromotion},
+ * and an entry whose promotion is withdrawn simply drops out of the plan. As of 2026-08-12 all four ARE
+ * promoted, so this is the LIVE path for steps 3 and 4 — the comment said the opposite for as long as it took
+ * the calibration to land, which is the kind of drift a reader has no way to catch.
  */
 const GUIDED_RING_PLAN: Readonly<
   Partial<Record<CoupangIssuanceTarget, { readonly primary: WingGuidedHighlightTarget; readonly also: readonly WingGuidedHighlightTarget[] }>>
@@ -861,12 +867,23 @@ const WING_SURFACE_PAINTED = `(function () {
   }
 })()`;
 
-/** Remove every read-only `data-aw-target` annotation. Value-free; safe on a page with none. */
+/**
+ * Remove every read-only ring annotation — BOTH markers. Value-free; safe on a page with none.
+ *
+ * `data-aw-primary` was added beside `data-aw-target` when a step gained the ability to ring several controls,
+ * and this clear was left stripping only the first. Both tagging scripts always write and clear the two
+ * together, so the asymmetry lived exactly here: after a `clearHighlight()` the last primary kept a stale
+ * `data-aw-primary`, and a later ring-plan tag only strips markers from elements still carrying
+ * `data-aw-target` — so that element could be re-tagged while a second one still claimed the chip, and the
+ * overlay would put it on whichever came first in document order. Not reachable with today's two ring plans,
+ * and repaired anyway: it is the "fixed in one place, left standing in the sibling" shape this workstream keeps
+ * paying for.
+ */
 const IN_PAGE_CLEAR_TAG = `(function () {
   /* coupang-issuance-cleartag */
   var slice = Function.prototype.call.bind(Array.prototype.slice);
-  var els = slice(document.querySelectorAll('[data-aw-target]'));
-  for (var i = 0; i < els.length; i++) { els[i].removeAttribute('data-aw-target'); }
+  var els = slice(document.querySelectorAll('[data-aw-target],[data-aw-primary]'));
+  for (var i = 0; i < els.length; i++) { els[i].removeAttribute('data-aw-target'); els[i].removeAttribute('data-aw-primary'); }
   return true;
 })()`;
 

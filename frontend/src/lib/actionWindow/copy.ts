@@ -42,13 +42,18 @@ const COPY: Record<string, string> = {
   "actionWindow.coupangIssuance.run": "쿠팡 Open API 키 발급 화면 안내",
   "actionWindow.coupangIssuance.reachOpenApi": "판매자정보 › 오픈API 키 발급으로 이동",
   // The 8 steps below are the MEASURED flow (five granted READ_ONLY runs + a dev-host guided walk,
-  // 2026-08-10): 발급 → 사용 목적(OPEN API, 기본 선택) → 확인 → 약관 동의 2건 → 키 생성.
+  // 2026-08-10): 발급 → 사용 목적(OPEN API, 기본 선택) → 확인 → 약관 동의 2건 → '약관 동의 및 Key 발급받기'.
+  // That last press does NOT create the key — refuted live on 2026-08-12, see
+  // `WING_KEY_CREATION_CONTROL_REFUTATION`. An integration-method screen follows it and the key is issued
+  // there; the walk does not model that screen yet, so it stops one step short and says so.
   // `selfDev` / `vendorInfo` / `callIp` were removed with the screens they named — WING shows no 자체개발
   // option, and 업체명 / 호출 IP never appear in this flow.
   "actionWindow.coupangIssuance.revealForm": "'API Key 발급 받기' 직접 누르기",
   "actionWindow.coupangIssuance.confirmPurpose": "사용 목적 확인 후 '확인' 직접 누르기",
   "actionWindow.coupangIssuance.termsConsent": "약관 2건 직접 읽고 동의",
-  "actionWindow.coupangIssuance.issueCheckpoint": "'약관 동의 및 Key 발급받기' 직접 누르기 (키 생성)",
+  // The `(키 생성)` qualifier was refuted on 2026-08-12 and removed. It sat in the step LIST while the detail
+  // string below said the opposite, so the seller read both claims on one screen.
+  "actionWindow.coupangIssuance.issueCheckpoint": "'약관 동의 및 Key 발급받기' 직접 누르기",
   "actionWindow.coupangIssuance.copyKeys": "액세스 키·시크릿 키·업체코드 복사",
   "actionWindow.coupangIssuance.return": "SellerOps로 돌아와 입력",
 
@@ -120,7 +125,7 @@ const ISSUANCE_STEP_DETAIL: Record<string, string> = {
   "actionWindow.coupangIssuance.termsConsent":
     "약관을 직접 읽고 판단하신 뒤 동의 체크박스 2개를 선택하세요. SellerOps는 약관을 읽지도, 대신 동의하지도, 체크하지도 않습니다. 2개가 모두 선택되면 자동으로 넘어갑니다(선택 여부는 저장·전송하지 않습니다).",
   "actionWindow.coupangIssuance.issueCheckpoint":
-    "'약관 동의 및 Key 발급받기'를 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다. ⚠ 이 버튼은 키를 만들지 않습니다. 다음에 연동 방식(자체개발/연동업체)을 고르는 화면이 나오고, 키는 그 화면의 '확인'에서 발급됩니다 — 그 화면은 아직 SellerOps가 안내하지 않습니다. 눌러서 다음 화면이 뜨면 아래 버튼을 누르세요.",
+    "'약관 동의 및 Key 발급받기'를 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다. ⚠ 이 버튼은 키를 만들지 않습니다. 다음에 연동 방식(자체개발/연동업체)을 고르는 화면이 나오고, 키는 그 화면의 '확인'에서 발급됩니다 — 그 화면은 아직 SellerOps가 안내하지 않으니 직접 진행해 주세요. Access Key가 화면에 표시되면 아래 버튼을 누르세요.",
   "actionWindow.coupangIssuance.copyKeys":
     "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요. SellerOps는 값을 읽지 않습니다. 복사했으면 아래 버튼을 누르세요.",
   "actionWindow.coupangIssuance.return":

@@ -557,8 +557,9 @@ export function buildFixedLabelContainmentScript(input: { candidateQuery: string
  *
  * Value-free OUTPUT, exactly like the single-spec script: per-spec integers, a MEASURED tag name, and an opaque
  * structural signature. Element text is read solely to compare against labels the caller wrote, and never
- * returned. Index 0 is the PRIMARY — it carries `data-aw-primary`, which is what the overlay's chip and its
- * page-dimming shroud attach to.
+ * returned. Index 0 is the PRIMARY — it carries `data-aw-primary`, which is what the overlay's chip attaches
+ * to. (The page-dimming shroud is NOT: it is dropped entirely once there is more than one ring, because two
+ * shrouds stack their darkness and the second ring's own control ends up dimmed by the first.)
  */
 export function buildFixedLabelRingPlanScript(input: {
   specs: readonly { candidateQuery: string; exactText: string; tagAncestor?: string }[];

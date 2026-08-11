@@ -665,8 +665,9 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     cli: "src/cli/local-agent-service.ts",
     driver: "launchd service → src/cli/local-agent.ts → LazyCoupangIssuanceDriver → CoupangWingIssuanceDriver (WING-resident guided walk; the window opens on the run's first call, never at agent boot)",
     // It HIGHLIGHTS seven live-calibrated controls ⇒ `allowsHighlight: true` ⇒ it fails closed
-    // (`SELECTORS_NOT_CALIBRATED`) unless the caller states the `issue` calibration. No guided step is text-only
-    // any more. (Said "two" until 2026-08-11, when the key-creation control was measured and promoted — and
+    // (`SELECTORS_NOT_CALIBRATED`) unless the caller states the `issue` calibration. Every step naming a WING
+    // control now rings it; `reach_open_api` and `return` name no control and stay text-only, which is what
+    // `textGuidedControlCount: 0` does and does not say — it counts CONTROLS, not steps. (Said "two" until 2026-08-11, when the key-creation control was measured and promoted — and
     // "three" until later the same day, when the guided-control calibration measured the `OPEN API` option
     // label, the `확인` control and the two consent sentences and the count went to seven. Note what the last
     // four are NOT: `ringedInputControlCount` stays 0, because the rings sit on labels and sentences and never

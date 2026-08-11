@@ -20,9 +20,16 @@
  * places and fail-open in one.** See `docs/coupang_wing_openapi_issuance_flow_discovery_v1.md`.
  *
  * ```
- * open-API page  →  발급  →  PURPOSE screen  →  확인  →  TERMS screen  →  약관 동의 및 Key 발급받기  →  keys
- *                            OPEN API (default)          2 consent boxes        ↑ THIS creates the key
+ * open-API page → 발급 → PURPOSE screen → 확인 → TERMS screen → 약관 동의 및 Key 발급받기 → ??? → keys
+ *                         OPEN API (default)        2 consent boxes                        ↑ NOT MODELLED
  * ```
+ *
+ * **The `???` is real, and it is where the key is actually issued.** Until 2026-08-12 this diagram ended
+ * `약관 동의 및 Key 발급받기 → keys` with "↑ THIS creates the key". It does not: the control was pressed on a
+ * live walk and no key was issued. An integration-method screen follows it (`업체 입력 방식` / `연동업체 선택`
+ * / `자체개발(직접입력)` / `업체명` / `취소` `확인`), and the operator reports the key is issued by THAT screen's
+ * `확인`. See `WING_KEY_CREATION_CONTROL_REFUTATION`. No apparatus has read that screen, so it is not modelled
+ * here and the plan below deliberately stops short of it.
  *
  * What the old plan got wrong, each corrected from a measurement rather than from prose:
  *
@@ -217,11 +224,25 @@ export function coupangIssuanceStepPlan(): readonly CoupangIssuanceStepMeta[] {
 export const COUPANG_ISSUANCE_TOTAL_STEPS = coupangIssuanceStepPlan().length;
 
 /**
- * **The step at which the seller creates the key**, named once so no layer has to count.
+ * **The LAST step this walk models**, named once so no layer has to count. Step 5 — the checkpoint in front of
+ * `약관 동의 및 Key 발급받기`.
  *
- * Everything before it is reversible: the seller can cancel out of the purpose or terms screen and nothing has
- * happened. From this step on, a credential may exist on the marketplace. Any future automation, retry, or
- * "resume from step N" has to treat this number as a wall.
+ * **It is NOT the step at which the key is created**, which is what this constant claimed until 2026-08-12 and
+ * what its name still says. The control was pressed on a live walk and no key was issued; an unmodelled
+ * integration-method screen follows, and the key is issued by that screen's `확인`
+ * (`WING_KEY_CREATION_CONTROL_REFUTATION`).
+ *
+ * **The name is left alone deliberately, and the correction is here rather than in a rename.** Renaming it
+ * would be a mechanical change across every consumer at the moment the real boundary is UNKNOWN — the key is
+ * created somewhere past step 5, and nobody has measured where. A constant renamed to a second guess is worse
+ * than one whose doc says what is and is not established.
+ *
+ * **What a consumer may rely on:** everything up to and including this step is reversible — the seller can
+ * cancel out of the purpose, terms or integration screen and nothing has happened. What it may NOT rely on is
+ * the converse: this is not the wall past which a credential exists, because the wall is at least one screen
+ * further on and its position is unmeasured. Erring the other way — treating step 5 as "a key may now exist" —
+ * is the safer error, and is what the old wording produced; erring toward "a key certainly exists here" is
+ * what this note exists to prevent.
  */
 export const COUPANG_ISSUANCE_KEY_CREATION_STEP = 5;
 
