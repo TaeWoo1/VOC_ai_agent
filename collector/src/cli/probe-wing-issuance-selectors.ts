@@ -1187,6 +1187,19 @@ export interface WingReconRecordRow {
   /** `matchCount === 1`. Stated explicitly because "would this label be highlightable" is the question asked. */
   canHighlight: boolean;
   sig16: string | null;
+  /**
+   * The MEASURED tag of a unique match, or null when the reading carried none.
+   *
+   * **The fourth and last layer this field was dropped at.** The locate script has returned it since the 발급
+   * recalibration; the driver seam kept it; `probeCandidate`'s type dropped it; the sweep's row dropped it; and
+   * this record — the only artefact a live sitting leaves behind — dropped it too. So a run could measure the
+   * tag four times over and still emit a record from which no promotion could cite one, which is precisely how
+   * `role: "button"` came to be asserted from `WING_TARGET_EXPECTED_ROLE` instead of from an observation.
+   *
+   * Note `expectedRole` sits directly above it and always has. A record carrying an EXPECTATION but not the
+   * MEASUREMENT is worse than one carrying neither: it reads like evidence.
+   */
+  observedTag: string | null;
 }
 
 /**
@@ -1230,6 +1243,9 @@ export function reconRecordFor(sweep: WingReconSweep | null): {
         verdict: c.verdict,
         canHighlight: c.verdict === "UNIQUE",
         sig16: c.sig16,
+        // The label-recon record gets it on the same terms as the Stage-2 one. Both fold through `interpretFor`,
+        // so a tag carried in one and dropped in the other would be the same defect in its fifth place.
+        observedTag: c.observedTag,
       })),
     })),
     faults: sweep.faults,
@@ -1302,6 +1318,9 @@ export function stage2RecordFor(sweep: WingStage2Sweep | null): {
         // highlightability claim it has no count for.
         canHighlight: c.verdict === "UNIQUE",
         sig16: c.sig16,
+        // MEASURED, or null. Tied to the verdict by the fold, like the signature: there is no "the match" to
+        // have a tag at count 0 or 2.
+        observedTag: c.observedTag,
         // The three fields this unit exists to put on the wire. `null` on any of them means unmeasured — the
         // previous record could not say that about a hidden count at all, because it never carried one.
         hiddenMatchCount: c.hiddenMatchCount,

@@ -33,7 +33,10 @@ import {
 import {
   WING_ISSUANCE_FLOW_DISCOVERY_PHASE,
   discoveryScopeRefusal,
+  runWingSelectorRecord,
+  stage2RecordFor,
 } from "../../../src/cli/probe-wing-issuance-selectors";
+import { observeFrom } from "../../../src/cli/coupang-wing-classifier";
 
 const PROMOTED = WING_GUIDED_HIGHLIGHT_PROMOTIONS.filter((p) => p.promoted);
 const ALL_CANDIDATE_IDS = Object.values(WING_STAGE2_RECON_CANDIDATES)
@@ -353,6 +356,72 @@ describe("the recon row carries the MEASURED tag", () => {
     ]);
     const row = folded!.candidates.find((c) => c.id === "stage2.confirm.actionable")!;
     expect(row.verdict).toBe("NOT_MEASURED");
+    expect(row.observedTag).toBeNull();
+  });
+});
+
+/* ─────────── the tag's whole journey, asserted at the artefact rather than per layer ─────────── */
+
+describe("the MEASURED tag survives every layer between the page and the record", () => {
+  /**
+   * The tag was dropped at FOUR separate seams — `probeCandidate`'s type, the sweep's raw row, the fold, and the
+   * emitted record — and each of those layers had passing tests throughout. That is the argument for asserting
+   * it here, at the only artefact a live sitting leaves behind: a per-layer test cannot see a field that the
+   * NEXT layer discards, and four of them in a row did not.
+   */
+  function deps(observedTag: string | undefined) {
+    return {
+      waitForReady: async () => "ready" as const,
+      observeSurface: async () =>
+        observeFrom("wing_host", {
+          passwordFieldPresent: false,
+          submitAffordancePresent: false,
+          dialogLikePresent: false,
+          choiceControlCount: 2,
+          actionControlCount: 3,
+          formCount: 1,
+          editableTextInputCount: 0,
+          readonlyFieldCount: 0,
+          listLikeContainerCount: 1,
+          markerScanTruncated: false,
+          openApiMarkerPresent: true,
+          credentialAnchorPresent: true,
+        }),
+      probeTarget: async () => ({ matchCount: 0, canHighlight: false }),
+      probeCandidate: async () => ({
+        matchCount: 1,
+        canHighlight: true,
+        sig: "abc123abc123abcd",
+        hiddenMatchCount: 0,
+        ...(observedTag ? { observedTag } : {}),
+      }),
+    };
+  }
+
+  async function rowFor(observedTag: string | undefined) {
+    const r = await runWingSelectorRecord(deps(observedTag), [], { stage2: ["confirm"] });
+    const rec = stage2RecordFor(r.stage2)!;
+    return rec.targets[0]!.candidates.find((c) => c.id === "stage2.confirm.actionable")!;
+  }
+
+  it("**reaches the emitted record** — the artefact a promotion is written from", async () => {
+    const row = await rowFor("BUTTON");
+    expect(row.canHighlight).toBe(true);
+    expect(row.observedTag).toBe("BUTTON");
+  });
+
+  it("sits beside the EXPECTED role rather than being substituted for it", async () => {
+    // The original defect in one line: a record carrying an expectation and not the measurement reads like
+    // evidence. Stage-2 targets have no shipped locator, so the expectation is explicitly not applicable —
+    // and the measurement is a separate field that either holds a reading or holds null.
+    const row = await rowFor("BUTTON");
+    expect(row.expectedRole).toBe("NOT_APPLICABLE_NO_SHIPPED_LOCATOR");
+    expect(row.observedTag).not.toBe(row.expectedRole);
+  });
+
+  it("stays null when the page never reported one — an absent reading is never filled in", async () => {
+    const row = await rowFor(undefined);
+    expect(row.canHighlight).toBe(true);
     expect(row.observedTag).toBeNull();
   });
 });
