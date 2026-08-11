@@ -456,6 +456,12 @@ export const WING_STAGE2_RECON_TARGETS = [
   // URL · IP 주소 → 확인, and the live flow goes purpose → 확인 → terms. Every string below is the operator's
   // verbatim transcription of that screen, taken the same day.
   "terms_heading", "terms_api_agree", "terms_category_agree", "terms_cancel", "terms_issue_final",
+  // APPENDED 2026-08-11 for the guided-control highlight calibration. The `OPEN API` option has been identified
+  // as radio 0's accessible name (`WING_STAGE2_OPTION_IDENTIFICATION_EVIDENCE`), but identifying a name is not
+  // locating an element: no apparatus has ever run a fixed-label LOCATE against the string, so nothing knows
+  // whether it resolves to one painting element. Appended rather than slotted beside `purpose`, because an
+  // earlier run's records are read back by id and a canonical-order change would silently re-sort them.
+  "purpose_open_api",
 ] as const;
 export type WingStage2ReconTarget = (typeof WING_STAGE2_RECON_TARGETS)[number];
 
@@ -495,19 +501,52 @@ export const WING_STAGE2_RECON_CANDIDATES: Readonly<Record<WingStage2ReconTarget
     confirm: Object.freeze([
       { id: "stage2.confirm.confirm", candidateQuery: "button,a,span,div", exactText: "확인",
         rationale: "the purpose screen's advance control. MEASURED 2026-08-10: pressing it hid the purpose screen and revealed the TERMS screen, so it is NOT the key-creating control the flow description called it — that description was wrong about the ordering, as it was already wrong about the option wording" },
+      // The PROMOTABLE shape of the same label, and the one a highlight would have to use. `button,a,span,div`
+      // is character-for-character the query that produced the 삭제 record now filed
+      // APPARATUS_UNSOUND and the 발급 refutation: a short whole-text label against four tag families, one of
+      // them `div`. Both of those resolved to exactly one element and one of them was a decoy. Narrowing to
+      // actionable elements is what separated the key-creation control from its identically-worded heading, so
+      // it is measured here BESIDE the baseline rather than swapped for it — if the two disagree, the
+      // disagreement is the finding.
+      { id: "stage2.confirm.actionable", candidateQuery: "button,a", exactText: "확인",
+        rationale: "the 확인 control narrowed to actionable elements, which is the only shape a ring may point with. Measured alongside the broad baseline so a difference in count between the two is visible rather than inferred" },
     ]),
     // ── the TERMS screen (2026-08-10, all five OPERATOR_TRANSCRIBED verbatim) ──
     terms_heading: Object.freeze([
       { id: "stage3.terms.heading", candidateQuery: "h1,h2,h3,h4,legend,strong,p,span,div", exactText: "약관 동의 및 Key 발급받기",
         rationale: "the terms screen's heading, transcribed verbatim on 2026-08-10. NOTE: character-for-character identical to the final button's label, which is why the two are separate targets with different element queries — see stage3.terms.issue_final" },
     ]),
+    // ── the two consent sentences, plus the per-tag NARROWINGS added 2026-08-11 ──
+    //
+    // The broad query measured TWO painting matches for each sentence on 2026-08-10, which is why neither was
+    // promotable: a ring needs one element, and two matches name neither. The narrowings exist to find out
+    // WHICH tag carries the sentence — the wrapper or the inner run — rather than to make the count smaller by
+    // trying queries until one returns 1. That distinction is why all four are swept together: if two of them
+    // each return 1 they are the same two elements the broad query found, and the pair is a nesting, not an
+    // ambiguity. Nothing is promoted from a narrowing that a live reading has not returned.
     terms_api_agree: Object.freeze([
       { id: "stage3.terms.api_agree", candidateQuery: "label,span,div,p", exactText: "API 이용 약관에 동의합니다.",
         rationale: "the FIRST checkbox's visible label, transcribed verbatim on 2026-08-10; the trailing period is part of the transcription and is not to be trimmed" },
+      { id: "stage3.terms.api_agree.label", candidateQuery: "label", exactText: "API 이용 약관에 동의합니다.",
+        rationale: "the sentence as a `<label>`. A weak prior: the terms checkboxes measured labelForCount 0 and ancestorLabelCount 0, so if this resolves the label exists but is not associated with the box — which is a finding about the page, not a locator" },
+      { id: "stage3.terms.api_agree.p", candidateQuery: "p", exactText: "API 이용 약관에 동의합니다.",
+        rationale: "the sentence as a paragraph — one of the two tag families the broad query's two matches must come from" },
+      { id: "stage3.terms.api_agree.span", candidateQuery: "span", exactText: "API 이용 약관에 동의합니다.",
+        rationale: "the sentence as an inline run, the likeliest inner half of a wrapper/run nesting" },
+      { id: "stage3.terms.api_agree.div", candidateQuery: "div", exactText: "API 이용 약관에 동의합니다.",
+        rationale: "the sentence as a block wrapper, the likeliest outer half of the same nesting" },
     ]),
     terms_category_agree: Object.freeze([
       { id: "stage3.terms.category_agree", candidateQuery: "label,span,div,p", exactText: "카테고리 자동 매칭 서비스 이용에 동의합니다.",
         rationale: "the SECOND checkbox's visible label, transcribed verbatim on 2026-08-10. A separate consent from the API terms — nothing here treats the two as one decision" },
+      { id: "stage3.terms.category_agree.label", candidateQuery: "label", exactText: "카테고리 자동 매칭 서비스 이용에 동의합니다.",
+        rationale: "the second sentence as a `<label>`, measured on the same terms as the first — the two consents are never inferred from one another" },
+      { id: "stage3.terms.category_agree.p", candidateQuery: "p", exactText: "카테고리 자동 매칭 서비스 이용에 동의합니다.",
+        rationale: "the second sentence as a paragraph" },
+      { id: "stage3.terms.category_agree.span", candidateQuery: "span", exactText: "카테고리 자동 매칭 서비스 이용에 동의합니다.",
+        rationale: "the second sentence as an inline run" },
+      { id: "stage3.terms.category_agree.div", candidateQuery: "div", exactText: "카테고리 자동 매칭 서비스 이용에 동의합니다.",
+        rationale: "the second sentence as a block wrapper" },
     ]),
     terms_cancel: Object.freeze([
       { id: "stage3.terms.cancel", candidateQuery: "button,a,span,div", exactText: "취소",
@@ -516,6 +555,27 @@ export const WING_STAGE2_RECON_CANDIDATES: Readonly<Record<WingStage2ReconTarget
     terms_issue_final: Object.freeze([
       { id: "stage3.terms.issue_final", candidateQuery: "button,a", exactText: "약관 동의 및 Key 발급받기",
         rationale: "THE KEY-CREATION CONTROL. Same text as the heading, so the query is narrowed to actionable elements — and whether that narrowing makes it unique is the measurement, not an assumption. Measured ONLY to locate it: this phase has no tooling that presses it and must never acquire one" },
+    ]),
+    // ── the purpose screen's `OPEN API` option, as a LOCATE target (2026-08-11) ──
+    //
+    // **A name is not a location, and this target exists because the two were about to be confused.**
+    // `WING_STAGE2_OPTION_IDENTIFICATION_EVIDENCE` settles that radio 0's accessible name IS the `OPEN API`
+    // candidate's text and that it derives from a single `label[for]`. That is a strong prior for the first
+    // candidate below and evidence for none of them: the association census walks OUT from each control to
+    // whatever names it, while a fixed-label locate walks IN from a query to whatever carries the text. The two
+    // can disagree — a `label[for]` naming the radio does not mean exactly one painting element on the screen
+    // has `OPEN API` as its whole text, and `OPEN API` is short, latin, and the kind of string a page can
+    // repeat in a heading, a tab, or a badge.
+    //
+    // Nothing here selects the option. Which purpose to use is the product owner's decision, already made and
+    // recorded as a decision rather than a measurement; this locates the label so the seller can be SHOWN it.
+    purpose_open_api: Object.freeze([
+      { id: "stage2.purpose_open_api.label", candidateQuery: "label", exactText: "OPEN API",
+        rationale: "the option's `<label for>` element — the one the association census measured as radio 0's name source (`nameSource: LABEL_FOR`, `labelForCount: 1`). The strongest prior in this set, and still unmeasured as a locate" },
+      { id: "stage2.purpose_open_api.broad", candidateQuery: "label,span,div,p", exactText: "OPEN API",
+        rationale: "the same string against the wider tag families, swept BESIDE the narrow query so a count above 1 here identifies the label query's uniqueness as a narrowing rather than an absence of repeats on the screen" },
+      { id: "stage2.purpose_open_api.input", candidateQuery: "input,button,a", exactText: "OPEN API",
+        rationale: "the actionable shapes. Expected to match 0 — a radio's whole text is empty — and measured anyway, because 'expected to match 0' is the assumption class this workstream has been wrong about twice" },
     ]),
   });
 
@@ -2100,3 +2160,184 @@ export const WING_TERMS_SCREEN_MARKERS_MEASURED = true as const;
  * invalidates this flag and requires a fresh reading.
  */
 export const WING_KEY_CREATION_SELECTOR_CALIBRATED = true as const;
+
+/* ──────────────── GUIDED-CONTROL HIGHLIGHT calibration (the purpose option, 확인, the two consents) ──────────────── */
+
+/**
+ * **The four controls the guided walk NAMES but cannot point at.**
+ *
+ * Steps 3 and 4 of the walk describe controls in prose — "사용 목적이 'OPEN API'인지 확인하고 … '확인'을 직접
+ * 누르세요", "동의 체크박스 2개를 선택하세요" — while the seller looks at a screen with no ring anywhere on it.
+ * Every one of these has been MEASURED in some sense already, and not one of them has been measured in the sense
+ * a ring requires, which is the distinction this whole constant exists to keep:
+ *
+ *  - `purpose_open_api` — its accessible NAME is established (`WING_STAGE2_OPTION_IDENTIFICATION_EVIDENCE`).
+ *    A name is produced by walking OUT from a control; a ring needs a walk IN from a query. Never done.
+ *  - `confirm` — its structural signature agrees across three runs, under a `button,a,span,div` query that is
+ *    character-for-character the shape behind the withdrawn 삭제 record. Stability is not identity.
+ *  - `consent_api` / `consent_category` — the consent SENTENCES measured **2 painting matches each**, and the
+ *    checkboxes measured no accessible association at all ({@link WING_TERMS_CHECKBOX_PROMOTION_BLOCKED}).
+ *
+ * A separate namespace from {@link WingStage2ReconTarget} deliberately: a recon target is something a sweep may
+ * be pointed at, and this is the much smaller set something may be RINGED for. The 삭제 record was withdrawn
+ * while its target sat in a hand-written list, and keeping the two vocabularies apart is what stops a
+ * measurement scope from reading as a promotion scope.
+ */
+export const WING_GUIDED_HIGHLIGHT_TARGETS = ["purpose_open_api", "confirm", "consent_api", "consent_category"] as const;
+export type WingGuidedHighlightTarget = (typeof WING_GUIDED_HIGHLIGHT_TARGETS)[number];
+
+/**
+ * One live locate reading. **Every field is something `buildFixedLabelLocateScript` returns** — there is no room
+ * here for a property the apparatus cannot produce, which is the single defect that produced both the refuted
+ * 발급 record (`role: "button"`, never measured) and the withdrawn 삭제 one.
+ */
+export interface WingGuidedHighlightReading {
+  /** The recon candidate id that was read. Resolves through {@link wingCandidateSpecById}; never a re-typed query. */
+  readonly candidateId: string;
+  /** WHICH screen the reading was taken on. A locate is evidence about one screen and no other. */
+  readonly screen: WingFlowScreen;
+  readonly visibleCount: number;
+  readonly hiddenCount: number;
+  /** The MEASURED tag of a unique match. Absent when nothing painted — never an expected value. */
+  readonly observedTag?: string;
+}
+
+/**
+ * The promotion decision for one target, and the reading it rests on.
+ *
+ * `candidateId: null` + `promoted: false` is the honest pre-measurement state, and it is the state every entry
+ * ships in until a live run says otherwise. Naming a candidate BEFORE the reading would be the "arbitrary
+ * selector promotion" this unit is forbidden to make — so the id is written down by the same edit that writes
+ * down the reading, and `guided-control-highlight-calibration.test.ts` refuses a `promoted: true` entry whose
+ * `candidateId` has no matching reading in {@link WING_GUIDED_HIGHLIGHT_EVIDENCE}.
+ */
+export interface WingGuidedHighlightPromotion {
+  readonly target: WingGuidedHighlightTarget;
+  readonly candidateId: string | null;
+  /** The screen the ring would be drawn on. Fixed by the walk's own step, not chosen by the reading. */
+  readonly screen: WingFlowScreen;
+  readonly promoted: boolean;
+  /** Why it is not promoted yet, or `null` once it is. Prose for a reviewer; never sent to a page. */
+  readonly blockedReason: string | null;
+}
+
+/**
+ * **NOT MEASURED — every entry is `promoted: false`.** The live calibration that fills these in is a
+ * `COUPANG_WING_ISSUANCE_FLOW_DISCOVERY` sitting; until it has run, the walk keeps guiding these four steps by
+ * TEXT exactly as it does today, and the driver draws no ring at any of them.
+ *
+ * Flipping an entry requires three things in the same edit, and the test enforces all three: a `candidateId`
+ * that resolves in {@link WING_STAGE2_RECON_CANDIDATES}, a reading of THAT id on THAT screen in
+ * {@link WING_GUIDED_HIGHLIGHT_EVIDENCE} with `visibleCount: 1` and `hiddenCount: 0`, and `blockedReason: null`.
+ */
+export const WING_GUIDED_HIGHLIGHT_PROMOTIONS: readonly WingGuidedHighlightPromotion[] = Object.freeze([
+  Object.freeze({
+    target: "purpose_open_api" as const,
+    candidateId: null,
+    screen: "PURPOSE" as const,
+    promoted: false,
+    blockedReason: "NAME_MEASURED_LOCATE_NEVER_RUN",
+  }),
+  Object.freeze({
+    target: "confirm" as const,
+    candidateId: null,
+    screen: "PURPOSE" as const,
+    promoted: false,
+    blockedReason: "ONLY_MEASURED_UNDER_THE_BROAD_QUERY_SHAPE_THAT_WAS_WITHDRAWN_ELSEWHERE",
+  }),
+  Object.freeze({
+    target: "consent_api" as const,
+    candidateId: null,
+    screen: "TERMS" as const,
+    promoted: false,
+    blockedReason: "SENTENCE_MATCHED_TWO_PAINTING_ELEMENTS_2026_08_10",
+  }),
+  Object.freeze({
+    target: "consent_category" as const,
+    candidateId: null,
+    screen: "TERMS" as const,
+    promoted: false,
+    blockedReason: "SENTENCE_MATCHED_TWO_PAINTING_ELEMENTS_2026_08_10",
+  }),
+]);
+
+export function wingGuidedHighlightPromotion(target: WingGuidedHighlightTarget): WingGuidedHighlightPromotion {
+  const found = WING_GUIDED_HIGHLIGHT_PROMOTIONS.find((p) => p.target === target);
+  // A target with no entry would fall through to "not promoted" and look exactly like a deliberate refusal.
+  if (!found) throw new Error(`coupang-wing-label-recon: no guided-highlight promotion entry for ${target}`);
+  return found;
+}
+
+/**
+ * **The consent pairing this unit is allowed to rest on, and what it actually says.**
+ *
+ * The 2026-08-11 guided walk advanced step 4 on `buildWingConsentCompleteScript`, which is fail-closed: it
+ * returns `true` only when EVERY consent resolved to exactly one visible checkbox inside the nearest ancestor
+ * holding exactly that one consent sentence, and that box was ticked. So the structural 1:1 pairing held on a
+ * real terms screen — that much is live, and it is the pairing the user's instruction points at.
+ *
+ * **What it is not.** It is an aggregate boolean by construction: the per-row verdicts, depths and block
+ * checkbox counts never crossed the page boundary, so nothing knows WHICH box paired with which consent or how
+ * far up the block sat. The per-row census (`buildWingConsentBlockScript`) has never been run live. A ring
+ * drawn from this evidence alone would be pointing with a fact the evidence deliberately does not carry.
+ */
+export const WING_CONSENT_PAIRING_LIVE_BASIS = "AGGREGATE_CONJUNCTION_TRUE_2026_08_11_PER_ROW_CENSUS_NEVER_RUN" as const;
+
+/** See {@link WingGuidedHighlightEvidence.phase} — a literal, pinned to the CLI's constant by test. */
+export const WING_GUIDED_HIGHLIGHT_PHASE = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" as const;
+export type WingGuidedHighlightPhase = typeof WING_GUIDED_HIGHLIGHT_PHASE;
+
+export interface WingGuidedHighlightEvidence {
+  /** `null` until a live calibration has run — never an empty object that reads like a completed measurement. */
+  readonly measuredOn: string | null;
+  readonly gitSha: string | null;
+  readonly runId: string | null;
+  readonly approvalId: string | null;
+  /**
+   * The phase that takes this measurement, as a literal. It is NOT imported from
+   * `cli/probe-wing-issuance-selectors.ts`, which owns the canonical constant: this is a leaf module and the CLI
+   * imports it, so the dependency only runs one way. `guided-control-highlight-calibration.test.ts` pins the two
+   * strings equal, which is the same thing the import would have bought without the cycle.
+   */
+  readonly phase: WingGuidedHighlightPhase;
+  readonly readings: readonly WingGuidedHighlightReading[];
+  /** The per-row consent-block census, once one exists. `null` means the instrument has not been run. */
+  readonly consentPairing: {
+    readonly visibleCheckboxCount: number;
+    readonly consentsMatchedExactlyOnce: number;
+    readonly consentsCompared: number;
+    /** The nearest-block depths, in row order. Structural integers; no text, no identity. */
+    readonly ancestorDepths: readonly number[];
+  } | null;
+  /** What the pairing claim rests on TODAY. Stays on the record after the census runs, as the prior state. */
+  readonly priorBasis: typeof WING_CONSENT_PAIRING_LIVE_BASIS;
+}
+
+/** **NOT MEASURED.** No reading exists yet; the empty array is the claim, and it is the true one. */
+export const WING_GUIDED_HIGHLIGHT_EVIDENCE: WingGuidedHighlightEvidence = Object.freeze({
+  measuredOn: null,
+  gitSha: null,
+  runId: null,
+  approvalId: null,
+  phase: WING_GUIDED_HIGHLIGHT_PHASE,
+  readings: Object.freeze([]),
+  consentPairing: null,
+  priorBasis: WING_CONSENT_PAIRING_LIVE_BASIS,
+});
+
+/**
+ * Resolve ANY recon candidate to its spec by id — the one door between a promotion record and a query string.
+ *
+ * Exported for the same reason {@link WING_PURPOSE_SCREEN_MARKER_SPEC} is: the driver must be able to ring a
+ * promoted control without a second hand-written copy of its query. A duplicate `exactText` is how the purpose
+ * heading's 이제/period drift got measured as absent, and a duplicate `candidateQuery` is how a ring could end
+ * up pointing with a string the calibration no longer covers.
+ */
+export function wingCandidateSpecById(id: string): WingFlowScreenMarkerSpec {
+  for (const candidates of Object.values(WING_STAGE2_RECON_CANDIDATES)) {
+    for (const c of candidates) {
+      if (c.id === id) return Object.freeze({ id: c.id, candidateQuery: c.candidateQuery, exactText: c.exactText });
+    }
+  }
+  throw new Error(`coupang-wing-label-recon: no candidate for id ${id}`);
+}

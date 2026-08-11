@@ -544,6 +544,21 @@ export function buildFixedLabelLocateScript(input: {
   exactText: string;
   tag: boolean;
   tagAncestor?: string;
+  /**
+   * **`keepPriorTags` (optional, tag only).** By default a tagging locate CLEARS every existing
+   * `data-aw-target` first, because one step has one control and a leftover tag is a ring pointing at the
+   * previous step (live-confirmed 2026-08-10). A step that promotes SEVERAL controls has to tag them one call
+   * at a time, and each call would otherwise erase the last — so the caller clears once, up front, and then
+   * passes this on every call in the sequence. It never widens what a single call tags: still exactly one
+   * element, still only on a unique visible match.
+   */
+  keepPriorTags?: boolean;
+  /**
+   * **`primary` (optional, tag only).** Marks this match as the one the step's chip names and the one the
+   * page-dimming shroud is punched around. Absent from every single-ring caller, where the overlay falls back
+   * to document order and nothing changes.
+   */
+  primary?: boolean;
 }): string {
   return `(function () {
   /* issuance-fixed-label-${input.tag ? "tag" : "locate"} (value-free OUTPUT: { count, sig? }) */
@@ -587,8 +602,12 @@ export function buildFixedLabelLocateScript(input: {
   var el = visible[0];
   ${
     input.tag
-      ? `var prior = slice(document.querySelectorAll('[data-aw-target]'));
-  for (var p = 0; p < prior.length; p++) { prior[p].removeAttribute('data-aw-target'); }
+      ? `${
+        input.keepPriorTags
+          ? `/* prior tags KEPT: this call is one of a multi-control sequence the caller already cleared once. */`
+          : `var prior = slice(document.querySelectorAll('[data-aw-target]'));
+  for (var p = 0; p < prior.length; p++) { prior[p].removeAttribute('data-aw-target'); prior[p].removeAttribute('data-aw-primary'); }`
+      }
   var tagEl = el;${
     input.tagAncestor
       ? `
@@ -597,7 +616,8 @@ export function buildFixedLabelLocateScript(input: {
   if (anc) { tagEl = anc; }`
       : ``
   }
-  tagEl.setAttribute('data-aw-target', '');`
+  tagEl.setAttribute('data-aw-target', '');${input.primary ? `
+  tagEl.setAttribute('data-aw-primary', '');` : ``}`
       : ``
   }
   var all = slice(document.querySelectorAll('*'));

@@ -40,8 +40,11 @@ import {
   WING_KEY_CREATION_SELECTOR_CALIBRATED,
   WING_PURPOSE_SCREEN_MARKER_SPEC,
   WING_TERMS_SCREEN_MARKER_SPECS,
+  wingGuidedHighlightPromotion,
+  wingCandidateSpecById,
   type WingFlowScreen,
   type WingFlowScreenMarkerSpec,
+  type WingGuidedHighlightTarget,
 } from "./coupang-wing-label-recon";
 import { mountOverlay, unmountOverlay, overlayMounted, resetOverlayAdvance, readOverlayAdvancePressed } from "./overlay";
 import {
@@ -753,6 +756,73 @@ const RETURN_GUIDANCE_SIG = "5e11e40b5e11e40b";
  *     no on-page instruction rendered anywhere.
  * One map, one branch: a guidance step clears the prior tag, mounts docked, and reports what actually mounted.
  */
+/**
+ * **The ring PLAN for the two steps that describe more than one control.**
+ *
+ * `confirm_purpose` asks the seller to check the purpose and then press 확인; `terms_consent` asks them to tick
+ * two separate consents. A single ring cannot express either, and a step that ringed only the first tagged
+ * element while the panel described both would be pointing at half of what it says.
+ *
+ * `primary` is the control the chip names and the page-dimming shroud is punched around — the ACT, not the thing
+ * to read: pressing 확인 is what advances the purpose screen. The consents have no such asymmetry, so the first
+ * one leads and the second is its equal beside it.
+ *
+ * **This map promotes nothing.** Every entry is resolved through {@link wingGuidedHighlightPromotion}, which is
+ * `promoted: false` for all four until a live reading says otherwise — so today this map produces an empty spec
+ * list and both steps stay text-guided, exactly as they are now.
+ */
+const GUIDED_RING_PLAN: Readonly<
+  Partial<Record<CoupangIssuanceTarget, { readonly primary: WingGuidedHighlightTarget; readonly also: readonly WingGuidedHighlightTarget[] }>>
+> = {
+  confirm_purpose: { primary: "confirm", also: ["purpose_open_api"] },
+  terms_consent: { primary: "consent_api", also: ["consent_category"] },
+};
+
+/**
+ * The PROMOTED specs for a step, primary first. Empty ⇒ nothing was promoted and the step is text-guided.
+ *
+ * Fail-closed PER CONTROL, not per step. An unpromoted sibling must not suppress a promoted one (that would
+ * silently withdraw a calibration nobody withdrew), and a promoted one must not drag an unpromoted one along
+ * (that is the promotion this unit is forbidden to make). If the planned primary is not promoted, the first
+ * promoted sibling leads — a ring set with no primary would put the chip wherever document order happened to
+ * land it.
+ *
+ * Specs are RESOLVED BY ID from the recon candidates, never re-typed here: the promotion record names an id, and
+ * `KEY_CREATION_SPEC` is in this file for the same reason — a second hand-written copy is how a ring ends up
+ * pointing with a string the calibration no longer covers.
+ */
+function promotedRingSpecs(target: CoupangIssuanceTarget): readonly WingFlowScreenMarkerSpec[] {
+  const plan = GUIDED_RING_PLAN[target];
+  if (!plan) return [];
+  const specs: WingFlowScreenMarkerSpec[] = [];
+  for (const t of [plan.primary, ...plan.also]) {
+    const p = wingGuidedHighlightPromotion(t);
+    if (!p.promoted || !p.candidateId) continue;
+    specs.push(wingCandidateSpecById(p.candidateId));
+  }
+  return specs;
+}
+
+/**
+ * Fold several opaque per-element signatures into one, so a multi-ring step has a single value for the engine's
+ * locate↔highlight anti-drift check.
+ *
+ * Structural, like the signatures it folds: an FNV-1a over the concatenated hex, computed host-side over values
+ * that are already opaque. It reads no page content and adds no new exposure — and it is ORDER-SENSITIVE on
+ * purpose, because the ring set is ordered (primary first) and two steps that tagged the same elements in a
+ * different order are not the same presentation.
+ */
+function foldSigs(sigs: readonly string[]): string {
+  let h = 0x811c9dc5;
+  for (const s of sigs.join("|")) {
+    h ^= s.charCodeAt(0);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  // 16 hex, matching the in-page signature width so nothing downstream has to special-case a folded one.
+  const half = h.toString(16).padStart(8, "0");
+  return `${half}${half}`;
+}
+
 const TEXT_GUIDED_SIG: Readonly<Partial<Record<CoupangIssuanceTarget, string>>> = {
   reach_open_api: REACH_OPEN_API_GUIDANCE_SIG,
   confirm_purpose: "b48e2f05b48e2f05",
@@ -982,12 +1052,15 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
   private async resolveFixedLabelSpec(
     spec: { candidateQuery: string; exactText: string; tagAncestor?: string },
     tag: boolean,
+    ring?: { keepPriorTags?: boolean; primary?: boolean },
   ): Promise<LocateResult> {
     const script = buildFixedLabelLocateScript({
       candidateQuery: spec.candidateQuery,
       exactText: spec.exactText,
       tag,
       ...(spec.tagAncestor ? { tagAncestor: spec.tagAncestor } : {}),
+      ...(ring?.keepPriorTags ? { keepPriorTags: true } : {}),
+      ...(ring?.primary ? { primary: true } : {}),
     });
     const page = this.activePage();
     const res = await this.evalStr<LocateResult>(page, script);
@@ -1103,7 +1176,35 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     return canHighlight && res.sig ? { matchCount, canHighlight, sig: res.sig, ...extra } : { matchCount, canHighlight, ...extra };
   }
 
+  /**
+   * Resolve a step's whole PROMOTED ring set — every spec must land on exactly one painting element, or the step
+   * does not ring at all.
+   *
+   * **All-or-nothing, and that is the honest reading.** A partially-resolved set means the page is not the one
+   * the calibration was taken on, and drawing the rings that happened to resolve would present a confident,
+   * incomplete picture of a screen we have just discovered we do not recognise. The failing spec's own count is
+   * returned so the park upstream says `target_not_found` about a real miss rather than a synthesised zero.
+   *
+   * When tagging, the prior step's tags are cleared ONCE up front and every spec then tags additively — a
+   * per-call clear would leave only the last one tagged, which is the single-ring assumption this exists to lift.
+   */
+  private async resolveRingPlan(specs: readonly WingFlowScreenMarkerSpec[], tag: boolean): Promise<LocateResult> {
+    if (tag) await this.evalStr(this.activePage(), IN_PAGE_CLEAR_TAG).catch(() => undefined);
+    const sigs: string[] = [];
+    for (let i = 0; i < specs.length; i++) {
+      const res = await this.resolveFixedLabelSpec(specs[i]!, tag, { keepPriorTags: true, primary: i === 0 });
+      if (res.count !== 1 || !res.sig) return { count: res.count };
+      sigs.push(res.sig);
+    }
+    return { count: 1, sig: foldSigs(sigs) };
+  }
+
   async locateTarget(target: CoupangIssuanceTarget): Promise<LocateResult> {
+    // PROMOTED first. `confirm_purpose` and `terms_consent` appear in BOTH tables — they are text-guided until
+    // their controls are calibrated and ringed afterwards — so the order of these two branches is what decides
+    // which. Promotion wins, and it can only be reached through a record that names a live reading.
+    const ring = promotedRingSpecs(target);
+    if (ring.length > 0) return this.resolveRingPlan(ring, false);
     // Text-guided (incl. `reach_open_api` and `return`, which are guidance rather than queried WING controls):
     // measured, not promoted. It resolves to a fixed synthetic signature — the page is not queried, so there is
     // nothing to find and nothing to miss.
@@ -1115,6 +1216,18 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
 
   async highlightTarget(target: CoupangIssuanceTarget): Promise<LocateResult> {
     const page = this.activePage();
+    // Same precedence as `locateTarget`, and it has to be the same or the two disagree about what this step is:
+    // one would tag a control while the other reported a synthetic guidance signature, and the engine's
+    // anti-drift check compares exactly those two values.
+    const ring = promotedRingSpecs(target);
+    if (ring.length > 0) {
+      const planned = await this.resolveRingPlan(ring, true);
+      if (planned.count !== 1 || !planned.sig) return { count: planned.count };
+      await sleep(LOCATOR_SETTLE_MS);
+      await this.mountStepOverlay(page, target);
+      if (!(await overlayMounted(page))) return { count: 0 };
+      return { count: 1, sig: planned.sig };
+    }
     const guided = TEXT_GUIDED_SIG[target];
     if (guided) {
       // CLEAR THE PRIOR TAG FIRST. Live-confirmed 2026-08-10: without this the mount found the PREVIOUS step's
