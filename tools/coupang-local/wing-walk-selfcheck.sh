@@ -296,9 +296,9 @@ if [ -z "$TREE_DIRTY" ]; then
   for phrase in \
     "EVERY marketplace action is YOURS" \
     "every screen after that is one YOU navigate to" \
-    "THREE steps are highlighted" \
-    "TEXT-GUIDED" \
-    "draws no ring at" \
+    "SEVEN controls are highlighted" \
+    "NO ring sits on a checkbox or a radio" \
+    "measured structural pairing" \
     "'OPEN API' is the DEFAULT purpose option" \
     "You read the two consent texts and decide" \
     "That control CREATES THE KEY" \
@@ -475,10 +475,13 @@ ENV
   # Asserted BOTH ways: the current claims must be present, and the retired ones must be gone — a disclosure
   # that gained a line while keeping its contradiction is not fixed.
   BOOT_OK=1
-  for claim in "ONE" "never navigates again" "THREE live-calibrated" "FOUR steps advance" "consent boxes are ticked" "RESTS in front of" "약관 동의 및 Key 발급받기" "never ticks a box"; do
+  for claim in "ONE" "never navigates again" "SEVEN live-calibrated" "NONE of the rings sits on an input" "FOUR steps advance" "consent boxes are ticked" "RESTS in front of" "약관 동의 및 Key 발급받기" "never ticks a box"; do
     grep -qF "$claim" <<<"$out" || { echo "  FAIL  BOOTSTRAP_DISCLOSE · missing claim: $claim"; BOOT_OK=0; FAILED=1; }
   done
-  for stale in "the agent never navigates" "0 gotos" "ONLY the two live-calibrated"; do
+  # Retired claims. The last three were true and are no longer: the count moved 2 → 3 → 7 as controls were
+  # measured, and a disclosure that keeps stating a smaller run than the one that executes is the exact
+  # manifest-honesty defect this workstream keeps having to unpick — in the sentence, not the data.
+  for stale in "the agent never navigates" "0 gotos" "ONLY the two live-calibrated" "THREE live-calibrated" "TEXT-GUIDED"; do
     if grep -qF "$stale" <<<"$out"; then
       echo "  FAIL  BOOTSTRAP_DISCLOSE · retired claim still shown: $stale"; BOOT_OK=0; FAILED=1
     fi

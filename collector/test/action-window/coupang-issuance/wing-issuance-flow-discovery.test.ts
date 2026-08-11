@@ -944,14 +944,18 @@ describe("the guided-walk manifest is not the fallback", () => {
     expect(CLI).toContain("isWingGuidedWalk\n    ? \"operator-performed: the whole tutorial");
   });
 
-  it("the operation names the boundary, the two highlight classes, and what is out of scope", () => {
+  it("the operation names the boundary, what the rings sit ON, and what is out of scope", () => {
     const from = CLI.indexOf('isWingGuidedWalk\n    ? "WING GUIDED ISSUANCE WALK');
     const op = CLI.slice(from, CLI.indexOf("\n    : isWingReveal", from));
     expect(op).toContain("CREATES THE KEY");
     expect(op).toContain("never pressed");
     expect(op).toContain("separate phase");
-    expect(op).toContain("TEXT-GUIDES");
-    expect(op).toContain("drawing no ring");
+    // The two highlight CLASSES became one on 2026-08-11 — every guided control is now calibrated. What
+    // replaced that distinction is the one that still matters: which ELEMENT each ring sits on. The purpose and
+    // consent rings are on a label and two sentences, never on the radio or the checkboxes, because those
+    // inputs have no accessible association and nothing may claim to know which box is which.
+    expect(op).toContain("never on the radio or the checkboxes");
+    expect(op).toContain("measured structural pairing");
     expect(op).toContain("navigates no further");
     expect(op).toContain("no connect-test, no sync");
   });
@@ -962,10 +966,12 @@ describe("the guided-walk manifest is not the fallback", () => {
     expect(max).toContain("0 presses of the key-creating");
     // ONE navigation now — the landing — and the budget must SAY so rather than keep claiming zero.
     expect(max).toContain("1 navigation (the landing at window open, never again)");
-    expect(max).toContain("3 highlights");
-    // Three since the purpose screen became one step. The budget also has to state that the runtime advances
-    // itself now — a budget listing only what the SELLER presses would understate what the agent does.
-    expect(max).toContain("2 text-guided");
+    // Seven since the guided-control calibration landed. The budget also has to state that the runtime
+    // advances itself now — a budget listing only what the SELLER presses would understate what the agent does.
+    expect(max).toContain("7 highlights");
+    expect(max).toContain("0 text-guided");
+    // …and the count that says what SellerOps does NOT know: no ring sits on an input.
+    expect(max).toContain("0 rings on an input");
     expect(max).toContain("4 steps advanced by OBSERVING WING");
     expect(max).toContain("the key-creating step never");
   });

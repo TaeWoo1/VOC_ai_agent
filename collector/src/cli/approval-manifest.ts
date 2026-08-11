@@ -302,9 +302,26 @@ export interface GuidedWalkBoundary {
   /** No connect-test, no sync, no upload: guidance finishing is not a connection. */
   performsConnectOrSync: false;
   /** How many of the walk's guided controls carry a live-calibrated locator and may be highlighted. */
-  highlightedControlCount: 3;
-  /** …and how many are guided by TEXT because nothing was promoted for them. */
-  textGuidedControlCount: 2;
+  highlightedControlCount: 7;
+  /**
+   * …and how many are guided by TEXT because nothing was promoted for them. **Zero since 2026-08-11**, when the
+   * guided-control calibration measured the `OPEN API` option label, the `확인` control and the two consent
+   * sentences on the live purpose and terms screens.
+   */
+  textGuidedControlCount: 0;
+  /**
+   * **How many rings sit on an `<input>`. Zero, and it is a claim about what SellerOps does NOT know.**
+   *
+   * The terms checkboxes have no accessible association at all (`WING_TERMS_CHECKBOX_PROMOTION_BLOCKED`:
+   * `nameSource: NONE`, `labelForCount: 0`, `ancestorLabelCount: 0`), so nothing may claim to know which box is
+   * which. The consent rings therefore sit on the SENTENCES, and the purpose ring on the option's `<label>` —
+   * never on the radio or the checkbox. What ties each sentence-ring to the right box is the measured block
+   * pairing, not a ring on the box.
+   *
+   * A count rather than prose because the operator grants against this descriptor, and prose on one side of a
+   * machine-checked list is the manifest-honesty defect this workstream keeps repeating.
+   */
+  ringedInputControlCount: 0;
   /**
    * How many steps the runtime advances by OBSERVING WING rather than by the seller pressing "다음".
    *
@@ -333,8 +350,9 @@ export const COUPANG_WING_GUIDED_WALK_BOUNDARY: GuidedWalkBoundary = {
   agentNavigations: 1,
   credentialValueReadBudget: 0,
   performsConnectOrSync: false,
-  highlightedControlCount: 3,
-  textGuidedControlCount: 2,
+  highlightedControlCount: 7,
+  textGuidedControlCount: 0,
+  ringedInputControlCount: 0,
   autoAdvancingStepCount: 4,
   keyCreationAutoAdvances: false,
   sellerConsentObserved: true,
@@ -646,10 +664,14 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     // does not use — and the whole point of this phase is that no one types that line.
     cli: "src/cli/local-agent-service.ts",
     driver: "launchd service → src/cli/local-agent.ts → LazyCoupangIssuanceDriver → CoupangWingIssuanceDriver (WING-resident guided walk; the window opens on the run's first call, never at agent boot)",
-    // It HIGHLIGHTS three live-calibrated controls ⇒ `allowsHighlight: true` ⇒ it fails closed
-    // (`SELECTORS_NOT_CALIBRATED`) unless the caller states the `issue` calibration. The other two guided steps
-    // are text-only and claim no locator. (Said "two" until 2026-08-11, when the key-creation control was
-    // measured and promoted — the descriptor beside it has read `highlightedControlCount: 3` ever since.)
+    // It HIGHLIGHTS seven live-calibrated controls ⇒ `allowsHighlight: true` ⇒ it fails closed
+    // (`SELECTORS_NOT_CALIBRATED`) unless the caller states the `issue` calibration. No guided step is text-only
+    // any more. (Said "two" until 2026-08-11, when the key-creation control was measured and promoted — and
+    // "three" until later the same day, when the guided-control calibration measured the `OPEN API` option
+    // label, the `확인` control and the two consent sentences and the count went to seven. Note what the last
+    // four are NOT: `ringedInputControlCount` stays 0, because the rings sit on labels and sentences and never
+    // on a radio or a checkbox — the boxes have no accessible association and nothing may claim to know which
+    // is which.)
     //
     // There is no action here for pressing anything: every marketplace act is the seller's. The one that
     // creates the key — `약관 동의 및 Key 발급받기` — is the last checkpoint's subject and is never pressed by
