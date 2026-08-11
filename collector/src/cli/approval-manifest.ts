@@ -292,14 +292,41 @@ export interface OperatorRevealAction {
  * the separation cannot be softened in prose alone.
  */
 export interface GuidedWalkBoundary {
-  /** The operator action being approved: walking the tutorial, not issuing anything. */
+  /** The operator action being approved. Walking the tutorial — which now ENDS in a real key. */
   operation: "WALK_WING_GUIDED_ISSUANCE_TUTORIAL";
-  /** The operation this phase must never perform or prepare. */
+  /**
+   * **The follow-on this phase must never perform.** It still may not: the AGENT presses nothing, and
+   * `COMPLETE_WING_KEY_ISSUANCE` is the seller's own act throughout.
+   *
+   * What changed on 2026-08-12 is that the walk now GUIDES the seller to it instead of stopping one screen
+   * short. That is not a loosening of this field — it never described what the operator may do — but leaving it
+   * unremarked would let a reader take "forbidden follow-on" as "this run ends before a key exists", which was
+   * true until this unit and is not now. {@link operatorIssuesRealKey} is the field that says so.
+   */
   forbiddenFollowOnAction: typeof WING_KEY_CREATION_ACTION;
-  /** The control the walk rests in front of and never presses. */
-  restsBeforeControl: "약관 동의 및 Key 발급받기";
-  createsKeyMaterial: false;
-  /** …and the runtime still cannot demonstrate that none was created. Only the seller sees the screen. */
+  /**
+   * **The control the walk rests in front of and never presses.** It was `약관 동의 및 Key 발급받기` until
+   * 2026-08-12 — a control believed to create the key, pressed on two live walks, and measured to create none.
+   * The walk rests in front of the one that does.
+   */
+  restsBeforeControl: "확인 (vendor-method screen)";
+  /**
+   * **Whether the AGENT creates key material. Still false, and it is a narrower claim than it used to be.**
+   *
+   * Until 2026-08-12 this field sat beside a walk that ended before any key could exist, so `false` carried two
+   * meanings at once — the agent makes no key, and no key is made. Only the first was ever what it asserted, and
+   * the second is now plainly untrue. {@link operatorIssuesRealKey} exists so the pair cannot be read as one.
+   */
+  agentCreatesKeyMaterial: false;
+  /**
+   * **TRUE. This run ends with a real, irreversible API key on the seller's live Coupang account.**
+   *
+   * The single most important line in this descriptor, and the reason this phase cannot be granted on the same
+   * footing as the walk that preceded it. The seller performs the press; SellerOps guides them to it, highlights
+   * it, and never touches it.
+   */
+  operatorIssuesRealKey: true;
+  /** …and the runtime still cannot demonstrate a key WAS created. Only the seller sees the value. */
   keyCreationRuledOut: false;
   /** The agent clicks, types, submits — and NAVIGATES — nothing. The last one is new to this entrypoint. */
   agentPerformsAction: false;
@@ -308,8 +335,12 @@ export interface GuidedWalkBoundary {
   credentialValueReadBudget: 0;
   /** No connect-test, no sync, no upload: guidance finishing is not a connection. */
   performsConnectOrSync: false;
-  /** How many of the walk's guided controls carry a live-calibrated locator and may be highlighted. */
-  highlightedControlCount: 7;
+  /**
+   * How many of the walk's guided controls carry a live-calibrated locator and may be highlighted. NINE since
+   * 2026-08-12: the seven the guided-control calibration established, plus the vendor screen's chosen option
+   * and its key-issuing `확인`, both measured on two checkpoints of that screen.
+   */
+  highlightedControlCount: 9;
   /**
    * …and how many are guided by TEXT because nothing was promoted for them. **Zero since 2026-08-11**, when the
    * guided-control calibration measured the `OPEN API` option label, the `확인` control and the two consent
@@ -325,6 +356,9 @@ export interface GuidedWalkBoundary {
    * never on the radio or the checkbox. What ties each sentence-ring to the right box is the measured block
    * pairing, not a ring on the box.
    *
+   * The vendor-method ring is the same shape and stays inside the same claim: it sits on the option's `<label>`,
+   * measured `visible: 1` / tag `LABEL` on both vendor checkpoints, never on the radio.
+   *
    * A count rather than prose because the operator grants against this descriptor, and prose on one side of a
    * machine-checked list is the manifest-honesty defect this workstream keeps repeating.
    */
@@ -336,33 +370,58 @@ export interface GuidedWalkBoundary {
    * every step; none auto-advances". That stopped being true on 2026-08-10 and a field that quietly keeps
    * saying it is worse than no field: the operator grants against this descriptor.
    */
-  autoAdvancingStepCount: 4;
-  /** The key-creation step is NOT one of them, and never becomes one. */
-  keyCreationAutoAdvances: false;
+  autoAdvancingStepCount: 6;
+  /**
+   * **Whether anything auto-performs the key-issuing PRESS. False, and it always will be.**
+   *
+   * Renamed from `keyCreationAutoAdvances` on 2026-08-12, because that name became ambiguous the moment the
+   * key-issuing step gained an observed advance: the press is not automatic and the advance AFTER it is. One
+   * field could not say both, and the one that could be misread is the one that guards the irreversible act.
+   */
+  keyCreationPressAutoPerformed: false;
+  /**
+   * **TRUE — the key-issuing step advances on WING showing the credentials.**
+   *
+   * An observation of the RESULT, which cannot cause it: the sanitized page category cannot become
+   * `credential_shown` before a credential exists. The seller presses 확인; SellerOps notices the keys appeared.
+   * Declared rather than left implicit because "the key step auto-advances" is alarming read alone and is
+   * exactly what an operator deserves to see stated precisely.
+   */
+  keyIssuanceAdvancesOnObservedResult: true;
   /**
    * Whether the runtime looks at the consent checkboxes' state. **True** — deliberately, to advance without
    * asking the seller to report what the page already shows. It never ticks a box, never reads the terms, and
    * the reading is a page-side conjunction that is never stored, transmitted, or logged.
    */
   sellerConsentObserved: true;
+  /**
+   * The input method the walk names, and WHO decided it. A product decision taken with the measurement in front
+   * of the owner and separated from it — the screen offers two options and both resolve identically well.
+   */
+  vendorMethodGuided: "자체개발(직접입력)";
+  vendorMethodDecidedBy: "PRODUCT_OWNER";
 }
 
 export const COUPANG_WING_GUIDED_WALK_BOUNDARY: GuidedWalkBoundary = {
   operation: "WALK_WING_GUIDED_ISSUANCE_TUTORIAL",
   forbiddenFollowOnAction: WING_KEY_CREATION_ACTION,
-  restsBeforeControl: "약관 동의 및 Key 발급받기",
-  createsKeyMaterial: false,
+  restsBeforeControl: "확인 (vendor-method screen)",
+  agentCreatesKeyMaterial: false,
+  operatorIssuesRealKey: true,
   keyCreationRuledOut: false,
   agentPerformsAction: false,
   agentNavigations: 1,
   credentialValueReadBudget: 0,
   performsConnectOrSync: false,
-  highlightedControlCount: 7,
+  highlightedControlCount: 9,
   textGuidedControlCount: 0,
   ringedInputControlCount: 0,
-  autoAdvancingStepCount: 4,
-  keyCreationAutoAdvances: false,
+  autoAdvancingStepCount: 6,
+  keyCreationPressAutoPerformed: false,
+  keyIssuanceAdvancesOnObservedResult: true,
   sellerConsentObserved: true,
+  vendorMethodGuided: "자체개발(직접입력)",
+  vendorMethodDecidedBy: "PRODUCT_OWNER",
 };
 
 export const COUPANG_WING_ISSUANCE_REVEAL_ACTION: OperatorRevealAction = {

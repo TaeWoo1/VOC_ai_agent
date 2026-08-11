@@ -13,6 +13,8 @@ const SIG: Record<string, string> = {
   terms_consent: "dddddddddddddddd",
   issue: "eeeeeeeeeeeeeeee",
   issue_final: "2222222222222222",
+  vendor_method: "3333333333333333",
+  vendor_confirm: "4444444444444444",
   credentials: "ffffffffffffffff",
   return: "1111111111111111",
 };
@@ -26,6 +28,8 @@ const BARRIER: Record<string, string> = {
   confirm_purpose: "checkpoint_confirm_purpose",
   terms_consent: "guiding_terms_consent",
   issue_final: "checkpoint_before_issue",
+  vendor_method: "guiding_vendor_method",
+  vendor_confirm: "checkpoint_issue_key",
   credentials: "guiding_copy_keys",
   return: "return_to_sellerops",
 };
@@ -76,14 +80,17 @@ describe("coupang issuance engine — the linear walkthrough from the WING home"
     driveCheckpoint(eng, "issue", "confirm_purpose");
     driveCheckpoint(eng, "confirm_purpose", "terms_consent");
     driveCheckpoint(eng, "terms_consent", "issue_final");
-    // ⚠ THE KEY-CREATION BOUNDARY: only after the seller reports pressing it can a credential exist to copy.
-    driveCheckpoint(eng, "issue_final", "credentials");
+    // MEASURED 2026-08-12: this press issues no key — it opens the vendor-method screen.
+    driveCheckpoint(eng, "issue_final", "vendor_method");
+    driveCheckpoint(eng, "vendor_method", "vendor_confirm");
+    // ⚠ THE KEY-CREATION BOUNDARY: only after the seller presses THIS 확인 can a credential exist to copy.
+    driveCheckpoint(eng, "vendor_confirm", "credentials");
     driveCheckpoint(eng, "credentials", "return");
     // The return checkpoint's observed on-page press completes the guidance.
     driveCheckpoint(eng, "return", null);
     expect(eng.currentStage()).toBe("guidance_complete");
     expect(eng.view().status).toBe("COMPLETED");
-    expect(eng.view().progress).toEqual({ completedSteps: 7, totalSteps: 7 });
+    expect(eng.view().progress).toEqual({ completedSteps: 9, totalSteps: 9 });
   });
 
   it("a FE REQUEST_STEP_RECHECK still advances a checkpoint as a fallback/recovery (never the primary driver)", () => {
@@ -118,35 +125,39 @@ describe("coupang issuance engine — the KEY-CREATION HUMAN CHECKPOINT never au
     pressNext(eng, "confirm_purpose");
     pressNext(eng, "terms_consent");
     pressNext(eng, "issue_final");
+    pressNext(eng, "vendor_method");
+    pressNext(eng, "vendor_confirm");
     return eng;
   }
 
-  it("rests at checkpoint_before_issue with the KEY-CREATING control highlighted (opaque 16-hex ref) and does not auto-advance", () => {
+  it("rests at checkpoint_issue_key with the KEY-CREATING control highlighted (opaque 16-hex ref) and does not auto-advance", () => {
     const eng = toIssueBarrier();
-    expect(eng.currentStage()).toBe("checkpoint_before_issue");
+    // The boundary MOVED on 2026-08-12, and moving it is the point: `checkpoint_before_issue` guarded a control
+    // that was pressed twice on live walks and issued nothing.
+    expect(eng.currentStage()).toBe("checkpoint_issue_key");
     expect(eng.view().status).toBe("WAITING_FOR_HUMAN");
-    expect(eng.view().currentStep?.stepNumber).toBe(5);
-    expect(eng.view().currentStep?.copyParams?.targetKind).toBe("issue_final");
-    const ref = eng.events().find((e) => e.type === "TARGET_HIGHLIGHTED" && e.payload.stepId === "aw.coupang_issuance_issue_checkpoint")!.payload.targetRef;
+    expect(eng.view().currentStep?.stepNumber).toBe(7);
+    expect(eng.view().currentStep?.copyParams?.targetKind).toBe("vendor_confirm");
+    const ref = eng.events().find((e) => e.type === "TARGET_HIGHLIGHTED" && e.payload.stepId === "aw.coupang_issuance_vendor_confirm")!.payload.targetRef;
     expect(ref).toMatch(/^[0-9a-f]{16}$/);
     // The checkpoint RESTS: no completion is emitted for the ISSUE step until the seller reports pressing 발급. The
     // driver enforces the human checkpoint by not observing an advance until the seller presses the on-page
     // button — the engine never presses 발급 itself and there is no auto-advance timer here.
     const completedStepIds = eng.events().filter((e) => e.type === "STEP_COMPLETED").map((e) => e.payload.stepId);
-    expect(completedStepIds).not.toContain("aw.coupang_issuance_issue_checkpoint");
+    expect(completedStepIds).not.toContain("aw.coupang_issuance_vendor_confirm");
   });
 
-  it("advances the 발급 checkpoint ONLY on the seller's observed on-page press (they issue the key themselves)", () => {
+  it("advances the key-issuing checkpoint ONLY on the seller's observed act (they issue the key themselves)", () => {
     const eng = toIssueBarrier();
     // The seller pressed the WING-resident '발급 완료 · 다음' button AFTER issuing the key in their own window; the
     // driver reports that observed press and the engine advances to the copy-keys checkpoint. SellerOps still
     // never clicks 발급 and reads no credential value — it only reacts to what the seller reports doing.
-    expect(eng.onUserActionObserved("issue_final")).toEqual({ guide: "credentials" });
+    expect(eng.onUserActionObserved("vendor_confirm")).toEqual({ guide: "credentials" });
     // The issue step completed and the run is now guiding the copy-keys checkpoint (its stage advances once the
     // credentials control is highlighted — here we assert the target moved and the step completed).
     expect(eng.activeTarget()).toBe("credentials");
     const completed = eng.events().filter((e) => e.type === "STEP_COMPLETED").map((e) => e.payload.stepId);
-    expect(completed).toContain("aw.coupang_issuance_issue_checkpoint");
+    expect(completed).toContain("aw.coupang_issuance_vendor_confirm");
   });
 });
 
@@ -294,7 +305,7 @@ describe("coupang issuance engine — contract validity + NO appBranch", () => {
     expect(v.intent).toBe("API_ISSUANCE_GUIDANCE");
     expect(v.runCopyKey).toBe("actionWindow.coupangIssuance.run");
     expect(v.appBranch).toBeUndefined(); // linear flow — NEVER an appBranch
-    expect(v.currentStep?.totalSteps).toBe(7);
+    expect(v.currentStep?.totalSteps).toBe(9);
     expect(validateRunView(v)).toEqual({ ok: true });
     expect(findProhibitedFields(v)).toEqual([]);
     for (const e of eng.events()) {

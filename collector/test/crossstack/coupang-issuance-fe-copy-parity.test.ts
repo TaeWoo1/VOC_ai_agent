@@ -38,6 +38,8 @@ const KEY_FOR_TARGET: Readonly<Partial<Record<CoupangIssuanceTarget, string>>> =
   confirm_purpose: "actionWindow.coupangIssuance.confirmPurpose",
   terms_consent: "actionWindow.coupangIssuance.termsConsent",
   issue_final: "actionWindow.coupangIssuance.issueCheckpoint",
+  vendor_method: "actionWindow.coupangIssuance.vendorMethod",
+  vendor_confirm: "actionWindow.coupangIssuance.vendorConfirm",
   credentials: "actionWindow.coupangIssuance.copyKeys",
   return: "actionWindow.coupangIssuance.return",
 };

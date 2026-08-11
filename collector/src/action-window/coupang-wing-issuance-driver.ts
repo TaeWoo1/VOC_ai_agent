@@ -615,8 +615,12 @@ const ADVANCE_BUTTON_LABEL: Readonly<Partial<Record<CoupangIssuanceTarget, strin
   issue: "발급 화면이 열렸어요 · 다음",
   confirm_purpose: "확인을 눌렀어요 · 다음",
   terms_consent: "동의했어요 · 다음",
-  // The key-creation step. Its caption confirms the seller's own act AFTER the fact; nothing here presses it.
-  issue_final: "발급을 눌렀어요 · 다음",
+  issue_final: "눌렀어요 · 다음",
+  vendor_method: "선택했어요 · 다음",
+  // THE key-creation step. Its caption confirms the seller's own act AFTER the fact; nothing here presses it,
+  // and the step advances by itself the moment WING shows the keys — this button is the fallback for a screen
+  // that did not change the way the measurement says it should.
+  vendor_confirm: "확인을 눌렀어요 · 다음",
   credentials: "복사했어요 · 다음",
   // The return step hands focus back to SellerOps; the SellerOps tab then owns the "enter keys" CTA, so this
   // on-page button is purely "go back" (avoids two near-identical "enter keys" buttons across the two windows).
@@ -634,6 +638,25 @@ const ADVANCE_BUTTON_LABEL: Readonly<Partial<Record<CoupangIssuanceTarget, strin
 const CHECKPOINT_ADVANCES_TO_SCREEN: Readonly<Partial<Record<CoupangIssuanceTarget, WingFlowScreen>>> = {
   issue: "PURPOSE",
   confirm_purpose: "TERMS",
+  // MEASURED 2026-08-12 on two checkpoints: pressing `약관 동의 및 Key 발급받기` opens the vendor-method screen
+  // and issues no key. This entry is the whole difference between a walk that rests in front of that control
+  // because what follows is unknown, and one that knows.
+  issue_final: "VENDOR_METHOD",
+};
+
+/**
+ * **The step that advances on a PAGE CATEGORY rather than a flow screen** — the key-issuing 확인.
+ *
+ * A sibling map rather than an entry in the one above, because what it waits for is a different kind of fact.
+ * The flow screens are three states of one page, told apart by fixed labels; the credentials appearing is the
+ * sanitized page category the classifier already produces, and the walk has read it since its first step.
+ *
+ * **This does not auto-advance the PRESS.** The seller presses 확인 themselves; this observes that WING then
+ * showed the keys. An observation of a result cannot cause it, and the ordering is what makes that plain: the
+ * category cannot become `credential_shown` before a credential exists.
+ */
+const CHECKPOINT_ADVANCES_TO_CATEGORY: Readonly<Partial<Record<CoupangIssuanceTarget, WingPageCategory>>> = {
+  vendor_confirm: "credential_shown",
 };
 
 /** How often the screen observation runs. Slower than the latch poll: it costs three in-page locates. */
@@ -660,8 +683,10 @@ const OVERLAY_STEP: Readonly<Record<CoupangIssuanceTarget, number>> = {
   confirm_purpose: 3,
   terms_consent: 4,
   issue_final: 5,
-  credentials: 6,
-  return: 7,
+  vendor_method: 6,
+  vendor_confirm: 7,
+  credentials: 8,
+  return: 9,
 };
 
 /**
@@ -691,7 +716,16 @@ export const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string
   //
   // What the copy must still do is unchanged: this is where the guidance STOPS, SellerOps never presses it, and
   // nothing auto-advances past it. The reason is now the honest one — what follows has never been measured.
-  issue_final: "'약관 동의 및 Key 발급받기'를 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다. ⚠ 이 버튼은 키를 만들지 않습니다. 다음에 연동 방식(자체개발/연동업체)을 고르는 화면이 나오고, 키는 그 화면의 '확인'에서 발급됩니다 — 그 화면은 아직 SellerOps가 안내하지 않으니 직접 진행해 주세요. Access Key가 화면에 표시되면 아래 버튼을 누르세요.",
+  // CORRECTED AGAIN 2026-08-12, and the correction is a REMOVAL. It said "그 화면은 아직 SellerOps가 안내하지
+  // 않으니 직접 진행해 주세요" — true when written, false since the vendor screen was measured. Guidance that
+  // apologises for not guiding, on a step that now guides, is the same class of stale safety copy as the
+  // key-creation warning this string already had to lose.
+  issue_final: "'약관 동의 및 Key 발급받기'를 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않습니다. 이 버튼은 키를 만들지 않고, 연동 방식을 고르는 화면을 엽니다. 그 화면이 열리면 자동으로 넘어갑니다.",
+  vendor_method: "입력 방식에서 '자체개발(직접입력)'을 직접 선택하세요 — SellerOps는 선택하지 않습니다. 선택하면 업체명 · URL · IP 주소 입력란이 나타납니다. 선택한 뒤 아래 버튼을 누르세요.",
+  // NOT trimmed, and every sentence is a safety claim the approval harness reproduces before the operator
+  // grants. This is the one step in the whole walk that brings an irreversible marketplace credential into
+  // existence, and the seller is the only one who can do it.
+  vendor_confirm: "업체명 · URL · IP 주소를 직접 입력한 뒤 '확인'을 직접 누르세요. ⚠ 여기서 실제 API 키가 발급됩니다 — 되돌릴 수 없습니다. SellerOps는 이 버튼을 절대 누르지 않고, 입력란에 아무것도 쓰지 않습니다. 키가 화면에 표시되면 자동으로 넘어갑니다.",
   credentials: "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요. SellerOps는 값을 읽지 않습니다. 복사했으면 아래 버튼을 누르세요.",
   return: "아래 버튼을 눌러 SellerOps로 돌아가세요. 복사한 키를 입력하면 연결이 끝납니다.",
 };
@@ -716,6 +750,10 @@ export const OPERATOR_STEP_TITLES: Readonly<Record<CoupangIssuanceTarget, string
   // The chip named a consequence this control does not have (see the panel copy above, corrected 2026-08-12).
   // It now names the control, like every other chip — the panel carries what is true about it.
   issue_final: "'약관 동의 및 Key 발급받기' 누르기",
+  vendor_method: "입력 방식 '자체개발(직접입력)' 선택",
+  // The one chip in the walk that names a CONSEQUENCE, because this control has one and it is irreversible.
+  // Every other chip names the control; this is the exception the panel copy alone should not have to carry.
+  vendor_confirm: "'확인' 누르기 (키 발급)",
   credentials: "키 3개 복사",
   return: "SellerOps로 돌아가기",
 };
@@ -792,6 +830,11 @@ const GUIDED_RING_PLAN: Readonly<
 > = {
   confirm_purpose: { primary: "confirm", also: ["purpose_open_api"] },
   terms_consent: { primary: "consent_api", also: ["consent_category"] },
+  // One control each. They go through the ring path rather than `WING_HIGHLIGHT_LABELS` for the reason the plan
+  // exists: the spec is resolved from the PROMOTION record by id, so withdrawing either calibration removes its
+  // ring by itself instead of leaving a hand-written query pointing at a control nothing measured.
+  vendor_method: { primary: "vendor_self_dev", also: [] },
+  vendor_confirm: { primary: "vendor_confirm", also: [] },
 };
 
 /**
@@ -1399,6 +1442,13 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     // which "the expected screen is showing" cannot be told apart from "it was showing all along".
     const baseline = expected ? await this.probeFlowScreen().catch(() => null) : null;
     const screenMayAdvance = expected !== undefined && baseline !== null && baseline !== expected;
+    // The same construction for the step whose completion is a page CATEGORY rather than a flow screen: the
+    // credentials appearing after the seller presses the key-issuing 확인. Same baseline rule, same reason — a
+    // run that started on a page already showing credentials must not report that the seller just made them.
+    const expectedCategory = CHECKPOINT_ADVANCES_TO_CATEGORY[target];
+    const categoryBaseline = expectedCategory ? await this.readSurface().then((p) => p.pageCategory).catch(() => null) : null;
+    const categoryMayAdvance =
+      expectedCategory !== undefined && categoryBaseline !== null && categoryBaseline !== expectedCategory;
     // The screen probe costs three in-page locates, so it runs on a slower cadence than the latch poll rather
     // than on every tick. The seller pressing the button is still noticed within one latch poll.
     const screenEvery = Math.max(1, Math.round(SCREEN_OBSERVE_POLL_MS / OVERLAY_ADVANCE_POLL_MS));
@@ -1410,6 +1460,14 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
         // The consent step changes no screen, so its completion is the seller's own two ticks — observed, never
         // performed, and never recorded (see `observeConsentComplete`).
         if (target === "terms_consent" && (await this.observeConsentComplete())) return true;
+        // The key-issuing step. This observes the RESULT — the credentials being on screen — and cannot cause
+        // it: the category cannot become `credential_shown` before a credential exists. The seller pressed it.
+        if (
+          categoryMayAdvance &&
+          (await this.readSurface().then((p) => p.pageCategory).catch(() => null)) === expectedCategory
+        ) {
+          return true;
+        }
       }
       if (i < maxPolls - 1) await sleep(OVERLAY_ADVANCE_POLL_MS);
     }

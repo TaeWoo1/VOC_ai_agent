@@ -2227,19 +2227,22 @@ export interface WingVendorMethodScreenEvidence {
 
 export const WING_VENDOR_METHOD_SCREEN_EVIDENCE: WingVendorMethodScreenEvidence = Object.freeze({
   measuredOn: "2026-08-12",
-  gitSha: "0dfb6929",
-  runId: "wt-48fb1454662d",
-  approvalId: "apr-b65060f5857e",
-  recordId: "wingrec_d5dc00c2486c",
-  vendorCheckpointsRead: 1,
+  gitSha: "7049af08",
+  runId: "wt-203deafd017f",
+  approvalId: "apr-5f58409446fd",
+  recordId: "wingrec_c7d61cd70f63",
+  // BOTH vendor checkpoints — the screen untouched, and the screen with a method selected. Six checkpoints, no
+  // halt. The sitting before this one (`wingrec_d5dc00c2486c`, `apr-b65060f5857e`) read this screen ONCE and is
+  // deliberately not folded in: its marker was refuted, so its sixth checkpoint never ran.
+  vendorCheckpointsRead: 2,
   readings: Object.freeze([
     Object.freeze({
       candidateId: "stage4.vendor.partner.label",
       screen: "VENDOR_METHOD" as const,
       visibleCount: 1,
-      hiddenCount: 0,
+      hiddenCount: 1,
       observedTag: "LABEL",
-      checkpointsAgreeing: 1,
+      checkpointsAgreeing: 2,
     }),
     // The broad sibling: TWO painting elements carry the string. The narrowing is doing work here, exactly as it
     // was for the purpose option — and unlike `확인`, where the broad query found the same element.
@@ -2247,23 +2250,23 @@ export const WING_VENDOR_METHOD_SCREEN_EVIDENCE: WingVendorMethodScreenEvidence 
       candidateId: "stage4.vendor.partner.broad",
       screen: "VENDOR_METHOD" as const,
       visibleCount: 2,
-      hiddenCount: 0,
-      checkpointsAgreeing: 1,
+      hiddenCount: 2,
+      checkpointsAgreeing: 2,
     }),
     Object.freeze({
       candidateId: "stage4.vendor.self_dev.label",
       screen: "VENDOR_METHOD" as const,
       visibleCount: 1,
-      hiddenCount: 0,
+      hiddenCount: 1,
       observedTag: "LABEL",
-      checkpointsAgreeing: 1,
+      checkpointsAgreeing: 2,
     }),
     Object.freeze({
       candidateId: "stage4.vendor.self_dev.broad",
       screen: "VENDOR_METHOD" as const,
       visibleCount: 2,
-      hiddenCount: 0,
-      checkpointsAgreeing: 1,
+      hiddenCount: 2,
+      checkpointsAgreeing: 2,
     }),
     // 업체명 — hidden on every screen of every earlier run, and the reason `wingConfirmAdvisory` reads it. It
     // paints here, which is the first time any apparatus has seen the vendor form.
@@ -2271,20 +2274,20 @@ export const WING_VENDOR_METHOD_SCREEN_EVIDENCE: WingVendorMethodScreenEvidence 
       candidateId: "stage2.vendor_info.baseline",
       screen: "VENDOR_METHOD" as const,
       visibleCount: 1,
-      hiddenCount: 0,
+      hiddenCount: 3,
       observedTag: "DT",
-      checkpointsAgreeing: 1,
+      checkpointsAgreeing: 2,
     }),
-    // The screen's own 확인 — the control that ISSUES THE KEY. Measured to be locatable; never pressed, and
-    // nothing may auto-advance from it. Its spec is the SAME candidate the purpose screen's 확인 uses, which is
-    // why a reading carries the screen it was taken on.
+    // The screen's own 확인 — the control that ISSUES THE KEY. Measured to be locatable; never pressed by any
+    // phase. Its spec is the SAME candidate the purpose screen's 확인 uses, which is exactly why a reading
+    // carries the screen it was taken on: on TERMS this same candidate reads hidden.
     Object.freeze({
       candidateId: "stage2.confirm.actionable",
       screen: "VENDOR_METHOD" as const,
       visibleCount: 1,
-      hiddenCount: 0,
+      hiddenCount: 12,
       observedTag: "BUTTON",
-      checkpointsAgreeing: 1,
+      checkpointsAgreeing: 2,
     }),
   ]),
   choiceAssociation: Object.freeze({
@@ -2297,11 +2300,62 @@ export const WING_VENDOR_METHOD_SCREEN_EVIDENCE: WingVendorMethodScreenEvidence 
   }),
   notEstablished: Object.freeze([
     // Each of these is a sentence someone could otherwise read INTO the rows above.
-    "REPRODUCIBILITY_ONE_CHECKPOINT_ONLY",
     "WHAT_THE_VENDOR_SCREENS_CONFIRM_DOES_NEVER_PRESSED",
-    "WHETHER_THE_ROWS_HOLD_AFTER_A_METHOD_IS_SELECTED",
-    "WHICH_METHOD_SELLEROPS_SHOULD_USE_IS_A_PRODUCT_DECISION",
+    "WHICH_OF_THE_TWO_METHODS_THE_OPERATOR_SELECTED",
+    "WHETHER_URL_AND_IP_APPEAR_UNDER_BOTH_METHODS",
   ]),
+});
+
+/**
+ * **The last piece of the product owner's original flow description, measured.**
+ *
+ * That description ran `발급 → 연동 방식 선택 → 자체개발(직접입력) → 업체명 · URL · IP 주소 → 확인`. It was judged
+ * "wrong about the ordering" on 2026-08-10, corrected to "right about the form, wrong about where it sits" on
+ * 2026-08-12 — and the three fields were still the part nothing had ever seen. `URL` and `IP 주소` read hidden on
+ * every screen of every run for three days.
+ *
+ * On the sixth checkpoint, after a method was selected, both painted for the first time (`visible: 1`, tag `DT`,
+ * beside the already-visible `업체명`). The account was right end to end.
+ *
+ * **ONE checkpoint, and it is not enough to promote either.** The reveal is the finding; the locators are not.
+ * `stage2.vendor_info.baseline` was visible on BOTH vendor checkpoints and clears the bar; `URL` and `IP 주소`
+ * appeared only on the second and do not, which is why they are recorded here rather than in the readings above.
+ * Nor is it established that the reveal belongs to the method that was chosen — only one method was ever
+ * selected, and which one is not measured.
+ */
+export const WING_VENDOR_FORM_REVEAL = Object.freeze({
+  revealedOn: "2026-08-12",
+  recordId: "wingrec_c7d61cd70f63",
+  atCheckpoint: "VENDOR_METHOD_SELECTED_BY_OPERATOR" as const,
+  candidateIds: Object.freeze(["stage2.vendor_url.url", "stage2.call_ip.ip_addr"]),
+  checkpointsAgreeing: 1,
+  promotable: false,
+});
+
+/**
+ * **WHICH input method a SellerOps seller picks — a PRODUCT DECISION, recorded as one.**
+ *
+ * Decided by the product owner on 2026-08-12, with the measurement in front of them and explicitly separated
+ * from it. Nothing in the sweep recommends a method and nothing could: the screen offers two radios in one group
+ * and both resolve identically well.
+ *
+ * What the measurement DOES say, and the whole of it: selecting a method revealed 업체명 · URL · IP 주소, the
+ * three fields the product owner's flow description attaches to the 자체개발 path. That is corroboration of the
+ * description, not a derivation of the decision — the run never recorded which radio was selected.
+ *
+ * What is NOT established and would have to be, for the other option: whether SellerOps appears in Coupang's
+ * 연동업체 list. No apparatus has read that dropdown, and it is an external fact rather than a measurable one.
+ */
+export const WING_VENDOR_METHOD_PRODUCT_DECISION = Object.freeze({
+  decidedOn: "2026-08-12",
+  decidedBy: "PRODUCT_OWNER" as const,
+  basis: "PRODUCT_DECISION_NOT_A_MEASUREMENT" as const,
+  method: "자체개발(직접입력)",
+  /** The candidate the walk rings for it. Resolves through {@link wingCandidateSpecById}; never re-typed. */
+  candidateId: "stage4.vendor.self_dev.label",
+  /** The option the walk does NOT ring. Measured to the same standard; not chosen. */
+  notChosenCandidateId: "stage4.vendor.partner.label",
+  unmeasuredForTheAlternative: "WHETHER_SELLEROPS_IS_IN_COUPANGS_VENDOR_LIST",
 });
 
 export interface WingScreenReading {
@@ -2724,7 +2778,22 @@ export const WING_KEY_CREATION_SELECTOR_CALIBRATED = true as const;
  * while its target sat in a hand-written list, and keeping the two vocabularies apart is what stops a
  * measurement scope from reading as a promotion scope.
  */
-export const WING_GUIDED_HIGHLIGHT_TARGETS = ["purpose_open_api", "confirm", "consent_api", "consent_category"] as const;
+export const WING_GUIDED_HIGHLIGHT_TARGETS = [
+  "purpose_open_api",
+  "confirm",
+  "consent_api",
+  "consent_category",
+  // The VENDOR-METHOD screen, added 2026-08-12. `vendor_self_dev` is the option the product owner chose
+  // ({@link WING_VENDOR_METHOD_PRODUCT_DECISION}); `vendor_confirm` is the control that ISSUES THE KEY — ringed,
+  // never pressed, exactly as the walk has always treated the control it rests on.
+  //
+  // `연동업체 선택` is deliberately ABSENT. It was measured to the same standard as its sibling and clears the
+  // same bar; it is not here because the walk names ONE method, and that is a product decision rather than a
+  // missing measurement. Recording it as an unpromoted entry would say the opposite — that something is still
+  // owed on it — so it is left out of the ringable vocabulary entirely and the decision carries the reason.
+  "vendor_self_dev",
+  "vendor_confirm",
+] as const;
 export type WingGuidedHighlightTarget = (typeof WING_GUIDED_HIGHLIGHT_TARGETS)[number];
 
 /**
@@ -2836,6 +2905,29 @@ export const WING_GUIDED_HIGHLIGHT_PROMOTIONS: readonly WingGuidedHighlightPromo
     target: "consent_category" as const,
     candidateId: "stage3.terms.category_agree.label",
     screen: "TERMS" as const,
+    promoted: true,
+    blockedReason: null,
+  }),
+  // ── the VENDOR-METHOD screen (2026-08-12) ──
+  //
+  // Both rest on `WING_VENDOR_METHOD_SCREEN_EVIDENCE`: two checkpoints of the same screen, agreeing integer for
+  // integer and tag for tag, with a broad sibling measuring 2 for the option label — so the `label` narrowing is
+  // a disambiguation here, not a coincidence.
+  Object.freeze({
+    target: "vendor_self_dev" as const,
+    candidateId: "stage4.vendor.self_dev.label",
+    screen: "VENDOR_METHOD" as const,
+    promoted: true,
+    blockedReason: null,
+  }),
+  // The control that ISSUES THE KEY. Its candidate is the SAME one `confirm` uses on the purpose screen — a
+  // promotion is per (target, screen), and this row is what says the ring was measured on the screen it is drawn
+  // on. A promotion resting on the purpose-screen reading would be pointing at this control with evidence about
+  // a different one; on the terms screen between them, that same candidate reads hidden.
+  Object.freeze({
+    target: "vendor_confirm" as const,
+    candidateId: "stage2.confirm.actionable",
+    screen: "VENDOR_METHOD" as const,
     promoted: true,
     blockedReason: null,
   }),
@@ -3005,6 +3097,30 @@ export const WING_GUIDED_HIGHLIGHT_EVIDENCE: WingGuidedHighlightEvidence = Objec
   }),
   priorBasis: WING_CONSENT_PAIRING_LIVE_BASIS,
 });
+
+/**
+ * **Every live reading a promotion may cite, from whichever sitting took it.**
+ *
+ * Two evidence records exist because two sittings measured two different screens, and neither should be edited
+ * to hold the other's rows — a record names a run, an approval and a git sha, and folding a second run into it
+ * would make those fields describe only part of what they appear to cover.
+ *
+ * What must NOT be two things is the question "is there a reading behind this promotion". So the lookup is here,
+ * once, and the promotion gate asks it rather than picking a record. Adding a third sitting means adding it to
+ * this list and nowhere else; forgetting to means its promotions fail the gate, which is the right direction to
+ * fail in.
+ */
+export function wingGuidedHighlightReadings(): readonly WingGuidedHighlightReading[] {
+  return [...WING_GUIDED_HIGHLIGHT_EVIDENCE.readings, ...WING_VENDOR_METHOD_SCREEN_EVIDENCE.readings];
+}
+
+/** The reading behind one promotion, or `undefined` — which is a promotion the gate must refuse. */
+export function wingGuidedHighlightReadingFor(
+  candidateId: string,
+  screen: WingFlowScreen,
+): WingGuidedHighlightReading | undefined {
+  return wingGuidedHighlightReadings().find((r) => r.candidateId === candidateId && r.screen === screen);
+}
 
 /**
  * Resolve ANY recon candidate to its spec by id — the one door between a promotion record and a query string.

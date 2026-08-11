@@ -28,6 +28,9 @@ import {
   WING_VENDOR_METHOD_PLAN,
   WING_VENDOR_METHOD_SCREEN_MARKER_IDS,
   WING_VENDOR_METHOD_SCREEN_EVIDENCE,
+  WING_VENDOR_METHOD_PRODUCT_DECISION,
+  WING_VENDOR_FORM_REVEAL,
+  wingGuidedHighlightReadingFor,
   WING_VENDOR_METHOD_PROMPT_MARKER_REFUTED,
   WING_GUIDED_HIGHLIGHT_PROMOTIONS,
   WING_CHOICE_LABEL_CANDIDATES,
@@ -262,18 +265,22 @@ describe("the vendor screen, identified", () => {
     expect(WING_VENDOR_METHOD_SCREEN_MARKER_IDS as readonly string[]).not.toContain(headingSpec.id);
   });
 
-  it("**the first vendor reading promotes NOTHING** — one checkpoint is not a reproduction", () => {
+  it("**every vendor reading was taken TWICE**, on the two checkpoints of that screen", () => {
     const e = WING_VENDOR_METHOD_SCREEN_EVIDENCE;
-    expect(e.vendorCheckpointsRead).toBe(1);
+    expect(e.vendorCheckpointsRead).toBe(2);
     for (const r of e.readings) {
       expect(r.screen, r.candidateId).toBe("VENDOR_METHOD");
-      expect(r.checkpointsAgreeing, r.candidateId).toBe(1);
+      expect(r.checkpointsAgreeing, r.candidateId).toBe(2);
     }
-    // Nothing on this screen may appear in the promotion table while that is true.
+    // The sitting BEFORE this one read the screen once and is not folded in — its marker was refuted, so its
+    // sixth checkpoint never ran. A record names a run, an approval and a git sha; widening one to cover a
+    // second run makes those fields describe only part of what they appear to.
+    expect(e.recordId).toBe("wingrec_c7d61cd70f63");
+    // Every promotion drawn on this screen cites a row from THIS record.
     const vendorIds = new Set(e.readings.map((r) => r.candidateId));
     for (const p of WING_GUIDED_HIGHLIGHT_PROMOTIONS) {
-      if (p.promoted && p.candidateId && p.screen === "VENDOR_METHOD") {
-        expect(vendorIds.has(p.candidateId), `${p.candidateId} promoted on one checkpoint`).toBe(false);
+      if (p.promoted && p.screen === "VENDOR_METHOD") {
+        expect(vendorIds.has(p.candidateId ?? ""), `${p.candidateId} has no vendor-screen reading`).toBe(true);
       }
     }
     // The two instruments agreed from opposite directions — the strongest thing on this record, and still one
@@ -283,7 +290,33 @@ describe("the vendor screen, identified", () => {
     expect(WING_CHOICE_LABEL_CANDIDATES[9]!.exactText).toBe("자체개발(직접입력)");
     // …and what it does NOT establish is written down, not left to the absence of a field.
     expect(e.notEstablished).toContain("WHAT_THE_VENDOR_SCREENS_CONFIRM_DOES_NEVER_PRESSED");
-    expect(e.notEstablished).toContain("WHICH_METHOD_SELLEROPS_SHOULD_USE_IS_A_PRODUCT_DECISION");
+    expect(e.notEstablished).toContain("WHICH_OF_THE_TWO_METHODS_THE_OPERATOR_SELECTED");
+  });
+
+  it("**the 업체명 · URL · IP reveal is recorded as a finding, and NOT as a locator**", () => {
+    // The product owner's original flow description ended with these three fields. `URL` and `IP 주소` read
+    // hidden on every screen of every run for three days, and painted for the first time on the checkpoint after
+    // a method was selected. The account was right end to end.
+    expect(WING_VENDOR_FORM_REVEAL.candidateIds).toEqual(["stage2.vendor_url.url", "stage2.call_ip.ip_addr"]);
+    expect(WING_VENDOR_FORM_REVEAL.atCheckpoint).toBe("VENDOR_METHOD_SELECTED_BY_OPERATOR");
+    // ONE checkpoint. The reveal is the finding; the locators are not, and nothing may ring them.
+    expect(WING_VENDOR_FORM_REVEAL.checkpointsAgreeing).toBe(1);
+    expect(WING_VENDOR_FORM_REVEAL.promotable).toBe(false);
+    for (const id of WING_VENDOR_FORM_REVEAL.candidateIds) {
+      expect(wingGuidedHighlightReadingFor(id, "VENDOR_METHOD"), id).toBeUndefined();
+    }
+  });
+
+  it("**the method choice is recorded as a PRODUCT DECISION**, with what it does not rest on", () => {
+    const d = WING_VENDOR_METHOD_PRODUCT_DECISION;
+    expect(d.basis).toBe("PRODUCT_DECISION_NOT_A_MEASUREMENT");
+    expect(d.decidedBy).toBe("PRODUCT_OWNER");
+    // The ringed candidate is resolved by id, never re-typed — and its text IS the decided method.
+    expect(wingCandidateSpecById(d.candidateId).exactText).toBe(d.method);
+    // The alternative is measured to the same standard and simply not chosen. What would have to be established
+    // for it is an EXTERNAL fact nothing here can read.
+    expect(wingGuidedHighlightReadingFor(d.notChosenCandidateId, "VENDOR_METHOD")?.visibleCount).toBe(1);
+    expect(d.unmeasuredForTheAlternative).toBe("WHETHER_SELLEROPS_IS_IN_COUPANGS_VENDOR_LIST");
   });
 
   it("the checkpoint that ASKS for the press expects TERMS, so an unmatched marker cannot cost the sweep", () => {

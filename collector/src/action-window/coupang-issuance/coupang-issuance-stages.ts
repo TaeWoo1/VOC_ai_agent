@@ -20,8 +20,9 @@
  * places and fail-open in one.** See `docs/coupang_wing_openapi_issuance_flow_discovery_v1.md`.
  *
  * ```
- * open-API page → 발급 → PURPOSE screen → 확인 → TERMS screen → 약관 동의 및 Key 발급받기 → ??? → keys
- *                         OPEN API (default)        2 consent boxes                        ↑ NOT MODELLED
+ * open-API page → 발급 → PURPOSE → 확인 → TERMS → 약관 동의 및 Key 발급받기 → VENDOR METHOD → 확인 → keys
+ *                    OPEN API (default)   2 consents                        자체개발(직접입력)   ↑ ISSUES THE KEY
+ *                                                                          업체명 · URL · IP
  * ```
  *
  * **The `???` is real, and it is where the key is actually issued.** Until 2026-08-12 this diagram ended
@@ -124,6 +125,28 @@ export type CoupangIssuanceStage =
    * `wingIssuedStateFrom` remains `NO_DISCRIMINATING_SIGNAL` on this surface.
    */
   | "checkpoint_before_issue"
+  /**
+   * Seller barrier (checkpoint): the VENDOR-METHOD screen's input-method choice. The runtime rings
+   * `자체개발(직접입력)` — the product owner's decision, taken with the measurement in front of them — and rests.
+   * The seller selects it themselves; SellerOps selects nothing and reads no `checked`.
+   *
+   * MEASURED 2026-08-12: two radios in one group, both named by `label[for]`, both resolving to exactly one
+   * painting `LABEL`. Selecting one revealed 업체명 · URL · IP 주소 — the last part of the product owner's
+   * original flow description, and the first time any apparatus had seen those fields paint.
+   */
+  | "guiding_vendor_method"
+  /**
+   * **Seller CHECKPOINT — THE KEY-CREATION BOUNDARY, and this time the name is measured.** The vendor screen's
+   * `확인` is highlighted and the run RESTS. The seller presses it themselves; the runtime never clicks it.
+   *
+   * This is where a real, irreversible marketplace credential comes into existence. `checkpoint_before_issue`
+   * held this name for two corrections while the control it guarded turned out not to create anything; the
+   * boundary is here.
+   *
+   * It DOES advance itself — on WING then showing the credentials, which is an observation of the RESULT and
+   * never of the press. Nothing about that observation causes the issuance.
+   */
+  | "checkpoint_issue_key"
   /** Seller barrier (checkpoint): they read + COPY the Access Key / Secret Key / 업체코드 (their highlighted
    * region). The runtime reads no value. */
   | "guiding_copy_keys"
@@ -147,6 +170,8 @@ export const COUPANG_ISSUANCE_BARRIER_STAGES: readonly CoupangIssuanceStage[] = 
   "checkpoint_confirm_purpose",
   "guiding_terms_consent",
   "checkpoint_before_issue",
+  "guiding_vendor_method",
+  "checkpoint_issue_key",
   "guiding_copy_keys",
   "return_to_sellerops",
 ];
@@ -215,8 +240,10 @@ export function coupangIssuanceStepPlan(): readonly CoupangIssuanceStepMeta[] {
     { stepNumber: 3, stepId: "aw.coupang_issuance_confirm_purpose", copyKey: "actionWindow.coupangIssuance.confirmPurpose", mode: "ACTION_WINDOW", copyParams: { targetKind: "confirm_purpose" } },
     { stepNumber: 4, stepId: "aw.coupang_issuance_terms_consent", copyKey: "actionWindow.coupangIssuance.termsConsent", mode: "ACTION_WINDOW", copyParams: { targetKind: "terms_consent" } },
     { stepNumber: 5, stepId: "aw.coupang_issuance_issue_checkpoint", copyKey: "actionWindow.coupangIssuance.issueCheckpoint", mode: "ACTION_WINDOW", copyParams: { targetKind: "issue_final" } },
-    { stepNumber: 6, stepId: "aw.coupang_issuance_copy_keys", copyKey: "actionWindow.coupangIssuance.copyKeys", mode: "ACTION_WINDOW", copyParams: { targetKind: "credentials" } },
-    { stepNumber: 7, stepId: "aw.coupang_issuance_return", copyKey: "actionWindow.coupangIssuance.return", mode: "ACTION_WINDOW", copyParams: { targetKind: "return" } },
+    { stepNumber: 6, stepId: "aw.coupang_issuance_vendor_method", copyKey: "actionWindow.coupangIssuance.vendorMethod", mode: "ACTION_WINDOW", copyParams: { targetKind: "vendor_method" } },
+    { stepNumber: 7, stepId: "aw.coupang_issuance_vendor_confirm", copyKey: "actionWindow.coupangIssuance.vendorConfirm", mode: "ACTION_WINDOW", copyParams: { targetKind: "vendor_confirm" } },
+    { stepNumber: 8, stepId: "aw.coupang_issuance_copy_keys", copyKey: "actionWindow.coupangIssuance.copyKeys", mode: "ACTION_WINDOW", copyParams: { targetKind: "credentials" } },
+    { stepNumber: 9, stepId: "aw.coupang_issuance_return", copyKey: "actionWindow.coupangIssuance.return", mode: "ACTION_WINDOW", copyParams: { targetKind: "return" } },
   ];
 }
 
@@ -224,27 +251,24 @@ export function coupangIssuanceStepPlan(): readonly CoupangIssuanceStepMeta[] {
 export const COUPANG_ISSUANCE_TOTAL_STEPS = coupangIssuanceStepPlan().length;
 
 /**
- * **The LAST step this walk models**, named once so no layer has to count. Step 5 — the checkpoint in front of
- * `약관 동의 및 Key 발급받기`.
+ * **The step at which a real API key comes into existence.** Step 7 — the vendor-method screen's `확인`.
  *
- * **It is NOT the step at which the key is created**, which is what this constant claimed until 2026-08-12 and
- * what its name still says. The control was pressed on a live walk and no key was issued; an unmodelled
- * integration-method screen follows, and the key is issued by that screen's `확인`
- * (`WING_KEY_CREATION_CONTROL_REFUTATION`).
+ * **It said 5 until 2026-08-12, and 5 was never right.** That step is the checkpoint in front of
+ * `약관 동의 및 Key 발급받기`, a control asserted from its label to create the key and never observed doing it.
+ * It was pressed on two live walks and issued none; the screen it opens was then measured
+ * (`WING_VENDOR_METHOD_SCREEN_EVIDENCE`), and the key is created by that screen's `확인`.
  *
- * **The name is left alone deliberately, and the correction is here rather than in a rename.** Renaming it
- * would be a mechanical change across every consumer at the moment the real boundary is UNKNOWN — the key is
- * created somewhere past step 5, and nobody has measured where. A constant renamed to a second guess is worse
- * than one whose doc says what is and is not established.
+ * The constant kept its name through the correction rather than being renamed to something hedged, and this is
+ * the note that used to explain why the name was a second guess. It is not one any more: the boundary is
+ * measured, and the name and the value finally agree.
  *
- * **What a consumer may rely on:** everything up to and including this step is reversible — the seller can
- * cancel out of the purpose, terms or integration screen and nothing has happened. What it may NOT rely on is
- * the converse: this is not the wall past which a credential exists, because the wall is at least one screen
- * further on and its position is unmeasured. Erring the other way — treating step 5 as "a key may now exist" —
- * is the safer error, and is what the old wording produced; erring toward "a key certainly exists here" is
- * what this note exists to prevent.
+ * **What a consumer may rely on:** everything BEFORE this step is reversible — the seller can cancel out of the
+ * purpose, terms or vendor screen and nothing has happened. Everything from this step on may have produced a
+ * credential. The walk still reads no credential VALUE, so `wingIssuedStateFrom` stays
+ * `NO_DISCRIMINATING_SIGNAL` on the issuance surface; "a key may exist" is a fact about the STEP, never a
+ * reading of one.
  */
-export const COUPANG_ISSUANCE_KEY_CREATION_STEP = 5;
+export const COUPANG_ISSUANCE_KEY_CREATION_STEP = 7;
 
 /** Step metadata at a 1-based index, clamped so a park/terminal view never reads past the plan. */
 export function coupangIssuanceStepMetaAt(plan: readonly CoupangIssuanceStepMeta[], stepNumber: number): CoupangIssuanceStepMeta {
@@ -272,6 +296,8 @@ export function coupangIssuanceStageToRunStatus(stage: CoupangIssuanceStage): Ru
     case "checkpoint_confirm_purpose":
     case "guiding_terms_consent":
     case "checkpoint_before_issue":
+    case "guiding_vendor_method":
+    case "checkpoint_issue_key":
     case "guiding_copy_keys":
     case "return_to_sellerops":
     case "target_not_found":
@@ -297,6 +323,8 @@ export function coupangIssuanceStageToStepStatus(stage: CoupangIssuanceStage): S
     case "checkpoint_confirm_purpose":
     case "guiding_terms_consent":
     case "checkpoint_before_issue":
+    case "guiding_vendor_method":
+    case "checkpoint_issue_key":
     case "guiding_copy_keys":
     case "return_to_sellerops":
     case "target_not_found":

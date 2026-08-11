@@ -796,6 +796,8 @@ export const CANDIDATE_WING_TARGET_SELECTORS = {
   confirm_purpose: "[data-aw-target='confirm_purpose']",
   terms_consent: "[data-aw-target='terms_consent']",
   issue_final: "[data-aw-target='issue_final']",
+  vendor_method: "[data-aw-target='vendor_method']",
+  vendor_confirm: "[data-aw-target='vendor_confirm']",
   credentials: "[data-aw-target='credentials']",
   return: "[data-aw-target='return']",
 } as const;

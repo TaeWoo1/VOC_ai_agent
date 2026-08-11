@@ -168,34 +168,43 @@ describe("the chip's title and the panel's instruction are different things", ()
     }
   });
 
-  it("**the last step's copy says what is TRUE of the control**, which stopped being 'it creates the key'", () => {
-    // Corrected 2026-08-12. The chip read "⚠ 키가 생성되는 단계" and the panel "⚠ 여기서 실제로 키가
-    // 생성됩니다 … 발급이 끝나면", and the control does not create a key: it was pressed on the live walk and
-    // none was issued (`WING_KEY_CREATION_CONTROL_REFUTATION`). A warning attached to a consequence that does
-    // not happen spends the credibility the true warnings need.
+  it("**the copy of every step that names a consequence says what is MEASURED of that control**", () => {
+    // Corrected twice. `issue_final`'s chip read "⚠ 키가 생성되는 단계" and its panel "⚠ 여기서 실제로 키가
+    // 생성됩니다" — asserted from a button label, refuted 2026-08-12 when the control was pressed and issued
+    // nothing (`WING_KEY_CREATION_CONTROL_REFUTATION`). The warning now lives on the control that has the
+    // consequence, and it is measured.
     expect(OPERATOR_STEP_TITLES.issue_final).not.toContain("키가 생성");
     expect(OPERATOR_STEP_LABELS.issue_final).not.toContain("여기서 실제로 키가 생성됩니다");
-    // The three claims that must SURVIVE, because they are what the step is for: the seller presses it,
-    // SellerOps never does, and nothing advances past it on its own.
-    for (const clause of [
-      "'약관 동의 및 Key 발급받기'를 직접 누르세요",
-      "버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다.",
-      "이 버튼은 키를 만들지 않습니다.",
-    ]) {
+    for (const clause of ["'약관 동의 및 Key 발급받기'를 직접 누르세요", "이 버튼은 키를 만들지 않고"]) {
       expect(OPERATOR_STEP_LABELS.issue_final, clause).toContain(clause);
     }
-    // …and it names where the key IS issued, plus the fact that SellerOps does not guide that screen — the
-    // seller is about to reach a step this walk has never measured, and being told so is the point.
-    expect(OPERATOR_STEP_LABELS.issue_final).toContain("그 화면의 '확인'에서 발급됩니다");
-    expect(OPERATOR_STEP_LABELS.issue_final).toContain("아직 SellerOps가 안내하지 않으니 직접 진행해 주세요");
-    // **The advance is gated on the CREDENTIALS being on screen, not on the press.** The first correction ended
-    // "눌러서 다음 화면이 뜨면 아래 버튼을 누르세요" — which directs the seller to advance the moment the
-    // integration screen appears. Step 6 then locates the fixed label `Access Key`, which does not paint on
-    // that screen, so `locateTarget` returns 0 and the run parks `target_not_found` on a step the seller was
-    // just told to enter. A correction that makes a dead end reachable BY FOLLOWING IT is worse than the claim
-    // it replaced.
-    expect(OPERATOR_STEP_LABELS.issue_final).toContain("Access Key가 화면에 표시되면 아래 버튼을 누르세요");
-    expect(OPERATOR_STEP_LABELS.issue_final).not.toContain("다음 화면이 뜨면 아래 버튼");
+    // **The second correction was itself a removal.** It said "그 화면은 아직 SellerOps가 안내하지 않으니 직접
+    // 진행해 주세요" and "Access Key가 화면에 표시되면 아래 버튼을 누르세요" — both true when written, both false
+    // once the vendor screen was measured and the walk gained steps for it. Guidance that apologises for not
+    // guiding, on a step that now guides, is the same class of stale safety copy as the warning above.
+    expect(OPERATOR_STEP_LABELS.issue_final).not.toContain("아직 SellerOps가 안내하지 않으니");
+    expect(OPERATOR_STEP_LABELS.issue_final).not.toContain("Access Key가 화면에 표시되면");
+    expect(OPERATOR_STEP_LABELS.issue_final).toContain("자동으로 넘어갑니다");
+  });
+
+  it("**the key-issuing step carries the irreversibility, in the panel AND the chip**", () => {
+    // The one control in the walk that brings a real credential into existence. Every other chip names a
+    // control; this one names the consequence, because the panel alone should not have to carry a fact this
+    // size — and the previous owner of that warning did not have the consequence at all.
+    expect(OPERATOR_STEP_TITLES.vendor_confirm).toContain("키 발급");
+    for (const clause of [
+      "'확인'을 직접 누르세요",
+      "여기서 실제 API 키가 발급됩니다",
+      "되돌릴 수 없습니다",
+      // SellerOps presses nothing and types nothing — the fields are the seller's own company details.
+      "이 버튼을 절대 누르지 않고, 입력란에 아무것도 쓰지 않습니다",
+    ]) {
+      expect(OPERATOR_STEP_LABELS.vendor_confirm, clause).toContain(clause);
+    }
+    // The method step names the chosen option and says who chooses. `연동업체 선택` is measured to the same
+    // standard and is not named, because the walk guides ONE method by product decision.
+    expect(OPERATOR_STEP_LABELS.vendor_method).toContain("'자체개발(직접입력)'을 직접 선택하세요");
+    expect(OPERATOR_STEP_LABELS.vendor_method).toContain("SellerOps는 선택하지 않습니다");
   });
 
   it("the chip has a STRUCTURAL ceiling too — a long label is visibly cut, not lost off-screen", () => {

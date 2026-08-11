@@ -986,40 +986,47 @@ describe("the guided-walk manifest is not the fallback", () => {
     expect(CLI).toContain("isWingGuidedWalk\n    ? \"operator-performed: the whole tutorial");
   });
 
-  it("the operation names the boundary, what the rings sit ON, and what is out of scope", () => {
+  it("**the operation says this run ends with a REAL KEY**, and what the rings sit on", () => {
     const from = CLI.indexOf('isWingGuidedWalk\n    ? "WING GUIDED ISSUANCE WALK');
     const op = CLI.slice(from, CLI.indexOf("\n    : isWingReveal", from));
-    expect(op).toContain("never pressed");
-    expect(op).toContain("separate phase");
-    // The two highlight CLASSES became one on 2026-08-11 — every guided control is now calibrated. What
-    // replaced that distinction is the one that still matters: which ELEMENT each ring sits on. The purpose and
-    // consent rings are on a label and two sentences, never on the radio or the checkboxes, because those
-    // inputs have no accessible association and nothing may claim to know which box is which.
-    expect(op).toContain("never on the radio or the checkboxes");
-    expect(op).toContain("measured structural pairing");
-    // The stop point is unchanged and its reason is corrected: the operation text may no longer tell the
-    // operator this control creates the key, because it does not.
-    expect(op).not.toContain("which is the control that CREATES THE KEY");
-    expect(op).toContain("REFUTED on 2026-08-12");
-    expect(op).toContain("what follows is unmeasured");
+    // The line that changed everything about this phase on 2026-08-12. Every earlier walk stopped one screen
+    // short of any key existing, and the operation text has to say plainly that this one does not.
+    expect(op).toContain("ENDS WITH A REAL API KEY ON YOUR LIVE COUPANG ACCOUNT");
+    expect(op).toContain("WHICH ISSUES THE KEY, IRREVERSIBLY");
+    expect(op).toContain("SellerOps never presses it");
+    // The press it asks for on the way rests on the MEASUREMENT, never on a button label — which is exactly what
+    // the refuted claim rested on.
+    expect(op).toContain("MEASURED to create no key");
+    // Which ELEMENT each ring sits on. Those inputs have no accessible association, and nothing may claim to
+    // know which box is which.
+    expect(op).toContain("never on a radio or a checkbox");
+    // The auto-advance that follows the key press is an OBSERVATION of the result, and the text says why it
+    // cannot be anything else.
+    expect(op).toContain("cannot cause it");
+    expect(op).toContain("PRODUCT DECISION");
     expect(op).toContain("navigates no further");
     expect(op).toContain("no connect-test, no sync");
+    // The retired claims. Both were true when written and neither is now.
+    expect(op).not.toContain("which is the control that CREATES THE KEY");
+    expect(op).not.toContain("what follows is unmeasured");
   });
 
-  it("the maxActions budget counts zero presses of the key-creating control", () => {
+  it("the maxActions budget counts the key press as the SELLER's, and zero for the agent", () => {
     const from = CLI.indexOf('isWingGuidedWalk\n    ? "operator-performed: the whole tutorial');
     const max = CLI.slice(from, CLI.indexOf("\n    : isWingReveal", from));
-    expect(max).toContain("0 presses of the key-creating");
-    // ONE navigation now — the landing — and the budget must SAY so rather than keep claiming zero.
+    expect(max).toContain("WHICH ISSUES A REAL KEY");
+    expect(max).toContain("0 key presses");
+    // ONE navigation — the landing — and the budget must SAY so rather than keep claiming zero.
     expect(max).toContain("1 navigation (the landing at window open, never again)");
-    // Seven since the guided-control calibration landed. The budget also has to state that the runtime
-    // advances itself now — a budget listing only what the SELLER presses would understate what the agent does.
-    expect(max).toContain("7 highlights");
+    // Nine since the vendor screen was measured. The budget also has to state that the runtime advances itself
+    // now — a budget listing only what the SELLER presses would understate what the agent does.
+    expect(max).toContain("9 highlights");
     expect(max).toContain("0 text-guided");
     // …and the count that says what SellerOps does NOT know: no ring sits on an input.
     expect(max).toContain("0 rings on an input");
-    expect(max).toContain("4 steps advanced by OBSERVING WING");
-    expect(max).toContain("the key-creating step never");
+    expect(max).toContain("6 steps advanced by OBSERVING WING");
+    // The one thing that is never observed into happening: the press itself.
+    expect(max).toContain("the key-issuing PRESS is never one of them");
   });
 });
 

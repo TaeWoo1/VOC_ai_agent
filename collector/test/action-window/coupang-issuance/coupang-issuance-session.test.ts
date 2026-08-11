@@ -135,9 +135,17 @@ describe("coupang issuance session — the full linear walkthrough (offline)", (
       "observe:terms_consent",
       "wait:terms_consent",
       "locate:issue_final",
-      "highlight:issue_final", // ⚠ THE KEY-CREATION CONTROL — highlighted, never pressed by SellerOps
+      "highlight:issue_final", // MEASURED not to create a key — it opens the vendor-method screen
       "observe:issue_final",
-      "wait:issue_final", // …the seller reports pressing it; only now can a credential exist
+      "wait:issue_final",
+      "locate:vendor_method",
+      "highlight:vendor_method",
+      "observe:vendor_method",
+      "wait:vendor_method",
+      "locate:vendor_confirm",
+      "highlight:vendor_confirm", // ⚠ THE KEY-CREATION CONTROL — highlighted, never pressed by SellerOps
+      "observe:vendor_confirm",
+      "wait:vendor_confirm", // …the seller presses it; only now can a credential exist
       "locate:credentials",
       "highlight:credentials", // copy the Access Key / Secret Key / 업체코드
       "observe:credentials",
@@ -153,12 +161,12 @@ describe("coupang issuance session — the full linear walkthrough (offline)", (
     expect(commandResults).toHaveLength(1);
   });
 
-  it("keeps totalSteps a fixed 7, carrying the coupang channel + issuance intent + NO appBranch on every view", async () => {
+  it("keeps totalSteps a fixed 9, carrying the coupang channel + issuance intent + NO appBranch on every view", async () => {
     const { io, session } = build();
     startRun(io);
     await session.whenSettled();
     const totals = new Set(io.views().map((v) => v.currentStep!.totalSteps));
-    expect(totals).toEqual(new Set([7]));
+    expect(totals).toEqual(new Set([9]));
     for (const v of io.views()) {
       expect(v.intent).toBe("API_ISSUANCE_GUIDANCE");
       expect(v.channelCode).toBe("coupang");

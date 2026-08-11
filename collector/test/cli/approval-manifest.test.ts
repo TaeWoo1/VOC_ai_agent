@@ -1382,7 +1382,27 @@ describe("the guided walk's installed-service entrypoint", () => {
       }
       expect(BOUNDARY.agentPerformsAction).toBe(false);
       expect(BOUNDARY.credentialValueReadBudget).toBe(0);
-      expect(BOUNDARY.keyCreationAutoAdvances).toBe(false);
+      // The PRESS is never automatic. Renamed from `keyCreationAutoAdvances` on 2026-08-12, when the key-issuing
+      // step gained an observed advance and one field could no longer say both things — and the one that could
+      // be misread is the one guarding the irreversible act.
+      expect(BOUNDARY.keyCreationPressAutoPerformed).toBe(false);
+      expect(BOUNDARY.agentCreatesKeyMaterial).toBe(false);
+    });
+
+    it("**declares that the OPERATOR ends this run holding a real key** — the agent's budget is not the whole story", () => {
+      // Until 2026-08-12 the walk stopped one screen short of any key existing, so `createsKeyMaterial: false`
+      // read as both "the agent makes none" and "none is made". Only the first was ever asserted. The second is
+      // now untrue, and this pair is what stops them being read as one claim.
+      expect(BOUNDARY.operatorIssuesRealKey).toBe(true);
+      expect(BOUNDARY.restsBeforeControl).toBe("확인 (vendor-method screen)");
+      // The advance AFTER the press is an observation of the RESULT — the sanitized page category cannot become
+      // `credential_shown` before a credential exists.
+      expect(BOUNDARY.keyIssuanceAdvancesOnObservedResult).toBe(true);
+      // The method the walk names is a PRODUCT decision, and the descriptor says whose.
+      expect(BOUNDARY.vendorMethodGuided).toBe("자체개발(직접입력)");
+      expect(BOUNDARY.vendorMethodDecidedBy).toBe("PRODUCT_OWNER");
+      expect(BOUNDARY.highlightedControlCount).toBe(9);
+      expect(BOUNDARY.ringedInputControlCount).toBe(0);
     });
   });
 });
