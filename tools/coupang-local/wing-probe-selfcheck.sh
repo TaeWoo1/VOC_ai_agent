@@ -373,8 +373,11 @@ if [ -z "$TREE_DIRTY" ]; then
   # A NARROWED vendor run must not promise the two steps it will not take.
   write_stage2_env "$FIXTURES/vendor-narrow.env" "$CUR_GIT" "$VENDOR_SCOPE" \
     "wt-selfcheck41" "apr-selfcheck41" "COUPANG_WING_VENDOR_METHOD_DISCOVERY"
-  OUT_VN="$(env SELLEROPS_WING_PROBE_RUN_ENV="$FIXTURES/vendor-narrow.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" \
-    SELLEROPS_WING_FLOW_CHECKPOINTS="PURPOSE_SCREEN_UNTOUCHED,PURPOSE_OPTION_SELECTED_BY_OPERATOR" bash "$PREFLIGHT" 2>&1 || true)"
+  # The plan goes in the RUN ENV, not the ambient shell — the preflight strips ambient copies on purpose, so a
+  # narrowing passed on the command line would silently be the full run.
+  printf "SELLEROPS_WING_FLOW_CHECKPOINTS='%s'\n" "PURPOSE_SCREEN_UNTOUCHED,PURPOSE_OPTION_SELECTED_BY_OPERATOR" \
+    >> "$FIXTURES/vendor-narrow.env"
+  OUT_VN="$(env SELLEROPS_WING_PROBE_RUN_ENV="$FIXTURES/vendor-narrow.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1 || true)"
   if grep -q "THIS RUN IS NARROWED" <<<"$OUT_VN" && ! grep -q "1 vendor-method selection" <<<"$OUT_VN"; then
     echo "  PASS  VENDOR_NARROW  · a narrowed run does not promise the vendor steps"
   else
