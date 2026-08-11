@@ -26,9 +26,13 @@ import {
   WING_TERMS_SCREEN_MARKER_IDS,
   WING_VENDOR_METHOD_CHECKPOINTS,
   WING_VENDOR_METHOD_PLAN,
-  WING_VENDOR_METHOD_SCREEN_MARKER_ID,
+  WING_VENDOR_METHOD_SCREEN_MARKER_IDS,
+  WING_VENDOR_METHOD_SCREEN_EVIDENCE,
+  WING_VENDOR_METHOD_PROMPT_MARKER_REFUTED,
+  WING_GUIDED_HIGHLIGHT_PROMOTIONS,
+  WING_CHOICE_LABEL_CANDIDATES,
   WING_VENDOR_METHOD_SCREEN_MARKER_MEASURED,
-  WING_VENDOR_METHOD_SCREEN_MARKER_SPEC,
+  WING_VENDOR_METHOD_SCREEN_MARKER_SPECS,
   resolveWingFlowCheckpoints,
   wingCandidateSpecById,
   wingDiscoveryScopeGap,
@@ -176,8 +180,13 @@ describe("resolveWingFlowCheckpoints — against the plan it was given", () => {
 /* ══════════════════════════ the VENDOR_METHOD screen ══════════════════════════ */
 
 type Row = { id: string; presence: WingStage2Presence };
+const ALL_MARKER_IDS = [
+  WING_PURPOSE_SCREEN_MARKER_ID,
+  ...WING_TERMS_SCREEN_MARKER_IDS,
+  ...WING_VENDOR_METHOD_SCREEN_MARKER_IDS,
+];
 const allMarkers = (visible: string | null): Row[] =>
-  [WING_PURPOSE_SCREEN_MARKER_ID, ...WING_TERMS_SCREEN_MARKER_IDS, WING_VENDOR_METHOD_SCREEN_MARKER_ID].map((id) => ({
+  ALL_MARKER_IDS.map((id) => ({
     id,
     presence: (id === visible ? "PRESENT_VISIBLE" : "PRESENT_HIDDEN_ONLY") as WingStage2Presence,
   }));
@@ -187,13 +196,24 @@ describe("the vendor screen, identified", () => {
     expect(WING_FLOW_SCREENS).toContain("VENDOR_METHOD");
   });
 
-  it("**outranks TERMS when both paint** — it is reported as a dialog OVER the terms screen", () => {
+  it("outranks TERMS when both paint — a precaution whose original reason was falsified", () => {
+    // It was ordered first expecting a DIALOG over the terms screen. Measured 2026-08-12: the vendor screen
+    // REPLACES it and both terms markers go back to hidden, so this case has never actually occurred. Kept,
+    // because the rule it follows — resolve to the screen where stopping is correct — has been right every time.
     const both = allMarkers(null).map((c) =>
-      c.id === WING_VENDOR_METHOD_SCREEN_MARKER_ID || (WING_TERMS_SCREEN_MARKER_IDS as readonly string[]).includes(c.id)
+      (WING_VENDOR_METHOD_SCREEN_MARKER_IDS as readonly string[]).includes(c.id) ||
+      (WING_TERMS_SCREEN_MARKER_IDS as readonly string[]).includes(c.id)
         ? { ...c, presence: "PRESENT_VISIBLE" as const }
         : c,
     );
     expect(wingFlowScreenFrom({ precondition: "OK", faultCount: 0, candidates: both })).toBe("VENDOR_METHOD");
+    // EITHER marker alone is sufficient, like the terms pair — a method selection that hid one option must not
+    // make the screen unrecognizable.
+    for (const id of WING_VENDOR_METHOD_SCREEN_MARKER_IDS) {
+      expect(wingFlowScreenFrom({ precondition: "OK", faultCount: 0, candidates: allMarkers(id) }), id).toBe(
+        "VENDOR_METHOD",
+      );
+    }
   });
 
   it("an UNPROBED vendor marker makes every screen NOT_MEASURED — which is why it is required of every scope", () => {
@@ -202,16 +222,18 @@ describe("the vendor screen, identified", () => {
     // per-screen probed-ness rule) would let a run standing on the vendor screen report TERMS because it never
     // asked.
     const withoutVendor = allMarkers(WING_TERMS_SCREEN_MARKER_IDS[0]!).filter(
-      (c) => c.id !== WING_VENDOR_METHOD_SCREEN_MARKER_ID,
+      (c) => !(WING_VENDOR_METHOD_SCREEN_MARKER_IDS as readonly string[]).includes(c.id),
     );
     expect(wingFlowScreenFrom({ precondition: "OK", faultCount: 0, candidates: withoutVendor })).toBe("NOT_MEASURED");
-    expect(wingScreenMarkerTargets()).toContain("vendor_method_prompt");
-    // …so a scope missing it is refused BEFORE Chrome, for BOTH discovery phases.
-    const gapScope = WING_STAGE2_RECON_TARGETS.filter((t) => t !== "vendor_method_prompt");
-    expect(wingDiscoveryScopeGap(gapScope)).toEqual(["vendor_method_prompt"]);
+    expect(wingScreenMarkerTargets()).toEqual(
+      expect.arrayContaining(["vendor_partner", "vendor_self_dev"]),
+    );
+    // …so a scope missing them is refused BEFORE Chrome, for BOTH discovery phases.
+    const gapScope = WING_STAGE2_RECON_TARGETS.filter((t) => t !== "vendor_partner");
+    expect(wingDiscoveryScopeGap(gapScope)).toEqual(["vendor_partner"]);
     for (const phase of [WING_ISSUANCE_FLOW_DISCOVERY_PHASE, WING_VENDOR_METHOD_DISCOVERY_PHASE]) {
       const refusal = discoveryScopeRefusal(phase, gapScope);
-      expect(refusal, phase).toContain("vendor_method_prompt");
+      expect(refusal, phase).toContain("vendor_partner");
       expect(refusal, phase).toContain(phase);
       expect(refusal, phase).toContain("No browser launched");
     }
@@ -220,15 +242,48 @@ describe("the vendor screen, identified", () => {
     expect(discoveryScopeRefusal(null, gapScope)).toBeNull();
   });
 
-  it("**exactly ONE marker**, and the screen's title is deliberately not it", () => {
-    // This screen sorts FIRST, so a marker that paints earlier in the flow would make every reading of the whole
-    // run report VENDOR_METHOD. The title `OPEN API 키 발급` is one 오픈/OPEN away from the walk's own first page.
-    expect(WING_VENDOR_METHOD_SCREEN_MARKER_SPEC.exactText).toBe("업체 입력 방식");
+  it("**the markers are the two MEASURED option labels** — the transcribed one was refuted", () => {
+    expect(WING_VENDOR_METHOD_SCREEN_MARKER_SPECS.map((s) => s.exactText)).toEqual([
+      "연동업체 선택",
+      "자체개발(직접입력)",
+    ]);
+    for (const spec of WING_VENDOR_METHOD_SCREEN_MARKER_SPECS) expect(spec.candidateQuery).toBe("label");
+    expect(WING_VENDOR_METHOD_SCREEN_MARKER_MEASURED).toBe(true);
+    // The first marker shipped was `업체 입력 방식`, transcribed off the live screen. It matched NOTHING as whole
+    // text on any of five readings — including the vendor screen's own — so the run halted at the last
+    // checkpoint. The candidate stays in the sweep because the absence is the evidence.
+    expect(WING_VENDOR_METHOD_PROMPT_MARKER_REFUTED).toContain("PRESENT_NOT_WHOLE_TEXT_ON_ITS_OWN_SCREEN");
+    const refutedSpec = wingCandidateSpecById("stage4.vendor.method_prompt");
+    expect(refutedSpec.exactText).toBe("업체 입력 방식");
+    expect(WING_VENDOR_METHOD_SCREEN_MARKER_IDS as readonly string[]).not.toContain(refutedSpec.id);
+    // The screen's TITLE is excluded, and now for a measured reason: it paints on EVERY screen in the flow.
     const headingSpec = wingCandidateSpecById("stage4.vendor.heading");
     expect(headingSpec.exactText).toBe("OPEN API 키 발급");
-    expect(headingSpec.id).not.toBe(WING_VENDOR_METHOD_SCREEN_MARKER_ID);
-    // Never matched by anything. Auto-advance built on it must degrade to the seller's own advance.
-    expect(WING_VENDOR_METHOD_SCREEN_MARKER_MEASURED).toBe(false);
+    expect(WING_VENDOR_METHOD_SCREEN_MARKER_IDS as readonly string[]).not.toContain(headingSpec.id);
+  });
+
+  it("**the first vendor reading promotes NOTHING** — one checkpoint is not a reproduction", () => {
+    const e = WING_VENDOR_METHOD_SCREEN_EVIDENCE;
+    expect(e.vendorCheckpointsRead).toBe(1);
+    for (const r of e.readings) {
+      expect(r.screen, r.candidateId).toBe("VENDOR_METHOD");
+      expect(r.checkpointsAgreeing, r.candidateId).toBe(1);
+    }
+    // Nothing on this screen may appear in the promotion table while that is true.
+    const vendorIds = new Set(e.readings.map((r) => r.candidateId));
+    for (const p of WING_GUIDED_HIGHLIGHT_PROMOTIONS) {
+      if (p.promoted && p.candidateId && p.screen === "VENDOR_METHOD") {
+        expect(vendorIds.has(p.candidateId), `${p.candidateId} promoted on one checkpoint`).toBe(false);
+      }
+    }
+    // The two instruments agreed from opposite directions — the strongest thing on this record, and still one
+    // checkpoint. Indices, never wording.
+    expect(e.choiceAssociation.rows.map((r) => r.exactCandidateIndex)).toEqual([8, 9]);
+    expect(WING_CHOICE_LABEL_CANDIDATES[8]!.exactText).toBe("연동업체 선택");
+    expect(WING_CHOICE_LABEL_CANDIDATES[9]!.exactText).toBe("자체개발(직접입력)");
+    // …and what it does NOT establish is written down, not left to the absence of a field.
+    expect(e.notEstablished).toContain("WHAT_THE_VENDOR_SCREENS_CONFIRM_DOES_NEVER_PRESSED");
+    expect(e.notEstablished).toContain("WHICH_METHOD_SELLEROPS_SHOULD_USE_IS_A_PRODUCT_DECISION");
   });
 
   it("the checkpoint that ASKS for the press expects TERMS, so an unmatched marker cannot cost the sweep", () => {
@@ -319,9 +374,10 @@ function fakeVendorFlow(over: { vendorFrom?: number; termsFrom?: number } = {}) 
   const vendorFrom = over.vendorFrom ?? 5;
   const PURPOSE_TEXT = "키의 사용 목적을 골라주세요";
   const TERMS_TEXT = "약관 동의 및 Key 발급받기";
-  const VENDOR_TEXT = "업체 입력 방식";
+  // The two MEASURED markers — the option labels. The transcribed `업체 입력 방식` never matched anything.
+  const VENDOR_TEXTS = ["연동업체 선택", "자체개발(직접입력)"];
   const paints = (t: string): boolean => {
-    if (t === VENDOR_TEXT) return reads >= vendorFrom;
+    if (VENDOR_TEXTS.includes(t)) return reads >= vendorFrom;
     // The terms markers keep painting behind the dialog, which is the case the precedence exists for.
     if (t === TERMS_TEXT) return reads >= termsFrom;
     if (t === PURPOSE_TEXT) return reads < termsFrom;

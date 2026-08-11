@@ -18,7 +18,7 @@ import {
   WING_VENDOR_METHOD_CHECKPOINTS,
   WING_PURPOSE_SCREEN_MARKER_ID,
   WING_TERMS_SCREEN_MARKER_IDS,
-  WING_VENDOR_METHOD_SCREEN_MARKER_ID,
+  WING_VENDOR_METHOD_SCREEN_MARKER_IDS,
   WING_CHECKPOINT_EXPECTED_SCREEN,
   WING_TERMS_CHECKBOX_PROMOTION_BLOCKED,
   wingFlowScreenFrom,
@@ -74,10 +74,10 @@ const markers = (screen: "PURPOSE" | "TERMS" | "VENDOR_METHOD" | "NEITHER"): Row
     id,
     presence: (screen === "TERMS" ? "PRESENT_VISIBLE" : "PRESENT_HIDDEN_ONLY") as WingStage2Presence,
   })),
-  {
-    id: WING_VENDOR_METHOD_SCREEN_MARKER_ID,
+  ...WING_VENDOR_METHOD_SCREEN_MARKER_IDS.map((id) => ({
+    id,
     presence: (screen === "VENDOR_METHOD" ? "PRESENT_VISIBLE" : "PRESENT_HIDDEN_ONLY") as WingStage2Presence,
-  },
+  })),
 ];
 
 /** A complete PURPOSE-screen reading with the vendor labels in the given state. */
@@ -175,7 +175,7 @@ describe("wingConfirmAdvisory — may the run INVITE the 확인 press?", () => {
     const both: Row[] = [
       { id: WING_PURPOSE_SCREEN_MARKER_ID, presence: "PRESENT_VISIBLE" },
       ...WING_TERMS_SCREEN_MARKER_IDS.map((id) => ({ id, presence: "PRESENT_VISIBLE" as const })),
-      { id: WING_VENDOR_METHOD_SCREEN_MARKER_ID, presence: "PRESENT_HIDDEN_ONLY" as const },
+      ...WING_VENDOR_METHOD_SCREEN_MARKER_IDS.map((id) => ({ id, presence: "PRESENT_HIDDEN_ONLY" as const })),
       ...WING_VENDOR_FORM_CANDIDATE_IDS.map((id) => ({ id, presence: "PRESENT_HIDDEN_ONLY" as const })),
     ];
     expect(wingFlowScreenFrom({ precondition: "OK", faultCount: 0, candidates: both })).toBe("TERMS");
@@ -183,7 +183,9 @@ describe("wingConfirmAdvisory — may the run INVITE the 확인 press?", () => {
     // terms screen, so the terms markers may well still paint behind it — and answering TERMS there would put the
     // run one screen behind the seller at the screen whose 확인 issues a real key.
     const allThree: Row[] = both.map((c) =>
-      c.id === WING_VENDOR_METHOD_SCREEN_MARKER_ID ? { ...c, presence: "PRESENT_VISIBLE" as const } : c,
+      (WING_VENDOR_METHOD_SCREEN_MARKER_IDS as readonly string[]).includes(c.id)
+        ? { ...c, presence: "PRESENT_VISIBLE" as const }
+        : c,
     );
     expect(wingFlowScreenFrom({ precondition: "OK", faultCount: 0, candidates: allThree })).toBe("VENDOR_METHOD");
     expect(wingConfirmAdvisory({ precondition: "OK", faultCount: 0, candidates: allThree })).toBe(

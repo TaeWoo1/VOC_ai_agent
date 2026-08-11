@@ -300,7 +300,8 @@ describe("discoveryScopeRefusal — a scope that cannot finish the flow it is me
       "purpose",
       "terms_heading",
       "terms_issue_final",
-      "vendor_method_prompt",
+      "vendor_partner",
+      "vendor_self_dev",
     ]);
   });
 
@@ -319,7 +320,8 @@ describe("discoveryScopeRefusal — a scope that cannot finish the flow it is me
       "call_ip",
       "terms_heading",
       "terms_issue_final",
-      "vendor_method_prompt",
+      "vendor_partner",
+      "vendor_self_dev",
     ]);
   });
 
@@ -362,7 +364,8 @@ describe("discoveryScopeRefusal — a scope that cannot finish the flow it is me
       "terms_cancel",
       "terms_issue_final",
       "purpose_open_api",
-      "vendor_method_prompt",
+      "vendor_partner",
+      "vendor_self_dev",
     ];
     expect(discoveryScopeRefusal(WING_ISSUANCE_FLOW_DISCOVERY_PHASE, scope)).toBeNull();
     expect(wingDiscoveryScopeGap(scope)).toEqual([]);

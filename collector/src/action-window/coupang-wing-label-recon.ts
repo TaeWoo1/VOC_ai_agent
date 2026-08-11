@@ -618,17 +618,17 @@ export const WING_STAGE2_RECON_CANDIDATES: Readonly<Record<WingStage2ReconTarget
     ]),
     vendor_method_prompt: Object.freeze([
       { id: "stage4.vendor.method_prompt", candidateQuery: "label,legend,th,dt,strong,span,div,p", exactText: "업체 입력 방식",
-        rationale: "THE SCREEN MARKER. The field label for the method choice, and the only transcribed string on this screen with no plausible twin on the purpose or terms screens — see WING_VENDOR_METHOD_SCREEN_MARKER_ID for why it is the only one" },
+        rationale: "the field label for the method choice, transcribed off the live screen. SHIPPED AS THE SCREEN MARKER on 2026-08-12 and REFUTED the same day — it read PRESENT_NOT_WHOLE_TEXT on all five readings INCLUDING the vendor screen's own, so the phrase is on the page split across nodes and no whole-text query can see it. Kept because the absence is the evidence; see WING_VENDOR_METHOD_PROMPT_MARKER_REFUTED" },
     ]),
     vendor_partner: Object.freeze([
       { id: "stage4.vendor.partner.label", candidateQuery: "label", exactText: "연동업체 선택",
-        rationale: "the integration-vendor option as a `<label for>`, the shape that carried the purpose screen's promotable option. A prior, not a measurement" },
+        rationale: "A SCREEN MARKER since 2026-08-12, and measured: hidden on all four earlier readings, visible:1 with a measured LABEL tag on the vendor screen. The association census agrees from the other direction — radio 0's derived name IS this string, via label[for]" },
       { id: "stage4.vendor.partner.broad", candidateQuery: "label,span,div,p,option", exactText: "연동업체 선택",
         rationale: "the same string against the wider families INCLUDING `option`, because this may be a select's placeholder rather than a radio's label — a distinction nothing has observed and which decides whether it can be ringed at all" },
     ]),
     vendor_self_dev: Object.freeze([
       { id: "stage4.vendor.self_dev.label", candidateQuery: "label", exactText: "자체개발(직접입력)",
-        rationale: "the self-developed option, transcribed WHOLE including the parenthetical. `self_dev`'s existing candidates carry the two halves (자체개발 / 직접입력) and are swept on this screen too, so which of the three matches is itself the finding about how the label is split" },
+        rationale: "the second SCREEN MARKER, measured on the same terms as the first. The WHOLE parenthetical is what matches: `self_dev`'s two halves (자체개발 / 직접입력) were swept on this screen too and both read PRESENT_NOT_WHOLE_TEXT, so the label is one string and not two" },
       { id: "stage4.vendor.self_dev.broad", candidateQuery: "label,span,div,p,option", exactText: "자체개발(직접입력)",
         rationale: "the whole-parenthetical string against the wider families, on the same terms as the vendor option beside it" },
     ]),
@@ -2135,37 +2135,174 @@ export const WING_PURPOSE_SCREEN_MARKER_ID = "stage2.purpose.operator_verbatim" 
 /** The candidates whose visibility identifies the TERMS screen. Either one is sufficient. */
 export const WING_TERMS_SCREEN_MARKER_IDS = ["stage3.terms.heading", WING_KEY_CREATION_CONTROL_ID] as const;
 /**
- * **The candidate whose visibility identifies the VENDOR-METHOD screen. Exactly ONE, on purpose.**
+ * **The candidates whose visibility identifies the VENDOR-METHOD screen. Either one is sufficient.**
  *
- * The terms screen gets two markers because either one appearing is sufficient evidence and neither could
- * plausibly appear anywhere else in this flow. Here the opposite risk dominates: this screen sorts FIRST in
- * {@link wingFlowScreenFrom}, so a marker that paints on an earlier screen would make every reading of the whole
- * flow report `VENDOR_METHOD` — and the run would halt at the second checkpoint claiming the seller had reached a
- * screen they have not seen. A second marker doubles that exposure and buys redundancy this screen does not need,
- * because unlike the terms screen it is reached by an act (`약관 동의 및 Key 발급받기`) whose effect is already
- * on the record.
+ * **These are MEASURED, and the first attempt was not.** The marker shipped on 2026-08-12 was a single
+ * transcribed string, `업체 입력 방식`, chosen because a marker that paints on an EARLIER screen would make every
+ * reading of the whole flow report `VENDOR_METHOD` — this screen sorts first — and one hypothesis seemed a
+ * smaller bet than two. It never matched anything: on the live run (`wingrec_d5dc00c2486c`) it read
+ * `PRESENT_NOT_WHOLE_TEXT` on all five readings **including the vendor screen's own**. The phrase is in the DOM
+ * and is not any element's whole text, anywhere. The run halted at the last checkpoint and kept the vendor
+ * sweep, which is what that halt was designed to cost.
  *
- * `업체 입력 방식` is the one transcribed string with no plausible twin earlier in the flow. `OPEN API 키 발급` is
- * swept as an ordinary candidate and deliberately excluded: the walk's own first page is `오픈API 키 발급`, and two
- * titles differing only by 오픈/OPEN is precisely the collision described above.
+ * The two below come from that sweep, and they are the opposite kind of thing: hidden on all four earlier
+ * readings, `visible: 1` with a measured `LABEL` tag on the vendor screen. Two rather than one now, because the
+ * argument for one was about UNMEASURED hypotheses — an unmeasured marker's false-positive risk is unbounded,
+ * and these two have a measured absence on every screen that precedes them. What two buys is the case where a
+ * method selection hides one of the options: they are the two arms of the same choice, so a selection that
+ * removed both would have removed the screen.
  *
- * It is a HYPOTHESIS. Nothing has matched it, exactly as nothing had matched the terms markers before 2026-08-10.
- * A run whose vendor checkpoint reads `UNRECOGNIZED` has falsified it and kept its sweep — see
- * {@link WING_VENDOR_METHOD_SCREEN_MARKER_MEASURED}.
+ * `OPEN API 키 발급` stays excluded, and now for a measured reason rather than a suspected one: it paints on
+ * EVERY screen in the flow (1, 1, 1, 1, and 2 on the vendor screen). That was the collision the exclusion was
+ * guessing at, and the guess was right.
  */
-export const WING_VENDOR_METHOD_SCREEN_MARKER_ID = "stage4.vendor.method_prompt" as const;
+export const WING_VENDOR_METHOD_SCREEN_MARKER_IDS = [
+  "stage4.vendor.partner.label",
+  "stage4.vendor.self_dev.label",
+] as const;
 
 /**
- * Whether {@link WING_VENDOR_METHOD_SCREEN_MARKER_ID} has ever been MATCHED by an apparatus. `false` until a live
- * reading says otherwise, and stated as a flag rather than left to prose because the marker gates a screen
- * identity that a checkpoint expectation is enforced against.
+ * Whether {@link WING_VENDOR_METHOD_SCREEN_MARKER_IDS} have been MATCHED by an apparatus. `true` since
+ * 2026-08-12 — see {@link WING_VENDOR_METHOD_SCREEN_EVIDENCE} for the reading.
  *
- * What it costs while false: the vendor screen's own sweep still lands (that checkpoint's expectation is `TERMS`,
- * the screen the seller was on before), and only the checkpoint AFTER it can halt on `SCREEN_NOT_AS_EXPECTED`.
- * So an unmatched marker loses the second vendor reading and keeps the first — which is the one that carries the
- * screen's full candidate sweep, and therefore the one the whole sitting is for.
+ * Stated as a flag rather than left to prose because the markers gate a screen identity that a checkpoint
+ * expectation is enforced against. What an unmatched marker costs, learned by paying it: the vendor screen's own
+ * sweep still lands (that checkpoint expects `TERMS`, the screen the seller was on before), and only the
+ * checkpoint AFTER it halts. So it loses the second vendor reading and keeps the first — the one carrying the
+ * screen's full candidate sweep, and therefore the one the sitting is for.
  */
-export const WING_VENDOR_METHOD_SCREEN_MARKER_MEASURED = false as const;
+export const WING_VENDOR_METHOD_SCREEN_MARKER_MEASURED = true as const;
+
+/**
+ * **The refuted marker hypothesis, kept.** `업체 입력 방식` was transcribed off the live screen by the operator
+ * and matched nothing as whole text on any of five readings.
+ *
+ * The candidate stays in the sweep and this constant stays beside it, because the absence is the evidence: a
+ * later reader looking at `stage4.vendor.method_prompt` needs to know it was tried as the screen's identity and
+ * why it failed, or the same short distinctive-looking phrase is available to be chosen again. `PRESENT_NOT_
+ * WHOLE_TEXT` on the screen it was transcribed from is the specific shape — the phrase is on the page and split
+ * across nodes, which whole-text matching cannot see and a human reading the screen cannot tell.
+ */
+export const WING_VENDOR_METHOD_PROMPT_MARKER_REFUTED = "PRESENT_NOT_WHOLE_TEXT_ON_ITS_OWN_SCREEN_2026_08_12" as const;
+
+/**
+ * **The first reading of the vendor-method screen, and the whole of what is established about it.**
+ *
+ * Taken 2026-08-12 under the granted `COUPANG_WING_VENDOR_METHOD_DISCOVERY` sitting `apr-b65060f5857e` /
+ * `wt-48fb1454662d` at git `0dfb6929` (sanitized record `wingrec_d5dc00c2486c`). Five checkpoints, screens
+ * `PURPOSE → PURPOSE → TERMS → TERMS → (the vendor screen)`, zero probe faults, zero agent selections.
+ *
+ * **`checkpointsAgreeing: 1` on every vendor row, and nothing here is promoted.** The bar is a reading
+ * reproduced on two checkpoints of the same screen; the sixth checkpoint halted on the refuted marker, so this
+ * screen was read once. The rows are recorded as evidence for a promotion a SECOND sitting can make — the
+ * temptation to read four clean `visible: 1` rows as sufficient is exactly what the bar is for.
+ *
+ * **Two instruments agreed, from opposite directions.** The fixed-label locate walks IN from a query to whatever
+ * carries the text; the association census walks OUT from each control to whatever names it. They met: the two
+ * visible radios are one group, both named by `label[for]`, and their derived names are the same two strings the
+ * locate resolved (`vendor_method_option.partner` at index 8, `vendor_method_option.self_dev` at 9). That is a
+ * stronger pairing than either instrument alone, and it is still one checkpoint.
+ */
+export interface WingVendorMethodScreenEvidence {
+  readonly measuredOn: string;
+  readonly gitSha: string;
+  readonly runId: string;
+  readonly approvalId: string;
+  readonly recordId: string;
+  /** How many checkpoints of this run read the vendor screen. `1` is why nothing below is promoted. */
+  readonly vendorCheckpointsRead: number;
+  readonly readings: readonly WingGuidedHighlightReading[];
+  /**
+   * The two visible radios, as the association census saw them. Indices into {@link WING_CHOICE_LABEL_CANDIDATES}
+   * — never wording, which is the whole point of storing an index.
+   */
+  readonly choiceAssociation: {
+    readonly visibleChoiceControlCount: number;
+    readonly nameGroupCount: number;
+    readonly rows: readonly { readonly index: number; readonly nameSource: string; readonly exactCandidateIndex: number }[];
+  };
+  /** What is NOT established, stated rather than left to the absence of a field. */
+  readonly notEstablished: readonly string[];
+}
+
+export const WING_VENDOR_METHOD_SCREEN_EVIDENCE: WingVendorMethodScreenEvidence = Object.freeze({
+  measuredOn: "2026-08-12",
+  gitSha: "0dfb6929",
+  runId: "wt-48fb1454662d",
+  approvalId: "apr-b65060f5857e",
+  recordId: "wingrec_d5dc00c2486c",
+  vendorCheckpointsRead: 1,
+  readings: Object.freeze([
+    Object.freeze({
+      candidateId: "stage4.vendor.partner.label",
+      screen: "VENDOR_METHOD" as const,
+      visibleCount: 1,
+      hiddenCount: 0,
+      observedTag: "LABEL",
+      checkpointsAgreeing: 1,
+    }),
+    // The broad sibling: TWO painting elements carry the string. The narrowing is doing work here, exactly as it
+    // was for the purpose option — and unlike `확인`, where the broad query found the same element.
+    Object.freeze({
+      candidateId: "stage4.vendor.partner.broad",
+      screen: "VENDOR_METHOD" as const,
+      visibleCount: 2,
+      hiddenCount: 0,
+      checkpointsAgreeing: 1,
+    }),
+    Object.freeze({
+      candidateId: "stage4.vendor.self_dev.label",
+      screen: "VENDOR_METHOD" as const,
+      visibleCount: 1,
+      hiddenCount: 0,
+      observedTag: "LABEL",
+      checkpointsAgreeing: 1,
+    }),
+    Object.freeze({
+      candidateId: "stage4.vendor.self_dev.broad",
+      screen: "VENDOR_METHOD" as const,
+      visibleCount: 2,
+      hiddenCount: 0,
+      checkpointsAgreeing: 1,
+    }),
+    // 업체명 — hidden on every screen of every earlier run, and the reason `wingConfirmAdvisory` reads it. It
+    // paints here, which is the first time any apparatus has seen the vendor form.
+    Object.freeze({
+      candidateId: "stage2.vendor_info.baseline",
+      screen: "VENDOR_METHOD" as const,
+      visibleCount: 1,
+      hiddenCount: 0,
+      observedTag: "DT",
+      checkpointsAgreeing: 1,
+    }),
+    // The screen's own 확인 — the control that ISSUES THE KEY. Measured to be locatable; never pressed, and
+    // nothing may auto-advance from it. Its spec is the SAME candidate the purpose screen's 확인 uses, which is
+    // why a reading carries the screen it was taken on.
+    Object.freeze({
+      candidateId: "stage2.confirm.actionable",
+      screen: "VENDOR_METHOD" as const,
+      visibleCount: 1,
+      hiddenCount: 0,
+      observedTag: "BUTTON",
+      checkpointsAgreeing: 1,
+    }),
+  ]),
+  choiceAssociation: Object.freeze({
+    visibleChoiceControlCount: 2,
+    nameGroupCount: 1,
+    rows: Object.freeze([
+      Object.freeze({ index: 0, nameSource: "LABEL_FOR", exactCandidateIndex: 8 }),
+      Object.freeze({ index: 1, nameSource: "LABEL_FOR", exactCandidateIndex: 9 }),
+    ]),
+  }),
+  notEstablished: Object.freeze([
+    // Each of these is a sentence someone could otherwise read INTO the rows above.
+    "REPRODUCIBILITY_ONE_CHECKPOINT_ONLY",
+    "WHAT_THE_VENDOR_SCREENS_CONFIRM_DOES_NEVER_PRESSED",
+    "WHETHER_THE_ROWS_HOLD_AFTER_A_METHOD_IS_SELECTED",
+    "WHICH_METHOD_SELLEROPS_SHOULD_USE_IS_A_PRODUCT_DECISION",
+  ]),
+});
 
 export interface WingScreenReading {
   readonly precondition: WingStage2Precondition;
@@ -2183,9 +2320,15 @@ export interface WingScreenReading {
  * ordering follows the same rule to its new answer rather than being re-derived, and the vendor screen sorts
  * first because it is both the latest and the only one carrying an irreversible control.
  *
- * The ordering matters concretely here: the vendor screen is reported as a dialog over the terms screen, so the
- * terms markers may well still paint behind it. A precedence that answered `TERMS` there would put the walk one
- * screen behind the seller, at the screen where being behind costs the most.
+ * **The reason it was ordered this way turned out to be wrong, and the ordering is kept anyway.** It was written
+ * expecting the vendor screen to be a DIALOG over the terms screen, with the terms markers still painting behind
+ * it — so a precedence answering `TERMS` would have put the walk one screen behind the seller. Measured
+ * 2026-08-12: the vendor screen REPLACES the terms screen, and both terms markers go back to hidden on it. So no
+ * reading has ever been ambiguous between the two, and this ordering has never yet decided anything.
+ *
+ * It stays because the rule it follows is the one that has been right every time: resolve to the screen where
+ * stopping is correct. What changed is that this is now a precaution rather than a fix for an observed overlap —
+ * and a precaution whose stated reason has been falsified is worth relabelling rather than quietly keeping.
  *
  * `UNRECOGNIZED` when no marker paints — a screen we have never measured is not a screen to act on.
  */
@@ -2193,14 +2336,14 @@ export function wingFlowScreenFrom(reading: WingScreenReading): WingFlowScreen {
   if (reading.precondition !== "OK" || reading.faultCount > 0) return "NOT_MEASURED";
   const byId = new Map(reading.candidates.map((c) => [c.id, c.presence]));
   const seen = (id: string): WingStage2Presence | undefined => byId.get(id);
-  const markers = [WING_PURPOSE_SCREEN_MARKER_ID, ...WING_TERMS_SCREEN_MARKER_IDS, WING_VENDOR_METHOD_SCREEN_MARKER_ID];
+  const markers = [WING_PURPOSE_SCREEN_MARKER_ID, ...WING_TERMS_SCREEN_MARKER_IDS, ...WING_VENDOR_METHOD_SCREEN_MARKER_IDS];
   // Every marker must have been PROBED. A missing row cannot distinguish "not on this screen" from "not asked
   // about", and screen identity is the one question that must not be answered from an absence of data.
   for (const id of markers) {
     const p = seen(id);
     if (p === undefined || p === "NOT_MEASURED") return "NOT_MEASURED";
   }
-  if (seen(WING_VENDOR_METHOD_SCREEN_MARKER_ID) === "PRESENT_VISIBLE") return "VENDOR_METHOD";
+  if (WING_VENDOR_METHOD_SCREEN_MARKER_IDS.some((id) => seen(id) === "PRESENT_VISIBLE")) return "VENDOR_METHOD";
   if (WING_TERMS_SCREEN_MARKER_IDS.some((id) => seen(id) === "PRESENT_VISIBLE")) return "TERMS";
   if (seen(WING_PURPOSE_SCREEN_MARKER_ID) === "PRESENT_VISIBLE") return "PURPOSE";
   return "UNRECOGNIZED";
@@ -2415,7 +2558,7 @@ export function wingScreenMarkerTargets(): WingStage2ReconTarget[] {
   // `NOT_MEASURED` for every reading of every run — and the alternative (a per-screen probed-ness rule) would let
   // a run standing on the vendor screen report TERMS because it never asked. A scope that cannot tell the seller
   // has moved on is worse than a scope that is one target wider.
-  return targetsCarrying([WING_PURPOSE_SCREEN_MARKER_ID, ...WING_TERMS_SCREEN_MARKER_IDS, WING_VENDOR_METHOD_SCREEN_MARKER_ID]);
+  return targetsCarrying([WING_PURPOSE_SCREEN_MARKER_ID, ...WING_TERMS_SCREEN_MARKER_IDS, ...WING_VENDOR_METHOD_SCREEN_MARKER_IDS]);
 }
 
 /**
@@ -2465,8 +2608,8 @@ export const WING_TERMS_SCREEN_MARKER_SPECS: readonly WingFlowScreenMarkerSpec[]
  * auto-advancing on it must degrade to the seller's own advance rather than stall — not firing is the EXPECTED
  * case until a live run says otherwise.
  */
-export const WING_VENDOR_METHOD_SCREEN_MARKER_SPEC: WingFlowScreenMarkerSpec = markerSpecById(
-  WING_VENDOR_METHOD_SCREEN_MARKER_ID,
+export const WING_VENDOR_METHOD_SCREEN_MARKER_SPECS: readonly WingFlowScreenMarkerSpec[] = Object.freeze(
+  WING_VENDOR_METHOD_SCREEN_MARKER_IDS.map(markerSpecById),
 );
 
 /**
