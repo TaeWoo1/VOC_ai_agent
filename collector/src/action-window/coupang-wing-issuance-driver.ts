@@ -671,13 +671,39 @@ const OVERLAY_STEP: Readonly<Record<CoupangIssuanceTarget, number>> = {
  * wording. `test/crossstack/coupang-issuance-fe-copy-parity.test.ts` is the assertion.
  */
 export const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string>> = {
-  reach_open_api: "WING에 로그인한 뒤 '오픈API 키 발급' 페이지로 직접 이동하세요. 도착하면 자동으로 다음 단계로 넘어갑니다.",
-  issue: "표시된 'API Key 발급 받기' 버튼을 직접 누르세요. SellerOps는 대신 누르지 않습니다. 이 버튼은 키를 만들지 않고 사용 목적 선택 화면을 엽니다. 화면이 열리면 자동으로 넘어갑니다.",
-  confirm_purpose: "사용 목적이 'OPEN API'로 되어 있는지 보시고(기본값이라 대개 그대로입니다), '확인'을 직접 누르세요. 이 버튼도 키를 만들지 않고 약관 동의 화면을 엽니다. 화면이 열리면 자동으로 넘어갑니다.",
-  terms_consent: "약관 내용을 직접 읽고 판단하신 뒤, 동의 체크박스 2개를 직접 선택하세요. SellerOps는 약관을 읽거나 대신 동의하지 않고, 체크박스를 대신 누르지도 않습니다. 다만 2개가 모두 선택됐는지는 이 화면에서 확인해 자동으로 다음으로 넘어갑니다(선택 여부는 저장·전송하지 않습니다).",
+  reach_open_api: "WING에 로그인한 뒤 '오픈API 키 발급' 페이지로 이동하세요. 도착하면 자동으로 넘어갑니다.",
+  issue: "'API Key 발급 받기'를 직접 누르세요. 키는 아직 만들어지지 않고 사용 목적 화면만 열립니다. 화면이 열리면 자동으로 넘어갑니다.",
+  confirm_purpose: "사용 목적이 'OPEN API'인지 확인하고(기본값입니다) '확인'을 직접 누르세요. 이 버튼도 키를 만들지 않고 약관 화면을 엽니다. 화면이 열리면 자동으로 넘어갑니다.",
+  terms_consent: "약관을 직접 읽고 판단하신 뒤 동의 체크박스 2개를 선택하세요. SellerOps는 약관을 읽지도, 대신 동의하지도, 체크하지도 않습니다. 2개가 모두 선택되면 자동으로 넘어갑니다(선택 여부는 저장·전송하지 않습니다).",
+  // NOT trimmed. Every sentence here is a safety claim the approval harness reproduces and asserts before the
+  // operator grants (`wing-walk-selfcheck.sh`, "the COMPLETE Korean copy of the key-creation step"), and this is
+  // the one step where the control in front of the seller creates the key. Concision is not worth a clause here.
   issue_final: "⚠ 여기서 실제로 키가 생성됩니다. '약관 동의 및 Key 발급받기' 버튼을 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다. 발급이 끝나면 아래 버튼을 누르세요.",
   credentials: "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요. SellerOps는 값을 읽지 않습니다. 복사했으면 아래 버튼을 누르세요.",
-  return: "이제 아래 버튼을 눌러 SellerOps로 돌아가세요. 돌아가면 복사한 키를 입력해 연결을 마칠 수 있어요.",
+  return: "아래 버튼을 눌러 SellerOps로 돌아가세요. 복사한 키를 입력하면 연결이 끝납니다.",
+};
+
+/**
+ * **The chip above the highlighted control** — which step this is, not what to do about it.
+ *
+ * The instruction lives in the panel, which wraps and has room for it. The chip cannot wrap (it would grow down
+ * over the control it points at), so a full instruction there ran off the viewport: live-observed 2026-08-11 at
+ * the key-creation step, cutting off exactly "SellerOps는 이 버튼을 절대 누르지 않고, 자동으로 넘어가지도
+ * 않습니다". Two renderings of one sentence, one of them silently incomplete — and the incomplete one sat on
+ * the control that creates the key.
+ *
+ * Each is a NOUN PHRASE naming the control or the act, never an abbreviated instruction: a shortened
+ * instruction is how a safety clause gets dropped and still reads like guidance.
+ */
+export const OPERATOR_STEP_TITLES: Readonly<Record<CoupangIssuanceTarget, string>> = {
+  reach_open_api: "오픈API 키 발급 페이지로 이동",
+  issue: "'API Key 발급 받기' 누르기",
+  confirm_purpose: "사용 목적 확인 후 '확인'",
+  terms_consent: "약관 2건 동의",
+  // The one chip that keeps a warning: it names the consequence, and the panel beside it carries the full text.
+  issue_final: "⚠ 키가 생성되는 단계",
+  credentials: "키 3개 복사",
+  return: "SellerOps로 돌아가기",
 };
 
 /** A browser context whose newest tab may hold the step the seller opened. Structural subset of Playwright's. */
@@ -1126,6 +1152,9 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
       totalSteps: COUPANG_ISSUANCE_TOTAL_STEPS,
       copyKey: `actionWindow.coupangIssuance.step.${target}`,
       label: OPERATOR_STEP_LABELS[target],
+      // The chip gets the short title; the panel keeps the instruction. Without this both rendered the same
+      // long string and the chip's copy ran off the viewport.
+      badgeLabel: OPERATOR_STEP_TITLES[target],
       guidanceEnabled: this.opts.guidanceEnabled ?? true,
       // Opt in to the WING-resident guidance panel (this driver is the only one that does); the button is
       // added only for a checkpoint (a target with an advance label). The reach step gets a copy-only panel.

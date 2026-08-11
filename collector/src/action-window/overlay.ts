@@ -26,6 +26,20 @@ export interface OverlayOptions {
    * copy — that mapping still belongs to the FE. Absent ⇒ the badge falls back to `copyKey`.
    */
   label?: string;
+  /**
+   * A SHORT title for the badge, when the full {@link label} belongs somewhere else.
+   *
+   * The badge is a chip pinned above the highlighted control and it cannot wrap (`white-space:nowrap`, so it
+   * never obscures the control it sits over). That was fine while the badge carried a `copyKey`. Once the
+   * WING-resident panel arrived, the SAME long instruction went to both, and the chip version ran off the
+   * viewport — live-observed 2026-08-11 on the KEY-CREATION step, where what it cut off was
+   * "SellerOps는 이 버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다": the promise not to press it, pushed
+   * off-screen at the one control that presses it.
+   *
+   * So: the panel owns the instruction, the chip says which step this is. Absent ⇒ unchanged behaviour
+   * (`label`, then `copyKey`), so no other caller moves.
+   */
+  badgeLabel?: string;
   guidanceEnabled: boolean;
   /**
    * Explicit opt-in for the WING-RESIDENT guidance panel. When `true`, mountOverlay draws a
@@ -247,8 +261,14 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
     const badge = document.createElement("div");
     badge.setAttribute("data-aw-badge", "");
     if (o.dockedPanelOnly) badge.style.display = "none";
-    badge.textContent = `${o.stepNumber}/${o.totalSteps} · ${o.label ?? o.copyKey}`;
-    badge.style.cssText = "position:absolute;left:0;top:-28px;background:#2b6cff;color:#fff;font:12px system-ui;padding:2px 8px;border-radius:4px;white-space:nowrap";
+    badge.textContent = `${o.stepNumber}/${o.totalSteps} · ${o.badgeLabel ?? o.label ?? o.copyKey}`;
+    // `nowrap` stays — a wrapping chip grows downward over the very control it points at. What it gains is a
+    // CEILING and an ellipsis, so a label longer than the chip can hold is visibly cut ("…") instead of running
+    // off the viewport, where the seller cannot tell truncated text from text that was never written.
+    // A structural backstop, not a substitute for `badgeLabel`: the ellipsis says something is missing, and the
+    // short title means nothing is.
+    badge.style.cssText =
+      "position:absolute;left:0;top:-28px;background:#2b6cff;color:#fff;font:12px system-ui;padding:2px 8px;border-radius:4px;white-space:nowrap;max-width:min(420px,60vw);overflow:hidden;text-overflow:ellipsis";
     box.appendChild(badge);
     G["__aw_mount_stage__"] = "append_overlay";
     document.body.appendChild(box);

@@ -247,10 +247,46 @@ repair itself, which is the point of re-reviewing rather than re-running the sui
 | 6 | The key-creation locator was a second hand-written copy of the measured candidate, defeating the invalidation rule `WING_KEY_CREATION_SELECTOR_CALIBRATED` documents. | Derived from `WING_TERMS_SCREEN_MARKER_SPECS`, failing at load if the measurement is gone. |
 | 7 | `waiting_login` has no expiry recovery. | **Accepted, not fixed** — and now argued in the code rather than asserted: it is already a park carrying `LOGIN_REQUIRED` with the button offered, so the expiry is not silent; there is no WING-resident surface to offer anything else on; and restarting the watch would poll a login page for as long as the agent lives. |
 
+### The live walk (2026-08-11, `apr-6a3fba7e27c2` / `wt-7bb4700ca9c0` @ `80fa96b9`)
+
+Granted, run, and stopped at the key-creation boundary. Sanitized evidence:
+
+| Time | Event | What it proves |
+|---|---|---|
+| — | `bridge_pairing_store_loaded {status:"ok", restored:34}` | The held token paired **with no macOS dialog** — the case documented into the manifest hours earlier, confirmed. |
+| 09:58:31 | `aw_coupang_walk_landing {urlCategory:"wing_host"}` | **Exactly one** navigation, at window open. |
+| 09:58:34→54 | `pageCategory:"login"` polling, no blocker | The observed wait watching WING through a login. No park, no prompt to return to the SellerOps tab. |
+| 09:58:56 | `login → open_api_issuance` | Step 1 auto-completed. |
+| ~10:04:59 | `stage2.purpose.operator_verbatim visible:1 tag:DIV` | Step 2 advanced on the screen the seller's own press produced. |
+| 10:05:01 | `stage3.terms.heading visible:1 DIV` · `stage3.terms.issue_final visible:1 **BUTTON**` | Step 3 advanced; and the key-creation calibration **reproduced on a fresh run at a new commit** — the reading the driver now *derives* from rather than re-typing. |
+| 10:17:22 | `aw_coupang_walk_surface_closing` → `aw_coupang_walk_surface_closed` | The teardown from the second review round, live. |
+
+Zero warnings, zero parks, zero drive errors. The operator confirmed: the ring sat on the right control at every
+step, the panel copy matched it, **each press advanced immediately and nothing advanced before they acted**, and
+the run rested at 5/7 with `약관 동의 및 Key 발급받기` ringed and **never pressed**.
+
+**One defect found live, fixed after the run.** The chip above the ring is `white-space:nowrap` (a wrapping chip
+would grow down over the control it points at), and it was being handed the same full instruction as the panel —
+so at the key-creation step it ran off the viewport, cutting off exactly *"SellerOps는 이 버튼을 절대 누르지
+않고, 자동으로 넘어가지도 않습니다"*. The promise not to press it, pushed off-screen at the one control that
+presses it, while the panel below showed it in full. Repaired by splitting the two: `OPERATOR_STEP_TITLES` (short
+noun phrases) for the chip, `OPERATOR_STEP_LABELS` for the panel, plus `max-width` + `text-overflow:ellipsis` as
+a structural backstop so the next long label is visibly cut rather than lost. The panel copy was also tightened
+at the operator's request — except `issue_final`, whose every sentence the approval harness reproduces and
+asserts before the grant.
+
+**Not exercised live, and it cannot be:** step 7 (`SellerOps로 돌아가기`) sits past the key-creating press this
+phase forbids, so finding 3's `return` half stays covered by the deterministic tests only.
+
+**Deferred, operator-requested:** highlighting the purpose radio / `확인` / each consent checkbox with a narrated
+advance. Structurally impossible today — those controls are measured but **not promoted**, so the driver draws no
+ring at them. Promoting them needs live calibration (as `issue_final` got on 2026-08-11) and moves
+`highlightedControlCount`, which needs a new approval scope. **A separate unit, not this one.**
+
 ## 6. Remaining
 
-1. One **fresh** live walk on the product path. Fresh bootstrap → manifest → STOP for a grant; any code change
-   revokes it.
+1. ~~One **fresh** live walk on the product path.~~ **Done** — see above. The notes below are kept for the next
+   live sitting on this workstream.
 
    **What the live run is for, and what it is not.** The ten-minute boundary itself is covered
    deterministically — the session and engine suites drive the wait to expiry with a 20 ms window and assert
