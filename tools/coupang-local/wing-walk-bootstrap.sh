@@ -85,7 +85,7 @@ echo "  git commit   : $GIT_COMMIT  (PINNED — the run refuses if HEAD moves or
 echo "  phase        : COUPANG_WING_GUIDED_ISSUANCE_WALK (agent READ_ONLY; the OPERATOR does every WING act)"
 # These lines are the FIRST thing the operator reads about the run, and they had gone stale: they still said
 # the agent never navigates and that two controls are highlighted, while the descriptor the preflight now prints
-# — and the gate verifies — carries agentNavigations:1, highlightedControlCount:3, textGuidedControlCount:2,
+# — and the gate verifies — carries agentNavigations:1, highlightedControlCount:7, textGuidedControlCount:0,
 # autoAdvancingStepCount:4 and sellerConsentObserved:true. The manifest was right and this half of the
 # disclosure was not, which is the defect this workstream keeps having to unpick, in the sentence rather than
 # the data. `wing-walk-selfcheck.sh` now greps this output too, so it cannot drift silently again.

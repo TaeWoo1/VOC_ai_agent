@@ -174,7 +174,7 @@ run_case "HEAD_DRIFT      (commit moved since bootstrap)" nonzero "git commit ch
 # The DISPLAY-side check. Unlike the destructive descriptor — where the risk is understating danger — every
 # softening here OVERSTATES safety, and the worst is `keyCreationRuledOut: true`: it would tell the operator
 # SellerOps had confirmed no key was created, which nothing can (NO_DISCRIMINATING_SIGNAL).
-CANON='{"guidedWalkBoundary":{"operation":"WALK_WING_GUIDED_ISSUANCE_TUTORIAL","forbiddenFollowOnAction":"COMPLETE_WING_KEY_ISSUANCE","restsBeforeControl":"약관 동의 및 Key 발급받기","createsKeyMaterial":false,"keyCreationRuledOut":false,"agentPerformsAction":false,"agentNavigations":1,"credentialValueReadBudget":0,"performsConnectOrSync":false,"highlightedControlCount":3,"textGuidedControlCount":2,"autoAdvancingStepCount":4,"keyCreationAutoAdvances":false,"sellerConsentObserved":true}}'
+CANON='{"guidedWalkBoundary":{"operation":"WALK_WING_GUIDED_ISSUANCE_TUTORIAL","forbiddenFollowOnAction":"COMPLETE_WING_KEY_ISSUANCE","restsBeforeControl":"약관 동의 및 Key 발급받기","createsKeyMaterial":false,"keyCreationRuledOut":false,"agentPerformsAction":false,"agentNavigations":1,"credentialValueReadBudget":0,"performsConnectOrSync":false,"highlightedControlCount":7,"textGuidedControlCount":0,"ringedInputControlCount":0,"autoAdvancingStepCount":4,"keyCreationAutoAdvances":false,"sellerConsentObserved":true}}'
 printf '%s' "$CANON" > "$FIXTURES/desc-ok.json"
 DESC_OK=1
 verify_walk_descriptor "$FIXTURES/desc-ok.json" >/dev/null 2>&1 || { echo "  FAIL  DESCRIPTOR · canonical descriptor rejected"; DESC_OK=0; FAILED=1; }
@@ -187,7 +187,8 @@ for soft in \
   '"credentialValueReadBudget":1' \
   '"performsConnectOrSync":true' \
   '"highlightedControlCount":6' \
-  '"textGuidedControlCount":0' \
+  '"textGuidedControlCount":2' \
+  '"ringedInputControlCount":1' \
   '"operation":"COMPLETE_WING_KEY_ISSUANCE"' \
   '"operation":"DELETE_WING_OPEN_API_KEY"' \
   '"forbiddenFollowOnAction":"NOTHING"' \
@@ -469,7 +470,7 @@ ENV
   # **The bootstrap's own DISCLOSURE, which nothing checked.** It is the first description of the run the
   # operator reads, and it had drifted to the pre-change behaviour — "the agent never navigates", "the two
   # live-calibrated controls" — while the descriptor the preflight prints and the gate verifies said
-  # agentNavigations:1 / highlightedControlCount:3 / textGuidedControlCount:2 / autoAdvancingStepCount:4 /
+  # agentNavigations:1 / highlightedControlCount:7 / textGuidedControlCount:0 / autoAdvancingStepCount:4 /
   # sellerConsentObserved:true. Only the preflight output was grepped, so this half could say anything.
   #
   # Asserted BOTH ways: the current claims must be present, and the retired ones must be gone — a disclosure
