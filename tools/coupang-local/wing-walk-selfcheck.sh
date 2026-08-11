@@ -174,30 +174,36 @@ run_case "HEAD_DRIFT      (commit moved since bootstrap)" nonzero "git commit ch
 # The DISPLAY-side check. Unlike the destructive descriptor — where the risk is understating danger — every
 # softening here OVERSTATES safety, and the worst is `keyCreationRuledOut: true`: it would tell the operator
 # SellerOps had confirmed no key was created, which nothing can (NO_DISCRIMINATING_SIGNAL).
-CANON='{"guidedWalkBoundary":{"operation":"WALK_WING_GUIDED_ISSUANCE_TUTORIAL","forbiddenFollowOnAction":"COMPLETE_WING_KEY_ISSUANCE","restsBeforeControl":"약관 동의 및 Key 발급받기","createsKeyMaterial":false,"keyCreationRuledOut":false,"agentPerformsAction":false,"agentNavigations":1,"credentialValueReadBudget":0,"performsConnectOrSync":false,"highlightedControlCount":7,"textGuidedControlCount":0,"ringedInputControlCount":0,"autoAdvancingStepCount":4,"keyCreationAutoAdvances":false,"sellerConsentObserved":true}}'
+CANON='{"guidedWalkBoundary":{"operation":"WALK_WING_GUIDED_ISSUANCE_TUTORIAL","forbiddenFollowOnAction":"COMPLETE_WING_KEY_ISSUANCE","restsBeforeControl":"확인 (vendor-method screen)","agentCreatesKeyMaterial":false,"operatorIssuesRealKey":true,"keyCreationRuledOut":false,"agentPerformsAction":false,"agentNavigations":1,"credentialValueReadBudget":0,"performsConnectOrSync":false,"highlightedControlCount":9,"textGuidedControlCount":0,"ringedInputControlCount":0,"autoAdvancingStepCount":6,"keyCreationPressAutoPerformed":false,"keyIssuanceAdvancesOnObservedResult":true,"sellerConsentObserved":true,"vendorMethodGuided":"자체개발(직접입력)","vendorMethodDecidedBy":"PRODUCT_OWNER"}}'
 printf '%s' "$CANON" > "$FIXTURES/desc-ok.json"
 DESC_OK=1
 verify_walk_descriptor "$FIXTURES/desc-ok.json" >/dev/null 2>&1 || { echo "  FAIL  DESCRIPTOR · canonical descriptor rejected"; DESC_OK=0; FAILED=1; }
 for soft in \
   '"keyCreationRuledOut":true' \
-  '"createsKeyMaterial":true' \
+  '"agentCreatesKeyMaterial":true' \
   '"agentPerformsAction":true' \
   '"agentNavigations":0' \
-  '"keyCreationAutoAdvances":true' \
+  '"keyCreationPressAutoPerformed":true' \
   '"credentialValueReadBudget":1' \
   '"performsConnectOrSync":true' \
-  '"highlightedControlCount":6' \
+  '"highlightedControlCount":8' \
   '"textGuidedControlCount":2' \
   '"ringedInputControlCount":1' \
+  '"autoAdvancingStepCount":5' \
   '"operation":"COMPLETE_WING_KEY_ISSUANCE"' \
   '"operation":"DELETE_WING_OPEN_API_KEY"' \
   '"forbiddenFollowOnAction":"NOTHING"' \
   '"restsBeforeControl":"확인"' \
+  '"restsBeforeControl":"약관 동의 및 Key 발급받기"' \
+  '"vendorMethodGuided":"연동업체 선택"' \
+  '"vendorMethodDecidedBy":"MEASUREMENT"' \
+  '"operatorIssuesRealKey":false' \
+  '"keyIssuanceAdvancesOnObservedResult":false' \
   '"keyCreationRuledOut":"false"' \
-  '"createsKeyMaterial":"false"' \
+  '"agentCreatesKeyMaterial":"false"' \
   '"agentPerformsAction":"false"' \
   '"performsConnectOrSync":"false"' \
-  '"keyCreationAutoAdvances":"false"' \
+  '"keyCreationPressAutoPerformed":"false"' \
   '"agentNavigations":"1"' \
   '"credentialValueReadBudget":"0"'
 do
@@ -299,17 +305,21 @@ if [ -z "$TREE_DIRTY" ]; then
     "강조 표시는 체크박스나 라디오 버튼 위에 뜨지 않습니다" \
     "어느 박스가 어느 동의인지 안다고 말하지 않습니다" \
     "every screen after that is one YOU navigate to" \
-    "SEVEN controls are highlighted" \
+    "NINE controls are highlighted" \
     "NO ring sits on a checkbox or a radio" \
     "measured structural pairing" \
     "'OPEN API' is the DEFAULT purpose option" \
     "You read the two consent texts and decide" \
-    "It does NOT create the key" \
-    "refuted on 2026-08-12" \
-    "No apparatus has ever read that screen" \
-    "DO NOT PRESS IT in this run" \
-    "separate phase, with its own manifest and its own grant" \
-    "no connect-test, no sync, no upload"
+    "THIS RUN ENDS WITH A REAL API KEY ON YOUR LIVE COUPANG ACCOUNT" \
+    "does NOT create the key" \
+    "refuted on" \
+    "THE KEY IS CREATED BY THE VENDOR SCREEN" \
+    "SellerOps rings it, never presses it" \
+    "PRODUCT DECISION" \
+    "STOP HERE and do not grant" \
+    "no connect-test, no sync, no upload" \
+    "THE ONE-LINE GRANT DOES NOT COVER THIS RUN" \
+    "I approve issuing a REAL Coupang API key on this account"
   do
     grep -qF "$phrase" <<<"$out" || { echo "  FAIL  NORMAL          · disclosure missing: $phrase"; DISCLOSE_OK=0; FAILED=1; }
   done
@@ -317,6 +327,13 @@ if [ -z "$TREE_DIRTY" ]; then
   # it was updated — it still told the operator that the purpose step and the checkboxes carry no highlight, on
   # the very run that had just promoted them. That is the manifest-honesty defect in the sentence rather than
   # the data, in the half the operator actually reads.
+  # …and the RETIRED English ones. The walk stopped one screen short until 2026-08-12; a disclosure that still
+  # says so would be describing a smaller run than the one about to execute — with a real key at the end of it.
+  for stale_en in "DO NOT PRESS IT in this run" "No apparatus has ever read that screen" "SEVEN controls are highlighted" "FOUR steps advance"; do
+    if grep -qF "$stale_en" <<<"$out"; then
+      echo "  FAIL  NORMAL          · retired English claim still shown: $stale_en"; DISCLOSE_OK=0; FAILED=1
+    fi
+  done
   for stale_ko in "사용 목적/확인 단계와 체크박스에는 강조 표시가 없습니다" "selector로 승격되지 않았기 때문"; do
     if grep -qF "$stale_ko" <<<"$out"; then
       echo "  FAIL  NORMAL          · retired Korean claim still shown: $stale_ko"; DISCLOSE_OK=0; FAILED=1
@@ -329,22 +346,24 @@ if [ -z "$TREE_DIRTY" ]; then
   # it and this asserts each is printed. One fragment per sentence, none spanning a wrapped output line.
   KOREAN_OK=1
   for phrase in \
-    "'약관 동의 및 Key 발급받기'를 직접 누르세요" \
-    "버튼을 절대 누르지 않고, 자동으로" \
-    "이 버튼은 키를 만들지 않습니다." \
-    "키는 그 화면의 '확인'에서 발급됩니다" \
-    "아직 SellerOps가 안내하지 않습니다."
+    "'확인'을 직접 누르세요" \
+    "여기서 실제 API 키가 발급됩니다" \
+    "되돌릴 수 없습니다" \
+    "입력란에 아무것도 쓰지 않습니다" \
+    "키가"
   do
     grep -qF "$phrase" <<<"$out" || { echo "  FAIL  NORMAL          · Korean on-screen warning missing: $phrase"; KOREAN_OK=0; FAILED=1; }
   done
   # The RETIRED warning. It was refuted on 2026-08-12 — the control was pressed and no key was issued — and a
   # warning attached to a consequence that does not happen spends the credibility the true ones need.
-  for stale_ko in "여기서 실제로 키가 생성됩니다" "발급이 끝나면 아래 버튼을"; do
+  # The RETIRED copy: the two sentences `issue_final` earned an hour after gaining them, and the older refuted
+  # warning that once sat on a control which creates nothing.
+  for stale_ko in "여기서 실제로 키가 생성됩니다" "발급이 끝나면 아래 버튼을" "아직 SellerOps가 안내하지 않" "Access Key가 화면에 표시되면"; do
     if grep -qF "$stale_ko" <<<"$out"; then
       echo "  FAIL  NORMAL          · refuted Korean warning still shown: $stale_ko"; KOREAN_OK=0; FAILED=1
     fi
   done
-  [ "$KOREAN_OK" = "1" ] && echo "  PASS  NORMAL          · the COMPLETE Korean copy of the key-creation step is shown before the grant line"
+  [ "$KOREAN_OK" = "1" ] && echo "  PASS  NORMAL          · the COMPLETE Korean copy of the key-ISSUING step is shown before the grant line"
 
   # The approved PHASE is bound into the run env FROM THE MANIFEST — the runtime half of the cross-phase
   # escalation fix. Without it the reveal CLI has only the `WALKTHROUGH_*` triple, which every WING phase shares.
@@ -380,7 +399,8 @@ if [ -z "$TREE_DIRTY" ]; then
   fi
   # The descriptor must reach the operator in full, not just as a PASS line — and both claims must be visible.
   if grep -qF '"WALK_WING_GUIDED_ISSUANCE_TUTORIAL"' <<<"$out" \
-     && grep -qF '"createsKeyMaterial": false' <<<"$out" \
+     && grep -qF '"agentCreatesKeyMaterial": false' <<<"$out" \
+     && grep -qF '"operatorIssuesRealKey": true' <<<"$out" \
      && grep -qF '"keyCreationRuledOut": false' <<<"$out" \
      && grep -qF '"agentNavigations": 1' <<<"$out" \
      && grep -qF '"performsConnectOrSync": false' <<<"$out" \
@@ -497,7 +517,7 @@ ENV
   # Asserted BOTH ways: the current claims must be present, and the retired ones must be gone — a disclosure
   # that gained a line while keeping its contradiction is not fixed.
   BOOT_OK=1
-  for claim in "ONE" "never navigates again" "SEVEN live-calibrated" "NONE of the rings sits on an input" "stay text-only" "FOUR steps advance" "consent boxes are ticked" "RESTS in front of" "약관 동의 및 Key 발급받기" "never ticks a box"; do
+  for claim in "ONE" "never navigates again" "NINE live-calibrated" "NONE of the rings sits on an input" "stay text-only" "SIX steps advance" "consent boxes are ticked" "RESTS in front" "THIS RUN ENDS WITH A REAL KEY" "PRODUCT DECISION" "never ticks a box"; do
     grep -qF "$claim" <<<"$out" || { echo "  FAIL  BOOTSTRAP_DISCLOSE · missing claim: $claim"; BOOT_OK=0; FAILED=1; }
   done
   # Retired claims. The last three were true and are no longer: the count moved 2 → 3 → 7 as controls were
@@ -506,7 +526,7 @@ ENV
   # "No guided step is text-only any more" over-claimed: `reach_open_api` and `return` name no WING control and
   # still draw no ring. `textGuidedControlCount: 0` counts CONTROLS, and the prose beside a machine-checked
   # field has to mean the same thing the field does.
-  for stale in "the agent never navigates" "0 gotos" "ONLY the two live-calibrated" "THREE live-calibrated" "TEXT-GUIDED" "No guided step is text-only"; do
+  for stale in "the agent never navigates" "0 gotos" "ONLY the two live-calibrated" "THREE live-calibrated" "SEVEN live-calibrated" "TEXT-GUIDED" "No guided step is text-only" "NOT performed, and NEVER auto-advanced"; do
     if grep -qF "$stale" <<<"$out"; then
       echo "  FAIL  BOOTSTRAP_DISCLOSE · retired claim still shown: $stale"; BOOT_OK=0; FAILED=1
     fi
