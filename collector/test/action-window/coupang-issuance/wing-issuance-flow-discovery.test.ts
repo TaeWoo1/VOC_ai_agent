@@ -524,12 +524,38 @@ describe("the terms screen — transcribed verbatim, and the key-creation bounda
     const terms = Object.values(WING_STAGE2_RECON_CANDIDATES)
       .flat()
       .filter((c) => c.id.startsWith("stage3.terms."));
-    expect(terms.map((c) => [c.id, c.exactText])).toEqual([
-      ["stage3.terms.heading", "약관 동의 및 Key 발급받기"],
-      ["stage3.terms.api_agree", "API 이용 약관에 동의합니다."],
-      ["stage3.terms.category_agree", "카테고리 자동 매칭 서비스 이용에 동의합니다."],
-      ["stage3.terms.cancel", "취소"],
-      ["stage3.terms.issue_final", "약관 동의 및 Key 발급받기"],
+    // The assertion is about the WORDING, which is the thing a human transcribed and the thing this file has no
+    // licence to invent. It used to be written as a row-for-row equality, which enforced the same rule and one
+    // more nobody intended: that no candidate may ever be added for a string already on the list. The 2026-08-11
+    // highlight calibration needs exactly that — the same two consent sentences under NARROWER element queries,
+    // to find out which tag carries them — so the two rules are now separated. Adding a sixth STRING still fails.
+    expect([...new Set(terms.map((c) => c.exactText))].sort()).toEqual(
+      [
+        "약관 동의 및 Key 발급받기",
+        "API 이용 약관에 동의합니다.",
+        "카테고리 자동 매칭 서비스 이용에 동의합니다.",
+        "취소",
+      ].sort(),
+    );
+    // …and the ids stay acknowledged one by one, so a new candidate is a deliberate edit here rather than a
+    // silent widening of what a live sweep measures.
+    expect(terms.map((c) => c.id)).toEqual([
+      "stage3.terms.heading",
+      "stage3.terms.api_agree",
+      // Narrowings added 2026-08-11 for the guided-control highlight calibration. Same sentence, one tag family
+      // each: the broad query measured TWO painting matches, and which of these carries the sentence is the
+      // measurement. They promote nothing on their own.
+      "stage3.terms.api_agree.label",
+      "stage3.terms.api_agree.p",
+      "stage3.terms.api_agree.span",
+      "stage3.terms.api_agree.div",
+      "stage3.terms.category_agree",
+      "stage3.terms.category_agree.label",
+      "stage3.terms.category_agree.p",
+      "stage3.terms.category_agree.span",
+      "stage3.terms.category_agree.div",
+      "stage3.terms.cancel",
+      "stage3.terms.issue_final",
     ]);
   });
 
@@ -577,7 +603,11 @@ describe("the terms screen — transcribed verbatim, and the key-creation bounda
     expect(from).toBeGreaterThan(-1);
     const block = src.slice(from, src.indexOf("\n  }", from));
     expect(block).toContain("DO NOT press");
-    expect(block).toContain("CREATES THE KEY");
+    // It used to say "That button CREATES THE KEY" — asserted from the label, never observed, and refuted on
+    // 2026-08-12 when the button was pressed and no key was issued. The refusal is unchanged; its REASON is
+    // now the true one, which is also the stronger one for a measuring phase: nothing has read what follows.
+    expect(block).not.toContain("CREATES THE KEY");
+    expect(block).toContain("a screen this phase has never read");
     expect(block).toContain("SEPARATE approval");
     // …and it must not agree to the terms on the seller's behalf, or advise on them.
     expect(block).toContain("SellerOps does not read them");
@@ -918,14 +948,22 @@ describe("the guided-walk manifest is not the fallback", () => {
     expect(CLI).toContain("isWingGuidedWalk\n    ? \"operator-performed: the whole tutorial");
   });
 
-  it("the operation names the boundary, the two highlight classes, and what is out of scope", () => {
+  it("the operation names the boundary, what the rings sit ON, and what is out of scope", () => {
     const from = CLI.indexOf('isWingGuidedWalk\n    ? "WING GUIDED ISSUANCE WALK');
     const op = CLI.slice(from, CLI.indexOf("\n    : isWingReveal", from));
-    expect(op).toContain("CREATES THE KEY");
     expect(op).toContain("never pressed");
     expect(op).toContain("separate phase");
-    expect(op).toContain("TEXT-GUIDES");
-    expect(op).toContain("drawing no ring");
+    // The two highlight CLASSES became one on 2026-08-11 — every guided control is now calibrated. What
+    // replaced that distinction is the one that still matters: which ELEMENT each ring sits on. The purpose and
+    // consent rings are on a label and two sentences, never on the radio or the checkboxes, because those
+    // inputs have no accessible association and nothing may claim to know which box is which.
+    expect(op).toContain("never on the radio or the checkboxes");
+    expect(op).toContain("measured structural pairing");
+    // The stop point is unchanged and its reason is corrected: the operation text may no longer tell the
+    // operator this control creates the key, because it does not.
+    expect(op).not.toContain("which is the control that CREATES THE KEY");
+    expect(op).toContain("REFUTED on 2026-08-12");
+    expect(op).toContain("what follows is unmeasured");
     expect(op).toContain("navigates no further");
     expect(op).toContain("no connect-test, no sync");
   });
@@ -936,10 +974,12 @@ describe("the guided-walk manifest is not the fallback", () => {
     expect(max).toContain("0 presses of the key-creating");
     // ONE navigation now — the landing — and the budget must SAY so rather than keep claiming zero.
     expect(max).toContain("1 navigation (the landing at window open, never again)");
-    expect(max).toContain("3 highlights");
-    // Three since the purpose screen became one step. The budget also has to state that the runtime advances
-    // itself now — a budget listing only what the SELLER presses would understate what the agent does.
-    expect(max).toContain("2 text-guided");
+    // Seven since the guided-control calibration landed. The budget also has to state that the runtime
+    // advances itself now — a budget listing only what the SELLER presses would understate what the agent does.
+    expect(max).toContain("7 highlights");
+    expect(max).toContain("0 text-guided");
+    // …and the count that says what SellerOps does NOT know: no ring sits on an input.
+    expect(max).toContain("0 rings on an input");
     expect(max).toContain("4 steps advanced by OBSERVING WING");
     expect(max).toContain("the key-creating step never");
   });
@@ -970,8 +1010,15 @@ describe("stale spotlight — the defect the dev-host live proof surfaced", () =
     // the tag is cleared a text-guided step would render neither ring nor panel. Clearing alone would have
     // replaced a misplaced panel with no panel.
     expect(OVL).toContain("if (!target && !o.dockedPanelOnly) {");
-    // …and it must IGNORE a stale anchor rather than look one up: using it is the defect.
-    expect(OVL).toContain('const target = o.dockedPanelOnly ? null : document.querySelector("[data-aw-target]");');
+    // …and it must IGNORE a stale anchor rather than look one up: using it is the defect. The lookup became a
+    // `querySelectorAll` when a step gained the ability to ring more than one control (the terms screen has two
+    // separate consents), so the assertion follows it — the rule is about the `dockedPanelOnly ? [] :` guard,
+    // not about which query sits behind it.
+    expect(OVL).toContain('const tagged = o.dockedPanelOnly ? [] : Array.prototype.slice.call(document.querySelectorAll("[data-aw-target]"))');
+    // The SECOND place the same rule now has to hold. The repositioner re-queries the tag set on every scroll,
+    // so a docked panel would have re-acquired a stale anchor there even with the mount-time guard intact — a
+    // guard fixed in one place and left standing in its sibling, which is this workstream's recurring shape.
+    expect(OVL).toContain("if (o.dockedPanelOnly) return;");
   });
 
   it("docked mode draws no ring, no dimming and no badge — it claims no location", () => {

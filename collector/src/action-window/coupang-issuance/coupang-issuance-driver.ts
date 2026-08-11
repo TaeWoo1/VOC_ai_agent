@@ -43,7 +43,14 @@ export type CoupangIssuanceTarget =
   | "confirm_purpose"
   /** The two consent checkboxes. Never ticked, never read; the seller decides. */
   | "terms_consent"
-  /** `약관 동의 및 Key 발급받기` — **the control that CREATES THE KEY.** Highlighted, never pressed. */
+  /**
+   * `약관 동의 및 Key 발급받기` — the walk's LAST step. Highlighted, never pressed.
+   *
+   * It was "the control that CREATES THE KEY" here until 2026-08-12, asserted from its label and never
+   * observed. It was then pressed on a live walk and no key was issued — an integration-method form appears
+   * and the key is issued by that screen's 확인. See `WING_KEY_CREATION_CONTROL_REFUTATION`. The walk still
+   * rests here; the reason is now that what follows has never been measured.
+   */
   | "issue_final"
   | "credentials"
   | "return";

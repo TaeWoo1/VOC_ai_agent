@@ -175,8 +175,11 @@ describe("the redesigned walk can actually be walked", () => {
     const driver = new CoupangWingIssuanceDriver(fakePage() as never);
     for (const target of COUPANG_ISSUANCE_TARGETS) {
       // These QUERY the page (they carry a calibrated locator), so they are covered where a real page exists.
-      // `issue_final` joined them on 2026-08-11 when its locator was measured on the TERMS screen.
+      // `issue_final` joined them on 2026-08-11 when its locator was measured on the TERMS screen, and
+      // `confirm_purpose` / `terms_consent` joined the same day when the guided-control calibration promoted
+      // the `확인` control, the `OPEN API` option label and the two consent sentences.
       if (target === "issue" || target === "credentials" || target === "issue_final") continue;
+      if (target === "confirm_purpose" || target === "terms_consent") continue;
       const res = await driver.locateTarget(target);
       expect(res.count, `${target} would park the run at target_not_found`).toBe(1);
       expect(res.sig, target).toMatch(/^[0-9a-f]{16}$/);
@@ -191,9 +194,11 @@ describe("the redesigned walk can actually be walked", () => {
     // test as passed, so a local run looks green and CI does not.
     const driver = new CoupangWingIssuanceDriver(fakePage() as never);
     const sigs = new Map<string, string>();
-    // `issue_final` LEFT this list on 2026-08-11 — exactly as the comment above says it would: it gained a
-    // calibrated locator and a spotlight, so it is no longer text-guided.
-    for (const target of ["reach_open_api", "confirm_purpose", "terms_consent", "return"] as const) {
+    // Three steps LEFT this list on 2026-08-11 — exactly as the comment above says they would. `issue_final`
+    // first, then `confirm_purpose` and `terms_consent` when the guided-control calibration measured their
+    // controls on the live purpose and terms screens. What remains is the two steps that are guidance rather
+    // than a WING control: reaching a page, and going back to SellerOps.
+    for (const target of ["reach_open_api", "return"] as const) {
       const res = await driver.locateTarget(target);
       sigs.set(target, res.sig!);
     }

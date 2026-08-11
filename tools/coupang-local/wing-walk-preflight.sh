@@ -153,7 +153,7 @@ fi
 # 2 highlighted + 4 text-guided" while the verifier above demanded `agentNavigations:1`, `highlightedControlCount:3`
 # and `textGuidedControlCount:2` — so the line the OPERATOR reads before granting described a narrower run than
 # the one the gate had verified. That is the manifest-honesty defect class, in the display rather than the data.
-pass "guided-walk boundary is exactly the canonical contract (rests before the key-creating control · never presses it · agent presses nothing and navigates ONCE, to the seller's own WING landing · 0 value reads · no connect/sync · 3 highlighted + 2 text-guided · 4 steps auto-advance, never the key-creating one · the consent boxes' completion is observed)"
+pass "guided-walk boundary is exactly the canonical contract (rests before the key-creating control · never presses it · agent presses nothing and navigates ONCE, to the seller's own WING landing · 0 value reads · no connect/sync · 7 highlighted + 0 text-guided, and 0 of the rings on an input · 4 steps auto-advance, never the key-creating one · the consent boxes' completion is observed)"
 
 # The 발급 selector must be calibrated: this phase highlights a real control. The gate refuses
 # SELECTORS_NOT_CALIBRATED before reaching here, so this can only be `true` — asserted anyway so a future change
@@ -204,12 +204,14 @@ echo "  WHAT THIS RUN IS, precisely:"
 echo "    • EVERY marketplace action is YOURS. You log in, you reach the page, you press each control. The"
 echo "      agent clicks, types, submits and selects nothing. It opens the WINDOW on your own WING sales-info"
 echo "      page once (so it is not blank); every screen after that is one YOU navigate to."
-echo "    • THREE steps are highlighted: 'API Key 발급 받기', the Access Key region, and — new on 2026-08-11 —"
-echo "      '약관 동의 및 Key 발급받기'. All three have a live-calibrated locator. The last one being RINGED is"
-echo "      not it being pressed: SellerOps points at it and stops."
-echo "    • '확인' and the two consent checkboxes are TEXT-GUIDED. They were measured but"
-echo "      NOT promoted to selectors, so SellerOps does not claim to know where they are and draws no ring at"
-echo "      them. If a step's panel has no highlight, that is the design, not a failure."
+echo "    • SEVEN controls are highlighted: 'API Key 발급 받기', '확인', '약관 동의 및 Key 발급받기', the Access"
+echo "      Key region, the 'OPEN API' option label, and both consent sentences. Every one has a live-calibrated"
+echo "      locator. The last one being RINGED is not it being pressed: SellerOps points at it and stops. The"
+echo "      two steps that name no WING control — reaching the page, and going back to SellerOps — draw no ring."
+echo "    • NO ring sits on a checkbox or a radio. The purpose ring is on the option's LABEL and the consent"
+echo "      rings are on the two SENTENCES — those inputs have no accessible association, so SellerOps does not"
+echo "      claim to know which box is which. What ties each sentence to its own box is a measured structural"
+echo "      pairing: each box's nearest enclosing block holds exactly one consent sentence and exactly one box."
 echo "    • 'OPEN API' is the DEFAULT purpose option, so the purpose screen is ONE step: check it, press 확인."
 echo "    • FOUR steps advance by themselves when WING's own screen changes. The key-creating step never does."
 echo "    • You read the two consent texts and decide. SellerOps does not read them, evaluate them, agree to"
@@ -218,7 +220,10 @@ echo "      walk can move on without you pressing anything — that reading is a
 echo "      is never stored, sent, or logged."
 echo
 echo "  ⚠ WHERE THIS RUN STOPS, and why:"
-echo "    • The walk RESTS in front of '약관 동의 및 Key 발급받기'. That control CREATES THE KEY."
+echo "    • The walk RESTS in front of '약관 동의 및 Key 발급받기'. It does NOT create the key — that was"
+echo "      asserted from its label and refuted on 2026-08-12, when it was pressed and no key was issued. What"
+echo "      it opens is an integration-method form (자체개발 / 연동업체 · 업체명 · 취소 · 확인), and the key is"
+echo "      issued by THAT screen's 확인. No apparatus has ever read that screen."
 echo "    • DO NOT PRESS IT in this run. There is no step after it here, and the walk has no tooling that could"
 echo "      press it. Actual key issuance is a separate phase, with its own manifest and its own grant."
 echo "    • No credential value is read, no connect-test, no sync, no upload. SellerOps cannot tell whether a"
@@ -228,8 +233,10 @@ echo
 # will be on the WING page. Reproduced COMPLETE, so nothing on screen is a surprise.
 echo "  WHAT THE LAST STEP SAYS ON THE WING PAGE (complete, Korean — this is what binds):"
 # CHECKPOINT-COPY-BEGIN
-echo "    ⚠ 여기서 실제로 키가 생성됩니다. '약관 동의 및 Key 발급받기' 버튼을 직접 누르세요 — SellerOps는 이"
-echo "    버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다. 발급이 끝나면 아래 버튼을 누르세요."
+echo "    '약관 동의 및 Key 발급받기'를 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않고, 자동으로"
+echo "    넘어가지도 않습니다. ⚠ 이 버튼은 키를 만들지 않습니다. 다음에 연동 방식(자체개발/연동업체)을 고르는"
+echo "    화면이 나오고, 키는 그 화면의 '확인'에서 발급됩니다 — 그 화면은 아직 SellerOps가 안내하지 않습니다."
+echo "    눌러서 다음 화면이 뜨면 아래 버튼을 누르세요."
 # CHECKPOINT-COPY-END
 echo
 echo "  ⚠ THIS PROOF STOPS BEFORE THAT PRESS. The copy above is the tutorial's own product text, shown here so"

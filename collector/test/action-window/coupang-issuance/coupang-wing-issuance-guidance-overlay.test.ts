@@ -26,8 +26,17 @@ import {
 } from "../../../src/action-window/coupang-wing-issuance-driver";
 import type { CoupangIssuanceTarget } from "../../../src/action-window/coupang-issuance/coupang-issuance-driver";
 
-/** The five steps with no promoted locator — every one must behave identically. */
-const GUIDANCE_TARGETS: readonly CoupangIssuanceTarget[] = ["reach_open_api", "confirm_purpose", "terms_consent", "return"];
+/**
+ * The steps with no promoted locator — every one must behave identically.
+ *
+ * `confirm_purpose` and `terms_consent` LEFT this list on 2026-08-11, when the guided-control calibration
+ * measured the `확인` control, the `OPEN API` option label and the two consent sentences on the live purpose and
+ * terms screens. They are now anchored, multi-ring steps, covered in
+ * `coupang-wing-multi-ring-highlight.test.ts`. What remains is the two steps that are guidance rather than a
+ * WING control at all: reaching a page, and going back to SellerOps. Their signatures are synthetic constants
+ * derived from no element, which is the property this file is really about.
+ */
+const GUIDANCE_TARGETS: readonly CoupangIssuanceTarget[] = ["reach_open_api", "return"];
 
 interface MountCall {
   dockedPanelOnly?: boolean;
@@ -159,18 +168,34 @@ describe("the chip's title and the panel's instruction are different things", ()
     }
   });
 
-  it("**the key-creation step's chip still warns**, and its full instruction is untouched", () => {
-    // The one chip that must carry a warning: shortening it must not turn "키가 생성된다" into a neutral label.
-    expect(OPERATOR_STEP_TITLES.issue_final).toContain("⚠");
-    expect(OPERATOR_STEP_TITLES.issue_final).toContain("키가 생성");
-    // …and the panel's copy keeps every sentence the approval harness reproduces before the grant.
+  it("**the last step's copy says what is TRUE of the control**, which stopped being 'it creates the key'", () => {
+    // Corrected 2026-08-12. The chip read "⚠ 키가 생성되는 단계" and the panel "⚠ 여기서 실제로 키가
+    // 생성됩니다 … 발급이 끝나면", and the control does not create a key: it was pressed on the live walk and
+    // none was issued (`WING_KEY_CREATION_CONTROL_REFUTATION`). A warning attached to a consequence that does
+    // not happen spends the credibility the true warnings need.
+    expect(OPERATOR_STEP_TITLES.issue_final).not.toContain("키가 생성");
+    expect(OPERATOR_STEP_LABELS.issue_final).not.toContain("여기서 실제로 키가 생성됩니다");
+    // The three claims that must SURVIVE, because they are what the step is for: the seller presses it,
+    // SellerOps never does, and nothing advances past it on its own.
     for (const clause of [
-      "여기서 실제로 키가 생성됩니다.",
-      "'약관 동의 및 Key 발급받기' 버튼을 직접 누르세요",
+      "'약관 동의 및 Key 발급받기'를 직접 누르세요",
       "버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다.",
+      "이 버튼은 키를 만들지 않습니다.",
     ]) {
       expect(OPERATOR_STEP_LABELS.issue_final, clause).toContain(clause);
     }
+    // …and it names where the key IS issued, plus the fact that SellerOps does not guide that screen — the
+    // seller is about to reach a step this walk has never measured, and being told so is the point.
+    expect(OPERATOR_STEP_LABELS.issue_final).toContain("그 화면의 '확인'에서 발급됩니다");
+    expect(OPERATOR_STEP_LABELS.issue_final).toContain("아직 SellerOps가 안내하지 않으니 직접 진행해 주세요");
+    // **The advance is gated on the CREDENTIALS being on screen, not on the press.** The first correction ended
+    // "눌러서 다음 화면이 뜨면 아래 버튼을 누르세요" — which directs the seller to advance the moment the
+    // integration screen appears. Step 6 then locates the fixed label `Access Key`, which does not paint on
+    // that screen, so `locateTarget` returns 0 and the run parks `target_not_found` on a step the seller was
+    // just told to enter. A correction that makes a dead end reachable BY FOLLOWING IT is worse than the claim
+    // it replaced.
+    expect(OPERATOR_STEP_LABELS.issue_final).toContain("Access Key가 화면에 표시되면 아래 버튼을 누르세요");
+    expect(OPERATOR_STEP_LABELS.issue_final).not.toContain("다음 화면이 뜨면 아래 버튼");
   });
 
   it("the chip has a STRUCTURAL ceiling too — a long label is visibly cut, not lost off-screen", () => {

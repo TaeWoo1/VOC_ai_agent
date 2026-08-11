@@ -40,8 +40,11 @@ import {
   WING_KEY_CREATION_SELECTOR_CALIBRATED,
   WING_PURPOSE_SCREEN_MARKER_SPEC,
   WING_TERMS_SCREEN_MARKER_SPECS,
+  wingGuidedHighlightPromotion,
+  wingCandidateSpecById,
   type WingFlowScreen,
   type WingFlowScreenMarkerSpec,
+  type WingGuidedHighlightTarget,
 } from "./coupang-wing-label-recon";
 import { mountOverlay, unmountOverlay, overlayMounted, resetOverlayAdvance, readOverlayAdvancePressed } from "./overlay";
 import {
@@ -66,6 +69,7 @@ import {
 import {
   buildFixedLabelContainmentScript,
   buildFixedLabelLocateScript,
+  buildFixedLabelRingPlanScript,
   sanitizeContainmentReading,
   type FixedLabelContainmentReading,
 } from "./api-issuance-calibration/visual-recon-inpage";
@@ -149,9 +153,10 @@ function isWingHighlightTarget(target: CoupangIssuanceTarget): target is "issue"
   // 삭제 record was withdrawn while its target stayed in a hand-written list, and only the flag being read at
   // the point of use keeps that from happening again.
   if (target === "issue_final") return WING_KEY_CREATION_SELECTOR_CALIBRATED;
-  // ONLY the two controls with a live-calibrated locator. The purpose radios, 확인, the consent boxes and the
-  // key-creating button are all MEASURED but NOT promoted, so the driver cannot highlight them and fails closed
-  // if asked — which is the tutorial's job to respect, not to work around.
+  // The two SINGLE-SPEC fixed-label targets, which is all this predicate has ever answered for. It is no
+  // longer the whole ringed set: the purpose option, 확인 and the two consent sentences were promoted on
+  // 2026-08-12 and resolve through `promotedRingSpecs`, which runs ahead of this on both the locate and the
+  // highlight path. `WING_HIGHLIGHT_LABELS` is this function's whole domain.
   return target === "issue" || target === "credentials";
 }
 
@@ -676,9 +681,17 @@ export const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string
   confirm_purpose: "사용 목적이 'OPEN API'인지 확인하고(기본값입니다) '확인'을 직접 누르세요. 이 버튼도 키를 만들지 않고 약관 화면을 엽니다. 화면이 열리면 자동으로 넘어갑니다.",
   terms_consent: "약관을 직접 읽고 판단하신 뒤 동의 체크박스 2개를 선택하세요. SellerOps는 약관을 읽지도, 대신 동의하지도, 체크하지도 않습니다. 2개가 모두 선택되면 자동으로 넘어갑니다(선택 여부는 저장·전송하지 않습니다).",
   // NOT trimmed. Every sentence here is a safety claim the approval harness reproduces and asserts before the
-  // operator grants (`wing-walk-selfcheck.sh`, "the COMPLETE Korean copy of the key-creation step"), and this is
-  // the one step where the control in front of the seller creates the key. Concision is not worth a clause here.
-  issue_final: "⚠ 여기서 실제로 키가 생성됩니다. '약관 동의 및 Key 발급받기' 버튼을 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다. 발급이 끝나면 아래 버튼을 누르세요.",
+  // operator grants (`wing-walk-selfcheck.sh`, "the COMPLETE Korean copy of the key-creation step").
+  //
+  // CORRECTED 2026-08-12. It read "⚠ 여기서 실제로 키가 생성됩니다 … 발급이 끝나면" — and the key is not created
+  // here. The control was pressed on the live walk and no key was issued; an integration-method form appears
+  // instead, and the operator reports the key is issued by THAT screen's 확인
+  // (`WING_KEY_CREATION_CONTROL_REFUTATION`). Telling the seller a key is about to be created, at a button that
+  // does not create one, is a false warning — and a false warning spends the credibility the true ones need.
+  //
+  // What the copy must still do is unchanged: this is where the guidance STOPS, SellerOps never presses it, and
+  // nothing auto-advances past it. The reason is now the honest one — what follows has never been measured.
+  issue_final: "'약관 동의 및 Key 발급받기'를 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다. ⚠ 이 버튼은 키를 만들지 않습니다. 다음에 연동 방식(자체개발/연동업체)을 고르는 화면이 나오고, 키는 그 화면의 '확인'에서 발급됩니다 — 그 화면은 아직 SellerOps가 안내하지 않으니 직접 진행해 주세요. Access Key가 화면에 표시되면 아래 버튼을 누르세요.",
   credentials: "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요. SellerOps는 값을 읽지 않습니다. 복사했으면 아래 버튼을 누르세요.",
   return: "아래 버튼을 눌러 SellerOps로 돌아가세요. 복사한 키를 입력하면 연결이 끝납니다.",
 };
@@ -700,8 +713,9 @@ export const OPERATOR_STEP_TITLES: Readonly<Record<CoupangIssuanceTarget, string
   issue: "'API Key 발급 받기' 누르기",
   confirm_purpose: "사용 목적 확인 후 '확인'",
   terms_consent: "약관 2건 동의",
-  // The one chip that keeps a warning: it names the consequence, and the panel beside it carries the full text.
-  issue_final: "⚠ 키가 생성되는 단계",
+  // The chip named a consequence this control does not have (see the panel copy above, corrected 2026-08-12).
+  // It now names the control, like every other chip — the panel carries what is true about it.
+  issue_final: "'약관 동의 및 Key 발급받기' 누르기",
   credentials: "키 3개 복사",
   return: "SellerOps로 돌아가기",
 };
@@ -732,8 +746,12 @@ const RETURN_GUIDANCE_SIG = "5e11e40b5e11e40b";
 /**
  * **TEXT-GUIDED steps: the ones the tutorial guides but cannot highlight.**
  *
- * The 2026-08-10 redesign added four such steps — the purpose radios, `확인`, the consent boxes and the
- * key-creating button. All four are MEASURED; none is PROMOTED, so there is no locator to spotlight. The driver
+ * The 2026-08-10 redesign added four such steps — the purpose radios, `확인`, the consent boxes and the walk's
+ * last control. All four were MEASURED and none PROMOTED, so there was no locator to spotlight. **All four have
+ * since been promoted** (the last control on 2026-08-11, the other three on 2026-08-12), so `confirm_purpose`
+ * and `terms_consent` now take the ring path and reach this map only if a calibration is WITHDRAWN. That
+ * fallback is why their entries stay: a withdrawn promotion must land on a docked panel, never back on the
+ * `{ count: 0 }` dead end described next. The driver
  * documented exactly that ("a tutorial step for an unpromoted control guides by TEXT") and then returned
  * `{ count: 0 }` for them, which the engine reads as `NONE` and parks `target_not_found` — permanently, because
  * a re-check re-locates and finds nothing again. The redesigned walk could not get past step 3.
@@ -753,6 +771,74 @@ const RETURN_GUIDANCE_SIG = "5e11e40b5e11e40b";
  *     no on-page instruction rendered anywhere.
  * One map, one branch: a guidance step clears the prior tag, mounts docked, and reports what actually mounted.
  */
+/**
+ * **The ring PLAN for the two steps that describe more than one control.**
+ *
+ * `confirm_purpose` asks the seller to check the purpose and then press 확인; `terms_consent` asks them to tick
+ * two separate consents. A single ring cannot express either, and a step that ringed only the first tagged
+ * element while the panel described both would be pointing at half of what it says.
+ *
+ * `primary` is the control the chip names and the page-dimming shroud is punched around — the ACT, not the thing
+ * to read: pressing 확인 is what advances the purpose screen. The consents have no such asymmetry, so the first
+ * one leads and the second is its equal beside it.
+ *
+ * **This map promotes nothing by itself.** Every entry is resolved through {@link wingGuidedHighlightPromotion},
+ * and an entry whose promotion is withdrawn simply drops out of the plan. As of 2026-08-12 all four ARE
+ * promoted, so this is the LIVE path for steps 3 and 4 — the comment said the opposite for as long as it took
+ * the calibration to land, which is the kind of drift a reader has no way to catch.
+ */
+const GUIDED_RING_PLAN: Readonly<
+  Partial<Record<CoupangIssuanceTarget, { readonly primary: WingGuidedHighlightTarget; readonly also: readonly WingGuidedHighlightTarget[] }>>
+> = {
+  confirm_purpose: { primary: "confirm", also: ["purpose_open_api"] },
+  terms_consent: { primary: "consent_api", also: ["consent_category"] },
+};
+
+/**
+ * The PROMOTED specs for a step, primary first. Empty ⇒ nothing was promoted and the step is text-guided.
+ *
+ * Fail-closed PER CONTROL, not per step. An unpromoted sibling must not suppress a promoted one (that would
+ * silently withdraw a calibration nobody withdrew), and a promoted one must not drag an unpromoted one along
+ * (that is the promotion this unit is forbidden to make). If the planned primary is not promoted, the first
+ * promoted sibling leads — a ring set with no primary would put the chip wherever document order happened to
+ * land it.
+ *
+ * Specs are RESOLVED BY ID from the recon candidates, never re-typed here: the promotion record names an id, and
+ * `KEY_CREATION_SPEC` is in this file for the same reason — a second hand-written copy is how a ring ends up
+ * pointing with a string the calibration no longer covers.
+ */
+function promotedRingSpecs(target: CoupangIssuanceTarget): readonly WingFlowScreenMarkerSpec[] {
+  const plan = GUIDED_RING_PLAN[target];
+  if (!plan) return [];
+  const specs: WingFlowScreenMarkerSpec[] = [];
+  for (const t of [plan.primary, ...plan.also]) {
+    const p = wingGuidedHighlightPromotion(t);
+    if (!p.promoted || !p.candidateId) continue;
+    specs.push(wingCandidateSpecById(p.candidateId));
+  }
+  return specs;
+}
+
+/**
+ * Fold several opaque per-element signatures into one, so a multi-ring step has a single value for the engine's
+ * locate↔highlight anti-drift check.
+ *
+ * Structural, like the signatures it folds: an FNV-1a over the concatenated hex, computed host-side over values
+ * that are already opaque. It reads no page content and adds no new exposure — and it is ORDER-SENSITIVE on
+ * purpose, because the ring set is ordered (primary first) and two steps that tagged the same elements in a
+ * different order are not the same presentation.
+ */
+function foldSigs(sigs: readonly string[]): string {
+  let h = 0x811c9dc5;
+  for (const s of sigs.join("|")) {
+    h ^= s.charCodeAt(0);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  // 16 hex, matching the in-page signature width so nothing downstream has to special-case a folded one.
+  const half = h.toString(16).padStart(8, "0");
+  return `${half}${half}`;
+}
+
 const TEXT_GUIDED_SIG: Readonly<Partial<Record<CoupangIssuanceTarget, string>>> = {
   reach_open_api: REACH_OPEN_API_GUIDANCE_SIG,
   confirm_purpose: "b48e2f05b48e2f05",
@@ -781,12 +867,23 @@ const WING_SURFACE_PAINTED = `(function () {
   }
 })()`;
 
-/** Remove every read-only `data-aw-target` annotation. Value-free; safe on a page with none. */
+/**
+ * Remove every read-only ring annotation — BOTH markers. Value-free; safe on a page with none.
+ *
+ * `data-aw-primary` was added beside `data-aw-target` when a step gained the ability to ring several controls,
+ * and this clear was left stripping only the first. Both tagging scripts always write and clear the two
+ * together, so the asymmetry lived exactly here: after a `clearHighlight()` the last primary kept a stale
+ * `data-aw-primary`, and a later ring-plan tag only strips markers from elements still carrying
+ * `data-aw-target` — so that element could be re-tagged while a second one still claimed the chip, and the
+ * overlay would put it on whichever came first in document order. Not reachable with today's two ring plans,
+ * and repaired anyway: it is the "fixed in one place, left standing in the sibling" shape this workstream keeps
+ * paying for.
+ */
 const IN_PAGE_CLEAR_TAG = `(function () {
   /* coupang-issuance-cleartag */
   var slice = Function.prototype.call.bind(Array.prototype.slice);
-  var els = slice(document.querySelectorAll('[data-aw-target]'));
-  for (var i = 0; i < els.length; i++) { els[i].removeAttribute('data-aw-target'); }
+  var els = slice(document.querySelectorAll('[data-aw-target],[data-aw-primary]'));
+  for (var i = 0; i < els.length; i++) { els[i].removeAttribute('data-aw-target'); els[i].removeAttribute('data-aw-primary'); }
   return true;
 })()`;
 
@@ -1103,7 +1200,51 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     return canHighlight && res.sig ? { matchCount, canHighlight, sig: res.sig, ...extra } : { matchCount, canHighlight, ...extra };
   }
 
+  /**
+   * Resolve a step's whole PROMOTED ring set — every spec must land on exactly one painting element, or the step
+   * does not ring at all.
+   *
+   * **All-or-nothing, and that is the honest reading.** A partially-resolved set means the page is not the one
+   * the calibration was taken on, and drawing the rings that happened to resolve would present a confident,
+   * incomplete picture of a screen we have just discovered we do not recognise. The failing spec's own count is
+   * returned so the park upstream says `target_not_found` about a real miss rather than a synthesised zero.
+   *
+   * When tagging, the prior step's tags are cleared ONCE up front and every spec then tags additively — a
+   * per-call clear would leave only the last one tagged, which is the single-ring assumption this exists to lift.
+   */
+  private async resolveRingPlan(specs: readonly WingFlowScreenMarkerSpec[], tag: boolean): Promise<LocateResult> {
+    // ONE evaluation for the whole plan. It used to be one per spec, twice over, plus a separate clear — five
+    // round trips for a two-control step, each one a page evaluation on a live marketplace page, and the
+    // operator saw the resulting rings arrive visibly later than the single-ring ones on 2026-08-12.
+    //
+    // The batched script is also ATOMIC where the sequence could not be: it resolves every spec before tagging
+    // anything, so the page never holds a partial ring set — not even between two evaluations.
+    const raw = await this.evalStr<{ resolved?: boolean; rows?: { count?: number; sig?: string }[] }>(
+      this.activePage(),
+      buildFixedLabelRingPlanScript({ specs: specs.map((sp) => ({ candidateQuery: sp.candidateQuery, exactText: sp.exactText })), tag }),
+    );
+    const rows = Array.isArray(raw?.rows) ? raw.rows : [];
+    // Re-checked host-side rather than trusted: `resolved` is the script's own summary, and a row set that does
+    // not match the plan it was built from is not a resolution of that plan. The FIRST failing row's own count
+    // travels, so the park upstream reports a real miss instead of a synthesised zero.
+    if (raw?.resolved !== true || rows.length !== specs.length) {
+      const missed = rows.find((r) => r?.count !== 1);
+      return { count: typeof missed?.count === "number" ? missed.count : 0 };
+    }
+    const sigs: string[] = [];
+    for (const r of rows) {
+      if (r?.count !== 1 || !r.sig) return { count: typeof r?.count === "number" ? r.count : 0 };
+      sigs.push(r.sig);
+    }
+    return { count: 1, sig: foldSigs(sigs) };
+  }
+
   async locateTarget(target: CoupangIssuanceTarget): Promise<LocateResult> {
+    // PROMOTED first. `confirm_purpose` and `terms_consent` appear in BOTH tables — they are text-guided until
+    // their controls are calibrated and ringed afterwards — so the order of these two branches is what decides
+    // which. Promotion wins, and it can only be reached through a record that names a live reading.
+    const ring = promotedRingSpecs(target);
+    if (ring.length > 0) return this.resolveRingPlan(ring, false);
     // Text-guided (incl. `reach_open_api` and `return`, which are guidance rather than queried WING controls):
     // measured, not promoted. It resolves to a fixed synthetic signature — the page is not queried, so there is
     // nothing to find and nothing to miss.
@@ -1115,6 +1256,18 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
 
   async highlightTarget(target: CoupangIssuanceTarget): Promise<LocateResult> {
     const page = this.activePage();
+    // Same precedence as `locateTarget`, and it has to be the same or the two disagree about what this step is:
+    // one would tag a control while the other reported a synthetic guidance signature, and the engine's
+    // anti-drift check compares exactly those two values.
+    const ring = promotedRingSpecs(target);
+    if (ring.length > 0) {
+      const planned = await this.resolveRingPlan(ring, true);
+      if (planned.count !== 1 || !planned.sig) return { count: planned.count };
+      await sleep(LOCATOR_SETTLE_MS);
+      await this.mountStepOverlay(page, target);
+      if (!(await overlayMounted(page))) return { count: 0 };
+      return { count: 1, sig: planned.sig };
+    }
     const guided = TEXT_GUIDED_SIG[target];
     if (guided) {
       // CLEAR THE PRIOR TAG FIRST. Live-confirmed 2026-08-10: without this the mount found the PREVIOUS step's

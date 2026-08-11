@@ -1113,11 +1113,16 @@ describe("the sweep runs the calibration reads ONLY under the calibration phase"
     // presence would say NOT_MEASURED while `containmentFaults` said nothing went wrong.
     const { d } = deps({ probeContainment: async () => null });
     const r = await runWingSelectorRecord(d, [], { stage2: ["confirm"], stage2Phase: WING_STAGE2_LABEL_CALIBRATION_PHASE });
-    expect(r.stage2!.containmentFaults).toEqual([{ id: "stage2.confirm.confirm", fault: "UNUSABLE_READING" }]);
+    // EVERY candidate of the target faults, not just the first — `confirm` has carried two query shapes since
+    // 2026-08-11, and a per-candidate fault list that named only one of them would leave the other looking
+    // measured. The ids are checked against the shipped set rather than typed as a pair, so a third narrowing
+    // does not silently escape the same rule.
+    const confirmIds = WING_STAGE2_RECON_CANDIDATES.confirm.map((c) => c.id);
+    expect(r.stage2!.containmentFaults).toEqual(confirmIds.map((id) => ({ id, fault: "UNUSABLE_READING" })));
     expect(r.stage2!.targets[0]!.candidates[0]!.containment).toBeNull();
     expect(r.stage2!.targets[0]!.candidates[0]!.presence).toBe("NOT_MEASURED");
-    // The count still landed: the two reads are separate evaluations and one failing must not lose the other.
-    expect(r.stage2!.candidatesMeasured).toBe(1);
+    // The counts still landed: the two reads are separate evaluations and one failing must not lose the other.
+    expect(r.stage2!.candidatesMeasured).toBe(confirmIds.length);
   });
 
   it("**a NULL association reading is a fault, not a silent absence**", async () => {
@@ -1134,10 +1139,10 @@ describe("the sweep runs the calibration reads ONLY under the calibration phase"
       },
     });
     const r = await runWingSelectorRecord(d, [], { stage2: ["confirm"], stage2Phase: WING_STAGE2_LABEL_CALIBRATION_PHASE });
-    expect(r.stage2!.containmentFaults).toHaveLength(1);
-    expect(r.stage2!.containmentFaults[0]!.id).toBe("stage2.confirm.confirm");
-    // The count survived, and its presence is honestly unmeasured rather than a fabricated absence.
-    expect(r.stage2!.candidatesMeasured).toBe(1);
+    const confirmIds = WING_STAGE2_RECON_CANDIDATES.confirm.map((c) => c.id);
+    expect(r.stage2!.containmentFaults.map((f) => f.id)).toEqual(confirmIds);
+    // The counts survived, and each presence is honestly unmeasured rather than a fabricated absence.
+    expect(r.stage2!.candidatesMeasured).toBe(confirmIds.length);
     expect(r.stage2!.targets[0]!.candidates[0]!.presence).toBe("NOT_MEASURED");
   });
 
@@ -1183,7 +1188,9 @@ describe("the emitted calibration record", () => {
     expect(rec.calibration).toBe(true);
     expect(rec.calibrationBlind).toBeNull();
     expect(rec.association).not.toBeNull();
-    expect(rec.containmentMeasured).toBe(1);
+    // One per candidate of the swept target, tied to the shipped set rather than typed — `confirm` gained a
+    // second query shape on 2026-08-11 and this number is a property of the set, not of the run.
+    expect(rec.containmentMeasured).toBe(WING_STAGE2_RECON_CANDIDATES.confirm.length);
     expect(rec.containmentFaults).toEqual([]);
     expect(rec.purposeOptionCandidateIds).toEqual(WING_STAGE2_PURPOSE_OPTION_CANDIDATES.map((c) => c.id));
     const row = rec.targets[0]!.candidates[0]!;
@@ -1219,7 +1226,10 @@ describe("the emitted calibration record", () => {
     });
     const r = await runWingSelectorRecord(d, [], { stage2: ["confirm"], stage2Phase: WING_STAGE2_LABEL_CALIBRATION_PHASE });
     const rec = stage2RecordFor(r.stage2)!;
-    expect(rec.candidatesMeasured).toBe(1);
+    // The point is the SPLIT: every candidate counted, none of them contained. Folding the two would let a
+    // fully-faulted containment pass read as a complete calibration.
+    expect(rec.candidatesMeasured).toBe(WING_STAGE2_RECON_CANDIDATES.confirm.length);
+    expect(rec.candidatesMeasured).toBeGreaterThan(0);
     expect(rec.containmentMeasured).toBe(0);
   });
 
@@ -1672,13 +1682,28 @@ describe("WING_STAGE2_LABEL_CALIBRATION_EVIDENCE — measured, inferred, and sti
     // be named here rather than quietly folded into its quads.
     expect(shipped.filter((id) => !ids.includes(id))).toEqual([
       "stage2.purpose.operator_verbatim",
+      // The 확인 label's actionable-only narrowing, added 2026-08-11. This run measured the broad shape; a quad
+      // taken under one query is not a quad for another.
+      "stage2.confirm.actionable",
       // …and the whole TERMS screen, which pressing 확인 revealed on 2026-08-10. This record could not have
       // quads for a screen nobody had reached when it was taken.
       "stage3.terms.heading",
       "stage3.terms.api_agree",
+      "stage3.terms.api_agree.label",
+      "stage3.terms.api_agree.p",
+      "stage3.terms.api_agree.span",
+      "stage3.terms.api_agree.div",
       "stage3.terms.category_agree",
+      "stage3.terms.category_agree.label",
+      "stage3.terms.category_agree.p",
+      "stage3.terms.category_agree.span",
+      "stage3.terms.category_agree.div",
       "stage3.terms.cancel",
       "stage3.terms.issue_final",
+      // The `OPEN API` option as a LOCATE target, added 2026-08-11 — this record predates it entirely.
+      "stage2.purpose_open_api.label",
+      "stage2.purpose_open_api.broad",
+      "stage2.purpose_open_api.input",
     ]);
     // Every recon absence is present here, and so is the one candidate that was not an absence.
     for (const id of E.refines.absentCandidateIds) expect(ids).toContain(id);

@@ -174,7 +174,7 @@ run_case "HEAD_DRIFT      (commit moved since bootstrap)" nonzero "git commit ch
 # The DISPLAY-side check. Unlike the destructive descriptor — where the risk is understating danger — every
 # softening here OVERSTATES safety, and the worst is `keyCreationRuledOut: true`: it would tell the operator
 # SellerOps had confirmed no key was created, which nothing can (NO_DISCRIMINATING_SIGNAL).
-CANON='{"guidedWalkBoundary":{"operation":"WALK_WING_GUIDED_ISSUANCE_TUTORIAL","forbiddenFollowOnAction":"COMPLETE_WING_KEY_ISSUANCE","restsBeforeControl":"약관 동의 및 Key 발급받기","createsKeyMaterial":false,"keyCreationRuledOut":false,"agentPerformsAction":false,"agentNavigations":1,"credentialValueReadBudget":0,"performsConnectOrSync":false,"highlightedControlCount":3,"textGuidedControlCount":2,"autoAdvancingStepCount":4,"keyCreationAutoAdvances":false,"sellerConsentObserved":true}}'
+CANON='{"guidedWalkBoundary":{"operation":"WALK_WING_GUIDED_ISSUANCE_TUTORIAL","forbiddenFollowOnAction":"COMPLETE_WING_KEY_ISSUANCE","restsBeforeControl":"약관 동의 및 Key 발급받기","createsKeyMaterial":false,"keyCreationRuledOut":false,"agentPerformsAction":false,"agentNavigations":1,"credentialValueReadBudget":0,"performsConnectOrSync":false,"highlightedControlCount":7,"textGuidedControlCount":0,"ringedInputControlCount":0,"autoAdvancingStepCount":4,"keyCreationAutoAdvances":false,"sellerConsentObserved":true}}'
 printf '%s' "$CANON" > "$FIXTURES/desc-ok.json"
 DESC_OK=1
 verify_walk_descriptor "$FIXTURES/desc-ok.json" >/dev/null 2>&1 || { echo "  FAIL  DESCRIPTOR · canonical descriptor rejected"; DESC_OK=0; FAILED=1; }
@@ -187,7 +187,8 @@ for soft in \
   '"credentialValueReadBudget":1' \
   '"performsConnectOrSync":true' \
   '"highlightedControlCount":6' \
-  '"textGuidedControlCount":0' \
+  '"textGuidedControlCount":2' \
+  '"ringedInputControlCount":1' \
   '"operation":"COMPLETE_WING_KEY_ISSUANCE"' \
   '"operation":"DELETE_WING_OPEN_API_KEY"' \
   '"forbiddenFollowOnAction":"NOTHING"' \
@@ -295,18 +296,31 @@ if [ -z "$TREE_DIRTY" ]; then
   DISCLOSE_OK=1
   for phrase in \
     "EVERY marketplace action is YOURS" \
+    "강조 표시는 체크박스나 라디오 버튼 위에 뜨지 않습니다" \
+    "어느 박스가 어느 동의인지 안다고 말하지 않습니다" \
     "every screen after that is one YOU navigate to" \
-    "THREE steps are highlighted" \
-    "TEXT-GUIDED" \
-    "draws no ring at" \
+    "SEVEN controls are highlighted" \
+    "NO ring sits on a checkbox or a radio" \
+    "measured structural pairing" \
     "'OPEN API' is the DEFAULT purpose option" \
     "You read the two consent texts and decide" \
-    "That control CREATES THE KEY" \
+    "It does NOT create the key" \
+    "refuted on 2026-08-12" \
+    "No apparatus has ever read that screen" \
     "DO NOT PRESS IT in this run" \
     "separate phase, with its own manifest and its own grant" \
     "no connect-test, no sync, no upload"
   do
     grep -qF "$phrase" <<<"$out" || { echo "  FAIL  NORMAL          · disclosure missing: $phrase"; DISCLOSE_OK=0; FAILED=1; }
+  done
+  # The KOREAN operator summary is the line that binds, and it went stale while the English disclosure beside
+  # it was updated — it still told the operator that the purpose step and the checkboxes carry no highlight, on
+  # the very run that had just promoted them. That is the manifest-honesty defect in the sentence rather than
+  # the data, in the half the operator actually reads.
+  for stale_ko in "사용 목적/확인 단계와 체크박스에는 강조 표시가 없습니다" "selector로 승격되지 않았기 때문"; do
+    if grep -qF "$stale_ko" <<<"$out"; then
+      echo "  FAIL  NORMAL          · retired Korean claim still shown: $stale_ko"; DISCLOSE_OK=0; FAILED=1
+    fi
   done
   [ "$DISCLOSE_OK" = "1" ] && echo "  PASS  NORMAL          · full guided-walk disclosure shown before the grant line"
 
@@ -315,12 +329,20 @@ if [ -z "$TREE_DIRTY" ]; then
   # it and this asserts each is printed. One fragment per sentence, none spanning a wrapped output line.
   KOREAN_OK=1
   for phrase in \
-    "여기서 실제로 키가 생성됩니다." \
-    "'약관 동의 및 Key 발급받기' 버튼을 직접 누르세요" \
-    "SellerOps는 이" \
-    "버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다."
+    "'약관 동의 및 Key 발급받기'를 직접 누르세요" \
+    "버튼을 절대 누르지 않고, 자동으로" \
+    "이 버튼은 키를 만들지 않습니다." \
+    "키는 그 화면의 '확인'에서 발급됩니다" \
+    "아직 SellerOps가 안내하지 않습니다."
   do
     grep -qF "$phrase" <<<"$out" || { echo "  FAIL  NORMAL          · Korean on-screen warning missing: $phrase"; KOREAN_OK=0; FAILED=1; }
+  done
+  # The RETIRED warning. It was refuted on 2026-08-12 — the control was pressed and no key was issued — and a
+  # warning attached to a consequence that does not happen spends the credibility the true ones need.
+  for stale_ko in "여기서 실제로 키가 생성됩니다" "발급이 끝나면 아래 버튼을"; do
+    if grep -qF "$stale_ko" <<<"$out"; then
+      echo "  FAIL  NORMAL          · refuted Korean warning still shown: $stale_ko"; KOREAN_OK=0; FAILED=1
+    fi
   done
   [ "$KOREAN_OK" = "1" ] && echo "  PASS  NORMAL          · the COMPLETE Korean copy of the key-creation step is shown before the grant line"
 
@@ -469,16 +491,22 @@ ENV
   # **The bootstrap's own DISCLOSURE, which nothing checked.** It is the first description of the run the
   # operator reads, and it had drifted to the pre-change behaviour — "the agent never navigates", "the two
   # live-calibrated controls" — while the descriptor the preflight prints and the gate verifies said
-  # agentNavigations:1 / highlightedControlCount:3 / textGuidedControlCount:2 / autoAdvancingStepCount:4 /
+  # agentNavigations:1 / highlightedControlCount:7 / textGuidedControlCount:0 / autoAdvancingStepCount:4 /
   # sellerConsentObserved:true. Only the preflight output was grepped, so this half could say anything.
   #
   # Asserted BOTH ways: the current claims must be present, and the retired ones must be gone — a disclosure
   # that gained a line while keeping its contradiction is not fixed.
   BOOT_OK=1
-  for claim in "ONE" "never navigates again" "THREE live-calibrated" "FOUR steps advance" "consent boxes are ticked" "RESTS in front of" "약관 동의 및 Key 발급받기" "never ticks a box"; do
+  for claim in "ONE" "never navigates again" "SEVEN live-calibrated" "NONE of the rings sits on an input" "stay text-only" "FOUR steps advance" "consent boxes are ticked" "RESTS in front of" "약관 동의 및 Key 발급받기" "never ticks a box"; do
     grep -qF "$claim" <<<"$out" || { echo "  FAIL  BOOTSTRAP_DISCLOSE · missing claim: $claim"; BOOT_OK=0; FAILED=1; }
   done
-  for stale in "the agent never navigates" "0 gotos" "ONLY the two live-calibrated"; do
+  # Retired claims. The last three were true and are no longer: the count moved 2 → 3 → 7 as controls were
+  # measured, and a disclosure that keeps stating a smaller run than the one that executes is the exact
+  # manifest-honesty defect this workstream keeps having to unpick — in the sentence, not the data.
+  # "No guided step is text-only any more" over-claimed: `reach_open_api` and `return` name no WING control and
+  # still draw no ring. `textGuidedControlCount: 0` counts CONTROLS, and the prose beside a machine-checked
+  # field has to mean the same thing the field does.
+  for stale in "the agent never navigates" "0 gotos" "ONLY the two live-calibrated" "THREE live-calibrated" "TEXT-GUIDED" "No guided step is text-only"; do
     if grep -qF "$stale" <<<"$out"; then
       echo "  FAIL  BOOTSTRAP_DISCLOSE · retired claim still shown: $stale"; BOOT_OK=0; FAILED=1
     fi

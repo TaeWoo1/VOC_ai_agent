@@ -302,9 +302,26 @@ export interface GuidedWalkBoundary {
   /** No connect-test, no sync, no upload: guidance finishing is not a connection. */
   performsConnectOrSync: false;
   /** How many of the walk's guided controls carry a live-calibrated locator and may be highlighted. */
-  highlightedControlCount: 3;
-  /** …and how many are guided by TEXT because nothing was promoted for them. */
-  textGuidedControlCount: 2;
+  highlightedControlCount: 7;
+  /**
+   * …and how many are guided by TEXT because nothing was promoted for them. **Zero since 2026-08-11**, when the
+   * guided-control calibration measured the `OPEN API` option label, the `확인` control and the two consent
+   * sentences on the live purpose and terms screens.
+   */
+  textGuidedControlCount: 0;
+  /**
+   * **How many rings sit on an `<input>`. Zero, and it is a claim about what SellerOps does NOT know.**
+   *
+   * The terms checkboxes have no accessible association at all (`WING_TERMS_CHECKBOX_PROMOTION_BLOCKED`:
+   * `nameSource: NONE`, `labelForCount: 0`, `ancestorLabelCount: 0`), so nothing may claim to know which box is
+   * which. The consent rings therefore sit on the SENTENCES, and the purpose ring on the option's `<label>` —
+   * never on the radio or the checkbox. What ties each sentence-ring to the right box is the measured block
+   * pairing, not a ring on the box.
+   *
+   * A count rather than prose because the operator grants against this descriptor, and prose on one side of a
+   * machine-checked list is the manifest-honesty defect this workstream keeps repeating.
+   */
+  ringedInputControlCount: 0;
   /**
    * How many steps the runtime advances by OBSERVING WING rather than by the seller pressing "다음".
    *
@@ -333,8 +350,9 @@ export const COUPANG_WING_GUIDED_WALK_BOUNDARY: GuidedWalkBoundary = {
   agentNavigations: 1,
   credentialValueReadBudget: 0,
   performsConnectOrSync: false,
-  highlightedControlCount: 3,
-  textGuidedControlCount: 2,
+  highlightedControlCount: 7,
+  textGuidedControlCount: 0,
+  ringedInputControlCount: 0,
   autoAdvancingStepCount: 4,
   keyCreationAutoAdvances: false,
   sellerConsentObserved: true,
@@ -646,10 +664,15 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     // does not use — and the whole point of this phase is that no one types that line.
     cli: "src/cli/local-agent-service.ts",
     driver: "launchd service → src/cli/local-agent.ts → LazyCoupangIssuanceDriver → CoupangWingIssuanceDriver (WING-resident guided walk; the window opens on the run's first call, never at agent boot)",
-    // It HIGHLIGHTS three live-calibrated controls ⇒ `allowsHighlight: true` ⇒ it fails closed
-    // (`SELECTORS_NOT_CALIBRATED`) unless the caller states the `issue` calibration. The other two guided steps
-    // are text-only and claim no locator. (Said "two" until 2026-08-11, when the key-creation control was
-    // measured and promoted — the descriptor beside it has read `highlightedControlCount: 3` ever since.)
+    // It HIGHLIGHTS seven live-calibrated controls ⇒ `allowsHighlight: true` ⇒ it fails closed
+    // (`SELECTORS_NOT_CALIBRATED`) unless the caller states the `issue` calibration. Every step naming a WING
+    // control now rings it; `reach_open_api` and `return` name no control and stay text-only, which is what
+    // `textGuidedControlCount: 0` does and does not say — it counts CONTROLS, not steps. (Said "two" until 2026-08-11, when the key-creation control was measured and promoted — and
+    // "three" until later the same day, when the guided-control calibration measured the `OPEN API` option
+    // label, the `확인` control and the two consent sentences and the count went to seven. Note what the last
+    // four are NOT: `ringedInputControlCount` stays 0, because the rings sit on labels and sentences and never
+    // on a radio or a checkbox — the boxes have no accessible association and nothing may claim to know which
+    // is which.)
     //
     // There is no action here for pressing anything: every marketplace act is the seller's. The one that
     // creates the key — `약관 동의 및 Key 발급받기` — is the last checkpoint's subject and is never pressed by
@@ -1013,15 +1036,20 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
       "안내는 WING 화면 위에 표시되고, 한 번 WING으로 넘어간 뒤에는 SellerOps 탭으로 돌아올 필요가 없습니다 " +
       "(SellerOps는 클릭·입력·제출을 하지 않고, 페이지를 대신 이동하지도 않습니다): " +
       "① 오픈API 키 발급 페이지로 직접 이동(도착하면 자동 진행) → ② 'API Key 발급 받기'(강조 표시됨)를 직접 누름" +
-      "(사용 목적 화면이 뜨면 자동 진행) → ③ 사용 목적이 'OPEN API'인지 보고 '확인'을 직접 누름" +
-      "(약관 화면이 뜨면 자동 진행) → ④ 약관 2개를 직접 읽고 판단한 뒤 동의 체크(2개가 모두 체크되면 자동 진행) → " +
-      "⑤ 여기서 멈춥니다. " +
-      "⚠ ③ 사용 목적/확인 단계와 체크박스에는 강조 표시가 없습니다. 해당 control은 측정만 되었고 selector로 승격되지 않았기 때문이며, " +
-      "SellerOps는 위치를 아는 척하지 않고 글로만 안내합니다. " +
+      "(사용 목적 화면이 뜨면 자동 진행) → ③ 'OPEN API' 항목과 '확인' 버튼이 함께 강조 표시되며, 확인 후 '확인'을 직접 누름" +
+      "(약관 화면이 뜨면 자동 진행) → ④ 동의 문장 2개가 각각 강조 표시되며, 약관을 직접 읽고 판단한 뒤 동의 체크" +
+      "(2개가 모두 체크되면 자동 진행) → ⑤ 여기서 멈춥니다. " +
+      "⚠ 강조 표시는 체크박스나 라디오 버튼 위에 뜨지 않습니다. 사용 목적은 항목의 라벨에, 동의는 문장 2개에 각각 뜹니다 — " +
+      "체크박스에는 접근성 연결이 없어서 SellerOps는 어느 박스가 어느 동의인지 안다고 말하지 않습니다. " +
+      "각 문장이 자기 박스와 짝이라는 것은 2026-08-11에 측정한 구조로 확인했습니다(각 박스를 감싸는 가장 가까운 블록이 " +
+      "동의 문장 정확히 하나와 박스 정확히 하나를 담고 있음). " +
       "⚠ 체크박스는 SellerOps가 대신 누르지 않습니다. 다만 2개가 모두 선택됐는지는 화면에서 확인해 자동으로 넘어갑니다 " +
       "(선택 여부는 저장·전송·기록하지 않습니다). SellerOps는 약관을 읽거나 판단하거나 대신 동의하지 않습니다. " +
-      "⚠ 마지막 '약관 동의 및 Key 발급받기'는 강조 표시됩니다(2026-08-11 측정 승격). 실제로 키를 생성하는 control이며, 자동으로 넘어가지 않고 " +
-      "이번 proof에서는 절대 누르지 않습니다. 키 발급·credential 읽기·연결·동기화는 이번 run의 범위가 아닙니다.",
+      "⚠ 마지막 '약관 동의 및 Key 발급받기'는 강조 표시됩니다(2026-08-11 측정 승격). 자동으로 넘어가지 않고 이번 run에서는 절대 누르지 않습니다. " +
+      "이 버튼이 키를 생성한다고 적혀 있었으나 2026-08-12에 반증됐습니다 — 실제로 눌렀을 때 키는 발급되지 않았고, " +
+      "연동 방식(자체개발/연동업체)을 고르는 화면이 나왔습니다. 키는 그 화면의 '확인'에서 발급되는 것으로 보고됐고, " +
+      "그 화면은 어떤 측정도 읽은 적이 없습니다. 그래서 여기서 멈추는 이유는 '키가 생성되니까'가 아니라 " +
+      "'다음이 확립되지 않았으니까'입니다. 키 발급·credential 읽기·연결·동기화는 이번 run의 범위가 아닙니다.",
     emitsFrontendUrl: false,
   },
   // The WING issuance-form REVEAL phase: a CLI-launched dedicated Chrome. The operator presses 발급 themselves

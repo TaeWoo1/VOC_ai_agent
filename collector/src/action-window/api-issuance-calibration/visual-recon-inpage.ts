@@ -539,6 +539,105 @@ export function buildFixedLabelContainmentScript(input: { candidateQuery: string
  * beyond the read-only `data-aw-target` marker. Kept ES5-plain + string-form so esbuild's `__name` shim is never
  * referenced in the page.
  */
+/**
+ * **Locate — and optionally tag — a whole RING PLAN in ONE in-page evaluation.**
+ *
+ * The multi-control version of {@link buildFixedLabelLocateScript}, and it exists for two reasons that turned
+ * out to be the same reason.
+ *
+ * **Latency, observed.** A step ringing two controls ran the single-spec script once per spec, twice over
+ * (locate, then tag), plus a separate clear — five round trips where one control needed two. The operator saw
+ * the new rings arrive visibly later than the old ones on the live walk of 2026-08-12. Each round trip is a
+ * page evaluation on a real marketplace page; the work inside them is microseconds.
+ *
+ * **Atomicity, which the sequence could not give.** Tagging spec-by-spec has an intermediate state: if the
+ * second spec fails to resolve, the first is already tagged, and the driver's all-or-nothing contract then has
+ * to unwind it. Here the specs are all resolved FIRST and nothing is tagged unless every one of them lands on
+ * exactly one painting element — so the page never holds a partial ring set at all.
+ *
+ * Value-free OUTPUT, exactly like the single-spec script: per-spec integers, a MEASURED tag name, and an opaque
+ * structural signature. Element text is read solely to compare against labels the caller wrote, and never
+ * returned. Index 0 is the PRIMARY — it carries `data-aw-primary`, which is what the overlay's chip attaches
+ * to. (The page-dimming shroud is NOT: it is dropped entirely once there is more than one ring, because two
+ * shrouds stack their darkness and the second ring's own control ends up dimmed by the first.)
+ */
+export function buildFixedLabelRingPlanScript(input: {
+  specs: readonly { candidateQuery: string; exactText: string; tagAncestor?: string }[];
+  tag: boolean;
+}): string {
+  const encoded = JSON.stringify(
+    input.specs.map((sp) => ({ q: sp.candidateQuery, t: sp.exactText, a: sp.tagAncestor ?? null })),
+  );
+  return `(function () {
+  /* issuance-ring-plan-${input.tag ? "tag" : "locate"} (value-free OUTPUT: per-spec { count, hiddenCount, tag?, sig? }) */
+  var sig = ${IN_PAGE_SIG_FACTORY};
+  var SPECS = ${encoded};
+  var slice = Function.prototype.call.bind(Array.prototype.slice);
+  function norm(s) { return String(s == null ? '' : s).replace(/\\s+/g, ' ').trim(); }
+  function accName(el) {
+    var al = el.getAttribute ? el.getAttribute('aria-label') : null;
+    if (al && norm(al).length) { return norm(al); }
+    /* text read ONLY to compare against a KNOWN fixed label; only a COUNT / structural sig is returned. */
+    return norm(el.textContent || '');
+  }
+  /* Identical paint test to the single-spec script — a match a human cannot see is not a match. */
+  function paints(node) {
+    if (!node || !node.getClientRects) { return false; }
+    var cs = window.getComputedStyle ? window.getComputedStyle(node) : null;
+    if (cs && (cs.display === 'none' || cs.visibility === 'hidden')) { return false; }
+    if (cs && cs.display === 'contents') { return node.childElementCount > 0; }
+    var rects = node.getClientRects();
+    if (!rects || rects.length === 0) { return false; }
+    var r = node.getBoundingClientRect ? node.getBoundingClientRect() : null;
+    return !!r && r.width > 0 && r.height > 0;
+  }
+  var CAP = 4000;
+  var rows = [], chosen = [], i, j, k, allResolved = true;
+  for (i = 0; i < SPECS.length; i++) {
+    var want = norm(SPECS[i].t), cands;
+    try { cands = slice(document.querySelectorAll(SPECS[i].q)); } catch (e) { cands = []; }
+    var matches = [];
+    for (j = 0; j < cands.length && j < CAP; j++) { if (accName(cands[j]) === want) { matches.push(cands[j]); } }
+    var visible = [];
+    for (k = 0; k < matches.length; k++) { if (paints(matches[k])) { visible.push(matches[k]); } }
+    var hiddenCount = matches.length - visible.length;
+    if (visible.length !== 1) {
+      allResolved = false;
+      chosen.push(null);
+      rows.push({ count: visible.length, hiddenCount: hiddenCount });
+      continue;
+    }
+    chosen.push(visible[0]);
+    rows.push({ count: 1, hiddenCount: hiddenCount });
+  }
+  ${
+    input.tag
+      ? `/* ALL-OR-NOTHING. Nothing is tagged unless every spec resolved, so a partial ring set never exists on
+     the page — not even for the moment between two evaluations, which is what the per-spec sequence had. */
+  if (allResolved) {
+    var prior = slice(document.querySelectorAll('[data-aw-target]'));
+    for (i = 0; i < prior.length; i++) { prior[i].removeAttribute('data-aw-target'); prior[i].removeAttribute('data-aw-primary'); }
+    for (i = 0; i < chosen.length; i++) {
+      var tagEl = chosen[i];
+      var anc = SPECS[i].a && tagEl.closest ? tagEl.closest(SPECS[i].a) : null;
+      if (anc) { tagEl = anc; }
+      tagEl.setAttribute('data-aw-target', '');
+      if (i === 0) { tagEl.setAttribute('data-aw-primary', ''); }
+    }
+  }`
+      : ``
+  }
+  /* The signature stays on the MATCHED element, never a promoted ancestor, so locate and tag agree. */
+  var all = slice(document.querySelectorAll('*'));
+  for (i = 0; i < chosen.length; i++) {
+    if (!chosen[i]) { continue; }
+    rows[i].tag = chosen[i].tagName;
+    rows[i].sig = sig(chosen[i].tagName + ':' + all.indexOf(chosen[i]), 'children:' + chosen[i].childElementCount);
+  }
+  return { resolved: allResolved, rows: rows };
+})()`;
+}
+
 export function buildFixedLabelLocateScript(input: {
   candidateQuery: string;
   exactText: string;
@@ -588,7 +687,7 @@ export function buildFixedLabelLocateScript(input: {
   ${
     input.tag
       ? `var prior = slice(document.querySelectorAll('[data-aw-target]'));
-  for (var p = 0; p < prior.length; p++) { prior[p].removeAttribute('data-aw-target'); }
+  for (var p = 0; p < prior.length; p++) { prior[p].removeAttribute('data-aw-target'); prior[p].removeAttribute('data-aw-primary'); }
   var tagEl = el;${
     input.tagAncestor
       ? `

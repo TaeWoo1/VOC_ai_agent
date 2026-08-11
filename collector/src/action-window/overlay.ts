@@ -214,10 +214,28 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
     // In docked panel-only mode the anchor is deliberately absent — the step has no promoted locator — so the
     // mount must NOT bail on a missing target. It must also not silently use a STALE tag left by an earlier
     // step: that is the defect this mode exists to fix, so the anchor is ignored outright rather than looked up.
-    const target = o.dockedPanelOnly ? null : document.querySelector("[data-aw-target]");
+    // EVERY tagged element, not the first one. A step may promote more than one control — the terms screen has
+    // two separate consents, and agreeing to one is not agreeing to the other — and `querySelector` silently
+    // ringed only whichever came first in the document while the panel described both. The PRIMARY (the control
+    // the chip names, and the only one that dims the page) is the element carrying `data-aw-primary`, falling
+    // back to document order so every existing single-ring caller is unchanged.
+    const tagged = o.dockedPanelOnly ? [] : Array.prototype.slice.call(document.querySelectorAll("[data-aw-target]")) as Element[];
+    let primaryIndex = 0;
+    for (let t = 0; t < tagged.length; t++) {
+      if (tagged[t]!.hasAttribute("data-aw-primary")) {
+        primaryIndex = t;
+        break;
+      }
+    }
+    const target = tagged.length > 0 ? tagged[primaryIndex]! : null;
     const prev = document.getElementById("__aw_overlay__");
     G["__aw_mount_stage__"] = "remove_previous";
     if (prev) prev.remove();
+    // …and every SECONDARY ring from the previous step. They are separate elements from `__aw_overlay__`, so
+    // removing only the primary would leave a step's extra rings painted over the next step's screen — the same
+    // stale-anchor defect `dockedPanelOnly` exists to fix, one layer out.
+    const staleRings = document.querySelectorAll("[data-aw-ring-secondary]");
+    for (let s = 0; s < staleRings.length; s++) staleRings[s]!.remove();
     // Clean any stale in-page tracker before re-mounting so listeners never accumulate.
     const stale = G["__aw_overlay_untrack__"];
     if (typeof stale === "function") (stale as () => void)();
@@ -237,7 +255,12 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
     const box = document.createElement("div");
     box.id = "__aw_overlay__";
     box.setAttribute("aria-hidden", "true");
+    box.setAttribute("data-aw-ring-index", String(primaryIndex));
     G["__aw_mount_stage__"] = "inject_style";
+    // The page-dimming shroud is a hole punched around ONE element, so two of them stack their darkness and the
+    // second ring's own control ends up dimmed by the first. With more than one ring the shroud is dropped and
+    // the rings carry the emphasis alone; a single ring keeps exactly the dimming it has always had.
+    const dim = tagged.length <= 1;
     box.style.cssText = [
       "position:fixed",
       "pointer-events:none", // never intercept the target click
@@ -245,7 +268,7 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
       "box-sizing:border-box",
       "border:3px solid #2b6cff",
       "border-radius:8px",
-      "box-shadow:0 0 0 9999px rgba(0,0,0,0.28)",
+      dim ? "box-shadow:0 0 0 9999px rgba(0,0,0,0.28)" : "box-shadow:0 0 0 3px rgba(43,108,255,0.35)",
       o.guidanceEnabled ? "display:block" : "display:none",
     ].join(";");
     if (o.dockedPanelOnly) {
@@ -272,6 +295,27 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
     box.appendChild(badge);
     G["__aw_mount_stage__"] = "append_overlay";
     document.body.appendChild(box);
+    // One ring per remaining tagged element. No chip and no shroud on these: the chip names ONE control, and a
+    // second chip pointing at a second control with the same step text is the crowding that made the first chip
+    // unreadable. They carry the same border so the seller sees "these, together".
+    for (let s = 0; s < tagged.length; s++) {
+      if (s === primaryIndex) continue;
+      const extra = document.createElement("div");
+      extra.setAttribute("aria-hidden", "true");
+      extra.setAttribute("data-aw-ring-secondary", "");
+      extra.setAttribute("data-aw-ring-index", String(s));
+      extra.style.cssText = [
+        "position:fixed",
+        "pointer-events:none",
+        "z-index:2147483000",
+        "box-sizing:border-box",
+        "border:3px solid #2b6cff",
+        "border-radius:8px",
+        "box-shadow:0 0 0 3px rgba(43,108,255,0.35)",
+        o.guidanceEnabled ? "display:block" : "display:none",
+      ].join(";");
+      document.body.appendChild(extra);
+    }
     G["__aw_mount_stage__"] = "position_overlay";
     // Glue the box to the control's live position. A `position:fixed` box uses viewport coordinates,
     // so it must be recomputed on every scroll/resize or it drifts off the control the moment the
@@ -293,14 +337,25 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
     // the shipped mountOverlay page body contains no `__name(`.)
     const reposition = [
       () => {
-        const el = document.querySelector("[data-aw-target]");
-        const b = document.getElementById("__aw_overlay__");
-        if (!el || !b) return;
-        const r = (el as Element).getBoundingClientRect();
-        b.style.left = `${r.left - 6}px`;
-        b.style.top = `${r.top - 6}px`;
-        b.style.width = `${r.width + 12}px`;
-        b.style.height = `${r.height + 12}px`;
+        // In docked mode the anchor is deliberately absent, so there is nothing to track — and a STALE tag left
+        // by an earlier step must not become one. That is the defect `dockedPanelOnly` exists to fix, and the
+        // repositioner is the second place it could re-enter.
+        if (o.dockedPanelOnly) return;
+        // Re-queried, never captured: the tag set is what the driver rewrote for THIS step, and a closure over
+        // stale element references would keep tracking a control the page has since replaced. Each ring carries
+        // the index it was created for, so the pairing survives a scroll without any shared state.
+        const els = document.querySelectorAll("[data-aw-target]");
+        const boxes = document.querySelectorAll("#__aw_overlay__,[data-aw-ring-secondary]");
+        for (let i = 0; i < boxes.length; i++) {
+          const b = boxes[i] as HTMLElement;
+          const el = els[Number(b.getAttribute("data-aw-ring-index"))];
+          if (!el) continue;
+          const r = (el as Element).getBoundingClientRect();
+          b.style.left = `${r.left - 6}px`;
+          b.style.top = `${r.top - 6}px`;
+          b.style.width = `${r.width + 12}px`;
+          b.style.height = `${r.height + 12}px`;
+        }
       },
     ][0]!;
     reposition();
@@ -423,24 +478,30 @@ export function sanitizeMountMessage(e: unknown): string {
   return s;
 }
 
-/** Recompute the overlay position after layout movement. */
+/** Recompute EVERY ring's position after layout movement — the primary and any secondary rings beside it. */
 export async function refreshOverlay(page: PageOrFrame): Promise<void> {
   await page.evaluate(() => {
-    const box = document.getElementById("__aw_overlay__");
-    const target = document.querySelector("[data-aw-target]");
-    if (!box || !target) return;
-    const rect = (target as Element).getBoundingClientRect();
-    box.style.left = `${rect.left - 6}px`;
-    box.style.top = `${rect.top - 6}px`;
-    box.style.width = `${rect.width + 12}px`;
-    box.style.height = `${rect.height + 12}px`;
+    const els = document.querySelectorAll("[data-aw-target]");
+    const boxes = document.querySelectorAll("#__aw_overlay__,[data-aw-ring-secondary]");
+    for (let i = 0; i < boxes.length; i++) {
+      const b = boxes[i] as HTMLElement;
+      const el = els[Number(b.getAttribute("data-aw-ring-index"))];
+      if (!el) continue;
+      const rect = (el as Element).getBoundingClientRect();
+      b.style.left = `${rect.left - 6}px`;
+      b.style.top = `${rect.top - 6}px`;
+      b.style.width = `${rect.width + 12}px`;
+      b.style.height = `${rect.height + 12}px`;
+    }
   });
 }
 
 export async function setOverlayGuidance(page: PageOrFrame, enabled: boolean): Promise<void> {
   await page.evaluate((en) => {
-    const box = document.getElementById("__aw_overlay__");
-    if (box) box.style.display = en ? "block" : "none";
+    // Every ring, not just the primary: a guidance toggle that hid one ring and left the others painted would
+    // leave the seller looking at emphasis nobody is explaining.
+    const boxes = document.querySelectorAll("#__aw_overlay__,[data-aw-ring-secondary]");
+    for (let i = 0; i < boxes.length; i++) (boxes[i] as HTMLElement).style.display = en ? "block" : "none";
   }, enabled);
 }
 
@@ -448,8 +509,8 @@ export async function unmountOverlay(page: PageOrFrame): Promise<void> {
   await page.evaluate(() => {
     const untrack = (window as unknown as Record<string, unknown>)["__aw_overlay_untrack__"];
     if (typeof untrack === "function") (untrack as () => void)();
-    const box = document.getElementById("__aw_overlay__");
-    if (box) box.remove();
+    const boxes = document.querySelectorAll("#__aw_overlay__,[data-aw-ring-secondary]");
+    for (let i = 0; i < boxes.length; i++) boxes[i]!.remove();
     // Also tear down the WING-resident guidance panel and clear the advance latch so a stale press can never be
     // read back after the walk moves on / cleans up.
     const panel = document.getElementById("__aw_advance_panel__");

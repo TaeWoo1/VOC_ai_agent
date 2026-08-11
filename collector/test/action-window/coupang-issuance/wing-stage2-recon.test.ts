@@ -135,7 +135,14 @@ describe("the Stage-2 sweep folds like the initial-surface one", () => {
   it("probes every candidate of every requested target, and nothing else", () => {
     const specs = wingStage2ReconProbes(["purpose", "confirm"]);
     const ids = specs.map((s) => s.targetId);
-    expect(ids).toEqual(["stage2.purpose.operator_reported", "stage2.purpose.operator_verbatim", "stage2.confirm.confirm"]);
+    expect(ids).toEqual([
+      "stage2.purpose.operator_reported",
+      "stage2.purpose.operator_verbatim",
+      "stage2.confirm.confirm",
+      // Added 2026-08-11: the same 확인 label under an actionable-only query, the shape a ring would have to
+      // point with. Swept beside the broad baseline rather than replacing it — see the candidate's rationale.
+      "stage2.confirm.actionable",
+    ]);
     // Every string sent to the page is one WE wrote — a candidate's own frozen fields.
     for (const s of specs) {
       const all = Object.values(WING_STAGE2_RECON_CANDIDATES).flat();
@@ -214,7 +221,10 @@ describe("the Stage-2 sweep folds like the initial-surface one", () => {
   });
 
   it("de-duplicates a repeated target — the same page work twice yields no new information", () => {
-    expect(wingStage2ReconProbes(["confirm", "confirm"])).toHaveLength(1);
+    // Compared against the single-target sweep rather than a typed-in length: what this asserts is that a
+    // repeated TARGET adds no page work, and a hardcoded `1` also asserted that `confirm` has one candidate —
+    // an unrelated fact that broke the moment a second query shape was added for the same label.
+    expect(wingStage2ReconProbes(["confirm", "confirm"])).toEqual(wingStage2ReconProbes(["confirm"]));
   });
 });
 
@@ -556,10 +566,11 @@ describe("runWingSelectorRecord — the Stage-2 sweep in the orchestrator", () =
     const { d, probed, censusCalls } = deps();
     const r = await runWingSelectorRecord(d, [], { stage2: ["purpose", "confirm"] });
     expect(r.stage2?.precondition).toBe("OK");
-    // 2 purpose candidates (the 08-09 report and the 08-10 verbatim transcription) + 1 confirm.
-    expect(probed).toHaveLength(3);
+    // 2 purpose candidates (the 08-09 report and the 08-10 verbatim transcription) + 2 confirm (the broad
+    // baseline and the 2026-08-11 actionable-only narrowing).
+    expect(probed).toHaveLength(4);
     expect(censusCalls()).toBe(1);
-    expect(r.stage2?.candidatesMeasured).toBe(3);
+    expect(r.stage2?.candidatesMeasured).toBe(4);
     expect(r.stage2?.choiceControls?.visibleChoiceControlCount).toBe(2);
   });
 
@@ -599,7 +610,7 @@ describe("runWingSelectorRecord — the Stage-2 sweep in the orchestrator", () =
       },
     });
     const r = await runWingSelectorRecord(d, [], { stage2: ["confirm"] });
-    expect(r.stage2?.candidatesNotMeasured).toBe(1);
+    expect(r.stage2?.candidatesNotMeasured).toBe(2);
     expect(r.stage2?.candidatesMeasured).toBe(0);
     expect(r.stage2?.faults[0]?.fault).toBe("CONTEXT_DESTROYED");
   });
@@ -614,7 +625,7 @@ describe("runWingSelectorRecord — the Stage-2 sweep in the orchestrator", () =
     expect(r.stage2?.choiceControls).toBeNull();
     expect(r.stage2?.choiceControlFault).toBe("TARGET_CLOSED");
     // …and the candidate sweep still completed: one failed read does not lose the rest of the record.
-    expect(r.stage2?.candidatesMeasured).toBe(1);
+    expect(r.stage2?.candidatesMeasured).toBe(2);
   });
 
   it("a census that returned NOTHING USABLE is a fault too — not a silent absence", async () => {
@@ -626,7 +637,7 @@ describe("runWingSelectorRecord — the Stage-2 sweep in the orchestrator", () =
     const r = await runWingSelectorRecord(d, [], { stage2: ["confirm"] });
     expect(r.stage2?.choiceControls).toBeNull();
     expect(r.stage2?.choiceControlFault).toBe("UNUSABLE_READING");
-    expect(r.stage2?.candidatesMeasured).toBe(1);
+    expect(r.stage2?.candidatesMeasured).toBe(2);
   });
 
   it("a missing census seam leaves the reading null rather than throwing", async () => {
@@ -711,6 +722,10 @@ describe("the emitted Stage-2 record", () => {
             verdict: "UNIQUE" as const,
             sig16: "0123456789abcdef",
             hiddenMatchCount: null,
+            // MEASURED, or null. Carried on the row since 2026-08-11: the locate script has always returned it
+            // and the sweep dropped it, so a promotion built on this record could only ever have cited an
+            // EXPECTED tag — the substitution that put `role: "button"` on the refuted 발급 record.
+            observedTag: null,
             containment: null,
             presence: "NOT_MEASURED" as const,
           },
@@ -854,12 +869,30 @@ describe("WING_STAGE2_RECON_EVIDENCE — measured, operator-reported, and inferr
     expect(all.filter((id) => !(e.measuredCandidateIds as readonly string[]).includes(id))).toEqual([
       // Added 2026-08-10 from the operator's verbatim transcription; this run predates it and never probed it.
       "stage2.purpose.operator_verbatim",
+      // Added 2026-08-11 for the guided-control highlight calibration: the SAME 확인 label, narrowed to
+      // actionable elements. This run measured only the broad `button,a,span,div` shape, and the whole point of
+      // the narrowing is that a count taken under the broad one does not transfer to it.
+      "stage2.confirm.actionable",
       // The TERMS screen, discovered 2026-08-10 by pressing 확인 — a screen this run had no idea existed.
       "stage3.terms.heading",
       "stage3.terms.api_agree",
+      // Per-tag narrowings of the two consent sentences, added 2026-08-11. Same strings, one tag family each.
+      "stage3.terms.api_agree.label",
+      "stage3.terms.api_agree.p",
+      "stage3.terms.api_agree.span",
+      "stage3.terms.api_agree.div",
       "stage3.terms.category_agree",
+      "stage3.terms.category_agree.label",
+      "stage3.terms.category_agree.p",
+      "stage3.terms.category_agree.span",
+      "stage3.terms.category_agree.div",
       "stage3.terms.cancel",
       "stage3.terms.issue_final",
+      // The purpose screen's `OPEN API` option as a LOCATE target, added 2026-08-11. Its accessible NAME was
+      // measured on a later run than this one, and a name is not a location — see the candidate set's comment.
+      "stage2.purpose_open_api.label",
+      "stage2.purpose_open_api.broad",
+      "stage2.purpose_open_api.input",
     ]);
   });
 
