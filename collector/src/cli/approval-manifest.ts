@@ -646,9 +646,10 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     // does not use — and the whole point of this phase is that no one types that line.
     cli: "src/cli/local-agent-service.ts",
     driver: "launchd service → src/cli/local-agent.ts → LazyCoupangIssuanceDriver → CoupangWingIssuanceDriver (WING-resident guided walk; the window opens on the run's first call, never at agent boot)",
-    // It HIGHLIGHTS two live-calibrated controls ⇒ `allowsHighlight: true` ⇒ it fails closed
-    // (`SELECTORS_NOT_CALIBRATED`) unless the caller states the `issue` calibration. The other guided steps are
-    // text-only and claim no locator.
+    // It HIGHLIGHTS three live-calibrated controls ⇒ `allowsHighlight: true` ⇒ it fails closed
+    // (`SELECTORS_NOT_CALIBRATED`) unless the caller states the `issue` calibration. The other two guided steps
+    // are text-only and claim no locator. (Said "two" until 2026-08-11, when the key-creation control was
+    // measured and promoted — the descriptor beside it has read `highlightedControlCount: 3` ever since.)
     //
     // There is no action here for pressing anything: every marketplace act is the seller's. The one that
     // creates the key — `약관 동의 및 Key 발급받기` — is the last checkpoint's subject and is never pressed by
