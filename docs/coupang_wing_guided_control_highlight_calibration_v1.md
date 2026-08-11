@@ -119,6 +119,23 @@ when it did not is worth less than no record.
 5. **The Korean operator summary went stale** while the English disclosure beside it was updated — it told the
    operator the promoted controls carry no highlight, on the run that promoted them. Caught on the displayed
    manifest, before any grant. The selfcheck now refuses the retired Korean claims too.
+6. **The correction to the step-5 copy made a dead end reachable by following it.** Found by `/code-review
+   high`, not by the suite. The new text ended "press the button below once the next screen appears" — that
+   screen is the integration form, and advancing lands on step 6, whose locator queries `Access Key`, which
+   does not paint there. The run would park `target_not_found` on a step the seller had just been told to
+   enter. The advance is now gated on the credentials being visible, which is the precondition step 6's locator
+   actually needs. **A correction that creates a new failure is not a correction**, and this one was mine, an
+   hour old, and green.
+7. **The FE step TITLE still asserted the refuted claim** (`… 직접 누르기 (키 생성)`) while the detail string 70
+   lines below said the opposite — both on one screen, in front of the seller. Six further comment/prose sites
+   were still stating withdrawn facts, including `WING_KEY_CREATION_CONTROL_ID`'s own header with the
+   refutation directly beneath it, and the disclosure's "no guided step is text-only any more" (two steps still
+   are — the field counts CONTROLS). `COUPANG_ISSUANCE_KEY_CREATION_STEP`'s doc claimed step 5 is the
+   irreversibility wall; it is at least one unmeasured screen further on. The constant is **not** renamed: the
+   real boundary is unknown, and a name that is a second guess is worse than one whose doc says so.
+8. **`IN_PAGE_CLEAR_TAG` stripped one of the two ring markers.** Both tagging scripts write the pair, so a
+   stale `data-aw-primary` could survive a clear and put the chip on the wrong control. Unreachable with
+   today's two ring plans, repaired anyway — same shape as (1).
 
 ## 6. Remaining
 
