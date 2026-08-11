@@ -312,6 +312,45 @@ describe("coupang issuance session — recoverable parks each recover via REQUES
   });
 });
 
+describe("coupang issuance session — a window the SELLER closed is never re-opened by a timer", () => {
+  it("**park recovery does not run after a close** — the agent must not re-open a marketplace window", async () => {
+    // Self-recovery drives a `{guide}`, which settles and locates; the lazy driver brings a window up on its
+    // FIRST call, so a timer-issued recheck re-opens the window the seller had just deliberately closed — and
+    // re-navigates it — once a second for ten minutes. `agentNavigations: 1` says the walk opens one window, at
+    // open, and never again. The engine's own note on this park says how it recovers: "re-opening and a
+    // REQUEST_STEP_RECHECK", both of which are the SELLER's.
+    const { io, engine, driver, session } = build({ action: { issue: false } });
+    startRun(io);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("checkpoint_reveal_issuance_form");
+    const callsBefore = driver.calls.length;
+
+    driver.closeSurface();
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("page_mismatch");
+    expect(io.blockers()).toContainEqual({ code: "UI_DRIFT", recoverable: true });
+    // Whatever the run did on the way into the park, it must then STOP: no locate, no highlight, no probe.
+    const after = driver.calls.slice(callsBefore);
+    expect(after.filter((c) => c.startsWith("locate:") || c.startsWith("highlight:") || c === "probeSurface")).toEqual([]);
+  });
+
+  it("…and the seller's own re-check DOES recover it — the button is the one re-open that was theirs", async () => {
+    const { io, engine, driver, session } = build({ action: { issue: false } });
+    startRun(io);
+    await session.whenSettled();
+    driver.closeSurface();
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("page_mismatch");
+    const callsBefore = driver.calls.length;
+
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
+    await session.whenSettled();
+    // Re-guided, so the run is live again rather than parked forever — the latch blocks a TIMER, not a seller.
+    expect(driver.calls.slice(callsBefore).some((c) => c.startsWith("locate:"))).toBe(true);
+    expect(engine.currentStage()).not.toBe("page_mismatch");
+  });
+});
+
 describe("coupang issuance session — operator control", () => {
   it("aborts to operator_aborted / CANCELLED and cleans up (resting at the reach transition barrier)", async () => {
     const { io, engine, driver, session } = build({ action: { reach_open_api: false } });

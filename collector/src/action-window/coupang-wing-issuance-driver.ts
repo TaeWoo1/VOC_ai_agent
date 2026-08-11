@@ -36,6 +36,7 @@ import { log } from "../log";
 import { buildWingConsentCompleteScript } from "../cli/coupang-wing-classifier";
 import {
   WING_STAGE3_TERMS_OPTION_CANDIDATES,
+  WING_KEY_CREATION_CONTROL_ID,
   WING_KEY_CREATION_SELECTOR_CALIBRATED,
   WING_PURPOSE_SCREEN_MARKER_SPEC,
   WING_TERMS_SCREEN_MARKER_SPECS,
@@ -100,6 +101,24 @@ export type WingHighlightTarget = "self_dev" | "vendor_info" | "call_ip" | "issu
  */
 export const WING_HIGHLIGHT_CALIBRATION = LIVE_DOM_CALIBRATION_PENDING;
 
+/**
+ * The key-creation control's locator, **derived from the measured candidate rather than re-typed.**
+ *
+ * `coupang-wing-label-recon.ts` says of these strings "there is exactly one copy of each of these, here", and
+ * `WING_KEY_CREATION_SELECTOR_CALIBRATED` promises that any edit to the candidate's `candidateQuery` or
+ * `exactText` invalidates the flag. A second hand-written copy defeats both: editing the recon candidate would
+ * leave the ring pointing with the stale string, and — because the TERMS heading carries character-identical
+ * text — a query that drifted wider than `button,a` here would put the spotlight on the HEADING while the
+ * measurement that justified the flag was taken against actionable elements only.
+ */
+const KEY_CREATION_SPEC: WingFlowScreenMarkerSpec = (() => {
+  const spec = WING_TERMS_SCREEN_MARKER_SPECS.find((s) => s.id === WING_KEY_CREATION_CONTROL_ID);
+  // Fail at load, not at highlight time: a missing spec would otherwise become "the control was not found" on a
+  // live page, which reads as a WING change rather than as our own broken wiring.
+  if (!spec) throw new Error("coupang-wing-issuance-driver: no measured candidate for the key-creation control");
+  return spec;
+})();
+
 export const WING_HIGHLIGHT_LABELS: Readonly<Record<WingHighlightTarget, { candidateQuery: string; exactText: string; tagAncestor?: string }>> = {
   // RETIRED FROM THE TUTORIAL 2026-08-10 — kept for the read-only probe and the records that cite them. The
   // purpose screen offers no 자체개발, and 업체명 / 호출 IP are never shown in this flow.
@@ -118,8 +137,10 @@ export const WING_HIGHLIGHT_LABELS: Readonly<Record<WingHighlightTarget, { candi
   // that justifies `WING_ISSUE_SELECTOR_CALIBRATED` and requires a fresh probe.
   issue: { candidateQuery: "button", exactText: "API Key 발급 받기" },
   // LIVE-CALIBRATED 2026-08-11 (see WING_KEY_CREATION_SELECTOR_CALIBRATED). Narrowed to actionable elements
-  // because the TERMS heading carries the identical text; measured distinct from it in the same pass.
-  issue_final: { candidateQuery: "button,a", exactText: "약관 동의 및 Key 발급받기" },
+  // because the TERMS heading carries the identical text; measured distinct from it in the same pass. Taken
+  // FROM that measurement — see KEY_CREATION_SPEC — so the ring can never point with a string the calibration
+  // no longer covers.
+  issue_final: { candidateQuery: KEY_CREATION_SPEC.candidateQuery, exactText: KEY_CREATION_SPEC.exactText },
   credentials: { candidateQuery: "label,span,div,dt,th,strong", exactText: "Access Key", tagAncestor: "tr" },
 };
 
@@ -1179,6 +1200,23 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     const maxPolls = Math.max(1, Math.ceil(timeoutMs / OVERLAY_ADVANCE_POLL_MS));
     const token = advanceToken(target);
     const expected = CHECKPOINT_ADVANCES_TO_SCREEN[target];
+    // The screen must CHANGE INTO the expected one — a reading taken BEFORE anything could have happened is the
+    // baseline, and an advance is only an observation of the seller's act if it differs from it.
+    //
+    // Without this the first probe ran at `i === 0`, immediately after arming and before any sleep, and simply
+    // asked "is the expected screen showing". WING keeps later screens in the same document — the marker
+    // evidence records `stage3.terms.heading` as `hiddenCount: 1` while on PURPOSE — and no reading of the
+    // purpose marker has ever been taken ON the issuance page. So if that marker paints before 발급 is pressed,
+    // step 2 completed itself and the walk guided step 3 while the seller had done nothing at all. An
+    // auto-advance that can fire on arrival is not an observation.
+    //
+    // Fail-closed: when the baseline ALREADY reads as the expected screen, screen-advance is off for this arm
+    // window and the seller's own WING-resident button is the way through. That button is on every checkpoint
+    // for exactly this reason.
+    // An UNREADABLE baseline disables it too: not knowing where the seller started is exactly the state in
+    // which "the expected screen is showing" cannot be told apart from "it was showing all along".
+    const baseline = expected ? await this.probeFlowScreen().catch(() => null) : null;
+    const screenMayAdvance = expected !== undefined && baseline !== null && baseline !== expected;
     // The screen probe costs three in-page locates, so it runs on a slower cadence than the latch poll rather
     // than on every tick. The seller pressing the button is still noticed within one latch poll.
     const screenEvery = Math.max(1, Math.round(SCREEN_OBSERVE_POLL_MS / OVERLAY_ADVANCE_POLL_MS));
@@ -1186,7 +1224,7 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
       const pressed = await readOverlayAdvancePressed(this.activePage(), token).catch(() => false);
       if (pressed) return true;
       if (i % screenEvery === 0) {
-        if (expected && (await this.probeFlowScreen().catch(() => "UNRECOGNIZED" as WingFlowScreen)) === expected) return true;
+        if (screenMayAdvance && (await this.probeFlowScreen().catch(() => "UNRECOGNIZED" as WingFlowScreen)) === expected) return true;
         // The consent step changes no screen, so its completion is the seller's own two ticks — observed, never
         // performed, and never recorded (see `observeConsentComplete`).
         if (target === "terms_consent" && (await this.observeConsentComplete())) return true;

@@ -466,6 +466,25 @@ ENV
     echo "  FAIL  BOOTSTRAP_CLEAN · bootstrap did not mint an identity on a clean tree (exit=$rc)"; FAILED=1
   fi
 
+  # **The bootstrap's own DISCLOSURE, which nothing checked.** It is the first description of the run the
+  # operator reads, and it had drifted to the pre-change behaviour — "the agent never navigates", "the two
+  # live-calibrated controls" — while the descriptor the preflight prints and the gate verifies said
+  # agentNavigations:1 / highlightedControlCount:3 / textGuidedControlCount:2 / autoAdvancingStepCount:4 /
+  # sellerConsentObserved:true. Only the preflight output was grepped, so this half could say anything.
+  #
+  # Asserted BOTH ways: the current claims must be present, and the retired ones must be gone — a disclosure
+  # that gained a line while keeping its contradiction is not fixed.
+  BOOT_OK=1
+  for claim in "ONE" "never navigates again" "THREE live-calibrated" "FOUR steps advance" "consent boxes are ticked" "RESTS in front of" "약관 동의 및 Key 발급받기" "never ticks a box"; do
+    grep -qF "$claim" <<<"$out" || { echo "  FAIL  BOOTSTRAP_DISCLOSE · missing claim: $claim"; BOOT_OK=0; FAILED=1; }
+  done
+  for stale in "the agent never navigates" "0 gotos" "ONLY the two live-calibrated"; do
+    if grep -qF "$stale" <<<"$out"; then
+      echo "  FAIL  BOOTSTRAP_DISCLOSE · retired claim still shown: $stale"; BOOT_OK=0; FAILED=1
+    fi
+  done
+  [ "$BOOT_OK" = "1" ] && echo "  PASS  BOOTSTRAP_DISCLOSE · the bootstrap's disclosure matches the descriptor the gate verifies"
+
   # An unreadable HEAD, and a HEAD that reads as something which is not a commit, must both refuse rather than
   # pin an identity nothing can verify. No healthy checkout produces either, so a `git` earlier on PATH does.
   SHABIN="$FIXTURES/shabin"; mkdir -p "$SHABIN"

@@ -116,9 +116,43 @@ async function waitForHealth(port: number, timeoutMs: number): Promise<BridgeHea
   }
 }
 
-function bridgePort(env: NodeJS.ProcessEnv): number {
+/**
+ * The port to PROBE — which must be the port the AGENT will listen on, not this shell's.
+ *
+ * launchd gives the job the plist's `EnvironmentVariables` and nothing of the installing shell, so the agent
+ * reads `BRIDGE_PORT` from the run-env file. Probing `process.env` instead meant that an operator who set the
+ * port in either place — the run-env file, or their shell — had the installer poll the OTHER one, time out
+ * after 20 s, print "the agent did not answer on loopback" and exit 5 on a service that was running perfectly.
+ */
+function bridgePort(env: Readonly<Record<string, string | undefined>>): number {
   const raw = env.BRIDGE_PORT ? Number(env.BRIDGE_PORT) : DEFAULT_BRIDGE_PORT;
   return Number.isInteger(raw) && raw > 0 && raw <= 65535 ? raw : DEFAULT_BRIDGE_PORT;
+}
+
+/**
+ * The installed service's own environment, read back from its plist. `status` has no plan to consult, and the
+ * plist is the only record of what the running agent was actually given.
+ *
+ * Best-effort by design: an unreadable or absent plist yields `{}`, and the caller falls back to the default
+ * port — the same answer `status` gave before, for a service that is most likely not installed at all.
+ */
+function installedServiceEnv(plistPath: string): Record<string, string> {
+  let xml: string;
+  try {
+    xml = readFileSync(plistPath, "utf8");
+  } catch {
+    return {};
+  }
+  const env: Record<string, string> = {};
+  // `String.match`, not `RegExp.exec` — this file's source guard forbids a bare `exec(`, and it is right to:
+  // the token it is fencing out is `child_process.exec`, and a guard that has to reason about which `exec` it
+  // is looking at is a guard that can be talked around.
+  const block = xml.match(/<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/);
+  if (!block?.[1]) return env;
+  for (const m of block[1].matchAll(/<key>([^<]*)<\/key>\s*<string>([^<]*)<\/string>/g)) {
+    if (m[1] !== undefined) env[m[1]] = m[2] ?? "";
+  }
+  return env;
 }
 
 function planFor(agentArgs: readonly string[], runEnv: Record<string, string>): LocalAgentServicePlan {
@@ -177,7 +211,8 @@ async function install(own: readonly string[], agentArgs: readonly string[]): Pr
     fail(`launchctl bootstrap failed (status ${boot.status}); the plist was removed, nothing is installed.`, 4);
   }
 
-  const port = bridgePort(process.env);
+  // `plan.env` — the plist's own environment, which is the whole of what the agent gets.
+  const port = bridgePort(plan.env);
   const health = await waitForHealth(port, HEALTH_TIMEOUT_MS);
   emit({
     action: "install",
@@ -197,7 +232,8 @@ async function install(own: readonly string[], agentArgs: readonly string[]): Pr
 }
 
 async function status(): Promise<void> {
-  const port = bridgePort(process.env);
+  const plistPath = resolve(process.env.HOME ?? "", "Library/LaunchAgents", `${LOCAL_AGENT_SERVICE_LABEL}.plist`);
+  const port = bridgePort(installedServiceEnv(plistPath));
   const loaded = launchctl("print", `${domainTarget()}/${LOCAL_AGENT_SERVICE_LABEL}`).ok;
   const health = await probeHealth(port);
   emit({

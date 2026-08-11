@@ -41,6 +41,14 @@ export class CoupangIssuanceGuidanceSession {
   private recovering = false;
   /** At most ONE surface-wait loop at a time — several would each probe and each advance the run. */
   private awaitingSurface = false;
+  /**
+   * The seller closed the WING window and has not asked for anything since.
+   *
+   * Latched so no TIMER can re-open it: every automatic recovery this session has goes through a drive, and a
+   * drive brings the lazy window up. Cleared by the seller's next command, which is the one re-open that was
+   * ever theirs to ask for.
+   */
+  private surfaceClosed = false;
 
   private started = false;
   private publishedSeq = 0;
@@ -109,6 +117,9 @@ export class CoupangIssuanceGuidanceSession {
       return;
     }
     const outcome = this.engine.command(command);
+    // An accepted command is the SELLER asking for something, which is the one thing that may re-open a window
+    // they closed. Cleared before the drive, so the chain this command starts is allowed to bring it back up.
+    if (outcome.ok) this.surfaceClosed = false;
     this.transport.send({
       kind: "aw_command_result",
       commandId: command.commandId,
@@ -247,6 +258,13 @@ export class CoupangIssuanceGuidanceSession {
    */
   private maybeRecoverPark(): void {
     if (this.recovering) return;
+    // **NEVER auto-recover a surface the seller CLOSED.** Self-recovery drives a `{guide}`, which settles and
+    // locates — and the lazy driver brings a window up on its first call, so a timer-issued recheck would
+    // re-open the marketplace window the seller had just deliberately closed, once a second for ten minutes.
+    // The engine's own note on this park says how it recovers: "re-opening and a `REQUEST_STEP_RECHECK`". Both
+    // of those are the SELLER's, and a run that re-opens their window on its own has taken an action nobody
+    // granted — `agentNavigations: 1` says the walk opens one window, at open, and never again.
+    if (this.surfaceClosed) return;
     if (!isCoupangIssuancePark(this.engine.currentStage())) return;
     if (this.engine.isPaused()) return;
     this.recovering = true;
@@ -269,6 +287,11 @@ export class CoupangIssuanceGuidanceSession {
     // post-navigation page. Best-effort and value-free; a driver without a real page omits it. If a read still
     // races a navigation and throws, `onDriveError → engine.onDriveFault` parks recoverably.
     await this.driver.settleSurface?.();
+    // Re-arm the closure watch on whatever page this guide is now working against. It used to be armed only on
+    // the `PROBE` branch, so a window brought up by a guide (a seller-commanded re-open after they closed the
+    // first one) was never watched again — closing THAT one changed nothing and the run went on driving a dead
+    // page. Token-guarded, so the newest arm is the only one that can report.
+    this.watchSurfaceClose();
     const loc = await this.driver.locateTarget(target);
     const afterLoc = this.engine.onTargetLocated(target, loc);
     if (typeof afterLoc === "object" && "guide" in afterLoc) {
@@ -364,6 +387,9 @@ export class CoupangIssuanceGuidanceSession {
   private onSurfaceClosed(token: number): void {
     if (token !== this.surfaceCloseToken) return;
     if (isCoupangIssuanceTerminal(this.engine.currentStage())) return;
+    // Latched BEFORE the park is driven, so the `CLEAR_HIGHLIGHT` chain that follows cannot end in a recovery
+    // loop that re-opens the window on a timer.
+    this.surfaceClosed = true;
     const effect = this.engine.onSurfaceClosed();
     this.publishState();
     if (!isNoop(effect)) {

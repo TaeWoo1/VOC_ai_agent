@@ -351,6 +351,11 @@ export function buildCoupangIssuanceLiveConfig(): CoupangIssuanceLiveCarrier {
   // re-launching a persistent context on a profile dir the live one still holds a lock on just fails. This is
   // the same reasoning, and the same shape, as the import carrier's own context.
   let walkContext: BrowserContext | null = null;
+  // ONE navigation per CARRIER, not per open. `agentNavigations: 1` says "the landing, at window open, and
+  // never again", and a re-open that navigated again would make the manifest false — the operator granted one
+  // goto. A window the seller re-opens comes up wherever the profile left them, which is also the better
+  // behaviour: they closed it mid-walk, and being sent back to the landing would lose their place.
+  let navigated = false;
   const driver = new LazyCoupangIssuanceDriver({
     open: async () => {
       if (!walkContext) {
@@ -376,7 +381,10 @@ export function buildCoupangIssuanceLiveConfig(): CoupangIssuanceLiveCarrier {
       // sending the seller somewhere this run cannot vouch for. A navigation failure is swallowed — the seller
       // can always reach WING themselves, and the observed wait picks them up when they do.
       const screened = screenWingUrl(COUPANG_WING_GUIDED_WALK_LANDING_URL);
-      if (screened.ok) {
+      if (navigated) {
+        log("aw_coupang_walk_landing_skipped", { reason: "ALREADY_NAVIGATED_ONCE" });
+      } else if (screened.ok) {
+        navigated = true;
         log("aw_coupang_walk_landing", { urlCategory: screened.urlCategory });
         await page.goto(COUPANG_WING_GUIDED_WALK_LANDING_URL, { waitUntil: "domcontentloaded" }).catch(() => undefined);
       } else {
@@ -390,7 +398,14 @@ export function buildCoupangIssuanceLiveConfig(): CoupangIssuanceLiveCarrier {
       // the same persistent profile. `LazyImportDriver` gets this wiring explicitly at its own boot; this is the
       // sibling that was left standing. `driver` is captured, not read, at closure-creation time — `open()`
       // cannot run before the `const` it belongs to is initialized.
+      // …and only when the CONTEXT has no page left. `activePage()` reads the newest tab, so WING opening a
+      // second tab means the run continues there while this one's close still fires — forgetting the driver
+      // then would drop a live window and, with the re-open guard above, strand a healthy run.
       page.once("close", () => {
+        if (context.pages().length > 0) {
+          log("aw_coupang_walk_tab_closed", { remainingPages: context.pages().length > 0 });
+          return;
+        }
         log("aw_coupang_walk_surface_closed", {});
         driver.markClosed();
       });

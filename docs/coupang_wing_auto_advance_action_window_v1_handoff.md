@@ -1,13 +1,13 @@
 # Coupang WING Auto-Advance Action Window v1 — session handoff
 
-**Branch** `feat/coupang-product-path-guided-issuance-e2e-v1` · **HEAD** `e05b2c3d` · clean, **not merged, no PR**.
+**Branch** `feat/coupang-product-path-guided-issuance-e2e-v1`.
 
-Two units landed on this branch back to back: `Coupang Product-Path Guided Issuance E2E v1` and
-`Coupang WING Auto-Advance Action Window v1`. 23 commits, 49 files, +2931/−244.
+Three units landed on this branch back to back: `Coupang Product-Path Guided Issuance E2E v1`,
+`Coupang WING Auto-Advance Action Window v1`, and `Coupang WING Auto-Advance Review Findings Repair v1`.
 
-An independent `/code-review high` over `main...HEAD` found **8 real defects**, five of which are merge
-blockers. **Do not open a PR or merge until at least findings 1–5 are fixed.** The green test suite did not
-catch any of them, which is the main thing to carry forward.
+An independent `/code-review high` over `main...HEAD` found **8 real defects**, five of which were merge
+blockers. **All eight are fixed** — see §6. The green test suite did not catch any of them, which is the main
+thing to carry forward: every fix landed with a test that fails without it.
 
 ---
 
@@ -73,7 +73,8 @@ marker in one pass instead of returning on the first visible one.
 
 ## 3. Independent review — 8 findings, verbatim scope
 
-Reviewer scope: `git diff main...HEAD`. Findings 1–5 are merge blockers.
+Reviewer scope: `git diff main...HEAD`. Findings 1–5 were merge blockers. **All eight are repaired** — the
+finding text below is kept verbatim as the record of what was wrong; §6 says what each fix was.
 
 ### 1. HIGH — `awaiting_wing_surface` is an unrecoverable dead end after the watch window expires
 `collector/src/action-window/coupang-issuance/coupang-issuance-session.ts:180`
@@ -173,9 +174,9 @@ non-production boot (the launchd service pins `NODE_ENV=production`, so this nee
 
 ---
 
-## 4. Test + safety state at `e05b2c3d`
+## 4. Test + safety state
 
-- collector `npm run typecheck` green · `npm test` **7975 passed | 142 skipped**
+- collector `npm run typecheck` green · `npm test` **8024 passed | 142 skipped**
 - frontend `npm run typecheck` green · `npm test` **1883 passed**
 - `tools/coupang-local/wing-walk-selfcheck.sh` **PASS**
 - No service installed (`uninstall` run after the last measurement); no plist under `~/Library/LaunchAgents`.
@@ -197,18 +198,51 @@ token and forces re-pairing every run.
 
 ---
 
-## 5. First actions for the next session
+## 5. What the eight repairs were
 
-1. **Fix finding 1 first**, and with it the test gap that hid it — add `awaiting_wing_surface` (and
-   `checkpoint_reveal_issuance_form`) to `ALL_STAGES` so every stage's allowed-commands are covered. The
-   pattern to watch for across all of these: **a guard fixed in one place and left standing in its sibling.**
-   That was the cause of three separate defects in these units (`onReachVerified` parks, the two overlay steps
-   in finding 3, the descriptor fields), and findings 1–4 are all further instances.
-2. Then 2, 3, 5 (blockers), then 6 (manifest honesty), then 7, 8.
-3. Re-run collector + frontend suites and `wing-walk-selfcheck.sh`.
-4. Re-run `/code-review high` over `main...HEAD` — the fixes touch the same seams the findings came from.
-5. One **fresh** live walk to confirm findings 1/3 are actually gone on the product path (the run must survive
-   a >10 min login and render step 1's panel with no stale ring). Fresh bootstrap → manifest → STOP for a grant.
-6. Only then PR → merge, as one PR for the whole branch.
+Unit `Coupang WING Auto-Advance Review Findings Repair v1`. Every fix landed with a test that fails without it;
+each was verified to fail against the pre-fix code, not merely asserted to.
 
-Do not merge on the current green suite alone. Every one of these 8 defects was present while it was green.
+| # | Repair |
+|---|---|
+| 1 | A new **observed-wait** stage class. `awaiting_wing_surface` offers `REQUEST_STEP_RECHECK` throughout the wait (and `recheck()` handles it), and on expiry converts to a recoverable `page_mismatch` park carrying **`SURFACE_SETTLE_TIMEOUT`** — "화면이 아직 준비되지 않았어요", which is what happened, rather than `UI_DRIFT`'s "화면이 바뀐 것 같아요", the message this stage exists to stop showing someone who was simply not there yet. Deliberately **no auto-restart**: the park is reached *by* a watch running out, and restarting it would poll a page nobody is looking at for as long as the agent lives. |
+| 1b | `ALL_STAGES` gains `awaiting_wing_surface` + `checkpoint_reveal_issuance_form`, plus an exhaustiveness case (a new stage cannot be added without being covered) and a general "every non-terminal stage can ask the runtime to look again". |
+| 2 | Fixed in **both** places it can go wrong: a single-flight guard on the surface-wait loop (the duplicate *watcher*) and a stage guard in `onSurfaceProbed` (the duplicate *advance*). |
+| 3 | `reach_open_api` and `return` moved into `TEXT_GUIDED_SIG`, so all five locator-less steps take one branch: clear the prior tag → mount docked → **report what actually mounted**. |
+| 4 | `markClosed()` wired at the carrier (`page.once("close")` inside `open()`), and the walk's window is closed with the agent that opened it — `isOpen()` / `close()` stop being dead code. |
+| 5 | Three FE strings corrected, and the "VERBATIM" comment replaced by an assertion: `collector/test/crossstack/coupang-issuance-fe-copy-parity.test.ts` pins all seven character-for-character to `OPERATOR_STEP_LABELS` (now exported). |
+| 6 | Two new `APPROVAL_ACTIONS`: `NAVIGATE_TO_SELLER_LANDING_ONCE` and `OBSERVE_CONSENT_COMPLETE_AGGREGATE`. The test asserts the **general** form — a boundary claim without a matching capability fails. |
+| 7 | `recoverPark` routes a drive throw through `onDriveError` instead of awaiting bare under a swallowing `.catch`. |
+| 8 | `awChannel`'s one-carrier exclusion now includes `hostLiveWalk` (and `hostLiveWalk` is decided before it is used). |
+
+Two things the reviewer noticed but did not file are also gone: the orphaned string literal in
+`run-coupang-wing-issuance-live.ts`, and — found while re-running the selfcheck — the **preflight's operator-facing
+summary line**, which still read "navigates nothing · 2 highlighted + 4 text-guided" while the verifier beside it
+demanded `agentNavigations:1 / 3 / 2`. Same defect class as finding 6, in the sentence the operator grants against.
+
+The pattern to keep watching for: **a guard fixed in one place and left standing in its sibling.** It caused
+three defects in the first two units and four of these eight; findings 2 and 3 were each repaired in *both*
+places for that reason.
+
+### The second review round
+
+Re-running `/code-review high` over the repaired branch found **7 more**, one HIGH. Two were introduced by the
+repair itself, which is the point of re-reviewing rather than re-running the suite:
+
+| # | Defect | Repair |
+|---|---|---|
+| 1 HIGH | **The park-recovery timer re-opened the seller's closed window.** Wiring `markClosed()` made the lazy driver bring a window up on the next call — so a park from a closed surface put a recheck on a 1 s timer that re-launched Chrome *and* re-ran the landing `goto`, for ten minutes. `agentNavigations: 1` stopped being true. | A `surfaceClosed` latch: no timer recovers a closed surface; the seller's own command clears it. The landing navigation is latched to once per **carrier**, not per open. The closure watch is re-armed on every guide, so a re-opened window is watched too. |
+| 2 | `markClosed()` fired on the first page's close even when the run had moved to a newer tab. | The close handler forgets the surface only when the context has **no page left**. (The orphan half was already fixed by giving the carrier its own `closeSurface()`.) |
+| 3 | The install health probe read `BRIDGE_PORT` from the installing **shell**; launchd gives the agent the plist's env, so a configured port made `install` poll the wrong one, time out, and `exit 5` on a healthy service. | `install` probes `plan.env`; `status` reads the installed plist. |
+| 4 | **The auto-advance could fire on arrival.** The first screen probe ran at `i === 0` with no baseline, so a marker already painted when the step was armed completed it with zero seller action. | The screen must **change into** the expected one, measured against a baseline taken at arm time; an unreadable baseline disables screen-advance and the seller's on-page button carries it. |
+| 5 | The **bootstrap's** disclosure still said "the agent never navigates" and "the two live-calibrated controls" — the same drift as the preflight line, in the half nothing grepped. | Rewritten to the verified descriptor, and the selfcheck now asserts both the current claims and the absence of the retired ones. |
+| 6 | The key-creation locator was a second hand-written copy of the measured candidate, defeating the invalidation rule `WING_KEY_CREATION_SELECTOR_CALIBRATED` documents. | Derived from `WING_TERMS_SCREEN_MARKER_SPECS`, failing at load if the measurement is gone. |
+| 7 | `waiting_login` has no expiry recovery. | **Accepted, not fixed** — and now argued in the code rather than asserted: it is already a park carrying `LOGIN_REQUIRED` with the button offered, so the expiry is not silent; there is no WING-resident surface to offer anything else on; and restarting the watch would poll a login page for as long as the agent lives. |
+
+## 6. Remaining
+
+1. One **fresh** live walk on the product path (the run must survive a >10 min login and render step 1's panel
+   with no stale ring). Fresh bootstrap → manifest → STOP for a grant; any code change revokes it.
+2. PR → merge, as one PR for the whole branch.
+
+Do not merge on a green suite alone. Every one of the 8 defects was present while it was green.

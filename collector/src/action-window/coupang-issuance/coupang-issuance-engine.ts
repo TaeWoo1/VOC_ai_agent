@@ -445,8 +445,16 @@ export class CoupangIssuanceEngine {
    * for as long as the agent lives — the exact thing the watch is bounded to prevent. The button was missing
    * here; that was the defect. It is present now, at this stage and throughout the wait before it.
    *
-   * `waiting_login` expires to nothing on purpose: it is ALREADY a park with a blocker and a button, so there
-   * is nothing to convert and re-announcing it would just spam the frontend.
+   * **`waiting_login` expires to nothing on purpose**, and this is the one place on the walk where the seller is
+   * left to come back to the SellerOps tab. It is worth being explicit about, because it is a real limit rather
+   * than an oversight:
+   *  - it is ALREADY a park carrying `LOGIN_REQUIRED` with `REQUEST_STEP_RECHECK` offered, so the frontend has
+   *    been showing a blocker card and a button the whole time — nothing about the expiry is silent;
+   *  - converting it would mean re-announcing a blocker the seller is already looking at;
+   *  - and there is no WING-resident surface to offer anything on: at a login screen the walk has mounted no
+   *    overlay, so "keep watching" is the only thing it could do, which is what just ran out.
+   * A seller who has been at a WING login for ten minutes is not mid-flow. Restarting the watch for them would
+   * poll a login page for as long as the agent lives.
    *
    * Idempotent, and a no-op on any other stage: a poll that finishes after the run has already moved on must
    * not park a healthy run.
