@@ -15,6 +15,7 @@ import {
   WING_ISSUANCE_FLOW_PLAN,
   WING_FLOW_HALT_REASONS,
   WING_VENDOR_FORM_CANDIDATE_IDS,
+  WING_VENDOR_METHOD_CHECKPOINTS,
   WING_PURPOSE_SCREEN_MARKER_ID,
   WING_TERMS_SCREEN_MARKER_IDS,
   WING_VENDOR_METHOD_SCREEN_MARKER_ID,
@@ -499,7 +500,10 @@ describe("the discovery PHASE is wired everywhere a Stage-2 phase must be", () =
     // The Stage-2 warning says "Choose no purpose … NEVER press 확인". Printed above a discovery manifest it
     // would contradict the manifest directly over it, and the operator would have to guess which is binding.
     const src = readFileSync(resolve(HERE, "../../../../tools/coupang-local/wing-probe-preflight.sh"), "utf8");
-    const discoveryBranch = src.indexOf('if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then');
+    // ONE branch now serves both flow phases — the predicate exists because "a run that advances the real
+    // flow" is a description of two phases, and a `[ "$PHASE" = … ]` repeated at each site is how the second
+    // one gets added to some of them.
+    const discoveryBranch = src.indexOf('if is_flow_phase "$PHASE"; then');
     const sharedBranch = src.indexOf('elif is_stage2_phase "$PHASE"; then');
     expect(discoveryBranch).toBeGreaterThan(-1);
     // The discovery branch must come FIRST, or the shared one swallows it.
@@ -507,7 +511,10 @@ describe("the discovery PHASE is wired everywhere a Stage-2 phase must be", () =
     const block = src.slice(discoveryBranch, sharedBranch);
     // It has to state the conditionality, the reason, and the halt — not just "you may press 확인".
     expect(block).toContain("ADVANCES THE REAL FLOW");
-    expect(block).toContain("KEY-CREATION control");
+    // NOT "the KEY-CREATION control" — that claim was REFUTED on 2026-08-12 (pressed live, no key issued), and
+    // this disclosure was one of the six places still asserting it. The boundary is stated by what is true.
+    expect(block).not.toContain("is the KEY-CREATION control");
+    expect(block).toContain("never read");
     expect(block).toContain("HALTS");
     expect(block).toContain("Fail-closed");
     // …and it must READ as English. A shell-escaping leak (`run'\''s`) shipped into the middle of the sentence
@@ -756,7 +763,7 @@ describe("the manifest cannot under-describe the flow it approves", () => {
 
   it("the preflight builds its step list FROM THE PLAN, and hard-codes no count", () => {
     const src = readFileSync(resolve(HERE, "../../../../tools/coupang-local/wing-probe-preflight.sh"), "utf8");
-    const from = src.indexOf('if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then');
+    const from = src.indexOf('if is_flow_phase "$PHASE"; then');
     const block = src.slice(from, src.indexOf('elif is_stage2_phase "$PHASE"; then', from));
     // Derived: it loops the plan and numbers as it goes.
     expect(block).toContain("for CP in $PLAN");
@@ -765,8 +772,10 @@ describe("the manifest cannot under-describe the flow it approves", () => {
     for (const c of WING_FLOW_CHECKPOINTS) expect(block, c).toContain(`${c})`);
     // No literal step number survives.
     expect(block).not.toMatch(/echo "    [0-9]+\)/);
-    expect(block).toContain("KEY-CREATION control");
+    expect(block).not.toContain("is the KEY-CREATION control");
     expect(block).toContain("no fifth checkpoint");
+    // …and the plan's own two extra steps have copy branches too, or a vendor run prints blank lines for them.
+    for (const c of WING_VENDOR_METHOD_CHECKPOINTS) expect(block, c).toContain(`${c})`);
   });
 
   it("the warning does not repeat a claim its own runs have since falsified", () => {
@@ -775,7 +784,7 @@ describe("the manifest cannot under-describe the flow it approves", () => {
     // a retired unknown teaches the reader to discount it, and the paragraph it sat in is the one explaining
     // why the run may stop before a key-creating control.
     const src = readFileSync(resolve(HERE, "../../../../tools/coupang-local/wing-probe-preflight.sh"), "utf8");
-    const from = src.indexOf('if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then');
+    const from = src.indexOf('if is_flow_phase "$PHASE"; then');
     const block = src.slice(from, src.indexOf('elif is_stage2_phase "$PHASE"; then', from));
     expect(block).not.toContain("nobody has ever pressed");
     expect(block).not.toContain("no run has measured what it does");

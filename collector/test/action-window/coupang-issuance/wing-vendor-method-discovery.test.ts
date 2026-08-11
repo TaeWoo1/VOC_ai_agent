@@ -296,14 +296,14 @@ describe("the vendor screen's candidates", () => {
 /* ══════════════════════════ the runner's hard stop ══════════════════════════ */
 
 const CENSUS: WingStructuralCensus = {
-  formCount: 1,
-  inputCount: 4,
-  buttonCount: 6,
-  linkCount: 20,
-  tableCount: 1,
-  headingCount: 3,
-  maskedFieldCount: 0,
+  passwordFieldPresent: false,
+  submitAffordancePresent: false,
+  dialogLikePresent: false,
   choiceControlCount: 2,
+  actionControlCount: 3,
+  formCount: 2,
+  editableTextInputCount: 6,
+  readonlyFieldCount: 0,
   listLikeContainerCount: 5,
   markerScanTruncated: false,
   openApiMarkerPresent: false,
