@@ -56,18 +56,33 @@ describe("the flow-screen markers were MEASURED, and the record says which readi
  * The key-creation control is the one the seller presses to create a key. It is also the one with no evidence,
  * and those two facts together are why it must stay unhighlighted until measured.
  */
-describe("the key-creation control is NOT promoted, and cannot be highlighted", () => {
-  it("its flag is false — the only readings that exist are hidden ones from the wrong screen", () => {
-    expect(WING_KEY_CREATION_SELECTOR_CALIBRATED).toBe(false);
-    const readings = WING_FLOW_SCREEN_MARKER_EVIDENCE.readings.filter((r) => r.id === WING_KEY_CREATION_CONTROL_ID);
-    // No reading at all is the honest state: the short-circuit meant it was never read on TERMS.
-    expect(readings).toEqual([]);
+describe("the key-creation control is promoted ONLY on a TERMS-screen reading", () => {
+  it("its flag is true, and the reading behind it is visible, unique and tagged BY MEASUREMENT", () => {
+    expect(WING_KEY_CREATION_SELECTOR_CALIBRATED).toBe(true);
+    const onTerms = WING_FLOW_SCREEN_MARKER_EVIDENCE.readings.find(
+      (r) => r.id === WING_KEY_CREATION_CONTROL_ID && r.screen === "TERMS",
+    );
+    expect(onTerms, "promotion needs a reading from the screen the control lives on").toBeTruthy();
+    expect(onTerms?.visibleCount).toBe(1);
+    expect(onTerms?.hiddenCount).toBe(0);
+    expect(onTerms?.observedTag).toBe("BUTTON");
   });
 
-  it("the driver never treats it as a highlight target", () => {
-    // `isWingHighlightTarget` is the single gate on drawing a ring, and it names its members literally.
-    expect(DRV).toContain('target is "issue" | "credentials"');
-    expect(DRV).not.toContain('"issue_final" | "credentials"');
+  it("keeps the PURPOSE-screen reading on the record, because it is what made the promotion premature before", () => {
+    // Hidden-unique on the wrong screen looked like evidence for a day. Deleting it would make the record
+    // read as though the answer had always been obvious.
+    const onPurpose = WING_FLOW_SCREEN_MARKER_EVIDENCE.readings.find(
+      (r) => r.id === WING_KEY_CREATION_CONTROL_ID && r.screen === "PURPOSE",
+    );
+    expect(onPurpose?.visibleCount).toBe(0);
+    expect(onPurpose?.hiddenCount).toBe(1);
+    expect(onPurpose?.observedTag).toBeUndefined();
+  });
+
+  it("the spotlight is gated on the FLAG, so withdrawing the calibration removes the ring by itself", () => {
+    // The 삭제 record was withdrawn while its target stayed in a hand-written list. Reading the flag at the
+    // point of use is what stops a withdrawal from leaving a ring pointing at nothing.
+    expect(DRV).toContain('if (target === "issue_final") return WING_KEY_CREATION_SELECTOR_CALIBRATED;');
   });
 
   it("it stays a TERMS marker, so the next walk reads it where it actually lives", () => {

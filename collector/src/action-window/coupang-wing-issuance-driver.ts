@@ -36,6 +36,7 @@ import { log } from "../log";
 import { buildWingConsentCompleteScript } from "../cli/coupang-wing-classifier";
 import {
   WING_STAGE3_TERMS_OPTION_CANDIDATES,
+  WING_KEY_CREATION_SELECTOR_CALIBRATED,
   WING_PURPOSE_SCREEN_MARKER_SPEC,
   WING_TERMS_SCREEN_MARKER_SPECS,
   type WingFlowScreen,
@@ -85,7 +86,7 @@ import type { LocateResult } from "./engine";
  *
  * What the tutorial can actually highlight is narrower still — see {@link isWingHighlightTarget}.
  */
-export type WingHighlightTarget = "self_dev" | "vendor_info" | "call_ip" | "issue" | "credentials";
+export type WingHighlightTarget = "self_dev" | "vendor_info" | "call_ip" | "issue" | "credentials" | "issue_final";
 
 /**
  * **CANDIDATE / LIVE_DOM_CALIBRATION_PENDING.** Proposed fixed WING labels for each highlightable target. WING's
@@ -116,10 +117,17 @@ export const WING_HIGHLIGHT_LABELS: Readonly<Record<WingHighlightTarget, { candi
   // — even toward the observed `id`/`className`, which are NOT adopted as anchors — discards the measurement
   // that justifies `WING_ISSUE_SELECTOR_CALIBRATED` and requires a fresh probe.
   issue: { candidateQuery: "button", exactText: "API Key 발급 받기" },
+  // LIVE-CALIBRATED 2026-08-11 (see WING_KEY_CREATION_SELECTOR_CALIBRATED). Narrowed to actionable elements
+  // because the TERMS heading carries the identical text; measured distinct from it in the same pass.
+  issue_final: { candidateQuery: "button,a", exactText: "약관 동의 및 Key 발급받기" },
   credentials: { candidateQuery: "label,span,div,dt,th,strong", exactText: "Access Key", tagAncestor: "tr" },
 };
 
-function isWingHighlightTarget(target: CoupangIssuanceTarget): target is "issue" | "credentials" {
+function isWingHighlightTarget(target: CoupangIssuanceTarget): target is "issue" | "credentials" | "issue_final" {
+  // Gated on the flag, not on a literal list, so WITHDRAWING the calibration removes the ring by itself. The
+  // 삭제 record was withdrawn while its target stayed in a hand-written list, and only the flag being read at
+  // the point of use keeps that from happening again.
+  if (target === "issue_final") return WING_KEY_CREATION_SELECTOR_CALIBRATED;
   // ONLY the two controls with a live-calibrated locator. The purpose radios, 확인, the consent boxes and the
   // key-creating button are all MEASURED but NOT promoted, so the driver cannot highlight them and fails closed
   // if asked — which is the tutorial's job to respect, not to work around.
@@ -685,7 +693,6 @@ const REACH_OPEN_API_GUIDANCE_SIG = "c0a9b17ec0a9b17e";
 const TEXT_GUIDED_SIG: Readonly<Partial<Record<CoupangIssuanceTarget, string>>> = {
   confirm_purpose: "b48e2f05b48e2f05",
   terms_consent: "16d9c7ba16d9c7ba",
-  issue_final: "9f3b60e19f3b60e1",
 };
 const RETURN_GUIDANCE_SIG = "5e11e40b5e11e40b";
 

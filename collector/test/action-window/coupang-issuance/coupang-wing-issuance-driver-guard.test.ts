@@ -174,7 +174,9 @@ describe("the redesigned walk can actually be walked", () => {
     // test as passed, so a local run looks green and CI does not.
     const driver = new CoupangWingIssuanceDriver(fakePage() as never);
     for (const target of COUPANG_ISSUANCE_TARGETS) {
-      if (target === "issue" || target === "credentials") continue; // these query the page; covered elsewhere
+      // These QUERY the page (they carry a calibrated locator), so they are covered where a real page exists.
+      // `issue_final` joined them on 2026-08-11 when its locator was measured on the TERMS screen.
+      if (target === "issue" || target === "credentials" || target === "issue_final") continue;
       const res = await driver.locateTarget(target);
       expect(res.count, `${target} would park the run at target_not_found`).toBe(1);
       expect(res.sig, target).toMatch(/^[0-9a-f]{16}$/);
@@ -189,7 +191,9 @@ describe("the redesigned walk can actually be walked", () => {
     // test as passed, so a local run looks green and CI does not.
     const driver = new CoupangWingIssuanceDriver(fakePage() as never);
     const sigs = new Map<string, string>();
-    for (const target of ["reach_open_api", "confirm_purpose", "terms_consent", "issue_final", "return"] as const) {
+    // `issue_final` LEFT this list on 2026-08-11 — exactly as the comment above says it would: it gained a
+    // calibrated locator and a spotlight, so it is no longer text-guided.
+    for (const target of ["reach_open_api", "confirm_purpose", "terms_consent", "return"] as const) {
       const res = await driver.locateTarget(target);
       sigs.set(target, res.sig!);
     }

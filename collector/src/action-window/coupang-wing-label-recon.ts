@@ -2044,6 +2044,12 @@ export const WING_FLOW_SCREEN_MARKER_EVIDENCE: WingFlowScreenMarkerEvidence = Ob
     // Hidden on PURPOSE, visible the moment the seller reached TERMS — the transition itself, observed.
     Object.freeze({ id: "stage3.terms.heading", screen: "PURPOSE", visibleCount: 0, hiddenCount: 1 }),
     Object.freeze({ id: "stage3.terms.heading", screen: "TERMS", visibleCount: 1, hiddenCount: 0, observedTag: "DIV" }),
+    // 2026-08-11, git `7fc18eac`. The reading the short-circuit had been hiding: on TERMS the key-creation
+    // control resolves to exactly ONE PAINTING element, and its tag was OBSERVED as BUTTON — not assumed.
+    // Read in the same pass as the heading above (both at 07:33:31), which is what confirms the `button,a`
+    // narrowing actually separates the control from the heading that carries the identical text.
+    Object.freeze({ id: WING_KEY_CREATION_CONTROL_ID, screen: "PURPOSE", visibleCount: 0, hiddenCount: 1 }),
+    Object.freeze({ id: WING_KEY_CREATION_CONTROL_ID, screen: "TERMS", visibleCount: 1, hiddenCount: 0, observedTag: "BUTTON" }),
   ]),
 });
 
@@ -2072,16 +2078,25 @@ export const WING_PURPOSE_SCREEN_MARKER_MEASURED = true as const;
 export const WING_TERMS_SCREEN_MARKERS_MEASURED = true as const;
 
 /**
- * Whether the key-creation control has a locator good enough to HIGHLIGHT. **FALSE.**
+ * Whether the key-creation control has a locator good enough to HIGHLIGHT. **TRUE** as of 2026-08-11.
  *
- * The only readings that exist are `visibleCount: 0, hiddenCount: 1`, all taken on the PURPOSE screen — the
- * `button,a` query resolves to exactly one node there and it does not paint. That is not evidence about the
- * terms screen, where the control the seller presses actually lives. The 2026-08-10 walk could not supply it
- * because `probeFlowScreen` short-circuited on the heading and never read this marker on TERMS; that
- * short-circuit is gone, so the next walk records it in the same pass.
+ * The reading that flipped it is in {@link WING_FLOW_SCREEN_MARKER_EVIDENCE}: on the TERMS screen the
+ * `button,a` query resolved to `visibleCount: 1`, `hiddenCount: 0`, `observedTag: "BUTTON"`. Every condition
+ * this flag demanded when it was false is met, and each is load-bearing:
  *
- * Flipping this requires a reading on the TERMS screen with `visibleCount: 1`, `hiddenCount: 0`, and a MEASURED
- * tag. A hidden unique match is exactly what invalidated the 삭제 calibration record — highlighting it would
- * draw a ring at nothing while claiming to point at the control that creates the key.
+ *  - **on TERMS.** The earlier readings were all from PURPOSE, where the same query matches one HIDDEN node.
+ *    A hidden unique match is what invalidated the 삭제 record; it is not evidence about the screen the seller
+ *    actually presses the control on.
+ *  - **unique.** The screen's heading carries character-for-character the same text, which is why the query is
+ *    narrowed to actionable elements — and whether that narrowing was enough was the open question, not an
+ *    assumption. Both markers were read in the SAME pass and came back distinct (heading `DIV`, control
+ *    `BUTTON`), so the narrowing is confirmed rather than argued.
+ *  - **observed tag.** `BUTTON` was measured, not expected. A tag that was expected rather than observed is
+ *    precisely how the 발급 record went wrong.
+ *
+ * This asserts SELECTOR readiness only. It is not an authorization and says nothing about the press: the agent
+ * highlights this control and never touches it, `keyCreationAutoAdvances` stays false, and pressing it remains
+ * the seller's own act behind its own approval. Any edit to the candidate's `candidateQuery` or `exactText`
+ * invalidates this flag and requires a fresh reading.
  */
-export const WING_KEY_CREATION_SELECTOR_CALIBRATED = false as const;
+export const WING_KEY_CREATION_SELECTOR_CALIBRATED = true as const;

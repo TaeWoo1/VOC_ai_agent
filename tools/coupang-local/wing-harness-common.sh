@@ -333,8 +333,8 @@ verify_walk_descriptor() {
     "agentNavigations:1" \
     "credentialValueReadBudget:0" \
     "performsConnectOrSync:false" \
-    "highlightedControlCount:2" \
-    "textGuidedControlCount:3" \
+    "highlightedControlCount:3" \
+    "textGuidedControlCount:2" \
     "autoAdvancingStepCount:4" \
     "keyCreationAutoAdvances:false" \
     "sellerConsentObserved:true"

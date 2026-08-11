@@ -290,9 +290,9 @@ export interface GuidedWalkBoundary {
   /** No connect-test, no sync, no upload: guidance finishing is not a connection. */
   performsConnectOrSync: false;
   /** How many of the walk's guided controls carry a live-calibrated locator and may be highlighted. */
-  highlightedControlCount: 2;
+  highlightedControlCount: 3;
   /** …and how many are guided by TEXT because nothing was promoted for them. */
-  textGuidedControlCount: 3;
+  textGuidedControlCount: 2;
   /**
    * How many steps the runtime advances by OBSERVING WING rather than by the seller pressing "다음".
    *
@@ -321,8 +321,8 @@ export const COUPANG_WING_GUIDED_WALK_BOUNDARY: GuidedWalkBoundary = {
   agentNavigations: 1,
   credentialValueReadBudget: 0,
   performsConnectOrSync: false,
-  highlightedControlCount: 2,
-  textGuidedControlCount: 3,
+  highlightedControlCount: 3,
+  textGuidedControlCount: 2,
   autoAdvancingStepCount: 4,
   keyCreationAutoAdvances: false,
   sellerConsentObserved: true,
@@ -989,11 +989,11 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
       "(사용 목적 화면이 뜨면 자동 진행) → ③ 사용 목적이 'OPEN API'인지 보고 '확인'을 직접 누름" +
       "(약관 화면이 뜨면 자동 진행) → ④ 약관 2개를 직접 읽고 판단한 뒤 동의 체크(2개가 모두 체크되면 자동 진행) → " +
       "⑤ 여기서 멈춥니다. " +
-      "⚠ ③④ 단계는 강조 표시가 없습니다. 해당 control은 측정만 되었고 selector로 승격되지 않았기 때문이며, " +
+      "⚠ ③ 사용 목적/확인 단계와 체크박스에는 강조 표시가 없습니다. 해당 control은 측정만 되었고 selector로 승격되지 않았기 때문이며, " +
       "SellerOps는 위치를 아는 척하지 않고 글로만 안내합니다. " +
       "⚠ 체크박스는 SellerOps가 대신 누르지 않습니다. 다만 2개가 모두 선택됐는지는 화면에서 확인해 자동으로 넘어갑니다 " +
       "(선택 여부는 저장·전송·기록하지 않습니다). SellerOps는 약관을 읽거나 판단하거나 대신 동의하지 않습니다. " +
-      "⚠ 마지막 '약관 동의 및 Key 발급받기'는 실제로 키를 생성하는 control이며, 자동으로 넘어가지 않고 " +
+      "⚠ 마지막 '약관 동의 및 Key 발급받기'는 강조 표시됩니다(2026-08-11 측정 승격). 실제로 키를 생성하는 control이며, 자동으로 넘어가지 않고 " +
       "이번 proof에서는 절대 누르지 않습니다. 키 발급·credential 읽기·연결·동기화는 이번 run의 범위가 아닙니다.",
     emitsFrontendUrl: false,
   },

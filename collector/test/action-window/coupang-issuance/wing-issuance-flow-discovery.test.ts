@@ -936,10 +936,10 @@ describe("the guided-walk manifest is not the fallback", () => {
     expect(max).toContain("0 presses of the key-creating");
     // ONE navigation now — the landing — and the budget must SAY so rather than keep claiming zero.
     expect(max).toContain("1 navigation (the landing at window open, never again)");
-    expect(max).toContain("2 highlights");
+    expect(max).toContain("3 highlights");
     // Three since the purpose screen became one step. The budget also has to state that the runtime advances
     // itself now — a budget listing only what the SELLER presses would understate what the agent does.
-    expect(max).toContain("3 text-guided");
+    expect(max).toContain("2 text-guided");
     expect(max).toContain("4 steps advanced by OBSERVING WING");
     expect(max).toContain("the key-creating step never");
   });
@@ -999,10 +999,12 @@ describe("stale spotlight — the defect the dev-host live proof surfaced", () =
     const guided = DRV.slice(DRV.indexOf("const TEXT_GUIDED_SIG"), DRV.indexOf("};", DRV.indexOf("const TEXT_GUIDED_SIG")));
     // `purpose_option` was retired on 2026-08-10: the purpose screen is ONE step, folded into
     // `confirm_purpose`, so there is no separate radio-check target left to guide.
-    for (const t of ["confirm_purpose", "terms_consent", "issue_final"]) {
+    // `issue_final` left this set on 2026-08-11: it was measured visible+unique on the TERMS screen, so it
+    // now carries a locator and IS spotlit. The remaining two are still measured-but-unpromoted.
+    for (const t of ["confirm_purpose", "terms_consent"]) {
       expect(guided, t).toContain(t);
     }
-    for (const t of ["issue:", "credentials:"]) expect(guided).not.toContain(t);
+    for (const t of ["issue:", "credentials:", "issue_final:"]) expect(guided).not.toContain(t);
   });
 });
 
