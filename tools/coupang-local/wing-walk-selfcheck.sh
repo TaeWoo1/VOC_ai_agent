@@ -296,6 +296,8 @@ if [ -z "$TREE_DIRTY" ]; then
   DISCLOSE_OK=1
   for phrase in \
     "EVERY marketplace action is YOURS" \
+    "강조 표시는 체크박스나 라디오 버튼 위에 뜨지 않습니다" \
+    "어느 박스가 어느 동의인지 안다고 말하지 않습니다" \
     "every screen after that is one YOU navigate to" \
     "SEVEN controls are highlighted" \
     "NO ring sits on a checkbox or a radio" \
@@ -308,6 +310,15 @@ if [ -z "$TREE_DIRTY" ]; then
     "no connect-test, no sync, no upload"
   do
     grep -qF "$phrase" <<<"$out" || { echo "  FAIL  NORMAL          · disclosure missing: $phrase"; DISCLOSE_OK=0; FAILED=1; }
+  done
+  # The KOREAN operator summary is the line that binds, and it went stale while the English disclosure beside
+  # it was updated — it still told the operator that the purpose step and the checkboxes carry no highlight, on
+  # the very run that had just promoted them. That is the manifest-honesty defect in the sentence rather than
+  # the data, in the half the operator actually reads.
+  for stale_ko in "사용 목적/확인 단계와 체크박스에는 강조 표시가 없습니다" "selector로 승격되지 않았기 때문"; do
+    if grep -qF "$stale_ko" <<<"$out"; then
+      echo "  FAIL  NORMAL          · retired Korean claim still shown: $stale_ko"; DISCLOSE_OK=0; FAILED=1
+    fi
   done
   [ "$DISCLOSE_OK" = "1" ] && echo "  PASS  NORMAL          · full guided-walk disclosure shown before the grant line"
 
