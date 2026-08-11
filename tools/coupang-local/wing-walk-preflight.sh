@@ -250,7 +250,9 @@ echo
 echo "  Then, with no terminal involved:"
 echo "    1. open SellerOps and go to /connect/coupang (the frontend finds the agent on loopback by itself)"
 echo "    2. start the guidance — SellerOps requests pairing"
-echo "    3. macOS shows the approval dialog with the code; confirm it, and confirm in the SellerOps screen"
+echo "    3. macOS shows the approval dialog with the code; confirm it, and confirm in the SellerOps screen."
+echo "       A browser that ALREADY holds a valid pairing token pairs silently and shows NO dialog — that is"
+echo "       the system working, not a failure. (A private window discards the token and re-pairs every run.)"
 echo "    4. the dedicated WING window opens THEN — at the run's first call, not at agent boot"
 echo
 echo "  The service is bound to THIS approval: its environment carries run=$RUN_ID approval=$APPROVAL_ID"

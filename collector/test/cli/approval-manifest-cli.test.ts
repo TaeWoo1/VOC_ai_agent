@@ -175,6 +175,34 @@ describe("approval-manifest-cli — the destructive WING deletion phase can be D
     expect(JSON.stringify(m)).not.toContain("SmartStore");
   });
 
+  it("**the WING account binding names BOTH logins** — the WING one and the SellerOps one are not the same account", () => {
+    // A guided walk signs in TWICE: the operator logs into WING with their own Coupang seller account, and
+    // SellerOps is logged into separately with a proof account. The binding said only "operator-owned Coupang
+    // WING test account", which is true of the marketplace side and made the SellerOps side invisible — and a
+    // reader took the SellerOps proof login for a WING identity, which is the one confusion a field naming what
+    // the grant is BOUND to must not invite.
+    setEnv({ SELLEROPS_APPROVAL_PHASE: "COUPANG_WING_GUIDED_ISSUANCE_WALK", ...IDENTITY });
+    const { code, out } = run(true);
+    expect(code).toBe(0);
+    const binding = String((JSON.parse(out) as Record<string, unknown>).accountBinding);
+    expect(binding).toContain("WING");
+    expect(binding).toContain("SellerOps");
+    expect(binding).toMatch(/no credential value/i);
+    // Still a DESCRIPTION, never an identity: no address, handle, or id for either side.
+    expect(binding).not.toContain("@");
+  });
+
+  it("the pairing dialog's ABSENCE is disclosed — a held token pairs silently, and that is not a failure", () => {
+    // Stated because its absence reads as a broken pairing: an operator who was told a dialog appears, and sees
+    // none, has no way to tell "already paired" from "nothing happened" and will go looking for a fault.
+    setEnv({ SELLEROPS_APPROVAL_PHASE: "COUPANG_WING_GUIDED_ISSUANCE_WALK", ...IDENTITY });
+    const { code, out } = run(true);
+    expect(code).toBe(0);
+    const summary = String((JSON.parse(out) as Record<string, unknown>).operatorActionSummary);
+    expect(summary).toContain("pairing token");
+    expect(summary).toContain("정상 동작");
+  });
+
   it("an UNBOUND identity still fails closed with no manifest printed", () => {
     for (const key of ["WALKTHROUGH_RUN_ID", "WALKTHROUGH_APPROVAL_ID", "WALKTHROUGH_GIT_COMMIT"] as const) {
       setEnv({ SELLEROPS_APPROVAL_PHASE: "COUPANG_WING_KEY_DELETION", ...IDENTITY, [key]: undefined });

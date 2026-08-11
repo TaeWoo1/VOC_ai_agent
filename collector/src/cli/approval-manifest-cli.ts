@@ -84,6 +84,22 @@ export interface ApprovalManifestCliOptions {
   selectorsCalibrated?: boolean;
 }
 
+/**
+ * **The default account binding for a WING phase — TWO accounts, named apart.**
+ *
+ * It read "operator-owned Coupang WING test account", which is true of the marketplace side and silently made
+ * the SellerOps side invisible. A guided walk signs in twice: the operator logs into **WING** with their own
+ * Coupang seller account, and separately logs into **SellerOps** with a proof account. Naming only one invites
+ * exactly the conflation the operator caught — reading the SellerOps proof login as if it were a WING identity.
+ *
+ * Deliberately no address, id, or handle for either: `validateApprovalPrerequisites` refuses a raw account id
+ * here, and the point of this field is what KIND of account is bound, never which one. Neither login's
+ * credential VALUE is read by anything in this run.
+ */
+const WING_DEFAULT_ACCOUNT_BINDING =
+  "WING: operator-owned Coupang seller account (the operator's own login) · SellerOps: a separate proof account. " +
+  "Two distinct logins; no credential value from either is read";
+
 export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): number {
   const phase = env("SELLEROPS_APPROVAL_PHASE") ?? "";
   // Fail closed on an unknown phase before deriving anything from a missing spec.
@@ -286,7 +302,7 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     accountBinding: isWingKeyDeletion
       ? COUPANG_WING_KEY_DELETION_SCOPE.accountBinding
       : (env("SELLEROPS_APPROVAL_ACCOUNT") ??
-        (isWingPhase ? "operator-owned Coupang WING test account" : "operator-owned test store")),
+        (isWingPhase ? WING_DEFAULT_ACCOUNT_BINDING : "operator-owned test store")),
     mode: spec.mode,
     apiCenterUrl,
     // Confirm the EXACT cli/driver from the spec — but only if the entrypoint really exists on disk.

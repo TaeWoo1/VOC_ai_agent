@@ -1002,6 +1002,11 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
       "에이전트는 로그인 세션에 상주하고, SellerOps 화면이 loopback에서 이를 찾습니다. " +
       "연결 승인 코드는 macOS 승인 대화상자가 표시하고, 승인은 SellerOps 제품 화면에서 진행합니다" +
       "(에이전트 터미널의 코드를 읽지 않습니다). " +
+      // Said out loud because its ABSENCE reads as a failure. A brand-new pairing shows the dialog; a browser
+      // that still holds a valid pairing token from an earlier run pairs silently and the dialog never appears,
+      // which is the system working. (A private window discards the token, so it re-pairs every time.)
+      "이미 유효한 pairing token이 있는 브라우저라면 대화상자가 뜨지 않고 바로 연결됩니다 — 정상 동작이며, " +
+      "실패가 아닙니다. 시크릿 창은 token을 버리므로 매번 다시 승인합니다. " +
       "SellerOps 화면에서 안내를 시작하면 그때 전용 Chrome 창이 열립니다" +
       "(에이전트가 켜져 있다는 이유만으로는 창이 열리지 않습니다). " +
       "그 창은 셀러 본인의 WING 판매정보 페이지로 한 번만 이동해 열립니다(빈 창 대신). 이후 화면 이동은 전부 셀러가 직접 합니다. " +

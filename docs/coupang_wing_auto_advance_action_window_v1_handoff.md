@@ -192,9 +192,17 @@ non-production boot (the launchd service pins `NODE_ENV=production`, so this nee
 
 **Dev environment the operator does not run:** Claude starts backend (`:8080`), frontend dev server
 (`:5173`), and installs/uninstalls the agent service. The operator touches only product UI, the macOS approval
-dialog, and WING. Walk account: `wing-walk@sellerops.test` / `walkproof1234` (fresh org, no seller accounts, so
-`resolvePhase` lands on `issuance`). Use a **normal** browser window — a private window discards the pairing
-token and forces re-pairing every run.
+dialog, and WING.
+
+**Two accounts.** They are separate logins and conflating them has already caused one misreading:
+- **SellerOps** proof account — `wing-walk@sellerops.test` / `walkproof1234` (fresh org, no seller accounts, so
+  `resolvePhase` lands on `issuance`). This is a SellerOps login and **not** a WING identity.
+- **WING** — the operator's own Coupang seller account, entered by them in the dedicated window. SellerOps never
+  types it and reads no credential value from either side.
+
+Use a **normal** browser window — a private window discards the pairing token and forces re-pairing every run.
+Conversely, a normal window that still holds a valid token pairs **without showing the macOS dialog**, which is
+the system working rather than a failed pairing.
 
 ---
 
@@ -241,8 +249,25 @@ repair itself, which is the point of re-reviewing rather than re-running the sui
 
 ## 6. Remaining
 
-1. One **fresh** live walk on the product path (the run must survive a >10 min login and render step 1's panel
-   with no stale ring). Fresh bootstrap → manifest → STOP for a grant; any code change revokes it.
+1. One **fresh** live walk on the product path. Fresh bootstrap → manifest → STOP for a grant; any code change
+   revokes it.
+
+   **What the live run is for, and what it is not.** The ten-minute boundary itself is covered
+   deterministically — the session and engine suites drive the wait to expiry with a 20 ms window and assert
+   the recoverable park, its blocker, its offered recheck, and that the recheck re-probes and drives on. **Do
+   not sit through a literal >10 min login to re-witness it**; a wall-clock repeat of a deterministic test
+   costs a sitting and proves less. Live confirms only what a fixture cannot: that the product path has no
+   dead end and no stale ring — step 1's panel renders docked with nothing ringed on the Access Key row, each
+   step advances on the seller's own act, and every stop offers a way on. Force the literal wait only if a
+   review acceptance explicitly demands it.
+
+   **Two accounts, and they are not the same one.** The operator logs into **WING** with their own Coupang
+   seller account; SellerOps is logged into separately with a **proof account**. No credential value from
+   either is read by anything in the run. (`wing-walk@sellerops.test` in §4 is the SellerOps proof login — it
+   is not a WING identity.)
+
+   **The macOS pairing dialog may not appear.** A browser still holding a valid pairing token pairs silently.
+   That is the system working; only a fresh pairing (or a private window, which discards the token) shows it.
 2. PR → merge, as one PR for the whole branch.
 
 Do not merge on a green suite alone. Every one of the 8 defects was present while it was green.
