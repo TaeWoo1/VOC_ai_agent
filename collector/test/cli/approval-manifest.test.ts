@@ -1339,4 +1339,50 @@ describe("the guided walk's installed-service entrypoint", () => {
     if (res.ok) return;
     expect(res.cause).toBe("ENTRYPOINT_TYPE_MISMATCH");
   });
+
+  /**
+   * **`capableActions` has to cover what the run DOES.** The operator's one-line grant binds to this manifest,
+   * and this list is the machine-checkable half of it. The walk gained two behaviours and declared neither: it
+   * navigates once to the seller's WING landing at window open, and it reads the aggregate "both consent boxes
+   * ticked" boolean to advance step 4. Both were disclosed in prose — `agentNavigations: 1`,
+   * `sellerConsentObserved: true` — while this list still described a strictly narrower run.
+   */
+  describe("…and its capability list matches the run", () => {
+    const SPEC = PHASE_SPECS.COUPANG_WING_GUIDED_ISSUANCE_WALK;
+    const BOUNDARY = SPEC.guidedWalkBoundary!;
+
+    it("declares the ONE navigation the boundary descriptor claims", () => {
+      expect(BOUNDARY.agentNavigations).toBe(1);
+      expect(SPEC.capableActions).toContain("NAVIGATE_TO_SELLER_LANDING_ONCE");
+    });
+
+    it("declares the consent-state read the boundary descriptor claims", () => {
+      expect(BOUNDARY.sellerConsentObserved).toBe(true);
+      expect(SPEC.capableActions).toContain("OBSERVE_CONSENT_COMPLETE_AGGREGATE");
+    });
+
+    it("**a prose-only disclosure is not enough — every claim in the boundary has a capability**", () => {
+      // The general form, so the next widening cannot be shipped as prose either. If a descriptor says the run
+      // navigates or reads consent, the validated list must say so too.
+      if (BOUNDARY.agentNavigations > 0) expect(SPEC.capableActions).toContain("NAVIGATE_TO_SELLER_LANDING_ONCE");
+      if (BOUNDARY.sellerConsentObserved) expect(SPEC.capableActions).toContain("OBSERVE_CONSENT_COMPLETE_AGGREGATE");
+    });
+
+    it("no OTHER phase claims either — they are this walk's, and no census reads `checked`", () => {
+      for (const [phase, spec] of Object.entries(PHASE_SPECS)) {
+        if (phase === "COUPANG_WING_GUIDED_ISSUANCE_WALK") continue;
+        expect(spec.capableActions, phase).not.toContain("NAVIGATE_TO_SELLER_LANDING_ONCE");
+        expect(spec.capableActions, phase).not.toContain("OBSERVE_CONSENT_COMPLETE_AGGREGATE");
+      }
+    });
+
+    it("still claims nothing that presses, types, or reads a value", () => {
+      for (const forbidden of ["CLICK", "SUBMIT", "TYPE", "READ_CREDENTIAL_VALUE", "CREATE_KEY"]) {
+        expect(SPEC.capableActions).not.toContain(forbidden as never);
+      }
+      expect(BOUNDARY.agentPerformsAction).toBe(false);
+      expect(BOUNDARY.credentialValueReadBudget).toBe(0);
+      expect(BOUNDARY.keyCreationAutoAdvances).toBe(false);
+    });
+  });
 });

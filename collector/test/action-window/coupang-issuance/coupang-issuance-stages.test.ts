@@ -18,11 +18,23 @@ import {
   type CoupangIssuanceStage,
 } from "../../../src/action-window/coupang-issuance/coupang-issuance-stages";
 
+/**
+ * EVERY stage, and the list is exhaustive on purpose.
+ *
+ * It was not: `awaiting_wing_surface` and `checkpoint_reveal_issuance_form` were added to the union without
+ * being added here, so the allowed-commands cases below never ran for them — which is exactly why the
+ * `awaiting_wing_surface` dead end (no `REQUEST_STEP_RECHECK`, no recovery loop, RUNNING forever) was invisible
+ * to a green suite. The `it.each` cases read the record literals below, and TypeScript requires those to be
+ * total over `CoupangIssuanceStage`, so a NEW stage now fails to compile until it is listed; the exhaustiveness
+ * test at the bottom of this block is what keeps this array itself in step.
+ */
 const ALL_STAGES: CoupangIssuanceStage[] = [
   "opening",
   "waiting_login",
+  "awaiting_wing_surface",
   "locating_open_api",
   "reaching_open_api",
+  "checkpoint_reveal_issuance_form",
   "checkpoint_confirm_purpose",
   "guiding_terms_consent",
   "checkpoint_before_issue",
@@ -81,6 +93,32 @@ describe("coupang issuance stages — step-status projection", () => {
   });
 });
 
+describe("coupang issuance stages — ALL_STAGES really is all of them", () => {
+  it("covers every stage in the union (a new stage cannot be added without being tested)", () => {
+    // The record literals in the two projection blocks above are `Record<CoupangIssuanceStage, string>`, so
+    // they are total by compilation. Comparing this array against one of them is what catches the OTHER half of
+    // the gap: a stage typed and mapped, but silently left out of the `it.each` list.
+    const mapped: Record<CoupangIssuanceStage, string> = {
+      opening: "",
+      waiting_login: "",
+      awaiting_wing_surface: "",
+      locating_open_api: "",
+      reaching_open_api: "",
+      checkpoint_reveal_issuance_form: "",
+      checkpoint_confirm_purpose: "",
+      guiding_terms_consent: "",
+      checkpoint_before_issue: "",
+      guiding_copy_keys: "",
+      return_to_sellerops: "",
+      guidance_complete: "",
+      target_not_found: "",
+      page_mismatch: "",
+      operator_aborted: "",
+    };
+    expect([...ALL_STAGES].sort()).toEqual(Object.keys(mapped).sort());
+  });
+});
+
 describe("coupang issuance stages — the WAITING_FOR_HUMAN invariant", () => {
   it("every WAITING_FOR_HUMAN stage projects an AWAITING_USER step (so a view can be built)", () => {
     for (const stage of ALL_STAGES) {
@@ -125,6 +163,31 @@ describe("coupang issuance stages — allowed commands", () => {
       const cmds = coupangIssuanceAllowedCommands(stage);
       expect(cmds).toContain("REQUEST_STEP_RECHECK");
       expect(cmds).not.toContain("PAUSE_RUN");
+    }
+  });
+
+  it("**an OBSERVED WAIT offers recheck too — a wait whose window elapses must not be a dead end**", () => {
+    // `awaiting_wing_surface` carries no blocker and clears itself, so it fell through to the automatic-stage
+    // branch, which omits `REQUEST_STEP_RECHECK`. A seller who needed longer than the surface-wait window (2FA,
+    // a password reset) was left with a run reporting RUNNING, no blocker, and nothing but CANCEL/manual: the
+    // command was rejected INVALID_FOR_STATE and the frontend was never offered the button. The park this stage
+    // replaced was recoverable.
+    const cmds = coupangIssuanceAllowedCommands("awaiting_wing_surface");
+    expect(cmds).toContain("REQUEST_STEP_RECHECK");
+    // Not a barrier: there is nothing to pause on, and a park does not offer it either.
+    expect(cmds).not.toContain("PAUSE_RUN");
+    expect(cmds).toContain("CANCEL_RUN");
+    expect(cmds).toContain("SWITCH_TO_MANUAL");
+  });
+
+  it("EVERY non-terminal stage can ask the runtime to look again", () => {
+    // The general form of the defect above, so the next stage added cannot repeat it in a different place. Only
+    // the two momentary automatic stages are exempt — nothing is resting there and the next effect is already
+    // in flight.
+    for (const stage of ALL_STAGES) {
+      if (isCoupangIssuanceTerminal(stage)) continue;
+      if (stage === "opening" || stage === "locating_open_api") continue;
+      expect(coupangIssuanceAllowedCommands(stage), stage).toContain("REQUEST_STEP_RECHECK");
     }
   });
 });

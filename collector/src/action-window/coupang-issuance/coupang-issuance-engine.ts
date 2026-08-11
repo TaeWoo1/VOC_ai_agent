@@ -40,6 +40,7 @@ import {
   coupangIssuanceStepMetaAt,
   coupangIssuanceStepPlan,
   isCoupangIssuanceBarrier,
+  isCoupangIssuanceObservedWait,
   isCoupangIssuancePark,
   isCoupangIssuanceTerminal,
   type CoupangIssuanceStage,
@@ -95,6 +96,13 @@ export function makeCoupangIssuanceClock(start = 1): CoupangIssuanceClock {
  */
 const HEX16 = /^[0-9a-f]{16}$/;
 
+/**
+ * The stages a surface probe is allowed to move. Every `PROBE` is issued from `opening` (`start` and the
+ * park/wait `recheck` both set it), and every surface-wait poll runs in one of the two waits — so anything else
+ * arriving here is a SECOND reader arriving after the first already advanced the run.
+ */
+const PROBE_ADVANCEABLE_STAGES: readonly CoupangIssuanceStage[] = ["opening", "waiting_login", "awaiting_wing_surface"];
+
 const TARGET_BARRIER = COUPANG_TARGET_BARRIER_STAGE;
 const TARGET_STEP: Readonly<Record<CoupangIssuanceTarget, number>> = {
   reach_open_api: 1,
@@ -121,7 +129,7 @@ export class CoupangIssuanceEngine {
   /** The control the current barrier/checkpoint rests on, so a recheck/resume re-guides the right section. */
   private currentTarget: CoupangIssuanceTarget | null = null;
   private targetSig: Partial<Record<CoupangIssuanceTarget, string>> = {};
-  private blockerCode: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT" | null = null;
+  private blockerCode: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT" | "SURFACE_SETTLE_TIMEOUT" | null = null;
   private blockerRecoverable = false;
   /** A pause is an overlay on a barrier, not a stage — the product's stage list is exactly 14. */
   private paused = false;
@@ -177,9 +185,13 @@ export class CoupangIssuanceEngine {
    *   <li><b>Checkpoint barrier</b> → "다음" advances it.</li>
    *   <li><b>reach_open_api barrier</b> → re-arm the navigation observation.</li>
    * </ul>
+   *
+   * <p>An OBSERVED WAIT takes the same path as a park. It is not one — nothing is blocked and the runtime is
+   * still looking — but "look again" means exactly the same thing there, and a recheck that resolved to `NONE`
+   * was the reason the wait had no way out once its window elapsed.
    */
   private recheck(): CoupangIssuanceEffect {
-    if (isCoupangIssuancePark(this.stage)) {
+    if (isCoupangIssuancePark(this.stage) || isCoupangIssuanceObservedWait(this.stage)) {
       if (this.currentTarget && isCoupangCheckpointTarget(this.currentTarget)) {
         const target = this.currentTarget;
         this.blockerCode = null;
@@ -241,6 +253,12 @@ export class CoupangIssuanceEngine {
    */
   onSurfaceProbed(probe: WingSurfaceProbe): CoupangIssuanceEffect {
     if (isCoupangIssuanceTerminal(this.stage)) return "NONE";
+    // ONLY a run that has not yet reached its first guided control may be advanced by a probe. Two readers can
+    // reach here at once — a surface-wait poll and a `REQUEST_STEP_RECHECK`'s `PROBE` — and without this the
+    // SECOND one re-ran the whole branch on a run the first had already advanced: `STEP_COMPLETED` for step 1
+    // emitted twice and two independent `{guide:"issue"}` chains armed on one target. The same target+stage
+    // re-check `advanceCheckpoint` has always done, applied to the probe path that was missing it.
+    if (!PROBE_ADVANCEABLE_STAGES.includes(this.stage)) return "NONE";
     if (!probe.ok || probe.blockerCode === "LOGIN_REQUIRED" || probe.pageCategory === "login") {
       // A wait, not a park: the seller logs in inside the WING window and the runtime notices by itself. It used
       // to need a `REQUEST_STEP_RECHECK` from the SellerOps tab, which is the tab they were told not to return to.
@@ -412,6 +430,34 @@ export class CoupangIssuanceEngine {
   }
 
   /**
+   * **The observed wait's window elapsed.** Nothing is watching WING any more, so the run must stop CLAIMING to
+   * be: an observed wait reports RUNNING with no blocker precisely because the runtime is looking on the
+   * seller's behalf, and once it has stopped, that reading is false.
+   *
+   * It converts to a recoverable `page_mismatch` park carrying `SURFACE_SETTLE_TIMEOUT` — "화면이 아직 준비되지
+   * 않았어요", which is what actually happened (ten minutes of readings, none of them a surface the tutorial
+   * recognized) rather than `UI_DRIFT`'s "화면이 바뀐 것 같아요", the misleading message this stage was created
+   * to stop showing a seller who simply had not logged in yet.
+   *
+   * **The seller's own 다시 확인 is the recovery, and deliberately the ONLY one.** Every other park restarts
+   * itself on a timer; this one does not, because it is reached *by* a watch running out. Restarting it would
+   * re-enter the same ten-minute watch, and a run nobody is sitting at would poll a page nobody is looking at
+   * for as long as the agent lives — the exact thing the watch is bounded to prevent. The button was missing
+   * here; that was the defect. It is present now, at this stage and throughout the wait before it.
+   *
+   * `waiting_login` expires to nothing on purpose: it is ALREADY a park with a blocker and a button, so there
+   * is nothing to convert and re-announcing it would just spam the frontend.
+   *
+   * Idempotent, and a no-op on any other stage: a poll that finishes after the run has already moved on must
+   * not park a healthy run.
+   */
+  onSurfaceWaitExpired(): CoupangIssuanceEffect {
+    if (isCoupangIssuanceTerminal(this.stage)) return "NONE";
+    if (!isCoupangIssuanceObservedWait(this.stage)) return "NONE";
+    return this.park("page_mismatch", "SURFACE_SETTLE_TIMEOUT");
+  }
+
+  /**
    * A drive effect threw — most often a navigation RACE: the seller's own page moved under an in-page
    * locate/highlight read. Not a failure; it PARKS recoverably on `page_mismatch` rather than leaving the run
    * idle with no barrier. Recovery is decided in {@link recheck}. Returns `CLEAR_HIGHLIGHT` so any half-applied
@@ -480,7 +526,7 @@ export class CoupangIssuanceEngine {
 
   private park(
     stage: "waiting_login" | "target_not_found" | "page_mismatch",
-    code: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT",
+    code: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT" | "SURFACE_SETTLE_TIMEOUT",
   ): CoupangIssuanceEffect {
     if (this.stage === stage && this.blockerCode === code) return "NONE";
     this.paused = false;

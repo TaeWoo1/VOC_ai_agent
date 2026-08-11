@@ -1080,4 +1080,42 @@ describe("the live guided-walk carrier is gated, and never downgrades silently",
     // ONE driver for the carrier's lifetime — a re-attach must reuse the seller's window, not open a second.
     expect(fn).toContain("createDriver: () => driver");
   });
+
+  it("**a window the seller CLOSES is forgotten** — the lazy driver is told, not just the run", () => {
+    // `LazyCoupangIssuanceDriver` documents "a closed window is FORGOTTEN", and nothing wired it. The inner
+    // `CoupangWingIssuanceDriver` resolved its own `whenSurfaceClosed` from the same event (that is how the run
+    // parks), but the LAZY driver kept handing every retry the dead page: `maybeRecoverPark` re-checked once a
+    // second for ten minutes and each one burned `settleSurface`'s poll and threw in `locateTarget`, instead of
+    // re-opening in the same persistent profile. `LazyImportDriver` has this wiring explicitly at its own boot.
+    const src = readFileSync(resolve(HERE, "../../../src/cli/local-agent.ts"), "utf8");
+    const from = src.indexOf("export function buildCoupangIssuanceLiveConfig");
+    const fn = src.slice(from, src.indexOf("\nexport function buildCoupangIssuanceConfig", from));
+    expect(fn).toContain('page.once("close"');
+    expect(fn).toContain("driver.markClosed()");
+    // Inside `open()`, so a RE-opened window gets its own handler rather than the first one being reused.
+    expect(fn.indexOf('page.once("close"')).toBeGreaterThan(fn.indexOf("open: async () =>"));
+  });
+
+  it("the walk's window is closed with the agent that opened it", () => {
+    // `isOpen()` / `close()` were dead code, so an orphaned dedicated Chrome outlived the stopped service and
+    // kept its persistent profile dir locked against the next boot.
+    const src = readFileSync(resolve(HERE, "../../../src/cli/local-agent.ts"), "utf8");
+    const shutdown = src.slice(src.indexOf("const guardedShutdown = createSignalShutdown("));
+    expect(shutdown.slice(0, 900)).toContain("coupangSurface");
+    expect(shutdown.slice(0, 900)).toContain(".close()");
+  });
+
+  it("**the live walk is one of the carriers the one-carrier-per-agent gate knows about**", () => {
+    // `awChannel` excluded reply / issuance / the coupang FIXTURE, but not the LIVE walk. On a non-production
+    // boot, `--action-window-coupang-issuance-live` plus `--dev-action-window-synthetic` left BOTH carriers
+    // defined and `createAgentBridge` threw at boot — a crash where the gate's whole purpose is a clean refusal.
+    const src = readFileSync(resolve(HERE, "../../../src/cli/local-agent.ts"), "utf8");
+    const line = src.split("\n").find((l) => l.includes("const awChannel ="));
+    expect(line).toBeTruthy();
+    for (const carrier of ["hostReply", "hostIssuance", "hostCoupangIssuance", "hostLiveWalk"]) {
+      expect(line, carrier).toContain(carrier);
+    }
+    // …and it must be DECIDED before it is used, or the exclusion reads `undefined`.
+    expect(src.indexOf("const hostLiveWalk =")).toBeLessThan(src.indexOf("const awChannel ="));
+  });
 });

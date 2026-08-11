@@ -644,8 +644,12 @@ const OVERLAY_STEP: Readonly<Record<CoupangIssuanceTarget, number>> = {
  * WING (no bounce back to the SellerOps tab per step). Every step is the SELLER's own act: SellerOps never
  * presses 발급 and never reads the Access Key / Secret Key / 업체코드. `reach_open_api` auto-advances on the
  * observed navigation (no button); every other step advances on the seller pressing THIS panel's button.
+ *
+ * **Exported so the frontend's copy can be PINNED to it.** `frontend/src/lib/actionWindow/copy.ts` claims to
+ * carry these strings verbatim; nothing asserted it, and three had already drifted back to the pre-auto-advance
+ * wording. `test/crossstack/coupang-issuance-fe-copy-parity.test.ts` is the assertion.
  */
-const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string>> = {
+export const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string>> = {
   reach_open_api: "WING에 로그인한 뒤 '오픈API 키 발급' 페이지로 직접 이동하세요. 도착하면 자동으로 다음 단계로 넘어갑니다.",
   issue: "표시된 'API Key 발급 받기' 버튼을 직접 누르세요. SellerOps는 대신 누르지 않습니다. 이 버튼은 키를 만들지 않고 사용 목적 선택 화면을 엽니다. 화면이 열리면 자동으로 넘어갑니다.",
   confirm_purpose: "사용 목적이 'OPEN API'로 되어 있는지 보시고(기본값이라 대개 그대로입니다), '확인'을 직접 누르세요. 이 버튼도 키를 만들지 않고 약관 동의 화면을 엽니다. 화면이 열리면 자동으로 넘어갑니다.",
@@ -677,6 +681,7 @@ export interface CoupangWingIssuanceDriverOptions {
  * constants so the engine's locate↔highlight anti-drift check (which requires the two sigs to match) still passes.
  */
 const REACH_OPEN_API_GUIDANCE_SIG = "c0a9b17ec0a9b17e";
+const RETURN_GUIDANCE_SIG = "5e11e40b5e11e40b";
 /**
  * **TEXT-GUIDED steps: the ones the tutorial guides but cannot highlight.**
  *
@@ -689,12 +694,24 @@ const REACH_OPEN_API_GUIDANCE_SIG = "c0a9b17ec0a9b17e";
  * No test caught it: the session and engine suites drive a fixture driver that answers `count: 1` for every
  * target, so the fixture stood one layer away from the thing it modelled. This constant is the repair, and it
  * promotes NOTHING — a text-guided step gets the guidance panel and its advance button, and no spotlight ring.
+ *
+ * **`reach_open_api` and `return` belong here too, and were left out.** Both are locator-less guidance in
+ * exactly the same sense — their sigs are synthetic constants, not derived from any element — but they kept a
+ * separate branch that mounted an ANCHORED overlay, i.e. the defect this map exists to fix:
+ *   - `return` followed the `credentials` step, whose `data-aw-target` is still on the Access Key row (nothing
+ *     clears a tag between steps), so the ring landed on the Access Key row while the panel read
+ *     `SellerOps로 돌아가기 7/7`;
+ *   - `reach_open_api` runs on a fresh window where no tag exists at all, so `mountOverlay` returned having
+ *     created NOTHING — and the branch answered `{count:1}` regardless, so the engine barriered on step 1 with
+ *     no on-page instruction rendered anywhere.
+ * One map, one branch: a guidance step clears the prior tag, mounts docked, and reports what actually mounted.
  */
 const TEXT_GUIDED_SIG: Readonly<Partial<Record<CoupangIssuanceTarget, string>>> = {
+  reach_open_api: REACH_OPEN_API_GUIDANCE_SIG,
   confirm_purpose: "b48e2f05b48e2f05",
   terms_consent: "16d9c7ba16d9c7ba",
+  return: RETURN_GUIDANCE_SIG,
 };
-const RETURN_GUIDANCE_SIG = "5e11e40b5e11e40b";
 
 /**
  * Has the surface painted anything readable? An ES5-plain STRING, like every other in-page script here
@@ -1040,12 +1057,9 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
   }
 
   async locateTarget(target: CoupangIssuanceTarget): Promise<LocateResult> {
-    // `reach_open_api` and `return` are GUIDANCE, not queried WING controls — each resolves to a fixed synthetic
-    // signature (reach = "go to the open-API page yourself"; return = "go back to SellerOps").
-    if (target === "reach_open_api") return { count: 1, sig: REACH_OPEN_API_GUIDANCE_SIG };
-    if (target === "return") return { count: 1, sig: RETURN_GUIDANCE_SIG };
-    // Text-guided: measured, not promoted. It resolves to a fixed synthetic signature exactly as the two
-    // guidance steps above do — the page is not queried, so there is nothing to find and nothing to miss.
+    // Text-guided (incl. `reach_open_api` and `return`, which are guidance rather than queried WING controls):
+    // measured, not promoted. It resolves to a fixed synthetic signature — the page is not queried, so there is
+    // nothing to find and nothing to miss.
     const guided = TEXT_GUIDED_SIG[target];
     if (guided) return { count: 1, sig: guided };
     if (!isWingHighlightTarget(target)) return { count: 0 };
@@ -1054,14 +1068,6 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
 
   async highlightTarget(target: CoupangIssuanceTarget): Promise<LocateResult> {
     const page = this.activePage();
-    if (target === "reach_open_api") {
-      await this.mountStepOverlay(page, "reach_open_api");
-      return { count: 1, sig: REACH_OPEN_API_GUIDANCE_SIG };
-    }
-    if (target === "return") {
-      await this.mountStepOverlay(page, "return");
-      return { count: 1, sig: RETURN_GUIDANCE_SIG };
-    }
     const guided = TEXT_GUIDED_SIG[target];
     if (guided) {
       // CLEAR THE PRIOR TAG FIRST. Live-confirmed 2026-08-10: without this the mount found the PREVIOUS step's

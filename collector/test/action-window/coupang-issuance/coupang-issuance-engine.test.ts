@@ -215,6 +215,70 @@ describe("coupang issuance engine — recoverable parks (never RUN_FAILED)", () 
     expect(eng.currentStage()).toBe("awaiting_wing_surface");
     expect(eng.events().map((e) => e.type)).not.toContain("RUN_FAILED");
   });
+
+  it("**an expired wait becomes a RECOVERABLE park, not a run that claims to still be watching**", () => {
+    const eng = engine();
+    eng.command({ type: "START_RUN", expectedRevision: 0 });
+    eng.onSurfaceProbed({ ok: true, pageCategory: "unknown" });
+    expect(eng.view().blocker).toBeUndefined(); // …while it IS watching
+
+    expect(eng.onSurfaceWaitExpired()).toBe("NONE");
+    // `SURFACE_SETTLE_TIMEOUT` ("화면이 아직 준비되지 않았어요"), not `UI_DRIFT` ("화면이 바뀐 것 같아요") — the
+    // message the observed wait exists to stop showing someone who was simply not there yet.
+    expect(eng.view().blocker).toEqual({ code: "SURFACE_SETTLE_TIMEOUT", recoverable: true });
+    expect(eng.view().status).toBe("WAITING_FOR_HUMAN");
+    expect(eng.view().allowedCommands).toContain("REQUEST_STEP_RECHECK");
+    // …and the recheck the frontend can now send re-probes from the top.
+    expect(eng.command({ type: "REQUEST_STEP_RECHECK", expectedRevision: eng.view().revision })).toEqual({
+      ok: true,
+      idempotent: false,
+      effect: "PROBE",
+    });
+  });
+
+  it("a recheck DURING the wait is accepted and re-probes (the button is offered, never needed)", () => {
+    const eng = engine();
+    eng.command({ type: "START_RUN", expectedRevision: 0 });
+    eng.onSurfaceProbed({ ok: true, pageCategory: "unknown" });
+    expect(eng.view().allowedCommands).toContain("REQUEST_STEP_RECHECK");
+    expect(eng.command({ type: "REQUEST_STEP_RECHECK", expectedRevision: eng.view().revision })).toEqual({
+      ok: true,
+      idempotent: false,
+      effect: "PROBE",
+    });
+  });
+
+  it("an expiry that arrives after the run moved on parks NOTHING", () => {
+    const eng = engine();
+    eng.command({ type: "START_RUN", expectedRevision: 0 });
+    eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" });
+    expect(eng.onSurfaceWaitExpired()).toBe("NONE");
+    expect(eng.currentStage()).toBe("locating_open_api");
+    expect(eng.view().blocker).toBeUndefined();
+  });
+
+  it("a LOGIN wait expires to nothing — it is already a park with a blocker and a button", () => {
+    const eng = engine();
+    eng.command({ type: "START_RUN", expectedRevision: 0 });
+    eng.onSurfaceProbed({ ok: true, pageCategory: "login" });
+    const before = eng.events().length;
+    expect(eng.onSurfaceWaitExpired()).toBe("NONE");
+    expect(eng.currentStage()).toBe("waiting_login");
+    expect(eng.events()).toHaveLength(before); // no re-announcement
+  });
+
+  it("**a SECOND probe of the same surface advances NOTHING** — two readers, one advance", () => {
+    // Two callers can reach `onSurfaceProbed` at once: a surface-wait poll and a `REQUEST_STEP_RECHECK`'s
+    // `PROBE`. Without this guard the second re-ran the whole branch on a run the first had already advanced —
+    // `STEP_COMPLETED` for step 1 twice and two independent `{guide:"issue"}` chains on one target.
+    const eng = engine();
+    eng.command({ type: "START_RUN", expectedRevision: 0 });
+    expect(eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" })).toEqual({ guide: "issue" });
+    const after = eng.events().length;
+    expect(eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" })).toBe("NONE");
+    expect(eng.events()).toHaveLength(after);
+    expect(eng.events().filter((e) => e.type === "STEP_COMPLETED")).toHaveLength(1);
+  });
 });
 
 describe("coupang issuance engine — contract validity + NO appBranch", () => {

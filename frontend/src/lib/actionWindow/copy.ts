@@ -106,10 +106,15 @@ const ISSUANCE_STEP_DETAIL: Record<string, string> = {
   // the WING-resident panel copy an operator read on screen and confirmed correct during the 2026-08-10
   // dev-host guided walk. Reused rather than rewritten: two places wording the same step differently is how
   // the tutorial and the runtime drift, and this copy is the half that has actually been seen live.
+  //
+  // The claim is ENFORCED, not just stated: `collector/test/crossstack/coupang-issuance-fe-copy-parity.test.ts`
+  // compares these five strings character-for-character against `OPERATOR_STEP_LABELS`. It exists because the
+  // comment was already false — three of them were the PRE-auto-advance wording, so the SellerOps tab told a
+  // seller to press a button that had stopped being the advance mechanism. Edit either side and both must move.
   "actionWindow.coupangIssuance.reachOpenApi":
-    "WING 홈에서 '오픈API 키 발급' 페이지로 직접 이동하세요. 이동을 감지하면 자동으로 다음 단계로 넘어갑니다.",
+    "WING에 로그인한 뒤 '오픈API 키 발급' 페이지로 직접 이동하세요. 도착하면 자동으로 다음 단계로 넘어갑니다.",
   "actionWindow.coupangIssuance.revealForm":
-    "표시된 'API Key 발급 받기' 버튼을 직접 누르세요. SellerOps는 대신 누르지 않습니다. 이 버튼은 키를 만들지 않고 사용 목적 선택 화면을 엽니다. 화면이 열리면 아래 버튼을 누르세요.",
+    "표시된 'API Key 발급 받기' 버튼을 직접 누르세요. SellerOps는 대신 누르지 않습니다. 이 버튼은 키를 만들지 않고 사용 목적 선택 화면을 엽니다. 화면이 열리면 자동으로 넘어갑니다.",
   "actionWindow.coupangIssuance.confirmPurpose":
     "사용 목적이 'OPEN API'로 되어 있는지 보시고(기본값이라 대개 그대로입니다), '확인'을 직접 누르세요. 이 버튼도 키를 만들지 않고 약관 동의 화면을 엽니다. 화면이 열리면 자동으로 넘어갑니다.",
   "actionWindow.coupangIssuance.termsConsent":
@@ -119,7 +124,7 @@ const ISSUANCE_STEP_DETAIL: Record<string, string> = {
   "actionWindow.coupangIssuance.copyKeys":
     "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요. SellerOps는 값을 읽지 않습니다. 복사했으면 아래 버튼을 누르세요.",
   "actionWindow.coupangIssuance.return":
-    "세 값을 복사했다면 SellerOps로 돌아와 주세요. 안내가 끝나면 연결 정보 입력 화면으로 이동합니다.",
+    "이제 아래 버튼을 눌러 SellerOps로 돌아가세요. 돌아가면 복사한 키를 입력해 연결을 마칠 수 있어요.",
 };
 
 /** The FULL per-step instruction for a guided issuance step, or null when the step has no detail mapping. */
@@ -277,9 +282,13 @@ const V2_ONLY_BLOCKER_VIEW: Record<string, BlockerView> = {
     title: "시작이 지연되고 있어요",
     body: "잠시 기다린 뒤 '다시 확인'을 눌러 주세요.",
   },
+  // Channel-NEUTRAL wording. It used to name 리뷰 관리 화면, which was true of the only run that raised it
+  // (the NAVER guided import) and wrong for the Coupang guided walk, which now raises it when its watch for a
+  // recognizable WING surface runs out. A blocker card that names the wrong screen sends the seller looking for
+  // a different problem, so this says the one thing true of both: the screen is not ready yet, look again.
   SURFACE_SETTLE_TIMEOUT: {
     title: "화면이 아직 준비되지 않았어요",
-    body: "판매자센터의 리뷰 관리 화면이 모두 뜬 뒤 '다시 확인'을 눌러 주세요.",
+    body: "판매자센터 화면이 모두 뜬 뒤 '다시 확인'을 눌러 주세요.",
   },
   GUIDANCE_PACK_REJECTED: {
     title: "안내를 불러오지 못했어요",

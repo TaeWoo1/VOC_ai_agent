@@ -361,6 +361,18 @@ export function buildCoupangIssuanceLiveConfig(): AgentCoupangIssuanceConfig {
       } else {
         log("aw_coupang_walk_landing_refused", { reason: screened.reason }, "warn");
       }
+      // **The seller closing their own window must FORGET it** — the property `LazyCoupangIssuanceDriver`
+      // documents and, until this wiring, did not have. `CoupangWingIssuanceDriver` resolves its own
+      // `whenSurfaceClosed` from the same event (that is how the run parks), but nothing told the LAZY driver,
+      // so it kept handing every retry the dead page: `maybeRecoverPark` re-checked once a second for ten
+      // minutes and each one burned `settleSurface`'s poll and threw in `locateTarget` instead of re-opening in
+      // the same persistent profile. `LazyImportDriver` gets this wiring explicitly at its own boot; this is the
+      // sibling that was left standing. `driver` is captured, not read, at closure-creation time — `open()`
+      // cannot run before the `const` it belongs to is initialized.
+      page.once("close", () => {
+        log("aw_coupang_walk_surface_closed", {});
+        driver.markClosed();
+      });
       return { context, page };
     },
   });
@@ -1181,16 +1193,15 @@ async function main(): Promise<void> {
   const hostReply = resolveReplySubmissionChannel(args, process.env);
   const hostIssuance = !hostReply && resolveApiIssuanceChannel(args, process.env);
   const hostCoupangIssuance = !hostReply && !hostIssuance && resolveCoupangIssuanceChannel(args, process.env);
-  const awChannel = hostReply || hostIssuance || hostCoupangIssuance ? null : resolveActionWindowChannel(args, process.env);
-  const actionWindow: AgentActionWindowConfig | undefined = awChannel
-    ? buildActionWindowConfig(awChannel, args, process.env)
-    : undefined;
-  const replySubmission: AgentReplySubmissionConfig | undefined = hostReply ? buildReplySubmissionConfig() : undefined;
-  const apiIssuance: AgentApiIssuanceConfig | undefined = hostIssuance ? buildApiIssuanceConfig() : undefined;
   // The LIVE guided walk takes precedence over the dev fixture when its binding is complete; when the flag is
   // present but the binding is not, the carrier is NOT hosted and the refusal is logged. Never a silent
   // downgrade to the fixture: the operator granted a live walk and a simulation that looks like one is worse
   // than nothing being hosted at all.
+  //
+  // Decided BEFORE `awChannel`, because it is one of the carriers the "one carrier per agent" exclusion below
+  // has to know about. It was the one carrier left out of it: `--action-window-coupang-issuance-live` beside
+  // `--dev-action-window-synthetic` left BOTH defined and `createAgentBridge` threw at boot, which is a crash
+  // where the gate's whole point is a clean refusal.
   const liveWalkRefusal = args.includes(ACTION_WINDOW_COUPANG_ISSUANCE_LIVE_FLAG)
     // The REPOSITORY root, not the collector package — `verifyRepoIdentity` compares this by realpath against
     // git's own toplevel, so handing it a subdirectory fails every time and looks like a decoy repo.
@@ -1200,11 +1211,21 @@ async function main(): Promise<void> {
   if (args.includes(ACTION_WINDOW_COUPANG_ISSUANCE_LIVE_FLAG) && !hostLiveWalk) {
     log("aw_coupang_live_walk_refused", { refusal: liveWalkRefusal ?? "unknown" }, "warn");
   }
+  const awChannel = hostReply || hostIssuance || hostCoupangIssuance || hostLiveWalk ? null : resolveActionWindowChannel(args, process.env);
+  const actionWindow: AgentActionWindowConfig | undefined = awChannel
+    ? buildActionWindowConfig(awChannel, args, process.env)
+    : undefined;
+  const replySubmission: AgentReplySubmissionConfig | undefined = hostReply ? buildReplySubmissionConfig() : undefined;
+  const apiIssuance: AgentApiIssuanceConfig | undefined = hostIssuance ? buildApiIssuanceConfig() : undefined;
   const coupangIssuance: AgentCoupangIssuanceConfig | undefined = hostLiveWalk
     ? buildCoupangIssuanceLiveConfig()
     : hostCoupangIssuance
       ? buildCoupangIssuanceConfig()
       : undefined;
+  // The one thing agent shutdown could leave behind: the guided walk's dedicated Chrome. `createDriver()` hands
+  // back the SAME lazy driver the session uses (one per carrier lifetime), so this is a handle to the seller's
+  // actual window rather than a second one — and `close()` is a no-op on a driver that never launched.
+  const coupangSurface = hostLiveWalk ? coupangIssuance?.createDriver() : undefined;
   // Approval-presenter wiring lives HERE and only here — never as a `createAgentBridge` default (see
   // `decideApprovalPresenter`). `none` means no human channel exists on this host, so pairing fails closed.
   const approvalKind = decideApprovalPresenter(process.env, process.platform);
@@ -1241,6 +1262,12 @@ async function main(): Promise<void> {
   // signal-driven path (createSignalShutdown makes a double signal a no-op).
   const guardedShutdown = createSignalShutdown(async () => {
     clearSignals(); // never leave a stale human-completed signal behind
+    // Close the guided walk's window with the agent that opened it. An orphaned dedicated Chrome outlives the
+    // service the seller stopped and keeps its persistent profile dir locked against the next boot.
+    if (coupangSurface instanceof LazyCoupangIssuanceDriver && coupangSurface.isOpen()) {
+      log("aw_coupang_walk_surface_closing", {});
+      await coupangSurface.close().catch(() => undefined);
+    }
     bridge.markAgentStopping();
     const report = await startup.shutdown();
     console.log(JSON.stringify({ event: "SHUTDOWN", ...report }));

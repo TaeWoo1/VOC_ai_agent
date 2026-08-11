@@ -39,6 +39,8 @@ export class CoupangIssuanceGuidanceSession {
   private readonly surfaceWaitTimeoutMs: number;
   /** At most ONE park-recovery loop at a time — several would each issue their own recheck. */
   private recovering = false;
+  /** At most ONE surface-wait loop at a time — several would each probe and each advance the run. */
+  private awaitingSurface = false;
 
   private started = false;
   private publishedSeq = 0;
@@ -169,25 +171,25 @@ export class CoupangIssuanceGuidanceSession {
         return this.drive(next);
       }
       case "AWAIT_SURFACE": {
-        // Keep looking, inside WING, until the seller gets somewhere we recognize. This is the loop that lets a
-        // run start on a blank tab and survive a login without anyone touching the SellerOps tab.
-        //
-        // The engine's wait states are idempotent, so re-reading the same page emits nothing; only a CHANGE
-        // produces a transition. Bounded by the same seated-operator window every other observation uses — an
-        // unbounded loop would outlive the run and keep polling a page nobody is looking at.
-        // Counted in POLLS, not in accumulated milliseconds: a zero-delay cadence (which tests use, and which a
-        // caller could pass) would advance an elapsed-time accumulator by zero and loop forever.
-        const maxPolls = Math.max(1, Math.ceil(this.surfaceWaitTimeoutMs / Math.max(1, this.surfaceWaitPollMs)));
-        for (let i = 0; i < maxPolls; i++) {
-          if (this.engine.isPaused() || isCoupangIssuanceTerminal(this.engine.currentStage())) return;
-          await new Promise<void>((resolve) => setTimeout(resolve, this.surfaceWaitPollMs));
-          if (this.engine.isPaused() || isCoupangIssuanceTerminal(this.engine.currentStage())) return;
-          const again = await this.driver.probeSurface();
-          const next = this.engine.onSurfaceProbed(again);
-          this.publishState();
-          if (next !== "AWAIT_SURFACE") return this.drive(next);
+        // SINGLE-FLIGHT, like `recovering` already does for park recovery. `waiting_login` is a park, so while
+        // one loop polls the FE is offered `REQUEST_STEP_RECHECK`; pressing it re-probed, read login again, and
+        // asked for a SECOND loop beside the first. Both then reported the issuance page before either narrowed
+        // the stage — duplicate `STEP_COMPLETED`, two `{guide:"issue"}` chains, two observers on one target.
+        // (The engine's own probe guard now stops the duplicate advance; this stops the duplicate WATCHER.)
+        if (this.awaitingSurface) return;
+        this.awaitingSurface = true;
+        let next: CoupangIssuanceEffect;
+        try {
+          next = await this.awaitSurface();
+        } finally {
+          this.awaitingSurface = false;
         }
-        return;
+        // Driven OUTSIDE the single-flight window, so a chain that comes back through here is not refused by the
+        // loop that is unwinding to start it. `NONE` ends the chain here rather than falling into
+        // `maybeRecoverPark`: the watch has just STOPPED, and re-entering it on a timer is what the bound exists
+        // to prevent (see `onSurfaceWaitExpired`).
+        if (isNoop(next)) return;
+        return this.drive(next);
       }
       case "CLEAR_HIGHLIGHT": {
         await this.driver.clearHighlight();
@@ -203,6 +205,38 @@ export class CoupangIssuanceGuidanceSession {
         this.maybeRecoverPark();
         return;
     }
+  }
+
+  /**
+   * Keep looking, inside WING, until the seller gets somewhere we recognize. This is the loop that lets a run
+   * start on a blank tab and survive a login without anyone touching the SellerOps tab.
+   *
+   * The engine's wait states are idempotent, so re-reading the same page emits nothing; only a CHANGE produces a
+   * transition. Bounded by the same seated-operator window every other observation uses — an unbounded loop
+   * would outlive the run and keep polling a page nobody is looking at.
+   * Counted in POLLS, not in accumulated milliseconds: a zero-delay cadence (which tests use, and which a caller
+   * could pass) would advance an elapsed-time accumulator by zero and loop forever.
+   *
+   * Returns the effect to drive AFTER the watch ends — driven by the caller, outside the single-flight window,
+   * so a chain that comes back through here is not refused by the loop that is unwinding to start it.
+   */
+  private async awaitSurface(): Promise<CoupangIssuanceEffect> {
+    const maxPolls = Math.max(1, Math.ceil(this.surfaceWaitTimeoutMs / Math.max(1, this.surfaceWaitPollMs)));
+    for (let i = 0; i < maxPolls; i++) {
+      if (this.engine.isPaused() || isCoupangIssuanceTerminal(this.engine.currentStage())) return "NONE";
+      await new Promise<void>((resolve) => setTimeout(resolve, this.surfaceWaitPollMs));
+      if (this.engine.isPaused() || isCoupangIssuanceTerminal(this.engine.currentStage())) return "NONE";
+      const again = await this.driver.probeSurface();
+      const next = this.engine.onSurfaceProbed(again);
+      this.publishState();
+      if (next !== "AWAIT_SURFACE") return next;
+    }
+    // The window is over and NOTHING is watching WING any more. Returning here left the run reporting RUNNING
+    // with no blocker, no recheck offered and no recovery loop — the one state on this walk a seller could not
+    // get out of. Hand it to the engine, which converts the wait into a recoverable park.
+    const expired = this.engine.onSurfaceWaitExpired();
+    this.publishState();
+    return expired;
   }
 
   /**
@@ -300,7 +334,15 @@ export class CoupangIssuanceGuidanceSession {
       if (!outcome.ok) return;
       this.publishState();
       if ("effect" in outcome && !isNoop(outcome.effect)) {
-        await this.drive(outcome.effect);
+        // Through `onDriveError`, NOT bare. Self-recovery exists FOR the navigation race, so a locate that
+        // throws here is the expected case — and `maybeRecoverPark` swallows what escapes this loop, so a bare
+        // await meant that throw ended the recovery silently: no `onDriveFault`, no published state, and
+        // nothing to restart it (this loop only starts at the end of a drive chain, and this WAS that chain).
+        try {
+          await this.drive(outcome.effect);
+        } catch (e) {
+          await this.onDriveError(e);
+        }
         // The drive either recovered the run or parked it again; either way the loop's own check decides.
       }
     }

@@ -166,6 +166,18 @@ export const APPROVAL_ACTIONS = [
   // checkboxes have no accessible name at all, so the alternative to measuring the pairing is inventing it.
   // Reads no `checked`: which box the seller ticked is not a thing this records.
   "CONSENT_BLOCK_CENSUS",
+  // ONE navigation, at window open, to the seller's own WING landing — and never again. Until this member
+  // existed the enum had NO navigation action at all, so the guided walk's `agentNavigations: 1` was disclosed
+  // in prose while the machine-checkable list the approval gate validates still described a run that navigates
+  // nothing. Deliberately narrow: it is a LANDING, not a route — a phase that drives the seller through screens
+  // is a different capability and would need its own member.
+  "NAVIGATE_TO_SELLER_LANDING_ONCE",
+  // Read whether the seller has finished consenting: ONE aggregate boolean, computed page-side as the
+  // conjunction of the two consent boxes. Which box is ticked never crosses the boundary, nothing is stored,
+  // transmitted or logged, and SellerOps still never ticks a box or reads the terms. It is nonetheless a
+  // `checked` read, and three census members in this same enum explicitly promise they do NOT read `checked` —
+  // so a run that does has to say so HERE, not only in `sellerConsentObserved`.
+  "OBSERVE_CONSENT_COMPLETE_AGGREGATE",
 ] as const;
 export type ApprovalAction = (typeof APPROVAL_ACTIONS)[number];
 
@@ -641,12 +653,21 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     // There is no action here for pressing anything: every marketplace act is the seller's. The one that
     // creates the key — `약관 동의 및 Key 발급받기` — is the last checkpoint's subject and is never pressed by
     // this run, which is stated in the operation text because a capability list cannot express a refusal.
+    //
+    // The last two are what this run GAINED and had gone on declaring without: it navigates once to the
+    // seller's own WING landing at window open, and it reads the aggregate "both consent boxes ticked" boolean
+    // to advance step 4. Both were disclosed in prose (`agentNavigations`, `sellerConsentObserved`) while this
+    // list — the one the approval gate machine-checks — still described a strictly narrower run than the one
+    // that executes. That gap is the recurring manifest-honesty defect on this workstream, and prose on one
+    // side of a validated list has never closed it.
     capableActions: [
       "OPEN_DEDICATED_WINDOW",
       "WAIT_OPERATOR_LOGIN_NAV",
       "CLASSIFY_SANITIZED_PAGE_CATEGORY",
       "HIGHLIGHT_REAL_CONTROL",
       "OBSERVE_USER_CLICK_TRANSITION",
+      "NAVIGATE_TO_SELLER_LANDING_ONCE",
+      "OBSERVE_CONSENT_COMPLETE_AGGREGATE",
     ],
     allowsHighlight: true,
     mode: "READ_ONLY",

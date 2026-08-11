@@ -150,11 +150,29 @@ export const COUPANG_ISSUANCE_BARRIER_STAGES: readonly CoupangIssuanceStage[] = 
  */
 export const COUPANG_ISSUANCE_PARK_STAGES: readonly CoupangIssuanceStage[] = ["waiting_login", "target_not_found", "page_mismatch"];
 
+/**
+ * **The OBSERVED WAITS — the runtime is watching WING, and the seller is not blocked on anything.**
+ *
+ * They carry no blocker and clear themselves, so they are deliberately NOT parks. But "clears itself" is only
+ * true while something is still watching: the wait is bounded by a seated-operator window, and when that window
+ * expires the run has to stay recoverable. It did not — `awaiting_wing_surface` fell through to the
+ * automatic-stage command list, which omits `REQUEST_STEP_RECHECK`, so a seller who needed longer than the
+ * window (2FA, a password reset) was left in a run reporting RUNNING with no blocker and no way to ask again.
+ * The park this stage replaced was recoverable; this list is what makes the wait recoverable too.
+ *
+ * `waiting_login` is an observed wait as well, but it is listed among the PARKS (it carries a `LOGIN_REQUIRED`
+ * blocker), and the two branches offer the same commands, so it is not repeated here.
+ */
+export const COUPANG_ISSUANCE_OBSERVED_WAIT_STAGES: readonly CoupangIssuanceStage[] = ["awaiting_wing_surface"];
+
 export function isCoupangIssuanceBarrier(stage: CoupangIssuanceStage): boolean {
   return COUPANG_ISSUANCE_BARRIER_STAGES.includes(stage);
 }
 export function isCoupangIssuancePark(stage: CoupangIssuanceStage): boolean {
   return COUPANG_ISSUANCE_PARK_STAGES.includes(stage);
+}
+export function isCoupangIssuanceObservedWait(stage: CoupangIssuanceStage): boolean {
+  return COUPANG_ISSUANCE_OBSERVED_WAIT_STAGES.includes(stage);
 }
 export function isCoupangIssuanceTerminal(stage: CoupangIssuanceStage): boolean {
   return COUPANG_ISSUANCE_TERMINAL_STAGES.includes(stage);
@@ -282,10 +300,14 @@ export function coupangIssuanceStageToStepStatus(stage: CoupangIssuanceStage): S
  * seller does all of that in their own window.
  *
  * <p>`PAUSE_RUN` is offered at the seller barriers but NOT at the parks (a park recovers only by re-probing).
+ *
+ * <p>An OBSERVED WAIT gets the park's list for the same reason: the runtime is looking by itself, so the button
+ * is never NEEDED — but the seller must always be able to say "look again", or a wait whose window has elapsed
+ * is a dead end.
  */
 export function coupangIssuanceAllowedCommands(stage: CoupangIssuanceStage): readonly CommandType[] {
   if (isCoupangIssuanceTerminal(stage)) return [];
-  if (isCoupangIssuancePark(stage)) {
+  if (isCoupangIssuancePark(stage) || isCoupangIssuanceObservedWait(stage)) {
     return ["REQUEST_STEP_RECHECK", "CANCEL_RUN", "SWITCH_TO_MANUAL", "SET_GUIDANCE_ENABLED", "FIND_CURRENT_STEP"];
   }
   if (isCoupangIssuanceBarrier(stage)) {

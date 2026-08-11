@@ -54,14 +54,22 @@ function loopback() {
   };
 }
 
-function build(script: CoupangIssuanceFixtureScript = {}) {
+function build(script: CoupangIssuanceFixtureScript = {}, waitOpts?: { surfaceWaitPollMs?: number; surfaceWaitTimeoutMs?: number }) {
   const io = loopback();
   const engine = new CoupangIssuanceEngine({ runId: RUN_ID, channelCode: "coupang" }, { clock: makeCoupangIssuanceClock() });
   const driver = new CoupangIssuanceFixtureDriver(script);
-  const session = new CoupangIssuanceGuidanceSession(engine, driver, io.transport, { rearmDelayMs: 1, surfaceWaitPollMs: 0, surfaceWaitTimeoutMs: 20 });
+  const session = new CoupangIssuanceGuidanceSession(engine, driver, io.transport, {
+    rearmDelayMs: 1,
+    surfaceWaitPollMs: 0,
+    surfaceWaitTimeoutMs: 20,
+    ...waitOpts,
+  });
   session.attach();
   return { io, engine, driver, session };
 }
+
+/** One macrotask. Lets a test observe the run MID-watch, which `whenSettled` by definition cannot. */
+const tick = (): Promise<void> => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 function startRun(io: ReturnType<typeof loopback>, expectedRevision = 0) {
   io.send({
@@ -226,6 +234,24 @@ describe("coupang issuance session — TARGET RE-FIND after a navigation race", 
     expect(driver.calls.filter((c) => c === "probeSurface").length).toBe(2);
   });
 
+  it("**a throw DURING self-recovery reaches the engine — the recovery loop is not silently ended**", async () => {
+    // TWO races on the same locate: the first parks, and the second happens inside the self-recovery drive.
+    // `maybeRecoverPark` swallows whatever escapes its loop, and `recoverPark` awaited `this.drive(...)` bare
+    // rather than through `onDriveError` — so the second throw ended the loop with `onDriveFault` never called,
+    // no state published, and nothing left to restart it (this loop only starts at the END of a drive chain,
+    // and that chain WAS this one). The run would sit parked forever. The navigation race is the very thing
+    // this path exists for, so it is the one throw that must not be dropped.
+    const { io, engine, driver, session } = build({ locateThrows: { confirm_purpose: 2 } });
+    startRun(io);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("guidance_complete");
+    // Three attempts: the two that raced and the one that landed.
+    expect(driver.calls.filter((c) => c === "locate:confirm_purpose").length).toBeGreaterThanOrEqual(3);
+    expect(io.eventTypes()).not.toContain("RUN_FAILED");
+    // The second fault was PUBLISHED, not swallowed — the frontend saw the park both times.
+    expect(io.blockers().filter((b) => b.code === "UI_DRIFT").length).toBeGreaterThanOrEqual(2);
+  });
+
   it("settles the surface before EVERY locate (a guide never locates a still-navigating page)", async () => {
     const { io, engine, driver, session } = build();
     startRun(io);
@@ -272,12 +298,15 @@ describe("coupang issuance session — recoverable parks each recover via REQUES
   });
 
   it("a wrong reach landing WAITS and re-probes itself — no re-check from the SellerOps tab", async () => {
-    const { io, engine, session } = build({ reachLanding: { ok: true, pageCategory: "unknown" } });
+    const { io, session } = build({ reachLanding: { ok: true, pageCategory: "unknown" } });
     startRun(io);
     await session.whenSettled();
-    // A wait, not a park: no blocker is raised, nothing asks the seller to do anything, and the run keeps
-    // re-reading WING until they get to the issuance page.
-    expect(engine.currentStage()).toBe("awaiting_wing_surface");
+    // A wait, not a park: no blocker is raised while it watches, nothing asks the seller to do anything, and the
+    // run keeps re-reading WING. Asserted on the VIEWS rather than the final stage, because this harness runs a
+    // 20 ms watch to keep the suite deterministic, so `whenSettled` necessarily returns after it has elapsed.
+    expect(io.views().some((v) => v.status === "RUNNING" && v.blocker === undefined)).toBe(true);
+    // The old park's message — "화면이 바뀐 것 같아요" — is what this stage exists to stop showing a seller who is
+    // merely still on their way. It must not be raised, not while waiting and not on expiry.
     expect(io.blockers()).not.toContainEqual({ code: "UI_DRIFT", recoverable: true });
     expect(io.eventTypes()).not.toContain("RUN_FAILED");
   });
@@ -390,11 +419,80 @@ describe("coupang issuance session — observed waits recover inside WING", () =
   });
 
   it("holds no blocker while merely waiting — 'not there yet' is not drift", async () => {
+    const { io, session } = build({ probeSequence: [BLANK] });
+    startRun(io);
+    await session.whenSettled();
+    // Every view published WHILE the watch ran reports RUNNING and carries no blocker — the seller is asked for
+    // nothing. (The final view is the expiry park; that is the test below.)
+    const whileWaiting = io.views().filter((v) => v.status === "RUNNING");
+    expect(whileWaiting.length).toBeGreaterThan(0);
+    for (const v of whileWaiting) expect(v.blocker).toBeUndefined();
+  });
+
+  it("**the wait is not a dead end when its window elapses — it parks RECOVERABLY**", async () => {
+    // The defect this replaces: the loop was bounded and simply `return`ed. `awaiting_wing_surface` is
+    // deliberately not a park stage, so nothing restarted it AND the automatic-stage command list omits
+    // `REQUEST_STEP_RECHECK` — a seller who needed longer than the window (2FA, a password reset) was left in a
+    // run reporting RUNNING with no blocker and nothing to press. The park it replaced was recoverable.
     const { engine, io, session } = build({ probeSequence: [BLANK] });
     startRun(io);
     await session.whenSettled();
-    expect(engine.currentStage()).toBe("awaiting_wing_surface");
-    expect(engine.view().blocker).toBeUndefined();
+
+    const view = io.lastView()!;
+    expect(view.status).toBe("WAITING_FOR_HUMAN");
+    // "화면이 아직 준비되지 않았어요" — what actually happened. NOT `UI_DRIFT`, whose "화면이 바뀐 것 같아요" is the
+    // message this stage was created to stop showing someone who was simply not there yet.
+    expect(view.blocker).toEqual({ code: "SURFACE_SETTLE_TIMEOUT", recoverable: true });
+    expect(view.allowedCommands).toContain("REQUEST_STEP_RECHECK");
+    expect(io.eventTypes()).not.toContain("RUN_FAILED");
+    expect(engine.currentStage()).toBe("page_mismatch");
+  });
+
+  it("…and that recheck actually re-probes and drives the run on", async () => {
+    // Recoverable has to mean recovered, not just labelled: the seller presses 다시 확인, the surface is read
+    // again, and the walk proceeds from wherever they now are. A ONE-poll watch, so the expiry park is reached
+    // while the fixture still has an unread `ISSUANCE` left for the recheck's own probe.
+    const { engine, io, session } = build({ probeSequence: [BLANK, BLANK, ISSUANCE] }, { surfaceWaitPollMs: 1, surfaceWaitTimeoutMs: 1 });
+    startRun(io);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("page_mismatch");
+
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("guidance_complete");
+    expect(io.lastView()?.blocker).toBeUndefined();
+  });
+
+  it("**a SECOND surface watch is never started beside the first**", async () => {
+    // `waiting_login` IS a park, so while the watch polls the FE is offered `REQUEST_STEP_RECHECK`. Pressing it
+    // re-probed → login again → a second watch, alive beside the first. When the seller then reached the
+    // issuance page BOTH reported it before either narrowed the stage: `STEP_COMPLETED` for step 1 twice, two
+    // `{guide:"issue"}` chains, duplicate STEP_READY / HUMAN_ACTION_REQUIRED / TARGET_HIGHLIGHTED, and two
+    // observers on one target.
+    //
+    // Reproduced by sending the recheck MID-watch (the only moment it can happen), so this cannot pass by the
+    // first watch having quietly ended first.
+    const { engine, io, session } = build(
+      { probeSequence: [LOGIN, LOGIN, LOGIN, LOGIN, ISSUANCE] },
+      { surfaceWaitTimeoutMs: 500 },
+    );
+    startRun(io);
+    for (let i = 0; i < 50 && engine.currentStage() !== "waiting_login"; i++) await tick();
+    expect(engine.currentStage()).toBe("waiting_login");
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision, "midwatch");
+    // The command must have been ACCEPTED, or this test would pass by never reproducing the race at all.
+    expect(io.sent.filter((f) => f.kind === "aw_command_result").map((f) => f as unknown as { commandId: string; accepted: boolean })).toContainEqual({
+      kind: "aw_command_result",
+      commandId: "midwatch",
+      accepted: true,
+    });
+    await session.whenSettled();
+
+    // Whatever the interleaving, step 1 completes ONCE and each step is highlighted at most once.
+    const completions = io.events().filter((e) => e.type === "STEP_COMPLETED" && e.payload.stepId === "aw.coupang_issuance_reach_open_api");
+    expect(completions).toHaveLength(1);
+    const highlights = io.events().filter((e) => e.type === "TARGET_HIGHLIGHTED").map((e) => e.payload.stepId);
+    expect(highlights.length).toBe(new Set(highlights).size);
   });
 
   it("waits through a login and picks the run up afterwards, with no command from the frontend", async () => {

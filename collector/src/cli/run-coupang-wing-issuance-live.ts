@@ -108,7 +108,6 @@ export const COUPANG_WING_GUIDED_ISSUANCE_WALK_PHASE = "COUPANG_WING_GUIDED_ISSU
  * again, and the guard test holds the count to exactly this.
  */
 export const COUPANG_WING_GUIDED_WALK_AGENT_NAVIGATIONS = 1 as const;
-  "approval-manifest gate, no phase binding and no repo-identity check";
 
 async function main(): Promise<void> {
   banner();
