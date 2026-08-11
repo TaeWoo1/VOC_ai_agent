@@ -304,7 +304,9 @@ if [ -z "$TREE_DIRTY" ]; then
     "measured structural pairing" \
     "'OPEN API' is the DEFAULT purpose option" \
     "You read the two consent texts and decide" \
-    "That control CREATES THE KEY" \
+    "It does NOT create the key" \
+    "refuted on 2026-08-12" \
+    "No apparatus has ever read that screen" \
     "DO NOT PRESS IT in this run" \
     "separate phase, with its own manifest and its own grant" \
     "no connect-test, no sync, no upload"
@@ -327,12 +329,20 @@ if [ -z "$TREE_DIRTY" ]; then
   # it and this asserts each is printed. One fragment per sentence, none spanning a wrapped output line.
   KOREAN_OK=1
   for phrase in \
-    "여기서 실제로 키가 생성됩니다." \
-    "'약관 동의 및 Key 발급받기' 버튼을 직접 누르세요" \
-    "SellerOps는 이" \
-    "버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다."
+    "'약관 동의 및 Key 발급받기'를 직접 누르세요" \
+    "버튼을 절대 누르지 않고, 자동으로" \
+    "이 버튼은 키를 만들지 않습니다." \
+    "키는 그 화면의 '확인'에서 발급됩니다" \
+    "아직 SellerOps가 안내하지 않습니다."
   do
     grep -qF "$phrase" <<<"$out" || { echo "  FAIL  NORMAL          · Korean on-screen warning missing: $phrase"; KOREAN_OK=0; FAILED=1; }
+  done
+  # The RETIRED warning. It was refuted on 2026-08-12 — the control was pressed and no key was issued — and a
+  # warning attached to a consequence that does not happen spends the credibility the true ones need.
+  for stale_ko in "여기서 실제로 키가 생성됩니다" "발급이 끝나면 아래 버튼을"; do
+    if grep -qF "$stale_ko" <<<"$out"; then
+      echo "  FAIL  NORMAL          · refuted Korean warning still shown: $stale_ko"; KOREAN_OK=0; FAILED=1
+    fi
   done
   [ "$KOREAN_OK" = "1" ] && echo "  PASS  NORMAL          · the COMPLETE Korean copy of the key-creation step is shown before the grant line"
 

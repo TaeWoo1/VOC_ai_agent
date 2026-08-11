@@ -603,7 +603,11 @@ describe("the terms screen — transcribed verbatim, and the key-creation bounda
     expect(from).toBeGreaterThan(-1);
     const block = src.slice(from, src.indexOf("\n  }", from));
     expect(block).toContain("DO NOT press");
-    expect(block).toContain("CREATES THE KEY");
+    // It used to say "That button CREATES THE KEY" — asserted from the label, never observed, and refuted on
+    // 2026-08-12 when the button was pressed and no key was issued. The refusal is unchanged; its REASON is
+    // now the true one, which is also the stronger one for a measuring phase: nothing has read what follows.
+    expect(block).not.toContain("CREATES THE KEY");
+    expect(block).toContain("a screen this phase has never read");
     expect(block).toContain("SEPARATE approval");
     // …and it must not agree to the terms on the seller's behalf, or advise on them.
     expect(block).toContain("SellerOps does not read them");
@@ -947,7 +951,6 @@ describe("the guided-walk manifest is not the fallback", () => {
   it("the operation names the boundary, what the rings sit ON, and what is out of scope", () => {
     const from = CLI.indexOf('isWingGuidedWalk\n    ? "WING GUIDED ISSUANCE WALK');
     const op = CLI.slice(from, CLI.indexOf("\n    : isWingReveal", from));
-    expect(op).toContain("CREATES THE KEY");
     expect(op).toContain("never pressed");
     expect(op).toContain("separate phase");
     // The two highlight CLASSES became one on 2026-08-11 — every guided control is now calibrated. What
@@ -956,6 +959,11 @@ describe("the guided-walk manifest is not the fallback", () => {
     // inputs have no accessible association and nothing may claim to know which box is which.
     expect(op).toContain("never on the radio or the checkboxes");
     expect(op).toContain("measured structural pairing");
+    // The stop point is unchanged and its reason is corrected: the operation text may no longer tell the
+    // operator this control creates the key, because it does not.
+    expect(op).not.toContain("which is the control that CREATES THE KEY");
+    expect(op).toContain("REFUTED on 2026-08-12");
+    expect(op).toContain("what follows is unmeasured");
     expect(op).toContain("navigates no further");
     expect(op).toContain("no connect-test, no sync");
   });

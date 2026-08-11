@@ -219,7 +219,10 @@ echo "      walk can move on without you pressing anything — that reading is a
 echo "      is never stored, sent, or logged."
 echo
 echo "  ⚠ WHERE THIS RUN STOPS, and why:"
-echo "    • The walk RESTS in front of '약관 동의 및 Key 발급받기'. That control CREATES THE KEY."
+echo "    • The walk RESTS in front of '약관 동의 및 Key 발급받기'. It does NOT create the key — that was"
+echo "      asserted from its label and refuted on 2026-08-12, when it was pressed and no key was issued. What"
+echo "      it opens is an integration-method form (자체개발 / 연동업체 · 업체명 · 취소 · 확인), and the key is"
+echo "      issued by THAT screen's 확인. No apparatus has ever read that screen."
 echo "    • DO NOT PRESS IT in this run. There is no step after it here, and the walk has no tooling that could"
 echo "      press it. Actual key issuance is a separate phase, with its own manifest and its own grant."
 echo "    • No credential value is read, no connect-test, no sync, no upload. SellerOps cannot tell whether a"
@@ -229,8 +232,10 @@ echo
 # will be on the WING page. Reproduced COMPLETE, so nothing on screen is a surprise.
 echo "  WHAT THE LAST STEP SAYS ON THE WING PAGE (complete, Korean — this is what binds):"
 # CHECKPOINT-COPY-BEGIN
-echo "    ⚠ 여기서 실제로 키가 생성됩니다. '약관 동의 및 Key 발급받기' 버튼을 직접 누르세요 — SellerOps는 이"
-echo "    버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다. 발급이 끝나면 아래 버튼을 누르세요."
+echo "    '약관 동의 및 Key 발급받기'를 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않고, 자동으로"
+echo "    넘어가지도 않습니다. ⚠ 이 버튼은 키를 만들지 않습니다. 다음에 연동 방식(자체개발/연동업체)을 고르는"
+echo "    화면이 나오고, 키는 그 화면의 '확인'에서 발급됩니다 — 그 화면은 아직 SellerOps가 안내하지 않습니다."
+echo "    눌러서 다음 화면이 뜨면 아래 버튼을 누르세요."
 # CHECKPOINT-COPY-END
 echo
 echo "  ⚠ THIS PROOF STOPS BEFORE THAT PRESS. The copy above is the tutorial's own product text, shown here so"

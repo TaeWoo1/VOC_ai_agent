@@ -120,7 +120,7 @@ const ISSUANCE_STEP_DETAIL: Record<string, string> = {
   "actionWindow.coupangIssuance.termsConsent":
     "약관을 직접 읽고 판단하신 뒤 동의 체크박스 2개를 선택하세요. SellerOps는 약관을 읽지도, 대신 동의하지도, 체크하지도 않습니다. 2개가 모두 선택되면 자동으로 넘어갑니다(선택 여부는 저장·전송하지 않습니다).",
   "actionWindow.coupangIssuance.issueCheckpoint":
-    "⚠ 여기서 실제로 키가 생성됩니다. '약관 동의 및 Key 발급받기' 버튼을 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다. 발급이 끝나면 아래 버튼을 누르세요.",
+    "'약관 동의 및 Key 발급받기'를 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다. ⚠ 이 버튼은 키를 만들지 않습니다. 다음에 연동 방식(자체개발/연동업체)을 고르는 화면이 나오고, 키는 그 화면의 '확인'에서 발급됩니다 — 그 화면은 아직 SellerOps가 안내하지 않습니다. 눌러서 다음 화면이 뜨면 아래 버튼을 누르세요.",
   "actionWindow.coupangIssuance.copyKeys":
     "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요. SellerOps는 값을 읽지 않습니다. 복사했으면 아래 버튼을 누르세요.",
   "actionWindow.coupangIssuance.return":

@@ -749,6 +749,90 @@ export const WING_CHOICE_LABEL_CANDIDATES: readonly WingPurposeOptionCandidate[]
 export const WING_KEY_CREATION_CONTROL_ID = "stage3.terms.issue_final" as const;
 
 /**
+ * **REFUTED 2026-08-12: `약관 동의 및 Key 발급받기` does NOT create the key.**
+ *
+ * It was pressed, on the live guided walk `apr-197d0cd2c9c7` / `wt-c5f5184e4a12` at git `7d19e624` — outside
+ * that run's approved scope, which budgeted zero presses of it — and **no key was issued.** What appeared
+ * instead is a further screen nothing in this codebase had ever seen: an integration-method form headed
+ * `OPEN API 키 발급`, with `업체 입력 방식` / `연동업체 선택`, a `자체개발(직접입력)` option, a `업체명` field,
+ * and `취소` / `확인`. The operator reports that the key is issued by THAT screen's `확인`.
+ *
+ * **The claim it replaces was asserted, never measured.** Five places said this control "CREATES THE KEY" as
+ * fact — the manifest operation, the preflight disclosure, the probe's warning, the seller-facing Korean step
+ * copy, and the target's own doc comment. Nobody had pressed it, because every phase correctly refused to; so
+ * the one observation that could settle it was the one the safety boundary prevented. That is not a criticism
+ * of the boundary. It is the reason a claim of this shape has to be written down as an expectation until
+ * something observes it, exactly as `pressOutcome: "UNCONFIRMED"` is on the 발급 record.
+ *
+ * **The product owner was right all along, about a screen nobody could reach.** The original flow description
+ * — 발급 → 연동 방식 선택 → 자체개발(직접입력) → 업체명 · URL · IP 주소 → 확인 — was judged "wrong about the
+ * ordering" on 2026-08-10 when the purpose screen led to TERMS instead. It was not wrong; the vendor form sits
+ * AFTER the terms, and every reading since has measured `업체명` / `URL` / `IP 주소` as present-but-hidden
+ * precisely because the screen holding them had not been opened. Four flow-discovery checkpoints on
+ * 2026-08-11 read them `PRESENT_HIDDEN_ONLY` and could not have read anything else.
+ *
+ * **What stays true, and what stops being a reason.** The walk still rests in front of this control, and that
+ * is still correct — but the reason is now "what follows it is not established", not "it creates the key". The
+ * agent's press budget for it remains zero and no phase gains tooling to press it.
+ *
+ * **OPERATOR_REPORTED, not measured.** No apparatus has read the vendor screen: it is past every phase's stop
+ * point, so its markers, its option labels and its `확인` are all uncalibrated. Nothing may be promoted, guided
+ * or auto-advanced from this record — it says what is known and names what is not.
+ */
+export interface WingKeyCreationControlRefutation {
+  readonly status: "LIVE_DOM_CALIBRATION_REFUTED";
+  readonly refutedOn: "2026-08-12";
+  /** The run on which the press happened. */
+  readonly runId: "wt-c5f5184e4a12";
+  readonly approvalId: "apr-197d0cd2c9c7";
+  readonly gitSha: "7d19e624";
+  /** The control the claim was about. */
+  readonly controlId: typeof WING_KEY_CREATION_CONTROL_ID;
+  /** The withdrawn claim, named in full so restoring it means deleting a sentence that says not to. */
+  readonly withdrawnClaim: "PRESSING_IT_CREATES_THE_KEY";
+  /** How the claim was arrived at. It was never a reading. */
+  readonly withdrawnClaimBasis: "ASSERTED_FROM_THE_CONTROL_LABEL_NEVER_OBSERVED";
+  /**
+   * **The press was outside the run's approved scope**, and the record says so rather than describing a walk
+   * that stopped where the manifest said it would. A record that reports the boundary holding when it did not
+   * is worth less than no record.
+   */
+  readonly pressWasInScope: false;
+  /** What the press produced. The whole refutation, in one field. */
+  readonly keyIssued: false;
+  /** The screen that appeared instead — OPERATOR-REPORTED; no apparatus has read it. */
+  readonly revealedScreen: "VENDOR_INTEGRATION_METHOD_FORM";
+  readonly revealedScreenAttribution: "OPERATOR_REPORTED_NOT_MEASURED";
+  /**
+   * The control the operator reports actually issues the key. Uncalibrated, unlocated, and deliberately NOT
+   * given a candidate here: writing a query for a screen nobody has measured is the move this file exists to
+   * refuse.
+   */
+  readonly keyCreatedBy: "THE_VENDOR_FORM_CONFIRM_UNCALIBRATED";
+  /** The walk's stop point is unchanged; only its stated reason is. */
+  readonly restsBeforeControlStillCorrect: true;
+  readonly newReasonToRest: "WHAT_FOLLOWS_IT_IS_NOT_ESTABLISHED";
+}
+
+export const WING_KEY_CREATION_CONTROL_REFUTATION: WingKeyCreationControlRefutation = Object.freeze({
+  status: "LIVE_DOM_CALIBRATION_REFUTED",
+  refutedOn: "2026-08-12",
+  runId: "wt-c5f5184e4a12",
+  approvalId: "apr-197d0cd2c9c7",
+  gitSha: "7d19e624",
+  controlId: WING_KEY_CREATION_CONTROL_ID,
+  withdrawnClaim: "PRESSING_IT_CREATES_THE_KEY",
+  withdrawnClaimBasis: "ASSERTED_FROM_THE_CONTROL_LABEL_NEVER_OBSERVED",
+  pressWasInScope: false,
+  keyIssued: false,
+  revealedScreen: "VENDOR_INTEGRATION_METHOD_FORM",
+  revealedScreenAttribution: "OPERATOR_REPORTED_NOT_MEASURED",
+  keyCreatedBy: "THE_VENDOR_FORM_CONFIRM_UNCALIBRATED",
+  restsBeforeControlStillCorrect: true,
+  newReasonToRest: "WHAT_FOLLOWS_IT_IS_NOT_ESTABLISHED",
+});
+
+/**
  * Fail-closed capability check, run BEFORE the operator is asked for anything.
  *
  * An association census with no candidates to compare against still measures derivation, association and

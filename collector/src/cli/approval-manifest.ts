@@ -1044,8 +1044,11 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
       "동의 문장 정확히 하나와 박스 정확히 하나를 담고 있음). " +
       "⚠ 체크박스는 SellerOps가 대신 누르지 않습니다. 다만 2개가 모두 선택됐는지는 화면에서 확인해 자동으로 넘어갑니다 " +
       "(선택 여부는 저장·전송·기록하지 않습니다). SellerOps는 약관을 읽거나 판단하거나 대신 동의하지 않습니다. " +
-      "⚠ 마지막 '약관 동의 및 Key 발급받기'는 강조 표시됩니다(2026-08-11 측정 승격). 실제로 키를 생성하는 control이며, 자동으로 넘어가지 않고 " +
-      "이번 proof에서는 절대 누르지 않습니다. 키 발급·credential 읽기·연결·동기화는 이번 run의 범위가 아닙니다.",
+      "⚠ 마지막 '약관 동의 및 Key 발급받기'는 강조 표시됩니다(2026-08-11 측정 승격). 자동으로 넘어가지 않고 이번 run에서는 절대 누르지 않습니다. " +
+      "이 버튼이 키를 생성한다고 적혀 있었으나 2026-08-12에 반증됐습니다 — 실제로 눌렀을 때 키는 발급되지 않았고, " +
+      "연동 방식(자체개발/연동업체)을 고르는 화면이 나왔습니다. 키는 그 화면의 '확인'에서 발급되는 것으로 보고됐고, " +
+      "그 화면은 어떤 측정도 읽은 적이 없습니다. 그래서 여기서 멈추는 이유는 '키가 생성되니까'가 아니라 " +
+      "'다음이 확립되지 않았으니까'입니다. 키 발급·credential 읽기·연결·동기화는 이번 run의 범위가 아닙니다.",
     emitsFrontendUrl: false,
   },
   // The WING issuance-form REVEAL phase: a CLI-launched dedicated Chrome. The operator presses 발급 themselves

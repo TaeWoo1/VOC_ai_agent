@@ -16,7 +16,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mountOverlay, unmountOverlay, refreshOverlay } from "../../../src/action-window/overlay";
-import { buildFixedLabelLocateScript } from "../../../src/action-window/api-issuance-calibration/visual-recon-inpage";
+import { buildFixedLabelRingPlanScript } from "../../../src/action-window/api-issuance-calibration/visual-recon-inpage";
 
 /* ─────────────────────────────── a minimal DOM double ─────────────────────────────── */
 
@@ -273,37 +273,61 @@ describe("the WING overlay rings EVERY tagged control", () => {
 
 /* ─────────────────────────── the locate script's tagging modes ─────────────────────────── */
 
-describe("buildFixedLabelLocateScript — additive tagging for a multi-control step", () => {
-  it("clears BOTH markers by default, so a prior step's primary cannot survive into this one", () => {
-    const src = buildFixedLabelLocateScript({ candidateQuery: "button", exactText: "확인", tag: true });
-    expect(src).toContain("removeAttribute('data-aw-target')");
-    // The one the first version forgot: a leftover `data-aw-primary` would put this step's chip on last step's
-    // control while the ring set was otherwise correct — the failure that is hardest to see, because everything
-    // else about the presentation looks right.
-    expect(src).toContain("removeAttribute('data-aw-primary')");
+describe("buildFixedLabelRingPlanScript — the whole ring set in one evaluation", () => {
+  const specs = [
+    { candidateQuery: "button,a", exactText: "확인" },
+    { candidateQuery: "label", exactText: "OPEN API" },
+  ];
+
+  it("**resolves every spec before tagging anything** — a partial ring set never exists on the page", () => {
+    // The property the per-spec sequence structurally could not have. It tagged the first control, then
+    // discovered the second was missing, and the caller's all-or-nothing contract had to unwind a state that
+    // had already existed on a live marketplace page.
+    const src = buildFixedLabelRingPlanScript({ specs, tag: true });
+    expect(src).toContain("if (allResolved) {");
+    // The clear is INSIDE that guard, so a failed plan leaves the previous step's ring exactly as it was
+    // rather than stripping it and drawing nothing.
+    const guarded = src.slice(src.indexOf("if (allResolved) {"));
+    expect(guarded).toContain("removeAttribute('data-aw-target')");
+    expect(guarded).toContain("removeAttribute('data-aw-primary')");
   });
 
-  it("`keepPriorTags` skips the clear — and still tags exactly one element", () => {
-    const src = buildFixedLabelLocateScript({ candidateQuery: "label", exactText: "OPEN API", tag: true, keepPriorTags: true });
-    expect(src).not.toContain("removeAttribute('data-aw-target')");
-    expect(src).toContain("tagEl.setAttribute('data-aw-target', '')");
-    // Unchanged fail-closed core: only a UNIQUE VISIBLE match is ever tagged.
-    expect(src).toContain("if (visible.length !== 1) { return { count: visible.length, hiddenCount: hiddenCount }; }");
+  it("index 0 is the PRIMARY, and it is the only one", () => {
+    const src = buildFixedLabelRingPlanScript({ specs, tag: true });
+    expect(src).toContain("if (i === 0) { tagEl.setAttribute('data-aw-primary', ''); }");
+    expect(src.match(/data-aw-primary', ''\)/g)).toHaveLength(1);
   });
 
-  it("`primary` marks the chip's control, and is absent unless asked for", () => {
-    const withP = buildFixedLabelLocateScript({ candidateQuery: "button", exactText: "확인", tag: true, primary: true });
-    const without = buildFixedLabelLocateScript({ candidateQuery: "button", exactText: "확인", tag: true });
-    expect(withP).toContain("tagEl.setAttribute('data-aw-primary', '')");
-    expect(without).not.toContain("data-aw-primary', '')");
+  it("keeps the fail-closed core of the single-spec script: unique AND painting", () => {
+    const src = buildFixedLabelRingPlanScript({ specs, tag: true });
+    expect(src).toContain("if (visible.length !== 1) {");
+    expect(src).toContain("allResolved = false;");
+    // The same paint test, not a looser one — a match nobody can see is not a match.
+    expect(src).toContain("cs.display === 'none' || cs.visibility === 'hidden'");
   });
 
-  it("neither option touches a NON-tagging locate — the read-only probe is unchanged", () => {
-    // `probeTargetMatch` / `probeFixedLabelMatch` run this with `tag: false`, under READ_ONLY manifests. A
-    // tagging branch reachable from those would be a page mutation no manifest describes.
-    const src = buildFixedLabelLocateScript({ candidateQuery: "button", exactText: "확인", tag: false, keepPriorTags: true, primary: true });
+  it("a NON-tagging plan mutates nothing — the read-only path stays read-only", () => {
+    const src = buildFixedLabelRingPlanScript({ specs, tag: false });
     expect(src).not.toContain("setAttribute");
     expect(src).not.toContain("removeAttribute");
+  });
+
+  it("carries every spec's own query and label, and returns neither", () => {
+    // The specs go IN; only counts, a measured tag and an opaque signature come back. The matched text is
+    // never returned — it is read solely to compare against a label we wrote.
+    const src = buildFixedLabelRingPlanScript({ specs, tag: false });
+    const parsed = JSON.parse(src.match(/var SPECS = (\[.*?\]);/)![1]!) as { q: string; t: string }[];
+    expect(parsed.map((p) => p.t)).toEqual(["확인", "OPEN API"]);
+    expect(parsed.map((p) => p.q)).toEqual(["button,a", "label"]);
+    expect(src).toContain("return { resolved: allResolved, rows: rows };");
+    expect(src).not.toContain("textContent: ");
+  });
+
+  it("the signature stays on the MATCHED element, never a promoted ancestor", () => {
+    // Same rule as the single-spec script: locate and tag must agree, and `tagAncestor` moves only the tag.
+    const src = buildFixedLabelRingPlanScript({ specs: [{ candidateQuery: "label", exactText: "Access Key", tagAncestor: "tr" }], tag: true });
+    expect(src).toContain("closest(SPECS[i].a)");
+    expect(src).toContain("rows[i].sig = sig(chosen[i].tagName");
   });
 });
 
@@ -339,25 +363,42 @@ vi.mock("../../../src/action-window/coupang-wing-label-recon", async (importOrig
   };
 });
 
-/** A fake page that answers the locate script with a unique match, and records every script it was sent. */
+/**
+ * A fake page that answers the RING-PLAN script and records every script it was sent.
+ *
+ * It answers per-spec from `counts`, in the order the plan lists them, so a case can say "the second control is
+ * not on this page" without knowing anything about how the driver batches. The `resolved` summary is derived
+ * here rather than passed in — the script computes it the same way, and a fake that could report `resolved:
+ * true` beside a failing row would let the driver's host-side re-check pass on data the real script cannot
+ * produce.
+ */
 class LocatePage {
   readonly scripts: string[] = [];
   readonly mounts: Record<string, unknown>[] = [];
   constructor(private readonly counts: readonly number[] = []) {}
-  private locates = 0;
   url(): string {
     return "https://wing.coupang.com/vendor/open-api";
   }
   on(): void {
     /* close handler */
   }
+  /** How many specs the plan script carries — read off the script itself, like the page would. */
+  private specCount(script: string): number {
+    const m = script.match(/var SPECS = (\[.*?\]);/);
+    return m ? (JSON.parse(m[1]!) as unknown[]).length : 0;
+  }
   async evaluate(script: unknown, arg?: unknown): Promise<unknown> {
     if (typeof script === "string") {
       this.scripts.push(script);
-      if (script.includes("issuance-fixed-label")) {
-        const n = this.counts[this.locates] ?? 1;
-        this.locates += 1;
-        return n === 1 ? { count: 1, hiddenCount: 0, tag: "LABEL", sig: `sig${this.locates}0000000000` } : { count: n, hiddenCount: 0 };
+      if (script.includes("issuance-ring-plan")) {
+        const n = this.specCount(script);
+        const rows = Array.from({ length: n }, (_, i) => {
+          const count = this.counts[i] ?? 1;
+          return count === 1
+            ? { count: 1, hiddenCount: 0, tag: "LABEL", sig: `sig${i}000000000000`.slice(0, 16) }
+            : { count, hiddenCount: 0 };
+        });
+        return { resolved: rows.every((r) => r.count === 1), rows };
       }
       return true;
     }
@@ -368,6 +409,10 @@ class LocatePage {
     return true; // overlayMounted
   }
 }
+
+/** The ring-plan scripts this page was sent, split by whether they tag. */
+const planScripts = (p: LocatePage, tagging: boolean): string[] =>
+  p.scripts.filter((s) => s.includes(`issuance-ring-plan-${tagging ? "tag" : "locate"}`));
 
 describe("the driver's promoted ring path", () => {
   beforeEach(() => {
@@ -385,9 +430,24 @@ describe("the driver's promoted ring path", () => {
     const page = new LocatePage();
     const res = await (await driver(page)).locateTarget("confirm_purpose");
     expect(res.count).toBe(1);
-    expect(page.scripts.filter((s) => s.includes("issuance-fixed-label"))).toHaveLength(2);
+    // ONE evaluation for the whole plan, not one per control.
+    expect(planScripts(page, false)).toHaveLength(1);
     // NOT the synthetic guidance constant for this step.
     expect(res.sig).not.toBe("b48e2f05b48e2f05");
+  });
+
+  it("**the whole plan is ONE page evaluation** — the latency the live walk surfaced", async () => {
+    // Two controls used to cost five round trips: locate ×2, a separate clear, and tag ×2. Each is an
+    // evaluation on a live marketplace page, and the operator saw the resulting rings arrive visibly later
+    // than the single-ring ones on 2026-08-12. Locate and highlight are one evaluation each now, and the
+    // clear happens INSIDE the tagging one.
+    const page = new LocatePage();
+    await (await driver(page)).highlightTarget("confirm_purpose");
+    expect(planScripts(page, true)).toHaveLength(1);
+    expect(page.scripts.filter((s) => s.includes("coupang-issuance-cleartag"))).toHaveLength(0);
+    // …and that single script carries BOTH controls, so nothing was silently dropped to make the count fall.
+    expect(planScripts(page, true)[0]).toContain("확인");
+    expect(planScripts(page, true)[0]).toContain("OPEN API");
   });
 
   it("locate and highlight fold to the SAME signature — the engine's anti-drift check compares them", async () => {
@@ -399,18 +459,21 @@ describe("the driver's promoted ring path", () => {
     expect(highlighted.sig).toBe(located.sig);
   });
 
-  it("highlighting clears the prior tags ONCE, then tags additively", async () => {
-    // A per-call clear would leave only the LAST spec tagged, which is the single-ring assumption this path
-    // exists to lift — and the step would silently go back to ringing one control.
+  it("**tagging is ALL-OR-NOTHING inside the page** — a partial ring set never exists, even for a moment", async () => {
+    // The property the per-spec sequence structurally could not have: it tagged the first control, then
+    // discovered the second was missing, and the driver's all-or-nothing contract had to unwind a page state
+    // that had already existed. Now the specs are all resolved before anything is tagged.
+    const src = planScripts(new LocatePage(), true);
     const page = new LocatePage();
     await (await driver(page)).highlightTarget("confirm_purpose");
-    expect(page.scripts.filter((s) => s.includes("coupang-issuance-cleartag"))).toHaveLength(1);
-    const tagging = page.scripts.filter((s) => s.includes("issuance-fixed-label-tag"));
-    expect(tagging).toHaveLength(2);
-    for (const t of tagging) expect(t).not.toContain("removeAttribute('data-aw-target')");
-    // Exactly one of them claims the chip, and it is the FIRST — the plan's primary, not document order.
-    expect(tagging.filter((t) => t.includes("data-aw-primary', '')"))).toHaveLength(1);
-    expect(tagging[0]).toContain("data-aw-primary', '')");
+    const tagging = planScripts(page, true)[0]!;
+    expect(src).toHaveLength(0); // sanity: a page that was never driven sent nothing
+    expect(tagging).toContain("if (allResolved) {");
+    // The clear lives inside the same evaluation, so the prior step's ring cannot outlive this one's failure.
+    expect(tagging).toContain("removeAttribute('data-aw-target')");
+    expect(tagging).toContain("removeAttribute('data-aw-primary')");
+    // Exactly the FIRST spec claims the chip — the plan's primary, never document order.
+    expect(tagging).toContain("if (i === 0) { tagEl.setAttribute('data-aw-primary', ''); }");
   });
 
   it("a promoted step mounts ANCHORED, never docked", async () => {
@@ -430,20 +493,34 @@ describe("the driver's promoted ring path", () => {
     expect(res.sig).toBeUndefined();
   });
 
+  it("a row set that does not match the plan is refused, whatever the script's own summary says", async () => {
+    // The host-side re-check. `resolved` is the script's summary of its own work; a plan of two answered by one
+    // row is not a resolution of that plan, and trusting the summary would let a truncated reading through.
+    const page = new LocatePage();
+    page.evaluate = async (script: unknown) =>
+      typeof script === "string" && script.includes("issuance-ring-plan")
+        ? { resolved: true, rows: [{ count: 1, hiddenCount: 0, tag: "LABEL", sig: "aaaaaaaaaaaaaaaa" }] }
+        : true;
+    const res = await (await driver(page)).locateTarget("confirm_purpose");
+    expect(res.count).toBe(0);
+    expect(res.sig).toBeUndefined();
+  });
+
   it("**the terms step rings BOTH consents**, each resolved by id from its own promotion", async () => {
     // Two separate consents; agreeing to one is not agreeing to the other. One ring could only ever have
     // pointed at half of what the panel says.
     const page = new LocatePage();
     const res = await (await driver(page)).highlightTarget("terms_consent");
     expect(res.count).toBe(1);
-    const tagging = page.scripts.filter((s) => s.includes("issuance-fixed-label-tag"));
-    expect(tagging).toHaveLength(2);
+    const tagging = planScripts(page, true)[0]!;
     // Both sentences, verbatim — resolved from the recon candidates by id, never re-typed at the ring site.
-    expect(tagging[0]).toContain("API 이용 약관에 동의합니다.");
-    expect(tagging[1]).toContain("카테고리 자동 매칭 서비스 이용에 동의합니다.");
-    // …and neither query names a checkbox INPUT: the boxes have no accessible association, so nothing here
+    expect(tagging).toContain("API 이용 약관에 동의합니다.");
+    expect(tagging).toContain("카테고리 자동 매칭 서비스 이용에 동의합니다.");
+    // …and neither spec's query names an INPUT: the boxes have no accessible association, so nothing here
     // claims to know where an individual box is. The rings sit on the sentences.
-    for (const t of tagging) expect(t).not.toMatch(/querySelectorAll\("[^"]*input/);
+    const specs = JSON.parse(tagging.match(/var SPECS = (\[.*?\]);/)![1]!) as { q: string }[];
+    expect(specs).toHaveLength(2);
+    for (const sp of specs) expect(sp.q.split(",")).not.toContain("input");
   });
 
   it("an UNPROMOTED sibling neither suppresses nor drags along the promoted one", async () => {
@@ -454,10 +531,9 @@ describe("the driver's promoted ring path", () => {
     const page = new LocatePage();
     const res = await (await driver(page)).highlightTarget("terms_consent");
     expect(res.count).toBe(1);
-    const tagging = page.scripts.filter((s) => s.includes("issuance-fixed-label-tag"));
-    expect(tagging).toHaveLength(1);
-    expect(tagging[0]).toContain("data-aw-primary', '')");
-    expect(tagging[0]).toContain("카테고리 자동 매칭 서비스 이용에 동의합니다.");
+    const specs = JSON.parse(planScripts(page, true)[0]!.match(/var SPECS = (\[.*?\]);/)![1]!) as { t: string }[];
+    expect(specs).toHaveLength(1);
+    expect(specs[0]!.t).toBe("카테고리 자동 매칭 서비스 이용에 동의합니다.");
   });
 
   it("**withdrawing a step's whole calibration falls back to TEXT-GUIDED, not to a parked run**", async () => {
@@ -486,7 +562,7 @@ describe("the driver's promoted ring path", () => {
     const hl = new LocatePage();
     const res = await (await driver(hl)).highlightTarget("terms_consent");
     expect(res).toEqual({ count: 1, sig: "16d9c7ba16d9c7ba" });
-    expect(hl.scripts.filter((s) => s.includes("issuance-fixed-label-tag"))).toHaveLength(0);
+    expect(planScripts(hl, true)).toHaveLength(0);
     expect(hl.scripts.filter((s) => s.includes("coupang-issuance-cleartag"))).toHaveLength(1);
     expect(hl.mounts[0]!["dockedPanelOnly"]).toBe(true);
   });

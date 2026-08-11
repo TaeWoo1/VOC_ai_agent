@@ -69,6 +69,7 @@ import {
 import {
   buildFixedLabelContainmentScript,
   buildFixedLabelLocateScript,
+  buildFixedLabelRingPlanScript,
   sanitizeContainmentReading,
   type FixedLabelContainmentReading,
 } from "./api-issuance-calibration/visual-recon-inpage";
@@ -679,9 +680,17 @@ export const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string
   confirm_purpose: "사용 목적이 'OPEN API'인지 확인하고(기본값입니다) '확인'을 직접 누르세요. 이 버튼도 키를 만들지 않고 약관 화면을 엽니다. 화면이 열리면 자동으로 넘어갑니다.",
   terms_consent: "약관을 직접 읽고 판단하신 뒤 동의 체크박스 2개를 선택하세요. SellerOps는 약관을 읽지도, 대신 동의하지도, 체크하지도 않습니다. 2개가 모두 선택되면 자동으로 넘어갑니다(선택 여부는 저장·전송하지 않습니다).",
   // NOT trimmed. Every sentence here is a safety claim the approval harness reproduces and asserts before the
-  // operator grants (`wing-walk-selfcheck.sh`, "the COMPLETE Korean copy of the key-creation step"), and this is
-  // the one step where the control in front of the seller creates the key. Concision is not worth a clause here.
-  issue_final: "⚠ 여기서 실제로 키가 생성됩니다. '약관 동의 및 Key 발급받기' 버튼을 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다. 발급이 끝나면 아래 버튼을 누르세요.",
+  // operator grants (`wing-walk-selfcheck.sh`, "the COMPLETE Korean copy of the key-creation step").
+  //
+  // CORRECTED 2026-08-12. It read "⚠ 여기서 실제로 키가 생성됩니다 … 발급이 끝나면" — and the key is not created
+  // here. The control was pressed on the live walk and no key was issued; an integration-method form appears
+  // instead, and the operator reports the key is issued by THAT screen's 확인
+  // (`WING_KEY_CREATION_CONTROL_REFUTATION`). Telling the seller a key is about to be created, at a button that
+  // does not create one, is a false warning — and a false warning spends the credibility the true ones need.
+  //
+  // What the copy must still do is unchanged: this is where the guidance STOPS, SellerOps never presses it, and
+  // nothing auto-advances past it. The reason is now the honest one — what follows has never been measured.
+  issue_final: "'약관 동의 및 Key 발급받기'를 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다. ⚠ 이 버튼은 키를 만들지 않습니다. 다음에 연동 방식(자체개발/연동업체)을 고르는 화면이 나오고, 키는 그 화면의 '확인'에서 발급됩니다 — 그 화면은 아직 SellerOps가 안내하지 않습니다. 눌러서 다음 화면이 뜨면 아래 버튼을 누르세요.",
   credentials: "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요. SellerOps는 값을 읽지 않습니다. 복사했으면 아래 버튼을 누르세요.",
   return: "아래 버튼을 눌러 SellerOps로 돌아가세요. 복사한 키를 입력하면 연결이 끝납니다.",
 };
@@ -703,8 +712,9 @@ export const OPERATOR_STEP_TITLES: Readonly<Record<CoupangIssuanceTarget, string
   issue: "'API Key 발급 받기' 누르기",
   confirm_purpose: "사용 목적 확인 후 '확인'",
   terms_consent: "약관 2건 동의",
-  // The one chip that keeps a warning: it names the consequence, and the panel beside it carries the full text.
-  issue_final: "⚠ 키가 생성되는 단계",
+  // The chip named a consequence this control does not have (see the panel copy above, corrected 2026-08-12).
+  // It now names the control, like every other chip — the panel carries what is true about it.
+  issue_final: "'약관 동의 및 Key 발급받기' 누르기",
   credentials: "키 3개 복사",
   return: "SellerOps로 돌아가기",
 };
@@ -1052,15 +1062,12 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
   private async resolveFixedLabelSpec(
     spec: { candidateQuery: string; exactText: string; tagAncestor?: string },
     tag: boolean,
-    ring?: { keepPriorTags?: boolean; primary?: boolean },
   ): Promise<LocateResult> {
     const script = buildFixedLabelLocateScript({
       candidateQuery: spec.candidateQuery,
       exactText: spec.exactText,
       tag,
       ...(spec.tagAncestor ? { tagAncestor: spec.tagAncestor } : {}),
-      ...(ring?.keepPriorTags ? { keepPriorTags: true } : {}),
-      ...(ring?.primary ? { primary: true } : {}),
     });
     const page = this.activePage();
     const res = await this.evalStr<LocateResult>(page, script);
@@ -1189,12 +1196,28 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
    * per-call clear would leave only the last one tagged, which is the single-ring assumption this exists to lift.
    */
   private async resolveRingPlan(specs: readonly WingFlowScreenMarkerSpec[], tag: boolean): Promise<LocateResult> {
-    if (tag) await this.evalStr(this.activePage(), IN_PAGE_CLEAR_TAG).catch(() => undefined);
+    // ONE evaluation for the whole plan. It used to be one per spec, twice over, plus a separate clear — five
+    // round trips for a two-control step, each one a page evaluation on a live marketplace page, and the
+    // operator saw the resulting rings arrive visibly later than the single-ring ones on 2026-08-12.
+    //
+    // The batched script is also ATOMIC where the sequence could not be: it resolves every spec before tagging
+    // anything, so the page never holds a partial ring set — not even between two evaluations.
+    const raw = await this.evalStr<{ resolved?: boolean; rows?: { count?: number; sig?: string }[] }>(
+      this.activePage(),
+      buildFixedLabelRingPlanScript({ specs: specs.map((sp) => ({ candidateQuery: sp.candidateQuery, exactText: sp.exactText })), tag }),
+    );
+    const rows = Array.isArray(raw?.rows) ? raw.rows : [];
+    // Re-checked host-side rather than trusted: `resolved` is the script's own summary, and a row set that does
+    // not match the plan it was built from is not a resolution of that plan. The FIRST failing row's own count
+    // travels, so the park upstream reports a real miss instead of a synthesised zero.
+    if (raw?.resolved !== true || rows.length !== specs.length) {
+      const missed = rows.find((r) => r?.count !== 1);
+      return { count: typeof missed?.count === "number" ? missed.count : 0 };
+    }
     const sigs: string[] = [];
-    for (let i = 0; i < specs.length; i++) {
-      const res = await this.resolveFixedLabelSpec(specs[i]!, tag, { keepPriorTags: true, primary: i === 0 });
-      if (res.count !== 1 || !res.sig) return { count: res.count };
-      sigs.push(res.sig);
+    for (const r of rows) {
+      if (r?.count !== 1 || !r.sig) return { count: typeof r?.count === "number" ? r.count : 0 };
+      sigs.push(r.sig);
     }
     return { count: 1, sig: foldSigs(sigs) };
   }

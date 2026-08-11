@@ -168,18 +168,26 @@ describe("the chip's title and the panel's instruction are different things", ()
     }
   });
 
-  it("**the key-creation step's chip still warns**, and its full instruction is untouched", () => {
-    // The one chip that must carry a warning: shortening it must not turn "키가 생성된다" into a neutral label.
-    expect(OPERATOR_STEP_TITLES.issue_final).toContain("⚠");
-    expect(OPERATOR_STEP_TITLES.issue_final).toContain("키가 생성");
-    // …and the panel's copy keeps every sentence the approval harness reproduces before the grant.
+  it("**the last step's copy says what is TRUE of the control**, which stopped being 'it creates the key'", () => {
+    // Corrected 2026-08-12. The chip read "⚠ 키가 생성되는 단계" and the panel "⚠ 여기서 실제로 키가
+    // 생성됩니다 … 발급이 끝나면", and the control does not create a key: it was pressed on the live walk and
+    // none was issued (`WING_KEY_CREATION_CONTROL_REFUTATION`). A warning attached to a consequence that does
+    // not happen spends the credibility the true warnings need.
+    expect(OPERATOR_STEP_TITLES.issue_final).not.toContain("키가 생성");
+    expect(OPERATOR_STEP_LABELS.issue_final).not.toContain("여기서 실제로 키가 생성됩니다");
+    // The three claims that must SURVIVE, because they are what the step is for: the seller presses it,
+    // SellerOps never does, and nothing advances past it on its own.
     for (const clause of [
-      "여기서 실제로 키가 생성됩니다.",
-      "'약관 동의 및 Key 발급받기' 버튼을 직접 누르세요",
+      "'약관 동의 및 Key 발급받기'를 직접 누르세요",
       "버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다.",
+      "이 버튼은 키를 만들지 않습니다.",
     ]) {
       expect(OPERATOR_STEP_LABELS.issue_final, clause).toContain(clause);
     }
+    // …and it names where the key IS issued, plus the fact that SellerOps does not guide that screen — the
+    // seller is about to reach a step this walk has never measured, and being told so is the point.
+    expect(OPERATOR_STEP_LABELS.issue_final).toContain("그 화면의 '확인'에서 발급됩니다");
+    expect(OPERATOR_STEP_LABELS.issue_final).toContain("아직 SellerOps가 안내하지 않습니다");
   });
 
   it("the chip has a STRUCTURAL ceiling too — a long label is visibly cut, not lost off-screen", () => {

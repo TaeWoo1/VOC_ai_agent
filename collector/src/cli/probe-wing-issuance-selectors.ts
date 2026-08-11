@@ -1470,7 +1470,7 @@ function printDiscoveryCheckpoint(
     console.error("  signal, and then STOP and type NOTHING into it.");
   } else {
     console.error(`${step} — the TERMS screen. Tick the two consent boxes YOURSELF, then STOP.`);
-    console.error("  ⚠ DO NOT press '약관 동의 및 Key 발급받기'. That button CREATES THE KEY, and it is the last");
+    console.error("  ⚠ DO NOT press '약관 동의 및 Key 발급받기'. It opens a screen this phase has never read, and it is the last");
     console.error("  checkpoint's whole reason for existing: this run measures where it is and never presses it.");
     console.error("  Key issuance is a SEPARATE approval with its own manifest — it cannot be reached from here.");
     console.error("  Read the terms and decide for yourself. SellerOps does not read them, agree to them, or");
