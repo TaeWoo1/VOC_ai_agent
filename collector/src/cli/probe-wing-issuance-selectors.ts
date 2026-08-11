@@ -70,7 +70,7 @@ import {
   interpretWingStage2Recon,
   wingStage2ReconProbes,
   wingDiscoveryScopeGap,
-  wingScreenMarkerTargets,
+  wingDiscoveryRequiredTargets,
   wingStage2Precondition,
   resolveWingStage2ReconScope,
   WING_STAGE2_RECON_TARGETS,
@@ -364,6 +364,13 @@ export interface WingSelectorRecordDeps {
     matchCount: number;
     canHighlight: boolean;
     sig?: string;
+    /**
+     * The MEASURED tag of a unique match. The driver seam (`probeFixedLabelMatch`) has returned it since the
+     * 발급 recalibration and this type dropped it, so every candidate the sweep measured could only ever have
+     * justified a promotion from an EXPECTED tag — the exact substitution that put `role: "button"` on a
+     * refuted record. Optional, and absent means not measured.
+     */
+    observedTag?: string;
     /** Text-matching but non-painting elements, when the reading carried the field. Absent ⇒ not measured. */
     hiddenMatchCount?: number;
   }>;
@@ -574,7 +581,7 @@ async function sweepStage2(
   const containmentProbe = calibration ? deps.probeContainment : undefined;
   if (probe) {
     for (const spec of wingStage2ReconProbes(targets)) {
-      let counted: { matchCount: number; sig?: string; hiddenMatchCount?: number } | null = null;
+      let counted: { matchCount: number; sig?: string; hiddenMatchCount?: number; observedTag?: string } | null = null;
       try {
         counted = await probe({ candidateQuery: spec.candidateQuery, exactText: spec.exactText });
       } catch (e) {
@@ -602,6 +609,9 @@ async function sweepStage2(
           // Carried through at last. The driver seam omits the field entirely when the page returned none, so an
           // absent hidden count stays absent rather than becoming a measured zero.
           ...(typeof counted.hiddenMatchCount === "number" ? { hiddenCount: counted.hiddenMatchCount } : {}),
+          // …and the MEASURED tag, on the same terms and for the same reason: the driver returns it, this seam
+          // dropped it, and a promotion justified by an EXPECTED tag is how the 발급 record went wrong.
+          ...(counted.observedTag ? { tag: counted.observedTag } : {}),
           ...(containment ? { containment } : {}),
         });
       }
@@ -692,7 +702,13 @@ async function sweepReconCandidates(
     for (const spec of wingReconProbes(reconTargets)) {
       try {
         const res = await probe({ candidateQuery: spec.candidateQuery, exactText: spec.exactText });
-        raw.push({ targetId: spec.targetId, matchCount: res.matchCount, ...(res.sig ? { sig: res.sig } : {}) });
+        raw.push({
+          targetId: spec.targetId,
+          matchCount: res.matchCount,
+          ...(res.sig ? { sig: res.sig } : {}),
+          ...(typeof res.hiddenMatchCount === "number" ? { hiddenCount: res.hiddenMatchCount } : {}),
+          ...(res.observedTag ? { tag: res.observedTag } : {}),
+        });
       } catch (e) {
         faults.push({ id: spec.targetId, fault: wingFaultFingerprint(e) });
       }
@@ -943,16 +959,16 @@ export function calibrationLaunchRefusal(
 }
 
 /**
- * **The discovery scope's OWN pre-launch refusal: a scope that cannot identify the screen it is on.**
+ * **The discovery scope's OWN pre-launch refusal: a scope that cannot finish the flow it is measuring.**
  *
- * A sibling of {@link calibrationLaunchRefusal}, and it exists for the same reason. Discovery derives each
- * reading's screen from the sweep's own rows, so a scope narrowed away from a screen marker makes every screen
- * `NOT_MEASURED` — and the run then halts at the SECOND checkpoint with `SCREEN_NOT_AS_EXPECTED`, after the
- * operator has logged in, navigated, and pressed `API Key 발급 받기` on a real marketplace. The downstream gate
- * is correct and fails closed; it just cannot give the sitting back.
+ * A sibling of {@link calibrationLaunchRefusal}, and it exists for the same reason. Discovery reads its own
+ * sweep rows to decide two things — which screen it is on, and whether the 확인 checkpoint may be offered — and
+ * BOTH fail closed on a row that was never probed. A scope narrowed away from either set halts the run
+ * part-way, after the operator has logged in, navigated, and pressed `API Key 발급 받기` on a real marketplace.
+ * The downstream gates are correct; they just cannot give the sitting back.
  *
  * Narrowing a discovery run is otherwise legitimate — that is what the scope is for — so this refuses only the
- * narrowing that removes the run's ability to say where it is.
+ * narrowing that removes the run's ability to finish.
  */
 export function discoveryScopeRefusal(
   isDiscoveryRun: boolean,
@@ -962,10 +978,11 @@ export function discoveryScopeRefusal(
   const missing = wingDiscoveryScopeGap(targets);
   if (missing.length === 0) return null;
   return (
-    `Refusing to launch: ${WING_ISSUANCE_FLOW_DISCOVERY_PHASE} cannot identify which screen it is on with this ` +
-    `scope — ${missing.join(", ")} carr${missing.length === 1 ? "ies" : "y"} a flow-screen marker and ${missing.length === 1 ? "is" : "are"} ` +
-    "not in it. Every reading would be NOT_MEASURED and the run would halt at the second checkpoint, after you " +
-    `had already pressed a real control. Re-bootstrap with ${wingScreenMarkerTargets().join(",")} in the scope. No browser launched.`
+    `Refusing to launch: ${WING_ISSUANCE_FLOW_DISCOVERY_PHASE} cannot reach its last checkpoint with this scope ` +
+    `— ${missing.join(", ")} feed${missing.length === 1 ? "s" : ""} a gate that fails closed on an unprobed row ` +
+    "(the flow-screen markers, and the vendor-form candidates the 확인 advisory reads), and none of them is in " +
+    "it. The run would halt part-way through, after you had already logged in and pressed a real control. " +
+    `Re-bootstrap with ${wingDiscoveryRequiredTargets().join(",")} in the scope. No browser launched.`
   );
 }
 

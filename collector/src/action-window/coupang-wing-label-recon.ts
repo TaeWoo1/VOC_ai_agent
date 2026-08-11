@@ -153,6 +153,16 @@ export interface WingReconCandidateResult {
    */
   readonly hiddenMatchCount: number | null;
   /**
+   * The MEASURED tag name of a unique match (e.g. `"LABEL"`), else null.
+   *
+   * The locate script has returned it since `e8e62981` and this seam dropped it — the same shape as the hidden
+   * count above, and the same one that let `role: "button"` be written into a calibration record by hand and be
+   * wrong. A record may only state what the apparatus returns, so a sweep whose rows cannot carry a tag can only
+   * ever justify a promotion from an EXPECTED one. Null when the reading carried none: never a guess, and never
+   * a tag for a count that was not 1.
+   */
+  readonly observedTag: string | null;
+  /**
    * The containment reading for this candidate, or null when the run did not take one (every non-calibration
    * run). Null is not "nothing was contained" — see {@link presence}, which is `NOT_MEASURED` in that case.
    */
@@ -331,6 +341,8 @@ export interface WingReconRawRow {
   readonly matchCount: number;
   readonly sig?: string;
   readonly hiddenCount?: number;
+  /** The MEASURED tag of a unique match, when the reading carried one. Absent ⇒ not measured, never assumed. */
+  readonly tag?: string;
   readonly containment?: FixedLabelContainmentReading;
 }
 
@@ -364,13 +376,14 @@ function interpretFor<K extends string>(
   const shapeById = new Map<string, string>();
   const sigById = new Map<string, string>();
   const hiddenById = new Map<string, number>();
+  const tagById = new Map<string, string>();
   const containmentById = new Map<string, FixedLabelContainmentReading>();
   const conflicting = new Set<string>();
   for (const r of raw) {
     // A repeated candidate id is a conflict when ANY of its readings differ, not just the count. Comparing the
     // count alone let two rows with the same count but different containment through, and the last one silently
     // won — which is the same "reported twice, differently" case, one field over.
-    const shape = JSON.stringify([r.matchCount, r.sig ?? null, r.hiddenCount ?? null, r.containment ?? null]);
+    const shape = JSON.stringify([r.matchCount, r.sig ?? null, r.hiddenCount ?? null, r.tag ?? null, r.containment ?? null]);
     if (shapeById.has(r.targetId) && shapeById.get(r.targetId) !== shape) conflicting.add(r.targetId);
     shapeById.set(r.targetId, shape);
     byId.set(r.targetId, r.matchCount);
@@ -379,6 +392,7 @@ function interpretFor<K extends string>(
     // the same measured-vs-unmeasured line the count itself draws, one field over.
     if (typeof r.hiddenCount === "number" && Number.isSafeInteger(r.hiddenCount) && r.hiddenCount >= 0)
       hiddenById.set(r.targetId, r.hiddenCount);
+    if (typeof r.tag === "string" && r.tag.length > 0) tagById.set(r.targetId, r.tag);
     if (r.containment) containmentById.set(r.targetId, r.containment);
   }
   const out: { target: K; candidates: WingReconCandidateResult[]; uniqueCandidateIds: string[]; resolvedUnambiguously: boolean }[] = [];
@@ -395,6 +409,7 @@ function interpretFor<K extends string>(
           // count or containment either — carrying one from a conflicting row would dress an untrusted reading
           // in evidence. `presence` follows the count: unmeasured.
           hiddenMatchCount: null,
+          observedTag: null,
           containment: null,
           presence: "NOT_MEASURED",
         };
@@ -408,6 +423,9 @@ function interpretFor<K extends string>(
         verdict,
         sig16: verdict === "UNIQUE" ? (sigById.get(c.id) ?? null) : null,
         hiddenMatchCount: hiddenById.get(c.id) ?? null,
+        // Tied to UNIQUE for the same reason the signature is: a tag is a property of THE match, and there is
+        // no such thing when the count is 0 or 2.
+        observedTag: verdict === "UNIQUE" ? (tagById.get(c.id) ?? null) : null,
         containment,
         presence: wingStage2PresenceFrom(containment),
       };
@@ -2076,8 +2094,8 @@ function markerSpecById(id: string): WingFlowScreenMarkerSpec {
  * So the same fact is available here as a set, before anyone is seated. Derived from the marker ids rather than
  * listed, because a hand-written list is what would drift when a marker moves between targets.
  */
-export function wingScreenMarkerTargets(): WingStage2ReconTarget[] {
-  const wanted = new Set<string>([WING_PURPOSE_SCREEN_MARKER_ID, ...WING_TERMS_SCREEN_MARKER_IDS]);
+function targetsCarrying(ids: readonly string[]): WingStage2ReconTarget[] {
+  const wanted = new Set<string>(ids);
   const out: WingStage2ReconTarget[] = [];
   for (const target of WING_STAGE2_RECON_TARGETS) {
     if (WING_STAGE2_RECON_CANDIDATES[target].some((c) => wanted.has(c.id))) out.push(target);
@@ -2085,9 +2103,39 @@ export function wingScreenMarkerTargets(): WingStage2ReconTarget[] {
   return out;
 }
 
-/** The screen-marker targets a requested discovery scope is MISSING. Empty ⇒ the screen will be identifiable. */
+export function wingScreenMarkerTargets(): WingStage2ReconTarget[] {
+  return targetsCarrying([WING_PURPOSE_SCREEN_MARKER_ID, ...WING_TERMS_SCREEN_MARKER_IDS]);
+}
+
+/**
+ * The targets carrying the VENDOR-FORM candidates, which {@link wingConfirmAdvisory} requires for the same
+ * reason: a candidate that was never probed cannot say whether its field is on screen, so the advisory answers
+ * `STOP_NOT_MEASURED` and the run halts before the 확인 checkpoint.
+ */
+export function wingConfirmGateTargets(): WingStage2ReconTarget[] {
+  return targetsCarrying([...WING_VENDOR_FORM_CANDIDATE_IDS]);
+}
+
+/**
+ * **Everything a discovery run must have in scope to finish.** The screen markers AND the vendor-form
+ * candidates — two separate downstream gates, both of which fail closed on an unprobed row.
+ *
+ * The second half was learned the expensive way. A scope narrowed to the screen markers plus the four controls
+ * being calibrated passed the marker check and then halted at `CONFIRM_ADVISORY_STOP / STOP_NOT_MEASURED` on
+ * 2026-08-11, after the operator had logged in, pressed 발급 and confirmed the purpose option — because
+ * `wingConfirmAdvisory` reads the vendor-form rows and they were not in the sweep. The guard that had just been
+ * added covered the marker gate and not its sibling, which is the shape this workstream keeps repeating: a rule
+ * fixed in one place and left standing in the next one along. So the requirement is a UNION derived from both
+ * gates, not a list either of them owns.
+ */
+export function wingDiscoveryRequiredTargets(): WingStage2ReconTarget[] {
+  const required = new Set<WingStage2ReconTarget>([...wingScreenMarkerTargets(), ...wingConfirmGateTargets()]);
+  return WING_STAGE2_RECON_TARGETS.filter((t) => required.has(t));
+}
+
+/** The required targets a requested discovery scope is MISSING. Empty ⇒ the run can reach its last checkpoint. */
 export function wingDiscoveryScopeGap(targets: readonly WingStage2ReconTarget[]): WingStage2ReconTarget[] {
-  return wingScreenMarkerTargets().filter((t) => !targets.includes(t));
+  return wingDiscoveryRequiredTargets().filter((t) => !targets.includes(t));
 }
 
 /** The PURPOSE screen's marker spec. Visible ⇒ the seller is on the purpose screen. */

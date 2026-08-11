@@ -722,6 +722,10 @@ describe("the emitted Stage-2 record", () => {
             verdict: "UNIQUE" as const,
             sig16: "0123456789abcdef",
             hiddenMatchCount: null,
+            // MEASURED, or null. Carried on the row since 2026-08-11: the locate script has always returned it
+            // and the sweep dropped it, so a promotion built on this record could only ever have cited an
+            // EXPECTED tag — the substitution that put `role: "button"` on the refuted 발급 record.
+            observedTag: null,
             containment: null,
             presence: "NOT_MEASURED" as const,
           },

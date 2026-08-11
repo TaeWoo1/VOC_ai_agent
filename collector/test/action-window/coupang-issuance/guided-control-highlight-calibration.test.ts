@@ -22,7 +22,10 @@ import {
   WING_STAGE2_RECON_CANDIDATES,
   wingGuidedHighlightPromotion,
   wingCandidateSpecById,
+  interpretWingStage2Recon,
   wingScreenMarkerTargets,
+  wingConfirmGateTargets,
+  wingDiscoveryRequiredTargets,
   wingDiscoveryScopeGap,
   type WingGuidedHighlightTarget,
   type WingStage2ReconTarget,
@@ -239,22 +242,33 @@ describe("the candidates the calibration will measure", () => {
 
 /* ─────────── the scope gap that would burn the sitting this calibration needs ─────────── */
 
-describe("discoveryScopeRefusal — a scope that cannot say which screen it is on", () => {
-  const FULL = wingScreenMarkerTargets();
+describe("discoveryScopeRefusal — a scope that cannot finish the flow it is measuring", () => {
+  const FULL = wingDiscoveryRequiredTargets();
 
   it("names EVERY target carrying a flow-screen marker, derived rather than listed", () => {
     // `wingFlowScreenFrom` needs all three markers PROBED — a missing row cannot distinguish "not on this
     // screen" from "not asked about". Derived from the marker ids so a marker moving between targets moves
     // this set with it, instead of leaving a hand-written list quietly wrong.
-    expect(FULL).toEqual(["purpose", "terms_heading", "terms_issue_final"]);
+    expect(wingScreenMarkerTargets()).toEqual(["purpose", "terms_heading", "terms_issue_final"]);
   });
 
-  it("**refuses BEFORE the browser launches when a marker target is missing**", () => {
-    // The gate downstream is correct and fails closed: every reading reads NOT_MEASURED and the run halts on
-    // SCREEN_NOT_AS_EXPECTED. It just halts at the SECOND checkpoint — after the operator has logged in,
-    // navigated, and pressed `API Key 발급 받기` on a real marketplace. It cannot give the sitting back.
+  it("**…and every target the 확인 advisory reads, which is the half that cost a live sitting**", () => {
+    // Learned the expensive way on 2026-08-11. A scope carrying the screen markers plus the four controls
+    // being calibrated passed the marker check and then halted at CONFIRM_ADVISORY_STOP / STOP_NOT_MEASURED,
+    // after the operator had logged in, pressed 발급 and confirmed the purpose option — because
+    // `wingConfirmAdvisory` reads the vendor-form rows and they were not in the sweep. The guard that had just
+    // been added covered one gate and left its sibling standing.
+    expect(wingConfirmGateTargets()).toEqual(["vendor_info", "vendor_url", "call_ip"]);
+    // The requirement is the UNION of the two gates, in canonical order — not a list either of them owns.
+    expect(FULL).toEqual(["purpose", "vendor_info", "vendor_url", "call_ip", "terms_heading", "terms_issue_final"]);
+  });
+
+  it("**refuses BEFORE the browser launches when a required target is missing**", () => {
+    // The gates downstream are correct and fail closed. They just fail at the second or third checkpoint —
+    // after the operator has logged in, navigated, and pressed `API Key 발급 받기` on a real marketplace.
     const refusal = discoveryScopeRefusal(true, ["purpose", "confirm", "terms_heading"]);
     expect(refusal).toContain("terms_issue_final");
+    expect(refusal).toContain("vendor_info");
     expect(refusal).toContain("No browser launched");
     // …and it tells the operator the scope that would work, rather than only what is wrong with theirs.
     expect(refusal).toContain(FULL.join(","));
@@ -277,10 +291,15 @@ describe("discoveryScopeRefusal — a scope that cannot say which screen it is o
     // The concrete run: the three screen markers, plus the targets carrying the controls being measured.
     const scope: readonly WingStage2ReconTarget[] = [
       "purpose",
+      "self_dev",
+      "vendor_info",
+      "vendor_url",
+      "call_ip",
       "confirm",
       "terms_heading",
       "terms_api_agree",
       "terms_category_agree",
+      "terms_cancel",
       "terms_issue_final",
       "purpose_open_api",
     ];
@@ -290,5 +309,50 @@ describe("discoveryScopeRefusal — a scope that cannot say which screen it is o
     // a consent ring is additionally gated on.
     expect(scope).toContain("terms_api_agree");
     expect(scope).toContain("terms_category_agree");
+  });
+});
+
+/* ─────────── the measured tag, which the sweep used to drop on the floor ─────────── */
+
+describe("the recon row carries the MEASURED tag", () => {
+  it("**a unique match's tag survives the fold** — a promotion may not cite an expected one", () => {
+    // The locate script has returned `tag` since the 발급 recalibration, and this seam dropped it. So every
+    // candidate a Stage-2 sweep measured could only ever have justified a promotion from `WING_TARGET_EXPECTED_
+    // ROLE` — the exact substitution that put `role: "button"` on a record nobody had measured.
+    const [folded] = interpretWingStage2Recon(["confirm"], [
+      { targetId: "stage2.confirm.actionable", matchCount: 1, sig: "abc123abc123abcd", hiddenCount: 0, tag: "BUTTON" },
+    ]);
+    const row = folded!.candidates.find((c) => c.id === "stage2.confirm.actionable")!;
+    expect(row.verdict).toBe("UNIQUE");
+    expect(row.observedTag).toBe("BUTTON");
+    expect(row.hiddenMatchCount).toBe(0);
+  });
+
+  it("a tag is null when the count is not 1 — there is no 'the match' to have a tag", () => {
+    const [folded] = interpretWingStage2Recon(["confirm"], [
+      { targetId: "stage2.confirm.confirm", matchCount: 2, tag: "DIV" },
+    ]);
+    expect(folded!.candidates[0]!.observedTag).toBeNull();
+  });
+
+  it("a reading that carried NO tag stays null, never a guess", () => {
+    const [folded] = interpretWingStage2Recon(["confirm"], [
+      { targetId: "stage2.confirm.actionable", matchCount: 1, sig: "abc123abc123abcd" },
+    ]);
+    const row = folded!.candidates.find((c) => c.id === "stage2.confirm.actionable")!;
+    expect(row.verdict).toBe("UNIQUE");
+    expect(row.observedTag).toBeNull();
+  });
+
+  it("two readings of one candidate that DISAGREE on the tag are NOT_MEASURED, like any other disagreement", () => {
+    // The conflict shape is per-field for a reason: two rows agreeing on the count while disagreeing on what
+    // they measured is precisely the case where the last one silently wins.
+    const [folded] = interpretWingStage2Recon(["confirm"], [
+      { targetId: "stage2.confirm.actionable", matchCount: 1, tag: "BUTTON" },
+      { targetId: "stage2.confirm.actionable", matchCount: 1, tag: "A" },
+    ]);
+    const row = folded!.candidates.find((c) => c.id === "stage2.confirm.actionable")!;
+    expect(row.verdict).toBe("NOT_MEASURED");
+    expect(row.observedTag).toBeNull();
   });
 });
