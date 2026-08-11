@@ -37,6 +37,8 @@ import {
   resolveWingStage2ReconScope,
   WING_FLOW_CHECKPOINTS,
   WING_FLOW_CHECKPOINTS_ENV,
+  WING_ISSUANCE_FLOW_PLAN,
+  WING_VENDOR_METHOD_PLAN,
   resolveWingFlowCheckpoints,
 } from "../action-window/coupang-wing-label-recon";
 // The public WING host default for the Coupang WING selector-probe phase (pure leaf; no per-run input needed).
@@ -169,10 +171,16 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
   const isWingStage2Recon = phase === "COUPANG_WING_STAGE2_RECON";
   const isWingStage2Calibration = phase === "COUPANG_WING_STAGE2_LABEL_CALIBRATION";
   const isWingFlowDiscovery = phase === "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY";
+  const isWingVendorMethod = phase === "COUPANG_WING_VENDOR_METHOD_DISCOVERY";
   // The per-run checkpoint PLAN, resolved here so the manifest describes THIS run rather than the phase's
   // longest possible one. A manifest promising four checkpoints for a three-checkpoint run is the same
   // manifest-does-not-describe-the-run defect as promising three for four, wearing the other hat.
-  const flowPlan = isWingFlowDiscovery ? resolveWingFlowCheckpoints(env(WING_FLOW_CHECKPOINTS_ENV)) : null;
+  //
+  // The plan resolved against is the PHASE's own. Defaulting to the issuance flow's would reject every vendor
+  // checkpoint as unrecognized; defaulting to the vendor plan would accept a six-checkpoint prefix under a
+  // manifest describing four, which is the direction that costs something.
+  const phasePlan = isWingVendorMethod ? WING_VENDOR_METHOD_PLAN : isWingFlowDiscovery ? WING_ISSUANCE_FLOW_PLAN : null;
+  const flowPlan = phasePlan ? resolveWingFlowCheckpoints(env(WING_FLOW_CHECKPOINTS_ENV), phasePlan) : null;
   if (flowPlan && !flowPlan.ok) {
     process.stderr.write(`PREFLIGHT FAIL: approval_prerequisite (WING_FLOW_CHECKPOINTS_MISMATCH): ${flowPlan.reason}\n`);
     return 1;
@@ -180,10 +188,12 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
   const checkpoints = flowPlan && flowPlan.ok ? flowPlan.checkpoints : [...WING_FLOW_CHECKPOINTS];
   const reachesTerms = checkpoints.includes("TERMS_CHECKED_BY_OPERATOR");
   const reachesConfirm = checkpoints.includes("AFTER_OPERATOR_CONFIRM");
+  const reachesVendorScreen = checkpoints.includes("VENDOR_METHOD_SCREEN_UNTOUCHED");
+  const reachesVendorSelection = checkpoints.includes("VENDOR_METHOD_SELECTED_BY_OPERATOR");
   // BOTH Stage-2 phases share the scope env var, so both must resolve it. A calibration manifest that skipped
   // this would print the full six targets while the run measured whatever the env var narrowed to — the same
   // manifest-under-describes-the-run gap review already found on the recon route.
-  const isWingStage2 = isWingStage2Recon || isWingStage2Calibration || isWingFlowDiscovery;
+  const isWingStage2 = isWingStage2Recon || isWingStage2Calibration || isWingFlowDiscovery || isWingVendorMethod;
   // The Stage-2 scope, from its OWN env var. Without this the resolver only ever sees `undefined` and returns
   // the full six — so `SELLEROPS_WING_STAGE2_TARGETS=purpose` produced a manifest listing all six targets and a
   // run command carrying all six, while the bootstrap printed the narrower scope it was asked for. The
@@ -231,6 +241,8 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     ? `WING OPEN-API issuance-flow DISCOVERY, NARROWED to ${checkpoints.length} checkpoints (${checkpoints.join(" → ")}) — the run ENDS after the last one and does not reach the terms screen's consent step. The OPERATOR presses 발급, confirms the purpose option is selected (no click needed if OPEN API is already the default)${reachesConfirm ? ", and — ONLY if the reading says the flow is still on the purpose screen and the 업체명/URL/IP form is not on it — presses 확인 so the agent can read WHETHER the screen changes" : ""}. The agent takes read-only label/presence/association readings at each checkpoint and performs no click, selection, input, or value read, and never reads \`checked\`. The key-creating 약관 동의 및 Key 발급받기 button is never pressed and no checkpoint of this run stands in front of it. SellerOps does not read, evaluate, agree to, or advise on the terms.`
     : isWingFlowDiscovery
     ? "WING OPEN-API issuance-flow DISCOVERY across operator-advanced checkpoints (the OPERATOR presses 발급, selects the purpose option, and — ONLY if the reading after that selection shows the 업체명/URL/IP form is not yet on screen — presses 확인, which opens the TERMS screen; the operator then ticks the two consent checkboxes themselves. The agent takes the same read-only label/association readings at each checkpoint, plus a CONSENT-BLOCK census on the terms screen — for each visible checkbox, whether the nearest ancestor block holding exactly one consent sentence also holds exactly one checkbox, reported as indices and counts, never as wording. It performs no click, selection, input, or value read, and never reads `checked`. THE RUN ENDS ON THE TERMS SCREEN: the button below it, `약관 동의 및 Key 발급받기`, is the KEY-CREATION control, it is measured only to locate it, it is never pressed, and this phase has no checkpoint after the one that would ask. Key issuance is a separate phase with its own manifest and its own grant. SellerOps does not read, evaluate, agree to, or advise on the terms)"
+    : isWingVendorMethod
+    ? `WING VENDOR-METHOD DISCOVERY across ${checkpoints.length} operator-advanced checkpoints (${checkpoints.join(" → ")}). The whole issuance flow as the discovery phase runs it, and then two steps further: the OPERATOR presses \`약관 동의 및 Key 발급받기\` themselves${reachesVendorScreen ? "" : " — NOT in this narrowed run, which ends earlier"}. That press was believed to create the key, was pressed on two live walks, and issued NO key either time (WING_KEY_CREATION_CONTROL_REFUTATION) — this phase rests on that measurement rather than on the button's label, which is what the refuted claim rested on. What it opens is an integration-method screen (\`업체 입력 방식\` / \`연동업체 선택\` / \`자체개발(직접입력)\` / \`업체명\` / \`취소\` \`확인\`) that NO apparatus has ever read; the agent sweeps it read-only${reachesVendorSelection ? " and the operator then selects an input method, which is where the run ENDS" : ""}. ⚠ THAT SCREEN'S \`확인\` ISSUES A REAL API KEY, irreversibly, on the operator's live account. It is not in this approval, no checkpoint of this phase stands in front of it, and the phase has no checkpoint after the last one above. Key issuance is a separate manifest and a separate mode-WRITE grant. WHICH input method SellerOps should use is a PRODUCT DECISION and is not answered by this run — the run measures what the screen is made of and recommends nothing. The agent performs no click, selection, input, or value read, and never reads \`checked\`.`
     : isWingGuidedWalk
     ? "WING GUIDED ISSUANCE WALK, end to end (the OPERATOR performs every marketplace action: log in, reach the page, press 'API Key 발급 받기', confirm OPEN API is selected, press 확인, read the two consent texts and tick them. The agent OPENS the seller's own WING sales-info landing once, so the window is not blank, and navigates no further. It highlights SEVEN live-calibrated controls — including the walk's last one, measured visible+unique on the terms screen on 2026-08-11, and the `OPEN API` option label, the 확인 control and the two consent SENTENCES, all measured the same day. Every guided step that names a WING CONTROL now rings it; the two steps that name no control — reaching the page, and going back to SellerOps — are still text-only, as they must be. The rings on the purpose option and the consents sit on the LABEL and the SENTENCES, never on the radio or the checkboxes: those inputs have no accessible association, so SellerOps does not claim to know which box is which — what ties each sentence to its own box is a measured structural pairing. It clicks, types, submits and selects nothing. It ADVANCES ITSELF on WING's own state: the purpose screen appearing, the terms screen appearing, and both consent boxes being ticked (a yes/no computed in the page, never stored, sent, or logged — it never ticks a box or reads the terms). THE WALK RESTS IN FRONT OF `약관 동의 및 Key 발급받기`: it is never pressed and no step follows it here. That control does NOT create the key — that was asserted from its label and REFUTED on 2026-08-12, when it was pressed and no key was issued; what it opens is an integration-method form (자체개발 / 연동업체 · 업체명 · 취소 · 확인) whose 확인 the operator reports as the issuing control. No apparatus has ever read that screen, so the walk stops here because what follows is unmeasured, not because a key would be created. Key issuance remains a separate phase with its own manifest and grant. No credential value read, no connect-test, no sync, no upload)"
     : isWingReveal
@@ -259,6 +271,15 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
       (reachesConfirm ? " + at most 1 확인 press (gated on the measurement, and skipped entirely if it says stop)" : "") +
       (reachesTerms ? " + up to 2 consent checkbox ticks" : "") +
       "; 0 presses of the key-creating 약관 동의 및 Key 발급받기 button, which this phase cannot reach. agent: " +
+      `${checkpoints.length} read-only checkpoint readings, 0 clicks, 0 selections, 0 inputs, 0 value reads` +
+      ` (checkpoints: ${checkpoints.join(" → ")})`
+    : isWingVendorMethod
+    ? "operator-performed: 1 발급 press + 1 purpose-option selection (none needed if OPEN API is already the default)" +
+      (reachesConfirm ? " + at most 1 확인 press on the purpose screen (gated on the measurement)" : "") +
+      (reachesTerms ? " + up to 2 consent checkbox ticks" : "") +
+      (reachesVendorScreen ? " + 1 press of 약관 동의 및 Key 발급받기 (measured to issue no key: pressed twice live, none issued)" : "") +
+      (reachesVendorSelection ? " + 1 vendor-method selection" : "") +
+      "; 0 presses of the vendor screen's 확인, which ISSUES A REAL KEY and which this phase cannot reach. agent: " +
       `${checkpoints.length} read-only checkpoint readings, 0 clicks, 0 selections, 0 inputs, 0 value reads` +
       ` (checkpoints: ${checkpoints.join(" → ")})`
     : isWingGuidedWalk

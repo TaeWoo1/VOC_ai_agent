@@ -12,10 +12,12 @@ import { fileURLToPath } from "node:url";
 import {
   WING_CONFIRM_ADVISORIES,
   WING_FLOW_CHECKPOINTS,
+  WING_ISSUANCE_FLOW_PLAN,
   WING_FLOW_HALT_REASONS,
   WING_VENDOR_FORM_CANDIDATE_IDS,
   WING_PURPOSE_SCREEN_MARKER_ID,
   WING_TERMS_SCREEN_MARKER_IDS,
+  WING_VENDOR_METHOD_SCREEN_MARKER_ID,
   WING_CHECKPOINT_EXPECTED_SCREEN,
   WING_TERMS_CHECKBOX_PROMOTION_BLOCKED,
   wingFlowScreenFrom,
@@ -24,6 +26,7 @@ import {
   WING_KEY_CREATION_CONTROL_ID,
   WING_CHOICE_LABEL_CANDIDATES,
   WING_STAGE3_TERMS_OPTION_CANDIDATES,
+  WING_STAGE4_VENDOR_METHOD_OPTION_CANDIDATES,
   WING_STAGE2_RECON_CANDIDATES,
   WING_STAGE2_RECON_TARGETS,
   wingConfirmAdvisory,
@@ -56,13 +59,24 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 type Row = { id: string; presence: WingStage2Presence };
 
-/** The screen markers, in the state that identifies one screen or the other. */
-const markers = (screen: "PURPOSE" | "TERMS" | "NEITHER"): Row[] => [
+/**
+ * The screen markers, in the state that identifies one screen or the other.
+ *
+ * EVERY marker family is present in every row set, always — including the vendor one. That is not tidiness: a
+ * marker missing from a reading makes `wingFlowScreenFrom` answer `NOT_MEASURED` by design, so a helper that
+ * omitted the newest family would silently turn every screen assertion below into an assertion about an
+ * unprobed sweep.
+ */
+const markers = (screen: "PURPOSE" | "TERMS" | "VENDOR_METHOD" | "NEITHER"): Row[] => [
   { id: WING_PURPOSE_SCREEN_MARKER_ID, presence: screen === "PURPOSE" ? "PRESENT_VISIBLE" : "PRESENT_HIDDEN_ONLY" },
   ...WING_TERMS_SCREEN_MARKER_IDS.map((id) => ({
     id,
     presence: (screen === "TERMS" ? "PRESENT_VISIBLE" : "PRESENT_HIDDEN_ONLY") as WingStage2Presence,
   })),
+  {
+    id: WING_VENDOR_METHOD_SCREEN_MARKER_ID,
+    presence: (screen === "VENDOR_METHOD" ? "PRESENT_VISIBLE" : "PRESENT_HIDDEN_ONLY") as WingStage2Presence,
+  },
 ];
 
 /** A complete PURPOSE-screen reading with the vendor labels in the given state. */
@@ -160,9 +174,20 @@ describe("wingConfirmAdvisory — may the run INVITE the 확인 press?", () => {
     const both: Row[] = [
       { id: WING_PURPOSE_SCREEN_MARKER_ID, presence: "PRESENT_VISIBLE" },
       ...WING_TERMS_SCREEN_MARKER_IDS.map((id) => ({ id, presence: "PRESENT_VISIBLE" as const })),
+      { id: WING_VENDOR_METHOD_SCREEN_MARKER_ID, presence: "PRESENT_HIDDEN_ONLY" as const },
       ...WING_VENDOR_FORM_CANDIDATE_IDS.map((id) => ({ id, presence: "PRESENT_HIDDEN_ONLY" as const })),
     ];
     expect(wingFlowScreenFrom({ precondition: "OK", faultCount: 0, candidates: both })).toBe("TERMS");
+    // …and the VENDOR screen outranks BOTH. Same rule, one screen further: it is reported as a dialog over the
+    // terms screen, so the terms markers may well still paint behind it — and answering TERMS there would put the
+    // run one screen behind the seller at the screen whose 확인 issues a real key.
+    const allThree: Row[] = both.map((c) =>
+      c.id === WING_VENDOR_METHOD_SCREEN_MARKER_ID ? { ...c, presence: "PRESENT_VISIBLE" as const } : c,
+    );
+    expect(wingFlowScreenFrom({ precondition: "OK", faultCount: 0, candidates: allThree })).toBe("VENDOR_METHOD");
+    expect(wingConfirmAdvisory({ precondition: "OK", faultCount: 0, candidates: allThree })).toBe(
+      "STOP_ALREADY_PAST_THE_PURPOSE_SCREEN",
+    );
     expect(wingConfirmAdvisory({ precondition: "OK", faultCount: 0, candidates: both })).toBe(
       "STOP_ALREADY_PAST_THE_PURPOSE_SCREEN",
     );
@@ -645,7 +670,9 @@ describe("the terms screen — transcribed verbatim, and the key-creation bounda
     ]);
     expect(WING_CHOICE_LABEL_CANDIDATES[4]!.exactText).toBe("OPEN API");
     expect(WING_CHOICE_LABEL_CANDIDATES[5]!.exactText).toBe("플레이오토 웹 솔루션");
-    expect(WING_CHOICE_LABEL_CANDIDATES.slice(6)).toEqual([...WING_STAGE3_TERMS_OPTION_CANDIDATES]);
+    expect(WING_CHOICE_LABEL_CANDIDATES.slice(6, 8)).toEqual([...WING_STAGE3_TERMS_OPTION_CANDIDATES]);
+    // The vendor-method options were APPENDED 2026-08-12, after both earlier families, for exactly this reason.
+    expect(WING_CHOICE_LABEL_CANDIDATES.slice(8)).toEqual([...WING_STAGE4_VENDOR_METHOD_OPTION_CANDIDATES]);
     // Unique ids and unique texts across the union — a collision would make the reported index order-dependent.
     const ids = WING_CHOICE_LABEL_CANDIDATES.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
@@ -688,7 +715,7 @@ describe("the manifest cannot under-describe the flow it approves", () => {
   });
 
   it("an invalid checkpoint plan REFUSES rather than falling back to the whole flow", () => {
-    const head = CLI_SRC.slice(CLI_SRC.indexOf("const flowPlan = isWingFlowDiscovery"));
+    const head = CLI_SRC.slice(CLI_SRC.indexOf("const flowPlan = phasePlan"));
     expect(head.slice(0, 900)).toContain("WING_FLOW_CHECKPOINTS_MISMATCH");
     expect(head.slice(0, 900)).toContain("resolveWingFlowCheckpoints");
   });
@@ -871,9 +898,9 @@ describe("the terms checkboxes are blocked from promotion, by name", () => {
 
 describe("a run may end the flow early, but never start it in the middle", () => {
   it("accepts a PREFIX and defaults to the whole flow", () => {
-    expect(resolveWingFlowCheckpoints(undefined)).toEqual({ ok: true, checkpoints: [...WING_FLOW_CHECKPOINTS] });
-    expect(resolveWingFlowCheckpoints("  ")).toEqual({ ok: true, checkpoints: [...WING_FLOW_CHECKPOINTS] });
-    const three = resolveWingFlowCheckpoints(WING_FLOW_CHECKPOINTS.slice(0, 3).join(","));
+    expect(resolveWingFlowCheckpoints(undefined, WING_ISSUANCE_FLOW_PLAN)).toEqual({ ok: true, checkpoints: [...WING_FLOW_CHECKPOINTS] });
+    expect(resolveWingFlowCheckpoints("  ", WING_ISSUANCE_FLOW_PLAN)).toEqual({ ok: true, checkpoints: [...WING_FLOW_CHECKPOINTS] });
+    const three = resolveWingFlowCheckpoints(WING_FLOW_CHECKPOINTS.slice(0, 3).join(","), WING_ISSUANCE_FLOW_PLAN);
     expect(three).toEqual({ ok: true, checkpoints: [...WING_FLOW_CHECKPOINTS.slice(0, 3)] });
   });
 
@@ -886,17 +913,17 @@ describe("a run may end the flow early, but never start it in the middle", () =>
       "PURPOSE_OPTION_SELECTED_BY_OPERATOR,PURPOSE_SCREEN_UNTOUCHED",
       "TERMS_CHECKED_BY_OPERATOR",
     ]) {
-      const r = resolveWingFlowCheckpoints(bad);
+      const r = resolveWingFlowCheckpoints(bad, WING_ISSUANCE_FLOW_PLAN);
       expect(r.ok, bad).toBe(false);
       if (!r.ok) expect(r.reason).toContain("PREFIX");
     }
   });
 
   it("reports a COUNT for unknown names, never the tokens", () => {
-    const r = resolveWingFlowCheckpoints("PURPOSE_SCREEN_UNTOUCHED,<script>alert(1)</script>");
+    const r = resolveWingFlowCheckpoints("PURPOSE_SCREEN_UNTOUCHED,<script>alert(1)</script>", WING_ISSUANCE_FLOW_PLAN);
     expect(r.ok).toBe(false);
     if (!r.ok) {
-      expect(r.reason).toContain("1 unrecognized");
+      expect(r.reason).toContain("1 checkpoint name(s) not in the ISSUANCE_FLOW plan");
       expect(r.reason).not.toContain("script");
     }
   });

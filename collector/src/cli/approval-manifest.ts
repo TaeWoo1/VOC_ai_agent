@@ -93,6 +93,13 @@ export const CALIBRATION_PHASES = [
   // permits — press 확인. The agent's click/type/submit/selection budget is still 0; the widening is entirely in
   // what the human is invited to do, which a capability list cannot express and a manifest must.
   "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY",
+  // The VENDOR-METHOD DISCOVERY phase. The discovery flow carried two checkpoints further, onto the screen that
+  // follows `약관 동의 및 Key 발급받기` — the one the operator reports actually issues the key. Separately
+  // approvable because it asks the operator to press the control every earlier manifest promised they would not:
+  // that press is MEASURED to issue no key (twice, on live walks), which is what makes this a READ phase and not
+  // a WRITE one. The agent's click/type/submit/selection budget is still 0. It ENDS with the seller looking at a
+  // `확인` that issues a real key and which no checkpoint of this phase may reach.
+  "COUPANG_WING_VENDOR_METHOD_DISCOVERY",
   // The GUIDED ISSUANCE WALK. The product path, run live end-to-end for the first time: the WING-resident
   // tutorial guides the seller from the open-API page to the terms screen, and RESTS in front of the control
   // that creates the key. Two of its eight steps highlight a live-calibrated control; the four added by the
@@ -657,6 +664,32 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     allowsHighlight: false,
     mode: "READ_ONLY",
   },
+  COUPANG_WING_VENDOR_METHOD_DISCOVERY: {
+    phase: "COUPANG_WING_VENDOR_METHOD_DISCOVERY",
+    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    driver: "CoupangWingIssuanceDriver (the discovery reads, carried two checkpoints further onto the vendor-method screen)",
+    // IDENTICAL to the discovery phase's list, and deliberately so: this phase measures nothing the other cannot.
+    // What differs is entirely WHERE the reads are taken and what the OPERATOR is invited to do to get there —
+    // which is why it is a separate manifest rather than a longer checkpoint list on the existing one. A phase
+    // that widened the capability list here would be describing a different instrument; this one is the same
+    // instrument pointed at a screen nothing has read.
+    capableActions: [
+      "OPEN_DEDICATED_WINDOW",
+      "WAIT_OPERATOR_LOGIN_NAV",
+      "CLASSIFY_SANITIZED_PAGE_CATEGORY",
+      "STRUCTURAL_CENSUS",
+      "PROBE_TARGET_MATCHCOUNT",
+      "CHOICE_CONTROL_SHAPE_CENSUS",
+      "FIXED_LABEL_CONTAINMENT_PROBE",
+      "CHOICE_CONTROL_LABEL_ASSOCIATION_CENSUS",
+      "CONSENT_BLOCK_CENSUS",
+    ],
+    allowsHighlight: false,
+    // READ_ONLY is a claim about the AGENT, and it stays true: it reads, and it presses nothing. The operator's
+    // side of this run is wider than any earlier READ phase's, and no mode enum can express that — the operation
+    // text and the operator summary carry it, which is the same division every phase in this file uses.
+    mode: "READ_ONLY",
+  },
   COUPANG_WING_GUIDED_ISSUANCE_WALK: {
     phase: "COUPANG_WING_GUIDED_ISSUANCE_WALK",
     // The operator's command INSTALLS the service; the agent it installs (`src/cli/local-agent.ts`) is then a
@@ -759,6 +792,7 @@ export const WING_PHASES: readonly CalibrationPhase[] = [
   "COUPANG_WING_STAGE2_RECON",
   "COUPANG_WING_STAGE2_LABEL_CALIBRATION",
   "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY",
+  "COUPANG_WING_VENDOR_METHOD_DISCOVERY",
   "COUPANG_WING_GUIDED_ISSUANCE_WALK",
   "COUPANG_WING_ISSUANCE_FORM_REVEAL",
   "COUPANG_WING_KEY_DELETION",
@@ -778,6 +812,7 @@ export const WING_STAGE2_MANIFEST_PHASES: readonly CalibrationPhase[] = [
   "COUPANG_WING_STAGE2_RECON",
   "COUPANG_WING_STAGE2_LABEL_CALIBRATION",
   "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY",
+  "COUPANG_WING_VENDOR_METHOD_DISCOVERY",
 ];
 export function isWingStage2Phase(phase: CalibrationPhase): boolean {
   return WING_STAGE2_MANIFEST_PHASES.includes(phase);
@@ -870,6 +905,7 @@ export const ENTRYPOINT_PHASES = [
   "COUPANG_WING_STAGE2_RECON",
   "COUPANG_WING_STAGE2_LABEL_CALIBRATION",
   "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY",
+  "COUPANG_WING_VENDOR_METHOD_DISCOVERY",
   "COUPANG_WING_GUIDED_ISSUANCE_WALK",
   "COUPANG_WING_ISSUANCE_FORM_REVEAL",
   "COUPANG_WING_KEY_DELETION",
@@ -1011,6 +1047,29 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
       "않습니다. SellerOps는 그 버튼의 위치만 측정하고, 그 다음 단계 자체가 존재하지 않습니다(키 발급은 별도 승인·별도 " +
       "manifest). SellerOps는 약관을 읽거나 판단하거나 대신 동의하지 않습니다. 각 시점마다 라벨 매칭 수·표시 여부·" +
       "라벨 연결 방식만 번호로 읽으며, 화면 문구·입력값·키 값은 기록하지 않습니다.",
+    emitsFrontendUrl: false,
+  },
+  // The VENDOR-METHOD DISCOVERY phase. Same CLI, same dedicated Chrome, two checkpoints further. The summary has
+  // one job the discovery summary did not: it asks the operator to press the control every earlier manifest
+  // promised they would not be asked to press, so it has to say WHY that is now a measured-safe request — and
+  // then say, in the same breath, exactly which control on the next screen is the irreversible one.
+  COUPANG_WING_VENDOR_METHOD_DISCOVERY: {
+    entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
+    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    entrypointCommandId: "probe-wing-issuance-selectors",
+    operatorActionSummary:
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 판매자가 화면을 직접 진행합니다(SellerOps는 클릭·선택·입력을 일절 하지 " +
+      "않습니다). ① 쿠팡(윙)에 직접 로그인·이동해 'API Key 발급 받기'를 직접 누르고 사용 목적 화면에서 멈춘 뒤 ready. " +
+      "② 'OPEN API'가 선택되어 있는지 확인하고 '확인'은 누르지 말고 ready. ③ 중단되지 않은 경우에만 '확인'을 직접 누르고 " +
+      "ready. ④ 약관 2개를 직접 읽고 판단해 체크한 뒤 ready. " +
+      "⑤ '약관 동의 및 Key 발급받기'를 직접 누르세요. 이 버튼은 키를 만들지 않는 것이 이미 측정되었습니다(live walk에서 두 번 " +
+      "눌렸고 두 번 모두 키가 발급되지 않았습니다) — 그래서 이번 단계에서 요청할 수 있는 것입니다. 그 다음에 나오는 화면은 " +
+      "SellerOps가 한 번도 읽어본 적이 없는 화면이며, 아무것도 고르지 말고 그대로 둔 채 ready. " +
+      "⑥ 그 화면에서 업체 입력 방식만 직접 선택하고 ready. 여기서 실행이 끝납니다. " +
+      "⚠ 그 화면의 '확인'은 실제 API 키를 발급하는(되돌릴 수 없는) control이며, 이번 승인 범위에 포함되지 않습니다. 절대 " +
+      "누르지 마세요 — 키 발급은 별도 manifest·별도 승인입니다. 어떤 입력 방식이 SellerOps에 맞는지는 이 실행이 답하지 " +
+      "않습니다(측정이 아니라 제품 결정이며, 이번에는 화면의 구조만 읽습니다). SellerOps는 각 시점마다 라벨 매칭 수·표시 " +
+      "여부·라벨 연결 방식만 번호로 읽으며, 화면 문구·입력값·키 값은 기록하지 않습니다.",
     emitsFrontendUrl: false,
   },
   // The GUIDED ISSUANCE WALK: the product path itself, live. The summary has to carry what the walk does NOT

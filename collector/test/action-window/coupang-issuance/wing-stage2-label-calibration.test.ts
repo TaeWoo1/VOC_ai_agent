@@ -1704,6 +1704,14 @@ describe("WING_STAGE2_LABEL_CALIBRATION_EVIDENCE — measured, inferred, and sti
       "stage2.purpose_open_api.label",
       "stage2.purpose_open_api.broad",
       "stage2.purpose_open_api.input",
+      // The VENDOR-METHOD screen's candidates, added 2026-08-12 — a screen this calibration could not reach and
+      // did not know existed.
+      "stage4.vendor.heading",
+      "stage4.vendor.method_prompt",
+      "stage4.vendor.partner.label",
+      "stage4.vendor.partner.broad",
+      "stage4.vendor.self_dev.label",
+      "stage4.vendor.self_dev.broad",
     ]);
     // Every recon absence is present here, and so is the one candidate that was not an absence.
     for (const id of E.refines.absentCandidateIds) expect(ids).toContain(id);

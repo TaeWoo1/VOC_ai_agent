@@ -33,6 +33,7 @@ import {
 } from "../../../src/action-window/coupang-wing-label-recon";
 import {
   WING_ISSUANCE_FLOW_DISCOVERY_PHASE,
+  WING_STAGE2_RECON_PHASE,
   discoveryScopeRefusal,
   runWingSelectorRecord,
   stage2RecordFor,
@@ -288,10 +289,19 @@ describe("discoveryScopeRefusal — a scope that cannot finish the flow it is me
   const FULL = wingDiscoveryRequiredTargets();
 
   it("names EVERY target carrying a flow-screen marker, derived rather than listed", () => {
-    // `wingFlowScreenFrom` needs all three markers PROBED — a missing row cannot distinguish "not on this
+    // `wingFlowScreenFrom` needs EVERY marker PROBED — a missing row cannot distinguish "not on this
     // screen" from "not asked about". Derived from the marker ids so a marker moving between targets moves
     // this set with it, instead of leaving a hand-written list quietly wrong.
-    expect(wingScreenMarkerTargets()).toEqual(["purpose", "terms_heading", "terms_issue_final"]);
+    //
+    // The VENDOR marker is required of THIS phase too, which does not reach that screen. It has to be: the
+    // requirement is that the screen be IDENTIFIABLE, and a run that could not tell the seller had moved on to
+    // the vendor screen would report the terms screen — the screen it expects — while they stood somewhere else.
+    expect(wingScreenMarkerTargets()).toEqual([
+      "purpose",
+      "terms_heading",
+      "terms_issue_final",
+      "vendor_method_prompt",
+    ]);
   });
 
   it("**…and every target the 확인 advisory reads, which is the half that cost a live sitting**", () => {
@@ -302,13 +312,21 @@ describe("discoveryScopeRefusal — a scope that cannot finish the flow it is me
     // been added covered one gate and left its sibling standing.
     expect(wingConfirmGateTargets()).toEqual(["vendor_info", "vendor_url", "call_ip"]);
     // The requirement is the UNION of the two gates, in canonical order — not a list either of them owns.
-    expect(FULL).toEqual(["purpose", "vendor_info", "vendor_url", "call_ip", "terms_heading", "terms_issue_final"]);
+    expect(FULL).toEqual([
+      "purpose",
+      "vendor_info",
+      "vendor_url",
+      "call_ip",
+      "terms_heading",
+      "terms_issue_final",
+      "vendor_method_prompt",
+    ]);
   });
 
   it("**refuses BEFORE the browser launches when a required target is missing**", () => {
     // The gates downstream are correct and fail closed. They just fail at the second or third checkpoint —
     // after the operator has logged in, navigated, and pressed `API Key 발급 받기` on a real marketplace.
-    const refusal = discoveryScopeRefusal(true, ["purpose", "confirm", "terms_heading"]);
+    const refusal = discoveryScopeRefusal(WING_ISSUANCE_FLOW_DISCOVERY_PHASE, ["purpose", "confirm", "terms_heading"]);
     expect(refusal).toContain("terms_issue_final");
     expect(refusal).toContain("vendor_info");
     expect(refusal).toContain("No browser launched");
@@ -319,14 +337,14 @@ describe("discoveryScopeRefusal — a scope that cannot finish the flow it is me
   it("passes a complete scope, and narrowing that keeps the markers stays legitimate", () => {
     // Narrowing a discovery run is what the scope is FOR. This refuses only the narrowing that removes the
     // run's ability to say where it is.
-    expect(discoveryScopeRefusal(true, [...FULL])).toBeNull();
-    expect(discoveryScopeRefusal(true, [...FULL, "confirm", "purpose_open_api"])).toBeNull();
+    expect(discoveryScopeRefusal(WING_ISSUANCE_FLOW_DISCOVERY_PHASE, [...FULL])).toBeNull();
+    expect(discoveryScopeRefusal(WING_ISSUANCE_FLOW_DISCOVERY_PHASE, [...FULL, "confirm", "purpose_open_api"])).toBeNull();
   });
 
   it("says nothing about a run that is not a discovery run", () => {
     // The other Stage-2 phases take ONE reading of a screen the operator already reached; they never derive a
     // screen and never gate a checkpoint on one.
-    expect(discoveryScopeRefusal(false, [])).toBeNull();
+    expect(discoveryScopeRefusal(WING_STAGE2_RECON_PHASE, [])).toBeNull();
   });
 
   it("the scope THIS unit's calibration needs covers both the markers and the four candidates", () => {
@@ -344,8 +362,9 @@ describe("discoveryScopeRefusal — a scope that cannot finish the flow it is me
       "terms_cancel",
       "terms_issue_final",
       "purpose_open_api",
+      "vendor_method_prompt",
     ];
-    expect(discoveryScopeRefusal(true, scope)).toBeNull();
+    expect(discoveryScopeRefusal(WING_ISSUANCE_FLOW_DISCOVERY_PHASE, scope)).toBeNull();
     expect(wingDiscoveryScopeGap(scope)).toEqual([]);
     // …and the consent-BLOCK census is taken only when BOTH consent targets are in scope, which is the reading
     // a consent ring is additionally gated on.

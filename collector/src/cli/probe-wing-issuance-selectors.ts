@@ -88,8 +88,9 @@ import {
   wingRevealedBetween,
   WING_CHOICE_LABEL_CANDIDATES,
   WING_STAGE3_TERMS_OPTION_CANDIDATES,
-  WING_FLOW_LAST_CHECKPOINT,
-  WING_KEY_CREATION_CONTROL_ID,
+  WING_ISSUANCE_FLOW_PLAN,
+  WING_VENDOR_METHOD_PLAN,
+  type WingFlowPlan,
   WING_CHECKPOINT_EXPECTED_SCREEN,
   WING_FLOW_CHECKPOINTS_ENV,
   resolveWingFlowCheckpoints,
@@ -645,12 +646,16 @@ async function sweepStage2(
   }
   let consentBlocks: WingConsentBlockCensus | null = null;
   let consentBlockFault: WingFaultFingerprint | null = null;
-  // DISCOVERY only. The consent screen is the only place this measures anything, and taking it under a
-  // calibration manifest would be a read that manifest never described.
+  // The MULTI-CHECKPOINT phases only. The consent screen is the only place this measures anything, and taking it
+  // under a calibration manifest would be a read that manifest never described.
   // Phase AND scope. A run narrowed away from the consent targets is not asking about them, and re-measuring
   // an already-established 1:1 pairing would widen a minimal run past what its manifest describes.
+  //
+  // Derived from "does this phase run a flow" rather than from one phase's name: the vendor phase walks through
+  // the same terms screen, and an equality check would have taken no census on the run that crosses it — the
+  // shape that downgraded discovery to a bare recon when `wingPhaseCalibrates` was an equality check.
   const consentInScope = targets.includes("terms_api_agree") && targets.includes("terms_category_agree");
-  if (phase === WING_ISSUANCE_FLOW_DISCOVERY_PHASE && consentInScope && deps.consentBlockCensus) {
+  if (wingPhaseFlowPlan(phase) !== null && consentInScope && deps.consentBlockCensus) {
     try {
       const read = await deps.consentBlockCensus(WING_STAGE3_TERMS_OPTION_CANDIDATES.map((c) => c.exactText));
       if (read) consentBlocks = read;
@@ -776,7 +781,14 @@ export async function runWingFlowDiscovery(
     readonly checkpoints?: readonly WingFlowCheckpoint[];
   },
 ): Promise<WingFlowDiscoveryResult> {
-  const checkpoints = opts.checkpoints ?? WING_FLOW_CHECKPOINTS;
+  // The PHASE decides the plan, and the plan decides where the loop must stop. A phase with no plan reaching this
+  // function is a caller error, not a short run: it would otherwise inherit the issuance flow's four checkpoints
+  // under a manifest that described a single reading.
+  const plan = wingPhaseFlowPlan(opts.phase);
+  if (!plan) {
+    throw new Error(`runWingFlowDiscovery: ${opts.phase} runs no checkpoint plan — it takes a single reading`);
+  }
+  const checkpoints = opts.checkpoints ?? plan.checkpoints;
   // The UNION, not the purpose-only list. Discovery crosses screens, and a census that compared a terms
   // checkbox's derived name against four purpose strings would report `-1` — a measured non-match — for a
   // control whose label we transcribed ourselves.
@@ -815,17 +827,21 @@ export async function runWingFlowDiscovery(
       }
     }
     deps.announceCheckpoint?.(checkpoint, index, checkpoints.length);
-    // The hard stop, enforced rather than documented. A checkpoint list that continued past the terms screen
-    // could only be asking the operator to press the key-creation control, and this loop refuses to be the
-    // thing that asks. Throwing beats halting: a caller who added a fifth checkpoint made a mistake in code,
-    // and a mistake in code should not be reported as a cautious measurement.
+    // The hard stop, enforced rather than documented, and taken from the PLAN so each phase stops where its own
+    // manifest says. A checkpoint list continuing past a plan's end could only be asking the operator to press
+    // the control that plan exists to stop in front of, and this loop refuses to be the thing that asks.
+    // Throwing beats halting: a caller who added a checkpoint made a mistake in code, and a mistake in code
+    // should not be reported as a cautious measurement.
     if (pastLastCheckpoint) {
       throw new Error(
-        `runWingFlowDiscovery: no checkpoint may follow ${WING_FLOW_LAST_CHECKPOINT} — the next control is ` +
-          `${WING_KEY_CREATION_CONTROL_ID}, which is key creation and needs its own approval`,
+        `runWingFlowDiscovery: no checkpoint may follow ${plan.lastCheckpoint} in the ${plan.id} plan — the next ` +
+          `control is ${plan.nextControl}` +
+          (plan.nextControlIsIrreversible
+            ? ", which ISSUES A REAL KEY and needs its own mode-WRITE approval"
+            : ", which needs its own approval"),
       );
     }
-    if (checkpoint === WING_FLOW_LAST_CHECKPOINT) pastLastCheckpoint = true;
+    if (checkpoint === plan.lastCheckpoint) pastLastCheckpoint = true;
     const signal = await deps.waitForReady();
     if (signal !== "ready") {
       aborted = signal === "abort";
@@ -971,14 +987,17 @@ export function calibrationLaunchRefusal(
  * narrowing that removes the run's ability to finish.
  */
 export function discoveryScopeRefusal(
-  isDiscoveryRun: boolean,
+  phase: WingStage2Phase | null,
   targets: readonly WingStage2ReconTarget[],
 ): string | null {
-  if (!isDiscoveryRun) return null;
+  // The PHASE, not a boolean "is this discovery". Both multi-checkpoint phases read the same two gates and both
+  // must refuse — and a boolean computed at one call site is how the second phase would have been added to the
+  // gate everywhere except the one place that decides whether it runs.
+  if (phase === null || wingPhaseFlowPlan(phase) === null) return null;
   const missing = wingDiscoveryScopeGap(targets);
   if (missing.length === 0) return null;
   return (
-    `Refusing to launch: ${WING_ISSUANCE_FLOW_DISCOVERY_PHASE} cannot reach its last checkpoint with this scope ` +
+    `Refusing to launch: ${phase} cannot reach its last checkpoint with this scope ` +
     `— ${missing.join(", ")} feed${missing.length === 1 ? "s" : ""} a gate that fails closed on an unprobed row ` +
     "(the flow-screen markers, and the vendor-form candidates the 확인 advisory reads), and none of them is in " +
     "it. The run would halt part-way through, after you had already logged in and pressed a real control. " +
@@ -1038,13 +1057,51 @@ export const WING_STAGE2_LABEL_CALIBRATION_PHASE = "COUPANG_WING_STAGE2_LABEL_CA
  */
 export const WING_ISSUANCE_FLOW_DISCOVERY_PHASE = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" as const;
 
+/**
+ * The approval phase that carries the discovery flow **two checkpoints further**, onto the vendor-method screen
+ * that follows `약관 동의 및 Key 발급받기`.
+ *
+ * Its own phase for the reason all of them are: the manifest is what the operator reads, and this one asks them
+ * to do something no earlier manifest described — press the control the walk has rested in front of since it was
+ * written. That press is MEASURED not to create a key (it happened twice on live walks and issued none,
+ * `WING_KEY_CREATION_CONTROL_REFUTATION`), which is what makes the phase a READ one at all. A phase asking for it
+ * on the strength of its label would be doing exactly what the refuted claim did.
+ *
+ * **Where it stops is the whole design.** The screen it reaches carries a `확인` that issues a real key. This
+ * phase measures that screen and never presses it; issuance is a separate manifest and a separate mode-WRITE
+ * grant, and no prefix of this plan can reach it.
+ */
+export const WING_VENDOR_METHOD_DISCOVERY_PHASE = "COUPANG_WING_VENDOR_METHOD_DISCOVERY" as const;
+
 /** The Stage-2 phases. Same operator surface, same scope vocabulary; they differ in what is measured. */
 export const WING_STAGE2_PHASES = [
   WING_STAGE2_RECON_PHASE,
   WING_STAGE2_LABEL_CALIBRATION_PHASE,
   WING_ISSUANCE_FLOW_DISCOVERY_PHASE,
+  WING_VENDOR_METHOD_DISCOVERY_PHASE,
 ] as const;
 export type WingStage2Phase = (typeof WING_STAGE2_PHASES)[number];
+
+/**
+ * **Which checkpoint PLAN a phase runs, or `null` for a phase that takes a single reading.**
+ *
+ * The one place a phase becomes a flow. Written as a total map rather than an `if` chain because the two things
+ * that must never happen are both spellable as a missing branch: a discovery phase falling through to `null` and
+ * silently taking one reading under a manifest promising four, and — the serious one — a phase resolving to the
+ * VENDOR plan when its manifest described the issuance flow, which would ask the operator to advance two
+ * checkpoints past what they approved.
+ */
+export const WING_PHASE_FLOW_PLANS: Readonly<Record<WingStage2Phase, WingFlowPlan | null>> = Object.freeze({
+  [WING_STAGE2_RECON_PHASE]: null,
+  [WING_STAGE2_LABEL_CALIBRATION_PHASE]: null,
+  [WING_ISSUANCE_FLOW_DISCOVERY_PHASE]: WING_ISSUANCE_FLOW_PLAN,
+  [WING_VENDOR_METHOD_DISCOVERY_PHASE]: WING_VENDOR_METHOD_PLAN,
+});
+
+/** The plan a phase runs, or `null` when it is not a multi-checkpoint phase. */
+export function wingPhaseFlowPlan(phase: WingStage2Phase): WingFlowPlan | null {
+  return WING_PHASE_FLOW_PLANS[phase];
+}
 
 /**
  * The phases that take the CALIBRATION instruments (containment probe + association census).
@@ -1056,6 +1113,10 @@ export type WingStage2Phase = (typeof WING_STAGE2_PHASES)[number];
 export const WING_CALIBRATING_PHASES = [
   WING_STAGE2_LABEL_CALIBRATION_PHASE,
   WING_ISSUANCE_FLOW_DISCOVERY_PHASE,
+  // The vendor phase needs them MORE than either: the association census walking out from each visible control is
+  // the instrument that can say whether 연동업체 선택 / 자체개발(직접입력) are radios with labels or a select's
+  // options — which decides whether either can be ringed at all.
+  WING_VENDOR_METHOD_DISCOVERY_PHASE,
 ] as const;
 
 export function wingPhaseCalibrates(phase: WingStage2Phase): boolean {
@@ -1468,14 +1529,40 @@ function printDiscoveryCheckpoint(
     console.error("  not submitting them. WHAT IT DOES is what this checkpoint measures — do not take the");
     console.error("  instruction as a claim that it advances the flow. Press it, let whatever follows settle,");
     console.error("  signal, and then STOP and type NOTHING into it.");
-  } else {
+  } else if (checkpoint === "TERMS_CHECKED_BY_OPERATOR") {
+    const last = index + 1 === total;
     console.error(`${step} — the TERMS screen. Tick the two consent boxes YOURSELF, then STOP.`);
-    console.error("  ⚠ DO NOT press '약관 동의 및 Key 발급받기'. It opens a screen this phase has never read, and it is the last");
-    console.error("  checkpoint's whole reason for existing: this run measures where it is and never presses it.");
-    console.error("  Key issuance is a SEPARATE approval with its own manifest — it cannot be reached from here.");
+    if (last) {
+      console.error("  ⚠ DO NOT press '약관 동의 및 Key 발급받기'. It opens a screen this phase has never read, and it is the last");
+      console.error("  checkpoint's whole reason for existing: this run measures where it is and never presses it.");
+      console.error("  Key issuance is a SEPARATE approval with its own manifest — it cannot be reached from here.");
+    } else {
+      // The VENDOR plan continues past this screen, so the flat prohibition above would contradict the very next
+      // instruction. Printing one document's rule against another document's step is how the 2026-08-11 bootstrap
+      // told the operator the opposite of the manifest they were about to read.
+      console.error("  Do NOT press '약관 동의 및 Key 발급받기' YET — the next checkpoint asks for it, and only after");
+      console.error("  this reading is taken. It is MEASURED not to create a key (pressed twice live, none issued).");
+    }
     console.error("  Read the terms and decide for yourself. SellerOps does not read them, agree to them, or");
     console.error("  advise on them; it reads only whether each box's label matches a string you transcribed.");
-    console.error("  Tick both (or neither — the reading is honest either way), then signal. This is the END.");
+    console.error("  Tick both (or neither — the reading is honest either way), then signal.");
+  } else if (checkpoint === "VENDOR_METHOD_SCREEN_UNTOUCHED") {
+    console.error(`${step} — press '약관 동의 및 Key 발급받기' YOURSELF, then STOP on the screen it opens.`);
+    console.error("  This press is MEASURED not to create a key: it was pressed on two live walks and no key was");
+    console.error("  issued either time. That measurement is why this checkpoint may ask for it at all.");
+    console.error("  What it opens has NEVER been read by any apparatus. Choose nothing, type nothing, and above");
+    console.error("  all do not press that screen's '확인' — THAT is what issues a real API key, and it is not in");
+    console.error("  this run's approval. Let the screen settle, signal, and STOP.");
+  } else if (checkpoint === "VENDOR_METHOD_SELECTED_BY_OPERATOR") {
+    console.error(`${step} — on the vendor screen, select the input method YOURSELF. Then STOP. This is the END.`);
+    console.error("  Pick whichever option you would pick for real; the reading is honest either way, and nothing");
+    console.error("  here recommends one — which method SellerOps should use is a product decision, not a");
+    console.error("  measurement, and this run is only measuring what the screen is made of.");
+    console.error("  ⚠ DO NOT press '확인'. It issues a REAL API KEY on your live account, irreversibly, and this");
+    console.error("  run has no approval for it. Issuance is a SEPARATE manifest and a separate grant.");
+    console.error("  SellerOps selects nothing and has no code path that could.");
+  } else {
+    console.error(`${step} — unrecognized checkpoint. Nothing is asked of you; signal to let the run end.`);
   }
   console.error('  Signal by creating this file (or say "ready"):');
   console.error(`       ${readyPath}`);
@@ -1539,7 +1626,10 @@ async function main(): Promise<void> {
   // launch past the blind gate and then take association readings its manifest described — with an empty
   // candidate list nobody checked.
   const isCalibrationRun = isStage2Run && wingPhaseCalibrates(stage2Phase);
-  const isDiscoveryRun = isStage2Run && stage2Phase === WING_ISSUANCE_FLOW_DISCOVERY_PHASE;
+  // The PLAN, not a phase equality. `=== DISCOVERY` here is what would have run the vendor phase as a single
+  // reading — the same mistake `wingPhaseCalibrates` was generalized to prevent, one gate along.
+  const flowPlan = isStage2Run ? wingPhaseFlowPlan(stage2Phase) : null;
+  const isDiscoveryRun = flowPlan !== null;
   // Refuse BEFORE Chrome launches, not at the sweep. The sweep's own blind gate stays (it is what a programmatic
   // caller hits), but an operator who is about to log in, navigate and press a real marketplace control should
   // learn that the instrument cannot answer the question before they do any of it — not after.
@@ -1551,7 +1641,7 @@ async function main(): Promise<void> {
   }
   // …and the same courtesy for the narrowing that would leave a discovery run unable to say which screen it is
   // reading. Same placement, same reason: before Chrome, not at the second checkpoint.
-  const scopeRefusal = discoveryScopeRefusal(isDiscoveryRun, stage2Targets);
+  const scopeRefusal = discoveryScopeRefusal(isStage2Run ? stage2Phase : null, stage2Targets);
   if (scopeRefusal) {
     console.error(scopeRefusal);
     process.exitCode = 2;
@@ -1648,8 +1738,8 @@ async function main(): Promise<void> {
     announceCheckpoint: (checkpoint, index, total) => printDiscoveryCheckpoint(checkpoint, index, total, readyPath, abortPath),
   };
 
-  if (isDiscoveryRun) {
-    const plan = resolveWingFlowCheckpoints(process.env[WING_FLOW_CHECKPOINTS_ENV]);
+  if (isDiscoveryRun && flowPlan) {
+    const plan = resolveWingFlowCheckpoints(process.env[WING_FLOW_CHECKPOINTS_ENV], flowPlan);
     if (!plan.ok) {
       console.error(`Refusing to launch: ${WING_FLOW_CHECKPOINTS_ENV} is invalid (${plan.reason}). No browser opened.`);
       process.exitCode = 2;
