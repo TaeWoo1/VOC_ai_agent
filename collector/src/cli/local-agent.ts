@@ -337,11 +337,32 @@ export function resolveCoupangIssuanceChannel(args: readonly string[], env: Node
 export const COUPANG_WING_GUIDED_WALK_LANDING_URL =
   "https://wing.coupang.com/tenants/wing-account/vendor/salesinfo?isTARegion=false&currentPlatform=DESKTOP&currentLocale=ko";
 
-export function buildCoupangIssuanceLiveConfig(): AgentCoupangIssuanceConfig {
+/** The live walk's carrier: the bridge config, plus the teardown for the window it may have opened. */
+export interface CoupangIssuanceLiveCarrier {
+  config: AgentCoupangIssuanceConfig;
+  /** Close the dedicated window if one was ever brought up. Safe on a carrier that never opened one. */
+  closeSurface: () => Promise<void>;
+}
+
+export function buildCoupangIssuanceLiveConfig(): CoupangIssuanceLiveCarrier {
   const cfg = loadConfig();
+  // Held ACROSS re-opens, and owned HERE rather than by the driver. If the seller closed only the tab, the
+  // context — and the session in it — survives, so a re-open has to make a fresh page in the SAME context;
+  // re-launching a persistent context on a profile dir the live one still holds a lock on just fails. This is
+  // the same reasoning, and the same shape, as the import carrier's own context.
+  let walkContext: BrowserContext | null = null;
   const driver = new LazyCoupangIssuanceDriver({
     open: async () => {
-      const context = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
+      if (!walkContext) {
+        const launched = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
+        // A context that genuinely died must be re-launched rather than reused, or every later open would work
+        // off a handle whose every call throws.
+        launched.once("close", () => {
+          walkContext = null;
+        });
+        walkContext = launched;
+      }
+      const context = walkContext;
       const page = (context.pages()[0] ?? (await context.newPage())) as Page;
       // ONE navigation, at OPEN, to the seller's own WING landing — and never again.
       //
@@ -377,11 +398,21 @@ export function buildCoupangIssuanceLiveConfig(): AgentCoupangIssuanceConfig {
     },
   });
   return {
-    runId: `run_${randomBytes(6).toString("hex")}`,
-    channelCode: "coupang",
-    // ONE driver for the carrier's lifetime, so a re-attach reuses the window the seller is already in rather
-    // than opening a second one beside it.
-    createDriver: () => driver,
+    config: {
+      runId: `run_${randomBytes(6).toString("hex")}`,
+      channelCode: "coupang",
+      // ONE driver for the carrier's lifetime, so a re-attach reuses the window the seller is already in rather
+      // than opening a second one beside it.
+      createDriver: () => driver,
+    },
+    // The CONTEXT, not the driver's cached copy of it: `markClosed()` drops that on a closed page, so a carrier
+    // whose window the seller closed would otherwise have nothing left to tear down.
+    closeSurface: async () => {
+      const ctx = walkContext;
+      walkContext = null;
+      driver.markClosed();
+      await ctx?.close().catch(() => undefined);
+    },
   };
 }
 
@@ -1217,15 +1248,14 @@ async function main(): Promise<void> {
     : undefined;
   const replySubmission: AgentReplySubmissionConfig | undefined = hostReply ? buildReplySubmissionConfig() : undefined;
   const apiIssuance: AgentApiIssuanceConfig | undefined = hostIssuance ? buildApiIssuanceConfig() : undefined;
-  const coupangIssuance: AgentCoupangIssuanceConfig | undefined = hostLiveWalk
-    ? buildCoupangIssuanceLiveConfig()
+  // The live carrier hands back its teardown alongside its config — the one thing agent shutdown could
+  // otherwise leave behind is the guided walk's dedicated Chrome.
+  const liveWalkCarrier = hostLiveWalk ? buildCoupangIssuanceLiveConfig() : undefined;
+  const coupangIssuance: AgentCoupangIssuanceConfig | undefined = liveWalkCarrier
+    ? liveWalkCarrier.config
     : hostCoupangIssuance
       ? buildCoupangIssuanceConfig()
       : undefined;
-  // The one thing agent shutdown could leave behind: the guided walk's dedicated Chrome. `createDriver()` hands
-  // back the SAME lazy driver the session uses (one per carrier lifetime), so this is a handle to the seller's
-  // actual window rather than a second one — and `close()` is a no-op on a driver that never launched.
-  const coupangSurface = hostLiveWalk ? coupangIssuance?.createDriver() : undefined;
   // Approval-presenter wiring lives HERE and only here — never as a `createAgentBridge` default (see
   // `decideApprovalPresenter`). `none` means no human channel exists on this host, so pairing fails closed.
   const approvalKind = decideApprovalPresenter(process.env, process.platform);
@@ -1264,9 +1294,9 @@ async function main(): Promise<void> {
     clearSignals(); // never leave a stale human-completed signal behind
     // Close the guided walk's window with the agent that opened it. An orphaned dedicated Chrome outlives the
     // service the seller stopped and keeps its persistent profile dir locked against the next boot.
-    if (coupangSurface instanceof LazyCoupangIssuanceDriver && coupangSurface.isOpen()) {
+    if (liveWalkCarrier) {
       log("aw_coupang_walk_surface_closing", {});
-      await coupangSurface.close().catch(() => undefined);
+      await liveWalkCarrier.closeSurface();
     }
     bridge.markAgentStopping();
     const report = await startup.shutdown();

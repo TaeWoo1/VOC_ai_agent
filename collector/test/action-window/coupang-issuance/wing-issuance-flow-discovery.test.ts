@@ -1097,12 +1097,26 @@ describe("the live guided-walk carrier is gated, and never downgrades silently",
   });
 
   it("the walk's window is closed with the agent that opened it", () => {
-    // `isOpen()` / `close()` were dead code, so an orphaned dedicated Chrome outlived the stopped service and
-    // kept its persistent profile dir locked against the next boot.
+    // The teardown was unreachable — the driver is a local `const` inside the builder — so an orphaned dedicated
+    // Chrome outlived the stopped service and kept its persistent profile dir locked against the next boot.
     const src = readFileSync(resolve(HERE, "../../../src/cli/local-agent.ts"), "utf8");
-    const shutdown = src.slice(src.indexOf("const guardedShutdown = createSignalShutdown("));
-    expect(shutdown.slice(0, 900)).toContain("coupangSurface");
-    expect(shutdown.slice(0, 900)).toContain(".close()");
+    const shutdown = src.slice(src.indexOf("const guardedShutdown = createSignalShutdown("), src.indexOf("const onSignal ="));
+    expect(shutdown).toContain("liveWalkCarrier.closeSurface()");
+  });
+
+  it("a re-open reuses the SAME context — a closed TAB must not re-launch on a locked profile dir", () => {
+    // The other half of forgetting a closed window. `markClosed()` drops the driver's page AND its cached
+    // context, so an `open()` that re-launched unconditionally would hit a persistent profile the live context
+    // still holds a lock on. The context is owned by the carrier and outlives any one page — the same shape the
+    // import carrier uses ("if the seller closed only the tab, the context … survives").
+    const src = readFileSync(resolve(HERE, "../../../src/cli/local-agent.ts"), "utf8");
+    const from = src.indexOf("export function buildCoupangIssuanceLiveConfig");
+    const fn = src.slice(from, src.indexOf("\nexport function buildCoupangIssuanceConfig", from));
+    expect(fn).toContain("if (!walkContext)");
+    // The launch is guarded by that check, never reached unconditionally.
+    expect(fn.indexOf("if (!walkContext)")).toBeLessThan(fn.indexOf("launchNaverContext("));
+    // …and a context that really died is dropped, or every later open would work off a dead handle.
+    expect(fn).toContain('launched.once("close"');
   });
 
   it("**the live walk is one of the carriers the one-carrier-per-agent gate knows about**", () => {
