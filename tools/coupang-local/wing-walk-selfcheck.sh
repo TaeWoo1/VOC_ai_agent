@@ -364,7 +364,7 @@ if [ -z "$TREE_DIRTY" ]; then
      && grep -qF '"performsConnectOrSync": false' <<<"$out" \
      && grep -qF '약관 동의 및 Key 발급받기' <<<"$out" \
      && grep -qF '"COMPLETE_WING_KEY_ISSUANCE"' <<<"$out"; then
-    echo "  PASS  NORMAL          · manifest names the control it rests before, both key claims, 0 navigations and no connect/sync"
+    echo "  PASS  NORMAL          · manifest names the control it rests before, both key claims, ONE navigation and no connect/sync"
   else
     echo "  FAIL  NORMAL          · guided-walk boundary incomplete in the displayed manifest"; FAILED=1
   fi

@@ -149,7 +149,11 @@ if ! verify_walk_descriptor "$MANIFEST_OUT"; then
   echo "PREFLIGHT FAIL — the guided-walk boundary descriptor is missing, softened, or names a different operation. Refusing to display it for approval."
   exit 1
 fi
-pass "guided-walk boundary is exactly the canonical contract (rests before the key-creating control · never presses it · agent performs nothing and navigates nothing · 0 value reads · no connect/sync · 2 highlighted + 4 text-guided)"
+# The summary must say what `verify_walk_descriptor` just checked, field for field. It said "navigates nothing ·
+# 2 highlighted + 4 text-guided" while the verifier above demanded `agentNavigations:1`, `highlightedControlCount:3`
+# and `textGuidedControlCount:2` — so the line the OPERATOR reads before granting described a narrower run than
+# the one the gate had verified. That is the manifest-honesty defect class, in the display rather than the data.
+pass "guided-walk boundary is exactly the canonical contract (rests before the key-creating control · never presses it · agent presses nothing and navigates ONCE, to the seller's own WING landing · 0 value reads · no connect/sync · 3 highlighted + 2 text-guided · 4 steps auto-advance, never the key-creating one · the consent boxes' completion is observed)"
 
 # The 발급 selector must be calibrated: this phase highlights a real control. The gate refuses
 # SELECTORS_NOT_CALIBRATED before reaching here, so this can only be `true` — asserted anyway so a future change
