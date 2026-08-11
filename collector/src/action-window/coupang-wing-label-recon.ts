@@ -1969,3 +1969,134 @@ export function wingRevealedBetween(
     })
     .map((c) => c.id);
 }
+
+/* ─────────────────── flow-screen MARKER SPECS (auto-advance observation) ─────────────────── */
+
+/**
+ * The marker specs behind {@link wingFlowScreenFrom}, resolved from the recon candidate map by id.
+ *
+ * Exported so the guided-walk driver can OBSERVE the screen the seller has reached without the strings being
+ * written down a second time. A duplicated `exactText` is how the purpose heading's 이제/period drift got
+ * measured as absent in the first place; there is exactly one copy of each of these, here.
+ *
+ * These are hypotheses with different standing, and the difference matters to anything built on them:
+ *
+ *  - the TERMS markers were transcribed VERBATIM off the real screen on 2026-08-10;
+ *  - the PURPOSE marker was transcribed the same day but **has never been matched by any apparatus**
+ *    ({@link WING_PURPOSE_SCREEN_MARKER_MEASURED}). Auto-advance built on it must degrade to the seller's own
+ *    advance rather than stall — the marker not firing is the EXPECTED case until a live run says otherwise.
+ */
+export interface WingFlowScreenMarkerSpec {
+  readonly id: string;
+  readonly candidateQuery: string;
+  readonly exactText: string;
+}
+
+function markerSpecById(id: string): WingFlowScreenMarkerSpec {
+  for (const candidates of Object.values(WING_STAGE2_RECON_CANDIDATES)) {
+    for (const c of candidates) {
+      if (c.id === id) return Object.freeze({ id: c.id, candidateQuery: c.candidateQuery, exactText: c.exactText });
+    }
+  }
+  // A marker id with no candidate behind it would make the screen observation silently blind, which reads
+  // exactly like "the seller has not got there yet" — the one failure this must not produce quietly.
+  throw new Error(`coupang-wing-label-recon: no candidate for flow-screen marker ${id}`);
+}
+
+/** The PURPOSE screen's marker spec. Visible ⇒ the seller is on the purpose screen. */
+export const WING_PURPOSE_SCREEN_MARKER_SPEC: WingFlowScreenMarkerSpec = markerSpecById(WING_PURPOSE_SCREEN_MARKER_ID);
+
+/** The TERMS screen's marker specs. EITHER visible ⇒ the seller is on the terms screen. */
+export const WING_TERMS_SCREEN_MARKER_SPECS: readonly WingFlowScreenMarkerSpec[] = Object.freeze(
+  WING_TERMS_SCREEN_MARKER_IDS.map(markerSpecById),
+);
+
+/**
+ * The live readings that flipped the two flags below. Recorded rather than summarized, because "measured" is a
+ * claim about a specific observation and the next person has to be able to check which one.
+ *
+ * Taken on 2026-08-10 during the granted `COUPANG_WING_GUIDED_ISSUANCE_WALK` run (git `30760554`), from the
+ * READ-ONLY fixed-label locate the auto-advance already runs — no extra apparatus, no extra sitting.
+ */
+export interface WingFlowScreenMarkerReading {
+  /** The recon candidate id that was read. */
+  readonly id: string;
+  /** Which measured screen the seller was on when it was read — a reading is only evidence about one screen. */
+  readonly screen: WingFlowScreen;
+  readonly visibleCount: number;
+  readonly hiddenCount: number;
+  /** The tag as OBSERVED. Absent when nothing painted — never an expected value. */
+  readonly observedTag?: string;
+}
+
+export interface WingFlowScreenMarkerEvidence {
+  readonly measuredOn: string;
+  readonly phase: string;
+  readonly readings: readonly WingFlowScreenMarkerReading[];
+}
+
+export const WING_FLOW_SCREEN_MARKER_EVIDENCE: WingFlowScreenMarkerEvidence = Object.freeze({
+  measuredOn: "2026-08-10",
+  phase: "COUPANG_WING_GUIDED_ISSUANCE_WALK",
+  readings: Object.freeze([
+    // On the PURPOSE screen, repeatedly, across the whole time the seller sat on it.
+    Object.freeze({ id: WING_PURPOSE_SCREEN_MARKER_ID, screen: "PURPOSE", visibleCount: 1, hiddenCount: 0, observedTag: "DIV" }),
+    // Hidden on PURPOSE, visible the moment the seller reached TERMS — the transition itself, observed.
+    Object.freeze({ id: "stage3.terms.heading", screen: "PURPOSE", visibleCount: 0, hiddenCount: 1 }),
+    Object.freeze({ id: "stage3.terms.heading", screen: "TERMS", visibleCount: 1, hiddenCount: 0, observedTag: "DIV" }),
+    // 2026-08-11, git `7fc18eac`. The reading the short-circuit had been hiding: on TERMS the key-creation
+    // control resolves to exactly ONE PAINTING element, and its tag was OBSERVED as BUTTON — not assumed.
+    // Read in the same pass as the heading above (both at 07:33:31), which is what confirms the `button,a`
+    // narrowing actually separates the control from the heading that carries the identical text.
+    Object.freeze({ id: WING_KEY_CREATION_CONTROL_ID, screen: "PURPOSE", visibleCount: 0, hiddenCount: 1 }),
+    Object.freeze({ id: WING_KEY_CREATION_CONTROL_ID, screen: "TERMS", visibleCount: 1, hiddenCount: 0, observedTag: "BUTTON" }),
+  ]),
+});
+
+/**
+ * Whether the PURPOSE marker has ever been MATCHED on a real screen. **TRUE** as of 2026-08-10 — see
+ * {@link WING_FLOW_SCREEN_MARKER_EVIDENCE}: `visibleCount: 1`, `hiddenCount: 0`, `observedTag: "DIV"`, read
+ * repeatedly while the seller was on the purpose screen.
+ *
+ * It was a hypothesis for a day and a half. The 08-09 transcription (`이제 …골라주세요.`) measured absent
+ * everywhere; the 08-10 verbatim re-transcription was a guess at why, and stayed marked as one until an
+ * apparatus resolved it. Editing this line from anything other than a recorded reading is the move that
+ * produced the refuted 발급 record.
+ */
+export const WING_PURPOSE_SCREEN_MARKER_MEASURED = true as const;
+
+/**
+ * Whether the TERMS markers have been MATCHED on a real screen. **TRUE** as of 2026-08-10 for
+ * `stage3.terms.heading`, which is sufficient: `wingFlowScreenFrom` treats EITHER terms marker as identifying
+ * the screen, and the heading was read `hiddenCount: 1` on PURPOSE and `visibleCount: 1, observedTag: "DIV"`
+ * the moment the seller reached TERMS.
+ *
+ * This asserts SCREEN IDENTIFICATION only. It says nothing about {@link WING_KEY_CREATION_CONTROL_ID}, which is
+ * the other terms marker and is NOT promotable on this evidence — every reading of it came from the purpose
+ * screen, where it matches one HIDDEN node. See {@link WING_KEY_CREATION_SELECTOR_CALIBRATED}.
+ */
+export const WING_TERMS_SCREEN_MARKERS_MEASURED = true as const;
+
+/**
+ * Whether the key-creation control has a locator good enough to HIGHLIGHT. **TRUE** as of 2026-08-11.
+ *
+ * The reading that flipped it is in {@link WING_FLOW_SCREEN_MARKER_EVIDENCE}: on the TERMS screen the
+ * `button,a` query resolved to `visibleCount: 1`, `hiddenCount: 0`, `observedTag: "BUTTON"`. Every condition
+ * this flag demanded when it was false is met, and each is load-bearing:
+ *
+ *  - **on TERMS.** The earlier readings were all from PURPOSE, where the same query matches one HIDDEN node.
+ *    A hidden unique match is what invalidated the 삭제 record; it is not evidence about the screen the seller
+ *    actually presses the control on.
+ *  - **unique.** The screen's heading carries character-for-character the same text, which is why the query is
+ *    narrowed to actionable elements — and whether that narrowing was enough was the open question, not an
+ *    assumption. Both markers were read in the SAME pass and came back distinct (heading `DIV`, control
+ *    `BUTTON`), so the narrowing is confirmed rather than argued.
+ *  - **observed tag.** `BUTTON` was measured, not expected. A tag that was expected rather than observed is
+ *    precisely how the 발급 record went wrong.
+ *
+ * This asserts SELECTOR readiness only. It is not an authorization and says nothing about the press: the agent
+ * highlights this control and never touches it, `keyCreationAutoAdvances` stays false, and pressing it remains
+ * the seller's own act behind its own approval. Any edit to the candidate's `candidateQuery` or `exactText`
+ * invalidates this flag and requires a fresh reading.
+ */
+export const WING_KEY_CREATION_SELECTOR_CALIBRATED = true as const;

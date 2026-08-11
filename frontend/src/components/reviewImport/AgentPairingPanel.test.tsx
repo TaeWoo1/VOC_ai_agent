@@ -16,7 +16,11 @@ afterEach(cleanup);
 
 function renderPanel(
   phase: string,
-  extra: { confirmationCode?: string | null; maybeNeedsLocalNetworkAccess?: boolean } = {},
+  extra: {
+    confirmationCode?: string | null;
+    confirmUrl?: string | null;
+    maybeNeedsLocalNetworkAccess?: boolean;
+  } = {},
 ) {
   const onConnect = vi.fn();
   const onRetry = vi.fn();
@@ -24,6 +28,7 @@ function renderPanel(
     <AgentPairingPanel
       phase={phase}
       confirmationCode={extra.confirmationCode ?? null}
+      confirmUrl={extra.confirmUrl ?? null}
       maybeNeedsLocalNetworkAccess={extra.maybeNeedsLocalNetworkAccess}
       onConnect={onConnect}
       onRetry={onRetry}
@@ -81,6 +86,24 @@ describe("AgentPairingPanel", () => {
     expect(screen.getByTestId("agent-pairing-code")).toHaveTextContent("482913");
     expect(screen.queryByTestId("agent-pairing-connect")).toBeNull();
     expect(screen.getByTestId("agent-pairing")).toHaveTextContent(/허용/);
+  });
+
+  /**
+   * The client already opens the approval page on the seller's click, but a browser can block that tab and the
+   * seller is then waiting on a window that never appeared. The link is the recovery — without it the only way
+   * back is a URL nobody in the product ever sees.
+   */
+  it("keeps the approval page reachable while pairing is pending", () => {
+    const url = "http://127.0.0.1:47615/bridge/confirm?requestId=r1";
+    renderPanel("pairing_pending", { confirmationCode: "482913", confirmUrl: url });
+    const link = screen.getByTestId("agent-pairing-confirm-link");
+    expect(link).toHaveAttribute("href", url);
+    expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"));
+  });
+
+  it("offers no approval link when the agent gave no usable one", () => {
+    renderPanel("pairing_pending", { confirmationCode: "482913" });
+    expect(screen.queryByTestId("agent-pairing-confirm-link")).toBeNull();
   });
 
   it("explains a denial and offers to try again", () => {

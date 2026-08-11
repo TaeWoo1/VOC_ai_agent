@@ -30,6 +30,12 @@ export interface AgentPairingPanelProps {
   /** The code the seller must match in the agent's own approval window, when one is pending. */
   confirmationCode?: string | null;
   /**
+   * The agent's approval page for the pending request. The client opens it on the seller's own click, but a
+   * browser may block that tab — so the affordance stays on screen. Without it a blocked pop-up leaves the
+   * seller waiting on a window that never appeared, with nothing to press.
+   */
+  confirmUrl?: string | null;
+  /**
    * `useBridge().state.maybeNeedsLocalNetworkAccess` — true when the page is served from a secure, non-loopback
    * origin and the bridge is unreachable, which on Chrome is indistinguishable from a blocked Local Network
    * Access permission. When set, the searching branch adds the "허용해 주세요" hint so a seller whose helper IS
@@ -43,6 +49,7 @@ export interface AgentPairingPanelProps {
 export function AgentPairingPanel({
   phase,
   confirmationCode,
+  confirmUrl,
   maybeNeedsLocalNetworkAccess,
   onConnect,
   onRetry,
@@ -67,6 +74,17 @@ export function AgentPairingPanel({
             >
               {confirmationCode}
             </p>
+          ) : null}
+          {confirmUrl ? (
+            <a
+              href={confirmUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              data-testid="agent-pairing-confirm-link"
+              className="self-start rounded-xl border border-line px-4 py-2 text-sm font-medium text-ink transition hover:bg-line/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            >
+              허용 창이 안 열렸나요? 다시 열기
+            </a>
           ) : null}
           <p className="text-sm text-muted">확인을 기다리는 중…</p>
         </>

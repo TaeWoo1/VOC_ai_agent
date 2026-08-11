@@ -333,3 +333,45 @@ describe("buildApprovalScript", () => {
     expect(script).toContain("우리 회사");
   });
 });
+
+/**
+ * The dialog has to be IN FRONT of the person it is asking. A launchd agent's `osascript` is not a foreground
+ * application, so a bare `display dialog` opens behind the seller's browser — observed live on 2026-08-10 as
+ * something that "flashed past", which makes pairing impossible however long the dialog stays up.
+ */
+describe("the approval dialog is brought to the front", () => {
+  const presentation = {
+    requestId: "req-1",
+    origin: "http://localhost:5173",
+    workspaceLabel: "SellerOps",
+    approvalCode: "0AE8-CDFA",
+  };
+
+  it("activates and displays from inside the activated process", () => {
+    const script = buildApprovalScript(presentation, 90);
+    expect(script).toContain('tell application "System Events"');
+    expect(script).toContain("activate");
+    // The display must be INSIDE the tell block — activating and then displaying from osascript's own context
+    // is the shape that left the dialog behind the browser.
+    const tellAt = script.indexOf('tell application "System Events"');
+    const endAt = script.indexOf("end tell");
+    const displayAt = script.indexOf("display dialog");
+    expect(tellAt).toBeGreaterThanOrEqual(0);
+    expect(displayAt).toBeGreaterThan(tellAt);
+    expect(endAt).toBeGreaterThan(displayAt);
+  });
+
+  it("keeps the refusal contract intact — a cancel is still a DECLINE, not a timeout", () => {
+    const script = buildApprovalScript(presentation, 90);
+    expect(script).toContain("on error number -128");
+    expect(script).toContain('buttons {"취소", "확인"}');
+    expect(script).toContain("cancel button 1");
+    expect(script).toContain("giving up after 90");
+  });
+
+  it("still carries the code and never the requestId", () => {
+    const script = buildApprovalScript(presentation, 90);
+    expect(script).toContain("0AE8-CDFA");
+    expect(script).not.toContain("req-1");
+  });
+});

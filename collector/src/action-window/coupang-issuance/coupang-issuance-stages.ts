@@ -65,8 +65,20 @@ import type { CommandType, CopyParams, ExecutionMode, RunStatus, StepStatus } fr
 export type CoupangIssuanceStage =
   /** Automatic: the run has just started; the surface is about to be probed. */
   | "opening"
-  /** Recoverable park: WING shows a login page. The seller logs in on their own screen. */
+  /**
+   * Observed wait: WING shows a login page. The seller logs in on their own screen and the runtime notices by
+   * itself — it no longer needs a command from the SellerOps tab to look again.
+   */
   | "waiting_login"
+  /**
+   * Observed wait: no WING surface the tutorial recognizes is on screen YET.
+   *
+   * The dedicated window opens on a blank tab, so this is where every run begins. It used to be
+   * `page_mismatch`, which told a seller who had not logged in that the screen had changed unexpectedly and
+   * then waited for a command that could only be sent from the tab they had just left. Not being there yet is
+   * the expected state, so it carries no blocker and clears itself.
+   */
+  | "awaiting_wing_surface"
   /** Automatic (RUNNING): momentary work between the probe and the first guided control. */
   | "locating_open_api"
   /**
@@ -82,12 +94,6 @@ export type CoupangIssuanceStage =
    * central error — and reaching this stage is not evidence that one exists.
    */
   | "checkpoint_reveal_issuance_form"
-  /**
-   * Seller barrier (checkpoint): the purpose screen. MEASURED: two radios, `OPEN API` and `플레이오토 웹 솔루션`,
-   * and `OPEN API` is already the DEFAULT — so for the SellerOps flow this step usually needs no click at all
-   * and the tutorial says so. Renamed from `guiding_self_dev`: 자체개발 is not on this screen.
-   */
-  | "guiding_purpose_option"
   /**
    * Seller CHECKPOINT: they press `확인`. MEASURED 2026-08-10 in isolation — two readings with nothing pressed
    * stayed on the purpose screen, and one 확인 press moved to the terms screen. It creates no key.
@@ -131,7 +137,6 @@ export const COUPANG_ISSUANCE_TERMINAL_STAGES: readonly CoupangIssuanceStage[] =
 export const COUPANG_ISSUANCE_BARRIER_STAGES: readonly CoupangIssuanceStage[] = [
   "reaching_open_api",
   "checkpoint_reveal_issuance_form",
-  "guiding_purpose_option",
   "checkpoint_confirm_purpose",
   "guiding_terms_consent",
   "checkpoint_before_issue",
@@ -145,11 +150,29 @@ export const COUPANG_ISSUANCE_BARRIER_STAGES: readonly CoupangIssuanceStage[] = 
  */
 export const COUPANG_ISSUANCE_PARK_STAGES: readonly CoupangIssuanceStage[] = ["waiting_login", "target_not_found", "page_mismatch"];
 
+/**
+ * **The OBSERVED WAITS — the runtime is watching WING, and the seller is not blocked on anything.**
+ *
+ * They carry no blocker and clear themselves, so they are deliberately NOT parks. But "clears itself" is only
+ * true while something is still watching: the wait is bounded by a seated-operator window, and when that window
+ * expires the run has to stay recoverable. It did not — `awaiting_wing_surface` fell through to the
+ * automatic-stage command list, which omits `REQUEST_STEP_RECHECK`, so a seller who needed longer than the
+ * window (2FA, a password reset) was left in a run reporting RUNNING with no blocker and no way to ask again.
+ * The park this stage replaced was recoverable; this list is what makes the wait recoverable too.
+ *
+ * `waiting_login` is an observed wait as well, but it is listed among the PARKS (it carries a `LOGIN_REQUIRED`
+ * blocker), and the two branches offer the same commands, so it is not repeated here.
+ */
+export const COUPANG_ISSUANCE_OBSERVED_WAIT_STAGES: readonly CoupangIssuanceStage[] = ["awaiting_wing_surface"];
+
 export function isCoupangIssuanceBarrier(stage: CoupangIssuanceStage): boolean {
   return COUPANG_ISSUANCE_BARRIER_STAGES.includes(stage);
 }
 export function isCoupangIssuancePark(stage: CoupangIssuanceStage): boolean {
   return COUPANG_ISSUANCE_PARK_STAGES.includes(stage);
+}
+export function isCoupangIssuanceObservedWait(stage: CoupangIssuanceStage): boolean {
+  return COUPANG_ISSUANCE_OBSERVED_WAIT_STAGES.includes(stage);
 }
 export function isCoupangIssuanceTerminal(stage: CoupangIssuanceStage): boolean {
   return COUPANG_ISSUANCE_TERMINAL_STAGES.includes(stage);
@@ -168,26 +191,25 @@ export interface CoupangIssuanceStepMeta {
 export const COUPANG_ISSUANCE_RUN_COPY_KEY = "actionWindow.coupangIssuance.run";
 
 /**
- * The step plan. Exactly EIGHT steps — a fixed line (no branch), so `totalSteps` is stable from the frontend's
+ * The step plan. Exactly SEVEN steps — a fixed line (no branch), so `totalSteps` is stable from the frontend's
  * first view onward. Step 1 is AUTOMATIC_OPERATION and carries no highlighted control (its transition-observe
  * uses text guidance, not a DOM control). Every other step is a control the SELLER operates.
  *
  * **The order is the measured order**, which the previous seven-step plan was not: it put 발급 fifth, after two
  * steps for fields this flow never shows, and had no step at all for the control that creates the key.
  *
- * **Step 6 is the key-creation boundary.** It is the last step SellerOps can guide without a credential
+ * **Step 5 is the key-creation boundary.** It is the last step SellerOps can guide without a credential
  * existing, and the runtime rests there.
  */
 export function coupangIssuanceStepPlan(): readonly CoupangIssuanceStepMeta[] {
   return [
     { stepNumber: 1, stepId: "aw.coupang_issuance_reach_open_api", copyKey: "actionWindow.coupangIssuance.reachOpenApi", mode: "AUTOMATIC_OPERATION" },
     { stepNumber: 2, stepId: "aw.coupang_issuance_reveal_form", copyKey: "actionWindow.coupangIssuance.revealForm", mode: "ACTION_WINDOW", copyParams: { targetKind: "issue" } },
-    { stepNumber: 3, stepId: "aw.coupang_issuance_purpose_option", copyKey: "actionWindow.coupangIssuance.purposeOption", mode: "ACTION_WINDOW", copyParams: { targetKind: "purpose_option" } },
-    { stepNumber: 4, stepId: "aw.coupang_issuance_confirm_purpose", copyKey: "actionWindow.coupangIssuance.confirmPurpose", mode: "ACTION_WINDOW", copyParams: { targetKind: "confirm_purpose" } },
-    { stepNumber: 5, stepId: "aw.coupang_issuance_terms_consent", copyKey: "actionWindow.coupangIssuance.termsConsent", mode: "ACTION_WINDOW", copyParams: { targetKind: "terms_consent" } },
-    { stepNumber: 6, stepId: "aw.coupang_issuance_issue_checkpoint", copyKey: "actionWindow.coupangIssuance.issueCheckpoint", mode: "ACTION_WINDOW", copyParams: { targetKind: "issue_final" } },
-    { stepNumber: 7, stepId: "aw.coupang_issuance_copy_keys", copyKey: "actionWindow.coupangIssuance.copyKeys", mode: "ACTION_WINDOW", copyParams: { targetKind: "credentials" } },
-    { stepNumber: 8, stepId: "aw.coupang_issuance_return", copyKey: "actionWindow.coupangIssuance.return", mode: "ACTION_WINDOW", copyParams: { targetKind: "return" } },
+    { stepNumber: 3, stepId: "aw.coupang_issuance_confirm_purpose", copyKey: "actionWindow.coupangIssuance.confirmPurpose", mode: "ACTION_WINDOW", copyParams: { targetKind: "confirm_purpose" } },
+    { stepNumber: 4, stepId: "aw.coupang_issuance_terms_consent", copyKey: "actionWindow.coupangIssuance.termsConsent", mode: "ACTION_WINDOW", copyParams: { targetKind: "terms_consent" } },
+    { stepNumber: 5, stepId: "aw.coupang_issuance_issue_checkpoint", copyKey: "actionWindow.coupangIssuance.issueCheckpoint", mode: "ACTION_WINDOW", copyParams: { targetKind: "issue_final" } },
+    { stepNumber: 6, stepId: "aw.coupang_issuance_copy_keys", copyKey: "actionWindow.coupangIssuance.copyKeys", mode: "ACTION_WINDOW", copyParams: { targetKind: "credentials" } },
+    { stepNumber: 7, stepId: "aw.coupang_issuance_return", copyKey: "actionWindow.coupangIssuance.return", mode: "ACTION_WINDOW", copyParams: { targetKind: "return" } },
   ];
 }
 
@@ -201,7 +223,7 @@ export const COUPANG_ISSUANCE_TOTAL_STEPS = coupangIssuanceStepPlan().length;
  * happened. From this step on, a credential may exist on the marketplace. Any future automation, retry, or
  * "resume from step N" has to treat this number as a wall.
  */
-export const COUPANG_ISSUANCE_KEY_CREATION_STEP = 6;
+export const COUPANG_ISSUANCE_KEY_CREATION_STEP = 5;
 
 /** Step metadata at a 1-based index, clamped so a park/terminal view never reads past the plan. */
 export function coupangIssuanceStepMetaAt(plan: readonly CoupangIssuanceStepMeta[], stepNumber: number): CoupangIssuanceStepMeta {
@@ -218,11 +240,14 @@ export function coupangIssuanceStageToRunStatus(stage: CoupangIssuanceStage): Ru
     case "opening":
       return "PREPARING";
     case "locating_open_api":
+    // An observed wait is WORK the runtime is doing (watching WING), not the seller being blocked — so it reads
+    // as RUNNING. Reporting WAITING_FOR_HUMAN here would put a "do something" prompt in front of a seller whose
+    // only remaining task is to keep going in the window they are already in.
+    case "awaiting_wing_surface":
       return "RUNNING";
     case "waiting_login":
     case "reaching_open_api":
     case "checkpoint_reveal_issuance_form":
-    case "guiding_purpose_option":
     case "checkpoint_confirm_purpose":
     case "guiding_terms_consent":
     case "checkpoint_before_issue":
@@ -243,11 +268,11 @@ export function coupangIssuanceStageToStepStatus(stage: CoupangIssuanceStage): S
     case "opening":
       return "PREPARING";
     case "locating_open_api":
+    case "awaiting_wing_surface":
       return "OBSERVING";
     case "waiting_login":
     case "reaching_open_api":
     case "checkpoint_reveal_issuance_form":
-    case "guiding_purpose_option":
     case "checkpoint_confirm_purpose":
     case "guiding_terms_consent":
     case "checkpoint_before_issue":
@@ -275,10 +300,14 @@ export function coupangIssuanceStageToStepStatus(stage: CoupangIssuanceStage): S
  * seller does all of that in their own window.
  *
  * <p>`PAUSE_RUN` is offered at the seller barriers but NOT at the parks (a park recovers only by re-probing).
+ *
+ * <p>An OBSERVED WAIT gets the park's list for the same reason: the runtime is looking by itself, so the button
+ * is never NEEDED — but the seller must always be able to say "look again", or a wait whose window has elapsed
+ * is a dead end.
  */
 export function coupangIssuanceAllowedCommands(stage: CoupangIssuanceStage): readonly CommandType[] {
   if (isCoupangIssuanceTerminal(stage)) return [];
-  if (isCoupangIssuancePark(stage)) {
+  if (isCoupangIssuancePark(stage) || isCoupangIssuanceObservedWait(stage)) {
     return ["REQUEST_STEP_RECHECK", "CANCEL_RUN", "SWITCH_TO_MANUAL", "SET_GUIDANCE_ENABLED", "FIND_CURRENT_STEP"];
   }
   if (isCoupangIssuanceBarrier(stage)) {

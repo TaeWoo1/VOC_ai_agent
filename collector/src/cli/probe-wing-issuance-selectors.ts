@@ -172,6 +172,9 @@ export const WING_TARGET_EXPECTED_ROLE: Readonly<Record<WingRecordTarget, string
   issue: "button",
   credentials: "readonly-region",
   delete: "button",
+  // The key-creation control. MEASURED as BUTTON on the terms screen (2026-08-11) — recorded here as the
+  // expected role for the recorder, on the strength of that reading rather than ahead of it.
+  issue_final: "button",
 };
 
 /** The fixed-label spec for a record target — issuance labels, plus the deletion 삭제 label (decoupled union). */

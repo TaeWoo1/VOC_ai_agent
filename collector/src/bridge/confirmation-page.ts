@@ -8,6 +8,8 @@
  * contains a pairing secret or ticket; only the short-lived `requestId` and the confirmation code.
  */
 
+import type { ApprovalChannel } from "./approval-presenter";
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -24,10 +26,35 @@ export interface ConfirmationPageInput {
   confirmationCode: string;
   /**
    * Does `allow` require the out-of-band approval code? When true the page collects it from the human, who
-   * reads it off the AGENT'S OWN CONSOLE. The code itself is deliberately NOT an input to this renderer —
-   * this page is fetchable by anyone holding the (public) `requestId`, so it must never contain the secret.
+   * reads it off whatever channel the presenter used. The code itself is deliberately NOT an input to this
+   * renderer — this page is fetchable by anyone holding the (public) `requestId`, so it must never contain
+   * the secret.
    */
   approvalRequired: boolean;
+  /**
+   * Where the presenter actually put the code, so the instruction points at the window the person is looking
+   * at. Omitted ⇒ neutral copy. The old text said "the terminal you ran the agent in", which is dead advice on
+   * the product path: an installed launchd service has no terminal and the code is in an OS dialog.
+   */
+  approvalChannel?: ApprovalChannel;
+}
+
+/**
+ * Where to tell the person to look. Neutral when the presenter did not say — never a guess.
+ *
+ * PLAIN TEXT, no markup: the same phrase is written into the page AND assigned to `textContent` in the inline
+ * script, and `textContent` renders tags literally. One string with no markup is what keeps the instruction and
+ * the empty-field message from naming two different windows.
+ */
+function approvalSourceText(channel: ApprovalChannel | undefined): string {
+  switch (channel) {
+    case "os_dialog":
+      return "화면에 뜬 SellerOps 승인 창에 표시된";
+    case "terminal":
+      return "에이전트를 실행한 터미널에 표시된";
+    default:
+      return "SellerOps 도우미가 표시한";
+  }
 }
 
 export function renderConfirmationPage(input: ConfirmationPageInput): string {
@@ -35,8 +62,11 @@ export function renderConfirmationPage(input: ConfirmationPageInput): string {
   const workspace = escapeHtml(input.workspaceLabel);
   const code = escapeHtml(input.confirmationCode);
   const requestId = escapeHtml(input.requestId);
+  // ONE source of the "where to look" phrase: the instruction and the empty-field message must name the same
+  // window, or the person is told two different places to find one code.
+  const approvalSource = approvalSourceText(input.approvalChannel);
   const approvalField = input.approvalRequired
-    ? `  <p class="meta">에이전트를 실행한 터미널에 표시된 <strong>승인 코드</strong>를 입력하세요.</p>
+    ? `  <p class="meta">${approvalSource} <strong>승인 코드</strong>를 입력하세요.</p>
   <input class="approval" id="approval" inputmode="latin" autocomplete="off" spellcheck="false" placeholder="XXXX-XXXX" aria-label="승인 코드">`
     : "";
   return `<!doctype html>
@@ -75,7 +105,7 @@ ${approvalField}
     const approvalEl = document.getElementById('approval');
     const approvalCode = approvalEl ? approvalEl.value : '';
     if (decision === 'allow' && approvalRequired && !approvalCode.trim()) {
-      document.getElementById('result').textContent = '터미널에 표시된 승인 코드를 입력하세요.';
+      document.getElementById('result').textContent = '${approvalSource} 승인 코드를 입력하세요.';
       return;
     }
     document.getElementById('allow').disabled = true;

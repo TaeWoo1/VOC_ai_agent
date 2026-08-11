@@ -15,13 +15,17 @@ import type { AwClientFrame, AwServerTransport } from "../../../../contracts/act
 import { log } from "../../log";
 import type { CoupangIssuanceEffect, CoupangIssuanceEngine } from "./coupang-issuance-engine";
 import { COUPANG_TARGET_BARRIER_STAGE, type CoupangIssuanceProbeDriver, type CoupangIssuanceTarget } from "./coupang-issuance-driver";
-import { isCoupangIssuanceTerminal } from "./coupang-issuance-stages";
+import { isCoupangIssuancePark, isCoupangIssuanceTerminal } from "./coupang-issuance-stages";
 
 export interface CoupangIssuanceSessionOptions {
   /** Fires after every published transition — the persistence hook. */
   onStatePublished?: () => void;
   /** Floor delay between barrier re-arms. A safety floor, not a tuning knob. */
   rearmDelayMs?: number;
+  /** How often an observed wait re-reads WING while the seller logs in / navigates. Tests set 0. */
+  surfaceWaitPollMs?: number;
+  /** How long an observed wait keeps looking. The seated-operator window — never unbounded. */
+  surfaceWaitTimeoutMs?: number;
 }
 
 export class CoupangIssuanceGuidanceSession {
@@ -31,6 +35,20 @@ export class CoupangIssuanceGuidanceSession {
   private readonly runId: string;
   private readonly onStatePublished: (() => void) | undefined;
   private readonly rearmDelayMs: number;
+  private readonly surfaceWaitPollMs: number;
+  private readonly surfaceWaitTimeoutMs: number;
+  /** At most ONE park-recovery loop at a time — several would each issue their own recheck. */
+  private recovering = false;
+  /** At most ONE surface-wait loop at a time — several would each probe and each advance the run. */
+  private awaitingSurface = false;
+  /**
+   * The seller closed the WING window and has not asked for anything since.
+   *
+   * Latched so no TIMER can re-open it: every automatic recovery this session has goes through a drive, and a
+   * drive brings the lazy window up. Cleared by the seller's next command, which is the one re-open that was
+   * ever theirs to ask for.
+   */
+  private surfaceClosed = false;
 
   private started = false;
   private publishedSeq = 0;
@@ -53,6 +71,8 @@ export class CoupangIssuanceGuidanceSession {
     this.started = engine.isStarted();
     this.onStatePublished = opts?.onStatePublished;
     this.rearmDelayMs = opts?.rearmDelayMs ?? 250;
+    this.surfaceWaitPollMs = opts?.surfaceWaitPollMs ?? 1_000;
+    this.surfaceWaitTimeoutMs = opts?.surfaceWaitTimeoutMs ?? 10 * 60_000;
   }
 
   attach(): () => void {
@@ -97,6 +117,9 @@ export class CoupangIssuanceGuidanceSession {
       return;
     }
     const outcome = this.engine.command(command);
+    // An accepted command is the SELLER asking for something, which is the one thing that may re-open a window
+    // they closed. Cleared before the drive, so the chain this command starts is allowed to bring it back up.
+    if (outcome.ok) this.surfaceClosed = false;
     this.transport.send({
       kind: "aw_command_result",
       commandId: command.commandId,
@@ -158,8 +181,30 @@ export class CoupangIssuanceGuidanceSession {
         this.publishState();
         return this.drive(next);
       }
+      case "AWAIT_SURFACE": {
+        // SINGLE-FLIGHT, like `recovering` already does for park recovery. `waiting_login` is a park, so while
+        // one loop polls the FE is offered `REQUEST_STEP_RECHECK`; pressing it re-probed, read login again, and
+        // asked for a SECOND loop beside the first. Both then reported the issuance page before either narrowed
+        // the stage — duplicate `STEP_COMPLETED`, two `{guide:"issue"}` chains, two observers on one target.
+        // (The engine's own probe guard now stops the duplicate advance; this stops the duplicate WATCHER.)
+        if (this.awaitingSurface) return;
+        this.awaitingSurface = true;
+        let next: CoupangIssuanceEffect;
+        try {
+          next = await this.awaitSurface();
+        } finally {
+          this.awaitingSurface = false;
+        }
+        // Driven OUTSIDE the single-flight window, so a chain that comes back through here is not refused by the
+        // loop that is unwinding to start it. `NONE` ends the chain here rather than falling into
+        // `maybeRecoverPark`: the watch has just STOPPED, and re-entering it on a timer is what the bound exists
+        // to prevent (see `onSurfaceWaitExpired`).
+        if (isNoop(next)) return;
+        return this.drive(next);
+      }
       case "CLEAR_HIGHLIGHT": {
         await this.driver.clearHighlight();
+        this.maybeRecoverPark();
         return;
       }
       case "CLEANUP": {
@@ -168,8 +213,68 @@ export class CoupangIssuanceGuidanceSession {
       }
       case "NONE":
       default:
+        this.maybeRecoverPark();
         return;
     }
+  }
+
+  /**
+   * Keep looking, inside WING, until the seller gets somewhere we recognize. This is the loop that lets a run
+   * start on a blank tab and survive a login without anyone touching the SellerOps tab.
+   *
+   * The engine's wait states are idempotent, so re-reading the same page emits nothing; only a CHANGE produces a
+   * transition. Bounded by the same seated-operator window every other observation uses — an unbounded loop
+   * would outlive the run and keep polling a page nobody is looking at.
+   * Counted in POLLS, not in accumulated milliseconds: a zero-delay cadence (which tests use, and which a caller
+   * could pass) would advance an elapsed-time accumulator by zero and loop forever.
+   *
+   * Returns the effect to drive AFTER the watch ends — driven by the caller, outside the single-flight window,
+   * so a chain that comes back through here is not refused by the loop that is unwinding to start it.
+   */
+  private async awaitSurface(): Promise<CoupangIssuanceEffect> {
+    const maxPolls = Math.max(1, Math.ceil(this.surfaceWaitTimeoutMs / Math.max(1, this.surfaceWaitPollMs)));
+    for (let i = 0; i < maxPolls; i++) {
+      if (this.engine.isPaused() || isCoupangIssuanceTerminal(this.engine.currentStage())) return "NONE";
+      await new Promise<void>((resolve) => setTimeout(resolve, this.surfaceWaitPollMs));
+      if (this.engine.isPaused() || isCoupangIssuanceTerminal(this.engine.currentStage())) return "NONE";
+      const again = await this.driver.probeSurface();
+      const next = this.engine.onSurfaceProbed(again);
+      this.publishState();
+      if (next !== "AWAIT_SURFACE") return next;
+    }
+    // The window is over and NOTHING is watching WING any more. Returning here left the run reporting RUNNING
+    // with no blocker, no recheck offered and no recovery loop — the one state on this walk a seller could not
+    // get out of. Hand it to the engine, which converts the wait into a recoverable park.
+    const expired = this.engine.onSurfaceWaitExpired();
+    this.publishState();
+    return expired;
+  }
+
+  /**
+   * Start the park recovery loop if the run has settled into one, and only one loop at a time.
+   *
+   * Called where a drive chain ENDS, because that is where a park becomes visible: the effect that produced it
+   * has been applied and nothing else is going to move the run.
+   */
+  private maybeRecoverPark(): void {
+    if (this.recovering) return;
+    // **NEVER auto-recover a surface the seller CLOSED.** Self-recovery drives a `{guide}`, which settles and
+    // locates — and the lazy driver brings a window up on its first call, so a timer-issued recheck would
+    // re-open the marketplace window the seller had just deliberately closed, once a second for ten minutes.
+    // The engine's own note on this park says how it recovers: "re-opening and a `REQUEST_STEP_RECHECK`". Both
+    // of those are the SELLER's, and a run that re-opens their window on its own has taken an action nobody
+    // granted — `agentNavigations: 1` says the walk opens one window, at open, and never again.
+    if (this.surfaceClosed) return;
+    if (!isCoupangIssuancePark(this.engine.currentStage())) return;
+    if (this.engine.isPaused()) return;
+    this.recovering = true;
+    this.busyCount += 1;
+    void this.recoverPark()
+      .catch(() => undefined)
+      .finally(() => {
+        this.recovering = false;
+        this.busyCount -= 1;
+      });
   }
 
   /**
@@ -182,6 +287,11 @@ export class CoupangIssuanceGuidanceSession {
     // post-navigation page. Best-effort and value-free; a driver without a real page omits it. If a read still
     // races a navigation and throws, `onDriveError → engine.onDriveFault` parks recoverably.
     await this.driver.settleSurface?.();
+    // Re-arm the closure watch on whatever page this guide is now working against. It used to be armed only on
+    // the `PROBE` branch, so a window brought up by a guide (a seller-commanded re-open after they closed the
+    // first one) was never watched again — closing THAT one changed nothing and the run went on driving a dead
+    // page. Token-guarded, so the newest arm is the only one that can report.
+    this.watchSurfaceClose();
     const loc = await this.driver.locateTarget(target);
     const afterLoc = this.engine.onTargetLocated(target, loc);
     if (typeof afterLoc === "object" && "guide" in afterLoc) {
@@ -223,6 +333,44 @@ export class CoupangIssuanceGuidanceSession {
     }
   }
 
+  /**
+   * Recover a RECOVERABLE PARK by itself, inside WING.
+   *
+   * The remaining parks — a control that is not on the page yet, a page that moved between the locate and the
+   * highlight, a window that was closed and reopened — all cleared only on a `REQUEST_STEP_RECHECK`, which the
+   * seller can only send from the SellerOps tab. That is the tab this walk exists to keep them out of, so each
+   * of those parks was a silent instruction to go back.
+   *
+   * A recheck is what the frontend's button would have sent; issuing it here on a timer is the same recovery
+   * without the round trip. Bounded, and it stops the moment the run leaves the park (or the engine reports
+   * there is nothing to redo), so a genuinely stuck run does not spin forever.
+   *
+   * The button remains: this removes the NEED to press it, never the ability.
+   */
+  private async recoverPark(): Promise<void> {
+    const maxPolls = Math.max(1, Math.ceil(this.surfaceWaitTimeoutMs / Math.max(1, this.surfaceWaitPollMs)));
+    for (let i = 0; i < maxPolls; i++) {
+      await new Promise<void>((resolve) => setTimeout(resolve, this.surfaceWaitPollMs));
+      if (this.engine.isPaused() || isCoupangIssuanceTerminal(this.engine.currentStage())) return;
+      if (!isCoupangIssuancePark(this.engine.currentStage())) return;
+      const outcome = this.engine.command({ type: "REQUEST_STEP_RECHECK", expectedRevision: this.engine.view().revision });
+      if (!outcome.ok) return;
+      this.publishState();
+      if ("effect" in outcome && !isNoop(outcome.effect)) {
+        // Through `onDriveError`, NOT bare. Self-recovery exists FOR the navigation race, so a locate that
+        // throws here is the expected case — and `maybeRecoverPark` swallows what escapes this loop, so a bare
+        // await meant that throw ended the recovery silently: no `onDriveFault`, no published state, and
+        // nothing to restart it (this loop only starts at the end of a drive chain, and this WAS that chain).
+        try {
+          await this.drive(outcome.effect);
+        } catch (e) {
+          await this.onDriveError(e);
+        }
+        // The drive either recovered the run or parked it again; either way the loop's own check decides.
+      }
+    }
+  }
+
   /** True while the engine is resting on exactly this target's barrier and not paused. */
   private stillWaitingOn(target: CoupangIssuanceTarget): boolean {
     return !this.engine.isPaused() && this.engine.currentStage() === COUPANG_TARGET_BARRIER_STAGE[target] && this.engine.activeTarget() === target;
@@ -239,6 +387,9 @@ export class CoupangIssuanceGuidanceSession {
   private onSurfaceClosed(token: number): void {
     if (token !== this.surfaceCloseToken) return;
     if (isCoupangIssuanceTerminal(this.engine.currentStage())) return;
+    // Latched BEFORE the park is driven, so the `CLEAR_HIGHLIGHT` chain that follows cannot end in a recovery
+    // loop that re-opens the window on a timer.
+    this.surfaceClosed = true;
     const effect = this.engine.onSurfaceClosed();
     this.publishState();
     if (!isNoop(effect)) {

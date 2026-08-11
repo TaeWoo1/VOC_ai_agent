@@ -150,7 +150,15 @@ export function buildApprovalScript(p: ApprovalPresentation, dialogSeconds: numb
   return [
     `set _verdict to ${appleScriptLiteral(VERDICT_GAVE_UP)}`,
     "try",
-    `  set _r to display dialog ${body} with title ${title} buttons {"취소", "확인"} default button 2 cancel button 1 with icon note giving up after ${dialogSeconds}`,
+    // ACTIVATED, and the dialog belongs to the activated process. A launchd agent's `osascript` is not a
+    // foreground application, so a bare `display dialog` opened BEHIND the seller's browser — live on
+    // 2026-08-10 the operator saw it only as something that "flashed past" and could not read the code, which
+    // makes pairing impossible however long the dialog technically stays up. Activating System Events and
+    // displaying from inside that tell block is what puts it in front of the person it is asking.
+    "  tell application \"System Events\"",
+    "    activate",
+    `    set _r to display dialog ${body} with title ${title} buttons {"취소", "확인"} default button 2 cancel button 1 with icon note giving up after ${dialogSeconds}`,
+    "  end tell",
     "  if gave up of _r then",
     `    set _verdict to ${appleScriptLiteral(VERDICT_GAVE_UP)}`,
     "  else",
@@ -212,6 +220,7 @@ export function createMacOsApprovalPresenter(opts: MacOsApprovalPresenterOptions
   const available = (): boolean => platform === "darwin" && fileExists(OSASCRIPT_PATH);
 
   return {
+    channel: "os_dialog",
     available,
     async present(presentation: ApprovalPresentation): Promise<PresentResult> {
       // Re-check rather than trust the caller: never try to show a secret on an unsupported host.

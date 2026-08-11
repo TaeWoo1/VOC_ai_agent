@@ -39,17 +39,21 @@ function make(opts: {
   secureNonLoopback?: boolean;
 }) {
   let lastWs: FakeWs | null = null;
+  const opened: string[] = [];
   const client = new BridgeClient({
     httpBase: "http://127.0.0.1:47615",
     wsBase: "ws://127.0.0.1:47615",
     workspaceLabel: "테스트",
     isSecureNonLoopbackOrigin: opts.secureNonLoopback ?? false,
     fetchFn: fakeFetch(opts.routes),
+    openConfirmation: (url) => opened.push(url),
     wsFactory: (url) => (lastWs = new FakeWs(url)),
     storage: opts.storage ?? fakeStorage(),
   });
-  return { client, ws: () => lastWs };
+  return { client, ws: () => lastWs, opened };
 }
+
+const CONFIRM_URL = "http://127.0.0.1:47615/bridge/confirm?requestId=r1";
 
 const HEALTH_OK = { "/bridge/health": () => ({ status: 200, body: { ok: true, service: "sellerops-local-agent", agentVersion: "t", protocolVersion: 1 } }) };
 
@@ -198,5 +202,77 @@ describe("bridge client state machine", () => {
     await client.revoke();
     expect(client.getState().phase).toBe("unpaired");
     expect(storage.getItem("sellerops_bridge_token")).toBeNull();
+  });
+});
+
+/**
+ * The agent's approval page is where the seller actually allows the pairing. Until this was wired, the URL
+ * came back in the pair/request response and went nowhere — reachable only by reading it out of a developer
+ * console, which is the developer path this product path replaces.
+ */
+describe("the agent's approval page", () => {
+  const pendingRoutes = (confirmUrl?: string) => ({
+    ...HEALTH_OK,
+    "/bridge/pair/request": () => ({
+      status: 200,
+      body: { requestId: "r1", confirmationCode: "ABC-123", ...(confirmUrl ? { confirmUrl } : {}) },
+    }),
+    "/bridge/pair/poll": () => ({ status: 200, body: { status: "pending" } }),
+  });
+
+  it("is opened on the seller's own pairing click and exposed for a blocked pop-up", async () => {
+    const { client, opened } = make({ routes: pendingRoutes(CONFIRM_URL) });
+    await client.requestPairing();
+    expect(opened).toEqual([CONFIRM_URL]);
+    expect(client.getState().confirmUrl).toBe(CONFIRM_URL);
+  });
+
+  it("refuses a URL that is not this agent's confirm endpoint", async () => {
+    for (const hostile of [
+      "http://evil.example/bridge/confirm?requestId=r1",
+      "http://127.0.0.1:1234/bridge/confirm?requestId=r1",
+      "javascript:alert(1)",
+      "http://127.0.0.1:47615/bridge/confirm.evil?requestId=r1",
+      "http://127.0.0.1:47615/../bridge/confirm?requestId=r1",
+    ]) {
+      const { client, opened } = make({ routes: pendingRoutes(hostile) });
+      await client.requestPairing();
+      // Nothing is opened and nothing is offered — the pairing still works, it just never navigates the seller
+      // somewhere this client cannot vouch for.
+      expect(opened, `must not open ${hostile}`).toEqual([]);
+      expect(client.getState().confirmUrl).toBeUndefined();
+      expect(client.getState().phase).toBe("pairing_pending");
+    }
+  });
+
+  it("still pairs when the agent returns no confirm URL at all", async () => {
+    const { client, opened } = make({ routes: pendingRoutes() });
+    await client.requestPairing();
+    expect(opened).toEqual([]);
+    expect(client.getState().phase).toBe("pairing_pending");
+    expect(client.getState().confirmUrl).toBeUndefined();
+  });
+
+  it("drops the URL once the request settles — a dead page reads as a broken pairing", async () => {
+    for (const status of ["paired", "denied", "expired"] as const) {
+      const { client } = make({
+        routes: {
+          ...HEALTH_OK,
+          "/bridge/pair/request": () => ({
+            status: 200,
+            body: { requestId: "r1", confirmationCode: "ABC-123", confirmUrl: CONFIRM_URL },
+          }),
+          "/bridge/pair/poll": () => ({
+            status: 200,
+            body: status === "paired" ? { status, pairingToken: "tok" } : { status },
+          }),
+          "/bridge/ws-ticket": () => ({ status: 200, body: { ticket: "tk", expiresInMs: 10000 } }),
+        },
+      });
+      await client.requestPairing();
+      expect(client.getState().confirmUrl).toBe(CONFIRM_URL);
+      await client.pollPairingOnce();
+      expect(client.getState().confirmUrl, `stale after ${status}`).toBeUndefined();
+    }
   });
 });

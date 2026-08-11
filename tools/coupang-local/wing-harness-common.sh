@@ -330,12 +330,14 @@ verify_walk_descriptor() {
     "createsKeyMaterial:false" \
     "keyCreationRuledOut:false" \
     "agentPerformsAction:false" \
-    "agentNavigations:0" \
+    "agentNavigations:1" \
     "credentialValueReadBudget:0" \
     "performsConnectOrSync:false" \
-    "highlightedControlCount:2" \
-    "textGuidedControlCount:4" \
-    "explicitCheckpointRequired:true"
+    "highlightedControlCount:3" \
+    "textGuidedControlCount:2" \
+    "autoAdvancingStepCount:4" \
+    "keyCreationAutoAdvances:false" \
+    "sellerConsentObserved:true"
   do
     key="${pair%%:*}"; want="${pair#*:}"
     got="$(python3 -c 'import json,sys

@@ -135,8 +135,9 @@ describe("run-coupang-wing-issuance-live CLI — source guard (gated, no click/t
     // seller reaches WING; an agent that drives the page there has taken a marketplace action nobody granted,
     // and every read-only WING entrypoint already holds that line ("this recorder never `.goto`s").
     const codeOnly = code.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    // THIS CLI still navigates nothing — the one landing lives in the Local Agent's carrier, not here.
     expect(codeOnly.split(".goto(").length - 1).toBe(0);
-    expect(code).toContain("COUPANG_WING_GUIDED_WALK_AGENT_NAVIGATIONS = 0");
+    expect(code).toContain("COUPANG_WING_GUIDED_WALK_AGENT_NAVIGATIONS = 1");
   });
 
   it("is gated on the explicit Coupang WING live-run approval flag and fails closed on a bad URL before launch", () => {
@@ -173,7 +174,9 @@ describe("the redesigned walk can actually be walked", () => {
     // test as passed, so a local run looks green and CI does not.
     const driver = new CoupangWingIssuanceDriver(fakePage() as never);
     for (const target of COUPANG_ISSUANCE_TARGETS) {
-      if (target === "issue" || target === "credentials") continue; // these query the page; covered elsewhere
+      // These QUERY the page (they carry a calibrated locator), so they are covered where a real page exists.
+      // `issue_final` joined them on 2026-08-11 when its locator was measured on the TERMS screen.
+      if (target === "issue" || target === "credentials" || target === "issue_final") continue;
       const res = await driver.locateTarget(target);
       expect(res.count, `${target} would park the run at target_not_found`).toBe(1);
       expect(res.sig, target).toMatch(/^[0-9a-f]{16}$/);
@@ -188,7 +191,9 @@ describe("the redesigned walk can actually be walked", () => {
     // test as passed, so a local run looks green and CI does not.
     const driver = new CoupangWingIssuanceDriver(fakePage() as never);
     const sigs = new Map<string, string>();
-    for (const target of ["reach_open_api", "purpose_option", "confirm_purpose", "terms_consent", "issue_final", "return"] as const) {
+    // `issue_final` LEFT this list on 2026-08-11 — exactly as the comment above says it would: it gained a
+    // calibrated locator and a spotlight, so it is no longer text-guided.
+    for (const target of ["reach_open_api", "confirm_purpose", "terms_consent", "return"] as const) {
       const res = await driver.locateTarget(target);
       sigs.set(target, res.sig!);
     }

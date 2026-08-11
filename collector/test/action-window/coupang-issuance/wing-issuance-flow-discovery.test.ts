@@ -41,6 +41,7 @@ import {
   type WingSelectorRecordDeps,
 } from "../../../src/cli/probe-wing-issuance-selectors";
 import { observeFrom, WING_PROBE_TARGET_NAMES, type WingStructuralCensus } from "../../../src/cli/coupang-wing-classifier";
+import { coupangLiveWalkRefusal } from "../../../src/cli/local-agent";
 import {
   CALIBRATION_PHASES,
   WING_STAGE2_MANIFEST_PHASES,
@@ -925,7 +926,7 @@ describe("the guided-walk manifest is not the fallback", () => {
     expect(op).toContain("separate phase");
     expect(op).toContain("TEXT-GUIDES");
     expect(op).toContain("drawing no ring");
-    expect(op).toContain("NAVIGATES nothing");
+    expect(op).toContain("navigates no further");
     expect(op).toContain("no connect-test, no sync");
   });
 
@@ -933,8 +934,202 @@ describe("the guided-walk manifest is not the fallback", () => {
     const from = CLI.indexOf('isWingGuidedWalk\n    ? "operator-performed: the whole tutorial');
     const max = CLI.slice(from, CLI.indexOf("\n    : isWingReveal", from));
     expect(max).toContain("0 presses of the key-creating");
-    expect(max).toContain("0 navigations");
-    expect(max).toContain("2 highlights");
-    expect(max).toContain("4 text-guided");
+    // ONE navigation now — the landing — and the budget must SAY so rather than keep claiming zero.
+    expect(max).toContain("1 navigation (the landing at window open, never again)");
+    expect(max).toContain("3 highlights");
+    // Three since the purpose screen became one step. The budget also has to state that the runtime advances
+    // itself now — a budget listing only what the SELLER presses would understate what the agent does.
+    expect(max).toContain("2 text-guided");
+    expect(max).toContain("4 steps advanced by OBSERVING WING");
+    expect(max).toContain("the key-creating step never");
+  });
+});
+
+/* ══════════════════════════ the text-guided steps have a presentation of their own ══════════════════════════ */
+
+describe("stale spotlight — the defect the dev-host live proof surfaced", () => {
+  const DRV = readFileSync(resolve(HERE, "../../../src/action-window/coupang-wing-issuance-driver.ts"), "utf8");
+  const OVL = readFileSync(resolve(HERE, "../../../src/action-window/overlay.ts"), "utf8");
+
+  it("**a text-guided step clears the prior tag BEFORE mounting**", () => {
+    // Live-confirmed 2026-08-10: it did not, so `mountOverlay` found the PREVIOUS step's `data-aw-target` —
+    // still on `API Key 발급 받기` — removed the old box and rebuilt it in the same place with this step's
+    // text. The operator saw a ring on one control while the panel described another, three steps running.
+    const body = DRV.slice(DRV.indexOf("  async highlightTarget("));
+    const fn = body.slice(0, body.indexOf("\n  /**"));
+    const clearIdx = fn.indexOf("IN_PAGE_CLEAR_TAG");
+    const mountIdx = fn.indexOf("this.mountStepOverlay(page, target, true)");
+    expect(clearIdx).toBeGreaterThan(-1);
+    expect(mountIdx).toBeGreaterThan(-1);
+    // Order is the property: clearing AFTER the mount would leave the ring drawn for the step's whole life.
+    expect(clearIdx).toBeLessThan(mountIdx);
+  });
+
+  it("**panel-only mode does not bail on a missing anchor** — otherwise the step shows nothing at all", () => {
+    // The other half. `mountOverlay` returns early when `querySelector("[data-aw-target]")` is null, so once
+    // the tag is cleared a text-guided step would render neither ring nor panel. Clearing alone would have
+    // replaced a misplaced panel with no panel.
+    expect(OVL).toContain("if (!target && !o.dockedPanelOnly) {");
+    // …and it must IGNORE a stale anchor rather than look one up: using it is the defect.
+    expect(OVL).toContain('const target = o.dockedPanelOnly ? null : document.querySelector("[data-aw-target]");');
+  });
+
+  it("docked mode draws no ring, no dimming and no badge — it claims no location", () => {
+    const from = OVL.indexOf("if (o.dockedPanelOnly) {");
+    const block = OVL.slice(from, OVL.indexOf("}", OVL.indexOf("box.style.height", from)));
+    expect(block).toContain('box.style.border = "none"');
+    expect(block).toContain('box.style.boxShadow = "none"');
+    expect(OVL).toContain("if (o.dockedPanelOnly) badge.style.display = \"none\";");
+    // Nothing is scrolled either: moving the seller's view toward a control we cannot locate is a claim too.
+    expect(OVL).toContain("if (target) (target as Element).scrollIntoView(");
+  });
+
+  it("the mode is ADDITIVE and OFF by default — the renewal and deletion drivers are untouched", () => {
+    // `overlay.ts` is shared. Every existing caller must keep the anchored ring it has today.
+    expect(OVL).toContain("dockedPanelOnly?: boolean;");
+    for (const f of ["coupang-wing-renewal-driver.ts", "coupang-wing-deletion-driver.ts"]) {
+      const src = readFileSync(resolve(HERE, `../../../src/action-window/${f}`), "utf8");
+      expect(src, f).not.toContain("dockedPanelOnly");
+    }
+    // …and the issuance driver passes it ONLY on the text-guided path.
+    expect(DRV.split("dockedPanelOnly").length - 1).toBeLessThanOrEqual(4);
+  });
+
+  it("only CALIBRATED targets are spotlit — the two with a locator, and no others", () => {
+    const guided = DRV.slice(DRV.indexOf("const TEXT_GUIDED_SIG"), DRV.indexOf("};", DRV.indexOf("const TEXT_GUIDED_SIG")));
+    // `purpose_option` was retired on 2026-08-10: the purpose screen is ONE step, folded into
+    // `confirm_purpose`, so there is no separate radio-check target left to guide.
+    // `issue_final` left this set on 2026-08-11: it was measured visible+unique on the TERMS screen, so it
+    // now carries a locator and IS spotlit. The remaining two are still measured-but-unpromoted.
+    for (const t of ["confirm_purpose", "terms_consent"]) {
+      expect(guided, t).toContain(t);
+    }
+    for (const t of ["issue:", "credentials:", "issue_final:"]) expect(guided).not.toContain(t);
+  });
+});
+
+/* ══════════════════════════ the PRODUCT path: the Local Agent hosts the live walk ══════════════════════════ */
+
+describe("the live guided-walk carrier is gated, and never downgrades silently", () => {
+  const PHASE = "COUPANG_WING_GUIDED_ISSUANCE_WALK";
+  const OK = { ok: true };
+  const bound = (over: Record<string, string | undefined> = {}): NodeJS.ProcessEnv => ({
+    SELLEROPS_APPROVAL_PHASE: PHASE,
+    SELLEROPS_WING_APPROVED_PHASE: PHASE,
+    WALKTHROUGH_APPROVAL_ID: "apr-46be037016a1",
+    WALKTHROUGH_GIT_COMMIT: "7b580d8e",
+    ...over,
+  });
+  const FLAG = ["--action-window-coupang-issuance-live"];
+
+  it("hosts only when EVERY binding is present", () => {
+    expect(coupangLiveWalkRefusal(FLAG, bound(), () => OK, "/repo")).toBeNull();
+  });
+
+  it("refuses a missing or mismatched phase — one variable is not enough", () => {
+    expect(coupangLiveWalkRefusal(FLAG, bound({ SELLEROPS_APPROVAL_PHASE: undefined }), () => OK, "/repo")).toBe("PHASE_NOT_BOUND");
+    expect(coupangLiveWalkRefusal(FLAG, bound({ SELLEROPS_WING_APPROVED_PHASE: undefined }), () => OK, "/repo")).toBe("PHASE_NOT_BOUND");
+    // A stale phase from another WING run must not arm this one.
+    expect(coupangLiveWalkRefusal(FLAG, bound({ SELLEROPS_WING_APPROVED_PHASE: "COUPANG_WING_ISSUANCE_FORM_REVEAL" }), () => OK, "/repo")).toBe("PHASE_NOT_BOUND");
+    // …and without the flag at all it is simply not requested.
+    expect(coupangLiveWalkRefusal([], bound(), () => OK, "/repo")).toBe("PHASE_NOT_BOUND");
+  });
+
+  it("refuses an unbootstrapped approval id or SHA — a live walk needs an approval to belong to", () => {
+    for (const bad of [undefined, "", "apr-", "not-an-id", "APR-46BE037016A1"]) {
+      expect(coupangLiveWalkRefusal(FLAG, bound({ WALKTHROUGH_APPROVAL_ID: bad }), () => OK, "/repo"), String(bad)).toBe("APPROVAL_NOT_BOUND");
+    }
+    for (const bad of [undefined, "", "zzzzzzz", "123"]) {
+      expect(coupangLiveWalkRefusal(FLAG, bound({ WALKTHROUGH_GIT_COMMIT: bad }), () => OK, "/repo"), String(bad)).toBe("APPROVAL_NOT_BOUND");
+    }
+  });
+
+  it("refuses when repo identity fails — a harness pointed at a decoy satisfies every other check", () => {
+    expect(coupangLiveWalkRefusal(FLAG, bound(), () => ({ ok: false }), "/repo")).toBe("REPO_IDENTITY_FAILED");
+  });
+
+  it("**every refusal means NOT HOSTED — never a fallback to the fixture**", () => {
+    // The failure this prevents: the operator grants a live walk, a binding is missing, and the agent hosts the
+    // SIMULATION instead. It would look identical in the UI and prove nothing about WING.
+    const src = readFileSync(resolve(HERE, "../../../src/cli/local-agent.ts"), "utf8");
+    const from = src.indexOf("const liveWalkRefusal =");
+    const block = src.slice(from, src.indexOf("const coupangIssuance:", from) + 400);
+    expect(block).toContain("hostLiveWalk");
+    expect(block).toContain("aw_coupang_live_walk_refused");
+    // The fixture is reachable ONLY through the dev flag's own gate, never as this one's fallback.
+    expect(block).toContain("hostCoupangIssuance");
+    expect(block).not.toMatch(/liveWalkRefusal[^\n]*\?\s*buildCoupangIssuanceConfig/);
+  });
+
+  it("the live carrier opens NO window at agent boot, and navigates EXACTLY ONCE — the landing", () => {
+    const src = readFileSync(resolve(HERE, "../../../src/cli/local-agent.ts"), "utf8");
+    const from = src.indexOf("export function buildCoupangIssuanceLiveConfig");
+    const fn = src.slice(from, src.indexOf("\nexport function buildCoupangIssuanceConfig", from));
+    // Lazily: the launch lives inside `open()`, which the session calls, not the builder.
+    expect(fn).toContain("new LazyCoupangIssuanceDriver({");
+    expect(fn).toContain("open: async () =>");
+    const codeOnly = fn.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    // ONE navigation, and it is the landing: opening the seller's own seller center so they are not dropped on
+    // a blank window. Every screen after it is one they reach. More than one goto here would be a route.
+    expect(codeOnly.split(".goto(").length - 1).toBe(1);
+    expect(codeOnly).toContain("COUPANG_WING_GUIDED_WALK_LANDING_URL");
+    // Screened BEFORE it is used — an off-target landing must open nothing, not send the seller somewhere the
+    // run cannot vouch for.
+    expect(codeOnly.indexOf("screenWingUrl")).toBeLessThan(codeOnly.indexOf(".goto("));
+    expect(codeOnly).toContain("if (screened.ok)");
+    // ONE driver for the carrier's lifetime — a re-attach must reuse the seller's window, not open a second.
+    expect(fn).toContain("createDriver: () => driver");
+  });
+
+  it("**a window the seller CLOSES is forgotten** — the lazy driver is told, not just the run", () => {
+    // `LazyCoupangIssuanceDriver` documents "a closed window is FORGOTTEN", and nothing wired it. The inner
+    // `CoupangWingIssuanceDriver` resolved its own `whenSurfaceClosed` from the same event (that is how the run
+    // parks), but the LAZY driver kept handing every retry the dead page: `maybeRecoverPark` re-checked once a
+    // second for ten minutes and each one burned `settleSurface`'s poll and threw in `locateTarget`, instead of
+    // re-opening in the same persistent profile. `LazyImportDriver` has this wiring explicitly at its own boot.
+    const src = readFileSync(resolve(HERE, "../../../src/cli/local-agent.ts"), "utf8");
+    const from = src.indexOf("export function buildCoupangIssuanceLiveConfig");
+    const fn = src.slice(from, src.indexOf("\nexport function buildCoupangIssuanceConfig", from));
+    expect(fn).toContain('page.once("close"');
+    expect(fn).toContain("driver.markClosed()");
+    // Inside `open()`, so a RE-opened window gets its own handler rather than the first one being reused.
+    expect(fn.indexOf('page.once("close"')).toBeGreaterThan(fn.indexOf("open: async () =>"));
+  });
+
+  it("the walk's window is closed with the agent that opened it", () => {
+    // The teardown was unreachable — the driver is a local `const` inside the builder — so an orphaned dedicated
+    // Chrome outlived the stopped service and kept its persistent profile dir locked against the next boot.
+    const src = readFileSync(resolve(HERE, "../../../src/cli/local-agent.ts"), "utf8");
+    const shutdown = src.slice(src.indexOf("const guardedShutdown = createSignalShutdown("), src.indexOf("const onSignal ="));
+    expect(shutdown).toContain("liveWalkCarrier.closeSurface()");
+  });
+
+  it("a re-open reuses the SAME context — a closed TAB must not re-launch on a locked profile dir", () => {
+    // The other half of forgetting a closed window. `markClosed()` drops the driver's page AND its cached
+    // context, so an `open()` that re-launched unconditionally would hit a persistent profile the live context
+    // still holds a lock on. The context is owned by the carrier and outlives any one page — the same shape the
+    // import carrier uses ("if the seller closed only the tab, the context … survives").
+    const src = readFileSync(resolve(HERE, "../../../src/cli/local-agent.ts"), "utf8");
+    const from = src.indexOf("export function buildCoupangIssuanceLiveConfig");
+    const fn = src.slice(from, src.indexOf("\nexport function buildCoupangIssuanceConfig", from));
+    expect(fn).toContain("if (!walkContext)");
+    // The launch is guarded by that check, never reached unconditionally.
+    expect(fn.indexOf("if (!walkContext)")).toBeLessThan(fn.indexOf("launchNaverContext("));
+    // …and a context that really died is dropped, or every later open would work off a dead handle.
+    expect(fn).toContain('launched.once("close"');
+  });
+
+  it("**the live walk is one of the carriers the one-carrier-per-agent gate knows about**", () => {
+    // `awChannel` excluded reply / issuance / the coupang FIXTURE, but not the LIVE walk. On a non-production
+    // boot, `--action-window-coupang-issuance-live` plus `--dev-action-window-synthetic` left BOTH carriers
+    // defined and `createAgentBridge` threw at boot — a crash where the gate's whole purpose is a clean refusal.
+    const src = readFileSync(resolve(HERE, "../../../src/cli/local-agent.ts"), "utf8");
+    const line = src.split("\n").find((l) => l.includes("const awChannel ="));
+    expect(line).toBeTruthy();
+    for (const carrier of ["hostReply", "hostIssuance", "hostCoupangIssuance", "hostLiveWalk"]) {
+      expect(line, carrier).toContain(carrier);
+    }
+    // …and it must be DECIDED before it is used, or the exclusion reads `undefined`.
+    expect(src.indexOf("const hostLiveWalk =")).toBeLessThan(src.indexOf("const awChannel ="));
   });
 });

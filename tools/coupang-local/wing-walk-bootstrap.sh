@@ -83,10 +83,24 @@ echo "  run id       : $RUN_ID"
 echo "  approval id  : $APPROVAL_ID  (binds the operator's single-use grant)"
 echo "  git commit   : $GIT_COMMIT  (PINNED — the run refuses if HEAD moves or the tree goes dirty)"
 echo "  phase        : COUPANG_WING_GUIDED_ISSUANCE_WALK (agent READ_ONLY; the OPERATOR does every WING act)"
-echo "  navigation   : the SELLER reaches WING; the agent never navigates (0 gotos, 0 clicks, 0 inputs)"
-echo "  highlights   : ONLY the two live-calibrated controls. The purpose radios, 확인 and the consent boxes"
-echo "                 are TEXT-GUIDED — measured but not promoted, so no ring is drawn at them"
-echo "  key issuance : NOT performed. The walk RESTS in front of '약관 동의 및 Key 발급받기' and never presses it"
+# These lines are the FIRST thing the operator reads about the run, and they had gone stale: they still said
+# the agent never navigates and that two controls are highlighted, while the descriptor the preflight now prints
+# — and the gate verifies — carries agentNavigations:1, highlightedControlCount:3, textGuidedControlCount:2,
+# autoAdvancingStepCount:4 and sellerConsentObserved:true. The manifest was right and this half of the
+# disclosure was not, which is the defect this workstream keeps having to unpick, in the sentence rather than
+# the data. `wing-walk-selfcheck.sh` now greps this output too, so it cannot drift silently again.
+echo "  navigation   : ONE — the agent opens the seller's own WING landing when the window comes up."
+echo "                 It never navigates again; every screen after it is one the SELLER reaches."
+echo "                 0 clicks, 0 inputs, 0 submits"
+echo "  highlights   : THREE live-calibrated controls (API Key 발급 받기 · 약관 동의 및 Key 발급받기 · the key"
+echo "                 region). The purpose radios and the consent boxes are TEXT-GUIDED — measured but not"
+echo "                 promoted, so no ring is drawn at them"
+echo "  auto-advance : FOUR steps advance on what the runtime OBSERVES on WING, with no button press. The"
+echo "                 seller's own on-page button remains on every step. The runtime reads whether the two"
+echo "                 consent boxes are ticked — one page-side boolean, never stored, sent, or logged; it"
+echo "                 never ticks a box and never reads the terms"
+echo "  key issuance : NOT performed, and NEVER auto-advanced. The walk RESTS in front of"
+echo "                 '약관 동의 및 Key 발급받기' and never presses it"
 echo
 echo "next: tools/coupang-local/wing-walk-preflight.sh  (prepares + displays the Approval Manifest; no browser)"
 echo "note: re-running this bootstrap mints a NEW approval id — the previous grant is dead."

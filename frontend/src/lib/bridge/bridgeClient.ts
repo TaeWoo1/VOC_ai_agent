@@ -44,6 +44,13 @@ export type BridgePhase =
 export interface BridgeState {
   phase: BridgePhase;
   confirmationCode?: string;
+  /**
+   * The agent-owned approval page for the PENDING request. The seller has to reach this page to allow the
+   * pairing, and until now nothing handed it to them — the URL was in the agent's response and went nowhere,
+   * so the only way to find it was to read it out of a developer console. Loopback-validated (see
+   * `sameOriginConfirmUrl`); absent when the agent did not return a usable one.
+   */
+  confirmUrl?: string;
   maybeNeedsLocalNetworkAccess: boolean;
   snapshot?: BridgeSnapshot;
   agentProtocolVersion?: number;
@@ -74,6 +81,11 @@ export interface BridgeClientDeps {
   /** True when the page is a secure origin that is NOT loopback (deployed) — enables the LNA hint. */
   isSecureNonLoopbackOrigin: boolean;
   fetchFn?: typeof fetch;
+  /**
+   * Open the agent's approval page. Injected so tests never pop a window, and so the production default stays
+   * one line: a new tab with no opener handle back to SellerOps.
+   */
+  openConfirmation?: (url: string) => void;
   wsFactory?: (url: string) => WebSocketLike;
   storage?: StorageLike;
   clientProtocolVersion?: number;
@@ -94,6 +106,7 @@ export class BridgeClient {
       workspaceLabel: deps.workspaceLabel,
       isSecureNonLoopbackOrigin: deps.isSecureNonLoopbackOrigin,
       fetchFn: deps.fetchFn ?? fetch.bind(globalThis),
+      openConfirmation: deps.openConfirmation ?? ((url) => void window.open(url, "_blank", "noopener,noreferrer")),
       wsFactory: deps.wsFactory ?? ((url) => new WebSocket(url) as unknown as WebSocketLike),
       storage: deps.storage ?? window.localStorage,
       clientProtocolVersion: deps.clientProtocolVersion ?? BRIDGE_PROTOCOL_VERSION,
@@ -153,7 +166,20 @@ export class BridgeClient {
     await this.connectWs(token);
   }
 
-  /** Begin a pairing request; the user then confirms on the agent-owned local page. */
+  /**
+   * Accept the agent's approval-page URL only when it is the SAME loopback service this client is talking to.
+   *
+   * The URL arrives in a response body, and a response body is not a trustworthy place to take navigation
+   * from: a compromised or impersonating local listener could answer with any address and the product would
+   * open it, wearing SellerOps's own "허용을 눌러 주세요" instruction. Pinning it to `httpBase` means the page
+   * we send the seller to is the page the pairing they are approving actually belongs to.
+   */
+  private sameOriginConfirmUrl(raw: unknown): string | undefined {
+    if (typeof raw !== "string" || raw === "") return undefined;
+    return raw.startsWith(`${this.d.httpBase}/bridge/confirm?`) ? raw : undefined;
+  }
+
+  /** Begin a pairing request, then open the agent-owned approval page the seller confirms on. */
   async requestPairing(): Promise<void> {
     try {
       const res = await this.d.fetchFn(`${this.d.httpBase}/bridge/pair/request`, {
@@ -165,9 +191,14 @@ export class BridgeClient {
         this.set({ phase: "unreachable", maybeNeedsLocalNetworkAccess: this.d.isSecureNonLoopbackOrigin });
         return;
       }
-      const body = (await res.json()) as { requestId: string; confirmationCode: string };
+      const body = (await res.json()) as { requestId: string; confirmationCode: string; confirmUrl?: string };
       this.pairingRequestId = body.requestId;
-      this.set({ phase: "pairing_pending", confirmationCode: body.confirmationCode });
+      const confirmUrl = this.sameOriginConfirmUrl(body.confirmUrl);
+      this.set({ phase: "pairing_pending", confirmationCode: body.confirmationCode, confirmUrl });
+      // Opened from inside the seller's own click on 연결, so the browser treats it as a user gesture rather
+      // than a pop-up. It can still be blocked, which is why the panel keeps the URL as a visible affordance
+      // instead of relying on this call having worked.
+      if (confirmUrl) this.d.openConfirmation(confirmUrl);
     } catch {
       this.set({ phase: "unreachable", maybeNeedsLocalNetworkAccess: this.d.isSecureNonLoopbackOrigin });
     }
@@ -188,16 +219,20 @@ export class BridgeClient {
       this.set({ phase: "unreachable", maybeNeedsLocalNetworkAccess: this.d.isSecureNonLoopbackOrigin });
       return;
     }
+    // A settled request's approval page is DEAD — reopening it renders "만료되었거나 알 수 없는 연결 요청입니다".
+    // So the URL is dropped on every terminal outcome, not just the happy one; a lingering affordance would
+    // send the seller to an error page and read as the pairing having broken.
     if (poll.status === "paired") {
       this.pairingRequestId = null;
+      this.set({ confirmUrl: undefined });
       this.d.storage.setItem(TOKEN_KEY, poll.pairingToken);
       await this.connectWs(poll.pairingToken);
     } else if (poll.status === "denied") {
       this.pairingRequestId = null;
-      this.set({ phase: "pairing_denied" });
+      this.set({ phase: "pairing_denied", confirmUrl: undefined });
     } else if (poll.status === "expired") {
       this.pairingRequestId = null;
-      this.set({ phase: "unpaired" });
+      this.set({ phase: "unpaired", confirmUrl: undefined });
     }
     // "pending" → caller polls again.
   }

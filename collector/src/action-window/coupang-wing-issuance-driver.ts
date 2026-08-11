@@ -33,6 +33,16 @@
  */
 import type { Page } from "playwright";
 import { log } from "../log";
+import { buildWingConsentCompleteScript } from "../cli/coupang-wing-classifier";
+import {
+  WING_STAGE3_TERMS_OPTION_CANDIDATES,
+  WING_KEY_CREATION_CONTROL_ID,
+  WING_KEY_CREATION_SELECTOR_CALIBRATED,
+  WING_PURPOSE_SCREEN_MARKER_SPEC,
+  WING_TERMS_SCREEN_MARKER_SPECS,
+  type WingFlowScreen,
+  type WingFlowScreenMarkerSpec,
+} from "./coupang-wing-label-recon";
 import { mountOverlay, unmountOverlay, overlayMounted, resetOverlayAdvance, readOverlayAdvancePressed } from "./overlay";
 import {
   EXTRACT_WING_CENSUS,
@@ -77,7 +87,7 @@ import type { LocateResult } from "./engine";
  *
  * What the tutorial can actually highlight is narrower still — see {@link isWingHighlightTarget}.
  */
-export type WingHighlightTarget = "self_dev" | "vendor_info" | "call_ip" | "issue" | "credentials";
+export type WingHighlightTarget = "self_dev" | "vendor_info" | "call_ip" | "issue" | "credentials" | "issue_final";
 
 /**
  * **CANDIDATE / LIVE_DOM_CALIBRATION_PENDING.** Proposed fixed WING labels for each highlightable target. WING's
@@ -90,6 +100,24 @@ export type WingHighlightTarget = "self_dev" | "vendor_info" | "call_ip" | "issu
  * claims a proven detector; a live WING walk must confirm each label resolves uniquely before this flips.
  */
 export const WING_HIGHLIGHT_CALIBRATION = LIVE_DOM_CALIBRATION_PENDING;
+
+/**
+ * The key-creation control's locator, **derived from the measured candidate rather than re-typed.**
+ *
+ * `coupang-wing-label-recon.ts` says of these strings "there is exactly one copy of each of these, here", and
+ * `WING_KEY_CREATION_SELECTOR_CALIBRATED` promises that any edit to the candidate's `candidateQuery` or
+ * `exactText` invalidates the flag. A second hand-written copy defeats both: editing the recon candidate would
+ * leave the ring pointing with the stale string, and — because the TERMS heading carries character-identical
+ * text — a query that drifted wider than `button,a` here would put the spotlight on the HEADING while the
+ * measurement that justified the flag was taken against actionable elements only.
+ */
+const KEY_CREATION_SPEC: WingFlowScreenMarkerSpec = (() => {
+  const spec = WING_TERMS_SCREEN_MARKER_SPECS.find((s) => s.id === WING_KEY_CREATION_CONTROL_ID);
+  // Fail at load, not at highlight time: a missing spec would otherwise become "the control was not found" on a
+  // live page, which reads as a WING change rather than as our own broken wiring.
+  if (!spec) throw new Error("coupang-wing-issuance-driver: no measured candidate for the key-creation control");
+  return spec;
+})();
 
 export const WING_HIGHLIGHT_LABELS: Readonly<Record<WingHighlightTarget, { candidateQuery: string; exactText: string; tagAncestor?: string }>> = {
   // RETIRED FROM THE TUTORIAL 2026-08-10 — kept for the read-only probe and the records that cite them. The
@@ -108,10 +136,19 @@ export const WING_HIGHLIGHT_LABELS: Readonly<Record<WingHighlightTarget, { candi
   // — even toward the observed `id`/`className`, which are NOT adopted as anchors — discards the measurement
   // that justifies `WING_ISSUE_SELECTOR_CALIBRATED` and requires a fresh probe.
   issue: { candidateQuery: "button", exactText: "API Key 발급 받기" },
+  // LIVE-CALIBRATED 2026-08-11 (see WING_KEY_CREATION_SELECTOR_CALIBRATED). Narrowed to actionable elements
+  // because the TERMS heading carries the identical text; measured distinct from it in the same pass. Taken
+  // FROM that measurement — see KEY_CREATION_SPEC — so the ring can never point with a string the calibration
+  // no longer covers.
+  issue_final: { candidateQuery: KEY_CREATION_SPEC.candidateQuery, exactText: KEY_CREATION_SPEC.exactText },
   credentials: { candidateQuery: "label,span,div,dt,th,strong", exactText: "Access Key", tagAncestor: "tr" },
 };
 
-function isWingHighlightTarget(target: CoupangIssuanceTarget): target is "issue" | "credentials" {
+function isWingHighlightTarget(target: CoupangIssuanceTarget): target is "issue" | "credentials" | "issue_final" {
+  // Gated on the flag, not on a literal list, so WITHDRAWING the calibration removes the ring by itself. The
+  // 삭제 record was withdrawn while its target stayed in a hand-written list, and only the flag being read at
+  // the point of use keeps that from happening again.
+  if (target === "issue_final") return WING_KEY_CREATION_SELECTOR_CALIBRATED;
   // ONLY the two controls with a live-calibrated locator. The purpose radios, 확인, the consent boxes and the
   // key-creating button are all MEASURED but NOT promoted, so the driver cannot highlight them and fails closed
   // if asked — which is the tutorial's job to respect, not to work around.
@@ -541,7 +578,12 @@ export const WING_DELETION_SELECTORS_CALIBRATED = false;
 
 /** Default seated-operator observe window (the seller works in the WING window). Tests override to instant. */
 export const DEFAULT_WING_OBSERVE_TIMEOUT_MS = 10 * 60_000;
-const SETTLE_TIMEOUT_MS = 15_000;
+/**
+ * The structural settle bound. Far shorter than the old 15s `networkidle` wait because it is a real bound on a
+ * predicate that actually resolves, not a timeout that was always paid in full.
+ */
+const STRUCTURAL_SETTLE_TIMEOUT_MS = 3_000;
+const STRUCTURAL_POLL_MS = 100;
 const LOCATOR_SETTLE_MS = 400;
 const VERIFY_MAX_POLLS = 12;
 const VERIFY_POLL_MS = 500;
@@ -566,7 +608,6 @@ function advanceToken(target: CoupangIssuanceTarget): string {
  */
 const ADVANCE_BUTTON_LABEL: Readonly<Partial<Record<CoupangIssuanceTarget, string>>> = {
   issue: "발급 화면이 열렸어요 · 다음",
-  purpose_option: "다음",
   confirm_purpose: "확인을 눌렀어요 · 다음",
   terms_consent: "동의했어요 · 다음",
   // The key-creation step. Its caption confirms the seller's own act AFTER the fact; nothing here presses it.
@@ -576,6 +617,22 @@ const ADVANCE_BUTTON_LABEL: Readonly<Partial<Record<CoupangIssuanceTarget, strin
   // on-page button is purely "go back" (avoids two near-identical "enter keys" buttons across the two windows).
   return: "SellerOps로 돌아가기",
 };
+
+/**
+ * The measured screen each checkpoint's own action makes appear. Watching for it is what removes the seller's
+ * "다음" press — the page proving the action happened is strictly better evidence than them telling us.
+ *
+ * `terms_consent` is deliberately absent: ticking two boxes changes no screen, so it is observed differently
+ * (see {@link observeConsentComplete}). `issue_final` is absent for a different reason — it is the key-creation
+ * boundary and nothing about it may auto-advance.
+ */
+const CHECKPOINT_ADVANCES_TO_SCREEN: Readonly<Partial<Record<CoupangIssuanceTarget, WingFlowScreen>>> = {
+  issue: "PURPOSE",
+  confirm_purpose: "TERMS",
+};
+
+/** How often the screen observation runs. Slower than the latch poll: it costs three in-page locates. */
+const SCREEN_OBSERVE_POLL_MS = 1_000;
 
 /** Bounded sleep between navigation-observe polls (no wall-clock read; timer only). */
 function sleep(ms: number): Promise<void> {
@@ -595,12 +652,11 @@ function isVerifyResolved(category: WingPageCategory): boolean {
 const OVERLAY_STEP: Readonly<Record<CoupangIssuanceTarget, number>> = {
   reach_open_api: 1,
   issue: 2,
-  purpose_option: 3,
-  confirm_purpose: 4,
-  terms_consent: 5,
-  issue_final: 6,
-  credentials: 7,
-  return: 8,
+  confirm_purpose: 3,
+  terms_consent: 4,
+  issue_final: 5,
+  credentials: 6,
+  return: 7,
 };
 
 /**
@@ -609,16 +665,45 @@ const OVERLAY_STEP: Readonly<Record<CoupangIssuanceTarget, number>> = {
  * WING (no bounce back to the SellerOps tab per step). Every step is the SELLER's own act: SellerOps never
  * presses 발급 and never reads the Access Key / Secret Key / 업체코드. `reach_open_api` auto-advances on the
  * observed navigation (no button); every other step advances on the seller pressing THIS panel's button.
+ *
+ * **Exported so the frontend's copy can be PINNED to it.** `frontend/src/lib/actionWindow/copy.ts` claims to
+ * carry these strings verbatim; nothing asserted it, and three had already drifted back to the pre-auto-advance
+ * wording. `test/crossstack/coupang-issuance-fe-copy-parity.test.ts` is the assertion.
  */
-const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string>> = {
-  reach_open_api: "WING 홈에서 '오픈API 키 발급' 페이지로 직접 이동하세요. 이동을 감지하면 자동으로 다음 단계로 넘어갑니다.",
-  issue: "표시된 'API Key 발급 받기' 버튼을 직접 누르세요. SellerOps는 대신 누르지 않습니다. 이 버튼은 키를 만들지 않고 사용 목적 선택 화면을 엽니다. 화면이 열리면 아래 버튼을 누르세요.",
-  purpose_option: "사용 목적 화면에서 'OPEN API'가 선택되어 있는지 확인하세요. 보통 기본값이라 아무것도 누르지 않아도 됩니다. 확인했으면 아래 '다음'을 누르세요.",
-  confirm_purpose: "'확인'을 직접 누르세요. 이 버튼도 키를 만들지 않고 약관 동의 화면을 엽니다. 화면이 열리면 아래 버튼을 누르세요.",
-  terms_consent: "약관 내용을 직접 읽고 판단하신 뒤, 동의 체크박스 2개를 직접 선택하세요. SellerOps는 약관을 읽거나 대신 동의하지 않고, 체크 여부도 확인하지 않습니다. 완료하면 아래 버튼을 누르세요.",
-  issue_final: "⚠ 여기서 실제로 키가 생성됩니다. '약관 동의 및 Key 발급받기' 버튼을 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않습니다. 발급이 끝나면 아래 버튼을 누르세요.",
+export const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string>> = {
+  reach_open_api: "WING에 로그인한 뒤 '오픈API 키 발급' 페이지로 이동하세요. 도착하면 자동으로 넘어갑니다.",
+  issue: "'API Key 발급 받기'를 직접 누르세요. 키는 아직 만들어지지 않고 사용 목적 화면만 열립니다. 화면이 열리면 자동으로 넘어갑니다.",
+  confirm_purpose: "사용 목적이 'OPEN API'인지 확인하고(기본값입니다) '확인'을 직접 누르세요. 이 버튼도 키를 만들지 않고 약관 화면을 엽니다. 화면이 열리면 자동으로 넘어갑니다.",
+  terms_consent: "약관을 직접 읽고 판단하신 뒤 동의 체크박스 2개를 선택하세요. SellerOps는 약관을 읽지도, 대신 동의하지도, 체크하지도 않습니다. 2개가 모두 선택되면 자동으로 넘어갑니다(선택 여부는 저장·전송하지 않습니다).",
+  // NOT trimmed. Every sentence here is a safety claim the approval harness reproduces and asserts before the
+  // operator grants (`wing-walk-selfcheck.sh`, "the COMPLETE Korean copy of the key-creation step"), and this is
+  // the one step where the control in front of the seller creates the key. Concision is not worth a clause here.
+  issue_final: "⚠ 여기서 실제로 키가 생성됩니다. '약관 동의 및 Key 발급받기' 버튼을 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다. 발급이 끝나면 아래 버튼을 누르세요.",
   credentials: "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요. SellerOps는 값을 읽지 않습니다. 복사했으면 아래 버튼을 누르세요.",
-  return: "이제 아래 버튼을 눌러 SellerOps로 돌아가세요. 돌아가면 복사한 키를 입력해 연결을 마칠 수 있어요.",
+  return: "아래 버튼을 눌러 SellerOps로 돌아가세요. 복사한 키를 입력하면 연결이 끝납니다.",
+};
+
+/**
+ * **The chip above the highlighted control** — which step this is, not what to do about it.
+ *
+ * The instruction lives in the panel, which wraps and has room for it. The chip cannot wrap (it would grow down
+ * over the control it points at), so a full instruction there ran off the viewport: live-observed 2026-08-11 at
+ * the key-creation step, cutting off exactly "SellerOps는 이 버튼을 절대 누르지 않고, 자동으로 넘어가지도
+ * 않습니다". Two renderings of one sentence, one of them silently incomplete — and the incomplete one sat on
+ * the control that creates the key.
+ *
+ * Each is a NOUN PHRASE naming the control or the act, never an abbreviated instruction: a shortened
+ * instruction is how a safety clause gets dropped and still reads like guidance.
+ */
+export const OPERATOR_STEP_TITLES: Readonly<Record<CoupangIssuanceTarget, string>> = {
+  reach_open_api: "오픈API 키 발급 페이지로 이동",
+  issue: "'API Key 발급 받기' 누르기",
+  confirm_purpose: "사용 목적 확인 후 '확인'",
+  terms_consent: "약관 2건 동의",
+  // The one chip that keeps a warning: it names the consequence, and the panel beside it carries the full text.
+  issue_final: "⚠ 키가 생성되는 단계",
+  credentials: "키 3개 복사",
+  return: "SellerOps로 돌아가기",
 };
 
 /** A browser context whose newest tab may hold the step the seller opened. Structural subset of Playwright's. */
@@ -643,6 +728,7 @@ export interface CoupangWingIssuanceDriverOptions {
  * constants so the engine's locate↔highlight anti-drift check (which requires the two sigs to match) still passes.
  */
 const REACH_OPEN_API_GUIDANCE_SIG = "c0a9b17ec0a9b17e";
+const RETURN_GUIDANCE_SIG = "5e11e40b5e11e40b";
 /**
  * **TEXT-GUIDED steps: the ones the tutorial guides but cannot highlight.**
  *
@@ -655,14 +741,45 @@ const REACH_OPEN_API_GUIDANCE_SIG = "c0a9b17ec0a9b17e";
  * No test caught it: the session and engine suites drive a fixture driver that answers `count: 1` for every
  * target, so the fixture stood one layer away from the thing it modelled. This constant is the repair, and it
  * promotes NOTHING — a text-guided step gets the guidance panel and its advance button, and no spotlight ring.
+ *
+ * **`reach_open_api` and `return` belong here too, and were left out.** Both are locator-less guidance in
+ * exactly the same sense — their sigs are synthetic constants, not derived from any element — but they kept a
+ * separate branch that mounted an ANCHORED overlay, i.e. the defect this map exists to fix:
+ *   - `return` followed the `credentials` step, whose `data-aw-target` is still on the Access Key row (nothing
+ *     clears a tag between steps), so the ring landed on the Access Key row while the panel read
+ *     `SellerOps로 돌아가기 7/7`;
+ *   - `reach_open_api` runs on a fresh window where no tag exists at all, so `mountOverlay` returned having
+ *     created NOTHING — and the branch answered `{count:1}` regardless, so the engine barriered on step 1 with
+ *     no on-page instruction rendered anywhere.
+ * One map, one branch: a guidance step clears the prior tag, mounts docked, and reports what actually mounted.
  */
 const TEXT_GUIDED_SIG: Readonly<Partial<Record<CoupangIssuanceTarget, string>>> = {
-  purpose_option: "7a1c33d27a1c33d2",
+  reach_open_api: REACH_OPEN_API_GUIDANCE_SIG,
   confirm_purpose: "b48e2f05b48e2f05",
   terms_consent: "16d9c7ba16d9c7ba",
-  issue_final: "9f3b60e19f3b60e1",
+  return: RETURN_GUIDANCE_SIG,
 };
-const RETURN_GUIDANCE_SIG = "5e11e40b5e11e40b";
+
+/**
+ * Has the surface painted anything readable? An ES5-plain STRING, like every other in-page script here
+ * (tsx/esbuild injects a `__name` helper into serialized functions, which the page then throws on).
+ *
+ * Value-free by construction: it returns one boolean and reads no text, attribute, URL, or field value. It is
+ * deliberately cruder than the classifier — its only job is "is there a document with laid-out content yet",
+ * so that a read happens as soon as one exists instead of after a fixed wait.
+ */
+const WING_SURFACE_PAINTED = `(function () {
+  /* coupang-issuance-painted */
+  try {
+    if (document.readyState === "loading") return false;
+    var b = document.body;
+    if (!b) return false;
+    var r = b.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  } catch (e) {
+    return false;
+  }
+})()`;
 
 /** Remove every read-only `data-aw-target` annotation. Value-free; safe on a page with none. */
 const IN_PAGE_CLEAR_TAG = `(function () {
@@ -706,13 +823,33 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
   }
 
   /** Best-effort settle; a page without `waitForLoadState` (offline fake) is left as-is. */
+  /**
+   * Settle the surface enough to read it — on a STRUCTURAL predicate, not on the network going quiet.
+   *
+   * `networkidle` was the wrong signal and cost the seller 15 seconds at every step. WING keeps sockets and
+   * analytics open indefinitely, so the wait never succeeded; it always burned the full timeout and returned,
+   * and two of them in one transition is the ~30s pause observed live on 2026-08-10. The page was READABLE the
+   * whole time.
+   *
+   * What replaces it asks the only question the reader actually has — has the document stopped loading and
+   * painted something — and polls it cheaply. A page that never satisfies it still proceeds after a short
+   * bound: the classifier fails closed on thin signals, so reading early is safe, while waiting is not free.
+   */
   private async settle(page: Page): Promise<void> {
     const p = page as unknown as { waitForLoadState?: (s: string, o?: { timeout?: number }) => Promise<void> };
     if (typeof p.waitForLoadState !== "function") return;
     try {
-      await p.waitForLoadState("networkidle", { timeout: SETTLE_TIMEOUT_MS });
+      // `domcontentloaded` is a real event on every navigation, unlike `networkidle`. Cheap, and it resolves
+      // immediately when the document is already past it.
+      await p.waitForLoadState("domcontentloaded", { timeout: STRUCTURAL_SETTLE_TIMEOUT_MS });
     } catch {
-      /* timeout is fine — the classifier fails closed on thin signals */
+      /* already past it, or the page is slow — the structural poll below is the real gate */
+    }
+    const deadline = STRUCTURAL_SETTLE_TIMEOUT_MS;
+    for (let waited = 0; waited < deadline; waited += STRUCTURAL_POLL_MS) {
+      const painted = await this.evalStr<boolean>(page, WING_SURFACE_PAINTED).catch(() => false);
+      if (painted === true) return;
+      await sleep(STRUCTURAL_POLL_MS);
     }
   }
 
@@ -862,6 +999,60 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
   }
 
   /**
+   * Which measured FLOW SCREEN the seller is currently on — the observation the auto-advance rests on.
+   *
+   * The coarse `pageCategory` cannot answer this: the issuance page, the purpose screen and the terms screen all
+   * classify as `open_api_issuance`, because they share the open-API marker. Screen identity comes from the
+   * markers the discovery runs measured, with the SAME precedence as {@link wingFlowScreenFrom} — **TERMS wins**
+   * a tie, because the terms screen is the one carrying the key-creation control and a reading that could be
+   * either must resolve to the one where stopping is correct.
+   *
+   * Value-free: it runs the audited fixed-label locate for each marker and looks only at the visible count. No
+   * new in-page script, no text read, no URL, no field value.
+   *
+   * `UNRECOGNIZED` is the honest answer for "not one of the screens we have measured" — including every screen
+   * before the seller has got anywhere. Callers must treat it as "not there yet", never as drift.
+   */
+  async probeFlowScreen(): Promise<WingFlowScreen> {
+    // EVERY terms marker is read, not just enough of them to decide. Short-circuiting on the first visible one
+    // was correct for the verdict and wrong for the evidence: `stage3.terms.heading` sits first in the array, so
+    // on the live walk of 2026-08-10 it answered TERMS and `stage3.terms.issue_final` — the key-creation control
+    // — was never read on the terms screen at all. The only readings that existed were from the PURPOSE screen,
+    // where it is hidden, so the run produced no basis for promoting it and the sitting had to be repeated.
+    //
+    // Reading both costs one extra in-page locate on the screen where the walk stops anyway.
+    let terms = false;
+    for (const spec of WING_TERMS_SCREEN_MARKER_SPECS) {
+      if (await this.markerVisible(spec)) terms = true;
+    }
+    if (terms) return "TERMS";
+    return (await this.markerVisible(WING_PURPOSE_SCREEN_MARKER_SPEC)) ? "PURPOSE" : "UNRECOGNIZED";
+  }
+
+  /**
+   * Is this marker PAINTING on the current surface? A hidden match is not a screen the seller can see, which is
+   * the distinction that invalidated an earlier calibration record — so `count` alone is not the test.
+   */
+  private async markerVisible(spec: WingFlowScreenMarkerSpec): Promise<boolean> {
+    const res = await this.resolveFixedLabelSpec(spec, false).catch(() => ({ count: 0 }) as LocateResult);
+    // The MEASUREMENT, recorded. Both flow-screen markers are unproven — the purpose heading has never been
+    // matched by any apparatus, and the terms markers were transcribed off a screen rather than resolved by
+    // one — so a live walk has to be able to say which of them actually fires. Without this the auto-advance
+    // would fall back to the seller's button and look indistinguishable from having worked.
+    //
+    // Sanitized: a candidate ID and integers. No text, no URL, no value. `hiddenCount` and `tag` travel because
+    // a hidden match is not a screen the seller can see, and a tag that was expected rather than OBSERVED is
+    // how a calibration record went wrong here before.
+    log("aw_coupang_flow_marker", {
+      markerId: spec.id,
+      visibleCount: res.count,
+      ...(typeof res.hiddenCount === "number" ? { hiddenCount: res.hiddenCount } : {}),
+      ...(res.tag ? { observedTag: res.tag } : {}),
+    });
+    return res.count >= 1;
+  }
+
+  /**
    * READ-ONLY: the full sanitized {@link WingObservation} of the CURRENT surface — page category + bucketized
    * signals + calibration blockers (always carries `LIVE_DOM_CALIBRATION_PENDING`). Built from the value-free
    * census + host-category read, exactly like {@link readSurface}, so nothing here reads a value/URL/text. This
@@ -913,12 +1104,9 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
   }
 
   async locateTarget(target: CoupangIssuanceTarget): Promise<LocateResult> {
-    // `reach_open_api` and `return` are GUIDANCE, not queried WING controls — each resolves to a fixed synthetic
-    // signature (reach = "go to the open-API page yourself"; return = "go back to SellerOps").
-    if (target === "reach_open_api") return { count: 1, sig: REACH_OPEN_API_GUIDANCE_SIG };
-    if (target === "return") return { count: 1, sig: RETURN_GUIDANCE_SIG };
-    // Text-guided: measured, not promoted. It resolves to a fixed synthetic signature exactly as the two
-    // guidance steps above do — the page is not queried, so there is nothing to find and nothing to miss.
+    // Text-guided (incl. `reach_open_api` and `return`, which are guidance rather than queried WING controls):
+    // measured, not promoted. It resolves to a fixed synthetic signature — the page is not queried, so there is
+    // nothing to find and nothing to miss.
     const guided = TEXT_GUIDED_SIG[target];
     if (guided) return { count: 1, sig: guided };
     if (!isWingHighlightTarget(target)) return { count: 0 };
@@ -927,19 +1115,16 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
 
   async highlightTarget(target: CoupangIssuanceTarget): Promise<LocateResult> {
     const page = this.activePage();
-    if (target === "reach_open_api") {
-      await this.mountStepOverlay(page, "reach_open_api");
-      return { count: 1, sig: REACH_OPEN_API_GUIDANCE_SIG };
-    }
-    if (target === "return") {
-      await this.mountStepOverlay(page, "return");
-      return { count: 1, sig: RETURN_GUIDANCE_SIG };
-    }
     const guided = TEXT_GUIDED_SIG[target];
     if (guided) {
-      // The guidance panel and its advance button, and NO spotlight ring: there is no promoted locator to point
-      // at, and drawing a ring somewhere plausible would be the invention this whole workstream refuses.
-      await this.mountStepOverlay(page, target);
+      // CLEAR THE PRIOR TAG FIRST. Live-confirmed 2026-08-10: without this the mount found the PREVIOUS step's
+      // `data-aw-target` — still on `API Key 발급 받기` — removed the old box and rebuilt it in the same place
+      // with this step's text. The operator saw a ring pointing at one control while the panel described
+      // another, for three consecutive steps. A step that claims no locator must leave no anchor behind.
+      await this.evalStr(page, IN_PAGE_CLEAR_TAG).catch(() => undefined);
+      // …then the panel ALONE, docked. Without `dockedPanelOnly` the mount finds no anchor and returns having
+      // created nothing, which is why these steps had no presentation of their own once the stale tag was gone.
+      await this.mountStepOverlay(page, target, true);
       return (await overlayMounted(page)) ? { count: 1, sig: guided } : { count: 0 };
     }
     if (!isWingHighlightTarget(target)) return { count: 0 };
@@ -959,13 +1144,17 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
    * on the observed navigation). The button only records the seller's press into an in-page value-free latch;
    * the driver never clicks/types and reads no field value.
    */
-  private async mountStepOverlay(page: Page, target: CoupangIssuanceTarget): Promise<void> {
+  private async mountStepOverlay(page: Page, target: CoupangIssuanceTarget, dockedPanelOnly = false): Promise<void> {
     const buttonLabel = ADVANCE_BUTTON_LABEL[target];
     await mountOverlay(page, {
+      ...(dockedPanelOnly ? { dockedPanelOnly: true } : {}),
       stepNumber: OVERLAY_STEP[target],
       totalSteps: COUPANG_ISSUANCE_TOTAL_STEPS,
       copyKey: `actionWindow.coupangIssuance.step.${target}`,
       label: OPERATOR_STEP_LABELS[target],
+      // The chip gets the short title; the panel keeps the instruction. Without this both rendered the same
+      // long string and the chip's copy ran off the viewport.
+      badgeLabel: OPERATOR_STEP_TITLES[target],
       guidanceEnabled: this.opts.guidanceEnabled ?? true,
       // Opt in to the WING-resident guidance panel (this driver is the only one that does); the button is
       // added only for a checkpoint (a target with an advance label). The reach step gets a copy-only panel.
@@ -1001,17 +1190,74 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
   }
 
   /**
-   * Await the seller's press of this checkpoint's WING-resident advance button, value-free: poll the in-page
-   * advance latch for THIS step's opaque token and resolve `true` the moment it matches. NEVER clicks, types, or
-   * reads a field value — only compares an opaque token. On timeout it returns `false` so the session re-arms.
+   * Has the seller finished consenting? A single aggregate boolean, computed IN THE PAGE.
+   *
+   * The one place this codebase looks at a consent checkbox's state, and it is deliberately the weakest read
+   * that answers the question: the conjunction happens page-side, so which box was ticked — or that one was and
+   * the other was not — never crosses the boundary and cannot be stored, sent, or logged by anything here.
+   *
+   * SellerOps still never ticks a box, never reads the terms, and never decides for the seller. Noticing that a
+   * human has consented is not consenting on their behalf; it is what lets the tutorial stop asking them to
+   * report what the page already shows.
+   *
+   * Fail-closed: any structural ambiguity yields `false` ("not proven complete"), and the seller's own advance
+   * button remains the way through.
+   */
+  private async observeConsentComplete(): Promise<boolean> {
+    const script = buildWingConsentCompleteScript(WING_STAGE3_TERMS_OPTION_CANDIDATES.map((c) => c.exactText));
+    return (await this.evalStr<boolean>(this.activePage(), script).catch(() => false)) === true;
+  }
+
+  /**
+   * Await this checkpoint's completion — whichever the page proves FIRST:
+   *
+   *  1. **the screen the seller's own action produces.** 발급 opens the purpose screen and 확인 opens the terms
+   *     screen, both measured. When the expected screen appears, the seller has plainly done the thing, and
+   *     asking them to confirm what the page already proves is what made this read as a tutorial rather than a
+   *     product. This is pure observation: nothing is clicked, and the seller still performs every WING action.
+   *  2. **their press of the WING-resident advance button.** Kept, and never removed: a marker that does not
+   *     resolve (the purpose heading has never been matched by any apparatus — see
+   *     `WING_PURPOSE_SCREEN_MARKER_MEASURED`) must degrade to the seller moving on, not to a stalled run. It is
+   *     also the safety fence — manual progress always remains available — and it lives in the WING overlay, so
+   *     using it still never sends anyone back to the SellerOps tab.
+   *
+   * Value-free throughout: an opaque token comparison and a visible/hidden count. No click, no type, no field
+   * value, no text. On timeout it returns `false` so the session re-arms.
    */
   private async observeOverlayAdvance(target: CoupangIssuanceTarget): Promise<boolean> {
     const timeoutMs = this.opts.observeTimeoutMs ?? DEFAULT_WING_OBSERVE_TIMEOUT_MS;
     const maxPolls = Math.max(1, Math.ceil(timeoutMs / OVERLAY_ADVANCE_POLL_MS));
     const token = advanceToken(target);
+    const expected = CHECKPOINT_ADVANCES_TO_SCREEN[target];
+    // The screen must CHANGE INTO the expected one — a reading taken BEFORE anything could have happened is the
+    // baseline, and an advance is only an observation of the seller's act if it differs from it.
+    //
+    // Without this the first probe ran at `i === 0`, immediately after arming and before any sleep, and simply
+    // asked "is the expected screen showing". WING keeps later screens in the same document — the marker
+    // evidence records `stage3.terms.heading` as `hiddenCount: 1` while on PURPOSE — and no reading of the
+    // purpose marker has ever been taken ON the issuance page. So if that marker paints before 발급 is pressed,
+    // step 2 completed itself and the walk guided step 3 while the seller had done nothing at all. An
+    // auto-advance that can fire on arrival is not an observation.
+    //
+    // Fail-closed: when the baseline ALREADY reads as the expected screen, screen-advance is off for this arm
+    // window and the seller's own WING-resident button is the way through. That button is on every checkpoint
+    // for exactly this reason.
+    // An UNREADABLE baseline disables it too: not knowing where the seller started is exactly the state in
+    // which "the expected screen is showing" cannot be told apart from "it was showing all along".
+    const baseline = expected ? await this.probeFlowScreen().catch(() => null) : null;
+    const screenMayAdvance = expected !== undefined && baseline !== null && baseline !== expected;
+    // The screen probe costs three in-page locates, so it runs on a slower cadence than the latch poll rather
+    // than on every tick. The seller pressing the button is still noticed within one latch poll.
+    const screenEvery = Math.max(1, Math.round(SCREEN_OBSERVE_POLL_MS / OVERLAY_ADVANCE_POLL_MS));
     for (let i = 0; i < maxPolls; i++) {
       const pressed = await readOverlayAdvancePressed(this.activePage(), token).catch(() => false);
       if (pressed) return true;
+      if (i % screenEvery === 0) {
+        if (screenMayAdvance && (await this.probeFlowScreen().catch(() => "UNRECOGNIZED" as WingFlowScreen)) === expected) return true;
+        // The consent step changes no screen, so its completion is the seller's own two ticks — observed, never
+        // performed, and never recorded (see `observeConsentComplete`).
+        if (target === "terms_consent" && (await this.observeConsentComplete())) return true;
+      }
       if (i < maxPolls - 1) await sleep(OVERLAY_ADVANCE_POLL_MS);
     }
     return false;

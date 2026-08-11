@@ -133,13 +133,22 @@ describe("browser launch reachability", () => {
     const calls = [...cli.matchAll(/launchNaverContext\(/g)].map((m) => m.index!);
     expect(calls.length).toBeGreaterThanOrEqual(1);
 
-    const builderStart = cli.indexOf("export async function buildInitialImportConfig");
-    const builderEnd = cli.indexOf("/**\n * Build the {@link AgentActionWindowConfig}");
-    expect(builderStart).toBeGreaterThan(-1);
-    expect(builderEnd).toBeGreaterThan(builderStart);
+    // TWO gated builders now: the initial-import one, and the Coupang guided walk's live carrier (whose launch
+    // is deferred into `open()` and only reached once every approval binding is present). The property is
+    // unchanged and still the point — every launch is inside a builder that a gate stands in front of, so none
+    // is reachable by booting the agent alone. Widening this to "anywhere" would retire the guard, not update it.
+    const spans = [
+      ["export async function buildInitialImportConfig", "/**\n * Build the {@link AgentActionWindowConfig}"],
+      ["export function buildCoupangIssuanceLiveConfig", "\nexport function buildCoupangIssuanceConfig"],
+    ].map(([from, to]) => {
+      const start = cli.indexOf(from!);
+      const end = cli.indexOf(to!, start);
+      expect(start, from).toBeGreaterThan(-1);
+      expect(end, to).toBeGreaterThan(start);
+      return [start, end] as const;
+    });
     for (const at of calls) {
-      expect(at).toBeGreaterThan(builderStart);
-      expect(at).toBeLessThan(builderEnd);
+      expect(spans.some(([start, end]) => at > start && at < end), `launch at ${at} is outside every gated builder`).toBe(true);
     }
   });
 

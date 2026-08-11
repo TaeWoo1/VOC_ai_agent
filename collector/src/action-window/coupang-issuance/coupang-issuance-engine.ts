@@ -40,6 +40,7 @@ import {
   coupangIssuanceStepMetaAt,
   coupangIssuanceStepPlan,
   isCoupangIssuanceBarrier,
+  isCoupangIssuanceObservedWait,
   isCoupangIssuancePark,
   isCoupangIssuanceTerminal,
   type CoupangIssuanceStage,
@@ -54,6 +55,15 @@ export type CoupangIssuanceEffect =
    * recoverably. Distinct from `PROBE` (which expects the WING home / issuance page at the top).
    */
   | "VERIFY_REACH"
+  /**
+   * Keep WATCHING for a WING surface we recognize, re-probing on the session's own cadence.
+   *
+   * This replaces a park. The dedicated window opens on a blank tab, so the very FIRST probe of every run was
+   * guaranteed to be `unknown` and the run parked on `page_mismatch` — telling a seller who has not logged in
+   * yet that "화면이 바뀐 것 같아요", and then never recovering on its own. Not being there yet is the expected
+   * state at the start of a walk, not drift.
+   */
+  | "AWAIT_SURFACE"
   /** Locate → highlight → arm the barrier for one control, as a single batched step in the session. */
   | { guide: CoupangIssuanceTarget }
   | { observe: CoupangIssuanceTarget }
@@ -86,16 +96,22 @@ export function makeCoupangIssuanceClock(start = 1): CoupangIssuanceClock {
  */
 const HEX16 = /^[0-9a-f]{16}$/;
 
+/**
+ * The stages a surface probe is allowed to move. Every `PROBE` is issued from `opening` (`start` and the
+ * park/wait `recheck` both set it), and every surface-wait poll runs in one of the two waits — so anything else
+ * arriving here is a SECOND reader arriving after the first already advanced the run.
+ */
+const PROBE_ADVANCEABLE_STAGES: readonly CoupangIssuanceStage[] = ["opening", "waiting_login", "awaiting_wing_surface"];
+
 const TARGET_BARRIER = COUPANG_TARGET_BARRIER_STAGE;
 const TARGET_STEP: Readonly<Record<CoupangIssuanceTarget, number>> = {
   reach_open_api: 1,
   issue: 2,
-  purpose_option: 3,
-  confirm_purpose: 4,
-  terms_consent: 5,
-  issue_final: 6,
-  credentials: 7,
-  return: 8,
+  confirm_purpose: 3,
+  terms_consent: 4,
+  issue_final: 5,
+  credentials: 6,
+  return: 7,
 };
 
 export class CoupangIssuanceEngine {
@@ -113,7 +129,7 @@ export class CoupangIssuanceEngine {
   /** The control the current barrier/checkpoint rests on, so a recheck/resume re-guides the right section. */
   private currentTarget: CoupangIssuanceTarget | null = null;
   private targetSig: Partial<Record<CoupangIssuanceTarget, string>> = {};
-  private blockerCode: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT" | null = null;
+  private blockerCode: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT" | "SURFACE_SETTLE_TIMEOUT" | null = null;
   private blockerRecoverable = false;
   /** A pause is an overlay on a barrier, not a stage — the product's stage list is exactly 14. */
   private paused = false;
@@ -169,9 +185,13 @@ export class CoupangIssuanceEngine {
    *   <li><b>Checkpoint barrier</b> → "다음" advances it.</li>
    *   <li><b>reach_open_api barrier</b> → re-arm the navigation observation.</li>
    * </ul>
+   *
+   * <p>An OBSERVED WAIT takes the same path as a park. It is not one — nothing is blocked and the runtime is
+   * still looking — but "look again" means exactly the same thing there, and a recheck that resolved to `NONE`
+   * was the reason the wait had no way out once its window elapsed.
    */
   private recheck(): CoupangIssuanceEffect {
-    if (isCoupangIssuancePark(this.stage)) {
+    if (isCoupangIssuancePark(this.stage) || isCoupangIssuanceObservedWait(this.stage)) {
       if (this.currentTarget && isCoupangCheckpointTarget(this.currentTarget)) {
         const target = this.currentTarget;
         this.blockerCode = null;
@@ -233,8 +253,17 @@ export class CoupangIssuanceEngine {
    */
   onSurfaceProbed(probe: WingSurfaceProbe): CoupangIssuanceEffect {
     if (isCoupangIssuanceTerminal(this.stage)) return "NONE";
+    // ONLY a run that has not yet reached its first guided control may be advanced by a probe. Two readers can
+    // reach here at once — a surface-wait poll and a `REQUEST_STEP_RECHECK`'s `PROBE` — and without this the
+    // SECOND one re-ran the whole branch on a run the first had already advanced: `STEP_COMPLETED` for step 1
+    // emitted twice and two independent `{guide:"issue"}` chains armed on one target. The same target+stage
+    // re-check `advanceCheckpoint` has always done, applied to the probe path that was missing it.
+    if (!PROBE_ADVANCEABLE_STAGES.includes(this.stage)) return "NONE";
     if (!probe.ok || probe.blockerCode === "LOGIN_REQUIRED" || probe.pageCategory === "login") {
-      return this.park("waiting_login", "LOGIN_REQUIRED");
+      // A wait, not a park: the seller logs in inside the WING window and the runtime notices by itself. It used
+      // to need a `REQUEST_STEP_RECHECK` from the SellerOps tab, which is the tab they were told not to return to.
+      this.waitingFor("waiting_login", "LOGIN_REQUIRED");
+      return "AWAIT_SURFACE";
     }
     const { branch } = branchAfterWingProbe(probe.pageCategory);
     if (branch === "open_api") {
@@ -256,8 +285,9 @@ export class CoupangIssuanceEngine {
       this.currentTarget = "reach_open_api";
       return { guide: "reach_open_api" };
     }
-    // login is handled above; anything else is an unexpected page → recoverable page_mismatch park.
-    return this.park("page_mismatch", "UI_DRIFT");
+    // Anything else is a page we do not recognize YET. Watch, do not park: at run start this is the blank tab
+    // the window opened on, and mid-walk it is most often a page still settling.
+    return this.awaitSurface();
   }
 
   /** Locate result for the control being guided. Not found / not unique → recoverable target_not_found. */
@@ -323,7 +353,11 @@ export class CoupangIssuanceEngine {
     if (isCoupangIssuanceTerminal(this.stage)) return "NONE";
     if (this.stage !== TARGET_BARRIER.reach_open_api || this.currentTarget !== "reach_open_api") return "NONE";
     if (!probe.ok || probe.blockerCode === "LOGIN_REQUIRED" || probe.pageCategory === "login") {
-      return this.park("waiting_login", "LOGIN_REQUIRED");
+      // A WAIT, exactly as on the probe path. This branch was left as a park when the other one was converted,
+      // and live on 2026-08-10 it swallowed a whole run: one login reading during the seller's navigation put
+      // the walk in a park that never looked again, so reaching the issuance page changed nothing.
+      this.waitingFor("waiting_login", "LOGIN_REQUIRED");
+      return "AWAIT_SURFACE";
     }
     if (probe.pageCategory === "open_api_issuance") {
       this.emit("USER_ACTION_OBSERVED", { stepId: this.stepId(), observed: true });
@@ -332,8 +366,9 @@ export class CoupangIssuanceEngine {
       this.currentTarget = "issue";
       return { guide: "issue" };
     }
-    // Wrong page / multiple transitions → recoverable park; a REQUEST_STEP_RECHECK re-probes from the top.
-    return this.park("page_mismatch", "UI_DRIFT");
+    // Still on the way (the home, an intermediate hop, a page mid-hydration) → keep watching. The seller is
+    // moving through WING; "not there yet" is not drift, and it must not need a command from the other tab.
+    return this.awaitSurface();
   }
 
   /** Where the run goes once a barrier's control has been acted on. */
@@ -347,10 +382,11 @@ export class CoupangIssuanceEngine {
       // MEASURED: 발급 opens the purpose screen. It does not create a key, and this hop no longer pretends it
       // does — the old plan went `issue → credentials`, i.e. straight from a press that reveals a form to
       // "copy your keys", past two screens and the control that actually issues.
+      //
+      // The purpose screen is ONE step, not two. `OPEN API` is already selected, so a separate "confirm the
+      // radio" step asked the seller to verify something nobody had asked them to change and then made them
+      // advance twice through a single screen. That check is a clause in `confirm_purpose`'s copy now.
       case "issue":
-        this.currentTarget = "purpose_option";
-        return { guide: "purpose_option" };
-      case "purpose_option":
         this.currentTarget = "confirm_purpose";
         return { guide: "confirm_purpose" };
       case "confirm_purpose":
@@ -391,6 +427,42 @@ export class CoupangIssuanceEngine {
     if (this.stage === "page_mismatch" && this.blockerCode === "UI_DRIFT") return "NONE";
     this.park("page_mismatch", "UI_DRIFT");
     return "CLEAR_HIGHLIGHT";
+  }
+
+  /**
+   * **The observed wait's window elapsed.** Nothing is watching WING any more, so the run must stop CLAIMING to
+   * be: an observed wait reports RUNNING with no blocker precisely because the runtime is looking on the
+   * seller's behalf, and once it has stopped, that reading is false.
+   *
+   * It converts to a recoverable `page_mismatch` park carrying `SURFACE_SETTLE_TIMEOUT` — "화면이 아직 준비되지
+   * 않았어요", which is what actually happened (ten minutes of readings, none of them a surface the tutorial
+   * recognized) rather than `UI_DRIFT`'s "화면이 바뀐 것 같아요", the misleading message this stage was created
+   * to stop showing a seller who simply had not logged in yet.
+   *
+   * **The seller's own 다시 확인 is the recovery, and deliberately the ONLY one.** Every other park restarts
+   * itself on a timer; this one does not, because it is reached *by* a watch running out. Restarting it would
+   * re-enter the same ten-minute watch, and a run nobody is sitting at would poll a page nobody is looking at
+   * for as long as the agent lives — the exact thing the watch is bounded to prevent. The button was missing
+   * here; that was the defect. It is present now, at this stage and throughout the wait before it.
+   *
+   * **`waiting_login` expires to nothing on purpose**, and this is the one place on the walk where the seller is
+   * left to come back to the SellerOps tab. It is worth being explicit about, because it is a real limit rather
+   * than an oversight:
+   *  - it is ALREADY a park carrying `LOGIN_REQUIRED` with `REQUEST_STEP_RECHECK` offered, so the frontend has
+   *    been showing a blocker card and a button the whole time — nothing about the expiry is silent;
+   *  - converting it would mean re-announcing a blocker the seller is already looking at;
+   *  - and there is no WING-resident surface to offer anything on: at a login screen the walk has mounted no
+   *    overlay, so "keep watching" is the only thing it could do, which is what just ran out.
+   * A seller who has been at a WING login for ten minutes is not mid-flow. Restarting the watch for them would
+   * poll a login page for as long as the agent lives.
+   *
+   * Idempotent, and a no-op on any other stage: a poll that finishes after the run has already moved on must
+   * not park a healthy run.
+   */
+  onSurfaceWaitExpired(): CoupangIssuanceEffect {
+    if (isCoupangIssuanceTerminal(this.stage)) return "NONE";
+    if (!isCoupangIssuanceObservedWait(this.stage)) return "NONE";
+    return this.park("page_mismatch", "SURFACE_SETTLE_TIMEOUT");
   }
 
   /**
@@ -437,9 +509,32 @@ export class CoupangIssuanceEngine {
    * Park recoverably at a seller-clearable stop. Emits `RUN_BLOCKED { recoverable: true }` and stops, never a
    * `RUN_FAILED`: the run is not over. A `REQUEST_STEP_RECHECK` re-probes / re-guides.
    */
+  /**
+   * Enter (or stay in) an OBSERVED WAIT: the runtime has not seen a surface it can act on and is watching for
+   * one. Idempotent, so a poll that keeps reading the same unrecognized page does not emit an event per tick.
+   *
+   * Unlike {@link park} this is not a blocker the seller has to clear from the SellerOps tab — it clears itself
+   * the moment WING shows something we recognize.
+   */
+  private waitingFor(stage: "waiting_login" | "awaiting_wing_surface", code: "LOGIN_REQUIRED" | null): void {
+    if (this.stage === stage && this.blockerCode === code) return;
+    this.paused = false;
+    this.blockerCode = code;
+    this.blockerRecoverable = code !== null;
+    this.stage = stage;
+    if (code) this.emit("RUN_BLOCKED", { code, recoverable: true });
+    this.emit("RUN_STATUS_CHANGED", { status: code ? "WAITING_FOR_HUMAN" : "RUNNING" });
+  }
+
+  /** Watch for a recognizable WING surface. Carries NO blocker — "not there yet" is not a fault. */
+  private awaitSurface(): CoupangIssuanceEffect {
+    this.waitingFor("awaiting_wing_surface", null);
+    return "AWAIT_SURFACE";
+  }
+
   private park(
     stage: "waiting_login" | "target_not_found" | "page_mismatch",
-    code: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT",
+    code: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT" | "SURFACE_SETTLE_TIMEOUT",
   ): CoupangIssuanceEffect {
     if (this.stage === stage && this.blockerCode === code) return "NONE";
     this.paused = false;

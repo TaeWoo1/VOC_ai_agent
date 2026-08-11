@@ -59,7 +59,18 @@ export type PresentResult =
   | { status: "declined" }
   | { status: "unavailable"; reason: PresenterUnavailable };
 
+/**
+ * WHERE this presenter puts the code, so the agent's own confirmation page can tell the person where to look
+ * for it. Declared BY the presenter rather than configured beside it: an instruction that can disagree with the
+ * channel that actually presented is worse than no instruction — it sends the person to a window that is not
+ * there. A presenter that omits it gets neutral copy, never a guess.
+ */
+export const APPROVAL_CHANNELS = ["os_dialog", "terminal"] as const;
+export type ApprovalChannel = (typeof APPROVAL_CHANNELS)[number];
+
 export interface ApprovalPresenter {
+  /** Where this presenter shows the code. Optional: an adapter that does not declare it gets neutral copy. */
+  readonly channel?: ApprovalChannel;
   /**
    * Can this presenter reach a human RIGHT NOW? Asked before any secret is minted, so an unavailable channel
    * costs nothing and leaves no ephemeral state behind. Must be side-effect free.

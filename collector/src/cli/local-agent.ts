@@ -45,6 +45,9 @@ import type { ConnectorOrchestratorObserver, ConnectorStartupResult } from "../c
 import { createAgentBridge, type AgentActionWindowConfig, type AgentApiIssuanceConfig, type AgentCoupangIssuanceConfig, type AgentImportConfig, type AgentReplySubmissionConfig } from "../agent/agent-bridge";
 import { IssuanceFixtureDriver } from "../action-window/api-issuance/issuance-fixture-driver";
 import { CoupangIssuanceFixtureDriver } from "../action-window/coupang-issuance/coupang-issuance-fixture-driver";
+import { LazyCoupangIssuanceDriver } from "../action-window/coupang-issuance/lazy-coupang-issuance-driver";
+import { verifyRepoIdentity } from "./repo-identity";
+import { screenWingUrl } from "./coupang-wing-classifier";
 import { NaverLiveProbeDriver } from "../action-window/naver-live-driver";
 import { createNaverActionWindowImportDriver } from "../action-window/naver-acquisition-adapter";
 import { defaultImportRunDirFor } from "../action-window/initial-import/import-dispatch";
@@ -252,10 +255,56 @@ export function buildApiIssuanceConfig(): AgentApiIssuanceConfig {
  * Coupang carrier: it lets the browser product path (SellerOps `/connect/coupang` guided walkthrough →
  * pairing → START_RUN → REQUEST_STEP_RECHECK) be driven end-to-end without opening real WING or a CLI client.
  * Never honored under `NODE_ENV=production`. Mutually exclusive with the other carriers (an agent hosts one).
- * The LIVE WING driver is NOT wired here — it is supplied only by the gated live entrypoint
- * (`run-coupang-wing-issuance-live.ts`).
+ * The LIVE WING driver is wired by {@link ACTION_WINDOW_COUPANG_ISSUANCE_LIVE_FLAG}, and only under the
+ * approval binding that flag's gate demands. This dev flag stays the FIXTURE path.
  */
 export const ACTION_WINDOW_COUPANG_ISSUANCE_FLAG = "--dev-action-window-coupang-issuance";
+
+/**
+ * **The PRODUCT path: host the guided WING walk with the REAL driver.**
+ *
+ * Separate from the dev flag because the difference is not a detail — one drives a fixture, the other opens the
+ * seller's marketplace window. It is gated on the same binding the standalone entrypoint requires, checked
+ * before the agent hosts anything:
+ *
+ *   - BOTH phase variables naming {@link COUPANG_WING_GUIDED_ISSUANCE_WALK_PHASE};
+ *   - a bootstrapped approval id and git SHA in the environment;
+ *   - repo identity against that SHA.
+ *
+ * Missing any of them, the agent boots WITHOUT the carrier rather than falling back to the fixture. A silent
+ * downgrade would be worse than a refusal: the operator granted a live walk and would get a simulation that
+ * looks like one.
+ */
+export const ACTION_WINDOW_COUPANG_ISSUANCE_LIVE_FLAG = "--action-window-coupang-issuance-live";
+
+/** Why the live guided-walk carrier was refused. Closed, and every value means "not hosted". */
+export const COUPANG_LIVE_WALK_REFUSALS = [
+  "PHASE_NOT_BOUND",
+  "APPROVAL_NOT_BOUND",
+  "REPO_IDENTITY_FAILED",
+] as const;
+export type CoupangLiveWalkRefusal = (typeof COUPANG_LIVE_WALK_REFUSALS)[number];
+
+/**
+ * Pure gate for the live carrier. Returns the refusal, or `null` when every binding is present.
+ *
+ * Pure and exported so the refusal can be tested without booting an agent or opening a window — the same
+ * reason every other WING gate in this repo is a function over inputs rather than a branch inside a boot.
+ */
+export function coupangLiveWalkRefusal(
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+  verify: (input: { expectedSha: string; repoRoot: string }) => { ok: boolean },
+  repoRoot: string,
+): CoupangLiveWalkRefusal | null {
+  if (!args.includes(ACTION_WINDOW_COUPANG_ISSUANCE_LIVE_FLAG)) return "PHASE_NOT_BOUND";
+  const phase = "COUPANG_WING_GUIDED_ISSUANCE_WALK";
+  if (env.SELLEROPS_APPROVAL_PHASE !== phase || env.SELLEROPS_WING_APPROVED_PHASE !== phase) return "PHASE_NOT_BOUND";
+  const approvalId = env.WALKTHROUGH_APPROVAL_ID ?? "";
+  const sha = env.WALKTHROUGH_GIT_COMMIT ?? "";
+  if (!/^apr-[0-9a-f]{6,}$/.test(approvalId) || !/^[0-9a-f]{7,40}$/.test(sha)) return "APPROVAL_NOT_BOUND";
+  return verify({ expectedSha: sha, repoRoot }).ok ? null : "REPO_IDENTITY_FAILED";
+}
 
 /** Pure gate: should the agent host the Coupang issuance guidance channel? Never under production. */
 export function resolveCoupangIssuanceChannel(args: readonly string[], env: NodeJS.ProcessEnv): boolean {
@@ -268,6 +317,120 @@ export function resolveCoupangIssuanceChannel(args: readonly string[], env: Node
  * driver (no browser, no live WING, no credential read). Run identity is Runtime-assigned (opaque random
  * suffix). No persistence: an issuance walk is read-only guidance with nothing to recover.
  */
+/**
+ * The PRODUCT-path carrier: the real WING driver, its window opened lazily by the session's first call.
+ *
+ * `open()` launches the dedicated persistent-profile window and takes the newest tab. It does NOT navigate —
+ * on the product path the seller reaches WING themselves, and an agent that drives the page there has taken a
+ * marketplace action nobody granted.
+ */
+/**
+ * Where the guided walk's dedicated window LANDS — the seller's own WING sales-info page.
+ *
+ * Chosen by the product owner on 2026-08-10 because logging in there leaves the seller one step from the
+ * open-API issuance page, whereas a blank window left them to find WING on their own and guaranteed the run's
+ * first reading was `unknown`.
+ *
+ * A landing, not a route through the flow: the walk navigates here once, at open, and never again. Every
+ * screen after this one the seller reaches themselves.
+ */
+export const COUPANG_WING_GUIDED_WALK_LANDING_URL =
+  "https://wing.coupang.com/tenants/wing-account/vendor/salesinfo?isTARegion=false&currentPlatform=DESKTOP&currentLocale=ko";
+
+/** The live walk's carrier: the bridge config, plus the teardown for the window it may have opened. */
+export interface CoupangIssuanceLiveCarrier {
+  config: AgentCoupangIssuanceConfig;
+  /** Close the dedicated window if one was ever brought up. Safe on a carrier that never opened one. */
+  closeSurface: () => Promise<void>;
+}
+
+export function buildCoupangIssuanceLiveConfig(): CoupangIssuanceLiveCarrier {
+  const cfg = loadConfig();
+  // Held ACROSS re-opens, and owned HERE rather than by the driver. If the seller closed only the tab, the
+  // context — and the session in it — survives, so a re-open has to make a fresh page in the SAME context;
+  // re-launching a persistent context on a profile dir the live one still holds a lock on just fails. This is
+  // the same reasoning, and the same shape, as the import carrier's own context.
+  let walkContext: BrowserContext | null = null;
+  // ONE navigation per CARRIER, not per open. `agentNavigations: 1` says "the landing, at window open, and
+  // never again", and a re-open that navigated again would make the manifest false — the operator granted one
+  // goto. A window the seller re-opens comes up wherever the profile left them, which is also the better
+  // behaviour: they closed it mid-walk, and being sent back to the landing would lose their place.
+  let navigated = false;
+  const driver = new LazyCoupangIssuanceDriver({
+    open: async () => {
+      if (!walkContext) {
+        const launched = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
+        // A context that genuinely died must be re-launched rather than reused, or every later open would work
+        // off a handle whose every call throws.
+        launched.once("close", () => {
+          walkContext = null;
+        });
+        walkContext = launched;
+      }
+      const context = walkContext;
+      const page = (context.pages()[0] ?? (await context.newPage())) as Page;
+      // ONE navigation, at OPEN, to the seller's own WING landing — and never again.
+      //
+      // The window used to come up BLANK, which made the seller's first task "find WING yourself" and made the
+      // run's first reading `unknown` by construction. Opening a seller's own seller center is not a
+      // marketplace action: nothing is clicked, typed, submitted or selected, and every step of the walk
+      // remains theirs. It is a NAVIGATION, so the walk's budget moves from zero to exactly this one and the
+      // manifest says so — `COUPANG_WING_GUIDED_WALK_AGENT_NAVIGATIONS`.
+      //
+      // Screened BEFORE it is used, fail-closed: an off-target or malformed landing opens nothing rather than
+      // sending the seller somewhere this run cannot vouch for. A navigation failure is swallowed — the seller
+      // can always reach WING themselves, and the observed wait picks them up when they do.
+      const screened = screenWingUrl(COUPANG_WING_GUIDED_WALK_LANDING_URL);
+      if (navigated) {
+        log("aw_coupang_walk_landing_skipped", { reason: "ALREADY_NAVIGATED_ONCE" });
+      } else if (screened.ok) {
+        navigated = true;
+        log("aw_coupang_walk_landing", { urlCategory: screened.urlCategory });
+        await page.goto(COUPANG_WING_GUIDED_WALK_LANDING_URL, { waitUntil: "domcontentloaded" }).catch(() => undefined);
+      } else {
+        log("aw_coupang_walk_landing_refused", { reason: screened.reason }, "warn");
+      }
+      // **The seller closing their own window must FORGET it** — the property `LazyCoupangIssuanceDriver`
+      // documents and, until this wiring, did not have. `CoupangWingIssuanceDriver` resolves its own
+      // `whenSurfaceClosed` from the same event (that is how the run parks), but nothing told the LAZY driver,
+      // so it kept handing every retry the dead page: `maybeRecoverPark` re-checked once a second for ten
+      // minutes and each one burned `settleSurface`'s poll and threw in `locateTarget` instead of re-opening in
+      // the same persistent profile. `LazyImportDriver` gets this wiring explicitly at its own boot; this is the
+      // sibling that was left standing. `driver` is captured, not read, at closure-creation time — `open()`
+      // cannot run before the `const` it belongs to is initialized.
+      // …and only when the CONTEXT has no page left. `activePage()` reads the newest tab, so WING opening a
+      // second tab means the run continues there while this one's close still fires — forgetting the driver
+      // then would drop a live window and, with the re-open guard above, strand a healthy run.
+      page.once("close", () => {
+        if (context.pages().length > 0) {
+          log("aw_coupang_walk_tab_closed", { remainingPages: context.pages().length > 0 });
+          return;
+        }
+        log("aw_coupang_walk_surface_closed", {});
+        driver.markClosed();
+      });
+      return { context, page };
+    },
+  });
+  return {
+    config: {
+      runId: `run_${randomBytes(6).toString("hex")}`,
+      channelCode: "coupang",
+      // ONE driver for the carrier's lifetime, so a re-attach reuses the window the seller is already in rather
+      // than opening a second one beside it.
+      createDriver: () => driver,
+    },
+    // The CONTEXT, not the driver's cached copy of it: `markClosed()` drops that on a closed page, so a carrier
+    // whose window the seller closed would otherwise have nothing left to tear down.
+    closeSurface: async () => {
+      const ctx = walkContext;
+      walkContext = null;
+      driver.markClosed();
+      await ctx?.close().catch(() => undefined);
+    },
+  };
+}
+
 export function buildCoupangIssuanceConfig(): AgentCoupangIssuanceConfig {
   return {
     runId: `run_${randomBytes(6).toString("hex")}`,
@@ -945,6 +1108,23 @@ export function createSignalShutdown(shutdown: () => Promise<unknown>): () => Pr
   };
 }
 
+/**
+ * Should the boot exit once startup has settled, or stay resident?
+ *
+ * The rule used to be "no runnable connection ⇒ exit", which asks about CONNECTIONS while the thing that has
+ * to stay alive is the BRIDGE CARRIER. A Coupang guided walk boots with a COUPANG connection, and COUPANG is
+ * `DISCOVERY_REQUIRED` — so it settles SKIPPED, nothing is managed, and the agent shut itself down one line
+ * after announcing `coupangIssuance: true`. The frontend then found nothing on loopback, which reads as "the
+ * helper is not running" rather than "the helper decided its own carrier did not count".
+ *
+ * A hosted carrier is exactly a promise that a client will attach later, so it keeps the process resident on
+ * its own — independently of whether any connection turned out to be runnable.
+ */
+export function shouldExitAfterBoot(input: { managedConnectionCount: number; hostsBridgeCarrier: boolean }): boolean {
+  if (input.hostsBridgeCarrier) return false;
+  return input.managedConnectionCount === 0;
+}
+
 /** A sanitized printer for each settled connection — enums / booleans / counts only. */
 const printingObserver: ConnectorOrchestratorObserver = {
   onConnectionSettled(result: ConnectorStartupResult): void {
@@ -1059,13 +1239,38 @@ async function main(): Promise<void> {
   const hostReply = resolveReplySubmissionChannel(args, process.env);
   const hostIssuance = !hostReply && resolveApiIssuanceChannel(args, process.env);
   const hostCoupangIssuance = !hostReply && !hostIssuance && resolveCoupangIssuanceChannel(args, process.env);
-  const awChannel = hostReply || hostIssuance || hostCoupangIssuance ? null : resolveActionWindowChannel(args, process.env);
+  // The LIVE guided walk takes precedence over the dev fixture when its binding is complete; when the flag is
+  // present but the binding is not, the carrier is NOT hosted and the refusal is logged. Never a silent
+  // downgrade to the fixture: the operator granted a live walk and a simulation that looks like one is worse
+  // than nothing being hosted at all.
+  //
+  // Decided BEFORE `awChannel`, because it is one of the carriers the "one carrier per agent" exclusion below
+  // has to know about. It was the one carrier left out of it: `--action-window-coupang-issuance-live` beside
+  // `--dev-action-window-synthetic` left BOTH defined and `createAgentBridge` threw at boot, which is a crash
+  // where the gate's whole point is a clean refusal.
+  const liveWalkRefusal = args.includes(ACTION_WINDOW_COUPANG_ISSUANCE_LIVE_FLAG)
+    // The REPOSITORY root, not the collector package — `verifyRepoIdentity` compares this by realpath against
+    // git's own toplevel, so handing it a subdirectory fails every time and looks like a decoy repo.
+    ? coupangLiveWalkRefusal(args, process.env, verifyRepoIdentity, resolve(collectorRoot, ".."))
+    : "PHASE_NOT_BOUND";
+  const hostLiveWalk = args.includes(ACTION_WINDOW_COUPANG_ISSUANCE_LIVE_FLAG) && liveWalkRefusal === null;
+  if (args.includes(ACTION_WINDOW_COUPANG_ISSUANCE_LIVE_FLAG) && !hostLiveWalk) {
+    log("aw_coupang_live_walk_refused", { refusal: liveWalkRefusal ?? "unknown" }, "warn");
+  }
+  const awChannel = hostReply || hostIssuance || hostCoupangIssuance || hostLiveWalk ? null : resolveActionWindowChannel(args, process.env);
   const actionWindow: AgentActionWindowConfig | undefined = awChannel
     ? buildActionWindowConfig(awChannel, args, process.env)
     : undefined;
   const replySubmission: AgentReplySubmissionConfig | undefined = hostReply ? buildReplySubmissionConfig() : undefined;
   const apiIssuance: AgentApiIssuanceConfig | undefined = hostIssuance ? buildApiIssuanceConfig() : undefined;
-  const coupangIssuance: AgentCoupangIssuanceConfig | undefined = hostCoupangIssuance ? buildCoupangIssuanceConfig() : undefined;
+  // The live carrier hands back its teardown alongside its config — the one thing agent shutdown could
+  // otherwise leave behind is the guided walk's dedicated Chrome.
+  const liveWalkCarrier = hostLiveWalk ? buildCoupangIssuanceLiveConfig() : undefined;
+  const coupangIssuance: AgentCoupangIssuanceConfig | undefined = liveWalkCarrier
+    ? liveWalkCarrier.config
+    : hostCoupangIssuance
+      ? buildCoupangIssuanceConfig()
+      : undefined;
   // Approval-presenter wiring lives HERE and only here — never as a `createAgentBridge` default (see
   // `decideApprovalPresenter`). `none` means no human channel exists on this host, so pairing fails closed.
   const approvalKind = decideApprovalPresenter(process.env, process.platform);
@@ -1102,6 +1307,12 @@ async function main(): Promise<void> {
   // signal-driven path (createSignalShutdown makes a double signal a no-op).
   const guardedShutdown = createSignalShutdown(async () => {
     clearSignals(); // never leave a stale human-completed signal behind
+    // Close the guided walk's window with the agent that opened it. An orphaned dedicated Chrome outlives the
+    // service the seller stopped and keeps its persistent profile dir locked against the next boot.
+    if (liveWalkCarrier) {
+      log("aw_coupang_walk_surface_closing", {});
+      await liveWalkCarrier.closeSurface();
+    }
     bridge.markAgentStopping();
     const report = await startup.shutdown();
     console.log(JSON.stringify({ event: "SHUTDOWN", ...report }));
@@ -1114,12 +1325,24 @@ async function main(): Promise<void> {
   const results = await startup.boot(decision.parsed.connections);
   bridge.markAgentStarted();
 
-  if (startup.managedConnectionIds().length === 0) {
-    // Nothing runnable is held (an all-SKIPPED / API-only / discovery-only boot) — there is no browser to
-    // keep resident for a WAITING/HUMAN handoff, so shut down cleanly and exit instead of hanging.
+  const managedConnectionCount = startup.managedConnectionIds().length;
+  const hostsBridgeCarrier =
+    actionWindow !== undefined ||
+    replySubmission !== undefined ||
+    apiIssuance !== undefined ||
+    coupangIssuance !== undefined;
+  if (shouldExitAfterBoot({ managedConnectionCount, hostsBridgeCarrier })) {
+    // Nothing runnable is held AND no carrier is hosted (an all-SKIPPED / API-only / discovery-only boot) —
+    // there is no browser to keep resident for a WAITING/HUMAN handoff and no client will attach, so shut
+    // down cleanly and exit instead of hanging.
     await guardedShutdown();
     process.exit(0);
     return;
+  }
+  if (managedConnectionCount === 0) {
+    // Resident purely for the carrier. Said out loud, because "no connection is runnable" and "the agent is
+    // up and waiting for SellerOps" are otherwise indistinguishable in the boot output.
+    log("aw_agent_resident_for_carrier", { managedConnections: 0 });
   }
 
   // Same-process human-completed re-verification: for every browser connection that settled

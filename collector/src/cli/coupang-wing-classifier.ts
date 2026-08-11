@@ -1721,3 +1721,79 @@ export function sanitizeConsentBlockCensus(raw: unknown, consents: readonly stri
     depthBound: CONSENT_ANCESTOR_DEPTH,
   });
 }
+
+/**
+ * **Are ALL of the seller's consents ticked?** One boolean, and nothing else.
+ *
+ * This is the only place in the codebase that looks at a consent checkbox's `checked`, and it exists so the
+ * guided walk can move on when the seller has finished consenting instead of asking them to press "다음" to
+ * report what the page already shows. The product principle it serves changed deliberately on 2026-08-10; the
+ * one it does NOT change is that **SellerOps never ticks a box, never reads the terms, and never decides
+ * anything on the seller's behalf.** Observing that a human consented is not consenting for them.
+ *
+ * **The individual states never cross the boundary.** The conjunction is computed IN THE PAGE, so what returns
+ * is a single aggregate boolean — not two booleans, not a count, not a per-row verdict. A caller cannot learn
+ * which box the seller ticked first, or that they ticked one and not the other, because that information is
+ * never serialized out. Callers must use it only to decide advancement: never store, transmit, or log it.
+ *
+ * Pairing is the MEASURED structural one (`buildWingConsentBlockScript`): a consent's box is the single visible
+ * checkbox inside the nearest ancestor holding exactly that one consent sentence. Fail-closed — if any consent
+ * does not resolve to exactly one such box, the answer is `false` ("not proven complete"), never `true`.
+ */
+export function buildWingConsentCompleteScript(consents: readonly string[]): string {
+  const encoded = JSON.stringify(consents.map((c) => String(c)));
+  return `(function () {
+  var CONSENTS = ${encoded};
+  var MAX_ROWS = ${MAX_CONSENT_ROWS}, DEPTH = ${CONSENT_ANCESTOR_DEPTH}, SCAN_CAP = 4000;
+  function slice(n) { return Array.prototype.slice.call(n); }
+  function norm(s) { return String(s == null ? '' : s).replace(/\\s+/g, ' ').replace(/^ | $/g, ''); }
+  function paints(el) {
+    try {
+      var cs = window.getComputedStyle(el);
+      if (!cs || cs.display === 'none' || cs.visibility === 'hidden') { return false; }
+      if (el.getClientRects && el.getClientRects().length === 0) { return false; }
+      var r = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+      return !!r && r.width > 0 && r.height > 0;
+    } catch (e) { return false; }
+  }
+  if (CONSENTS.length === 0) { return false; }
+  var all;
+  try { all = slice(document.querySelectorAll("input[type='checkbox']")); } catch (e2) { return false; }
+  if (all.length > SCAN_CAP) { all = all.slice(0, SCAN_CAP); }
+  var boxes = [], i, j, d;
+  for (i = 0; i < all.length; i++) { if (paints(all[i])) { boxes.push(all[i]); } }
+  var capped = boxes.slice(0, MAX_ROWS);
+  /* Per consent: the count of uniquely-paired visible boxes, and how many of those are ticked. */
+  var paired = [], ticked = [];
+  for (j = 0; j < CONSENTS.length; j++) { paired.push(0); ticked.push(0); }
+  for (i = 0; i < capped.length; i++) {
+    var node = capped[i], depth = -1, hit = -1, several = false;
+    for (d = 1; d <= DEPTH; d++) {
+      node = node && node.parentElement;
+      if (!node) { break; }
+      var text = norm(node.textContent || '');
+      var found = [];
+      for (j = 0; j < CONSENTS.length; j++) {
+        var want = norm(CONSENTS[j]);
+        if (want.length > 0 && text.indexOf(want) !== -1) { found.push(j); }
+      }
+      if (found.length > 0) { depth = d; hit = found[0]; several = found.length > 1; break; }
+    }
+    if (depth === -1 || several) { continue; }
+    var container = capped[i];
+    for (d = 0; d < depth; d++) { container = container.parentElement; }
+    var inner;
+    try { inner = slice(container.querySelectorAll("input[type='checkbox']")); } catch (e3) { inner = []; }
+    var blockBoxes = 0;
+    for (d = 0; d < inner.length; d++) { if (paints(inner[d])) { blockBoxes++; } }
+    if (blockBoxes !== 1) { continue; }
+    paired[hit] = paired[hit] + 1;
+    if (capped[i].checked === true) { ticked[hit] = ticked[hit] + 1; }
+  }
+  /* Fail closed: EVERY consent must have resolved to exactly one box, and that box must be ticked. */
+  for (j = 0; j < CONSENTS.length; j++) {
+    if (paired[j] !== 1 || ticked[j] !== 1) { return false; }
+  }
+  return true;
+})()`;
+}

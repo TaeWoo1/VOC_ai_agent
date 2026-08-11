@@ -166,6 +166,18 @@ export const APPROVAL_ACTIONS = [
   // checkboxes have no accessible name at all, so the alternative to measuring the pairing is inventing it.
   // Reads no `checked`: which box the seller ticked is not a thing this records.
   "CONSENT_BLOCK_CENSUS",
+  // ONE navigation, at window open, to the seller's own WING landing — and never again. Until this member
+  // existed the enum had NO navigation action at all, so the guided walk's `agentNavigations: 1` was disclosed
+  // in prose while the machine-checkable list the approval gate validates still described a run that navigates
+  // nothing. Deliberately narrow: it is a LANDING, not a route — a phase that drives the seller through screens
+  // is a different capability and would need its own member.
+  "NAVIGATE_TO_SELLER_LANDING_ONCE",
+  // Read whether the seller has finished consenting: ONE aggregate boolean, computed page-side as the
+  // conjunction of the two consent boxes. Which box is ticked never crosses the boundary, nothing is stored,
+  // transmitted or logged, and SellerOps still never ticks a box or reads the terms. It is nonetheless a
+  // `checked` read, and three census members in this same enum explicitly promise they do NOT read `checked` —
+  // so a run that does has to say so HERE, not only in `sellerConsentObserved`.
+  "OBSERVE_CONSENT_COMPLETE_AGGREGATE",
 ] as const;
 export type ApprovalAction = (typeof APPROVAL_ACTIONS)[number];
 
@@ -284,16 +296,31 @@ export interface GuidedWalkBoundary {
   keyCreationRuledOut: false;
   /** The agent clicks, types, submits — and NAVIGATES — nothing. The last one is new to this entrypoint. */
   agentPerformsAction: false;
-  agentNavigations: 0;
+  /** ONE: the landing the window opens on. The walk never navigates again — every screen after it is the seller's. */
+  agentNavigations: 1;
   credentialValueReadBudget: 0;
   /** No connect-test, no sync, no upload: guidance finishing is not a connection. */
   performsConnectOrSync: false;
   /** How many of the walk's guided controls carry a live-calibrated locator and may be highlighted. */
-  highlightedControlCount: 2;
+  highlightedControlCount: 3;
   /** …and how many are guided by TEXT because nothing was promoted for them. */
-  textGuidedControlCount: 4;
-  /** A mandatory operator checkpoint precedes every step; none auto-advances. */
-  explicitCheckpointRequired: true;
+  textGuidedControlCount: 2;
+  /**
+   * How many steps the runtime advances by OBSERVING WING rather than by the seller pressing "다음".
+   *
+   * This replaced `explicitCheckpointRequired`, which asserted that "a mandatory operator checkpoint precedes
+   * every step; none auto-advances". That stopped being true on 2026-08-10 and a field that quietly keeps
+   * saying it is worse than no field: the operator grants against this descriptor.
+   */
+  autoAdvancingStepCount: 4;
+  /** The key-creation step is NOT one of them, and never becomes one. */
+  keyCreationAutoAdvances: false;
+  /**
+   * Whether the runtime looks at the consent checkboxes' state. **True** — deliberately, to advance without
+   * asking the seller to report what the page already shows. It never ticks a box, never reads the terms, and
+   * the reading is a page-side conjunction that is never stored, transmitted, or logged.
+   */
+  sellerConsentObserved: true;
 }
 
 export const COUPANG_WING_GUIDED_WALK_BOUNDARY: GuidedWalkBoundary = {
@@ -303,12 +330,14 @@ export const COUPANG_WING_GUIDED_WALK_BOUNDARY: GuidedWalkBoundary = {
   createsKeyMaterial: false,
   keyCreationRuledOut: false,
   agentPerformsAction: false,
-  agentNavigations: 0,
+  agentNavigations: 1,
   credentialValueReadBudget: 0,
   performsConnectOrSync: false,
-  highlightedControlCount: 2,
-  textGuidedControlCount: 4,
-  explicitCheckpointRequired: true,
+  highlightedControlCount: 3,
+  textGuidedControlCount: 2,
+  autoAdvancingStepCount: 4,
+  keyCreationAutoAdvances: false,
+  sellerConsentObserved: true,
 };
 
 export const COUPANG_WING_ISSUANCE_REVEAL_ACTION: OperatorRevealAction = {
@@ -612,21 +641,34 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   },
   COUPANG_WING_GUIDED_ISSUANCE_WALK: {
     phase: "COUPANG_WING_GUIDED_ISSUANCE_WALK",
-    cli: "src/cli/run-coupang-wing-issuance-live.ts",
-    driver: "CoupangWingIssuanceDriver (WING-resident guided walk: highlight the two calibrated controls, text-guide the rest, rest at every checkpoint)",
-    // It HIGHLIGHTS two live-calibrated controls ⇒ `allowsHighlight: true` ⇒ it fails closed
-    // (`SELECTORS_NOT_CALIBRATED`) unless the caller states the `issue` calibration. The other guided steps are
-    // text-only and claim no locator.
+    // The operator's command INSTALLS the service; the agent it installs (`src/cli/local-agent.ts`) is then a
+    // launchd job they never invoke. Naming the agent here would print an on-approval line the product path
+    // does not use — and the whole point of this phase is that no one types that line.
+    cli: "src/cli/local-agent-service.ts",
+    driver: "launchd service → src/cli/local-agent.ts → LazyCoupangIssuanceDriver → CoupangWingIssuanceDriver (WING-resident guided walk; the window opens on the run's first call, never at agent boot)",
+    // It HIGHLIGHTS three live-calibrated controls ⇒ `allowsHighlight: true` ⇒ it fails closed
+    // (`SELECTORS_NOT_CALIBRATED`) unless the caller states the `issue` calibration. The other two guided steps
+    // are text-only and claim no locator. (Said "two" until 2026-08-11, when the key-creation control was
+    // measured and promoted — the descriptor beside it has read `highlightedControlCount: 3` ever since.)
     //
     // There is no action here for pressing anything: every marketplace act is the seller's. The one that
     // creates the key — `약관 동의 및 Key 발급받기` — is the last checkpoint's subject and is never pressed by
     // this run, which is stated in the operation text because a capability list cannot express a refusal.
+    //
+    // The last two are what this run GAINED and had gone on declaring without: it navigates once to the
+    // seller's own WING landing at window open, and it reads the aggregate "both consent boxes ticked" boolean
+    // to advance step 4. Both were disclosed in prose (`agentNavigations`, `sellerConsentObserved`) while this
+    // list — the one the approval gate machine-checks — still described a strictly narrower run than the one
+    // that executes. That gap is the recurring manifest-honesty defect on this workstream, and prose on one
+    // side of a validated list has never closed it.
     capableActions: [
       "OPEN_DEDICATED_WINDOW",
       "WAIT_OPERATOR_LOGIN_NAV",
       "CLASSIFY_SANITIZED_PAGE_CATEGORY",
       "HIGHLIGHT_REAL_CONTROL",
       "OBSERVE_USER_CLICK_TRANSITION",
+      "NAVIGATE_TO_SELLER_LANDING_ONCE",
+      "OBSERVE_CONSENT_COMPLETE_AGGREGATE",
     ],
     allowsHighlight: true,
     mode: "READ_ONLY",
@@ -764,6 +806,10 @@ export const APPROVAL_PREREQ_CAUSES = [
   // The WING issuance-form REVEAL phase requires its immutable operator-reveal descriptor, exactly.
   "MISSING_REVEAL_ACTION_CONTRACT",
   "REVEAL_ACTION_CONTRACT_MISMATCH",
+  // A service-hosted phase's operator action must state where the pairing code actually appears. The whole claim
+  // of a product-path run is that it is terminal-free; a summary that omits the OS approval dialog is describing
+  // a different run from the one that executes.
+  "MISSING_SERVICE_PAIRING_CHANNEL",
 ] as const;
 export type ApprovalPrereqCause = (typeof APPROVAL_PREREQ_CAUSES)[number];
 
@@ -773,7 +819,19 @@ export type ApprovalPrereqCause = (typeof APPROVAL_PREREQ_CAUSES)[number];
  * phase's real operator action is the CLI-launched dedicated Chrome window, never a frontend URL. Each phase
  * declares exactly ONE entrypoint so the operator is told the single true action and nothing else.
  */
-export const ENTRYPOINT_TYPES = ["CLI_LAUNCHED_DEDICATED_WINDOW", "FRONTEND_URL"] as const;
+/**
+ * `INSTALLED_LOCAL_AGENT_SERVICE` is the PRODUCT path and is deliberately its own type rather than a variant of
+ * the CLI one. The operator's action is not "run the agent" — it is "install the service, then open SellerOps":
+ * the agent is a launchd background job with no terminal, the marketplace window opens only when the run's
+ * first call needs it, and the pairing code is presented by the OS approval dialog and confirmed in the product
+ * UI. Calling that `CLI_LAUNCHED_DEDICATED_WINDOW` would tell the operator to expect a window at boot and a
+ * code in a console, neither of which happens.
+ */
+export const ENTRYPOINT_TYPES = [
+  "CLI_LAUNCHED_DEDICATED_WINDOW",
+  "INSTALLED_LOCAL_AGENT_SERVICE",
+  "FRONTEND_URL",
+] as const;
 export type EntrypointType = (typeof ENTRYPOINT_TYPES)[number];
 
 /** The phases that carry an operator entrypoint: the calibration phases, the FE-run-host issuance proof, and
@@ -936,19 +994,34 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
   // do as precisely as what it does — the four text-guided steps are not highlighted, and the last checkpoint
   // stands in front of a control this run never presses.
   COUPANG_WING_GUIDED_ISSUANCE_WALK: {
-    entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
-    cli: "src/cli/run-coupang-wing-issuance-live.ts",
-    entrypointCommandId: "run-coupang-wing-issuance-live",
+    entrypointType: "INSTALLED_LOCAL_AGENT_SERVICE",
+    cli: "src/cli/local-agent-service.ts",
+    entrypointCommandId: "local-agent-service",
     operatorActionSummary:
-      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 로그인·페이지 이동·모든 마켓플레이스 조작은 판매자가 직접 합니다" +
-      "(SellerOps는 클릭·입력·제출을 하지 않고, 페이지를 대신 이동하지도 않습니다). 안내는 WING 화면 위에 표시되며 " +
-      "각 단계에서 멈춥니다: ① 오픈API 키 발급 페이지로 직접 이동 → ② 'API Key 발급 받기'(강조 표시됨)를 직접 누름 → " +
-      "③ 사용 목적 화면에서 'OPEN API' 선택 확인(기본값이면 누를 것 없음) → ④ '확인'을 직접 누름 → ⑤ 약관 2개를 " +
-      "직접 읽고 판단한 뒤 동의 체크 → ⑥ 여기서 멈춥니다. " +
-      "⚠ ③④⑤ 단계는 강조 표시가 없습니다. 해당 control은 측정만 되었고 selector로 승격되지 않았기 때문이며, " +
+      "승인 후 Local Agent를 백그라운드 서비스로 설치합니다(launchd, 1회). 이후 터미널은 쓰지 않습니다 — " +
+      "에이전트는 로그인 세션에 상주하고, SellerOps 화면이 loopback에서 이를 찾습니다. " +
+      "연결 승인 코드는 macOS 승인 대화상자가 표시하고, 승인은 SellerOps 제품 화면에서 진행합니다" +
+      "(에이전트 터미널의 코드를 읽지 않습니다). " +
+      // Said out loud because its ABSENCE reads as a failure. A brand-new pairing shows the dialog; a browser
+      // that still holds a valid pairing token from an earlier run pairs silently and the dialog never appears,
+      // which is the system working. (A private window discards the token, so it re-pairs every time.)
+      "이미 유효한 pairing token이 있는 브라우저라면 대화상자가 뜨지 않고 바로 연결됩니다 — 정상 동작이며, " +
+      "실패가 아닙니다. 시크릿 창은 token을 버리므로 매번 다시 승인합니다. " +
+      "SellerOps 화면에서 안내를 시작하면 그때 전용 Chrome 창이 열립니다" +
+      "(에이전트가 켜져 있다는 이유만으로는 창이 열리지 않습니다). " +
+      "그 창은 셀러 본인의 WING 판매정보 페이지로 한 번만 이동해 열립니다(빈 창 대신). 이후 화면 이동은 전부 셀러가 직접 합니다. " +
+      "안내는 WING 화면 위에 표시되고, 한 번 WING으로 넘어간 뒤에는 SellerOps 탭으로 돌아올 필요가 없습니다 " +
+      "(SellerOps는 클릭·입력·제출을 하지 않고, 페이지를 대신 이동하지도 않습니다): " +
+      "① 오픈API 키 발급 페이지로 직접 이동(도착하면 자동 진행) → ② 'API Key 발급 받기'(강조 표시됨)를 직접 누름" +
+      "(사용 목적 화면이 뜨면 자동 진행) → ③ 사용 목적이 'OPEN API'인지 보고 '확인'을 직접 누름" +
+      "(약관 화면이 뜨면 자동 진행) → ④ 약관 2개를 직접 읽고 판단한 뒤 동의 체크(2개가 모두 체크되면 자동 진행) → " +
+      "⑤ 여기서 멈춥니다. " +
+      "⚠ ③ 사용 목적/확인 단계와 체크박스에는 강조 표시가 없습니다. 해당 control은 측정만 되었고 selector로 승격되지 않았기 때문이며, " +
       "SellerOps는 위치를 아는 척하지 않고 글로만 안내합니다. " +
-      "⚠ 마지막 '약관 동의 및 Key 발급받기'는 실제로 키를 생성하는 control이며, 이번 proof에서는 절대 누르지 않습니다. " +
-      "키 발급·credential 읽기·연결·동기화는 이번 run의 범위가 아닙니다.",
+      "⚠ 체크박스는 SellerOps가 대신 누르지 않습니다. 다만 2개가 모두 선택됐는지는 화면에서 확인해 자동으로 넘어갑니다 " +
+      "(선택 여부는 저장·전송·기록하지 않습니다). SellerOps는 약관을 읽거나 판단하거나 대신 동의하지 않습니다. " +
+      "⚠ 마지막 '약관 동의 및 Key 발급받기'는 강조 표시됩니다(2026-08-11 측정 승격). 실제로 키를 생성하는 control이며, 자동으로 넘어가지 않고 " +
+      "이번 proof에서는 절대 누르지 않습니다. 키 발급·credential 읽기·연결·동기화는 이번 run의 범위가 아닙니다.",
     emitsFrontendUrl: false,
   },
   // The WING issuance-form REVEAL phase: a CLI-launched dedicated Chrome. The operator presses 발급 themselves
@@ -1001,6 +1074,8 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
 const FRONTEND_URL_MARKERS: readonly string[] = ["http://", "https://", "/connect/naver", "?walkthroughRun="];
 /** Tokens that must never appear in a FRONTEND_URL phase's operator action — it must not describe a CLI. */
 const CLI_ONLY_MARKERS: readonly string[] = ["전용 Chrome", "dedicated window", "src/cli/", ".ts"];
+/** Both halves of the terminal-free pairing claim: where the code appears, and where it is confirmed. */
+const SERVICE_PAIRING_CHANNEL_MARKERS: readonly string[] = ["macOS 승인 대화상자", "제품 화면"];
 
 export type EntrypointContractResult = { ok: true } | { ok: false; cause: ApprovalPrereqCause; reason: string };
 
@@ -1021,6 +1096,21 @@ export function validateEntrypointContract(phase: EntrypointPhase, spec: Entrypo
     }
     if (spec.emitsFrontendUrl || FRONTEND_URL_MARKERS.some((m) => summary.includes(m))) {
       return { ok: false, cause: "FRONTEND_URL_IN_CLI_ENTRYPOINT", reason: `${phase} is CLI-launched — its operator action must carry no frontend URL` };
+    }
+  } else if (spec.entrypointType === "INSTALLED_LOCAL_AGENT_SERVICE") {
+    // A service-hosted phase names the INSTALL command (not the agent it installs) and, like a CLI phase,
+    // surfaces no bound frontend URL — the operator opens SellerOps normally, with no run token in the address.
+    if (!spec.cli || spec.cli !== canonical.cli) {
+      return { ok: false, cause: "ENTRYPOINT_CLI_MISMATCH", reason: `${phase} entrypoint cli must be exactly "${canonical.cli}"` };
+    }
+    if (spec.emitsFrontendUrl || FRONTEND_URL_MARKERS.some((m) => summary.includes(m))) {
+      return { ok: false, cause: "FRONTEND_URL_IN_CLI_ENTRYPOINT", reason: `${phase} installs a service — its operator action must carry no bound frontend URL` };
+    }
+    // The positive requirement, and the reason this type exists at all: the operator must be told that the
+    // pairing code comes from the OS approval dialog. Drop that sentence and the manifest silently reverts to
+    // promising a terminal-free run while describing nothing that makes it one.
+    if (!SERVICE_PAIRING_CHANNEL_MARKERS.every((m) => summary.includes(m))) {
+      return { ok: false, cause: "MISSING_SERVICE_PAIRING_CHANNEL", reason: `${phase} runs as an installed service — its operator action must state that the pairing code is shown by the macOS approval dialog and confirmed in the SellerOps UI` };
     }
   } else {
     // A frontend-URL phase must name NO CLI and must not describe a CLI-only action.

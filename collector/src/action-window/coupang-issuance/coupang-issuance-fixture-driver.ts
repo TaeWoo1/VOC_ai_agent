@@ -17,8 +17,16 @@ import type { CoupangIssuanceProbeDriver, CoupangIssuanceTarget, WingSurfaceProb
 import type { LocateResult } from "../engine";
 
 export interface CoupangIssuanceFixtureScript {
-  /** The surface probe result. Missing → a wing_home page (`ok:true`). A login page parks the run. */
+  /** The surface probe result. Missing → a wing_home page (`ok:true`). A login page makes the run WAIT. */
   probe?: WingSurfaceProbe;
+  /**
+   * A SEQUENCE of probe results, one per `probeSurface()` call, with the last one repeating forever.
+   *
+   * Models what a real run actually sees: a blank tab, then a login page, then the issuance page — the seller
+   * moving through WING while the runtime watches. A single static `probe` cannot express that, and an observed
+   * wait is precisely a behaviour over successive readings. Takes precedence over `probe` when present.
+   */
+  probeSequence?: readonly WingSurfaceProbe[];
   /**
    * The page category the seller LANDS on after reaching the open-API issuance page (the `reach_open_api`
    * navigation the engine re-probes to verify). Missing → `open_api_issuance`, the happy landing. Set to a
@@ -58,6 +66,8 @@ export class CoupangIssuanceFixtureDriver implements CoupangIssuanceProbeDriver 
   private readonly script: CoupangIssuanceFixtureScript;
   /** Every call, in order — so a test can assert the runtime never armed a control it should not have. */
   readonly calls: string[] = [];
+  /** How many surface probes have been served — the cursor into `probeSequence`. */
+  private probeCount = 0;
   /** How many times `settleSurface` was called (the session settles before each guide). */
   settleCount = 0;
   /**
@@ -90,6 +100,12 @@ export class CoupangIssuanceFixtureDriver implements CoupangIssuanceProbeDriver 
     // After the seller reaches the open-API page, the surface IS the landing page (open_api_issuance by default)
     // — this is what the engine's VERIFY_REACH re-probe reads to confirm the page before guiding 자체개발.
     if (this.reachedOpenApi) return this.script.reachLanding ?? DEFAULT_OPEN_API_LANDING;
+    const seq = this.script.probeSequence;
+    if (seq && seq.length > 0) {
+      const at = Math.min(this.probeCount, seq.length - 1);
+      this.probeCount += 1;
+      return seq[at] as WingSurfaceProbe;
+    }
     return this.script.probe ?? DEFAULT_WING_HOME_PROBE;
   }
   // No `probeSurfaceSettled` override: the session falls back to `probeSurface` here (interface method optional).

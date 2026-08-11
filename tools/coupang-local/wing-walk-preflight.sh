@@ -80,9 +80,27 @@ else
 fi
 
 check_no_code_drift "$RUN_GIT"
-check_toolchain "$COLLECTOR_DIR" "src/cli/run-coupang-wing-reveal-live.ts" "reveal"
+# The entrypoint THIS phase runs, not an adjacent one. It used to name the reveal CLI — so the check passed on a
+# tree where the walk's own entrypoint had been renamed or deleted, which is the failure it exists to catch.
+check_toolchain "$COLLECTOR_DIR" "src/cli/local-agent-service.ts" "guided-walk service installer"
+[ -f "$COLLECTOR_DIR/src/cli/local-agent.ts" ] \
+  && pass "hosted agent present (src/cli/local-agent.ts — the service's ProgramArguments target)" \
+  || fail "hosted agent missing: $COLLECTOR_DIR/src/cli/local-agent.ts — the installed service would crash-loop"
 check_dedicated_profile "$COLLECTOR_DIR"
 check_browser_launchable
+
+# The product path runs the agent as a launchd user agent. On any other OS the service adapter refuses
+# (UNSUPPORTED_PLATFORM), so an operator would grant against a manifest describing a run that cannot start.
+[ "$(uname -s)" = "Darwin" ] \
+  && pass "host is macOS (the launchd service adapter and the native approval dialog both exist here)" \
+  || fail "the guided walk's product path needs macOS — launchd autostart and the native pairing dialog have no adapter on $(uname -s)"
+
+# The agent boot needs a connections file; without one it exits before hosting the carrier, and the frontend
+# would sit at "unreachable" with nothing explaining why.
+WALK_CONNECTIONS="${SELLEROPS_WALK_CONNECTIONS:-$COLLECTOR_DIR/.connections/coupang-walk.json}"
+[ -f "$WALK_CONNECTIONS" ] \
+  && pass "walk connections file present (the agent boot has a connection set to load)" \
+  || fail "no connections file at $WALK_CONNECTIONS — the agent exits at boot without one"
 
 echo
 if [ "$FAILED" != "0" ]; then
@@ -131,7 +149,11 @@ if ! verify_walk_descriptor "$MANIFEST_OUT"; then
   echo "PREFLIGHT FAIL — the guided-walk boundary descriptor is missing, softened, or names a different operation. Refusing to display it for approval."
   exit 1
 fi
-pass "guided-walk boundary is exactly the canonical contract (rests before the key-creating control · never presses it · agent performs nothing and navigates nothing · 0 value reads · no connect/sync · 2 highlighted + 4 text-guided)"
+# The summary must say what `verify_walk_descriptor` just checked, field for field. It said "navigates nothing ·
+# 2 highlighted + 4 text-guided" while the verifier above demanded `agentNavigations:1`, `highlightedControlCount:3`
+# and `textGuidedControlCount:2` — so the line the OPERATOR reads before granting described a narrower run than
+# the one the gate had verified. That is the manifest-honesty defect class, in the display rather than the data.
+pass "guided-walk boundary is exactly the canonical contract (rests before the key-creating control · never presses it · agent presses nothing and navigates ONCE, to the seller's own WING landing · 0 value reads · no connect/sync · 3 highlighted + 2 text-guided · 4 steps auto-advance, never the key-creating one · the consent boxes' completion is observed)"
 
 # The 발급 selector must be calibrated: this phase highlights a real control. The gate refuses
 # SELECTORS_NOT_CALIBRATED before reaching here, so this can only be `true` — asserted anyway so a future change
@@ -180,15 +202,20 @@ echo "    $M_OPERATOR_ACTION"
 echo
 echo "  WHAT THIS RUN IS, precisely:"
 echo "    • EVERY marketplace action is YOURS. You log in, you reach the page, you press each control. The"
-echo "      agent clicks, types, submits and NAVIGATES nothing — it does not even open the page for you."
-echo "    • Only TWO steps are highlighted: 'API Key 발급 받기' and the Access Key region. Both have a"
-echo "      live-calibrated locator."
-echo "    • The purpose radios, '확인' and the two consent checkboxes are TEXT-GUIDED. They were measured but"
+echo "      agent clicks, types, submits and selects nothing. It opens the WINDOW on your own WING sales-info"
+echo "      page once (so it is not blank); every screen after that is one YOU navigate to."
+echo "    • THREE steps are highlighted: 'API Key 발급 받기', the Access Key region, and — new on 2026-08-11 —"
+echo "      '약관 동의 및 Key 발급받기'. All three have a live-calibrated locator. The last one being RINGED is"
+echo "      not it being pressed: SellerOps points at it and stops."
+echo "    • '확인' and the two consent checkboxes are TEXT-GUIDED. They were measured but"
 echo "      NOT promoted to selectors, so SellerOps does not claim to know where they are and draws no ring at"
 echo "      them. If a step's panel has no highlight, that is the design, not a failure."
-echo "    • 'OPEN API' is the DEFAULT purpose option. That step usually needs no click at all."
+echo "    • 'OPEN API' is the DEFAULT purpose option, so the purpose screen is ONE step: check it, press 확인."
+echo "    • FOUR steps advance by themselves when WING's own screen changes. The key-creating step never does."
 echo "    • You read the two consent texts and decide. SellerOps does not read them, evaluate them, agree to"
-echo "      them, or advise on them, and it never reads whether a box is checked."
+echo "      them, or advise on them, and it never ticks a box. It DOES check whether both are ticked, so the"
+echo "      walk can move on without you pressing anything — that reading is a yes/no computed in the page and"
+echo "      is never stored, sent, or logged."
 echo
 echo "  ⚠ WHERE THIS RUN STOPS, and why:"
 echo "    • The walk RESTS in front of '약관 동의 및 Key 발급받기'. That control CREATES THE KEY."
@@ -202,7 +229,7 @@ echo
 echo "  WHAT THE LAST STEP SAYS ON THE WING PAGE (complete, Korean — this is what binds):"
 # CHECKPOINT-COPY-BEGIN
 echo "    ⚠ 여기서 실제로 키가 생성됩니다. '약관 동의 및 Key 발급받기' 버튼을 직접 누르세요 — SellerOps는 이"
-echo "    버튼을 절대 누르지 않습니다. 발급이 끝나면 아래 버튼을 누르세요."
+echo "    버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다. 발급이 끝나면 아래 버튼을 누르세요."
 # CHECKPOINT-COPY-END
 echo
 echo "  ⚠ THIS PROOF STOPS BEFORE THAT PRESS. The copy above is the tutorial's own product text, shown here so"
@@ -211,12 +238,26 @@ echo
 echo "  If this manifest is correct and displayed, the operator's entire single-use grant is one line:"
 echo "    Seated and ready."
 echo
-echo "  On approval:"
-# BOTH phase variables travel on the command, like the probe harness does with its scope variables: the CLI
-# refuses unless they are present and both name this phase, so a run env from another WING action cannot
-# authorize this entrypoint even if it is still exported in the shell.
-echo "    cd $COLLECTOR_DIR && SELLEROPS_APPROVAL_PHASE=$M_PHASE SELLEROPS_WING_APPROVED_PHASE=$M_PHASE \\"
-echo "      npx tsx $M_CLI -- --i-understand-this-opens-live-coupang-wing"
+echo "  On approval — ONE command, then no terminal for the rest of the run:"
+# The phase variables are NOT exported on this command line. They travel in the run-env file, which the installer
+# reads and writes into the service's own environment — so the binding survives into a launchd job that inherits
+# nothing from this shell. A variable exported here would reach the installer and never reach the agent.
+echo "    cd $COLLECTOR_DIR && npx tsx $M_CLI install --run-env $RUN_ENV \\"
+# ABSOLUTE, not relative: a relative path would resolve only because launchd honours WorkingDirectory, and a
+# connections file that silently fails to load looks exactly like an agent that refuses for a different reason.
+echo "      -- --connections $WALK_CONNECTIONS --action-window-coupang-issuance-live"
+echo
+echo "  Then, with no terminal involved:"
+echo "    1. open SellerOps and go to /connect/coupang (the frontend finds the agent on loopback by itself)"
+echo "    2. start the guidance — SellerOps requests pairing"
+echo "    3. macOS shows the approval dialog with the code; confirm it, and confirm in the SellerOps screen."
+echo "       A browser that ALREADY holds a valid pairing token pairs silently and shows NO dialog — that is"
+echo "       the system working, not a failure. (A private window discards the token and re-pairs every run.)"
+echo "    4. the dedicated WING window opens THEN — at the run's first call, not at agent boot"
+echo
+echo "  The service is bound to THIS approval: its environment carries run=$RUN_ID approval=$APPROVAL_ID"
+echo "  git=$RUN_GIT, and the agent refuses to host the carrier if any of them stops matching the tree."
+echo "  When the run is over: cd $COLLECTOR_DIR && npx tsx $M_CLI uninstall"
 echo
 echo "  (Re-bootstrap ⇒ new approval id ⇒ the old approval is dead. A code/branch/run/scope change ⇒ REVOKED.)"
 exit 0

@@ -174,7 +174,7 @@ run_case "HEAD_DRIFT      (commit moved since bootstrap)" nonzero "git commit ch
 # The DISPLAY-side check. Unlike the destructive descriptor — where the risk is understating danger — every
 # softening here OVERSTATES safety, and the worst is `keyCreationRuledOut: true`: it would tell the operator
 # SellerOps had confirmed no key was created, which nothing can (NO_DISCRIMINATING_SIGNAL).
-CANON='{"guidedWalkBoundary":{"operation":"WALK_WING_GUIDED_ISSUANCE_TUTORIAL","forbiddenFollowOnAction":"COMPLETE_WING_KEY_ISSUANCE","restsBeforeControl":"약관 동의 및 Key 발급받기","createsKeyMaterial":false,"keyCreationRuledOut":false,"agentPerformsAction":false,"agentNavigations":0,"credentialValueReadBudget":0,"performsConnectOrSync":false,"highlightedControlCount":2,"textGuidedControlCount":4,"explicitCheckpointRequired":true}}'
+CANON='{"guidedWalkBoundary":{"operation":"WALK_WING_GUIDED_ISSUANCE_TUTORIAL","forbiddenFollowOnAction":"COMPLETE_WING_KEY_ISSUANCE","restsBeforeControl":"약관 동의 및 Key 발급받기","createsKeyMaterial":false,"keyCreationRuledOut":false,"agentPerformsAction":false,"agentNavigations":1,"credentialValueReadBudget":0,"performsConnectOrSync":false,"highlightedControlCount":3,"textGuidedControlCount":2,"autoAdvancingStepCount":4,"keyCreationAutoAdvances":false,"sellerConsentObserved":true}}'
 printf '%s' "$CANON" > "$FIXTURES/desc-ok.json"
 DESC_OK=1
 verify_walk_descriptor "$FIXTURES/desc-ok.json" >/dev/null 2>&1 || { echo "  FAIL  DESCRIPTOR · canonical descriptor rejected"; DESC_OK=0; FAILED=1; }
@@ -182,8 +182,8 @@ for soft in \
   '"keyCreationRuledOut":true' \
   '"createsKeyMaterial":true' \
   '"agentPerformsAction":true' \
-  '"agentNavigations":1' \
-  '"explicitCheckpointRequired":false' \
+  '"agentNavigations":0' \
+  '"keyCreationAutoAdvances":true' \
   '"credentialValueReadBudget":1' \
   '"performsConnectOrSync":true' \
   '"highlightedControlCount":6' \
@@ -196,8 +196,8 @@ for soft in \
   '"createsKeyMaterial":"false"' \
   '"agentPerformsAction":"false"' \
   '"performsConnectOrSync":"false"' \
-  '"explicitCheckpointRequired":"true"' \
-  '"agentNavigations":"0"' \
+  '"keyCreationAutoAdvances":"false"' \
+  '"agentNavigations":"1"' \
   '"credentialValueReadBudget":"0"'
 do
   # The fixture must be BUILT and must actually DIFFER from canonical. If the generator throws, no file is
@@ -278,7 +278,15 @@ if [ -z "$TREE_DIRTY" ]; then
   run_case "NORMAL          · 발급 selector calibration disclosed" 0 "selectors calibrated: true" "$FIXTURES/normal.env"
   run_case "NORMAL          · descriptor verdict shown" 0 "guided-walk boundary is exactly the canonical contract" "$FIXTURES/normal.env"
   run_case "NORMAL          · one-line grant offered" 0 "Seated and ready." "$FIXTURES/normal.env"
-  run_case "NORMAL          · run command is the GUIDED-WALK entrypoint" 0 "run-coupang-wing-issuance-live.ts" "$FIXTURES/normal.env"
+  # The product path INSTALLS the agent as a service; it never tells the operator to run it. The old case
+  # asserted "local-agent.ts", which the installer command also contains as its ProgramArguments target — so it
+  # would have kept passing after a regression back to a hand-run agent. Assert the install verb instead, plus
+  # the two sentences that make the run terminal-free.
+  run_case "NORMAL          · run command INSTALLS the agent service" 0 "local-agent-service.ts install" "$FIXTURES/normal.env"
+  run_case "NORMAL          · no terminal after the install" 0 "then no terminal for the rest of the run" "$FIXTURES/normal.env"
+  run_case "NORMAL          · pairing code comes from macOS, not a console" 0 "macOS shows the approval dialog with the code" "$FIXTURES/normal.env"
+  run_case "NORMAL          · operator starts in the product UI" 0 "/connect/coupang" "$FIXTURES/normal.env"
+  run_case "NORMAL          · teardown is disclosed with the grant" 0 "uninstall" "$FIXTURES/normal.env"
 
   out="$(env SELLEROPS_WING_WALK_RUN_ENV="$FIXTURES/normal.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1)"
 
@@ -287,8 +295,8 @@ if [ -z "$TREE_DIRTY" ]; then
   DISCLOSE_OK=1
   for phrase in \
     "EVERY marketplace action is YOURS" \
-    "NAVIGATES nothing" \
-    "Only TWO steps are highlighted" \
+    "every screen after that is one YOU navigate to" \
+    "THREE steps are highlighted" \
     "TEXT-GUIDED" \
     "draws no ring at" \
     "'OPEN API' is the DEFAULT purpose option" \
@@ -310,7 +318,7 @@ if [ -z "$TREE_DIRTY" ]; then
     "여기서 실제로 키가 생성됩니다." \
     "'약관 동의 및 Key 발급받기' 버튼을 직접 누르세요" \
     "SellerOps는 이" \
-    "버튼을 절대 누르지 않습니다."
+    "버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다."
   do
     grep -qF "$phrase" <<<"$out" || { echo "  FAIL  NORMAL          · Korean on-screen warning missing: $phrase"; KOREAN_OK=0; FAILED=1; }
   done
@@ -329,23 +337,34 @@ if [ -z "$TREE_DIRTY" ]; then
   else
     echo "  FAIL  NORMAL          · duplicate SELLEROPS_WING_APPROVED_PHASE lines in the run env"; FAILED=1
   fi
-  run_case "NORMAL          · run command carries BOTH phase variables" 0 "SELLEROPS_WING_APPROVED_PHASE=COUPANG_WING_GUIDED_ISSUANCE_WALK" "$FIXTURES/normal.env"
-
-  # A calibration/action phase must NEVER hand the operator a frontend URL (the historical defect).
-  if grep -qF "localhost:5173" <<<"$out" || grep -qF "/connect/" <<<"$out"; then
-    echo "  FAIL  NORMAL          · no frontend URL (a CLI phase must not emit one)"; FAILED=1
+  # The phase bindings must NOT be exported on the install command line. A launchd job inherits nothing from
+  # the installing shell, so a variable set there would reach the installer and never reach the agent — the
+  # binding travels in the run-env file, which the installer reads and writes into the service's environment.
+  if grep -qF "SELLEROPS_WING_APPROVED_PHASE=" <<<"$out"; then
+    echo "  FAIL  NORMAL          · the install command exports a phase variable the launchd job cannot inherit"; FAILED=1
   else
-    echo "  PASS  NORMAL          · no frontend URL emitted"
+    echo "  PASS  NORMAL          · phase bindings travel in the run env, not on the install command line"
+  fi
+  run_case "NORMAL          · the install command passes the run env" 0 "install --run-env" "$FIXTURES/normal.env"
+
+  # A calibration/action phase must NEVER hand the operator a BOUND frontend URL — the historical defect was
+  # printing /connect/naver?walkthroughRun=<id> as the operator action for every phase, which claims a run/tab
+  # binding this run does not have. A bare product route is the opposite: it is where the seller starts, and
+  # withholding it is what forced the terminal path. Absolute URLs and run tokens stay refused.
+  if grep -qF "localhost:5173" <<<"$out" || grep -qF "walkthroughRun=" <<<"$out" || grep -qF "/connect/naver" <<<"$out"; then
+    echo "  FAIL  NORMAL          · a BOUND frontend URL was emitted (run token or absolute origin)"; FAILED=1
+  else
+    echo "  PASS  NORMAL          · no bound frontend URL emitted (bare product route only)"
   fi
   # The descriptor must reach the operator in full, not just as a PASS line — and both claims must be visible.
   if grep -qF '"WALK_WING_GUIDED_ISSUANCE_TUTORIAL"' <<<"$out" \
      && grep -qF '"createsKeyMaterial": false' <<<"$out" \
      && grep -qF '"keyCreationRuledOut": false' <<<"$out" \
-     && grep -qF '"agentNavigations": 0' <<<"$out" \
+     && grep -qF '"agentNavigations": 1' <<<"$out" \
      && grep -qF '"performsConnectOrSync": false' <<<"$out" \
      && grep -qF '약관 동의 및 Key 발급받기' <<<"$out" \
      && grep -qF '"COMPLETE_WING_KEY_ISSUANCE"' <<<"$out"; then
-    echo "  PASS  NORMAL          · manifest names the control it rests before, both key claims, 0 navigations and no connect/sync"
+    echo "  PASS  NORMAL          · manifest names the control it rests before, both key claims, ONE navigation and no connect/sync"
   else
     echo "  FAIL  NORMAL          · guided-walk boundary incomplete in the displayed manifest"; FAILED=1
   fi
@@ -446,6 +465,25 @@ ENV
   else
     echo "  FAIL  BOOTSTRAP_CLEAN · bootstrap did not mint an identity on a clean tree (exit=$rc)"; FAILED=1
   fi
+
+  # **The bootstrap's own DISCLOSURE, which nothing checked.** It is the first description of the run the
+  # operator reads, and it had drifted to the pre-change behaviour — "the agent never navigates", "the two
+  # live-calibrated controls" — while the descriptor the preflight prints and the gate verifies said
+  # agentNavigations:1 / highlightedControlCount:3 / textGuidedControlCount:2 / autoAdvancingStepCount:4 /
+  # sellerConsentObserved:true. Only the preflight output was grepped, so this half could say anything.
+  #
+  # Asserted BOTH ways: the current claims must be present, and the retired ones must be gone — a disclosure
+  # that gained a line while keeping its contradiction is not fixed.
+  BOOT_OK=1
+  for claim in "ONE" "never navigates again" "THREE live-calibrated" "FOUR steps advance" "consent boxes are ticked" "RESTS in front of" "약관 동의 및 Key 발급받기" "never ticks a box"; do
+    grep -qF "$claim" <<<"$out" || { echo "  FAIL  BOOTSTRAP_DISCLOSE · missing claim: $claim"; BOOT_OK=0; FAILED=1; }
+  done
+  for stale in "the agent never navigates" "0 gotos" "ONLY the two live-calibrated"; do
+    if grep -qF "$stale" <<<"$out"; then
+      echo "  FAIL  BOOTSTRAP_DISCLOSE · retired claim still shown: $stale"; BOOT_OK=0; FAILED=1
+    fi
+  done
+  [ "$BOOT_OK" = "1" ] && echo "  PASS  BOOTSTRAP_DISCLOSE · the bootstrap's disclosure matches the descriptor the gate verifies"
 
   # An unreadable HEAD, and a HEAD that reads as something which is not a commit, must both refuse rather than
   # pin an identity nothing can verify. No healthy checkout produces either, so a `git` earlier on PATH does.

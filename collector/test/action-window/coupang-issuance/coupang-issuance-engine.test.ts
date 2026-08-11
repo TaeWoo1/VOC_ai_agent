@@ -9,7 +9,6 @@ import { CoupangIssuanceEngine, makeCoupangIssuanceClock } from "../../../src/ac
 
 const SIG: Record<string, string> = {
   reach_open_api: "aaaaaaaaaaaaaaaa",
-  purpose_option: "bbbbbbbbbbbbbbbb",
   confirm_purpose: "cccccccccccccccc",
   terms_consent: "dddddddddddddddd",
   issue: "eeeeeeeeeeeeeeee",
@@ -24,7 +23,6 @@ function engine() {
 
 const BARRIER: Record<string, string> = {
   issue: "checkpoint_reveal_issuance_form",
-  purpose_option: "guiding_purpose_option",
   confirm_purpose: "checkpoint_confirm_purpose",
   terms_consent: "guiding_terms_consent",
   issue_final: "checkpoint_before_issue",
@@ -75,8 +73,7 @@ describe("coupang issuance engine — the linear walkthrough from the WING home"
     // asserts the run rested at that step's barrier before the observed press moved it on.
     // The MEASURED order: 발급 opens the purpose screen, 확인 opens the terms screen, and the key is created on
     // the terms screen by `약관 동의 및 Key 발급받기`.
-    driveCheckpoint(eng, "issue", "purpose_option");
-    driveCheckpoint(eng, "purpose_option", "confirm_purpose");
+    driveCheckpoint(eng, "issue", "confirm_purpose");
     driveCheckpoint(eng, "confirm_purpose", "terms_consent");
     driveCheckpoint(eng, "terms_consent", "issue_final");
     // ⚠ THE KEY-CREATION BOUNDARY: only after the seller reports pressing it can a credential exist to copy.
@@ -86,7 +83,7 @@ describe("coupang issuance engine — the linear walkthrough from the WING home"
     driveCheckpoint(eng, "return", null);
     expect(eng.currentStage()).toBe("guidance_complete");
     expect(eng.view().status).toBe("COMPLETED");
-    expect(eng.view().progress).toEqual({ completedSteps: 8, totalSteps: 8 });
+    expect(eng.view().progress).toEqual({ completedSteps: 7, totalSteps: 7 });
   });
 
   it("a FE REQUEST_STEP_RECHECK still advances a checkpoint as a fallback/recovery (never the primary driver)", () => {
@@ -97,8 +94,8 @@ describe("coupang issuance engine — the linear walkthrough from the WING home"
     eng.onTargetHighlighted("issue", { count: 1, sig: SIG.issue! });
     expect(eng.currentStage()).toBe("checkpoint_reveal_issuance_form");
     // The fallback path (FE 다음) still completes the checkpoint and guides the next control.
-    pressNext(eng, "purpose_option");
-    expect(eng.currentStage()).toBe("guiding_purpose_option");
+    pressNext(eng, "confirm_purpose");
+    expect(eng.currentStage()).toBe("checkpoint_confirm_purpose");
   });
 
   it("skips the reach transition when the seller is ALREADY on the open-API issuance page (step 1 auto-completes)", () => {
@@ -118,7 +115,6 @@ describe("coupang issuance engine — the KEY-CREATION HUMAN CHECKPOINT never au
     eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" }); // → guide self_dev
     eng.onTargetLocated("issue", { count: 1, sig: SIG.issue! });
     eng.onTargetHighlighted("issue", { count: 1, sig: SIG.issue! });
-    pressNext(eng, "purpose_option");
     pressNext(eng, "confirm_purpose");
     pressNext(eng, "terms_consent");
     pressNext(eng, "issue_final");
@@ -129,7 +125,7 @@ describe("coupang issuance engine — the KEY-CREATION HUMAN CHECKPOINT never au
     const eng = toIssueBarrier();
     expect(eng.currentStage()).toBe("checkpoint_before_issue");
     expect(eng.view().status).toBe("WAITING_FOR_HUMAN");
-    expect(eng.view().currentStep?.stepNumber).toBe(6);
+    expect(eng.view().currentStep?.stepNumber).toBe(5);
     expect(eng.view().currentStep?.copyParams?.targetKind).toBe("issue_final");
     const ref = eng.events().find((e) => e.type === "TARGET_HIGHLIGHTED" && e.payload.stepId === "aw.coupang_issuance_issue_checkpoint")!.payload.targetRef;
     expect(ref).toMatch(/^[0-9a-f]{16}$/);
@@ -155,20 +151,50 @@ describe("coupang issuance engine — the KEY-CREATION HUMAN CHECKPOINT never au
 });
 
 describe("coupang issuance engine — recoverable parks (never RUN_FAILED)", () => {
-  it("parks on waiting_login for a login page and stays recoverable", () => {
+  it("WAITS on a login page — the seller logs in in WING and the runtime keeps looking", () => {
     const eng = engine();
     eng.command({ type: "START_RUN", expectedRevision: 0 });
-    expect(eng.onSurfaceProbed({ ok: false, pageCategory: "login", blockerCode: "LOGIN_REQUIRED" })).toBe("NONE");
+    // `AWAIT_SURFACE`, not `NONE`: the run keeps re-probing on its own. It used to sit until a
+    // `REQUEST_STEP_RECHECK` arrived — from the SellerOps tab the seller had just been told to leave.
+    expect(eng.onSurfaceProbed({ ok: false, pageCategory: "login", blockerCode: "LOGIN_REQUIRED" })).toBe("AWAIT_SURFACE");
     expect(eng.currentStage()).toBe("waiting_login");
     expect(eng.view().blocker).toEqual({ code: "LOGIN_REQUIRED", recoverable: true });
     expect(eng.events().map((e) => e.type)).not.toContain("RUN_FAILED");
   });
 
-  it("parks on page_mismatch for an unexpected page, and on target_not_found for a missing control", () => {
+  it("re-reading the same login page emits nothing new — a poll is not an event stream", () => {
+    const eng = engine();
+    eng.command({ type: "START_RUN", expectedRevision: 0 });
+    eng.onSurfaceProbed({ ok: false, pageCategory: "login", blockerCode: "LOGIN_REQUIRED" });
+    const after = eng.events().length;
+    expect(eng.onSurfaceProbed({ ok: false, pageCategory: "login", blockerCode: "LOGIN_REQUIRED" })).toBe("AWAIT_SURFACE");
+    expect(eng.events().length).toBe(after);
+  });
+
+  it("an unrecognized page is a WAIT with no blocker — the window opens blank, which is not drift", () => {
+    const eng = engine();
+    eng.command({ type: "START_RUN", expectedRevision: 0 });
+    // Every run starts here: the dedicated window's blank tab classifies as `unknown`. Parking told a seller who
+    // had not logged in yet that the screen had changed unexpectedly, and then never recovered by itself.
+    expect(eng.onSurfaceProbed({ ok: true, pageCategory: "unknown" })).toBe("AWAIT_SURFACE");
+    expect(eng.currentStage()).toBe("awaiting_wing_surface");
+    expect(eng.view().blocker).toBeUndefined();
+    expect(eng.events().map((e) => e.type)).not.toContain("RUN_BLOCKED");
+  });
+
+  it("a wait clears itself the moment WING shows something we recognize", () => {
+    const eng = engine();
+    eng.command({ type: "START_RUN", expectedRevision: 0 });
+    eng.onSurfaceProbed({ ok: true, pageCategory: "unknown" });
+    expect(eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" })).toEqual({ guide: "issue" });
+    expect(eng.view().blocker).toBeUndefined();
+  });
+
+  it("parks on target_not_found for a missing control", () => {
     const eng = engine();
     eng.command({ type: "START_RUN", expectedRevision: 0 });
     eng.onSurfaceProbed({ ok: true, pageCategory: "credential_shown" }); // not where the tutorial starts
-    expect(eng.currentStage()).toBe("page_mismatch");
+    expect(eng.currentStage()).toBe("awaiting_wing_surface");
 
     const eng2 = engine();
     eng2.command({ type: "START_RUN", expectedRevision: 0 });
@@ -178,7 +204,7 @@ describe("coupang issuance engine — recoverable parks (never RUN_FAILED)", () 
     expect(eng2.view().blocker).toEqual({ code: "TARGET_NOT_FOUND", recoverable: true });
   });
 
-  it("parks on page_mismatch when the reach verification lands on a non-issuance page", () => {
+  it("WAITS when the reach verification lands somewhere that is not the issuance page yet", () => {
     const eng = engine();
     eng.command({ type: "START_RUN", expectedRevision: 0 });
     eng.onSurfaceProbed({ ok: true, pageCategory: "wing_home" });
@@ -186,8 +212,72 @@ describe("coupang issuance engine — recoverable parks (never RUN_FAILED)", () 
     eng.onTargetHighlighted("reach_open_api", { count: 1, sig: SIG.reach_open_api! });
     eng.onUserActionObserved("reach_open_api");
     eng.onReachVerified({ ok: true, pageCategory: "unknown" });
-    expect(eng.currentStage()).toBe("page_mismatch");
+    expect(eng.currentStage()).toBe("awaiting_wing_surface");
     expect(eng.events().map((e) => e.type)).not.toContain("RUN_FAILED");
+  });
+
+  it("**an expired wait becomes a RECOVERABLE park, not a run that claims to still be watching**", () => {
+    const eng = engine();
+    eng.command({ type: "START_RUN", expectedRevision: 0 });
+    eng.onSurfaceProbed({ ok: true, pageCategory: "unknown" });
+    expect(eng.view().blocker).toBeUndefined(); // …while it IS watching
+
+    expect(eng.onSurfaceWaitExpired()).toBe("NONE");
+    // `SURFACE_SETTLE_TIMEOUT` ("화면이 아직 준비되지 않았어요"), not `UI_DRIFT` ("화면이 바뀐 것 같아요") — the
+    // message the observed wait exists to stop showing someone who was simply not there yet.
+    expect(eng.view().blocker).toEqual({ code: "SURFACE_SETTLE_TIMEOUT", recoverable: true });
+    expect(eng.view().status).toBe("WAITING_FOR_HUMAN");
+    expect(eng.view().allowedCommands).toContain("REQUEST_STEP_RECHECK");
+    // …and the recheck the frontend can now send re-probes from the top.
+    expect(eng.command({ type: "REQUEST_STEP_RECHECK", expectedRevision: eng.view().revision })).toEqual({
+      ok: true,
+      idempotent: false,
+      effect: "PROBE",
+    });
+  });
+
+  it("a recheck DURING the wait is accepted and re-probes (the button is offered, never needed)", () => {
+    const eng = engine();
+    eng.command({ type: "START_RUN", expectedRevision: 0 });
+    eng.onSurfaceProbed({ ok: true, pageCategory: "unknown" });
+    expect(eng.view().allowedCommands).toContain("REQUEST_STEP_RECHECK");
+    expect(eng.command({ type: "REQUEST_STEP_RECHECK", expectedRevision: eng.view().revision })).toEqual({
+      ok: true,
+      idempotent: false,
+      effect: "PROBE",
+    });
+  });
+
+  it("an expiry that arrives after the run moved on parks NOTHING", () => {
+    const eng = engine();
+    eng.command({ type: "START_RUN", expectedRevision: 0 });
+    eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" });
+    expect(eng.onSurfaceWaitExpired()).toBe("NONE");
+    expect(eng.currentStage()).toBe("locating_open_api");
+    expect(eng.view().blocker).toBeUndefined();
+  });
+
+  it("a LOGIN wait expires to nothing — it is already a park with a blocker and a button", () => {
+    const eng = engine();
+    eng.command({ type: "START_RUN", expectedRevision: 0 });
+    eng.onSurfaceProbed({ ok: true, pageCategory: "login" });
+    const before = eng.events().length;
+    expect(eng.onSurfaceWaitExpired()).toBe("NONE");
+    expect(eng.currentStage()).toBe("waiting_login");
+    expect(eng.events()).toHaveLength(before); // no re-announcement
+  });
+
+  it("**a SECOND probe of the same surface advances NOTHING** — two readers, one advance", () => {
+    // Two callers can reach `onSurfaceProbed` at once: a surface-wait poll and a `REQUEST_STEP_RECHECK`'s
+    // `PROBE`. Without this guard the second re-ran the whole branch on a run the first had already advanced —
+    // `STEP_COMPLETED` for step 1 twice and two independent `{guide:"issue"}` chains on one target.
+    const eng = engine();
+    eng.command({ type: "START_RUN", expectedRevision: 0 });
+    expect(eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" })).toEqual({ guide: "issue" });
+    const after = eng.events().length;
+    expect(eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" })).toBe("NONE");
+    expect(eng.events()).toHaveLength(after);
+    expect(eng.events().filter((e) => e.type === "STEP_COMPLETED")).toHaveLength(1);
   });
 });
 
@@ -204,7 +294,7 @@ describe("coupang issuance engine — contract validity + NO appBranch", () => {
     expect(v.intent).toBe("API_ISSUANCE_GUIDANCE");
     expect(v.runCopyKey).toBe("actionWindow.coupangIssuance.run");
     expect(v.appBranch).toBeUndefined(); // linear flow — NEVER an appBranch
-    expect(v.currentStep?.totalSteps).toBe(8);
+    expect(v.currentStep?.totalSteps).toBe(7);
     expect(validateRunView(v)).toEqual({ ok: true });
     expect(findProhibitedFields(v)).toEqual([]);
     for (const e of eng.events()) {

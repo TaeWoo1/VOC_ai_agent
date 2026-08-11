@@ -96,8 +96,18 @@ export const COUPANG_WING_GUIDED_ISSUANCE_WALK_PHASE = "COUPANG_WING_GUIDED_ISSU
  * entrypoint already holds ("this recorder never `.goto`s"). The screened URL is still resolved, because the
  * screen is what keeps the dedicated window pointed at the WING host, but nothing drives the page to it.
  */
-export const COUPANG_WING_GUIDED_WALK_AGENT_NAVIGATIONS = 0 as const;
-  "approval-manifest gate, no phase binding and no repo-identity check";
+/**
+ * How many times the agent navigates during a guided walk. **One** — the landing, at window open.
+ *
+ * It was zero, and the window came up blank: the seller's first task was to find WING themselves, and the
+ * run's first reading was `unknown` by construction. Opening a seller's own seller center is not a marketplace
+ * action (nothing is clicked, typed, submitted, or selected) but it IS a navigation, so the number says one
+ * rather than the claim being quietly softened to "no meaningful navigation".
+ *
+ * It is a LANDING, not a route: every screen after it is one the seller reaches. Nothing in the walk navigates
+ * again, and the guard test holds the count to exactly this.
+ */
+export const COUPANG_WING_GUIDED_WALK_AGENT_NAVIGATIONS = 1 as const;
 
 async function main(): Promise<void> {
   banner();
