@@ -1,0 +1,300 @@
+/**
+ * **The OPERATOR CONFIRMATION channel — the only thing that may advance a live checkpoint.**
+ *
+ * ## Why this module exists
+ *
+ * Every live/calibration run in this workstream advanced on a **sentinel file**: the operator said the screen was
+ * ready, and something created `…/probe-wing-issuance-selectors.ready`. On 2026-08-13 that "something" was the
+ * assistant, acting on a line of chat text — a line the operator had never written. The run advanced on a
+ * fabricated confirmation. Nothing was pressed (the screen gate halted the run one checkpoint later), but the
+ * mechanism was sound only for as long as every participant behaved, which is not a mechanism.
+ *
+ * The defect is structural, not behavioural: **chat text and a `touch` are both things a language model can
+ * produce.** A channel that a model can produce cannot be evidence that a human looked at a screen.
+ *
+ * ## What replaces it
+ *
+ * A confirmation event that only a real press can create:
+ *
+ *  1. The run mints a **random 32-hex token per checkpoint** ({@link mintOperatorConfirmToken}). It is written
+ *     into the page and held in the run's memory — never printed, never logged, never written to disk. A model
+ *     reading this repository, the terminal, or the status directory cannot learn the value it would have to
+ *     echo.
+ *  2. The token is armed in a **SellerOps-owned confirmation surface** ({@link buildOperatorConfirmArmScript}) —
+ *     a blank tab that renders the step, the instruction the operator was given, and one button: `현재 화면 확인`.
+ *  3. The button's handler records the event **only for a trusted event** (`ev.isTrusted === true`, which a
+ *     dispatched or programmatic `click()` cannot set) and only while its own token is the armed one.
+ *  4. The run polls, and {@link verifyOperatorConfirmEvent} admits the event only if the token matches the one it
+ *     minted for THIS checkpoint and the press was trusted. Everything else — no event, a stale token, an
+ *     untrusted event, a malformed record — is refused, and refusal never advances.
+ *
+ * A confirmation that passes carries {@link OPERATOR_UI_CONFIRMED} as its provenance, and that literal is the
+ * ONLY way to construct the `ready` arm of {@link OperatorConfirmation}. Callers therefore cannot record a
+ * checkpoint as confirmed without naming the channel it came through — the type system carries the audit, not a
+ * convention.
+ *
+ * ## What this does NOT claim
+ *
+ * It does not defend against an operator who presses without looking, and it does not defend against code in this
+ * repository that decides to drive the confirmation surface itself. It closes exactly one hole: **a checkpoint can
+ * no longer advance on text.**
+ *
+ * String IIFEs (never passed functions): tsx/esbuild instruments named/module functions with a `__name` helper
+ * absent in the page, so a serialized function throws `ReferenceError: __name`. Kept ES5-plain and free of
+ * backticks (a backtick would terminate the TypeScript template literal that carries it).
+ */
+
+import { randomUUID } from "node:crypto";
+
+/**
+ * The one provenance a confirmed checkpoint may carry. It is a literal type as well as a value: the `ready` arm of
+ * {@link OperatorConfirmation} requires it, so no code path can report a confirmation without naming this channel.
+ */
+export const OPERATOR_UI_CONFIRMED = "OPERATOR_UI_CONFIRMED" as const;
+export type OperatorConfirmProvenance = typeof OPERATOR_UI_CONFIRMED;
+
+/**
+ * The result of one wait. `ready` is reachable ONLY through a verified press; `abort` and `timeout` carry a null
+ * provenance because nothing confirmed them.
+ */
+export type OperatorConfirmation =
+  | { readonly signal: "ready"; readonly provenance: OperatorConfirmProvenance }
+  | { readonly signal: "abort"; readonly provenance: null }
+  | { readonly signal: "timeout"; readonly provenance: null };
+
+/** Every way a poll can end. Only `CONFIRMED` advances; the rest are recorded and waited through. */
+export const OPERATOR_CONFIRM_VERDICTS = [
+  "CONFIRMED",
+  /** Nothing has been pressed yet — the ordinary state of a wait. */
+  "NO_EVENT",
+  /** An event whose token is not the one THIS checkpoint armed (a stale press, or a forged one). */
+  "TOKEN_MISMATCH",
+  /** `isTrusted` was not true: a dispatched/synthesised event, not a human press. */
+  "UNTRUSTED_EVENT",
+  /** The record is not shaped like a confirmation. Refused rather than interpreted. */
+  "MALFORMED",
+  /** The confirmation surface could not be armed at all (tab closed, evaluate threw). Fail closed. */
+  "UI_NOT_ARMED",
+] as const;
+export type OperatorConfirmVerdict = (typeof OPERATOR_CONFIRM_VERDICTS)[number];
+
+/** The page global holding the armed token and the event. Distinctive so nothing on a host page collides. */
+export const OPERATOR_CONFIRM_STATE_KEY = "__sellerOpsOperatorConfirm";
+/** The confirmation surface's root element id. */
+export const OPERATOR_CONFIRM_ROOT_ID = "sellerops-operator-confirm-root";
+/** The button's own id — named in the copy so an operator can be told exactly what to look for. */
+export const OPERATOR_CONFIRM_BUTTON_ID = "sellerops-operator-confirm-button";
+/** The button's label. The operator is told this string and nothing else advances the run. */
+export const OPERATOR_CONFIRM_BUTTON_LABEL = "현재 화면 확인";
+/** The confirmation tab's title, so it is findable among the seller's own tabs. */
+export const OPERATOR_CONFIRM_PAGE_TITLE = "SellerOps 확인";
+
+/** 32 lowercase hex — the shape {@link mintOperatorConfirmToken} produces and the only shape accepted. */
+const TOKEN_PATTERN = /^[0-9a-f]{32}$/;
+
+/** Whether a value is a well-formed confirmation token. Used on BOTH sides of the comparison (see verify). */
+export function isOperatorConfirmToken(value: unknown): value is string {
+  return typeof value === "string" && TOKEN_PATTERN.test(value);
+}
+
+/**
+ * A fresh per-checkpoint token. Never printed, never logged, never persisted — its whole value is that the only
+ * copies are the run's memory and the confirmation page the operator is looking at.
+ */
+export function mintOperatorConfirmToken(): string {
+  return randomUUID().replace(/-/g, "");
+}
+
+/** What the operator is being asked to confirm. Copy only — the same lines the terminal printed. */
+export interface OperatorConfirmAsk {
+  /** Step header, e.g. `DISCOVERY 5/7`. */
+  readonly title: string;
+  /** The one-line ask. */
+  readonly headline: string;
+  /** The detail lines, already sanitized (this module renders them verbatim as text nodes). */
+  readonly lines: readonly string[];
+}
+
+/**
+ * Build the arm IIFE for ONE checkpoint. Self-mounting: it creates the surface if the tab is blank, so a reloaded
+ * or freshly-opened tab needs no separate setup call and cannot end up armed-but-unrendered.
+ *
+ * Returns `true` in the page when the surface is armed. Anything else (including a throw) is {@link
+ * OperatorConfirmVerdict} `UI_NOT_ARMED` host-side, which fails the wait closed rather than waiting on a button
+ * nobody can see.
+ */
+export function buildOperatorConfirmArmScript(ask: OperatorConfirmAsk & { readonly token: string }): string {
+  return `(function () {
+  /* sellerops-operator-confirm (arm) */
+  var KEY = ${JSON.stringify(OPERATOR_CONFIRM_STATE_KEY)};
+  var TOKEN = ${JSON.stringify(ask.token)};
+  var TITLE = ${JSON.stringify(ask.title)};
+  var HEADLINE = ${JSON.stringify(ask.headline)};
+  var LINES = ${JSON.stringify(ask.lines)};
+  var d = document;
+  if (!d || !d.body) return false;
+  d.title = ${JSON.stringify(OPERATOR_CONFIRM_PAGE_TITLE)};
+  var st = window[KEY];
+  if (!st) { st = { armed: null, event: null }; window[KEY] = st; }
+  /* Arming CLEARS any earlier press. A confirmation belongs to exactly one checkpoint. */
+  st.event = null;
+  st.armed = TOKEN;
+  d.body.style.margin = "0";
+  d.body.style.background = "#0d1117";
+  d.body.style.color = "#e6edf3";
+  d.body.style.font = "14px/1.6 -apple-system, BlinkMacSystemFont, sans-serif";
+  var root = d.getElementById(${JSON.stringify(OPERATOR_CONFIRM_ROOT_ID)});
+  if (!root) {
+    root = d.createElement("div");
+    root.id = ${JSON.stringify(OPERATOR_CONFIRM_ROOT_ID)};
+    d.body.appendChild(root);
+  }
+  while (root.firstChild) root.removeChild(root.firstChild);
+  root.style.cssText = "max-width:720px;margin:0 auto;padding:28px 24px";
+  /* textContent everywhere: this surface renders copy, never markup, so nothing it is handed can become DOM. */
+  var mk = function (tag, text, css) {
+    var el = d.createElement(tag);
+    if (text !== null) el.textContent = text;
+    if (css) el.style.cssText = css;
+    root.appendChild(el);
+    return el;
+  };
+  mk("div", TITLE, "font-size:12px;letter-spacing:.08em;color:#7d8590;text-transform:uppercase");
+  mk("div", HEADLINE, "font-size:19px;font-weight:600;margin:6px 0 16px");
+  var body = mk("div", null, "color:#adbac7;white-space:pre-wrap");
+  for (var i = 0; i < LINES.length; i++) {
+    var p = d.createElement("div");
+    p.textContent = LINES[i];
+    p.style.cssText = "margin:0 0 4px";
+    body.appendChild(p);
+  }
+  var note = mk(
+    "div",
+    "이 버튼을 직접 누르셔야만 다음 단계로 넘어갑니다. 대화창에 'ready'라고 쓰거나 터미널에서 파일을 만드는 것으로는 진행되지 않습니다.",
+    "margin:20px 0 10px;color:#7d8590;font-size:13px"
+  );
+  var btn = d.createElement("button");
+  btn.id = ${JSON.stringify(OPERATOR_CONFIRM_BUTTON_ID)};
+  btn.type = "button";
+  btn.textContent = ${JSON.stringify(OPERATOR_CONFIRM_BUTTON_LABEL)};
+  btn.style.cssText =
+    "font:600 16px/1 -apple-system,BlinkMacSystemFont,sans-serif;padding:14px 22px;border-radius:8px;" +
+    "border:1px solid #2f81f7;background:#1f6feb;color:#fff;cursor:pointer";
+  btn.addEventListener(
+    "click",
+    function (ev) {
+      /* isTrusted is false for any dispatched or programmatic click. A synthesised press is refused HERE as
+         well as host-side, so the page never even holds a record that a verifier would have to reject. */
+      if (!ev || ev.isTrusted !== true) {
+        note.textContent = "직접 누른 것이 아닌 신호는 무시됩니다. 버튼을 눌러 주세요.";
+        return;
+      }
+      if (st.armed !== TOKEN) return;
+      st.event = { token: TOKEN, trusted: true };
+      st.armed = null;
+      btn.disabled = true;
+      btn.style.opacity = "0.55";
+      btn.style.cursor = "default";
+      btn.textContent = "확인됨 — 다음 단계를 준비합니다";
+    },
+    false
+  );
+  root.appendChild(btn);
+  return true;
+})()`;
+}
+
+/** Read the pending confirmation event, or null. Returns a copy: the page's own object never leaves the page. */
+export const OPERATOR_CONFIRM_READ_SCRIPT = `(function () {
+  /* sellerops-operator-confirm (read) */
+  var st = window[${JSON.stringify(OPERATOR_CONFIRM_STATE_KEY)}];
+  if (!st || !st.event) return null;
+  return { token: st.event.token, trusted: st.event.trusted === true };
+})()`;
+
+/** Drop a refused event so the next poll is not the same refusal again. Leaves the armed token in place. */
+export const OPERATOR_CONFIRM_CLEAR_SCRIPT = `(function () {
+  /* sellerops-operator-confirm (clear) */
+  var st = window[${JSON.stringify(OPERATOR_CONFIRM_STATE_KEY)}];
+  if (st) st.event = null;
+  return true;
+})()`;
+
+/**
+ * Decide whether a raw page record is THIS checkpoint's confirmation. Pure, and deliberately narrow: every field
+ * is checked, and anything unrecognized is `MALFORMED` rather than best-effort interpreted.
+ *
+ * `expectedToken` is validated too. A caller that lost its token (empty string, undefined threaded through) would
+ * otherwise be comparing against a value the page could match by accident — so an unusable expectation refuses
+ * everything instead of accepting something.
+ */
+export function verifyOperatorConfirmEvent(raw: unknown, expectedToken: string): OperatorConfirmVerdict {
+  if (!isOperatorConfirmToken(expectedToken)) return "MALFORMED";
+  if (raw === null || raw === undefined) return "NO_EVENT";
+  if (typeof raw !== "object") return "MALFORMED";
+  const record = raw as { token?: unknown; trusted?: unknown };
+  if (!isOperatorConfirmToken(record.token)) return "MALFORMED";
+  if (record.token !== expectedToken) return "TOKEN_MISMATCH";
+  if (record.trusted !== true) return "UNTRUSTED_EVENT";
+  return "CONFIRMED";
+}
+
+/** The injected seams, so the whole wait is unit-tested offline over a fake page. */
+export interface OperatorConfirmSeams {
+  /** Evaluate one of this module's string IIFEs in the confirmation surface. */
+  evaluate(script: string): Promise<unknown>;
+  /** Whether the operator has asked to stop (Ctrl+C or the abort sentinel). Checked before every poll. */
+  aborted(): boolean;
+  sleep(ms: number): Promise<void>;
+  /** Sanitized observability: the VERDICT only, never the token or the event. */
+  onVerdict?(verdict: OperatorConfirmVerdict): void;
+}
+
+export interface OperatorConfirmWaitOptions {
+  readonly token: string;
+  readonly pollMs: number;
+  readonly timeoutMs: number;
+}
+
+const ABORTED: OperatorConfirmation = { signal: "abort", provenance: null };
+const TIMED_OUT: OperatorConfirmation = { signal: "timeout", provenance: null };
+
+/**
+ * Arm the surface for one checkpoint and wait for a verified press.
+ *
+ * Fails closed on every axis: an un-armable surface returns immediately without waiting on a button nobody can
+ * see; a refused event is recorded, cleared, and waited through; and running out of budget is a `timeout`, which
+ * every caller treats as "do not advance". There is no branch that returns `ready` without
+ * {@link verifyOperatorConfirmEvent} saying `CONFIRMED` first.
+ */
+export async function awaitOperatorConfirmation(
+  seams: OperatorConfirmSeams,
+  ask: OperatorConfirmAsk,
+  opts: OperatorConfirmWaitOptions,
+): Promise<OperatorConfirmation> {
+  if (seams.aborted()) return ABORTED;
+  const armed = await seams
+    .evaluate(buildOperatorConfirmArmScript({ ...ask, token: opts.token }))
+    .then((v) => v === true)
+    .catch(() => false);
+  if (!armed) {
+    seams.onVerdict?.("UI_NOT_ARMED");
+    return TIMED_OUT;
+  }
+  const ticks = Math.max(1, Math.ceil(opts.timeoutMs / Math.max(1, opts.pollMs)));
+  for (let i = 0; i < ticks; i++) {
+    if (seams.aborted()) return ABORTED;
+    const raw = await seams.evaluate(OPERATOR_CONFIRM_READ_SCRIPT).catch(() => null);
+    const verdict = verifyOperatorConfirmEvent(raw, opts.token);
+    if (verdict === "CONFIRMED") {
+      seams.onVerdict?.(verdict);
+      return { signal: "ready", provenance: OPERATOR_UI_CONFIRMED };
+    }
+    if (verdict !== "NO_EVENT") {
+      seams.onVerdict?.(verdict);
+      await seams.evaluate(OPERATOR_CONFIRM_CLEAR_SCRIPT).catch(() => undefined);
+    }
+    await seams.sleep(opts.pollMs);
+  }
+  return TIMED_OUT;
+}

@@ -42,6 +42,7 @@ import {
   stage2RecordFor,
 } from "../../../src/cli/probe-wing-issuance-selectors";
 import { observeFrom } from "../../../src/cli/coupang-wing-classifier";
+import { OPERATOR_CONFIRMED } from "../../fixtures/operator-confirmation";
 
 const PROMOTED = WING_GUIDED_HIGHLIGHT_PROMOTIONS.filter((p) => p.promoted);
 const ALL_CANDIDATE_IDS = Object.values(WING_STAGE2_RECON_CANDIDATES)
@@ -456,7 +457,7 @@ describe("the MEASURED tag survives every layer between the page and the record"
    */
   function deps(observedTag: string | undefined) {
     return {
-      waitForReady: async () => "ready" as const,
+      awaitOperatorConfirmation: async () => OPERATOR_CONFIRMED,
       observeSurface: async () =>
         observeFrom("wing_host", {
           passwordFieldPresent: false,

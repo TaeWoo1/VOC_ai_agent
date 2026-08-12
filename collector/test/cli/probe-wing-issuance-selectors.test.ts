@@ -20,6 +20,7 @@ import {
   type WingSelectorRecordDeps,
 } from "../../src/cli/probe-wing-issuance-selectors";
 import { WING_PROBE_TARGET_NAMES, type WingObservation } from "../../src/cli/coupang-wing-classifier";
+import { OPERATOR_CONFIRMED, confirmationFor } from "../fixtures/operator-confirmation";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = resolve(HERE, "../../src/cli/probe-wing-issuance-selectors.ts");
@@ -141,7 +142,7 @@ interface FakeOptions {
 function fakeDeps(o: FakeOptions = {}): { deps: WingSelectorRecordDeps; probed: WingRecordTarget[] } {
   const probed: WingRecordTarget[] = [];
   const deps: WingSelectorRecordDeps = {
-    waitForReady: async () => o.signal ?? "ready",
+    awaitOperatorConfirmation: async () => confirmationFor(o.signal ?? "ready"),
     observeSurface: async () => OBS,
     probeTarget: async (target) => {
       probed.push(target);
@@ -233,7 +234,7 @@ describe("wing selector recorder — read-only walk", () => {
     // fault, matchCount 0, and the loop continues to the rest.
     const probed: WingRecordTarget[] = [];
     const deps: WingSelectorRecordDeps = {
-      waitForReady: async () => "ready",
+      awaitOperatorConfirmation: async () => OPERATOR_CONFIRMED,
       observeSurface: async () => {
         throw new Error("Execution context was destroyed, most likely because of a navigation.");
       },
@@ -294,7 +295,7 @@ describe("wing selector recorder — read-only walk", () => {
     // exists — so an all-unique run on an off-surface page still reports the surface reason, not a state.
     const offSurface: WingObservation = { ...OBS, pageCategory: "wing_home" };
     const result = await runWingSelectorRecord({
-      waitForReady: async () => "ready",
+      awaitOperatorConfirmation: async () => OPERATOR_CONFIRMED,
       observeSurface: async () => offSurface,
       probeTarget: async () => UNIQUE,
       announce: () => undefined,
@@ -307,7 +308,7 @@ describe("wing selector recorder — read-only walk", () => {
     // A failed observe lacks the credential anchor exactly like a genuinely empty page does. Reporting that as
     // deletion evidence is the one mistake the verdict must never make.
     const result = await runWingSelectorRecord({
-      waitForReady: async () => "ready",
+      awaitOperatorConfirmation: async () => OPERATOR_CONFIRMED,
       observeSurface: async () => {
         throw new Error("Target page, context or browser has been closed");
       },

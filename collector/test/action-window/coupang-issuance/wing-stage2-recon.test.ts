@@ -40,6 +40,7 @@ import {
   type WingSelectorRecordDeps,
 } from "../../../src/cli/probe-wing-issuance-selectors";
 import { CoupangWingIssuanceDriver } from "../../../src/action-window/coupang-wing-issuance-driver";
+import { OPERATOR_ABORTED, OPERATOR_CONFIRMED } from "../../fixtures/operator-confirmation";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -543,7 +544,7 @@ describe("runWingSelectorRecord — the Stage-2 sweep in the orchestrator", () =
     const baseline: string[] = [];
     let censusCalls = 0;
     const d: WingSelectorRecordDeps = {
-      waitForReady: async () => "ready",
+      awaitOperatorConfirmation: async () => OPERATOR_CONFIRMED,
       observeSurface: async () => over.observation ?? obs({ choiceControlCount: 2 }),
       probeTarget: async (t) => {
         baseline.push(t);
@@ -592,7 +593,7 @@ describe("runWingSelectorRecord — the Stage-2 sweep in the orchestrator", () =
   });
 
   it("an ABORT records no Stage-2 sweep at all — null, not an empty one", async () => {
-    const { d } = deps({ waitForReady: async () => "abort" });
+    const { d } = deps({ awaitOperatorConfirmation: async () => OPERATOR_ABORTED });
     const r = await runWingSelectorRecord(d, [], { stage2: ["purpose"] });
     expect(r.stage2).toBeNull();
     expect(r.aborted).toBe(true);

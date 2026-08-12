@@ -61,6 +61,7 @@ import {
   type WingSelectorRecordDeps,
 } from "../../../src/cli/probe-wing-issuance-selectors";
 import { observeFrom, type WingStructuralCensus } from "../../../src/cli/coupang-wing-classifier";
+import { OPERATOR_CONFIRMED } from "../../fixtures/operator-confirmation";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = (rel: string): string => readFileSync(resolve(HERE, "../../../src", rel), "utf8");
@@ -428,9 +429,9 @@ function fakeVendorFlow(over: { vendorFrom?: number; termsFrom?: number } = {}) 
     return false;
   };
   const deps: WingSelectorRecordDeps = {
-    waitForReady: async () => {
+    awaitOperatorConfirmation: async () => {
       waits += 1;
-      return "ready";
+      return OPERATOR_CONFIRMED;
     },
     observeSurface: async () => {
       reads += 1;
