@@ -157,7 +157,9 @@ async function main(): Promise<void> {
   }
 
   const cfg = loadConfig();
-  const ctx = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
+  // `followWindow` — the page follows the seller's window instead of Playwright's pinned 1280×720. Measured,
+  // not assumed: see `buildLaunchOptions`, and the crop it fixes is the one that blocked two live walks.
+  const ctx = await launchNaverContext(cfg.profileDir, cfg.browserChannel, { followWindow: true });
   try {
     // The newest tab, wherever the SELLER navigated. This entrypoint never `.goto`s — see
     // COUPANG_WING_GUIDED_WALK_AGENT_NAVIGATIONS. `url` stays resolved and screened so the dedicated window can
