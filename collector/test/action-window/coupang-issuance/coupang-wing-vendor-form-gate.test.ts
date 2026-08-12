@@ -188,16 +188,25 @@ describe("the vendor-form gate at step ⑥", () => {
     }
   });
 
-  it("its field readings carry an id and a boolean — never a value", async () => {
+  it("its field readings carry an id, booleans and STRUCTURE — never a value", async () => {
+    // The structural counts joined the line on 2026-08-13: the census had computed them from the start and
+    // logged none, so a live walk that read `IP 주소` as not-ready for ninety seconds could not say what the
+    // region actually held. Every one of them is an integer or a tag name; what the seller typed is still
+    // represented only by `ready`.
     const page = new FakeVendorPage();
     page.filled = new Set(["stage2.vendor_info.baseline"]);
     page.pressed = true;
     await driverOn(page).observeUserAction("vendor_method");
     const rows = getLogSink().filter((l) => l.event === "aw_coupang_vendor_form_field");
     expect(rows.length).toBeGreaterThan(0);
+    const allowed = ["fieldId", "ready", "resolved", "regionTag", "inputCount", "textInputCount", "buttonCount", "entryRowCount", "visibleCount", "repeat"];
     for (const row of rows) {
-      expect(Object.keys(row.meta ?? {}).sort()).toEqual(["fieldId", "ready", "resolved"]);
-      expect(typeof (row.meta as Record<string, unknown>)["ready"]).toBe("boolean");
+      const meta = (row.meta ?? {}) as Record<string, unknown>;
+      for (const key of Object.keys(meta)) expect(allowed, key).toContain(key);
+      expect(typeof meta["ready"]).toBe("boolean");
+      // Nothing derived from a VALUE travels — not even the emptiness count the readiness rule itself uses.
+      expect(meta["filledTextInputCount"]).toBeUndefined();
+      for (const value of Object.values(meta)) expect(["string", "number", "boolean"]).toContain(typeof value);
     }
   });
 });

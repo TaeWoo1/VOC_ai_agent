@@ -324,7 +324,9 @@ if [ -z "$TREE_DIRTY" ]; then
     "SEVEN steps advance by themselves" \
     "finishes itself when the vendor FORM reads complete" \
     "keeps clear of the control it points at AND of the ones you use to reach it" \
+    "the RING comes down once the form appears" \
     "입력이 끝나면 자동 진행" \
+    "강조 표시는 사라지고 안내만 남습니다" \
     "You read the two consent texts and decide" \
     "THIS RUN ENDS WITH A REAL API KEY ON YOUR LIVE COUPANG ACCOUNT" \
     "does NOT create the key" \

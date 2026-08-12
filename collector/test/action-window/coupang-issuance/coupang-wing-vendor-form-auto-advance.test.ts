@@ -27,6 +27,8 @@ class FakeVendorPage {
   censusReads = 0;
   /** Every in-page script the driver ran, so the keep-clear marking can be inspected. */
   scripts: string[] = [];
+  /** Every overlay mount, as the panel options the driver handed the page. */
+  mounts: { label?: string; docked?: boolean }[] = [];
 
   url(): string {
     return "https://wing.coupang.com/vendor/open-api";
@@ -72,6 +74,11 @@ class FakeVendorPage {
           return { presses: this.pressed ? 1 : 0, latched: this.pressed, tokenArmed: true, panelMounted: true };
         }
         return this.pressed;
+      }
+      const opts = arg as Record<string, unknown>;
+      if (typeof opts["label"] === "string") {
+        this.mounts.push({ label: opts["label"] as string, docked: opts["dockedPanelOnly"] === true });
+        return undefined;
       }
       return this.pressed;
     }
@@ -160,10 +167,70 @@ describe("step ⑥ completes itself on the form the seller is filling in", () =>
     page.filled = new Set(FIELD_IDS);
     await driverOn(page).observeUserAction("vendor_method");
     for (const row of rows("aw_coupang_vendor_form_field")) {
-      for (const key of Object.keys(row.meta ?? {})) expect(["fieldId", "ready", "resolved", "visibleCount", "repeat"]).toContain(key);
+      for (const key of Object.keys(row.meta ?? {})) {
+        expect(
+          ["fieldId", "ready", "resolved", "visibleCount", "repeat", "regionTag", "inputCount", "textInputCount", "buttonCount", "entryRowCount"],
+          key,
+        ).toContain(key);
+      }
     }
     const advance = rows("aw_coupang_vendor_form_auto_advance")[0];
     expect(Object.keys(advance?.meta ?? {})).toEqual(["target"]);
+  });
+});
+
+describe("the ⑥ ring comes down once the seller has chosen the method", () => {
+  it("**retires the ring and re-briefs the panel** when the form is on screen", async () => {
+    // Reported by the operator on 2026-08-13, watching the ring sit on a radio they had already set while the
+    // work moved to the fields below it: "입력해야 하는 턴은 ring을 없애든지 입력 박스 전체를 감싸든지".
+    const page = new FakeVendorPage();
+    await driverOn(page).observeUserAction("vendor_method");
+    expect(rows("aw_coupang_step_ring_retired").length).toBeGreaterThan(0);
+    const docked = page.mounts.find((m) => m.docked === true);
+    expect(docked, "the panel was not re-mounted docked").toBeDefined();
+    expect(docked?.label).toContain("입력 방식은 선택되었습니다");
+  });
+
+  it("retires it ONCE, not on every poll", async () => {
+    const page = new FakeVendorPage();
+    await driverOn(page, 3_000).observeUserAction("vendor_method");
+    expect(rows("aw_coupang_step_ring_retired").length).toBe(1);
+  });
+
+  it("**keeps the ring while the form is not on screen** — `UNKNOWN` is not a selection", async () => {
+    // The signal is the form REVEAL, never the radio's `checked`: SellerOps does not claim to know which option
+    // is selected. A census that cannot resolve the three labels says nothing about what the seller chose.
+    const page = new FakeVendorPage();
+    const base = FakeVendorPage.prototype.evaluate;
+    page.evaluate = async (script: unknown, arg?: unknown): Promise<unknown> => {
+      if (typeof script === "string" && script.includes("wing-field-region-census")) {
+        return { readings: FIELD_IDS.map((id) => ({ id, visibleCount: 0, hiddenCount: 1 })) };
+      }
+      return base.call(page, script, arg);
+    };
+    await driverOn(page).observeUserAction("vendor_method");
+    expect(rows("aw_coupang_step_ring_retired").length).toBe(0);
+    expect(page.mounts.some((m) => m.docked === true)).toBe(false);
+  });
+
+  it("**puts it back if the form leaves the screen** — the decision is re-made from a live reading", async () => {
+    const page = new FakeVendorPage();
+    let revealed = true;
+    const base = FakeVendorPage.prototype.evaluate;
+    page.evaluate = async (script: unknown, arg?: unknown): Promise<unknown> => {
+      if (typeof script === "string" && script.includes("wing-field-region-census") && !revealed) {
+        return { readings: FIELD_IDS.map((id) => ({ id, visibleCount: 0, hiddenCount: 1 })) };
+      }
+      return base.call(page, script, arg);
+    };
+    const driver = driverOn(page, 4_000);
+    const observing = driver.observeUserAction("vendor_method");
+    for (let i = 0; i < 2_000 && rows("aw_coupang_step_ring_retired").length === 0; i++) {
+      await new Promise<void>((r) => setTimeout(r, 1));
+    }
+    revealed = false; // the seller went back; the form is no longer painting
+    await observing;
+    expect(rows("aw_coupang_step_ring_restored").length).toBe(1);
   });
 });
 
