@@ -1295,8 +1295,13 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
       "(사용 목적 화면이 뜨면 자동 진행) → ③ 'OPEN API' 항목과 '확인' 버튼이 함께 강조 표시되며, 확인 후 '확인'을 직접 누름" +
       "(약관 화면이 뜨면 자동 진행) → ④ 동의 문장 2개가 각각 강조 표시되며, 약관을 직접 읽고 판단한 뒤 동의 체크" +
       "(2개가 모두 체크되면 자동 진행) → ⑤ '약관 동의 및 Key 발급받기'(강조 표시됨)를 직접 누름" +
-      "(업체 입력 방식 화면이 뜨면 자동 진행) → ⑥ '자체개발(직접입력)' 라벨이 강조 표시되며, 방식을 직접 선택 → " +
-      "⑦ 업체명 · URL · IP 주소를 직접 입력한 뒤 그 화면의 '확인'(강조 표시됨)을 직접 누름. " +
+      "(업체 입력 방식 화면이 뜨면 자동 진행) → ⑥ '자체개발(직접입력)' 라벨이 강조 표시되며, 방식을 직접 선택한 뒤 " +
+      "업체명 · URL을 입력하고 IP는 '추가'까지 누름" +
+      // The seventh auto-advance, and the only one that does not watch a screen. Stated where the operator
+      // reads what each step does, with the reading it rests on — an emptiness count, taken about once a
+      // second while they type — because "SellerOps watches the form" is a sentence they are entitled to see.
+      "(입력이 끝나면 자동 진행 — SellerOps는 입력란이 비었는지만 약 1초에 한 번 확인하고 값은 읽지 않습니다) → " +
+      "⑦ 그 화면의 '확인'(강조 표시됨)을 직접 누름. " +
       "⚠ 여기서 실제 API 키가 발급되어 라이브 계정 상태가 바뀝니다. 이번 run은 발급까지 수행하며, 필요하면 나중에 " +
       "별도의 삭제 작업으로 지울 수 있습니다(키가 화면에 표시되면 자동 진행) → " +
       "⑧ 발급된 키 영역이 강조 표시되며, 키는 판매자가 직접 확인·보관 → ⑨ SellerOps로 복귀. " +

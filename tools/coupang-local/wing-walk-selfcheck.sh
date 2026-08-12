@@ -324,6 +324,7 @@ if [ -z "$TREE_DIRTY" ]; then
     "SEVEN steps advance by themselves" \
     "finishes itself when the vendor FORM reads complete" \
     "keeps clear of the control it points at AND of the ones you use to reach it" \
+    "입력이 끝나면 자동 진행" \
     "You read the two consent texts and decide" \
     "THIS RUN ENDS WITH A REAL API KEY ON YOUR LIVE COUPANG ACCOUNT" \
     "does NOT create the key" \
@@ -354,7 +355,10 @@ if [ -z "$TREE_DIRTY" ]; then
       echo "  FAIL  NORMAL          · retired English claim still shown: $stale_en"; DISCLOSE_OK=0; FAILED=1
     fi
   done
-  for stale_ko in "사용 목적/확인 단계와 체크박스에는 강조 표시가 없습니다" "selector로 승격되지 않았기 때문"; do
+  # …and the step-⑥ line that ended "방식을 직접 선택 → ⑦ 업체명 · URL · IP 주소를 직접 입력한 뒤": the form
+  # entry moved INTO ⑥ when that step started completing itself on it, and a Korean summary still splitting them
+  # describes a walk that waits for a press it no longer waits for.
+  for stale_ko in "사용 목적/확인 단계와 체크박스에는 강조 표시가 없습니다" "selector로 승격되지 않았기 때문" "방식을 직접 선택 → ⑦ 업체명"; do
     if grep -qF "$stale_ko" <<<"$out"; then
       echo "  FAIL  NORMAL          · retired Korean claim still shown: $stale_ko"; DISCLOSE_OK=0; FAILED=1
     fi
