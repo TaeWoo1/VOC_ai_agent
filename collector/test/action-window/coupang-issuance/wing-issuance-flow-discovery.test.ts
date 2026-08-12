@@ -777,8 +777,16 @@ describe("the manifest cannot under-describe the flow it approves", () => {
     expect(block).not.toMatch(/echo "    [0-9]+\)/);
     expect(block).not.toContain("is the KEY-CREATION control");
     expect(block).toContain("no fifth checkpoint");
-    // …and the plan's own two extra steps have copy branches too, or a vendor run prints blank lines for them.
+    // …and the plan's own extra steps have copy branches too, or a vendor run prints blank lines for them.
     for (const c of WING_VENDOR_METHOD_CHECKPOINTS) expect(block, c).toContain(`${c})`);
+    // **The shell's own plan string must BE the plan.** A copy branch existing does not mean the checkpoint is
+    // reached: the list the operator reads is `PLAN_FULL`, and a checkpoint added to the TypeScript plan but not
+    // to that string produces a manifest describing a shorter run than the one about to execute — which is
+    // exactly what happened when this checkpoint was added on 2026-08-13, and what a `case` label cannot catch.
+    const planLine = /PLAN_FULL="\$PLAN_FULL,([A-Z_,]+)"/.exec(block)?.[1] ?? "";
+    expect(planLine.split(",")).toEqual([...WING_VENDOR_METHOD_CHECKPOINTS]);
+    const baseLine = /PLAN_FULL="([A-Z_,]+)"/.exec(block)?.[1] ?? "";
+    expect(baseLine.split(",")).toEqual([...WING_FLOW_CHECKPOINTS]);
   });
 
   it("the warning does not repeat a claim its own runs have since falsified", () => {
