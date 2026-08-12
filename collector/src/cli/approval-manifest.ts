@@ -431,8 +431,13 @@ export interface GuidedWalkBoundary {
    * This replaced `explicitCheckpointRequired`, which asserted that "a mandatory operator checkpoint precedes
    * every step; none auto-advances". That stopped being true on 2026-08-10 and a field that quietly keeps
    * saying it is worse than no field: the operator grants against this descriptor.
+   *
+   * SEVEN since 2026-08-13: the vendor-METHOD step now finishes itself when the form the seller is filling in
+   * reads complete, on the same emptiness-only census {@link vendorFormReadinessObserved} already declares. Only
+   * two steps are left asking for a press — copying the keys, and returning to SellerOps — and neither is
+   * something the page can observe.
    */
-  autoAdvancingStepCount: 6;
+  autoAdvancingStepCount: 7;
   /**
    * **Whether anything auto-performs the key-issuing PRESS. False, and it always will be.**
    *
@@ -469,6 +474,13 @@ export interface GuidedWalkBoundary {
    * says. A press over an empty form is refused ONCE, with a panel message; the next press goes through
    * whatever the reading says, because manual progress always remains available and this association has never
    * been calibrated on a live screen.
+   *
+   * **POLLED since 2026-08-13, not read once per press.** The same reading now also COMPLETES that step (see
+   * {@link autoAdvancingStepCount}), so it is taken about once a second for as long as the seller is filling the
+   * form in. What crosses the boundary is unchanged — an emptiness count and a registered-row count, per field,
+   * per reading — and the log is throttled on the reading itself, so a steady state is sampled rather than
+   * repeated. The frequency is disclosed because "it checks when you press" and "it watches while you type" are
+   * different sentences to an operator, even when both read the same nothing.
    *
    * Declared because it is a value read, however narrow, and because it CHANGES WHAT A PRESS DOES: an operator
    * granting against this manifest should not discover mid-walk that a button they pressed did nothing.
@@ -524,7 +536,7 @@ export const COUPANG_WING_GUIDED_WALK_BOUNDARY: GuidedWalkBoundary = {
   highlightedControlCount: 9,
   textGuidedControlCount: 0,
   ringedInputControlCount: 0,
-  autoAdvancingStepCount: 6,
+  autoAdvancingStepCount: 7,
   keyCreationPressAutoPerformed: false,
   keyIssuanceAdvancesOnObservedResult: true,
   sellerConsentObserved: true,

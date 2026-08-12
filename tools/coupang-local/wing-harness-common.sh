@@ -338,7 +338,7 @@ verify_walk_descriptor() {
     "highlightedControlCount:9" \
     "textGuidedControlCount:0" \
     "ringedInputControlCount:0" \
-    "autoAdvancingStepCount:6" \
+    "autoAdvancingStepCount:7" \
     "keyCreationPressAutoPerformed:false" \
     "keyIssuanceAdvancesOnObservedResult:true" \
     "sellerConsentObserved:true" \

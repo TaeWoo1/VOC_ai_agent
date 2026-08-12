@@ -397,10 +397,18 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
         // SIX candidate placements, not two. The first version chose between bottom-centre and top-centre, and
         // when a control sat at BOTH ends it kept the bottom one — i.e. it settled, deliberately, onto a
         // control. A viewport has corners; a 560px panel and a marketplace dialog rarely need the same ones.
+        //
+        // …and the ring is not the only thing the seller has to reach. A step's ring sits on ONE control while
+        // the screen in front of them holds the ones they must operate to GET there — on the vendor screen, the
+        // form above the button the next step rings. The panel covered WING's own `확인` there on 2026-08-12
+        // while ringing the option ABOVE it, and nothing in this computation could see that: `확인` carried no
+        // tag yet. So a step may also declare controls to KEEP CLEAR of, tagged `data-aw-avoid`, and they enter
+        // the same geometry as the rings.
         const panel = document.getElementById("__aw_advance_panel__");
         if (!panel) return;
         const targets = document.querySelectorAll("[data-aw-target]");
-        if (targets.length === 0) return;
+        const avoided = document.querySelectorAll("[data-aw-avoid]");
+        if (targets.length === 0 && avoided.length === 0) return;
         const p = panel.getBoundingClientRect();
         const pw = p.width;
         const ph = p.height;
@@ -414,23 +422,30 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
         // It is projected FLUSH AGAINST that edge, keeping its own height — the position it holds after the
         // smallest scroll that brings it into view. A one-pixel marker at the very edge would be technically
         // "inside the viewport" and would clear every candidate, which is the same blindness in a new costume.
-        const spans: number[][] = [];
-        for (let i = 0; i < targets.length; i++) {
-          const r = targets[i]!.getBoundingClientRect();
-          const rh = Math.min(Math.max(r.bottom - r.top, 1), vh);
-          const above = r.bottom <= 0;
-          const below = r.top >= vh;
-          const top = above ? 0 : below ? vh - rh : r.top;
-          const bottom = above ? rh : below ? vh : r.bottom;
-          spans.push([r.left, top, r.right, bottom]);
-        }
-        // How much of the highlighted controls a panel at (x, y) would sit on, in square pixels. Zero means
-        // clear; comparing areas is what lets the least-bad placement win when nothing is clear.
+        const spansOf = [
+          (nodes: NodeListOf<Element>) => {
+            const out: number[][] = [];
+            for (let i = 0; i < nodes.length; i++) {
+              const r = nodes[i]!.getBoundingClientRect();
+              const rh = Math.min(Math.max(r.bottom - r.top, 1), vh);
+              const above = r.bottom <= 0;
+              const below = r.top >= vh;
+              const top = above ? 0 : below ? vh - rh : r.top;
+              const bottom = above ? rh : below ? vh : r.bottom;
+              out.push([r.left, top, r.right, bottom]);
+            }
+            return out;
+          },
+        ][0]!;
+        const spans = spansOf(targets);
+        const avoidSpans = spansOf(avoided);
+        // How much of a set of controls a panel at (x, y) would sit on, in square pixels. Zero means clear;
+        // comparing areas is what lets the least-bad placement win when nothing is clear.
         const overlapAt = [
-          (x: number, y: number) => {
+          (x: number, y: number, boxes: number[][]) => {
             let area = 0;
-            for (let i = 0; i < spans.length; i++) {
-              const s = spans[i]!;
+            for (let i = 0; i < boxes.length; i++) {
+              const s = boxes[i]!;
               const ox = Math.min(x + pw, s[2]!) - Math.max(x, s[0]!);
               const oy = Math.min(y + ph, s[3]!) - Math.max(y, s[1]!);
               if (ox > 0 && oy > 0) area += ox * oy;
@@ -445,18 +460,26 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
         // Order IS the preference: bottom-centre first (where it has always rested), then top-centre, then the
         // right corners, then the left. The decision reads only the TARGETS and the panel's own size — never the
         // panel's current position — so re-running it cannot move the panel, and it cannot oscillate.
+        //
+        // The two sets are compared LEXICOGRAPHICALLY, ring overlap first: the panel may sit on a control the
+        // seller is not being pointed at yet, if the alternative is sitting on the one they are. Ranking them
+        // together with a weight would let enough avoided area outvote the ring, which is a step that hides the
+        // thing it is about — and it would need a fudge factor nothing measured. Least ring, then least next.
         let bestX = xs[0]!;
         let bestY = ys[0]!;
         let bestArea = -1;
-        for (let xi = 0; xi < xs.length && bestArea !== 0; xi++) {
+        let bestAvoid = -1;
+        for (let xi = 0; xi < xs.length && !(bestArea === 0 && bestAvoid === 0); xi++) {
           for (let yi = 0; yi < ys.length; yi++) {
-            const area = overlapAt(xs[xi]!, ys[yi]!);
-            if (bestArea < 0 || area < bestArea) {
+            const area = overlapAt(xs[xi]!, ys[yi]!, spans);
+            const avoid = overlapAt(xs[xi]!, ys[yi]!, avoidSpans);
+            if (bestArea < 0 || area < bestArea || (area === bestArea && avoid < bestAvoid)) {
               bestArea = area;
+              bestAvoid = avoid;
               bestX = xs[xi]!;
               bestY = ys[yi]!;
             }
-            if (bestArea === 0) break;
+            if (bestArea === 0 && bestAvoid === 0) break;
           }
         }
         setStyle(panel, "left", `${Math.round(bestX)}px`);

@@ -561,6 +561,73 @@ export function buildFixedLabelContainmentScript(input: { candidateQuery: string
  * to. (The page-dimming shroud is NOT: it is dropped entirely once there is more than one ring, because two
  * shrouds stack their darkness and the second ring's own control ends up dimmed by the first.)
  */
+/**
+ * **Mark the controls the guidance panel must KEEP CLEAR of — `data-aw-avoid`, and nothing else.**
+ *
+ * A step's ring says "press this". The screen usually also holds the controls the seller must operate to get
+ * there, and the panel is the one element in this system that takes clicks — so a panel parked on them blocks
+ * the seller's own manual progress. That is a safety-fence problem, not a cosmetic one, and it happened: on
+ * 2026-08-12 the panel sat on WING's `확인` while step ⑥ ringed the option above it.
+ *
+ * **BEST-EFFORT, and deliberately unlike the ring plan.** {@link buildFixedLabelRingPlanScript} is all-or-nothing
+ * because a ring is a CLAIM about where a control is, and half a claim is a wrong one. This makes no claim: an
+ * avoided box is only a hint about where NOT to put a panel, so a spec that does not resolve simply contributes
+ * nothing and the placement is exactly what it was before. Failing the mount over it would trade a real step for
+ * a hint.
+ *
+ * Every prior mark is cleared first, so an empty spec list is the correct way to say "this step avoids nothing"
+ * — a stale mark from the previous step would push the panel away from a control nobody is being sent to.
+ *
+ * Value-free OUTPUT and value-free WORK: text is read solely to compare against the caller's known fixed labels,
+ * never returned; the result is a count of marks. No click, no type, no field value, no `sig`. ES5-plain string
+ * form like every other in-page script here.
+ */
+export function buildFixedLabelAvoidTagScript(input: {
+  specs: readonly { candidateQuery: string; exactText: string }[];
+}): string {
+  const encoded = JSON.stringify(input.specs.map((sp) => ({ q: sp.candidateQuery, t: sp.exactText })));
+  return `(function () {
+  /* issuance-avoid-tag (value-free OUTPUT: { marked }) */
+  var SPECS = ${encoded};
+  var slice = Function.prototype.call.bind(Array.prototype.slice);
+  function norm(s) { return String(s == null ? '' : s).replace(/\\s+/g, ' ').trim(); }
+  function accName(el) {
+    var al = el.getAttribute ? el.getAttribute('aria-label') : null;
+    if (al && norm(al).length) { return norm(al); }
+    /* text read ONLY to compare against a KNOWN fixed label; only a COUNT is returned. */
+    return norm(el.textContent || '');
+  }
+  /* The same paint test as the ring plan — a box a human cannot see is not a box to steer around. */
+  function paints(node) {
+    if (!node || !node.getClientRects) { return false; }
+    var cs = window.getComputedStyle ? window.getComputedStyle(node) : null;
+    if (cs && (cs.display === 'none' || cs.visibility === 'hidden')) { return false; }
+    if (cs && cs.display === 'contents') { return node.childElementCount > 0; }
+    var rects = node.getClientRects();
+    if (!rects || rects.length === 0) { return false; }
+    var r = node.getBoundingClientRect ? node.getBoundingClientRect() : null;
+    return !!r && r.width > 0 && r.height > 0;
+  }
+  var prior = slice(document.querySelectorAll('[data-aw-avoid]'));
+  for (var p = 0; p < prior.length; p++) { prior[p].removeAttribute('data-aw-avoid'); }
+  var CAP = 4000, marked = 0, i, j;
+  for (i = 0; i < SPECS.length; i++) {
+    var want = norm(SPECS[i].t), cands;
+    try { cands = slice(document.querySelectorAll(SPECS[i].q)); } catch (e) { cands = []; }
+    var visible = [];
+    for (j = 0; j < cands.length && j < CAP; j++) {
+      if (accName(cands[j]) === want && paints(cands[j])) { visible.push(cands[j]); }
+    }
+    /* Exactly one, like everywhere else: a label matching several elements does not locate anything, and
+       steering the panel away from all of them would reserve a region nobody measured. */
+    if (visible.length !== 1) { continue; }
+    visible[0].setAttribute('data-aw-avoid', '');
+    marked += 1;
+  }
+  return { marked: marked };
+})()`;
+}
+
 export function buildFixedLabelRingPlanScript(input: {
   specs: readonly { candidateQuery: string; exactText: string; tagAncestor?: string }[];
   tag: boolean;
