@@ -128,6 +128,19 @@ export class CoupangIssuanceGuidanceSession {
     });
     this.publishState();
     if (command.type === "START_RUN" && outcome.ok) this.started = true;
+    // **"현재 단계 다시 찾기" = put the WING window back in front of the seller.**
+    //
+    // The walk lives in a window SellerOps opened and the seller then loses behind everything else — reported
+    // 2026-08-12 as "FE에서 해당 창을 찾아들어가기 어렵다". The engine treats this command as a no-op, and it
+    // stays one: nothing is navigated, nothing is clicked, no window is opened. It RAISES the surface that
+    // already exists, and a run with no window does nothing at all rather than bringing one up (that is what
+    // starting the walk is for).
+    if (command.type === "FIND_CURRENT_STEP" && outcome.ok) {
+      void this.driver
+        .focusSurface?.()
+        .then((raised) => log("aw_coupang_surface_focus", { raised }))
+        .catch(() => log("aw_coupang_surface_focus", { raised: false }, "warn"));
+    }
     if (outcome.ok && "effect" in outcome && !isNoop(outcome.effect)) {
       this.busyCount += 1;
       void this.drive(outcome.effect)

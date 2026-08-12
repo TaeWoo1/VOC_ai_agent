@@ -39,6 +39,13 @@ export interface LazyCoupangIssuanceDriverDeps {
    * driver. Absent ⇒ the step is what it was: a completion with no move, logged as such.
    */
   returnToSellerOps?: () => Promise<void>;
+  /**
+   * Raise the walk's EXISTING window. Called only when the seller asks ("현재 단계 다시 찾기"), and only when a
+   * window is already open — {@link LazyCoupangIssuanceDriver.focusSurface} refuses to open one, because a
+   * lazy driver whose "show me where I am" opened a marketplace window would be the side effect this class
+   * exists to prevent.
+   */
+  raiseSurface?: () => Promise<boolean>;
 }
 
 export class LazyCoupangIssuanceDriver implements CoupangIssuanceProbeDriver {
@@ -97,6 +104,16 @@ export class LazyCoupangIssuanceDriver implements CoupangIssuanceProbeDriver {
   async settleSurface(): Promise<void> {
     const d = await this.driver();
     await d.settleSurface?.();
+  }
+
+  /**
+   * Raise the window if — and ONLY if — one is already open. `isOpen()` rather than `driver()`: going through
+   * the lazy accessor would LAUNCH Chrome, so "show me where I am" would open a marketplace window for a seller
+   * who has not started the walk. That is precisely the side effect this class exists to prevent.
+   */
+  async focusSurface(): Promise<boolean> {
+    if (!this.isOpen() || !this.deps.raiseSurface) return false;
+    return this.deps.raiseSurface();
   }
 
   async locateTarget(target: CoupangIssuanceTarget): Promise<LocateResult> {

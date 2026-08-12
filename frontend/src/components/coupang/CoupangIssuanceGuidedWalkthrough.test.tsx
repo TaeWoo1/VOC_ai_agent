@@ -127,6 +127,29 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
     expect(screen.queryByRole("button", { name: "확인 완료" })).toBeNull();
   });
 
+  /**
+   * The walk happens in a window SellerOps opened, and a seller who switches away can lose it behind everything
+   * else — reported live on 2026-08-12, with this screen offering no way back to it. The runtime raises the
+   * EXISTING window on `FIND_CURRENT_STEP`; it opens nothing and navigates nothing.
+   */
+  it("**offers a way back to the WING window**, and sends FIND_CURRENT_STEP for it", async () => {
+    const onCommand = vi.fn();
+    render(
+      <CoupangIssuanceGuidedWalkthrough
+        onIssued={vi.fn()}
+        run={issuanceRun({ allowedCommands: ["REQUEST_STEP_RECHECK", "CANCEL_RUN", "FIND_CURRENT_STEP"] })}
+        onCommand={onCommand}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "쿠팡 윙 창 앞으로 가져오기" }));
+    expect(onCommand).toHaveBeenCalledWith("FIND_CURRENT_STEP");
+  });
+
+  it("…and offers it ONLY when the run allows it — controls come from allowedCommands, never from a hunch", () => {
+    render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} run={issuanceRun()} onCommand={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "쿠팡 윙 창 앞으로 가져오기" })).toBeNull();
+  });
+
   it("a recoverable blocker adds the recovery control (확인 완료) alongside 취소 — recovery is the FE's job", () => {
     render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} run={blocked("LOGIN_REQUIRED")} onCommand={vi.fn()} />);
     expect(screen.getByRole("button", { name: "확인 완료" })).toBeInTheDocument();

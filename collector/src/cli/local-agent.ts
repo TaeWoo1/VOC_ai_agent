@@ -431,6 +431,26 @@ export function buildCoupangIssuanceLiveConfig(): CoupangIssuanceLiveCarrier {
      *   - it is the SECOND and last navigation of the walk. The first is the landing; both are the seller's
      *     own request, and neither is a marketplace action (see the count's own constant).
      */
+    /**
+     * **"현재 단계 다시 찾기" — put the window the walk lives in back in front.**
+     *
+     * Reported live on 2026-08-12: the WING window SellerOps opened gets lost behind everything else, and the
+     * connect screen offered no way back to it. This raises the EXISTING surface and does nothing else — no
+     * navigation, no new tab, no window opened. The newest page in the context is the one the walk is reading
+     * (`activePage()` uses the same rule), so it is the one raised.
+     */
+    raiseSurface: async () => {
+      const pages = walkContext?.pages() ?? [];
+      const page = pages.length > 0 ? pages[pages.length - 1] : undefined;
+      if (!page) {
+        log("aw_coupang_surface_raise", { raised: false, reason: "NO_PAGE" });
+        return false;
+      }
+      await page.bringToFront().catch(() => undefined);
+      const raised = await raiseWindowOf(page);
+      log("aw_coupang_surface_raise", { raised });
+      return raised;
+    },
     returnToSellerOps: async () => {
       const context = walkContext;
       if (!context) {

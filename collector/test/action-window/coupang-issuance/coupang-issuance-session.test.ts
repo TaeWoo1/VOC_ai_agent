@@ -592,3 +592,64 @@ describe("coupang issuance session — the consent panel is mounted before it is
     }
   });
 });
+
+/**
+ * **Finding the WING window again.**
+ *
+ * The walk lives in a window SellerOps opened, and a seller who switches away can lose it behind everything
+ * else — reported live on 2026-08-12, with the connect screen offering no way back. `FIND_CURRENT_STEP` was
+ * already allowed at every non-terminal stage and did nothing; it now means "raise the window I am in".
+ */
+describe("coupang issuance session — bringing the WING window back to the front", () => {
+  it("**raises the surface when the seller asks**, and stays a no-op for the engine", async () => {
+    // A script where the seller has NOT acted yet, so the run rests at a barrier — the state they are actually
+    // in when they lose the window behind another one.
+    const { io, driver, session } = build({ action: { reach_open_api: false } });
+    let focused = 0;
+    (driver as unknown as { focusSurface: () => Promise<boolean> }).focusSurface = async () => {
+      focused += 1;
+      return true;
+    };
+    startRun(io);
+    await session.whenSettled();
+    const revision = io.lastView()!.revision;
+    command(io, "FIND_CURRENT_STEP", revision, "focus1");
+    await session.whenSettled();
+    await tick();
+    // eslint-disable-next-line no-console
+    expect(focused).toBe(1);
+    // A raise is not progress: the run must not advance, complete a step, or change stage because the seller
+    // looked for their own window.
+    expect(io.lastView()!.currentStep?.stepId).toBe(io.views().at(-2)?.currentStep?.stepId);
+  });
+
+  it("no other command raises it — a window that jumps forward uninvited is its own defect", async () => {
+    const { io, driver, session } = build({ action: { reach_open_api: false } });
+    let focused = 0;
+    (driver as unknown as { focusSurface: () => Promise<boolean> }).focusSurface = async () => {
+      focused += 1;
+      return true;
+    };
+    startRun(io);
+    await session.whenSettled();
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision, "rc1");
+    await session.whenSettled();
+    await tick();
+    expect(focused).toBe(0);
+  });
+
+  it("a driver that cannot raise anything is not an error — the run carries on", async () => {
+    // The fixture driver has no `focusSurface` at all, which is the shape of every driver that is not the live
+    // walk. The command must still be accepted and the run must be untouched.
+    const { io, session, engine } = build({ action: { reach_open_api: false } });
+    startRun(io);
+    await session.whenSettled();
+    const stage = engine.currentStage();
+    command(io, "FIND_CURRENT_STEP", io.lastView()!.revision, "focus2");
+    await session.whenSettled();
+    await tick();
+    const result = io.sent.filter((f) => f.kind === "aw_command_result").at(-1) as { accepted: boolean };
+    expect(result.accepted).toBe(true);
+    expect(engine.currentStage()).toBe(stage);
+  });
+});

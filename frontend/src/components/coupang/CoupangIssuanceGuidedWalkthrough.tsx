@@ -143,6 +143,12 @@ export function CoupangIssuanceGuidedWalkthrough({
   const OFFERED_COMMANDS: readonly CommandType[] = isBlocked
     ? ["REQUEST_STEP_RECHECK", "CANCEL_RUN"]
     : ["CANCEL_RUN"];
+  // The walk happens in a window SellerOps opened, and a seller who switches away can lose it behind everything
+  // else — reported live on 2026-08-12, with this screen offering no way back to it. `FIND_CURRENT_STEP` is
+  // already in `allowedCommands` at every non-terminal stage and the runtime treats it as "show me where I am";
+  // on this walk that means RAISING the WING window. It is rendered as its own control rather than through the
+  // generic panel so the label can say what it actually does here.
+  const canRaiseWindow = effectiveRun?.allowedCommands.includes("FIND_CURRENT_STEP") ?? false;
   const controlExclude = effectiveRun
     ? effectiveRun.allowedCommands.filter((c) => !OFFERED_COMMANDS.includes(c))
     : [];
@@ -282,6 +288,16 @@ export function CoupangIssuanceGuidedWalkthrough({
                 <p className="text-xs text-muted">
                   {effectiveRun.progress.completedSteps} / {effectiveRun.progress.totalSteps} 단계 완료
                 </p>
+              )}
+              {canRaiseWindow && (
+                <button
+                  type="button"
+                  className="btn-ghost text-sm"
+                  onClick={() => effectiveCommand?.("FIND_CURRENT_STEP")}
+                  disabled={busy}
+                >
+                  쿠팡 윙 창 앞으로 가져오기
+                </button>
               )}
             </section>
           )}
