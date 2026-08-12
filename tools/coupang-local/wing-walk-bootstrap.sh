@@ -2,9 +2,11 @@
 #
 # Coupang WING issuance-form REVEAL bootstrap (browser-only: no backend, no DB, no frontend).
 #
-# Mints the run identity for `COUPANG_WING_GUIDED_ISSUANCE_WALK` — the one step where SellerOps highlights the
-# live-calibrated 발급 control and the OPERATOR presses it. The press is expected to open the API configuration
-# step; that expectation is NOT confirmed, and the key is created only by a later 확인, which has no tooling.
+# Mints the run identity for `COUPANG_WING_GUIDED_ISSUANCE_WALK` — a NINE-control walk in which SellerOps
+# highlights each live-calibrated control and the OPERATOR presses every one of them. It no longer rests before
+# the API configuration step: that step was measured on 2026-08-12, so the walk continues onto the vendor-method
+# screen and ends at its `확인`. ⚠ That press is OPERATOR-REPORTED to create a REAL API key on the live account,
+# and this run is what verifies it — so the grant this identity is minted for is a WRITE grant, not a sitting.
 #
 # There is NO per-run scope to choose: the phase pins its own channel / account / surface / operation / budget,
 # and the gate refuses any deviation. Nothing about this run is configurable from the environment.

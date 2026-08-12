@@ -6,10 +6,12 @@
 # (docs/sellerops_live_approval_contract.md §2), then prepares + displays the sanitized Approval Manifest. On any
 # check failing it prints NO manifest and requests NO approval.
 #
-# This phase is NOT destructive and must never borrow the deletion harness's disclosure copy: the operator presses
-# 발급, which is expected to open the API configuration step. What it displays instead — and what the manifest
-# carries — is the pair of claims that matter: this press is not key creation, AND the runtime cannot prove no key
-# was created (every sanitized signal is identical between an issued and a no-key surface).
+# This phase deletes nothing, but it is no longer harmless: the walk now runs through to the vendor screen's
+# `확인`, which is OPERATOR-REPORTED to create a REAL key. So it borrows the deletion harness's INSISTENCE — a
+# grant naming the consequence in the operator's own words — without borrowing its copy. What the manifest
+# carries is the pair of claims that matter, each with its provenance: the earlier '약관 동의 및 Key 발급받기'
+# press is operator-reported NOT to be key creation, AND the runtime cannot prove that either way (every
+# sanitized signal is identical between an issued and a no-key surface).
 #
 # It launches NO browser, makes NO Coupang call, reads no credential value, and mutates nothing.
 #
