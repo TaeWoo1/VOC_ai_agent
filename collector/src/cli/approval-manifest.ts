@@ -382,8 +382,14 @@ export interface GuidedWalkBoundary {
   /**
    * **TRUE — the key-issuing step advances on WING showing the credentials.**
    *
-   * An observation of the RESULT, which cannot cause it: the sanitized page category cannot become
-   * `credential_shown` before a credential exists. The seller presses 확인; SellerOps notices the keys appeared.
+   * An observation of the RESULT, which cannot cause it: the credential label cannot paint before a credential
+   * exists. The seller presses 확인; SellerOps notices the keys appeared.
+   *
+   * Corrected 2026-08-12. This named the sanitized page category becoming `credential_shown`, which is
+   * unreachable on this surface — `classifyWingPage` answers `open_api_issuance` while the open-API marker is
+   * present, and the keys appear ON that page. Two sittings issued a real key and the step never completed
+   * itself. The safety property is the one this field has always declared and is unchanged; what changed is
+   * that the mechanism named here is now one that can actually fire.
    * Declared rather than left implicit because "the key step auto-advances" is alarming read alone and is
    * exactly what an operator deserves to see stated precisely.
    */

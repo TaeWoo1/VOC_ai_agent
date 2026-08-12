@@ -1395,8 +1395,9 @@ describe("the guided walk's installed-service entrypoint", () => {
       // now untrue, and this pair is what stops them being read as one claim.
       expect(BOUNDARY.operatorIssuesRealKey).toBe(true);
       expect(BOUNDARY.restsBeforeControl).toBe("확인 (vendor-method screen)");
-      // The advance AFTER the press is an observation of the RESULT — the sanitized page category cannot become
-      // `credential_shown` before a credential exists.
+      // The advance AFTER the press is an observation of the RESULT — the credential label cannot paint before
+      // a credential exists. (It said "the page category cannot become `credential_shown`" until 2026-08-12,
+      // which named a transition that is unreachable on this surface and therefore never fired.)
       expect(BOUNDARY.keyIssuanceAdvancesOnObservedResult).toBe(true);
       // The method the walk names is a PRODUCT decision, and the descriptor says whose.
       expect(BOUNDARY.vendorMethodGuided).toBe("자체개발(직접입력)");
