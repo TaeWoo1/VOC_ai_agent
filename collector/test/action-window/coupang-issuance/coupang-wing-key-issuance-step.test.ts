@@ -159,8 +159,10 @@ describe("the copy carries the consequence exactly once, on the control that has
       expect(label, target).not.toContain("키가 발급됩니다");
       expect(label, target).not.toContain("여기서 실제로 키가 생성됩니다");
     }
-    // `issue_final` says the opposite, and that is the measured claim.
-    expect(OPERATOR_STEP_LABELS.issue_final).toContain("키를 만들지 않고");
+    // `issue_final` says the opposite — attributed, because SellerOps cannot confirm an absence it is
+    // structurally unable to see.
+    expect(OPERATOR_STEP_LABELS.issue_final).toContain("키가 발급되지 않고");
+    expect(OPERATOR_STEP_LABELS.issue_final).toContain("확인할 수 없습니다");
   });
 
   it("the method step says WHO chooses, and does not offer the option the walk does not guide", () => {

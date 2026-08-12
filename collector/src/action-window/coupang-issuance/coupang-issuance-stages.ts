@@ -22,6 +22,7 @@
  * ```
  * open-API page → 발급 → PURPOSE → 확인 → TERMS → 약관 동의 및 Key 발급받기 → VENDOR METHOD → 확인 → keys
  *                    OPEN API (default)   2 consents                        자체개발(직접입력)   ↑ ISSUES THE KEY
+ *                                                                                             (operator-reported)
  *                                                                          업체명 · URL · IP
  * ```
  *
@@ -258,9 +259,15 @@ export const COUPANG_ISSUANCE_TOTAL_STEPS = coupangIssuanceStepPlan().length;
  * It was pressed on two live walks and issued none; the screen it opens was then measured
  * (`WING_VENDOR_METHOD_SCREEN_EVIDENCE`), and the key is created by that screen's `확인`.
  *
- * The constant kept its name through the correction rather than being renamed to something hedged, and this is
- * the note that used to explain why the name was a second guess. It is not one any more: the boundary is
- * measured, and the name and the value finally agree.
+ * The constant kept its name through the correction rather than being renamed to something hedged. **What is
+ * measured is the SCREEN, not the consequence**: two checkpoints established that this screen exists, what it
+ * is made of, and that its `확인` resolves to exactly one painting BUTTON. That its press creates the key is the
+ * operator's report, and the apparatus cannot corroborate it — an issued surface and a no-key one are measurably
+ * indistinguishable to every signal it captures (`WING_KEY_ABSENCE_ATTRIBUTION`). The live WRITE run is what
+ * settles it.
+ *
+ * So the value is where the evidence points and the name finally matches the value; neither is a measurement of
+ * the consequence, and treating this step as "a key may now exist" is the safer error either way.
  *
  * **What a consumer may rely on:** everything BEFORE this step is reversible — the seller can cancel out of the
  * purpose, terms or vendor screen and nothing has happened. Everything from this step on may have produced a

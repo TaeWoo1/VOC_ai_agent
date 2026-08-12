@@ -349,7 +349,8 @@ if [ -z "$TREE_DIRTY" ]; then
   run_case "VENDOR         · operation names the phase" 0 "WING VENDOR-METHOD DISCOVERY" "$FIXTURES/vendor.env"
   # The press it asks for is justified by the MEASUREMENT, never by the button's label — which is exactly what
   # the refuted claim was justified by.
-  run_case "VENDOR         · the press rests on the measurement" 0 "issued NO key either time" "$FIXTURES/vendor.env"
+  run_case "VENDOR         · the press rests on the OPERATOR REPORT" 0 "the OPERATOR reported no key either time" "$FIXTURES/vendor.env"
+  run_case "VENDOR         · …and the report is not rounded up to a measurement" 0 "The report is not a measurement" "$FIXTURES/vendor.env"
   run_case "VENDOR         · the screen is declared unread" 0 "NO apparatus has ever read" "$FIXTURES/vendor.env"
   # …and the boundary it stops at, in both the reviewer's line and the operator's.
   run_case "VENDOR         · operation names the irreversible control" 0 "ISSUES A REAL API KEY" "$FIXTURES/vendor.env"
@@ -357,7 +358,7 @@ if [ -z "$TREE_DIRTY" ]; then
   run_case "VENDOR         · disclosure names the irreversible control" 0 "ISSUES A REAL API KEY on your live account" "$FIXTURES/vendor.env"
   run_case "VENDOR         · disclosure says no checkpoint can reach it" 0 "no checkpoint of this phase stands in front of it" "$FIXTURES/vendor.env"
   run_case "VENDOR         · disclosure carries the six-step plan" 0 "6 checkpoints" "$FIXTURES/vendor.env"
-  run_case "VENDOR         · step 5 is the measured-safe press" 0 "MEASURED not to create a key" "$FIXTURES/vendor.env"
+  run_case "VENDOR         · step 5 attributes the no-key claim" 0 "reported no key either time" "$FIXTURES/vendor.env"
   run_case "VENDOR         · step 6 forbids the issuing press" 0 "Do NOT press '확인'" "$FIXTURES/vendor.env"
   # The choice is the product owner's, and the manifest must not nudge.
   run_case "VENDOR         · the method choice is declared a product decision" 0 "product decision" "$FIXTURES/vendor.env"

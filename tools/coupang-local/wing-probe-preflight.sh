@@ -287,8 +287,9 @@ if is_flow_phase "$PHASE"; then
       TERMS_CHECKED_BY_OPERATOR)
         echo "    $STEP_I) the TERMS screen: tick the two consent boxes yourself → ready" ;;
       VENDOR_METHOD_SCREEN_UNTOUCHED)
-        echo "    $STEP_I) press '약관 동의 및 Key 발급받기' yourself — MEASURED not to create a key (pressed"
-        echo "       twice on live walks, none issued) — then STOP on the screen it opens, choose nothing → ready" ;;
+        echo "    $STEP_I) press '약관 동의 및 Key 발급받기' yourself — pressed on two live walks and the operator"
+        echo "       reported no key either time (SellerOps cannot confirm that either way) — then STOP on the"
+        echo "       screen it opens, choose nothing → ready" ;;
       VENDOR_METHOD_SELECTED_BY_OPERATOR)
         echo "    $STEP_I) on that screen, select the input method yourself. Do NOT press '확인' → ready" ;;
     esac
@@ -309,9 +310,11 @@ if is_flow_phase "$PHASE"; then
   echo "  If step 3 does run, you press '확인' and STOP at whatever opens — the TERMS screen."
   if [ "$PHASE" = "COUPANG_WING_VENDOR_METHOD_DISCOVERY" ]; then
     echo "  ⚠ THIS PHASE GOES TWO STEPS FURTHER, and this is the part to read twice."
-    echo "    '약관 동의 및 Key 발급받기' was believed to create the key. It was pressed on two live walks and"
-    echo "    NO key was issued either time, so this phase asks for it on that MEASUREMENT — never on its label,"
-    echo "    which is exactly what the refuted claim rested on."
+    echo "    '약관 동의 및 Key 발급받기' was believed to create the key. It was pressed on two live walks and the"
+    echo "    OPERATOR reported no key either time, so this phase asks for it on THEIR REPORT — never on its"
+    echo "    label, which is exactly what the refuted claim rested on. That report is not a measurement and is"
+    echo "    not treated as one: SellerOps cannot tell an issued surface from a no-key one — every sanitized"
+    echo "    signal it captures is identical on both."
     echo "    What it opens is an integration-method screen NO apparatus has ever read: 업체 입력 방식 ·"
     echo "    연동업체 선택 · 자체개발(직접입력) · 업체명 · 취소 · 확인."
     echo "  ⚠ THE RUN ENDS ON THAT SCREEN, and the reason is its '확인':"

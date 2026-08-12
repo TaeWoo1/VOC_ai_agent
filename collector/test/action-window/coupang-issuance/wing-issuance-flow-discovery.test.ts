@@ -996,7 +996,9 @@ describe("the guided-walk manifest is not the fallback", () => {
     expect(op).toContain("SellerOps never presses it");
     // The press it asks for on the way rests on the MEASUREMENT, never on a button label — which is exactly what
     // the refuted claim rested on.
-    expect(op).toContain("MEASURED to create no key");
+    expect(op).toContain("operator-reported to issue no key");
+    expect(op).toContain("SellerOps cannot confirm that either way");
+    expect(op).not.toContain("MEASURED to create no key");
     // Which ELEMENT each ring sits on. Those inputs have no accessible association, and nothing may claim to
     // know which box is which.
     expect(op).toContain("never on a radio or a checkbox");

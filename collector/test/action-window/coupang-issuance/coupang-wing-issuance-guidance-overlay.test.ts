@@ -168,14 +168,20 @@ describe("the chip's title and the panel's instruction are different things", ()
     }
   });
 
-  it("**the copy of every step that names a consequence says what is MEASURED of that control**", () => {
+  it("**the copy of every step that names a consequence attributes it**", () => {
     // Corrected twice. `issue_final`'s chip read "⚠ 키가 생성되는 단계" and its panel "⚠ 여기서 실제로 키가
     // 생성됩니다" — asserted from a button label, refuted 2026-08-12 when the control was pressed and issued
     // nothing (`WING_KEY_CREATION_CONTROL_REFUTATION`). The warning now lives on the control that has the
     // consequence, and it is measured.
     expect(OPERATOR_STEP_TITLES.issue_final).not.toContain("키가 생성");
     expect(OPERATOR_STEP_LABELS.issue_final).not.toContain("여기서 실제로 키가 생성됩니다");
-    for (const clause of ["'약관 동의 및 Key 발급받기'를 직접 누르세요", "이 버튼은 키를 만들지 않고"]) {
+    // …and it does not claim SellerOps VERIFIED the absence, because it cannot: an issued surface and a no-key
+    // one are measurably indistinguishable to it. The seller is told whose report this is.
+    for (const clause of [
+      "'약관 동의 및 Key 발급받기'를 직접 누르세요",
+      "이 버튼에서는 키가 발급되지 않고",
+      "SellerOps는 키 발급 여부를 확인할 수 없습니다",
+    ]) {
       expect(OPERATOR_STEP_LABELS.issue_final, clause).toContain(clause);
     }
     // **The second correction was itself a removal.** It said "그 화면은 아직 SellerOps가 안내하지 않으니 직접
@@ -204,6 +210,8 @@ describe("the chip's title and the panel's instruction are different things", ()
     // The method step names the chosen option and says who chooses. `연동업체 선택` is measured to the same
     // standard and is not named, because the walk guides ONE method by product decision.
     expect(OPERATOR_STEP_LABELS.vendor_method).toContain("'자체개발(직접입력)'을 직접 선택하세요");
+    // 업체명 was ALREADY painting on the untouched vendor screen; only URL and IP 주소 appeared on selection.
+    expect(OPERATOR_STEP_LABELS.vendor_method).toContain("업체명은 이미 화면에 있습니다");
     expect(OPERATOR_STEP_LABELS.vendor_method).toContain("SellerOps는 선택하지 않습니다");
   });
 

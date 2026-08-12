@@ -108,7 +108,8 @@ echo "  key issuance : ⚠ THIS RUN ENDS WITH A REAL KEY ON THE SELLER'S LIVE AC
 echo "                 of the vendor screen's '확인' — the control that ISSUES it — rings it, and never"
 echo "                 presses it. The PRESS is never auto-advanced; only WING then SHOWING the keys is"
 echo "                 observed, which is a result and cannot cause itself. '약관 동의 및 Key 발급받기' does"
-echo "                 NOT create the key: refuted 2026-08-12, pressed twice live and none issued"
+echo "                 NOT create the key: refuted 2026-08-12 — pressed twice live, operator-reported to"
+echo "                 issue none. SellerOps cannot confirm that either way"
 echo "  method       : the walk guides '자체개발(직접입력)' — a PRODUCT DECISION, not a measurement"
 echo
 echo "next: tools/coupang-local/wing-walk-preflight.sh  (prepares + displays the Approval Manifest; no browser)"

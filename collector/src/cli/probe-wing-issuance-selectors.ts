@@ -1063,9 +1063,15 @@ export const WING_ISSUANCE_FLOW_DISCOVERY_PHASE = "COUPANG_WING_ISSUANCE_FLOW_DI
  *
  * Its own phase for the reason all of them are: the manifest is what the operator reads, and this one asks them
  * to do something no earlier manifest described — press the control the walk has rested in front of since it was
- * written. That press is MEASURED not to create a key (it happened twice on live walks and issued none,
- * `WING_KEY_CREATION_CONTROL_REFUTATION`), which is what makes the phase a READ one at all. A phase asking for it
- * on the strength of its label would be doing exactly what the refuted claim did.
+ * written. That press has been made twice on live walks and the OPERATOR reported no key either time
+ * (`WING_KEY_CREATION_CONTROL_REFUTATION`), which is what makes the phase a READ one at all. A phase asking for
+ * it on the strength of its label would be doing exactly what the refuted claim did.
+ *
+ * **The report is not a measurement, and this phase does not get to round it up into one.** SellerOps cannot
+ * corroborate it: an issued surface and a no-key one are measurably indistinguishable across every sanitized
+ * signal it captures (`WING_KEY_ABSENCE_ATTRIBUTION`). Two operator reports of the same outcome is the best
+ * evidence that exists here, and calling it "measured" would be the same shape as the claim it replaced —
+ * asserting from the strongest thing to hand rather than from what the instrument can see.
  *
  * **Where it stops is the whole design.** The screen it reaches carries a `확인` that issues a real key. This
  * phase measures that screen and never presses it; issuance is a separate manifest and a separate mode-WRITE
@@ -1541,15 +1547,17 @@ function printDiscoveryCheckpoint(
       // instruction. Printing one document's rule against another document's step is how the 2026-08-11 bootstrap
       // told the operator the opposite of the manifest they were about to read.
       console.error("  Do NOT press '약관 동의 및 Key 발급받기' YET — the next checkpoint asks for it, and only after");
-      console.error("  this reading is taken. It is MEASURED not to create a key (pressed twice live, none issued).");
+      console.error("  It was pressed on two live walks and the operator reported no key either time —");
+      console.error("  SellerOps cannot confirm that either way, so treat it as their report, not a measurement.");
     }
     console.error("  Read the terms and decide for yourself. SellerOps does not read them, agree to them, or");
     console.error("  advise on them; it reads only whether each box's label matches a string you transcribed.");
     console.error("  Tick both (or neither — the reading is honest either way), then signal.");
   } else if (checkpoint === "VENDOR_METHOD_SCREEN_UNTOUCHED") {
     console.error(`${step} — press '약관 동의 및 Key 발급받기' YOURSELF, then STOP on the screen it opens.`);
-    console.error("  This press is MEASURED not to create a key: it was pressed on two live walks and no key was");
-    console.error("  issued either time. That measurement is why this checkpoint may ask for it at all.");
+    console.error("  This press was made on two live walks and the OPERATOR reported no key either time. That");
+    console.error("  report is why this checkpoint may ask for it — SellerOps cannot corroborate it: an issued");
+    console.error("  surface and a no-key one are indistinguishable across every signal it captures.");
     console.error("  What it opens has NEVER been read by any apparatus. Choose nothing, type nothing, and above");
     console.error("  all do not press that screen's '확인' — THAT is what issues a real API key, and it is not in");
     console.error("  this run's approval. Let the screen settle, signal, and STOP.");

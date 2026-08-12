@@ -29,9 +29,10 @@
 #                                            nothing; the 확인 step is offered only when the reading taken after
 #                                            the selection shows the vendor form is not yet on screen.
 #   COUPANG_WING_VENDOR_METHOD_DISCOVERY   — the discovery flow carried TWO checkpoints further, onto the screen
-#                                            that follows `약관 동의 및 Key 발급받기`. That press is MEASURED not
-#                                            to create a key (pressed twice on live walks, none issued), which is
-#                                            what makes this a READ phase. It ENDS with the operator looking at a
+#                                            that follows `약관 동의 및 Key 발급받기`. That press was made twice on
+#                                            live walks and the OPERATOR reported no key either time (SellerOps
+#                                            cannot confirm it either way), which is what makes this a READ
+#                                            phase. It ENDS with the operator looking at a
 #                                            `확인` that ISSUES A REAL KEY and which no checkpoint may reach —
 #                                            issuance is a separate manifest and a separate mode-WRITE grant.
 #   COUPANG_WING_STAGE2_LABEL_CALIBRATION  — the same surface and the same operator flow, plus two further
@@ -190,9 +191,9 @@ if [ -n "$STAGE2_TARGETS" ]; then
   echo "  stage-2 scope: $STAGE2_TARGETS"
   if [ "$PHASE" = "COUPANG_WING_VENDOR_METHOD_DISCOVERY" ]; then
     echo "  NOTE         : YOU advance the whole flow, one checkpoint at a time, and TWO steps further than the"
-    echo "                 discovery phase: you also press '약관 동의 및 Key 발급받기' (MEASURED not to create a"
-    echo "                 key — pressed twice on live walks, none issued) and then select an input method on"
-    echo "                 the screen it opens."
+    echo "                 discovery phase: you also press '약관 동의 및 Key 발급받기' (pressed twice on live"
+    echo "                 walks, operator-reported to issue no key — SellerOps cannot confirm that) and then"
+    echo "                 select an input method on the screen it opens."
     echo "                 ⚠ THAT SCREEN'S '확인' ISSUES A REAL KEY. It is not in this approval and no checkpoint"
     echo "                 of this phase can reach it. SellerOps clicks, selects and types nothing at any point."
   elif [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then

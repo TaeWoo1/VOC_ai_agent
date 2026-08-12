@@ -860,6 +860,17 @@ export interface WingKeyCreationControlRefutation {
   readonly pressWasInScope: false;
   /** What the press produced. The whole refutation, in one field. */
   readonly keyIssued: false;
+  /**
+   * **WHO says no key was issued. Not the apparatus — it structurally cannot say.**
+   *
+   * `wingIssuedStateFrom` returns `NO_DISCRIMINATING_SIGNAL`, and that is itself a MEASURED result: every
+   * sanitized signal this recorder captures is identical on an issued and a no-key surface. So `keyIssued:
+   * false` is the operator's report of their own screen, on the same footing as `revealedScreenAttribution`
+   * beside it — and it was missing that footing while its neighbour had it, which is how "no key was issued"
+   * came to be repeated as an apparatus MEASUREMENT in eight operator-facing places. The guard against it is in
+   * `wing-vendor-method-discovery.test.ts`, which greps the whole tree, so the phrasing may not come back.
+   */
+  readonly keyIssuedAttribution: typeof WING_KEY_ABSENCE_ATTRIBUTION;
   /** The screen that appeared instead — OPERATOR-REPORTED; no apparatus has read it. */
   readonly revealedScreen: "VENDOR_INTEGRATION_METHOD_FORM";
   readonly revealedScreenAttribution: "OPERATOR_REPORTED_NOT_MEASURED";
@@ -874,6 +885,16 @@ export interface WingKeyCreationControlRefutation {
   readonly newReasonToRest: "WHAT_FOLLOWS_IT_IS_NOT_ESTABLISHED";
 }
 
+/**
+ * **What "no key was issued" rests on, named once.**
+ *
+ * The operator looked at their own screen and reported it. SellerOps did not corroborate it and cannot: the
+ * issued and no-key surfaces are measurably indistinguishable across every signal it captures. The one thing
+ * the runtime CAN add is negative and weak — the sanitized page category never became `credential_shown` on
+ * any reading of any run — and a category that does not change is not a credential that does not exist.
+ */
+export const WING_KEY_ABSENCE_ATTRIBUTION = "OPERATOR_REPORTED_APPARATUS_CANNOT_DISCRIMINATE" as const;
+
 export const WING_KEY_CREATION_CONTROL_REFUTATION: WingKeyCreationControlRefutation = Object.freeze({
   status: "LIVE_DOM_CALIBRATION_REFUTED",
   refutedOn: "2026-08-12",
@@ -885,6 +906,7 @@ export const WING_KEY_CREATION_CONTROL_REFUTATION: WingKeyCreationControlRefutat
   withdrawnClaimBasis: "ASSERTED_FROM_THE_CONTROL_LABEL_NEVER_OBSERVED",
   pressWasInScope: false,
   keyIssued: false,
+  keyIssuedAttribution: WING_KEY_ABSENCE_ATTRIBUTION,
   revealedScreen: "VENDOR_INTEGRATION_METHOD_FORM",
   revealedScreenAttribution: "OPERATOR_REPORTED_NOT_MEASURED",
   keyCreatedBy: "THE_VENDOR_FORM_CONFIRM_UNCALIBRATED",
@@ -2065,8 +2087,10 @@ export const WING_ISSUANCE_FLOW_PLAN: WingFlowPlan = Object.freeze({
   checkpoints: WING_FLOW_CHECKPOINTS,
   lastCheckpoint: WING_FLOW_LAST_CHECKPOINT,
   nextControl: WING_KEY_CREATION_CONTROL_ID,
-  // MEASURED reversible: it was pressed twice on live walks and issued no key. That is why a second plan may
-  // continue past it at all — and it is a fact about this control, not a licence for the next one.
+  // Reversible on the OPERATOR's report, twice, and NOT on a measurement: the apparatus cannot discriminate an
+  // issued surface from a no-key one ({@link WING_KEY_ABSENCE_ATTRIBUTION}). That report is why a second plan
+  // may continue past this control at all — a fact about this control, on this evidence, and never a licence
+  // for the next one.
   nextControlIsIrreversible: false,
 });
 
@@ -2140,8 +2164,9 @@ export const WING_TERMS_SCREEN_MARKER_IDS = ["stage3.terms.heading", WING_KEY_CR
  * **These are MEASURED, and the first attempt was not.** The marker shipped on 2026-08-12 was a single
  * transcribed string, `업체 입력 방식`, chosen because a marker that paints on an EARLIER screen would make every
  * reading of the whole flow report `VENDOR_METHOD` — this screen sorts first — and one hypothesis seemed a
- * smaller bet than two. It never matched anything: on the live run (`wingrec_d5dc00c2486c`) it read
- * `PRESENT_NOT_WHOLE_TEXT` on all five readings **including the vendor screen's own**. The phrase is in the DOM
+ * smaller bet than two. It never matched anything: on `wingrec_c7d61cd70f63` — the six-checkpoint run whose
+ * every sentinel the operator created directly — it read `PRESENT_NOT_WHOLE_TEXT` on all SIX readings,
+ * **including both of the vendor screen's own**, and the earlier `wingrec_d5dc00c2486c` agrees. The phrase is in the DOM
  * and is not any element's whole text, anywhere. The run halted at the last checkpoint and kept the vendor
  * sweep, which is what that halt was designed to cost.
  *
@@ -2339,9 +2364,11 @@ export const WING_VENDOR_FORM_REVEAL = Object.freeze({
  * from it. Nothing in the sweep recommends a method and nothing could: the screen offers two radios in one group
  * and both resolve identically well.
  *
- * What the measurement DOES say, and the whole of it: selecting a method revealed 업체명 · URL · IP 주소, the
- * three fields the product owner's flow description attaches to the 자체개발 path. That is corroboration of the
- * description, not a derivation of the decision — the run never recorded which radio was selected.
+ * What the measurement DOES say, and the whole of it: selecting a method revealed `URL` and `IP 주소`. TWO
+ * fields, not three — `업체명` was ALREADY painting on the untouched vendor screen, and "selecting revealed
+ * 업체명 · URL · IP 주소" reads the reveal one field wider than it was. The three together are what the product
+ * owner's flow description attaches to the 자체개발 path, so this corroborates the description; it does not
+ * derive the decision, and the run never recorded which radio was selected.
  *
  * What is NOT established and would have to be, for the other option: whether SellerOps appears in Coupang's
  * 연동업체 list. No apparatus has read that dropdown, and it is an external fact rather than a measurable one.

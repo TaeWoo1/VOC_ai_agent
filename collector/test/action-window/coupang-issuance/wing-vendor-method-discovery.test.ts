@@ -7,6 +7,7 @@
  * the plan may now cross a control that turned out to be reversible, and it still may not reach the one past it.
  */
 import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +29,8 @@ import {
   WING_VENDOR_METHOD_PLAN,
   WING_VENDOR_METHOD_SCREEN_MARKER_IDS,
   WING_VENDOR_METHOD_SCREEN_EVIDENCE,
+  WING_KEY_CREATION_CONTROL_REFUTATION,
+  WING_KEY_ABSENCE_ATTRIBUTION,
   WING_VENDOR_METHOD_PRODUCT_DECISION,
   WING_VENDOR_FORM_REVEAL,
   wingGuidedHighlightReadingFor,
@@ -531,10 +534,16 @@ describe("runWingFlowDiscovery under the vendor plan", () => {
 describe("the instructions the operator reads", () => {
   const CLI_SRC = SRC("cli/probe-wing-issuance-selectors.ts");
 
-  it("the vendor checkpoint says the press is MEASURED not to create a key, and why that matters", () => {
+  it("**the vendor checkpoint attributes the no-key claim to the OPERATOR**, not to a measurement", () => {
+    // The justification for asking anyone to press this control. It read "MEASURED not to create a key" in
+    // eight places until the 2026-08-12 audit: the apparatus cannot discriminate an issued surface from a
+    // no-key one, so nothing it captured ever said that. Two operator reports is the best evidence here, and
+    // rounding it up to "measured" is the same shape as the label-derived claim it replaced.
     const branch = CLI_SRC.slice(CLI_SRC.indexOf('checkpoint === "VENDOR_METHOD_SCREEN_UNTOUCHED"'));
     const body = branch.slice(0, branch.indexOf('checkpoint === "VENDOR_METHOD_SELECTED_BY_OPERATOR"'));
-    expect(body).toContain("MEASURED not to create a key");
+    expect(body).toContain("the OPERATOR reported no key either time");
+    expect(body).toContain("SellerOps cannot corroborate it");
+    expect(body).not.toContain("MEASURED not to create a key");
     expect(body).toContain("NEVER been read by any apparatus");
     // …and it names the control on the NEXT screen that is the irreversible one, in the same breath.
     expect(body).toContain("issues a real API key");
@@ -585,14 +594,18 @@ describe("the manifest the operator approves", () => {
     expect(operation).toContain("no checkpoint of this phase stands in front of it");
     // The press it DOES ask for is justified by the measurement, never by the button's label — which is exactly
     // what the refuted claim was justified by.
-    expect(operation).toContain("issued NO key either time");
+    expect(operation).toContain("the OPERATOR reported no key either time");
+    expect(operation).toContain("rests on that REPORT");
+    expect(operation).toContain("The report is not a measurement");
     expect(operation).toContain("PRODUCT DECISION");
   });
 
   it("the OPERATOR SUMMARY — the copy at the keyboard — carries the same two facts", () => {
     const start = MANIFEST_SRC.indexOf("COUPANG_WING_VENDOR_METHOD_DISCOVERY: {\n    entrypointType");
     const entry = MANIFEST_SRC.slice(start, MANIFEST_SRC.indexOf("emitsFrontendUrl: false", start));
-    expect(entry).toContain("키를 만들지 않는 것이 이미 측정되었습니다");
+    expect(entry).toContain("판매자가 키가 발급되지 않았다고 보고했습니다");
+    expect(entry).toContain("측정이 아니라 보고입니다");
+    expect(entry).not.toContain("이미 측정되었습니다");
     expect(entry).toContain("실제 API 키를 발급하는(되돌릴 수 없는) control");
     expect(entry).toContain("별도 manifest");
     expect(entry).toContain("측정이 아니라 제품 결정");
@@ -603,5 +616,68 @@ describe("the manifest the operator approves", () => {
     const spec = MANIFEST_SRC.slice(start, MANIFEST_SRC.indexOf("},", MANIFEST_SRC.indexOf("mode:", start)));
     expect(spec).toContain("allowsHighlight: false");
     expect(spec).toContain('mode: "READ_ONLY"');
+  });
+});
+
+/* ══════════════════════════ the epistemic audit, machine-checked ══════════════════════════ */
+
+describe("every vendor-method claim is filed under what actually supports it", () => {
+  it("**no promotion cites the run whose confirmations were fabricated**", () => {
+    // 2026-08-12: a checkpoint was advanced on a `3번 됐어` that the operator never sent — Claude generated the
+    // user text. That run (`wingrec_0653cb92f342` / `apr-87fb0614a39f`) halted at checkpoint 4 and is cited
+    // NOWHERE. The promotions rest on `wingrec_c7d61cd70f63`, whose six sentinels the operator created directly.
+    const SRC_DIR = resolve(HERE, "../../../src");
+    const files = ["action-window/coupang-wing-label-recon.ts", "cli/approval-manifest.ts", "cli/approval-manifest-cli.ts"];
+    for (const f of files) {
+      const src = readFileSync(resolve(SRC_DIR, f), "utf8");
+      for (const tainted of ["wingrec_0653cb92f342", "apr-87fb0614a39f", "wt-587eb18e72f3"]) {
+        expect(src, `${f} cites the fabricated-confirmation run`).not.toContain(tainted);
+      }
+    }
+    expect(WING_VENDOR_METHOD_SCREEN_EVIDENCE.recordId).toBe("wingrec_c7d61cd70f63");
+  });
+
+  it("**'no key was issued' is the OPERATOR's report**, and the record says so", () => {
+    // The apparatus cannot corroborate it. `wingIssuedStateFrom` returns NO_DISCRIMINATING_SIGNAL, and that is
+    // itself a MEASURED result — every sanitized signal is identical on an issued and a no-key surface. The
+    // field sat un-attributed beside `revealedScreenAttribution`, which is how the claim came to be repeated as
+    // "MEASURED not to create a key" in eight operator-facing places.
+    expect(WING_KEY_CREATION_CONTROL_REFUTATION.keyIssued).toBe(false);
+    expect(WING_KEY_CREATION_CONTROL_REFUTATION.keyIssuedAttribution).toBe(WING_KEY_ABSENCE_ATTRIBUTION);
+    expect(WING_KEY_ABSENCE_ATTRIBUTION).toContain("APPARATUS_CANNOT_DISCRIMINATE");
+  });
+
+  it("**no source or harness rounds that report up to a measurement**", () => {
+    const roots = [resolve(HERE, "../../../src"), resolve(HERE, "../../../../tools/coupang-local")];
+    const forbidden = ["MEASURED not to create a key", "MEASURED to create no key", "measured to issue no key", "이미 측정되었습니다"];
+    for (const root of roots) {
+      // grep exits 1 on "no match", which is the PASSING case here.
+      let out = "";
+      try {
+        out = execFileSync("grep", ["-rl", ...forbidden.flatMap((f) => ["-e", f]), root], { encoding: "utf8" }).trim();
+      } catch {
+        out = "";
+      }
+      expect(out, `a file still calls the operator report a measurement:\n${out}`).toBe("");
+    }
+  });
+
+  it("**the key-ISSUING boundary is still operator-reported**, and nothing claims otherwise", () => {
+    // What two checkpoints measured is the SCREEN — that it exists, what it is made of, and that its 확인
+    // resolves to one painting BUTTON. That pressing it creates the key is the operator's account of a press
+    // nothing has performed. The WRITE run is what will settle it.
+    expect(WING_KEY_ISSUING_CONTROL).toContain("OPERATOR_REPORTED_NOT_MEASURED");
+    expect(WING_VENDOR_METHOD_SCREEN_EVIDENCE.notEstablished).toContain(
+      "WHAT_THE_VENDOR_SCREENS_CONFIRM_DOES_NEVER_PRESSED",
+    );
+  });
+
+  it("**the URL/IP reveal is not stretched to cover 업체명, nor to a particular method**", () => {
+    // 업체명 was ALREADY painting on the untouched vendor screen; only these two appeared on selection. And only
+    // one method was ever selected — which one is not on the record.
+    expect(WING_VENDOR_FORM_REVEAL.candidateIds).toEqual(["stage2.vendor_url.url", "stage2.call_ip.ip_addr"]);
+    expect(WING_VENDOR_FORM_REVEAL.candidateIds as readonly string[]).not.toContain("stage2.vendor_info.baseline");
+    expect(wingGuidedHighlightReadingFor("stage2.vendor_info.baseline", "VENDOR_METHOD")?.checkpointsAgreeing).toBe(2);
+    expect(WING_VENDOR_METHOD_SCREEN_EVIDENCE.notEstablished).toContain("WHICH_OF_THE_TWO_METHODS_THE_OPERATOR_SELECTED");
   });
 });
