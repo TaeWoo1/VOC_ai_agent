@@ -155,7 +155,7 @@ fi
 # 2 highlighted + 4 text-guided" while the verifier above demanded `agentNavigations:1`, `highlightedControlCount:3`
 # and `textGuidedControlCount:2` — so the line the OPERATOR reads before granting described a narrower run than
 # the one the gate had verified. That is the manifest-honesty defect class, in the display rather than the data.
-pass "guided-walk boundary is exactly the canonical contract (rests before the key-ISSUING control · never presses it · the OPERATOR issues a real key · agent presses nothing and navigates ONCE, to the seller's own WING landing · 0 value reads · no connect/sync · 9 highlighted + 0 text-guided, and 0 of the rings on an input · 6 steps auto-advance, never the key-issuing PRESS · the guided method is a product decision · the consent boxes' completion is observed)"
+pass "guided-walk boundary is exactly the canonical contract (rests before the key-ISSUING control · never presses it · the OPERATOR issues a real key · agent presses nothing and navigates TWICE — the seller's own WING landing, and the seller-pressed return to the local SellerOps connect screen · 0 value reads · no connect/sync · 9 highlighted + 0 text-guided, and 0 of the rings on an input · 6 steps auto-advance, never the key-issuing PRESS · the guided method is a product decision · the consent boxes' completion is observed)"
 
 # The 발급 selector must be calibrated: this phase highlights a real control. The gate refuses
 # SELECTORS_NOT_CALIBRATED before reaching here, so this can only be `true` — asserted anyway so a future change
@@ -206,7 +206,9 @@ echo "  WHAT THIS RUN IS, precisely:"
 echo "    • EVERY marketplace action is YOURS. You log in, you reach the page, you press each control, and you"
 echo "      type your own 업체명 · URL · IP 주소. The agent clicks, types, submits and selects nothing. It opens"
 echo "      the WINDOW on your own WING sales-info page once (so it is not blank);"
-echo "      every screen after that is one YOU navigate to."
+echo "      every screen after that is one YOU navigate to. At the very end, if you press"
+echo "      'SellerOps로 돌아가기', it opens the local SellerOps connect screen in a NEW TAB and brings it to"
+echo "      the front — your WING tab is left untouched, so the keys stay on screen."
 echo "    • NINE controls are highlighted: 'API Key 발급 받기', '확인', '약관 동의 및 Key 발급받기', the Access"
 echo "      Key region, the 'OPEN API' option label, both consent sentences, the '자체개발(직접입력)' option, and"
 echo "      the vendor screen's '확인'. Every one has a live-calibrated locator. A control being RINGED is not it"

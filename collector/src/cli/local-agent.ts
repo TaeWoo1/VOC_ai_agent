@@ -48,6 +48,7 @@ import { CoupangIssuanceFixtureDriver } from "../action-window/coupang-issuance/
 import { LazyCoupangIssuanceDriver } from "../action-window/coupang-issuance/lazy-coupang-issuance-driver";
 import { verifyRepoIdentity } from "./repo-identity";
 import { screenWingUrl } from "./coupang-wing-classifier";
+import { screenSellerOpsReturnUrl } from "./sellerops-return-url";
 import { NaverLiveProbeDriver } from "../action-window/naver-live-driver";
 import { createNaverActionWindowImportDriver } from "../action-window/naver-acquisition-adapter";
 import { defaultImportRunDirFor } from "../action-window/initial-import/import-dispatch";
@@ -359,7 +360,11 @@ export function buildCoupangIssuanceLiveConfig(): CoupangIssuanceLiveCarrier {
   const driver = new LazyCoupangIssuanceDriver({
     open: async () => {
       if (!walkContext) {
-        const launched = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
+        // `followWindow`: the walk's page must be laid out against the window the SELLER has. Without it
+        // Playwright pins every page to 1280×720 at DPR 1 — measured on 2026-08-12 as 140×130 CSS px SMALLER
+        // than the window it is displayed in, which is the live-observed crop that put WING's own `확인` out of
+        // reach twice. See `buildLaunchOptions`.
+        const launched = await launchNaverContext(cfg.profileDir, cfg.browserChannel, { followWindow: true });
         // A context that genuinely died must be re-launched rather than reused, or every later open would work
         // off a handle whose every call throws.
         launched.once("close", () => {
@@ -410,6 +415,42 @@ export function buildCoupangIssuanceLiveConfig(): CoupangIssuanceLiveCarrier {
         driver.markClosed();
       });
       return { context, page };
+    },
+    /**
+     * **`SellerOps로 돌아가기`, actually returning.**
+     *
+     * Live-observed 2026-08-12: the seller pressed it and nothing happened. The button recorded a step
+     * completion while its label promised a move, and the SellerOps tab was in a different window the walk has
+     * no way to reach.
+     *
+     * Three properties this has to have, and each is a choice:
+     *   - it opens a NEW TAB and leaves the WING one alone. The secret key is shown once, and the seller may
+     *     still be pasting it — navigating that tab away would take the only copy off their screen;
+     *   - the destination is SCREENED to a loopback SellerOps origin, origin-only, fail-closed. This navigation
+     *     is triggered by a button on a marketplace page, so it gets the same treatment as the WING landing;
+     *   - it is the SECOND and last navigation of the walk. The first is the landing; both are the seller's
+     *     own request, and neither is a marketplace action (see the count's own constant).
+     */
+    returnToSellerOps: async () => {
+      const context = walkContext;
+      if (!context) {
+        log("aw_coupang_return_refused", { reason: "NO_WINDOW" }, "warn");
+        return;
+      }
+      const screened = screenSellerOpsReturnUrl(loadConfig().appUrl);
+      if (!screened.ok) {
+        // Nothing opens. A refused destination leaves the seller on WING with their keys, which is a worse
+        // ending than a working button and a much better one than a window sent somewhere unvouched for.
+        log("aw_coupang_return_refused", { reason: screened.reason }, "warn");
+        return;
+      }
+      const tab = await context.newPage();
+      await tab.goto(screened.url, { waitUntil: "domcontentloaded" }).catch(() => undefined);
+      // The tab exists; now make it the thing the seller is looking at. Best effort, and reported as a
+      // measurement rather than an intention — same as every other raise in this file.
+      await tab.bringToFront().catch(() => undefined);
+      const raised = await raiseWindowOf(tab);
+      log("aw_coupang_returned_to_sellerops", { raised });
     },
   });
   return {

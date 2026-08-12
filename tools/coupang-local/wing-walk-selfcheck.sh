@@ -174,7 +174,7 @@ run_case "HEAD_DRIFT      (commit moved since bootstrap)" nonzero "git commit ch
 # The DISPLAY-side check. Unlike the destructive descriptor — where the risk is understating danger — every
 # softening here OVERSTATES safety, and the worst is `keyCreationRuledOut: true`: it would tell the operator
 # SellerOps had confirmed no key was created, which nothing can (NO_DISCRIMINATING_SIGNAL).
-CANON='{"guidedWalkBoundary":{"operation":"WALK_WING_GUIDED_ISSUANCE_TUTORIAL","forbiddenFollowOnAction":"COMPLETE_WING_KEY_ISSUANCE","restsBeforeControl":"확인 (vendor-method screen)","agentCreatesKeyMaterial":false,"operatorIssuesRealKey":true,"keyCreationRuledOut":false,"agentPerformsAction":false,"agentNavigations":1,"credentialValueReadBudget":0,"performsConnectOrSync":false,"highlightedControlCount":9,"textGuidedControlCount":0,"ringedInputControlCount":0,"autoAdvancingStepCount":6,"keyCreationPressAutoPerformed":false,"keyIssuanceAdvancesOnObservedResult":true,"sellerConsentObserved":true,"vendorMethodGuided":"자체개발(직접입력)","vendorMethodDecidedBy":"PRODUCT_OWNER"}}'
+CANON='{"guidedWalkBoundary":{"operation":"WALK_WING_GUIDED_ISSUANCE_TUTORIAL","forbiddenFollowOnAction":"COMPLETE_WING_KEY_ISSUANCE","restsBeforeControl":"확인 (vendor-method screen)","agentCreatesKeyMaterial":false,"operatorIssuesRealKey":true,"keyCreationRuledOut":false,"agentPerformsAction":false,"agentNavigations":2,"credentialValueReadBudget":0,"performsConnectOrSync":false,"highlightedControlCount":9,"textGuidedControlCount":0,"ringedInputControlCount":0,"autoAdvancingStepCount":6,"keyCreationPressAutoPerformed":false,"keyIssuanceAdvancesOnObservedResult":true,"sellerConsentObserved":true,"vendorMethodGuided":"자체개발(직접입력)","vendorMethodDecidedBy":"PRODUCT_OWNER"}}'
 printf '%s' "$CANON" > "$FIXTURES/desc-ok.json"
 DESC_OK=1
 verify_walk_descriptor "$FIXTURES/desc-ok.json" >/dev/null 2>&1 || { echo "  FAIL  DESCRIPTOR · canonical descriptor rejected"; DESC_OK=0; FAILED=1; }
@@ -183,6 +183,7 @@ for soft in \
   '"agentCreatesKeyMaterial":true' \
   '"agentPerformsAction":true' \
   '"agentNavigations":0' \
+  '"agentNavigations":1' \
   '"keyCreationPressAutoPerformed":true' \
   '"credentialValueReadBudget":1' \
   '"performsConnectOrSync":true' \
@@ -204,7 +205,7 @@ for soft in \
   '"agentPerformsAction":"false"' \
   '"performsConnectOrSync":"false"' \
   '"keyCreationPressAutoPerformed":"false"' \
-  '"agentNavigations":"1"' \
+  '"agentNavigations":"2"' \
   '"credentialValueReadBudget":"0"'
 do
   # The fixture must be BUILT and must actually DIFFER from canonical. If the generator throws, no file is
@@ -331,7 +332,10 @@ if [ -z "$TREE_DIRTY" ]; then
   # the data, in the half the operator actually reads.
   # …and the RETIRED English ones. The walk stopped one screen short until 2026-08-12; a disclosure that still
   # says so would be describing a smaller run than the one about to execute — with a real key at the end of it.
-  for stale_en in "DO NOT PRESS IT in this run" "No apparatus has ever read that screen" "SEVEN controls are highlighted" "FOUR steps advance"; do
+  # `every screen after that is one YOU navigate to` used to END the sentence, and the walk now has a second
+  # navigation after it — the seller-pressed return. A disclosure that still stops there describes a run that
+  # navigates once, which is exactly the shape of understatement this fence exists to refuse.
+  for stale_en in "DO NOT PRESS IT in this run" "No apparatus has ever read that screen" "SEVEN controls are highlighted" "FOUR steps advance" "It never navigates again"; do
     if grep -qF "$stale_en" <<<"$out"; then
       echo "  FAIL  NORMAL          · retired English claim still shown: $stale_en"; DISCLOSE_OK=0; FAILED=1
     fi
@@ -410,11 +414,11 @@ if [ -z "$TREE_DIRTY" ]; then
      && grep -qF '"agentCreatesKeyMaterial": false' <<<"$out" \
      && grep -qF '"operatorIssuesRealKey": true' <<<"$out" \
      && grep -qF '"keyCreationRuledOut": false' <<<"$out" \
-     && grep -qF '"agentNavigations": 1' <<<"$out" \
+     && grep -qF '"agentNavigations": 2' <<<"$out" \
      && grep -qF '"performsConnectOrSync": false' <<<"$out" \
      && grep -qF '약관 동의 및 Key 발급받기' <<<"$out" \
      && grep -qF '"COMPLETE_WING_KEY_ISSUANCE"' <<<"$out"; then
-    echo "  PASS  NORMAL          · manifest names the control it rests before, both key claims, ONE navigation and no connect/sync"
+    echo "  PASS  NORMAL          · manifest names the control it rests before, both key claims, BOTH navigations and no connect/sync"
   else
     echo "  FAIL  NORMAL          · guided-walk boundary incomplete in the displayed manifest"; FAILED=1
   fi
@@ -525,7 +529,7 @@ ENV
   # Asserted BOTH ways: the current claims must be present, and the retired ones must be gone — a disclosure
   # that gained a line while keeping its contradiction is not fixed.
   BOOT_OK=1
-  for claim in "ONE" "never navigates again" "NINE live-calibrated" "NONE of the rings sits on an input" "stay text-only" "SIX steps advance" "consent boxes are ticked" "RESTS in front" "THIS RUN ENDS WITH A REAL KEY" "PRODUCT DECISION" "never ticks a box"; do
+  for claim in "TWO, and neither is a marketplace screen" "the LANDING" "the RETURN" "WING tab is left exactly as it is" "NINE live-calibrated" "NONE of the rings sits on an input" "stay text-only" "SIX steps advance" "consent boxes are ticked" "RESTS in front" "THIS RUN ENDS WITH A REAL KEY" "PRODUCT DECISION" "never ticks a box"; do
     grep -qF "$claim" <<<"$out" || { echo "  FAIL  BOOTSTRAP_DISCLOSE · missing claim: $claim"; BOOT_OK=0; FAILED=1; }
   done
   # Retired claims. The last three were true and are no longer: the count moved 2 → 3 → 7 as controls were

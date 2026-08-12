@@ -31,6 +31,14 @@ export interface LazyCoupangIssuanceDriverDeps {
    * path the seller reaches WING themselves, which is the boundary the whole phase rests on.
    */
   open(): Promise<{ context: BrowserContext; page: Page }>;
+  /**
+   * The walk's LAST step, made real: open the SellerOps connect screen and put it in front of the seller.
+   *
+   * Passed straight through to {@link CoupangWingIssuanceDriver}, which calls it only when the seller presses
+   * `SellerOps로 돌아가기` — see that option's own doc for why the navigation lives out here and not in the
+   * driver. Absent ⇒ the step is what it was: a completion with no move, logged as such.
+   */
+  returnToSellerOps?: () => Promise<void>;
 }
 
 export class LazyCoupangIssuanceDriver implements CoupangIssuanceProbeDriver {
@@ -60,7 +68,10 @@ export class LazyCoupangIssuanceDriver implements CoupangIssuanceProbeDriver {
     if (this.opened) return this.opened;
     if (!this.opening) {
       this.opening = this.deps.open().then(({ context, page }) => {
-        const d = new CoupangWingIssuanceDriver(page, { context });
+        const d = new CoupangWingIssuanceDriver(page, {
+          context,
+          ...(this.deps.returnToSellerOps ? { returnToSellerOps: this.deps.returnToSellerOps } : {}),
+        });
         this.opened = d;
         this.context = context;
         return d;

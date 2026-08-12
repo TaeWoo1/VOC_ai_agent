@@ -1022,8 +1022,10 @@ describe("the guided-walk manifest is not the fallback", () => {
     const max = CLI.slice(from, CLI.indexOf("\n    : isWingReveal", from));
     expect(max).toContain("WHICH ISSUES A REAL KEY");
     expect(max).toContain("0 key presses");
-    // ONE navigation — the landing — and the budget must SAY so rather than keep claiming zero.
-    expect(max).toContain("1 navigation (the landing at window open, never again)");
+    // TWO navigations — the landing, and the seller-pressed return to SellerOps — and the budget must SAY so
+    // rather than keep describing the narrower run it used to be.
+    expect(max).toContain("2 navigations (the landing at window open, and — only if the seller presses");
+    expect(max).toContain("leaving the WING tab untouched");
     // Nine since the vendor screen was measured. The budget also has to state that the runtime advances itself
     // now — a budget listing only what the SELLER presses would understate what the agent does.
     expect(max).toContain("9 highlights");
@@ -1164,7 +1166,7 @@ describe("the live guided-walk carrier is gated, and never downgrades silently",
     expect(block).not.toMatch(/liveWalkRefusal[^\n]*\?\s*buildCoupangIssuanceConfig/);
   });
 
-  it("the live carrier opens NO window at agent boot, and navigates EXACTLY ONCE — the landing", () => {
+  it("the live carrier opens NO window at agent boot, and navigates EXACTLY TWICE — the landing and the return", () => {
     const src = readFileSync(resolve(HERE, "../../../src/cli/local-agent.ts"), "utf8");
     const from = src.indexOf("export function buildCoupangIssuanceLiveConfig");
     const fn = src.slice(from, src.indexOf("\nexport function buildCoupangIssuanceConfig", from));
@@ -1172,14 +1174,19 @@ describe("the live guided-walk carrier is gated, and never downgrades silently",
     expect(fn).toContain("new LazyCoupangIssuanceDriver({");
     expect(fn).toContain("open: async () =>");
     const codeOnly = fn.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
-    // ONE navigation, and it is the landing: opening the seller's own seller center so they are not dropped on
-    // a blank window. Every screen after it is one they reach. More than one goto here would be a route.
-    expect(codeOnly.split(".goto(").length - 1).toBe(1);
+    // TWO navigations, and BOTH are named: the landing (so the seller is not dropped on a blank window) and
+    // the return the seller asks for on the last step. Every screen in between is one they reach — a third
+    // goto here would be a route through the flow, which is a different capability entirely.
+    expect(codeOnly.split(".goto(").length - 1).toBe(2);
     expect(codeOnly).toContain("COUPANG_WING_GUIDED_WALK_LANDING_URL");
-    // Screened BEFORE it is used — an off-target landing must open nothing, not send the seller somewhere the
-    // run cannot vouch for.
+    // Screened BEFORE it is used — an off-target destination must open nothing, not send the seller somewhere
+    // the run cannot vouch for. TWO screens now: the WING host for the landing, loopback for the return.
     expect(codeOnly.indexOf("screenWingUrl")).toBeLessThan(codeOnly.indexOf(".goto("));
     expect(codeOnly).toContain("if (screened.ok)");
+    expect(codeOnly.indexOf("screenSellerOpsReturnUrl")).toBeLessThan(codeOnly.lastIndexOf(".goto("));
+    // …and the return opens a NEW TAB rather than navigating the WING one: the secret key is shown once, and
+    // the seller may still be copying it.
+    expect(codeOnly).toContain("context.newPage()");
     // ONE driver for the carrier's lifetime — a re-attach must reuse the seller's window, not open a second.
     expect(fn).toContain("createDriver: () => driver");
   });

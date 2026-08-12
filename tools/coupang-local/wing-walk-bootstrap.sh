@@ -91,9 +91,12 @@ echo "  phase        : COUPANG_WING_GUIDED_ISSUANCE_WALK (agent READ_ONLY; the O
 # autoAdvancingStepCount:4 and sellerConsentObserved:true. The manifest was right and this half of the
 # disclosure was not, which is the defect this workstream keeps having to unpick, in the sentence rather than
 # the data. `wing-walk-selfcheck.sh` now greps this output too, so it cannot drift silently again.
-echo "  navigation   : ONE — the agent opens the seller's own WING landing when the window comes up."
-echo "                 It never navigates again; every screen after it is one the SELLER reaches."
-echo "                 0 clicks, 0 inputs, 0 submits"
+echo "  navigation   : TWO, and neither is a marketplace screen the agent drives you to."
+echo "                 1. the LANDING — it opens your own WING sales-info page when the window comes up."
+echo "                 2. the RETURN — only if you press 'SellerOps로 돌아가기' on the last step, it opens the"
+echo "                    local SellerOps connect screen in a NEW TAB and brings it to the front. Your WING"
+echo "                    tab is left exactly as it is, so the keys stay on screen while you paste them."
+echo "                 Every screen in between is one the SELLER reaches. 0 clicks, 0 inputs, 0 submits"
 echo "  highlights   : NINE live-calibrated controls (API Key 발급 받기 · 확인 · 약관 동의 및 Key 발급받기 · the"
 echo "                 key region · the OPEN API option label · both consent sentences · the"
 echo "                 자체개발(직접입력) option · the vendor screen's 확인). Every step that names a WING"

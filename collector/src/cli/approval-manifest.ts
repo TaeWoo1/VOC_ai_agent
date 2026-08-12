@@ -179,6 +179,16 @@ export const APPROVAL_ACTIONS = [
   // nothing. Deliberately narrow: it is a LANDING, not a route — a phase that drives the seller through screens
   // is a different capability and would need its own member.
   "NAVIGATE_TO_SELLER_LANDING_ONCE",
+  // The walk's LAST step, and the only navigation that leaves the marketplace: when the seller presses
+  // `SellerOps로 돌아가기`, a NEW TAB opens the local SellerOps connect screen and is brought to the front. The
+  // WING tab is left exactly as it is, because the secret key is shown once and the seller may still be
+  // copying it. The destination is screened to a LOOPBACK SellerOps origin, origin-only, and fails closed.
+  //
+  // It is here rather than folded into the landing member because it is a different act with a different risk:
+  // the landing is the agent choosing where the walk starts, this is the agent acting on a press. A capability
+  // list that called both "one navigation" would be describing a narrower run than the one that executes —
+  // which is the exact defect the two members above were added to close.
+  "RETURN_TO_SELLEROPS_ON_SELLER_REQUEST",
   // Read whether the seller has finished consenting: ONE aggregate boolean, computed page-side as the
   // conjunction of the two consent boxes. Which box is ticked never crosses the boundary, nothing is stored,
   // transmitted or logged, and SellerOps still never ticks a box or reads the terms. It is nonetheless a
@@ -337,8 +347,17 @@ export interface GuidedWalkBoundary {
   keyCreationRuledOut: false;
   /** The agent clicks, types, submits — and NAVIGATES — nothing. The last one is new to this entrypoint. */
   agentPerformsAction: false;
-  /** ONE: the landing the window opens on. The walk never navigates again — every screen after it is the seller's. */
-  agentNavigations: 1;
+  /**
+   * TWO, and neither is a marketplace screen the walk drives the seller to.
+   *
+   * 1. the LANDING the window opens on — the seller's own WING home, once, at open;
+   * 2. the RETURN, when the seller presses `SellerOps로 돌아가기` on the last step: a new tab on the local
+   *    SellerOps connect screen, brought to the front, with the WING tab left untouched.
+   *
+   * It was 1, and the second navigation did not exist — which is why that button moved nothing while its label
+   * promised a move. Every screen of the flow BETWEEN these two is still one the seller reaches themselves.
+   */
+  agentNavigations: 2;
   credentialValueReadBudget: 0;
   /** No connect-test, no sync, no upload: guidance finishing is not a connection. */
   performsConnectOrSync: false;
@@ -423,7 +442,7 @@ export const COUPANG_WING_GUIDED_WALK_BOUNDARY: GuidedWalkBoundary = {
   operatorIssuesRealKey: true,
   keyCreationRuledOut: false,
   agentPerformsAction: false,
-  agentNavigations: 1,
+  agentNavigations: 2,
   credentialValueReadBudget: 0,
   performsConnectOrSync: false,
   highlightedControlCount: 9,
@@ -796,6 +815,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
       "HIGHLIGHT_REAL_CONTROL",
       "OBSERVE_USER_CLICK_TRANSITION",
       "NAVIGATE_TO_SELLER_LANDING_ONCE",
+      "RETURN_TO_SELLEROPS_ON_SELLER_REQUEST",
       "OBSERVE_CONSENT_COMPLETE_AGGREGATE",
     ],
     allowsHighlight: true,

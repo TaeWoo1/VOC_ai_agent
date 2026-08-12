@@ -331,7 +331,7 @@ verify_walk_descriptor() {
     "operatorIssuesRealKey:true" \
     "keyCreationRuledOut:false" \
     "agentPerformsAction:false" \
-    "agentNavigations:1" \
+    "agentNavigations:2" \
     "credentialValueReadBudget:0" \
     "performsConnectOrSync:false" \
     "highlightedControlCount:9" \

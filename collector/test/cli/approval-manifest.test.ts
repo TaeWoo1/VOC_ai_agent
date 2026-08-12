@@ -1351,9 +1351,12 @@ describe("the guided walk's installed-service entrypoint", () => {
     const SPEC = PHASE_SPECS.COUPANG_WING_GUIDED_ISSUANCE_WALK;
     const BOUNDARY = SPEC.guidedWalkBoundary!;
 
-    it("declares the ONE navigation the boundary descriptor claims", () => {
-      expect(BOUNDARY.agentNavigations).toBe(1);
+    it("declares BOTH navigations the boundary descriptor claims", () => {
+      // Two since 2026-08-12: the landing, and the return to SellerOps the seller asks for on the last step.
+      // The second one is why that step's button finally does what its label says.
+      expect(BOUNDARY.agentNavigations).toBe(2);
       expect(SPEC.capableActions).toContain("NAVIGATE_TO_SELLER_LANDING_ONCE");
+      expect(SPEC.capableActions).toContain("RETURN_TO_SELLEROPS_ON_SELLER_REQUEST");
     });
 
     it("declares the consent-state read the boundary descriptor claims", () => {
@@ -1365,6 +1368,8 @@ describe("the guided walk's installed-service entrypoint", () => {
       // The general form, so the next widening cannot be shipped as prose either. If a descriptor says the run
       // navigates or reads consent, the validated list must say so too.
       if (BOUNDARY.agentNavigations > 0) expect(SPEC.capableActions).toContain("NAVIGATE_TO_SELLER_LANDING_ONCE");
+      // A SECOND navigation is a second capability, not a bigger number beside the first one.
+      if (BOUNDARY.agentNavigations > 1) expect(SPEC.capableActions).toContain("RETURN_TO_SELLEROPS_ON_SELLER_REQUEST");
       if (BOUNDARY.sellerConsentObserved) expect(SPEC.capableActions).toContain("OBSERVE_CONSENT_COMPLETE_AGGREGATE");
     });
 
@@ -1372,6 +1377,7 @@ describe("the guided walk's installed-service entrypoint", () => {
       for (const [phase, spec] of Object.entries(PHASE_SPECS)) {
         if (phase === "COUPANG_WING_GUIDED_ISSUANCE_WALK") continue;
         expect(spec.capableActions, phase).not.toContain("NAVIGATE_TO_SELLER_LANDING_ONCE");
+        expect(spec.capableActions, phase).not.toContain("RETURN_TO_SELLEROPS_ON_SELLER_REQUEST");
         expect(spec.capableActions, phase).not.toContain("OBSERVE_CONSENT_COMPLETE_AGGREGATE");
       }
     });
