@@ -366,6 +366,14 @@ if [ -z "$TREE_DIRTY" ]; then
   # The new last step, and the two things it must say: what the operator does, and what is read from it.
   run_case "VENDOR         · step 7 asks for the registration" 0 "press '추가' so it is" "$FIXTURES/vendor.env"
   run_case "VENDOR         · step 7 says what it reads, and what it does not" 0 "not even how many fields are non-empty" "$FIXTURES/vendor.env"
+  # HOW a checkpoint advances, on the page the operator grants from. Until 2026-08-13 the plan said "→ ready"
+  # while a sentinel file did the advancing, and that file was created on a chat line the operator never wrote.
+  # A preflight that still promised the old channel would be describing a run that no longer exists.
+  run_case "VENDOR         · the plan names the confirmation control" 0 "press [현재 화면 확인]" "$FIXTURES/vendor.env"
+  run_case "VENDOR         · …on the SellerOps tab, not in chat" 0 "SellerOps 확인" "$FIXTURES/vendor.env"
+  run_case "VENDOR         · …and says a message never advances a run" 0 "a chat message or a file never advances" "$FIXTURES/vendor.env"
+  # The manifest's own operator line carries it too — the plan and the manifest are read by different people.
+  run_case "VENDOR         · the manifest disclosure names the control" 0 "현재 화면 확인" "$FIXTURES/vendor.env"
   # The choice is the product owner's, and the manifest must not nudge.
   run_case "VENDOR         · the method choice is declared a product decision" 0 "product decision" "$FIXTURES/vendor.env"
   run_case "VENDOR         · run command carries BOTH phase variables" 0 "SELLEROPS_WING_APPROVED_PHASE=COUPANG_WING_VENDOR_METHOD_DISCOVERY" "$FIXTURES/vendor.env"

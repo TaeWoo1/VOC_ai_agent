@@ -612,6 +612,22 @@ describe("Coupang WING selector-probe phase (COUPANG_WING_SELECTOR_PROBE)", () =
       }
     }
   });
+
+  it("every probe-CLI phase discloses the confirmation channel, and none still asks for 'ready'", () => {
+    // The manifest is what the operator grants against, so it has to name the thing they will actually be asked
+    // to do. Until 2026-08-13 these summaries said "ready 를 보내세요" while a sentinel file did the advancing —
+    // and the file was created on a chat line nobody wrote. A summary left behind would re-open that door.
+    const probePhases = (Object.keys(PHASE_ENTRYPOINTS) as (keyof typeof PHASE_ENTRYPOINTS)[]).filter(
+      (phase) => PHASE_ENTRYPOINTS[phase].cli === "src/cli/probe-wing-issuance-selectors.ts",
+    );
+    expect(probePhases.length).toBe(6);
+    for (const phase of probePhases) {
+      const summary = PHASE_ENTRYPOINTS[phase].operatorActionSummary;
+      expect(summary, `${phase} must name the confirmation control`).toContain("현재 화면 확인");
+      expect(summary, `${phase} must disclose the extra tab`).toContain("SellerOps 확인");
+      expect(summary, `${phase} must not still ask for a chat/file signal`).not.toContain("ready 를 보내세요");
+    }
+  });
 });
 
 describe("Coupang WING selector-probe target scope (probeTargets)", () => {

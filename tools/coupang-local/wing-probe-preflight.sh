@@ -269,35 +269,37 @@ if is_flow_phase "$PHASE"; then
   fi
   PLAN="${SELLEROPS_WING_FLOW_CHECKPOINTS:-$PLAN_FULL}"
   PLAN_N="$(printf '%s' "$PLAN" | tr ',' '\n' | grep -c .)"
-  echo "  $PLAN_N checkpoints, each waiting for your signal, each instruction printed only when it is that"
-  echo "  step's turn:"
+  echo "  $PLAN_N checkpoints. Each one waits for YOU to press [현재 화면 확인] on the 'SellerOps 확인' tab that"
+  echo "  opens alongside the WING window — a chat message or a file never advances the run, and since"
+  echo "  2026-08-13 nothing else can (that day a checkpoint advanced on a chat line the operator never wrote)."
+  echo "  Each instruction is printed, and shown on that tab, only when it is that step's turn:"
   STEP_I=0
   OLD_IFS="$IFS"; IFS=','
   for CP in $PLAN; do
     STEP_I=$((STEP_I + 1))
     case "$CP" in
       PURPOSE_SCREEN_UNTOUCHED)
-        echo "    $STEP_I) 발급 press → STOP on the purpose screen, select nothing → ready" ;;
+        echo "    $STEP_I) 발급 press → STOP on the purpose screen, select nothing → press [현재 화면 확인]" ;;
       PURPOSE_OPTION_SELECTED_BY_OPERATOR)
         echo "    $STEP_I) make sure 'OPEN API' is selected — it is the DEFAULT, so press nothing if it already" 
-        echo "       is. Do NOT press 확인 → ready" ;;
+        echo "       is. Do NOT press 확인 → press [현재 화면 확인]" ;;
       AFTER_OPERATOR_CONFIRM)
         echo "    $STEP_I) press 확인 — offered ONLY IF the previous reading says the flow is still on the" 
-        echo "       purpose screen and the 업체명/URL/IP fields are not on it → ready" ;;
+        echo "       purpose screen and the 업체명/URL/IP fields are not on it → press [현재 화면 확인]" ;;
       TERMS_CHECKED_BY_OPERATOR)
-        echo "    $STEP_I) the TERMS screen: tick the two consent boxes yourself → ready" ;;
+        echo "    $STEP_I) the TERMS screen: tick the two consent boxes yourself → press [현재 화면 확인]" ;;
       VENDOR_METHOD_SCREEN_UNTOUCHED)
         echo "    $STEP_I) press '약관 동의 및 Key 발급받기' yourself — pressed on two live walks and the operator"
         echo "       reported no key either time (SellerOps cannot confirm that either way) — then STOP on the"
-        echo "       screen it opens, choose nothing → ready" ;;
+        echo "       screen it opens, choose nothing → press [현재 화면 확인]" ;;
       VENDOR_METHOD_SELECTED_BY_OPERATOR)
         echo "    $STEP_I) on that screen, select the input method yourself and LEAVE the fields it reveals empty."
-        echo "       Do NOT press '확인' → ready" ;;
+        echo "       Do NOT press '확인' → press [현재 화면 확인]" ;;
       VENDOR_FORM_IP_REGISTERED_BY_OPERATOR)
         echo "    $STEP_I) fill the form in yourself: type 업체명 · URL, type an IP address and press '추가' so it is"
         echo "       REGISTERED. SellerOps reads the TAG NAMES inside each field's region and how many of each —"
         echo "       not what you typed, and not even how many fields are non-empty. Filling a form in is not"
-        echo "       submitting it, so your account is unchanged. Do NOT press '확인' → ready" ;;
+        echo "       submitting it, so your account is unchanged. Do NOT press '확인' → press [현재 화면 확인]" ;;
     esac
   done
   IFS="$OLD_IFS"
