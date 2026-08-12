@@ -523,21 +523,6 @@ export function buildReplySubmissionConfig(): AgentReplySubmissionConfig {
 }
 
 /**
- * Raise the OS window a page lives in — best effort, never fatal.
- *
- * `page.bringToFront()` activates a TAB inside its window; it does not raise the window itself. When SellerOps and
- * the seller center are in the same window that is enough, and when they are not it is invisible: on 2026-07-26 the
- * operator pressed 계속 가져오기 from a SellerOps tab in a different browser window and nothing appeared to happen,
- * because the tab we activated was in a window behind it.
- *
- * There is no Playwright API for "raise this window", so this goes through CDP's `Browser` domain — the same
- * browser we launched, asking about its own window. It restores a minimized window and re-asserts its bounds,
- * which is as far as a browser can push without the OS-level focus stealing that no page should be able to do.
- *
- * Returns whether it worked, because the caller LOGS it: a claim that a window was raised has to be a measurement,
- * not an intention.
- */
-/**
  * Run a {@link planOsOpen} plan — the ONLY place this agent starts an OS process for a URL.
  *
  * `shell: false` (the default, restated by passing an argv array and never a command string) is the property
@@ -573,6 +558,21 @@ async function openInDefaultBrowser(command: string, args: readonly string[]): P
 /** How long the OS launcher gets to exit before the return reports itself unproven. */
 const OS_OPEN_TIMEOUT_MS = 10_000;
 
+/**
+ * Raise the OS window a page lives in — best effort, never fatal.
+ *
+ * `page.bringToFront()` activates a TAB inside its window; it does not raise the window itself. When SellerOps and
+ * the seller center are in the same window that is enough, and when they are not it is invisible: on 2026-07-26 the
+ * operator pressed 계속 가져오기 from a SellerOps tab in a different browser window and nothing appeared to happen,
+ * because the tab we activated was in a window behind it.
+ *
+ * There is no Playwright API for "raise this window", so this goes through CDP's `Browser` domain — the same
+ * browser we launched, asking about its own window. It restores a minimized window and re-asserts its bounds,
+ * which is as far as a browser can push without the OS-level focus stealing that no page should be able to do.
+ *
+ * Returns whether it worked, because the caller LOGS it: a claim that a window was raised has to be a measurement,
+ * not an intention.
+ */
 async function raiseWindowOf(page: Page): Promise<boolean> {
   try {
     const cdp = await page.context().newCDPSession(page);
