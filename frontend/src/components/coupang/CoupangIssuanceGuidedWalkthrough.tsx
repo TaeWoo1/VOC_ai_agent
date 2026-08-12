@@ -289,17 +289,23 @@ export function CoupangIssuanceGuidedWalkthrough({
                   {effectiveRun.progress.completedSteps} / {effectiveRun.progress.totalSteps} 단계 완료
                 </p>
               )}
-              {canRaiseWindow && (
-                <button
-                  type="button"
-                  className="btn-ghost text-sm"
-                  onClick={() => effectiveCommand?.("FIND_CURRENT_STEP")}
-                  disabled={busy}
-                >
-                  쿠팡 윙 창 앞으로 가져오기
-                </button>
-              )}
             </section>
+          )}
+
+          {/* The way back to the WING window, and it is deliberately the LOUDEST thing on this screen.
+              Reported live twice (2026-08-12): the seller could not find it. It was a ghost-styled line of text
+              at the bottom of a status box, and it was hidden entirely at a blocker — which is precisely when a
+              seller has lost the window and comes here looking. It is now its own control, full width, rendered
+              for every non-terminal run. It raises the EXISTING window; it opens nothing and navigates nothing. */}
+          {effectiveRun.status !== "COMPLETED" && canRaiseWindow && (
+            <button
+              type="button"
+              className="btn-ghost block w-full"
+              onClick={() => effectiveCommand?.("FIND_CURRENT_STEP")}
+              disabled={busy}
+            >
+              쿠팡 윙 창 앞으로 가져오기
+            </button>
           )}
 
           {/* Recovery is the FE's job: at a recoverable blocker, surface the blocker + the recovery control
