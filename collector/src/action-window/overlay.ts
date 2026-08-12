@@ -599,6 +599,14 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
         btn.addEventListener("click", function () {
           const w = window as unknown as Record<string, unknown>;
           w["__aw_advance_pressed__"] = w["__aw_advance_token__"];
+          // A COUNT of presses, kept beside the latch and never cleared by a re-arm.
+          //
+          // The latch alone cannot distinguish "the seller never pressed" from "they pressed and something
+          // ate it" — and on 2026-08-12 the walk sat at step 6 through repeated presses with no way to tell
+          // those apart from outside. The count is value-free (an integer), survives the re-arm that clears
+          // the latch, and is what makes "the handler ran" a measurement rather than an inference.
+          const prev = w["__aw_advance_press_count__"];
+          w["__aw_advance_press_count__"] = (typeof prev === "number" ? prev : 0) + 1;
         });
         row.appendChild(btn);
       }
@@ -749,6 +757,41 @@ export async function resetOverlayAdvance(page: PageOrFrame, token: string): Pro
  */
 export async function readOverlayAdvancePressed(page: PageOrFrame, token: string): Promise<boolean> {
   return page.evaluate((t) => (window as unknown as Record<string, unknown>)["__aw_advance_pressed__"] === t, token);
+}
+
+/**
+ * **Everything the host needs to say WHERE the advance path broke, in one read.** Value-free throughout: a
+ * count, three booleans, no page content.
+ *
+ * Four independent facts, because "the walk did not advance" has four distinct causes and they need different
+ * fixes: the panel is gone (nothing to press), the seller has not pressed (`presses` 0), they pressed but the
+ * latch does not match this step's token (`presses` > 0, `latched` false — a re-arm race or a stale panel from
+ * a previous step), or everything is in order and the reader is not running (`latched` true and the walk still
+ * sitting there). Inferring between those from silence is what cost a live sitting on 2026-08-12.
+ */
+export interface OverlayAdvanceDiagnostics {
+  /** How many times THIS page's advance button has been pressed since the page loaded. Never cleared by a re-arm. */
+  presses: number;
+  /** Is the latch currently set to the token the caller is polling for? */
+  latched: boolean;
+  /** Is a token armed at all? (`false` ⇒ nothing mounted an advance affordance, or it was torn down.) */
+  tokenArmed: boolean;
+  /** Is the guidance panel still on the page? */
+  panelMounted: boolean;
+}
+
+export async function readOverlayAdvanceDiagnostics(page: PageOrFrame, token: string): Promise<OverlayAdvanceDiagnostics> {
+  return page.evaluate((t) => {
+    const w = window as unknown as Record<string, unknown>;
+    const presses = w["__aw_advance_press_count__"];
+    const armed = w["__aw_advance_token__"];
+    return {
+      presses: typeof presses === "number" ? presses : 0,
+      latched: w["__aw_advance_pressed__"] === t,
+      tokenArmed: typeof armed === "string" && armed.length > 0,
+      panelMounted: !!document.getElementById("__aw_advance_panel__"),
+    };
+  }, token);
 }
 
 /** Test/QA helper: is the WING-resident advance panel currently mounted? (sanitized boolean) */

@@ -569,3 +569,64 @@ describe("the guidance panel's disclosure", () => {
     expect(toggleOf(doc)).toBeNull();
   });
 });
+
+/* ───────────── 4. an advance takes the OLD ring down and re-anchors on the next control ───────────── */
+
+/**
+ * Live-observed 2026-08-12: the walk sat at step ⑥ with the ring still on `자체개발(직접입력)`. The operator
+ * asked the right question — if the ring is not going to move to the input fields, the old one should at least
+ * be gone. It should, and this is what "gone" has to mean: the previous step's ring is REMOVED, not left
+ * beside the new one, and the new ring is on the next control by the time the panel says so.
+ */
+describe("a step advance re-anchors the ring", () => {
+  const STEP7 = {
+    ...BASE,
+    stepNumber: 7,
+    residentPanel: true,
+    label: "⚠ 이 화면의 '확인'에서 실제 API 키가 발급됩니다",
+    advance: { buttonLabel: "확인을 눌렀어요 · 다음", token: "tok7" },
+  };
+
+  it("**the old ring is removed and the new one sits on the next control**", async () => {
+    const doc = new Doc();
+    const option = tagged(doc, rect(380, 300, 160, 30)); // 자체개발(직접입력)
+    const { page, env } = fakePage(doc, 800);
+    await mountOverlay(page as never, PANEL);
+    env.mutate();
+    expect(doc.getElementById("__aw_overlay__")!.style["top"]).toBe("294px");
+
+    // The advance: the ring-plan script clears every prior `data-aw-target` before tagging the new control, so
+    // the next mount finds exactly one anchor. This models that, then mounts step ⑦.
+    option.removeAttribute("data-aw-target");
+    const confirm = tagged(doc, rect(1200, 690, 130, 44)); // the vendor screen's 확인
+    await mountOverlay(page as never, STEP7);
+    env.mutate();
+
+    // ONE ring, on 확인 — not two, and not the option's coordinates with step ⑦'s text beside them.
+    const rings = doc.querySelectorAll("#__aw_overlay__,[data-aw-ring-secondary]");
+    expect(rings).toHaveLength(1);
+    expect(rings[0]!.style["top"]).toBe("684px");
+    expect(rings[0]!.style["left"]).toBe("1194px");
+    expect(confirm.hasAttribute("data-aw-target")).toBe(true);
+    expect(option.hasAttribute("data-aw-target")).toBe(false);
+  });
+
+  it("the panel that arrives with it is the NEW step's, and its latch is re-armed", async () => {
+    const doc = new Doc();
+    const option = tagged(doc, rect(380, 300, 160, 30));
+    const { page, env } = fakePage(doc, 800);
+    await mountOverlay(page as never, PANEL);
+    env.run(() => {
+      (globalThis as unknown as { window: Record<string, unknown> }).window["__aw_advance_pressed__"] = "tok";
+    });
+    option.removeAttribute("data-aw-target");
+    tagged(doc, rect(1200, 690, 130, 44));
+    await mountOverlay(page as never, STEP7);
+    // A press recorded against step ⑥ must not satisfy step ⑦: the mount re-arms the token and drops the latch.
+    expect(env.win["__aw_advance_token__"]).toBe("tok7");
+    expect(env.win["__aw_advance_pressed__"]).toBeUndefined();
+    const panels = doc.querySelectorAll("#__aw_advance_panel__");
+    expect(panels).toHaveLength(1);
+    expect(panels[0]!.children[0]!.children[0]!.textContent).toContain("실제 API 키가 발급됩니다");
+  });
+});

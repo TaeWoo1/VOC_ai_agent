@@ -47,7 +47,15 @@ import {
   type WingFlowScreenMarkerSpec,
   type WingGuidedHighlightTarget,
 } from "./coupang-wing-label-recon";
-import { mountOverlay, unmountOverlay, overlayMounted, resetOverlayAdvance, readOverlayAdvancePressed } from "./overlay";
+import {
+  mountOverlay,
+  unmountOverlay,
+  overlayMounted,
+  resetOverlayAdvance,
+  readOverlayAdvancePressed,
+  readOverlayAdvanceDiagnostics,
+  type OverlayAdvanceDiagnostics,
+} from "./overlay";
 import {
   EXTRACT_WING_CENSUS,
   EXTRACT_WING_CHOICE_CONTROL_SHAPES,
@@ -731,6 +739,31 @@ const REMOUNT_TIMEOUT_MS = 10_000;
 const RETURN_TO_SELLEROPS_TIMEOUT_MS = 15_000;
 
 /**
+ * How long an ARMED step may go without its watcher starting before the run says so and takes the panel down.
+ *
+ * Generous — arming is followed by several in-page reads on a live marketplace page — but finite, because the
+ * alternative is what happened at step 6 on 2026-08-12: a panel that looked live, presses that were recorded,
+ * and nothing reading them, for as long as the seller was willing to keep pressing.
+ */
+const OBSERVE_START_WATCHDOG_MS = 20_000;
+
+/**
+ * How often an armed step reports that it is alive AND what it can see of the seller's presses. Slow enough
+ * that a ten-minute barrier costs sixty lines, frequent enough that a stall is visible within one.
+ */
+const OBSERVE_HEARTBEAT_MS = 10_000;
+
+/**
+ * How many CONSECUTIVE latch reads may go unanswered before the step gives up and takes its panel down.
+ *
+ * Each read is already bounded by {@link IN_PAGE_READ_TIMEOUT_MS}, so three of them is ~12s of a page that
+ * cannot be read at all — which on a live walk is not a slow page, it is a page this run has lost. A run that
+ * kept polling it would keep a panel on the glass whose button nobody is reading, which is the exact state the
+ * seller met at step 6 on 2026-08-12: presses recorded in the page, and no reader.
+ */
+const UNREADABLE_POLL_LIMIT = 3;
+
+/**
  * Resolve `work`, or `fallback` if it has not settled within `ms` — and treat a rejection as the fallback too,
  * so a caller gets one fail-closed value for both ways a read can fail to produce an answer.
  */
@@ -1081,6 +1114,8 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
   private readonly page: Page;
   private readonly opts: CoupangWingIssuanceDriverOptions;
   private readonly closed: Promise<void>;
+  /** Armed by {@link armObserve}, cancelled by the observe loop it is waiting for. See {@link armWatchdog}. */
+  private observeWatchdog: ReturnType<typeof setTimeout> | null = null;
 
   constructor(page: Page, opts: CoupangWingIssuanceDriverOptions = {}) {
     this.page = page;
@@ -1568,7 +1603,54 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     // step or arm window can never be misread as this step's advance. `reach_open_api` arms nothing here — it is
     // watched as a page-CATEGORY transition in `observeUserAction`, not a button press.
     if (isCoupangCheckpointTarget(target)) {
-      await resetOverlayAdvance(this.activePage(), advanceToken(target)).catch(() => undefined);
+      // **TIME-BOXED, and this is the last unboxed read on the arm/observe path.**
+      //
+      // The session drives `armObserve` and only THEN starts the barrier watcher (`await armObserve(...)`, then
+      // `void watchBarrier(...)`), so an `evaluate` that never settles here does not slow the walk down — it
+      // means the watcher is never started at all. The panel stays on the glass looking live, the seller's press
+      // is faithfully recorded into the in-page latch, and nothing ever reads it. That is exactly the state the
+      // 2026-08-12 walk sat in at step 6 through repeated presses.
+      const rearmed = await timebox(
+        resetOverlayAdvance(this.activePage(), advanceToken(target))
+          .then(() => true)
+          .catch(() => false),
+        false,
+      );
+      // Logged either way: an arm that could not be re-armed is a step whose latch may still hold a stale press,
+      // and the observe loop below has to be reachable to do anything about it.
+      log("aw_coupang_step_armed", { target, rearmed });
+      this.armWatchdog(target);
+    }
+  }
+
+  /**
+   * **Did the watcher this arm exists for actually start?**
+   *
+   * `armObserve` returning is not the same as anything WATCHING. Between the two sits the session's own effect
+   * chain, and on 2026-08-12 the walk sat at an armed step with a live-looking panel and no reader — a state
+   * indistinguishable, from outside, from a seller who has not pressed anything yet.
+   *
+   * So arming starts a timer that {@link observeOverlayAdvance} cancels on entry. If it fires, the run says so
+   * and TAKES THE PANEL DOWN: guidance nobody is driving must not keep presenting itself as guidance. The
+   * session's park/recheck path re-guides and mounts a fresh one, which is the recovery — the seller is never
+   * left with a panel whose button does nothing.
+   */
+  private armWatchdog(target: CoupangIssuanceTarget): void {
+    this.cancelWatchdog();
+    this.observeWatchdog = setTimeout(() => {
+      this.observeWatchdog = null;
+      log("aw_coupang_observe_never_started", { target }, "warn");
+      // Fail closed: no panel is honest, a dead panel is not.
+      void this.clearHighlight().catch(() => undefined);
+    }, OBSERVE_START_WATCHDOG_MS);
+    // Never hold the process open on account of a diagnostic timer.
+    this.observeWatchdog.unref?.();
+  }
+
+  private cancelWatchdog(): void {
+    if (this.observeWatchdog) {
+      clearTimeout(this.observeWatchdog);
+      this.observeWatchdog = null;
     }
   }
 
@@ -1598,7 +1680,9 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
    */
   private async observeConsentComplete(): Promise<boolean> {
     const script = buildWingConsentCompleteScript(WING_STAGE3_TERMS_OPTION_CANDIDATES.map((c) => c.exactText));
-    return (await this.evalStr<boolean>(this.activePage(), script).catch(() => false)) === true;
+    // Time-boxed like every other read on this path. A `.catch` guards a REJECTION; it does nothing about an
+    // `evaluate` that simply never settles, which is the failure this walk has now met twice.
+    return (await timebox(this.evalStr<boolean>(this.activePage(), script).catch(() => false), false)) === true;
   }
 
   /**
@@ -1618,6 +1702,10 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
    * value, no text. On timeout it returns `false` so the session re-arms.
    */
   private async observeOverlayAdvance(target: CoupangIssuanceTarget): Promise<boolean> {
+    // The watcher IS running — cancel the arm watchdog before anything else, including before the baseline reads
+    // below, which are themselves several in-page evaluates.
+    this.cancelWatchdog();
+    log("aw_coupang_observe_start", { target });
     const timeoutMs = this.opts.observeTimeoutMs ?? DEFAULT_WING_OBSERVE_TIMEOUT_MS;
     const maxPolls = Math.max(1, Math.ceil(timeoutMs / OVERLAY_ADVANCE_POLL_MS));
     const token = advanceToken(target);
@@ -1670,11 +1758,49 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     // The screen probe costs three in-page locates, so it runs on a slower cadence than the latch poll rather
     // than on every tick. The seller pressing the button is still noticed within one latch poll.
     const screenEvery = Math.max(1, Math.round(SCREEN_OBSERVE_POLL_MS / OVERLAY_ADVANCE_POLL_MS));
+    const pollsPerHeartbeat = Math.max(1, Math.round(OBSERVE_HEARTBEAT_MS / OVERLAY_ADVANCE_POLL_MS));
+    /** Consecutive latch reads that could not be answered at all. Reset by any read that answers. */
+    let unreadable = 0;
     for (let i = 0; i < maxPolls; i++) {
       // Time-boxed, like every in-page read below it. An `evaluate` that never settles used to stop this loop
       // dead mid-iteration, with the panel still painted and nothing left watching it.
-      const pressed = await timebox(readOverlayAdvancePressed(this.activePage(), token), false);
-      if (pressed) {
+      // The HEARTBEAT, and the only place a press can be told apart from a silence.
+      //
+      // Every `pollsPerHeartbeat` ticks the poll reads the four diagnostics together and logs them: how many
+      // times this page's advance button has been pressed, whether the latch matches THIS step's token, whether
+      // a token is armed at all, and whether the panel is still mounted. All value-free.
+      //
+      // A run that stops emitting these has stopped polling — which nothing could see before, because a step
+      // watching only a button probes no screen and logged nothing at all. `presses: 0` while the seller says
+      // they pressed means the click never reached the handler; `presses: n, latched: false` means a re-arm ate
+      // it; `latched: true` and no advance means the reader is at fault. Three different fixes, one line.
+      if (i % pollsPerHeartbeat === 0) {
+        const diag = await timebox(readOverlayAdvanceDiagnostics(this.activePage(), token), null as OverlayAdvanceDiagnostics | null);
+        if (diag) log("aw_coupang_observe_heartbeat", { target, poll: i, ...diag });
+        else log("aw_coupang_observe_heartbeat", { target, poll: i, unreadable: true }, "warn");
+      }
+      // TRI-STATE, not a boolean. A time-boxed read that answers `false` for both "not pressed yet" and "this
+      // page can no longer be read" is how a walk keeps polling a surface that stopped answering, forever, while
+      // the seller presses a button nobody is reading. The two are different facts and are now different values.
+      const latch = await timebox(
+        readOverlayAdvancePressed(this.activePage(), token).then((v) => (v ? "PRESSED" : "NOT_PRESSED")),
+        "UNREADABLE" as const,
+      );
+      if (latch === "UNREADABLE") {
+        unreadable += 1;
+        if (unreadable >= UNREADABLE_POLL_LIMIT) {
+          // FAIL CLOSED. The page is not answering this run any more; the panel on it is no longer guidance,
+          // whatever it still looks like. Take it down, say so, and hand back to the session — its re-arm
+          // re-resolves the active page and re-guides, which is the only recovery that can actually work if the
+          // page handle is what died.
+          log("aw_coupang_observe_unreadable", { target, polls: unreadable }, "warn");
+          await this.clearHighlight().catch(() => undefined);
+          return false;
+        }
+      } else {
+        unreadable = 0;
+      }
+      if (latch === "PRESSED") {
         // The one step whose button promises something OUTSIDE this page. Performed on the press and nowhere
         // else, so nothing moves the seller's window while they still have work on WING.
         if (target === "return") await this.returnToSellerOps();
@@ -1783,6 +1909,9 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
 
   /** Teardown, time-boxed for the same reason {@link clearHighlight} is: a closing page may never answer. */
   async cleanup(): Promise<void> {
+    // The watchdog outlives nothing: a run that has been torn down must not have a timer left that fires later
+    // and unmounts an overlay belonging to whatever came next.
+    this.cancelWatchdog();
     const page = this.activePage();
     await timebox(unmountOverlay(page), undefined);
     await timebox(this.evalStr(page, IN_PAGE_CLEAR_TAG).then(() => undefined), undefined);
