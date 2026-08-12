@@ -180,6 +180,8 @@ describe("the redesigned walk can actually be walked", () => {
       // the `확인` control, the `OPEN API` option label and the two consent sentences.
       if (target === "issue" || target === "credentials" || target === "issue_final") continue;
       if (target === "confirm_purpose" || target === "terms_consent") continue;
+      // …and the two vendor-screen steps joined on 2026-08-12, when that screen was measured on two checkpoints.
+      if (target === "vendor_method" || target === "vendor_confirm") continue;
       const res = await driver.locateTarget(target);
       expect(res.count, `${target} would park the run at target_not_found`).toBe(1);
       expect(res.sig, target).toMatch(/^[0-9a-f]{16}$/);

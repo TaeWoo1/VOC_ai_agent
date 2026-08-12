@@ -336,6 +336,55 @@ if [ -z "$TREE_DIRTY" ]; then
   else
     echo "  FAIL  STAGE2CAL_NARROW · narrowing was silently widened"; FAILED=1
   fi
+  # ── the VENDOR-METHOD DISCOVERY phase ─────────────────────────────────────
+  # The first phase that asks the operator to press `약관 동의 및 Key 발급받기`. Every case below is about the
+  # two sentences that make that askable and that keep it from going one step further: the press is measured to
+  # issue no key, and the control after it issues a real one.
+  VENDOR_SCOPE="purpose,self_dev,vendor_info,vendor_url,call_ip,confirm,terms_heading,terms_api_agree,terms_category_agree,terms_cancel,terms_issue_final,purpose_open_api,vendor_method_heading,vendor_method_prompt,vendor_partner,vendor_self_dev"
+  write_stage2_env "$FIXTURES/vendor.env" "$CUR_GIT" "$VENDOR_SCOPE" \
+    "wt-selfcheck40" "apr-selfcheck40" "COUPANG_WING_VENDOR_METHOD_DISCOVERY"
+  run_case "VENDOR         (vendor-method discovery scope)" 0 "PREFLIGHT PASS" "$FIXTURES/vendor.env"
+  run_case "VENDOR         · manifest phase" 0 "COUPANG_WING_VENDOR_METHOD_DISCOVERY" "$FIXTURES/vendor.env"
+  run_case "VENDOR         · READ_ONLY mode (the AGENT's budget is unchanged)" 0 "READ_ONLY" "$FIXTURES/vendor.env"
+  run_case "VENDOR         · operation names the phase" 0 "WING VENDOR-METHOD DISCOVERY" "$FIXTURES/vendor.env"
+  # The press it asks for is justified by the MEASUREMENT, never by the button's label — which is exactly what
+  # the refuted claim was justified by.
+  run_case "VENDOR         · the press rests on the OPERATOR REPORT" 0 "the OPERATOR reported no key either time" "$FIXTURES/vendor.env"
+  run_case "VENDOR         · …and the report is not rounded up to a measurement" 0 "The report is not a measurement" "$FIXTURES/vendor.env"
+  run_case "VENDOR         · the screen is declared unread" 0 "NO apparatus has ever read" "$FIXTURES/vendor.env"
+  # …and the boundary it stops at, in both the reviewer's line and the operator's.
+  run_case "VENDOR         · operation names the irreversible control" 0 "ISSUES A REAL API KEY" "$FIXTURES/vendor.env"
+  run_case "VENDOR         · operation names the separate WRITE grant" 0 "separate mode-WRITE grant" "$FIXTURES/vendor.env"
+  run_case "VENDOR         · disclosure names the irreversible control" 0 "ISSUES A REAL API KEY on your live account" "$FIXTURES/vendor.env"
+  run_case "VENDOR         · disclosure says no checkpoint can reach it" 0 "no checkpoint of this phase stands in front of it" "$FIXTURES/vendor.env"
+  run_case "VENDOR         · disclosure carries the six-step plan" 0 "6 checkpoints" "$FIXTURES/vendor.env"
+  run_case "VENDOR         · step 5 attributes the no-key claim" 0 "reported no key either time" "$FIXTURES/vendor.env"
+  run_case "VENDOR         · step 6 forbids the issuing press" 0 "Do NOT press '확인'" "$FIXTURES/vendor.env"
+  # The choice is the product owner's, and the manifest must not nudge.
+  run_case "VENDOR         · the method choice is declared a product decision" 0 "product decision" "$FIXTURES/vendor.env"
+  run_case "VENDOR         · run command carries BOTH phase variables" 0 "SELLEROPS_WING_APPROVED_PHASE=COUPANG_WING_VENDOR_METHOD_DISCOVERY" "$FIXTURES/vendor.env"
+  # The RETIRED sentence. The issuance phase's disclosure called `약관 동의 및 Key 발급받기` "the KEY-CREATION
+  # control" — refuted 2026-08-12. It must not reappear in either flow phase's copy.
+  OUT_VENDOR="$(env SELLEROPS_WING_PROBE_RUN_ENV="$FIXTURES/vendor.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1 || true)"
+  if grep -q "is the KEY-CREATION control" <<<"$OUT_VENDOR"; then
+    echo "  FAIL  VENDOR         · the refuted key-creation claim is still in the disclosure"; FAILED=1
+  else
+    echo "  PASS  VENDOR         · the refuted key-creation claim is gone"
+  fi
+  # A NARROWED vendor run must not promise the two steps it will not take.
+  write_stage2_env "$FIXTURES/vendor-narrow.env" "$CUR_GIT" "$VENDOR_SCOPE" \
+    "wt-selfcheck41" "apr-selfcheck41" "COUPANG_WING_VENDOR_METHOD_DISCOVERY"
+  # The plan goes in the RUN ENV, not the ambient shell — the preflight strips ambient copies on purpose, so a
+  # narrowing passed on the command line would silently be the full run.
+  printf "SELLEROPS_WING_FLOW_CHECKPOINTS='%s'\n" "PURPOSE_SCREEN_UNTOUCHED,PURPOSE_OPTION_SELECTED_BY_OPERATOR" \
+    >> "$FIXTURES/vendor-narrow.env"
+  OUT_VN="$(env SELLEROPS_WING_PROBE_RUN_ENV="$FIXTURES/vendor-narrow.env" SELLEROPS_MANIFEST_OUT="$MANIFEST_OUT" bash "$PREFLIGHT" 2>&1 || true)"
+  if grep -q "THIS RUN IS NARROWED" <<<"$OUT_VN" && ! grep -q "1 vendor-method selection" <<<"$OUT_VN"; then
+    echo "  PASS  VENDOR_NARROW  · a narrowed run does not promise the vendor steps"
+  else
+    echo "  FAIL  VENDOR_NARROW  · a narrowed run still promises steps it cannot take"; FAILED=1
+  fi
+
   # The two Stage-2 phases must stay DISTINGUISHABLE in the prose the operator reads. If the calibration copy
   # ever collapsed into the recon copy, both would still pass every case above.
   if grep -q "HOW each choice control is labelled" <<<"$OUT_S2"; then

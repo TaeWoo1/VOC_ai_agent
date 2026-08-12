@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  WING_FLOW_SCREENS,
   WING_FLOW_SCREEN_MARKER_EVIDENCE,
   WING_KEY_CREATION_CONTROL_ID,
   WING_KEY_CREATION_SELECTOR_CALIBRATED,
@@ -12,6 +13,8 @@ import {
   WING_TERMS_SCREEN_MARKERS_MEASURED,
   WING_TERMS_SCREEN_MARKER_IDS,
   WING_TERMS_SCREEN_MARKER_SPECS,
+  WING_VENDOR_METHOD_SCREEN_MARKER_IDS,
+  WING_VENDOR_METHOD_SCREEN_MARKER_SPECS,
 } from "../../../src/action-window/coupang-wing-label-recon";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -109,5 +112,47 @@ describe("every terms marker is read in one pass", () => {
   it("the specs come from the recon candidates — the strings are written down once", () => {
     expect(WING_PURPOSE_SCREEN_MARKER_SPEC.id).toBe(WING_PURPOSE_SCREEN_MARKER_ID);
     expect(WING_TERMS_SCREEN_MARKER_SPECS.map((s) => s.id)).toEqual([...WING_TERMS_SCREEN_MARKER_IDS]);
+  });
+});
+
+/* ══════════════ the ladder that RUNS must know every screen the resolver knows ══════════════ */
+
+describe("the live probe covers every measured screen", () => {
+  /** The screens that name a real surface — the two sentinels are answers, not places. */
+  const REAL_SCREENS = WING_FLOW_SCREENS.filter((s) => s !== "UNRECOGNIZED" && s !== "NOT_MEASURED");
+  const ladder = () => DRV.slice(DRV.indexOf("async probeFlowScreen"), DRV.indexOf("private async markerVisible"));
+
+  it("**every screen the pure resolver can return is reachable from the LIVE ladder**", () => {
+    // THE regression. On 2026-08-12 the vendor screen had marker specs, the pure `wingFlowScreenFrom` knew it,
+    // `CHECKPOINT_ADVANCES_TO_SCREEN` pointed a step at it, and three tests pinned all of that — but the ladder
+    // that actually runs still had two rungs, so the probe answered UNRECOGNIZED on the vendor screen and the
+    // advance could not fire. Every fence was on the RECORD; none was on the runtime.
+    //
+    // Derived from the enum on purpose: adding a screen without teaching the ladder fails here, which is the
+    // only way this class of defect gets caught before a live sitting pays for it.
+    // Matched as a quoted literal rather than `return "X"` — PURPOSE is answered from a ternary. Weaker than
+    // proving the return is reachable, strong enough for the defect it exists for: VENDOR_METHOD appeared
+    // nowhere in this function at all.
+    const fn = ladder();
+    for (const screen of REAL_SCREENS) {
+      expect(fn, `probeFlowScreen can never answer ${screen}`).toContain(`"${screen}"`);
+    }
+  });
+
+  it("the ladder's precedence is the resolver's precedence — VENDOR_METHOD, then TERMS, then PURPOSE", () => {
+    // The vendor screen REPLACES the terms screen (both terms markers go hidden on it, measured ×2), so a ladder
+    // that asked TERMS first would still be right today — but only by accident of which markers hide. The pure
+    // resolver fixes the order; the ladder must not be free to disagree with it.
+    const fn = ladder();
+    expect(fn.indexOf('return "VENDOR_METHOD"')).toBeLessThan(fn.indexOf('if (terms) return "TERMS"'));
+    expect(fn.indexOf('if (terms) return "TERMS"')).toBeLessThan(fn.indexOf("WING_PURPOSE_SCREEN_MARKER_SPEC"));
+    // …and the vendor rung reads EVERY marker in one pass, for the same evidence reason the terms rung does.
+    expect(fn).toContain("let vendor = false");
+    expect(fn).not.toContain('if (await this.markerVisible(spec)) return "VENDOR_METHOD"');
+  });
+
+  it("the vendor specs come from the recon candidates too", () => {
+    expect(WING_VENDOR_METHOD_SCREEN_MARKER_SPECS.map((s) => s.id)).toEqual([...WING_VENDOR_METHOD_SCREEN_MARKER_IDS]);
+    expect(WING_VENDOR_METHOD_SCREEN_MARKER_SPECS.length).toBeGreaterThan(0);
   });
 });

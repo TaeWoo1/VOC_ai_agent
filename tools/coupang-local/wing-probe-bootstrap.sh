@@ -28,6 +28,13 @@
 #                                            conditionally 확인). The agent still clicks, selects and types
 #                                            nothing; the 확인 step is offered only when the reading taken after
 #                                            the selection shows the vendor form is not yet on screen.
+#   COUPANG_WING_VENDOR_METHOD_DISCOVERY   — the discovery flow carried TWO checkpoints further, onto the screen
+#                                            that follows `약관 동의 및 Key 발급받기`. That press was made twice on
+#                                            live walks and the OPERATOR reported no key either time (SellerOps
+#                                            cannot confirm it either way), which is what makes this a READ
+#                                            phase. It ENDS with the operator looking at a
+#                                            `확인` that ISSUES A REAL KEY and which no checkpoint may reach —
+#                                            issuance is a separate manifest and a separate mode-WRITE grant.
 #   COUPANG_WING_STAGE2_LABEL_CALIBRATION  — the same surface and the same operator flow, plus two further
 #                                            read-only reads: a per-candidate CONTAINMENT probe and a
 #                                            label-ASSOCIATION census (how each control is labelled, whether the
@@ -65,9 +72,9 @@ git_hardened() {
 #    pattern and inject a second assignment into the file below.
 PHASE="${SELLEROPS_APPROVAL_PHASE:-COUPANG_WING_SELECTOR_PROBE}"
 case "$PHASE" in
-  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION|COUPANG_WING_ISSUANCE_FLOW_DISCOVERY) ;;
+  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION|COUPANG_WING_ISSUANCE_FLOW_DISCOVERY|COUPANG_WING_VENDOR_METHOD_DISCOVERY) ;;
   *)
-    echo "BOOTSTRAP FAIL — SELLEROPS_APPROVAL_PHASE must be COUPANG_WING_SELECTOR_PROBE, COUPANG_WING_LABEL_RECON, COUPANG_WING_STAGE2_RECON, COUPANG_WING_STAGE2_LABEL_CALIBRATION, or COUPANG_WING_ISSUANCE_FLOW_DISCOVERY."
+    echo "BOOTSTRAP FAIL — SELLEROPS_APPROVAL_PHASE must be COUPANG_WING_SELECTOR_PROBE, COUPANG_WING_LABEL_RECON, COUPANG_WING_STAGE2_RECON, COUPANG_WING_STAGE2_LABEL_CALIBRATION, COUPANG_WING_ISSUANCE_FLOW_DISCOVERY, or COUPANG_WING_VENDOR_METHOD_DISCOVERY."
     echo "                 (The DESTRUCTIVE deletion phase has its own harness and is not approvable from here.)"
     exit 1 ;;
 esac
@@ -78,7 +85,14 @@ esac
 # Is this either of the two STAGE-2 phases? One predicate, used by every branch below — the WING phase list
 # already learned what happens when a new phase is added to some of the `if`s and not others.
 is_stage2_phase() {
-  case "$1" in COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION|COUPANG_WING_ISSUANCE_FLOW_DISCOVERY) return 0 ;; *) return 1 ;; esac
+  case "$1" in COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION|COUPANG_WING_ISSUANCE_FLOW_DISCOVERY|COUPANG_WING_VENDOR_METHOD_DISCOVERY) return 0 ;; *) return 1 ;; esac
+}
+
+# Does this phase run a multi-checkpoint FLOW? The two discovery phases. Their scope has to cover the screen
+# markers and the vendor-form candidates or the run halts part-way through a real sitting, so they do NOT get
+# the six-target default the single-reading phases use — see `wingDiscoveryRequiredTargets`.
+is_flow_phase() {
+  case "$1" in COUPANG_WING_ISSUANCE_FLOW_DISCOVERY|COUPANG_WING_VENDOR_METHOD_DISCOVERY) return 0 ;; *) return 1 ;; esac
 }
 
 if [ "$PHASE" = "COUPANG_WING_LABEL_RECON" ]; then
@@ -103,7 +117,14 @@ esac
 # cannot carry one and a Stage-2 run cannot be narrowed by a probe scope.
 STAGE2_TARGETS=""
 if is_stage2_phase "$PHASE"; then
-  STAGE2_TARGETS="${SELLEROPS_WING_STAGE2_TARGETS:-purpose,self_dev,vendor_info,vendor_url,call_ip,confirm}"
+  if is_flow_phase "$PHASE"; then
+    # The FULL canonical set. A flow run narrowed to the six below cannot identify its own screen and is refused
+    # before Chrome launches — which is correct, and is a refusal the default should not be walking into.
+    STAGE2_DEFAULT="purpose,self_dev,vendor_info,vendor_url,call_ip,confirm,terms_heading,terms_api_agree,terms_category_agree,terms_cancel,terms_issue_final,purpose_open_api,vendor_method_heading,vendor_method_prompt,vendor_partner,vendor_self_dev"
+  else
+    STAGE2_DEFAULT="purpose,self_dev,vendor_info,vendor_url,call_ip,confirm"
+  fi
+  STAGE2_TARGETS="${SELLEROPS_WING_STAGE2_TARGETS:-$STAGE2_DEFAULT}"
   case "$STAGE2_TARGETS" in
     ""|*[!a-z_0-9,]*|,*|*,|*,,*)
       echo "BOOTSTRAP FAIL — SELLEROPS_WING_STAGE2_TARGETS must be a comma-separated list of lowercase target names."
@@ -114,7 +135,7 @@ fi
 # The per-run checkpoint PLAN (discovery only). A PREFIX of the flow, validated in TS; the shape check here is
 # the same one every other value written to this file gets, because the preflight sources it.
 FLOW_CHECKPOINTS=""
-if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then
+if is_flow_phase "$PHASE"; then
   FLOW_CHECKPOINTS="${SELLEROPS_WING_FLOW_CHECKPOINTS:-}"
   case "$FLOW_CHECKPOINTS" in
     "") ;;
@@ -168,7 +189,14 @@ if [ -n "$FLOW_CHECKPOINTS" ]; then
 fi
 if [ -n "$STAGE2_TARGETS" ]; then
   echo "  stage-2 scope: $STAGE2_TARGETS"
-  if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then
+  if [ "$PHASE" = "COUPANG_WING_VENDOR_METHOD_DISCOVERY" ]; then
+    echo "  NOTE         : YOU advance the whole flow, one checkpoint at a time, and TWO steps further than the"
+    echo "                 discovery phase: you also press '약관 동의 및 Key 발급받기' (pressed twice on live"
+    echo "                 walks, operator-reported to issue no key — SellerOps cannot confirm that) and then"
+    echo "                 select an input method on the screen it opens."
+    echo "                 ⚠ THAT SCREEN'S '확인' ISSUES A REAL KEY. It is not in this approval and no checkpoint"
+    echo "                 of this phase can reach it. SellerOps clicks, selects and types nothing at any point."
+  elif [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then
     # Discovery ASKS for the two things the shared note forbids. Printing the shared copy here would tell the
     # operator the opposite of the manifest the very next command prints — and the bootstrap is read first.
     echo "  NOTE         : YOU advance the flow (발급 → select 'OPEN API' → 확인), one checkpoint at a time."

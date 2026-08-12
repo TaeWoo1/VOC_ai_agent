@@ -74,7 +74,13 @@ PROBE_TARGETS="${SELLEROPS_WING_PROBE_TARGETS:-}"
 # their scope in the same variable; they differ only in what is measured. One predicate, used by every branch
 # below, so a third Stage-2 phase cannot be added to some of them and missed by the rest.
 is_stage2_phase() {
-  case "$1" in COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION|COUPANG_WING_ISSUANCE_FLOW_DISCOVERY) return 0 ;; *) return 1 ;; esac
+  case "$1" in COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION|COUPANG_WING_ISSUANCE_FLOW_DISCOVERY|COUPANG_WING_VENDOR_METHOD_DISCOVERY) return 0 ;; *) return 1 ;; esac
+}
+
+# The two multi-checkpoint FLOW phases. Every branch that describes "a run that advances the real flow" must
+# name both, which is why it is a predicate rather than a `[ "$PHASE" = … ]` repeated at each one.
+is_flow_phase() {
+  case "$1" in COUPANG_WING_ISSUANCE_FLOW_DISCOVERY|COUPANG_WING_VENDOR_METHOD_DISCOVERY) return 0 ;; *) return 1 ;; esac
 }
 
 # The header must name the scope this RUN actually has. On a Stage-2 run there is no probe scope at all, and
@@ -97,10 +103,10 @@ check_identity_fresh "$BOOTSTRAP_EPOCH" "$IDENTITY_TTL_SECONDS"
 #    candidate-label recon. This harness prepares those and no others; the destructive deletion phase has its
 #    own gate and is not approvable from here.
 case "$PHASE" in
-  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION|COUPANG_WING_ISSUANCE_FLOW_DISCOVERY)
+  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION|COUPANG_WING_ISSUANCE_FLOW_DISCOVERY|COUPANG_WING_VENDOR_METHOD_DISCOVERY)
     pass "phase is $PHASE (READ_ONLY)" ;;
   *)
-    fail "phase must be COUPANG_WING_SELECTOR_PROBE, COUPANG_WING_LABEL_RECON, COUPANG_WING_STAGE2_RECON, COUPANG_WING_STAGE2_LABEL_CALIBRATION, or COUPANG_WING_ISSUANCE_FLOW_DISCOVERY (got '${PHASE:-unset}') — this harness prepares no other phase" ;;
+    fail "phase must be COUPANG_WING_SELECTOR_PROBE, COUPANG_WING_LABEL_RECON, COUPANG_WING_STAGE2_RECON, COUPANG_WING_STAGE2_LABEL_CALIBRATION, COUPANG_WING_ISSUANCE_FLOW_DISCOVERY, or COUPANG_WING_VENDOR_METHOD_DISCOVERY (got '${PHASE:-unset}') — this harness prepares no other phase" ;;
 esac
 
 # 4. No code drift since bootstrap. The manifest records a git SHA; if HEAD moved, or the working tree
@@ -165,7 +171,7 @@ fi
 # AND it must be the same phase this run bootstrapped — a manifest for the OTHER read-only phase describes
 # different work (shipped labels vs candidate hypotheses) and must not be presented under this run's identity.
 case "$M_PHASE" in
-  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION|COUPANG_WING_ISSUANCE_FLOW_DISCOVERY) ;;
+  COUPANG_WING_SELECTOR_PROBE|COUPANG_WING_LABEL_RECON|COUPANG_WING_STAGE2_RECON|COUPANG_WING_STAGE2_LABEL_CALIBRATION|COUPANG_WING_ISSUANCE_FLOW_DISCOVERY|COUPANG_WING_VENDOR_METHOD_DISCOVERY) ;;
   *)
     echo "PREFLIGHT FAIL — the prepared manifest is for phase $M_PHASE, not a READ_ONLY WING recorder phase. Refusing."
     exit 1 ;;
@@ -245,7 +251,7 @@ echo
 echo "  operator action ($M_ENTRY_TYPE):"
 echo "    $M_OPERATOR_ACTION"
 echo
-if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then
+if is_flow_phase "$PHASE"; then
   if [ -n "${SELLEROPS_WING_FLOW_CHECKPOINTS:-}" ]; then
     echo "  ⚠ THIS RUN IS NARROWED. The checkpoint plan is a PREFIX of the flow and the run ENDS after the last"
     echo "    one listed — it does not reach the checkpoints below it:"
@@ -257,7 +263,11 @@ if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then
   # The step list is BUILT FROM THE PLAN. Typed out, it promised four steps for a three-step run — the same
   # manifest-does-not-describe-the-run defect as under-promising, and it sat directly above a narrowing banner
   # saying the opposite.
-  PLAN="${SELLEROPS_WING_FLOW_CHECKPOINTS:-PURPOSE_SCREEN_UNTOUCHED,PURPOSE_OPTION_SELECTED_BY_OPERATOR,AFTER_OPERATOR_CONFIRM,TERMS_CHECKED_BY_OPERATOR}"
+  PLAN_FULL="PURPOSE_SCREEN_UNTOUCHED,PURPOSE_OPTION_SELECTED_BY_OPERATOR,AFTER_OPERATOR_CONFIRM,TERMS_CHECKED_BY_OPERATOR"
+  if [ "$PHASE" = "COUPANG_WING_VENDOR_METHOD_DISCOVERY" ]; then
+    PLAN_FULL="$PLAN_FULL,VENDOR_METHOD_SCREEN_UNTOUCHED,VENDOR_METHOD_SELECTED_BY_OPERATOR"
+  fi
+  PLAN="${SELLEROPS_WING_FLOW_CHECKPOINTS:-$PLAN_FULL}"
   PLAN_N="$(printf '%s' "$PLAN" | tr ',' '\n' | grep -c .)"
   echo "  $PLAN_N checkpoints, each waiting for your signal, each instruction printed only when it is that"
   echo "  step's turn:"
@@ -276,6 +286,12 @@ if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then
         echo "       purpose screen and the 업체명/URL/IP fields are not on it → ready" ;;
       TERMS_CHECKED_BY_OPERATOR)
         echo "    $STEP_I) the TERMS screen: tick the two consent boxes yourself → ready" ;;
+      VENDOR_METHOD_SCREEN_UNTOUCHED)
+        echo "    $STEP_I) press '약관 동의 및 Key 발급받기' yourself — pressed on two live walks and the operator"
+        echo "       reported no key either time (SellerOps cannot confirm that either way) — then STOP on the"
+        echo "       screen it opens, choose nothing → ready" ;;
+      VENDOR_METHOD_SELECTED_BY_OPERATOR)
+        echo "    $STEP_I) on that screen, select the input method yourself. Do NOT press '확인' → ready" ;;
     esac
   done
   IFS="$OLD_IFS"
@@ -292,10 +308,29 @@ if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then
   echo "    · if the vendor form ever DID appear on the purpose screen, '확인' would be a submission — also a halt."
   echo "  Fail-closed throughout: an unreadable page, any probe fault, or a missing marker halts as well."
   echo "  If step 3 does run, you press '확인' and STOP at whatever opens — the TERMS screen."
-  echo "  ⚠ THE RUN ENDS THERE, and the reason is the button below those checkboxes:"
-  echo "    '약관 동의 및 Key 발급받기' is the KEY-CREATION control. This run measures where it is and NEVER"
-  echo "    presses it, and there is no fifth checkpoint that could ask you to — the code refuses to accept one."
-  echo "    Key issuance is a SEPARATE phase with its own manifest and its own single-use grant."
+  if [ "$PHASE" = "COUPANG_WING_VENDOR_METHOD_DISCOVERY" ]; then
+    echo "  ⚠ THIS PHASE GOES TWO STEPS FURTHER, and this is the part to read twice."
+    echo "    '약관 동의 및 Key 발급받기' was believed to create the key. It was pressed on two live walks and the"
+    echo "    OPERATOR reported no key either time, so this phase asks for it on THEIR REPORT — never on its"
+    echo "    label, which is exactly what the refuted claim rested on. That report is not a measurement and is"
+    echo "    not treated as one: SellerOps cannot tell an issued surface from a no-key one — every sanitized"
+    echo "    signal it captures is identical on both."
+    echo "    What it opens is an integration-method screen NO apparatus has ever read: 업체 입력 방식 ·"
+    echo "    연동업체 선택 · 자체개발(직접입력) · 업체명 · 취소 · 확인."
+    echo "  ⚠ THE RUN ENDS ON THAT SCREEN, and the reason is its '확인':"
+    echo "    that control ISSUES A REAL API KEY on your live account, changing its state. It is NOT in this approval,"
+    echo "    no checkpoint of this phase stands in front of it, and the code refuses to accept one that would."
+    echo "    Key issuance is a SEPARATE manifest and a SEPARATE mode-WRITE grant."
+    echo "  ⚠ WHICH input method SellerOps should use is NOT answered by this run. That is a product decision,"
+    echo "    not a measurement — pick whatever you would pick for real; the reading is honest either way, and"
+    echo "    nothing here recommends one."
+  else
+    echo "  ⚠ THE RUN ENDS THERE, and the reason is the button below those checkboxes:"
+    echo "    '약관 동의 및 Key 발급받기' opens a screen this phase has never read. This run measures where the"
+    echo "    button is and NEVER presses it, and there is no fifth checkpoint that could ask you to — the code"
+    echo "    refuses to accept one."
+    echo "    Key issuance is a SEPARATE phase with its own manifest and its own single-use grant."
+  fi
   echo "  You read the terms and decide. SellerOps does not read them, evaluate them, agree to them, or advise"
   echo "  on them — it reads only whether each checkbox's label matches a string you transcribed yourself."
   echo "  At each checkpoint SellerOps reads the same read-only things it has read all along: match counts,"

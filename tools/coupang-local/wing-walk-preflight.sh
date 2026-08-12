@@ -6,10 +6,12 @@
 # (docs/sellerops_live_approval_contract.md §2), then prepares + displays the sanitized Approval Manifest. On any
 # check failing it prints NO manifest and requests NO approval.
 #
-# This phase is NOT destructive and must never borrow the deletion harness's disclosure copy: the operator presses
-# 발급, which is expected to open the API configuration step. What it displays instead — and what the manifest
-# carries — is the pair of claims that matter: this press is not key creation, AND the runtime cannot prove no key
-# was created (every sanitized signal is identical between an issued and a no-key surface).
+# This phase deletes nothing, but it is no longer harmless: the walk now runs through to the vendor screen's
+# `확인`, which is OPERATOR-REPORTED to create a REAL key. So it borrows the deletion harness's INSISTENCE — a
+# grant naming the consequence in the operator's own words — without borrowing its copy. What the manifest
+# carries is the pair of claims that matter, each with its provenance: the earlier '약관 동의 및 Key 발급받기'
+# press is operator-reported NOT to be key creation, AND the runtime cannot prove that either way (every
+# sanitized signal is identical between an issued and a no-key surface).
 #
 # It launches NO browser, makes NO Coupang call, reads no credential value, and mutates nothing.
 #
@@ -153,7 +155,7 @@ fi
 # 2 highlighted + 4 text-guided" while the verifier above demanded `agentNavigations:1`, `highlightedControlCount:3`
 # and `textGuidedControlCount:2` — so the line the OPERATOR reads before granting described a narrower run than
 # the one the gate had verified. That is the manifest-honesty defect class, in the display rather than the data.
-pass "guided-walk boundary is exactly the canonical contract (rests before the key-creating control · never presses it · agent presses nothing and navigates ONCE, to the seller's own WING landing · 0 value reads · no connect/sync · 7 highlighted + 0 text-guided, and 0 of the rings on an input · 4 steps auto-advance, never the key-creating one · the consent boxes' completion is observed)"
+pass "guided-walk boundary is exactly the canonical contract (rests before the key-ISSUING control · never presses it · the OPERATOR issues a real key · agent presses nothing and navigates ONCE, to the seller's own WING landing · 0 value reads · no connect/sync · 9 highlighted + 0 text-guided, and 0 of the rings on an input · 6 steps auto-advance, never the key-issuing PRESS · the guided method is a product decision · the consent boxes' completion is observed)"
 
 # The 발급 selector must be calibrated: this phase highlights a real control. The gate refuses
 # SELECTORS_NOT_CALIBRATED before reaching here, so this can only be `true` — asserted anyway so a future change
@@ -201,49 +203,62 @@ echo "  operator action ($M_ENTRY_TYPE):"
 echo "    $M_OPERATOR_ACTION"
 echo
 echo "  WHAT THIS RUN IS, precisely:"
-echo "    • EVERY marketplace action is YOURS. You log in, you reach the page, you press each control. The"
-echo "      agent clicks, types, submits and selects nothing. It opens the WINDOW on your own WING sales-info"
-echo "      page once (so it is not blank); every screen after that is one YOU navigate to."
-echo "    • SEVEN controls are highlighted: 'API Key 발급 받기', '확인', '약관 동의 및 Key 발급받기', the Access"
-echo "      Key region, the 'OPEN API' option label, and both consent sentences. Every one has a live-calibrated"
-echo "      locator. The last one being RINGED is not it being pressed: SellerOps points at it and stops. The"
-echo "      two steps that name no WING control — reaching the page, and going back to SellerOps — draw no ring."
-echo "    • NO ring sits on a checkbox or a radio. The purpose ring is on the option's LABEL and the consent"
-echo "      rings are on the two SENTENCES — those inputs have no accessible association, so SellerOps does not"
-echo "      claim to know which box is which. What ties each sentence to its own box is a measured structural"
-echo "      pairing: each box's nearest enclosing block holds exactly one consent sentence and exactly one box."
+echo "    • EVERY marketplace action is YOURS. You log in, you reach the page, you press each control, and you"
+echo "      type your own 업체명 · URL · IP 주소. The agent clicks, types, submits and selects nothing. It opens"
+echo "      the WINDOW on your own WING sales-info page once (so it is not blank);"
+echo "      every screen after that is one YOU navigate to."
+echo "    • NINE controls are highlighted: 'API Key 발급 받기', '확인', '약관 동의 및 Key 발급받기', the Access"
+echo "      Key region, the 'OPEN API' option label, both consent sentences, the '자체개발(직접입력)' option, and"
+echo "      the vendor screen's '확인'. Every one has a live-calibrated locator. A control being RINGED is not it"
+echo "      being pressed: SellerOps points at it and stops. The two steps that name no WING control — reaching"
+echo "      the page, and going back to SellerOps — draw no ring."
+echo "    • NO ring TARGETS a checkbox or a radio. Every ring resolves to a LABEL or a SENTENCE, never to an"
+echo "      input element. On WING those labels WRAP their own input, so the box is drawn INSIDE the ring and"
+echo "      you will SEE a box enclosed (live-observed 2026-08-12). The distinction is not cosmetic: it is why"
+echo "      SellerOps does not claim to know which box is which, and a ring is never a click either way."
+echo "      What ties each sentence to its own box is a measured structural pairing: each box's nearest"
+echo "      enclosing block holds exactly one sentence and one box."
 echo "    • 'OPEN API' is the DEFAULT purpose option, so the purpose screen is ONE step: check it, press 확인."
-echo "    • FOUR steps advance by themselves when WING's own screen changes. The key-creating step never does."
+echo "    • WHICH input method is guided — '자체개발(직접입력)' — is a PRODUCT DECISION, recorded as one. The"
+echo "      screen offers two options and both resolve identically well; nothing measured chooses between them."
+echo "    • SIX steps advance by themselves when WING's own screen changes. The key-issuing PRESS is never one"
+echo "      of them: what advances that step is WING then SHOWING the keys, which is an observation of the"
+echo "      RESULT and cannot cause it."
 echo "    • You read the two consent texts and decide. SellerOps does not read them, evaluate them, agree to"
 echo "      them, or advise on them, and it never ticks a box. It DOES check whether both are ticked, so the"
 echo "      walk can move on without you pressing anything — that reading is a yes/no computed in the page and"
 echo "      is never stored, sent, or logged."
 echo
-echo "  ⚠ WHERE THIS RUN STOPS, and why:"
-echo "    • The walk RESTS in front of '약관 동의 및 Key 발급받기'. It does NOT create the key — that was"
-echo "      asserted from its label and refuted on 2026-08-12, when it was pressed and no key was issued. What"
-echo "      it opens is an integration-method form (자체개발 / 연동업체 · 업체명 · 취소 · 확인), and the key is"
-echo "      issued by THAT screen's 확인. No apparatus has ever read that screen."
-echo "    • DO NOT PRESS IT in this run. There is no step after it here, and the walk has no tooling that could"
-echo "      press it. Actual key issuance is a separate phase, with its own manifest and its own grant."
+echo "  ⚠⚠ THIS RUN ENDS WITH A REAL API KEY ON YOUR LIVE COUPANG ACCOUNT. READ THIS PART TWICE."
+echo "    • That is NEW. Every earlier guided walk stopped one screen short of any key existing, because the"
+echo "      screen past '약관 동의 및 Key 발급받기' had never been measured. It has been now, so the walk goes"
+echo "      all the way — and 'all the way' means a real credential on a real seller account. Removing it"
+echo "      afterwards is a SEPARATE deletion run, not an undo."
+echo "    • '약관 동의 및 Key 발급받기' does NOT create the key. That was asserted from its label and refuted on"
+echo "      2026-08-12, when it was pressed on two live walks and YOU reported no key either time. This run"
+echo "      asks you to press it on THAT REPORT, never on the label — and the report is not a measurement:"
+echo "      SellerOps cannot tell an issued surface from a no-key one."
+echo "    • THE KEY IS CREATED BY THE VENDOR SCREEN'S '확인', after you choose the input method and fill in"
+echo "      업체명 · URL · IP 주소. YOU press it. SellerOps rings it, never presses it, and has no code path"
+echo "      that could — and it types nothing into those fields, which are your own company details."
 echo "    • No credential value is read, no connect-test, no sync, no upload. SellerOps cannot tell whether a"
 echo "      key exists either way — every sanitized signal is identical on an issued and a no-key surface."
+echo "    • If you do not want a key created on this account today, STOP HERE and do not grant."
 echo
 # The terminal disclosure above is what the OPERATOR grants against; the copy that stops them mid-flow is what
 # will be on the WING page. Reproduced COMPLETE, so nothing on screen is a surprise.
-echo "  WHAT THE LAST STEP SAYS ON THE WING PAGE (complete, Korean — this is what binds):"
+echo "  WHAT THE KEY-ISSUING STEP SAYS ON THE WING PAGE (complete, Korean — this is what binds):"
 # CHECKPOINT-COPY-BEGIN
-echo "    '약관 동의 및 Key 발급받기'를 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않고, 자동으로"
-echo "    넘어가지도 않습니다. ⚠ 이 버튼은 키를 만들지 않습니다. 다음에 연동 방식(자체개발/연동업체)을 고르는"
-echo "    화면이 나오고, 키는 그 화면의 '확인'에서 발급됩니다 — 그 화면은 아직 SellerOps가 안내하지 않습니다."
-echo "    눌러서 다음 화면이 뜨면 아래 버튼을 누르세요."
+echo "    업체명 · URL을 입력하고, IP 주소는 입력한 뒤 옆의 '추가'를 눌러 등록하세요 — 추가하지 않으면 IP가"
+echo "    등록되지 않습니다. 그 다음 '확인'을 직접 누르세요. ⚠ 여기서 실제 API 키가 발급되어 라이브 계정"
+echo "    상태가 바뀝니다(지우려면 나중에 별도의 삭제 작업이 필요합니다). SellerOps는 이 버튼을 절대 누르지"
+echo "    않고, 입력란에 아무것도 쓰지 않습니다. 키가 화면에 표시되면 자동으로 넘어갑니다."
 # CHECKPOINT-COPY-END
 echo
-echo "  ⚠ THIS PROOF STOPS BEFORE THAT PRESS. The copy above is the tutorial's own product text, shown here so"
-echo "    you can see it before granting — in THIS run you read it and stop."
-echo
-echo "  If this manifest is correct and displayed, the operator's entire single-use grant is one line:"
-echo "    Seated and ready."
+echo "  ⚠ THE ONE-LINE GRANT DOES NOT COVER THIS RUN."
+echo "    'Seated and ready.' is the standing shorthand for a run whose worst outcome is a wasted sitting. This"
+echo "    one creates a real credential, so the grant has to name that in the operator's own words. Approve with:"
+echo "      Seated and ready — I approve issuing a REAL Coupang API key on this account."
 echo
 echo "  On approval — ONE command, then no terminal for the rest of the run:"
 # The phase variables are NOT exported on this command line. They travel in the run-env file, which the installer

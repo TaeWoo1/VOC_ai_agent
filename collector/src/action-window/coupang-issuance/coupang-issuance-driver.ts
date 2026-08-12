@@ -44,14 +44,30 @@ export type CoupangIssuanceTarget =
   /** The two consent checkboxes. Never ticked, never read; the seller decides. */
   | "terms_consent"
   /**
-   * `약관 동의 및 Key 발급받기` — the walk's LAST step. Highlighted, never pressed.
+   * `약관 동의 및 Key 발급받기`. Highlighted, never pressed — and no longer the walk's last step.
    *
    * It was "the control that CREATES THE KEY" here until 2026-08-12, asserted from its label and never
    * observed. It was then pressed on a live walk and no key was issued — an integration-method form appears
-   * and the key is issued by that screen's 확인. See `WING_KEY_CREATION_CONTROL_REFUTATION`. The walk still
-   * rests here; the reason is now that what follows has never been measured.
+   * instead. That form has since been MEASURED (`WING_VENDOR_METHOD_SCREEN_EVIDENCE`), which is what lets the
+   * walk continue past this control at all: it rested here because what followed was unmeasured, and that is no
+   * longer true.
    */
   | "issue_final"
+  /**
+   * The vendor-method screen's input-method choice. The walk rings `자체개발(직접입력)` — a PRODUCT DECISION
+   * (`WING_VENDOR_METHOD_PRODUCT_DECISION`), taken with the measurement in front of the owner and separated
+   * from it. `연동업체 선택` is measured to the same standard and is not ringed.
+   */
+  | "vendor_method"
+  /**
+   * **THE CONTROL THAT ISSUES THE KEY** — the vendor screen's `확인`. Highlighted, never pressed; the seller
+   * presses it themselves and the walk advances only on WING then SHOWING the credentials.
+   *
+   * Measured `visible: 1` / `BUTTON` on both vendor checkpoints. It shares its candidate with the purpose
+   * screen's `확인`, which is why every reading carries the screen it was taken on — on the terms screen
+   * between them, that same candidate reads hidden.
+   */
+  | "vendor_confirm"
   | "credentials"
   | "return";
 
@@ -66,6 +82,8 @@ export const COUPANG_ISSUANCE_TARGETS: readonly CoupangIssuanceTarget[] = [
   "confirm_purpose",
   "terms_consent",
   "issue_final",
+  "vendor_method",
+  "vendor_confirm",
   "credentials",
   "return",
 ];
@@ -96,6 +114,8 @@ export const COUPANG_ISSUANCE_CHECKPOINT_TARGETS: readonly CoupangIssuanceTarget
   "confirm_purpose",
   "terms_consent",
   "issue_final",
+  "vendor_method",
+  "vendor_confirm",
   "credentials",
   "return",
 ];
@@ -116,6 +136,10 @@ export const COUPANG_TARGET_BARRIER_STAGE: Readonly<Record<CoupangIssuanceTarget
   terms_consent: "guiding_terms_consent",
   // The key-creation boundary. `issue` used to map here, back when 발급 was believed to create the key.
   issue_final: "checkpoint_before_issue",
+  vendor_method: "guiding_vendor_method",
+  // The key-creation boundary. `issue_final`'s barrier kept its name through two corrections and finally stops
+  // claiming to be this one.
+  vendor_confirm: "checkpoint_issue_key",
   credentials: "guiding_copy_keys",
   return: "return_to_sellerops",
 };

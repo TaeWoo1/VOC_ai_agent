@@ -40,6 +40,7 @@ import {
   WING_KEY_CREATION_SELECTOR_CALIBRATED,
   WING_PURPOSE_SCREEN_MARKER_SPEC,
   WING_TERMS_SCREEN_MARKER_SPECS,
+  WING_VENDOR_METHOD_SCREEN_MARKER_SPECS,
   wingGuidedHighlightPromotion,
   wingCandidateSpecById,
   type WingFlowScreen,
@@ -147,6 +148,38 @@ export const WING_HIGHLIGHT_LABELS: Readonly<Record<WingHighlightTarget, { candi
   issue_final: { candidateQuery: KEY_CREATION_SPEC.candidateQuery, exactText: KEY_CREATION_SPEC.exactText },
   credentials: { candidateQuery: "label,span,div,dt,th,strong", exactText: "Access Key", tagAncestor: "tr" },
 };
+
+/**
+ * **The marker that says a key now EXISTS on this screen** — the credential label itself, painting.
+ *
+ * Derived from {@link WING_HIGHLIGHT_LABELS.credentials} rather than re-typed, so the string the walk rings at
+ * step ⑧ and the string it watches for at step ⑦ can never drift apart. `tagAncestor` is deliberately dropped:
+ * the question here is "is this label on the screen", not "which row does it belong to".
+ *
+ * Why this and not the page CATEGORY, which is what {@link CHECKPOINT_ADVANCES_TO_CATEGORY} says it waits for:
+ * `credential_shown` is **structurally unreachable** on this surface. `classifyWingPage` returns
+ * `open_api_issuance` whenever the open-API marker or the credential anchor is present, and both are still
+ * present when WING shows the issued keys — the credentials appear ON the open-API page, not instead of it. So
+ * the category branch could never have fired, which is exactly what two live sittings observed: the key was
+ * issued and step ⑦ never completed itself. The category map stays (it costs one read and is honest about what
+ * it waits for); this is what actually answers the question.
+ *
+ * **It cannot cause what it observes.** The label paints because a credential exists, and a credential exists
+ * because the seller pressed 확인. Nothing here clicks, types, or reads a VALUE — only whether the fixed label
+ * is visible, the same value-free locate every other marker uses.
+ *
+ * NOT a promotion and not a measurement: `Access Key` has never been matched by any apparatus on the issued
+ * screen. Like every other unproven marker in this walk it degrades to the seller's own WING-resident button
+ * rather than to a stall, and the baseline rule means a screen already showing keys disables it outright.
+ */
+const WING_CREDENTIAL_SHOWN_MARKER_SPEC: WingFlowScreenMarkerSpec = Object.freeze({
+  id: "issuance.credentials.access_key",
+  candidateQuery: WING_HIGHLIGHT_LABELS.credentials.candidateQuery,
+  exactText: WING_HIGHLIGHT_LABELS.credentials.exactText,
+});
+
+/** The checkpoints whose completion is "a credential is now on the screen". Today: the key-issuing 확인. */
+const CHECKPOINT_ADVANCES_ON_CREDENTIAL: readonly CoupangIssuanceTarget[] = ["vendor_confirm"];
 
 function isWingHighlightTarget(target: CoupangIssuanceTarget): target is "issue" | "credentials" | "issue_final" {
   // Gated on the flag, not on a literal list, so WITHDRAWING the calibration removes the ring by itself. The
@@ -615,8 +648,12 @@ const ADVANCE_BUTTON_LABEL: Readonly<Partial<Record<CoupangIssuanceTarget, strin
   issue: "발급 화면이 열렸어요 · 다음",
   confirm_purpose: "확인을 눌렀어요 · 다음",
   terms_consent: "동의했어요 · 다음",
-  // The key-creation step. Its caption confirms the seller's own act AFTER the fact; nothing here presses it.
-  issue_final: "발급을 눌렀어요 · 다음",
+  issue_final: "눌렀어요 · 다음",
+  vendor_method: "선택했어요 · 다음",
+  // THE key-creation step. Its caption confirms the seller's own act AFTER the fact; nothing here presses it,
+  // and the step advances by itself the moment WING shows the keys — this button is the fallback for a screen
+  // that did not change the way the measurement says it should.
+  vendor_confirm: "확인을 눌렀어요 · 다음",
   credentials: "복사했어요 · 다음",
   // The return step hands focus back to SellerOps; the SellerOps tab then owns the "enter keys" CTA, so this
   // on-page button is purely "go back" (avoids two near-identical "enter keys" buttons across the two windows).
@@ -634,10 +671,79 @@ const ADVANCE_BUTTON_LABEL: Readonly<Partial<Record<CoupangIssuanceTarget, strin
 const CHECKPOINT_ADVANCES_TO_SCREEN: Readonly<Partial<Record<CoupangIssuanceTarget, WingFlowScreen>>> = {
   issue: "PURPOSE",
   confirm_purpose: "TERMS",
+  // MEASURED 2026-08-12 on two checkpoints: pressing `약관 동의 및 Key 발급받기` opens the vendor-method screen
+  // and issues no key. This entry is the whole difference between a walk that rests in front of that control
+  // because what follows is unknown, and one that knows.
+  issue_final: "VENDOR_METHOD",
+};
+
+/**
+ * **The step that advances on a PAGE CATEGORY rather than a flow screen** — the key-issuing 확인.
+ *
+ * A sibling map rather than an entry in the one above, because what it waits for is a different kind of fact.
+ * The flow screens are three states of one page, told apart by fixed labels; the credentials appearing is the
+ * sanitized page category the classifier already produces, and the walk has read it since its first step.
+ *
+ * **This does not auto-advance the PRESS.** The seller presses 확인 themselves; this observes that WING then
+ * showed the keys. An observation of a result cannot cause it, and the ordering is what makes that plain: the
+ * category cannot become `credential_shown` before a credential exists.
+ *
+ * **And on this surface it never becomes `credential_shown` at all.** `classifyWingPage` answers
+ * `open_api_issuance` while the open-API marker or the credential anchor is present, and the keys appear ON that
+ * page — so this map is a correct statement about a category the live walk cannot reach, which is why the step
+ * completed itself on neither of the two sittings that issued a key. What actually answers is
+ * {@link WING_CREDENTIAL_SHOWN_MARKER_SPEC}. This stays because it costs one read and is true wherever WING does
+ * navigate to a keys-only view; it is no longer the thing being relied on.
+ */
+const CHECKPOINT_ADVANCES_TO_CATEGORY: Readonly<Partial<Record<CoupangIssuanceTarget, WingPageCategory>>> = {
+  vendor_confirm: "credential_shown",
 };
 
 /** How often the screen observation runs. Slower than the latch poll: it costs three in-page locates. */
 const SCREEN_OBSERVE_POLL_MS = 1_000;
+
+/**
+ * **Every in-page read on the observe path is time-boxed, because Playwright's `evaluate` has no timeout.**
+ *
+ * It resolves when the frame has a usable execution context and otherwise waits forever. Every `.catch` around
+ * these calls guards a REJECTION; none guards a call that simply never settles. On 2026-08-12 that is exactly
+ * what happened on the live walk: the loop emitted ~2 lines/second for four minutes, stopped between two
+ * adjacent awaits while WING was bouncing the session, and never resumed — the seller was left looking at a
+ * guidance panel that was no longer being driven by anything.
+ *
+ * A timed-out read resolves to a fail-closed fallback rather than rejecting, so a page that cannot answer reads
+ * as "not proven" and the seller's own WING-resident button remains the way through. The abandoned promise stays
+ * pending — Playwright gives no way to cancel an `evaluate` — which is acceptable precisely because it is now
+ * bounded: the loop moves on instead of being held by it.
+ */
+const IN_PAGE_READ_TIMEOUT_MS = 4_000;
+
+/**
+ * The re-mount is several reads plus a settle sleep, so it gets its own, larger box. Still bounded: a re-mount
+ * that cannot complete must cost one poll, never the walk.
+ */
+const REMOUNT_TIMEOUT_MS = 10_000;
+
+/**
+ * Resolve `work`, or `fallback` if it has not settled within `ms` — and treat a rejection as the fallback too,
+ * so a caller gets one fail-closed value for both ways a read can fail to produce an answer.
+ */
+function timebox<T>(work: Promise<T>, fallback: T, ms: number = IN_PAGE_READ_TIMEOUT_MS): Promise<T> {
+  return new Promise<T>((resolve) => {
+    let settled = false;
+    const finish = (value: T): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(fallback), ms);
+    work.then(
+      (v) => finish(v),
+      () => finish(fallback),
+    );
+  });
+}
 
 /** Bounded sleep between navigation-observe polls (no wall-clock read; timer only). */
 function sleep(ms: number): Promise<void> {
@@ -660,8 +766,10 @@ const OVERLAY_STEP: Readonly<Record<CoupangIssuanceTarget, number>> = {
   confirm_purpose: 3,
   terms_consent: 4,
   issue_final: 5,
-  credentials: 6,
-  return: 7,
+  vendor_method: 6,
+  vendor_confirm: 7,
+  credentials: 8,
+  return: 9,
 };
 
 /**
@@ -691,7 +799,22 @@ export const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string
   //
   // What the copy must still do is unchanged: this is where the guidance STOPS, SellerOps never presses it, and
   // nothing auto-advances past it. The reason is now the honest one — what follows has never been measured.
-  issue_final: "'약관 동의 및 Key 발급받기'를 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다. ⚠ 이 버튼은 키를 만들지 않습니다. 다음에 연동 방식(자체개발/연동업체)을 고르는 화면이 나오고, 키는 그 화면의 '확인'에서 발급됩니다 — 그 화면은 아직 SellerOps가 안내하지 않으니 직접 진행해 주세요. Access Key가 화면에 표시되면 아래 버튼을 누르세요.",
+  // CORRECTED AGAIN 2026-08-12, and the correction is a REMOVAL. It said "그 화면은 아직 SellerOps가 안내하지
+  // 않으니 직접 진행해 주세요" — true when written, false since the vendor screen was measured. Guidance that
+  // apologises for not guiding, on a step that now guides, is the same class of stale safety copy as the
+  // key-creation warning this string already had to lose.
+  issue_final: "'약관 동의 및 Key 발급받기'를 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않습니다. 이 버튼에서는 키가 발급되지 않고 연동 방식을 고르는 화면이 열립니다(live walk 2회에서 그렇게 보고되었습니다. SellerOps는 키 발급 여부를 확인할 수 없습니다). 그 화면이 열리면 자동으로 넘어갑니다.",
+  vendor_method: "입력 방식에서 '자체개발(직접입력)'을 직접 선택하세요 — SellerOps는 선택하지 않습니다. 선택하면 URL · IP 주소 입력란이 더 나타납니다(업체명은 이미 화면에 있습니다). 선택한 뒤 아래 버튼을 누르세요.",
+  // NOT trimmed, and every sentence is a safety claim the approval harness reproduces before the operator
+  // grants. This is the one step in the whole walk that brings a real marketplace credential into existence,
+  // and the seller is the only one who can do it.
+  //
+  // NARROWED 2026-08-12. It said "되돌릴 수 없습니다", which is false: WING has a 삭제 control, the operator has
+  // used it, and this repository has a deletion phase built around it. A warning the reader can personally
+  // falsify does not make them more careful — it teaches them that these warnings are approximate, on the one
+  // screen where they must not be. What is true is that a real key comes into existence and live account state
+  // changes; removing it later is a separate act, not an undo.
+  vendor_confirm: "업체명 · URL을 입력하고, IP 주소는 입력한 뒤 옆의 '추가'를 눌러 등록하세요 — 추가하지 않으면 IP가 등록되지 않습니다. 그 다음 '확인'을 직접 누르세요. ⚠ 여기서 실제 API 키가 발급되어 라이브 계정 상태가 바뀝니다(지우려면 나중에 별도의 삭제 작업이 필요합니다). SellerOps는 이 버튼을 절대 누르지 않고, 입력란에 아무것도 쓰지 않습니다. 키가 화면에 표시되면 자동으로 넘어갑니다.",
   credentials: "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요. SellerOps는 값을 읽지 않습니다. 복사했으면 아래 버튼을 누르세요.",
   return: "아래 버튼을 눌러 SellerOps로 돌아가세요. 복사한 키를 입력하면 연결이 끝납니다.",
 };
@@ -716,6 +839,10 @@ export const OPERATOR_STEP_TITLES: Readonly<Record<CoupangIssuanceTarget, string
   // The chip named a consequence this control does not have (see the panel copy above, corrected 2026-08-12).
   // It now names the control, like every other chip — the panel carries what is true about it.
   issue_final: "'약관 동의 및 Key 발급받기' 누르기",
+  vendor_method: "입력 방식 '자체개발(직접입력)' 선택",
+  // The one chip in the walk that names a CONSEQUENCE, because this control creates a real credential.
+  // Every other chip names the control; this is the exception the panel copy alone should not have to carry.
+  vendor_confirm: "'확인' 누르기 (키 발급)",
   credentials: "키 3개 복사",
   return: "SellerOps로 돌아가기",
 };
@@ -792,6 +919,11 @@ const GUIDED_RING_PLAN: Readonly<
 > = {
   confirm_purpose: { primary: "confirm", also: ["purpose_open_api"] },
   terms_consent: { primary: "consent_api", also: ["consent_category"] },
+  // One control each. They go through the ring path rather than `WING_HIGHLIGHT_LABELS` for the reason the plan
+  // exists: the spec is resolved from the PROMOTION record by id, so withdrawing either calibration removes its
+  // ring by itself instead of leaving a hand-written query pointing at a control nothing measured.
+  vendor_method: { primary: "vendor_self_dev", also: [] },
+  vendor_confirm: { primary: "vendor_confirm", also: [] },
 };
 
 /**
@@ -1118,6 +1250,20 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     // where it is hidden, so the run produced no basis for promoting it and the sitting had to be repeated.
     //
     // Reading both costs one extra in-page locate on the screen where the walk stops anyway.
+    //
+    // VENDOR_METHOD is read FIRST, and this ladder must stay in the same order as the pure
+    // `wingFlowScreenFrom` — because the vendor screen REPLACES the terms screen rather than overlaying it,
+    // measured 2026-08-12. Reversing them would answer TERMS on a screen whose terms markers are hidden.
+    //
+    // This branch was MISSING on the live walk of 2026-08-12: the marker specs existed, the pure resolver knew
+    // the screen, `CHECKPOINT_ADVANCES_TO_SCREEN` pointed `issue_final` at it, and the tests pinned all three —
+    // but the ladder that actually runs still had only two rungs, so the probe answered UNRECOGNIZED on the
+    // vendor screen and the advance could never fire. The record was fenced; the runtime was not.
+    let vendor = false;
+    for (const spec of WING_VENDOR_METHOD_SCREEN_MARKER_SPECS) {
+      if (await this.markerVisible(spec)) vendor = true;
+    }
+    if (vendor) return "VENDOR_METHOD";
     let terms = false;
     for (const spec of WING_TERMS_SCREEN_MARKER_SPECS) {
       if (await this.markerVisible(spec)) terms = true;
@@ -1131,7 +1277,30 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
    * the distinction that invalidated an earlier calibration record — so `count` alone is not the test.
    */
   private async markerVisible(spec: WingFlowScreenMarkerSpec): Promise<boolean> {
-    const res = await this.resolveFixedLabelSpec(spec, false).catch(() => ({ count: 0 }) as LocateResult);
+    return (await this.markerVisibleOrUnreadable(spec)) === true;
+  }
+
+  /**
+   * The same reading, but able to say **"the page could not be read"** — `null` — instead of folding that into
+   * a measured-looking zero.
+   *
+   * The distinction is load-bearing exactly once: at a checkpoint's BASELINE. `markerVisible` swallows every
+   * read failure into `count: 0`, so `markerVisible(...).catch(() => null)` was dead code and a baseline taken
+   * while WING was bouncing the session recorded a confident `false` — which ARMS the advance rather than
+   * disabling it. The comment beside it claimed the opposite. On the key-issuing step that is a path to
+   * reporting "the seller just issued a key" about a page that was showing a key all along, which is the one
+   * class of failure this walk may not have.
+   */
+  private async markerVisibleOrUnreadable(spec: WingFlowScreenMarkerSpec): Promise<boolean | null> {
+    const res = await timebox<LocateResult | null>(
+      this.resolveFixedLabelSpec(spec, false).catch(() => null),
+      null,
+    );
+    if (res === null) {
+      // Sanitized like every other reading here: an id and a flag, never text, a URL, or a value.
+      log("aw_coupang_flow_marker", { markerId: spec.id, unreadable: true });
+      return null;
+    }
     // The MEASUREMENT, recorded. Both flow-screen markers are unproven — the purpose heading has never been
     // matched by any apparatus, and the terms markers were transcribed off a screen rather than resolved by
     // one — so a live walk has to be able to say which of them actually fires. Without this the auto-advance
@@ -1316,10 +1485,19 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     });
   }
 
+  /**
+   * **The fault recovery must not be made of the thing that faulted.**
+   *
+   * `onDriveFault` answers `CLEAR_HIGHLIGHT`, and the park recovery that re-guides the seller runs only after
+   * this resolves. Both calls below are `evaluate`s against the SAME page whose unanswered `evaluate` produced
+   * the fault, so leaving them untimed made the recovery unreachable in exactly the state it exists for: on
+   * 2026-08-12 the drive error landed at 05:58:34 and the run emitted nothing at all for the nine minutes until
+   * the seller closed the window — no re-guide, no park recovery, and a guidance panel still on the glass.
+   */
   async clearHighlight(): Promise<void> {
     const page = this.activePage();
-    await unmountOverlay(page).catch(() => undefined);
-    await this.evalStr(page, IN_PAGE_CLEAR_TAG).catch(() => undefined);
+    await timebox(unmountOverlay(page), undefined);
+    await timebox(this.evalStr(page, IN_PAGE_CLEAR_TAG).then(() => undefined), undefined);
   }
 
   async armObserve(target: CoupangIssuanceTarget): Promise<void> {
@@ -1397,23 +1575,95 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     // for exactly this reason.
     // An UNREADABLE baseline disables it too: not knowing where the seller started is exactly the state in
     // which "the expected screen is showing" cannot be told apart from "it was showing all along".
+    //
+    // ⚠ For the SCREEN baseline that sentence is still aspirational, and saying so is better than implying a
+    // fence that is not there: `probeFlowScreen` folds an unreadable page into `UNRECOGNIZED`, which differs
+    // from every expected screen and therefore ARMS this rather than disabling it. Recorded rather than fixed
+    // here — the screen advances wait for a screen to APPEAR, so an unreadable baseline costs a transition that
+    // did happen, not a false completion. The credential baseline below is the one where it would be a false
+    // completion, and that one is now genuinely fail-closed.
     const baseline = expected ? await this.probeFlowScreen().catch(() => null) : null;
     const screenMayAdvance = expected !== undefined && baseline !== null && baseline !== expected;
+    // The same construction for the step whose completion is a page CATEGORY rather than a flow screen: the
+    // credentials appearing after the seller presses the key-issuing 확인. Same baseline rule, same reason — a
+    // run that started on a page already showing credentials must not report that the seller just made them.
+    const expectedCategory = CHECKPOINT_ADVANCES_TO_CATEGORY[target];
+    const categoryBaseline = expectedCategory ? await this.readSurface().then((p) => p.pageCategory).catch(() => null) : null;
+    const categoryMayAdvance =
+      expectedCategory !== undefined && categoryBaseline !== null && categoryBaseline !== expectedCategory;
+    // The SAME baseline construction for the credential marker — the observation that actually fires on this
+    // surface (see {@link WING_CREDENTIAL_SHOWN_MARKER_SPEC}). A run that opened on a page already showing keys
+    // must not report that the seller just made one, so a marker already painting at arm time turns it off and
+    // the seller's own button is the way through.
+    //
+    // `markerVisibleOrUnreadable`, NOT `markerVisible`: the latter cannot reject, so the `.catch(() => null)`
+    // this line used to carry was dead code and an unreadable page produced a confident `false`. WING bounced
+    // the session twice during the 2026-08-12 walk, so "arm the key step while the page cannot be read" is a
+    // live state on this surface, not a hypothetical.
+    const credentialWatched = CHECKPOINT_ADVANCES_ON_CREDENTIAL.includes(target);
+    const credentialBaseline = credentialWatched
+      ? await this.markerVisibleOrUnreadable(WING_CREDENTIAL_SHOWN_MARKER_SPEC)
+      : null;
+    const credentialMayAdvance = credentialWatched && credentialBaseline === false;
     // The screen probe costs three in-page locates, so it runs on a slower cadence than the latch poll rather
     // than on every tick. The seller pressing the button is still noticed within one latch poll.
     const screenEvery = Math.max(1, Math.round(SCREEN_OBSERVE_POLL_MS / OVERLAY_ADVANCE_POLL_MS));
     for (let i = 0; i < maxPolls; i++) {
-      const pressed = await readOverlayAdvancePressed(this.activePage(), token).catch(() => false);
+      // Time-boxed, like every in-page read below it. An `evaluate` that never settles used to stop this loop
+      // dead mid-iteration, with the panel still painted and nothing left watching it.
+      const pressed = await timebox(readOverlayAdvancePressed(this.activePage(), token), false);
       if (pressed) return true;
       if (i % screenEvery === 0) {
         if (screenMayAdvance && (await this.probeFlowScreen().catch(() => "UNRECOGNIZED" as WingFlowScreen)) === expected) return true;
         // The consent step changes no screen, so its completion is the seller's own two ticks — observed, never
         // performed, and never recorded (see `observeConsentComplete`).
         if (target === "terms_consent" && (await this.observeConsentComplete())) return true;
+        // The key-issuing step. This observes the RESULT — the credentials being on screen — and cannot cause
+        // it: the category cannot become `credential_shown` before a credential exists. The seller pressed it.
+        if (
+          categoryMayAdvance &&
+          (await timebox(this.readSurface().then((p) => p.pageCategory), null as WingPageCategory | null)) === expectedCategory
+        ) {
+          return true;
+        }
+        // …and the reading that actually fires on this surface: the credential label painting where it was
+        // measurably absent one moment ago. Same observe-the-RESULT property as the branch above.
+        if (credentialMayAdvance && (await this.markerVisible(WING_CREDENTIAL_SHOWN_MARKER_SPEC))) {
+          return true;
+        }
+        // THE SELLER'S WAY OUT MUST SURVIVE A NAVIGATION. WING can bounce the window to login mid-checkpoint —
+        // observed 2026-08-12 immediately after the key-issuing 확인 — and a navigation destroys the overlay
+        // with the page. Everything then still "works": the latch poll reads a page with no panel on it, the
+        // screen probe finds no marker, and the window quietly runs out with the seller looking at a WING page
+        // that has no guidance and no button. Re-mounting is the whole recovery, and it is safe to repeat: the
+        // mount is idempotent (it removes its own predecessor) and re-arms THIS step's token, so a press
+        // recorded before the bounce cannot survive as a press after it.
+        await this.remountIfLost(target);
       }
       if (i < maxPolls - 1) await sleep(OVERLAY_ADVANCE_POLL_MS);
     }
     return false;
+  }
+
+  /**
+   * Re-mount this step's overlay if it is no longer on the active page — the WING navigation recovery.
+   *
+   * Goes through {@link highlightTarget} rather than re-mounting directly, so the ring is re-resolved against
+   * the page that is actually there now: a stale anchor from before the navigation is exactly the defect the
+   * walk has already paid for twice. A page where the control cannot be found (the login screen) simply mounts
+   * nothing and is retried on the next poll — never a stall, never a ring pointing at nothing.
+   */
+  private async remountIfLost(target: CoupangIssuanceTarget): Promise<void> {
+    const page = this.activePage();
+    // Time-boxed, and defaulting to "still mounted" on a page that will not answer. This check runs once a
+    // second against a page that is BY DEFINITION unstable when it matters — an overlay only goes missing
+    // because the document was replaced — so it was the single most likely place for the loop to hang, and it
+    // was added by the very commit that introduced the recovery it guards.
+    if (await timebox(overlayMounted(page), true)) return;
+    log("aw_coupang_overlay_remount", { target });
+    // The re-mount itself is several more evaluates plus a settle sleep. Bounded as one unit: a re-mount that
+    // cannot complete must cost this poll, not the walk.
+    await timebox(this.highlightTarget(target).then(() => undefined), undefined, REMOUNT_TIMEOUT_MS);
   }
 
   /**
@@ -1440,10 +1690,11 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     return wingPageCategoryFromCensus(urlCategory, census).pageCategory;
   }
 
+  /** Teardown, time-boxed for the same reason {@link clearHighlight} is: a closing page may never answer. */
   async cleanup(): Promise<void> {
     const page = this.activePage();
-    await unmountOverlay(page).catch(() => undefined);
-    await this.evalStr(page, IN_PAGE_CLEAR_TAG).catch(() => undefined);
+    await timebox(unmountOverlay(page), undefined);
+    await timebox(this.evalStr(page, IN_PAGE_CLEAR_TAG).then(() => undefined), undefined);
   }
 
   whenSurfaceClosed(): Promise<void> {

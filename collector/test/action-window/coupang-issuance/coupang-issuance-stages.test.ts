@@ -38,6 +38,8 @@ const ALL_STAGES: CoupangIssuanceStage[] = [
   "checkpoint_confirm_purpose",
   "guiding_terms_consent",
   "checkpoint_before_issue",
+  "guiding_vendor_method",
+  "checkpoint_issue_key",
   "guiding_copy_keys",
   "return_to_sellerops",
   "guidance_complete",
@@ -58,6 +60,8 @@ describe("coupang issuance stages — run-status projection", () => {
     checkpoint_confirm_purpose: "WAITING_FOR_HUMAN",
     guiding_terms_consent: "WAITING_FOR_HUMAN",
     checkpoint_before_issue: "WAITING_FOR_HUMAN",
+    guiding_vendor_method: "WAITING_FOR_HUMAN",
+    checkpoint_issue_key: "WAITING_FOR_HUMAN",
     guiding_copy_keys: "WAITING_FOR_HUMAN",
     return_to_sellerops: "WAITING_FOR_HUMAN",
     guidance_complete: "COMPLETED",
@@ -81,6 +85,8 @@ describe("coupang issuance stages — step-status projection", () => {
     checkpoint_confirm_purpose: "AWAITING_USER",
     guiding_terms_consent: "AWAITING_USER",
     checkpoint_before_issue: "AWAITING_USER",
+    guiding_vendor_method: "AWAITING_USER",
+    checkpoint_issue_key: "AWAITING_USER",
     guiding_copy_keys: "AWAITING_USER",
     return_to_sellerops: "AWAITING_USER",
     guidance_complete: "COMPLETED",
@@ -108,6 +114,8 @@ describe("coupang issuance stages — ALL_STAGES really is all of them", () => {
       checkpoint_confirm_purpose: "",
       guiding_terms_consent: "",
       checkpoint_before_issue: "",
+      guiding_vendor_method: "",
+      checkpoint_issue_key: "",
       guiding_copy_keys: "",
       return_to_sellerops: "",
       guidance_complete: "",
@@ -244,13 +252,13 @@ describe("the fence is LIFTED, and every clause of it was answered in code", () 
   });
 });
 
-describe("coupang issuance stages — the fixed 7-step plan, in the MEASURED order", () => {
-  it("is always seven steps (a fixed linear line, no branch)", () => {
+describe("coupang issuance stages — the fixed 9-step plan, in the MEASURED order", () => {
+  it("is always nine steps (a fixed linear line, no branch)", () => {
     // Seven → eight on 2026-08-10 (the old plan had steps for screens this flow never shows, and none for the
-    // control that creates the key) → seven again once the purpose screen became ONE step. `OPEN API` is the
-    // default, so checking the radio and pressing 확인 are one instruction on one screen, not two advances.
-    expect(COUPANG_ISSUANCE_TOTAL_STEPS).toBe(7);
-    expect(coupangIssuanceStepPlan()).toHaveLength(7);
+    // control that creates the key) → seven again once the purpose screen became ONE step → NINE on 2026-08-12,
+    // when the vendor-method screen was measured and the walk stopped ending one screen short of the key.
+    expect(COUPANG_ISSUANCE_TOTAL_STEPS).toBe(9);
+    expect(coupangIssuanceStepPlan()).toHaveLength(9);
   });
 
   it("uses the exact product-required stepIds, in flow order", () => {
@@ -260,6 +268,8 @@ describe("coupang issuance stages — the fixed 7-step plan, in the MEASURED ord
       "aw.coupang_issuance_confirm_purpose",
       "aw.coupang_issuance_terms_consent",
       "aw.coupang_issuance_issue_checkpoint",
+      "aw.coupang_issuance_vendor_method",
+      "aw.coupang_issuance_vendor_confirm",
       "aw.coupang_issuance_copy_keys",
       "aw.coupang_issuance_return",
     ]);
@@ -272,6 +282,8 @@ describe("coupang issuance stages — the fixed 7-step plan, in the MEASURED ord
       "actionWindow.coupangIssuance.confirmPurpose",
       "actionWindow.coupangIssuance.termsConsent",
       "actionWindow.coupangIssuance.issueCheckpoint",
+      "actionWindow.coupangIssuance.vendorMethod",
+      "actionWindow.coupangIssuance.vendorConfirm",
       "actionWindow.coupangIssuance.copyKeys",
       "actionWindow.coupangIssuance.return",
     ]);
@@ -281,7 +293,7 @@ describe("coupang issuance stages — the fixed 7-step plan, in the MEASURED ord
     const plan = coupangIssuanceStepPlan();
     expect(plan.map((s) => s.mode)).toEqual([
       "AUTOMATIC_OPERATION",
-      ...Array.from({ length: 6 }, () => "ACTION_WINDOW"),
+      ...Array.from({ length: 8 }, () => "ACTION_WINDOW"),
     ]);
     expect(plan[0]!.copyParams).toBeUndefined(); // step 1 (reach) is text guidance — no highlighted control
     expect(plan.slice(1).map((s) => s.copyParams?.targetKind)).toEqual([
@@ -289,6 +301,8 @@ describe("coupang issuance stages — the fixed 7-step plan, in the MEASURED ord
       "confirm_purpose",
       "terms_consent",
       "issue_final",
+      "vendor_method",
+      "vendor_confirm",
       "credentials",
       "return",
     ]);
@@ -299,13 +313,15 @@ describe("coupang issuance stages — the fixed 7-step plan, in the MEASURED ord
     // "copy your keys", so the tutorial told the seller to copy credentials that did not exist. The step that
     // creates them now exists, is named once, and sits immediately before the copy step.
     const plan = coupangIssuanceStepPlan();
-    expect(COUPANG_ISSUANCE_KEY_CREATION_STEP).toBe(5);
+    // **Step 5 until 2026-08-12, and it was never the key-creating one.** That control was pressed on two live
+    // walks and issued nothing; the screen it opens has since been measured, and its 확인 is the boundary.
+    expect(COUPANG_ISSUANCE_KEY_CREATION_STEP).toBe(7);
     const keyStep = plan[COUPANG_ISSUANCE_KEY_CREATION_STEP - 1]!;
-    expect(keyStep.copyParams?.targetKind).toBe("issue_final");
+    expect(keyStep.copyParams?.targetKind).toBe("vendor_confirm");
     expect(plan[COUPANG_ISSUANCE_KEY_CREATION_STEP]!.copyParams?.targetKind).toBe("credentials");
     // …and nothing before it can create a key: every earlier targetKind is a reveal, a confirmation or a read.
     for (const s of plan.slice(0, COUPANG_ISSUANCE_KEY_CREATION_STEP - 1)) {
-      expect(s.copyParams?.targetKind).not.toBe("issue_final");
+      expect(s.copyParams?.targetKind).not.toBe("vendor_confirm");
     }
   });
 

@@ -54,6 +54,11 @@ const COPY: Record<string, string> = {
   // The `(키 생성)` qualifier was refuted on 2026-08-12 and removed. It sat in the step LIST while the detail
   // string below said the opposite, so the seller read both claims on one screen.
   "actionWindow.coupangIssuance.issueCheckpoint": "'약관 동의 및 Key 발급받기' 직접 누르기",
+  "actionWindow.coupangIssuance.vendorMethod": "입력 방식 '자체개발(직접입력)' 직접 선택",
+  // The `(키 발급)` qualifier is on THIS step, and it is measured. It sat on `issueCheckpoint` until 2026-08-12
+  // asserted from a button label, was refuted when that button was pressed and issued nothing, and belongs to
+  // the control that actually does it.
+  "actionWindow.coupangIssuance.vendorConfirm": "'확인' 직접 누르기 (키 발급)",
   "actionWindow.coupangIssuance.copyKeys": "액세스 키·시크릿 키·업체코드 복사",
   "actionWindow.coupangIssuance.return": "SellerOps로 돌아와 입력",
 
@@ -125,7 +130,11 @@ const ISSUANCE_STEP_DETAIL: Record<string, string> = {
   "actionWindow.coupangIssuance.termsConsent":
     "약관을 직접 읽고 판단하신 뒤 동의 체크박스 2개를 선택하세요. SellerOps는 약관을 읽지도, 대신 동의하지도, 체크하지도 않습니다. 2개가 모두 선택되면 자동으로 넘어갑니다(선택 여부는 저장·전송하지 않습니다).",
   "actionWindow.coupangIssuance.issueCheckpoint":
-    "'약관 동의 및 Key 발급받기'를 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않고, 자동으로 넘어가지도 않습니다. ⚠ 이 버튼은 키를 만들지 않습니다. 다음에 연동 방식(자체개발/연동업체)을 고르는 화면이 나오고, 키는 그 화면의 '확인'에서 발급됩니다 — 그 화면은 아직 SellerOps가 안내하지 않으니 직접 진행해 주세요. Access Key가 화면에 표시되면 아래 버튼을 누르세요.",
+    "'약관 동의 및 Key 발급받기'를 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않습니다. 이 버튼에서는 키가 발급되지 않고 연동 방식을 고르는 화면이 열립니다(live walk 2회에서 그렇게 보고되었습니다. SellerOps는 키 발급 여부를 확인할 수 없습니다). 그 화면이 열리면 자동으로 넘어갑니다.",
+  "actionWindow.coupangIssuance.vendorMethod":
+    "입력 방식에서 '자체개발(직접입력)'을 직접 선택하세요 — SellerOps는 선택하지 않습니다. 선택하면 URL · IP 주소 입력란이 더 나타납니다(업체명은 이미 화면에 있습니다). 선택한 뒤 아래 버튼을 누르세요.",
+  "actionWindow.coupangIssuance.vendorConfirm":
+    "업체명 · URL을 입력하고, IP 주소는 입력한 뒤 옆의 '추가'를 눌러 등록하세요 — 추가하지 않으면 IP가 등록되지 않습니다. 그 다음 '확인'을 직접 누르세요. ⚠ 여기서 실제 API 키가 발급되어 라이브 계정 상태가 바뀝니다(지우려면 나중에 별도의 삭제 작업이 필요합니다). SellerOps는 이 버튼을 절대 누르지 않고, 입력란에 아무것도 쓰지 않습니다. 키가 화면에 표시되면 자동으로 넘어갑니다.",
   "actionWindow.coupangIssuance.copyKeys":
     "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요. SellerOps는 값을 읽지 않습니다. 복사했으면 아래 버튼을 누르세요.",
   "actionWindow.coupangIssuance.return":

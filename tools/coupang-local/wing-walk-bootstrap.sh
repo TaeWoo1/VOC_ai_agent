@@ -2,9 +2,11 @@
 #
 # Coupang WING issuance-form REVEAL bootstrap (browser-only: no backend, no DB, no frontend).
 #
-# Mints the run identity for `COUPANG_WING_GUIDED_ISSUANCE_WALK` — the one step where SellerOps highlights the
-# live-calibrated 발급 control and the OPERATOR presses it. The press is expected to open the API configuration
-# step; that expectation is NOT confirmed, and the key is created only by a later 확인, which has no tooling.
+# Mints the run identity for `COUPANG_WING_GUIDED_ISSUANCE_WALK` — a NINE-control walk in which SellerOps
+# highlights each live-calibrated control and the OPERATOR presses every one of them. It no longer rests before
+# the API configuration step: that step was measured on 2026-08-12, so the walk continues onto the vendor-method
+# screen and ends at its `확인`. ⚠ That press is OPERATOR-REPORTED to create a REAL API key on the live account,
+# and this run is what verifies it — so the grant this identity is minted for is a WRITE grant, not a sitting.
 #
 # There is NO per-run scope to choose: the phase pins its own channel / account / surface / operation / budget,
 # and the gate refuses any deviation. Nothing about this run is configurable from the environment.
@@ -92,19 +94,25 @@ echo "  phase        : COUPANG_WING_GUIDED_ISSUANCE_WALK (agent READ_ONLY; the O
 echo "  navigation   : ONE — the agent opens the seller's own WING landing when the window comes up."
 echo "                 It never navigates again; every screen after it is one the SELLER reaches."
 echo "                 0 clicks, 0 inputs, 0 submits"
-echo "  highlights   : SEVEN live-calibrated controls (API Key 발급 받기 · 확인 · 약관 동의 및 Key 발급받기 · the"
-echo "                 key region · the OPEN API option label · both consent sentences). Every step that names"
-echo "                 a WING control now rings it; the two that name no control — reaching the page, and"
-echo "                 going back to SellerOps — stay text-only. NONE of the rings sits on an input: the"
-echo "                 purpose ring is on the option's label and the consent rings on the two sentences,"
-echo "                 because the radios and the checkboxes have no accessible association and SellerOps"
-echo "                 does not claim to know which box is which"
-echo "  auto-advance : FOUR steps advance on what the runtime OBSERVES on WING, with no button press. The"
+echo "  highlights   : NINE live-calibrated controls (API Key 발급 받기 · 확인 · 약관 동의 및 Key 발급받기 · the"
+echo "                 key region · the OPEN API option label · both consent sentences · the"
+echo "                 자체개발(직접입력) option · the vendor screen's 확인). Every step that names a WING"
+echo "                 control rings it; the two that name no control — reaching the page, and going back to"
+echo "                 SellerOps — stay text-only. NONE of the rings sits on an input: the option rings are on"
+echo "                 the labels and the consent rings on the two sentences, because the radios and the"
+echo "                 checkboxes have no accessible association and SellerOps does not claim to know which"
+echo "                 box is which"
+echo "  auto-advance : SIX steps advance on what the runtime OBSERVES on WING, with no button press. The"
 echo "                 seller's own on-page button remains on every step. The runtime reads whether the two"
 echo "                 consent boxes are ticked — one page-side boolean, never stored, sent, or logged; it"
 echo "                 never ticks a box and never reads the terms"
-echo "  key issuance : NOT performed, and NEVER auto-advanced. The walk RESTS in front of"
-echo "                 '약관 동의 및 Key 발급받기' and never presses it"
+echo "  key issuance : ⚠ THIS RUN ENDS WITH A REAL KEY ON THE SELLER'S LIVE ACCOUNT. The walk RESTS in front"
+echo "                 of the vendor screen's '확인' — the control that ISSUES it — rings it, and never"
+echo "                 presses it. The PRESS is never auto-advanced; only WING then SHOWING the keys is"
+echo "                 observed, which is a result and cannot cause itself. '약관 동의 및 Key 발급받기' does"
+echo "                 NOT create the key: refuted 2026-08-12 — pressed twice live, operator-reported to"
+echo "                 issue none. SellerOps cannot confirm that either way"
+echo "  method       : the walk guides '자체개발(직접입력)' — a PRODUCT DECISION, not a measurement"
 echo
 echo "next: tools/coupang-local/wing-walk-preflight.sh  (prepares + displays the Approval Manifest; no browser)"
 echo "note: re-running this bootstrap mints a NEW approval id — the previous grant is dead."

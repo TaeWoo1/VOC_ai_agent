@@ -12,10 +12,13 @@ import { fileURLToPath } from "node:url";
 import {
   WING_CONFIRM_ADVISORIES,
   WING_FLOW_CHECKPOINTS,
+  WING_ISSUANCE_FLOW_PLAN,
   WING_FLOW_HALT_REASONS,
   WING_VENDOR_FORM_CANDIDATE_IDS,
+  WING_VENDOR_METHOD_CHECKPOINTS,
   WING_PURPOSE_SCREEN_MARKER_ID,
   WING_TERMS_SCREEN_MARKER_IDS,
+  WING_VENDOR_METHOD_SCREEN_MARKER_IDS,
   WING_CHECKPOINT_EXPECTED_SCREEN,
   WING_TERMS_CHECKBOX_PROMOTION_BLOCKED,
   wingFlowScreenFrom,
@@ -24,6 +27,7 @@ import {
   WING_KEY_CREATION_CONTROL_ID,
   WING_CHOICE_LABEL_CANDIDATES,
   WING_STAGE3_TERMS_OPTION_CANDIDATES,
+  WING_STAGE4_VENDOR_METHOD_OPTION_CANDIDATES,
   WING_STAGE2_RECON_CANDIDATES,
   WING_STAGE2_RECON_TARGETS,
   wingConfirmAdvisory,
@@ -56,12 +60,23 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 type Row = { id: string; presence: WingStage2Presence };
 
-/** The screen markers, in the state that identifies one screen or the other. */
-const markers = (screen: "PURPOSE" | "TERMS" | "NEITHER"): Row[] => [
+/**
+ * The screen markers, in the state that identifies one screen or the other.
+ *
+ * EVERY marker family is present in every row set, always — including the vendor one. That is not tidiness: a
+ * marker missing from a reading makes `wingFlowScreenFrom` answer `NOT_MEASURED` by design, so a helper that
+ * omitted the newest family would silently turn every screen assertion below into an assertion about an
+ * unprobed sweep.
+ */
+const markers = (screen: "PURPOSE" | "TERMS" | "VENDOR_METHOD" | "NEITHER"): Row[] => [
   { id: WING_PURPOSE_SCREEN_MARKER_ID, presence: screen === "PURPOSE" ? "PRESENT_VISIBLE" : "PRESENT_HIDDEN_ONLY" },
   ...WING_TERMS_SCREEN_MARKER_IDS.map((id) => ({
     id,
     presence: (screen === "TERMS" ? "PRESENT_VISIBLE" : "PRESENT_HIDDEN_ONLY") as WingStage2Presence,
+  })),
+  ...WING_VENDOR_METHOD_SCREEN_MARKER_IDS.map((id) => ({
+    id,
+    presence: (screen === "VENDOR_METHOD" ? "PRESENT_VISIBLE" : "PRESENT_HIDDEN_ONLY") as WingStage2Presence,
   })),
 ];
 
@@ -160,9 +175,22 @@ describe("wingConfirmAdvisory — may the run INVITE the 확인 press?", () => {
     const both: Row[] = [
       { id: WING_PURPOSE_SCREEN_MARKER_ID, presence: "PRESENT_VISIBLE" },
       ...WING_TERMS_SCREEN_MARKER_IDS.map((id) => ({ id, presence: "PRESENT_VISIBLE" as const })),
+      ...WING_VENDOR_METHOD_SCREEN_MARKER_IDS.map((id) => ({ id, presence: "PRESENT_HIDDEN_ONLY" as const })),
       ...WING_VENDOR_FORM_CANDIDATE_IDS.map((id) => ({ id, presence: "PRESENT_HIDDEN_ONLY" as const })),
     ];
     expect(wingFlowScreenFrom({ precondition: "OK", faultCount: 0, candidates: both })).toBe("TERMS");
+    // …and the VENDOR screen outranks BOTH. Same rule, one screen further: it is reported as a dialog over the
+    // terms screen, so the terms markers may well still paint behind it — and answering TERMS there would put the
+    // run one screen behind the seller at the screen whose 확인 issues a real key.
+    const allThree: Row[] = both.map((c) =>
+      (WING_VENDOR_METHOD_SCREEN_MARKER_IDS as readonly string[]).includes(c.id)
+        ? { ...c, presence: "PRESENT_VISIBLE" as const }
+        : c,
+    );
+    expect(wingFlowScreenFrom({ precondition: "OK", faultCount: 0, candidates: allThree })).toBe("VENDOR_METHOD");
+    expect(wingConfirmAdvisory({ precondition: "OK", faultCount: 0, candidates: allThree })).toBe(
+      "STOP_ALREADY_PAST_THE_PURPOSE_SCREEN",
+    );
     expect(wingConfirmAdvisory({ precondition: "OK", faultCount: 0, candidates: both })).toBe(
       "STOP_ALREADY_PAST_THE_PURPOSE_SCREEN",
     );
@@ -474,7 +502,10 @@ describe("the discovery PHASE is wired everywhere a Stage-2 phase must be", () =
     // The Stage-2 warning says "Choose no purpose … NEVER press 확인". Printed above a discovery manifest it
     // would contradict the manifest directly over it, and the operator would have to guess which is binding.
     const src = readFileSync(resolve(HERE, "../../../../tools/coupang-local/wing-probe-preflight.sh"), "utf8");
-    const discoveryBranch = src.indexOf('if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then');
+    // ONE branch now serves both flow phases — the predicate exists because "a run that advances the real
+    // flow" is a description of two phases, and a `[ "$PHASE" = … ]` repeated at each site is how the second
+    // one gets added to some of them.
+    const discoveryBranch = src.indexOf('if is_flow_phase "$PHASE"; then');
     const sharedBranch = src.indexOf('elif is_stage2_phase "$PHASE"; then');
     expect(discoveryBranch).toBeGreaterThan(-1);
     // The discovery branch must come FIRST, or the shared one swallows it.
@@ -482,7 +513,10 @@ describe("the discovery PHASE is wired everywhere a Stage-2 phase must be", () =
     const block = src.slice(discoveryBranch, sharedBranch);
     // It has to state the conditionality, the reason, and the halt — not just "you may press 확인".
     expect(block).toContain("ADVANCES THE REAL FLOW");
-    expect(block).toContain("KEY-CREATION control");
+    // NOT "the KEY-CREATION control" — that claim was REFUTED on 2026-08-12 (pressed live, no key issued), and
+    // this disclosure was one of the six places still asserting it. The boundary is stated by what is true.
+    expect(block).not.toContain("is the KEY-CREATION control");
+    expect(block).toContain("never read");
     expect(block).toContain("HALTS");
     expect(block).toContain("Fail-closed");
     // …and it must READ as English. A shell-escaping leak (`run'\''s`) shipped into the middle of the sentence
@@ -645,7 +679,9 @@ describe("the terms screen — transcribed verbatim, and the key-creation bounda
     ]);
     expect(WING_CHOICE_LABEL_CANDIDATES[4]!.exactText).toBe("OPEN API");
     expect(WING_CHOICE_LABEL_CANDIDATES[5]!.exactText).toBe("플레이오토 웹 솔루션");
-    expect(WING_CHOICE_LABEL_CANDIDATES.slice(6)).toEqual([...WING_STAGE3_TERMS_OPTION_CANDIDATES]);
+    expect(WING_CHOICE_LABEL_CANDIDATES.slice(6, 8)).toEqual([...WING_STAGE3_TERMS_OPTION_CANDIDATES]);
+    // The vendor-method options were APPENDED 2026-08-12, after both earlier families, for exactly this reason.
+    expect(WING_CHOICE_LABEL_CANDIDATES.slice(8)).toEqual([...WING_STAGE4_VENDOR_METHOD_OPTION_CANDIDATES]);
     // Unique ids and unique texts across the union — a collision would make the reported index order-dependent.
     const ids = WING_CHOICE_LABEL_CANDIDATES.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
@@ -688,7 +724,7 @@ describe("the manifest cannot under-describe the flow it approves", () => {
   });
 
   it("an invalid checkpoint plan REFUSES rather than falling back to the whole flow", () => {
-    const head = CLI_SRC.slice(CLI_SRC.indexOf("const flowPlan = isWingFlowDiscovery"));
+    const head = CLI_SRC.slice(CLI_SRC.indexOf("const flowPlan = phasePlan"));
     expect(head.slice(0, 900)).toContain("WING_FLOW_CHECKPOINTS_MISMATCH");
     expect(head.slice(0, 900)).toContain("resolveWingFlowCheckpoints");
   });
@@ -729,7 +765,7 @@ describe("the manifest cannot under-describe the flow it approves", () => {
 
   it("the preflight builds its step list FROM THE PLAN, and hard-codes no count", () => {
     const src = readFileSync(resolve(HERE, "../../../../tools/coupang-local/wing-probe-preflight.sh"), "utf8");
-    const from = src.indexOf('if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then');
+    const from = src.indexOf('if is_flow_phase "$PHASE"; then');
     const block = src.slice(from, src.indexOf('elif is_stage2_phase "$PHASE"; then', from));
     // Derived: it loops the plan and numbers as it goes.
     expect(block).toContain("for CP in $PLAN");
@@ -738,8 +774,10 @@ describe("the manifest cannot under-describe the flow it approves", () => {
     for (const c of WING_FLOW_CHECKPOINTS) expect(block, c).toContain(`${c})`);
     // No literal step number survives.
     expect(block).not.toMatch(/echo "    [0-9]+\)/);
-    expect(block).toContain("KEY-CREATION control");
+    expect(block).not.toContain("is the KEY-CREATION control");
     expect(block).toContain("no fifth checkpoint");
+    // …and the plan's own two extra steps have copy branches too, or a vendor run prints blank lines for them.
+    for (const c of WING_VENDOR_METHOD_CHECKPOINTS) expect(block, c).toContain(`${c})`);
   });
 
   it("the warning does not repeat a claim its own runs have since falsified", () => {
@@ -748,7 +786,7 @@ describe("the manifest cannot under-describe the flow it approves", () => {
     // a retired unknown teaches the reader to discount it, and the paragraph it sat in is the one explaining
     // why the run may stop before a key-creating control.
     const src = readFileSync(resolve(HERE, "../../../../tools/coupang-local/wing-probe-preflight.sh"), "utf8");
-    const from = src.indexOf('if [ "$PHASE" = "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY" ]; then');
+    const from = src.indexOf('if is_flow_phase "$PHASE"; then');
     const block = src.slice(from, src.indexOf('elif is_stage2_phase "$PHASE"; then', from));
     expect(block).not.toContain("nobody has ever pressed");
     expect(block).not.toContain("no run has measured what it does");
@@ -871,9 +909,9 @@ describe("the terms checkboxes are blocked from promotion, by name", () => {
 
 describe("a run may end the flow early, but never start it in the middle", () => {
   it("accepts a PREFIX and defaults to the whole flow", () => {
-    expect(resolveWingFlowCheckpoints(undefined)).toEqual({ ok: true, checkpoints: [...WING_FLOW_CHECKPOINTS] });
-    expect(resolveWingFlowCheckpoints("  ")).toEqual({ ok: true, checkpoints: [...WING_FLOW_CHECKPOINTS] });
-    const three = resolveWingFlowCheckpoints(WING_FLOW_CHECKPOINTS.slice(0, 3).join(","));
+    expect(resolveWingFlowCheckpoints(undefined, WING_ISSUANCE_FLOW_PLAN)).toEqual({ ok: true, checkpoints: [...WING_FLOW_CHECKPOINTS] });
+    expect(resolveWingFlowCheckpoints("  ", WING_ISSUANCE_FLOW_PLAN)).toEqual({ ok: true, checkpoints: [...WING_FLOW_CHECKPOINTS] });
+    const three = resolveWingFlowCheckpoints(WING_FLOW_CHECKPOINTS.slice(0, 3).join(","), WING_ISSUANCE_FLOW_PLAN);
     expect(three).toEqual({ ok: true, checkpoints: [...WING_FLOW_CHECKPOINTS.slice(0, 3)] });
   });
 
@@ -886,17 +924,17 @@ describe("a run may end the flow early, but never start it in the middle", () =>
       "PURPOSE_OPTION_SELECTED_BY_OPERATOR,PURPOSE_SCREEN_UNTOUCHED",
       "TERMS_CHECKED_BY_OPERATOR",
     ]) {
-      const r = resolveWingFlowCheckpoints(bad);
+      const r = resolveWingFlowCheckpoints(bad, WING_ISSUANCE_FLOW_PLAN);
       expect(r.ok, bad).toBe(false);
       if (!r.ok) expect(r.reason).toContain("PREFIX");
     }
   });
 
   it("reports a COUNT for unknown names, never the tokens", () => {
-    const r = resolveWingFlowCheckpoints("PURPOSE_SCREEN_UNTOUCHED,<script>alert(1)</script>");
+    const r = resolveWingFlowCheckpoints("PURPOSE_SCREEN_UNTOUCHED,<script>alert(1)</script>", WING_ISSUANCE_FLOW_PLAN);
     expect(r.ok).toBe(false);
     if (!r.ok) {
-      expect(r.reason).toContain("1 unrecognized");
+      expect(r.reason).toContain("1 checkpoint name(s) not in the ISSUANCE_FLOW plan");
       expect(r.reason).not.toContain("script");
     }
   });
@@ -948,40 +986,53 @@ describe("the guided-walk manifest is not the fallback", () => {
     expect(CLI).toContain("isWingGuidedWalk\n    ? \"operator-performed: the whole tutorial");
   });
 
-  it("the operation names the boundary, what the rings sit ON, and what is out of scope", () => {
+  it("**the operation says this run ends with a REAL KEY**, and what the rings sit on", () => {
     const from = CLI.indexOf('isWingGuidedWalk\n    ? "WING GUIDED ISSUANCE WALK');
     const op = CLI.slice(from, CLI.indexOf("\n    : isWingReveal", from));
-    expect(op).toContain("never pressed");
-    expect(op).toContain("separate phase");
-    // The two highlight CLASSES became one on 2026-08-11 — every guided control is now calibrated. What
-    // replaced that distinction is the one that still matters: which ELEMENT each ring sits on. The purpose and
-    // consent rings are on a label and two sentences, never on the radio or the checkboxes, because those
-    // inputs have no accessible association and nothing may claim to know which box is which.
-    expect(op).toContain("never on the radio or the checkboxes");
-    expect(op).toContain("measured structural pairing");
-    // The stop point is unchanged and its reason is corrected: the operation text may no longer tell the
-    // operator this control creates the key, because it does not.
-    expect(op).not.toContain("which is the control that CREATES THE KEY");
-    expect(op).toContain("REFUTED on 2026-08-12");
-    expect(op).toContain("what follows is unmeasured");
+    // The line that changed everything about this phase on 2026-08-12. Every earlier walk stopped one screen
+    // short of any key existing, and the operation text has to say plainly that this one does not.
+    expect(op).toContain("ENDS WITH A REAL API KEY ON YOUR LIVE COUPANG ACCOUNT");
+    expect(op).toContain("WHICH ISSUES THE KEY and changes live account state");
+    // NOT "IRREVERSIBLY". Narrowed 2026-08-12 — WING has a 삭제 control and the operator has used it, so the
+    // binding text must not carry a claim the reader can falsify.
+    expect(op).toContain("SEPARATE deletion run, not an undo");
+    expect(op).not.toContain("IRREVERSIBLY");
+    expect(op).toContain("SellerOps never presses it");
+    // The press it asks for on the way rests on the MEASUREMENT, never on a button label — which is exactly what
+    // the refuted claim rested on.
+    expect(op).toContain("operator-reported to issue no key");
+    expect(op).toContain("SellerOps cannot confirm that either way");
+    expect(op).not.toContain("MEASURED to create no key");
+    // Which ELEMENT each ring sits on. Those inputs have no accessible association, and nothing may claim to
+    // know which box is which.
+    expect(op).toContain("never on a radio or a checkbox");
+    // The auto-advance that follows the key press is an OBSERVATION of the result, and the text says why it
+    // cannot be anything else.
+    expect(op).toContain("cannot cause it");
+    expect(op).toContain("PRODUCT DECISION");
     expect(op).toContain("navigates no further");
     expect(op).toContain("no connect-test, no sync");
+    // The retired claims. Both were true when written and neither is now.
+    expect(op).not.toContain("which is the control that CREATES THE KEY");
+    expect(op).not.toContain("what follows is unmeasured");
   });
 
-  it("the maxActions budget counts zero presses of the key-creating control", () => {
+  it("the maxActions budget counts the key press as the SELLER's, and zero for the agent", () => {
     const from = CLI.indexOf('isWingGuidedWalk\n    ? "operator-performed: the whole tutorial');
     const max = CLI.slice(from, CLI.indexOf("\n    : isWingReveal", from));
-    expect(max).toContain("0 presses of the key-creating");
-    // ONE navigation now — the landing — and the budget must SAY so rather than keep claiming zero.
+    expect(max).toContain("WHICH ISSUES A REAL KEY");
+    expect(max).toContain("0 key presses");
+    // ONE navigation — the landing — and the budget must SAY so rather than keep claiming zero.
     expect(max).toContain("1 navigation (the landing at window open, never again)");
-    // Seven since the guided-control calibration landed. The budget also has to state that the runtime
-    // advances itself now — a budget listing only what the SELLER presses would understate what the agent does.
-    expect(max).toContain("7 highlights");
+    // Nine since the vendor screen was measured. The budget also has to state that the runtime advances itself
+    // now — a budget listing only what the SELLER presses would understate what the agent does.
+    expect(max).toContain("9 highlights");
     expect(max).toContain("0 text-guided");
     // …and the count that says what SellerOps does NOT know: no ring sits on an input.
     expect(max).toContain("0 rings on an input");
-    expect(max).toContain("4 steps advanced by OBSERVING WING");
-    expect(max).toContain("the key-creating step never");
+    expect(max).toContain("6 steps advanced by OBSERVING WING");
+    // The one thing that is never observed into happening: the press itself.
+    expect(max).toContain("the key-issuing PRESS is never one of them");
   });
 });
 
@@ -1018,7 +1069,12 @@ describe("stale spotlight — the defect the dev-host live proof surfaced", () =
     // The SECOND place the same rule now has to hold. The repositioner re-queries the tag set on every scroll,
     // so a docked panel would have re-acquired a stale anchor there even with the mount-time guard intact — a
     // guard fixed in one place and left standing in its sibling, which is this workstream's recurring shape.
-    expect(OVL).toContain("if (o.dockedPanelOnly) return;");
+    //
+    // It also now covers the panel-occlusion pass the repositioner took on: a docked step rings no control, so
+    // there is nothing for its panel to be sitting on, and the one guard is still the whole rule.
+    const rep = OVL.slice(OVL.indexOf("const reposition = ["), OVL.indexOf("const schedule = ["));
+    expect(rep).toContain("if (o.dockedPanelOnly) return;");
+    expect(rep.indexOf("if (o.dockedPanelOnly) return;")).toBeLessThan(rep.indexOf('document.querySelectorAll("[data-aw-target]")'));
   });
 
   it("docked mode draws no ring, no dimming and no badge — it claims no location", () => {

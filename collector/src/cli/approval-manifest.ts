@@ -93,6 +93,13 @@ export const CALIBRATION_PHASES = [
   // permits — press 확인. The agent's click/type/submit/selection budget is still 0; the widening is entirely in
   // what the human is invited to do, which a capability list cannot express and a manifest must.
   "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY",
+  // The VENDOR-METHOD DISCOVERY phase. The discovery flow carried two checkpoints further, onto the screen that
+  // follows `약관 동의 및 Key 발급받기` — the one the operator reports actually issues the key. Separately
+  // approvable because it asks the operator to press the control every earlier manifest promised they would not:
+  // that press is MEASURED to issue no key (twice, on live walks), which is what makes this a READ phase and not
+  // a WRITE one. The agent's click/type/submit/selection budget is still 0. It ENDS with the seller looking at a
+  // `확인` that issues a real key and which no checkpoint of this phase may reach.
+  "COUPANG_WING_VENDOR_METHOD_DISCOVERY",
   // The GUIDED ISSUANCE WALK. The product path, run live end-to-end for the first time: the WING-resident
   // tutorial guides the seller from the open-API page to the terms screen, and RESTS in front of the control
   // that creates the key. Two of its eight steps highlight a live-calibrated control; the four added by the
@@ -285,14 +292,48 @@ export interface OperatorRevealAction {
  * the separation cannot be softened in prose alone.
  */
 export interface GuidedWalkBoundary {
-  /** The operator action being approved: walking the tutorial, not issuing anything. */
+  /** The operator action being approved. Walking the tutorial — which now ENDS in a real key. */
   operation: "WALK_WING_GUIDED_ISSUANCE_TUTORIAL";
-  /** The operation this phase must never perform or prepare. */
+  /**
+   * **The follow-on this phase must never perform.** It still may not: the AGENT presses nothing, and
+   * `COMPLETE_WING_KEY_ISSUANCE` is the seller's own act throughout.
+   *
+   * What changed on 2026-08-12 is that the walk now GUIDES the seller to it instead of stopping one screen
+   * short. That is not a loosening of this field — it never described what the operator may do — but leaving it
+   * unremarked would let a reader take "forbidden follow-on" as "this run ends before a key exists", which was
+   * true until this unit and is not now. {@link operatorIssuesRealKey} is the field that says so.
+   */
   forbiddenFollowOnAction: typeof WING_KEY_CREATION_ACTION;
-  /** The control the walk rests in front of and never presses. */
-  restsBeforeControl: "약관 동의 및 Key 발급받기";
-  createsKeyMaterial: false;
-  /** …and the runtime still cannot demonstrate that none was created. Only the seller sees the screen. */
+  /**
+   * **The control the walk rests in front of and never presses.** It was `약관 동의 및 Key 발급받기` until
+   * 2026-08-12 — a control believed to create the key, pressed on two live walks, and measured to create none.
+   * The walk rests in front of the one that does.
+   */
+  restsBeforeControl: "확인 (vendor-method screen)";
+  /**
+   * **Whether the AGENT creates key material. Still false, and it is a narrower claim than it used to be.**
+   *
+   * Until 2026-08-12 this field sat beside a walk that ended before any key could exist, so `false` carried two
+   * meanings at once — the agent makes no key, and no key is made. Only the first was ever what it asserted, and
+   * the second is now plainly untrue. {@link operatorIssuesRealKey} exists so the pair cannot be read as one.
+   */
+  agentCreatesKeyMaterial: false;
+  /**
+   * **TRUE. This run ends with a real API key on the seller's live Coupang account.**
+   *
+   * The single most important line in this descriptor, and the reason this phase cannot be granted on the same
+   * footing as the walk that preceded it. The seller performs the press; SellerOps guides them to it, highlights
+   * it, and never touches it.
+   *
+   * NARROWED 2026-08-12, and the narrowing is a correction. This said "irreversible", and it is not: WING has a
+   * 삭제 control, the operator has used it, and this repository has a whole deletion phase built around it. What
+   * is true is that the run CREATES a real credential and CHANGES live account state; undoing that is a separate
+   * deletion, not an undo. Overstating a risk is not the safe side of this — a warning that a reader can
+   * personally falsify spends the credibility that {@link OperatorDestructiveAction}'s genuinely irreversible
+   * one needs.
+   */
+  operatorIssuesRealKey: true;
+  /** …and the runtime still cannot demonstrate a key WAS created. Only the seller sees the value. */
   keyCreationRuledOut: false;
   /** The agent clicks, types, submits — and NAVIGATES — nothing. The last one is new to this entrypoint. */
   agentPerformsAction: false;
@@ -301,8 +342,12 @@ export interface GuidedWalkBoundary {
   credentialValueReadBudget: 0;
   /** No connect-test, no sync, no upload: guidance finishing is not a connection. */
   performsConnectOrSync: false;
-  /** How many of the walk's guided controls carry a live-calibrated locator and may be highlighted. */
-  highlightedControlCount: 7;
+  /**
+   * How many of the walk's guided controls carry a live-calibrated locator and may be highlighted. NINE since
+   * 2026-08-12: the seven the guided-control calibration established, plus the vendor screen's chosen option
+   * and its key-issuing `확인`, both measured on two checkpoints of that screen.
+   */
+  highlightedControlCount: 9;
   /**
    * …and how many are guided by TEXT because nothing was promoted for them. **Zero since 2026-08-11**, when the
    * guided-control calibration measured the `OPEN API` option label, the `확인` control and the two consent
@@ -318,6 +363,9 @@ export interface GuidedWalkBoundary {
    * never on the radio or the checkbox. What ties each sentence-ring to the right box is the measured block
    * pairing, not a ring on the box.
    *
+   * The vendor-method ring is the same shape and stays inside the same claim: it sits on the option's `<label>`,
+   * measured `visible: 1` / tag `LABEL` on both vendor checkpoints, never on the radio.
+   *
    * A count rather than prose because the operator grants against this descriptor, and prose on one side of a
    * machine-checked list is the manifest-honesty defect this workstream keeps repeating.
    */
@@ -329,33 +377,64 @@ export interface GuidedWalkBoundary {
    * every step; none auto-advances". That stopped being true on 2026-08-10 and a field that quietly keeps
    * saying it is worse than no field: the operator grants against this descriptor.
    */
-  autoAdvancingStepCount: 4;
-  /** The key-creation step is NOT one of them, and never becomes one. */
-  keyCreationAutoAdvances: false;
+  autoAdvancingStepCount: 6;
+  /**
+   * **Whether anything auto-performs the key-issuing PRESS. False, and it always will be.**
+   *
+   * Renamed from `keyCreationAutoAdvances` on 2026-08-12, because that name became ambiguous the moment the
+   * key-issuing step gained an observed advance: the press is not automatic and the advance AFTER it is. One
+   * field could not say both, and the one that could be misread is the one that guards the key-creating act.
+   */
+  keyCreationPressAutoPerformed: false;
+  /**
+   * **TRUE — the key-issuing step advances on WING showing the credentials.**
+   *
+   * An observation of the RESULT, which cannot cause it: the credential label cannot paint before a credential
+   * exists. The seller presses 확인; SellerOps notices the keys appeared.
+   *
+   * Corrected 2026-08-12. This named the sanitized page category becoming `credential_shown`, which is
+   * unreachable on this surface — `classifyWingPage` answers `open_api_issuance` while the open-API marker is
+   * present, and the keys appear ON that page. Two sittings issued a real key and the step never completed
+   * itself. The safety property is the one this field has always declared and is unchanged; what changed is
+   * that the mechanism named here is now one that can actually fire.
+   * Declared rather than left implicit because "the key step auto-advances" is alarming read alone and is
+   * exactly what an operator deserves to see stated precisely.
+   */
+  keyIssuanceAdvancesOnObservedResult: true;
   /**
    * Whether the runtime looks at the consent checkboxes' state. **True** — deliberately, to advance without
    * asking the seller to report what the page already shows. It never ticks a box, never reads the terms, and
    * the reading is a page-side conjunction that is never stored, transmitted, or logged.
    */
   sellerConsentObserved: true;
+  /**
+   * The input method the walk names, and WHO decided it. A product decision taken with the measurement in front
+   * of the owner and separated from it — the screen offers two options and both resolve identically well.
+   */
+  vendorMethodGuided: "자체개발(직접입력)";
+  vendorMethodDecidedBy: "PRODUCT_OWNER";
 }
 
 export const COUPANG_WING_GUIDED_WALK_BOUNDARY: GuidedWalkBoundary = {
   operation: "WALK_WING_GUIDED_ISSUANCE_TUTORIAL",
   forbiddenFollowOnAction: WING_KEY_CREATION_ACTION,
-  restsBeforeControl: "약관 동의 및 Key 발급받기",
-  createsKeyMaterial: false,
+  restsBeforeControl: "확인 (vendor-method screen)",
+  agentCreatesKeyMaterial: false,
+  operatorIssuesRealKey: true,
   keyCreationRuledOut: false,
   agentPerformsAction: false,
   agentNavigations: 1,
   credentialValueReadBudget: 0,
   performsConnectOrSync: false,
-  highlightedControlCount: 7,
+  highlightedControlCount: 9,
   textGuidedControlCount: 0,
   ringedInputControlCount: 0,
-  autoAdvancingStepCount: 4,
-  keyCreationAutoAdvances: false,
+  autoAdvancingStepCount: 6,
+  keyCreationPressAutoPerformed: false,
+  keyIssuanceAdvancesOnObservedResult: true,
   sellerConsentObserved: true,
+  vendorMethodGuided: "자체개발(직접입력)",
+  vendorMethodDecidedBy: "PRODUCT_OWNER",
 };
 
 export const COUPANG_WING_ISSUANCE_REVEAL_ACTION: OperatorRevealAction = {
@@ -657,6 +736,32 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     allowsHighlight: false,
     mode: "READ_ONLY",
   },
+  COUPANG_WING_VENDOR_METHOD_DISCOVERY: {
+    phase: "COUPANG_WING_VENDOR_METHOD_DISCOVERY",
+    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    driver: "CoupangWingIssuanceDriver (the discovery reads, carried two checkpoints further onto the vendor-method screen)",
+    // IDENTICAL to the discovery phase's list, and deliberately so: this phase measures nothing the other cannot.
+    // What differs is entirely WHERE the reads are taken and what the OPERATOR is invited to do to get there —
+    // which is why it is a separate manifest rather than a longer checkpoint list on the existing one. A phase
+    // that widened the capability list here would be describing a different instrument; this one is the same
+    // instrument pointed at a screen nothing has read.
+    capableActions: [
+      "OPEN_DEDICATED_WINDOW",
+      "WAIT_OPERATOR_LOGIN_NAV",
+      "CLASSIFY_SANITIZED_PAGE_CATEGORY",
+      "STRUCTURAL_CENSUS",
+      "PROBE_TARGET_MATCHCOUNT",
+      "CHOICE_CONTROL_SHAPE_CENSUS",
+      "FIXED_LABEL_CONTAINMENT_PROBE",
+      "CHOICE_CONTROL_LABEL_ASSOCIATION_CENSUS",
+      "CONSENT_BLOCK_CENSUS",
+    ],
+    allowsHighlight: false,
+    // READ_ONLY is a claim about the AGENT, and it stays true: it reads, and it presses nothing. The operator's
+    // side of this run is wider than any earlier READ phase's, and no mode enum can express that — the operation
+    // text and the operator summary carry it, which is the same division every phase in this file uses.
+    mode: "READ_ONLY",
+  },
   COUPANG_WING_GUIDED_ISSUANCE_WALK: {
     phase: "COUPANG_WING_GUIDED_ISSUANCE_WALK",
     // The operator's command INSTALLS the service; the agent it installs (`src/cli/local-agent.ts`) is then a
@@ -759,6 +864,7 @@ export const WING_PHASES: readonly CalibrationPhase[] = [
   "COUPANG_WING_STAGE2_RECON",
   "COUPANG_WING_STAGE2_LABEL_CALIBRATION",
   "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY",
+  "COUPANG_WING_VENDOR_METHOD_DISCOVERY",
   "COUPANG_WING_GUIDED_ISSUANCE_WALK",
   "COUPANG_WING_ISSUANCE_FORM_REVEAL",
   "COUPANG_WING_KEY_DELETION",
@@ -778,6 +884,7 @@ export const WING_STAGE2_MANIFEST_PHASES: readonly CalibrationPhase[] = [
   "COUPANG_WING_STAGE2_RECON",
   "COUPANG_WING_STAGE2_LABEL_CALIBRATION",
   "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY",
+  "COUPANG_WING_VENDOR_METHOD_DISCOVERY",
 ];
 export function isWingStage2Phase(phase: CalibrationPhase): boolean {
   return WING_STAGE2_MANIFEST_PHASES.includes(phase);
@@ -870,6 +977,7 @@ export const ENTRYPOINT_PHASES = [
   "COUPANG_WING_STAGE2_RECON",
   "COUPANG_WING_STAGE2_LABEL_CALIBRATION",
   "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY",
+  "COUPANG_WING_VENDOR_METHOD_DISCOVERY",
   "COUPANG_WING_GUIDED_ISSUANCE_WALK",
   "COUPANG_WING_ISSUANCE_FORM_REVEAL",
   "COUPANG_WING_KEY_DELETION",
@@ -1013,6 +1121,31 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
       "라벨 연결 방식만 번호로 읽으며, 화면 문구·입력값·키 값은 기록하지 않습니다.",
     emitsFrontendUrl: false,
   },
+  // The VENDOR-METHOD DISCOVERY phase. Same CLI, same dedicated Chrome, two checkpoints further. The summary has
+  // one job the discovery summary did not: it asks the operator to press the control every earlier manifest
+  // promised they would not be asked to press, so it has to say WHY that is now a measured-safe request — and
+  // then say, in the same breath, exactly which control on the next screen is the key-issuing one.
+  COUPANG_WING_VENDOR_METHOD_DISCOVERY: {
+    entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
+    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    entrypointCommandId: "probe-wing-issuance-selectors",
+    operatorActionSummary:
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 판매자가 화면을 직접 진행합니다(SellerOps는 클릭·선택·입력을 일절 하지 " +
+      "않습니다). ① 쿠팡(윙)에 직접 로그인·이동해 'API Key 발급 받기'를 직접 누르고 사용 목적 화면에서 멈춘 뒤 ready. " +
+      "② 'OPEN API'가 선택되어 있는지 확인하고 '확인'은 누르지 말고 ready. ③ 중단되지 않은 경우에만 '확인'을 직접 누르고 " +
+      "ready. ④ 약관 2개를 직접 읽고 판단해 체크한 뒤 ready. " +
+      "⑤ '약관 동의 및 Key 발급받기'를 직접 누르세요. 이 버튼은 live walk에서 두 번 눌렸고, 두 번 모두 " +
+      "판매자가 키가 발급되지 않았다고 보고했습니다 — 그 보고가 이번 단계에서 요청할 수 있는 근거입니다. " +
+      "SellerOps는 키 발급 여부를 " +
+      "확인할 수 없습니다(발급된 화면과 아닌 화면이 SellerOps가 읽는 모든 신호에서 동일합니다). 측정이 아니라 보고입니다. 그 다음에 나오는 화면은 " +
+      "SellerOps가 한 번도 읽어본 적이 없는 화면이며, 아무것도 고르지 말고 그대로 둔 채 ready. " +
+      "⑥ 그 화면에서 업체 입력 방식만 직접 선택하고 ready. 여기서 실행이 끝납니다. " +
+      "⚠ 그 화면의 '확인'은 실제 API 키를 발급해 라이브 계정 상태를 바꾸는 control이며, 이번 승인 범위에 포함되지 않습니다. 절대 " +
+      "누르지 마세요 — 키 발급은 별도 manifest·별도 승인입니다. 어떤 입력 방식이 SellerOps에 맞는지는 이 실행이 답하지 " +
+      "않습니다(측정이 아니라 제품 결정이며, 이번에는 화면의 구조만 읽습니다). SellerOps는 각 시점마다 라벨 매칭 수·표시 " +
+      "여부·라벨 연결 방식만 번호로 읽으며, 화면 문구·입력값·키 값은 기록하지 않습니다.",
+    emitsFrontendUrl: false,
+  },
   // The GUIDED ISSUANCE WALK: the product path itself, live. The summary has to carry what the walk does NOT
   // do as precisely as what it does — the four text-guided steps are not highlighted, and the last checkpoint
   // stands in front of a control this run never presses.
@@ -1038,18 +1171,31 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
       "① 오픈API 키 발급 페이지로 직접 이동(도착하면 자동 진행) → ② 'API Key 발급 받기'(강조 표시됨)를 직접 누름" +
       "(사용 목적 화면이 뜨면 자동 진행) → ③ 'OPEN API' 항목과 '확인' 버튼이 함께 강조 표시되며, 확인 후 '확인'을 직접 누름" +
       "(약관 화면이 뜨면 자동 진행) → ④ 동의 문장 2개가 각각 강조 표시되며, 약관을 직접 읽고 판단한 뒤 동의 체크" +
-      "(2개가 모두 체크되면 자동 진행) → ⑤ 여기서 멈춥니다. " +
-      "⚠ 강조 표시는 체크박스나 라디오 버튼 위에 뜨지 않습니다. 사용 목적은 항목의 라벨에, 동의는 문장 2개에 각각 뜹니다 — " +
+      "(2개가 모두 체크되면 자동 진행) → ⑤ '약관 동의 및 Key 발급받기'(강조 표시됨)를 직접 누름" +
+      "(업체 입력 방식 화면이 뜨면 자동 진행) → ⑥ '자체개발(직접입력)' 라벨이 강조 표시되며, 방식을 직접 선택 → " +
+      "⑦ 업체명 · URL · IP 주소를 직접 입력한 뒤 그 화면의 '확인'(강조 표시됨)을 직접 누름. " +
+      "⚠ 여기서 실제 API 키가 발급되어 라이브 계정 상태가 바뀝니다. 이번 run은 발급까지 수행하며, 필요하면 나중에 " +
+      "별도의 삭제 작업으로 지울 수 있습니다(키가 화면에 표시되면 자동 진행) → " +
+      "⑧ 발급된 키 영역이 강조 표시되며, 키는 판매자가 직접 확인·보관 → ⑨ SellerOps로 복귀. " +
+      "⚠ 강조 표시가 가리키는 대상은 체크박스나 라디오 버튼이 아닙니다. 사용 목적은 항목의 라벨에, 동의는 문장 2개에 " +
+      "각각 뜹니다. 다만 WING의 라벨이 자기 입력 요소를 감싸고 있어서, 테두리 안에 체크박스가 함께 들어와 보입니다" +
+      "(2026-08-12 live 관측). 보이는 모양과 무관하게 SellerOps는 그 입력 요소를 가리키지도, 누르지도 않습니다 — " +
       "체크박스에는 접근성 연결이 없어서 SellerOps는 어느 박스가 어느 동의인지 안다고 말하지 않습니다. " +
       "각 문장이 자기 박스와 짝이라는 것은 2026-08-11에 측정한 구조로 확인했습니다(각 박스를 감싸는 가장 가까운 블록이 " +
       "동의 문장 정확히 하나와 박스 정확히 하나를 담고 있음). " +
       "⚠ 체크박스는 SellerOps가 대신 누르지 않습니다. 다만 2개가 모두 선택됐는지는 화면에서 확인해 자동으로 넘어갑니다 " +
       "(선택 여부는 저장·전송·기록하지 않습니다). SellerOps는 약관을 읽거나 판단하거나 대신 동의하지 않습니다. " +
-      "⚠ 마지막 '약관 동의 및 Key 발급받기'는 강조 표시됩니다(2026-08-11 측정 승격). 자동으로 넘어가지 않고 이번 run에서는 절대 누르지 않습니다. " +
-      "이 버튼이 키를 생성한다고 적혀 있었으나 2026-08-12에 반증됐습니다 — 실제로 눌렀을 때 키는 발급되지 않았고, " +
-      "연동 방식(자체개발/연동업체)을 고르는 화면이 나왔습니다. 키는 그 화면의 '확인'에서 발급되는 것으로 보고됐고, " +
-      "그 화면은 어떤 측정도 읽은 적이 없습니다. 그래서 여기서 멈추는 이유는 '키가 생성되니까'가 아니라 " +
-      "'다음이 확립되지 않았으니까'입니다. 키 발급·credential 읽기·연결·동기화는 이번 run의 범위가 아닙니다.",
+      "⚠ '약관 동의 및 Key 발급받기'는 이번 run에서 직접 누릅니다. 이 버튼이 키를 생성한다고 적혀 있었으나 " +
+      "2026-08-12에 반증됐습니다 — 두 번의 live walk에서 실제로 눌렀을 때 판매자가 두 번 모두 키가 발급되지 " +
+      "않았다고 보고했고, 연동 방식을 고르는 화면이 나왔습니다. 이 단계를 요청하는 근거는 그 보고이며, " +
+      "버튼의 문구가 아닙니다 — 그리고 그 보고는 측정이 아닙니다. SellerOps는 키 발급 여부를 확인할 수 " +
+      "없습니다(발급된 화면과 아닌 화면이 SellerOps가 읽는 모든 신호에서 동일합니다). " +
+      "⚠⚠ 실제 키는 업체 입력 방식 화면의 '확인'에서 발급됩니다. 그 화면 자체는 2026-08-12에 측정됐지만" +
+      "(존재·구성·라벨 위치), '확인을 누르면 키가 발급된다'는 것은 아직 판매자 보고이며 이번 run이 그것을 " +
+      "검증합니다. 그 버튼은 판매자가 직접 누릅니다 — SellerOps는 강조 표시만 하고, 절대 누르지 않으며, " +
+      "누를 수 있는 코드 경로가 없습니다. 업체명 · URL · IP 주소는 판매자 본인의 정보이며 SellerOps는 " +
+      "입력란에 아무것도 쓰지 않습니다. 어떤 입력 방식이 SellerOps에 맞는지는 측정이 아니라 제품 결정입니다. " +
+      "credential 값 읽기·연결·동기화는 이번 run의 범위가 아닙니다.",
     emitsFrontendUrl: false,
   },
   // The WING issuance-form REVEAL phase: a CLI-launched dedicated Chrome. The operator presses 발급 themselves

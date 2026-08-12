@@ -23,6 +23,20 @@ describe("Local Agent launch policy (macOS-specific, local-agent-specific)", () 
     expect(p.headless).toBe(false);
   });
 
+  it("[1b] **the page follows the WINDOW** — viewport is explicitly null on every platform", () => {
+    // Omitting `viewport` does not mean "use the window": Playwright pins the page to 1280x720 regardless of how
+    // large the seller makes the window, and the page never reflows. Live-observed 2026-08-12 on the Coupang
+    // guided walk — the WING key-issuance dialog is taller than 720px and the guidance panel is anchored to the
+    // bottom of that fixed viewport, which is exactly where WING puts a dialog's primary buttons, so the walk
+    // covered the '확인' it was asking the seller to press. `null` is load-bearing; it is not a default.
+    for (const platform of ["darwin", "linux", "win32"] as NodeJS.Platform[]) {
+      const p = buildLocalAgentLaunchPolicy({ platform, profileDir: DEDICATED });
+      expect(p.viewport, platform).toBeNull();
+      // Not merely absent — an omitted key is the defect this pins.
+      expect("viewport" in p, platform).toBe(true);
+    }
+  });
+
   it("[2] it never forces --password-store=basic", () => {
     const p = macPolicy();
     expect(JSON.stringify(p)).not.toContain("--password-store");

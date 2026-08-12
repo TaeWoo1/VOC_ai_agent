@@ -14,8 +14,11 @@
 import { describe, it, expect } from "vitest";
 import {
   WING_GUIDED_HIGHLIGHT_TARGETS,
+  WING_VENDOR_METHOD_PRODUCT_DECISION,
   WING_GUIDED_HIGHLIGHT_PROMOTIONS,
   WING_GUIDED_HIGHLIGHT_EVIDENCE,
+  wingGuidedHighlightReadings,
+  wingGuidedHighlightReadingFor,
   WING_GUIDED_HIGHLIGHT_PHASE,
   WING_CONSENT_PAIRING_LIVE_BASIS,
   WING_TERMS_CHECKBOX_PROMOTION_BLOCKED,
@@ -33,6 +36,7 @@ import {
 } from "../../../src/action-window/coupang-wing-label-recon";
 import {
   WING_ISSUANCE_FLOW_DISCOVERY_PHASE,
+  WING_STAGE2_RECON_PHASE,
   discoveryScopeRefusal,
   runWingSelectorRecord,
   stage2RecordFor,
@@ -67,7 +71,10 @@ describe("the guided-highlight promotion record", () => {
     for (const p of PROMOTED) {
       expect(p.candidateId, p.target).not.toBeNull();
       expect(p.blockedReason, p.target).toBeNull();
-      const backing = WING_GUIDED_HIGHLIGHT_EVIDENCE.readings.filter(
+      // From EVERY sitting's record, not one of them. Two sittings measured two screens, and a gate that read
+      // only the first would refuse the second's promotions — pushing the next person toward editing a record
+      // that names a run, an approval and a git sha so that it covers a run it did not.
+      const backing = wingGuidedHighlightReadings().filter(
         (r) => r.candidateId === p.candidateId && r.screen === p.screen,
       );
       // A reading from another screen is not evidence about this one. Every earlier reading of the key-creation
@@ -99,7 +106,7 @@ describe("the guided-highlight promotion record", () => {
   });
 
   it("every reading names a REAL shipped candidate, so a rename breaks the record instead of orphaning it", () => {
-    for (const r of WING_GUIDED_HIGHLIGHT_EVIDENCE.readings) {
+    for (const r of wingGuidedHighlightReadings()) {
       expect(ALL_CANDIDATE_IDS, r.candidateId).toContain(r.candidateId);
       expect(() => wingCandidateSpecById(r.candidateId)).not.toThrow();
     }
@@ -166,10 +173,11 @@ describe("the guided-highlight promotion record", () => {
     // Recorded, not zeroed away: three of the four promoted rings sit beside a hidden twin, and a reviewer can
     // see which. If one ever paints the locate returns 2 and the step fails closed — a recoverable park with
     // the seller's own control still on screen, never a misplaced ring.
-    const promotedReadings = PROMOTED.map((p) =>
-      WING_GUIDED_HIGHLIGHT_EVIDENCE.readings.find((r) => r.candidateId === p.candidateId && r.screen === p.screen)!,
-    );
-    expect(promotedReadings.filter((r) => r.hiddenCount > 0)).toHaveLength(3);
+    const promotedReadings = PROMOTED.map((p) => wingGuidedHighlightReadingFor(p.candidateId!, p.screen)!);
+    // Five of the six promoted rings now sit beside a hidden twin — both vendor-screen rings do — and a reviewer
+    // can see which. If one ever paints the locate returns 2 and the step fails closed: a recoverable park with
+    // the seller's own control still on screen, never a misplaced ring.
+    expect(promotedReadings.filter((r) => r.hiddenCount > 0)).toHaveLength(5);
     for (const r of promotedReadings) expect(Number.isInteger(r.hiddenCount)).toBe(true);
   });
 
@@ -177,7 +185,7 @@ describe("the guided-highlight promotion record", () => {
     // Four bare `visibleCount: 1` rows would say nothing about WHY the shipped query is the narrow one. The
     // broad siblings are what make each promotion checkable: `.broad` measuring 2 is why `label` is a
     // disambiguation, and the consent sentences measuring 2 visible each is why their narrowings are a nesting.
-    const byId = (id: string) => WING_GUIDED_HIGHLIGHT_EVIDENCE.readings.find((r) => r.candidateId === id)!;
+    const byId = (id: string) => wingGuidedHighlightReadings().find((r) => r.candidateId === id)!;
     expect(byId("stage2.purpose_open_api.broad").visibleCount).toBe(2);
     expect(byId("stage3.terms.api_agree").visibleCount).toBe(2);
     expect(byId("stage3.terms.category_agree").visibleCount).toBe(2);
@@ -190,13 +198,30 @@ describe("the guided-highlight promotion record", () => {
   it("what is ringed TODAY, in one line a reviewer can read", () => {
     // Deliberately hardcoded. Every other assertion here is a rule; this one is the state, and it must be
     // edited by the same commit that lands a reading — which is exactly the review moment this unit is about.
-    expect(PROMOTED.map((p) => p.target)).toEqual(["purpose_open_api", "confirm", "consent_api", "consent_category"]);
+    expect(PROMOTED.map((p) => p.target)).toEqual([
+      "purpose_open_api",
+      "confirm",
+      "consent_api",
+      "consent_category",
+      "vendor_self_dev",
+      "vendor_confirm",
+    ]);
     expect(PROMOTED.map((p) => p.candidateId)).toEqual([
       "stage2.purpose_open_api.label",
       "stage2.confirm.actionable",
       "stage3.terms.api_agree.label",
       "stage3.terms.category_agree.label",
+      "stage4.vendor.self_dev.label",
+      // The SAME candidate `confirm` uses on the purpose screen. A promotion is per (target, screen), and this
+      // pair is the whole reason: on TERMS, between the two, that candidate reads hidden.
+      "stage2.confirm.actionable",
     ]);
+    // `연동업체 선택` clears the same bar and is deliberately NOT ringed — a product decision, not a missing
+    // measurement, which is why it is absent from the ringable vocabulary rather than sitting in the table as
+    // an unpromoted row that would read as something still owed.
+    expect(WING_GUIDED_HIGHLIGHT_TARGETS as readonly string[]).not.toContain("vendor_partner");
+    expect(WING_VENDOR_METHOD_PRODUCT_DECISION.notChosenCandidateId).toBe("stage4.vendor.partner.label");
+    expect(WING_VENDOR_METHOD_PRODUCT_DECISION.basis).toBe("PRODUCT_DECISION_NOT_A_MEASUREMENT");
   });
 });
 
@@ -288,10 +313,20 @@ describe("discoveryScopeRefusal — a scope that cannot finish the flow it is me
   const FULL = wingDiscoveryRequiredTargets();
 
   it("names EVERY target carrying a flow-screen marker, derived rather than listed", () => {
-    // `wingFlowScreenFrom` needs all three markers PROBED — a missing row cannot distinguish "not on this
+    // `wingFlowScreenFrom` needs EVERY marker PROBED — a missing row cannot distinguish "not on this
     // screen" from "not asked about". Derived from the marker ids so a marker moving between targets moves
     // this set with it, instead of leaving a hand-written list quietly wrong.
-    expect(wingScreenMarkerTargets()).toEqual(["purpose", "terms_heading", "terms_issue_final"]);
+    //
+    // The VENDOR marker is required of THIS phase too, which does not reach that screen. It has to be: the
+    // requirement is that the screen be IDENTIFIABLE, and a run that could not tell the seller had moved on to
+    // the vendor screen would report the terms screen — the screen it expects — while they stood somewhere else.
+    expect(wingScreenMarkerTargets()).toEqual([
+      "purpose",
+      "terms_heading",
+      "terms_issue_final",
+      "vendor_partner",
+      "vendor_self_dev",
+    ]);
   });
 
   it("**…and every target the 확인 advisory reads, which is the half that cost a live sitting**", () => {
@@ -302,13 +337,22 @@ describe("discoveryScopeRefusal — a scope that cannot finish the flow it is me
     // been added covered one gate and left its sibling standing.
     expect(wingConfirmGateTargets()).toEqual(["vendor_info", "vendor_url", "call_ip"]);
     // The requirement is the UNION of the two gates, in canonical order — not a list either of them owns.
-    expect(FULL).toEqual(["purpose", "vendor_info", "vendor_url", "call_ip", "terms_heading", "terms_issue_final"]);
+    expect(FULL).toEqual([
+      "purpose",
+      "vendor_info",
+      "vendor_url",
+      "call_ip",
+      "terms_heading",
+      "terms_issue_final",
+      "vendor_partner",
+      "vendor_self_dev",
+    ]);
   });
 
   it("**refuses BEFORE the browser launches when a required target is missing**", () => {
     // The gates downstream are correct and fail closed. They just fail at the second or third checkpoint —
     // after the operator has logged in, navigated, and pressed `API Key 발급 받기` on a real marketplace.
-    const refusal = discoveryScopeRefusal(true, ["purpose", "confirm", "terms_heading"]);
+    const refusal = discoveryScopeRefusal(WING_ISSUANCE_FLOW_DISCOVERY_PHASE, ["purpose", "confirm", "terms_heading"]);
     expect(refusal).toContain("terms_issue_final");
     expect(refusal).toContain("vendor_info");
     expect(refusal).toContain("No browser launched");
@@ -319,14 +363,14 @@ describe("discoveryScopeRefusal — a scope that cannot finish the flow it is me
   it("passes a complete scope, and narrowing that keeps the markers stays legitimate", () => {
     // Narrowing a discovery run is what the scope is FOR. This refuses only the narrowing that removes the
     // run's ability to say where it is.
-    expect(discoveryScopeRefusal(true, [...FULL])).toBeNull();
-    expect(discoveryScopeRefusal(true, [...FULL, "confirm", "purpose_open_api"])).toBeNull();
+    expect(discoveryScopeRefusal(WING_ISSUANCE_FLOW_DISCOVERY_PHASE, [...FULL])).toBeNull();
+    expect(discoveryScopeRefusal(WING_ISSUANCE_FLOW_DISCOVERY_PHASE, [...FULL, "confirm", "purpose_open_api"])).toBeNull();
   });
 
   it("says nothing about a run that is not a discovery run", () => {
     // The other Stage-2 phases take ONE reading of a screen the operator already reached; they never derive a
     // screen and never gate a checkpoint on one.
-    expect(discoveryScopeRefusal(false, [])).toBeNull();
+    expect(discoveryScopeRefusal(WING_STAGE2_RECON_PHASE, [])).toBeNull();
   });
 
   it("the scope THIS unit's calibration needs covers both the markers and the four candidates", () => {
@@ -344,8 +388,10 @@ describe("discoveryScopeRefusal — a scope that cannot finish the flow it is me
       "terms_cancel",
       "terms_issue_final",
       "purpose_open_api",
+      "vendor_partner",
+      "vendor_self_dev",
     ];
-    expect(discoveryScopeRefusal(true, scope)).toBeNull();
+    expect(discoveryScopeRefusal(WING_ISSUANCE_FLOW_DISCOVERY_PHASE, scope)).toBeNull();
     expect(wingDiscoveryScopeGap(scope)).toEqual([]);
     // …and the consent-BLOCK census is taken only when BOTH consent targets are in scope, which is the reading
     // a consent ring is additionally gated on.

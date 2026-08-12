@@ -327,18 +327,21 @@ verify_walk_descriptor() {
   for pair in \
     "operation:WALK_WING_GUIDED_ISSUANCE_TUTORIAL" \
     "forbiddenFollowOnAction:COMPLETE_WING_KEY_ISSUANCE" \
-    "createsKeyMaterial:false" \
+    "agentCreatesKeyMaterial:false" \
+    "operatorIssuesRealKey:true" \
     "keyCreationRuledOut:false" \
     "agentPerformsAction:false" \
     "agentNavigations:1" \
     "credentialValueReadBudget:0" \
     "performsConnectOrSync:false" \
-    "highlightedControlCount:7" \
+    "highlightedControlCount:9" \
     "textGuidedControlCount:0" \
     "ringedInputControlCount:0" \
-    "autoAdvancingStepCount:4" \
-    "keyCreationAutoAdvances:false" \
-    "sellerConsentObserved:true"
+    "autoAdvancingStepCount:6" \
+    "keyCreationPressAutoPerformed:false" \
+    "keyIssuanceAdvancesOnObservedResult:true" \
+    "sellerConsentObserved:true" \
+    "vendorMethodDecidedBy:PRODUCT_OWNER"
   do
     key="${pair%%:*}"; want="${pair#*:}"
     got="$(python3 -c 'import json,sys
@@ -362,8 +365,19 @@ print(want if ok else json.dumps(v))' "$manifest" "$key" "$want" 2>/dev/null)" |
   got="$(python3 -c 'import json,sys
 d = json.load(open(sys.argv[1])).get("guidedWalkBoundary") or {}
 print(d.get("restsBeforeControl", ""))' "$manifest" 2>/dev/null)" || got=""
-  if [ "$got" != "약관 동의 및 Key 발급받기" ]; then
-    echo "  FAIL  guided-walk descriptor restsBeforeControl is '${got:-missing}' — it must name the key-creating control"
+  # It named `약관 동의 및 Key 발급받기` until 2026-08-12 — a control believed to create the key, pressed on two
+  # live walks, and measured to create none. The walk rests in front of the one that does.
+  if [ "$got" != "확인 (vendor-method screen)" ]; then
+    echo "  FAIL  guided-walk descriptor restsBeforeControl is '${got:-missing}' — it must name the key-ISSUING control"
+    rc=1
+  fi
+  # The method the walk names is a PRODUCT decision, and the descriptor must carry which one — a walk that
+  # silently changed the option it rings would be changing what the seller configures on their own account.
+  got="$(python3 -c 'import json,sys
+d = json.load(open(sys.argv[1])).get("guidedWalkBoundary") or {}
+print(d.get("vendorMethodGuided", ""))' "$manifest" 2>/dev/null)" || got=""
+  if [ "$got" != "자체개발(직접입력)" ]; then
+    echo "  FAIL  guided-walk descriptor vendorMethodGuided is '${got:-missing}' — it must name the guided input method"
     rc=1
   fi
   return $rc

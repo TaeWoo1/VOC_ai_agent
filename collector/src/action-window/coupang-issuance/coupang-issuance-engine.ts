@@ -110,8 +110,10 @@ const TARGET_STEP: Readonly<Record<CoupangIssuanceTarget, number>> = {
   confirm_purpose: 3,
   terms_consent: 4,
   issue_final: 5,
-  credentials: 6,
-  return: 7,
+  vendor_method: 6,
+  vendor_confirm: 7,
+  credentials: 8,
+  return: 9,
 };
 
 export class CoupangIssuanceEngine {
@@ -396,7 +398,18 @@ export class CoupangIssuanceEngine {
         this.currentTarget = "issue_final";
         return { guide: "issue_final" };
       // THE KEY-CREATION BOUNDARY. Only after the seller reports pressing it can a credential exist to copy.
+      // MEASURED 2026-08-12: this press issues NO key. It opens the vendor-method screen, which is where the
+      // walk now goes — it used to hop straight to `credentials`, i.e. "copy your keys" past the two screens
+      // and the one control that actually issues them.
       case "issue_final":
+        this.currentTarget = "vendor_method";
+        return { guide: "vendor_method" };
+      case "vendor_method":
+        this.currentTarget = "vendor_confirm";
+        return { guide: "vendor_confirm" };
+      // THE key-creation boundary. Reaching here means the seller pressed the vendor screen's 확인 themselves
+      // AND WING then showed the credentials — the advance is an observation of the result, never of the press.
+      case "vendor_confirm":
         this.currentTarget = "credentials";
         return { guide: "credentials" };
       case "credentials":

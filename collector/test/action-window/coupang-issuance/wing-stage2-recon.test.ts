@@ -893,6 +893,14 @@ describe("WING_STAGE2_RECON_EVIDENCE — measured, operator-reported, and inferr
       "stage2.purpose_open_api.label",
       "stage2.purpose_open_api.broad",
       "stage2.purpose_open_api.input",
+      // The VENDOR-METHOD screen, added 2026-08-12. This run had no idea it existed either — nothing did until
+      // `약관 동의 및 Key 발급받기` was pressed on a live walk and turned out not to create the key.
+      "stage4.vendor.heading",
+      "stage4.vendor.method_prompt",
+      "stage4.vendor.partner.label",
+      "stage4.vendor.partner.broad",
+      "stage4.vendor.self_dev.label",
+      "stage4.vendor.self_dev.broad",
     ]);
   });
 
