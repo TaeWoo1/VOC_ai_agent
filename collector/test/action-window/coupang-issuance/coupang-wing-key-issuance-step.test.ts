@@ -29,7 +29,7 @@ import {
   wingCandidateSpecById,
   wingGuidedHighlightPromotion,
 } from "../../../src/action-window/coupang-wing-label-recon";
-import { COUPANG_WING_GUIDED_WALK_BOUNDARY } from "../../../src/cli/approval-manifest";
+import { COUPANG_WING_GUIDED_WALK_BOUNDARY, PHASE_ENTRYPOINTS } from "../../../src/cli/approval-manifest";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DRIVER_SRC = readFileSync(resolve(HERE, "../../../src/action-window/coupang-wing-issuance-driver.ts"), "utf8");
@@ -169,5 +169,26 @@ describe("the copy carries the consequence exactly once, on the control that has
     expect(OPERATOR_STEP_LABELS.vendor_method).toContain("SellerOps는 선택하지 않습니다");
     // `연동업체 선택` is measured to the same standard and deliberately not named: the walk guides one method.
     expect(OPERATOR_STEP_LABELS.vendor_method).not.toContain("연동업체");
+  });
+
+  it("**the manifest's own step list ends at the key, not before it**", () => {
+    // This paragraph is what the operator reads in the Approval Manifest, and it is what the grant binds to.
+    // Every OTHER description of the walk was updated when the walk grew; this one still ended "⑤ 여기서
+    // 멈춥니다" and promised the 발급받기 button would never be pressed — a manifest understating its own run,
+    // which is the one direction that must never pass silently. Nothing failed, because nothing checked it.
+    const summary = PHASE_ENTRYPOINTS.COUPANG_WING_GUIDED_ISSUANCE_WALK.operatorActionSummary;
+    for (const stale of ["⑤ 여기서 멈춥니다", "이번 run에서는 절대 누르지 않습니다", "이번 승인 범위에 포함되지 않습니다"]) {
+      expect(summary, `the manifest must not still say "${stale}"`).not.toContain(stale);
+    }
+    // It must reach the control with the consequence, and say the consequence.
+    expect(summary).toContain("실제 API 키가 발급되며 되돌릴 수 없습니다");
+    expect(summary).toContain(WING_VENDOR_METHOD_PRODUCT_DECISION.method);
+    // …and keep the two attributions the audit installed: the earlier press is a REPORT, and so is the
+    // consequence of the later one — this run is what verifies the latter.
+    expect(summary).toContain("측정이 아닙니다");
+    expect(summary).toContain("이번 run이 그것을");
+    // The agent's own budget stays zero in the same breath as the press it is asking for.
+    expect(summary).toContain("절대 누르지 않으며");
+    expect(summary).toContain("입력란에 아무것도 쓰지 않습니다");
   });
 });
