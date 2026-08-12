@@ -28,6 +28,20 @@ export type SellerOpsReturnScreen =
  */
 const LOOPBACK_HOSTS: readonly string[] = ["localhost", "127.0.0.1", "[::1]", "::1"];
 
+/**
+ * Whether `url` is EXACTLY what {@link screenSellerOpsReturnUrl} produces — a loopback SellerOps origin on the
+ * connect route, and nothing else.
+ *
+ * The screening function answers "what may this configured value become"; this answers "is this string already
+ * that". They are different questions and the second one is what a process launcher needs: `os-open-url.ts`
+ * builds an argv for the seller's real browser, so it re-establishes the property rather than trusting its caller
+ * to have run the screening first.
+ */
+export function isSellerOpsReturnUrl(url: string): boolean {
+  const screened = screenSellerOpsReturnUrl(url);
+  return screened.ok && screened.url === url;
+}
+
 /** Screen a configured SellerOps app URL into the exact return destination, or refuse with a reason. */
 export function screenSellerOpsReturnUrl(appUrl: string | undefined): SellerOpsReturnScreen {
   const raw = (appUrl ?? "").trim();

@@ -174,7 +174,7 @@ run_case "HEAD_DRIFT      (commit moved since bootstrap)" nonzero "git commit ch
 # The DISPLAY-side check. Unlike the destructive descriptor — where the risk is understating danger — every
 # softening here OVERSTATES safety, and the worst is `keyCreationRuledOut: true`: it would tell the operator
 # SellerOps had confirmed no key was created, which nothing can (NO_DISCRIMINATING_SIGNAL).
-CANON='{"guidedWalkBoundary":{"operation":"WALK_WING_GUIDED_ISSUANCE_TUTORIAL","forbiddenFollowOnAction":"COMPLETE_WING_KEY_ISSUANCE","restsBeforeControl":"확인 (vendor-method screen)","agentCreatesKeyMaterial":false,"operatorIssuesRealKey":true,"keyCreationRuledOut":false,"agentPerformsAction":false,"agentNavigations":2,"credentialValueReadBudget":0,"performsConnectOrSync":false,"highlightedControlCount":9,"textGuidedControlCount":0,"ringedInputControlCount":0,"autoAdvancingStepCount":6,"keyCreationPressAutoPerformed":false,"keyIssuanceAdvancesOnObservedResult":true,"sellerConsentObserved":true,"vendorMethodGuided":"자체개발(직접입력)","vendorMethodDecidedBy":"PRODUCT_OWNER"}}'
+CANON='{"guidedWalkBoundary":{"operation":"WALK_WING_GUIDED_ISSUANCE_TUTORIAL","forbiddenFollowOnAction":"COMPLETE_WING_KEY_ISSUANCE","restsBeforeControl":"확인 (vendor-method screen)","agentCreatesKeyMaterial":false,"operatorIssuesRealKey":true,"keyCreationRuledOut":false,"agentPerformsAction":false,"agentNavigations":1,"opensLocalSellerOpsInDefaultBrowser":true,"credentialValueReadBudget":0,"performsConnectOrSync":false,"highlightedControlCount":9,"textGuidedControlCount":0,"ringedInputControlCount":0,"autoAdvancingStepCount":6,"keyCreationPressAutoPerformed":false,"keyIssuanceAdvancesOnObservedResult":true,"sellerConsentObserved":true,"vendorFormReadinessObserved":true,"keyIssuanceRequiresUnoccludedResult":true,"vendorMethodGuided":"자체개발(직접입력)","vendorMethodDecidedBy":"PRODUCT_OWNER"}}'
 printf '%s' "$CANON" > "$FIXTURES/desc-ok.json"
 DESC_OK=1
 verify_walk_descriptor "$FIXTURES/desc-ok.json" >/dev/null 2>&1 || { echo "  FAIL  DESCRIPTOR · canonical descriptor rejected"; DESC_OK=0; FAILED=1; }
@@ -183,7 +183,8 @@ for soft in \
   '"agentCreatesKeyMaterial":true' \
   '"agentPerformsAction":true' \
   '"agentNavigations":0' \
-  '"agentNavigations":1' \
+  '"agentNavigations":2' \
+  '"opensLocalSellerOpsInDefaultBrowser":false' \
   '"keyCreationPressAutoPerformed":true' \
   '"credentialValueReadBudget":1' \
   '"performsConnectOrSync":true' \
@@ -200,12 +201,18 @@ for soft in \
   '"vendorMethodDecidedBy":"MEASUREMENT"' \
   '"operatorIssuesRealKey":false' \
   '"keyIssuanceAdvancesOnObservedResult":false' \
+  # A softening: it hides that the run reads whether the seller's fields are empty.
+  '"vendorFormReadinessObserved":false' \
+  # NOT a softening — it understates the fence rather than the risk. Listed because the verifier is exact-match
+  # and a descriptor that drifts either way is one the operator did not grant against.
+  '"keyIssuanceRequiresUnoccludedResult":false' \
   '"keyCreationRuledOut":"false"' \
   '"agentCreatesKeyMaterial":"false"' \
   '"agentPerformsAction":"false"' \
   '"performsConnectOrSync":"false"' \
   '"keyCreationPressAutoPerformed":"false"' \
-  '"agentNavigations":"2"' \
+  '"agentNavigations":"1"' \
+  '"opensLocalSellerOpsInDefaultBrowser":"true"' \
   '"credentialValueReadBudget":"0"'
 do
   # The fixture must be BUILT and must actually DIFFER from canonical. If the generator throws, no file is
@@ -414,11 +421,12 @@ if [ -z "$TREE_DIRTY" ]; then
      && grep -qF '"agentCreatesKeyMaterial": false' <<<"$out" \
      && grep -qF '"operatorIssuesRealKey": true' <<<"$out" \
      && grep -qF '"keyCreationRuledOut": false' <<<"$out" \
-     && grep -qF '"agentNavigations": 2' <<<"$out" \
+     && grep -qF '"agentNavigations": 1' <<<"$out" \
+     && grep -qF '"opensLocalSellerOpsInDefaultBrowser": true' <<<"$out" \
      && grep -qF '"performsConnectOrSync": false' <<<"$out" \
      && grep -qF '약관 동의 및 Key 발급받기' <<<"$out" \
      && grep -qF '"COMPLETE_WING_KEY_ISSUANCE"' <<<"$out"; then
-    echo "  PASS  NORMAL          · manifest names the control it rests before, both key claims, BOTH navigations and no connect/sync"
+    echo "  PASS  NORMAL          · manifest names the control it rests before, both key claims, the one navigation, the default-browser return and no connect/sync"
   else
     echo "  FAIL  NORMAL          · guided-walk boundary incomplete in the displayed manifest"; FAILED=1
   fi
@@ -529,7 +537,7 @@ ENV
   # Asserted BOTH ways: the current claims must be present, and the retired ones must be gone — a disclosure
   # that gained a line while keeping its contradiction is not fixed.
   BOOT_OK=1
-  for claim in "TWO, and neither is a marketplace screen" "the LANDING" "the RETURN" "WING tab is left exactly as it is" "NINE live-calibrated" "NONE of the rings sits on an input" "stay text-only" "SIX steps advance" "consent boxes are ticked" "RESTS in front" "THIS RUN ENDS WITH A REAL KEY" "PRODUCT DECISION" "never ticks a box"; do
+  for claim in "ONE, and it is not a marketplace screen" "the LANDING" "OWN DEFAULT BROWSER" "This window is not touched at all" "NINE live-calibrated" "NONE of the rings sits on an input" "stay text-only" "SIX steps advance" "consent boxes are ticked" "refused ONCE with a message" "PAINTED OVER them" "RESTS in front" "THIS RUN ENDS WITH A REAL KEY" "PRODUCT DECISION" "never ticks a box"; do
     grep -qF "$claim" <<<"$out" || { echo "  FAIL  BOOTSTRAP_DISCLOSE · missing claim: $claim"; BOOT_OK=0; FAILED=1; }
   done
   # Retired claims. The last three were true and are no longer: the count moved 2 → 3 → 7 as controls were
@@ -538,7 +546,10 @@ ENV
   # "No guided step is text-only any more" over-claimed: `reach_open_api` and `return` name no WING control and
   # still draw no ring. `textGuidedControlCount: 0` counts CONTROLS, and the prose beside a machine-checked
   # field has to mean the same thing the field does.
-  for stale in "the agent never navigates" "0 gotos" "ONLY the two live-calibrated" "THREE live-calibrated" "SEVEN live-calibrated" "TEXT-GUIDED" "No guided step is text-only" "NOT performed, and NEVER auto-advanced"; do
+  # "TWO, and neither is…" / "in a NEW TAB" were true for one day: the return opened a second tab in the walk's
+  # own window, which navigated and returned nobody — that window has no SellerOps session, so it delivered a
+  # login screen. The return now happens in the seller's default browser and this window is not navigated twice.
+  for stale in "the agent never navigates" "TWO, and neither is a marketplace screen" "in a NEW TAB" "0 gotos" "ONLY the two live-calibrated" "THREE live-calibrated" "SEVEN live-calibrated" "TEXT-GUIDED" "No guided step is text-only" "NOT performed, and NEVER auto-advanced"; do
     if grep -qF "$stale" <<<"$out"; then
       echo "  FAIL  BOOTSTRAP_DISCLOSE · retired claim still shown: $stale"; BOOT_OK=0; FAILED=1
     fi

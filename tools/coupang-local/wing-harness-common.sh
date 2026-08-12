@@ -331,7 +331,8 @@ verify_walk_descriptor() {
     "operatorIssuesRealKey:true" \
     "keyCreationRuledOut:false" \
     "agentPerformsAction:false" \
-    "agentNavigations:2" \
+    "agentNavigations:1" \
+    "opensLocalSellerOpsInDefaultBrowser:true" \
     "credentialValueReadBudget:0" \
     "performsConnectOrSync:false" \
     "highlightedControlCount:9" \
@@ -341,6 +342,8 @@ verify_walk_descriptor() {
     "keyCreationPressAutoPerformed:false" \
     "keyIssuanceAdvancesOnObservedResult:true" \
     "sellerConsentObserved:true" \
+    "vendorFormReadinessObserved:true" \
+    "keyIssuanceRequiresUnoccludedResult:true" \
     "vendorMethodDecidedBy:PRODUCT_OWNER"
   do
     key="${pair%%:*}"; want="${pair#*:}"

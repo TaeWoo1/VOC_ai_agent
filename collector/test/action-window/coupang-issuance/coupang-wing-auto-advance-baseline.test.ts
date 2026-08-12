@@ -62,6 +62,12 @@ class FakePage {
   credentialReads = 0;
   /** Whether the step overlay is still on the page. A WING navigation takes it with the document. */
   overlayPresent = false;
+  /**
+   * Whether WING's own success dialog is painted over the credentials — the live 2026-08-12 state, where the
+   * marker was showing and the seller could not see it. Modelled separately from `screen` because that is the
+   * distinction the walk got wrong: the label paints in both.
+   */
+  credentialCovered = false;
   constructor(screen: Screen) {
     this.screen = screen;
   }
@@ -81,6 +87,18 @@ class FakePage {
         script.includes(WING_HIGHLIGHT_LABELS.credentials.candidateQuery)
       ) {
         this.credentialReads += 1;
+      }
+      // The HIT TEST answers in its own shape, because it asks its own question: not "does the marker paint"
+      // but "would the page hand it back at its own coordinates". A dialog over it paints all five samples.
+      if (script.includes("wing-marker-occlusion")) {
+        if (!painting) return { visibleCount: 0, hiddenCount: 0 };
+        return {
+          visibleCount: 1,
+          hiddenCount: 0,
+          inViewport: true,
+          sampled: 5,
+          covered: this.credentialCovered ? 5 : 0,
+        };
       }
       return painting ? { count: 1, sig: "abcdef0123456789", hiddenCount: 0 } : { count: 0, hiddenCount: 0 };
     }
@@ -163,6 +181,31 @@ describe("the screen-based auto-advance requires the screen to CHANGE", () => {
     const observing = driver.observeUserAction("vendor_confirm");
     await waitFor(() => page.credentialReads > 0);
     page.screen = "ISSUED"; // the seller pressed 확인 themselves; WING put the keys on the glass
+    expect(await observing).toBe(true);
+  });
+
+  it("**does NOT complete while WING's own dialog covers the credentials** — the 2026-08-12 defect", async () => {
+    // The live shape, exactly: the seller pressed 확인, WING opened its `발급 완료` dialog, and the credential
+    // label painted BEHIND it. The step advanced, step ⑧ rang a row nobody could see, and the panel said to
+    // copy keys that were covered. Painting was true; lookable-at was not, and only the second one is the
+    // seller having finished.
+    const { driver, page } = driverOn("VENDOR", 300);
+    const observing = driver.observeUserAction("vendor_confirm");
+    await waitFor(() => page.credentialReads > 0);
+    page.credentialCovered = true;
+    page.screen = "ISSUED";
+    expect(await observing).toBe(false);
+  });
+
+  it("…and completes as soon as that dialog is dismissed — the advance is delayed, never cancelled", async () => {
+    const { driver, page } = driverOn("VENDOR", 4_000);
+    const observing = driver.observeUserAction("vendor_confirm");
+    await waitFor(() => page.credentialReads > 0);
+    page.credentialCovered = true;
+    page.screen = "ISSUED";
+    // The seller reads the dialog and closes it themselves. Nothing here dismisses anything.
+    await waitFor(() => page.credentialReads > 2);
+    page.credentialCovered = false;
     expect(await observing).toBe(true);
   });
 

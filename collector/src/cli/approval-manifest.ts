@@ -179,15 +179,20 @@ export const APPROVAL_ACTIONS = [
   // nothing. Deliberately narrow: it is a LANDING, not a route — a phase that drives the seller through screens
   // is a different capability and would need its own member.
   "NAVIGATE_TO_SELLER_LANDING_ONCE",
-  // The walk's LAST step, and the only navigation that leaves the marketplace: when the seller presses
-  // `SellerOps로 돌아가기`, a NEW TAB opens the local SellerOps connect screen and is brought to the front. The
-  // WING tab is left exactly as it is, because the secret key is shown once and the seller may still be
-  // copying it. The destination is screened to a LOOPBACK SellerOps origin, origin-only, and fails closed.
+  // The walk's LAST step: when the seller presses `SellerOps로 돌아가기`, the agent asks the OPERATING SYSTEM to
+  // open the local SellerOps connect screen in the seller's OWN DEFAULT BROWSER. The destination is screened to
+  // a LOOPBACK SellerOps origin, origin-only, twice (once by the screening, once by the argv planner), and fails
+  // closed on anything else.
+  //
+  // **No window this agent controls is navigated.** It opened a new tab in the walk's own window until
+  // 2026-08-12, which navigated for real and returned nobody: that window is a dedicated profile with no
+  // SellerOps session, so the seller landed on a login screen. The WING window is now not touched at all — the
+  // keys stay exactly where the seller left them, and the walk still navigates it exactly once, at the landing.
   //
   // It is here rather than folded into the landing member because it is a different act with a different risk:
-  // the landing is the agent choosing where the walk starts, this is the agent acting on a press. A capability
-  // list that called both "one navigation" would be describing a narrower run than the one that executes —
-  // which is the exact defect the two members above were added to close.
+  // the landing is the agent choosing where the walk starts, this is the agent STARTING A PROCESS on the
+  // seller's machine in response to a press. Narrower than it sounds and stated as narrowly as it is: the only
+  // thing that can be opened is a loopback SellerOps route, so it cannot reach a marketplace surface.
   "RETURN_TO_SELLEROPS_ON_SELLER_REQUEST",
   // Read whether the seller has finished consenting: ONE aggregate boolean, computed page-side as the
   // conjunction of the two consent boxes. Which box is ticked never crosses the boundary, nothing is stored,
@@ -195,6 +200,26 @@ export const APPROVAL_ACTIONS = [
   // `checked` read, and three census members in this same enum explicitly promise they do NOT read `checked` —
   // so a run that does has to say so HERE, not only in `sellerConsentObserved`.
   "OBSERVE_CONSENT_COMPLETE_AGGREGATE",
+  // Read whether the seller has FILLED IN the vendor form: for each of 업체명 / URL, how many of the field's own
+  // text inputs hold a non-empty trimmed value, computed page-side and returned as a COUNT; for `IP 주소`, how
+  // many registered entries the field holds, because 추가 is a press whose result is a row rather than typed
+  // text. **What was typed never crosses the boundary** — only its emptiness — and nothing is stored,
+  // transmitted or logged beyond a per-field boolean.
+  //
+  // It is here for the same reason `OBSERVE_CONSENT_COMPLETE_AGGREGATE` is: this enum's other census members
+  // promise they read no value at all, and a run that reads one — however narrowly — has to say so in the list
+  // the approval gate validates, not only in prose. It is NEVER taken on a credential field: the request that
+  // measures the credential region deliberately omits the flag, and a test pins that.
+  "OBSERVE_FIELD_NONEMPTY_AGGREGATE",
+  // Read-only LABEL-REGION census: for a fixed label that resolves uniquely, the tag names of its ancestors, how
+  // it is associated with a region (`label[for]`, `dt`→`dd`, `th`→`td`, or a wrapping label), and how many
+  // inputs / buttons / entry rows that region holds. Tag names and integers only — no text, no attribute value,
+  // no selector. It is what tells the step-⑧ ring that `Access Key` is a table HEADER rather than the result.
+  "MEASURE_LABEL_REGION_STRUCTURE",
+  // Read-only OCCLUSION hit test: at a located marker's own coordinates, is the marker what the page would hand
+  // back, or is something painted over it. A boolean per sample point and nothing else — never the tag, text, or
+  // identity of whatever is on top. It is what stops step ⑦ completing behind WING's own `발급 완료` dialog.
+  "MEASURE_MARKER_OCCLUSION",
 ] as const;
 export type ApprovalAction = (typeof APPROVAL_ACTIONS)[number];
 
@@ -348,16 +373,27 @@ export interface GuidedWalkBoundary {
   /** The agent clicks, types, submits — and NAVIGATES — nothing. The last one is new to this entrypoint. */
   agentPerformsAction: false;
   /**
-   * TWO, and neither is a marketplace screen the walk drives the seller to.
+   * ONE: the LANDING the window opens on — the seller's own WING home, once, at open. Every screen of the flow
+   * after it is one the seller reaches themselves.
    *
-   * 1. the LANDING the window opens on — the seller's own WING home, once, at open;
-   * 2. the RETURN, when the seller presses `SellerOps로 돌아가기` on the last step: a new tab on the local
-   *    SellerOps connect screen, brought to the front, with the WING tab left untouched.
-   *
-   * It was 1, and the second navigation did not exist — which is why that button moved nothing while its label
-   * promised a move. Every screen of the flow BETWEEN these two is still one the seller reaches themselves.
+   * It read 2 for a day, when the return opened a second tab in this same window. That navigation is gone — not
+   * because the return was dropped, but because it now happens somewhere this agent does not drive (see
+   * {@link opensLocalSellerOpsInDefaultBrowser}). This field counts navigations of the walk's own window, and
+   * the honest count of those is one.
    */
-  agentNavigations: 2;
+  agentNavigations: 1;
+  /**
+   * **TRUE — the last step opens a local SellerOps URL in the seller's OWN default browser.**
+   *
+   * Its own field rather than a second navigation, because it is a different act against a different surface:
+   * nothing the agent controls moves, and instead the OS is asked to open one screened loopback route in a
+   * browser the agent has no handle on. Folding it into {@link agentNavigations} would say the walk's window
+   * moves twice, which is false; leaving it out entirely would hide that the run starts a process at all.
+   *
+   * Bounded by construction: the URL is screened to a loopback SellerOps origin twice, and a marketplace host
+   * cannot survive either screening.
+   */
+  opensLocalSellerOpsInDefaultBrowser: true;
   credentialValueReadBudget: 0;
   /** No connect-test, no sync, no upload: guidance finishing is not a connection. */
   performsConnectOrSync: false;
@@ -427,6 +463,29 @@ export interface GuidedWalkBoundary {
    */
   sellerConsentObserved: true;
   /**
+   * **TRUE — before handing over to the ring on the key-issuing `확인`, the run checks the vendor form is filled.**
+   *
+   * It reads whether 업체명 / URL hold anything and whether an IP has been REGISTERED — never what any of them
+   * says. A press over an empty form is refused ONCE, with a panel message; the next press goes through
+   * whatever the reading says, because manual progress always remains available and this association has never
+   * been calibrated on a live screen.
+   *
+   * Declared because it is a value read, however narrow, and because it CHANGES WHAT A PRESS DOES: an operator
+   * granting against this manifest should not discover mid-walk that a button they pressed did nothing.
+   */
+  vendorFormReadinessObserved: true;
+  /**
+   * **TRUE — the key-issuing step will not complete while something is painted over the credentials.**
+   *
+   * A hit test at the marker's own coordinates, added after 2026-08-12, when the step advanced the instant the
+   * credential label painted — behind WING's own `발급 완료` dialog. The seller was told to copy keys they could
+   * not see and step ⑧ ringed a row behind a modal.
+   *
+   * It only ever DELAYS an advance; the seller's own WING-resident button is unchanged and still the way
+   * through, so a page that cannot be hit-tested costs a poll rather than the walk.
+   */
+  keyIssuanceRequiresUnoccludedResult: true;
+  /**
    * The input method the walk names, and WHO decided it. A product decision taken with the measurement in front
    * of the owner and separated from it — the screen offers two options and both resolve identically well.
    */
@@ -442,7 +501,8 @@ export const COUPANG_WING_GUIDED_WALK_BOUNDARY: GuidedWalkBoundary = {
   operatorIssuesRealKey: true,
   keyCreationRuledOut: false,
   agentPerformsAction: false,
-  agentNavigations: 2,
+  agentNavigations: 1,
+  opensLocalSellerOpsInDefaultBrowser: true,
   credentialValueReadBudget: 0,
   performsConnectOrSync: false,
   highlightedControlCount: 9,
@@ -452,6 +512,8 @@ export const COUPANG_WING_GUIDED_WALK_BOUNDARY: GuidedWalkBoundary = {
   keyCreationPressAutoPerformed: false,
   keyIssuanceAdvancesOnObservedResult: true,
   sellerConsentObserved: true,
+  vendorFormReadinessObserved: true,
+  keyIssuanceRequiresUnoccludedResult: true,
   vendorMethodGuided: "자체개발(직접입력)",
   vendorMethodDecidedBy: "PRODUCT_OWNER",
 };
@@ -817,6 +879,9 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
       "NAVIGATE_TO_SELLER_LANDING_ONCE",
       "RETURN_TO_SELLEROPS_ON_SELLER_REQUEST",
       "OBSERVE_CONSENT_COMPLETE_AGGREGATE",
+      "OBSERVE_FIELD_NONEMPTY_AGGREGATE",
+      "MEASURE_LABEL_REGION_STRUCTURE",
+      "MEASURE_MARKER_OCCLUSION",
     ],
     allowsHighlight: true,
     mode: "READ_ONLY",

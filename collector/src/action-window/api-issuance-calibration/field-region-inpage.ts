@@ -1,0 +1,145 @@
+/**
+ * **The in-page half of the fixed-label REGION census.** One `evaluate` body, built from a candidate list.
+ *
+ * It reuses `buildFixedLabelLocateScript`'s two rules verbatim — whole normalized text against a fixed label, and
+ * a match must PAINT — and then answers the question that script does not: what is this label attached to.
+ *
+ * **Nothing it returns is content.** `tagName`, integers, and one fixed association enum. It reads
+ * `input.value` in exactly one place, tests `trim().length > 0`, and returns a COUNT; the value never leaves the
+ * page and never reaches a variable that is returned. That read happens only for candidates whose request set
+ * `readFilled`, which the credential candidates never do.
+ *
+ * Written in ES5 with no closures over builder state, for the same reason every other in-page script here is: the
+ * bundler's `keepNames` rewrites arrow functions into `__name(...)` calls that do not exist in the page.
+ */
+import type { FieldRegionRequest } from "../coupang-wing-field-region";
+import { FIELD_REGION_ANCESTOR_DEPTH } from "../coupang-wing-field-region";
+
+/** The tags that take typed text. A checkbox or a radio is not a field the seller fills in. */
+const TEXTUAL_INPUT_TYPES = ["text", "url", "email", "tel", "search", "number", "password"] as const;
+
+/**
+ * Build the census body for `requests`.
+ *
+ * The candidate list is embedded as JSON rather than interpolated as code, so a candidate string is data in the
+ * page and never a place an expression could be spliced in.
+ */
+export function buildFieldRegionCensusScript(requests: readonly FieldRegionRequest[]): string {
+  const spec = requests.map((r) => ({
+    id: r.id,
+    q: r.candidateQuery,
+    t: r.exactText,
+    f: r.readFilled === true,
+  }));
+  return `(function () {
+  /* wing-field-region-census (value-free OUTPUT: tags, counts, association enum) */
+  var slice = Function.prototype.call.bind(Array.prototype.slice);
+  var SPEC = ${JSON.stringify(spec)};
+  var TEXT_TYPES = ${JSON.stringify(TEXTUAL_INPUT_TYPES)};
+  var DEPTH = ${FIELD_REGION_ANCESTOR_DEPTH};
+  function norm(s) { return String(s == null ? '' : s).replace(/\\s+/g, ' ').trim(); }
+  function accName(el) {
+    var al = el.getAttribute ? el.getAttribute('aria-label') : null;
+    if (al && norm(al).length) { return norm(al); }
+    /* text read ONLY to compare against a KNOWN fixed label; nothing derived from it is returned. */
+    return norm(el.textContent || '');
+  }
+  function paints(node) {
+    if (!node || !node.getClientRects) { return false; }
+    var cs = window.getComputedStyle ? window.getComputedStyle(node) : null;
+    if (cs && (cs.display === 'none' || cs.visibility === 'hidden')) { return false; }
+    if (cs && cs.display === 'contents') { return node.childElementCount > 0; }
+    var rects = node.getClientRects();
+    if (!rects || rects.length === 0) { return false; }
+    var r = node.getBoundingClientRect ? node.getBoundingClientRect() : null;
+    return !!r && r.width > 0 && r.height > 0;
+  }
+  function isTextual(el) {
+    var tn = el.tagName;
+    if (tn === 'TEXTAREA') { return true; }
+    if (tn !== 'INPUT') { return false; }
+    var ty = (el.getAttribute('type') || 'text').toLowerCase();
+    for (var i = 0; i < TEXT_TYPES.length; i++) { if (TEXT_TYPES[i] === ty) { return true; } }
+    return false;
+  }
+  /* The region a label names, by the first association that answers. Order matters: an explicit \`for\` is what
+     WING itself declares and beats any structural guess; wrapping is checked last because a \`<label>\` that also
+     has a \`for\` would otherwise report the weaker association. */
+  function regionOf(el) {
+    var id = el.getAttribute ? el.getAttribute('for') : null;
+    if (id) {
+      var byId = null;
+      try { byId = document.getElementById(id); } catch (e) { byId = null; }
+      if (byId) { return { kind: 'LABEL_FOR', node: byId }; }
+    }
+    if (el.tagName === 'DT') {
+      var dd = el.nextElementSibling;
+      while (dd && dd.tagName !== 'DD') { dd = dd.nextElementSibling; }
+      if (dd) { return { kind: 'DT_NEXT_DD', node: dd }; }
+    }
+    if (el.tagName === 'TH') {
+      var td = el.nextElementSibling;
+      while (td && td.tagName !== 'TD') { td = td.nextElementSibling; }
+      if (td) { return { kind: 'TH_NEXT_TD', node: td }; }
+    }
+    if (el.tagName === 'LABEL' && el.querySelector && el.querySelector('input,textarea,select')) {
+      return { kind: 'LABEL_WRAPS', node: el };
+    }
+    return { kind: 'NONE', node: null };
+  }
+  function ancestorsOf(el) {
+    var out = [], p = el.parentElement, n = 0;
+    while (p && n < DEPTH) { out.push(p.tagName); p = p.parentElement; n++; }
+    return out;
+  }
+  var readings = [];
+  for (var s = 0; s < SPEC.length; s++) {
+    var want = norm(SPEC[s].t);
+    var cands; try { cands = slice(document.querySelectorAll(SPEC[s].q)); } catch (e) { cands = []; }
+    var matches = [], CAP = 4000;
+    for (var i = 0; i < cands.length && i < CAP; i++) { if (accName(cands[i]) === want) { matches.push(cands[i]); } }
+    var visible = [];
+    for (var v = 0; v < matches.length; v++) { if (paints(matches[v])) { visible.push(matches[v]); } }
+    var row = { id: SPEC[s].id, visibleCount: visible.length, hiddenCount: matches.length - visible.length };
+    if (visible.length === 1) {
+      var el = visible[0];
+      row.observedTag = el.tagName;
+      row.ancestorTags = ancestorsOf(el);
+      var reg = regionOf(el);
+      row.association = reg.kind;
+      if (reg.node) {
+        row.regionTag = reg.node.tagName;
+        var fields = [];
+        if (reg.node.tagName === 'INPUT' || reg.node.tagName === 'TEXTAREA' || reg.node.tagName === 'SELECT') {
+          fields = [reg.node];
+        } else {
+          fields = slice(reg.node.querySelectorAll('input,textarea,select'));
+        }
+        var inputCount = 0, textInputCount = 0, filled = 0;
+        for (var fi = 0; fi < fields.length; fi++) {
+          if (!paints(fields[fi])) { continue; }
+          inputCount++;
+          if (!isTextual(fields[fi])) { continue; }
+          textInputCount++;
+          /* THE ONLY VALUE READ IN THIS FILE. Its emptiness is counted; the value is not stored, not returned,
+             and not compared against anything. Gated on the per-candidate flag, which credentials never set. */
+          if (SPEC[s].f && norm(fields[fi].value).length > 0) { filled++; }
+        }
+        row.inputCount = inputCount;
+        row.textInputCount = textInputCount;
+        var buttons = reg.node.querySelectorAll ? slice(reg.node.querySelectorAll('button,a[role="button"]')) : [];
+        var buttonCount = 0;
+        for (var bi = 0; bi < buttons.length; bi++) { if (paints(buttons[bi])) { buttonCount++; } }
+        row.buttonCount = buttonCount;
+        var entries = reg.node.querySelectorAll ? slice(reg.node.querySelectorAll('li,tr,option')) : [];
+        var entryRowCount = 0;
+        for (var ei = 0; ei < entries.length; ei++) { if (paints(entries[ei])) { entryRowCount++; } }
+        row.entryRowCount = entryRowCount;
+        if (SPEC[s].f) { row.filledTextInputCount = filled; }
+      }
+    }
+    readings.push(row);
+  }
+  return { readings: readings };
+})()`;
+}

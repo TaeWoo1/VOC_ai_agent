@@ -1022,10 +1022,12 @@ describe("the guided-walk manifest is not the fallback", () => {
     const max = CLI.slice(from, CLI.indexOf("\n    : isWingReveal", from));
     expect(max).toContain("WHICH ISSUES A REAL KEY");
     expect(max).toContain("0 key presses");
-    // TWO navigations — the landing, and the seller-pressed return to SellerOps — and the budget must SAY so
-    // rather than keep describing the narrower run it used to be.
-    expect(max).toContain("2 navigations (the landing at window open, and — only if the seller presses");
-    expect(max).toContain("leaving the WING tab untouched");
+    // ONE navigation of the WING window — the landing — and the return stated as the separate thing it is: a
+    // local screen opened in the seller's OWN browser. It read "2 navigations … a new tab" for a day, which
+    // described a return that navigated for real and delivered a login page, because this window has no session.
+    expect(max).toContain("1 navigation of the WING window");
+    expect(max).toContain("OWN default browser");
+    expect(max).toContain("with the WING window not touched at all");
     // Nine since the vendor screen was measured. The budget also has to state that the runtime advances itself
     // now — a budget listing only what the SELLER presses would understate what the agent does.
     expect(max).toContain("9 highlights");
@@ -1166,7 +1168,7 @@ describe("the live guided-walk carrier is gated, and never downgrades silently",
     expect(block).not.toMatch(/liveWalkRefusal[^\n]*\?\s*buildCoupangIssuanceConfig/);
   });
 
-  it("the live carrier opens NO window at agent boot, and navigates EXACTLY TWICE — the landing and the return", () => {
+  it("the live carrier opens NO window at agent boot, and navigates EXACTLY ONCE — the landing", () => {
     const src = readFileSync(resolve(HERE, "../../../src/cli/local-agent.ts"), "utf8");
     const from = src.indexOf("export function buildCoupangIssuanceLiveConfig");
     const fn = src.slice(from, src.indexOf("\nexport function buildCoupangIssuanceConfig", from));
@@ -1174,19 +1176,28 @@ describe("the live guided-walk carrier is gated, and never downgrades silently",
     expect(fn).toContain("new LazyCoupangIssuanceDriver({");
     expect(fn).toContain("open: async () =>");
     const codeOnly = fn.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
-    // TWO navigations, and BOTH are named: the landing (so the seller is not dropped on a blank window) and
-    // the return the seller asks for on the last step. Every screen in between is one they reach — a third
-    // goto here would be a route through the flow, which is a different capability entirely.
-    expect(codeOnly.split(".goto(").length - 1).toBe(2);
+    // ONE navigation, and it is named: the landing, so the seller is not dropped on a blank window. Every
+    // screen after it is one they reach — a second goto here would be a route through the flow, which is a
+    // different capability entirely.
+    //
+    // It was 2 for a day, when the return opened a second tab in this same window. That navigated and returned
+    // nobody: the window is a dedicated profile with no SellerOps session, so the seller got a login page.
+    expect(codeOnly.split(".goto(").length - 1).toBe(1);
     expect(codeOnly).toContain("COUPANG_WING_GUIDED_WALK_LANDING_URL");
     // Screened BEFORE it is used — an off-target destination must open nothing, not send the seller somewhere
-    // the run cannot vouch for. TWO screens now: the WING host for the landing, loopback for the return.
+    // the run cannot vouch for.
     expect(codeOnly.indexOf("screenWingUrl")).toBeLessThan(codeOnly.indexOf(".goto("));
     expect(codeOnly).toContain("if (screened.ok)");
-    expect(codeOnly.indexOf("screenSellerOpsReturnUrl")).toBeLessThan(codeOnly.lastIndexOf(".goto("));
-    // …and the return opens a NEW TAB rather than navigating the WING one: the secret key is shown once, and
-    // the seller may still be copying it.
-    expect(codeOnly).toContain("context.newPage()");
+    // …and the return touches this window NOT AT ALL: it is screened again and handed to the OS, so the keys
+    // stay exactly where the seller left them.
+    expect(codeOnly.indexOf("screenSellerOpsReturnUrl")).toBeGreaterThan(codeOnly.indexOf(".goto("));
+    expect(codeOnly).toContain("planOsOpen(screened.url, process.platform)");
+    // Scoped to the return itself: `open()` legitimately acquires the landing page, and the property under test
+    // is that the RETURN adds nothing to this window — no tab, no navigation, no raise over the keys.
+    const ret = codeOnly.slice(codeOnly.indexOf("returnToSellerOps: async ()"));
+    for (const touch of ["newPage(", ".goto(", "bringToFront(", "raiseWindowOf("]) {
+      expect(ret, touch).not.toContain(touch);
+    }
     // ONE driver for the carrier's lifetime — a re-attach must reuse the seller's window, not open a second.
     expect(fn).toContain("createDriver: () => driver");
   });

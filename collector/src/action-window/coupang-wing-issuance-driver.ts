@@ -82,6 +82,14 @@ import {
   sanitizeContainmentReading,
   type FixedLabelContainmentReading,
 } from "./api-issuance-calibration/visual-recon-inpage";
+import {
+  buildFixedLabelOcclusionScript,
+  occlusionVerdict,
+  sanitizeOcclusionReading,
+  type OcclusionVerdict,
+} from "./api-issuance-calibration/occlusion-inpage";
+import { buildFieldRegionCensusScript } from "./api-issuance-calibration/field-region-inpage";
+import { sanitizeFieldRegionCensus, type FieldRegionRequest } from "./coupang-wing-field-region";
 import { COUPANG_ISSUANCE_TOTAL_STEPS } from "./coupang-issuance/coupang-issuance-stages";
 import type {
   CoupangIssuanceProbeDriver,
@@ -154,7 +162,19 @@ export const WING_HIGHLIGHT_LABELS: Readonly<Record<WingHighlightTarget, { candi
   // FROM that measurement — see KEY_CREATION_SPEC — so the ring can never point with a string the calibration
   // no longer covers.
   issue_final: { candidateQuery: KEY_CREATION_SPEC.candidateQuery, exactText: KEY_CREATION_SPEC.exactText },
-  credentials: { candidateQuery: "label,span,div,dt,th,strong", exactText: "Access Key", tagAncestor: "tr" },
+  // The ring at step ⑧ frames the whole credential TABLE, not the header row.
+  //
+  // `tagAncestor` was `"tr"` until 2026-08-12, when the first live reading of this label came back
+  // `observedTag: "TH"` — so `closest('tr')` resolved to the HEADER row, and the ring framed the words
+  // `Access Key` while the panel said "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요". The values
+  // the seller has to copy were outside it, in the body rows of the same table.
+  //
+  // `table` is the smallest ancestor holding both, and — unlike a guess at an intermediate wrapper — it is
+  // GUARANTEED to exist by the measurement itself: a `TH` is only a `TH` inside a table. If a later WING ever
+  // matches this label somewhere else, `buildFixedLabelLocateScript` falls back to the matched element, which is
+  // the pre-2026-08-12 behaviour minus the row. The step also logs the census of this label's ancestor chain on
+  // every live walk (`aw_coupang_credential_region`), so the anchor is a reading rather than a belief.
+  credentials: { candidateQuery: "label,span,div,dt,th,strong", exactText: "Access Key", tagAncestor: "table" },
 };
 
 /**
@@ -188,6 +208,41 @@ const WING_CREDENTIAL_SHOWN_MARKER_SPEC: WingFlowScreenMarkerSpec = Object.freez
 
 /** The checkpoints whose completion is "a credential is now on the screen". Today: the key-issuing 확인. */
 const CHECKPOINT_ADVANCES_ON_CREDENTIAL: readonly CoupangIssuanceTarget[] = ["vendor_confirm"];
+
+/**
+ * **The three fields the seller fills before the key-issuing `확인` is worth pointing at.**
+ *
+ * Taken from the recon candidates by id rather than re-typed, like every other spec the walk uses — a second
+ * hand-written copy of `업체명` is how a locator drifts away from the measurement that justifies it.
+ *
+ * All three were measured painting on the vendor screen once a method is selected
+ * ({@link WING_VENDOR_FORM_REVEAL}); `업체명` on both vendor checkpoints, `URL` and `IP 주소` on the second only.
+ * What has NEVER been measured is what each label is attached to, which is exactly what the census reads — so
+ * the readiness rule below treats an unresolvable association as "cannot tell", never as "not ready".
+ *
+ * `readFilled` is on for all three because these are the seller's own business details, and only their
+ * EMPTINESS crosses the boundary. It is off for every credential candidate, by construction and by test.
+ */
+const VENDOR_FORM_FIELDS: readonly FieldRegionRequest[] = Object.freeze(
+  (["stage2.vendor_info.baseline", "stage2.vendor_url.url", "stage2.call_ip.ip_addr"] as const).map((id) => {
+    const spec = wingCandidateSpecById(id);
+    return Object.freeze({ id: spec.id, candidateQuery: spec.candidateQuery, exactText: spec.exactText, readFilled: true });
+  }),
+);
+
+/** The `IP 주소` field, which is ready on a REGISTERED ENTRY rather than on typed text — the seller presses 추가. */
+const VENDOR_FORM_IP_FIELD_ID = "stage2.call_ip.ip_addr";
+
+/**
+ * Whether the vendor form is filled in far enough that `확인` is the right thing to be looking at.
+ *
+ *  - `READY` — every field resolved, and each is satisfied.
+ *  - `NOT_READY` — every field resolved, and at least one is not.
+ *  - `UNKNOWN` — a field did not resolve to exactly one label with a region, or the page did not answer. The
+ *    walk must not hold the seller behind a reading it could not take, so this is treated as `READY`'s
+ *    equivalent at the one place it is used.
+ */
+export type VendorFormReadiness = "READY" | "NOT_READY" | "UNKNOWN";
 
 function isWingHighlightTarget(target: CoupangIssuanceTarget): target is "issue" | "credentials" | "issue_final" {
   // Gated on the flag, not on a literal list, so WITHDRAWING the calibration removes the ring by itself. The
@@ -878,7 +933,10 @@ export const OPERATOR_STEP_BRIEF: Readonly<Record<CoupangIssuanceTarget, string>
   confirm_purpose: "사용 목적이 'OPEN API'인지 확인하고 '확인'을 직접 누르세요.",
   terms_consent: "약관을 직접 읽고 판단하신 뒤 동의 체크박스 2개를 선택하세요.",
   issue_final: "'약관 동의 및 Key 발급받기'를 직접 누르세요. 이 버튼에서는 키가 발급되지 않습니다.",
-  vendor_method: "입력 방식에서 '자체개발(직접입력)'을 직접 선택하세요.",
+  // Names the fields as well as the selection: they appear on THIS screen once a method is chosen, and the next
+  // step's ring sits on the control that issues the key. A seller told about them here does not meet that ring
+  // with an empty form.
+  vendor_method: "'자체개발(직접입력)'을 직접 선택한 뒤, 업체명 · URL을 입력하고 IP는 '추가'까지 누르세요.",
   vendor_confirm: "⚠ 이 화면의 '확인'에서 실제 API 키가 발급됩니다. 업체명 · URL을 입력하고 IP는 '추가'까지 누른 뒤, '확인'을 직접 누르세요.",
   credentials: "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요.",
   return: "아래 버튼을 눌러 SellerOps로 돌아가세요.",
@@ -892,6 +950,18 @@ export const OPERATOR_STEP_BRIEF: Readonly<Record<CoupangIssuanceTarget, string>
  * disclosure starts closed, which is where the lightening actually comes from — seven steps, not nine.
  */
 export const STEPS_WITH_DETAIL_OPEN: readonly CoupangIssuanceTarget[] = ["issue_final", "vendor_confirm"];
+
+/**
+ * **What the panel says when the seller asks to move on and the form still reads empty.**
+ *
+ * It replaces the step's brief once, and the next press goes through regardless — so this is a reminder, not a
+ * refusal, and its wording has to be one. It says what was not filled in and it does not say the seller is
+ * wrong: the association between these labels and their inputs has never been calibrated live, so the reading
+ * behind this message is the less reliable party.
+ */
+const VENDOR_FORM_INCOMPLETE_BRIEF =
+  "잠깐 — 업체명 · URL이 비어 있거나 IP가 아직 '추가'되지 않은 것으로 보입니다. 다음 화면의 '확인'을 누르면 " +
+  "실제 키가 발급되므로, 먼저 채워 주세요. 이미 채우셨다면 아래 버튼을 한 번 더 누르시면 계속 진행합니다.";
 
 /**
  * **The chip above the highlighted control** — which step this is, not what to do about it.
@@ -1412,6 +1482,92 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
   }
 
   /**
+   * **Is the marker not merely painting, but LOOKABLE AT?** The hit test that step ⑦ now turns on.
+   *
+   * On 2026-08-12 the credential label painted while WING's own `발급 완료` dialog was open over it, so the walk
+   * advanced, put step ⑧'s ring on a row behind a modal, and told the seller to copy keys they could not see.
+   * Every check in place was satisfied: matched, once, painting. This asks the question those could not.
+   *
+   * Bounded like every other read on this path, and `UNREADABLE` on a page that will not answer — which the
+   * caller treats as "do not advance", the same as covered.
+   */
+  private async markerOcclusion(spec: WingFlowScreenMarkerSpec): Promise<OcclusionVerdict> {
+    const script = buildFixedLabelOcclusionScript({
+      candidateQuery: spec.candidateQuery,
+      exactText: spec.exactText,
+    });
+    const raw = await timebox<unknown>(
+      this.evalStr<unknown>(this.activePage(), script).catch(() => null),
+      null,
+    );
+    const verdict = occlusionVerdict(sanitizeOcclusionReading(raw));
+    // Recorded on every non-clear reading, because "the walk did not advance" and "the walk could not see the
+    // page" look identical in a log that says nothing. Sanitized: a candidate id and a fixed enum.
+    if (verdict !== "CLEAR") log("aw_coupang_marker_occlusion", { markerId: spec.id, verdict });
+    return verdict;
+  }
+
+  /**
+   * **Has the seller filled the vendor form?** A structural census, read live, and never a value.
+   *
+   * The ring at step ⑦ points at `확인` — the control that ISSUES THE KEY — and on 2026-08-12 it did so the
+   * instant the step began, over three empty fields. The seller who filled them did so because they knew to;
+   * one who follows the ring presses the control against an empty form. A ring beats a sentence, so the fix is
+   * not more copy on the panel: it is not putting the ring there yet.
+   *
+   * What is read: how many text inputs in each field's region are non-EMPTY, and how many registered entries
+   * the `IP 주소` region holds — because `추가` is a press whose result is a row, not typed text. Nothing about
+   * what the seller typed leaves the page.
+   *
+   * **`UNKNOWN` is not `NOT_READY`.** The association between these labels and their inputs has never been
+   * measured on a live screen — only the labels have — so a census that cannot resolve one is the expected
+   * failure, not a signal about the seller. Holding the walk on it would replace a ring pointing too early with
+   * a walk that cannot reach the key at all.
+   */
+  private async vendorFormReadiness(): Promise<VendorFormReadiness> {
+    const script = buildFieldRegionCensusScript(VENDOR_FORM_FIELDS);
+    const raw = await timebox<unknown>(this.evalStr<unknown>(this.activePage(), script).catch(() => null), null);
+    const census = sanitizeFieldRegionCensus(raw, VENDOR_FORM_FIELDS.map((f) => f.id));
+    let satisfied = 0;
+    for (const r of census.readings) {
+      // A label that did not resolve, or resolved to nothing structural, decides nothing about the seller.
+      if (r.visibleCount !== 1 || r.association === undefined || r.association === "NONE") {
+        log("aw_coupang_vendor_form_field", { fieldId: r.id, visibleCount: r.visibleCount, resolved: false });
+        return "UNKNOWN";
+      }
+      const ready =
+        r.id === VENDOR_FORM_IP_FIELD_ID ? (r.entryRowCount ?? 0) >= 1 : (r.filledTextInputCount ?? 0) >= 1;
+      // Sanitized: an id and booleans/counts. The whole point is that "did they fill it" travels and "what did
+      // they put there" does not.
+      log("aw_coupang_vendor_form_field", { fieldId: r.id, resolved: true, ready });
+      if (ready) satisfied += 1;
+    }
+    return satisfied === census.readings.length ? "READY" : "NOT_READY";
+  }
+
+  /**
+   * Record the credential label's own structure on the issued screen — the measurement the ⑧ anchor rests on.
+   *
+   * Read-only, bounded, and swallowing: a census that cannot be taken must not stop the step it annotates. The
+   * request deliberately does NOT set `readFilled` — a count of non-empty credential fields is still a reading
+   * of the credential fields, and the walk's whole claim is that nothing here looks at them.
+   */
+  private async logCredentialRegion(): Promise<void> {
+    const req: FieldRegionRequest = {
+      id: WING_CREDENTIAL_SHOWN_MARKER_SPEC.id,
+      candidateQuery: WING_CREDENTIAL_SHOWN_MARKER_SPEC.candidateQuery,
+      exactText: WING_CREDENTIAL_SHOWN_MARKER_SPEC.exactText,
+    };
+    const raw = await timebox<unknown>(
+      this.evalStr<unknown>(this.activePage(), buildFieldRegionCensusScript([req])).catch(() => null),
+      null,
+    );
+    const reading = sanitizeFieldRegionCensus(raw, [req.id]).readings[0];
+    if (!reading) return;
+    log("aw_coupang_credential_region", { ...reading });
+  }
+
+  /**
    * READ-ONLY: the full sanitized {@link WingObservation} of the CURRENT surface — page category + bucketized
    * signals + calibration blockers (always carries `LIVE_DOM_CALIBRATION_PENDING`). Built from the value-free
    * census + host-category read, exactly like {@link readSurface}, so nothing here reads a value/URL/text. This
@@ -1543,6 +1699,13 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
       return (await overlayMounted(page)) ? { count: 1, sig: guided } : { count: 0 };
     }
     if (!isWingHighlightTarget(target)) return { count: 0 };
+    // **The credential region, MEASURED on the screen the ring is about to be drawn on.**
+    //
+    // The anchor moved from the header row to the table on the strength of one live reading plus the HTML
+    // content model (a `TH` is only a `TH` inside a table). That is sound and it is still an inference, so the
+    // step records the ancestor chain it actually found — value-free tag names and counts — and the next reader
+    // is looking at a reading rather than at this comment. It changes nothing about what is ringed.
+    if (target === "credentials") await this.logCredentialRegion();
     const res = await this.resolveFixedLabelTarget(target, true);
     if (res.count !== 1 || !res.sig) return { count: res.count };
     // Give the just-set tag a beat to land, then mount the reused read-only overlay on it (scroll into view +
@@ -1559,7 +1722,12 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
    * on the observed navigation). The button only records the seller's press into an in-page value-free latch;
    * the driver never clicks/types and reads no field value.
    */
-  private async mountStepOverlay(page: Page, target: CoupangIssuanceTarget, dockedPanelOnly = false): Promise<void> {
+  private async mountStepOverlay(
+    page: Page,
+    target: CoupangIssuanceTarget,
+    dockedPanelOnly = false,
+    briefOverride?: string,
+  ): Promise<void> {
     const buttonLabel = ADVANCE_BUTTON_LABEL[target];
     await mountOverlay(page, {
       ...(dockedPanelOnly ? { dockedPanelOnly: true } : {}),
@@ -1567,8 +1735,10 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
       totalSteps: COUPANG_ISSUANCE_TOTAL_STEPS,
       copyKey: `actionWindow.coupangIssuance.step.${target}`,
       // The BRIEF leads and the complete copy sits behind the panel's disclosure — which still renders it, and
-      // renders it open on the two steps that carry a safety claim.
-      label: OPERATOR_STEP_BRIEF[target],
+      // renders it open on the two steps that carry a safety claim. An override replaces the brief only: the
+      // step's full copy is unchanged, because what changed is what the seller has to do NEXT, not what the
+      // step is.
+      label: briefOverride ?? OPERATOR_STEP_BRIEF[target],
       detail: OPERATOR_STEP_LABELS[target],
       ...(STEPS_WITH_DETAIL_OPEN.includes(target) ? { detailExpanded: true } : {}),
       // The chip gets the short title; the panel keeps the instruction. Without this both rendered the same
@@ -1761,6 +1931,8 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     const pollsPerHeartbeat = Math.max(1, Math.round(OBSERVE_HEARTBEAT_MS / OVERLAY_ADVANCE_POLL_MS));
     /** Consecutive latch reads that could not be answered at all. Reset by any read that answers. */
     let unreadable = 0;
+    /** Whether the vendor-form gate has already told this seller once. It refuses one press, never two. */
+    let formWarned = false;
     for (let i = 0; i < maxPolls; i++) {
       // Time-boxed, like every in-page read below it. An `evaluate` that never settles used to stop this loop
       // dead mid-iteration, with the panel still painted and nothing left watching it.
@@ -1801,6 +1973,32 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
         unreadable = 0;
       }
       if (latch === "PRESSED") {
+        // **THE FORM GATE.** Step ⑦ rings `확인` — the control that ISSUES THE KEY — and the seller reaches it
+        // by pressing this button. On 2026-08-12 that ring appeared over three empty fields, and the operator
+        // said plainly what would follow: someone follows the ring and presses 확인 without filling them.
+        //
+        // So the ring is not moved and the copy is not lengthened. The step simply does not hand over yet.
+        //
+        // **Once, and then it yields.** Manual progress always remains available: the second press goes
+        // through whatever the census says. The seller can see their own screen and this reading has never
+        // been calibrated against a live one — a fence that could trap a seller behind a misread field would
+        // be a worse failure than the one it closes.
+        if (target === "vendor_method" && !formWarned) {
+          const readiness = await this.vendorFormReadiness();
+          if (readiness === "NOT_READY") {
+            formWarned = true;
+            log("aw_coupang_vendor_form_not_ready", { target });
+            // Clear the press first: the seller's NEXT press must be a new one, not this one read twice.
+            await timebox(resetOverlayAdvance(this.activePage(), token).catch(() => undefined), undefined);
+            await timebox(
+              this.mountStepOverlay(this.activePage(), target, false, VENDOR_FORM_INCOMPLETE_BRIEF),
+              undefined,
+              REMOUNT_TIMEOUT_MS,
+            );
+            continue;
+          }
+          log("aw_coupang_vendor_form_ready", { target, readiness });
+        }
         // The one step whose button promises something OUTSIDE this page. Performed on the press and nowhere
         // else, so nothing moves the seller's window while they still have work on WING.
         if (target === "return") await this.returnToSellerOps();
@@ -1821,7 +2019,14 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
         }
         // …and the reading that actually fires on this surface: the credential label painting where it was
         // measurably absent one moment ago. Same observe-the-RESULT property as the branch above.
-        if (credentialMayAdvance && (await this.markerVisible(WING_CREDENTIAL_SHOWN_MARKER_SPEC))) {
+        //
+        // **And UNCOVERED.** `markerVisible` alone advanced this step on 2026-08-12 while WING's own `발급 완료`
+        // dialog was still open over the credentials: the seller was told to copy keys behind a modal and step
+        // ⑧ rang a row they could not see. Painting is not the same as lookable-at, and the difference is a hit
+        // test. Everything except a tested, uncovered marker leaves the step where it is — the seller's own
+        // WING-resident button is still the way through, so a page that cannot be hit-tested costs a poll and
+        // never the walk.
+        if (credentialMayAdvance && (await this.markerOcclusion(WING_CREDENTIAL_SHOWN_MARKER_SPEC)) === "CLEAR") {
           return true;
         }
         // THE SELLER'S WAY OUT MUST SURVIVE A NAVIGATION. WING can bounce the window to login mid-checkpoint —
@@ -1843,8 +2048,9 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
    *
    * Bounded and swallowing, deliberately: the walk is COMPLETE by the time this runs — the keys exist and the
    * seller has copied them — so a return that fails must not turn a finished walk into a failed one. What it
-   * must not do is fail silently, hence the log line either way. The keys stay on screen: the carrier opens the
-   * connect page beside the WING tab rather than navigating away from it.
+   * must not do is fail silently, hence the log line either way. The keys stay on screen because the carrier
+   * does not touch this window at all: it hands a screened loopback URL to the seller's OWN default browser,
+   * where their SellerOps session already lives. Opening it HERE is what produced a login screen on 2026-08-12.
    */
   private async returnToSellerOps(): Promise<void> {
     const go = this.opts.returnToSellerOps;
