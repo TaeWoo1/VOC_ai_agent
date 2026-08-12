@@ -40,6 +40,7 @@ import {
   WING_KEY_CREATION_SELECTOR_CALIBRATED,
   WING_PURPOSE_SCREEN_MARKER_SPEC,
   WING_TERMS_SCREEN_MARKER_SPECS,
+  WING_VENDOR_METHOD_SCREEN_MARKER_SPECS,
   wingGuidedHighlightPromotion,
   wingCandidateSpecById,
   type WingFlowScreen,
@@ -725,7 +726,7 @@ export const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string
   // NOT trimmed, and every sentence is a safety claim the approval harness reproduces before the operator
   // grants. This is the one step in the whole walk that brings an irreversible marketplace credential into
   // existence, and the seller is the only one who can do it.
-  vendor_confirm: "업체명 · URL · IP 주소를 직접 입력한 뒤 '확인'을 직접 누르세요. ⚠ 여기서 실제 API 키가 발급됩니다 — 되돌릴 수 없습니다. SellerOps는 이 버튼을 절대 누르지 않고, 입력란에 아무것도 쓰지 않습니다. 키가 화면에 표시되면 자동으로 넘어갑니다.",
+  vendor_confirm: "업체명 · URL을 입력하고, IP 주소는 입력한 뒤 옆의 '추가'를 눌러 등록하세요 — 추가하지 않으면 IP가 등록되지 않습니다. 그 다음 '확인'을 직접 누르세요. ⚠ 여기서 실제 API 키가 발급됩니다 — 되돌릴 수 없습니다. SellerOps는 이 버튼을 절대 누르지 않고, 입력란에 아무것도 쓰지 않습니다. 키가 화면에 표시되면 자동으로 넘어갑니다.",
   credentials: "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요. SellerOps는 값을 읽지 않습니다. 복사했으면 아래 버튼을 누르세요.",
   return: "아래 버튼을 눌러 SellerOps로 돌아가세요. 복사한 키를 입력하면 연결이 끝납니다.",
 };
@@ -1161,6 +1162,20 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     // where it is hidden, so the run produced no basis for promoting it and the sitting had to be repeated.
     //
     // Reading both costs one extra in-page locate on the screen where the walk stops anyway.
+    //
+    // VENDOR_METHOD is read FIRST, and this ladder must stay in the same order as the pure
+    // `wingFlowScreenFrom` — because the vendor screen REPLACES the terms screen rather than overlaying it,
+    // measured 2026-08-12. Reversing them would answer TERMS on a screen whose terms markers are hidden.
+    //
+    // This branch was MISSING on the live walk of 2026-08-12: the marker specs existed, the pure resolver knew
+    // the screen, `CHECKPOINT_ADVANCES_TO_SCREEN` pointed `issue_final` at it, and the tests pinned all three —
+    // but the ladder that actually runs still had only two rungs, so the probe answered UNRECOGNIZED on the
+    // vendor screen and the advance could never fire. The record was fenced; the runtime was not.
+    let vendor = false;
+    for (const spec of WING_VENDOR_METHOD_SCREEN_MARKER_SPECS) {
+      if (await this.markerVisible(spec)) vendor = true;
+    }
+    if (vendor) return "VENDOR_METHOD";
     let terms = false;
     for (const spec of WING_TERMS_SCREEN_MARKER_SPECS) {
       if (await this.markerVisible(spec)) terms = true;

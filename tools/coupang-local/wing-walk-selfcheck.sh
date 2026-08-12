@@ -302,11 +302,13 @@ if [ -z "$TREE_DIRTY" ]; then
   DISCLOSE_OK=1
   for phrase in \
     "EVERY marketplace action is YOURS" \
-    "강조 표시는 체크박스나 라디오 버튼 위에 뜨지 않습니다" \
+    "강조 표시가 가리키는 대상은 체크박스나 라디오 버튼이 아닙니다" \
+    "테두리 안에 체크박스가 함께 들어와 보입니다" \
     "어느 박스가 어느 동의인지 안다고 말하지 않습니다" \
     "every screen after that is one YOU navigate to" \
     "NINE controls are highlighted" \
-    "NO ring sits on a checkbox or a radio" \
+    "NO ring TARGETS a checkbox or a radio" \
+    "you will SEE a box enclosed" \
     "measured structural pairing" \
     "'OPEN API' is the DEFAULT purpose option" \
     "You read the two consent texts and decide" \
@@ -348,9 +350,9 @@ if [ -z "$TREE_DIRTY" ]; then
   for phrase in \
     "'확인'을 직접 누르세요" \
     "여기서 실제 API 키가 발급됩니다" \
-    "되돌릴 수 없습니다" \
+    "되돌릴 수" \
     "입력란에 아무것도 쓰지 않습니다" \
-    "키가"
+    "추가하지 않으면 IP가"
   do
     grep -qF "$phrase" <<<"$out" || { echo "  FAIL  NORMAL          · Korean on-screen warning missing: $phrase"; KOREAN_OK=0; FAILED=1; }
   done

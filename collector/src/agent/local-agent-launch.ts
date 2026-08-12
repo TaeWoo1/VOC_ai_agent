@@ -42,6 +42,17 @@ export interface LocalAgentLaunchPolicy {
   chromiumSandbox: boolean;
   /** Always an installed Chrome channel (default `chrome`) — never bundled Chromium. */
   channel: string;
+  /**
+   * `null` = the page uses the REAL window size, which is the only correct setting for a window a human works in.
+   *
+   * Omitting this pins the page viewport to Playwright's 1280x720 default, INDEPENDENTLY of the window: the
+   * seller maximizes the window and the page does not reflow. Live-observed 2026-08-12 on the guided walk — the
+   * WING key-issuance dialog is taller than 720px, and the guidance panel is anchored to the bottom of that
+   * fixed viewport, which is exactly where WING puts a dialog's primary buttons. The seller could not reach
+   * '확인' without zooming out. A walk that covers the control it is asking the seller to press is worse than
+   * no walk, and this is a launch default, not a WING quirk.
+   */
+  viewport: null;
   /** macOS ONLY: `['--use-mock-keychain']`. Undefined on other platforms. */
   ignoreDefaultArgs?: string[];
 }
@@ -87,6 +98,9 @@ export function buildLocalAgentLaunchPolicy(opts: {
     acceptDownloads: base.acceptDownloads,
     chromiumSandbox: base.chromiumSandbox,
     channel,
+    // The page follows the WINDOW. See the field's doc: without this the seller works in a 1280x720 page no
+    // matter how large they make the window, and the guidance panel sits on top of WING's own buttons.
+    viewport: null,
   };
   if (opts.platform === "darwin") {
     policy.ignoreDefaultArgs = [LOCAL_AGENT_MOCK_KEYCHAIN_ARG];

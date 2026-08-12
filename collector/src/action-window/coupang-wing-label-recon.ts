@@ -2684,10 +2684,13 @@ export const WING_TERMS_SCREEN_MARKER_SPECS: readonly WingFlowScreenMarkerSpec[]
 /**
  * The VENDOR-METHOD screen's marker spec. Visible ⇒ the seller has reached the screen that issues the key.
  *
- * Exported for the guided walk's screen observation, on the same terms as the two above and with one difference
- * that matters: this one has never matched anything ({@link WING_VENDOR_METHOD_SCREEN_MARKER_MEASURED}). Anything
- * auto-advancing on it must degrade to the seller's own advance rather than stall — not firing is the EXPECTED
- * case until a live run says otherwise.
+ * Exported for the guided walk's screen observation, on the same terms as the two above. This doc used to say the
+ * spec "has never matched anything" — written before the measurement and left behind by it. Both markers have
+ * matched, visible, on two checkpoints of the vendor screen ({@link WING_VENDOR_METHOD_SCREEN_MARKER_MEASURED},
+ * {@link WING_VENDOR_METHOD_SCREEN_EVIDENCE}), so a walk resting on this screen SHOULD advance by itself.
+ *
+ * Anything auto-advancing on it still degrades to the seller's own advance rather than stalling — that is the
+ * safety property, not a prediction about whether it fires.
  */
 export const WING_VENDOR_METHOD_SCREEN_MARKER_SPECS: readonly WingFlowScreenMarkerSpec[] = Object.freeze(
   WING_VENDOR_METHOD_SCREEN_MARKER_IDS.map(markerSpecById),

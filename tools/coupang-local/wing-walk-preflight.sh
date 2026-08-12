@@ -212,10 +212,12 @@ echo "      Key region, the 'OPEN API' option label, both consent sentences, the
 echo "      the vendor screen's '확인'. Every one has a live-calibrated locator. A control being RINGED is not it"
 echo "      being pressed: SellerOps points at it and stops. The two steps that name no WING control — reaching"
 echo "      the page, and going back to SellerOps — draw no ring."
-echo "    • NO ring sits on a checkbox or a radio. The purpose and vendor-method rings are on the options'"
-echo "      LABELS and the consent rings on the two SENTENCES — those inputs have no accessible association, so"
-echo "      SellerOps does not claim to know which box is which. What ties each sentence to its own box is a"
-echo "      measured structural pairing: each box's nearest enclosing block holds exactly one sentence and one box."
+echo "    • NO ring TARGETS a checkbox or a radio. Every ring resolves to a LABEL or a SENTENCE, never to an"
+echo "      input element. On WING those labels WRAP their own input, so the box is drawn INSIDE the ring and"
+echo "      you will SEE a box enclosed (live-observed 2026-08-12). The distinction is not cosmetic: it is why"
+echo "      SellerOps does not claim to know which box is which, and a ring is never a click either way."
+echo "      What ties each sentence to its own box is a measured structural pairing: each box's nearest"
+echo "      enclosing block holds exactly one sentence and one box."
 echo "    • 'OPEN API' is the DEFAULT purpose option, so the purpose screen is ONE step: check it, press 확인."
 echo "    • WHICH input method is guided — '자체개발(직접입력)' — is a PRODUCT DECISION, recorded as one. The"
 echo "      screen offers two options and both resolve identically well; nothing measured chooses between them."
@@ -246,9 +248,10 @@ echo
 # will be on the WING page. Reproduced COMPLETE, so nothing on screen is a surprise.
 echo "  WHAT THE KEY-ISSUING STEP SAYS ON THE WING PAGE (complete, Korean — this is what binds):"
 # CHECKPOINT-COPY-BEGIN
-echo "    업체명 · URL · IP 주소를 직접 입력한 뒤 '확인'을 직접 누르세요. ⚠ 여기서 실제 API 키가 발급됩니다 —"
-echo "    되돌릴 수 없습니다. SellerOps는 이 버튼을 절대 누르지 않고, 입력란에 아무것도 쓰지 않습니다. 키가"
-echo "    화면에 표시되면 자동으로 넘어갑니다."
+echo "    업체명 · URL을 입력하고, IP 주소는 입력한 뒤 옆의 '추가'를 눌러 등록하세요 — 추가하지 않으면 IP가"
+echo "    등록되지 않습니다. 그 다음 '확인'을 직접 누르세요. ⚠ 여기서 실제 API 키가 발급됩니다 — 되돌릴 수"
+echo "    없습니다. SellerOps는 이 버튼을 절대 누르지 않고, 입력란에 아무것도 쓰지 않습니다. 키가 화면에"
+echo "    표시되면 자동으로 넘어갑니다."
 # CHECKPOINT-COPY-END
 echo
 echo "  ⚠ THE ONE-LINE GRANT DOES NOT COVER THIS RUN."
