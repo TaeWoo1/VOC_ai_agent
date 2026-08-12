@@ -171,9 +171,13 @@ write_env "$FIXTURES/drift.env" "0000000" "COUPANG_WING_GUIDED_ISSUANCE_WALK" "w
 run_case "HEAD_DRIFT      (commit moved since bootstrap)" nonzero "git commit changed" "$FIXTURES/drift.env"
 
 # ── the descriptor: this phase's whole safety claim ────────────────────────────
-# The DISPLAY-side check. Unlike the destructive descriptor — where the risk is understating danger — every
-# softening here OVERSTATES safety, and the worst is `keyCreationRuledOut: true`: it would tell the operator
-# SellerOps had confirmed no key was created, which nothing can (NO_DISCRIMINATING_SIGNAL).
+# The DISPLAY-side check. Unlike the destructive descriptor — where the risk is understating danger — nearly
+# every softening here OVERSTATES safety, and the worst is `keyCreationRuledOut: true`: it would tell the
+# operator SellerOps had confirmed no key was created, which nothing can (NO_DISCRIMINATING_SIGNAL).
+# `vendorFormReadinessObserved: false` is one of those — it would hide that the run reads whether the seller's
+# own fields are empty. `keyIssuanceRequiresUnoccludedResult: false` is the one entry that is NOT a softening:
+# it understates a fence rather than a risk. It is in the list all the same, because the verifier is exact-match
+# and a descriptor that drifts in either direction is one the operator did not grant against.
 CANON='{"guidedWalkBoundary":{"operation":"WALK_WING_GUIDED_ISSUANCE_TUTORIAL","forbiddenFollowOnAction":"COMPLETE_WING_KEY_ISSUANCE","restsBeforeControl":"확인 (vendor-method screen)","agentCreatesKeyMaterial":false,"operatorIssuesRealKey":true,"keyCreationRuledOut":false,"agentPerformsAction":false,"agentNavigations":1,"opensLocalSellerOpsInDefaultBrowser":true,"credentialValueReadBudget":0,"performsConnectOrSync":false,"highlightedControlCount":9,"textGuidedControlCount":0,"ringedInputControlCount":0,"autoAdvancingStepCount":6,"keyCreationPressAutoPerformed":false,"keyIssuanceAdvancesOnObservedResult":true,"sellerConsentObserved":true,"vendorFormReadinessObserved":true,"keyIssuanceRequiresUnoccludedResult":true,"vendorMethodGuided":"자체개발(직접입력)","vendorMethodDecidedBy":"PRODUCT_OWNER"}}'
 printf '%s' "$CANON" > "$FIXTURES/desc-ok.json"
 DESC_OK=1
@@ -201,10 +205,7 @@ for soft in \
   '"vendorMethodDecidedBy":"MEASUREMENT"' \
   '"operatorIssuesRealKey":false' \
   '"keyIssuanceAdvancesOnObservedResult":false' \
-  # A softening: it hides that the run reads whether the seller's fields are empty.
   '"vendorFormReadinessObserved":false' \
-  # NOT a softening — it understates the fence rather than the risk. Listed because the verifier is exact-match
-  # and a descriptor that drifts either way is one the operator did not grant against.
   '"keyIssuanceRequiresUnoccludedResult":false' \
   '"keyCreationRuledOut":"false"' \
   '"agentCreatesKeyMaterial":"false"' \
