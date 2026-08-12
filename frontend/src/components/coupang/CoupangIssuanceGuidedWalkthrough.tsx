@@ -143,6 +143,12 @@ export function CoupangIssuanceGuidedWalkthrough({
   const OFFERED_COMMANDS: readonly CommandType[] = isBlocked
     ? ["REQUEST_STEP_RECHECK", "CANCEL_RUN"]
     : ["CANCEL_RUN"];
+  // The walk happens in a window SellerOps opened, and a seller who switches away can lose it behind everything
+  // else — reported live on 2026-08-12, with this screen offering no way back to it. `FIND_CURRENT_STEP` is
+  // already in `allowedCommands` at every non-terminal stage and the runtime treats it as "show me where I am";
+  // on this walk that means RAISING the WING window. It is rendered as its own control rather than through the
+  // generic panel so the label can say what it actually does here.
+  const canRaiseWindow = effectiveRun?.allowedCommands.includes("FIND_CURRENT_STEP") ?? false;
   const controlExclude = effectiveRun
     ? effectiveRun.allowedCommands.filter((c) => !OFFERED_COMMANDS.includes(c))
     : [];
@@ -286,6 +292,22 @@ export function CoupangIssuanceGuidedWalkthrough({
             </section>
           )}
 
+          {/* The way back to the WING window, and it is deliberately the LOUDEST thing on this screen.
+              Reported live twice (2026-08-12): the seller could not find it. It was a ghost-styled line of text
+              at the bottom of a status box, and it was hidden entirely at a blocker — which is precisely when a
+              seller has lost the window and comes here looking. It is now its own control, full width, rendered
+              for every non-terminal run. It raises the EXISTING window; it opens nothing and navigates nothing. */}
+          {effectiveRun.status !== "COMPLETED" && canRaiseWindow && (
+            <button
+              type="button"
+              className="btn-ghost block w-full"
+              onClick={() => effectiveCommand?.("FIND_CURRENT_STEP")}
+              disabled={busy}
+            >
+              쿠팡 윙 창 앞으로 가져오기
+            </button>
+          )}
+
           {/* Recovery is the FE's job: at a recoverable blocker, surface the blocker + the recovery control
               ("다시 확인" / 취소). REQUEST_STEP_RECHECK re-probes/re-guides; it never completes a step. */}
           {effectiveRun.blocker && (
@@ -317,6 +339,20 @@ export function CoupangIssuanceGuidedWalkthrough({
               >
                 SellerOps로 돌아가 연결 정보 입력하기
               </button>
+              {/* The keys are on a WING window SellerOps opened, and WING shows the secret key ONCE — so the
+                  end of the walk is the WORST moment to lose that window behind the others. The label says
+                  what it is for here rather than naming a step, because there is no step left to find. It
+                  raises the EXISTING window and can open nothing: the runtime refuses unless one is open. */}
+              {canRaiseWindow && (
+                <button
+                  type="button"
+                  className="btn-ghost block w-full"
+                  onClick={() => effectiveCommand?.("FIND_CURRENT_STEP")}
+                  disabled={busy}
+                >
+                  쿠팡 윙 키 화면 다시 보기
+                </button>
+              )}
             </div>
           )}
         </>

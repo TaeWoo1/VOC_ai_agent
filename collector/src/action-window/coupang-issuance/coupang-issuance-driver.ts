@@ -191,6 +191,18 @@ export interface CoupangIssuanceProbeDriver {
    */
   highlightTarget(target: CoupangIssuanceTarget): Promise<LocateResult>;
 
+  /**
+   * Optional: RAISE the window this walk already lives in, so the seller can find it again.
+   *
+   * The walk's own window is one SellerOps opened and the seller then loses behind their other windows —
+   * reported live on 2026-08-12. This is the whole capability: bring an EXISTING surface to the front.
+   *
+   * It never opens a window (a run with none answers `false`), never navigates, and never touches a control.
+   * Returns whether the raise actually happened, because a claim that a window was raised should be a
+   * measurement rather than an intention.
+   */
+  focusSurface?(): Promise<boolean>;
+
   /** Take the annotation off whatever is currently highlighted. Safe to call on a half-built run. */
   clearHighlight(): Promise<void>;
 

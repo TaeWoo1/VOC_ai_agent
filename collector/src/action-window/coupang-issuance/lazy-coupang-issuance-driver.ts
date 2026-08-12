@@ -31,6 +31,23 @@ export interface LazyCoupangIssuanceDriverDeps {
    * path the seller reaches WING themselves, which is the boundary the whole phase rests on.
    */
   open(): Promise<{ context: BrowserContext; page: Page }>;
+  /**
+   * The walk's LAST step, made real: open the SellerOps connect screen in the seller's OWN default browser,
+   * where their session is. Never in THIS window — it is a dedicated profile that has never been signed in, so
+   * opening the connect screen here delivers a login page, which is what happened on 2026-08-12.
+   *
+   * Passed straight through to {@link CoupangWingIssuanceDriver}, which calls it only when the seller presses
+   * `SellerOps로 돌아가기` — see that option's own doc for why the navigation lives out here and not in the
+   * driver. Absent ⇒ the step is what it was: a completion with no move, logged as such.
+   */
+  returnToSellerOps?: () => Promise<void>;
+  /**
+   * Raise the walk's EXISTING window. Called only when the seller asks ("현재 단계 다시 찾기"), and only when a
+   * window is already open — {@link LazyCoupangIssuanceDriver.focusSurface} refuses to open one, because a
+   * lazy driver whose "show me where I am" opened a marketplace window would be the side effect this class
+   * exists to prevent.
+   */
+  raiseSurface?: () => Promise<boolean>;
 }
 
 export class LazyCoupangIssuanceDriver implements CoupangIssuanceProbeDriver {
@@ -60,7 +77,10 @@ export class LazyCoupangIssuanceDriver implements CoupangIssuanceProbeDriver {
     if (this.opened) return this.opened;
     if (!this.opening) {
       this.opening = this.deps.open().then(({ context, page }) => {
-        const d = new CoupangWingIssuanceDriver(page, { context });
+        const d = new CoupangWingIssuanceDriver(page, {
+          context,
+          ...(this.deps.returnToSellerOps ? { returnToSellerOps: this.deps.returnToSellerOps } : {}),
+        });
         this.opened = d;
         this.context = context;
         return d;
@@ -86,6 +106,16 @@ export class LazyCoupangIssuanceDriver implements CoupangIssuanceProbeDriver {
   async settleSurface(): Promise<void> {
     const d = await this.driver();
     await d.settleSurface?.();
+  }
+
+  /**
+   * Raise the window if — and ONLY if — one is already open. `isOpen()` rather than `driver()`: going through
+   * the lazy accessor would LAUNCH Chrome, so "show me where I am" would open a marketplace window for a seller
+   * who has not started the walk. That is precisely the side effect this class exists to prevent.
+   */
+  async focusSurface(): Promise<boolean> {
+    if (!this.isOpen() || !this.deps.raiseSurface) return false;
+    return this.deps.raiseSurface();
   }
 
   async locateTarget(target: CoupangIssuanceTarget): Promise<LocateResult> {

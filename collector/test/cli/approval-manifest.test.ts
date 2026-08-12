@@ -1351,9 +1351,16 @@ describe("the guided walk's installed-service entrypoint", () => {
     const SPEC = PHASE_SPECS.COUPANG_WING_GUIDED_ISSUANCE_WALK;
     const BOUNDARY = SPEC.guidedWalkBoundary!;
 
-    it("declares the ONE navigation the boundary descriptor claims", () => {
+    it("declares the ONE navigation of its own window, and the return as a separate act", () => {
+      // It read 2 for a day, when the return opened a second tab in the walk's own window. That returned nobody
+      // — the window is a dedicated profile with no SellerOps session, so the seller got a login screen — so the
+      // return moved OUT of this browser and into the seller's default one. The walk's window is navigated once.
       expect(BOUNDARY.agentNavigations).toBe(1);
       expect(SPEC.capableActions).toContain("NAVIGATE_TO_SELLER_LANDING_ONCE");
+      // The return still happens, and still needs its own declared capability — starting a process on the
+      // seller's machine is not covered by "navigates once at open".
+      expect(BOUNDARY.opensLocalSellerOpsInDefaultBrowser).toBe(true);
+      expect(SPEC.capableActions).toContain("RETURN_TO_SELLEROPS_ON_SELLER_REQUEST");
     });
 
     it("declares the consent-state read the boundary descriptor claims", () => {
@@ -1365,6 +1372,11 @@ describe("the guided walk's installed-service entrypoint", () => {
       // The general form, so the next widening cannot be shipped as prose either. If a descriptor says the run
       // navigates or reads consent, the validated list must say so too.
       if (BOUNDARY.agentNavigations > 0) expect(SPEC.capableActions).toContain("NAVIGATE_TO_SELLER_LANDING_ONCE");
+      // Opening a URL somewhere this agent does not drive is its own capability, not a bigger number beside the
+      // first one. It was briefly counted as a second navigation, which said the walk's own window moves twice.
+      if (BOUNDARY.opensLocalSellerOpsInDefaultBrowser) {
+        expect(SPEC.capableActions).toContain("RETURN_TO_SELLEROPS_ON_SELLER_REQUEST");
+      }
       if (BOUNDARY.sellerConsentObserved) expect(SPEC.capableActions).toContain("OBSERVE_CONSENT_COMPLETE_AGGREGATE");
     });
 
@@ -1372,6 +1384,7 @@ describe("the guided walk's installed-service entrypoint", () => {
       for (const [phase, spec] of Object.entries(PHASE_SPECS)) {
         if (phase === "COUPANG_WING_GUIDED_ISSUANCE_WALK") continue;
         expect(spec.capableActions, phase).not.toContain("NAVIGATE_TO_SELLER_LANDING_ONCE");
+        expect(spec.capableActions, phase).not.toContain("RETURN_TO_SELLEROPS_ON_SELLER_REQUEST");
         expect(spec.capableActions, phase).not.toContain("OBSERVE_CONSENT_COMPLETE_AGGREGATE");
       }
     });

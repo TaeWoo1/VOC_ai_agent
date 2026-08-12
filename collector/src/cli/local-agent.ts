@@ -24,6 +24,7 @@
  * value is a sanitized enum / boolean / count.
  */
 
+import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -48,6 +49,8 @@ import { CoupangIssuanceFixtureDriver } from "../action-window/coupang-issuance/
 import { LazyCoupangIssuanceDriver } from "../action-window/coupang-issuance/lazy-coupang-issuance-driver";
 import { verifyRepoIdentity } from "./repo-identity";
 import { screenWingUrl } from "./coupang-wing-classifier";
+import { screenSellerOpsReturnUrl } from "./sellerops-return-url";
+import { planOsOpen } from "./os-open-url";
 import { NaverLiveProbeDriver } from "../action-window/naver-live-driver";
 import { createNaverActionWindowImportDriver } from "../action-window/naver-acquisition-adapter";
 import { defaultImportRunDirFor } from "../action-window/initial-import/import-dispatch";
@@ -359,7 +362,11 @@ export function buildCoupangIssuanceLiveConfig(): CoupangIssuanceLiveCarrier {
   const driver = new LazyCoupangIssuanceDriver({
     open: async () => {
       if (!walkContext) {
-        const launched = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
+        // `followWindow`: the walk's page must be laid out against the window the SELLER has. Without it
+        // Playwright pins every page to 1280×720 at DPR 1 — measured on 2026-08-12 as 140×130 CSS px SMALLER
+        // than the window it is displayed in, which is the live-observed crop that put WING's own `확인` out of
+        // reach twice. See `buildLaunchOptions`.
+        const launched = await launchNaverContext(cfg.profileDir, cfg.browserChannel, { followWindow: true });
         // A context that genuinely died must be re-launched rather than reused, or every later open would work
         // off a handle whose every call throws.
         launched.once("close", () => {
@@ -411,6 +418,68 @@ export function buildCoupangIssuanceLiveConfig(): CoupangIssuanceLiveCarrier {
       });
       return { context, page };
     },
+    /**
+     * **`SellerOps로 돌아가기`, actually returning.**
+     *
+     * Live-observed 2026-08-12: the seller pressed it and nothing happened. The button recorded a step
+     * completion while its label promised a move, and the SellerOps tab was in a different window the walk has
+     * no way to reach.
+     *
+     * It first opened a new tab in the WALK's own window, which navigated for real and still did not return
+     * anyone: that window is a dedicated persistent profile that has never held a SellerOps session, so on
+     * 2026-08-12 the seller pressed 돌아가기 and got a LOGIN screen. A return that lands somewhere the seller has
+     * to log in again is not a return, and no amount of raising the right window fixes which browser it is in.
+     *
+     * So it hands the URL to the **OS default browser** — the one SellerOps is already open and signed in to.
+     * Three properties, each a choice:
+     *   - the WING window is NOT TOUCHED. It is not navigated, no tab is added, nothing is raised over the keys.
+     *     The secret key is shown once and the seller may still be pasting it; the walk's window stays exactly
+     *     as they left it, which also means the walk still navigates it exactly once, at the landing;
+     *   - the destination is SCREENED to a loopback SellerOps origin, origin-only, fail-closed, and screened a
+     *     second time by `planOsOpen` before an argv is built. This is triggered by a button on a marketplace
+     *     page and it starts a process, so it gets more screening than the WING landing, not less;
+     *   - it is a LOCAL hand-off, not a marketplace navigation. Nothing marketplace-facing happens, in this
+     *     window or any other.
+     */
+    /**
+     * **"현재 단계 다시 찾기" — put the window the walk lives in back in front.**
+     *
+     * Reported live on 2026-08-12: the WING window SellerOps opened gets lost behind everything else, and the
+     * connect screen offered no way back to it. This raises the EXISTING surface and does nothing else — no
+     * navigation, no new tab, no window opened. The newest page in the context is the one the walk is reading
+     * (`activePage()` uses the same rule), so it is the one raised.
+     */
+    raiseSurface: async () => {
+      const pages = walkContext?.pages() ?? [];
+      const page = pages.length > 0 ? pages[pages.length - 1] : undefined;
+      if (!page) {
+        log("aw_coupang_surface_raise", { raised: false, reason: "NO_PAGE" });
+        return false;
+      }
+      await page.bringToFront().catch(() => undefined);
+      const raised = await raiseWindowOf(page);
+      log("aw_coupang_surface_raise", { raised });
+      return raised;
+    },
+    returnToSellerOps: async () => {
+      const screened = screenSellerOpsReturnUrl(loadConfig().appUrl);
+      if (!screened.ok) {
+        // Nothing opens. A refused destination leaves the seller on WING with their keys, which is a worse
+        // ending than a working button and a much better one than a browser sent somewhere unvouched for.
+        log("aw_coupang_return_refused", { reason: screened.reason }, "warn");
+        return;
+      }
+      const plan = planOsOpen(screened.url, process.platform);
+      if (!plan.ok) {
+        log("aw_coupang_return_refused", { reason: plan.reason }, "warn");
+        return;
+      }
+      const opened = await openInDefaultBrowser(plan.command, plan.args);
+      // A measurement, not an intention: `opened` is the launcher's own exit status. It says the OS accepted the
+      // URL, which is as far as this side can see — whether the browser then showed a connect screen or a login
+      // screen depends on the seller's session, and reading that would mean reading their browser.
+      log("aw_coupang_returned_to_sellerops", { opened, surface: "DEFAULT_BROWSER" });
+    },
   });
   return {
     config: {
@@ -452,6 +521,42 @@ export function buildReplySubmissionConfig(): AgentReplySubmissionConfig {
     persistDir: defaultReplyRunDirFor(collectorRoot),
   };
 }
+
+/**
+ * Run a {@link planOsOpen} plan — the ONLY place this agent starts an OS process for a URL.
+ *
+ * `shell: false` (the default, restated by passing an argv array and never a command string) is the property
+ * that matters: the plan's last argument is a screened loopback URL, and it reaches the launcher as one argument
+ * rather than as text something else re-parses.
+ *
+ * `detached` + `unref`, so the launcher is not tied to the agent's lifetime — the seller's browser must not close
+ * because a background service restarted. Bounded, because a launcher that never exits must not hold the walk's
+ * last step open; the timeout resolves `false` rather than throwing, since by this point the keys exist and the
+ * walk is done. Returns whether the launcher exited cleanly — a measurement, not an intention.
+ */
+async function openInDefaultBrowser(command: string, args: readonly string[]): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (ok: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(ok);
+    };
+    const timer = setTimeout(() => finish(false), OS_OPEN_TIMEOUT_MS);
+    try {
+      const child = spawn(command, [...args], { detached: true, stdio: "ignore" });
+      child.on("error", () => finish(false));
+      child.on("exit", (code) => finish(code === 0));
+      child.unref();
+    } catch {
+      finish(false);
+    }
+  });
+}
+
+/** How long the OS launcher gets to exit before the return reports itself unproven. */
+const OS_OPEN_TIMEOUT_MS = 10_000;
 
 /**
  * Raise the OS window a page lives in — best effort, never fatal.

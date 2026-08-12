@@ -362,7 +362,17 @@ export function coupangIssuanceStageToStepStatus(stage: CoupangIssuanceStage): S
  * is a dead end.
  */
 export function coupangIssuanceAllowedCommands(stage: CoupangIssuanceStage): readonly CommandType[] {
-  if (isCoupangIssuanceTerminal(stage)) return [];
+  // TERMINAL keeps exactly one command, and only this one: `FIND_CURRENT_STEP` — "show me where I am".
+  //
+  // It was the empty list, which is right about every command that DOES something and wrong about this one. The
+  // walk ends with the seller's Access Key on a WING window SellerOps opened; losing that window behind the
+  // others is the same problem at the end as in the middle, and it is worse there, because the keys are shown
+  // once. A completed run that cannot bring its own window back tells the seller to go and find it themselves.
+  //
+  // Safe by construction rather than by intent: the command performs no step, completes nothing, and cannot
+  // open anything — `LazyCoupangIssuanceDriver.focusSurface` refuses unless a window is ALREADY open, so a run
+  // whose window the seller closed answers `false` instead of launching a marketplace window at the end of it.
+  if (isCoupangIssuanceTerminal(stage)) return ["FIND_CURRENT_STEP"];
   if (isCoupangIssuancePark(stage) || isCoupangIssuanceObservedWait(stage)) {
     return ["REQUEST_STEP_RECHECK", "CANCEL_RUN", "SWITCH_TO_MANUAL", "SET_GUIDANCE_ENABLED", "FIND_CURRENT_STEP"];
   }

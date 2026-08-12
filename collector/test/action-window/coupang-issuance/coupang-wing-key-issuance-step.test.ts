@@ -102,7 +102,10 @@ describe("the key-issuing step advances on the RESULT, never on the press", () =
   it("is the ONLY step keyed on a page category, and the map is a separate one", () => {
     const map = DRIVER_SRC.slice(
       DRIVER_SRC.indexOf("const CHECKPOINT_ADVANCES_TO_CATEGORY"),
-      DRIVER_SRC.indexOf("/** How often the screen observation runs"),
+      // Ends at the map that FOLLOWS it. Anchored on that map's own heading rather than on "whatever comes
+      // next", which is how this slice silently grew to cover `TARGET_HOME_SCREEN` when it was added between
+      // the two — and then failed claiming the category map had five entries.
+      DRIVER_SRC.indexOf("/**\n * **The screen each step LIVES ON"),
     );
     expect(map).toContain('vendor_confirm: "credential_shown"');
     // Nothing else. A second entry here would be a step advancing on a page category rather than on the flow

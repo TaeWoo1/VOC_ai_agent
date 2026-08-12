@@ -179,12 +179,47 @@ export const APPROVAL_ACTIONS = [
   // nothing. Deliberately narrow: it is a LANDING, not a route — a phase that drives the seller through screens
   // is a different capability and would need its own member.
   "NAVIGATE_TO_SELLER_LANDING_ONCE",
+  // The walk's LAST step: when the seller presses `SellerOps로 돌아가기`, the agent asks the OPERATING SYSTEM to
+  // open the local SellerOps connect screen in the seller's OWN DEFAULT BROWSER. The destination is screened to
+  // a LOOPBACK SellerOps origin, origin-only, twice (once by the screening, once by the argv planner), and fails
+  // closed on anything else.
+  //
+  // **No window this agent controls is navigated.** It opened a new tab in the walk's own window until
+  // 2026-08-12, which navigated for real and returned nobody: that window is a dedicated profile with no
+  // SellerOps session, so the seller landed on a login screen. The WING window is now not touched at all — the
+  // keys stay exactly where the seller left them, and the walk still navigates it exactly once, at the landing.
+  //
+  // It is here rather than folded into the landing member because it is a different act with a different risk:
+  // the landing is the agent choosing where the walk starts, this is the agent STARTING A PROCESS on the
+  // seller's machine in response to a press. Narrower than it sounds and stated as narrowly as it is: the only
+  // thing that can be opened is a loopback SellerOps route, so it cannot reach a marketplace surface.
+  "RETURN_TO_SELLEROPS_ON_SELLER_REQUEST",
   // Read whether the seller has finished consenting: ONE aggregate boolean, computed page-side as the
   // conjunction of the two consent boxes. Which box is ticked never crosses the boundary, nothing is stored,
   // transmitted or logged, and SellerOps still never ticks a box or reads the terms. It is nonetheless a
   // `checked` read, and three census members in this same enum explicitly promise they do NOT read `checked` —
   // so a run that does has to say so HERE, not only in `sellerConsentObserved`.
   "OBSERVE_CONSENT_COMPLETE_AGGREGATE",
+  // Read whether the seller has FILLED IN the vendor form: for each of 업체명 / URL, how many of the field's own
+  // text inputs hold a non-empty trimmed value, computed page-side and returned as a COUNT; for `IP 주소`, how
+  // many registered entries the field holds, because 추가 is a press whose result is a row rather than typed
+  // text. **What was typed never crosses the boundary** — only its emptiness — and nothing is stored,
+  // transmitted or logged beyond a per-field boolean.
+  //
+  // It is here for the same reason `OBSERVE_CONSENT_COMPLETE_AGGREGATE` is: this enum's other census members
+  // promise they read no value at all, and a run that reads one — however narrowly — has to say so in the list
+  // the approval gate validates, not only in prose. It is NEVER taken on a credential field: the request that
+  // measures the credential region deliberately omits the flag, and a test pins that.
+  "OBSERVE_FIELD_NONEMPTY_AGGREGATE",
+  // Read-only LABEL-REGION census: for a fixed label that resolves uniquely, the tag names of its ancestors, how
+  // it is associated with a region (`label[for]`, `dt`→`dd`, `th`→`td`, or a wrapping label), and how many
+  // inputs / buttons / entry rows that region holds. Tag names and integers only — no text, no attribute value,
+  // no selector. It is what tells the step-⑧ ring that `Access Key` is a table HEADER rather than the result.
+  "MEASURE_LABEL_REGION_STRUCTURE",
+  // Read-only OCCLUSION hit test: at a located marker's own coordinates, is the marker what the page would hand
+  // back, or is something painted over it. A boolean per sample point and nothing else — never the tag, text, or
+  // identity of whatever is on top. It is what stops step ⑦ completing behind WING's own `발급 완료` dialog.
+  "MEASURE_MARKER_OCCLUSION",
 ] as const;
 export type ApprovalAction = (typeof APPROVAL_ACTIONS)[number];
 
@@ -337,8 +372,28 @@ export interface GuidedWalkBoundary {
   keyCreationRuledOut: false;
   /** The agent clicks, types, submits — and NAVIGATES — nothing. The last one is new to this entrypoint. */
   agentPerformsAction: false;
-  /** ONE: the landing the window opens on. The walk never navigates again — every screen after it is the seller's. */
+  /**
+   * ONE: the LANDING the window opens on — the seller's own WING home, once, at open. Every screen of the flow
+   * after it is one the seller reaches themselves.
+   *
+   * It read 2 for a day, when the return opened a second tab in this same window. That navigation is gone — not
+   * because the return was dropped, but because it now happens somewhere this agent does not drive (see
+   * {@link opensLocalSellerOpsInDefaultBrowser}). This field counts navigations of the walk's own window, and
+   * the honest count of those is one.
+   */
   agentNavigations: 1;
+  /**
+   * **TRUE — the last step opens a local SellerOps URL in the seller's OWN default browser.**
+   *
+   * Its own field rather than a second navigation, because it is a different act against a different surface:
+   * nothing the agent controls moves, and instead the OS is asked to open one screened loopback route in a
+   * browser the agent has no handle on. Folding it into {@link agentNavigations} would say the walk's window
+   * moves twice, which is false; leaving it out entirely would hide that the run starts a process at all.
+   *
+   * Bounded by construction: the URL is screened to a loopback SellerOps origin twice, and a marketplace host
+   * cannot survive either screening.
+   */
+  opensLocalSellerOpsInDefaultBrowser: true;
   credentialValueReadBudget: 0;
   /** No connect-test, no sync, no upload: guidance finishing is not a connection. */
   performsConnectOrSync: false;
@@ -408,6 +463,45 @@ export interface GuidedWalkBoundary {
    */
   sellerConsentObserved: true;
   /**
+   * **TRUE — before handing over to the ring on the key-issuing `확인`, the run checks the vendor form is filled.**
+   *
+   * It reads whether 업체명 / URL hold anything and whether an IP has been REGISTERED — never what any of them
+   * says. A press over an empty form is refused ONCE, with a panel message; the next press goes through
+   * whatever the reading says, because manual progress always remains available and this association has never
+   * been calibrated on a live screen.
+   *
+   * Declared because it is a value read, however narrow, and because it CHANGES WHAT A PRESS DOES: an operator
+   * granting against this manifest should not discover mid-walk that a button they pressed did nothing.
+   */
+  vendorFormReadinessObserved: true;
+  /**
+   * **TRUE — the key-issuing step will not complete while something is painted over the credentials.**
+   *
+   * A hit test at the marker's own coordinates, added after 2026-08-12, when the step advanced the instant the
+   * credential label painted — behind WING's own `발급 완료` dialog. The seller was told to copy keys they could
+   * not see and step ⑧ ringed a row behind a modal.
+   *
+   * It only ever DELAYS an advance; the seller's own WING-resident button is unchanged and still the way
+   * through, so a page that cannot be hit-tested costs a poll rather than the walk.
+   */
+  keyIssuanceRequiresUnoccludedResult: true;
+  /**
+   * **TRUE — guidance is only ever re-drawn on the screen the step is actually about.**
+   *
+   * WING can replace the document mid-step (it bounced the walk to its password-confirm page on 2026-08-12),
+   * and the recovery that re-draws the guidance used to re-resolve the step's fixed label against whatever page
+   * had arrived. It found the password form's `확인`, ringed it, and kept the key-issuance warning attached.
+   *
+   * The re-anchor now establishes the sanitized page category and — where the screen's markers are measured —
+   * the flow screen, BEFORE it points at anything. On anything else it takes the guidance down and waits with
+   * no ring, re-anchors by itself when the seller's own screen returns, and parks with a recoverable blocker
+   * after a bounded wait rather than polling a page it cannot guide.
+   *
+   * Declared because an operator reading "SellerOps highlights the control" is entitled to know what stops that
+   * sentence from applying to a control on a completely different screen.
+   */
+  reanchorRequiresOwnScreen: true;
+  /**
    * The input method the walk names, and WHO decided it. A product decision taken with the measurement in front
    * of the owner and separated from it — the screen offers two options and both resolve identically well.
    */
@@ -424,6 +518,7 @@ export const COUPANG_WING_GUIDED_WALK_BOUNDARY: GuidedWalkBoundary = {
   keyCreationRuledOut: false,
   agentPerformsAction: false,
   agentNavigations: 1,
+  opensLocalSellerOpsInDefaultBrowser: true,
   credentialValueReadBudget: 0,
   performsConnectOrSync: false,
   highlightedControlCount: 9,
@@ -433,6 +528,9 @@ export const COUPANG_WING_GUIDED_WALK_BOUNDARY: GuidedWalkBoundary = {
   keyCreationPressAutoPerformed: false,
   keyIssuanceAdvancesOnObservedResult: true,
   sellerConsentObserved: true,
+  vendorFormReadinessObserved: true,
+  keyIssuanceRequiresUnoccludedResult: true,
+  reanchorRequiresOwnScreen: true,
   vendorMethodGuided: "자체개발(직접입력)",
   vendorMethodDecidedBy: "PRODUCT_OWNER",
 };
@@ -646,6 +744,11 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
       "CLASSIFY_SANITIZED_PAGE_CATEGORY",
       "STRUCTURAL_CENSUS",
       "PROBE_TARGET_MATCHCOUNT",
+      // Score the credential anchor's ancestors by what they enclose — a tag name and two counts of matched
+      // fixed labels per level. Declared because it reads STRUCTURE the other two do not: `STRUCTURAL_CENSUS`
+      // is a census of the page, `PROBE_TARGET_MATCHCOUNT` is one label's count, and this is the containment
+      // relation between them. It reads no value, which on the issued screen is the property that matters.
+      "MEASURE_LABEL_REGION_STRUCTURE",
     ],
     allowsHighlight: false,
     mode: "READ_ONLY",
@@ -664,6 +767,10 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
       "CLASSIFY_SANITIZED_PAGE_CATEGORY",
       "STRUCTURAL_CENSUS",
       "PROBE_TARGET_MATCHCOUNT",
+      // Kept EXACTLY equal to the selector probe's list, and a test pins that: recon runs the same CLI down the
+      // same branch, so it takes the same credential-region reading. A capability the two do not share would
+      // mean one of them describes a run it does not perform.
+      "MEASURE_LABEL_REGION_STRUCTURE",
     ],
     allowsHighlight: false,
     mode: "READ_ONLY",
@@ -796,7 +903,11 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
       "HIGHLIGHT_REAL_CONTROL",
       "OBSERVE_USER_CLICK_TRANSITION",
       "NAVIGATE_TO_SELLER_LANDING_ONCE",
+      "RETURN_TO_SELLEROPS_ON_SELLER_REQUEST",
       "OBSERVE_CONSENT_COMPLETE_AGGREGATE",
+      "OBSERVE_FIELD_NONEMPTY_AGGREGATE",
+      "MEASURE_LABEL_REGION_STRUCTURE",
+      "MEASURE_MARKER_OCCLUSION",
     ],
     allowsHighlight: true,
     mode: "READ_ONLY",

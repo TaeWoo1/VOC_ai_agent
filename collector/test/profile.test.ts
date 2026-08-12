@@ -158,3 +158,42 @@ describe("buildLaunchOptions", () => {
     expect(opts.acceptDownloads).toBe(true);
   });
 });
+
+/**
+ * The guided walk's crop, pinned as a policy. Measured on 2026-08-12 (`measure-walk-window-geometry.ts`, real
+ * Chrome): without this the page is laid out at 1280×720 inside a 1420×850 window, and the seller is told their
+ * display is 1280×720 at DPR 1 when it is 1440×870 at DPR 2.
+ */
+describe("buildLaunchOptions — followWindow (the guided-walk window policy)", () => {
+  it("is OFF by default, so no other launcher moves", () => {
+    expect("viewport" in buildLaunchOptions("chrome")).toBe(false);
+    expect("args" in buildLaunchOptions("chrome")).toBe(false);
+    expect("viewport" in buildLaunchOptions("chrome", {})).toBe(false);
+    expect("viewport" in buildLaunchOptions("chrome", { followWindow: false })).toBe(false);
+  });
+
+  it("turns the device-metrics override OFF (viewport: null) — the page follows the window", () => {
+    expect(buildLaunchOptions("chrome", { followWindow: true }).viewport).toBeNull();
+  });
+
+  it("ALSO opens the window at the desktop's size — the two are one policy, not two", () => {
+    // `viewport: null` alone leaves Playwright's default 1280×720 WINDOW, whose page area is SHORTER than the
+    // 720px viewport it replaces. Splitting these would trade a crop for a smaller page.
+    expect(buildLaunchOptions("chrome", { followWindow: true }).args).toEqual(["--start-maximized"]);
+  });
+
+  it("changes nothing else — same channel, same sandbox, still headed and download-accepting", () => {
+    expect(buildLaunchOptions("chrome", { followWindow: true })).toEqual({
+      headless: false,
+      acceptDownloads: true,
+      chromiumSandbox: true,
+      channel: "chrome",
+      viewport: null,
+      args: ["--start-maximized"],
+    });
+  });
+
+  it("keeps the blank-channel rule under the new policy (bundled Chromium)", () => {
+    expect("channel" in buildLaunchOptions("  ", { followWindow: true })).toBe(false);
+  });
+});

@@ -40,6 +40,27 @@ export interface OverlayOptions {
    * (`label`, then `copyKey`), so no other caller moves.
    */
   badgeLabel?: string;
+  /**
+   * The REST of the step's copy, behind a `자세히` disclosure — everything the seller may need to read but does
+   * not need in front of them while their hands are on the marketplace.
+   *
+   * The panel started as one paragraph and grew: by the key-creation step it carried five sentences of safety
+   * copy across four lines, docked over a WING dialog that had its own crop problem. A panel that large stops
+   * being read and starts being an obstacle, which is the opposite of what a guidance panel is for. So the
+   * panel now shows a SHORT instruction ({@link label}) with the complete copy one press away.
+   *
+   * Absent ⇒ the panel is exactly what it was: `label` alone. The disclosure is only offered on a panel that
+   * ALREADY takes pointer events (one with an {@link advance} button) — adding a button to a copy-only panel
+   * would make it interactive and give it a new way to sit on a control the seller must reach.
+   */
+  detail?: string;
+  /**
+   * Start with {@link detail} OPEN. For a step whose copy carries a safety claim — the one control in this walk
+   * that brings a real credential into existence — the seller must not have to press anything to see the
+   * warning. Lightening a panel is worth doing; hiding a warning to do it is not, and the honest consequence is
+   * that the walk's two safety-bearing steps stay as long as they are.
+   */
+  detailExpanded?: boolean;
   guidanceEnabled: boolean;
   /**
    * Explicit opt-in for the WING-RESIDENT guidance panel. When `true`, mountOverlay draws a
@@ -372,30 +393,79 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
         // where the panel saying "press 확인 yourself" sat on top of 확인. The ring is `pointer-events:none` and
         // could only ever hide the control; the panel takes clicks when it carries a button, so an overlap there
         // is a walk that blocks the seller's own manual progress. That is a safety-fence violation, not cosmetics.
+        //
+        // SIX candidate placements, not two. The first version chose between bottom-centre and top-centre, and
+        // when a control sat at BOTH ends it kept the bottom one — i.e. it settled, deliberately, onto a
+        // control. A viewport has corners; a 560px panel and a marketplace dialog rarely need the same ones.
         const panel = document.getElementById("__aw_advance_panel__");
         if (!panel) return;
         const targets = document.querySelectorAll("[data-aw-target]");
         if (targets.length === 0) return;
         const p = panel.getBoundingClientRect();
-        const h = p.height;
-        // Would a panel whose top edge sits at `top` cover any highlighted control? Horizontal extent is read
-        // from the panel's own rect, so a narrow panel beside a control is not treated as covering it.
-        const covers = [
-          (top: number) => {
-            const bottom = top + h;
-            for (let i = 0; i < targets.length; i++) {
-              const r = targets[i]!.getBoundingClientRect();
-              if (r.bottom > top && r.top < bottom && r.right > p.left && r.left < p.right) return true;
+        const pw = p.width;
+        const ph = p.height;
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const margin = 24;
+        // A target OUTSIDE the viewport is projected onto the edge it will arrive from, rather than dropped.
+        // Dropping it is what let the panel park exactly where a below-the-fold control lands the moment the
+        // seller scrolls to it: at that instant the panel is "not covering" anything, and one scroll later it is
+        // covering the only thing that matters. A projected target keeps that edge reserved from the start.
+        // It is projected FLUSH AGAINST that edge, keeping its own height — the position it holds after the
+        // smallest scroll that brings it into view. A one-pixel marker at the very edge would be technically
+        // "inside the viewport" and would clear every candidate, which is the same blindness in a new costume.
+        const spans: number[][] = [];
+        for (let i = 0; i < targets.length; i++) {
+          const r = targets[i]!.getBoundingClientRect();
+          const rh = Math.min(Math.max(r.bottom - r.top, 1), vh);
+          const above = r.bottom <= 0;
+          const below = r.top >= vh;
+          const top = above ? 0 : below ? vh - rh : r.top;
+          const bottom = above ? rh : below ? vh : r.bottom;
+          spans.push([r.left, top, r.right, bottom]);
+        }
+        // How much of the highlighted controls a panel at (x, y) would sit on, in square pixels. Zero means
+        // clear; comparing areas is what lets the least-bad placement win when nothing is clear.
+        const overlapAt = [
+          (x: number, y: number) => {
+            let area = 0;
+            for (let i = 0; i < spans.length; i++) {
+              const s = spans[i]!;
+              const ox = Math.min(x + pw, s[2]!) - Math.max(x, s[0]!);
+              const oy = Math.min(y + ph, s[3]!) - Math.max(y, s[1]!);
+              if (ox > 0 && oy > 0) area += ox * oy;
             }
-            return false;
+            return area;
           },
         ][0]!;
-        // Bottom is the resting place and is only given up for a top dock that is genuinely clear. Deciding it
-        // from the two PROSPECTIVE positions (never from where the panel happens to be) is what stops it
-        // oscillating between the two when a control sits at both ends.
-        const stayBottom = !covers(window.innerHeight - 24 - h) || covers(24);
-        setStyle(panel, "bottom", stayBottom ? "24px" : "auto");
-        setStyle(panel, "top", stayBottom ? "auto" : "24px");
+        // Clamped so an oversized panel (a long step, a narrow window) is never pushed off the top-left, where
+        // the seller could not read it at all.
+        const xs = [Math.max(margin, (vw - pw) / 2), Math.max(margin, vw - pw - margin), margin];
+        const ys = [Math.max(margin, vh - ph - margin), margin];
+        // Order IS the preference: bottom-centre first (where it has always rested), then top-centre, then the
+        // right corners, then the left. The decision reads only the TARGETS and the panel's own size — never the
+        // panel's current position — so re-running it cannot move the panel, and it cannot oscillate.
+        let bestX = xs[0]!;
+        let bestY = ys[0]!;
+        let bestArea = -1;
+        for (let xi = 0; xi < xs.length && bestArea !== 0; xi++) {
+          for (let yi = 0; yi < ys.length; yi++) {
+            const area = overlapAt(xs[xi]!, ys[yi]!);
+            if (bestArea < 0 || area < bestArea) {
+              bestArea = area;
+              bestX = xs[xi]!;
+              bestY = ys[yi]!;
+            }
+            if (bestArea === 0) break;
+          }
+        }
+        setStyle(panel, "left", `${Math.round(bestX)}px`);
+        setStyle(panel, "top", `${Math.round(bestY)}px`);
+        // The mount styles the panel bottom-centred with a translate; an explicit placement has to clear both or
+        // the two compose into a position neither of them meant.
+        setStyle(panel, "right", "auto");
+        setStyle(panel, "bottom", "auto");
+        setStyle(panel, "transform", "none");
       },
     ][0]!;
     // Coalesce a burst of layout changes into ONE reposition on the next frame. The latch lives on `window` so a
@@ -484,11 +554,41 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
       // must press on a short page and block their manual progress. With a button it must stay clickable.
       const panelPointerEvents = o.advance ? "auto" : "none";
       panel.style.cssText =
-        `position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:2147483001;pointer-events:${panelPointerEvents};box-sizing:border-box;max-width:min(560px,92vw);background:#0b1f4d;color:#fff;font:14px system-ui,-apple-system,sans-serif;padding:14px 16px;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,0.38);display:flex;gap:14px;align-items:center`;
+        `position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:2147483001;pointer-events:${panelPointerEvents};box-sizing:border-box;max-width:min(560px,92vw);background:#0b1f4d;color:#fff;font:14px system-ui,-apple-system,sans-serif;padding:14px 16px;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,0.38);display:flex;flex-direction:column;gap:10px`;
+      // The instruction, the disclosure and the advance button share ONE row; the detail (when open) is a second
+      // row under it. That way a collapsed panel is exactly as tall as the old single-line one.
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;gap:14px;align-items:center";
       const text = document.createElement("div");
       text.textContent = o.label != null ? o.label : o.copyKey;
       text.style.cssText = "flex:1 1 auto;line-height:1.45";
-      panel.appendChild(text);
+      row.appendChild(text);
+      // The disclosure is offered only where the panel is ALREADY interactive. On a copy-only panel it would be
+      // the single button on an element that is `pointer-events:none` precisely so it can never block a control.
+      const detailShown = o.detail != null && o.advance != null;
+      const startOpen = o.detailExpanded === true;
+      if (detailShown) {
+        const toggle = document.createElement("button");
+        toggle.setAttribute("type", "button");
+        toggle.setAttribute("data-aw-panel-detail-toggle", "");
+        toggle.textContent = startOpen ? "간단히" : "자세히";
+        toggle.style.cssText =
+          "flex:0 0 auto;background:transparent;color:#cfe0ff;border:1px solid rgba(255,255,255,0.4);border-radius:8px;padding:8px 12px;font:600 13px system-ui,-apple-system,sans-serif;cursor:pointer";
+        toggle.addEventListener("click", function () {
+          const d = document.getElementById("__aw_panel_detail__");
+          const t = document.getElementById("__aw_panel_detail_toggle__");
+          if (!d) return;
+          const opening = d.style.display === "none";
+          d.style.display = opening ? "block" : "none";
+          if (t) t.textContent = opening ? "간단히" : "자세히";
+          // The panel just changed height. Re-place it in the same gesture: a panel that grows downward onto the
+          // control it describes is the defect the placement logic exists to prevent, and waiting for the next
+          // observer tick to notice would show the seller exactly that, briefly.
+          reposition();
+        });
+        toggle.id = "__aw_panel_detail_toggle__";
+        row.appendChild(toggle);
+      }
       if (o.advance) {
         const btn = document.createElement("button");
         btn.setAttribute("type", "button");
@@ -499,8 +599,24 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
         btn.addEventListener("click", function () {
           const w = window as unknown as Record<string, unknown>;
           w["__aw_advance_pressed__"] = w["__aw_advance_token__"];
+          // A COUNT of presses, kept beside the latch and never cleared by a re-arm.
+          //
+          // The latch alone cannot distinguish "the seller never pressed" from "they pressed and something
+          // ate it" — and on 2026-08-12 the walk sat at step 6 through repeated presses with no way to tell
+          // those apart from outside. The count is value-free (an integer), survives the re-arm that clears
+          // the latch, and is what makes "the handler ran" a measurement rather than an inference.
+          const prev = w["__aw_advance_press_count__"];
+          w["__aw_advance_press_count__"] = (typeof prev === "number" ? prev : 0) + 1;
         });
-        panel.appendChild(btn);
+        row.appendChild(btn);
+      }
+      panel.appendChild(row);
+      if (detailShown) {
+        const detail = document.createElement("div");
+        detail.id = "__aw_panel_detail__";
+        detail.textContent = o.detail != null ? o.detail : "";
+        detail.style.cssText = `line-height:1.5;font-size:13px;color:#e6eeff;border-top:1px solid rgba(255,255,255,0.18);padding-top:10px;display:${startOpen ? "block" : "none"}`;
+        panel.appendChild(detail);
       }
       document.body.appendChild(panel);
       // The panel is built AFTER the first `reposition()`, so without this the occlusion check would not run
@@ -641,6 +757,41 @@ export async function resetOverlayAdvance(page: PageOrFrame, token: string): Pro
  */
 export async function readOverlayAdvancePressed(page: PageOrFrame, token: string): Promise<boolean> {
   return page.evaluate((t) => (window as unknown as Record<string, unknown>)["__aw_advance_pressed__"] === t, token);
+}
+
+/**
+ * **Everything the host needs to say WHERE the advance path broke, in one read.** Value-free throughout: a
+ * count, three booleans, no page content.
+ *
+ * Four independent facts, because "the walk did not advance" has four distinct causes and they need different
+ * fixes: the panel is gone (nothing to press), the seller has not pressed (`presses` 0), they pressed but the
+ * latch does not match this step's token (`presses` > 0, `latched` false — a re-arm race or a stale panel from
+ * a previous step), or everything is in order and the reader is not running (`latched` true and the walk still
+ * sitting there). Inferring between those from silence is what cost a live sitting on 2026-08-12.
+ */
+export interface OverlayAdvanceDiagnostics {
+  /** How many times THIS page's advance button has been pressed since the page loaded. Never cleared by a re-arm. */
+  presses: number;
+  /** Is the latch currently set to the token the caller is polling for? */
+  latched: boolean;
+  /** Is a token armed at all? (`false` ⇒ nothing mounted an advance affordance, or it was torn down.) */
+  tokenArmed: boolean;
+  /** Is the guidance panel still on the page? */
+  panelMounted: boolean;
+}
+
+export async function readOverlayAdvanceDiagnostics(page: PageOrFrame, token: string): Promise<OverlayAdvanceDiagnostics> {
+  return page.evaluate((t) => {
+    const w = window as unknown as Record<string, unknown>;
+    const presses = w["__aw_advance_press_count__"];
+    const armed = w["__aw_advance_token__"];
+    return {
+      presses: typeof presses === "number" ? presses : 0,
+      latched: w["__aw_advance_pressed__"] === t,
+      tokenArmed: typeof armed === "string" && armed.length > 0,
+      panelMounted: !!document.getElementById("__aw_advance_panel__"),
+    };
+  }, token);
 }
 
 /** Test/QA helper: is the WING-resident advance panel currently mounted? (sanitized boolean) */

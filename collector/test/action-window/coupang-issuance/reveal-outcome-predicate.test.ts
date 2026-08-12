@@ -252,10 +252,21 @@ describe("the fail-closed ordering survives the repair", () => {
       resolve(dirname(fileURLToPath(import.meta.url)), "../../../src/action-window/overlay.ts"),
       "utf8",
     );
-    // overlay.ts creates its button ONLY under `advance` …
-    const btnAt = overlaySrc.indexOf('document.createElement("button")');
-    expect(btnAt).toBeGreaterThan(-1);
-    expect(overlaySrc.slice(0, btnAt)).toMatch(/if \(o\.advance\)\s*\{[^}]*$/);
+    // overlay.ts creates EVERY button it has under a gate that requires `advance` — there are two now (the
+    // panel's `자세히` disclosure and the advance button itself), and the invariant is about all of them, not
+    // about whichever one happens to come first in the file.
+    const buttonSites: number[] = [];
+    for (let at = overlaySrc.indexOf('document.createElement("button")'); at > -1; ) {
+      buttonSites.push(at);
+      at = overlaySrc.indexOf('document.createElement("button")', at + 1);
+    }
+    expect(buttonSites.length).toBeGreaterThan(0);
+    // `detailShown` is the disclosure's gate; it is DEFINED as requiring an advance button, so a panel without
+    // one stays exactly as non-interactive as it was.
+    expect(overlaySrc).toContain("const detailShown = o.detail != null && o.advance != null;");
+    for (const at of buttonSites) {
+      expect(overlaySrc.slice(0, at)).toMatch(/if \((o\.advance|detailShown)\)\s*\{[^}]*$/);
+    }
     // … and this driver never passes one. Adding `advance` here would put a clickable SellerOps control in front
     // of a seller mid-action on a live marketplace page, AND make actionControlCount count our own DOM.
     const mountArgs = drvSrc.slice(drvSrc.indexOf("mountOverlayFn ?? mountOverlay)(page, {"));

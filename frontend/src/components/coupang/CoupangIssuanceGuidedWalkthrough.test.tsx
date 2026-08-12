@@ -127,6 +127,96 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
     expect(screen.queryByRole("button", { name: "확인 완료" })).toBeNull();
   });
 
+  /**
+   * The walk happens in a window SellerOps opened, and a seller who switches away can lose it behind everything
+   * else — reported live on 2026-08-12, with this screen offering no way back to it. The runtime raises the
+   * EXISTING window on `FIND_CURRENT_STEP`; it opens nothing and navigates nothing.
+   */
+  it("**offers a way back to the WING window**, and sends FIND_CURRENT_STEP for it", async () => {
+    const onCommand = vi.fn();
+    render(
+      <CoupangIssuanceGuidedWalkthrough
+        onIssued={vi.fn()}
+        run={issuanceRun({ allowedCommands: ["REQUEST_STEP_RECHECK", "CANCEL_RUN", "FIND_CURRENT_STEP"] })}
+        onCommand={onCommand}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "쿠팡 윙 창 앞으로 가져오기" }));
+    expect(onCommand).toHaveBeenCalledWith("FIND_CURRENT_STEP");
+  });
+
+  it("…and offers it ONLY when the run allows it — controls come from allowedCommands, never from a hunch", () => {
+    render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} run={issuanceRun()} onCommand={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "쿠팡 윙 창 앞으로 가져오기" })).toBeNull();
+  });
+
+  /**
+   * **Where it renders, not merely that it renders.** It shipped inside the healthy-status box as a ghost-styled
+   * `text-sm` line, so it was hidden at a blocker and easy to miss otherwise — and on two live walks the seller
+   * reported they could not find the window from this screen. These pin the placement, which is the part that
+   * failed; a control nobody can find is not offered.
+   */
+  it("**offers the way back at a BLOCKER too** — that is exactly when the window has been lost", () => {
+    render(
+      <CoupangIssuanceGuidedWalkthrough
+        onIssued={vi.fn()}
+        run={{ ...blocked("LOGIN_REQUIRED"), allowedCommands: ["REQUEST_STEP_RECHECK", "CANCEL_RUN", "FIND_CURRENT_STEP"] }}
+        onCommand={vi.fn()}
+      />,
+    );
+    // The healthy status box is gone at a blocker, and the control used to live inside it.
+    expect(screen.queryByText("쿠팡(윙) 창에서 화면 안내를 따라 진행하세요")).toBeNull();
+    expect(screen.getByRole("button", { name: "쿠팡 윙 창 앞으로 가져오기" })).toBeInTheDocument();
+  });
+
+  it("**is a full-width control, not a line of text inside the status box**", () => {
+    render(
+      <CoupangIssuanceGuidedWalkthrough
+        onIssued={vi.fn()}
+        run={issuanceRun({ allowedCommands: ["REQUEST_STEP_RECHECK", "CANCEL_RUN", "FIND_CURRENT_STEP"] })}
+        onCommand={vi.fn()}
+      />,
+    );
+    const btn = screen.getByRole("button", { name: "쿠팡 윙 창 앞으로 가져오기" });
+    expect(btn.className).toContain("w-full");
+    // Outside the status region, so a blocker (which replaces that region) cannot take it away.
+    expect(screen.getByRole("status", { name: "화면 안내 진행 상태" }).contains(btn)).toBe(false);
+  });
+
+  /**
+   * **The end of the walk is the WORST moment to lose that window.** WING shows the secret key once, and the
+   * keys are on a window SellerOps opened. So the control survives completion — under a label that says what it
+   * is for, because there is no "current step" left to find.
+   */
+  it("becomes '키 화면 다시 보기' once the run is COMPLETED — the keys are still on that window", async () => {
+    const onCommand = vi.fn();
+    render(
+      <CoupangIssuanceGuidedWalkthrough
+        onIssued={vi.fn()}
+        run={issuanceRun({ status: "COMPLETED", allowedCommands: ["FIND_CURRENT_STEP"] })}
+        onCommand={onCommand}
+      />,
+    );
+    // The step-shaped label is gone; the purpose-shaped one is there, and it sends the same read-only command.
+    expect(screen.queryByRole("button", { name: "쿠팡 윙 창 앞으로 가져오기" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "쿠팡 윙 키 화면 다시 보기" }));
+    expect(onCommand).toHaveBeenCalledWith("FIND_CURRENT_STEP");
+    // …and the hand-off to credential entry is still the primary action.
+    expect(screen.getByRole("button", { name: "SellerOps로 돌아가 연결 정보 입력하기" })).toBeInTheDocument();
+  });
+
+  it("…and shows neither when the completed run does not allow it — no window to raise", () => {
+    render(
+      <CoupangIssuanceGuidedWalkthrough
+        onIssued={vi.fn()}
+        run={issuanceRun({ status: "COMPLETED", allowedCommands: [] })}
+        onCommand={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "쿠팡 윙 키 화면 다시 보기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "쿠팡 윙 창 앞으로 가져오기" })).toBeNull();
+  });
+
   it("a recoverable blocker adds the recovery control (확인 완료) alongside 취소 — recovery is the FE's job", () => {
     render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} run={blocked("LOGIN_REQUIRED")} onCommand={vi.fn()} />);
     expect(screen.getByRole("button", { name: "확인 완료" })).toBeInTheDocument();

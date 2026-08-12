@@ -110,7 +110,22 @@ export interface NaverLaunchOptions {
   chromiumSandbox: boolean;
   /** Present only when a browser channel is configured (e.g. `chrome`). */
   channel?: string;
+  /**
+   * `null` means "stop overriding the page's metrics" — present ONLY under {@link LaunchWindowPolicy.followWindow}.
+   * See {@link buildLaunchOptions} for what it is measured to fix.
+   */
+  viewport?: null;
+  /** Chromium args — present only under `followWindow`, where the window must open at the desktop's size. */
+  args?: string[];
 }
+
+/** Should the PAGE be laid out against the WINDOW the seller actually has? Off by default; see below. */
+export interface LaunchWindowPolicy {
+  followWindow?: boolean;
+}
+
+/** Opens the window at the size of the desktop. Load-bearing under `followWindow` — see the measurement below. */
+const START_MAXIMIZED_ARG = "--start-maximized";
 
 /**
  * Pure: build the persistent-context launch options. Always headed (a human logs
@@ -121,15 +136,42 @@ export interface NaverLaunchOptions {
  * This only changes WHICH browser binary launches — it never changes the profile
  * dir, so the dedicated SellerOps profile (not the user's personal Chrome
  * profile) is used regardless.
+ *
+ * ## `followWindow` — the guided-walk crop, and what measurement says about it
+ *
+ * Playwright's default is to OVERRIDE the page's device metrics: without an explicit `viewport` it pins every
+ * page to 1280×720 at DPR 1, no matter what window the operator has. `measure-walk-window-geometry.ts` read
+ * this back from real Chrome on 2026-08-12:
+ *
+ * ```
+ * AS_SHIPPED      inner 1280×720   outer 1420×850   screenAvail 1280×720    dpr 1
+ * MAXIMIZED       inner 1280×720   outer 1420×850   screenAvail 1280×720    dpr 1
+ * FOLLOWS_WINDOW  inner 1440×783   outer 1440×870   screenAvail 1440×870    dpr 2
+ * ```
+ *
+ * Three things that only a measurement could settle. The page is laid out for 140×130 CSS px LESS than the
+ * window it is displayed in — WING's own dialog then runs past the bottom of what the seller can see, which is
+ * the live-observed crop where the vendor `확인` was unreachable. `--start-maximized` alone changes NOTHING,
+ * because the override wins over the window; that is why the operator's only working workaround was `cmd -`
+ * (page zoom is the one thing that alters CSS layout size while the viewport is pinned). And the override fakes
+ * the SCREEN too — a page asking how big the display is gets 1280×720 at DPR 1 rather than the real 1440×870 at
+ * DPR 2, so a responsive marketplace layout is answering a question about a monitor that does not exist.
+ *
+ * `followWindow` turns the override off (`viewport: null`) AND opens the window at the desktop's size. The two
+ * belong together: `viewport: null` alone leaves Playwright's default 1280×720 WINDOW, whose page area is
+ * SHORTER than the 720 px it replaces. Off by default, so no other launcher moves.
  */
-export function buildLaunchOptions(channel?: string): NaverLaunchOptions {
+export function buildLaunchOptions(channel?: string, policy?: LaunchWindowPolicy): NaverLaunchOptions {
   const base: NaverLaunchOptions = {
     headless: false,
     acceptDownloads: true,
     chromiumSandbox: true,
   };
+  const withWindow: NaverLaunchOptions = policy?.followWindow
+    ? { ...base, viewport: null, args: [START_MAXIMIZED_ARG] }
+    : base;
   const trimmed = channel?.trim();
-  return trimmed ? { ...base, channel: trimmed } : base;
+  return trimmed ? { ...withWindow, channel: trimmed } : withWindow;
 }
 
 /**
@@ -173,14 +215,21 @@ export function markProfileCleanExit(userDataDir: string): void {
 export async function launchNaverContext(
   profileDir: string,
   channel?: string,
+  policy?: LaunchWindowPolicy,
 ): Promise<BrowserContext> {
   const userDataDir = resolveProfileDir(profileDir);
   mkdirSync(userDataDir, { recursive: true });
   // Suppress Chrome's crash-restore bubble on this reopen — Playwright left the profile flagged dirty when it
   // tore the previous browser down. Cookies/login are untouched; only the restore prompt is cleared.
   markProfileCleanExit(userDataDir);
-  const options = buildLaunchOptions(channel);
-  log("profile.launch", { headless: options.headless, channel: options.channel ?? "bundled" });
+  const options = buildLaunchOptions(channel, policy);
+  // `followWindow` is logged because it changes what the seller sees, and a run that came up cropped should be
+  // answerable from the log rather than from re-deriving which call site launched it. A boolean, not a size.
+  log("profile.launch", {
+    headless: options.headless,
+    channel: options.channel ?? "bundled",
+    followWindow: policy?.followWindow === true,
+  });
   return chromium.launchPersistentContext(userDataDir, options);
 }
 
