@@ -214,6 +214,72 @@ describe("the screen-based auto-advance requires the screen to CHANGE", () => {
     expect(getLogSink().filter((e) => e.event === "aw_coupang_overlay_remount")).toHaveLength(0);
   });
 
+  /* ────────── a page that never ANSWERS is not a page that answered "no" ────────── */
+
+  it("**an in-page read that never settles cannot stop the walk**", async () => {
+    // THE defect the 2026-08-12 live run died of. Playwright's `evaluate` has no timeout: it resolves when the
+    // frame has a usable execution context and otherwise waits forever. Every `.catch` on this path guards a
+    // REJECTION; none guarded a call that simply never settles. The loop emitted ~2 lines/second for four
+    // minutes, stopped between two adjacent awaits while WING was bouncing the session, and never resumed — the
+    // seller was left looking at a guidance panel nothing was driving any more.
+    //
+    // The hang is modelled on the argument-less read (`overlayMounted`), which this workstream's own recovery
+    // commit put on the once-a-second path — in the one state where the overlay goes missing BECAUSE the
+    // document is being replaced, i.e. exactly when a page is least able to answer.
+    const page = new FakePage("VENDOR");
+    const original = page.evaluate.bind(page);
+    page.evaluate = async (script: unknown, arg?: unknown): Promise<unknown> => {
+      if (typeof script !== "string" && arg === undefined) return new Promise<never>(() => undefined); // never settles
+      return original(script, arg);
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const driver = new CoupangWingIssuanceDriver(page as any, { observeTimeoutMs: 30 });
+    // Resolving AT ALL is the property. A pre-fix driver hangs here forever and the test times out.
+    expect(await driver.observeUserAction("vendor_confirm")).toBe(false);
+  }, 30_000);
+
+  it("**the fault recovery resolves even when the page it must talk to never answers**", async () => {
+    // `onDriveFault` answers CLEAR_HIGHLIGHT, and the park recovery that re-guides the seller runs only after
+    // it resolves — so an untimed unmount made the recovery unreachable in precisely the state it exists for.
+    // Live: the drive error landed at 05:58:34 and the run emitted nothing for the nine minutes until the
+    // seller closed the window. No re-guide, no park recovery, and the panel still on the glass.
+    const page = new FakePage("VENDOR");
+    page.evaluate = async (): Promise<unknown> => new Promise<never>(() => undefined);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const driver = new CoupangWingIssuanceDriver(page as any, {});
+    // Both, concurrently: each is two time-boxed reads, and running them in sequence spends the boxes twice
+    // over for no extra coverage.
+    await expect(Promise.all([driver.clearHighlight(), driver.cleanup()])).resolves.toEqual([undefined, undefined]);
+  }, 40_000);
+
+  it("**an UNREADABLE credential baseline disables the key step's advance** — it is not a measured 'no'", async () => {
+    // `markerVisible` folds every read failure into `count: 0`, so the `.catch(() => null)` beside this baseline
+    // was dead code and an unreadable page recorded a confident `false` — which ARMS the advance. WING bounced
+    // the session twice during the live run, so "arm the key step while the page cannot be read" is a live
+    // state on this surface. What it buys: a page that comes back showing a key that existed all along would
+    // complete the step, i.e. report that the seller just issued one.
+    const page = new FakePage("VENDOR");
+    let baselineTaken = false;
+    const original = page.evaluate.bind(page);
+    page.evaluate = async (script: unknown, arg?: unknown): Promise<unknown> => {
+      const isCredentialLocate =
+        typeof script === "string" &&
+        script.includes(WING_HIGHLIGHT_LABELS.credentials.exactText) &&
+        script.includes(WING_HIGHLIGHT_LABELS.credentials.candidateQuery);
+      if (isCredentialLocate && !baselineTaken) {
+        baselineTaken = true;
+        throw new Error("execution context was destroyed");
+      }
+      return original(script, arg);
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const driver = new CoupangWingIssuanceDriver(page as any, { observeTimeoutMs: 2_000 });
+    const observing = driver.observeUserAction("vendor_confirm");
+    await waitFor(() => baselineTaken);
+    page.screen = "ISSUED"; // the keys are on the glass — but nothing here knows the seller made them
+    expect(await observing).toBe(false);
+  }, 20_000);
+
   it("**the key-creation step has no screen advance at all**, whatever the page says", async () => {
     // `issue_final` is absent from the advance map on purpose and must stay absent: it is the one control that
     // mutates marketplace state, and nothing about it may auto-advance. Asserted from BOTH screens so it cannot

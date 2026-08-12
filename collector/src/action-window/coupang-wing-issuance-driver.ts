@@ -702,6 +702,49 @@ const CHECKPOINT_ADVANCES_TO_CATEGORY: Readonly<Partial<Record<CoupangIssuanceTa
 /** How often the screen observation runs. Slower than the latch poll: it costs three in-page locates. */
 const SCREEN_OBSERVE_POLL_MS = 1_000;
 
+/**
+ * **Every in-page read on the observe path is time-boxed, because Playwright's `evaluate` has no timeout.**
+ *
+ * It resolves when the frame has a usable execution context and otherwise waits forever. Every `.catch` around
+ * these calls guards a REJECTION; none guards a call that simply never settles. On 2026-08-12 that is exactly
+ * what happened on the live walk: the loop emitted ~2 lines/second for four minutes, stopped between two
+ * adjacent awaits while WING was bouncing the session, and never resumed — the seller was left looking at a
+ * guidance panel that was no longer being driven by anything.
+ *
+ * A timed-out read resolves to a fail-closed fallback rather than rejecting, so a page that cannot answer reads
+ * as "not proven" and the seller's own WING-resident button remains the way through. The abandoned promise stays
+ * pending — Playwright gives no way to cancel an `evaluate` — which is acceptable precisely because it is now
+ * bounded: the loop moves on instead of being held by it.
+ */
+const IN_PAGE_READ_TIMEOUT_MS = 4_000;
+
+/**
+ * The re-mount is several reads plus a settle sleep, so it gets its own, larger box. Still bounded: a re-mount
+ * that cannot complete must cost one poll, never the walk.
+ */
+const REMOUNT_TIMEOUT_MS = 10_000;
+
+/**
+ * Resolve `work`, or `fallback` if it has not settled within `ms` — and treat a rejection as the fallback too,
+ * so a caller gets one fail-closed value for both ways a read can fail to produce an answer.
+ */
+function timebox<T>(work: Promise<T>, fallback: T, ms: number = IN_PAGE_READ_TIMEOUT_MS): Promise<T> {
+  return new Promise<T>((resolve) => {
+    let settled = false;
+    const finish = (value: T): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(fallback), ms);
+    work.then(
+      (v) => finish(v),
+      () => finish(fallback),
+    );
+  });
+}
+
 /** Bounded sleep between navigation-observe polls (no wall-clock read; timer only). */
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -1234,7 +1277,30 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
    * the distinction that invalidated an earlier calibration record — so `count` alone is not the test.
    */
   private async markerVisible(spec: WingFlowScreenMarkerSpec): Promise<boolean> {
-    const res = await this.resolveFixedLabelSpec(spec, false).catch(() => ({ count: 0 }) as LocateResult);
+    return (await this.markerVisibleOrUnreadable(spec)) === true;
+  }
+
+  /**
+   * The same reading, but able to say **"the page could not be read"** — `null` — instead of folding that into
+   * a measured-looking zero.
+   *
+   * The distinction is load-bearing exactly once: at a checkpoint's BASELINE. `markerVisible` swallows every
+   * read failure into `count: 0`, so `markerVisible(...).catch(() => null)` was dead code and a baseline taken
+   * while WING was bouncing the session recorded a confident `false` — which ARMS the advance rather than
+   * disabling it. The comment beside it claimed the opposite. On the key-issuing step that is a path to
+   * reporting "the seller just issued a key" about a page that was showing a key all along, which is the one
+   * class of failure this walk may not have.
+   */
+  private async markerVisibleOrUnreadable(spec: WingFlowScreenMarkerSpec): Promise<boolean | null> {
+    const res = await timebox<LocateResult | null>(
+      this.resolveFixedLabelSpec(spec, false).catch(() => null),
+      null,
+    );
+    if (res === null) {
+      // Sanitized like every other reading here: an id and a flag, never text, a URL, or a value.
+      log("aw_coupang_flow_marker", { markerId: spec.id, unreadable: true });
+      return null;
+    }
     // The MEASUREMENT, recorded. Both flow-screen markers are unproven — the purpose heading has never been
     // matched by any apparatus, and the terms markers were transcribed off a screen rather than resolved by
     // one — so a live walk has to be able to say which of them actually fires. Without this the auto-advance
@@ -1419,10 +1485,19 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     });
   }
 
+  /**
+   * **The fault recovery must not be made of the thing that faulted.**
+   *
+   * `onDriveFault` answers `CLEAR_HIGHLIGHT`, and the park recovery that re-guides the seller runs only after
+   * this resolves. Both calls below are `evaluate`s against the SAME page whose unanswered `evaluate` produced
+   * the fault, so leaving them untimed made the recovery unreachable in exactly the state it exists for: on
+   * 2026-08-12 the drive error landed at 05:58:34 and the run emitted nothing at all for the nine minutes until
+   * the seller closed the window — no re-guide, no park recovery, and a guidance panel still on the glass.
+   */
   async clearHighlight(): Promise<void> {
     const page = this.activePage();
-    await unmountOverlay(page).catch(() => undefined);
-    await this.evalStr(page, IN_PAGE_CLEAR_TAG).catch(() => undefined);
+    await timebox(unmountOverlay(page), undefined);
+    await timebox(this.evalStr(page, IN_PAGE_CLEAR_TAG).then(() => undefined), undefined);
   }
 
   async armObserve(target: CoupangIssuanceTarget): Promise<void> {
@@ -1500,6 +1575,13 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     // for exactly this reason.
     // An UNREADABLE baseline disables it too: not knowing where the seller started is exactly the state in
     // which "the expected screen is showing" cannot be told apart from "it was showing all along".
+    //
+    // ⚠ For the SCREEN baseline that sentence is still aspirational, and saying so is better than implying a
+    // fence that is not there: `probeFlowScreen` folds an unreadable page into `UNRECOGNIZED`, which differs
+    // from every expected screen and therefore ARMS this rather than disabling it. Recorded rather than fixed
+    // here — the screen advances wait for a screen to APPEAR, so an unreadable baseline costs a transition that
+    // did happen, not a false completion. The credential baseline below is the one where it would be a false
+    // completion, and that one is now genuinely fail-closed.
     const baseline = expected ? await this.probeFlowScreen().catch(() => null) : null;
     const screenMayAdvance = expected !== undefined && baseline !== null && baseline !== expected;
     // The same construction for the step whose completion is a page CATEGORY rather than a flow screen: the
@@ -1513,16 +1595,23 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     // surface (see {@link WING_CREDENTIAL_SHOWN_MARKER_SPEC}). A run that opened on a page already showing keys
     // must not report that the seller just made one, so a marker already painting at arm time turns it off and
     // the seller's own button is the way through.
+    //
+    // `markerVisibleOrUnreadable`, NOT `markerVisible`: the latter cannot reject, so the `.catch(() => null)`
+    // this line used to carry was dead code and an unreadable page produced a confident `false`. WING bounced
+    // the session twice during the 2026-08-12 walk, so "arm the key step while the page cannot be read" is a
+    // live state on this surface, not a hypothetical.
     const credentialWatched = CHECKPOINT_ADVANCES_ON_CREDENTIAL.includes(target);
     const credentialBaseline = credentialWatched
-      ? await this.markerVisible(WING_CREDENTIAL_SHOWN_MARKER_SPEC).catch(() => null)
+      ? await this.markerVisibleOrUnreadable(WING_CREDENTIAL_SHOWN_MARKER_SPEC)
       : null;
     const credentialMayAdvance = credentialWatched && credentialBaseline === false;
     // The screen probe costs three in-page locates, so it runs on a slower cadence than the latch poll rather
     // than on every tick. The seller pressing the button is still noticed within one latch poll.
     const screenEvery = Math.max(1, Math.round(SCREEN_OBSERVE_POLL_MS / OVERLAY_ADVANCE_POLL_MS));
     for (let i = 0; i < maxPolls; i++) {
-      const pressed = await readOverlayAdvancePressed(this.activePage(), token).catch(() => false);
+      // Time-boxed, like every in-page read below it. An `evaluate` that never settles used to stop this loop
+      // dead mid-iteration, with the panel still painted and nothing left watching it.
+      const pressed = await timebox(readOverlayAdvancePressed(this.activePage(), token), false);
       if (pressed) return true;
       if (i % screenEvery === 0) {
         if (screenMayAdvance && (await this.probeFlowScreen().catch(() => "UNRECOGNIZED" as WingFlowScreen)) === expected) return true;
@@ -1533,13 +1622,13 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
         // it: the category cannot become `credential_shown` before a credential exists. The seller pressed it.
         if (
           categoryMayAdvance &&
-          (await this.readSurface().then((p) => p.pageCategory).catch(() => null)) === expectedCategory
+          (await timebox(this.readSurface().then((p) => p.pageCategory), null as WingPageCategory | null)) === expectedCategory
         ) {
           return true;
         }
         // …and the reading that actually fires on this surface: the credential label painting where it was
         // measurably absent one moment ago. Same observe-the-RESULT property as the branch above.
-        if (credentialMayAdvance && (await this.markerVisible(WING_CREDENTIAL_SHOWN_MARKER_SPEC).catch(() => false))) {
+        if (credentialMayAdvance && (await this.markerVisible(WING_CREDENTIAL_SHOWN_MARKER_SPEC))) {
           return true;
         }
         // THE SELLER'S WAY OUT MUST SURVIVE A NAVIGATION. WING can bounce the window to login mid-checkpoint —
@@ -1566,9 +1655,15 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
    */
   private async remountIfLost(target: CoupangIssuanceTarget): Promise<void> {
     const page = this.activePage();
-    if (await overlayMounted(page).catch(() => true)) return;
+    // Time-boxed, and defaulting to "still mounted" on a page that will not answer. This check runs once a
+    // second against a page that is BY DEFINITION unstable when it matters — an overlay only goes missing
+    // because the document was replaced — so it was the single most likely place for the loop to hang, and it
+    // was added by the very commit that introduced the recovery it guards.
+    if (await timebox(overlayMounted(page), true)) return;
     log("aw_coupang_overlay_remount", { target });
-    await this.highlightTarget(target).catch(() => undefined);
+    // The re-mount itself is several more evaluates plus a settle sleep. Bounded as one unit: a re-mount that
+    // cannot complete must cost this poll, not the walk.
+    await timebox(this.highlightTarget(target).then(() => undefined), undefined, REMOUNT_TIMEOUT_MS);
   }
 
   /**
@@ -1595,10 +1690,11 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     return wingPageCategoryFromCensus(urlCategory, census).pageCategory;
   }
 
+  /** Teardown, time-boxed for the same reason {@link clearHighlight} is: a closing page may never answer. */
   async cleanup(): Promise<void> {
     const page = this.activePage();
-    await unmountOverlay(page).catch(() => undefined);
-    await this.evalStr(page, IN_PAGE_CLEAR_TAG).catch(() => undefined);
+    await timebox(unmountOverlay(page), undefined);
+    await timebox(this.evalStr(page, IN_PAGE_CLEAR_TAG).then(() => undefined), undefined);
   }
 
   whenSurfaceClosed(): Promise<void> {
