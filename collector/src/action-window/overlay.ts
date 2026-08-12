@@ -335,11 +335,22 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
     // `reposition` still needs a stable reference for
     // add/removeEventListener, so it cannot simply be inlined. (A transform-level regression test asserts
     // the shipped mountOverlay page body contains no `__name(`.)
+    // Write a style property ONLY when the value actually changes. Load-bearing, not a micro-optimization:
+    // assigning the same value still emits an attribute MutationRecord, and the tracker below repositions ON
+    // mutations — so an unconditional write would feed its own observer and spin a permanent rAF loop.
+    // (Array-index initializer for the `__name` reason documented above; same for every closure that follows.)
+    const setStyle = [
+      (el: HTMLElement, prop: string, value: string) => {
+        const s = el.style as unknown as Record<string, string>;
+        if (s[prop] !== value) s[prop] = value;
+      },
+    ][0]!;
     const reposition = [
       () => {
         // In docked mode the anchor is deliberately absent, so there is nothing to track — and a STALE tag left
         // by an earlier step must not become one. That is the defect `dockedPanelOnly` exists to fix, and the
-        // repositioner is the second place it could re-enter.
+        // repositioner is the second place it could re-enter. Nothing below applies either: a docked step rings
+        // no control, so there is no control for its panel to be sitting on.
         if (o.dockedPanelOnly) return;
         // Re-queried, never captured: the tag set is what the driver rewrote for THIS step, and a closure over
         // stale element references would keep tracking a control the page has since replaced. Each ring carries
@@ -351,21 +362,105 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
           const el = els[Number(b.getAttribute("data-aw-ring-index"))];
           if (!el) continue;
           const r = (el as Element).getBoundingClientRect();
-          b.style.left = `${r.left - 6}px`;
-          b.style.top = `${r.top - 6}px`;
-          b.style.width = `${r.width + 12}px`;
-          b.style.height = `${r.height + 12}px`;
+          setStyle(b, "left", `${r.left - 6}px`);
+          setStyle(b, "top", `${r.top - 6}px`);
+          setStyle(b, "width", `${r.width + 12}px`);
+          setStyle(b, "height", `${r.height + 12}px`);
         }
+        // …and then KEEP THE PANEL OFF THE CONTROL IT DESCRIBES. The panel is docked bottom-centre, which is
+        // also where a marketplace dialog puts its primary buttons — live-observed twice on the Coupang walk,
+        // where the panel saying "press 확인 yourself" sat on top of 확인. The ring is `pointer-events:none` and
+        // could only ever hide the control; the panel takes clicks when it carries a button, so an overlap there
+        // is a walk that blocks the seller's own manual progress. That is a safety-fence violation, not cosmetics.
+        const panel = document.getElementById("__aw_advance_panel__");
+        if (!panel) return;
+        const targets = document.querySelectorAll("[data-aw-target]");
+        if (targets.length === 0) return;
+        const p = panel.getBoundingClientRect();
+        const h = p.height;
+        // Would a panel whose top edge sits at `top` cover any highlighted control? Horizontal extent is read
+        // from the panel's own rect, so a narrow panel beside a control is not treated as covering it.
+        const covers = [
+          (top: number) => {
+            const bottom = top + h;
+            for (let i = 0; i < targets.length; i++) {
+              const r = targets[i]!.getBoundingClientRect();
+              if (r.bottom > top && r.top < bottom && r.right > p.left && r.left < p.right) return true;
+            }
+            return false;
+          },
+        ][0]!;
+        // Bottom is the resting place and is only given up for a top dock that is genuinely clear. Deciding it
+        // from the two PROSPECTIVE positions (never from where the panel happens to be) is what stops it
+        // oscillating between the two when a control sits at both ends.
+        const stayBottom = !covers(window.innerHeight - 24 - h) || covers(24);
+        setStyle(panel, "bottom", stayBottom ? "24px" : "auto");
+        setStyle(panel, "top", stayBottom ? "auto" : "24px");
+      },
+    ][0]!;
+    // Coalesce a burst of layout changes into ONE reposition on the next frame. The latch lives on `window` so a
+    // re-mount (which runs the previous tracker's teardown first) cannot leave a frame scheduled against a
+    // closure that is gone.
+    // Every host API this tracker uses is FEATURE-DETECTED, and none of it is optional decoration: a host
+    // missing one simply keeps the scroll/resize tracking it always had. (The offline fakes the overlay suite
+    // drives are such a host — they model a document, not a browser — and a mount that threw there would be a
+    // mount that throws on any surface with a trimmed sandbox.)
+    const schedule = [
+      () => {
+        const w = window as unknown as Record<string, unknown>;
+        if (typeof w["requestAnimationFrame"] !== "function") {
+          reposition();
+          return;
+        }
+        if (w["__aw_overlay_pending__"]) return;
+        // The PENDING flag is claimed BEFORE the frame is requested, and the handle is stored after — never the
+        // other way round. Storing the handle as the flag looks equivalent and is not: a host that runs the
+        // callback synchronously would clear a flag that had not been set yet, and the assignment would then
+        // set it permanently, wedging every later reposition. One coalescing latch, one cancel handle.
+        w["__aw_overlay_pending__"] = true;
+        const id = window.requestAnimationFrame(() => {
+          const w2 = window as unknown as Record<string, unknown>;
+          delete w2["__aw_overlay_pending__"];
+          delete w2["__aw_overlay_raf__"];
+          reposition();
+        });
+        if (w["__aw_overlay_pending__"]) w["__aw_overlay_raf__"] = id;
       },
     ][0]!;
     reposition();
     // `capture:true` catches scrolls on any nested scroller, not just the window.
     window.addEventListener("scroll", reposition, true);
     window.addEventListener("resize", reposition);
+    // THE OTHER WAY A CONTROL MOVES, and until 2026-08-12 the only one nothing watched: the page relaid itself
+    // out without a scroll and without a resize. Live-observed on the Coupang vendor screen, where selecting the
+    // integration method reveals two more rows and turns a dropdown into a text input — a step whose whole
+    // content is a layout change — and the rings stayed at the coordinates they were mounted at. The seller then
+    // sees emphasis on the wrong control, which is worse than none: a ring is a claim about where to press.
+    const W = window as unknown as Record<string, unknown>;
+    const mo = typeof W["MutationObserver"] === "function" ? new MutationObserver(schedule) : null;
+    if (mo && document.documentElement) mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+    const ro = typeof W["ResizeObserver"] === "function" ? new ResizeObserver(schedule) : null;
+    if (ro) {
+      if (document.documentElement) ro.observe(document.documentElement);
+      if (document.body) ro.observe(document.body);
+      for (let t = 0; t < tagged.length; t++) ro.observe(tagged[t]!);
+    }
+    // Backstop for the movement neither observer reports: a CSS transition/animation slides an element over
+    // several hundred ms while mutating nothing. Cheap — a few `getBoundingClientRect` reads, and `setStyle`
+    // writes nothing when the answer has not changed.
+    const tick = typeof W["setInterval"] === "function" ? window.setInterval(schedule, 500) : 0;
     (window as unknown as Record<string, unknown>)["__aw_overlay_untrack__"] = () => {
       window.removeEventListener("scroll", reposition, true);
       window.removeEventListener("resize", reposition);
-      delete (window as unknown as Record<string, unknown>)["__aw_overlay_untrack__"];
+      if (mo) mo.disconnect();
+      if (ro) ro.disconnect();
+      const w = window as unknown as Record<string, unknown>;
+      if (tick && typeof w["clearInterval"] === "function") window.clearInterval(tick);
+      const pending = w["__aw_overlay_raf__"];
+      if (typeof pending === "number" && typeof w["cancelAnimationFrame"] === "function") window.cancelAnimationFrame(pending);
+      delete w["__aw_overlay_raf__"];
+      delete w["__aw_overlay_pending__"];
+      delete w["__aw_overlay_untrack__"];
     };
     // WING-RESIDENT guidance panel + advance latch. Drawn as a SEPARATE fixed element from the ring, so the
     // interactive advance button (pointer-events:auto) can never overlap or intercept a WING control (the ring
@@ -408,6 +503,9 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
         panel.appendChild(btn);
       }
       document.body.appendChild(panel);
+      // The panel is built AFTER the first `reposition()`, so without this the occlusion check would not run
+      // until the next layout change — i.e. the one moment it is most likely to matter is the one it would miss.
+      reposition();
     }
     // Mount SUCCEEDED — clear the breadcrumb so a subsequent mount that rejects BEFORE its body runs (a transient
     // soft-nav) reads back `unknown`, never this completed mount's stale stage (which would read as a false locus).

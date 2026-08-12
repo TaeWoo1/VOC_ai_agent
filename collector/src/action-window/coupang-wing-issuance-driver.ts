@@ -149,6 +149,38 @@ export const WING_HIGHLIGHT_LABELS: Readonly<Record<WingHighlightTarget, { candi
   credentials: { candidateQuery: "label,span,div,dt,th,strong", exactText: "Access Key", tagAncestor: "tr" },
 };
 
+/**
+ * **The marker that says a key now EXISTS on this screen** — the credential label itself, painting.
+ *
+ * Derived from {@link WING_HIGHLIGHT_LABELS.credentials} rather than re-typed, so the string the walk rings at
+ * step ⑧ and the string it watches for at step ⑦ can never drift apart. `tagAncestor` is deliberately dropped:
+ * the question here is "is this label on the screen", not "which row does it belong to".
+ *
+ * Why this and not the page CATEGORY, which is what {@link CHECKPOINT_ADVANCES_TO_CATEGORY} says it waits for:
+ * `credential_shown` is **structurally unreachable** on this surface. `classifyWingPage` returns
+ * `open_api_issuance` whenever the open-API marker or the credential anchor is present, and both are still
+ * present when WING shows the issued keys — the credentials appear ON the open-API page, not instead of it. So
+ * the category branch could never have fired, which is exactly what two live sittings observed: the key was
+ * issued and step ⑦ never completed itself. The category map stays (it costs one read and is honest about what
+ * it waits for); this is what actually answers the question.
+ *
+ * **It cannot cause what it observes.** The label paints because a credential exists, and a credential exists
+ * because the seller pressed 확인. Nothing here clicks, types, or reads a VALUE — only whether the fixed label
+ * is visible, the same value-free locate every other marker uses.
+ *
+ * NOT a promotion and not a measurement: `Access Key` has never been matched by any apparatus on the issued
+ * screen. Like every other unproven marker in this walk it degrades to the seller's own WING-resident button
+ * rather than to a stall, and the baseline rule means a screen already showing keys disables it outright.
+ */
+const WING_CREDENTIAL_SHOWN_MARKER_SPEC: WingFlowScreenMarkerSpec = Object.freeze({
+  id: "issuance.credentials.access_key",
+  candidateQuery: WING_HIGHLIGHT_LABELS.credentials.candidateQuery,
+  exactText: WING_HIGHLIGHT_LABELS.credentials.exactText,
+});
+
+/** The checkpoints whose completion is "a credential is now on the screen". Today: the key-issuing 확인. */
+const CHECKPOINT_ADVANCES_ON_CREDENTIAL: readonly CoupangIssuanceTarget[] = ["vendor_confirm"];
+
 function isWingHighlightTarget(target: CoupangIssuanceTarget): target is "issue" | "credentials" | "issue_final" {
   // Gated on the flag, not on a literal list, so WITHDRAWING the calibration removes the ring by itself. The
   // 삭제 record was withdrawn while its target stayed in a hand-written list, and only the flag being read at
@@ -655,6 +687,13 @@ const CHECKPOINT_ADVANCES_TO_SCREEN: Readonly<Partial<Record<CoupangIssuanceTarg
  * **This does not auto-advance the PRESS.** The seller presses 확인 themselves; this observes that WING then
  * showed the keys. An observation of a result cannot cause it, and the ordering is what makes that plain: the
  * category cannot become `credential_shown` before a credential exists.
+ *
+ * **And on this surface it never becomes `credential_shown` at all.** `classifyWingPage` answers
+ * `open_api_issuance` while the open-API marker or the credential anchor is present, and the keys appear ON that
+ * page — so this map is a correct statement about a category the live walk cannot reach, which is why the step
+ * completed itself on neither of the two sittings that issued a key. What actually answers is
+ * {@link WING_CREDENTIAL_SHOWN_MARKER_SPEC}. This stays because it costs one read and is true wherever WING does
+ * navigate to a keys-only view; it is no longer the thing being relied on.
  */
 const CHECKPOINT_ADVANCES_TO_CATEGORY: Readonly<Partial<Record<CoupangIssuanceTarget, WingPageCategory>>> = {
   vendor_confirm: "credential_shown",
@@ -1464,6 +1503,15 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     const categoryBaseline = expectedCategory ? await this.readSurface().then((p) => p.pageCategory).catch(() => null) : null;
     const categoryMayAdvance =
       expectedCategory !== undefined && categoryBaseline !== null && categoryBaseline !== expectedCategory;
+    // The SAME baseline construction for the credential marker — the observation that actually fires on this
+    // surface (see {@link WING_CREDENTIAL_SHOWN_MARKER_SPEC}). A run that opened on a page already showing keys
+    // must not report that the seller just made one, so a marker already painting at arm time turns it off and
+    // the seller's own button is the way through.
+    const credentialWatched = CHECKPOINT_ADVANCES_ON_CREDENTIAL.includes(target);
+    const credentialBaseline = credentialWatched
+      ? await this.markerVisible(WING_CREDENTIAL_SHOWN_MARKER_SPEC).catch(() => null)
+      : null;
+    const credentialMayAdvance = credentialWatched && credentialBaseline === false;
     // The screen probe costs three in-page locates, so it runs on a slower cadence than the latch poll rather
     // than on every tick. The seller pressing the button is still noticed within one latch poll.
     const screenEvery = Math.max(1, Math.round(SCREEN_OBSERVE_POLL_MS / OVERLAY_ADVANCE_POLL_MS));
@@ -1483,10 +1531,38 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
         ) {
           return true;
         }
+        // …and the reading that actually fires on this surface: the credential label painting where it was
+        // measurably absent one moment ago. Same observe-the-RESULT property as the branch above.
+        if (credentialMayAdvance && (await this.markerVisible(WING_CREDENTIAL_SHOWN_MARKER_SPEC).catch(() => false))) {
+          return true;
+        }
+        // THE SELLER'S WAY OUT MUST SURVIVE A NAVIGATION. WING can bounce the window to login mid-checkpoint —
+        // observed 2026-08-12 immediately after the key-issuing 확인 — and a navigation destroys the overlay
+        // with the page. Everything then still "works": the latch poll reads a page with no panel on it, the
+        // screen probe finds no marker, and the window quietly runs out with the seller looking at a WING page
+        // that has no guidance and no button. Re-mounting is the whole recovery, and it is safe to repeat: the
+        // mount is idempotent (it removes its own predecessor) and re-arms THIS step's token, so a press
+        // recorded before the bounce cannot survive as a press after it.
+        await this.remountIfLost(target);
       }
       if (i < maxPolls - 1) await sleep(OVERLAY_ADVANCE_POLL_MS);
     }
     return false;
+  }
+
+  /**
+   * Re-mount this step's overlay if it is no longer on the active page — the WING navigation recovery.
+   *
+   * Goes through {@link highlightTarget} rather than re-mounting directly, so the ring is re-resolved against
+   * the page that is actually there now: a stale anchor from before the navigation is exactly the defect the
+   * walk has already paid for twice. A page where the control cannot be found (the login screen) simply mounts
+   * nothing and is retried on the next poll — never a stall, never a ring pointing at nothing.
+   */
+  private async remountIfLost(target: CoupangIssuanceTarget): Promise<void> {
+    const page = this.activePage();
+    if (await overlayMounted(page).catch(() => true)) return;
+    log("aw_coupang_overlay_remount", { target });
+    await this.highlightTarget(target).catch(() => undefined);
   }
 
   /**

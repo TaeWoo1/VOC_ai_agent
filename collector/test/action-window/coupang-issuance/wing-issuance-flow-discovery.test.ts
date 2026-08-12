@@ -1065,7 +1065,12 @@ describe("stale spotlight — the defect the dev-host live proof surfaced", () =
     // The SECOND place the same rule now has to hold. The repositioner re-queries the tag set on every scroll,
     // so a docked panel would have re-acquired a stale anchor there even with the mount-time guard intact — a
     // guard fixed in one place and left standing in its sibling, which is this workstream's recurring shape.
-    expect(OVL).toContain("if (o.dockedPanelOnly) return;");
+    //
+    // It also now covers the panel-occlusion pass the repositioner took on: a docked step rings no control, so
+    // there is nothing for its panel to be sitting on, and the one guard is still the whole rule.
+    const rep = OVL.slice(OVL.indexOf("const reposition = ["), OVL.indexOf("const schedule = ["));
+    expect(rep).toContain("if (o.dockedPanelOnly) return;");
+    expect(rep.indexOf("if (o.dockedPanelOnly) return;")).toBeLessThan(rep.indexOf('document.querySelectorAll("[data-aw-target]")'));
   });
 
   it("docked mode draws no ring, no dimming and no badge — it claims no location", () => {
