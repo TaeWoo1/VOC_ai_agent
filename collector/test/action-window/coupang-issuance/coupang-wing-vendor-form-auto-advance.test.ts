@@ -234,6 +234,30 @@ describe("the ⑥ ring comes down once the seller has chosen the method", () => 
   });
 });
 
+describe("the recorder's vendor census is NARROWER than the walk's", () => {
+  it("**asks for the tag census and NOT for the emptiness count**", async () => {
+    // The measurement sitting settles what a registered IP does to its region. It needs the shape and it does
+    // not need to know whether anything is filled in — so it does not ask, and the request the page receives is
+    // the assertion. `readFilled` is the one field in this census that touches a value at all.
+    const page = new FakeVendorPage();
+    await driverOn(page).vendorFieldRegions();
+    const script = page.scripts.find((s) => s.includes("wing-field-region-census"));
+    expect(script).toBeDefined();
+    expect(script).toContain('"c":true');
+    expect(script).toContain('"f":false');
+    expect(script).not.toContain('"f":true');
+  });
+
+  it("the WALK's own census is the other way round — it needs the emptiness and not the shape", async () => {
+    const page = new FakeVendorPage();
+    page.filled = new Set(FIELD_IDS);
+    await driverOn(page).observeUserAction("vendor_method");
+    const script = page.scripts.find((s) => s.includes("wing-field-region-census"));
+    expect(script).toContain('"f":true');
+    expect(script).not.toContain('"c":true');
+  });
+});
+
 describe("the panel's keep-clear marks are written per step", () => {
   it("**step ⑥ declares the form and the 확인 below it** — the controls the seller uses next", async () => {
     const page = new FakeVendorPage();

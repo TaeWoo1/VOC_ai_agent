@@ -291,7 +291,13 @@ if is_flow_phase "$PHASE"; then
         echo "       reported no key either time (SellerOps cannot confirm that either way) — then STOP on the"
         echo "       screen it opens, choose nothing → ready" ;;
       VENDOR_METHOD_SELECTED_BY_OPERATOR)
-        echo "    $STEP_I) on that screen, select the input method yourself. Do NOT press '확인' → ready" ;;
+        echo "    $STEP_I) on that screen, select the input method yourself and LEAVE the fields it reveals empty."
+        echo "       Do NOT press '확인' → ready" ;;
+      VENDOR_FORM_IP_REGISTERED_BY_OPERATOR)
+        echo "    $STEP_I) fill the form in yourself: type 업체명 · URL, type an IP address and press '추가' so it is"
+        echo "       REGISTERED. SellerOps reads the TAG NAMES inside each field's region and how many of each —"
+        echo "       not what you typed, and not even how many fields are non-empty. Filling a form in is not"
+        echo "       submitting it, so your account is unchanged. Do NOT press '확인' → ready" ;;
     esac
   done
   IFS="$OLD_IFS"

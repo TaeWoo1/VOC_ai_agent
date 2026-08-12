@@ -93,6 +93,7 @@ import { buildAncestorScopeScript, buildFieldRegionCensusScript } from "./api-is
 import {
   sanitizeAncestorScope,
   sanitizeFieldRegionCensus,
+  type FieldRegionCensus,
   type AncestorScopeReading,
   type FieldRegionRequest,
 } from "./coupang-wing-field-region";
@@ -1838,6 +1839,33 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
       if (ready) satisfied += 1;
     }
     return satisfied === census.readings.length ? "READY" : "NOT_READY";
+  }
+
+  /**
+   * **READ-ONLY census of the vendor form's three regions, for the recorder — structure only, no emptiness.**
+   *
+   * The seam the measurement sitting uses to settle what a REGISTERED IP does to its region. Two differences
+   * from the walk's own reading, and both are deliberate:
+   *
+   *  - `readFilled` is DROPPED. The walk counts non-empty inputs because a rule depends on it; a measurement of
+   *    the region's shape does not, and the narrower read is the one to take when the wider one buys nothing.
+   *  - `readTagCounts` is ON, which is the entire point: `entryRowCount` answers the same zero for "nothing
+   *    registered" and "registered as something I do not count", and only the tag census tells them apart.
+   *
+   * Bounded and swallowing like every other read here. It tags nothing, mounts nothing, and presses nothing.
+   */
+  async vendorFieldRegions(): Promise<FieldRegionCensus> {
+    const requests: readonly FieldRegionRequest[] = VENDOR_FORM_FIELDS.map((f) => ({
+      id: f.id,
+      candidateQuery: f.candidateQuery,
+      exactText: f.exactText,
+      readTagCounts: true,
+    }));
+    const raw = await timebox<unknown>(
+      this.evalStr<unknown>(this.activePage(), buildFieldRegionCensusScript(requests)).catch(() => null),
+      null,
+    );
+    return sanitizeFieldRegionCensus(raw, requests.map((r) => r.id));
   }
 
   /**

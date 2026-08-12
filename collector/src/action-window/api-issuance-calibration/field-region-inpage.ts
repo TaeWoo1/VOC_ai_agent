@@ -109,6 +109,7 @@ export function buildFieldRegionCensusScript(requests: readonly FieldRegionReque
     q: r.candidateQuery,
     t: r.exactText,
     f: r.readFilled === true,
+    c: r.readTagCounts === true,
   }));
   return `(function () {
   /* wing-field-region-census (value-free OUTPUT: tags, counts, association enum) */
@@ -215,6 +216,25 @@ export function buildFieldRegionCensusScript(requests: readonly FieldRegionReque
         for (var ei = 0; ei < entries.length; ei++) { if (paints(entries[ei])) { entryRowCount++; } }
         row.entryRowCount = entryRowCount;
         if (SPEC[s].f) { row.filledTextInputCount = filled; }
+        /* The whole region, by TAG. Opt-in per candidate because it walks every descendant instead of running
+           four fixed queries — it reads strictly less than the counts above it, and costs more.
+           entryRowCount answers the same zero for "nothing is registered" and "registered as something I do
+           not count", and on 2026-08-13 that cost a live walk its auto-advance. Two of these — before the
+           seller presses the register button and after — say what a registered entry actually is. */
+        if (SPEC[s].c) {
+          var all = reg.node.querySelectorAll ? slice(reg.node.querySelectorAll('*')) : [];
+          var names = {}, order = [];
+          for (var ti = 0; ti < all.length && ti < CAP; ti++) {
+            if (!paints(all[ti])) { continue; }
+            var tn = all[ti].tagName;
+            if (typeof tn !== 'string') { continue; }
+            if (names[tn] === undefined) { names[tn] = 0; order.push(tn); }
+            names[tn]++;
+          }
+          var counts = [];
+          for (var oi = 0; oi < order.length; oi++) { counts.push({ tag: order[oi], count: names[order[oi]] }); }
+          row.regionTagCounts = counts;
+        }
       }
     }
     readings.push(row);

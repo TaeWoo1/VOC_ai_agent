@@ -859,11 +859,15 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     phase: "COUPANG_WING_VENDOR_METHOD_DISCOVERY",
     cli: "src/cli/probe-wing-issuance-selectors.ts",
     driver: "CoupangWingIssuanceDriver (the discovery reads, carried two checkpoints further onto the vendor-method screen)",
-    // IDENTICAL to the discovery phase's list, and deliberately so: this phase measures nothing the other cannot.
-    // What differs is entirely WHERE the reads are taken and what the OPERATOR is invited to do to get there —
-    // which is why it is a separate manifest rather than a longer checkpoint list on the existing one. A phase
-    // that widened the capability list here would be describing a different instrument; this one is the same
-    // instrument pointed at a screen nothing has read.
+    // It was IDENTICAL to the discovery phase's list, and the sentence explaining why was worth keeping until it
+    // stopped being true: this phase measured nothing the other could not, and differed entirely in WHERE the
+    // reads were taken.
+    //
+    // 2026-08-13 added one capability, and it is listed rather than folded into `STRUCTURAL_CENSUS` because the
+    // operator grants against this list. `MEASURE_LABEL_REGION_STRUCTURE` reads what is INSIDE a fixed label's
+    // region — its tag names and how many of each — which is a different question from the page-level census
+    // above it. It is taken on the vendor form, whose three fields hold the seller's own business details, so
+    // the narrowness matters: tag names and integers, and NOT the emptiness count the guided walk takes.
     capableActions: [
       "OPEN_DEDICATED_WINDOW",
       "WAIT_OPERATOR_LOGIN_NAV",
@@ -874,6 +878,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
       "FIXED_LABEL_CONTAINMENT_PROBE",
       "CHOICE_CONTROL_LABEL_ASSOCIATION_CENSUS",
       "CONSENT_BLOCK_CENSUS",
+      "MEASURE_LABEL_REGION_STRUCTURE",
     ],
     allowsHighlight: false,
     // READ_ONLY is a claim about the AGENT, and it stays true: it reads, and it presses nothing. The operator's
@@ -1262,7 +1267,15 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
       "SellerOps는 키 발급 여부를 " +
       "확인할 수 없습니다(발급된 화면과 아닌 화면이 SellerOps가 읽는 모든 신호에서 동일합니다). 측정이 아니라 보고입니다. 그 다음에 나오는 화면은 " +
       "SellerOps가 한 번도 읽어본 적이 없는 화면이며, 아무것도 고르지 말고 그대로 둔 채 ready. " +
-      "⑥ 그 화면에서 업체 입력 방식만 직접 선택하고 ready. 여기서 실행이 끝납니다. " +
+      "⑥ 그 화면에서 업체 입력 방식만 직접 선택하고(입력란은 비워둔 채) ready. " +
+      // The checkpoint added on 2026-08-13. The operator types their own business details, so the summary says
+      // in the same breath what is read from them: tag names and counts, and NOT the emptiness count the guided
+      // walk takes. Filling a form in is not submitting it — the control that submits is the one this run still
+      // ends in front of, and the warning below is unchanged.
+      "⑦ 업체명 · URL을 직접 입력하고 IP 주소는 '추가'까지 눌러 등록한 뒤 ready. 여기서 실행이 끝납니다. " +
+      "이 단계는 각 입력란 영역 '안에 어떤 태그가 몇 개 있는지'만 읽습니다 — 입력한 값은 물론이고, 몇 개가 " +
+      "채워졌는지도 세지 않습니다(그건 안내 walk가 하는 읽기이며 이번 실행에는 없습니다). 폼을 채우는 것은 " +
+      "제출이 아니라서 계정 상태는 바뀌지 않습니다. " +
       "⚠ 그 화면의 '확인'은 실제 API 키를 발급해 라이브 계정 상태를 바꾸는 control이며, 이번 승인 범위에 포함되지 않습니다. 절대 " +
       "누르지 마세요 — 키 발급은 별도 manifest·별도 승인입니다. 어떤 입력 방식이 SellerOps에 맞는지는 이 실행이 답하지 " +
       "않습니다(측정이 아니라 제품 결정이며, 이번에는 화면의 구조만 읽습니다). SellerOps는 각 시점마다 라벨 매칭 수·표시 " +

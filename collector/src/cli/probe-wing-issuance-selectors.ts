@@ -89,6 +89,7 @@ import {
   WING_CHOICE_LABEL_CANDIDATES,
   WING_STAGE3_TERMS_OPTION_CANDIDATES,
   WING_ISSUANCE_FLOW_PLAN,
+  WING_VENDOR_METHOD_CHECKPOINTS,
   WING_VENDOR_METHOD_PLAN,
   type WingFlowPlan,
   WING_CHECKPOINT_EXPECTED_SCREEN,
@@ -98,6 +99,7 @@ import {
   type WingFlowScreen,
 } from "../action-window/coupang-wing-label-recon";
 import type { FixedLabelContainmentReading } from "../action-window/api-issuance-calibration/visual-recon-inpage";
+import type { FieldRegionCensus } from "../action-window/coupang-wing-field-region";
 import {
   LIVE_DOM_CALIBRATION_PENDING,
   WING_APPROVAL_PHASE_ENV,
@@ -397,6 +399,16 @@ export interface WingSelectorRecordDeps {
    * the same reason `probeCandidate` is: a run that cannot take it must record that it could not, never die.
    */
   choiceControlCensus?(): Promise<WingChoiceControlCensus | null>;
+  /**
+   * READ-ONLY structural census of the VENDOR FORM's three field regions — tag names and counts, and never the
+   * emptiness count the guided walk takes.
+   *
+   * Optional like every other measurement seam: a run that cannot take it records that it could not. Taken only
+   * on the vendor screen's checkpoints, where the question it answers lives — what a REGISTERED IP does to its
+   * region, which `entryRowCount` alone cannot say (it reports the same zero for "none registered" and
+   * "registered as something I do not count", and on 2026-08-13 that cost the guided walk its auto-advance).
+   */
+  vendorFieldRegions?(): Promise<FieldRegionCensus | null>;
   /** Print sanitized instructions (noop in tests). */
   announce?(): void;
   /**
@@ -733,6 +745,15 @@ async function sweepReconCandidates(
 
 /* ────────────────────────────── ISSUANCE-FLOW DISCOVERY (multi-checkpoint) ────────────────────────────── */
 
+/**
+ * The checkpoints that stand ON the vendor screen, and are therefore the ones whose readings can carry a census
+ * of its form. Derived from the plan's own list rather than re-typed, so a checkpoint added there is either in
+ * this set or visibly not.
+ */
+const VENDOR_REGION_CHECKPOINTS: readonly WingFlowCheckpoint[] = WING_VENDOR_METHOD_CHECKPOINTS.filter(
+  (c) => WING_CHECKPOINT_EXPECTED_SCREEN[c] === "VENDOR_METHOD",
+);
+
 /** One checkpoint's complete reading. `stage2` is never null: a checkpoint that ran took a sweep. */
 export interface WingFlowCheckpointReading {
   readonly checkpoint: WingFlowCheckpoint;
@@ -741,6 +762,11 @@ export interface WingFlowCheckpointReading {
   readonly stage2: WingStage2Sweep;
   /** WHICH screen this reading is of, derived from its own markers — never assumed from the checkpoint name. */
   readonly screen: WingFlowScreen;
+  /**
+   * The vendor form's region census, on the checkpoints that stand on the vendor screen. `null` everywhere else,
+   * and on a run whose deps do not offer it — the reading says "not taken", never a synthesised empty one.
+   */
+  readonly vendorRegions: FieldRegionCensus | null;
 }
 
 export interface WingFlowDiscoveryResult {
@@ -861,7 +887,13 @@ export async function runWingFlowDiscovery(
       faultCount: stage2.faults.length + stage2.containmentFaults.length,
       candidates: stage2.targets.flatMap((t) => t.candidates).map((c) => ({ id: c.id, presence: c.presence })),
     };
-    readings.push({ checkpoint, observation, observationFault, stage2, screen: wingFlowScreenFrom(screenOf) });
+    // The vendor form's regions, on the two checkpoints that stand in front of it. Taken here rather than in the
+    // sweep because it is a census of a SCREEN this plan reaches last, and running it on the purpose or terms
+    // screen would be three label lookups answering "not on this screen" three times.
+    const vendorRegions = VENDOR_REGION_CHECKPOINTS.includes(checkpoint)
+      ? await deps.vendorFieldRegions?.().catch(() => null) ?? null
+      : null;
+    readings.push({ checkpoint, observation, observationFault, stage2, screen: wingFlowScreenFrom(screenOf), vendorRegions });
 
     if (stage2.precondition !== "OK") {
       halted = "PRECONDITION_FAILED";
@@ -1562,13 +1594,26 @@ function printDiscoveryCheckpoint(
     console.error("  all do not press that screen's '확인' — THAT is what issues a real API key, and it is not in");
     console.error("  this run's approval. Let the screen settle, signal, and STOP.");
   } else if (checkpoint === "VENDOR_METHOD_SELECTED_BY_OPERATOR") {
-    console.error(`${step} — on the vendor screen, select the input method YOURSELF. Then STOP. This is the END.`);
+    console.error(`${step} — on the vendor screen, select the input method YOURSELF. Then STOP.`);
     console.error("  Pick whichever option you would pick for real; the reading is honest either way, and nothing");
     console.error("  here recommends one — which method SellerOps should use is a product decision, not a");
     console.error("  measurement, and this run is only measuring what the screen is made of.");
+    console.error("  Leave the fields it reveals EMPTY for now: this reading is the 'before' half of a pair.");
     console.error("  ⚠ DO NOT press '확인'. It issues a REAL API KEY on your live account and changes its state, and this");
     console.error("  run has no approval for it. Issuance is a SEPARATE manifest and a separate grant.");
     console.error("  SellerOps selects nothing and has no code path that could.");
+  } else if (checkpoint === "VENDOR_FORM_IP_REGISTERED_BY_OPERATOR") {
+    console.error(`${step} — fill the form in YOURSELF, then STOP. This is the END.`);
+    console.error("  Type your own 업체명 and URL, type an IP address, and press '추가' so it is REGISTERED.");
+    console.error("  That press is the whole point of this checkpoint: the guided walk decides 'an IP has been");
+    console.error("  added' from a count of list rows, and on 2026-08-13 that read zero while the address was");
+    console.error("  registered — WING shows it as a removable chip. This reading is the 'after' half, and the");
+    console.error("  difference between the two says what a registered entry actually is.");
+    console.error("  What is read: the tag names inside each field's region and how many of each. NOT what you");
+    console.error("  typed — this census does not even count how many fields are non-empty, which the guided");
+    console.error("  walk does. Nothing about 업체명 · URL · IP leaves the page.");
+    console.error("  ⚠ DO NOT press '확인'. Filling the form in changes nothing on your account; SUBMITTING it");
+    console.error("  issues a REAL API KEY, and that is a separate manifest and a separate grant.");
   } else {
     console.error(`${step} — unrecognized checkpoint. Nothing is asked of you; signal to let the run end.`);
   }
@@ -1739,6 +1784,9 @@ async function main(): Promise<void> {
     choiceAssociationCensus: (candidates) => driver.choiceAssociationCensus(candidates),
     // Armed unconditionally; `sweepStage2` calls it only under the discovery phase, so ONE gate decides.
     consentBlockCensus: (consents) => driver.consentBlockCensus(consents),
+    // …and the same shape for the vendor form's regions: wired here, called only on the checkpoints that stand
+    // on the vendor screen. Structure and tag counts; the emptiness count the guided walk takes is NOT asked for.
+    vendorFieldRegions: () => driver.vendorFieldRegions(),
     announce: () =>
       isStage2Run
         ? printStage2Instructions(readyPath, abortPath, isCalibrationRun)
@@ -1797,6 +1845,9 @@ async function main(): Promise<void> {
               observation: r.observation,
               observationFault: r.observationFault,
               stage2: stage2RecordFor(r.stage2),
+              // Null except on the vendor screen's checkpoints. Tag names and integers — and deliberately no
+              // emptiness count, so the difference between the two vendor readings is a difference in SHAPE.
+              vendorRegions: r.vendorRegions,
             })),
           },
           null,

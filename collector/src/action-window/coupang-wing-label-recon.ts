@@ -2016,6 +2016,23 @@ export const WING_FLOW_CHECKPOINTS = [
 export const WING_VENDOR_METHOD_CHECKPOINTS = [
   "VENDOR_METHOD_SCREEN_UNTOUCHED",
   "VENDOR_METHOD_SELECTED_BY_OPERATOR",
+  /**
+   * **THREE since 2026-08-13, and the third exists because a rule was written without it.**
+   *
+   * The guided walk decides "the seller has registered an IP" from `entryRowCount` — painting `li` / `tr` /
+   * `option` in the field's region. On the live walk of that day it read zero while the address WAS registered,
+   * because WING renders a registered IP as a removable chip. The rule was inferred from a shape nobody had
+   * measured, which is the one mistake this file exists to stop.
+   *
+   * So this checkpoint asks for exactly one more act than the one before it — the seller types their own
+   * 업체명 · URL, then presses `추가` — and takes the same census again. The pair before/after is the
+   * measurement; nothing here reads what they typed, and the region census is taken WITHOUT the emptiness
+   * count for that reason.
+   *
+   * It changes no marketplace state: the form is not submitted, and the control that would submit it is the one
+   * this plan still ends in front of.
+   */
+  "VENDOR_FORM_IP_REGISTERED_BY_OPERATOR",
 ] as const;
 
 export type WingFlowCheckpoint =
@@ -2116,7 +2133,11 @@ export const WING_ISSUANCE_FLOW_PLAN: WingFlowPlan = Object.freeze({
 export const WING_VENDOR_METHOD_PLAN: WingFlowPlan = Object.freeze({
   id: "VENDOR_METHOD" as const,
   checkpoints: Object.freeze([...WING_FLOW_CHECKPOINTS, ...WING_VENDOR_METHOD_CHECKPOINTS]),
-  lastCheckpoint: "VENDOR_METHOD_SELECTED_BY_OPERATOR" as const,
+  // Moved one along on 2026-08-13, to the checkpoint that has the seller fill the form in. The END is unchanged
+  // and so is everything below: the next control is still the key-issuing `확인`, and filling a form in is not
+  // submitting it. What the extra checkpoint buys is the second half of a before/after reading — see
+  // `VENDOR_FORM_IP_REGISTERED_BY_OPERATOR`.
+  lastCheckpoint: "VENDOR_FORM_IP_REGISTERED_BY_OPERATOR" as const,
   nextControl: WING_KEY_ISSUING_CONTROL,
   nextControlMutatesLiveAccount: true,
 });
@@ -2497,6 +2518,9 @@ export const WING_CHECKPOINT_EXPECTED_SCREEN: Readonly<Record<WingFlowCheckpoint
     // expectation that depends on the marker is evaluated one checkpoint later.
     VENDOR_METHOD_SCREEN_UNTOUCHED: "TERMS",
     VENDOR_METHOD_SELECTED_BY_OPERATOR: "VENDOR_METHOD",
+    // Filling the form in does not change the screen — it is the same vendor screen with the fields revealed —
+    // so this checkpoint expects the one the seller was already on.
+    VENDOR_FORM_IP_REGISTERED_BY_OPERATOR: "VENDOR_METHOD",
   });
 
 /**
