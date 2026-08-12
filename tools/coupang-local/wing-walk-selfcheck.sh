@@ -178,7 +178,7 @@ run_case "HEAD_DRIFT      (commit moved since bootstrap)" nonzero "git commit ch
 # own fields are empty. `keyIssuanceRequiresUnoccludedResult: false` is the one entry that is NOT a softening:
 # it understates a fence rather than a risk. It is in the list all the same, because the verifier is exact-match
 # and a descriptor that drifts in either direction is one the operator did not grant against.
-CANON='{"guidedWalkBoundary":{"operation":"WALK_WING_GUIDED_ISSUANCE_TUTORIAL","forbiddenFollowOnAction":"COMPLETE_WING_KEY_ISSUANCE","restsBeforeControl":"확인 (vendor-method screen)","agentCreatesKeyMaterial":false,"operatorIssuesRealKey":true,"keyCreationRuledOut":false,"agentPerformsAction":false,"agentNavigations":1,"opensLocalSellerOpsInDefaultBrowser":true,"credentialValueReadBudget":0,"performsConnectOrSync":false,"highlightedControlCount":9,"textGuidedControlCount":0,"ringedInputControlCount":0,"autoAdvancingStepCount":6,"keyCreationPressAutoPerformed":false,"keyIssuanceAdvancesOnObservedResult":true,"sellerConsentObserved":true,"vendorFormReadinessObserved":true,"keyIssuanceRequiresUnoccludedResult":true,"vendorMethodGuided":"자체개발(직접입력)","vendorMethodDecidedBy":"PRODUCT_OWNER"}}'
+CANON='{"guidedWalkBoundary":{"operation":"WALK_WING_GUIDED_ISSUANCE_TUTORIAL","forbiddenFollowOnAction":"COMPLETE_WING_KEY_ISSUANCE","restsBeforeControl":"확인 (vendor-method screen)","agentCreatesKeyMaterial":false,"operatorIssuesRealKey":true,"keyCreationRuledOut":false,"agentPerformsAction":false,"agentNavigations":1,"opensLocalSellerOpsInDefaultBrowser":true,"credentialValueReadBudget":0,"performsConnectOrSync":false,"highlightedControlCount":9,"textGuidedControlCount":0,"ringedInputControlCount":0,"autoAdvancingStepCount":6,"keyCreationPressAutoPerformed":false,"keyIssuanceAdvancesOnObservedResult":true,"sellerConsentObserved":true,"vendorFormReadinessObserved":true,"keyIssuanceRequiresUnoccludedResult":true,"reanchorRequiresOwnScreen":true,"vendorMethodGuided":"자체개발(직접입력)","vendorMethodDecidedBy":"PRODUCT_OWNER"}}'
 printf '%s' "$CANON" > "$FIXTURES/desc-ok.json"
 DESC_OK=1
 verify_walk_descriptor "$FIXTURES/desc-ok.json" >/dev/null 2>&1 || { echo "  FAIL  DESCRIPTOR · canonical descriptor rejected"; DESC_OK=0; FAILED=1; }
@@ -207,6 +207,7 @@ for soft in \
   '"keyIssuanceAdvancesOnObservedResult":false' \
   '"vendorFormReadinessObserved":false' \
   '"keyIssuanceRequiresUnoccludedResult":false' \
+  '"reanchorRequiresOwnScreen":false' \
   '"keyCreationRuledOut":"false"' \
   '"agentCreatesKeyMaterial":"false"' \
   '"agentPerformsAction":"false"' \
@@ -538,7 +539,7 @@ ENV
   # Asserted BOTH ways: the current claims must be present, and the retired ones must be gone — a disclosure
   # that gained a line while keeping its contradiction is not fixed.
   BOOT_OK=1
-  for claim in "ONE, and it is not a marketplace screen" "the LANDING" "OWN DEFAULT BROWSER" "This window is not touched at all" "NINE live-calibrated" "NONE of the rings sits on an input" "stay text-only" "SIX steps advance" "consent boxes are ticked" "refused ONCE with a message" "PAINTED OVER them" "RESTS in front" "THIS RUN ENDS WITH A REAL KEY" "PRODUCT DECISION" "never ticks a box"; do
+  for claim in "ONE, and it is not a marketplace screen" "the LANDING" "OWN DEFAULT BROWSER" "This window is not touched at all" "NINE live-calibrated" "NONE of the rings sits on an input" "stay text-only" "SIX steps advance" "consent boxes are ticked" "refused ONCE with a message" "PAINTED OVER them" "re-drawn on the screen the step is about" "RESTS in front" "THIS RUN ENDS WITH A REAL KEY" "PRODUCT DECISION" "never ticks a box"; do
     grep -qF "$claim" <<<"$out" || { echo "  FAIL  BOOTSTRAP_DISCLOSE · missing claim: $claim"; BOOT_OK=0; FAILED=1; }
   done
   # Retired claims. The last three were true and are no longer: the count moved 2 → 3 → 7 as controls were

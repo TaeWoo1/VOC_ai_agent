@@ -344,6 +344,7 @@ verify_walk_descriptor() {
     "sellerConsentObserved:true" \
     "vendorFormReadinessObserved:true" \
     "keyIssuanceRequiresUnoccludedResult:true" \
+    "reanchorRequiresOwnScreen:true" \
     "vendorMethodDecidedBy:PRODUCT_OWNER"
   do
     key="${pair%%:*}"; want="${pair#*:}"

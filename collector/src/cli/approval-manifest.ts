@@ -486,6 +486,22 @@ export interface GuidedWalkBoundary {
    */
   keyIssuanceRequiresUnoccludedResult: true;
   /**
+   * **TRUE — guidance is only ever re-drawn on the screen the step is actually about.**
+   *
+   * WING can replace the document mid-step (it bounced the walk to its password-confirm page on 2026-08-12),
+   * and the recovery that re-draws the guidance used to re-resolve the step's fixed label against whatever page
+   * had arrived. It found the password form's `확인`, ringed it, and kept the key-issuance warning attached.
+   *
+   * The re-anchor now establishes the sanitized page category and — where the screen's markers are measured —
+   * the flow screen, BEFORE it points at anything. On anything else it takes the guidance down and waits with
+   * no ring, re-anchors by itself when the seller's own screen returns, and parks with a recoverable blocker
+   * after a bounded wait rather than polling a page it cannot guide.
+   *
+   * Declared because an operator reading "SellerOps highlights the control" is entitled to know what stops that
+   * sentence from applying to a control on a completely different screen.
+   */
+  reanchorRequiresOwnScreen: true;
+  /**
    * The input method the walk names, and WHO decided it. A product decision taken with the measurement in front
    * of the owner and separated from it — the screen offers two options and both resolve identically well.
    */
@@ -514,6 +530,7 @@ export const COUPANG_WING_GUIDED_WALK_BOUNDARY: GuidedWalkBoundary = {
   sellerConsentObserved: true,
   vendorFormReadinessObserved: true,
   keyIssuanceRequiresUnoccludedResult: true,
+  reanchorRequiresOwnScreen: true,
   vendorMethodGuided: "자체개발(직접입력)",
   vendorMethodDecidedBy: "PRODUCT_OWNER",
 };

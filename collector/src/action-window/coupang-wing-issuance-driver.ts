@@ -244,6 +244,19 @@ const VENDOR_FORM_IP_FIELD_ID = "stage2.call_ip.ip_addr";
  */
 export type VendorFormReadiness = "READY" | "NOT_READY" | "UNKNOWN";
 
+/**
+ * What one re-anchor attempt did.
+ *  - `MOUNTED` — the overlay is on the step's own screen (either it never left, or it was rebuilt there).
+ *  - `WRONG_PAGE` — the sanitized page category is not one this walk lives on. The seller is somewhere else.
+ *  - `WRONG_SCREEN` — the right page, the wrong screen of it.
+ *  - `NOT_MOUNTED` — the right screen, and the mount still produced nothing. The control was not found.
+ *
+ * Three distinct not-mounted values rather than one, because they call for different things and reading them as
+ * one is what produced a silent retry loop: the first two are a seller who has gone somewhere (wait for them),
+ * the third is a page this step cannot guide (give up sooner rather than pretend).
+ */
+type RemountOutcome = "MOUNTED" | "WRONG_PAGE" | "WRONG_SCREEN" | "NOT_MOUNTED";
+
 function isWingHighlightTarget(target: CoupangIssuanceTarget): target is "issue" | "credentials" | "issue_final" {
   // Gated on the flag, not on a literal list, so WITHDRAWING the calibration removes the ring by itself. The
   // 삭제 record was withdrawn while its target stayed in a hand-written list, and only the flag being read at
@@ -762,6 +775,58 @@ const CHECKPOINT_ADVANCES_TO_CATEGORY: Readonly<Partial<Record<CoupangIssuanceTa
   vendor_confirm: "credential_shown",
 };
 
+/**
+ * **The screen each step LIVES ON** — not the screen it advances to. What the re-anchor is checked against.
+ *
+ * On 2026-08-12 WING bounced the walk to its password-confirm page mid-step-⑦. The overlay went with the
+ * document, the recovery re-resolved the fixed label `확인` against whatever was there, found exactly one — the
+ * password form's submit — and ringed it, still carrying "이 화면의 '확인'에서 실제 API 키가 발급됩니다". A
+ * confidently wrong instruction on the key-creating step, produced by the recovery written to prevent a
+ * guidance-less screen. The occlusion gate protects the ADVANCE; nothing was protecting the RE-ANCHOR.
+ *
+ * **Only screens whose markers are MEASURED appear here**, and the omission is deliberate rather than an
+ * oversight: `WING_PURPOSE_SCREEN_MARKER_MEASURED` is false — that marker has never been matched by any
+ * apparatus — so requiring `PURPOSE` would suspend guidance on the very screen it is supposed to protect,
+ * every time. `confirm_purpose` is therefore covered by the page-CATEGORY fence alone (see
+ * {@link REANCHORABLE_PAGE_CATEGORIES}), which is what actually catches the login/password case.
+ */
+const TARGET_HOME_SCREEN: Readonly<Partial<Record<CoupangIssuanceTarget, WingFlowScreen>>> = {
+  terms_consent: "TERMS",
+  issue_final: "TERMS",
+  vendor_method: "VENDOR_METHOD",
+  vendor_confirm: "VENDOR_METHOD",
+};
+
+/**
+ * **The only page categories a re-anchor may happen on.** Every step of this walk lives on the open-API page.
+ *
+ * The general half of the fence, and the half that caught the live failure: WING's password-confirm screen is
+ * not the issuance page under any reading, so no step re-anchors there — including the ones with no measured
+ * home screen. `credential_shown` is included because the classifier can answer either on the issued surface.
+ */
+const REANCHORABLE_PAGE_CATEGORIES: readonly WingPageCategory[] = ["open_api_issuance", "credential_shown"];
+
+/**
+ * How many CONSECUTIVE seconds the guidance may be suspended — the seller off the step's screen, re-authing or
+ * navigating — before the step gives up and hands back to the session to park.
+ *
+ * Generous, because the thing being waited on is a human logging in again, and cutting that short would park a
+ * run that was about to recover by itself. Finite, because the alternative is what happened at 15:05 on
+ * 2026-08-12: `panelMounted: false` in every heartbeat, a re-mount attempt every second, nothing on the seller's
+ * screen, and a log that looked healthy.
+ */
+const REMOUNT_RECOVERY_POLL_LIMIT = 60;
+
+/**
+ * How often a REPEATING observation is written while its state does not change: the first one, then every
+ * `LOG_REPEAT_EVERY`-th.
+ *
+ * The evidence has to survive — "the walk sat there for four minutes seeing nothing" is a finding — but a line
+ * per second per marker buried the live 2026-08-12 log and would bury the next one. First-and-then-sampled keeps
+ * the transition visible (the first line is the moment it started) and the duration recoverable (the count).
+ */
+const LOG_REPEAT_EVERY = 30;
+
 /** How often the screen observation runs. Slower than the latch poll: it costs three in-page locates. */
 const SCREEN_OBSERVE_POLL_MS = 1_000;
 
@@ -1186,6 +1251,11 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
   private readonly closed: Promise<void>;
   /** Armed by {@link armObserve}, cancelled by the observe loop it is waiting for. See {@link armWatchdog}. */
   private observeWatchdog: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * How many times each repeating observation has been seen since it last changed. See {@link logThrottled}:
+   * the poll loop writes a handful of these once a second, and the 2026-08-12 log is unreadable because of it.
+   */
+  private readonly repeatCounts = new Map<string, number>();
 
   constructor(page: Page, opts: CoupangWingIssuanceDriverOptions = {}) {
     this.page = page;
@@ -1503,7 +1573,20 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     const verdict = occlusionVerdict(sanitizeOcclusionReading(raw));
     // Recorded on every non-clear reading, because "the walk did not advance" and "the walk could not see the
     // page" look identical in a log that says nothing. Sanitized: a candidate id and a fixed enum.
-    if (verdict !== "CLEAR") log("aw_coupang_marker_occlusion", { markerId: spec.id, verdict });
+    //
+    // THROTTLED, and keyed by the verdict so a CHANGE always writes a first line. This runs once a second for as
+    // long as a step waits, which on 2026-08-12 meant several hundred identical `NOT_VISIBLE` lines around the
+    // three that mattered. Sampling keeps the transition and the duration; it drops only the repetition.
+    if (verdict !== "CLEAR") {
+      for (const other of ["COVERED", "NOT_VISIBLE", "UNREADABLE"] as const) {
+        if (other !== verdict) this.resetRepeatLog("occl:" + spec.id + ":" + other);
+      }
+      this.logThrottled("occl:" + spec.id + ":" + verdict, "aw_coupang_marker_occlusion", { markerId: spec.id, verdict });
+    } else {
+      for (const other of ["COVERED", "NOT_VISIBLE", "UNREADABLE"] as const) {
+        this.resetRepeatLog("occl:" + spec.id + ":" + other);
+      }
+    }
     return verdict;
   }
 
@@ -1933,6 +2016,8 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     let unreadable = 0;
     /** Whether the vendor-form gate has already told this seller once. It refuses one press, never two. */
     let formWarned = false;
+    /** Consecutive polls with no guidance on the glass because the seller is not on this step's screen. */
+    let suspended = 0;
     for (let i = 0; i < maxPolls; i++) {
       // Time-boxed, like every in-page read below it. An `evaluate` that never settles used to stop this loop
       // dead mid-iteration, with the panel still painted and nothing left watching it.
@@ -2036,7 +2121,35 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
         // that has no guidance and no button. Re-mounting is the whole recovery, and it is safe to repeat: the
         // mount is idempotent (it removes its own predecessor) and re-arms THIS step's token, so a press
         // recorded before the bounce cannot survive as a press after it.
-        await this.remountIfLost(target);
+        //
+        // …and it is only a recovery while it lands on the step's OWN screen. When it does not, the step waits
+        // WITHOUT A RING rather than pointing at whatever the current page happens to call `확인`, re-anchors by
+        // itself the moment the seller's own screen comes back, and gives up after a bounded wait instead of
+        // polling a page it cannot guide. All three of those were missing on 2026-08-12.
+        const outcome = await this.remountIfLost(target);
+        if (outcome === "MOUNTED") {
+          if (suspended > 0) {
+            log("aw_coupang_guidance_resumed", { target, polls: suspended });
+            suspended = 0;
+            this.resetRepeatLog("offpage:" + target);
+            this.resetRepeatLog("offscreen:" + target);
+          }
+        } else {
+          suspended += 1;
+          if (suspended === 1) {
+            // NOTHING ON THE GLASS while we cannot guide. A ring from before the navigation is worse than no
+            // ring: it is an instruction about a screen the seller is no longer looking at.
+            log("aw_coupang_guidance_suspended", { target, reason: outcome });
+            await this.clearHighlight().catch(() => undefined);
+          }
+          if (suspended >= REMOUNT_RECOVERY_POLL_LIMIT) {
+            // FAIL CLOSED, VISIBLY. Handing back to the session parks the run with a recoverable blocker, so the
+            // seller gets a "다시 확인" they can press once they have finished whatever took them away — rather
+            // than a walk that keeps looking healthy in a log nobody is reading.
+            log("aw_coupang_guidance_lost", { target, reason: outcome, polls: suspended }, "warn");
+            return false;
+          }
+        }
       }
       if (i < maxPolls - 1) await sleep(OVERLAY_ADVANCE_POLL_MS);
     }
@@ -2069,24 +2182,76 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
   }
 
   /**
+   * Write a REPEATING observation the first time and then every {@link LOG_REPEAT_EVERY}-th, carrying the run
+   * of identical readings so the duration survives without the flood.
+   *
+   * Keyed by the caller, and the key is reset by {@link resetRepeatLog} when the state changes — so a return to
+   * normal and a fresh departure from it both produce a line, which is the part a reader actually needs.
+   */
+  private logThrottled(key: string, event: string, meta: Record<string, unknown>, level?: "warn"): void {
+    const n = (this.repeatCounts.get(key) ?? 0) + 1;
+    this.repeatCounts.set(key, n);
+    if (n === 1 || n % LOG_REPEAT_EVERY === 0) log(event, { ...meta, ...(n > 1 ? { repeat: n } : {}) }, level);
+  }
+
+  /** Forget a throttled key, so the next occurrence logs as a first one again. */
+  private resetRepeatLog(key: string): void {
+    this.repeatCounts.delete(key);
+  }
+
+  /**
    * Re-mount this step's overlay if it is no longer on the active page — the WING navigation recovery.
    *
-   * Goes through {@link highlightTarget} rather than re-mounting directly, so the ring is re-resolved against
-   * the page that is actually there now: a stale anchor from before the navigation is exactly the defect the
-   * walk has already paid for twice. A page where the control cannot be found (the login screen) simply mounts
-   * nothing and is retried on the next poll — never a stall, never a ring pointing at nothing.
+   * **It verifies WHERE IT IS before it re-anchors.** Two fences, in cost order:
+   *
+   *  1. the sanitized page CATEGORY must be one this walk lives on. Every step happens on the open-API page, so
+   *     anything else — a login, WING's password-confirm screen, the home — is not a place to put a ring;
+   *  2. for the steps whose screen markers are MEASURED, the flow screen must be the step's own.
+   *
+   * Without them this method re-resolved a fixed label against whatever page had replaced the document, and on
+   * 2026-08-12 that put the key-issuance ring and its warning on a password submit button. Re-resolving the
+   * anchor was the right instinct and re-resolving it *anywhere* was the defect: "the control is on this page"
+   * and "this is the page the step is about" are different claims, and only the second one licenses guidance.
+   *
+   * Returns what happened so the caller can decide how long to keep waiting — a refusal here is a suspension,
+   * not a failure: the seller may simply be logging back in, and the step re-anchors by itself when their own
+   * screen comes back.
    */
-  private async remountIfLost(target: CoupangIssuanceTarget): Promise<void> {
+  private async remountIfLost(target: CoupangIssuanceTarget): Promise<RemountOutcome> {
     const page = this.activePage();
     // Time-boxed, and defaulting to "still mounted" on a page that will not answer. This check runs once a
     // second against a page that is BY DEFINITION unstable when it matters — an overlay only goes missing
     // because the document was replaced — so it was the single most likely place for the loop to hang, and it
     // was added by the very commit that introduced the recovery it guards.
-    if (await timebox(overlayMounted(page), true)) return;
-    log("aw_coupang_overlay_remount", { target });
+    if (await timebox(overlayMounted(page), true)) return "MOUNTED";
+    const category = await timebox(
+      this.readSurface().then((p) => p.pageCategory).catch(() => null),
+      null as WingPageCategory | null,
+    );
+    if (category === null || !REANCHORABLE_PAGE_CATEGORIES.includes(category)) {
+      // Sanitized: the fixed category enum, never a URL. `null` travels as `unknown` rather than as a category
+      // nobody read — a page that will not answer is not a page to ring either.
+      this.logThrottled("offpage:" + target, "aw_coupang_reanchor_off_page", { target, pageCategory: category ?? "unreadable" }, "warn");
+      return "WRONG_PAGE";
+    }
+    const home = TARGET_HOME_SCREEN[target];
+    if (home !== undefined) {
+      const screen = await timebox(
+        this.probeFlowScreen().catch(() => "UNRECOGNIZED" as WingFlowScreen),
+        "UNRECOGNIZED" as WingFlowScreen,
+      );
+      if (screen !== home) {
+        this.logThrottled("offscreen:" + target, "aw_coupang_reanchor_off_screen", { target, expected: home, observed: screen }, "warn");
+        return "WRONG_SCREEN";
+      }
+    }
+    this.logThrottled("remount:" + target, "aw_coupang_overlay_remount", { target });
     // The re-mount itself is several more evaluates plus a settle sleep. Bounded as one unit: a re-mount that
     // cannot complete must cost this poll, not the walk.
     await timebox(this.highlightTarget(target).then(() => undefined), undefined, REMOUNT_TIMEOUT_MS);
+    // …and CHECKED. A re-mount that ran and painted nothing used to read exactly like one that worked, which is
+    // how the walk spent a minute retrying with `panelMounted: false` in every heartbeat.
+    return (await timebox(overlayMounted(page), false)) ? "MOUNTED" : "NOT_MOUNTED";
   }
 
   /**
