@@ -1829,6 +1829,14 @@ async function main(): Promise<void> {
       stage2: stage2Targets,
       stage2Phase,
     });
+    // **The credential region's own scope**, taken on the SAME reading as everything else and only when the
+    // seller signalled ready — never on an aborted run, where nothing was looked at.
+    //
+    // It answers the one question step ⑧ has been guessing at: which ancestor of `Access Key` holds all three
+    // credential labels and none of the seller's vendor-form fields. `tr` held one, `table` held the vendor
+    // block too (live, 2026-08-13). Read-only, and it carries tag names and integers — there is no value read
+    // in it at all, which matters more here than anywhere else in this file: it runs on the issued screen.
+    const credentialScope = result.aborted ? null : await driver.credentialAncestorScope().catch(() => null);
     console.error("");
     console.error("WING selector recorder complete. 이제 SellerOps 탭으로 직접 돌아가세요.");
     // SANITIZED calibration record → stdout. Integers/booleans/fixed-labels/roles/opaque sigs + the sanitized
@@ -1856,6 +1864,9 @@ async function main(): Promise<void> {
           // Null on any non-Stage-2 run. On a Stage-2 run this is the ENTIRE product of the grant: the
           // precondition, the folded candidate verdicts, and the closed-vocabulary shape census.
           stage2: stage2RecordFor(result.stage2),
+          // Null when the run aborted or the anchor did not resolve. Otherwise: one row per ancestor level, each
+          // a tag name and two counts of MATCHED FIXED LABELS — never their text, never a value.
+          credentialRegionScope: credentialScope,
         },
         null,
         2,

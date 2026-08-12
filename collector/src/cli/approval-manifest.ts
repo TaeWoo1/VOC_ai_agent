@@ -744,6 +744,11 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
       "CLASSIFY_SANITIZED_PAGE_CATEGORY",
       "STRUCTURAL_CENSUS",
       "PROBE_TARGET_MATCHCOUNT",
+      // Score the credential anchor's ancestors by what they enclose — a tag name and two counts of matched
+      // fixed labels per level. Declared because it reads STRUCTURE the other two do not: `STRUCTURAL_CENSUS`
+      // is a census of the page, `PROBE_TARGET_MATCHCOUNT` is one label's count, and this is the containment
+      // relation between them. It reads no value, which on the issued screen is the property that matters.
+      "MEASURE_LABEL_REGION_STRUCTURE",
     ],
     allowsHighlight: false,
     mode: "READ_ONLY",
@@ -762,6 +767,10 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
       "CLASSIFY_SANITIZED_PAGE_CATEGORY",
       "STRUCTURAL_CENSUS",
       "PROBE_TARGET_MATCHCOUNT",
+      // Kept EXACTLY equal to the selector probe's list, and a test pins that: recon runs the same CLI down the
+      // same branch, so it takes the same credential-region reading. A capability the two do not share would
+      // mean one of them describes a run it does not perform.
+      "MEASURE_LABEL_REGION_STRUCTURE",
     ],
     allowsHighlight: false,
     mode: "READ_ONLY",

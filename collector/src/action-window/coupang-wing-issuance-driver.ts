@@ -88,8 +88,13 @@ import {
   sanitizeOcclusionReading,
   type OcclusionVerdict,
 } from "./api-issuance-calibration/occlusion-inpage";
-import { buildFieldRegionCensusScript } from "./api-issuance-calibration/field-region-inpage";
-import { sanitizeFieldRegionCensus, type FieldRegionRequest } from "./coupang-wing-field-region";
+import { buildAncestorScopeScript, buildFieldRegionCensusScript } from "./api-issuance-calibration/field-region-inpage";
+import {
+  sanitizeAncestorScope,
+  sanitizeFieldRegionCensus,
+  type AncestorScopeReading,
+  type FieldRegionRequest,
+} from "./coupang-wing-field-region";
 import { COUPANG_ISSUANCE_TOTAL_STEPS } from "./coupang-issuance/coupang-issuance-stages";
 import type {
   CoupangIssuanceProbeDriver,
@@ -205,6 +210,33 @@ const WING_CREDENTIAL_SHOWN_MARKER_SPEC: WingFlowScreenMarkerSpec = Object.freez
   candidateQuery: WING_HIGHLIGHT_LABELS.credentials.candidateQuery,
   exactText: WING_HIGHLIGHT_LABELS.credentials.exactText,
 });
+
+/**
+ * **What step ⑧'s ring must enclose, and what it must not.**
+ *
+ * The three labels the panel names ("표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요") have to be
+ * inside it, or the ring is not about what the copy says. The vendor-form labels have to be outside it: they are
+ * the seller's own business details, they are on the same screen after issuance, and a ring that reaches them —
+ * which `table` did, live on 2026-08-13 — is pointing at the wrong thing while claiming to point at the keys.
+ *
+ * `Access Key` is the anchor rather than a member of the list: it is the one label already live-calibrated, and
+ * the scope is measured relative to it.
+ */
+const CREDENTIAL_REGION_MUST_CONTAIN: readonly { candidateQuery: string; exactText: string }[] = Object.freeze([
+  { candidateQuery: WING_HIGHLIGHT_LABELS.credentials.candidateQuery, exactText: "Secret Key" },
+  { candidateQuery: WING_HIGHLIGHT_LABELS.credentials.candidateQuery, exactText: "업체코드" },
+]);
+
+/** …and the labels whose presence means the level has reached past the keys. Taken from the vendor-form specs. */
+const CREDENTIAL_REGION_MUST_EXCLUDE: readonly { candidateQuery: string; exactText: string }[] = Object.freeze(
+  ["stage2.vendor_info.baseline", "stage2.vendor_url.url"].map((id) => {
+    const spec = wingCandidateSpecById(id);
+    return { candidateQuery: spec.candidateQuery, exactText: spec.exactText };
+  }),
+);
+
+/** How far up the chain the scope is scored. Six levels is more than the observed `TH → TR → TBODY → TABLE`. */
+const CREDENTIAL_REGION_MAX_DEPTH = 6;
 
 /** The checkpoints whose completion is "a credential is now on the screen". Today: the key-issuing 확인. */
 const CHECKPOINT_ADVANCES_ON_CREDENTIAL: readonly CoupangIssuanceTarget[] = ["vendor_confirm"];
@@ -1325,6 +1357,27 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
   }
 
   /**
+   * **READ-ONLY: score the credential anchor's ancestors by what they enclose.** The measurement that decides
+   * where step ⑧'s ring goes, and the one this walk has been guessing at.
+   *
+   * `tr` framed the header row alone; `table` reached past the keys into the 연동 정보 block and enclosed the
+   * seller's own 업체명 / IP / URL (live, 2026-08-13). The right level is between them and its TAG NAME does not
+   * identify it — what does is what it contains, which is what this counts.
+   *
+   * Contains no value read of any kind, deliberately and structurally: the labels it is pointed at sit beside an
+   * Access Key, so there is no `readFilled` equivalent here and none may be added. Tag names and integers only.
+   */
+  async credentialAncestorScope(): Promise<AncestorScopeReading> {
+    const script = buildAncestorScopeScript({
+      anchor: { candidateQuery: WING_CREDENTIAL_SHOWN_MARKER_SPEC.candidateQuery, exactText: WING_CREDENTIAL_SHOWN_MARKER_SPEC.exactText },
+      mustContain: CREDENTIAL_REGION_MUST_CONTAIN,
+      mustExclude: CREDENTIAL_REGION_MUST_EXCLUDE,
+      maxDepth: CREDENTIAL_REGION_MAX_DEPTH,
+    });
+    return sanitizeAncestorScope(await this.evalStr<unknown>(this.activePage(), script));
+  }
+
+  /**
    * READ-ONLY shape census of the surface's choice controls — counts and closed-vocabulary categories only.
    *
    * A DEDICATED method rather than a general `evaluate` seam on purpose: exposing "run this string in the page"
@@ -1531,7 +1584,7 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     );
     if (res === null) {
       // Sanitized like every other reading here: an id and a flag, never text, a URL, or a value.
-      log("aw_coupang_flow_marker", { markerId: spec.id, unreadable: true });
+      this.logThrottled("flow:" + spec.id + ":unreadable", "aw_coupang_flow_marker", { markerId: spec.id, unreadable: true });
       return null;
     }
     // The MEASUREMENT, recorded. Both flow-screen markers are unproven — the purpose heading has never been
@@ -1542,12 +1595,19 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     // Sanitized: a candidate ID and integers. No text, no URL, no value. `hiddenCount` and `tag` travel because
     // a hidden match is not a screen the seller can see, and a tag that was expected rather than OBSERVED is
     // how a calibration record went wrong here before.
-    log("aw_coupang_flow_marker", {
-      markerId: spec.id,
-      visibleCount: res.count,
-      ...(typeof res.hiddenCount === "number" ? { hiddenCount: res.hiddenCount } : {}),
-      ...(res.tag ? { observedTag: res.tag } : {}),
-    });
+    // THROTTLED on the reading itself, so any CHANGE writes a first line immediately and only a steady state is
+    // sampled. `probeFlowScreen` reads three or four of these once a second for as long as a step waits, which
+    // is what buried the two readings that mattered on the 2026-08-12 log.
+    this.logThrottled(
+      `flow:${spec.id}:${res.count}:${res.hiddenCount ?? "-"}:${res.tag ?? "-"}`,
+      "aw_coupang_flow_marker",
+      {
+        markerId: spec.id,
+        visibleCount: res.count,
+        ...(typeof res.hiddenCount === "number" ? { hiddenCount: res.hiddenCount } : {}),
+        ...(res.tag ? { observedTag: res.tag } : {}),
+      },
+    );
     return res.count >= 1;
   }
 
@@ -1647,7 +1707,27 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     );
     const reading = sanitizeFieldRegionCensus(raw, [req.id]).readings[0];
     if (!reading) return;
-    log("aw_coupang_credential_region", { ...reading });
+    // **Field by field, never spread.** Two reasons, and the first one already cost a measurement: `safeMeta`
+    // collapses any non-scalar to a type tag, so `ancestorTags` — the whole point of this reading — logged as
+    // `"[object]"` on the 2026-08-12 walk. The chain is joined into a scalar here instead.
+    //
+    // The second is the one that matters more: a spread logs whatever the shape grows next. This reading is
+    // taken on the screen holding the seller's Access Key, so what leaves it is enumerated by hand. Every value
+    // below is a tag name (`^[A-Z][A-Z0-9]{0,19}$`, enforced by the sanitizer), an integer, or a fixed enum.
+    // `filledTextInputCount` cannot appear at all — the request never asks for it.
+    log("aw_coupang_credential_region", {
+      markerId: reading.id,
+      visibleCount: reading.visibleCount,
+      hiddenCount: reading.hiddenCount,
+      ...(reading.observedTag ? { observedTag: reading.observedTag } : {}),
+      ...(reading.ancestorTags && reading.ancestorTags.length > 0
+        ? { ancestorChain: reading.ancestorTags.join(">"), ancestorDepth: reading.ancestorTags.length }
+        : {}),
+      ...(reading.association ? { association: reading.association } : {}),
+      ...(reading.regionTag ? { regionTag: reading.regionTag } : {}),
+      ...(reading.inputCount !== undefined ? { inputCount: reading.inputCount } : {}),
+      ...(reading.entryRowCount !== undefined ? { entryRowCount: reading.entryRowCount } : {}),
+    });
   }
 
   /**
@@ -2224,8 +2304,11 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     // because the document was replaced — so it was the single most likely place for the loop to hang, and it
     // was added by the very commit that introduced the recovery it guards.
     if (await timebox(overlayMounted(page), true)) return "MOUNTED";
+    // `readPageCategory`, NOT `readSurface`: the two compute the same category and only the latter LOGS it. This
+    // runs once a second for as long as the seller is away, so going through the logging one wrote a line per
+    // second about a page nobody was being guided on.
     const category = await timebox(
-      this.readSurface().then((p) => p.pageCategory).catch(() => null),
+      this.readPageCategory(page).catch(() => null),
       null as WingPageCategory | null,
     );
     if (category === null || !REANCHORABLE_PAGE_CATEGORIES.includes(category)) {

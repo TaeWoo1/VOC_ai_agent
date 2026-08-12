@@ -339,6 +339,20 @@ export function CoupangIssuanceGuidedWalkthrough({
               >
                 SellerOps로 돌아가 연결 정보 입력하기
               </button>
+              {/* The keys are on a WING window SellerOps opened, and WING shows the secret key ONCE — so the
+                  end of the walk is the WORST moment to lose that window behind the others. The label says
+                  what it is for here rather than naming a step, because there is no step left to find. It
+                  raises the EXISTING window and can open nothing: the runtime refuses unless one is open. */}
+              {canRaiseWindow && (
+                <button
+                  type="button"
+                  className="btn-ghost block w-full"
+                  onClick={() => effectiveCommand?.("FIND_CURRENT_STEP")}
+                  disabled={busy}
+                >
+                  쿠팡 윙 키 화면 다시 보기
+                </button>
+              )}
             </div>
           )}
         </>

@@ -15,6 +15,85 @@
 import type { FieldRegionRequest } from "../coupang-wing-field-region";
 import { FIELD_REGION_ANCESTOR_DEPTH } from "../coupang-wing-field-region";
 
+/**
+ * **Score the anchor's ancestors by what they enclose** — the reading that decides where step ⑧'s ring goes.
+ *
+ * `mustContain` and `mustExclude` are fixed labels, matched by the same whole-text + paints rules as everything
+ * else here. For each ancestor level it returns how many of each GROUP have at least one painting match inside
+ * it. Nothing else: a tag name and two integers per level.
+ *
+ * It reads no value at all — there is no `readFilled` equivalent, and there must not be, because the labels this
+ * is pointed at sit next to the seller's Access Key.
+ */
+export function buildAncestorScopeScript(input: {
+  anchor: { candidateQuery: string; exactText: string };
+  mustContain: readonly { candidateQuery: string; exactText: string }[];
+  mustExclude: readonly { candidateQuery: string; exactText: string }[];
+  maxDepth: number;
+}): string {
+  return `(function () {
+  /* wing-ancestor-scope (value-free OUTPUT: { anchorResolved, rows: [{ depth, tag, containCount, excludeCount }] }) */
+  var slice = Function.prototype.call.bind(Array.prototype.slice);
+  var ANCHOR = ${JSON.stringify(input.anchor)};
+  var CONTAIN = ${JSON.stringify(input.mustContain)};
+  var EXCLUDE = ${JSON.stringify(input.mustExclude)};
+  var MAX_DEPTH = ${JSON.stringify(input.maxDepth)};
+  function norm(s) { return String(s == null ? '' : s).replace(/\\s+/g, ' ').trim(); }
+  function accName(el) {
+    var al = el.getAttribute ? el.getAttribute('aria-label') : null;
+    if (al && norm(al).length) { return norm(al); }
+    /* text read ONLY to compare against a KNOWN fixed label; nothing derived from it is returned. */
+    return norm(el.textContent || '');
+  }
+  function paints(node) {
+    if (!node || !node.getClientRects) { return false; }
+    var cs = window.getComputedStyle ? window.getComputedStyle(node) : null;
+    if (cs && (cs.display === 'none' || cs.visibility === 'hidden')) { return false; }
+    if (cs && cs.display === 'contents') { return node.childElementCount > 0; }
+    var rects = node.getClientRects();
+    if (!rects || rects.length === 0) { return false; }
+    var r = node.getBoundingClientRect ? node.getBoundingClientRect() : null;
+    return !!r && r.width > 0 && r.height > 0;
+  }
+  function matching(spec) {
+    var cands; try { cands = slice(document.querySelectorAll(spec.candidateQuery)); } catch (e) { return []; }
+    var want = norm(spec.exactText), out = [], CAP = 4000;
+    for (var i = 0; i < cands.length && i < CAP; i++) {
+      if (accName(cands[i]) === want && paints(cands[i])) { out.push(cands[i]); }
+    }
+    return out;
+  }
+  var anchors = matching(ANCHOR);
+  if (anchors.length !== 1) { return { anchorResolved: false, rows: [] }; }
+  /* Resolved ONCE, document-wide, then tested for containment per level — the alternative is re-querying the
+     whole document at every depth, which on a live marketplace page is the same reading taken six times. */
+  var contain = [], exclude = [];
+  for (var c = 0; c < CONTAIN.length; c++) { contain.push(matching(CONTAIN[c])); }
+  for (var x = 0; x < EXCLUDE.length; x++) { exclude.push(matching(EXCLUDE[x])); }
+  function groupsInside(groups, root) {
+    var n = 0;
+    for (var g = 0; g < groups.length; g++) {
+      for (var e = 0; e < groups[g].length; e++) {
+        if (root.contains && root.contains(groups[g][e])) { n++; break; }
+      }
+    }
+    return n;
+  }
+  var rows = [], node = anchors[0].parentElement, depth = 1;
+  while (node && depth <= MAX_DEPTH) {
+    rows.push({
+      depth: depth,
+      tag: node.tagName,
+      containCount: groupsInside(contain, node),
+      excludeCount: groupsInside(exclude, node)
+    });
+    node = node.parentElement;
+    depth++;
+  }
+  return { anchorResolved: true, rows: rows };
+})()`;
+}
+
 /** The tags that take typed text. A checkbox or a radio is not a field the seller fills in. */
 const TEXTUAL_INPUT_TYPES = ["text", "url", "email", "tel", "search", "number", "password"] as const;
 

@@ -183,14 +183,37 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
     expect(screen.getByRole("status", { name: "화면 안내 진행 상태" }).contains(btn)).toBe(false);
   });
 
-  it("is gone once the run is COMPLETED — there is no step left to go back to", () => {
+  /**
+   * **The end of the walk is the WORST moment to lose that window.** WING shows the secret key once, and the
+   * keys are on a window SellerOps opened. So the control survives completion — under a label that says what it
+   * is for, because there is no "current step" left to find.
+   */
+  it("becomes '키 화면 다시 보기' once the run is COMPLETED — the keys are still on that window", async () => {
+    const onCommand = vi.fn();
     render(
       <CoupangIssuanceGuidedWalkthrough
         onIssued={vi.fn()}
         run={issuanceRun({ status: "COMPLETED", allowedCommands: ["FIND_CURRENT_STEP"] })}
+        onCommand={onCommand}
+      />,
+    );
+    // The step-shaped label is gone; the purpose-shaped one is there, and it sends the same read-only command.
+    expect(screen.queryByRole("button", { name: "쿠팡 윙 창 앞으로 가져오기" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "쿠팡 윙 키 화면 다시 보기" }));
+    expect(onCommand).toHaveBeenCalledWith("FIND_CURRENT_STEP");
+    // …and the hand-off to credential entry is still the primary action.
+    expect(screen.getByRole("button", { name: "SellerOps로 돌아가 연결 정보 입력하기" })).toBeInTheDocument();
+  });
+
+  it("…and shows neither when the completed run does not allow it — no window to raise", () => {
+    render(
+      <CoupangIssuanceGuidedWalkthrough
+        onIssued={vi.fn()}
+        run={issuanceRun({ status: "COMPLETED", allowedCommands: [] })}
         onCommand={vi.fn()}
       />,
     );
+    expect(screen.queryByRole("button", { name: "쿠팡 윙 키 화면 다시 보기" })).toBeNull();
     expect(screen.queryByRole("button", { name: "쿠팡 윙 창 앞으로 가져오기" })).toBeNull();
   });
 

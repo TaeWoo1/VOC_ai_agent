@@ -9,9 +9,14 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { buildFieldRegionCensusScript } from "../../src/action-window/api-issuance-calibration/field-region-inpage";
 import {
+  buildAncestorScopeScript,
+  buildFieldRegionCensusScript,
+} from "../../src/action-window/api-issuance-calibration/field-region-inpage";
+import {
+  chooseAncestorScope,
   FIELD_REGION_ANCESTOR_DEPTH,
+  sanitizeAncestorScope,
   sanitizeFieldRegionCensus,
   type FieldRegionRequest,
 } from "../../src/action-window/coupang-wing-field-region";
@@ -75,6 +80,10 @@ class El {
   }
   descendants(): El[] {
     return this.children.flatMap((c) => [c, ...c.descendants()]);
+  }
+  /** DOM `contains` is reflexive — a node contains itself — and the ancestor scoring relies on that. */
+  contains(other: El): boolean {
+    return other === this || this.descendants().includes(other);
   }
   querySelectorAll(sel: string): El[] {
     return matchAll(this.descendants(), sel);
@@ -308,6 +317,88 @@ describe("what step ⑧ anchors its ring on", () => {
     const fn = src.slice(from, src.indexOf("\n  /**", from + 10));
     expect(from).toBeGreaterThan(0);
     expect(fn).not.toContain("readFilled");
+  });
+});
+
+describe("scoring the anchor's ancestors — where step ⑧'s ring belongs", () => {
+  /**
+   * The live shape, 2026-08-13: the credential table and the 연동 정보 block are inside one container, so `table`
+   * reached past the keys and swallowed the seller's own 업체명 / IP / URL. `tr` framed the header alone. The
+   * right level is between them, and its TAG says nothing useful — what distinguishes it is what it contains.
+   */
+  function issuedScreen(): El {
+    const keyRow = (label: string) => new El({ tag: "tr", children: [new El({ tag: "th", text: label }), new El({ tag: "td", text: "REDACTED" })] });
+    const credentialTable = new El({
+      tag: "table",
+      children: [new El({ tag: "tbody", children: [keyRow("Access Key"), keyRow("Secret Key"), keyRow("업체코드")] })],
+    });
+    const vendorTable = new El({
+      tag: "table",
+      children: [
+        new El({ tag: "thead", children: [new El({ tag: "tr", children: [new El({ tag: "th", text: "업체명" }), new El({ tag: "th", text: "IP주소" })] })] }),
+      ],
+    });
+    return new El({
+      tag: "section",
+      children: [new El({ tag: "div", children: [credentialTable] }), new El({ tag: "div", children: [vendorTable] })],
+    });
+  }
+
+  const spec = (t: string) => ({ candidateQuery: DT_QUERY, exactText: t });
+  const CONTAIN = [spec("Access Key"), spec("Secret Key"), spec("업체코드")];
+  const EXCLUDE = [spec("업체명"), spec("IP주소")];
+
+  function scopeOf(root: El) {
+    const all = [root, ...root.descendants()];
+    const document = {
+      querySelectorAll: (sel: string): El[] => matchAll(all, sel),
+      getElementById: (): El | null => null,
+    };
+    const window = { getComputedStyle: (el: El) => el.computedStyle() };
+    const script = buildAncestorScopeScript({ anchor: spec("Access Key"), mustContain: CONTAIN, mustExclude: EXCLUDE, maxDepth: 8 });
+    return sanitizeAncestorScope(new Function("document", "window", `return (${script});`)(document, window));
+  }
+
+  it("**picks the level that holds all three keys and none of the vendor fields**", () => {
+    const reading = scopeOf(issuedScreen());
+    const chosen = chooseAncestorScope(reading, CONTAIN.length);
+    expect(chosen).not.toBeNull();
+    // TR → TBODY → TABLE: the header row holds one key, the body holds all three, and the table is still clean
+    // because the vendor block is a sibling. The shallowest clean level wins.
+    expect(chosen!.tag).toBe("TBODY");
+    expect(chosen!.depth).toBe(2);
+  });
+
+  it("**rejects the level that reaches the seller's own fields** — the defect, scored", () => {
+    const reading = scopeOf(issuedScreen());
+    const outer = reading.rows.filter((r) => r.excludeCount > 0);
+    // Everything above the credential table sees 업체명/IP주소. That is exactly what the live ring was doing.
+    expect(outer.length).toBeGreaterThan(0);
+    expect(outer.every((r) => r.depth > 3)).toBe(true);
+  });
+
+  it("returns null rather than the closest near-miss when no level qualifies", () => {
+    // A page where a key label is missing: three-of-three is not satisfiable, so nothing is chosen. Guessing
+    // "the best available" is how a ring ends up framing something nobody measured.
+    const reading = scopeOf(
+      new El({ tag: "section", children: [new El({ tag: "table", children: [new El({ tag: "tr", children: [new El({ tag: "th", text: "Access Key" })] })] })] }),
+    );
+    expect(chooseAncestorScope(reading, CONTAIN.length)).toBeNull();
+  });
+
+  it("carries tags and counts only — no text, no value, no key material", () => {
+    const dump = JSON.stringify(scopeOf(issuedScreen()));
+    expect(dump).not.toContain("REDACTED");
+    expect(dump).not.toContain("Access Key");
+    expect(dump).not.toContain("업체명");
+  });
+
+  it("an anchor that does not resolve uniquely reads nothing at all", () => {
+    expect(sanitizeAncestorScope({ rows: [{ depth: 1, tag: "TR", containCount: 3, excludeCount: 0 }] })).toEqual({
+      anchorResolved: false,
+      rows: [],
+    });
+    expect(chooseAncestorScope({ anchorResolved: false, rows: [] }, 3)).toBeNull();
   });
 });
 

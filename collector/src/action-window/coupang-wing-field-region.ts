@@ -95,6 +95,64 @@ export interface FieldRegionCensus {
   readonly readings: readonly FieldRegionReading[];
 }
 
+/**
+ * **One level of the anchor's ancestor chain, scored by what it encloses.** The measurement that decides where
+ * step ⑧'s ring goes.
+ *
+ * `tr` framed the header row alone; `table` reached past the keys and swallowed the 연동 정보 block, with the
+ * seller's own 업체명 / IP / URL in it. The right region is between the two, and no amount of reading the chain's
+ * TAG NAMES says which level it is — `DIV > DIV > DIV` is a real answer and a useless one. What distinguishes
+ * the levels is what they CONTAIN, so that is what is counted: how many of the credential labels are inside, and
+ * how many of the labels that must stay outside.
+ *
+ * Counts of matched fixed labels — never their text, never a value, never a selector.
+ */
+export interface AncestorScopeRow {
+  /** 1 = the anchor's parent. The anchor itself is never a row: a label is not a region. */
+  readonly depth: number;
+  readonly tag: string;
+  /** How many of the `mustContain` labels paint inside this ancestor. */
+  readonly containCount: number;
+  /** How many of the `mustExclude` labels do. The first non-zero level is one level too far. */
+  readonly excludeCount: number;
+}
+
+export interface AncestorScopeReading {
+  /** Whether the anchor label itself resolved to exactly one painting element. Nothing below is read if not. */
+  readonly anchorResolved: boolean;
+  readonly rows: readonly AncestorScopeRow[];
+}
+
+/**
+ * The SHALLOWEST ancestor holding every label that must be inside and none that must be outside — or `null` when
+ * no level does, which is a real answer and must not be rounded up to "use the closest one that nearly works".
+ */
+export function chooseAncestorScope(reading: AncestorScopeReading, mustContainCount: number): AncestorScopeRow | null {
+  if (!reading.anchorResolved) return null;
+  for (const row of [...reading.rows].sort((a, b) => a.depth - b.depth)) {
+    if (row.containCount === mustContainCount && row.excludeCount === 0) return row;
+  }
+  return null;
+}
+
+/** Fold a raw ancestor-scope answer into the declared shape, dropping anything else. */
+export function sanitizeAncestorScope(raw: unknown): AncestorScopeReading {
+  const obj = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  if (obj["anchorResolved"] !== true) return { anchorResolved: false, rows: [] };
+  const rows: AncestorScopeRow[] = [];
+  for (const r of Array.isArray(obj["rows"]) ? (obj["rows"] as unknown[]) : []) {
+    if (!r || typeof r !== "object") continue;
+    const row = r as Record<string, unknown>;
+    const depth = count(row["depth"]);
+    const t = tag(row["tag"]);
+    const containCount = count(row["containCount"]);
+    const excludeCount = count(row["excludeCount"]);
+    if (depth === undefined || depth < 1 || t === undefined || containCount === undefined || excludeCount === undefined) continue;
+    rows.push({ depth, tag: t, containCount, excludeCount });
+  }
+  return { anchorResolved: true, rows };
+}
+
 const ASSOCIATIONS: ReadonlySet<string> = new Set<string>(FIELD_REGION_ASSOCIATIONS);
 
 function count(raw: unknown): number | undefined {

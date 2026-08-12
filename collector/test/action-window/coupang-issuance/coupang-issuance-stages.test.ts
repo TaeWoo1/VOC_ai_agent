@@ -138,11 +138,18 @@ describe("coupang issuance stages — the WAITING_FOR_HUMAN invariant", () => {
 });
 
 describe("coupang issuance stages — allowed commands", () => {
-  it("terminal stages allow nothing", () => {
-    expect(coupangIssuanceAllowedCommands("guidance_complete")).toEqual([]);
-    expect(coupangIssuanceAllowedCommands("operator_aborted")).toEqual([]);
-    expect(isCoupangIssuanceTerminal("guidance_complete")).toBe(true);
-    expect(isCoupangIssuanceTerminal("operator_aborted")).toBe(true);
+  it("**terminal stages allow nothing that DOES anything** — only 'show me where I am'", () => {
+    // It was the empty list, which is right about every command that acts and wrong about this one: the walk
+    // ends with the seller's Access Key on a window SellerOps opened, and a completed run that cannot bring its
+    // own window back tells them to go and find it themselves. `FIND_CURRENT_STEP` completes no step, performs
+    // nothing, and cannot open a window — the lazy driver refuses to launch one for it.
+    for (const stage of ["guidance_complete", "operator_aborted"] as const) {
+      expect(isCoupangIssuanceTerminal(stage), stage).toBe(true);
+      expect(coupangIssuanceAllowedCommands(stage), stage).toEqual(["FIND_CURRENT_STEP"]);
+      for (const forbidden of ["REQUEST_STEP_RECHECK", "RESUME_RUN", "PAUSE_RUN", "CANCEL_RUN", "SWITCH_TO_MANUAL", "SET_GUIDANCE_ENABLED"]) {
+        expect(coupangIssuanceAllowedCommands(stage), `${stage}/${forbidden}`).not.toContain(forbidden);
+      }
+    }
   });
 
   it("guiding barriers offer recheck + PAUSE + cancel + manual, and NEVER a click/submit/read command", () => {
