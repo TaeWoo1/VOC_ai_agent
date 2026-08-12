@@ -725,6 +725,12 @@ const IN_PAGE_READ_TIMEOUT_MS = 4_000;
 const REMOUNT_TIMEOUT_MS = 10_000;
 
 /**
+ * The return to SellerOps opens a page and focuses it, so it gets a load-sized box rather than a read-sized one.
+ * Bounded all the same: the walk is finished by then, and a slow connect page must not hold the run open.
+ */
+const RETURN_TO_SELLEROPS_TIMEOUT_MS = 15_000;
+
+/**
  * Resolve `work`, or `fallback` if it has not settled within `ms` — and treat a rejection as the fallback too,
  * so a caller gets one fail-closed value for both ways a read can fail to produce an answer.
  */
@@ -820,6 +826,41 @@ export const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string
 };
 
 /**
+ * **The one line the panel shows before the seller presses anything.**
+ *
+ * {@link OPERATOR_STEP_LABELS} is the complete copy and stays exactly as it is — it is what the approval
+ * harness reproduces, what the frontend is pinned to, and what the panel still renders. What changed is WHERE:
+ * the complete copy moved behind the panel's `자세히` disclosure and these lines took the front. The panel had
+ * grown to five sentences over four lines, docked on top of a marketplace dialog, at the moment the seller's
+ * attention belongs on the dialog — a panel nobody finishes reading is not safer for being longer.
+ *
+ * Each of these is the step's OWN instruction, shortened by dropping the explanation, never by dropping a
+ * clause that changes what the seller is agreeing to. `vendor_confirm` keeps its warning IN the brief, because
+ * that step's one-line summary without it would be an instruction to press a button that creates a real
+ * credential — and the collapsed state has to be safe to act on by itself.
+ */
+export const OPERATOR_STEP_BRIEF: Readonly<Record<CoupangIssuanceTarget, string>> = {
+  reach_open_api: "WING에 로그인한 뒤 '오픈API 키 발급' 페이지로 이동하세요. 도착하면 자동으로 넘어갑니다.",
+  issue: "'API Key 발급 받기'를 직접 누르세요. 키는 아직 만들어지지 않습니다.",
+  confirm_purpose: "사용 목적이 'OPEN API'인지 확인하고 '확인'을 직접 누르세요.",
+  terms_consent: "약관을 직접 읽고 판단하신 뒤 동의 체크박스 2개를 선택하세요.",
+  issue_final: "'약관 동의 및 Key 발급받기'를 직접 누르세요. 이 버튼에서는 키가 발급되지 않습니다.",
+  vendor_method: "입력 방식에서 '자체개발(직접입력)'을 직접 선택하세요.",
+  vendor_confirm: "⚠ 이 화면의 '확인'에서 실제 API 키가 발급됩니다. 업체명 · URL을 입력하고 IP는 '추가'까지 누른 뒤, '확인'을 직접 누르세요.",
+  credentials: "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요.",
+  return: "아래 버튼을 눌러 SellerOps로 돌아가세요.",
+};
+
+/**
+ * **The steps whose panel opens ALREADY EXPANDED.**
+ *
+ * Both carry safety copy the seller must not have to press a button to see: the control that creates the
+ * credential, and the one immediately before it that is routinely mistaken for it. Everywhere else the
+ * disclosure starts closed, which is where the lightening actually comes from — seven steps, not nine.
+ */
+export const STEPS_WITH_DETAIL_OPEN: readonly CoupangIssuanceTarget[] = ["issue_final", "vendor_confirm"];
+
+/**
  * **The chip above the highlighted control** — which step this is, not what to do about it.
  *
  * The instruction lives in the panel, which wraps and has room for it. The chip cannot wrap (it would grow down
@@ -861,6 +902,23 @@ export interface CoupangWingIssuanceDriverOptions {
   context?: WingContextLike;
   /** Pause between VERIFY_REACH settle-polls. Defaults to {@link VERIFY_POLL_MS}; tests set 0. */
   verifyPollMs?: number;
+  /**
+   * **The `SellerOps로 돌아가기` button's actual return, injected.**
+   *
+   * The last step's button recorded a step completion and moved nothing, while its label promised a move — the
+   * seller pressed it, watched their screen stay on WING, and said so. The WING window and the SellerOps tab are
+   * separate windows, so nothing the driver reads can bring the seller back; something has to open the connect
+   * screen for them.
+   *
+   * It is INJECTED rather than done here for a reason that is not stylistic: this driver's source guard forbids
+   * `.goto(` / `window.open` outright, and it should — a driver that can navigate the seller's window is one
+   * misplaced call away from driving a marketplace page. The carrier owns the one navigation the walk already
+   * had (the landing) and now owns this one, screened to a LOOPBACK SellerOps origin and fail-closed.
+   *
+   * Called at most ONCE, and only after the seller presses that button. Absent ⇒ the step behaves exactly as it
+   * did before, and says so in the log rather than silently pretending it returned.
+   */
+  returnToSellerOps?: () => Promise<void>;
 }
 
 /**
@@ -1473,7 +1531,11 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
       stepNumber: OVERLAY_STEP[target],
       totalSteps: COUPANG_ISSUANCE_TOTAL_STEPS,
       copyKey: `actionWindow.coupangIssuance.step.${target}`,
-      label: OPERATOR_STEP_LABELS[target],
+      // The BRIEF leads and the complete copy sits behind the panel's disclosure — which still renders it, and
+      // renders it open on the two steps that carry a safety claim.
+      label: OPERATOR_STEP_BRIEF[target],
+      detail: OPERATOR_STEP_LABELS[target],
+      ...(STEPS_WITH_DETAIL_OPEN.includes(target) ? { detailExpanded: true } : {}),
       // The chip gets the short title; the panel keeps the instruction. Without this both rendered the same
       // long string and the chip's copy ran off the viewport.
       badgeLabel: OPERATOR_STEP_TITLES[target],
@@ -1612,7 +1674,12 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
       // Time-boxed, like every in-page read below it. An `evaluate` that never settles used to stop this loop
       // dead mid-iteration, with the panel still painted and nothing left watching it.
       const pressed = await timebox(readOverlayAdvancePressed(this.activePage(), token), false);
-      if (pressed) return true;
+      if (pressed) {
+        // The one step whose button promises something OUTSIDE this page. Performed on the press and nowhere
+        // else, so nothing moves the seller's window while they still have work on WING.
+        if (target === "return") await this.returnToSellerOps();
+        return true;
+      }
       if (i % screenEvery === 0) {
         if (screenMayAdvance && (await this.probeFlowScreen().catch(() => "UNRECOGNIZED" as WingFlowScreen)) === expected) return true;
         // The consent step changes no screen, so its completion is the seller's own two ticks — observed, never
@@ -1643,6 +1710,30 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
       if (i < maxPolls - 1) await sleep(OVERLAY_ADVANCE_POLL_MS);
     }
     return false;
+  }
+
+  /**
+   * Take the seller back to SellerOps, through the capability the carrier injected.
+   *
+   * Bounded and swallowing, deliberately: the walk is COMPLETE by the time this runs — the keys exist and the
+   * seller has copied them — so a return that fails must not turn a finished walk into a failed one. What it
+   * must not do is fail silently, hence the log line either way. The keys stay on screen: the carrier opens the
+   * connect page beside the WING tab rather than navigating away from it.
+   */
+  private async returnToSellerOps(): Promise<void> {
+    const go = this.opts.returnToSellerOps;
+    if (!go) {
+      // The state the seller met on 2026-08-12. Now it is a recorded fact rather than a button that quietly
+      // did nothing.
+      log("aw_coupang_return_not_wired", {});
+      return;
+    }
+    log("aw_coupang_return_to_sellerops", {});
+    await timebox(
+      go().catch(() => undefined),
+      undefined,
+      RETURN_TO_SELLEROPS_TIMEOUT_MS,
+    );
   }
 
   /**

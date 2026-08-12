@@ -21,8 +21,10 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CoupangWingIssuanceDriver,
+  OPERATOR_STEP_BRIEF,
   OPERATOR_STEP_LABELS,
   OPERATOR_STEP_TITLES,
+  STEPS_WITH_DETAIL_OPEN,
 } from "../../../src/action-window/coupang-wing-issuance-driver";
 import type { CoupangIssuanceTarget } from "../../../src/action-window/coupang-issuance/coupang-issuance-driver";
 
@@ -43,7 +45,12 @@ interface MountCall {
   stepNumber: number;
   label?: string;
   badgeLabel?: string;
+  detail?: string;
+  detailExpanded?: boolean;
 }
+
+/** A value-free locate result the fake returns for the audited fixed-label script — count + an opaque sig. */
+const FAKE_LOCATE = { count: 1, sig: "a1b2c3d4e5f60718" };
 
 /**
  * A read-only fake page that can tell the driver's three in-page calls apart:
@@ -63,8 +70,12 @@ class FakePage {
   }
   async evaluate(script: unknown, arg?: unknown): Promise<unknown> {
     if (typeof script === "string") {
-      this.order.push(script.includes("coupang-issuance-cleartag") ? "clearTag" : "script");
-      return true;
+      const isClear = script.includes("coupang-issuance-cleartag");
+      this.order.push(isClear ? "clearTag" : "script");
+      // The clear-tag IIFE answers a boolean; the fixed-label locate answers `{count, sig}`. Returning `true`
+      // for both made every RING-path target resolve to `count: undefined` and mount nothing, so a test could
+      // only ever reach the docked steps — which is how the anchored steps' panel options went unasserted.
+      return isClear ? true : { ...FAKE_LOCATE };
     }
     if (arg !== undefined) {
       this.order.push("mount");
@@ -137,7 +148,10 @@ describe("the locator-less steps all present themselves DOCKED, with no stale an
       const { driver, page } = driverWith(true);
       await driver.highlightTarget(target);
       expect(page.mounts[0]?.badgeLabel, target).toBe(OPERATOR_STEP_TITLES[target]);
-      expect(page.mounts[0]?.label, target).toBe(OPERATOR_STEP_LABELS[target]);
+      // The panel leads with the BRIEF and carries the complete copy behind its disclosure — which still
+      // renders it, so nothing the walk ever said has been dropped, only moved one press away.
+      expect(page.mounts[0]?.label, target).toBe(OPERATOR_STEP_BRIEF[target]);
+      expect(page.mounts[0]?.detail, target).toBe(OPERATOR_STEP_LABELS[target]);
     }
   });
 });
@@ -225,6 +239,53 @@ describe("the chip's title and the panel's instruction are different things", ()
     expect(badge).toContain("max-width:");
     // `nowrap` STAYS: a wrapping chip grows downward over the control it points at.
     expect(badge).toContain("white-space:nowrap");
+  });
+});
+
+/**
+ * The panel leads with a BRIEF and keeps the complete copy behind a disclosure. What has to hold is that
+ * nothing was lost in the shortening, and that the two steps carrying a safety claim never hide it.
+ */
+describe("the panel's brief — shorter, and still safe to act on alone", () => {
+  const TARGETS = Object.keys(OPERATOR_STEP_LABELS) as CoupangIssuanceTarget[];
+
+  it("every step has one, and it is shorter than the complete copy it fronts", () => {
+    for (const target of TARGETS) {
+      const brief = OPERATOR_STEP_BRIEF[target];
+      expect(brief, target).toBeTruthy();
+      expect(brief.length, `${target} brief is not shorter`).toBeLessThanOrEqual(OPERATOR_STEP_LABELS[target].length);
+    }
+  });
+
+  it("**the key-creating step's brief carries the warning itself** — a collapsed panel must still be honest", () => {
+    // The one step where the collapsed state, read alone, would otherwise be "press this button". It names the
+    // consequence before the instruction, and its detail opens by itself on top of that.
+    expect(OPERATOR_STEP_BRIEF.vendor_confirm).toContain("실제 API 키가 발급됩니다");
+    expect(OPERATOR_STEP_BRIEF.vendor_confirm).toContain("'확인'을 직접 누르세요");
+    // The IP row is the step's live-observed failure mode: typing an IP without pressing 추가 registers nothing.
+    expect(OPERATOR_STEP_BRIEF.vendor_confirm).toContain("추가");
+  });
+
+  it("a brief never CONTRADICTS the copy it fronts — the two 'no key here' steps stay consistent", () => {
+    expect(OPERATOR_STEP_BRIEF.issue).toContain("키는 아직 만들어지지 않습니다");
+    expect(OPERATOR_STEP_BRIEF.issue_final).toContain("이 버튼에서는 키가 발급되지 않습니다");
+    expect(OPERATOR_STEP_BRIEF.issue_final).not.toContain("키가 발급됩니다.");
+  });
+
+  it("**the disclosure opens by itself on exactly the two safety-bearing steps**", async () => {
+    // The two are the walk's safety copy: the control that creates the credential, and the one immediately
+    // before it that is routinely mistaken for it.
+    expect([...STEPS_WITH_DETAIL_OPEN].sort()).toEqual(["issue_final", "vendor_confirm"]);
+    // …and the wiring is real, not a constant nobody reads: mounted expanded here, absent everywhere else.
+    const expanded = driverWith(true);
+    await expanded.driver.highlightTarget("issue_final");
+    expect(expanded.page.mounts[0]?.detailExpanded).toBe(true);
+    for (const target of ["issue", "credentials", "return"] as CoupangIssuanceTarget[]) {
+      const { driver, page } = driverWith(true);
+      await driver.highlightTarget(target);
+      expect(page.mounts[0]?.detail, target).toBe(OPERATOR_STEP_LABELS[target]);
+      expect(page.mounts[0]?.detailExpanded, target).toBeUndefined();
+    }
   });
 });
 

@@ -60,6 +60,18 @@ class El {
       set: (t, k: string, v: string) => {
         if (t[k] !== v) this.styleWrites++;
         t[k] = v;
+        // `cssText` in a real DOM POPULATES the individual properties, and code that reads one back after
+        // setting the other depends on it — the panel's disclosure decides whether it is open by reading
+        // `style.display`, which the mount set through `cssText`. A double that stores the string and nothing
+        // else makes that read answer `undefined`, which is a bug the double invented.
+        if (k === "cssText") {
+          for (const decl of String(v).split(";")) {
+            const at = decl.indexOf(":");
+            if (at < 0) continue;
+            const prop = decl.slice(0, at).trim();
+            if (prop) t[prop] = decl.slice(at + 1).trim();
+          }
+        }
         return true;
       },
     });
@@ -78,6 +90,10 @@ class El {
   }
   appendChild(c: El): void {
     this.children.push(c);
+    // Registered with the document, not just parented — the panel's own children (the disclosure toggle and the
+    // detail block) are looked up by id, and a double where an appended node is unreachable by `getElementById`
+    // models a DOM nobody has.
+    this.doc?.register(c);
   }
   remove(): void {
     this.removed = true;
@@ -86,8 +102,10 @@ class El {
   scrollIntoView(): void {
     /* read-only reveal; irrelevant here */
   }
-  addEventListener(): void {
-    /* the panel's advance button binds a click listener; nothing here presses it */
+  /** Recorded, never auto-fired: the disclosure test presses the toggle deliberately; nothing else is pressed. */
+  readonly listeners: { type: string; fn: () => void }[] = [];
+  addEventListener(type: string, fn: () => void): void {
+    this.listeners.push({ type, fn });
   }
   getBoundingClientRect(): Rect {
     return this.rect;
@@ -153,6 +171,8 @@ function fakePage(doc: Doc, innerHeight = 800): { page: { evaluate: (fn: unknown
   // writes); running it inline keeps every other case reading as "the page moved, then the ring moved".
   const win: Record<string, unknown> = {
     innerHeight,
+    // The placement now chooses horizontally as well as vertically, so the double needs a width to choose in.
+    innerWidth: 1200,
     addEventListener: (type: string, fn: () => void) => listeners.push({ type, fn }),
     removeEventListener: () => undefined,
     requestAnimationFrame: (fn: () => void) => {
@@ -352,72 +372,200 @@ describe("the ring tracks a layout change — not only a scroll and a resize", (
 
 /* ─────────────────────────── 2. the panel stays OFF the control it describes ─────────────────────────── */
 
+/**
+ * Viewport 1200×800, panel 400×100 ⇒ the six candidate placements are
+ * x ∈ {400 (centre), 776 (right), 24 (left)} × y ∈ {676 (bottom), 24 (top)}, in that preference order.
+ */
 describe("the guidance panel never covers the control it is pointing at", () => {
   it("**it moves to the top when the control sits under the bottom dock**", async () => {
     // Live-observed twice: the panel telling the seller to press 확인, sitting on 확인. It takes clicks when it
     // carries a button, so this is manual progress being blocked, not a cosmetic overlap.
     const doc = new Doc();
-    tagged(doc, rect(200, 700, 100, 40));
+    tagged(doc, rect(380, 700, 100, 40));
     const { page, env } = fakePage(doc, 800);
     await mountOverlay(page as never, PANEL);
-    const panel = sizePanel(doc, rect(100, 676, 400, 100));
+    const panel = sizePanel(doc, rect(400, 676, 400, 100));
     env.mutate();
     expect(panel.style["top"]).toBe("24px");
+    expect(panel.style["left"]).toBe("400px");
+    // The mount's bottom-centred CSS has to be cleared, or the two placements compose.
     expect(panel.style["bottom"]).toBe("auto");
+    expect(panel.style["transform"]).toBe("none");
   });
 
   it("it stays at the bottom when nothing is under it", async () => {
     const doc = new Doc();
-    tagged(doc, rect(200, 300, 100, 40));
+    tagged(doc, rect(380, 300, 100, 40));
     const { page, env } = fakePage(doc, 800);
     await mountOverlay(page as never, PANEL);
-    const panel = sizePanel(doc, rect(100, 676, 400, 100));
+    const panel = sizePanel(doc, rect(400, 676, 400, 100));
     env.mutate();
-    expect(panel.style["bottom"]).toBe("24px");
-    expect(panel.style["top"]).toBe("auto");
+    expect(panel.style["top"]).toBe("676px");
+    expect(panel.style["left"]).toBe("400px");
   });
 
   it("a control BESIDE the panel is not treated as under it", async () => {
     // Horizontal extent comes from the panel's own rect. A narrow panel and a control in the opposite margin
-    // overlap on the vertical band and nowhere else; flipping for that would move the panel for no reason.
+    // overlap on the vertical band and nowhere else; moving for that would move the panel for no reason.
     const doc = new Doc();
-    tagged(doc, rect(900, 700, 100, 40));
+    tagged(doc, rect(1000, 700, 100, 40));
     const { page, env } = fakePage(doc, 800);
     await mountOverlay(page as never, PANEL);
-    const panel = sizePanel(doc, rect(100, 676, 400, 100));
+    const panel = sizePanel(doc, rect(400, 676, 400, 100));
     env.mutate();
-    expect(panel.style["bottom"]).toBe("24px");
+    expect(panel.style["top"]).toBe("676px");
+    expect(panel.style["left"]).toBe("400px");
   });
 
-  it("**both ends covered ⇒ it stays put** — a panel that flips every frame is its own defect", async () => {
+  it("**both centre docks covered ⇒ it takes a corner** — it never settles onto a control", async () => {
+    // The previous version chose between bottom-centre and top-centre and, when both were covered, KEPT the
+    // bottom one: it deliberately parked on the control it was describing. A viewport has corners.
     const doc = new Doc();
-    tagged(doc, rect(200, 700, 100, 40));
-    tagged(doc, rect(200, 30, 100, 40));
+    tagged(doc, rect(380, 700, 100, 40));
+    tagged(doc, rect(380, 30, 100, 40));
     const { page, env } = fakePage(doc, 800);
     await mountOverlay(page as never, PANEL);
-    const panel = sizePanel(doc, rect(100, 676, 400, 100));
+    const panel = sizePanel(doc, rect(400, 676, 400, 100));
     env.mutate();
-    expect(panel.style["bottom"]).toBe("24px");
+    expect(panel.style["left"]).toBe("776px");
+    expect(panel.style["top"]).toBe("676px");
+  });
+
+  it("when NOTHING is clear it takes the least-covering placement, and does not oscillate", async () => {
+    // A control across the whole width at both ends: every candidate overlaps something. The choice is then the
+    // smallest overlap, and — because the decision reads only the targets and the panel's own size, never where
+    // the panel currently is — repeating it writes nothing.
+    const doc = new Doc();
+    tagged(doc, rect(0, 690, 1200, 110)); // covers the whole bottom band
+    tagged(doc, rect(0, 24, 1200, 40)); // covers less of the top band
+    const { page, env } = fakePage(doc, 800);
+    await mountOverlay(page as never, PANEL);
+    const panel = sizePanel(doc, rect(400, 676, 400, 100));
+    env.mutate();
+    expect(panel.style["top"]).toBe("24px");
     const writes = panel.styleWrites;
     env.mutate();
     env.mutate();
-    // Decided from the two PROSPECTIVE positions, never from where the panel currently is — so repeating the
-    // decision cannot change it.
-    expect(panel.style["bottom"]).toBe("24px");
+    expect(panel.style["top"]).toBe("24px");
     expect(panel.styleWrites).toBe(writes);
   });
 
   it("the decision is re-made when the layout moves the control INTO the panel", async () => {
     const doc = new Doc();
-    const target = tagged(doc, rect(200, 300, 100, 40));
+    const target = tagged(doc, rect(380, 300, 100, 40));
     const { page, env } = fakePage(doc, 800);
     await mountOverlay(page as never, PANEL);
-    const panel = sizePanel(doc, rect(100, 676, 400, 100));
+    const panel = sizePanel(doc, rect(400, 676, 400, 100));
     env.mutate();
-    expect(panel.style["bottom"]).toBe("24px");
-    target.rect = rect(200, 700, 100, 40);
+    expect(panel.style["top"]).toBe("676px");
+    target.rect = rect(380, 700, 100, 40);
     env.mutate();
     expect(panel.style["top"]).toBe("24px");
-    expect(panel.style["bottom"]).toBe("auto");
+  });
+
+  it("**a control BELOW THE FOLD still reserves the bottom band** — it is where that control arrives", async () => {
+    // The defect this closes: an off-viewport target overlaps nothing, so the panel used to park exactly where
+    // that control lands the moment the seller scrolls to it. Projected onto the edge it will arrive from, the
+    // band stays reserved from the start.
+    const doc = new Doc();
+    tagged(doc, rect(380, 2400, 100, 40)); // far below a 800px viewport
+    const { page, env } = fakePage(doc, 800);
+    await mountOverlay(page as never, PANEL);
+    const panel = sizePanel(doc, rect(400, 676, 400, 100));
+    env.mutate();
+    expect(panel.style["top"]).toBe("24px");
+  });
+
+  it("a control scrolled off ABOVE reserves the top band, not the bottom", async () => {
+    const doc = new Doc();
+    tagged(doc, rect(380, -300, 100, 40));
+    const { page, env } = fakePage(doc, 800);
+    await mountOverlay(page as never, PANEL);
+    const panel = sizePanel(doc, rect(400, 676, 400, 100));
+    env.mutate();
+    expect(panel.style["top"]).toBe("676px");
+  });
+
+  it("an oversized panel is clamped into the viewport rather than pushed off the top", async () => {
+    const doc = new Doc();
+    tagged(doc, rect(380, 400, 100, 40));
+    const { page, env } = fakePage(doc, 800);
+    await mountOverlay(page as never, PANEL);
+    const panel = sizePanel(doc, rect(0, 0, 1400, 900)); // taller AND wider than the viewport
+    env.mutate();
+    expect(panel.style["top"]).toBe("24px");
+    expect(panel.style["left"]).toBe("24px");
+  });
+});
+
+/* ─────────────────── 3. the panel shows a BRIEF, with the complete copy one press away ─────────────────── */
+
+/**
+ * The panel had grown to five sentences across four lines, docked on top of a marketplace dialog, at the moment
+ * the seller's attention belongs on the dialog. It now leads with one line and keeps the rest behind a `자세히`
+ * disclosure — except where the copy carries a safety claim, which opens by itself.
+ */
+describe("the guidance panel's disclosure", () => {
+  const DETAIL = "SellerOps는 이 버튼을 절대 누르지 않고, 입력란에 아무것도 쓰지 않습니다.";
+  const WITH_DETAIL = { ...PANEL, detail: DETAIL };
+
+  const detailOf = (doc: Doc): El | null => doc.getElementById("__aw_panel_detail__");
+  const toggleOf = (doc: Doc): El | null => doc.getElementById("__aw_panel_detail_toggle__");
+
+  it("starts CLOSED, and the complete copy is present in the DOM rather than dropped", async () => {
+    const doc = new Doc();
+    tagged(doc, rect(380, 300, 100, 40));
+    const { page } = fakePage(doc, 800);
+    await mountOverlay(page as never, WITH_DETAIL);
+    expect(detailOf(doc)?.textContent).toBe(DETAIL);
+    expect(detailOf(doc)?.style["display"]).toBe("none");
+    expect(toggleOf(doc)?.textContent).toBe("자세히");
+  });
+
+  it("**opens by itself when the step carries a safety claim** — a warning is never behind a press", async () => {
+    const doc = new Doc();
+    tagged(doc, rect(380, 300, 100, 40));
+    const { page } = fakePage(doc, 800);
+    await mountOverlay(page as never, { ...WITH_DETAIL, detailExpanded: true });
+    expect(detailOf(doc)?.style["display"]).toBe("block");
+    expect(toggleOf(doc)?.textContent).toBe("간단히");
+  });
+
+  it("the seller's press opens it AND re-places the panel in the same gesture", async () => {
+    // A panel that grows downward onto the control it describes is the defect the placement logic exists to
+    // prevent; waiting for the next observer tick to notice would show the seller exactly that, briefly.
+    const doc = new Doc();
+    tagged(doc, rect(380, 700, 100, 40));
+    const { page, env } = fakePage(doc, 800);
+    await mountOverlay(page as never, WITH_DETAIL);
+    sizePanel(doc, rect(400, 676, 400, 100));
+    const toggle = toggleOf(doc)!;
+    const press = toggle.listeners.find((l) => l.type === "click")!.fn;
+    env.run(press);
+    expect(detailOf(doc)?.style["display"]).toBe("block");
+    expect(toggle.textContent).toBe("간단히");
+    // …and the placement ran: the control under the bottom dock pushed the panel to the top.
+    expect(doc.getElementById("__aw_advance_panel__")!.style["top"]).toBe("24px");
+  });
+
+  it("a COPY-ONLY panel gets no disclosure — it stays pointer-events:none with nothing to press", async () => {
+    // The reach step's panel has no advance button, so it takes no pointer events precisely so it can never
+    // block a control. A disclosure button would be the one clickable thing on it.
+    const doc = new Doc();
+    tagged(doc, rect(380, 300, 100, 40));
+    const { page } = fakePage(doc, 800);
+    const { advance: _dropped, ...copyOnly } = WITH_DETAIL;
+    await mountOverlay(page as never, copyOnly);
+    expect(detailOf(doc)).toBeNull();
+    expect(toggleOf(doc)).toBeNull();
+  });
+
+  it("a panel with no detail at all is exactly what it always was", async () => {
+    const doc = new Doc();
+    tagged(doc, rect(380, 300, 100, 40));
+    const { page } = fakePage(doc, 800);
+    await mountOverlay(page as never, PANEL);
+    expect(detailOf(doc)).toBeNull();
+    expect(toggleOf(doc)).toBeNull();
   });
 });
