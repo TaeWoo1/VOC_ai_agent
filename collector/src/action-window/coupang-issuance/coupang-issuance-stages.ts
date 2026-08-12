@@ -140,7 +140,7 @@ export type CoupangIssuanceStage =
    * **Seller CHECKPOINT — THE KEY-CREATION BOUNDARY, and this time the name is measured.** The vendor screen's
    * `확인` is highlighted and the run RESTS. The seller presses it themselves; the runtime never clicks it.
    *
-   * This is where a real, irreversible marketplace credential comes into existence. `checkpoint_before_issue`
+   * This is where a real marketplace credential comes into existence. `checkpoint_before_issue`
    * held this name for two corrections while the control it guarded turned out not to create anything; the
    * boundary is here.
    *

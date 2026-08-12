@@ -168,7 +168,7 @@ describe("the screen-based auto-advance requires the screen to CHANGE", () => {
 
   it("**a run that STARTS on a screen already showing a key cannot report the seller just made one**", async () => {
     // The same baseline rule as every other advance here, and the reason it matters more on this one: this is
-    // the step that brings an irreversible marketplace credential into existence, so "it was already there" and
+    // the step that brings a real marketplace credential into existence, so "it was already there" and
     // "the seller just made it" must never be confusable.
     const { driver } = driverOn("ISSUED");
     expect(await driver.observeUserAction("vendor_confirm")).toBe(false);

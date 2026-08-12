@@ -992,7 +992,11 @@ describe("the guided-walk manifest is not the fallback", () => {
     // The line that changed everything about this phase on 2026-08-12. Every earlier walk stopped one screen
     // short of any key existing, and the operation text has to say plainly that this one does not.
     expect(op).toContain("ENDS WITH A REAL API KEY ON YOUR LIVE COUPANG ACCOUNT");
-    expect(op).toContain("WHICH ISSUES THE KEY, IRREVERSIBLY");
+    expect(op).toContain("WHICH ISSUES THE KEY and changes live account state");
+    // NOT "IRREVERSIBLY". Narrowed 2026-08-12 — WING has a 삭제 control and the operator has used it, so the
+    // binding text must not carry a claim the reader can falsify.
+    expect(op).toContain("SEPARATE deletion run, not an undo");
+    expect(op).not.toContain("IRREVERSIBLY");
     expect(op).toContain("SellerOps never presses it");
     // The press it asks for on the way rests on the MEASUREMENT, never on a button label — which is exactly what
     // the refuted claim rested on.

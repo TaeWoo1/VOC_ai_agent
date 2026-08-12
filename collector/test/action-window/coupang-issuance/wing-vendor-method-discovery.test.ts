@@ -89,12 +89,15 @@ describe("two plans, each carrying its own stop", () => {
     expect(WING_FLOW_CHECKPOINTS).not.toContain("VENDOR_METHOD_SCREEN_UNTOUCHED");
   });
 
-  it("each plan names the control it stops in front of, and only one of them is irreversible", () => {
+  it("each plan names the control it stops in front of, and only one of them mutates the live account", () => {
     expect(WING_ISSUANCE_FLOW_PLAN.nextControl).toBe(WING_KEY_CREATION_CONTROL_ID);
-    // MEASURED reversible. This is the fact the whole phase rests on, and it is a fact about ONE control.
-    expect(WING_ISSUANCE_FLOW_PLAN.nextControlIsIrreversible).toBe(false);
+    // Creates nothing, on the OPERATOR's report. This is the fact the whole phase rests on, and it is a fact
+    // about ONE control.
+    expect(WING_ISSUANCE_FLOW_PLAN.nextControlMutatesLiveAccount).toBe(false);
     expect(WING_VENDOR_METHOD_PLAN.nextControl).toBe(WING_KEY_ISSUING_CONTROL);
-    expect(WING_VENDOR_METHOD_PLAN.nextControlIsIrreversible).toBe(true);
+    // Renamed from `nextControlIsIrreversible` on 2026-08-12: the key-issuing 확인 changes live account state,
+    // and a separate deletion undoes it. Only the 삭제 phase is irreversible.
+    expect(WING_VENDOR_METHOD_PLAN.nextControlMutatesLiveAccount).toBe(true);
     // The key-issuing control is named as an OPERATOR REPORT, not as a candidate id: naming a candidate would
     // claim a locator for it exists, and nothing has read that screen.
     expect(WING_KEY_ISSUING_CONTROL).toContain("OPERATOR_REPORTED_NOT_MEASURED");
@@ -545,7 +548,7 @@ describe("the instructions the operator reads", () => {
     expect(body).toContain("SellerOps cannot corroborate it");
     expect(body).not.toContain("MEASURED not to create a key");
     expect(body).toContain("NEVER been read by any apparatus");
-    // …and it names the control on the NEXT screen that is the irreversible one, in the same breath.
+    // …and it names the control on the NEXT screen that creates the key, in the same breath.
     expect(body).toContain("issues a real API key");
   });
 
@@ -586,7 +589,7 @@ describe("the manifest the operator approves", () => {
     }
   });
 
-  it("the OPERATION text names the irreversible control and refuses to recommend a method", () => {
+  it("the OPERATION text names the key-issuing control and refuses to recommend a method", () => {
     const branch = CLI_SRC.slice(CLI_SRC.indexOf("isWingVendorMethod\n    ? `WING VENDOR-METHOD DISCOVERY"));
     const operation = branch.slice(0, branch.indexOf("\n    : isWingGuidedWalk"));
     expect(operation).toContain("ISSUES A REAL API KEY");
@@ -606,7 +609,8 @@ describe("the manifest the operator approves", () => {
     expect(entry).toContain("판매자가 키가 발급되지 않았다고 보고했습니다");
     expect(entry).toContain("측정이 아니라 보고입니다");
     expect(entry).not.toContain("이미 측정되었습니다");
-    expect(entry).toContain("실제 API 키를 발급하는(되돌릴 수 없는) control");
+    expect(entry).toContain("실제 API 키를 발급해 라이브 계정 상태를 바꾸는 control");
+    expect(entry).not.toContain("되돌릴 수 없");
     expect(entry).toContain("별도 manifest");
     expect(entry).toContain("측정이 아니라 제품 결정");
   });

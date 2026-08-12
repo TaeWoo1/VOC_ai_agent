@@ -232,7 +232,8 @@ echo
 echo "  ⚠⚠ THIS RUN ENDS WITH A REAL API KEY ON YOUR LIVE COUPANG ACCOUNT. READ THIS PART TWICE."
 echo "    • That is NEW. Every earlier guided walk stopped one screen short of any key existing, because the"
 echo "      screen past '약관 동의 및 Key 발급받기' had never been measured. It has been now, so the walk goes"
-echo "      all the way — and 'all the way' means an irreversible credential on a real seller account."
+echo "      all the way — and 'all the way' means a real credential on a real seller account. Removing it"
+echo "      afterwards is a SEPARATE deletion run, not an undo."
 echo "    • '약관 동의 및 Key 발급받기' does NOT create the key. That was asserted from its label and refuted on"
 echo "      2026-08-12, when it was pressed on two live walks and YOU reported no key either time. This run"
 echo "      asks you to press it on THAT REPORT, never on the label — and the report is not a measurement:"
@@ -249,9 +250,9 @@ echo
 echo "  WHAT THE KEY-ISSUING STEP SAYS ON THE WING PAGE (complete, Korean — this is what binds):"
 # CHECKPOINT-COPY-BEGIN
 echo "    업체명 · URL을 입력하고, IP 주소는 입력한 뒤 옆의 '추가'를 눌러 등록하세요 — 추가하지 않으면 IP가"
-echo "    등록되지 않습니다. 그 다음 '확인'을 직접 누르세요. ⚠ 여기서 실제 API 키가 발급됩니다 — 되돌릴 수"
-echo "    없습니다. SellerOps는 이 버튼을 절대 누르지 않고, 입력란에 아무것도 쓰지 않습니다. 키가 화면에"
-echo "    표시되면 자동으로 넘어갑니다."
+echo "    등록되지 않습니다. 그 다음 '확인'을 직접 누르세요. ⚠ 여기서 실제 API 키가 발급되어 라이브 계정"
+echo "    상태가 바뀝니다(지우려면 나중에 별도의 삭제 작업이 필요합니다). SellerOps는 이 버튼을 절대 누르지"
+echo "    않고, 입력란에 아무것도 쓰지 않습니다. 키가 화면에 표시되면 자동으로 넘어갑니다."
 # CHECKPOINT-COPY-END
 echo
 echo "  ⚠ THE ONE-LINE GRANT DOES NOT COVER THIS RUN."

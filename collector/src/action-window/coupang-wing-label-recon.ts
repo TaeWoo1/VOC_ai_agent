@@ -2076,10 +2076,16 @@ export interface WingFlowPlan {
   /** What the operator's NEXT act would be. The plan's reason for ending, in the plan. */
   readonly nextControl: string;
   /**
-   * Whether that next act mutates marketplace state irreversibly. `false` here does NOT mean "safe to add a
+   * Whether that next act mutates LIVE MARKETPLACE STATE. `false` here does NOT mean "safe to add a
    * checkpoint" — both plans end, and the flag says what kind of boundary each end is.
+   *
+   * Renamed from `nextControlIsIrreversible` on 2026-08-12. The key-issuing 확인 was recorded as irreversible
+   * and it is not: WING has a 삭제 control, the operator has used it, and this repository has a deletion phase
+   * built around it. A boolean asserting the false half of that is the same overstatement as the prose it
+   * drove — and it sat next to {@link OperatorDestructiveAction}'s `irreversible: true`, which is TRUE, where
+   * the two could only be told apart by knowing which control each described.
    */
-  readonly nextControlIsIrreversible: boolean;
+  readonly nextControlMutatesLiveAccount: boolean;
 }
 
 export const WING_ISSUANCE_FLOW_PLAN: WingFlowPlan = Object.freeze({
@@ -2091,7 +2097,7 @@ export const WING_ISSUANCE_FLOW_PLAN: WingFlowPlan = Object.freeze({
   // issued surface from a no-key one ({@link WING_KEY_ABSENCE_ATTRIBUTION}). That report is why a second plan
   // may continue past this control at all — a fact about this control, on this evidence, and never a licence
   // for the next one.
-  nextControlIsIrreversible: false,
+  nextControlMutatesLiveAccount: false,
 });
 
 /**
@@ -2103,8 +2109,8 @@ export const WING_ISSUANCE_FLOW_PLAN: WingFlowPlan = Object.freeze({
  * this screen without having advanced through them. The cost is a longer sitting; the alternative is a first
  * reading whose starting state nobody established.
  *
- * **Where it ends is the boundary this unit exists to respect.** The next press issues a key — irreversibly, on a
- * real marketplace account. No checkpoint may follow, and no phase may reach that press by continuing this plan;
+ * **Where it ends is the boundary this unit exists to respect.** The next press issues a key on a real
+ * marketplace account, changing its state; removing it is a separate deletion, not an undo. No checkpoint may follow, and no phase may reach that press by continuing this plan;
  * it needs its own manifest, its own mode-WRITE grant, and its own explicit single-use approval.
  */
 export const WING_VENDOR_METHOD_PLAN: WingFlowPlan = Object.freeze({
@@ -2112,7 +2118,7 @@ export const WING_VENDOR_METHOD_PLAN: WingFlowPlan = Object.freeze({
   checkpoints: Object.freeze([...WING_FLOW_CHECKPOINTS, ...WING_VENDOR_METHOD_CHECKPOINTS]),
   lastCheckpoint: "VENDOR_METHOD_SELECTED_BY_OPERATOR" as const,
   nextControl: WING_KEY_ISSUING_CONTROL,
-  nextControlIsIrreversible: true,
+  nextControlMutatesLiveAccount: true,
 });
 
 export const WING_FLOW_PLANS: Readonly<Record<WingFlowPlanId, WingFlowPlan>> = Object.freeze({
@@ -2399,7 +2405,7 @@ export interface WingScreenReading {
  * screens resolves to the one where stopping is correct. It used to be the terms screen because that is where the
  * control believed to create the key sat. It does not create the key; the vendor screen's own `확인` does. So the
  * ordering follows the same rule to its new answer rather than being re-derived, and the vendor screen sorts
- * first because it is both the latest and the only one carrying an irreversible control.
+ * first because it is both the latest and the only one carrying a control that mutates the live account.
  *
  * **The reason it was ordered this way turned out to be wrong, and the ordering is kept anyway.** It was written
  * expecting the vendor screen to be a DIALOG over the terms screen, with the terms markers still painting behind

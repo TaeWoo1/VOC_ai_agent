@@ -49,11 +49,23 @@ tag. Broad siblings on the record beside each narrowing.
 | **the vendor screen's `확인` issues the key** | operator's account. No apparatus has pressed it. **The WRITE run is what verifies it.** `WING_KEY_ISSUING_CONTROL` carries `OPERATOR_REPORTED_NOT_MEASURED` |
 | **pressing `약관 동의 및 Key 발급받기` issues no key** | operator's report on two live walks. ⓕ Was written as an apparatus measurement in eight operator-facing places — corrected. SellerOps is structurally unable to confirm it; the only thing the runtime adds is negative and weak (the page category never became `credential_shown`) |
 | the three fields are things the seller types into | the labels are measured; the inputs behind them are not enumerated |
-| a key created here is irreversible / affects an existing key | never measured, and the manifest errs toward more caution rather than less |
+| a key created here affects an *existing* key | never measured; the manifest says nothing either way |
+| ~~a key created here is irreversible~~ | **REFUTED, and it was refutable all along.** WING has a `삭제` control, this repository has a whole `COUPANG_WING_KEY_DELETION` phase built around it, and the operator deleted a key on 2026-08-12 between two walks |
 
-The two `operatorIssuesRealKey: true` / "ISSUES THE KEY, IRREVERSIBLY" statements in the manifest rest on this
-row. They are deliberately kept at their strongest: a warning that overstates the risk of an irreversible act
-errs in the safe direction, and the code-level record says plainly which row it comes from.
+The manifest's `operatorIssuesRealKey: true` rests on the first row of this table. What it now says is that the
+run **creates a real key and changes live account state**, and that removing it is a **separate deletion**.
+
+It used to say "ISSUES THE KEY, IRREVERSIBLY", in ten places, and this section defended that as erring toward
+caution. That defence was wrong twice over. The claim was not unmeasured — the deletion phase measures the
+opposite — so "never measured, errs toward caution" described a gap that was not there. And overstatement is not
+the safe direction in a binding disclosure: the operator can personally falsify this one, and a reader who
+catches a manifest overstating once has no way to know which of the other warnings is also approximate. The
+`OperatorDestructiveAction` descriptor's `irreversible: true` **is** true, and it is what the word was spending.
+
+Narrowed 2026-08-12 across the descriptor, both operator summaries, the on-page step copy (collector + the
+frontend mirror it is pinned to), the walk and probe preflights, the recon plan's boolean (renamed
+`nextControlIsIrreversible` → `nextControlMutatesLiveAccount`), and the selfcheck fence — which now also
+refuses the retired phrase, so it cannot come back.
 
 ## 4. PRODUCT_OWNER_DECISION
 

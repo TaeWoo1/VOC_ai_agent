@@ -145,9 +145,13 @@ describe("the key-issuing step advances on the RESULT, never on the press", () =
 /* ══════════════════════════ what the seller is told ══════════════════════════ */
 
 describe("the copy carries the consequence exactly once, on the control that has it", () => {
-  it("the key-issuing step warns of irreversibility in BOTH the panel and the chip", () => {
-    expect(OPERATOR_STEP_LABELS.vendor_confirm).toContain("여기서 실제 API 키가 발급됩니다");
-    expect(OPERATOR_STEP_LABELS.vendor_confirm).toContain("되돌릴 수 없습니다");
+  it("the key-issuing step names the consequence in BOTH the panel and the chip", () => {
+    expect(OPERATOR_STEP_LABELS.vendor_confirm).toContain("여기서 실제 API 키가 발급되어 라이브 계정 상태가 바뀝니다");
+    expect(OPERATOR_STEP_LABELS.vendor_confirm).toContain("별도의 삭제 작업이 필요합니다");
+    // NOT "되돌릴 수 없습니다". Narrowed 2026-08-12: WING has a 삭제 control, the operator has used it, and this
+    // repository has a deletion phase built on it. A warning the reader can personally falsify is not the
+    // cautious side of this — it devalues the one on the deletion phase, which IS irreversible.
+    expect(OPERATOR_STEP_LABELS.vendor_confirm).not.toContain("되돌릴 수 없");
     // Every other chip names a control; this one names the consequence, because the panel alone should not have
     // to carry a fact this size — and the chip cannot wrap, so it was truncated once already.
     expect(OPERATOR_STEP_TITLES.vendor_confirm).toContain("키 발급");
@@ -181,7 +185,9 @@ describe("the copy carries the consequence exactly once, on the control that has
       expect(summary, `the manifest must not still say "${stale}"`).not.toContain(stale);
     }
     // It must reach the control with the consequence, and say the consequence.
-    expect(summary).toContain("실제 API 키가 발급되며 되돌릴 수 없습니다");
+    expect(summary).toContain("실제 API 키가 발급되어 라이브 계정 상태가 바뀝니다");
+    expect(summary).toContain("별도의 삭제 작업으로 지울 수 있습니다");
+    expect(summary).not.toContain("되돌릴 수 없");
     expect(summary).toContain(WING_VENDOR_METHOD_PRODUCT_DECISION.method);
     // …and keep the two attributions the audit installed: the earlier press is a REPORT, and so is the
     // consequence of the later one — this run is what verifies the latter.

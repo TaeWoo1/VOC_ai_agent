@@ -349,8 +349,9 @@ if [ -z "$TREE_DIRTY" ]; then
   KOREAN_OK=1
   for phrase in \
     "'확인'을 직접 누르세요" \
-    "여기서 실제 API 키가 발급됩니다" \
-    "되돌릴 수" \
+    "여기서 실제 API 키가 발급되어" \
+    "상태가 바뀝니다" \
+    "별도의 삭제 작업이 필요합니다" \
     "입력란에 아무것도 쓰지 않습니다" \
     "추가하지 않으면 IP가"
   do
@@ -360,7 +361,12 @@ if [ -z "$TREE_DIRTY" ]; then
   # warning attached to a consequence that does not happen spends the credibility the true ones need.
   # The RETIRED copy: the two sentences `issue_final` earned an hour after gaining them, and the older refuted
   # warning that once sat on a control which creates nothing.
-  for stale_ko in "여기서 실제로 키가 생성됩니다" "발급이 끝나면 아래 버튼을" "아직 SellerOps가 안내하지 않" "Access Key가 화면에 표시되면"; do
+  # …and "되돌릴 수 없습니다", retired 2026-08-12 for the opposite reason to the others: not because it warned
+  # about something that does not happen, but because the operator can falsify it themselves. WING has a 삭제
+  # control and they have used it. A warning a reader can personally disprove teaches them that these warnings
+  # are approximate — on the one screen where they must not be, and next to a DELETION phase whose
+  # irreversibility claim is true.
+  for stale_ko in "여기서 실제로 키가 생성됩니다" "발급이 끝나면 아래 버튼을" "아직 SellerOps가 안내하지 않" "Access Key가 화면에 표시되면" "되돌릴 수 없습니다"; do
     if grep -qF "$stale_ko" <<<"$out"; then
       echo "  FAIL  NORMAL          · refuted Korean warning still shown: $stale_ko"; KOREAN_OK=0; FAILED=1
     fi

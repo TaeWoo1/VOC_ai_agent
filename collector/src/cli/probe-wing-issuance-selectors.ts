@@ -836,7 +836,7 @@ export async function runWingFlowDiscovery(
       throw new Error(
         `runWingFlowDiscovery: no checkpoint may follow ${plan.lastCheckpoint} in the ${plan.id} plan — the next ` +
           `control is ${plan.nextControl}` +
-          (plan.nextControlIsIrreversible
+          (plan.nextControlMutatesLiveAccount
             ? ", which ISSUES A REAL KEY and needs its own mode-WRITE approval"
             : ", which needs its own approval"),
       );
@@ -1566,7 +1566,7 @@ function printDiscoveryCheckpoint(
     console.error("  Pick whichever option you would pick for real; the reading is honest either way, and nothing");
     console.error("  here recommends one — which method SellerOps should use is a product decision, not a");
     console.error("  measurement, and this run is only measuring what the screen is made of.");
-    console.error("  ⚠ DO NOT press '확인'. It issues a REAL API KEY on your live account, irreversibly, and this");
+    console.error("  ⚠ DO NOT press '확인'. It issues a REAL API KEY on your live account and changes its state, and this");
     console.error("  run has no approval for it. Issuance is a SEPARATE manifest and a separate grant.");
     console.error("  SellerOps selects nothing and has no code path that could.");
   } else {

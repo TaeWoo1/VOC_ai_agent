@@ -318,7 +318,7 @@ if is_flow_phase "$PHASE"; then
     echo "    What it opens is an integration-method screen NO apparatus has ever read: 업체 입력 방식 ·"
     echo "    연동업체 선택 · 자체개발(직접입력) · 업체명 · 취소 · 확인."
     echo "  ⚠ THE RUN ENDS ON THAT SCREEN, and the reason is its '확인':"
-    echo "    that control ISSUES A REAL API KEY on your live account, irreversibly. It is NOT in this approval,"
+    echo "    that control ISSUES A REAL API KEY on your live account, changing its state. It is NOT in this approval,"
     echo "    no checkpoint of this phase stands in front of it, and the code refuses to accept one that would."
     echo "    Key issuance is a SEPARATE manifest and a SEPARATE mode-WRITE grant."
     echo "  ⚠ WHICH input method SellerOps should use is NOT answered by this run. That is a product decision,"

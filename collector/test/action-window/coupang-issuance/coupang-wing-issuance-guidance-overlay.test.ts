@@ -193,15 +193,15 @@ describe("the chip's title and the panel's instruction are different things", ()
     expect(OPERATOR_STEP_LABELS.issue_final).toContain("자동으로 넘어갑니다");
   });
 
-  it("**the key-issuing step carries the irreversibility, in the panel AND the chip**", () => {
+  it("**the key-issuing step carries the consequence, in the panel AND the chip**", () => {
     // The one control in the walk that brings a real credential into existence. Every other chip names a
     // control; this one names the consequence, because the panel alone should not have to carry a fact this
     // size — and the previous owner of that warning did not have the consequence at all.
     expect(OPERATOR_STEP_TITLES.vendor_confirm).toContain("키 발급");
     for (const clause of [
       "'확인'을 직접 누르세요",
-      "여기서 실제 API 키가 발급됩니다",
-      "되돌릴 수 없습니다",
+      "여기서 실제 API 키가 발급되어 라이브 계정 상태가 바뀝니다",
+      "지우려면 나중에 별도의 삭제 작업이 필요합니다",
       // SellerOps presses nothing and types nothing — the fields are the seller's own company details.
       "이 버튼을 절대 누르지 않고, 입력란에 아무것도 쓰지 않습니다",
     ]) {

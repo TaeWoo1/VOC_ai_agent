@@ -319,11 +319,18 @@ export interface GuidedWalkBoundary {
    */
   agentCreatesKeyMaterial: false;
   /**
-   * **TRUE. This run ends with a real, irreversible API key on the seller's live Coupang account.**
+   * **TRUE. This run ends with a real API key on the seller's live Coupang account.**
    *
    * The single most important line in this descriptor, and the reason this phase cannot be granted on the same
    * footing as the walk that preceded it. The seller performs the press; SellerOps guides them to it, highlights
    * it, and never touches it.
+   *
+   * NARROWED 2026-08-12, and the narrowing is a correction. This said "irreversible", and it is not: WING has a
+   * 삭제 control, the operator has used it, and this repository has a whole deletion phase built around it. What
+   * is true is that the run CREATES a real credential and CHANGES live account state; undoing that is a separate
+   * deletion, not an undo. Overstating a risk is not the safe side of this — a warning that a reader can
+   * personally falsify spends the credibility that {@link OperatorDestructiveAction}'s genuinely irreversible
+   * one needs.
    */
   operatorIssuesRealKey: true;
   /** …and the runtime still cannot demonstrate a key WAS created. Only the seller sees the value. */
@@ -376,7 +383,7 @@ export interface GuidedWalkBoundary {
    *
    * Renamed from `keyCreationAutoAdvances` on 2026-08-12, because that name became ambiguous the moment the
    * key-issuing step gained an observed advance: the press is not automatic and the advance AFTER it is. One
-   * field could not say both, and the one that could be misread is the one that guards the irreversible act.
+   * field could not say both, and the one that could be misread is the one that guards the key-creating act.
    */
   keyCreationPressAutoPerformed: false;
   /**
@@ -1117,7 +1124,7 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
   // The VENDOR-METHOD DISCOVERY phase. Same CLI, same dedicated Chrome, two checkpoints further. The summary has
   // one job the discovery summary did not: it asks the operator to press the control every earlier manifest
   // promised they would not be asked to press, so it has to say WHY that is now a measured-safe request — and
-  // then say, in the same breath, exactly which control on the next screen is the irreversible one.
+  // then say, in the same breath, exactly which control on the next screen is the key-issuing one.
   COUPANG_WING_VENDOR_METHOD_DISCOVERY: {
     entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
     cli: "src/cli/probe-wing-issuance-selectors.ts",
@@ -1133,7 +1140,7 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
       "확인할 수 없습니다(발급된 화면과 아닌 화면이 SellerOps가 읽는 모든 신호에서 동일합니다). 측정이 아니라 보고입니다. 그 다음에 나오는 화면은 " +
       "SellerOps가 한 번도 읽어본 적이 없는 화면이며, 아무것도 고르지 말고 그대로 둔 채 ready. " +
       "⑥ 그 화면에서 업체 입력 방식만 직접 선택하고 ready. 여기서 실행이 끝납니다. " +
-      "⚠ 그 화면의 '확인'은 실제 API 키를 발급하는(되돌릴 수 없는) control이며, 이번 승인 범위에 포함되지 않습니다. 절대 " +
+      "⚠ 그 화면의 '확인'은 실제 API 키를 발급해 라이브 계정 상태를 바꾸는 control이며, 이번 승인 범위에 포함되지 않습니다. 절대 " +
       "누르지 마세요 — 키 발급은 별도 manifest·별도 승인입니다. 어떤 입력 방식이 SellerOps에 맞는지는 이 실행이 답하지 " +
       "않습니다(측정이 아니라 제품 결정이며, 이번에는 화면의 구조만 읽습니다). SellerOps는 각 시점마다 라벨 매칭 수·표시 " +
       "여부·라벨 연결 방식만 번호로 읽으며, 화면 문구·입력값·키 값은 기록하지 않습니다.",
@@ -1167,7 +1174,8 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
       "(2개가 모두 체크되면 자동 진행) → ⑤ '약관 동의 및 Key 발급받기'(강조 표시됨)를 직접 누름" +
       "(업체 입력 방식 화면이 뜨면 자동 진행) → ⑥ '자체개발(직접입력)' 라벨이 강조 표시되며, 방식을 직접 선택 → " +
       "⑦ 업체명 · URL · IP 주소를 직접 입력한 뒤 그 화면의 '확인'(강조 표시됨)을 직접 누름. " +
-      "⚠ 여기서 실제 API 키가 발급되며 되돌릴 수 없습니다(키가 화면에 표시되면 자동 진행) → " +
+      "⚠ 여기서 실제 API 키가 발급되어 라이브 계정 상태가 바뀝니다. 이번 run은 발급까지 수행하며, 필요하면 나중에 " +
+      "별도의 삭제 작업으로 지울 수 있습니다(키가 화면에 표시되면 자동 진행) → " +
       "⑧ 발급된 키 영역이 강조 표시되며, 키는 판매자가 직접 확인·보관 → ⑨ SellerOps로 복귀. " +
       "⚠ 강조 표시가 가리키는 대상은 체크박스나 라디오 버튼이 아닙니다. 사용 목적은 항목의 라벨에, 동의는 문장 2개에 " +
       "각각 뜹니다. 다만 WING의 라벨이 자기 입력 요소를 감싸고 있어서, 테두리 안에 체크박스가 함께 들어와 보입니다" +
