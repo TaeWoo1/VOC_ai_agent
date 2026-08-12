@@ -48,6 +48,7 @@ import { observeFrom, WING_PROBE_TARGET_NAMES, type WingStructuralCensus } from 
 import { coupangLiveWalkRefusal } from "../../../src/cli/local-agent";
 import {
   CALIBRATION_PHASES,
+  COUPANG_WING_GUIDED_WALK_BOUNDARY,
   WING_STAGE2_MANIFEST_PHASES,
   WING_PHASES,
   PHASE_ENTRYPOINTS,
@@ -1034,7 +1035,11 @@ describe("the guided-walk manifest is not the fallback", () => {
     expect(max).toContain("0 text-guided");
     // …and the count that says what SellerOps does NOT know: no ring sits on an input.
     expect(max).toContain("0 rings on an input");
-    expect(max).toContain("6 steps advanced by OBSERVING WING");
+    // SEVEN since 2026-08-13, when the vendor-method step started completing itself on the readiness census.
+    // The budget and the descriptor's `autoAdvancingStepCount` are two statements of one fact, and this is the
+    // assertion that keeps them one.
+    expect(max).toContain("7 steps advanced by OBSERVING WING");
+    expect(max).toContain(`${COUPANG_WING_GUIDED_WALK_BOUNDARY.autoAdvancingStepCount} steps advanced by OBSERVING WING`);
     // The one thing that is never observed into happening: the press itself.
     expect(max).toContain("the key-issuing PRESS is never one of them");
   });
