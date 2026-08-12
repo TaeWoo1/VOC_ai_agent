@@ -310,6 +310,24 @@ describe("what step ⑧ anchors its ring on", () => {
     expect(readings[0]!.ancestorTags).toContain("TABLE");
   });
 
+  it("**the anchor is what the live reading says, and the reading refuted the premise**", async () => {
+    const { WING_CREDENTIAL_REGION_EVIDENCE, WING_HIGHLIGHT_LABELS } = await import(
+      "../../src/action-window/coupang-wing-issuance-driver"
+    );
+    const ev = WING_CREDENTIAL_REGION_EVIDENCE;
+    // The question was "which level between `tr` and `table` holds the keys and not the vendor fields". The
+    // answer is none, because there is nothing between them: the three credential labels are three `<th>` in ONE
+    // header row (so every level below `table` has the labels without their values), and WING puts the 연동 정보
+    // block inside the same `<table>` (so the first level reaching the values reaches that too).
+    expect(ev.anchorObservedTag).toBe("TH");
+    const clean = ev.rows.filter((r) => r.excludeCount === 0).map((r) => r.tag);
+    expect(clean).toEqual(["TR", "THEAD"]);
+    expect(ev.rows.find((r) => r.tag === "TABLE")!.excludeCount).toBe(2);
+    expect(ev.conclusion).toBe("NO_LEVEL_HOLDS_THE_VALUES_WITHOUT_THE_VENDOR_BLOCK");
+    // …and the shipped anchor is the one the evidence names, not a second hand-written choice beside it.
+    expect(WING_HIGHLIGHT_LABELS.credentials.tagAncestor).toBe(ev.anchorKept);
+  });
+
   it("**the credential census never asks for a filled-field count** — nothing here reads the keys", async () => {
     // `readFilled` is opt-in per candidate precisely so this stays checkable rather than remembered.
     const src = readFileSync(resolve(__dirname, "../../src/action-window/coupang-wing-issuance-driver.ts"), "utf8");

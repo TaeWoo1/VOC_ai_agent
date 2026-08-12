@@ -174,11 +174,16 @@ export const WING_HIGHLIGHT_LABELS: Readonly<Record<WingHighlightTarget, { candi
   // `Access Key` while the panel said "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요". The values
   // the seller has to copy were outside it, in the body rows of the same table.
   //
-  // `table` is the smallest ancestor holding both, and — unlike a guess at an intermediate wrapper — it is
-  // GUARANTEED to exist by the measurement itself: a `TH` is only a `TH` inside a table. If a later WING ever
-  // matches this label somewhere else, `buildFixedLabelLocateScript` falls back to the matched element, which is
-  // the pre-2026-08-12 behaviour minus the row. The step also logs the census of this label's ancestor chain on
-  // every live walk (`aw_coupang_credential_region`), so the anchor is a reading rather than a belief.
+  // `table` is the smallest ancestor holding both, and it is now MEASURED rather than argued: see
+  // {@link WING_CREDENTIAL_REGION_EVIDENCE}. The operator reported the ring reaching the 연동 정보 block, which
+  // it does — and the reading shows why that cannot be fixed by picking a different ancestor. The three
+  // credential labels are three `<th>` in ONE header row, so every level below `table` holds the labels without
+  // their VALUES; and WING puts the vendor block inside the same `<table>`, so the first level that reaches the
+  // values reaches it too. Ringing less would leave the values the panel says to copy outside the ring.
+  //
+  // If a later WING ever matches this label somewhere else, `buildFixedLabelLocateScript` falls back to the
+  // matched element — the pre-2026-08-12 behaviour minus the row. The step also logs this label's ancestor
+  // chain on every live walk (`aw_coupang_credential_region`), so a change in the markup shows up as a reading.
   credentials: { candidateQuery: "label,span,div,dt,th,strong", exactText: "Access Key", tagAncestor: "table" },
 };
 
@@ -235,8 +240,64 @@ const CREDENTIAL_REGION_MUST_EXCLUDE: readonly { candidateQuery: string; exactTe
   }),
 );
 
-/** How far up the chain the scope is scored. Six levels is more than the observed `TH → TR → TBODY → TABLE`. */
+/** How far up the chain the scope is scored. Six levels is more than the observed `TH → TR → THEAD → TABLE`. */
 const CREDENTIAL_REGION_MAX_DEPTH = 6;
+
+/**
+ * **The credential region, MEASURED — and the measurement refutes the premise it was taken under.**
+ *
+ * Taken 2026-08-13 under the granted READ_ONLY sitting `apr-c888d155557e` / `wt-9c8cca297aa5` at git `f47be317`
+ * (sanitized record `wingrec_6c5dc16f6c4a`), on the operator's own already-issued open-API page with the
+ * credential rows and the 연동 정보 block both on screen.
+ *
+ * The question was "which ancestor between `tr` and `table` holds the keys and not the seller's vendor fields".
+ * The answer is **none, because there is nothing between them**:
+ *
+ *  | depth | tag     | credential labels inside | vendor labels inside |
+ *  |-------|---------|--------------------------|----------------------|
+ *  | 1     | `TR`    | 2 of 2                   | 0                    |
+ *  | 2     | `THEAD` | 2 of 2                   | 0                    |
+ *  | 3     | `TABLE` | 2 of 2                   | **2**                |
+ *  | 4-6   | `DIV`   | 2 of 2                   | 2                    |
+ *
+ * Two facts, and together they close the question. `Access Key` / `Secret Key` / `업체코드` are three `<th>` in
+ * ONE header row, so `TR` and `THEAD` hold every credential LABEL and none of their VALUES — which live in the
+ * body row beneath. And WING puts the 연동 정보 block inside the SAME `<table>`, so the first level that reaches
+ * the values also reaches the seller's 업체명 / URL.
+ *
+ * So `table` is the SMALLEST element containing the keys together with the values the panel tells the seller to
+ * copy, and the extra content inside the ring is WING's markup rather than a bad choice of anchor. Narrowing to
+ * `thead`/`tr` would ring three column headings and leave the values outside; narrowing to `tbody` would ring
+ * values with no labels and was never measured at all. The anchor stays, and it is now a reading.
+ *
+ * `chooseAncestorScope` deliberately answers `null` on this shape rather than returning `TR` — it is asked for a
+ * level holding the labels, and a level holding labels-without-values is not the region step ⑧ is about.
+ */
+export const WING_CREDENTIAL_REGION_EVIDENCE = Object.freeze({
+  measuredOn: "2026-08-13",
+  gitSha: "f47be317",
+  runId: "wt-9c8cca297aa5",
+  approvalId: "apr-c888d155557e",
+  recordId: "wingrec_6c5dc16f6c4a",
+  anchorObservedTag: "TH",
+  /** Value-free rows exactly as the probe returned them. */
+  rows: Object.freeze([
+    Object.freeze({ depth: 1, tag: "TR", containCount: 2, excludeCount: 0 }),
+    Object.freeze({ depth: 2, tag: "THEAD", containCount: 2, excludeCount: 0 }),
+    Object.freeze({ depth: 3, tag: "TABLE", containCount: 2, excludeCount: 2 }),
+    Object.freeze({ depth: 4, tag: "DIV", containCount: 2, excludeCount: 2 }),
+    Object.freeze({ depth: 5, tag: "DIV", containCount: 2, excludeCount: 2 }),
+    Object.freeze({ depth: 6, tag: "DIV", containCount: 2, excludeCount: 2 }),
+  ]),
+  /** What the reading DECIDES, stated so nobody has to re-derive it from the table. */
+  conclusion: "NO_LEVEL_HOLDS_THE_VALUES_WITHOUT_THE_VENDOR_BLOCK" as const,
+  anchorKept: "table" as const,
+  notEstablished: Object.freeze([
+    // Each of these is a sentence someone could otherwise read into the rows above.
+    "WHETHER_A_TBODY_LEVEL_WOULD_EXCLUDE_THE_VENDOR_BLOCK_ANCHOR_IS_IN_THEAD",
+    "WHERE_THE_CREDENTIAL_VALUES_SIT_RELATIVE_TO_THE_VENDOR_BLOCK",
+  ]),
+});
 
 /** The checkpoints whose completion is "a credential is now on the screen". Today: the key-issuing 확인. */
 const CHECKPOINT_ADVANCES_ON_CREDENTIAL: readonly CoupangIssuanceTarget[] = ["vendor_confirm"];
