@@ -147,7 +147,20 @@ public class CoupangInquiriesClient {
                     }
                     collected.put(row.inquiryId(), row);
                 }
-                if (!envelope.hasPageAfter(pageNum) || content.isEmpty()) {
+                if (content.isEmpty()) {
+                    break;
+                }
+                if (!envelope.hasPagination()) {
+                    // No pagination block: the only honest end-of-data signal left is a SHORT page.
+                    // A FULL page with no total is ambiguous — stopping would silently truncate the
+                    // window, and paging on would be guessing. Fail the page closed instead.
+                    if (content.size() >= MAX_PAGE_SIZE) {
+                        throw new IllegalStateException(
+                                "쿠팡 고객문의 응답에 페이지 정보가 없어 다음 페이지 여부를 알 수 없습니다.");
+                    }
+                    break;
+                }
+                if (!envelope.hasPageAfter(pageNum)) {
                     break;
                 }
                 if (++pageNum > MAX_PAGES_PER_TYPE) {
@@ -359,17 +372,18 @@ public class CoupangInquiriesClient {
             return data == null || data.content() == null ? List.of() : data.content();
         }
 
+        /** Whether the response carried a usable page total at all — see the caller's ambiguity rule. */
+        boolean hasPagination() {
+            return data != null && data.pagination() != null && data.pagination().totalPages() != null;
+        }
+
         /**
-         * Whether a page after {@code pageNum} exists. Absent or unusable pagination means "no" —
-         * the sweep stops rather than paging blind, and the bounded loop is the backstop for a
-         * provider that reports a total it never reaches.
+         * Whether a page after {@code pageNum} exists, per the provider's own total. Only meaningful
+         * when {@link #hasPagination()}; the bounded loop is the backstop for a provider that
+         * reports a total it never reaches.
          */
         boolean hasPageAfter(int pageNum) {
-            if (data == null || data.pagination() == null) {
-                return false;
-            }
-            Integer totalPages = data.pagination().totalPages();
-            return totalPages != null && pageNum < totalPages;
+            return hasPagination() && pageNum < data.pagination().totalPages();
         }
     }
 

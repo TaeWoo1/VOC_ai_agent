@@ -69,6 +69,8 @@ class CoupangInquiryRoutineFlowTest {
     @Autowired PlatformTransactionManager txManager;
     @Autowired ChannelRepository channels;
     @Autowired ConnectorCredentialRepository credentials;
+    @Autowired com.sellerops.inquiry.proposal.InquiryProposalRepository proposals;
+    @Autowired com.sellerops.inquiry.reply.InquiryReplyDraftRepository replyDrafts;
 
     private final UUID org = UUID.randomUUID();
     private final UUID account = UUID.randomUUID();
@@ -192,6 +194,72 @@ class CoupangInquiryRoutineFlowTest {
         assertThat(stored.getTitle()).isNull();
         // Coupang does not classify 상품 Q&A secrecy — null, not a guessed false.
         assertThat(stored.getSecret()).isNull();
+    }
+
+    // --- the routine the seller actually performs ------------------------
+
+    /** The seller-facing chain that runs on a collected work item, wired the way production wires it. */
+    private com.sellerops.inquiry.proposal.InquiryProposalService proposalService() {
+        return new com.sellerops.inquiry.proposal.InquiryProposalService(
+                workItems, proposals, inquiries,
+                new com.sellerops.inquiry.proposal.RuleBasedInquiryProposalProvider(),
+                new com.sellerops.inquiry.proposal.InquiryProposalWriter(workItems, proposals, audits, txManager),
+                replyDrafts, channels);
+    }
+
+    /** A COUPANG catalog row, so the detail read resolves the channel the seller sees. */
+    private UUID seedCoupangChannel() {
+        com.sellerops.channel.Channel row = new com.sellerops.channel.Channel();
+        row.setCode("COUPANG");
+        row.setNameKo("쿠팡");
+        row.setStatus(com.sellerops.channel.ChannelStatus.CONNECTED);
+        row.setSupportsInquiry(true);
+        return channels.save(row).getId();
+    }
+
+    @Test
+    void aCollectedInquiryCarriesTheWholeRoutineThroughToADraftTheSellerOwns() {
+        UUID coupang = seedCoupangChannel();
+        http.enqueue(json(page(inquiry(4001, "언제 배송되나요"))));
+        http.enqueue(json(page()));
+        FetchPage collected = connector.fetch(
+                new FetchRequest(org, account, "COUPANG", DataType.INQUIRY, null, 50));
+        @SuppressWarnings("unchecked")
+        List<CanonicalInquiry> records = (List<CanonicalInquiry>) collected.records();
+        ingestion.ingestInquiries(org, coupang, account, records);
+        UUID workItemId = workItems.findAll().get(0).getId();
+
+        var service = proposalService();
+        var proposal = service.propose(org, workItemId, UUID.randomUUID());
+
+        // The draft is a coarse CATEGORY, not a reply body — the seller writes the words.
+        assertThat(proposal.proposal().summaryCategory()).isEqualTo("delivery_status_reply");
+        assertThat(workItems.findAll().get(0).getPhase()).isEqualTo(InquiryWorkItemPhase.PROPOSED);
+
+        var detail = service.detail(org, workItemId);
+        // The operator sees which channel this came from — the acquisition preserved that identity
+        // all the way down without a single Coupang-specific line in the routine spine.
+        assertThat(detail.channelCode()).isEqualTo("COUPANG");
+        assertThat(detail.channelNameKo()).isEqualTo("쿠팡");
+        assertThat(detail.details()).isEqualTo("언제 배송되나요");
+        assertThat(detail.status()).isEqualTo("UNANSWERED");
+
+        var draftService = new com.sellerops.inquiry.reply.InquiryReplyDraftService(workItems, replyDrafts);
+        var saved = draftService.save(org, workItemId, UUID.randomUUID(),
+                "배송 안내", "오늘 출고 예정입니다.", 0);
+        assertThat(saved.version()).isEqualTo(1);
+        assertThat(service.detail(org, workItemId).draft().comments()).isEqualTo("오늘 출고 예정입니다.");
+    }
+
+    @Test
+    void sellerOpsHasNoWayToPostTheReplyToCoupangItself() {
+        UUID coupang = seedCoupangChannel();
+        // The dispatch path resolves an adapter by channel; Coupang has none, and the empty registry
+        // is what makes "SellerOps never submits to Coupang" structural rather than a promise. The
+        // seller posts it themselves through the Action Window.
+        var registry = new com.sellerops.inquiry.publish.ChannelReplyAdapterRegistry(channels, List.of());
+        assertThat(registry.resolve(coupang)).isEmpty();
+        assertThat(registry.registeredChannelCodes()).doesNotContain("COUPANG");
     }
 
     @Test

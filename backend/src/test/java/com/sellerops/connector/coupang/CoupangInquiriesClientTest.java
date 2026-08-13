@@ -264,13 +264,29 @@ class CoupangInquiriesClientTest {
     }
 
     @Test
-    void absentPaginationStopsTheSweepRatherThanPagingBlind() {
+    void aShortPageWithNoPaginationEndsTheWindowSafely() {
+        // No page total, but the page is short — a short page is an end-of-data signal on its own.
         http.enqueue(json(200, "{\"code\":200,\"data\":{\"content\":["
                 + inquiry(1, 5, "문의", "2026-08-04T09:00:00") + "]}}"));
         http.enqueue(json(200, page()));
 
         assertThat(rowsOf(fetch(null))).hasSize(1);
         assertThat(http.sent).hasSize(2);
+    }
+
+    @Test
+    void aFullPageWithNoPaginationFailsClosedRatherThanSilentlyTruncating() {
+        // A full page and no total: there may be a second page and there is no way to tell. Stopping
+        // here would drop inquiries and report success — the worst of the three options.
+        StringBuilder items = new StringBuilder();
+        for (int i = 1; i <= CoupangInquiriesClient.MAX_PAGE_SIZE; i++) {
+            items.append(i > 1 ? "," : "").append(inquiry(i, 5, "문의", "2026-08-04T09:00:00"));
+        }
+        http.enqueue(json(200, "{\"code\":200,\"data\":{\"content\":[" + items + "]}}"));
+
+        assertThatThrownBy(() -> fetch(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("페이지 정보가 없어");
     }
 
     @Test
