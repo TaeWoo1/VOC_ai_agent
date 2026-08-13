@@ -116,6 +116,19 @@ export async function confirmActionBarrier(host: ActionBarrierHost, spec: Action
   return (await host.confirm(ask)).signal === "ready";
 }
 
+/**
+ * The machine-readable refusal, for stdout — ONE shape across every CLI that has a barrier.
+ *
+ * A refusal that prints nothing is indistinguishable from a crash before the print to anything reading the
+ * output, and four CLIs each inventing their own shape is four things a harness has to know. This is also why
+ * **no status file is written on a refusal**: every `CollectorState` describes something that happened to a
+ * collection attempt, and nothing happened. The record says so out loud instead, so "the seller declined" is a
+ * fact a reader can see rather than the absence of one.
+ */
+export function barrierRefusedRecord(kind: ActionBarrierKind): string {
+  return JSON.stringify({ event: "ACTION_BARRIER", outcome: "NOT_ALLOWED", kind, acted: false });
+}
+
 /** The operator-facing line when an act was not allowed. Sanitized: it names the act's KIND, never a value. */
 export function actionBarrierRefusedMessage(kind: ActionBarrierKind): string {
   return `실행이 확인되지 않아 여기서 멈춥니다 (${kind}). 아무것도 실행되지 않았습니다.`;

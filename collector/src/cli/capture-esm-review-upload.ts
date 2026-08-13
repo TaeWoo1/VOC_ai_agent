@@ -72,6 +72,8 @@ import { log } from "../log";
 import type { SavedDownloadInspection } from "../naver/review-download-save";
 import { buildEsmReviewUploadReport, saveValidateUploadDeleteEsmReview } from "../esm/esm-review-upload";
 import { launchPersistentBrowser } from "../profile";
+import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
+import { actionBarrierRefusedMessage, barrierRefusedRecord, confirmActionBarrier } from "./operator-action-barrier";
 
 const NETWORKIDLE_BUDGET_MS = 8_000;
 const STABILITY_INTERVAL_MS = 500;
@@ -261,18 +263,36 @@ async function main(): Promise<void> {
   removeSentinel(sentinelPath);
 
   const ctx = await launchPersistentBrowser(cfg.esmProfileDir, cfg.browserChannel);
-  const page = (ctx.pages()[0] ?? (await ctx.newPage())) as Page;
+  const confirmHost = await attachOperatorConfirmTab(ctx as unknown as ConfirmHostContext, {
+    aborted: () => false,
+    timeoutMs: CONFIRM_TIMEOUT_MS,
+  });
+  const page = confirmHost.entryPage as unknown as Page;
   try {
     await page.goto(cfg.esmReviewUrl, { waitUntil: "domcontentloaded" });
-    console.error(CONFIRM_PROMPT);
-    console.error("");
-    console.error(`  Sentinel file (create this when ready):`);
-    console.error(`    ${sentinelPath}`);
-    console.error("");
-    const ready = await waitForSentinel(sentinelPath, CONFIRM_TIMEOUT_MS, SENTINEL_POLL_INTERVAL_MS);
-    if (!ready) {
-      console.error("No sentinel within the timeout; aborting without reading the page.");
-      log("esm.review.capture-upload", { result: "STOPPED", stop: "sentinel-timeout", clicked: 0 });
+    // **THE ACTION BARRIER**, and this run is the reason the policy exists: it clicks the marketplace's own
+    // export control, waits for a real download, and — with the upload flag — POSTs the seller's reviews into
+    // the backend database. Its readiness prompt used to say, in as many words, that in Claude Code the
+    // operator could say "ready" and the assistant would create the file that started all of it.
+    const allowed = await confirmActionBarrier(confirmHost, {
+      kind: "EXPORT_TRIGGER",
+      title: "ESM+ 리뷰 내보내기",
+      headline: "지금 화면의 내보내기 컨트롤을 SellerOps가 한 번 눌러도 될까요?",
+      allows: [
+        "허용된 프레임 안에서 하나로 확인된 내보내기 컨트롤을 정확히 한 번 누릅니다.",
+        "그 결과로 내려받아진 파일 하나를 이 컴퓨터에 저장하고 검사합니다.",
+        // Unconditional: this entrypoint refuses without the upload approval flag, so a run that reaches
+        // this ask is always a run that will upload. A conditional line here would imply otherwise.
+        "검사를 통과한 파일을 SellerOps 백엔드로 업로드합니다 (리뷰 데이터가 DB에 적재됩니다).",
+        "검사가 끝난 파일은 삭제합니다.",
+      ],
+      stillWillNot: "다른 컨트롤을 누르거나, 화면의 값을 읽거나, 다른 곳으로 무엇도 보내지 않습니다.",
+    });
+    if (!allowed) {
+      console.error(actionBarrierRefusedMessage("EXPORT_TRIGGER"));
+    console.log(barrierRefusedRecord("EXPORT_TRIGGER"));
+      log("esm.review.capture-upload", { result: "STOPPED", stop: "no-operator-confirmation", clicked: 0 });
+      process.exitCode = 7;
       return;
     }
 

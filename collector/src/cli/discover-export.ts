@@ -29,7 +29,7 @@ import { runExport } from "../naver/review-export";
 import type { SessionVerdict } from "../naver/session-verdict";
 import { launchNaverContext, type PwPage } from "../profile";
 import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
-import { actionBarrierRefusedMessage, confirmActionBarrier } from "./operator-action-barrier";
+import { actionBarrierRefusedMessage, barrierRefusedRecord, confirmActionBarrier } from "./operator-action-barrier";
 import { collectSanitizedStorage } from "../naver/storage-collect";
 import { decideState, writeStatus, type RunSignals } from "../status";
 import { login, resolveChannelId, uploadReviewFile, UploadError } from "../upload";
@@ -176,6 +176,7 @@ async function doDiscover(classifyOnly: boolean, diagnoseStorage: boolean): Prom
     // collection attempt, and nothing happened here — the run stopped before it acted. Reaching for the
     // nearest-looking state would put a claim in the status file that no run supports.
     console.error(actionBarrierRefusedMessage("EXPORT_TRIGGER"));
+    console.log(barrierRefusedRecord("EXPORT_TRIGGER"));
     await ctx.close();
     log("run.halted", { reason: "no-operator-confirmation" });
     process.exitCode = 7;

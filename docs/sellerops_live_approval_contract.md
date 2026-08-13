@@ -327,9 +327,22 @@ then finds a file on their disk and rows in a database was told less than they a
 their kin state what the operator INTENDED when they typed the command. They do not state that a
 person looked at the page the run is now about to act on.
 
+**A refusal reports, and writes nothing.** Every barrier refusal prints one shape —
+`{"event":"ACTION_BARRIER","outcome":"NOT_ALLOWED","kind":…,"acted":false}` — and exits `7`. No status
+file is written: every `CollectorState` describes something that happened to a collection attempt,
+and nothing happened. The record says so out loud rather than leaving a reader to infer it from
+silence.
+
 Implementation: `collector/src/cli/operator-action-barrier.ts`.
-`collector/test/cli/operator-action-barrier-guard.test.ts` fails when a live CLI reaches one of these
-acts without a press before it.
+`collector/test/cli/operator-action-barrier-guard.test.ts` sweeps `src/cli/` for the acting
+PRIMITIVES (`.click(`, `.press(`, `.fill(`, `.type(`, `.selectOption(`, `.check(`, `.setInputFiles(`,
+`waitForEvent("download")`, `.saveAs(`) as well as the named chains, requires a barrier before each,
+and requires the refusal to return on its own rather than fall through. It is mutation-tested: an act
+moved before its barrier, a deleted refusal `return`, a dropped barrier callback and a newly added
+unbarriered click are each caught.
+
+An earlier version of this list held only five helper NAMES, and two CLIs that click, download and
+ingest into the database passed it cleanly — see below.
 
 ### Applied: the three auto-read arms (2026-08-13)
 
@@ -338,6 +351,10 @@ acts without a press before it.
 | `capture-export-same-session` | login/2FA waited through → first resolvable verdict → **through** the reconnect resolve → export gate → readiness poll → capture chain | the guarded continue click; then the export click → download → upload → status write | **nothing** in the default arm; the opt-in hand-off sat at the top | a press before the continue click (raised only on `RECONNECT_REQUIRED`, which is the only verdict that can reach it), and a press before the capture chain — disclosing click, save, upload and status write |
 | `continue-account-store-same-session` | settle the SPA, read the state | ONE real continue click on NAVER | the opt-in hand-off only, at the top | a press immediately before the click, in both arms |
 | `discover-reply-target` | read the row census | **none** — it clicks, types, submits, downloads, uploads and writes nothing (its own source guard pins that) | n/a | **unchanged.** A confirmation here would be the prompt-on-every-read this policy exists to avoid |
+| `discover-export` (`--discover` without `--classify-only`) | navigate, hydrate, read the verdict | the export click → download → upload → status write | nothing | a press before the capture leg |
+| `capture-esm-review` | a `.ready` hand-off, then the marketplace-selection check | the ESM+ export click + download wait | a `.ready` file whose own prompt said *'in Claude Code, say "ready" and Claude creates the sentinel'* | a press immediately before the click, after every gate that could refuse it. Its READ hand-offs stay sentinel files and stay on the §5a register |
+| `capture-esm-review-upload` | the same `.ready` hand-off | the click → download → save → **upload into the backend DB** | the same `.ready` file | a press before the chain, disclosing the DB ingest |
+| `upload-file` | reads no page at all | the upload | n/a | **unchanged, by policy.** The operator typing the path IS the decision; there is no observation to be mistaken for one. Named in the guard so the exclusion is a rule, not an omission |
 
 ---
 

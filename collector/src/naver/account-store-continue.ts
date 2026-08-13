@@ -97,7 +97,9 @@ export interface ContinueGateInput {
 export type ContinueOutcome =
   | Exclude<ContinueGateKind, "CONTINUE_ALLOWED">
   | "CONTINUED"
-  | "HALT_SELECTOR_NOT_UNIQUE";
+  | "HALT_SELECTOR_NOT_UNIQUE"
+  /** Every gate passed and the click was next, and the operator did not allow it. Nothing was clicked. */
+  | "HALT_NOT_CONFIRMED";
 
 export type UrlCategory = "login" | "seller-center" | "other";
 
@@ -416,6 +418,17 @@ export async function continueAtCardOnce(
   expected: ExpectedIdentity,
   salt: string,
   expectedContinueCard: ExpectedContinueCard,
+  /**
+   * **The operator's permission for the ONE click**, asked at the last possible moment.
+   *
+   * It belongs here rather than in the caller because only this function knows when a click is actually next:
+   * a caller asking before it runs is asking on whatever page happens to be open — which, on a cold profile,
+   * is the NAVER login form, and the ask would say "the 계속 button on this screen" over a password field.
+   *
+   * Every refusal above returns before it is called, so an operator is asked only on a run that has already
+   * verified the account, the card and a single safe control. Omitted ⇒ nothing to ask ⇒ nothing is clicked.
+   */
+  confirmClick?: () => Promise<boolean>,
 ): Promise<ContinueResult> {
   const fingerprintConfigured = expectedContinueCard.expectedCardFingerprint !== undefined;
 
@@ -472,6 +485,21 @@ export async function continueAtCardOnce(
       preClick,
       safeContinueControlCountBucket: safeBucket,
       detail: "the proven safe control did not resolve to exactly one element — refuse to click",
+    };
+  }
+
+  // 4b) THE ACTION BARRIER — every gate has passed and the next statement clicks the seller's page. A caller
+  //     that supplies no `confirmClick` gets no click: an act nobody asked about is the thing this prevents.
+  const allowed = confirmClick === undefined ? false : await confirmClick();
+  if (!allowed) {
+    log("continue.account-store.halt", { outcome: "HALT_NOT_CONFIRMED", surface: preClick.signals.surface });
+    return {
+      outcome: "HALT_NOT_CONFIRMED",
+      clicked: false,
+      preClickVerdict,
+      preClick,
+      safeContinueControlCountBucket: safeBucket,
+      detail: "the operator did not confirm the continue click — nothing was clicked",
     };
   }
 

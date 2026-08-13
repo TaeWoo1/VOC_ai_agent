@@ -87,7 +87,12 @@ import { approvalRequiredMessage, hasLiveRunApproval, isClassifyOnly } from "./l
 import { decideCaptureGate, type CaptureGateDecision } from "./same-session";
 import type { OperatorConfirmAsk } from "./operator-confirm";
 import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
-import { actionBarrierRefusedMessage, confirmActionBarrier } from "./operator-action-barrier";
+import {
+  OBSERVED_BY_AUTO_READ,
+  actionBarrierRefusedMessage,
+  barrierRefusedRecord,
+  confirmActionBarrier,
+} from "./operator-action-barrier";
 
 // The human may need to clear 2FA/CAPTCHA and the Commerce account/store flow; give
 // them plenty of time, but never wait forever.
@@ -387,7 +392,10 @@ async function main(): Promise<void> {
         log("capture.aborted", { reason: "auto-read-timeout", checks: start.checks });
         return;
       }
-      log("session.start", { verdict: start.verdict, checks: start.checks });
+      // The provenance of what advanced this run so far: a READING, not a decision. Recorded so the log says
+      // which kind of evidence carried the run to the barrier — and so `AUTO_READ` is a value that exists in
+      // the world rather than a type nothing produces.
+      log("session.start", { verdict: start.verdict, checks: start.checks, observedBy: OBSERVED_BY_AUTO_READ });
       verdict = start.verdict;
     }
 
@@ -456,6 +464,7 @@ async function main(): Promise<void> {
       });
       if (!allowed) {
         console.error(actionBarrierRefusedMessage("MARKETPLACE_CLICK"));
+        console.log(barrierRefusedRecord("MARKETPLACE_CLICK"));
         log("capture.aborted", { reason: "no-operator-confirmation-continue" });
         process.exitCode = 7;
         return;
@@ -518,8 +527,12 @@ async function main(): Promise<void> {
       evaluateReadinessFn: evaluateExportTargetReadiness,
     };
 
-    // 7) DRY-RUN (classify-only): report the would-capture decision and STOP before any click,
+    // 7) DRY-RUN (classify-only): report the would-capture decision and STOP before the EXPORT click,
     //    download, upload, or status write.
+    //
+    //    ⚠ Not "before any click": the reconnect resolve above may click the Commerce continue control on a
+    //    `RECONNECT_REQUIRED` verdict, and it does so on this path too. That click now has its own barrier
+    //    (Barrier 1), but the comment claimed for years that classify-only clicked nothing at all.
     if (classifyOnly) {
       console.log(classifyOnlyReport(verdict, resolution, gate));
       log("run.classify-only", { wouldCapture: gate.proceed, state: gate.state });
@@ -544,7 +557,12 @@ async function main(): Promise<void> {
         headline: "지금 화면의 내보내기 컨트롤을 SellerOps가 한 번 눌러도 될까요?",
         allows: [
           "화면에서 하나로 확인된 내보내기 컨트롤을 정확히 한 번 누릅니다.",
-          ...(diagnoseConfirm ? ["이어서 뜨는 이용 동의 창의 '확인'을 한 번 누릅니다."] : []),
+          // `approvedIndexRequested` is set by its OWN flag and never consults `diagnoseConfirm`, so keying
+          // this line off `diagnoseConfirm` alone hid a SECOND real click on the seller's consent modal —
+          // the click that actually makes NAVER run the export — behind an ask that said "one control, once".
+          ...(diagnoseConfirm || approvedIndexRequested
+            ? ["이어서 뜨는 이용 동의 창의 '확인'을 한 번 누릅니다 (내보내기를 실제로 실행시키는 누름입니다)."]
+            : []),
           ...(diagnoseSaveDownload ? ["내려받아진 파일 하나를 이 컴퓨터에 저장하고 검사합니다."] : []),
           ...(diagnoseUpload ? ["저장된 파일을 로컬 SellerOps 백엔드로 업로드합니다 (리뷰 데이터가 DB에 적재됩니다)."] : []),
           ...(diagnoseWriteStatus ? ["그 결과를 수집 상태 기록에 남깁니다."] : []),
@@ -555,6 +573,7 @@ async function main(): Promise<void> {
       });
       if (!allowedDiagnostic) {
         console.error(actionBarrierRefusedMessage("EXPORT_TRIGGER"));
+        console.log(barrierRefusedRecord("EXPORT_TRIGGER"));
         log("capture.aborted", { reason: "no-operator-confirmation-diagnostic" });
         process.exitCode = 7;
         return;
@@ -902,6 +921,7 @@ async function main(): Promise<void> {
     });
     if (!allowedCapture) {
       console.error(actionBarrierRefusedMessage("EXPORT_TRIGGER"));
+      console.log(barrierRefusedRecord("EXPORT_TRIGGER"));
       log("capture.aborted", { reason: "no-operator-confirmation-export" });
       process.exitCode = 7;
       return;

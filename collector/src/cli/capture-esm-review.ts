@@ -71,6 +71,8 @@ import { esmMarketplaceReadyPathFor, esmSentinelPathFor } from "../esm/esm-senti
 import { log } from "../log";
 import { saveAndInspectDownload, type SavedDownloadInspection } from "../naver/review-download-save";
 import { launchPersistentBrowser } from "../profile";
+import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
+import { actionBarrierRefusedMessage, barrierRefusedRecord, confirmActionBarrier } from "./operator-action-barrier";
 
 const NETWORKIDLE_BUDGET_MS = 8_000;
 const STABILITY_INTERVAL_MS = 500;
@@ -329,7 +331,13 @@ async function main(): Promise<void> {
   removeSentinel(marketplaceReadyPath);
 
   const ctx = await launchPersistentBrowser(resolution.profileDir, cfg.browserChannel);
-  const page = (ctx.pages()[0] ?? (await ctx.newPage())) as Page;
+  // Opened up front so the operator's own page stays the entry page. Nothing waits on it unless this run
+  // reaches the export click — the observe-only mode never does.
+  const confirmHost = await attachOperatorConfirmTab(ctx as unknown as ConfirmHostContext, {
+    aborted: () => false,
+    timeoutMs: CONFIRM_TIMEOUT_MS,
+  });
+  const page = confirmHost.entryPage as unknown as Page;
   try {
     await page.goto(cfg.esmReviewUrl, { waitUntil: "domcontentloaded" });
     console.error(CONFIRM_PROMPT);
@@ -525,6 +533,31 @@ async function main(): Promise<void> {
     const preClickMarketplace = await inspectSelectedMarketplace(page);
     if (preClickMarketplace !== marketplace) {
       emitStop("marketplace-reset", { requestedMarketplace: marketplace, detectedMarketplace: preClickMarketplace, approvedIndex });
+      return;
+    }
+
+    // **THE ACTION BARRIER**, immediately before the click and after every gate that could refuse it — so the
+    // ask names a control this run has already bound, on the marketplace it has already verified, rather than
+    // a page the operator was looking at some minutes ago.
+    //
+    // The READ hand-offs above (the readiness signal, the marketplace-selection signal) are still sentinel
+    // files and are still on the register in the approval contract §5a. They advance a reading; this advances
+    // an act, and only the second one can put a file on the seller's disk.
+    const allowedExport = await confirmActionBarrier(confirmHost, {
+      kind: "EXPORT_TRIGGER",
+      title: "ESM+ 리뷰 내보내기",
+      headline: `${marketplace} 화면의 내보내기 컨트롤을 SellerOps가 한 번 눌러도 될까요?`,
+      allows: [
+        "허용된 프레임 안에서 하나로 확인된 내보내기 컨트롤을 정확히 한 번 누릅니다.",
+        "그 결과로 파일이 내려받아지는지 한 번만 기다려 관찰합니다.",
+      ],
+      stillWillNot: "파일을 저장하거나 업로드하지 않고, 다른 컨트롤을 누르거나 화면의 값을 읽지 않습니다.",
+    });
+    if (!allowedExport) {
+      console.error(actionBarrierRefusedMessage("EXPORT_TRIGGER"));
+    console.log(barrierRefusedRecord("EXPORT_TRIGGER"));
+      log("esm.review.capture", { result: "STOPPED", stop: "no-operator-confirmation", clicked: 0 });
+      process.exitCode = 7;
       return;
     }
 
