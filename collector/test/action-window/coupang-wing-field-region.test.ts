@@ -18,6 +18,8 @@ import {
   FIELD_REGION_ANCESTOR_DEPTH,
   sanitizeAncestorScope,
   sanitizeFieldRegionCensus,
+  VENDOR_IP_REGION_BASELINE_BUTTON_COUNT,
+  vendorIpEntryRegistered,
   type FieldRegionRequest,
 } from "../../src/action-window/coupang-wing-field-region";
 
@@ -526,5 +528,38 @@ describe("the in-page script's own discipline", () => {
     for (const forbidden of [".click(", ".focus(", ".submit(", "setAttribute", "dispatchEvent", "innerHTML"]) {
       expect(src, forbidden).not.toContain(forbidden);
     }
+  });
+});
+
+describe("what a REGISTERED IP entry is", () => {
+  // Measured on 2026-08-13 (READ_ONLY sitting wt-017b33239e33), before and after the operator pressed 추가.
+  const BEFORE = { inputCount: 1, textInputCount: 1, buttonCount: 1, entryRowCount: 0 };
+  const AFTER = { inputCount: 1, textInputCount: 1, buttonCount: 2, entryRowCount: 0 };
+
+  it("reads the measured before/after pair the way the live screen behaved", () => {
+    expect(vendorIpEntryRegistered(BEFORE)).toBe(false);
+    expect(vendorIpEntryRegistered(AFTER)).toBe(true);
+  });
+
+  it("the ROW COUNT alone never fires — which is the defect this rule replaced", () => {
+    // Both readings carry entryRowCount 0. A rule built on it answers "not registered" to a screen showing the
+    // address registered, and step ⑥ of the guided walk could never advance.
+    expect(BEFORE.entryRowCount).toBe(0);
+    expect(AFTER.entryRowCount).toBe(0);
+  });
+
+  it("a second entry still reads registered — the rule asks whether the count ROSE, not what it is", () => {
+    expect(vendorIpEntryRegistered({ buttonCount: 3, entryRowCount: 0 })).toBe(true);
+  });
+
+  it("a layout that DOES render rows is still honoured", () => {
+    // Kept deliberately: replacing the row count would drop a signal that costs one comparison to keep.
+    expect(vendorIpEntryRegistered({ buttonCount: 1, entryRowCount: 1 })).toBe(true);
+  });
+
+  it("an UNMEASURED count is not a registration — both halves fail closed", () => {
+    expect(vendorIpEntryRegistered({})).toBe(false);
+    expect(vendorIpEntryRegistered({ buttonCount: VENDOR_IP_REGION_BASELINE_BUTTON_COUNT })).toBe(false);
+    expect(vendorIpEntryRegistered({ buttonCount: 0, entryRowCount: 0 })).toBe(false);
   });
 });

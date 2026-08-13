@@ -2017,6 +2017,10 @@ async function main(): Promise<void> {
               // Null except on the vendor screen's checkpoints. Tag names and integers — and deliberately no
               // emptiness count, so the difference between the two vendor readings is a difference in SHAPE.
               vendorRegions: r.vendorRegions,
+              // WHAT let this reading be taken. It was in the run's log lines and missing from the record the
+              // reviewer actually reads — so the artefact could not show, on its own, that no checkpoint here
+              // advanced on anything but a verified press.
+              confirmedBy: r.confirmedBy,
             })),
           },
           null,

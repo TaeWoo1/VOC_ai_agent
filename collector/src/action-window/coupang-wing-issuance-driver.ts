@@ -93,6 +93,7 @@ import { buildAncestorScopeScript, buildFieldRegionCensusScript } from "./api-is
 import {
   sanitizeAncestorScope,
   sanitizeFieldRegionCensus,
+  vendorIpEntryRegistered,
   type FieldRegionCensus,
   type AncestorScopeReading,
   type FieldRegionRequest,
@@ -1809,19 +1810,16 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
         return "UNKNOWN";
       }
       const ready =
-        r.id === VENDOR_FORM_IP_FIELD_ID ? (r.entryRowCount ?? 0) >= 1 : (r.filledTextInputCount ?? 0) >= 1;
+        r.id === VENDOR_FORM_IP_FIELD_ID ? vendorIpEntryRegistered(r) : (r.filledTextInputCount ?? 0) >= 1;
       // Sanitized: an id, booleans, a tag name and integers. The whole point is that "did they fill it" travels
       // and "what did they put there" does not.
       //
-      // **The STRUCTURE travels too, since 2026-08-13, and it is a measurement this walk owes itself.** The
-      // census computed these four counts from the beginning and logged none of them, so when the live run of
-      // that day read `IP 주소` as not-ready for a minute and a half, the log could say only that — while the
-      // seller's screen showed the address registered as a removable CHIP (`211.222.138.6 ×`), which is not an
-      // `li`, a `tr` or an `option` and so is not what `entryRowCount` counts.
-      //
-      // The rule stays as it is until the shape is READ rather than guessed at. What these lines give the next
-      // walk is both states of the same region — before the seller presses 추가 and after — from which the
-      // rule follows: nothing here has ever recorded what a registered entry does to this region.
+      // **The STRUCTURE travels too, since 2026-08-13.** The census computed these four counts from the
+      // beginning and logged none of them, so when the live run of that day read `IP 주소` as not-ready for a
+      // minute and a half, the log could say only that. These lines are what a READ_ONLY sitting then compared
+      // before and after the seller pressed 추가, and the rule above now follows from that comparison rather
+      // than from a guess about the markup — see `vendorIpEntryRegistered`. They stay: the next surprise on
+      // this screen will be diagnosed from the same four numbers.
       this.logThrottled(
         `vform:${r.id}:${ready}:${r.regionTag ?? "-"}:${r.inputCount ?? "-"}:${r.textInputCount ?? "-"}:${r.buttonCount ?? "-"}:${r.entryRowCount ?? "-"}`,
         "aw_coupang_vendor_form_field",

@@ -66,6 +66,50 @@ export interface FieldRegionRequest {
 /** How many DISTINCT tag names a region census carries. A region with more shapes than this is not a form row. */
 export const FIELD_REGION_TAG_CENSUS_LIMIT = 16;
 
+/**
+ * **How many buttons WING's `API 호출 IP` region has when nothing is registered — MEASURED, not assumed.**
+ *
+ * One: the `추가` control itself. Registering an address adds its own remove control beside the chip, so the
+ * region carries one button per registered entry ON TOP of this baseline.
+ */
+export const VENDOR_IP_REGION_BASELINE_BUTTON_COUNT = 1;
+
+/**
+ * **Does this region hold at least one REGISTERED IP entry?**
+ *
+ * The rule this replaced counted `entryRowCount` — `li` / `tr` / `option` — and read **zero on both sides of the
+ * registration**, so the guided walk's step ⑥ could never advance. The 2026-08-13 live sitting
+ * (`wt-017b33239e33`, READ_ONLY, operator-confirmed at every checkpoint) measured the same region before and
+ * after the operator pressed `추가`:
+ *
+ * | signal          | before | after |
+ * |-----------------|--------|-------|
+ * | `entryRowCount` | 0      | **0** |
+ * | `buttonCount`   | 1      | **2** |
+ * | `BUTTON`        | 1      | **2** |
+ * | `DIV`           | 2      | **3** |
+ * | `SPAN`          | 4      | **6** |
+ * | `INPUT`         | 1      | 1     |
+ * | `STRONG`        | 2      | 2     |
+ *
+ * A registered entry is a `div` chip carrying its own remove `button` — which is why a row count cannot see it
+ * and a button count can. The 업체명 and URL regions were byte-identical across the same pair while the operator
+ * typed into both, so the signal is specific to REGISTRATION rather than to typing.
+ *
+ * `entryRowCount` is kept as an alternative, not replaced by one: a WING layout that did render rows would still
+ * be honoured, and keeping it costs a comparison. Both fail closed — an unmeasured count is not a registration.
+ *
+ * n=1: one sitting, one address. Registering a second should read `buttonCount: 3`; nothing here depends on
+ * that, since the rule asks only whether the count has risen above the baseline.
+ */
+export function vendorIpEntryRegistered(reading: {
+  readonly buttonCount?: number;
+  readonly entryRowCount?: number;
+}): boolean {
+  if ((reading.entryRowCount ?? 0) >= 1) return true;
+  return (reading.buttonCount ?? 0) > VENDOR_IP_REGION_BASELINE_BUTTON_COUNT;
+}
+
 /** One tag name and how many of it paint inside a region. No text, no attribute, no order dependence. */
 export interface RegionTagCount {
   readonly tag: string;

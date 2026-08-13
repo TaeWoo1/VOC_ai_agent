@@ -50,8 +50,13 @@ class FakeVendorPage {
             regionTag: "DD",
             inputCount: 1,
             textInputCount: 1,
-            buttonCount: id === "stage2.call_ip.ip_addr" ? 1 : 0,
-            entryRowCount: id === "stage2.call_ip.ip_addr" && this.filled.has(id) ? 1 : 0,
+            // The MEASURED WING shape (2026-08-13 READ_ONLY sitting, wt-017b33239e33): a registered address is
+            // a chip carrying its own remove button, so the region's button count rises from 1 (the `추가`
+            // control) to 2 — and `entryRowCount` reads ZERO on both sides. This fixture used to model the
+            // registration as a row appearing, which is why every test here passed while the live walk sat at
+            // NOT_READY for a minute and a half. A fake that models what the page does not do proves nothing.
+            buttonCount: id === "stage2.call_ip.ip_addr" ? (this.filled.has(id) ? 2 : 1) : 0,
+            entryRowCount: 0,
             filledTextInputCount: id !== "stage2.call_ip.ip_addr" && this.filled.has(id) ? 1 : 0,
           })),
         };
