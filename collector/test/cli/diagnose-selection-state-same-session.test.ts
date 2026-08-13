@@ -52,25 +52,27 @@ describe("diagnose-selection-state-same-session — gated + salted + sentinel co
     expect(collectIdx).toBeGreaterThan(saltIdx);
   });
 
-  it("derives the sentinel path from the shared helper and polls (no terminal stdin)", () => {
-    expect(/from\s+["']\.\/probe-sentinel["']/.test(code)).toBe(true);
-    expect(/sentinelPathFor\s*\(/.test(code)).toBe(true);
-    expect(/waitForSentinel\s*\(/.test(code)).toBe(true);
+  it("**takes no readiness signal from the filesystem, and none from stdin**", () => {
+    // It used to wait on a `.ready` file, and its own printed prompt told the operator that in Claude Code they
+    // could "just say ready and Claude creates it". That is the channel that failed on 2026-08-13.
+    expect(/sentinelPathFor\s*\(/.test(code)).toBe(false);
+    expect(/probe-sentinel/.test(code)).toBe(false);
+    expect(/waitForSentinel\s*\(/.test(code)).toBe(false);
+    expect(/existsSync/.test(code)).toBe(false);
     expect(code.includes("process.stdin")).toBe(false);
     expect(/waitForEnter/.test(code)).toBe(false);
   });
 
-  it("clears any stale sentinel before waiting and cleans up afterwards", () => {
-    expect(/removeSentinel\s*\(/.test(code)).toBe(true);
-    expect(/unlinkSync/.test(code)).toBe(true);
+  it("waits on the shared confirmation surface instead", () => {
+    expect(/attachOperatorConfirmTab\s*\(/.test(code)).toBe(true);
+    expect(code.includes("confirmHost.confirm(CONFIRM_ASK)")).toBe(true);
   });
 
-  it("aborts WITHOUT reading storage when the sentinel never appears", () => {
-    expect(/sentinel-timeout/.test(code)).toBe(true);
-    const abortIdx = code.indexOf("sentinel-timeout");
+  it("aborts WITHOUT reading storage unless a press confirmed the screen", () => {
+    const guard = code.indexOf('confirmation.signal !== "ready"');
     const collectIdx = code.indexOf("collectSanitizedStorage(", code.indexOf("async function main"));
-    expect(abortIdx).toBeGreaterThanOrEqual(0);
-    expect(abortIdx).toBeLessThan(collectIdx); // the timeout return precedes any storage read
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(collectIdx); // the refusal returns before any storage read
   });
 
   it("emits only the sanitized signals via the pure collector/extractor", () => {

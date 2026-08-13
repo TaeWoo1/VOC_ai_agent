@@ -1152,6 +1152,36 @@ export const WING_DISCOVERY_TERMS_STEP_SUMMARY =
  * It also discloses the extra tab: the run opens one page it did not open before, and a manifest that promised a
  * single dedicated window would be describing a different run than the one about to happen.
  */
+/**
+ * The RUN-LEVEL half of the same disclosure: this manifest is granted by a press, not by the line the operator
+ * says. Stated on the manifest because it changes what the operator has to DO to start the run — the phrase in
+ * chat tells the assistant to begin, and the run then asks them again, on a screen carrying these same fields.
+ */
+/**
+ * **The default account binding for a WING phase — TWO accounts, named apart.**
+ *
+ * It read "operator-owned Coupang WING test account", which is true of the marketplace side and silently made
+ * the SellerOps side invisible. A guided walk signs in twice: the operator logs into **WING** with their own
+ * Coupang seller account, and separately logs into **SellerOps** with a proof account. Naming only one invites
+ * exactly the conflation the operator caught — reading the SellerOps proof login as if it were a WING identity.
+ *
+ * It lives HERE, in the contract module, rather than in the manifest CLI, because the run-level grant screen
+ * renders this field too: with a copy in each place, the screen the operator presses said one thing and the
+ * manifest they granted against said another. Observed live on 2026-08-13 — the screen read "operator-owned
+ * Coupang WING test account" while the manifest above it read the sentence below.
+ *
+ * Deliberately no address, id, or handle for either: `validateApprovalPrerequisites` refuses a raw account id
+ * here, and the point of this field is what KIND of account is bound, never which one. Neither login's
+ * credential VALUE is read by anything in this run.
+ */
+export const WING_DEFAULT_ACCOUNT_BINDING =
+  "WING: operator-owned Coupang seller account (the operator's own login) · SellerOps: a separate proof account. " +
+  "Two distinct logins; no credential value from either is read";
+
+export const WING_RUN_GRANT_SUMMARY =
+  " 실행은 SellerOps가 함께 여는 'SellerOps 확인' 탭에서 이 승인 내용(채널·계정·화면·작업·모드·허용 동작)을 " +
+  "다시 보여 드리고, 그 버튼을 직접 누르셔야만 시작됩니다. 대화창의 한 줄이나 터미널 옵션만으로는 시작되지 않습니다.";
+
 export const WING_PROBE_CONFIRM_CHANNEL_SUMMARY =
   " 각 단계는 SellerOps가 함께 여는 빈 'SellerOps 확인' 탭의 [현재 화면 확인] 버튼을 직접 누르셔야만 넘어갑니다. " +
   "대화창에 'ready'라고 쓰거나 파일을 만드는 것으로는 진행되지 않습니다. 그 탭은 안내 문구와 버튼만 있는 " +
@@ -1361,7 +1391,8 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
       "검증합니다. 그 버튼은 판매자가 직접 누릅니다 — SellerOps는 강조 표시만 하고, 절대 누르지 않으며, " +
       "누를 수 있는 코드 경로가 없습니다. 업체명 · URL · IP 주소는 판매자 본인의 정보이며 SellerOps는 " +
       "입력란에 아무것도 쓰지 않습니다. 어떤 입력 방식이 SellerOps에 맞는지는 측정이 아니라 제품 결정입니다. " +
-      "credential 값 읽기·연결·동기화는 이번 run의 범위가 아닙니다.",
+      "credential 값 읽기·연결·동기화는 이번 run의 범위가 아닙니다." +
+      WING_RUN_GRANT_SUMMARY,
     emitsFrontendUrl: false,
   },
   // The WING issuance-form REVEAL phase: a CLI-launched dedicated Chrome. The operator presses 발급 themselves
@@ -1372,7 +1403,14 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
     cli: "src/cli/run-coupang-wing-reveal-live.ts",
     entrypointCommandId: "run-coupang-wing-reveal-live",
     operatorActionSummary:
-      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 오픈API 화면에서 준비되면 ready 를 보내세요. SellerOps는 '발급' 버튼을 강조 표시만 하고 멈춥니다(클릭·입력 없음). 발급은 판매자가 직접 누릅니다. 연동 방식 설정 화면이 열릴 것으로 예상되지만 확인된 사실은 아니며, 실제 키 발급/최종 '확인'은 이번 단계에서 수행하지 않습니다. 화면이 열리면 더 진행하지 마세요. SellerOps는 화면 종류만 한 번 확인하고 종료하며, 키 생성 여부는 판단할 수 없습니다.",
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 오픈API 화면에 도착하신 뒤 " +
+      "'SellerOps 확인' 탭의 [현재 화면 확인]을 누르세요. SellerOps는 '발급' 버튼을 강조 표시만 하고 멈춥니다" +
+      "(클릭·입력 없음). 발급은 판매자가 직접 누르고, 누르신 뒤 같은 버튼으로 한 번 더 확인해 주시면 그때 화면을 읽습니다. " +
+      "연동 방식 설정 화면이 열릴 것으로 예상되지만 확인된 사실은 아니며, 실제 키 발급/최종 '확인'은 이번 단계에서 " +
+      "수행하지 않습니다. 화면이 열리면 더 진행하지 마세요. SellerOps는 화면 종류만 한 번 확인하고 종료하며, " +
+      "키 생성 여부는 판단할 수 없습니다." +
+      WING_RUN_GRANT_SUMMARY +
+      WING_PROBE_CONFIRM_CHANNEL_SUMMARY,
     emitsFrontendUrl: false,
   },
   // The Coupang WING key-DELETION phase: a CLI-launched dedicated Chrome (never a frontend URL). The seller logs
@@ -1385,8 +1423,12 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
     cli: "src/cli/run-coupang-wing-deletion-live.ts",
     entrypointCommandId: "run-coupang-wing-deletion-live",
     operatorActionSummary:
-      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 이미 발급된 오픈API 화면에서 준비되면 ready 를 보내세요. " +
-      "SellerOps는 삭제 버튼 위치만 강조하고 멈춥니다. 삭제는 되돌릴 수 없고 기존 키가 즉시 무효화됩니다 — 삭제는 직접 누르세요(클릭·입력·값 읽기 없음).",
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 이미 발급된 오픈API 화면에 도착하신 뒤 " +
+      "'SellerOps 확인' 탭의 [현재 화면 확인]을 누르세요. " +
+      "SellerOps는 삭제 버튼 위치만 강조하고 멈춥니다. 삭제는 되돌릴 수 없고 기존 키가 즉시 무효화됩니다 — 삭제는 " +
+      "직접 누르세요(클릭·입력·값 읽기 없음). 삭제하신 뒤 같은 버튼으로 한 번 더 확인해 주시면 그때 결과만 읽습니다." +
+      WING_RUN_GRANT_SUMMARY +
+      WING_PROBE_CONFIRM_CHANNEL_SUMMARY,
     emitsFrontendUrl: false,
   },
   // The FE-run-host issuance live proof: the operator's ONE action is opening the bound FE wizard URL. The

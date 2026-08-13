@@ -20,6 +20,7 @@ import {
   sanitizeFieldRegionCensus,
   VENDOR_IP_REGION_BASELINE_BUTTON_COUNT,
   vendorIpEntryRegistered,
+  vendorIpRegionBaselineFrom,
   type FieldRegionRequest,
 } from "../../src/action-window/coupang-wing-field-region";
 
@@ -533,12 +534,15 @@ describe("the in-page script's own discipline", () => {
 
 describe("what a REGISTERED IP entry is", () => {
   // Measured on 2026-08-13 (READ_ONLY sitting wt-017b33239e33), before and after the operator pressed 추가.
-  const BEFORE = { inputCount: 1, textInputCount: 1, buttonCount: 1, entryRowCount: 0 };
-  const AFTER = { inputCount: 1, textInputCount: 1, buttonCount: 2, entryRowCount: 0 };
+  const BEFORE = { visibleCount: 1, inputCount: 1, textInputCount: 1, buttonCount: 1, entryRowCount: 0 };
+  const AFTER = { visibleCount: 1, inputCount: 1, textInputCount: 1, buttonCount: 2, entryRowCount: 0 };
 
   it("reads the measured before/after pair the way the live screen behaved", () => {
-    expect(vendorIpEntryRegistered(BEFORE)).toBe(false);
-    expect(vendorIpEntryRegistered(AFTER)).toBe(true);
+    // The step baselines on the BEFORE reading, exactly as the walk does on its first resolved census.
+    const baseline = vendorIpRegionBaselineFrom(BEFORE);
+    expect(baseline).toBe(VENDOR_IP_REGION_BASELINE_BUTTON_COUNT);
+    expect(vendorIpEntryRegistered(BEFORE, baseline)).toBe(false);
+    expect(vendorIpEntryRegistered(AFTER, baseline)).toBe(true);
   });
 
   it("the ROW COUNT alone never fires — which is the defect this rule replaced", () => {
@@ -548,18 +552,62 @@ describe("what a REGISTERED IP entry is", () => {
     expect(AFTER.entryRowCount).toBe(0);
   });
 
-  it("a second entry still reads registered — the rule asks whether the count ROSE, not what it is", () => {
-    expect(vendorIpEntryRegistered({ buttonCount: 3, entryRowCount: 0 })).toBe(true);
+  it("**a WING variant with a different empty-region shape cannot false-positive**", () => {
+    // The whole reason the comparison is against a baseline rather than against the 1 that one live screen
+    // produced. A region carrying two controls before anything is registered reads NOT registered on arrival —
+    // under the absolute rule it read registered, and what this step hands to is a ring on the control that
+    // issues the key.
+    const variantEmpty = { visibleCount: 1, buttonCount: 2, entryRowCount: 0 };
+    const variantRegistered = { visibleCount: 1, buttonCount: 3, entryRowCount: 0 };
+    const baseline = vendorIpRegionBaselineFrom(variantEmpty);
+    expect(vendorIpEntryRegistered(variantEmpty, baseline)).toBe(false);
+    expect(vendorIpEntryRegistered(variantRegistered, baseline)).toBe(true);
   });
 
-  it("a layout that DOES render rows is still honoured", () => {
-    // Kept deliberately: replacing the row count would drop a signal that costs one comparison to keep.
-    expect(vendorIpEntryRegistered({ buttonCount: 1, entryRowCount: 1 })).toBe(true);
+  it("a second entry still reads registered — the rule asks whether the count ROSE", () => {
+    expect(vendorIpEntryRegistered({ buttonCount: 3, entryRowCount: 0 }, 2)).toBe(true);
   });
 
-  it("an UNMEASURED count is not a registration — both halves fail closed", () => {
-    expect(vendorIpEntryRegistered({})).toBe(false);
-    expect(vendorIpEntryRegistered({ buttonCount: VENDOR_IP_REGION_BASELINE_BUTTON_COUNT })).toBe(false);
-    expect(vendorIpEntryRegistered({ buttonCount: 0, entryRowCount: 0 })).toBe(false);
+  it("a REMOVED entry drops back below the baseline and is not a registration", () => {
+    // The seller who registers an address and then deletes it must not leave the step reading ready.
+    expect(vendorIpEntryRegistered({ buttonCount: 1, entryRowCount: 0 }, 1)).toBe(false);
+    expect(vendorIpEntryRegistered({ buttonCount: 0, entryRowCount: 0 }, 1)).toBe(false);
+  });
+
+  it("a layout that DOES render rows is still honoured, with or without a baseline", () => {
+    // Kept deliberately: one row is a registration whatever the region looked like before, so this half needs
+    // no before-picture and keeps working on the reading that establishes one.
+    expect(vendorIpEntryRegistered({ buttonCount: 1, entryRowCount: 1 }, 1)).toBe(true);
+    expect(vendorIpEntryRegistered({ buttonCount: 1, entryRowCount: 1 }, null)).toBe(true);
+  });
+
+  it("**no baseline is not a registration** — the button half fails closed without a before-picture", () => {
+    expect(vendorIpEntryRegistered(AFTER, null)).toBe(false);
+    expect(vendorIpEntryRegistered({ buttonCount: 99 }, null)).toBe(false);
+  });
+
+  it("an UNMEASURED count is not a registration either", () => {
+    expect(vendorIpEntryRegistered({}, 1)).toBe(false);
+    expect(vendorIpEntryRegistered({ entryRowCount: 0 }, 0)).toBe(false);
+  });
+
+  it("a region that did not resolve yields NO baseline — it is not a picture of this form", () => {
+    expect(vendorIpRegionBaselineFrom({ visibleCount: 0, buttonCount: 1 })).toBeNull();
+    expect(vendorIpRegionBaselineFrom({ visibleCount: 2, buttonCount: 1 })).toBeNull();
+    expect(vendorIpRegionBaselineFrom({ visibleCount: 1 })).toBeNull();
+    // A reading that never claimed to resolve is not one either, whatever it counted.
+    expect(vendorIpRegionBaselineFrom({ buttonCount: 1 })).toBeNull();
+  });
+
+  it("**a region caught MID-PAINT yields no baseline** — otherwise the empty region reads as a registration", () => {
+    // The region carries `추가` whether or not anything is registered, so a count below the measured empty
+    // state is a region that has not finished painting. Taken as a baseline it would be 0, and the very next
+    // reading of the SAME empty region — at 1 — would be an increase: a registration that never happened,
+    // completing step ⑥ and ringing 확인, the control that issues the key, over an unfilled form.
+    expect(vendorIpRegionBaselineFrom({ visibleCount: 1, buttonCount: 0 })).toBeNull();
+    // …and refusing costs only a poll: the next resolved reading takes the baseline instead.
+    expect(vendorIpRegionBaselineFrom({ visibleCount: 1, buttonCount: 1 })).toBe(1);
+    // The mid-paint reading also cannot be a registration against a null baseline.
+    expect(vendorIpEntryRegistered({ buttonCount: 1, entryRowCount: 0 }, null)).toBe(false);
   });
 });

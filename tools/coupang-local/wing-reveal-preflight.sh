@@ -207,8 +207,11 @@ echo "    판단할 수 없습니다. 화면은 판매자만 확인할 수 있�
 echo "    화면을 확인해 주세요."
 # CHECKPOINT-COPY-END
 echo
-echo "  If this manifest is correct and displayed, the operator's entire single-use grant is one line:"
+echo "  If this manifest is correct and displayed, say the one line that tells the assistant to start it:"
 echo "    Seated and ready."
+echo
+echo "  That line does NOT authorize the run. The run opens a 'SellerOps 확인' tab, shows you these same"
+echo "  binding fields, and starts ONLY when you press the button on it yourself. No press, no run."
 echo
 echo "  On approval:"
 # BOTH phase variables travel on the command, like the probe harness does with its scope variables: the CLI

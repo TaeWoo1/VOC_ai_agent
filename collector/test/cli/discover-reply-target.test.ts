@@ -7,13 +7,12 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  awaitSentinelGate,
   censusToRows,
   classifyReviewRowStructure,
   expectedHintPathFrom,
   ExpectedHintError,
   loadExpectedHint,
-  runSentinelGatedCensus,
+  runConfirmedCensus,
   sentinelModeFrom,
   settleRowCensus,
   type DiscoveredRowSignal,
@@ -328,40 +327,26 @@ describe("sentinelModeFrom — opt-in flag vocabulary", () => {
   });
 });
 
-describe("awaitSentinelGate — clears stale first, then polls, fails closed", () => {
-  it("clears a STALE sentinel before polling, so a leftover file cannot satisfy the gate", async () => {
-    const fs = fakeSentinelFs({ staleAtStart: true, appearsAfterChecks: 2 });
-    const outcome = await awaitSentinelGate(fs.deps, SENTINEL, { timeoutMs: 100, intervalMs: 10 });
-    expect(outcome).toBe("ready");
-    // The very first action is the removal, and the first existence check after it is false.
-    expect(fs.events[0]).toBe("remove");
-    expect(fs.events[1]).toBe("exists:false");
-  });
-
-  it("returns ready once the operator creates the sentinel", async () => {
-    const fs = fakeSentinelFs({ appearsAfterChecks: 3 });
-    await expect(awaitSentinelGate(fs.deps, SENTINEL, { timeoutMs: 1000, intervalMs: 10 })).resolves.toBe("ready");
-  });
-
-  it("fails closed with timeout when the sentinel never appears, bounded by iteration count", async () => {
-    const fs = fakeSentinelFs();
-    await expect(awaitSentinelGate(fs.deps, SENTINEL, { timeoutMs: 50, intervalMs: 10 })).resolves.toBe("timeout");
-    // 5 polls + one final check — bounded, never a wall-clock read.
-    expect(fs.checks()).toBe(6);
-  });
-
-  it("still honours a zero/degenerate budget without spinning", async () => {
-    const fs = fakeSentinelFs();
-    await expect(awaitSentinelGate(fs.deps, SENTINEL, { timeoutMs: 0, intervalMs: 0 })).resolves.toBe("timeout");
-    expect(fs.checks()).toBe(2);
-  });
-});
-
-describe("runSentinelGatedCensus — the census runs ONLY after the gate", () => {
-  it("never reads the page when the gate times out", async () => {
+describe("runConfirmedCensus — the census runs ONLY after a verified press", () => {
+  it("never reads the page when nobody presses", async () => {
     let censusCalls = 0;
-    const r = await runSentinelGatedCensus(
+    const r = await runConfirmedCensus(
       () => Promise.resolve("timeout" as const),
+      () => {
+        censusCalls += 1;
+        return Promise.resolve("read");
+      },
+    );
+    expect(r).toEqual({ outcome: "timeout" });
+    expect(censusCalls).toBe(0);
+  });
+
+  it("**an ABORT reads nothing either** — only `ready` is a confirmation", async () => {
+    // The gate now takes an operator confirmation, whose signal has three values. Anything that is not a
+    // verified press must leave the page unread, and `!== "ready"` is what makes that true by construction.
+    let censusCalls = 0;
+    const r = await runConfirmedCensus(
+      () => Promise.resolve("abort" as const),
       () => {
         censusCalls += 1;
         return Promise.resolve("read");
@@ -373,7 +358,7 @@ describe("runSentinelGatedCensus — the census runs ONLY after the gate", () =>
 
   it("reads the page only after the gate reports ready (ordering is observable)", async () => {
     const order: string[] = [];
-    const r = await runSentinelGatedCensus(
+    const r = await runConfirmedCensus(
       async () => {
         order.push("gate");
         return "ready" as const;
@@ -387,9 +372,9 @@ describe("runSentinelGatedCensus — the census runs ONLY after the gate", () =>
     expect(r).toEqual({ outcome: "ready", result: "summary" });
   });
 
-  it("the gated result is the unchanged sanitized summary — sentinel mode adds no new output", async () => {
+  it("the gated result is the unchanged sanitized summary — the hand-off adds no new output", async () => {
     const summary = classifyReviewRowStructure([discovered()], null, 2, false);
-    const r = await runSentinelGatedCensus(() => Promise.resolve("ready" as const), () => Promise.resolve(summary));
+    const r = await runConfirmedCensus(() => Promise.resolve("ready" as const), () => Promise.resolve(summary));
     expect(r.outcome).toBe("ready");
     expect(r.outcome === "ready" && Object.keys(r.result).sort()).toEqual([
       "blockers", "bodyNodePresentCount", "dateNodePresentCount", "expectedHintProvided",

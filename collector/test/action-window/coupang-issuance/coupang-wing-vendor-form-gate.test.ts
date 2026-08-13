@@ -32,10 +32,20 @@ class FakeVendorPage {
   filled = new Set<string>();
   censusReads = 0;
 
+  /**
+   * From which census read the registered-address chip paints. `1` = the ordinary case (reading #1 is the
+   * step's before-picture, the chip arrives after it); `0` = a form that was already complete when ⑥ armed.
+   */
+  ipRegisteredFromRead = 1;
+
   url(): string {
     return "https://wing.coupang.com/vendor/open-api";
   }
   on(): void {}
+
+  private ipChipShowing(): boolean {
+    return this.filled.has("stage2.call_ip.ip_addr") && this.censusReads > this.ipRegisteredFromRead;
+  }
 
   async evaluate(script: unknown, arg?: unknown): Promise<unknown> {
     if (typeof script === "string") {
@@ -51,8 +61,16 @@ class FakeVendorPage {
             regionTag: "DD",
             inputCount: 1,
             textInputCount: 1,
-            buttonCount: id === "stage2.call_ip.ip_addr" ? 1 : 0,
-            entryRowCount: id === "stage2.call_ip.ip_addr" && this.filled.has(id) ? 1 : 0,
+            // The MEASURED WING shape (2026-08-13 READ_ONLY sitting, wt-017b33239e33): a registered address is a
+            // chip carrying its own remove button, so the region's button count rises from 1 (the `추가` control)
+            // to 2 while `entryRowCount` stays ZERO on both sides. This fixture modelled the registration as a
+            // ROW appearing — a shape the live screen was then measured NOT to have — and every test here passed
+            // against it while the live walk read the same form as incomplete.
+            //
+            // It is a TRANSITION, not a constant: the readiness rule compares the region against the one the
+            // step armed on, so `ipRegisteredFromRead` decides which reading the chip first appears in.
+            buttonCount: id === "stage2.call_ip.ip_addr" ? (this.ipChipShowing() ? 2 : 1) : 0,
+            entryRowCount: 0,
             filledTextInputCount: id !== "stage2.call_ip.ip_addr" && this.filled.has(id) ? 1 : 0,
           })),
         };
@@ -119,11 +137,30 @@ describe("the vendor-form gate at step ⑥", () => {
   });
 
   it("advances when all three are done — 업체명 · URL typed, and the IP actually ADDED", async () => {
+    // The seller fills the form in while the step watches, which is when the registration is observable at all:
+    // the chip has to arrive after the reading the step baselined on.
     const page = new FakeVendorPage();
     page.filled = new Set(FIELD_IDS);
+    const observing = driverOn(page, 3_000).observeUserAction("vendor_method");
+    await waitFor(() => page.censusReads > 1);
     page.pressed = true;
-    expect(await driverOn(page).observeUserAction("vendor_method")).toBe(true);
+    expect(await observing).toBe(true);
     expect(logged("aw_coupang_vendor_form_not_ready")).toBe(false);
+  });
+
+  it("**a form already complete when ⑥ armed refuses one press, then yields**", async () => {
+    // The named cost of comparing against a before-picture: a walk re-anchoring on a form the seller finished
+    // earlier cannot tell it from a form nobody has touched, so it reads NOT_READY and the seller presses twice.
+    // Recorded here rather than left to be rediscovered live.
+    const page = new FakeVendorPage();
+    page.filled = new Set(FIELD_IDS);
+    page.ipRegisteredFromRead = 0;
+    page.pressed = true;
+    const observing = driverOn(page, 3_000).observeUserAction("vendor_method");
+    await waitFor(() => page.resets > 0);
+    expect(logged("aw_coupang_vendor_form_not_ready")).toBe(true);
+    page.pressed = true;
+    expect(await observing).toBe(true);
   });
 
   it("**an IP typed but never ADDED is not ready** — 추가 is the press that registers it", async () => {

@@ -32,8 +32,7 @@
  * types credentials and never writes to NAVER. Do NOT run during planning/implementation — building and
  * verifying this file is offline and hermetic (`main()` launches nothing on import).
  */
-import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { loadConfig } from "../config";
 import { log } from "../log";
@@ -46,7 +45,8 @@ import {
   type ReviewRowSignal,
 } from "../action-window/reply-submission/reply-surface";
 import { approvalRequiredMessage, hasLiveRunApproval, isClassifyOnly } from "./live-run-approval";
-import { sentinelPathFor } from "./probe-sentinel";
+import type { OperatorConfirmAsk } from "./operator-confirm";
+import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
 
 const EXPECTED_HINT_FLAG = "--expected-hint";
 const RECENCY_BUCKETS: readonly RecencyBucket[] = ["TODAY", "THIS_WEEK", "OLDER"];
@@ -319,20 +319,13 @@ export function expectedHintPathFrom(args: readonly string[]): string | null {
   return raw && !raw.startsWith("--") ? raw : null;
 }
 
-/* ──────────────── Same-session sentinel gate (read-only hand-off, pure core) ──────────────── */
+/* ──────────────── Same-session confirmation gate (read-only hand-off, pure core) ──────────────── */
 
 /** Budget for the human hand-off, mirroring the other same-session CLIs. */
-const SENTINEL_TIMEOUT_MS = 10 * 60_000;
-const SENTINEL_POLL_INTERVAL_MS = 750;
+const CONFIRM_TIMEOUT_MS = 10 * 60_000;
 
-export type SentinelGateOutcome = "ready" | "timeout";
-
-/** Injected so the gate is unit-testable offline with a fake fs + fake sleep — no disk, no timers. */
-export interface SentinelGateDeps {
-  existsFile: (path: string) => boolean;
-  removeFile: (path: string) => void;
-  sleep: (ms: number) => Promise<void>;
-}
+/** What one hand-off produced. Only `ready` lets the census run. */
+export type ConfirmedGateOutcome = "ready" | "abort" | "timeout";
 
 /**
  * Opt into same-session sentinel mode. Mirrors `capture-export-same-session`'s flag vocabulary so the
@@ -343,64 +336,40 @@ export function sentinelModeFrom(args: readonly string[]): boolean {
 }
 
 /**
- * Wait for the operator's sentinel file, having FIRST cleared any stale one.
- *
- * Clearing before polling is the whole safety property: a leftover file from an earlier run must never
- * satisfy this gate, or the census would read a page the human has not finished preparing. Bounded by a
- * fixed iteration count (no wall-clock read), so it is deterministic under test. Fails closed with
- * `timeout` — the caller must then abort WITHOUT reading the page.
- */
-export async function awaitSentinelGate(
-  deps: SentinelGateDeps,
-  path: string,
-  opts: { timeoutMs: number; intervalMs: number },
-): Promise<SentinelGateOutcome> {
-  deps.removeFile(path);
-  const interval = Math.max(1, opts.intervalMs);
-  const maxChecks = Math.max(1, Math.ceil(Math.max(0, opts.timeoutMs) / interval));
-  for (let i = 0; i < maxChecks; i += 1) {
-    if (deps.existsFile(path)) return "ready";
-    await deps.sleep(interval);
-  }
-  return deps.existsFile(path) ? "ready" : "timeout";
-}
-
-/**
- * Sequence the hand-off: the census runs **only** after the gate reports `ready`. On `timeout` the
+ * Sequence the hand-off: the census runs **only** after the gate reports `ready`. On anything else the
  * census is never invoked, so a half-prepared page is never read. Kept as its own tiny pure combinator
  * precisely so this ordering invariant is unit-testable without a browser.
  */
-export async function runSentinelGatedCensus<T>(
-  gate: () => Promise<SentinelGateOutcome>,
+export async function runConfirmedCensus<T>(
+  gate: () => Promise<ConfirmedGateOutcome>,
   census: () => Promise<T>,
 ): Promise<{ outcome: "ready"; result: T } | { outcome: "timeout" }> {
   const outcome = await gate();
-  if (outcome === "timeout") return { outcome: "timeout" };
+  if (outcome !== "ready") return { outcome: "timeout" };
   return { outcome: "ready", result: await census() };
 }
 
-/** Best-effort sentinel removal — used to clear a stale file at startup and to clean up after use. */
-function removeSentinelFile(path: string): void {
-  try {
-    if (existsSync(path)) unlinkSync(path);
-  } catch {
-    /* best-effort — a leftover is cleared by the next run's pre-poll removal anyway */
-  }
-}
-
-const SENTINEL_PROMPT = [
-  "",
-  "SENTINEL MODE — this window is yours. In THIS SAME window:",
-  "  1) Complete the NAVER-ID login (and any 2FA/CAPTCHA) yourself.",
-  "  2) Complete any Commerce reconnect / account-store selection.",
-  "  3) Navigate to the review-management list, with review rows visibly rendered.",
-  "  4) Leave the browser OPEN.",
-  "",
-  "Then signal readiness by creating the sentinel file shown below (in Claude Code, just say",
-  '"ready" and Claude creates it). Only then is the page read — READ-ONLY, structure only:',
-  "no click, no typing, no submit, no download, no upload, no status write. (Ctrl-C to abort.)",
-  "",
-].join("\n");
+/**
+ * What the operator is asked to do, and confirm.
+ *
+ * It used to end with 'just say "ready" and Claude creates it' — the channel that failed on 2026-08-13, when
+ * the assistant created the file on the strength of a chat line the operator never wrote.
+ */
+const CONFIRM_ASK: OperatorConfirmAsk = {
+  title: "NAVER 리뷰 목록 구조 판독",
+  headline: "리뷰 목록이 그려진 화면에 직접 도착한 뒤 확인해 주세요.",
+  lines: [
+    "HAND-OFF — this window is yours. In THIS SAME window:",
+    "  1) Complete the NAVER-ID login (and any 2FA/CAPTCHA) yourself.",
+    "  2) Complete any Commerce reconnect / account-store selection.",
+    "  3) Navigate to the review-management list, with review rows visibly rendered.",
+    "  4) Leave the browser OPEN.",
+    "",
+    "Then press [현재 화면 확인] in the SellerOps confirmation tab — nothing else advances this run. Only",
+    "then is the page read — READ-ONLY, structure only: no click, no typing, no submit, no",
+    "download, no upload, no status write.",
+  ],
+};
 
 /* ─────────────────────────── In-page census (read-only, generic) ─────────────────────────── */
 
@@ -452,12 +421,16 @@ async function doLogin(): Promise<void> {
 async function doDiscover(expectedHintPath: string | null, sentinelMode: boolean): Promise<void> {
   const expected = expectedHintPath ? loadExpectedHint(expectedHintPath) : null;
   const cfg = loadConfig();
-  // Single source of truth for the continuation file, shared with the other same-session CLIs —
-  // run only ONE of them at a time. Cleared before polling and again on cleanup.
-  const sentinelPath = sentinelPathFor(cfg.statusFile);
   const ctx = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
+  // The confirmation surface is a SellerOps-owned tab in the SAME window; `entryPage` is the operator's own
+  // page, captured before that tab existed. Opened in both modes so the two differ only in whether the run
+  // WAITS on it — the auto path must not be able to read the blank surface either.
+  const confirmHost = await attachOperatorConfirmTab(ctx as unknown as ConfirmHostContext, {
+    aborted: () => false,
+    timeoutMs: CONFIRM_TIMEOUT_MS,
+  });
   try {
-    const page = (ctx.pages()[0] ?? (await ctx.newPage())) as unknown as PwPage;
+    const page = confirmHost.entryPage as unknown as PwPage;
     await page.goto(process.env.NAVER_REVIEW_URL ?? NAVER_LANDING_URL, { waitUntil: "domcontentloaded" });
     // `evaluate` is deliberately absent from the pure `PwPage` structural surface; a real Playwright page
     // always has it. The census is sanitized IN-PAGE (counts/booleans/lengths) before it crosses back.
@@ -483,24 +456,15 @@ async function doDiscover(expectedHintPath: string | null, sentinelMode: boolean
       // SAME-SESSION HAND-OFF. The human logs in / reconnects / selects the store / reaches the review
       // list IN THIS WINDOW; only then is the page read, AS THEY LEFT IT (no re-navigation). This exists
       // so a cold or reconnect-required profile costs an aborted run instead of an empty census.
-      mkdirSync(dirname(sentinelPath), { recursive: true });
-      console.error(SENTINEL_PROMPT);
-      console.error("  Sentinel file (create this when ready):");
-      console.error(`    ${sentinelPath}`);
-      console.error("");
-      const gated = await runSentinelGatedCensus(
-        () =>
-          awaitSentinelGate(
-            { existsFile: existsSync, removeFile: removeSentinelFile, sleep },
-            sentinelPath,
-            { timeoutMs: SENTINEL_TIMEOUT_MS, intervalMs: SENTINEL_POLL_INTERVAL_MS },
-          ),
+      confirmHost.announce(CONFIRM_ASK);
+      const gated = await runConfirmedCensus(
+        () => confirmHost.confirm(CONFIRM_ASK).then((c) => c.signal),
         readSanitized,
       );
       if (gated.outcome === "timeout") {
         // Fail closed: never read a page the human has not finished preparing. No summary is emitted.
-        console.error("No sentinel within the timeout; aborting without reading the page.");
-        log("discover.reply.aborted", { reason: "sentinel-timeout" });
+        console.error("No confirmation press — aborting without reading the page.");
+        log("discover.reply.aborted", { reason: "no-operator-confirmation" });
         process.exitCode = 4;
         return;
       }
@@ -512,7 +476,6 @@ async function doDiscover(expectedHintPath: string | null, sentinelMode: boolean
     console.error("Waiting for the review list to render, then reading structure only (no click)…");
     console.log(JSON.stringify(await readSanitized(), null, 2));
   } finally {
-    removeSentinelFile(sentinelPath);
     await (ctx as unknown as { close(): Promise<void> }).close();
   }
 }

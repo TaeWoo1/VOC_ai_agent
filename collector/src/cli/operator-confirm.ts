@@ -22,8 +22,8 @@
  *     echo.
  *  2. The token is armed in a **SellerOps-owned confirmation surface** ({@link buildOperatorConfirmArmScript}) —
  *     a blank tab that renders the step, the instruction the operator was given, and one button: `현재 화면 확인`.
- *  3. The button's handler records the event **only for a trusted event** (`ev.isTrusted === true`, which a
- *     dispatched or programmatic `click()` cannot set) and only while its own token is the armed one.
+ *  3. The button's handler records the event **only for a trusted event** (`ev.isTrusted === true`, which no
+ *     in-page `element.click()` or `dispatchEvent` can set) and only while its own token is the armed one.
  *  4. The run polls, and {@link verifyOperatorConfirmEvent} admits the event only if the token matches the one it
  *     minted for THIS checkpoint and the press was trusted. Everything else — no event, a stale token, an
  *     untrusted event, a malformed record — is refused, and refusal never advances.
@@ -35,9 +35,16 @@
  *
  * ## What this does NOT claim
  *
- * It does not defend against an operator who presses without looking, and it does not defend against code in this
- * repository that decides to drive the confirmation surface itself. It closes exactly one hole: **a checkpoint can
- * no longer advance on text.**
+ * It does not defend against an operator who presses without looking.
+ *
+ * **And `isTrusted` is not a defence against this repository.** It rejects synthesised in-page events; it does
+ * NOT reject a Playwright/CDP click, which arrives through the browser's own input pipeline and is trusted like
+ * a human's. Every host here already holds a handle to the confirmation tab, so code in this package could press
+ * its own button. What stops that is the shape of {@link OperatorConfirmSeams} and of the host's page interface —
+ * `url` / `evaluate` / `bringToFront`, with no click path — plus review. It is a boundary, not a wall.
+ *
+ * What this closes is exactly one hole: **a checkpoint can no longer advance on text**, or on anything a process
+ * that is not driving this browser can produce.
  *
  * String IIFEs (never passed functions): tsx/esbuild instruments named/module functions with a `__name` helper
  * absent in the page, so a serialized function throws `ReferenceError: __name`. Kept ES5-plain and free of
@@ -58,9 +65,20 @@ export type OperatorConfirmProvenance = typeof OPERATOR_UI_CONFIRMED;
  * provenance because nothing confirmed them.
  */
 export type OperatorConfirmation =
-  | { readonly signal: "ready"; readonly provenance: OperatorConfirmProvenance }
+  | { readonly signal: "ready"; readonly provenance: OperatorConfirmProvenance; readonly choice: OperatorConfirmChoice }
   | { readonly signal: "abort"; readonly provenance: null }
   | { readonly signal: "timeout"; readonly provenance: null };
+
+/**
+ * WHICH button the operator pressed.
+ *
+ * Some runs offer a second answer that is not "the screen is ready" — the calibration stages offer "skip this
+ * optional stage". That is still an ADVANCE, so it needs the same trusted channel rather than a file beside it;
+ * it is a different answer to the same ask, not a different ask.
+ *
+ * `primary` is what a surface with one button always produces, so nothing that ignores this field can be wrong.
+ */
+export type OperatorConfirmChoice = "primary" | "secondary";
 
 /** Every way a poll can end. Only `CONFIRMED` advances; the rest are recorded and waited through. */
 export const OPERATOR_CONFIRM_VERDICTS = [
@@ -84,6 +102,8 @@ export const OPERATOR_CONFIRM_STATE_KEY = "__sellerOpsOperatorConfirm";
 export const OPERATOR_CONFIRM_ROOT_ID = "sellerops-operator-confirm-root";
 /** The button's own id — named in the copy so an operator can be told exactly what to look for. */
 export const OPERATOR_CONFIRM_BUTTON_ID = "sellerops-operator-confirm-button";
+/** The SECOND button's id, present only when the ask offers a second answer. */
+export const OPERATOR_CONFIRM_SECONDARY_BUTTON_ID = "sellerops-operator-confirm-secondary";
 /** The button's label. The operator is told this string and nothing else advances the run. */
 export const OPERATOR_CONFIRM_BUTTON_LABEL = "현재 화면 확인";
 /** The confirmation tab's title, so it is findable among the seller's own tabs. */
@@ -113,6 +133,20 @@ export interface OperatorConfirmAsk {
   readonly headline: string;
   /** The detail lines, already sanitized (this module renders them verbatim as text nodes). */
   readonly lines: readonly string[];
+  /**
+   * The PRIMARY button's label, when the default one would misname what the press does.
+   *
+   * Every checkpoint asks "is this screen ready", and `현재 화면 확인` says that. The run-level grant asks
+   * something else — whether this run may start at all — and a button labelled "check the current screen"
+   * above an approval is the kind of small wrongness that teaches an operator to press without reading.
+   */
+  readonly confirmLabel?: string;
+  /**
+   * An optional SECOND answer, rendered as a second button. Present only where the run genuinely has two
+   * operator-decidable outcomes; its press is verified exactly like the first one and reports
+   * {@link OperatorConfirmChoice} `secondary`.
+   */
+  readonly secondary?: { readonly label: string };
 }
 
 /**
@@ -168,39 +202,54 @@ export function buildOperatorConfirmArmScript(ask: OperatorConfirmAsk & { readon
     p.style.cssText = "margin:0 0 4px";
     body.appendChild(p);
   }
+  /* The tab's OWN business, and only that. What advances the run is said once, in the ask's tail — saying it
+     here as well put the same sentence on the screen twice and taught the operator to skim it. */
   var note = mk(
     "div",
-    "이 버튼을 직접 누르셔야만 다음 단계로 넘어갑니다. 대화창에 'ready'라고 쓰거나 터미널에서 파일을 만드는 것으로는 진행되지 않습니다. " +
-      "이 탭은 SellerOps 전용 화면입니다 — 여기서 다른 주소로 이동하지 마세요. 쿠팡(윙)은 옆 탭에서 진행하시면 됩니다.",
+    "이 탭은 SellerOps 화면입니다 — 여기서 다른 주소로 이동하지 마세요. 마켓플레이스는 옆 탭에서 진행하시면 됩니다.",
     "margin:20px 0 10px;color:#7d8590;font-size:13px"
   );
-  var btn = d.createElement("button");
-  btn.id = ${JSON.stringify(OPERATOR_CONFIRM_BUTTON_ID)};
-  btn.type = "button";
-  btn.textContent = ${JSON.stringify(OPERATOR_CONFIRM_BUTTON_LABEL)};
-  btn.style.cssText =
-    "font:600 16px/1 -apple-system,BlinkMacSystemFont,sans-serif;padding:14px 22px;border-radius:8px;" +
-    "border:1px solid #2f81f7;background:#1f6feb;color:#fff;cursor:pointer";
-  btn.addEventListener(
-    "click",
-    function (ev) {
-      /* isTrusted is false for any dispatched or programmatic click. A synthesised press is refused HERE as
-         well as host-side, so the page never even holds a record that a verifier would have to reject. */
-      if (!ev || ev.isTrusted !== true) {
-        note.textContent = "직접 누른 것이 아닌 신호는 무시됩니다. 버튼을 눌러 주세요.";
-        return;
-      }
-      if (st.armed !== TOKEN) return;
-      st.event = { token: TOKEN, trusted: true };
-      st.armed = null;
-      btn.disabled = true;
-      btn.style.opacity = "0.55";
-      btn.style.cursor = "default";
-      btn.textContent = "확인됨 — 다음 단계를 준비합니다";
-    },
-    false
-  );
-  root.appendChild(btn);
+  var SECONDARY = ${JSON.stringify(ask.secondary?.label ?? null)};
+  var buttons = [];
+  var mkButton = function (id, label, choice, primary) {
+    var btn = d.createElement("button");
+    btn.id = id;
+    btn.type = "button";
+    btn.textContent = label;
+    btn.style.cssText =
+      "font:600 16px/1 -apple-system,BlinkMacSystemFont,sans-serif;padding:14px 22px;border-radius:8px;" +
+      "margin-right:10px;cursor:pointer;" +
+      (primary
+        ? "border:1px solid #2f81f7;background:#1f6feb;color:#fff"
+        : "border:1px solid #444c56;background:transparent;color:#adbac7");
+    btn.addEventListener(
+      "click",
+      function (ev) {
+        /* isTrusted is false for any in-page dispatched or programmatic click. A synthesised press is refused
+           HERE as well as host-side, so the page never even holds a record a verifier would have to reject.
+           (A CDP-driven click IS trusted — see this module's header for what does and does not stop that.) */
+        if (!ev || ev.isTrusted !== true) {
+          note.textContent = "직접 누른 것이 아닌 신호는 무시됩니다. 버튼을 눌러 주세요.";
+          return;
+        }
+        if (st.armed !== TOKEN) return;
+        st.event = { token: TOKEN, trusted: true, choice: choice };
+        st.armed = null;
+        for (var b = 0; b < buttons.length; b++) {
+          buttons[b].disabled = true;
+          buttons[b].style.opacity = "0.55";
+          buttons[b].style.cursor = "default";
+        }
+        btn.textContent = "확인됨 — 다음 단계를 준비합니다";
+      },
+      false
+    );
+    buttons.push(btn);
+    root.appendChild(btn);
+    return btn;
+  };
+  mkButton(${JSON.stringify(OPERATOR_CONFIRM_BUTTON_ID)}, ${JSON.stringify(ask.confirmLabel ?? OPERATOR_CONFIRM_BUTTON_LABEL)}, "primary", true);
+  if (SECONDARY) mkButton(${JSON.stringify(OPERATOR_CONFIRM_SECONDARY_BUTTON_ID)}, SECONDARY, "secondary", false);
   return true;
 })()`;
 }
@@ -210,7 +259,7 @@ export const OPERATOR_CONFIRM_READ_SCRIPT = `(function () {
   /* sellerops-operator-confirm (read) */
   var st = window[${JSON.stringify(OPERATOR_CONFIRM_STATE_KEY)}];
   if (!st || !st.event) return null;
-  return { token: st.event.token, trusted: st.event.trusted === true };
+  return { token: st.event.token, trusted: st.event.trusted === true, choice: st.event.choice };
 })()`;
 
 /** Drop a refused event so the next poll is not the same refusal again. Leaves the armed token in place. */
@@ -229,6 +278,15 @@ export const OPERATOR_CONFIRM_CLEAR_SCRIPT = `(function () {
  * otherwise be comparing against a value the page could match by accident — so an unusable expectation refuses
  * everything instead of accepting something.
  */
+/**
+ * WHICH answer a verified event carries. Anything that is not exactly `"secondary"` reads as `primary` — the
+ * default is the answer every single-button surface produces, so an unrecognised value can only ever under-claim.
+ */
+export function operatorConfirmChoiceOf(raw: unknown): OperatorConfirmChoice {
+  const choice = (raw as { choice?: unknown } | null)?.choice;
+  return choice === "secondary" ? "secondary" : "primary";
+}
+
 export function verifyOperatorConfirmEvent(raw: unknown, expectedToken: string): OperatorConfirmVerdict {
   if (!isOperatorConfirmToken(expectedToken)) return "MALFORMED";
   if (raw === null || raw === undefined) return "NO_EVENT";
@@ -240,10 +298,42 @@ export function verifyOperatorConfirmEvent(raw: unknown, expectedToken: string):
   return "CONFIRMED";
 }
 
-/** The injected seams, so the whole wait is unit-tested offline over a fake page. */
+/**
+ * **How the wait reaches a confirmation surface — the one thing that differs between hosts.**
+ *
+ * Stated as three intents rather than as "evaluate this string" so a surface that is not a page can implement
+ * it. Everything that decides whether a checkpoint advances — the token, the verification, the fail-closed
+ * ordering — lives above this interface and is the same for every host.
+ */
+export interface OperatorConfirmTransport {
+  /** Render the ask and arm this token. Resolves `true` only when the operator can now see and press it. */
+  arm(ask: OperatorConfirmAsk, token: string): Promise<boolean>;
+  /** The pending event record, or null/undefined when nothing has been pressed. Never interpreted here. */
+  read(): Promise<unknown>;
+  /** Drop a refused event so the next poll is not the same refusal again. */
+  clear(): Promise<void>;
+}
+
+/**
+ * The transport for a surface that is a real DOM: this module's own string IIFEs, evaluated in it. `evaluate`
+ * is the caller's — it is what pins the surface to a page the run owns.
+ */
+export function pageEvaluateTransport(evaluate: (script: string) => Promise<unknown>): OperatorConfirmTransport {
+  return {
+    arm: (ask, token) =>
+      evaluate(buildOperatorConfirmArmScript({ ...ask, token }))
+        .then((v) => v === true)
+        // An un-armable surface is a wait on a button nobody can see. It fails closed one level up.
+        .catch(() => false),
+    read: () => evaluate(OPERATOR_CONFIRM_READ_SCRIPT).catch(() => null),
+    clear: () => evaluate(OPERATOR_CONFIRM_CLEAR_SCRIPT).then(() => undefined).catch(() => undefined),
+  };
+}
+
+/** The injected seams, so the whole wait is unit-tested offline over a fake surface. */
 export interface OperatorConfirmSeams {
-  /** Evaluate one of this module's string IIFEs in the confirmation surface. */
-  evaluate(script: string): Promise<unknown>;
+  /** How this run reaches its confirmation surface. */
+  readonly transport: OperatorConfirmTransport;
   /** Whether the operator has asked to stop (Ctrl+C or the abort sentinel). Checked before every poll. */
   aborted(): boolean;
   sleep(ms: number): Promise<void>;
@@ -287,10 +377,7 @@ export async function awaitOperatorConfirmation(
   opts: OperatorConfirmWaitOptions,
 ): Promise<OperatorConfirmation> {
   if (seams.aborted()) return ABORTED;
-  const armed = await seams
-    .evaluate(buildOperatorConfirmArmScript({ ...ask, token: opts.token }))
-    .then((v) => v === true)
-    .catch(() => false);
+  const armed = await seams.transport.arm(ask, opts.token).catch(() => false);
   if (!armed) {
     seams.onVerdict?.("UI_NOT_ARMED");
     return TIMED_OUT;
@@ -301,15 +388,15 @@ export async function awaitOperatorConfirmation(
   const ticks = Math.max(1, Math.ceil(opts.timeoutMs / Math.max(1, opts.pollMs)));
   for (let i = 0; i < ticks; i++) {
     if (seams.aborted()) return ABORTED;
-    const raw = await seams.evaluate(OPERATOR_CONFIRM_READ_SCRIPT).catch(() => null);
+    const raw = await seams.transport.read().catch(() => null);
     const verdict = verifyOperatorConfirmEvent(raw, opts.token);
     if (verdict === "CONFIRMED") {
       seams.onVerdict?.(verdict);
-      return { signal: "ready", provenance: OPERATOR_UI_CONFIRMED };
+      return { signal: "ready", provenance: OPERATOR_UI_CONFIRMED, choice: operatorConfirmChoiceOf(raw) };
     }
     if (verdict !== "NO_EVENT") {
       seams.onVerdict?.(verdict);
-      await seams.evaluate(OPERATOR_CONFIRM_CLEAR_SCRIPT).catch(() => undefined);
+      await seams.transport.clear().catch(() => undefined);
     }
     await seams.sleep(opts.pollMs);
   }

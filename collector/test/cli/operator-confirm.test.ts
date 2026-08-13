@@ -21,6 +21,7 @@ import {
   buildOperatorConfirmArmScript,
   isOperatorConfirmToken,
   mintOperatorConfirmToken,
+  pageEvaluateTransport,
   verifyOperatorConfirmEvent,
   type OperatorConfirmSeams,
   type OperatorConfirmVerdict,
@@ -63,6 +64,7 @@ describe("verifyOperatorConfirmEvent", () => {
   it("an untrusted event is refused even when the token is right", () => {
     // The forgery this closes: something in the page dispatching `new MouseEvent('click')` on the button, or
     // calling `button.click()`. Both leave `isTrusted` false, and neither is a human looking at a screen.
+    // It does NOT close a CDP-driven click, which is trusted like a human's — see the module header.
     expect(verifyOperatorConfirmEvent({ token, trusted: false }, token)).toBe("UNTRUSTED_EVENT");
     expect(verifyOperatorConfirmEvent({ token, trusted: "true" }, token)).toBe("UNTRUSTED_EVENT");
     expect(verifyOperatorConfirmEvent({ token }, token)).toBe("UNTRUSTED_EVENT");
@@ -94,36 +96,39 @@ function fakeSurface(o: { press?: "trusted" | "untrusted" | "stale"; afterTicks?
   let event: unknown = null;
   let reads = 0;
   let pressed = false;
+  // Driven through the page transport on purpose: it is what every browser-hosted CLI uses, so these tests
+  // exercise the real arm/read/clear scripts rather than a paraphrase of them.
+  const evaluate = async (script: string): Promise<unknown> => {
+    if (script.includes("(arm)")) {
+      if (o.armFails === true) throw new Error("Target page, context or browser has been closed");
+      armedScripts.push(script);
+      const m = /var TOKEN = "([0-9a-f]{32})"/.exec(script);
+      armed = m?.[1] ?? null;
+      event = null;
+      pressed = false;
+      reads = 0;
+      return true;
+    }
+    if (script === OPERATOR_CONFIRM_CLEAR_SCRIPT) {
+      event = null;
+      return true;
+    }
+    reads += 1;
+    // ONE press per arming, like a human: after a refusal is cleared the page holds nothing until the button
+    // is pressed again. A fake that re-presses on every tick would hide whether the host clears refusals.
+    if (o.press && reads >= (o.afterTicks ?? 1) && !pressed && armed) {
+      pressed = true;
+      event =
+        o.press === "trusted"
+          ? { token: armed, trusted: true }
+          : o.press === "untrusted"
+            ? { token: armed, trusted: false }
+            : { token: "f".repeat(32), trusted: true };
+    }
+    return event;
+  };
   const seams: OperatorConfirmSeams = {
-    evaluate: async (script) => {
-      if (script.includes("(arm)")) {
-        if (o.armFails === true) throw new Error("Target page, context or browser has been closed");
-        armedScripts.push(script);
-        const m = /var TOKEN = "([0-9a-f]{32})"/.exec(script);
-        armed = m?.[1] ?? null;
-        event = null;
-        pressed = false;
-        reads = 0;
-        return true;
-      }
-      if (script === OPERATOR_CONFIRM_CLEAR_SCRIPT) {
-        event = null;
-        return true;
-      }
-      reads += 1;
-      // ONE press per arming, like a human: after a refusal is cleared the page holds nothing until the button
-      // is pressed again. A fake that re-presses on every tick would hide whether the host clears refusals.
-      if (o.press && reads >= (o.afterTicks ?? 1) && !pressed && armed) {
-        pressed = true;
-        event =
-          o.press === "trusted"
-            ? { token: armed, trusted: true }
-            : o.press === "untrusted"
-              ? { token: armed, trusted: false }
-              : { token: "f".repeat(32), trusted: true };
-      }
-      return event;
-    },
+    transport: pageEvaluateTransport(evaluate),
     aborted: () => false,
     sleep: async () => undefined,
     onVerdict: (v) => verdicts.push(v),
@@ -137,7 +142,7 @@ describe("awaitOperatorConfirmation", () => {
   it("a trusted press returns ready, and the provenance names the channel", async () => {
     const { seams } = fakeSurface({ press: "trusted", afterTicks: 3 });
     const r = await awaitOperatorConfirmation(seams, ASK, opts);
-    expect(r).toEqual({ signal: "ready", provenance: OPERATOR_UI_CONFIRMED });
+    expect(r).toEqual({ signal: "ready", provenance: OPERATOR_UI_CONFIRMED, choice: "primary" });
   });
 
   it("no press at all times out — it never falls through to ready", async () => {
@@ -246,9 +251,19 @@ describe("the in-page scripts", () => {
     expect(arm).not.toContain("document.write");
   });
 
-  it("tells the operator, in the surface itself, that chat text does not advance the run", () => {
-    expect(arm).toContain("직접 누르셔야만");
-    expect(arm).toContain("'ready'");
+  it("**the surface's own note says the tab's business, and does NOT repeat the ask's tail**", () => {
+    // What advances the run is said once, in the ask (which the terminal prints and the surface renders). The
+    // note used to say it a second time, so the same three sentences reached the operator twice on one screen.
+    expect(arm).toContain("이 탭은 SellerOps 화면입니다");
+    expect(arm).not.toContain("'ready'라고 쓰거나");
+  });
+
+  it("**the primary button takes the ask's own label** — a run grant is not 'check the current screen'", () => {
+    const grant = buildOperatorConfirmArmScript({ ...ASK, confirmLabel: "이 실행 승인", token: "a".repeat(32) });
+    expect(grant).toContain('"이 실행 승인", "primary"');
+    expect(grant).not.toContain(`"${OPERATOR_CONFIRM_BUTTON_LABEL}", "primary"`);
+    // …and an ask that says nothing keeps the screen-confirmation label.
+    expect(arm).toContain(`"${OPERATOR_CONFIRM_BUTTON_LABEL}", "primary"`);
   });
 
   it("…and that this tab must not be navigated", () => {

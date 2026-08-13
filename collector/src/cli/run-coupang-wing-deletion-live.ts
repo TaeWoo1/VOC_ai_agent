@@ -62,6 +62,9 @@ import {
 import { resolveWingActionPhase, resolveWingUrl, screenWingUrl, type WingPageCategory } from "./coupang-wing-classifier";
 import { verifyRepoIdentity } from "./repo-identity";
 import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from "./live-run-approval";
+import type { OperatorConfirmAsk } from "./operator-confirm";
+import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
+import { confirmRunGrant, runGrantRefusalMessage, type RunGrantBinding } from "./operator-run-grant";
 
 const WKD = PHASE_SPECS.COUPANG_WING_KEY_DELETION;
 /** The repository this run must be reading — derived from this file's location, never from the environment. */
@@ -148,14 +151,43 @@ export function gateRefusalCause(
   return identity.ok ? null : `${identity.cause}: ${identity.reason}`;
 }
 
-/* ────────────────────────────── sentinels (operator readiness + completion) ────────────────────────────── */
+/**
+ * The manifest fields THIS run holds, for the run-level grant. Read from the SAME immutable destructive scope
+ * the gate pins and the same run env the bootstrap bound — so the operator presses against what the run will
+ * do, not against a paraphrase of it in a terminal or a chat log.
+ *
+ * This is the destructive phase, so the surface it renders on says `WRITE` and says so first.
+ */
+export function deletionRunGrantBinding(): RunGrantBinding {
+  const scope = WKD.destructiveScope ?? COUPANG_WING_KEY_DELETION_SCOPE;
+  return {
+    approvalId: env("WALKTHROUGH_APPROVAL_ID") ?? "unknown",
+    runId: env("WALKTHROUGH_RUN_ID") ?? "unknown",
+    gitSha: env("WALKTHROUGH_GIT_COMMIT") ?? "unknown",
+    channel: scope.channel,
+    account: scope.accountBinding,
+    surface: scope.surface,
+    operation: scope.operation,
+    mode: WKD.mode,
+    maxActions: scope.maxActions,
+    agentDoesNot: "'삭제'를 대신 누르지 않고, 아무것도 입력하지 않으며, 어떤 값도 읽지 않습니다.",
+    // `mode` is `READ_ONLY` and honestly so — the AGENT only reads; the SELLER deletes their own key. The
+    // grant screen must not therefore read as a harmless run, so the risk is named specifically.
+    caution: `${WING_DELETION_WARNING_LABEL} — 이 실행에서 판매자님이 직접 키를 삭제하시게 되며, 되돌릴 수 없습니다.`,
+  };
+}
 
-export const DELETION_READY_FILENAME = "run-coupang-wing-deletion-live.ready";
-export const DELETION_DONE_FILENAME = "run-coupang-wing-deletion-live.deleted";
+/* ────────────────────────────── the operator's two checkpoints ────────────────────────────── */
+
+/**
+ * **There is no readiness sentinel and no completion sentinel.** This run is DESTRUCTIVE: its second checkpoint
+ * stood for "I deleted the key", and a file any process can `touch` cannot be evidence that a human looked at a
+ * screen and did that. Both are now a verified press on the SellerOps confirmation surface
+ * (`./operator-confirm`), which nothing but a human at the keyboard can produce.
+ *
+ * The ABORT sentinel stays: a forged abort stops a destructive run, which is the safe direction.
+ */
 export const DELETION_ABORT_FILENAME = "run-coupang-wing-deletion-live.abort";
-
-const SENTINEL_POLL_MS = 1_000;
-const WAIT_TIMEOUT_MS = 20 * 60_000; // generous budget for a manual login + navigate + read the warning + delete
 
 function sentinelPath(statusFile: string, filename: string): string {
   return resolve(dirname(resolve(statusFile)), filename);
@@ -167,19 +199,31 @@ function removeSentinel(path: string): void {
     /* best-effort */
   }
 }
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
 
-/** Poll a readiness/abort pair until one appears (or timeout). Returns which fired. */
-async function waitForSignal(readyPath: string, abortPath: string, abortFlag: { v: boolean }): Promise<"ready" | "abort" | "timeout"> {
-  const maxTicks = Math.ceil(WAIT_TIMEOUT_MS / SENTINEL_POLL_MS);
-  for (let i = 0; i < maxTicks; i++) {
-    if (abortFlag.v || existsSync(abortPath)) return "abort";
-    if (existsSync(readyPath)) return "ready";
-    await sleep(SENTINEL_POLL_MS);
-  }
-  return "timeout";
+/**
+ * The two checkpoints, in the operator's own words. The second names the irreversible action and says who
+ * performs it — this run highlights a control and rests; the seller deletes their own key.
+ */
+export function deletionAskFor(kind: "ready" | "deleted"): OperatorConfirmAsk {
+  return kind === "ready"
+    ? {
+        title: "WING 키 삭제 1/2",
+        headline: "이미 발급된 open-API 키 페이지에 직접 도착해 주세요.",
+        lines: [
+          "로그인 · 2단계 인증 · 이동은 모두 직접 하세요 — SellerOps는 이 창을 조작하지 않습니다.",
+          "도착하신 뒤 아래 버튼을 누르시면, SellerOps가 삭제 버튼을 표시하고 경고 문구를 띄운 뒤 멈춥니다.",
+          "이 단계에서는 아무것도 삭제되지 않습니다.",
+        ],
+      }
+    : {
+        title: "WING 키 삭제 2/2",
+        headline: "표시된 삭제를 직접 누르셨다면 확인해 주세요 — 되돌릴 수 없습니다.",
+        lines: [
+          `⚠ ${WING_DELETION_WARNING_LABEL}`,
+          "SellerOps는 삭제를 대신 누르지 않습니다. 누르는 것은 판매자님입니다.",
+          "아직 삭제하지 않으셨다면 이 버튼을 누르지 마세요 — 중단은 Ctrl+C입니다.",
+        ],
+      };
 }
 
 /** Upper bound on the checkpoint clear, so a blocked page cannot suppress the run's outcome. */
@@ -297,11 +341,9 @@ async function main(): Promise<void> {
   // This drives the guided deletion — the SELLER navigates + presses 삭제; SellerOps highlights the control, rests
   // at the irreversible-warning checkpoint, and reads a sanitized page category only.
   const cfg = loadConfig();
-  const readyPath = sentinelPath(cfg.statusFile, DELETION_READY_FILENAME);
-  const donePath = sentinelPath(cfg.statusFile, DELETION_DONE_FILENAME);
   const abortPath = sentinelPath(cfg.statusFile, DELETION_ABORT_FILENAME);
-  mkdirSync(dirname(readyPath), { recursive: true });
-  for (const p of [readyPath, donePath, abortPath]) removeSentinel(p);
+  mkdirSync(dirname(abortPath), { recursive: true });
+  removeSentinel(abortPath);
 
   const abortFlag = { v: false };
   const onSigint = (): void => {
@@ -311,13 +353,43 @@ async function main(): Promise<void> {
   process.on("SIGTERM", onSigint);
 
   const ctx: BrowserContext = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
-  const entry = (ctx.pages()[0] ?? (await ctx.newPage())) as Page;
-  const driver = new CoupangWingDeletionDriver(entry, { context: ctx });
+  const confirmHost = await attachOperatorConfirmTab(ctx as unknown as ConfirmHostContext, {
+    aborted: () => abortFlag.v || existsSync(abortPath),
+    abortPath,
+    onVerdict: (verdict) => {
+      if (verdict !== "CONFIRMED") log("aw_coupang_deletion_operator_confirm_refused", { verdict });
+    },
+  });
+  const confirmCheckpoint = async (kind: "ready" | "deleted"): Promise<DeletionCompletionSignal> => {
+    const ask = deletionAskFor(kind);
+    confirmHost.announce(ask);
+    const confirmation = await confirmHost.confirm(ask);
+    log("aw_coupang_deletion_operator_confirm", {
+      checkpoint: ask.title,
+      signal: confirmation.signal,
+      provenance: confirmation.provenance ?? "none",
+    });
+    return confirmation.signal;
+  };
+  const driver = new CoupangWingDeletionDriver(confirmHost.entryPage as unknown as Page, {
+    context: confirmHost.contextLike as unknown as BrowserContext,
+  });
   try {
-    console.error("");
-    console.error("WING key-deletion: log in and reach your ALREADY-ISSUED open-API 키 page yourself.");
-    console.error(`  1) When you are on the already-issued page, create: ${readyPath}   (or ${abortPath} to abort)`);
-    const first = await waitForSignal(readyPath, abortPath, abortFlag);
+    // **THE RUN-LEVEL GRANT, before anything is highlighted.** The approval flag above is the assistant's
+    // statement of intent; it authorizes nothing. What authorizes this DESTRUCTIVE run is the operator
+    // pressing a button against the manifest's own binding fields, in a window only they can press.
+    const grant = await confirmRunGrant(confirmHost, deletionRunGrantBinding());
+    if (grant !== "GRANTED") {
+      console.error(runGrantRefusalMessage(grant));
+      console.log(JSON.stringify({ event: "COUPANG_DELETION", outcome: "NOT_GRANTED" }));
+      log("aw_coupang_deletion_run_grant", { outcome: grant });
+      // Read by anything downstream of a human watching the terminal. A destructive run that exits 0 when it
+      // was never authorized is how "the run finished" comes to read as "the run was allowed".
+      process.exitCode = 7;
+      return;
+    }
+    log("aw_coupang_deletion_run_grant", { outcome: grant });
+    const first = await confirmCheckpoint("ready");
     if (first !== "ready") {
       console.log(JSON.stringify({ event: "COUPANG_DELETION", outcome: first === "abort" ? "ABORTED" : "TIMEOUT" }));
       return;
@@ -342,11 +414,7 @@ async function main(): Promise<void> {
       );
       return;
     }
-    console.error("");
-    console.error(`  ⚠ ${WING_DELETION_WARNING_LABEL}`);
-    console.error(`  2) After you delete the key yourself, create: ${donePath}   (or ${abortPath} to abort)`);
-    removeSentinel(readyPath);
-    const second = await waitForSignal(donePath, abortPath, abortFlag);
+    const second = await confirmCheckpoint("deleted");
     // The checkpoint is retired HERE — before the verify poll, on every signal — so no stale "press 삭제"
     // guidance outlives the operator's action. See `finishDeletionRun`.
     const outcome = await finishDeletionRun(driver, second);
@@ -360,7 +428,7 @@ async function main(): Promise<void> {
       ...(outcome.pageCategory === undefined ? {} : { pageCategory: outcome.pageCategory }),
     });
   } finally {
-    for (const p of [readyPath, donePath, abortPath]) removeSentinel(p);
+    removeSentinel(abortPath);
     process.removeListener("SIGINT", onSigint);
     process.removeListener("SIGTERM", onSigint);
     await driver.cleanup().catch(() => undefined);

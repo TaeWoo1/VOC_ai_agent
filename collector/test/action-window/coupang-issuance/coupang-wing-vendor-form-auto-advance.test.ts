@@ -25,6 +25,14 @@ class FakeVendorPage {
   onVendorScreen = true;
   filled = new Set<string>();
   censusReads = 0;
+  /**
+   * **From which census read the IP chip is on the page.** The walk compares the `API 호출 IP` region against
+   * what it read when the step armed, so a fixture that shows the chip in the FIRST reading is modelling a form
+   * that was already complete — not a seller registering an address. `1` is the ordinary case: reading #1 is the
+   * before-picture, and the chip appears from #2. `0` models the already-complete form, which deliberately does
+   * NOT auto-advance.
+   */
+  ipRegisteredFromRead = 1;
   /** Every in-page script the driver ran, so the keep-clear marking can be inspected. */
   scripts: string[] = [];
   /** Every overlay mount, as the panel options the driver handed the page. */
@@ -34,6 +42,11 @@ class FakeVendorPage {
     return "https://wing.coupang.com/vendor/open-api";
   }
   on(): void {}
+
+  /** Whether the registered-address chip paints for the census read now in flight. */
+  private ipChipShowing(): boolean {
+    return this.filled.has("stage2.call_ip.ip_addr") && this.censusReads > this.ipRegisteredFromRead;
+  }
 
   async evaluate(script: unknown, arg?: unknown): Promise<unknown> {
     if (typeof script === "string") {
@@ -55,7 +68,10 @@ class FakeVendorPage {
             // control) to 2 — and `entryRowCount` reads ZERO on both sides. This fixture used to model the
             // registration as a row appearing, which is why every test here passed while the live walk sat at
             // NOT_READY for a minute and a half. A fake that models what the page does not do proves nothing.
-            buttonCount: id === "stage2.call_ip.ip_addr" ? (this.filled.has(id) ? 2 : 1) : 0,
+            //
+            // And it is a TRANSITION, not a constant: the walk reports a registration by comparing the region
+            // against the one it armed on, so the chip has to arrive while the step is watching.
+            buttonCount: id === "stage2.call_ip.ip_addr" ? (this.ipChipShowing() ? 2 : 1) : 0,
             entryRowCount: 0,
             filledTextInputCount: id !== "stage2.call_ip.ip_addr" && this.filled.has(id) ? 1 : 0,
           })),
@@ -105,7 +121,9 @@ describe("step ⑥ completes itself on the form the seller is filling in", () =>
     const page = new FakeVendorPage();
     page.filled = new Set(FIELD_IDS);
     expect(page.pressed).toBe(false);
-    expect(await driverOn(page).observeUserAction("vendor_method")).toBe(true);
+    // Long enough for TWO census reads: the first is the step's before-picture of the IP region, and the chip
+    // the seller registers is only observable against it.
+    expect(await driverOn(page, 3_000).observeUserAction("vendor_method")).toBe(true);
     expect(rows("aw_coupang_vendor_form_auto_advance").length).toBe(1);
   });
 
@@ -140,9 +158,41 @@ describe("step ⑥ completes itself on the form the seller is filling in", () =>
     expect(await driverOn(page).observeUserAction("vendor_method")).toBe(false);
   });
 
-  it("the seller's own button still advances the step, form or no form", async () => {
+  it("**a form ALREADY complete when the step armed does not complete itself** — and says nothing about it", async () => {
+    // The named cost of comparing against a before-picture instead of against the number 1. A walk re-anchoring
+    // on a form the seller finished earlier baselines on the chip that is already there, so the count never
+    // rises and this advance stays silent. That is the safe direction: what it hands to is a ring on 확인.
     const page = new FakeVendorPage();
     page.filled = new Set(FIELD_IDS);
+    page.ipRegisteredFromRead = 0; // the chip is on the page from the very first reading
+    expect(await driverOn(page).observeUserAction("vendor_method")).toBe(false);
+    expect(rows("aw_coupang_vendor_form_auto_advance").length).toBe(0);
+  });
+
+  it("…and the seller's own button is still the way through it", async () => {
+    // Manual progress always remains available: the gate refuses one press and the next goes through. So the
+    // cost above is two presses of a button that is on the panel throughout, never an unreachable key.
+    const page = new FakeVendorPage();
+    page.filled = new Set(FIELD_IDS);
+    page.ipRegisteredFromRead = 0;
+    page.pressed = true;
+    const driver = driverOn(page, 3_000);
+    const observing = driver.observeUserAction("vendor_method");
+    for (let i = 0; i < 3_000 && page.pressed; i++) await new Promise<void>((r) => setTimeout(r, 1));
+    expect(page.pressed, "the refusal never re-armed the latch").toBe(false);
+    page.pressed = true; // the seller reads the panel and presses again
+    expect(await observing).toBe(true);
+  });
+
+  it("the seller's own button advances the step with no form reading at all", async () => {
+    // `UNKNOWN` is not `NOT_READY`: a census the page will not answer must never stand between the seller and
+    // the key. Their press goes through unexamined.
+    const page = new FakeVendorPage();
+    const base = FakeVendorPage.prototype.evaluate;
+    page.evaluate = async (script: unknown, arg?: unknown): Promise<unknown> => {
+      if (typeof script === "string" && script.includes("wing-field-region-census")) return null;
+      return base.call(page, script, arg);
+    };
     page.pressed = true;
     expect(await driverOn(page).observeUserAction("vendor_method")).toBe(true);
   });
@@ -170,7 +220,7 @@ describe("step ⑥ completes itself on the form the seller is filling in", () =>
   it("what it logs is an id and booleans — never what the seller typed", async () => {
     const page = new FakeVendorPage();
     page.filled = new Set(FIELD_IDS);
-    await driverOn(page).observeUserAction("vendor_method");
+    await driverOn(page, 3_000).observeUserAction("vendor_method");
     for (const row of rows("aw_coupang_vendor_form_field")) {
       for (const key of Object.keys(row.meta ?? {})) {
         expect(
