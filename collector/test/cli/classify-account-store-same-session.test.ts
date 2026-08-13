@@ -34,10 +34,10 @@ describe("classify-account-store-same-session — strictly NO-CLICK, report-only
 
   it("never dumps raw HTML and does the single navigation only before the handoff", () => {
     expect(/\.content\s*\(/.test(code)).toBe(false); // the boundary reads content, not the CLI
-    // Exactly one goto, and it is the initial route open (before the sentinel wait).
+    // Exactly one goto, and it is the initial route open (before the operator is asked to confirm).
     expect((code.match(/\.goto\s*\(/g) ?? []).length).toBe(1);
     const gotoIdx = code.indexOf(".goto(");
-    const waitIdx = code.indexOf("waitForSentinel(", code.indexOf("async function main"));
+    const waitIdx = code.indexOf("confirmHost.confirm(", code.indexOf("async function main"));
     expect(gotoIdx).toBeLessThan(waitIdx);
   });
 });
@@ -66,9 +66,9 @@ describe("classify-account-store-same-session — auto-read (--no-sentinel) mode
     expect(approvalIdx).toBeLessThan(noSentinelIdx);
   });
 
-  it("keeps the manual sentinel path available as a fallback (waitForSentinel still present)", () => {
-    expect(/waitForSentinel\s*\(/.test(code)).toBe(true);
-    expect(/sentinelPathFor\s*\(/.test(code)).toBe(true);
+  it("keeps the manual confirmation path available as a fallback", () => {
+    expect(/attachOperatorConfirmTab\s*\(/.test(code)).toBe(true);
+    expect(code.includes("confirmHost.confirm(CONFIRM_ASK)")).toBe(true);
   });
 });
 
@@ -86,25 +86,22 @@ describe("classify-account-store-same-session — gated + salted + sentinel cont
     expect(collectIdx).toBeGreaterThan(saltIdx);
   });
 
-  it("derives the sentinel path from the shared helper and polls (no terminal stdin)", () => {
-    expect(/from\s+["']\.\/probe-sentinel["']/.test(code)).toBe(true);
-    expect(/sentinelPathFor\s*\(/.test(code)).toBe(true);
-    expect(/waitForSentinel\s*\(/.test(code)).toBe(true);
+  it("**takes no readiness signal from the filesystem, and none from stdin**", () => {
+    // It used to wait on a `.ready` file, and its own printed prompt told the operator that in Claude Code they
+    // could "just say ready and Claude creates it". That is the channel that failed on 2026-08-13.
+    expect(/sentinelPathFor\s*\(/.test(code)).toBe(false);
+    expect(/probe-sentinel/.test(code)).toBe(false);
+    expect(/waitForSentinel\s*\(/.test(code)).toBe(false);
+    expect(/existsSync/.test(code)).toBe(false);
     expect(code.includes("process.stdin")).toBe(false);
     expect(/waitForEnter/.test(code)).toBe(false);
   });
 
-  it("clears any stale sentinel before waiting and cleans up afterwards", () => {
-    expect(/removeSentinel\s*\(/.test(code)).toBe(true);
-    expect(/unlinkSync/.test(code)).toBe(true);
-  });
-
-  it("aborts WITHOUT reading the surface when the sentinel never appears", () => {
-    expect(/sentinel-timeout/.test(code)).toBe(true);
-    const abortIdx = code.indexOf("sentinel-timeout");
+  it("aborts WITHOUT reading the surface unless a press confirmed the screen", () => {
+    const guard = code.indexOf('confirmation.signal !== "ready"');
     const collectIdx = code.indexOf("collectSelectionSurface(", code.indexOf("async function main"));
-    expect(abortIdx).toBeGreaterThanOrEqual(0);
-    expect(abortIdx).toBeLessThan(collectIdx); // the timeout return precedes any surface read
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(collectIdx); // the refusal returns before any surface read
   });
 
   it("reports only the sanitized decision + shapes via the pure boundary (wouldClick, never a click)", () => {

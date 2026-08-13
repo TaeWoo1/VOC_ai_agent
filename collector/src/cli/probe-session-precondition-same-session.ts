@@ -25,8 +25,6 @@
  * live CLIs. Standing state: NAVER live work is PAUSED. Building/verifying this entrypoint is
  * OFFLINE; running it live is a separate, per-run operator-approved step (R4 gates G2/G3/G6).
  */
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { dirname } from "node:path";
 import type { Page } from "playwright";
 import { loadConfig } from "../config";
 import { log } from "../log";
@@ -34,35 +32,40 @@ import { checkLiveSessionVerdict, urlCategory } from "../naver/session-check";
 import { naverSessionPrecondition } from "../action-window/naver-session-precondition";
 import { launchNaverContext } from "../profile";
 import { approvalRequiredMessage, hasLiveRunApproval } from "./live-run-approval";
-import { sentinelPathFor } from "./probe-sentinel";
+import type { OperatorConfirmAsk } from "./operator-confirm";
+import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
 
 const HYDRATION_TIMEOUT_MS = 15_000;
 // The human may need to clear 2FA/CAPTCHA and the Commerce account/store flow; give them plenty of
 // time, but never wait forever.
 const CONFIRM_TIMEOUT_MS = 10 * 60_000;
-const SENTINEL_POLL_INTERVAL_MS = 750;
 
 /**
- * Prompt shown after the browser opens. Session-precondition specific — it promises ONLY a
- * read of the session state, never an export classification, click, or capture.
+ * What the operator is asked to do, and confirm.
+ *
+ * It used to end with "just say \"ready\" and Claude creates it", which is exactly the channel that failed on
+ * 2026-08-13: the assistant created the sentinel on the strength of a chat line the operator never wrote. The
+ * instruction now names the one thing that advances this run, and it is not something a model can produce.
  */
-const PROBE_CONFIRM_PROMPT = [
-  "",
-  "A browser window is open on NAVER. In that SAME window:",
-  "  1) Complete the NAVER-ID login (and any 2FA/CAPTCHA) yourself.",
-  "  2) Reach the SmartStore Center review-management page you would export from",
-  "     (or leave a reconnect / login / auth-challenge screen up if that is where",
-  "     you land — the probe reports whichever it is).",
-  "  3) Leave the browser OPEN.",
-  "",
-  "Then signal readiness by creating the sentinel file shown below (in Claude Code,",
-  "just say \"ready\" and Claude creates it). The collector is polling for it and will",
-  "then read ONLY the sanitized session precondition in this same window: is the",
-  "session READY, or does it need you first. It never evaluates the export target,",
-  "locates or highlights a control, acts on the page, saves a file, hands data",
-  "downstream, writes a status record, starts a backend, or sends anything to",
-  "SellerOps. (Ctrl-C to abort.)",
-].join("\n");
+const PROBE_ASK: OperatorConfirmAsk = {
+  title: "NAVER 세션 전제조건 판독",
+  headline: "읽히기를 원하는 화면에 도착한 뒤 확인해 주세요.",
+  lines: [
+    "A browser window is open on NAVER. In that SAME window:",
+    "  1) Complete the NAVER-ID login (and any 2FA/CAPTCHA) yourself.",
+    "  2) Reach the SmartStore Center review-management page you would export from",
+    "     (or leave a reconnect / login / auth-challenge screen up if that is where",
+    "     you land — the probe reports whichever it is).",
+    "  3) Leave the browser OPEN.",
+    "",
+    "Then press [현재 화면 확인] in the SellerOps confirmation tab — nothing else advances this run. It will",
+    "then read ONLY the sanitized session precondition in this same window: is the",
+    "session READY, or does it need you first. It never evaluates the export target,",
+    "locates or highlights a control, acts on the page, saves a file, hands data",
+    "downstream, writes a status record, starts a backend, or sends anything to",
+    "SellerOps. (Ctrl-C to abort.)",
+  ],
+};
 
 function banner(): void {
   const line = "─".repeat(64);
@@ -83,33 +86,6 @@ async function settleSpa(page: Page): Promise<void> {
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-/** Best-effort: remove the sentinel if present. Used at startup (clear stale) and cleanup. */
-function removeSentinel(path: string): void {
-  try {
-    if (existsSync(path)) unlinkSync(path);
-  } catch {
-    /* best-effort — a leftover is cleared by the next run's startup unlink anyway */
-  }
-}
-
-/**
- * Poll for the sentinel file up to `timeoutMs`. Returns true once it appears, false on timeout.
- * The caller clears any stale sentinel BEFORE calling this, so a hit only reflects a post-startup
- * creation.
- */
-async function waitForSentinel(path: string, timeoutMs: number, intervalMs: number): Promise<boolean> {
-  const maxChecks = Math.max(1, Math.ceil(timeoutMs / intervalMs));
-  for (let i = 0; i < maxChecks; i += 1) {
-    if (existsSync(path)) return true;
-    await sleep(intervalMs);
-  }
-  return existsSync(path);
-}
-
 async function main(): Promise<void> {
   banner();
   const args = process.argv.slice(2);
@@ -126,29 +102,24 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Single source of truth for the continuation file; clear any stale sentinel BEFORE waiting so a
-  // leftover from a crashed run can never auto-proceed.
-  const sentinelPath = sentinelPathFor(cfg.statusFile);
-  mkdirSync(dirname(sentinelPath), { recursive: true });
-  removeSentinel(sentinelPath);
-
   const ctx = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
-  const page = (ctx.pages()[0] ?? (await ctx.newPage())) as Page;
+  // The confirmation surface is a SellerOps-owned tab in the SAME window. `entryPage` is the operator's own
+  // page, captured before that tab existed — this run reads that page and never the surface.
+  const confirmHost = await attachOperatorConfirmTab(ctx as unknown as ConfirmHostContext, {
+    aborted: () => false,
+    timeoutMs: CONFIRM_TIMEOUT_MS,
+  });
+  const page = confirmHost.entryPage as unknown as Page;
   try {
     // 1) Open the review route — this typically redirects to login / Commerce select.
     await page.goto(cfg.naverReviewUrl, { waitUntil: "domcontentloaded" });
 
-    // 2) Hand off to the human IN THE SAME CONTEXT; wait for the sentinel (not stdin).
-    console.error(PROBE_CONFIRM_PROMPT);
-    console.error("");
-    console.error("  Sentinel file (create this when ready):");
-    console.error(`    ${sentinelPath}`);
-    console.error("");
-    const ready = await waitForSentinel(sentinelPath, CONFIRM_TIMEOUT_MS, SENTINEL_POLL_INTERVAL_MS);
-    if (!ready) {
+    confirmHost.announce(PROBE_ASK);
+    const confirmation = await confirmHost.confirm(PROBE_ASK);
+    if (confirmation.signal !== "ready") {
       // Never read a half-loaded page on a timeout — abort cleanly without a snapshot.
-      console.error("No sentinel within the timeout; aborting without reading the page.");
-      log("probe.aborted", { reason: "sentinel-timeout" });
+      console.error("No confirmation press — aborting without reading the page.");
+      log("probe.aborted", { reason: confirmation.signal });
       return;
     }
 
@@ -167,7 +138,6 @@ async function main(): Promise<void> {
       ...(precondition.ready ? {} : { blockerCode: precondition.blockerCode }),
     });
   } finally {
-    removeSentinel(sentinelPath);
     await ctx.close();
   }
 }

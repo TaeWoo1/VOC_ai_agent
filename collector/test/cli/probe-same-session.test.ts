@@ -58,33 +58,41 @@ describe("probe-same-session — structurally cannot reach export / download / u
   });
 });
 
-describe("probe-same-session — sentinel-file continuation (no terminal stdin)", () => {
+describe("probe-same-session — the continuation is a verified press, not a file", () => {
   const code = stripComments(readFileSync(CLI_PATH, "utf8"));
 
   it("does not depend on terminal stdin / an Enter keypress", () => {
-    // The whole point of this change: stdin is unreliable in the harness, so the probe
-    // must NOT read process.stdin or wait on an Enter keypress.
+    // stdin is unreliable in the harness, so the probe must NOT read process.stdin or wait on an Enter keypress.
     expect(code.includes("process.stdin")).toBe(false);
     expect(/waitForEnter/.test(code)).toBe(false);
   });
 
-  it("derives the sentinel path from the shared helper (single source of truth)", () => {
-    expect(/from\s+["']\.\/probe-sentinel["']/.test(code)).toBe(true);
-    expect(/sentinelPathFor\s*\(/.test(code)).toBe(true);
+  it("**takes no readiness signal from the filesystem at all**", () => {
+    // It used to wait on `.status/probe-same-session.ready`, and its own printed prompt told the operator that
+    // in Claude Code they could "just say ready and Claude creates it". That is the channel that failed on
+    // 2026-08-13 — the assistant created the file on the strength of a chat line nobody wrote.
+    expect(/sentinelPathFor\s*\(/.test(code)).toBe(false);
+    expect(/probe-sentinel/.test(code)).toBe(false);
+    expect(/existsSync/.test(code)).toBe(false);
+    expect(/unlinkSync/.test(code)).toBe(false);
   });
 
-  it("polls for the sentinel file rather than blocking on input", () => {
-    expect(/existsSync/.test(code)).toBe(true);
-    expect(/waitForSentinel\s*\(/.test(code)).toBe(true);
+  it("waits on the shared confirmation surface instead", () => {
+    expect(/attachOperatorConfirmTab\s*\(/.test(code)).toBe(true);
+    expect(/confirmHost\.confirm\(PROBE_ASK\)/.test(code)).toBe(true);
   });
 
-  it("clears any stale sentinel before waiting and cleans up afterwards", () => {
-    // removeSentinel is used at startup (clear stale) and in finally (cleanup).
-    expect(/removeSentinel\s*\(/.test(code)).toBe(true);
-    expect(/unlinkSync/.test(code)).toBe(true);
+  it("**reads the page only for a `ready` confirmation** — an abort or a timeout reads nothing", () => {
+    expect(/confirmation\.signal !== "ready"/.test(code)).toBe(true);
+    // …and the refusal returns BEFORE the page is read.
+    const guard = code.indexOf('confirmation.signal !== "ready"');
+    expect(guard).toBeGreaterThan(-1);
+    expect(code.indexOf("extractProbeSignals(")).toBeGreaterThan(guard);
   });
 
-  it("aborts without reading the page when the sentinel never appears", () => {
-    expect(/sentinel-timeout/.test(code)).toBe(true);
+  it("the operator instruction no longer tells anyone to say `ready`", () => {
+    const src = readFileSync(CLI_PATH, "utf8");
+    expect(src).not.toContain('just say "ready"');
+    expect(src).not.toContain("Sentinel file");
   });
 });

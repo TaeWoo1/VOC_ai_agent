@@ -88,9 +88,15 @@ describe("continue-account-store-same-session — auto-read default, sentinel op
     expect(/!args\.includes\("--no-sentinel"\)/.test(code)).toBe(true);
   });
 
-  it("keeps the sentinel machinery available for sentinel mode (no terminal stdin)", () => {
-    expect(/sentinelPathFor\s*\(/.test(code)).toBe(true);
-    expect(/waitForSentinel\s*\(/.test(code)).toBe(true);
+  it("**confirmation mode waits on a verified press, never on a file**", () => {
+    // This CLI performs ONE real click when the state is unambiguous, so what stands in front of that click has
+    // to be something a model cannot produce. It used to be a `.ready` file whose own prompt told the operator
+    // that in Claude Code they could "just say ready and Claude creates it".
+    expect(/attachOperatorConfirmTab\s*\(/.test(code)).toBe(true);
+    expect(code.includes("confirmHost.confirm(CONFIRM_ASK)")).toBe(true);
+    expect(/sentinelPathFor\s*\(/.test(code)).toBe(false);
+    expect(/waitForSentinel\s*\(/.test(code)).toBe(false);
+    expect(/probe-sentinel/.test(code)).toBe(false);
     expect(code.includes("process.stdin")).toBe(false);
   });
 });
