@@ -370,8 +370,11 @@ else
   echo "  no 발급/재발급/삭제, and it never navigates the window (the seller does)."
 fi
 echo
-echo "  If this manifest is correct and displayed, the operator's entire single-use grant is one line:"
+echo "  If this manifest is correct and displayed, say the one line that tells the assistant to start it:"
 echo "    Seated and ready."
+echo
+echo "  Nothing is read until you press [현재 화면 확인] on the 'SellerOps 확인' tab the run opens — the first"
+echo "  checkpoint is that press, so the line above starts a window and authorizes no reading."
 echo
 echo "  On approval, run the probe with the APPROVED scope inline. The probe refuses unless BOTH variables"
 echo "  are set and equal — an unset scope can no longer widen the run to every target:"

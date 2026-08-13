@@ -202,8 +202,11 @@ echo
 echo "  operator action ($M_ENTRY_TYPE):"
 echo "    $M_OPERATOR_ACTION"
 echo
-echo "  If this manifest is correct and you accept 1–5 above, the single-use grant is one line:"
+echo "  If this manifest is correct and you accept 1–5 above, say the one line that tells the assistant to start it:"
 echo "    Seated and ready."
+echo
+echo "  That line does NOT authorize the run. The run opens a 'SellerOps 확인' tab, shows you these same"
+echo "  binding fields, and starts ONLY when you press the button on it yourself. No press, no run."
 echo
 echo "  On approval, run the deletion entrypoint in THIS shell (it re-verifies HEAD + a clean tree itself):"
 # BOTH phase variables travel on the command, like the probe harness does with its scope variables: the CLI
