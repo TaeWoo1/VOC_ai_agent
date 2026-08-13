@@ -134,6 +134,14 @@ export interface OperatorConfirmAsk {
   /** The detail lines, already sanitized (this module renders them verbatim as text nodes). */
   readonly lines: readonly string[];
   /**
+   * The PRIMARY button's label, when the default one would misname what the press does.
+   *
+   * Every checkpoint asks "is this screen ready", and `현재 화면 확인` says that. The run-level grant asks
+   * something else — whether this run may start at all — and a button labelled "check the current screen"
+   * above an approval is the kind of small wrongness that teaches an operator to press without reading.
+   */
+  readonly confirmLabel?: string;
+  /**
    * An optional SECOND answer, rendered as a second button. Present only where the run genuinely has two
    * operator-decidable outcomes; its press is verified exactly like the first one and reports
    * {@link OperatorConfirmChoice} `secondary`.
@@ -194,10 +202,11 @@ export function buildOperatorConfirmArmScript(ask: OperatorConfirmAsk & { readon
     p.style.cssText = "margin:0 0 4px";
     body.appendChild(p);
   }
+  /* The tab's OWN business, and only that. What advances the run is said once, in the ask's tail — saying it
+     here as well put the same sentence on the screen twice and taught the operator to skim it. */
   var note = mk(
     "div",
-    "이 버튼을 직접 누르셔야만 다음 단계로 넘어갑니다. 대화창에 'ready'라고 쓰거나 터미널에서 파일을 만드는 것으로는 진행되지 않습니다. " +
-      "이 탭은 SellerOps 전용 화면입니다 — 여기서 다른 주소로 이동하지 마세요. 쿠팡(윙)은 옆 탭에서 진행하시면 됩니다.",
+    "이 탭은 SellerOps 화면입니다 — 여기서 다른 주소로 이동하지 마세요. 마켓플레이스는 옆 탭에서 진행하시면 됩니다.",
     "margin:20px 0 10px;color:#7d8590;font-size:13px"
   );
   var SECONDARY = ${JSON.stringify(ask.secondary?.label ?? null)};
@@ -239,7 +248,7 @@ export function buildOperatorConfirmArmScript(ask: OperatorConfirmAsk & { readon
     root.appendChild(btn);
     return btn;
   };
-  mkButton(${JSON.stringify(OPERATOR_CONFIRM_BUTTON_ID)}, ${JSON.stringify(OPERATOR_CONFIRM_BUTTON_LABEL)}, "primary", true);
+  mkButton(${JSON.stringify(OPERATOR_CONFIRM_BUTTON_ID)}, ${JSON.stringify(ask.confirmLabel ?? OPERATOR_CONFIRM_BUTTON_LABEL)}, "primary", true);
   if (SECONDARY) mkButton(${JSON.stringify(OPERATOR_CONFIRM_SECONDARY_BUTTON_ID)}, SECONDARY, "secondary", false);
   return true;
 })()`;

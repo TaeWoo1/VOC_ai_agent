@@ -1157,6 +1157,27 @@ export const WING_DISCOVERY_TERMS_STEP_SUMMARY =
  * says. Stated on the manifest because it changes what the operator has to DO to start the run — the phrase in
  * chat tells the assistant to begin, and the run then asks them again, on a screen carrying these same fields.
  */
+/**
+ * **The default account binding for a WING phase — TWO accounts, named apart.**
+ *
+ * It read "operator-owned Coupang WING test account", which is true of the marketplace side and silently made
+ * the SellerOps side invisible. A guided walk signs in twice: the operator logs into **WING** with their own
+ * Coupang seller account, and separately logs into **SellerOps** with a proof account. Naming only one invites
+ * exactly the conflation the operator caught — reading the SellerOps proof login as if it were a WING identity.
+ *
+ * It lives HERE, in the contract module, rather than in the manifest CLI, because the run-level grant screen
+ * renders this field too: with a copy in each place, the screen the operator presses said one thing and the
+ * manifest they granted against said another. Observed live on 2026-08-13 — the screen read "operator-owned
+ * Coupang WING test account" while the manifest above it read the sentence below.
+ *
+ * Deliberately no address, id, or handle for either: `validateApprovalPrerequisites` refuses a raw account id
+ * here, and the point of this field is what KIND of account is bound, never which one. Neither login's
+ * credential VALUE is read by anything in this run.
+ */
+export const WING_DEFAULT_ACCOUNT_BINDING =
+  "WING: operator-owned Coupang seller account (the operator's own login) · SellerOps: a separate proof account. " +
+  "Two distinct logins; no credential value from either is read";
+
 export const WING_RUN_GRANT_SUMMARY =
   " 실행은 SellerOps가 함께 여는 'SellerOps 확인' 탭에서 이 승인 내용(채널·계정·화면·작업·모드·허용 동작)을 " +
   "다시 보여 드리고, 그 버튼을 직접 누르셔야만 시작됩니다. 대화창의 한 줄이나 터미널 옵션만으로는 시작되지 않습니다.";

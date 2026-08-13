@@ -40,7 +40,7 @@ import { resolveWingUrl, screenWingUrl } from "./coupang-wing-classifier";
 import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from "./live-run-approval";
 import { WING_APPROVAL_PHASE_ENV, WING_APPROVED_PHASE_ENV } from "./coupang-wing-classifier";
 import { verifyRepoIdentity } from "./repo-identity";
-import { PHASE_SPECS } from "./approval-manifest";
+import { PHASE_SPECS, WING_DEFAULT_ACCOUNT_BINDING } from "./approval-manifest";
 import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
 import { confirmRunGrant, runGrantRefusalMessage, type RunGrantBinding } from "./operator-run-grant";
 
@@ -104,12 +104,16 @@ export function issuanceRunGrantBinding(env: NodeJS.ProcessEnv = process.env): R
     runId: read("WALKTHROUGH_RUN_ID"),
     gitSha: read("WALKTHROUGH_GIT_COMMIT"),
     channel: "COUPANG",
-    account: "operator-owned Coupang WING test account",
+    account: WING_DEFAULT_ACCOUNT_BINDING,
     surface: "Coupang WING Open API",
     operation:
       "guided WING issuance walk (SellerOps guides and rings; the SELLER performs every real step and stops in front of '약관 동의 및 Key 발급받기')",
     mode: spec.mode,
     maxActions: "0 agent actions on WING — highlights and panels only",
+    agentDoesNot: "어떤 버튼도 대신 누르지 않고, 아무것도 입력하지 않으며, 어떤 값도 읽지 않습니다.",
+    caution:
+      "안내는 '약관 동의 및 Key 발급받기' 앞에서 멈춥니다. 그 다음 화면의 '확인'을 누르시면 실제 키가 생성됩니다 — " +
+      "누르는 것도, 확인하는 것도 판매자님입니다.",
   };
 }
 

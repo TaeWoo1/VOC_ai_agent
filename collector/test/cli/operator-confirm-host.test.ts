@@ -320,7 +320,7 @@ describe("the operator reads one set of words", () => {
     const all = ask.lines.join("\n");
     expect(all).toContain(OPERATOR_CONFIRM_BUTTON_LABEL);
     expect(all).toContain(OPERATOR_CONFIRM_PAGE_TITLE);
-    expect(all).toContain("대화창에 'ready'라고 쓰거나");
+    expect(all).toContain("대화창의 'ready'나 파일 생성으로는");
     expect(all).toContain("/tmp/x/run.abort");
     // The ask's own words survive it.
     expect(ask.title).toBe(ASK.title);
@@ -329,7 +329,7 @@ describe("the operator reads one set of words", () => {
 
   it("a run with no abort file still tells the operator how to stop", () => {
     expect(confirmTailLines().join("\n")).toContain("Ctrl+C");
-    expect(confirmTailLines().join("\n")).not.toContain("파일을 만드세요");
+    expect(confirmTailLines().join("\n")).not.toContain("이 파일 생성");
   });
 
   it("**the terminal and the surface are handed the same ask**", async () => {
@@ -342,6 +342,14 @@ describe("the operator reads one set of words", () => {
       expect(printed.join("\n"), line).toContain(line);
       expect(armScript, line).toContain(JSON.stringify(line).slice(1, -1));
     }
+  });
+
+  it("**the tail names the ask's OWN button** — a run grant does not say 'check the current screen'", () => {
+    const grantish = { ...ASK, confirmLabel: "이 실행 승인" };
+    expect(withConfirmTail(grantish).lines.join("\n")).toContain("[이 실행 승인]");
+    expect(withConfirmTail(grantish).lines.join("\n")).not.toContain(OPERATOR_CONFIRM_BUTTON_LABEL);
+    // …and the surface renders that label on the button it arms.
+    expect(withConfirmTail(ASK).lines.join("\n")).toContain(OPERATOR_CONFIRM_BUTTON_LABEL);
   });
 
   it("printing an ask writes the title, the headline and every line", () => {

@@ -43,7 +43,11 @@ import {
 } from "../action-window/coupang-wing-label-recon";
 // The public WING host default for the Coupang WING selector-probe phase (pure leaf; no per-run input needed).
 import { WING_DEFAULT_URL, resolveWingProbeScope } from "./coupang-wing-classifier";
-import { COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION, COUPANG_WING_KEY_DELETION_SCOPE } from "./approval-manifest";
+import {
+  COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION,
+  COUPANG_WING_KEY_DELETION_SCOPE,
+  WING_DEFAULT_ACCOUNT_BINDING,
+} from "./approval-manifest";
 import { verifyRepoIdentity } from "./repo-identity";
 // The 삭제 selector calibration flag — the SAME constant `run-coupang-wing-deletion-live.ts` feeds the gate.
 // `approval-manifest.ts` deliberately never imports it (WING phases default to uncalibrated there), so the
@@ -85,22 +89,6 @@ export interface ApprovalManifestCliOptions {
    */
   selectorsCalibrated?: boolean;
 }
-
-/**
- * **The default account binding for a WING phase — TWO accounts, named apart.**
- *
- * It read "operator-owned Coupang WING test account", which is true of the marketplace side and silently made
- * the SellerOps side invisible. A guided walk signs in twice: the operator logs into **WING** with their own
- * Coupang seller account, and separately logs into **SellerOps** with a proof account. Naming only one invites
- * exactly the conflation the operator caught — reading the SellerOps proof login as if it were a WING identity.
- *
- * Deliberately no address, id, or handle for either: `validateApprovalPrerequisites` refuses a raw account id
- * here, and the point of this field is what KIND of account is bound, never which one. Neither login's
- * credential VALUE is read by anything in this run.
- */
-const WING_DEFAULT_ACCOUNT_BINDING =
-  "WING: operator-owned Coupang seller account (the operator's own login) · SellerOps: a separate proof account. " +
-  "Two distinct logins; no credential value from either is read";
 
 export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): number {
   const phase = env("SELLEROPS_APPROVAL_PHASE") ?? "";

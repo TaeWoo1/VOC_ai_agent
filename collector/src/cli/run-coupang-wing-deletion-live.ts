@@ -170,9 +170,10 @@ export function deletionRunGrantBinding(): RunGrantBinding {
     operation: scope.operation,
     mode: WKD.mode,
     maxActions: scope.maxActions,
+    agentDoesNot: "'삭제'를 대신 누르지 않고, 아무것도 입력하지 않으며, 어떤 값도 읽지 않습니다.",
     // `mode` is `READ_ONLY` and honestly so — the AGENT only reads; the SELLER deletes their own key. The
-    // grant screen must not therefore read as a harmless run, so the irreversible act is named on its own line.
-    irreversible: `${WING_DELETION_WARNING_LABEL} — 이 실행에서 판매자님이 직접 키를 삭제하시게 됩니다.`,
+    // grant screen must not therefore read as a harmless run, so the risk is named specifically.
+    caution: `${WING_DELETION_WARNING_LABEL} — 이 실행에서 판매자님이 직접 키를 삭제하시게 되며, 되돌릴 수 없습니다.`,
   };
 }
 

@@ -251,9 +251,19 @@ describe("the in-page scripts", () => {
     expect(arm).not.toContain("document.write");
   });
 
-  it("tells the operator, in the surface itself, that chat text does not advance the run", () => {
-    expect(arm).toContain("직접 누르셔야만");
-    expect(arm).toContain("'ready'");
+  it("**the surface's own note says the tab's business, and does NOT repeat the ask's tail**", () => {
+    // What advances the run is said once, in the ask (which the terminal prints and the surface renders). The
+    // note used to say it a second time, so the same three sentences reached the operator twice on one screen.
+    expect(arm).toContain("이 탭은 SellerOps 화면입니다");
+    expect(arm).not.toContain("'ready'라고 쓰거나");
+  });
+
+  it("**the primary button takes the ask's own label** — a run grant is not 'check the current screen'", () => {
+    const grant = buildOperatorConfirmArmScript({ ...ASK, confirmLabel: "이 실행 승인", token: "a".repeat(32) });
+    expect(grant).toContain('"이 실행 승인", "primary"');
+    expect(grant).not.toContain(`"${OPERATOR_CONFIRM_BUTTON_LABEL}", "primary"`);
+    // …and an ask that says nothing keeps the screen-confirmation label.
+    expect(arm).toContain(`"${OPERATOR_CONFIRM_BUTTON_LABEL}", "primary"`);
   });
 
   it("…and that this tab must not be navigated", () => {

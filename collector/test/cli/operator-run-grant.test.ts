@@ -15,7 +15,10 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { OPERATOR_UI_CONFIRMED, type OperatorConfirmAsk, type OperatorConfirmation } from "../../src/cli/operator-confirm";
+import { withConfirmTail } from "../../src/cli/operator-confirm-host";
+import { COUPANG_WING_KEY_DELETION_SCOPE, WING_DEFAULT_ACCOUNT_BINDING } from "../../src/cli/approval-manifest";
 import {
+  RUN_GRANT_BUTTON_LABEL,
   confirmRunGrant,
   runGrantAsk,
   runGrantBindingComplete,
@@ -38,6 +41,7 @@ const BINDING: RunGrantBinding = {
   operation: "WING issuance-form reveal",
   mode: "READ_ONLY",
   maxActions: "1 operator-performed 발급 press + 1 sanitized observation",
+  agentDoesNot: "'발급'을 대신 누르지 않고, 아무것도 입력하지 않으며, 어떤 값도 읽지 않습니다.",
 };
 
 /** A surface scripted to answer one way. `announce` is recorded so the ordering can be asserted. */
@@ -72,22 +76,47 @@ describe("the grant screen shows the manifest's binding, verbatim", () => {
     expect(runGrantAsk(long).lines.join("\n")).toContain(long.operation);
   });
 
-  it("**a run that leaves an irreversible mark says so first, above every other field**", () => {
-    // `mode` alone cannot carry this. On this workstream the destructive key deletion is declared `READ_ONLY`,
-    // and honestly so — the AGENT only reads; the SELLER deletes their own key. A screen reading the mode alone
-    // would show `READ_ONLY` above a run that ends with a key gone.
-    const ask = runGrantAsk({ ...BINDING, irreversible: "삭제된 키는 복구할 수 없습니다" });
-    expect(ask.title).toContain("되돌릴 수 없음");
-    expect(ask.headline).toContain("되돌릴 수 없는");
-    expect(ask.lines[0]).toContain("삭제된 키는 복구할 수 없습니다");
-    expect(runGrantAsk(BINDING).headline).not.toContain("되돌릴 수 없는");
-    expect(runGrantAsk({ ...BINDING, mode: "WRITE" }).headline).toContain("되돌릴 수 없는");
+  it("**the risk is stated SPECIFICALLY, and never as a word on the title**", () => {
+    // `mode` alone cannot carry it: the destructive key deletion is declared `READ_ONLY`, honestly, because the
+    // AGENT only reads and the SELLER deletes their own key. But stamping every such title "되돌릴 수 없음"
+    // is wrong in the other direction — it makes read-only runs look alarming and teaches the word away.
+    const ask = runGrantAsk({ ...BINDING, caution: "삭제된 키는 복구할 수 없습니다" });
+    expect(ask.title).toBe("RUN GRANT — READ_ONLY");
+    expect(ask.title).not.toContain("되돌릴 수 없음");
+    expect(ask.lines[0]).toBe("⚠ 삭제된 키는 복구할 수 없습니다");
+    // A run with no risk to state does not open with a blank warning.
+    expect(runGrantAsk(BINDING).lines[0]).not.toContain("⚠");
+    // The headline is the same either way — it asks the operator to read, and the reading is the screen.
+    expect(runGrantAsk(BINDING).headline).toBe("아래 실행 내용을 확인해 주세요.");
   });
 
-  it("tells the operator that not pressing starts nothing, and that the grant is single-use", () => {
+  it("**every screen says what SellerOps will NOT do** — half of what is being decided", () => {
+    expect(runGrantAsk(BINDING).lines.join("\n")).toContain(`SellerOps는 ${BINDING.agentDoesNot}`);
+  });
+
+  it("the ids stay in FULL, on one line, after the run's own description", () => {
+    const lines = runGrantAsk(BINDING).lines;
+    const idLine = lines.findIndex((l) => l.includes(BINDING.approvalId));
+    expect(lines[idLine]).toBe(`승인 ${BINDING.approvalId} · 실행 ${BINDING.runId} · 커밋 ${BINDING.gitSha}`);
+    expect(idLine).toBeGreaterThan(lines.findIndex((l) => l.includes(BINDING.operation)));
+  });
+
+  it("**says what advances it exactly once**, and the button is named for granting a run", () => {
+    // Three different sentences used to tell the operator the same thing: the ask's own tail, the surface's
+    // note, and a line in the body. A screen that repeats itself is a screen that gets skimmed.
+    const ask = withConfirmTail(runGrantAsk(BINDING), "/tmp/x/run.abort");
+    const all = ask.lines.join("\n");
+    expect(ask.confirmLabel).toBe(RUN_GRANT_BUTTON_LABEL);
+    expect(all).toContain(`[${RUN_GRANT_BUTTON_LABEL}]`);
+    expect(all).not.toContain("현재 화면 확인");
+    expect(all.match(/누르세요/g) ?? []).toHaveLength(1);
+    expect(all.match(/ready/g) ?? []).toHaveLength(1);
+  });
+
+  it("tells the operator to stop if the screen disagrees, and that the grant is single-use", () => {
     const lines = runGrantAsk(BINDING).lines.join("\n");
-    expect(lines).toContain("누르지 않으면 아무것도 시작되지 않습니다");
-    expect(lines).toContain("다음 실행은 다시 확인해야 합니다");
+    expect(lines).toContain("다른 내용이 있으면 진행하지 마세요");
+    expect(lines).toContain("이 실행 한 번에만 적용됩니다");
   });
 });
 
@@ -155,14 +184,29 @@ describe("the CLIs that hold a manifest bind their grant to it", () => {
     expect(new Set(ops).size).toBe(3);
   });
 
-  it("**the deletion run's grant screen names the irreversible act**, whatever its mode says", () => {
-    const binding = deletionRunGrantBinding();
-    expect(binding.irreversible).toBeDefined();
-    expect(runGrantAsk(binding).title).toContain("되돌릴 수 없음");
-    // …and so does the reveal run, whose own banner says it cannot prove no key was created.
-    expect(revealRunGrantBinding().irreversible).toBeDefined();
-    // The guided walk stops in front of the key-issuing control and claims none.
-    expect(issuanceRunGrantBinding(ENV as unknown as NodeJS.ProcessEnv).irreversible).toBeUndefined();
+  it("**every WING run states a specific caution**, and each states its own", () => {
+    const cautions = [
+      deletionRunGrantBinding().caution,
+      revealRunGrantBinding().caution,
+      issuanceRunGrantBinding(ENV as unknown as NodeJS.ProcessEnv).caution,
+    ];
+    for (const c of cautions) expect(c, "a WING run with nothing to caution about").toBeDefined();
+    expect(new Set(cautions).size).toBe(3);
+    // The deletion run's is the one that says irreversible, because it is.
+    expect(deletionRunGrantBinding().caution).toContain("되돌릴 수 없습니다");
+    // …and no title carries it as a decoration.
+    for (const b of [deletionRunGrantBinding(), revealRunGrantBinding()]) {
+      expect(runGrantAsk(b).title).not.toContain("되돌릴 수 없");
+    }
+  });
+
+  it("**the account is the manifest's own value**, not a second copy of it", () => {
+    // Observed live on 2026-08-13: the grant screen read "operator-owned Coupang WING test account" while the
+    // manifest above it read the two-account sentence. One string, one place, or they drift again.
+    for (const b of [revealRunGrantBinding(), issuanceRunGrantBinding(ENV as unknown as NodeJS.ProcessEnv)]) {
+      expect(b.account).toBe(WING_DEFAULT_ACCOUNT_BINDING);
+    }
+    expect(deletionRunGrantBinding().account).toBe(COUPANG_WING_KEY_DELETION_SCOPE.accountBinding);
   });
 
   it("an unbound run env cannot produce a grantable binding", () => {

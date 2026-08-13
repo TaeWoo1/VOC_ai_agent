@@ -122,17 +122,21 @@ export interface OperatorConfirmHost {
  * Not decoration. The channel this replaced let the instruction reach the operator through a chat paraphrase and
  * the confirmation come back the same way, and neither end was the run.
  */
-export function confirmTailLines(abortPath?: string): readonly string[] {
+export function confirmTailLines(abortPath?: string, label: string = OPERATOR_CONFIRM_BUTTON_LABEL): readonly string[] {
   return [
-    `진행하려면 '${OPERATOR_CONFIRM_PAGE_TITLE}' 탭의 [${OPERATOR_CONFIRM_BUTTON_LABEL}] 버튼을 직접 누르세요.`,
-    "대화창에 'ready'라고 쓰거나 파일을 만드는 것으로는 진행되지 않습니다 — SellerOps는 그런 신호를 받지 않습니다.",
-    abortPath ? `중단하려면 Ctrl+C, 또는 이 파일을 만드세요: ${abortPath}` : "중단하려면 Ctrl+C를 누르세요.",
+    `계속하려면 '${OPERATOR_CONFIRM_PAGE_TITLE}' 탭의 [${label}] 버튼을 직접 누르세요.`,
+    "대화창의 'ready'나 파일 생성으로는 진행되지 않습니다.",
+    abortPath ? `중단: Ctrl+C, 또는 이 파일 생성 — ${abortPath}` : "중단: Ctrl+C.",
   ];
 }
 
-/** An ask, plus the one paragraph that says what advances it. */
+/**
+ * An ask, plus the one paragraph that says what advances it — and it is the ONLY place that paragraph appears.
+ * The surface's own note used to repeat it, so the same three sentences reached the operator twice on one
+ * screen; the button's label is threaded through so the tail names the button the ask actually renders.
+ */
 export function withConfirmTail(ask: OperatorConfirmAsk, abortPath?: string): OperatorConfirmAsk {
-  return { ...ask, lines: [...ask.lines, "", ...confirmTailLines(abortPath)] };
+  return { ...ask, lines: [...ask.lines, "", ...confirmTailLines(abortPath, ask.confirmLabel)] };
 }
 
 /** Print an ask to the terminal in the same words the confirmation surface shows. */

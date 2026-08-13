@@ -52,6 +52,7 @@ import { confirmRunGrant, runGrantRefusalMessage, type RunGrantBinding } from ".
 import {
   COUPANG_WING_ISSUANCE_REVEAL_ACTION,
   PHASE_SPECS,
+  WING_DEFAULT_ACCOUNT_BINDING,
   validateApprovalPrerequisites,
   type ApprovalPrereqInput,
 } from "./approval-manifest";
@@ -108,7 +109,7 @@ export function gateRefusalCause(
   const input: ApprovalPrereqInput = {
     phase: REVEAL.phase,
     channel: "COUPANG",
-    accountBinding: "operator-owned Coupang WING test account",
+    accountBinding: WING_DEFAULT_ACCOUNT_BINDING,
     mode: REVEAL.mode,
     apiCenterUrl,
     cli: REVEAL.cli,
@@ -142,19 +143,21 @@ export function revealRunGrantBinding(): RunGrantBinding {
     runId: env("WALKTHROUGH_RUN_ID") ?? "unknown",
     gitSha: env("WALKTHROUGH_GIT_COMMIT") ?? "unknown",
     channel: "COUPANG",
-    account: "operator-owned Coupang WING test account",
+    // The manifest's OWN account value, from the contract module — not a second copy of it. The two drifted,
+    // and the operator saw one string on the screen they pressed and another on the manifest they granted.
+    account: WING_DEFAULT_ACCOUNT_BINDING,
     surface: "Coupang WING Open API",
     operation:
       "WING issuance-form reveal (the OPERATOR presses 발급; this press is not the key-creating action; agent performs no click/input/value read)",
     mode: REVEAL.mode,
     maxActions: "1 operator-performed 발급 press + 1 sanitized observation",
+    agentDoesNot: "'발급'을 대신 누르지 않고, 아무것도 입력하지 않으며, 어떤 값도 읽지 않습니다.",
     // `mode` is `READ_ONLY` and the press is not believed to create a key — but this run's own banner says it
     // CANNOT prove one was not created (`keyCreationRuledOut: false`, and every signal it reads is identical
-    // either way). A grant screen that stayed silent about that would be the mildest screen in the workstream
-    // above the one run that admits it cannot tell.
-    irreversible:
-      "'발급'을 누르면 실제로 키가 만들어질 가능성을 SellerOps는 배제하지 못합니다 — 화면으로 확인하실 수 있는 " +
-      "것은 판매자님뿐입니다.",
+    // either way). Stated specifically here rather than as a word on the title.
+    caution:
+      "판매자님이 '발급'을 직접 누르시면 실제 키가 생성될 가능성을 SellerOps는 배제할 수 없습니다 — " +
+      "화면으로 확인하실 수 있는 것은 판매자님뿐입니다.",
   };
 }
 

@@ -53,39 +53,54 @@ export interface RunGrantBinding {
   /** The action budget the manifest declares — what the operator is agreeing may happen. */
   readonly maxActions: string;
   /**
-   * The IRREVERSIBLE thing the operator will do in this run, in the manifest's own words — or absent when the
-   * run has none.
-   *
-   * It is separate from {@link mode} because on this workstream `mode` does not carry it: the destructive key
-   * deletion is declared `READ_ONLY`, and honestly so — the AGENT only reads; the SELLER deletes their own key.
-   * A grant screen that read the mode alone would show `READ_ONLY` above a run that ends with a key gone.
+   * **What SellerOps will NOT do in this run**, in the manifest's own terms. Required, because it is half of
+   * what an operator is actually deciding: a screen that lists only what a run may do leaves them to infer the
+   * boundary, and the inference people make about software is generous.
    */
-  readonly irreversible?: string;
+  readonly agentDoesNot: string;
+  /**
+   * **The concrete risk this run carries**, in the manifest's own words — or absent when it carries none.
+   *
+   * Rendered as the ⚠ block, and NEVER as a decoration on the title. `mode` cannot carry this on its own: the
+   * destructive key deletion is declared `READ_ONLY`, honestly, because the AGENT only reads and the SELLER
+   * deletes their own key. But a `READ_ONLY` title stamped "되돌릴 수 없음" is equally wrong in the other
+   * direction — it makes every read-only run look alarming and teaches the operator to ignore the word. So the
+   * risk is stated specifically, once, where it applies.
+   */
+  readonly caution?: string;
 }
 
-/** The run-level ask. One screen, the manifest's fields, and what pressing means. */
+/** The button that grants a RUN. Named for what the press does — approving a run, not checking a screen. */
+export const RUN_GRANT_BUTTON_LABEL = "이 실행 승인";
+
+/**
+ * The run-level ask.
+ *
+ * The order is the order an operator decides in: the risk first, then what the run is, then the ids they check
+ * against their manifest. The ids stay in full — they are the thing that binds — but they sit last and on one
+ * line, because an operator who reads only the top of this screen should still have read the part that matters.
+ *
+ * Every value is the manifest's, verbatim. Nothing here summarises, softens or re-words one.
+ */
 export function runGrantAsk(binding: RunGrantBinding): OperatorConfirmAsk {
-  const changes = binding.mode.toUpperCase().includes("WRITE") || binding.irreversible !== undefined;
   return {
-    title: `RUN GRANT — ${binding.mode}${binding.irreversible ? " · 되돌릴 수 없음" : ""}`,
-    headline: changes
-      ? "이 실행은 되돌릴 수 없는 결과를 남깁니다. 아래 내용이 맞을 때만 확인해 주세요."
-      : "아래 내용이 승인하신 것과 같을 때만 확인해 주세요.",
+    title: `RUN GRANT — ${binding.mode}`,
+    headline: "아래 실행 내용을 확인해 주세요.",
+    confirmLabel: RUN_GRANT_BUTTON_LABEL,
     lines: [
-      ...(binding.irreversible ? [`⚠ ${binding.irreversible}`, ""] : []),
-      `channel:    ${binding.channel}`,
-      `account:    ${binding.account}`,
-      `surface:    ${binding.surface}`,
-      `operation:  ${binding.operation}`,
-      `mode:       ${binding.mode}`,
-      `actions:    ${binding.maxActions}`,
+      ...(binding.caution ? [`⚠ ${binding.caution}`] : []),
+      `SellerOps는 ${binding.agentDoesNot}`,
       "",
-      `approvalId: ${binding.approvalId}`,
-      `runId:      ${binding.runId}`,
-      `commit:     ${binding.gitSha}`,
+      `채널      ${binding.channel}`,
+      `계정      ${binding.account}`,
+      `화면      ${binding.surface}`,
+      `하는 일   ${binding.operation}`,
+      `모드      ${binding.mode}`,
+      `허용 동작 ${binding.maxActions}`,
       "",
-      "이 화면의 내용이 승인하신 Approval Manifest와 다르면 누르지 마세요 — 누르지 않으면 아무것도 시작되지 않습니다.",
-      "확인은 이 실행 하나에만 적용됩니다. 다음 실행은 다시 확인해야 합니다.",
+      `승인 ${binding.approvalId} · 실행 ${binding.runId} · 커밋 ${binding.gitSha}`,
+      "",
+      "승인하신 Approval Manifest와 다른 내용이 있으면 진행하지 마세요. 이 승인은 이 실행 한 번에만 적용됩니다.",
     ],
   };
 }
@@ -99,9 +114,9 @@ export type RunGrantOutcome = "GRANTED" | "REFUSED_NO_CONFIRMATION" | "REFUSED_A
  * while the run would read that press as a full authorization.
  */
 export function runGrantBindingComplete(binding: RunGrantBinding): boolean {
-  // `irreversible` is optional — absent is a real answer ("this run has none"). Every other field must be a
+  // `caution` is optional — absent is a real answer ("this run carries none"). Every other field must be a
   // real value: `unknown` is the literal each CLI's builder falls back to for an unbound run env.
-  const { irreversible: _irreversible, ...required } = binding;
+  const { caution: _caution, ...required } = binding;
   return Object.values(required).every(
     (v) => typeof v === "string" && v.trim().length > 0 && v.trim() !== "unknown",
   );
