@@ -28,6 +28,8 @@ import { waitForSpaHydration } from "../naver/hydration";
 import { runExport } from "../naver/review-export";
 import type { SessionVerdict } from "../naver/session-verdict";
 import { launchNaverContext, type PwPage } from "../profile";
+import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
+import { actionBarrierRefusedMessage, barrierRefusedRecord, confirmActionBarrier } from "./operator-action-barrier";
 import { collectSanitizedStorage } from "../naver/storage-collect";
 import { decideState, writeStatus, type RunSignals } from "../status";
 import { login, resolveChannelId, uploadReviewFile, UploadError } from "../upload";
@@ -120,7 +122,10 @@ async function doDiscover(classifyOnly: boolean, diagnoseStorage: boolean): Prom
     }
   }
   const ctx = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
-  const page = (ctx.pages()[0] ?? (await ctx.newPage())) as unknown as PwPage;
+  // The confirmation surface, opened before anything is read so the operator's own page stays the entry page.
+  // Nothing waits on it unless this run reaches an ACT — the classify-only leg never does.
+  const confirmHost = await attachOperatorConfirmTab(ctx as unknown as ConfirmHostContext, { aborted: () => false });
+  const page = confirmHost.entryPage as unknown as PwPage;
   const now = (): string => new Date().toISOString();
 
   // 1) Session check — the five-state verdict is the authority. Never proceed on
@@ -150,6 +155,33 @@ async function doDiscover(classifyOnly: boolean, diagnoseStorage: boolean): Prom
   // 2) LOGGED_IN — branch by mode. Classify-only is strictly NO-CLICK (it never
   //    calls runExport); the full path is the ONLY one that triggers/captures.
   if (classifyOnly) return doDiscoverClassifyOnly(page, verdict, ctx, cfg, now, diagnoseStorage);
+  // **THE ACTION BARRIER.** Everything above is reading — a navigation this run performed itself and a
+  // sanitized verdict. What follows triggers the marketplace's own export, puts a file on this machine and
+  // ingests it into a database, and the flag that selected this leg says what the operator INTENDED when they
+  // typed the command, not that a person looked at the page it is now about to act on.
+  const allowed = await confirmActionBarrier(confirmHost, {
+    kind: "EXPORT_TRIGGER",
+    title: "리뷰 내보내기 (전체 캡처)",
+    headline: "지금 화면의 내보내기 컨트롤을 SellerOps가 한 번 눌러도 될까요?",
+    allows: [
+      "화면에서 하나로 확인된 내보내기 컨트롤을 정확히 한 번 누릅니다.",
+      "그 결과로 내려받아진 파일 하나를 이 컴퓨터에 저장합니다.",
+      "저장된 파일을 SellerOps 백엔드로 업로드합니다 (리뷰 데이터가 DB에 적재됩니다).",
+      "그 결과를 수집 상태 기록에 남깁니다.",
+    ],
+    stillWillNot: "다른 컨트롤을 누르거나, 화면의 값을 읽거나, 다른 곳으로 무엇도 보내지 않습니다.",
+  });
+  if (!allowed) {
+    // NO status is written, deliberately. Every `CollectorState` describes something that happened to a
+    // collection attempt, and nothing happened here — the run stopped before it acted. Reaching for the
+    // nearest-looking state would put a claim in the status file that no run supports.
+    console.error(actionBarrierRefusedMessage("EXPORT_TRIGGER"));
+    console.log(barrierRefusedRecord("EXPORT_TRIGGER"));
+    await ctx.close();
+    log("run.halted", { reason: "no-operator-confirmation" });
+    process.exitCode = 7;
+    return;
+  }
   return doDiscoverFullCapture(page, ctx, cfg, now);
 }
 

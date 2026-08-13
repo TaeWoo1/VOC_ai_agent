@@ -269,14 +269,8 @@ an advance, so it does not get a file beside the channel.
 API-center walks (`observe-api-center`, `calibrate-api-center`, `capture-api-center-visual`,
 `probe-issuance-selectors`).
 
-**The hand-off is a press, but the DEFAULT arm has no checkpoint at all** in
-`capture-export-same-session`, `continue-account-store-same-session` and `discover-reply-target`.
-Each takes `--require-sentinel` / `--sentinel` to opt into the operator hand-off, which is now a
-press; without it they poll the page themselves and proceed on their own reading. That is
-pre-existing behaviour and it is stated here rather than left to be inferred from "no sentinel
-remains", because the first of them ends in a real export click, a download and an upload. Closing
-it means deciding whether an auto-read arm may exist at all, which is a product-owner call and not
-this contract's to make.
+**Auto-read arms** — where a run polls the page itself instead of waiting for a hand-off — are
+allowed, and are governed by §5b below rather than by a checkpoint at the top of the run.
 
 The two bridge-client live-proof CLIs lost the ability to advance a checkpoint at all — a diagnostic
 must not be able to move a live guided walk on, and `다음` is the frontend's own button.
@@ -291,6 +285,76 @@ the Action Window runtime's own operator signal (`run-action-window-live-naver`)
 (`classify-esm-review`, `capture-esm-review`, `capture-esm-review-upload`, `probe-esm-session-ttl`).
 `collector/test/cli/operator-advance-channel-guard.test.ts` holds that list and fails when a
 migrated CLI regresses onto a sentinel.
+
+---
+
+## 5b. Auto-read may advance GUIDANCE; it may never cross an ACTION BARRIER
+
+A run may watch the seller's screen and advance its own guidance on what it sees. That is the Action
+Window's shape and it is what makes the walks usable — nobody wants a prompt in front of every read,
+and a confirmation the operator presses forty times is one they stop reading. **Reading is not
+acting.**
+
+**Two provenances, and they are not substitutable.**
+
+| | says | may authorize |
+|---|---|---|
+| `AUTO_READ` | the page LOOKED a certain way | the run's own next **guidance** step |
+| `OPERATOR_UI_CONFIRMED` | a person DECIDED something | an act (§5a, and the barriers below) |
+
+A run that treats the first as the second has decided on the seller's behalf and called it their
+choice. That is the same defect as advancing on chat text, arriving through a better-looking door:
+the reading is real; the inference from it is not the seller's.
+
+**The barrier.** Immediately before any of these, a run must have a verified press, and it must ask
+at the point the act is about to happen — not at the top of the run:
+
+`MARKETPLACE_CLICK` · `MARKETPLACE_SUBMIT` · `EXPORT_TRIGGER` · `DOWNLOAD` · `UPLOAD` ·
+`CREDENTIAL_REVEAL` · `DESTRUCTIVE`
+
+A readiness hand-off at the start authorizes a *run*; it cannot authorize an act the run decides on
+minutes later, on a page the operator has since changed. `capture-export-same-session`'s opt-in
+hand-off ran at the top while the export click happened after a reconnect, a re-read, a gate and a
+readiness poll — the operator who pressed at the beginning was never shown the thing that was
+eventually clicked.
+
+**One press per DISCLOSED chain.** Where an act carries automatic consequences — a click that
+downloads, a download that uploads — the ask names all of them. One press for a disclosed chain is
+honest; one press for a hidden chain is not. An operator who allows "click the export control" and
+then finds a file on their disk and rows in a database was told less than they agreed to.
+
+**A flag is not an approval.** `--capture-reviews`, `--diagnose-upload-saved-review-download` and
+their kin state what the operator INTENDED when they typed the command. They do not state that a
+person looked at the page the run is now about to act on.
+
+**A refusal reports, and writes nothing.** Every barrier refusal prints one shape —
+`{"event":"ACTION_BARRIER","outcome":"NOT_ALLOWED","kind":…,"acted":false}` — and exits `7`. No status
+file is written: every `CollectorState` describes something that happened to a collection attempt,
+and nothing happened. The record says so out loud rather than leaving a reader to infer it from
+silence.
+
+Implementation: `collector/src/cli/operator-action-barrier.ts`.
+`collector/test/cli/operator-action-barrier-guard.test.ts` sweeps `src/cli/` for the acting
+PRIMITIVES (`.click(`, `.press(`, `.fill(`, `.type(`, `.selectOption(`, `.check(`, `.setInputFiles(`,
+`waitForEvent("download")`, `.saveAs(`) as well as the named chains, requires a barrier before each,
+and requires the refusal to return on its own rather than fall through. It is mutation-tested: an act
+moved before its barrier, a deleted refusal `return`, a dropped barrier callback and a newly added
+unbarriered click are each caught.
+
+An earlier version of this list held only five helper NAMES, and two CLIs that click, download and
+ingest into the database passed it cleanly — see below.
+
+### Applied: the three auto-read arms (2026-08-13)
+
+| CLI | how far auto-read carries it | its action barrier | before the fix | now |
+|---|---|---|---|---|
+| `capture-export-same-session` | login/2FA waited through → first resolvable verdict → **through** the reconnect resolve → export gate → readiness poll → capture chain | the guarded continue click; then the export click → download → upload → status write | **nothing** in the default arm; the opt-in hand-off sat at the top | a press before the continue click (raised only on `RECONNECT_REQUIRED`, which is the only verdict that can reach it), and a press before the capture chain — disclosing click, save, upload and status write |
+| `continue-account-store-same-session` | settle the SPA, read the state | ONE real continue click on NAVER | the opt-in hand-off only, at the top | a press immediately before the click, in both arms |
+| `discover-reply-target` | read the row census | **none** — it clicks, types, submits, downloads, uploads and writes nothing (its own source guard pins that) | n/a | **unchanged.** A confirmation here would be the prompt-on-every-read this policy exists to avoid |
+| `discover-export` (`--discover` without `--classify-only`) | navigate, hydrate, read the verdict | the export click → download → upload → status write | nothing | a press before the capture leg |
+| `capture-esm-review` | a `.ready` hand-off, then the marketplace-selection check | the ESM+ export click + download wait | a `.ready` file whose own prompt said *'in Claude Code, say "ready" and Claude creates the sentinel'* | a press immediately before the click, after every gate that could refuse it. Its READ hand-offs stay sentinel files and stay on the §5a register |
+| `capture-esm-review-upload` | the same `.ready` hand-off | the click → download → save → **upload into the backend DB** | the same `.ready` file | a press before the chain, disclosing the DB ingest |
+| `upload-file` | reads no page at all | the upload | n/a | **unchanged, by policy.** The operator typing the path IS the decision; there is no observation to be mistaken for one. Named in the guard so the exclusion is a rule, not an omission |
 
 ---
 

@@ -87,6 +87,12 @@ import { approvalRequiredMessage, hasLiveRunApproval, isClassifyOnly } from "./l
 import { decideCaptureGate, type CaptureGateDecision } from "./same-session";
 import type { OperatorConfirmAsk } from "./operator-confirm";
 import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
+import {
+  OBSERVED_BY_AUTO_READ,
+  actionBarrierRefusedMessage,
+  barrierRefusedRecord,
+  confirmActionBarrier,
+} from "./operator-action-barrier";
 
 // The human may need to clear 2FA/CAPTCHA and the Commerce account/store flow; give
 // them plenty of time, but never wait forever.
@@ -386,7 +392,10 @@ async function main(): Promise<void> {
         log("capture.aborted", { reason: "auto-read-timeout", checks: start.checks });
         return;
       }
-      log("session.start", { verdict: start.verdict, checks: start.checks });
+      // The provenance of what advanced this run so far: a READING, not a decision. Recorded so the log says
+      // which kind of evidence carried the run to the barrier — and so `AUTO_READ` is a value that exists in
+      // the world rather than a type nothing produces.
+      log("session.start", { verdict: start.verdict, checks: start.checks, observedBy: OBSERVED_BY_AUTO_READ });
       verdict = start.verdict;
     }
 
@@ -438,6 +447,29 @@ async function main(): Promise<void> {
     // Report mode tag: a NORMAL `--capture-reviews` run is reported as "capture-reviews" (not the
     // diagnostic mode), even though it reuses the same validated chain underneath.
     const captureMode = captureReviews ? "capture-reviews" : "diagnose-export-click";
+    // **ACTION BARRIER 1 — the guarded Commerce continue click.** `resolveReconnectIfNeeded` returns straight
+    // through for `LOGGED_IN` without touching anything, so the ask is raised ONLY on the verdict that can
+    // reach a click. The ordinary run never sees this screen, which is the point: a confirmation in front of
+    // every read would be the thing that teaches operators to press without looking.
+    if (verdict === "RECONNECT_REQUIRED") {
+      const allowed = await confirmActionBarrier(confirmHost, {
+        kind: "MARKETPLACE_CLICK",
+        title: "계정 재연결 계속",
+        headline: "재연결 화면의 '계속' 버튼을 SellerOps가 한 번 누르는 것을 허용하시겠습니까?",
+        allows: [
+          "재연결 화면의 '계속' 버튼을 정확히 한 번 누릅니다 (모든 확인 조건이 맞을 때만).",
+          "누른 뒤의 화면이 안정될 때까지 읽기만 하며 기다립니다.",
+        ],
+        stillWillNot: "내보내기를 실행하거나, 파일을 저장하거나, 아무것도 전송하지 않습니다.",
+      });
+      if (!allowed) {
+        console.error(actionBarrierRefusedMessage("MARKETPLACE_CLICK"));
+        console.log(barrierRefusedRecord("MARKETPLACE_CLICK"));
+        log("capture.aborted", { reason: "no-operator-confirmation-continue" });
+        process.exitCode = 7;
+        return;
+      }
+    }
     const resolution = await resolveReconnectIfNeeded(page as unknown as Page, ctx, verdict, {
       expected: {
         expectedChannelCode: cfg.naverExpectedChannelCode,
@@ -495,8 +527,12 @@ async function main(): Promise<void> {
       evaluateReadinessFn: evaluateExportTargetReadiness,
     };
 
-    // 7) DRY-RUN (classify-only): report the would-capture decision and STOP before any click,
+    // 7) DRY-RUN (classify-only): report the would-capture decision and STOP before the EXPORT click,
     //    download, upload, or status write.
+    //
+    //    ⚠ Not "before any click": the reconnect resolve above may click the Commerce continue control on a
+    //    `RECONNECT_REQUIRED` verdict, and it does so on this path too. That click now has its own barrier
+    //    (Barrier 1), but the comment claimed for years that classify-only clicked nothing at all.
     if (classifyOnly) {
       console.log(classifyOnlyReport(verdict, resolution, gate));
       log("run.classify-only", { wouldCapture: gate.proceed, state: gate.state });
@@ -509,6 +545,37 @@ async function main(): Promise<void> {
       if (!gate.proceed) {
         console.log(diagnoseHaltReport(verdict, resolution, gate, captureMode));
         log("run.halted", { state: gate.state });
+        return;
+      }
+      // **ACTION BARRIER 3 — the diagnostic click chain**, which `--capture-reviews` also runs. The flags say
+      // what the operator INTENDED when they typed the command; they do not say that a person looked at the
+      // page this run is now about to click on. The chain is disclosed from the flags actually set, so the
+      // press covers exactly what this invocation will do and no more.
+      const allowedDiagnostic = await confirmActionBarrier(confirmHost, {
+        kind: "EXPORT_TRIGGER",
+        title: captureReviews ? "리뷰 내보내기" : "내보내기 진단 클릭",
+        headline: "지금 화면의 내보내기 컨트롤을 SellerOps가 한 번 눌러도 될까요?",
+        allows: [
+          "화면에서 하나로 확인된 내보내기 컨트롤을 정확히 한 번 누릅니다.",
+          // `approvedIndexRequested` is set by its OWN flag and never consults `diagnoseConfirm`, so keying
+          // this line off `diagnoseConfirm` alone hid a SECOND real click on the seller's consent modal —
+          // the click that actually makes NAVER run the export — behind an ask that said "one control, once".
+          ...(diagnoseConfirm || approvedIndexRequested
+            ? ["이어서 뜨는 이용 동의 창의 '확인'을 한 번 누릅니다 (내보내기를 실제로 실행시키는 누름입니다)."]
+            : []),
+          ...(diagnoseSaveDownload ? ["내려받아진 파일 하나를 이 컴퓨터에 저장하고 검사합니다."] : []),
+          ...(diagnoseUpload ? ["저장된 파일을 로컬 SellerOps 백엔드로 업로드합니다 (리뷰 데이터가 DB에 적재됩니다)."] : []),
+          ...(diagnoseWriteStatus ? ["그 결과를 수집 상태 기록에 남깁니다."] : []),
+        ],
+        stillWillNot: diagnoseSaveDownload
+          ? "다른 컨트롤을 누르거나, 화면의 값을 읽거나, 외부로 무엇도 보내지 않습니다."
+          : "파일을 저장하거나, 업로드하거나, 상태를 기록하지 않습니다.",
+      });
+      if (!allowedDiagnostic) {
+        console.error(actionBarrierRefusedMessage("EXPORT_TRIGGER"));
+        console.log(barrierRefusedRecord("EXPORT_TRIGGER"));
+        log("capture.aborted", { reason: "no-operator-confirmation-diagnostic" });
+        process.exitCode = 7;
         return;
       }
       // 7b-fast) SUPERVISED-FAST (override only): the HTML `EXPORT_TARGET_EMPTY` readiness is a
@@ -837,6 +904,28 @@ async function main(): Promise<void> {
       return;
     }
 
+    // **ACTION BARRIER 2 — the capture chain.** One press, and the whole chain is disclosed on it: an operator
+    // who allows "click the export control" and then finds a file on their disk and rows in a database has been
+    // told less than they agreed to. Everything before this line was reading; nothing before it acted.
+    const allowedCapture = await confirmActionBarrier(confirmHost, {
+      kind: "EXPORT_TRIGGER",
+      title: "리뷰 내보내기",
+      headline: "지금 화면의 내보내기 컨트롤을 SellerOps가 한 번 눌러도 될까요?",
+      allows: [
+        "화면에서 하나로 확인된 내보내기 컨트롤을 정확히 한 번 누릅니다.",
+        "그 결과로 내려받아진 파일 하나를 이 컴퓨터에 저장합니다.",
+        "저장된 파일을 로컬 SellerOps 백엔드로 업로드합니다 (리뷰 데이터가 DB에 적재됩니다).",
+        "그 결과를 수집 상태 기록에 남깁니다.",
+      ],
+      stillWillNot: "다른 컨트롤을 누르거나, 화면의 값을 읽거나, 외부로 무엇도 보내지 않습니다.",
+    });
+    if (!allowedCapture) {
+      console.error(actionBarrierRefusedMessage("EXPORT_TRIGGER"));
+      console.log(barrierRefusedRecord("EXPORT_TRIGGER"));
+      log("capture.aborted", { reason: "no-operator-confirmation-export" });
+      process.exitCode = 7;
+      return;
+    }
     await captureAndUpload(page, cfg, now);
   } finally {
     await ctx.close();
