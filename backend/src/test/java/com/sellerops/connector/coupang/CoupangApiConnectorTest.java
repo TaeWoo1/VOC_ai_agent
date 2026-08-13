@@ -56,6 +56,9 @@ class CoupangApiConnectorTest {
     private final CoupangOrdersClient ordersClient =
             new CoupangOrdersClient(http, new CoupangSigner(clock), clock, "https://api-gateway.coupang.com",
                     TEST_APPROVAL_ID);
+    private final CoupangInquiriesClient inquiriesClient =
+            new CoupangInquiriesClient(http, new CoupangSigner(clock), clock,
+                    "https://api-gateway.coupang.com", TEST_APPROVAL_ID);
     private final String masterKey = randomKeyBase64();
 
     private CredentialVault vault;
@@ -64,7 +67,7 @@ class CoupangApiConnectorTest {
     @BeforeEach
     void setUp() {
         vault = vaultWithKey(masterKey);
-        connector = new CoupangApiConnector(ordersClient, vault);
+        connector = new CoupangApiConnector(ordersClient, inquiriesClient, vault);
     }
 
     private CredentialVault vaultWithKey(String masterKeyBase64) {
@@ -124,8 +127,10 @@ class CoupangApiConnectorTest {
 
     @Test
     void unsupportedDataTypesThrowWithZeroHttp() {
+        // REVIEW stays here deliberately: Coupang publishes no seller review API, so this is the
+        // assertion that a later "just add REVIEW too" cannot pass without confronting that fact.
         for (DataType dataType : new DataType[] {
-                DataType.REVIEW, DataType.INQUIRY, DataType.PRODUCT, DataType.SALES}) {
+                DataType.REVIEW, DataType.PRODUCT, DataType.SALES}) {
             assertThatThrownBy(() -> connector.fetch(request(dataType)))
                     .isInstanceOf(UnsupportedDataTypeException.class);
         }
@@ -136,11 +141,16 @@ class CoupangApiConnectorTest {
     }
 
     @Test
-    void capabilitiesExposeOrderSummaryOnly() {
+    void capabilitiesExposeTheTwoReadOnlyStreamsAtTheirOwnConfidence() {
         var capabilities = connector.capabilities("COUPANG");
         assertThat(capabilities.connectorClass()).isEqualTo("API");
-        assertThat(capabilities.supportedDataTypes()).containsExactly(DataType.ORDER_SUMMARY);
+        assertThat(capabilities.supportedDataTypes())
+                .containsExactlyInAnyOrder(DataType.ORDER_SUMMARY, DataType.INQUIRY);
         assertThat(capabilities.verificationStatus()).containsEntry(DataType.ORDER_SUMMARY, "CONFIRMED");
+        // **INQUIRY is NOT CONFIRMED by having been written.** Only a gated live run on a real
+        // account promotes it; until then the UI must never render it as supported.
+        assertThat(capabilities.verificationStatus()).containsEntry(DataType.INQUIRY, "NEEDS_VERIFICATION");
+        assertThat(capabilities.supports(DataType.REVIEW)).isFalse();
         assertThat(connector.dedicatedChannels()).containsExactly("COUPANG");
         assertThat(connector.kind()).isEqualTo("COUPANG_API");
         // Honest boundary: no Coupang review API.
@@ -158,7 +168,7 @@ class CoupangApiConnectorTest {
     @Test
     void closedVaultFailsClosedWithZeroHttp() {
         storeCoupangCredential();
-        CoupangApiConnector keylessConnector = new CoupangApiConnector(ordersClient, vaultWithKey(""));
+        CoupangApiConnector keylessConnector = new CoupangApiConnector(ordersClient, inquiriesClient, vaultWithKey(""));
 
         assertThatThrownBy(() -> keylessConnector.fetch(request(DataType.ORDER_SUMMARY)))
                 .isInstanceOf(IllegalStateException.class)
@@ -199,9 +209,18 @@ class CoupangApiConnectorTest {
         // not a credential gate — is what stops it.
         CoupangOrdersClient unarmed = new CoupangOrdersClient(
                 http, new CoupangSigner(clock), clock, "https://api-gateway.coupang.com", "");
-        CoupangApiConnector unarmedConnector = new CoupangApiConnector(unarmed, vault);
+        CoupangInquiriesClient unarmedInquiries = new CoupangInquiriesClient(
+                http, new CoupangSigner(clock), clock, "https://api-gateway.coupang.com", "");
+        CoupangApiConnector unarmedConnector =
+                new CoupangApiConnector(unarmed, unarmedInquiries, vault);
 
         assertThatThrownBy(() -> unarmedConnector.fetch(request(DataType.ORDER_SUMMARY)))
+                .isInstanceOf(CoupangLiveApprovalRequiredException.class);
+        assertThat(http.sent).isEmpty();
+
+        // The inquiry stream is a SECOND client with its own transport method — the guard has to be at
+        // both choke points, not just the one the order path happens to use.
+        assertThatThrownBy(() -> unarmedConnector.fetch(request(DataType.INQUIRY)))
                 .isInstanceOf(CoupangLiveApprovalRequiredException.class);
         assertThat(http.sent).isEmpty();
 
