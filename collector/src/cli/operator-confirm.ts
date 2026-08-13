@@ -170,7 +170,8 @@ export function buildOperatorConfirmArmScript(ask: OperatorConfirmAsk & { readon
   }
   var note = mk(
     "div",
-    "이 버튼을 직접 누르셔야만 다음 단계로 넘어갑니다. 대화창에 'ready'라고 쓰거나 터미널에서 파일을 만드는 것으로는 진행되지 않습니다.",
+    "이 버튼을 직접 누르셔야만 다음 단계로 넘어갑니다. 대화창에 'ready'라고 쓰거나 터미널에서 파일을 만드는 것으로는 진행되지 않습니다. " +
+      "이 탭은 SellerOps 전용 화면입니다 — 여기서 다른 주소로 이동하지 마세요. 쿠팡(윙)은 옆 탭에서 진행하시면 됩니다.",
     "margin:20px 0 10px;color:#7d8590;font-size:13px"
   );
   var btn = d.createElement("button");

@@ -248,7 +248,13 @@ describe("the in-page scripts", () => {
 
   it("tells the operator, in the surface itself, that chat text does not advance the run", () => {
     expect(arm).toContain("직접 누르셔야만");
-    expect(arm).toContain("ready");
+    expect(arm).toContain("'ready'");
+  });
+
+  it("…and that this tab must not be navigated", () => {
+    // The surface paints itself onto whatever document the tab holds, and the host refuses to arm a navigated
+    // one — which is fail-closed but costs a live sitting. Saying so is cheaper than halting.
+    expect(arm).toContain("다른 주소로 이동하지 마세요");
   });
 
   it("carries the ask's copy verbatim, so the button is pressed against the instruction it belongs to", () => {

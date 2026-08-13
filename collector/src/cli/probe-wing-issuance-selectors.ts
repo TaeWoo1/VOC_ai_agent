@@ -1540,6 +1540,11 @@ export function recordAbortPathFor(statusFile: string): string {
 }
 
 const CONFIRM_POLL_MS = 500;
+/**
+ * The ONLY document the confirmation surface may be armed on. A fresh `newPage()` is `about:blank`, and it stays
+ * that way because nothing in this run navigates it — so any other value means the tab is not ours any more.
+ */
+const CONFIRM_SURFACE_URL = "about:blank";
 const RECORD_WAIT_TIMEOUT_MS = 20 * 60_000; // generous budget for a manual login + navigate to the issuance page
 
 function mintRunId(): string {
@@ -1897,8 +1902,25 @@ async function main(): Promise<void> {
     on: (event: "close", handler: () => void) => ctx.on(event, handler),
   };
   const driver = new CoupangWingIssuanceDriver(entry, { context: wingPages });
-  const evalOnConfirmPage = (script: string): Promise<unknown> =>
-    (confirmPage as unknown as { evaluate<T>(s: string): Promise<T> }).evaluate<unknown>(script);
+  /**
+   * **The confirmation tab is PINNED to the blank document it was opened on.**
+   *
+   * The arm script is self-mounting: it paints itself onto whatever document the tab holds. Nothing stops the
+   * operator from typing a URL into that tab — and the first arming raises it to the front at exactly the moment
+   * the printed ask says "log in and reach the 키 발급 page yourself", which is when someone would. Arming after
+   * that would restyle a LIVE MARKETPLACE PAGE and rewrite its title, retiring this recorder's standing claim
+   * that it adds nothing to WING, in a run whose manifest promised precisely that.
+   *
+   * So the tab is checked rather than trusted, on every evaluation. A navigated tab throws, which the caller
+   * reads as `UI_NOT_ARMED` and fails the wait closed — the run stops instead of painting on the seller's page.
+   */
+  const evalOnConfirmPage = (script: string): Promise<unknown> => {
+    const url = confirmPage.url();
+    if (url !== CONFIRM_SURFACE_URL) {
+      return Promise.reject(new Error("the confirmation tab is no longer the SellerOps surface"));
+    }
+    return (confirmPage as unknown as { evaluate<T>(s: string): Promise<T> }).evaluate<unknown>(script);
+  };
   const confirmSeams: OperatorConfirmSeams = {
     evaluate: evalOnConfirmPage,
     aborted: () => abortFlag.v || existsSync(abortPath),

@@ -190,6 +190,17 @@ describe("the confirmation surface is separate from the page being measured", ()
     expect(CODE).toContain("onArmed: () => (confirmPage as unknown as { bringToFront(): Promise<void> }).bringToFront()");
   });
 
+  it("the surface is PINNED to its blank document — a navigated tab is refused, not painted on", () => {
+    // The arm script is self-mounting, so it will paint onto whatever document the tab holds. The first arming
+    // raises that tab at the exact moment the ask says "log in and reach the 키 발급 page yourself", which is
+    // when an operator would type a URL into it. Arming after that would restyle a live marketplace page and
+    // rewrite its title — retiring the claim the manifest was granted against.
+    expect(CODE).toContain('const CONFIRM_SURFACE_URL = "about:blank"');
+    expect(CODE).toContain("if (url !== CONFIRM_SURFACE_URL)");
+    // Rejecting (not returning null) is what makes the arm read UI_NOT_ARMED and the wait fail closed.
+    expect(CODE).toContain("the confirmation tab is no longer the SellerOps surface");
+  });
+
   it("a fresh token is minted per wait, inside the seam", () => {
     const seam = SOURCE.slice(SOURCE.indexOf("awaitOperatorConfirmation: async (ask)"));
     expect(seam.slice(0, seam.indexOf("},"))).toContain("token: mintOperatorConfirmToken()");
