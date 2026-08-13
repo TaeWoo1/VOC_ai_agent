@@ -1310,6 +1310,56 @@ export const COUPANG_WING_CREDENTIAL_HANDOFF_SCOPE = Object.freeze({
     "1 operator-confirmed credential read + 1 handoff to the SellerOps backend + 1 read-only connection check",
 });
 
+/**
+ * **What the operator is actually agreeing to, field by field.**
+ *
+ * The scope sentence above says what the run DOES. This says what is true of the credential while it does it —
+ * the eight facts a person needs in order to give informed consent to a run that reads their API keys, and the
+ * eight a reviewer needs in order to check that the code still matches the promise.
+ *
+ * They are on the MANIFEST rather than in the preflight's prose because prose is not checkable. Every field
+ * here is asserted against the shipping code by an offline test, so a promise that stops being true breaks a
+ * test rather than quietly staying on the screen.
+ */
+export const COUPANG_WING_CREDENTIAL_HANDOFF_DISCLOSURE = Object.freeze({
+  /** WHICH account. The opaque slot, resolved server-side; the seller-account id never leaves the backend. */
+  accountBinding:
+    "SELLEROPS_ACCOUNT_SLOT (opaque 24-hex account slot). The slot SELECTS; the JWT AUTHORIZES — the backend " +
+    "resolves it inside the caller's org, and a slot from another org reads as absent. Refuses if unset.",
+  /** HOW MANY times a value is read. One, and the code has exactly one call site for it. */
+  credentialReadBudget:
+    "ONE read, once, for all three fields together. Not a poll, not a retry, not a per-field sequence — one " +
+    "in-page call behind the operator's CREDENTIAL_REVEAL press, and one POST.",
+  /** WHERE the values go. Straight to the seller's own backend, over loopback, with no stop in between. */
+  transport:
+    "Agent → the seller's own SellerOps backend, directly: one POST to /api/agent/credential-handoff over a " +
+    "screened loopback origin. No intermediary, no third party, and no assistant/LLM context at any point.",
+  /** WHERE the values are NOT. The list is exhaustive by construction — a source sweep pins it. */
+  noPersistence:
+    "Never written to stdout/stderr, a log line, telemetry, a screenshot, a fixture, a file, the clipboard, " +
+    "localStorage/sessionStorage, or an assistant's context. The plaintext exists in one function's scope and " +
+    "is dropped when it returns (JS strings cannot be zeroed — that is stated, not claimed otherwise).",
+  /** WHAT the backend does with them. The existing vault path, unchanged. */
+  storage:
+    "The EXISTING credential vault: envelope encryption (a per-credential DEK wrapped by the master key), via " +
+    "the same validator and the same store the operator's own form uses. No second storage path exists.",
+  /** The two outcomes are reported SEPARATELY, because one can be true while the other is not. */
+  storedVerifiedSeparation:
+    "`stored` and `connectionStatus` are separate fields. A credential that is stored but whose check could " +
+    "not run reports stored:true + UNVERIFIED — never a fabricated success, and never 'nothing was stored' " +
+    "when something was.",
+  /** The verification is a READ. It changes nothing on the marketplace. */
+  verification:
+    "A read-only Coupang API call (the same connection check the operator's own button runs). No order, " +
+    "product, shipping or inventory write; nothing is issued, changed or deleted on the marketplace.",
+  /** What happens if it goes wrong — stated BEFORE the run rather than discovered during it. */
+  failurePolicy:
+    "It NEVER overwrites: an account with a credential already stored is refused before the vault is touched. " +
+    "A refusal before the store leaves the run's one handoff unspent and retryable. Once stored, the arming " +
+    "is spent — a failed verification does not hand it back; re-check the connection, or replace the " +
+    "credential through the renewal path, which is atomic and has rollback.",
+});
+
 export const WING_RUN_GRANT_SUMMARY =
   " 실행은 SellerOps가 함께 여는 'SellerOps 확인' 탭에서 이 승인 내용(채널·계정·화면·작업·모드·허용 동작)을 " +
   "다시 보여 드리고, 그 버튼을 직접 누르셔야만 시작됩니다. 대화창의 한 줄이나 터미널 옵션만으로는 시작되지 않습니다.";
@@ -1831,6 +1881,15 @@ export interface ApprovalManifest {
    * press is not key creation, and that the runtime cannot prove no key was created.
    */
   operatorRevealAction?: OperatorRevealAction;
+  /**
+   * CREDENTIAL_READ only: the eight facts about the seller's values that an operator needs in order to give
+   * informed consent — where they go, how many times they are read, what is never written down, how they are
+   * stored, how the two outcomes are reported, what the verification is, and what happens if it fails.
+   *
+   * On the MANIFEST rather than in the preflight's prose because prose is not checkable. Absent on every phase
+   * that reads no value, which is every other phase.
+   */
+  credentialHandoffDisclosure?: typeof COUPANG_WING_CREDENTIAL_HANDOFF_DISCLOSURE;
   expiresAt: "process-lifetime";
   gitSha: string;
 }
@@ -2283,6 +2342,12 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
     ...(spec.guidedWalkBoundary ? { guidedWalkBoundary: spec.guidedWalkBoundary } : {}),
     ...(spec.requiresOperatorRevealAction && spec.operatorRevealAction
       ? { operatorRevealAction: spec.operatorRevealAction }
+      : {}),
+    // Keyed off the MODE, not the phase name. `CREDENTIAL_READ` is the one posture that holds a seller's
+    // values, so any phase that ever carries it discloses what happens to them — a new credential phase cannot
+    // be added without the disclosure coming with it.
+    ...(spec.mode === "CREDENTIAL_READ"
+      ? { credentialHandoffDisclosure: COUPANG_WING_CREDENTIAL_HANDOFF_DISCLOSURE }
       : {}),
     expiresAt: "process-lifetime",
     gitSha: input.gitSha,

@@ -48,33 +48,33 @@ TOKEN="$(curl -s --max-time 8 -X POST -H 'Content-Type: application/json' \
 
 ACCOUNTS="$(curl -s --max-time 8 -H "Authorization: Bearer $TOKEN" "$BACKEND_ORIGIN/api/seller-accounts" 2>/dev/null)"
 [ -n "$ACCOUNTS" ] || die "the seller-account list came back empty at the transport level."
+# The account list carries a channelId and a display name, not a channel CODE — so the code is resolved from
+# the channel list and matched by id. Matching the Korean display name instead would tie which account a
+# credential lands on to a string that exists to be shown to people.
+CHANNELS="$(curl -s --max-time 8 -H "Authorization: Bearer $TOKEN" "$BACKEND_ORIGIN/api/channels" 2>/dev/null)"
+[ -n "$CHANNELS" ] || die "the channel list came back empty at the transport level."
 
-# The Coupang account, by channel code. `python3` is already a hard dependency of the preflight, and a JSON
-# array is not something to parse with `sed` when picking WHICH account a credential lands on.
-ACCOUNT_ID="$(printf '%s' "$ACCOUNTS" | python3 -c '
+# EXACTLY one, or nothing. `python3` is already a hard dependency of the preflight, and a JSON array is not
+# something to parse with `sed` when picking WHICH account a credential lands on.
+READ='
 import json, sys
+want = sys.argv[1]
+accounts_raw, channels_raw = sys.stdin.read().split("\x00", 1)
 try:
-    rows = json.load(sys.stdin)
+    accounts, channels = json.loads(accounts_raw), json.loads(channels_raw)
 except Exception:
-    sys.exit(0)
-want = "'"$WANT_CHANNEL"'"
-ids = [r.get("id") for r in rows if isinstance(r, dict) and r.get("channelCode") == want]
-# EXACTLY one, or nothing. Two Coupang accounts on a proof org means a human has to say which — picking the
-# first would be this script guessing which connection the seller\x27s key belongs to.
-print(ids[0] if len(ids) == 1 else "")
-' 2>/dev/null)"
-
-if [ -z "$ACCOUNT_ID" ]; then
-  COUNT="$(printf '%s' "$ACCOUNTS" | python3 -c '
-import json, sys
-try:
-    rows = json.load(sys.stdin)
-except Exception:
-    print("?"); sys.exit(0)
-print(sum(1 for r in rows if isinstance(r, dict) and r.get("channelCode") == "'"$WANT_CHANNEL"'"))
-' 2>/dev/null)"
-  die "expected exactly ONE $WANT_CHANNEL seller account on this org, found ${COUNT:-?}. Create one in the UI, or remove the extras — this script will not choose which account a credential lands on."
-fi
+    print("PARSE_FAILED"); sys.exit(0)
+ids = {c.get("id") for c in channels if isinstance(c, dict) and c.get("code") == want}
+mine = [a.get("id") for a in accounts if isinstance(a, dict) and a.get("channelId") in ids]
+print(mine[0] if len(mine) == 1 else "COUNT=%d" % len(mine))
+'
+FOUND="$(printf '%s\x00%s' "$ACCOUNTS" "$CHANNELS" | python3 -c "$READ" "$WANT_CHANNEL" 2>/dev/null)"
+case "$FOUND" in
+  PARSE_FAILED|"") die "could not read the account/channel lists from $BACKEND_ORIGIN." ;;
+  COUNT=1) ;;
+  COUNT=*) die "expected exactly ONE $WANT_CHANNEL seller account on this org, found ${FOUND#COUNT=}. Create one, or remove the extras — this script will not choose which account a credential lands on." ;;
+esac
+ACCOUNT_ID="$FOUND"
 
 SLOT_JSON="$(curl -s --max-time 8 -H "Authorization: Bearer $TOKEN" \
   "$BACKEND_ORIGIN/api/seller-accounts/$ACCOUNT_ID/session-slot" 2>/dev/null)"

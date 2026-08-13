@@ -265,6 +265,34 @@ else
   echo "    • SellerOps does not press 발급 or 확인, types nothing, and creates or deletes no key. You issued it."
   echo "    • If the screen does not resolve unambiguously, it refuses and reads nothing — enter the keys yourself."
   echo "    • It will NOT overwrite a credential you already have stored; that is the separate renewal path."
+  echo
+  # The EIGHT disclosures, read out of the prepared manifest rather than re-typed here. A second copy of these
+  # sentences in shell is a second thing that can stop matching the code they describe.
+  echo "  WHAT IS TRUE OF YOUR KEYS (from the manifest, not from this script):"
+  python3 -c '
+import json, sys, textwrap
+LABELS = [
+    ("accountBinding", "저장 대상 계정"),
+    ("credentialReadBudget", "읽기 횟수"),
+    ("transport", "전달 경로"),
+    ("noPersistence", "기록 안 함"),
+    ("storage", "저장 방식"),
+    ("storedVerifiedSeparation", "저장/검증 결과"),
+    ("verification", "검증 호출"),
+    ("failurePolicy", "실패 시"),
+]
+d = (json.load(open(sys.argv[1])) or {}).get("credentialHandoffDisclosure")
+if not d:
+    print("    ⚠ the prepared manifest carries NO credential disclosure — do not approve.")
+    sys.exit(0)
+missing = [k for k, _ in LABELS if not d.get(k)]
+if missing:
+    print("    ⚠ the disclosure is incomplete (%s) — do not approve." % ", ".join(missing))
+    sys.exit(0)
+for key, ko in LABELS:
+    for i, line in enumerate(textwrap.wrap(d[key], 96)):
+        print("    %s %s" % (("%-12s ·" % ko) if i == 0 else " " * 14, line))
+' "$MANIFEST_OUT"
 fi
 echo
 echo "  If this manifest is correct and displayed, say the one line that tells the assistant to start it:"
