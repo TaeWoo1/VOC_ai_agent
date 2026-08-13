@@ -38,6 +38,12 @@ APPROVAL_ID="$COUPANG_APPROVAL_ID"
 BACKEND_ORIGIN="${SELLEROPS_BACKEND_ORIGIN:-$COUPANG_BACKEND_ORIGIN}"
 FRONTEND_ORIGIN="${SELLEROPS_FRONTEND_ORIGIN:-$COUPANG_FRONTEND_ORIGIN}"
 DB_ALIAS="$COUPANG_DB_ALIAS"
+# The run kind the bootstrap minted. A run env without one predates the split and is `orders`.
+RUN_KIND="${COUPANG_RUN_KIND:-orders}"
+case "$RUN_KIND" in
+  orders|inquiries|inquiries-dedupe) ;;
+  *) echo "PREFLIGHT FAIL — run env carries an unknown kind '$RUN_KIND'. Re-bootstrap."; exit 1 ;;
+esac
 # The prefix length the backend surfaces (must match CoupangSetupView.LiveApprovalReadiness.PREFIX_LENGTH).
 APPROVAL_PREFIX_LEN=12
 EXPECTED_PREFIX="${APPROVAL_ID:0:$APPROVAL_PREFIX_LEN}"
@@ -99,11 +105,40 @@ CUR_GIT="$(git -C "$HERE" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 [ "$CUR_GIT" = "$RUN_GIT" ] && pass "git commit unchanged since bootstrap ($CUR_GIT)" \
   || fail "git commit changed ($RUN_GIT → $CUR_GIT) — re-bootstrap the run"
 
-# 6. Pristine baseline — a live proof starts from zero so the counts it records are unambiguous.
+# 6. Expected baseline — a live proof starts from a KNOWN state so the counts it records are unambiguous.
+#    The two kinds expect different states, and each is checked exactly, never loosely:
+#      orders     — nothing yet: the run creates the account, stores the credential, and collects.
+#      inquiries  — exactly one connected Coupang account with its credential already stored (the handoff
+#                   ran first), and NO inquiry yet, so every inquiry that appears came from this run.
 CREDS="$(q 'select count(*) from connector_credentials')"; SYNCS="$(q 'select count(*) from sync_jobs')"
 ORDERS="$(q 'select count(*) from channel_orders')"; COUPANG_ACCTS="$(coupang_accts)"
-if [ -z "$CREDS$SYNCS$ORDERS$COUPANG_ACCTS" ]; then
-  fail "could not query the disposable DB ($PGHOST:$PGPORT/$PGDATABASE)"; CREDS="?"; SYNCS="?"; ORDERS="?"; COUPANG_ACCTS="?"
+INQUIRIES="$(q 'select count(*) from inquiries')"; WORKITEMS="$(q 'select count(*) from inquiry_work_item')"
+if [ -z "$CREDS$SYNCS$ORDERS$COUPANG_ACCTS$INQUIRIES$WORKITEMS" ]; then
+  fail "could not query the disposable DB ($PGHOST:$PGPORT/$PGDATABASE)"
+  CREDS="?"; SYNCS="?"; ORDERS="?"; COUPANG_ACCTS="?"; INQUIRIES="?"; WORKITEMS="?"
+elif [ "$RUN_KIND" = "inquiries-dedupe" ]; then
+  # The idempotency re-run inverts the usual baseline: it needs rows to ALREADY be there, because the
+  # property under test is that re-collecting them changes nothing. The count is captured here and
+  # printed in the manifest as the number the run must leave untouched.
+  echo "  baseline: credentials=$CREDS coupang_accounts=$COUPANG_ACCTS inquiries=$INQUIRIES work_items=$WORKITEMS"
+  { [ "$CREDS" = 1 ] && [ "$COUPANG_ACCTS" = 1 ]; } \
+    && pass "exactly one connected Coupang account with a stored credential" \
+    || fail "needs exactly ONE Coupang account with ONE stored credential"
+  [ "${INQUIRIES:-0}" -gt 0 ] 2>/dev/null \
+    && pass "$INQUIRIES inquiry row(s) already collected — there is something to re-collect" \
+    || fail "no inquiry collected yet — run the acquisition proof first; there is nothing to dedupe against"
+  CURSOR="$(q "select count(*) from sync_cursors where data_type='INQUIRY'")"
+  [ "${CURSOR:-0}" -gt 0 ] 2>/dev/null \
+    && pass "an INQUIRY cursor exists (the run's first action clears it to re-sweep the same window)" \
+    || fail "no INQUIRY cursor — the previous acquisition run did not complete"
+elif [ "$RUN_KIND" = "inquiries" ]; then
+  echo "  baseline: credentials=$CREDS coupang_accounts=$COUPANG_ACCTS inquiries=$INQUIRIES work_items=$WORKITEMS"
+  { [ "$CREDS" = 1 ] && [ "$COUPANG_ACCTS" = 1 ]; } \
+    && pass "exactly one connected Coupang account with a stored credential" \
+    || fail "inquiry proof needs exactly ONE Coupang account with ONE stored credential (run the credential handoff first)"
+  { [ "$INQUIRIES" = 0 ] && [ "$WORKITEMS" = 0 ]; } \
+    && pass "no inquiry collected yet (every row this run records is its own)" \
+    || fail "inquiries/work items already present — reset the disposable DB so the counts are unambiguous"
 else
   echo "  baseline: credentials=$CREDS sync_jobs=$SYNCS channel_orders=$ORDERS coupang_accounts=$COUPANG_ACCTS"
   { [ "$CREDS" = 0 ] && [ "$SYNCS" = 0 ] && [ "$ORDERS" = 0 ] && [ "$COUPANG_ACCTS" = 0 ]; } \
@@ -114,9 +149,28 @@ fi
 # mode=WRITE per docs/sellerops_live_approval_contract.md §7: credential entry + connection test + first sync
 # is a WRITE-class step (it writes a credential + account + sync state to OUR system). Every Coupang
 # MARKETPLACE call in this run is a read-only GET — no order/shipping/product mutation.
-APPROVAL_OPERATION="${SELLEROPS_APPROVAL_OPERATION:-guided first-connection + order-routine read-only proof (credential + connect-test + first ORDER_SUMMARY sync + idempotent re-sync)}"
+if [ "$RUN_KIND" = "inquiries-dedupe" ]; then
+  # mode=WRITE for the same reason: sync state is written to OUR system. The ONLY local write outside the
+  # sync itself is the cursor delete named below — no inquiry, work item, product or credential row is
+  # touched by hand, and the whole point of the run is that the sync does not change them either.
+  APPROVAL_OPERATION="${SELLEROPS_APPROVAL_OPERATION:-INQUIRY idempotency proof: clear the INQUIRY cursor on this account, re-sweep the SAME 30-day window, and prove the re-collected rows are skipped rather than duplicated}"
+  APPROVAL_MAX="${SELLEROPS_APPROVAL_MAX:-cursor delete=1 (INQUIRY, this account), re-sync=1, expected inserted=0 / skipped=$INQUIRIES, replies posted=0}"
+elif [ "$RUN_KIND" = "inquiries" ]; then
+  # Still mode=WRITE: the first sync writes collection state to OUR system (contract §7 lists
+  # "first sync" as WRITE-class). Every Coupang MARKETPLACE call is a read-only GET.
+  #
+  # **The guided reply entry is included, and the reply is deliberately NOT posted.** Bundling the
+  # verifications into one run is the point — but a posted reply is a real answer to a real buyer on a
+  # live account, and that is the seller's product decision, not a proof artifact. The run reaches the
+  # submit barrier, shows the draft, and is cancelled there. Posting for real is its own decision on
+  # its own day.
+  APPROVAL_OPERATION="${SELLEROPS_APPROVAL_OPERATION:-상품별 고객문의 acquisition + routine proof (first INQUIRY sync + idempotent re-sync + work queue/proposal/draft + guided reply ENTRY, no reply posted)}"
+  APPROVAL_MAX="${SELLEROPS_APPROVAL_MAX:-sync=1, re-sync=1, guided-entry=1, replies posted=0 (cancelled at the submit barrier)}"
+else
+  APPROVAL_OPERATION="${SELLEROPS_APPROVAL_OPERATION:-guided first-connection + order-routine read-only proof (credential + connect-test + first ORDER_SUMMARY sync + idempotent re-sync)}"
+  APPROVAL_MAX="${SELLEROPS_APPROVAL_MAX:-credential=1, test=1, sync=1, re-sync=1}"
+fi
 APPROVAL_ACCOUNT="${SELLEROPS_APPROVAL_ACCOUNT:-operator-owned Coupang WING vendor (test)}"
-APPROVAL_MAX="${SELLEROPS_APPROVAL_MAX:-credential=1, test=1, sync=1, re-sync=1}"
 # Sanitized account binding only — fail closed if an override looks like a raw id/token (contract §2).
 if printf '%s' "$APPROVAL_ACCOUNT" | grep -Eq '^[0-9]{4,}$|^[0-9a-fA-F]{16,}$'; then
   echo "PREFLIGHT FAIL: SELLEROPS_APPROVAL_ACCOUNT looks like a raw id/token — the manifest carries only a sanitized description."
@@ -133,7 +187,8 @@ if [ "$FAILED" = "0" ]; then
   "runId": "$RUN_ID",
   "gitCommit": "$CUR_GIT",
   "channel": "COUPANG",
-  "surface": "connect/coupang",
+  "runKind": "$RUN_KIND",
+  "surface": "$( [ "$RUN_KIND" = "inquiries" ] && echo "operations inbox + guided WING inquiry window" || echo "connect/coupang" )",
   "operation": "$APPROVAL_OPERATION",
   "mode": "WRITE",
   "accountBinding": "$APPROVAL_ACCOUNT",
@@ -165,6 +220,17 @@ JSON
   echo "  Standing Safety Contract + full scope: docs/sellerops_live_approval_contract.md"
   echo
   echo "  All Coupang MARKETPLACE calls in this run are read-only GETs — no order/shipping/product write."
+  if [ "$RUN_KIND" = "inquiries-dedupe" ]; then
+    echo "  The run FIRST deletes exactly one row: this account's INQUIRY sync cursor. Nothing else is"
+    echo "  hand-modified. Then one sync re-sweeps the same 30 days. PASS = inserted 0, skipped $INQUIRIES,"
+    echo "  failed 0, inquiries still $INQUIRIES, work items still $WORKITEMS. Any insert is a dedupe FAILURE."
+    echo "  onlineInquiries ONLY — the PII-bearing callCenterInquiries endpoint is never called."
+  fi
+  if [ "$RUN_KIND" = "inquiries" ]; then
+    echo "  The inquiry stream calls onlineInquiries ONLY. The PII-bearing callCenterInquiries endpoint"
+    echo "  (buyerEmail / buyerPhone) is never called, and no buyer identity is stored or displayed."
+    echo "  NO reply is posted: the guided run stops at the submit barrier and is cancelled there."
+  fi
   echo "  If this manifest is correct and displayed, the operator's entire single-use grant is one line:"
   echo "    Seated and ready."
   echo "  (Re-bootstrap ⇒ new approval id ⇒ old approval is dead. A code/branch/run/scope change ⇒ REVOKED.)"

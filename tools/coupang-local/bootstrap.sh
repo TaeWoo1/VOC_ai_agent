@@ -14,6 +14,24 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN_DIR="$HERE/.run"
 RUN_ENV="$RUN_DIR/current.env"
 
+# Which proof this run is for. It is bound into the run env, so a grant for one is never a grant for the
+# other: preflight refuses a kind that is not its own, and each kind has its OWN expected DB baseline —
+# `orders` starts from nothing, `inquiries` starts from an already-connected account. Unlike the credential
+# bootstrap (where omission would reach the more dangerous run), both kinds here are read-only marketplace
+# GETs, so `orders` stays the default and the existing documented flow is unchanged.
+KIND="${1:-orders}"
+case "$KIND" in
+  orders)
+    KIND_WHAT="first connection + ORDER_SUMMARY routine (starts from an empty DB)" ;;
+  inquiries)
+    KIND_WHAT="상품별 고객문의 acquisition + routine (starts from a CONNECTED account with a stored credential)" ;;
+  inquiries-dedupe)
+    KIND_WHAT="re-sweep the SAME window to prove idempotency (starts from an account that has already collected)" ;;
+  *)
+    echo "BOOTSTRAP FAIL — unknown run kind '$KIND'. Use 'orders', 'inquiries' or 'inquiries-dedupe'."
+    exit 1 ;;
+esac
+
 RUN_ID="cp-$(openssl rand -hex 6)"
 APPROVAL_ID="apr-$(openssl rand -hex 6)"
 GIT_COMMIT="$(git -C "$HERE" rev-parse --short HEAD 2>/dev/null || echo unknown)"
@@ -30,6 +48,7 @@ COUPANG_GIT_COMMIT=$GIT_COMMIT
 COUPANG_DB_ALIAS=$DB_ALIAS
 COUPANG_BACKEND_ORIGIN=$BACKEND_ORIGIN
 COUPANG_FRONTEND_ORIGIN=$FRONTEND_ORIGIN
+COUPANG_RUN_KIND=$KIND
 ENV
 
 echo "coupang live-proof bootstrap complete → $RUN_ENV"
@@ -37,6 +56,7 @@ echo
 echo "  run id     : $RUN_ID"
 echo "  approval id: $APPROVAL_ID  (arms the backend live-call interlock; binds the operator grant)"
 echo "  git commit : $GIT_COMMIT"
+echo "  run kind   : $KIND  ($KIND_WHAT)"
 echo "  db alias   : $DB_ALIAS"
 echo "  backend    : $BACKEND_ORIGIN"
 echo "  frontend   : $FRONTEND_ORIGIN"

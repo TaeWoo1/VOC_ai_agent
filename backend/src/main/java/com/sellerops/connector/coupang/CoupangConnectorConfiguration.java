@@ -44,7 +44,19 @@ public class CoupangConnectorConfiguration {
     }
 
     @Bean
-    CoupangApiConnector coupangApiConnector(CoupangOrdersClient ordersClient, CredentialVault vault) {
-        return new CoupangApiConnector(ordersClient, vault);
+    CoupangInquiriesClient coupangInquiriesClient(
+            CoupangHttpClient http, CoupangSigner signer,
+            @Value("${sellerops.connector.coupang.base-url:https://api-gateway.coupang.com}") String baseUrl,
+            @Value("${sellerops.connector.coupang.live-approval-id:}") String liveApprovalId) {
+        // Same base URL and same live-call interlock as the order client — one armed approval covers
+        // the account's read-only collection, and neither stream can reach a real host without it.
+        return new CoupangInquiriesClient(http, signer, Clock.systemUTC(), baseUrl, liveApprovalId);
+    }
+
+    @Bean
+    CoupangApiConnector coupangApiConnector(CoupangOrdersClient ordersClient,
+                                            CoupangInquiriesClient inquiriesClient,
+                                            CredentialVault vault) {
+        return new CoupangApiConnector(ordersClient, inquiriesClient, vault);
     }
 }

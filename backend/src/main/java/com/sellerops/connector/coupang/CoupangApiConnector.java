@@ -23,13 +23,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * The real Coupang WING Open API connector. ORDER_SUMMARY is collectable through the
- * officially documented "PO list query, paging by day" v5 {@code ordersheets} flow (see
- * {@link CoupangOrdersClient}); everything else stays unsupported — REVIEW has no official
- * Coupang API at all, INQUIRY/PRODUCT/SALES are deferred pending their own schema
- * verification. The bean exists only behind {@code sellerops.connector.coupang.enabled=true}
- * ({@link CoupangConnectorConfiguration}); with the flag off, COUPANG keeps resolving to the
- * mock connector and runtime behavior is unchanged.
+ * The real Coupang WING Open API connector. Two streams are collectable, both officially
+ * documented and both read-only: ORDER_SUMMARY through the "PO list query, paging by day" v5
+ * {@code ordersheets} flow ({@link CoupangOrdersClient}), and INQUIRY through the v5
+ * {@code onlineInquiries} 상품별 고객문의 flow ({@link CoupangInquiriesClient}). Everything else
+ * stays unsupported — REVIEW has no official Coupang API at all, PRODUCT/SALES are deferred
+ * pending their own schema verification. The bean exists only behind
+ * {@code sellerops.connector.coupang.enabled=true} ({@link CoupangConnectorConfiguration}); with
+ * the flag off, COUPANG keeps resolving to the mock connector and runtime behavior is unchanged.
  *
  * <p>Fail-closed ordering inside {@code fetch} / {@code verifyConnection}: data-type/route gate
  * → vault open (missing credential / missing master key throw here) → secret-shape check → only
@@ -52,10 +53,13 @@ public class CoupangApiConnector implements PullConnector, ConnectionVerifier {
     private static final Logger log = LoggerFactory.getLogger(CoupangApiConnector.class);
 
     private final CoupangOrdersClient ordersClient;
+    private final CoupangInquiriesClient inquiriesClient;
     private final CredentialVault vault;
 
-    public CoupangApiConnector(CoupangOrdersClient ordersClient, CredentialVault vault) {
+    public CoupangApiConnector(CoupangOrdersClient ordersClient, CoupangInquiriesClient inquiriesClient,
+                               CredentialVault vault) {
         this.ordersClient = ordersClient;
+        this.inquiriesClient = inquiriesClient;
         this.vault = vault;
     }
 
@@ -73,11 +77,19 @@ public class CoupangApiConnector implements PullConnector, ConnectionVerifier {
     public ConnectorCapabilities capabilities(String channelCode) {
         return new ConnectorCapabilities(
                 CONNECTOR_CLASS,
-                Set.of(DataType.ORDER_SUMMARY),
-                Map.of(DataType.ORDER_SUMMARY, "CONFIRMED"),
+                Set.of(DataType.ORDER_SUMMARY, DataType.INQUIRY),
+                // INQUIRY was promoted to CONFIRMED by the live proof of 2026-08-14, not by the code
+                // being written: a real account collected real inquiries through the official v5 path,
+                // and a re-sweep of the same window inserted nothing and skipped every row.
+                // See docs/coupang_inquiry_live_proof_v1.md.
+                Map.of(DataType.ORDER_SUMMARY, "CONFIRMED",
+                        DataType.INQUIRY, "CONFIRMED"),
                 "ORDER_SUMMARY via the official v5 ordersheets day-paging flow"
                         + " (createdAt window ≤31d, per-status sweep, nextToken paging)."
-                        + " REVIEW has no official Coupang API; INQUIRY/PRODUCT/SALES deferred.");
+                        + " INQUIRY via the official v5 onlineInquiries 상품별 고객문의 flow"
+                        + " (inquiryAt window ≤7d, answered-bucket sweep, pageNum paging);"
+                        + " the PII-bearing 고객센터 callCenterInquiries stream is not called."
+                        + " REVIEW has no official Coupang API; PRODUCT/SALES deferred.");
     }
 
     @Override
@@ -91,13 +103,24 @@ public class CoupangApiConnector implements PullConnector, ConnectionVerifier {
 
     @Override
     public FetchPage fetch(FetchRequest request) {
-        if (!CHANNEL_CODE.equals(request.channelCode()) || request.dataType() != DataType.ORDER_SUMMARY) {
+        boolean routable = CHANNEL_CODE.equals(request.channelCode())
+                && (request.dataType() == DataType.ORDER_SUMMARY || request.dataType() == DataType.INQUIRY);
+        if (!routable) {
             throw new UnsupportedDataTypeException(request.channelCode(), request.dataType());
         }
+        // Credentials open once, before either stream's first HTTP call — the fail-closed ordering
+        // is the same for both: no credential, no request.
         Credential credential = openAndValidate(request.orgId(), request.sellerAccountId());
         try {
-            return ordersClient.fetchOrderSummaryPage(
-                    credential.accessKey(), credential.secretKey(), credential.vendorId(), request.cursorValue());
+            return switch (request.dataType()) {
+                case ORDER_SUMMARY -> ordersClient.fetchOrderSummaryPage(
+                        credential.accessKey(), credential.secretKey(), credential.vendorId(),
+                        request.cursorValue());
+                case INQUIRY -> inquiriesClient.fetchInquiryPage(
+                        credential.accessKey(), credential.secretKey(), credential.vendorId(),
+                        request.cursorValue());
+                default -> throw new UnsupportedDataTypeException(request.channelCode(), request.dataType());
+            };
         } catch (CoupangRateLimitedException e) {
             // Cursor unchanged — a throttled attempt must re-request the same window.
             return FetchPage.rateLimited(

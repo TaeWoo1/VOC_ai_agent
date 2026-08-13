@@ -5,11 +5,9 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.JsonDeserializer;
-import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
-import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import com.sellerops.connector.DataType;
 import com.sellerops.connector.FetchPage;
 import com.sellerops.ingest.canonical.CanonicalOrder;
@@ -28,9 +26,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.StringJoiner;
 import java.util.TreeMap;
-import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -108,10 +104,6 @@ public class CoupangOrdersClient {
      */
     private static final String IP_DENIED_MARKER = "not allowed ip";
 
-    private static final List<String> SAFE_ERROR_FIELDS =
-            List.of("code", "message", "errorCode", "error", "errorMessage");
-    private static final int MAX_ERROR_DETAIL = 200;
-
     private final CoupangHttpClient http;
     private final CoupangSigner signer;
     private final Clock clock;
@@ -187,14 +179,14 @@ public class CoupangOrdersClient {
         if (response.statusCode() != 200) {
             throw new IllegalStateException(
                     "쿠팡 주문 목록 조회에 실패했습니다 (HTTP " + response.statusCode() + ")"
-                            + httpErrorDetail(response.body()) + ".");
+                            + CoupangResponseDiagnostics.errorDetail(mapper, response.body()) + ".");
         }
         String body = response.body();
         if (body == null || body.isBlank()) {
             // A 200 with no body can't bind (and would NPE inside readValue, escaping the catch below).
             // Fail closed with a specific, value-free message — length only, never content.
             log.warn("Coupang ordersheets 200-body was empty: contentType={} length={}",
-                    contentTypeFamily(response), body == null ? 0 : body.length());
+                    CoupangResponseDiagnostics.contentTypeFamily(response), body == null ? 0 : body.length());
             throw new IllegalStateException("쿠팡 주문 목록 응답이 비어 있습니다.");
         }
         try {
@@ -204,9 +196,10 @@ public class CoupangOrdersClient {
             // types, object KEY-NAME sets (schema, not values), array counts, the Jackson binding path
             // and target type. No response VALUE, buyer PII, id, secret, header, or raw body is recorded.
             log.warn("Coupang ordersheets 200-body did not fit the envelope: {}",
-                    ordersheetShapeDiagnostic(response, e));
+                    CoupangResponseDiagnostics.shapeDiagnostic(mapper, response, e, "data"));
             throw new IllegalStateException(
-                    "쿠팡 주문 목록 응답을 해석할 수 없습니다" + mappingPathSuffix(e) + ".");
+                    "쿠팡 주문 목록 응답을 해석할 수 없습니다"
+                            + CoupangResponseDiagnostics.mappingPathSuffix(e) + ".");
         }
     }
 
@@ -536,139 +529,6 @@ public class CoupangOrdersClient {
             // Response bodies stay out of messages (order endpoints can carry PII).
             throw new IllegalStateException(failureMessage);
         }
-    }
-
-    /**
-     * A sanitized, length-capped diagnostic for a non-2xx Coupang response — surfaces only the
-     * known scalar error fields ({@link #SAFE_ERROR_FIELDS}); nested objects/arrays, headers,
-     * and the raw body are never included. Returns {@code ""} when nothing safe is parseable.
-     */
-    private String httpErrorDetail(String body) {
-        if (body == null || body.isBlank()) {
-            return "";
-        }
-        try {
-            JsonNode root = mapper.readTree(body);
-            if (root == null || !root.isObject()) {
-                return "";
-            }
-            LinkedHashMap<String, String> picked = new LinkedHashMap<>();
-            for (String field : SAFE_ERROR_FIELDS) {
-                JsonNode value = root.get(field);
-                if (value != null && value.isValueNode() && !value.asText().isBlank()) {
-                    picked.put(field, value.asText());
-                }
-            }
-            if (picked.isEmpty()) {
-                return "";
-            }
-            String detail = picked.entrySet().stream()
-                    .map(e -> e.getKey() + "=" + e.getValue())
-                    .collect(Collectors.joining(", "));
-            if (detail.length() > MAX_ERROR_DETAIL) {
-                detail = detail.substring(0, MAX_ERROR_DETAIL) + "…";
-            }
-            return " [" + detail + "]";
-        } catch (Exception e) {
-            return "";
-        }
-    }
-
-    // --- shape-only parse diagnostics (schema, never values) --------------
-
-    /**
-     * A safe, SHAPE-ONLY description of why a 200 ordersheets body failed to bind — the exact
-     * information needed to correct the DTO without a live re-run leaking anything. It records only:
-     * the response {@code Content-Type} family, the Jackson binding path (field NAMES / array indices)
-     * and target type, the root JSON node type, the root object's KEY-NAME set, the {@code data} node
-     * type and element count, and the first element's KEY-NAME set. Object keys are API schema, not
-     * data. <b>No response value, buyer PII, order id, amount, secret, header, or raw body appears.</b>
-     */
-    private String ordersheetShapeDiagnostic(CoupangHttpClient.Response response, JsonProcessingException cause) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("contentType=").append(contentTypeFamily(response));
-        if (cause instanceof JsonMappingException mapping) {
-            sb.append(" path=").append(mappingPath(mapping));
-            if (cause instanceof MismatchedInputException mismatch && mismatch.getTargetType() != null) {
-                sb.append(" targetType=").append(mismatch.getTargetType().getSimpleName());
-            }
-        }
-        try {
-            JsonNode root = mapper.readTree(response.body());
-            sb.append(" root=").append(nodeType(root));
-            if (root != null && root.isObject()) {
-                sb.append(" rootKeys=").append(fieldNames(root));
-                JsonNode data = root.get("data");
-                sb.append(" data=").append(nodeType(data));
-                if (data != null && data.isArray()) {
-                    sb.append(" dataCount=").append(data.size());
-                    if (!data.isEmpty()) {
-                        sb.append(" itemKeys=").append(fieldNames(data.get(0)));
-                    }
-                }
-            }
-        } catch (Exception ignored) {
-            // Body was not even well-formed JSON; length only (still no content).
-            sb.append(" root=non-json(").append(response.body() == null ? 0 : response.body().length())
-                    .append("chars)");
-        }
-        return sb.toString();
-    }
-
-    /**
-     * The Jackson binding path as a compact {@code field[index].field} string built ONLY from
-     * {@link JsonMappingException.Reference} field names and array indices — never a bound value.
-     * Surfaced (via {@link #mappingPathSuffix}) in the operator-facing error so the failing field is
-     * actionable without the log.
-     */
-    private static String mappingPath(JsonMappingException mapping) {
-        StringBuilder sb = new StringBuilder();
-        for (JsonMappingException.Reference ref : mapping.getPath()) {
-            if (ref.getFieldName() != null) {
-                if (sb.length() > 0) {
-                    sb.append('.');
-                }
-                sb.append(ref.getFieldName());
-            } else if (ref.getIndex() >= 0) {
-                sb.append('[').append(ref.getIndex()).append(']');
-            }
-        }
-        return sb.length() == 0 ? "<root>" : sb.toString();
-    }
-
-    /** The safe {@code (path=…, 타입=…)} suffix for the operator-facing message — names/types only. */
-    private static String mappingPathSuffix(JsonProcessingException cause) {
-        if (!(cause instanceof JsonMappingException mapping)) {
-            return "";
-        }
-        String path = mappingPath(mapping);
-        String type = cause instanceof MismatchedInputException mismatch && mismatch.getTargetType() != null
-                ? ", 타입=" + mismatch.getTargetType().getSimpleName() : "";
-        return " (위치=" + path + type + ")";
-    }
-
-    private static String contentTypeFamily(CoupangHttpClient.Response response) {
-        String raw = response.header("Content-Type").orElse(null);
-        if (raw == null || raw.isBlank()) {
-            return "<none>";
-        }
-        // Media type only (drop any charset/boundary params — never values).
-        int semicolon = raw.indexOf(';');
-        return (semicolon >= 0 ? raw.substring(0, semicolon) : raw).trim();
-    }
-
-    private static String nodeType(JsonNode node) {
-        return node == null ? "absent" : node.getNodeType().name();
-    }
-
-    /** The object's KEY names (schema), never its values. */
-    private static String fieldNames(JsonNode node) {
-        if (node == null || !node.isObject()) {
-            return "[]";
-        }
-        StringJoiner joiner = new StringJoiner(",", "[", "]");
-        node.fieldNames().forEachRemaining(joiner::add);
-        return joiner.toString();
     }
 
     // --- response DTOs (officially confirmed field names only) ------------
