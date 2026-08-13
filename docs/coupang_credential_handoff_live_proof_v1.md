@@ -7,9 +7,10 @@ for the next, and the code enforces the order: `WING_CREDENTIAL_CELLS_CALIBRATED
 | phase | what it does | state |
 |---|---|---|
 | 1. key issuance | the OPERATOR issues a real WING Open API key; the agent guides and reads no value | **PASS 2026-08-13** |
-| 2. cell calibration | READ_ONLY: which cell holds each key, value-free | pending |
-| 3. handoff | one-shot read → vault → read-only verify | blocked on 2 |
-| 4. — | | |
+| 2. cell calibration | READ_ONLY: which cell holds each key, value-free | **PASS 2026-08-13** (3 sittings; 2 refusals were the evidence) |
+| 3. handoff | one-shot read → vault → read-only verify | **PASS 2026-08-13** — `STORED_AND_VERIFIED` |
+
+Both UX defects found in phase 1 (D1, D2) are closed; see their sections below.
 
 Contract: [`coupang_credential_handoff_v1.md`](./coupang_credential_handoff_v1.md).
 Approval contract: [`sellerops_live_approval_contract.md`](./sellerops_live_approval_contract.md) §5c.
@@ -367,3 +368,49 @@ rather than an absence.
 
 **On the sitting-1 data this classifier answers `UNKNOWN`** — a key demonstrably exists on that account, and
 the honest answer is still `UNKNOWN`, because the reading does not establish it. A test pins exactly that.
+
+## Phase 3 — the credential handoff, live (PASS)
+
+**`STORED_AND_VERIFIED`, 2026-08-13.** `wt-9f46f897a8db` / `apr-6fb987d9e72b` at git `e94039cc`,
+`COUPANG_WING_CREDENTIAL_HANDOFF`, mode `CREDENTIAL_READ`, on the operator's own issued screen and their own
+disposable SellerOps backend. This is the first run in the workstream that read a credential value.
+
+### What the run's own record says
+
+| condition | evidence |
+|---|---|
+| read ONLY after a trusted run grant | grant `GRANTED` 15:19:19 → read 15:19:55. Two presses, both `OPERATOR_UI_CONFIRMED`; neither reachable from chat text or a file |
+| calibrated same-row resolver, and only it | `aw_coupang_credential_cells {resolved: true, reason: "OK"}` — the rule measured in phase 2, on the live screen |
+| credential value exposure | **zero.** No token of value shape in the run output, no new or untracked file, no credential-shaped token in the backend log |
+| agent → pinned backend, directly | one POST to the screened loopback origin `:18091`. No intermediary, no assistant context |
+| EMPTY slot → encrypted store, once | slot `credentialPresent: false` before, `true` after; stored through the existing vault path |
+| handoff arming consumed | `armed: false, consumed: true` afterwards — and the id prefixes read `null`, so a spent arming names nothing |
+| plaintext discarded | the values reached no returned field; the record carries digests only |
+| read-only Coupang verification | `connectionStatus: SUCCESS` — the same check the operator's own button runs |
+| stored / verified reported separately | two fields, both true here, which is why the outcome is the combined constant rather than a bare success |
+| no overwrite / reissue / delete | none attempted, and the path is now closed to itself twice over: the arming is spent AND the account holds a credential |
+
+### The evidence block is value-free by construction
+
+Per field: a presence bit, a length **bucket**, a character **class**, and a per-run **salted** digest.
+
+```
+access_key   medium_16_39   alnum_symbol   4af4c7e242c4
+secret_key   long_40_plus   hex_lower      8be3baa41530
+vendor_id    short_1_15     hex_upper      8d05ffaab1d0
+```
+
+The salt is per-run, so these identify nothing across runs and cannot be matched against a later sighting.
+Nobody — operator, reviewer, or assistant — saw a value at any point.
+
+### What this proves, and what it does not
+
+It proves the chain end to end on one account, one screen, one WING variant: grant → structural census →
+barrier press → one read → one POST → encrypted store → read-only verify → value-free record.
+
+It does not prove the refusal paths fire live; those are pinned offline (the whole-set refusals, the interlock's
+seven, the never-overwrite rule) and each fails closed by construction. It also does not prove anything about a
+second handoff, which is now unreachable on this account by design.
+
+**No further live run.** The account holds a credential, so this path refuses itself; a re-proof needs a fresh
+account and a fresh grant.
