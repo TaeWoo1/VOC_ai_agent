@@ -244,15 +244,14 @@ echo
 echo "  That line does NOT authorize the run. The run opens a 'SellerOps 확인' tab, shows you these same"
 echo "  binding fields, and starts ONLY when you press the button on it yourself. No press, no run."
 echo
-echo "  On approval:"
+echo "  On approval — the run env carries the identity, so it must be SOURCED, not just the phase vars:"
+# Printing only the two phase variables is what produced UNBOUND_IDENTITY on the first calibration sitting:
+# the gate reads WALKTHROUGH_RUN_ID / _APPROVAL_ID / _GIT_COMMIT, and those live in the run env alone.
+echo "    cd $COLLECTOR_DIR && set -a && . $RUN_ENV && set +a && \\"
 if [ "$KIND" = "handoff" ]; then
-  echo "    cd $COLLECTOR_DIR && SELLEROPS_APPROVAL_PHASE=$M_PHASE SELLEROPS_WING_APPROVED_PHASE=$M_PHASE \\"
   echo "      SELLEROPS_ACCOUNT_SLOT=\$SELLEROPS_ACCOUNT_SLOT \\"
-  echo "      npx tsx $M_CLI -- --i-understand-this-opens-live-coupang-wing"
-else
-  echo "    cd $COLLECTOR_DIR && SELLEROPS_APPROVAL_PHASE=$M_PHASE SELLEROPS_WING_APPROVED_PHASE=$M_PHASE \\"
-  echo "      npx tsx $M_CLI -- --i-understand-this-opens-live-coupang-wing"
 fi
+echo "      npx tsx $M_CLI -- --i-understand-this-opens-live-coupang-wing"
 echo
 echo "  (Re-bootstrap ⇒ new approval id ⇒ the old approval is dead. A code/branch/run/scope change ⇒ REVOKED.)"
 exit 0
