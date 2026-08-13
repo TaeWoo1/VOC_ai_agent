@@ -120,15 +120,18 @@ import {
 } from "./coupang-wing-classifier";
 import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from "./live-run-approval";
 import {
-  OPERATOR_CONFIRM_BUTTON_LABEL,
   OPERATOR_CONFIRM_PAGE_TITLE,
-  awaitOperatorConfirmation,
-  mintOperatorConfirmToken,
   type OperatorConfirmAsk,
   type OperatorConfirmProvenance,
-  type OperatorConfirmSeams,
   type OperatorConfirmation,
 } from "./operator-confirm";
+import {
+  attachOperatorConfirmTab,
+  printOperatorAsk,
+  withConfirmTail,
+  type ConfirmHostContext,
+  type ConfirmHostPage,
+} from "./operator-confirm-host";
 
 /**
  * A per-run operator signal: proceed, abort the session, or the wait timed out.
@@ -1539,20 +1542,8 @@ export function recordAbortPathFor(statusFile: string): string {
   return resolve(dirname(resolve(statusFile)), RECORD_ABORT_FILENAME);
 }
 
-const CONFIRM_POLL_MS = 500;
-/**
- * The ONLY document the confirmation surface may be armed on. A fresh `newPage()` is `about:blank`, and it stays
- * that way because nothing in this run navigates it — so any other value means the tab is not ours any more.
- */
-const CONFIRM_SURFACE_URL = "about:blank";
-const RECORD_WAIT_TIMEOUT_MS = 20 * 60_000; // generous budget for a manual login + navigate to the issuance page
-
 function mintRunId(): string {
   return `wingrec_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
 }
 
 function removeSentinel(path: string): void {
@@ -1586,26 +1577,10 @@ function banner(): void {
  * The terminal prints it and the confirmation surface renders the same object, so the button is pressed against
  * the instruction it belongs to. That is not tidiness: the channel this replaced let the instruction reach the
  * operator through a chat paraphrase and the confirmation come back the same way, and neither end was the run.
+ *
+ * The builders below are this recorder's own words; the tail that says what advances a checkpoint, the surface,
+ * and the wait are shared with every other live CLI in `./operator-confirm-host`.
  */
-function confirmTailLines(abortPath: string): readonly string[] {
-  return [
-    `진행하려면 '${OPERATOR_CONFIRM_PAGE_TITLE}' 탭의 [${OPERATOR_CONFIRM_BUTTON_LABEL}] 버튼을 직접 누르세요.`,
-    "대화창에 'ready'라고 쓰거나 파일을 만드는 것으로는 진행되지 않습니다 — SellerOps는 그런 신호를 받지 않습니다.",
-    `중단하려면 Ctrl+C, 또는 이 파일을 만드세요: ${abortPath}`,
-  ];
-}
-
-/** The ask, plus the one paragraph that says what advances it. */
-export function withConfirmTail(ask: OperatorConfirmAsk, abortPath: string): OperatorConfirmAsk {
-  return { ...ask, lines: [...ask.lines, "", ...confirmTailLines(abortPath)] };
-}
-
-/** Print an ask to the terminal in the same words the confirmation surface shows. */
-function printAsk(ask: OperatorConfirmAsk): void {
-  console.error("");
-  console.error(`${ask.title} — ${ask.headline}`);
-  for (const line of ask.lines) console.error(line === "" ? "" : `  ${line}`);
-}
 
 /**
  * Stage-2 copy. Separate, because the operator is being asked to take a REAL marketplace action before confirming
@@ -1887,74 +1862,36 @@ async function main(): Promise<void> {
   process.on("SIGTERM", onSigint);
 
   const ctx: BrowserContext = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
-  // The driver reads the NEWEST tab (context injected) — wherever the seller navigated. The recorder never drives it.
-  // Captured BEFORE the confirmation tab is opened, so `entry` is the seller's own page in every ordering.
-  const entry = (ctx.pages()[0] ?? (await ctx.newPage())) as Page;
-  // The confirmation surface: a SellerOps-owned BLANK tab. It is deliberately not an overlay on the marketplace
-  // page — this recorder's whole claim is that it adds nothing to WING and touches nothing there, and a button
-  // injected into the seller's page would retire that claim to buy a convenience.
-  const confirmPage = (await ctx.newPage()) as Page;
-  // …and the driver must never read it. `activePage()` takes the NEWEST tab, so an unfiltered context would hand
-  // every measurement the blank confirmation page and report a confident reading of nothing. The filter is the
-  // one place that knows both pages exist.
-  const wingPages: WingContextLike = {
-    pages: () => ctx.pages().filter((p) => p !== confirmPage) as Page[],
-    on: (event: "close", handler: () => void) => ctx.on(event, handler),
-  };
-  const driver = new CoupangWingIssuanceDriver(entry, { context: wingPages });
-  /**
-   * **The confirmation tab is PINNED to the blank document it was opened on.**
-   *
-   * The arm script is self-mounting: it paints itself onto whatever document the tab holds. Nothing stops the
-   * operator from typing a URL into that tab — and the first arming raises it to the front at exactly the moment
-   * the printed ask says "log in and reach the 키 발급 page yourself", which is when someone would. Arming after
-   * that would restyle a LIVE MARKETPLACE PAGE and rewrite its title, retiring this recorder's standing claim
-   * that it adds nothing to WING, in a run whose manifest promised precisely that.
-   *
-   * So the tab is checked rather than trusted, on every evaluation. A navigated tab throws, which the caller
-   * reads as `UI_NOT_ARMED` and fails the wait closed — the run stops instead of painting on the seller's page.
-   */
-  const evalOnConfirmPage = (script: string): Promise<unknown> => {
-    const url = confirmPage.url();
-    if (url !== CONFIRM_SURFACE_URL) {
-      return Promise.reject(new Error("the confirmation tab is no longer the SellerOps surface"));
-    }
-    return (confirmPage as unknown as { evaluate<T>(s: string): Promise<T> }).evaluate<unknown>(script);
-  };
-  const confirmSeams: OperatorConfirmSeams = {
-    evaluate: evalOnConfirmPage,
+  // The confirmation surface, and the entry page captured before it existed. Everything about how that tab is
+  // owned, pinned, raised and kept out of the driver's reach lives in the shared host — this recorder proved
+  // that pattern live, and every other live CLI here now runs the same one rather than a second copy of it.
+  const confirmHost = await attachOperatorConfirmTab(ctx as unknown as ConfirmHostContext, {
     aborted: () => abortFlag.v || existsSync(abortPath),
-    sleep,
-    // The run raises its own surface. On 2026-08-13 the operator could not find the window it was in, and
-    // raising that window from the OS opened a third blank one INSIDE the run's own browser (Chrome routes a
-    // second launch on the same user-data-dir into the running instance) — a page the recorder would then have
-    // measured as the newest tab. Playwright raises the TAB, inside the context that owns it, and cannot do that.
-    onArmed: () => (confirmPage as unknown as { bringToFront(): Promise<void> }).bringToFront(),
+    abortPath,
     // The VERDICT only. The token never reaches a log line, and neither does the event.
     onVerdict: (verdict) => {
       if (verdict !== "CONFIRMED") log("aw_coupang_operator_confirm_refused", { runId, verdict });
     },
-  };
+  });
+  // The driver reads the NEWEST tab — wherever the seller navigated — from a context the confirmation tab is
+  // filtered out of. Unfiltered, every measurement would land on the blank surface and report a confident
+  // reading of nothing.
+  const driver = new CoupangWingIssuanceDriver(confirmHost.entryPage as unknown as Page, {
+    context: confirmHost.contextLike as unknown as WingContextLike,
+  });
   /** The ONE builder both the terminal and the confirmation surface read, so they cannot say different things. */
   const askCopyFor = (ask: WingOperatorAsk): OperatorConfirmAsk =>
-    withConfirmTail(
-      ask.checkpoint === null
-        ? isStage2Run
-          ? stage2AskCopy(isCalibrationRun)
-          : baselineAskCopy()
-        : discoveryCheckpointCopy(ask.checkpoint, ask.index, ask.total),
-      abortPath,
-    );
+    ask.checkpoint === null
+      ? isStage2Run
+        ? stage2AskCopy(isCalibrationRun)
+        : baselineAskCopy()
+      : discoveryCheckpointCopy(ask.checkpoint, ask.index, ask.total);
 
   const deps: WingSelectorRecordDeps = {
+    announce: () => confirmHost.announce(askCopyFor({ checkpoint: null, index: 0, total: 1 })),
+    announceCheckpoint: (checkpoint, index, total) => confirmHost.announce(askCopyFor({ checkpoint, index, total })),
     awaitOperatorConfirmation: async (ask) => {
-      const confirmation = await awaitOperatorConfirmation(confirmSeams, askCopyFor(ask), {
-        // A FRESH token per checkpoint. A press held over from the previous screen cannot advance this one, and
-        // nothing outside this process ever sees the value it would have to produce.
-        token: mintOperatorConfirmToken(),
-        pollMs: CONFIRM_POLL_MS,
-        timeoutMs: RECORD_WAIT_TIMEOUT_MS,
-      });
+      const confirmation = await confirmHost.confirm(askCopyFor(ask));
       log("aw_coupang_operator_confirm", {
         runId,
         checkpoint: ask.checkpoint ?? "single_reading",
@@ -1981,8 +1918,6 @@ async function main(): Promise<void> {
     // …and the same shape for the vendor form's regions: wired here, called only on the checkpoints that stand
     // on the vendor screen. Structure and tag counts; the emptiness count the guided walk takes is NOT asked for.
     vendorFieldRegions: () => driver.vendorFieldRegions(),
-    announce: () => printAsk(askCopyFor({ checkpoint: null, index: 0, total: 1 })),
-    announceCheckpoint: (checkpoint, index, total) => printAsk(askCopyFor({ checkpoint, index, total })),
   };
 
   if (isDiscoveryRun && flowPlan) {

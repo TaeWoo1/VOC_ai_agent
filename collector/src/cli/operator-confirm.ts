@@ -240,10 +240,42 @@ export function verifyOperatorConfirmEvent(raw: unknown, expectedToken: string):
   return "CONFIRMED";
 }
 
-/** The injected seams, so the whole wait is unit-tested offline over a fake page. */
+/**
+ * **How the wait reaches a confirmation surface — the one thing that differs between hosts.**
+ *
+ * Stated as three intents rather than as "evaluate this string" so a surface that is not a page can implement
+ * it. Everything that decides whether a checkpoint advances — the token, the verification, the fail-closed
+ * ordering — lives above this interface and is the same for every host.
+ */
+export interface OperatorConfirmTransport {
+  /** Render the ask and arm this token. Resolves `true` only when the operator can now see and press it. */
+  arm(ask: OperatorConfirmAsk, token: string): Promise<boolean>;
+  /** The pending event record, or null/undefined when nothing has been pressed. Never interpreted here. */
+  read(): Promise<unknown>;
+  /** Drop a refused event so the next poll is not the same refusal again. */
+  clear(): Promise<void>;
+}
+
+/**
+ * The transport for a surface that is a real DOM: this module's own string IIFEs, evaluated in it. `evaluate`
+ * is the caller's — it is what pins the surface to a page the run owns.
+ */
+export function pageEvaluateTransport(evaluate: (script: string) => Promise<unknown>): OperatorConfirmTransport {
+  return {
+    arm: (ask, token) =>
+      evaluate(buildOperatorConfirmArmScript({ ...ask, token }))
+        .then((v) => v === true)
+        // An un-armable surface is a wait on a button nobody can see. It fails closed one level up.
+        .catch(() => false),
+    read: () => evaluate(OPERATOR_CONFIRM_READ_SCRIPT).catch(() => null),
+    clear: () => evaluate(OPERATOR_CONFIRM_CLEAR_SCRIPT).then(() => undefined).catch(() => undefined),
+  };
+}
+
+/** The injected seams, so the whole wait is unit-tested offline over a fake surface. */
 export interface OperatorConfirmSeams {
-  /** Evaluate one of this module's string IIFEs in the confirmation surface. */
-  evaluate(script: string): Promise<unknown>;
+  /** How this run reaches its confirmation surface. */
+  readonly transport: OperatorConfirmTransport;
   /** Whether the operator has asked to stop (Ctrl+C or the abort sentinel). Checked before every poll. */
   aborted(): boolean;
   sleep(ms: number): Promise<void>;
@@ -287,10 +319,7 @@ export async function awaitOperatorConfirmation(
   opts: OperatorConfirmWaitOptions,
 ): Promise<OperatorConfirmation> {
   if (seams.aborted()) return ABORTED;
-  const armed = await seams
-    .evaluate(buildOperatorConfirmArmScript({ ...ask, token: opts.token }))
-    .then((v) => v === true)
-    .catch(() => false);
+  const armed = await seams.transport.arm(ask, opts.token).catch(() => false);
   if (!armed) {
     seams.onVerdict?.("UI_NOT_ARMED");
     return TIMED_OUT;
@@ -301,7 +330,7 @@ export async function awaitOperatorConfirmation(
   const ticks = Math.max(1, Math.ceil(opts.timeoutMs / Math.max(1, opts.pollMs)));
   for (let i = 0; i < ticks; i++) {
     if (seams.aborted()) return ABORTED;
-    const raw = await seams.evaluate(OPERATOR_CONFIRM_READ_SCRIPT).catch(() => null);
+    const raw = await seams.transport.read().catch(() => null);
     const verdict = verifyOperatorConfirmEvent(raw, opts.token);
     if (verdict === "CONFIRMED") {
       seams.onVerdict?.(verdict);
@@ -309,7 +338,7 @@ export async function awaitOperatorConfirmation(
     }
     if (verdict !== "NO_EVENT") {
       seams.onVerdict?.(verdict);
-      await seams.evaluate(OPERATOR_CONFIRM_CLEAR_SCRIPT).catch(() => undefined);
+      await seams.transport.clear().catch(() => undefined);
     }
     await seams.sleep(opts.pollMs);
   }

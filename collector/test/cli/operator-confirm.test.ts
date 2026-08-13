@@ -21,6 +21,7 @@ import {
   buildOperatorConfirmArmScript,
   isOperatorConfirmToken,
   mintOperatorConfirmToken,
+  pageEvaluateTransport,
   verifyOperatorConfirmEvent,
   type OperatorConfirmSeams,
   type OperatorConfirmVerdict,
@@ -94,36 +95,39 @@ function fakeSurface(o: { press?: "trusted" | "untrusted" | "stale"; afterTicks?
   let event: unknown = null;
   let reads = 0;
   let pressed = false;
+  // Driven through the page transport on purpose: it is what every browser-hosted CLI uses, so these tests
+  // exercise the real arm/read/clear scripts rather than a paraphrase of them.
+  const evaluate = async (script: string): Promise<unknown> => {
+    if (script.includes("(arm)")) {
+      if (o.armFails === true) throw new Error("Target page, context or browser has been closed");
+      armedScripts.push(script);
+      const m = /var TOKEN = "([0-9a-f]{32})"/.exec(script);
+      armed = m?.[1] ?? null;
+      event = null;
+      pressed = false;
+      reads = 0;
+      return true;
+    }
+    if (script === OPERATOR_CONFIRM_CLEAR_SCRIPT) {
+      event = null;
+      return true;
+    }
+    reads += 1;
+    // ONE press per arming, like a human: after a refusal is cleared the page holds nothing until the button
+    // is pressed again. A fake that re-presses on every tick would hide whether the host clears refusals.
+    if (o.press && reads >= (o.afterTicks ?? 1) && !pressed && armed) {
+      pressed = true;
+      event =
+        o.press === "trusted"
+          ? { token: armed, trusted: true }
+          : o.press === "untrusted"
+            ? { token: armed, trusted: false }
+            : { token: "f".repeat(32), trusted: true };
+    }
+    return event;
+  };
   const seams: OperatorConfirmSeams = {
-    evaluate: async (script) => {
-      if (script.includes("(arm)")) {
-        if (o.armFails === true) throw new Error("Target page, context or browser has been closed");
-        armedScripts.push(script);
-        const m = /var TOKEN = "([0-9a-f]{32})"/.exec(script);
-        armed = m?.[1] ?? null;
-        event = null;
-        pressed = false;
-        reads = 0;
-        return true;
-      }
-      if (script === OPERATOR_CONFIRM_CLEAR_SCRIPT) {
-        event = null;
-        return true;
-      }
-      reads += 1;
-      // ONE press per arming, like a human: after a refusal is cleared the page holds nothing until the button
-      // is pressed again. A fake that re-presses on every tick would hide whether the host clears refusals.
-      if (o.press && reads >= (o.afterTicks ?? 1) && !pressed && armed) {
-        pressed = true;
-        event =
-          o.press === "trusted"
-            ? { token: armed, trusted: true }
-            : o.press === "untrusted"
-              ? { token: armed, trusted: false }
-              : { token: "f".repeat(32), trusted: true };
-      }
-      return event;
-    },
+    transport: pageEvaluateTransport(evaluate),
     aborted: () => false,
     sleep: async () => undefined,
     onVerdict: (v) => verdicts.push(v),

@@ -23,10 +23,10 @@ import {
   discoveryCheckpointCopy,
   runWingFlowDiscovery,
   runWingSelectorRecord,
-  withConfirmTail,
   type WingOperatorAsk,
   type WingSelectorRecordDeps,
 } from "../../src/cli/probe-wing-issuance-selectors";
+import { withConfirmTail } from "../../src/cli/operator-confirm-host";
 import { observeFrom, type WingStructuralCensus } from "../../src/cli/coupang-wing-classifier";
 import { OPERATOR_ABORTED, OPERATOR_CONFIRMED, OPERATOR_TIMED_OUT } from "../fixtures/operator-confirmation";
 
@@ -168,45 +168,29 @@ describe("the readiness sentinel is gone, not merely unused", () => {
 });
 
 describe("the confirmation surface is separate from the page being measured", () => {
-  it("the driver's context excludes the confirmation page", () => {
+  // The surface's own guarantees — pinning, raising, filtering, a fresh token per wait — are OWNED by the shared
+  // host and are proved by driving it in `operator-confirm-host.test.ts` rather than by matching its source. What
+  // is this recorder's own business, and is asserted here, is that it uses that host and hands the driver the
+  // filtered context rather than the raw one.
+  it("the driver reads a context the confirmation tab is filtered out of", () => {
     // `activePage()` takes the NEWEST tab. Handed an unfiltered context, every measurement would land on the
     // blank confirmation page and be reported as a confident reading of nothing.
-    expect(SOURCE).toContain("ctx.pages().filter((p) => p !== confirmPage)");
-    expect(SOURCE).toContain("new CoupangWingIssuanceDriver(entry, { context: wingPages })");
+    expect(CODE).toContain("attachOperatorConfirmTab(");
+    expect(CODE).toContain("context: confirmHost.contextLike");
+    expect(CODE).not.toContain("{ context: ctx }");
   });
 
-  it("the confirmation lives on its own page — nothing is mounted on the marketplace page", () => {
-    expect(CODE).toContain("const confirmPage = (await ctx.newPage())");
-    // The recorder's standing claim is that it adds nothing to WING. Evaluating the confirm scripts anywhere but
-    // the confirmation page would retire that claim for a convenience.
-    expect(CODE).toContain("evalOnConfirmPage");
+  it("nothing is mounted on the marketplace page", () => {
+    // The recorder's standing claim is that it adds nothing to WING. Every confirm script is evaluated by the
+    // host, on its own tab; this file must not evaluate one anywhere.
     expect(CODE).not.toContain("entry.evaluate");
+    expect(CODE).not.toContain("buildOperatorConfirmArmScript");
   });
 
-  it("the run raises its own confirmation tab", () => {
-    // Not the operator's job, and not the OS's. Raising the window from outside (`open -a`) routes into Chrome's
-    // user-data-dir singleton and opens a THIRD blank window inside the run's own browser — a page the recorder
-    // would then read as the newest tab. Playwright raises the TAB inside the context that owns it.
-    expect(CODE).toContain("onArmed: () => (confirmPage as unknown as { bringToFront(): Promise<void> }).bringToFront()");
-  });
-
-  it("the surface is PINNED to its blank document — a navigated tab is refused, not painted on", () => {
-    // The arm script is self-mounting, so it will paint onto whatever document the tab holds. The first arming
-    // raises that tab at the exact moment the ask says "log in and reach the 키 발급 page yourself", which is
-    // when an operator would type a URL into it. Arming after that would restyle a live marketplace page and
-    // rewrite its title — retiring the claim the manifest was granted against.
-    expect(CODE).toContain('const CONFIRM_SURFACE_URL = "about:blank"');
-    expect(CODE).toContain("if (url !== CONFIRM_SURFACE_URL)");
-    // Rejecting (not returning null) is what makes the arm read UI_NOT_ARMED and the wait fail closed.
-    expect(CODE).toContain("the confirmation tab is no longer the SellerOps surface");
-  });
-
-  it("a fresh token is minted per wait, inside the seam", () => {
-    const seam = SOURCE.slice(SOURCE.indexOf("awaitOperatorConfirmation: async (ask)"));
-    expect(seam.slice(0, seam.indexOf("},"))).toContain("token: mintOperatorConfirmToken()");
-  });
-
-  it("the token is never logged — only the signal and the provenance are", () => {
+  it("the token is never minted, held or logged here", () => {
+    // It lives for the length of one wait inside the host. A copy in this file would be a copy in a place that
+    // prints things.
+    expect(CODE).not.toContain("mintOperatorConfirmToken");
     const logLines = CODE.split("\n").filter((l) => l.includes("log(")).join("\n");
     expect(logLines).not.toContain("token");
   });
@@ -217,8 +201,8 @@ describe("the operator reads one set of words", () => {
     // `askCopyFor` feeds BOTH `announce`/`announceCheckpoint` and the confirmation seam. Two builders would let
     // the printed instruction and the confirmed instruction drift apart — which is the shape of the original
     // defect, where the instruction reached the operator through a paraphrase.
-    expect(SOURCE).toContain("printAsk(askCopyFor(");
-    expect(SOURCE).toContain("askCopyFor(ask)");
+    expect(SOURCE).toContain("confirmHost.announce(askCopyFor(");
+    expect(SOURCE).toContain("confirmHost.confirm(askCopyFor(ask))");
   });
 
   it("every checkpoint's copy names its step, and the tail says what advances it", () => {
