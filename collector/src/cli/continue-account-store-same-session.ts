@@ -35,6 +35,7 @@ import { launchNaverContext } from "../profile";
 import { approvalRequiredMessage, hasLiveRunApproval } from "./live-run-approval";
 import type { OperatorConfirmAsk } from "./operator-confirm";
 import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
+import { actionBarrierRefusedMessage, confirmActionBarrier } from "./operator-action-barrier";
 
 const HYDRATION_TIMEOUT_MS = 15_000;
 // The human may need to clear 2FA/CAPTCHA and reach the reconnect-continue screen.
@@ -165,6 +166,27 @@ async function main(): Promise<void> {
     }
 
     // 2) The single chokepoint: the boundary gates, then performs at most ONE guarded click.
+    // **THE ACTION BARRIER.** Everything above this line is reading — the auto-read arm settles the SPA and
+    // the sentinel arm waits for a hand-off, and neither of those is a decision to click anything. What comes
+    // next is ONE real click on the seller's NAVER page, so it is asked for here, immediately before it, rather
+    // than inferred from how the page looked.
+    const allowed = await confirmActionBarrier(confirmHost, {
+      kind: "MARKETPLACE_CLICK",
+      title: "계정 재연결 계속",
+      headline: "이 화면의 '계속' 버튼을 SellerOps가 한 번 누르는 것을 허용하시겠습니까?",
+      allows: [
+        "재연결 화면의 '계속' 버튼을 정확히 한 번 누릅니다 (판매자님이 승인하신 계정의 카드일 때만).",
+        "누른 뒤의 화면 상태를 한 번 읽어 보고합니다.",
+      ],
+      stillWillNot: "스토어를 선택하거나, 내보내기를 실행하거나, 어떤 값도 읽지 않습니다.",
+    });
+    if (!allowed) {
+      console.error(actionBarrierRefusedMessage("MARKETPLACE_CLICK"));
+      console.log(JSON.stringify({ event: "CONTINUE_ACCOUNT_STORE", outcome: "NOT_ALLOWED", clicked: false }));
+      log("continue.account-store.aborted", { reason: "no-operator-confirmation" });
+      process.exitCode = 7;
+      return;
+    }
     const result = await continueAtCardOnce(page, ctx, expected, salt, expectedContinueCard);
 
     // Sanitized JSON is the only stdout payload; all blocks are buckets/enums/booleans/hashes.

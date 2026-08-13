@@ -159,7 +159,8 @@ describe("the migrated CLIs reach the channel through the shared host", () => {
     for (const f of MIGRATED) {
       const src = code(join(CLI_DIR, f));
       expect(src, `${f} attaches a confirmation surface but never waits on it`).toMatch(
-        /confirmHost\.confirm\(|confirm\(ask\)|confirmCheckpoint\(|confirmRunGrant\(/,
+        // …by any of the shapes that reach `host.confirm` — a checkpoint, a run grant, or an action barrier.
+        /confirmHost\.confirm\(|confirm\(ask\)|confirmCheckpoint\(|confirmRunGrant\(|confirmActionBarrier\(/,
       );
     }
   });
