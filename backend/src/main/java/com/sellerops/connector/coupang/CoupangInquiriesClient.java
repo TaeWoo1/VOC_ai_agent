@@ -367,8 +367,16 @@ public class CoupangInquiriesClient {
      * extra — only a burst pays. The signature is stamped AFTER the pause, never before: a
      * signed-date is only valid for a few minutes, and signing then sleeping would spend that budget
      * on our own throttle.
+     *
+     * <p><b>Synchronized, and the limiter is therefore global rather than per-vendor.</b> This client
+     * is a Spring singleton shared by every account, so {@code lastCallAtMillis} is touched by every
+     * sync thread; leaving it unguarded would be a data race whose failure mode is exactly the 429
+     * this method exists to prevent — an unpublished write means the next thread sees no recent call
+     * and skips its pause. Coupang's limit is per vendorId, so serializing across vendors is stricter
+     * than required. That is the deliberate direction to err in: over-throttling costs a few seconds
+     * on an asynchronous run, and under-throttling costs the seller a failed import.
      */
-    private void pace() {
+    private synchronized void pace() {
         long now = clock.millis();
         long since = now - lastCallAtMillis;
         if (lastCallAtMillis > 0 && since < MIN_CALL_INTERVAL_MS) {

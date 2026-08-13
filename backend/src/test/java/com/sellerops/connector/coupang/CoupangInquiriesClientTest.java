@@ -391,6 +391,46 @@ class CoupangInquiriesClientTest {
     }
 
     @Test
+    void thePacerIsGuardedAgainstTheConcurrentSyncsThatShareThisSingleton() throws Exception {
+        // The client is a Spring singleton shared by every account, so the pacer's state is touched
+        // by every sync thread. An unguarded field's failure mode is precisely the 429 it prevents:
+        // an unpublished write lets the next thread believe no call was recent and skip its pause.
+        assertThat(java.lang.reflect.Modifier.isSynchronized(
+                CoupangInquiriesClient.class.getDeclaredMethod("pace").getModifiers())).isTrue();
+
+        // And it holds under actual concurrency: every call after the very first one pauses.
+        int threads = 4;
+        int callsEach = 3;
+        List<Long> observed = java.util.Collections.synchronizedList(new ArrayList<>());
+        CoupangInquiriesClient shared = new CoupangInquiriesClient(
+                new FakeCoupangHttpClient(), new CoupangSigner(clock), clock,
+                "https://api-gateway.coupang.com", TEST_APPROVAL_ID, observed::add);
+        java.lang.reflect.Method pace = CoupangInquiriesClient.class.getDeclaredMethod("pace");
+        pace.setAccessible(true);
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(threads);
+        try {
+            List<java.util.concurrent.Future<?>> futures = new ArrayList<>();
+            for (int t = 0; t < threads; t++) {
+                futures.add(pool.submit(() -> {
+                    for (int i = 0; i < callsEach; i++) {
+                        try {
+                            pace.invoke(shared);
+                        } catch (Exception e) {
+                            throw new IllegalStateException(e);
+                        }
+                    }
+                }));
+            }
+            for (var f : futures) {
+                f.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(observed).hasSize(threads * callsEach - 1);
+    }
+
+    @Test
     void theSignatureIsStampedAfterThePauseNotBeforeIt() {
         // A signed-date is only valid for a few minutes. Signing and then sleeping would spend that
         // budget on our own throttle — so the pause must happen first, and this pins the order.
