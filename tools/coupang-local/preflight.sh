@@ -112,7 +112,7 @@ CUR_GIT="$(git -C "$HERE" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 #                   ran first), and NO inquiry yet, so every inquiry that appears came from this run.
 CREDS="$(q 'select count(*) from connector_credentials')"; SYNCS="$(q 'select count(*) from sync_jobs')"
 ORDERS="$(q 'select count(*) from channel_orders')"; COUPANG_ACCTS="$(coupang_accts)"
-INQUIRIES="$(q 'select count(*) from inquiries')"; WORKITEMS="$(q 'select count(*) from inquiry_work_items')"
+INQUIRIES="$(q 'select count(*) from inquiries')"; WORKITEMS="$(q 'select count(*) from inquiry_work_item')"
 if [ -z "$CREDS$SYNCS$ORDERS$COUPANG_ACCTS$INQUIRIES$WORKITEMS" ]; then
   fail "could not query the disposable DB ($PGHOST:$PGPORT/$PGDATABASE)"
   CREDS="?"; SYNCS="?"; ORDERS="?"; COUPANG_ACCTS="?"; INQUIRIES="?"; WORKITEMS="?"
