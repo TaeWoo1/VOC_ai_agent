@@ -161,7 +161,66 @@ That is an INFERENCE about the second row's width, and no locator was built on i
 (`WING_CREDENTIAL_CELLS_CALIBRATED` is still `false`), and D1 is unanswered because the region was never scored
 from the value side.
 
-### What sitting 2 measures, and why it is a measurement rather than a rule
+### Sitting 2 — MEASUREMENT PASS / calibration FAIL-CLOSED, 2026-08-13
+
+`apr-fd6ea58a03e6` / `wt-fa71d221404a` / `e9e06fc1`. Grant `GRANTED` 12:43:33; checkpoint
+`OPERATOR_UI_CONFIRMED` 12:43:54; surface `open_api_issuance`. **Exit 5** — and this time the refusal came
+with its own explanation.
+
+```
+업체코드     column index 1   candidates: row 1 (TBODY, 5 cells)   row 5 (TBODY, 3 cells)
+Access Key   column index 3   candidate:  row 1 (TBODY, 5 cells)
+Secret Key   column index 4   candidate:  row 1 (TBODY, 5 cells)
+credentialState: UNKNOWN (CELL_NOT_UNIQUE on vendor_id)
+```
+
+**The collision, measured.** The credential row is row 1, **five columns wide** — 업체코드 at index 1, Access
+Key at 3, Secret Key at 4. Row 5 is **three columns wide**: the 연동 정보 block, 업체명 / IP주소 / URL, whose
+index 1 is the IP address's value. So 업체코드's column index collides with IP주소's, and the naive column rule
+finds both. Without the refusal, **an IP address would have been stored as the vendor code.**
+
+The hypothesis recorded after sitting 1 — "a narrower row covering column 0" — was **wrong in detail**: the
+index is 1, not 0. Measuring beat inferring, which is the entire reason the sitting existed.
+
+**The region scope, first time taken:**
+
+```
+depth 1  TR      labels 0   values 2   vendor 0     ← the value row: clean of the vendor block
+depth 2  TBODY   labels 0   values 2   vendor 2
+depth 3  TABLE   labels 3   values 2   vendor 2
+depth 4-6 DIV    labels 3   values 2   vendor 2
+cleanRingRegion: null
+```
+
+No level holds the labels AND the values AND nothing else — the labels are in `THEAD`, the values in `TBODY`.
+D1 therefore has no "just narrow the anchor" answer. It does have a **new** fact: depth 1, the value row, is
+clean of the vendor block.
+
+### The same-row rule, derived from that measurement
+
+The disambiguator the readings support, and nothing more: **three keys shown together are one record, so they
+are one row.** Labels that resolved to exactly one cell on their own are the anchors; if at least two agree on
+a row, that is the credential row, and an ambiguous label keeps the candidate inside it — only if exactly one
+is.
+
+- no row ordinal is hardcoded — the row is whatever the unambiguous labels resolved to
+- no text is read — candidates are chosen by row identity, never by content
+- fewer than two anchors, anchors that disagree, or zero/several candidates in the row all fail closed
+  (`ROW_NOT_CORROBORATED`, distinct from `CELL_NOT_UNIQUE` so "ambiguous" and "ambiguity survived" stay
+  different facts)
+- `candidateCellCount` keeps the RAW count: the record says what was seen, not what was chosen
+
+Offline regression reproduces the live collision — 업체코드 at index 1 of a five-column row, the vendor block a
+three-column row whose index 1 is an IP — and asserts the naive rule finds two, corroboration resolves to the
+credential row, and **the read returns the vendor code and not the IP**. Plus every fail-closed axis, and that
+the same shape at different row positions resolves identically (no hardcoded ordinal).
+
+### What sitting 3 confirms
+
+Only that all three fields resolve on the live screen through the same-row rule. On that reading — and only on
+it — `WING_CREDENTIAL_CELLS_CALIBRATED` is flipped, which is what opens the `CREDENTIAL_READ` manifest.
+
+### What sitting 2 measured, and why it is a measurement rather than a rule
 
 Two value-free additions, both declared capabilities:
 

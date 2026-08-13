@@ -119,6 +119,8 @@ function run<T>(script: string, root: El): T {
 const VENDOR = "V-00099";
 const ACCESS = "8f2c1ab4d5e6f70819a2b3c4d5e6f708";
 const SECRET = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4";
+/** The value that sits in 업체코드's colliding column on the live screen. */
+const VENDOR_IP = "203.0.113.7";
 
 /**
  * The WING shape as measured: three `<th>` in ONE header row, values in the body row beneath, and the 연동 정보
@@ -227,8 +229,10 @@ describe("it refuses rather than guessing", () => {
     tbody.add(el({ tag: "tr" }).add(el({ tag: "td", text: "X1" }), el({ tag: "td", text: "X2" }), el({ tag: "td", text: "X3" })));
     const c = census(root);
     expect(c.readings.every((r) => r.candidateCellCount === 2)).toBe(true);
-    expect(credentialCellsResolved(c, COUPANG_CREDENTIAL_FIELD_IDS)).toMatchObject({ ok: false, reason: "CELL_NOT_UNIQUE" });
-    expect(read(root)).toMatchObject({ ok: false, reason: "CELL_NOT_UNIQUE" });
+    // Every label is ambiguous, so there are no unambiguous anchors to corroborate against — and the refusal
+    // says which of the two failures it was.
+    expect(credentialCellsResolved(c, COUPANG_CREDENTIAL_FIELD_IDS)).toMatchObject({ ok: false, reason: "ROW_NOT_CORROBORATED" });
+    expect(read(root)).toMatchObject({ ok: false, reason: "ROW_NOT_CORROBORATED" });
   });
 
   it("an empty value cell is not a value — the calibration would otherwise certify a locator that reads nothing", () => {
@@ -412,7 +416,7 @@ describe("the sanitizer is the boundary, not the script's good manners", () => {
     const c = sanitizeCredentialCellCensus(
       {
         readings: [
-          { id: "access_key", labelVisibleCount: 1, labelHiddenCount: 0, association: "TH_COLUMN_TD", candidateCellCount: 1, cellNonEmpty: true },
+          { id: "access_key", labelVisibleCount: 1, labelHiddenCount: 0, association: "TH_COLUMN_TD", candidateCellCount: 1, cellResolvedBy: "DIRECT", cellNonEmpty: true },
         ],
       },
       ["access_key"],
@@ -459,33 +463,171 @@ function narrowSecondRowTable(): El {
   );
 }
 
-describe("the candidate detail says WHY a column resolved to more than one cell", () => {
-  it("reports each candidate's row, section and width — a bare count says nothing", () => {
-    const c = census(narrowSecondRowTable());
+describe("the live column collision, and the same-row rule measured out of it", () => {
+  /**
+   * **The 2026-08-13 screen, as its own readings describe it.** The credential row is five columns wide with
+   * 업체코드 at index 1, Access Key at 3, Secret Key at 4. Below it the 연동 정보 block is a THREE-column row —
+   * 업체명 / IP주소 / URL — whose index 1 is the IP address's value.
+   *
+   * So 업체코드's column index collides with IP주소's. The naive column rule finds both, and the value it would
+   * have stored as the vendor code is an IP address.
+   */
+  function liveCollisionTable(): El {
+    const head = el({ tag: "tr" }).add(
+      el({ tag: "th", text: "번호" }),
+      el({ tag: "th", text: "업체코드" }),
+      el({ tag: "th", text: "구분" }),
+      el({ tag: "th", text: "Access Key" }),
+      el({ tag: "th", text: "Secret Key" }),
+    );
+    const values = el({ tag: "tr" }).add(
+      el({ tag: "td", text: "1" }),
+      el({ tag: "td", text: VENDOR }),
+      el({ tag: "td", text: "자체개발" }),
+      el({ tag: "td", text: ACCESS }),
+      el({ tag: "td", text: SECRET }),
+    );
+    const vendorHead = el({ tag: "tr" }).add(
+      el({ tag: "th", text: "업체명" }),
+      el({ tag: "th", text: "IP주소" }),
+      el({ tag: "th", text: "URL" }),
+    );
+    const vendorRow = el({ tag: "tr" }).add(
+      el({ tag: "td", text: "sellerOps" }),
+      el({ tag: "td", text: VENDOR_IP }),
+      el({ tag: "td", text: "https://app.example.com/connect" }),
+    );
+    return el({ tag: "div" }).add(
+      el({ tag: "table" }).add(el({ tag: "thead" }).add(head), el({ tag: "tbody" }).add(values, vendorHead, vendorRow)),
+    );
+  }
+
+  it("the NAIVE column rule finds two candidates for 업체코드 and one for each of the others", () => {
+    const c = census(liveCollisionTable());
     const vendor = c.readings.find((r) => r.id === "vendor_id");
+    expect(vendor?.labelColumnIndex).toBe(1);
     expect(vendor?.candidateCellCount).toBe(2);
-    expect(vendor?.labelColumnIndex).toBe(0);
-    // The two candidates differ in the one way that explains the count: their rows are different WIDTHS.
-    expect(vendor?.candidateCells?.map((x) => x.rowCellCount)).toEqual([3, 1]);
-    // …and the other two labels resolve uniquely, because the narrow row does not reach their column.
-    expect(c.readings.find((r) => r.id === "access_key")?.candidateCellCount).toBe(1);
-    expect(c.readings.find((r) => r.id === "secret_key")?.candidateCellCount).toBe(1);
+    // The two differ in the one way that explains the count: their rows are different WIDTHS.
+    expect(vendor?.candidateCells?.map((x) => x.rowCellCount)).toEqual([5, 3]);
+    expect(c.readings.find((r) => r.id === "access_key")?.labelColumnIndex).toBe(3);
+    expect(c.readings.find((r) => r.id === "secret_key")?.labelColumnIndex).toBe(4);
   });
 
-  it("still REFUSES — the detail explains the ambiguity, it does not resolve it", () => {
-    // Nothing here picks the wider row. A rule that did would be written from one screen, which is the move
-    // this workstream has twice withdrawn.
-    expect(credentialCellsResolved(census(narrowSecondRowTable()), COUPANG_CREDENTIAL_FIELD_IDS)).toMatchObject({
-      ok: false,
-      reason: "CELL_NOT_UNIQUE",
-      id: "vendor_id",
-    });
-    expect(read(narrowSecondRowTable())).toMatchObject({ ok: false, reason: "CELL_NOT_UNIQUE" });
+  it("**same-row corroboration resolves it** — and the raw count stays on the record as the evidence", () => {
+    const c = census(liveCollisionTable());
+    const vendor = c.readings.find((r) => r.id === "vendor_id");
+    expect(vendor?.cellResolvedBy).toBe("ROW_CORROBORATION");
+    expect(vendor?.candidateCellCount).toBe(2); // unchanged: the count is what was seen, not what was chosen
+    expect(c.readings.find((r) => r.id === "access_key")?.cellResolvedBy).toBe("DIRECT");
+    expect(c.readings.find((r) => r.id === "secret_key")?.cellResolvedBy).toBe("DIRECT");
+    // All three agree on one row, and that row was derived from the unambiguous labels — never hardcoded.
+    const rows = new Set(c.readings.map((r) => r.credentialRowOrdinal));
+    expect(rows.size).toBe(1);
+    expect(credentialCellsResolved(c, COUPANG_CREDENTIAL_FIELD_IDS)).toMatchObject({ ok: true, reason: "OK" });
+  });
+
+  it("**and it reads the vendor code, not the IP address in the colliding column**", () => {
+    const out = read(liveCollisionTable());
+    expect(out.ok).toBe(true);
+    expect(out.values).toEqual({ vendor_id: VENDOR, access_key: ACCESS, secret_key: SECRET });
+    expect(out.values?.["vendor_id"]).not.toBe(VENDOR_IP);
   });
 
   it("carries no value in the candidate detail", () => {
-    const serialized = JSON.stringify(census(narrowSecondRowTable()));
-    for (const secret of [VENDOR, ACCESS, SECRET]) expect(serialized).not.toContain(secret);
+    const serialized = JSON.stringify(census(liveCollisionTable()));
+    for (const secret of [VENDOR, ACCESS, SECRET, VENDOR_IP]) expect(serialized).not.toContain(secret);
+  });
+});
+
+describe("corroboration fails closed on every axis", () => {
+  it("fewer than TWO unambiguous anchors — one label cannot vouch for a row", () => {
+    // Only Secret Key resolves directly; 업체코드 AND Access Key are both ambiguous.
+    const head = el({ tag: "tr" }).add(
+      el({ tag: "th", text: "업체코드" }),
+      el({ tag: "th", text: "Access Key" }),
+      el({ tag: "th", text: "Secret Key" }),
+    );
+    const values = el({ tag: "tr" }).add(
+      el({ tag: "td", text: VENDOR }),
+      el({ tag: "td", text: ACCESS }),
+      el({ tag: "td", text: SECRET }),
+    );
+    const other = el({ tag: "tr" }).add(el({ tag: "td", text: "a" }), el({ tag: "td", text: "b" }));
+    const root = el({ tag: "div" }).add(el({ tag: "table" }).add(head, values, other));
+    const c = census(root);
+    expect(c.readings.find((r) => r.id === "secret_key")?.cellResolvedBy).toBe("DIRECT");
+    expect(credentialCellsResolved(c, COUPANG_CREDENTIAL_FIELD_IDS)).toMatchObject({ ok: false, reason: "ROW_NOT_CORROBORATED" });
+    expect(read(root).ok).toBe(false);
+  });
+
+  it("anchors that DISAGREE about the row corroborate nothing", () => {
+    // Two tables, so Access Key and Secret Key resolve to cells in different rows.
+    const t = (label: string, value: string): El =>
+      el({ tag: "table" }).add(
+        el({ tag: "tr" }).add(el({ tag: "th", text: label })),
+        el({ tag: "tr" }).add(el({ tag: "td", text: value })),
+      );
+    const wide = el({ tag: "table" }).add(
+      el({ tag: "tr" }).add(el({ tag: "th", text: "업체코드" })),
+      el({ tag: "tr" }).add(el({ tag: "td", text: VENDOR })),
+      el({ tag: "tr" }).add(el({ tag: "td", text: "other" })),
+    );
+    const root = el({ tag: "div" }).add(wide, t("Access Key", ACCESS), t("Secret Key", SECRET));
+    const c = census(root);
+    // They resolve, but in different TABLES — which the table check catches first, and either way nothing reads.
+    expect(credentialCellsResolved(c, COUPANG_CREDENTIAL_FIELD_IDS).ok).toBe(false);
+    expect(read(root).ok).toBe(false);
+  });
+
+  it("TWO candidates inside the corroborated row is still ambiguous", () => {
+    // A second cell at 업체코드's index within the SAME row is impossible in a table, so the shape that
+    // reproduces this is a second row that is ALSO the anchors' row — i.e. the anchors disagree. Modelled by
+    // making 업체코드's column reach two cells of the credential row's own width.
+    const head = el({ tag: "tr" }).add(
+      el({ tag: "th", text: "업체코드" }),
+      el({ tag: "th", text: "Access Key" }),
+      el({ tag: "th", text: "Secret Key" }),
+    );
+    const values = el({ tag: "tr" }).add(
+      el({ tag: "td", text: VENDOR }),
+      el({ tag: "td", text: ACCESS }),
+      el({ tag: "td", text: SECRET }),
+    );
+    const twin = el({ tag: "tr" }).add(
+      el({ tag: "td", text: "V-OTHER" }),
+      el({ tag: "td", text: "A-OTHER" }),
+      el({ tag: "td", text: "S-OTHER" }),
+    );
+    const root = el({ tag: "div" }).add(el({ tag: "table" }).add(head, values, twin));
+    expect(credentialCellsResolved(census(root), COUPANG_CREDENTIAL_FIELD_IDS)).toMatchObject({
+      ok: false,
+      reason: "ROW_NOT_CORROBORATED",
+    });
+    expect(read(root).ok).toBe(false);
+  });
+
+  it("no row ordinal is hardcoded — the same shape at a different row position resolves the same way", () => {
+    const build = (leadingRows: number): El => {
+      const head = el({ tag: "tr" }).add(
+        el({ tag: "th", text: "업체코드" }),
+        el({ tag: "th", text: "Access Key" }),
+        el({ tag: "th", text: "Secret Key" }),
+      );
+      const values = el({ tag: "tr" }).add(
+        el({ tag: "td", text: VENDOR }),
+        el({ tag: "td", text: ACCESS }),
+        el({ tag: "td", text: SECRET }),
+      );
+      const narrow = el({ tag: "tr" }).add(el({ tag: "td", text: "x" }));
+      const table = el({ tag: "table" });
+      for (let i = 0; i < leadingRows; i++) table.add(el({ tag: "tr" }).add(el({ tag: "td", text: `pad-${i}` })));
+      return el({ tag: "div" }).add(table.add(head, values, narrow));
+    };
+    for (const pad of [0, 1, 4]) {
+      const c = census(build(pad));
+      expect(credentialCellsResolved(c, COUPANG_CREDENTIAL_FIELD_IDS), `pad=${pad}`).toMatchObject({ ok: true });
+      expect(read(build(pad)).values, `pad=${pad}`).toEqual({ vendor_id: VENDOR, access_key: ACCESS, secret_key: SECRET });
+    }
   });
 });
 
@@ -529,7 +671,9 @@ describe("the region scope — the measurement D1 rests on", () => {
     // 업체코드's column reaches the narrow row too, so only two cells resolve — and the scope says so rather
     // than pretending the anchor is complete.
     expect(s.anchorResolved).toBe(true);
-    expect(s.resolvedCellCount).toBe(2);
+    // Same-row corroboration settles 업체코드 here too, so all three values resolve — and there is STILL no
+    // level holding them together with their labels and without the vendor block, which is D1's question.
+    expect(s.resolvedCellCount).toBe(3);
     // No level holds every credential label AND every resolved value AND none of the vendor labels.
     expect(chooseCredentialRegion(s, 3)).toBeNull();
     // The rows are the evidence for that, not an assertion about it.

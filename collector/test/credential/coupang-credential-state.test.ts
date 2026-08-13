@@ -26,6 +26,7 @@ function resolved(id: string, cellNonEmpty?: boolean, over: Partial<CredentialCe
     labelTag: "TH",
     association: "TH_COLUMN_TD",
     candidateCellCount: 1,
+    cellResolvedBy: "DIRECT",
     cellTag: "TD",
     cellInputCount: 0,
     tableOrdinal: 1,
@@ -70,13 +71,13 @@ describe("everything else is UNKNOWN, and UNKNOWN never issues", () => {
       reason: "LABEL_NOT_UNIQUE",
     },
     {
-      name: "the live 2026-08-13 shape — 업체코드's column resolved to TWO cells",
+      name: "a column that stayed ambiguous after corroboration",
       census: census([
-        { ...resolved("vendor_id", true), candidateCellCount: 2 },
+        { ...resolved("vendor_id", true), candidateCellCount: 2, cellResolvedBy: undefined },
         resolved("access_key", true),
         resolved("secret_key", true),
       ]),
-      reason: "CELL_NOT_UNIQUE",
+      reason: "ROW_NOT_CORROBORATED",
     },
     {
       name: "a mixed association",
@@ -126,19 +127,33 @@ describe("everything else is UNKNOWN, and UNKNOWN never issues", () => {
     });
   }
 
-  it("**the live calibration's own result classifies as UNKNOWN**, so it cannot start an issuance", () => {
-    // 2026-08-13, apr-18727aabc978: access_key and secret_key resolved and were non-empty; 업체코드's column
-    // resolved to two cells. A key DOES exist on that account — and the honest answer is still UNKNOWN,
-    // because the reading does not establish it. That is the failure direction we want.
-    const live = census([
-      { ...resolved("vendor_id"), candidateCellCount: 2, cellTag: undefined, cellInputCount: undefined, tableOrdinal: undefined },
+  it("**sitting 1's own result classified as UNKNOWN**, so it could not have started an issuance", () => {
+    // 2026-08-13, apr-18727aabc978, BEFORE same-row corroboration existed: access_key and secret_key resolved
+    // and were non-empty; 업체코드's column resolved to two cells and nothing settled it. A key DOES exist on
+    // that account — and the honest answer was still UNKNOWN, because the reading did not establish it.
+    const sitting1 = census([
+      { ...resolved("vendor_id"), candidateCellCount: 2, cellResolvedBy: undefined, cellTag: undefined, cellInputCount: undefined, tableOrdinal: undefined },
       resolved("access_key", true),
       resolved("secret_key", true),
     ]);
-    const reading = coupangCredentialStateFrom(live, COUPANG_CREDENTIAL_FIELD_IDS);
-    expect(reading).toMatchObject({ state: "UNKNOWN", reason: "CELL_NOT_UNIQUE", field: "vendor_id" });
+    const reading = coupangCredentialStateFrom(sitting1, COUPANG_CREDENTIAL_FIELD_IDS);
+    expect(reading).toMatchObject({ state: "UNKNOWN", reason: "ROW_NOT_CORROBORATED", field: "vendor_id" });
     expect(mayStartIssuance(reading.state)).toBe(false);
     expect(mayOfferHandoff(reading.state)).toBe(false);
+  });
+
+  it("the SAME screen with corroboration is KEY_PRESENT — the rule changed the reading, not the account", () => {
+    // The identical shape once 업체코드 settles by same-row corroboration. This is what sitting 2 has to show
+    // live before `WING_CREDENTIAL_CELLS_CALIBRATED` may be flipped.
+    const corroborated = census([
+      { ...resolved("vendor_id", true), candidateCellCount: 2, cellResolvedBy: "ROW_CORROBORATION" },
+      resolved("access_key", true),
+      resolved("secret_key", true),
+    ]);
+    const reading = coupangCredentialStateFrom(corroborated, COUPANG_CREDENTIAL_FIELD_IDS);
+    expect(reading).toMatchObject({ state: "KEY_PRESENT", reason: "OK" });
+    expect(mayStartIssuance(reading.state)).toBe(false);
+    expect(mayOfferHandoff(reading.state)).toBe(true);
   });
 });
 

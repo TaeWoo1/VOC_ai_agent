@@ -123,6 +123,10 @@ const RESOLVER_FRAGMENT = `
       out.association = 'TH_NEXT_TD';
       out.candidateCellCount = 1;
       out.cell = next;
+      out.resolvedCandidates = [next];
+      /* Row-headed: each label is its OWN row, so there is no shared credential row to corroborate against.
+         Reported as -1 so it never becomes an anchor for the column rule. */
+      out.candidateCells = [{ rowOrdinal: -1, sectionTag: 'TABLE', rowCellCount: 2, cellTag: 'TD' }];
     } else {
       var row = header.parentElement;
       var table = closestTable(header);
@@ -154,18 +158,73 @@ const RESOLVER_FRAGMENT = `
       out.association = found.length > 0 ? 'TH_COLUMN_TD' : 'NONE';
       out.candidateCellCount = found.length;
       out.candidateCells = described;
+      out.resolvedCandidates = found;
       if (found.length === 1) { out.cell = found[0]; }
     }
     if (out.cell) {
-      out.cellTag = out.cell.tagName;
-      out.cellInputCount = cellFields(out.cell).length;
-      out.tableOrdinal = tableOrdinal(out.cell);
+      out.cellResolvedBy = 'DIRECT';
+      /* Read from the reading's OWN candidate list, which both branches set — the column branch's local was
+         var-hoisted into the row-headed branch, where it is undefined. */
+      out.cellRowOrdinal = out.candidateCells && out.candidateCells.length === 1 ? out.candidateCells[0].rowOrdinal : -1;
     }
     return out;
+  }
+  /* The cell's own facts, computed AFTER corroboration so a row-corroborated cell carries the same ones a
+     directly-resolved cell does. Computing them inside resolveOne would have described only the easy half. */
+  function describeCell(out) {
+    if (!out.cell) { return; }
+    out.cellTag = out.cell.tagName;
+    out.cellInputCount = cellFields(out.cell).length;
+    out.tableOrdinal = tableOrdinal(out.cell);
+  }
+  /**
+   * **SAME-ROW CORROBORATION.** A column index alone is not enough: on the live WING screen 업체코드 sits at
+   * index 1 of a five-column credential row, and the 연동 정보 block below is a three-column row whose index 1
+   * is IP주소's value. The column rule finds both, and without this the run would have stored an IP address
+   * as the vendor code.
+   *
+   * The rule, derived from that measurement and from nothing else: three keys shown together are ONE record,
+   * so they are one row. Labels that resolved to exactly one cell on their own are the anchors; if at least
+   * two of them agree on a row, that row is the credential row, and an ambiguous label keeps only the
+   * candidate that is IN it — and only if exactly one is.
+   *
+   * No row ordinal is hardcoded: the row is whatever the unambiguous labels resolved to. No text is read:
+   * candidates are chosen by row identity, never by what they contain. Fewer than two anchors, anchors that
+   * disagree, or an ambiguous label with zero or several candidates in that row all leave it unresolved.
+   */
+  function corroborateByRow(rows) {
+    var anchors = [];
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].cell && rows[i].cellResolvedBy === 'DIRECT' && typeof rows[i].cellRowOrdinal === 'number' && rows[i].cellRowOrdinal >= 0) {
+        anchors.push(rows[i].cellRowOrdinal);
+      }
+    }
+    if (anchors.length < 2) { return null; }
+    for (var a = 1; a < anchors.length; a++) { if (anchors[a] !== anchors[0]) { return null; } }
+    var rowOrdinal = anchors[0];
+    for (var r = 0; r < rows.length; r++) {
+      var row = rows[r];
+      if (row.cell || !row.candidateCells || row.candidateCells.length < 2) { continue; }
+      var inRow = [];
+      for (var c = 0; c < row.candidateCells.length; c++) {
+        if (row.candidateCells[c].rowOrdinal === rowOrdinal) { inRow.push(c); }
+      }
+      /* Exactly one, or it stays unresolved. Two candidates in one row is a shape no rule here can split. */
+      if (inRow.length !== 1) { continue; }
+      row.cell = row.resolvedCandidates[inRow[0]];
+      row.cellResolvedBy = 'ROW_CORROBORATION';
+      row.cellRowOrdinal = rowOrdinal;
+    }
+    return rowOrdinal;
   }
   function resolveAll(specs) {
     var rows = [];
     for (var i = 0; i < specs.length; i++) { rows.push(resolveOne(specs[i])); }
+    var credentialRow = corroborateByRow(rows);
+    for (var d = 0; d < rows.length; d++) {
+      describeCell(rows[d]);
+      if (credentialRow !== null) { rows[d].credentialRowOrdinal = credentialRow; }
+    }
     /* Two labels pointing at one element is not two readings. Marked on BOTH, so neither can be used. */
     for (var a = 0; a < rows.length; a++) {
       if (!rows[a].cell) { continue; }
@@ -212,6 +271,8 @@ ${RESOLVER_FRAGMENT}
     if (typeof r.cellInputCount === 'number') { out.cellInputCount = r.cellInputCount; }
     if (typeof r.tableOrdinal === 'number') { out.tableOrdinal = r.tableOrdinal; }
     if (typeof r.labelColumnIndex === 'number') { out.labelColumnIndex = r.labelColumnIndex; }
+    if (r.cellResolvedBy) { out.cellResolvedBy = r.cellResolvedBy; }
+    if (typeof r.credentialRowOrdinal === 'number') { out.credentialRowOrdinal = r.credentialRowOrdinal; }
     if (r.candidateCells && r.candidateCells.length) { out.candidateCells = r.candidateCells; }
     if (r.cellDuplicate) { out.cellDuplicate = true; }
     if (r.scanTruncated) { out.scanTruncated = true; }
@@ -260,7 +321,9 @@ ${RESOLVER_FRAGMENT}
     var r = resolved[i];
     if (r.labelVisibleCount !== 1) { return { ok: false, reason: 'LABEL_NOT_UNIQUE', id: r.id }; }
     if (!r.association || r.association === 'NONE') { return { ok: false, reason: 'NO_ASSOCIATION', id: r.id }; }
-    if (r.candidateCellCount !== 1 || !r.cell) { return { ok: false, reason: 'CELL_NOT_UNIQUE', id: r.id }; }
+    /* candidateCellCount is the RAW count and stays the evidence; what licenses a read is that exactly one
+       cell survived — directly, or by same-row corroboration against the labels that were unambiguous. */
+    if (!r.cell || !r.cellResolvedBy) { return { ok: false, reason: r.candidateCellCount > 1 ? 'ROW_NOT_CORROBORATED' : 'CELL_NOT_UNIQUE', id: r.id }; }
     if (typeof r.cellInputCount !== 'number' || r.cellInputCount > 1) { return { ok: false, reason: 'CELL_SHAPE_AMBIGUOUS', id: r.id }; }
     if (r.cellDuplicate) { return { ok: false, reason: 'CELL_COLLISION', id: r.id }; }
     var text = cellText(r.cell);

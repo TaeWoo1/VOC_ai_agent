@@ -130,6 +130,14 @@ export interface CredentialCellReading {
   /** True when the label scan exceeded its cap, so the uniqueness count is not trustworthy. */
   readonly scanTruncated?: boolean;
   /**
+   * HOW the cell was settled. `DIRECT` = the column resolved to exactly one. `ROW_CORROBORATION` = the column
+   * was ambiguous and exactly one candidate sat in the row the unambiguous labels agreed on. Absent = it was
+   * not settled, and nothing may read it.
+   */
+  readonly cellResolvedBy?: "DIRECT" | "ROW_CORROBORATION";
+  /** The row the unambiguous labels agreed on, when at least two of them did. Never a hardcoded ordinal. */
+  readonly credentialRowOrdinal?: number;
+  /**
    * The label's own column index within its header row. Present whenever the label resolved uniquely inside a
    * row — including when the column then resolved to MORE than one cell, because that is exactly the case where
    * the index is the thing a reader needs.
@@ -229,6 +237,13 @@ export const CREDENTIAL_CELL_REFUSALS = [
   "NO_ASSOCIATION",
   /** The association resolved to zero cells, or to more than one. */
   "CELL_NOT_UNIQUE",
+  /**
+   * The column resolved to several cells and same-row corroboration could not reduce it to one — fewer than
+   * two unambiguous labels to anchor on, anchors that disagreed about the row, or zero/several candidates
+   * inside the corroborated row. Distinct from `CELL_NOT_UNIQUE` so "the column is ambiguous" and "the
+   * ambiguity survived corroboration" are different facts in the record.
+   */
+  "ROW_NOT_CORROBORATED",
   /** The cell holds more than one field, so no rule here says which one is the value. */
   "CELL_SHAPE_AMBIGUOUS",
   /** The cell resolved, and is empty. A locator that reads nothing is not a locator. */
@@ -281,7 +296,12 @@ export function credentialCellsResolved(
     if (!reading) return { ok: false, reason: "MISSING_READING", id };
     if (reading.labelVisibleCount !== 1) return { ok: false, reason: "LABEL_NOT_UNIQUE", id };
     if (!reading.association || reading.association === "NONE") return { ok: false, reason: "NO_ASSOCIATION", id };
-    if (reading.candidateCellCount !== 1) return { ok: false, reason: "CELL_NOT_UNIQUE", id };
+    // The RAW count stays the evidence; what licenses a read is that exactly one cell survived — directly, or
+    // by same-row corroboration. A column that is ambiguous and stayed ambiguous is the second reason.
+    if (reading.cellResolvedBy === undefined) {
+      const ambiguous = (reading.candidateCellCount ?? 0) > 1;
+      return { ok: false, reason: ambiguous ? "ROW_NOT_CORROBORATED" : "CELL_NOT_UNIQUE", id };
+    }
     // An unmeasured input count is not a zero: a census that never answered cannot license an extraction rule.
     if (reading.cellInputCount === undefined || reading.cellInputCount > 1) {
       return { ok: false, reason: "CELL_SHAPE_AMBIGUOUS", id };
@@ -384,6 +404,10 @@ export function sanitizeCredentialCellCensus(raw: unknown, requestedIds: readonl
     const candidateCellCount = count(row["candidateCellCount"]);
     const cellTag = association === "NONE" ? undefined : tag(row["cellTag"]);
     const cellInputCount = count(row["cellInputCount"]);
+    const resolvedByRaw = row["cellResolvedBy"];
+    const cellResolvedBy =
+      resolvedByRaw === "DIRECT" || resolvedByRaw === "ROW_CORROBORATION" ? resolvedByRaw : undefined;
+    const credentialRowOrdinal = count(row["credentialRowOrdinal"]);
     const columnIndex = count(row["labelColumnIndex"]);
     const candidates = candidateCells(row["candidateCells"]);
     const ordinalRaw = row["tableOrdinal"];
@@ -399,6 +423,8 @@ export function sanitizeCredentialCellCensus(raw: unknown, requestedIds: readonl
       ...(cellInputCount !== undefined ? { cellInputCount } : {}),
       ...(tableOrdinal !== undefined ? { tableOrdinal } : {}),
       ...(columnIndex !== undefined ? { labelColumnIndex: columnIndex } : {}),
+      ...(cellResolvedBy ? { cellResolvedBy } : {}),
+      ...(credentialRowOrdinal !== undefined ? { credentialRowOrdinal } : {}),
       ...(candidates.length > 0 ? { candidateCells: candidates } : {}),
       ...(row["cellDuplicate"] === true ? { cellDuplicate: true } : {}),
       ...(typeof nonEmptyRaw === "boolean" ? { cellNonEmpty: nonEmptyRaw } : {}),
