@@ -41,7 +41,6 @@ const KEY_FOR_TARGET: Readonly<Partial<Record<CoupangIssuanceTarget, string>>> =
   vendor_method: "actionWindow.coupangIssuance.vendorMethod",
   vendor_confirm: "actionWindow.coupangIssuance.vendorConfirm",
   credentials: "actionWindow.coupangIssuance.copyKeys",
-  return: "actionWindow.coupangIssuance.return",
 };
 
 /**

@@ -65,15 +65,16 @@ function driverFor(
 
 describe("SellerOps로 돌아가기 — the return actually happens", () => {
   it("**fires when the seller presses it**, and the step still completes", async () => {
+    // The press is now the CREDENTIALS step's own CTA (`SellerOps에 연결`) — the walk's last button. There is
+    // no separate return step: it existed only because this step used to ask for a hand-copy.
     const wired = driverFor({ pressed: true, wired: true });
-    expect(await wired.driver.observeUserAction("return")).toBe(true);
+    expect(await wired.driver.observeUserAction("credentials")).toBe(true);
     expect(wired.returns).toBe(1);
   });
 
   it("does NOT fire on any other step's press — nothing moves the window mid-walk", async () => {
-    // The seller still has work on WING at every other checkpoint, including the one where the keys are on
-    // screen waiting to be copied.
-    for (const target of ["issue", "confirm_purpose", "vendor_method", "credentials"] as CoupangIssuanceTarget[]) {
+    // The seller still has work on WING at every other checkpoint — including the one that creates the key.
+    for (const target of ["issue", "confirm_purpose", "vendor_method", "vendor_confirm"] as CoupangIssuanceTarget[]) {
       const wired = driverFor({ pressed: true, wired: true });
       expect(await wired.driver.observeUserAction(target), target).toBe(true);
       expect(wired.returns, target).toBe(0);
@@ -82,7 +83,7 @@ describe("SellerOps로 돌아가기 — the return actually happens", () => {
 
   it("does not fire while the seller has NOT pressed it — an elapsed window returns them nowhere", async () => {
     const wired = driverFor({ pressed: false, wired: true });
-    expect(await wired.driver.observeUserAction("return")).toBe(false);
+    expect(await wired.driver.observeUserAction("credentials")).toBe(false);
     expect(wired.returns).toBe(0);
   });
 
@@ -90,7 +91,7 @@ describe("SellerOps로 돌아가기 — the return actually happens", () => {
     // A capability that is absent must degrade to the old behaviour (a completion with no move), never to a
     // stalled last step. The driver logs `aw_coupang_return_not_wired` so the silence is on the record.
     const bare = driverFor({ pressed: true, wired: false });
-    expect(await bare.driver.observeUserAction("return")).toBe(true);
+    expect(await bare.driver.observeUserAction("credentials")).toBe(true);
     expect(bare.returns).toBe(0);
   });
 
@@ -101,6 +102,6 @@ describe("SellerOps로 돌아가기 — the return actually happens", () => {
       page as any,
       { observeTimeoutMs: 50, returnToSellerOps: async () => Promise.reject(new Error("no window")) },
     );
-    await expect(driver.observeUserAction("return")).resolves.toBe(true);
+    await expect(driver.observeUserAction("credentials")).resolves.toBe(true);
   });
 });

@@ -879,10 +879,17 @@ const ADVANCE_BUTTON_LABEL: Readonly<Partial<Record<CoupangIssuanceTarget, strin
   // and the step advances by itself the moment WING shows the keys — this button is the fallback for a screen
   // that did not change the way the measurement says it should.
   vendor_confirm: "확인을 눌렀어요 · 다음",
-  credentials: "복사했어요 · 다음",
-  // The return step hands focus back to SellerOps; the SellerOps tab then owns the "enter keys" CTA, so this
-  // on-page button is purely "go back" (avoids two near-identical "enter keys" buttons across the two windows).
-  return: "SellerOps로 돌아가기",
+  /**
+   * **The walk's last button, and the handoff's own CTA.**
+   *
+   * It said `복사했어요 · 다음` while the panel told the seller to copy three keys by hand. That is the thing
+   * this unit removes: SellerOps fetches them, under a confirmation the seller presses on a SellerOps surface,
+   * so asking a person to transcribe a 40-character secret is work the product created for itself.
+   *
+   * Pressing this returns to SellerOps — there is no separate return step any more. Two consecutive buttons
+   * both meaning "go to SellerOps" is exactly the confusion the old `return` step's own comment warned about.
+   */
+  credentials: "SellerOps에 연결",
 };
 
 /**
@@ -1077,7 +1084,6 @@ const OVERLAY_STEP: Readonly<Record<CoupangIssuanceTarget, number>> = {
   vendor_method: 6,
   vendor_confirm: 7,
   credentials: 8,
-  return: 9,
 };
 
 /**
@@ -1127,8 +1133,9 @@ export const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string
   // screen where they must not be. What is true is that a real key comes into existence and live account state
   // changes; removing it later is a separate act, not an undo.
   vendor_confirm: "업체명 · URL을 입력하고, IP 주소는 입력한 뒤 옆의 '추가'를 눌러 등록하세요 — 추가하지 않으면 IP가 등록되지 않습니다. 그 다음 '확인'을 직접 누르세요. ⚠ 여기서 실제 API 키가 발급되어 라이브 계정 상태가 바뀝니다(지우려면 나중에 별도의 삭제 작업이 필요합니다). SellerOps는 이 버튼을 절대 누르지 않고, 입력란에 아무것도 쓰지 않습니다. 키가 화면에 표시되면 자동으로 넘어갑니다.",
-  credentials: "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요. SellerOps는 값을 읽지 않습니다. 복사했으면 아래 버튼을 누르세요.",
-  return: "아래 버튼을 눌러 SellerOps로 돌아가세요. 복사한 키를 입력하면 연결이 끝납니다.",
+  // No copy request. The seller issued the key; SellerOps fetches what it needs, and the ASKING happens on a
+  // SellerOps surface where a press can be verified — not here, on a marketplace page.
+  credentials: "API 키 발급이 확인됐습니다. SellerOps가 연결에 필요한 정보를 안전하게 가져올 준비가 됐어요. 아래 버튼을 누르시면 SellerOps로 돌아가고, 거기서 가져와도 될지 한 번 더 여쭙니다.",
 };
 
 /**
@@ -1156,8 +1163,7 @@ export const OPERATOR_STEP_BRIEF: Readonly<Record<CoupangIssuanceTarget, string>
   // with an empty form.
   vendor_method: "'자체개발(직접입력)'을 직접 선택한 뒤, 업체명 · URL을 입력하고 IP는 '추가'까지 누르세요. 다 채우면 자동으로 넘어갑니다.",
   vendor_confirm: "⚠ 이 화면의 '확인'에서 실제 API 키가 발급됩니다. 업체명 · URL을 입력하고 IP는 '추가'까지 누른 뒤, '확인'을 직접 누르세요.",
-  credentials: "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요.",
-  return: "아래 버튼을 눌러 SellerOps로 돌아가세요.",
+  credentials: "API 키 발급이 확인됐습니다. SellerOps가 연결에 필요한 정보를 가져올 준비가 됐어요.",
 };
 
 /**
@@ -1215,8 +1221,7 @@ export const OPERATOR_STEP_TITLES: Readonly<Record<CoupangIssuanceTarget, string
   // The one chip in the walk that names a CONSEQUENCE, because this control creates a real credential.
   // Every other chip names the control; this is the exception the panel copy alone should not have to carry.
   vendor_confirm: "'확인' 누르기 (키 발급)",
-  credentials: "키 3개 복사",
-  return: "SellerOps로 돌아가기",
+  credentials: "SellerOps에 연결",
 };
 
 /** A browser context whose newest tab may hold the step the seller opened. Structural subset of Playwright's. */
@@ -1253,12 +1258,14 @@ export interface CoupangWingIssuanceDriverOptions {
 }
 
 /**
- * FIXED, synthetic guidance signatures for the two guidance-only targets (`reach_open_api`, `return`). Neither is
- * a WING control — they are text guidance — so these are NOT derived from any page element. Stable opaque 16-hex
- * constants so the engine's locate↔highlight anti-drift check (which requires the two sigs to match) still passes.
+ * FIXED, synthetic guidance signature for the one guidance-only target (`reach_open_api`). It is not a WING
+ * control — it is text guidance — so this is NOT derived from any page element. A stable opaque 16-hex constant
+ * so the engine's locate↔highlight anti-drift check (which requires the two sigs to match) still passes.
+ *
+ * There was a second, for `return`. That target is gone: the credentials step's own CTA performs the return, and
+ * that step DOES ring a real control, so it needs no synthetic signature.
  */
 const REACH_OPEN_API_GUIDANCE_SIG = "c0a9b17ec0a9b17e";
-const RETURN_GUIDANCE_SIG = "5e11e40b5e11e40b";
 /**
  * **TEXT-GUIDED steps: the ones the tutorial guides but cannot highlight.**
  *
@@ -1364,7 +1371,6 @@ const TEXT_GUIDED_SIG: Readonly<Partial<Record<CoupangIssuanceTarget, string>>> 
   reach_open_api: REACH_OPEN_API_GUIDANCE_SIG,
   confirm_purpose: "b48e2f05b48e2f05",
   terms_consent: "16d9c7ba16d9c7ba",
-  return: RETURN_GUIDANCE_SIG,
 };
 
 /**
@@ -2402,9 +2408,10 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
           }
           log("aw_coupang_vendor_form_ready", { target, readiness });
         }
-        // The one step whose button promises something OUTSIDE this page. Performed on the press and nowhere
-        // else, so nothing moves the seller's window while they still have work on WING.
-        if (target === "return") await this.returnToSellerOps();
+        // The one step whose button promises something OUTSIDE this page — now the LAST step rather than a
+        // step after it. Performed on the press and nowhere else, so nothing moves the seller's window while
+        // they still have work on WING.
+        if (target === "credentials") await this.returnToSellerOps();
         return true;
       }
       if (i % screenEvery === 0) {

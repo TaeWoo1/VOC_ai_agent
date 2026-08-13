@@ -57,7 +57,7 @@ function pressNext(eng: CoupangIssuanceEngine, nextTarget: string | null): void 
 }
 
 describe("coupang issuance engine — the linear walkthrough from the WING home", () => {
-  it("reach_open_api → verify → 발급 → purpose → 확인 → terms → key → … → return → complete, advancing each checkpoint WING-RESIDENT", () => {
+  it("reach_open_api → verify → 발급 → purpose → 확인 → terms → key → … → credentials → complete, advancing each checkpoint WING-RESIDENT", () => {
     const eng = engine();
     expect(eng.command({ type: "START_RUN", expectedRevision: 0 })).toEqual({ ok: true, idempotent: false, effect: "PROBE" });
 
@@ -85,12 +85,12 @@ describe("coupang issuance engine — the linear walkthrough from the WING home"
     driveCheckpoint(eng, "vendor_method", "vendor_confirm");
     // ⚠ THE KEY-CREATION BOUNDARY: only after the seller presses THIS 확인 can a credential exist to copy.
     driveCheckpoint(eng, "vendor_confirm", "credentials");
-    driveCheckpoint(eng, "credentials", "return");
-    // The return checkpoint's observed on-page press completes the guidance.
-    driveCheckpoint(eng, "return", null);
+    // The LAST step. Its own CTA returns the seller to SellerOps, so its observed press completes the
+    // guidance — there is no step after it to advance to.
+    driveCheckpoint(eng, "credentials", null);
     expect(eng.currentStage()).toBe("guidance_complete");
     expect(eng.view().status).toBe("COMPLETED");
-    expect(eng.view().progress).toEqual({ completedSteps: 9, totalSteps: 9 });
+    expect(eng.view().progress).toEqual({ completedSteps: 8, totalSteps: 8 });
   });
 
   it("a FE REQUEST_STEP_RECHECK still advances a checkpoint as a fallback/recovery (never the primary driver)", () => {
@@ -305,7 +305,7 @@ describe("coupang issuance engine — contract validity + NO appBranch", () => {
     expect(v.intent).toBe("API_ISSUANCE_GUIDANCE");
     expect(v.runCopyKey).toBe("actionWindow.coupangIssuance.run");
     expect(v.appBranch).toBeUndefined(); // linear flow — NEVER an appBranch
-    expect(v.currentStep?.totalSteps).toBe(9);
+    expect(v.currentStep?.totalSteps).toBe(8);
     expect(validateRunView(v)).toEqual({ ok: true });
     expect(findProhibitedFields(v)).toEqual([]);
     for (const e of eng.events()) {

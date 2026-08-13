@@ -243,8 +243,10 @@ export function coupangIssuanceStepPlan(): readonly CoupangIssuanceStepMeta[] {
     { stepNumber: 5, stepId: "aw.coupang_issuance_issue_checkpoint", copyKey: "actionWindow.coupangIssuance.issueCheckpoint", mode: "ACTION_WINDOW", copyParams: { targetKind: "issue_final" } },
     { stepNumber: 6, stepId: "aw.coupang_issuance_vendor_method", copyKey: "actionWindow.coupangIssuance.vendorMethod", mode: "ACTION_WINDOW", copyParams: { targetKind: "vendor_method" } },
     { stepNumber: 7, stepId: "aw.coupang_issuance_vendor_confirm", copyKey: "actionWindow.coupangIssuance.vendorConfirm", mode: "ACTION_WINDOW", copyParams: { targetKind: "vendor_confirm" } },
+    // The LAST step. Its ids keep the `copy_keys` spelling: they are a stable FE contract, and renaming a
+    // copyKey silently drops the panel's text if any consumer lags. What the step SAYS changed completely —
+    // it no longer asks the seller to copy anything — and its CTA performs the return that step 9 used to.
     { stepNumber: 8, stepId: "aw.coupang_issuance_copy_keys", copyKey: "actionWindow.coupangIssuance.copyKeys", mode: "ACTION_WINDOW", copyParams: { targetKind: "credentials" } },
-    { stepNumber: 9, stepId: "aw.coupang_issuance_return", copyKey: "actionWindow.coupangIssuance.return", mode: "ACTION_WINDOW", copyParams: { targetKind: "return" } },
   ];
 }
 

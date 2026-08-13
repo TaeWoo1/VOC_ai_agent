@@ -35,10 +35,11 @@ import type { CoupangIssuanceTarget } from "../../../src/action-window/coupang-i
  * measured the `확인` control, the `OPEN API` option label and the two consent sentences on the live purpose and
  * terms screens. They are now anchored, multi-ring steps, covered in
  * `coupang-wing-multi-ring-highlight.test.ts`. What remains is the two steps that are guidance rather than a
- * WING control at all: reaching a page, and going back to SellerOps. Their signatures are synthetic constants
- * derived from no element, which is the property this file is really about.
+ * WING control at all: reaching a page. Its signature is a synthetic constant derived from no element, which is
+ * the property this file is really about. `return` was the second until the credentials step absorbed it — that
+ * step rings a real control, so it is not locator-less.
  */
-const GUIDANCE_TARGETS: readonly CoupangIssuanceTarget[] = ["reach_open_api", "return"];
+const GUIDANCE_TARGETS: readonly CoupangIssuanceTarget[] = ["reach_open_api"];
 
 interface MountCall {
   dockedPanelOnly?: boolean;
@@ -292,7 +293,7 @@ describe("the panel's brief — shorter, and still safe to act on alone", () => 
 describe("the locator-less steps, continued", () => {
   it("mounts NO spotlight ring for them — a docked mount makes no claim about where a control is", async () => {
     const { driver, page } = driverWith(true);
-    await driver.highlightTarget("return");
+    await driver.highlightTarget("reach_open_api");
     // `dockedPanelOnly` is the whole claim: no anchor lookup, no ring, no dimming, no scroll.
     expect(page.mounts[0]?.dockedPanelOnly).toBe(true);
   });

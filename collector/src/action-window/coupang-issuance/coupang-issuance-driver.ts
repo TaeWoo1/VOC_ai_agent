@@ -27,7 +27,7 @@ import type { CoupangIssuanceStage } from "./coupang-issuance-stages";
  *    configuration step instead, and that `self_dev` / `vendor_info` / `call_ip` are not on the surface where
  *    this walk expects them. Left unchanged pending the Stage-2 observation — see `coupang-issuance-stages.ts`.
  *  - `credentials` — the region where the Access Key / Secret Key / 업체코드 appear (NEVER read any value).
- *  - `return` — guidance-only ("return to SellerOps").
+ *    It is the walk's LAST step: its CTA returns the seller to SellerOps, in the handoff-ready state.
  */
 export type CoupangIssuanceTarget =
   | "reach_open_api"
@@ -69,7 +69,13 @@ export type CoupangIssuanceTarget =
    */
   | "vendor_confirm"
   | "credentials"
-  | "return";
+  /**
+   * There is no `return` target. It existed because `credentials` told the seller to copy three keys and go
+   * type them in, so the walk needed a step afterwards to send them back. The keys are no longer copied by
+   * hand — `credentials` ends with `SellerOps에 연결`, which performs the return itself — and two consecutive
+   * buttons both meaning "go to SellerOps" is the confusion the old `return` step's own comment warned about.
+   */
+  ;
 
 /**
  * In flow order, which is now the MEASURED order. `self_dev` / `vendor_info` / `call_ip` are gone: the first
@@ -85,7 +91,6 @@ export const COUPANG_ISSUANCE_TARGETS: readonly CoupangIssuanceTarget[] = [
   "vendor_method",
   "vendor_confirm",
   "credentials",
-  "return",
 ];
 
 /**
@@ -106,8 +111,8 @@ export const COUPANG_ISSUANCE_TRANSITION_OBSERVE_TARGET: CoupangIssuanceTarget =
  * step copy and a "다음" advance button. The seller reads/acts on the section, then presses that on-page button;
  * the driver OBSERVES the value-free press and the checkpoint advances — the seller never bounces back to the
  * SellerOps tab. (A FE `REQUEST_STEP_RECHECK` stays valid as a fallback/recovery path — e.g. at a park.) `issue`
- * is here too — the 발급 button is highlighted and the seller presses it themselves, then the on-page "다음";
- * `return` hands focus back to SellerOps (its panel button is "돌아가기", no WING section to locate).
+ * is here too — the 발급 button is highlighted and the seller presses it themselves, then the on-page "다음".
+ * `credentials` is the LAST one: its button hands focus back to SellerOps.
  */
 export const COUPANG_ISSUANCE_CHECKPOINT_TARGETS: readonly CoupangIssuanceTarget[] = [
   "issue",
@@ -117,7 +122,6 @@ export const COUPANG_ISSUANCE_CHECKPOINT_TARGETS: readonly CoupangIssuanceTarget
   "vendor_method",
   "vendor_confirm",
   "credentials",
-  "return",
 ];
 
 /** True for a same-page viewport checkpoint (advance on operator "다음"); false only for the transition-observe. */
@@ -140,8 +144,11 @@ export const COUPANG_TARGET_BARRIER_STAGE: Readonly<Record<CoupangIssuanceTarget
   // The key-creation boundary. `issue_final`'s barrier kept its name through two corrections and finally stops
   // claiming to be this one.
   vendor_confirm: "checkpoint_issue_key",
+  // The stage NAME is legacy. It was minted when this step told the seller to copy three keys by hand, which
+  // it no longer does — it now confirms the issuance and hands off. Renaming a stage is a shared-contract
+  // change (the renewal walk and the NAVER walk use the same vocabulary), so it is parked rather than done
+  // here; what matters for correctness is that the target maps to the barrier the seller is actually at.
   credentials: "guiding_copy_keys",
-  return: "return_to_sellerops",
 };
 
 /**

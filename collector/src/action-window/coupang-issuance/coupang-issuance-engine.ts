@@ -113,7 +113,6 @@ const TARGET_STEP: Readonly<Record<CoupangIssuanceTarget, number>> = {
   vendor_method: 6,
   vendor_confirm: 7,
   credentials: 8,
-  return: 9,
 };
 
 export class CoupangIssuanceEngine {
@@ -412,10 +411,9 @@ export class CoupangIssuanceEngine {
       case "vendor_confirm":
         this.currentTarget = "credentials";
         return { guide: "credentials" };
+      // The LAST step. Its own CTA performs the return, so there is no step after it to advance to — pressing
+      // it completes the walk. The seller is sent back to SellerOps by `returnToSellerOps`, not by a step.
       case "credentials":
-        this.currentTarget = "return";
-        return { guide: "return" };
-      case "return":
         return this.complete();
     }
   }

@@ -102,7 +102,7 @@ async function pressNextToComplete(io: ReturnType<typeof loopback>, engine: Coup
 }
 
 describe("coupang issuance session — the full linear walkthrough (offline)", () => {
-  it("reach → verify → 발급 → 확인 → terms → key → … → return → complete on WING-resident advances ALONE (a single START_RUN, no FE 다음)", async () => {
+  it("reach → verify → 발급 → 확인 → terms → key → … → credentials → complete on WING-resident advances ALONE (a single START_RUN, no FE 다음)", async () => {
     const { io, engine, driver, session } = build();
     startRun(io);
     await session.whenSettled();
@@ -147,13 +147,11 @@ describe("coupang issuance session — the full linear walkthrough (offline)", (
       "observe:vendor_confirm",
       "wait:vendor_confirm", // …the seller presses it; only now can a credential exist
       "locate:credentials",
-      "highlight:credentials", // copy the Access Key / Secret Key / 업체코드
+      // The LAST step: the keys are on screen, and its CTA (`SellerOps에 연결`) returns the seller. There is no
+      // separate return step — it existed only because this one used to ask for a hand-copy.
+      "highlight:credentials",
       "observe:credentials",
       "wait:credentials",
-      "locate:return",
-      "highlight:return",
-      "observe:return",
-      "wait:return",
       "cleanup",
     ]);
     // PROOF the FE never drove a step: the ONLY command the session received was the single START_RUN.
@@ -161,12 +159,12 @@ describe("coupang issuance session — the full linear walkthrough (offline)", (
     expect(commandResults).toHaveLength(1);
   });
 
-  it("keeps totalSteps a fixed 9, carrying the coupang channel + issuance intent + NO appBranch on every view", async () => {
+  it("keeps totalSteps a fixed 8, carrying the coupang channel + issuance intent + NO appBranch on every view", async () => {
     const { io, session } = build();
     startRun(io);
     await session.whenSettled();
     const totals = new Set(io.views().map((v) => v.currentStep!.totalSteps));
-    expect(totals).toEqual(new Set([9]));
+    expect(totals).toEqual(new Set([8]));
     for (const v of io.views()) {
       expect(v.intent).toBe("API_ISSUANCE_GUIDANCE");
       expect(v.channelCode).toBe("coupang");

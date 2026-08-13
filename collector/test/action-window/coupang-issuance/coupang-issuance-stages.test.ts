@@ -259,13 +259,13 @@ describe("the fence is LIFTED, and every clause of it was answered in code", () 
   });
 });
 
-describe("coupang issuance stages — the fixed 9-step plan, in the MEASURED order", () => {
-  it("is always nine steps (a fixed linear line, no branch)", () => {
+describe("coupang issuance stages — the fixed 8-step plan, in the MEASURED order", () => {
+  it("is always eight steps (a fixed linear line, no branch)", () => {
     // Seven → eight on 2026-08-10 (the old plan had steps for screens this flow never shows, and none for the
     // control that creates the key) → seven again once the purpose screen became ONE step → NINE on 2026-08-12,
     // when the vendor-method screen was measured and the walk stopped ending one screen short of the key.
-    expect(COUPANG_ISSUANCE_TOTAL_STEPS).toBe(9);
-    expect(coupangIssuanceStepPlan()).toHaveLength(9);
+    expect(COUPANG_ISSUANCE_TOTAL_STEPS).toBe(8);
+    expect(coupangIssuanceStepPlan()).toHaveLength(8);
   });
 
   it("uses the exact product-required stepIds, in flow order", () => {
@@ -278,7 +278,6 @@ describe("coupang issuance stages — the fixed 9-step plan, in the MEASURED ord
       "aw.coupang_issuance_vendor_method",
       "aw.coupang_issuance_vendor_confirm",
       "aw.coupang_issuance_copy_keys",
-      "aw.coupang_issuance_return",
     ]);
   });
 
@@ -292,7 +291,6 @@ describe("coupang issuance stages — the fixed 9-step plan, in the MEASURED ord
       "actionWindow.coupangIssuance.vendorMethod",
       "actionWindow.coupangIssuance.vendorConfirm",
       "actionWindow.coupangIssuance.copyKeys",
-      "actionWindow.coupangIssuance.return",
     ]);
   });
 
@@ -300,7 +298,7 @@ describe("coupang issuance stages — the fixed 9-step plan, in the MEASURED ord
     const plan = coupangIssuanceStepPlan();
     expect(plan.map((s) => s.mode)).toEqual([
       "AUTOMATIC_OPERATION",
-      ...Array.from({ length: 8 }, () => "ACTION_WINDOW"),
+      ...Array.from({ length: 7 }, () => "ACTION_WINDOW"),
     ]);
     expect(plan[0]!.copyParams).toBeUndefined(); // step 1 (reach) is text guidance — no highlighted control
     expect(plan.slice(1).map((s) => s.copyParams?.targetKind)).toEqual([
@@ -311,7 +309,6 @@ describe("coupang issuance stages — the fixed 9-step plan, in the MEASURED ord
       "vendor_method",
       "vendor_confirm",
       "credentials",
-      "return",
     ]);
   });
 
