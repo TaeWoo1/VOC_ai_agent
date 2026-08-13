@@ -75,6 +75,15 @@ const COPY: Record<string, string> = {
   "actionWindow.coupangRenewal.reissueCheckpoint": "재발급 버튼 직접 누르기",
   "actionWindow.coupangRenewal.copyKeys": "새 액세스 키·시크릿 키·업체코드 복사",
   "actionWindow.coupangRenewal.return": "SellerOps로 돌아와 새 키 입력",
+
+  // Coupang WING 고객문의 답변 guidance (Action Window). Unlike the issuance walk, NOTHING on the 고객문의
+  // screen has been measured, so this run highlights nothing and asserts no label — it opens the screened
+  // WING window, rests while the seller navigates and posts, and records what the seller reports. Wording
+  // must never read as 발송/전송/등록 by SellerOps: the seller posts the reply themselves.
+  "actionWindow.coupangInquiryReply.run": "쿠팡 고객문의 답변 화면 안내",
+  "actionWindow.coupangInquiryReply.openWing": "쿠팡 윙 창 열기",
+  "actionWindow.coupangInquiryReply.reachScreen": "고객문의 화면으로 직접 이동",
+  "actionWindow.coupangInquiryReply.userReply": "답변을 직접 등록",
 };
 
 // Per-step FULL instruction for the guided issuance walkthrough — so the SellerOps screen is self-sufficient
@@ -139,6 +148,18 @@ const ISSUANCE_STEP_DETAIL: Record<string, string> = {
     "업체명 · URL을 입력하고, IP 주소는 입력한 뒤 옆의 '추가'를 눌러 등록하세요 — 추가하지 않으면 IP가 등록되지 않습니다. 그 다음 '확인'을 직접 누르세요. ⚠ 여기서 실제 API 키가 발급되어 라이브 계정 상태가 바뀝니다(지우려면 나중에 별도의 삭제 작업이 필요합니다). SellerOps는 이 버튼을 절대 누르지 않고, 입력란에 아무것도 쓰지 않습니다. 키가 화면에 표시되면 자동으로 넘어갑니다.",
   "actionWindow.coupangIssuance.copyKeys":
     "API 키 발급이 확인됐습니다. SellerOps가 연결에 필요한 정보를 안전하게 가져올 준비가 됐어요. 아래 버튼을 누르시면 SellerOps로 돌아가고, 거기서 가져와도 될지 한 번 더 여쭙니다.",
+
+  // Coupang 고객문의 답변 — FULL per-step instruction. Deliberately vaguer than the issuance walk about
+  // WHERE things are: no sitting has measured this screen, so naming a menu path would be asserting a
+  // layout nobody has seen. The seller knows their own WING; SellerOps holds the draft and stays out of it.
+  "actionWindow.coupangInquiryReply.run":
+    "SellerOps가 쿠팡 윙 창을 열어 드립니다. 답변 초안은 이 화면에 있으니 보고 쓰시면 됩니다. 등록은 셀러님이 직접 하시고, SellerOps는 대신 입력하거나 등록하지 않습니다.",
+  "actionWindow.coupangInquiryReply.openWing":
+    "쿠팡 윙 창을 엽니다. 로그인은 셀러님이 직접 하세요 — SellerOps는 로그인하지 않습니다.",
+  "actionWindow.coupangInquiryReply.reachScreen":
+    "윙에서 이 문의가 있는 고객문의 화면으로 직접 이동하세요. 도착하셨으면 아래에서 알려 주세요. SellerOps는 화면을 읽지 않기 때문에 도착 여부를 스스로 알 수 없습니다.",
+  "actionWindow.coupangInquiryReply.userReply":
+    "옆의 답변 초안을 참고해 답변을 직접 등록하세요 — SellerOps는 등록 버튼을 누르지 않습니다. 마치신 뒤 결과를 알려 주시면 그대로 기록합니다(SellerOps가 등록을 확인한 것은 아닙니다).",
 };
 
 /** The FULL per-step instruction for a guided issuance step, or null when the step has no detail mapping. */
