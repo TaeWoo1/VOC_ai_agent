@@ -28,8 +28,10 @@ import { launchNaverContext } from "../profile";
 import { CoupangWingCredentialDriver } from "../action-window/coupang-wing-credential-driver";
 import {
   COUPANG_CREDENTIAL_FIELD_IDS,
+  chooseCredentialRegion,
   credentialCellsResolved,
 } from "../action-window/coupang-wing-credential-cells";
+import { CREDENTIAL_REGION_MAX_DEPTH, CREDENTIAL_REGION_VENDOR_LABELS } from "../action-window/coupang-wing-issuance-driver";
 import type { OperatorConfirmAsk } from "./operator-confirm";
 import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
 import { confirmRunGrant, runGrantRefusalMessage, type RunGrantBinding } from "./operator-run-grant";
@@ -246,6 +248,11 @@ async function main(): Promise<void> {
 
     const census = await driver.censusCredentialCells();
     const verdict = credentialCellsResolved(census, COUPANG_CREDENTIAL_FIELD_IDS);
+    // The account's key state, from the SAME census — no second reading, and no value.
+    const state = await driver.classifyCredentialState(census);
+    // …and the region the ⑧ ring has to enclose. Anchored on the value cell; `null` is a real answer.
+    const scope = await driver.measureCredentialRegionScope(CREDENTIAL_REGION_VENDOR_LABELS, CREDENTIAL_REGION_MAX_DEPTH);
+    const cleanRegion = chooseCredentialRegion(scope, COUPANG_CREDENTIAL_FIELD_IDS.length);
     // SANITIZED record → stdout. Enums, tag names, integers and one boolean per cell. No value, no selector, no
     // raw URL (the URL is reduced to a host category).
     console.log(
@@ -257,7 +264,12 @@ async function main(): Promise<void> {
           resolved: verdict.ok,
           refusal: verdict.reason,
           ...(verdict.id ? { refusalField: verdict.id } : {}),
+          credentialState: state,
           readings: census.readings,
+          regionScope: scope,
+          // `null` means NO level holds the three keys without the seller's 연동 정보 block. That is a real
+          // answer and the ring stays a blocker on it — it is never rounded up to the closest near-miss.
+          cleanRingRegion: cleanRegion,
         },
         null,
         2,
@@ -268,6 +280,11 @@ async function main(): Promise<void> {
       console.error(`⚠ The credential cells did NOT resolve (${verdict.reason}${verdict.id ? ` on ${verdict.id}` : ""}).`);
       console.error("  That is the measurement, not a failure to retry away. The handoff stays closed until a");
       console.error("  reading resolves all three — do not hand-write a locator from this output.");
+    }
+    if (!cleanRegion) {
+      console.error("");
+      console.error("⚠ No ancestor level holds the three credential values WITHOUT the vendor 연동 정보 block.");
+      console.error("  The ⑧ ring stays a blocker. Do not pick an anchor from this output.");
     }
     process.exitCode = calibrationExitCode("MEASURED", verdict.ok);
   } finally {

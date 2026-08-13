@@ -15,12 +15,15 @@ import { describe, expect, it } from "vitest";
 import {
   buildCredentialCellCensusScript,
   buildCredentialCellReadScript,
+  buildCredentialRegionScopeScript,
 } from "../../src/action-window/api-issuance-calibration/credential-cell-inpage";
 import {
   COUPANG_CREDENTIAL_FIELDS,
   COUPANG_CREDENTIAL_FIELD_IDS,
+  chooseCredentialRegion,
   credentialCellsResolved,
   sanitizeCredentialCellCensus,
+  sanitizeCredentialRegionScope,
 } from "../../src/action-window/coupang-wing-credential-cells";
 
 /* ───────────────────────────── a fake DOM with a real tree ───────────────────────────── */
@@ -74,6 +77,10 @@ class El {
   }
   descendants(): El[] {
     return this.children.flatMap((c) => [c, ...c.descendants()]);
+  }
+  /** DOM semantics: an element contains itself. The region scope relies on it. */
+  contains(other: El): boolean {
+    return other === this || this.descendants().includes(other);
   }
   querySelectorAll(sel: string): El[] {
     const wanted = sel.split(",").map((s) => s.trim().toUpperCase());
@@ -411,5 +418,133 @@ describe("the sanitizer is the boundary, not the script's good manners", () => {
       ["access_key"],
     );
     expect(credentialCellsResolved(c, ["access_key"])).toMatchObject({ ok: false, reason: "CELL_SHAPE_AMBIGUOUS" });
+  });
+});
+
+
+/* ─────────────── what the 2026-08-13 calibration refused on, and what the next one has to answer ─────────────── */
+
+const VENDOR_LABELS = [
+  { candidateQuery: "label,span,div,dt,th,strong", exactText: "업체명" },
+  { candidateQuery: "label,span,div,dt,th,strong", exactText: "IP주소" },
+  { candidateQuery: "label,span,div,dt,th,strong", exactText: "URL" },
+];
+
+function scope(root: El): ReturnType<typeof sanitizeCredentialRegionScope> {
+  return sanitizeCredentialRegionScope(
+    run<unknown>(buildCredentialRegionScopeScript(COUPANG_CREDENTIAL_FIELDS, VENDOR_LABELS, 6), root),
+  );
+}
+
+/**
+ * The live shape, as far as the readings describe it: one table, the credential header row + its value row,
+ * and a NARROWER `td`-bearing row that covers 업체코드's column index but not the other two. That is the only
+ * arrangement consistent with `candidateCellCount` being 2 / 1 / 1, and it is a HYPOTHESIS — which is exactly
+ * why the census now reports each candidate's row and width instead of a bare count.
+ */
+function narrowSecondRowTable(): El {
+  const head = el({ tag: "tr" }).add(
+    el({ tag: "th", text: "업체코드" }),
+    el({ tag: "th", text: "Access Key" }),
+    el({ tag: "th", text: "Secret Key" }),
+  );
+  const values = el({ tag: "tr" }).add(
+    el({ tag: "td", text: VENDOR }),
+    el({ tag: "td", text: ACCESS }),
+    el({ tag: "td", text: SECRET }),
+  );
+  const narrow = el({ tag: "tr" }).add(el({ tag: "td", text: "연동 정보수정" }));
+  return el({ tag: "div" }).add(
+    el({ tag: "table" }).add(el({ tag: "thead" }).add(head), el({ tag: "tbody" }).add(values, narrow)),
+  );
+}
+
+describe("the candidate detail says WHY a column resolved to more than one cell", () => {
+  it("reports each candidate's row, section and width — a bare count says nothing", () => {
+    const c = census(narrowSecondRowTable());
+    const vendor = c.readings.find((r) => r.id === "vendor_id");
+    expect(vendor?.candidateCellCount).toBe(2);
+    expect(vendor?.labelColumnIndex).toBe(0);
+    // The two candidates differ in the one way that explains the count: their rows are different WIDTHS.
+    expect(vendor?.candidateCells?.map((x) => x.rowCellCount)).toEqual([3, 1]);
+    // …and the other two labels resolve uniquely, because the narrow row does not reach their column.
+    expect(c.readings.find((r) => r.id === "access_key")?.candidateCellCount).toBe(1);
+    expect(c.readings.find((r) => r.id === "secret_key")?.candidateCellCount).toBe(1);
+  });
+
+  it("still REFUSES — the detail explains the ambiguity, it does not resolve it", () => {
+    // Nothing here picks the wider row. A rule that did would be written from one screen, which is the move
+    // this workstream has twice withdrawn.
+    expect(credentialCellsResolved(census(narrowSecondRowTable()), COUPANG_CREDENTIAL_FIELD_IDS)).toMatchObject({
+      ok: false,
+      reason: "CELL_NOT_UNIQUE",
+      id: "vendor_id",
+    });
+    expect(read(narrowSecondRowTable())).toMatchObject({ ok: false, reason: "CELL_NOT_UNIQUE" });
+  });
+
+  it("carries no value in the candidate detail", () => {
+    const serialized = JSON.stringify(census(narrowSecondRowTable()));
+    for (const secret of [VENDOR, ACCESS, SECRET]) expect(serialized).not.toContain(secret);
+  });
+});
+
+describe("the region scope — the measurement D1 rests on", () => {
+  it("finds the level holding the keys when the vendor block is OUTSIDE the table", () => {
+    const root = wingIssuedTable(); // its vendor block is a sibling `div`, not part of the table
+    const s = scope(root);
+    expect(s.anchorResolved).toBe(true);
+    expect(s.resolvedCellCount).toBe(3);
+    const clean = chooseCredentialRegion(s, 3);
+    expect(clean, "a clean level exists on this shape").not.toBeNull();
+    expect(clean!.vendorLabelCount).toBe(0);
+    expect(clean!.credentialCellCount).toBe(3);
+  });
+
+  it("**answers null when every level that holds the keys also holds the vendor block**", () => {
+    // The live shape, modelled from the readings: ONE table holding the credential header + value rows AND a
+    // narrow row whose single cell carries the 연동 정보 block. `WING_CREDENTIAL_REGION_EVIDENCE` measured
+    // exactly this from the label side (`excludeCount: 2` at TABLE); this scores it from the value side.
+    const head = el({ tag: "tr" }).add(
+      el({ tag: "th", text: "업체코드" }),
+      el({ tag: "th", text: "Access Key" }),
+      el({ tag: "th", text: "Secret Key" }),
+    );
+    const values = el({ tag: "tr" }).add(
+      el({ tag: "td", text: VENDOR }),
+      el({ tag: "td", text: ACCESS }),
+      el({ tag: "td", text: SECRET }),
+    );
+    const vendorRow = el({ tag: "tr" }).add(
+      el({ tag: "td" }).add(
+        el({ tag: "span", text: "업체명" }),
+        el({ tag: "span", text: "IP주소" }),
+        el({ tag: "span", text: "URL" }),
+      ),
+    );
+    const root = el({ tag: "div" }).add(
+      el({ tag: "table" }).add(el({ tag: "thead" }).add(head), el({ tag: "tbody" }).add(values, vendorRow)),
+    );
+    const s = scope(root);
+    // 업체코드's column reaches the narrow row too, so only two cells resolve — and the scope says so rather
+    // than pretending the anchor is complete.
+    expect(s.anchorResolved).toBe(true);
+    expect(s.resolvedCellCount).toBe(2);
+    // No level holds every credential label AND every resolved value AND none of the vendor labels.
+    expect(chooseCredentialRegion(s, 3)).toBeNull();
+    // The rows are the evidence for that, not an assertion about it.
+    expect(s.rows.some((r) => r.vendorLabelCount > 0)).toBe(true);
+  });
+
+  it("carries no value — depths, tag names and three integers", () => {
+    const serialized = JSON.stringify(scope(wingIssuedTable()));
+    for (const secret of [VENDOR, ACCESS, SECRET]) expect(serialized).not.toContain(secret);
+    expect(serialized).not.toContain("cellText");
+  });
+
+  it("an unresolvable anchor scores nothing rather than guessing a level", () => {
+    const root = el({ tag: "div" }).add(el({ tag: "div", text: "업체코드" }));
+    expect(scope(root)).toEqual({ anchorResolved: false, resolvedCellCount: 0, rows: [] });
+    expect(chooseCredentialRegion(scope(root), 3)).toBeNull();
   });
 });

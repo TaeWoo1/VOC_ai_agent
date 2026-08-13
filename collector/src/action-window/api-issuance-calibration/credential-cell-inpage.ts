@@ -131,18 +131,29 @@ const RESOLVER_FRAGMENT = `
       for (var k = 0; k < kids.length; k++) { if (isCell(kids[k])) { rowCells.push(kids[k]); } }
       var index = rowCells.indexOf(header);
       if (index < 0) { out.association = 'NONE'; return out; }
+      out.labelColumnIndex = index;
       var rows; try { rows = slice(table.querySelectorAll('tr')); } catch (e) { rows = []; }
-      var found = [];
+      var found = [], described = [];
       for (var r = 0; r < rows.length; r++) {
         if (rows[r] === row) { continue; }
         var cells = [], rk = slice(rows[r].children);
         for (var c = 0; c < rk.length; c++) { if (isCell(rk[c])) { cells.push(rk[c]); } }
         var at = cells[index];
         /* Only a TD counts: a second header row at the same index is a label, not a value. */
-        if (at && at.tagName === 'TD') { found.push(at); }
+        if (at && at.tagName === 'TD') {
+          found.push(at);
+          /* WHY there is more than one, when there is. Structure only: which row, which section, how wide. */
+          described.push({
+            rowOrdinal: r,
+            sectionTag: rows[r].parentElement ? rows[r].parentElement.tagName : 'TABLE',
+            rowCellCount: cells.length,
+            cellTag: at.tagName
+          });
+        }
       }
       out.association = found.length > 0 ? 'TH_COLUMN_TD' : 'NONE';
       out.candidateCellCount = found.length;
+      out.candidateCells = described;
       if (found.length === 1) { out.cell = found[0]; }
     }
     if (out.cell) {
@@ -200,6 +211,8 @@ ${RESOLVER_FRAGMENT}
     if (r.cellTag) { out.cellTag = r.cellTag; }
     if (typeof r.cellInputCount === 'number') { out.cellInputCount = r.cellInputCount; }
     if (typeof r.tableOrdinal === 'number') { out.tableOrdinal = r.tableOrdinal; }
+    if (typeof r.labelColumnIndex === 'number') { out.labelColumnIndex = r.labelColumnIndex; }
+    if (r.candidateCells && r.candidateCells.length) { out.candidateCells = r.candidateCells; }
     if (r.cellDuplicate) { out.cellDuplicate = true; }
     if (r.scanTruncated) { out.scanTruncated = true; }
     /* The ONE bit. Computed inside the page; the value it came from reaches no returned field. */
@@ -255,5 +268,76 @@ ${RESOLVER_FRAGMENT}
     values[r.id] = text;
   }
   return { ok: true, values: values };
+})()`;
+}
+
+/**
+ * **Score the credential VALUE cell's ancestors by what they enclose** — the measurement D1 needs.
+ *
+ * `WING_CREDENTIAL_REGION_EVIDENCE` scored the ancestors of the LABEL, found no level holding the keys without
+ * the seller's 연동 정보 block, and recorded that whether a `tbody` level would exclude it was unknown *because
+ * the anchor sat in the `thead`*. This anchors on the VALUE side instead — the side the ring has to enclose —
+ * and counts, per level: how many of the three credential labels are inside, how many of the resolved value
+ * cells are inside, and how many of 업체명 / IP주소 / URL are.
+ *
+ * A depth, a tag name, and three integers per level. It reads no value: the cells are located by the shared
+ * resolver and then only tested for CONTAINMENT, and `cellText` is never called.
+ */
+export function buildCredentialRegionScopeScript(
+  requests: readonly CredentialCellRequest[],
+  vendorLabels: readonly { candidateQuery: string; exactText: string }[],
+  maxDepth: number,
+): string {
+  return `(function () {
+  /* wing-credential-region-scope (value-free OUTPUT: { anchorResolved, resolvedCellCount, rows: [...] }) */
+${RESOLVER_FRAGMENT}
+  var SPECS = ${JSON.stringify(requests.map((r) => ({ id: r.id, candidateQuery: r.candidateQuery, exactText: r.exactText })))};
+  var VENDOR = ${JSON.stringify(vendorLabels)};
+  var MAX_DEPTH = ${JSON.stringify(maxDepth)};
+  var resolved = resolveAll(SPECS);
+  /* The labels themselves, resolved once document-wide and then tested for containment per level — the
+     alternative is re-querying the whole document at every depth, which on a live page is one reading taken
+     six times. */
+  var labelEls = [], cellEls = [];
+  for (var i = 0; i < resolved.length; i++) {
+    if (resolved[i].labelVisibleCount === 1) {
+      var m = matching(SPECS[i]);
+      if (m.visible.length === 1) { labelEls.push(m.visible[0]); }
+    }
+    if (resolved[i].cell) { cellEls.push(resolved[i].cell); }
+  }
+  if (cellEls.length === 0) { return { anchorResolved: false, resolvedCellCount: 0, rows: [] }; }
+  var vendorEls = [];
+  for (var v = 0; v < VENDOR.length; v++) {
+    var vm = matching(VENDOR[v]);
+    if (vm.visible.length > 0) { vendorEls.push(vm.visible); }
+  }
+  function groupsInside(groups, root) {
+    var n = 0;
+    for (var g = 0; g < groups.length; g++) {
+      for (var e = 0; e < groups[g].length; e++) {
+        if (root.contains && root.contains(groups[g][e])) { n++; break; }
+      }
+    }
+    return n;
+  }
+  function elementsInside(els, root) {
+    var n = 0;
+    for (var e = 0; e < els.length; e++) { if (root.contains && root.contains(els[e])) { n++; } }
+    return n;
+  }
+  var rows = [], node = cellEls[0].parentElement, depth = 1;
+  while (node && depth <= MAX_DEPTH) {
+    rows.push({
+      depth: depth,
+      tag: node.tagName,
+      credentialLabelCount: elementsInside(labelEls, node),
+      credentialCellCount: elementsInside(cellEls, node),
+      vendorLabelCount: groupsInside(vendorEls, node)
+    });
+    node = node.parentElement;
+    depth++;
+  }
+  return { anchorResolved: true, resolvedCellCount: cellEls.length, rows: rows };
 })()`;
 }

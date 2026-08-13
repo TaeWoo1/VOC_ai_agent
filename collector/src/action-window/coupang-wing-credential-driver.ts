@@ -29,13 +29,17 @@ import {
   COUPANG_CREDENTIAL_FIELD_IDS,
   credentialCellsResolved,
   sanitizeCredentialCellCensus,
+  sanitizeCredentialRegionScope,
   type CredentialCellCensus,
   type CredentialCellRefusal,
+  type CredentialRegionScope,
 } from "./coupang-wing-credential-cells";
 import {
   buildCredentialCellCensusScript,
   buildCredentialCellReadScript,
+  buildCredentialRegionScopeScript,
 } from "./api-issuance-calibration/credential-cell-inpage";
+import { coupangCredentialStateFrom, type CoupangCredentialStateReading } from "./coupang-credential-state";
 import type { CredentialReadResult } from "../credential/coupang-credential-handoff";
 
 const SETTLE_TIMEOUT_MS = 2_000;
@@ -136,6 +140,39 @@ export class CoupangWingCredentialDriver {
       associations: census.readings.map((r) => r.association ?? "NONE"),
     });
     return census;
+  }
+
+  /**
+   * **Which ancestor level holds the keys and not the seller's business details?** Value-free, and the
+   * measurement D1 rests on. Anchored on the value CELL rather than the label, because the ring has to enclose
+   * the values and the label's own chain was already measured to answer nothing.
+   */
+  async measureCredentialRegionScope(vendorLabels: readonly { candidateQuery: string; exactText: string }[], maxDepth: number): Promise<CredentialRegionScope> {
+    const raw = await this.evalStr<unknown>(
+      this.activePage(),
+      buildCredentialRegionScopeScript(COUPANG_CREDENTIAL_FIELDS, vendorLabels, maxDepth),
+    ).catch(() => null);
+    const scope = sanitizeCredentialRegionScope(raw);
+    log("aw_coupang_credential_region_scope", {
+      anchorResolved: scope.anchorResolved,
+      resolvedCellCount: scope.resolvedCellCount,
+      levels: scope.rows.length,
+    });
+    return scope;
+  }
+
+  /**
+   * **Does this account already hold a key?** `NO_KEY` / `KEY_PRESENT` / `UNKNOWN`, from the same value-free
+   * census — never a value, and `UNKNOWN` on anything that does not resolve.
+   */
+  async classifyCredentialState(census: CredentialCellCensus): Promise<CoupangCredentialStateReading> {
+    const reading = coupangCredentialStateFrom(census, COUPANG_CREDENTIAL_FIELD_IDS);
+    log("aw_coupang_credential_state", {
+      state: reading.state,
+      reason: reading.reason,
+      ...(reading.field ? { field: reading.field } : {}),
+    });
+    return reading;
   }
 
   /**

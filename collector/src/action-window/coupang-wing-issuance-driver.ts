@@ -237,6 +237,13 @@ const CREDENTIAL_REGION_MUST_CONTAIN: readonly { candidateQuery: string; exactTe
 ]);
 
 /** …and the labels whose presence means the level has reached past the keys. Taken from the vendor-form specs. */
+export const CREDENTIAL_REGION_VENDOR_LABELS: readonly { candidateQuery: string; exactText: string }[] = Object.freeze(
+  ["stage2.vendor_info.baseline", "stage2.vendor_url.url", "stage2.call_ip.ip_addr"].map((id) => {
+    const spec = wingCandidateSpecById(id);
+    return { candidateQuery: spec.candidateQuery, exactText: spec.exactText };
+  }),
+);
+
 const CREDENTIAL_REGION_MUST_EXCLUDE: readonly { candidateQuery: string; exactText: string }[] = Object.freeze(
   ["stage2.vendor_info.baseline", "stage2.vendor_url.url"].map((id) => {
     const spec = wingCandidateSpecById(id);
@@ -245,7 +252,7 @@ const CREDENTIAL_REGION_MUST_EXCLUDE: readonly { candidateQuery: string; exactTe
 );
 
 /** How far up the chain the scope is scored. Six levels is more than the observed `TH → TR → THEAD → TABLE`. */
-const CREDENTIAL_REGION_MAX_DEPTH = 6;
+export const CREDENTIAL_REGION_MAX_DEPTH = 6;
 
 /**
  * **The credential region, MEASURED — and the measurement refutes the premise it was taken under.**

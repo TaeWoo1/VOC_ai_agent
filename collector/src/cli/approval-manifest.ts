@@ -246,6 +246,17 @@ export const APPROVAL_ACTIONS = [
   // trusted operator confirmation, and taken at most once per run — not a poll, not a retry, not a per-field
   // sequence. Every other member of this enum exists on the promise that no value crosses the boundary; this one
   // is the exception, and it says so in the list the approval gate validates rather than only in prose.
+  // Read-only CREDENTIAL-REGION scope: for each ancestor level of a credential VALUE cell, how many of the
+  // three credential labels are inside, how many of the resolved value cells are, and how many of
+  // 업체명 / IP주소 / URL are. A depth, a tag name, three integers. It reads no value — the cells are located
+  // and then only tested for CONTAINMENT. It is what answers whether a ring can enclose the keys WITHOUT the
+  // seller's own business details, a question `WING_CREDENTIAL_REGION_EVIDENCE` recorded as unanswerable from
+  // the label side because the anchor sits in the `thead`.
+  "MEASURE_CREDENTIAL_REGION_SCOPE",
+  // Value-free ACCOUNT KEY STATE: NO_KEY / KEY_PRESENT / UNKNOWN, derived from the census above and its one
+  // non-emptiness bit. No value is read, and `UNKNOWN` never starts an issuance — a wrong NO_KEY would create
+  // a second real key on a live account, so the classifier requires a POSITIVE reading for it.
+  "CLASSIFY_CREDENTIAL_KEY_STATE",
   "READ_CREDENTIAL_VALUES_ONCE",
   // **Put those values on a socket.** One POST to the SellerOps backend's own credential endpoint, over
   // loopback, which stores them through the existing vault and verifies them with a read-only Coupang API call.
@@ -1039,6 +1050,8 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
       "WAIT_OPERATOR_LOGIN_NAV",
       "CLASSIFY_SANITIZED_PAGE_CATEGORY",
       "MEASURE_CREDENTIAL_CELL_STRUCTURE",
+      "MEASURE_CREDENTIAL_REGION_SCOPE",
+      "CLASSIFY_CREDENTIAL_KEY_STATE",
     ],
     // It measures where a value SITS; it never rings it. A ring on a credential cell would be pointing the
     // seller at the thing this run promises not to read.
@@ -1055,6 +1068,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
       "CLASSIFY_SANITIZED_PAGE_CATEGORY",
       // The pre-flight the read itself repeats: the same resolution, measured before anything is extracted.
       "MEASURE_CREDENTIAL_CELL_STRUCTURE",
+      "CLASSIFY_CREDENTIAL_KEY_STATE",
       "READ_CREDENTIAL_VALUES_ONCE",
       "HAND_CREDENTIAL_TO_SELLEROPS_BACKEND",
     ],

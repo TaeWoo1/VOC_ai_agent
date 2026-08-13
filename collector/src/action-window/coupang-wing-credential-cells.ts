@@ -129,10 +129,89 @@ export interface CredentialCellReading {
   readonly tableOrdinal?: number;
   /** True when the label scan exceeded its cap, so the uniqueness count is not trustworthy. */
   readonly scanTruncated?: boolean;
+  /**
+   * The label's own column index within its header row. Present whenever the label resolved uniquely inside a
+   * row — including when the column then resolved to MORE than one cell, because that is exactly the case where
+   * the index is the thing a reader needs.
+   */
+  readonly labelColumnIndex?: number;
+  /**
+   * One entry per candidate cell the column resolved to, in document order. Structure only: which row it is,
+   * which section that row is in, and how many cells that row has.
+   *
+   * It exists because `candidateCellCount: 2` is a refusal that says nothing about WHY. The 2026-08-13
+   * calibration returned exactly that for 업체코드 while `Access Key` and `Secret Key` each resolved to one —
+   * which is a fact about the second row's WIDTH, and no count alone can say so. Measuring it is the alternative
+   * to inferring it, and inferring it is what this workstream has twice had to withdraw.
+   */
+  readonly candidateCells?: readonly CredentialCandidateCell[];
+}
+
+/** One candidate value cell, as structure. No text, no attribute, no identity. */
+export interface CredentialCandidateCell {
+  /** The candidate's row position among the table's rows, in document order. */
+  readonly rowOrdinal: number;
+  /** The tag of the row's parent — `THEAD` / `TBODY` / `TABLE`. */
+  readonly sectionTag: string;
+  /** How many `th`/`td` cells that row holds. A narrower row cannot be the credential row. */
+  readonly rowCellCount: number;
+  /** The candidate's own tag. */
+  readonly cellTag: string;
 }
 
 export interface CredentialCellCensus {
   readonly readings: readonly CredentialCellReading[];
+}
+
+/**
+ * **One ancestor level of the credential VALUE cell, scored by what it encloses.** The measurement D1 needs and
+ * which has never been taken.
+ *
+ * `WING_CREDENTIAL_REGION_EVIDENCE` scored the ancestors of the LABEL and found no level holding the keys
+ * without the seller's 연동 정보 block — and it recorded, in its own `notEstablished` list, that whether a
+ * `tbody` level would exclude that block was unknown, because the anchor was in the `thead`. This scores from
+ * the VALUE side instead, which is the side the ring has to enclose.
+ *
+ * Counts of matched fixed labels and of resolved cells. Never their text, never a value, never a selector.
+ */
+export interface CredentialRegionScopeRow {
+  /** 1 = the value cell's parent. The cell itself is never a row: one value is not the region. */
+  readonly depth: number;
+  readonly tag: string;
+  /** How many of the three credential LABELS paint inside this level. */
+  readonly credentialLabelCount: number;
+  /** How many of the resolved credential VALUE CELLS are inside it. */
+  readonly credentialCellCount: number;
+  /** How many of 업체명 / IP주소 / URL paint inside it. The first non-zero level is one level too far. */
+  readonly vendorLabelCount: number;
+}
+
+export interface CredentialRegionScope {
+  /** Whether a value cell resolved at all. Nothing below is read if not. */
+  readonly anchorResolved: boolean;
+  /** How many of the three value cells resolved uniquely — the basis the counts below are relative to. */
+  readonly resolvedCellCount: number;
+  readonly rows: readonly CredentialRegionScopeRow[];
+}
+
+/**
+ * **The SHALLOWEST level that holds every credential label and value and none of the vendor block — or `null`.**
+ *
+ * `null` is a real answer and must not be rounded up to "the closest one that nearly works". The product-owner
+ * rule for D1 is explicit: if no clean region is measured, the ring stays a blocker rather than being pointed
+ * at an anchor somebody chose.
+ */
+export function chooseCredentialRegion(
+  scope: CredentialRegionScope,
+  labelCount: number,
+): CredentialRegionScopeRow | null {
+  if (!scope.anchorResolved || scope.resolvedCellCount === 0) return null;
+  for (const row of [...scope.rows].sort((a, b) => a.depth - b.depth)) {
+    if (row.credentialLabelCount === labelCount && row.credentialCellCount === scope.resolvedCellCount && row.vendorLabelCount === 0) {
+      return row;
+    }
+  }
+  return null;
 }
 
 /**
@@ -215,6 +294,9 @@ export function credentialCellsResolved(
 
 const ASSOCIATIONS: ReadonlySet<string> = new Set<string>(CREDENTIAL_CELL_ASSOCIATIONS);
 
+/** How many candidate cells a reading may describe. A column with more than this is not a credential column. */
+export const CREDENTIAL_CANDIDATE_CELL_LIMIT = 8;
+
 function count(raw: unknown): number | undefined {
   return typeof raw === "number" && Number.isInteger(raw) && raw >= 0 ? raw : undefined;
 }
@@ -225,6 +307,43 @@ function count(raw: unknown): number | undefined {
  */
 function tag(raw: unknown): string | undefined {
   return typeof raw === "string" && /^[A-Z][A-Z0-9]{0,19}$/.test(raw) ? raw : undefined;
+}
+
+/** Fold the candidate list, dropping any row that is not four well-shaped structural facts. */
+function candidateCells(raw: unknown): readonly CredentialCandidateCell[] {
+  if (!Array.isArray(raw)) return [];
+  const out: CredentialCandidateCell[] = [];
+  for (const row of raw as unknown[]) {
+    if (!row || typeof row !== "object") continue;
+    const r = row as Record<string, unknown>;
+    const rowOrdinal = count(r["rowOrdinal"]);
+    const sectionTag = tag(r["sectionTag"]);
+    const rowCellCount = count(r["rowCellCount"]);
+    const cellTag = tag(r["cellTag"]);
+    if (rowOrdinal === undefined || sectionTag === undefined || rowCellCount === undefined || cellTag === undefined) continue;
+    out.push({ rowOrdinal, sectionTag, rowCellCount, cellTag });
+  }
+  return out.slice(0, CREDENTIAL_CANDIDATE_CELL_LIMIT);
+}
+
+/** Fold a raw region-scope answer into the declared shape, dropping anything else. Fail-closed and total. */
+export function sanitizeCredentialRegionScope(raw: unknown): CredentialRegionScope {
+  const obj = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  if (obj["anchorResolved"] !== true) return { anchorResolved: false, resolvedCellCount: 0, rows: [] };
+  const rows: CredentialRegionScopeRow[] = [];
+  for (const r of Array.isArray(obj["rows"]) ? (obj["rows"] as unknown[]) : []) {
+    if (!r || typeof r !== "object") continue;
+    const row = r as Record<string, unknown>;
+    const depth = count(row["depth"]);
+    const t = tag(row["tag"]);
+    const credentialLabelCount = count(row["credentialLabelCount"]);
+    const credentialCellCount = count(row["credentialCellCount"]);
+    const vendorLabelCount = count(row["vendorLabelCount"]);
+    if (depth === undefined || depth < 1 || t === undefined) continue;
+    if (credentialLabelCount === undefined || credentialCellCount === undefined || vendorLabelCount === undefined) continue;
+    rows.push({ depth, tag: t, credentialLabelCount, credentialCellCount, vendorLabelCount });
+  }
+  return { anchorResolved: true, resolvedCellCount: count(obj["resolvedCellCount"]) ?? 0, rows };
 }
 
 /**
@@ -265,6 +384,8 @@ export function sanitizeCredentialCellCensus(raw: unknown, requestedIds: readonl
     const candidateCellCount = count(row["candidateCellCount"]);
     const cellTag = association === "NONE" ? undefined : tag(row["cellTag"]);
     const cellInputCount = count(row["cellInputCount"]);
+    const columnIndex = count(row["labelColumnIndex"]);
+    const candidates = candidateCells(row["candidateCells"]);
     const ordinalRaw = row["tableOrdinal"];
     const tableOrdinal =
       typeof ordinalRaw === "number" && Number.isInteger(ordinalRaw) && ordinalRaw >= -1 ? ordinalRaw : undefined;
@@ -277,6 +398,8 @@ export function sanitizeCredentialCellCensus(raw: unknown, requestedIds: readonl
       ...(cellTag ? { cellTag } : {}),
       ...(cellInputCount !== undefined ? { cellInputCount } : {}),
       ...(tableOrdinal !== undefined ? { tableOrdinal } : {}),
+      ...(columnIndex !== undefined ? { labelColumnIndex: columnIndex } : {}),
+      ...(candidates.length > 0 ? { candidateCells: candidates } : {}),
       ...(row["cellDuplicate"] === true ? { cellDuplicate: true } : {}),
       ...(typeof nonEmptyRaw === "boolean" ? { cellNonEmpty: nonEmptyRaw } : {}),
     };

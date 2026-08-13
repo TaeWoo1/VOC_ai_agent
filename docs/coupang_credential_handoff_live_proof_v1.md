@@ -119,8 +119,80 @@ EXISTING run, not start a new flow. The WING window stays open and untouched eit
 
 ---
 
+### Backlog — copy-friendly connection details (deployment polish, not a blocker)
+
+The vendor form asks the seller for three things SellerOps already knows: 업체명, the SellerOps URL, and the
+fixed API-call IP. On 2026-08-13 the operator typed `http://localhost:5173/connect` into WING's URL field,
+which is a development origin on a live marketplace record.
+
+- **one source**: backend/config owns all three; the FE renders them and never re-types them
+- **copy per field, and copy-all**
+- **`localhost` must be unreachable in production** — a build that could show a loopback origin here is the
+  defect, not the copy that displayed it
+
+Not in this unit and not a merge blocker. Recorded here because the live run is where it surfaced.
+
 ## Phase 2 — cell calibration
 
-Pending. Fresh `COUPANG_WING_CREDENTIAL_CELL_CALIBRATION` bootstrap, its own grant, on the key issued in
-phase 1 — reusing that live state rather than issuing anything further. No new key, no deletion, no
-reissue.
+### Sitting 1 — REFUSED (`CELL_NOT_UNIQUE`), 2026-08-13
+
+`apr-18727aabc978` / `wt-a6648aaa792c` / `8284ae2e`. Grant `GRANTED` 12:27:03; checkpoint confirmed
+12:28:06 with `provenance: OPERATOR_UI_CONFIRMED`. Surface classified `open_api_issuance`. **Exit 5** —
+measured, and the cells did not resolve.
+
+| label | visible | tag | association | candidates | cellTag | inputs | table | nonEmpty |
+|---|---|---|---|---|---|---|---|---|
+| 업체코드 | 1 | `TH` | `TH_COLUMN_TD` | **2** | — | — | — | — |
+| Access Key | 1 | `TH` | `TH_COLUMN_TD` | 1 | `TD` | 0 | 1 | true |
+| Secret Key | 1 | `TH` | `TH_COLUMN_TD` | 1 | `TD` | 0 | 1 | true |
+
+**Established.** The shape is column-headed, for all three — `TH_COLUMN_TD` fired and `TH_NEXT_TD` did not,
+corroborating the walk's own `association: "NONE"`. The value cells are plain `TD` holding TEXT
+(`cellInputCount: 0`), so extraction is `textContent` and not an input value — a real open question, since a
+copyable key is as often a readonly input. Access Key and Secret Key resolve uniquely and are non-empty.
+
+**Also established, incidentally and usefully:** this was a fresh window after the operator re-navigated, and
+both keys read non-empty — so **WING redisplays the Secret Key on the already-issued screen**. The manual-entry
+fallback survives a window close.
+
+**Not established: which of 업체코드's two candidate cells is the value.** Access Key and Secret Key each found
+one, so the second row is narrower than the credential row — it covers 업체코드's column index and not theirs.
+That is an INFERENCE about the second row's width, and no locator was built on it. The handoff stays refused
+(`WING_CREDENTIAL_CELLS_CALIBRATED` is still `false`), and D1 is unanswered because the region was never scored
+from the value side.
+
+### What sitting 2 measures, and why it is a measurement rather than a rule
+
+Two value-free additions, both declared capabilities:
+
+- **`MEASURE_CREDENTIAL_CELL_STRUCTURE` gains candidate DETAIL** — per label its own column index, and per
+  candidate cell the row ordinal, the section tag, and that row's cell count. `candidateCellCount: 2` is a
+  refusal that says nothing about why; this says which rows they are and how wide.
+- **`MEASURE_CREDENTIAL_REGION_SCOPE`** — for each ancestor level of a credential VALUE cell: how many of the
+  three labels are inside, how many resolved value cells are inside, and how many of 업체명 / IP주소 / URL are.
+  `WING_CREDENTIAL_REGION_EVIDENCE` recorded that the `tbody` question was unanswerable from the label side
+  *because the anchor sits in the `thead`*; this anchors on the value side, which is the side the ring encloses.
+
+Nothing in either reads a value. `chooseCredentialRegion` returns `null` when no level is clean, and `null` is
+the answer D1 is allowed to have — the ring stays a blocker rather than being pointed at a chosen anchor.
+
+## `CoupangCredentialState` — added to this PR's direction
+
+An account may already hold a key, and a seller who does must not be walked into issuing another. The state is
+determined value-free from the same census: `NO_KEY` / `KEY_PRESENT` / `UNKNOWN`.
+
+The asymmetry is the design. A wrong `KEY_PRESENT` sends someone to a handoff that then refuses — recoverable.
+A wrong `NO_KEY` walks them into creating a **second real key on a live account** — not. So `NO_KEY` requires a
+POSITIVE reading (cells resolved AND all empty), `KEY_PRESENT` requires cells resolved AND all non-empty, and
+everything else — a missing label, an ambiguous column, a mixed shape, a truncated scan, a census taken without
+the bit, a partially-filled table — is `UNKNOWN`. `mayStartIssuance` is true only for `NO_KEY` and
+`mayOfferHandoff` only for `KEY_PRESENT`, spelled as predicates so `!== "KEY_PRESENT"` cannot creep in and read
+`UNKNOWN` as permission.
+
+This is the trap `wingIssuedStateFrom` documented: `credentialAnchorPresent` reads `true` on a confirmed no-key
+form, so "something credential-shaped is here" was never "a key exists". What is different is that the census
+measures the value CELL and one bit about it — an empty cell is a screen with no key, and that is a reading
+rather than an absence.
+
+**On the sitting-1 data this classifier answers `UNKNOWN`** — a key demonstrably exists on that account, and
+the honest answer is still `UNKNOWN`, because the reading does not establish it. A test pins exactly that.
