@@ -72,19 +72,57 @@ export const COUPANG_CREDENTIAL_FIELDS: readonly CredentialCellRequest[] = Objec
 ]);
 
 /**
- * **Has a real sitting MEASURED where the values sit? No.**
+ * **Where the credential values sit — MEASURED 2026-08-13, and the rule that reads them is calibrated.**
  *
- * `false`, and it stays `false` until a `COUPANG_WING_CREDENTIAL_CELL_CALIBRATION` run has answered on the
- * operator's own issued screen. The approval gate refuses to prepare a `CREDENTIAL_READ` manifest while this is
- * `false`, so the handoff cannot run on a shape nobody has inspected — which is the precise risk the calibration
- * phase exists to remove, and which the contract's own §11 ordering promised without anything enforcing it until
- * review pointed that out.
+ * `apr-9a81d1968b2e` / `wt-5286f763e5b0` at git `b823db47`, `COUPANG_WING_CREDENTIAL_CELL_CALIBRATION`,
+ * READ_ONLY, on the operator's own issued screen. Grant and checkpoint both `OPERATOR_UI_CONFIRMED` presses.
  *
- * The precedent is `WING_ISSUE_SELECTOR_CALIBRATED`, including its history: it shipped `false`, closed the path
- * that depended on it, and was flipped only from a reading. Flip this the same way — from a run, with the run's
- * identity recorded beside it — and never to make a live attempt succeed.
+ * | label | association | resolved by | row | table | column | non-empty |
+ * |---|---|---|---|---|---|---|
+ * | 업체코드 | `TH_COLUMN_TD` | `ROW_CORROBORATION` | 1 | 1 | 1 | yes |
+ * | Access Key | `TH_COLUMN_TD` | `DIRECT` | 1 | 1 | 3 | yes |
+ * | Secret Key | `TH_COLUMN_TD` | `DIRECT` | 1 | 1 | 4 | yes |
+ *
+ * **It took three sittings, and the two refusals are the reason this is worth anything.** Sitting 1 refused
+ * `CELL_NOT_UNIQUE` on 업체코드 and could not say why. Sitting 2 measured why: the credential row is five
+ * columns wide with 업체코드 at index 1, and the 연동 정보 block below is a three-column row whose index 1 is
+ * IP주소's value — so the naive column rule finds both, and the cell it would have read is an IP address.
+ * Sitting 3 is this table, with the same-row rule settling 업체코드 against the two labels that resolved on
+ * their own.
+ *
+ * A hypothesis recorded after sitting 1 — "a narrow row covering column 0" — was wrong in detail; the index is
+ * 1. That is why each step here is a reading and not an inference.
+ *
+ * **What this licenses and what it does not.** The approval gate will now prepare a `CREDENTIAL_READ` manifest
+ * (`credentialCellsCalibrated`), which is still not an approval: the handoff needs its own single-use grant and
+ * a press at the barrier. Withdraw this to `false` and the whole path closes again — the same lever, and the
+ * same history, as `WING_ISSUE_SELECTOR_CALIBRATED`.
+ *
+ * n=1: one account, one screen, one WING variant. Every rule it feeds fails closed on anything it does not
+ * recognise, which is what makes an n=1 calibration safe to ship rather than safe to assume.
  */
-export const WING_CREDENTIAL_CELLS_CALIBRATED = false;
+export const WING_CREDENTIAL_CELL_EVIDENCE = Object.freeze({
+  measuredOn: "2026-08-13",
+  gitSha: "b823db47",
+  runId: "wt-5286f763e5b0",
+  approvalId: "apr-9a81d1968b2e",
+  association: "TH_COLUMN_TD" as const,
+  credentialRowOrdinal: 1,
+  tableOrdinal: 1,
+  /** Column index per field, as measured. Recorded as evidence — no rule reads these back. */
+  columnIndex: Object.freeze({ vendor_id: 1, access_key: 3, secret_key: 4 }),
+  /** How each cell was settled. The one that needed corroboration is named, not smoothed over. */
+  resolvedBy: Object.freeze({
+    vendor_id: "ROW_CORROBORATION" as const,
+    access_key: "DIRECT" as const,
+    secret_key: "DIRECT" as const,
+  }),
+  /** The colliding row: the 연동 정보 block, three columns, whose index 1 is IP주소's value. */
+  collidingRow: Object.freeze({ rowOrdinal: 5, rowCellCount: 3, collidesWith: "vendor_id" as const }),
+  credentialState: "KEY_PRESENT" as const,
+});
+
+export const WING_CREDENTIAL_CELLS_CALIBRATED = true;
 
 /** The ids of {@link COUPANG_CREDENTIAL_FIELDS}, in the same order. */
 export const COUPANG_CREDENTIAL_FIELD_IDS: readonly string[] = Object.freeze(

@@ -215,10 +215,45 @@ three-column row whose index 1 is an IP — and asserts the naive rule finds two
 credential row, and **the read returns the vendor code and not the IP**. Plus every fail-closed axis, and that
 the same shape at different row positions resolves identically (no hardcoded ordinal).
 
-### What sitting 3 confirms
+### Sitting 3 — PASS, 2026-08-13
 
-Only that all three fields resolve on the live screen through the same-row rule. On that reading — and only on
-it — `WING_CREDENTIAL_CELLS_CALIBRATED` is flipped, which is what opens the `CREDENTIAL_READ` manifest.
+`apr-9a81d1968b2e` / `wt-5286f763e5b0` / `b823db47`. Grant `GRANTED` 12:57:51; checkpoint
+`OPERATOR_UI_CONFIRMED` 12:58:17. **Exit 0.**
+
+| label | association | resolved by | row | table | column | non-empty |
+|---|---|---|---|---|---|---|
+| 업체코드 | `TH_COLUMN_TD` | **`ROW_CORROBORATION`** | 1 | 1 | 1 | yes |
+| Access Key | `TH_COLUMN_TD` | `DIRECT` | 1 | 1 | 3 | yes |
+| Secret Key | `TH_COLUMN_TD` | `DIRECT` | 1 | 1 | 4 | yes |
+
+`resolved: true` · `refusal: OK` · **`credentialState: KEY_PRESENT`**.
+
+The rule worked on the screen that defeated the naive one. `candidateCellCount: 2` is still on the record as the
+raw evidence — 업체코드's column reaches row 1 (five cells) and row 5 (three cells, the 연동 정보 block whose
+index 1 is the IP). Corroboration kept row 1 because that is where the two unambiguous labels landed, and the
+row was derived from them rather than named.
+
+`credentialState` answered positively for the first time, from the same census that refused twice. **The rule
+changed the reading; the account never changed.**
+
+`WING_CREDENTIAL_CELLS_CALIBRATED` is flipped to `true` on this reading and on nothing else, with
+`WING_CREDENTIAL_CELL_EVIDENCE` recorded beside it. The APPROVAL GATE still defaults to `false` — a caller who
+omits the field gets the refusal — so what changed is what the two CLIs now state, not what the gate assumes.
+
+### D1 — answered, and the answer is still `null`
+
+```
+depth 1  TR      labels 0   values 3   vendor 0     ← all three values, zero vendor labels
+depth 2  TBODY   labels 0   values 3   vendor 2
+depth 3  TABLE   labels 3   values 3   vendor 2     ← today's anchor
+```
+
+No level holds the labels AND the values AND nothing else: the labels are in `THEAD`, the values in `TBODY`. So
+the `TABLE` ring cannot be narrowed into correctness, which settles it as the thing to remove.
+
+**Product-owner decision, 2026-08-13:** v1 rings the **value row** (depth 1) — the live-measured credential row,
+which contains the three values and none of 업체명 / IP주소 / URL. Three-cell multi-highlight goes to the
+overlay-extension backlog.
 
 ### What sitting 2 measured, and why it is a measurement rather than a rule
 
