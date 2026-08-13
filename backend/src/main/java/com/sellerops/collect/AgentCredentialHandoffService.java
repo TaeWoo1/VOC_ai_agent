@@ -37,6 +37,9 @@ import org.springframework.stereotype.Service;
  * approved; this path reads three secrets off a seller's screen, so it is armed with the whole identity the
  * operator's grant was bound to — approval, run, commit, phase — used once. See {@link CredentialHandoffArming}.
  *
+ * <p>Its one-shot is CLAIMED atomically immediately before the store, not marked after it: checking a flag and
+ * acting on it later is a window, and this is the one path where that window costs a second credential.
+ *
  * <p><b>It never overwrites.</b> An account that already has a credential is refused, because replacing a working
  * credential is a different operation with a different safety property — {@code POST /credentials/replace} does it
  * atomically with rollback, so a handoff that silently rotated in place would be the one path that can destroy a
@@ -120,13 +123,29 @@ public class AgentCredentialHandoffService {
         // null (unknown), never an estimate.
         CredentialIntakeRequest intake = new CredentialIntakeRequest(
                 template.connectorClass(), template.authType(), request.secrets(), null, null);
-        collect.storeCredential(orgId, sellerAccountId, intake, actorUserId);
-        // **Spent at the store, not at the verification.** The store is the irreversible half; what follows can
-        // fail for reasons that have nothing to do with the credential. Returning the arming on a failed
-        // verification would invite reading three secrets again to replace something already stored, and
-        // replacement is the renewal path's job. A refusal ABOVE this line consumes nothing, because nothing
-        // happened. See `CredentialHandoffArming`.
-        arming.consume();
+        // **CLAIMED here, on the near side of the store, and atomically.** `refusalFor` above only READS the
+        // one-shot flag, so claiming after the store would leave a window in which two concurrent requests both
+        // pass the check and both store. The unique constraint on `seller_account_id` closes that for ONE
+        // account and does nothing for two: two slots, one arming, two credentials.
+        //
+        // Everything that can refuse WITHOUT storing has already run, so a claim here is a claim on a store that
+        // is about to happen. What follows the store — the verification — never returns it: see the arming.
+        if (!arming.claim()) {
+            log.warn("Coupang credential handoff refused by the run interlock: reason={}",
+                    CredentialHandoffArming.REASON_ARMING_CONSUMED);
+            throw ApiException.badRequest("이 실행의 연결 정보 전달은 이미 사용되었습니다. 저장된 것은 없습니다. ("
+                    + CredentialHandoffArming.REASON_ARMING_CONSUMED + ")");
+        }
+        try {
+            collect.storeCredential(orgId, sellerAccountId, intake, actorUserId);
+        } catch (RuntimeException e) {
+            // Nothing was stored, so nothing was spent. This is the ONE case that hands a claim back, and it is
+            // what keeps "a refusal before the store leaves the handoff retryable" true when the refusal comes
+            // from inside the store itself — the credential validator rejecting a malformed secret map, which
+            // means the resolver read something wrong and the operator deserves their retry.
+            arming.releaseUnusedClaim();
+            throw e;
+        }
 
         // **From here the credential IS stored, and every exit must say so.**
         //

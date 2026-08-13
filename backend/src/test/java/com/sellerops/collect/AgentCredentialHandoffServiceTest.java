@@ -493,6 +493,50 @@ class AgentCredentialHandoffServiceTest {
     }
 
     @Test
+    void theOneShotIsCLAIMEDBeforeTheStore_notMarkedAfterIt() {
+        // The race review found: `refusalFor` only READS the flag, so a claim made after the store left a window
+        // in which two concurrent requests both passed the check. The DB's unique constraint on
+        // seller_account_id closes that for ONE account and does nothing for two — two slots, one arming, two
+        // credentials. Asserted structurally, because a timing test for this is a flaky test for this.
+        String src = readServiceSource();
+        int claimAt = src.indexOf("arming.claim()");
+        int storeAt = src.indexOf("collect.storeCredential(");
+        assertThat(claimAt).isGreaterThan(0);
+        assertThat(storeAt).isGreaterThan(0);
+        assertThat(claimAt).isLessThan(storeAt);
+        // …and the claim's RESULT is acted on. Ignoring it would put the race straight back.
+        assertThat(src).contains("if (!arming.claim())");
+    }
+
+    @Test
+    void aStoreThatTHREWHandsTheClaimBack_becauseNothingWasStored() {
+        // The half that keeps the manifest honest: "a refusal before the store leaves the handoff retryable"
+        // has to hold when the refusal comes from INSIDE the store — the validator rejecting a malformed secret
+        // map, which means the resolver read something wrong and the operator deserves their retry.
+        SellerAccount acc = account(org, "COUPANG");
+        AgentCredentialHandoffRequest bad = new AgentCredentialHandoffRequest(slotFor(acc), "COUPANG",
+                Map.of("access_key", ACCESS, "secret_key", SECRET, "vendor_id", VENDOR, "smuggled", "x"), thisRun());
+
+        assertThatThrownBy(() -> service.handOff(org, actor, bad)).isInstanceOf(ApiException.class);
+
+        assertThat(vault.hasCredential(org, acc.getId())).isFalse();
+        // The handoff is still the operator's to spend…
+        assertThat(arming.isArmed()).isTrue();
+        // …and spending it works.
+        assertThat(service.handOff(org, actor, coupangRequest(slotFor(acc))).stored()).isTrue();
+        assertThat(arming.isArmed()).isFalse();
+    }
+
+    private static String readServiceSource() {
+        try {
+            return java.nio.file.Files.readString(java.nio.file.Path.of(
+                    "src/main/java/com/sellerops/collect/AgentCredentialHandoffService.java"));
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("could not read the service source", e);
+        }
+    }
+
+    @Test
     void theSanitizedReadinessCarriesPrefixesAndNothingElse() {
         CredentialHandoffArming a = armedForThisRun();
         CredentialHandoffArming.Readiness ready = a.readiness();
@@ -502,7 +546,7 @@ class AgentCredentialHandoffServiceTest {
         assertThat(ready.runIdPrefix()).isEqualTo("wt-30bf20bef").hasSize(CredentialHandoffArming.PREFIX_LENGTH);
         assertThat(ready.phase()).isEqualTo(CredentialHandoffArming.PHASE_CREDENTIAL_HANDOFF);
 
-        a.consume();
+        a.claim();
         assertThat(a.readiness().armed()).isFalse();
         assertThat(a.readiness().consumed()).isTrue();
         // An unarmed readiness names nothing at all, so a preflight cannot match a prefix off a spent arming.

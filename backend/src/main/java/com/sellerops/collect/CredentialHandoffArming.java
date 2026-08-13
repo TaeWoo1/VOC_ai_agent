@@ -38,17 +38,22 @@ import org.springframework.stereotype.Component;
  *   <li><b>Identity match.</b> The caller must PRESENT the same quadruple. The agent knows it because the run
  *       env it sourced is the one the manifest was prepared from — so a second agent, a different run, or a
  *       rebuilt branch cannot use an arming it was not part of.</li>
- *   <li><b>One shot.</b> Consumed when a credential is stored. A run gets one handoff; a second is refused
- *       here, before the vault, in addition to the never-overwrite rule that already refuses it after.</li>
+ *   <li><b>One shot.</b> CLAIMED atomically immediately before the store. A run gets one handoff; a second is
+ *       refused here, before the vault, in addition to the never-overwrite rule that already refuses a second
+ *       credential on the same account after.</li>
  * </ol>
  *
  * <h2>What "consumed" is tied to, precisely</h2>
  *
- * The store, not the verification. The store is the irreversible half: once the credential is in the vault the
- * seller has a connection, and the read-only check that follows can fail for reasons that have nothing to do
- * with the credential. So a failed verification does NOT return the arming — retrying would mean reading three
+ * The store, not the verification — and on the NEAR side of it, atomically. Once the credential is in the vault
+ * the seller has a connection, and the read-only check that follows can fail for reasons that have nothing to do
+ * with the credential. So a failed verification does NOT return the arming: retrying would mean reading three
  * secrets a second time to replace something already stored, and replacement is the renewal path's job, with
  * its own atomicity and its own rollback.
+ *
+ * <p>A store that THREW is the one exception, and barely one: nothing was stored, so nothing was spent (see
+ * {@link #releaseUnusedClaim}). That keeps the manifest's promise — a refusal before the store leaves the
+ * handoff retryable — true in the case where the refusal comes from inside the store itself.
  *
  * <p>A refusal BEFORE the store consumes nothing, because nothing happened: an unknown slot, a channel
  * mismatch, an existing credential, or a failed identity check all leave the arming intact for the retry the
@@ -184,12 +189,30 @@ public class CredentialHandoffArming {
     }
 
     /**
-     * Spend the arming. Called ONLY once a credential has been stored — see the class docstring for why that
-     * boundary and not the verification's. Returns whether this call was the one that spent it, so a caller
-     * cannot mistake a double-consume for a fresh one.
+     * **Claim the arming, atomically.** Called immediately BEFORE the store it authorizes, never after.
+     *
+     * The ordering is the whole point, and it was wrong at first: {@link #refusalFor} only READS the consumed
+     * flag, so consuming after the store left a window in which two concurrent requests both passed the check
+     * and both stored. The database's unique constraint on `seller_account_id` closes that for ONE account and
+     * does nothing for two — two slots, one arming, two credentials, and the manifest says a run gets one.
+     *
+     * Returns whether THIS call was the one that claimed it. A caller that ignores the result has put back the
+     * race it was given this method to avoid.
      */
-    public boolean consume() {
+    public boolean claim() {
         return consumed.compareAndSet(false, true);
+    }
+
+    /**
+     * Hand a CLAIMED arming back, for the one case that justifies it: the store it was claimed for threw, so
+     * nothing was stored and the operator's one handoff was never actually spent.
+     *
+     * Deliberately narrow, and package-private. It is not "undo", and it must never become reachable from a
+     * path where a credential might have been written — the manifest promises that a refusal before the store
+     * leaves the handoff retryable AND that once stored it is spent, and both halves are load-bearing.
+     */
+    void releaseUnusedClaim() {
+        consumed.set(false);
     }
 
     /** Whether an arming is currently usable — shape, phase, freshness and one-shot, but no caller identity. */

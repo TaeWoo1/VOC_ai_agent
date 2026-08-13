@@ -170,11 +170,19 @@ describe("each promise is pinned to the code that keeps it", () => {
       "utf8",
     );
     expect(service).toContain("vault.hasCredential(orgId, sellerAccountId)");
-    // Spent AFTER the store, never before it — the ordering is the promise.
+    // **Claimed on the NEAR side of the store, atomically.** It used to be marked after, which left a window in
+    // which two concurrent requests both passed the read-only check and both stored — harmless for one account
+    // (the DB's unique constraint) and two credentials for two. The ordering is the promise.
     const storeAt = service.indexOf("collect.storeCredential(");
-    const consumeAt = service.indexOf("arming.consume()");
+    const claimAt = service.indexOf("arming.claim()");
     expect(storeAt).toBeGreaterThan(0);
-    expect(consumeAt).toBeGreaterThan(storeAt);
+    expect(claimAt).toBeGreaterThan(0);
+    expect(claimAt).toBeLessThan(storeAt);
+    // …and the claim's result is acted on, or the race is straight back.
+    expect(service).toContain("if (!arming.claim())");
+    // A store that THREW hands the claim back — which is what keeps the "retryable" half of this promise true
+    // when the refusal comes from inside the store itself.
+    expect(service).toContain("arming.releaseUnusedClaim()");
   });
 
   it("the preflight reads the disclosure from the MANIFEST rather than re-typing it", () => {
