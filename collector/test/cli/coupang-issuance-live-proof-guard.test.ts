@@ -61,10 +61,16 @@ describe("coupang-issuance-live-proof — bridge-client source guard", () => {
     expect(code).not.toContain(token);
   });
 
-  it("sends ONLY the two benign guidance commands — START_RUN and REQUEST_STEP_RECHECK", () => {
+  it("**sends ONE command — START_RUN — and cannot advance a checkpoint**", () => {
     expect(code).toContain('type: "START_RUN"');
-    expect(code).toContain('type: "REQUEST_STEP_RECHECK"');
-    // No mutating/marketplace command types leak into the client.
+    // It used to send `REQUEST_STEP_RECHECK` once per appearance of a sentinel file the operator touched: a
+    // file any process can create, standing in for "I have SEEN the overlay and done what it asks". A
+    // DIAGNOSTIC must not be able to move a live guided walk on to the next instruction — 다음 is the
+    // SellerOps frontend's own button, pressed by the seller, in the product path.
+    expect(code).not.toContain("REQUEST_STEP_RECHECK");
+    expect(code).not.toContain("NEXT_SIGNAL");
+    expect(code).not.toContain("sendNext");
+    // No mutating/marketplace command types leak into the client either.
     for (const forbidden of ["SUBMIT", "EXPORT", "DOWNLOAD", "APPROVE_"]) {
       expect(code).not.toContain(forbidden);
     }

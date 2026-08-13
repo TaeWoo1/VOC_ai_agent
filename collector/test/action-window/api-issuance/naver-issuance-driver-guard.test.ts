@@ -204,19 +204,22 @@ describe("issuance-live-proof CLI — source guard (gated bridge client, no mark
     expect(code).not.toContain("NaverIssuanceDriver");
   });
 
-  it("sends ONLY the two benign guidance commands — START_RUN and REQUEST_STEP_RECHECK — never any other", () => {
+  it("**sends ONE command — START_RUN — and never any other", () => {
     expect(code).toContain("START_RUN");
-    expect(code).toContain("REQUEST_STEP_RECHECK");
     // No mutating/marketplace command types leak in from a copy-paste of another client.
     for (const forbidden of ["REPLY", "SUBMIT", "EXPORT", "DOWNLOAD", "AUTOFILL"]) {
       expect(code).not.toContain(forbidden);
     }
   });
 
-  it("advances only on an EXPLICIT operator sentinel — there is no timer-driven auto-recheck", () => {
-    // The only REQUEST_STEP_RECHECK send is `sendNext`, and it fires solely from the sentinel-file poll.
-    expect(code).toContain("ISSUANCE_NEXT_SIGNAL");
-    expect(code).toContain("sendNext");
+  it("**cannot advance a checkpoint at all** — the sentinel that used to do it is gone", () => {
+    // It used to send `REQUEST_STEP_RECHECK` once per appearance of a sentinel file the operator touched: a
+    // file any process can create, standing in for "I have SEEN the overlay and done what it asks". A
+    // DIAGNOSTIC must not be able to move a live guided walk on to the next instruction — 다음 is the
+    // SellerOps frontend's own button, pressed by the seller, in the product path.
+    expect(code).not.toContain("REQUEST_STEP_RECHECK");
+    expect(code).not.toContain("ISSUANCE_NEXT_SIGNAL");
+    expect(code).not.toContain("sendNext");
   });
 
   it("is gated on the explicit live-run approval flag and is inert on import (main only when invoked directly)", () => {

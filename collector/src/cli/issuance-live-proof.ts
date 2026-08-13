@@ -7,22 +7,23 @@
  * existing-app highlight-proof sittings. It is NOT a browser driver and it never touches NAVER: it connects to
  * the LOCAL Action-Window bridge that {@link file://./run-api-issuance-live-naver.ts} already opened on the
  * seller's dedicated Chrome window, adopts that host's issuance run, and drives the guided walk exactly as the
- * SellerOps frontend would over `/bridge/ws`:
+ * SellerOps frontend would OPEN it over `/bridge/ws`:
  *   - pair (`/bridge/pair/request` → `/bridge/pair/poll`) → ws-ticket → `/bridge/ws` (Origin-scoped),
- *   - read the announced `aw_session` runId and send ONE `START_RUN` (intent `API_ISSUANCE_GUIDANCE`),
- *   - print SANITIZED frames (status / step / blocker only — never a URL, value, or credential), and
- *   - advance a same-page viewport CHECKPOINT with an EXPLICIT "다음" (`REQUEST_STEP_RECHECK`) — sent once per
- *     appearance of a SENTINEL file the operator touches after they SEE the overlay. There is NO auto-recheck:
- *     the run only ever advances on a real operator confirmation, which is the whole point of a calibration walk.
+ *   - read the announced `aw_session` runId and send ONE `START_RUN` (intent `API_ISSUANCE_GUIDANCE`), and
+ *   - print SANITIZED frames (status / step / blocker only — never a URL, value, or credential).
  *
- * It sends only the two benign guidance commands (`START_RUN`, `REQUEST_STEP_RECHECK`); it can no more act on
+ * **It cannot advance a checkpoint, and that is deliberate.** It used to send `REQUEST_STEP_RECHECK` once per
+ * appearance of a sentinel file the operator touched — a file any process can create, standing in for "I have
+ * SEEN the overlay and done what it asks". A diagnostic must not be able to move a live guided walk on to the
+ * next instruction. 다음 is the SellerOps frontend's own button, pressed by the seller, in the product path.
+ *
+ * It sends ONE benign guidance command (`START_RUN`); it can no more act on
  * NAVER than the frontend can. Every real step — login, opening/creating the app, adding the API group, copying
  * the Client ID/Secret — is the seller's, in their own window. Gated on the explicit live-run approval flag (a
  * live proof is not something to run casually) and inert on import (`main` runs only when invoked directly), so
  * hermetic tests import it without connecting to anything.
  */
 import { randomUUID } from "node:crypto";
-import { existsSync, unlinkSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import WebSocket from "ws";
 import { hasLiveRunApproval, approvalRequiredMessage } from "./live-run-approval";
@@ -30,7 +31,6 @@ import { hasLiveRunApproval, approvalRequiredMessage } from "./live-run-approval
 const HTTP_BASE = process.env.BRIDGE_HTTP_BASE ?? "http://127.0.0.1:47615";
 const WS_BASE = HTTP_BASE.replace(/^http/, "ws");
 const ORIGIN = process.env.BRIDGE_ORIGIN ?? "http://localhost:5173";
-const NEXT_SIGNAL = process.env.ISSUANCE_NEXT_SIGNAL ?? ".status/issuance-next.signal";
 const WORKSPACE_LABEL = "SellerOps";
 const BRIDGE_PROTOCOL_VERSION = 1;
 const AW_PROTOCOL_VERSION = 2;
@@ -38,7 +38,6 @@ const AW_TRANSPORT_VERSION = 1;
 const EXPECTED_CARRIER = "issuance";
 const CHANNEL_CODE = "naver";
 const INTENT = "API_ISSUANCE_GUIDANCE";
-const SIGNAL_POLL_MS = 500;
 const PAIR_POLL_TRIES = 12;
 const PAIR_POLL_MS = 300;
 
@@ -50,8 +49,8 @@ function banner(): void {
   console.error(bar);
   console.error(" NAVER API-issuance LIVE-PROOF driver (bridge client) — explicit per-run approval required.");
   console.error(" Connects to the ALREADY-APPROVED local bridge that run-api-issuance-live-naver opened; it never");
-  console.error(" opens/logs-in/clicks NAVER. It sends only START_RUN + REQUEST_STEP_RECHECK ('다음'), advancing a");
-  console.error(` checkpoint ONLY when you touch the sentinel file (${NEXT_SIGNAL}) after you SEE the overlay.`);
+  console.error(" opens/logs-in/clicks NAVER. It sends ONE command — START_RUN — and then only WATCHES.");
+  console.error(" It cannot advance a checkpoint: 다음 is the SellerOps frontend's own button, pressed by you.");
   console.error(bar);
 }
 
@@ -126,19 +125,6 @@ class LiveProofSession {
     line("→ START_RUN", `intent=${INTENT}`);
   }
 
-  /** The explicit "다음": ONE REQUEST_STEP_RECHECK per sentinel appearance. No timer-driven auto-recheck. */
-  sendNext(): void {
-    if (!this.announcedRunId || this.completed) return;
-    this.sendCommand({
-      protocolVersion: AW_PROTOCOL_VERSION,
-      commandId: randomUUID(),
-      runId: this.announcedRunId,
-      expectedRevision: this.latestRevision,
-      type: "REQUEST_STEP_RECHECK",
-    });
-    line("→ 다음 (REQUEST_STEP_RECHECK)", `expectedRevision=${this.latestRevision}`);
-  }
-
   isDone(): boolean {
     return this.completed;
   }
@@ -195,9 +181,9 @@ class LiveProofSession {
       );
       if (v.status === "WAITING_FOR_HUMAN" && !blocker) {
         if (targetKind === "open_app") line("  ** OPEN your existing app in the NAVER window — SellerOps observes the app_detail transition. **");
-        else line(`  ** CHECKPOINT '${String(targetKind)}' — overlay should be visible. When confirmed, touch ${NEXT_SIGNAL} to send 다음. **`);
+        else line(`  ** CHECKPOINT '${String(targetKind)}' — overlay should be visible. Press 다음 in SellerOps when you have. **`);
       }
-      if (blocker) line(`  ** RECOVERABLE PARK (${String(blocker.code)}) — touch ${NEXT_SIGNAL} to re-guide/recover. **`);
+      if (blocker) line(`  ** RECOVERABLE PARK (${String(blocker.code)}) — press 다음 in SellerOps to re-guide/recover. **`);
       if (v.status === "COMPLETED") {
         this.completed = true;
         line("run COMPLETED");
@@ -224,31 +210,12 @@ async function main(): Promise<void> {
     process.exit(3);
     return;
   }
-  try {
-    if (existsSync(NEXT_SIGNAL)) unlinkSync(NEXT_SIGNAL);
-  } catch {
-    /* best-effort clear */
-  }
-
   const token = await pairAndGetToken();
   const ticket = await mintTicket(token);
   const url = `${WS_BASE}/bridge/ws?ticket=${encodeURIComponent(ticket)}`;
   line("ws connect", url.replace(/ticket=[^&]+/, "ticket=<redacted>"));
   const ws = new WebSocket(url, { origin: ORIGIN });
   const session = new LiveProofSession(ws);
-
-  // Poll the sentinel: one explicit "다음" per appearance, then clear it. No timer ever advances the run itself.
-  const timer = setInterval(() => {
-    if (session.isDone()) return;
-    if (existsSync(NEXT_SIGNAL)) {
-      try {
-        unlinkSync(NEXT_SIGNAL);
-      } catch {
-        /* ignore */
-      }
-      session.sendNext();
-    }
-  }, SIGNAL_POLL_MS);
 
   await new Promise<void>((resolve) => {
     ws.on("open", () => line("ws open"));
@@ -269,7 +236,6 @@ async function main(): Promise<void> {
     process.on("SIGTERM", () => resolve());
   });
 
-  clearInterval(timer);
   try {
     ws.close();
   } catch {
