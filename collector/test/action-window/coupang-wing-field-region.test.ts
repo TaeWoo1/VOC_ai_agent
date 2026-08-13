@@ -374,13 +374,14 @@ describe("the sanitizer is the boundary", () => {
 });
 
 describe("what step ⑧ anchors its ring on", () => {
-  it("**frames the credential TABLE, not the header row it used to** — the 2026-08-12 defect", async () => {
+  it("**anchors on NO ancestor of the label at all** — both anchors it ever had were wrong", async () => {
     const { WING_HIGHLIGHT_LABELS } = await import("../../src/action-window/coupang-wing-issuance-driver");
-    // `tr` resolved to the HEADER row, because the live reading of this label came back `observedTag: "TH"`.
-    // The ring framed the words `Access Key` while the panel said to copy three values that were outside it.
-    expect(WING_HIGHLIGHT_LABELS.credentials.tagAncestor).toBe("table");
-    expect(WING_HIGHLIGHT_LABELS.credentials.tagAncestor).not.toBe("tr");
-    // …and the ancestor is guaranteed to exist by the measurement itself: a TH is only a TH inside a table.
+    // `tr` resolved to the HEADER row, because the live reading of this label came back `observedTag: "TH"`, so
+    // the ring framed the words `Access Key`. `table` reached the values and the seller's 연동 정보 block with
+    // them. The measurement below says why no third string would have worked either, and step ⑧ now rings the
+    // value ROW — which is not an ancestor of this label — through `buildCredentialRowRingScript`.
+    expect(WING_HIGHLIGHT_LABELS.credentials.tagAncestor).toBeUndefined();
+    // …and the label itself still resolves, because it is what ⑦ watches for and what the cell specs derive from.
     const { readings } = census(
       [
         {
@@ -416,17 +417,32 @@ describe("what step ⑧ anchors its ring on", () => {
     expect(clean).toEqual(["TR", "THEAD"]);
     expect(ev.rows.find((r) => r.tag === "TABLE")!.excludeCount).toBe(2);
     expect(ev.conclusion).toBe("NO_LEVEL_HOLDS_THE_VALUES_WITHOUT_THE_VENDOR_BLOCK");
-    // …and the shipped anchor is the one the evidence names, not a second hand-written choice beside it.
-    expect(WING_HIGHLIGHT_LABELS.credentials.tagAncestor).toBe(ev.anchorKept);
+    // **The conclusion was acted on rather than filed.** `anchorKept` records what the walk shipped WHILE this
+    // measurement stood — an anchor the same reading had already refuted, kept because nothing better was
+    // measured yet. Step ⑧ no longer uses it, and the two must not be able to drift back together.
+    expect(ev.anchorKept).toBe("table");
+    expect(WING_HIGHLIGHT_LABELS.credentials.tagAncestor).toBeUndefined();
   });
 
-  it("**the credential census never asks for a filled-field count** — nothing here reads the keys", async () => {
-    // `readFilled` is opt-in per candidate precisely so this stays checkable rather than remembered.
+  it("**the ⑧ ring reads no credential value** — not even the one non-emptiness bit the calibration takes", async () => {
+    // The reading this replaced (`logCredentialRegion`) was held to "never asks for a filled-field count". The
+    // ring path is held to more: it never reaches the extraction rule at all. Checked on the EMITTED script,
+    // because the resolver it shares does define those functions — what matters is that this terminal, which is
+    // the one that runs on the screen showing the keys, calls neither.
+    const { buildCredentialRowRingScript } = await import(
+      "../../src/action-window/api-issuance-calibration/credential-cell-inpage"
+    );
+    const { COUPANG_CREDENTIAL_FIELDS } = await import("../../src/action-window/coupang-wing-credential-cells");
+    const { CREDENTIAL_REGION_VENDOR_LABELS } = await import("../../src/action-window/coupang-wing-issuance-driver");
+    const script = buildCredentialRowRingScript(COUPANG_CREDENTIAL_FIELDS, CREDENTIAL_REGION_VENDOR_LABELS, { tag: true });
+    const terminal = script.slice(script.indexOf("var SPECS ="));
+    expect(terminal).not.toContain("cellText(");
+    expect(terminal).not.toContain("cellNonEmpty(");
+    // …and the driver's own credential step reaches the ring, never the label+ancestor locate it used to.
     const src = readFileSync(resolve(__dirname, "../../src/action-window/coupang-wing-issuance-driver.ts"), "utf8");
-    const from = src.indexOf("private async logCredentialRegion");
-    const fn = src.slice(from, src.indexOf("\n  /**", from + 10));
-    expect(from).toBeGreaterThan(0);
-    expect(fn).not.toContain("readFilled");
+    expect(src).toContain("buildCredentialRowRingScript");
+    // The DECLARATION, not the name: the replacement's docstring names what it replaced, which is the record.
+    expect(src).not.toContain("private async logCredentialRegion");
   });
 });
 

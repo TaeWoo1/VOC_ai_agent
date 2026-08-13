@@ -255,6 +255,31 @@ the `TABLE` ring cannot be narrowed into correctness, which settles it as the th
 which contains the three values and none of 업체명 / IP주소 / URL. Three-cell multi-highlight goes to the
 overlay-extension backlog.
 
+#### D1 — CLOSED (offline), 2026-08-13
+
+`WING_HIGHLIGHT_LABELS.credentials` has **no `tagAncestor` at all**, and step ⑧ no longer resolves through the
+fixed-label locate. It resolves through `buildCredentialRowRingScript` — a third terminal on the credential-cell
+resolver — which tags the `TR` the three value cells share. The ring and the read therefore rest on **one**
+corroboration: a ring cannot be drawn where the read would refuse, and neither can be moved without moving both.
+
+What it refuses, each with an executed offline case: the three cells not sharing one row (`ROW_NOT_SHARED` — the
+row-headed shape gives each label its own row, and the READ is fine there while the ring is not), a vendor label
+inside the row that would be ringed (`ROW_HOLDS_VENDOR_LABEL` — checked in the page on every walk, not assumed
+from the calibration, so a WING that later moves 업체명 into the credential row closes the ring instead of
+enclosing it), and every whole-set refusal the read makes (`ASSOCIATION_MIXED`, `TABLE_MIXED`, `SCAN_TRUNCATED`,
+`LABEL_NOT_UNIQUE`, `ROW_NOT_CORROBORATED`, …). A refusal returns `count: 0` and the step parks; there is no
+fallback ring, because the fallback available here is the header row, which is the 2026-08-12 defect.
+
+The ring path **reads no credential value** — not even the one non-emptiness bit the calibration takes. Pinned on
+the emitted script: its terminal calls neither `cellText` nor `cellNonEmpty`.
+
+Its signature is table-relative (row position within its own table, the table's ordinal, the row's width) rather
+than the fixed-label locate's document-wide element index, so a WING notice appearing above the table cannot make
+the engine's locate↔highlight anti-drift check read "the match changed".
+
+**Still open:** the ring is one box around the row, not three around the cells. Multi-highlight stays in the
+overlay backlog, as decided.
+
 ### What sitting 2 measured, and why it is a measurement rather than a rule
 
 Two value-free additions, both declared capabilities:

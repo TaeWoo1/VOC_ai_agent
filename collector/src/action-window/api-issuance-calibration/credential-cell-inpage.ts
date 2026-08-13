@@ -36,6 +36,7 @@
  * Written in ES5 with no closures over builder state, for the same reason every other in-page script here is: the
  * bundler's `keepNames` rewrites arrow functions into `__name(...)` calls that do not exist in the page.
  */
+import { IN_PAGE_SIG_FACTORY } from "../signature";
 import type { CredentialCellRequest } from "../coupang-wing-credential-cells";
 
 /**
@@ -331,6 +332,115 @@ ${RESOLVER_FRAGMENT}
     values[r.id] = text;
   }
   return { ok: true, values: values };
+})()`;
+}
+
+/**
+ * **The value-row RING** — a third terminal on the same resolver, and the one that draws on the page.
+ *
+ * ## Why this is a terminal here rather than an anchor in the highlight table
+ *
+ * Step ⑧'s ring went through the generic fixed-label locate: match `Access Key`, walk up to a `tagAncestor`.
+ * That path **cannot reach the values**. WING puts the three labels in one `<thead>` row and the three values in
+ * the `<tbody>` row beneath, so every ancestor of the label that holds a value also holds the whole table — and
+ * the table holds the seller's own 연동 정보 block. Measured, not argued: `WING_CREDENTIAL_REGION_EVIDENCE`
+ * scored the label's ancestors and concluded `NO_LEVEL_HOLDS_THE_VALUES_WITHOUT_THE_VENDOR_BLOCK`, and the ring
+ * shipped as `table` reached 업체명 / IP주소 / URL on a live screen.
+ *
+ * The value row is not an ancestor of the label at all, so no `tagAncestor` string could ever have named it. It
+ * is what the credential-cell resolver already resolves — the row the three value cells share — which is why
+ * this is the same resolver and not a second one. The calibration that licenses the read is the calibration
+ * that licenses the ring.
+ *
+ * ## What it refuses
+ *
+ * Everything the read refuses about STRUCTURE, plus two of its own: the three cells must share one `TR`
+ * (`ROW_NOT_SHARED` — the row-headed shape gives each label its own row, and three rows are not a region), and
+ * that row must contain none of the vendor labels (`ROW_HOLDS_VENDOR_LABEL`). A refusal returns `count: 0` and
+ * the step parks; it never falls back to ringing something else, because the something-else available here is
+ * the header row, which is the defect this replaces.
+ *
+ * ## It reads no value, and that is structural
+ *
+ * `cellText` / `cellNonEmpty` are never called on this path — not even for the one non-emptiness bit the
+ * calibration takes. A ring is drawn on a screen the seller is looking at; whether the cell is empty is
+ * something they can see and something this has no need to know. A test pins that the emitted body calls
+ * neither.
+ */
+export function buildCredentialRowRingScript(
+  requests: readonly CredentialCellRequest[],
+  vendorLabels: readonly { candidateQuery: string; exactText: string }[],
+  opts: { tag: boolean },
+): string {
+  return `(function () {
+  /* wing-credential-row-${opts.tag ? "ring" : "locate"} (value-free OUTPUT: { count, reason, sig?, rowTag?, rowCellCount? }) */
+  var sig = ${IN_PAGE_SIG_FACTORY};
+${RESOLVER_FRAGMENT}
+  var SPECS = ${JSON.stringify(requests.map((r) => ({ id: r.id, candidateQuery: r.candidateQuery, exactText: r.exactText })))};
+  var VENDOR = ${JSON.stringify(vendorLabels)};
+  function refuse(reason) { return { count: 0, reason: reason }; }
+  var resolved = resolveAll(SPECS);
+  /* ONE shape, ONE table — the same whole-set agreement the read checks, and for the same reason: three
+     readings can each be individually fine over a page that is not the shape the calibration measured. */
+  var assoc = null, table = null;
+  for (var t = 0; t < resolved.length; t++) {
+    var rr = resolved[t];
+    if (rr.scanTruncated) { return refuse('SCAN_TRUNCATED'); }
+    if (!rr.association || rr.association === 'NONE') { continue; }
+    if (assoc === null) { assoc = rr.association; } else if (assoc !== rr.association) { return refuse('ASSOCIATION_MIXED'); }
+    if (typeof rr.tableOrdinal === 'number' && rr.tableOrdinal >= 0) {
+      if (table === null) { table = rr.tableOrdinal; } else if (table !== rr.tableOrdinal) { return refuse('TABLE_MIXED'); }
+    }
+  }
+  /* Every field must have resolved, and all three must land in the SAME row element. Identity, not ordinal:
+     two rows can share an ordinal across a re-render, and the thing being tagged is an element. */
+  var row = null;
+  for (var i = 0; i < resolved.length; i++) {
+    var r = resolved[i];
+    if (r.labelVisibleCount !== 1) { return refuse('LABEL_NOT_UNIQUE'); }
+    if (!r.association || r.association === 'NONE') { return refuse('NO_ASSOCIATION'); }
+    if (!r.cell || !r.cellResolvedBy) { return refuse(r.candidateCellCount > 1 ? 'ROW_NOT_CORROBORATED' : 'CELL_NOT_UNIQUE'); }
+    if (typeof r.cellInputCount !== 'number' || r.cellInputCount > 1) { return refuse('CELL_SHAPE_AMBIGUOUS'); }
+    if (r.cellDuplicate) { return refuse('CELL_COLLISION'); }
+    var parent = r.cell.parentElement;
+    if (!parent || parent.tagName !== 'TR') { return refuse('ROW_NOT_SHARED'); }
+    if (row === null) { row = parent; } else if (row !== parent) { return refuse('ROW_NOT_SHARED'); }
+  }
+  if (!row) { return refuse('ROW_NOT_SHARED'); }
+  /* The seller's own 업체명 / IP주소 / URL are not part of their key, and a ring that reaches them is pointing
+     at the wrong thing while claiming to point at the keys. Checked on the element about to be tagged. */
+  for (var v = 0; v < VENDOR.length; v++) {
+    var vm = matching(VENDOR[v]);
+    if (vm.truncated) { return refuse('SCAN_TRUNCATED'); }
+    for (var e = 0; e < vm.visible.length; e++) {
+      if (row.contains && row.contains(vm.visible[e])) { return refuse('ROW_HOLDS_VENDOR_LABEL'); }
+    }
+  }
+  var rowCells = [], kids = slice(row.children);
+  for (var k = 0; k < kids.length; k++) { if (isCell(kids[k])) { rowCells.push(kids[k]); } }
+${
+  opts.tag
+    ? `  /* Clear first, then tag. A step that leaves the previous ring behind puts the box on one control while
+     the panel describes another — observed live, for three consecutive steps. */
+  var prior = slice(document.querySelectorAll('[data-aw-target]'));
+  for (var p = 0; p < prior.length; p++) { prior[p].removeAttribute('data-aw-target'); prior[p].removeAttribute('data-aw-primary'); }
+  row.setAttribute('data-aw-target', '');
+`
+    : ``
+}  /* The signature is TABLE-RELATIVE, not a document-wide element index like the fixed-label locate's. The
+     engine compares the locate's sig with the highlight's, and between those two calls an overlay is cleared
+     and remounted — which shifts every document index and would read as "the match changed" when nothing did.
+     Row position within its own table, plus the table's ordinal and the row's width, moves only when the thing
+     being pointed at actually moves. Structure only: no text, value, or attribute. */
+  var tbl = closestTable(row);
+  var trs; try { trs = tbl ? slice(tbl.querySelectorAll('tr')) : []; } catch (e) { trs = []; }
+  return {
+    count: 1,
+    reason: 'OK',
+    rowTag: row.tagName,
+    rowCellCount: rowCells.length,
+    sig: sig(row.tagName + ':' + tableOrdinal(row) + ':' + trs.indexOf(row), 'cells:' + rowCells.length)
+  };
 })()`;
 }
 

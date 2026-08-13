@@ -90,6 +90,8 @@ import {
   type OcclusionVerdict,
 } from "./api-issuance-calibration/occlusion-inpage";
 import { buildAncestorScopeScript, buildFieldRegionCensusScript } from "./api-issuance-calibration/field-region-inpage";
+import { buildCredentialRowRingScript } from "./api-issuance-calibration/credential-cell-inpage";
+import { COUPANG_CREDENTIAL_FIELDS, sanitizeCredentialRowRing } from "./coupang-wing-credential-cells";
 import {
   sanitizeAncestorScope,
   sanitizeFieldRegionCensus,
@@ -171,24 +173,22 @@ export const WING_HIGHLIGHT_LABELS: Readonly<Record<WingHighlightTarget, { candi
   // FROM that measurement — see KEY_CREATION_SPEC — so the ring can never point with a string the calibration
   // no longer covers.
   issue_final: { candidateQuery: KEY_CREATION_SPEC.candidateQuery, exactText: KEY_CREATION_SPEC.exactText },
-  // The ring at step ⑧ frames the whole credential TABLE, not the header row.
+  // **This entry no longer decides where step ⑧'s ring goes, and it has no `tagAncestor` at all.**
   //
-  // `tagAncestor` was `"tr"` until 2026-08-12, when the first live reading of this label came back
-  // `observedTag: "TH"` — so `closest('tr')` resolved to the HEADER row, and the ring framed the words
-  // `Access Key` while the panel said "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요". The values
-  // the seller has to copy were outside it, in the body rows of the same table.
+  // It had `"tr"` until 2026-08-12, which resolved to the HEADER row and framed the words `Access Key` rather
+  // than the keys. It then had `"table"`, which reached the values and — live, 2026-08-13 — the seller's own
+  // 연동 정보 block along with them. Neither was a tuning error. `WING_CREDENTIAL_REGION_EVIDENCE` scored this
+  // label's ancestors and concluded `NO_LEVEL_HOLDS_THE_VALUES_WITHOUT_THE_VENDOR_BLOCK`: the three labels are
+  // three `<th>` in ONE header row, so every level below the table holds labels without values, and WING puts
+  // the vendor block inside that same table. **No ancestor of this label is the answer**, so no string here
+  // could have been.
   //
-  // `table` is the smallest ancestor holding both, and it is now MEASURED rather than argued: see
-  // {@link WING_CREDENTIAL_REGION_EVIDENCE}. The operator reported the ring reaching the 연동 정보 block, which
-  // it does — and the reading shows why that cannot be fixed by picking a different ancestor. The three
-  // credential labels are three `<th>` in ONE header row, so every level below `table` holds the labels without
-  // their VALUES; and WING puts the vendor block inside the same `<table>`, so the first level that reaches the
-  // values reaches it too. Ringing less would leave the values the panel says to copy outside the ring.
-  //
-  // If a later WING ever matches this label somewhere else, `buildFixedLabelLocateScript` falls back to the
-  // matched element — the pre-2026-08-12 behaviour minus the row. The step also logs this label's ancestor
-  // chain on every live walk (`aw_coupang_credential_region`), so a change in the markup shows up as a reading.
-  credentials: { candidateQuery: "label,span,div,dt,th,strong", exactText: "Access Key", tagAncestor: "table" },
+  // The ring is now drawn on the value ROW — which is not an ancestor of the label — by
+  // {@link buildCredentialRowRingScript}, off the same resolver that reads the cells. What this entry still
+  // does is supply the fixed label: {@link WING_CREDENTIAL_SHOWN_MARKER_SPEC} (⑦'s "a key now exists" marker)
+  // and the credential-cell field specs both derive from it, which is what keeps the string the walk watches
+  // for and the string it resolves by from drifting apart.
+  credentials: { candidateQuery: "label,span,div,dt,th,strong", exactText: "Access Key" },
 };
 
 /**
@@ -406,16 +406,17 @@ export interface VendorIpBaseline {
  */
 type RemountOutcome = "MOUNTED" | "WRONG_PAGE" | "WRONG_SCREEN" | "NOT_MOUNTED";
 
-function isWingHighlightTarget(target: CoupangIssuanceTarget): target is "issue" | "credentials" | "issue_final" {
+function isWingHighlightTarget(target: CoupangIssuanceTarget): target is "issue" | "issue_final" {
   // Gated on the flag, not on a literal list, so WITHDRAWING the calibration removes the ring by itself. The
   // 삭제 record was withdrawn while its target stayed in a hand-written list, and only the flag being read at
   // the point of use keeps that from happening again.
   if (target === "issue_final") return WING_KEY_CREATION_SELECTOR_CALIBRATED;
-  // The two SINGLE-SPEC fixed-label targets, which is all this predicate has ever answered for. It is no
-  // longer the whole ringed set: the purpose option, 확인 and the two consent sentences were promoted on
+  // The SINGLE-SPEC fixed-label targets — the ones a label plus an optional ancestor can actually reach. It is
+  // not the whole ringed set: the purpose option, 확인 and the two consent sentences were promoted on
   // 2026-08-12 and resolve through `promotedRingSpecs`, which runs ahead of this on both the locate and the
-  // highlight path. `WING_HIGHLIGHT_LABELS` is this function's whole domain.
-  return target === "issue" || target === "credentials";
+  // highlight path; and `credentials` left this set entirely, because no ancestor of its label is the region
+  // (see `WING_HIGHLIGHT_LABELS.credentials`). What remains is this function's whole domain.
+  return target === "issue";
 }
 
 /**
@@ -1909,45 +1910,38 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
   }
 
   /**
-   * Record the credential label's own structure on the issued screen — the measurement the ⑧ anchor rests on.
+   * **Step ⑧'s ring: resolve — and, when tagging, annotate — the credential VALUE ROW.**
    *
-   * Read-only, bounded, and swallowing: a census that cannot be taken must not stop the step it annotates. The
-   * request deliberately does NOT set `readFilled` — a count of non-empty credential fields is still a reading
-   * of the credential fields, and the walk's whole claim is that nothing here looks at them.
+   * This replaced `logCredentialRegion`, which measured the LABEL's ancestor chain to justify the `table`
+   * anchor. That anchor is gone, so the reading that argued for it has nothing left to argue: the ring now
+   * rests on {@link WING_CREDENTIAL_CELL_EVIDENCE} and on this call's own value-free answer, which is logged on
+   * every walk whether it resolves or refuses.
+   *
+   * Fail-closed by construction. A refusal returns `{ count: 0 }`, which the engine parks as a recoverable
+   * `target_not_found`; there is no fallback ring, because the fallback available here is the header row and
+   * that is the defect this replaces. The vendor labels are re-checked in the page every time rather than
+   * trusted from the calibration — a WING that moves 업체명 into the credential row must close the ring, not
+   * enclose it.
+   *
+   * It reads no credential value: the terminal never calls the extraction rule, not even for the one
+   * non-emptiness bit the calibration takes.
    */
-  private async logCredentialRegion(): Promise<void> {
-    const req: FieldRegionRequest = {
-      id: WING_CREDENTIAL_SHOWN_MARKER_SPEC.id,
-      candidateQuery: WING_CREDENTIAL_SHOWN_MARKER_SPEC.candidateQuery,
-      exactText: WING_CREDENTIAL_SHOWN_MARKER_SPEC.exactText,
-    };
-    const raw = await timebox<unknown>(
-      this.evalStr<unknown>(this.activePage(), buildFieldRegionCensusScript([req])).catch(() => null),
-      null,
-    );
-    const reading = sanitizeFieldRegionCensus(raw, [req.id]).readings[0];
-    if (!reading) return;
-    // **Field by field, never spread.** Two reasons, and the first one already cost a measurement: `safeMeta`
-    // collapses any non-scalar to a type tag, so `ancestorTags` — the whole point of this reading — logged as
-    // `"[object]"` on the 2026-08-12 walk. The chain is joined into a scalar here instead.
-    //
-    // The second is the one that matters more: a spread logs whatever the shape grows next. This reading is
-    // taken on the screen holding the seller's Access Key, so what leaves it is enumerated by hand. Every value
-    // below is a tag name (`^[A-Z][A-Z0-9]{0,19}$`, enforced by the sanitizer), an integer, or a fixed enum.
-    // `filledTextInputCount` cannot appear at all — the request never asks for it.
-    log("aw_coupang_credential_region", {
-      markerId: reading.id,
-      visibleCount: reading.visibleCount,
-      hiddenCount: reading.hiddenCount,
-      ...(reading.observedTag ? { observedTag: reading.observedTag } : {}),
-      ...(reading.ancestorTags && reading.ancestorTags.length > 0
-        ? { ancestorChain: reading.ancestorTags.join(">"), ancestorDepth: reading.ancestorTags.length }
-        : {}),
-      ...(reading.association ? { association: reading.association } : {}),
-      ...(reading.regionTag ? { regionTag: reading.regionTag } : {}),
-      ...(reading.inputCount !== undefined ? { inputCount: reading.inputCount } : {}),
-      ...(reading.entryRowCount !== undefined ? { entryRowCount: reading.entryRowCount } : {}),
+  private async resolveCredentialRowRing(tag: boolean): Promise<LocateResult> {
+    const script = buildCredentialRowRingScript(COUPANG_CREDENTIAL_FIELDS, CREDENTIAL_REGION_VENDOR_LABELS, { tag });
+    const raw = await timebox<unknown>(this.evalStr<unknown>(this.activePage(), script).catch(() => null), null);
+    const reading = sanitizeCredentialRowRing(raw);
+    // Field by field, never spread — the same rule the reading it replaced was held to, and for the same
+    // reason: this is taken on the screen holding the seller's Secret Key. Every value below is a fixed enum,
+    // a tag name (`^[A-Z][A-Z0-9]{0,19}$`), an integer, or the opaque 16-hex signature.
+    log("aw_coupang_credential_row_ring", {
+      tagged: tag,
+      count: reading.count,
+      reason: reading.reason,
+      ...(reading.rowTag ? { rowTag: reading.rowTag } : {}),
+      ...(reading.rowCellCount !== undefined ? { rowCellCount: reading.rowCellCount } : {}),
     });
+    if (reading.count !== 1 || !reading.sig) return { count: reading.count };
+    return { count: 1, sig: reading.sig, ...(reading.rowTag ? { tag: reading.rowTag } : {}) };
   }
 
   /**
@@ -2051,6 +2045,8 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     // nothing to find and nothing to miss.
     const guided = TEXT_GUIDED_SIG[target];
     if (guided) return { count: 1, sig: guided };
+    // ⑧ resolves by the credential-cell resolver, not by a label + ancestor — see `resolveCredentialRowRing`.
+    if (target === "credentials") return this.resolveCredentialRowRing(false);
     if (!isWingHighlightTarget(target)) return { count: 0 };
     return this.resolveFixedLabelTarget(target, false);
   }
@@ -2081,15 +2077,13 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
       await this.mountStepOverlay(page, target, true);
       return (await overlayMounted(page)) ? { count: 1, sig: guided } : { count: 0 };
     }
-    if (!isWingHighlightTarget(target)) return { count: 0 };
-    // **The credential region, MEASURED on the screen the ring is about to be drawn on.**
-    //
-    // The anchor moved from the header row to the table on the strength of one live reading plus the HTML
-    // content model (a `TH` is only a `TH` inside a table). That is sound and it is still an inference, so the
-    // step records the ancestor chain it actually found — value-free tag names and counts — and the next reader
-    // is looking at a reading rather than at this comment. It changes nothing about what is ringed.
-    if (target === "credentials") await this.logCredentialRegion();
-    const res = await this.resolveFixedLabelTarget(target, true);
+    // ⑧ rings the value ROW, resolved by the same rule that reads the cells; every other target rings a label.
+    const res: LocateResult =
+      target === "credentials"
+        ? await this.resolveCredentialRowRing(true)
+        : isWingHighlightTarget(target)
+          ? await this.resolveFixedLabelTarget(target, true)
+          : { count: 0 };
     if (res.count !== 1 || !res.sig) return { count: res.count };
     // Give the just-set tag a beat to land, then mount the reused read-only overlay on it (scroll into view +
     // "여기입니다" pointer). Never a WING click awaited.

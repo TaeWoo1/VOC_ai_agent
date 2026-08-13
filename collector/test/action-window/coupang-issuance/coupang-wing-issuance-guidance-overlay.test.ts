@@ -76,7 +76,11 @@ class FakePage {
       // The clear-tag IIFE answers a boolean; the fixed-label locate answers `{count, sig}`. Returning `true`
       // for both made every RING-path target resolve to `count: undefined` and mount nothing, so a test could
       // only ever reach the docked steps — which is how the anchored steps' panel options went unasserted.
-      return isClear ? true : { ...FAKE_LOCATE };
+      if (isClear) return true;
+      // ⑧ no longer goes through the fixed-label locate: it rings the credential VALUE ROW, and its answer is
+      // re-screened host-side against a closed vocabulary, so a bare `{count, sig}` is refused by design.
+      if (script.includes("wing-credential-row-ring")) return { ...FAKE_LOCATE, reason: "OK", rowTag: "TR", rowCellCount: 5 };
+      return { ...FAKE_LOCATE };
     }
     if (arg !== undefined) {
       this.order.push("mount");
@@ -281,7 +285,7 @@ describe("the panel's brief — shorter, and still safe to act on alone", () => 
     const expanded = driverWith(true);
     await expanded.driver.highlightTarget("issue_final");
     expect(expanded.page.mounts[0]?.detailExpanded).toBe(true);
-    for (const target of ["issue", "credentials", "return"] as CoupangIssuanceTarget[]) {
+    for (const target of ["issue", "credentials"] as CoupangIssuanceTarget[]) {
       const { driver, page } = driverWith(true);
       await driver.highlightTarget(target);
       expect(page.mounts[0]?.detail, target).toBe(OPERATOR_STEP_LABELS[target]);

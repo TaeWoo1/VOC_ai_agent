@@ -350,6 +350,87 @@ export function credentialCellsResolved(
   return { ok: true, reason: "OK" };
 }
 
+/**
+ * **Why step ⑧'s ring may not be drawn** — the value-row ring's own vocabulary.
+ *
+ * It restates the structural members of {@link CREDENTIAL_CELL_REFUSALS} rather than importing the type,
+ * because the two answer different questions and must be able to diverge: this one carries no `CELL_EMPTY` and
+ * no `MISSING_READING`, since the ring path takes no non-emptiness bit and asks for the whole set at once. What
+ * it adds are the two facts only a ring can be wrong about.
+ */
+export const CREDENTIAL_ROW_RING_REFUSALS = [
+  "OK",
+  "LABEL_NOT_UNIQUE",
+  "NO_ASSOCIATION",
+  "CELL_NOT_UNIQUE",
+  "ROW_NOT_CORROBORATED",
+  "CELL_SHAPE_AMBIGUOUS",
+  "CELL_COLLISION",
+  "ASSOCIATION_MIXED",
+  "TABLE_MIXED",
+  "SCAN_TRUNCATED",
+  /**
+   * The three value cells did not land in ONE row element. The row-headed shape gives each label its own row,
+   * and three rows are not a region — there is nothing to ring that is the credential and only the credential.
+   */
+  "ROW_NOT_SHARED",
+  /**
+   * The row that would be ringed also holds 업체명 / IP주소 / URL — the seller's own business details, which are
+   * not part of their key. This is the defect the ring is being moved to fix, kept as a runtime refusal so a
+   * WING that later moves the vendor block INTO the credential row closes the ring instead of enclosing it.
+   */
+  "ROW_HOLDS_VENDOR_LABEL",
+  /** The page answered something this vocabulary does not contain. Fail-closed: no ring. */
+  "UNREADABLE",
+] as const;
+export type CredentialRowRingRefusal = (typeof CREDENTIAL_ROW_RING_REFUSALS)[number];
+
+/**
+ * What the ring terminal is allowed to tell the host: a count, a reason from the closed vocabulary above, and —
+ * only when it resolved — an opaque signature, a tag name and an integer. No selector, no text, no value.
+ */
+export interface CredentialRowRingReading {
+  /** 1 when the row resolved (and, on the tagging call, was tagged); 0 otherwise. Never anything else. */
+  readonly count: number;
+  readonly reason: CredentialRowRingRefusal;
+  /** The opaque 16-hex structural signature of the ringed row. Present only when `count` is 1. */
+  readonly sig?: string;
+  readonly rowTag?: string;
+  readonly rowCellCount?: number;
+}
+
+const ROW_RING_REFUSALS: ReadonlySet<string> = new Set<string>(CREDENTIAL_ROW_RING_REFUSALS);
+
+/**
+ * Fold the ring terminal's answer into the declared shape — the host-side half of the boundary.
+ *
+ * Total and fail-closed: anything that is not a recognised refusal is `UNREADABLE`, and a `count` of 1 that
+ * arrives without a well-shaped signature resolves to no ring at all. The alternative — trusting the script
+ * because we wrote it — is the arrangement this workstream has had to repair twice.
+ */
+export function sanitizeCredentialRowRing(raw: unknown): CredentialRowRingReading {
+  const obj = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const reasonRaw = obj["reason"];
+  const reason: CredentialRowRingRefusal =
+    typeof reasonRaw === "string" && ROW_RING_REFUSALS.has(reasonRaw)
+      ? (reasonRaw as CredentialRowRingRefusal)
+      : "UNREADABLE";
+  const sigRaw = obj["sig"];
+  const sig = typeof sigRaw === "string" && /^[0-9a-f]{16}$/.test(sigRaw) ? sigRaw : undefined;
+  if (obj["count"] !== 1 || reason !== "OK" || sig === undefined) {
+    return { count: 0, reason: reason === "OK" ? "UNREADABLE" : reason };
+  }
+  const rowTag = tag(obj["rowTag"]);
+  const rowCellCount = count(obj["rowCellCount"]);
+  return {
+    count: 1,
+    reason: "OK",
+    sig,
+    ...(rowTag ? { rowTag } : {}),
+    ...(rowCellCount !== undefined ? { rowCellCount } : {}),
+  };
+}
+
 const ASSOCIATIONS: ReadonlySet<string> = new Set<string>(CREDENTIAL_CELL_ASSOCIATIONS);
 
 /** How many candidate cells a reading may describe. A column with more than this is not a credential column. */

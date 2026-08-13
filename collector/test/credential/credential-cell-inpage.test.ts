@@ -16,6 +16,7 @@ import {
   buildCredentialCellCensusScript,
   buildCredentialCellReadScript,
   buildCredentialRegionScopeScript,
+  buildCredentialRowRingScript,
 } from "../../src/action-window/api-issuance-calibration/credential-cell-inpage";
 import {
   COUPANG_CREDENTIAL_FIELDS,
@@ -24,6 +25,8 @@ import {
   credentialCellsResolved,
   sanitizeCredentialCellCensus,
   sanitizeCredentialRegionScope,
+  sanitizeCredentialRowRing,
+  type CredentialRowRingReading,
 } from "../../src/action-window/coupang-wing-credential-cells";
 
 /* ───────────────────────────── a fake DOM with a real tree ───────────────────────────── */
@@ -83,8 +86,17 @@ class El {
     return other === this || this.descendants().includes(other);
   }
   querySelectorAll(sel: string): El[] {
-    const wanted = sel.split(",").map((s) => s.trim().toUpperCase());
-    return this.descendants().filter((e) => wanted.includes(e.tagName));
+    return select(this.descendants(), sel);
+  }
+  /* The ring terminal is the only one that WRITES to the page, so the fake has to be able to be written to. */
+  setAttribute(name: string, value: string): void {
+    this.attrs.set(name, value);
+  }
+  removeAttribute(name: string): void {
+    this.attrs.delete(name);
+  }
+  hasAttribute(name: string): boolean {
+    return this.attrs.has(name);
   }
   computedStyle(): { display: string; visibility: string } {
     return { display: this.display, visibility: "visible" };
@@ -95,9 +107,28 @@ class El {
   getBoundingClientRect(): { width: number; height: number } {
     return { width: 100, height: 20 };
   }
-  getAttribute(): string | null {
-    return null;
+  getAttribute(name: string): string | null {
+    return this.attrs.get(name) ?? null;
   }
+  private readonly attrs = new Map<string, string>();
+}
+
+/**
+ * Tag-name lists (`th,td`), the attribute selector the tagging path uses (`[data-aw-target]`), and `*`.
+ *
+ * `*` is here because leaving it out made a test pass for the wrong reason: it returned nothing, so a
+ * document-wide element index was constant, so the signature-stability case could not fail. A fake that cannot
+ * express a selector silently answers "no elements" — which is the shape of a green test over a broken rule.
+ */
+function select(els: El[], sel: string): El[] {
+  const trimmed = sel.trim();
+  if (trimmed === "*") return [...els];
+  if (trimmed.startsWith("[")) {
+    const name = trimmed.slice(1, -1);
+    return els.filter((e) => e.hasAttribute(name));
+  }
+  const wanted = trimmed.split(",").map((s) => s.trim().toUpperCase());
+  return els.filter((e) => wanted.includes(e.tagName));
 }
 
 function el(init: ElInit): El {
@@ -108,8 +139,7 @@ function run<T>(script: string, root: El): T {
   const all = root.descendants();
   const document = {
     querySelectorAll(sel: string): El[] {
-      const wanted = sel.split(",").map((s) => s.trim().toUpperCase());
-      return all.filter((e) => wanted.includes(e.tagName));
+      return select(all, sel);
     },
   };
   const window = { getComputedStyle: (e: El) => e.computedStyle() };
@@ -463,45 +493,48 @@ function narrowSecondRowTable(): El {
   );
 }
 
-describe("the live column collision, and the same-row rule measured out of it", () => {
-  /**
-   * **The 2026-08-13 screen, as its own readings describe it.** The credential row is five columns wide with
-   * 업체코드 at index 1, Access Key at 3, Secret Key at 4. Below it the 연동 정보 block is a THREE-column row —
-   * 업체명 / IP주소 / URL — whose index 1 is the IP address's value.
-   *
-   * So 업체코드's column index collides with IP주소's. The naive column rule finds both, and the value it would
-   * have stored as the vendor code is an IP address.
-   */
-  function liveCollisionTable(): El {
-    const head = el({ tag: "tr" }).add(
-      el({ tag: "th", text: "번호" }),
-      el({ tag: "th", text: "업체코드" }),
-      el({ tag: "th", text: "구분" }),
-      el({ tag: "th", text: "Access Key" }),
-      el({ tag: "th", text: "Secret Key" }),
-    );
-    const values = el({ tag: "tr" }).add(
-      el({ tag: "td", text: "1" }),
-      el({ tag: "td", text: VENDOR }),
-      el({ tag: "td", text: "자체개발" }),
-      el({ tag: "td", text: ACCESS }),
-      el({ tag: "td", text: SECRET }),
-    );
-    const vendorHead = el({ tag: "tr" }).add(
-      el({ tag: "th", text: "업체명" }),
-      el({ tag: "th", text: "IP주소" }),
-      el({ tag: "th", text: "URL" }),
-    );
-    const vendorRow = el({ tag: "tr" }).add(
-      el({ tag: "td", text: "sellerOps" }),
-      el({ tag: "td", text: VENDOR_IP }),
-      el({ tag: "td", text: "https://app.example.com/connect" }),
-    );
-    return el({ tag: "div" }).add(
-      el({ tag: "table" }).add(el({ tag: "thead" }).add(head), el({ tag: "tbody" }).add(values, vendorHead, vendorRow)),
-    );
-  }
+/**
+ * **The 2026-08-13 screen, as its own readings describe it.** The credential row is five columns wide with
+ * 업체코드 at index 1, Access Key at 3, Secret Key at 4. Below it the 연동 정보 block is a THREE-column row —
+ * 업체명 / IP주소 / URL — whose index 1 is the IP address's value.
+ *
+ * So 업체코드's column index collides with IP주소's. The naive column rule finds both, and the value it would
+ * have stored as the vendor code is an IP address.
+ *
+ * Module-scope because the value-row RING is measured against the same shape: the ring and the read rest on one
+ * corroboration, and a second copy of this fixture is somewhere they could stop doing so.
+ */
+function liveCollisionTable(): El {
+  const head = el({ tag: "tr" }).add(
+    el({ tag: "th", text: "번호" }),
+    el({ tag: "th", text: "업체코드" }),
+    el({ tag: "th", text: "구분" }),
+    el({ tag: "th", text: "Access Key" }),
+    el({ tag: "th", text: "Secret Key" }),
+  );
+  const values = el({ tag: "tr" }).add(
+    el({ tag: "td", text: "1" }),
+    el({ tag: "td", text: VENDOR }),
+    el({ tag: "td", text: "자체개발" }),
+    el({ tag: "td", text: ACCESS }),
+    el({ tag: "td", text: SECRET }),
+  );
+  const vendorHead = el({ tag: "tr" }).add(
+    el({ tag: "th", text: "업체명" }),
+    el({ tag: "th", text: "IP주소" }),
+    el({ tag: "th", text: "URL" }),
+  );
+  const vendorRow = el({ tag: "tr" }).add(
+    el({ tag: "td", text: "sellerOps" }),
+    el({ tag: "td", text: VENDOR_IP }),
+    el({ tag: "td", text: "https://app.example.com/connect" }),
+  );
+  return el({ tag: "div" }).add(
+    el({ tag: "table" }).add(el({ tag: "thead" }).add(head), el({ tag: "tbody" }).add(values, vendorHead, vendorRow)),
+  );
+}
 
+describe("the live column collision, and the same-row rule measured out of it", () => {
   it("the NAIVE column rule finds two candidates for 업체코드 and one for each of the others", () => {
     const c = census(liveCollisionTable());
     const vendor = c.readings.find((r) => r.id === "vendor_id");
@@ -690,5 +723,237 @@ describe("the region scope — the measurement D1 rests on", () => {
     const root = el({ tag: "div" }).add(el({ tag: "div", text: "업체코드" }));
     expect(scope(root)).toEqual({ anchorResolved: false, resolvedCellCount: 0, rows: [] });
     expect(chooseCredentialRegion(scope(root), 3)).toBeNull();
+  });
+});
+
+/* ───────────────────────────── D1: the value-row ring ───────────────────────────── */
+
+/**
+ * **What step ⑧ draws a box around.** The ring had two anchors before this and both were measured wrong: `tr`
+ * framed the header row (the words, not the keys), `table` framed the keys AND the seller's own 업체명 / IP주소
+ * / URL. `WING_CREDENTIAL_REGION_EVIDENCE` explains why no third string would have worked — every ancestor of
+ * the label that reaches a value reaches the whole table.
+ *
+ * The value ROW is not an ancestor of the label, so it was never reachable that way. It is what the
+ * credential-cell resolver already resolves, which is the point: **the ring and the read rest on one
+ * corroboration**, and a ring drawn where the read would refuse cannot exist.
+ */
+function ring(root: El, tag = true): CredentialRowRingReading {
+  return sanitizeCredentialRowRing(
+    run<unknown>(buildCredentialRowRingScript(COUPANG_CREDENTIAL_FIELDS, VENDOR_LABELS, { tag }), root),
+  );
+}
+
+/** The one element the page was told to ring, or null. */
+function tagged(root: El): El | null {
+  return root.descendants().find((e) => e.hasAttribute("data-aw-target")) ?? null;
+}
+
+describe("the ring lands on the credential VALUE row — the live shape", () => {
+  it("resolves, and tags the row the three values share", () => {
+    const root = liveCollisionTable();
+    const r = ring(root);
+    expect(r).toMatchObject({ count: 1, reason: "OK", rowTag: "TR", rowCellCount: 5 });
+    const box = tagged(root);
+    expect(box, "nothing was tagged").not.toBeNull();
+    expect(box!.tagName).toBe("TR");
+  });
+
+  it("**encloses the three values and NONE of the vendor block** — the defect, stated as containment", () => {
+    const root = liveCollisionTable();
+    ring(root);
+    const box = tagged(root)!;
+    const inside = box.descendants().map((e) => e.textContent);
+    for (const value of [VENDOR, ACCESS, SECRET]) expect(inside, `${value} is outside the ring`).toContain(value);
+    // The whole of D1: 업체명 / IP주소 / URL and their values are outside it. `table` enclosed all six.
+    for (const label of ["업체명", "IP주소", "URL", VENDOR_IP, "sellerOps"]) {
+      expect(box.textContent, `the ring reaches ${label}`).not.toContain(label);
+    }
+  });
+
+  it("is neither of the two anchors it replaces — not the header row, not the table", () => {
+    const root = liveCollisionTable();
+    ring(root);
+    const box = tagged(root)!;
+    expect(box.tagName).not.toBe("TABLE");
+    // The header row holds the LABELS. Ringing it is the 2026-08-12 defect; ringing the table is the 08-13 one.
+    expect(box.textContent).not.toContain("Access Key");
+    expect(box.textContent).toContain(ACCESS);
+  });
+
+  it("rests on the SAME corroboration as the read — the ambiguous 업체코드 does not weaken it", () => {
+    // 업체코드 resolves by ROW_CORROBORATION on this shape (its column collides with IP주소's). The ring is
+    // licensed by the same resolution the read is, which is why they cannot disagree about where the keys are.
+    const root = liveCollisionTable();
+    expect(census(root).readings.find((r) => r.id === "vendor_id")?.cellResolvedBy).toBe("ROW_CORROBORATION");
+    expect(ring(root).count).toBe(1);
+    expect(read(root).ok).toBe(true);
+  });
+
+  it("the simple measured shape rings too — three values, one row, three cells", () => {
+    const root = wingIssuedTable();
+    expect(ring(root)).toMatchObject({ count: 1, reason: "OK", rowTag: "TR", rowCellCount: 3 });
+  });
+});
+
+describe("the ring refuses rather than framing something else", () => {
+  it("**a vendor label INSIDE the credential row closes the ring** — it is not enclosed", () => {
+    // The runtime guard, not the calibration: a WING that later moves 업체명 into the credential row must make
+    // the ring disappear, not make it correct. The values are still perfectly resolvable here — that is the
+    // point. Nothing about the READ is wrong; the RING would be.
+    const head = el({ tag: "tr" }).add(
+      el({ tag: "th", text: "업체코드" }),
+      el({ tag: "th", text: "Access Key" }),
+      el({ tag: "th", text: "Secret Key" }),
+      el({ tag: "th", text: "업체명" }),
+    );
+    const body = el({ tag: "tr" }).add(
+      el({ tag: "td", text: VENDOR }),
+      el({ tag: "td", text: ACCESS }),
+      el({ tag: "td", text: SECRET }),
+      el({ tag: "td" }).add(el({ tag: "span", text: "업체명" })),
+    );
+    const root = el({ tag: "div" }).add(
+      el({ tag: "table" }).add(el({ tag: "thead" }).add(head), el({ tag: "tbody" }).add(body)),
+    );
+    expect(ring(root)).toEqual({ count: 0, reason: "ROW_HOLDS_VENDOR_LABEL" });
+    expect(tagged(root), "a refused ring still tagged the page").toBeNull();
+  });
+
+  it("the row-headed shape has no shared row — three rows are not a region", () => {
+    const row = (label: string, value: string) =>
+      el({ tag: "tr" }).add(el({ tag: "th", text: label }), el({ tag: "td", text: value }));
+    const root = el({ tag: "div" }).add(
+      el({ tag: "table" }).add(
+        el({ tag: "tbody" }).add(row("업체코드", VENDOR), row("Access Key", ACCESS), row("Secret Key", SECRET)),
+      ),
+    );
+    // The READ is fine on this shape — it is the other association the resolver supports. The RING is not.
+    expect(read(root).ok).toBe(true);
+    expect(ring(root)).toEqual({ count: 0, reason: "ROW_NOT_SHARED" });
+    expect(tagged(root)).toBeNull();
+  });
+
+  it("corroboration that fails leaves no ring — one anchor cannot vouch for a row", () => {
+    // Access Key duplicated: it stops being an unambiguous anchor, so 업체코드's two candidates stay two.
+    const head = el({ tag: "tr" }).add(
+      el({ tag: "th", text: "업체코드" }),
+      el({ tag: "th", text: "Access Key" }),
+      el({ tag: "th", text: "Secret Key" }),
+    );
+    const values = el({ tag: "tr" }).add(
+      el({ tag: "td", text: VENDOR }),
+      el({ tag: "td", text: ACCESS }),
+      el({ tag: "td", text: SECRET }),
+    );
+    const root = el({ tag: "div" }).add(
+      el({ tag: "table" }).add(el({ tag: "thead" }).add(head), el({ tag: "tbody" }).add(values)),
+      el({ tag: "span", text: "Access Key" }),
+    );
+    expect(ring(root)).toEqual({ count: 0, reason: "LABEL_NOT_UNIQUE" });
+    expect(tagged(root)).toBeNull();
+  });
+
+  it("a mixed association is refused before anything is tagged — the whole-set check the read makes", () => {
+    // The review defect, at the ring: a trailing `td` in the header row makes the LAST label resolve row-headed.
+    const head = el({ tag: "tr" }).add(
+      el({ tag: "th", text: "업체코드" }),
+      el({ tag: "th", text: "Access Key" }),
+      el({ tag: "th", text: "Secret Key" }),
+      el({ tag: "td", text: "복사" }),
+    );
+    const values = el({ tag: "tr" }).add(
+      el({ tag: "td", text: VENDOR }),
+      el({ tag: "td", text: ACCESS }),
+      el({ tag: "td", text: SECRET }),
+    );
+    const root = el({ tag: "div" }).add(
+      el({ tag: "table" }).add(el({ tag: "thead" }).add(head), el({ tag: "tbody" }).add(values)),
+    );
+    expect(ring(root)).toEqual({ count: 0, reason: "ASSOCIATION_MIXED" });
+    expect(tagged(root)).toBeNull();
+  });
+
+  it("nothing on the page at all is a refusal, not an empty ring", () => {
+    const root = el({ tag: "div" }).add(el({ tag: "p", text: "로그인" }));
+    expect(ring(root).count).toBe(0);
+    expect(tagged(root)).toBeNull();
+  });
+});
+
+describe("the ring's signature, and what it must survive", () => {
+  it("locate and ring agree — the engine's anti-drift check compares exactly these two", () => {
+    const root = liveCollisionTable();
+    const located = ring(root, false);
+    const drawn = ring(root, true);
+    expect(located.sig).toBe(drawn.sig);
+    expect(located.sig).toMatch(/^[0-9a-f]{16}$/);
+    // …and the locate call tagged nothing, which is the difference between the two terminals.
+    const fresh = liveCollisionTable();
+    ring(fresh, false);
+    expect(tagged(fresh)).toBeNull();
+  });
+
+  it("**an element appearing ABOVE the table does not change it** — why the sig is table-relative", () => {
+    // A document-wide element index — what the fixed-label locate uses — moves when anything is inserted
+    // earlier in the document. A WING notice above the table is enough. The engine compares the locate's sig
+    // with the highlight's and parks on a mismatch, so an index that counts the whole page would report "the
+    // match changed" over a page where the only thing that changed was above it.
+    //
+    // Inserted BEFORE, deliberately: an overlay appended at the END of the document shifts nothing, so a case
+    // that appended would pass under either rule and prove neither.
+    const before = ring(liveCollisionTable(), false).sig;
+    const withBanner = el({ tag: "div" }).add(
+      el({ tag: "div", text: "쿠팡 공지" }).add(el({ tag: "span", text: "점검 안내" })),
+      liveCollisionTable(),
+    );
+    expect(ring(withBanner, false).sig).toBe(before);
+  });
+
+  it("clears a previous step's tag before it draws its own", () => {
+    const root = liveCollisionTable();
+    const stale = el({ tag: "button", text: "API Key 발급 받기" });
+    stale.setAttribute("data-aw-target", "");
+    root.add(stale);
+    ring(root);
+    expect(stale.hasAttribute("data-aw-target"), "the previous ring survived").toBe(false);
+    expect(tagged(root)!.tagName).toBe("TR");
+  });
+});
+
+describe("the ring is value-free, and the sanitizer is the boundary", () => {
+  it("no credential value appears anywhere in what it returns", () => {
+    const serialized = JSON.stringify(ring(liveCollisionTable()));
+    for (const secret of [VENDOR, ACCESS, SECRET, VENDOR_IP]) expect(serialized).not.toContain(secret);
+  });
+
+  it("the emitted terminal never reaches the extraction rule — not even for the non-emptiness bit", () => {
+    const script = buildCredentialRowRingScript(COUPANG_CREDENTIAL_FIELDS, VENDOR_LABELS, { tag: true });
+    const terminal = script.slice(script.indexOf("var SPECS ="));
+    expect(terminal).not.toContain("cellText(");
+    expect(terminal).not.toContain("cellNonEmpty(");
+  });
+
+  it("a reason outside the vocabulary is UNREADABLE, and a value smuggled into one lands nowhere", () => {
+    expect(sanitizeCredentialRowRing({ count: 1, reason: ACCESS, sig: "a1b2c3d4e5f60718" })).toEqual({
+      count: 0,
+      reason: "UNREADABLE",
+    });
+    expect(sanitizeCredentialRowRing({ count: 1, reason: "OK", sig: "a1b2c3d4e5f60718", rowTag: SECRET })).toEqual({
+      count: 1,
+      reason: "OK",
+      sig: "a1b2c3d4e5f60718",
+    });
+  });
+
+  it("a resolved answer without a well-shaped signature draws no ring", () => {
+    // `count: 1` is a claim; the signature is what the engine checks the claim against. Missing or malformed,
+    // there is nothing to compare at the next step, so the honest outcome is no ring rather than an unanchored one.
+    expect(sanitizeCredentialRowRing({ count: 1, reason: "OK" })).toEqual({ count: 0, reason: "UNREADABLE" });
+    expect(sanitizeCredentialRowRing({ count: 1, reason: "OK", sig: "not-a-signature" })).toEqual({
+      count: 0,
+      reason: "UNREADABLE",
+    });
+    expect(sanitizeCredentialRowRing(null)).toEqual({ count: 0, reason: "UNREADABLE" });
   });
 });
