@@ -100,3 +100,39 @@ describe("Coupang issuance step copy — the FE and the WING-resident panel say 
     expect(Object.keys(KEY_FOR_TARGET).sort()).toEqual(Object.keys(OPERATOR_STEP_LABELS).sort());
   });
 });
+
+/* ─────────────── D2: the return URL and the reader that has to accept it ─────────────── */
+
+/**
+ * **The agent builds the return URL; the frontend decides what it means.** Two files, one string, and a
+ * disagreement between them is silent: the seller lands on the connect page, the resume marker is not
+ * recognized, and they are shown the start of a walk they have just finished — which is D2 itself, arriving a
+ * second time through a typo.
+ *
+ * The frontend module is PARSED rather than imported, for the same reason as the copy above: the collector
+ * package does not compile the frontend. What is executed here is the collector's real screening function.
+ */
+describe("the guided walk's return marker survives the trip to the frontend", () => {
+  const FE_TUTORIAL = resolve(HERE, "../../../frontend/src/lib/coupangTutorial.ts");
+
+  it("the URL the agent opens carries exactly the query the FE reader looks for", async () => {
+    const { screenSellerOpsReturnUrl, SELLEROPS_ISSUANCE_RESUME_QUERY } = await import("../../src/cli/sellerops-return-url");
+    const screened = screenSellerOpsReturnUrl("http://localhost:5173");
+    expect(screened.ok).toBe(true);
+    const url = new URL((screened as { url: string }).url);
+    expect(url.pathname).toBe("/connect/coupang");
+    // The marker, parsed back out of the built URL rather than re-stated: `key=value`, split on the `=`.
+    const [key, value] = SELLEROPS_ISSUANCE_RESUME_QUERY.split("=");
+    expect(url.searchParams.get(key!)).toBe(value);
+
+    // …and the FE reader tests for that same pair. Parsed, so an edit on either side breaks this.
+    const fe = readFileSync(FE_TUTORIAL, "utf8");
+    const reader = fe.slice(fe.indexOf("export function isIssuanceResumeReturn"));
+    expect(reader).toContain(`get("${key}") === "${value}"`);
+  });
+
+  it("the FE reader is where the FE says it is — a renamed export would pass the string check alone", () => {
+    const fe = readFileSync(FE_TUTORIAL, "utf8");
+    expect(fe).toContain("export function isIssuanceResumeReturn(search: string): boolean");
+  });
+});

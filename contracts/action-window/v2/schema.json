@@ -20,7 +20,7 @@
     },
     "BlockerCode": {
       "type": "string",
-      "enum": ["LOGIN_REQUIRED", "UI_DRIFT", "TARGET_NOT_FOUND", "TARGET_AMBIGUOUS", "SESSION_EXPIRED", "UNSUPPORTED_STATE", "DOWNLOAD_TIMEOUT", "ARTIFACT_INVALID", "SCOPE_MISMATCH", "INGEST_FAILED", "SURFACE_OPEN_FAILED", "PREPARE_NOT_STARTED", "SURFACE_SETTLE_TIMEOUT", "GUIDANCE_PACK_REJECTED", "OVERLAY_MOUNT_FAILED", "OVERLAY_NOT_VISIBLE", "SURFACE_CLOSED"]
+      "enum": ["LOGIN_REQUIRED", "UI_DRIFT", "TARGET_NOT_FOUND", "TARGET_AMBIGUOUS", "SESSION_EXPIRED", "UNSUPPORTED_STATE", "DOWNLOAD_TIMEOUT", "ARTIFACT_INVALID", "SCOPE_MISMATCH", "INGEST_FAILED", "SURFACE_OPEN_FAILED", "PREPARE_NOT_STARTED", "SURFACE_SETTLE_TIMEOUT", "GUIDANCE_PACK_REJECTED", "OVERLAY_MOUNT_FAILED", "OVERLAY_NOT_VISIBLE", "SURFACE_CLOSED", "CREDENTIAL_STATE_UNKNOWN"]
     },
     "CommandType": {
       "type": "string",
@@ -49,6 +49,11 @@
       "type": "string",
       "description": "v2, issuance-scoped: the application branch the API-issuance runtime observed on the seller's application list — existing (open the one existing Commerce app) or new (create one). Rides ONLY the issuance run view (ActionWindowRunView.appBranch) on an API_ISSUANCE_GUIDANCE run; absent until the list is observed and never on any other run/payload. A single sanitized bit — no app/store/account identity.",
       "enum": ["existing", "new"]
+    },
+    "IssuanceCredentialState": {
+      "type": "string",
+      "description": "v2, issuance-scoped: whether the seller's marketplace account already holds an API credential, as OBSERVED by the guidance runtime. KEY_PRESENT = cells resolved and non-empty; NO_KEY = cells resolved and empty (a positive reading, never a failure to find one); UNKNOWN = anything else, which refuses the walk rather than proceeding. Rides ONLY the issuance run view (ActionWindowRunView.credentialState) on an API_ISSUANCE_GUIDANCE run. One sanitized enum — no credential value, length, prefix, or account identity.",
+      "enum": ["NO_KEY", "KEY_PRESENT", "UNKNOWN"]
     },
     "OpaqueRef": {
       "type": "string",
@@ -144,6 +149,7 @@
         "executionMode": { "$ref": "#/$defs/ExecutionMode" },
         "intent": { "$ref": "#/$defs/RunIntent" },
         "appBranch": { "$ref": "#/$defs/IssuanceAppBranch" },
+        "credentialState": { "$ref": "#/$defs/IssuanceCredentialState" },
         "currentStep": {
           "type": "object",
           "additionalProperties": false,

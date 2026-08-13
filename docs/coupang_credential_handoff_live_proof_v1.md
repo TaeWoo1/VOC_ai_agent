@@ -117,6 +117,58 @@ or issuance context and the page resolves its phase from scratch.
 **Fix rule, from the operator:** the return must land on the credential-entry / handoff state of the
 EXISTING run, not start a new flow. The WING window stays open and untouched either way.
 
+#### D2 — CLOSED (offline), 2026-08-13
+
+**The cause was that nothing carried the fact that a run was in flight.** Neither side was wrong on its own:
+the connect page derives its landing phase from PERSISTED state and a seller mid-issuance has persisted
+nothing, and the walkthrough component's "have we started" flag is component-local, so a fresh tab starts at
+the start CTA. Two correct behaviours, one missing signal.
+
+Two things now carry it, and they are separate on purpose:
+
+- **The return URL** — the agent appends `?issuance=resume` (`SELLEROPS_ISSUANCE_RESUME_QUERY`). It skips the
+  start gate and adopts whatever run the agent is already hosting. It is **not** a run id and makes no identity
+  claim: a forged value can do nothing a seller cannot do by pressing the CTA themselves. A cross-stack test
+  pins the collector's builder against the frontend's reader, because a typo between them is silent — it would
+  land the seller on the start of the walk again, which is D2 arriving a second time.
+- **`credentialState` on the wire** — `NO_KEY` / `KEY_PRESENT` / `UNKNOWN`, issuance-scoped exactly like
+  `appBranch`, rejected by `validateRunView` on any other intent.
+
+**Where each state goes.** The walk's last control creates a real key on a live account, so before guiding the
+first step toward it the run asks whether one already exists — on the open-API surface, which is the only page
+where the question is answerable, through both doors into that surface (`onSurfaceProbed` and
+`onReachVerified`).
+
+| reading | what happens |
+|---|---|
+| `NO_KEY` | the walk proceeds to step 2, exactly as before |
+| `KEY_PRESENT` | steps 2–7 are **not walked** — the run goes straight to step ⑧, the same hand-off state a seller who has just issued a key ends on |
+| `UNKNOWN` | park `credential_state_unknown`, blocker `CREDENTIAL_STATE_UNKNOWN`, recoverable |
+
+Both cohorts therefore arrive at one screen, which is what the operator asked for. The FE reads the enum and
+says *"이미 발급된 Open API 키를 확인했어요"* rather than *"발급 완료"* — telling someone they issued a key
+they did not issue is a claim about their account that is not true.
+
+**Three fail-closed properties, each with an executed offline case and each mutation-checked:**
+
+1. `mayStartIssuance` is ASKED, rather than `!== "KEY_PRESENT"` tested. The second spelling reads `UNKNOWN` as
+   permission, and `UNKNOWN` is where a second real key gets created. Mutating it to that spelling is CAUGHT.
+2. A driver that does not implement the probe answers `UNKNOWN`, not `NO_KEY`. The failure this closes is not
+   an ambiguous page but an OLD driver, and it would fail silently. Mutating the fallback is CAUGHT.
+3. `UNKNOWN` deliberately does **not** latch, while a decision does. A second reading arriving while the run is
+   still in `locating_open_api` must not re-branch a run already being guided; but a recoverable park whose
+   recovery cannot change the answer is not recoverable, so the flag is set only by the two branches that
+   guide. Both halves are pinned.
+
+**The reading is an `AUTO_READ`, and crosses no action barrier** (approval contract §5b): it advances the run's
+own guidance. `KEY_PRESENT` PREVENTS an act rather than causing one, and `NO_KEY` still ends the walk at a
+control the seller presses themselves. It is gated on `WING_CREDENTIAL_CELLS_CALIBRATED` — withdraw the
+calibration and it answers `UNKNOWN`, which parks.
+
+**Still open (deliberately):** the credential HANDOFF itself is not yet wired into the frontend — it lives in
+`run-coupang-credential-handoff-live`, behind its own `CREDENTIAL_REVEAL` barrier. What D2 delivers is that
+both cohorts reach the same hand-off-ready state; what they do from there is the live proof below.
+
 ---
 
 ### Backlog — copy-friendly connection details (deployment polish, not a blocker)

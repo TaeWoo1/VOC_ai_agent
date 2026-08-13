@@ -11,8 +11,27 @@
  * discarded and replaced with the connect route, so nothing can ride along in it.
  */
 
-/** The one route the walk returns to: the Coupang connect screen, where the copied keys are entered. */
+/** The one route the walk returns to: the Coupang connect screen, where the connection is completed. */
 export const SELLEROPS_COUPANG_CONNECT_PATH = "/connect/coupang";
+
+/**
+ * **The marker that says "this is a RETURN, not an arrival"** — the whole of D2's URL half.
+ *
+ * Reported live on 2026-08-13: the seller pressed the walk's return and landed on `쿠팡 연결 안내 시작` /
+ * `이미 키가 있어요`, i.e. the beginning of the flow, having just finished it. The cause is not a wrong route.
+ * The connect page resolves its phase from persisted state — correct, and for a seller mid-issuance nothing is
+ * persisted yet — and the walkthrough component's "have we started" flag is component-local, so a fresh tab
+ * starts at the start CTA. Neither side is wrong on its own; nothing was carrying the fact that a run is
+ * already in flight.
+ *
+ * This carries it, and carries nothing else. It is not a run id and makes no identity claim — the agent hosts
+ * exactly one issuance run and the frontend adopts it over the bridge, so the only thing missing was
+ * permission to skip the start gate. A forged value can therefore do nothing a seller cannot do by pressing
+ * the CTA themselves.
+ *
+ * The frontend's reader (`isIssuanceResumeReturn`) is pinned against this constant by a cross-stack test.
+ */
+export const SELLEROPS_ISSUANCE_RESUME_QUERY = "issuance=resume";
 
 /** Why a return destination was refused. Fixed enum — it is logged, so it carries no URL and no host. */
 export type SellerOpsReturnRefusal = "EMPTY" | "UNPARSEABLE" | "NOT_HTTP" | "NOT_LOOPBACK";
@@ -54,6 +73,7 @@ export function screenSellerOpsReturnUrl(appUrl: string | undefined): SellerOpsR
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return { ok: false, reason: "NOT_HTTP" };
   if (!LOOPBACK_HOSTS.includes(parsed.hostname)) return { ok: false, reason: "NOT_LOOPBACK" };
-  // ORIGIN ONLY. Everything else about the configured value is dropped rather than carried forward.
-  return { ok: true, url: `${parsed.origin}${SELLEROPS_COUPANG_CONNECT_PATH}` };
+  // ORIGIN ONLY. Everything else about the configured value is dropped rather than carried forward — the
+  // route and the resume marker are ours, not the operator's.
+  return { ok: true, url: `${parsed.origin}${SELLEROPS_COUPANG_CONNECT_PATH}?${SELLEROPS_ISSUANCE_RESUME_QUERY}` };
 }

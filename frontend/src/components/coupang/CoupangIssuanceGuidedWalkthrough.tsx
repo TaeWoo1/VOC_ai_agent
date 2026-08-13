@@ -11,6 +11,7 @@ import { CoupangIssuanceTutorial } from "./CoupangIssuanceTutorial";
 import { useGuidedIssuance } from "../../lib/actionWindow/issuance/useGuidedIssuance";
 import type { GuidedIssuanceRuntime } from "../../lib/actionWindow/issuance/issuanceRuntime";
 import { classifyAgentEnv, type AgentEnvStatus } from "../../lib/guidedConnection";
+import { isIssuanceResumeReturn } from "../../lib/coupangTutorial";
 
 /**
  * The Action Window guided walkthrough for Coupang WING Open API key issuance — a fork of
@@ -79,7 +80,13 @@ export function CoupangIssuanceGuidedWalkthrough({
   // hosting. Pairing is deferred until the seller starts, so the dedicated WING window / agent handshake only
   // begins on an explicit action. Fixture renders (a `run` prop) start immediately.
   const controlled = run !== undefined;
-  const [started, setStarted] = useState(controlled);
+  // …and a RETURN is not an arrival. The agent's own "SellerOps에 연결" appends `?issuance=resume`, which is the
+  // only thing on this page that can know a run is already in flight: the journey phase is derived from
+  // persisted state (nothing is persisted mid-issuance) and this flag is component-local, so a fresh tab
+  // otherwise re-offers "쿠팡 연결 안내 시작" to a seller who has just finished. It skips a gate the seller can
+  // press themselves and adopts whatever run the agent is hosting — it authorizes nothing.
+  const resumed = !controlled && isIssuanceResumeReturn(typeof window === "undefined" ? "" : window.location.search);
+  const [started, setStarted] = useState(controlled || resumed);
   // The failure-only text fallback: the static WING checklist. Local to this phase — the pure journey reducer
   // only owns the issuance→connect transition (via `onIssued`), not the guided/text sub-mode.
   const [textMode, setTextMode] = useState(false);
@@ -115,6 +122,12 @@ export function CoupangIssuanceGuidedWalkthrough({
   // an optional `intent`), adapted with a single documented cast — the same codec-equivalence the issuance
   // session rests on, in the one place downstream needs v1.
   const liveView = issuance.view as unknown as ActionWindowRunView | null;
+  // **Whether this account ALREADY had a key**, as the agent read it — v2-only and issuance-only, so it is
+  // taken from the v2 view before the cast rather than added to the shared v1 shape. `KEY_PRESENT` means the
+  // run skipped issuance entirely and went straight to the hand-off; the copy has to say so, because telling
+  // someone "발급 완료" when they issued nothing is a claim about their account that is not true.
+  const credentialState = controlled ? null : (issuance.view?.credentialState ?? null);
+  const alreadyHadKey = credentialState === "KEY_PRESENT";
   const effectiveRun = controlled ? (run ?? null) : liveView;
   const effectiveCommand = controlled ? onCommand : issuance.send;
   // The host refused (wrong carrier / unreachable / START_RUN rejected) → guidance can't run; point at text.
@@ -216,6 +229,13 @@ export function CoupangIssuanceGuidedWalkthrough({
 
   return (
     <div className="space-y-4" aria-label="화면 안내 발급">
+      {/* The seller already had a key, so no issuance happened and none will. Said out loud: the rest of this
+          screen is a walk, and a walk with no issuance step in it needs to explain itself. */}
+      {alreadyHadKey && (
+        <p className="rounded-xl bg-ok/10 px-4 py-3 text-sm text-ink break-keep" role="status">
+          이미 발급된 Open API 키가 있어요. 새로 발급하지 않고, 연결에 필요한 정보만 확인합니다.
+        </p>
+      )}
       {/* Persistent advisory: the guided path must also tell the seller to register the fixed call IP
           (the WING walkthrough covers the key issuance, but the 'API 호출 IP' field is easy to miss). */}
       <section className="space-y-1 rounded-lg border border-line px-4 py-3" aria-label="API 호출 IP 등록 안내">
@@ -329,7 +349,7 @@ export function CoupangIssuanceGuidedWalkthrough({
           {effectiveRun.status === "COMPLETED" && (
             <div className="space-y-2">
               <p className="text-sm font-medium text-ink break-keep" role="status">
-                Open API 키 발급 완료
+                {alreadyHadKey ? "이미 발급된 Open API 키를 확인했어요" : "Open API 키 발급 완료"}
               </p>
               <button
                 type="button"

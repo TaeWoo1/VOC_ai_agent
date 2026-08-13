@@ -195,6 +195,29 @@ export function resolvePhase(input: CoupangResolveInput): ResolvedPhase {
 
 // --- Step model (the 6-step progress indicator) -----------------------------------------------------
 
+/**
+ * **Did the seller arrive here by pressing the guided walk's own return?**
+ *
+ * The local agent appends `?issuance=resume` when its WING panel hands focus back — see
+ * `SELLEROPS_ISSUANCE_RESUME_QUERY` in `collector/src/cli/sellerops-return-url.ts`, which a cross-stack test
+ * pins against this reader.
+ *
+ * It exists because nothing else on this page can know. The landing phase is derived from PERSISTED state, and
+ * a seller in the middle of issuance has persisted nothing yet; the walkthrough component's own "started" flag
+ * is component-local, so a fresh tab starts at the start CTA. The result, reported live on 2026-08-13: pressing
+ * the return at the END of the walk landed on `쿠팡 연결 안내 시작` / `이미 키가 있어요`.
+ *
+ * **It authorizes nothing.** It skips a start gate the seller can press themselves, and the run it resumes into
+ * is whatever the agent is already hosting — a forged value can do nothing a click could not.
+ */
+export function isIssuanceResumeReturn(search: string): boolean {
+  try {
+    return new URLSearchParams(search).get("issuance") === "resume";
+  } catch {
+    return false;
+  }
+}
+
 export type StepState = "done" | "current" | "upcoming";
 
 export interface CoupangStepView {

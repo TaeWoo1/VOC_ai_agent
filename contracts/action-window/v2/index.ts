@@ -173,6 +173,22 @@ export const ISSUANCE_APP_BRANCHES = ["existing", "new"] as const;
 export type IssuanceAppBranch = (typeof ISSUANCE_APP_BRANCHES)[number];
 
 /**
+ * v2, ISSUANCE-SCOPED. Whether the seller's marketplace account ALREADY holds an API credential, as observed
+ * by the guidance runtime — the signal that decides whether an issuance walk should happen at all.
+ *
+ * `KEY_PRESENT` means the runtime resolved the credential cells and they hold something. `NO_KEY` means it
+ * resolved them and they are empty — a POSITIVE reading, never a failure to find one. `UNKNOWN` is everything
+ * else, and it is a refusal rather than a shrug: the walk ends at a control that creates a credential, so a
+ * wrong `NO_KEY` issues a second real key on a live account while a wrong `KEY_PRESENT` costs a screen.
+ *
+ * It rides ONLY the issuance run view, and only on an `API_ISSUANCE_GUIDANCE` run. It is one sanitized enum —
+ * no credential value, no length, no prefix, no account identity. The runtime derives it from a value-free
+ * structural census plus one non-emptiness bit per cell; see `coupang-credential-state.ts`.
+ */
+export const ISSUANCE_CREDENTIAL_STATES = ["NO_KEY", "KEY_PRESENT", "UNKNOWN"] as const;
+export type IssuanceCredentialState = (typeof ISSUANCE_CREDENTIAL_STATES)[number];
+
+/**
  * Why a run stopped.
  *
  * <p>The last two are import-run additions, and both close a real hole rather than adding vocabulary:
@@ -219,6 +235,11 @@ export const BLOCKER_CODES = [
   "OVERLAY_MOUNT_FAILED",
   "OVERLAY_NOT_VISIBLE",
   "SURFACE_CLOSED",
+  /**
+   * The runtime could not determine whether the account already holds an API credential, so an issuance walk
+   * that ends at a key-creating control will not proceed. Recoverable: a re-check re-reads the surface.
+   */
+  "CREDENTIAL_STATE_UNKNOWN",
 ] as const;
 export type BlockerCode = (typeof BLOCKER_CODES)[number];
 
@@ -339,6 +360,16 @@ export interface ActionWindowRunView {
    * has to decode the step-2 copy key.
    */
   appBranch?: IssuanceAppBranch;
+  /**
+   * v2, ISSUANCE-ONLY. Whether the seller's account already holds an API credential — `KEY_PRESENT` /
+   * `NO_KEY` / `UNKNOWN`. Absent until the runtime has read the credential surface, and present ONLY on an
+   * `API_ISSUANCE_GUIDANCE` run (`validateRunView` rejects it on any other intent).
+   *
+   * The frontend routes on it so a seller who already has a key and a seller who has just issued one arrive at
+   * the SAME hand-off state, and so neither is walked into issuing a second. One sanitized enum: no credential
+   * value, no account identity.
+   */
+  credentialState?: IssuanceCredentialState;
 
   currentStep?: {
     stepId: string;
@@ -615,6 +646,14 @@ export function validateRunView(input: unknown): ValidationResult {
       e.push(err("UNKNOWN_ENUM", "$.appBranch"));
     }
     if (input.intent !== "API_ISSUANCE_GUIDANCE") e.push(err("CONSTRAINT_VIOLATION", "$.appBranch"));
+  }
+  // credentialState is issuance-scoped for the same reason: "does this account already hold a key" is a
+  // question only the issuance walk asks, and the answer decides whether it walks at all.
+  if (input.credentialState !== undefined) {
+    if (!(ISSUANCE_CREDENTIAL_STATES as readonly string[]).includes(input.credentialState as string)) {
+      e.push(err("UNKNOWN_ENUM", "$.credentialState"));
+    }
+    if (input.intent !== "API_ISSUANCE_GUIDANCE") e.push(err("CONSTRAINT_VIOLATION", "$.credentialState"));
   }
   if (typeof input.guidanceEnabled !== "boolean") e.push(err("MISSING_FIELD", "$.guidanceEnabled"));
 

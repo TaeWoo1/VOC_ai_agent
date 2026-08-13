@@ -356,6 +356,7 @@ ingest into the database passed it cleanly — see below.
 | `capture-esm-review-upload` | the same `.ready` hand-off | the click → download → save → **upload into the backend DB** | the same `.ready` file | a press before the chain, disclosing the DB ingest |
 | `upload-file` | reads no page at all | the upload | n/a | **unchanged, by policy.** The operator typing the path IS the decision; there is no observation to be mistaken for one. Named in the guard so the exclusion is a rule, not an omission |
 | `run-coupang-credential-handoff-live` | classify the surface, census the credential cells value-free | **`CREDENTIAL_REVEAL`** — read the three values → POST them to the SellerOps vault → read-only verify | n/a (new) | one press, disclosing the whole chain, immediately before the read. See §5c |
+| Coupang guided issuance walk (`CHECK_CREDENTIAL_STATE`) | census the credential cells value-free, on the open-API surface, to decide whether an issuance walk should happen at all | **none** — it crosses no barrier. `KEY_PRESENT` PREVENTS an act (the walk stops before the key-creating control); `NO_KEY` still ends at a control the SELLER presses; `UNKNOWN` parks | n/a (new) | **unchanged, by policy.** A confirmation here would be the prompt-on-every-read this policy exists to avoid, and the read's only power is to refuse. It reads no value: a structural census plus one non-emptiness bit per cell, and it is gated on `WING_CREDENTIAL_CELLS_CALIBRATED` |
 
 ## 5c. `CREDENTIAL_READ` — the one mode that is not `READ_ONLY`
 

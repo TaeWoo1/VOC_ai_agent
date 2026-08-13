@@ -13,6 +13,7 @@
  * The targets are parameterized (not one method per control) because the sequence is data
  * ({@link CoupangIssuanceTarget}); a per-control method set would drift from it by hand.
  */
+import type { CoupangCredentialState } from "../coupang-credential-state";
 import type { WingPageCategory, WingSignals } from "../../cli/coupang-wing-classifier";
 import type { LocateResult } from "../engine";
 import type { CoupangIssuanceStage } from "./coupang-issuance-stages";
@@ -187,6 +188,28 @@ export interface CoupangIssuanceProbeDriver {
    * it or make it a no-op.
    */
   settleSurface?(): Promise<void>;
+
+  /**
+   * **Does this account already hold an API credential?** Value-free, and the answer that decides whether an
+   * issuance walk happens at all.
+   *
+   * Answerable only on the credential surface, so the engine asks for it once the seller is on the open-API
+   * page and never before. It returns a `CoupangCredentialState`: `KEY_PRESENT` (cells resolved, non-empty),
+   * `NO_KEY` (cells resolved, empty — a POSITIVE reading), or `UNKNOWN` for everything else.
+   *
+   * **What it reads.** A structural census — an association enum, tag names, integers — plus ONE bit per cell:
+   * whether it is empty. No credential value crosses the page boundary, and no length, prefix, or character
+   * class is derived from one. That bit is required rather than convenient: a locator resolving to an empty
+   * cell has found no key, and a determination that cannot tell those apart is the trap `wingIssuedStateFrom`
+   * documented (`credentialAnchorPresent` reads `true` on a confirmed no-key form).
+   *
+   * **Why this is an `AUTO_READ` and needs no barrier** (approval contract §5b): it advances the run's own
+   * GUIDANCE and crosses no action barrier. `KEY_PRESENT` PREVENTS an act rather than causing one, and `NO_KEY`
+   * still ends the walk at a control the seller presses themselves.
+   *
+   * A driver that cannot answer omits it, and the engine reads that as `UNKNOWN` — a park, never a licence.
+   */
+  probeCredentialState?(): Promise<CoupangCredentialState>;
 
   /** How many candidates match {@code target}, and the opaque signature of the one (if exactly one). */
   locateTarget(target: CoupangIssuanceTarget): Promise<LocateResult>;

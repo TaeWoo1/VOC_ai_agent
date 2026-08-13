@@ -320,6 +320,13 @@ const V2_ONLY_BLOCKER_VIEW: Record<string, BlockerView> = {
     title: "판매자센터 창이 닫혔어요",
     body: "'다시 확인'을 누르면 판매자센터 창을 다시 열어 드릴게요.",
   },
+  // The issuance walk refused to go on because it could not tell whether this account already has a key. The
+  // copy says what SellerOps could not do and what clears it — it does NOT say "키가 없는 것 같아요", because
+  // the whole point of this blocker is that nobody knows, and a guess in that direction creates a second key.
+  CREDENTIAL_STATE_UNKNOWN: {
+    title: "발급된 키가 있는지 확인하지 못했어요",
+    body: "쿠팡 윙의 Open API 화면이 모두 뜬 뒤 '다시 확인'을 눌러 주세요. 확인되기 전에는 발급 안내를 시작하지 않습니다.",
+  },
 };
 
 /**

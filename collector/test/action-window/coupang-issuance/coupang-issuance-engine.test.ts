@@ -70,7 +70,10 @@ describe("coupang issuance engine — the linear walkthrough from the WING home"
 
     // The seller navigated off the home; the engine re-probes to VERIFY the issuance page before step 1 completes.
     expect(eng.onUserActionObserved("reach_open_api")).toBe("VERIFY_REACH");
-    expect(eng.onReachVerified({ ok: true, pageCategory: "open_api_issuance" })).toEqual({ guide: "issue" });
+    // …and BEFORE the first issuance control, the run asks whether this account already has a key. A positive
+    // NO_KEY is what licenses the walk to continue toward a control that creates one.
+    expect(eng.onReachVerified({ ok: true, pageCategory: "open_api_issuance" })).toBe("CHECK_CREDENTIAL_STATE");
+    expect(eng.onCredentialStateProbed("NO_KEY")).toEqual({ guide: "issue" });
 
     // Every same-page checkpoint now advances ON THE WING PAGE — the seller presses its on-page advance button and
     // the driver reports it (onUserActionObserved). No REQUEST_STEP_RECHECK from the FE is needed. Each call
@@ -108,7 +111,8 @@ describe("coupang issuance engine — the linear walkthrough from the WING home"
   it("skips the reach transition when the seller is ALREADY on the open-API issuance page (step 1 auto-completes)", () => {
     const eng = engine();
     eng.command({ type: "START_RUN", expectedRevision: 0 });
-    expect(eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" })).toEqual({ guide: "issue" });
+    expect(eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" })).toBe("CHECK_CREDENTIAL_STATE");
+    expect(eng.onCredentialStateProbed("NO_KEY")).toEqual({ guide: "issue" });
     // Step 1 completed automatically without ever guiding reach_open_api.
     const completed = eng.events().filter((e) => e.type === "STEP_COMPLETED").map((e) => e.payload.stepId);
     expect(completed).toContain("aw.coupang_issuance_reach_open_api");
@@ -197,7 +201,8 @@ describe("coupang issuance engine — recoverable parks (never RUN_FAILED)", () 
     const eng = engine();
     eng.command({ type: "START_RUN", expectedRevision: 0 });
     eng.onSurfaceProbed({ ok: true, pageCategory: "unknown" });
-    expect(eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" })).toEqual({ guide: "issue" });
+    expect(eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" })).toBe("CHECK_CREDENTIAL_STATE");
+    expect(eng.onCredentialStateProbed("NO_KEY")).toEqual({ guide: "issue" });
     expect(eng.view().blocker).toBeUndefined();
   });
 
@@ -284,7 +289,8 @@ describe("coupang issuance engine — recoverable parks (never RUN_FAILED)", () 
     // `STEP_COMPLETED` for step 1 twice and two independent `{guide:"issue"}` chains on one target.
     const eng = engine();
     eng.command({ type: "START_RUN", expectedRevision: 0 });
-    expect(eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" })).toEqual({ guide: "issue" });
+    expect(eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" })).toBe("CHECK_CREDENTIAL_STATE");
+    expect(eng.onCredentialStateProbed("NO_KEY")).toEqual({ guide: "issue" });
     const after = eng.events().length;
     expect(eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" })).toBe("NONE");
     expect(eng.events()).toHaveLength(after);
@@ -312,5 +318,90 @@ describe("coupang issuance engine — contract validity + NO appBranch", () => {
       expect(validateEventEnvelope(e), `event ${e.type}`).toEqual({ ok: true });
       expect(findProhibitedFields(e)).toEqual([]);
     }
+  });
+});
+
+/* ─────────────── D2: whether the walk walks at all ─────────────── */
+
+/**
+ * **The credential-state branch.** The walk's last control creates a real key on a live account, so the run
+ * asks whether one already exists before guiding the first step toward it.
+ *
+ * The asymmetry is the whole design, and it is why there are three answers rather than two: a wrong
+ * `KEY_PRESENT` costs a screen, a wrong `NO_KEY` costs a second credential.
+ */
+describe("coupang issuance engine — does this account already have a key", () => {
+  /** Start a run and get it to the surface where the question is answerable. */
+  function atTheQuestion() {
+    const eng = engine();
+    eng.command({ type: "START_RUN", expectedRevision: 0 });
+    expect(eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" })).toBe("CHECK_CREDENTIAL_STATE");
+    return eng;
+  }
+
+  it("**KEY_PRESENT goes straight to the hand-off** — no step on the path to creating a key is guided", () => {
+    const eng = atTheQuestion();
+    expect(eng.onCredentialStateProbed("KEY_PRESENT")).toEqual({ guide: "credentials" });
+    // The seller lands on step ⑧ — the SAME step a seller who has just issued a key ends on. One screen, two
+    // cohorts, which is the point: the hand-off does not care how the key came to exist.
+    expect(eng.view().currentStep?.stepNumber).toBe(8);
+    expect(eng.view().credentialState).toBe("KEY_PRESENT");
+  });
+
+  it("NO_KEY walks, exactly as it always did", () => {
+    const eng = atTheQuestion();
+    expect(eng.onCredentialStateProbed("NO_KEY")).toEqual({ guide: "issue" });
+    expect(eng.view().currentStep?.stepNumber).toBe(2);
+    expect(eng.view().credentialState).toBe("NO_KEY");
+  });
+
+  it("**UNKNOWN parks, recoverably, and guides nothing** — it is a refusal, not a shrug", () => {
+    const eng = atTheQuestion();
+    expect(eng.onCredentialStateProbed("UNKNOWN")).toBe("NONE");
+    expect(eng.currentStage()).toBe("credential_state_unknown");
+    expect(eng.view().blocker).toEqual({ code: "CREDENTIAL_STATE_UNKNOWN", recoverable: true });
+    expect(eng.view().credentialState).toBe("UNKNOWN");
+    // …and it never became a guide. `!== "KEY_PRESENT"` would have read this as permission to walk.
+    expect(eng.activeTarget()).toBeNull();
+  });
+
+  it("the reading is on the wire, and every view carrying it is contract-valid", () => {
+    for (const state of ["NO_KEY", "KEY_PRESENT", "UNKNOWN"] as const) {
+      const eng = atTheQuestion();
+      eng.onCredentialStateProbed(state);
+      const view = eng.view();
+      expect(validateRunView(view), state).toMatchObject({ ok: true });
+      // Issuance-scoped, like appBranch: the contract rejects it on any other intent.
+      expect(view.intent).toBe("API_ISSUANCE_GUIDANCE");
+      // One enum, and nothing derived from a credential VALUE anywhere near it.
+      expect(findProhibitedFields(view)).toEqual([]);
+    }
+  });
+
+  it("**absent until it has been read** — a default here would be a claim about a screen nobody looked at", () => {
+    const eng = engine();
+    eng.command({ type: "START_RUN", expectedRevision: 0 });
+    expect(eng.view().credentialState).toBeUndefined();
+    expect(validateRunView(eng.view())).toMatchObject({ ok: true });
+  });
+
+  it("a SECOND answer changes nothing — the first one already moved the run", () => {
+    const eng = atTheQuestion();
+    eng.onCredentialStateProbed("NO_KEY");
+    const after = eng.events().length;
+    expect(eng.onCredentialStateProbed("KEY_PRESENT")).toBe("NONE");
+    expect(eng.events()).toHaveLength(after);
+    // …and it did not overwrite what was read the first time.
+    expect(eng.view().credentialState).toBe("NO_KEY");
+  });
+
+  it("a park is recoverable: a re-check re-probes, and a second reading can clear it", () => {
+    const eng = atTheQuestion();
+    eng.onCredentialStateProbed("UNKNOWN");
+    const rev = eng.view().revision;
+    expect(eng.command({ type: "REQUEST_STEP_RECHECK", expectedRevision: rev }).ok).toBe(true);
+    expect(eng.onSurfaceProbed({ ok: true, pageCategory: "open_api_issuance" })).toBe("CHECK_CREDENTIAL_STATE");
+    expect(eng.onCredentialStateProbed("NO_KEY")).toEqual({ guide: "issue" });
+    expect(eng.view().blocker).toBeUndefined();
   });
 });

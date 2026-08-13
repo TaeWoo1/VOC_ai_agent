@@ -45,6 +45,7 @@ const ALL_STAGES: CoupangIssuanceStage[] = [
   "guidance_complete",
   "target_not_found",
   "page_mismatch",
+  "credential_state_unknown",
   "operator_aborted",
 ];
 
@@ -67,6 +68,7 @@ describe("coupang issuance stages — run-status projection", () => {
     guidance_complete: "COMPLETED",
     target_not_found: "WAITING_FOR_HUMAN",
     page_mismatch: "WAITING_FOR_HUMAN",
+    credential_state_unknown: "WAITING_FOR_HUMAN",
     operator_aborted: "CANCELLED",
   };
   it.each(ALL_STAGES)("%s", (stage) => {
@@ -92,6 +94,7 @@ describe("coupang issuance stages — step-status projection", () => {
     guidance_complete: "COMPLETED",
     target_not_found: "AWAITING_USER",
     page_mismatch: "AWAITING_USER",
+    credential_state_unknown: "AWAITING_USER",
     operator_aborted: "PENDING",
   };
   it.each(ALL_STAGES)("%s", (stage) => {
@@ -121,6 +124,7 @@ describe("coupang issuance stages — ALL_STAGES really is all of them", () => {
       guidance_complete: "",
       target_not_found: "",
       page_mismatch: "",
+      credential_state_unknown: "",
       operator_aborted: "",
     };
     expect([...ALL_STAGES].sort()).toEqual(Object.keys(mapped).sort());

@@ -7,6 +7,7 @@
 import { describe, it, expect } from "vitest";
 import {
   SELLEROPS_COUPANG_CONNECT_PATH,
+  SELLEROPS_ISSUANCE_RESUME_QUERY,
   screenSellerOpsReturnUrl,
 } from "../../src/cli/sellerops-return-url";
 
@@ -14,14 +15,14 @@ describe("screenSellerOpsReturnUrl", () => {
   it("accepts the local SellerOps UI and returns the connect route", () => {
     expect(screenSellerOpsReturnUrl("http://localhost:5173")).toEqual({
       ok: true,
-      url: `http://localhost:5173${SELLEROPS_COUPANG_CONNECT_PATH}`,
+      url: `http://localhost:5173${SELLEROPS_COUPANG_CONNECT_PATH}?${SELLEROPS_ISSUANCE_RESUME_QUERY}`,
     });
   });
 
   it("accepts the other spelling of loopback, and a non-default port", () => {
     expect(screenSellerOpsReturnUrl("http://127.0.0.1:4173")).toEqual({
       ok: true,
-      url: `http://127.0.0.1:4173${SELLEROPS_COUPANG_CONNECT_PATH}`,
+      url: `http://127.0.0.1:4173${SELLEROPS_COUPANG_CONNECT_PATH}?${SELLEROPS_ISSUANCE_RESUME_QUERY}`,
     });
   });
 
@@ -29,7 +30,7 @@ describe("screenSellerOpsReturnUrl", () => {
     // A path, a query and a fragment on the configured value are all dropped. The route is ours to decide.
     expect(screenSellerOpsReturnUrl("http://localhost:5173/somewhere?next=x#y")).toEqual({
       ok: true,
-      url: `http://localhost:5173${SELLEROPS_COUPANG_CONNECT_PATH}`,
+      url: `http://localhost:5173${SELLEROPS_COUPANG_CONNECT_PATH}?${SELLEROPS_ISSUANCE_RESUME_QUERY}`,
     });
   });
 

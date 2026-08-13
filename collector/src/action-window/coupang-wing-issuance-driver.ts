@@ -90,8 +90,18 @@ import {
   type OcclusionVerdict,
 } from "./api-issuance-calibration/occlusion-inpage";
 import { buildAncestorScopeScript, buildFieldRegionCensusScript } from "./api-issuance-calibration/field-region-inpage";
-import { buildCredentialRowRingScript } from "./api-issuance-calibration/credential-cell-inpage";
-import { COUPANG_CREDENTIAL_FIELDS, sanitizeCredentialRowRing } from "./coupang-wing-credential-cells";
+import {
+  buildCredentialCellCensusScript,
+  buildCredentialRowRingScript,
+} from "./api-issuance-calibration/credential-cell-inpage";
+import {
+  COUPANG_CREDENTIAL_FIELDS,
+  COUPANG_CREDENTIAL_FIELD_IDS,
+  WING_CREDENTIAL_CELLS_CALIBRATED,
+  sanitizeCredentialCellCensus,
+  sanitizeCredentialRowRing,
+} from "./coupang-wing-credential-cells";
+import { coupangCredentialStateFrom, type CoupangCredentialState } from "./coupang-credential-state";
 import {
   sanitizeAncestorScope,
   sanitizeFieldRegionCensus,
@@ -1907,6 +1917,41 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
       null,
     );
     return sanitizeFieldRegionCensus(raw, requests.map((r) => r.id));
+  }
+
+  /**
+   * **Does this account already hold an API key?** The reading that decides whether the walk walks at all.
+   *
+   * One value-free census of the credential cells — structure plus one non-emptiness bit each — classified by
+   * the pure {@link coupangCredentialStateFrom}. No credential value crosses the page boundary and none is
+   * derived: the bit is computed inside the page and reduced to a boolean before anything is returned.
+   *
+   * **Gated on the calibration.** `WING_CREDENTIAL_CELLS_CALIBRATED` is what says the resolution rule has been
+   * measured against a real WING screen; withdraw it and this answers `UNKNOWN`, which parks. The same lever
+   * that closes the credential read closes this, because both rest on the same measurement.
+   *
+   * Anything it cannot read is `UNKNOWN` — a thrown evaluate, an unresolved census, a page that is not the
+   * credential surface. `NO_KEY` is only ever a positive reading of empty cells.
+   */
+  async probeCredentialState(): Promise<CoupangCredentialState> {
+    if (!WING_CREDENTIAL_CELLS_CALIBRATED) return "UNKNOWN";
+    const raw = await timebox<unknown>(
+      this.evalStr<unknown>(
+        this.activePage(),
+        buildCredentialCellCensusScript(COUPANG_CREDENTIAL_FIELDS, { readNonEmpty: true }),
+      ).catch(() => null),
+      null,
+    );
+    const census = sanitizeCredentialCellCensus(raw, COUPANG_CREDENTIAL_FIELD_IDS);
+    const reading = coupangCredentialStateFrom(census, COUPANG_CREDENTIAL_FIELD_IDS);
+    // The enum and the census refusal that produced it. Both are closed vocabularies; the field id is one of
+    // the three contract ids. Nothing here is derived from a credential value.
+    log("aw_coupang_issuance_credential_state_probe", {
+      state: reading.state,
+      reason: reading.reason,
+      ...(reading.field ? { field: reading.field } : {}),
+    });
+    return reading.state;
   }
 
   /**
