@@ -152,6 +152,34 @@ describe("the migrated CLIs reach the channel through the shared host", () => {
     expect(MIGRATED.length).toBeGreaterThanOrEqual(12);
   });
 
+  it("**every one of them actually WAITS on a confirmation**", () => {
+    // The assertions below are all negatives, and negatives cannot see the regression that matters most:
+    // delete every `confirmHost.confirm(...)` while keeping the `attachOperatorConfirmTab(...)` call and this
+    // file would stay green with every checkpoint gone. "No sentinel" is not "advances on a press".
+    for (const f of MIGRATED) {
+      const src = code(join(CLI_DIR, f));
+      expect(src, `${f} attaches a confirmation surface but never waits on it`).toMatch(
+        /confirmHost\.confirm\(|confirm\(ask\)|confirmCheckpoint\(|confirmRunGrant\(/,
+      );
+    }
+  });
+
+  it("**a refused confirmation returns** — no migrated CLI reads on past one", () => {
+    // Each CLI's own suite pins WHAT it must not do after a refusal; this pins that a refusal is handled at
+    // all. `observe-api-center` printed a line and carried on into the read for one commit.
+    for (const f of MIGRATED) {
+      const src = code(join(CLI_DIR, f));
+      if (!/confirmation\.signal !== "ready"/.test(src)) continue;
+      for (const m of src.matchAll(/confirmation\.signal !== "ready"\)\s*\{?([\s\S]{0,400})/g)) {
+        // `break` counts: the WING recorder's checkpoint loop leaves before its reading rather than returning
+        // from `main`. What does NOT count is falling through, which is what this exists to catch.
+        expect(m[1] ?? "", `${f}: a refusal branch that does not return, throw or break`).toMatch(
+          /\breturn\b|\bthrow\b|\bbreak\b/,
+        );
+      }
+    }
+  });
+
   it("**none of them builds its own arm script or mints its own token**", () => {
     // One implementation of the trusted-press gate. A second copy is a second thing to get wrong, in a file
     // that also prints to a terminal.

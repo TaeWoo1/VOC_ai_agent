@@ -36,7 +36,6 @@ import { launchNaverContext } from "../profile";
 import { approvalRequiredMessage, hasLiveRunApproval } from "./live-run-approval";
 import type { OperatorConfirmAsk } from "./operator-confirm";
 import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
-import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 /** Coarse host category, derived from a URL WITHOUT ever logging the raw URL. */
@@ -230,6 +229,14 @@ export const WAIT_FOR_MANUAL_NAVIGATION_FLAG = "--wait-for-manual-navigation";
  * failed on 2026-08-13. Each checkpoint is now a verified press on the SellerOps confirmation surface
  * (`./operator-confirm`).
  */
+/** Thrown when a tutorial checkpoint was not confirmed. Carries the signal, never anything from the page. */
+class OperatorCheckpointRefused extends Error {
+  constructor(readonly signal: "abort" | "timeout") {
+    super(`operator checkpoint not confirmed: ${signal}`);
+    this.name = "OperatorCheckpointRefused";
+  }
+}
+
 export const OBSERVE_LOGIN_ASK: OperatorConfirmAsk = {
   title: "API CENTER — 로그인",
   headline: "열린 창에서 직접 로그인하신 뒤 확인해 주세요.",
@@ -584,7 +591,6 @@ export const LOGIN_WAIT_TIMEOUT_MS = 5 * 60_000; // generous: manual login + 2FA
  * what forced a `category_unchanged` timeout re-read on the first cold two-step run).
  */
 export const NAVIGATION_WAIT_TIMEOUT_MS = 20 * 60_000;
-const SENTINEL_POLL_MS = 1_000;
 
 async function settle(page: Page): Promise<void> {
   try {
@@ -592,10 +598,6 @@ async function settle(page: Page): Promise<void> {
   } catch {
     /* timeout is fine — the classifier fails closed on thin signals */
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
 }
 
 /**
@@ -635,6 +637,7 @@ async function main(): Promise<void> {
   const ctx = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
   const confirmHost = await attachOperatorConfirmTab(ctx as unknown as ConfirmHostContext, {
     aborted: () => false,
+    // The host's default only; each checkpoint passes its own budget to `confirm`.
     timeoutMs: NAVIGATION_WAIT_TIMEOUT_MS,
   });
   const page = confirmHost.entryPage as unknown as Page;
@@ -661,16 +664,23 @@ async function main(): Promise<void> {
     const census = await targetEval.evaluate<ApiCenterStructuralCensus>(EXTRACT_API_CENTER_CENSUS);
     return { census, openPageCount: pages.length };
   };
-  const waitForManualLogin = async (): Promise<void> => {
-    confirmHost.announce(OBSERVE_LOGIN_ASK);
-    const confirmation = await confirmHost.confirm(OBSERVE_LOGIN_ASK);
-    if (confirmation.signal !== "ready") console.error("확인이 없었습니다 — 현재 화면을 그대로 다시 읽습니다.");
+  /**
+   * **A checkpoint that was not confirmed ends the tutorial; it does not fall through to the read.**
+   *
+   * The seams below return `void`, so a refusal has nowhere to go but out. Under the sentinel this printed a
+   * line and re-observed anyway — an inherited behaviour, and the one place among these CLIs where "the
+   * operator never confirmed" and "the operator confirmed" produced the same next action. What the tutorial
+   * then read was whatever happened to be on the screen, and it advanced its guidance on it.
+   */
+  const confirmCheckpoint = async (ask: OperatorConfirmAsk, timeoutMs: number): Promise<void> => {
+    confirmHost.announce(ask);
+    const confirmation = await confirmHost.confirm(ask, { timeoutMs });
+    if (confirmation.signal !== "ready") throw new OperatorCheckpointRefused(confirmation.signal);
   };
-  const waitForManualNavigation = async (): Promise<void> => {
-    confirmHost.announce(OBSERVE_NAVIGATION_ASK);
-    const confirmation = await confirmHost.confirm(OBSERVE_NAVIGATION_ASK);
-    if (confirmation.signal !== "ready") console.error("확인이 없었습니다 — 현재 화면을 그대로 다시 읽습니다.");
-  };
+  const waitForManualLogin = (): Promise<void> => confirmCheckpoint(OBSERVE_LOGIN_ASK, LOGIN_WAIT_TIMEOUT_MS);
+  // A larger budget than the login gate: finding and opening one application is not rushed.
+  const waitForManualNavigation = (): Promise<void> =>
+    confirmCheckpoint(OBSERVE_NAVIGATION_ASK, NAVIGATION_WAIT_TIMEOUT_MS);
 
   try {
     if (waitForNavigation) {
@@ -727,6 +737,13 @@ async function main(): Promise<void> {
         blockerCount: result.observation.blockers.length,
       });
     }
+  } catch (e) {
+    // The one expected non-error exit: the operator did not confirm. Nothing was read past the checkpoint, and
+    // the run says so with a code rather than a stack.
+    if (!(e instanceof OperatorCheckpointRefused)) throw e;
+    console.error("확인 버튼이 눌리지 않았습니다 — 화면을 더 읽지 않고 종료합니다.");
+    log("apiCenter.observe.aborted", { reason: e.signal });
+    process.exitCode = 7;
   } finally {
     await ctx.close();
   }

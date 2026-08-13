@@ -382,6 +382,9 @@ async function main(): Promise<void> {
       console.error(runGrantRefusalMessage(grant));
       console.log(JSON.stringify({ event: "COUPANG_DELETION", outcome: "NOT_GRANTED" }));
       log("aw_coupang_deletion_run_grant", { outcome: grant });
+      // Read by anything downstream of a human watching the terminal. A destructive run that exits 0 when it
+      // was never authorized is how "the run finished" comes to read as "the run was allowed".
+      process.exitCode = 7;
       return;
     }
     log("aw_coupang_deletion_run_grant", { outcome: grant });

@@ -107,7 +107,7 @@ export interface OperatorConfirmHost {
    * Arm one checkpoint and wait for a verified press. A fresh token every time: a press held over from the
    * previous screen cannot advance this one.
    */
-  confirm(ask: OperatorConfirmAsk): Promise<OperatorConfirmation>;
+  confirm(ask: OperatorConfirmAsk, opts?: { readonly timeoutMs?: number }): Promise<OperatorConfirmation>;
   /**
    * Print an ask to the terminal in the same words {@link confirm} will render — the same object, so the two
    * cannot say different things. Called by the run at the moment it decides what to ask next; `confirm` does not
@@ -185,7 +185,10 @@ export async function attachOperatorConfirmTab(
     entryPage,
     contextLike,
     announce: (ask) => printOperatorAsk(withConfirmTail(ask, opts.abortPath), print),
-    confirm: (ask) => {
+    // `timeoutMs` per call, because one run's checkpoints are not all the same size: a login gate and a
+    // "find and open one application" walk had different budgets before this host existed, and collapsing
+    // them into the host's default silently gave the shorter one the longer wait.
+    confirm: (ask, callOpts) => {
       const full = withConfirmTail(ask, opts.abortPath);
       return awaitOperatorConfirmation(
         {
@@ -208,7 +211,7 @@ export async function attachOperatorConfirmTab(
         {
           token: mintOperatorConfirmToken(),
           pollMs: opts.pollMs ?? CONFIRM_POLL_MS,
-          timeoutMs: opts.timeoutMs ?? CONFIRM_TIMEOUT_MS,
+          timeoutMs: callOpts?.timeoutMs ?? opts.timeoutMs ?? CONFIRM_TIMEOUT_MS,
         },
       );
     },

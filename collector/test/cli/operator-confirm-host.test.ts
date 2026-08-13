@@ -245,6 +245,19 @@ describe("an ask with a SECOND answer", () => {
   });
 });
 
+describe("a checkpoint may set its own budget", () => {
+  it("**a per-call timeout overrides the host default** — one run's checkpoints are not all the same size", async () => {
+    // The login gate and the "find and open one application" walk had different budgets before this host
+    // existed. Collapsing them into one default silently gave the shorter one the longer wait.
+    const ctx = new FakeContext([new FakePage()]);
+    const { host, confirmTab } = await hostOn(ctx, { timeoutMs: 5_000 });
+    const started = Date.now();
+    expect((await host.confirm(ASK, { timeoutMs: 5 })).signal).toBe("timeout");
+    expect(Date.now() - started).toBeLessThan(4_000);
+    expect(confirmTab.scripts.some((s) => s.includes("(arm)"))).toBe(true);
+  });
+});
+
 describe("the surface is pinned to the document it opened on", () => {
   it("**a tab the operator navigated is refused, never painted on**", async () => {
     // The arm script is self-mounting. The first arming raises the tab at exactly the moment the ask says "log

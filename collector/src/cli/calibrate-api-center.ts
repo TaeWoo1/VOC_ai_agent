@@ -400,7 +400,6 @@ export function stageAskFor(
 
 /* ────────────────────────────── live wiring (inert on import) ────────────────────────────── */
 
-const SENTINEL_POLL_MS = 1_000;
 const STAGE_WAIT_TIMEOUT_MS = 20 * 60_000; // generous per-stage budget for a manual navigate + hover + hotkey
 const HYDRATION_TIMEOUT_MS = 15_000;
 
@@ -410,10 +409,6 @@ function mintRunId(): string {
 
 function mintNonce(): string {
   return randomUUID().replace(/-/g, "").slice(0, 12);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
 }
 
 function removeSentinel(path: string): void {

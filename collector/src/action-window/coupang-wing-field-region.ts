@@ -75,15 +75,32 @@ export const FIELD_REGION_TAG_CENSUS_LIMIT = 16;
 export const VENDOR_IP_REGION_BASELINE_BUTTON_COUNT = 1;
 
 /**
- * **What a region looked like before the seller acted.** `null` when the region did not resolve, which is the
- * only honest reading of "there is nothing to compare against".
+ * **What a region looked like before the seller acted**, or `null` when there is nothing honest to compare
+ * against: a reading that did not resolve to exactly one label, one that carries no count at all, or one taken
+ * while the region was still painting (see below).
  */
 export function vendorIpRegionBaselineFrom(reading: {
   readonly visibleCount?: number;
   readonly buttonCount?: number;
 }): number | null {
-  if (reading.visibleCount !== undefined && reading.visibleCount !== 1) return null;
-  return typeof reading.buttonCount === "number" ? reading.buttonCount : null;
+  // A reading that did not resolve uniquely is not a picture of this region. `undefined` is refused too: a
+  // caller that never measured it has nothing to compare against, and this function's whole contract is that
+  // `null` is the honest answer to that.
+  if (reading.visibleCount !== 1) return null;
+  if (typeof reading.buttonCount !== "number") return null;
+  /**
+   * **And it must be at least as many controls as an empty region has.**
+   *
+   * The region carries the `추가` control whether or not anything is registered, so a count BELOW the measured
+   * empty state is a region caught mid-paint, not a region with fewer controls. Accepting it would set the
+   * baseline to 0 one poll before `추가` renders — and the very next reading of the same empty region, at 1,
+   * would then be an increase, i.e. a registration that never happened. Step ⑥ would complete itself and step
+   * ⑦ would ring `확인`, the control that issues the key, over a form with no registered IP.
+   *
+   * Refusing leaves the baseline unset, so the next resolved reading takes it — which costs one poll and
+   * cannot claim anything.
+   */
+  return reading.buttonCount < VENDOR_IP_REGION_BASELINE_BUTTON_COUNT ? null : reading.buttonCount;
 }
 
 /**

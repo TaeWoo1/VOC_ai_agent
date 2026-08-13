@@ -125,13 +125,7 @@ import {
   type OperatorConfirmProvenance,
   type OperatorConfirmation,
 } from "./operator-confirm";
-import {
-  attachOperatorConfirmTab,
-  printOperatorAsk,
-  withConfirmTail,
-  type ConfirmHostContext,
-  type ConfirmHostPage,
-} from "./operator-confirm-host";
+import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
 
 /**
  * A per-run operator signal: proceed, abort the session, or the wait timed out.

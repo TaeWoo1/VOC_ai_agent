@@ -191,8 +191,14 @@ async function main(): Promise<void> {
   const confirmHost = await attachOperatorConfirmTab(ctx as unknown as ConfirmHostContext, { aborted: () => false });
   try {
     // **THE RUN-LEVEL GRANT, before the bridge accepts anything.** The approval flag is the assistant's
-    // statement of intent; it authorizes nothing. What authorizes this walk is the seller pressing a button
+    // statement of intent; it authorizes nothing. What authorizes this run is the operator pressing a button
     // against the manifest's own binding fields, in a window only they can press.
+    //
+    // ⚠ This entrypoint is the gated live SCAFFOLD, not the guided walk's product path — the manifest's
+    // entrypoint is `local-agent-service.ts install --action-window-coupang-issuance-live`, and there the
+    // run begins when the seller presses 시작 on the SellerOps screen, which is already a real press by a
+    // real person in a SellerOps-owned surface. The phase's `operatorActionSummary` says THAT, not this; a
+    // manifest promising a confirmation tab the product path never opens would be describing another run.
     const grant = await confirmRunGrant(confirmHost, issuanceRunGrantBinding());
     if (grant !== "GRANTED") {
       console.error(runGrantRefusalMessage(grant));
@@ -201,9 +207,11 @@ async function main(): Promise<void> {
       return;
     }
     log("aw_coupang_issuance_run_grant", { outcome: grant });
-    // The newest tab, wherever the SELLER navigated. This entrypoint never `.goto`s — see
-    // COUPANG_WING_GUIDED_WALK_AGENT_NAVIGATIONS. `url` stays resolved and screened so the dedicated window can
-    // only be opened against the WING host, but nothing drives the page there.
+    // The seller's own page, captured before the confirmation tab existed. The driver re-resolves the NEWEST
+    // tab from `contextLike` on every call, so this is a starting handle rather than the page it guides — and
+    // that list has the confirmation surface filtered out of it. This entrypoint never `.goto`s (see
+    // COUPANG_WING_GUIDED_WALK_AGENT_NAVIGATIONS); `url` stays resolved and screened so the dedicated window
+    // can only be opened against the WING host, but nothing drives the page there.
     const page = confirmHost.entryPage as unknown as Page;
     console.error("");
     console.error("GUIDED WALK — log in to WING and reach the open-API 키 발급 page YOURSELF.");

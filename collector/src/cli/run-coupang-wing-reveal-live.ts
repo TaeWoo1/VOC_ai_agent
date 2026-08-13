@@ -148,6 +148,13 @@ export function revealRunGrantBinding(): RunGrantBinding {
       "WING issuance-form reveal (the OPERATOR presses 발급; this press is not the key-creating action; agent performs no click/input/value read)",
     mode: REVEAL.mode,
     maxActions: "1 operator-performed 발급 press + 1 sanitized observation",
+    // `mode` is `READ_ONLY` and the press is not believed to create a key — but this run's own banner says it
+    // CANNOT prove one was not created (`keyCreationRuledOut: false`, and every signal it reads is identical
+    // either way). A grant screen that stayed silent about that would be the mildest screen in the workstream
+    // above the one run that admits it cannot tell.
+    irreversible:
+      "'발급'을 누르면 실제로 키가 만들어질 가능성을 SellerOps는 배제하지 못합니다 — 화면으로 확인하실 수 있는 " +
+      "것은 판매자님뿐입니다.",
   };
 }
 

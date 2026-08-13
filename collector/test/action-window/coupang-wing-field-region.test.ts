@@ -595,5 +595,19 @@ describe("what a REGISTERED IP entry is", () => {
     expect(vendorIpRegionBaselineFrom({ visibleCount: 0, buttonCount: 1 })).toBeNull();
     expect(vendorIpRegionBaselineFrom({ visibleCount: 2, buttonCount: 1 })).toBeNull();
     expect(vendorIpRegionBaselineFrom({ visibleCount: 1 })).toBeNull();
+    // A reading that never claimed to resolve is not one either, whatever it counted.
+    expect(vendorIpRegionBaselineFrom({ buttonCount: 1 })).toBeNull();
+  });
+
+  it("**a region caught MID-PAINT yields no baseline** — otherwise the empty region reads as a registration", () => {
+    // The region carries `추가` whether or not anything is registered, so a count below the measured empty
+    // state is a region that has not finished painting. Taken as a baseline it would be 0, and the very next
+    // reading of the SAME empty region — at 1 — would be an increase: a registration that never happened,
+    // completing step ⑥ and ringing 확인, the control that issues the key, over an unfilled form.
+    expect(vendorIpRegionBaselineFrom({ visibleCount: 1, buttonCount: 0 })).toBeNull();
+    // …and refusing costs only a poll: the next resolved reading takes the baseline instead.
+    expect(vendorIpRegionBaselineFrom({ visibleCount: 1, buttonCount: 1 })).toBe(1);
+    // The mid-paint reading also cannot be a registration against a null baseline.
+    expect(vendorIpEntryRegistered({ buttonCount: 1, entryRowCount: 0 }, null)).toBe(false);
   });
 });

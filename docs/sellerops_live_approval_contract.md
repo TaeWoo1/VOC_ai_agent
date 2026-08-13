@@ -144,9 +144,17 @@ and the Standing Safety Contract (§1) already holds. **It authorizes nothing on
 neither does the CLI's approval flag: both are statements of INTENT, and both are things a language
 model can produce. The authorization is the press.
 
-Implementation: `collector/src/cli/operator-run-grant.ts`. Wired into the guided WING walk, the
-reveal run and the destructive deletion run. The WING selector recorder takes its first
-per-checkpoint confirmation before it reads anything, which is the same gate under another name.
+Implementation: `collector/src/cli/operator-run-grant.ts`. Wired into the CLI-launched WING runs —
+the reveal run, the destructive deletion run, and the gated live scaffold
+`run-coupang-wing-issuance-live`. The WING selector recorder takes its first per-checkpoint
+confirmation before it reads anything, which is the same gate under another name.
+
+**The guided walk is the exception, and it is one by construction.** Its entrypoint is an installed
+launchd service (`local-agent-service install --action-window-coupang-issuance-live`), so there is
+no CLI-owned window to render a grant screen in — and none is needed: the walk begins when the
+seller presses 시작 on the SellerOps screen, which is already a real press by a real person in a
+SellerOps-owned surface. Its manifest says that, and deliberately does not promise a confirmation
+tab that entrypoint never opens.
 
 **Additional detail is requested ONLY when** one of these is true (otherwise, ask for nothing more):
 
@@ -250,15 +258,23 @@ Where a run has two operator-decidable outcomes — "this screen is ready" and "
 stage" — the second is a **second button on the same surface**, verified the same way. Skipping is
 an advance, so it does not get a file beside the channel.
 
-**Migrated** (no readiness sentinel remains): the WING selector recorder, the WING reveal and
-deletion runs, every NAVER same-session probe (`probe-same-session`, `probe-export-same-session`,
-`classify-export-same-session`, `capture-export-same-session`, `probe-session-precondition-same-session`,
-`classify-account-store-same-session`, `continue-account-store-same-session`,
-`diagnose-selection-state-same-session`, `discover-reply-target`), and the API-center walks
-(`observe-api-center`, `calibrate-api-center`, `capture-api-center-visual`,
-`probe-issuance-selectors`). The two bridge-client live-proof CLIs lost the ability to advance a
-checkpoint at all — a diagnostic must not be able to move a live guided walk on, and `다음` is the
-frontend's own button.
+**Every checkpoint is a press** in: the WING selector recorder, the WING reveal and deletion runs,
+`probe-same-session`, `probe-export-same-session`, `classify-export-same-session`,
+`probe-session-precondition-same-session`, `diagnose-selection-state-same-session`, and the
+API-center walks (`observe-api-center`, `calibrate-api-center`, `capture-api-center-visual`,
+`probe-issuance-selectors`).
+
+**The hand-off is a press, but the DEFAULT arm has no checkpoint at all** in
+`capture-export-same-session`, `continue-account-store-same-session` and `discover-reply-target`.
+Each takes `--require-sentinel` / `--sentinel` to opt into the operator hand-off, which is now a
+press; without it they poll the page themselves and proceed on their own reading. That is
+pre-existing behaviour and it is stated here rather than left to be inferred from "no sentinel
+remains", because the first of them ends in a real export click, a download and an upload. Closing
+it means deciding whether an auto-read arm may exist at all, which is a product-owner call and not
+this contract's to make.
+
+The two bridge-client live-proof CLIs lost the ability to advance a checkpoint at all — a diagnostic
+must not be able to move a live guided walk on, and `다음` is the frontend's own button.
 
 **Still on the sentinel channel** (not yet migrated, and each would need a multi-answer surface
 rather than a two-button one): the NAVER reply workstream

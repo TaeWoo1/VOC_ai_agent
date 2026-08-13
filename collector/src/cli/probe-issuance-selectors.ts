@@ -166,10 +166,6 @@ function mintRunId(): string {
   return `probe_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 function removeSentinel(path: string): void {
   try {
     if (existsSync(path)) unlinkSync(path);

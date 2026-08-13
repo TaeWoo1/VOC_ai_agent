@@ -159,8 +159,9 @@ describe("the CLIs that hold a manifest bind their grant to it", () => {
     const binding = deletionRunGrantBinding();
     expect(binding.irreversible).toBeDefined();
     expect(runGrantAsk(binding).title).toContain("되돌릴 수 없음");
-    // …and the other two runs do not claim one.
-    expect(revealRunGrantBinding().irreversible).toBeUndefined();
+    // …and so does the reveal run, whose own banner says it cannot prove no key was created.
+    expect(revealRunGrantBinding().irreversible).toBeDefined();
+    // The guided walk stops in front of the key-issuing control and claims none.
     expect(issuanceRunGrantBinding(ENV as unknown as NodeJS.ProcessEnv).irreversible).toBeUndefined();
   });
 

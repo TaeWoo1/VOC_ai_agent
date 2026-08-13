@@ -22,8 +22,8 @@
  *     echo.
  *  2. The token is armed in a **SellerOps-owned confirmation surface** ({@link buildOperatorConfirmArmScript}) —
  *     a blank tab that renders the step, the instruction the operator was given, and one button: `현재 화면 확인`.
- *  3. The button's handler records the event **only for a trusted event** (`ev.isTrusted === true`, which a
- *     dispatched or programmatic `click()` cannot set) and only while its own token is the armed one.
+ *  3. The button's handler records the event **only for a trusted event** (`ev.isTrusted === true`, which no
+ *     in-page `element.click()` or `dispatchEvent` can set) and only while its own token is the armed one.
  *  4. The run polls, and {@link verifyOperatorConfirmEvent} admits the event only if the token matches the one it
  *     minted for THIS checkpoint and the press was trusted. Everything else — no event, a stale token, an
  *     untrusted event, a malformed record — is refused, and refusal never advances.
@@ -35,9 +35,16 @@
  *
  * ## What this does NOT claim
  *
- * It does not defend against an operator who presses without looking, and it does not defend against code in this
- * repository that decides to drive the confirmation surface itself. It closes exactly one hole: **a checkpoint can
- * no longer advance on text.**
+ * It does not defend against an operator who presses without looking.
+ *
+ * **And `isTrusted` is not a defence against this repository.** It rejects synthesised in-page events; it does
+ * NOT reject a Playwright/CDP click, which arrives through the browser's own input pipeline and is trusted like
+ * a human's. Every host here already holds a handle to the confirmation tab, so code in this package could press
+ * its own button. What stops that is the shape of {@link OperatorConfirmSeams} and of the host's page interface —
+ * `url` / `evaluate` / `bringToFront`, with no click path — plus review. It is a boundary, not a wall.
+ *
+ * What this closes is exactly one hole: **a checkpoint can no longer advance on text**, or on anything a process
+ * that is not driving this browser can produce.
  *
  * String IIFEs (never passed functions): tsx/esbuild instruments named/module functions with a `__name` helper
  * absent in the page, so a serialized function throws `ReferenceError: __name`. Kept ES5-plain and free of
@@ -209,8 +216,9 @@ export function buildOperatorConfirmArmScript(ask: OperatorConfirmAsk & { readon
     btn.addEventListener(
       "click",
       function (ev) {
-        /* isTrusted is false for any dispatched or programmatic click. A synthesised press is refused HERE as
-           well as host-side, so the page never even holds a record that a verifier would have to reject. */
+        /* isTrusted is false for any in-page dispatched or programmatic click. A synthesised press is refused
+           HERE as well as host-side, so the page never even holds a record a verifier would have to reject.
+           (A CDP-driven click IS trusted — see this module's header for what does and does not stop that.) */
         if (!ev || ev.isTrusted !== true) {
           note.textContent = "직접 누른 것이 아닌 신호는 무시됩니다. 버튼을 눌러 주세요.";
           return;

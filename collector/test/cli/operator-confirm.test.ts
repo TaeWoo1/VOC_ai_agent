@@ -64,6 +64,7 @@ describe("verifyOperatorConfirmEvent", () => {
   it("an untrusted event is refused even when the token is right", () => {
     // The forgery this closes: something in the page dispatching `new MouseEvent('click')` on the button, or
     // calling `button.click()`. Both leave `isTrusted` false, and neither is a human looking at a screen.
+    // It does NOT close a CDP-driven click, which is trusted like a human's — see the module header.
     expect(verifyOperatorConfirmEvent({ token, trusted: false }, token)).toBe("UNTRUSTED_EVENT");
     expect(verifyOperatorConfirmEvent({ token, trusted: "true" }, token)).toBe("UNTRUSTED_EVENT");
     expect(verifyOperatorConfirmEvent({ token }, token)).toBe("UNTRUSTED_EVENT");
