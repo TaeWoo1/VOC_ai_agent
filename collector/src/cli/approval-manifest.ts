@@ -1269,6 +1269,31 @@ export const WING_DEFAULT_ACCOUNT_BINDING =
   "WING: operator-owned Coupang seller account (the operator's own login) · SellerOps: a separate proof account. " +
   "Two distinct logins; no credential value from either is read";
 
+/**
+ * **The two credential phases' immutable scope — operation + budget, in ONE place.**
+ *
+ * They live here rather than in their CLIs for the reason `WING_DEFAULT_ACCOUNT_BINDING` does: the run-grant
+ * screen and the Approval Manifest each render these fields, and on 2026-08-13 a field with a copy in each place
+ * drifted — the operator pressed against one string while granting against another. The manifest CLI pins these
+ * (it does not read them from the environment, exactly as the destructive phase does), the run CLIs import them,
+ * and a regression asserts the two agree.
+ */
+export const COUPANG_WING_CREDENTIAL_CALIBRATION_SCOPE = Object.freeze({
+  operation:
+    "WING credential-cell structure calibration (agent measures WHICH CELL holds each key and whether it is " +
+    "non-empty; it reads no value, and performs no click/input/navigation)",
+  maxActions: "1 sanitized structural census of the credential cells (0 clicks, 0 inputs, 0 value reads)",
+});
+
+export const COUPANG_WING_CREDENTIAL_HANDOFF_SCOPE = Object.freeze({
+  operation:
+    "WING credential handoff (after the seller's own confirmation, the agent reads 업체코드 / Access Key / " +
+    "Secret Key ONCE and hands them to the SellerOps credential vault, then verifies with a read-only Coupang " +
+    "API call; the agent presses no marketplace control and creates/deletes no key)",
+  maxActions:
+    "1 operator-confirmed credential read + 1 handoff to the SellerOps backend + 1 read-only connection check",
+});
+
 export const WING_RUN_GRANT_SUMMARY =
   " 실행은 SellerOps가 함께 여는 'SellerOps 확인' 탭에서 이 승인 내용(채널·계정·화면·작업·모드·허용 동작)을 " +
   "다시 보여 드리고, 그 버튼을 직접 누르셔야만 시작됩니다. 대화창의 한 줄이나 터미널 옵션만으로는 시작되지 않습니다.";

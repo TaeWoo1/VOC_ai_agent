@@ -33,7 +33,13 @@ import {
 import type { OperatorConfirmAsk } from "./operator-confirm";
 import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
 import { confirmRunGrant, runGrantRefusalMessage, type RunGrantBinding } from "./operator-run-grant";
-import { PHASE_SPECS, WING_DEFAULT_ACCOUNT_BINDING, validateApprovalPrerequisites, type ApprovalPrereqInput } from "./approval-manifest";
+import {
+  COUPANG_WING_CREDENTIAL_CALIBRATION_SCOPE,
+  PHASE_SPECS,
+  WING_DEFAULT_ACCOUNT_BINDING,
+  validateApprovalPrerequisites,
+  type ApprovalPrereqInput,
+} from "./approval-manifest";
 import { resolveWingActionPhase, resolveWingUrl, screenWingUrl } from "./coupang-wing-classifier";
 import { verifyRepoIdentity } from "./repo-identity";
 import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from "./live-run-approval";
@@ -41,12 +47,14 @@ import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from ".
 const CALIBRATION = PHASE_SPECS.COUPANG_WING_CREDENTIAL_CELL_CALIBRATION;
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
-/** The single operation sentence. Shared by the gate and the grant so the two cannot describe different runs. */
-export const CREDENTIAL_CELL_CALIBRATION_OPERATION =
-  "WING credential-cell structure calibration (agent measures WHICH CELL holds each key and whether it is " +
-  "non-empty; it reads no value, and performs no click/input/navigation)";
+/**
+ * The operation sentence and the budget, from the CONTRACT module's own scope — not a second copy of them. The
+ * manifest CLI pins the same constants, so the screen the operator presses and the manifest they grant against
+ * cannot say different things.
+ */
+export const CREDENTIAL_CELL_CALIBRATION_OPERATION = COUPANG_WING_CREDENTIAL_CALIBRATION_SCOPE.operation;
 
-const MAX_ACTIONS = "1 sanitized structural census of the credential cells (0 clicks, 0 inputs, 0 value reads)";
+const MAX_ACTIONS = COUPANG_WING_CREDENTIAL_CALIBRATION_SCOPE.maxActions;
 
 function env(k: string): string | undefined {
   const v = process.env[k];

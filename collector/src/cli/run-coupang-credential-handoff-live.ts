@@ -42,7 +42,13 @@ import {
 } from "./operator-action-barrier";
 import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
 import { confirmRunGrant, runGrantRefusalMessage, type RunGrantBinding } from "./operator-run-grant";
-import { PHASE_SPECS, WING_DEFAULT_ACCOUNT_BINDING, validateApprovalPrerequisites, type ApprovalPrereqInput } from "./approval-manifest";
+import {
+  COUPANG_WING_CREDENTIAL_HANDOFF_SCOPE,
+  PHASE_SPECS,
+  WING_DEFAULT_ACCOUNT_BINDING,
+  validateApprovalPrerequisites,
+  type ApprovalPrereqInput,
+} from "./approval-manifest";
 import { resolveWingActionPhase, resolveWingUrl, screenWingUrl } from "./coupang-wing-classifier";
 import { verifyRepoIdentity } from "./repo-identity";
 import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from "./live-run-approval";
@@ -51,14 +57,14 @@ const HANDOFF = PHASE_SPECS.COUPANG_WING_CREDENTIAL_HANDOFF;
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const CHANNEL_CODE = "COUPANG";
 
-/** The single operation sentence, shared by the gate and the grant so the two cannot describe different runs. */
-export const CREDENTIAL_HANDOFF_OPERATION =
-  "WING credential handoff (after the seller's own confirmation, the agent reads 업체코드 / Access Key / " +
-  "Secret Key ONCE and hands them to the SellerOps credential vault, then verifies with a read-only Coupang " +
-  "API call; the agent presses no marketplace control and creates/deletes no key)";
+/**
+ * The operation sentence and the budget, from the CONTRACT module's own scope — not a second copy of them. The
+ * manifest CLI pins the same constants, so the screen the operator presses and the manifest they grant against
+ * cannot say different things.
+ */
+export const CREDENTIAL_HANDOFF_OPERATION = COUPANG_WING_CREDENTIAL_HANDOFF_SCOPE.operation;
 
-const MAX_ACTIONS =
-  "1 operator-confirmed credential read + 1 handoff to the SellerOps backend + 1 read-only connection check";
+const MAX_ACTIONS = COUPANG_WING_CREDENTIAL_HANDOFF_SCOPE.maxActions;
 
 function env(k: string): string | undefined {
   const v = process.env[k];
