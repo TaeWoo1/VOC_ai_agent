@@ -20,8 +20,6 @@ import {
   gateRefusalCause,
   REVEAL_ABORT_FILENAME,
   REVEAL_BANNER_LINES,
-  REVEAL_DONE_FILENAME,
-  REVEAL_READY_FILENAME,
   sentinelPath,
 } from "../../src/cli/run-coupang-wing-reveal-live";
 import {
@@ -302,13 +300,19 @@ describe("reveal CLI — structurally incapable of acting on WING", () => {
     }
   });
 
-  it("its three sentinels are distinct — readiness, the press, and abort cannot be confused", () => {
-    const names = [REVEAL_READY_FILENAME, REVEAL_DONE_FILENAME, REVEAL_ABORT_FILENAME];
-    expect(new Set(names).size).toBe(3);
-    for (const n of names) expect(n.startsWith("run-coupang-wing-reveal-live.")).toBe(true);
-    // …and they resolve beside the status file, never outside the collector tree.
-    const p = sentinelPath("/tmp/x/.status/naver.json", REVEAL_READY_FILENAME);
-    expect(p).toBe(`/tmp/x/.status/${REVEAL_READY_FILENAME}`);
+  it("**the only sentinel left is the ABORT one** — nothing advances this run from the filesystem", () => {
+    // The readiness and the "I pressed 발급" sentinels are gone. Both advanced the walk, and a file any process
+    // can `touch` is not evidence that a human looked at a screen — the second one stood for a real marketplace
+    // action, and the observation taken on the strength of it went into a sanitized record as a fact.
+    //
+    // The abort file stays, and the asymmetry is the point: a forged abort STOPS a run.
+    expect(REVEAL_ABORT_FILENAME).toBe("run-coupang-wing-reveal-live.abort");
+    expect(code).not.toContain("run-coupang-wing-reveal-live.ready");
+    expect(code).not.toContain("run-coupang-wing-reveal-live.pressed");
+    // …and it resolves beside the status file, never outside the collector tree.
+    expect(sentinelPath("/tmp/x/.status/naver.json", REVEAL_ABORT_FILENAME)).toBe(
+      `/tmp/x/.status/${REVEAL_ABORT_FILENAME}`,
+    );
   });
 
   it("does not reuse the PROBE or DELETION sentinels — a stale one must not drive this run", () => {

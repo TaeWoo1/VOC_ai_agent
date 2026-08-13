@@ -8,7 +8,15 @@
  * importing the module launches nothing (it is inert on import).
  */
 import { describe, it, expect, afterEach } from "vitest";
-import { gateRefusalCause } from "../../src/cli/run-coupang-wing-deletion-live";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  DELETION_ABORT_FILENAME,
+  deletionAskFor,
+  gateRefusalCause,
+} from "../../src/cli/run-coupang-wing-deletion-live";
+import { WING_DELETION_WARNING_LABEL } from "../../src/action-window/coupang-wing-deletion-driver";
 import { COUPANG_WING_KEY_DELETION_SCOPE, PHASE_SPECS } from "../../src/cli/approval-manifest";
 import { WING_DEFAULT_URL } from "../../src/cli/coupang-wing-classifier";
 import type { verifyRepoIdentity } from "../../src/cli/repo-identity";
@@ -201,5 +209,63 @@ describe("deletion CLI gate — the run it authorizes is the one the manifest de
       expect(r ?? "").not.toContain("evil.example.com");
       expect(r ?? "").not.toContain("/Users/");
     }
+  });
+});
+
+/* ────────────────────────────── the operator's two checkpoints ────────────────────────────── */
+
+/**
+ * This run is DESTRUCTIVE, and its second checkpoint stands for "I deleted the key". Both checkpoints used to be
+ * sentinel FILES — a `touch` any process can perform, standing in for a human looking at a screen and deleting
+ * their own credential. They are verified presses now, and what is pinned here is that no file came back.
+ */
+describe("the deletion run advances on a verified press and on nothing else", () => {
+  const SRC = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), "../../src/cli/run-coupang-wing-deletion-live.ts"),
+    "utf8",
+  );
+
+  it("**the readiness and completion sentinels are gone; the abort file stays**", () => {
+    expect(DELETION_ABORT_FILENAME).toBe("run-coupang-wing-deletion-live.abort");
+    // The asymmetry is the point: a forged abort STOPS a destructive run, which is the safe direction.
+    expect(SRC).not.toContain("run-coupang-wing-deletion-live.ready");
+    expect(SRC).not.toContain("run-coupang-wing-deletion-live.deleted");
+    expect(SRC).not.toContain("DELETION_READY_FILENAME");
+    expect(SRC).not.toContain("DELETION_DONE_FILENAME");
+  });
+
+  it("**the two checkpoints are two different asks** — the second is not the first read twice", () => {
+    const ready = deletionAskFor("ready");
+    const deleted = deletionAskFor("deleted");
+    expect(ready.title).not.toBe(deleted.title);
+    expect(ready.headline).not.toBe(deleted.headline);
+  });
+
+  it("the second ask carries the irreversibility warning and says who presses 삭제", () => {
+    const deleted = [deletionAskFor("deleted").headline, ...deletionAskFor("deleted").lines].join("\n");
+    expect(deleted).toContain(WING_DELETION_WARNING_LABEL);
+    expect(deleted).toContain("되돌릴 수 없습니다");
+    expect(deleted).toContain("판매자님");
+    // …and it tells an operator who has NOT yet deleted anything what to do instead of pressing.
+    expect(deleted).toContain("아직 삭제하지 않으셨다면");
+  });
+
+  it("no ask still tells the operator to create a file", () => {
+    for (const kind of ["ready", "deleted"] as const) {
+      const ask = deletionAskFor(kind);
+      const all = [ask.title, ask.headline, ...ask.lines].join("\n");
+      expect(all, kind).not.toContain(".ready");
+      expect(all, kind).not.toContain("create:");
+    }
+  });
+
+  it("main() drives both checkpoints through the confirmation host", () => {
+    const body = SRC.slice(SRC.indexOf("async function main(): Promise<void>"));
+    expect(body).toContain("attachOperatorConfirmTab(");
+    expect(body).toContain('confirmCheckpoint("ready")');
+    expect(body).toContain('confirmCheckpoint("deleted")');
+    // The driver reads a context the confirmation tab is filtered out of — `activePage()` takes the NEWEST tab,
+    // so an unfiltered context would have the post-deletion verify land on the blank SellerOps surface.
+    expect(body).toContain("context: confirmHost.contextLike");
   });
 });

@@ -42,6 +42,13 @@ import {
 } from "../action-window/coupang-wing-reveal-driver";
 import { WING_ISSUE_SELECTOR_CALIBRATED } from "../action-window/coupang-wing-issuance-driver";
 import {
+  OPERATOR_CONFIRM_BUTTON_LABEL,
+  OPERATOR_CONFIRM_PAGE_TITLE,
+  type OperatorConfirmAsk,
+  type OperatorConfirmation,
+} from "./operator-confirm";
+import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
+import {
   COUPANG_WING_ISSUANCE_REVEAL_ACTION,
   PHASE_SPECS,
   validateApprovalPrerequisites,
@@ -125,19 +132,21 @@ export function gateRefusalCause(
 
 /* ────────────────────────────── sentinels ────────────────────────────── */
 
-export const REVEAL_READY_FILENAME = "run-coupang-wing-reveal-live.ready";
-export const REVEAL_DONE_FILENAME = "run-coupang-wing-reveal-live.pressed";
+/**
+ * **There is no readiness sentinel and no pressed sentinel.** Both used to advance this walk — `.ready` before
+ * the checkpoint and `.pressed` after it — and a file any process can `touch` cannot be evidence that a human
+ * looked at a screen. The `.pressed` one was the worse of the two: it stood for "I pressed 발급 on WING", and
+ * the observation taken on the strength of it went into a sanitized record as a fact.
+ *
+ * Both are now a verified press on the SellerOps confirmation surface (`./operator-confirm`).
+ *
+ * The ABORT sentinel stays, and the asymmetry is deliberate: a forged abort stops a run, which is the safe
+ * direction. Only advancing needs a channel a model cannot reach.
+ */
 export const REVEAL_ABORT_FILENAME = "run-coupang-wing-reveal-live.abort";
 
 export function sentinelPath(statusFile: string, filename: string): string {
   return resolve(dirname(resolve(statusFile)), filename);
-}
-
-const POLL_MS = 1_000;
-const WAIT_TIMEOUT_MS = 20 * 60_000;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
 }
 
 function removeSentinel(path: string): void {
@@ -148,51 +157,8 @@ function removeSentinel(path: string): void {
   }
 }
 
-/** Wait for one of the operator's sentinels. Pure-ish seam so the walk order is unit-testable offline. */
+/** What one operator checkpoint produced. `ready`/`pressed` are reachable ONLY through a verified press. */
 export type RevealSignal = "ready" | "pressed" | "abort" | "timeout";
-
-/** Injectable surroundings for {@link waitForSignal} — filesystem, clock and the signal handler's flag. */
-export interface SignalWaitDeps {
-  exists(path: string): boolean;
-  sleep(ms: number): Promise<void>;
-  /** True once SIGINT/SIGTERM has been seen. Checked FIRST, so Ctrl-C wins over a sentinel that just appeared. */
-  aborted(): boolean;
-  maxTicks?: number;
-  pollMs?: number;
-  /**
-   * Consume a sentinel once it has fired. A ready file left in place is not inert: if the two waits ever end up
-   * watching the same path, the second returns on tick 0 and the human checkpoint is skipped in silence.
-   */
-  remove?(path: string): void;
-}
-
-/**
- * Wait for `target` to appear, or for an abort, or for the deadline. Exported and dependency-injected because it
- * is the only thing standing between "the operator said they pressed 발급" and SellerOps reading a live page — and
- * inline in `main()` it could not be tested without a browser and a 20-minute clock.
- *
- * Abort is checked BEFORE the target on every tick. An operator who hits Ctrl-C while the page is mid-transition
- * must not have a sentinel that lands in the same tick override them.
- */
-export async function waitForSignal(
-  target: string,
-  /** Which signal a hit on `target` means — `ready` before the checkpoint, `pressed` after it. */
-  kind: "ready" | "pressed",
-  abortPath: string,
-  deps: SignalWaitDeps,
-): Promise<RevealSignal> {
-  // Clamped, both of them. `pollMs: 0` makes the derived budget `Math.ceil(Infinity)` and the loop never ends —
-  // a wait with no deadline on the seam that decides when SellerOps reads a live page. A negative one makes the
-  // budget negative, so the body never runs and it returns `timeout` without ever checking abort or the target.
-  const pollMs = Math.max(1, deps.pollMs ?? POLL_MS);
-  const maxTicks = Math.max(1, deps.maxTicks ?? Math.ceil(WAIT_TIMEOUT_MS / pollMs));
-  for (let i = 0; i < maxTicks; i++) {
-    if (deps.aborted() || deps.exists(abortPath)) return "abort";
-    if (deps.exists(target)) return kind;
-    await deps.sleep(pollMs);
-  }
-  return "timeout";
-}
 
 /* ────────────────────────────── the walk ────────────────────────────── */
 
@@ -459,29 +425,49 @@ export function revealExitCode(report: RevealWalkReport): number {
 }
 
 /**
- * Wire the walk's IO to the real filesystem sentinels and the console. Exported so a test can prove the two
- * waits observe DIFFERENT paths: the mapping from signal kind to sentinel file is the one place `waitForSignal`'s
- * label and its target are re-joined, and getting it wrong (both waits on the ready path) makes the checkpoint
- * wait return on tick 0 — SellerOps would observe a page nobody pressed, and exit 0.
+ * The two checkpoints, in the operator's own words. Separate builders because they ask for two different things
+ * and only one of them is a real marketplace action.
  */
-export function makeRevealIo(
-  paths: { readyPath: string; donePath: string; abortPath: string },
-  deps: SignalWaitDeps,
-): RevealWalkIo {
+export function revealAskFor(kind: "ready" | "pressed"): OperatorConfirmAsk {
+  return kind === "ready"
+    ? {
+        title: "WING REVEAL 1/2",
+        headline: "reach the WING open-API screen YOURSELF in the opened window.",
+        lines: [
+          "SellerOps는 이 창을 조작하지 않습니다 — 로그인 · 2단계 인증 · 이동은 모두 직접 하세요.",
+          "화면에 도착하신 뒤에 아래 버튼을 누르시면, SellerOps가 발급 버튼을 표시(하이라이트)합니다.",
+          "이 단계에서는 아무것도 눌리지 않습니다.",
+        ],
+      }
+    : {
+        title: "WING REVEAL 2/2",
+        headline: "표시된 발급 버튼을 직접 누르신 뒤에 확인해 주세요.",
+        lines: [
+          "SellerOps는 발급을 대신 누르지 않습니다. 누르는 것은 판매자님입니다.",
+          "누르신 뒤 화면이 바뀌면, 아래 버튼을 눌러 주세요 — SellerOps는 그 다음에야 화면을 한 번 읽습니다.",
+          "아직 누르지 않으셨다면 누르지 마세요. 이 창은 관찰 한 번으로 끝납니다.",
+        ],
+      };
+}
+
+/**
+ * Wire the walk's IO to a confirmation channel and the console. Exported so a test can prove the two waits are
+ * two DIFFERENT asks and that neither advances without a verified press: the second stands for "I pressed 발급
+ * on WING", and the observation taken on the strength of it goes into a sanitized record as a fact.
+ */
+export function makeRevealIo(confirm: (ask: OperatorConfirmAsk) => Promise<OperatorConfirmation>): RevealWalkIo {
   return {
     waitFor: async (kind) => {
-      const target = kind === "ready" ? paths.readyPath : paths.donePath;
-      const signal = await waitForSignal(target, kind, paths.abortPath, deps);
-      // Consume it. Leaving the ready file behind is what makes the "both waits watch the same path" mistake
-      // fail OPEN rather than time out.
-      if (signal === kind) deps.remove?.(target);
-      return signal;
+      const confirmation = await confirm(revealAskFor(kind));
+      // `ready` from the channel means "a human pressed the SellerOps button for THIS ask" — which is this
+      // checkpoint's own signal. Everything else (abort, timeout) passes through and stops the walk.
+      return confirmation.signal === "ready" ? kind : confirmation.signal;
     },
     note: (line) => console.error(line),
     // SANITIZED record → stdout. Enums / booleans / buckets / signal NAMES only — never a selector, value, PII,
     // raw DOM/HTML, screenshot, or raw URL (the URL is reduced to a host category).
     emit: (record) => console.log(JSON.stringify(record, null, 2)),
-    pressSignalHint: paths.donePath,
+    pressSignalHint: `SellerOps '${OPERATOR_CONFIRM_PAGE_TITLE}' 탭의 [${OPERATOR_CONFIRM_BUTTON_LABEL}] 버튼`,
   };
 }
 
@@ -548,11 +534,9 @@ async function main(): Promise<void> {
   }
 
   const cfg = loadConfig();
-  const readyPath = sentinelPath(cfg.statusFile, REVEAL_READY_FILENAME);
-  const donePath = sentinelPath(cfg.statusFile, REVEAL_DONE_FILENAME);
   const abortPath = sentinelPath(cfg.statusFile, REVEAL_ABORT_FILENAME);
-  mkdirSync(dirname(readyPath), { recursive: true });
-  for (const p of [readyPath, donePath, abortPath]) removeSentinel(p);
+  mkdirSync(dirname(abortPath), { recursive: true });
+  removeSentinel(abortPath);
 
   const abortFlag = { v: false };
   const onSigint = (): void => {
@@ -561,30 +545,36 @@ async function main(): Promise<void> {
   process.on("SIGINT", onSigint);
   process.on("SIGTERM", onSigint);
 
-  const waitDeps: SignalWaitDeps = {
-    exists: existsSync,
-    sleep,
-    aborted: () => abortFlag.v,
-    remove: removeSentinel,
-  };
-  const io = makeRevealIo({ readyPath, donePath, abortPath }, waitDeps);
-
   const ctx: BrowserContext = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
-  const entry = (ctx.pages()[0] ?? (await ctx.newPage())) as Page;
-  const driver = new CoupangWingRevealDriver(entry, { context: ctx });
+  // The confirmation tab is opened BEFORE the driver is built, so the entry page is the operator's own in every
+  // ordering and the driver's context has the surface filtered out of it.
+  const confirmHost = await attachOperatorConfirmTab(ctx as unknown as ConfirmHostContext, {
+    aborted: () => abortFlag.v || existsSync(abortPath),
+    abortPath,
+    onVerdict: (verdict) => {
+      if (verdict !== "CONFIRMED") log("aw_coupang_reveal_operator_confirm_refused", { verdict });
+    },
+  });
+  const io = makeRevealIo(async (ask) => {
+    confirmHost.announce(ask);
+    const confirmation = await confirmHost.confirm(ask);
+    log("aw_coupang_reveal_operator_confirm", {
+      checkpoint: ask.title,
+      signal: confirmation.signal,
+      provenance: confirmation.provenance ?? "none",
+    });
+    return confirmation;
+  });
+  const driver = new CoupangWingRevealDriver(confirmHost.entryPage as unknown as Page, {
+    context: confirmHost.contextLike as unknown as BrowserContext,
+  });
   try {
-    console.error("");
-    console.error("Navigate MANUALLY to the WING open-API screen in the opened window, then signal readiness:");
-    console.error(`       ${readyPath}`);
-    console.error(`     abort: ${abortPath}`);
-    // The COMPLETION sentinel is deliberately NOT announced here — the walk discloses it at the checkpoint. See
-    // `RevealWalkIo.pressSignalHint`.
     const report = await runRevealWalk(driver, io, screen.urlCategory);
     // The report is READ. A process that exits 0 whatever happened is how "the walk completed" comes to read as
     // "the expected thing happened" to anything downstream of a human watching the terminal.
     process.exitCode = revealExitCode(report);
   } finally {
-    for (const p of [readyPath, donePath, abortPath]) removeSentinel(p);
+    removeSentinel(abortPath);
     process.removeListener("SIGINT", onSigint);
     process.removeListener("SIGTERM", onSigint);
     await driver.cleanup().catch(() => undefined);

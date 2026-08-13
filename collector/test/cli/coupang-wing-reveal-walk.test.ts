@@ -3,12 +3,16 @@
  *
  * Everything between the approval gate and the printed record used to live inside `main()` — unexported, wired
  * directly to `launchNaverContext`, `existsSync` and a 20-minute wall clock. So the paths that decide whether
- * SellerOps touches a live marketplace page at all (both sentinel waits, both aborts, the timeout, the
+ * SellerOps touches a live marketplace page at all (both operator checkpoints, both aborts, the timeout, the
  * three fail-closed refusals, and the unexpected-outcome stop) had no test: the only way to reach them was to open
  * Chrome on the seller's WING account. That is precisely backwards for the code that guards a real WING press.
  *
- * `runRevealWalk` + `waitForSignal` are now the seam. Both take their surroundings as dependencies, so every
+ * `runRevealWalk` + `makeRevealIo` are now the seam. Both take their surroundings as dependencies, so every
  * branch below runs offline against fakes, and `main()` is left as wiring: launch, hand over, tear down.
+ *
+ * The checkpoints themselves are no longer FILES. Both used to be sentinels the operator (or anything else) could
+ * create; they are now verified presses on the SellerOps confirmation surface, and what this file pins is that
+ * the walk asks for two different ones and takes nothing from the filesystem but an abort.
  */
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -17,14 +21,14 @@ import { fileURLToPath } from "node:url";
 import {
   makeRevealIo,
   REVEAL_WALK_STOPS,
+  revealAskFor,
   revealExitCode,
   runRevealWalk,
-  waitForSignal,
   type RevealWalkDriverLike,
   type RevealWalkIo,
   type RevealWalkStop,
-  type SignalWaitDeps,
 } from "../../src/cli/run-coupang-wing-reveal-live";
+import { OPERATOR_CONFIRM_BUTTON_LABEL, OPERATOR_UI_CONFIRMED } from "../../src/cli/operator-confirm";
 import {
   STAGE2_DISJUNCTS,
   WING_EMPIRICALLY_REFUTED_DISJUNCTS,
@@ -34,6 +38,9 @@ import {
 } from "../../src/action-window/coupang-wing-reveal-driver";
 import type { WingRevealOutcome, WingRevealResult } from "../../src/action-window/coupang-wing-reveal-driver";
 import { observeFrom, type WingObservation, type WingStructuralCensus } from "../../src/cli/coupang-wing-classifier";
+
+/** What the walk discloses AT the checkpoint: the SellerOps button, never a file the operator could create. */
+const PRESS_HINT = `SellerOps 확인 탭의 [${OPERATOR_CONFIRM_BUTTON_LABEL}] 버튼`;
 
 const SRC = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -160,7 +167,7 @@ function harness(o: FakeOpts = {}) {
       order.push(
         line.includes(WING_REVEAL_CHECKPOINT_LABEL)
           ? "note:checkpoint"
-          : line.includes("/status/run-coupang-wing-reveal-live.pressed")
+          : line.includes(PRESS_HINT)
             ? "note:presshint"
             : "note",
       );
@@ -170,7 +177,7 @@ function harness(o: FakeOpts = {}) {
       order.push("emit");
       emitted.push(record);
     },
-    pressSignalHint: "/status/run-coupang-wing-reveal-live.pressed",
+    pressSignalHint: PRESS_HINT,
   };
 
   return { driver, io, order, notes, emitted };
@@ -178,70 +185,48 @@ function harness(o: FakeOpts = {}) {
 
 const noteText = (notes: string[]): string => notes.join("\n");
 
-/* ────────────────────────────── the sentinel wait ────────────────────────────── */
+/* ────────────────────────────── the operator checkpoints ────────────────────────────── */
 
-describe("waitForSignal — the operator's three sentinels", () => {
-  function deps(over: Partial<SignalWaitDeps> & { present?: string[] } = {}): SignalWaitDeps & { sleeps: number } {
-    const present = new Set(over.present ?? []);
-    const state = {
-      sleeps: 0,
-      exists: (p: string) => present.has(p),
-      sleep: async () => {
-        state.sleeps += 1;
-      },
-      aborted: () => false,
-      maxTicks: 3,
-      pollMs: 0,
-      ...over,
-    };
-    return state as SignalWaitDeps & { sleeps: number };
-  }
+describe("makeRevealIo — a checkpoint advances on a verified press and on nothing else", () => {
+  const CONFIRMED = { signal: "ready", provenance: OPERATOR_UI_CONFIRMED } as const;
 
-  it("returns `ready` when the readiness sentinel is there", async () => {
-    expect(await waitForSignal("/r", "ready", "/a", deps({ present: ["/r"] }))).toBe("ready");
+  it("**the two checkpoints are two different asks** — the second is not the first read twice", () => {
+    // The mapping from checkpoint to ask is the one place a walk can silently skip a human step. When these were
+    // sentinel files, pointing both waits at the same path made the second return on tick 0 — SellerOps would
+    // observe a page nobody pressed, and exit 0. The equivalent mistake now is one ask for both.
+    const ready = revealAskFor("ready");
+    const pressed = revealAskFor("pressed");
+    expect(ready.title).not.toBe(pressed.title);
+    expect(ready.headline).not.toBe(pressed.headline);
+    // The second names the real marketplace action, and says who performs it.
+    expect([pressed.headline, ...pressed.lines].join("\n")).toContain("발급");
+    expect([pressed.headline, ...pressed.lines].join("\n")).toContain("직접");
   });
 
-  it("returns `pressed` for the completion sentinel — the SAME function, a different meaning", async () => {
-    // The kind is passed in rather than inferred by comparing the target to `readyPath`. That comparison was the
-    // original shape, and it means any path that is not the ready path reports as a completed press.
-    expect(await waitForSignal("/d", "pressed", "/a", deps({ present: ["/d"] }))).toBe("pressed");
-  });
-
-  it("returns `abort` for the abort sentinel", async () => {
-    expect(await waitForSignal("/r", "ready", "/a", deps({ present: ["/a"] }))).toBe("abort");
-  });
-
-  it("returns `abort` for the SIGINT flag even with no abort file", async () => {
-    expect(await waitForSignal("/r", "ready", "/a", deps({ aborted: () => true }))).toBe("abort");
-  });
-
-  it("abort WINS when both land on the same tick — Ctrl-C is not overridden by a late sentinel", async () => {
-    expect(await waitForSignal("/r", "ready", "/a", deps({ present: ["/r", "/a"] }))).toBe("abort");
-    expect(await waitForSignal("/d", "pressed", "/a", deps({ present: ["/d"], aborted: () => true }))).toBe("abort");
-  });
-
-  it("returns `timeout` when nothing ever appears, and stops at the tick budget", async () => {
-    const d = deps({ maxTicks: 4 });
-    expect(await waitForSignal("/r", "ready", "/a", d)).toBe("timeout");
-    expect(d.sleeps).toBe(4);
-  });
-
-  it("does not sleep at all when the sentinel is already present", async () => {
-    const d = deps({ present: ["/r"] });
-    await waitForSignal("/r", "ready", "/a", d);
-    expect(d.sleeps).toBe(0);
-  });
-
-  it("a sentinel appearing mid-wait is picked up", async () => {
-    let tick = 0;
-    const d = deps({
-      exists: (p: string) => p === "/d" && tick >= 2,
-      sleep: async () => {
-        tick += 1;
-      },
-      maxTicks: 6,
+  it("each wait is confirmed against ITS OWN ask", async () => {
+    const asks: string[] = [];
+    const io = makeRevealIo(async (ask) => {
+      asks.push(ask.title);
+      return CONFIRMED;
     });
-    expect(await waitForSignal("/d", "pressed", "/a", d)).toBe("pressed");
+    expect(await io.waitFor("ready")).toBe("ready");
+    expect(await io.waitFor("pressed")).toBe("pressed");
+    expect(asks).toEqual([revealAskFor("ready").title, revealAskFor("pressed").title]);
+  });
+
+  it("an abort and a timeout pass straight through — neither is a press", async () => {
+    const abort = makeRevealIo(async () => ({ signal: "abort", provenance: null }) as const);
+    const timeout = makeRevealIo(async () => ({ signal: "timeout", provenance: null }) as const);
+    expect(await abort.waitFor("ready")).toBe("abort");
+    expect(await abort.waitFor("pressed")).toBe("abort");
+    expect(await timeout.waitFor("pressed")).toBe("timeout");
+  });
+
+  it("**the press hint names the SellerOps button, not a file the operator could create**", () => {
+    const io = makeRevealIo(async () => CONFIRMED);
+    expect(io.pressSignalHint).toContain(OPERATOR_CONFIRM_BUTTON_LABEL);
+    expect(io.pressSignalHint).not.toContain(".ready");
+    expect(io.pressSignalHint).not.toContain(".pressed");
   });
 });
 
@@ -584,68 +569,8 @@ describe("the walk cannot reach a browser, and importing the module runs nothing
 
 /* ────────────────────────────── the wiring itself ────────────────────────────── */
 
-/**
- * `makeRevealIo` is the ONE place `waitForSignal`'s label and its target file are re-joined, and it had no test:
- * the walk test injects `io.waitFor` wholesale, and the source guard only checked that the call site existed.
- *
- * Review demonstrated what that costs. Point both waits at `readyPath` — a one-token edit that typechecks and
- * passed the entire suite — and because the ready sentinel was never consumed, the checkpoint wait returns on
- * tick 0. SellerOps highlights 발급 and immediately takes its "post-press" observation of a page nobody pressed,
- * emits the record, and exits 0. The human checkpoint is skipped in silence.
- */
-describe("makeRevealIo — the two waits must watch DIFFERENT files", () => {
-  function ioFor(present: string[]) {
-    const files = new Set(present);
-    const removed: string[] = [];
-    const io = makeRevealIo(
-      { readyPath: "/s/ready", donePath: "/s/pressed", abortPath: "/s/abort" },
-      {
-        exists: (p) => files.has(p),
-        sleep: async () => undefined,
-        aborted: () => false,
-        maxTicks: 3,
-        pollMs: 1,
-        remove: (p) => {
-          files.delete(p);
-          removed.push(p);
-        },
-      },
-    );
-    return { io, removed, files };
-  }
-
-  it("the readiness wait watches the ready file", async () => {
-    expect(await ioFor(["/s/ready"]).io.waitFor("ready")).toBe("ready");
-  });
-
-  it("the press wait watches the PRESSED file — a ready sentinel does not satisfy it", async () => {
-    // The mutation this kills: `waitForSignal(readyPath, kind, …)` for both.
-    expect(await ioFor(["/s/ready"]).io.waitFor("pressed")).toBe("timeout");
-    expect(await ioFor(["/s/pressed"]).io.waitFor("pressed")).toBe("pressed");
-  });
-
-  it("the readiness wait is not satisfied by the pressed file either", async () => {
-    expect(await ioFor(["/s/pressed"]).io.waitFor("ready")).toBe("timeout");
-  });
-
-  it("a fired sentinel is CONSUMED, so it cannot satisfy the next wait", async () => {
-    const { io, removed, files } = ioFor(["/s/ready", "/s/pressed"]);
-    expect(await io.waitFor("ready")).toBe("ready");
-    expect(removed).toEqual(["/s/ready"]);
-    expect(files.has("/s/ready")).toBe(false);
-  });
-
-  it("an abort is not consumed — it must keep aborting", async () => {
-    const { io, removed } = ioFor(["/s/abort"]);
-    expect(await io.waitFor("ready")).toBe("abort");
-    expect(removed).toEqual([]);
-  });
-
-  it("the press hint names the completion sentinel, so the walk can disclose it at the checkpoint", () => {
-    expect(ioFor([]).io.pressSignalHint).toBe("/s/pressed");
-  });
-
-  it("narration goes to stderr and the sanitized record to STDOUT — the channels are a contract", () => {
+describe("makeRevealIo — the channels are a contract", () => {
+  it("narration goes to stderr and the sanitized record to STDOUT", () => {
     // Swapping them survived every test. The record is the machine-readable artifact of the run; emitting it on
     // stderr and the prose on stdout means the record never reaches a caller capturing stdout.
     const out: string[] = [];
@@ -654,7 +579,7 @@ describe("makeRevealIo — the two waits must watch DIFFERENT files", () => {
     console.log = (...a: unknown[]) => void out.push(a.map(String).join(" "));
     console.error = (...a: unknown[]) => void err.push(a.map(String).join(" "));
     try {
-      const { io } = ioFor([]);
+      const io = makeRevealIo(async () => ({ signal: "timeout", provenance: null }));
       io.note("a narration line");
       io.emit({ outcome: "SURFACE_UNCHANGED" });
     } finally {
@@ -664,46 +589,6 @@ describe("makeRevealIo — the two waits must watch DIFFERENT files", () => {
     expect(err).toEqual(["a narration line"]);
     expect(out).toHaveLength(1);
     expect(JSON.parse(out[0]!)).toEqual({ outcome: "SURFACE_UNCHANGED" });
-  });
-});
-
-describe("waitForSignal — a pathological poll interval cannot disable the deadline", () => {
-  const base = { exists: () => false, sleep: async () => undefined, aborted: () => false };
-
-  it("pollMs 0 does not produce an infinite wait", async () => {
-    // `Math.ceil(WAIT_TIMEOUT_MS / 0)` is Infinity: the loop would never end, on the seam that decides when
-    // SellerOps reads a live page.
-    expect(await waitForSignal("/r", "ready", "/a", { ...base, pollMs: 0 })).toBe("timeout");
-  });
-
-  it("a negative pollMs does not skip the loop body entirely", async () => {
-    // A negative budget makes the body never run: it would return `timeout` without ever checking abort or the
-    // target — including when the operator had already signalled.
-    let checked = 0;
-    const sig = await waitForSignal("/r", "ready", "/a", {
-      ...base,
-      exists: (p) => {
-        checked += 1;
-        return p === "/r";
-      },
-      pollMs: -5,
-    });
-    expect(checked).toBeGreaterThan(0);
-    expect(sig).toBe("ready");
-  });
-
-  it("a non-positive tick budget still checks at least once", async () => {
-    let checked = 0;
-    const sig = await waitForSignal("/r", "ready", "/a", {
-      ...base,
-      exists: (p) => {
-        checked += 1;
-        return p === "/r";
-      },
-      maxTicks: 0,
-    });
-    expect(checked).toBeGreaterThan(0);
-    expect(sig).toBe("ready");
   });
 });
 
@@ -808,31 +693,29 @@ describe("the report is reported — a run that exits 0 whatever happened is an 
     expect(body).toContain("process.exitCode = revealExitCode(report);");
   });
 
-  it("main() wires BOTH sentinel paths and the sentinel CONSUMER — the seam tests cannot see this", () => {
-    // Review's finding 5: `makeRevealIo` is tested in both directions, but main() also joins label to file, and
-    // `SignalWaitDeps.remove` is OPTIONAL — dropping it typechecks, and the consumption test keeps passing
-    // because it injects its own `remove`. Dropping it plus pointing donePath at the ready filename reproduces
-    // the original fail-open exactly, at the one place no seam test looks.
+  it("**main() wires the confirmation channel, and no readiness file survives it**", () => {
+    // The predecessor of this test guarded the one place a label was re-joined to a sentinel FILE: drop the
+    // consumer, point both waits at the same path, and the human checkpoint is skipped in silence. There is no
+    // such file any more, so what has to be guarded is that none came back and that the walk's IO is built from
+    // the confirmation host rather than from the filesystem.
     const src2 = readFileSync(SRC, "utf8");
     const body = src2.slice(src2.indexOf("async function main(): Promise<void>"));
-    expect(body).toContain("sentinelPath(cfg.statusFile, REVEAL_READY_FILENAME)");
-    expect(body).toContain("sentinelPath(cfg.statusFile, REVEAL_DONE_FILENAME)");
-    expect(body).toContain("remove: removeSentinel,");
-    // The sentinel sweep happens TWICE — once at startup and once in the finally — and `toContain` is satisfied
-    // by either, so it cannot see one being deleted. Counted instead, and positioned: the startup sweep must
-    // precede the browser launch. Consumption only removes sentinels THIS process observed, so a `.pressed`
-    // file left behind by a SIGKILLed run would otherwise make the checkpoint wait return on tick 0 — the
-    // branch's headline fail-open, arriving through the one door consumption does not cover.
-    const sweep = "for (const p of [readyPath, donePath, abortPath]) removeSentinel(p);";
-    const sweeps = body.split(sweep).length - 1;
-    expect(sweeps, "both the startup sweep and the teardown sweep must be present").toBe(2);
-    expect(body.indexOf(sweep), "the startup sweep must run BEFORE the browser launches").toBeLessThan(
+    expect(body).toContain("attachOperatorConfirmTab(");
+    expect(body).toContain("confirmHost.confirm(ask)");
+    expect(body).not.toContain("REVEAL_READY_FILENAME");
+    expect(body).not.toContain("REVEAL_DONE_FILENAME");
+    // The driver reads a context the confirmation tab is filtered out of. `activePage()` takes the NEWEST tab,
+    // so an unfiltered context would have the reveal observation land on the blank SellerOps surface.
+    expect(body).toContain("context: confirmHost.contextLike");
+    // The abort sentinel is still cleared before the browser opens: a leftover from a killed run would
+    // otherwise abort this one on tick 0. It is the ONLY file this run reads.
+    const sweep = "removeSentinel(abortPath);";
+    expect(body.split(sweep).length - 1, "both the startup and the teardown clear must be present").toBe(2);
+    expect(body.indexOf(sweep), "the startup clear must run BEFORE the browser launches").toBeLessThan(
       body.indexOf("launchNaverContext("),
     );
-    // The three sentinels must come from three DIFFERENT filename constants.
     const names = [...body.matchAll(/sentinelPath\(cfg\.statusFile, (REVEAL_\w+)\)/g)].map((m) => m[1]!);
-    expect(names).toHaveLength(3);
-    expect(new Set(names).size).toBe(3);
+    expect(names).toEqual(["REVEAL_ABORT_FILENAME"]);
   });
 });
 
