@@ -48,6 +48,7 @@ import {
   type OperatorConfirmation,
 } from "./operator-confirm";
 import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
+import { confirmRunGrant, runGrantRefusalMessage, type RunGrantBinding } from "./operator-run-grant";
 import {
   COUPANG_WING_ISSUANCE_REVEAL_ACTION,
   PHASE_SPECS,
@@ -128,6 +129,26 @@ export function gateRefusalCause(
   if (!res.ok) return res.cause;
   const identity = verifyIdentity({ expectedSha: input.gitSha, repoRoot: REPO_ROOT });
   return identity.ok ? null : `${identity.cause}: ${identity.reason}`;
+}
+
+/**
+ * The manifest fields THIS run holds, for the run-level grant. Built from the same constants the gate above
+ * pins and the same run env the bootstrap bound — so the operator presses against what the run will do, not
+ * against a paraphrase of it in a terminal or a chat log.
+ */
+export function revealRunGrantBinding(): RunGrantBinding {
+  return {
+    approvalId: env("WALKTHROUGH_APPROVAL_ID") ?? "unknown",
+    runId: env("WALKTHROUGH_RUN_ID") ?? "unknown",
+    gitSha: env("WALKTHROUGH_GIT_COMMIT") ?? "unknown",
+    channel: "COUPANG",
+    account: "operator-owned Coupang WING test account",
+    surface: "Coupang WING Open API",
+    operation:
+      "WING issuance-form reveal (the OPERATOR presses 발급; this press is not the key-creating action; agent performs no click/input/value read)",
+    mode: REVEAL.mode,
+    maxActions: "1 operator-performed 발급 press + 1 sanitized observation",
+  };
 }
 
 /* ────────────────────────────── sentinels ────────────────────────────── */
@@ -569,6 +590,17 @@ async function main(): Promise<void> {
     context: confirmHost.contextLike as unknown as BrowserContext,
   });
   try {
+    // **THE RUN-LEVEL GRANT, before the walk reads anything.** The approval flag above is the assistant's
+    // statement of intent; it authorizes nothing. What authorizes this run is the operator pressing a button
+    // against the manifest's own binding fields, in a window only they can press.
+    const grant = await confirmRunGrant(confirmHost, revealRunGrantBinding());
+    if (grant !== "GRANTED") {
+      console.error(runGrantRefusalMessage(grant));
+      log("aw_coupang_reveal_run_grant", { outcome: grant });
+      process.exitCode = 7;
+      return;
+    }
+    log("aw_coupang_reveal_run_grant", { outcome: grant });
     const report = await runRevealWalk(driver, io, screen.urlCategory);
     // The report is READ. A process that exits 0 whatever happened is how "the walk completed" comes to read as
     // "the expected thing happened" to anything downstream of a human watching the terminal.

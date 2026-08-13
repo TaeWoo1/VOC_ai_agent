@@ -25,7 +25,7 @@
 import { randomUUID } from "node:crypto";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import type { Page } from "playwright";
+import type { BrowserContext, Page } from "playwright";
 import { loadConfig } from "../config";
 import { log } from "../log";
 import { launchNaverContext } from "../profile";
@@ -40,6 +40,9 @@ import { resolveWingUrl, screenWingUrl } from "./coupang-wing-classifier";
 import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from "./live-run-approval";
 import { WING_APPROVAL_PHASE_ENV, WING_APPROVED_PHASE_ENV } from "./coupang-wing-classifier";
 import { verifyRepoIdentity } from "./repo-identity";
+import { PHASE_SPECS } from "./approval-manifest";
+import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
+import { confirmRunGrant, runGrantRefusalMessage, type RunGrantBinding } from "./operator-run-grant";
 
 const CHANNEL_CODE = "coupang";
 
@@ -87,6 +90,28 @@ async function waitForShutdown(bridge: AgentBridge): Promise<void> {
  * Lifting it is this diff, which is the reviewable act the fence's own comment asked for.
  */
 export const COUPANG_WING_GUIDED_ISSUANCE_WALK_PHASE = "COUPANG_WING_GUIDED_ISSUANCE_WALK" as const;
+
+/**
+ * The manifest fields THIS walk holds, for the run-level grant. Read from the phase spec the bootstrap
+ * prepared against and the run env it bound — so the seller presses against what the walk will do, not against
+ * a paraphrase of it in a terminal or a chat log.
+ */
+export function issuanceRunGrantBinding(env: NodeJS.ProcessEnv = process.env): RunGrantBinding {
+  const spec = PHASE_SPECS.COUPANG_WING_GUIDED_ISSUANCE_WALK;
+  const read = (k: string): string => (typeof env[k] === "string" && env[k]!.trim().length > 0 ? env[k]!.trim() : "unknown");
+  return {
+    approvalId: read("WALKTHROUGH_APPROVAL_ID"),
+    runId: read("WALKTHROUGH_RUN_ID"),
+    gitSha: read("WALKTHROUGH_GIT_COMMIT"),
+    channel: "COUPANG",
+    account: "operator-owned Coupang WING test account",
+    surface: "Coupang WING Open API",
+    operation:
+      "guided WING issuance walk (SellerOps guides and rings; the SELLER performs every real step and stops in front of '약관 동의 및 Key 발급받기')",
+    mode: spec.mode,
+    maxActions: "0 agent actions on WING — highlights and panels only",
+  };
+}
 
 /**
  * **The agent's navigation budget on this entrypoint: zero.**
@@ -160,18 +185,35 @@ async function main(): Promise<void> {
   // `followWindow` — the page follows the seller's window instead of Playwright's pinned 1280×720. Measured,
   // not assumed: see `buildLaunchOptions`, and the crop it fixes is the one that blocked two live walks.
   const ctx = await launchNaverContext(cfg.profileDir, cfg.browserChannel, { followWindow: true });
+  // The SellerOps-owned confirmation tab, opened before the driver exists so the seller's own page is the entry
+  // page and the driver's context has the surface filtered out of it — `activePage()` takes the NEWEST tab, and
+  // an unfiltered context would guide the blank SellerOps page instead of WING.
+  const confirmHost = await attachOperatorConfirmTab(ctx as unknown as ConfirmHostContext, { aborted: () => false });
   try {
+    // **THE RUN-LEVEL GRANT, before the bridge accepts anything.** The approval flag is the assistant's
+    // statement of intent; it authorizes nothing. What authorizes this walk is the seller pressing a button
+    // against the manifest's own binding fields, in a window only they can press.
+    const grant = await confirmRunGrant(confirmHost, issuanceRunGrantBinding());
+    if (grant !== "GRANTED") {
+      console.error(runGrantRefusalMessage(grant));
+      log("aw_coupang_issuance_run_grant", { outcome: grant });
+      process.exitCode = 7;
+      return;
+    }
+    log("aw_coupang_issuance_run_grant", { outcome: grant });
     // The newest tab, wherever the SELLER navigated. This entrypoint never `.goto`s — see
     // COUPANG_WING_GUIDED_WALK_AGENT_NAVIGATIONS. `url` stays resolved and screened so the dedicated window can
     // only be opened against the WING host, but nothing drives the page there.
-    const page = (ctx.pages()[0] ?? (await ctx.newPage())) as Page;
+    const page = confirmHost.entryPage as unknown as Page;
     console.error("");
     console.error("GUIDED WALK — log in to WING and reach the open-API 키 발급 page YOURSELF.");
     console.error("  SellerOps does not navigate for you and presses nothing. The on-page panel guides each step.");
     console.error("  ⚠ It STOPS in front of '약관 동의 및 Key 발급받기'. Do not press it in this run.");
 
     const runId = mintIssuanceRunId();
-    const driver = new CoupangWingIssuanceDriver(page, { context: ctx });
+    const driver = new CoupangWingIssuanceDriver(page, {
+      context: confirmHost.contextLike as unknown as BrowserContext,
+    });
     const bridge = createAgentBridge({
       ...resolveAgentBridgeConfig(args, process.env),
       approvalPresenter: createApprovalPresenterFor(decideApprovalPresenter(process.env, process.platform)),

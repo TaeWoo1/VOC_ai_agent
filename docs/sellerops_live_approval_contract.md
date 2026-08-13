@@ -119,17 +119,34 @@ NAVER · API Center UI calibration · READ_ONLY · run wt-xxxx · 2026-08-01 · 
 
 ---
 
-## 3. Operator Approval — the default is one line
+## 3. Operator Approval — the grant is a PRESS, and the default ask is one line
 
-When a **valid manifest is prepared and displayed**, the entire approval is exactly:
+**The grant is not text.** A run that carries an Approval Manifest renders that manifest's binding
+fields on the **SellerOps confirmation surface** — the same trusted channel §5a defines for in-run
+checkpoints — and refuses to start until the operator **presses the button on it**. No press, no
+run: the process exits without touching the marketplace.
+
+What the operator presses against is the binding the RUN holds (`channel` / `account` / `surface` /
+`operation` / `mode` / `actions`, pinned by `approvalId` + `runId` + commit), passed through
+verbatim rather than summarised — so a run whose manifest says something else says it on that
+screen. A run that ends with something irreversible names that act above every other field.
+
+When a **valid manifest is prepared and displayed**, the operator's spoken part is still one line:
 
 ```
 Seated and ready.
 ```
 
-That one line is a **single-use** grant bound to the currently displayed `approvalId` + `runId` +
-`scope` — nothing more is required, because the manifest already carries channel / account /
-date / operator / mode / allowed actions and the Standing Safety Contract (§1) already holds.
+That line is a **single-use** intent bound to the currently displayed `approvalId` + `runId` +
+`scope`, and it is what tells the assistant to start the run at all — nothing more is required,
+because the manifest already carries channel / account / date / operator / mode / allowed actions
+and the Standing Safety Contract (§1) already holds. **It authorizes nothing on its own**, and
+neither does the CLI's approval flag: both are statements of INTENT, and both are things a language
+model can produce. The authorization is the press.
+
+Implementation: `collector/src/cli/operator-run-grant.ts`. Wired into the guided WING walk, the
+reveal run and the destructive deletion run. The WING selector recorder takes its first
+per-checkpoint confirmation before it reads anything, which is the same gate under another name.
 
 **Additional detail is requested ONLY when** one of these is true (otherwise, ask for nothing more):
 
@@ -143,7 +160,8 @@ date / operator / mode / allowed actions and the Standing Safety Contract (§1) 
   own explicit, mode-`WRITE` approval, not a READ manifest's one-liner.
 
 The assistant binds the grant to the **manifest id**, not to a long natural-language parse: a
-`Seated and ready.` with a stale/absent manifest authorizes nothing.
+`Seated and ready.` with a stale/absent manifest authorizes nothing — and now cannot, because the
+run's own grant screen refuses an incomplete binding rather than displaying blanks to press against.
 
 ---
 
@@ -222,10 +240,36 @@ measurement was lost. Nothing was pressed on the marketplace, but only because a
 halted the run — the confirmation itself had failed. Chat text and `touch` are both things a
 language model can produce, so neither was ever evidence that a human had looked at a screen.
 
-Implementation: `collector/src/cli/operator-confirm.ts`, wired into
-`collector/src/cli/probe-wing-issuance-selectors.ts`. Every probe-phase Approval Manifest discloses
-the channel and the extra tab. **Still on the sentinel channel** (migration pending): the guided
-walk (`run-coupang-wing-issuance-live`), the reveal and deletion drivers, and the NAVER probes.
+**Implementation.** `collector/src/cli/operator-confirm.ts` owns what makes a confirmation
+trustworthy; `collector/src/cli/operator-confirm-host.ts` owns the surface — a SellerOps-owned blank
+tab in the run's own browser, pinned to the document it opened on, raised by the run itself, and
+filtered out of the pages the run measures. Every probe-phase Approval Manifest discloses the
+channel and the extra tab.
+
+Where a run has two operator-decidable outcomes — "this screen is ready" and "skip this optional
+stage" — the second is a **second button on the same surface**, verified the same way. Skipping is
+an advance, so it does not get a file beside the channel.
+
+**Migrated** (no readiness sentinel remains): the WING selector recorder, the WING reveal and
+deletion runs, every NAVER same-session probe (`probe-same-session`, `probe-export-same-session`,
+`classify-export-same-session`, `capture-export-same-session`, `probe-session-precondition-same-session`,
+`classify-account-store-same-session`, `continue-account-store-same-session`,
+`diagnose-selection-state-same-session`, `discover-reply-target`), and the API-center walks
+(`observe-api-center`, `calibrate-api-center`, `capture-api-center-visual`,
+`probe-issuance-selectors`). The two bridge-client live-proof CLIs lost the ability to advance a
+checkpoint at all — a diagnostic must not be able to move a live guided walk on, and `다음` is the
+frontend's own button.
+
+**Still on the sentinel channel** (not yet migrated, and each would need a multi-answer surface
+rather than a two-button one): the NAVER reply workstream
+(`run-guided-reply-session-live-naver`, `run-reply-submission-live-naver`,
+`run-review-id-reconciliation-live-naver`, `run-chrome-selector-discovery-live-naver`,
+`run-store-identity-diagnostic-live-naver`, `run-abort-rehearsal-live-naver`,
+`run-composer-abort-rehearsal-live-naver`, `calibrate-reply-target`, `calibrate-element-anchors`),
+the Action Window runtime's own operator signal (`run-action-window-live-naver`), and the ESM CLIs
+(`classify-esm-review`, `capture-esm-review`, `capture-esm-review-upload`, `probe-esm-session-ttl`).
+`collector/test/cli/operator-advance-channel-guard.test.ts` holds that list and fails when a
+migrated CLI regresses onto a sentinel.
 
 ---
 

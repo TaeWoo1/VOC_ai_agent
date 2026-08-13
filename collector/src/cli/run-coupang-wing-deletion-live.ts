@@ -64,6 +64,7 @@ import { verifyRepoIdentity } from "./repo-identity";
 import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from "./live-run-approval";
 import type { OperatorConfirmAsk } from "./operator-confirm";
 import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
+import { confirmRunGrant, runGrantRefusalMessage, type RunGrantBinding } from "./operator-run-grant";
 
 const WKD = PHASE_SPECS.COUPANG_WING_KEY_DELETION;
 /** The repository this run must be reading — derived from this file's location, never from the environment. */
@@ -148,6 +149,31 @@ export function gateRefusalCause(
   // approved it for cannot describe different code.
   const identity = verifyIdentity({ expectedSha: input.gitSha, repoRoot: REPO_ROOT });
   return identity.ok ? null : `${identity.cause}: ${identity.reason}`;
+}
+
+/**
+ * The manifest fields THIS run holds, for the run-level grant. Read from the SAME immutable destructive scope
+ * the gate pins and the same run env the bootstrap bound — so the operator presses against what the run will
+ * do, not against a paraphrase of it in a terminal or a chat log.
+ *
+ * This is the destructive phase, so the surface it renders on says `WRITE` and says so first.
+ */
+export function deletionRunGrantBinding(): RunGrantBinding {
+  const scope = WKD.destructiveScope ?? COUPANG_WING_KEY_DELETION_SCOPE;
+  return {
+    approvalId: env("WALKTHROUGH_APPROVAL_ID") ?? "unknown",
+    runId: env("WALKTHROUGH_RUN_ID") ?? "unknown",
+    gitSha: env("WALKTHROUGH_GIT_COMMIT") ?? "unknown",
+    channel: scope.channel,
+    account: scope.accountBinding,
+    surface: scope.surface,
+    operation: scope.operation,
+    mode: WKD.mode,
+    maxActions: scope.maxActions,
+    // `mode` is `READ_ONLY` and honestly so — the AGENT only reads; the SELLER deletes their own key. The
+    // grant screen must not therefore read as a harmless run, so the irreversible act is named on its own line.
+    irreversible: `${WING_DELETION_WARNING_LABEL} — 이 실행에서 판매자님이 직접 키를 삭제하시게 됩니다.`,
+  };
 }
 
 /* ────────────────────────────── the operator's two checkpoints ────────────────────────────── */
@@ -348,6 +374,17 @@ async function main(): Promise<void> {
     context: confirmHost.contextLike as unknown as BrowserContext,
   });
   try {
+    // **THE RUN-LEVEL GRANT, before anything is highlighted.** The approval flag above is the assistant's
+    // statement of intent; it authorizes nothing. What authorizes this DESTRUCTIVE run is the operator
+    // pressing a button against the manifest's own binding fields, in a window only they can press.
+    const grant = await confirmRunGrant(confirmHost, deletionRunGrantBinding());
+    if (grant !== "GRANTED") {
+      console.error(runGrantRefusalMessage(grant));
+      console.log(JSON.stringify({ event: "COUPANG_DELETION", outcome: "NOT_GRANTED" }));
+      log("aw_coupang_deletion_run_grant", { outcome: grant });
+      return;
+    }
+    log("aw_coupang_deletion_run_grant", { outcome: grant });
     const first = await confirmCheckpoint("ready");
     if (first !== "ready") {
       console.log(JSON.stringify({ event: "COUPANG_DELETION", outcome: first === "abort" ? "ABORTED" : "TIMEOUT" }));
