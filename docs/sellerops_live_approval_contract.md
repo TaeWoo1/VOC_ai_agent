@@ -355,6 +355,29 @@ ingest into the database passed it cleanly — see below.
 | `capture-esm-review` | a `.ready` hand-off, then the marketplace-selection check | the ESM+ export click + download wait | a `.ready` file whose own prompt said *'in Claude Code, say "ready" and Claude creates the sentinel'* | a press immediately before the click, after every gate that could refuse it. Its READ hand-offs stay sentinel files and stay on the §5a register |
 | `capture-esm-review-upload` | the same `.ready` hand-off | the click → download → save → **upload into the backend DB** | the same `.ready` file | a press before the chain, disclosing the DB ingest |
 | `upload-file` | reads no page at all | the upload | n/a | **unchanged, by policy.** The operator typing the path IS the decision; there is no observation to be mistaken for one. Named in the guard so the exclusion is a rule, not an omission |
+| `run-coupang-credential-handoff-live` | classify the surface, census the credential cells value-free | **`CREDENTIAL_REVEAL`** — read the three values → POST them to the SellerOps vault → read-only verify | n/a (new) | one press, disclosing the whole chain, immediately before the read. See §5c |
+
+## 5c. `CREDENTIAL_READ` — the one mode that is not `READ_ONLY`
+
+Every phase in `PHASE_SPECS` declares `mode: READ_ONLY` and means it: the agent reads structure and no
+value. The Coupang credential handoff does read values, so it carries a different literal —
+`CREDENTIAL_READ` — precisely so that run cannot be described with the word every other run uses. It is
+**not** `WRITE`: the agent still clicks, types, submits and issues nothing on the marketplace. What it
+writes to is the seller's own SellerOps vault.
+
+The gate enforces the pairing in both directions (`validateApprovalPrerequisites` step 6c):
+
+- a `READ_ONLY` phase may not declare `READ_CREDENTIAL_VALUES_ONCE` or
+  `HAND_CREDENTIAL_TO_SELLEROPS_BACKEND` → `CREDENTIAL_ACTION_IN_READ_ONLY_PHASE`
+- a `CREDENTIAL_READ` phase **must** declare both → `CREDENTIAL_MODE_UNDERDECLARED`
+
+The second direction is the one that matters: a run cannot carry the alarming mode and then quietly
+narrow its declared capability to something innocuous, because the operator's grant is given against the
+action list.
+
+The value-cell structure is measured first, by a separate `READ_ONLY` phase
+(`COUPANG_WING_CREDENTIAL_CELL_CALIBRATION`) with its own approval — a grant for the calibration is never
+a grant for the handoff. Full contract: [`coupang_credential_handoff_v1.md`](./coupang_credential_handoff_v1.md).
 
 ---
 
