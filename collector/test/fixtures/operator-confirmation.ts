@@ -11,8 +11,12 @@ import {
 } from "../../src/cli/operator-confirm";
 import type { WingRecordSignal } from "../../src/cli/probe-wing-issuance-selectors";
 
-/** A confirmed press. */
-export const OPERATOR_CONFIRMED: OperatorConfirmation = { signal: "ready", provenance: OPERATOR_UI_CONFIRMED };
+/** A confirmed press of the primary button. */
+export const OPERATOR_CONFIRMED: OperatorConfirmation = {
+  signal: "ready",
+  provenance: OPERATOR_UI_CONFIRMED,
+  choice: "primary",
+};
 /** The operator stopped the session. */
 export const OPERATOR_ABORTED: OperatorConfirmation = { signal: "abort", provenance: null };
 /** Nobody pressed anything within the budget. */

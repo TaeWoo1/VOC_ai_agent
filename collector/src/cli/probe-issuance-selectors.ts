@@ -39,6 +39,8 @@ import {
 import { VISUAL_RECON_SCREENS, type VisualReconScreen } from "../action-window/api-issuance-calibration/visual-recon";
 import { screenApiCenterUrl, type ApiCenterPageCategory } from "./observe-api-center";
 import { approvalRequiredMessage, hasLiveRunApproval } from "./live-run-approval";
+import type { OperatorConfirmAsk } from "./operator-confirm";
+import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
 
 /** A per-screen operator signal: proceed, abort the session, or the wait timed out. */
 export type SelectorProbeSignal = "ready" | "abort" | "timeout";
@@ -131,20 +133,34 @@ export async function runSelectorProbeSession(deps: SelectorProbeDeps): Promise<
 
 /* ────────────────────────────── sentinels + live wiring (inert on import) ────────────────────────────── */
 
-/** Per-screen readiness sentinel filename (cleared + re-polled every screen). */
-export const PROBE_SENTINEL_FILENAME = "probe-issuance-selectors.ready";
-/** Operator abort sentinel filename (ends the session, writes the partial sanitized summary). */
+/**
+ * **There is no per-screen readiness sentinel.** It used to advance this probe from screen to screen, and its
+ * own printed instruction said `Signal readiness by creating this file (or say "ready")` — which is precisely
+ * the channel that failed on 2026-08-13. Each screen is now a verified press on the SellerOps confirmation
+ * surface (`./operator-confirm`).
+ *
+ * The abort sentinel stays: a forged abort ends a session, which is the safe direction.
+ */
 export const PROBE_ABORT_FILENAME = "probe-issuance-selectors.abort";
 
-export function probeSentinelPathFor(statusFile: string): string {
-  return resolve(dirname(resolve(statusFile)), PROBE_SENTINEL_FILENAME);
-}
 export function probeAbortPathFor(statusFile: string): string {
   return resolve(dirname(resolve(statusFile)), PROBE_ABORT_FILENAME);
 }
 
-const SENTINEL_POLL_MS = 1_000;
 const SCREEN_WAIT_TIMEOUT_MS = 20 * 60_000; // generous per-screen budget for a manual navigate/scroll
+
+/** One screen's ask, in the operator's own words. Built per screen so the press belongs to that screen. */
+export function screenAskFor(screen: VisualReconScreen, targets: readonly IssuanceHighlightTarget[]): OperatorConfirmAsk {
+  return {
+    title: `SELECTOR PROBE — ${screen}`,
+    headline: `${screen} 화면으로 직접 이동하신 뒤 확인해 주세요.`,
+    lines: [
+      `측정 대상: ${targets.join(", ")}`,
+      "열린 전용 Chrome 창에서 직접 이동하세요 — SellerOps는 그 창을 조작하지 않습니다.",
+      "확인을 누르시면 각 대상의 고정 라벨이 몇 개 매칭되는지만 읽습니다 (읽기 전용 — 표시도 클릭도 없습니다).",
+    ],
+  };
+}
 
 function mintRunId(): string {
   return `probe_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -171,16 +187,6 @@ function banner(): void {
   console.error(" value (incl. Client ID/Secret). Per screen: navigate MANUALLY, then signal ready. Output is");
   console.error(" sanitized integers/booleans only — no selector, label, value, or URL.");
   console.error(line);
-}
-
-function printScreenInstructions(screen: VisualReconScreen, targets: readonly IssuanceHighlightTarget[], readyPath: string, abortPath: string): void {
-  console.error("");
-  console.error(`Selector probe screen: ${screen} (targets: ${targets.join(", ")}).`);
-  console.error(`  1) Navigate MANUALLY to the ${screen} surface in the opened dedicated Chrome window.`);
-  console.error('  2) Signal readiness by creating this file (or say "ready"):');
-  console.error(`       ${readyPath}`);
-  console.error(`     To abort the whole session, create: ${abortPath}  (or press Ctrl+C).`);
-  console.error("  Polling… (read-only — nothing is highlighted or clicked)");
 }
 
 /**
@@ -214,10 +220,8 @@ async function main(): Promise<void> {
 
   const cfg = loadConfig();
   const runId = mintRunId();
-  const readyPath = probeSentinelPathFor(cfg.statusFile);
   const abortPath = probeAbortPathFor(cfg.statusFile);
-  mkdirSync(dirname(readyPath), { recursive: true });
-  removeSentinel(readyPath);
+  mkdirSync(dirname(abortPath), { recursive: true });
   removeSentinel(abortPath);
 
   const abortFlag = { v: false };
@@ -228,34 +232,34 @@ async function main(): Promise<void> {
   process.on("SIGTERM", onSigint);
 
   const ctx: BrowserContext = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
-  const activePage = (): Page => {
-    const list = ctx.pages();
-    return (list[list.length - 1] ?? list[0]) as Page;
-  };
-  const entry = (ctx.pages()[0] ?? (await ctx.newPage())) as Page;
+  // The confirmation surface, and the entry page captured before it existed. The driver reads the NEWEST tab,
+  // so it is handed a context the surface is filtered out of — unfiltered, every measurement would land on the
+  // blank SellerOps page and be reported as a confident reading of nothing.
+  const confirmHost = await attachOperatorConfirmTab(ctx as unknown as ConfirmHostContext, {
+    aborted: () => abortFlag.v || existsSync(abortPath),
+    abortPath,
+    timeoutMs: SCREEN_WAIT_TIMEOUT_MS,
+  });
+  const entry = confirmHost.entryPage as unknown as Page;
   await entry.goto(url, { waitUntil: "domcontentloaded" }).catch(() => undefined);
 
-  const driver = new NaverIssuanceDriver(entry, { context: ctx });
+  const driver = new NaverIssuanceDriver(entry, { context: confirmHost.contextLike as unknown as BrowserContext });
 
+  /** The targets the session announced for the screen now in flight, so its ask names them. */
+  let screenTargets: readonly IssuanceHighlightTarget[] = [];
   const deps: SelectorProbeDeps = {
     probeSurface: async () => {
       const p = await driver.probeSurface();
       return { pageCategory: p.pageCategory };
     },
     probeTarget: (target) => driver.probeTargetMatch(target),
-    waitForScreenSentinel: async (_screen) => {
-      removeSentinel(readyPath);
-      const maxTicks = Math.ceil(SCREEN_WAIT_TIMEOUT_MS / SENTINEL_POLL_MS);
-      for (let i = 0; i < maxTicks; i++) {
-        if (abortFlag.v || existsSync(abortPath)) return "abort";
-        if (existsSync(readyPath)) return "ready";
-        await sleep(SENTINEL_POLL_MS);
-      }
-      return "timeout";
+    // A FRESH confirmation per screen. A press held over from the previous one cannot advance this one.
+    waitForScreenSentinel: async (screen) => (await confirmHost.confirm(screenAskFor(screen, screenTargets))).signal,
+    announceScreen: (s, targets) => {
+      screenTargets = targets;
+      confirmHost.announce(screenAskFor(s, targets));
     },
-    announceScreen: (s, targets) => printScreenInstructions(s, targets, readyPath, abortPath),
   };
-  void activePage; // the driver reads the newest tab itself (context injected)
 
   try {
     const result = await runSelectorProbeSession(deps);
@@ -286,7 +290,6 @@ async function main(): Promise<void> {
       nonUniqueCalibrated: result.nonUniqueCalibrated,
     });
   } finally {
-    removeSentinel(readyPath);
     removeSentinel(abortPath);
     process.removeListener("SIGINT", onSigint);
     process.removeListener("SIGTERM", onSigint);

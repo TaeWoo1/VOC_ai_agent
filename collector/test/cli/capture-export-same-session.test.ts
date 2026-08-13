@@ -111,36 +111,35 @@ describe("capture-export-same-session — gated + sentinel-file continuation", (
     expect(/waitForEnter/.test(code)).toBe(false);
   });
 
-  it("derives the sentinel path from the shared helper (single source of truth)", () => {
-    expect(/from\s+["']\.\/probe-sentinel["']/.test(code)).toBe(true);
-    expect(/sentinelPathFor\s*\(/.test(code)).toBe(true);
+  it("**takes no readiness signal from the filesystem at all**", () => {
+    // The hand-off mode waited on a `.ready` file, and its own prompt told the operator that in Claude Code
+    // they could "just say ready and Claude creates it". What follows a confirmation HERE is a real click on a
+    // real export control, so this is the CLI that could least afford a channel a model can produce.
+    expect(/sentinelPathFor\s*\(/.test(code)).toBe(false);
+    expect(/probe-sentinel/.test(code)).toBe(false);
+    expect(/waitForSentinel\s*\(/.test(code)).toBe(false);
+    expect(/existsSync/.test(code)).toBe(false);
+    expect(/unlinkSync/.test(code)).toBe(false);
   });
 
-  it("polls for the sentinel file rather than blocking on input", () => {
-    expect(/existsSync/.test(code)).toBe(true);
-    expect(/waitForSentinel\s*\(/.test(code)).toBe(true);
+  it("waits on the shared confirmation surface instead", () => {
+    expect(/attachOperatorConfirmTab\s*\(/.test(code)).toBe(true);
+    expect(code.includes("confirmHost.confirm(CONFIRM_ASK)")).toBe(true);
   });
 
-  it("clears any stale sentinel before waiting and cleans up afterwards", () => {
-    expect(/removeSentinel\s*\(/.test(code)).toBe(true);
-    expect(/unlinkSync/.test(code)).toBe(true);
-  });
-
-  it("aborts WITHOUT reading or clicking the page when the sentinel never appears", () => {
-    expect(/sentinel-timeout/.test(code)).toBe(true);
-    // The abort path returns before the verdict/plan/capture — runExport is only in captureAndUpload.
-    const abortIdx = mainFn.indexOf("sentinel-timeout");
+  it("aborts WITHOUT reading or clicking the page when nobody presses", () => {
+    const abortIdx = mainFn.indexOf('confirmation.signal !== "ready"');
     const captureIdx = mainFn.indexOf("captureAndUpload(");
     expect(abortIdx).toBeGreaterThanOrEqual(0);
-    expect(abortIdx).toBeLessThan(captureIdx); // the timeout return precedes any capture dispatch
+    expect(abortIdx).toBeLessThan(captureIdx); // the refusal returns before any capture dispatch
   });
 
-  it("waits for the sentinel BEFORE reading the verdict/plan and dispatching capture", () => {
-    const sentinelIdx = mainFn.indexOf("waitForSentinel(");
+  it("waits for the PRESS before reading the verdict/plan and dispatching capture", () => {
+    const confirmIdx = mainFn.indexOf("confirmHost.confirm(");
     const verdictIdx = mainFn.indexOf("checkLiveSessionVerdict(");
     const captureIdx = mainFn.indexOf("captureAndUpload(");
-    expect(sentinelIdx).toBeGreaterThanOrEqual(0);
-    expect(verdictIdx).toBeGreaterThan(sentinelIdx); // no read before the human signals readiness
+    expect(confirmIdx).toBeGreaterThanOrEqual(0);
+    expect(verdictIdx).toBeGreaterThan(confirmIdx); // no read before the human confirms the screen
     expect(captureIdx).toBeGreaterThan(verdictIdx);
   });
 });
@@ -193,12 +192,12 @@ describe("capture-export-same-session — auto-read by default, sentinel opt-in"
 
   it("reaches resolveReconnectIfNeeded only AFTER a resolvable start verdict (auto-read or sentinel)", () => {
     const autoIdx = mainFn.indexOf("waitForCaptureStartState(");
-    const sentinelIdx = mainFn.indexOf("waitForSentinel(");
+    const confirmIdx = mainFn.indexOf("confirmHost.confirm(");
     const resolveIdx = mainFn.indexOf("resolveReconnectIfNeeded(");
     expect(autoIdx).toBeGreaterThanOrEqual(0);
-    expect(sentinelIdx).toBeGreaterThanOrEqual(0);
+    expect(confirmIdx).toBeGreaterThanOrEqual(0);
     expect(resolveIdx).toBeGreaterThan(autoIdx); // after the auto-read poll
-    expect(resolveIdx).toBeGreaterThan(sentinelIdx); // and after the sentinel wait
+    expect(resolveIdx).toBeGreaterThan(confirmIdx); // and after the operator's press
   });
 
   it("an auto-read timeout halts without click/capture/status write", () => {

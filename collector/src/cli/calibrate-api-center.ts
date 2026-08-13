@@ -47,6 +47,8 @@ import { loadConfig } from "../config";
 import { log } from "../log";
 import { launchNaverContext } from "../profile";
 import { approvalRequiredMessage, hasLiveRunApproval } from "./live-run-approval";
+import { OPERATOR_CONFIRM_BUTTON_LABEL, type OperatorConfirmAsk } from "./operator-confirm";
+import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
 import {
   EXTRACT_API_CENTER_CENSUS,
   observeFrom,
@@ -350,23 +352,50 @@ export function calibrationArtifactAbsPath(runId: string): string {
   return resolve(COLLECTOR_ROOT, ".calibration", `api-center-${runId}.json`);
 }
 
-/* ────────────────────────────── sentinels (multi-checkpoint) ────────────────────────────── */
+/* ────────────────────────────── the operator's per-stage checkpoint ────────────────────────────── */
 
-/** Per-stage readiness sentinel filename (cleared + re-polled every stage). */
-export const CALIBRATION_SENTINEL_FILENAME = "calibrate-api-center.ready";
-/** Per-stage SKIP sentinel filename (advances an OPTIONAL stage without a capture). */
-export const CALIBRATION_SKIP_FILENAME = "calibrate-api-center.skip";
-/** Operator abort sentinel filename (ends the session, writes the partial sanitized summary). */
+/**
+ * **There is no readiness sentinel and no skip sentinel.** Both ADVANCED a stage — `.ready` with a capture and
+ * `.skip` without one — and a file any process can `touch` cannot be evidence that a human looked at a screen.
+ * Skipping is a second ANSWER to the same ask, so it is a second button on the same verified surface rather
+ * than a file beside it (`./operator-confirm`).
+ *
+ * The abort sentinel stays: a forged abort ends a session, which is the safe direction.
+ */
 export const CALIBRATION_ABORT_FILENAME = "calibrate-api-center.abort";
 
-export function calibrationSentinelPathFor(statusFile: string): string {
-  return resolve(dirname(resolve(statusFile)), CALIBRATION_SENTINEL_FILENAME);
-}
-export function calibrationSkipPathFor(statusFile: string): string {
-  return resolve(dirname(resolve(statusFile)), CALIBRATION_SKIP_FILENAME);
-}
 export function calibrationAbortPathFor(statusFile: string): string {
   return resolve(dirname(resolve(statusFile)), CALIBRATION_ABORT_FILENAME);
+}
+
+/** The label on the second button, offered only for a stage that may honestly be skipped. */
+export const CALIBRATION_SKIP_BUTTON_LABEL = "이 단계 건너뛰기";
+
+/** One stage's ask, in the operator's own words. Built per stage so the press belongs to that stage. */
+export function stageAskFor(
+  stage: CalibrationStage,
+  targetKind: CalibrationTargetKind,
+  optional: boolean,
+): OperatorConfirmAsk {
+  return {
+    title: `CALIBRATION — ${stage}`,
+    headline: `${stage} 화면으로 직접 이동하신 뒤, 대상을 캡처하고 확인해 주세요.`,
+    lines: [
+      `대상: ${targetKind}${optional ? " (선택 단계)" : ""}`,
+      "열린 전용 Chrome 창에서 직접 이동하세요 — SellerOps는 그 창을 조작하지 않습니다.",
+      `대상 위에 마우스를 올리고 ${DEFAULT_CALIBRATION_HOTKEY_LABEL} 를 누르면 페이지에 캡처 안내가 뜹니다`,
+      "(대상 종류 · 매칭 개수 · 해석 여부만 표시되며, 값은 절대 표시되지 않습니다).",
+      "자격 증명 입력란은 위치만 캡처되고 값은 읽지 않습니다.",
+      ...(optional
+        ? [
+            "",
+            `이 단계는 선택입니다 — 캡처 없이 넘어가려면 [${CALIBRATION_SKIP_BUTTON_LABEL}] 를 누르세요.`,
+            "캡처 없이 '현재 화면 확인'만 누르면 선택 단계는 진행되지 않습니다.",
+          ]
+        : []),
+    ],
+    ...(optional ? { secondary: { label: CALIBRATION_SKIP_BUTTON_LABEL } } : {}),
+  };
 }
 
 /* ────────────────────────────── live wiring (inert on import) ────────────────────────────── */
@@ -417,30 +446,6 @@ function banner(): void {
   console.error(line);
 }
 
-function printStageInstructions(
-  stage: CalibrationStage,
-  targetKind: CalibrationTargetKind,
-  optional: boolean,
-  readyPath: string,
-  skipPath: string,
-  abortPath: string,
-): void {
-  console.error("");
-  console.error(`Calibration stage: ${stage} (target: ${targetKind}${optional ? ", optional" : ""}).`);
-  console.error(`  1) Navigate MANUALLY to the ${stage} surface in the opened dedicated Chrome window.`);
-  console.error(`  2) Hover the target and press ${DEFAULT_CALIBRATION_HOTKEY_LABEL} — an on-page toast confirms`);
-  console.error("     the capture (target kind + match count + resolved/unresolved; no value is ever shown).");
-  console.error("     A credential value field is captured by POSITION only — its value is never read.");
-  console.error('  3) Signal readiness by creating this file (or say "ready"):');
-  console.error(`       ${readyPath}`);
-  if (optional) {
-    console.error(`     This stage is OPTIONAL — to skip it WITHOUT a capture, create: ${skipPath}`);
-    console.error('       (or say "skip"). A bare "ready" without a capture will NOT advance an optional stage.');
-  }
-  console.error(`     To abort the whole session, create: ${abortPath}  (or press Ctrl+C).`);
-  console.error("  Polling…");
-}
-
 /**
  * Live entry (gated). NOT run during offline build/verify. Opens the window ONCE, keeps login across stages,
  * registers the init-script capture listener + the two exposeBinding channels BEFORE the first navigation (so
@@ -484,12 +489,8 @@ async function main(): Promise<void> {
     return;
   }
   const artifactRel = declaredArtifactRel ?? calibrationArtifactRelPath(runId);
-  const readyPath = calibrationSentinelPathFor(cfg.statusFile);
-  const skipPath = calibrationSkipPathFor(cfg.statusFile);
   const abortPath = calibrationAbortPathFor(cfg.statusFile);
-  mkdirSync(dirname(readyPath), { recursive: true });
-  removeSentinel(readyPath);
-  removeSentinel(skipPath);
+  mkdirSync(dirname(abortPath), { recursive: true });
   removeSentinel(abortPath);
 
   const abortFlag = { v: false };
@@ -500,8 +501,16 @@ async function main(): Promise<void> {
   process.on("SIGTERM", onSigint);
 
   const ctx: BrowserContext = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
+  const confirmHost = await attachOperatorConfirmTab(ctx as unknown as ConfirmHostContext, {
+    aborted: () => abortFlag.v || existsSync(abortPath),
+    abortPath,
+    timeoutMs: STAGE_WAIT_TIMEOUT_MS,
+  });
+  // The NEWEST tab, from a list the confirmation surface is filtered out of. Unfiltered this would resolve to
+  // the blank SellerOps page the moment it opened — every census read there, and the capture channel's
+  // `isActivePage` check would reject the operator's real captures as coming from an inactive tab.
   const activePage = (): Page => {
-    const list = ctx.pages();
+    const list = confirmHost.contextLike.pages() as unknown as Page[];
     return (list[list.length - 1] ?? list[0]) as Page;
   };
 
@@ -524,6 +533,8 @@ async function main(): Promise<void> {
   const entry = activePage();
   if (entry) await entry.goto(url, { waitUntil: "domcontentloaded" }).catch(() => undefined);
 
+  /** The ask for the stage now in flight, built when the session announces it. */
+  let stageAsk: OperatorConfirmAsk = stageAskFor(CALIBRATION_STAGES[0]!, "create_app", false);
   const deps: CalibrationSessionDeps = {
     ...base,
     readCensus: async () => {
@@ -534,32 +545,30 @@ async function main(): Promise<void> {
     setActiveStage: (nonce, kind) => channel.setActiveStage(nonce, kind),
     clearActiveStage: () => channel.clearActiveStage(),
     takeCaptureFor: (nonce) => channel.takeCaptureFor(nonce),
+    // A FRESH confirmation per stage; the wait polls ONLY the confirmation tab, so nothing here can race the
+    // operator's navigation of their own page. The init-script listener survives every navigation, so there is
+    // nothing to re-arm mid-wait either.
     waitForStageSentinel: async (_stage) => {
-      removeSentinel(readyPath);
-      removeSentinel(skipPath);
-      const maxTicks = Math.ceil(STAGE_WAIT_TIMEOUT_MS / SENTINEL_POLL_MS);
-      for (let i = 0; i < maxTicks; i++) {
-        // Sentinel-file-only poll — NO page.evaluate here, so nothing can race the operator's navigation. The
-        // init-script listener already survives every navigation, so there is nothing to re-arm mid-wait.
-        if (abortFlag.v || existsSync(abortPath)) return "abort";
-        if (existsSync(skipPath)) return "skip";
-        if (existsSync(readyPath)) return "ready";
-        await sleep(SENTINEL_POLL_MS);
-      }
-      return "timeout";
+      const confirmation = await confirmHost.confirm(stageAsk);
+      if (confirmation.signal !== "ready") return confirmation.signal;
+      return confirmation.choice === "secondary" ? "skip" : "ready";
     },
-    announceStage: (stage, targetKind, optional) =>
-      printStageInstructions(stage, targetKind, optional, readyPath, skipPath, abortPath),
+    announceStage: (stage, targetKind, optional) => {
+      stageAsk = stageAskFor(stage, targetKind, optional);
+      confirmHost.announce(stageAsk);
+    },
     announceCaptureRequired: (stage) => {
       console.error("");
       console.error(`Stage ${stage} is REQUIRED but no target was captured — not advancing.`);
       console.error(`Hover the target and press ${DEFAULT_CALIBRATION_HOTKEY_LABEL} (watch for the on-page toast),`);
-      console.error("then signal ready again. Polling…");
+      console.error(`then press [${OPERATOR_CONFIRM_BUTTON_LABEL}] again. Polling…`);
     },
     announceSkippable: (stage) => {
       console.error("");
       console.error(`Stage ${stage} is OPTIONAL and nothing was captured — a bare ready does not advance it.`);
-      console.error("Either capture the anchor and signal ready, or create the .skip sentinel to skip. Polling…");
+      console.error(
+        `Either capture the anchor and press [${OPERATOR_CONFIRM_BUTTON_LABEL}], or press [${CALIBRATION_SKIP_BUTTON_LABEL}]. Polling…`,
+      );
     },
   };
 
@@ -617,8 +626,6 @@ async function main(): Promise<void> {
       unresolvedCount: result.summary.unresolvedCount,
     });
   } finally {
-    removeSentinel(readyPath);
-    removeSentinel(skipPath);
     removeSentinel(abortPath);
     process.removeListener("SIGINT", onSigint);
     process.removeListener("SIGTERM", onSigint);

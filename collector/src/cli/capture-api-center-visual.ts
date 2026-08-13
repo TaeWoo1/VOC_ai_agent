@@ -34,9 +34,12 @@ import { loadConfig } from "../config";
 import { log } from "../log";
 import { launchNaverContext } from "../profile";
 import { approvalRequiredMessage, hasLiveRunApproval } from "./live-run-approval";
+import type { OperatorConfirmAsk } from "./operator-confirm";
+import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
 import { EXTRACT_API_CENTER_CENSUS, screenApiCenterUrl, type ApiCenterStructuralCensus, type ApiCenterUrlCategory } from "./observe-api-center";
 import {
   checkpointFor,
+  type VisualReconCheckpoint,
   mayScreenshot,
   sanitizeVisualSummary,
   verifyRedaction,
@@ -247,25 +250,47 @@ export function cleanupVisualArtifacts(): number {
   return removed;
 }
 
-/* ────────────────────────────── sentinels (per screen) ────────────────────────────── */
+/* ────────────────────────────── the operator's per-screen checkpoint ────────────────────────────── */
 
-export const VISUAL_READY_FILENAME = "capture-api-center-visual.ready";
-export const VISUAL_SKIP_FILENAME = "capture-api-center-visual.skip";
+/**
+ * **There is no readiness sentinel and no skip sentinel.** Both ADVANCED a checkpoint, and a file any process
+ * can `touch` cannot be evidence that a human looked at a screen — least of all here, where what follows a
+ * confirmation is a SCREENSHOT of the operator's own seller-centre page. Skipping is a second ANSWER to the
+ * same ask, so it is a second button on the same verified surface (`./operator-confirm`).
+ *
+ * The abort sentinel stays: a forged abort ends a session, which is the safe direction.
+ */
 export const VISUAL_ABORT_FILENAME = "capture-api-center-visual.abort";
 
-export function visualReadyPathFor(statusFile: string): string {
-  return resolve(dirname(resolve(statusFile)), VISUAL_READY_FILENAME);
-}
-export function visualSkipPathFor(statusFile: string): string {
-  return resolve(dirname(resolve(statusFile)), VISUAL_SKIP_FILENAME);
-}
 export function visualAbortPathFor(statusFile: string): string {
   return resolve(dirname(resolve(statusFile)), VISUAL_ABORT_FILENAME);
 }
 
+/** The label on the second button — every visual checkpoint may honestly be skipped. */
+export const VISUAL_SKIP_BUTTON_LABEL = "이 화면 건너뛰기";
+
+/** One checkpoint's ask, in the operator's own words. */
+export function visualScreenAskFor(screen: VisualReconScreen, checkpoint: VisualReconCheckpoint): OperatorConfirmAsk {
+  return {
+    title: `VISUAL RECON — ${screen}`,
+    headline:
+      checkpoint.navigation === "scroll_same_page"
+        ? "같은 페이지입니다 — 이동하지 마시고, 이 구간이 보이도록 직접 스크롤한 뒤 확인해 주세요."
+        : "이 페이지로 직접 이동하신 뒤 확인해 주세요.",
+    lines: [
+      `page: ${checkpoint.page}, ${checkpoint.kind}`,
+      "열린 전용 Chrome 창에서 직접 이동/스크롤하세요 — SellerOps는 그 창을 조작하지 않습니다.",
+      "확인을 누르시면 민감한 영역을 모두 가리고, 가려졌는지 검증한 뒤 촬영하고, 다시 걷어냅니다.",
+      "검증되지 않으면 촬영하지 않습니다.",
+      "",
+      `이 화면을 건너뛰려면 [${VISUAL_SKIP_BUTTON_LABEL}] 를 누르세요.`,
+    ],
+    secondary: { label: VISUAL_SKIP_BUTTON_LABEL },
+  };
+}
+
 /* ────────────────────────────── live wiring (inert on import) ────────────────────────────── */
 
-const SENTINEL_POLL_MS = 1_000;
 const SCREEN_WAIT_TIMEOUT_MS = 20 * 60_000;
 const HYDRATION_TIMEOUT_MS = 15_000;
 
@@ -395,13 +420,9 @@ async function main(): Promise<void> {
   const cfg = loadConfig();
   const runId = mintRunId();
 
-  const readyPath = visualReadyPathFor(cfg.statusFile);
-  const skipPath = visualSkipPathFor(cfg.statusFile);
   const abortPath = visualAbortPathFor(cfg.statusFile);
-  mkdirSync(dirname(readyPath), { recursive: true });
+  mkdirSync(dirname(abortPath), { recursive: true });
   mkdirSync(visualArtifactDirAbs(), { recursive: true });
-  removeSentinel(readyPath);
-  removeSentinel(skipPath);
   removeSentinel(abortPath);
 
   const abortFlag = { v: false };
@@ -412,8 +433,15 @@ async function main(): Promise<void> {
   process.on("SIGTERM", onSigint);
 
   const ctx: BrowserContext = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
+  const confirmHost = await attachOperatorConfirmTab(ctx as unknown as ConfirmHostContext, {
+    aborted: () => abortFlag.v || existsSync(abortPath),
+    abortPath,
+    timeoutMs: SCREEN_WAIT_TIMEOUT_MS,
+  });
+  // The NEWEST tab, from a list the confirmation surface is filtered out of. Unfiltered, this run would redact,
+  // verify and SCREENSHOT the blank SellerOps page instead of the screen the operator prepared.
   const activePage = (): Page => {
-    const list = ctx.pages();
+    const list = confirmHost.contextLike.pages() as unknown as Page[];
     return (list[list.length - 1] ?? list[0]) as Page;
   };
 
@@ -428,17 +456,11 @@ async function main(): Promise<void> {
 
   const deps: VisualReconSessionDeps = {
     urlCategory,
-    waitForScreenSentinel: async (_screen) => {
-      removeSentinel(readyPath);
-      removeSentinel(skipPath);
-      const maxTicks = Math.ceil(SCREEN_WAIT_TIMEOUT_MS / SENTINEL_POLL_MS);
-      for (let i = 0; i < maxTicks; i++) {
-        if (abortFlag.v || existsSync(abortPath)) return "abort";
-        if (existsSync(skipPath)) return "skip";
-        if (existsSync(readyPath)) return "ready";
-        await sleep(SENTINEL_POLL_MS);
-      }
-      return "timeout";
+    // A FRESH confirmation per checkpoint. A press held over from the previous screen cannot advance this one.
+    waitForScreenSentinel: async (screen) => {
+      const confirmation = await confirmHost.confirm(visualScreenAskFor(screen, checkpointFor(screen)));
+      if (confirmation.signal !== "ready") return confirmation.signal;
+      return confirmation.choice === "secondary" ? "skip" : "ready";
     },
     applyRedactionAllFrames: async () => {
       const page = activePage();
@@ -491,22 +513,7 @@ async function main(): Promise<void> {
       if (!isSafeVisualArtifactPath(out)) return;
       writeFileSync(out, JSON.stringify(summary, null, 2), "utf8");
     },
-    announceScreen: (scr) => {
-      const cp = checkpointFor(scr);
-      console.error("");
-      console.error(`Visual-recon checkpoint: ${scr}  (page: ${cp.page}, ${cp.kind}).`);
-      if (cp.navigation === "scroll_same_page") {
-        console.error("  1) This is the SAME page as the previous checkpoint — do NOT navigate away; just SCROLL");
-        console.error("     MANUALLY so this section is in view.");
-      } else {
-        console.error("  1) Navigate MANUALLY to this page in the opened dedicated Chrome window.");
-      }
-      console.error('  2) When the section is in view, signal ready by creating this file (or say "ready"):');
-      console.error(`       ${readyPath}`);
-      console.error(`     To SKIP this checkpoint: create ${skipPath} (or say "skip").`);
-      console.error(`     To ABORT the session: create ${abortPath} (or press Ctrl+C).`);
-      console.error("  The tool redacts every sensitive region, VERIFIES coverage, captures, then clears the overlays.");
-    },
+    announceScreen: (scr) => confirmHost.announce(visualScreenAskFor(scr, checkpointFor(scr))),
     announceHalt: (scr, verdict) => {
       console.error("");
       console.error(`Screen ${scr}: redaction did NOT fully verify — NO screenshot was taken (fail-closed).`);
@@ -550,8 +557,6 @@ async function main(): Promise<void> {
       screensSkipped: result.screensSkipped,
     });
   } finally {
-    removeSentinel(readyPath);
-    removeSentinel(skipPath);
     removeSentinel(abortPath);
     process.removeListener("SIGINT", onSigint);
     process.removeListener("SIGTERM", onSigint);

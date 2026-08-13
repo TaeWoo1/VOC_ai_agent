@@ -49,8 +49,8 @@ class FakePage implements ConfirmHostPage {
     this.raised += 1;
   }
   /** A real human press: it carries whatever token is armed RIGHT NOW, and it is trusted. */
-  press(): void {
-    if (this.armedToken !== null) this.event = { token: this.armedToken, trusted: true };
+  press(choice: "primary" | "secondary" = "primary"): void {
+    if (this.armedToken !== null) this.event = { token: this.armedToken, trusted: true, choice };
   }
   /** What a dispatched `click()` produces instead — the same token, `isTrusted` false. */
   pressUntrusted(): void {
@@ -157,7 +157,7 @@ describe("a checkpoint advances on a press and on nothing else", () => {
     // knows the token it has to carry.
     for (let i = 0; i < 2_000 && confirmTab.armed() === null; i++) await new Promise<void>((r) => setTimeout(r, 1));
     confirmTab.press();
-    expect(await waiting).toEqual({ signal: "ready", provenance: OPERATOR_UI_CONFIRMED });
+    expect(await waiting).toEqual({ signal: "ready", provenance: OPERATOR_UI_CONFIRMED, choice: "primary" });
   });
 
   it("**nobody presses anything and the wait times out** — it never falls through", async () => {
@@ -206,6 +206,42 @@ describe("a checkpoint advances on a press and on nothing else", () => {
     const { host, confirmTab } = await hostOn(ctx, { aborted: () => true });
     expect(await host.confirm(ASK)).toEqual({ signal: "abort", provenance: null });
     expect(confirmTab.scripts).toEqual([]);
+  });
+});
+
+describe("an ask with a SECOND answer", () => {
+  const SKIPPABLE = { ...ASK, secondary: { label: "이 단계 건너뛰기" } };
+
+  it("renders the second button only when the ask offers one", async () => {
+    const ctx = new FakeContext([new FakePage()]);
+    const { host, confirmTab } = await hostOn(ctx);
+    await host.confirm(ASK);
+    expect(confirmTab.scripts.find((s) => s.includes("(arm)"))).toContain('var SECONDARY = null');
+    await host.confirm(SKIPPABLE);
+    const armed = confirmTab.scripts.filter((s) => s.includes("(arm)"));
+    expect(armed[armed.length - 1]).toContain("이 단계 건너뛰기");
+  });
+
+  it("**the second press is verified exactly like the first, and reports itself as the second**", async () => {
+    // Skipping an optional stage is still an ADVANCE, so it goes through the same token + trusted-press check
+    // rather than through a file beside it. What differs is only WHICH answer it is.
+    const ctx = new FakeContext([new FakePage()]);
+    const { host, confirmTab } = await hostOn(ctx, { timeoutMs: 5_000 });
+    const waiting = host.confirm(SKIPPABLE);
+    for (let i = 0; i < 2_000 && confirmTab.armed() === null; i++) await new Promise<void>((r) => setTimeout(r, 1));
+    confirmTab.press("secondary");
+    expect(await waiting).toEqual({ signal: "ready", provenance: OPERATOR_UI_CONFIRMED, choice: "secondary" });
+  });
+
+  it("an event with no choice at all reads as the PRIMARY answer, never the second", async () => {
+    // Fail toward the narrower answer: a surface with one button produces no `choice`, and an unrecognised
+    // value must not become "skip this stage".
+    const ctx = new FakeContext([new FakePage()]);
+    const { host, confirmTab } = await hostOn(ctx, { timeoutMs: 5_000 });
+    const waiting = host.confirm(SKIPPABLE);
+    for (let i = 0; i < 2_000 && confirmTab.armed() === null; i++) await new Promise<void>((r) => setTimeout(r, 1));
+    confirmTab.press("bogus" as "primary");
+    expect((await waiting)).toMatchObject({ signal: "ready", choice: "primary" });
   });
 });
 

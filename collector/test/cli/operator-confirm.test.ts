@@ -141,7 +141,7 @@ describe("awaitOperatorConfirmation", () => {
   it("a trusted press returns ready, and the provenance names the channel", async () => {
     const { seams } = fakeSurface({ press: "trusted", afterTicks: 3 });
     const r = await awaitOperatorConfirmation(seams, ASK, opts);
-    expect(r).toEqual({ signal: "ready", provenance: OPERATOR_UI_CONFIRMED });
+    expect(r).toEqual({ signal: "ready", provenance: OPERATOR_UI_CONFIRMED, choice: "primary" });
   });
 
   it("no press at all times out — it never falls through to ready", async () => {

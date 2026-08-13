@@ -6,6 +6,9 @@
  * unvalidated (calibration-pending) instrument.
  */
 import { describe, it, expect, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   EXTRACT_API_CENTER_CENSUS,
   LOGIN_WAIT_TIMEOUT_MS,
@@ -17,7 +20,8 @@ import {
   observeApiCenterGuidedTutorial,
   observeApiCenterManualNavigation,
   observeFrom,
-  observeSentinelPathFor,
+  OBSERVE_LOGIN_ASK,
+  OBSERVE_NAVIGATION_ASK,
   resolveUrlCategory,
   screenApiCenterUrl,
   toSignals,
@@ -542,9 +546,37 @@ describe("checkpoint timeouts — the app_detail navigation walk is not rushed",
   });
 });
 
-describe("observeSentinelPathFor", () => {
-  it("resolves the sentinel next to the status file", () => {
-    expect(observeSentinelPathFor("/x/.status/naver.json")).toBe("/x/.status/observe-api-center.ready");
+describe("the two tutorial checkpoints are verified presses, not a file", () => {
+  const SRC = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../../src/cli/observe-api-center.ts"), "utf8");
+
+  it("**no readiness sentinel survives** — and the instruction that named one is gone", () => {
+    // The printed instruction used to say, in as many words, `in Claude Code, just say "ready"`. That is the
+    // channel that failed on 2026-08-13: the assistant created the file on a chat line nobody wrote.
+    //
+    // Comments are stripped first: the doc block above the checkpoints NAMES the file it replaced, deliberately,
+    // and a bare sweep over the whole source would read that history as the defect it records.
+    const code = SRC.split("\n")
+      .filter((l) => {
+        const t = l.trimStart();
+        return !t.startsWith("*") && !t.startsWith("/*") && !t.startsWith("//");
+      })
+      .join("\n");
+    expect(code).not.toContain("observe-api-center.ready");
+    expect(code).not.toContain('just say "ready"');
+    expect(code).not.toContain("waitForSentinel");
+  });
+
+  it("the two asks are DIFFERENT — the navigation checkpoint is not the login one read twice", () => {
+    expect(OBSERVE_LOGIN_ASK.title).not.toBe(OBSERVE_NAVIGATION_ASK.title);
+    expect(OBSERVE_LOGIN_ASK.headline).not.toBe(OBSERVE_NAVIGATION_ASK.headline);
+  });
+
+  it("both asks still say what the tool will not do", () => {
+    for (const ask of [OBSERVE_LOGIN_ASK, OBSERVE_NAVIGATION_ASK]) {
+      const all = [ask.headline, ...ask.lines].join("\n");
+      expect(all).toContain("Secret");
+      expect(all).toContain("직접");
+    }
   });
 });
 

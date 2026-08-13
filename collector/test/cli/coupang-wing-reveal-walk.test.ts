@@ -188,7 +188,7 @@ const noteText = (notes: string[]): string => notes.join("\n");
 /* ────────────────────────────── the operator checkpoints ────────────────────────────── */
 
 describe("makeRevealIo — a checkpoint advances on a verified press and on nothing else", () => {
-  const CONFIRMED = { signal: "ready", provenance: OPERATOR_UI_CONFIRMED } as const;
+  const CONFIRMED = { signal: "ready", provenance: OPERATOR_UI_CONFIRMED, choice: "primary" } as const;
 
   it("**the two checkpoints are two different asks** — the second is not the first read twice", () => {
     // The mapping from checkpoint to ask is the one place a walk can silently skip a human step. When these were

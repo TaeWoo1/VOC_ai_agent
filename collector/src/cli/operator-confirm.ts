@@ -58,9 +58,20 @@ export type OperatorConfirmProvenance = typeof OPERATOR_UI_CONFIRMED;
  * provenance because nothing confirmed them.
  */
 export type OperatorConfirmation =
-  | { readonly signal: "ready"; readonly provenance: OperatorConfirmProvenance }
+  | { readonly signal: "ready"; readonly provenance: OperatorConfirmProvenance; readonly choice: OperatorConfirmChoice }
   | { readonly signal: "abort"; readonly provenance: null }
   | { readonly signal: "timeout"; readonly provenance: null };
+
+/**
+ * WHICH button the operator pressed.
+ *
+ * Some runs offer a second answer that is not "the screen is ready" — the calibration stages offer "skip this
+ * optional stage". That is still an ADVANCE, so it needs the same trusted channel rather than a file beside it;
+ * it is a different answer to the same ask, not a different ask.
+ *
+ * `primary` is what a surface with one button always produces, so nothing that ignores this field can be wrong.
+ */
+export type OperatorConfirmChoice = "primary" | "secondary";
 
 /** Every way a poll can end. Only `CONFIRMED` advances; the rest are recorded and waited through. */
 export const OPERATOR_CONFIRM_VERDICTS = [
@@ -84,6 +95,8 @@ export const OPERATOR_CONFIRM_STATE_KEY = "__sellerOpsOperatorConfirm";
 export const OPERATOR_CONFIRM_ROOT_ID = "sellerops-operator-confirm-root";
 /** The button's own id — named in the copy so an operator can be told exactly what to look for. */
 export const OPERATOR_CONFIRM_BUTTON_ID = "sellerops-operator-confirm-button";
+/** The SECOND button's id, present only when the ask offers a second answer. */
+export const OPERATOR_CONFIRM_SECONDARY_BUTTON_ID = "sellerops-operator-confirm-secondary";
 /** The button's label. The operator is told this string and nothing else advances the run. */
 export const OPERATOR_CONFIRM_BUTTON_LABEL = "현재 화면 확인";
 /** The confirmation tab's title, so it is findable among the seller's own tabs. */
@@ -113,6 +126,12 @@ export interface OperatorConfirmAsk {
   readonly headline: string;
   /** The detail lines, already sanitized (this module renders them verbatim as text nodes). */
   readonly lines: readonly string[];
+  /**
+   * An optional SECOND answer, rendered as a second button. Present only where the run genuinely has two
+   * operator-decidable outcomes; its press is verified exactly like the first one and reports
+   * {@link OperatorConfirmChoice} `secondary`.
+   */
+  readonly secondary?: { readonly label: string };
 }
 
 /**
@@ -174,33 +193,46 @@ export function buildOperatorConfirmArmScript(ask: OperatorConfirmAsk & { readon
       "이 탭은 SellerOps 전용 화면입니다 — 여기서 다른 주소로 이동하지 마세요. 쿠팡(윙)은 옆 탭에서 진행하시면 됩니다.",
     "margin:20px 0 10px;color:#7d8590;font-size:13px"
   );
-  var btn = d.createElement("button");
-  btn.id = ${JSON.stringify(OPERATOR_CONFIRM_BUTTON_ID)};
-  btn.type = "button";
-  btn.textContent = ${JSON.stringify(OPERATOR_CONFIRM_BUTTON_LABEL)};
-  btn.style.cssText =
-    "font:600 16px/1 -apple-system,BlinkMacSystemFont,sans-serif;padding:14px 22px;border-radius:8px;" +
-    "border:1px solid #2f81f7;background:#1f6feb;color:#fff;cursor:pointer";
-  btn.addEventListener(
-    "click",
-    function (ev) {
-      /* isTrusted is false for any dispatched or programmatic click. A synthesised press is refused HERE as
-         well as host-side, so the page never even holds a record that a verifier would have to reject. */
-      if (!ev || ev.isTrusted !== true) {
-        note.textContent = "직접 누른 것이 아닌 신호는 무시됩니다. 버튼을 눌러 주세요.";
-        return;
-      }
-      if (st.armed !== TOKEN) return;
-      st.event = { token: TOKEN, trusted: true };
-      st.armed = null;
-      btn.disabled = true;
-      btn.style.opacity = "0.55";
-      btn.style.cursor = "default";
-      btn.textContent = "확인됨 — 다음 단계를 준비합니다";
-    },
-    false
-  );
-  root.appendChild(btn);
+  var SECONDARY = ${JSON.stringify(ask.secondary?.label ?? null)};
+  var buttons = [];
+  var mkButton = function (id, label, choice, primary) {
+    var btn = d.createElement("button");
+    btn.id = id;
+    btn.type = "button";
+    btn.textContent = label;
+    btn.style.cssText =
+      "font:600 16px/1 -apple-system,BlinkMacSystemFont,sans-serif;padding:14px 22px;border-radius:8px;" +
+      "margin-right:10px;cursor:pointer;" +
+      (primary
+        ? "border:1px solid #2f81f7;background:#1f6feb;color:#fff"
+        : "border:1px solid #444c56;background:transparent;color:#adbac7");
+    btn.addEventListener(
+      "click",
+      function (ev) {
+        /* isTrusted is false for any dispatched or programmatic click. A synthesised press is refused HERE as
+           well as host-side, so the page never even holds a record that a verifier would have to reject. */
+        if (!ev || ev.isTrusted !== true) {
+          note.textContent = "직접 누른 것이 아닌 신호는 무시됩니다. 버튼을 눌러 주세요.";
+          return;
+        }
+        if (st.armed !== TOKEN) return;
+        st.event = { token: TOKEN, trusted: true, choice: choice };
+        st.armed = null;
+        for (var b = 0; b < buttons.length; b++) {
+          buttons[b].disabled = true;
+          buttons[b].style.opacity = "0.55";
+          buttons[b].style.cursor = "default";
+        }
+        btn.textContent = "확인됨 — 다음 단계를 준비합니다";
+      },
+      false
+    );
+    buttons.push(btn);
+    root.appendChild(btn);
+    return btn;
+  };
+  mkButton(${JSON.stringify(OPERATOR_CONFIRM_BUTTON_ID)}, ${JSON.stringify(OPERATOR_CONFIRM_BUTTON_LABEL)}, "primary", true);
+  if (SECONDARY) mkButton(${JSON.stringify(OPERATOR_CONFIRM_SECONDARY_BUTTON_ID)}, SECONDARY, "secondary", false);
   return true;
 })()`;
 }
@@ -210,7 +242,7 @@ export const OPERATOR_CONFIRM_READ_SCRIPT = `(function () {
   /* sellerops-operator-confirm (read) */
   var st = window[${JSON.stringify(OPERATOR_CONFIRM_STATE_KEY)}];
   if (!st || !st.event) return null;
-  return { token: st.event.token, trusted: st.event.trusted === true };
+  return { token: st.event.token, trusted: st.event.trusted === true, choice: st.event.choice };
 })()`;
 
 /** Drop a refused event so the next poll is not the same refusal again. Leaves the armed token in place. */
@@ -229,6 +261,15 @@ export const OPERATOR_CONFIRM_CLEAR_SCRIPT = `(function () {
  * otherwise be comparing against a value the page could match by accident — so an unusable expectation refuses
  * everything instead of accepting something.
  */
+/**
+ * WHICH answer a verified event carries. Anything that is not exactly `"secondary"` reads as `primary` — the
+ * default is the answer every single-button surface produces, so an unrecognised value can only ever under-claim.
+ */
+export function operatorConfirmChoiceOf(raw: unknown): OperatorConfirmChoice {
+  const choice = (raw as { choice?: unknown } | null)?.choice;
+  return choice === "secondary" ? "secondary" : "primary";
+}
+
 export function verifyOperatorConfirmEvent(raw: unknown, expectedToken: string): OperatorConfirmVerdict {
   if (!isOperatorConfirmToken(expectedToken)) return "MALFORMED";
   if (raw === null || raw === undefined) return "NO_EVENT";
@@ -334,7 +375,7 @@ export async function awaitOperatorConfirmation(
     const verdict = verifyOperatorConfirmEvent(raw, opts.token);
     if (verdict === "CONFIRMED") {
       seams.onVerdict?.(verdict);
-      return { signal: "ready", provenance: OPERATOR_UI_CONFIRMED };
+      return { signal: "ready", provenance: OPERATOR_UI_CONFIRMED, choice: operatorConfirmChoiceOf(raw) };
     }
     if (verdict !== "NO_EVENT") {
       seams.onVerdict?.(verdict);

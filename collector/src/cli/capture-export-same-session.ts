@@ -31,8 +31,7 @@
  *
  * LIVE-ONLY — refuses to act without the explicit per-run approval flag.
  */
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import type { BrowserContext, Page } from "playwright";
 import { loadConfig, type CollectorConfig } from "../config";
 import { log } from "../log";
@@ -86,12 +85,12 @@ import { login, resolveChannelId, uploadReviewFile, UploadError } from "../uploa
 import { waitForCaptureStartState } from "./capture-start-state";
 import { approvalRequiredMessage, hasLiveRunApproval, isClassifyOnly } from "./live-run-approval";
 import { decideCaptureGate, type CaptureGateDecision } from "./same-session";
-import { sentinelPathFor } from "./probe-sentinel";
+import type { OperatorConfirmAsk } from "./operator-confirm";
+import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
 
 // The human may need to clear 2FA/CAPTCHA and the Commerce account/store flow; give
 // them plenty of time, but never wait forever.
 const CONFIRM_TIMEOUT_MS = 10 * 60_000;
-const SENTINEL_POLL_INTERVAL_MS = 750;
 // Auto-read default: re-settle + re-read the verdict on this cadence until a resolvable
 // start state (LOGGED_IN / RECONNECT_REQUIRED) appears or the timeout elapses.
 const START_POLL_INTERVAL_MS = 1_500;
@@ -130,21 +129,28 @@ const AUTO_READ_PROMPT = [
   "waited through until they clear or the timeout halts the run. (Ctrl-C to abort.)",
 ].join("\n");
 
-/** Prompt shown after the browser opens. The exact sentinel path is printed below it. */
-const CONFIRM_PROMPT = [
-  "",
-  "A browser window is open on NAVER. In that SAME window:",
-  "  1) Complete the NAVER-ID login (and any 2FA/CAPTCHA) yourself.",
-  "  2) Select the account / store and enter the SmartStore Center review-management",
-  "     / export page, with the export controls visibly loaded.",
-  "  3) Leave the browser OPEN.",
-  "",
-  "Then signal readiness by creating the sentinel file shown below (in Claude Code,",
-  "just say \"ready\" and Claude creates it). The collector is polling for it and will",
-  "then verify the session + export layout and, ONLY for a single unambiguous sync",
-  "control, click it ONCE, capture the download, and upload it to the LOCAL dev",
-  "backend. If anything is ambiguous it halts WITHOUT clicking. (Ctrl-C to abort.)",
-].join("\n");
+/**
+ * What the operator is asked to do, and confirm, in the opt-in hand-off mode.
+ *
+ * It used to end with "just say \"ready\" and Claude creates it" — the channel that failed on 2026-08-13, and
+ * the one this run could least afford: what follows a confirmation here is a real click on a real export control.
+ */
+const CONFIRM_ASK: OperatorConfirmAsk = {
+  title: "NAVER 내보내기 캡처",
+  headline: "내보내기 화면에 직접 도착한 뒤 확인해 주세요 — 확인 뒤에 실제 클릭이 일어납니다.",
+  lines: [
+    "A browser window is open on NAVER. In that SAME window:",
+    "  1) Complete the NAVER-ID login (and any 2FA/CAPTCHA) yourself.",
+    "  2) Select the account / store and enter the SmartStore Center review-management",
+    "     / export page, with the export controls visibly loaded.",
+    "  3) Leave the browser OPEN.",
+    "",
+    "Then press [현재 화면 확인] in the SellerOps confirmation tab — nothing else advances this run. It will",
+    "then verify the session + export layout and, ONLY for a single unambiguous sync",
+    "control, click it ONCE, capture the download, and upload it to the LOCAL dev",
+    "backend. If anything is ambiguous it halts WITHOUT clicking.",
+  ],
+};
 
 function banner(): void {
   const line = "─".repeat(64);
@@ -255,30 +261,6 @@ function diagnoseHaltReport(
   });
 }
 
-/** Best-effort: remove the sentinel if present. Used at startup (clear stale) and cleanup. */
-function removeSentinel(path: string): void {
-  try {
-    if (existsSync(path)) unlinkSync(path);
-  } catch {
-    /* best-effort — a leftover is cleared by the next run's startup unlink anyway */
-  }
-}
-
-/**
- * Poll for the sentinel file up to `timeoutMs`. Returns true once it appears, false
- * on timeout. Bounded by a fixed iteration count (no wall-clock read). The caller
- * clears any stale sentinel BEFORE calling this, so a hit only ever reflects a
- * post-startup creation.
- */
-async function waitForSentinel(path: string, timeoutMs: number, intervalMs: number): Promise<boolean> {
-  const maxChecks = Math.max(1, Math.ceil(timeoutMs / intervalMs));
-  for (let i = 0; i < maxChecks; i += 1) {
-    if (existsSync(path)) return true;
-    await sleep(intervalMs);
-  }
-  return existsSync(path);
-}
-
 /**
  * Past the gate (`LOGGED_IN` + single sync control): trigger the ONE guarded capture and,
  * on a real CAPTURED file, upload it through the existing offline-core client. This is the
@@ -358,14 +340,14 @@ async function main(): Promise<void> {
     !args.includes("--no-sentinel") &&
     !args.includes("--auto-read-after-hydration");
 
-  // Single source of truth for the continuation file; clear any stale sentinel BEFORE
-  // waiting so a leftover from a crashed run can never auto-proceed.
-  const sentinelPath = sentinelPathFor(cfg.statusFile);
-  mkdirSync(dirname(sentinelPath), { recursive: true });
-  removeSentinel(sentinelPath);
-
   const ctx: BrowserContext = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
-  const page = (ctx.pages()[0] ?? (await ctx.newPage())) as unknown as PwPage;
+  // The confirmation surface is a SellerOps-owned tab in the SAME window. `entryPage` is the operator's own
+  // page, captured before that tab existed — this run reads that page and never the surface.
+  const confirmHost = await attachOperatorConfirmTab(ctx as unknown as ConfirmHostContext, {
+    aborted: () => false,
+    timeoutMs: CONFIRM_TIMEOUT_MS,
+  });
+  const page = confirmHost.entryPage as unknown as PwPage;
   try {
     // 1) Open the review route — this typically redirects to login / Commerce select.
     await page.goto(cfg.naverReviewUrl, { waitUntil: "domcontentloaded" });
@@ -374,17 +356,14 @@ async function main(): Promise<void> {
     //    logs in / clears 2FA manually; how we then detect readiness depends on the mode.
     let verdict: SessionVerdict;
     if (sentinelMode) {
-      // Legacy opt-in: hand off to the human and wait for the sentinel file (not stdin).
-      console.error(CONFIRM_PROMPT);
-      console.error("");
-      console.error(`  Sentinel file (create this when ready):`);
-      console.error(`    ${sentinelPath}`);
-      console.error("");
-      const ready = await waitForSentinel(sentinelPath, CONFIRM_TIMEOUT_MS, SENTINEL_POLL_INTERVAL_MS);
-      if (!ready) {
+      // Opt-in hand-off: the operator says the window is theirs to read, on the one channel that a
+      // language model cannot produce.
+      confirmHost.announce(CONFIRM_ASK);
+      const confirmation = await confirmHost.confirm(CONFIRM_ASK);
+      if (confirmation.signal !== "ready") {
         // Never act on a half-loaded page on a timeout — abort cleanly without reading or clicking.
-        console.error("No sentinel within the timeout; aborting without reading the page.");
-        log("capture.aborted", { reason: "sentinel-timeout" });
+        console.error("No confirmation press — aborting without reading the page.");
+        log("capture.aborted", { reason: confirmation.signal });
         return;
       }
       // Read the page AS THE HUMAN LEFT IT (no re-navigation), with a bounded hydrate first.
@@ -860,7 +839,6 @@ async function main(): Promise<void> {
 
     await captureAndUpload(page, cfg, now);
   } finally {
-    removeSentinel(sentinelPath);
     await ctx.close();
   }
 }

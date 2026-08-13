@@ -34,7 +34,8 @@ import { loadConfig } from "../config";
 import { log } from "../log";
 import { launchNaverContext } from "../profile";
 import { approvalRequiredMessage, hasLiveRunApproval } from "./live-run-approval";
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
+import type { OperatorConfirmAsk } from "./operator-confirm";
+import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -223,13 +224,34 @@ export const WAIT_FOR_MANUAL_LOGIN_FLAG = "--wait-for-manual-login";
 /** Opt-in flag: after the initial observation, wait for the seller to MANUALLY navigate deeper, then re-observe. */
 export const WAIT_FOR_MANUAL_NAVIGATION_FLAG = "--wait-for-manual-navigation";
 
-/** Fixed sentinel filename (one run at a time). Distinct from probe-same-session's. */
-export const OBSERVE_SENTINEL_FILENAME = "observe-api-center.ready";
+/**
+ * **There is no readiness sentinel.** Both tutorial checkpoints advanced on `observe-api-center.ready`, and the
+ * instruction printed beside it said, in as many words, `in Claude Code, just say "ready"` — the channel that
+ * failed on 2026-08-13. Each checkpoint is now a verified press on the SellerOps confirmation surface
+ * (`./operator-confirm`).
+ */
+export const OBSERVE_LOGIN_ASK: OperatorConfirmAsk = {
+  title: "API CENTER — 로그인",
+  headline: "열린 창에서 직접 로그인하신 뒤 확인해 주세요.",
+  lines: [
+    "이 페이지는 로그인 화면으로 보입니다 (전용 프로필이 로그인되어 있지 않습니다).",
+    "로그인은 판매자님이 직접 하십니다 — SellerOps는 입력·클릭·제출·자동완성을 하지 않고,",
+    "ID / 비밀번호 / Client ID / Secret 를 읽지도 않습니다.",
+    "로그인 후 API 센터 화면에 도착하시면 확인을 눌러 주세요 — SellerOps는 그때 페이지 '분류'만 다시 읽습니다.",
+  ],
+};
 
-/** Sentinel path next to the collector status file (same `.status/` dir), mirroring `probe-sentinel`. */
-export function observeSentinelPathFor(statusFile: string): string {
-  return resolve(dirname(resolve(statusFile)), OBSERVE_SENTINEL_FILENAME);
-}
+export const OBSERVE_NAVIGATION_ASK: OperatorConfirmAsk = {
+  title: "API CENTER — 다음 화면",
+  headline: "다음 단계 화면으로 직접 이동하신 뒤 확인해 주세요.",
+  lines: [
+    "열린 전용 Chrome 창에서, 같은 창에서 다음 단계로 이동하세요",
+    "(예: 애플리케이션 하나를 열어 상세 화면으로, 또는 발급된 키 화면으로).",
+    "SellerOps는 클릭·입력·제출·열기·발급·연동·복사·자동완성을 하지 않고, 어떤 값도 읽지 않습니다",
+    "(Client ID / Secret 포함).",
+    "확인을 누르시면 페이지 '분류'만 한 번 다시 읽어 다음 단계로 넘어갑니다.",
+  ],
+};
 
 /**
  * Safe transition enum across an optional manual-login wait — describes only the PAGE's login gate, not
@@ -576,53 +598,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Best-effort remove (clear stale at startup, and at cleanup). */
-function removeSentinel(path: string): void {
-  try {
-    if (existsSync(path)) unlinkSync(path);
-  } catch {
-    /* best-effort */
-  }
-}
-
-/** Poll for the sentinel up to the timeout (counter-based; no wall-clock read). */
-async function waitForSentinel(path: string, timeoutMs: number = LOGIN_WAIT_TIMEOUT_MS): Promise<boolean> {
-  const maxTicks = Math.ceil(timeoutMs / SENTINEL_POLL_MS);
-  for (let i = 0; i < maxTicks; i++) {
-    if (existsSync(path)) return true;
-    await sleep(SENTINEL_POLL_MS);
-  }
-  return existsSync(path);
-}
-
-/** Safe operator instructions for the manual-login wait — no raw URL/content, only the local file path. */
-function printLoginWaitInstructions(sentinelPath: string): void {
-  console.error("");
-  console.error("Tutorial step: the API-center page looks like a LOGIN page (dedicated profile not signed in).");
-  console.error("Log in MANUALLY inside the opened dedicated Chrome window — YOU do the login (and, later,");
-  console.error("open/create the API application and copy the Client ID/Secret). The tool will NOT type,");
-  console.error("click, submit, autofill, or read your ID / password / Client ID / Secret. When you have");
-  console.error("logged in and are on the API-center page, signal readiness by creating this file — the tool");
-  console.error("then RE-READS only the sanitized page category to advance the tutorial:");
-  console.error(`  ${sentinelPath}`);
-  console.error('  (e.g. `touch "' + sentinelPath + '"`; in Claude Code, just say "ready").');
-  console.error("Polling…");
-}
-
-/** Safe operator instructions for the manual-navigation checkpoint — no raw URL/content, only the local file path. */
-function printManualNavigationInstructions(sentinelPath: string): void {
-  console.error("");
-  console.error("Tutorial checkpoint: manually navigate to the NEXT API-center page, then signal readiness.");
-  console.error("Inside the opened dedicated Chrome window — in the SAME window/tab — YOU navigate to the next");
-  console.error("tutorial step (e.g. open one API application to see its detail, or open its issued-keys page).");
-  console.error("The tool will NOT click, type, submit, open, issue, link, copy, autofill, or read any value");
-  console.error("(incl. Client ID/Secret). After you signal readiness it RE-READS only the sanitized page");
-  console.error("category ONCE to advance the tutorial. When you are on the next page, create this file:");
-  console.error(`  ${sentinelPath}`);
-  console.error('  (e.g. `touch "' + sentinelPath + '"`; in Claude Code, just say "ready").');
-  console.error("Polling…");
-}
-
 /**
  * Live entry (gated). NOT run during offline build/verify. Reads the operator-owned
  * `NAVER_API_CENTER_URL` (never logged), navigates read-only, runs the generic sweep, prints the
@@ -657,12 +632,12 @@ async function main(): Promise<void> {
   const cfg = loadConfig();
   const waitForLogin = args.includes(WAIT_FOR_MANUAL_LOGIN_FLAG);
   const waitForNavigation = args.includes(WAIT_FOR_MANUAL_NAVIGATION_FLAG);
-  const sentinelPath = observeSentinelPathFor(cfg.statusFile);
-  mkdirSync(dirname(sentinelPath), { recursive: true });
-  removeSentinel(sentinelPath); // clear any stale sentinel BEFORE the run
-
   const ctx = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
-  const page = (ctx.pages()[0] ?? (await ctx.newPage())) as Page;
+  const confirmHost = await attachOperatorConfirmTab(ctx as unknown as ConfirmHostContext, {
+    aborted: () => false,
+    timeoutMs: NAVIGATION_WAIT_TIMEOUT_MS,
+  });
+  const page = confirmHost.entryPage as unknown as Page;
   // Evaluate a STRING (not a passed function) so tsx/esbuild's __name helper is never referenced in the
   // page context. Cast to get the typed census back from the string-form evaluate.
   const evalPage = page as unknown as { evaluate<R>(script: string): Promise<R> };
@@ -677,7 +652,9 @@ async function main(): Promise<void> {
   // `page` still shows the app list, so we select the NEWEST tab (last of ctx.pages()) and also report the
   // open-tab COUNT (never any tab's URL/title). Still no click/type/submit; only a sanitized structural read.
   const reReadNavigatedPage = async (): Promise<NavigatedPageRead> => {
-    const pages = ctx.pages();
+    // The confirmation tab is filtered out: it is the NEWEST page from the moment it opens, so an unfiltered
+    // list would re-read the blank SellerOps surface instead of wherever the seller navigated.
+    const pages = confirmHost.contextLike.pages() as unknown as Page[];
     const target = (pages[pages.length - 1] ?? page) as Page;
     await settle(target);
     const targetEval = target as unknown as { evaluate<R>(script: string): Promise<R> };
@@ -685,17 +662,14 @@ async function main(): Promise<void> {
     return { census, openPageCount: pages.length };
   };
   const waitForManualLogin = async (): Promise<void> => {
-    removeSentinel(sentinelPath);
-    printLoginWaitInstructions(sentinelPath);
-    const appeared = await waitForSentinel(sentinelPath);
-    if (!appeared) console.error("Manual-login wait timed out — re-observing the current page as-is.");
+    confirmHost.announce(OBSERVE_LOGIN_ASK);
+    const confirmation = await confirmHost.confirm(OBSERVE_LOGIN_ASK);
+    if (confirmation.signal !== "ready") console.error("확인이 없었습니다 — 현재 화면을 그대로 다시 읽습니다.");
   };
   const waitForManualNavigation = async (): Promise<void> => {
-    removeSentinel(sentinelPath);
-    printManualNavigationInstructions(sentinelPath);
-    // Larger budget than the login gate — the app_detail walk (find + open one application) is not rushed.
-    const appeared = await waitForSentinel(sentinelPath, NAVIGATION_WAIT_TIMEOUT_MS);
-    if (!appeared) console.error("Manual-navigation wait timed out — re-observing the current page as-is.");
+    confirmHost.announce(OBSERVE_NAVIGATION_ASK);
+    const confirmation = await confirmHost.confirm(OBSERVE_NAVIGATION_ASK);
+    if (confirmation.signal !== "ready") console.error("확인이 없었습니다 — 현재 화면을 그대로 다시 읽습니다.");
   };
 
   try {
@@ -754,7 +728,6 @@ async function main(): Promise<void> {
       });
     }
   } finally {
-    removeSentinel(sentinelPath);
     await ctx.close();
   }
 }
