@@ -25,8 +25,10 @@ case "$KIND" in
     KIND_WHAT="first connection + ORDER_SUMMARY routine (starts from an empty DB)" ;;
   inquiries)
     KIND_WHAT="상품별 고객문의 acquisition + routine (starts from a CONNECTED account with a stored credential)" ;;
+  inquiries-dedupe)
+    KIND_WHAT="re-sweep the SAME window to prove idempotency (starts from an account that has already collected)" ;;
   *)
-    echo "BOOTSTRAP FAIL — unknown run kind '$KIND'. Use 'orders' or 'inquiries'."
+    echo "BOOTSTRAP FAIL — unknown run kind '$KIND'. Use 'orders', 'inquiries' or 'inquiries-dedupe'."
     exit 1 ;;
 esac
 

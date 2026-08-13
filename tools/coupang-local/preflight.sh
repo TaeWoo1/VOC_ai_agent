@@ -41,7 +41,7 @@ DB_ALIAS="$COUPANG_DB_ALIAS"
 # The run kind the bootstrap minted. A run env without one predates the split and is `orders`.
 RUN_KIND="${COUPANG_RUN_KIND:-orders}"
 case "$RUN_KIND" in
-  orders|inquiries) ;;
+  orders|inquiries|inquiries-dedupe) ;;
   *) echo "PREFLIGHT FAIL — run env carries an unknown kind '$RUN_KIND'. Re-bootstrap."; exit 1 ;;
 esac
 # The prefix length the backend surfaces (must match CoupangSetupView.LiveApprovalReadiness.PREFIX_LENGTH).
@@ -116,6 +116,21 @@ INQUIRIES="$(q 'select count(*) from inquiries')"; WORKITEMS="$(q 'select count(
 if [ -z "$CREDS$SYNCS$ORDERS$COUPANG_ACCTS$INQUIRIES$WORKITEMS" ]; then
   fail "could not query the disposable DB ($PGHOST:$PGPORT/$PGDATABASE)"
   CREDS="?"; SYNCS="?"; ORDERS="?"; COUPANG_ACCTS="?"; INQUIRIES="?"; WORKITEMS="?"
+elif [ "$RUN_KIND" = "inquiries-dedupe" ]; then
+  # The idempotency re-run inverts the usual baseline: it needs rows to ALREADY be there, because the
+  # property under test is that re-collecting them changes nothing. The count is captured here and
+  # printed in the manifest as the number the run must leave untouched.
+  echo "  baseline: credentials=$CREDS coupang_accounts=$COUPANG_ACCTS inquiries=$INQUIRIES work_items=$WORKITEMS"
+  { [ "$CREDS" = 1 ] && [ "$COUPANG_ACCTS" = 1 ]; } \
+    && pass "exactly one connected Coupang account with a stored credential" \
+    || fail "needs exactly ONE Coupang account with ONE stored credential"
+  [ "${INQUIRIES:-0}" -gt 0 ] 2>/dev/null \
+    && pass "$INQUIRIES inquiry row(s) already collected — there is something to re-collect" \
+    || fail "no inquiry collected yet — run the acquisition proof first; there is nothing to dedupe against"
+  CURSOR="$(q "select count(*) from sync_cursors where data_type='INQUIRY'")"
+  [ "${CURSOR:-0}" -gt 0 ] 2>/dev/null \
+    && pass "an INQUIRY cursor exists (the run's first action clears it to re-sweep the same window)" \
+    || fail "no INQUIRY cursor — the previous acquisition run did not complete"
 elif [ "$RUN_KIND" = "inquiries" ]; then
   echo "  baseline: credentials=$CREDS coupang_accounts=$COUPANG_ACCTS inquiries=$INQUIRIES work_items=$WORKITEMS"
   { [ "$CREDS" = 1 ] && [ "$COUPANG_ACCTS" = 1 ]; } \
@@ -134,7 +149,13 @@ fi
 # mode=WRITE per docs/sellerops_live_approval_contract.md §7: credential entry + connection test + first sync
 # is a WRITE-class step (it writes a credential + account + sync state to OUR system). Every Coupang
 # MARKETPLACE call in this run is a read-only GET — no order/shipping/product mutation.
-if [ "$RUN_KIND" = "inquiries" ]; then
+if [ "$RUN_KIND" = "inquiries-dedupe" ]; then
+  # mode=WRITE for the same reason: sync state is written to OUR system. The ONLY local write outside the
+  # sync itself is the cursor delete named below — no inquiry, work item, product or credential row is
+  # touched by hand, and the whole point of the run is that the sync does not change them either.
+  APPROVAL_OPERATION="${SELLEROPS_APPROVAL_OPERATION:-INQUIRY idempotency proof: clear the INQUIRY cursor on this account, re-sweep the SAME 30-day window, and prove the re-collected rows are skipped rather than duplicated}"
+  APPROVAL_MAX="${SELLEROPS_APPROVAL_MAX:-cursor delete=1 (INQUIRY, this account), re-sync=1, expected inserted=0 / skipped=$INQUIRIES, replies posted=0}"
+elif [ "$RUN_KIND" = "inquiries" ]; then
   # Still mode=WRITE: the first sync writes collection state to OUR system (contract §7 lists
   # "first sync" as WRITE-class). Every Coupang MARKETPLACE call is a read-only GET.
   #
@@ -199,6 +220,12 @@ JSON
   echo "  Standing Safety Contract + full scope: docs/sellerops_live_approval_contract.md"
   echo
   echo "  All Coupang MARKETPLACE calls in this run are read-only GETs — no order/shipping/product write."
+  if [ "$RUN_KIND" = "inquiries-dedupe" ]; then
+    echo "  The run FIRST deletes exactly one row: this account's INQUIRY sync cursor. Nothing else is"
+    echo "  hand-modified. Then one sync re-sweeps the same 30 days. PASS = inserted 0, skipped $INQUIRIES,"
+    echo "  failed 0, inquiries still $INQUIRIES, work items still $WORKITEMS. Any insert is a dedupe FAILURE."
+    echo "  onlineInquiries ONLY — the PII-bearing callCenterInquiries endpoint is never called."
+  fi
   if [ "$RUN_KIND" = "inquiries" ]; then
     echo "  The inquiry stream calls onlineInquiries ONLY. The PII-bearing callCenterInquiries endpoint"
     echo "  (buyerEmail / buyerPhone) is never called, and no buyer identity is stored or displayed."
