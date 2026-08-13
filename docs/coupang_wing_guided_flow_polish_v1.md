@@ -28,7 +28,7 @@ own screen. `NOT_REACHED` = the run never got to the state that would have produ
 | **the re-anchor fence refuses a wrong PAGE** | **LIVE_MEASURED** | `aw_coupang_reanchor_off_page {"pageCategory":"login"}` + `guidance_suspended` — the same WING bounce that on 2026-08-12 put the key-issuance ring on a password submit |
 | **the re-anchor fence refuses a wrong SCREEN** | **LIVE_MEASURED** | `aw_coupang_reanchor_off_screen {"expected":"VENDOR_METHOD","observed":"UNRECOGNIZED"}` |
 | the bounded park stops the silent retry | **LIVE_MEASURED** | `aw_coupang_guidance_lost {"polls":60}` — twice, and see §3 |
-| **⑥ auto-advances when the form reads ready** | **REFUTED — the rule is wrong** | see §2 |
+| **⑥ auto-advances when the form reads ready** | **REFUTED — the rule was wrong; fixed from a measurement** | see §2, and §2a for what replaced it |
 | ⑦→⑧ auto-advance on the credentials appearing | **NOT_REACHED** | third consecutive walk; WING bounced the session before any credential could paint |
 
 ---
@@ -49,14 +49,47 @@ and its `추가` button, exactly as WING's own hint describes ("등록한 IP 주
 `entryRowCount` counts painting `li` / `tr` / `option` in the region. A chip is none of those, so the count is
 zero however many addresses are registered, and `READY` was unreachable on this surface.
 
-**The rule has not been changed.** Nothing has ever read what a registered entry does to that region, and
+At the time, the rule was NOT changed: nothing had read what a registered entry does to that region, and
 guessing at it — `span`, or "two buttons instead of one" — is the move this workstream has twice had to
-withdraw. What changed is that the census now LOGS the structure it was already computing (`regionTag`,
-`inputCount`, `textInputCount`, `buttonCount`, `entryRowCount`), so the next walk records the region in both
-states — before `추가` and after — and the rule follows from the reading.
+withdraw. Instead the census began LOGGING the structure it was already computing (`regionTag`, `inputCount`,
+`textInputCount`, `buttonCount`, `entryRowCount`), and a separate READ_ONLY sitting was run to record the
+region in both states. §2a is that reading.
 
-**Not established:** what tag the chip is; whether its `×` is a `button`; whether `buttonCount` distinguishes
-the two states at all.
+---
+
+## 2a. What a registered entry actually is — MEASURED 2026-08-13
+
+Run identity: `wt-017b33239e33` · approval `apr-181b4bd2cebf` · git `b95c908f` ·
+phase `COUPANG_WING_VENDOR_METHOD_DISCOVERY` · mode `READ_ONLY` · 7/7 checkpoints, every one
+`OPERATOR_UI_CONFIRMED`. No key issued; the vendor `확인` was never pressed.
+
+The `API 호출 IP` region, before the operator pressed `추가` and after:
+
+| signal | before | after |
+|---|---|---|
+| `entryRowCount` | 0 | **0** |
+| `buttonCount` | 1 | **2** |
+| `BUTTON` | 1 | **2** |
+| `DIV` | 2 | **3** |
+| `SPAN` | 4 | **6** |
+| `INPUT` | 1 | 1 |
+| `STRONG` | 2 | 2 |
+
+**A registered address is a `div` chip carrying its own remove `button`.** The row count reads zero on both
+sides — so the old rule could not have fired on any number of registered addresses. The region's one baseline
+button is the `추가` control itself, so `buttonCount > 1` means at least one entry is registered.
+
+Two controls on the reading: `entryRowCount` was measured on both sides rather than assumed, and the 업체명 and
+URL regions were **byte-identical** across the pair while the operator typed into both — so the signal is
+specific to REGISTRATION, not to typing. n=1 (one sitting, one address); a second entry should read
+`buttonCount: 3`, and nothing depends on that, because the rule asks only whether the count rose.
+
+The rule now lives in `vendorIpEntryRegistered` (`collector/src/action-window/coupang-wing-field-region.ts`),
+which keeps `entryRowCount >= 1` as an alternative rather than a replacement. Both halves fail closed.
+
+**The offline fixture was wrong in the same way the rule was.** It modelled the registration as a row
+appearing, which is why sixteen tests passed while the live walk sat at NOT_READY. It now models the measured
+shape.
 
 ---
 
