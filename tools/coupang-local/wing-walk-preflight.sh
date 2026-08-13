@@ -155,7 +155,7 @@ fi
 # 2 highlighted + 4 text-guided" while the verifier above demanded `agentNavigations:1`, `highlightedControlCount:3`
 # and `textGuidedControlCount:2` — so the line the OPERATOR reads before granting described a narrower run than
 # the one the gate had verified. That is the manifest-honesty defect class, in the display rather than the data.
-pass "guided-walk boundary is exactly the canonical contract (rests before the key-ISSUING control · never presses it · the OPERATOR issues a real key · agent presses nothing and navigates this window ONCE, to the seller's own WING landing; the seller-pressed return opens the local SellerOps connect screen in the seller's OWN default browser and touches this window not at all · 0 value reads · no connect/sync · 9 highlighted + 0 text-guided, and 0 of the rings on an input · 6 steps auto-advance, never the key-issuing PRESS · the guided method is a product decision · the consent boxes' completion is observed · the vendor form's readiness is observed and refuses one press over an empty form · the key step will not complete while anything is painted over the credentials · guidance is only re-drawn on the step's own screen and parks rather than pointing at a control on another one)"
+pass "guided-walk boundary is exactly the canonical contract (rests before the key-ISSUING control · never presses it · the OPERATOR issues a real key · agent presses nothing and navigates this window ONCE, to the seller's own WING landing; the seller-pressed return opens the local SellerOps connect screen in the seller's OWN default browser and touches this window not at all · 0 value reads · no connect/sync · 9 highlighted + 0 text-guided, and 0 of the rings on an input · 7 steps auto-advance, never the key-issuing PRESS · the guided method is a product decision · the consent boxes' completion is observed · the vendor form's readiness is observed, refuses one press over an empty form and COMPLETES the input-method step once it reads full · the key step will not complete while anything is painted over the credentials · guidance is only re-drawn on the step's own screen and parks rather than pointing at a control on another one)"
 
 # The 발급 selector must be calibrated: this phase highlights a real control. The gate refuses
 # SELECTORS_NOT_CALIBRATED before reaching here, so this can only be `true` — asserted anyway so a future change
@@ -225,9 +225,21 @@ echo "      enclosing block holds exactly one sentence and one box."
 echo "    • 'OPEN API' is the DEFAULT purpose option, so the purpose screen is ONE step: check it, press 확인."
 echo "    • WHICH input method is guided — '자체개발(직접입력)' — is a PRODUCT DECISION, recorded as one. The"
 echo "      screen offers two options and both resolve identically well; nothing measured chooses between them."
-echo "    • SIX steps advance by themselves when WING's own screen changes. The key-issuing PRESS is never one"
+echo "    • SEVEN steps advance by themselves on what SellerOps observes. The key-issuing PRESS is never one"
 echo "      of them: what advances that step is WING then SHOWING the keys, which is an observation of the"
 echo "      RESULT and cannot cause it."
+echo "    • The seventh is NEW (2026-08-13) and it is the only one that does not watch a screen: the"
+echo "      input-method step finishes itself when the vendor FORM reads complete. While you fill it in,"
+echo "      SellerOps checks about once a second WHETHER 업체명 · URL hold anything and whether an IP has been"
+echo "      ADDED — never what any of them says. Your own '다음' button stays on the panel throughout."
+echo "    • On that same step the RING comes down once the form appears: it points at the input-method option,"
+echo "      and the moment that option is chosen your work is in the fields below it. SellerOps does not read"
+echo "      which option is selected — what it sees is the three fields painting — and it takes the highlight"
+echo "      off rather than moving it, because what those labels are attached to has never been calibrated."
+echo "    • The guidance panel keeps clear of the control it points at AND of the ones you use to reach it —"
+echo "      on the vendor screen, the form fields and the '확인' beneath them. It sat on that button on"
+echo "      2026-08-12 while pointing at the option above it, and the panel is the one part of this that"
+echo "      takes clicks."
 echo "    • You read the two consent texts and decide. SellerOps does not read them, evaluate them, agree to"
 echo "      them, or advise on them, and it never ticks a box. It DOES check whether both are ticked, so the"
 echo "      walk can move on without you pressing anything — that reading is a yes/no computed in the page and"

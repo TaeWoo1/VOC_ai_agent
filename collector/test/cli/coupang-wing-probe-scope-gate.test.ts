@@ -262,7 +262,7 @@ describe("the live CLI wires the gate, not the manifest resolver", () => {
     const gateAt = code.indexOf("resolveGatedWingProbeScope(process.env)");
     expect(gateAt).toBeGreaterThan(-1);
     // Each string must be a CALL inside main(), not a definition earlier in the file.
-    for (const sideEffect of ["loadConfig()", "mkdirSync(", "removeSentinel(readyPath)", "process.on(", "await launchNaverContext("]) {
+    for (const sideEffect of ["loadConfig()", "mkdirSync(", "removeSentinel(abortPath)", "process.on(", "await launchNaverContext("]) {
       const at = code.indexOf(sideEffect);
       expect(at, `${sideEffect} should exist`).toBeGreaterThan(-1);
       expect(gateAt, `gate must precede ${sideEffect}`).toBeLessThan(at);

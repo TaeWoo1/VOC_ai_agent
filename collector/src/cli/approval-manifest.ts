@@ -431,8 +431,13 @@ export interface GuidedWalkBoundary {
    * This replaced `explicitCheckpointRequired`, which asserted that "a mandatory operator checkpoint precedes
    * every step; none auto-advances". That stopped being true on 2026-08-10 and a field that quietly keeps
    * saying it is worse than no field: the operator grants against this descriptor.
+   *
+   * SEVEN since 2026-08-13: the vendor-METHOD step now finishes itself when the form the seller is filling in
+   * reads complete, on the same emptiness-only census {@link vendorFormReadinessObserved} already declares. Only
+   * two steps are left asking for a press — copying the keys, and returning to SellerOps — and neither is
+   * something the page can observe.
    */
-  autoAdvancingStepCount: 6;
+  autoAdvancingStepCount: 7;
   /**
    * **Whether anything auto-performs the key-issuing PRESS. False, and it always will be.**
    *
@@ -469,6 +474,13 @@ export interface GuidedWalkBoundary {
    * says. A press over an empty form is refused ONCE, with a panel message; the next press goes through
    * whatever the reading says, because manual progress always remains available and this association has never
    * been calibrated on a live screen.
+   *
+   * **POLLED since 2026-08-13, not read once per press.** The same reading now also COMPLETES that step (see
+   * {@link autoAdvancingStepCount}), so it is taken about once a second for as long as the seller is filling the
+   * form in. What crosses the boundary is unchanged — an emptiness count and a registered-row count, per field,
+   * per reading — and the log is throttled on the reading itself, so a steady state is sampled rather than
+   * repeated. The frequency is disclosed because "it checks when you press" and "it watches while you type" are
+   * different sentences to an operator, even when both read the same nothing.
    *
    * Declared because it is a value read, however narrow, and because it CHANGES WHAT A PRESS DOES: an operator
    * granting against this manifest should not discover mid-walk that a button they pressed did nothing.
@@ -524,7 +536,7 @@ export const COUPANG_WING_GUIDED_WALK_BOUNDARY: GuidedWalkBoundary = {
   highlightedControlCount: 9,
   textGuidedControlCount: 0,
   ringedInputControlCount: 0,
-  autoAdvancingStepCount: 6,
+  autoAdvancingStepCount: 7,
   keyCreationPressAutoPerformed: false,
   keyIssuanceAdvancesOnObservedResult: true,
   sellerConsentObserved: true,
@@ -847,11 +859,15 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     phase: "COUPANG_WING_VENDOR_METHOD_DISCOVERY",
     cli: "src/cli/probe-wing-issuance-selectors.ts",
     driver: "CoupangWingIssuanceDriver (the discovery reads, carried two checkpoints further onto the vendor-method screen)",
-    // IDENTICAL to the discovery phase's list, and deliberately so: this phase measures nothing the other cannot.
-    // What differs is entirely WHERE the reads are taken and what the OPERATOR is invited to do to get there —
-    // which is why it is a separate manifest rather than a longer checkpoint list on the existing one. A phase
-    // that widened the capability list here would be describing a different instrument; this one is the same
-    // instrument pointed at a screen nothing has read.
+    // It was IDENTICAL to the discovery phase's list, and the sentence explaining why was worth keeping until it
+    // stopped being true: this phase measured nothing the other could not, and differed entirely in WHERE the
+    // reads were taken.
+    //
+    // 2026-08-13 added one capability, and it is listed rather than folded into `STRUCTURAL_CENSUS` because the
+    // operator grants against this list. `MEASURE_LABEL_REGION_STRUCTURE` reads what is INSIDE a fixed label's
+    // region — its tag names and how many of each — which is a different question from the page-level census
+    // above it. It is taken on the vendor form, whose three fields hold the seller's own business details, so
+    // the narrowness matters: tag names and integers, and NOT the emptiness count the guided walk takes.
     capableActions: [
       "OPEN_DEDICATED_WINDOW",
       "WAIT_OPERATOR_LOGIN_NAV",
@@ -862,6 +878,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
       "FIXED_LABEL_CONTAINMENT_PROBE",
       "CHOICE_CONTROL_LABEL_ASSOCIATION_CENSUS",
       "CONSENT_BLOCK_CENSUS",
+      "MEASURE_LABEL_REGION_STRUCTURE",
     ],
     allowsHighlight: false,
     // READ_ONLY is a claim about the AGENT, and it stays true: it reads, and it presses nothing. The operator's
@@ -1122,7 +1139,23 @@ export interface EntrypointSpec {
  * — the same defect as omitting one, and the harness has now produced it in both directions.
  */
 export const WING_DISCOVERY_TERMS_STEP_SUMMARY =
-  " ④ 약관 화면에서 내용을 직접 읽고 판단하신 뒤 동의 체크박스 2개를 직접 선택하고 ready. 여기서 실행이 끝납니다.";
+  " ④ 약관 화면에서 내용을 직접 읽고 판단하신 뒤 동의 체크박스 2개를 직접 선택하고 '현재 화면 확인'. 여기서 실행이 끝납니다.";
+
+/**
+ * **HOW a probe run advances**, in one sentence, on every probe-CLI manifest.
+ *
+ * It is a disclosure and not a formatting detail. Until 2026-08-13 these manifests said "ready 를 보내세요", and
+ * what actually advanced the run was a sentinel file — which the assistant created on the strength of a chat line
+ * the operator never wrote. The channel is now a button on a SellerOps-owned blank tab, and the manifest has to
+ * say so, because the operator is granting against what they will be asked to do.
+ *
+ * It also discloses the extra tab: the run opens one page it did not open before, and a manifest that promised a
+ * single dedicated window would be describing a different run than the one about to happen.
+ */
+export const WING_PROBE_CONFIRM_CHANNEL_SUMMARY =
+  " 각 단계는 SellerOps가 함께 여는 빈 'SellerOps 확인' 탭의 [현재 화면 확인] 버튼을 직접 누르셔야만 넘어갑니다. " +
+  "대화창에 'ready'라고 쓰거나 파일을 만드는 것으로는 진행되지 않습니다. 그 탭은 안내 문구와 버튼만 있는 " +
+  "SellerOps 화면이며, 쿠팡(윙) 페이지에는 아무것도 추가하지 않습니다.";
 
 export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>> = {
   API_CENTER_STRUCTURE_OBSERVATION: {
@@ -1166,7 +1199,8 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
     cli: "src/cli/probe-wing-issuance-selectors.ts",
     entrypointCommandId: "probe-wing-issuance-selectors",
     operatorActionSummary:
-      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 오픈API 발급 화면에서 준비되면 ready 를 보내세요. SellerOps는 강조 없이 각 대상의 고정 라벨 일치 수만 읽습니다(클릭·입력·값 읽기 없음).",
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 오픈API 발급 화면에서 멈춘 뒤 '현재 화면 확인'을 누르세요. SellerOps는 강조 없이 각 대상의 고정 라벨 일치 수만 읽습니다(클릭·입력·값 읽기 없음)." +
+      WING_PROBE_CONFIRM_CHANNEL_SUMMARY,
     emitsFrontendUrl: false,
   },
   // The candidate-label recon: the SAME CLI and the same dedicated Chrome, so the entrypoint contract is
@@ -1177,7 +1211,8 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
     cli: "src/cli/probe-wing-issuance-selectors.ts",
     entrypointCommandId: "probe-wing-issuance-selectors",
     operatorActionSummary:
-      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 오픈API 발급 화면에서 준비되면 ready 를 보내세요. SellerOps는 아직 확정되지 않은 대상들의 여러 후보 라벨에 대해 일치 수만 읽습니다(강조·클릭·입력·값 읽기 없음). 후보가 하나로 좁혀져도 이 실행은 선택자를 바꾸지 않습니다.",
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 오픈API 발급 화면에서 멈춘 뒤 '현재 화면 확인'을 누르세요. SellerOps는 아직 확정되지 않은 대상들의 여러 후보 라벨에 대해 일치 수만 읽습니다(강조·클릭·입력·값 읽기 없음). 후보가 하나로 좁혀져도 이 실행은 선택자를 바꾸지 않습니다." +
+      WING_PROBE_CONFIRM_CHANNEL_SUMMARY,
     emitsFrontendUrl: false,
   },
   // The STAGE-2 recon: the same CLI and the same dedicated Chrome again, so the entrypoint contract is
@@ -1190,9 +1225,10 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
     entrypointCommandId: "probe-wing-issuance-selectors",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동한 뒤, 오픈API 화면에서 'API Key 발급 받기'를 " +
-      "직접 눌러 사용 목적 선택 화면을 여세요(SellerOps는 누르지 않습니다). 그 화면이 그대로 떠 있는 상태에서 ready 를 보내세요. " +
+      "직접 눌러 사용 목적 선택 화면을 여세요(SellerOps는 누르지 않습니다). 그 화면이 그대로 떠 있는 상태에서 '현재 화면 확인'을 누르세요. " +
       "SellerOps는 선택 항목의 개수와 종류, 그리고 미리 정해 둔 후보 라벨의 일치 수만 읽습니다. 목적을 선택하지 않고, " +
-      "업체명/URL/IP를 입력하지 않으며, '확인'(최종 발급)은 절대 누르지 않습니다(강조·클릭·입력·값 읽기 없음).",
+      "업체명/URL/IP를 입력하지 않으며, '확인'(최종 발급)은 절대 누르지 않습니다(강조·클릭·입력·값 읽기 없음)." +
+      WING_PROBE_CONFIRM_CHANNEL_SUMMARY,
     emitsFrontendUrl: false,
   },
   // The STAGE-2 LABEL CALIBRATION: same CLI, same dedicated Chrome, same operator flow as the Stage-2 recon —
@@ -1205,10 +1241,11 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
     entrypointCommandId: "probe-wing-issuance-selectors",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동한 뒤, 오픈API 화면에서 'API Key 발급 받기'를 " +
-      "직접 눌러 사용 목적 선택 화면을 여세요(SellerOps는 누르지 않습니다). 그 화면이 그대로 떠 있는 상태에서 ready 를 보내세요. " +
+      "직접 눌러 사용 목적 선택 화면을 여세요(SellerOps는 누르지 않습니다). 그 화면이 그대로 떠 있는 상태에서 '현재 화면 확인'을 누르세요. " +
       "SellerOps는 각 선택 항목이 '어떻게 라벨링되어 있는지'(라벨 연결 방식·연결 성공 여부·라디오 그룹 번호·길이 구간)와, " +
       "미리 정해 둔 후보 문구와의 일치 여부만 번호로 읽습니다. 화면의 문구 자체는 기록되지 않습니다. 목적을 선택하지 않고, " +
-      "업체명/URL/IP를 입력하지 않으며, '확인'(최종 발급)은 절대 누르지 않습니다(강조·클릭·입력·값 읽기 없음).",
+      "업체명/URL/IP를 입력하지 않으며, '확인'(최종 발급)은 절대 누르지 않습니다(강조·클릭·입력·값 읽기 없음)." +
+      WING_PROBE_CONFIRM_CHANNEL_SUMMARY,
     emitsFrontendUrl: false,
   },
   // The ISSUANCE-FLOW DISCOVERY phase: same CLI and same dedicated Chrome again. The summary has to carry what
@@ -1221,15 +1258,16 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
     entrypointCommandId: "probe-wing-issuance-selectors",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 이 단계에서는 판매자가 화면을 직접 진행합니다(SellerOps는 클릭·선택·입력을 " +
-      "일절 하지 않습니다). ① 쿠팡(윙)에 직접 로그인·이동해 'API Key 발급 받기'를 직접 누르고 사용 목적 화면에서 멈춘 뒤 ready. " +
-      "② 'OPEN API'를 직접 선택하고, '확인'은 누르지 말고 ready. 여기서 SellerOps가 업체명/URL/IP 입력란이 이미 화면에 " +
+      "일절 하지 않습니다). ① 쿠팡(윙)에 직접 로그인·이동해 'API Key 발급 받기'를 직접 누르고 사용 목적 화면에서 멈춘 뒤 '현재 화면 확인'. " +
+      "② 'OPEN API'를 직접 선택하고, '확인'은 누르지 말고 '현재 화면 확인'. 여기서 SellerOps가 업체명/URL/IP 입력란이 이미 화면에 " +
       "나타났는지 읽습니다. 이미 나타났다면 '확인'은 최종 제출일 수 있으므로 실행은 그 자리에서 중단되고, 누르라는 안내 자체를 " +
-      "하지 않습니다. ③ 중단되지 않은 경우에만 '확인'을 직접 누르고, 다음 화면이 뜨면 아무것도 누르지 말고 ready." +
+      "하지 않습니다. ③ 중단되지 않은 경우에만 '확인'을 직접 누르고, 다음 화면이 뜨면 아무것도 누르지 말고 '현재 화면 확인'." +
       WING_DISCOVERY_TERMS_STEP_SUMMARY +
       " ⚠ 약관 화면의 '약관 동의 및 Key 발급받기' 버튼은 실제로 키를 생성하는 control이며, 이번 단계에서는 절대 누르지 " +
       "않습니다. SellerOps는 그 버튼의 위치만 측정하고, 그 다음 단계 자체가 존재하지 않습니다(키 발급은 별도 승인·별도 " +
       "manifest). SellerOps는 약관을 읽거나 판단하거나 대신 동의하지 않습니다. 각 시점마다 라벨 매칭 수·표시 여부·" +
-      "라벨 연결 방식만 번호로 읽으며, 화면 문구·입력값·키 값은 기록하지 않습니다.",
+      "라벨 연결 방식만 번호로 읽으며, 화면 문구·입력값·키 값은 기록하지 않습니다." +
+      WING_PROBE_CONFIRM_CHANNEL_SUMMARY,
     emitsFrontendUrl: false,
   },
   // The VENDOR-METHOD DISCOVERY phase. Same CLI, same dedicated Chrome, two checkpoints further. The summary has
@@ -1242,19 +1280,28 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
     entrypointCommandId: "probe-wing-issuance-selectors",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 판매자가 화면을 직접 진행합니다(SellerOps는 클릭·선택·입력을 일절 하지 " +
-      "않습니다). ① 쿠팡(윙)에 직접 로그인·이동해 'API Key 발급 받기'를 직접 누르고 사용 목적 화면에서 멈춘 뒤 ready. " +
-      "② 'OPEN API'가 선택되어 있는지 확인하고 '확인'은 누르지 말고 ready. ③ 중단되지 않은 경우에만 '확인'을 직접 누르고 " +
-      "ready. ④ 약관 2개를 직접 읽고 판단해 체크한 뒤 ready. " +
+      "않습니다). ① 쿠팡(윙)에 직접 로그인·이동해 'API Key 발급 받기'를 직접 누르고 사용 목적 화면에서 멈춘 뒤 '현재 화면 확인'. " +
+      "② 'OPEN API'가 선택되어 있는지 확인하고 '확인'은 누르지 말고 '현재 화면 확인'. ③ 중단되지 않은 경우에만 '확인'을 직접 누르고 " +
+      "'현재 화면 확인'. ④ 약관 2개를 직접 읽고 판단해 체크한 뒤 '현재 화면 확인'. " +
       "⑤ '약관 동의 및 Key 발급받기'를 직접 누르세요. 이 버튼은 live walk에서 두 번 눌렸고, 두 번 모두 " +
       "판매자가 키가 발급되지 않았다고 보고했습니다 — 그 보고가 이번 단계에서 요청할 수 있는 근거입니다. " +
       "SellerOps는 키 발급 여부를 " +
       "확인할 수 없습니다(발급된 화면과 아닌 화면이 SellerOps가 읽는 모든 신호에서 동일합니다). 측정이 아니라 보고입니다. 그 다음에 나오는 화면은 " +
-      "SellerOps가 한 번도 읽어본 적이 없는 화면이며, 아무것도 고르지 말고 그대로 둔 채 ready. " +
-      "⑥ 그 화면에서 업체 입력 방식만 직접 선택하고 ready. 여기서 실행이 끝납니다. " +
+      "SellerOps가 한 번도 읽어본 적이 없는 화면이며, 아무것도 고르지 말고 그대로 둔 채 '현재 화면 확인'. " +
+      "⑥ 그 화면에서 업체 입력 방식만 직접 선택하고(입력란은 비워둔 채) '현재 화면 확인'. " +
+      // The checkpoint added on 2026-08-13. The operator types their own business details, so the summary says
+      // in the same breath what is read from them: tag names and counts, and NOT the emptiness count the guided
+      // walk takes. Filling a form in is not submitting it — the control that submits is the one this run still
+      // ends in front of, and the warning below is unchanged.
+      "⑦ 업체명 · URL을 직접 입력하고 IP 주소는 '추가'까지 눌러 등록한 뒤 '현재 화면 확인'. 여기서 실행이 끝납니다. " +
+      "이 단계는 각 입력란 영역 '안에 어떤 태그가 몇 개 있는지'만 읽습니다 — 입력한 값은 물론이고, 몇 개가 " +
+      "채워졌는지도 세지 않습니다(그건 안내 walk가 하는 읽기이며 이번 실행에는 없습니다). 폼을 채우는 것은 " +
+      "제출이 아니라서 계정 상태는 바뀌지 않습니다. " +
       "⚠ 그 화면의 '확인'은 실제 API 키를 발급해 라이브 계정 상태를 바꾸는 control이며, 이번 승인 범위에 포함되지 않습니다. 절대 " +
       "누르지 마세요 — 키 발급은 별도 manifest·별도 승인입니다. 어떤 입력 방식이 SellerOps에 맞는지는 이 실행이 답하지 " +
       "않습니다(측정이 아니라 제품 결정이며, 이번에는 화면의 구조만 읽습니다). SellerOps는 각 시점마다 라벨 매칭 수·표시 " +
-      "여부·라벨 연결 방식만 번호로 읽으며, 화면 문구·입력값·키 값은 기록하지 않습니다.",
+      "여부·라벨 연결 방식만 번호로 읽으며, 화면 문구·입력값·키 값은 기록하지 않습니다." +
+      WING_PROBE_CONFIRM_CHANNEL_SUMMARY,
     emitsFrontendUrl: false,
   },
   // The GUIDED ISSUANCE WALK: the product path itself, live. The summary has to carry what the walk does NOT
@@ -1283,8 +1330,16 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
       "(사용 목적 화면이 뜨면 자동 진행) → ③ 'OPEN API' 항목과 '확인' 버튼이 함께 강조 표시되며, 확인 후 '확인'을 직접 누름" +
       "(약관 화면이 뜨면 자동 진행) → ④ 동의 문장 2개가 각각 강조 표시되며, 약관을 직접 읽고 판단한 뒤 동의 체크" +
       "(2개가 모두 체크되면 자동 진행) → ⑤ '약관 동의 및 Key 발급받기'(강조 표시됨)를 직접 누름" +
-      "(업체 입력 방식 화면이 뜨면 자동 진행) → ⑥ '자체개발(직접입력)' 라벨이 강조 표시되며, 방식을 직접 선택 → " +
-      "⑦ 업체명 · URL · IP 주소를 직접 입력한 뒤 그 화면의 '확인'(강조 표시됨)을 직접 누름. " +
+      "(업체 입력 방식 화면이 뜨면 자동 진행) → ⑥ '자체개발(직접입력)' 라벨이 강조 표시되며, 방식을 직접 선택한 뒤 " +
+      "업체명 · URL을 입력하고 IP는 '추가'까지 누름" +
+      // The seventh auto-advance, and the only one that does not watch a screen. Stated where the operator
+      // reads what each step does, with the reading it rests on — an emptiness count, taken about once a
+      // second while they type — because "SellerOps watches the form" is a sentence they are entitled to see.
+      "(입력이 끝나면 자동 진행 — SellerOps는 입력란이 비었는지만 약 1초에 한 번 확인하고 값은 읽지 않습니다. " +
+      // The ring comes DOWN mid-step, which is a change in what the seller sees and therefore theirs to be told
+      // about. It is a reduction in what SellerOps points at, never an addition.
+      "입력란이 화면에 나타나면 라벨의 강조 표시는 사라지고 안내만 남습니다) → " +
+      "⑦ 그 화면의 '확인'(강조 표시됨)을 직접 누름. " +
       "⚠ 여기서 실제 API 키가 발급되어 라이브 계정 상태가 바뀝니다. 이번 run은 발급까지 수행하며, 필요하면 나중에 " +
       "별도의 삭제 작업으로 지울 수 있습니다(키가 화면에 표시되면 자동 진행) → " +
       "⑧ 발급된 키 영역이 강조 표시되며, 키는 판매자가 직접 확인·보관 → ⑨ SellerOps로 복귀. " +

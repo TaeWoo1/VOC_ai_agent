@@ -60,6 +60,7 @@ import {
   type ApprovalPrereqInput,
 } from "../../../src/cli/approval-manifest";
 import { WING_DEFAULT_URL, observeFrom, type WingStructuralCensus } from "../../../src/cli/coupang-wing-classifier";
+import { OPERATOR_CONFIRMED } from "../../fixtures/operator-confirmation";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = (p: string): string => readFileSync(resolve(HERE, "../../../src", p), "utf8");
@@ -990,7 +991,7 @@ const CONTAINMENT: FixedLabelContainmentReading = {
 function deps(over: Partial<WingSelectorRecordDeps> = {}): { d: WingSelectorRecordDeps; calls: string[] } {
   const calls: string[] = [];
   const d: WingSelectorRecordDeps = {
-    waitForReady: async () => "ready",
+    awaitOperatorConfirmation: async () => OPERATOR_CONFIRMED,
     observeSurface: async () => observeFrom("wing_host", BASE),
     probeTarget: async () => ({ matchCount: 0, canHighlight: false }),
     probeCandidate: async () => {

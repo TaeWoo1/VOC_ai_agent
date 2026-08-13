@@ -55,6 +55,7 @@ import {
   WING_DELETION_LABELS,
   WING_HIGHLIGHT_LABELS,
   type WingDeletionTarget,
+  type WingContextLike,
   type WingFixedLabelProbe,
   type WingHighlightTarget,
 } from "../action-window/coupang-wing-issuance-driver";
@@ -89,6 +90,7 @@ import {
   WING_CHOICE_LABEL_CANDIDATES,
   WING_STAGE3_TERMS_OPTION_CANDIDATES,
   WING_ISSUANCE_FLOW_PLAN,
+  WING_VENDOR_METHOD_CHECKPOINTS,
   WING_VENDOR_METHOD_PLAN,
   type WingFlowPlan,
   WING_CHECKPOINT_EXPECTED_SCREEN,
@@ -98,6 +100,7 @@ import {
   type WingFlowScreen,
 } from "../action-window/coupang-wing-label-recon";
 import type { FixedLabelContainmentReading } from "../action-window/api-issuance-calibration/visual-recon-inpage";
+import type { FieldRegionCensus } from "../action-window/coupang-wing-field-region";
 import {
   LIVE_DOM_CALIBRATION_PENDING,
   WING_APPROVAL_PHASE_ENV,
@@ -116,9 +119,36 @@ import {
   type WingConsentBlockCensus,
 } from "./coupang-wing-classifier";
 import { coupangWingApprovalRequiredMessage, hasCoupangWingRunApproval } from "./live-run-approval";
+import {
+  OPERATOR_CONFIRM_BUTTON_LABEL,
+  OPERATOR_CONFIRM_PAGE_TITLE,
+  awaitOperatorConfirmation,
+  mintOperatorConfirmToken,
+  type OperatorConfirmAsk,
+  type OperatorConfirmProvenance,
+  type OperatorConfirmSeams,
+  type OperatorConfirmation,
+} from "./operator-confirm";
 
-/** A per-run operator signal: proceed, abort the session, or the wait timed out. */
-export type WingRecordSignal = "ready" | "abort" | "timeout";
+/**
+ * A per-run operator signal: proceed, abort the session, or the wait timed out.
+ *
+ * `ready` is no longer a value a caller can simply produce — it arrives only inside an {@link OperatorConfirmation}
+ * carrying {@link OPERATOR_UI_CONFIRMED}, which only a verified press on the SellerOps confirmation surface can
+ * mint. See `./operator-confirm` for why the sentinel file it replaced was not a mechanism.
+ */
+export type WingRecordSignal = OperatorConfirmation["signal"];
+
+/**
+ * WHAT the operator is being asked to confirm. It travels to the confirmation surface so the button is pressed
+ * against the same copy the terminal printed — not against a paraphrase of it in a chat window.
+ */
+export interface WingOperatorAsk {
+  /** The checkpoint, or null on the single-reading runs (baseline probe / recon / Stage-2 sweep). */
+  readonly checkpoint: WingFlowCheckpoint | null;
+  readonly index: number;
+  readonly total: number;
+}
 
 /**
  * Every fixed-label target the recorder measures: the highlightable issuance candidates AND the 삭제 (delete)
@@ -245,6 +275,12 @@ export interface WingSelectorRecordResult {
   observation: WingObservation | null;
   /** Sanitized fingerprint when the surface observation THREW (else null) — so a failed observe is diagnosable, not an opaque fatal. */
   observationFault: WingFaultFingerprint | null;
+  /**
+   * WHICH channel let this reading happen. `OPERATOR_UI_CONFIRMED` is the only non-null value, and it can only
+   * come from a verified press — so the record carries the provenance of its own advance rather than leaving a
+   * reader to assume one. Null on an aborted or timed-out run, where nothing was confirmed and nothing was read.
+   */
+  confirmedBy: OperatorConfirmProvenance | null;
   targets: WingSelectorRecord[];
   /** How many candidates resolved uniquely this run (sanitized count). */
   uniqueCandidates: number;
@@ -350,8 +386,17 @@ export interface WingStage2Sweep {
 
 /** Injected seams so the whole read-only recorder is unit-tested offline over fakes (no browser, no WING). */
 export interface WingSelectorRecordDeps {
-  /** Block until the operator signals ready / abort / timeout (sentinel-file only). */
-  waitForReady(): Promise<WingRecordSignal>;
+  /**
+   * Block until the operator CONFIRMS the screen on the SellerOps confirmation surface — or aborts, or the wait
+   * runs out. **This is the only thing that advances a checkpoint.**
+   *
+   * It replaced a `.ready` sentinel file, and the replacement is not a refactor. On 2026-08-13 that file was
+   * created on the strength of a line of chat text the operator never wrote, and the run advanced. Chat text and
+   * `touch` are both things a language model can produce; a verified press on a surface holding a per-checkpoint
+   * random token is not. The seam returns the provenance rather than a bare enum so a reading cannot record
+   * itself as confirmed without naming the channel that confirmed it.
+   */
+  awaitOperatorConfirmation(ask: WingOperatorAsk): Promise<OperatorConfirmation>;
   /** The sanitized surface observation (pageCategory + signals + blockers) — reused from the driver's own probe. */
   observeSurface(): Promise<WingObservation>;
   /** Read-only fixed-label match for one candidate (never tags/highlights/clicks/reads a value). */
@@ -397,6 +442,16 @@ export interface WingSelectorRecordDeps {
    * the same reason `probeCandidate` is: a run that cannot take it must record that it could not, never die.
    */
   choiceControlCensus?(): Promise<WingChoiceControlCensus | null>;
+  /**
+   * READ-ONLY structural census of the VENDOR FORM's three field regions — tag names and counts, and never the
+   * emptiness count the guided walk takes.
+   *
+   * Optional like every other measurement seam: a run that cannot take it records that it could not. Taken only
+   * on the vendor screen's checkpoints, where the question it answers lives — what a REGISTERED IP does to its
+   * region, which `entryRowCount` alone cannot say (it reports the same zero for "none registered" and
+   * "registered as something I do not count", and on 2026-08-13 that cost the guided walk its auto-advance).
+   */
+  vendorFieldRegions?(): Promise<FieldRegionCensus | null>;
   /** Print sanitized instructions (noop in tests). */
   announce?(): void;
   /**
@@ -445,15 +500,18 @@ export async function runWingSelectorRecord(
   const reconTargets = opts.recon ?? [];
   const stage2Targets = opts.stage2 ?? [];
   deps.announce?.();
-  const signal = await deps.waitForReady();
-  if (signal !== "ready") {
+  const confirmation = await deps.awaitOperatorConfirmation({ checkpoint: null, index: 0, total: 1 });
+  if (confirmation.signal !== "ready") {
     return {
       observation: null,
       observationFault: null,
+      // Nothing confirmed this run, so there is no provenance to record. Null is the honest value: the field
+      // says WHICH channel let the reading happen, and on an aborted run no channel did.
+      confirmedBy: null,
       targets: [],
       uniqueCandidates: 0,
       nonUniqueCandidates: 0,
-      aborted: signal === "abort",
+      aborted: confirmation.signal === "abort",
       issuedState: wingIssuedStateFrom(null),
       // An aborted/timed-out recon run measured nothing. Emitting an empty sweep would read as "swept, found
       // nothing"; null says the sweep never happened, which is the same measured-vs-unmeasured distinction the
@@ -514,6 +572,9 @@ export async function runWingSelectorRecord(
   return {
     observation,
     observationFault,
+    // Narrowed to the `ready` arm above, so this is the OPERATOR_UI_CONFIRMED literal by construction — the
+    // record cannot claim a confirmation the type system did not see arrive.
+    confirmedBy: confirmation.provenance,
     targets,
     uniqueCandidates,
     nonUniqueCandidates,
@@ -733,6 +794,15 @@ async function sweepReconCandidates(
 
 /* ────────────────────────────── ISSUANCE-FLOW DISCOVERY (multi-checkpoint) ────────────────────────────── */
 
+/**
+ * The checkpoints that stand ON the vendor screen, and are therefore the ones whose readings can carry a census
+ * of its form. Derived from the plan's own list rather than re-typed, so a checkpoint added there is either in
+ * this set or visibly not.
+ */
+const VENDOR_REGION_CHECKPOINTS: readonly WingFlowCheckpoint[] = WING_VENDOR_METHOD_CHECKPOINTS.filter(
+  (c) => WING_CHECKPOINT_EXPECTED_SCREEN[c] === "VENDOR_METHOD",
+);
+
 /** One checkpoint's complete reading. `stage2` is never null: a checkpoint that ran took a sweep. */
 export interface WingFlowCheckpointReading {
   readonly checkpoint: WingFlowCheckpoint;
@@ -741,6 +811,17 @@ export interface WingFlowCheckpointReading {
   readonly stage2: WingStage2Sweep;
   /** WHICH screen this reading is of, derived from its own markers — never assumed from the checkpoint name. */
   readonly screen: WingFlowScreen;
+  /**
+   * The vendor form's region census, on the checkpoints that stand on the vendor screen. `null` everywhere else,
+   * and on a run whose deps do not offer it — the reading says "not taken", never a synthesised empty one.
+   */
+  readonly vendorRegions: FieldRegionCensus | null;
+  /**
+   * The channel that advanced INTO this reading. Non-optional and non-null by construction: the loop cannot push
+   * a reading it did not first receive a verified confirmation for, and the literal type makes that structural
+   * rather than a habit. It is the field an auditor reads to see that no checkpoint advanced on text.
+   */
+  readonly confirmedBy: OperatorConfirmProvenance;
 }
 
 export interface WingFlowDiscoveryResult {
@@ -842,10 +923,10 @@ export async function runWingFlowDiscovery(
       );
     }
     if (checkpoint === plan.lastCheckpoint) pastLastCheckpoint = true;
-    const signal = await deps.waitForReady();
-    if (signal !== "ready") {
-      aborted = signal === "abort";
-      halted = signal === "abort" ? "OPERATOR_ABORTED" : "OPERATOR_SIGNAL_TIMEOUT";
+    const confirmation = await deps.awaitOperatorConfirmation({ checkpoint, index, total: checkpoints.length });
+    if (confirmation.signal !== "ready") {
+      aborted = confirmation.signal === "abort";
+      halted = confirmation.signal === "abort" ? "OPERATOR_ABORTED" : "OPERATOR_SIGNAL_TIMEOUT";
       break;
     }
     let observation: WingObservation | null = null;
@@ -861,7 +942,21 @@ export async function runWingFlowDiscovery(
       faultCount: stage2.faults.length + stage2.containmentFaults.length,
       candidates: stage2.targets.flatMap((t) => t.candidates).map((c) => ({ id: c.id, presence: c.presence })),
     };
-    readings.push({ checkpoint, observation, observationFault, stage2, screen: wingFlowScreenFrom(screenOf) });
+    // The vendor form's regions, on the two checkpoints that stand in front of it. Taken here rather than in the
+    // sweep because it is a census of a SCREEN this plan reaches last, and running it on the purpose or terms
+    // screen would be three label lookups answering "not on this screen" three times.
+    const vendorRegions = VENDOR_REGION_CHECKPOINTS.includes(checkpoint)
+      ? await deps.vendorFieldRegions?.().catch(() => null) ?? null
+      : null;
+    readings.push({
+      checkpoint,
+      observation,
+      observationFault,
+      stage2,
+      screen: wingFlowScreenFrom(screenOf),
+      vendorRegions,
+      confirmedBy: confirmation.provenance,
+    });
 
     if (stage2.precondition !== "OK") {
       halted = "PRECONDITION_FAILED";
@@ -1429,19 +1524,27 @@ export function scopeRefusalMessage(refusal: WingProbeScopeRefusal, reason: stri
 
 /* ────────────────────────────── sentinels + live wiring (inert on import) ────────────────────────────── */
 
-/** Readiness sentinel filename (cleared at startup + after use). */
-export const RECORD_SENTINEL_FILENAME = "probe-wing-issuance-selectors.ready";
-/** Operator abort sentinel filename (ends the session, writes the empty sanitized record). */
+/**
+ * **There is no readiness sentinel any more.** `probe-wing-issuance-selectors.ready` used to advance a checkpoint,
+ * and on 2026-08-13 it was created by the assistant on the strength of a chat line the operator never wrote. A
+ * file any process can `touch` cannot be evidence that a human looked at a screen; the confirmation surface in
+ * `./operator-confirm` replaced it, and no code path here reads a readiness file.
+ *
+ * The ABORT sentinel stays, and the asymmetry is deliberate: a forged abort stops a run, which is the safe
+ * direction. Only advancing needs a channel a model cannot reach.
+ */
 export const RECORD_ABORT_FILENAME = "probe-wing-issuance-selectors.abort";
 
-export function recordSentinelPathFor(statusFile: string): string {
-  return resolve(dirname(resolve(statusFile)), RECORD_SENTINEL_FILENAME);
-}
 export function recordAbortPathFor(statusFile: string): string {
   return resolve(dirname(resolve(statusFile)), RECORD_ABORT_FILENAME);
 }
 
-const SENTINEL_POLL_MS = 1_000;
+const CONFIRM_POLL_MS = 500;
+/**
+ * The ONLY document the confirmation surface may be armed on. A fresh `newPage()` is `about:blank`, and it stays
+ * that way because nothing in this run navigates it — so any other value means the tab is not ours any more.
+ */
+const CONFIRM_SURFACE_URL = "about:blank";
 const RECORD_WAIT_TIMEOUT_MS = 20 * 60_000; // generous budget for a manual login + navigate to the issuance page
 
 function mintRunId(): string {
@@ -1467,34 +1570,64 @@ function banner(): void {
   console.error(" It measures ONLY how many candidates each target's fixed WING label matches (a count), whether");
   console.error(" it resolves uniquely, and an opaque 16-hex structural signature. It never highlights, tags,");
   console.error(" clicks, types, submits, issues a key, or reads any value (incl. Access Key / Secret Key / 업체코드).");
-  console.error(" The SELLER navigates MANUALLY to the open-API issuance page, then signals ready. Output is a");
+  console.error(" The SELLER navigates MANUALLY to the open-API issuance page, then confirms each screen on the");
+  console.error(` SellerOps '${OPERATOR_CONFIRM_PAGE_TITLE}' tab — nothing else advances the run. Output is a`);
+  // Named because it was not obvious live: the run opens 'Chrome for Testing', which sits beside the operator's
+  // everyday Chrome in the Dock and looks almost identical. Time was lost looking for the tabs in the wrong app.
+  console.error(" It opens its OWN browser ('Chrome for Testing'), NOT your everyday Chrome, with two tabs: the");
+  console.error(" WING page you navigate, and the confirmation tab. It raises the confirmation tab by itself.");
   console.error(" sanitized calibration record — no selector, value, PII, raw DOM/HTML, screenshot, or raw URL.");
   console.error(line);
 }
 
 /**
- * Stage-2 instructions. Separate copy, because the operator is being asked to take a REAL marketplace action
- * before signalling ready — and the one thing they must not do (press 확인) is on the screen they are opening.
+ * **The copy the operator reads is built ONCE and shown in both places.**
+ *
+ * The terminal prints it and the confirmation surface renders the same object, so the button is pressed against
+ * the instruction it belongs to. That is not tidiness: the channel this replaced let the instruction reach the
+ * operator through a chat paraphrase and the confirmation come back the same way, and neither end was the run.
  */
-function printStage2Instructions(readyPath: string, abortPath: string, calibration = false): void {
+function confirmTailLines(abortPath: string): readonly string[] {
+  return [
+    `진행하려면 '${OPERATOR_CONFIRM_PAGE_TITLE}' 탭의 [${OPERATOR_CONFIRM_BUTTON_LABEL}] 버튼을 직접 누르세요.`,
+    "대화창에 'ready'라고 쓰거나 파일을 만드는 것으로는 진행되지 않습니다 — SellerOps는 그런 신호를 받지 않습니다.",
+    `중단하려면 Ctrl+C, 또는 이 파일을 만드세요: ${abortPath}`,
+  ];
+}
+
+/** The ask, plus the one paragraph that says what advances it. */
+export function withConfirmTail(ask: OperatorConfirmAsk, abortPath: string): OperatorConfirmAsk {
+  return { ...ask, lines: [...ask.lines, "", ...confirmTailLines(abortPath)] };
+}
+
+/** Print an ask to the terminal in the same words the confirmation surface shows. */
+function printAsk(ask: OperatorConfirmAsk): void {
   console.error("");
-  console.error(
-    calibration
-      ? "WING Stage-2 LABEL CALIBRATION: reach the purpose-selection screen YOURSELF in the opened window."
-      : "WING Stage-2 recon: reach the purpose-selection screen YOURSELF in the opened window.",
-  );
-  if (calibration) {
-    console.error("  It reads how each choice control is LABELLED — the derivation, the association, the group —");
-    console.error("  and compares the result against a fixed candidate list. No wording leaves the page, and no");
-    console.error("  option is selected: the whole point is to learn what the options ARE before anyone picks one.");
-  }
-  console.error("  1) Log in and reach the open-API 키 발급 page (nothing on WING is clicked for you).");
-  console.error("  2) Press 'API Key 발급 받기' YOURSELF. SellerOps does not press it and never will.");
-  console.error("  3) STOP on the purpose screen. Choose nothing. Type nothing. Do NOT press '확인'.");
-  console.error('  4) With that screen still open, signal readiness by creating this file (or say "ready"):');
-  console.error(`       ${readyPath}`);
-  console.error(`     To abort the session, create: ${abortPath}  (or press Ctrl+C).`);
-  console.error("  Polling… (read-only — nothing is highlighted, selected, clicked, or navigated)");
+  console.error(`${ask.title} — ${ask.headline}`);
+  for (const line of ask.lines) console.error(line === "" ? "" : `  ${line}`);
+}
+
+/**
+ * Stage-2 copy. Separate, because the operator is being asked to take a REAL marketplace action before confirming
+ * — and the one thing they must not do (press 확인) is on the screen they are opening.
+ */
+export function stage2AskCopy(calibration: boolean): OperatorConfirmAsk {
+  return {
+    title: calibration ? "WING Stage-2 LABEL CALIBRATION" : "WING Stage-2 recon",
+    headline: "reach the purpose-selection screen YOURSELF in the opened window.",
+    lines: [
+      ...(calibration
+        ? [
+            "It reads how each choice control is LABELLED — the derivation, the association, the group —",
+            "and compares the result against a fixed candidate list. No wording leaves the page, and no",
+            "option is selected: the whole point is to learn what the options ARE before anyone picks one.",
+          ]
+        : []),
+      "1) Log in and reach the open-API 키 발급 page (nothing on WING is clicked for you).",
+      "2) Press 'API Key 발급 받기' YOURSELF. SellerOps does not press it and never will.",
+      "3) STOP on the purpose screen. Choose nothing. Type nothing. Do NOT press '확인'.",
+    ],
+  };
 }
 
 /**
@@ -1505,87 +1638,134 @@ function printStage2Instructions(readyPath: string, abortPath: string, calibrati
  * 확인, and whether it is printed at all depends on a reading that has not been taken when the first block goes
  * out. Printing the plan in advance would tell them to press a control the gate may be about to forbid.
  */
-function printDiscoveryCheckpoint(
-  checkpoint: WingFlowCheckpoint,
-  index: number,
-  total: number,
-  readyPath: string,
-  abortPath: string,
-): void {
+export function discoveryCheckpointCopy(checkpoint: WingFlowCheckpoint, index: number, total: number): OperatorConfirmAsk {
   // The step counter is COMPUTED. It was hand-typed as "1/3", "2/3", "3/3", and adding a fourth checkpoint left
   // the first two claiming a three-step run while the manifest promised four — an operator told a different
   // number by each document. Three separate literals is three chances to miss one; this is none.
-  const step = `DISCOVERY ${index + 1}/${total}`;
-  console.error("");
+  const title = `DISCOVERY ${index + 1}/${total}`;
   if (checkpoint === "PURPOSE_SCREEN_UNTOUCHED") {
-    console.error(`${step} — the purpose screen, UNTOUCHED (the baseline every later reading is compared against).`);
-    console.error("  1) Log in and reach the open-API 키 발급 page yourself (nothing on WING is clicked for you).");
-    console.error("  2) Press 'API Key 발급 받기' YOURSELF, and STOP. Select nothing yet.");
-  } else if (checkpoint === "PURPOSE_OPTION_SELECTED_BY_OPERATOR") {
-    console.error(`${step} — make sure 'OPEN API' is the selected option. Do NOT press 확인.`);
-    console.error("  OPERATOR-REPORTED 2026-08-10: it is already the DEFAULT. If so, press nothing at all —");
-    console.error("  this checkpoint records the state, it does not require a click. SellerOps does not click");
-    console.error("  the radio and has no code path that could, and it never reads `checked`.");
-    console.error("  This reading is what the next step is gated on: if the flow has already moved past the");
-    console.error("  purpose screen, or the 업체명 / URL / IP fields are on it, the run ends here and does not");
-    console.error("  ask you to press 확인.");
-  } else if (checkpoint === "AFTER_OPERATOR_CONFIRM") {
-    console.error(`${step} — the reading permits one more step: press 확인 YOURSELF, then STOP.`);
-    console.error("  What the reading established is NARROW: 업체명 / URL / IP are not on this screen, so 확인 is");
-    console.error("  not submitting them. WHAT IT DOES is what this checkpoint measures — do not take the");
-    console.error("  instruction as a claim that it advances the flow. Press it, let whatever follows settle,");
-    console.error("  signal, and then STOP and type NOTHING into it.");
-  } else if (checkpoint === "TERMS_CHECKED_BY_OPERATOR") {
-    const last = index + 1 === total;
-    console.error(`${step} — the TERMS screen. Tick the two consent boxes YOURSELF, then STOP.`);
-    if (last) {
-      console.error("  ⚠ DO NOT press '약관 동의 및 Key 발급받기'. It opens a screen this phase has never read, and it is the last");
-      console.error("  checkpoint's whole reason for existing: this run measures where it is and never presses it.");
-      console.error("  Key issuance is a SEPARATE approval with its own manifest — it cannot be reached from here.");
-    } else {
-      // The VENDOR plan continues past this screen, so the flat prohibition above would contradict the very next
-      // instruction. Printing one document's rule against another document's step is how the 2026-08-11 bootstrap
-      // told the operator the opposite of the manifest they were about to read.
-      console.error("  Do NOT press '약관 동의 및 Key 발급받기' YET — the next checkpoint asks for it, and only after");
-      console.error("  It was pressed on two live walks and the operator reported no key either time —");
-      console.error("  SellerOps cannot confirm that either way, so treat it as their report, not a measurement.");
-    }
-    console.error("  Read the terms and decide for yourself. SellerOps does not read them, agree to them, or");
-    console.error("  advise on them; it reads only whether each box's label matches a string you transcribed.");
-    console.error("  Tick both (or neither — the reading is honest either way), then signal.");
-  } else if (checkpoint === "VENDOR_METHOD_SCREEN_UNTOUCHED") {
-    console.error(`${step} — press '약관 동의 및 Key 발급받기' YOURSELF, then STOP on the screen it opens.`);
-    console.error("  This press was made on two live walks and the OPERATOR reported no key either time. That");
-    console.error("  report is why this checkpoint may ask for it — SellerOps cannot corroborate it: an issued");
-    console.error("  surface and a no-key one are indistinguishable across every signal it captures.");
-    console.error("  What it opens has NEVER been read by any apparatus. Choose nothing, type nothing, and above");
-    console.error("  all do not press that screen's '확인' — THAT is what issues a real API key, and it is not in");
-    console.error("  this run's approval. Let the screen settle, signal, and STOP.");
-  } else if (checkpoint === "VENDOR_METHOD_SELECTED_BY_OPERATOR") {
-    console.error(`${step} — on the vendor screen, select the input method YOURSELF. Then STOP. This is the END.`);
-    console.error("  Pick whichever option you would pick for real; the reading is honest either way, and nothing");
-    console.error("  here recommends one — which method SellerOps should use is a product decision, not a");
-    console.error("  measurement, and this run is only measuring what the screen is made of.");
-    console.error("  ⚠ DO NOT press '확인'. It issues a REAL API KEY on your live account and changes its state, and this");
-    console.error("  run has no approval for it. Issuance is a SEPARATE manifest and a separate grant.");
-    console.error("  SellerOps selects nothing and has no code path that could.");
-  } else {
-    console.error(`${step} — unrecognized checkpoint. Nothing is asked of you; signal to let the run end.`);
+    return {
+      title,
+      headline: "the purpose screen, UNTOUCHED (the baseline every later reading is compared against).",
+      lines: [
+        "1) Log in and reach the open-API 키 발급 page yourself (nothing on WING is clicked for you).",
+        "2) Press 'API Key 발급 받기' YOURSELF, and STOP. Select nothing yet.",
+      ],
+    };
   }
-  console.error('  Signal by creating this file (or say "ready"):');
-  console.error(`       ${readyPath}`);
-  console.error(`     To abort the session, create: ${abortPath}  (or press Ctrl+C).`);
-  console.error("  Polling… (read-only — SellerOps highlights, clicks, selects and types nothing)");
+  if (checkpoint === "PURPOSE_OPTION_SELECTED_BY_OPERATOR") {
+    return {
+      title,
+      headline: "make sure 'OPEN API' is the selected option. Do NOT press 확인.",
+      lines: [
+        "OPERATOR-REPORTED 2026-08-10: it is already the DEFAULT. If so, press nothing at all —",
+        "this checkpoint records the state, it does not require a click. SellerOps does not click",
+        "the radio and has no code path that could, and it never reads whether it is checked.",
+        "This reading is what the next step is gated on: if the flow has already moved past the",
+        "purpose screen, or the 업체명 / URL / IP fields are on it, the run ends here and does not",
+        "ask you to press 확인.",
+      ],
+    };
+  }
+  if (checkpoint === "AFTER_OPERATOR_CONFIRM") {
+    return {
+      title,
+      headline: "the reading permits one more step: press 확인 YOURSELF, then STOP.",
+      lines: [
+        "What the reading established is NARROW: 업체명 / URL / IP are not on this screen, so 확인 is",
+        "not submitting them. WHAT IT DOES is what this checkpoint measures — do not take the",
+        "instruction as a claim that it advances the flow. Press it, let whatever follows settle,",
+        "confirm, and then STOP and type NOTHING into it.",
+      ],
+    };
+  }
+  if (checkpoint === "TERMS_CHECKED_BY_OPERATOR") {
+    const last = index + 1 === total;
+    return {
+      title,
+      headline: "the TERMS screen. Tick the two consent boxes YOURSELF, then STOP.",
+      lines: [
+        ...(last
+          ? [
+              "⚠ DO NOT press '약관 동의 및 Key 발급받기'. It opens a screen this phase has never read, and it is the",
+              "last checkpoint's whole reason for existing: this run measures where it is and never presses it.",
+              "Key issuance is a SEPARATE approval with its own manifest — it cannot be reached from here.",
+            ]
+          : // The VENDOR plan continues past this screen, so the flat prohibition above would contradict the very
+            // next instruction. Printing one document's rule against another document's step is how the
+            // 2026-08-11 bootstrap told the operator the opposite of the manifest they were about to read.
+            [
+              "Do NOT press '약관 동의 및 Key 발급받기' YET — the next checkpoint asks for it, and only after",
+              "It was pressed on two live walks and the operator reported no key either time —",
+              "SellerOps cannot confirm that either way, so treat it as their report, not a measurement.",
+            ]),
+        "Read the terms and decide for yourself. SellerOps does not read them, agree to them, or",
+        "advise on them; it reads only whether each box's label matches a string you transcribed.",
+        "Tick both (or neither — the reading is honest either way), then confirm.",
+      ],
+    };
+  }
+  if (checkpoint === "VENDOR_METHOD_SCREEN_UNTOUCHED") {
+    return {
+      title,
+      headline: "press '약관 동의 및 Key 발급받기' YOURSELF, then STOP on the screen it opens.",
+      lines: [
+        "This press was made on two live walks and the OPERATOR reported no key either time. That",
+        "report is why this checkpoint may ask for it — SellerOps cannot corroborate it: an issued",
+        "surface and a no-key one are indistinguishable across every signal it captures.",
+        "What it opens has NEVER been read by any apparatus. Choose nothing, type nothing, and above",
+        "all do not press that screen's '확인' — THAT is what issues a real API key, and it is not in",
+        "this run's approval. Let the screen settle, confirm, and STOP.",
+      ],
+    };
+  }
+  if (checkpoint === "VENDOR_METHOD_SELECTED_BY_OPERATOR") {
+    return {
+      title,
+      headline: "on the vendor screen, select the input method YOURSELF. Then STOP.",
+      lines: [
+        "Pick whichever option you would pick for real; the reading is honest either way, and nothing",
+        "here recommends one — which method SellerOps should use is a product decision, not a",
+        "measurement, and this run is only measuring what the screen is made of.",
+        "Leave the fields it reveals EMPTY for now: this reading is the 'before' half of a pair.",
+        "⚠ DO NOT press '확인'. It issues a REAL API KEY on your live account and changes its state, and",
+        "this run has no approval for it. Issuance is a SEPARATE manifest and a separate grant.",
+        "SellerOps selects nothing and has no code path that could.",
+      ],
+    };
+  }
+  if (checkpoint === "VENDOR_FORM_IP_REGISTERED_BY_OPERATOR") {
+    return {
+      title,
+      headline: "fill the form in YOURSELF, then STOP. This is the END.",
+      lines: [
+        "Type your own 업체명 and URL, type an IP address, and press '추가' so it is REGISTERED.",
+        "That press is the whole point of this checkpoint: the guided walk decides 'an IP has been",
+        "added' from a count of list rows, and on 2026-08-13 that read zero while the address was",
+        "registered — WING shows it as a removable chip. This reading is the 'after' half, and the",
+        "difference between the two says what a registered entry actually is.",
+        "What is read: the tag names inside each field's region and how many of each. NOT what you",
+        "typed — this census does not even count how many fields are non-empty, which the guided",
+        "walk does. Nothing about 업체명 · URL · IP leaves the page.",
+        "⚠ DO NOT press '확인'. Filling the form in changes nothing on your account; SUBMITTING it",
+        "issues a REAL API KEY, and that is a separate manifest and a separate grant.",
+      ],
+    };
+  }
+  return {
+    title,
+    headline: "unrecognized checkpoint. Nothing is asked of you; confirm to let the run end.",
+    lines: [],
+  };
 }
 
-function printInstructions(readyPath: string, abortPath: string): void {
-  console.error("");
-  console.error("WING selector recorder: navigate MANUALLY to the open-API 키 발급 page in the opened window.");
-  console.error("  1) Log in and reach the open-API issuance page yourself (nothing on WING is clicked for you).");
-  console.error('  2) Signal readiness by creating this file (or say "ready"):');
-  console.error(`       ${readyPath}`);
-  console.error(`     To abort the session, create: ${abortPath}  (or press Ctrl+C).`);
-  console.error("  Polling… (read-only — nothing is highlighted, clicked, or navigated)");
+/** The single-reading baseline run's copy. */
+export function baselineAskCopy(): OperatorConfirmAsk {
+  return {
+    title: "WING selector recorder",
+    headline: "navigate MANUALLY to the open-API 키 발급 page in the opened window.",
+    lines: ["1) Log in and reach the open-API issuance page yourself (nothing on WING is clicked for you)."],
+  };
 }
 
 /**
@@ -1695,10 +1875,8 @@ async function main(): Promise<void> {
 
   const cfg = loadConfig();
   const runId = mintRunId();
-  const readyPath = recordSentinelPathFor(cfg.statusFile);
   const abortPath = recordAbortPathFor(cfg.statusFile);
-  mkdirSync(dirname(readyPath), { recursive: true });
-  removeSentinel(readyPath);
+  mkdirSync(dirname(abortPath), { recursive: true });
   removeSentinel(abortPath);
 
   const abortFlag = { v: false };
@@ -1710,19 +1888,80 @@ async function main(): Promise<void> {
 
   const ctx: BrowserContext = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
   // The driver reads the NEWEST tab (context injected) — wherever the seller navigated. The recorder never drives it.
+  // Captured BEFORE the confirmation tab is opened, so `entry` is the seller's own page in every ordering.
   const entry = (ctx.pages()[0] ?? (await ctx.newPage())) as Page;
-  const driver = new CoupangWingIssuanceDriver(entry, { context: ctx });
+  // The confirmation surface: a SellerOps-owned BLANK tab. It is deliberately not an overlay on the marketplace
+  // page — this recorder's whole claim is that it adds nothing to WING and touches nothing there, and a button
+  // injected into the seller's page would retire that claim to buy a convenience.
+  const confirmPage = (await ctx.newPage()) as Page;
+  // …and the driver must never read it. `activePage()` takes the NEWEST tab, so an unfiltered context would hand
+  // every measurement the blank confirmation page and report a confident reading of nothing. The filter is the
+  // one place that knows both pages exist.
+  const wingPages: WingContextLike = {
+    pages: () => ctx.pages().filter((p) => p !== confirmPage) as Page[],
+    on: (event: "close", handler: () => void) => ctx.on(event, handler),
+  };
+  const driver = new CoupangWingIssuanceDriver(entry, { context: wingPages });
+  /**
+   * **The confirmation tab is PINNED to the blank document it was opened on.**
+   *
+   * The arm script is self-mounting: it paints itself onto whatever document the tab holds. Nothing stops the
+   * operator from typing a URL into that tab — and the first arming raises it to the front at exactly the moment
+   * the printed ask says "log in and reach the 키 발급 page yourself", which is when someone would. Arming after
+   * that would restyle a LIVE MARKETPLACE PAGE and rewrite its title, retiring this recorder's standing claim
+   * that it adds nothing to WING, in a run whose manifest promised precisely that.
+   *
+   * So the tab is checked rather than trusted, on every evaluation. A navigated tab throws, which the caller
+   * reads as `UI_NOT_ARMED` and fails the wait closed — the run stops instead of painting on the seller's page.
+   */
+  const evalOnConfirmPage = (script: string): Promise<unknown> => {
+    const url = confirmPage.url();
+    if (url !== CONFIRM_SURFACE_URL) {
+      return Promise.reject(new Error("the confirmation tab is no longer the SellerOps surface"));
+    }
+    return (confirmPage as unknown as { evaluate<T>(s: string): Promise<T> }).evaluate<unknown>(script);
+  };
+  const confirmSeams: OperatorConfirmSeams = {
+    evaluate: evalOnConfirmPage,
+    aborted: () => abortFlag.v || existsSync(abortPath),
+    sleep,
+    // The run raises its own surface. On 2026-08-13 the operator could not find the window it was in, and
+    // raising that window from the OS opened a third blank one INSIDE the run's own browser (Chrome routes a
+    // second launch on the same user-data-dir into the running instance) — a page the recorder would then have
+    // measured as the newest tab. Playwright raises the TAB, inside the context that owns it, and cannot do that.
+    onArmed: () => (confirmPage as unknown as { bringToFront(): Promise<void> }).bringToFront(),
+    // The VERDICT only. The token never reaches a log line, and neither does the event.
+    onVerdict: (verdict) => {
+      if (verdict !== "CONFIRMED") log("aw_coupang_operator_confirm_refused", { runId, verdict });
+    },
+  };
+  /** The ONE builder both the terminal and the confirmation surface read, so they cannot say different things. */
+  const askCopyFor = (ask: WingOperatorAsk): OperatorConfirmAsk =>
+    withConfirmTail(
+      ask.checkpoint === null
+        ? isStage2Run
+          ? stage2AskCopy(isCalibrationRun)
+          : baselineAskCopy()
+        : discoveryCheckpointCopy(ask.checkpoint, ask.index, ask.total),
+      abortPath,
+    );
 
   const deps: WingSelectorRecordDeps = {
-    waitForReady: async () => {
-      removeSentinel(readyPath);
-      const maxTicks = Math.ceil(RECORD_WAIT_TIMEOUT_MS / SENTINEL_POLL_MS);
-      for (let i = 0; i < maxTicks; i++) {
-        if (abortFlag.v || existsSync(abortPath)) return "abort";
-        if (existsSync(readyPath)) return "ready";
-        await sleep(SENTINEL_POLL_MS);
-      }
-      return "timeout";
+    awaitOperatorConfirmation: async (ask) => {
+      const confirmation = await awaitOperatorConfirmation(confirmSeams, askCopyFor(ask), {
+        // A FRESH token per checkpoint. A press held over from the previous screen cannot advance this one, and
+        // nothing outside this process ever sees the value it would have to produce.
+        token: mintOperatorConfirmToken(),
+        pollMs: CONFIRM_POLL_MS,
+        timeoutMs: RECORD_WAIT_TIMEOUT_MS,
+      });
+      log("aw_coupang_operator_confirm", {
+        runId,
+        checkpoint: ask.checkpoint ?? "single_reading",
+        signal: confirmation.signal,
+        provenance: confirmation.provenance ?? "none",
+      });
+      return confirmation;
     },
     observeSurface: () => driver.observeSurface(),
     probeTarget: (target) => driver.probeFixedLabelMatch(wingRecordLabelSpec(target)),
@@ -1739,11 +1978,11 @@ async function main(): Promise<void> {
     choiceAssociationCensus: (candidates) => driver.choiceAssociationCensus(candidates),
     // Armed unconditionally; `sweepStage2` calls it only under the discovery phase, so ONE gate decides.
     consentBlockCensus: (consents) => driver.consentBlockCensus(consents),
-    announce: () =>
-      isStage2Run
-        ? printStage2Instructions(readyPath, abortPath, isCalibrationRun)
-        : printInstructions(readyPath, abortPath),
-    announceCheckpoint: (checkpoint, index, total) => printDiscoveryCheckpoint(checkpoint, index, total, readyPath, abortPath),
+    // …and the same shape for the vendor form's regions: wired here, called only on the checkpoints that stand
+    // on the vendor screen. Structure and tag counts; the emptiness count the guided walk takes is NOT asked for.
+    vendorFieldRegions: () => driver.vendorFieldRegions(),
+    announce: () => printAsk(askCopyFor({ checkpoint: null, index: 0, total: 1 })),
+    announceCheckpoint: (checkpoint, index, total) => printAsk(askCopyFor({ checkpoint, index, total })),
   };
 
   if (isDiscoveryRun && flowPlan) {
@@ -1797,6 +2036,13 @@ async function main(): Promise<void> {
               observation: r.observation,
               observationFault: r.observationFault,
               stage2: stage2RecordFor(r.stage2),
+              // Null except on the vendor screen's checkpoints. Tag names and integers — and deliberately no
+              // emptiness count, so the difference between the two vendor readings is a difference in SHAPE.
+              vendorRegions: r.vendorRegions,
+              // WHAT let this reading be taken. It was in the run's log lines and missing from the record the
+              // reviewer actually reads — so the artefact could not show, on its own, that no checkpoint here
+              // advanced on anything but a verified press.
+              confirmedBy: r.confirmedBy,
             })),
           },
           null,
@@ -1812,7 +2058,6 @@ async function main(): Promise<void> {
         agentSelections: flow.agentSelections,
       });
     } finally {
-      removeSentinel(readyPath);
       removeSentinel(abortPath);
       await ctx.close().catch(() => undefined);
       process.off("SIGINT", onSigint);
@@ -1895,7 +2140,6 @@ async function main(): Promise<void> {
       stage2ContainmentFaults: result.stage2?.containmentFaults.length ?? 0,
     });
   } finally {
-    removeSentinel(readyPath);
     removeSentinel(abortPath);
     process.removeListener("SIGINT", onSigint);
     process.removeListener("SIGTERM", onSigint);

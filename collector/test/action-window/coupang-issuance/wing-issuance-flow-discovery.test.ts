@@ -48,11 +48,13 @@ import { observeFrom, WING_PROBE_TARGET_NAMES, type WingStructuralCensus } from 
 import { coupangLiveWalkRefusal } from "../../../src/cli/local-agent";
 import {
   CALIBRATION_PHASES,
+  COUPANG_WING_GUIDED_WALK_BOUNDARY,
   WING_STAGE2_MANIFEST_PHASES,
   WING_PHASES,
   PHASE_ENTRYPOINTS,
   PHASE_SPECS,
 } from "../../../src/cli/approval-manifest";
+import { OPERATOR_ABORTED, OPERATOR_CONFIRMED, confirmationFor } from "../../fixtures/operator-confirmation";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -298,7 +300,7 @@ function fakeFlow(
   const paints = (t: string): boolean =>
     VENDOR.includes(t) ? over.vendorVisible === true : t === TERMS_TEXT ? onTerms() : t === PURPOSE_TEXT ? !onTerms() : false;
   const deps: WingSelectorRecordDeps = {
-    waitForReady: async () => signals[waits++] ?? "timeout",
+    awaitOperatorConfirmation: async () => confirmationFor(signals[waits++] ?? "timeout"),
     observeSurface: async () => {
       reads += 1;
       return observeFrom("wing_host", { ...CENSUS, choiceControlCount: over.choiceControls ?? 2 });
@@ -428,9 +430,9 @@ describe("runWingFlowDiscovery — one reading per operator-advanced checkpoint"
     const { deps } = fakeFlow();
     const counted: WingSelectorRecordDeps = {
       ...deps,
-      waitForReady: async () => {
+      awaitOperatorConfirmation: async () => {
         waits += 1;
-        return "ready";
+        return OPERATOR_CONFIRMED;
       },
     };
     const r = await runWingFlowDiscovery(counted, { targets: ALL_TARGETS, phase: WING_ISSUANCE_FLOW_DISCOVERY_PHASE });
@@ -776,8 +778,16 @@ describe("the manifest cannot under-describe the flow it approves", () => {
     expect(block).not.toMatch(/echo "    [0-9]+\)/);
     expect(block).not.toContain("is the KEY-CREATION control");
     expect(block).toContain("no fifth checkpoint");
-    // …and the plan's own two extra steps have copy branches too, or a vendor run prints blank lines for them.
+    // …and the plan's own extra steps have copy branches too, or a vendor run prints blank lines for them.
     for (const c of WING_VENDOR_METHOD_CHECKPOINTS) expect(block, c).toContain(`${c})`);
+    // **The shell's own plan string must BE the plan.** A copy branch existing does not mean the checkpoint is
+    // reached: the list the operator reads is `PLAN_FULL`, and a checkpoint added to the TypeScript plan but not
+    // to that string produces a manifest describing a shorter run than the one about to execute — which is
+    // exactly what happened when this checkpoint was added on 2026-08-13, and what a `case` label cannot catch.
+    const planLine = /PLAN_FULL="\$PLAN_FULL,([A-Z_,]+)"/.exec(block)?.[1] ?? "";
+    expect(planLine.split(",")).toEqual([...WING_VENDOR_METHOD_CHECKPOINTS]);
+    const baseLine = /PLAN_FULL="([A-Z_,]+)"/.exec(block)?.[1] ?? "";
+    expect(baseLine.split(",")).toEqual([...WING_FLOW_CHECKPOINTS]);
   });
 
   it("the warning does not repeat a claim its own runs have since falsified", () => {
@@ -872,11 +882,11 @@ describe("the operator-facing step counter is computed, not typed", () => {
     expect(steps).toEqual(WING_FLOW_CHECKPOINTS.map((_, i) => ({ index: i, total: WING_FLOW_CHECKPOINTS.length })));
   });
 
-  it("the printer interpolates the counter and contains no hard-coded N/M", () => {
+  it("the copy builder interpolates the counter and contains no hard-coded N/M", () => {
     const src = readFileSync(resolve(HERE, "../../../src/cli/probe-wing-issuance-selectors.ts"), "utf8");
-    const from = src.indexOf("function printDiscoveryCheckpoint");
-    const body = src.slice(from, src.indexOf("\nfunction printInstructions", from));
-    expect(body).toContain("const step = `DISCOVERY ${index + 1}/${total}`");
+    const from = src.indexOf("export function discoveryCheckpointCopy");
+    const body = src.slice(from, src.indexOf("\nexport function baselineAskCopy", from));
+    expect(body).toContain("const title = `DISCOVERY ${index + 1}/${total}`");
     // Any surviving literal step counter is the defect coming back.
     expect(body).not.toMatch(/DISCOVERY [0-9]+\/[0-9]+/);
   });
@@ -1034,7 +1044,11 @@ describe("the guided-walk manifest is not the fallback", () => {
     expect(max).toContain("0 text-guided");
     // …and the count that says what SellerOps does NOT know: no ring sits on an input.
     expect(max).toContain("0 rings on an input");
-    expect(max).toContain("6 steps advanced by OBSERVING WING");
+    // SEVEN since 2026-08-13, when the vendor-method step started completing itself on the readiness census.
+    // The budget and the descriptor's `autoAdvancingStepCount` are two statements of one fact, and this is the
+    // assertion that keeps them one.
+    expect(max).toContain("7 steps advanced by OBSERVING WING");
+    expect(max).toContain(`${COUPANG_WING_GUIDED_WALK_BOUNDARY.autoAdvancingStepCount} steps advanced by OBSERVING WING`);
     // The one thing that is never observed into happening: the press itself.
     expect(max).toContain("the key-issuing PRESS is never one of them");
   });

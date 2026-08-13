@@ -178,7 +178,7 @@ run_case "HEAD_DRIFT      (commit moved since bootstrap)" nonzero "git commit ch
 # own fields are empty. `keyIssuanceRequiresUnoccludedResult: false` is the one entry that is NOT a softening:
 # it understates a fence rather than a risk. It is in the list all the same, because the verifier is exact-match
 # and a descriptor that drifts in either direction is one the operator did not grant against.
-CANON='{"guidedWalkBoundary":{"operation":"WALK_WING_GUIDED_ISSUANCE_TUTORIAL","forbiddenFollowOnAction":"COMPLETE_WING_KEY_ISSUANCE","restsBeforeControl":"확인 (vendor-method screen)","agentCreatesKeyMaterial":false,"operatorIssuesRealKey":true,"keyCreationRuledOut":false,"agentPerformsAction":false,"agentNavigations":1,"opensLocalSellerOpsInDefaultBrowser":true,"credentialValueReadBudget":0,"performsConnectOrSync":false,"highlightedControlCount":9,"textGuidedControlCount":0,"ringedInputControlCount":0,"autoAdvancingStepCount":6,"keyCreationPressAutoPerformed":false,"keyIssuanceAdvancesOnObservedResult":true,"sellerConsentObserved":true,"vendorFormReadinessObserved":true,"keyIssuanceRequiresUnoccludedResult":true,"reanchorRequiresOwnScreen":true,"vendorMethodGuided":"자체개발(직접입력)","vendorMethodDecidedBy":"PRODUCT_OWNER"}}'
+CANON='{"guidedWalkBoundary":{"operation":"WALK_WING_GUIDED_ISSUANCE_TUTORIAL","forbiddenFollowOnAction":"COMPLETE_WING_KEY_ISSUANCE","restsBeforeControl":"확인 (vendor-method screen)","agentCreatesKeyMaterial":false,"operatorIssuesRealKey":true,"keyCreationRuledOut":false,"agentPerformsAction":false,"agentNavigations":1,"opensLocalSellerOpsInDefaultBrowser":true,"credentialValueReadBudget":0,"performsConnectOrSync":false,"highlightedControlCount":9,"textGuidedControlCount":0,"ringedInputControlCount":0,"autoAdvancingStepCount":7,"keyCreationPressAutoPerformed":false,"keyIssuanceAdvancesOnObservedResult":true,"sellerConsentObserved":true,"vendorFormReadinessObserved":true,"keyIssuanceRequiresUnoccludedResult":true,"reanchorRequiresOwnScreen":true,"vendorMethodGuided":"자체개발(직접입력)","vendorMethodDecidedBy":"PRODUCT_OWNER"}}'
 printf '%s' "$CANON" > "$FIXTURES/desc-ok.json"
 DESC_OK=1
 verify_walk_descriptor "$FIXTURES/desc-ok.json" >/dev/null 2>&1 || { echo "  FAIL  DESCRIPTOR · canonical descriptor rejected"; DESC_OK=0; FAILED=1; }
@@ -195,7 +195,7 @@ for soft in \
   '"highlightedControlCount":8' \
   '"textGuidedControlCount":2' \
   '"ringedInputControlCount":1' \
-  '"autoAdvancingStepCount":5' \
+  '"autoAdvancingStepCount":6' \
   '"operation":"COMPLETE_WING_KEY_ISSUANCE"' \
   '"operation":"DELETE_WING_OPEN_API_KEY"' \
   '"forbiddenFollowOnAction":"NOTHING"' \
@@ -321,6 +321,12 @@ if [ -z "$TREE_DIRTY" ]; then
     "you will SEE a box enclosed" \
     "measured structural pairing" \
     "'OPEN API' is the DEFAULT purpose option" \
+    "SEVEN steps advance by themselves" \
+    "finishes itself when the vendor FORM reads complete" \
+    "keeps clear of the control it points at AND of the ones you use to reach it" \
+    "the RING comes down once the form appears" \
+    "입력이 끝나면 자동 진행" \
+    "강조 표시는 사라지고 안내만 남습니다" \
     "You read the two consent texts and decide" \
     "THIS RUN ENDS WITH A REAL API KEY ON YOUR LIVE COUPANG ACCOUNT" \
     "does NOT create the key" \
@@ -344,12 +350,17 @@ if [ -z "$TREE_DIRTY" ]; then
   # `every screen after that is one YOU navigate to` used to END the sentence, and the walk now has a second
   # navigation after it — the seller-pressed return. A disclosure that still stops there describes a run that
   # navigates once, which is exactly the shape of understatement this fence exists to refuse.
-  for stale_en in "DO NOT PRESS IT in this run" "No apparatus has ever read that screen" "SEVEN controls are highlighted" "FOUR steps advance" "It never navigates again"; do
+  # "SIX steps advance by themselves" is retired for the reason all of these are: the run grew and the sentence
+  # did not. The vendor-METHOD step now completes on the readiness census it was already taking.
+  for stale_en in "DO NOT PRESS IT in this run" "No apparatus has ever read that screen" "SEVEN controls are highlighted" "FOUR steps advance" "SIX steps advance by themselves" "It never navigates again"; do
     if grep -qF "$stale_en" <<<"$out"; then
       echo "  FAIL  NORMAL          · retired English claim still shown: $stale_en"; DISCLOSE_OK=0; FAILED=1
     fi
   done
-  for stale_ko in "사용 목적/확인 단계와 체크박스에는 강조 표시가 없습니다" "selector로 승격되지 않았기 때문"; do
+  # …and the step-⑥ line that ended "방식을 직접 선택 → ⑦ 업체명 · URL · IP 주소를 직접 입력한 뒤": the form
+  # entry moved INTO ⑥ when that step started completing itself on it, and a Korean summary still splitting them
+  # describes a walk that waits for a press it no longer waits for.
+  for stale_ko in "사용 목적/확인 단계와 체크박스에는 강조 표시가 없습니다" "selector로 승격되지 않았기 때문" "방식을 직접 선택 → ⑦ 업체명"; do
     if grep -qF "$stale_ko" <<<"$out"; then
       echo "  FAIL  NORMAL          · retired Korean claim still shown: $stale_ko"; DISCLOSE_OK=0; FAILED=1
     fi
@@ -539,7 +550,7 @@ ENV
   # Asserted BOTH ways: the current claims must be present, and the retired ones must be gone — a disclosure
   # that gained a line while keeping its contradiction is not fixed.
   BOOT_OK=1
-  for claim in "ONE, and it is not a marketplace screen" "the LANDING" "OWN DEFAULT BROWSER" "This window is not touched at all" "NINE live-calibrated" "NONE of the rings sits on an input" "stay text-only" "SIX steps advance" "consent boxes are ticked" "refused ONCE with a message" "PAINTED OVER them" "re-drawn on the screen the step is about" "RESTS in front" "THIS RUN ENDS WITH A REAL KEY" "PRODUCT DECISION" "never ticks a box"; do
+  for claim in "ONE, and it is not a marketplace screen" "the LANDING" "OWN DEFAULT BROWSER" "This window is not touched at all" "NINE live-calibrated" "NONE of the rings sits on an input" "stay text-only" "SEVEN steps advance" "consent boxes are ticked" "refused ONCE with a message" "WHILE YOU FILL THE FORM IN" "the step finishes ITSELF" "docked out of the way of the ring AND of the controls" "PAINTED OVER them" "re-drawn on the screen the step is about" "RESTS in front" "THIS RUN ENDS WITH A REAL KEY" "PRODUCT DECISION" "never ticks a box"; do
     grep -qF "$claim" <<<"$out" || { echo "  FAIL  BOOTSTRAP_DISCLOSE · missing claim: $claim"; BOOT_OK=0; FAILED=1; }
   done
   # Retired claims. The last three were true and are no longer: the count moved 2 → 3 → 7 as controls were
@@ -551,7 +562,10 @@ ENV
   # "TWO, and neither is…" / "in a NEW TAB" were true for one day: the return opened a second tab in the walk's
   # own window, which navigated and returned nobody — that window has no SellerOps session, so it delivered a
   # login screen. The return now happens in the seller's default browser and this window is not navigated twice.
-  for stale in "the agent never navigates" "TWO, and neither is a marketplace screen" "in a NEW TAB" "0 gotos" "ONLY the two live-calibrated" "THREE live-calibrated" "SEVEN live-calibrated" "TEXT-GUIDED" "No guided step is text-only" "NOT performed, and NEVER auto-advanced"; do
+  # "SIX steps advance" joined them on 2026-08-13: the vendor-METHOD step now completes itself on the readiness
+  # census it was already taking, so the count is SEVEN and a disclosure still saying six understates what the
+  # run does without asking — the same shape as every other entry in this list.
+  for stale in "the agent never navigates" "TWO, and neither is a marketplace screen" "in a NEW TAB" "0 gotos" "ONLY the two live-calibrated" "THREE live-calibrated" "SEVEN live-calibrated" "TEXT-GUIDED" "No guided step is text-only" "NOT performed, and NEVER auto-advanced" "SIX steps advance"; do
     if grep -qF "$stale" <<<"$out"; then
       echo "  FAIL  BOOTSTRAP_DISCLOSE · retired claim still shown: $stale"; BOOT_OK=0; FAILED=1
     fi

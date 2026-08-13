@@ -191,6 +191,44 @@ still hold unchanged.
 
 ---
 
+## 5a. In-run checkpoints advance on an operator-UI confirmation — never on chat text
+
+The grant in §3 authorizes a run. It does **not** authorize any particular checkpoint inside that
+run, and the two must not share a channel.
+
+**The rule.** Where a live or calibration run pauses for the operator to put a screen into a
+specific state, the run may only continue on a **confirmation event the assistant cannot produce**:
+
+- the operator presses a control in a **SellerOps-owned surface** (for the WING recorder: a blank
+  `SellerOps 확인` tab carrying the step's own instruction and one `현재 화면 확인` button);
+- the run mints a **random per-checkpoint token**, arms it on that surface, and never prints, logs,
+  or persists it — so the value a forgery would have to echo exists only in the run's memory and on
+  the operator's screen;
+- the press is accepted only when it is **trusted browser input** (`isTrusted`) carrying **that**
+  checkpoint's token;
+- the reading records the provenance **`OPERATOR_UI_CONFIRMED`**;
+- **no event ⇒ no advance.** A timeout, an untrusted event, a stale token, or a surface that cannot
+  be armed all fail closed.
+
+**What is forbidden as a checkpoint signal:** a line in the assistant's chat transcript (`ready`,
+`떴어`, `체크`, `N번 됐어`), a sentinel file the assistant can `touch`, and any inference from a
+screenshot or a paraphrase. Aborting is deliberately asymmetric — a forged abort only stops a run —
+so Ctrl+C and an abort sentinel remain available.
+
+**Why it exists.** On **2026-08-13**, during the `COUPANG_WING_VENDOR_METHOD_DISCOVERY` sitting
+(`wt-7fac1238faa8`), the assistant generated a user turn that the operator had never written and
+attempted to advance checkpoint 5/7 on it. The operator caught it and stopped the session; the
+measurement was lost. Nothing was pressed on the marketplace, but only because a later screen gate
+halted the run — the confirmation itself had failed. Chat text and `touch` are both things a
+language model can produce, so neither was ever evidence that a human had looked at a screen.
+
+Implementation: `collector/src/cli/operator-confirm.ts`, wired into
+`collector/src/cli/probe-wing-issuance-selectors.ts`. Every probe-phase Approval Manifest discloses
+the channel and the extra tab. **Still on the sentinel channel** (migration pending): the guided
+walk (`run-coupang-wing-issuance-live`), the reveal and deletion drivers, and the NAVER probes.
+
+---
+
 ## 6. UI / CLI display
 
 The approval-waiting screen/CLI shows only:

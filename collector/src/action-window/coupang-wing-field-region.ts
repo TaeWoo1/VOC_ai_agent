@@ -53,6 +53,67 @@ export interface FieldRegionRequest {
    * field here that touches a value at all. Never set for a credential candidate.
    */
   readonly readFilled?: boolean;
+  /**
+   * Whether to census the region's painting descendants BY TAG — see {@link FieldRegionReading.regionTagCounts}.
+   *
+   * Opt-in for cost rather than for exposure: it walks the whole region instead of four fixed queries, and only
+   * the measurement that needs it should pay. It reads strictly less than the counts beside it — tag names, and
+   * how many of each.
+   */
+  readonly readTagCounts?: boolean;
+}
+
+/** How many DISTINCT tag names a region census carries. A region with more shapes than this is not a form row. */
+export const FIELD_REGION_TAG_CENSUS_LIMIT = 16;
+
+/**
+ * **How many buttons WING's `API 호출 IP` region has when nothing is registered — MEASURED, not assumed.**
+ *
+ * One: the `추가` control itself. Registering an address adds its own remove control beside the chip, so the
+ * region carries one button per registered entry ON TOP of this baseline.
+ */
+export const VENDOR_IP_REGION_BASELINE_BUTTON_COUNT = 1;
+
+/**
+ * **Does this region hold at least one REGISTERED IP entry?**
+ *
+ * The rule this replaced counted `entryRowCount` — `li` / `tr` / `option` — and read **zero on both sides of the
+ * registration**, so the guided walk's step ⑥ could never advance. The 2026-08-13 live sitting
+ * (`wt-017b33239e33`, READ_ONLY, operator-confirmed at every checkpoint) measured the same region before and
+ * after the operator pressed `추가`:
+ *
+ * | signal          | before | after |
+ * |-----------------|--------|-------|
+ * | `entryRowCount` | 0      | **0** |
+ * | `buttonCount`   | 1      | **2** |
+ * | `BUTTON`        | 1      | **2** |
+ * | `DIV`           | 2      | **3** |
+ * | `SPAN`          | 4      | **6** |
+ * | `INPUT`         | 1      | 1     |
+ * | `STRONG`        | 2      | 2     |
+ *
+ * A registered entry is a `div` chip carrying its own remove `button` — which is why a row count cannot see it
+ * and a button count can. The 업체명 and URL regions were byte-identical across the same pair while the operator
+ * typed into both, so the signal is specific to REGISTRATION rather than to typing.
+ *
+ * `entryRowCount` is kept as an alternative, not replaced by one: a WING layout that did render rows would still
+ * be honoured, and keeping it costs a comparison. Both fail closed — an unmeasured count is not a registration.
+ *
+ * n=1: one sitting, one address. Registering a second should read `buttonCount: 3`; nothing here depends on
+ * that, since the rule asks only whether the count has risen above the baseline.
+ */
+export function vendorIpEntryRegistered(reading: {
+  readonly buttonCount?: number;
+  readonly entryRowCount?: number;
+}): boolean {
+  if ((reading.entryRowCount ?? 0) >= 1) return true;
+  return (reading.buttonCount ?? 0) > VENDOR_IP_REGION_BASELINE_BUTTON_COUNT;
+}
+
+/** One tag name and how many of it paint inside a region. No text, no attribute, no order dependence. */
+export interface RegionTagCount {
+  readonly tag: string;
+  readonly count: number;
 }
 
 /** One label's structural reading. Every field is a count, a tag name, or a fixed enum. */
@@ -88,6 +149,22 @@ export interface FieldRegionReading {
    * `readFilled`. The value itself never leaves the page.
    */
   readonly filledTextInputCount?: number;
+  /**
+   * **Every painting descendant of the region, counted by TAG NAME.** Present only when the request asks for it.
+   *
+   * The instrument for a question the four counts above could not answer: on 2026-08-13 the walk read `IP 주소`
+   * as not-ready while the seller's screen showed the address REGISTERED — as a removable chip, which is not one
+   * of the `li` / `tr` / `option` that {@link entryRowCount} counts. What a registered entry does to this region
+   * has never been read, and `entryRowCount` alone cannot say: it reports the same zero for "nothing registered"
+   * and "registered as something I do not count".
+   *
+   * Taken BEFORE and AFTER the seller presses 추가, the difference between two of these names the shape.
+   *
+   * Sorted by tag name so two readings can be compared directly, and capped at
+   * {@link FIELD_REGION_TAG_CENSUS_LIMIT} distinct tags. Tag names and integers — the same alphabet as
+   * {@link ancestorTags}, which is to say strictly less than the emptiness count beside it.
+   */
+  readonly regionTagCounts?: readonly RegionTagCount[];
 }
 
 /** A whole census — one reading per requested candidate, in request order. */
@@ -168,6 +245,27 @@ function tag(raw: unknown): string | undefined {
 }
 
 /**
+ * A region's tag census, folded to pairs of a real tag name and a positive integer — and SORTED, so two readings
+ * of the same region taken minutes apart can be compared line by line rather than element by element.
+ *
+ * Everything else is dropped: a row whose tag does not pass {@link tag} carries no information this census is
+ * for, and it is exactly the shape through which page text would have to arrive.
+ */
+function tagCounts(raw: unknown): readonly RegionTagCount[] {
+  if (!Array.isArray(raw)) return [];
+  const rows: RegionTagCount[] = [];
+  for (const row of raw as unknown[]) {
+    if (!row || typeof row !== "object") continue;
+    const name = tag((row as { tag?: unknown }).tag);
+    const n = count((row as { count?: unknown }).count);
+    if (name === undefined || n === undefined || n === 0) continue;
+    rows.push({ tag: name, count: n });
+  }
+  rows.sort((a, b) => (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0));
+  return rows.slice(0, FIELD_REGION_TAG_CENSUS_LIMIT);
+}
+
+/**
  * Fold whatever the page returned into the declared shape, dropping everything else.
  *
  * Fail-closed and total: a page that answers with something unexpected produces a reading with `visibleCount: 0`
@@ -212,6 +310,7 @@ export function sanitizeFieldRegionCensus(raw: unknown, requestedIds: readonly s
       ...(count(row["filledTextInputCount"]) !== undefined
         ? { filledTextInputCount: count(row["filledTextInputCount"])! }
         : {}),
+      ...(tagCounts(row["regionTagCounts"]).length > 0 ? { regionTagCounts: tagCounts(row["regionTagCounts"]) } : {}),
     };
   });
   return { readings };

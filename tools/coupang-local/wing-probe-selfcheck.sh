@@ -357,9 +357,23 @@ if [ -z "$TREE_DIRTY" ]; then
   run_case "VENDOR         · operation names the separate WRITE grant" 0 "separate mode-WRITE grant" "$FIXTURES/vendor.env"
   run_case "VENDOR         · disclosure names the irreversible control" 0 "ISSUES A REAL API KEY on your live account" "$FIXTURES/vendor.env"
   run_case "VENDOR         · disclosure says no checkpoint can reach it" 0 "no checkpoint of this phase stands in front of it" "$FIXTURES/vendor.env"
-  run_case "VENDOR         · disclosure carries the six-step plan" 0 "6 checkpoints" "$FIXTURES/vendor.env"
+  # SEVEN since 2026-08-13, when the plan gained the checkpoint that has the seller fill the form in — the
+  # 'after' half of the reading that says what a REGISTERED IP is. The count is asserted rather than left to the
+  # step list because the shell keeps its own copy of the plan, and that copy is what the operator reads.
+  run_case "VENDOR         · disclosure carries the seven-step plan" 0 "7 checkpoints" "$FIXTURES/vendor.env"
   run_case "VENDOR         · step 5 attributes the no-key claim" 0 "reported no key either time" "$FIXTURES/vendor.env"
   run_case "VENDOR         · step 6 forbids the issuing press" 0 "Do NOT press '확인'" "$FIXTURES/vendor.env"
+  # The new last step, and the two things it must say: what the operator does, and what is read from it.
+  run_case "VENDOR         · step 7 asks for the registration" 0 "press '추가' so it is" "$FIXTURES/vendor.env"
+  run_case "VENDOR         · step 7 says what it reads, and what it does not" 0 "not even how many fields are non-empty" "$FIXTURES/vendor.env"
+  # HOW a checkpoint advances, on the page the operator grants from. Until 2026-08-13 the plan said "→ ready"
+  # while a sentinel file did the advancing, and that file was created on a chat line the operator never wrote.
+  # A preflight that still promised the old channel would be describing a run that no longer exists.
+  run_case "VENDOR         · the plan names the confirmation control" 0 "press [현재 화면 확인]" "$FIXTURES/vendor.env"
+  run_case "VENDOR         · …on the SellerOps tab, not in chat" 0 "SellerOps 확인" "$FIXTURES/vendor.env"
+  run_case "VENDOR         · …and says a message never advances a run" 0 "a chat message or a file never advances" "$FIXTURES/vendor.env"
+  # The manifest's own operator line carries it too — the plan and the manifest are read by different people.
+  run_case "VENDOR         · the manifest disclosure names the control" 0 "현재 화면 확인" "$FIXTURES/vendor.env"
   # The choice is the product owner's, and the manifest must not nudge.
   run_case "VENDOR         · the method choice is declared a product decision" 0 "product decision" "$FIXTURES/vendor.env"
   run_case "VENDOR         · run command carries BOTH phase variables" 0 "SELLEROPS_WING_APPROVED_PHASE=COUPANG_WING_VENDOR_METHOD_DISCOVERY" "$FIXTURES/vendor.env"

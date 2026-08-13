@@ -36,6 +36,7 @@ import {
   type WingReconTarget,
 } from "../../src/action-window/coupang-wing-label-recon";
 import { WING_PROBE_TARGET_NAMES, type WingObservation } from "../../src/cli/coupang-wing-classifier";
+import { confirmationFor } from "../fixtures/operator-confirmation";
 
 const RECON_ALL = [...WING_RECON_TARGETS] as WingReconTarget[];
 const CANDIDATE_COUNT = RECON_ALL.reduce((n, t) => n + WING_LABEL_RECON_CANDIDATES[t].length, 0);
@@ -87,7 +88,7 @@ function fakeDeps(o: FakeOptions = {}): {
   const probedTargets: WingRecordTarget[] = [];
   const probedCandidates: string[] = [];
   const deps: WingSelectorRecordDeps = {
-    waitForReady: async () => o.signal ?? "ready",
+    awaitOperatorConfirmation: async () => confirmationFor(o.signal ?? "ready"),
     observeSurface: async () => OBS,
     probeTarget: async (target) => {
       probedTargets.push(target);

@@ -18,6 +18,8 @@ import {
   FIELD_REGION_ANCESTOR_DEPTH,
   sanitizeAncestorScope,
   sanitizeFieldRegionCensus,
+  VENDOR_IP_REGION_BASELINE_BUTTON_COUNT,
+  vendorIpEntryRegistered,
   type FieldRegionRequest,
 } from "../../src/action-window/coupang-wing-field-region";
 
@@ -99,6 +101,10 @@ function matchAll(pool: readonly El[], sel: string): El[] {
   return pool.filter((e) =>
     wanted.some((w) => {
       if (w === 'a[role="button"]') return e.tagName === "A" && e.getAttribute("role") === "button";
+      // The universal selector, which the region's TAG census issues. Modelled rather than special-cased away:
+      // that census walks the whole region, and a harness that answered nothing for `*` would test a script the
+      // page never runs.
+      if (w === "*") return true;
       return e.tagName === w.toUpperCase();
     }),
   );
@@ -198,6 +204,91 @@ describe("the vendor form's structure, as the census reads it", () => {
     const { readings } = census(noFlag, [vendorForm({ vendorValue: "내 회사" })]);
     expect(readings[0]!.textInputCount).toBe(1);
     expect(readings[0]!.filledTextInputCount).toBeUndefined();
+  });
+});
+
+/**
+ * The instrument added on 2026-08-13, and the reason it exists is a defect the four counts above could not see:
+ * the guided walk read `IP 주소` as not-ready while the seller's screen showed the address REGISTERED, because
+ * WING renders a registered IP as a removable chip and `entryRowCount` counts `li` / `tr` / `option`. A count
+ * that answers zero for "none" and for "one I do not recognise" cannot be told apart from itself.
+ */
+describe("the region's TAG census — what a registered entry does to its region", () => {
+  const withTags: readonly FieldRegionRequest[] = [
+    { id: "call_ip", candidateQuery: DT_QUERY, exactText: "IP 주소", readTagCounts: true },
+  ];
+
+  /** The IP region as WING actually renders it: the registered address is a chip, not a list row. */
+  function ipRegion(chips: number) {
+    return new El({
+      tag: "dl",
+      children: [
+        new El({ tag: "dt", text: "IP 주소" }),
+        new El({
+          tag: "dd",
+          children: [
+            ...new Array(chips).fill(0).map(
+              () => new El({ tag: "span", children: [new El({ tag: "em", text: "211.222.138.6" }), new El({ tag: "button", text: "×" })] }),
+            ),
+            new El({ tag: "input", type: "text", value: "" }),
+            new El({ tag: "button", text: "추가" }),
+          ],
+        }),
+      ],
+    });
+  }
+
+  const tagsOf = (roots: readonly El[]): Record<string, number> =>
+    Object.fromEntries((census(withTags, roots).readings[0]!.regionTagCounts ?? []).map((r) => [r.tag, r.count]));
+
+  it("**names the difference a registered entry makes** — the before/after pair, in one assertion", () => {
+    const before = tagsOf([ipRegion(0)]);
+    const after = tagsOf([ipRegion(1)]);
+    expect(before["SPAN"]).toBeUndefined();
+    expect(after["SPAN"]).toBe(1);
+    // …and what `entryRowCount` says about the very same pair, which is why this census had to exist.
+    expect(census(withTags, [ipRegion(0)]).readings[0]!.entryRowCount).toBe(0);
+    expect(census(withTags, [ipRegion(1)]).readings[0]!.entryRowCount).toBe(0);
+  });
+
+  it("counts every painting descendant by tag, and is sorted so two readings compare line by line", () => {
+    const rows = census(withTags, [ipRegion(2)]).readings[0]!.regionTagCounts!;
+    expect(rows.map((r) => r.tag)).toEqual([...rows.map((r) => r.tag)].sort());
+    expect(Object.fromEntries(rows.map((r) => [r.tag, r.count]))).toEqual({ BUTTON: 3, EM: 2, INPUT: 1, SPAN: 2 });
+  });
+
+  it("is OPT-IN — a candidate that did not ask carries no tag census", () => {
+    expect(census(VENDOR_REQ, [ipRegion(1)]).readings[2]!.regionTagCounts).toBeUndefined();
+  });
+
+  it("**carries no value** — not even the emptiness count, which this request never asks for", () => {
+    const out = census(withTags, [ipRegion(1)]);
+    expect(JSON.stringify(out)).not.toContain("211.222.138.6");
+    expect(out.readings[0]!.filledTextInputCount).toBeUndefined();
+  });
+
+  it("the sanitizer drops anything in it that is not a tag name and a positive count", () => {
+    const raw = {
+      readings: [
+        {
+          id: "x",
+          visibleCount: 1,
+          hiddenCount: 0,
+          association: "DT_NEXT_DD",
+          regionTag: "DD",
+          regionTagCounts: [
+            { tag: "SPAN", count: 2 },
+            { tag: "내 회사", count: 1 },
+            { tag: "SPAN", count: -1 },
+            { tag: "BUTTON", count: 0 },
+            { count: 3 },
+            "SPAN",
+          ],
+        },
+      ],
+    };
+    const out = sanitizeFieldRegionCensus(raw, ["x"]);
+    expect(out.readings[0]!.regionTagCounts).toEqual([{ tag: "SPAN", count: 2 }]);
   });
 });
 
@@ -437,5 +528,38 @@ describe("the in-page script's own discipline", () => {
     for (const forbidden of [".click(", ".focus(", ".submit(", "setAttribute", "dispatchEvent", "innerHTML"]) {
       expect(src, forbidden).not.toContain(forbidden);
     }
+  });
+});
+
+describe("what a REGISTERED IP entry is", () => {
+  // Measured on 2026-08-13 (READ_ONLY sitting wt-017b33239e33), before and after the operator pressed 추가.
+  const BEFORE = { inputCount: 1, textInputCount: 1, buttonCount: 1, entryRowCount: 0 };
+  const AFTER = { inputCount: 1, textInputCount: 1, buttonCount: 2, entryRowCount: 0 };
+
+  it("reads the measured before/after pair the way the live screen behaved", () => {
+    expect(vendorIpEntryRegistered(BEFORE)).toBe(false);
+    expect(vendorIpEntryRegistered(AFTER)).toBe(true);
+  });
+
+  it("the ROW COUNT alone never fires — which is the defect this rule replaced", () => {
+    // Both readings carry entryRowCount 0. A rule built on it answers "not registered" to a screen showing the
+    // address registered, and step ⑥ of the guided walk could never advance.
+    expect(BEFORE.entryRowCount).toBe(0);
+    expect(AFTER.entryRowCount).toBe(0);
+  });
+
+  it("a second entry still reads registered — the rule asks whether the count ROSE, not what it is", () => {
+    expect(vendorIpEntryRegistered({ buttonCount: 3, entryRowCount: 0 })).toBe(true);
+  });
+
+  it("a layout that DOES render rows is still honoured", () => {
+    // Kept deliberately: replacing the row count would drop a signal that costs one comparison to keep.
+    expect(vendorIpEntryRegistered({ buttonCount: 1, entryRowCount: 1 })).toBe(true);
+  });
+
+  it("an UNMEASURED count is not a registration — both halves fail closed", () => {
+    expect(vendorIpEntryRegistered({})).toBe(false);
+    expect(vendorIpEntryRegistered({ buttonCount: VENDOR_IP_REGION_BASELINE_BUTTON_COUNT })).toBe(false);
+    expect(vendorIpEntryRegistered({ buttonCount: 0, entryRowCount: 0 })).toBe(false);
   });
 });

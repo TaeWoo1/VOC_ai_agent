@@ -76,6 +76,7 @@ import {
   type WingStructuralCensus,
 } from "../cli/coupang-wing-classifier";
 import {
+  buildFixedLabelAvoidTagScript,
   buildFixedLabelContainmentScript,
   buildFixedLabelLocateScript,
   buildFixedLabelRingPlanScript,
@@ -92,6 +93,8 @@ import { buildAncestorScopeScript, buildFieldRegionCensusScript } from "./api-is
 import {
   sanitizeAncestorScope,
   sanitizeFieldRegionCensus,
+  vendorIpEntryRegistered,
+  type FieldRegionCensus,
   type AncestorScopeReading,
   type FieldRegionRequest,
 } from "./coupang-wing-field-region";
@@ -325,6 +328,39 @@ const VENDOR_FORM_FIELDS: readonly FieldRegionRequest[] = Object.freeze(
 
 /** The `IP 주소` field, which is ready on a REGISTERED ENTRY rather than on typed text — the seller presses 추가. */
 const VENDOR_FORM_IP_FIELD_ID = "stage2.call_ip.ip_addr";
+
+/** The vendor-form labels as plain locator specs — the same three, minus the census's `readFilled`. */
+function vendorFormLabelSpecs(): readonly { candidateQuery: string; exactText: string }[] {
+  return VENDOR_FORM_FIELDS.map((f) => ({ candidateQuery: f.candidateQuery, exactText: f.exactText }));
+}
+
+/**
+ * **The controls a step's panel must stay off, beyond the one it rings.**
+ *
+ * The panel is docked and takes clicks; the ring is `pointer-events:none` and takes none. So the panel is the
+ * only part of this guidance that can stand between the seller and their own screen — and on 2026-08-12 it did,
+ * covering WING's `확인` while step ⑥ ringed the option above it. The seller had to say so in chat.
+ *
+ * Both vendor steps declare the same screen from different points in it:
+ *  - ⑥ rings `자체개발(직접입력)`, and everything the seller does NEXT is below it — the three form fields and the
+ *    `확인` that step ⑦ will ring;
+ *  - ⑦ rings that `확인`, and the fields stay declared because a seller correcting one is the ordinary case.
+ *
+ * **What is avoided is each LABEL's own box, not its input** — the association between them has never been
+ * calibrated live (it is exactly what the readiness census reads structurally), so anything more would be a
+ * claim about markup nobody has measured. It is enough for what this does: the panel is 560px wide and a label
+ * that lands under it takes its own row with it. Everything here resolves through the recon candidates by id or
+ * through the promotion record; nothing is a second hand-written label.
+ *
+ * `추가` is deliberately absent: no recon candidate matches it, so there is nothing measured to point at.
+ */
+function nextControlAvoidSpecs(target: CoupangIssuanceTarget): readonly { candidateQuery: string; exactText: string }[] {
+  if (target === "vendor_method") {
+    return [...vendorFormLabelSpecs(), ...promotedRingSpecs("vendor_confirm").map((s) => ({ candidateQuery: s.candidateQuery, exactText: s.exactText }))];
+  }
+  if (target === "vendor_confirm") return vendorFormLabelSpecs();
+  return [];
+}
 
 /**
  * Whether the vendor form is filled in far enough that `확인` is the right thing to be looking at.
@@ -1056,7 +1092,11 @@ export const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string
   // apologises for not guiding, on a step that now guides, is the same class of stale safety copy as the
   // key-creation warning this string already had to lose.
   issue_final: "'약관 동의 및 Key 발급받기'를 직접 누르세요 — SellerOps는 이 버튼을 절대 누르지 않습니다. 이 버튼에서는 키가 발급되지 않고 연동 방식을 고르는 화면이 열립니다(live walk 2회에서 그렇게 보고되었습니다. SellerOps는 키 발급 여부를 확인할 수 없습니다). 그 화면이 열리면 자동으로 넘어갑니다.",
-  vendor_method: "입력 방식에서 '자체개발(직접입력)'을 직접 선택하세요 — SellerOps는 선택하지 않습니다. 선택하면 URL · IP 주소 입력란이 더 나타납니다(업체명은 이미 화면에 있습니다). 선택한 뒤 아래 버튼을 누르세요.",
+  // The last clause used to read "선택한 뒤 아래 버튼을 누르세요." The step now finishes itself the moment the
+  // form reads complete, and a panel that still asks for a press the runtime no longer waits for is the same
+  // stale-copy defect this file keeps correcting — one step later. The button is still there and still works,
+  // which is what the parenthesis says.
+  vendor_method: "입력 방식에서 '자체개발(직접입력)'을 직접 선택하세요 — SellerOps는 선택하지 않습니다. 선택하면 URL · IP 주소 입력란이 더 나타납니다(업체명은 이미 화면에 있습니다). 업체명 · URL을 입력하고 IP는 '추가'까지 누르면 자동으로 넘어갑니다(SellerOps는 입력란이 비었는지만 보고 값은 읽지 않습니다. 넘어가지 않으면 아래 버튼을 누르세요).",
   // NOT trimmed, and every sentence is a safety claim the approval harness reproduces before the operator
   // grants. This is the one step in the whole walk that brings a real marketplace credential into existence,
   // and the seller is the only one who can do it.
@@ -1094,7 +1134,7 @@ export const OPERATOR_STEP_BRIEF: Readonly<Record<CoupangIssuanceTarget, string>
   // Names the fields as well as the selection: they appear on THIS screen once a method is chosen, and the next
   // step's ring sits on the control that issues the key. A seller told about them here does not meet that ring
   // with an empty form.
-  vendor_method: "'자체개발(직접입력)'을 직접 선택한 뒤, 업체명 · URL을 입력하고 IP는 '추가'까지 누르세요.",
+  vendor_method: "'자체개발(직접입력)'을 직접 선택한 뒤, 업체명 · URL을 입력하고 IP는 '추가'까지 누르세요. 다 채우면 자동으로 넘어갑니다.",
   vendor_confirm: "⚠ 이 화면의 '확인'에서 실제 API 키가 발급됩니다. 업체명 · URL을 입력하고 IP는 '추가'까지 누른 뒤, '확인'을 직접 누르세요.",
   credentials: "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요.",
   return: "아래 버튼을 눌러 SellerOps로 돌아가세요.",
@@ -1117,6 +1157,16 @@ export const STEPS_WITH_DETAIL_OPEN: readonly CoupangIssuanceTarget[] = ["issue_
  * wrong: the association between these labels and their inputs has never been calibrated live, so the reading
  * behind this message is the less reliable party.
  */
+/**
+ * **What the panel says at ⑥ once the form is on screen and the ring has come down.**
+ *
+ * The ring is retired at that moment because the seller has already done what it points at — see
+ * {@link CoupangWingIssuanceDriver.retireStepRing} — so the brief has to carry the rest of the step by itself.
+ */
+const VENDOR_FORM_ENTRY_BRIEF =
+  "입력 방식은 선택되었습니다. 이제 업체명 · URL을 입력하고, IP 주소는 입력한 뒤 옆의 '추가'까지 누르세요. " +
+  "다 채우면 자동으로 넘어갑니다.";
+
 const VENDOR_FORM_INCOMPLETE_BRIEF =
   "잠깐 — 업체명 · URL이 비어 있거나 IP가 아직 '추가'되지 않은 것으로 보입니다. 다음 화면의 '확인'을 누르면 " +
   "실제 키가 발급되므로, 먼저 채워 주세요. 이미 채우셨다면 아래 버튼을 한 번 더 누르시면 계속 진행합니다.";
@@ -1335,6 +1385,11 @@ const IN_PAGE_CLEAR_TAG = `(function () {
   var slice = Function.prototype.call.bind(Array.prototype.slice);
   var els = slice(document.querySelectorAll('[data-aw-target],[data-aw-primary]'));
   for (var i = 0; i < els.length; i++) { els[i].removeAttribute('data-aw-target'); els[i].removeAttribute('data-aw-primary'); }
+  /* …and the panel's keep-clear marks. They are written per step beside the ring tags, so leaving them behind
+     would steer the NEXT step's panel around a control that step is not sending anyone to. Same asymmetry the
+     paragraph above is about, one marker later. */
+  var avoid = slice(document.querySelectorAll('[data-aw-avoid]'));
+  for (var a = 0; a < avoid.length; a++) { avoid[a].removeAttribute('data-aw-avoid'); }
   return true;
 })()`;
 
@@ -1349,6 +1404,14 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
    * the poll loop writes a handful of these once a second, and the 2026-08-12 log is unreadable because of it.
    */
   private readonly repeatCounts = new Map<string, number>();
+  /**
+   * Steps whose ring is currently DOWN although the step is still running — see {@link retireStepRing}.
+   *
+   * It exists so the recovery paths do not put back a ring the step deliberately took off: every remount goes
+   * through one place that asks this set what to draw. Membership is derived from a live reading and revisited
+   * on every poll, so it corrects itself if the screen goes back.
+   */
+  private readonly ringRetired = new Set<CoupangIssuanceTarget>();
 
   constructor(page: Page, opts: CoupangWingIssuanceDriverOptions = {}) {
     this.page = page;
@@ -1736,17 +1799,71 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     for (const r of census.readings) {
       // A label that did not resolve, or resolved to nothing structural, decides nothing about the seller.
       if (r.visibleCount !== 1 || r.association === undefined || r.association === "NONE") {
-        log("aw_coupang_vendor_form_field", { fieldId: r.id, visibleCount: r.visibleCount, resolved: false });
+        // THROTTLED on the reading, like every other repeating observation here. This census used to run once
+        // per press; step ⑥ now polls it for as long as the seller is filling the form in, and three lines a
+        // second would bury the transition that matters — which is the only thing anyone reads this for.
+        this.logThrottled(
+          `vform:${r.id}:unresolved:${r.visibleCount}`,
+          "aw_coupang_vendor_form_field",
+          { fieldId: r.id, visibleCount: r.visibleCount, resolved: false },
+        );
         return "UNKNOWN";
       }
       const ready =
-        r.id === VENDOR_FORM_IP_FIELD_ID ? (r.entryRowCount ?? 0) >= 1 : (r.filledTextInputCount ?? 0) >= 1;
-      // Sanitized: an id and booleans/counts. The whole point is that "did they fill it" travels and "what did
-      // they put there" does not.
-      log("aw_coupang_vendor_form_field", { fieldId: r.id, resolved: true, ready });
+        r.id === VENDOR_FORM_IP_FIELD_ID ? vendorIpEntryRegistered(r) : (r.filledTextInputCount ?? 0) >= 1;
+      // Sanitized: an id, booleans, a tag name and integers. The whole point is that "did they fill it" travels
+      // and "what did they put there" does not.
+      //
+      // **The STRUCTURE travels too, since 2026-08-13.** The census computed these four counts from the
+      // beginning and logged none of them, so when the live run of that day read `IP 주소` as not-ready for a
+      // minute and a half, the log could say only that. These lines are what a READ_ONLY sitting then compared
+      // before and after the seller pressed 추가, and the rule above now follows from that comparison rather
+      // than from a guess about the markup — see `vendorIpEntryRegistered`. They stay: the next surprise on
+      // this screen will be diagnosed from the same four numbers.
+      this.logThrottled(
+        `vform:${r.id}:${ready}:${r.regionTag ?? "-"}:${r.inputCount ?? "-"}:${r.textInputCount ?? "-"}:${r.buttonCount ?? "-"}:${r.entryRowCount ?? "-"}`,
+        "aw_coupang_vendor_form_field",
+        {
+          fieldId: r.id,
+          resolved: true,
+          ready,
+          ...(r.regionTag ? { regionTag: r.regionTag } : {}),
+          ...(typeof r.inputCount === "number" ? { inputCount: r.inputCount } : {}),
+          ...(typeof r.textInputCount === "number" ? { textInputCount: r.textInputCount } : {}),
+          ...(typeof r.buttonCount === "number" ? { buttonCount: r.buttonCount } : {}),
+          ...(typeof r.entryRowCount === "number" ? { entryRowCount: r.entryRowCount } : {}),
+        },
+      );
       if (ready) satisfied += 1;
     }
     return satisfied === census.readings.length ? "READY" : "NOT_READY";
+  }
+
+  /**
+   * **READ-ONLY census of the vendor form's three regions, for the recorder — structure only, no emptiness.**
+   *
+   * The seam the measurement sitting uses to settle what a REGISTERED IP does to its region. Two differences
+   * from the walk's own reading, and both are deliberate:
+   *
+   *  - `readFilled` is DROPPED. The walk counts non-empty inputs because a rule depends on it; a measurement of
+   *    the region's shape does not, and the narrower read is the one to take when the wider one buys nothing.
+   *  - `readTagCounts` is ON, which is the entire point: `entryRowCount` answers the same zero for "nothing
+   *    registered" and "registered as something I do not count", and only the tag census tells them apart.
+   *
+   * Bounded and swallowing like every other read here. It tags nothing, mounts nothing, and presses nothing.
+   */
+  async vendorFieldRegions(): Promise<FieldRegionCensus> {
+    const requests: readonly FieldRegionRequest[] = VENDOR_FORM_FIELDS.map((f) => ({
+      id: f.id,
+      candidateQuery: f.candidateQuery,
+      exactText: f.exactText,
+      readTagCounts: true,
+    }));
+    const raw = await timebox<unknown>(
+      this.evalStr<unknown>(this.activePage(), buildFieldRegionCensusScript(requests)).catch(() => null),
+      null,
+    );
+    return sanitizeFieldRegionCensus(raw, requests.map((r) => r.id));
   }
 
   /**
@@ -1953,6 +2070,17 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     briefOverride?: string,
   ): Promise<void> {
     const buttonLabel = ADVANCE_BUTTON_LABEL[target];
+    // MARK the controls this step's panel must keep clear of, BEFORE the mount positions it — the placement runs
+    // inside the mount, so marks written afterwards would only take effect on the next scroll. Every mount path
+    // funnels through here, including the re-anchor and the vendor-form reminder, so the marks are rewritten as
+    // often as the panel is drawn and a step that avoids nothing clears the previous step's marks.
+    //
+    // Bounded and swallowing: this is a hint about where a panel sits. A page that will not answer it must not
+    // cost the seller their guidance, so a failure leaves the placement exactly as it was before this existed.
+    await timebox(
+      this.evalStr(page, buildFixedLabelAvoidTagScript({ specs: nextControlAvoidSpecs(target) })).catch(() => undefined),
+      undefined,
+    );
     await mountOverlay(page, {
       ...(dockedPanelOnly ? { dockedPanelOnly: true } : {}),
       stepNumber: OVERLAY_STEP[target],
@@ -1992,6 +2120,10 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
   }
 
   async armObserve(target: CoupangIssuanceTarget): Promise<void> {
+    // A fresh arm re-guides the step from the top — the engine has just drawn this step's ring again — so a
+    // retirement from the previous arm window is forgotten here rather than left to suppress a ring that is
+    // already on the glass. The first poll re-decides it from a live reading, in either direction.
+    this.ringRetired.delete(target);
     // A same-page checkpoint is advanced by the seller pressing THIS step's WING-resident overlay button. Re-arm
     // the value-free latch (set this step's opaque token, drop any prior press) so a stale press from an earlier
     // step or arm window can never be misread as this step's advance. `reach_open_api` arms nothing here — it is
@@ -2216,8 +2348,11 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
             log("aw_coupang_vendor_form_not_ready", { target });
             // Clear the press first: the seller's NEXT press must be a new one, not this one read twice.
             await timebox(resetOverlayAdvance(this.activePage(), token).catch(() => undefined), undefined);
+            // DOCKED when this step's ring has been retired. Not a detail: an anchored mount with no
+            // `data-aw-target` on the page creates NOTHING and returns, so re-briefing a ringless step through
+            // the anchored path would take the seller's panel away at the moment it has something to tell them.
             await timebox(
-              this.mountStepOverlay(this.activePage(), target, false, VENDOR_FORM_INCOMPLETE_BRIEF),
+              this.mountStepOverlay(this.activePage(), target, this.ringRetired.has(target), VENDOR_FORM_INCOMPLETE_BRIEF),
               undefined,
               REMOUNT_TIMEOUT_MS,
             );
@@ -2254,6 +2389,59 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
         // never the walk.
         if (credentialMayAdvance && (await this.markerOcclusion(WING_CREDENTIAL_SHOWN_MARKER_SPEC)) === "CLEAR") {
           return true;
+        }
+        // **THE RING COMES DOWN WHEN THE SELLER HAS ALREADY DONE WHAT IT POINTS AT.**
+        //
+        // Step ⑥ rings `자체개발(직접입력)`. The moment that option is chosen the seller's work moves to the
+        // three fields below it, and the ring keeps pointing at a radio they have already set — live-reported by
+        // the operator on 2026-08-13: "입력해야 하는 턴은 ring을 없애든지 입력 박스 전체를 감싸든지".
+        //
+        // It is taken down rather than moved, because moving it would need a region nothing has measured: what
+        // ties these labels to their inputs is exactly the association this census reads structurally, and a
+        // ring is a CLAIM about where a control is. The panel keeps the instruction, which it can carry.
+        //
+        // **The signal is the form REVEAL, not the radio.** SellerOps never reads `checked` — it does not claim
+        // to know which option is selected. What it can see is that 업체명 · URL · IP 주소 all resolve, and they
+        // only paint once a method is chosen (`WING_VENDOR_FORM_REVEAL`, measured 2026-08-12; live on
+        // 2026-08-13 URL resolved four seconds after 업체명, exactly at the selection). `UNKNOWN` means they do
+        // not all resolve, so the ring belongs — and this is re-decided on every poll, in BOTH directions, so a
+        // seller who goes back to a fresh form gets the ring again.
+        if (target === "vendor_method") {
+          const readiness = await this.vendorFormReadiness();
+          if (readiness !== "UNKNOWN" && !this.ringRetired.has(target)) {
+            await this.retireStepRing(target, VENDOR_FORM_ENTRY_BRIEF);
+          } else if (readiness === "UNKNOWN" && this.ringRetired.has(target)) {
+            this.ringRetired.delete(target);
+            log("aw_coupang_step_ring_restored", { target, reason: "FORM_NOT_ON_SCREEN" });
+            await timebox(this.highlightTarget(target).then(() => undefined), undefined, REMOUNT_TIMEOUT_MS);
+          }
+          // **AND THE STEP COMPLETES ITSELF once the form is filled in.** The seller selects the method, types
+          // 업체명 and URL, presses 추가 — and then had to tell SellerOps they had, on a panel whose own reading
+          // already knew. The same census that refuses a premature press answers this; nothing new is read.
+          //
+          // **No baseline, and that is the difference between this advance and every other one here.** The
+          // others watch for an EVENT (a screen arriving, a credential appearing) and a baseline is what stops
+          // "it was already like that" being reported as "the seller just did it". This one is a PRECONDITION
+          // for the next step's ring: `확인` is worth pointing at exactly when the form is ready, whether it
+          // became ready a moment ago or before the step re-armed. Requiring a change would suppress it in the
+          // ordinary recovery case — the walk re-anchoring on a form the seller has already completed — which is
+          // the state this is most useful in. Nothing is pressed either way: step ⑦ rings a control and rests.
+          //
+          // Fenced on the SCREEN, checked second so it costs nothing until the form reads ready: the vendor
+          // labels also paint on the issued 연동 정보 block, and a readiness reading taken there is not this
+          // screen's form. `UNKNOWN` never advances, and the seller's own button stays on the panel throughout.
+          //
+          // ⚠ It did NOT fire on the live walk of 2026-08-13, and the reason is above the rule rather than in
+          // it: `IP 주소` reads not-ready because WING registers an address as a removable CHIP, which is none of
+          // the `li` / `tr` / `option` that `entryRowCount` counts. The structure is now logged on every reading
+          // (see {@link vendorFormReadiness}) so the next walk records what a registered entry actually is.
+          if (
+            readiness === "READY" &&
+            (await this.probeFlowScreen().catch(() => "UNRECOGNIZED" as WingFlowScreen)) === "VENDOR_METHOD"
+          ) {
+            log("aw_coupang_vendor_form_auto_advance", { target });
+            return true;
+          }
         }
         // THE SELLER'S WAY OUT MUST SURVIVE A NAVIGATION. WING can bounce the window to login mid-checkpoint —
         // observed 2026-08-12 immediately after the key-issuing 확인 — and a navigation destroys the overlay
@@ -2341,6 +2529,30 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
   }
 
   /**
+   * **Take a step's ring down while the step goes on** — leaving the panel, its brief and its button.
+   *
+   * A ring points at the ONE control the seller acts on next. Step ⑥ has two halves — choose the method, then
+   * fill the form it reveals — and the ring can only be about the first. Once it is done the ring is an
+   * instruction to do something already done, sitting on the screen where the real work is.
+   *
+   * The ring is REMOVED rather than re-pointed: what the form's labels are attached to has never been
+   * calibrated live, and a ring is a claim about where a control is. The panel is not — it says what to do and
+   * has room to say it, which is why the brief is replaced in the same breath.
+   *
+   * Membership is recorded so the recovery paths do not undo it: every remount asks {@link ringRetired} what to
+   * draw. Bounded and swallowing like the other mount paths — a page that will not answer costs this poll.
+   */
+  private async retireStepRing(target: CoupangIssuanceTarget, brief: string): Promise<void> {
+    this.ringRetired.add(target);
+    log("aw_coupang_step_ring_retired", { target, reason: "SELLER_DID_WHAT_IT_POINTED_AT" });
+    const page = this.activePage();
+    // The tags first, then the docked mount: `mountOverlay` reads the tag set, and a docked mount with the old
+    // ring tags still on the page would leave the ring painted with nothing tracking it.
+    await timebox(this.evalStr(page, IN_PAGE_CLEAR_TAG).then(() => undefined), undefined);
+    await timebox(this.mountStepOverlay(page, target, true, brief), undefined, REMOUNT_TIMEOUT_MS);
+  }
+
+  /**
    * Re-mount this step's overlay if it is no longer on the active page — the WING navigation recovery.
    *
    * **It verifies WHERE IT IS before it re-anchors.** Two fences, in cost order:
@@ -2392,6 +2604,14 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     this.logThrottled("remount:" + target, "aw_coupang_overlay_remount", { target });
     // The re-mount itself is several more evaluates plus a settle sleep. Bounded as one unit: a re-mount that
     // cannot complete must cost this poll, not the walk.
+    //
+    // A step whose ring was deliberately RETIRED gets its panel back and no ring — the recovery must not undo a
+    // decision the step made about its own presentation. (Whether the ring belongs is re-decided from a live
+    // reading on the next poll either way, so this cannot strand a step ringless once the screen goes back.)
+    if (this.ringRetired.has(target)) {
+      await timebox(this.mountStepOverlay(page, target, true, VENDOR_FORM_ENTRY_BRIEF), undefined, REMOUNT_TIMEOUT_MS);
+      return (await timebox(overlayMounted(page), false)) ? "MOUNTED" : "NOT_MOUNTED";
+    }
     await timebox(this.highlightTarget(target).then(() => undefined), undefined, REMOUNT_TIMEOUT_MS);
     // …and CHECKED. A re-mount that ran and painted nothing used to read exactly like one that worked, which is
     // how the walk spent a minute retrying with `panelMounted: false` in every heartbeat.

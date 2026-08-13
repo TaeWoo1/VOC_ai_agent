@@ -61,6 +61,7 @@ import {
   type WingSelectorRecordDeps,
 } from "../../../src/cli/probe-wing-issuance-selectors";
 import { observeFrom, type WingStructuralCensus } from "../../../src/cli/coupang-wing-classifier";
+import { OPERATOR_CONFIRMED } from "../../fixtures/operator-confirmation";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = (rel: string): string => readFileSync(resolve(HERE, "../../../src", rel), "utf8");
@@ -77,7 +78,12 @@ describe("two plans, each carrying its own stop", () => {
     expect(WING_VENDOR_METHOD_PLAN.checkpoints.slice(WING_FLOW_CHECKPOINTS.length)).toEqual([
       ...WING_VENDOR_METHOD_CHECKPOINTS,
     ]);
-    expect(WING_VENDOR_METHOD_PLAN.lastCheckpoint).toBe("VENDOR_METHOD_SELECTED_BY_OPERATOR");
+    // The last checkpoint moved along on 2026-08-13, to the one that has the seller fill the form in. The END is
+    // unchanged — what follows is still the key-issuing 확인 — and the plan is still a prefix relationship.
+    expect(WING_VENDOR_METHOD_PLAN.lastCheckpoint).toBe("VENDOR_FORM_IP_REGISTERED_BY_OPERATOR");
+    expect(WING_VENDOR_METHOD_PLAN.lastCheckpoint).toBe(
+      WING_VENDOR_METHOD_PLAN.checkpoints[WING_VENDOR_METHOD_PLAN.checkpoints.length - 1],
+    );
   });
 
   it("**the issuance plan is UNCHANGED** — a second plan existing does not widen the first", () => {
@@ -423,9 +429,9 @@ function fakeVendorFlow(over: { vendorFrom?: number; termsFrom?: number } = {}) 
     return false;
   };
   const deps: WingSelectorRecordDeps = {
-    waitForReady: async () => {
+    awaitOperatorConfirmation: async () => {
       waits += 1;
-      return "ready";
+      return OPERATOR_CONFIRMED;
     },
     observeSurface: async () => {
       reads += 1;
@@ -463,7 +469,7 @@ function fakeVendorFlow(over: { vendorFrom?: number; termsFrom?: number } = {}) 
 const ALL_TARGETS = [...WING_STAGE2_RECON_TARGETS] as const;
 
 describe("runWingFlowDiscovery under the vendor plan", () => {
-  it("runs all six checkpoints and reads the vendor screen as VENDOR_METHOD", async () => {
+  it("runs every checkpoint in the plan and reads the vendor screen as VENDOR_METHOD", async () => {
     const { deps, asked } = fakeVendorFlow();
     const r = await runWingFlowDiscovery(deps, {
       targets: ALL_TARGETS,
@@ -477,6 +483,9 @@ describe("runWingFlowDiscovery under the vendor plan", () => {
       "TERMS",
       "TERMS",
       "VENDOR_METHOD",
+      "VENDOR_METHOD",
+      // …and the form-filling checkpoint, which does not change the screen: it is the same vendor screen with
+      // the fields the method revealed, read a second time so the pair says what a registered entry is.
       "VENDOR_METHOD",
     ]);
     expect(r.agentSelections).toBe(0);

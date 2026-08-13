@@ -257,6 +257,14 @@ function tagged(doc: Doc, r: Rect): El {
   return el;
 }
 
+/** A control the step declares it must KEEP CLEAR of — no ring on it, and the panel still steps around it. */
+function avoided(doc: Doc, r: Rect): El {
+  const el = new El("BUTTON", r, doc);
+  el.setAttribute("data-aw-avoid", "");
+  doc.seed(el);
+  return el;
+}
+
 /** Give the mounted panel a real box, since the double's created elements start at zero size. */
 function sizePanel(doc: Doc, r: Rect): El {
   const panel = doc.getElementById("__aw_advance_panel__")!;
@@ -484,6 +492,59 @@ describe("the guidance panel never covers the control it is pointing at", () => 
     const panel = sizePanel(doc, rect(400, 676, 400, 100));
     env.mutate();
     expect(panel.style["top"]).toBe("676px");
+  });
+
+  it("**it also steps off the control the seller must use NEXT** — the one nothing rings yet", async () => {
+    // The 2026-08-12 report, in one case: step ⑥ ringed the input-method option and the panel sat on WING's own
+    // `확인` below it. Nothing here could see that — `확인` carried no tag until the NEXT step. A step may now
+    // declare controls to keep clear of, and they enter the same geometry.
+    const doc = new Doc();
+    tagged(doc, rect(1000, 400, 100, 40)); // the ring, clear of every candidate placement
+    avoided(doc, rect(380, 700, 100, 40)); // the 확인 the seller reaches next
+    const { page, env } = fakePage(doc, 800);
+    await mountOverlay(page as never, PANEL);
+    const panel = sizePanel(doc, rect(400, 676, 400, 100));
+    env.mutate();
+    expect(panel.style["top"]).toBe("24px");
+    expect(panel.style["left"]).toBe("400px");
+  });
+
+  it("**the RING outranks a keep-clear box** — the panel never hides the control it is about", async () => {
+    // Ranking the two sets together with a weight would let enough avoided area outvote the ring, which is a
+    // step that hides the thing it points at. Here the ring overlap is small (4 000px²) and every alternative
+    // carries a large avoided overlap (≥40 000px²), so a summed score would keep the panel on the ring. It
+    // moves off it instead: least ring first, least next-control only as the tie-break.
+    const doc = new Doc();
+    tagged(doc, rect(380, 700, 100, 40)); // under the bottom dock
+    avoided(doc, rect(0, 0, 1200, 200)); // the whole top band
+    avoided(doc, rect(700, 600, 500, 200)); // and the bottom-right corner
+    const { page, env } = fakePage(doc, 800);
+    await mountOverlay(page as never, PANEL);
+    const panel = sizePanel(doc, rect(400, 676, 400, 100));
+    env.mutate();
+    expect(panel.style["top"]).toBe("24px");
+  });
+
+  it("a keep-clear box below the fold reserves its band too — same projection as a ring", async () => {
+    const doc = new Doc();
+    tagged(doc, rect(1000, 400, 100, 40));
+    avoided(doc, rect(380, 2400, 100, 40));
+    const { page, env } = fakePage(doc, 800);
+    await mountOverlay(page as never, PANEL);
+    const panel = sizePanel(doc, rect(400, 676, 400, 100));
+    env.mutate();
+    expect(panel.style["top"]).toBe("24px");
+  });
+
+  it("a step that declares none behaves exactly as it did before", async () => {
+    const doc = new Doc();
+    tagged(doc, rect(380, 300, 100, 40));
+    const { page, env } = fakePage(doc, 800);
+    await mountOverlay(page as never, PANEL);
+    const panel = sizePanel(doc, rect(400, 676, 400, 100));
+    env.mutate();
+    expect(panel.style["top"]).toBe("676px");
+    expect(panel.style["left"]).toBe("400px");
   });
 
   it("an oversized panel is clamped into the viewport rather than pushed off the top", async () => {
