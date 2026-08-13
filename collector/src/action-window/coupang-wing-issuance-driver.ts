@@ -94,6 +94,7 @@ import {
   sanitizeAncestorScope,
   sanitizeFieldRegionCensus,
   vendorIpEntryRegistered,
+  vendorIpRegionBaselineFrom,
   type FieldRegionCensus,
   type AncestorScopeReading,
   type FieldRegionRequest,
@@ -372,6 +373,18 @@ function nextControlAvoidSpecs(target: CoupangIssuanceTarget): readonly { candid
  *    equivalent at the one place it is used.
  */
 export type VendorFormReadiness = "READY" | "NOT_READY" | "UNKNOWN";
+
+/**
+ * **What the `API 호출 IP` region looked like before the seller acted, for the length of ONE arm window.**
+ *
+ * Mutable and owned by the observe loop, so it dies with the arm it was taken in: a step that re-arms measures
+ * the screen in front of it rather than inheriting a count from a form the seller has since changed. `null` means
+ * nothing has been measured yet — the first reading in which the region resolves fills it, and by construction
+ * that reading is therefore never a registration.
+ */
+export interface VendorIpBaseline {
+  buttonCount: number | null;
+}
 
 /**
  * What one re-anchor attempt did.
@@ -1782,16 +1795,21 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
    * one who follows the ring presses the control against an empty form. A ring beats a sentence, so the fix is
    * not more copy on the panel: it is not putting the ring there yet.
    *
-   * What is read: how many text inputs in each field's region are non-EMPTY, and how many registered entries
-   * the `IP 주소` region holds — because `추가` is a press whose result is a row, not typed text. Nothing about
-   * what the seller typed leaves the page.
+   * What is read: how many text inputs in each field's region are non-EMPTY, and whether the `IP 주소` region has
+   * GAINED a control since this step armed — because `추가` is a press whose result is a removable chip, not typed
+   * text. Nothing about what the seller typed leaves the page.
    *
    * **`UNKNOWN` is not `NOT_READY`.** The association between these labels and their inputs has never been
    * measured on a live screen — only the labels have — so a census that cannot resolve one is the expected
    * failure, not a signal about the seller. Holding the walk on it would replace a ring pointing too early with
    * a walk that cannot reach the key at all.
+   *
+   * `ip` is the arm window's own before-picture and is FILLED HERE, on the first reading in which the region
+   * resolves — so the reading that establishes the baseline can never also be the one that reports a
+   * registration. It is cleared again the moment the form stops resolving, so a seller who navigates back to a
+   * fresh form is measured against that form rather than against the one they left.
    */
-  private async vendorFormReadiness(): Promise<VendorFormReadiness> {
+  private async vendorFormReadiness(ip: VendorIpBaseline): Promise<VendorFormReadiness> {
     const script = buildFieldRegionCensusScript(VENDOR_FORM_FIELDS);
     const raw = await timebox<unknown>(this.evalStr<unknown>(this.activePage(), script).catch(() => null), null);
     const census = sanitizeFieldRegionCensus(raw, VENDOR_FORM_FIELDS.map((f) => f.id));
@@ -1799,6 +1817,10 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     for (const r of census.readings) {
       // A label that did not resolve, or resolved to nothing structural, decides nothing about the seller.
       if (r.visibleCount !== 1 || r.association === undefined || r.association === "NONE") {
+        // …and it invalidates the before-picture. The three fields reveal together, so a census that cannot
+        // resolve ANY of them is not reading this form — and a stale baseline is precisely how a chip that was
+        // already there would come to read as one the seller just added.
+        ip.buttonCount = null;
         // THROTTLED on the reading, like every other repeating observation here. This census used to run once
         // per press; step ⑥ now polls it for as long as the seller is filling the form in, and three lines a
         // second would bury the transition that matters — which is the only thing anyone reads this for.
@@ -1809,8 +1831,15 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
         );
         return "UNKNOWN";
       }
-      const ready =
-        r.id === VENDOR_FORM_IP_FIELD_ID ? vendorIpEntryRegistered(r) : (r.filledTextInputCount ?? 0) >= 1;
+      let ready: boolean;
+      if (r.id === VENDOR_FORM_IP_FIELD_ID) {
+        ready = vendorIpEntryRegistered(r, ip.buttonCount);
+        // Taken AFTER the comparison, so the first resolved reading establishes the baseline and reports
+        // not-registered — which is what it is: nothing has been observed to change yet.
+        if (ip.buttonCount === null) ip.buttonCount = vendorIpRegionBaselineFrom(r);
+      } else {
+        ready = (r.filledTextInputCount ?? 0) >= 1;
+      }
       // Sanitized: an id, booleans, a tag name and integers. The whole point is that "did they fill it" travels
       // and "what did they put there" does not.
       //
@@ -2289,6 +2318,12 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     let unreadable = 0;
     /** Whether the vendor-form gate has already told this seller once. It refuses one press, never two. */
     let formWarned = false;
+    /**
+     * The `API 호출 IP` region's before-picture, for THIS arm window only — the same construction as the screen,
+     * category and credential baselines above, and for the same reason: an advance is only an observation of the
+     * seller's act if it differs from what was there when the step began.
+     */
+    const ipBaseline: VendorIpBaseline = { buttonCount: null };
     /** Consecutive polls with no guidance on the glass because the seller is not on this step's screen. */
     let suspended = 0;
     for (let i = 0; i < maxPolls; i++) {
@@ -2342,7 +2377,7 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
         // been calibrated against a live one — a fence that could trap a seller behind a misread field would
         // be a worse failure than the one it closes.
         if (target === "vendor_method" && !formWarned) {
-          const readiness = await this.vendorFormReadiness();
+          const readiness = await this.vendorFormReadiness(ipBaseline);
           if (readiness === "NOT_READY") {
             formWarned = true;
             log("aw_coupang_vendor_form_not_ready", { target });
@@ -2407,7 +2442,7 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
         // not all resolve, so the ring belongs — and this is re-decided on every poll, in BOTH directions, so a
         // seller who goes back to a fresh form gets the ring again.
         if (target === "vendor_method") {
-          const readiness = await this.vendorFormReadiness();
+          const readiness = await this.vendorFormReadiness(ipBaseline);
           if (readiness !== "UNKNOWN" && !this.ringRetired.has(target)) {
             await this.retireStepRing(target, VENDOR_FORM_ENTRY_BRIEF);
           } else if (readiness === "UNKNOWN" && this.ringRetired.has(target)) {
@@ -2419,22 +2454,27 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
           // 업체명 and URL, presses 추가 — and then had to tell SellerOps they had, on a panel whose own reading
           // already knew. The same census that refuses a premature press answers this; nothing new is read.
           //
-          // **No baseline, and that is the difference between this advance and every other one here.** The
-          // others watch for an EVENT (a screen arriving, a credential appearing) and a baseline is what stops
-          // "it was already like that" being reported as "the seller just did it". This one is a PRECONDITION
-          // for the next step's ring: `확인` is worth pointing at exactly when the form is ready, whether it
-          // became ready a moment ago or before the step re-armed. Requiring a change would suppress it in the
-          // ordinary recovery case — the walk re-anchoring on a form the seller has already completed — which is
-          // the state this is most useful in. Nothing is pressed either way: step ⑦ rings a control and rests.
+          // **Baselined like every other advance here**, on the one field whose readiness is a COUNT rather than
+          // an emptiness: `API 호출 IP`. The others watch for an EVENT and a baseline is what stops "it was
+          // already like that" being reported as "the seller just did it"; this one used to compare against the
+          // literal 1 that a single live screen produced, which would read a WING variant carrying two controls
+          // in that region as registered on arrival — and what this step hands to is a ring on `확인`, the
+          // control that issues the key. `ipBaseline` is that region as it was when this arm began.
+          //
+          // The cost is named rather than hidden: a walk re-anchoring on a form the seller has ALREADY completed
+          // baselines on the chip already there, so this does not fire and the seller presses their own panel
+          // button instead — which the form gate refuses once and then honours. A missed auto-advance is
+          // recoverable by the seller; a ring on `확인` over an unfilled form is what it costs them.
           //
           // Fenced on the SCREEN, checked second so it costs nothing until the form reads ready: the vendor
           // labels also paint on the issued 연동 정보 block, and a readiness reading taken there is not this
           // screen's form. `UNKNOWN` never advances, and the seller's own button stays on the panel throughout.
           //
-          // ⚠ It did NOT fire on the live walk of 2026-08-13, and the reason is above the rule rather than in
-          // it: `IP 주소` reads not-ready because WING registers an address as a removable CHIP, which is none of
-          // the `li` / `tr` / `option` that `entryRowCount` counts. The structure is now logged on every reading
-          // (see {@link vendorFormReadiness}) so the next walk records what a registered entry actually is.
+          // It did NOT fire on the live walk of 2026-08-13: `IP 주소` read not-ready because WING registers an
+          // address as a removable CHIP, which is none of the `li` / `tr` / `option` that `entryRowCount`
+          // counts. A READ_ONLY sitting that day measured the region either side of `추가` and the rule follows
+          // from that comparison — see {@link vendorIpEntryRegistered}. The four structural counts stay in the
+          // log on every reading, because that comparison is what the next surprise here will be diagnosed from.
           if (
             readiness === "READY" &&
             (await this.probeFlowScreen().catch(() => "UNRECOGNIZED" as WingFlowScreen)) === "VENDOR_METHOD"

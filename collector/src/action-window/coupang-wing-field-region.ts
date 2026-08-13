@@ -67,15 +67,27 @@ export interface FieldRegionRequest {
 export const FIELD_REGION_TAG_CENSUS_LIMIT = 16;
 
 /**
- * **How many buttons WING's `API 호출 IP` region has when nothing is registered — MEASURED, not assumed.**
+ * **How many buttons WING's `API 호출 IP` region had when nothing was registered — MEASURED on one screen.**
  *
- * One: the `추가` control itself. Registering an address adds its own remove control beside the chip, so the
- * region carries one button per registered entry ON TOP of this baseline.
+ * One: the `추가` control itself. Kept as the record of what was measured, and used by the offline fixtures that
+ * model that screen. It is deliberately **not** an input to {@link vendorIpEntryRegistered} any more — see there.
  */
 export const VENDOR_IP_REGION_BASELINE_BUTTON_COUNT = 1;
 
 /**
- * **Does this region hold at least one REGISTERED IP entry?**
+ * **What a region looked like before the seller acted.** `null` when the region did not resolve, which is the
+ * only honest reading of "there is nothing to compare against".
+ */
+export function vendorIpRegionBaselineFrom(reading: {
+  readonly visibleCount?: number;
+  readonly buttonCount?: number;
+}): number | null {
+  if (reading.visibleCount !== undefined && reading.visibleCount !== 1) return null;
+  return typeof reading.buttonCount === "number" ? reading.buttonCount : null;
+}
+
+/**
+ * **Does this region hold an IP entry the seller registered DURING this step?**
  *
  * The rule this replaced counted `entryRowCount` — `li` / `tr` / `option` — and read **zero on both sides of the
  * registration**, so the guided walk's step ⑥ could never advance. The 2026-08-13 live sitting
@@ -93,21 +105,41 @@ export const VENDOR_IP_REGION_BASELINE_BUTTON_COUNT = 1;
  * | `STRONG`        | 2      | 2     |
  *
  * A registered entry is a `div` chip carrying its own remove `button` — which is why a row count cannot see it
- * and a button count can. The 업체명 and URL regions were byte-identical across the same pair while the operator
- * typed into both, so the signal is specific to REGISTRATION rather than to typing.
+ * and a button count can.
  *
- * `entryRowCount` is kept as an alternative, not replaced by one: a WING layout that did render rows would still
- * be honoured, and keeping it costs a comparison. Both fail closed — an unmeasured count is not a registration.
+ * ## Why the comparison is against a BASELINE and not against the number 1
  *
- * n=1: one sitting, one address. Registering a second should read `buttonCount: 3`; nothing here depends on
- * that, since the rule asks only whether the count has risen above the baseline.
+ * That table is n=1: one sitting, one screen, one address. The first rule written from it asked
+ * `buttonCount > 1`, and a WING variant carrying two controls in that region before anything is registered
+ * would have satisfied it on arrival — which on this step means ringing `확인`, **the control that issues the
+ * key**, over a form the seller has not filled. The measurement supports "registering adds a button"; it does
+ * not support "an empty region has exactly one".
+ *
+ * So the caller measures the region when the step arms and passes what it read. What is claimed is only the
+ * DIFFERENCE, which is what was actually observed.
+ *
+ * `entryRowCount` is kept as a baseline-free alternative: a WING layout that renders registered entries as rows
+ * says so structurally, and one row is a registration whatever the region looked like before.
+ *
+ * **Fail closed on every axis.** No baseline (`null`) is not a registration; an unmeasured `buttonCount` is not
+ * a registration; equal counts are not a registration.
+ *
+ * **What this costs.** A walk that re-arms over a form the seller ALREADY completed baselines on the chip that
+ * is already there, so the count never rises and step ⑥ does not complete itself. The seller's own panel button
+ * is still on the screen throughout, and the form gate refuses exactly one press before yielding — so that case
+ * degrades to pressing 다음 twice, never to a walk that cannot reach the key. That is the deliberate trade: a
+ * missed auto-advance is recoverable by the seller, a premature ring on `확인` is not.
  */
-export function vendorIpEntryRegistered(reading: {
-  readonly buttonCount?: number;
-  readonly entryRowCount?: number;
-}): boolean {
+export function vendorIpEntryRegistered(
+  reading: {
+    readonly buttonCount?: number;
+    readonly entryRowCount?: number;
+  },
+  baselineButtonCount: number | null,
+): boolean {
   if ((reading.entryRowCount ?? 0) >= 1) return true;
-  return (reading.buttonCount ?? 0) > VENDOR_IP_REGION_BASELINE_BUTTON_COUNT;
+  if (baselineButtonCount === null || typeof reading.buttonCount !== "number") return false;
+  return reading.buttonCount > baselineButtonCount;
 }
 
 /** One tag name and how many of it paint inside a region. No text, no attribute, no order dependence. */

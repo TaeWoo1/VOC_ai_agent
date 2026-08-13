@@ -76,16 +76,30 @@ The `API 호출 IP` region, before the operator pressed `추가` and after:
 | `STRONG` | 2 | 2 |
 
 **A registered address is a `div` chip carrying its own remove `button`.** The row count reads zero on both
-sides — so the old rule could not have fired on any number of registered addresses. The region's one baseline
-button is the `추가` control itself, so `buttonCount > 1` means at least one entry is registered.
+sides — so the old rule could not have fired on any number of registered addresses. The region gains a button
+per registered entry.
 
 Two controls on the reading: `entryRowCount` was measured on both sides rather than assumed, and the 업체명 and
 URL regions were **byte-identical** across the pair while the operator typed into both — so the signal is
-specific to REGISTRATION, not to typing. n=1 (one sitting, one address); a second entry should read
-`buttonCount: 3`, and nothing depends on that, because the rule asks only whether the count rose.
+specific to REGISTRATION, not to typing.
 
-The rule now lives in `vendorIpEntryRegistered` (`collector/src/action-window/coupang-wing-field-region.ts`),
-which keeps `entryRowCount >= 1` as an alternative rather than a replacement. Both halves fail closed.
+**The comparison is against a before-picture, not against the number 1.** The first rule written from this
+table asked `buttonCount > 1`, which is n=1 talking: one sitting, one screen. A WING variant carrying two
+controls in that region before anything is registered would satisfy it on arrival, and what step ⑥ hands to is
+a ring on `확인` — the control that issues the key. So the walk measures the region when the step arms
+(`VendorIpBaseline`, the same construction as the screen / category / credential baselines beside it) and claims
+only the DIFFERENCE, which is what was actually observed. The baseline is cleared the moment the form stops
+resolving, so a seller who returns to a fresh form is measured against that one.
+
+The rule lives in `vendorIpEntryRegistered` (`collector/src/action-window/coupang-wing-field-region.ts`), which
+keeps `entryRowCount >= 1` as a baseline-free alternative rather than a replacement. Every half fails closed: no
+baseline is not a registration, no count is not a registration, equal counts are not a registration.
+
+**What it costs, named rather than discovered live:** a walk re-anchoring on a form the seller ALREADY completed
+baselines on the chip that is already there, so step ⑥ does not complete itself. The seller's own panel button
+is on screen throughout and the form gate refuses exactly one press before yielding — so that case is two
+presses, never an unreachable key. A missed auto-advance is recoverable by the seller; a premature ring on `확인`
+is not.
 
 **The offline fixture was wrong in the same way the rule was.** It modelled the registration as a row
 appearing, which is why sixteen tests passed while the live walk sat at NOT_READY. It now models the measured
