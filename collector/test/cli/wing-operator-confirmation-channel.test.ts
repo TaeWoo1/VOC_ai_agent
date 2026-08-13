@@ -136,6 +136,14 @@ describe("a checkpoint advances only on a confirmed press", () => {
   });
 });
 
+describe("the printed record carries the provenance", () => {
+  it("every reading's confirmedBy travels into the JSON a reviewer reads", () => {
+    // It was only in the run's log lines at first. The record is the artefact that outlives the terminal, and a
+    // record that cannot show HOW its checkpoints advanced is one an auditor would have to take on trust.
+    expect(CODE).toContain("confirmedBy: r.confirmedBy");
+  });
+});
+
 describe("the readiness sentinel is gone, not merely unused", () => {
   it("the recorder names no readiness file and reads none", () => {
     expect(CODE).not.toContain("probe-wing-issuance-selectors.ready");
