@@ -10,6 +10,7 @@ import {
   activeStep,
   stepModel,
   recoveryCopy,
+  isIssuanceResumeReturn,
   COUPANG_STEP_LABELS,
   type CoupangState,
 } from "./coupangTutorial";
@@ -266,6 +267,20 @@ describe("recoveryCopy", () => {
       const c = recoveryCopy(code);
       const blob = `${c.title} ${c.body} ${c.retestLabel}`;
       expect(blob).not.toMatch(/returnShippingCenter|ordersheet|400/i);
+    }
+  });
+});
+
+describe("isIssuanceResumeReturn — a return is not an arrival", () => {
+  it("accepts the marker the local agent's return URL carries", () => {
+    expect(isIssuanceResumeReturn("?issuance=resume")).toBe(true);
+    // Order and company do not matter — it is one param among whatever else the URL holds.
+    expect(isIssuanceResumeReturn("?walkthroughRun=abc&issuance=resume")).toBe(true);
+  });
+
+  it("accepts NOTHING else — a near-miss must land on the start gate, not past it", () => {
+    for (const search of ["", "?", "?issuance=", "?issuance=start", "?resume=1", "?issuance=RESUME", "not a query"]) {
+      expect(isIssuanceResumeReturn(search), search).toBe(false);
     }
   });
 });

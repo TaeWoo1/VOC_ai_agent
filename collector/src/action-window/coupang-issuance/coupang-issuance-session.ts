@@ -185,6 +185,19 @@ export class CoupangIssuanceGuidanceSession {
         this.publishState();
         return this.drive(next);
       }
+      case "CHECK_CREDENTIAL_STATE": {
+        // **A driver that cannot answer answers UNKNOWN**, which parks. The alternative — treating a missing
+        // capability as "no key" — is the one wrong answer that walks a seller into creating a second one, and
+        // it would be given by a driver that is merely OLD rather than by a page that is ambiguous.
+        const probe = this.driver.probeCredentialState;
+        const state = probe ? await probe.call(this.driver).catch(() => "UNKNOWN" as const) : ("UNKNOWN" as const);
+        // The enum, and nothing else. It is derived from a value-free census plus one non-emptiness bit per
+        // cell; no credential value exists on this path to be logged.
+        log("aw_coupang_issuance_credential_state", { runId: this.runId, state });
+        const next = this.engine.onCredentialStateProbed(state);
+        this.publishState();
+        return this.drive(next);
+      }
       case "VERIFY_REACH": {
         // The seller navigated to the issuance page (a navigation the driver observed). Re-read the sanitized page
         // category and let the engine confirm it is open_api_issuance before guiding 자체개발. BOUNDED POLLING: the

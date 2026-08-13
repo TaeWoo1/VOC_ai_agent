@@ -1,5 +1,6 @@
 package com.sellerops.connector.coupang.setup;
 
+import com.sellerops.collect.CredentialHandoffArming;
 import com.sellerops.connector.coupang.setup.CoupangSetupView.LiveApprovalReadiness;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,12 +26,15 @@ public class CoupangSetupController {
     private final CoupangAdvertisedEgress advertisedEgress;
     private final boolean connectorEnabled;
     private final String liveApprovalId;
+    private final CredentialHandoffArming credentialHandoffArming;
 
     public CoupangSetupController(
             CoupangAdvertisedEgress advertisedEgress,
+            CredentialHandoffArming credentialHandoffArming,
             @Value("${sellerops.connector.coupang.enabled:false}") boolean connectorEnabled,
             @Value("${sellerops.connector.coupang.live-approval-id:}") String liveApprovalId) {
         this.advertisedEgress = advertisedEgress;
+        this.credentialHandoffArming = credentialHandoffArming;
         this.connectorEnabled = connectorEnabled;
         this.liveApprovalId = liveApprovalId;
     }
@@ -40,6 +44,7 @@ public class CoupangSetupController {
     public CoupangSetupView setup() {
         return new CoupangSetupView(
                 advertisedEgress.ips(),
-                LiveApprovalReadiness.of(connectorEnabled, liveApprovalId));
+                LiveApprovalReadiness.of(connectorEnabled, liveApprovalId),
+                credentialHandoffArming.readiness());
     }
 }

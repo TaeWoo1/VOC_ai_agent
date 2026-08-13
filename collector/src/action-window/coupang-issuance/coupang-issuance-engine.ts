@@ -30,6 +30,7 @@ import type { ActionWindowRunView, EventEnvelope, EventPayload, EventType, RunSt
 import { branchAfterWingProbe } from "../../cli/coupang-wing-classifier";
 import { COUPANG_TARGET_BARRIER_STAGE, isCoupangCheckpointTarget, type CoupangIssuanceTarget, type WingSurfaceProbe } from "./coupang-issuance-driver";
 import type { LocateResult } from "../engine";
+import { mayOfferHandoff, mayStartIssuance, type CoupangCredentialState } from "../coupang-credential-state";
 import {
   COUPANG_ISSUANCE_PAUSED_COMMANDS,
   COUPANG_ISSUANCE_RUN_COPY_KEY,
@@ -64,6 +65,14 @@ export type CoupangIssuanceEffect =
    * state at the start of a walk, not drift.
    */
   | "AWAIT_SURFACE"
+  /**
+   * **Read whether this account already has a key, before guiding anything that could create one.**
+   *
+   * Issued once the seller is on the open-API surface — the only page where the question is answerable — and
+   * always BEFORE the first issuance control is guided. The session answers with
+   * {@link CoupangIssuanceEngine.onCredentialStateProbed}.
+   */
+  | "CHECK_CREDENTIAL_STATE"
   /** Locate → highlight → arm the barrier for one control, as a single batched step in the session. */
   | { guide: CoupangIssuanceTarget }
   | { observe: CoupangIssuanceTarget }
@@ -113,7 +122,6 @@ const TARGET_STEP: Readonly<Record<CoupangIssuanceTarget, number>> = {
   vendor_method: 6,
   vendor_confirm: 7,
   credentials: 8,
-  return: 9,
 };
 
 export class CoupangIssuanceEngine {
@@ -131,7 +139,21 @@ export class CoupangIssuanceEngine {
   /** The control the current barrier/checkpoint rests on, so a recheck/resume re-guides the right section. */
   private currentTarget: CoupangIssuanceTarget | null = null;
   private targetSig: Partial<Record<CoupangIssuanceTarget, string>> = {};
-  private blockerCode: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT" | "SURFACE_SETTLE_TIMEOUT" | null = null;
+  private blockerCode:
+    | "LOGIN_REQUIRED"
+    | "TARGET_NOT_FOUND"
+    | "UI_DRIFT"
+    | "SURFACE_SETTLE_TIMEOUT"
+    | "CREDENTIAL_STATE_UNKNOWN"
+    | null = null;
+  /**
+   * What the runtime OBSERVED about this account's credentials, once it has been on a surface where that is
+   * answerable. `null` until then — absent from the view rather than defaulted, because a default here is a
+   * claim about a screen nobody has read.
+   */
+  private credentialState: CoupangCredentialState | null = null;
+  /** Whether the credential reading has already sent the run somewhere. `UNKNOWN` sends it nowhere. */
+  private credentialBranchTaken = false;
   private blockerRecoverable = false;
   /** A pause is an overlay on a barrier, not a stage — the product's stage list is exactly 14. */
   private paused = false;
@@ -275,9 +297,10 @@ export class CoupangIssuanceEngine {
       this.emit("RUN_STATUS_CHANGED", { status: "RUNNING" });
       this.completedSteps = 1;
       this.emit("STEP_COMPLETED", { stepId: this.stepIdFor(1), stepStatus: "COMPLETED" });
-      this.activeStepIndex = 2;
-      this.currentTarget = "issue";
-      return { guide: "issue" };
+      // NOT `{guide:"issue"}` any more. The walk's last control CREATES a credential, so before guiding the
+      // first step toward it the run asks whether this account already has one. Everything that decides where
+      // it goes next lives in `onCredentialStateProbed`.
+      return "CHECK_CREDENTIAL_STATE";
     }
     if (branch === "wing_home") {
       // The seller is on the WING home — guide the reach_open_api transition-observe (step 1).
@@ -365,12 +388,60 @@ export class CoupangIssuanceEngine {
       this.emit("USER_ACTION_OBSERVED", { stepId: this.stepId(), observed: true });
       this.completedSteps = this.activeStepIndex; // step 1 (reach the open-API issuance page)
       this.emit("STEP_COMPLETED", { stepId: this.stepId(), stepStatus: "COMPLETED" });
-      this.currentTarget = "issue";
-      return { guide: "issue" };
+      this.stage = "locating_open_api";
+      // The seller has only NOW arrived at the surface where the question is answerable, so this is the other
+      // door into the same check. Both doors, and no third — every path to `{guide:"issue"}` runs through
+      // `onCredentialStateProbed`.
+      return "CHECK_CREDENTIAL_STATE";
     }
     // Still on the way (the home, an intermediate hop, a page mid-hydration) → keep watching. The seller is
     // moving through WING; "not there yet" is not drift, and it must not need a command from the other tab.
     return this.awaitSurface();
+  }
+
+  /**
+   * **The one branch that decides whether this seller is walked toward creating a key.**
+   *
+   * Three answers, three destinations, and the asymmetry between them is the design:
+   *
+   *  - `NO_KEY` — a POSITIVE reading that the credential cells are empty. The walk proceeds to step 2, exactly
+   *    as it always did.
+   *  - `KEY_PRESENT` — the account already holds a key. Steps 2–7 are the path to creating one, so they are not
+   *    walked at all; the run goes straight to the hand-off step, which is the SAME state a seller who has just
+   *    issued a key ends on. Both cohorts see one screen.
+   *  - `UNKNOWN` — park. `mayStartIssuance` is asked rather than `!== "KEY_PRESENT"` tested, because that
+   *    spelling reads `UNKNOWN` as permission, and `UNKNOWN` is where a second real key gets created.
+   *
+   * The reading is recorded on the run view (`credentialState`) whatever it says, so the frontend routes on the
+   * observation rather than on the step number it can see.
+   */
+  onCredentialStateProbed(reading: CoupangCredentialState): CoupangIssuanceEffect {
+    if (isCoupangIssuanceTerminal(this.stage)) return "NONE";
+    // Only from the automatic stage the check is issued in…
+    if (this.stage !== "locating_open_api") return "NONE";
+    // …and only once it has DECIDED. The stage alone is not enough: the `NO_KEY` branch leaves the run in
+    // `locating_open_api` until the first control is highlighted, so a second answer arriving in that window
+    // would re-branch a run already being guided — and one that disagreed would redirect it.
+    //
+    // `UNKNOWN` deliberately does not latch. It parks, and a recoverable park whose recovery cannot change the
+    // answer is not recoverable at all — which is the deadlock this flag exists to avoid rather than create.
+    if (this.credentialBranchTaken) return "NONE";
+    this.credentialState = reading;
+    if (mayOfferHandoff(reading)) {
+      this.credentialBranchTaken = true;
+      // Straight to the hand-off. Nothing in between is walked, so nothing in between is reported as done:
+      // `completedSteps` still counts only what the seller actually did.
+      this.currentTarget = "credentials";
+      this.activeStepIndex = TARGET_STEP.credentials;
+      return { guide: "credentials" };
+    }
+    if (mayStartIssuance(reading)) {
+      this.credentialBranchTaken = true;
+      this.activeStepIndex = 2;
+      this.currentTarget = "issue";
+      return { guide: "issue" };
+    }
+    return this.park("credential_state_unknown", "CREDENTIAL_STATE_UNKNOWN");
   }
 
   /** Where the run goes once a barrier's control has been acted on. */
@@ -412,10 +483,9 @@ export class CoupangIssuanceEngine {
       case "vendor_confirm":
         this.currentTarget = "credentials";
         return { guide: "credentials" };
+      // The LAST step. Its own CTA performs the return, so there is no step after it to advance to — pressing
+      // it completes the walk. The seller is sent back to SellerOps by `returnToSellerOps`, not by a step.
       case "credentials":
-        this.currentTarget = "return";
-        return { guide: "return" };
-      case "return":
         return this.complete();
     }
   }
@@ -546,8 +616,8 @@ export class CoupangIssuanceEngine {
   }
 
   private park(
-    stage: "waiting_login" | "target_not_found" | "page_mismatch",
-    code: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT" | "SURFACE_SETTLE_TIMEOUT",
+    stage: "waiting_login" | "target_not_found" | "page_mismatch" | "credential_state_unknown",
+    code: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT" | "SURFACE_SETTLE_TIMEOUT" | "CREDENTIAL_STATE_UNKNOWN",
   ): CoupangIssuanceEffect {
     if (this.stage === stage && this.blockerCode === code) return "NONE";
     this.paused = false;
@@ -599,6 +669,7 @@ export class CoupangIssuanceEngine {
       executionMode: "ACTION_WINDOW",
       intent: "API_ISSUANCE_GUIDANCE",
       // Deliberately NO appBranch — the Coupang walk is linear.
+      ...(this.credentialState ? { credentialState: this.credentialState } : {}),
       currentStep: {
         stepId: meta.stepId,
         stepNumber: meta.stepNumber,

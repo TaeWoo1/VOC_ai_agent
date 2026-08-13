@@ -14,6 +14,7 @@
  */
 import { CANDIDATE_WING_TARGET_SELECTORS } from "../../cli/coupang-wing-classifier";
 import type { CoupangIssuanceProbeDriver, CoupangIssuanceTarget, WingSurfaceProbe } from "./coupang-issuance-driver";
+import type { CoupangCredentialState } from "../coupang-credential-state";
 import type { LocateResult } from "../engine";
 
 export interface CoupangIssuanceFixtureScript {
@@ -33,6 +34,11 @@ export interface CoupangIssuanceFixtureScript {
    * non-issuance category (e.g. `unknown`, `login`) to model a wrong page / expired session.
    */
   reachLanding?: WingSurfaceProbe;
+  /**
+   * What the runtime reads about this account's existing credentials. Missing → `NO_KEY` (a fresh seller).
+   * `KEY_PRESENT` sends the run straight to the hand-off step; `UNKNOWN` parks it.
+   */
+  credentialState?: CoupangCredentialState;
   /** Per-target locate results. Missing → a single match with a deterministic signature. */
   locate?: Partial<Record<CoupangIssuanceTarget, LocateResult>>;
   /** Per-target highlight re-validation. Missing → the same result `locate` gave (no drift). */
@@ -109,6 +115,16 @@ export class CoupangIssuanceFixtureDriver implements CoupangIssuanceProbeDriver 
     return this.script.probe ?? DEFAULT_WING_HOME_PROBE;
   }
   // No `probeSurfaceSettled` override: the session falls back to `probeSurface` here (interface method optional).
+
+  /**
+   * The account's key state. Default `NO_KEY` — the fixture models a fresh seller, which is the walk it exists
+   * to rehearse. Scripts that need the other two set them explicitly, because both change where the run GOES:
+   * `KEY_PRESENT` skips issuance to the hand-off, `UNKNOWN` parks.
+   */
+  async probeCredentialState(): Promise<CoupangCredentialState> {
+    this.calls.push("probeCredentialState");
+    return this.script.credentialState ?? "NO_KEY";
+  }
 
   async locateTarget(target: CoupangIssuanceTarget): Promise<LocateResult> {
     // The CANDIDATE selector is CONSULTED (as the live driver would) but never emitted — only counted.

@@ -59,8 +59,10 @@ const COPY: Record<string, string> = {
   // asserted from a button label, was refuted when that button was pressed and issued nothing, and belongs to
   // the control that actually does it.
   "actionWindow.coupangIssuance.vendorConfirm": "'확인' 직접 누르기 (키 발급)",
-  "actionWindow.coupangIssuance.copyKeys": "액세스 키·시크릿 키·업체코드 복사",
-  "actionWindow.coupangIssuance.return": "SellerOps로 돌아와 입력",
+  // The walk's LAST step. It said "액세스 키·시크릿 키·업체코드 복사" while the panel asked the seller to
+  // transcribe a 40-character secret by hand; SellerOps fetches them now, under a confirmation pressed on a
+  // SellerOps surface. The separate `return` step is gone — this step's CTA performs the return.
+  "actionWindow.coupangIssuance.copyKeys": "SellerOps에 연결",
 
   // Coupang WING Open API key RENEWAL guidance (Action Window). Entered from an already-connected account
   // whose credential is expiring. The renewal step plan reuses the issuance runtime but highlights 유효기간
@@ -136,9 +138,7 @@ const ISSUANCE_STEP_DETAIL: Record<string, string> = {
   "actionWindow.coupangIssuance.vendorConfirm":
     "업체명 · URL을 입력하고, IP 주소는 입력한 뒤 옆의 '추가'를 눌러 등록하세요 — 추가하지 않으면 IP가 등록되지 않습니다. 그 다음 '확인'을 직접 누르세요. ⚠ 여기서 실제 API 키가 발급되어 라이브 계정 상태가 바뀝니다(지우려면 나중에 별도의 삭제 작업이 필요합니다). SellerOps는 이 버튼을 절대 누르지 않고, 입력란에 아무것도 쓰지 않습니다. 키가 화면에 표시되면 자동으로 넘어갑니다.",
   "actionWindow.coupangIssuance.copyKeys":
-    "표시된 Access Key / Secret Key / 업체코드를 직접 복사하세요. SellerOps는 값을 읽지 않습니다. 복사했으면 아래 버튼을 누르세요.",
-  "actionWindow.coupangIssuance.return":
-    "아래 버튼을 눌러 SellerOps로 돌아가세요. 복사한 키를 입력하면 연결이 끝납니다.",
+    "API 키 발급이 확인됐습니다. SellerOps가 연결에 필요한 정보를 안전하게 가져올 준비가 됐어요. 아래 버튼을 누르시면 SellerOps로 돌아가고, 거기서 가져와도 될지 한 번 더 여쭙니다.",
 };
 
 /** The FULL per-step instruction for a guided issuance step, or null when the step has no detail mapping. */
@@ -319,6 +319,13 @@ const V2_ONLY_BLOCKER_VIEW: Record<string, BlockerView> = {
   SURFACE_CLOSED: {
     title: "판매자센터 창이 닫혔어요",
     body: "'다시 확인'을 누르면 판매자센터 창을 다시 열어 드릴게요.",
+  },
+  // The issuance walk refused to go on because it could not tell whether this account already has a key. The
+  // copy says what SellerOps could not do and what clears it — it does NOT say "키가 없는 것 같아요", because
+  // the whole point of this blocker is that nobody knows, and a guess in that direction creates a second key.
+  CREDENTIAL_STATE_UNKNOWN: {
+    title: "발급된 키가 있는지 확인하지 못했어요",
+    body: "쿠팡 윙의 Open API 화면이 모두 뜬 뒤 '다시 확인'을 눌러 주세요. 확인되기 전에는 발급 안내를 시작하지 않습니다.",
   },
 };
 

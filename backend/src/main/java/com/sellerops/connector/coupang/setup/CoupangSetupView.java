@@ -1,5 +1,6 @@
 package com.sellerops.connector.coupang.setup;
 
+import com.sellerops.collect.CredentialHandoffArming;
 import java.util.List;
 
 /**
@@ -10,16 +11,27 @@ import java.util.List;
  * @param advertisedEgressIps the fixed public egress IPv4(s) to register in the Coupang app's calling-IP
  *                            allowlist. Sanitized, non-secret, and EMPTY when none is configured (the UI
  *                            then shows generic guidance, never a fabricated IP). Never null.
+ * @param credentialHandoff   the sanitized CREDENTIAL-HANDOFF interlock readiness — a different interlock from
+ *                            {@code liveApproval} and deliberately so: that one asks whether SOME approval id is
+ *                            armed for a read-only marketplace GET, this one asks whether THIS run, at THIS
+ *                            commit, for the credential phase, still has its one unspent handoff. Value-free:
+ *                            two id prefixes, a phase literal, two booleans. Never null.
  * @param liveApproval        the sanitized backend live-run readiness — never a credential. Lets a live
  *                            proof's preflight confirm the running backend is armed with the approved run's
  *                            approval id (binding proof), the gap a green health check cannot close. Never
  *                            null.
  */
-public record CoupangSetupView(List<String> advertisedEgressIps, LiveApprovalReadiness liveApproval) {
+public record CoupangSetupView(List<String> advertisedEgressIps, LiveApprovalReadiness liveApproval,
+                              CredentialHandoffArming.Readiness credentialHandoff) {
 
     public CoupangSetupView {
         advertisedEgressIps = advertisedEgressIps == null ? List.of() : List.copyOf(advertisedEgressIps);
         liveApproval = liveApproval == null ? LiveApprovalReadiness.notArmed(false) : liveApproval;
+        // Absent reads as UNARMED, never as "unknown". A readiness field that can be missing is one a preflight
+        // can mistake for a check it did not run.
+        credentialHandoff = credentialHandoff == null
+                ? new CredentialHandoffArming.Readiness(false, false, null, null, null)
+                : credentialHandoff;
     }
 
     /**

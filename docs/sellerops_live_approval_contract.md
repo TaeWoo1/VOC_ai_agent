@@ -355,6 +355,63 @@ ingest into the database passed it cleanly — see below.
 | `capture-esm-review` | a `.ready` hand-off, then the marketplace-selection check | the ESM+ export click + download wait | a `.ready` file whose own prompt said *'in Claude Code, say "ready" and Claude creates the sentinel'* | a press immediately before the click, after every gate that could refuse it. Its READ hand-offs stay sentinel files and stay on the §5a register |
 | `capture-esm-review-upload` | the same `.ready` hand-off | the click → download → save → **upload into the backend DB** | the same `.ready` file | a press before the chain, disclosing the DB ingest |
 | `upload-file` | reads no page at all | the upload | n/a | **unchanged, by policy.** The operator typing the path IS the decision; there is no observation to be mistaken for one. Named in the guard so the exclusion is a rule, not an omission |
+| `run-coupang-credential-handoff-live` | classify the surface, census the credential cells value-free | **`CREDENTIAL_REVEAL`** — read the three values → POST them to the SellerOps vault → read-only verify | n/a (new) | one press, disclosing the whole chain, immediately before the read. See §5c |
+| Coupang guided issuance walk (`CHECK_CREDENTIAL_STATE`) | census the credential cells value-free, on the open-API surface, to decide whether an issuance walk should happen at all | **none** — it crosses no barrier. `KEY_PRESENT` PREVENTS an act (the walk stops before the key-creating control); `NO_KEY` still ends at a control the SELLER presses; `UNKNOWN` parks | n/a (new) | **unchanged, by policy.** A confirmation here would be the prompt-on-every-read this policy exists to avoid, and the read's only power is to refuse. It reads no value: a structural census plus one non-emptiness bit per cell, and it is gated on `WING_CREDENTIAL_CELLS_CALIBRATED` |
+
+## 5c. `CREDENTIAL_READ` — the one mode that is not `READ_ONLY`
+
+Every phase in `PHASE_SPECS` declares `mode: READ_ONLY` and means it: the agent reads structure and no
+value. The Coupang credential handoff does read values, so it carries a different literal —
+`CREDENTIAL_READ` — precisely so that run cannot be described with the word every other run uses. It is
+**not** `WRITE`: the agent still clicks, types, submits and issues nothing on the marketplace. What it
+writes to is the seller's own SellerOps vault.
+
+The gate enforces the pairing in both directions (`validateApprovalPrerequisites` step 6c):
+
+- a `READ_ONLY` phase may not declare `READ_CREDENTIAL_VALUES_ONCE` or
+  `HAND_CREDENTIAL_TO_SELLEROPS_BACKEND` → `CREDENTIAL_ACTION_IN_READ_ONLY_PHASE`
+- a `CREDENTIAL_READ` phase **must** declare both → `CREDENTIAL_MODE_UNDERDECLARED`
+
+The second direction is the one that matters: a run cannot carry the alarming mode and then quietly
+narrow its declared capability to something innocuous, because the operator's grant is given against the
+action list.
+
+### The backend is armed with the WHOLE identity, and spends it once
+
+`CoupangLiveCallGuard` asks one question — is SOME approval id armed — and that is the right question for a
+read-only marketplace GET. It is the wrong question for the run that reads three secrets off a seller's
+screen and writes them into the vault: a single non-blank string cannot say WHICH run was approved, at WHICH
+commit, for WHICH phase, or whether it has already been used.
+
+So the credential handoff has its own interlock (`CredentialHandoffArming`), armed only by
+`tools/coupang-local/wing-credential-arm-backend.sh` from the run env `wing-credential-bootstrap.sh handoff`
+minted. It refuses:
+
+| | why |
+|---|---|
+| nothing armed | the default state of every backend that was not prepared for this run |
+| a malformed or partial arming | every field must have the shape the bootstrap mints, so a hand-exported value is a refusal rather than a shortcut |
+| the `COUPANG_WING_CREDENTIAL_CELL_CALIBRATION` phase | that grant is for a run that reads no value, and both bootstraps mint identically-shaped ids |
+| an arming older than 1h (or stamped in the future) | the grant is single-sitting; a skewed clock is not something to reason about |
+| a request presenting a different approval / run / commit | each field closes a different way to reuse a grant |
+| a second handoff | one run, one handoff |
+
+**The arming is spent at the STORE, not at the verification.** The store is the irreversible half; the
+read-only check after it can fail for reasons that have nothing to do with the credential. Returning the
+arming there would invite reading three secrets again to replace something already in the vault, and
+replacement is the renewal path's job. A refusal *before* the store consumes nothing, because nothing
+happened.
+
+There is deliberately **no argument** to the arming script: it reads the minted run env and nothing else, so
+"arm it with a value I typed" is impossible rather than discouraged. The preflight then matches BOTH id
+prefixes and the phase from `/api/connect/coupang/setup` against the manifest it is about to display, and a
+backend that has already spent its handoff fails the preflight rather than the operator's grant.
+
+The value-cell structure is measured first, by a separate `READ_ONLY` phase
+(`COUPANG_WING_CREDENTIAL_CELL_CALIBRATION`) with its own approval — a grant for the calibration is never
+a grant for the handoff. That order is **enforced**: `WING_CREDENTIAL_CELLS_CALIBRATED` ships `false` and
+the gate refuses a `CREDENTIAL_READ` manifest while it is (`CREDENTIAL_CELLS_NOT_CALIBRATED`), so the
+handoff cannot reach PREPARED on a screen nobody has measured. Full contract: [`coupang_credential_handoff_v1.md`](./coupang_credential_handoff_v1.md).
 
 ---
 

@@ -41,10 +41,11 @@ describe("the walk's end moved to the control that actually issues", () => {
     const plan = coupangIssuanceStepPlan();
     expect(COUPANG_ISSUANCE_KEY_CREATION_STEP).toBe(7);
     expect(plan[COUPANG_ISSUANCE_KEY_CREATION_STEP - 1]!.copyParams?.targetKind).toBe("vendor_confirm");
-    // …and the two steps after it read and return. Nothing guided follows the key.
+    // …and exactly ONE step follows it: the credentials step, which confirms the issuance and hands off. It
+    // absorbed the old `return` step, whose only reason to exist was that this one used to ask for a hand-copy.
+    // Nothing guided follows the key beyond it.
     expect(plan.slice(COUPANG_ISSUANCE_KEY_CREATION_STEP).map((s) => s.copyParams?.targetKind)).toEqual([
       "credentials",
-      "return",
     ]);
   });
 

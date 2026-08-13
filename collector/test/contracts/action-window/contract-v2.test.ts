@@ -355,6 +355,37 @@ describe("Action Window v2 — API-issuance guidance binding rules", () => {
   it("appBranch is not final prose / identity — it survives the privacy sweep", () => {
     expect(findProhibitedFields(issuanceView({ appBranch: "existing" }))).toEqual([]);
   });
+
+  // credentialState is the sanitized "does this account already hold a key" reading. Same scoping rules as
+  // appBranch, and for a sharper reason: the walk it gates ends at a control that creates a real credential.
+  it("an issuance run view MAY omit credentialState (before the credential surface is read)", () => {
+    expect(validateRunView(issuanceView())).toEqual({ ok: true });
+  });
+
+  it.each(["NO_KEY", "KEY_PRESENT", "UNKNOWN"] as const)("an issuance run view accepts credentialState=%s", (state) => {
+    expect(validateRunView(issuanceView({ credentialState: state }))).toEqual({ ok: true });
+  });
+
+  it("rejects an unknown credentialState value", () => {
+    // Notably including the spellings a caller might reach for by analogy — the enum is the enum.
+    for (const bad of ["PRESENT", "none", "MAYBE", true]) {
+      expect(errorCodes(validateRunView(issuanceView({ credentialState: bad })))).toContain("UNKNOWN_ENUM");
+    }
+  });
+
+  it("rejects credentialState on a non-issuance run (it is issuance-scoped)", () => {
+    const exportView = {
+      protocolVersion: 2, runId: "r", revision: 3, channelCode: "coupang",
+      runCopyKey: "actionWindow.review.run", status: "RUNNING", executionMode: "AUTOMATIC_OPERATION",
+      intent: "EXPORT", credentialState: "KEY_PRESENT", guidanceEnabled: true, allowedCommands: [],
+      progress: { completedSteps: 0, totalSteps: 3 }, updatedAt: "2026-08-04T00:00:00Z",
+    };
+    expect(errorCodes(validateRunView(exportView))).toContain("CONSTRAINT_VIOLATION");
+  });
+
+  it("credentialState carries no credential — it survives the privacy sweep", () => {
+    expect(findProhibitedFields(issuanceView({ credentialState: "KEY_PRESENT" }))).toEqual([]);
+  });
 });
 
 describe("Action Window v2 — schema ↔ TypeScript consistency (mechanical)", () => {

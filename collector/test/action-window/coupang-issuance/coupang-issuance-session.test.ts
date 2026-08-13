@@ -102,7 +102,7 @@ async function pressNextToComplete(io: ReturnType<typeof loopback>, engine: Coup
 }
 
 describe("coupang issuance session — the full linear walkthrough (offline)", () => {
-  it("reach → verify → 발급 → 확인 → terms → key → … → return → complete on WING-resident advances ALONE (a single START_RUN, no FE 다음)", async () => {
+  it("reach → verify → 발급 → 확인 → terms → key → … → credentials → complete on WING-resident advances ALONE (a single START_RUN, no FE 다음)", async () => {
     const { io, engine, driver, session } = build();
     startRun(io);
     await session.whenSettled();
@@ -119,6 +119,8 @@ describe("coupang issuance session — the full linear walkthrough (offline)", (
       "observe:reach_open_api", // transition-observe: arm the navigation watch
       "wait:reach_open_api",
       "probeSurface", // VERIFY_REACH: confirm the seller reached the open-API issuance page
+      // …and then, before the first control on the path to creating a key, whether one already exists.
+      "probeCredentialState",
       // The MEASURED order since 2026-08-10: 발급 opens the purpose screen, 확인 opens the terms screen, and the
       // key is created on the terms screen. The old sequence guided 자체개발 / 업체명 / 호출 IP here — one control
       // that is not on the screen, and two whose screens this flow never shows.
@@ -147,13 +149,11 @@ describe("coupang issuance session — the full linear walkthrough (offline)", (
       "observe:vendor_confirm",
       "wait:vendor_confirm", // …the seller presses it; only now can a credential exist
       "locate:credentials",
-      "highlight:credentials", // copy the Access Key / Secret Key / 업체코드
+      // The LAST step: the keys are on screen, and its CTA (`SellerOps에 연결`) returns the seller. There is no
+      // separate return step — it existed only because this one used to ask for a hand-copy.
+      "highlight:credentials",
       "observe:credentials",
       "wait:credentials",
-      "locate:return",
-      "highlight:return",
-      "observe:return",
-      "wait:return",
       "cleanup",
     ]);
     // PROOF the FE never drove a step: the ONLY command the session received was the single START_RUN.
@@ -161,12 +161,12 @@ describe("coupang issuance session — the full linear walkthrough (offline)", (
     expect(commandResults).toHaveLength(1);
   });
 
-  it("keeps totalSteps a fixed 9, carrying the coupang channel + issuance intent + NO appBranch on every view", async () => {
+  it("keeps totalSteps a fixed 8, carrying the coupang channel + issuance intent + NO appBranch on every view", async () => {
     const { io, session } = build();
     startRun(io);
     await session.whenSettled();
     const totals = new Set(io.views().map((v) => v.currentStep!.totalSteps));
-    expect(totals).toEqual(new Set([9]));
+    expect(totals).toEqual(new Set([8]));
     for (const v of io.views()) {
       expect(v.intent).toBe("API_ISSUANCE_GUIDANCE");
       expect(v.channelCode).toBe("coupang");
@@ -179,9 +179,11 @@ describe("coupang issuance session — the full linear walkthrough (offline)", (
     const { io, engine, driver, session } = build({ probe: { ok: true, pageCategory: "open_api_issuance" } });
     startRun(io);
     await session.whenSettled();
-    // No reach_open_api guidance at all — step 1 auto-completed; the first guided control is 발급.
+    // No reach_open_api guidance at all — step 1 auto-completed. The first thing that happens is the
+    // credential-state read, and only a positive NO_KEY lets the walk go on to 발급.
     expect(driver.calls).not.toContain("locate:reach_open_api");
-    expect(driver.calls[1]).toBe("locate:issue");
+    expect(driver.calls[1]).toBe("probeCredentialState");
+    expect(driver.calls[2]).toBe("locate:issue");
     await pressNextToComplete(io, engine, session);
     expect(engine.currentStage()).toBe("guidance_complete");
   });
@@ -651,5 +653,50 @@ describe("coupang issuance session — bringing the WING window back to the fron
     const result = io.sent.filter((f) => f.kind === "aw_command_result").at(-1) as { accepted: boolean };
     expect(result.accepted).toBe(true);
     expect(engine.currentStage()).toBe(stage);
+  });
+});
+
+/* ─────────────── D2: the session's half of the credential-state gate ─────────────── */
+
+describe("coupang issuance session — the credential-state read, and what happens without it", () => {
+  it("**a driver that cannot answer answers UNKNOWN**, and the run parks rather than walking", async () => {
+    // The failure this closes is not a page being ambiguous — it is a DRIVER being old. Treating a missing
+    // capability as "no key" is the one wrong answer that walks a seller into creating a second one, and it
+    // would be given silently, by code that looks like it is doing nothing.
+    const io = loopback();
+    const engine = new CoupangIssuanceEngine({ runId: RUN_ID, channelCode: "coupang" }, { clock: makeCoupangIssuanceClock() });
+    const real = new CoupangIssuanceFixtureDriver({ probe: { ok: true, pageCategory: "open_api_issuance" } });
+    // A driver from before this capability existed: everything else works, and the optional method is absent.
+    const legacy = new Proxy(real, {
+      get: (t, p, r) => (p === "probeCredentialState" ? undefined : Reflect.get(t, p, r)),
+      has: (t, p) => (p === "probeCredentialState" ? false : Reflect.has(t, p)),
+    });
+    const session = new CoupangIssuanceGuidanceSession(engine, legacy, io.transport, {
+      rearmDelayMs: 1,
+      surfaceWaitPollMs: 0,
+      surfaceWaitTimeoutMs: 20,
+    });
+    session.attach();
+    startRun(io);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("credential_state_unknown");
+    expect(engine.view().blocker?.code).toBe("CREDENTIAL_STATE_UNKNOWN");
+    expect(real.calls).not.toContain("locate:issue");
+  });
+
+  it("KEY_PRESENT skips every control on the path to creating a key", async () => {
+    const { engine, driver, session, io } = build({
+      probe: { ok: true, pageCategory: "open_api_issuance" },
+      credentialState: "KEY_PRESENT",
+    });
+    startRun(io);
+    await session.whenSettled();
+    // The ONLY control guided is the hand-off. 발급, the terms screen, and the key-creating 확인 are not
+    // highlighted, not armed, and not observed.
+    for (const target of ["issue", "confirm_purpose", "terms_consent", "issue_final", "vendor_method", "vendor_confirm"]) {
+      expect(driver.calls, target).not.toContain(`locate:${target}`);
+    }
+    expect(driver.calls).toContain("locate:credentials");
+    expect(engine.view().credentialState).toBe("KEY_PRESENT");
   });
 });

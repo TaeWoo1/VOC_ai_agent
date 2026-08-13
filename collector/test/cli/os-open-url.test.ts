@@ -9,14 +9,14 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { planOsOpen } from "../../src/cli/os-open-url";
-import { SELLEROPS_COUPANG_CONNECT_PATH, isSellerOpsReturnUrl } from "../../src/cli/sellerops-return-url";
+import { SELLEROPS_COUPANG_CONNECT_PATH, SELLEROPS_ISSUANCE_RESUME_QUERY, isSellerOpsReturnUrl } from "../../src/cli/sellerops-return-url";
 
-const RETURN_URL = `http://localhost:5173${SELLEROPS_COUPANG_CONNECT_PATH}`;
+const RETURN_URL = `http://localhost:5173${SELLEROPS_COUPANG_CONNECT_PATH}?${SELLEROPS_ISSUANCE_RESUME_QUERY}`;
 
 describe("isSellerOpsReturnUrl", () => {
   it("accepts exactly what the screening produces", () => {
     expect(isSellerOpsReturnUrl(RETURN_URL)).toBe(true);
-    expect(isSellerOpsReturnUrl(`http://127.0.0.1:4173${SELLEROPS_COUPANG_CONNECT_PATH}`)).toBe(true);
+    expect(isSellerOpsReturnUrl(`http://127.0.0.1:4173${SELLEROPS_COUPANG_CONNECT_PATH}?${SELLEROPS_ISSUANCE_RESUME_QUERY}`)).toBe(true);
   });
 
   it("**a loopback origin is not enough** — the route has to be the connect route", () => {
@@ -29,8 +29,8 @@ describe("isSellerOpsReturnUrl", () => {
 
   it("refuses every host that is not this machine, and every non-http scheme", () => {
     for (const off of [
-      `https://wing.coupang.com${SELLEROPS_COUPANG_CONNECT_PATH}`,
-      `http://192.168.1.9:5173${SELLEROPS_COUPANG_CONNECT_PATH}`,
+      `https://wing.coupang.com${SELLEROPS_COUPANG_CONNECT_PATH}?${SELLEROPS_ISSUANCE_RESUME_QUERY}`,
+      `http://192.168.1.9:5173${SELLEROPS_COUPANG_CONNECT_PATH}?${SELLEROPS_ISSUANCE_RESUME_QUERY}`,
       "file:///Users/someone/x.html",
       "javascript:alert(1)",
       "",

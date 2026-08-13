@@ -35,10 +35,11 @@ import type { CoupangIssuanceTarget } from "../../../src/action-window/coupang-i
  * measured the `확인` control, the `OPEN API` option label and the two consent sentences on the live purpose and
  * terms screens. They are now anchored, multi-ring steps, covered in
  * `coupang-wing-multi-ring-highlight.test.ts`. What remains is the two steps that are guidance rather than a
- * WING control at all: reaching a page, and going back to SellerOps. Their signatures are synthetic constants
- * derived from no element, which is the property this file is really about.
+ * WING control at all: reaching a page. Its signature is a synthetic constant derived from no element, which is
+ * the property this file is really about. `return` was the second until the credentials step absorbed it — that
+ * step rings a real control, so it is not locator-less.
  */
-const GUIDANCE_TARGETS: readonly CoupangIssuanceTarget[] = ["reach_open_api", "return"];
+const GUIDANCE_TARGETS: readonly CoupangIssuanceTarget[] = ["reach_open_api"];
 
 interface MountCall {
   dockedPanelOnly?: boolean;
@@ -75,7 +76,11 @@ class FakePage {
       // The clear-tag IIFE answers a boolean; the fixed-label locate answers `{count, sig}`. Returning `true`
       // for both made every RING-path target resolve to `count: undefined` and mount nothing, so a test could
       // only ever reach the docked steps — which is how the anchored steps' panel options went unasserted.
-      return isClear ? true : { ...FAKE_LOCATE };
+      if (isClear) return true;
+      // ⑧ no longer goes through the fixed-label locate: it rings the credential VALUE ROW, and its answer is
+      // re-screened host-side against a closed vocabulary, so a bare `{count, sig}` is refused by design.
+      if (script.includes("wing-credential-row-ring")) return { ...FAKE_LOCATE, reason: "OK", rowTag: "TR", rowCellCount: 5 };
+      return { ...FAKE_LOCATE };
     }
     if (arg !== undefined) {
       this.order.push("mount");
@@ -280,7 +285,7 @@ describe("the panel's brief — shorter, and still safe to act on alone", () => 
     const expanded = driverWith(true);
     await expanded.driver.highlightTarget("issue_final");
     expect(expanded.page.mounts[0]?.detailExpanded).toBe(true);
-    for (const target of ["issue", "credentials", "return"] as CoupangIssuanceTarget[]) {
+    for (const target of ["issue", "credentials"] as CoupangIssuanceTarget[]) {
       const { driver, page } = driverWith(true);
       await driver.highlightTarget(target);
       expect(page.mounts[0]?.detail, target).toBe(OPERATOR_STEP_LABELS[target]);
@@ -292,7 +297,7 @@ describe("the panel's brief — shorter, and still safe to act on alone", () => 
 describe("the locator-less steps, continued", () => {
   it("mounts NO spotlight ring for them — a docked mount makes no claim about where a control is", async () => {
     const { driver, page } = driverWith(true);
-    await driver.highlightTarget("return");
+    await driver.highlightTarget("reach_open_api");
     // `dockedPanelOnly` is the whole claim: no anchor lookup, no ring, no dimming, no scroll.
     expect(page.mounts[0]?.dockedPanelOnly).toBe(true);
   });

@@ -26,11 +26,14 @@ import {
 } from "./approval-manifest";
 import {
   CALIBRATION_PHASES,
+  COUPANG_WING_CREDENTIAL_CALIBRATION_SCOPE,
+  COUPANG_WING_CREDENTIAL_HANDOFF_SCOPE,
   COUPANG_WING_ISSUANCE_REVEAL_ACTION,
   isWingCalibrationPhase,
   PHASE_ENTRYPOINTS,
   WING_DISCOVERY_TERMS_STEP_SUMMARY,
 } from "./approval-manifest";
+import { WING_CREDENTIAL_CELLS_CALIBRATED } from "../action-window/coupang-wing-credential-cells";
 import { WING_ISSUE_SELECTOR_CALIBRATED } from "../action-window/coupang-wing-issuance-driver";
 import { resolveVisualReconScope } from "../action-window/api-issuance-calibration/visual-recon";
 import {
@@ -74,6 +77,12 @@ export interface ApprovalManifestCliOptions {
    */
   verifyIdentity?: typeof verifyRepoIdentity;
   /**
+   * Credential value-cell calibration seam, on the same contract as the two beside it: the DEFAULT is the
+   * shipped {@link WING_CREDENTIAL_CELLS_CALIBRATED}, so a caller who omits it gets whatever the code actually
+   * claims. A test that needs a PREPARED handoff manifest injects `true` and says so; production cannot.
+   */
+  credentialCellsCalibrated?: boolean;
+  /**
    * 삭제 calibration seam, on exactly the same contract as {@link verifyIdentity}: the DEFAULT is the shipped
    * {@link WING_DELETION_SELECTORS_CALIBRATED}, so a caller who omits it gets whatever the code actually claims,
    * never a permissive constant.
@@ -109,6 +118,16 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
   const isWingLabelRecon = phase === "COUPANG_WING_LABEL_RECON";
   const isWingKeyDeletion = phase === "COUPANG_WING_KEY_DELETION";
   const isWingReveal = phase === "COUPANG_WING_ISSUANCE_FORM_REVEAL";
+  const isCredentialCalibration = phase === "COUPANG_WING_CREDENTIAL_CELL_CALIBRATION";
+  const isCredentialHandoff = phase === "COUPANG_WING_CREDENTIAL_HANDOFF";
+  // Both credential phases pin their scope, like the destructive one: the operator grants against these exact
+  // sentences, so a leftover `SELLEROPS_APPROVAL_OPERATION` from another run must not be able to re-describe a
+  // run that reads a secret.
+  const credentialScope = isCredentialHandoff
+    ? COUPANG_WING_CREDENTIAL_HANDOFF_SCOPE
+    : isCredentialCalibration
+      ? COUPANG_WING_CREDENTIAL_CALIBRATION_SCOPE
+      : null;
   const isWingGuidedWalk = phase === "COUPANG_WING_GUIDED_ISSUANCE_WALK";
   // The shared list, NOT a fourth hand-maintained chain. Review caught this one still spelled out by hand after
   // the other three were consolidated: it decides whether the entry URL is screened against the WING host or
@@ -236,6 +255,8 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     ? `WING VENDOR-METHOD DISCOVERY across ${checkpoints.length} operator-advanced checkpoints (${checkpoints.join(" → ")}). The whole issuance flow as the discovery phase runs it, and then further still: the OPERATOR presses \`약관 동의 및 Key 발급받기\` themselves${reachesVendorScreen ? "" : " — NOT in this narrowed run, which ends earlier"}. That press was believed to create the key, was pressed on two live walks, and the OPERATOR reported no key either time (WING_KEY_CREATION_CONTROL_REFUTATION) — this phase rests on that REPORT rather than on the button's label, which is what the refuted claim rested on. ⚠ The report is not a measurement and is not treated as one: SellerOps cannot confirm whether a key exists, because an issued surface and a no-key one are measurably indistinguishable across every sanitized signal it captures. What it opens is an integration-method screen (\`업체 입력 방식\` / \`연동업체 선택\` / \`자체개발(직접입력)\` / \`업체명\` / \`취소\` \`확인\`) that NO apparatus has ever read; the agent sweeps it read-only${reachesVendorSelection ? " and the operator then selects an input method" : ""}${reachesVendorForm ? ", and then fills the form it reveals in — their own 업체명 · URL, and an IP address REGISTERED with `추가` — so the same region census can be taken before and after it. That census reads the TAG NAMES inside each field's region and how many of each: not the values, and not even how many fields are non-empty (the reading the guided walk takes, and not this one). Filling a form in is not submitting it, so no account state changes. That is where the run ENDS" : reachesVendorSelection ? ", which is where the run ENDS" : ""}. ⚠ THAT SCREEN'S \`확인\` ISSUES A REAL API KEY on the operator's live account, changing its state. It is not in this approval, no checkpoint of this phase stands in front of it, and the phase has no checkpoint after the last one above. Key issuance is a separate manifest and a separate mode-WRITE grant. WHICH input method SellerOps should use is a PRODUCT DECISION and is not answered by this run — the run measures what the screen is made of and recommends nothing. The agent performs no click, selection, input, or value read, and never reads \`checked\`.`
     : isWingGuidedWalk
     ? "WING GUIDED ISSUANCE WALK, end to end — and THIS RUN ENDS WITH A REAL API KEY ON YOUR LIVE COUPANG ACCOUNT. ⚠ That is new: every earlier walk stopped one screen short of any key existing. The OPERATOR performs every marketplace action: log in, reach the page, press 'API Key 발급 받기', confirm OPEN API is selected, press 확인, read the two consent texts and tick them, press '약관 동의 및 Key 발급받기' (pressed on two live walks, operator-reported to issue no key — SellerOps cannot confirm that either way), select the input method, type their own 업체명 · URL · IP 주소, and press the vendor screen's '확인' — WHICH ISSUES THE KEY and changes live account state. Removing it afterwards is a SEPARATE deletion run, not an undo. SellerOps never presses it, never types into any field, and has no code path that could. The agent OPENS the seller's own WING sales-info landing once, so the window is not blank, and navigates no further. It highlights NINE live-calibrated controls; every guided step that names a WING CONTROL rings it, and the two that name no control — reaching the page, and going back to SellerOps — are still text-only. The rings on the purpose option, the consents and the vendor method sit on the LABEL and the SENTENCES, never on a radio or a checkbox: those inputs have no accessible association, so SellerOps does not claim to know which is which. It ADVANCES ITSELF on WING's own state — the purpose screen appearing, the terms screen appearing, both consent boxes being ticked (a yes/no computed in the page, never stored, sent, or logged), the vendor screen appearing, the vendor FORM reading complete (an emptiness count per field, polled while the seller types, never a value), and finally the credentials appearing. That last one is an observation of the RESULT and cannot cause it: the credential label cannot paint before a credential exists. WHICH input method is guided ('자체개발(직접입력)') is a PRODUCT DECISION recorded as one, not a measurement. No credential value read, no connect-test, no sync, no upload."
+    : credentialScope
+    ? credentialScope.operation
     : isWingReveal
     ? "WING issuance-form reveal (the OPERATOR presses 발급; this press is not the key-creating action; agent performs no click/input/value read)"
     : isVisualRecon
@@ -275,6 +296,8 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
       ` (checkpoints: ${checkpoints.join(" → ")})`
     : isWingGuidedWalk
     ? "operator-performed: the whole tutorial END TO END (1 발급 press + 1 확인 press on the merged purpose step + up to 2 consent ticks + 1 press of 약관 동의 및 Key 발급받기 + 1 input-method selection + the seller's own 업체명/URL/IP entry + 1 press of the vendor screen's 확인, WHICH ISSUES A REAL KEY). agent: 9 highlights of live-calibrated controls (highlighting the key-issuing control is not pressing it), 0 text-guided steps with no highlight, 0 rings on an input, 7 steps advanced by OBSERVING WING (the key-issuing PRESS is never one of them — only the credentials appearing after it), 0 clicks, 0 inputs, 0 submits, 0 key presses, 1 navigation of the WING window (the landing at window open; never a marketplace screen after it), plus — only if the seller presses SellerOps로 돌아가기 at the last step — 1 local SellerOps connect screen opened in the seller's OWN default browser, with the WING window not touched at all, 0 credential-value reads"
+    : credentialScope
+    ? credentialScope.maxActions
     : isWingReveal
     ? "1 operator-performed 발급 press + 1 sanitized observation"
     : isVisualRecon
@@ -335,14 +358,19 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     // calibration fact. Two of its six guided controls are highlighted; the other four are text-guided and
     // claim no locator, so nothing here asserts a calibration they do not have.
     ...(isWingReveal || isWingGuidedWalk ? { selectorsCalibrated: WING_ISSUE_SELECTOR_CALIBRATED } : {}),
+    // From the shared constant, never a hardcoded true: the display path must close when the calibration is
+    // withdrawn, exactly as the runtime path does.
+    ...(isCredentialHandoff
+      ? { credentialCellsCalibrated: opts.credentialCellsCalibrated ?? WING_CREDENTIAL_CELLS_CALIBRATED }
+      : {}),
     runId: env("WALKTHROUGH_RUN_ID") ?? "unknown",
     approvalId: env("WALKTHROUGH_APPROVAL_ID") ?? "unknown",
     gitSha: env("WALKTHROUGH_GIT_COMMIT") ?? "unknown",
-    maxActions: isWingKeyDeletion ? defaultMaxActions : (env("SELLEROPS_APPROVAL_MAX") ?? defaultMaxActions),
+    maxActions: isWingKeyDeletion || credentialScope ? defaultMaxActions : (env("SELLEROPS_APPROVAL_MAX") ?? defaultMaxActions),
     surface: isWingKeyDeletion
       ? COUPANG_WING_KEY_DELETION_SCOPE.surface
       : (env("SELLEROPS_APPROVAL_SURFACE") ?? (isWingPhase ? "Coupang WING Open API" : "Commerce API Center")),
-    operation: isWingKeyDeletion ? defaultOperation : (env("SELLEROPS_APPROVAL_OPERATION") ?? defaultOperation),
+    operation: isWingKeyDeletion || credentialScope ? defaultOperation : (env("SELLEROPS_APPROVAL_OPERATION") ?? defaultOperation),
     startRunContract,
     // The WING key-deletion phase is scoped around an operator-performed irreversible action — carry its immutable
     // descriptor so the gate can enforce it. The deletion CLI exists, but the 삭제 calibration is WITHDRAWN, so

@@ -159,6 +159,18 @@ export type CoupangIssuanceStage =
   | "target_not_found"
   /** Recoverable park: the seller is on a page the tutorial did not expect. */
   | "page_mismatch"
+  /**
+   * **Recoverable park: SellerOps cannot tell whether this account already has a key, so it will not walk on.**
+   *
+   * The walk ends at a control that CREATES a credential. Running it for a seller who already holds one issues
+   * a second real key on a live account; refusing to run it for a seller who does not costs them a screen and a
+   * re-check. Those are not comparable, which is why the third answer parks instead of proceeding.
+   *
+   * Recoverable on purpose: the usual cause is a page still settling or a seller not yet on the issuance
+   * screen, and a re-check re-reads it. See `coupang-credential-state.ts` for why `NO_KEY` requires a positive
+   * reading rather than a failure to find one.
+   */
+  | "credential_state_unknown"
   /** Terminal: the operator cancelled or left for the manual path. */
   | "operator_aborted";
 
@@ -181,7 +193,12 @@ export const COUPANG_ISSUANCE_BARRIER_STAGES: readonly CoupangIssuanceStage[] = 
  * The recoverable parks. Each is a place the run stopped resting on the SELLER (log in, get to the page, make
  * the control appear) — never a failure. A `REQUEST_STEP_RECHECK` re-probes / re-guides the surface.
  */
-export const COUPANG_ISSUANCE_PARK_STAGES: readonly CoupangIssuanceStage[] = ["waiting_login", "target_not_found", "page_mismatch"];
+export const COUPANG_ISSUANCE_PARK_STAGES: readonly CoupangIssuanceStage[] = [
+  "waiting_login",
+  "target_not_found",
+  "page_mismatch",
+  "credential_state_unknown",
+];
 
 /**
  * **The OBSERVED WAITS — the runtime is watching WING, and the seller is not blocked on anything.**
@@ -243,8 +260,10 @@ export function coupangIssuanceStepPlan(): readonly CoupangIssuanceStepMeta[] {
     { stepNumber: 5, stepId: "aw.coupang_issuance_issue_checkpoint", copyKey: "actionWindow.coupangIssuance.issueCheckpoint", mode: "ACTION_WINDOW", copyParams: { targetKind: "issue_final" } },
     { stepNumber: 6, stepId: "aw.coupang_issuance_vendor_method", copyKey: "actionWindow.coupangIssuance.vendorMethod", mode: "ACTION_WINDOW", copyParams: { targetKind: "vendor_method" } },
     { stepNumber: 7, stepId: "aw.coupang_issuance_vendor_confirm", copyKey: "actionWindow.coupangIssuance.vendorConfirm", mode: "ACTION_WINDOW", copyParams: { targetKind: "vendor_confirm" } },
+    // The LAST step. Its ids keep the `copy_keys` spelling: they are a stable FE contract, and renaming a
+    // copyKey silently drops the panel's text if any consumer lags. What the step SAYS changed completely —
+    // it no longer asks the seller to copy anything — and its CTA performs the return that step 9 used to.
     { stepNumber: 8, stepId: "aw.coupang_issuance_copy_keys", copyKey: "actionWindow.coupangIssuance.copyKeys", mode: "ACTION_WINDOW", copyParams: { targetKind: "credentials" } },
-    { stepNumber: 9, stepId: "aw.coupang_issuance_return", copyKey: "actionWindow.coupangIssuance.return", mode: "ACTION_WINDOW", copyParams: { targetKind: "return" } },
   ];
 }
 
@@ -309,6 +328,7 @@ export function coupangIssuanceStageToRunStatus(stage: CoupangIssuanceStage): Ru
     case "return_to_sellerops":
     case "target_not_found":
     case "page_mismatch":
+    case "credential_state_unknown":
       return "WAITING_FOR_HUMAN";
     case "guidance_complete":
       return "COMPLETED";
@@ -336,6 +356,7 @@ export function coupangIssuanceStageToStepStatus(stage: CoupangIssuanceStage): S
     case "return_to_sellerops":
     case "target_not_found":
     case "page_mismatch":
+    case "credential_state_unknown":
       return "AWAITING_USER";
     case "guidance_complete":
       return "COMPLETED";

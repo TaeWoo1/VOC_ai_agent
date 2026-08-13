@@ -334,6 +334,73 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
       const { container } = render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} />);
       await expectNoAxeViolations(container);
     });
+
+    /**
+     * **D2.** The agent's own return appends `?issuance=resume`. Without it, a seller who pressed
+     * "SellerOps에 연결" at the END of the walk was shown its BEGINNING — the phase is derived from persisted
+     * state (nothing is persisted mid-issuance) and this component's start flag is local to a tab that has
+     * just been replaced.
+     */
+    describe("returning from the guided walk is not arriving at it", () => {
+      const setSearch = (search: string) => {
+        window.history.replaceState({}, "", `/connect/coupang${search}`);
+      };
+      afterEach(() => setSearch(""));
+
+      it("**skips the start gate and adopts the run the agent is already hosting**", () => {
+        setSearch("?issuance=resume");
+        const host = fakeHost();
+        render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} />);
+        expect(screen.queryByRole("button", { name: "쿠팡 연결 안내 시작" })).toBeNull();
+        expect(screen.queryByRole("button", { name: "이미 키가 있어요" })).toBeNull();
+      });
+
+      it("a plain arrival still gets the start gate — the marker is what distinguishes them", () => {
+        setSearch("");
+        const host = fakeHost();
+        render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} />);
+        expect(screen.getByRole("button", { name: "쿠팡 연결 안내 시작" })).toBeInTheDocument();
+      });
+
+      it("**a seller who already had a key is not told they issued one**", () => {
+        // The run skipped issuance entirely (the agent read KEY_PRESENT), so "Open API 키 발급 완료" would be a
+        // claim about their account that is not true. The credential state is v2-only and issuance-only, so it
+        // is read off the host's v2 view rather than the shared v1 shape.
+        setSearch("?issuance=resume");
+        const host = fakeHost();
+        render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} />);
+        act(() =>
+          host.publish({
+            ...issuanceRun({ status: "COMPLETED", allowedCommands: [] }),
+            credentialState: "KEY_PRESENT",
+          } as ActionWindowRunView),
+        );
+        expect(screen.getByText("이미 발급된 Open API 키를 확인했어요")).toBeInTheDocument();
+        expect(screen.queryByText("Open API 키 발급 완료")).toBeNull();
+        expect(screen.getByText(/이미 발급된 Open API 키가 있어요/)).toBeInTheDocument();
+      });
+
+      it("a seller who DID issue one still reads the issuance wording", () => {
+        setSearch("?issuance=resume");
+        const host = fakeHost();
+        render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} />);
+        act(() =>
+          host.publish({
+            ...issuanceRun({ status: "COMPLETED", allowedCommands: [] }),
+            credentialState: "NO_KEY",
+          } as ActionWindowRunView),
+        );
+        expect(screen.getByText("Open API 키 발급 완료")).toBeInTheDocument();
+        expect(screen.queryByText(/이미 발급된 Open API 키가 있어요/)).toBeNull();
+      });
+
+      it("some other query is not the marker", () => {
+        setSearch("?issuance=start&resume=1");
+        const host = fakeHost();
+        render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} />);
+        expect(screen.getByRole("button", { name: "쿠팡 연결 안내 시작" })).toBeInTheDocument();
+      });
+    });
   });
 
   describe("live host wiring (no run prop → the shared issuance host)", () => {

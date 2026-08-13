@@ -26,6 +26,23 @@ server:
   port: 8080
 
 sellerops:
+  # The Local Agent credential handoff — the ONE path that reads a seller's API keys off their marketplace
+  # screen and writes them into the vault. Armed separately from the read-only live-call interlock above,
+  # with the WHOLE identity the operator's grant was bound to, and spent after one store.
+  #
+  # Empty by default, which means UNARMED: a handoff on an unprepared backend is refused before the vault is
+  # touched. Armed only by tools/coupang-local/wing-credential-arm-backend.sh, from the run env that
+  # wing-credential-bootstrap.sh minted — every field must have the shape that bootstrap produces, so a
+  # hand-exported value is a refusal rather than a shortcut. All four are environment tokens, never secrets.
+  credential-handoff:
+    approval-id: ${SELLEROPS_CREDENTIAL_HANDOFF_APPROVAL_ID:}
+    run-id: ${SELLEROPS_CREDENTIAL_HANDOFF_RUN_ID:}
+    git-commit: ${SELLEROPS_CREDENTIAL_HANDOFF_GIT_COMMIT:}
+    # Must be COUPANG_WING_CREDENTIAL_HANDOFF. The calibration phase mints an identically-shaped approval id
+    # for a run that reads NO value; this is what stops its grant from arming the run that reads three.
+    phase: ${SELLEROPS_CREDENTIAL_HANDOFF_PHASE:}
+    # The bootstrap's own epoch. An arming older than the TTL (1h) is refused — the grant is single-sitting.
+    armed-at-epoch-seconds: ${SELLEROPS_CREDENTIAL_HANDOFF_ARMED_AT:0}
   vault:
     # Credential vault master key: base64-encoded 32 bytes (AES-256). Local
     # throwaway only — never commit a real key; KMS-backed keys are a later

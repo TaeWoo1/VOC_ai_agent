@@ -101,9 +101,11 @@ describe("CoupangWingIssuanceDriver — source guard (no click/type/submit/issue
     expect(code).not.toContain("IN_PAGE_SIG_FACTORY");
   });
 
-  it("treats reach_open_api and return as guidance-only — fixed synthetic signatures, never queried controls", () => {
+  it("treats reach_open_api as guidance-only — a fixed synthetic signature, never a queried control", () => {
     expect(code).toContain("REACH_OPEN_API_GUIDANCE_SIG");
-    expect(code).toContain("RETURN_GUIDANCE_SIG");
+    // There was a second, for `return`. That target is gone — the credentials step's CTA performs the return —
+    // and the credentials step rings a real control, so no synthetic signature stands in for it.
+    expect(code).not.toContain("RETURN_GUIDANCE_SIG");
   });
 
   it("keeps its ISSUANCE fixed-label candidates LIVE_DOM_CALIBRATION_PENDING (the 삭제 landing did not widen)", () => {
@@ -196,11 +198,12 @@ describe("the redesigned walk can actually be walked", () => {
     // test as passed, so a local run looks green and CI does not.
     const driver = new CoupangWingIssuanceDriver(fakePage() as never);
     const sigs = new Map<string, string>();
-    // Three steps LEFT this list on 2026-08-11 — exactly as the comment above says they would. `issue_final`
-    // first, then `confirm_purpose` and `terms_consent` when the guided-control calibration measured their
-    // controls on the live purpose and terms screens. What remains is the two steps that are guidance rather
-    // than a WING control: reaching a page, and going back to SellerOps.
-    for (const target of ["reach_open_api", "return"] as const) {
+    // Four steps LEFT this list. `issue_final` first, then `confirm_purpose` and `terms_consent` when the
+    // guided-control calibration measured their controls on the live purpose and terms screens — and finally
+    // `return`, which stopped being a step at all: the credentials step's own CTA performs the return, and
+    // that step rings a real control. What remains is the ONE step that is guidance rather than a WING
+    // control: reaching a page.
+    for (const target of ["reach_open_api"] as const) {
       const res = await driver.locateTarget(target);
       sigs.set(target, res.sig!);
     }

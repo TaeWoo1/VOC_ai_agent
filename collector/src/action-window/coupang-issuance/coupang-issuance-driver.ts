@@ -13,6 +13,7 @@
  * The targets are parameterized (not one method per control) because the sequence is data
  * ({@link CoupangIssuanceTarget}); a per-control method set would drift from it by hand.
  */
+import type { CoupangCredentialState } from "../coupang-credential-state";
 import type { WingPageCategory, WingSignals } from "../../cli/coupang-wing-classifier";
 import type { LocateResult } from "../engine";
 import type { CoupangIssuanceStage } from "./coupang-issuance-stages";
@@ -27,7 +28,7 @@ import type { CoupangIssuanceStage } from "./coupang-issuance-stages";
  *    configuration step instead, and that `self_dev` / `vendor_info` / `call_ip` are not on the surface where
  *    this walk expects them. Left unchanged pending the Stage-2 observation — see `coupang-issuance-stages.ts`.
  *  - `credentials` — the region where the Access Key / Secret Key / 업체코드 appear (NEVER read any value).
- *  - `return` — guidance-only ("return to SellerOps").
+ *    It is the walk's LAST step: its CTA returns the seller to SellerOps, in the handoff-ready state.
  */
 export type CoupangIssuanceTarget =
   | "reach_open_api"
@@ -69,7 +70,13 @@ export type CoupangIssuanceTarget =
    */
   | "vendor_confirm"
   | "credentials"
-  | "return";
+  /**
+   * There is no `return` target. It existed because `credentials` told the seller to copy three keys and go
+   * type them in, so the walk needed a step afterwards to send them back. The keys are no longer copied by
+   * hand — `credentials` ends with `SellerOps에 연결`, which performs the return itself — and two consecutive
+   * buttons both meaning "go to SellerOps" is the confusion the old `return` step's own comment warned about.
+   */
+  ;
 
 /**
  * In flow order, which is now the MEASURED order. `self_dev` / `vendor_info` / `call_ip` are gone: the first
@@ -85,7 +92,6 @@ export const COUPANG_ISSUANCE_TARGETS: readonly CoupangIssuanceTarget[] = [
   "vendor_method",
   "vendor_confirm",
   "credentials",
-  "return",
 ];
 
 /**
@@ -106,8 +112,8 @@ export const COUPANG_ISSUANCE_TRANSITION_OBSERVE_TARGET: CoupangIssuanceTarget =
  * step copy and a "다음" advance button. The seller reads/acts on the section, then presses that on-page button;
  * the driver OBSERVES the value-free press and the checkpoint advances — the seller never bounces back to the
  * SellerOps tab. (A FE `REQUEST_STEP_RECHECK` stays valid as a fallback/recovery path — e.g. at a park.) `issue`
- * is here too — the 발급 button is highlighted and the seller presses it themselves, then the on-page "다음";
- * `return` hands focus back to SellerOps (its panel button is "돌아가기", no WING section to locate).
+ * is here too — the 발급 button is highlighted and the seller presses it themselves, then the on-page "다음".
+ * `credentials` is the LAST one: its button hands focus back to SellerOps.
  */
 export const COUPANG_ISSUANCE_CHECKPOINT_TARGETS: readonly CoupangIssuanceTarget[] = [
   "issue",
@@ -117,7 +123,6 @@ export const COUPANG_ISSUANCE_CHECKPOINT_TARGETS: readonly CoupangIssuanceTarget
   "vendor_method",
   "vendor_confirm",
   "credentials",
-  "return",
 ];
 
 /** True for a same-page viewport checkpoint (advance on operator "다음"); false only for the transition-observe. */
@@ -140,8 +145,11 @@ export const COUPANG_TARGET_BARRIER_STAGE: Readonly<Record<CoupangIssuanceTarget
   // The key-creation boundary. `issue_final`'s barrier kept its name through two corrections and finally stops
   // claiming to be this one.
   vendor_confirm: "checkpoint_issue_key",
+  // The stage NAME is legacy. It was minted when this step told the seller to copy three keys by hand, which
+  // it no longer does — it now confirms the issuance and hands off. Renaming a stage is a shared-contract
+  // change (the renewal walk and the NAVER walk use the same vocabulary), so it is parked rather than done
+  // here; what matters for correctness is that the target maps to the barrier the seller is actually at.
   credentials: "guiding_copy_keys",
-  return: "return_to_sellerops",
 };
 
 /**
@@ -180,6 +188,28 @@ export interface CoupangIssuanceProbeDriver {
    * it or make it a no-op.
    */
   settleSurface?(): Promise<void>;
+
+  /**
+   * **Does this account already hold an API credential?** Value-free, and the answer that decides whether an
+   * issuance walk happens at all.
+   *
+   * Answerable only on the credential surface, so the engine asks for it once the seller is on the open-API
+   * page and never before. It returns a `CoupangCredentialState`: `KEY_PRESENT` (cells resolved, non-empty),
+   * `NO_KEY` (cells resolved, empty — a POSITIVE reading), or `UNKNOWN` for everything else.
+   *
+   * **What it reads.** A structural census — an association enum, tag names, integers — plus ONE bit per cell:
+   * whether it is empty. No credential value crosses the page boundary, and no length, prefix, or character
+   * class is derived from one. That bit is required rather than convenient: a locator resolving to an empty
+   * cell has found no key, and a determination that cannot tell those apart is the trap `wingIssuedStateFrom`
+   * documented (`credentialAnchorPresent` reads `true` on a confirmed no-key form).
+   *
+   * **Why this is an `AUTO_READ` and needs no barrier** (approval contract §5b): it advances the run's own
+   * GUIDANCE and crosses no action barrier. `KEY_PRESENT` PREVENTS an act rather than causing one, and `NO_KEY`
+   * still ends the walk at a control the seller presses themselves.
+   *
+   * A driver that cannot answer omits it, and the engine reads that as `UNKNOWN` — a park, never a licence.
+   */
+  probeCredentialState?(): Promise<CoupangCredentialState>;
 
   /** How many candidates match {@code target}, and the opaque signature of the one (if exactly one). */
   locateTarget(target: CoupangIssuanceTarget): Promise<LocateResult>;

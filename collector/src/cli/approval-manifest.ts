@@ -122,6 +122,18 @@ export const CALIBRATION_PHASES = [
   // operator-destructive-action contract (§ steps 7 + destructive-action check). Its scope is a marketplace
   // mutation the operator performs, so it is the FIRST phase to carry an `operatorDestructiveAction` descriptor.
   "COUPANG_WING_KEY_DELETION",
+  // The credential value-CELL calibration. READ_ONLY and value-free: for each of the three fixed credential
+  // labels it resolves the cell holding that label's value and reports the STRUCTURE — which association
+  // answered, the cell's tag, whether exactly one candidate resolved, how many fields it holds, and one
+  // non-emptiness bit. It exists because `WHERE_THE_CREDENTIAL_VALUES_SIT` is recorded as NOT established, so a
+  // value-reading locator written today would be a guess about the location of a secret.
+  "COUPANG_WING_CREDENTIAL_CELL_CALIBRATION",
+  // The credential HANDOFF. The ONLY phase in this list whose agent reads a credential VALUE — which is why it
+  // is the only one whose mode is not `READ_ONLY`. After a trusted operator confirmation it takes ONE read of
+  // 업체코드 / Access Key / Secret Key and hands them to the SellerOps backend vault, which verifies them with a
+  // read-only Coupang API call. It still clicks, types, submits and issues NOTHING on the marketplace: the key
+  // exists because the seller created it. See `docs/coupang_credential_handoff_v1.md`.
+  "COUPANG_WING_CREDENTIAL_HANDOFF",
   // Not a calibration phase — the FE-run-host live proof of the existing-app guided issuance tutorial. It is
   // listed here because this is the set of phases the approval gate can emit + prerequisite-check. Unlike the
   // four calibration phases (CLI-launched dedicated window), its OPERATOR entrypoint is the bound FE URL: the
@@ -220,8 +232,50 @@ export const APPROVAL_ACTIONS = [
   // back, or is something painted over it. A boolean per sample point and nothing else — never the tag, text, or
   // identity of whatever is on top. It is what stops step ⑦ completing behind WING's own `발급 완료` dialog.
   "MEASURE_MARKER_OCCLUSION",
+  // Read-only CREDENTIAL-CELL structure census: for each of the three fixed credential labels, which association
+  // ties it to a value cell (`th`→`td` beside it, or the cell at its column index below it), the cell's tag, how
+  // many candidates resolved, how many fields the cell holds, and whether it is non-empty.
+  //
+  // That last bit is a reading of a credential cell, and it is the reason this is its own member rather than
+  // part of `MEASURE_LABEL_REGION_STRUCTURE` — which explicitly promises it is never taken on a credential. One
+  // boolean, and it is required rather than convenient: a locator that resolves to an EMPTY cell has not found
+  // the key, and a calibration that cannot tell those apart would certify a locator that reads nothing. No
+  // length, no character class, no prefix, and no value.
+  "MEASURE_CREDENTIAL_CELL_STRUCTURE",
+  // **Read the credential VALUES.** ONE in-page read of 업체코드 / Access Key / Secret Key, taken only after a
+  // trusted operator confirmation, and taken at most once per run — not a poll, not a retry, not a per-field
+  // sequence. Every other member of this enum exists on the promise that no value crosses the boundary; this one
+  // is the exception, and it says so in the list the approval gate validates rather than only in prose.
+  // Read-only CREDENTIAL-REGION scope: for each ancestor level of a credential VALUE cell, how many of the
+  // three credential labels are inside, how many of the resolved value cells are, and how many of
+  // 업체명 / IP주소 / URL are. A depth, a tag name, three integers. It reads no value — the cells are located
+  // and then only tested for CONTAINMENT. It is what answers whether a ring can enclose the keys WITHOUT the
+  // seller's own business details, a question `WING_CREDENTIAL_REGION_EVIDENCE` recorded as unanswerable from
+  // the label side because the anchor sits in the `thead`.
+  "MEASURE_CREDENTIAL_REGION_SCOPE",
+  // Value-free ACCOUNT KEY STATE: NO_KEY / KEY_PRESENT / UNKNOWN, derived from the census above and its one
+  // non-emptiness bit. No value is read, and `UNKNOWN` never starts an issuance — a wrong NO_KEY would create
+  // a second real key on a live account, so the classifier requires a POSITIVE reading for it.
+  "CLASSIFY_CREDENTIAL_KEY_STATE",
+  "READ_CREDENTIAL_VALUES_ONCE",
+  // **Put those values on a socket.** One POST to the SellerOps backend's own credential endpoint, over
+  // loopback, which stores them through the existing vault and verifies them with a read-only Coupang API call.
+  // Separate from the read because it is a separate act with a separate risk: reading a value the seller is
+  // looking at is not the same as transmitting it, and an approval should be able to describe one without
+  // silently granting the other.
+  "HAND_CREDENTIAL_TO_SELLEROPS_BACKEND",
 ] as const;
 export type ApprovalAction = (typeof APPROVAL_ACTIONS)[number];
+
+/**
+ * The two actions that touch a credential VALUE. A phase may declare them only if its mode is `CREDENTIAL_READ`,
+ * and a `CREDENTIAL_READ` phase must declare them — see the gate. Kept as one list because the alternative is the
+ * `phase === … || phase === …` chain this module has already had to consolidate twice.
+ */
+export const CREDENTIAL_VALUE_ACTIONS: readonly ApprovalAction[] = [
+  "READ_CREDENTIAL_VALUES_ONCE",
+  "HAND_CREDENTIAL_TO_SELLEROPS_BACKEND",
+];
 
 const HIGHLIGHT_ACTIONS: readonly ApprovalAction[] = ["HIGHLIGHT_REAL_CONTROL"];
 
@@ -633,7 +687,16 @@ export interface PhaseSpec {
    * so no code path can clear it and silently skip the scope gate.
    */
   readonly destructiveScope?: DestructiveRunScope;
-  mode: "READ_ONLY";
+  /**
+   * The AGENT's posture toward the seller's data on this run.
+   *
+   * `READ_ONLY` is every phase that reads structure and no value — which, until the credential handoff, was all
+   * of them. `CREDENTIAL_READ` is the one posture in which the agent holds a marketplace secret, and it exists
+   * as its own literal precisely so that run cannot be described with the word every other run uses. It is NOT
+   * `WRITE`: the agent still clicks, types, submits and issues nothing on the marketplace. What it writes to is
+   * the seller's own SellerOps vault.
+   */
+  mode: "READ_ONLY" | "CREDENTIAL_READ";
   /** Visual-recon only: the fixed, closed set of API-center screens the redacted-screenshot recon may capture. */
   captureScreens?: readonly string[];
   /** Visual-recon only: the gitignored sink category the redacted PNG + sanitized JSON summary land in. */
@@ -978,6 +1041,40 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     operatorDestructiveAction: COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION,
     destructiveScope: COUPANG_WING_KEY_DELETION_SCOPE,
   },
+  COUPANG_WING_CREDENTIAL_CELL_CALIBRATION: {
+    phase: "COUPANG_WING_CREDENTIAL_CELL_CALIBRATION",
+    cli: "src/cli/calibrate-credential-cells.ts",
+    driver: "CoupangWingCredentialDriver (value-free credential-cell census)",
+    capableActions: [
+      "OPEN_DEDICATED_WINDOW",
+      "WAIT_OPERATOR_LOGIN_NAV",
+      "CLASSIFY_SANITIZED_PAGE_CATEGORY",
+      "MEASURE_CREDENTIAL_CELL_STRUCTURE",
+      "MEASURE_CREDENTIAL_REGION_SCOPE",
+      "CLASSIFY_CREDENTIAL_KEY_STATE",
+    ],
+    // It measures where a value SITS; it never rings it. A ring on a credential cell would be pointing the
+    // seller at the thing this run promises not to read.
+    allowsHighlight: false,
+    mode: "READ_ONLY",
+  },
+  COUPANG_WING_CREDENTIAL_HANDOFF: {
+    phase: "COUPANG_WING_CREDENTIAL_HANDOFF",
+    cli: "src/cli/run-coupang-credential-handoff-live.ts",
+    driver: "CoupangWingCredentialDriver (one-shot credential read) + credential handoff client",
+    capableActions: [
+      "OPEN_DEDICATED_WINDOW",
+      "WAIT_OPERATOR_LOGIN_NAV",
+      "CLASSIFY_SANITIZED_PAGE_CATEGORY",
+      // The pre-flight the read itself repeats: the same resolution, measured before anything is extracted.
+      "MEASURE_CREDENTIAL_CELL_STRUCTURE",
+      "CLASSIFY_CREDENTIAL_KEY_STATE",
+      "READ_CREDENTIAL_VALUES_ONCE",
+      "HAND_CREDENTIAL_TO_SELLEROPS_BACKEND",
+    ],
+    allowsHighlight: false,
+    mode: "CREDENTIAL_READ",
+  },
 };
 
 /**
@@ -996,6 +1093,8 @@ export const WING_PHASES: readonly CalibrationPhase[] = [
   "COUPANG_WING_GUIDED_ISSUANCE_WALK",
   "COUPANG_WING_ISSUANCE_FORM_REVEAL",
   "COUPANG_WING_KEY_DELETION",
+  "COUPANG_WING_CREDENTIAL_CELL_CALIBRATION",
+  "COUPANG_WING_CREDENTIAL_HANDOFF",
 ];
 export function isWingCalibrationPhase(phase: CalibrationPhase): boolean {
   return WING_PHASES.includes(phase);
@@ -1068,6 +1167,12 @@ export const APPROVAL_PREREQ_CAUSES = [
   // of a product-path run is that it is terminal-free; a summary that omits the OS approval dialog is describing
   // a different run from the one that executes.
   "MISSING_SERVICE_PAIRING_CHANNEL",
+  // The credential interlock, both directions: a READ_ONLY phase declaring an action that touches a credential
+  // value, and a CREDENTIAL_READ phase that does not declare one. See gate step 6c.
+  "CREDENTIAL_ACTION_IN_READ_ONLY_PHASE",
+  "CREDENTIAL_MODE_UNDERDECLARED",
+  // A CREDENTIAL_READ phase whose value-cell locator has never been measured on a real screen.
+  "CREDENTIAL_CELLS_NOT_CALIBRATED",
 ] as const;
 export type ApprovalPrereqCause = (typeof APPROVAL_PREREQ_CAUSES)[number];
 
@@ -1109,6 +1214,8 @@ export const ENTRYPOINT_PHASES = [
   "COUPANG_WING_GUIDED_ISSUANCE_WALK",
   "COUPANG_WING_ISSUANCE_FORM_REVEAL",
   "COUPANG_WING_KEY_DELETION",
+  "COUPANG_WING_CREDENTIAL_CELL_CALIBRATION",
+  "COUPANG_WING_CREDENTIAL_HANDOFF",
   "API_ISSUANCE_FE_LIVE_PROOF",
   "NAVER_GUIDED_CONNECTION",
 ] as const;
@@ -1177,6 +1284,81 @@ export const WING_DISCOVERY_TERMS_STEP_SUMMARY =
 export const WING_DEFAULT_ACCOUNT_BINDING =
   "WING: operator-owned Coupang seller account (the operator's own login) · SellerOps: a separate proof account. " +
   "Two distinct logins; no credential value from either is read";
+
+/**
+ * **The two credential phases' immutable scope — operation + budget, in ONE place.**
+ *
+ * They live here rather than in their CLIs for the reason `WING_DEFAULT_ACCOUNT_BINDING` does: the run-grant
+ * screen and the Approval Manifest each render these fields, and on 2026-08-13 a field with a copy in each place
+ * drifted — the operator pressed against one string while granting against another. The manifest CLI pins these
+ * (it does not read them from the environment, exactly as the destructive phase does), the run CLIs import them,
+ * and a regression asserts the two agree.
+ */
+export const COUPANG_WING_CREDENTIAL_CALIBRATION_SCOPE = Object.freeze({
+  operation:
+    "WING credential-cell structure calibration (agent measures WHICH CELL holds each key and whether it is " +
+    "non-empty; it reads no value, and performs no click/input/navigation)",
+  maxActions: "1 sanitized structural census of the credential cells (0 clicks, 0 inputs, 0 value reads)",
+});
+
+export const COUPANG_WING_CREDENTIAL_HANDOFF_SCOPE = Object.freeze({
+  operation:
+    "WING credential handoff (after the seller's own confirmation, the agent reads 업체코드 / Access Key / " +
+    "Secret Key ONCE and hands them to the SellerOps credential vault, then verifies with a read-only Coupang " +
+    "API call; the agent presses no marketplace control and creates/deletes no key)",
+  maxActions:
+    "1 operator-confirmed credential read + 1 handoff to the SellerOps backend + 1 read-only connection check",
+});
+
+/**
+ * **What the operator is actually agreeing to, field by field.**
+ *
+ * The scope sentence above says what the run DOES. This says what is true of the credential while it does it —
+ * the eight facts a person needs in order to give informed consent to a run that reads their API keys, and the
+ * eight a reviewer needs in order to check that the code still matches the promise.
+ *
+ * They are on the MANIFEST rather than in the preflight's prose because prose is not checkable. Every field
+ * here is asserted against the shipping code by an offline test, so a promise that stops being true breaks a
+ * test rather than quietly staying on the screen.
+ */
+export const COUPANG_WING_CREDENTIAL_HANDOFF_DISCLOSURE = Object.freeze({
+  /** WHICH account. The opaque slot, resolved server-side; the seller-account id never leaves the backend. */
+  accountBinding:
+    "SELLEROPS_ACCOUNT_SLOT (opaque 24-hex account slot). The slot SELECTS; the JWT AUTHORIZES — the backend " +
+    "resolves it inside the caller's org, and a slot from another org reads as absent. Refuses if unset.",
+  /** HOW MANY times a value is read. One, and the code has exactly one call site for it. */
+  credentialReadBudget:
+    "ONE read, once, for all three fields together. Not a poll, not a retry, not a per-field sequence — one " +
+    "in-page call behind the operator's CREDENTIAL_REVEAL press, and one POST.",
+  /** WHERE the values go. Straight to the seller's own backend, over loopback, with no stop in between. */
+  transport:
+    "Agent → the seller's own SellerOps backend, directly: one POST to /api/agent/credential-handoff over a " +
+    "screened loopback origin. No intermediary, no third party, and no assistant/LLM context at any point.",
+  /** WHERE the values are NOT. The list is exhaustive by construction — a source sweep pins it. */
+  noPersistence:
+    "Never written to stdout/stderr, a log line, telemetry, a screenshot, a fixture, a file, the clipboard, " +
+    "localStorage/sessionStorage, or an assistant's context. The plaintext exists in one function's scope and " +
+    "is dropped when it returns (JS strings cannot be zeroed — that is stated, not claimed otherwise).",
+  /** WHAT the backend does with them. The existing vault path, unchanged. */
+  storage:
+    "The EXISTING credential vault: envelope encryption (a per-credential DEK wrapped by the master key), via " +
+    "the same validator and the same store the operator's own form uses. No second storage path exists.",
+  /** The two outcomes are reported SEPARATELY, because one can be true while the other is not. */
+  storedVerifiedSeparation:
+    "`stored` and `connectionStatus` are separate fields. A credential that is stored but whose check could " +
+    "not run reports stored:true + UNVERIFIED — never a fabricated success, and never 'nothing was stored' " +
+    "when something was.",
+  /** The verification is a READ. It changes nothing on the marketplace. */
+  verification:
+    "A read-only Coupang API call (the same connection check the operator's own button runs). No order, " +
+    "product, shipping or inventory write; nothing is issued, changed or deleted on the marketplace.",
+  /** What happens if it goes wrong — stated BEFORE the run rather than discovered during it. */
+  failurePolicy:
+    "It NEVER overwrites: an account with a credential already stored is refused before the vault is touched. " +
+    "A refusal before the store leaves the run's one handoff unspent and retryable. Once stored, the arming " +
+    "is spent — a failed verification does not hand it back; re-check the connection, or replace the " +
+    "credential through the renewal path, which is atomic and has rollback.",
+});
 
 export const WING_RUN_GRANT_SUMMARY =
   " 실행은 SellerOps가 함께 여는 'SellerOps 확인' 탭에서 이 승인 내용(채널·계정·화면·작업·모드·허용 동작)을 " +
@@ -1431,6 +1613,33 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
       WING_PROBE_CONFIRM_CHANNEL_SUMMARY,
     emitsFrontendUrl: false,
   },
+  COUPANG_WING_CREDENTIAL_CELL_CALIBRATION: {
+    entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
+    cli: "src/cli/calibrate-credential-cells.ts",
+    entrypointCommandId: "calibrate-credential-cells",
+    operatorActionSummary:
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 이미 발급된 오픈API 키가 보이는 " +
+      "화면에 도착하신 뒤 'SellerOps 확인' 탭의 [현재 화면 확인]을 누르세요. SellerOps는 업체코드·Access Key·" +
+      "Secret Key 라벨이 어떤 칸과 연결되어 있는지 구조만 한 번 측정합니다 — 값은 읽지 않고, 그 칸이 비어 있는지 " +
+      "여부(예/아니오) 하나만 확인합니다. 클릭·입력·발급·전송 없음." +
+      WING_RUN_GRANT_SUMMARY +
+      WING_PROBE_CONFIRM_CHANNEL_SUMMARY,
+    emitsFrontendUrl: false,
+  },
+  COUPANG_WING_CREDENTIAL_HANDOFF: {
+    entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
+    cli: "src/cli/run-coupang-credential-handoff-live.ts",
+    entrypointCommandId: "run-coupang-credential-handoff-live",
+    operatorActionSummary:
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 방금 발급하신 키가 보이는 화면에 " +
+      "도착하신 뒤 'SellerOps 확인' 탭에서 [실행 허용]을 누르시면 — 그때 처음으로 — SellerOps가 업체코드·Access " +
+      "Key·Secret Key를 한 번만 읽어 SellerOps 연결 정보 저장소로 바로 보내고, 읽기 전용 쿠팡 API로 연결을 " +
+      "확인합니다. 값은 화면·기록·로그·대화창 어디에도 남지 않습니다. SellerOps는 발급 버튼을 대신 누르지 않고, " +
+      "아무것도 입력·제출하지 않으며, 키를 만들거나 지우지 않습니다." +
+      WING_RUN_GRANT_SUMMARY +
+      WING_PROBE_CONFIRM_CHANNEL_SUMMARY,
+    emitsFrontendUrl: false,
+  },
   // The FE-run-host issuance live proof: the operator's ONE action is opening the bound FE wizard URL. The
   // supporting CLI-launched host (dedicated Chrome + bridge) is NOT the operator entrypoint and is declared in
   // the manifest's `supportingSurface` — so this summary carries NO CLI-only marker (it must pass the
@@ -1526,6 +1735,11 @@ export interface ApprovalPrereqInput {
   missingEnv?: readonly string[];
   /** Override for tests; defaults to the code-level `SELECTORS_CALIBRATED` flag. */
   selectorsCalibrated?: boolean;
+  /**
+   * Whether a real calibration run has MEASURED where the credential values sit. Read only for a
+   * `CREDENTIAL_READ` phase, and defaulted to `false` there — a caller who omits it gets the refusal.
+   */
+  credentialCellsCalibrated?: boolean;
   /** The calibration capture hotkey label (Phase A only) — must be defined for the calibrator to arm capture. */
   hotkey?: string;
   /** The gitignored raw-artifact path (Phase A only) — must resolve under the `.calibration/` dir. */
@@ -1606,7 +1820,8 @@ export interface ApprovalManifest {
   phase: CalibrationPhase;
   cli: string;
   driver: string;
-  mode: "READ_ONLY";
+  /** The agent's posture — see {@link PhaseSpec.mode}. `CREDENTIAL_READ` is the one that holds a secret. */
+  mode: "READ_ONLY" | "CREDENTIAL_READ";
   accountBinding: string;
   apiCenterHost: string; // host CATEGORY enum, never the raw URL
   allowedActions: readonly ApprovalAction[];
@@ -1666,6 +1881,15 @@ export interface ApprovalManifest {
    * press is not key creation, and that the runtime cannot prove no key was created.
    */
   operatorRevealAction?: OperatorRevealAction;
+  /**
+   * CREDENTIAL_READ only: the eight facts about the seller's values that an operator needs in order to give
+   * informed consent — where they go, how many times they are read, what is never written down, how they are
+   * stored, how the two outcomes are reported, what the verification is, and what happens if it fails.
+   *
+   * On the MANIFEST rather than in the preflight's prose because prose is not checkable. Absent on every phase
+   * that reads no value, which is every other phase.
+   */
+  credentialHandoffDisclosure?: typeof COUPANG_WING_CREDENTIAL_HANDOFF_DISCLOSURE;
   expiresAt: "process-lifetime";
   gitSha: string;
 }
@@ -1745,6 +1969,39 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
   // 6b) Every declared action must be one the phase's driver can actually perform.
   if (!declared.every((a) => (spec.capableActions as readonly string[]).includes(a))) {
     return fail("ACTION_CAPABILITY_MISMATCH", `declared actions exceed ${spec.phase} driver capability`);
+  }
+  // 6c) **The credential interlock, in both directions.**
+  //
+  // Forward: an action that touches a credential VALUE may be declared only by a phase whose mode says so. Step
+  // 3 already pins `input.mode` to the spec's mode, so this is really a statement about the SPEC — a phase that
+  // lists a credential action while calling itself READ_ONLY is a manifest that describes a run reading secrets
+  // in the same words as one that reads none, and the operator's grant is given against those words.
+  //
+  // Backward, and this is the half that matters: a `CREDENTIAL_READ` phase MUST declare both. A run cannot be
+  // labelled with the alarming mode and then quietly narrow its declared capability to something innocuous —
+  // the mode and the action list have to tell the same story, or the manifest fails to prepare at all.
+  const declaresCredentialValue = declared.some((a) => (CREDENTIAL_VALUE_ACTIONS as readonly string[]).includes(a));
+  if (declaresCredentialValue && spec.mode !== "CREDENTIAL_READ") {
+    return fail(
+      "CREDENTIAL_ACTION_IN_READ_ONLY_PHASE",
+      `${spec.phase} is ${spec.mode}; only a CREDENTIAL_READ phase may declare ${CREDENTIAL_VALUE_ACTIONS.join(" / ")}`,
+    );
+  }
+  if (spec.mode === "CREDENTIAL_READ" && !CREDENTIAL_VALUE_ACTIONS.every((a) => (declared as readonly string[]).includes(a))) {
+    return fail(
+      "CREDENTIAL_MODE_UNDERDECLARED",
+      `${spec.phase} is CREDENTIAL_READ and must declare ${CREDENTIAL_VALUE_ACTIONS.join(" / ")}`,
+    );
+  }
+  // 6d) **A run may not read a value out of a shape nobody has measured.** The contract orders the calibration
+  // before the handoff; until this, nothing enforced it, so the handoff could have taken three secrets from a
+  // screen no human had inspected — the exact risk the calibration phase was created to remove. Defaults to
+  // `false` (fail closed) so a caller who omits the field gets the refusal, exactly like `selectorsCalibrated`.
+  if (spec.mode === "CREDENTIAL_READ" && (input.credentialCellsCalibrated ?? false) !== true) {
+    return fail(
+      "CREDENTIAL_CELLS_NOT_CALIBRATED",
+      `${spec.phase} reads credential VALUES; run ${PHASE_SPECS.COUPANG_WING_CREDENTIAL_CELL_CALIBRATION.phase} (READ_ONLY) first and land the measured cell shape`,
+    );
   }
 
   // 7) The highlight-proof phase requires the control selectors to be calibrated for real (not fixtures).
@@ -2085,6 +2342,12 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
     ...(spec.guidedWalkBoundary ? { guidedWalkBoundary: spec.guidedWalkBoundary } : {}),
     ...(spec.requiresOperatorRevealAction && spec.operatorRevealAction
       ? { operatorRevealAction: spec.operatorRevealAction }
+      : {}),
+    // Keyed off the MODE, not the phase name. `CREDENTIAL_READ` is the one posture that holds a seller's
+    // values, so any phase that ever carries it discloses what happens to them — a new credential phase cannot
+    // be added without the disclosure coming with it.
+    ...(spec.mode === "CREDENTIAL_READ"
+      ? { credentialHandoffDisclosure: COUPANG_WING_CREDENTIAL_HANDOFF_DISCLOSURE }
       : {}),
     expiresAt: "process-lifetime",
     gitSha: input.gitSha,
