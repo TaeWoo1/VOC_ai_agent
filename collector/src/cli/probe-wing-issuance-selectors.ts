@@ -1567,6 +1567,10 @@ function banner(): void {
   console.error(" clicks, types, submits, issues a key, or reads any value (incl. Access Key / Secret Key / 업체코드).");
   console.error(" The SELLER navigates MANUALLY to the open-API issuance page, then confirms each screen on the");
   console.error(` SellerOps '${OPERATOR_CONFIRM_PAGE_TITLE}' tab — nothing else advances the run. Output is a`);
+  // Named because it was not obvious live: the run opens 'Chrome for Testing', which sits beside the operator's
+  // everyday Chrome in the Dock and looks almost identical. Time was lost looking for the tabs in the wrong app.
+  console.error(" It opens its OWN browser ('Chrome for Testing'), NOT your everyday Chrome, with two tabs: the");
+  console.error(" WING page you navigate, and the confirmation tab. It raises the confirmation tab by itself.");
   console.error(" sanitized calibration record — no selector, value, PII, raw DOM/HTML, screenshot, or raw URL.");
   console.error(line);
 }
@@ -1899,6 +1903,11 @@ async function main(): Promise<void> {
     evaluate: evalOnConfirmPage,
     aborted: () => abortFlag.v || existsSync(abortPath),
     sleep,
+    // The run raises its own surface. On 2026-08-13 the operator could not find the window it was in, and
+    // raising that window from the OS opened a third blank one INSIDE the run's own browser (Chrome routes a
+    // second launch on the same user-data-dir into the running instance) — a page the recorder would then have
+    // measured as the newest tab. Playwright raises the TAB, inside the context that owns it, and cannot do that.
+    onArmed: () => (confirmPage as unknown as { bringToFront(): Promise<void> }).bringToFront(),
     // The VERDICT only. The token never reaches a log line, and neither does the event.
     onVerdict: (verdict) => {
       if (verdict !== "CONFIRMED") log("aw_coupang_operator_confirm_refused", { runId, verdict });

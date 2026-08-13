@@ -175,6 +175,13 @@ describe("the confirmation surface is separate from the page being measured", ()
     expect(CODE).not.toContain("entry.evaluate");
   });
 
+  it("the run raises its own confirmation tab", () => {
+    // Not the operator's job, and not the OS's. Raising the window from outside (`open -a`) routes into Chrome's
+    // user-data-dir singleton and opens a THIRD blank window inside the run's own browser — a page the recorder
+    // would then read as the newest tab. Playwright raises the TAB inside the context that owns it.
+    expect(CODE).toContain("onArmed: () => (confirmPage as unknown as { bringToFront(): Promise<void> }).bringToFront()");
+  });
+
   it("a fresh token is minted per wait, inside the seam", () => {
     const seam = SOURCE.slice(SOURCE.indexOf("awaitOperatorConfirmation: async (ask)"));
     expect(seam.slice(0, seam.indexOf("},"))).toContain("token: mintOperatorConfirmToken()");

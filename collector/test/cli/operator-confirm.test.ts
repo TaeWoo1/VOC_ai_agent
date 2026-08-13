@@ -162,11 +162,40 @@ describe("awaitOperatorConfirmation", () => {
     expect(verdicts).toContain("TOKEN_MISMATCH");
   });
 
+  it("the surface is raised ONCE, after arming — never before, and never on a failed arm", async () => {
+    // Order matters: raising a surface that still shows the PREVIOUS checkpoint's copy would put the wrong
+    // words in front of the operator at the moment they decide.
+    const raisedAt: number[] = [];
+    const { seams, armedScripts } = fakeSurface({ press: "trusted", afterTicks: 2 });
+    const r = await awaitOperatorConfirmation(
+      { ...seams, onArmed: () => void raisedAt.push(armedScripts.length) },
+      ASK,
+      opts,
+    );
+    expect(r.signal).toBe("ready");
+    expect(raisedAt).toEqual([1]);
+  });
+
+  it("a surface that will not raise still confirms — raising is best-effort", async () => {
+    const { seams } = fakeSurface({ press: "trusted" });
+    const r = await awaitOperatorConfirmation(
+      {
+        ...seams,
+        onArmed: () => Promise.reject(new Error("Target page, context or browser has been closed")),
+      },
+      ASK,
+      opts,
+    );
+    expect(r.signal).toBe("ready");
+  });
+
   it("a surface that cannot be armed fails closed immediately", async () => {
+    const raised: string[] = [];
     const { seams, verdicts } = fakeSurface({ armFails: true });
-    const r = await awaitOperatorConfirmation(seams, ASK, opts);
+    const r = await awaitOperatorConfirmation({ ...seams, onArmed: () => void raised.push("raised") }, ASK, opts);
     expect(r).toEqual({ signal: "timeout", provenance: null });
     expect(verdicts).toEqual(["UI_NOT_ARMED"]);
+    expect(raised).toEqual([]);
   });
 
   it("an abort is honoured before the surface is armed at all", async () => {

@@ -246,6 +246,19 @@ export interface OperatorConfirmSeams {
   /** Whether the operator has asked to stop (Ctrl+C or the abort sentinel). Checked before every poll. */
   aborted(): boolean;
   sleep(ms: number): Promise<void>;
+  /**
+   * Called ONCE, after the surface is armed and before the first poll — the caller's chance to put it where the
+   * operator can see it.
+   *
+   * It exists because of a live sitting on 2026-08-13: the surface was armed and rendered correctly, the
+   * operator could not find the window it was in, and raising it from the OS (`open -a`) hit Chrome's
+   * user-data-dir singleton and opened a THIRD blank window inside the run's own browser instead. A run that
+   * needs the operator to find a window has a step nobody wrote down; a run that raises its own does not.
+   *
+   * After arming, not before: raising a surface still showing the PREVIOUS checkpoint's instruction would put
+   * the wrong words in front of the operator at the exact moment they are deciding.
+   */
+  onArmed?(): void | Promise<void>;
   /** Sanitized observability: the VERDICT only, never the token or the event. */
   onVerdict?(verdict: OperatorConfirmVerdict): void;
 }
@@ -281,6 +294,9 @@ export async function awaitOperatorConfirmation(
     seams.onVerdict?.("UI_NOT_ARMED");
     return TIMED_OUT;
   }
+  // Best-effort: a surface that cannot be raised is still a surface the operator can switch to, so a failure
+  // here must not end a run that is otherwise ready to be confirmed.
+  await Promise.resolve(seams.onArmed?.()).catch(() => undefined);
   const ticks = Math.max(1, Math.ceil(opts.timeoutMs / Math.max(1, opts.pollMs)));
   for (let i = 0; i < ticks; i++) {
     if (seams.aborted()) return ABORTED;
