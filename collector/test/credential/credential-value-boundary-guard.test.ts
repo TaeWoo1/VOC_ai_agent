@@ -91,6 +91,10 @@ describe("nothing writes a value down", () => {
       "appendFile",
       "navigator.clipboard",
       "writeText(",
+      // Bypasses `log()` and its denylist entirely — the sink a value would reach if someone wanted it "just
+      // for debugging". Named because the list is a denylist and is only ever as good as its entries.
+      "process.stdout.write",
+      "process.stderr.write",
       "localStorage",
       "sessionStorage",
     ];
@@ -123,6 +127,25 @@ describe("nothing writes a value down", () => {
         }
       }
     }
+  });
+
+  it("the per-run digest salt is never supplied by production code", () => {
+    // A fixed salt makes the digest a cross-run identifier and, for the low-entropy 업체코드, invertible offline.
+    // The seam exists for tests; the property is that nothing under `src/` uses it.
+    expect(filesContaining("CredentialDigestSalt.forTest", ["credential/credential-evidence.ts"])).toEqual([]);
+    // …and no module that can hold plaintext passes the seam at all, under any name.
+    for (const f of HOLDERS) expect(code(f), `${f} supplies a digest salt`).not.toMatch(/\bsalt\s*:/);
+  });
+
+  it("the destination of the POST is screened before anything is read", () => {
+    // The one place all three plaintext values leave the process. Every other boundary here is screened;
+    // review found this one was not, and an unscreened `SELLEROPS_BASE_URL` sends a Secret Key to any host.
+    const cli = code("cli/run-coupang-credential-handoff-live.ts");
+    expect(cli).toContain("screenCredentialBackendOrigin(cfg.baseUrl)");
+    // …and the raw configured value must not survive past the screen.
+    const call = "screenCredentialBackendOrigin(cfg.baseUrl)";
+    const afterScreen = cli.slice(cli.indexOf(call) + call.length);
+    expect(afterScreen, "the unscreened configured value is used after the screen").not.toContain("cfg.baseUrl");
   });
 
   it("the value-carrying result type is never returned by the flow that consumes it", () => {

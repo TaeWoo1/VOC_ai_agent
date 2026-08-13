@@ -304,6 +304,72 @@ describe("it refuses rather than guessing", () => {
   });
 });
 
+describe("the whole set has to agree — the defect review found, with its own repro", () => {
+  /**
+   * The header row carries a trailing `<td>` (a copy button's cell, on a real page). The LAST `<th>`'s next
+   * sibling is then a `td`, so `secret_key` resolves row-headed while the other two resolve column-headed — and
+   * reads the cell beside it. Every per-field check passed: three unique labels, one candidate each, all
+   * non-empty, three DISTINCT strings. The button's label would have been stored as the Secret Key, on an
+   * account that then refuses to be overwritten, with the one-shot read already burned.
+   */
+  function trailingCellTable(): El {
+    const head = el({ tag: "tr" }).add(
+      el({ tag: "th", text: "업체코드" }),
+      el({ tag: "th", text: "Access Key" }),
+      el({ tag: "th", text: "Secret Key" }),
+      el({ tag: "td", text: "복사" }),
+    );
+    const body = el({ tag: "tr" }).add(
+      el({ tag: "td", text: VENDOR }),
+      el({ tag: "td", text: ACCESS }),
+      el({ tag: "td", text: SECRET }),
+    );
+    return el({ tag: "div" }).add(el({ tag: "table" }).add(head, body));
+  }
+
+  it("the census shows the mixed shape rather than three clean readings", () => {
+    const c = census(trailingCellTable());
+    expect(new Set(c.readings.map((r) => r.association)).size).toBe(2);
+  });
+
+  it("**it refuses** — ASSOCIATION_MIXED, before any value is taken", () => {
+    const root = trailingCellTable();
+    expect(credentialCellsResolved(census(root), COUPANG_CREDENTIAL_FIELD_IDS)).toMatchObject({
+      ok: false,
+      reason: "ASSOCIATION_MIXED",
+    });
+    expect(read(root)).toMatchObject({ ok: false, reason: "ASSOCIATION_MIXED" });
+  });
+
+  it("and the value it WOULD have read is not in the refusal", () => {
+    expect(JSON.stringify(read(trailingCellTable()))).not.toContain("복사");
+  });
+
+  it("three labels in three different tables is not one credential region", () => {
+    const t = (label: string, value: string): El =>
+      el({ tag: "table" }).add(el({ tag: "tr" }).add(el({ tag: "th", text: label }), el({ tag: "td", text: value })));
+    const root = el({ tag: "div" }).add(t("업체코드", VENDOR), t("Access Key", ACCESS), t("Secret Key", SECRET));
+    expect(credentialCellsResolved(census(root), COUPANG_CREDENTIAL_FIELD_IDS)).toMatchObject({
+      ok: false,
+      reason: "TABLE_MIXED",
+    });
+    expect(read(root)).toMatchObject({ ok: false, reason: "TABLE_MIXED" });
+  });
+});
+
+describe("a page too big to scan is refused, not scanned partway", () => {
+  it("SCAN_TRUNCATED — the old cap turned 'matched twice' into 'matched once'", () => {
+    // The fail-OPEN review demonstrated: past the cap a second matching label was neither counted as visible
+    // nor as hidden, so the uniqueness guard read 1 and the first match won.
+    const root = wingIssuedTable();
+    for (let i = 0; i < 20_001; i++) root.add(el({ tag: "span", text: `filler-${i}` }));
+    const c = census(root);
+    expect(c.readings.every((r) => r.scanTruncated === true)).toBe(true);
+    expect(credentialCellsResolved(c, COUPANG_CREDENTIAL_FIELD_IDS)).toMatchObject({ ok: false, reason: "SCAN_TRUNCATED" });
+    expect(read(root)).toMatchObject({ ok: false, reason: "SCAN_TRUNCATED" });
+  });
+});
+
 describe("the sanitizer is the boundary, not the script's good manners", () => {
   it("drops a value smuggled into any field — none of them has a shape that accepts one", () => {
     const smuggled = sanitizeCredentialCellCensus(

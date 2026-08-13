@@ -9,6 +9,7 @@ import com.sellerops.channel.ChannelRepository;
 import com.sellerops.channel.ChannelStatus;
 import com.sellerops.collect.dto.AgentCredentialHandoffRequest;
 import com.sellerops.collect.dto.AgentCredentialHandoffResultView;
+import com.sellerops.collect.dto.ConnectionTestResultView;
 import com.sellerops.collect.dto.CredentialIntakeRequest;
 import com.sellerops.common.ApiException;
 import com.sellerops.connector.ChannelConnectionStatusRepository;
@@ -114,6 +115,31 @@ class AgentCredentialHandoffServiceTest {
                         sellerAccounts, channels, txManager),
                 new com.sellerops.connector.ConnectorAlertService(alerts, sellerAccounts, channels));
         service = new AgentCredentialHandoffService(slotRepo, sellerAccounts, channels, vault, collect);
+    }
+
+    /**
+     * A control service whose connection test throws — the shape `CoupangLiveCallGuard` produces on an unarmed
+     * backend. Subclassed rather than mocked because the point is that the REAL store ran first.
+     */
+    private CollectControlService collectThatFailsVerification() {
+        return new CollectControlService(sellerAccounts, channels, schedules, syncJobs,
+                connectionStatus, capabilities, new ConnectorRegistry(List.of(new MockApiConnector())),
+                new SyncRunExecutor(sellerAccounts, channels, new ConnectorRegistry(List.of(new MockApiConnector())),
+                        new IngestionService(reviews, inquiries, orders, new ProductService(products),
+                                communityArticles, channels,
+                                new InquiryWorkItemWriter(inquiries, workItems, audits, txManager)),
+                        new com.sellerops.order.ChannelOrderIngestionService(channelOrders, channelOrderStatusEvents, txManager),
+                        syncJobs, cursors, connectionStatus),
+                vault, slots,
+                new NaverConnectionLifecycle(sellerAccounts, channels, txManager),
+                new com.sellerops.connector.coupang.onboarding.CoupangConnectionLifecycle(
+                        sellerAccounts, channels, txManager),
+                new com.sellerops.connector.ConnectorAlertService(alerts, sellerAccounts, channels)) {
+            @Override
+            public ConnectionTestResultView testConnection(UUID orgId, UUID sellerAccountId) {
+                throw new IllegalStateException("쿠팡 라이브 API 호출이 승인 없이 시도되었습니다.");
+            }
+        };
     }
 
     private SellerAccount account(UUID ownerOrg, String channelCode) {
@@ -242,6 +268,26 @@ class AgentCredentialHandoffServiceTest {
 
         assertThatThrownBy(() -> service.handOff(org, actor, partial)).isInstanceOf(ApiException.class);
         assertThat(vault.hasCredential(org, acc.getId())).isFalse();
+    }
+
+    @Test
+    void aVerificationThatTHROWSStillReportsTheCredentialAsStored() {
+        // The store commits on its own; the verification that follows can throw for reasons that have nothing to
+        // do with the credential (CoupangLiveCallGuard refusing an unarmed backend, a provider fault, transport).
+        // Letting that propagate made the agent print STORE_FAILED — "nothing is stored" — which is the opposite
+        // of the truth in the ONE state the operator cannot retry out of: the read is one-shot and a second
+        // handoff is refused with CREDENTIAL_ALREADY_STORED.
+        SellerAccount acc = account(org, "COUPANG");
+        AgentCredentialHandoffService throwing = new AgentCredentialHandoffService(
+                slotRepo, sellerAccounts, channels, vault, collectThatFailsVerification());
+
+        AgentCredentialHandoffResultView result = throwing.handOff(org, actor, coupangRequest(slotFor(acc)));
+
+        assertThat(result.stored()).isTrue();
+        assertThat(result.connectionStatus()).isEqualTo("UNVERIFIED");
+        assertThat(result.connectionReason()).isEqualTo("VERIFY_ERROR");
+        // And the credential really is there — the report matches reality in both directions.
+        assertThat(vault.hasCredential(org, acc.getId())).isTrue();
     }
 
     @Test

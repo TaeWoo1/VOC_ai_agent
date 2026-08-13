@@ -15,6 +15,14 @@ const FORBIDDEN_KEY_SUBSTRINGS = [
   "secret",
   "credential",
   "session",
+  // The Coupang credential handoff's own field names. `secret_key` was already covered by "secret"; these two
+  // were not, so a careless `log("…", values)` would have printed an Access Key and a vendor code in full.
+  // Review found the gap while checking whether the boundary guard's identifier list was sufficient — it is a
+  // denylist, so the answer is only ever "for the names on it".
+  "access_key",
+  "accesskey",
+  "vendor_id",
+  "vendorid",
 ];
 
 export interface LogEntry {

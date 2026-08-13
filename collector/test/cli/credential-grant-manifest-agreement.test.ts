@@ -50,7 +50,9 @@ function renderManifest(phase: string): RenderedManifest {
     process.env["WALKTHROUGH_RUN_ID"] = "wt-1";
     process.env["WALKTHROUGH_APPROVAL_ID"] = "apr-1";
     process.env["WALKTHROUGH_GIT_COMMIT"] = "abc1234";
-    runApprovalManifestCli({ verifyIdentity: () => ({ ok: true, head: "abc1234" }) });
+    // The handoff phase is gated on a calibration that has not happened; injected here so these cases test the
+    // COPY they are about rather than re-testing the gate, which has its own suite.
+    runApprovalManifestCli({ verifyIdentity: () => ({ ok: true, head: "abc1234" }), credentialCellsCalibrated: true });
   } finally {
     process.stdout.write = realOut;
     process.stderr.write = realErr;

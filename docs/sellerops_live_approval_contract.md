@@ -377,7 +377,9 @@ action list.
 
 The value-cell structure is measured first, by a separate `READ_ONLY` phase
 (`COUPANG_WING_CREDENTIAL_CELL_CALIBRATION`) with its own approval — a grant for the calibration is never
-a grant for the handoff. Full contract: [`coupang_credential_handoff_v1.md`](./coupang_credential_handoff_v1.md).
+a grant for the handoff. That order is **enforced**: `WING_CREDENTIAL_CELLS_CALIBRATED` ships `false` and
+the gate refuses a `CREDENTIAL_READ` manifest while it is (`CREDENTIAL_CELLS_NOT_CALIBRATED`), so the
+handoff cannot reach PREPARED on a screen nobody has measured. Full contract: [`coupang_credential_handoff_v1.md`](./coupang_credential_handoff_v1.md).
 
 ---
 

@@ -121,6 +121,24 @@ describe("what stops the run before anything is transmitted", () => {
     expect(record.evidence).toHaveLength(3);
   });
 
+  it("a value whose alphabet is page prose is read and then NOT sent", async () => {
+    // Defence in depth behind the in-page resolution. Review's repro reached the wrong cell and got a copy
+    // button's label — three distinct strings, so the distinctness check passes. This is what stops it.
+    const notAKey = { vendor_id: VENDOR, access_key: ACCESS, secret_key: "복사" };
+    const { seams: s, rec } = seams({ read: { ok: true, values: notAKey } });
+    const record = await handOffCoupangCredential(s);
+    expect(record.outcome).toBe("VALUES_NOT_KEY_SHAPED");
+    expect(rec.postCalls).toBe(0);
+  });
+
+  it("a legitimate triple is NOT caught by that check", async () => {
+    // The check must not be a filter that only lets through what a test author imagined. A vendor code with a
+    // hyphen, a lowercase-hex access key and a long secret all pass.
+    const { seams: s, rec } = seams({});
+    expect((await handOffCoupangCredential(s)).outcome).toBe("STORED_AND_VERIFIED");
+    expect(rec.postCalls).toBe(1);
+  });
+
   it("a throwing transport is a STORE_FAILED, and the thrown error is not inspected or re-raised", async () => {
     const { seams: s } = seams({
       post: async () => {

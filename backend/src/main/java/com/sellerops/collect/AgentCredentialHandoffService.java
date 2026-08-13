@@ -15,6 +15,8 @@ import com.sellerops.selleraccount.AccountSessionSlotRepository;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
@@ -39,11 +41,16 @@ import org.springframework.stereotype.Service;
 @Service
 public class AgentCredentialHandoffService {
 
+    private static final Logger log = LoggerFactory.getLogger(AgentCredentialHandoffService.class);
+
     /** Safe reason constants. Operator-facing text lives in the thrown message; these travel to the agent. */
     static final String REASON_UNKNOWN_SLOT = "UNKNOWN_ACCOUNT_SLOT";
     static final String REASON_CHANNEL_MISMATCH = "CHANNEL_MISMATCH";
     static final String REASON_UNSUPPORTED_CHANNEL = "UNSUPPORTED_CHANNEL";
     static final String REASON_CREDENTIAL_EXISTS = "CREDENTIAL_ALREADY_STORED";
+    /** The credential is stored; the read-only check could not be run at all (armed-interlock, provider, transport). */
+    static final String TEST_STATUS_UNVERIFIED = "UNVERIFIED";
+    static final String REASON_VERIFY_ERROR = "VERIFY_ERROR";
 
     private final AccountSessionSlotRepository slots;
     private final SellerAccountRepository accounts;
@@ -96,9 +103,27 @@ public class AgentCredentialHandoffService {
                 template.connectorClass(), template.authType(), request.secrets(), null, null);
         collect.storeCredential(orgId, sellerAccountId, intake, actorUserId);
 
-        // The same manual, explicit check the operator's own button runs: read-only, no collection, no job.
-        ConnectionTestResultView test = collect.testConnection(orgId, sellerAccountId);
-        return new AgentCredentialHandoffResultView(true, test.status(), test.reasonCode());
+        // **From here the credential IS stored, and every exit must say so.**
+        //
+        // The store commits on its own (nothing here is transactional), and the verification that follows can
+        // throw for reasons that have nothing to do with the credential: `CoupangLiveCallGuard` refuses when the
+        // backend is not armed with a live approval id, and any provider/transport fault propagates the same way.
+        // Letting that reach the client turned a 500 into the agent's `STORE_FAILED`, whose own contract says
+        // "nothing is stored" — the opposite of the truth, in the one state the operator cannot retry out of: the
+        // read is one-shot, and a second handoff is refused with CREDENTIAL_ALREADY_STORED.
+        //
+        // So a failed VERIFICATION is reported as a stored-but-unverified credential with a safe reason. The
+        // operator can then re-run the connection test, or replace the credential through the renewal path, both
+        // of which exist. Nothing is fabricated: `stored` is true because it is, and the status is not SUCCESS.
+        try {
+            // The same manual, explicit check the operator's own button runs: read-only, no collection, no job.
+            ConnectionTestResultView test = collect.testConnection(orgId, sellerAccountId);
+            return new AgentCredentialHandoffResultView(true, test.status(), test.reasonCode());
+        } catch (RuntimeException e) {
+            // The exception is NOT echoed: a provider fault can carry a body, and a body is what must not appear.
+            log.warn("Coupang credential handoff stored, verification threw: type={}", e.getClass().getSimpleName());
+            return new AgentCredentialHandoffResultView(true, TEST_STATUS_UNVERIFIED, REASON_VERIFY_ERROR);
+        }
     }
 
     /**

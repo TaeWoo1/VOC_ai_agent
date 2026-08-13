@@ -33,6 +33,7 @@ import {
   PHASE_ENTRYPOINTS,
   WING_DISCOVERY_TERMS_STEP_SUMMARY,
 } from "./approval-manifest";
+import { WING_CREDENTIAL_CELLS_CALIBRATED } from "../action-window/coupang-wing-credential-cells";
 import { WING_ISSUE_SELECTOR_CALIBRATED } from "../action-window/coupang-wing-issuance-driver";
 import { resolveVisualReconScope } from "../action-window/api-issuance-calibration/visual-recon";
 import {
@@ -75,6 +76,12 @@ export interface ApprovalManifestCliOptions {
    * gets the strict behaviour, never a disabled one.
    */
   verifyIdentity?: typeof verifyRepoIdentity;
+  /**
+   * Credential value-cell calibration seam, on the same contract as the two beside it: the DEFAULT is the
+   * shipped {@link WING_CREDENTIAL_CELLS_CALIBRATED}, so a caller who omits it gets whatever the code actually
+   * claims. A test that needs a PREPARED handoff manifest injects `true` and says so; production cannot.
+   */
+  credentialCellsCalibrated?: boolean;
   /**
    * 삭제 calibration seam, on exactly the same contract as {@link verifyIdentity}: the DEFAULT is the shipped
    * {@link WING_DELETION_SELECTORS_CALIBRATED}, so a caller who omits it gets whatever the code actually claims,
@@ -351,6 +358,11 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
     // calibration fact. Two of its six guided controls are highlighted; the other four are text-guided and
     // claim no locator, so nothing here asserts a calibration they do not have.
     ...(isWingReveal || isWingGuidedWalk ? { selectorsCalibrated: WING_ISSUE_SELECTOR_CALIBRATED } : {}),
+    // From the shared constant, never a hardcoded true: the display path must close when the calibration is
+    // withdrawn, exactly as the runtime path does.
+    ...(isCredentialHandoff
+      ? { credentialCellsCalibrated: opts.credentialCellsCalibrated ?? WING_CREDENTIAL_CELLS_CALIBRATED }
+      : {}),
     runId: env("WALKTHROUGH_RUN_ID") ?? "unknown",
     approvalId: env("WALKTHROUGH_APPROVAL_ID") ?? "unknown",
     gitSha: env("WALKTHROUGH_GIT_COMMIT") ?? "unknown",

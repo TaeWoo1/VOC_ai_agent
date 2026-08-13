@@ -64,13 +64,25 @@ const RESOLVER_FRAGMENT = `
   }
   /* Matches split into painting / not — "nothing matched" and "nothing visible matched" are different faults. */
   function matching(spec) {
-    var cands; try { cands = slice(document.querySelectorAll(spec.candidateQuery)); } catch (e) { return { visible: [], hidden: 0 }; }
-    var want = norm(spec.exactText), vis = [], hid = 0, CAP = 4000;
-    for (var i = 0; i < cands.length && i < CAP; i++) {
+    var cands; try { cands = slice(document.querySelectorAll(spec.candidateQuery)); } catch (e) { return { visible: [], hidden: 0, truncated: true }; }
+    var want = norm(spec.exactText), vis = [], hid = 0, CAP = 20000;
+    /* A cap that SKIPS the tail turns "matched more than once" into "matched once" — a fail-OPEN in the guard
+       that is supposed to refuse an ambiguous label, on a locator that resolves to a secret. A page bigger than
+       the cap is reported as truncated and refused, never scanned partially. */
+    if (cands.length > CAP) { return { visible: [], hidden: 0, truncated: true }; }
+    for (var i = 0; i < cands.length; i++) {
       if (accName(cands[i]) !== want) { continue; }
       if (paints(cands[i])) { vis.push(cands[i]); } else { hid++; }
     }
-    return { visible: vis, hidden: hid };
+    return { visible: vis, hidden: hid, truncated: false };
+  }
+  /* Which TABLE a cell belongs to, as an ordinal among the document's tables. An integer, never an identity —
+     and enough to answer "did all three labels resolve inside the same table". */
+  function tableOrdinal(el) {
+    var t = closestTable(el);
+    if (!t) { return -1; }
+    var tables; try { tables = slice(document.querySelectorAll('table')); } catch (e) { return -1; }
+    return tables.indexOf(t);
   }
   function isCell(el) { return !!el && (el.tagName === 'TD' || el.tagName === 'TH'); }
   function closestCell(el) {
@@ -100,6 +112,7 @@ const RESOLVER_FRAGMENT = `
   function resolveOne(spec) {
     var m = matching(spec);
     var out = { id: spec.id, labelVisibleCount: m.visible.length, labelHiddenCount: m.hidden, cell: null };
+    if (m.truncated) { out.scanTruncated = true; return out; }
     if (m.visible.length !== 1) { return out; }
     var label = m.visible[0];
     out.labelTag = label.tagName;
@@ -135,6 +148,7 @@ const RESOLVER_FRAGMENT = `
     if (out.cell) {
       out.cellTag = out.cell.tagName;
       out.cellInputCount = cellFields(out.cell).length;
+      out.tableOrdinal = tableOrdinal(out.cell);
     }
     return out;
   }
@@ -185,7 +199,9 @@ ${RESOLVER_FRAGMENT}
     if (typeof r.candidateCellCount === 'number') { out.candidateCellCount = r.candidateCellCount; }
     if (r.cellTag) { out.cellTag = r.cellTag; }
     if (typeof r.cellInputCount === 'number') { out.cellInputCount = r.cellInputCount; }
+    if (typeof r.tableOrdinal === 'number') { out.tableOrdinal = r.tableOrdinal; }
     if (r.cellDuplicate) { out.cellDuplicate = true; }
+    if (r.scanTruncated) { out.scanTruncated = true; }
     /* The ONE bit. Computed inside the page; the value it came from reaches no returned field. */
     if (READ_NON_EMPTY && r.cell) { out.cellNonEmpty = cellNonEmpty(r.cell); }
     readings.push(out);
@@ -213,6 +229,20 @@ ${RESOLVER_FRAGMENT}
   var SPECS = ${JSON.stringify(requests.map((r) => ({ id: r.id, candidateQuery: r.candidateQuery, exactText: r.exactText })))};
   var resolved = resolveAll(SPECS);
   var values = {};
+  /* ONE shape, ONE table, for all three. Resolved per label these agree on the WING screen, and disagree only
+     when the page is not the shape the calibration measured — e.g. a trailing cell in the header row makes the
+     LAST label resolve by the row-headed rule and read the cell beside it, which on a real page is a copy
+     button's label. Checked before any value is taken. */
+  var assoc = null, table = null;
+  for (var t = 0; t < resolved.length; t++) {
+    var rr = resolved[t];
+    if (rr.scanTruncated) { return { ok: false, reason: 'SCAN_TRUNCATED', id: rr.id }; }
+    if (!rr.association || rr.association === 'NONE') { continue; }
+    if (assoc === null) { assoc = rr.association; } else if (assoc !== rr.association) { return { ok: false, reason: 'ASSOCIATION_MIXED', id: rr.id }; }
+    if (typeof rr.tableOrdinal === 'number' && rr.tableOrdinal >= 0) {
+      if (table === null) { table = rr.tableOrdinal; } else if (table !== rr.tableOrdinal) { return { ok: false, reason: 'TABLE_MIXED', id: rr.id }; }
+    }
+  }
   for (var i = 0; i < resolved.length; i++) {
     var r = resolved[i];
     if (r.labelVisibleCount !== 1) { return { ok: false, reason: 'LABEL_NOT_UNIQUE', id: r.id }; }

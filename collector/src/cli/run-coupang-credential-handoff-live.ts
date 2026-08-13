@@ -29,10 +29,12 @@ import { login } from "../upload";
 import { CoupangWingCredentialDriver } from "../action-window/coupang-wing-credential-driver";
 import {
   COUPANG_CREDENTIAL_FIELD_IDS,
+  WING_CREDENTIAL_CELLS_CALIBRATED,
   credentialCellsResolved,
 } from "../action-window/coupang-wing-credential-cells";
 import { handOffCoupangCredential, type CredentialHandoffRecord } from "../credential/coupang-credential-handoff";
 import { postCoupangCredentialHandoff } from "../credential/credential-handoff-client";
+import { backendOriginRefusalMessage, screenCredentialBackendOrigin } from "../credential/backend-origin";
 import {
   ACTION_BARRIER_BUTTON_LABEL,
   actionBarrierRefusedMessage,
@@ -87,6 +89,12 @@ export function accountSlot(): string | null {
 export function gateRefusalCause(
   apiCenterUrl: string,
   verifyIdentity: typeof verifyRepoIdentity = verifyRepoIdentity,
+  /**
+   * Calibration seam. The DEFAULT is the shipped constant, never a hardcoded `true`, so withdrawing the
+   * calibration closes this path again without touching the gate — the arrangement the reveal CLI already uses
+   * for its own selector calibration, and for the same reason.
+   */
+  cellsCalibrated: boolean = WING_CREDENTIAL_CELLS_CALIBRATED,
 ): string | null {
   const phaseBinding = resolveWingActionPhase(process.env, "COUPANG_WING_CREDENTIAL_HANDOFF");
   if (!phaseBinding.ok) return `${phaseBinding.refusal}: ${phaseBinding.reason}`;
@@ -102,6 +110,7 @@ export function gateRefusalCause(
     // The full capability, declared. The gate's credential interlock refuses a CREDENTIAL_READ phase that
     // declares less than it does — a run cannot carry the alarming mode and a reassuring action list.
     declaredActions: HANDOFF.capableActions,
+    credentialCellsCalibrated: cellsCalibrated,
     runId: env("WALKTHROUGH_RUN_ID") ?? "unknown",
     approvalId: env("WALKTHROUGH_APPROVAL_ID") ?? "unknown",
     gitSha: env("WALKTHROUGH_GIT_COMMIT") ?? "unknown",
@@ -158,7 +167,7 @@ export function arrivalAsk(): { title: string; headline: string; lines: readonly
     headline: "방금 발급하신 키가 보이는 WING 화면에 직접 도착하신 뒤 눌러 주세요.",
     lines: [
       "SellerOps는 이 창을 조작하지 않습니다 — 로그인 · 이동 · 발급은 모두 판매자님이 하신 것입니다.",
-      "이 단계에서는 아무 값도 읽지 않습니다. 화면 구조만 확인합니다.",
+      "이 단계에서는 값을 읽지 않습니다. 어떤 칸이 값을 담고 있는지 구조만 확인하고, 그 칸이 비어 있는지 여부만 봅니다.",
       "값을 읽어도 되는지는 다음 화면에서 다시 여쭙니다.",
     ],
   };
@@ -200,6 +209,7 @@ export function handoffExitCode(record: CredentialHandoffRecord): number {
       return 5;
     case "READ_REFUSED":
     case "VALUES_NOT_DISTINCT":
+    case "VALUES_NOT_KEY_SHAPED":
       return 6;
     case "NOT_ALLOWED":
       return 7;
@@ -255,6 +265,14 @@ async function main(): Promise<void> {
   }
 
   const cfg = loadConfig();
+  // WHERE the secrets would go, screened BEFORE anything else — ahead of the browser, ahead of the login that
+  // would otherwise send the SellerOps password to the same unscreened origin.
+  const backend = screenCredentialBackendOrigin(cfg.baseUrl);
+  if (!backend.ok) {
+    console.error(backendOriginRefusalMessage(backend.reason));
+    process.exit(4);
+    return;
+  }
   const abortPath = sentinelPath(cfg.statusFile, HANDOFF_ABORT_FILENAME);
   mkdirSync(dirname(abortPath), { recursive: true });
   removeSentinel(abortPath);
@@ -270,7 +288,7 @@ async function main(): Promise<void> {
   // the barrier would mean three secrets were read for a handoff that could never happen.
   let token: string;
   try {
-    token = await login(cfg.baseUrl, cfg.email, cfg.password);
+    token = await login(backend.origin, cfg.email, cfg.password);
   } catch {
     console.error("Refusing to start: could not sign in to the SellerOps backend. No browser launched, nothing read.");
     process.exit(4);
@@ -342,7 +360,7 @@ async function main(): Promise<void> {
         return true;
       },
       read: () => driver.readCredentialValues(),
-      post: (secrets) => postCoupangCredentialHandoff(cfg.baseUrl, token, slot, CHANNEL_CODE, secrets),
+      post: (secrets) => postCoupangCredentialHandoff(backend.origin, token, slot, CHANNEL_CODE, secrets),
     });
 
     // The barrier already printed its own refusal record; a second one would double-report the same stop.

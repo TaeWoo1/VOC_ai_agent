@@ -49,6 +49,12 @@ So the handoff endpoint takes the slot and resolves it server-side.
 > authorization would be the same defect as reading an auto-read as an approval (§5b): a token that
 > identifies is not a token that permits.
 
+**Where the values may be sent is screened.** `SELLEROPS_BASE_URL` is passed through
+`screenCredentialBackendOrigin` before the browser opens and before the login that would otherwise send
+the SellerOps password to the same place: loopback, `.localhost`, `.test`, `.local`, and the ORIGIN only
+(a configured path is dropped). Review found this unscreened — the one boundary in the unit that was,
+while the marketplace URL, the profile directory, the OS handoff and the outbound Coupang call all are.
+
 **Known placeholder, disclosed rather than hidden:** the agent authenticates with the collector's
 SellerOps dev login (`upload.ts login()`). `sellerops_local_agent_runtime_adr.md` §7(3) already lists
 "프론트-에이전트 페어링/인증 모델 … 업로드용 데브 계정을 revocable pairing token으로 교체하는 시점"
@@ -87,13 +93,24 @@ nothing again**; recovery is the seller's own existing manual entry path, which 
 Fail closed means: any label not matching exactly once, any label without a uniquely associated value
 cell, any empty value, any duplicate among the three — refuse, report the value-free reason, stop.
 
+**And the three have to agree as a SET.** Review found the case a per-field sweep cannot see: a trailing
+cell in the header row makes the LAST `<th>`'s next sibling a `td`, so that label resolves by the
+row-headed rule while the other two resolve column-headed — and reads the cell beside it, which on a real
+page is a copy button's label. Every per-field check passed; the values were three distinct strings, so
+the distinctness check passed too; and a button's label would have been stored as the Secret Key on an
+account that then refuses to be overwritten, with the one-shot read already spent. So the read also
+refuses `ASSOCIATION_MIXED` (the three did not resolve by one shape), `TABLE_MIXED` (they did not resolve
+inside one table), and `SCAN_TRUNCATED` (the candidate scan hit its cap, so "matched once" could not be
+told from "matched once so far" — a fail-*open* in the uniqueness guard). Behind all of that, the flow
+refuses `VALUES_NOT_KEY_SHAPED` when a value's alphabet is page prose rather than a key.
+
 ## 5. What may cross which boundary
 
 | boundary | may carry | may never carry |
 |---|---|---|
 | in-page → agent | the three values, once | DOM, HTML, screenshots, the page URL, any fourth field |
 | agent → stdout / log / telemetry / status file | outcome enum, per-field presence, length bucket, char class, salted digest prefix | any value, or any substring of one |
-| agent → backend | the three values, in ONE request body, over loopback | anything else about the page |
+| agent → backend | the three values, in ONE request body, to a **screened** loopback origin | anything else about the page |
 | backend → response | masked metadata + a safe connection result | any value, ciphertext, IV, or provider body |
 | agent → anywhere else | **nothing** | clipboard, a file, `localStorage`, a fixture, an env var, a second endpoint |
 | agent → Claude / any LLM context | **nothing** | the values never enter a model context, in any form |
@@ -159,6 +176,23 @@ Key deletion, reissue, renewal, rotation on expiry, reading a key that was issue
 and any second channel. `POST /credentials/replace` (guided renewal, with rollback) already exists and
 is untouched by this unit.
 
+## 9a. What the independent review changed
+
+Ten findings, all addressed. The four that changed behaviour rather than wording:
+
+- **the wrong cell could be read and stored** (§4, above) — the mixed-shape case, with an executed repro
+- **the destination was unscreened** (§2, above)
+- **a stored credential was reported as "nothing is stored"** — the backend's verification can throw for
+  environment reasons (an unarmed live-call interlock, a provider fault) *after* the store has committed.
+  That reached the agent as `STORE_FAILED`, whose contract says nothing is stored — the opposite of the
+  truth, in the one state the operator cannot retry out of. A failed verification is now
+  `stored: true` + `UNVERIFIED` / `VERIFY_ERROR`.
+- **the calibration was not a precondition** (§11, above)
+
+And two disclosure corrections: `safeMeta`'s denylist covered `secret_key` but not `access_key` or
+`vendor_id`, and the handoff's first checkpoint told the seller no value is touched while the pre-flight
+census takes the one bit that is.
+
 ## 10. Not established
 
 - **Where the credential VALUES sit relative to their labels.** `WING_CREDENTIAL_REGION_EVIDENCE`
@@ -174,6 +208,13 @@ is untouched by this unit.
 
 1. Value-free calibration (READ_ONLY): does each label have a uniquely associated value cell, and what
    is its shape? **No value crosses the boundary.** Its own approval.
+
+   **This ordering is enforced, not merely written.** `WING_CREDENTIAL_CELLS_CALIBRATED` ships `false`,
+   and the approval gate refuses to prepare a `CREDENTIAL_READ` manifest while it is
+   (`CREDENTIAL_CELLS_NOT_CALIBRATED`). So the handoff cannot run — the manifest will not even print —
+   until a real sitting has measured the cells and the constant is flipped from that reading. Review
+   pointed out that §11 promised the order and nothing carried it; the precedent for the fix is
+   `WING_ISSUE_SELECTOR_CALIBRATED`, including its history of shipping `false` and closing the path.
 2. Offline: the read, the handoff, the barrier, the leak regression — all against the measured shape.
 3. The live proof: its own manifest, its own fresh approval, naming the credential read explicitly.
    A grant for the calibration is never a grant for the handoff.

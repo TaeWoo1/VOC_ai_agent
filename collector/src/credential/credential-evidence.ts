@@ -65,12 +65,22 @@ export class CredentialDigestSalt {
     this.salt = salt;
   }
 
-  /** A fresh 32-byte CSPRNG salt. One per run; there is deliberately no way to supply or persist one. */
+  /**
+   * A fresh 32-byte CSPRNG salt. One per run, and never written anywhere.
+   *
+   * There IS a way to supply one — {@link forTest}, and `CredentialHandoffSeams.salt` — which an earlier version
+   * of this comment denied. Nothing in `src/` passes either (the boundary guard sweeps for it), and that is the
+   * property: not that the seam cannot exist, but that production does not use it. A fixed salt would make the
+   * digest a cross-run identifier and, for the low-entropy 업체코드, an offline-invertible one.
+   */
   static forRun(): CredentialDigestSalt {
     return new CredentialDigestSalt(randomBytes(32));
   }
 
-  /** Test seam: a fixed salt, so a digest assertion is deterministic. Never reachable from production code. */
+  /**
+   * Test seam: a fixed salt, so a digest assertion is deterministic. Not called from anything under `src/` — the
+   * boundary guard asserts that, rather than this comment asserting it.
+   */
   static forTest(seed: string): CredentialDigestSalt {
     return new CredentialDigestSalt(Buffer.from(seed, "utf8"));
   }

@@ -1157,6 +1157,8 @@ export const APPROVAL_PREREQ_CAUSES = [
   // value, and a CREDENTIAL_READ phase that does not declare one. See gate step 6c.
   "CREDENTIAL_ACTION_IN_READ_ONLY_PHASE",
   "CREDENTIAL_MODE_UNDERDECLARED",
+  // A CREDENTIAL_READ phase whose value-cell locator has never been measured on a real screen.
+  "CREDENTIAL_CELLS_NOT_CALIBRATED",
 ] as const;
 export type ApprovalPrereqCause = (typeof APPROVAL_PREREQ_CAUSES)[number];
 
@@ -1669,6 +1671,11 @@ export interface ApprovalPrereqInput {
   missingEnv?: readonly string[];
   /** Override for tests; defaults to the code-level `SELECTORS_CALIBRATED` flag. */
   selectorsCalibrated?: boolean;
+  /**
+   * Whether a real calibration run has MEASURED where the credential values sit. Read only for a
+   * `CREDENTIAL_READ` phase, and defaulted to `false` there — a caller who omits it gets the refusal.
+   */
+  credentialCellsCalibrated?: boolean;
   /** The calibration capture hotkey label (Phase A only) — must be defined for the calibrator to arm capture. */
   hotkey?: string;
   /** The gitignored raw-artifact path (Phase A only) — must resolve under the `.calibration/` dir. */
@@ -1911,6 +1918,16 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
     return fail(
       "CREDENTIAL_MODE_UNDERDECLARED",
       `${spec.phase} is CREDENTIAL_READ and must declare ${CREDENTIAL_VALUE_ACTIONS.join(" / ")}`,
+    );
+  }
+  // 6d) **A run may not read a value out of a shape nobody has measured.** The contract orders the calibration
+  // before the handoff; until this, nothing enforced it, so the handoff could have taken three secrets from a
+  // screen no human had inspected — the exact risk the calibration phase was created to remove. Defaults to
+  // `false` (fail closed) so a caller who omits the field gets the refusal, exactly like `selectorsCalibrated`.
+  if (spec.mode === "CREDENTIAL_READ" && (input.credentialCellsCalibrated ?? false) !== true) {
+    return fail(
+      "CREDENTIAL_CELLS_NOT_CALIBRATED",
+      `${spec.phase} reads credential VALUES; run ${PHASE_SPECS.COUPANG_WING_CREDENTIAL_CELL_CALIBRATION.phase} (READ_ONLY) first and land the measured cell shape`,
     );
   }
 

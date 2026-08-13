@@ -60,6 +60,8 @@ export const CREDENTIAL_HANDOFF_OUTCOMES = [
   "READ_REFUSED",
   /** The three values were not three distinct things. Read, never sent. */
   "VALUES_NOT_DISTINCT",
+  /** A value's alphabet says it is page text, not a key. Read, never sent. */
+  "VALUES_NOT_KEY_SHAPED",
   /** The backend refused or was unreachable. Read and sent; nothing is stored. */
   "STORE_FAILED",
 ] as const;
@@ -132,6 +134,23 @@ export async function handOffCoupangCredential(seams: CredentialHandoffSeams): P
   if (!credentialFieldsDistinct(evidence)) {
     log("coupang_credential_handoff", { outcome: "VALUES_NOT_DISTINCT", sent: false });
     return { outcome: "VALUES_NOT_DISTINCT", evidence };
+  }
+
+  // 3b. **Does each value look like a key at all?** Defence in depth behind the in-page resolution, and it
+  //     exists because review found a real path to the wrong cell: a trailing cell in the header row made one
+  //     label resolve by the other shape and read a copy button's label, which is three distinct strings and
+  //     passes every check above. `other` means the value carries characters no credential does — Korean text,
+  //     spaces, punctuation outside the key alphabet. It is a SHAPE check and deliberately not a format claim:
+  //     nothing here asserts how long a Coupang key is or what alphabet it uses, only that page prose is not one.
+  const notKeyShaped = evidence.find((e) => e.charClass === "other");
+  if (notKeyShaped) {
+    log("coupang_credential_handoff", {
+      outcome: "VALUES_NOT_KEY_SHAPED",
+      field: notKeyShaped.key,
+      charClass: notKeyShaped.charClass,
+      sent: false,
+    });
+    return { outcome: "VALUES_NOT_KEY_SHAPED", evidence };
   }
 
   // 4. ONE POST. The only consumer of the plaintext in this process.

@@ -24,12 +24,16 @@ import {
   type ApprovalPrereqInput,
 } from "../../src/cli/approval-manifest";
 import { WING_DEFAULT_URL } from "../../src/cli/coupang-wing-classifier";
+import { WING_CREDENTIAL_CELLS_CALIBRATED } from "../../src/action-window/coupang-wing-credential-cells";
 
 const HANDOFF = PHASE_SPECS.COUPANG_WING_CREDENTIAL_HANDOFF;
 const CALIBRATION = PHASE_SPECS.COUPANG_WING_CREDENTIAL_CELL_CALIBRATION;
 
 function baseFor(spec: typeof HANDOFF): ApprovalPrereqInput {
   return {
+    // A handoff manifest cannot be PREPARED until a real calibration has measured the cells; every case that is
+    // not ABOUT that gate states it, so the gate has exactly one test and does not silently pass the others.
+    ...(spec.mode === "CREDENTIAL_READ" ? { credentialCellsCalibrated: true } : {}),
     phase: spec.phase,
     channel: "COUPANG",
     accountBinding: "operator-owned test account",
@@ -112,6 +116,27 @@ describe("a READ_ONLY phase cannot declare a credential action", () => {
     } finally {
       patched["COUPANG_WING_CREDENTIAL_CELL_CALIBRATION"] = original;
     }
+  });
+});
+
+describe("a CREDENTIAL_READ phase cannot run on an unmeasured screen", () => {
+  it("**the handoff does not reach PREPARED as shipped** — the cells have never been measured", () => {
+    // The contract orders the calibration before the handoff (§11). Until this gate, nothing enforced it: the
+    // handoff could have taken three secrets out of a shape no human had inspected. The shipped constant is
+    // `false`, so the path is closed until a real sitting flips it.
+    expect(WING_CREDENTIAL_CELLS_CALIBRATED).toBe(false);
+    const r = validateApprovalPrerequisites({ ...baseFor(HANDOFF), credentialCellsCalibrated: undefined });
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.cause).toBe("CREDENTIAL_CELLS_NOT_CALIBRATED");
+  });
+
+  it("an explicit false is refused too — the default is not the only path to the refusal", () => {
+    const r = validateApprovalPrerequisites({ ...baseFor(HANDOFF), credentialCellsCalibrated: false });
+    expect(r.ok === false && r.cause).toBe("CREDENTIAL_CELLS_NOT_CALIBRATED");
+  });
+
+  it("the calibration phase is NOT gated on itself — that would be unreachable by construction", () => {
+    expect(validateApprovalPrerequisites({ ...baseFor(CALIBRATION), credentialCellsCalibrated: undefined }).ok).toBe(true);
   });
 });
 

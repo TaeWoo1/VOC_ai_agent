@@ -71,6 +71,21 @@ export const COUPANG_CREDENTIAL_FIELDS: readonly CredentialCellRequest[] = Objec
   Object.freeze({ id: "secret_key", candidateQuery: "label,span,div,dt,th,strong", exactText: "Secret Key" }),
 ]);
 
+/**
+ * **Has a real sitting MEASURED where the values sit? No.**
+ *
+ * `false`, and it stays `false` until a `COUPANG_WING_CREDENTIAL_CELL_CALIBRATION` run has answered on the
+ * operator's own issued screen. The approval gate refuses to prepare a `CREDENTIAL_READ` manifest while this is
+ * `false`, so the handoff cannot run on a shape nobody has inspected — which is the precise risk the calibration
+ * phase exists to remove, and which the contract's own §11 ordering promised without anything enforcing it until
+ * review pointed that out.
+ *
+ * The precedent is `WING_ISSUE_SELECTOR_CALIBRATED`, including its history: it shipped `false`, closed the path
+ * that depended on it, and was flipped only from a reading. Flip this the same way — from a run, with the run's
+ * identity recorded beside it — and never to make a live attempt succeed.
+ */
+export const WING_CREDENTIAL_CELLS_CALIBRATED = false;
+
 /** The ids of {@link COUPANG_CREDENTIAL_FIELDS}, in the same order. */
 export const COUPANG_CREDENTIAL_FIELD_IDS: readonly string[] = Object.freeze(
   COUPANG_CREDENTIAL_FIELDS.map((f) => f.id),
@@ -106,6 +121,14 @@ export interface CredentialCellReading {
   readonly cellNonEmpty?: boolean;
   /** True when this cell is the SAME element another request resolved to. Two labels, one value, is not a read. */
   readonly cellDuplicate?: boolean;
+  /**
+   * Which `<table>` the cell sits in, as an ordinal among the document's tables. An integer, never an identity —
+   * and the only thing that answers "did all three labels land in the same region". `-1` when the cell is in no
+   * table (a row-headed resolution outside one).
+   */
+  readonly tableOrdinal?: number;
+  /** True when the label scan exceeded its cap, so the uniqueness count is not trustworthy. */
+  readonly scanTruncated?: boolean;
 }
 
 export interface CredentialCellCensus {
@@ -133,6 +156,18 @@ export const CREDENTIAL_CELL_REFUSALS = [
   "CELL_EMPTY",
   /** Two labels resolved to cells the page reported as the same one. */
   "CELL_COLLISION",
+  /**
+   * The three labels did not resolve by the SAME shape. Found by review, with an executed repro: a trailing cell
+   * in the header row makes the LAST label's next sibling a `td`, so it resolves row-headed while the other two
+   * resolve column-headed — and reads the cell beside it, which on a real page is a copy button's label. Every
+   * per-field check passed; the whole was wrong. The values differ, so the distinctness check passes too, and a
+   * button label would have been stored as the Secret Key on an account that then refuses to be overwritten.
+   */
+  "ASSOCIATION_MIXED",
+  /** The labels resolved inside DIFFERENT tables. Three keys are one region or they are not these three keys. */
+  "TABLE_MIXED",
+  /** The candidate scan hit its cap, so "matched once" could not be distinguished from "matched once so far". */
+  "SCAN_TRUNCATED",
 ] as const;
 export type CredentialCellRefusal = (typeof CREDENTIAL_CELL_REFUSALS)[number];
 
@@ -150,6 +185,18 @@ export function credentialCellsResolved(
   requestedIds: readonly string[],
   requireNonEmpty = true,
 ): { readonly ok: boolean; readonly reason: CredentialCellRefusal; readonly id?: string } {
+  // WHOLE-SET checks first: a per-field sweep can pass three times over a resolution that is wrong as a set.
+  const truncated = census.readings.find((r) => r.scanTruncated === true);
+  if (truncated) return { ok: false, reason: "SCAN_TRUNCATED", id: truncated.id };
+  const associations = new Set(
+    census.readings.filter((r) => r.association && r.association !== "NONE").map((r) => r.association),
+  );
+  if (associations.size > 1) return { ok: false, reason: "ASSOCIATION_MIXED" };
+  const tables = new Set(
+    census.readings.filter((r) => typeof r.tableOrdinal === "number" && r.tableOrdinal >= 0).map((r) => r.tableOrdinal),
+  );
+  if (tables.size > 1) return { ok: false, reason: "TABLE_MIXED" };
+
   for (const id of requestedIds) {
     const reading = census.readings.find((r) => r.id === id);
     if (!reading) return { ok: false, reason: "MISSING_READING", id };
@@ -206,6 +253,9 @@ export function sanitizeCredentialCellCensus(raw: unknown, requestedIds: readonl
       id,
       labelVisibleCount,
       labelHiddenCount: count(row?.["labelHiddenCount"]) ?? 0,
+      // Survives the early return below: a truncated scan is precisely WHY the label did not resolve, and
+      // dropping it here would turn the honest refusal back into a bare "nothing matched".
+      ...(row?.["scanTruncated"] === true ? { scanTruncated: true } : {}),
     };
     if (!row || labelVisibleCount !== 1) return base;
     const assocRaw = row["association"];
@@ -215,6 +265,9 @@ export function sanitizeCredentialCellCensus(raw: unknown, requestedIds: readonl
     const candidateCellCount = count(row["candidateCellCount"]);
     const cellTag = association === "NONE" ? undefined : tag(row["cellTag"]);
     const cellInputCount = count(row["cellInputCount"]);
+    const ordinalRaw = row["tableOrdinal"];
+    const tableOrdinal =
+      typeof ordinalRaw === "number" && Number.isInteger(ordinalRaw) && ordinalRaw >= -1 ? ordinalRaw : undefined;
     const nonEmptyRaw = row["cellNonEmpty"];
     return {
       ...base,
@@ -223,6 +276,7 @@ export function sanitizeCredentialCellCensus(raw: unknown, requestedIds: readonl
       ...(candidateCellCount !== undefined ? { candidateCellCount } : {}),
       ...(cellTag ? { cellTag } : {}),
       ...(cellInputCount !== undefined ? { cellInputCount } : {}),
+      ...(tableOrdinal !== undefined ? { tableOrdinal } : {}),
       ...(row["cellDuplicate"] === true ? { cellDuplicate: true } : {}),
       ...(typeof nonEmptyRaw === "boolean" ? { cellNonEmpty: nonEmptyRaw } : {}),
     };

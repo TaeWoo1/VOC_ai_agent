@@ -99,7 +99,18 @@ export class CoupangWingCredentialDriver {
    * screen, or a category the classifier could not resolve.
    */
   async classifyInitialSurface(): Promise<{ ok: boolean; observation: WingObservation }> {
-    const observation = await this.observeSurface();
+    return this.classifySurfaceOf(this.activePage());
+  }
+
+  /**
+   * Classify ONE page, named by the caller. Separate from {@link classifyInitialSurface} so the read can pin the
+   * page it checks and the page it reads to the same object — `activePage()` answers "the newest tab", and two
+   * calls a moment apart can be two different tabs.
+   */
+  private async classifySurfaceOf(page: Page): Promise<{ ok: boolean; observation: WingObservation }> {
+    await this.settle(page);
+    const structural = await this.evalStr<WingStructuralCensus>(page, EXTRACT_WING_CENSUS);
+    const observation = observeFrom(classifyWingUrlCategory(page.url()), structural);
     const ok = CREDENTIAL_SURFACES.includes(observation.pageCategory);
     log("aw_coupang_credential_classify", { ok, pageCategory: observation.pageCategory });
     return { ok, observation };
@@ -142,14 +153,18 @@ export class CoupangWingCredentialDriver {
       return { ok: false, reason: "MISSING_READING" };
     }
     this.readAttempted = true;
-    const surface = await this.classifyInitialSurface();
+    // ONE page, for both the classification and the read. `activePage()` returns the NEWEST tab, so calling it
+    // twice can classify one page and read another — a WING popup opening between the two is enough. The screen
+    // a value comes from must be the screen that was checked.
+    const page = this.activePage();
+    const surface = await this.classifySurfaceOf(page);
     if (!surface.ok) {
       log("aw_coupang_credential_read", { attempted: false, reason: "OFF_SURFACE" });
       return { ok: false, reason: "MISSING_READING" };
     }
     let raw: unknown;
     try {
-      raw = await this.evalStr<unknown>(this.activePage(), buildCredentialCellReadScript(COUPANG_CREDENTIAL_FIELDS));
+      raw = await this.evalStr<unknown>(page, buildCredentialCellReadScript(COUPANG_CREDENTIAL_FIELDS));
     } catch {
       // The thrown error is not inspected: an evaluate failure can quote the script, and the script's return
       // value is three secrets.
@@ -181,17 +196,21 @@ export class CoupangWingCredentialDriver {
       return { ok: false, reason: "MISSING_READING" };
     }
     const map = values as Record<string, unknown>;
-    const out: Record<string, string> = {};
+    // NAMED `values`, deliberately: the repo-wide boundary guard forbids that identifier inside any `log(` or
+    // `console.` argument in this file, so the plaintext map is covered by the sweep. It was called `out`, and
+    // review pointed out that `log("…", out)` would have passed the guard untouched and then printed
+    // `access_key` and `vendor_id` in full, because `safeMeta`'s denylist did not carry those two names.
+    const values2: Record<string, string> = {};
     for (const id of COUPANG_CREDENTIAL_FIELD_IDS) {
       const v = map[id];
       if (typeof v !== "string" || v.length === 0) {
         log("aw_coupang_credential_read", { attempted: true, ok: false, reason: "CELL_EMPTY", field: id });
         return { ok: false, reason: "CELL_EMPTY", id };
       }
-      out[id] = v;
+      values2[id] = v;
     }
     // COUNT only. There is no branch in this class that logs a value, and this is the line a reader checks.
     log("aw_coupang_credential_read", { attempted: true, ok: true, fields: COUPANG_CREDENTIAL_FIELD_IDS.length });
-    return { ok: true, values: out };
+    return { ok: true, values: values2 };
   }
 }
