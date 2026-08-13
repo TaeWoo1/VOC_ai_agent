@@ -28,12 +28,19 @@ public record AgentCredentialHandoffRequest(
         String accountSlot,
         @NotBlank @Pattern(regexp = "^[A-Z0-9_]{2,32}$", message = "채널 코드 형식이 올바르지 않습니다.")
         String channelCode,
-        @NotEmpty Map<String, String> secrets) {
+        @NotEmpty Map<String, String> secrets,
+        CredentialHandoffRunBinding runBinding) {
 
-    /** Masked — a request object must never be able to put a credential in a log line or a stack trace. */
+    /**
+     * Masked — a request object must never be able to put a credential in a log line or a stack trace.
+     *
+     * <p>The run binding is printed in full and deliberately so: it is the identity a reader diagnosing a
+     * refused handoff needs, and it holds nothing secret (two opaque environment ids, a commit, a phase).
+     */
     @Override
     public String toString() {
         return "AgentCredentialHandoffRequest[accountSlot=<masked>, channelCode=" + channelCode
-                + ", secrets=<masked:" + (secrets != null ? secrets.size() : 0) + ">]";
+                + ", secrets=<masked:" + (secrets != null ? secrets.size() : 0) + ">"
+                + ", runBinding=" + runBinding + "]";
     }
 }

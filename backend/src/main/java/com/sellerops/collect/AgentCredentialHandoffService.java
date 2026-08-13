@@ -29,9 +29,13 @@ import org.springframework.stereotype.Service;
  * place that knows how to persist a credential is a second place that can persist one wrongly. See
  * {@code docs/coupang_credential_handoff_v1.md} §1 for the full reuse map.
  *
- * <p><b>Fail-closed order.</b> Slot → org → account → channel guard → channel supports API credentials → no
- * credential already on file → store → verify. Nothing privileged happens before the org scoping, and a request
- * that fails any gate has touched no vault and made no provider call.
+ * <p><b>Fail-closed order.</b> Run interlock → slot → org → account → channel guard → channel supports API
+ * credentials → no credential already on file → store → verify. Nothing privileged happens before the org
+ * scoping, and a request that fails any gate has touched no vault and made no provider call.
+ *
+ * <p>The interlock is FIRST on purpose. A single armed live-call approval id says only that SOME run was
+ * approved; this path reads three secrets off a seller's screen, so it is armed with the whole identity the
+ * operator's grant was bound to — approval, run, commit, phase — used once. See {@link CredentialHandoffArming}.
  *
  * <p><b>It never overwrites.</b> An account that already has a credential is refused, because replacing a working
  * credential is a different operation with a different safety property — {@code POST /credentials/replace} does it
@@ -57,17 +61,20 @@ public class AgentCredentialHandoffService {
     private final ChannelRepository channels;
     private final CredentialVault vault;
     private final CollectControlService collect;
+    private final CredentialHandoffArming arming;
 
     public AgentCredentialHandoffService(AccountSessionSlotRepository slots,
                                          SellerAccountRepository accounts,
                                          ChannelRepository channels,
                                          CredentialVault vault,
-                                         CollectControlService collect) {
+                                         CollectControlService collect,
+                                         CredentialHandoffArming arming) {
         this.slots = slots;
         this.accounts = accounts;
         this.channels = channels;
         this.vault = vault;
         this.collect = collect;
+        this.arming = arming;
     }
 
     /**
@@ -76,6 +83,18 @@ public class AgentCredentialHandoffService {
      */
     public AgentCredentialHandoffResultView handOff(UUID orgId, UUID actorUserId,
                                                     AgentCredentialHandoffRequest request) {
+        // **FIRST, before anything else.** The interlock asks whether THIS run was approved, at THIS commit, for
+        // THIS phase, and has not already spent its one handoff. It runs ahead of the slot resolution so a
+        // request from an unapproved run cannot even learn whether a slot exists — and so the refusal it gets is
+        // about the approval rather than about the seller's data.
+        String refusal = arming.refusalFor(request.runBinding());
+        if (refusal != null) {
+            // A safe constant. The presented identity is not echoed back, and no secret exists on this path yet.
+            log.warn("Coupang credential handoff refused by the run interlock: reason={}", refusal);
+            throw ApiException.badRequest(
+                    "이 실행은 연결 정보 전달 승인이 확인되지 않아 중단되었습니다. 저장된 것은 없습니다. (" + refusal + ")");
+        }
+
         UUID sellerAccountId = resolveAccount(orgId, request.accountSlot());
         Channel channel = requireChannelOf(orgId, sellerAccountId);
 
@@ -102,6 +121,12 @@ public class AgentCredentialHandoffService {
         CredentialIntakeRequest intake = new CredentialIntakeRequest(
                 template.connectorClass(), template.authType(), request.secrets(), null, null);
         collect.storeCredential(orgId, sellerAccountId, intake, actorUserId);
+        // **Spent at the store, not at the verification.** The store is the irreversible half; what follows can
+        // fail for reasons that have nothing to do with the credential. Returning the arming on a failed
+        // verification would invite reading three secrets again to replace something already stored, and
+        // replacement is the renewal path's job. A refusal ABOVE this line consumes nothing, because nothing
+        // happened. See `CredentialHandoffArming`.
+        arming.consume();
 
         // **From here the credential IS stored, and every exit must say so.**
         //

@@ -33,7 +33,10 @@ import {
   credentialCellsResolved,
 } from "../action-window/coupang-wing-credential-cells";
 import { handOffCoupangCredential, type CredentialHandoffRecord } from "../credential/coupang-credential-handoff";
-import { postCoupangCredentialHandoff } from "../credential/credential-handoff-client";
+import {
+  postCoupangCredentialHandoff,
+  type CredentialHandoffRunBinding,
+} from "../credential/credential-handoff-client";
 import { backendOriginRefusalMessage, screenCredentialBackendOrigin } from "../credential/backend-origin";
 import {
   ACTION_BARRIER_BUTTON_LABEL,
@@ -122,6 +125,26 @@ export function gateRefusalCause(
   if (!res.ok) return res.cause;
   const identity = verifyIdentity({ expectedSha: input.gitSha, repoRoot: REPO_ROOT });
   return identity.ok ? null : `${identity.cause}: ${identity.reason}`;
+}
+
+/**
+ * **The identity this run presents to the backend's credential interlock.**
+ *
+ * Taken from the SAME env the gate and the manifest are built from, rather than re-derived: the whole property
+ * is that the backend was armed with the identity the operator granted against, and a second source for these
+ * four values is a second thing that can disagree with the manifest.
+ *
+ * `unknown` is deliberately NOT substituted for a missing value. A blank field fails the backend's shape check
+ * and the handoff is refused — which is the correct outcome for a run whose identity nobody can name, and a
+ * quieter failure than a placeholder that looks like an answer.
+ */
+export function handoffRunBinding(): CredentialHandoffRunBinding {
+  return {
+    approvalId: env("WALKTHROUGH_APPROVAL_ID") ?? "",
+    runId: env("WALKTHROUGH_RUN_ID") ?? "",
+    gitCommit: env("WALKTHROUGH_GIT_COMMIT") ?? "",
+    phase: HANDOFF.phase,
+  };
 }
 
 /** The manifest fields this run holds, for the run-level grant press. */
@@ -360,7 +383,8 @@ async function main(): Promise<void> {
         return true;
       },
       read: () => driver.readCredentialValues(),
-      post: (secrets) => postCoupangCredentialHandoff(backend.origin, token, slot, CHANNEL_CODE, secrets),
+      post: (secrets) =>
+        postCoupangCredentialHandoff(backend.origin, token, slot, CHANNEL_CODE, secrets, handoffRunBinding()),
     });
 
     // The barrier already printed its own refusal record; a second one would double-report the same stop.

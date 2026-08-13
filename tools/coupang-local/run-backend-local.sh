@@ -41,14 +41,37 @@ RUN_ENV="$HERE/.run/current.env"
 die() { echo "FAIL-CLOSED: $*" >&2; exit 1; }
 kc() { security find-generic-password -s "$1" -a "$2" -w 2>/dev/null || true; }
 
-# ---- run identity + approval id (from bootstrap.sh; required) -----------------
-[ -f "$RUN_ENV" ] || die "no run env at $RUN_ENV — run tools/coupang-local/bootstrap.sh first."
-# shellcheck disable=SC1090
-set -a; . "$RUN_ENV"; set +a
-[ -n "${COUPANG_APPROVAL_ID:-}" ] || die "COUPANG_APPROVAL_ID missing from run env — re-run bootstrap.sh."
-# Arm the backend live-call interlock with THIS run's approval id. preflight.sh verifies the running backend
-# reports this id's prefix via /setup before any live action is taken.
-export SELLEROPS_CONNECTOR_COUPANG_LIVE_APPROVAL_ID="$COUPANG_APPROVAL_ID"
+# ---- run identity + approval id ------------------------------------------------
+#
+# Two callers, two run envs, and the difference is deliberate:
+#
+#   - the ORDER-ROUTINE proof (bootstrap.sh → current.env) arms the read-only live-call interlock;
+#   - the CREDENTIAL HANDOFF (wing-credential-bootstrap.sh handoff → wing-credential-arm-backend.sh) arms the
+#     credential interlock, and arms the live-call one with the SAME id, because the handoff's verification
+#     leg is itself a read-only Coupang GET.
+#
+# When the credential arming is already exported, this script must NOT re-arm the live-call interlock from
+# `current.env`: that would boot a backend whose two interlocks name different runs, and the operator's grant
+# names one. It is detected rather than passed as a flag — the presence of a MINTED credential arming is the
+# fact that matters, and a flag would be one more thing a hand can set.
+if [ -n "${SELLEROPS_CREDENTIAL_HANDOFF_APPROVAL_ID:-}" ]; then
+  [ -n "${SELLEROPS_CONNECTOR_COUPANG_LIVE_APPROVAL_ID:-}" ] \
+    || die "credential arming present but the live-call interlock is unset — boot via wing-credential-arm-backend.sh."
+  [ "$SELLEROPS_CONNECTOR_COUPANG_LIVE_APPROVAL_ID" = "$SELLEROPS_CREDENTIAL_HANDOFF_APPROVAL_ID" ] \
+    || die "the two interlocks name different approvals. One run, one grant, one id."
+  COUPANG_APPROVAL_ID="$SELLEROPS_CREDENTIAL_HANDOFF_APPROVAL_ID"
+  COUPANG_RUN_ID="${SELLEROPS_CREDENTIAL_HANDOFF_RUN_ID:-}"
+  ARMED_FOR="credential handoff + its read-only verification"
+else
+  [ -f "$RUN_ENV" ] || die "no run env at $RUN_ENV — run tools/coupang-local/bootstrap.sh first."
+  # shellcheck disable=SC1090
+  set -a; . "$RUN_ENV"; set +a
+  [ -n "${COUPANG_APPROVAL_ID:-}" ] || die "COUPANG_APPROVAL_ID missing from run env — re-run bootstrap.sh."
+  # Arm the backend live-call interlock with THIS run's approval id. preflight.sh verifies the running backend
+  # reports this id's prefix via /setup before any live action is taken.
+  export SELLEROPS_CONNECTOR_COUPANG_LIVE_APPROVAL_ID="$COUPANG_APPROVAL_ID"
+  ARMED_FOR="read-only order routine"
+fi
 
 # ---- refuse to boot against the real sellerops DB -----------------------------
 # Catch both the default prod port (:5432/…sellerops…) AND a 'sellerops' database name reached on any
@@ -70,6 +93,13 @@ echo "starting Coupang live-proof backend on :${SERVER_PORT}"
 echo "  JDBC        : $SPRING_DATASOURCE_URL"
 echo "  coupang     : enabled=true  base-url=$SELLEROPS_CONNECTOR_COUPANG_BASE_URL  scheduler=$SELLEROPS_COLLECT_SCHEDULER_ENABLED"
 echo "  interlock   : armed with approval ${COUPANG_APPROVAL_ID:0:12}…  (run ${COUPANG_RUN_ID:-?})"
+echo "  armed for   : $ARMED_FOR"
+if [ -n "${SELLEROPS_CREDENTIAL_HANDOFF_APPROVAL_ID:-}" ]; then
+  echo "  credential  : interlock ARMED — one handoff, spent at the store, gone on restart"
+  echo "                phase ${SELLEROPS_CREDENTIAL_HANDOFF_PHASE:-?}  commit ${SELLEROPS_CREDENTIAL_HANDOFF_GIT_COMMIT:-?}"
+else
+  echo "  credential  : interlock UNARMED — a credential handoff is refused before the vault is touched"
+fi
 echo "  advertised  : ${SELLEROPS_CONNECTOR_COUPANG_ADVERTISED_EGRESS_IPS:-<none set>}"
 echo "reminder: NO Coupang call happens until the operator enters a credential + triggers test/sync AFTER preflight."
 cd "$BACKEND_DIR"

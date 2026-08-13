@@ -124,13 +124,42 @@ if [ "$KIND" = "handoff" ]; then
     pass "backend reachable and accepting the SellerOps login"
     SETUP="$(curl -s --max-time 8 -H "Authorization: Bearer $TOKEN" "$BACKEND_ORIGIN/api/connect/coupang/setup" 2>/dev/null)"
     EXPECTED_PREFIX="${APPROVAL_ID:0:12}"
+    EXPECTED_RUN_PREFIX="${RUN_ID:0:12}"
     case "$SETUP" in
-      *'"approvalArmed":true'*|*'"approvalArmed" : true'*) pass "backend live-call interlock is armed" ;;
-      *) fail "backend live-call interlock NOT armed — run-backend-local.sh must arm this run's approval id, or the verification leg refuses" ;;
+      *'"approvalArmed":true'*|*'"approvalArmed" : true'*) pass "backend live-call interlock is armed (the read-only verification leg)" ;;
+      *) fail "backend live-call interlock NOT armed — boot via wing-credential-arm-backend.sh, or the verification leg refuses" ;;
     esac
     case "$SETUP" in
       *"$EXPECTED_PREFIX"*) pass "armed approval id prefix matches this run ($EXPECTED_PREFIX)" ;;
       *) fail "the armed approval id is not this run's ($EXPECTED_PREFIX) — wrong or stale backend; re-bootstrap and re-arm" ;;
+    esac
+
+    # 2b. The CREDENTIAL interlock — a different gate from the one above, and the one that matters here. The
+    #     live-call id says some run may make a read-only GET; this says THIS run, at THIS commit, for the
+    #     credential phase, still holds its one unspent handoff. Checked as its own block because an armed
+    #     live-call interlock used to be the only thing standing between a prepared backend and a stored key.
+    CRED="$(printf '%s' "$SETUP" | tr -d ' ')"
+    case "$CRED" in
+      *'"credentialHandoff":{"armed":true'*) pass "backend CREDENTIAL interlock is armed" ;;
+      *'"armed":true'*) pass "backend CREDENTIAL interlock is armed" ;;
+      *) fail "backend CREDENTIAL interlock NOT armed — boot via wing-credential-arm-backend.sh (a live-call grant is not a credential grant)" ;;
+    esac
+    case "$CRED" in
+      *'"consumed":true'*) fail "this backend has already SPENT its one credential handoff — restart it and re-arm; a run gets one" ;;
+      *) pass "the one-shot credential handoff is unspent" ;;
+    esac
+    case "$CRED" in
+      *"\"phase\":\"$PHASE_EXPECTED\""*) pass "armed credential phase is $PHASE_EXPECTED" ;;
+      *) fail "the armed credential phase is not $PHASE_EXPECTED — a calibration grant is for a run that reads no value" ;;
+    esac
+    # BOTH prefixes. The approval alone cannot say which run, and the run alone cannot say which approval.
+    case "$CRED" in
+      *"\"approvalIdPrefix\":\"$EXPECTED_PREFIX\""*) pass "credential interlock's approval matches this run ($EXPECTED_PREFIX)" ;;
+      *) fail "the credential interlock names a different approval — re-bootstrap and re-arm" ;;
+    esac
+    case "$CRED" in
+      *"\"runIdPrefix\":\"$EXPECTED_RUN_PREFIX\""*) pass "credential interlock's run matches this run ($EXPECTED_RUN_PREFIX)" ;;
+      *) fail "the credential interlock names a different run — re-bootstrap and re-arm" ;;
     esac
   fi
 fi

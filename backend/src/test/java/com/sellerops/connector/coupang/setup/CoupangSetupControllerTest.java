@@ -11,7 +11,10 @@ import org.junit.jupiter.api.Test;
 class CoupangSetupControllerTest {
 
     private static CoupangSetupController controller(String ips, boolean enabled, String approvalId) {
-        return new CoupangSetupController(new CoupangAdvertisedEgress(ips), enabled, approvalId);
+        // The credential-handoff interlock is a SEPARATE arming from the live-call approval id, so this
+        // controller test hands it an unarmed one: a live-call grant must not read as a credential grant.
+        return new CoupangSetupController(new CoupangAdvertisedEgress(ips),
+                new com.sellerops.collect.CredentialHandoffArming("", "", "", "", 0), enabled, approvalId);
     }
 
     @Test
@@ -41,11 +44,15 @@ class CoupangSetupControllerTest {
     void setupEndpointEmptyByDefaultAndViewNeverNull() {
         assertThat(controller("", false, "").setup().advertisedEgressIps()).isEmpty();
         // The view normalizes a null list to empty and a null readiness to a not-armed value.
-        CoupangSetupView view = new CoupangSetupView(null, null);
+        CoupangSetupView view = new CoupangSetupView(null, null, null);
         assertThat(view.advertisedEgressIps()).isEmpty();
         assertThat(view.liveApproval()).isNotNull();
         assertThat(view.liveApproval().approvalArmed()).isFalse();
         assertThat(view.liveApproval().approvalIdPrefix()).isNull();
+        // …and an absent credential-handoff readiness reads as UNARMED, never as "unknown".
+        assertThat(view.credentialHandoff()).isNotNull();
+        assertThat(view.credentialHandoff().armed()).isFalse();
+        assertThat(view.credentialHandoff().approvalIdPrefix()).isNull();
     }
 
     @Test

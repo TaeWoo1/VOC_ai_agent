@@ -376,6 +376,37 @@ The second direction is the one that matters: a run cannot carry the alarming mo
 narrow its declared capability to something innocuous, because the operator's grant is given against the
 action list.
 
+### The backend is armed with the WHOLE identity, and spends it once
+
+`CoupangLiveCallGuard` asks one question — is SOME approval id armed — and that is the right question for a
+read-only marketplace GET. It is the wrong question for the run that reads three secrets off a seller's
+screen and writes them into the vault: a single non-blank string cannot say WHICH run was approved, at WHICH
+commit, for WHICH phase, or whether it has already been used.
+
+So the credential handoff has its own interlock (`CredentialHandoffArming`), armed only by
+`tools/coupang-local/wing-credential-arm-backend.sh` from the run env `wing-credential-bootstrap.sh handoff`
+minted. It refuses:
+
+| | why |
+|---|---|
+| nothing armed | the default state of every backend that was not prepared for this run |
+| a malformed or partial arming | every field must have the shape the bootstrap mints, so a hand-exported value is a refusal rather than a shortcut |
+| the `COUPANG_WING_CREDENTIAL_CELL_CALIBRATION` phase | that grant is for a run that reads no value, and both bootstraps mint identically-shaped ids |
+| an arming older than 1h (or stamped in the future) | the grant is single-sitting; a skewed clock is not something to reason about |
+| a request presenting a different approval / run / commit | each field closes a different way to reuse a grant |
+| a second handoff | one run, one handoff |
+
+**The arming is spent at the STORE, not at the verification.** The store is the irreversible half; the
+read-only check after it can fail for reasons that have nothing to do with the credential. Returning the
+arming there would invite reading three secrets again to replace something already in the vault, and
+replacement is the renewal path's job. A refusal *before* the store consumes nothing, because nothing
+happened.
+
+There is deliberately **no argument** to the arming script: it reads the minted run env and nothing else, so
+"arm it with a value I typed" is impossible rather than discouraged. The preflight then matches BOTH id
+prefixes and the phase from `/api/connect/coupang/setup` against the manifest it is about to display, and a
+backend that has already spent its handoff fails the preflight rather than the operator's grant.
+
 The value-cell structure is measured first, by a separate `READ_ONLY` phase
 (`COUPANG_WING_CREDENTIAL_CELL_CALIBRATION`) with its own approval — a grant for the calibration is never
 a grant for the handoff. That order is **enforced**: `WING_CREDENTIAL_CELLS_CALIBRATED` ships `false` and

@@ -10,6 +10,7 @@ import com.sellerops.channel.ChannelStatus;
 import com.sellerops.collect.dto.AgentCredentialHandoffRequest;
 import com.sellerops.collect.dto.AgentCredentialHandoffResultView;
 import com.sellerops.collect.dto.ConnectionTestResultView;
+import com.sellerops.collect.dto.CredentialHandoffRunBinding;
 import com.sellerops.collect.dto.CredentialIntakeRequest;
 import com.sellerops.common.ApiException;
 import com.sellerops.connector.ChannelConnectionStatusRepository;
@@ -114,7 +115,9 @@ class AgentCredentialHandoffServiceTest {
                 new com.sellerops.connector.coupang.onboarding.CoupangConnectionLifecycle(
                         sellerAccounts, channels, txManager),
                 new com.sellerops.connector.ConnectorAlertService(alerts, sellerAccounts, channels));
-        service = new AgentCredentialHandoffService(slotRepo, sellerAccounts, channels, vault, collect);
+        this.collect = collect;
+        this.arming = armedForThisRun();
+        service = new AgentCredentialHandoffService(slotRepo, sellerAccounts, channels, vault, collect, arming);
     }
 
     /**
@@ -167,9 +170,30 @@ class AgentCredentialHandoffServiceTest {
         return slots.resolveSlot(acc.getOrgId(), acc.getId(), acc.getChannelId());
     }
 
+    /* ── the run interlock: an arming this suite's requests match, unless a test says otherwise ────────── */
+
+    static final String RUN_APPROVAL = "apr-4c57d35545f8";
+    static final String RUN_ID = "wt-30bf20bef006";
+    static final String RUN_COMMIT = "04eded4b";
+    private CollectControlService collect;
+    private CredentialHandoffArming arming;
+
+    private static CredentialHandoffArming armedForThisRun() {
+        return new CredentialHandoffArming(RUN_APPROVAL, RUN_ID, RUN_COMMIT,
+                CredentialHandoffArming.PHASE_CREDENTIAL_HANDOFF, NOW.getEpochSecond(),
+                java.time.Clock.fixed(NOW, java.time.ZoneOffset.UTC));
+    }
+
+    private static final java.time.Instant NOW = java.time.Instant.parse("2026-08-13T12:00:00Z");
+
+    private static CredentialHandoffRunBinding thisRun() {
+        return new CredentialHandoffRunBinding(RUN_APPROVAL, RUN_ID, RUN_COMMIT,
+                CredentialHandoffArming.PHASE_CREDENTIAL_HANDOFF);
+    }
+
     private static AgentCredentialHandoffRequest coupangRequest(String slot) {
         return new AgentCredentialHandoffRequest(slot, "COUPANG",
-                Map.of("access_key", ACCESS, "secret_key", SECRET, "vendor_id", VENDOR));
+                Map.of("access_key", ACCESS, "secret_key", SECRET, "vendor_id", VENDOR), thisRun());
     }
 
     @Test
@@ -254,7 +278,7 @@ class AgentCredentialHandoffServiceTest {
     void anUnknownSecretKeyIsRejectedByTheEXISTINGValidator() {
         SellerAccount acc = account(org, "COUPANG");
         AgentCredentialHandoffRequest bad = new AgentCredentialHandoffRequest(slotFor(acc), "COUPANG",
-                Map.of("access_key", ACCESS, "secret_key", SECRET, "vendor_id", VENDOR, "smuggled", "x"));
+                Map.of("access_key", ACCESS, "secret_key", SECRET, "vendor_id", VENDOR, "smuggled", "x"), thisRun());
 
         assertThatThrownBy(() -> service.handOff(org, actor, bad)).isInstanceOf(ApiException.class);
         assertThat(vault.hasCredential(org, acc.getId())).isFalse();
@@ -264,7 +288,7 @@ class AgentCredentialHandoffServiceTest {
     void aMissingRequiredFieldIsRejectedAndNothingIsStored() {
         SellerAccount acc = account(org, "COUPANG");
         AgentCredentialHandoffRequest partial = new AgentCredentialHandoffRequest(slotFor(acc), "COUPANG",
-                Map.of("access_key", ACCESS, "secret_key", SECRET));
+                Map.of("access_key", ACCESS, "secret_key", SECRET), thisRun());
 
         assertThatThrownBy(() -> service.handOff(org, actor, partial)).isInstanceOf(ApiException.class);
         assertThat(vault.hasCredential(org, acc.getId())).isFalse();
@@ -279,7 +303,7 @@ class AgentCredentialHandoffServiceTest {
         // handoff is refused with CREDENTIAL_ALREADY_STORED.
         SellerAccount acc = account(org, "COUPANG");
         AgentCredentialHandoffService throwing = new AgentCredentialHandoffService(
-                slotRepo, sellerAccounts, channels, vault, collectThatFailsVerification());
+                slotRepo, sellerAccounts, channels, vault, collectThatFailsVerification(), armedForThisRun());
 
         AgentCredentialHandoffResultView result = throwing.handOff(org, actor, coupangRequest(slotFor(acc)));
 
@@ -310,4 +334,180 @@ class AgentCredentialHandoffServiceTest {
         // …and it does not leak the seller-account id the opaque slot stood in for, either.
         assertThat(rendered).doesNotContain(acc.getId().toString());
     }
+
+    /* ══════════════════ the run interlock — nothing is stored unless THIS run was approved ══════════════════ */
+
+    /**
+     * The interlock is the first gate, and every refusal below leaves the vault untouched. That is the whole
+     * property: a request from a run nobody approved must not be able to store a credential, and must not be
+     * able to learn anything about the account either.
+     */
+    private AgentCredentialHandoffService serviceArmedWith(CredentialHandoffArming a) {
+        return new AgentCredentialHandoffService(slotRepo, sellerAccounts, channels, vault, collect, a);
+    }
+
+    private static AgentCredentialHandoffRequest requestPresenting(String slot, CredentialHandoffRunBinding b) {
+        return new AgentCredentialHandoffRequest(slot, "COUPANG",
+                Map.of("access_key", ACCESS, "secret_key", SECRET, "vendor_id", VENDOR), b);
+    }
+
+    @Test
+    void theCorrectIdentityIsWhatLetsAHandoffThrough() {
+        SellerAccount acc = account(org, "COUPANG");
+
+        AgentCredentialHandoffResultView result = service.handOff(org, actor, coupangRequest(slotFor(acc)));
+
+        assertThat(result.stored()).isTrue();
+        assertThat(vault.hasCredential(org, acc.getId())).isTrue();
+    }
+
+    @Test
+    void aWrongApprovalRunOrCommitStoresNOTHING() {
+        SellerAccount acc = account(org, "COUPANG");
+        // Each field is wrong ON ITS OWN, so no single one of them is carrying the check.
+        List<CredentialHandoffRunBinding> wrong = List.of(
+                new CredentialHandoffRunBinding("apr-000000000000", RUN_ID, RUN_COMMIT,
+                        CredentialHandoffArming.PHASE_CREDENTIAL_HANDOFF),
+                new CredentialHandoffRunBinding(RUN_APPROVAL, "wt-000000000000", RUN_COMMIT,
+                        CredentialHandoffArming.PHASE_CREDENTIAL_HANDOFF),
+                new CredentialHandoffRunBinding(RUN_APPROVAL, RUN_ID, "deadbeef",
+                        CredentialHandoffArming.PHASE_CREDENTIAL_HANDOFF));
+
+        for (CredentialHandoffRunBinding b : wrong) {
+            assertThatThrownBy(() -> service.handOff(org, actor, requestPresenting(slotFor(acc), b)))
+                    .isInstanceOf(ApiException.class)
+                    .hasMessageContaining(CredentialHandoffArming.REASON_BINDING_MISMATCH);
+            assertThat(vault.hasCredential(org, acc.getId())).isFalse();
+        }
+    }
+
+    @Test
+    void aCALIBRATIONGrantCannotArmTheRunThatReadsThreeValues() {
+        // Both bootstraps mint an identically-shaped approval id. The phase is the only thing that tells the run
+        // which reads NO value from the run which reads every one of them.
+        SellerAccount acc = account(org, "COUPANG");
+        CredentialHandoffArming calibration = new CredentialHandoffArming(RUN_APPROVAL, RUN_ID, RUN_COMMIT,
+                "COUPANG_WING_CREDENTIAL_CELL_CALIBRATION", NOW.getEpochSecond(),
+                java.time.Clock.fixed(NOW, java.time.ZoneOffset.UTC));
+
+        assertThatThrownBy(() -> serviceArmedWith(calibration).handOff(org, actor, coupangRequest(slotFor(acc))))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining(CredentialHandoffArming.REASON_ARMING_WRONG_PHASE);
+        assertThat(vault.hasCredential(org, acc.getId())).isFalse();
+    }
+
+    @Test
+    void aSTALEArmingIsRefused_andSoIsOneStampedInTheFuture() {
+        SellerAccount acc = account(org, "COUPANG");
+        java.time.Clock clock = java.time.Clock.fixed(NOW, java.time.ZoneOffset.UTC);
+        // Just past the window. The operator's grant is single-sitting; a backend left armed overnight is not it.
+        CredentialHandoffArming stale = new CredentialHandoffArming(RUN_APPROVAL, RUN_ID, RUN_COMMIT,
+                CredentialHandoffArming.PHASE_CREDENTIAL_HANDOFF,
+                NOW.minus(CredentialHandoffArming.ARMING_TTL).minusSeconds(1).getEpochSecond(), clock);
+        // …and a clock skewed FORWARD would otherwise extend the window without limit.
+        CredentialHandoffArming future = new CredentialHandoffArming(RUN_APPROVAL, RUN_ID, RUN_COMMIT,
+                CredentialHandoffArming.PHASE_CREDENTIAL_HANDOFF, NOW.plusSeconds(600).getEpochSecond(), clock);
+
+        for (CredentialHandoffArming a : List.of(stale, future)) {
+            assertThatThrownBy(() -> serviceArmedWith(a).handOff(org, actor, coupangRequest(slotFor(acc))))
+                    .isInstanceOf(ApiException.class)
+                    .hasMessageContaining(CredentialHandoffArming.REASON_ARMING_EXPIRED);
+            assertThat(vault.hasCredential(org, acc.getId())).isFalse();
+        }
+    }
+
+    @Test
+    void anUNARMEDBackendStoresNothing_andAHandCraftedStringIsNotAnArming() {
+        SellerAccount acc = account(org, "COUPANG");
+        java.time.Clock clock = java.time.Clock.fixed(NOW, java.time.ZoneOffset.UTC);
+        // Nothing armed at all — the default state of every backend that was not prepared for this run.
+        CredentialHandoffArming none = new CredentialHandoffArming("", "", "", "", 0, clock);
+        assertThatThrownBy(() -> serviceArmedWith(none).handOff(org, actor, coupangRequest(slotFor(acc))))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining(CredentialHandoffArming.REASON_NOT_ARMED);
+
+        // **The env-only bypass.** Someone exporting plausible-looking values by hand, or reusing the single
+        // live-call approval knob, does not arm this: every field must have the shape the bootstrap mints, and
+        // a PARTIAL arming arms nothing.
+        List<CredentialHandoffArming> notArmings = List.of(
+                new CredentialHandoffArming("yes", "yes", "yes", "yes", NOW.getEpochSecond(), clock),
+                new CredentialHandoffArming(RUN_APPROVAL, "", "", "", NOW.getEpochSecond(), clock),
+                new CredentialHandoffArming(RUN_APPROVAL, RUN_ID, RUN_COMMIT, "", NOW.getEpochSecond(), clock),
+                new CredentialHandoffArming("APR-4C57D35545F8", RUN_ID, RUN_COMMIT,
+                        CredentialHandoffArming.PHASE_CREDENTIAL_HANDOFF, NOW.getEpochSecond(), clock));
+        for (CredentialHandoffArming a : notArmings) {
+            assertThatThrownBy(() -> serviceArmedWith(a).handOff(org, actor, coupangRequest(slotFor(acc))))
+                    .isInstanceOf(ApiException.class)
+                    .hasMessageContaining(CredentialHandoffArming.REASON_ARMING_MALFORMED);
+        }
+        assertThat(vault.hasCredential(org, acc.getId())).isFalse();
+    }
+
+    @Test
+    void aRequestThatPresentsNOIdentityIsRefusedBeforeTheSlotIsEvenResolved() {
+        SellerAccount acc = account(org, "COUPANG");
+
+        assertThatThrownBy(() -> service.handOff(org, actor, requestPresenting(slotFor(acc), null)))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining(CredentialHandoffArming.REASON_BINDING_ABSENT);
+        assertThat(vault.hasCredential(org, acc.getId())).isFalse();
+    }
+
+    @Test
+    void theArmingIsONESHOT_spentAtTheStore() {
+        SellerAccount first = account(org, "COUPANG");
+        assertThat(service.handOff(org, actor, coupangRequest(slotFor(first))).stored()).isTrue();
+
+        // A DIFFERENT account, so the never-overwrite rule is not what refuses this. The arming is spent.
+        SellerAccount second = account(org, "COUPANG");
+        assertThatThrownBy(() -> service.handOff(org, actor, coupangRequest(slotFor(second))))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining(CredentialHandoffArming.REASON_ARMING_CONSUMED);
+        assertThat(vault.hasCredential(org, second.getId())).isFalse();
+    }
+
+    @Test
+    void aRefusalBEFORETheStoreDoesNotSpendTheArming() {
+        // Nothing happened, so the operator's one handoff is still theirs. The refusal here is the channel
+        // guard; what matters is that it left the arming intact for the retry they can legitimately make.
+        SellerAccount acc = account(org, "COUPANG");
+        AgentCredentialHandoffRequest wrongChannel = new AgentCredentialHandoffRequest(slotFor(acc), "NAVER",
+                Map.of("access_key", ACCESS, "secret_key", SECRET, "vendor_id", VENDOR), thisRun());
+
+        assertThatThrownBy(() -> service.handOff(org, actor, wrongChannel)).isInstanceOf(ApiException.class);
+        assertThat(arming.isArmed()).isTrue();
+        assertThat(service.handOff(org, actor, coupangRequest(slotFor(acc))).stored()).isTrue();
+    }
+
+    @Test
+    void aFAILEDVERIFICATIONDoesNotReturnTheArming_theCredentialIsAlreadyStored() {
+        // The store is the irreversible half. Handing the arming back would invite reading three secrets again
+        // to replace something already in the vault, and replacement is the renewal path's job.
+        SellerAccount acc = account(org, "COUPANG");
+        CredentialHandoffArming a = armedForThisRun();
+        AgentCredentialHandoffService throwing = new AgentCredentialHandoffService(
+                slotRepo, sellerAccounts, channels, vault, collectThatFailsVerification(), a);
+
+        assertThat(throwing.handOff(org, actor, coupangRequest(slotFor(acc))).stored()).isTrue();
+        assertThat(a.isArmed()).isFalse();
+    }
+
+    @Test
+    void theSanitizedReadinessCarriesPrefixesAndNothingElse() {
+        CredentialHandoffArming a = armedForThisRun();
+        CredentialHandoffArming.Readiness ready = a.readiness();
+        assertThat(ready.armed()).isTrue();
+        assertThat(ready.consumed()).isFalse();
+        assertThat(ready.approvalIdPrefix()).isEqualTo("apr-4c57d355").hasSize(CredentialHandoffArming.PREFIX_LENGTH);
+        assertThat(ready.runIdPrefix()).isEqualTo("wt-30bf20bef").hasSize(CredentialHandoffArming.PREFIX_LENGTH);
+        assertThat(ready.phase()).isEqualTo(CredentialHandoffArming.PHASE_CREDENTIAL_HANDOFF);
+
+        a.consume();
+        assertThat(a.readiness().armed()).isFalse();
+        assertThat(a.readiness().consumed()).isTrue();
+        // An unarmed readiness names nothing at all, so a preflight cannot match a prefix off a spent arming.
+        assertThat(a.readiness().approvalIdPrefix()).isNull();
+        assertThat(a.readiness().runIdPrefix()).isNull();
+    }
+
 }

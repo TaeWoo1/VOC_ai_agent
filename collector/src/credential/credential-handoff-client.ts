@@ -14,6 +14,21 @@ import type { CredentialHandoffResponse } from "./coupang-credential-handoff";
 
 type FetchImpl = typeof fetch;
 
+/**
+ * **Which approved run this handoff belongs to**, presented back to the backend so it can check the request
+ * against the identity it was armed with out of band.
+ *
+ * Every field is an environment token minted by the bootstrap — no credential, no seller identity — and all
+ * four travel because each closes a different way to reuse a grant. The backend refuses a request that presents
+ * an identity nobody armed, before the vault is touched. See `CredentialHandoffArming` on the backend side.
+ */
+export interface CredentialHandoffRunBinding {
+  readonly approvalId: string;
+  readonly runId: string;
+  readonly gitCommit: string;
+  readonly phase: string;
+}
+
 /** A network failure, carrying no body and no value. The HTTP status is the whole diagnosis it offers. */
 export class CredentialHandoffTransportError extends Error {
   constructor(readonly httpStatus?: number) {
@@ -37,6 +52,7 @@ export async function postCoupangCredentialHandoff(
   accountSlot: string,
   channelCode: string,
   secrets: Readonly<Record<string, string>>,
+  runBinding: CredentialHandoffRunBinding,
   fetchImpl: FetchImpl = fetch,
 ): Promise<CredentialHandoffResponse> {
   let res: Response;
@@ -44,7 +60,7 @@ export async function postCoupangCredentialHandoff(
     res = await fetchImpl(`${baseUrl}/api/agent/credential-handoff`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ accountSlot, channelCode, secrets }),
+      body: JSON.stringify({ accountSlot, channelCode, secrets, runBinding }),
     });
   } catch {
     // The caught error is not inspected: a fetch failure can quote the request it failed on.
