@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { OPERATOR_UI_CONFIRMED, type OperatorConfirmAsk, type OperatorConfirmation } from "../../src/cli/operator-confirm";
 import { withConfirmTail } from "../../src/cli/operator-confirm-host";
 import { COUPANG_WING_KEY_DELETION_SCOPE, WING_DEFAULT_ACCOUNT_BINDING } from "../../src/cli/approval-manifest";
+import { runApprovalManifestCli } from "../../src/cli/approval-manifest-cli";
 import {
   RUN_GRANT_BUTTON_LABEL,
   confirmRunGrant,
@@ -30,6 +31,37 @@ import { deletionRunGrantBinding } from "../../src/cli/run-coupang-wing-deletion
 import { issuanceRunGrantBinding } from "../../src/cli/run-coupang-wing-issuance-live";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Drive the REAL manifest CLI for the reveal phase and parse what it printed. Not a fixture: the whole point is
+ * that the screen and the manifest agree, and a fixture of the manifest would agree with whatever it was
+ * written from.
+ */
+function renderRevealManifest(): { accountBinding?: string } {
+  const saved = { ...process.env };
+  let out = "";
+  const realOut = process.stdout.write.bind(process.stdout);
+  const realErr = process.stderr.write.bind(process.stderr);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (process.stdout as any).write = (s: string): boolean => ((out += s), true);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (process.stderr as any).write = (): boolean => true;
+  try {
+    process.env["SELLEROPS_APPROVAL_PHASE"] = "COUPANG_WING_ISSUANCE_FORM_REVEAL";
+    process.env["WALKTHROUGH_RUN_ID"] = "wt-1";
+    process.env["WALKTHROUGH_APPROVAL_ID"] = "apr-1";
+    process.env["WALKTHROUGH_GIT_COMMIT"] = "abc1234";
+    runApprovalManifestCli({ verifyIdentity: () => ({ ok: true, head: "abc1234" }) });
+  } finally {
+    process.stdout.write = realOut;
+    process.stderr.write = realErr;
+    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+    Object.assign(process.env, saved);
+  }
+  const start = out.indexOf("{");
+  const end = out.lastIndexOf("}");
+  return start >= 0 && end > start ? (JSON.parse(out.slice(start, end + 1)) as { accountBinding?: string }) : {};
+}
 
 const BINDING: RunGrantBinding = {
   approvalId: "apr-181b4bd2cebf",
@@ -201,12 +233,32 @@ describe("the CLIs that hold a manifest bind their grant to it", () => {
   });
 
   it("**the account is the manifest's own value**, not a second copy of it", () => {
-    // Observed live on 2026-08-13: the grant screen read "operator-owned Coupang WING test account" while the
-    // manifest above it read the two-account sentence. One string, one place, or they drift again.
+    // Observed live on 2026-08-13 (docs/trusted_operator_confirmation_proof_v1.md): the grant screen read
+    // "operator-owned Coupang WING test account" while the Approval Manifest above it read the two-account
+    // sentence. One string, one place, or they drift again.
     for (const b of [revealRunGrantBinding(), issuanceRunGrantBinding(ENV as unknown as NodeJS.ProcessEnv)]) {
       expect(b.account).toBe(WING_DEFAULT_ACCOUNT_BINDING);
     }
     expect(deletionRunGrantBinding().account).toBe(COUPANG_WING_KEY_DELETION_SCOPE.accountBinding);
+  });
+
+  it("**the grant SCREEN renders the account the real MANIFEST renders**, character for character", () => {
+    // Equality of the two constants is necessary and not sufficient: what the operator compares is the LINE on
+    // the screen against the LINE on the manifest. So this drives the real manifest CLI for the reveal phase,
+    // parses what it emitted, and matches it against the line the grant ask puts on the surface.
+    const manifest = renderRevealManifest();
+    expect(manifest.accountBinding, "the manifest CLI emitted no account").toBeTruthy();
+    const screenLine = runGrantAsk(revealRunGrantBinding()).lines.find((l) => l.startsWith("계정"));
+    expect(screenLine, "the grant screen has no account line").toBeDefined();
+    expect(screenLine).toBe(`계정      ${manifest.accountBinding}`);
+  });
+
+  it("the string the two copies had drifted to is gone from the runs that render this screen", () => {
+    // It is still a true description of the WING side alone, which is exactly why it came back once.
+    const src = ["run-coupang-wing-reveal-live.ts", "run-coupang-wing-issuance-live.ts", "operator-run-grant.ts"]
+      .map((f) => readFileSync(resolve(HERE, "../../src/cli/", f), "utf8"))
+      .join("\n");
+    expect(src).not.toContain('"operator-owned Coupang WING test account"');
   });
 
   it("an unbound run env cannot produce a grantable binding", () => {

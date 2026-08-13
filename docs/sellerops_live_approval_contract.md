@@ -149,6 +149,11 @@ the reveal run, the destructive deletion run, and the gated live scaffold
 `run-coupang-wing-issuance-live`. The WING selector recorder takes its first per-checkpoint
 confirmation before it reads anything, which is the same gate under another name.
 
+**Live proof:** [`trusted_operator_confirmation_proof_v1.md`](./trusted_operator_confirmation_proof_v1.md)
+— two sittings on 2026-08-13, same code and phase, differing only in whether the operator pressed:
+no press ⇒ `REFUSED_ABORTED` with zero WING navigation / read / action / observation; press ⇒
+`GRANTED`, and the next checkpoint arms with its own fresh token.
+
 **The guided walk is the exception, and it is one by construction.** Its entrypoint is an installed
 launchd service (`local-agent-service install --action-window-coupang-issuance-live`), so there is
 no CLI-owned window to render a grant screen in — and none is needed: the walk begins when the
