@@ -94,21 +94,61 @@ public class CoupangInquiriesClient {
      *  (org, channel, externalId) — an unprefixed id would silently merge two different inquiries. */
     static final String EXTERNAL_ID_PREFIX = "onlineInquiry:";
 
+    /**
+     * Minimum gap between two signed calls, in milliseconds — <b>measured against a real 429, not
+     * chosen from the docs.</b>
+     *
+     * <p>Coupang documents 429 above 5 calls/s per vendorId. One backfill window sweep is
+     * {@code windows × ANSWERED_TYPES} calls issued back to back: on the live proof (2026-08-14) the
+     * first 30-day backfill pushed 10 calls through in 1.6s (~6/s) and got away with it, and the
+     * re-sweep minutes later did not — it took a 429 partway and needed two retries to finish. Nothing
+     * was lost or duplicated (the cursor holds on a throttled page, which that run proved), but a
+     * seller's first import should not need three attempts and should not show them "속도 제한".
+     *
+     * <p>250ms is 4 calls/s — under the documented ceiling with margin, because the limit is per
+     * vendorId and the order stream may be sweeping the same vendor concurrently. The cost is ~2.5s
+     * added to a full backfill, on a run that is already asynchronous.
+     */
+    static final long MIN_CALL_INTERVAL_MS = 250;
+
+    /** The pause between calls, injectable so tests pace deterministically instead of sleeping. */
+    interface Pacer {
+        void pauseMillis(long millis);
+    }
+
+    /** The real pacer. Interrupt is restored and the sweep continues — a lost pause is not a failure. */
+    static final Pacer SLEEPING_PACER = millis -> {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    };
+
     private final CoupangHttpClient http;
     private final CoupangSigner signer;
     private final Clock clock;
     private final String baseUrl;
     /** The armed live-run approval id — see {@link CoupangOrdersClient}; blank ⇒ a real host is refused. */
     private final String liveApprovalId;
+    private final Pacer pacer;
     private final ObjectMapper mapper = new ObjectMapper();
+    /** Epoch millis of the last signed call, or 0 before the first. Per-client, like the sweep itself. */
+    private long lastCallAtMillis;
 
     public CoupangInquiriesClient(CoupangHttpClient http, CoupangSigner signer, Clock clock,
                                   String baseUrl, String liveApprovalId) {
+        this(http, signer, clock, baseUrl, liveApprovalId, SLEEPING_PACER);
+    }
+
+    CoupangInquiriesClient(CoupangHttpClient http, CoupangSigner signer, Clock clock,
+                           String baseUrl, String liveApprovalId, Pacer pacer) {
         this.http = http;
         this.signer = signer;
         this.clock = clock;
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
         this.liveApprovalId = liveApprovalId;
+        this.pacer = pacer;
     }
 
     /**
@@ -311,6 +351,7 @@ public class CoupangInquiriesClient {
                                                  String accessKey, String secretKey, String vendorId) {
         // Live-run approval interlock — the same backend choke point every Coupang request passes.
         CoupangLiveCallGuard.ensureLiveCallAllowed(baseUrl, liveApprovalId);
+        pace();
         String authorization = signer.authorization(accessKey, secretKey, "GET", path, query);
         Map<String, String> headers = new LinkedHashMap<>();
         headers.put("Authorization", authorization);
@@ -318,6 +359,23 @@ public class CoupangInquiriesClient {
         headers.put("X-MARKET", MARKET);
         URI uri = URI.create(baseUrl + path + (query.isEmpty() ? "" : "?" + query));
         return http.get(uri, headers);
+    }
+
+    /**
+     * Hold the sweep under the documented per-vendor rate limit. The gap is measured from the last
+     * call this client made, so a naturally slow call (a big page, a slow gateway) costs nothing
+     * extra — only a burst pays. The signature is stamped AFTER the pause, never before: a
+     * signed-date is only valid for a few minutes, and signing then sleeping would spend that budget
+     * on our own throttle.
+     */
+    private void pace() {
+        long now = clock.millis();
+        long since = now - lastCallAtMillis;
+        if (lastCallAtMillis > 0 && since < MIN_CALL_INTERVAL_MS) {
+            pacer.pauseMillis(MIN_CALL_INTERVAL_MS - since);
+            now = clock.millis();
+        }
+        lastCallAtMillis = now;
     }
 
     /**

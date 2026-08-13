@@ -95,7 +95,8 @@ class CoupangInquiryRoutineFlowTest {
         CoupangSigner signer = new CoupangSigner(clock);
         connector = new CoupangApiConnector(
                 new CoupangOrdersClient(http, signer, clock, "https://api-gateway.coupang.com", "apr-test"),
-                new CoupangInquiriesClient(http, signer, clock, "https://api-gateway.coupang.com", "apr-test"),
+                new CoupangInquiriesClient(
+                http, signer, clock, "https://api-gateway.coupang.com", "apr-test", millis -> { }),
                 vault);
     }
 

@@ -2,9 +2,10 @@
 
 > The first Coupang vertical that is *operational work* rather than connection work: acquire the
 > seller's customer inquiries through an official API, carry them into the existing routine spine,
-> and hand the seller back to their own marketplace screen to answer. **Offline slice** — no live
-> Coupang call has been made in this unit. Sanitized: no secret, key, vendor id, IP, buyer identity,
-> inquiry text, or seller data appears here.
+> and hand the seller back to their own marketplace screen to answer. **Live-proven acquisition**
+> (2026-08-14, `docs/coupang_inquiry_live_proof_v1.md`); the routine chain is implemented and
+> offline-tested but has never had a live subject. Sanitized: no secret, key, vendor id, IP, buyer
+> identity, inquiry text, or seller data appears here.
 
 ---
 
@@ -46,13 +47,15 @@ own PII handling and its own decision about the confirm/transfer obligations it 
   impossible, so the initial import walks 7-day windows **backward** to a 30-day floor, one window
   per `fetch` with `hasMore=true`, driven by the executor's existing paging loop; then it settles
   into a trailing routine window.
-- **`CoupangApiConnector`** — advertises `INQUIRY` as **`NEEDS_VERIFICATION`** beside
-  `ORDER_SUMMARY` `CONFIRMED`, and routes `fetch` by data type. REVIEW still throws
-  `UnsupportedDataTypeException`.
+- **`CoupangApiConnector`** — advertises `INQUIRY` as **`CONFIRMED`** beside `ORDER_SUMMARY`
+  (promoted by the live proof, not by the code existing) and routes `fetch` by data type. REVIEW
+  still throws `UnsupportedDataTypeException`.
 - **`CoupangResponseDiagnostics`** — the order client's sanitization rules for provider bodies,
   extracted so both streams share one implementation rather than two.
+- **A paced sweep** — a minimum 250ms between signed calls (4/s, under Coupang's documented 5/s).
+  Added after a live 429; see the live-proof record §4.
 - **No migration, no new table, no new endpoint.** Inquiries land in the existing `inquiries` +
-  `inquiry_work_items` via the shared `IngestionService`.
+  `inquiry_work_item` via the shared `IngestionService`.
 
 ### The request, exactly as documented
 
@@ -170,35 +173,36 @@ mistaken for "the seller has no inquiries". The live proof settles it.
 
 ## 7. Honest capability state
 
-| Channel × capability | State | Why |
+Updated by the live proof of 2026-08-14 (`docs/coupang_inquiry_live_proof_v1.md`).
+
+| Channel × capability | State | Basis |
 |---|---|---|
-| Coupang INQUIRY (API) | **IMPLEMENTED**, `NEEDS_VERIFICATION` | Code exists; **no live run has collected a single inquiry**. Must not be shown to a seller as 지원. |
+| Coupang INQUIRY (API) | **VERIFIED**, `CONFIRMED` | A real account collected through the official v5 path, and a re-sweep of the same window inserted nothing, skipped every row, and left the stored rows untouched. |
 | Coupang REVIEW | **BLOCKED**, unchanged | No official API. Nothing was built. |
-| Coupang inquiry reply (write) | **guided only**, `UNVERIFIED` by design | SellerOps never submits; no adapter exists; the terminal is a report. |
+| Routine chain (queue → proposal → draft → Action Window) | **IMPLEMENTED · LIVE_UNPROVEN** | Offline-tested end to end; both live inquiries were already answered, so no work item opened and the chain had no subject. A live subject requires a real buyer question and cannot be manufactured. |
+| Coupang inquiry reply (write) | **guided only**, `UNVERIFIED` by design | SellerOps never submits; no adapter exists; the terminal is a report. No reply was posted in any sitting. |
 
-`docs/multi-channel-connector-roadmap.md` §4.1 and the capability ledger are **not** updated by this
-unit — they move only on live evidence, and there is none yet.
+`docs/multi-channel-connector-roadmap.md` §4.1 and the capability ledger were moved on this evidence
+and no more: INQUIRY is 라이브 검증 ✅ but **not** 운영 지원 — the connector flag stays off.
 
----
+## 8. What the live proof settled — and what it did not
 
-## 8. What the live proof has to settle
+All seven questions this section used to list were put to a real account on 2026-08-14. The full
+record is `docs/coupang_inquiry_live_proof_v1.md`; in brief:
 
-One READ_ONLY manifest, batched:
+| | Result |
+|---|---|
+| Is the path `api/v5`? | **Yes** — no 404. |
+| Does the key's app have 고객문의 access? | **Yes** — no 403. It is a separate permission from orders, and this one had it. |
+| `inquiryAt`'s real rendering | Parsed under the KST reading; **zero** rows dropped as unrepresentable. |
+| Does the backfill walk tile and terminate? | Yes — the cursor stopped exactly on `today − 30`. |
+| Is re-collection idempotent? | Yes — insert 0, skip 2, duplicate 0, and `updated_at` unchanged: the rows were not written at all. |
+| Does an ingested inquiry reach the work queue with a proposal and a draft? | **Not answered.** Both inquiries were already answered, so no work item opened. |
+| Does the guided entry carry the operator to the real screen? | **Not answered** — no draft existed to carry, and no reply was posted. |
 
-1. The `api/v5` path is the right one (a 404 here is the finding, not a failure to hide).
-2. The credential's Coupang app actually **has** 고객문의 API access — the order-access grant does
-   not imply it, and a 403 here is a distinct, real outcome.
-3. `inquiryAt`'s real rendering (offset or bare), against the KST reading.
-4. Whether any row is dropped as unrepresentable on real data, and which field.
-5. The backfill walk tiles and terminates against a real account's history.
-6. An ingested inquiry reaches the work queue, gets a category proposal, and holds a draft.
-7. The guided entry carries the operator to their real 고객문의 screen and SellerOps writes nothing.
-
-Prerequisite that is not free: a proof environment with a **stored Coupang credential** and the
-calling IP registered. The previous unit's proof database was destroyed at teardown, so the
-credential handoff has to run again before any of the above can be attempted.
-
----
+It also surfaced one defect that only a live run could: the sweep exceeded Coupang's documented
+5 calls/s and took a 429 partway. It failed safely (cursor held, nothing lost or duplicated) and is
+now paced to 4 calls/s — a fix that changes only timing and is not itself live-verified.
 
 ## 9. Follow-ups (not started)
 
@@ -208,5 +212,10 @@ credential handoff has to run again before any of the above can be attempted.
 - **`callCenterInquiries`** as a separate stream, with its own PII decision.
 - **`backfillCursor` for INQUIRY** so an operator can re-collect an exact window without clearing
   the cursor (Coupang currently returns empty, so a windowed backfill fails closed).
+- **Pace the ORDER stream too.** `CoupangOrdersClient` sweeps six statuses × pages with the same
+  absence of pacing against the same per-vendor limit. It has never been observed taking a 429 and
+  was deliberately left alone here: it is a live-proven path, and changing it on an inference rather
+  than an observation is how proven paths break.
+- **A live subject for the routine chain** — the first genuinely unanswered Coupang inquiry.
 - **Product-name enrichment** — the inquiry endpoint carries none, so products created from this
   stream are named by their key until a product lookup fills them in.

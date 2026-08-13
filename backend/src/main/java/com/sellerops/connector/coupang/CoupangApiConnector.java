@@ -78,10 +78,12 @@ public class CoupangApiConnector implements PullConnector, ConnectionVerifier {
         return new ConnectorCapabilities(
                 CONNECTOR_CLASS,
                 Set.of(DataType.ORDER_SUMMARY, DataType.INQUIRY),
-                // INQUIRY stays NEEDS_VERIFICATION until a gated live run collects on a real account.
-                // The code being written is not the evidence; only a live run promotes this.
+                // INQUIRY was promoted to CONFIRMED by the live proof of 2026-08-14, not by the code
+                // being written: a real account collected real inquiries through the official v5 path,
+                // and a re-sweep of the same window inserted nothing and skipped every row.
+                // See docs/coupang_inquiry_live_proof_v1.md.
                 Map.of(DataType.ORDER_SUMMARY, "CONFIRMED",
-                        DataType.INQUIRY, "NEEDS_VERIFICATION"),
+                        DataType.INQUIRY, "CONFIRMED"),
                 "ORDER_SUMMARY via the official v5 ordersheets day-paging flow"
                         + " (createdAt window ≤31d, per-status sweep, nextToken paging)."
                         + " INQUIRY via the official v5 onlineInquiries 상품별 고객문의 flow"

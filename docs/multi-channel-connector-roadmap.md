@@ -200,7 +200,7 @@ ChannelCollectionAdapter {
 | ESM+ (`GMARKET`/`AUCTION`) | REVIEW | EXPORT(감독형) 후보 | — | ❌ | 표면(마켓 탭)만 확인 (2026-07-07) | ❌ | `docs/esm/live-capture-plan.md` | 표기하지 않음 |
 | Coupang | ORDER_SUMMARY | API(HMAC) | ✅ 키 등록 폼 | ❌ (인증 골격만) | ❌ | ❌ | `docs/sellerops_phase3d_completion_summary.md` §3 | 표기하지 않음 |
 | Coupang | REVIEW | 공식 API **없음** (확인) — 방식 미확정 | — | ❌ | ❌ | ❌ | 동상 §6 | 표기하지 않음 |
-| Coupang | INQUIRY | API 후보(CS API 존재, 스키마 미열람) | — | ❌ | ❌ | ❌ | 동상 §6 | 표기하지 않음 |
+| Coupang | INQUIRY | **API — 공식 v5 `onlineInquiries`(상품별 고객문의)**. PII를 담은 `callCenterInquiries`(고객센터)는 **호출하지 않음** | — | ✅ 커넥터 + 7일 창 backfill 워크 + 공용 ingest | ✅ **라이브 검증 (2026-08-14)** — 실계정 수집 2건, 동일 창 재수집 insert 0 / skip 2 / 중복 0 | ❌ (플래그 off) | `docs/coupang_inquiry_live_proof_v1.md`, `docs/coupang_routine_operations_v1.md` | 검증됨 — 단, 운영 지원 아님 |
 | 11번가 | ORDER_SUMMARY | API | ✅ 키 등록 폼 | ❌ (인증 골격만) | ❌ | ❌ | 동상 §3 | 표기하지 않음 |
 | 11번가 | REVIEW·Q&A | API 후보 — **세트 내 유일한 공식 리뷰 API**(스펙 로그인 장벽) | — | ❌ | ❌ | ❌ | 동상 §6 | 표기하지 않음 |
 | SSG | ORDER_SUMMARY | API | ✅ 키 등록 폼 | ❌ (인증 골격만) | ❌ | ❌ | 동상 §3 | 표기하지 않음 |

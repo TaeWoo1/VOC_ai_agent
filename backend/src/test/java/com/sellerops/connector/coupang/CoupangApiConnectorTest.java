@@ -57,8 +57,8 @@ class CoupangApiConnectorTest {
             new CoupangOrdersClient(http, new CoupangSigner(clock), clock, "https://api-gateway.coupang.com",
                     TEST_APPROVAL_ID);
     private final CoupangInquiriesClient inquiriesClient =
-            new CoupangInquiriesClient(http, new CoupangSigner(clock), clock,
-                    "https://api-gateway.coupang.com", TEST_APPROVAL_ID);
+            new CoupangInquiriesClient(
+                http, new CoupangSigner(clock), clock, "https://api-gateway.coupang.com", TEST_APPROVAL_ID, millis -> { });
     private final String masterKey = randomKeyBase64();
 
     private CredentialVault vault;
@@ -147,9 +147,9 @@ class CoupangApiConnectorTest {
         assertThat(capabilities.supportedDataTypes())
                 .containsExactlyInAnyOrder(DataType.ORDER_SUMMARY, DataType.INQUIRY);
         assertThat(capabilities.verificationStatus()).containsEntry(DataType.ORDER_SUMMARY, "CONFIRMED");
-        // **INQUIRY is NOT CONFIRMED by having been written.** Only a gated live run on a real
-        // account promotes it; until then the UI must never render it as supported.
-        assertThat(capabilities.verificationStatus()).containsEntry(DataType.INQUIRY, "NEEDS_VERIFICATION");
+        // INQUIRY was promoted by the 2026-08-14 live proof (real account, official v5 path, and a
+        // re-sweep that inserted nothing) — not by the code existing. Only a live run may move this.
+        assertThat(capabilities.verificationStatus()).containsEntry(DataType.INQUIRY, "CONFIRMED");
         assertThat(capabilities.supports(DataType.REVIEW)).isFalse();
         assertThat(connector.dedicatedChannels()).containsExactly("COUPANG");
         assertThat(connector.kind()).isEqualTo("COUPANG_API");
@@ -210,7 +210,7 @@ class CoupangApiConnectorTest {
         CoupangOrdersClient unarmed = new CoupangOrdersClient(
                 http, new CoupangSigner(clock), clock, "https://api-gateway.coupang.com", "");
         CoupangInquiriesClient unarmedInquiries = new CoupangInquiriesClient(
-                http, new CoupangSigner(clock), clock, "https://api-gateway.coupang.com", "");
+                http, new CoupangSigner(clock), clock, "https://api-gateway.coupang.com", "", millis -> { });
         CoupangApiConnector unarmedConnector =
                 new CoupangApiConnector(unarmed, unarmedInquiries, vault);
 

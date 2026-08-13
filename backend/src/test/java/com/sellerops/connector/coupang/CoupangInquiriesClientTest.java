@@ -9,6 +9,7 @@ import com.sellerops.ingest.canonical.CanonicalInquiry;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -29,8 +30,11 @@ class CoupangInquiriesClientTest {
     private final Clock clock = Clock.fixed(Instant.parse("2026-08-05T02:00:00Z"), ZoneOffset.UTC);
     private final FakeCoupangHttpClient http = new FakeCoupangHttpClient();
     private static final String TEST_APPROVAL_ID = "apr-test-approval";
+    /** Records the pauses the sweep asks for instead of taking them — no test ever sleeps. */
+    private final List<Long> pauses = new ArrayList<>();
     private final CoupangInquiriesClient client = new CoupangInquiriesClient(
-            http, new CoupangSigner(clock), clock, "https://api-gateway.coupang.com", TEST_APPROVAL_ID);
+            http, new CoupangSigner(clock), clock, "https://api-gateway.coupang.com", TEST_APPROVAL_ID,
+            pauses::add);
 
     private static final String ACCESS_KEY = "AK-1";
     private static final String SECRET_KEY = "SK-1";
@@ -340,6 +344,70 @@ class CoupangInquiriesClientTest {
                 .hasMessageContaining("HTTP 403")
                 .hasMessageContaining("Not allowed IP")
                 .hasMessageNotContaining("do-not-echo");
+    }
+
+    // --- rate limiting ----------------------------------------------------
+
+    @Test
+    void theSweepPacesItselfUnderTheDocumentedPerVendorRateLimit() {
+        // The live proof took a 429 mid-sweep: 10 back-to-back calls is ~6/s against a documented
+        // ceiling of 5/s. Every call after the first now waits.
+        enqueueEmptyBuckets();
+
+        fetch(null);
+
+        assertThat(http.sent).hasSize(2);
+        assertThat(pauses).hasSize(1);
+        assertThat(pauses.get(0)).isEqualTo(CoupangInquiriesClient.MIN_CALL_INTERVAL_MS);
+        // 4 calls/s — under the documented 5/s, with margin, because the limit is per vendorId and
+        // the order stream may be sweeping the same vendor at the same time.
+        assertThat(1000.0 / CoupangInquiriesClient.MIN_CALL_INTERVAL_MS).isLessThan(5.0);
+    }
+
+    @Test
+    void theFirstCallIsNotDelayed() {
+        http.enqueue(json(200, page(inquiry(1, 5, "문의", "2026-08-04T09:00:00"))));
+        http.enqueue(json(200, page()));
+
+        fetch(null);
+
+        // A run that collects one window should not pay a pause it does not owe.
+        assertThat(pauses).hasSize(1);
+    }
+
+    @Test
+    void everyPagedCallIsPacedToo() {
+        // Paging is where a burst actually comes from: pages within a bucket are back to back.
+        http.enqueue(json(200, page(1, 3, inquiry(1, 5, "문의", "2026-08-04T09:00:00"))));
+        http.enqueue(json(200, page(2, 3, inquiry(2, 5, "문의", "2026-08-04T09:00:00"))));
+        http.enqueue(json(200, page(3, 3, inquiry(3, 5, "문의", "2026-08-04T09:00:00"))));
+        http.enqueue(json(200, page()));
+
+        fetch(null);
+
+        assertThat(http.sent).hasSize(4);
+        assertThat(pauses).hasSize(3);
+        assertThat(pauses).allMatch(p -> p == CoupangInquiriesClient.MIN_CALL_INTERVAL_MS);
+    }
+
+    @Test
+    void theSignatureIsStampedAfterThePauseNotBeforeIt() {
+        // A signed-date is only valid for a few minutes. Signing and then sleeping would spend that
+        // budget on our own throttle — so the pause must happen first, and this pins the order.
+        String source = readClientSource();
+        int paceCall = source.indexOf("pace();");
+        int signCall = source.indexOf("signer.authorization(");
+        assertThat(paceCall).isGreaterThan(0);
+        assertThat(paceCall).isLessThan(signCall);
+    }
+
+    private static String readClientSource() {
+        try {
+            return java.nio.file.Files.readString(java.nio.file.Path.of(
+                    "src/main/java/com/sellerops/connector/coupang/CoupangInquiriesClient.java"));
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     // --- cursor integration -----------------------------------------------
