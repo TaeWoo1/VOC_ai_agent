@@ -125,6 +125,7 @@ public class ChannelReviewService {
                 body.redacted(),
                 product == null ? null : product.getName(),
                 review.getMediaCount(),
+                isTextless(review),
                 isNew(review, newSince),
                 new ChannelReviewDetailView.LocateTarget(
                         product == null ? null : product.getSku(),
@@ -147,6 +148,7 @@ public class ChannelReviewService {
                 product == null ? null : product.getSku(),
                 review.getSourceOptionId(),
                 review.getMediaCount(),
+                isTextless(review),
                 isNew(review, newSince));
     }
 
@@ -162,6 +164,14 @@ public class ChannelReviewService {
     /** The most recent REVIEW collection for this account, whatever produced it. */
     private Optional<SyncJob> lastReviewImport(UUID orgId, UUID accountId) {
         return syncJobs.findFirstByOrgIdAndSellerAccountIdAndDataTypeOrderByCreatedAtDesc(orgId, accountId, "REVIEW");
+    }
+
+    /**
+     * A review the buyer rated without writing. The channel's placeholder for that cell is never stored, so
+     * a blank body means exactly this and nothing else — there is no case where a body went missing.
+     */
+    private boolean isTextless(Review review) {
+        return review.getBody() == null || review.getBody().isBlank();
     }
 
     private boolean isNew(Review review, Instant newSince) {

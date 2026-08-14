@@ -56,6 +56,7 @@ public class AgentReviewHandoffService {
     static final String REASON_CHANNEL_MISMATCH = "CHANNEL_MISMATCH";
     static final String REASON_UNSUPPORTED_CHANNEL = "UNSUPPORTED_CHANNEL";
     static final String REASON_BAD_DATE = "UNPARSEABLE_REVIEW_DATE";
+    static final String REASON_BODY_DISAGREES = "BODY_TEXTLESS_DISAGREEMENT";
 
     /** The one channel this path serves. Widening it is a decision, not a configuration. */
     static final String SUPPORTED_CHANNEL = CoupangApiConnector.CHANNEL_CODE;
@@ -135,6 +136,13 @@ public class AgentReviewHandoffService {
         List<CanonicalReview> out = new ArrayList<>(rows.size());
         for (int i = 0; i < rows.size(); i++) {
             AgentReviewHandoffRequest.Review row = rows.get(i);
+            // The flag and the body must agree. A textless review with text, or a written review with no
+            // text, means the agent and this record disagree about what was on the screen — and the dedup
+            // key differs between the two, so guessing which is right would key the row wrongly.
+            if (row.textless() != row.body().isBlank()) {
+                throw ApiException.badRequest(
+                        "상품평 본문과 '본문 없음' 표시가 서로 맞지 않습니다. (" + REASON_BODY_DISAGREES + ")");
+            }
             Instant receivedAt = parseDate(row.writtenOn());
             out.add(new CanonicalReview(
                     row.productName(),
@@ -148,7 +156,8 @@ public class AgentReviewHandoffService {
                     ReviewReplyState.UNKNOWN,
                     null,
                     row.vendorItemId(),
-                    row.mediaCount()));
+                    row.mediaCount(),
+                    row.textless()));
         }
         return out;
     }

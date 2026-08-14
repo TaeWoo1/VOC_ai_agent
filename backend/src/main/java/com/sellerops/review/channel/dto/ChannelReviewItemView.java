@@ -24,5 +24,12 @@ public record ChannelReviewItemView(
         String productId,
         String vendorItemId,
         int mediaCount,
+        /**
+         * The buyer rated and wrote nothing. Derived from the stored body being blank — the placeholder a
+         * channel prints in that cell is never stored, so blank means exactly this. The surface must say
+         * "별점만 남긴 상품평" rather than "본문을 표시할 수 없습니다": one is what happened, the other implies
+         * SellerOps lost something.
+         */
+        boolean textless,
         boolean isNew) {
 }

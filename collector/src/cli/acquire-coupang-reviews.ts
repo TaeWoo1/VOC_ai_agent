@@ -237,10 +237,11 @@ export function banner(): void {
 export function summarize(result: AcquisitionResult, handoff: ReviewHandoffResponse | null): string {
   const head =
     `pages=${result.pagesAccepted} rows=${result.rowsRead} collected=${result.reviews.length} ` +
+    `textless=${result.textlessCollected} ` +
     `complete=${result.complete} stop=${result.stopReason} lastPage=${result.lastPageNumber ?? "?"}`;
   const drops =
     ` dropped(date=${result.dropped.unparseableDate} rating=${result.dropped.unreadableRating} ` +
-    `product=${result.dropped.noProductId} body=${result.dropped.noBody})`;
+    `product=${result.dropped.noProductId})`;
   const tail = handoff === null
     ? " handoff=NOT_ATTEMPTED"
     : ` handoff(stored=${handoff.stored} skipped=${handoff.skipped} failed=${handoff.failed}` +

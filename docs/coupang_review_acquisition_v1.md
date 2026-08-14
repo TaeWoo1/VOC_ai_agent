@@ -190,18 +190,25 @@ body, matched as the whole normalized cell so a real review that mentions the ph
 every freshly-stored review sat milliseconds before its own import: a handoff that had just stored 22
 rendered "새 상품평 0". The clock was the bug, not the query.
 
-### The open product decision
+### What is done with a rating-only review — decided
 
-This account's reviews are **86% rating-only**. What acquisition does with them is a product-owner decision
-with a real consequence either way, and it is recorded here rather than resolved:
+This account's reviews are **86% rating-only**, so the choice had a real consequence either way. The
+product-owner decision (2026-08-15) is: **store them, keyed additionally on the purchased option.**
 
-- **(a) drop them** (the v1 rule, currently in code) — the record shows 3 of 22, and the rating distribution
-  (1★×3, 2★×1, 4★×5, 5★×13) is lost entirely. No silent merge.
-- **(b) store them** marked as textless — the record shows ~19, and two rating-only reviews of one product on
-  one day at one score merge. Counts understate.
-- **(c) store them, folding the option id into the key for textless reviews only** — now available, because
-  the option id turned out to be present on every row. Separates options; same-option same-day same-rating
-  still merges.
+- The rating IS the signal. Dropping them would have thrown away the whole distribution — 1★×3, 2★×1, 4★×5,
+  5★×13 — for a record showing 3 of 22.
+- **Coupang's placeholder is never stored as a body.** It is UI text, not a customer's words. The review is
+  stored as `textless` with an empty body, and the surface says 별점만 남긴 상품평 rather than implying
+  SellerOps lost something.
+- **`dedup_key_version` v3** keys a textless review on `channel|product|date||rating|optionId`. It applies
+  per ROW, not per channel — a written review on the same channel keeps v2, so nothing about text reviews
+  changes. Folding the option is what the screen supports: the live reading found 옵션ID on every row.
+- **The residue is a v1 limitation, recorded rather than closed.** Two textless reviews of the same OPTION on
+  the same day at the same rating still merge. Closing it would need a per-review identifier Coupang does not
+  publish; a row position or the buyer's name is not one, and neither will be added.
+- The wire carries `textless` rather than inferring it from a blank body, and a row whose flag and body
+  disagree is refused. A blank body could be a reader defect; the flag is the agent saying it saw a rating
+  with no text, and the two key differently.
 
 ---
 

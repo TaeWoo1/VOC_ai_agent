@@ -60,7 +60,13 @@ public record AgentReviewHandoffRequest(
             @NotBlank @Pattern(regexp = "^\\d{4}-\\d{2}-\\d{2}$", message = "작성일 형식이 올바르지 않습니다.")
             String writtenOn,
             @NotNull @Min(1) @Max(5) Integer rating,
-            @NotBlank @Size(max = 8000) String body,
+            /**
+             * What the buyer wrote. BLANK is legitimate and means exactly one thing — see {@code textless}.
+             * A channel's own placeholder sentence must never arrive here: it is UI text, not a customer's
+             * words, and storing it as a body is what made 19 of 22 reviews look written on the first live
+             * backfill.
+             */
+            @NotNull @Size(max = 8000) String body,
             @NotBlank @Pattern(regexp = "^\\d{1,32}$", message = "상품 ID 형식이 올바르지 않습니다.")
             String productId,
             @Pattern(regexp = "^\\d{1,32}$", message = "옵션 ID 형식이 올바르지 않습니다.")
@@ -68,13 +74,20 @@ public record AgentReviewHandoffRequest(
             @Size(max = 500) String productName,
             @Min(0) @Max(50) int mediaCount,
             /** The list cell cut the body off. Stored text is then a prefix, and the product should say so. */
-            boolean bodyTruncated) {
+            boolean bodyTruncated,
+            /**
+             * The buyer rated and wrote nothing. Carried rather than inferred from a blank body, because the
+             * two are different claims: a blank body could be a reader defect, while this is the agent saying
+             * it saw a rating with no text. A disagreement between the two is refused rather than resolved.
+             */
+            boolean textless) {
 
         /** Masked — a review body is a customer's words and has no business in a log line or a stack trace. */
         @Override
         public String toString() {
             return "Review[writtenOn=" + writtenOn + ", rating=" + rating
                     + ", body=<masked:" + (body != null ? body.length() : 0) + ">"
+                    + ", textless=" + textless
                     + ", productId=" + productId + ", mediaCount=" + mediaCount + "]";
         }
     }

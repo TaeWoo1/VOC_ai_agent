@@ -147,6 +147,17 @@ export interface CoupangAcquiredReview {
   readonly body: string;
   readonly bodyTruncated: boolean;
   readonly bodyExpandable: boolean;
+  /**
+   * The buyer rated and wrote nothing. `body` is then the empty string — never Coupang's placeholder
+   * sentence, which is the channel's UI and not a customer's words.
+   *
+   * A textless review is still a review: the rating is the signal, and 86% of the first live account's
+   * 상품평 were these (product decision, 2026-08-15). What it costs is stated where it is paid — the
+   * backend folds the option id into the dedup key for exactly these rows, so two textless reviews of one
+   * OPTION on one day at one rating still merge. That residue is a recorded v1 limitation, not something to
+   * be closed with an unstable identifier like a row position or the buyer's name.
+   */
+  readonly textless: boolean;
   /** Coupang `노출상품ID` — the catalog identity the review hangs off. */
   readonly productId: string;
   /** Coupang `옵션ID` (`vendorItemId`) when the cell prints one; null when it does not. */
@@ -162,12 +173,17 @@ export interface CoupangReviewDropCounts {
   readonly unparseableDate: number;
   readonly unreadableRating: number;
   readonly noProductId: number;
-  readonly noBody: number;
 }
 
 export interface CoupangReviewCanonicalization {
   readonly reviews: readonly CoupangAcquiredReview[];
   readonly dropped: CoupangReviewDropCounts;
+  /**
+   * How many of the collected reviews were rated with no text. Reported rather than dropped: on the first
+   * live account it was 19 of 22, and a run that said only "22 collected" would hide what kind of record the
+   * seller is actually getting.
+   */
+  readonly textlessCount: number;
 }
 
 /** No pager was read at all — distinct from "there is no pager", which is `found: false` from a real read. */
@@ -448,13 +464,17 @@ export function canonicalizeReviewRow(
   if (rating === null) return { dropReason: "unreadableRating" };
   const { productId, vendorItemId } = parseProductIds(row.productText);
   if (productId === null) return { dropReason: "noProductId" };
-  const body = row.bodyText.trim();
-  if (isEmptyReviewBody(body)) return { dropReason: "noBody" };
+  const raw = row.bodyText.trim();
+  // Coupang's placeholder is the channel's own UI text. It is not stored as a body — the review becomes
+  // textless, which is a state the record carries rather than a sentence it repeats.
+  const textless = isEmptyReviewBody(raw);
+  const body = textless ? "" : raw;
   return {
     review: {
       writtenOn,
       rating,
       body,
+      textless,
       bodyTruncated: row.bodyTruncated,
       bodyExpandable: row.bodyExpandable,
       productId,
@@ -471,8 +491,10 @@ export function canonicalizeReviewRow(
  * a partial harvest, and half of a review list is indistinguishable from a whole one once it is stored.
  */
 export function canonicalizeReviewRows(reading: CoupangReviewPageReading): CoupangReviewCanonicalization {
-  const dropped = { unparseableDate: 0, unreadableRating: 0, noProductId: 0, noBody: 0 };
-  if (reading.reason !== "OK") return { reviews: Object.freeze([]), dropped: Object.freeze(dropped) };
+  const dropped = { unparseableDate: 0, unreadableRating: 0, noProductId: 0 };
+  if (reading.reason !== "OK") {
+    return { reviews: Object.freeze([]), dropped: Object.freeze(dropped), textlessCount: 0 };
+  }
 
   const reviews: CoupangAcquiredReview[] = [];
   for (const row of reading.rows) {
@@ -483,7 +505,11 @@ export function canonicalizeReviewRows(reading: CoupangReviewPageReading): Coupa
     }
     reviews.push(outcome.review);
   }
-  return { reviews: Object.freeze(reviews), dropped: Object.freeze(dropped) };
+  return {
+    reviews: Object.freeze(reviews),
+    dropped: Object.freeze(dropped),
+    textlessCount: reviews.filter((r) => r.textless).length,
+  };
 }
 
 /**

@@ -102,6 +102,8 @@ export interface AcquisitionResult {
   readonly lastPageNumber: number | null;
   readonly reviews: readonly CoupangAcquiredReview[];
   readonly dropped: CoupangReviewDropCounts;
+  /** How many collected reviews were rated with no text — reported, never hidden inside the total. */
+  readonly textlessCollected: number;
   /** Pages that repeated a page already seen — recorded rather than silently tolerated. */
   readonly repeatedPages: number;
 }
@@ -110,7 +112,7 @@ export interface AcquisitionResult {
 export const MAX_ACQUISITION_PAGES = 100;
 
 function emptyDrops(): CoupangReviewDropCounts {
-  return { unparseableDate: 0, unreadableRating: 0, noProductId: 0, noBody: 0 };
+  return { unparseableDate: 0, unreadableRating: 0, noProductId: 0 };
 }
 
 function addDrops(into: CoupangReviewDropCounts, from: CoupangReviewDropCounts): CoupangReviewDropCounts {
@@ -118,7 +120,6 @@ function addDrops(into: CoupangReviewDropCounts, from: CoupangReviewDropCounts):
     unparseableDate: into.unparseableDate + from.unparseableDate,
     unreadableRating: into.unreadableRating + from.unreadableRating,
     noProductId: into.noProductId + from.noProductId,
-    noBody: into.noBody + from.noBody,
   };
 }
 
@@ -265,6 +266,7 @@ export class ReviewAcquisitionSession {
       lastPageNumber: this.lastPageNumber,
       reviews: Object.freeze([...this.collected]),
       dropped: this.drops,
+      textlessCollected: this.collected.filter((r) => r.textless).length,
       repeatedPages: this.repeated,
     };
   }

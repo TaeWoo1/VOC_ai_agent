@@ -45,7 +45,8 @@ function result(over: Partial<AcquisitionResult> = {}): AcquisitionResult {
     rowsRead: 20,
     lastPageNumber: 2,
     reviews: [],
-    dropped: { unparseableDate: 0, unreadableRating: 0, noProductId: 0, noBody: 0 },
+    dropped: { unparseableDate: 0, unreadableRating: 0, noProductId: 0 },
+    textlessCollected: 0,
     repeatedPages: 0,
     ...over,
   };
@@ -141,11 +142,16 @@ describe("what the run prints", () => {
     expect(summarize(result(), null)).toContain("handoff=NOT_ATTEMPTED");
   });
 
+  it("reports how many collected reviews were rated with no text", () => {
+    // 19 of 22 on the first live account. A line that said only "22 collected" would hide what kind of
+    // record the seller is actually getting.
+    expect(summarize(result({ textlessCollected: 19 }), null)).toContain("textless=19");
+  });
+
   it("carries the drop counts, so a skipped review is reported rather than lost", () => {
-    const line = summarize(result({ dropped: { unparseableDate: 1, unreadableRating: 0, noProductId: 0, noBody: 3 } }), null);
+    const line = summarize(result({ dropped: { unparseableDate: 1, unreadableRating: 0, noProductId: 0 } }), null);
 
     expect(line).toContain("date=1");
-    expect(line).toContain("body=3");
   });
 
   it("banners the collection, the buyer exclusion, and who turns the pages", () => {

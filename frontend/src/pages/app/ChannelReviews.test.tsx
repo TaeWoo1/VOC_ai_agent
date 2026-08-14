@@ -38,6 +38,7 @@ const PAGE: ChannelReviewPageView = {
       productId: "15411270785",
       vendorItemId: "81234567890",
       mediaCount: 2,
+      textless: false,
       isNew: true,
     },
     {
@@ -50,6 +51,7 @@ const PAGE: ChannelReviewPageView = {
       productId: "15411270785",
       vendorItemId: null,
       mediaCount: 0,
+      textless: false,
       isNew: false,
     },
   ],
@@ -64,6 +66,7 @@ const DETAIL: ChannelReviewDetailView = {
   bodyRedacted: false,
   productName: "무선 이어폰",
   mediaCount: 2,
+  textless: false,
   isNew: true,
   locateTarget: {
     productId: "15411270785",
@@ -141,6 +144,32 @@ describe("the channel review record", () => {
     await userEvent.click(screen.getByText("배송도 빠르고 포장도 꼼꼼했어요"));
 
     expect(await screen.findByText(/가려서 표시했습니다/)).toBeInTheDocument();
+  });
+});
+
+describe("a review the buyer rated without writing", () => {
+  it("says what it is, rather than implying SellerOps lost the text", async () => {
+    getChannelReviewsStrict.mockResolvedValue({
+      ...PAGE,
+      items: [{ ...PAGE.items[0]!, preview: null, textless: true }],
+    });
+    renderPage();
+
+    expect(await screen.findByText("별점만 남긴 상품평")).toBeInTheDocument();
+    expect(screen.queryByText(/표시할 수 있는 본문이 없습니다/)).toBeNull();
+  });
+
+  it("says the rating still counts, in the detail", async () => {
+    getChannelReviewsStrict.mockResolvedValue({
+      ...PAGE,
+      items: [{ ...PAGE.items[0]!, preview: null, textless: true }],
+    });
+    getChannelReviewStrict.mockResolvedValue({ ...DETAIL, body: "", textless: true });
+    renderPage();
+
+    await userEvent.click(await screen.findByText("별점만 남긴 상품평"));
+
+    expect(await screen.findByText(/별점은 그대로 집계됩니다/)).toBeInTheDocument();
   });
 });
 

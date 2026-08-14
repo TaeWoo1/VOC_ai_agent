@@ -118,7 +118,13 @@ class AgentReviewHandoffServiceTest {
 
     private AgentReviewHandoffRequest.Review review(String body, int rating, String writtenOn) {
         return new AgentReviewHandoffRequest.Review(writtenOn, rating, body, PRODUCT, OPTION,
-                "무선 이어폰", 0, false);
+                "무선 이어폰", 0, false, false);
+    }
+
+    /** A buyer who rated and wrote nothing. The body is EMPTY — never a channel's placeholder sentence. */
+    private AgentReviewHandoffRequest.Review textless(int rating, String writtenOn, String optionId) {
+        return new AgentReviewHandoffRequest.Review(writtenOn, rating, "", PRODUCT, optionId,
+                "무선 이어폰", 0, false, true);
     }
 
     private AgentReviewHandoffRequest request(String slot, boolean complete,
@@ -137,7 +143,7 @@ class AgentReviewHandoffServiceTest {
     void stores_the_reviews_it_was_handed_with_the_source_facts_the_screen_carried() {
         SellerAccount acc = account(org, "COUPANG");
         AgentReviewHandoffRequest.Review row =
-                new AgentReviewHandoffRequest.Review("2026-08-11", 5, BODY_A, PRODUCT, OPTION, "무선 이어폰", 2, true);
+                new AgentReviewHandoffRequest.Review("2026-08-11", 5, BODY_A, PRODUCT, OPTION, "무선 이어폰", 2, true, false);
 
         AgentReviewHandoffResultView result = service.handOff(org, request(slotFor(acc), true, List.of(row)));
 
@@ -212,6 +218,69 @@ class AgentReviewHandoffServiceTest {
 
         assertThat(result.stored()).isEqualTo(1);
         assertThat(result.skipped()).isEqualTo(1);
+    }
+
+    /* ───────────────────────────── the textless review (v3) ───────────────────────────── */
+
+    @Test
+    void keys_a_textless_review_on_its_purchased_option_so_two_options_stay_two_reviews() {
+        // The live finding: 86% of the account's 상품평 were rating-only, and under v2 every one of them
+        // hashes on the same empty body — so two options of one product on one day at one rating collapsed.
+        SellerAccount acc = account(org, "COUPANG");
+
+        service.handOff(org, request(slotFor(acc), true,
+                List.of(textless(5, "2026-08-11", "81234567890"), textless(5, "2026-08-11", "70000000000"))));
+
+        assertThat(reviews.findAll()).hasSize(2);
+        assertThat(reviews.findAll()).allSatisfy(r -> {
+            assertThat(r.getDedupKeyVersion()).isEqualTo(3);
+            assertThat(r.getBody()).isEmpty();
+        });
+    }
+
+    @Test
+    void still_merges_two_textless_reviews_of_the_SAME_option_on_one_day_at_one_rating() {
+        // The residue, recorded rather than papered over: closing it needs a per-review identifier the
+        // screen does not publish, and a row position or a buyer's name is not one.
+        SellerAccount acc = account(org, "COUPANG");
+
+        AgentReviewHandoffResultView result = service.handOff(org, request(slotFor(acc), true,
+                List.of(textless(5, "2026-08-11", OPTION), textless(5, "2026-08-11", OPTION))));
+
+        assertThat(result.stored()).isEqualTo(1);
+        assertThat(result.skipped()).isEqualTo(1);
+    }
+
+    @Test
+    void leaves_a_review_WITH_text_on_the_channel_formula() {
+        // v3 applies per ROW, not per channel. Nothing about a written review changes.
+        SellerAccount acc = account(org, "COUPANG");
+
+        service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
+
+        assertThat(reviews.findAll().get(0).getDedupKeyVersion()).isEqualTo(2);
+    }
+
+    @Test
+    void refuses_a_row_whose_body_and_textless_flag_disagree() {
+        SellerAccount acc = account(org, "COUPANG");
+        AgentReviewHandoffRequest.Review lying =
+                new AgentReviewHandoffRequest.Review("2026-08-11", 5, BODY_A, PRODUCT, OPTION, null, 0, false, true);
+
+        assertThatThrownBy(() -> service.handOff(org, request(slotFor(acc), true, List.of(lying))))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining(AgentReviewHandoffService.REASON_BODY_DISAGREES);
+        assertThat(reviews.findAll()).isEmpty();
+    }
+
+    @Test
+    void falls_back_when_a_textless_review_has_no_option_to_key_on() {
+        SellerAccount acc = account(org, "COUPANG");
+
+        service.handOff(org, request(slotFor(acc), true, List.of(textless(5, "2026-08-11", null))));
+
+        // No option id means nothing extra to key on — it falls back rather than inventing one.
+        assertThat(reviews.findAll().get(0).getDedupKeyVersion()).isEqualTo(2);
     }
 
     /* ───────────────────────────── the coverage claim ───────────────────────────── */
@@ -323,7 +392,7 @@ class AgentReviewHandoffServiceTest {
     void refuses_the_whole_batch_when_one_date_cannot_be_read_rather_than_importing_the_rest() {
         SellerAccount acc = account(org, "COUPANG");
         AgentReviewHandoffRequest.Review bad =
-                new AgentReviewHandoffRequest.Review("2026-13-45", 5, BODY_SHORT, PRODUCT, OPTION, null, 0, false);
+                new AgentReviewHandoffRequest.Review("2026-13-45", 5, BODY_SHORT, PRODUCT, OPTION, null, 0, false, false);
 
         assertThatThrownBy(() -> service.handOff(org, request(slotFor(acc), true,
                 List.of(review(BODY_A, 5, "2026-08-11"), bad))))

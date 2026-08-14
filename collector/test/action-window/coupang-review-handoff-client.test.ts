@@ -18,6 +18,7 @@ const REVIEW: CoupangAcquiredReview = {
   writtenOn: "2026-08-11",
   rating: 5,
   body: BODY,
+  textless: false,
   bodyTruncated: false,
   bodyExpandable: false,
   productId: "15411270785",
@@ -69,6 +70,7 @@ describe("what crosses the wire", () => {
       "productId",
       "productName",
       "rating",
+      "textless",
       "vendorItemId",
       "writtenOn",
     ]);
@@ -99,6 +101,21 @@ describe("what crosses the wire", () => {
     const sent = JSON.parse(init.body as string) as { complete: boolean; stopReason: string };
     expect(sent.complete).toBe(false);
     expect(sent.stopReason).toBe("PAGER_UNRESOLVED");
+  });
+});
+
+describe("a textless review crosses as a state, never as the channel's placeholder", () => {
+  it("sends an empty body and the flag, so the backend keys it on the option id", async () => {
+    const fetchImpl = vi.fn(async () => okResponse({ received: 1, stored: 1, skipped: 0, failed: 0 }));
+    const textless: CoupangAcquiredReview = { ...REVIEW, body: "", textless: true };
+
+    await postCoupangReviewHandoff("http://localhost:8080", "tok", { ...REQUEST, reviews: [textless] }, fetchImpl as never);
+
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    const sent = JSON.parse(init.body as string) as { reviews: Record<string, unknown>[] };
+    expect(sent.reviews[0]).toMatchObject({ body: "", textless: true, vendorItemId: "81234567890" });
+    // Coupang's own UI sentence is not what a customer wrote, and it never travels as one.
+    expect(init.body as string).not.toContain("등록된 내용이 없습니다");
   });
 });
 

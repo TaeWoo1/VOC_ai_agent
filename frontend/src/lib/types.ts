@@ -1285,6 +1285,11 @@ export interface ChannelReviewItemView {
   productId: string | null;
   vendorItemId: string | null;
   mediaCount: number;
+  /**
+   * The buyer rated and wrote nothing. Render it as what it is — 별점만 남긴 상품평 — never as "본문을
+   * 표시할 수 없습니다", which would blame SellerOps for something the buyer chose.
+   */
+  textless: boolean;
   /** Arrived in the most recent import — derived from that import's start, never a read flag. */
   isNew: boolean;
 }
@@ -1326,6 +1331,8 @@ export interface ChannelReviewDetailView {
   bodyRedacted: boolean;
   productName: string | null;
   mediaCount: number;
+  /** The buyer rated and wrote nothing — see `ChannelReviewItemView.textless`. */
+  textless: boolean;
   isNew: boolean;
   locateTarget: ChannelReviewLocateTarget;
 }

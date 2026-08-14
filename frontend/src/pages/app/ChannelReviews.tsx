@@ -177,8 +177,11 @@ export function ChannelReviews() {
                       {item.isNew ? <Chip tone="accent">새 상품평</Chip> : null}
                       {item.mediaCount > 0 ? <Chip>사진·영상 {item.mediaCount}</Chip> : null}
                     </span>
-                    <span className="mt-1 block break-keep text-base text-ink">
-                      {item.preview ?? "표시할 수 있는 본문이 없습니다"}
+                    <span
+                      className={`mt-1 block break-keep text-base ${item.textless ? "text-muted" : "text-ink"}`}
+                    >
+                      {/* A textless review is what the buyer chose, not something we failed to show. */}
+                      {item.textless ? "별점만 남긴 상품평" : (item.preview ?? "표시할 수 있는 본문이 없습니다")}
                     </span>
                     <span className="mt-1 block truncate text-sm text-muted">
                       {item.productName ?? item.productId ?? "상품 정보 없음"}
@@ -215,9 +218,15 @@ function ReviewDetail({ detail }: { detail: ChannelReviewDetailView }) {
         {detail.isNew ? <Chip tone="accent">새 상품평</Chip> : null}
         {detail.mediaCount > 0 ? <Chip>사진·영상 {detail.mediaCount}</Chip> : null}
       </div>
-      <p className="whitespace-pre-wrap break-keep leading-relaxed text-ink">
-        {detail.body ?? "표시할 수 있는 본문이 없습니다"}
-      </p>
+      {detail.textless ? (
+        <p className="break-keep leading-relaxed text-muted">
+          별점만 남기고 내용을 쓰지 않은 상품평입니다. 별점은 그대로 집계됩니다.
+        </p>
+      ) : (
+        <p className="whitespace-pre-wrap break-keep leading-relaxed text-ink">
+          {detail.body ?? "표시할 수 있는 본문이 없습니다"}
+        </p>
+      )}
       {detail.bodyRedacted ? (
         <p className="text-sm text-muted">
           연락처·링크처럼 개인정보로 보이는 부분은 가려서 표시했습니다.

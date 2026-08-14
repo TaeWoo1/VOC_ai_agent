@@ -209,7 +209,7 @@ describe("canonicalization decides what a cell means, once, offline", () => {
   it("turns a reading into stored reviews with ids, date, rating and a body fingerprint", () => {
     const { reviews, dropped } = canonicalizeReviewRows(page(HEADERS, [ROW_A, ROW_B]));
 
-    expect(dropped).toEqual({ unparseableDate: 0, unreadableRating: 0, noProductId: 0, noBody: 0 });
+    expect(dropped).toEqual({ unparseableDate: 0, unreadableRating: 0, noProductId: 0 });
     expect(reviews).toHaveLength(2);
     expect(reviews[0]).toMatchObject({
       writtenOn: "2026-08-11",
@@ -225,16 +225,18 @@ describe("canonicalization decides what a cell means, once, offline", () => {
     expect(reviews[1]!.vendorItemId).toBeNull();
   });
 
-  it("drops a review whose body is Coupang's own placeholder, not a customer's words", () => {
-    // The first live backfill: WING renders 등록된 내용이 없습니다. where a buyer wrote nothing, so the
-    // empty-cell guard never fired and 19 of 22 stored reviews carried the placeholder as their body — two
-    // of which then merged, exactly the collapse the guard existed to prevent.
+  it("keeps a placeholder-bodied review as TEXTLESS, and never stores the placeholder", () => {
+    // The first live backfill: WING renders 등록된 내용이 없습니다. where a buyer wrote nothing, and 19 of 22
+    // reviews were that. They are kept — the rating is the signal — but the channel's own UI sentence is
+    // never stored as if a customer had written it.
     const placeholder = { ...ROW_A, body: "등록된 내용이 없습니다." };
-    const { reviews, dropped } = canonicalizeReviewRows(page(HEADERS, [placeholder, ROW_B]));
+    const { reviews, textlessCount } = canonicalizeReviewRows(page(HEADERS, [placeholder, ROW_B]));
 
-    expect(dropped.noBody).toBe(1);
-    expect(reviews).toHaveLength(1);
-    expect(reviews[0]!.body).toBe(BODY_B);
+    expect(reviews).toHaveLength(2);
+    expect(textlessCount).toBe(1);
+    expect(reviews[0]).toMatchObject({ textless: true, body: "", rating: 5 });
+    expect(reviews[1]).toMatchObject({ textless: false, body: BODY_B });
+    expect(JSON.stringify(reviews)).not.toContain("등록된 내용이 없습니다");
   });
 
   it("keeps a real review that merely contains the phrase", () => {
@@ -244,12 +246,14 @@ describe("canonicalization decides what a cell means, once, offline", () => {
     expect(canonicalizeReviewRows(page(HEADERS, [mentions])).reviews).toHaveLength(1);
   });
 
-  it("drops a rating-only review instead of merging it with the next one", () => {
-    const textless = { ...ROW_A, body: "" };
-    const { reviews, dropped } = canonicalizeReviewRows(page(HEADERS, [textless, { ...textless, no: "2" }]));
+  it("keeps a rating-only review, because the rating is the signal it carries", () => {
+    const rated = { ...ROW_A, body: "" };
+    const { reviews, textlessCount } = canonicalizeReviewRows(page(HEADERS, [rated, { ...rated, no: "2" }]));
 
-    expect(reviews).toHaveLength(0);
-    expect(dropped.noBody).toBe(2);
+    expect(reviews).toHaveLength(2);
+    expect(textlessCount).toBe(2);
+    // The backend keys these on the purchased option; what merges after that is a recorded limitation.
+    expect(reviews.every((r) => r.textless && r.body === "")).toBe(true);
   });
 
   it("drops a row whose date, rating or product id it cannot read, and counts which", () => {
@@ -262,7 +266,7 @@ describe("canonicalization decides what a cell means, once, offline", () => {
       ]),
     );
 
-    expect(dropped).toEqual({ unparseableDate: 1, unreadableRating: 1, noProductId: 1, noBody: 0 });
+    expect(dropped).toEqual({ unparseableDate: 1, unreadableRating: 1, noProductId: 1 });
     expect(reviews).toHaveLength(1);
   });
 

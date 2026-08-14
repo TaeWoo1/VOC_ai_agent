@@ -23,6 +23,26 @@ public final class ReviewDedupKey {
 
     public static final int V1 = 1;
     public static final int V2 = 2;
+    /**
+     * <b>v3</b> — a TEXTLESS review (the buyer rated and wrote nothing), keyed additionally on the purchased
+     * option: {@code SHA-256(channel|product|date||rating|optionId)}.
+     *
+     * <p>It exists because of what the first live Coupang backfill found: 86% of that seller's 상품평 were
+     * rating-only, and Coupang renders a fixed placeholder sentence where the body would be. Under v2 every
+     * one of them hashes on the same empty body, so two rating-only reviews of one PRODUCT on one day at one
+     * rating collapse into a single row — and the rating distribution, which is the only signal such a review
+     * carries, silently understates.
+     *
+     * <p>Folding the option id is what the screen actually supports: the live reading found 옵션ID present on
+     * every row. It does not close the gap, and is not pretended to — two textless reviews of the same OPTION
+     * on the same day at the same rating still merge. That residue is a recorded v1 limitation
+     * ({@code docs/coupang_review_acquisition_v1.md}); closing it would need a per-review identifier the
+     * screen does not publish, and a row position or a buyer's name is not one.
+     *
+     * <p>It applies PER ROW, not per channel — which is what {@code reviews.dedup_key_version} was always for.
+     * A review WITH text on the same channel keeps v2, so nothing about text reviews changes.
+     */
+    public static final int V3 = 3;
 
     private ReviewDedupKey() {
     }
@@ -39,15 +59,24 @@ public final class ReviewDedupKey {
      * review of one product on one day into a single row — the false merge that looks exactly like dedup
      * working.
      *
-     * <p>The purchased option (옵션ID) is deliberately NOT folded in. The column prints it on some rows and
-     * not others, so a key that included it would change identity when a cell rendered differently, and a
-     * re-read of the same review would import as a new one. The residual case — two options of one product,
-     * same day, same rating, same body text — merges, and is recorded as a known limitation rather than
-     * traded for an unstable key.
+     * <p>The purchased option (옵션ID) is NOT folded in for a review WITH TEXT. The body already separates
+     * those, and a key that included the option would change identity if a cell ever rendered without it —
+     * turning a re-read of the same review into a new one. A textless review has no body to separate it,
+     * which is exactly why {@link #V3} exists and why it applies only there.
      */
     public static int versionFor(String channelCode) {
         return EsmApiConnector.CHANNEL_CODE.equals(channelCode)
                 || CoupangApiConnector.CHANNEL_CODE.equals(channelCode) ? V2 : V1;
+    }
+
+    /**
+     * The version for ONE row: v3 when the row is textless AND carries an option id to key on, else the
+     * channel's own version. A textless row with no option id falls back rather than inventing one.
+     */
+    public static int versionForRow(String channelCode, boolean textless, String optionId) {
+        int channelVersion = versionFor(channelCode);
+        boolean optionAvailable = optionId != null && !optionId.isBlank();
+        return textless && optionAvailable && channelVersion >= V2 ? V3 : channelVersion;
     }
 
     /**
@@ -56,6 +85,19 @@ public final class ReviewDedupKey {
      */
     public static String contentHash(int version, UUID channelId, UUID productId, String datePart,
             String body, Integer rating) {
+        return contentHash(version, channelId, productId, datePart, body, rating, null);
+    }
+
+    /**
+     * The content hash for the given version, with the purchased option available to v3. v3 folds the option
+     * id in AFTER the rating; v2 and v1 ignore it entirely, so an existing hash cannot change by passing one.
+     */
+    public static String contentHash(int version, UUID channelId, UUID productId, String datePart,
+            String body, Integer rating, String optionId) {
+        if (version >= V3) {
+            return ContentHash.of(channelId.toString(), productId.toString(), datePart, body,
+                    rating == null ? null : rating.toString(), optionId);
+        }
         if (version >= V2) {
             return ContentHash.of(channelId.toString(), productId.toString(), datePart, body,
                     rating == null ? null : rating.toString());

@@ -50,6 +50,7 @@ function wireRow(review: CoupangAcquiredReview): Record<string, unknown> {
     writtenOn: review.writtenOn,
     rating: review.rating,
     body: review.body,
+    textless: review.textless,
     productId: review.productId,
     vendorItemId: review.vendorItemId,
     productName: review.productName,

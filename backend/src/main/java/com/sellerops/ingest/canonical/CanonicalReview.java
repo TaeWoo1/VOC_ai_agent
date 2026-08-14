@@ -21,7 +21,15 @@ public record CanonicalReview(
         ReviewReplyState replyState,
         Instant repliedAt,
         String sourceOptionId,
-        int mediaCount) {
+        int mediaCount,
+        /**
+         * The buyer rated and wrote nothing. {@code body} is then blank — never a channel's placeholder
+         * sentence, which is UI text and not a customer's words. It is carried rather than derived from a
+         * blank body because the two are different claims: a blank body could be a reader defect, while this
+         * is the source saying it saw a rating with no text. {@link com.sellerops.ingest.ReviewDedupKey}
+         * keys these rows on the purchased option.
+         */
+        boolean textless) {
 
     /**
      * A source that carries no reply statement. Kept so every connector and test that predates
@@ -43,6 +51,15 @@ public record CanonicalReview(
                            Instant receivedAt, String externalId, int sourceRow,
                            ReviewReplyState replyState, Instant repliedAt) {
         this(productName, sku, rating, body, receivedAt, externalId, sourceRow, replyState, repliedAt,
-                null, 0);
+                null, 0, false);
+    }
+
+    /** A source that reports an option and media but does not distinguish a textless review. */
+    public CanonicalReview(String productName, String sku, Integer rating, String body,
+                           Instant receivedAt, String externalId, int sourceRow,
+                           ReviewReplyState replyState, Instant repliedAt,
+                           String sourceOptionId, int mediaCount) {
+        this(productName, sku, rating, body, receivedAt, externalId, sourceRow, replyState, repliedAt,
+                sourceOptionId, mediaCount, false);
     }
 }

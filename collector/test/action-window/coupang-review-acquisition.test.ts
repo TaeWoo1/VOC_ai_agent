@@ -315,30 +315,41 @@ describe("every other ending refuses to claim coverage", () => {
   });
 });
 
-describe("a page of reviews that cannot be canonicalized is still a page", () => {
-  it("keeps walking past a page where every review was textless", () => {
+describe("a rating-only page is collected, and an uncanonicalizable one is still a page", () => {
+  it("collects a page of rating-only reviews rather than dropping it", () => {
     const session = new ReviewAcquisitionSession();
 
-    const outcome = session.offerPage(readable([row(""), row("")], pagerAt(1, 5)));
+    const outcome = session.offerPage(readable([row(""), row("", "2026.08.10")], pagerAt(1, 5)));
 
-    expect(outcome.dropped.noBody).toBe(2);
+    expect(outcome.newReviews).toBe(2);
+    expect(session.result().textlessCollected).toBe(2);
+    expect(outcome.stopReason).toBe("IN_PROGRESS");
+  });
+
+  it("keeps walking past a page whose every row failed to canonicalize", () => {
+    const session = new ReviewAcquisitionSession();
+
+    // Unparseable dates: nothing survives, and that is still not the end of the list.
+    const outcome = session.offerPage(readable([row("a", "어제"), row("b", "어제")], pagerAt(1, 5)));
+
+    expect(outcome.dropped.unparseableDate).toBe(2);
     expect(outcome.stopReason).toBe("IN_PROGRESS");
     expect(session.open).toBe(true);
   });
 
   it("does not read a second all-dropped page as a page that did not advance", () => {
     const session = new ReviewAcquisitionSession();
-    session.offerPage(readable([row("")], pagerAt(1, 5)));
+    session.offerPage(readable([row("a", "어제")], pagerAt(1, 5)));
 
-    expect(session.offerPage(readable([row("")], pagerAt(2, 5))).stopReason).toBe("IN_PROGRESS");
+    expect(session.offerPage(readable([row("b", "어제")], pagerAt(2, 5))).stopReason).toBe("IN_PROGRESS");
   });
 
   it("accumulates drop counts across the whole walk", () => {
     const session = new ReviewAcquisitionSession();
-    session.offerPage(readable([row(""), row("좋아요")], pagerAt(1, 5)));
-    session.offerPage(readable([row("", "어제"), row("괜찮아요")], pagerAt(2, 5)));
+    session.offerPage(readable([row("a", "어제"), row("좋아요")], pagerAt(1, 5)));
+    session.offerPage(readable([row("b", "어제"), row("괜찮아요")], pagerAt(2, 5)));
 
-    expect(session.result().dropped).toMatchObject({ noBody: 1, unparseableDate: 1 });
+    expect(session.result().dropped).toMatchObject({ unparseableDate: 2 });
   });
 });
 

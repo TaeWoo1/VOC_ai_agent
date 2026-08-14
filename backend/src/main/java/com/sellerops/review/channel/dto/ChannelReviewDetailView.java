@@ -28,6 +28,8 @@ public record ChannelReviewDetailView(
         boolean bodyRedacted,
         String productName,
         int mediaCount,
+        /** The buyer rated and wrote nothing — see {@code ChannelReviewItemView.textless}. */
+        boolean textless,
         boolean isNew,
         LocateTarget locateTarget) {
 
