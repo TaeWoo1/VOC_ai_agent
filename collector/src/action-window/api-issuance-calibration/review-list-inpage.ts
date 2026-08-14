@@ -93,28 +93,26 @@ const REVIEW_FRAGMENT = `
      its hits' chains, once each; the shape the most DISTINCT labels vote for wins. Two independent labels
      landing in the same repeating shape is what makes it a row — one label agreeing with itself is a repeated
      word. The row tag is never assumed; it comes back as a finding. */
-  /* The ELEMENTS of one candidate shape. Found by walking a hit's chain to the level that matches, then taking
-     that element's same-tag siblings — the units themselves, so per-unit questions are asked of real elements
-     rather than inferred from a description. */
-  function unitsForKey(hitLists, key) {
-    var anchor = null;
-    for (var a = 0; a < hitLists.length && anchor === null; a++) {
-      for (var b = 0; b < hitLists[a].length && anchor === null; b++) {
-        var walk = repeatLevelsOf(hitLists[a][b]);
-        for (var L = 0; L < walk.levels.length; L++) {
-          if (walk.levels[L].tagName + ':' + walk.levels[L].siblingCount === key) { anchor = walk.nodes[L]; break; }
-        }
-      }
+  /* **A candidate unit set, identified by the ELEMENT it hangs off — never by a string.**
+     The first version keyed candidates on tagName plus siblingCount. On the real WING 상품평 screen that
+     collided: DIV-with-4-siblings matched a container set whose siblings shared no class shape AND the row set
+     the field words actually meant, so votes cast at one place were counted for another, and the winner
+     was then materialised from whichever the walk happened to reach first. The run resolved a container that
+     held ten dates and called it a review.
+     A sibling set IS its parent plus a tag. Comparing those by reference cannot collide. */
+  function candidateIndex(candidates, parent, tag) {
+    for (var i = 0; i < candidates.length; i++) {
+      if (candidates[i].parent === parent && candidates[i].tag === tag) { return i; }
     }
+    return -1;
+  }
+  function unitsUnder(parent, tag, anchor) {
     var nodes = [];
-    if (!anchor) { return nodes; }
-    var parent = parentOf(anchor);
-    var tag = String(anchor.tagName || '').toUpperCase();
     if (parent && parent.children) {
       for (var k = 0; k < parent.children.length && nodes.length < MAX_UNITS; k++) {
         if (String(parent.children[k].tagName || '').toUpperCase() === tag) { nodes.push(parent.children[k]); }
       }
-    } else { nodes.push(anchor); }
+    } else if (anchor) { nodes.push(anchor); }
     return nodes;
   }
   /* Does this element hold one review's worth of evidence — a date, a rating token? Fixed SHAPE patterns we
@@ -129,45 +127,52 @@ const REVIEW_FRAGMENT = `
     return false;
   }
   function resolveUnit(hitLists, regexes) {
-    var tally = {}, levelOf = {}, bestN = 0;
-    for (var i = 0; i < hitLists.length; i++) {
-      var voted = {};
+    var candidates = [], bestN = 0, i, j;
+    for (i = 0; i < hitLists.length; i++) {
+      var voted = [];
       for (var h = 0; h < hitLists[i].length; h++) {
-        var levels = repeatLevelsOf(hitLists[i][h]).levels;
-        for (var j = 0; j < levels.length; j++) {
-          var key = levels[j].tagName + ':' + levels[j].siblingCount;
-          if (voted[key]) { continue; }
-          voted[key] = 1;
-          tally[key] = (tally[key] || 0) + 1;
-          if (!levelOf[key]) { levelOf[key] = levels[j]; }
-          if (tally[key] > bestN) { bestN = tally[key]; }
+        var walk = repeatLevelsOf(hitLists[i][h]);
+        for (j = 0; j < walk.levels.length; j++) {
+          var node = walk.nodes[j];
+          var parent = parentOf(node);
+          var tag = String(node.tagName || '').toUpperCase();
+          var at = candidateIndex(candidates, parent, tag);
+          if (at < 0) {
+            candidates.push({ parent: parent, tag: tag, level: walk.levels[j], anchor: node, votes: 0 });
+            at = candidates.length - 1;
+          }
+          /* One vote per LABEL per candidate — a label agreeing with itself is a repeated word, not a row. */
+          if (voted.indexOf(at) >= 0) { continue; }
+          voted.push(at);
+          candidates[at].votes++;
+          if (candidates[at].votes > bestN) { bestN = candidates[at].votes; }
         }
       }
     }
     if (bestN === 0) { return { level: null, labelsAgreeing: 0, nodes: [] }; }
     /* **The tie is the hard part, and depth alone gets it wrong.**
        On a table the field words live in the HEADER, not in the rows, so every label votes for the header CELL
-       repeat and for the row repeat equally — and for whatever page SECTION repeat encloses them both. Taking
-       the innermost resolves the unit to a header cell and then asks whether that cell contains a photo; taking
-       the outermost resolves it to "grid, filters, pager" and calls the pager a review.
-       So tied candidates are separated by what they CONTAIN: the review unit is the repeat whose members most
+       set and for the row set — and for whatever page SECTION encloses them both. Taking the innermost resolves
+       the unit to a header cell and then asks whether that cell contains a photo; taking the outermost resolves
+       it to "grid, filters, pager" and calls the pager a review.
+       So tied candidates are separated by what they CONTAIN: the review unit is the set whose members most
        consistently each hold one review's worth of evidence — a date, a rating token. A header cell holds none.
        A page section holds all of them in one member and none in the others. A row holds one each.
        Depth breaks what remains, outward, so a wrapper never beats the row it wraps. */
     var best = null, bestScore = -1, bestNodes = [];
-    for (var key2 in tally) {
-      if (tally[key2] !== bestN) { continue; }
-      var nodes2 = unitsForKey(hitLists, key2);
+    for (i = 0; i < candidates.length; i++) {
+      if (candidates[i].votes !== bestN) { continue; }
+      var nodes2 = unitsUnder(candidates[i].parent, candidates[i].tag, candidates[i].anchor);
       if (nodes2.length === 0) { continue; }
       var withEvidence = 0;
       for (var n = 0; n < nodes2.length; n++) { if (hasShapeEvidence(nodes2[n], regexes)) { withEvidence++; } }
       var score = withEvidence / nodes2.length;
       var better = score > bestScore ||
-        (score === bestScore && best !== null && levelOf[key2].depth > levelOf[best].depth);
-      if (better) { bestScore = score; best = key2; bestNodes = nodes2; }
+        (score === bestScore && best !== null && candidates[i].level.depth > best.level.depth);
+      if (better) { bestScore = score; best = candidates[i]; bestNodes = nodes2; }
     }
     if (best === null) { return { level: null, labelsAgreeing: 0, nodes: [] }; }
-    return { level: levelOf[best], labelsAgreeing: bestN, nodes: bestNodes };
+    return { level: best.level, labelsAgreeing: bestN, nodes: bestNodes };
   }
   /* Descendants of one unit, bounded. Used for every per-unit question; nothing here reads a value. */
   function within(unit) {

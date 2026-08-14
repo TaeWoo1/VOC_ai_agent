@@ -279,16 +279,46 @@ export interface ReviewAcquisitionClassification {
   readonly dedupeKeyCandidates: readonly ReviewIdCandidate[];
   /** Whether any unit exposes its own detail link, which is an identifier and a route in one. */
   readonly detailLinkPresent: boolean;
+  /**
+   * Whether the resolved "unit" is really a CONTAINER holding many reviews rather than one.
+   *
+   * The independent check on the unit resolution, and it exists because the first live reading needed one: the
+   * probe resolved a four-member `DIV` set that held **ten dates**, reported every identifier length as
+   * carried by exactly one member, and produced a confident `NO_IDENTIFIER`. A review row holds one review's
+   * worth of evidence; a container holds everyone's.
+   */
+  readonly containerSuspected: boolean;
 }
 
 /** At least two carriers, because "one unit carries one distinct value" is true of everything. */
 const MIN_CARRIERS_FOR_A_KEY = 2;
 
+/**
+ * How many of one shape a unit may hold before it stops looking like one review. Two, not one: a row can
+ * legitimately print 작성일 and 수정일, or a rating and a helpful-vote count.
+ */
+const MAX_SHAPE_HITS_PER_UNIT = 2;
+
 export function classifyAcquisitionFeasibility(
   census: ReviewListCensus | null | undefined,
 ): ReviewAcquisitionClassification {
   if (!census || census.reason !== "OK" || !census.unit.resolved) {
-    return { verdict: "UNDETERMINED", dedupeKeyCandidates: [], detailLinkPresent: false };
+    return {
+      verdict: "UNDETERMINED",
+      dedupeKeyCandidates: [],
+      detailLinkPresent: false,
+      containerSuspected: false,
+    };
+  }
+  // The unit resolved — but did it resolve to a REVIEW? A set of four that holds ten dates has not.
+  const busiest = census.textShapes.reduce((max, s) => Math.max(max, s.unitCount), 0);
+  if (census.unit.unitCount > 0 && busiest > census.unit.unitCount * MAX_SHAPE_HITS_PER_UNIT) {
+    return {
+      verdict: "UNDETERMINED",
+      dedupeKeyCandidates: [],
+      detailLinkPresent: census.unit.unitsWithDetailLink > 0,
+      containerSuspected: true,
+    };
   }
   const detailLinkPresent = census.unit.unitsWithDetailLink > 0;
   const dedupeKeyCandidates = census.unit.idCandidates.filter(
@@ -298,6 +328,7 @@ export function classifyAcquisitionFeasibility(
     verdict: dedupeKeyCandidates.length > 0 ? "IDENTIFIER_FOUND" : "NO_IDENTIFIER",
     dedupeKeyCandidates,
     detailLinkPresent,
+    containerSuspected: false,
   };
 }
 

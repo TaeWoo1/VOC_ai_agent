@@ -7,7 +7,9 @@
 >
 > - **Unit:** Coupang Review Integration Feasibility v1 → **READ_ONLY review acquisition feasibility**
 > - **Date:** 2026-08-14
-> - **Live contact:** none yet. The discovery run is built, offline-tested, and **not yet run.**
+> - **Live contact:** **one sitting, 2026-08-14 — VOID.** It ran clean and returned a confident
+>   `NO_IDENTIFIER` from a unit that was not a review. See §9. Nothing from it is recorded as a finding
+>   about Coupang.
 
 ---
 
@@ -213,3 +215,60 @@ is visible to whoever reads the run rather than silently believed.
 - **external-research required:** 마켓플레이스 판매이용약관 §14 verbatim (the policy axis for C).
 - **product-owner decision:** the 아이템위너 question in §6.
 - **measurement required:** everything in §8 — one sitting.
+
+---
+
+## 9. The first live sitting, and why its verdict was thrown away
+
+The run completed (exit 0) against the real screen and returned `acquisitionVerdict: NO_IDENTIFIER`.
+**That verdict is void.** The probe had not resolved a review.
+
+What gave it away, from the run's own numbers:
+
+| Reading | Value | What it means |
+|---|---|---|
+| `unit.unitCount` | 4 | four "reviews" |
+| `textShapes.dateDotted.unitCount` | **10** | ten dates inside those four |
+| `unit.siblingsSharingClassShape` | **1** of 4 | the four siblings share no shape — not a repeating list |
+| every `idCandidate.unitsCarrying` | **1** | each digit length appears in exactly one member |
+| `unitsWithImage` / `unitsWithDetailLink` | 3 / 1 | members are not alike |
+
+A review row holds one review's worth of evidence. This set held everyone's — it was a **container**, and
+every count the run produced described the wrong element.
+
+**Two defects, one of them the interesting one.**
+
+1. *Candidate identity collided.* Sets were keyed on `tagName + siblingCount`, so `DIV:4` covered a
+   container set (1 of 4 sharing a class shape) **and** the row set the field words meant (4 of 4 — visible
+   in `labelCounts.starRating.sharedRepeatLevel`). Votes cast at one place in the document were counted for
+   another. A sibling set *is* its parent plus a tag; those are now compared by reference, which cannot
+   collide.
+
+2. *The evidence heuristic cannot catch this on its own, and that is not fixable by tuning.* A wrapper whose
+   every child contains a date scores 4/4; the row set, whose header row has no date, scores 3/4. **The
+   wrapper wins.** So there is now an independent guard on the outcome rather than a better heuristic: if the
+   resolved unit holds more than two of any one shape per member, it is a container and the verdict is
+   `UNDETERMINED` — never `NO_IDENTIFIER`.
+
+This is the same failure the three 고객문의 sittings produced, in a new costume: **a confident zero that
+reads exactly like a real refutation.** The difference is that this time the run's own output contained the
+contradiction, and the guard now makes the probe state it rather than leaving it to be noticed.
+
+### What the sitting DID establish
+
+These readings do not depend on which unit was resolved, so they survive:
+
+- **One document, no shadow DOM, no iframes** (`framesScanned: 1`, `shadowRootsFound: 0`). The screen is
+  plainly reachable — unlike the hypotheses that cost the 고객문의 sittings.
+- **It is a table with 7 columns** (`TH`, `siblingCount: 7`), and `등록일` / `작성자` are among its headers.
+  `평점` is absent; the screen says **`별점`** (6 hits). No `사진` / `동영상` / `구매자` header words.
+- **Long digit runs DO exist in markup**: `anchorDigitRunLengths` includes 8, 9, 10 and 11. This is the
+  opposite of the 고객문의 finding, where the needed lengths were simply absent — a review id in an
+  attribute is plausible here, and that is the single most encouraging number in the run.
+- **Dates are `YYYY.MM.DD`** (10 leaves, `dateDotted` only).
+- **Paging exists and is bounded**: numeric pager, highest printed page **5**; 4 `<select>` elements and
+  **no `input[type=date]`** — so the period filter is a dropdown, not a date range.
+- **No interactive `최신순` / `최근 N개월`** was found; only `조회` (×4). Sort and period control remain
+  unestablished.
+
+`ownershipScope` is `NOT_ESTABLISHED` — no product id was supplied, so the catalog question was not asked.

@@ -315,6 +315,7 @@ async function main(): Promise<void> {
           acquisitionVerdict: acquisition.verdict,
           dedupeKeyCandidates: acquisition.dedupeKeyCandidates,
           detailLinkPresent: acquisition.detailLinkPresent,
+          containerSuspected: acquisition.containerSuspected,
           ownershipScope: scope,
           productIdsSupplied: productIds.length,
         },
@@ -323,7 +324,12 @@ async function main(): Promise<void> {
       ),
     );
 
-    if (acquisition.verdict === "UNDETERMINED") {
+    if (acquisition.containerSuspected) {
+      console.error("");
+      console.error("⚠ UNDETERMINED — the resolved unit holds more evidence than one review's worth, so it is");
+      console.error("  a CONTAINER, not a row. Nothing about identifiers may be read off this run: every count");
+      console.error("  it produced describes the wrong element.");
+    } else if (acquisition.verdict === "UNDETERMINED") {
       console.error("");
       console.error("⚠ Acquisition feasibility is UNDETERMINED — the review unit did not resolve.");
       console.error("  Do NOT record this as 'the screen carries no review id'. A screen whose rows were never");

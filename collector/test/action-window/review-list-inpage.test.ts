@@ -477,3 +477,95 @@ describe("the sanitizer refuses rather than degrades", () => {
     expect(sanitizeReviewListCensus(raw, LABELS, CONTROLS, SHAPES).unit.unitsWithImage).toBe(4);
   });
 });
+
+/* ───────────────────────────── the live reading that voided itself ───────────────────────────── */
+
+describe("a container is not a review", () => {
+  /**
+   * **The failure the first live sitting produced, reproduced.**
+   *
+   * On the real WING 상품평 screen the probe resolved a four-member `DIV` set, reported it as the review unit,
+   * and returned `NO_IDENTIFIER` — from a set that held **ten dates** and in which every identifier length was
+   * carried by exactly one member. A review row holds one review's worth of evidence; that set held everyone's.
+   *
+   * The evidence heuristic alone cannot catch it: a wrapper whose every child contains a date scores 4/4, and
+   * the row set — whose header row has no date — scores 3/4. The wrapper WINS on evidence. So the guard is a
+   * separate, independent check on the outcome, not a better heuristic.
+   */
+  function wrapperOfCards(): El {
+    const card = (n: number): El =>
+      el({ tag: "div", attrs: { class: `card c${n}` } }).add(
+        // Each wrapper child holds several reviews' worth of dates — which is what makes it a container.
+        el({ tag: "span", text: REVIEW_DATE }),
+        el({ tag: "span", text: REVIEW_DATE }),
+        el({ tag: "span", text: REVIEW_DATE }),
+        el({ tag: "span", text: "평점" }),
+        el({ tag: "span", text: "작성일" }),
+      );
+    return el({ tag: "body" }).add(
+      el({ tag: "div", attrs: { class: "wrap" } }).add(card(1), card(2), card(3), card(4)),
+    );
+  }
+
+  it("**a unit holding many reviews' worth of dates is UNDETERMINED, not NO_IDENTIFIER**", () => {
+    const c = census(wrapperOfCards());
+
+    const verdict = classifyAcquisitionFeasibility(c);
+    expect(verdict.containerSuspected).toBe(true);
+    expect(verdict.verdict).toBe("UNDETERMINED");
+    // And nothing about identifiers is asserted from it — every count describes the wrong element.
+    expect(verdict.dedupeKeyCandidates).toEqual([]);
+  });
+
+  it("the guard allows a row that prints TWO dates — 작성일 and 수정일 are one review", () => {
+    const raw = {
+      reason: "OK",
+      elementsScanned: 10,
+      shadowRootsFound: 0,
+      elementsWithAnchorAttributes: 1,
+      controlAffordances: WING_REVIEW_CONTROL_LABELS.map((r) => ({
+        id: r.id,
+        interactiveCount: 0,
+        staticCount: 0,
+      })),
+      labelCounts: WING_REVIEW_FIELD_LABELS.map((l) => ({ id: l.id, elementCount: 0 })),
+      // 4 units, 8 date leaves inside them — exactly two each. A row, not a container.
+      textShapes: [{ id: "dateDotted", leafCount: 8, unitCount: 8 }],
+      unit: {
+        level: {
+          depth: 1,
+          tagName: "TR",
+          siblingCount: 4,
+          siblingsSharingClassShape: 4,
+          classTokenCount: 1,
+          attributeKinds: [],
+          hasDetailAffordance: true,
+          digitRunLengths: [],
+        },
+        labelsAgreeing: 3,
+        unitCount: 4,
+        idCandidates: [
+          { source: "ATTRIBUTE", digitLength: 9, unitsCarrying: 4, distinctValues: 4 },
+        ],
+      },
+      pagination: {},
+    };
+    const c = sanitizeReviewListCensus(raw, WING_REVIEW_FIELD_LABELS, WING_REVIEW_CONTROL_LABELS, [
+      { id: "dateDotted", pattern: "^x$" },
+    ]);
+    const verdict = classifyAcquisitionFeasibility(c);
+    expect(verdict.containerSuspected).toBe(false);
+    expect(verdict.verdict).toBe("IDENTIFIER_FOUND");
+  });
+
+  it("**candidate sets are told apart by ELEMENT, not by tag-and-count**", () => {
+    // The reporting half of the same defect: on the live screen two different DIV sets both had four siblings,
+    // so one key covered both — one with all four sharing a class shape, one with none. Whichever the walk
+    // reached first supplied the level that got reported, describing a set nobody had voted for.
+    const c = census(reviewGrid());
+
+    // The reported level must describe the set that was actually chosen: four DIV siblings, and the unit count
+    // measured from that same set.
+    expect(c.unit.level?.siblingCount).toBe(c.unit.unitCount);
+  });
+});
