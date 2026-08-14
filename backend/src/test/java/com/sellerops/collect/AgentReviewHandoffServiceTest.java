@@ -118,13 +118,13 @@ class AgentReviewHandoffServiceTest {
 
     private AgentReviewHandoffRequest.Review review(String body, int rating, String writtenOn) {
         return new AgentReviewHandoffRequest.Review(writtenOn, rating, body, PRODUCT, OPTION,
-                "무선 이어폰", 0, false, false);
+                "무선 이어폰", 0, false);
     }
 
     /** A buyer who rated and wrote nothing. The body is EMPTY — never a channel's placeholder sentence. */
     private AgentReviewHandoffRequest.Review textless(int rating, String writtenOn, String optionId) {
         return new AgentReviewHandoffRequest.Review(writtenOn, rating, "", PRODUCT, optionId,
-                "무선 이어폰", 0, false, true);
+                "무선 이어폰", 0, true);
     }
 
     private AgentReviewHandoffRequest request(String slot, boolean complete,
@@ -143,7 +143,7 @@ class AgentReviewHandoffServiceTest {
     void stores_the_reviews_it_was_handed_with_the_source_facts_the_screen_carried() {
         SellerAccount acc = account(org, "COUPANG");
         AgentReviewHandoffRequest.Review row =
-                new AgentReviewHandoffRequest.Review("2026-08-11", 5, BODY_A, PRODUCT, OPTION, "무선 이어폰", 2, true, false);
+                new AgentReviewHandoffRequest.Review("2026-08-11", 5, BODY_A, PRODUCT, OPTION, "무선 이어폰", 2, false);
 
         AgentReviewHandoffResultView result = service.handOff(org, request(slotFor(acc), true, List.of(row)));
 
@@ -265,7 +265,7 @@ class AgentReviewHandoffServiceTest {
     void refuses_a_row_whose_body_and_textless_flag_disagree() {
         SellerAccount acc = account(org, "COUPANG");
         AgentReviewHandoffRequest.Review lying =
-                new AgentReviewHandoffRequest.Review("2026-08-11", 5, BODY_A, PRODUCT, OPTION, null, 0, false, true);
+                new AgentReviewHandoffRequest.Review("2026-08-11", 5, BODY_A, PRODUCT, OPTION, null, 0, true);
 
         assertThatThrownBy(() -> service.handOff(org, request(slotFor(acc), true, List.of(lying))))
                 .isInstanceOf(ApiException.class)
@@ -274,13 +274,32 @@ class AgentReviewHandoffServiceTest {
     }
 
     @Test
-    void falls_back_when_a_textless_review_has_no_option_to_key_on() {
+    void keys_a_textless_review_under_v3_even_when_the_option_cell_was_empty() {
+        // WHICH formula a row uses is decided by what the row IS, never by whether one of its cells could be
+        // read. An earlier form required an option id too — so the same review keyed under v3 in one reading
+        // and v2 in the next, and a re-sync stored it twice. There is nothing extra to fold in here; the
+        // option contributes an empty part, exactly as any absent value does.
         SellerAccount acc = account(org, "COUPANG");
 
         service.handOff(org, request(slotFor(acc), true, List.of(textless(5, "2026-08-11", null))));
 
-        // No option id means nothing extra to key on — it falls back rather than inventing one.
-        assertThat(reviews.findAll().get(0).getDedupKeyVersion()).isEqualTo(2);
+        assertThat(reviews.findAll().get(0).getDedupKeyVersion()).isEqualTo(3);
+    }
+
+    @Test
+    void stores_a_textless_review_once_across_two_sittings_however_the_option_cell_read() {
+        // The regression the version flip caused: one sitting reads the option, the next does not, and the
+        // seller's list grows a second copy of a review nobody wrote twice.
+        SellerAccount acc = account(org, "COUPANG");
+        String slot = slotFor(acc);
+
+        service.handOff(org, request(slot, true, List.of(textless(5, "2026-08-11", null))));
+        AgentReviewHandoffResultView second =
+                service.handOff(org, request(slot, true, List.of(textless(5, "2026-08-11", null))));
+
+        assertThat(second.stored()).isEqualTo(0);
+        assertThat(second.skipped()).isEqualTo(1);
+        assertThat(reviews.findAll()).hasSize(1);
     }
 
     /* ───────────────────────────── the coverage claim ───────────────────────────── */
@@ -392,7 +411,7 @@ class AgentReviewHandoffServiceTest {
     void refuses_the_whole_batch_when_one_date_cannot_be_read_rather_than_importing_the_rest() {
         SellerAccount acc = account(org, "COUPANG");
         AgentReviewHandoffRequest.Review bad =
-                new AgentReviewHandoffRequest.Review("2026-13-45", 5, BODY_SHORT, PRODUCT, OPTION, null, 0, false, false);
+                new AgentReviewHandoffRequest.Review("2026-13-45", 5, BODY_SHORT, PRODUCT, OPTION, null, 0, false);
 
         assertThatThrownBy(() -> service.handOff(org, request(slotFor(acc), true,
                 List.of(review(BODY_A, 5, "2026-08-11"), bad))))

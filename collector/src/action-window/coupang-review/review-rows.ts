@@ -12,8 +12,8 @@
  * assert the column was located and its text still never appears.
  *
  * **A row that cannot be canonicalized is dropped and counted, never guessed.** An unparseable date, an
- * unreadable rating, a product cell with no id, and a body with no text each drop the row into a named
- * counter. The last one is a real product gap, not a defect — see {@link CoupangAcquiredReview}.
+ * unreadable rating, and a product cell with no id each drop the row into a named counter. An EMPTY body is
+ * not among them: a buyer who rated without writing left a review, and it is kept as a textless one.
  */
 import { reviewBodyFingerprint } from "../reply-submission/review-body-fingerprint";
 
@@ -48,8 +48,9 @@ export interface CoupangReviewRowReading {
  *
  * The three states are deliberately distinct, and the middle one is why this type exists at all:
  *
- * - `found: false, hasNext: false` — there is no pager and nothing to press. The list is one page, and this
- *   page IS the whole list. A small seller's channel is genuinely complete in one read.
+ * - `found: false, nextEnabled: false` — there is no pager and nothing pressable. The list is one page, and
+ *   this page IS the whole list. A small seller's channel is genuinely complete in one read. (A DRAWN but
+ *   dead next arrow does not disturb this: WING prints its arrows either way.)
  * - `found: true, resolved: false` — a pager is there and which page it is showing could not be identified.
  *   This must never round up to "the end": rounding it up is precisely how a walk comes to claim a coverage
  *   it does not have.
@@ -134,11 +135,11 @@ export interface CoupangReviewPageReading {
  * off; `bodyExpandable` says the cell offered to show more, which is the honest warning that the stored text
  * may be a prefix of what the buyer wrote.
  *
- * **There is no rating-only review here.** Coupang lets a buyer rate without writing, and such a review has no
- * text to tell it apart from another rating-only review of the same product on the same day at the same score.
- * The screen carries no per-review identifier (`docs/coupang_review_policy_gate_v1.md` §9.2), so storing them
- * would silently merge distinct reviews into one. They are dropped and counted instead — a gap that is
- * reported rather than a merge that is not.
+ * **A rating-only review is one of these too**, carried by {@link CoupangAcquiredReview.textless} rather than
+ * by a body. Coupang lets a buyer rate without writing, and the screen carries no per-review identifier
+ * (`docs/coupang_review_policy_gate_v1.md` §9.2) — so what tells two of them apart is the option each was left
+ * on, and nothing tells apart two on ONE option, one day, one rating. That residue is recorded, not papered
+ * over: see the field's own note.
  */
 export interface CoupangAcquiredReview {
   /** `YYYY-MM-DD`, from the row's own date cell. */
@@ -299,7 +300,7 @@ const MAX_PAGE_NUMBERS = 200;
 
 /**
  * Sanitize the pager half. A malformed or absent pager becomes {@link UNREAD_PAGER} — never a
- * `found: false, hasNext: false` reading, which the session would correctly treat as "this is a
+ * `found: false, nextEnabled: false` reading, which the session would correctly treat as "this is a
  * one-page list" and complete on.
  */
 function sanitizePager(raw: unknown): CoupangReviewPagerReading {
@@ -360,9 +361,12 @@ export type PagerPosition = "FINAL_PAGE" | "MORE_PAGES" | "UNKNOWN";
  */
 export function pagerPosition(pager: CoupangReviewPagerReading): PagerPosition {
   if (!pager.found) {
-    // No numbered pager. Only a screen that also offers nothing to press is a single-page list; a next
-    // control with no numbers beside it means there IS more and we simply cannot count it.
-    return pager.hasNext ? "UNKNOWN" : "FINAL_PAGE";
+    // No numbered pager. What decides is whether the next control can be PRESSED, not whether one is
+    // drawn: WING renders its `<`/`>` arrows on every list, dead ones included, so asking `hasNext` here
+    // would answer UNKNOWN for a genuinely one-page channel — a small seller whose whole list is read in
+    // one page could never be told their list was complete. An enabled next with nothing numbered beside
+    // it still means there IS more and we cannot count it.
+    return pager.nextEnabled ? "UNKNOWN" : "FINAL_PAGE";
   }
   if (!pager.resolved || pager.currentPage === null) return "UNKNOWN";
   const highest = pager.pageNumbers[pager.pageNumbers.length - 1];
@@ -395,6 +399,32 @@ export const EMPTY_BODY_PLACEHOLDERS: readonly string[] = Object.freeze([
   "등록된 상품평이 없습니다.",
   "내용 없음",
 ]);
+
+/**
+ * **The expander is Coupang's word, not the buyer's.**
+ *
+ * A long review is printed cut off with a `더보기` control inside the same cell, and the cell's text is read
+ * whole — so the control's own label lands on the END of the stored body. Three things then go wrong at once,
+ * and none of them announces itself: the seller reads a review that ends in a button, the body fingerprint is
+ * computed over text no customer wrote, and locate anchors on that fingerprint — so the row would still match
+ * itself only because both sides carry the same defect.
+ *
+ * Stripped as a TRAILING word only, and only when the rest of the cell said something. A review that mentions
+ * 더보기 in the middle of a sentence keeps it: that is a customer's word, in a customer's sentence.
+ */
+const BODY_EXPANDER_WORDS: readonly string[] = Object.freeze(["더보기", "전체보기", "펼쳐보기"]);
+
+export function stripExpanderChrome(body: string): string {
+  let out = body.trim();
+  // A cell can carry more than one (an expander and a collapse), so peel until nothing more comes off.
+  for (;;) {
+    const word = BODY_EXPANDER_WORDS.find((w) => out.endsWith(w));
+    if (word === undefined) return out;
+    // A cell holding only the control peels to nothing, which is correct: that is a cell with no review text
+    // in it, and it goes on to be recognised as textless rather than stored as a button label.
+    out = out.slice(0, out.length - word.length).trim();
+  }
+}
 
 /** True when the cell holds nothing a buyer wrote — blank, or the channel's own placeholder sentence. */
 export function isEmptyReviewBody(body: string): boolean {
@@ -464,7 +494,7 @@ export function canonicalizeReviewRow(
   if (rating === null) return { dropReason: "unreadableRating" };
   const { productId, vendorItemId } = parseProductIds(row.productText);
   if (productId === null) return { dropReason: "noProductId" };
-  const raw = row.bodyText.trim();
+  const raw = stripExpanderChrome(row.bodyText);
   // Coupang's placeholder is the channel's own UI text. It is not stored as a body — the review becomes
   // textless, which is a state the record carries rather than a sentence it repeats.
   const textless = isEmptyReviewBody(raw);

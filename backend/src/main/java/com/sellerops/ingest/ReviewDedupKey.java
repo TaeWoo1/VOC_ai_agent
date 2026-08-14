@@ -70,13 +70,19 @@ public final class ReviewDedupKey {
     }
 
     /**
-     * The version for ONE row: v3 when the row is textless AND carries an option id to key on, else the
-     * channel's own version. A textless row with no option id falls back rather than inventing one.
+     * The version for ONE row: v3 for a textless row on a content-hashed channel, else the channel's own
+     * version.
+     *
+     * <p><b>It is a function of {@code textless} alone, deliberately.</b> An earlier form also required an
+     * option id to be present, which made the FORMULA depend on a cell that a screen can render empty — so
+     * one reading of a review would key it under v3 and the next under v2, and a re-sync would store the
+     * same review twice. Which formula a row uses must be decided by what the row IS, never by whether one
+     * of its cells happened to be readable. A textless row with no option id still hashes under v3, with
+     * the option contributing an empty part exactly as {@link ContentHash} treats any absent value.
      */
-    public static int versionForRow(String channelCode, boolean textless, String optionId) {
+    public static int versionForRow(String channelCode, boolean textless) {
         int channelVersion = versionFor(channelCode);
-        boolean optionAvailable = optionId != null && !optionId.isBlank();
-        return textless && optionAvailable && channelVersion >= V2 ? V3 : channelVersion;
+        return textless && channelVersion >= V2 ? V3 : channelVersion;
     }
 
     /**

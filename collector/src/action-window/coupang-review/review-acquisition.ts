@@ -67,6 +67,12 @@ export const ACQUISITION_STOP_REASONS = [
   "PAGE_DID_NOT_ADVANCE",
   /** The bound on pages was hit first. Says nothing about whether more exist. */
   "PAGE_LIMIT_REACHED",
+  /**
+   * One sitting's worth of reviews was collected. The handoff carries a bounded batch, and a walk that
+   * kept going past that bound would end with the backend refusing the WHOLE sitting at the last step —
+   * every page the operator turned lost to a validation error. Stopping at the bound keeps what was read.
+   */
+  "REVIEW_LIMIT_REACHED",
   /** Still walking. */
   "IN_PROGRESS",
 ] as const;
@@ -104,12 +110,30 @@ export interface AcquisitionResult {
   readonly dropped: CoupangReviewDropCounts;
   /** How many collected reviews were rated with no text — reported, never hidden inside the total. */
   readonly textlessCollected: number;
+  /**
+   * How many bodies the list cell offered to expand — the honest warning that the stored text is a PREFIX of
+   * what the buyer wrote. It stops here rather than travelling to the backend, which has no column for it, so
+   * the number is put in front of the operator who can still go and look at the screen.
+   */
+  readonly expandableCollected: number;
   /** Pages that repeated a page already seen — recorded rather than silently tolerated. */
   readonly repeatedPages: number;
 }
 
 /** A generous bound. A seller with more 상품평 pages than this backfills across more than one sitting. */
 export const MAX_ACQUISITION_PAGES = 100;
+
+/**
+ * **One sitting hands over one batch, and this is the batch.**
+ *
+ * The backend refuses a handoff carrying more than this ({@code AgentReviewHandoffRequest.MAX_REVIEWS}), and
+ * it refuses it as a whole — so a walk that ignored the bound would spend an operator's entire sitting
+ * turning pages and then store none of them. The walk stops here instead, with a stop reason that says so.
+ *
+ * Kept as a plain number rather than imported from the handoff client, which is the module that talks to the
+ * network; the session stays pure. The two are pinned to each other by a test.
+ */
+export const MAX_ACQUISITION_REVIEWS = 500;
 
 function emptyDrops(): CoupangReviewDropCounts {
   return { unparseableDate: 0, unreadableRating: 0, noProductId: 0 };
@@ -138,6 +162,7 @@ export interface AcquisitionSessionOptions {
    */
   readonly knownKeys?: Iterable<string>;
   readonly maxPages?: number;
+  readonly maxReviews?: number;
 }
 
 export class ReviewAcquisitionSession {
@@ -145,6 +170,7 @@ export class ReviewAcquisitionSession {
   private readonly seenPageSignatures = new Set<string>();
   private readonly collected: CoupangAcquiredReview[] = [];
   private readonly maxPages: number;
+  private readonly maxReviews: number;
   private drops = emptyDrops();
   private accepted = 0;
   private rows = 0;
@@ -155,6 +181,10 @@ export class ReviewAcquisitionSession {
   constructor(options: AcquisitionSessionOptions = {}) {
     this.known = new Set(options.knownKeys ?? []);
     this.maxPages = Math.max(1, Math.min(MAX_ACQUISITION_PAGES, options.maxPages ?? MAX_ACQUISITION_PAGES));
+    this.maxReviews = Math.max(
+      1,
+      Math.min(MAX_ACQUISITION_REVIEWS, options.maxReviews ?? MAX_ACQUISITION_REVIEWS),
+    );
   }
 
   /** True while the operator should keep paging. */
@@ -209,6 +239,14 @@ export class ReviewAcquisitionSession {
       this.repeated += 1;
       this.stopped = "PAGE_DID_NOT_ADVANCE";
       return { pageNumber, accepted: false, rowsRead: reading.rows.length, newReviews: 0, alreadyKnown: reviews.length, dropped, stopReason: this.stopped };
+    }
+    // **The batch bound is checked BEFORE the page is taken, not after.** Checked afterwards it could only
+    // notice the overflow once the batch already held it, and the handoff would still be refused whole. So a
+    // page that would not fit is not accepted at all: what is already collected is handed over intact, and
+    // the operator is told the sitting stopped at its limit rather than at the end of their list.
+    if (this.collected.length + reviews.length > this.maxReviews) {
+      this.stopped = "REVIEW_LIMIT_REACHED";
+      return { pageNumber, accepted: false, rowsRead: reading.rows.length, newReviews: 0, alreadyKnown: 0, dropped, stopReason: this.stopped };
     }
     if (reviews.length > 0) this.seenPageSignatures.add(signature);
 
@@ -267,6 +305,7 @@ export class ReviewAcquisitionSession {
       reviews: Object.freeze([...this.collected]),
       dropped: this.drops,
       textlessCollected: this.collected.filter((r) => r.textless).length,
+      expandableCollected: this.collected.filter((r) => r.bodyExpandable).length,
       repeatedPages: this.repeated,
     };
   }

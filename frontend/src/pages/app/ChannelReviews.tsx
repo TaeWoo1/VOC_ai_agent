@@ -24,10 +24,25 @@ import type { ChannelReviewDetailView, ChannelReviewPageView } from "../../lib/t
  * No buyer name appears anywhere, because none is stored: the acquisition path locates that column
  * on the screen precisely so it can refuse to read it.
  */
+/** One screenful. The backend takes it as `size`; the FE never assumes the server used it. */
+const PAGE_SIZE = 20;
+
+/**
+ * "21–22번째 · 총 22개" — which slice of the list is on screen. Derived from what the RESPONSE says its
+ * page and size were, not from what was asked for: a server that clamped the size would otherwise be
+ * described by a label that quietly disagreed with the rows under it.
+ */
+export function shownRangeLabel(page: ChannelReviewPageView | null): string {
+  if (page === null || page.items.length === 0) return "0개 표시 중";
+  const first = page.page * page.size + 1;
+  return `${first}–${first + page.items.length - 1}번째 · 총 ${page.total}개`;
+}
+
 export function ChannelReviews() {
   const { accountId = "" } = useParams();
 
   const [sort, setSort] = useState<"newest" | "lowest">("newest");
+  const [pageIndex, setPageIndex] = useState(0);
   const [page, setPage] = useState<ChannelReviewPageView | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -37,10 +52,12 @@ export function ChannelReviews() {
   const [detailError, setDetailError] = useState(false);
 
   const load = useCallback(
-    async (nextSort: "newest" | "lowest") => {
+    async (nextSort: "newest" | "lowest", nextPage: number) => {
       setLoading(true);
       try {
-        setPage(await api.getChannelReviewsStrict(accountId, { sort: nextSort, size: 20 }));
+        setPage(
+          await api.getChannelReviewsStrict(accountId, { sort: nextSort, page: nextPage, size: PAGE_SIZE }),
+        );
         setLoadError(false);
       } catch {
         // Fail closed: an unreachable backend shows nothing, never an invented list. The seller has
@@ -56,8 +73,8 @@ export function ChannelReviews() {
 
   useEffect(() => {
     if (!accountId) return;
-    void load(sort);
-  }, [accountId, sort, load]);
+    void load(sort, pageIndex);
+  }, [accountId, sort, pageIndex, load]);
 
   useEffect(() => {
     if (!accountId || !selectedId) {
@@ -83,6 +100,9 @@ export function ChannelReviews() {
       live = false;
     };
   }, [accountId, selectedId]);
+
+  // Ceiling division on the size the SERVER reported, for the same reason the label uses it.
+  const totalPages = page === null || page.size <= 0 ? 1 : Math.max(1, Math.ceil(page.total / page.size));
 
   return (
     <div className="space-y-6">
@@ -121,7 +141,10 @@ export function ChannelReviews() {
           variant={sort === "newest" ? "solid" : "outline"}
           size="sm"
           aria-pressed={sort === "newest"}
-          onClick={() => setSort("newest")}
+          onClick={() => {
+            setSort("newest");
+            setPageIndex(0);
+          }}
         >
           최신순
         </Btn>
@@ -129,7 +152,10 @@ export function ChannelReviews() {
           variant={sort === "lowest" ? "solid" : "outline"}
           size="sm"
           aria-pressed={sort === "lowest"}
-          onClick={() => setSort("lowest")}
+          onClick={() => {
+            setSort("lowest");
+            setPageIndex(0);
+          }}
         >
           낮은 평점순
         </Btn>
@@ -140,7 +166,7 @@ export function ChannelReviews() {
           title="상품평을 불러오지 못했습니다"
           body="연결 상태를 확인한 뒤 다시 시도해 주세요. 불러오지 못한 목록을 임의로 채우지는 않습니다."
           action={
-            <Btn size="sm" onClick={() => void load(sort)}>
+            <Btn size="sm" onClick={() => void load(sort, pageIndex)}>
               다시 시도
             </Btn>
           }
@@ -159,7 +185,7 @@ export function ChannelReviews() {
         />
       ) : (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
-          <Panel title="목록" description={`${page?.items.length ?? 0}개 표시 중`}>
+          <Panel title="목록" description={shownRangeLabel(page)}>
             <ul className="divide-y divide-line">
               {(page?.items ?? []).map((item) => (
                 <li key={item.id}>
@@ -190,6 +216,35 @@ export function ChannelReviews() {
                 </li>
               ))}
             </ul>
+
+            {/*
+              **The list is paged, and the paging is visible.** Without this the page showed the first 20 and
+              nothing said so — a seller with 22 상품평 read "총 22개" over a list of 20 and had no way to
+              reach the other two. The buttons move the window; the label says which window is open.
+            */}
+            {totalPages > 1 ? (
+              <nav className="mt-4 flex items-center justify-between gap-3" aria-label="상품평 목록 페이지">
+                <Btn
+                  size="sm"
+                  variant="outline"
+                  disabled={pageIndex <= 0 || loading}
+                  onClick={() => setPageIndex((n) => Math.max(0, n - 1))}
+                >
+                  이전
+                </Btn>
+                <span className="text-sm text-muted">
+                  {pageIndex + 1} / {totalPages} 페이지
+                </span>
+                <Btn
+                  size="sm"
+                  variant="outline"
+                  disabled={pageIndex >= totalPages - 1 || loading}
+                  onClick={() => setPageIndex((n) => n + 1)}
+                >
+                  다음
+                </Btn>
+              </nav>
+            ) : null}
           </Panel>
 
           <Panel title="상세" description={selectedId ? undefined : "왼쪽에서 상품평을 선택하세요"}>

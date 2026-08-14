@@ -1539,7 +1539,12 @@ export const COUPANG_WING_REVIEW_ACQUISITION_SCOPE = Object.freeze({
     "are offered, which one is showing, whether a next control is pressable) so the run can tell whether it " +
     "reached the end of the list, and it NEVER presses it — every page turn is the operator's; it hands what " +
     "it read to the SellerOps backend over the operator's own session, where identical reviews de-duplicate " +
-    "rather than being stored twice; and, when asked, it rings ONE already-stored review on the screen by " +
+    "rather than being stored twice; a 상품평 whose buyer rated without writing IS STORED, as a review with " +
+    "no text — Coupang's own '등록된 내용이 없습니다.' placeholder is never kept as though a customer had " +
+    "written it — and such a review is told apart by the option it was left on, so two options stay two " +
+    "reviews while two textless reviews of ONE option on one day at one rating merge into one (a known " +
+    "limit, accepted rather than fixed with a buyer name or a row position); and, when asked, it rings ONE " +
+    "already-stored review on the screen by " +
     "matching product, option, date, rating and the review body's fingerprint, refusing to ring anything at " +
     "all unless exactly one row matches)",
   maxActions:

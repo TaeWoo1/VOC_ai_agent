@@ -237,7 +237,7 @@ export function banner(): void {
 export function summarize(result: AcquisitionResult, handoff: ReviewHandoffResponse | null): string {
   const head =
     `pages=${result.pagesAccepted} rows=${result.rowsRead} collected=${result.reviews.length} ` +
-    `textless=${result.textlessCollected} ` +
+    `textless=${result.textlessCollected} expandable=${result.expandableCollected} ` +
     `complete=${result.complete} stop=${result.stopReason} lastPage=${result.lastPageNumber ?? "?"}`;
   const drops =
     ` dropped(date=${result.dropped.unparseableDate} rating=${result.dropped.unreadableRating} ` +
@@ -379,6 +379,16 @@ async function main(): Promise<void> {
     if (stop !== "COLLECTED") {
       console.error(summarize(result, null));
       process.exitCode = acquisitionExitCode(stop, result.complete, false);
+      return;
+    }
+    // **A read page with no reviews on it is not a handoff.** A seller whose 상품평 list is genuinely empty,
+    // and a page whose every row was dropped, both arrive here with pages read and nothing to store. Posting
+    // that would be an empty batch, which the backend rejects outright — and the operator would be told their
+    // sitting FAILED when what actually happened is that there was nothing to collect.
+    if (result.reviews.length === 0) {
+      console.error(summarize(result, null));
+      console.error("  nothing to hand over — the pages read carried no review this run could store.");
+      process.exitCode = acquisitionExitCode("NOTHING_COLLECTED", result.complete, false);
       return;
     }
 

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { ChannelReviews } from "./ChannelReviews";
+import { ChannelReviews, shownRangeLabel } from "./ChannelReviews";
 import { expectNoAxeViolations } from "../../test/axe";
 import type { ChannelReviewDetailView, ChannelReviewPageView } from "../../lib/types";
 
@@ -221,6 +221,63 @@ describe("no buyer appears, because none is stored", () => {
     await screen.findByText(/다음에도 구매할게요/);
 
     expect(document.body.textContent).not.toContain("김서연");
+  });
+});
+
+/**
+ * A seller with more 상품평 than one screenful used to be shown the first 20 under a "총 22개" chip, with
+ * nothing on the page saying a second page existed and no control that could reach it.
+ */
+describe("a list longer than one screen can be walked", () => {
+  const LONG = { ...PAGE, total: 42, size: 20 };
+
+  it("says which slice of the list is on screen", () => {
+    expect(shownRangeLabel({ ...LONG, page: 1 })).toBe("21–22번째 · 총 42개");
+    // Derived from what the RESPONSE said, so a server that clamped the size cannot be misdescribed.
+    expect(shownRangeLabel({ ...LONG, page: 0, size: 2 })).toBe("1–2번째 · 총 42개");
+    expect(shownRangeLabel(null)).toBe("0개 표시 중");
+  });
+
+  it("asks the backend for the next page when the seller asks for it", async () => {
+    getChannelReviewsStrict.mockResolvedValue(LONG);
+    renderPage();
+    await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요");
+
+    await userEvent.click(screen.getByRole("button", { name: "다음" }));
+
+    await waitFor(() =>
+      expect(getChannelReviewsStrict).toHaveBeenLastCalledWith("acc-1", {
+        sort: "newest",
+        page: 1,
+        size: 20,
+      }),
+    );
+  });
+
+  it("offers no paging at all when the whole list already fits", async () => {
+    getChannelReviewsStrict.mockResolvedValue(PAGE);
+    renderPage();
+    await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요");
+
+    expect(screen.queryByRole("button", { name: "다음" })).toBeNull();
+  });
+
+  it("returns to the first page when the order changes, rather than keeping a position that no longer means the same thing", async () => {
+    getChannelReviewsStrict.mockResolvedValue(LONG);
+    renderPage();
+    await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요");
+    await userEvent.click(screen.getByRole("button", { name: "다음" }));
+    await waitFor(() => expect(getChannelReviewsStrict).toHaveBeenLastCalledWith("acc-1", expect.objectContaining({ page: 1 })));
+
+    await userEvent.click(screen.getByRole("button", { name: "낮은 평점순" }));
+
+    await waitFor(() =>
+      expect(getChannelReviewsStrict).toHaveBeenLastCalledWith("acc-1", {
+        sort: "lowest",
+        page: 0,
+        size: 20,
+      }),
+    );
   });
 });
 

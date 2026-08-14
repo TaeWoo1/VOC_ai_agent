@@ -47,6 +47,7 @@ function result(over: Partial<AcquisitionResult> = {}): AcquisitionResult {
     reviews: [],
     dropped: { unparseableDate: 0, unreadableRating: 0, noProductId: 0 },
     textlessCollected: 0,
+    expandableCollected: 0,
     repeatedPages: 0,
     ...over,
   };
@@ -146,6 +147,14 @@ describe("what the run prints", () => {
     // 19 of 22 on the first live account. A line that said only "22 collected" would hide what kind of
     // record the seller is actually getting.
     expect(summarize(result({ textlessCollected: 19 }), null)).toContain("textless=19");
+  });
+
+  /**
+   * The one number that says the stored text may be a PREFIX. It goes no further than this line — the backend
+   * has no column for it — so if it never reached the summary it would exist nowhere a person looks.
+   */
+  it("prints how many bodies the cell offered to expand", () => {
+    expect(summarize(result({ expandableCollected: 3 }), null)).toContain("expandable=3");
   });
 
   it("carries the drop counts, so a skipped review is reported rather than lost", () => {
@@ -290,5 +299,31 @@ describe("the harness scripts describe the run that exists", () => {
 
   it("does not claim the walk can stop early at a page of familiar reviews", () => {
     expect(PREFLIGHT).toContain("walks every page on a RE-collection");
+  });
+
+  /**
+   * The manifest once said a rating-only 상품평 was "skipped and counted, not stored" — and by the time two
+   * grants had been given against that sentence, 19 of 22 stored reviews were exactly that kind. A manifest
+   * that misdescribes what is persisted is not an informed approval, whatever the operator answered.
+   *
+   * So the three facts of the decision are pinned here in both places a person can read them: the manifest
+   * display the operator sees, and the scope sentence the gate validates.
+   */
+  it("tells the operator that a rating-only review IS stored, and how it can collide", () => {
+    expect(PREFLIGHT).toContain("A 별점 with nothing written under it IS stored");
+    expect(PREFLIGHT).toContain("등록된 내용이 없습니다.");
+    expect(PREFLIGHT).toContain("stored with no text at all");
+    expect(PREFLIGHT).toContain("told apart by the 옵션 it was left on");
+    expect(PREFLIGHT).toContain("cannot be told apart and become one");
+    // The pre-decision sentence, which said the opposite of what the code does.
+    expect(PREFLIGHT).not.toContain("is skipped and counted, not stored");
+  });
+
+  it("carries the same fact in the scope sentence the gate validates", () => {
+    const scope = COUPANG_WING_REVIEW_ACQUISITION_SCOPE.operation;
+    expect(scope).toContain("rated without writing IS STORED");
+    expect(scope).toContain("등록된 내용이 없습니다.");
+    expect(scope).toContain("told apart by the option it was left on");
+    expect(scope).toContain("merge into one");
   });
 });

@@ -246,6 +246,36 @@ describe("canonicalization decides what a cell means, once, offline", () => {
     expect(canonicalizeReviewRows(page(HEADERS, [mentions])).reviews).toHaveLength(1);
   });
 
+  /**
+   * A long review is printed cut off with a 더보기 control INSIDE the body cell, and the cell is read whole —
+   * so without this the stored body ends in a button label, and the fingerprint locate anchors on is computed
+   * over a word no customer wrote.
+   */
+  it("does not store the cell's own 더보기 control as part of what the buyer wrote", () => {
+    const expanded = { ...ROW_A, body: "배송도 빠르고 소리도 좋아요 더보기" };
+    const { reviews } = canonicalizeReviewRows(page(HEADERS, [expanded]));
+
+    expect(reviews[0]!.body).toBe("배송도 빠르고 소리도 좋아요");
+    expect(JSON.stringify(reviews)).not.toContain("더보기");
+  });
+
+  it("treats a cell holding only the control as a review with no text", () => {
+    const chromeOnly = { ...ROW_A, body: "전체보기" };
+    const { reviews, textlessCount } = canonicalizeReviewRows(page(HEADERS, [chromeOnly]));
+
+    expect(textlessCount).toBe(1);
+    expect(reviews[0]).toMatchObject({ textless: true, body: "" });
+  });
+
+  it("keeps 더보기 where the buyer wrote it mid-sentence", () => {
+    // Stripped as a TRAILING control only. A customer's word inside a customer's sentence is theirs.
+    const mentions = { ...ROW_A, body: "더보기 눌러야 다 보이는 게 불편했어요" };
+
+    expect(canonicalizeReviewRows(page(HEADERS, [mentions])).reviews[0]!.body).toBe(
+      "더보기 눌러야 다 보이는 게 불편했어요",
+    );
+  });
+
   it("keeps a rating-only review, because the rating is the signal it carries", () => {
     const rated = { ...ROW_A, body: "" };
     const { reviews, textlessCount } = canonicalizeReviewRows(page(HEADERS, [rated, { ...rated, no: "2" }]));

@@ -44,6 +44,13 @@ export class ReviewHandoffTransportError extends Error {
  * visible in one place — and so that adding a field to the canonical record does not silently start
  * transmitting it. `bodyFingerprint` deliberately does NOT travel: the backend recomputes it from the body it
  * stored, and a fingerprint the agent asserted would be a second source of truth for the locate target.
+ *
+ * **`bodyTruncated` does not travel either, and its absence is deliberate.** It only ever meant "longer than
+ * the 8,000-character reader cap", which a list cell cannot be, so it crossed as `false` on every row ever
+ * sent and nothing on the other side stored it. What DOES say the text may be a prefix is `bodyExpandable` —
+ * the cell offering 더보기 — and that stays on this side, counted into the run summary the operator reads,
+ * because there is no column for it and inventing one for a flag no live sitting has yet seen fire would be
+ * the guess this unit keeps refusing to make.
  */
 function wireRow(review: CoupangAcquiredReview): Record<string, unknown> {
   return {
@@ -55,7 +62,6 @@ function wireRow(review: CoupangAcquiredReview): Record<string, unknown> {
     vendorItemId: review.vendorItemId,
     productName: review.productName,
     mediaCount: review.mediaCount,
-    bodyTruncated: review.bodyTruncated,
   };
 }
 

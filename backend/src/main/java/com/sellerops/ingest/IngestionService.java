@@ -90,7 +90,7 @@ public class IngestionService {
             try {
                 Product product = productService.resolveOrCreate(orgId, row.productName(), row.sku());
                 boolean hasExternal = isPresent(row.externalId());
-                int keyVersion = ReviewDedupKey.versionForRow(channelCode, row.textless(), row.sourceOptionId());
+                int keyVersion = ReviewDedupKey.versionForRow(channelCode, row.textless());
                 String hash = hasExternal ? null
                         : ReviewDedupKey.contentHash(keyVersion, channelId, product.getId(),
                         datePart(row.receivedAt()), row.body(), row.rating(), row.sourceOptionId());

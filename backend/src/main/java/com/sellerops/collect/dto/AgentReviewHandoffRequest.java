@@ -73,8 +73,6 @@ public record AgentReviewHandoffRequest(
             String vendorItemId,
             @Size(max = 500) String productName,
             @Min(0) @Max(50) int mediaCount,
-            /** The list cell cut the body off. Stored text is then a prefix, and the product should say so. */
-            boolean bodyTruncated,
             /**
              * The buyer rated and wrote nothing. Carried rather than inferred from a blank body, because the
              * two are different claims: a blank body could be a reader defect, while this is the agent saying

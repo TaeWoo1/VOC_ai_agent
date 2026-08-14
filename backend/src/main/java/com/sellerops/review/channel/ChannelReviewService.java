@@ -77,7 +77,7 @@ public class ChannelReviewService {
     public ChannelReviewPageView list(UUID orgId, UUID accountId, String sort, int page, int size) {
         SellerAccount account = requireAccount(orgId, accountId);
         UUID channelId = account.getChannelId();
-        Optional<SyncJob> lastImport = lastReviewImport(orgId, accountId);
+        Optional<SyncJob> lastImport = lastReviewImport(orgId, channelId);
         Instant newSince = lastImport.map(SyncJob::getStartedAt).orElse(null);
 
         Page<Review> found = reviews.findByOrgIdAndChannelId(orgId, channelId,
@@ -114,7 +114,7 @@ public class ChannelReviewService {
                 : products.findAllByOrgIdAndIdIn(orgId, List.of(review.getProductId()))
                         .stream().findFirst().orElse(null);
         RedactedBody body = VocPreviewSanitizer.redactFullBody(review.getBody());
-        Instant newSince = lastReviewImport(orgId, accountId).map(SyncJob::getStartedAt).orElse(null);
+        Instant newSince = lastReviewImport(orgId, account.getChannelId()).map(SyncJob::getStartedAt).orElse(null);
 
         return new ChannelReviewDetailView(
                 review.getId(),
@@ -162,8 +162,17 @@ public class ChannelReviewService {
     }
 
     /** The most recent REVIEW collection for this account, whatever produced it. */
-    private Optional<SyncJob> lastReviewImport(UUID orgId, UUID accountId) {
-        return syncJobs.findFirstByOrgIdAndSellerAccountIdAndDataTypeOrderByCreatedAtDesc(orgId, accountId, "REVIEW");
+    /**
+     * **Scoped by CHANNEL, because that is what the list is scoped by.**
+     *
+     * <p>The rows come from {@code findByOrgIdAndChannelId} — every review the org holds for this channel,
+     * whichever of its seller accounts collected them. An import read per ACCOUNT would then date a list it
+     * does not cover: on an org with two Coupang connections, reviews collected under the sibling account
+     * would be marked new, or not new, against an import that never touched them. One scope for the rows and
+     * their dates, or the numbers on the page describe two different sets.
+     */
+    private Optional<SyncJob> lastReviewImport(UUID orgId, UUID channelId) {
+        return syncJobs.findFirstByOrgIdAndChannelIdAndDataTypeOrderByCreatedAtDesc(orgId, channelId, "REVIEW");
     }
 
     /**

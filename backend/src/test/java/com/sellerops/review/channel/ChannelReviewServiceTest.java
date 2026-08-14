@@ -199,6 +199,32 @@ class ChannelReviewServiceTest {
     }
 
     @Test
+    void dates_the_list_by_the_channel_it_listed_by_rather_than_by_one_account_on_it() {
+        // Two Coupang connections in one org sit on ONE channel, and the list shows the channel's reviews —
+        // every one of them, whichever connection collected them. Read per ACCOUNT, this same page would say
+        // no import had ever run and mark nothing new, over rows an import had just brought in.
+        SellerAccount sibling = new SellerAccount();
+        sibling.setOrgId(org);
+        sibling.setChannelId(channelId);
+        sibling.setConnectionStatus(ChannelStatus.PENDING);
+        sibling.setFileUpload(false);
+        accounts.save(sibling);
+
+        Product p = product("무선 이어폰", "15411270785");
+        Instant importStart = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        review(BODY, 5, LocalDate.of(2026, 8, 11), p, importStart.plusSeconds(1));
+        SyncJob job = importAt(importStart, "SUCCESS");
+        job.setSellerAccountId(sibling.getId());
+        syncJobs.save(job);
+
+        ChannelReviewPageView view = service.list(org, account.getId(), "newest", 0, 20);
+
+        assertThat(view.newCount()).isEqualTo(1);
+        assertThat(view.items().get(0).isNew()).isTrue();
+        assertThat(view.lastImportAt()).isNotNull();
+    }
+
+    @Test
     void marks_nothing_new_when_no_import_has_run() {
         Product p = product("무선 이어폰", "15411270785");
         review(BODY, 5, LocalDate.of(2026, 8, 11), p, Instant.now());

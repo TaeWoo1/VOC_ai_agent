@@ -65,6 +65,18 @@ public interface SyncJobRepository extends JpaRepository<SyncJob, UUID> {
             UUID orgId, UUID sellerAccountId, String dataType);
 
     /**
+     * The most recent sync of one data type for one CHANNEL, newest first.
+     *
+     * <p>The channel-scoped twin of the read above, and the difference is not cosmetic. A surface that lists
+     * reviews by channel — every review the org holds for that channel, whichever seller account collected it
+     * — must date its "last import" and its "new since" by the same scope it listed by. Reading the import
+     * from one ACCOUNT instead would mark rows collected under a sibling account as new or not-new against a
+     * clock that never ran over them.
+     */
+    Optional<SyncJob> findFirstByOrgIdAndChannelIdAndDataTypeOrderByCreatedAtDesc(
+            UUID orgId, UUID channelId, String dataType);
+
+    /**
      * The in-flight ({@code RUNNING}) runs for one (seller account, data type) — the single-flight
      * gate ({@code SyncRunGate}) reads this under the account row lock to decide whether to coalesce a
      * new run into an existing one or fail an orphaned one. Oldest first so a stale sweep is

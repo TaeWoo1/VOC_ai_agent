@@ -13,6 +13,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_ACQUISITION_PAGES,
+  MAX_ACQUISITION_REVIEWS,
   ReviewAcquisitionSession,
 } from "../../src/action-window/coupang-review/review-acquisition";
 import {
@@ -301,6 +302,30 @@ describe("every other ending refuses to claim coverage", () => {
     expect(session.result()).toMatchObject({ complete: false, stopReason: "PAGE_LIMIT_REACHED" });
   });
 
+  /**
+   * The handoff is ONE bounded batch, and the backend refuses an oversized one as a whole — so a walk that
+   * ran past the bound would end with an operator having turned every page of a long list for a validation
+   * error and nothing stored. The bound is enforced before a page is taken, so what was collected still fits.
+   */
+  it("stops at the batch bound rather than collecting a handoff the backend will refuse", () => {
+    const session = new ReviewAcquisitionSession({ maxReviews: 3 });
+    session.offerPage(readable([row("a"), row("b")], pagerAt(1, 9)));
+    // This page would take the batch to four. It is not accepted at all.
+    const third = session.offerPage(readable([row("c"), row("d")], pagerAt(2, 9)));
+
+    expect(third.accepted).toBe(false);
+    expect(third.stopReason).toBe("REVIEW_LIMIT_REACHED");
+    const result = session.result();
+    expect(result.reviews).toHaveLength(2);
+    expect(result.complete).toBe(false);
+  });
+
+  it("bounds the batch at the size the wire accepts", () => {
+    // Pinned to AgentReviewHandoffRequest.MAX_REVIEWS on the other side. If one moves, this fails.
+    expect(MAX_ACQUISITION_REVIEWS).toBe(500);
+    expect(new ReviewAcquisitionSession({ maxReviews: 10_000 }).open).toBe(true);
+  });
+
   it("ignores pages offered after it stopped", () => {
     const session = new ReviewAcquisitionSession();
     session.offerPage(UNREADABLE);
@@ -384,5 +409,39 @@ describe("pagerPosition on its own", () => {
     // "page 9 of 1,2,3" is a contradiction, not a position — and read as past-the-end it would COMPLETE a
     // walk. The reading is refused instead.
     expect(pagerPosition(inconsistent)).toBe("UNKNOWN");
+  });
+
+  /**
+   * The one-page seller. WING draws its `<` and `>` arrows on every list, dead ones included, so a next
+   * control being PRESENT says nothing — and the un-numbered branch used to ask exactly that. The effect was
+   * that a channel whose entire 상품평 list fits on one page could never be told it was complete: every
+   * sitting would end `OPERATOR_FINISHED`, never `FINAL_PAGE_REACHED`. Whether the arrow can be PRESSED is
+   * the question.
+   */
+  it("completes an un-numbered list whose next arrow is drawn but dead", () => {
+    const onePage: CoupangReviewPagerReading = pagerReading({
+      found: false,
+      resolved: false,
+      pageNumbers: [],
+      currentPage: null,
+      hasNext: true,
+      nextEnabled: false,
+    });
+
+    expect(pagerPosition(onePage)).toBe("FINAL_PAGE");
+  });
+
+  it("still refuses an un-numbered list whose next arrow is live", () => {
+    const uncountable: CoupangReviewPagerReading = pagerReading({
+      found: false,
+      resolved: false,
+      pageNumbers: [],
+      currentPage: null,
+      hasNext: true,
+      nextEnabled: true,
+    });
+
+    // There IS more; there is simply nothing on the screen to count it by.
+    expect(pagerPosition(uncountable)).toBe("UNKNOWN");
   });
 });

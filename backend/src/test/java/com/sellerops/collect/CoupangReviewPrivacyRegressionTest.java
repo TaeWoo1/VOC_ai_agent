@@ -79,7 +79,7 @@ class CoupangReviewPrivacyRegressionTest {
         ObjectMapper mapper = new ObjectMapper();
         String json = """
                 {"writtenOn":"2026-08-11","rating":5,"body":"아주 만족합니다","productId":"15411270785",
-                 "vendorItemId":"81234567890","productName":"무선 이어폰","mediaCount":0,"bodyTruncated":false,
+                 "vendorItemId":"81234567890","productName":"무선 이어폰","mediaCount":0,
                  "author":"김서연"}
                 """;
 
@@ -93,7 +93,7 @@ class CoupangReviewPrivacyRegressionTest {
         ObjectMapper mapper = new ObjectMapper();
         String json = """
                 {"writtenOn":"2026-08-11","rating":5,"body":"아주 만족합니다","productId":"15411270785",
-                 "vendorItemId":"81234567890","productName":"무선 이어폰","mediaCount":0,"bodyTruncated":false}
+                 "vendorItemId":"81234567890","productName":"무선 이어폰","mediaCount":0}
                 """;
 
         AgentReviewHandoffRequest.Review row = mapper.readValue(json, AgentReviewHandoffRequest.Review.class);
@@ -106,7 +106,7 @@ class CoupangReviewPrivacyRegressionTest {
     void a_request_object_printed_into_a_log_carries_no_review_text() {
         AgentReviewHandoffRequest.Review row = new AgentReviewHandoffRequest.Review(
                 "2026-08-11", 5, "배송도 빠르고 포장도 꼼꼼해서 아주 만족합니다", "15411270785", "81234567890",
-                "무선 이어폰", 0, false, false);
+                "무선 이어폰", 0, false);
         AgentReviewHandoffRequest request =
                 new AgentReviewHandoffRequest("0123456789abcdef01234567", "COUPANG", true, "OPERATOR_FINISHED",
                         List.of(row));

@@ -65,7 +65,6 @@ describe("what crosses the wire", () => {
     const sent = JSON.parse(init.body as string) as { reviews: Record<string, unknown>[] };
     expect(Object.keys(sent.reviews[0]!).sort()).toEqual([
       "body",
-      "bodyTruncated",
       "mediaCount",
       "productId",
       "productName",
@@ -74,6 +73,21 @@ describe("what crosses the wire", () => {
       "vendorItemId",
       "writtenOn",
     ]);
+  });
+
+  /**
+   * `bodyTruncated` only ever meant "longer than the 8,000-character reader cap", which a WING list cell
+   * cannot be — so it crossed as false on every row ever sent, and nothing on the other side stored it. What
+   * says the text may be a prefix is `bodyExpandable`, and that stays agent-side in the run summary.
+   */
+  it("does not send a truncation flag that could never be true", async () => {
+    const fetchImpl = vi.fn(async () => okResponse({ received: 1, stored: 1, skipped: 0, failed: 0 }));
+
+    await postCoupangReviewHandoff("http://localhost:8080", "tok", REQUEST, fetchImpl as never);
+
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(init.body as string).not.toContain("bodyTruncated");
+    expect(init.body as string).not.toContain("bodyExpandable");
   });
 
   it("does not send the fingerprint the agent computed", async () => {

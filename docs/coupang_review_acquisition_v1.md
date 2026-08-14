@@ -28,9 +28,14 @@ Three measured facts decided nearly every design choice here. None of them was a
 Per review: the review text as the screen printed it, the rating, the date, Coupang's 노출상품ID and —
 when the cell prints one — the 옵션ID, and how many photos/videos the review itself carries.
 
-The agent also reports whether the list cell cut the text off (`bodyTruncated`), and the backend accepts it
-and **does not store it** — so no surface can show it. That is a gap, named in §7 rather than left as a
-claim the product cannot keep.
+The body is what the buyer wrote, and only that. Where a long review is printed cut off with a 더보기 control
+inside the same cell, the control's own label is stripped before anything is stored — otherwise the seller
+reads a review ending in a button and the body fingerprint locate anchors on is computed over a word no
+customer wrote.
+
+Whether the text may be a **prefix** is the agent's `bodyExpandable` — the cell offered to show more. It does
+not cross to the backend, which has no column for it; the run's summary line prints `expandable=N` for the
+operator, and §7 keeps it as a named gap rather than a claim the product cannot keep.
 
 **The buyer is not stored, and the guarantee is structural rather than filtered.** There is no author
 field on the wire record, none on the canonical record, and no column on `reviews`. The wire record
@@ -140,6 +145,7 @@ outline, and a scroll: it never clicks, focuses, types, or submits.
 | The driver | `collector/src/action-window/coupang-review/coupang-wing-review-reader-driver.ts` |
 | Agent → backend handoff | `backend/.../collect/AgentReviewHandoffService.java` |
 | Dedup formula version | `backend/.../ingest/ReviewDedupKey.java` |
+| The columns, and what the option is part of | `V37__review_source_option_and_media.sql`, `V38__review_source_option_in_textless_key.sql` |
 | The seller's record (list / detail / locate target) | `backend/.../review/channel/`, `frontend/src/pages/app/ChannelReviews.tsx` |
 
 ## 6.5 What the first live backfill established — 2026-08-15
@@ -259,14 +265,23 @@ product-owner decision (2026-08-15) is: **store them, keyed additionally on the 
 4. **The product SKU is Coupang's 노출상품ID with no channel prefix**, matching every other connector.
    An org connected to two channels where a NAVER SKU is exactly a Coupang productId digit string would
    collide. Not observed; recorded here rather than silently assumed away.
-5. **`bodyTruncated` is carried and discarded.** The agent knows whether the list cell truncated a review
-   and sends it; nothing persists it, so the product cannot warn that a stored body is a prefix. Either give
-   it a column or stop sending it — and the live run could not decide which, because only 3 of 22 reviews had
-   any text to truncate.
+5. **A prefix body cannot be flagged in the product.** `bodyExpandable` — the cell offering 더보기 — is the
+   only honest "this may be cut off" signal, and it stops at the agent's summary line because `reviews` has
+   no column for it. The live run could not decide whether it needs one: only 3 of 22 reviews had any text at
+   all, and none of the three was long enough for WING to fold. An account with long reviews settles it, and
+   a column invented before that would be schema written against a guess.
 
 6. **`mediaCount` was 0 on every row.** With 19 of 22 reviews textless there was nothing to attach a photo
    to, so "this account has no review media" and "the reader does not find media where WING puts it" are
    still indistinguishable. An account with photo reviews would settle it in one reading.
 
-7. **GA gates G1–G6 are untouched** (`docs/coupang_review_policy_gate_v1.md` §6.2). Nothing in this unit
+7. **A sitting hands over at most 500 reviews.** The handoff is one bounded batch, and the backend refuses
+   an oversized one as a whole — so the walk stops at that bound with `REVIEW_LIMIT_REACHED` rather than
+   spending an operator's whole sitting on pages that would then be refused together. What was read is
+   stored; `complete` is false, and the sitting says so. A seller with more than 500 상품평 therefore cannot
+   backfill in one go: the agent pre-loads no stored keys (§7.2), so a second sitting re-walks from page 1
+   and the database dedupes it — correct, but it never reaches page 51. Closing that is the same work as
+   §7.2, and it only becomes urgent on an account with more reviews than any yet seen.
+
+8. **GA gates G1–G6 are untouched** (`docs/coupang_review_policy_gate_v1.md` §6.2). Nothing in this unit
    moves them; a written Coupang answer is still what releases this.
