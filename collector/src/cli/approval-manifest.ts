@@ -128,6 +128,9 @@ export const CALIBRATION_PHASES = [
   // non-emptiness bit. It exists because `WHERE_THE_CREDENTIAL_VALUES_SIT` is recorded as NOT established, so a
   // value-reading locator written today would be a guess about the location of a secret.
   "COUPANG_WING_CREDENTIAL_CELL_CALIBRATION",
+  // The 고객문의 list census — the WING analog of the credential-cell calibration, for the screen the guided
+  // reply run has to be able to point at. It answers whether the page carries an id we can target at all.
+  "COUPANG_WING_INQUIRY_LIST_CALIBRATION",
   // The credential HANDOFF. The ONLY phase in this list whose agent reads a credential VALUE — which is why it
   // is the only one whose mode is not `READ_ONLY`. After a trusted operator confirmation it takes ONE read of
   // 업체코드 / Access Key / Secret Key and hands them to the SellerOps backend vault, which verifies them with a
@@ -241,6 +244,17 @@ export const APPROVAL_ACTIONS = [
   // boolean, and it is required rather than convenient: a locator that resolves to an EMPTY cell has not found
   // the key, and a calibration that cannot tell those apart would certify a locator that reads nothing. No
   // length, no character class, no prefix, and no value.
+  // Read-only INQUIRY-LIST census: how the 고객문의 rows are arranged (a container enum), how many there are,
+  // how many carry a machine-readable digit run at all, and how many offer a way into a detail view. It reads
+  // row text in exactly ONE place — an `indexOf` against a fixed PLATFORM word WE supply (`답변완료` /
+  // `미답변`) — and reduces it to a boolean inside the page. A buyer's words never cross the boundary, and
+  // there is no terminal here that could return them.
+  "MEASURE_INQUIRY_LIST_STRUCTURE",
+  // Read-only TARGET MATCH COUNT: for a digit string SellerOps already holds (the channel's own inquiryId, the
+  // seller's own productId), how many rows carry it as a WHOLE digit run, plus — only when exactly one does —
+  // the NAMES of the attributes it was found in. The identifiers are ours and travel INTO the page; what comes
+  // back is a count. Zero and two are both refusals: "the one inquiry" may never degrade into "some inquiry".
+  "COUNT_INQUIRY_TARGET_MATCHES",
   "MEASURE_CREDENTIAL_CELL_STRUCTURE",
   // **Read the credential VALUES.** ONE in-page read of 업체코드 / Access Key / Secret Key, taken only after a
   // trusted operator confirmation, and taken at most once per run — not a poll, not a retry, not a per-field
@@ -1058,6 +1072,22 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     allowsHighlight: false,
     mode: "READ_ONLY",
   },
+  COUPANG_WING_INQUIRY_LIST_CALIBRATION: {
+    phase: "COUPANG_WING_INQUIRY_LIST_CALIBRATION",
+    cli: "src/cli/calibrate-inquiry-list.ts",
+    driver: "CoupangWingInquiryDriver (value-free 고객문의 list census)",
+    capableActions: [
+      "OPEN_DEDICATED_WINDOW",
+      "WAIT_OPERATOR_LOGIN_NAV",
+      "CLASSIFY_SANITIZED_PAGE_CATEGORY",
+      "MEASURE_INQUIRY_LIST_STRUCTURE",
+      "COUNT_INQUIRY_TARGET_MATCHES",
+    ],
+    // It measures WHERE the seller's inquiries sit; it rings nothing. A ring belongs to the guided run that
+    // has a calibrated target — this one is the run that finds out whether such a target exists at all.
+    allowsHighlight: false,
+    mode: "READ_ONLY",
+  },
   COUPANG_WING_CREDENTIAL_HANDOFF: {
     phase: "COUPANG_WING_CREDENTIAL_HANDOFF",
     cli: "src/cli/run-coupang-credential-handoff-live.ts",
@@ -1094,6 +1124,7 @@ export const WING_PHASES: readonly CalibrationPhase[] = [
   "COUPANG_WING_ISSUANCE_FORM_REVEAL",
   "COUPANG_WING_KEY_DELETION",
   "COUPANG_WING_CREDENTIAL_CELL_CALIBRATION",
+  "COUPANG_WING_INQUIRY_LIST_CALIBRATION",
   "COUPANG_WING_CREDENTIAL_HANDOFF",
 ];
 export function isWingCalibrationPhase(phase: CalibrationPhase): boolean {
@@ -1215,6 +1246,7 @@ export const ENTRYPOINT_PHASES = [
   "COUPANG_WING_ISSUANCE_FORM_REVEAL",
   "COUPANG_WING_KEY_DELETION",
   "COUPANG_WING_CREDENTIAL_CELL_CALIBRATION",
+  "COUPANG_WING_INQUIRY_LIST_CALIBRATION",
   "COUPANG_WING_CREDENTIAL_HANDOFF",
   "API_ISSUANCE_FE_LIVE_PROOF",
   "NAVER_GUIDED_CONNECTION",
@@ -1299,6 +1331,15 @@ export const COUPANG_WING_CREDENTIAL_CALIBRATION_SCOPE = Object.freeze({
     "WING credential-cell structure calibration (agent measures WHICH CELL holds each key and whether it is " +
     "non-empty; it reads no value, and performs no click/input/navigation)",
   maxActions: "1 sanitized structural census of the credential cells (0 clicks, 0 inputs, 0 value reads)",
+});
+
+export const COUPANG_WING_INQUIRY_LIST_CALIBRATION_SCOPE = Object.freeze({
+  operation:
+    "WING 고객문의 list structure calibration (agent counts how the inquiry rows are arranged, whether a row " +
+    "carries an identifier SellerOps can target, and how many rows are answered vs unanswered; it reads no " +
+    "buyer text, and performs no click/input/navigation)",
+  maxActions:
+    "1 sanitized structural census of the 고객문의 list (0 clicks, 0 inputs, 0 replies, 0 buyer-text reads)",
 });
 
 export const COUPANG_WING_CREDENTIAL_HANDOFF_SCOPE = Object.freeze({
@@ -1622,6 +1663,19 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
       "화면에 도착하신 뒤 'SellerOps 확인' 탭의 [현재 화면 확인]을 누르세요. SellerOps는 업체코드·Access Key·" +
       "Secret Key 라벨이 어떤 칸과 연결되어 있는지 구조만 한 번 측정합니다 — 값은 읽지 않고, 그 칸이 비어 있는지 " +
       "여부(예/아니오) 하나만 확인합니다. 클릭·입력·발급·전송 없음." +
+      WING_RUN_GRANT_SUMMARY +
+      WING_PROBE_CONFIRM_CHANNEL_SUMMARY,
+    emitsFrontendUrl: false,
+  },
+  COUPANG_WING_INQUIRY_LIST_CALIBRATION: {
+    entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
+    cli: "src/cli/calibrate-inquiry-list.ts",
+    entrypointCommandId: "calibrate-inquiry-list",
+    operatorActionSummary:
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 고객문의 목록 화면에 도착하신 뒤 " +
+      "'SellerOps 확인' 탭의 [현재 화면 확인]을 누르세요. SellerOps는 목록이 어떤 구조인지, 각 행에 문의를 " +
+      "가리킬 수 있는 번호가 붙어 있는지, 답변완료·미답변이 구분되는지만 세어 봅니다. **구매자가 쓴 문의 내용은 " +
+      "읽지 않고 어디에도 남기지 않습니다** — 화면에서 나오는 것은 개수뿐입니다. 클릭·입력·답변·전송 없음." +
       WING_RUN_GRANT_SUMMARY +
       WING_PROBE_CONFIRM_CHANNEL_SUMMARY,
     emitsFrontendUrl: false,
