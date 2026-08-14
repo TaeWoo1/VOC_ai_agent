@@ -1,6 +1,6 @@
 # Coupang Review Integration — Feasibility v1
 
-> **Status:** INVESTIGATION. **Nothing is promoted.** Coupang REVIEW remains `BLOCKED` in
+> **Status:** INVESTIGATION **CLOSED** (2026-08-14). **Nothing is promoted.** Coupang REVIEW remains `BLOCKED` in
 > `docs/multi-channel-connector-roadmap.md` §4.1 and `REVIEW_API` remains an honest `unsupportedScope`
 > on `CoupangApiConnector`. This document records what was established, by what evidence, and what a
 > single READ_ONLY sitting is being asked to decide.
@@ -89,22 +89,20 @@ item; until then no run beyond a single READ_ONLY structural measurement is just
 
 ---
 
-## 6. The structural finding that outranks the engineering — 아이템위너
+## 6. Recorded limitation — Coupang reviews may be item-level, not seller-transaction-specific
 
-Coupang shares 상품평 across **every seller of the same item**. Only 셀러평 stays with the seller.
+Coupang shares 상품평 across **every seller of the same item**; only 셀러평 stays with the seller. So
+"reviews on my product" and "reviews of my sales" are not necessarily the same set, and no screen reading
+can separate them — the distinction lives in order data the review does not carry.
 
-So on Coupang, "reviews on my product" and "reviews of my sales" are **not the same set**, and no
-screen reading can separate them — the distinction lives in order data the review does not carry.
+**This is recorded as a limitation of the data, not as a blocker on the decision** (product-owner
+direction, 2026-08-14). Item-level VOC is still VOC: a seller learns what buyers say about the item they
+sell, which is what the analysis channel is for. What it must never do is claim to be a per-transaction
+view of the seller's own sales.
 
-This is a **product-owner decision**, not a technical one:
-
-> Is the operational unit the item's review stream (which includes other sellers' sales), or only the
-> seller's own sales (which Coupang does not expose as a review set)?
-
-If the answer is the latter, Coupang review operations largely do not exist as a capability, whatever
-the screen turns out to support. The probe therefore reports catalog scope **asymmetrically**: finding a
-product id we hold proves our catalog is on the screen; finding none proves nothing, and there is no
-verdict for "other sellers' items" because no measurement can earn it.
+The probe reports catalog scope **asymmetrically** for the same reason: finding a product id we hold
+proves our catalog is on the screen; finding none proves nothing. There is no verdict for "other sellers'
+items", because no measurement can earn it.
 
 ---
 
@@ -390,3 +388,41 @@ a reported `bestCoverage`, and this reading is `IDENTIFIER_PARTIAL` at **0.7**.
   so a review PHOTO indicator is *not* established by this reading.
 - Catalog scope is `NOT_ESTABLISHED` only because no productId was supplied; the column is there to match
   against.
+
+---
+
+## 12. Unit closure — where this leaves Coupang REVIEW
+
+| Axis | State |
+|---|---|
+| **TECHNICALLY_POSSIBLE** | **CONDITIONAL_YES** — the review row is resolved and a per-review identifier exists; two gaps named below |
+| **POLICY** | **UNCLEAR** — 마켓플레이스 판매이용약관 §14 verbatim is still unread. Unchanged by any measurement here, and it is what gates the next unit. |
+| **PRODUCT** | **review acquisition + VOC/analysis channel.** Not a reply channel — WING offers sellers no way to answer a 상품평. |
+
+Settled and not revisited:
+
+- **No official review API** (documentation catalogue counted, 2026-08-14).
+- **No official export** (operator, on their own account).
+- **No seller reply feature** (operator). The channel ends at analysis.
+- **Public product-page scraping is not a candidate** — prohibited in terms effective 2026-09-03.
+- **Item-level review scope** is a recorded limitation (§6), not a blocker.
+
+`docs/multi-channel-connector-roadmap.md` §4.1 keeps Coupang REVIEW at **BLOCKED** and the connector's
+`REVIEW_API` stays an honest `unsupportedScope`. Three live sittings established structure; none of them
+established a right to collect, and structure alone promotes nothing.
+
+### What the next unit closes, in ONE sitting
+
+Gated on the policy answer. If §14 permits a seller reading their own screen:
+
+1. **Why the 10-digit identifier covers only 7 of 10 rows** — a different review type, a deleted one, or an
+   id only some rows expose.
+2. **A stable dedupe key**, from that identifier or from a synthetic one built on structural fields only —
+   never on review body or author.
+3. **Pagination and incremental acquisition** — the period filter is a `<select>`, not a date range, so how
+   far back a run can reach and how it would resume are both open.
+4. **productId / vendorItemId row mapping** — `vendorItemId` never appeared (`cellsWithTwoRuns: 0`), and
+   the column's second line is unaccounted for.
+
+If that sitting comes back clean, **Coupang Review Acquisition v1** follows directly. No further
+small-step calibration: one sitting, then implementation.
