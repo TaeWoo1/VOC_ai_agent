@@ -4,9 +4,9 @@ What SellerOps stores when it reads a seller's own WING 상품평 screen, how it
 already has, and how it finds one again on the screen.
 
 **Status: the first live backfill ran on 2026-08-15 and collected 22 reviews from the operator's own WING
-screen; one stored review was located and rung on that screen.** §6.5 records what it established, the two
-defects it exposed, and the one product decision it forces. The **same-range re-sync proof has not run yet**
-— it is the remaining live step. Nothing here is promoted in `docs/multi-channel-connector-roadmap.md` §4.1.
+screen; one stored review was located and rung on that screen.** §6.5 records what it established and the two
+defects it exposed; the rating-only decision it forced is settled there and implemented. The **same-range
+re-sync proof has not run yet** — it is the remaining live step. Nothing here is promoted in `docs/multi-channel-connector-roadmap.md` §4.1.
 
 **Posture, unchanged from the gate:** `TECHNICALLY_POSSIBLE = CONDITIONAL_YES` / `POLICY = UNCLEAR` /
 `DEVELOPMENT = PILOT_ALLOWED` / `GA = POLICY_GATED`
@@ -42,10 +42,11 @@ column is one careless fallback away from being read, while a column that is exp
 not read is something a test can hold. `excludedColumns` comes back as a count, and the regression
 asserts the column was found and its text appears nowhere.
 
-**Rating-only reviews are dropped and counted, not stored.** Coupang lets a buyer rate without writing.
-With no per-review identifier, two textless five-star reviews of one product on one day are
-indistinguishable, and storing them would merge two real reviews into one — a merge that would look
-exactly like dedupe working. The drop is reported per run.
+**A rating-only review is STORED, as textless.** Coupang lets a buyer rate without writing, and renders a
+fixed placeholder sentence where the body would be. That sentence is the channel's UI, not a customer's
+words, so it is never stored as a body: the review is kept with an empty body and a `textless` flag, and the
+surface says 별점만 남긴 상품평. The rating is the signal such a review carries, and on the first live account
+86% of the 상품평 were these. How many were textless is reported per run rather than folded into the total.
 
 ## 3. How a review is recognised again
 
@@ -57,10 +58,19 @@ reached from the other direction. ESM+ exports carry no review id; Coupang's scr
 value at all. Rating has to be in the key because short bodies repeat: under v1 a five-star and a
 one-star `좋아요` on one product on one day would fold into a single row.
 
-**The option id is deliberately not in the key.** The column prints it on some rows and not others, so a
-key including it would change identity when a cell rendered differently, and a re-read of the same
-review would import as new. The residual: two options of one product, same day, same rating, same body
-text, merge. That is recorded here as a known limitation rather than traded for an unstable key.
+**A textless review keys on v3, which folds in the purchased option** —
+`SHA-256(channel | product | date | | rating | optionId)`. It has no body to separate it from another
+rating-only review, so under v2 every one of them on a product/day/rating collapses into a single row. The
+live reading found 옵션ID on every row, which is what makes this available.
+
+The version applies **per ROW, not per channel** — which is what `reviews.dedup_key_version` was always for.
+A review WITH text keeps v2, so nothing about written reviews changes: the option stays out of their key,
+because the body already separates them and a key including it would change identity if a cell ever rendered
+without one.
+
+**The residue is a v1 limitation, recorded rather than closed.** Two textless reviews of the same OPTION on
+the same day at the same rating still merge. Closing it needs a per-review identifier Coupang does not
+publish; a row position or the buyer's name is not one, and neither will be added.
 
 ## 4. How collection advances
 
