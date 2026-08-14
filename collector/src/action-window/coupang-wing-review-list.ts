@@ -310,7 +310,20 @@ export interface ReviewFrameCensus {
  * one distinct value is a category code; collecting on it would fold every review into a single row, and the
  * fold would look exactly like de-duplication working.
  */
-export const REVIEW_ACQUISITION_VERDICTS = ["IDENTIFIER_FOUND", "NO_IDENTIFIER", "UNDETERMINED"] as const;
+export const REVIEW_ACQUISITION_VERDICTS = [
+  "IDENTIFIER_FOUND",
+  /**
+   * Unique where present, but **not present on every review**.
+   *
+   * A third state, because the bar this module states — "present on each review and DIFFERENT for each" — is
+   * two properties, and the first version only enforced the second. The first real reading found a 10-digit
+   * number that was unique on every unit carrying it and carried by 7 of 10 units, and reported
+   * `IDENTIFIER_FOUND`. An acquisition built on that would silently drop three reviews in ten.
+   */
+  "IDENTIFIER_PARTIAL",
+  "NO_IDENTIFIER",
+  "UNDETERMINED",
+] as const;
 export type ReviewAcquisitionVerdict = (typeof REVIEW_ACQUISITION_VERDICTS)[number];
 
 export interface ReviewAcquisitionClassification {
@@ -328,6 +341,11 @@ export interface ReviewAcquisitionClassification {
    * worth of evidence; a container holds everyone's.
    */
   readonly containerSuspected: boolean;
+  /**
+   * The best candidate's coverage — carriers over units, 0..1. Reported rather than folded into the verdict,
+   * because "unique on 7 of 10" and "unique on 10 of 10" are different engineering problems.
+   */
+  readonly bestCoverage: number;
 }
 
 /** At least two carriers, because "one unit carries one distinct value" is true of everything. */
@@ -348,6 +366,7 @@ export function classifyAcquisitionFeasibility(
       dedupeKeyCandidates: [],
       detailLinkPresent: false,
       containerSuspected: false,
+      bestCoverage: 0,
     };
   }
   // The unit resolved — but did it resolve to a REVIEW? A set of four that holds ten dates has not.
@@ -358,18 +377,25 @@ export function classifyAcquisitionFeasibility(
       dedupeKeyCandidates: [],
       detailLinkPresent: census.unit.unitsWithDetailLink > 0,
       containerSuspected: true,
+      bestCoverage: 0,
     };
   }
   const detailLinkPresent = census.unit.unitsWithDetailLink > 0;
   const dedupeKeyCandidates = census.unit.idCandidates.filter(
     (c) => c.uniquePerUnit && c.unitsCarrying >= MIN_CARRIERS_FOR_A_KEY,
   );
-  return {
-    verdict: dedupeKeyCandidates.length > 0 ? "IDENTIFIER_FOUND" : "NO_IDENTIFIER",
-    dedupeKeyCandidates,
-    detailLinkPresent,
-    containerSuspected: false,
-  };
+  const bestCoverage = dedupeKeyCandidates.reduce(
+    (max, c) => Math.max(max, census.unit.unitCount > 0 ? c.unitsCarrying / census.unit.unitCount : 0),
+    0,
+  );
+  // FULL coverage, or it is partial. A key on 7 of 10 reviews drops three in ten, quietly.
+  const verdict =
+    dedupeKeyCandidates.length === 0
+      ? "NO_IDENTIFIER"
+      : bestCoverage >= 1
+        ? "IDENTIFIER_FOUND"
+        : "IDENTIFIER_PARTIAL";
+  return { verdict, dedupeKeyCandidates, detailLinkPresent, containerSuspected: false, bestCoverage };
 }
 
 /**

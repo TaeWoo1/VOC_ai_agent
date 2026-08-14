@@ -7,9 +7,9 @@
 >
 > - **Unit:** Coupang Review Integration Feasibility v1 → **READ_ONLY review acquisition feasibility**
 > - **Date:** 2026-08-14
-> - **Live contact:** **two sittings, 2026-08-14 — both inconclusive, neither recorded as a finding about
->   Coupang.** The first returned a confident `NO_IDENTIFIER` from a unit that was not a review (§9); the
->   second measured the same DOM, was caught by the new container guard, and refused (§10).
+> - **Live contact:** **three sittings, 2026-08-14.** The first two were inconclusive and are recorded as
+>   such (§9, §10). **The third resolved the review row and is the first real reading** (§11) — it is
+>   `TECHNICALLY_POSSIBLE` with two named gaps, and it promotes nothing.
 
 ---
 
@@ -330,3 +330,63 @@ makes, since the same rendering would have hidden a rating, a date, or a control
 It is defined in the review probe rather than in the shared primitives **on purpose**: the 고객문의 probe
 is live-proven against the leaf rule, and widening a predicate underneath a proven measurement is how a
 proof quietly stops meaning what it said.
+
+---
+
+## 11. The third sitting — the first real reading
+
+`unitSource: COLUMN`, and the row it found is unmistakably a row:
+
+| Reading | Value |
+|---|---|
+| review unit | `TBODY`, **10 siblings, 10 of 10 sharing a class shape** |
+| cells agreeing | 20 |
+| detail affordance / detail link | **10 / 10** |
+| image present | **10 / 10** |
+| star-class rating | **10 / 10** |
+| `dateDotted` inside units | **10 in 10 units** — one date each |
+
+Every per-unit count is uniform across all ten. That is what a repeating row set looks like, and it is the
+exact opposite of the container the first sitting resolved (3/4, 1/4, 2/4, ten dates in four units). Each
+review is a `<tbody>` of its own — which no probe that assumed `tr` would ever have found.
+
+### The identifiers, and the trap the column set
+
+| Source | Length | Carriers | Distinct | Reading |
+|---|---|---|---|---|
+| ATTRIBUTE | 11 | **10 / 10** | 9 | on every review, **not unique** → the productId |
+| ATTRIBUTE | 10 | 7 / 10 | 7 | **unique where present**, on 7 of 10 |
+| PRINTED | 10 | 7 / 10 | 7 | the same number, also printed |
+
+The 11-digit run is on all ten and has nine distinct values — exactly the shape of `노출상품ID`, and exactly
+the thing that would have been mistaken for a review id. The column agrees independently:
+`distinctFirstRunValues: 9` over 10 digit-carrying cells.
+
+**The 10-digit run is the review-identifier candidate**, and it appears in both markup and printed text.
+
+### The bar the classifier was not enforcing
+
+This module has stated the bar since it was written: *present on each review and DIFFERENT for each*. The
+first version enforced only the second half, so it called 7-of-10 `IDENTIFIER_FOUND`. **An acquisition built
+on that would have dropped three reviews in ten, silently.** There is now an `IDENTIFIER_PARTIAL` verdict and
+a reported `bestCoverage`, and this reading is `IDENTIFIER_PARTIAL` at **0.7**.
+
+### Two gaps that block a clean answer
+
+1. **Coverage 7/10.** Three reviews carry no 10-digit run. Why is unknown — a different review type, a
+   deleted one, an id only some rows expose.
+2. **옵션ID never appeared.** `cellsWithTwoRuns: 0` and `distinctSecondRunValues: 0`: no cell printed two
+   numbers, and only 10 of 22 cells in the column held digits at all. So `vendorItemId` is **not
+   established**, and the column's second line is unaccounted for.
+
+### What else the sitting settled
+
+- **Paging is bounded and dropdown-driven**: 4 `<select>`, **0 `input[type=date]`**, pager to page **5**,
+  10 rows per page. A date-range request is not available as a date input; incremental collection would have
+  to go through a dropdown, and no `최신순` / `최근 N개월` control was found as a pressable element.
+- **`평점` is absent — the screen says `별점`.** `등록일` and `작성자` appear once each, as headers.
+- One `dateDotted` and one `ratingNumber` per unit.
+- `unitsWithImage` is 10/10, but `unitsWithStarLikeClass` is also 10/10 — **the image may BE the star strip**,
+  so a review PHOTO indicator is *not* established by this reading.
+- Catalog scope is `NOT_ESTABLISHED` only because no productId was supplied; the column is there to match
+  against.

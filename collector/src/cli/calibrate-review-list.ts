@@ -325,6 +325,7 @@ async function main(): Promise<void> {
           dedupeKeyCandidates: acquisition.dedupeKeyCandidates,
           detailLinkPresent: acquisition.detailLinkPresent,
           containerSuspected: acquisition.containerSuspected,
+          bestCoverage: acquisition.bestCoverage,
           ownershipScope: scope,
           productIdsSupplied: productIds.length,
           // WHICH route resolved the row, never merely THAT one did. The column is the strong reading.
@@ -347,6 +348,10 @@ async function main(): Promise<void> {
       console.error("  Do NOT record this as 'the screen carries no review id'. A screen whose rows were never");
       console.error("  found produces exactly this reading whether an identifier exists or not, and that is the");
       console.error("  confident zero three 고객문의 sittings were spent on.");
+    } else if (acquisition.verdict === "IDENTIFIER_PARTIAL") {
+      console.error("");
+      console.error("⚠ A candidate is unique WHERE PRESENT but not present on every review.");
+      console.error("  An acquisition built on it would silently drop the reviews that do not carry it.");
     } else if (acquisition.verdict === "NO_IDENTIFIER") {
       console.error("");
       console.error("⚠ No candidate is unique per review unit. A dedupe key built on any of these would fold");

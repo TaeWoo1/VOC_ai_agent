@@ -180,11 +180,53 @@ describe("the question the run exists to answer", () => {
     const c = census(reviewGrid({ id: "unique" }));
 
     const verdict = classifyAcquisitionFeasibility(c);
-    expect(verdict.verdict).toBe("IDENTIFIER_FOUND");
+    // 3 of 4 units carry it — the header row is the fourth. Unique where present, not on every unit.
+    expect(verdict.verdict).toBe("IDENTIFIER_PARTIAL");
     const key = verdict.dedupeKeyCandidates.find((k) => k.source === "ATTRIBUTE" && k.digitLength === 9)!;
     expect(key.unitsCarrying).toBe(3);
     expect(key.distinctValues).toBe(3);
     expect(key.uniquePerUnit).toBe(true);
+    expect(verdict.bestCoverage).toBeCloseTo(0.75);
+  });
+
+  it("**unique on SOME reviews is not a dedupe key** — the bar is present on each AND different for each", () => {
+    // The first real reading found a 10-digit number unique on every unit carrying it and carried by 7 of 10.
+    // Reported as IDENTIFIER_FOUND, an acquisition on it would have dropped three reviews in ten, silently.
+    const raw = {
+      reason: "OK",
+      elementsScanned: 10,
+      shadowRootsFound: 0,
+      elementsWithAnchorAttributes: 1,
+      controlAffordances: WING_REVIEW_CONTROL_LABELS.map((r) => ({ id: r.id, interactiveCount: 0, staticCount: 0 })),
+      labelCounts: WING_REVIEW_FIELD_LABELS.map((l) => ({ id: l.id, elementCount: 0 })),
+      textShapes: [],
+      unit: {
+        level: {
+          depth: 1,
+          tagName: "TBODY",
+          siblingCount: 10,
+          siblingsSharingClassShape: 10,
+          classTokenCount: 0,
+          attributeKinds: [],
+          hasDetailAffordance: true,
+          digitRunLengths: [],
+        },
+        labelsAgreeing: 20,
+        unitCount: 10,
+        idCandidates: [
+          { source: "ATTRIBUTE", digitLength: 10, unitsCarrying: 7, distinctValues: 7 },
+          { source: "ATTRIBUTE", digitLength: 11, unitsCarrying: 10, distinctValues: 9 },
+        ],
+      },
+      pagination: {},
+    };
+    const c = sanitizeReviewListCensus(raw, WING_REVIEW_FIELD_LABELS, WING_REVIEW_CONTROL_LABELS, []);
+    const verdict = classifyAcquisitionFeasibility(c);
+
+    expect(verdict.verdict).toBe("IDENTIFIER_PARTIAL");
+    expect(verdict.bestCoverage).toBeCloseTo(0.7);
+    // The 11-digit run is on every unit and is NOT unique — a product id, not a review id.
+    expect(verdict.dedupeKeyCandidates.map((k) => k.digitLength)).toEqual([10]);
   });
 
   it("**an id every review carries but that never differs is NOT a key**", () => {
@@ -584,7 +626,9 @@ describe("a container is not a review", () => {
     ]);
     const verdict = classifyAcquisitionFeasibility(c);
     expect(verdict.containerSuspected).toBe(false);
+    // 4 of 4 units carry it — full coverage is what earns IDENTIFIER_FOUND.
     expect(verdict.verdict).toBe("IDENTIFIER_FOUND");
+    expect(verdict.bestCoverage).toBe(1);
   });
 
   it("**candidate sets are told apart by ELEMENT, not by tag-and-count**", () => {
