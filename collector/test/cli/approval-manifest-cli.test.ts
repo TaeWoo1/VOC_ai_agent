@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { runApprovalManifestCli, type ApprovalManifestCliOptions } from "../../src/cli/approval-manifest-cli";
 import { WING_DELETION_SELECTORS_CALIBRATED } from "../../src/action-window/coupang-wing-issuance-driver";
-import { COUPANG_WING_KEY_DELETION_OPERATION } from "../../src/cli/approval-manifest";
+import { COUPANG_WING_KEY_DELETION_OPERATION, PINNED_PHASE_SCOPES } from "../../src/cli/approval-manifest";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_SRC = resolve(HERE, "../../src/cli/approval-manifest-cli.ts");
@@ -406,5 +406,51 @@ describe("approval-manifest-cli — the read-only WING probe path is unchanged b
     expect(code).toBe(1);
     expect(out).toBe("");
     expect(err).toContain("UNKNOWN_PHASE");
+  });
+});
+
+/**
+ * **The defect this suite did not have a test for.**
+ *
+ * The manifest CLI's defaults describe an API ISSUANCE HIGHLIGHT PROOF. Every phase that is not one has to pin
+ * its own wording, and a phase added without pinning it inherits the default silently — the review discovery's
+ * first prepared manifest read `operation: "API issuance highlight proof (new-app or existing-app)"` and
+ * `surface: "Coupang WING Open API"` over a run that measures a page of customers' reviews, and PASSED
+ * preflight. The operator would have been granting against a sentence describing a different run.
+ *
+ * So the rule is asserted for every pinned phase at once, rather than per phase as each is added.
+ */
+describe("a phase never inherits another run's description", () => {
+  const GENERIC_OPERATION = "API issuance highlight proof (new-app or existing-app)";
+
+  for (const phase of Object.keys(PINNED_PHASE_SCOPES)) {
+    it(`${phase} carries its OWN operation, surface, and budget`, () => {
+      setEnv({ SELLEROPS_APPROVAL_PHASE: phase, ...IDENTITY });
+      const { code, out } = run();
+      expect(code).toBe(0);
+      const manifest = JSON.parse(out) as Record<string, string>;
+      const pinned = PINNED_PHASE_SCOPES[phase as keyof typeof PINNED_PHASE_SCOPES]!;
+
+      expect(manifest.operation).toBe(pinned.operation);
+      expect(manifest.maxActions).toBe(pinned.maxActions);
+      expect(manifest.surface).toBe(pinned.surface);
+      expect(manifest.operation).not.toBe(GENERIC_OPERATION);
+    });
+  }
+
+  it("**an ambient SELLEROPS_APPROVAL_* cannot re-describe a pinned run**", () => {
+    setEnv({
+      SELLEROPS_APPROVAL_PHASE: "COUPANG_WING_REVIEW_STRUCTURE_DISCOVERY",
+      SELLEROPS_APPROVAL_OPERATION: "something else entirely",
+      SELLEROPS_APPROVAL_SURFACE: "a different screen",
+      SELLEROPS_APPROVAL_MAX: "unlimited",
+      ...IDENTITY,
+    });
+    const { code, out } = run();
+    expect(code).toBe(0);
+    const manifest = JSON.parse(out) as Record<string, string>;
+    expect(manifest.operation).toContain("상품평");
+    expect(manifest.surface).toBe("Coupang WING 상품평");
+    expect(manifest.maxActions).not.toBe("unlimited");
   });
 });

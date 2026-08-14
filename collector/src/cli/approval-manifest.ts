@@ -1414,6 +1414,28 @@ export const COUPANG_WING_REVIEW_DISCOVERY_SCOPE = Object.freeze({
     "presence or against fixed literals and their values never travel; no text leaves the page)",
 });
 
+/**
+ * **The phases whose manifest wording is PINNED, in one lookup rather than a fourth `phase === … ?` chain.**
+ *
+ * A phase that is not in here falls through to the manifest CLI's generic defaults — which describe an API
+ * issuance highlight proof. That is harmless for a phase that IS one and a real defect for a phase that is
+ * not: the review discovery's first prepared manifest read `operation: "API issuance highlight proof"` and
+ * `surface: "Coupang WING Open API"` over a run that measures a page of customers' reviews. The operator
+ * would have been granting against a sentence describing a different run.
+ *
+ * `surface` is pinned here too, which the earlier per-phase chain never did — so the sentence the operator
+ * reads and the sentence the run CLI declares to the gate are now the same string, instead of two strings
+ * that happened to agree.
+ *
+ * This file has already recorded three chains that had to be consolidated after a phase was added to two of
+ * them. This is the shape that stops there being a fourth.
+ */
+export interface PinnedPhaseScope {
+  readonly operation: string;
+  readonly maxActions: string;
+  readonly surface: string;
+}
+
 export const COUPANG_WING_CREDENTIAL_HANDOFF_SCOPE = Object.freeze({
   operation:
     "WING credential handoff (after the seller's own confirmation, the agent reads 업체코드 / Access Key / " +
@@ -1421,6 +1443,31 @@ export const COUPANG_WING_CREDENTIAL_HANDOFF_SCOPE = Object.freeze({
     "API call; the agent presses no marketplace control and creates/deletes no key)",
   maxActions:
     "1 operator-confirmed credential read + 1 handoff to the SellerOps backend + 1 read-only connection check",
+});
+
+/**
+ * The lookup. A phase absent from here gets the manifest CLI's generic defaults, which is correct only for the
+ * issuance-proof family those defaults describe.
+ */
+export const PINNED_PHASE_SCOPES: Partial<Record<CalibrationPhase, PinnedPhaseScope>> = Object.freeze({
+  COUPANG_WING_CREDENTIAL_CELL_CALIBRATION: {
+    ...COUPANG_WING_CREDENTIAL_CALIBRATION_SCOPE,
+    surface: "Coupang WING Open API",
+  },
+  COUPANG_WING_CREDENTIAL_HANDOFF: {
+    ...COUPANG_WING_CREDENTIAL_HANDOFF_SCOPE,
+    surface: "Coupang WING Open API",
+  },
+  COUPANG_WING_INQUIRY_LIST_CALIBRATION: {
+    ...COUPANG_WING_INQUIRY_LIST_CALIBRATION_SCOPE,
+    // The same string `calibrate-inquiry-list.ts` hands the gate. Before this they were two strings that
+    // happened to describe the same screen, and only one of them was on the operator's screen.
+    surface: "Coupang WING 고객문의",
+  },
+  COUPANG_WING_REVIEW_STRUCTURE_DISCOVERY: {
+    ...COUPANG_WING_REVIEW_DISCOVERY_SCOPE,
+    surface: "Coupang WING 상품평",
+  },
 });
 
 /**
