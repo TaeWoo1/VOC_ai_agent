@@ -1,5 +1,8 @@
 package com.sellerops.inquiry.publish;
 
+import com.sellerops.connector.coupang.CoupangInquiryReplyClient;
+import com.sellerops.connector.coupang.CoupangSigner;
+import com.sellerops.connector.coupang.JdkCoupangHttpClient;
 import com.sellerops.connector.esm.EsmHttpClient;
 import com.sellerops.connector.esm.EsmJwtSigner;
 import com.sellerops.connector.esm.JdkEsmHttpClient;
@@ -51,5 +54,37 @@ public class PublishExecutionWiring {
     ChannelReplyAdapter esmChannelReplyAdapter(EsmAnswerClient answerClient, EsmReplyTokenResolver tokenResolver,
                                                EsmInformStatusProbe informProbe, CredentialVault vault) {
         return new EsmChannelReplyAdapter(answerClient, tokenResolver, informProbe, vault);
+    }
+
+    /**
+     * The Coupang answer transport — its own HTTP client and signer, not the collection client's.
+     *
+     * <p>Separate on purpose: the collection client is a read path that may be paging a 30-day sweep
+     * when a seller confirms a reply, and the only WRITE this connector has should not share an
+     * object whose whole design assumes it can retry. They still hold to the same per-vendor pace and
+     * the same live-call guard, which is where sharing actually matters.
+     */
+    @Bean
+    CoupangInquiryReplyClient coupangInquiryReplyClient(
+            @Value("${sellerops.connector.coupang.base-url:https://api-gateway.coupang.com}") String baseUrl,
+            @Value("${sellerops.connector.coupang.live-approval-id:}") String liveApprovalId) {
+        return new CoupangInquiryReplyClient(new JdkCoupangHttpClient(), new CoupangSigner(Clock.systemUTC()),
+                baseUrl, liveApprovalId, Clock.systemUTC());
+    }
+
+    /**
+     * The Coupang channel reply adapter.
+     *
+     * <p>{@code reply-by} is the WING operator id Coupang stamps an answer with. SellerOps does not
+     * hold it — the credential handoff stores 업체코드 / Access Key / Secret Key and nothing else — so
+     * it is configured explicitly and defaults to blank. Blank means the adapter refuses to publish
+     * rather than sending a request that would be rejected: an unconfigured deployment must look like
+     * an unconfigured deployment, not like Coupang turning the seller's reply down.
+     */
+    @Bean
+    ChannelReplyAdapter coupangChannelReplyAdapter(
+            CoupangInquiryReplyClient replyClient, CredentialVault vault,
+            @Value("${sellerops.connector.coupang.reply-by:}") String replyBy) {
+        return new CoupangChannelReplyAdapter(replyClient, vault, replyBy);
     }
 }
