@@ -174,6 +174,106 @@ const REVIEW_FRAGMENT = `
     if (best === null) { return { level: null, labelsAgreeing: 0, nodes: [] }; }
     return { level: best.level, labelsAgreeing: bestN, nodes: bestNodes };
   }
+  /* **The column probe.** The operator read a column off the real screen that the field words never found:
+     노출상품ID (옵션ID). Coupang's own definitions make those productId and vendorItemId — so the seller's
+     catalog identity is PRINTED in a cell, exactly as the 접수번호 was on 고객문의, and exactly where three
+     sittings of attribute scanning were never going to look.
+     It is resolved GEOMETRICALLY: cells whose horizontal centre falls inside the header's own span and which
+     sit below it. That works for a table, a div grid and a shadow-rendered list alike.
+     Column scope is a SAFETY property, not a convenience: other columns hold digit runs too, and matching a
+     catalog id against one of those would attribute a review to the wrong product. */
+  function columnProbe(all, HEADERS, DIGITS) {
+    var leaves = leavesOf(all), i, j;
+    var headerHits = [], headerId = null;
+    for (j = 0; j < HEADERS.length && headerHits.length === 0; j++) {
+      for (i = 0; i < leaves.length; i++) {
+        if (textOf(leaves[i]).indexOf(HEADERS[j].exactText) >= 0) { headerHits.push(leaves[i]); }
+      }
+      if (headerHits.length > 0) { headerId = HEADERS[j].id; }
+    }
+    if (headerHits.length === 0) { return { reason: 'HEADER_NOT_FOUND', cells: [] }; }
+    if (headerHits.length > 1) { return { reason: 'HEADER_AMBIGUOUS', headerId: headerId, cells: [] }; }
+    var hrect = rectOf(headerHits[0]);
+    if (!hrect) { return { reason: 'HEADER_NOT_FOUND', cells: [] }; }
+    var left = hrect.left, right = hrect.left + hrect.width, below = hrect.top + hrect.height / 2;
+
+    var cells = [];
+    for (i = 0; i < leaves.length; i++) {
+      if (leaves[i] === headerHits[0]) { continue; }
+      var r = rectOf(leaves[i]);
+      if (!r) { continue; }
+      var cx = r.left + r.width / 2;
+      if (cx < left || cx > right || r.top < below) { continue; }
+      cells.push(leaves[i]);
+    }
+    if (cells.length === 0) { return { reason: 'NO_CELLS', headerId: headerId, cells: [] }; }
+
+    /* Two runs in one cell is the 노출상품ID (옵션ID) shape. Whether the SECOND run varies faster than the
+       first is what says option-level identity exists — counts of distinct values, never the values. */
+    var withDigits = 0, withTwo = 0, firstSeen = {}, secondSeen = {}, dFirst = 0, dSecond = 0, ourMatches = 0;
+    for (i = 0; i < cells.length; i++) {
+      var runs = textDigitRuns(cells[i]);
+      if (runs.length > 0) { withDigits++; }
+      if (runs.length >= 2) { withTwo++; }
+      if (runs.length >= 1 && !firstSeen[runs[0]]) { firstSeen[runs[0]] = 1; dFirst++; }
+      if (runs.length >= 2 && !secondSeen[runs[1]]) { secondSeen[runs[1]] = 1; dSecond++; }
+      for (var d = 0; d < DIGITS.length; d++) {
+        var hit = false;
+        for (var k = 0; k < runs.length; k++) { if (runs[k] === DIGITS[d].digits) { hit = true; break; } }
+        if (hit) { ourMatches++; break; }
+      }
+    }
+    return {
+      reason: 'OK',
+      headerId: headerId,
+      cellsInColumn: cells.length,
+      cellsWithDigits: withDigits,
+      cellsWithTwoRuns: withTwo,
+      distinctFirstRunValues: dFirst,
+      distinctSecondRunValues: dSecond,
+      cellsMatchingOurDigits: ourMatches,
+      cells: cells
+    };
+  }
+  /* **The review unit, from the column.** One cell per row by construction, so the repeat the MOST cells share
+     is the row — and here the tie breaks INWARD, not outward: the smallest set containing one cell each IS the
+     row, while anything larger contains several. That is the opposite of the label path, where the innermost
+     agreement is a header cell, and the difference is why the two are separate functions rather than one with
+     a flag. */
+  function unitFromCells(cells) {
+    var candidates = [], bestN = 0, i, j;
+    for (i = 0; i < cells.length; i++) {
+      var walk = repeatLevelsOf(cells[i]);
+      var voted = [];
+      for (j = 0; j < walk.levels.length; j++) {
+        var node = walk.nodes[j];
+        var parent = parentOf(node);
+        var tag = String(node.tagName || '').toUpperCase();
+        var at = candidateIndex(candidates, parent, tag);
+        if (at < 0) {
+          candidates.push({ parent: parent, tag: tag, level: walk.levels[j], anchor: node, votes: 0 });
+          at = candidates.length - 1;
+        }
+        if (voted.indexOf(at) >= 0) { continue; }
+        voted.push(at);
+        candidates[at].votes++;
+        if (candidates[at].votes > bestN) { bestN = candidates[at].votes; }
+      }
+    }
+    /* Two cells agreeing is the minimum that means anything — one cell agrees with itself about everything. */
+    if (bestN < 2) { return { level: null, cellsAgreeing: 0, nodes: [] }; }
+    var best = null, bestNodes = [];
+    for (i = 0; i < candidates.length; i++) {
+      if (candidates[i].votes !== bestN) { continue; }
+      if (best !== null && candidates[i].level.depth >= best.level.depth) { continue; }
+      var nodes = unitsUnder(candidates[i].parent, candidates[i].tag, candidates[i].anchor);
+      if (nodes.length === 0) { continue; }
+      best = candidates[i];
+      bestNodes = nodes;
+    }
+    if (best === null) { return { level: null, cellsAgreeing: 0, nodes: [] }; }
+    return { level: best.level, cellsAgreeing: bestN, nodes: bestNodes };
+  }
   /* Descendants of one unit, bounded. Used for every per-unit question; nothing here reads a value. */
   function within(unit) {
     var kids; try { kids = slice(unit.querySelectorAll('*')); } catch (e) { kids = []; }
@@ -280,7 +380,7 @@ const REVIEW_FRAGMENT = `
       highestPagerNumber: highest
     };
   }
-  function census(LABELS, CONTROLS, SHAPES, DIGITS, CLASS_TOKENS) {
+  function census(LABELS, CONTROLS, SHAPES, DIGITS, CLASS_TOKENS, HEADERS) {
     var collected = collectAll();
     if (collected === null) { return { reason: 'SCAN_TRUNCATED' }; }
     var all = collected.els;
@@ -329,7 +429,15 @@ const REVIEW_FRAGMENT = `
       try { regexes.push(new RegExp(SHAPES[j].pattern)); } catch (e) { regexes.push(null); }
     }
 
-    var unit = resolveUnit(hitLists, regexes);
+    /* THE COLUMN FIRST. A header we can name resolves the row far more reliably than field words that may all
+       live in one header cell — and it is the only route to the seller's catalog identity, which is printed
+       rather than marked up. Label agreement stays as the fallback for a screen without that column. */
+    var column = columnProbe(all, HEADERS, DIGITS);
+    var fromColumn = column.reason === 'OK' ? unitFromCells(column.cells) : { level: null, cellsAgreeing: 0, nodes: [] };
+    var unitSource = fromColumn.nodes.length > 0 ? 'COLUMN' : 'LABEL_AGREEMENT';
+    var unit = fromColumn.nodes.length > 0
+      ? { level: fromColumn.level, labelsAgreeing: fromColumn.cellsAgreeing, nodes: fromColumn.nodes }
+      : resolveUnit(hitLists, regexes);
     var units = unit.nodes;
     var withDetail = 0, withImg = 0, withVideo = 0, withAria = 0, withStar = 0, withOurs = 0, withLink = 0;
     var attrSeen = {}, attrLengths = [], printSeen = {}, printLengths = [], idTally = {};
@@ -401,6 +509,17 @@ const REVIEW_FRAGMENT = `
       shadowRootsFound: collected.shadowRoots,
       elementsWithAnchorAttributes: withAnchors,
       anchorDigitRunLengths: allLengths,
+      unitSource: unitSource,
+      columnProbe: {
+        reason: column.reason,
+        headerId: column.headerId === undefined ? null : column.headerId,
+        cellsInColumn: column.cellsInColumn || 0,
+        cellsWithDigits: column.cellsWithDigits || 0,
+        cellsWithTwoRuns: column.cellsWithTwoRuns || 0,
+        distinctFirstRunValues: column.distinctFirstRunValues || 0,
+        distinctSecondRunValues: column.distinctSecondRunValues || 0,
+        cellsMatchingOurDigits: column.cellsMatchingOurDigits || 0
+      },
       controlAffordances: inside,
       labelCounts: labelCounts,
       textShapes: textShapes,
@@ -434,6 +553,7 @@ export function buildReviewListCensusScript(
   shapes: readonly ReviewTextShape[],
   digits: readonly ReviewDigitExpectation[] = [],
   classTokens: readonly string[] = [],
+  headers: readonly ReviewLabelExpectation[] = [],
 ): string {
   return [
     "(function () {",
@@ -444,7 +564,8 @@ export function buildReviewListCensusScript(
     "  var SHAPES = " + JSON.stringify(shapes.map((s) => ({ id: s.id, pattern: s.pattern }))) + ";",
     "  var DIGITS = " + JSON.stringify(digits.map((d) => ({ id: d.id, digits: d.digits }))) + ";",
     "  var CLASS_TOKENS = " + JSON.stringify(classTokens.map((t) => t.toLowerCase())) + ";",
-    "  return census(LABELS, CONTROLS, SHAPES, DIGITS, CLASS_TOKENS);",
+    "  var HEADERS = " + JSON.stringify(headers.map((h) => ({ id: h.id, exactText: h.exactText }))) + ";",
+    "  return census(LABELS, CONTROLS, SHAPES, DIGITS, CLASS_TOKENS, HEADERS);",
     "})()",
   ].join("\n");
 }

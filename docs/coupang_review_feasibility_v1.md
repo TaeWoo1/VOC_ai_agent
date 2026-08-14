@@ -120,6 +120,27 @@ An earlier version of this probe measured whether a reply control existed. That 
 declares the action, and the approval scope states `0 reply-control lookups` positively so it is
 checkable. A measurement kept "for later" after being told not to use it is one that gets used later.
 
+## 7-ter. The column the operator found — 노출상품ID (옵션ID)
+
+The operator read a column off the real screen that no field-word scan had found. Coupang's own
+definitions make those two numbers **`productId`** and **`vendorItemId`**, which changes two things:
+
+1. **Catalog identity is available per row without SellerOps supplying anything.** It is *printed*, not
+   marked up — exactly as the 접수번호 was on 고객문의, and exactly where attribute scanning would never
+   have looked. The probe now anchors on that fixed header and resolves its column geometrically.
+2. **It is the better anchor for the row itself.** One cell per review, by construction — where field
+   words on this screen all sit in a single header cell. The column leads; label agreement is the
+   fallback, and `unitSource` reports which one resolved the unit so the weaker reading can never be
+   mistaken for the stronger.
+
+**A 상품ID is not a review id, and this is the trap the column creates.** It is the most
+identifier-looking thing on the screen and it is per *product*: many reviews share one. Collecting on it
+would fold them together. That is why the column reports `distinctFirstRunValues` and
+`distinctSecondRunValues` separately — a first-run count well below the cell count is exactly what a
+product id looks like, and the option id varying faster is what says option-level identity exists.
+
+Neither number is returned. Only counts of how many differ.
+
 ## 7-bis. The one question the sitting is for
 
 **Could these reviews be collected and de-duplicated at all?**

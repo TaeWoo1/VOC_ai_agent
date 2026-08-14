@@ -14,6 +14,12 @@
  * acquisition-and-analysis only, and this run does not look for a reply control, does not count one, and
  * cannot report one.
  *
+ * **The 노출상품ID (옵션ID) column changes the anchor.** The operator read it off the real screen; no field-word
+ * scan had found it, and Coupang's own definitions make those two numbers `productId` and `vendorItemId`. So
+ * catalog identity is printed per row — and one cell per review is a far better anchor for the row itself than
+ * field words that may all live in a single header cell. The column leads; label agreement is the fallback, and
+ * which one resolved the unit is reported rather than left to be assumed.
+ *
  * What acquisition needs before any of it is designed is a **stable identifier** — one present on each review
  * and DIFFERENT for each. Without it there is no dedupe key, and a re-read of the same screen would either
  * duplicate every review or silently collapse them. That question is asked of markup and of printed text
@@ -141,10 +147,11 @@ export function discoveryRunGrantBinding(): RunGrantBinding {
     mode: DISCOVERY.mode,
     maxActions: MAX_ACTIONS,
     agentDoesNot:
-      "이 화면에서 리뷰를 '수집·중복제거'할 수 있는지만 한 번 측정합니다 — '평점'·'작성일' 같은 쿠팡 고정 단어가 " +
-      "어느 반복 구조 안에 함께 있는지, 리뷰마다 다른 번호가 있는지(값이 아니라 자릿수와 '서로 다른 개수'만), " +
-      "상세 링크가 있는지, 기간·정렬·페이지 컨트롤이 있는지. 리뷰 본문·구매자 이름·상품명은 읽지 않고, " +
-      "사진·동영상은 개수만 세며 주소는 읽지 않습니다. 결과로는 개수·태그 이름만 나옵니다. 클릭·입력·전송 없음.",
+      "이 화면에서 리뷰를 '수집·중복제거'할 수 있는지만 한 번 측정합니다 — '노출상품ID (옵션ID)' 열을 찾아 그 " +
+      "열만 읽고(칸 수와 서로 다른 상품·옵션 개수만, 번호 자체는 나오지 않습니다), 그 칸들로 리뷰 한 줄의 범위를 " +
+      "찾은 뒤, 리뷰마다 다른 번호가 있는지(값이 아니라 자릿수와 '서로 다른 개수'만), 상세 링크가 있는지, " +
+      "기간·정렬·페이지 컨트롤이 있는지. 리뷰 본문·구매자 이름·상품명은 읽지 않고, 사진·동영상은 개수만 세며 " +
+      "주소는 읽지 않습니다. 결과로는 개수·태그 이름만 나옵니다. 클릭·입력·전송 없음.",
   };
 }
 
@@ -169,8 +176,9 @@ export function discoveryAsk(): OperatorConfirmAsk {
     headline: "상품평(리뷰) 목록 화면에 직접 도착하신 뒤 눌러 주세요.",
     lines: [
       "SellerOps는 이 창을 조작하지 않습니다 — 로그인 · 이동은 모두 직접 하세요.",
-      "누르시면 이 화면의 구조를 한 번만 측정합니다: 반복 단위, 리뷰마다 다른 번호가 있는지, 상세 링크·별점· " +
-        "날짜 표기 모양, 기간·정렬·페이지 컨트롤.",
+      "누르시면 이 화면의 구조를 한 번만 측정합니다: '노출상품ID (옵션ID)' 열의 칸 수와 서로 다른 개수, " +
+        "리뷰 한 줄의 반복 단위, 리뷰마다 다른 번호가 있는지, 상세 링크·별점·등록일 표기 모양, 기간·정렬·페이지 컨트롤.",
+      "상품ID·옵션ID 번호 자체는 나오지 않습니다 — 몇 개인지, 서로 몇 개나 다른지만 셉니다.",
       "리뷰 본문 · 구매자 이름 · 상품명은 읽지 않습니다. 사진·동영상은 개수만 세고 주소는 읽지 않습니다.",
       "화면의 글자는 이 창 밖으로 나가지 않습니다. 나오는 것은 숫자와 태그 이름뿐입니다.",
       "아무것도 눌리거나 입력되지 않고, 아무것도 전송되지 않습니다.",
@@ -196,9 +204,10 @@ export function discoveryExitCode(stop: DiscoveryStop, decided: boolean): number
 
 export const DISCOVERY_BANNER_LINES: readonly string[] = [
   " LIVE Coupang WING 상품평 READ_ONLY acquisition-feasibility discovery — per-run approval required.",
-  " SellerOps measures whether a review could be ACQUIRED and DE-DUPLICATED: the repeating unit Coupang's",
-  " own field words agree on, whether any per-review number is unique, whether a detail link exists, and",
-  " what sort / period / paging controls the screen offers.",
+  " SellerOps measures whether a review could be ACQUIRED and DE-DUPLICATED: it resolves the ONE column",
+  " headed 노출상품ID (옵션ID) and reads it as counts, uses those cells to find the review row, then asks",
+  " whether any per-review number is unique, whether a detail link exists, and what sort / period / paging",
+  " controls the screen offers. No 상품ID or 옵션ID value is returned — only how many differ.",
   " No review body, buyer name, or product name is read; photos and videos are counted, never sourced.",
   " Page text is compared in-page against fixed words and shape patterns and only counts come back.",
   " It never clicks, types, submits, navigates, highlights, tags, or issues a network call.",
@@ -318,6 +327,9 @@ async function main(): Promise<void> {
           containerSuspected: acquisition.containerSuspected,
           ownershipScope: scope,
           productIdsSupplied: productIds.length,
+          // WHICH route resolved the row, never merely THAT one did. The column is the strong reading.
+          unitSource: census?.unitSource ?? null,
+          columnProbe: census?.columnProbe ?? null,
         },
         null,
         2,

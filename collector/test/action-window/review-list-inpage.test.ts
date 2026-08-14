@@ -25,6 +25,7 @@ import { describe, expect, it } from "vitest";
 import { buildReviewListCensusScript } from "../../src/action-window/api-issuance-calibration/review-list-inpage";
 import {
   WING_REVIEW_CLASS_TOKENS,
+  WING_REVIEW_COLUMN_HEADERS,
   WING_REVIEW_CONTROL_LABELS,
   WING_REVIEW_FIELD_LABELS,
   WING_REVIEW_TEXT_SHAPES,
@@ -60,6 +61,7 @@ function script(digits: ReviewDigitExpectation[] = []): string {
     WING_REVIEW_TEXT_SHAPES,
     digits,
     WING_REVIEW_CLASS_TOKENS,
+    WING_REVIEW_COLUMN_HEADERS,
   );
 }
 
@@ -69,6 +71,7 @@ function census(root: El, digits: ReviewDigitExpectation[] = []): ReviewListCens
     WING_REVIEW_FIELD_LABELS,
     WING_REVIEW_CONTROL_LABELS,
     WING_REVIEW_TEXT_SHAPES,
+    WING_REVIEW_COLUMN_HEADERS,
   );
 }
 
@@ -87,14 +90,28 @@ interface RowOptions {
 
 const SHARED_ID = "981234567";
 
+/** Column geometry. The catalog column is resolved by its header's horizontal span, so boxes are load-bearing. */
+const CATALOG_X = { left: 400, width: 120 };
+function rowBox(top: number, left: number, width: number) {
+  return { left, top, width, height: 20 };
+}
+
 function reviewRow(index: number, body: string, buyer: string, opts: RowOptions = {}): El {
+  const top = 100 + index * 30;
   const cells: El[] = [
     // The rating, rendered the way a real one is: a class-tokened strip that also exposes an accessible value.
-    el({ tag: "span", attrs: { class: "star-rating on", "aria-valuenow": "5" } }),
-    el({ tag: "span", text: REVIEW_DATE }),
-    el({ tag: "span", text: body }),
-    el({ tag: "span", text: buyer }),
-    el({ tag: "img", attrs: { src: IMAGE_SRC } }),
+    el({ tag: "span", attrs: { class: "star-rating on", "aria-valuenow": "5" }, box: rowBox(top, 0, 80) }),
+    el({ tag: "span", text: REVIEW_DATE, box: rowBox(top, 90, 100) }),
+    el({ tag: "span", text: body, box: rowBox(top, 200, 100) }),
+    el({ tag: "span", text: buyer, box: rowBox(top, 310, 80) }),
+    // 노출상품ID (옵션ID): the seller's catalog identity, PRINTED. One product, a different option per row.
+    el({
+      tag: "span",
+      // In `shared` mode the option id is constant too — a screen on which NOTHING differs per review.
+      text: opts.id === "shared" ? `${PRODUCT} (87654321)` : `${PRODUCT} (8765432${index})`,
+      box: rowBox(top, CATALOG_X.left, CATALOG_X.width),
+    }),
+    el({ tag: "img", attrs: { src: IMAGE_SRC }, box: rowBox(top, 530, 40) }),
   ];
   if (opts.id === "unique") {
     cells.push(el({ tag: "a", attrs: { href: `/reviews/98123456${index}` }, text: "상세" }));
@@ -110,11 +127,11 @@ function reviewRow(index: number, body: string, buyer: string, opts: RowOptions 
 /** A WING-shaped 상품평 grid: a header row of field words, then review rows that repeat its shape. */
 function reviewGrid(opts: RowOptions = { id: "unique" }): El {
   const header = el({ tag: "div", attrs: { class: "rv-row rv-hdr" } }).add(
-    el({ tag: "span", text: "평점" }),
-    el({ tag: "span", text: "작성일" }),
-    el({ tag: "span", text: "상품평" }),
-    el({ tag: "span", text: "구매자" }),
-    el({ tag: "span", text: "상품명" }),
+    el({ tag: "span", text: "평점", box: rowBox(60, 0, 80) }),
+    el({ tag: "span", text: "작성일", box: rowBox(60, 90, 100) }),
+    el({ tag: "span", text: "상품평", box: rowBox(60, 200, 100) }),
+    el({ tag: "span", text: "구매자", box: rowBox(60, 310, 80) }),
+    el({ tag: "span", text: "노출상품ID (옵션ID)", box: rowBox(60, CATALOG_X.left, CATALOG_X.width) }),
   );
   // Only the FIRST row links a product id we hold — so the catalog-scope reading has to count units, not rows.
   const rest: RowOptions = { ...opts, productLink: false };
@@ -299,15 +316,17 @@ describe("the catalog-scope and collection-range readings", () => {
   it("finds a product id SellerOps already holds, and calls that OUR_CATALOG_CONFIRMED", () => {
     const c = census(reviewGrid({ id: "unique", productLink: true }), PRODUCT_IDS);
 
-    expect(c.unit.unitsMatchingOurDigits).toBe(1);
+    // Every row's catalog cell carries it — that is what the column is for.
+    expect(c.unit.unitsMatchingOurDigits).toBe(3);
     expect(classifyOwnershipScope(c)).toBe("OUR_CATALOG_CONFIRMED");
   });
 
-  it("**finding none is NOT_ESTABLISHED, never a claim about other sellers**", () => {
-    // The id may simply not be printed or marked up — exactly as the 접수번호 was not. Coupang shares 상품평
-    // across every seller of the same item, so a verdict here would be a claim this probe cannot earn.
-    const c = census(reviewGrid(), PRODUCT_IDS);
+  it("**an id we do NOT hold is NOT_ESTABLISHED, never a claim about other sellers**", () => {
+    // Coupang shares 상품평 across every seller of the same item, so "these are someone else's" is a verdict
+    // this probe cannot earn — the absence of OUR id says nothing about whose reviews these are.
+    const c = census(reviewGrid(), [{ id: "productId", digits: "99999999999" }]);
 
+    expect(c.columnProbe.cellsMatchingOurDigits).toBe(0);
     expect(c.unit.unitsMatchingOurDigits).toBe(0);
     expect(classifyOwnershipScope(c)).toBe("NOT_ESTABLISHED");
   });
@@ -337,10 +356,10 @@ describe("the catalog-scope and collection-range readings", () => {
     const c = census(reviewGrid({ id: "unique", productLink: true }), PRODUCT_IDS);
 
     expect(c.unit.unitAttributeDigitLengths).toContain(11);
-    // Printed runs are the date's 4-2-2. Reported so the reading cannot be mistaken for a review id: the
-    // 고객문의 screen is exactly where a printed number turned out to BE the identifier, and telling those
-    // apart is a judgement for whoever reads the run, not one this probe should make silently.
-    expect(c.unit.unitPrintedDigitLengths).toEqual([2, 4]);
+    // Printed runs are the date's 4-2-2 AND the catalog column's 11-digit product / 8-digit option. Reported
+    // so the reading cannot be mistaken for a review id: the 고객문의 screen is exactly where a printed number
+    // turned out to BE the identifier, and telling those apart is a judgement for whoever reads the run.
+    expect(c.unit.unitPrintedDigitLengths).toEqual([2, 4, 8, 11]);
     // The date is present on every unit and NOT unique — so it can never be mistaken for a dedupe key.
     const printedYear = c.unit.idCandidates.find((k) => k.source === "PRINTED" && k.digitLength === 4)!;
     expect(printedYear.uniquePerUnit).toBe(false);
@@ -567,5 +586,70 @@ describe("a container is not a review", () => {
     // The reported level must describe the set that was actually chosen: four DIV siblings, and the unit count
     // measured from that same set.
     expect(c.unit.level?.siblingCount).toBe(c.unit.unitCount);
+  });
+});
+
+/* ───────────────────────────── the catalog column ───────────────────────────── */
+
+describe("the 노출상품ID (옵션ID) column", () => {
+  it("**resolves the review unit from the column, not from field-word agreement**", () => {
+    // One cell per review by construction — a far stronger anchor than field words that all live in one header
+    // cell. The run reports WHICH route resolved it, so the weaker reading can never be mistaken for this one.
+    const c = census(reviewGrid());
+
+    expect(c.unitSource).toBe("COLUMN");
+    expect(c.unit.resolved).toBe(true);
+    // Three cells, three rows — the header's own cell sits above the column and is excluded.
+    expect(c.unit.unitCount).toBe(4);
+  });
+
+  it("reads product and option identity as COUNTS — neither number travels", () => {
+    const c = census(reviewGrid());
+
+    expect(c.columnProbe.reason).toBe("OK");
+    expect(c.columnProbe.headerId).toBe("exposedWithOption");
+    expect(c.columnProbe.cellsInColumn).toBe(3);
+    expect(c.columnProbe.cellsWithTwoRuns).toBe(3);
+    // One product across all three rows, a different option each — exactly what productId/vendorItemId means.
+    expect(c.columnProbe.distinctFirstRunValues).toBe(1);
+    expect(c.columnProbe.distinctSecondRunValues).toBe(3);
+    // And neither id is anywhere in the result.
+    expect(JSON.stringify(c)).not.toContain(PRODUCT);
+    expect(JSON.stringify(c)).not.toContain("87654321");
+  });
+
+  it("**matches OUR catalog without being handed anything**, when we do hand it something", () => {
+    const c = census(reviewGrid(), PRODUCT_IDS);
+
+    expect(c.columnProbe.cellsMatchingOurDigits).toBe(3);
+    expect(classifyOwnershipScope(c)).toBe("OUR_CATALOG_CONFIRMED");
+  });
+
+  it("a screen without that header falls back to field-word agreement, and says so", () => {
+    const noColumn = el({ tag: "body" }).add(
+      el({ tag: "div", attrs: { class: "g" } }).add(
+        el({ tag: "div", attrs: { class: "r" } }).add(
+          el({ tag: "span", text: "평점" }),
+          el({ tag: "span", text: "작성일" }),
+        ),
+        el({ tag: "div", attrs: { class: "r" } }).add(el({ tag: "span", text: REVIEW_DATE })),
+        el({ tag: "div", attrs: { class: "r" } }).add(el({ tag: "span", text: REVIEW_DATE })),
+      ),
+    );
+    const c = census(noColumn);
+
+    expect(c.columnProbe.reason).toBe("HEADER_NOT_FOUND");
+    expect(c.unitSource).toBe("LABEL_AGREEMENT");
+  });
+
+  it("**a product id is NOT a review id** — it repeats across reviews, and the reading shows it", () => {
+    // The trap this column creates: it is the most identifier-looking thing on the screen and it is per
+    // PRODUCT, not per review. Collecting on it would fold every review of one product into a single row.
+    const c = census(reviewGrid());
+
+    const printed = c.unit.idCandidates.filter((k) => k.source === "PRINTED" && k.uniquePerUnit);
+    // The option id differs per row; the product id does not. Both are printed, and only one is a key.
+    expect(c.columnProbe.distinctFirstRunValues).toBeLessThan(c.columnProbe.cellsInColumn);
+    expect(printed.length).toBeGreaterThan(0);
   });
 });

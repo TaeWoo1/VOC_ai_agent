@@ -175,6 +175,17 @@ describe("which frame gets reported", () => {
         elementsWithAnchorAttributes: 0,
         anchorDigitRunLengths: [],
         controlAffordances: [],
+        unitSource: "COLUMN" as const,
+        columnProbe: {
+          reason: "OK" as const,
+          headerId: "exposedWithOption",
+          cellsInColumn: 3,
+          cellsWithDigits: 3,
+          cellsWithTwoRuns: 3,
+          distinctFirstRunValues: 1,
+          distinctSecondRunValues: 3,
+          cellsMatchingOurDigits: 0,
+        },
         labelCounts: [],
         textShapes: [],
         unit: {

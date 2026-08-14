@@ -76,6 +76,43 @@ export interface ReviewTextShape {
   readonly pattern: string;
 }
 
+/** Why the catalog-column probe refused. */
+export const REVIEW_COLUMN_REFUSALS = ["HEADER_NOT_FOUND", "HEADER_AMBIGUOUS", "NO_CELLS"] as const;
+export type ReviewColumnRefusal = (typeof REVIEW_COLUMN_REFUSALS)[number];
+
+/**
+ * **The `노출상품ID (옵션ID)` column — the seller's catalog identity, printed rather than marked up.**
+ *
+ * The operator read this column off the real screen; no field-word scan had found it. Coupang's own
+ * definitions make those two numbers `productId` and `vendorItemId`, which means catalog identity is available
+ * per row **without SellerOps supplying anything** — and available in exactly the place three 고객문의 sittings
+ * of attribute scanning were never going to look.
+ *
+ * It is also the better anchor for the row itself: one cell per review, by construction.
+ *
+ * Column scope is a SAFETY property, not a convenience. Other columns hold digit runs too, and matching a
+ * catalog id against one of those would attribute a review to the wrong product.
+ */
+export interface ReviewColumnProbe {
+  readonly reason: "OK" | ReviewColumnRefusal;
+  /** Which header spelling matched, as the id WE supplied. Never the page's text. */
+  readonly headerId: string | null;
+  readonly cellsInColumn: number;
+  readonly cellsWithDigits: number;
+  /** Cells printing TWO runs — the `노출상품ID (옵션ID)` shape, product and option together. */
+  readonly cellsWithTwoRuns: number;
+  /** Distinct FIRST runs (productId). Fewer than the cell count means several reviews share a product. */
+  readonly distinctFirstRunValues: number;
+  /** Distinct SECOND runs (vendorItemId). Counts only — the values stay in the page. */
+  readonly distinctSecondRunValues: number;
+  /** Cells carrying a digit SellerOps already holds. The catalog match, as a count. */
+  readonly cellsMatchingOurDigits: number;
+}
+
+/** How the review unit was resolved. Reported so a reading cannot be mistaken for the stronger one. */
+export const REVIEW_UNIT_SOURCES = ["COLUMN", "LABEL_AGREEMENT"] as const;
+export type ReviewUnitSource = (typeof REVIEW_UNIT_SOURCES)[number];
+
 /** Why a census refused. Every one is fail-closed — never a partial reading. */
 export const REVIEW_CENSUS_REFUSALS = [
   /** The scan hit its element budget; a truncated page cannot be counted honestly. */
@@ -240,6 +277,9 @@ export interface ReviewListCensus {
   readonly elementsWithAnchorAttributes: number;
   readonly anchorDigitRunLengths: readonly number[];
   readonly controlAffordances: readonly ReviewControlAffordance[];
+  /** Which route resolved the review unit — the column (strong) or field-word agreement (weaker). */
+  readonly unitSource: ReviewUnitSource;
+  readonly columnProbe: ReviewColumnProbe;
   readonly labelCounts: readonly ReviewLabelCount[];
   readonly textShapes: readonly ReviewTextShapeCount[];
   readonly unit: ReviewUnitReading;
@@ -349,6 +389,11 @@ export type ReviewScopeVerdict = (typeof REVIEW_SCOPE_VERDICTS)[number];
 
 export function classifyOwnershipScope(census: ReviewListCensus | null | undefined): ReviewScopeVerdict {
   if (!census || census.reason !== "OK") return "NOT_ESTABLISHED";
+  // The column is the stronger evidence and is checked first: a match inside the ONE column whose header names
+  // 노출상품ID is a match against a catalog id, where a match anywhere in a row could be an order number.
+  if (census.columnProbe.reason === "OK" && census.columnProbe.cellsMatchingOurDigits > 0) {
+    return "OUR_CATALOG_CONFIRMED";
+  }
   return census.unit.unitsMatchingOurDigits > 0 ? "OUR_CATALOG_CONFIRMED" : "NOT_ESTABLISHED";
 }
 
@@ -437,6 +482,51 @@ const REFUSED_UNIT: ReviewUnitReading = Object.freeze({
   unitsWithDetailLink: 0,
   idCandidates: [],
 });
+
+const REFUSED_COLUMN: ReviewColumnProbe = Object.freeze({
+  reason: "HEADER_NOT_FOUND" as const,
+  headerId: null,
+  cellsInColumn: 0,
+  cellsWithDigits: 0,
+  cellsWithTwoRuns: 0,
+  distinctFirstRunValues: 0,
+  distinctSecondRunValues: 0,
+  cellsMatchingOurDigits: 0,
+});
+
+const COLUMN_REFUSALS: readonly string[] = REVIEW_COLUMN_REFUSALS;
+
+/**
+ * The column probe, fail-closed. The header id is echoed only when it names a spelling the CALLER supplied —
+ * the one place a page-controlled string could otherwise have travelled.
+ */
+function sanitizeColumnProbe(raw: unknown, headers: readonly ReviewLabelExpectation[]): ReviewColumnProbe {
+  if (!raw || typeof raw !== "object") return REFUSED_COLUMN;
+  const p = raw as Record<string, unknown>;
+  const headerId =
+    typeof p.headerId === "string" && headers.some((h) => h.id === p.headerId) ? p.headerId : null;
+  const reason = typeof p.reason === "string" ? p.reason : null;
+  if (reason !== "OK") {
+    return {
+      ...REFUSED_COLUMN,
+      reason: reason && COLUMN_REFUSALS.includes(reason) ? (reason as ReviewColumnRefusal) : "HEADER_NOT_FOUND",
+      headerId,
+    };
+  }
+  const cellsInColumn = count(p.cellsInColumn);
+  if (cellsInColumn === null || cellsInColumn === 0) return { ...REFUSED_COLUMN, reason: "NO_CELLS", headerId };
+  const bounded = (v: unknown): number => Math.min(count(v) ?? 0, cellsInColumn);
+  return {
+    reason: "OK",
+    headerId,
+    cellsInColumn,
+    cellsWithDigits: bounded(p.cellsWithDigits),
+    cellsWithTwoRuns: bounded(p.cellsWithTwoRuns),
+    distinctFirstRunValues: bounded(p.distinctFirstRunValues),
+    distinctSecondRunValues: bounded(p.distinctSecondRunValues),
+    cellsMatchingOurDigits: bounded(p.cellsMatchingOurDigits),
+  };
+}
 
 const REFUSED_PAGINATION: ReviewPaginationReading = Object.freeze({
   dateInputCount: 0,
@@ -534,6 +624,7 @@ export function sanitizeReviewListCensus(
   labelExpectations: readonly ReviewLabelExpectation[],
   controlExpectations: readonly ReviewLabelExpectation[],
   shapeExpectations: readonly ReviewTextShape[],
+  headerExpectations: readonly ReviewLabelExpectation[] = [],
 ): ReviewListCensus {
   const refused = (reason: "OK" | ReviewCensusRefusal): ReviewListCensus => ({
     reason,
@@ -542,6 +633,8 @@ export function sanitizeReviewListCensus(
     elementsWithAnchorAttributes: 0,
     anchorDigitRunLengths: [],
     controlAffordances: [],
+    unitSource: "LABEL_AGREEMENT" as const,
+    columnProbe: REFUSED_COLUMN,
     labelCounts: [],
     textShapes: [],
     unit: REFUSED_UNIT,
@@ -614,6 +707,8 @@ export function sanitizeReviewListCensus(
     elementsWithAnchorAttributes,
     anchorDigitRunLengths: digitRunLengths(r.anchorDigitRunLengths),
     controlAffordances,
+    unitSource: r.unitSource === "COLUMN" ? "COLUMN" : "LABEL_AGREEMENT",
+    columnProbe: sanitizeColumnProbe(r.columnProbe, headerExpectations),
     labelCounts,
     textShapes,
     unit: sanitizeUnit(r.unit),

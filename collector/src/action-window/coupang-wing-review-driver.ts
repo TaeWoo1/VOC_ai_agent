@@ -95,6 +95,20 @@ export const WING_REVIEW_CLASS_TOKENS: readonly string[] = Object.freeze([
   "score",
 ]);
 
+/**
+ * **The catalog column's header, as the operator read it off the real screen.**
+ *
+ * `노출상품ID (옵션ID)` — Coupang's own definitions make those `productId` and `vendorItemId`. Spacing around
+ * the parenthesis has never been measured, so every spelling is supplied at once together with each half
+ * alone: one more `indexOf` inside the page each, against a seated sitting for a guess.
+ */
+export const WING_REVIEW_COLUMN_HEADERS: readonly ReviewLabelExpectation[] = Object.freeze([
+  { id: "exposedWithOption", exactText: "노출상품ID (옵션ID)" },
+  { id: "exposedWithOptionTight", exactText: "노출상품ID(옵션ID)" },
+  { id: "exposedOnly", exactText: "노출상품ID" },
+  { id: "optionOnly", exactText: "옵션ID" },
+]);
+
 export interface CoupangWingReviewDriverOptions {
   readonly context?: BrowserContext;
 }
@@ -138,13 +152,14 @@ export class CoupangWingReviewDriver {
     labels: readonly ReviewLabelExpectation[] = WING_REVIEW_FIELD_LABELS,
     controls: readonly ReviewLabelExpectation[] = WING_REVIEW_CONTROL_LABELS,
     shapes: readonly ReviewTextShape[] = WING_REVIEW_TEXT_SHAPES,
+    headers: readonly ReviewLabelExpectation[] = WING_REVIEW_COLUMN_HEADERS,
   ): Promise<ReviewListCensus> {
     const page = this.activePage();
     await this.settle(page);
     const raw = await (page as unknown as { evaluate<T>(s: string): Promise<T> })
-      .evaluate<unknown>(buildReviewListCensusScript(labels, controls, shapes, digits, WING_REVIEW_CLASS_TOKENS))
+      .evaluate<unknown>(buildReviewListCensusScript(labels, controls, shapes, digits, WING_REVIEW_CLASS_TOKENS, headers))
       .catch(() => null);
-    return this.record(sanitizeReviewListCensus(raw, labels, controls, shapes));
+    return this.record(sanitizeReviewListCensus(raw, labels, controls, shapes, headers));
   }
 
   /**
@@ -161,19 +176,20 @@ export class CoupangWingReviewDriver {
     labels: readonly ReviewLabelExpectation[] = WING_REVIEW_FIELD_LABELS,
     controls: readonly ReviewLabelExpectation[] = WING_REVIEW_CONTROL_LABELS,
     shapes: readonly ReviewTextShape[] = WING_REVIEW_TEXT_SHAPES,
+    headers: readonly ReviewLabelExpectation[] = WING_REVIEW_COLUMN_HEADERS,
   ): Promise<ReviewFrameCensus[]> {
     const page = this.activePage();
     await this.settle(page);
     const framesOf = (page as unknown as { frames?: () => FrameLike[] }).frames;
     const frames = typeof framesOf === "function" ? framesOf.call(page).slice(0, MAX_FRAMES) : [];
-    const script = buildReviewListCensusScript(labels, controls, shapes, digits, WING_REVIEW_CLASS_TOKENS);
+    const script = buildReviewListCensusScript(labels, controls, shapes, digits, WING_REVIEW_CLASS_TOKENS, headers);
     const out: ReviewFrameCensus[] = [];
     for (let frameIndex = 0; frameIndex < frames.length; frameIndex += 1) {
       const raw = await frames[frameIndex]!.evaluate<unknown>(script).catch(() => null);
       if (raw === null) continue;
       out.push({
         frameIndex,
-        census: this.record(sanitizeReviewListCensus(raw, labels, controls, shapes), frameIndex),
+        census: this.record(sanitizeReviewListCensus(raw, labels, controls, shapes, headers), frameIndex),
       });
     }
     return out;
@@ -186,6 +202,8 @@ export class CoupangWingReviewDriver {
       reason: census.reason,
       elementsScanned: census.elementsScanned,
       unit: `${census.unit.level?.tagName ?? "none"}/${census.unit.unitCount}/${census.unit.labelsAgreeing}`,
+      unitSource: census.unitSource,
+      column: `${census.columnProbe.reason}/${census.columnProbe.cellsInColumn}/${census.columnProbe.distinctFirstRunValues}`,
       controls: census.controlAffordances.map((a) => `${a.id}=${a.interactiveCount}/${a.staticCount}`),
       ids: census.unit.idCandidates
         .filter((c) => c.uniquePerUnit)
