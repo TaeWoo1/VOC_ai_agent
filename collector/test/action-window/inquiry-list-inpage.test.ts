@@ -20,6 +20,7 @@
 import { describe, expect, it } from "vitest";
 import { buildInquiryListCensusScript } from "../../src/action-window/api-issuance-calibration/inquiry-list-inpage";
 import {
+  resolveInquiryColumnTarget,
   resolveInquiryTarget,
   sanitizeInquiryListCensus,
   type InquiryDigitExpectation,
@@ -34,6 +35,8 @@ interface ElInit {
   attrs?: Record<string, string>;
   display?: string;
   rects?: number;
+  /** Where this element paints. The column probe resolves a column geometrically, so this is load-bearing. */
+  box?: { left: number; top: number; width: number; height: number };
 }
 
 /** A shadow root: queryable like a document, and reachable back to its host — which is how the walk crosses. */
@@ -65,6 +68,7 @@ class El {
   private readonly ownText: string;
   private readonly display: string;
   private readonly rects: number;
+  private readonly box: { left: number; top: number; width: number; height: number };
   readonly attributes: { name: string; value: string }[];
 
   constructor(init: ElInit) {
@@ -72,6 +76,7 @@ class El {
     this.ownText = init.text ?? "";
     this.display = init.display ?? "block";
     this.rects = init.rects ?? 1;
+    this.box = init.box ?? { left: 0, top: 0, width: 100, height: 20 };
     this.attributes = Object.entries(init.attrs ?? {}).map(([name, value]) => ({ name, value }));
   }
 
@@ -128,8 +133,8 @@ class El {
   getClientRects(): unknown[] {
     return new Array(this.rects).fill({});
   }
-  getBoundingClientRect(): { width: number; height: number } {
-    return { width: 100, height: 20 };
+  getBoundingClientRect(): { left: number; top: number; width: number; height: number } {
+    return this.box;
   }
 }
 
@@ -414,6 +419,167 @@ describe("the anchor leads, and the row shape comes back as a finding", () => {
   });
 });
 
+/**
+ * The real WING 고객문의 grid, as the seller described it: 등록일시 · 고객명 · 상품/문의내용 · 문의유형(접수번호) ·
+ * 주문번호 · 답변여부, with the receipt number PRINTED as `주문문의 (158846709)` rather than marked up.
+ *
+ * Laid out with real geometry, because the column is resolved geometrically — a fixture without boxes would
+ * pass every column test for the wrong reason.
+ */
+const COL_X: Record<string, number> = { date: 0, name: 120, body: 240, type: 460, order: 600, state: 740 };
+const COL_W = 110;
+
+function wingGrid(
+  rows: { receiptNo: string; orderNo: string; buyer: string; body: string; state: string }[],
+): El {
+  const headerCells = [
+    ["등록일시", COL_X.date],
+    ["고객명", COL_X.name],
+    ["상품/문의내용", COL_X.body],
+    ["문의유형(접수번호)", COL_X.type],
+    ["주문번호", COL_X.order],
+    ["답변여부", COL_X.state],
+  ] as const;
+  const header = el({ tag: "div", attrs: { class: "hd" }, box: { left: 0, top: 0, width: 860, height: 30 } });
+  for (const [text, left] of headerCells) {
+    header.add(el({ tag: "span", text, box: { left: left!, top: 0, width: COL_W, height: 30 } }));
+  }
+  const body = el({ tag: "div", box: { left: 0, top: 0, width: 860, height: 400 } }).add(header);
+  rows.forEach((r, i) => {
+    const top = 40 + i * 40;
+    const cell = (text: string, left: number): El =>
+      el({ tag: "span", text, box: { left, top, width: COL_W, height: 30 } });
+    body.add(
+      el({ tag: "div", attrs: { class: "rw" }, box: { left: 0, top, width: 860, height: 30 } }).add(
+        cell("2026-08-01", COL_X.date!),
+        cell(r.buyer, COL_X.name!),
+        cell(r.body, COL_X.body!),
+        cell(`주문문의 (${r.receiptNo})`, COL_X.type!),
+        cell(r.orderNo, COL_X.order!),
+        cell(r.state, COL_X.state!),
+        el({
+          tag: "a",
+          text: "상세",
+          attrs: { href: "/cs/detail" },
+          box: { left: COL_X.state! + 60, top, width: 40, height: 30 },
+        }),
+      ),
+    );
+  });
+  return el({ tag: "div" }).add(body);
+}
+
+const HEADERS: InquiryLabelExpectation[] = [
+  { id: "typeWithNo", exactText: "문의유형(접수번호)" },
+  { id: "receiptNo", exactText: "접수번호" },
+];
+
+function gridCensus(root: El, digits = DIGITS) {
+  const raw = run<unknown>(buildInquiryListCensusScript(digits, LABELS, HEADERS), root);
+  return sanitizeInquiryListCensus(raw, digits, LABELS, HEADERS);
+}
+
+describe("the identifier the seller can SEE — matched in the column its header names", () => {
+  const GRID = (): El =>
+    wingGrid([
+      {
+        receiptNo: INQUIRY_A,
+        orderNo: "31000012345678",
+        buyer: "김**",
+        body: BUYER_TEXT_A,
+        state: "답변완료",
+      },
+      {
+        receiptNo: INQUIRY_B,
+        orderNo: "31000087654321",
+        buyer: "이**",
+        body: BUYER_TEXT_B,
+        state: "답변완료",
+      },
+    ]);
+
+  it("**resolves each DB inquiryId to exactly one row, and to DIFFERENT rows**", () => {
+    // This is the mapping the whole unit rests on: onlineInquiries.inquiryId == the printed 접수번호.
+    const census = gridCensus(GRID(), [
+      { id: "inquiryA", digits: INQUIRY_A },
+      { id: "inquiryB", digits: INQUIRY_B },
+    ]);
+
+    expect(census.columnProbe.reason).toBe("OK");
+    expect(census.columnProbe.headerId).toBe("typeWithNo");
+    expect(census.columnProbe.matches.map((m) => m.matchCount)).toEqual([1, 1]);
+    // Both resolving to the SAME row would report 1 and 1 too, and would be a broken mapping that looks clean.
+    expect(census.columnProbe.distinctRowsMatched).toBe(2);
+    expect(resolveInquiryColumnTarget(census, "inquiryA").ok).toBe(true);
+  });
+
+  it("reports the row's detail affordance and its answered state, as ids we supplied", () => {
+    const census = gridCensus(GRID(), [{ id: "inquiryA", digits: INQUIRY_A }]);
+
+    const match = census.columnProbe.matches[0]!;
+    expect(match.hasDetailAffordance).toBe(true);
+    expect(match.answeredStateId).toBe("answeredTight");
+    // The ROW is one level above the cell — not level 0, which is the cell repeating across the row.
+    expect(match.rowLevelDepth).toBe(1);
+    // And its sibling count is 3 for TWO inquiries, because the header row is a <div> beside them. Sibling
+    // count is a measurement of the markup, not a count of inquiries, and reading it as the latter is exactly
+    // the kind of inference this probe exists to keep out of a locator.
+    const rowLevel = match.topology!.repeatLevels.find((l) => l.depth === 1)!;
+    expect(rowLevel.siblingCount).toBe(3);
+    expect(rowLevel.siblingsSharingClassShape).toBe(2);
+  });
+
+  it("**an order number is never matched against an inquiry id** — the column scope is the guard", () => {
+    // The 주문번호 column holds digit runs too. Without column scoping, an id that happened to coincide would
+    // resolve confidently to a row, and "confidently wrong" here means showing a seller another customer's
+    // question. Here the order number IS one of our expectations, and it must not be found.
+    const census = gridCensus(GRID(), [
+      { id: "inquiryA", digits: INQUIRY_A },
+      { id: "orderNo", digits: "31000012345678" },
+    ]);
+
+    expect(census.columnProbe.matches.find((m) => m.id === "inquiryA")!.matchCount).toBe(1);
+    expect(census.columnProbe.matches.find((m) => m.id === "orderNo")!.matchCount).toBe(0);
+  });
+
+  it("**a whole-run match** — the printed number is not matched by a prefix of itself", () => {
+    const census = gridCensus(GRID(), [{ id: "prefix", digits: INQUIRY_A.slice(0, 5) }]);
+
+    expect(census.columnProbe.matches[0]!.matchCount).toBe(0);
+  });
+
+  it("refuses when the header is nowhere on the screen, rather than matching page-wide", () => {
+    const root = el({ tag: "div" }).add(
+      el({ tag: "div" }).add(el({ tag: "span", text: `주문문의 (${INQUIRY_A})` })),
+    );
+
+    const census = gridCensus(root);
+
+    expect(census.columnProbe.reason).toBe("HEADER_NOT_FOUND");
+    expect(resolveInquiryColumnTarget(census, "inquiryId")).toEqual({ ok: false, reason: "CENSUS_REFUSED" });
+  });
+
+  it("refuses when two headers match — which column is THE column would be a guess", () => {
+    const root = GRID();
+    root.add(
+      el({ tag: "div" }).add(
+        el({ tag: "span", text: "문의유형(접수번호)", box: { left: 0, top: 900, width: 100, height: 20 } }),
+      ),
+    );
+
+    expect(gridCensus(root).columnProbe.reason).toBe("HEADER_AMBIGUOUS");
+  });
+
+  it("nothing from the 고객명 or 문의내용 columns reaches the result", () => {
+    const census = gridCensus(GRID(), [{ id: "inquiryA", digits: INQUIRY_A }]);
+
+    const wire = JSON.stringify(census);
+    for (const secretish of [BUYER_TEXT_A, BUYER_TEXT_B, "김**", "이**", "주문문의", "31000012345678"]) {
+      expect(wire, `column probe leaked ${secretish}`).not.toContain(secretish);
+    }
+  });
+});
+
 describe("the scan reaches every document, not just the easy one", () => {
   it("**finds a list rendered inside an open shadow root**", () => {
     // A document-level query stops at a shadow boundary. A component-rendered list is invisible to it — the
@@ -586,17 +752,24 @@ describe("nothing a buyer wrote can leave the page", () => {
     expect(wire).toContain("inquiryId");
   });
 
-  it("**`textContent` is read in exactly one place**, and reduced to a boolean there", () => {
-    const body = buildInquiryListCensusScript(DIGITS, LABELS);
+  it("**`textContent` is read in exactly ONE function**, and every caller reduces it to a count", () => {
+    // The probe now compares text in two ways — against fixed platform words, and against our own identifiers
+    // in one column. Both go through a single reader, which is what keeps "where does page text enter this
+    // script" answerable by looking at one line instead of auditing every branch.
+    const body = buildInquiryListCensusScript(DIGITS, LABELS, HEADERS);
     const code = body
       .split("\n")
       .filter((l) => !l.trimStart().startsWith("/*") && !l.trimStart().startsWith("*"))
       .join("\n");
     const reads = code.split("textContent").length - 1;
-    expect(reads, "textContent must be read only inside countLabel").toBe(1);
-    // And that one read is a fixed-literal containment test, never assigned to a returned field.
+    expect(reads, "textContent must be read only inside textOf").toBe(1);
     const readLine = code.split("\n").find((l) => l.includes("textContent"))!;
-    expect(readLine).toContain("indexOf(literal)");
+    expect(readLine).toContain("function textOf");
+    // Every use of that reader ends in a containment test or a digit-run extraction — never an assignment
+    // into something returned. `indexOf` and `.match(` are the only two shapes allowed to follow it.
+    for (const use of code.split("\n").filter((l) => l.includes("textOf(") && !l.includes("function textOf"))) {
+      expect(use, `textOf used without reducing it: ${use.trim()}`).toMatch(/indexOf\(|\.match\(/);
+    }
   });
 
   it("the census returns no attribute VALUE and no class name — only kinds and counts", () => {

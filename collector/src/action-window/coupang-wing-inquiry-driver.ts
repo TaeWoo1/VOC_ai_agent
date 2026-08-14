@@ -40,6 +40,24 @@ export const WING_INQUIRY_STATUS_LABELS: readonly InquiryLabelExpectation[] = Ob
   { id: "waiting", exactText: "대기" },
 ]);
 
+/**
+ * **The column header that names where the 접수번호 is printed.**
+ *
+ * The seller reads an inquiry's identity off the screen as `주문문의 (158846709)`, in the column headed
+ * `문의유형(접수번호)` — and that number is the same 9-digit `inquiryId` the API hands SellerOps. The attribute
+ * calibration measured why it was never going to be found the other way: that screen carries no 9- or 11-digit
+ * run in any `href` / `id` / `data-*` at all.
+ *
+ * Spacing around the parenthesis has never been measured, so both spellings are supplied at once, together with
+ * the bare `접수번호` as a last resort. Supplying candidates costs one in-page comparison each; guessing one and
+ * re-running live costs a seated sitting.
+ */
+export const WING_INQUIRY_COLUMN_HEADERS: readonly InquiryLabelExpectation[] = Object.freeze([
+  { id: "typeWithNo", exactText: "문의유형(접수번호)" },
+  { id: "typeWithNoSpaced", exactText: "문의유형 (접수번호)" },
+  { id: "receiptNo", exactText: "접수번호" },
+]);
+
 export interface CoupangWingInquiryDriverOptions {
   readonly context?: BrowserContext;
 }
@@ -86,13 +104,14 @@ export class CoupangWingInquiryDriver {
   async censusInquiryList(
     digits: readonly InquiryDigitExpectation[],
     labels: readonly InquiryLabelExpectation[] = WING_INQUIRY_STATUS_LABELS,
+    headers: readonly InquiryLabelExpectation[] = WING_INQUIRY_COLUMN_HEADERS,
   ): Promise<InquiryListCensus> {
     const page = this.activePage();
     await this.settle(page);
     const raw = await (page as unknown as { evaluate<T>(s: string): Promise<T> })
-      .evaluate<unknown>(buildInquiryListCensusScript(digits, labels))
+      .evaluate<unknown>(buildInquiryListCensusScript(digits, labels, headers))
       .catch(() => null);
-    return this.record(sanitizeInquiryListCensus(raw, digits, labels));
+    return this.record(sanitizeInquiryListCensus(raw, digits, labels, headers));
   }
 
   /**
@@ -107,17 +126,21 @@ export class CoupangWingInquiryDriver {
   async censusAllFrames(
     digits: readonly InquiryDigitExpectation[],
     labels: readonly InquiryLabelExpectation[] = WING_INQUIRY_STATUS_LABELS,
+    headers: readonly InquiryLabelExpectation[] = WING_INQUIRY_COLUMN_HEADERS,
   ): Promise<InquiryFrameCensus[]> {
     const page = this.activePage();
     await this.settle(page);
     const framesOf = (page as unknown as { frames?: () => FrameLike[] }).frames;
     const frames = typeof framesOf === "function" ? framesOf.call(page).slice(0, MAX_FRAMES) : [];
-    const script = buildInquiryListCensusScript(digits, labels);
+    const script = buildInquiryListCensusScript(digits, labels, headers);
     const out: InquiryFrameCensus[] = [];
     for (let frameIndex = 0; frameIndex < frames.length; frameIndex += 1) {
       const raw = await frames[frameIndex]!.evaluate<unknown>(script).catch(() => null);
       if (raw === null) continue;
-      out.push({ frameIndex, census: this.record(sanitizeInquiryListCensus(raw, digits, labels), frameIndex) });
+      out.push({
+        frameIndex,
+        census: this.record(sanitizeInquiryListCensus(raw, digits, labels, headers), frameIndex),
+      });
     }
     return out;
   }
@@ -132,6 +155,8 @@ export class CoupangWingInquiryDriver {
       digitLengths: census.anchorDigitRunLengths.join("/"),
       matches: census.anchors.map((m) => `${m.id}=${m.matchCount}`),
       labels: census.labelCounts.map((l) => `${l.id}=${l.elementCount}`),
+      column: `${census.columnProbe.reason}/${census.columnProbe.cellsInColumn}`,
+      columnMatches: census.columnProbe.matches.map((m) => `${m.id}=${m.matchCount}`),
     });
     return census;
   }

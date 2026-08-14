@@ -178,7 +178,7 @@ const CENSUS_FRAGMENT = `
   /* The repeat chain above (and including) the anchor. A <td> repeats across and a <tr> repeats down; both are
      reported, because deciding which one is "the row" from inside a probe is exactly the guess that failed. */
   function repeatLevelsOf(el) {
-    var levels = [], node = el, depth = 0;
+    var levels = [], nodes = [], node = el, depth = 0;
     while (node && depth <= MAX_ANCESTOR_DEPTH && levels.length < MAX_LEVELS) {
       var parent = parentOf(node);
       if (parent) {
@@ -202,12 +202,15 @@ const CENSUS_FRAGMENT = `
             hasDetailAffordance: hasDetailAffordance(node),
             digitRunLengths: digitLengthsOf(node, true)
           });
+          /* The ELEMENT each level describes, kept alongside so a caller can act on "the row" without
+             re-deriving it from a description and risking a different answer. It never leaves the page. */
+          nodes.push(node);
         }
       }
       node = parent;
       depth++;
     }
-    return { levels: levels, scanned: depth };
+    return { levels: levels, nodes: nodes, scanned: depth };
   }
   /* The topology reading, shared by digit anchors and label anchors — the structure question is the same one
      whichever kind of thing we found, and one implementation means one set of rules about what may travel. */
@@ -220,6 +223,10 @@ const CENSUS_FRAGMENT = `
       repeatLevels: walk.levels
     };
   }
+  /* THE ONLY PLACE PAGE TEXT IS READ, in the whole script. Everything downstream compares it to a string WE
+     supplied and keeps a count or an element — never the text itself. One read site is what makes that
+     checkable in review rather than merely asserted, and a test pins that this is the only one. */
+  function textOf(el) { return norm(el.textContent || ''); }
   /* Fixed-literal comparison on LEAF elements only. The comparison happens here; what survives it is a list of
      ELEMENTS, never their text. Leaves keep it strictly innermost and keep the scan linear — a status word is
      rendered as leaf text, and counting ancestors too would report a row, its container, and the page body as
@@ -228,9 +235,128 @@ const CENSUS_FRAGMENT = `
     var out = [];
     for (var i = 0; i < all.length; i++) {
       if (all[i].childElementCount !== 0) { continue; }
-      if (norm(all[i].textContent || '').indexOf(literal) >= 0) { out.push(all[i]); }
+      if (textOf(all[i]).indexOf(literal) >= 0) { out.push(all[i]); }
     }
     return out;
+  }
+  /* Whole digit runs in an element's TEXT. Whole, for the same reason as in attributes: a prefix match would
+     silently target a different inquiry. The runs are compared in-page against digits we already hold; neither
+     the text nor the runs are ever returned. */
+  function textDigitRuns(el) {
+    var runs = textOf(el).match(/[0-9]+/g);
+    return runs || [];
+  }
+  function rectOf(el) {
+    return el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+  }
+  /* Painting leaves, the unit of both the label scan and the column scan. */
+  function leavesOf(all) {
+    var out = [];
+    for (var i = 0; i < all.length; i++) {
+      if (all[i].childElementCount === 0 && paints(all[i])) { out.push(all[i]); }
+    }
+    return out;
+  }
+  /* Which fixed status word this row carries, as the id WE supplied for it — never the word itself, and never
+     anything else in the row. Null when the row says none of them. */
+  function answeredStateOf(row, LABELS) {
+    var leaves; try { leaves = slice(row.querySelectorAll('*')); } catch (e) { leaves = []; }
+    if (leaves.length > 500) { leaves = leaves.slice(0, 500); }
+    leaves.push(row);
+    for (var j = 0; j < LABELS.length; j++) {
+      for (var i = 0; i < leaves.length; i++) {
+        if (leaves[i].childElementCount !== 0) { continue; }
+        if (textOf(leaves[i]).indexOf(LABELS[j].exactText) >= 0) { return LABELS[j].id; }
+      }
+    }
+    return null;
+  }
+  /* **The column probe.** The identifier the seller can see is not in any attribute — it is printed in a cell,
+     under a fixed platform header. So the header is the anchor, and the column it names is the ONLY place any
+     text is compared against our identifiers.
+     The column is resolved GEOMETRICALLY: cells whose horizontal centre falls inside the header's own span and
+     which sit below it. That works for a table, a div grid, and a shadow-rendered list alike — the lesson of
+     the row tag, applied one level up rather than re-learned. Column scoping is a safety property, not a
+     convenience: an order number in the next column is also a digit run, and matching our inquiry id against
+     it would resolve confidently to the wrong row. */
+  function columnProbe(all, DIGITS, LABELS, HEADERS) {
+    var leaves = leavesOf(all), i, j;
+    var headerHits = [], headerId = null;
+    for (j = 0; j < HEADERS.length && headerHits.length === 0; j++) {
+      for (i = 0; i < leaves.length; i++) {
+        if (textOf(leaves[i]).indexOf(HEADERS[j].exactText) >= 0) { headerHits.push(leaves[i]); }
+      }
+      if (headerHits.length > 0) { headerId = HEADERS[j].id; }
+    }
+    if (headerHits.length === 0) { return { reason: 'HEADER_NOT_FOUND' }; }
+    if (headerHits.length > 1) { return { reason: 'HEADER_AMBIGUOUS', headerId: headerId }; }
+    var hrect = rectOf(headerHits[0]);
+    if (!hrect) { return { reason: 'HEADER_NOT_FOUND' }; }
+    var left = hrect.left, right = hrect.left + hrect.width, below = hrect.top + hrect.height / 2;
+
+    var cells = [], withDigits = 0;
+    for (i = 0; i < leaves.length; i++) {
+      if (leaves[i] === headerHits[0]) { continue; }
+      var r = rectOf(leaves[i]);
+      if (!r) { continue; }
+      var cx = r.left + r.width / 2;
+      if (cx < left || cx > right || r.top < below) { continue; }
+      cells.push(leaves[i]);
+      if (textDigitRuns(leaves[i]).length > 0) { withDigits++; }
+    }
+    if (cells.length === 0) { return { reason: 'NO_CELLS', headerId: headerId }; }
+
+    var matches = [], rowsSeen = [], distinct = 0;
+    for (j = 0; j < DIGITS.length; j++) {
+      var hits = [];
+      for (i = 0; i < cells.length; i++) {
+        var runs = textDigitRuns(cells[i]);
+        for (var k = 0; k < runs.length; k++) {
+          /* Whole-run equality, in text exactly as in attributes. */
+          if (runs[k] === DIGITS[j].digits) { hits.push(cells[i]); break; }
+        }
+      }
+      hits = innermost(hits);
+      var topology = null, affordance = false, state = null, rowDepth = null;
+      if (hits.length === 1) {
+        topology = topologyOf(hits[0], null);
+        /* WHICH repeat level is the row.
+           Not the innermost: a cell repeats across a row just as a row repeats down a list, so level 0 is the
+           cell the number is printed in — reporting its affordance would answer about the wrong element.
+           The row is found rather than indexed: it is the smallest enclosing repeat that carries the inquiry's
+           OWN status word, because that is what makes it a row rather than a cell or a section. */
+        var walk = repeatLevelsOf(hits[0]);
+        var row = hits[0];
+        for (var L = 0; L < walk.nodes.length; L++) {
+          var st = answeredStateOf(walk.nodes[L], LABELS);
+          if (st !== null) { row = walk.nodes[L]; state = st; rowDepth = walk.levels[L].depth; break; }
+        }
+        /* No level says a status word. Fall back to the OUTERMOST measured repeat and report the state as
+           unknown — a row we cannot read the state of is a finding, not a reason to claim one. */
+        if (state === null && walk.nodes.length > 0) {
+          row = walk.nodes[walk.nodes.length - 1];
+          rowDepth = walk.levels[walk.levels.length - 1].depth;
+        }
+        affordance = hasDetailAffordance(row);
+        if (rowsSeen.indexOf(row) < 0) { rowsSeen.push(row); distinct++; }
+      }
+      matches.push({
+        id: DIGITS[j].id,
+        matchCount: hits.length,
+        topology: topology,
+        rowLevelDepth: rowDepth,
+        hasDetailAffordance: affordance,
+        answeredStateId: state
+      });
+    }
+    return {
+      reason: 'OK',
+      headerId: headerId,
+      cellsInColumn: cells.length,
+      cellsWithDigits: withDigits,
+      distinctRowsMatched: distinct,
+      matches: matches
+    };
   }
   /* Do the hits sit in the same KIND of place? Two leaves saying the same word inside identically shaped
      siblings is a row structure; two leaves in unrelated corners of the page is a filter chip and a legend.
@@ -251,7 +377,7 @@ const CENSUS_FRAGMENT = `
     }
     return { level: best, hits: bestN };
   }
-  function census(DIGITS, LABELS) {
+  function census(DIGITS, LABELS, HEADERS) {
     var collected = collectAll();
     if (collected === null) { return { reason: 'SCAN_TRUNCATED' }; }
     var all = collected.els;
@@ -313,7 +439,8 @@ const CENSUS_FRAGMENT = `
       elementsWithAnchorAttributes: withAnchors,
       anchorDigitRunLengths: allLengths,
       anchors: anchors,
-      labelCounts: labelCounts
+      labelCounts: labelCounts,
+      columnProbe: columnProbe(all, DIGITS, LABELS, HEADERS)
     };
   }
 `;
@@ -326,15 +453,18 @@ const CENSUS_FRAGMENT = `
 export function buildInquiryListCensusScript(
   digits: readonly InquiryDigitExpectation[],
   labels: readonly InquiryLabelExpectation[],
+  headers: readonly InquiryLabelExpectation[] = [],
 ): string {
   const digitSpecs = digits.map((d) => ({ id: d.id, digits: d.digits }));
   const labelSpecs = labels.map((l) => ({ id: l.id, exactText: l.exactText }));
+  const headerSpecs = headers.map((h) => ({ id: h.id, exactText: h.exactText }));
   return [
     "(function () {",
     CENSUS_FRAGMENT,
     "  var DIGITS = " + JSON.stringify(digitSpecs) + ";",
     "  var LABELS = " + JSON.stringify(labelSpecs) + ";",
-    "  return census(DIGITS, LABELS);",
+    "  var HEADERS = " + JSON.stringify(headerSpecs) + ";",
+    "  return census(DIGITS, LABELS, HEADERS);",
     "})()",
   ].join("\n");
 }

@@ -1344,12 +1344,14 @@ export const COUPANG_WING_CREDENTIAL_CALIBRATION_SCOPE = Object.freeze({
  */
 export const COUPANG_WING_INQUIRY_LIST_CALIBRATION_SCOPE = Object.freeze({
   operation:
-    "WING 고객문의 anchor + topology calibration (agent looks for an identifier SellerOps already holds in the " +
-    "page's href / id / data-* attributes only, measures the repeating structure around it, and counts fixed " +
-    "Coupang status words; buyer text never leaves the page, and it performs no click/input/navigation)",
+    "WING 고객문의 anchor + topology calibration (agent looks for an identifier SellerOps already holds — in " +
+    "href / id / data-* attributes, and in the cells of the ONE column headed 문의유형(접수번호) — and measures " +
+    "the repeating structure around it; the 고객명 / 상품·문의내용 columns are never compared against anything, " +
+    "buyer text never leaves the page, and it performs no click/input/navigation)",
   maxActions:
-    "1 sanitized structural census of the 고객문의 screen (0 clicks, 0 inputs, 0 replies; buyer text never " +
-    "leaves the page — fixed-literal comparison only, no text returned)",
+    "1 sanitized structural census of the 고객문의 screen (0 clicks, 0 inputs, 0 replies; page text is compared " +
+    "in-page against strings SellerOps supplied — its own identifiers and fixed Coupang status words — and only " +
+    "counts, tag names and attribute kinds are returned; no text leaves the page)",
 });
 
 export const COUPANG_WING_CREDENTIAL_HANDOFF_SCOPE = Object.freeze({
@@ -1683,11 +1685,12 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
     entrypointCommandId: "calibrate-inquiry-list",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 고객문의 목록 화면에 도착하신 뒤 " +
-      "'SellerOps 확인' 탭의 [현재 화면 확인]을 누르세요. SellerOps는 이미 가지고 있는 문의 번호가 이 화면의 " +
-      "링크 주소·id·data 속성 안에 있는지만 찾고(그 밖의 어디도 보지 않습니다), 정확히 한 곳에서 찾으면 그 주변이 " +
-      "어떤 모양으로 반복되는지를 셉니다. 화면의 글자는 '답변완료' 같은 쿠팡 고정 단어와 맞는지만 이 창 안에서 " +
-      "비교하고 개수만 나옵니다 — **구매자가 쓴 문의 내용은 이 창 밖으로 나가지 않고 어디에도 기록되지 않습니다.** " +
-      "링크 주소나 class 이름도 밖으로 나오지 않습니다. 클릭·입력·답변·전송 없음." +
+      "'SellerOps 확인' 탭의 [현재 화면 확인]을 누르세요. SellerOps는 이미 가지고 있는 문의 접수번호를 두 곳에서만 " +
+      "찾습니다 — 링크 주소·id·data 속성, 그리고 '문의유형(접수번호)' 머리글이 붙은 그 열의 칸. 고객명·상품명· " +
+      "문의내용 열은 비교 대상이 아닙니다. 정확히 한 곳에서 찾으면 그 주변이 어떤 모양으로 반복되는지, 상세로 " +
+      "들어갈 수 있는지, 답변완료인지를 셉니다. 화면의 글자는 우리가 넣은 번호와 '답변완료' 같은 쿠팡 고정 단어에 " +
+      "맞는지만 이 창 안에서 비교하고 개수만 나옵니다 — **구매자가 쓴 문의 내용은 이 창 밖으로 나가지 않고 " +
+      "어디에도 기록되지 않습니다.** 링크 주소나 class 이름도 밖으로 나오지 않습니다. 클릭·입력·답변·전송 없음." +
       WING_RUN_GRANT_SUMMARY +
       WING_PROBE_CONFIRM_CHANNEL_SUMMARY,
     emitsFrontendUrl: false,

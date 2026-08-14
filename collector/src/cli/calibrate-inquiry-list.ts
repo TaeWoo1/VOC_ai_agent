@@ -11,14 +11,21 @@
  *
  * **It assumes nothing about what a row looks like.** The first calibration defined a row as `tr`/`li`/
  * `[role=row]`, counted 54 of them, and reported zero status words on a screen showing two answered inquiries —
- * it had measured the navigation. So the anchor leads now: an identifier we already hold, searched for
- * document-wide in `href` / `id` / `data-*` and nowhere else, with the repeating structure around it walked
- * outward from wherever it lands.
+ * it had measured the navigation. So the anchor leads now, and the structure around it is walked outward from
+ * wherever it lands.
  *
- * **Buyer text never leaves the page.** The identifiers travel INTO the page (they are ours, from our own
- * database) and what comes back is a count. Text is compared in exactly one place — an `indexOf` against fixed
- * Coupang status words we supply — on leaf elements, reduced to a boolean before it can be returned. Attribute
- * values and class names are likewise compared in-page and never returned.
+ * **The identifier the seller can see is printed, not marked up.** The attribute calibration established that
+ * the screen carries no 9- or 11-digit run in any `href` / `id` / `data-*` — those lengths are simply absent.
+ * The 접수번호 is in a cell instead, under the header `문의유형(접수번호)`, as `주문문의 (158846709)`. So the
+ * canonical probe finds that header, resolves ITS column, and compares our own digits against the cells in that
+ * column only. Column scope is a safety property: the 주문번호 column holds digit runs too, and matching an
+ * inquiry id against an order number would resolve confidently to the wrong customer's question.
+ *
+ * **Buyer text never leaves the page, and 고객명 / 상품·문의내용 are never compared against anything.** The
+ * identifiers travel INTO the page (they are ours, from our own database) and what comes back is a count. Page
+ * text is read in exactly ONE function, compared there against strings we supplied — our own digits, and fixed
+ * Coupang status words — and reduced to a count or an element before it can be returned. Attribute values and
+ * class names are likewise compared in-page and never returned.
  *
  * It never clicks, types, submits, navigates, highlights, tags, or mounts an overlay on the WING page.
  *
@@ -31,8 +38,16 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig } from "../config";
 import { log } from "../log";
 import { launchNaverContext } from "../profile";
-import { CoupangWingInquiryDriver, WING_INQUIRY_STATUS_LABELS } from "../action-window/coupang-wing-inquiry-driver";
-import { resolveInquiryTarget, type InquiryDigitExpectation } from "../action-window/coupang-wing-inquiry-list";
+import {
+  CoupangWingInquiryDriver,
+  WING_INQUIRY_COLUMN_HEADERS,
+  WING_INQUIRY_STATUS_LABELS,
+} from "../action-window/coupang-wing-inquiry-driver";
+import {
+  resolveInquiryColumnTarget,
+  resolveInquiryTarget,
+  type InquiryDigitExpectation,
+} from "../action-window/coupang-wing-inquiry-list";
 import type { OperatorConfirmAsk } from "./operator-confirm";
 import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
 import { confirmRunGrant, runGrantRefusalMessage, type RunGrantBinding } from "./operator-run-grant";
@@ -125,9 +140,10 @@ export function calibrationRunGrantBinding(): RunGrantBinding {
     mode: CALIBRATION.mode,
     maxActions: MAX_ACTIONS,
     agentDoesNot:
-      "SellerOps가 이미 가지고 있는 문의 번호가 이 화면의 링크·id·data 속성 안에 있는지만 찾고, 그 주변이 " +
-      "어떤 구조로 반복되는지 셉니다. 화면 글자는 '답변완료' 같은 쿠팡 고정 단어와 맞는지만 비교하고, 결과로는 " +
-      "개수만 나옵니다 — 구매자가 쓴 문의 내용은 이 창 밖으로 나가지 않습니다. 클릭·입력·답변 등록·전송 없음.",
+      "SellerOps가 이미 가지고 있는 문의 접수번호를 '문의유형(접수번호)' 열 안에서만 찾습니다. 고객명·상품명· " +
+      "문의내용 열은 비교 대상에서 제외됩니다. 화면 글자는 우리가 넣은 번호·'답변완료' 같은 쿠팡 고정 단어와 " +
+      "맞는지만 창 안에서 비교하고, 결과로는 개수·태그 이름만 나옵니다 — 구매자가 쓴 내용은 이 창 밖으로 " +
+      "나가지 않습니다. 클릭·입력·답변 등록·전송 없음.",
   };
 }
 
@@ -152,8 +168,9 @@ export function calibrationAsk(): OperatorConfirmAsk {
     headline: "고객문의 목록 화면에 직접 도착하신 뒤 눌러 주세요.",
     lines: [
       "SellerOps는 이 창을 조작하지 않습니다 — 로그인 · 이동은 모두 직접 하세요.",
-      "누르시면 화면 구조를 한 번 셉니다.",
-      "구매자가 쓴 문의 내용은 이 창 밖으로 나가지 않습니다. 나오는 것은 숫자와 태그 이름뿐입니다.",
+      "누르시면 '문의유형(접수번호)' 열에서 우리가 가진 접수번호를 한 번 찾아봅니다.",
+      "고객명·상품명·문의내용 열은 비교하지 않습니다.",
+      "구매자가 쓴 내용은 이 창 밖으로 나가지 않습니다. 나오는 것은 숫자와 태그 이름뿐입니다.",
       "아무것도 눌리거나 입력되지 않고, 답변은 등록되지 않습니다.",
     ],
   };
@@ -175,9 +192,10 @@ export function calibrationExitCode(stop: CalibrationStop, targeted: boolean): n
 
 export const CALIBRATION_BANNER_LINES: readonly string[] = [
   " LIVE Coupang WING 고객문의 anchor calibration — explicit per-run approval required.",
-  " SellerOps looks for an identifier it already holds in href/id/data-* attributes ONLY, and",
-  " measures the repeating structure around it. Buyer text never leaves the page: text is",
-  " compared to fixed Coupang words in-page and only counts come back. Nothing is sent anywhere.",
+  " SellerOps looks for an identifier it already holds: in href/id/data-* attributes, and in the",
+  " cells of the ONE column headed 문의유형(접수번호). Buyer text never leaves the page — page text",
+  " is compared in-page against strings SellerOps supplied and only counts come back, and the",
+  " 고객명 / 상품·문의내용 columns are never compared against anything. Nothing is sent anywhere.",
   " It never clicks, types, submits, navigates, highlights, or tags the WING page.",
 ];
 
@@ -269,11 +287,16 @@ async function main(): Promise<void> {
 
     // EVERY frame, not just the top document. A seller center embeds sub-applications, and scanning only the
     // top document is the same class of mistake as assuming the row tag — one level up.
-    const frames = await driver.censusAllFrames(targets, WING_INQUIRY_STATUS_LABELS);
+    const frames = await driver.censusAllFrames(targets, WING_INQUIRY_STATUS_LABELS, WING_INQUIRY_COLUMN_HEADERS);
     // The primary target is the FIRST id the operator named — by convention the channel's own inquiryId.
     // Resolution is asked for that one only; a fallback to a product id would answer a different question.
     const primary = targets[0]!;
-    const resolved = frames.find((f) => resolveInquiryTarget(f.census, primary.id).ok);
+    // THE CANONICAL PATH is the printed 접수번호, because that is the identifier the seller can actually see.
+    // The attribute reading is kept alongside it — it is the mechanism that would work if WING ever puts the
+    // number in the markup, and reporting both is how a live proof can say which one it established.
+    const resolved =
+      frames.find((f) => resolveInquiryColumnTarget(f.census, primary.id).ok) ??
+      frames.find((f) => resolveInquiryTarget(f.census, primary.id).ok);
     // With no resolution anywhere, report against the frame that carried the most machine ids — the one most
     // likely to BE the list — so the refusal describes the best candidate rather than an arbitrary frame.
     const best =
@@ -282,7 +305,9 @@ async function main(): Promise<void> {
         (a, b) => b.census.elementsWithAnchorAttributes - a.census.elementsWithAnchorAttributes,
       )[0];
     const census = best?.census ?? null;
-    const resolution = resolveInquiryTarget(census, primary.id);
+    const columnResolution = resolveInquiryColumnTarget(census, primary.id);
+    const attributeResolution = resolveInquiryTarget(census, primary.id);
+    const resolution = columnResolution.ok ? columnResolution : attributeResolution;
 
     // SANITIZED record → stdout. Integers, tag names, attribute KINDS, and our own expectation ids.
     // No page text, no attribute value, no class name, no selector, no raw URL.
@@ -296,6 +321,10 @@ async function main(): Promise<void> {
           reportedFrameIndex: best?.frameIndex ?? null,
           frames,
           primaryTargetId: primary.id,
+          // WHICH mechanism resolved it, never merely THAT something did.
+          resolvedVia: columnResolution.ok ? "PRINTED_RECEIPT_NO" : attributeResolution.ok ? "ATTRIBUTE" : null,
+          columnRefusal: columnResolution.ok ? null : columnResolution.reason,
+          attributeRefusal: attributeResolution.ok ? null : attributeResolution.reason,
           targetResolved: resolution.ok,
           ...(resolution.ok ? {} : { targetRefusal: resolution.reason }),
         },
@@ -304,11 +333,11 @@ async function main(): Promise<void> {
       ),
     );
 
-    if (census && census.reason === "OK" && census.elementsWithAnchorAttributes === 0) {
+    if (census && census.reason === "OK" && census.columnProbe.reason !== "OK") {
       console.error("");
-      console.error("⚠ NOTHING on that screen carries a machine-readable number in href / id / data-*.");
-      console.error("  That refutes id-based targeting for this surface. It is the measurement, not a failure to");
-      console.error("  retry away — and matching on the buyer's text instead is not an available answer.");
+      console.error(`⚠ The 접수번호 column did not resolve (${census.columnProbe.reason}).`);
+      console.error("  Without the column, a digit match would be scoped to the whole screen — and the 주문번호");
+      console.error("  column holds digit runs too. Matching there would resolve confidently to the wrong row.");
     } else if (!resolution.ok) {
       console.error("");
       console.error(`⚠ The target did NOT resolve (${resolution.reason}) for ${primary.id}.`);
