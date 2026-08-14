@@ -3,11 +3,10 @@
 What SellerOps stores when it reads a seller's own WING 상품평 screen, how it recognises a review it
 already has, and how it finds one again on the screen.
 
-**Status: built and proven offline; the live sitting is ready to request and has not run.** The harness
-exists (`COUPANG_WING_REVIEW_ACQUISITION` + its bootstrap/preflight pair + `acquire-coupang-reviews.ts`),
-so the proof — first backfill → same-range re-sync → one locate — needs only a fresh seated approval. §7
-lists exactly what is still open. Nothing here is promoted in
-`docs/multi-channel-connector-roadmap.md` §4.1.
+**Status: the first live backfill ran on 2026-08-15 and collected 22 reviews from the operator's own WING
+screen; one stored review was located and rung on that screen.** §6.5 records what it established, the two
+defects it exposed, and the one product decision it forces. The **same-range re-sync proof has not run yet**
+— it is the remaining live step. Nothing here is promoted in `docs/multi-channel-connector-roadmap.md` §4.1.
 
 **Posture, unchanged from the gate:** `TECHNICALLY_POSSIBLE = CONDITIONAL_YES` / `POLICY = UNCLEAR` /
 `DEVELOPMENT = PILOT_ALLOWED` / `GA = POLICY_GATED`
@@ -130,6 +129,81 @@ outline, and a scroll: it never clicks, focuses, types, or submits.
 | Agent → backend handoff | `backend/.../collect/AgentReviewHandoffService.java` |
 | Dedup formula version | `backend/.../ingest/ReviewDedupKey.java` |
 | The seller's record (list / detail / locate target) | `backend/.../review/channel/`, `frontend/src/pages/app/ChannelReviews.tsx` |
+
+## 6.5 What the first live backfill established — 2026-08-15
+
+Six seated `READ_ONLY` sittings on the operator's own 상품평 screen. The first five refused; the sixth
+collected. Every refusal was the design working, and every fix came from a measurement rather than a guess.
+
+### The run that worked
+
+```
+page 1: rows=10 new=9 known=1      page 2: rows=10 new=9 known=1
+page 3: rows=4  new=4 known=0  →  FINAL_PAGE_REACHED
+handoff: received=22 stored=22 skipped=0 failed=0   complete=true  lastPage=3
+dropped(date=0 rating=0 product=0 body=0)
+locate:  verdict=LOCATED matches=1 highlighted=true
+```
+
+| Question | Answer |
+|---|---|
+| Real header parsing | **Works.** All five roles resolved from Coupang's own words, first attempt |
+| The buyer column | **Found and excluded** — `excludedColumns=1` on every page |
+| Row width | 7 columns, 24 rows, **zero** mismatches |
+| `productId` / `옵션ID` | **Both present on all 22** — the option id is not the sometimes-absent field the census suggested |
+| Completion | Read from the screen: page 3's next control carries `disabled` |
+| Locate | One match, one ring, on a real stored review |
+| Marketplace actions | **0.** The operator turned every page |
+| `mediaCount` | 0 everywhere — **cannot yet tell "no photos" from "not detected"** |
+| Body truncation | Undetermined; only 3 reviews had text to truncate |
+
+### The pager, which took five readings
+
+WING states component state in **`data-wuic-attrs`**, not in `class`:
+
+```html
+<span data-wuic-partial="prev" data-wuic-attrs="disabled"><a href="#"></a></span>
+<span data-wuic-attrs="page:1 active"><a href="#">1</a></span>
+<span data-wuic-partial="next" data-wuic-attrs=""><a href="#"></a></span>
+```
+
+Three failures with one cause each: the current page is the token `active` in that attribute (not a class,
+not aria — so descending into the cell found nothing either); `disabled` lives there too; and prev/next are
+**empty `<a>`s** whose glyph is CSS, so every rule looking for the word `다음` or a `>` came back empty on a
+screen that plainly shows `< 1 2 3 >`.
+
+The reading that ended it was the operator opening devtools and pasting the markup. What the probe
+contributed was narrowing it to one region and proving four hypotheses wrong; what a person reading the
+screen contributed was the answer. **A diagnostic that cannot say why it refused costs a seated sitting per
+guess** — which is why the census now reports its own refusal in integers, and why the region reports its
+skeleton (tags and attribute NAMES, never a value) when it cannot resolve.
+
+### Two defects only a live screen could produce
+
+**19 of 22 stored reviews carried a Coupang placeholder as their body.** The design assumed a rating-only
+review leaves the cell empty; WING renders `등록된 내용이 없습니다.` there. The empty-cell guard never fired
+(`dropped body=0`) and the placeholder was stored as if a customer had written it — and two of them then
+merged, which is precisely the silent collapse that guard existed to prevent. Now recognised as an empty
+body, matched as the whole normalized cell so a real review that mentions the phrase survives.
+
+**The new-review count was always zero.** The import's start was stamped after the rows were written, so
+every freshly-stored review sat milliseconds before its own import: a handoff that had just stored 22
+rendered "새 상품평 0". The clock was the bug, not the query.
+
+### The open product decision
+
+This account's reviews are **86% rating-only**. What acquisition does with them is a product-owner decision
+with a real consequence either way, and it is recorded here rather than resolved:
+
+- **(a) drop them** (the v1 rule, currently in code) — the record shows 3 of 22, and the rating distribution
+  (1★×3, 2★×1, 4★×5, 5★×13) is lost entirely. No silent merge.
+- **(b) store them** marked as textless — the record shows ~19, and two rating-only reviews of one product on
+  one day at one score merge. Counts understate.
+- **(c) store them, folding the option id into the key for textless reviews only** — now available, because
+  the option id turned out to be present on every row. Separates options; same-option same-day same-rating
+  still merges.
+
+---
 
 ## 7. What is NOT done
 
