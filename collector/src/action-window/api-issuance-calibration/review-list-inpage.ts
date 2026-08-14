@@ -12,9 +12,9 @@
  * ## The second attribute allowlist, named rather than smuggled
  *
  * The identifier allowlist (`href` / `id` / `data-*`) is unchanged and still the only place a digit is looked
- * for. But deciding whether `답글` is a BUTTON or a printed column header cannot be done from tag names alone —
- * a `div[role=button]` is a control, and calling it furniture would report "Coupang has no reply feature" about
- * a screen that has one. That is the most expensive wrong answer this run can produce.
+ * for. But deciding whether `최근 1개월` is a pressable RANGE control or a printed caption cannot be done from
+ * tag names alone — a `div[role=button]` is a control, and calling it furniture would report that the screen
+ * offers no date filter when it does, which is the reading incremental collection depends on.
  *
  * So a second, deliberately tiny allowlist exists for STRUCTURE classification, and it is stated here rather
  * than left implicit:
@@ -56,7 +56,7 @@ const REVIEW_FRAGMENT = `
     return !!el.hasAttribute && el.hasAttribute(name);
   }
   /* A control a seller could actually press. Tag first, then role — a div[role=button] is a control, and a
-     probe that only knew about <button> would report "no reply feature" on a screen that has one. */
+     probe that only knew about <button> would report no date filter on a screen that has one. */
   function isInteractive(el) {
     var tag = String(el.tagName || '').toUpperCase();
     if (tag === 'BUTTON') { return true; }
@@ -75,10 +75,10 @@ const REVIEW_FRAGMENT = `
     }
     return null;
   }
-  /* Hits on a fixed literal, split by whether they are pressable. The split IS the finding: '답변여부' as a
-     column header is a word, '답글 등록' on a button is a capability, and collapsing them would report a reply
-     feature on a screen that has none. */
-  function replyHits(all, literal) {
+  /* Hits on a fixed literal, split by whether they are pressable. The split is the finding: a printed
+     '최근 1개월' is a caption describing what is already shown, a pressable one is a range the acquisition
+     could ASK for, and only the second makes incremental collection possible. */
+  function controlHits(all, literal) {
     var interactive = [], statics = [];
     for (var i = 0; i < all.length; i++) {
       if (all[i].childElementCount !== 0) { continue; }
@@ -195,21 +195,32 @@ const REVIEW_FRAGMENT = `
     }
     return false;
   }
-  function anyReplyControl(nodes, REPLIES) {
+  /* A per-unit DETAIL LINK: an identifier and the only route to anything the list does not show, in one. The
+     address itself is never read — only that an anchor with an href is inside the unit. */
+  function anyDetailLink(nodes) {
     for (var i = 0; i < nodes.length; i++) {
-      if (nodes[i].childElementCount !== 0) { continue; }
-      for (var r = 0; r < REPLIES.length; r++) {
-        if (textOf(nodes[i]).indexOf(REPLIES[r].exactText) >= 0 && interactiveAt(nodes[i])) { return true; }
-      }
+      if (String(nodes[i].tagName || '').toUpperCase() === 'A' && hasAttr(nodes[i], 'href')) { return true; }
     }
     return false;
   }
-  function anyReplyInput(nodes) {
-    for (var i = 0; i < nodes.length; i++) {
-      if (String(nodes[i].tagName || '').toUpperCase() === 'TEXTAREA') { return true; }
-      if (hasAttr(nodes[i], 'contenteditable')) { return true; }
+  /* **The identifier reading.** For each digit LENGTH, how many units carry a run of it and how many DISTINCT
+     values those runs have. Two counts, because a dedupe key needs two properties — present on each review and
+     different for each — and one count cannot express both. The values are compared here and never returned. */
+  function tallyRuns(tally, source, length, value, unitIndex) {
+    var key = source + ':' + length;
+    if (!tally[key]) { tally[key] = { source: source, digitLength: length, units: {}, values: {} }; }
+    tally[key].units[unitIndex] = 1;
+    tally[key].values[value] = 1;
+  }
+  function idCandidatesFrom(tally) {
+    var out = [];
+    for (var key in tally) {
+      var t = tally[key], u = 0, v = 0, k;
+      for (k in t.units) { u++; }
+      for (k in t.values) { v++; }
+      out.push({ source: t.source, digitLength: t.digitLength, unitsCarrying: u, distinctValues: v });
     }
-    return false;
+    return out;
   }
   function anyOurDigits(nodes, DIGITS) {
     for (var i = 0; i < nodes.length; i++) {
@@ -247,13 +258,24 @@ const REVIEW_FRAGMENT = `
     }
     /* A page number is only a pager when it repeats with its neighbours; a lone '3' is a quantity. */
     var shared = commonRepeat(pagerLeaves);
+    var isPager = shared.hits >= 2;
+    /* How far back the screen ADMITS to going — the difference between a channel that can be backfilled and
+       one that can only be watched forward. A page count is about the list, not about anyone. */
+    var highest = 0;
+    if (isPager) {
+      for (var h = 0; h < pagerLeaves.length; h++) {
+        var v = parseInt(textOf(pagerLeaves[h]), 10);
+        if (v > highest) { highest = v; }
+      }
+    }
     return {
       dateInputCount: dateInputs,
       selectCount: selects,
-      numericPagerCount: shared.hits >= 2 ? shared.hits : 0
+      numericPagerCount: isPager ? shared.hits : 0,
+      highestPagerNumber: highest
     };
   }
-  function census(LABELS, REPLIES, SHAPES, DIGITS, CLASS_TOKENS) {
+  function census(LABELS, CONTROLS, SHAPES, DIGITS, CLASS_TOKENS) {
     var collected = collectAll();
     if (collected === null) { return { reason: 'SCAN_TRUNCATED' }; }
     var all = collected.els;
@@ -270,17 +292,16 @@ const REVIEW_FRAGMENT = `
       }
     }
 
-    /* THE REPLY READING FIRST, and independent of the row structure — a screen whose layout we fail to
-       resolve must still answer the question the whole run exists for. */
-    var replyAffordances = [], replyControls = [];
-    for (j = 0; j < REPLIES.length; j++) {
-      var rh = replyHits(all, REPLIES[j].exactText);
-      for (var c = 0; c < rh.interactive.length; c++) { replyControls.push(rh.interactive[c]); }
-      replyAffordances.push({
-        id: REPLIES[j].id,
-        interactiveCount: rh.interactive.length,
-        staticCount: rh.statics.length,
-        controls: rh.interactive
+    /* The sort / period / range controls, read independently of the row structure — a screen whose layout we
+       fail to resolve can still say whether a range can be asked for. */
+    var controlAffordances = [];
+    for (j = 0; j < CONTROLS.length; j++) {
+      var ch = controlHits(all, CONTROLS[j].exactText);
+      controlAffordances.push({
+        id: CONTROLS[j].id,
+        interactiveCount: ch.interactive.length,
+        staticCount: ch.statics.length,
+        controls: ch.interactive
       });
     }
 
@@ -305,38 +326,49 @@ const REVIEW_FRAGMENT = `
 
     var unit = resolveUnit(hitLists, regexes);
     var units = unit.nodes;
-    var withDetail = 0, withImg = 0, withVideo = 0, withAria = 0, withStar = 0, withOurs = 0;
-    var withReply = 0, withReplyInput = 0;
-    var attrSeen = {}, attrLengths = [], printSeen = {}, printLengths = [];
+    var withDetail = 0, withImg = 0, withVideo = 0, withAria = 0, withStar = 0, withOurs = 0, withLink = 0;
+    var attrSeen = {}, attrLengths = [], printSeen = {}, printLengths = [], idTally = {};
     for (i = 0; i < units.length; i++) {
       var nodes = within(units[i]);
       if (hasDetailAffordance(units[i])) { withDetail++; }
+      if (anyDetailLink(nodes)) { withLink++; }
       if (anyTag(nodes, 'IMG')) { withImg++; }
       if (anyTag(nodes, 'VIDEO')) { withVideo++; }
       if (anyRatingAria(nodes)) { withAria++; }
       if (anyStarClass(nodes, CLASS_TOKENS)) { withStar++; }
       if (DIGITS.length > 0 && anyOurDigits(nodes, DIGITS)) { withOurs++; }
-      if (anyReplyControl(nodes, REPLIES)) { withReply++; }
-      if (anyReplyInput(nodes)) { withReplyInput++; }
       var lens = digitLengthsOf(units[i], true);
       for (var L = 0; L < lens.length; L++) { if (!attrSeen[lens[L]]) { attrSeen[lens[L]] = 1; attrLengths.push(lens[L]); } }
       printedLengthsOf(nodes, printSeen, printLengths);
+      /* THE IDENTIFIER READING. Every run in this unit, tallied by source and length — how many units carry
+         one, and how many distinct values exist. The values live only in this object's keys and never leave. */
+      for (var d = 0; d < nodes.length; d++) {
+        var aruns = anchorRunsOf(nodes[d]);
+        for (var ar = 0; ar < aruns.length; ar++) {
+          tallyRuns(idTally, 'ATTRIBUTE', aruns[ar].digits.length, aruns[ar].digits, i);
+        }
+        if (nodes[d].childElementCount !== 0) { continue; }
+        var pruns = textDigitRuns(nodes[d]);
+        for (var pr = 0; pr < pruns.length; pr++) {
+          tallyRuns(idTally, 'PRINTED', pruns[pr].length, pruns[pr], i);
+        }
+      }
     }
 
-    /* How many reply controls sit INSIDE a review unit rather than in page furniture. A '문의 답변' button in
-       the global navigation is not a review reply control, and this is what tells them apart. */
+    /* How many of each control sit INSIDE a review unit rather than in page furniture. A '최근 1개월' chip in
+       the global navigation is not this list's range control, and this is what tells them apart. */
     var inside = [];
-    for (j = 0; j < replyAffordances.length; j++) {
+    for (j = 0; j < controlAffordances.length; j++) {
       var n = 0;
-      for (var k = 0; k < replyAffordances[j].controls.length; k++) {
+      for (var k = 0; k < controlAffordances[j].controls.length; k++) {
         for (i = 0; i < units.length; i++) {
-          if (units[i].contains && units[i].contains(replyAffordances[j].controls[k])) { n++; break; }
+          if (units[i].contains && units[i].contains(controlAffordances[j].controls[k])) { n++; break; }
         }
       }
       inside.push({
-        id: replyAffordances[j].id,
-        interactiveCount: replyAffordances[j].interactiveCount,
-        staticCount: replyAffordances[j].staticCount,
+        id: controlAffordances[j].id,
+        interactiveCount: controlAffordances[j].interactiveCount,
+        staticCount: controlAffordances[j].staticCount,
         insideUnitCount: n
       });
     }
@@ -364,7 +396,7 @@ const REVIEW_FRAGMENT = `
       shadowRootsFound: collected.shadowRoots,
       elementsWithAnchorAttributes: withAnchors,
       anchorDigitRunLengths: allLengths,
-      replyAffordances: inside,
+      controlAffordances: inside,
       labelCounts: labelCounts,
       textShapes: textShapes,
       unit: {
@@ -379,8 +411,8 @@ const REVIEW_FRAGMENT = `
         unitsMatchingOurDigits: withOurs,
         unitAttributeDigitLengths: attrLengths,
         unitPrintedDigitLengths: printLengths,
-        unitsWithReplyControl: withReply,
-        unitsWithReplyInput: withReplyInput
+        unitsWithDetailLink: withLink,
+        idCandidates: idCandidatesFrom(idTally)
       },
       pagination: paginationOf(all)
     };
@@ -393,7 +425,7 @@ const REVIEW_FRAGMENT = `
  */
 export function buildReviewListCensusScript(
   labels: readonly ReviewLabelExpectation[],
-  replies: readonly ReviewLabelExpectation[],
+  controls: readonly ReviewLabelExpectation[],
   shapes: readonly ReviewTextShape[],
   digits: readonly ReviewDigitExpectation[] = [],
   classTokens: readonly string[] = [],
@@ -403,11 +435,11 @@ export function buildReviewListCensusScript(
     CENSUS_PRIMITIVES_FRAGMENT,
     REVIEW_FRAGMENT,
     "  var LABELS = " + JSON.stringify(labels.map((l) => ({ id: l.id, exactText: l.exactText }))) + ";",
-    "  var REPLIES = " + JSON.stringify(replies.map((l) => ({ id: l.id, exactText: l.exactText }))) + ";",
+    "  var CONTROLS = " + JSON.stringify(controls.map((l) => ({ id: l.id, exactText: l.exactText }))) + ";",
     "  var SHAPES = " + JSON.stringify(shapes.map((s) => ({ id: s.id, pattern: s.pattern }))) + ";",
     "  var DIGITS = " + JSON.stringify(digits.map((d) => ({ id: d.id, digits: d.digits }))) + ";",
     "  var CLASS_TOKENS = " + JSON.stringify(classTokens.map((t) => t.toLowerCase())) + ";",
-    "  return census(LABELS, REPLIES, SHAPES, DIGITS, CLASS_TOKENS);",
+    "  return census(LABELS, CONTROLS, SHAPES, DIGITS, CLASS_TOKENS);",
     "})()",
   ].join("\n");
 }

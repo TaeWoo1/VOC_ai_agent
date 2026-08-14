@@ -65,7 +65,7 @@ describe("the run declares what it is", () => {
       "WAIT_OPERATOR_LOGIN_NAV",
       "CLASSIFY_SANITIZED_PAGE_CATEGORY",
       "MEASURE_REVIEW_LIST_STRUCTURE",
-      "CLASSIFY_REVIEW_REPLY_AFFORDANCE",
+      "MEASURE_REVIEW_IDENTIFIER_CANDIDATES",
     ]);
     for (const forbidden of [
       "READ_CREDENTIAL_VALUES_ONCE",
@@ -99,9 +99,15 @@ describe("the run declares what it is", () => {
     }
   });
 
+  it("the scope names the identifier reading, which is what the run is FOR", () => {
+    for (const text of [REVIEW_DISCOVERY_OPERATION.toLowerCase(), DISCOVERY_BANNER_LINES.join(" ").toLowerCase()]) {
+      expect(text).toContain("de-duplicat");
+    }
+  });
+
   it("the scope sentence names the SECOND attribute allowlist rather than leaving it implicit", () => {
-    // role / type / aria-valuenow / contenteditable are what let the probe tell a 답글 button from a 답글여부
-    // header. An operator approving the run is owed the actual list of what it looks at.
+    // role / type / aria-valuenow / contenteditable are what let the probe tell a pressable range control from
+    // a printed caption. An operator approving the run is owed the actual list of what it looks at.
     const text = COUPANG_WING_REVIEW_DISCOVERY_SCOPE.maxActions;
     for (const attr of ["role", "type", "aria-valuenow", "contenteditable"]) {
       expect(text).toContain(attr);
@@ -113,12 +119,30 @@ describe("the run declares what it is", () => {
     expect(lines).toContain("리뷰 본문");
     expect(lines).toContain("구매자 이름");
     expect(lines).toContain("이 창 밖으로 나가지 않습니다");
-    expect(lines).toContain("답글은 등록되지 않습니다");
+    expect(lines).toContain("아무것도 전송되지 않습니다");
   });
 
-  it("**an undetermined reply answer is its own exit code**, never rounded up to success", () => {
-    // 5 is "we could not decide whether a reply control exists" — the reading that must not be recorded as
-    // "Coupang has no seller reply", because a screen whose rows were never found produces it either way.
+  it("**the run does not ask about replies, on any surface it shows the operator**", () => {
+    // The operator established WING has no seller reply feature, so the scope must not claim to look for one —
+    // an approval that describes a measurement the run does not take is as wrong as one that omits a measurement
+    // it does take.
+    const surfaces = [
+      REVIEW_DISCOVERY_OPERATION,
+      COUPANG_WING_REVIEW_DISCOVERY_SCOPE.maxActions,
+      DISCOVERY_BANNER_LINES.join(" "),
+      discoveryAsk().lines.join(" "),
+    ];
+    for (const surface of surfaces) {
+      expect(surface).not.toContain("답글");
+      expect(surface.toLowerCase()).not.toContain("reply control exists");
+    }
+    // And the budget states the absence positively, so it is checkable rather than merely true.
+    expect(COUPANG_WING_REVIEW_DISCOVERY_SCOPE.maxActions).toContain("0 reply-control lookups");
+  });
+
+  it("**an undetermined acquisition answer is its own exit code**, never rounded up to success", () => {
+    // 5 is "we could not decide whether the reviews carry an identifier" — the reading that must not be
+    // recorded as "there is none", because a screen whose rows were never found produces it either way.
     expect(discoveryExitCode("MEASURED", true)).toBe(0);
     expect(discoveryExitCode("MEASURED", false)).toBe(5);
     expect(discoveryExitCode("ABORTED_BEFORE_CHECKPOINT", true)).toBe(7);
@@ -150,7 +174,7 @@ describe("which frame gets reported", () => {
         shadowRootsFound: 0,
         elementsWithAnchorAttributes: 0,
         anchorDigitRunLengths: [],
-        replyAffordances: [],
+        controlAffordances: [],
         labelCounts: [],
         textShapes: [],
         unit: {
@@ -166,10 +190,10 @@ describe("which frame gets reported", () => {
           unitsMatchingOurDigits: 0,
           unitAttributeDigitLengths: [],
           unitPrintedDigitLengths: [],
-          unitsWithReplyControl: 0,
-          unitsWithReplyInput: 0,
+          unitsWithDetailLink: 0,
+          idCandidates: [],
         },
-        pagination: { dateInputCount: 0, selectCount: 0, numericPagerCount: 0 },
+        pagination: { dateInputCount: 0, selectCount: 0, numericPagerCount: 0, highestPagerNumber: 0 },
       },
     };
   }

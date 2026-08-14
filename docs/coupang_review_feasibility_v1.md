@@ -5,7 +5,7 @@
 > on `CoupangApiConnector`. This document records what was established, by what evidence, and what a
 > single READ_ONLY sitting is being asked to decide.
 >
-> - **Unit:** Coupang Review Integration Feasibility v1 → Coupang WING Review Structure Discovery v1
+> - **Unit:** Coupang Review Integration Feasibility v1 → **READ_ONLY review acquisition feasibility**
 > - **Date:** 2026-08-14
 > - **Live contact:** none yet. The discovery run is built, offline-tested, and **not yet run.**
 
@@ -80,7 +80,7 @@ The remaining candidate, and the subject of the discovery run.
 |---|---|---|
 | TECHNICALLY_POSSIBLE | **UNKNOWN — being measured** | The screen exists; nothing about its structure has been measured. |
 | POLICY | **UNCLEAR** | The bot clause governs `coupang.com`. The seller relationship is governed by 마켓플레이스 판매이용약관 §14 (마켓플레이스 시스템 악용), whose **verbatim text has not been read**. A seller reading their own screen is not obviously 악용 — and "not obviously" is not `ALLOWED`. |
-| PRODUCT_RECOMMENDED | **NOT YET** | Depends on §6 and on the reply verdict. |
+| PRODUCT_RECOMMENDED | **NOT YET** | Depends on §6 and on the identifier verdict. Reply is closed — §7. |
 
 **The policy axis stays `UNCLEAR` on purpose.** Reading §14's actual text is the next external-research
 item; until then no run beyond a single READ_ONLY structural measurement is justified, and none is built.
@@ -106,26 +106,37 @@ verdict for "other sellers' items" because no measurement can earn it.
 
 ---
 
-## 7. The one question the sitting is for
+## 7. The reply question is closed — by observation, not measurement
 
-**Does a seller reply control exist on the 상품평 screen?**
+**The operator confirmed WING offers sellers no way to answer a 상품평.** So:
 
-Everything forks on it:
+> **Coupang review operations are acquisition-and-analysis only.** No engineering changes that, and no
+> guided human-in-the-loop reply path is possible on this channel.
 
-- **Present** → Coupang review operations can reach a guided human-in-the-loop reply, and the channel
-  is worth the shape of investment the 고객문의 path received.
-- **Absent** → the channel is **acquisition-and-analysis only**, permanently, and no engineering
-  changes that. Worth knowing before designing an acquisition path, not after.
+An earlier version of this probe measured whether a reply control existed. That measurement was
+**removed rather than kept and ignored** — the words are not in the run at all, the phase no longer
+declares the action, and the approval scope states `0 reply-control lookups` positively so it is
+checkable. A measurement kept "for later" after being told not to use it is one that gets used later.
 
-It is answered **independently of the row structure**, so a screen whose layout fails to resolve still
-yields the answer. And it distinguishes an interactive `답글` from a printed one: `답글여부` as a column
-header is a word, `답글 등록` on a button is a capability. Collapsing them would report a reply feature
-on a screen that has none — the most expensive wrong answer available here.
+## 7-bis. The one question the sitting is for
 
-**Three states, not two.** `NO_REPLY_CONTROL` may only be claimed from a reading that actually found the
-review rows. On a screen whose unit never resolved, zero interactive hits is equally consistent with
-"the probe never reached the reviews" — which is exactly the confident zero three 고객문의 sittings were
-spent on. That reading is `UNDETERMINED` and exits `5`.
+**Could these reviews be collected and de-duplicated at all?**
+
+That needs a **stable identifier** — present on each review and DIFFERENT for each. Those are two
+properties, and one count cannot express both, so both travel: how many units carry a digit run of a
+given length, and how many DISTINCT values those runs have.
+
+- `unitsCarrying === distinctValues` → a dedupe key candidate.
+- `unitsCarrying` far above `distinctValues` → a category code. Collecting on it would fold every
+  review on the screen into one row, **and the fold would look exactly like de-duplication working.**
+
+Asked of markup and of printed text separately, because on the 고객문의 screen the identifier turned
+out to be printed rather than marked up.
+
+**Three states, not two.** `NO_IDENTIFIER` may only be claimed from a reading that actually found the
+review rows. On a screen whose unit never resolved, finding no candidate is equally consistent with
+"the probe never reached the reviews" — the confident zero three 고객문의 sittings were spent on. That
+reading is `UNDETERMINED` and exits `5`.
 
 ---
 
@@ -139,11 +150,17 @@ the match ran inwards and only counts came back. There is no review id to hold. 
 **Coupang's own fixed UI words**, and the review unit is whatever repeating structure the most of them
 agree on. The row tag is a finding; three sittings were paid to learn that.
 
+**Scope of this sitting: `TECHNICALLY_POSSIBLE` only.** The policy axis stays `UNCLEAR` regardless of what
+comes back, and no acquisition is implemented on the strength of it.
+
 Measured in one pass:
 
 | Question | How | What travels |
 |---|---|---|
-| Reply control exists? | Fixed reply words, split by whether the hit is pressable | Two counts per word, plus how many sit inside a review unit |
+| Stable identifier? | Every digit run inside a unit, tallied by source and length | Units carrying, and distinct values — **never a value** |
+| Detail URL per review? | An `<a href>` inside the unit | A count — never the address |
+| Incremental collection? | Sort / period words, split by whether the hit is pressable | Two counts per word, plus how many sit inside a unit |
+| How far back? | The largest number the pager prints | One integer |
 | The review unit | The repeat the field words agree on | Tag, sibling counts, class-token count, agreeing-label count |
 | Rating | `aria-valuenow` presence, and a class shape containing a token we supply | Per-unit booleans, counted |
 | Date | Fixed SHAPE patterns | Which pattern id matched, and how many leaves — **never a date** |
@@ -186,7 +203,7 @@ is visible to whoever reads the run rather than silently believed.
 |---|---|---|---|
 | A. Official Review API | **No — does not exist** | — | ✕ closed |
 | B. Official WING export | **No — operator confirmed none** | would have been cleanest | ✕ closed (reopen if Coupang adds one) |
-| C. Seller-owned WING screen, READ_ONLY | **being measured** | **UNCLEAR** (판매이용약관 §14 unread) | **pending** — gated on the reply verdict and §6 |
+| C. Seller-owned WING screen, READ_ONLY | **being measured** | **UNCLEAR** (판매이용약관 §14 unread) | **pending** — gated on the identifier verdict and §6 |
 | D. Public product-page scraping | Yes | **DISALLOWED** (2026-09-03) | ✕ **not adopted** |
 
 ## 10. Open points, classified

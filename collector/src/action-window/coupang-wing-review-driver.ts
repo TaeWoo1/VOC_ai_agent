@@ -21,27 +21,31 @@ import {
 } from "./coupang-wing-review-list";
 
 /**
- * **The reply words — the ones this run exists to decide about.**
+ * **The sort / period / paging words.**
+ *
+ * Retargeted from the reply words this list used to hold: the operator confirmed WING gives sellers no way to
+ * answer a 상품평, so the reply question is closed and the probe does not ask it. What these decide instead is
+ * whether a range can be ASKED for — the difference between a channel that can be backfilled incrementally and
+ * one that can only be re-read whole.
  *
  * Every plausible spelling is supplied at once, deliberately. The first 고객문의 calibration supplied one
  * spelling per state, came back with zero of both, and left "the wording differs" and "the scan never reached
  * the list" indistinguishable at the cost of a seated sitting. Candidates are nearly free — one more `indexOf`
- * inside the page each — and the counts come back separately, so a single run says which wording the screen
- * uses.
- *
- * `답변` is included even though it is the 고객문의 word: if Coupang runs reviews through the same vocabulary,
- * not asking would produce a false "no reply control" on a screen that has one.
+ * inside the page each.
  */
-export const WING_REVIEW_REPLY_LABELS: readonly ReviewLabelExpectation[] = Object.freeze([
-  { id: "replyTight", exactText: "답글" },
-  { id: "replyWrite", exactText: "답글쓰기" },
-  { id: "replyWriteSpaced", exactText: "답글 쓰기" },
-  { id: "replyRegister", exactText: "답글 등록" },
-  { id: "replySeller", exactText: "판매자 답글" },
-  { id: "comment", exactText: "댓글" },
-  { id: "answerDo", exactText: "답변하기" },
-  { id: "answerRegister", exactText: "답변 등록" },
-  { id: "answer", exactText: "답변" },
+export const WING_REVIEW_CONTROL_LABELS: readonly ReviewLabelExpectation[] = Object.freeze([
+  { id: "sortLatest", exactText: "최신순" },
+  { id: "sortRating", exactText: "평점순" },
+  { id: "sortWord", exactText: "정렬" },
+  { id: "periodWord", exactText: "조회기간" },
+  { id: "periodRecent", exactText: "최근" },
+  { id: "period1m", exactText: "1개월" },
+  { id: "period3m", exactText: "3개월" },
+  { id: "period6m", exactText: "6개월" },
+  { id: "period1y", exactText: "1년" },
+  { id: "periodCustom", exactText: "직접입력" },
+  { id: "search", exactText: "조회" },
+  { id: "pagerNext", exactText: "다음" },
 ]);
 
 /**
@@ -58,12 +62,11 @@ export const WING_REVIEW_FIELD_LABELS: readonly ReviewLabelExpectation[] = Objec
   { id: "registeredAt", exactText: "등록일" },
   { id: "reviewWord", exactText: "상품평" },
   { id: "reviewLoan", exactText: "리뷰" },
+  { id: "reviewNo", exactText: "상품평번호" },
   { id: "buyerHeader", exactText: "구매자" },
   { id: "authorHeader", exactText: "작성자" },
   { id: "productName", exactText: "상품명" },
   { id: "optionHeader", exactText: "옵션" },
-  { id: "replyStateHeader", exactText: "답글여부" },
-  { id: "answerStateHeader", exactText: "답변여부" },
   { id: "photoWord", exactText: "사진" },
   { id: "videoWord", exactText: "동영상" },
 ]);
@@ -133,15 +136,15 @@ export class CoupangWingReviewDriver {
   async censusReviewList(
     digits: readonly ReviewDigitExpectation[] = [],
     labels: readonly ReviewLabelExpectation[] = WING_REVIEW_FIELD_LABELS,
-    replies: readonly ReviewLabelExpectation[] = WING_REVIEW_REPLY_LABELS,
+    controls: readonly ReviewLabelExpectation[] = WING_REVIEW_CONTROL_LABELS,
     shapes: readonly ReviewTextShape[] = WING_REVIEW_TEXT_SHAPES,
   ): Promise<ReviewListCensus> {
     const page = this.activePage();
     await this.settle(page);
     const raw = await (page as unknown as { evaluate<T>(s: string): Promise<T> })
-      .evaluate<unknown>(buildReviewListCensusScript(labels, replies, shapes, digits, WING_REVIEW_CLASS_TOKENS))
+      .evaluate<unknown>(buildReviewListCensusScript(labels, controls, shapes, digits, WING_REVIEW_CLASS_TOKENS))
       .catch(() => null);
-    return this.record(sanitizeReviewListCensus(raw, labels, replies, shapes));
+    return this.record(sanitizeReviewListCensus(raw, labels, controls, shapes));
   }
 
   /**
@@ -156,21 +159,21 @@ export class CoupangWingReviewDriver {
   async censusAllFrames(
     digits: readonly ReviewDigitExpectation[] = [],
     labels: readonly ReviewLabelExpectation[] = WING_REVIEW_FIELD_LABELS,
-    replies: readonly ReviewLabelExpectation[] = WING_REVIEW_REPLY_LABELS,
+    controls: readonly ReviewLabelExpectation[] = WING_REVIEW_CONTROL_LABELS,
     shapes: readonly ReviewTextShape[] = WING_REVIEW_TEXT_SHAPES,
   ): Promise<ReviewFrameCensus[]> {
     const page = this.activePage();
     await this.settle(page);
     const framesOf = (page as unknown as { frames?: () => FrameLike[] }).frames;
     const frames = typeof framesOf === "function" ? framesOf.call(page).slice(0, MAX_FRAMES) : [];
-    const script = buildReviewListCensusScript(labels, replies, shapes, digits, WING_REVIEW_CLASS_TOKENS);
+    const script = buildReviewListCensusScript(labels, controls, shapes, digits, WING_REVIEW_CLASS_TOKENS);
     const out: ReviewFrameCensus[] = [];
     for (let frameIndex = 0; frameIndex < frames.length; frameIndex += 1) {
       const raw = await frames[frameIndex]!.evaluate<unknown>(script).catch(() => null);
       if (raw === null) continue;
       out.push({
         frameIndex,
-        census: this.record(sanitizeReviewListCensus(raw, labels, replies, shapes), frameIndex),
+        census: this.record(sanitizeReviewListCensus(raw, labels, controls, shapes), frameIndex),
       });
     }
     return out;
@@ -183,7 +186,10 @@ export class CoupangWingReviewDriver {
       reason: census.reason,
       elementsScanned: census.elementsScanned,
       unit: `${census.unit.level?.tagName ?? "none"}/${census.unit.unitCount}/${census.unit.labelsAgreeing}`,
-      reply: census.replyAffordances.map((a) => `${a.id}=${a.interactiveCount}/${a.staticCount}`),
+      controls: census.controlAffordances.map((a) => `${a.id}=${a.interactiveCount}/${a.staticCount}`),
+      ids: census.unit.idCandidates
+        .filter((c) => c.uniquePerUnit)
+        .map((c) => `${c.source}:${c.digitLength}=${c.unitsCarrying}`),
       labels: census.labelCounts.map((l) => `${l.id}=${l.elementCount}`),
       shapes: census.textShapes.map((s) => `${s.id}=${s.leafCount}`),
     });

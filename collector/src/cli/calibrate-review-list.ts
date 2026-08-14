@@ -6,14 +6,18 @@
  *   # optional, for the catalog-scope question:
  *   SELLEROPS_REVIEW_PRODUCT_IDS=productId:15411270785 npx tsx src/cli/calibrate-review-list.ts -- …
  *
- * **One sitting, and it answers the fork.** Coupang publishes no review API — the official documentation lists
- * 11 API categories and no review endpoint among them — and the operator has confirmed that WING has a review
- * screen with no official Excel/CSV export. That leaves one question worth a live run before any acquisition
- * design exists: **does a seller reply control exist on that screen at all?**
+ * **One sitting, and it answers one thing: can a review be acquired and de-duplicated at all?**
  *
- * With one, Coupang review operations can reach a guided human-in-the-loop reply, and the channel is worth the
- * same shape of investment the 고객문의 path got. Without one, the channel is acquisition-and-analysis only and
- * no amount of engineering changes that. Building either before measuring would be building on a guess.
+ * Two facts close everything else in advance. Coupang publishes no review API — the official documentation
+ * lists 11 categories and no review endpoint among them — and the operator confirmed that WING's review screen
+ * offers no official export, and **no seller reply feature at all**. So Coupang review operations are
+ * acquisition-and-analysis only, and this run does not look for a reply control, does not count one, and
+ * cannot report one.
+ *
+ * What acquisition needs before any of it is designed is a **stable identifier** — one present on each review
+ * and DIFFERENT for each. Without it there is no dedupe key, and a re-read of the same screen would either
+ * duplicate every review or silently collapse them. That question is asked of markup and of printed text
+ * separately, because on the 고객문의 screen the identifier turned out to be printed rather than marked up.
  *
  * **It assumes nothing about what a review row looks like.** Three 고객문의 sittings were spent on probes that
  * decided the page's shape before measuring it — first the row tag, then the attribute location — and each
@@ -38,8 +42,8 @@ import { log } from "../log";
 import { launchNaverContext } from "../profile";
 import { CoupangWingReviewDriver } from "../action-window/coupang-wing-review-driver";
 import {
+  classifyAcquisitionFeasibility,
   classifyOwnershipScope,
-  classifyReplyCapability,
   type ReviewDigitExpectation,
   type ReviewFrameCensus,
 } from "../action-window/coupang-wing-review-list";
@@ -137,10 +141,10 @@ export function discoveryRunGrantBinding(): RunGrantBinding {
     mode: DISCOVERY.mode,
     maxActions: MAX_ACTIONS,
     agentDoesNot:
-      "이 화면이 어떤 구조인지만 한 번 측정합니다 — '평점'·'작성일' 같은 쿠팡 고정 단어가 어느 반복 구조 안에 " +
-      "함께 있는지, 판매자 답글 버튼이 있는지, 별점·날짜·번호가 어떤 모양인지. 리뷰 본문·구매자 이름·상품명은 " +
-      "읽지 않고, 사진·동영상은 개수만 세며 주소는 읽지 않습니다. 화면 글자는 우리가 넣은 고정 단어·모양 패턴과 " +
-      "맞는지만 창 안에서 비교하고 결과로는 개수·태그 이름만 나옵니다. 클릭·입력·답글 등록·전송 없음.",
+      "이 화면에서 리뷰를 '수집·중복제거'할 수 있는지만 한 번 측정합니다 — '평점'·'작성일' 같은 쿠팡 고정 단어가 " +
+      "어느 반복 구조 안에 함께 있는지, 리뷰마다 다른 번호가 있는지(값이 아니라 자릿수와 '서로 다른 개수'만), " +
+      "상세 링크가 있는지, 기간·정렬·페이지 컨트롤이 있는지. 리뷰 본문·구매자 이름·상품명은 읽지 않고, " +
+      "사진·동영상은 개수만 세며 주소는 읽지 않습니다. 결과로는 개수·태그 이름만 나옵니다. 클릭·입력·전송 없음.",
   };
 }
 
@@ -165,10 +169,11 @@ export function discoveryAsk(): OperatorConfirmAsk {
     headline: "상품평(리뷰) 목록 화면에 직접 도착하신 뒤 눌러 주세요.",
     lines: [
       "SellerOps는 이 창을 조작하지 않습니다 — 로그인 · 이동은 모두 직접 하세요.",
-      "누르시면 이 화면의 구조를 한 번만 측정합니다: 반복 단위, 판매자 답글 버튼 유무, 별점·날짜 표기 모양.",
+      "누르시면 이 화면의 구조를 한 번만 측정합니다: 반복 단위, 리뷰마다 다른 번호가 있는지, 상세 링크·별점· " +
+        "날짜 표기 모양, 기간·정렬·페이지 컨트롤.",
       "리뷰 본문 · 구매자 이름 · 상품명은 읽지 않습니다. 사진·동영상은 개수만 세고 주소는 읽지 않습니다.",
       "화면의 글자는 이 창 밖으로 나가지 않습니다. 나오는 것은 숫자와 태그 이름뿐입니다.",
-      "아무것도 눌리거나 입력되지 않고, 답글은 등록되지 않습니다.",
+      "아무것도 눌리거나 입력되지 않고, 아무것도 전송되지 않습니다.",
     ],
   };
 }
@@ -178,10 +183,10 @@ export const DISCOVERY_STOPS = ["ABORTED_BEFORE_CHECKPOINT", "MEASURED"] as cons
 export type DiscoveryStop = (typeof DISCOVERY_STOPS)[number];
 
 /**
- * 0 = measured, and the reply-capability question is DECIDED (present, or absent from a reading that
- *     demonstrably reached the reviews)
+ * 0 = measured, and acquisition feasibility is DECIDED (an identifier candidate exists, or demonstrably does
+ *     not on a reading that reached the reviews)
  * 5 = measured, but the answer is `UNDETERMINED` — a real result, and the one that must not be rounded up:
- *     a screen whose unit never resolved cannot support a claim that Coupang has no reply feature
+ *     a screen whose unit never resolved cannot support a claim about what its rows carry
  * 7 = nothing was measured (refused, aborted, or timed out)
  */
 export function discoveryExitCode(stop: DiscoveryStop, decided: boolean): number {
@@ -190,9 +195,10 @@ export function discoveryExitCode(stop: DiscoveryStop, decided: boolean): number
 }
 
 export const DISCOVERY_BANNER_LINES: readonly string[] = [
-  " LIVE Coupang WING 상품평 structure discovery — explicit per-run approval required.",
-  " SellerOps measures WHAT THE SCREEN IS: which repeating unit Coupang's own fixed field words agree",
-  " on, whether a seller REPLY CONTROL exists, and what shape the rating / date / id columns have.",
+  " LIVE Coupang WING 상품평 READ_ONLY acquisition-feasibility discovery — per-run approval required.",
+  " SellerOps measures whether a review could be ACQUIRED and DE-DUPLICATED: the repeating unit Coupang's",
+  " own field words agree on, whether any per-review number is unique, whether a detail link exists, and",
+  " what sort / period / paging controls the screen offers.",
   " No review body, buyer name, or product name is read; photos and videos are counted, never sourced.",
   " Page text is compared in-page against fixed words and shape patterns and only counts come back.",
   " It never clicks, types, submits, navigates, highlights, tags, or issues a network call.",
@@ -291,7 +297,7 @@ async function main(): Promise<void> {
     const frames = await driver.censusAllFrames(productIds);
     const best = reportableFrame(frames);
     const census = best?.census ?? null;
-    const reply = classifyReplyCapability(census);
+    const acquisition = classifyAcquisitionFeasibility(census);
     const scope = classifyOwnershipScope(census);
 
     // SANITIZED record → stdout. Integers, tag names, attribute KINDS, and our own expectation ids.
@@ -305,10 +311,10 @@ async function main(): Promise<void> {
           // Frames are named by INDEX. A frame URL carries the seller's own account path.
           reportedFrameIndex: best?.frameIndex ?? null,
           frames,
-          // THE FORK. Reported as its own field so a reader cannot mistake a count for a verdict.
-          replyVerdict: reply.verdict,
-          replyInteractiveLabelIds: reply.interactiveLabelIds,
-          replyPrintedOnly: reply.printedOnly,
+          // THE VERDICT. Its own field, so a reader cannot mistake a count for one.
+          acquisitionVerdict: acquisition.verdict,
+          dedupeKeyCandidates: acquisition.dedupeKeyCandidates,
+          detailLinkPresent: acquisition.detailLinkPresent,
           ownershipScope: scope,
           productIdsSupplied: productIds.length,
         },
@@ -317,17 +323,18 @@ async function main(): Promise<void> {
       ),
     );
 
-    if (reply.verdict === "UNDETERMINED") {
+    if (acquisition.verdict === "UNDETERMINED") {
       console.error("");
-      console.error("⚠ The reply-capability question is UNDETERMINED — the review unit did not resolve.");
-      console.error("  Do NOT record this as 'Coupang has no seller reply'. A screen whose rows were never");
-      console.error("  found produces exactly this reading whether the control exists or not, and that is the");
+      console.error("⚠ Acquisition feasibility is UNDETERMINED — the review unit did not resolve.");
+      console.error("  Do NOT record this as 'the screen carries no review id'. A screen whose rows were never");
+      console.error("  found produces exactly this reading whether an identifier exists or not, and that is the");
       console.error("  confident zero three 고객문의 sittings were spent on.");
-    } else if (reply.verdict === "NO_REPLY_CONTROL" && reply.printedOnly) {
+    } else if (acquisition.verdict === "NO_IDENTIFIER") {
       console.error("");
-      console.error("ℹ The reply words appear ONLY as printed text — a state column, not a control.");
+      console.error("⚠ No candidate is unique per review unit. A dedupe key built on any of these would fold");
+      console.error("  every review into one row — and the fold would look exactly like de-duplication working.");
     }
-    process.exitCode = discoveryExitCode("MEASURED", reply.verdict !== "UNDETERMINED");
+    process.exitCode = discoveryExitCode("MEASURED", acquisition.verdict !== "UNDETERMINED");
   } finally {
     removeSentinel(abortPath);
     process.removeListener("SIGINT", onSigint);

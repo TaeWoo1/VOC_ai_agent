@@ -9,25 +9,25 @@
 import { describe, expect, it } from "vitest";
 import {
   CoupangWingReviewDriver,
+  WING_REVIEW_CONTROL_LABELS,
   WING_REVIEW_FIELD_LABELS,
-  WING_REVIEW_REPLY_LABELS,
   WING_REVIEW_TEXT_SHAPES,
 } from "../../src/action-window/coupang-wing-review-driver";
 import { clearLogSink, getLogSink } from "../../src/log";
 
-/** A census as the page would return it, with the reply reading under our control. */
-function pageResult(interactiveReplies: number, labelsAgreeing = 3): unknown {
+/** A census as the page would return it, with the identifier reading under our control. */
+function pageResult(distinctIds: number, labelsAgreeing = 3): unknown {
   return {
     reason: "OK",
     elementsScanned: 400,
     shadowRootsFound: 0,
     elementsWithAnchorAttributes: 20,
     anchorDigitRunLengths: [11],
-    replyAffordances: WING_REVIEW_REPLY_LABELS.map((r, i) => ({
+    controlAffordances: WING_REVIEW_CONTROL_LABELS.map((r, i) => ({
       id: r.id,
-      interactiveCount: i === 0 ? interactiveReplies : 0,
+      interactiveCount: i === 0 ? 1 : 0,
       staticCount: 0,
-      insideUnitCount: i === 0 ? interactiveReplies : 0,
+      insideUnitCount: 0,
     })),
     labelCounts: WING_REVIEW_FIELD_LABELS.map((l) => ({ id: l.id, elementCount: 1 })),
     textShapes: WING_REVIEW_TEXT_SHAPES.map((s) => ({ id: s.id, leafCount: 0, unitCount: 0 })),
@@ -45,8 +45,10 @@ function pageResult(interactiveReplies: number, labelsAgreeing = 3): unknown {
       labelsAgreeing,
       unitCount: 4,
       unitsWithImage: 3,
+      unitsWithDetailLink: 3,
+      idCandidates: [{ source: "ATTRIBUTE", digitLength: 9, unitsCarrying: 3, distinctValues: distinctIds }],
     },
-    pagination: { dateInputCount: 2, selectCount: 1, numericPagerCount: 5 },
+    pagination: { dateInputCount: 2, selectCount: 1, numericPagerCount: 5, highestPagerNumber: 12 },
   };
 }
 
@@ -67,17 +69,19 @@ function driverFor(frames: FrameScript[]): CoupangWingReviewDriver {
 
 describe("the probe scans every frame, not just the top document", () => {
   it("**finds the reviews in a child frame** that the top document does not contain", async () => {
-    const driver = driverFor([() => Promise.resolve(pageResult(0)), () => Promise.resolve(pageResult(3))]);
+    const driver = driverFor([() => Promise.resolve(pageResult(1)), () => Promise.resolve(pageResult(3))]);
 
     const frames = await driver.censusAllFrames();
 
     expect(frames.map((f) => f.frameIndex)).toEqual([0, 1]);
-    expect(frames[1]!.census.replyAffordances[0]!.interactiveCount).toBe(3);
+    // The child frame's ids are unique per unit; the top document's are not.
+    expect(frames[0]!.census.unit.idCandidates[0]!.uniquePerUnit).toBe(false);
+    expect(frames[1]!.census.unit.idCandidates[0]!.uniquePerUnit).toBe(true);
   });
 
   it("a frame it cannot evaluate is SKIPPED, not reported as an empty reading", async () => {
-    // Cross-origin, or detached mid-scan. Reporting it as a census of zero would read as "there is no reply
-    // control", which is a claim this probe did not earn.
+    // Cross-origin, or detached mid-scan. Reporting it as a census of zero would read as "the reviews carry no
+    // identifier", which is a claim this probe did not earn.
     const driver = driverFor([() => Promise.reject(new Error("cross-origin")), () => Promise.resolve(pageResult(3))]);
 
     const frames = await driver.censusAllFrames();
@@ -132,21 +136,22 @@ describe("the probe scans every frame, not just the top document", () => {
     // Only ids we supplied, counts, and tag names. Nothing that could carry page content.
     expect(wire).toContain("aw_coupang_review_census");
     expect(wire).toContain("TR/4/3");
+    // And nothing about a reply — the probe does not ask, so the log cannot answer.
+    expect(wire).not.toContain("reply");
   });
 });
 
 describe("the words handed to the page are ours", () => {
-  it("supplies several spellings of the reply word at once, so one sitting decides", () => {
-    // The first 고객문의 calibration supplied one spelling per state, came back with zero of both, and left
-    // "the wording differs" indistinguishable from "the scan never reached the list" — at the cost of a seated
-    // sitting. Candidates cost one indexOf each.
-    const texts = WING_REVIEW_REPLY_LABELS.map((l) => l.exactText);
-    expect(texts).toContain("답글");
-    expect(texts).toContain("답글 등록");
-    expect(texts).toContain("댓글");
-    // 고객문의's own word, in case Coupang runs reviews through the same vocabulary. Not asking would produce a
-    // false "no reply control" on a screen that has one.
-    expect(texts).toContain("답변");
+  it("**asks about ranges and sorting, and not about replies**", () => {
+    // The operator established WING has no seller reply feature. The reply words are gone rather than gathered
+    // and ignored — a measurement kept "for later" after being told not to use it is one that gets used.
+    const texts = WING_REVIEW_CONTROL_LABELS.map((l) => l.exactText);
+    expect(texts).toContain("최신순");
+    expect(texts).toContain("3개월");
+    expect(texts).toContain("조회기간");
+    for (const replyWord of ["답글", "댓글", "답변", "답변하기"]) {
+      expect(texts, `must not ask about ${replyWord}`).not.toContain(replyWord);
+    }
     expect(new Set(texts).size).toBe(texts.length);
   });
 
@@ -155,7 +160,7 @@ describe("the words handed to the page are ours", () => {
       const re = new RegExp(shape.pattern);
       expect(re.test("배송도 빠르고 포장도 꼼꼼해서 아주 만족합니다"), shape.id).toBe(false);
       expect(re.test("김서연"), shape.id).toBe(false);
-      // Anchored at both ends, so a shape can never match a fragment of something longer.
+      // Anchored at the start, so a shape can never match a fragment of something longer.
       expect(shape.pattern.startsWith("^"), shape.id).toBe(true);
     }
   });
@@ -166,6 +171,8 @@ describe("the words handed to the page are ours", () => {
     expect(texts).toContain("작성일");
     // The 구매자 COLUMN HEADER is counted; a buyer's name is never compared against anything.
     expect(texts).toContain("구매자");
+    // No reply-state column either — that question is closed.
+    expect(texts).not.toContain("답글여부");
     expect(new Set(texts).size).toBe(texts.length);
   });
 });

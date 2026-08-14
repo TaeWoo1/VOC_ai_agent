@@ -15,15 +15,19 @@
  * structure around them is measured, and the unit they AGREE on is the review row. The row tag is a finding,
  * never an assumption — the lesson three 고객문의 sittings paid for.
  *
- * ## The question this run exists to answer first
+ * ## The question this run exists to answer
  *
- * **Does a seller reply control exist at all?** Everything downstream forks on it: with one, Coupang review
- * operations can reach a guided human-in-the-loop reply; without one, the channel is acquisition-and-analysis
- * only and no amount of engineering changes that. It is answered independently of the row structure, so a
- * screen whose layout we fail to resolve still yields the answer — and it distinguishes an INTERACTIVE `답글`
- * from a printed one, because `답글여부` as a column header is a word, not a capability. Counting them together
- * would report a reply feature on a screen that has none, which is the most expensive wrong answer available
- * here.
+ * **Can a review be acquired and de-duplicated at all?** The reply question is closed: the operator confirmed
+ * WING offers sellers no way to answer a 상품평, so Coupang review operations are acquisition-and-analysis
+ * only and no measurement here can change that. This probe therefore does not look for a reply control, does
+ * not count one, and cannot report one — a measurement kept "for later" after being told not to use it is a
+ * measurement that quietly gets used.
+ *
+ * What acquisition needs before anything is designed is a **stable identifier**. Not a plausible one: one that
+ * is present on each review and DIFFERENT for each. So identifier candidates are reported as a pair of counts
+ * per digit length — how many units carry a run of that length, and how many DISTINCT values those runs have.
+ * Equal counts mean a dedupe key; `unitsCarrying` far above `distinctValues` means a category code that would
+ * collapse every review into one row.
  *
  * ## What may not cross, and what that leaves
  *
@@ -103,20 +107,45 @@ export interface ReviewRepeatLevel {
 }
 
 /**
- * **The reply reading — the finding this whole run is for.**
+ * **A sort / period / paging control, split by whether it is pressable.**
  *
- * `interactiveCount` and `staticCount` are separate because collapsing them is the difference between "sellers
- * can answer reviews on Coupang" and "the word 답글 appears on the screen". A `답글여부` column header is a
- * printed word; a `답글 등록` button is a product capability. Only the first of those is safe to be wrong about.
+ * `interactiveCount` and `staticCount` are separate because a printed `최근 1개월` is a caption describing what
+ * the screen is already showing, and a pressable one is a range the acquisition could ASK for. Only the second
+ * makes incremental collection possible, and collapsing them would report a filter on a screen that has none.
  */
-export interface ReviewReplyAffordance {
+export interface ReviewControlAffordance {
   readonly id: string;
   /** Hits on a button / link / `[role=button]` / submit input — a control a seller could press. */
   readonly interactiveCount: number;
-  /** Hits on a leaf that is not interactive — a header, a state word, a legend. Never a capability. */
+  /** Hits on a leaf that is not interactive — a caption, a legend, a column header. Never a control. */
   readonly staticCount: number;
   /** How many of the interactive hits sit inside the resolved review unit rather than in page furniture. */
   readonly insideUnitCount: number;
+}
+
+/**
+ * **An identifier candidate — the reading acquisition cannot be designed without.**
+ *
+ * A dedupe key has to be present on each review and DIFFERENT for each. Those are two properties and a single
+ * count cannot express both, so both travel: how many units carry a digit run of this length, and how many
+ * DISTINCT values those runs have.
+ *
+ *  - `unitsCarrying === distinctValues` — every carrier's run is unique. A dedupe key candidate.
+ *  - `unitsCarrying` far above `distinctValues` — a category code, a page size, a rating. Collecting on it
+ *    would collapse every review on the screen into one row, and the collapse would look like successful
+ *    de-duplication.
+ *
+ * **Lengths and counts only.** The values are compared inside the page and never returned; a distinct-value
+ * count identifies nothing and no one.
+ */
+export interface ReviewIdCandidate {
+  /** Where the run was found. Attribute runs survive a re-render; printed ones are what the seller can see. */
+  readonly source: "ATTRIBUTE" | "PRINTED";
+  readonly digitLength: number;
+  readonly unitsCarrying: number;
+  readonly distinctValues: number;
+  /** Derived, and the whole point: every unit that carries one carries a different one. */
+  readonly uniquePerUnit: boolean;
 }
 
 /** Per-label outcome, and the repeat level its hits agree on. */
@@ -139,7 +168,7 @@ export interface ReviewTextShapeCount {
  * **The review unit — the row or card, measured rather than assumed.**
  *
  * Resolved as the repeat level the most distinct field labels agree on. A screen where `평점`, `작성일` and
- * `답글` all sit inside the same repeating `LI` has told us what a review is; a screen where they agree on
+ * `상품평` all sit inside the same repeating `LI` has told us what a review is; a screen where they agree on
  * nothing has told us the labels found page furniture, and that is a refusal rather than a row.
  */
 export interface ReviewUnitReading {
@@ -170,10 +199,13 @@ export interface ReviewUnitReading {
   readonly unitAttributeDigitLengths: readonly number[];
   /** The same question asked of PRINTED text, because on 고객문의 that is where the identifier turned out to be. */
   readonly unitPrintedDigitLengths: readonly number[];
-  /** Units containing an interactive reply control. */
-  readonly unitsWithReplyControl: number;
-  /** Units containing a `textarea` or `contenteditable` — a place a reply could be typed. */
-  readonly unitsWithReplyInput: number;
+  /**
+   * Units carrying their own `<a href>` — a per-review DETAIL URL, which is both an identifier and the only
+   * route to anything the list does not show. Counted; the address itself never travels.
+   */
+  readonly unitsWithDetailLink: number;
+  /** Identifier candidates, per source and length. The dedupe-key question, answered with two counts. */
+  readonly idCandidates: readonly ReviewIdCandidate[];
 }
 
 /**
@@ -187,6 +219,14 @@ export interface ReviewPaginationReading {
   readonly selectCount: number;
   /** Leaves whose whole text is a 1–3 digit page number and which share a repeat. A pager, measured. */
   readonly numericPagerCount: number;
+  /**
+   * The largest page number the pager prints.
+   *
+   * Not a value about anyone — it is how far back the screen admits to going, and therefore the difference
+   * between a channel that can be backfilled and one that can only be watched forward. `0` when no pager was
+   * found, which is a finding rather than "one page".
+   */
+  readonly highestPagerNumber: number;
 }
 
 /**
@@ -199,7 +239,7 @@ export interface ReviewListCensus {
   readonly shadowRootsFound: number;
   readonly elementsWithAnchorAttributes: number;
   readonly anchorDigitRunLengths: readonly number[];
-  readonly replyAffordances: readonly ReviewReplyAffordance[];
+  readonly controlAffordances: readonly ReviewControlAffordance[];
   readonly labelCounts: readonly ReviewLabelCount[];
   readonly textShapes: readonly ReviewTextShapeCount[];
   readonly unit: ReviewUnitReading;
@@ -219,43 +259,46 @@ export interface ReviewFrameCensus {
 /* ─────────────────────────────── the two classifications ─────────────────────────────── */
 
 /**
- * Whether a seller reply control exists on this screen.
+ * **Whether a review could be acquired and de-duplicated at all.**
  *
- * `UNDETERMINED` is not a hedge, it is the honest third state. "No reply control" may only be claimed from a
- * reading that actually found the review list — on a screen whose unit never resolved, zero interactive `답글`
- * hits is equally consistent with "the probe never reached the rows", and that is exactly the confident zero
- * three 고객문의 sittings produced.
+ * `UNDETERMINED` is not a hedge, it is the honest third state. "No identifier" may only be claimed from a
+ * reading that actually found the review list — on a screen whose unit never resolved, finding no candidate is
+ * equally consistent with "the probe never reached the rows", and that is exactly the confident zero three
+ * 고객문의 sittings produced.
+ *
+ * The bar for `IDENTIFIER_FOUND` is uniqueness, not presence. A length that every unit carries but that has
+ * one distinct value is a category code; collecting on it would fold every review into a single row, and the
+ * fold would look exactly like de-duplication working.
  */
-export const REVIEW_REPLY_VERDICTS = ["REPLY_CONTROL_PRESENT", "NO_REPLY_CONTROL", "UNDETERMINED"] as const;
-export type ReviewReplyVerdict = (typeof REVIEW_REPLY_VERDICTS)[number];
+export const REVIEW_ACQUISITION_VERDICTS = ["IDENTIFIER_FOUND", "NO_IDENTIFIER", "UNDETERMINED"] as const;
+export type ReviewAcquisitionVerdict = (typeof REVIEW_ACQUISITION_VERDICTS)[number];
 
-export interface ReviewReplyClassification {
-  readonly verdict: ReviewReplyVerdict;
-  /** Which label ids carried an interactive hit. Ours, never the page's words. */
-  readonly interactiveLabelIds: readonly string[];
-  /** Whether any label appeared ONLY as printed text — a 답글여부 header, not a capability. */
-  readonly printedOnly: boolean;
+export interface ReviewAcquisitionClassification {
+  readonly verdict: ReviewAcquisitionVerdict;
+  /** The candidates that are unique per carrying unit — the ones a dedupe key could be built on. */
+  readonly dedupeKeyCandidates: readonly ReviewIdCandidate[];
+  /** Whether any unit exposes its own detail link, which is an identifier and a route in one. */
+  readonly detailLinkPresent: boolean;
 }
 
-/**
- * **The fork this unit exists to decide.** One interactive hit is enough to say a control is present; saying
- * it is absent requires a reading that resolved the review unit first.
- */
-export function classifyReplyCapability(census: ReviewListCensus | null | undefined): ReviewReplyClassification {
-  if (!census || census.reason !== "OK") {
-    return { verdict: "UNDETERMINED", interactiveLabelIds: [], printedOnly: false };
+/** At least two carriers, because "one unit carries one distinct value" is true of everything. */
+const MIN_CARRIERS_FOR_A_KEY = 2;
+
+export function classifyAcquisitionFeasibility(
+  census: ReviewListCensus | null | undefined,
+): ReviewAcquisitionClassification {
+  if (!census || census.reason !== "OK" || !census.unit.resolved) {
+    return { verdict: "UNDETERMINED", dedupeKeyCandidates: [], detailLinkPresent: false };
   }
-  const interactiveLabelIds = census.replyAffordances.filter((a) => a.interactiveCount > 0).map((a) => a.id);
-  const printedOnly =
-    interactiveLabelIds.length === 0 && census.replyAffordances.some((a) => a.staticCount > 0);
-  if (interactiveLabelIds.length > 0) {
-    return { verdict: "REPLY_CONTROL_PRESENT", interactiveLabelIds, printedOnly: false };
-  }
-  // No control found. That is only a FINDING if the probe demonstrably reached the reviews.
-  if (!census.unit.resolved) {
-    return { verdict: "UNDETERMINED", interactiveLabelIds: [], printedOnly };
-  }
-  return { verdict: "NO_REPLY_CONTROL", interactiveLabelIds: [], printedOnly };
+  const detailLinkPresent = census.unit.unitsWithDetailLink > 0;
+  const dedupeKeyCandidates = census.unit.idCandidates.filter(
+    (c) => c.uniquePerUnit && c.unitsCarrying >= MIN_CARRIERS_FOR_A_KEY,
+  );
+  return {
+    verdict: dedupeKeyCandidates.length > 0 ? "IDENTIFIER_FOUND" : "NO_IDENTIFIER",
+    dedupeKeyCandidates,
+    detailLinkPresent,
+  };
 }
 
 /**
@@ -360,15 +403,50 @@ const REFUSED_UNIT: ReviewUnitReading = Object.freeze({
   unitsMatchingOurDigits: 0,
   unitAttributeDigitLengths: [],
   unitPrintedDigitLengths: [],
-  unitsWithReplyControl: 0,
-  unitsWithReplyInput: 0,
+  unitsWithDetailLink: 0,
+  idCandidates: [],
 });
 
 const REFUSED_PAGINATION: ReviewPaginationReading = Object.freeze({
   dateInputCount: 0,
   selectCount: 0,
   numericPagerCount: 0,
+  highestPagerNumber: 0,
 });
+
+/** How many identifier candidates may be reported. A distribution, not an inventory. */
+const MAX_ID_CANDIDATES = 16;
+
+/**
+ * Identifier candidates, fail-closed per entry. `uniquePerUnit` is DERIVED here rather than trusted from the
+ * page — it is the field a reader will act on, and a page that could assert it could assert a dedupe key that
+ * does not exist.
+ */
+function sanitizeIdCandidates(raw: unknown, unitCount: number): readonly ReviewIdCandidate[] {
+  const rows = Array.isArray(raw) ? raw : [];
+  const out: ReviewIdCandidate[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const c = row as Record<string, unknown>;
+    const source = c.source === "ATTRIBUTE" || c.source === "PRINTED" ? c.source : null;
+    const digitLength = count(c.digitLength);
+    const unitsCarrying = count(c.unitsCarrying);
+    const distinctValues = count(c.distinctValues);
+    if (source === null || digitLength === null || unitsCarrying === null || distinctValues === null) continue;
+    if (digitLength < 1 || digitLength > 64) continue;
+    // No more units can carry a run than exist, and no more distinct values than carriers.
+    if (unitsCarrying > unitCount || distinctValues > unitsCarrying) continue;
+    out.push({
+      source,
+      digitLength,
+      unitsCarrying,
+      distinctValues,
+      uniquePerUnit: unitsCarrying > 0 && distinctValues === unitsCarrying,
+    });
+    if (out.length >= MAX_ID_CANDIDATES) break;
+  }
+  return out;
+}
 
 /**
  * The unit reading, fail-closed. A unit is only `resolved` when a coherent level came back AND at least two
@@ -397,8 +475,8 @@ function sanitizeUnit(raw: unknown): ReviewUnitReading {
     unitsMatchingOurDigits: per(u.unitsMatchingOurDigits),
     unitAttributeDigitLengths: digitRunLengths(u.unitAttributeDigitLengths),
     unitPrintedDigitLengths: digitRunLengths(u.unitPrintedDigitLengths),
-    unitsWithReplyControl: per(u.unitsWithReplyControl),
-    unitsWithReplyInput: per(u.unitsWithReplyInput),
+    unitsWithDetailLink: per(u.unitsWithDetailLink),
+    idCandidates: sanitizeIdCandidates(u.idCandidates, unitCount),
   };
 }
 
@@ -409,6 +487,7 @@ function sanitizePagination(raw: unknown): ReviewPaginationReading {
     dateInputCount: count(p.dateInputCount) ?? 0,
     selectCount: count(p.selectCount) ?? 0,
     numericPagerCount: count(p.numericPagerCount) ?? 0,
+    highestPagerNumber: count(p.highestPagerNumber) ?? 0,
   };
 }
 
@@ -422,7 +501,7 @@ function sanitizePagination(raw: unknown): ReviewPaginationReading {
 export function sanitizeReviewListCensus(
   raw: unknown,
   labelExpectations: readonly ReviewLabelExpectation[],
-  replyExpectations: readonly ReviewLabelExpectation[],
+  controlExpectations: readonly ReviewLabelExpectation[],
   shapeExpectations: readonly ReviewTextShape[],
 ): ReviewListCensus {
   const refused = (reason: "OK" | ReviewCensusRefusal): ReviewListCensus => ({
@@ -431,7 +510,7 @@ export function sanitizeReviewListCensus(
     shadowRootsFound: 0,
     elementsWithAnchorAttributes: 0,
     anchorDigitRunLengths: [],
-    replyAffordances: [],
+    controlAffordances: [],
     labelCounts: [],
     textShapes: [],
     unit: REFUSED_UNIT,
@@ -457,15 +536,15 @@ export function sanitizeReviewListCensus(
       (e) => e && typeof e === "object" && (e as Record<string, unknown>).id === id,
     ) as Record<string, unknown> | undefined;
 
-  const replyAffordances: ReviewReplyAffordance[] = [];
-  for (const expectation of replyExpectations) {
-    const found = find(r.replyAffordances, expectation.id);
+  const controlAffordances: ReviewControlAffordance[] = [];
+  for (const expectation of controlExpectations) {
+    const found = find(r.controlAffordances, expectation.id);
     const interactiveCount = count(found?.interactiveCount);
     const staticCount = count(found?.staticCount);
-    // The reply reading is the point of the run. An unreadable one must not degrade to a quiet zero, which
-    // would be indistinguishable from "Coupang has no reply feature".
+    // An unreadable control reading must not degrade to a quiet zero, which would be indistinguishable from
+    // "this screen offers no date range" — the reading incremental collection depends on.
     if (interactiveCount === null || staticCount === null) return refused("UNREADABLE");
-    replyAffordances.push({
+    controlAffordances.push({
       id: expectation.id,
       interactiveCount,
       staticCount,
@@ -503,7 +582,7 @@ export function sanitizeReviewListCensus(
     shadowRootsFound,
     elementsWithAnchorAttributes,
     anchorDigitRunLengths: digitRunLengths(r.anchorDigitRunLengths),
-    replyAffordances,
+    controlAffordances,
     labelCounts,
     textShapes,
     unit: sanitizeUnit(r.unit),

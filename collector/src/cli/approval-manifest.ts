@@ -131,11 +131,12 @@ export const CALIBRATION_PHASES = [
   // The 고객문의 list census — the WING analog of the credential-cell calibration, for the screen the guided
   // reply run has to be able to point at. It answers whether the page carries an id we can target at all.
   "COUPANG_WING_INQUIRY_LIST_CALIBRATION",
-  // The 상품평 structure discovery. Unlike every other phase here it has no anchor to hand the page: Coupang
-  // publishes no review API, so SellerOps holds no review id, date or rating and the screen is first contact.
-  // The anchors are Coupang's own fixed field words, and the finding the run exists for is whether a seller
-  // REPLY CONTROL exists at all — the fork between a guided human-in-the-loop reply channel and an
-  // acquisition-and-analysis-only one.
+  // The 상품평 acquisition-feasibility discovery. Unlike every other phase here it has no anchor to hand the
+  // page: Coupang publishes no review API, so SellerOps holds no review id, date or rating and the screen is
+  // first contact. The anchors are Coupang's own fixed field words, and the finding the run exists for is
+  // whether a review carries a STABLE IDENTIFIER — without one there is no dedupe key and no acquisition to
+  // design. The reply question is not asked: the operator confirmed WING has no seller reply feature, so this
+  // channel is acquisition-and-analysis only.
   "COUPANG_WING_REVIEW_STRUCTURE_DISCOVERY",
   // The credential HANDOFF. The ONLY phase in this list whose agent reads a credential VALUE — which is why it
   // is the only one whose mode is not `READ_ONLY`. After a trusted operator confirmation it takes ONE read of
@@ -270,11 +271,13 @@ export const APPROVAL_ACTIONS = [
   // patterns WE supply, reduced to a count inside the page. **No review body, buyer name, product name, or
   // media source is read into any returned field**, and there is no terminal here that could return one.
   "MEASURE_REVIEW_LIST_STRUCTURE",
-  // Read-only REPLY-AFFORDANCE classification: whether a seller reply control exists on the 상품평 screen at
-  // all. Hits on the fixed reply words are split by whether they are PRESSABLE — a `답글여부` column header is a
-  // printed word, a `답글 등록` button is a capability, and collapsing the two would report a reply feature on a
-  // screen that has none. It presses nothing; it counts controls.
-  "CLASSIFY_REVIEW_REPLY_AFFORDANCE",
+  // Read-only IDENTIFIER-CANDIDATE measurement: for each digit LENGTH found inside a review unit, how many
+  // units carry a run of it and how many DISTINCT values those runs have. Two counts, because a dedupe key
+  // needs two properties — present on each review and different for each — and one count cannot express both.
+  // The values are compared inside the page and never returned; a distinct-value count identifies nobody.
+  // Alongside it: whether each unit exposes its own detail link, and which sort / period / paging controls
+  // exist, which together decide whether acquisition could ever be incremental.
+  "MEASURE_REVIEW_IDENTIFIER_CANDIDATES",
   "MEASURE_CREDENTIAL_CELL_STRUCTURE",
   // **Read the credential VALUES.** ONE in-page read of 업체코드 / Access Key / Secret Key, taken only after a
   // trusted operator confirmation, and taken at most once per run — not a poll, not a retry, not a per-field
@@ -1117,10 +1120,11 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
       "WAIT_OPERATOR_LOGIN_NAV",
       "CLASSIFY_SANITIZED_PAGE_CATEGORY",
       "MEASURE_REVIEW_LIST_STRUCTURE",
-      "CLASSIFY_REVIEW_REPLY_AFFORDANCE",
+      "MEASURE_REVIEW_IDENTIFIER_CANDIDATES",
     ],
-    // It measures whether a reply control EXISTS; it never rings one and never presses one. A ring belongs to a
-    // guided run with a calibrated target — this is the run that finds out whether such a target could exist.
+    // It measures whether the reviews could be COLLECTED; it rings nothing and presses nothing. A ring belongs
+    // to a guided run with a calibrated target, and there is no guided review run to have one: the operator
+    // confirmed WING offers sellers no way to answer a 상품평, so this channel ends at analysis.
     allowsHighlight: false,
     mode: "READ_ONLY",
   },
@@ -1402,13 +1406,16 @@ export const COUPANG_WING_INQUIRY_LIST_CALIBRATION_SCOPE = Object.freeze({
  */
 export const COUPANG_WING_REVIEW_DISCOVERY_SCOPE = Object.freeze({
   operation:
-    "WING 상품평 structure discovery (agent measures WHAT THE SCREEN IS: which repeating unit Coupang's own " +
-    "fixed field words agree on, whether a seller REPLY CONTROL exists, and what shape the rating / date / id " +
-    "columns have; it reads no review body, no buyer name, no product name and no image or video source, and " +
-    "it performs no click/input/navigation)",
+    "WING 상품평 READ_ONLY acquisition-feasibility discovery (agent measures whether a review could be " +
+    "COLLECTED and DE-DUPLICATED: which repeating unit Coupang's own fixed field words agree on, whether any " +
+    "per-review number is unique to its review, whether each review exposes its own detail link, what shape " +
+    "the rating / date columns have, and which sort / period / paging controls exist; it reads no review " +
+    "body, no buyer name, no product name and no image or video source, it does not look for or report a " +
+    "reply control, and it performs no click/input/navigation)",
   maxActions:
-    "1 sanitized structural census of the 상품평 screen (0 clicks, 0 inputs, 0 replies; 0 review body reads, " +
-    "0 buyer name reads, 0 product name reads, 0 image/video source reads; page text is compared " +
+    "1 sanitized structural census of the 상품평 screen (0 clicks, 0 inputs, 0 submissions; 0 review body " +
+    "reads, 0 buyer name reads, 0 product name reads, 0 image/video source reads, 0 reply-control lookups; " +
+    "page text is compared " +
     "in-page against fixed Coupang words and date/rating SHAPE patterns SellerOps supplied, and only counts, " +
     "tag names and attribute kinds are returned; role / type / aria-valuenow / contenteditable are tested for " +
     "presence or against fixed literals and their values never travel; no text leaves the page)",
@@ -1809,10 +1816,11 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 상품평(리뷰) 목록 화면에 도착하신 뒤 " +
       "'SellerOps 확인' 탭의 [현재 화면 확인]을 누르세요. SellerOps는 이 화면이 어떤 구조인지 한 번만 measure합니다 — " +
-      "'평점'·'작성일' 같은 쿠팡 고정 단어가 어느 반복 구조 안에 함께 들어 있는지, **판매자 답글 버튼이 있는지**, " +
-      "별점·날짜·번호가 어떤 모양으로 표시되는지. 화면의 글자는 우리가 넣은 고정 단어와 날짜/별점 '모양' 패턴에 " +
-      "맞는지만 이 창 안에서 비교하고 개수만 나옵니다 — **리뷰 본문·구매자 이름·상품명은 읽지 않고, 사진·동영상은 " +
-      "개수만 세며 주소는 읽지 않습니다.** 클릭·입력·답글 등록·전송 없음." +
+      "'평점'·'작성일' 같은 쿠팡 고정 단어가 어느 반복 구조 안에 함께 들어 있는지, **리뷰마다 서로 다른 번호가 " +
+      "있는지**(값이 아니라 자릿수와 '서로 다른 개수'만), 상세 링크가 있는지, 기간·정렬·페이지 컨트롤이 있는지. " +
+      "화면의 글자는 우리가 넣은 고정 단어와 날짜/별점 '모양' 패턴에 맞는지만 이 창 안에서 비교하고 개수만 " +
+      "나옵니다 — **리뷰 본문·구매자 이름·상품명은 읽지 않고, 사진·동영상은 개수만 세며 주소는 읽지 않습니다.** " +
+      "판매자 답글 기능은 찾지도 세지도 않습니다. 클릭·입력·전송 없음." +
       WING_RUN_GRANT_SUMMARY +
       WING_PROBE_CONFIRM_CHANNEL_SUMMARY,
     emitsFrontendUrl: false,
