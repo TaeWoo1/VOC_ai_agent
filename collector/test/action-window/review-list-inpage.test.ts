@@ -885,3 +885,135 @@ describe("how much history one acquisition could reach", () => {
     expect(select?.insideUnit).toBe(false);
   });
 });
+
+describe("the column the first live reading actually found", () => {
+  /**
+   * **The live shape, reproduced: one column, three digit lengths, and a collision hiding inside it.**
+   *
+   * Ten rows carried a number at the same position — two of 8 digits (the SAME value), one of 9, seven of 10
+   * (all different). Bucketed by length, the largest bucket looked like a key on 7 of 10 rows, and the run
+   * reported `PARTIAL_COVERAGE` with "3 rows missing". Both halves were wrong: no row was missing, and two
+   * rows were indistinguishable.
+   */
+  function liveShapedGrid(): El {
+    const header = el({ tag: "div", attrs: { class: "rv-row rv-hdr" } }).add(
+      el({ tag: "span", text: "작성일", box: rowBox(60, 90, 100) }),
+      el({ tag: "th", box: rowBox(60, CATALOG_X.left, CATALOG_X.width) }).add(
+        el({
+          tag: "div",
+          attrs: { class: "text-wrapper" },
+          text: "노출상품ID (옵션ID)",
+          box: rowBox(60, CATALOG_X.left, CATALOG_X.width),
+        }).add(el({ tag: "br" })),
+      ),
+    );
+    // Two rows share one 8-digit value, one row has 9 digits, seven have distinct 10-digit values.
+    const values = ["87654321", "87654321", "987654321", ...Array.from({ length: 7 }, (_, i) => `900000001${i}`)];
+    const rows = values.map((v, i) => {
+      const top = 100 + i * 30;
+      return el({ tag: "div", attrs: { class: "rv-row" } }).add(
+        el({ tag: "span", text: v, box: rowBox(top, 0, 80) }),
+        el({ tag: "span", text: REVIEW_DATE, box: rowBox(top, 90, 100) }),
+        el({
+          tag: "span",
+          text: `${PRODUCT} (8765432${i % 3})`,
+          box: rowBox(top, CATALOG_X.left, CATALOG_X.width),
+        }),
+      );
+    });
+    return el({ tag: "body" }).add(
+      el({ tag: "div", attrs: { class: "rv-grid" } }).add(
+        el({ tag: "div", attrs: { class: "rv-head" } }).add(header),
+        el({ tag: "div", attrs: { class: "rv-body" } }).add(...rows),
+      ),
+    );
+  }
+
+  it("**every row is populated — 'three rows missing' was an artefact of bucketing by length**", () => {
+    const c = census(liveShapedGrid());
+    const cell = c.cells.find((x) => x.cellIndex === 0);
+
+    expect(c.unit.unitCount).toBe(10);
+    // The per-length buckets still show 2 / 1 / 7 …
+    expect(cell?.runs.find((r) => r.digitLength === 8)?.unitsCarrying).toBe(2);
+    expect(cell?.runs.find((r) => r.digitLength === 10)?.unitsCarrying).toBe(7);
+    // … and the column-level reading says what they add up to.
+    expect(cell?.unitsWithAnyRun).toBe(10);
+  });
+
+  it("**and it is NOT a key — two rows carry the same value**, which the buckets could not show", () => {
+    const c = census(liveShapedGrid());
+    const cell = c.cells.find((x) => x.cellIndex === 0);
+
+    // Ten rows, nine distinct values. The 10-digit bucket alone reported 7 carriers and 7 distinct, which is
+    // what made a colliding column look like a partial key.
+    expect(cell?.distinctValuesAcrossLengths).toBe(9);
+    expect(chooseDedupeKey(c).verdict).not.toBe("KEY_FOUND");
+    expect(chooseDedupeKey(c).verdict).not.toBe("PARTIAL_COVERAGE");
+  });
+
+  it("a composite key is still available here, and is reported as its own answer", () => {
+    // The two colliding rows differ in their option ids, so their whole-row digit signatures differ. That is a
+    // real answer and a worse key: wider, order-dependent, and not one value a locate can be handed.
+    const c = census(liveShapedGrid());
+
+    expect(c.distinctRowSignatures).toBe(10);
+    expect(chooseDedupeKey(c).verdict).toBe("COMPOSITE_ONLY");
+  });
+
+  it("**two rows identical in every number means no key at all** — not 'we could not find one'", () => {
+    const twins = el({ tag: "body" }).add(
+      el({ tag: "div", attrs: { class: "rv-grid" } }).add(
+        el({ tag: "div", attrs: { class: "rv-head" } }).add(
+          el({ tag: "div", attrs: { class: "rv-row rv-hdr" } }).add(
+            el({ tag: "span", text: "작성일", box: rowBox(60, 90, 100) }),
+            el({ tag: "th", box: rowBox(60, CATALOG_X.left, CATALOG_X.width) }).add(
+              el({
+                tag: "div",
+                attrs: { class: "text-wrapper" },
+                text: "노출상품ID (옵션ID)",
+                box: rowBox(60, CATALOG_X.left, CATALOG_X.width),
+              }).add(el({ tag: "br" })),
+            ),
+          ),
+        ),
+        el({ tag: "div", attrs: { class: "rv-body" } }).add(
+          ...[0, 1, 2].map((i) =>
+            el({ tag: "div", attrs: { class: "rv-row" } }).add(
+              el({ tag: "span", text: REVIEW_DATE, box: rowBox(100 + i * 30, 90, 100) }),
+              el({
+                tag: "span",
+                text: `${PRODUCT} (87654321)`,
+                box: rowBox(100 + i * 30, CATALOG_X.left, CATALOG_X.width),
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+    const c = census(twins);
+
+    expect(c.unit.unitCount).toBe(3);
+    expect(c.distinctRowSignatures).toBe(1);
+    expect(chooseDedupeKey(c).verdict).toBe("NO_UNIQUE_POSITION");
+  });
+
+  it("dropdown options are profiled by SHAPE once the guessed words all miss", () => {
+    const withPeriods = el({ tag: "body" }).add(
+      el({ tag: "select" }).add(
+        el({ tag: "option", text: "1개월" }),
+        el({ tag: "option", text: "6개월" }),
+        el({ tag: "option", text: "7일" }),
+        el({ tag: "option", text: "전체" }),
+      ),
+      liveShapedGrid(),
+    );
+    const select = census(withPeriods).selects[0];
+
+    expect(select?.optionCount).toBe(4);
+    expect(select?.optionsMatchingShapes.find((s) => s.shapeId === "periodMonths")?.unitCount).toBe(2);
+    expect(select?.optionsMatchingShapes.find((s) => s.shapeId === "periodDays")?.unitCount).toBe(1);
+    // 전체 matches no shape, and no option TEXT appears anywhere in the result.
+    expect(JSON.stringify(select)).not.toContain("전체");
+  });
+});

@@ -244,6 +244,7 @@ describe("which frame gets reported", () => {
         pagination: { dateInputCount: 0, selectCount: 0, numericPagerCount: 0, highestPagerNumber: 0 },
         cells: [],
         selects: [],
+        distinctRowSignatures: 0,
       },
     };
   }
