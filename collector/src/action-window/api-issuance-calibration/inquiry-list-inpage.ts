@@ -113,6 +113,35 @@ const CENSUS_FRAGMENT = `
     for (var i = 0; i < links.length; i++) { if (paints(links[i])) { return true; } }
     return false;
   }
+  /* EVERY element, including inside open shadow roots.
+     A document-level query stops at a shadow boundary, so a component-rendered list is invisible to it — the
+     same blind spot as scanning only the top frame, one layer in, and it produces the same confident zero.
+     Closed roots stay unreachable by construction; nothing here tries to open one. */
+  function collectAll() {
+    var out = [], roots = [document], shadowRoots = 0, guard = 0;
+    while (roots.length > 0 && guard < 2000) {
+      guard++;
+      var root = roots.shift();
+      var els; try { els = slice(root.querySelectorAll('*')); } catch (e) { continue; }
+      for (var i = 0; i < els.length; i++) {
+        out.push(els[i]);
+        if (out.length > CAP) { return null; }
+        if (els[i].shadowRoot) { roots.push(els[i].shadowRoot); shadowRoots++; }
+      }
+    }
+    return { els: out, shadowRoots: shadowRoots };
+  }
+  /* The parent for SIBLING purposes, crossing shadow boundaries. Without this the repeat walk stops dead at
+     the boundary and reports "nothing repeats" for a row that plainly does.
+     A shadow child's siblings live on the ROOT, not on the host — hopping straight to the host would skip the
+     collection the rows are actually in and lose the row level entirely. From the root, the next hop up is the
+     host. */
+  function parentOf(node) {
+    if (node.parentElement) { return node.parentElement; }
+    var p = node.parentNode;
+    if (p && p.children) { return p; }
+    return node.host ? node.host : null;
+  }
   /* Keep only the INNERMOST matches. An <a> inside a <tr> that both carry the id is ONE target, not an
      ambiguous two — and a false refusal there is as costly as a false target. */
   function innermost(els) {
@@ -151,7 +180,7 @@ const CENSUS_FRAGMENT = `
   function repeatLevelsOf(el) {
     var levels = [], node = el, depth = 0;
     while (node && depth <= MAX_ANCESTOR_DEPTH && levels.length < MAX_LEVELS) {
-      var parent = node.parentElement;
+      var parent = parentOf(node);
       if (parent) {
         var kids = parent.children, same = 0, sameShape = 0;
         var tag = String(node.tagName || '').toUpperCase();
@@ -203,23 +232,29 @@ const CENSUS_FRAGMENT = `
     }
     return out;
   }
-  /* Do the hits sit in the same KIND of place? Two leaves saying the same word inside two identically shaped
-     siblings is a row structure; two leaves in unrelated corners of the page is a coincidence. */
-  function hitsSharingShape(hits, topology) {
-    if (!topology || topology.repeatLevels.length === 0) { return 0; }
-    var want = topology.repeatLevels[0], n = 0;
+  /* Do the hits sit in the same KIND of place? Two leaves saying the same word inside identically shaped
+     siblings is a row structure; two leaves in unrelated corners of the page is a filter chip and a legend.
+     The comparison is over each hit's WHOLE chain rather than only its innermost level — the first version
+     compared level[0] alone and scored 1-of-2 for hits that plainly did share an outer repeat, because one of
+     them sat one wrapper deeper. The most common (tag, siblingCount) across all hits is the honest answer. */
+  function commonRepeat(hits) {
+    var tally = {}, best = null, bestN = 0;
     for (var i = 0; i < hits.length; i++) {
-      var walk = repeatLevelsOf(hits[i]);
-      if (walk.levels.length > 0 && walk.levels[0].tagName === want.tagName && walk.levels[0].depth === want.depth) {
-        n++;
+      var levels = repeatLevelsOf(hits[i]).levels, seen = {};
+      for (var j = 0; j < levels.length; j++) {
+        var key = levels[j].tagName + ':' + levels[j].siblingCount;
+        if (seen[key]) { continue; }
+        seen[key] = 1;
+        tally[key] = (tally[key] || 0) + 1;
+        if (tally[key] > bestN) { bestN = tally[key]; best = levels[j]; }
       }
     }
-    return n;
+    return { level: best, hits: bestN };
   }
   function census(DIGITS, LABELS) {
-    var all;
-    try { all = slice(document.querySelectorAll('*')); } catch (e) { return { reason: 'UNREADABLE' }; }
-    if (all.length > CAP) { return { reason: 'SCAN_TRUNCATED' }; }
+    var collected = collectAll();
+    if (collected === null) { return { reason: 'SCAN_TRUNCATED' }; }
+    var all = collected.els;
     if (all.length === 0) { return { reason: 'NO_ELEMENTS' }; }
 
     var i, j, withAnchors = 0;
@@ -260,18 +295,21 @@ const CENSUS_FRAGMENT = `
     var labelCounts = [];
     for (j = 0; j < LABELS.length; j++) {
       var lhits = labelHits(all, LABELS[j].exactText);
-      var ltop = lhits.length > 0 ? topologyOf(lhits[0], null) : null;
+      var shared = commonRepeat(lhits);
       labelCounts.push({
         id: LABELS[j].id,
         elementCount: lhits.length,
-        topology: ltop,
-        hitsSharingRepeatShape: hitsSharingShape(lhits, ltop)
+        topology: lhits.length > 0 ? topologyOf(lhits[0], null) : null,
+        /* The repeat the hits AGREE on — the row candidate, when there is one. */
+        sharedRepeatLevel: shared.level,
+        hitsSharingRepeatShape: shared.hits
       });
     }
 
     return {
       reason: 'OK',
       elementsScanned: all.length,
+      shadowRootsFound: collected.shadowRoots,
       elementsWithAnchorAttributes: withAnchors,
       anchorDigitRunLengths: allLengths,
       anchors: anchors,

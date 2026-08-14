@@ -162,7 +162,15 @@ export interface InquiryLabelCount {
   readonly elementCount: number;
   /** The structure around the FIRST hit. Null when nothing matched. */
   readonly topology: InquiryAnchorTopology | null;
-  /** How many hits share that first repeat level's tag and depth — whether they are the same kind of thing. */
+  /**
+   * The repeat level the hits AGREE on — the row candidate, when there is one.
+   *
+   * Chosen as the most common (tag, sibling count) across every hit's whole chain, not from the first hit
+   * alone: two hits can sit in the same repeating row while one of them is a wrapper deeper, and comparing
+   * only innermost levels scores that as disagreement.
+   */
+  readonly sharedRepeatLevel: InquiryRepeatLevel | null;
+  /** How many hits' chains contain that level — the difference between rows and page furniture. */
   readonly hitsSharingRepeatShape: number;
 }
 
@@ -172,8 +180,16 @@ export interface InquiryLabelCount {
  */
 export interface InquiryListCensus {
   readonly reason: "OK" | InquiryCensusRefusal;
-  /** Every element considered. The scan is document-wide because the row shape is unknown by construction. */
+  /** Every element considered, including inside open shadow roots. */
   readonly elementsScanned: number;
+  /**
+   * How many open shadow roots the scan descended into.
+   *
+   * A component-rendered list is invisible to `document.querySelectorAll('*')` — the same blind spot as
+   * scanning only the top frame, one layer in. This number is how a future reading of "nothing found" can be
+   * told apart from "nothing found, and there were 40 shadow roots we now do look inside".
+   */
+  readonly shadowRootsFound: number;
   /** Elements carrying at least one digit run in an allowlisted attribute — whether machine ids exist here. */
   readonly elementsWithAnchorAttributes: number;
   /** Every distinct digit-run LENGTH the screen carries in allowlisted attributes, sorted. Lengths, not values. */
@@ -348,6 +364,7 @@ export function sanitizeInquiryListCensus(
   const refused = (reason: "OK" | InquiryCensusRefusal): InquiryListCensus => ({
     reason,
     elementsScanned: 0,
+    shadowRootsFound: 0,
     elementsWithAnchorAttributes: 0,
     anchorDigitRunLengths: [],
     anchors: [],
@@ -363,7 +380,8 @@ export function sanitizeInquiryListCensus(
   }
   const elementsScanned = count(r.elementsScanned);
   const elementsWithAnchorAttributes = count(r.elementsWithAnchorAttributes);
-  if (elementsScanned === null || elementsWithAnchorAttributes === null) {
+  const shadowRootsFound = count(r.shadowRootsFound);
+  if (elementsScanned === null || elementsWithAnchorAttributes === null || shadowRootsFound === null) {
     return refused("UNREADABLE");
   }
   // More elements carrying anchors than elements scanned is incoherent — refuse rather than reconcile it.
@@ -401,6 +419,7 @@ export function sanitizeInquiryListCensus(
       id: expectation.id,
       elementCount,
       topology: elementCount > 0 ? sanitizeTopology(found?.topology) : null,
+      sharedRepeatLevel: elementCount > 0 ? sanitizeRepeatLevel(found?.sharedRepeatLevel) : null,
       // No more hits can share a shape than there were hits.
       hitsSharingRepeatShape: Math.min(hitsSharingRepeatShape, elementCount),
     });
@@ -409,6 +428,7 @@ export function sanitizeInquiryListCensus(
   return {
     reason: "OK",
     elementsScanned,
+    shadowRootsFound,
     elementsWithAnchorAttributes,
     anchorDigitRunLengths: digitRunLengths(r.anchorDigitRunLengths),
     anchors,

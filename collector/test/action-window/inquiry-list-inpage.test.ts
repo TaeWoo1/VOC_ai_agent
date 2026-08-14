@@ -36,10 +36,32 @@ interface ElInit {
   rects?: number;
 }
 
+/** A shadow root: queryable like a document, and reachable back to its host — which is how the walk crosses. */
+class ShadowRoot {
+  readonly children: El[] = [];
+  constructor(readonly host: El) {}
+  add(...kids: El[]): this {
+    for (const k of kids) {
+      k.parent = null;
+      k.shadowParent = this;
+      this.children.push(k);
+    }
+    return this;
+  }
+  descendants(): El[] {
+    return this.children.flatMap((c) => [c, ...c.descendants()]);
+  }
+  querySelectorAll(sel: string): El[] {
+    return select(this.descendants(), sel);
+  }
+}
+
 class El {
   readonly tagName: string;
   readonly children: El[] = [];
   parent: El | null = null;
+  shadowParent: ShadowRoot | null = null;
+  shadowRoot: ShadowRoot | null = null;
   private readonly ownText: string;
   private readonly display: string;
   private readonly rects: number;
@@ -64,12 +86,23 @@ class El {
   get textContent(): string {
     return this.ownText + this.children.map((c) => c.textContent).join("");
   }
+  /** Attaches an open shadow root and returns THIS, so a fixture reads like the markup it stands for. */
+  attachShadow(...kids: El[]): this {
+    this.shadowRoot = new ShadowRoot(this);
+    this.shadowRoot.add(...kids);
+    return this;
+  }
   get parentElement(): El | null {
     return this.parent;
+  }
+  /** DOM semantics: a shadow child's `parentNode` is the root, whose `host` is the element it hangs off. */
+  get parentNode(): El | ShadowRoot | null {
+    return this.parent ?? this.shadowParent;
   }
   get childElementCount(): number {
     return this.children.length;
   }
+  /** Light-DOM descendants only — a document query does NOT cross into a shadow root, which is the whole point. */
   descendants(): El[] {
     return this.children.flatMap((c) => [c, ...c.descendants()]);
   }
@@ -381,6 +414,40 @@ describe("the anchor leads, and the row shape comes back as a finding", () => {
   });
 });
 
+describe("the scan reaches every document, not just the easy one", () => {
+  it("**finds a list rendered inside an open shadow root**", () => {
+    // A document-level query stops at a shadow boundary. A component-rendered list is invisible to it — the
+    // same blind spot as scanning only the top frame, one layer in, and it yields the same confident zero.
+    const host = el({ tag: "inquiry-list" }).attachShadow(
+      el({ tag: "div", attrs: { class: "row", "data-inquiry-no": INQUIRY_A } }).add(
+        el({ tag: "span", text: "답변완료" }),
+      ),
+      el({ tag: "div", attrs: { class: "row", "data-inquiry-no": INQUIRY_B } }).add(
+        el({ tag: "span", text: "답변완료" }),
+      ),
+    );
+    const root = el({ tag: "div" }).add(el({ tag: "main" }).add(host));
+
+    const census = censusOf(root);
+
+    expect(census.shadowRootsFound).toBe(1);
+    const anchor = census.anchors.find((m) => m.id === "inquiryId")!;
+    expect(anchor.matchCount).toBe(1);
+    // And the repeat walk crosses the boundary via the host rather than stopping dead at it.
+    expect(anchor.topology!.repeatLevels[0]!.siblingCount).toBe(2);
+    expect(census.labelCounts.find((l) => l.id === "answeredTight")!.elementCount).toBe(2);
+  });
+
+  it("counts the shadow roots it descended into, so a future zero can be read honestly", () => {
+    const root = el({ tag: "div" }).add(
+      el({ tag: "x-a" }).attachShadow(el({ tag: "span", text: "hello" })),
+      el({ tag: "x-b" }).attachShadow(el({ tag: "span", text: "world" })),
+    );
+
+    expect(censusOf(root).shadowRootsFound).toBe(2);
+  });
+});
+
 describe("a zero match is made interpretable, instead of being left ambiguous", () => {
   it("**reports the LENGTHS of the ids the screen does carry**, so a miss is not two findings at once", () => {
     // The live screen matched neither identifier while 113 elements carried digits in allowlisted attributes.
@@ -448,7 +515,28 @@ describe("a zero match is made interpretable, instead of being left ambiguous", 
 
     const unanswered = census.labelCounts.find((l) => l.id === "unansweredTight")!;
     expect(unanswered.elementCount).toBe(2);
+    expect(unanswered.sharedRepeatLevel).toBeNull();
     expect(unanswered.hitsSharingRepeatShape).toBe(0);
+  });
+
+  it("**hits agree on a repeat even when one sits a wrapper deeper**", () => {
+    // The first version compared only each hit's innermost level and scored 1-of-2 for hits that plainly did
+    // share an outer repeat — one of them was nested one level further in. Agreement is about the chain.
+    const rows = el({ tag: "div" });
+    rows.add(
+      el({ tag: "div", attrs: { class: "row" } }).add(el({ tag: "span", text: "답변완료" })),
+      el({ tag: "div", attrs: { class: "row" } }).add(
+        el({ tag: "div" }).add(el({ tag: "em" }).add(el({ tag: "span", text: "답변완료" }))),
+      ),
+    );
+
+    const census = censusOf(el({ tag: "div" }).add(rows));
+
+    const answered = census.labelCounts.find((l) => l.id === "answeredTight")!;
+    expect(answered.elementCount).toBe(2);
+    expect(answered.sharedRepeatLevel!.tagName).toBe("DIV");
+    expect(answered.sharedRepeatLevel!.siblingCount).toBe(2);
+    expect(answered.hitsSharingRepeatShape).toBe(2);
   });
 });
 
@@ -557,9 +645,11 @@ describe("the census fails closed rather than reporting a partial reading", () =
       undefined,
       "OK",
       { reason: "OK" },
-      { reason: "OK", elementsScanned: -1, elementsWithAnchorAttributes: 0 },
+      { reason: "OK", elementsScanned: -1, shadowRootsFound: 0, elementsWithAnchorAttributes: 0 },
       // More elements carrying anchors than elements scanned is incoherent; reconciling it invents a reading.
-      { reason: "OK", elementsScanned: 1, elementsWithAnchorAttributes: 5 },
+      { reason: "OK", elementsScanned: 1, shadowRootsFound: 0, elementsWithAnchorAttributes: 5 },
+      // A count the scan could not produce is not a count.
+      { reason: "OK", elementsScanned: 1, elementsWithAnchorAttributes: 1 },
     ]) {
       expect(sanitizeInquiryListCensus(bad, DIGITS, LABELS).reason).not.toBe("OK");
     }
@@ -569,6 +659,7 @@ describe("the census fails closed rather than reporting a partial reading", () =
     const raw = {
       reason: "OK",
       elementsScanned: 40,
+      shadowRootsFound: 0,
       elementsWithAnchorAttributes: 9,
       anchors: [
         {
@@ -615,6 +706,7 @@ describe("the census fails closed rather than reporting a partial reading", () =
     const raw = {
       reason: "OK",
       elementsScanned: 40,
+      shadowRootsFound: 0,
       elementsWithAnchorAttributes: 9,
       anchors: [
         {
@@ -650,6 +742,7 @@ describe("the census fails closed rather than reporting a partial reading", () =
     const raw = {
       reason: "OK",
       elementsScanned: 40,
+      shadowRootsFound: 0,
       elementsWithAnchorAttributes: 9,
       anchors: [{ id: "inquiryId", matchCount: 1 }],
       labelCounts: [],

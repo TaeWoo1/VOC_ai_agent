@@ -18,6 +18,7 @@ function pageResult(matchCount: number, elementsWithAnchorAttributes = 5): unkno
   return {
     reason: "OK",
     elementsScanned: 100,
+    shadowRootsFound: 0,
     elementsWithAnchorAttributes,
     anchorDigitRunLengths: [9],
     anchors: [
@@ -50,6 +51,7 @@ function pageResult(matchCount: number, elementsWithAnchorAttributes = 5): unkno
       id: l.id,
       elementCount: 0,
       topology: null,
+      sharedRepeatLevel: null,
       hitsSharingRepeatShape: 0,
     })),
   };
