@@ -24,6 +24,24 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
 
     long countByOrgIdAndReceivedAtAfter(UUID orgId, Instant after);
 
+    /**
+     * One connected channel's reviews, whatever their state — the channel review list.
+     *
+     * <p>Deliberately unfiltered. Every other paged read here narrows to something the operator must act on
+     * (unanswered, committed, dismissed), because those surfaces are work queues. This one is a record: on
+     * Coupang there is no reply to be pending, so "reviews needing action" is not a subset that means
+     * anything, and a list that hid answered reviews would hide most of the seller's own VOC.
+     */
+    Page<Review> findByOrgIdAndChannelId(UUID orgId, UUID channelId, Pageable pageable);
+
+    /**
+     * How many of this channel's reviews were stored at or after an instant — the "arrived in the last
+     * import" count, derived from the import's own start rather than from a stored per-review flag. Counts
+     * over the whole channel, not a page: a per-page count would shrink as the operator paged and read as
+     * the number of new reviews falling.
+     */
+    long countByOrgIdAndChannelIdAndCreatedAtGreaterThanEqual(UUID orgId, UUID channelId, Instant since);
+
     long countByOrgIdAndNegativeTrue(UUID orgId);
 
     List<Review> findAllByOrgId(UUID orgId);

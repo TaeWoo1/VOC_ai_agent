@@ -234,9 +234,19 @@ export function ChannelWorkspace() {
         description="이 채널의 연결 상태와 자료 수집을 관리합니다."
         meta={status ? <HealthBadge state={status.state} /> : undefined}
         action={
-          <BtnLink to="/connect" size="sm" variant="outline">
-            채널 목록
-          </BtnLink>
+          <div className="flex flex-wrap gap-2">
+            {/* Only where the channel actually collects reviews this way. A link offered on a channel
+                with no review record would open a page that can only say "아직 없습니다", which reads
+                as a failure rather than as a capability this channel does not have. */}
+            {channel?.code === "COUPANG" ? (
+              <BtnLink to={`/connect/channels/${accountId}/reviews`} size="sm" variant="outline">
+                상품평
+              </BtnLink>
+            ) : null}
+            <BtnLink to="/connect" size="sm" variant="outline">
+              채널 목록
+            </BtnLink>
+          </div>
         }
       />
 
