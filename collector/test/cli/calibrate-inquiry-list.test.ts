@@ -82,10 +82,17 @@ describe("the run declares what it is", () => {
     }
   });
 
-  it("the operation sentence says what it will not read, and the checkpoint repeats it", () => {
-    expect(INQUIRY_LIST_CALIBRATION_OPERATION).toContain("reads no buyer text");
-    expect(calibrationAsk().lines.join(" ")).toContain("구매자가 쓴 문의 내용은 읽지 않습니다");
-    expect(CALIBRATION_BANNER_LINES.join(" ")).toContain("reads NO buyer text");
+  it("**the disclosure is precise about text, not flattering**, and the checkpoint repeats it", () => {
+    // An earlier version of this scope claimed "reads no buyer text". The probe DOES compare page text — to
+    // fixed platform literals we supply, on leaf elements, reduced to a boolean inside the page. So the true
+    // claim is that buyer text never LEAVES the page. An operator approving a screen full of customers'
+    // questions is owed the accurate sentence, and an overstated one is the kind that quietly stops being true.
+    for (const disclosure of [INQUIRY_LIST_CALIBRATION_OPERATION, CALIBRATION_BANNER_LINES.join(" ")]) {
+      expect(disclosure.toLowerCase()).toContain("buyer text never leaves the page");
+      expect(disclosure.toLowerCase()).not.toContain("reads no buyer text");
+      expect(disclosure.toLowerCase()).not.toContain("0 buyer-text reads");
+    }
+    expect(calibrationAsk().lines.join(" ")).toContain("이 창 밖으로 나가지 않습니다");
   });
 
   it("**an unresolved target is its own exit code**, never rounded up to success", () => {

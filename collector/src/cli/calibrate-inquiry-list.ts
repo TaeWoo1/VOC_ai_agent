@@ -6,14 +6,19 @@
  *     npx tsx src/cli/calibrate-inquiry-list.ts -- --i-understand-this-opens-live-coupang-wing
  *
  * It answers the question the guided reply run cannot be built without: **can SellerOps point at one specific
- * inquiry on that screen at all?** Nothing about the WING 고객문의 list has ever been measured — not its
- * structure, not whether a row carries the channel's own `inquiryId`, not how answered-ness is visible. A
- * locator written from a reasonable guess about any of those would point the seller at the wrong customer's
- * question, which is worse than pointing at nothing.
+ * inquiry on that screen at all?** A locator written from a reasonable guess would point the seller at the
+ * wrong customer's question, which is worse than pointing at nothing.
  *
- * **It reads no buyer text.** The identifiers travel INTO the page (they are ours, from our own database) and
- * what comes back is a count. The only text the page reads is an `indexOf` against a fixed Coupang word we
- * supply — `답변완료` / `미답변` — reduced to a boolean before it can be returned.
+ * **It assumes nothing about what a row looks like.** The first calibration defined a row as `tr`/`li`/
+ * `[role=row]`, counted 54 of them, and reported zero status words on a screen showing two answered inquiries —
+ * it had measured the navigation. So the anchor leads now: an identifier we already hold, searched for
+ * document-wide in `href` / `id` / `data-*` and nowhere else, with the repeating structure around it walked
+ * outward from wherever it lands.
+ *
+ * **Buyer text never leaves the page.** The identifiers travel INTO the page (they are ours, from our own
+ * database) and what comes back is a count. Text is compared in exactly one place — an `indexOf` against fixed
+ * Coupang status words we supply — on leaf elements, reduced to a boolean before it can be returned. Attribute
+ * values and class names are likewise compared in-page and never returned.
  *
  * It never clicks, types, submits, navigates, highlights, tags, or mounts an overlay on the WING page.
  *
@@ -120,8 +125,9 @@ export function calibrationRunGrantBinding(): RunGrantBinding {
     mode: CALIBRATION.mode,
     maxActions: MAX_ACTIONS,
     agentDoesNot:
-      "구매자가 쓴 문의 내용을 읽지 않습니다. 목록이 어떤 구조인지, 각 행에 문의를 가리킬 번호가 있는지, " +
-      "답변완료·미답변이 몇 건인지 개수만 셉니다. 클릭·입력·답변 등록·전송 없음.",
+      "SellerOps가 이미 가지고 있는 문의 번호가 이 화면의 링크·id·data 속성 안에 있는지만 찾고, 그 주변이 " +
+      "어떤 구조로 반복되는지 셉니다. 화면 글자는 '답변완료' 같은 쿠팡 고정 단어와 맞는지만 비교하고, 결과로는 " +
+      "개수만 나옵니다 — 구매자가 쓴 문의 내용은 이 창 밖으로 나가지 않습니다. 클릭·입력·답변 등록·전송 없음.",
   };
 }
 
@@ -146,8 +152,8 @@ export function calibrationAsk(): OperatorConfirmAsk {
     headline: "고객문의 목록 화면에 직접 도착하신 뒤 눌러 주세요.",
     lines: [
       "SellerOps는 이 창을 조작하지 않습니다 — 로그인 · 이동은 모두 직접 하세요.",
-      "누르시면 목록의 구조와 개수를 한 번 셉니다.",
-      "구매자가 쓴 문의 내용은 읽지 않습니다. 화면에서 나오는 것은 숫자뿐입니다.",
+      "누르시면 화면 구조를 한 번 셉니다.",
+      "구매자가 쓴 문의 내용은 이 창 밖으로 나가지 않습니다. 나오는 것은 숫자와 태그 이름뿐입니다.",
       "아무것도 눌리거나 입력되지 않고, 답변은 등록되지 않습니다.",
     ],
   };
@@ -168,9 +174,10 @@ export function calibrationExitCode(stop: CalibrationStop, targeted: boolean): n
 }
 
 export const CALIBRATION_BANNER_LINES: readonly string[] = [
-  " LIVE Coupang WING 고객문의 list calibration — explicit per-run approval required.",
-  " SellerOps counts how the inquiry rows are arranged and whether one of them carries the",
-  " identifier it already holds. It reads NO buyer text and sends nothing anywhere.",
+  " LIVE Coupang WING 고객문의 anchor calibration — explicit per-run approval required.",
+  " SellerOps looks for an identifier it already holds in href/id/data-* attributes ONLY, and",
+  " measures the repeating structure around it. Buyer text never leaves the page: text is",
+  " compared to fixed Coupang words in-page and only counts come back. Nothing is sent anywhere.",
   " It never clicks, types, submits, navigates, highlights, or tags the WING page.",
 ];
 
@@ -266,8 +273,8 @@ async function main(): Promise<void> {
     const primary = targets[0]!;
     const resolution = resolveInquiryTarget(census, primary.id);
 
-    // SANITIZED record → stdout. A container enum, integers, our own expectation ids, and attribute NAMES.
-    // No row text, no attribute value, no selector, no raw URL.
+    // SANITIZED record → stdout. Integers, tag names, attribute KINDS, and our own expectation ids.
+    // No page text, no attribute value, no class name, no selector, no raw URL.
     console.log(
       JSON.stringify(
         {
@@ -283,16 +290,16 @@ async function main(): Promise<void> {
       ),
     );
 
-    if (census.reason === "OK" && census.rowsWithDigits === 0) {
+    if (census.reason === "OK" && census.elementsWithAnchorAttributes === 0) {
       console.error("");
-      console.error("⚠ NO row on that screen carries a machine-readable number at all.");
+      console.error("⚠ NOTHING on that screen carries a machine-readable number in href / id / data-*.");
       console.error("  That refutes id-based targeting for this surface. It is the measurement, not a failure to");
       console.error("  retry away — and matching on the buyer's text instead is not an available answer.");
     } else if (!resolution.ok) {
       console.error("");
       console.error(`⚠ The target did NOT resolve (${resolution.reason}) for ${primary.id}.`);
-      console.error("  Do not hand-write a locator from this output. A guided run may only point at a row this");
-      console.error("  measurement resolved to exactly one.");
+      console.error("  Do not hand-write a locator from this output. A guided run may only point at an element");
+      console.error("  this measurement resolved to exactly one, with a measured repeat around it.");
     }
     process.exitCode = calibrationExitCode("MEASURED", resolution.ok);
   } finally {

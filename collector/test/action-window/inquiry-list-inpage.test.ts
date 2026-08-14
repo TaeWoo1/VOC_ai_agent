@@ -1,12 +1,18 @@
 /**
- * **The 고객문의 list census, executed.** These run the REAL generated script — the same string the driver
+ * **The 고객문의 anchor probe, executed.** These run the REAL generated script — the same string the driver
  * evaluates in the page — against a fake DOM.
  *
- * The property worth the most here is an absence: a buyer's words must not be able to leave the page. That is
- * asserted two ways, because either alone is weak. Structurally, the emitted body must read `textContent` in
- * exactly one place and reduce it to a boolean there. Behaviourally, a page whose rows are full of distinctive
- * buyer text must produce a census in which none of it appears — including in the attribute names, which are
- * the one string-shaped thing that does travel.
+ * Two properties are worth the most here, and both are absences.
+ *
+ * **Buyer text cannot leave the page.** Asserted structurally (the emitted body reads `textContent` in exactly
+ * one place and reduces it to a boolean there) and behaviourally (a page full of distinctive buyer text yields
+ * a census containing none of it).
+ *
+ * **The row tag is never assumed.** The version this replaces defined a row as `tr`/`li`/`[role=row]` and, on
+ * the real WING screen, confidently measured the navigation instead — 54 rows, zero ids, and zero occurrences
+ * of both status words on a screen showing two answered inquiries. So there is a test here for a page whose
+ * inquiries are plain `<div>`s with no table, no list, and no row role: the previous design could not see it at
+ * all, and this one must find it without being told what to look for.
  *
  * No jsdom: jsdom has no layout, so every element would read as not painting and every case would pass for the
  * wrong reason.
@@ -95,9 +101,9 @@ class El {
 }
 
 /**
- * Enough selector grammar for the census: comma lists, `*`, `[attr]`, `TAG[attr]`, and one level of descendant
- * (`table tr`). A fake that cannot express a selector silently answers "no elements", which is the shape of a
- * green test over a broken rule — so anything unrecognised throws instead.
+ * Enough selector grammar for the probe: comma lists, `*`, `[attr]`, `TAG[attr]`, and one level of descendant.
+ * A fake that cannot express a selector silently answers "no elements", which is the shape of a green test over
+ * a broken rule — so anything unrecognised throws instead.
  */
 function select(els: El[], sel: string): El[] {
   const out: El[] = [];
@@ -171,11 +177,12 @@ const DIGITS: InquiryDigitExpectation[] = [
   { id: "productId", digits: PRODUCT },
 ];
 const LABELS: InquiryLabelExpectation[] = [
-  { id: "answered", exactText: "답변완료" },
-  { id: "unanswered", exactText: "미답변" },
+  { id: "answeredTight", exactText: "답변완료" },
+  { id: "answeredSpaced", exactText: "답변 완료" },
+  { id: "unansweredTight", exactText: "미답변" },
 ];
 
-/** One list row: an id-bearing link, the buyer's text, and a status word. */
+/** One table-shaped row: an id-bearing link, the buyer's text, and a status word. */
 function row(opts: {
   inquiryId?: string;
   productId?: string;
@@ -204,6 +211,24 @@ function wingInquiryList(rows: El[]): El {
   return el({ tag: "div" }).add(el({ tag: "table" }).add(el({ tag: "tbody" }).add(...rows)));
 }
 
+/**
+ * The same screen with NO table, NO list, and NO row role — inquiries as bare `<div>`s, the way a modern SPA
+ * renders them. The previous design could not see this page at all.
+ */
+function divGridInquiryList(rows: { inquiryId: string; text: string; status: string }[]): El {
+  const body = el({ tag: "div", attrs: { class: "inq-body" } });
+  for (const r of rows) {
+    body.add(
+      el({ tag: "div", attrs: { class: "inq-row", "data-inquiry-no": r.inquiryId } }).add(
+        el({ tag: "div", attrs: { class: "inq-cell" }, text: r.text }),
+        el({ tag: "div", attrs: { class: "inq-cell" }, text: r.status }),
+        el({ tag: "button", text: "답변하기" }),
+      ),
+    );
+  }
+  return el({ tag: "div" }).add(body);
+}
+
 function censusOf(root: El, digits = DIGITS, labels = LABELS) {
   const raw = run<unknown>(buildInquiryListCensusScript(digits, labels), root);
   return sanitizeInquiryListCensus(raw, digits, labels);
@@ -211,8 +236,8 @@ function censusOf(root: El, digits = DIGITS, labels = LABELS) {
 
 /* ───────────────────────────── the cases ───────────────────────────── */
 
-describe("the 고객문의 list census counts rows without reading them", () => {
-  it("finds the one row carrying the inquiry id, and names the attribute it came from", () => {
+describe("the anchor leads, and the row shape comes back as a finding", () => {
+  it("finds the one element carrying the inquiry id, and measures the repeat chain above it", () => {
     const census = censusOf(
       wingInquiryList([
         row({ inquiryId: INQUIRY_A, productId: PRODUCT, text: BUYER_TEXT_A, status: "답변완료" }),
@@ -221,14 +246,66 @@ describe("the 고객문의 list census counts rows without reading them", () => 
     );
 
     expect(census.reason).toBe("OK");
-    expect(census.containerKind).toBe("TABLE");
-    expect(census.rowsScanned).toBe(2);
-    expect(census.rowCounts.table).toBe(2);
-    const inquiryMatch = census.digitMatches.find((m) => m.id === "inquiryId")!;
-    expect(inquiryMatch.rowMatchCount).toBe(1);
-    // The name is what lets the next unit build a locator from a measurement instead of a guess.
-    expect(inquiryMatch.matchedAttributeNames).toContain("href");
-    expect(resolveInquiryTarget(census, "inquiryId")).toEqual({ ok: true, expectationId: "inquiryId" });
+    const anchor = census.anchors.find((m) => m.id === "inquiryId")!;
+    expect(anchor.matchCount).toBe(1);
+    expect(anchor.topology!.matchedTagName).toBe("A");
+    // The KIND travels; the href itself never does.
+    expect(anchor.topology!.attributeKinds).toEqual(["HREF"]);
+
+    // A <td> repeats across the row and a <tr> repeats down the table. BOTH are reported — deciding which one
+    // is "the row" from inside a probe is exactly the guess that failed against the real screen.
+    const tags = anchor.topology!.repeatLevels.map((l) => l.tagName);
+    expect(tags).toEqual(["TD", "TR"]);
+    const rowLevel = anchor.topology!.repeatLevels.find((l) => l.tagName === "TR")!;
+    expect(rowLevel.siblingCount).toBe(2);
+    expect(rowLevel.hasDetailAffordance).toBe(true);
+
+    const resolution = resolveInquiryTarget(census, "inquiryId");
+    expect(resolution.ok).toBe(true);
+  });
+
+  it("**finds a div-shaped list that has no table, no li, and no row role**", () => {
+    // The regression that cost a live sitting: the previous probe defined a row as tr/li/[role=row], found 54
+    // of them on the real screen, and reported zero ids and zero status words — it had measured the navigation.
+    const census = censusOf(
+      divGridInquiryList([
+        { inquiryId: INQUIRY_A, text: BUYER_TEXT_A, status: "답변완료" },
+        { inquiryId: INQUIRY_B, text: BUYER_TEXT_B, status: "답변완료" },
+        { inquiryId: "158900001", text: "세 번째 문의", status: "미답변" },
+      ]),
+    );
+
+    const anchor = census.anchors.find((m) => m.id === "inquiryId")!;
+    expect(anchor.matchCount).toBe(1);
+    expect(anchor.topology!.matchedTagName).toBe("DIV");
+    expect(anchor.topology!.attributeKinds).toEqual(["DATA"]);
+
+    const level = anchor.topology!.repeatLevels[0]!;
+    expect(level.tagName).toBe("DIV");
+    // Three inquiries on screen, three identically shaped siblings — that is what identifies the row level.
+    expect(level.siblingCount).toBe(3);
+    expect(level.siblingsSharingClassShape).toBe(3);
+    expect(level.classTokenCount).toBe(1);
+    expect(level.hasDetailAffordance).toBe(true);
+    expect(resolveInquiryTarget(census, "inquiryId").ok).toBe(true);
+  });
+
+  it("**looks in href / id / data-* and nowhere else**", () => {
+    // A page can carry the number in a title, a value, an aria-label, or its text. None of those are structural
+    // anchors, and reading them widens the boundary for no targeting benefit.
+    const root = el({ tag: "div" }).add(
+      el({ tag: "div" }).add(
+        el({ tag: "span", attrs: { title: INQUIRY_A }, text: INQUIRY_A }),
+        el({ tag: "input", attrs: { value: INQUIRY_A } }),
+        el({ tag: "span", attrs: { "aria-label": INQUIRY_A } }),
+      ),
+    );
+
+    const census = censusOf(root);
+
+    expect(census.elementsWithAnchorAttributes).toBe(0);
+    expect(census.anchors.find((m) => m.id === "inquiryId")!.matchCount).toBe(0);
+    expect(resolveInquiryTarget(census, "inquiryId")).toEqual({ ok: false, reason: "TARGET_NOT_FOUND" });
   });
 
   it("**refuses a product id that matches several rows** rather than picking one", () => {
@@ -241,22 +318,8 @@ describe("the 고객문의 list census counts rows without reading them", () => 
 
     // A product id matches every inquiry on that product. Falling back to it would turn "the one inquiry"
     // into "some inquiry about the right product", which reads identically in a log and is wrong.
-    expect(census.digitMatches.find((m) => m.id === "productId")!.rowMatchCount).toBe(2);
+    expect(census.anchors.find((m) => m.id === "productId")!.matchCount).toBe(2);
     expect(resolveInquiryTarget(census, "productId")).toEqual({ ok: false, reason: "TARGET_AMBIGUOUS" });
-  });
-
-  it("reports zero when the page carries no id — refuting the approach rather than working around it", () => {
-    const census = censusOf(
-      wingInquiryList([
-        row({ inquiryId: "", productId: undefined, text: BUYER_TEXT_A, status: "답변완료", detail: false }),
-      ]),
-    );
-
-    expect(census.rowsWithDigits).toBe(0);
-    expect(census.digitMatches.find((m) => m.id === "inquiryId")!.rowMatchCount).toBe(0);
-    expect(resolveInquiryTarget(census, "inquiryId")).toEqual({ ok: false, reason: "TARGET_NOT_FOUND" });
-    // And no fallback to matching the buyer's text exists to be reached for.
-    expect(JSON.stringify(census)).not.toContain(BUYER_TEXT_A);
   });
 
   it("**a digit run must match whole** — a prefix targets a different inquiry silently", () => {
@@ -266,46 +329,89 @@ describe("the 고객문의 list census counts rows without reading them", () => 
       [],
     );
 
-    expect(census.digitMatches[0]!.rowMatchCount).toBe(0);
+    expect(census.anchors[0]!.matchCount).toBe(0);
   });
 
-  it("counts answered and unanswered rows from fixed platform words we supply", () => {
+  it("an id inside a link nested in a matching row counts ONCE, as the innermost", () => {
+    // Otherwise a <tr> and the <a> inside it would read as two matches — a false ambiguity refusal on a page
+    // that actually identifies the inquiry exactly once.
+    const inner = el({ tag: "a", attrs: { href: `/cs/inquiries/${INQUIRY_A}` } });
+    const outer = el({ tag: "tr", attrs: { "data-inquiry-id": INQUIRY_A } }).add(el({ tag: "td" }).add(inner));
+    const sibling = el({ tag: "tr", attrs: { "data-inquiry-id": INQUIRY_B } });
     const census = censusOf(
-      wingInquiryList([
-        row({ inquiryId: INQUIRY_A, text: BUYER_TEXT_A, status: "답변완료" }),
-        row({ inquiryId: INQUIRY_B, text: BUYER_TEXT_B, status: "미답변" }),
-        row({ inquiryId: "158900001", text: "세 번째 문의", status: "미답변" }),
+      el({ tag: "div" }).add(el({ tag: "table" }).add(el({ tag: "tbody" }).add(outer, sibling))),
+    );
+
+    const anchor = census.anchors.find((m) => m.id === "inquiryId")!;
+    expect(anchor.matchCount).toBe(1);
+    expect(anchor.topology!.matchedTagName).toBe("A");
+  });
+
+  it("the page's own navigation does not become a false match", () => {
+    const root = wingInquiryList([
+      row({ inquiryId: INQUIRY_A, text: BUYER_TEXT_A, status: "답변완료" }),
+      row({ inquiryId: INQUIRY_B, text: BUYER_TEXT_B, status: "미답변" }),
+    ]);
+    root.add(
+      el({ tag: "ul" }).add(
+        el({ tag: "li" }).add(el({ tag: "a", text: "주문관리", attrs: { href: "/orders/12345" } })),
+        el({ tag: "li" }).add(el({ tag: "a", text: "상품관리", attrs: { href: "/products/6789" } })),
+      ),
+    );
+
+    const census = censusOf(root);
+
+    // Navigation carries digits — it just never carries THIS inquiry's number.
+    expect(census.elementsWithAnchorAttributes).toBeGreaterThan(2);
+    expect(resolveInquiryTarget(census, "inquiryId").ok).toBe(true);
+  });
+
+  it("one match with nothing repeating around it is not a target", () => {
+    // A detail page carries the id too. There is no row there to point at, and pretending otherwise would send
+    // the guided run to highlight a page.
+    const root = el({ tag: "div" }).add(
+      el({ tag: "section" }).add(el({ tag: "a", attrs: { href: `/cs/inquiries/${INQUIRY_A}` } })),
+    );
+
+    const census = censusOf(root);
+
+    expect(census.anchors.find((m) => m.id === "inquiryId")!.matchCount).toBe(1);
+    expect(census.anchors.find((m) => m.id === "inquiryId")!.topology!.repeatLevels).toEqual([]);
+    expect(resolveInquiryTarget(census, "inquiryId")).toEqual({ ok: false, reason: "TARGET_TOPOLOGY_UNKNOWN" });
+  });
+});
+
+describe("the status wording is measured, not guessed", () => {
+  it("**several spellings are counted separately**, so one run settles which the screen uses", () => {
+    // The first calibration supplied one spelling per state and came back with zero of both — which left "the
+    // wording differs" and "the scan never reached the list" indistinguishable, at the cost of a live sitting.
+    const census = censusOf(
+      divGridInquiryList([
+        { inquiryId: INQUIRY_A, text: BUYER_TEXT_A, status: "답변 완료" },
+        { inquiryId: INQUIRY_B, text: BUYER_TEXT_B, status: "답변 완료" },
+        { inquiryId: "158900001", text: "세 번째", status: "미답변" },
       ]),
     );
 
     expect(census.labelCounts).toEqual([
-      { id: "answered", rowCount: 1 },
-      { id: "unanswered", rowCount: 2 },
+      { id: "answeredTight", elementCount: 0 },
+      { id: "answeredSpaced", elementCount: 2 },
+      { id: "unansweredTight", elementCount: 1 },
     ]);
   });
 
-  it("counts which rows offer a way into a detail view", () => {
+  it("a status word is counted on the leaf that renders it, not on every ancestor", () => {
+    // Counting ancestors too would report a row, its container, and the page body as three answered inquiries.
     const census = censusOf(
-      wingInquiryList([
-        row({ inquiryId: INQUIRY_A, text: BUYER_TEXT_A, status: "답변완료" }),
-        row({ inquiryId: INQUIRY_B, text: BUYER_TEXT_B, status: "미답변", detail: false }),
-      ]),
+      wingInquiryList([row({ inquiryId: INQUIRY_A, text: BUYER_TEXT_A, status: "답변완료" })]),
     );
 
-    expect(census.rowsWithDetailAffordance).toBe(1);
-  });
-
-  it("a hidden template row is not a row the seller can be pointed at", () => {
-    const hidden = row({ inquiryId: INQUIRY_A, text: BUYER_TEXT_A, status: "답변완료" });
-    const template = new El({ tag: "tr", display: "none" });
-    const census = censusOf(wingInquiryList([hidden, template]));
-
-    expect(census.rowsScanned).toBe(1);
+    expect(census.labelCounts.find((l) => l.id === "answeredTight")!.elementCount).toBe(1);
   });
 });
 
 describe("nothing a buyer wrote can leave the page", () => {
-  it("no row text appears anywhere in the census, for any expectation", () => {
+  it("no page text appears anywhere in the census, for any expectation", () => {
     const census = censusOf(
       wingInquiryList([
         row({ inquiryId: INQUIRY_A, productId: PRODUCT, text: BUYER_TEXT_A, status: "답변완료" }),
@@ -328,25 +434,28 @@ describe("nothing a buyer wrote can leave the page", () => {
       .filter((l) => !l.trimStart().startsWith("/*") && !l.trimStart().startsWith("*"))
       .join("\n");
     const reads = code.split("textContent").length - 1;
-    expect(reads, "textContent must be read only inside hasLabel").toBe(1);
-    // And that one read is inside the boolean-returning helper, never assigned to a returned field.
-    const hasLabelLine = code.split("\n").find((l) => l.includes("textContent"))!;
-    expect(hasLabelLine).toContain("function hasLabel");
-    expect(hasLabelLine).toContain("indexOf");
+    expect(reads, "textContent must be read only inside countLabel").toBe(1);
+    // And that one read is a fixed-literal containment test, never assigned to a returned field.
+    const readLine = code.split("\n").find((l) => l.includes("textContent"))!;
+    expect(readLine).toContain("indexOf(literal)");
   });
 
-  it("the census never returns an attribute VALUE, only names", () => {
+  it("the census returns no attribute VALUE and no class name — only kinds and counts", () => {
     const census = censusOf(
-      wingInquiryList([row({ inquiryId: INQUIRY_A, productId: PRODUCT, text: BUYER_TEXT_A, status: "답변완료" })]),
+      divGridInquiryList([
+        { inquiryId: INQUIRY_A, text: BUYER_TEXT_A, status: "답변완료" },
+        { inquiryId: INQUIRY_B, text: BUYER_TEXT_B, status: "답변완료" },
+      ]),
     );
 
     const wire = JSON.stringify(census);
-    // The href that matched carried a path; the path must not travel with the name.
-    expect(wire).not.toContain("/tenants/");
-    expect(wire).toContain("href");
+    expect(wire).not.toContain("inq-row");
+    expect(wire).not.toContain("inq-body");
+    expect(wire).not.toContain("data-inquiry-no");
+    expect(wire).toContain("DATA");
   });
 
-  it("attribute names do not travel when the target is ambiguous", () => {
+  it("topology does not travel when the target is ambiguous", () => {
     const census = censusOf(
       wingInquiryList([
         row({ inquiryId: INQUIRY_A, productId: PRODUCT, text: BUYER_TEXT_A, status: "답변완료" }),
@@ -354,51 +463,18 @@ describe("nothing a buyer wrote can leave the page", () => {
       ]),
     );
 
-    // With 2 matches the names describe several rows, so they would mislead whoever builds the locator.
-    expect(census.digitMatches.find((m) => m.id === "productId")!.matchedAttributeNames).toEqual([]);
+    // With 2 matches a topology describes one of two places, so it would mislead whoever builds the locator.
+    expect(census.anchors.find((m) => m.id === "productId")!.topology).toBeNull();
   });
 });
 
 describe("the census fails closed rather than reporting a partial reading", () => {
-  it("**the page's own furniture does not refuse the census**", () => {
-    // The first version refused whenever rows appeared under two container kinds. Run against the real WING
-    // screen it refused instantly and correctly by its own rule — every application page has a navigation
-    // list beside its data table. Targeting never needed to know which list is THE list.
-    const root = wingInquiryList([row({ inquiryId: INQUIRY_A, text: BUYER_TEXT_A, status: "답변완료" })]);
-    root.add(
-      el({ tag: "ul" }).add(
-        el({ tag: "li", text: "주문관리" }),
-        el({ tag: "li", text: "상품관리" }),
-        el({ tag: "li", text: "고객문의" }),
-      ),
-    );
-
-    const census = censusOf(root);
-
-    expect(census.reason).toBe("OK");
-    expect(census.rowCounts.list).toBe(3);
-    expect(census.rowCounts.table).toBe(1);
-    // A navigation item never carries an inquiry id, so the target is still exactly one.
-    expect(resolveInquiryTarget(census, "inquiryId")).toEqual({ ok: true, expectationId: "inquiryId" });
-  });
-
-  it("a row nested inside another matching row counts ONCE, as the innermost", () => {
-    // Otherwise a <tr> wrapping a matching <li> would read as two matches — a false ambiguity refusal on a
-    // page that actually identifies the row exactly once.
-    const inner = el({ tag: "li", attrs: { "data-inquiry-id": INQUIRY_A } });
-    const outer = el({ tag: "tr" }).add(el({ tag: "td" }).add(el({ tag: "ul" }).add(inner)));
-    const census = censusOf(el({ tag: "div" }).add(el({ tag: "table" }).add(el({ tag: "tbody" }).add(outer))));
-
-    expect(census.digitMatches.find((m) => m.id === "inquiryId")!.rowMatchCount).toBe(1);
-    expect(census.containerKind).toBe("LIST");
-  });
-
-  it("refuses an empty screen rather than reporting zero rows as a clean reading", () => {
-    expect(censusOf(el({ tag: "div" })).reason).toBe("NO_ROWS");
+  it("refuses an empty document rather than reporting zero as a clean reading", () => {
+    expect(censusOf(el({ tag: "div" })).reason).toBe("NO_ELEMENTS");
   });
 
   it("a resolution against a refused census never claims a target", () => {
-    for (const reason of ["NO_ROWS", "SCAN_TRUNCATED", "UNREADABLE"] as const) {
+    for (const reason of ["NO_ELEMENTS", "SCAN_TRUNCATED", "UNREADABLE"] as const) {
       const census = sanitizeInquiryListCensus({ reason }, DIGITS, LABELS);
       expect(resolveInquiryTarget(census, "inquiryId")).toEqual({ ok: false, reason: "CENSUS_REFUSED" });
     }
@@ -410,13 +486,9 @@ describe("the census fails closed rather than reporting a partial reading", () =
       undefined,
       "OK",
       { reason: "OK" },
-      { reason: "OK", containerKind: "TABLE", rowCounts: { table: -1, list: 0, grid: 0 } },
-      { reason: "OK", containerKind: "SOMETHING_NEW", rowCounts: { table: 1, list: 0, grid: 0 } },
-      // More rows carrying digits than rows scanned is incoherent; reconciling it would invent a reading.
-      {
-        reason: "OK", containerKind: "TABLE", rowCounts: { table: 1, list: 0, grid: 0 },
-        rowsScanned: 1, rowsWithDigits: 5, rowsWithDetailAffordance: 0,
-      },
+      { reason: "OK", elementsScanned: -1, elementsWithAnchorAttributes: 0 },
+      // More elements carrying anchors than elements scanned is incoherent; reconciling it invents a reading.
+      { reason: "OK", elementsScanned: 1, elementsWithAnchorAttributes: 5 },
     ]) {
       expect(sanitizeInquiryListCensus(bad, DIGITS, LABELS).reason).not.toBe("OK");
     }
@@ -425,43 +497,90 @@ describe("the census fails closed rather than reporting a partial reading", () =
   it("**the page cannot introduce a string of its own** into the result", () => {
     const raw = {
       reason: "OK",
-      containerKind: "TABLE",
-      rowCounts: { table: 1, list: 0, grid: 0 },
-      rowsScanned: 1,
-      rowsWithDigits: 1,
-      rowsWithDetailAffordance: 1,
-      // A hostile page answering with ids we never asked about, and a value shaped like a name.
-      digitMatches: [
-        { id: "inquiryId", rowMatchCount: 1, matchedAttributeNames: ["href", "/tenants/seller-cs/1", ""] },
-        { id: "productId", rowMatchCount: 0 },
-        { id: "somethingElse", rowMatchCount: 9 },
+      elementsScanned: 40,
+      elementsWithAnchorAttributes: 9,
+      anchors: [
+        {
+          id: "inquiryId",
+          matchCount: 1,
+          topology: {
+            // A hostile page answering with a value shaped like a tag, and kinds we never allowlisted.
+            matchedTagName: "/tenants/seller-cs/1",
+            attributeKinds: ["HREF", "TITLE", BUYER_TEXT_A],
+            ancestorDepthScanned: 3,
+            repeatLevels: [
+              { depth: 1, tagName: "TR", siblingCount: 2, siblingsSharingClassShape: 2, classTokenCount: 1 },
+              // A level claiming more shape-sharing siblings than siblings is dropped, not repaired.
+              { depth: 2, tagName: "DIV", siblingCount: 2, siblingsSharingClassShape: 9, classTokenCount: 0 },
+            ],
+          },
+        },
+        { id: "productId", matchCount: 0 },
+        { id: "somethingElse", matchCount: 9 },
       ],
       labelCounts: [
-        { id: "answered", rowCount: 1 },
-        { id: "unanswered", rowCount: 0 },
-        { id: "injected", rowCount: 7 },
+        { id: "answeredTight", elementCount: 1 },
+        { id: "answeredSpaced", elementCount: 0 },
+        { id: "unansweredTight", elementCount: 0 },
+        { id: "injected", elementCount: 7 },
       ],
     };
 
     const census = sanitizeInquiryListCensus(raw, DIGITS, LABELS);
 
-    // Only the expectations the CALLER supplied come back, and the path-shaped "name" is dropped.
-    expect(census.digitMatches.map((m) => m.id)).toEqual(["inquiryId", "productId"]);
-    expect(census.digitMatches[0]!.matchedAttributeNames).toEqual(["href"]);
-    expect(census.labelCounts.map((l) => l.id)).toEqual(["answered", "unanswered"]);
-    expect(JSON.stringify(census)).not.toContain("somethingElse");
-    expect(JSON.stringify(census)).not.toContain("injected");
+    // Only the expectations the CALLER supplied come back.
+    expect(census.anchors.map((m) => m.id)).toEqual(["inquiryId", "productId"]);
+    expect(census.labelCounts.map((l) => l.id)).toEqual(["answeredTight", "answeredSpaced", "unansweredTight"]);
+    // A path-shaped tag name is not a tag name, so the whole topology drops rather than half-travelling.
+    expect(census.anchors[0]!.topology).toBeNull();
+    const wire = JSON.stringify(census);
+    expect(wire).not.toContain("somethingElse");
+    expect(wire).not.toContain("injected");
+    expect(wire).not.toContain("TITLE");
+    expect(wire).not.toContain(BUYER_TEXT_A);
+  });
+
+  it("an incoherent repeat level drops without taking the good ones with it", () => {
+    const raw = {
+      reason: "OK",
+      elementsScanned: 40,
+      elementsWithAnchorAttributes: 9,
+      anchors: [
+        {
+          id: "inquiryId",
+          matchCount: 1,
+          topology: {
+            matchedTagName: "A",
+            attributeKinds: ["HREF"],
+            ancestorDepthScanned: 4,
+            repeatLevels: [
+              { depth: 1, tagName: "TD", siblingCount: 3, siblingsSharingClassShape: 3, classTokenCount: 0 },
+              // A "repeat" of one is not a repeat.
+              { depth: 2, tagName: "TR", siblingCount: 1, siblingsSharingClassShape: 1, classTokenCount: 0 },
+            ],
+          },
+        },
+        { id: "productId", matchCount: 0 },
+      ],
+      labelCounts: [
+        { id: "answeredTight", elementCount: 1 },
+        { id: "answeredSpaced", elementCount: 0 },
+        { id: "unansweredTight", elementCount: 0 },
+      ],
+    };
+
+    const census = sanitizeInquiryListCensus(raw, DIGITS, LABELS);
+
+    expect(census.anchors[0]!.topology!.repeatLevels.map((l) => l.tagName)).toEqual(["TD"]);
+    expect(resolveInquiryTarget(census, "inquiryId").ok).toBe(true);
   });
 
   it("a missing count for a requested expectation is UNREADABLE, not a zero", () => {
     const raw = {
       reason: "OK",
-      containerKind: "TABLE",
-      rowCounts: { table: 1, list: 0, grid: 0 },
-      rowsScanned: 1,
-      rowsWithDigits: 1,
-      rowsWithDetailAffordance: 1,
-      digitMatches: [{ id: "inquiryId", rowMatchCount: 1 }],
+      elementsScanned: 40,
+      elementsWithAnchorAttributes: 9,
+      anchors: [{ id: "inquiryId", matchCount: 1 }],
       labelCounts: [],
     };
 

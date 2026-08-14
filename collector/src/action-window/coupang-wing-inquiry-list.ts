@@ -12,31 +12,41 @@
  * What IS available is a number we already hold. `onlineInquiries` gives SellerOps the channel's own
  * `inquiryId`, and the seller's own `sellerProductId`; both are identifiers from our own database, not buyer
  * data. So the match runs the other way round: we hand the page a digit string we are looking for, and the
- * page hands back **how many rows carry it**. Nothing crosses but integers.
+ * page hands back **how many elements carry it**. Nothing crosses but integers, enums, and tag names.
  *
- * That inversion is what makes this safe, and it also makes it honest — a count of 0 or 2 is a refusal that
- * needs no interpretation, where a text similarity score would have needed a threshold nobody could justify.
+ * ## Why this version measures topology instead of counting rows
  *
- * ## What has NOT been measured
+ * The first two versions asked the page "how many rows are there, and do any of them carry the id?" — where
+ * *row* meant `table tr`, `ul li`, or `[role=row]`. Against the real WING screen that returned 54 rows, zero
+ * id matches, and — decisively — **zero occurrences of both `답변완료` and `미답변`**, on a screen the operator
+ * could see two answered inquiries on. A row set that contains neither status word is not the inquiry list.
+ * The measurement had found the page's navigation and furniture and counted it confidently.
  *
- * Whether the WING list carries `inquiryId` at all — in an attribute, an href, a data-* value, or nowhere.
- * That is the question the calibration exists to answer, and this module is deliberately written so the
- * answer can be "nowhere": every expectation reports its own match count, and a zero is recorded rather than
- * worked around. No fallback to text matching exists here, and none should be added without its own decision.
+ * The mistake was structural, not a tuning error: **the row tag was assumed before it was measured.** So this
+ * version assumes nothing about it. The anchor is the identifier — a digit string we already hold — and it is
+ * searched for across the whole document in a small allowlist of STRUCTURAL attributes (`href`, `id`, `data-*`).
+ * Wherever it lands, the topology around it is then measured: what tag carries it, how far up the first
+ * repeating sibling unit sits, how many siblings that unit has, whether it offers a way into a detail view.
+ * The row shape comes back as a *finding*. That is the only order in which it can be trusted.
+ *
+ * ## What the page may and may not send back
+ *
+ * Attribute VALUES never cross — only which KIND of attribute matched. Class names never cross — only how many
+ * tokens, and how many siblings share the identical shape (compared inside the page). Text never crosses: the
+ * only text comparison is `indexOf` against fixed PLATFORM strings WE supply, on leaf elements, reduced to a
+ * boolean before it can be returned. Buyer text never leaves the page.
  */
 
-/** What kind of element the matched row turned out to be. A fixed enum — it names no element or selector. */
-export const INQUIRY_CONTAINER_KINDS = [
-  /** The row is a `<tr>` inside a `<table>`. */
-  "TABLE",
-  /** The row is an `<li>`. */
-  "LIST",
-  /** The row carries an explicit row role. */
-  "GRID",
-  /** Nothing matched, so nothing is named. */
-  "NONE",
+/** The STRUCTURAL attributes an identifier may be looked for in. Nothing else is read, in any element. */
+export const INQUIRY_ATTRIBUTE_KINDS = [
+  /** The element's `href`. */
+  "HREF",
+  /** The element's `id`. */
+  "ID",
+  /** Any `data-*` attribute. */
+  "DATA",
 ] as const;
-export type InquiryContainerKind = (typeof INQUIRY_CONTAINER_KINDS)[number];
+export type InquiryAttributeKind = (typeof INQUIRY_ATTRIBUTE_KINDS)[number];
 
 /**
  * One thing we are looking for, expressed as a digit string we already hold.
@@ -54,9 +64,10 @@ export interface InquiryDigitExpectation {
 /**
  * One fixed PLATFORM label to count — `답변완료`, `미답변` and the like.
  *
- * These are Coupang's own UI strings, supplied by us and matched whole, exactly as the issuance calibration
- * matches `발급` or `확인`. Counting rows that carry a known platform word is structural; it is categorically
- * different from reading the row's content, and no text is returned either way.
+ * These are Coupang's own UI strings, supplied by us and compared as fixed literals, exactly as the issuance
+ * calibration compares `발급` or `확인`. Several spellings of the same state are supplied at once because the
+ * exact wording on that screen has never been measured, and guessing one and re-running live for the next is
+ * precisely the loop this calibration exists to avoid.
  */
 export interface InquiryLabelExpectation {
   readonly id: string;
@@ -67,62 +78,85 @@ export interface InquiryLabelExpectation {
 export const INQUIRY_CENSUS_REFUSALS = [
   /** The scan hit its element budget; a truncated page cannot be counted honestly. */
   "SCAN_TRUNCATED",
-  /** No row-shaped elements were found at all. */
-  "NO_ROWS",
+  /** The document held no elements to scan at all. */
+  "NO_ELEMENTS",
   /** The script returned something that is not a census. */
   "UNREADABLE",
 ] as const;
 export type InquiryCensusRefusal = (typeof INQUIRY_CENSUS_REFUSALS)[number];
 
-/** Per-expectation outcome: our own id, and how many rows carried that digit run. */
-export interface InquiryDigitMatch {
-  readonly id: string;
-  readonly rowMatchCount: number;
-  /** Where the digits were found, when exactly one row matched. Attribute NAMES are schema, not data. */
-  readonly matchedAttributeNames: readonly string[];
-}
-
-/** Per-label outcome: our own id, and how many rows carried that exact platform word. */
-export interface InquiryLabelCount {
-  readonly id: string;
-  readonly rowCount: number;
-}
-
-/** How many painting row-shaped elements each kind contributed. Structure, reported rather than chosen between. */
-export interface InquiryRowCounts {
-  readonly table: number;
-  readonly list: number;
-  readonly grid: number;
+/**
+ * **One level of repetition above the anchor.** A `<td>` repeats across a row and a `<tr>` repeats down a
+ * table, and both are true at once — so the chain reports every level it finds rather than picking one.
+ *
+ * `siblingsSharingClassShape` separates a genuine repeating list from a coincidence of two `<div>`s. The class
+ * strings themselves are compared inside the page; only the count comes back.
+ */
+export interface InquiryRepeatLevel {
+  /** Levels above the matched element. 0 means the matched element itself already repeats. */
+  readonly depth: number;
+  readonly tagName: string;
+  /** Same-tag siblings, including this element. */
+  readonly siblingCount: number;
+  /** How many of those siblings carry an identical class shape. */
+  readonly siblingsSharingClassShape: number;
+  /** How many class tokens this element carries. A shape, not a name. */
+  readonly classTokenCount: number;
+  /** Which structural attribute kinds this element itself carries. */
+  readonly attributeKinds: readonly InquiryAttributeKind[];
+  /** Whether this element offers a link or button — a way into a detail view at all. */
+  readonly hasDetailAffordance: boolean;
 }
 
 /**
- * The whole structural reading of one 고객문의 screen. Integers, enums, and the ids we supplied — nothing
- * else. No row text, no selector, no href, no attribute VALUE.
+ * **The structure around a resolved anchor**, measured rather than assumed.
  *
- * **Why this counts every row-shaped element rather than picking one list.** The first version refused when
- * rows appeared under more than one container kind, on the reasoning that "which list is THE list" should not
- * be guessed. Run against the real WING screen it refused immediately, and correctly by its own rule: an
- * application page has navigation `<li>`s and a data `<table>` at the same time, so that rule could never
- * succeed anywhere.
+ * Reported ONLY when exactly one element carried the identifier. With two matches this would describe two
+ * different places at once, and with none there is nothing to describe — in both cases the honest output is
+ * the count and no topology.
  *
- * The rule was answering the wrong question. Targeting does not need to know which list is the list; it needs
- * to know that **exactly one element on the page carries the identifier**. A navigation item will never carry
- * an inquiry id. That property is simpler, stronger, and immune to the page's furniture — so the census now
- * scans every row-shaped element and reports the per-kind counts as structure, and `containerKind` names the
- * kind of the ONE row that matched (or `NONE`).
+ * `repeatLevels` runs innermost-first and is the measured answer to "what is a row on this screen". Nothing
+ * here decides which level is THE row: the level whose `siblingCount` matches the number of inquiries the
+ * seller can see is a finding to be read off, and reading it off is a decision for the unit that builds a
+ * locator — with this measurement in front of it, not in place of it.
+ */
+export interface InquiryAnchorTopology {
+  /** Tag of the element that carried the identifier. */
+  readonly matchedTagName: string;
+  /** Which kinds of structural attribute carried it. Kinds, never names, never values. */
+  readonly attributeKinds: readonly InquiryAttributeKind[];
+  /** How many ancestor levels were walked before the budget ran out. */
+  readonly ancestorDepthScanned: number;
+  /** Repeating ancestors, innermost first. Empty means nothing around the anchor repeats at all. */
+  readonly repeatLevels: readonly InquiryRepeatLevel[];
+}
+
+/** Per-expectation outcome: our own id, how many elements carried it, and the topology when exactly one did. */
+export interface InquiryAnchorMatch {
+  readonly id: string;
+  /** Innermost matches across the whole document, in allowlisted attributes only. */
+  readonly matchCount: number;
+  /** Present only when `matchCount === 1`. */
+  readonly topology: InquiryAnchorTopology | null;
+}
+
+/** Per-label outcome: our own id, and how many leaf elements carried that exact platform literal. */
+export interface InquiryLabelCount {
+  readonly id: string;
+  readonly elementCount: number;
+}
+
+/**
+ * The whole structural reading of one 고객문의 screen. Integers, enums, tag names, and the ids we supplied —
+ * nothing else. No text, no selector, no href, no class name, no attribute VALUE.
  */
 export interface InquiryListCensus {
   readonly reason: "OK" | InquiryCensusRefusal;
-  /** The kind of the single matching row, when exactly one matched the PRIMARY expectation; else `NONE`. */
-  readonly containerKind: InquiryContainerKind;
-  readonly rowCounts: InquiryRowCounts;
-  /** Every distinct row-shaped element scanned, deduplicated across kinds. */
-  readonly rowsScanned: number;
-  /** Rows carrying at least one digit run anywhere in their attributes — the anchor's availability. */
-  readonly rowsWithDigits: number;
-  /** Rows carrying a link or button — whether a detail view is reachable from the row at all. */
-  readonly rowsWithDetailAffordance: number;
-  readonly digitMatches: readonly InquiryDigitMatch[];
+  /** Every element considered. The scan is document-wide because the row shape is unknown by construction. */
+  readonly elementsScanned: number;
+  /** Elements carrying at least one digit run in an allowlisted attribute — whether machine ids exist here. */
+  readonly elementsWithAnchorAttributes: number;
+  readonly anchors: readonly InquiryAnchorMatch[];
   readonly labelCounts: readonly InquiryLabelCount[];
 }
 
@@ -130,19 +164,22 @@ export interface InquiryListCensus {
 export const INQUIRY_TARGET_REFUSALS = [
   /** The census itself refused; there is nothing to resolve against. */
   "CENSUS_REFUSED",
-  /** No row carried the identifier. The inquiry is not on this screen — or the screen does not carry ids. */
+  /** No element carried the identifier. The inquiry is not on this screen — or the screen carries no ids. */
   "TARGET_NOT_FOUND",
-  /** More than one row carried it. Picking one would be a guess about which is the seller's inquiry. */
+  /** More than one element carried it. Picking one would be a guess about which is the seller's inquiry. */
   "TARGET_AMBIGUOUS",
+  /** Exactly one matched, but nothing around it repeats — there is no row-shaped thing to point at. */
+  "TARGET_TOPOLOGY_UNKNOWN",
 ] as const;
 export type InquiryTargetRefusal = (typeof INQUIRY_TARGET_REFUSALS)[number];
 
 export type InquiryTargetResolution =
-  | { readonly ok: true; readonly expectationId: string }
+  | { readonly ok: true; readonly expectationId: string; readonly topology: InquiryAnchorTopology }
   | { readonly ok: false; readonly reason: InquiryTargetRefusal };
 
 /**
- * **The one rule that decides whether a target may be acted on.** Exactly one row, or nothing happens.
+ * **The one rule that decides whether a target may be acted on.** Exactly one element, with a measured
+ * repeating unit around it, or nothing happens.
  *
  * Deliberately total and deliberately narrow: it consults one expectation, not a best-of. A caller that
  * wants to try `inquiryId` and fall back to `sellerProductId` must ask twice and own that decision, because
@@ -156,18 +193,21 @@ export function resolveInquiryTarget(
   if (!census || census.reason !== "OK") {
     return { ok: false, reason: "CENSUS_REFUSED" };
   }
-  const match = census.digitMatches.find((m) => m.id === expectationId);
-  if (!match || match.rowMatchCount === 0) {
+  const match = census.anchors.find((m) => m.id === expectationId);
+  if (!match || match.matchCount === 0) {
     return { ok: false, reason: "TARGET_NOT_FOUND" };
   }
-  if (match.rowMatchCount > 1) {
+  if (match.matchCount > 1) {
     return { ok: false, reason: "TARGET_AMBIGUOUS" };
   }
-  return { ok: true, expectationId };
+  if (!match.topology || match.topology.repeatLevels.length === 0) {
+    return { ok: false, reason: "TARGET_TOPOLOGY_UNKNOWN" };
+  }
+  return { ok: true, expectationId, topology: match.topology };
 }
 
-const CONTAINER_KINDS: readonly string[] = INQUIRY_CONTAINER_KINDS;
 const REFUSALS: readonly string[] = INQUIRY_CENSUS_REFUSALS;
+const ATTRIBUTE_KINDS: readonly string[] = INQUIRY_ATTRIBUTE_KINDS;
 
 /** A safe non-negative integer, or null. Anything else is a reading we will not trust. */
 function count(value: unknown): number | null {
@@ -176,9 +216,75 @@ function count(value: unknown): number | null {
     : null;
 }
 
-/** An attribute NAME we are willing to echo: conservative, so a value can never masquerade as a name. */
-function attributeName(value: unknown): string | null {
-  return typeof value === "string" && /^[a-zA-Z][a-zA-Z0-9_:-]{0,40}$/.test(value) ? value : null;
+/**
+ * A tag name we are willing to echo. Uppercase, short, dashes allowed for custom elements — conservative
+ * enough that an attribute value cannot masquerade as one.
+ */
+function tagName(value: unknown): string | null {
+  return typeof value === "string" && /^[A-Z][A-Z0-9-]{0,23}$/.test(value) ? value : null;
+}
+
+/** Attribute KINDS from the fixed allowlist, deduplicated and ordered as declared. */
+function attributeKinds(value: unknown): readonly InquiryAttributeKind[] {
+  const raw = Array.isArray(value) ? value : [];
+  return INQUIRY_ATTRIBUTE_KINDS.filter((k) => raw.some((v) => v === k && ATTRIBUTE_KINDS.includes(k)));
+}
+
+/** How many repeat levels may be reported. Enough to tell a cell from a row from a section; not a page dump. */
+const MAX_REPEAT_LEVELS = 4;
+
+/** One level, or null when any field is missing or incoherent. A bad level drops; it never degrades a good one. */
+function sanitizeRepeatLevel(raw: unknown): InquiryRepeatLevel | null {
+  if (!raw || typeof raw !== "object") return null;
+  const l = raw as Record<string, unknown>;
+  const depth = count(l.depth);
+  const tag = tagName(l.tagName);
+  const siblingCount = count(l.siblingCount);
+  const siblingsSharingClassShape = count(l.siblingsSharingClassShape);
+  const classTokenCount = count(l.classTokenCount);
+  if (
+    depth === null ||
+    tag === null ||
+    siblingCount === null ||
+    siblingsSharingClassShape === null ||
+    classTokenCount === null
+  ) {
+    return null;
+  }
+  // A repeating level has at least two siblings, and no more can share its shape than exist.
+  if (siblingCount < 2 || siblingsSharingClassShape > siblingCount) return null;
+  return {
+    depth,
+    tagName: tag,
+    siblingCount,
+    siblingsSharingClassShape,
+    classTokenCount,
+    attributeKinds: attributeKinds(l.attributeKinds),
+    hasDetailAffordance: l.hasDetailAffordance === true,
+  };
+}
+
+/**
+ * Total, fail-closed sanitizer for a topology. Returns null when the anchor itself is unreadable — an
+ * unreadable topology must degrade to "no target", never to a partly-trusted one a locator gets built from.
+ */
+function sanitizeTopology(raw: unknown): InquiryAnchorTopology | null {
+  if (!raw || typeof raw !== "object") return null;
+  const t = raw as Record<string, unknown>;
+  const matchedTagName = tagName(t.matchedTagName);
+  const ancestorDepthScanned = count(t.ancestorDepthScanned);
+  if (matchedTagName === null || ancestorDepthScanned === null) return null;
+  const rawLevels = Array.isArray(t.repeatLevels) ? t.repeatLevels : [];
+  const repeatLevels = rawLevels
+    .map(sanitizeRepeatLevel)
+    .filter((l): l is InquiryRepeatLevel => l !== null)
+    .slice(0, MAX_REPEAT_LEVELS);
+  return {
+    matchedTagName,
+    attributeKinds: attributeKinds(t.attributeKinds),
+    ancestorDepthScanned,
+    repeatLevels,
+  };
 }
 
 /**
@@ -196,12 +302,9 @@ export function sanitizeInquiryListCensus(
 ): InquiryListCensus {
   const refused = (reason: "OK" | InquiryCensusRefusal): InquiryListCensus => ({
     reason,
-    containerKind: "NONE",
-    rowCounts: { table: 0, list: 0, grid: 0 },
-    rowsScanned: 0,
-    rowsWithDigits: 0,
-    rowsWithDetailAffordance: 0,
-    digitMatches: [],
+    elementsScanned: 0,
+    elementsWithAnchorAttributes: 0,
+    anchors: [],
     labelCounts: [],
   });
   if (!raw || typeof raw !== "object") {
@@ -212,44 +315,29 @@ export function sanitizeInquiryListCensus(
   if (reason !== "OK") {
     return refused(reason && REFUSALS.includes(reason) ? (reason as InquiryCensusRefusal) : "UNREADABLE");
   }
-  const containerKind = typeof r.containerKind === "string" && CONTAINER_KINDS.includes(r.containerKind)
-    ? (r.containerKind as InquiryContainerKind)
-    : null;
-  const rawCounts = (r.rowCounts && typeof r.rowCounts === "object" ? r.rowCounts : {}) as Record<string, unknown>;
-  const table = count(rawCounts.table);
-  const list = count(rawCounts.list);
-  const grid = count(rawCounts.grid);
-  const rowsScanned = count(r.rowsScanned);
-  const rowsWithDigits = count(r.rowsWithDigits);
-  const rowsWithDetailAffordance = count(r.rowsWithDetailAffordance);
-  if (containerKind === null || table === null || list === null || grid === null || rowsScanned === null
-      || rowsWithDigits === null || rowsWithDetailAffordance === null) {
+  const elementsScanned = count(r.elementsScanned);
+  const elementsWithAnchorAttributes = count(r.elementsWithAnchorAttributes);
+  if (elementsScanned === null || elementsWithAnchorAttributes === null) {
     return refused("UNREADABLE");
   }
-  // More rows carrying digits than rows scanned is incoherent — refuse rather than reconcile it.
-  if (rowsWithDigits > rowsScanned || rowsWithDetailAffordance > rowsScanned) {
+  // More elements carrying anchors than elements scanned is incoherent — refuse rather than reconcile it.
+  if (elementsWithAnchorAttributes > elementsScanned) {
     return refused("UNREADABLE");
   }
 
-  const rawMatches = Array.isArray(r.digitMatches) ? r.digitMatches : [];
-  const digitMatches: InquiryDigitMatch[] = [];
+  const rawAnchors = Array.isArray(r.anchors) ? r.anchors : [];
+  const anchors: InquiryAnchorMatch[] = [];
   for (const expectation of digitExpectations) {
-    const found = rawMatches.find(
+    const found = rawAnchors.find(
       (m) => m && typeof m === "object" && (m as Record<string, unknown>).id === expectation.id,
     ) as Record<string, unknown> | undefined;
-    const matchCount = count(found?.rowMatchCount);
+    const matchCount = count(found?.matchCount);
     if (matchCount === null) {
       return refused("UNREADABLE");
     }
-    const names = Array.isArray(found?.matchedAttributeNames) ? found!.matchedAttributeNames : [];
-    digitMatches.push({
-      id: expectation.id,
-      rowMatchCount: matchCount,
-      matchedAttributeNames: names
-        .map(attributeName)
-        .filter((n): n is string => n !== null)
-        .slice(0, 8),
-    });
+    // Topology travels only for an unambiguous anchor. Anything else would describe the wrong element.
+    const topology = matchCount === 1 ? sanitizeTopology(found?.topology) : null;
+    anchors.push({ id: expectation.id, matchCount, topology });
   }
 
   const rawLabels = Array.isArray(r.labelCounts) ? r.labelCounts : [];
@@ -258,21 +346,12 @@ export function sanitizeInquiryListCensus(
     const found = rawLabels.find(
       (l) => l && typeof l === "object" && (l as Record<string, unknown>).id === expectation.id,
     ) as Record<string, unknown> | undefined;
-    const rows = count(found?.rowCount);
-    if (rows === null) {
+    const elementCount = count(found?.elementCount);
+    if (elementCount === null) {
       return refused("UNREADABLE");
     }
-    labelCounts.push({ id: expectation.id, rowCount: rows });
+    labelCounts.push({ id: expectation.id, elementCount });
   }
 
-  return {
-    reason: "OK",
-    containerKind,
-    rowCounts: { table, list, grid },
-    rowsScanned,
-    rowsWithDigits,
-    rowsWithDetailAffordance,
-    digitMatches,
-    labelCounts,
-  };
+  return { reason: "OK", elementsScanned, elementsWithAnchorAttributes, anchors, labelCounts };
 }

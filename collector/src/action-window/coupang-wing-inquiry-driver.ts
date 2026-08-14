@@ -19,10 +19,24 @@ import {
   type InquiryListCensus,
 } from "./coupang-wing-inquiry-list";
 
-/** Coupang's own words for the two states, matched whole. Ours to supply, never read off the page. */
+/**
+ * Coupang's own words for the two states, as fixed literals. Ours to supply, never read off the page.
+ *
+ * **Several spellings of each state are supplied at once, deliberately.** The first calibration supplied one
+ * spelling per state and came back with zero of both on a screen the seller could see two answered inquiries
+ * on — which left "the wording differs" and "the scan never reached the list" indistinguishable, at the cost of
+ * a live sitting. Candidate spellings are free: each is one more `indexOf` inside the page, and the counts come
+ * back separately, so one run tells us which wording the screen actually uses.
+ */
 export const WING_INQUIRY_STATUS_LABELS: readonly InquiryLabelExpectation[] = Object.freeze([
-  { id: "answered", exactText: "답변완료" },
-  { id: "unanswered", exactText: "미답변" },
+  { id: "answeredTight", exactText: "답변완료" },
+  { id: "answeredSpaced", exactText: "답변 완료" },
+  { id: "unansweredTight", exactText: "미답변" },
+  { id: "unansweredSpaced", exactText: "미 답변" },
+  { id: "pendingTight", exactText: "답변대기" },
+  { id: "pendingSpaced", exactText: "답변 대기" },
+  { id: "done", exactText: "완료" },
+  { id: "waiting", exactText: "대기" },
 ]);
 
 export interface CoupangWingInquiryDriverOptions {
@@ -56,9 +70,10 @@ export class CoupangWingInquiryDriver {
   }
 
   /**
-   * **The value-free census.** Counts rows, counts how many carry each identifier we already hold, counts how
-   * many say each fixed platform word. Safe to run at any point: there is no terminal here that returns text,
-   * so there is nothing for a confirmation to gate beyond the run grant itself.
+   * **The value-free anchor probe.** Finds where each identifier we already hold lands in the page's
+   * structural attributes, measures the repeating structure around it, and counts each fixed platform literal.
+   * Safe to run at any point: there is no terminal here that returns text, so there is nothing for a
+   * confirmation to gate beyond the run grant itself.
    */
   async censusInquiryList(
     digits: readonly InquiryDigitExpectation[],
@@ -74,12 +89,10 @@ export class CoupangWingInquiryDriver {
     // could print a row, so could the census, and neither may.
     log("aw_coupang_inquiry_census", {
       reason: census.reason,
-      containerKind: census.containerKind,
-      rowsScanned: census.rowsScanned,
-      rowCounts: `${census.rowCounts.table}/${census.rowCounts.list}/${census.rowCounts.grid}`,
-      rowsWithDigits: census.rowsWithDigits,
-      matches: census.digitMatches.map((m) => `${m.id}=${m.rowMatchCount}`),
-      labels: census.labelCounts.map((l) => `${l.id}=${l.rowCount}`),
+      elementsScanned: census.elementsScanned,
+      elementsWithAnchorAttributes: census.elementsWithAnchorAttributes,
+      matches: census.anchors.map((m) => `${m.id}=${m.matchCount}`),
+      labels: census.labelCounts.map((l) => `${l.id}=${l.elementCount}`),
     });
     return census;
   }

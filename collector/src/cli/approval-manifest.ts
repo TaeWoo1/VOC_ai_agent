@@ -244,16 +244,18 @@ export const APPROVAL_ACTIONS = [
   // boolean, and it is required rather than convenient: a locator that resolves to an EMPTY cell has not found
   // the key, and a calibration that cannot tell those apart would certify a locator that reads nothing. No
   // length, no character class, no prefix, and no value.
-  // Read-only INQUIRY-LIST census: how the 고객문의 rows are arranged (a container enum), how many there are,
-  // how many carry a machine-readable digit run at all, and how many offer a way into a detail view. It reads
-  // row text in exactly ONE place — an `indexOf` against a fixed PLATFORM word WE supply (`답변완료` /
-  // `미답변`) — and reduces it to a boolean inside the page. A buyer's words never cross the boundary, and
-  // there is no terminal here that could return them.
+  // Read-only INQUIRY-SCREEN structure: how many elements the screen holds, how many carry a machine-readable
+  // number in a STRUCTURAL attribute (`href` / `id` / `data-*` — nothing else is looked at), the repeating
+  // structure around a resolved anchor (tag names, sibling counts, class-token counts, detail affordance), and
+  // how many leaf elements carry each fixed PLATFORM status word WE supply. Text is compared in exactly one
+  // place — an `indexOf` against those literals, reduced to a boolean inside the page. **Buyer text never
+  // leaves the page**, and there is no terminal here that could return it.
   "MEASURE_INQUIRY_LIST_STRUCTURE",
   // Read-only TARGET MATCH COUNT: for a digit string SellerOps already holds (the channel's own inquiryId, the
-  // seller's own productId), how many rows carry it as a WHOLE digit run, plus — only when exactly one does —
-  // the NAMES of the attributes it was found in. The identifiers are ours and travel INTO the page; what comes
-  // back is a count. Zero and two are both refusals: "the one inquiry" may never degrade into "some inquiry".
+  // seller's own productId), how many elements carry it as a WHOLE digit run in an allowlisted attribute, plus
+  // — only when exactly one does — the KIND of attribute it was found in. The identifiers are ours and travel
+  // INTO the page; what comes back is a count. Attribute VALUES never cross. Zero and two are both refusals:
+  // "the one inquiry" may never degrade into "some inquiry".
   "COUNT_INQUIRY_TARGET_MATCHES",
   "MEASURE_CREDENTIAL_CELL_STRUCTURE",
   // **Read the credential VALUES.** ONE in-page read of 업체코드 / Access Key / Secret Key, taken only after a
@@ -1333,13 +1335,21 @@ export const COUPANG_WING_CREDENTIAL_CALIBRATION_SCOPE = Object.freeze({
   maxActions: "1 sanitized structural census of the credential cells (0 clicks, 0 inputs, 0 value reads)",
 });
 
+/**
+ * **The disclosure is precise about text, not flattering.** An earlier version of this scope said
+ * "0 buyer-text reads". The probe does compare page text — against fixed platform literals we supply, on leaf
+ * elements, reduced to a boolean inside the page — so the true claim is that buyer text never LEAVES the page.
+ * An operator approving a screen full of customers' questions is owed the accurate sentence, and a claim that
+ * overstates the boundary is the kind that quietly stops being true.
+ */
 export const COUPANG_WING_INQUIRY_LIST_CALIBRATION_SCOPE = Object.freeze({
   operation:
-    "WING 고객문의 list structure calibration (agent counts how the inquiry rows are arranged, whether a row " +
-    "carries an identifier SellerOps can target, and how many rows are answered vs unanswered; it reads no " +
-    "buyer text, and performs no click/input/navigation)",
+    "WING 고객문의 anchor + topology calibration (agent looks for an identifier SellerOps already holds in the " +
+    "page's href / id / data-* attributes only, measures the repeating structure around it, and counts fixed " +
+    "Coupang status words; buyer text never leaves the page, and it performs no click/input/navigation)",
   maxActions:
-    "1 sanitized structural census of the 고객문의 list (0 clicks, 0 inputs, 0 replies, 0 buyer-text reads)",
+    "1 sanitized structural census of the 고객문의 screen (0 clicks, 0 inputs, 0 replies; buyer text never " +
+    "leaves the page — fixed-literal comparison only, no text returned)",
 });
 
 export const COUPANG_WING_CREDENTIAL_HANDOFF_SCOPE = Object.freeze({
