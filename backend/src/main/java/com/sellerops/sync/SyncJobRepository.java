@@ -23,9 +23,12 @@ public interface SyncJobRepository extends JpaRepository<SyncJob, UUID> {
      * Here the predicate is part of the query and {@code pageable} bounds the result after it, so
      * the newest N review imports are the newest N review imports.
      *
-     * <p><b>The predicate is exact, not heuristic.</b> {@code FileUploadConnector} is the only writer
-     * that sets {@code uploadType} at all, so {@code jobType='FILE_UPLOAD' AND uploadType='REVIEW'}
-     * selects precisely the file/export review imports and nothing else. It deliberately does NOT
+     * <p><b>The predicate is exact, not heuristic.</b> Only two writers set {@code uploadType} at all —
+     * {@code FileUploadConnector} ({@code jobType='FILE_UPLOAD'}) and {@code AgentReviewHandoffService}
+     * ({@code jobType='AGENT_HANDOFF'}, the Coupang WING screen read) — so this pair selects precisely the
+     * review imports and nothing else. The agent handoff belongs here for the reason the upload does: the
+     * seller asking "did my review import work" does not distinguish a file from a screen, and a history that
+     * showed one and hid the other would answer that question wrongly. It deliberately does NOT
      * filter on {@code dataType} or {@code sellerAccountId}: an upload carries {@code null} for both
      * (see {@code FileUploadConnector.uploadDescriptor}), which is exactly why the existing
      * run-history filters cannot see uploads.
@@ -44,7 +47,8 @@ public interface SyncJobRepository extends JpaRepository<SyncJob, UUID> {
      */
     @Query("""
             select j from SyncJob j
-            where j.orgId = :orgId and j.jobType = 'FILE_UPLOAD' and j.uploadType = 'REVIEW'
+            where j.orgId = :orgId and j.jobType in ('FILE_UPLOAD', 'AGENT_HANDOFF')
+              and j.uploadType = 'REVIEW'
             order by coalesce(j.finishedAt, j.createdAt) desc, j.id desc
             """)
     List<SyncJob> findReviewImports(@Param("orgId") UUID orgId, Pageable pageable);

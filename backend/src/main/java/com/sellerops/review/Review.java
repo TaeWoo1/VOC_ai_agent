@@ -65,6 +65,16 @@ public class Review extends BaseEntity {
     @Column(name = "reply_state", nullable = false)
     private ReviewReplyState replyState = ReviewReplyState.UNKNOWN;
 
+    /** The purchased option the review is about (Coupang 옵션ID / vendorItemId). Catalog identity, never a
+     *  buyer; null for sources with no option concept. Deliberately NOT part of {@code content_hash} — see
+     *  {@code V37__review_source_option_and_media.sql}. */
+    @Column(name = "source_option_id")
+    private String sourceOptionId;
+
+    /** Photos/videos on the review itself, never the product thumbnail beside it. 0 when unreported. */
+    @Column(name = "media_count", nullable = false)
+    private int mediaCount;
+
     /** When the channel says the reply was posted. Date-granular (the shared DateParse path
      *  quantises to UTC start-of-day) and diagnostic only — nothing gates on it. */
     @Column(name = "replied_at")

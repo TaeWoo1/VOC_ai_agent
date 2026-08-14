@@ -19,7 +19,9 @@ public record CanonicalReview(
         String externalId,
         int sourceRow,
         ReviewReplyState replyState,
-        Instant repliedAt) {
+        Instant repliedAt,
+        String sourceOptionId,
+        int mediaCount) {
 
     /**
      * A source that carries no reply statement. Kept so every connector and test that predates
@@ -30,5 +32,17 @@ public record CanonicalReview(
                            Instant receivedAt, String externalId, int sourceRow) {
         this(productName, sku, rating, body, receivedAt, externalId, sourceRow,
                 ReviewReplyState.UNKNOWN, null);
+    }
+
+    /**
+     * A source that reports a reply state but no purchased option and no review media — every source
+     * that predates Coupang WING acquisition. Same reasoning as the overload above: the absence is the
+     * default, so it is written once here rather than as two more literals at each call site.
+     */
+    public CanonicalReview(String productName, String sku, Integer rating, String body,
+                           Instant receivedAt, String externalId, int sourceRow,
+                           ReviewReplyState replyState, Instant repliedAt) {
+        this(productName, sku, rating, body, receivedAt, externalId, sourceRow, replyState, repliedAt,
+                null, 0);
     }
 }

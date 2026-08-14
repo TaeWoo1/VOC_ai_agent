@@ -1,0 +1,22 @@
+-- Coupang WING 상품평 acquisition: the two source facts a review row carries that the canonical
+-- review store had nowhere to put.
+--
+-- source_option_id — Coupang's 옵션ID (vendorItemId), the purchased option a 상품평 is written about.
+--   It is catalog identity, never a buyer. It is NOT folded into content_hash: the column prints it on
+--   some rows and not others, and a dedup key that changes when a cell renders differently would make a
+--   re-read of the same review look like a new one. Nullable, and stays null wherever a source has no
+--   option concept.
+--
+-- media_count — how many photos/videos the review itself carries, counted inside the review body cell
+--   only. The product thumbnail every row shows is not review media, and a row-wide count would have
+--   reported that every review has a photo. Zero (not null) is the honest default for a source that
+--   does not report media at all.
+--
+-- Additive only, no drops, no backfill: every existing review keeps null / 0, which is exactly what is
+-- true of them. IF NOT EXISTS keeps re-runs and partial applies safe.
+--
+-- What is deliberately NOT here: any column that could hold a review author. Coupang's 상품평 screen
+-- prints the buyer's name next to every review, the acquisition path resolves that column so it can
+-- refuse to read it, and there is no field on this table for the value to land in.
+alter table reviews add column if not exists source_option_id varchar(64);
+alter table reviews add column if not exists media_count integer not null default 0;

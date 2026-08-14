@@ -126,6 +126,11 @@ public class IngestionService {
                 entity.setDedupKeyVersion(keyVersion);
                 entity.setReplyState(row.replyState());
                 entity.setRepliedAt(row.repliedAt());
+                // Source facts, written on INSERT only. They are not part of any dedup key, so a duplicate
+                // must not be able to rewrite them either — see refreshReplyState for why a re-import is
+                // deliberately allowed to change reply state and nothing else.
+                entity.setSourceOptionId(row.sourceOptionId());
+                entity.setMediaCount(row.mediaCount());
                 trySave(tally, row.sourceRow(),
                         () -> reviews.save(entity).getId(),
                         () -> existsReview(orgId, channelId, hasExternal, row.externalId(), hash));
