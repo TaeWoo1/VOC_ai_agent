@@ -5,7 +5,10 @@
 
 **Verdict: `POLICY_UNCLEAR`.** Not because the documents were not read. They were read, in full, and the
 answer is that Coupang's rules do not address this. No clause permits it. No clause squarely prohibits it.
-Three clauses reach it obliquely, and one of them lands on code SellerOps has **already shipped**.
+Three clauses reach it obliquely.
+
+**Development posture: `PILOT_ALLOWED`. GA: `POLICY_GATED`** (§6, product-owner decision 2026-08-14).
+`UNCLEAR` is not used as a blocker on building; it is used as a blocker on releasing.
 
 This unit did no coding and no live calibration, as scoped.
 
@@ -133,6 +136,11 @@ operational persistence.
 discovery about a future feature. It is listed in §5 as question Q4 and tracked as its own task; it is *not*
 a reason to rip out working INQUIRY code today, and it is *not* something to leave undocumented.
 
+> **Scope correction (product owner, 2026-08-14).** §5③ governs *data provided through the API service*.
+> **REVIEW is not an API path** — Coupang publishes no review endpoint, which is why this whole workstream
+> exists. So §5③ does **not** reach the WING review pilot. Q4 survives as an INQUIRY-only question, and it
+> does not gate review development.
+
 ---
 
 ## 5. What to ask Coupang
@@ -188,52 +196,71 @@ consent — see §6.
 
 ---
 
-## 6. What may be built before an answer, and what may not
+## 6. The development posture — `PILOT_ALLOWED`, GA `POLICY_GATED`
 
-### 6.1 Permitted now
+**Product-owner decision, 2026-08-14.** `POLICY_UNCLEAR` stands, but **it is not used as a blocker on
+technical development.** The reasoning on the record:
 
-- **Offline work only**: contracts, schemas, sanitizers, dedupe-key design, parsers exercised against
-  synthetic fixtures, and tests. None of it touches a live account.
-- **The four structural questions** left open by `coupang_review_feasibility_v1.md` §12 may be *designed for*
-  — but the live sitting that answers them is **not** permitted until Q1 returns. Reading the screen is the
-  very act in question.
-- Documentation and this gate.
+- §5③ governs API-provided data, and REVIEW is not an API path (§4 scope correction).
+- No explicit permission *or* prohibition of seller-owned WING `READ_ONLY` review automation has been found.
+- Commercial services (CREMA, ReviewAid) offer Coupang review back-fill, scheduled sync, and migration to a
+  seller's own mall. **This is market precedent, not permission.** It is recorded because pretending not to
+  know it would be dishonest, and it carries **zero evidentiary weight** on the policy axis — the standing
+  rule that the existence of third-party crawlers is never an argument for allowance is unchanged.
 
-### 6.2 Not permitted before an answer
+So: **build it, pilot it, do not GA it.** The gate moved from "may we write code" to "may we release".
 
-- Any live WING review run, including a `READ_ONLY` calibration sitting.
-- Any storage of Coupang review data, real or trial.
-- Any scheduled or repeating acquisition.
-- Public product-page access, which stays excluded independently of all of the above.
+### 6.1 Data minimization — binding for the pilot
 
-### 6.3 Release gate
+These are not aspirations. They are the shape of the pilot, and each is enforced by a test rather than by
+intention:
 
-Coupang REVIEW may not ship unless **all** of these hold:
+| # | Constraint |
+|---|---|
+| **D1** | **Seller-owned WING only.** The seller's own account, their own products. |
+| **D2** | **No public product-page access.** Excluded as a path, permanently and independently. |
+| **D3** | **No author collection or storage** — 구매자 ID, nickname, masked ID, or any author-derived value. Not stored, not logged, not used in a dedupe key. |
+| **D4** | **No raw HTML, DOM, screenshots.** The value-free census discipline from the three discovery sittings carries forward. |
+| **D5** | **No permanent storage of review body text in this unit.** Metadata and dedupe structure only. |
+| **D6** | **No transmission to external LLMs.** |
+| **D7** | **Metadata and dedupe structure only** — rating, date, product identifiers, the review identifier, media indicators. |
 
-1. **G1 — Written answer.** Q1 and Q2 answered in writing by Coupang, permitting seller-owned READ_ONLY
-   reading *and* seller-side storage. **A non-answer is a `DISALLOWED` for release purposes.**
+**D5 is the one that shapes the product.** A VOC/analysis channel that may not keep review text is, for now,
+a *change-detection and volume* channel: it can tell a seller that ratings moved, which product, when, and
+how many — not what the reviews said. That is a real and useful thing, and it is smaller than "VOC 분석".
+Naming that gap now is cheaper than discovering it in a demo. Lifting D5 is a separate decision, not a
+detail of implementation.
+
+### 6.2 GA release gate
+
+The pilot may run. **Coupang REVIEW may not go GA** unless all of these hold:
+
+1. **G1 — Written answer.** Q1 and Q2 answered in writing by Coupang. **A non-answer is a `DISALLOWED` for
+   GA purposes.**
 2. **G2 — Current text.** The clauses in §2–§4 re-verified against the terms then in force in WING, not
    against the 2023 snapshot this document rests on.
-3. **G3 — Zero buyer identifiers.** No 구매자 ID, nickname, masked ID, or author-derived value is stored,
-   logged, or used in a dedupe key — enforced by a test, not by intention. This holds *regardless* of what
-   Coupang answers, because §13② shows Coupang retires those identifiers on purpose.
-4. **G4 — Seller-scoped and non-redistributable.** Review data is visible only to the seller whose account
-   produced it. No cross-seller aggregation, no external publication. §2②6 of the 상품평 운영정책 shows
-   Coupang treats republication of reviews as its own right to license — so we take none of it.
+3. **G3 — Zero buyer identifiers** (= D3), permanently. This holds *regardless* of what Coupang answers,
+   because §13② shows Coupang retires those identifiers on purpose.
+4. **G4 — Seller-scoped and non-redistributable.** Visible only to the seller whose account produced it. No
+   cross-seller aggregation, no external publication. §2②6 of the 상품평 운영정책 shows Coupang treats
+   republication of reviews as its own right to license — so we take none of it.
 5. **G5 — Seller consent is explicit and revocable**, and revocation deletes the stored corpus.
+6. **G6 — Any relaxation of D5** (storing review body text) is decided explicitly and separately, and is
+   itself gated on G1.
 
-If G1 fails, the honest product outcome is not "ship it quietly". It is that Coupang REVIEW stays
-**unsupported**, and the roadmap says so.
+If G1 fails, the honest outcome is not "ship it quietly". Coupang REVIEW stays a pilot, and the roadmap
+says so.
 
 ---
 
-## 7. Three axes
+## 7. The axes
 
 | Axis | State | Basis |
 |---|---|---|
-| **TECHNICALLY_POSSIBLE** | **CONDITIONAL_YES** | unchanged — three live sittings, `docs/coupang_review_feasibility_v1.md` |
+| **TECHNICALLY_POSSIBLE** | **CONDITIONAL_YES** | three live sittings, `docs/coupang_review_feasibility_v1.md` |
 | **POLICY** | **UNCLEAR** | §14 read and silent; three clauses reach obliquely; no permission anywhere. §5 is the enquiry that would resolve it |
-| **PRODUCT_RECOMMENDED** | **not yet** | gated on G1–G5. The feature is designable now and shippable only after |
+| **DEVELOPMENT** | **PILOT_ALLOWED** | product-owner decision, §6. Bounded by D1–D7 |
+| **GA_RELEASE** | **POLICY_GATED** | G1–G6, §6.2 |
 
 `docs/multi-channel-connector-roadmap.md` §4.1 keeps Coupang REVIEW at **BLOCKED**, and the connector's
 `REVIEW_API` stays an honest `unsupportedScope`. Nothing here promotes anything.
@@ -242,9 +269,11 @@ If G1 fails, the honest product outcome is not "ship it quietly". It is that Cou
 
 ## 8. Classification of every unresolved point
 
-- **Repository-verifiable:** whether stored INQUIRY data can be scoped or retained differently (§4, Q4).
+- **Repository-verifiable:** whether stored INQUIRY data can be scoped or retained differently (§4, Q4 —
+  INQUIRY only; it does not gate review work).
 - **External-research required:** the current text of the seller terms and 서비스 이용 정책 (G2) — behind a
   WING login, so an operator task.
-- **Product-owner decision:** whether to send the §5 enquiry at all, and whether to build the offline
-  slice under §6.1 while it is pending.
+- **Product-owner decision — settled 2026-08-14:** development posture is `PILOT_ALLOWED` under D1–D7.
+  **Still open:** whether to send the §5 enquiry, and when to revisit **D5** (review body text), which is
+  what separates a change-detection channel from a VOC-analysis one.
 - **Coupang decision:** Q1–Q5. Nobody else can answer these, and no amount of further reading will.

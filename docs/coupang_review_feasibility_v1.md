@@ -413,9 +413,9 @@ established a right to collect, and structure alone promotes nothing.
 
 ### What the next unit closes, in ONE sitting
 
-Gated on the policy answer — now specifically on **G1** of `docs/coupang_review_policy_gate_v1.md` §6.3.
-Until Coupang answers in writing, the sitting below **may not run**: reading the screen is the very act in
-question. The four questions may be designed for, not measured.
+**Cleared to run.** `docs/coupang_review_policy_gate_v1.md` §6 sets development to `PILOT_ALLOWED`; the
+policy answer gates **GA**, not the sitting. The sitting is bounded by the data-minimization contract
+D1–D7 — in particular **no author values and no review body text**.
 
 1. **Why the 10-digit identifier covers only 7 of 10 rows** — a different review type, a deleted one, or an
    id only some rows expose.
