@@ -396,7 +396,7 @@ a reported `bestCoverage`, and this reading is `IDENTIFIER_PARTIAL` at **0.7**.
 | Axis | State |
 |---|---|
 | **TECHNICALLY_POSSIBLE** | **CONDITIONAL_YES** — the review row is resolved and a per-review identifier exists; two gaps named below |
-| **POLICY** | **UNCLEAR** — 마켓플레이스 판매이용약관 §14 verbatim is still unread. Unchanged by any measurement here, and it is what gates the next unit. |
+| **POLICY** | **UNCLEAR** — §14 has since been read and is *silent* on automation; the real exposure is in the 저장·가공 clauses. See `docs/coupang_review_policy_gate_v1.md`, which supersedes this row. |
 | **PRODUCT** | **review acquisition + VOC/analysis channel.** Not a reply channel — WING offers sellers no way to answer a 상품평. |
 
 Settled and not revisited:
@@ -413,7 +413,9 @@ established a right to collect, and structure alone promotes nothing.
 
 ### What the next unit closes, in ONE sitting
 
-Gated on the policy answer. If §14 permits a seller reading their own screen:
+Gated on the policy answer — now specifically on **G1** of `docs/coupang_review_policy_gate_v1.md` §6.3.
+Until Coupang answers in writing, the sitting below **may not run**: reading the screen is the very act in
+question. The four questions may be designed for, not measured.
 
 1. **Why the 10-digit identifier covers only 7 of 10 rows** — a different review type, a deleted one, or an
    id only some rows expose.

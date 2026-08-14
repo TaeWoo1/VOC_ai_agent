@@ -1,0 +1,250 @@
+# Coupang WING Review — Policy Gate v1
+
+**Question.** May SellerOps, under a seller's explicit connection, read that seller's own WING 상품평 screen
+`READ_ONLY` on a schedule, store what it reads, and analyse it as VOC — as a shipped product feature?
+
+**Verdict: `POLICY_UNCLEAR`.** Not because the documents were not read. They were read, in full, and the
+answer is that Coupang's rules do not address this. No clause permits it. No clause squarely prohibits it.
+Three clauses reach it obliquely, and one of them lands on code SellerOps has **already shipped**.
+
+This unit did no coding and no live calibration, as scoped.
+
+---
+
+## 1. What was read, and how
+
+Coupang's own hosts refuse automated fetches (`coupang.com` → HTTP 403, `helpseller.coupangcorp.com` → 403).
+**The bot filter was not defeated.** Spoofing headers to get past an access control is the class of thing this
+repo forbids, and doing it *to read the rules about automated access* would be self-refuting.
+
+The primary text was taken instead from the Internet Archive's dated snapshots of Coupang's own pages — the
+same words Coupang published, with a timestamp attached, which is a stronger citation than a live fetch.
+
+| Document | Snapshot | Version stamped in the document |
+|---|---|---|
+| 쿠팡 판매이용약관 (공통 · 마켓플레이스 · **오픈 API** · 풀필먼트) | 2023-08-07 | — |
+| 쿠팡 이용약관 (회원) | 2025-12-01 | 2024-11-05 시행 |
+| 쿠팡 서비스 이용 정책 | 2023-08-07 | 2018-09-07 |
+| 상품평 · 상품문의 · 판매자평 운영정책 | 2023-08-07 | 2022-08-05 |
+
+> **Staleness is a real limitation.** The seller terms snapshot is from 2023; Coupang has revised its terms
+> since (a revision effective **2026-09-03** is known). Every clause below must be re-checked against the
+> current text in WING before anything ships. That re-check is part of the gate in §6, and it is an
+> operator task — the current text sits behind a login.
+
+**Absence was established by counting, not by failing to find.** Keyword census over the entire seller-terms
+document:
+
+| term | hits | what they were |
+|---|---|---|
+| 스파이더 / 스크레이퍼 / 자동화 / 매크로 / 정보처리시스템 / 외부 프로그램 | **0** | — |
+| 로봇 | 6 | all in the site's product-category nav (`로봇/작동완구`) |
+| 크롤 | 1 | the word `스크롤` in a UI hint |
+
+The seller terms contain no automation vocabulary at all.
+
+---
+
+## 2. 마켓플레이스 §14 — the gate the last unit named, and it is the wrong gate
+
+`docs/coupang_review_feasibility_v1.md` §12 left the policy axis open pending "마켓플레이스 판매이용약관 §14
+verbatim". It has now been read. **제14조 (금지행위)** lists 31 prohibited acts, and every one of them is
+about *selling conduct*: 허위 구매, 중복 등록, 카테고리 위반, 불공정 키워드, 허위 배송 정보, 선불전자지급수단
+관련 행위, 불성실한 고객대응.
+
+Nothing about automation, collection, storage, or external programs. The only item with any reach is the
+catch-all:
+
+> 31. 회사 또는 쿠팡의 일상 업무를 방해하거나 방해할 수 있는 기타 행위 .
+
+A paced `READ_ONLY` read of one's own screen does not obviously 방해 anything — and "does not obviously" is
+not permission.
+
+**So §14 is silent, and the last unit was watching the wrong door.** The exposure is not in the *access*
+clauses. It is in the *keeping a copy* clauses. That reframing is the main result of this unit.
+
+---
+
+## 3. The three clauses that actually reach us
+
+### 3.1 쿠팡 서비스 이용 정책 — 시스템 부정 행위 (the closest thing to an on-point rule)
+
+> 1) 사이버몰 및 기타 회사의 정보처리시스템 ( 이하 ' 사이버몰등 ') 에 회사가 제공하지 않은 비정상적인 방법으로
+> 접근하거나 이용하는 행위
+> …
+> 3) 회사가 게시한 정보를 무단으로 복제하거나 위조 · 변조하는 행위
+
+WING is "기타 회사의 정보처리시스템". Item 1 is the access question; item 3 is the storage question, and item
+3 is the sharper of the two — a stored review corpus *is* 복제 of 회사가 게시한 정보, and 무단 unless Coupang
+says otherwise.
+
+**But the scoping cuts the other way.** This table is introduced as "쿠팡이용약관 제12조 제2항에 따라 금지되는
+**회원**의 행위" and its enforcement list is 회원 자격 조치. The policy's preamble covers 회원 *and* 판매자, so
+the document is not cleanly one or the other. It was written about buyers abusing 사이버몰; its words are wide
+enough to reach a seller reading WING. **Which of those governs is exactly what Coupang has to answer.**
+
+### 3.2 공통 판매이용약관 §14 (비밀유지) — VOC analysis is, on the text, 가공
+
+> ① 이용자는 서비스 사용 중 자신이 인지하거나 취득한 회사 또는 서비스에 관한 어떠한 정보 ( 구매자 정보 등
+> 서비스 이용과 관련하여 취득한 개인정보보호법상 개인정보 및 회사의 기술 및 사업정보 … ( 이하 총칭하여
+> "기밀정보" ) 도 본 약관의 이행 , 서비스의 사용 , 서비스를 통한 상품의 구매자와의 거래 수행 등을 위한 목적
+> 이외의 목적으로 사용해서는 안됩니다 .
+> ③ 이용자는 회사의 사전 서면 동의 없이 회사에 귀속된 기밀 정보를 복사 , 복제 또는 **가공**하거나 제 3 자에게
+> 제공 , 판매 , 홍보 또는 공개할 수 없으며 …
+
+Buyer information obtained through the service is 기밀정보 by this definition. §14③ forbids 복사·복제·가공 of
+it without Coupang's **prior written consent**. A VOC pipeline is, in the plainest sense of the word, 가공.
+
+The counter-argument is §14①'s purpose test: analysing your own reviews to run your own store is arguably
+"서비스의 사용 … 을 위한 목적". Genuinely arguable in both directions, which is the definition of `UNCLEAR`.
+
+### 3.3 마켓플레이스 §13 — our copy would outlive Coupang's own privacy expiry
+
+> ② 회사는 개인정보 보호를 위하여 배송 등의 목적으로 해당 판매자에게 공개된 구매자의 개인정보를 상당한
+> 기간이 경과한 후에는 비공개 처리합니다 .
+
+Coupang deliberately *retires* buyer identifiers from seller view after a period. A SellerOps-side corpus
+keeps them forever. **A stored copy defeats a privacy control Coupang built on purpose** — and it does so
+silently, which is worse than doing it loudly. This is the strongest argument for the design constraint in
+§6: store no buyer identifier at all.
+
+---
+
+## 4. A finding about code already on `main`
+
+**오픈 API 서비스 이용약관 §5③** — a document the previous units never opened:
+
+> ③ 이용자는 회사가 제공하는 서비스 이용과 관련하여 API 서비스를 통해 제공된 데이터에만 접속할 수 있으며 ,
+> API 서비스를 통해 제공된 해당 데이터를 **복제 , 저장 또는 전송할 수 없습니다** .
+
+and §6①6:
+
+> 6. 제 3 자의 동의 없이 개인정보를 수집하거나 데이터베이스 , 저장매체 등에 개인정보를 저장하는 행위 ;
+
+SellerOps **already stores Coupang INQUIRY data acquired through the official Open API** (Units 1–2, merged).
+Read literally, §5③ prohibits that.
+
+Read literally, §5③ also prohibits every ERP, OMS, and order-management integration Coupang itself promotes
+its API for — no such tool could function without storing a response. So the literal reading is almost
+certainly not the intended one, and the clause most likely aims at redistribution rather than at ordinary
+operational persistence.
+
+**We do not get to make that call for Coupang.** This is now a named open item against shipped code, not a
+discovery about a future feature. It is listed in §5 as question Q4 and tracked as its own task; it is *not*
+a reason to rip out working INQUIRY code today, and it is *not* something to leave undocumented.
+
+---
+
+## 5. What to ask Coupang
+
+Send as one enquiry (WING 판매자 문의 → 입점/제휴 or 마켓플레이스 담당). Lead with the product description so
+the questions are read in context.
+
+### 5.1 Product description to include verbatim
+
+> SellerOps는 판매자가 자신의 판매 업무를 처리하도록 돕는 커머스 운영 도구입니다. 판매자 본인이 명시적으로
+> 연결을 허용한 자신의 계정에 한해 동작하며, 다음 범위로 상품평 기능을 검토하고 있습니다.
+>
+> - 판매자 **본인 계정**의 WING 상품평 화면을, 판매자가 직접 로그인한 브라우저에서 **읽기 전용**으로 조회
+> - 조회 대상은 **판매자 자신의 상품에 달린 상품평**
+> - 저장 항목: 별점, 등록일, 상품 식별자(노출상품ID/옵션ID), 상품평 본문
+> - **저장하지 않는 항목: 구매자 ID·닉네임 등 작성자 식별정보 일체, 이미지·동영상 원본**
+> - 용도: 해당 판매자 본인에게만 제공되는 VOC 분석 및 CS 업무 지원
+> - **재배포·외부 공개·제3자 제공·광고 활용 없음**. 다른 판매자에게 제공하지 않음
+> - 공개 상품 페이지 크롤링은 하지 않음. 미공개 내부 API 호출도 하지 않음
+> - 조회 주기는 판매자당 1일 수 회 수준으로 제한하며, 쿠팡 시스템 부하를 고려해 조정 가능
+
+### 5.2 The questions, in priority order
+
+**Q1 — the actual gate.**
+판매자가 자신의 계정으로 로그인한 상태에서, 판매자 본인의 WING 상품평 화면을 소프트웨어를 이용해 읽기 전용으로
+조회하는 것이 「쿠팡 서비스 이용 정책」의 '시스템 부정 행위' 1)호(회사가 제공하지 않은 비정상적인 방법으로
+접근하거나 이용하는 행위)에 해당합니까? 해당 조항이 **판매자의 WING 이용**에도 적용됩니까, 아니면 회원의
+사이버몰 이용에만 적용됩니까?
+
+**Q2 — storage.**
+판매자가 자신의 상품에 달린 상품평(별점·등록일·본문)을 자신의 업무 시스템에 저장하여 VOC 분석에 사용하는 것이
+「쿠팡 서비스 이용 정책」 '시스템 부정 행위' 3)호(회사가 게시한 정보를 무단으로 복제) 또는 판매이용약관
+제14조 제3항(기밀정보의 복사·복제·가공)에 해당합니까? 해당한다면 제14조 제3항의 **'회사의 사전 서면 동의'**를
+받을 수 있는 절차가 있습니까?
+
+**Q3 — the sanctioned route, if there is one.**
+상품평 데이터를 판매자에게 제공하는 **공식 경로**(Open API, 공식 export, 파트너/솔루션 제휴 등)가 현재
+존재하거나 계획되어 있습니까? 있다면 그 경로의 신청 방법과 조건은 무엇입니까?
+
+**Q4 — the one about shipped code.**
+오픈 API 서비스 이용약관 제5조 제3항은 "API 서비스를 통해 제공된 데이터를 복제, 저장 또는 전송할 수 없습니다"
+라고 규정합니다. 판매자 연동 솔루션이 주문·문의 등 API 응답을 **판매자 업무 처리 목적으로 자신의 시스템에
+저장**하는 것도 이 조항의 금지 대상입니까? (ERP·주문관리 솔루션의 통상적인 연동을 포함하여 답변 부탁드립니다.)
+
+**Q5 — personal data.**
+상품평에 노출되는 구매자 ID 일부를 **저장하지 않고** 별점·등록일·본문만 저장하는 경우에도 제한이 있습니까?
+
+### 5.3 What an answer must contain to count
+
+A reply is only usable as a gate release if it is **in writing, attributable to Coupang, and answers Q1 and
+Q2 directly**. "문의 주셔서 감사합니다" is not an answer. A phone call is not an answer. Silence is not
+consent — see §6.
+
+---
+
+## 6. What may be built before an answer, and what may not
+
+### 6.1 Permitted now
+
+- **Offline work only**: contracts, schemas, sanitizers, dedupe-key design, parsers exercised against
+  synthetic fixtures, and tests. None of it touches a live account.
+- **The four structural questions** left open by `coupang_review_feasibility_v1.md` §12 may be *designed for*
+  — but the live sitting that answers them is **not** permitted until Q1 returns. Reading the screen is the
+  very act in question.
+- Documentation and this gate.
+
+### 6.2 Not permitted before an answer
+
+- Any live WING review run, including a `READ_ONLY` calibration sitting.
+- Any storage of Coupang review data, real or trial.
+- Any scheduled or repeating acquisition.
+- Public product-page access, which stays excluded independently of all of the above.
+
+### 6.3 Release gate
+
+Coupang REVIEW may not ship unless **all** of these hold:
+
+1. **G1 — Written answer.** Q1 and Q2 answered in writing by Coupang, permitting seller-owned READ_ONLY
+   reading *and* seller-side storage. **A non-answer is a `DISALLOWED` for release purposes.**
+2. **G2 — Current text.** The clauses in §2–§4 re-verified against the terms then in force in WING, not
+   against the 2023 snapshot this document rests on.
+3. **G3 — Zero buyer identifiers.** No 구매자 ID, nickname, masked ID, or author-derived value is stored,
+   logged, or used in a dedupe key — enforced by a test, not by intention. This holds *regardless* of what
+   Coupang answers, because §13② shows Coupang retires those identifiers on purpose.
+4. **G4 — Seller-scoped and non-redistributable.** Review data is visible only to the seller whose account
+   produced it. No cross-seller aggregation, no external publication. §2②6 of the 상품평 운영정책 shows
+   Coupang treats republication of reviews as its own right to license — so we take none of it.
+5. **G5 — Seller consent is explicit and revocable**, and revocation deletes the stored corpus.
+
+If G1 fails, the honest product outcome is not "ship it quietly". It is that Coupang REVIEW stays
+**unsupported**, and the roadmap says so.
+
+---
+
+## 7. Three axes
+
+| Axis | State | Basis |
+|---|---|---|
+| **TECHNICALLY_POSSIBLE** | **CONDITIONAL_YES** | unchanged — three live sittings, `docs/coupang_review_feasibility_v1.md` |
+| **POLICY** | **UNCLEAR** | §14 read and silent; three clauses reach obliquely; no permission anywhere. §5 is the enquiry that would resolve it |
+| **PRODUCT_RECOMMENDED** | **not yet** | gated on G1–G5. The feature is designable now and shippable only after |
+
+`docs/multi-channel-connector-roadmap.md` §4.1 keeps Coupang REVIEW at **BLOCKED**, and the connector's
+`REVIEW_API` stays an honest `unsupportedScope`. Nothing here promotes anything.
+
+---
+
+## 8. Classification of every unresolved point
+
+- **Repository-verifiable:** whether stored INQUIRY data can be scoped or retained differently (§4, Q4).
+- **External-research required:** the current text of the seller terms and 서비스 이용 정책 (G2) — behind a
+  WING login, so an operator task.
+- **Product-owner decision:** whether to send the §5 enquiry at all, and whether to build the offline
+  slice under §6.1 while it is pending.
+- **Coupang decision:** Q1–Q5. Nobody else can answer these, and no amount of further reading will.
