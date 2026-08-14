@@ -7,9 +7,9 @@
 >
 > - **Unit:** Coupang Review Integration Feasibility v1 → **READ_ONLY review acquisition feasibility**
 > - **Date:** 2026-08-14
-> - **Live contact:** **one sitting, 2026-08-14 — VOID.** It ran clean and returned a confident
->   `NO_IDENTIFIER` from a unit that was not a review. See §9. Nothing from it is recorded as a finding
->   about Coupang.
+> - **Live contact:** **two sittings, 2026-08-14 — both inconclusive, neither recorded as a finding about
+>   Coupang.** The first returned a confident `NO_IDENTIFIER` from a unit that was not a review (§9); the
+>   second measured the same DOM, was caught by the new container guard, and refused (§10).
 
 ---
 
@@ -293,3 +293,40 @@ These readings do not depend on which unit was resolved, so they survive:
   unestablished.
 
 `ownershipScope` is `NOT_ESTABLISHED` — no product id was supplied, so the catalog question was not asked.
+
+---
+
+## 10. The second sitting — the guard held, and the header was rendered around a `<br>`
+
+`UNDETERMINED`, `containerSuspected: true`, exit 5. Two things came out of it.
+
+**The guard proved itself on the same data.** The readings were byte-identical to the first sitting —
+`elementsScanned: 2172`, the same unit, the same six agreeing labels, the same pager. On that input the
+first version had produced a confident `NO_IDENTIFIER`; this one refused. Same input, different
+conclusion, because the guard now catches what the heuristic could not.
+
+(The two runs measuring an identical DOM 47 minutes apart is itself worth noting: the browser profile
+persists, so a re-opened window can present the previous page. Whether the second sitting saw a stale
+screen or the same screen freshly is not something the probe can tell.)
+
+**The column was not found, and the reason was the markup.** WING renders that header as:
+
+```html
+<th ... class="... normal-col" style="width: 128px;">
+  <div class="text-wrapper">노출상품ID <br> (옵션ID)</div>
+</th>
+```
+
+The probe scanned only *leaves* — elements with no element children — and the `<br>` makes that `div` a
+non-leaf. So the one element that prints the words was never tested against them, while its normalised
+text is **exactly** the literal the run was looking for. `HEADER_NOT_FOUND` on a column that was on the
+screen the whole time.
+
+The fix is a predicate, not a special case: an element **prints text** when no element child of it carries
+any. A `<br>` is not a child that carries text; a `<td>` inside a `<tr>` is. That keeps hits textually
+innermost — which is all the leaf rule was ever for — and it now governs every text scan the review probe
+makes, since the same rendering would have hidden a rating, a date, or a control just as easily.
+
+It is defined in the review probe rather than in the shared primitives **on purpose**: the 고객문의 probe
+is live-proven against the leaf rule, and widening a predicate underneath a proven measurement is how a
+proof quietly stops meaning what it said.

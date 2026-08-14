@@ -46,6 +46,42 @@ import { CENSUS_PRIMITIVES_FRAGMENT } from "./wing-census-primitives";
 const REVIEW_FRAGMENT = `
   var MAX_UNITS = 200;
   var MAX_UNIT_NODES = 400;
+  /* **What counts as an element that PRINTS text.**
+     The primitives call an element a leaf when it has no element children at all, and on the real WING
+     상품평 header that rule reported
+     HEADER_NOT_FOUND for a column that was plainly on screen. The header is rendered
+       <th><div class="text-wrapper">노출상품ID <br> (옵션ID)</div></th>
+     and the <br> makes that div a non-leaf, so nothing was ever tested against it — while its normalised text
+     is exactly the literal we were looking for.
+     So an element prints text when no element child of it carries any. A <br> is not a child that carries
+     text; a <td> inside a <tr> is. That keeps hits textually innermost, which is what the leaf rule was for.
+     It is defined HERE rather than in the primitives on purpose: the 고객문의 probe is live-proven against the
+     leaf rule, and widening a predicate underneath a proven measurement is how a proof stops meaning what it
+     said. */
+  function printsText(el) {
+    var kids = el.children;
+    if (!kids || kids.length === 0) { return true; }
+    for (var i = 0; i < kids.length; i++) {
+      if (textOf(kids[i]).length > 0) { return false; }
+    }
+    return true;
+  }
+  /* The review probe's own text-leaf scans, on that predicate. */
+  function textLeavesOf(all) {
+    var out = [];
+    for (var i = 0; i < all.length; i++) {
+      if (printsText(all[i]) && paints(all[i])) { out.push(all[i]); }
+    }
+    return out;
+  }
+  function reviewLabelHits(all, literal) {
+    var out = [];
+    for (var i = 0; i < all.length; i++) {
+      if (!printsText(all[i])) { continue; }
+      if (textOf(all[i]).indexOf(literal) >= 0) { out.push(all[i]); }
+    }
+    return out;
+  }
   /* THE STRUCTURE ATTRIBUTE ALLOWLIST — read only as described, never returned. */
   function attrEquals(el, name, literal) {
     if (!el.getAttribute) { return false; }
@@ -81,7 +117,7 @@ const REVIEW_FRAGMENT = `
   function controlHits(all, literal) {
     var interactive = [], statics = [];
     for (var i = 0; i < all.length; i++) {
-      if (all[i].childElementCount !== 0) { continue; }
+      if (!printsText(all[i])) { continue; }
       if (textOf(all[i]).indexOf(literal) < 0) { continue; }
       var ctrl = interactiveAt(all[i]);
       if (ctrl) { if (interactive.indexOf(ctrl) < 0) { interactive.push(ctrl); } }
@@ -120,7 +156,7 @@ const REVIEW_FRAGMENT = `
   function hasShapeEvidence(unit, regexes) {
     var nodes = within(unit);
     for (var i = 0; i < nodes.length; i++) {
-      if (nodes[i].childElementCount !== 0) { continue; }
+      if (!printsText(nodes[i])) { continue; }
       var t = textOf(nodes[i]);
       for (var r = 0; r < regexes.length; r++) { if (regexes[r] && regexes[r].test(t)) { return true; } }
     }
@@ -183,12 +219,16 @@ const REVIEW_FRAGMENT = `
      Column scope is a SAFETY property, not a convenience: other columns hold digit runs too, and matching a
      catalog id against one of those would attribute a review to the wrong product. */
   function columnProbe(all, HEADERS, DIGITS) {
-    var leaves = leavesOf(all), i, j;
+    var leaves = textLeavesOf(all), i, j;
     var headerHits = [], headerId = null;
     for (j = 0; j < HEADERS.length && headerHits.length === 0; j++) {
-      for (i = 0; i < leaves.length; i++) {
-        if (textOf(leaves[i]).indexOf(HEADERS[j].exactText) >= 0) { headerHits.push(leaves[i]); }
+      var found = [];
+      for (i = 0; i < all.length; i++) {
+        if (!printsText(all[i])) { continue; }
+        if (textOf(all[i]).indexOf(HEADERS[j].exactText) >= 0) { found.push(all[i]); }
       }
+      /* Innermost, so an ancestor that merely contains the header is not a second hit. */
+      headerHits = innermost(found);
       if (headerHits.length > 0) { headerId = HEADERS[j].id; }
     }
     if (headerHits.length === 0) { return { reason: 'HEADER_NOT_FOUND', cells: [] }; }
@@ -333,7 +373,7 @@ const REVIEW_FRAGMENT = `
       for (var r = 0; r < runs.length; r++) {
         for (var d = 0; d < DIGITS.length; d++) { if (runs[r].digits === DIGITS[d].digits) { return true; } }
       }
-      if (nodes[i].childElementCount !== 0) { continue; }
+      if (!printsText(nodes[i])) { continue; }
       var printed = textDigitRuns(nodes[i]);
       for (var p = 0; p < printed.length; p++) {
         for (var e = 0; e < DIGITS.length; e++) { if (printed[p] === DIGITS[e].digits) { return true; } }
@@ -343,7 +383,7 @@ const REVIEW_FRAGMENT = `
   }
   function printedLengthsOf(nodes, seen, out) {
     for (var i = 0; i < nodes.length; i++) {
-      if (nodes[i].childElementCount !== 0) { continue; }
+      if (!printsText(nodes[i])) { continue; }
       var runs = textDigitRuns(nodes[i]);
       for (var r = 0; r < runs.length; r++) {
         var len = runs[r].length;
@@ -359,7 +399,7 @@ const REVIEW_FRAGMENT = `
       var tag = String(all[i].tagName || '').toUpperCase();
       if (tag === 'INPUT' && attrEquals(all[i], 'type', 'date')) { dateInputs++; }
       if (tag === 'SELECT') { selects++; }
-      if (all[i].childElementCount === 0 && /^[0-9]{1,3}$/.test(textOf(all[i]))) { pagerLeaves.push(all[i]); }
+      if (printsText(all[i]) && /^[0-9]{1,3}$/.test(textOf(all[i]))) { pagerLeaves.push(all[i]); }
     }
     /* A page number is only a pager when it repeats with its neighbours; a lone '3' is a quantity. */
     var shared = commonRepeat(pagerLeaves);
@@ -412,7 +452,7 @@ const REVIEW_FRAGMENT = `
 
     var hitLists = [], labelCounts = [];
     for (j = 0; j < LABELS.length; j++) {
-      var hits = labelHits(all, LABELS[j].exactText);
+      var hits = reviewLabelHits(all, LABELS[j].exactText);
       hitLists.push(hits);
       var shared = commonRepeat(hits);
       labelCounts.push({
@@ -460,7 +500,7 @@ const REVIEW_FRAGMENT = `
         for (var ar = 0; ar < aruns.length; ar++) {
           tallyRuns(idTally, 'ATTRIBUTE', aruns[ar].digits.length, aruns[ar].digits, i);
         }
-        if (nodes[d].childElementCount !== 0) { continue; }
+        if (!printsText(nodes[d])) { continue; }
         var pruns = textDigitRuns(nodes[d]);
         for (var pr = 0; pr < pruns.length; pr++) {
           tallyRuns(idTally, 'PRINTED', pruns[pr].length, pruns[pr], i);
@@ -492,7 +532,7 @@ const REVIEW_FRAGMENT = `
       var leafCount = 0, inUnit = 0;
       if (re) {
         for (i = 0; i < all.length; i++) {
-          if (all[i].childElementCount !== 0) { continue; }
+          if (!printsText(all[i])) { continue; }
           if (!re.test(textOf(all[i]))) { continue; }
           leafCount++;
           for (var u = 0; u < units.length; u++) {

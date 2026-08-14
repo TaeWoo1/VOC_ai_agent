@@ -131,7 +131,17 @@ function reviewGrid(opts: RowOptions = { id: "unique" }): El {
     el({ tag: "span", text: "작성일", box: rowBox(60, 90, 100) }),
     el({ tag: "span", text: "상품평", box: rowBox(60, 200, 100) }),
     el({ tag: "span", text: "구매자", box: rowBox(60, 310, 80) }),
-    el({ tag: "span", text: "노출상품ID (옵션ID)", box: rowBox(60, CATALOG_X.left, CATALOG_X.width) }),
+    // The header EXACTLY as WING renders it: the words are split across a <br>, so the element that prints
+    // them is not a leaf by child count. That is what made the first column probe report HEADER_NOT_FOUND.
+    el({ tag: "th", box: rowBox(60, CATALOG_X.left, CATALOG_X.width) }).add(
+      // Own text plus a text-free <br> child — the words are the div's OWN text nodes, as WING renders them.
+      el({
+        tag: "div",
+        attrs: { class: "text-wrapper" },
+        text: "노출상품ID (옵션ID)",
+        box: rowBox(60, CATALOG_X.left, CATALOG_X.width),
+      }).add(el({ tag: "br" })),
+    ),
   );
   // Only the FIRST row links a product id we hold — so the catalog-scope reading has to count units, not rows.
   const rest: RowOptions = { ...opts, productLink: false };
@@ -623,6 +633,18 @@ describe("the 노출상품ID (옵션ID) column", () => {
 
     expect(c.columnProbe.cellsMatchingOurDigits).toBe(3);
     expect(classifyOwnershipScope(c)).toBe("OUR_CATALOG_CONFIRMED");
+  });
+
+  it("**a header split across a <br> is still found** — the failure the second live sitting produced", () => {
+    // WING renders it as <th><div class="text-wrapper">노출상품ID <br> (옵션ID)</div></th>. The <br> makes that
+    // div a non-leaf by child count, so a leaf-only scan never tested the one element that prints the words —
+    // and the run reported HEADER_NOT_FOUND for a column that was plainly on screen.
+    const c = census(reviewGrid());
+
+    expect(c.columnProbe.reason).toBe("OK");
+    expect(c.columnProbe.headerId).toBe("exposedWithOption");
+    // And the element that prints the words is a single hit, not an ambiguous pair with its <th>.
+    expect(c.columnProbe.reason).not.toBe("HEADER_AMBIGUOUS");
   });
 
   it("a screen without that header falls back to field-word agreement, and says so", () => {
