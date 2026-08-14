@@ -20,6 +20,7 @@ import {
   acquisitionAsk,
   acquisitionExitCode,
   acquisitionRunGrantBinding,
+  locateAsk,
   parseAccountSlot,
   summarize,
 } from "../../src/cli/acquire-coupang-reviews";
@@ -182,6 +183,35 @@ describe("the per-page checkpoint asks for the page in front of the operator", (
     const all = [...acquisitionAsk(1).lines, acquisitionRunGrantBinding().agentDoesNot].join(" ");
 
     expect(all).toContain("SellerOps는 넘기지 않습니다");
+  });
+});
+
+describe("the highlight the phase declares is one the run actually performs", () => {
+  it("offers a locate checkpoint, so the declared action is not a manifest promising more than the run does", () => {
+    expect(CLI_SOURCE).toContain("locateAny(");
+    expect(locateAsk().title).toContain("찾기");
+  });
+
+  it("tells the operator that one match rings and zero or two ring nothing", () => {
+    const lines = locateAsk().lines.join(" ");
+
+    expect(lines).toContain("정확히 하나일 때만");
+    expect(lines).toContain("둘 이상이면 아무것도 표시하지 않습니다");
+  });
+
+  it("says the ring is a border and a scroll, and nothing else", () => {
+    expect(locateAsk().lines.join(" ")).toContain("누르거나 입력하거나 전송하지 않습니다");
+  });
+
+  it("is skippable, because the reviews are already stored by then", () => {
+    expect(locateAsk().secondary?.label).toBe("건너뛰기");
+    expect(locateAsk().lines.join(" ")).toContain("이미 저장되었습니다");
+  });
+
+  it("is offered only after a handoff that actually stored something", () => {
+    // Ringing a review to show that SellerOps "has" it, right after the handoff failed, would demonstrate
+    // something untrue.
+    expect(CLI_SOURCE).toContain("if (handoff !== null && handoff.ok && result.reviews.length > 0)");
   });
 });
 

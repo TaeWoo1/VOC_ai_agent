@@ -78,11 +78,7 @@ export class CoupangWingReviewReaderDriver {
       log("aw_coupang_review_locate", { verdict: outcome.verdict, matches: outcome.matches, rows: outcome.rowsConsidered });
       return { ...outcome, highlighted: false };
     }
-    const page = this.activePage();
-    const marked = await (page as unknown as { evaluate<T>(s: string): Promise<T> })
-      .evaluate<number>(buildReviewRowAnnotateScript(outcome.matchedRowIndex))
-      .catch(() => 0);
-    const highlighted = marked === 1;
+    const highlighted = await this.annotate(outcome.matchedRowIndex);
     log("aw_coupang_review_locate", {
       verdict: highlighted ? outcome.verdict : "NOT_ON_PAGE",
       matches: outcome.matches,
@@ -90,6 +86,46 @@ export class CoupangWingReviewReaderDriver {
       highlighted,
     });
     return highlighted ? { ...outcome, highlighted } : { ...outcome, verdict: "NOT_ON_PAGE", matchedRowIndex: null, highlighted };
+  }
+
+  /**
+   * Find the FIRST of several stored reviews that this page holds, and ring it.
+   *
+   * One read, many targets — not one read per target. Reading the page once and matching offline is not an
+   * optimisation: a per-target read would compare each target against a *different* reading of a page that can
+   * re-render between them, so a run could ring row 3 of a page that no longer looks like the one it matched.
+   *
+   * A target that is ambiguous on this page is SKIPPED rather than ringing, and the walk continues to the next
+   * one — an ambiguous match is a refusal for that review, not for the attempt. The returned outcome is the one
+   * belonging to whichever target was rung, or the last refusal when none was.
+   */
+  async locateAny(targets: readonly ReviewLocateTarget[]): Promise<ReviewLocateResult> {
+    const reading = await this.readCurrentPage();
+    let last: ReviewLocateOutcome = { verdict: "NOT_ON_PAGE", matchedRowIndex: null, rowsConsidered: reading.rows.length, matches: 0 };
+    for (const target of targets) {
+      const outcome = locateReviewOnPage(reading, target);
+      last = outcome;
+      if (outcome.verdict !== "LOCATED" || outcome.matchedRowIndex === null) continue;
+      const highlighted = await this.annotate(outcome.matchedRowIndex);
+      if (highlighted) {
+        log("aw_coupang_review_locate", { verdict: "LOCATED", matches: 1, rows: outcome.rowsConsidered, highlighted: true });
+        return { ...outcome, highlighted: true };
+      }
+      // The row the match named is no longer there — the page changed between the read and the ring. That is
+      // NOT_ON_PAGE, not a silent miss, and the next target is not tried against a page that has moved.
+      last = { ...outcome, verdict: "NOT_ON_PAGE", matchedRowIndex: null };
+      break;
+    }
+    log("aw_coupang_review_locate", { verdict: last.verdict, matches: last.matches, rows: last.rowsConsidered, highlighted: false });
+    return { ...last, highlighted: false };
+  }
+
+  private async annotate(rowIndex: number): Promise<boolean> {
+    const page = this.activePage();
+    const marked = await (page as unknown as { evaluate<T>(s: string): Promise<T> })
+      .evaluate<number>(buildReviewRowAnnotateScript(rowIndex))
+      .catch(() => 0);
+    return marked === 1;
   }
 
   /** Take the ring back off. Safe on a page that never had one. */

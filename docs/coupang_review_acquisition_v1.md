@@ -3,9 +3,11 @@
 What SellerOps stores when it reads a seller's own WING 상품평 screen, how it recognises a review it
 already has, and how it finds one again on the screen.
 
-**Status: built and proven offline. Not yet run live.** The live proof (first backfill → same-range
-re-sync → one locate) needs a fresh, seated approval and has not happened; §7 lists exactly what is
-still open. Nothing here is promoted in `docs/multi-channel-connector-roadmap.md` §4.1.
+**Status: built and proven offline; the live sitting is ready to request and has not run.** The harness
+exists (`COUPANG_WING_REVIEW_ACQUISITION` + its bootstrap/preflight pair + `acquire-coupang-reviews.ts`),
+so the proof — first backfill → same-range re-sync → one locate — needs only a fresh seated approval. §7
+lists exactly what is still open. Nothing here is promoted in
+`docs/multi-channel-connector-roadmap.md` §4.1.
 
 **Posture, unchanged from the gate:** `TECHNICALLY_POSSIBLE = CONDITIONAL_YES` / `POLICY = UNCLEAR` /
 `DEVELOPMENT = PILOT_ALLOWED` / `GA = POLICY_GATED`
@@ -136,15 +138,26 @@ outline, and a scroll: it never clicks, focuses, types, or submits.
    never met the real header row — and the two things most likely to differ from the fixture are the
    exact header words (§2's role literals are candidates, supplied generously) and whether every row's
    cell count matches the header's, which currently fails the whole read closed.
-2. **The live-run harness for acquisition does not exist yet.** There is no
-   `COUPANG_WING_REVIEW_ACQUISITION` approval phase, no bootstrap/preflight pair, and no acquisition
-   CLI. The structure-discovery harness cannot stand in: its manifest describes a run that returns no
-   text, and this one returns review bodies.
-3. **`[쿠팡에서 보기]` is not wired from the frontend.** The matching, the highlight and the target the
-   backend hands out are all built and tested; what is missing is the Action Window run that carries the
-   target to a seated window — a `REVIEW_LOCATE` run intent in `contracts/action-window/v2/`, its engine,
-   and the FE runtime. The detail page therefore renders the review and its catalog identity and offers
-   **no button**, rather than a button that does nothing.
+2. **The sitting has a harness but has never been run.** `COUPANG_WING_REVIEW_ACQUISITION` is its own
+   phase with its own bootstrap, preflight and CLI — separate from the structure discovery's, because that
+   manifest describes a run that returns no text and this one returns review bodies. One checkpoint per
+   page (the operator turns them), one handoff at the end, then an optional locate checkpoint. Every word
+   of its disclosure is pinned by a test that reads the shell files, because this workstream has twice
+   shipped a banner describing a measurement that no longer existed.
+3. **`[쿠팡에서 보기]` is not wired from the frontend.** The locate itself is built, tested, and performed
+   live: the acquisition sitting offers a locate checkpoint after the handoff and rings one stored review on
+   the operator's own screen. What is missing is the *product* entry — a button in the review detail that
+   starts that locate without a terminal.
+
+   That needs a `REVIEW_LOCATE` run intent in `contracts/action-window/v2/`, a locate engine in the
+   collector, and a backend-minted `reviewRef` so neither the review nor its target crosses the frontend —
+   the same shape `submissionRef` has. The transport already exists: the Coupang guided issuance walk is
+   FE-initiated over the bridge and is live-proven, so this is choreography rather than new plumbing.
+
+   The intent is deliberately **not** in the contract yet. An intent no runtime honors is the same defect as
+   an approval manifest declaring an action the run never performs — a promise in the shared vocabulary. It
+   lands with the slice that implements it. The detail page correspondingly renders the review and its
+   catalog identity and offers **no button**, rather than a button that does nothing.
 4. **Truncated bodies are detected, not solved.** If the list cell cuts a review off, `bodyTruncated`
    says so and the stored text is a prefix. Whether the real screen truncates is a live question.
 5. **The product SKU is Coupang's 노출상품ID with no channel prefix**, matching every other connector.

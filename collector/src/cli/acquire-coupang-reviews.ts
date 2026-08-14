@@ -175,6 +175,28 @@ export function acquisitionAsk(pageOrdinal: number): OperatorConfirmAsk {
   };
 }
 
+/**
+ * The locate checkpoint, offered once after the reviews are stored.
+ *
+ * It exists because the phase DECLARES a highlight, and a declared action a run never performs is a manifest
+ * describing more than the run does — the same defect as one describing less. It is also the only way to see,
+ * on a real screen, that a stored review can be found again on a list that carries no review id.
+ */
+export function locateAsk(): OperatorConfirmAsk {
+  return {
+    title: "저장한 상품평을 화면에서 찾기",
+    headline: "방금 저장한 상품평 중 하나가 보이는 페이지를 띄운 뒤 눌러 주세요.",
+    lines: [
+      "SellerOps가 방금 저장한 상품평을 이 화면에서 다시 찾아 그 줄에 테두리를 그립니다.",
+      "쿠팡 상품평에는 리뷰 번호가 없어서, 상품·옵션·날짜·별점·본문이 모두 일치하는 줄을 찾습니다.",
+      "일치하는 줄이 정확히 하나일 때만 표시합니다 — 없거나 둘 이상이면 아무것도 표시하지 않습니다.",
+      "테두리를 그리고 화면을 그 줄로 스크롤하는 것이 전부입니다. 누르거나 입력하거나 전송하지 않습니다.",
+      "건너뛰셔도 됩니다 — 상품평은 이미 저장되었습니다.",
+    ],
+    secondary: { label: "건너뛰기" },
+  };
+}
+
 /** Where the sitting stopped. Only `COLLECTED` reached the handoff. */
 export const ACQUISITION_STOPS = ["ABORTED_BEFORE_CHECKPOINT", "COLLECTED", "NOTHING_COLLECTED"] as const;
 export type AcquisitionStop = (typeof ACQUISITION_STOPS)[number];
@@ -376,6 +398,30 @@ async function main(): Promise<void> {
     }
     console.error(summarize(result, handoff));
     process.exitCode = acquisitionExitCode(stop, result.complete, handoff !== null && handoff.ok);
+
+    // **The locate leg.** Offered only when the reviews are actually stored — ringing a review on the screen
+    // to demonstrate that SellerOps "has" it, when the handoff had just failed, would be a demonstration of
+    // something untrue. It is offered once, it is skippable, and it changes no exit code: the sitting's result
+    // is what it collected.
+    if (handoff !== null && handoff.ok && result.reviews.length > 0) {
+      const ask = locateAsk();
+      confirmHost.announce(ask);
+      const confirmation = await confirmHost.confirm(ask);
+      if (confirmation.signal === "ready" && confirmation.choice === "primary") {
+        const targets = result.reviews.map((r) => ({
+          productId: r.productId,
+          vendorItemId: r.vendorItemId,
+          writtenOn: r.writtenOn,
+          rating: r.rating,
+          bodyFingerprint: r.bodyFingerprint,
+        }));
+        const located = await driver.locateAny(targets);
+        console.error(
+          `  locate: verdict=${located.verdict} matches=${located.matches} rows=${located.rowsConsidered} ` +
+            `highlighted=${located.highlighted}`,
+        );
+      }
+    }
   } finally {
     process.off("SIGINT", onSigint);
     process.off("SIGTERM", onSigint);
