@@ -43,9 +43,10 @@ import {
 import { humanSignalPathFor } from "../agent/local-agent-human-signal";
 import type { UserActionCategory } from "../agent/progressive-reconnect";
 import type { ConnectorOrchestratorObserver, ConnectorStartupResult } from "../connector/connector-orchestrator";
-import { createAgentBridge, type AgentActionWindowConfig, type AgentApiIssuanceConfig, type AgentCoupangIssuanceConfig, type AgentImportConfig, type AgentReplySubmissionConfig } from "../agent/agent-bridge";
+import { createAgentBridge, type AgentActionWindowConfig, type AgentApiIssuanceConfig, type AgentCoupangIssuanceConfig, type AgentImportConfig, type AgentReplySubmissionConfig, type AgentReviewLocateConfig } from "../agent/agent-bridge";
 import { IssuanceFixtureDriver } from "../action-window/api-issuance/issuance-fixture-driver";
 import { CoupangIssuanceFixtureDriver } from "../action-window/coupang-issuance/coupang-issuance-fixture-driver";
+import { ReviewLocateFixtureDriver } from "../action-window/coupang-review/review-locate-fixture-driver";
 import { LazyCoupangIssuanceDriver } from "../action-window/coupang-issuance/lazy-coupang-issuance-driver";
 import { verifyRepoIdentity } from "./repo-identity";
 import { screenWingUrl } from "./coupang-wing-classifier";
@@ -264,6 +265,16 @@ export function buildApiIssuanceConfig(): AgentApiIssuanceConfig {
 export const ACTION_WINDOW_COUPANG_ISSUANCE_FLAG = "--dev-action-window-coupang-issuance";
 
 /**
+ * **Host the review-locate carrier with a FIXTURE driver** — the frontend's development boot for
+ * `[쿠팡에서 보기]`.
+ *
+ * Never honored under `NODE_ENV=production`, and mutually exclusive with the other carriers. The product path
+ * is the gated live host (`src/cli/run-coupang-review-locate-live.ts`), which opens the seller's own window;
+ * this flag opens nothing and reads nothing.
+ */
+export const ACTION_WINDOW_REVIEW_LOCATE_FLAG = "--dev-action-window-review-locate";
+
+/**
  * **The PRODUCT path: host the guided WING walk with the REAL driver.**
  *
  * Separate from the dev flag because the difference is not a detail — one drives a fixture, the other opens the
@@ -313,6 +324,18 @@ export function coupangLiveWalkRefusal(
 export function resolveCoupangIssuanceChannel(args: readonly string[], env: NodeJS.ProcessEnv): boolean {
   if (env.NODE_ENV === "production") return false;
   return args.includes(ACTION_WINDOW_COUPANG_ISSUANCE_FLAG);
+}
+
+/**
+ * Pure gate: should the agent host the review-locate channel with a FIXTURE driver? Never under production.
+ *
+ * <p>The product path for a locate is the gated live host (`run-coupang-review-locate-live.ts`), which brings
+ * a real window. This flag exists for the frontend: a locate has four faces to build — searching, rung, not
+ * on this page, two matches — and three of them are states a real WING screen only reaches by accident.
+ */
+export function resolveReviewLocateChannel(args: readonly string[], env: NodeJS.ProcessEnv): boolean {
+  if (env.NODE_ENV === "production") return false;
+  return args.includes(ACTION_WINDOW_REVIEW_LOCATE_FLAG);
 }
 
 /**
@@ -505,6 +528,31 @@ export function buildCoupangIssuanceConfig(): AgentCoupangIssuanceConfig {
     runId: `run_${randomBytes(6).toString("hex")}`,
     channelCode: "coupang",
     createDriver: () => new CoupangIssuanceFixtureDriver(),
+  };
+}
+
+/**
+ * Build the dev review-locate carrier — a scripted fixture driver (no browser) and a resolver that answers
+ * with a fixed, obviously-synthetic target.
+ *
+ * <p>The script walks the frontend through the interesting sequence rather than the happy one: the first read
+ * misses (the seller is on the wrong page), the second finds it. A carrier that always succeeded on the first
+ * read would leave the park states unbuilt, which is where every real locate that is not instant lands.
+ */
+export function buildReviewLocateConfig(): AgentReviewLocateConfig {
+  return {
+    runId: `run_${randomBytes(6).toString("hex")}`,
+    channelCode: "coupang",
+    createDriver: () => new ReviewLocateFixtureDriver([{ verdict: "NOT_ON_PAGE" }, { verdict: "LOCATED" }]),
+    // Synthetic and constant: the dev boot resolves no binding against any backend, and the values are
+    // recognisably not a seller's (a zeroed fingerprint could not be a real review body's).
+    resolveTarget: async () => ({
+      productId: "0000000000",
+      vendorItemId: null,
+      writtenOn: "2026-01-01",
+      rating: 5,
+      bodyFingerprint: "0".repeat(64),
+    }),
   };
 }
 
@@ -1344,6 +1392,7 @@ async function main(): Promise<void> {
   const hostReply = resolveReplySubmissionChannel(args, process.env);
   const hostIssuance = !hostReply && resolveApiIssuanceChannel(args, process.env);
   const hostCoupangIssuance = !hostReply && !hostIssuance && resolveCoupangIssuanceChannel(args, process.env);
+  const hostReviewLocate = !hostReply && !hostIssuance && !hostCoupangIssuance && resolveReviewLocateChannel(args, process.env);
   // The LIVE guided walk takes precedence over the dev fixture when its binding is complete; when the flag is
   // present but the binding is not, the carrier is NOT hosted and the refusal is logged. Never a silent
   // downgrade to the fixture: the operator granted a live walk and a simulation that looks like one is worse
@@ -1362,7 +1411,7 @@ async function main(): Promise<void> {
   if (args.includes(ACTION_WINDOW_COUPANG_ISSUANCE_LIVE_FLAG) && !hostLiveWalk) {
     log("aw_coupang_live_walk_refused", { refusal: liveWalkRefusal ?? "unknown" }, "warn");
   }
-  const awChannel = hostReply || hostIssuance || hostCoupangIssuance || hostLiveWalk ? null : resolveActionWindowChannel(args, process.env);
+  const awChannel = hostReply || hostIssuance || hostCoupangIssuance || hostReviewLocate || hostLiveWalk ? null : resolveActionWindowChannel(args, process.env);
   const actionWindow: AgentActionWindowConfig | undefined = awChannel
     ? buildActionWindowConfig(awChannel, args, process.env)
     : undefined;
@@ -1376,6 +1425,7 @@ async function main(): Promise<void> {
     : hostCoupangIssuance
       ? buildCoupangIssuanceConfig()
       : undefined;
+  const reviewLocate: AgentReviewLocateConfig | undefined = hostReviewLocate ? buildReviewLocateConfig() : undefined;
   // Approval-presenter wiring lives HERE and only here — never as a `createAgentBridge` default (see
   // `decideApprovalPresenter`). `none` means no human channel exists on this host, so pairing fails closed.
   const approvalKind = decideApprovalPresenter(process.env, process.platform);
@@ -1386,11 +1436,12 @@ async function main(): Promise<void> {
     ...(replySubmission ? { replySubmission } : {}),
     ...(apiIssuance ? { apiIssuance } : {}),
     ...(coupangIssuance ? { coupangIssuance } : {}),
+    ...(reviewLocate ? { reviewLocate } : {}),
   });
   const bridgeListen = await bridge.listen();
   // Sanitized: the presenter KIND only (an enum) — never a code, origin, or pairing detail. Makes it visible
   // that this host can (or cannot) show an approval code, which decides whether pairing can succeed at all.
-  console.log(JSON.stringify({ event: "BRIDGE", ...bridgeListen, actionWindow: actionWindow !== undefined, replySubmission: replySubmission !== undefined, apiIssuance: apiIssuance !== undefined, coupangIssuance: coupangIssuance !== undefined, approvalPresenter: approvalKind, ...(awChannel ? { actionWindowChannel: awChannel } : {}) }));
+  console.log(JSON.stringify({ event: "BRIDGE", ...bridgeListen, actionWindow: actionWindow !== undefined, replySubmission: replySubmission !== undefined, apiIssuance: apiIssuance !== undefined, coupangIssuance: coupangIssuance !== undefined, reviewLocate: reviewLocate !== undefined, approvalPresenter: approvalKind, ...(awChannel ? { actionWindowChannel: awChannel } : {}) }));
   bridge.seed(decision.parsed.connections.map((c) => c.connectionId));
 
   // ONE observer into the startup: keep the sanitized stdout printer AND feed the bridge snapshot/events.

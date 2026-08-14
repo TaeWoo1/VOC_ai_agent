@@ -73,7 +73,6 @@ const DETAIL: ChannelReviewDetailView = {
     vendorItemId: "81234567890",
     writtenOn: "2026-08-11",
     rating: 5,
-    bodyFingerprint: "a".repeat(64),
   },
 };
 

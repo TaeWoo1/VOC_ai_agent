@@ -20,7 +20,7 @@
     },
     "BlockerCode": {
       "type": "string",
-      "enum": ["LOGIN_REQUIRED", "UI_DRIFT", "TARGET_NOT_FOUND", "TARGET_AMBIGUOUS", "SESSION_EXPIRED", "UNSUPPORTED_STATE", "DOWNLOAD_TIMEOUT", "ARTIFACT_INVALID", "SCOPE_MISMATCH", "INGEST_FAILED", "SURFACE_OPEN_FAILED", "PREPARE_NOT_STARTED", "SURFACE_SETTLE_TIMEOUT", "GUIDANCE_PACK_REJECTED", "OVERLAY_MOUNT_FAILED", "OVERLAY_NOT_VISIBLE", "SURFACE_CLOSED", "CREDENTIAL_STATE_UNKNOWN"]
+      "enum": ["LOGIN_REQUIRED", "UI_DRIFT", "TARGET_NOT_FOUND", "TARGET_AMBIGUOUS", "SESSION_EXPIRED", "UNSUPPORTED_STATE", "DOWNLOAD_TIMEOUT", "ARTIFACT_INVALID", "SCOPE_MISMATCH", "INGEST_FAILED", "SURFACE_OPEN_FAILED", "PREPARE_NOT_STARTED", "SURFACE_SETTLE_TIMEOUT", "GUIDANCE_PACK_REJECTED", "OVERLAY_MOUNT_FAILED", "OVERLAY_NOT_VISIBLE", "SURFACE_CLOSED", "CREDENTIAL_STATE_UNKNOWN", "LOCATE_TARGET_UNRESOLVED"]
     },
     "CommandType": {
       "type": "string",
@@ -32,8 +32,8 @@
     },
     "RunIntent": {
       "type": "string",
-      "description": "v2: selects the step plan. EXPORT is the v1 read chain; REPLY_SUBMISSION is the guided human-performed reply post. INITIAL_REVIEW_IMPORT_DISCOVERY finds the historical range the marketplace currently allows (no plan exists yet, so it binds a discoveryRef); INITIAL_REVIEW_IMPORT_SEGMENT guides one already-planned segment to a downloaded, ingested file (binds an importRef). API_ISSUANCE_GUIDANCE is the NAVER Commerce API-center onboarding walk — read-only guidance choreography that highlights the control the seller must press next and observes their own click until the Application ID/Secret is on screen for them to copy into SellerOps's masked form (never logging in, clicking, submitting, auto-creating an app, selecting an API group, or reading a credential value); it binds no ref (like EXPORT). All non-reply intents reach the ordinary COMPLETED terminal.",
-      "enum": ["EXPORT", "REPLY_SUBMISSION", "INITIAL_REVIEW_IMPORT_DISCOVERY", "INITIAL_REVIEW_IMPORT_SEGMENT", "API_ISSUANCE_GUIDANCE"]
+      "description": "v2: selects the step plan. EXPORT is the v1 read chain; REPLY_SUBMISSION is the guided human-performed reply post. INITIAL_REVIEW_IMPORT_DISCOVERY finds the historical range the marketplace currently allows (no plan exists yet, so it binds a discoveryRef); INITIAL_REVIEW_IMPORT_SEGMENT guides one already-planned segment to a downloaded, ingested file (binds an importRef). API_ISSUANCE_GUIDANCE is the NAVER Commerce API-center onboarding walk — read-only guidance choreography that highlights the control the seller must press next and observes their own click until the Application ID/Secret is on screen for them to copy into SellerOps's masked form (never logging in, clicking, submitting, auto-creating an app, selecting an API group, or reading a credential value); it binds no ref (like EXPORT). REVIEW_LOCATE is the seller pressing [쿠팡에서 보기] on a review SellerOps already stored: it reads the page the seller brought up and rings the one row that matches on every field, turning no page and pressing nothing; a review that is not on the visible page is reported as TARGET_NOT_FOUND rather than searched for. It binds a locateRef because Coupang publishes no review id — the fields that re-find the row describe one buyer's review, so they stay server-side and only the opaque ref crosses. All non-reply intents reach the ordinary COMPLETED terminal.",
+      "enum": ["EXPORT", "REPLY_SUBMISSION", "INITIAL_REVIEW_IMPORT_DISCOVERY", "INITIAL_REVIEW_IMPORT_SEGMENT", "API_ISSUANCE_GUIDANCE", "REVIEW_LOCATE"]
     },
     "OperatorOutcome": {
       "type": "string",
@@ -87,13 +87,14 @@
         "type": { "$ref": "#/$defs/CommandType" },
         "payload": {
           "type": "object",
-          "description": "Typed payload when required. START_RUN requires { channelCode } and optionally { intent } plus EXACTLY ONE binding ref chosen by that intent: submissionRef iff REPLY_SUBMISSION, discoveryRef iff INITIAL_REVIEW_IMPORT_DISCOVERY, importRef iff INITIAL_REVIEW_IMPORT_SEGMENT. EXPORT (and an absent intent) carries none, and every ref not required by the intent is prohibited. SET_GUIDANCE_ENABLED requires { enabled }.",
+          "description": "Typed payload when required. START_RUN requires { channelCode } and optionally { intent } plus EXACTLY ONE binding ref chosen by that intent: submissionRef iff REPLY_SUBMISSION, discoveryRef iff INITIAL_REVIEW_IMPORT_DISCOVERY, importRef iff INITIAL_REVIEW_IMPORT_SEGMENT, locateRef iff REVIEW_LOCATE. EXPORT (and an absent intent) carries none, and every ref not required by the intent is prohibited. SET_GUIDANCE_ENABLED requires { enabled }.",
           "properties": {
             "channelCode": { "$ref": "#/$defs/SemanticCode" },
             "intent": { "$ref": "#/$defs/RunIntent" },
             "submissionRef": { "$ref": "#/$defs/OpaqueRef" },
             "discoveryRef": { "$ref": "#/$defs/OpaqueRef" },
             "importRef": { "$ref": "#/$defs/OpaqueRef" },
+            "locateRef": { "$ref": "#/$defs/OpaqueRef" },
             "enabled": { "type": "boolean" }
           }
         }
@@ -129,7 +130,8 @@
             "verification": { "$ref": "#/$defs/VerificationState" },
             "submissionRef": { "$ref": "#/$defs/OpaqueRef" },
             "discoveryRef": { "$ref": "#/$defs/OpaqueRef" },
-            "importRef": { "$ref": "#/$defs/OpaqueRef" }
+            "importRef": { "$ref": "#/$defs/OpaqueRef" },
+            "locateRef": { "$ref": "#/$defs/OpaqueRef" }
           }
         }
       }

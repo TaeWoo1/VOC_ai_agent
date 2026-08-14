@@ -201,6 +201,7 @@ describe("Action Window v2 — initial-review-import binding rules", () => {
   const DISCOVERY = "0f1e2d3c4b5a6978";
   const IMPORT = "9a8b7c6d5e4f3021";
   const SUBMISSION = "a1b2c3d4e5f60718";
+  const LOCATE = "1122334455667788";
 
   it("every intent declares which ref it requires (exhaustive, so a new intent cannot be unbound by omission)", () => {
     for (const intent of RUN_INTENTS) {
@@ -244,6 +245,25 @@ describe("Action Window v2 — initial-review-import binding rules", () => {
     const codes = errorCodes(validateCommandEnvelope(bad));
     expect(codes).toContain("UNKNOWN_ENUM"); // the intent itself
     expect(codes).toContain("CONSTRAINT_VIOLATION"); // ...and the ref it tried to carry
+  });
+
+  /**
+   * A locate has to be bound, and for a reason unlike the other three: the run mutates nothing, but the
+   * fields that find the review on the screen describe one buyer's review — so the binding exists to keep
+   * them off this wire entirely.
+   */
+  it("a locate requires an opaque locateRef", () => {
+    expect(errorCodes(validateCommandEnvelope({ ...base, payload: { channelCode: "coupang", intent: "REVIEW_LOCATE" } })))
+      .toContain("CONSTRAINT_VIOLATION");
+    // a review's own fields are exactly what must never ride here — and none of them is 16-hex
+    expect(validateCommandEnvelope({ ...base, payload: { channelCode: "coupang", intent: "REVIEW_LOCATE", locateRef: "2026-08-11" } }).ok).toBe(false);
+    expect(validateCommandEnvelope({ ...base, payload: { channelCode: "coupang", intent: "REVIEW_LOCATE", locateRef: LOCATE } })).toEqual({ ok: true });
+  });
+
+  it("treats a locateRef as an opaque ref (no fingerprint, product id, or date)", () => {
+    expect(findProhibitedFields({ locateRef: "f".repeat(64) }).length).toBeGreaterThan(0);
+    expect(findProhibitedFields({ locateRef: "15411270785" }).length).toBeGreaterThan(0);
+    expect(findProhibitedFields({ locateRef: LOCATE })).toEqual([]);
   });
 
   it("treats discoveryRef and importRef as opaque refs (no path, selector, or date)", () => {

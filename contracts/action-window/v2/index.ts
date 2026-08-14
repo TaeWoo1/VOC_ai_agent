@@ -16,6 +16,8 @@
  *    add no status. Their bindings resolve **server-side** to a seller account, plan, and segment, so
  *    no plan id, segment id, or date ever crosses this boundary; the required dates reach the seller
  *    as sanitized primitive `copyParams` under an FE-owned copy key, like any other step copy;
+ *  - a `REVIEW_LOCATE` intent + an opaque `locateRef` (binds a run to ONE stored review without ever carrying
+ *    what identifies it — see the intent's own note);
  *  - a terminal `OPERATOR_REPORTED` run/step status (a reply post has NO read-back verifier, so it can
  *    never reach `COMPLETED` — see `docs/action-window-runtime/contract-boundary.md` §2);
  *  - a `SUBMISSION_REPORTED` event + `RUN_OPERATOR_REPORTED` terminal event, both carrying **two
@@ -104,6 +106,18 @@ export type ExecutionMode = (typeof EXECUTION_MODES)[number];
  * Both are read-only export choreography — the seller clicks every marketplace control — so they reach
  * the ordinary `COMPLETED` terminal, unlike `REPLY_SUBMISSION`.
  *
+ * `REVIEW_LOCATE` is the seller pressing `[쿠팡에서 보기]` on a review SellerOps already stored, and asking to
+ * be shown that same review on the marketplace's own screen. It is the narrowest run in this contract: it reads
+ * the page the seller brought up, and — only when exactly one row matches on every field — draws a ring around
+ * it. It turns no page, clicks nothing, types nothing, and submits nothing; a review that is not on the visible
+ * page is reported as `TARGET_NOT_FOUND` for the seller to page to, never searched for by the runtime.
+ *
+ * It carries a `locateRef` because the thing it must find CANNOT cross this boundary: Coupang publishes no
+ * review id, so a review is re-found by product, option, date, rating and a fingerprint of its body — a bag of
+ * fields that, taken together, describe one buyer's review. The ref is minted server-side against the review the
+ * seller pressed, and the runtime resolves it over its own authenticated backend session, so what travels here
+ * is one opaque token and what identifies the review never travels at all.
+ *
  * `API_ISSUANCE_GUIDANCE` is the NAVER Commerce API-center onboarding walk: open the API center, observe
  * which page category the seller is on, highlight the one control they must press next, observe their own
  * click, and advance — until the Application ID / Secret is on screen for them to copy into SellerOps's
@@ -119,6 +133,7 @@ export const RUN_INTENTS = [
   "INITIAL_REVIEW_IMPORT_DISCOVERY",
   "INITIAL_REVIEW_IMPORT_SEGMENT",
   "API_ISSUANCE_GUIDANCE",
+  "REVIEW_LOCATE",
 ] as const;
 export type RunIntent = (typeof RUN_INTENTS)[number];
 
@@ -130,7 +145,9 @@ export type RunIntent = (typeof RUN_INTENTS)[number];
  * approved work), so "required for exactly this intent, prohibited for every other" is the rule for
  * all of them and is stated once. `EXPORT` maps to no ref — it binds to nothing.
  */
-export const INTENT_REQUIRED_REF: Readonly<Record<RunIntent, "submissionRef" | "discoveryRef" | "importRef" | null>> = {
+export const INTENT_REQUIRED_REF: Readonly<
+  Record<RunIntent, "submissionRef" | "discoveryRef" | "importRef" | "locateRef" | null>
+> = {
   EXPORT: null,
   REPLY_SUBMISSION: "submissionRef",
   INITIAL_REVIEW_IMPORT_DISCOVERY: "discoveryRef",
@@ -138,10 +155,14 @@ export const INTENT_REQUIRED_REF: Readonly<Record<RunIntent, "submissionRef" | "
   // API-issuance guidance binds to no approved marketplace work — it is a tutorial over the seller's own
   // API center, authorized by the guided-connection flow, not by a minted ref. So it carries none.
   API_ISSUANCE_GUIDANCE: null,
+  // A locate binds to ONE stored review. Not because the run mutates anything — it draws a ring — but because
+  // the fields that find that review on the screen are a description of one buyer's review, and the ref is how
+  // they stay on the server side of this boundary.
+  REVIEW_LOCATE: "locateRef",
 };
 
 /** Every binding ref a `START_RUN` payload may carry (exactly one, chosen by intent). */
-export const START_RUN_REF_KEYS = ["submissionRef", "discoveryRef", "importRef"] as const;
+export const START_RUN_REF_KEYS = ["submissionRef", "discoveryRef", "importRef", "locateRef"] as const;
 
 /**
  * What the operator reports happened at the submit barrier (v2). Kept SEPARATE from `verification`.
@@ -240,6 +261,19 @@ export const BLOCKER_CODES = [
    * that ends at a key-creating control will not proceed. Recoverable: a re-check re-reads the surface.
    */
   "CREDENTIAL_STATE_UNKNOWN",
+  /**
+   * A `REVIEW_LOCATE` run could not turn its `locateRef` into something to look for — the binding was already
+   * spent, it expired, or the runtime could not reach the backend to ask.
+   *
+   * <p>It needs its own code because every existing one would misdescribe it. `UNSUPPORTED_STATE` reads as
+   * "this screen is not supported" and sends the seller to look at Coupang; `SESSION_EXPIRED` reads as a
+   * marketplace login that lapsed; `ARTIFACT_INVALID` names an artifact that never exists on this run. What
+   * actually happened is between SellerOps and itself, and the repair is one press: `[쿠팡에서 보기]` again.
+   *
+   * <p>Deliberately NOT recoverable in the contract's sense — a recheck cannot mint a new binding, and the run
+   * that would need one is over. The next press is a new run.
+   */
+  "LOCATE_TARGET_UNRESOLVED",
 ] as const;
 export type BlockerCode = (typeof BLOCKER_CODES)[number];
 
@@ -288,7 +322,14 @@ export interface CommandEnvelope {
 
 export type CommandPayload =
   // START_RUN — exactly one binding ref, selected by intent (see INTENT_REQUIRED_REF).
-  | { channelCode: string; intent?: RunIntent; submissionRef?: string; discoveryRef?: string; importRef?: string }
+  | {
+      channelCode: string;
+      intent?: RunIntent;
+      submissionRef?: string;
+      discoveryRef?: string;
+      importRef?: string;
+      locateRef?: string;
+    }
   | { enabled: boolean } // SET_GUIDANCE_ENABLED
   | Record<string, never>; // commands with no payload
 
@@ -331,6 +372,12 @@ export interface EventPayload {
   discoveryRef?: string;
   /** v2: opaque 16-hex binding to one planned import segment — NEVER a plan/segment id or a date. */
   importRef?: string;
+  /**
+   * v2: opaque 16-hex binding to ONE stored review a locate run was asked to find — NEVER a review id, a
+   * product id, a date, a rating, or a body fingerprint. The fields that actually match the row stay on the
+   * server side of this boundary and reach the runtime over its own backend session.
+   */
+  locateRef?: string;
 }
 
 /** Primitive, interpolation-safe copy parameter value (FE owns final copy). */
@@ -451,7 +498,14 @@ export const PROHIBITED_KEYS: readonly string[] = [
   "reviewContent",
 ];
 
-const REF_KEYS: readonly string[] = ["targetRef", "artifactRef", "submissionRef", "discoveryRef", "importRef"];
+const REF_KEYS: readonly string[] = [
+  "targetRef",
+  "artifactRef",
+  "submissionRef",
+  "discoveryRef",
+  "importRef",
+  "locateRef",
+];
 const HEX16 = /^[0-9a-f]{16}$/;
 /** A dotted semantic copy key (e.g. `actionWindow.review.ready`) — never final prose. */
 const COPY_KEY = /^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z0-9]+)+$/;

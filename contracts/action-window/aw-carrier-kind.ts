@@ -29,7 +29,7 @@
  * (`createAgentBridge` throws when both are configured), so this reports a fact about the agent, not
  * a menu to choose from.
  */
-export const AW_CARRIER_KINDS = ["export", "reply", "import", "issuance"] as const;
+export const AW_CARRIER_KINDS = ["export", "reply", "import", "issuance", "locate"] as const;
 
 export type AwCarrierKind = (typeof AW_CARRIER_KINDS)[number];
 
@@ -76,6 +76,20 @@ export const AW_CARRIER_IMPORT = "import";
  * <p>Unannotated for the same reason as {@link AW_CARRIER_EXPORT}.
  */
 export const AW_CARRIER_ISSUANCE = "issuance";
+
+/**
+ * The v2 **review-locate** carrier — showing a seller, on the marketplace's own screen, one review SellerOps
+ * has already stored.
+ *
+ * <p>It speaks v2 envelopes like `reply`, `import` and `issuance`, so version alone cannot separate the four.
+ * It is its own kind because what the agent does here is narrower than all three: a locate run reads the page
+ * the seller brought up and draws a ring around one row. It downloads nothing, ingests nothing, submits
+ * nothing, and guides no walk — folding it into `issuance` would announce a multi-step tutorial where there is
+ * a single read, and folding it into `export` would announce an artifact that never exists.
+ *
+ * <p>Unannotated for the same reason as {@link AW_CARRIER_EXPORT}.
+ */
+export const AW_CARRIER_LOCATE = "locate";
 
 /**
  * Narrow an announced value to a known carrier, or `null` when it is absent or unrecognised.
