@@ -203,8 +203,11 @@ describe("which frame gets reported", () => {
           unitPrintedDigitLengths: [],
           unitsWithDetailLink: 0,
           idCandidates: [],
+          leafCounts: [],
         },
         pagination: { dateInputCount: 0, selectCount: 0, numericPagerCount: 0, highestPagerNumber: 0 },
+        cells: [],
+        selects: [],
       },
     };
   }
