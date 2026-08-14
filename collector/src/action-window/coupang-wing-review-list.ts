@@ -243,6 +243,15 @@ export interface ReviewUnitReading {
   readonly unitsWithDetailLink: number;
   /** Identifier candidates, per source and length. The dedupe-key question, answered with two counts. */
   readonly idCandidates: readonly ReviewIdCandidate[];
+  /**
+   * How many text-printing leaves each unit holds, in unit order.
+   *
+   * A structural count, in the same family as `unitCount` — it says nothing about anyone. It is here because
+   * a row that carries fewer cells than its neighbours is a **different kind of row**, and that is the first
+   * hypothesis for why an identifier covers some rows and not others. A uniform list rules the hypothesis out;
+   * a split list names the cause without a second sitting.
+   */
+  readonly leafCounts: readonly number[];
 }
 
 /**
@@ -267,6 +276,79 @@ export interface ReviewPaginationReading {
 }
 
 /**
+ * **One digit-run length, seen at one cell position across the rows.**
+ *
+ * The first reading proved that "a 10-digit run exists somewhere in the row, unique where present, on 7 of 10
+ * rows" is not enough to build on. It names no column, so nothing can extract it; and it cannot say WHY three
+ * rows lack it. Both gaps close by asking the same question *per cell position* instead of per row.
+ */
+export interface ReviewCellRun {
+  readonly digitLength: number;
+  readonly unitsCarrying: number;
+  readonly distinctValues: number;
+  /** Every unit carrying a run of this length at this position carries a different one. */
+  readonly uniquePerUnit: boolean;
+}
+
+/**
+ * **One cell position, across every review row.**
+ *
+ * Cells are indexed by their order among the row's own text-printing leaves — a position, not a selector and
+ * not a column name. A key at a known position is *extractable*; a key known only to be "somewhere in the row"
+ * is not, which is why this exists.
+ *
+ * `unitsWithCell` below the unit count is itself a finding: rows that do not reach this position are a
+ * different row shape, and that is the most likely explanation for a partial identifier.
+ */
+export interface ReviewCellReading {
+  readonly cellIndex: number;
+  readonly unitsWithCell: number;
+  /**
+   * Rows carrying ANY digit run here, and how many distinct values there are **across every length**.
+   *
+   * The per-length buckets below cannot answer the uniqueness question, and the first live reading proved it:
+   * one column held 8-, 9- and 10-digit values, the buckets reported 2, 1 and 7 carriers, and the largest
+   * bucket looked like a key covering 7 of 10 rows. Every row carried a value; two of them carried the SAME
+   * value. Bucketing by length had split one column into three and hidden both facts at once.
+   *
+   * A column is a key when `unitsWithAnyRun` equals the row count and `distinctValuesAcrossLengths` equals it
+   * too. Length is a property of the value, not of the question.
+   */
+  readonly unitsWithAnyRun: number;
+  readonly distinctValuesAcrossLengths: number;
+  readonly runs: readonly ReviewCellRun[];
+  /** How many units carry a leaf matching each supplied shape at this position — a date column, a rating column. */
+  readonly shapeHits: readonly ReviewCellShapeHit[];
+}
+
+export interface ReviewCellShapeHit {
+  readonly shapeId: string;
+  readonly unitCount: number;
+}
+
+/**
+ * **A `<select>`, profiled for whether it could ask for a range.**
+ *
+ * The first reading found 4 selects and 0 date inputs, which says a period filter exists but not what it can
+ * reach. An option count and how many options carry a period word we supplied is the difference between
+ * "there is a dropdown" and "the acquisition can request 6 months".
+ */
+export interface ReviewSelectReading {
+  readonly optionCount: number;
+  /** Options whose whole text equals one of the period words WE supplied. Ours to state, counted in-page. */
+  readonly optionsMatchingControlLabels: number;
+  /**
+   * Options matching a supplied SHAPE, per shape id.
+   *
+   * The first live reading matched **zero** options against our exact period words while four dropdowns sat on
+   * the screen carrying 6, 3, 3 and 3 options. Exact literals answer "is the word I guessed there"; a shape
+   * answers "what kind of thing is in this list", which is the question when the vocabulary is unknown.
+   */
+  readonly optionsMatchingShapes: readonly ReviewCellShapeHit[];
+  readonly insideUnit: boolean;
+}
+
+/**
  * The whole structural reading of one 상품평 screen. Integers, enums, tag names, and the ids we supplied.
  * No text, no selector, no href, no class name, no attribute VALUE, no `src`.
  */
@@ -284,6 +366,22 @@ export interface ReviewListCensus {
   readonly textShapes: readonly ReviewTextShapeCount[];
   readonly unit: ReviewUnitReading;
   readonly pagination: ReviewPaginationReading;
+  /** Per cell POSITION across the rows — where an extractable key lives, and why some rows lack one. */
+  readonly cells: readonly ReviewCellReading[];
+  /**
+   * **How many rows are distinguishable by their numbers AT ALL, taken together.**
+   *
+   * When no single column is unique, the real question is whether a composite key exists — and this answers it
+   * with one integer. Equal to the row count means every row differs from every other somewhere in its digits,
+   * so a composite key is available even though no single column is. Below the row count means two rows carry
+   * the SAME numbers everywhere, and **no key of any kind can be built from this screen** — which is a finding,
+   * not a failure, and one that no per-column reading can produce.
+   *
+   * A count of distinct combinations. The combinations themselves never leave the page.
+   */
+  readonly distinctRowSignatures: number;
+  /** Every `<select>` on the screen, profiled for range reach. */
+  readonly selects: readonly ReviewSelectReading[];
 }
 
 /**
@@ -423,6 +521,90 @@ export function classifyOwnershipScope(census: ReviewListCensus | null | undefin
   return census.unit.unitsMatchingOurDigits > 0 ? "OUR_CATALOG_CONFIRMED" : "NOT_ESTABLISHED";
 }
 
+/**
+ * **The canonical key — and the locate anchor, which turn out to be the same reading.**
+ *
+ * Acquisition needs a value that is present on every review, different for every review, and *extractable from
+ * a known position*. `[쿠팡에서 보기]` needs a value that identifies one review on a re-rendered screen. Those
+ * are the same three properties, so they are decided once rather than by two rules that could disagree — and a
+ * key we could store but not re-find would be worse than none, because it would look like it worked.
+ *
+ * `PARTIAL_COVERAGE` is kept distinct from `NO_UNIQUE_POSITION` deliberately. The first reading found a run
+ * that was unique on all 7 of the 10 rows carrying it; treated as a key, an acquisition would have silently
+ * dropped three reviews in ten, and every count downstream would have agreed with itself.
+ */
+export const REVIEW_KEY_VERDICTS = [
+  "KEY_FOUND",
+  /** Unique at a known position, but not on every row. Not a key — see `unitsMissing`. */
+  "PARTIAL_COVERAGE",
+  /**
+   * No single column distinguishes the rows, but their numbers TAKEN TOGETHER do.
+   *
+   * A real and different answer: a composite key can be built, and it is worse than a single one — it is wider,
+   * it breaks if any component column is re-ordered, and it cannot be handed to a locate as one value.
+   */
+  "COMPOSITE_ONLY",
+  /** Positions were read, and none held a per-row-unique run. */
+  "NO_UNIQUE_POSITION",
+  /** The row never resolved, so "no key" would be indistinguishable from "never reached the rows". */
+  "UNDETERMINED",
+] as const;
+export type ReviewKeyVerdict = (typeof REVIEW_KEY_VERDICTS)[number];
+
+export interface ReviewKeyChoice {
+  readonly verdict: ReviewKeyVerdict;
+  /** The position the key is read from. `null` unless a candidate was found. */
+  readonly cellIndex: number | null;
+  readonly digitLength: number | null;
+  /** Rows the key covers, out of the rows measured. `1` is the only value that makes it a key. */
+  readonly coverage: number;
+  /** Rows with no such run — the ones an acquisition built on this key would silently drop. */
+  readonly unitsMissing: number;
+}
+
+const NO_KEY: ReviewKeyChoice = Object.freeze({
+  verdict: "UNDETERMINED" as const,
+  cellIndex: null,
+  digitLength: null,
+  coverage: 0,
+  unitsMissing: 0,
+});
+
+export function chooseDedupeKey(census: ReviewListCensus | null | undefined): ReviewKeyChoice {
+  if (!census || census.reason !== "OK" || !census.unit.resolved) return NO_KEY;
+  const units = census.unit.unitCount;
+  if (units < 2 || census.cells.length === 0) return NO_KEY;
+
+  let best: ReviewKeyChoice | null = null;
+  for (const cell of census.cells) {
+    // THE QUESTION IS ASKED OF THE COLUMN, NOT OF A LENGTH BUCKET. A column holding 8-, 9- and 10-digit values
+    // is one column; splitting it by length reports the biggest bucket as a partial key and hides both that
+    // every row is populated and that two of them collide.
+    if (cell.unitsWithAnyRun === 0) continue;
+    if (cell.distinctValuesAcrossLengths < cell.unitsWithAnyRun) continue; // two rows share a value here
+    // The dominant length, reported so the value can be recognised — not used to decide anything.
+    const dominant = cell.runs.reduce<ReviewCellRun | null>(
+      (max, r) => (max === null || r.unitsCarrying > max.unitsCarrying ? r : max),
+      null,
+    );
+    const candidate: ReviewKeyChoice = {
+      verdict: cell.unitsWithAnyRun >= units ? "KEY_FOUND" : "PARTIAL_COVERAGE",
+      cellIndex: cell.cellIndex,
+      digitLength: dominant?.digitLength ?? null,
+      coverage: cell.unitsWithAnyRun / units,
+      unitsMissing: Math.max(0, units - cell.unitsWithAnyRun),
+    };
+    if (best === null || candidate.coverage > best.coverage) best = candidate;
+  }
+  if (best !== null) return best;
+
+  // No column works. Whether the rows are distinguishable AT ALL is a different question, and the answer
+  // decides whether a composite key is available or nothing is.
+  return census.distinctRowSignatures >= units
+    ? { ...NO_KEY, verdict: "COMPOSITE_ONLY", coverage: 1 }
+    : { ...NO_KEY, verdict: "NO_UNIQUE_POSITION" };
+}
+
 /* ─────────────────────────────────── the sanitizer ─────────────────────────────────── */
 
 const REFUSALS: readonly string[] = REVIEW_CENSUS_REFUSALS;
@@ -507,6 +689,7 @@ const REFUSED_UNIT: ReviewUnitReading = Object.freeze({
   unitPrintedDigitLengths: [],
   unitsWithDetailLink: 0,
   idCandidates: [],
+  leafCounts: [],
 });
 
 const REFUSED_COLUMN: ReviewColumnProbe = Object.freeze({
@@ -624,7 +807,105 @@ function sanitizeUnit(raw: unknown): ReviewUnitReading {
     unitPrintedDigitLengths: digitRunLengths(u.unitPrintedDigitLengths),
     unitsWithDetailLink: per(u.unitsWithDetailLink),
     idCandidates: sanitizeIdCandidates(u.idCandidates, unitCount),
+    // One entry per unit, bounded by the unit count. A longer list than there are units is incoherent.
+    leafCounts: (Array.isArray(u.leafCounts) ? u.leafCounts : [])
+      .slice(0, unitCount)
+      .map((v) => count(v) ?? 0),
   };
+}
+
+/** How many cell POSITIONS may be reported. A row wider than this is not a row we can key on anyway. */
+const MAX_CELLS = 32;
+
+/**
+ * The per-position reading, fail-closed per entry.
+ *
+ * `uniquePerUnit` is DERIVED here, exactly as it is for the whole-row candidates and for the same reason: it
+ * is the field an acquisition would be built on, and a page able to assert it could assert a dedupe key that
+ * does not exist.
+ */
+function sanitizeCells(
+  raw: unknown,
+  unitCount: number,
+  shapes: readonly ReviewTextShape[],
+): readonly ReviewCellReading[] {
+  const rows = Array.isArray(raw) ? raw : [];
+  const out: ReviewCellReading[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const c = row as Record<string, unknown>;
+    const cellIndex = count(c.cellIndex);
+    const unitsWithCell = count(c.unitsWithCell);
+    if (cellIndex === null || unitsWithCell === null) continue;
+    if (cellIndex >= MAX_CELLS || unitsWithCell > unitCount) continue;
+
+    const runs: ReviewCellRun[] = [];
+    for (const r of Array.isArray(c.runs) ? c.runs : []) {
+      if (!r || typeof r !== "object") continue;
+      const run = r as Record<string, unknown>;
+      const digitLength = count(run.digitLength);
+      const unitsCarrying = count(run.unitsCarrying);
+      const distinctValues = count(run.distinctValues);
+      if (digitLength === null || unitsCarrying === null || distinctValues === null) continue;
+      if (digitLength < 1 || digitLength > 64) continue;
+      if (unitsCarrying > unitsWithCell || distinctValues > unitsCarrying) continue;
+      runs.push({
+        digitLength,
+        unitsCarrying,
+        distinctValues,
+        uniquePerUnit: unitsCarrying > 0 && distinctValues === unitsCarrying,
+      });
+    }
+
+    // Shape ids are echoed only when they name a shape the CALLER supplied.
+    const shapeHits: ReviewCellShapeHit[] = [];
+    for (const hit of Array.isArray(c.shapeHits) ? c.shapeHits : []) {
+      if (!hit || typeof hit !== "object") continue;
+      const h = hit as Record<string, unknown>;
+      if (typeof h.shapeId !== "string" || !shapes.some((s) => s.id === h.shapeId)) continue;
+      shapeHits.push({ shapeId: h.shapeId, unitCount: Math.min(count(h.unitCount) ?? 0, unitsWithCell) });
+    }
+
+    // Derived here rather than trusted, like every other field an acquisition would be built on. Bounded by
+    // the carriers, because more distinct values than carriers is incoherent.
+    const unitsWithAnyRun = Math.min(count(c.unitsWithAnyRun) ?? 0, unitsWithCell);
+    out.push({
+      cellIndex,
+      unitsWithCell,
+      unitsWithAnyRun,
+      distinctValuesAcrossLengths: Math.min(count(c.distinctValuesAcrossLengths) ?? 0, unitsWithAnyRun),
+      runs,
+      shapeHits,
+    });
+    if (out.length >= MAX_CELLS) break;
+  }
+  return out;
+}
+
+function sanitizeSelects(raw: unknown, shapes: readonly ReviewTextShape[]): readonly ReviewSelectReading[] {
+  const rows = Array.isArray(raw) ? raw : [];
+  const out: ReviewSelectReading[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const s = row as Record<string, unknown>;
+    const optionCount = count(s.optionCount);
+    if (optionCount === null) continue;
+    const optionsMatchingShapes: ReviewCellShapeHit[] = [];
+    for (const hit of Array.isArray(s.optionsMatchingShapes) ? s.optionsMatchingShapes : []) {
+      if (!hit || typeof hit !== "object") continue;
+      const h = hit as Record<string, unknown>;
+      if (typeof h.shapeId !== "string" || !shapes.some((sh) => sh.id === h.shapeId)) continue;
+      optionsMatchingShapes.push({ shapeId: h.shapeId, unitCount: Math.min(count(h.unitCount) ?? 0, optionCount) });
+    }
+    out.push({
+      optionCount,
+      optionsMatchingControlLabels: Math.min(count(s.optionsMatchingControlLabels) ?? 0, optionCount),
+      optionsMatchingShapes,
+      insideUnit: s.insideUnit === true,
+    });
+    if (out.length >= MAX_CELLS) break;
+  }
+  return out;
 }
 
 function sanitizePagination(raw: unknown): ReviewPaginationReading {
@@ -665,6 +946,9 @@ export function sanitizeReviewListCensus(
     textShapes: [],
     unit: REFUSED_UNIT,
     pagination: REFUSED_PAGINATION,
+    cells: [],
+    selects: [],
+    distinctRowSignatures: 0,
   });
   if (!raw || typeof raw !== "object") return refused("UNREADABLE");
   const r = raw as Record<string, unknown>;
@@ -739,5 +1023,12 @@ export function sanitizeReviewListCensus(
     textShapes,
     unit: sanitizeUnit(r.unit),
     pagination: sanitizePagination(r.pagination),
+    cells: sanitizeCells(r.cells, count(r.unit && (r.unit as Record<string, unknown>).unitCount) ?? 0, shapeExpectations),
+    selects: sanitizeSelects(r.selects, shapeExpectations),
+    // Bounded by the row count: more distinct signatures than rows is incoherent.
+    distinctRowSignatures: Math.min(
+      count(r.distinctRowSignatures) ?? 0,
+      count(r.unit && (r.unit as Record<string, unknown>).unitCount) ?? 0,
+    ),
   };
 }

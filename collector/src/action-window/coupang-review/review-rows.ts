@@ -1,0 +1,560 @@
+/**
+ * **The offline half of Coupang WING 상품평 acquisition** — sanitize what the page returned, then canonicalize
+ * it into the record acquisition actually stores.
+ *
+ * Two jobs, deliberately in one place and none of it in the browser: parsing a date, a rating and an id pair is
+ * exactly the kind of rule that gets written twice and drifts, and in-page code is the half that cannot be unit
+ * tested. The page reads; this decides what any of it means.
+ *
+ * **The buyer has no field here.** Not "is dropped here" — has none. {@link CoupangAcquiredReview} carries no
+ * author, and neither does the reading type it is built from, so there is no assignment for a careless edit to
+ * add. `excludedColumns` carries the COUNT of buyer columns the page found, which is what lets a regression
+ * assert the column was located and its text still never appears.
+ *
+ * **A row that cannot be canonicalized is dropped and counted, never guessed.** An unparseable date, an
+ * unreadable rating, and a product cell with no id each drop the row into a named counter. An EMPTY body is
+ * not among them: a buyer who rated without writing left a review, and it is kept as a textless one.
+ */
+import { reviewBodyFingerprint } from "../reply-submission/review-body-fingerprint";
+
+/** Why a page reading ended as it did. Everything but `OK` means acquisition takes nothing from this page. */
+export const REVIEW_READ_REASONS = [
+  "OK",
+  "NO_ROWS",
+  "HEADERS_UNRESOLVED",
+  "AMBIGUOUS_TABLE",
+  "ROW_WIDTH_MISMATCH",
+  "UNREADABLE",
+] as const;
+export type ReviewReadReason = (typeof REVIEW_READ_REASONS)[number];
+
+/** One row exactly as the page printed it, normalized only for whitespace. No author field exists. */
+export interface CoupangReviewRowReading {
+  readonly rowIndex: number;
+  readonly dateText: string | null;
+  readonly ratingText: string | null;
+  readonly ratingAria: string | null;
+  readonly bodyText: string;
+  readonly bodyTruncated: boolean;
+  readonly bodyExpandable: boolean;
+  readonly productText: string | null;
+  readonly productNameText: string | null;
+  readonly mediaCount: number;
+}
+
+/**
+ * What the paging control says — the only thing on the screen that can tell acquisition it reached the end
+ * of the list.
+ *
+ * The three states are deliberately distinct, and the middle one is why this type exists at all:
+ *
+ * - `found: false, hasNext: false` — there is no pager and nothing to press at all. The list is one page,
+ *   and this page IS the whole list. A next control that merely LOOKS dead is not enough here: with no
+ *   numbers to place it against, the reader cannot tell this list's arrow from any other arrow on the
+ *   document, so `hasNext` is what decides and a walk stops rather than claiming the end.
+ * - `found: true, resolved: false` — a pager is there and which page it is showing could not be identified.
+ *   This must never round up to "the end": rounding it up is precisely how a walk comes to claim a coverage
+ *   it does not have.
+ * - `found: true, resolved: true` — `currentPage` against the highest of `pageNumbers`, plus whether a next
+ *   control exists and is pressable. A windowed pager (1…10 while 50 pages exist) leaves its next control
+ *   enabled, which is what stops page 10 being read as the last one.
+ */
+export interface CoupangReviewPagerReading {
+  readonly found: boolean;
+  readonly resolved: boolean;
+  readonly pageNumbers: readonly number[];
+  readonly currentPage: number | null;
+  readonly hasNext: boolean;
+  readonly nextEnabled: boolean;
+  /**
+   * **Why a refusal happened, in integers.**
+   *
+   * The first live sitting stopped on `PAGER_UNRESOLVED` and the run could say nothing more. Three
+   * different causes produce that one word — no cluster of page numbers on the screen at all, several
+   * clusters, or one cluster on which none of the current-page signals fired uniquely — and they need
+   * three different fixes. Without these counts they arrive as the same silence, and each guess costs a
+   * seated sitting.
+   *
+   * All structural: how many numeric-sibling clusters were seen, how many were discarded as table rows,
+   * how many numbers the chosen one holds, and how many cells each current-page signal marked. A signal
+   * count of 0 means the screen does not mark the current page that way; 2+ means it does but not
+   * uniquely. No page text, class name, or page number reaches any of them.
+   */
+  readonly clustersFound: number;
+  readonly clustersOfCells: number;
+  readonly clusterSize: number;
+  readonly ariaCurrentMarks: number;
+  readonly classMarks: number;
+  readonly nonLinkMarks: number;
+  /**
+   * **The shape of the paging region, for the sitting that has to design against it.**
+   *
+   * Two readings refused: the current page is marked by none of the four signals, and no next control
+   * matched any word or arrow supplied. Two failed guesses is where guessing stops, so the region reports
+   * itself — `childShapes` is one token per numeric child (`TAG` + class-present + is-link + aria-present +
+   * disabled), and `regionLabels` are the short control words beside them, each `text|shape`.
+   *
+   * A pager's labels are Coupang's own UI vocabulary (다음 · 이전 · 맨끝 · ›), never customer content:
+   * capped at 6 characters, capped at 20 entries, pure numbers excluded. They exist to be READ in a seated
+   * sitting and are never stored — no persistence path carries them.
+   */
+  readonly childShapes: readonly string[];
+  readonly regionLabels: readonly string[];
+  /**
+   * **The region's skeleton: tags and attribute NAMES, never a value.**
+   *
+   * Four readings refused, and each fix aimed at a marker the screen turned out not to use. The reason each
+   * was a guess is that nothing ever reported what the markup IS. Each entry is
+   * `depth + TAG + [attribute names] + textLength` — an attribute NAME is structure (`href`, `class`,
+   * `data-page`) and is exactly what distinguishes a current page from a link to one. No attribute value,
+   * no class string, no text: a length is not a text. Bounded to 40 elements of one region, emitted only
+   * on a refusal, and never persisted.
+   */
+  readonly regionSkeleton: readonly string[];
+}
+
+/** One document's reading: the structural verdict plus the rows, if any survived it. */
+export interface CoupangReviewPageReading {
+  readonly reason: ReviewReadReason;
+  readonly tablesScanned: number;
+  readonly headerWidth: number;
+  /** How many buyer/author columns the header held. Counted so a test can prove one was found and not read. */
+  readonly excludedColumns: number;
+  readonly unmappedColumns: number;
+  readonly duplicateRoles: number;
+  readonly rolesResolved: readonly string[];
+  readonly widthMismatchRows: number;
+  readonly rows: readonly CoupangReviewRowReading[];
+  /** Read on every path, including the refusals — a resolved pager over an unreadable table is a finding. */
+  readonly pager: CoupangReviewPagerReading;
+}
+
+/**
+ * One review, canonicalized — the unit acquisition hands to the backend.
+ *
+ * `body` is the review text as the seller's own screen printed it. `bodyTruncated` says the list cell cut it
+ * off; `bodyExpandable` says the cell offered to show more, which is the honest warning that the stored text
+ * may be a prefix of what the buyer wrote.
+ *
+ * **A rating-only review is one of these too**, carried by {@link CoupangAcquiredReview.textless} rather than
+ * by a body. Coupang lets a buyer rate without writing, and the screen carries no per-review identifier
+ * (`docs/coupang_review_policy_gate_v1.md` §9.2) — so what tells two of them apart is the option each was left
+ * on, and nothing tells apart two on ONE option, one day, one rating. That residue is recorded, not papered
+ * over: see the field's own note.
+ */
+export interface CoupangAcquiredReview {
+  /** `YYYY-MM-DD`, from the row's own date cell. */
+  readonly writtenOn: string;
+  readonly rating: number;
+  readonly body: string;
+  readonly bodyTruncated: boolean;
+  readonly bodyExpandable: boolean;
+  /**
+   * The buyer rated and wrote nothing. `body` is then the empty string — never Coupang's placeholder
+   * sentence, which is the channel's UI and not a customer's words.
+   *
+   * A textless review is still a review: the rating is the signal, and 86% of the first live account's
+   * 상품평 were these (product decision, 2026-08-15). What it costs is stated where it is paid — the
+   * backend folds the option id into the dedup key for exactly these rows, so two textless reviews of one
+   * OPTION on one day at one rating still merge. That residue is a recorded v1 limitation, not something to
+   * be closed with an unstable identifier like a row position or the buyer's name.
+   */
+  readonly textless: boolean;
+  /** Coupang `노출상품ID` — the catalog identity the review hangs off. */
+  readonly productId: string;
+  /** Coupang `옵션ID` (`vendorItemId`) when the cell prints one; null when it does not. */
+  readonly vendorItemId: string | null;
+  readonly productName: string | null;
+  readonly mediaCount: number;
+  /** `review-body-fingerprint/v1` of `body` — the locate anchor, identical in Java. */
+  readonly bodyFingerprint: string;
+}
+
+/** Why rows did not survive canonicalization. Each is a count, never a sample of what was dropped. */
+export interface CoupangReviewDropCounts {
+  readonly unparseableDate: number;
+  readonly unreadableRating: number;
+  readonly noProductId: number;
+}
+
+export interface CoupangReviewCanonicalization {
+  readonly reviews: readonly CoupangAcquiredReview[];
+  readonly dropped: CoupangReviewDropCounts;
+  /**
+   * How many of the collected reviews were rated with no text. Reported rather than dropped: on the first
+   * live account it was 19 of 22, and a run that said only "22 collected" would hide what kind of record the
+   * seller is actually getting.
+   */
+  readonly textlessCount: number;
+}
+
+/** No pager was read at all — distinct from "there is no pager", which is `found: false` from a real read. */
+export const UNREAD_PAGER: CoupangReviewPagerReading = Object.freeze({
+  found: false,
+  resolved: false,
+  pageNumbers: Object.freeze([]),
+  currentPage: null,
+  // `hasNext: true` on an unread pager is the fail-closed default: an acquisition that never saw the
+  // control must not conclude there was nothing after this page.
+  hasNext: true,
+  nextEnabled: true,
+  clustersFound: 0,
+  clustersOfCells: 0,
+  clusterSize: 0,
+  ariaCurrentMarks: 0,
+  classMarks: 0,
+  nonLinkMarks: 0,
+  childShapes: Object.freeze([]),
+  regionLabels: Object.freeze([]),
+  regionSkeleton: Object.freeze([]),
+});
+
+/**
+ * A pager reading with every field defaulted to the fail-closed value, overridden field by field.
+ *
+ * It exists so the diagnostic counts have ONE place that knows their defaults. Without it every caller and
+ * fixture repeats six integers whose only correct value is zero, and the next field added to this type
+ * silently means "0" in some of them and "missing" in others.
+ */
+export function pagerReading(over: Partial<CoupangReviewPagerReading> = {}): CoupangReviewPagerReading {
+  return { ...UNREAD_PAGER, ...over };
+}
+
+const EMPTY_READING: CoupangReviewPageReading = Object.freeze({
+  reason: "UNREADABLE",
+  tablesScanned: 0,
+  headerWidth: 0,
+  excludedColumns: 0,
+  unmappedColumns: 0,
+  duplicateRoles: 0,
+  rolesResolved: Object.freeze([]),
+  widthMismatchRows: 0,
+  rows: Object.freeze([]),
+  pager: UNREAD_PAGER,
+});
+
+const MAX_ROWS = 200;
+const MAX_BODY_CHARS = 8000;
+
+function str(v: unknown): string | null {
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+function count(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0;
+}
+
+function bool(v: unknown): boolean {
+  return v === true;
+}
+
+/**
+ * Fail-closed sanitization of whatever `page.evaluate` returned. A null, a non-object, or an unknown reason
+ * becomes `UNREADABLE` with no rows — never a partially-trusted reading, because the caller's next move is to
+ * store what this returns.
+ */
+export function sanitizeReviewPageReading(raw: unknown): CoupangReviewPageReading {
+  if (raw === null || typeof raw !== "object") return EMPTY_READING;
+  const r = raw as Record<string, unknown>;
+  const reason = REVIEW_READ_REASONS.includes(r["reason"] as ReviewReadReason)
+    ? (r["reason"] as ReviewReadReason)
+    : "UNREADABLE";
+  const rawRows = Array.isArray(r["rows"]) ? (r["rows"] as unknown[]).slice(0, MAX_ROWS) : [];
+  const rows: CoupangReviewRowReading[] = [];
+  for (let i = 0; i < rawRows.length; i += 1) {
+    const row = rawRows[i];
+    if (row === null || typeof row !== "object") continue;
+    const rr = row as Record<string, unknown>;
+    const body = str(rr["bodyText"]) ?? "";
+    rows.push({
+      rowIndex: count(rr["rowIndex"]),
+      dateText: str(rr["dateText"]),
+      ratingText: str(rr["ratingText"]),
+      ratingAria: str(rr["ratingAria"]),
+      bodyText: body.length > MAX_BODY_CHARS ? body.slice(0, MAX_BODY_CHARS) : body,
+      bodyTruncated: bool(rr["bodyTruncated"]) || body.length > MAX_BODY_CHARS,
+      bodyExpandable: bool(rr["bodyExpandable"]),
+      productText: str(rr["productText"]),
+      productNameText: str(rr["productNameText"]),
+      mediaCount: count(rr["mediaCount"]),
+    });
+  }
+  const pager = sanitizePager(r["pager"]);
+  const roles = Array.isArray(r["rolesResolved"])
+    ? (r["rolesResolved"] as unknown[]).filter((x): x is string => typeof x === "string")
+    : [];
+  return {
+    reason: reason === "OK" && rows.length === 0 ? "NO_ROWS" : reason,
+    tablesScanned: count(r["tablesScanned"]),
+    headerWidth: count(r["headerWidth"]),
+    excludedColumns: count(r["excludedColumns"]),
+    unmappedColumns: count(r["unmappedColumns"]),
+    duplicateRoles: count(r["duplicateRoles"]),
+    rolesResolved: Object.freeze(roles),
+    widthMismatchRows: count(r["widthMismatchRows"]),
+    rows: Object.freeze(rows),
+    pager,
+  };
+}
+
+const MAX_PAGE_NUMBERS = 200;
+
+/**
+ * Sanitize the pager half. A malformed or absent pager becomes {@link UNREAD_PAGER} — never a
+ * `found: false, hasNext: false` reading, which the session would correctly treat as "this is a
+ * one-page list" and complete on.
+ */
+function sanitizePager(raw: unknown): CoupangReviewPagerReading {
+  if (raw === null || typeof raw !== "object") return UNREAD_PAGER;
+  const p = raw as Record<string, unknown>;
+  const numbers = Array.isArray(p["pageNumbers"])
+    ? (p["pageNumbers"] as unknown[])
+        .filter((n): n is number => typeof n === "number" && Number.isInteger(n) && n > 0)
+        .slice(0, MAX_PAGE_NUMBERS)
+        .sort((a, b) => a - b)
+    : [];
+  const currentRaw = p["currentPage"];
+  const current =
+    typeof currentRaw === "number" && Number.isInteger(currentRaw) && currentRaw > 0 ? currentRaw : null;
+  const found = p["found"] === true;
+  // `resolved` is recomputed rather than trusted: the page said it, and a current page that is not in
+  // the numbers it also reported is not a reading anything should act on.
+  const resolved = found && current !== null && numbers.includes(current);
+  return {
+    found,
+    resolved,
+    pageNumbers: Object.freeze(numbers),
+    currentPage: resolved ? current : null,
+    hasNext: p["hasNext"] === true,
+    nextEnabled: p["hasNext"] === true && p["nextEnabled"] === true,
+    clustersFound: count(p["clustersFound"]),
+    clustersOfCells: count(p["clustersOfCells"]),
+    clusterSize: count(p["clusterSize"]),
+    ariaCurrentMarks: count(p["ariaCurrentMarks"]),
+    classMarks: count(p["classMarks"]),
+    nonLinkMarks: count(p["nonLinkMarks"]),
+    childShapes: shortStrings(p["childShapes"], 24),
+    regionLabels: shortStrings(p["regionLabels"], 20),
+    regionSkeleton: shortStrings(p["regionSkeleton"], 40),
+  };
+}
+
+/** Bounded string list from the page: capped in count and in per-entry length, non-strings dropped. */
+function shortStrings(raw: unknown, max: number): readonly string[] {
+  if (!Array.isArray(raw)) return Object.freeze([]);
+  return Object.freeze(
+    (raw as unknown[])
+      .filter((v): v is string => typeof v === "string" && v.length > 0 && v.length <= 24)
+      .slice(0, max),
+  );
+}
+
+/** Where the pager says this page sits in the list. `UNKNOWN` is the only answer that stops a walk. */
+export type PagerPosition = "FINAL_PAGE" | "MORE_PAGES" | "UNKNOWN";
+
+/**
+ * Read the pager's position, fail closed.
+ *
+ * A page is FINAL only when the screen positively says so: either there is no pager and no next control at
+ * all (a one-page list), or the pager resolved, this page is the highest number it offers, and its next
+ * control is absent or unpressable. Everything else is `MORE_PAGES` or `UNKNOWN`, and neither of those may
+ * become a coverage claim.
+ */
+export function pagerPosition(pager: CoupangReviewPagerReading): PagerPosition {
+  if (!pager.found) {
+    // **No numbers on the screen means no evidence of position, so the only safe answer is the absence of
+    // a control to press.** This branch briefly asked `nextEnabled` instead, reasoning that WING draws its
+    // arrows on every list and a one-page seller could otherwise never be told they were finished. Two
+    // things were wrong with that. A list of one page still prints the number `1`, so it resolves on the
+    // branch below and never arrives here. And this branch is reached only when NO cluster of page numbers
+    // was found anywhere — which is exactly when the reader falls back to scanning the whole document for
+    // anything arrow-shaped, so a dead `›` in a site header or a carousel would have been read as "the
+    // list ends here" and the walk would have claimed coverage after page 1.
+    //
+    // A drawn-but-dead arrow we cannot place is not evidence of the end. Only a screen offering nothing
+    // to press at all is a one-page list.
+    return pager.hasNext ? "UNKNOWN" : "FINAL_PAGE";
+  }
+  if (!pager.resolved || pager.currentPage === null) return "UNKNOWN";
+  const highest = pager.pageNumbers[pager.pageNumbers.length - 1];
+  if (highest === undefined) return "UNKNOWN";
+  // A current page the pager does not also offer is a contradiction, not a position. The sanitizer already
+  // refuses to mark such a reading resolved; this repeats the check so the function is safe for any caller,
+  // because the failure it prevents ("page 9 of 1,2,3" reading as past-the-end) completes a walk.
+  if (!pager.pageNumbers.includes(pager.currentPage)) return "UNKNOWN";
+  if (pager.currentPage < highest) return "MORE_PAGES";
+  // At the highest number the pager PRINTS — which on a windowed pager (1…10 of 50) is not the end. The
+  // next control is what tells those two apart, so it decides here rather than the number.
+  return pager.nextEnabled ? "MORE_PAGES" : "FINAL_PAGE";
+}
+
+/**
+ * **What Coupang prints where a buyer wrote nothing.**
+ *
+ * The design assumed a rating-only review leaves the body cell EMPTY. The first live backfill proved
+ * otherwise: WING renders the sentence `등록된 내용이 없습니다.` there, so the empty-cell guard never fired
+ * and **19 of 22 stored reviews carried a Coupang placeholder as if it were what a customer wrote**. Two of
+ * them then merged, which is exactly the silent collapse the guard existed to prevent — the placeholder is
+ * identical text, so two rating-only reviews of one product on one day at one score hash the same.
+ *
+ * Matched as a whole normalized cell, never as a substring: a real review that happens to contain the phrase
+ * is a real review.
+ */
+export const EMPTY_BODY_PLACEHOLDERS: readonly string[] = Object.freeze([
+  "등록된 내용이 없습니다.",
+  "등록된 내용이 없습니다",
+  "등록된 상품평이 없습니다.",
+  "내용 없음",
+]);
+
+/**
+ * **The expander is Coupang's word, not the buyer's.**
+ *
+ * A long review is printed cut off with a `더보기` control inside the same cell, and the cell's text is read
+ * whole — so the control's own label lands on the END of the stored body. Three things then go wrong at once,
+ * and none of them announces itself: the seller reads a review that ends in a button, the body fingerprint is
+ * computed over text no customer wrote, and locate anchors on that fingerprint — so the row would still match
+ * itself only because both sides carry the same defect.
+ *
+ * Stripped as a TRAILING word only, and only when the rest of the cell said something. A review that mentions
+ * 더보기 in the middle of a sentence keeps it: that is a customer's word, in a customer's sentence.
+ */
+export const BODY_EXPANDER_WORDS: readonly string[] = Object.freeze(["더보기", "전체보기", "펼쳐보기"]);
+
+export function stripExpanderChrome(body: string): string {
+  let out = body.trim();
+  // A cell can carry more than one (an expander and a collapse), so peel until nothing more comes off.
+  for (;;) {
+    const word = BODY_EXPANDER_WORDS.find((w) => out.endsWith(w));
+    if (word === undefined) return out;
+    // A cell holding only the control peels to nothing, which is correct: that is a cell with no review text
+    // in it, and it goes on to be recognised as textless rather than stored as a button label.
+    out = out.slice(0, out.length - word.length).trim();
+  }
+}
+
+/** True when the cell holds nothing a buyer wrote — blank, or the channel's own placeholder sentence. */
+export function isEmptyReviewBody(body: string): boolean {
+  const trimmed = body.trim();
+  return trimmed.length === 0 || EMPTY_BODY_PLACEHOLDERS.includes(trimmed);
+}
+
+/** `2026.08.11` / `2026-8-1` / `2026/08/11 14:03` → `2026-08-11`. Anything else → null; never a guess. */
+export function parseReviewDate(text: string | null): string | null {
+  if (text === null) return null;
+  const m = /(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})/.exec(text);
+  if (m === null) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/**
+ * A 1..5 rating from the cell's own text, else from its aria label. `5`, `5.0`, `5점`, `평점 5점` and
+ * `5점 만점에 4점` all read; the LAST 1..5 figure wins, because Korean rating labels put the score after the
+ * scale. A half star (`4.5`) floors to 4 rather than rounding up — an overstated rating is the direction that
+ * hides a complaint.
+ */
+export function parseReviewRating(text: string | null, aria: string | null): number | null {
+  for (const source of [text, aria]) {
+    if (source === null) continue;
+    const matches = source.match(/[1-5](?:\.\d)?/g);
+    if (matches === null || matches.length === 0) continue;
+    const value = Number(matches[matches.length - 1]);
+    if (Number.isFinite(value) && value >= 1 && value <= 5) return Math.floor(value);
+  }
+  return null;
+}
+
+/**
+ * `123456789 (987654321)` → the pair. A cell printing one number gives a product id and no option id; a cell
+ * printing none gives neither. The parenthesised half is the option id by Coupang's own header
+ * (`노출상품ID (옵션ID)`), so position decides, never magnitude.
+ */
+export function parseProductIds(text: string | null): { productId: string | null; vendorItemId: string | null } {
+  if (text === null) return { productId: null, vendorItemId: null };
+  const parenthesised = /\((\d{3,})\)/.exec(text);
+  const outside = parenthesised === null ? text : text.replace(parenthesised[0], " ");
+  const first = /(\d{3,})/.exec(outside);
+  return {
+    productId: first === null ? null : first[1]!,
+    vendorItemId: parenthesised === null ? null : parenthesised[1]!,
+  };
+}
+
+/** Which check a row failed. Named so the caller counts a reason rather than merely a loss. */
+export type ReviewRowDropReason = keyof CoupangReviewDropCounts;
+
+/**
+ * Canonicalize ONE row. Exported because locate needs the row's page POSITION alongside its canonical form,
+ * and a second copy of these four checks living in the locate path is how the two would come to disagree
+ * about which rows exist.
+ */
+export function canonicalizeReviewRow(
+  row: CoupangReviewRowReading,
+): { review: CoupangAcquiredReview } | { dropReason: ReviewRowDropReason } {
+  const writtenOn = parseReviewDate(row.dateText);
+  if (writtenOn === null) return { dropReason: "unparseableDate" };
+  const rating = parseReviewRating(row.ratingText, row.ratingAria);
+  if (rating === null) return { dropReason: "unreadableRating" };
+  const { productId, vendorItemId } = parseProductIds(row.productText);
+  if (productId === null) return { dropReason: "noProductId" };
+  const raw = stripExpanderChrome(row.bodyText);
+  // Coupang's placeholder is the channel's own UI text. It is not stored as a body — the review becomes
+  // textless, which is a state the record carries rather than a sentence it repeats.
+  const textless = isEmptyReviewBody(raw);
+  const body = textless ? "" : raw;
+  return {
+    review: {
+      writtenOn,
+      rating,
+      body,
+      textless,
+      bodyTruncated: row.bodyTruncated,
+      bodyExpandable: row.bodyExpandable,
+      productId,
+      vendorItemId,
+      productName: row.productNameText,
+      mediaCount: row.mediaCount,
+      bodyFingerprint: reviewBodyFingerprint(body),
+    },
+  };
+}
+
+/**
+ * Canonicalize a page reading. A reading whose reason is not `OK` yields nothing — a structural failure is not
+ * a partial harvest, and half of a review list is indistinguishable from a whole one once it is stored.
+ */
+export function canonicalizeReviewRows(reading: CoupangReviewPageReading): CoupangReviewCanonicalization {
+  const dropped = { unparseableDate: 0, unreadableRating: 0, noProductId: 0 };
+  if (reading.reason !== "OK") {
+    return { reviews: Object.freeze([]), dropped: Object.freeze(dropped), textlessCount: 0 };
+  }
+
+  const reviews: CoupangAcquiredReview[] = [];
+  for (const row of reading.rows) {
+    const outcome = canonicalizeReviewRow(row);
+    if ("dropReason" in outcome) {
+      dropped[outcome.dropReason] += 1;
+      continue;
+    }
+    reviews.push(outcome.review);
+  }
+  return {
+    reviews: Object.freeze(reviews),
+    dropped: Object.freeze(dropped),
+    textlessCount: reviews.filter((r) => r.textless).length,
+  };
+}
+
+/**
+ * The collector's own boundary key for one acquired review — how the pager walk recognizes a page it has
+ * already taken. It is NOT the storage identity: the backend's content hash decides that, and this never
+ * leaves the agent. The body reaches it as its fingerprint, so the boundary set holds no review text.
+ */
+export function localBoundaryKey(review: CoupangAcquiredReview): string {
+  const parts = [review.productId, review.vendorItemId ?? "", review.writtenOn, String(review.rating), review.bodyFingerprint];
+  return parts.map((p) => `${p.length}:${p}`).join("");
+}

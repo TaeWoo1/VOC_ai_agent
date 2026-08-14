@@ -48,6 +48,7 @@ import { log } from "../log";
 import { launchNaverContext } from "../profile";
 import { CoupangWingReviewDriver } from "../action-window/coupang-wing-review-driver";
 import {
+  chooseDedupeKey,
   classifyAcquisitionFeasibility,
   classifyOwnershipScope,
   type ReviewDigitExpectation,
@@ -308,6 +309,7 @@ async function main(): Promise<void> {
     const census = best?.census ?? null;
     const acquisition = classifyAcquisitionFeasibility(census);
     const scope = classifyOwnershipScope(census);
+    const keyChoice = chooseDedupeKey(census);
 
     // SANITIZED record → stdout. Integers, tag names, attribute KINDS, and our own expectation ids.
     // No page text, no attribute value, no class name, no selector, no raw URL, no media source.
@@ -331,6 +333,14 @@ async function main(): Promise<void> {
           // WHICH route resolved the row, never merely THAT one did. The column is the strong reading.
           unitSource: census?.unitSource ?? null,
           columnProbe: census?.columnProbe ?? null,
+          // THE KEY, and the locate anchor, which are one reading. A position makes it extractable; a length
+          // and a coverage say whether it is a key at all.
+          keyChoice,
+          // Where the rows differ in width. A split here is the cause of a partial identifier, and it is the
+          // difference between a screen with a narrower row kind and one that prints a placeholder.
+          leafCounts: census?.unit.leafCounts ?? [],
+          cells: census?.cells ?? [],
+          selects: census?.selects ?? [],
         },
         null,
         2,
@@ -356,6 +366,28 @@ async function main(): Promise<void> {
       console.error("");
       console.error("⚠ No candidate is unique per review unit. A dedupe key built on any of these would fold");
       console.error("  every review into one row — and the fold would look exactly like de-duplication working.");
+    }
+
+    // The key is reported separately from the feasibility verdict on purpose. "An identifier exists somewhere
+    // in the row" and "a key can be READ from position N" are different claims, and only the second is
+    // something an acquisition — or a locate — can be built on.
+    if (keyChoice.verdict === "KEY_FOUND") {
+      console.error("");
+      console.error(
+        `✓ A key covers every row: ${keyChoice.digitLength} digits at cell position ${keyChoice.cellIndex}.`,
+      );
+      console.error("  The same value is the [쿠팡에서 보기] locate anchor — one reading, so they cannot disagree.");
+    } else if (keyChoice.verdict === "PARTIAL_COVERAGE") {
+      console.error("");
+      console.error(
+        `⚠ The best key is at cell position ${keyChoice.cellIndex} and misses ${keyChoice.unitsMissing} of the rows.`,
+      );
+      console.error("  Check `leafCounts` before concluding anything: a SPLIT means those rows are a narrower");
+      console.error("  row kind, and a UNIFORM list means they reach the cell and print no id. Different causes.");
+    } else if (keyChoice.verdict === "NO_UNIQUE_POSITION") {
+      console.error("");
+      console.error("⚠ No cell position holds a per-row-unique run. There is nothing to key on and nothing to");
+      console.error("  locate by — not 'we could not find it', but 'the positions were read and none qualifies'.");
     }
     process.exitCode = discoveryExitCode("MEASURED", acquisition.verdict !== "UNDETERMINED");
   } finally {

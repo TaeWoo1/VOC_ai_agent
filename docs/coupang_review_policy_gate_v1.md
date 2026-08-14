@@ -221,15 +221,27 @@ intention:
 | **D2** | **No public product-page access.** Excluded as a path, permanently and independently. |
 | **D3** | **No author collection or storage** — 구매자 ID, nickname, masked ID, or any author-derived value. Not stored, not logged, not used in a dedupe key. |
 | **D4** | **No raw HTML, DOM, screenshots.** The value-free census discipline from the three discovery sittings carries forward. |
-| **D5** | **No permanent storage of review body text in this unit.** Metadata and dedupe structure only. |
-| **D6** | **No transmission to external LLMs.** |
-| **D7** | **Metadata and dedupe structure only** — rating, date, product identifiers, the review identifier, media indicators. |
+| ~~**D5**~~ | ~~No permanent storage of review body text.~~ **Lifted 2026-08-14 — see §6.1.1.** |
+| **D6** | **No transmission to external LLMs** in this unit. Not required for the MVP. |
+| **D7** | **Storable:** review raw text, rating, date, product identifiers (productId / vendorItemId), media metadata. Nothing else. |
+| **D8** | **No marketplace writes.** Coupang offers sellers no reply to a 상품평, so there is no reply, draft, or write flow to build — and none is built. |
 
-**D5 is the one that shapes the product.** A VOC/analysis channel that may not keep review text is, for now,
-a *change-detection and volume* channel: it can tell a seller that ratings moved, which product, when, and
-how many — not what the reviews said. That is a real and useful thing, and it is smaller than "VOC 분석".
-Naming that gap now is cheaper than discovering it in a demo. Lifting D5 is a separate decision, not a
-detail of implementation.
+#### 6.1.1 D5 lifted — raw review text is persisted
+
+**Product-owner decision, 2026-08-14, made with the clauses in view.** Raw review text is stored.
+
+This is the decision that moves the channel from change-detection to actual VOC: a seller can now be told
+*what buyers said*, not merely that ratings moved. It is also the decision that runs closest to the clauses
+in §3 — 서비스 이용 정책 '시스템 부정 행위' 3) (무단 복제) and 공통 §14③ (복사·복제·가공). Storing the text
+is the act those clauses describe most directly.
+
+**It is recorded here as a product decision, not as a legal determination.** `POLICY` stays `UNCLEAR`; the
+GA gate (§6.2) is unchanged and still requires a written answer. What changed is that the pilot no longer
+holds back the part of the product that makes it worth building.
+
+**D3 did not move with it.** Author values remain excluded — no 구매자 ID, nickname, or masked ID, anywhere,
+including dedupe keys. Review text is stored; the person who wrote it is not identified. That separation is
+the reason this is defensible at all, and it is enforced by test.
 
 ### 6.2 GA release gate
 
@@ -245,8 +257,10 @@ The pilot may run. **Coupang REVIEW may not go GA** unless all of these hold:
    cross-seller aggregation, no external publication. §2②6 of the 상품평 운영정책 shows Coupang treats
    republication of reviews as its own right to license — so we take none of it.
 5. **G5 — Seller consent is explicit and revocable**, and revocation deletes the stored corpus.
-6. **G6 — Any relaxation of D5** (storing review body text) is decided explicitly and separately, and is
-   itself gated on G1.
+6. **G6 — Raw review text.** This document originally required any relaxation of D5 to be gated on G1.
+   **It was not.** The product owner lifted D5 on 2026-08-14 for the pilot, deliberately and with the
+   clauses in view (§6.1.1). Recorded as it happened rather than reworded to look satisfied: **raw text
+   persistence is in the pilot ahead of the policy answer, and remains gated on G1 for GA.**
 
 If G1 fails, the honest outcome is not "ship it quietly". Coupang REVIEW stays a pilot, and the roadmap
 says so.
@@ -259,8 +273,9 @@ says so.
 |---|---|---|
 | **TECHNICALLY_POSSIBLE** | **CONDITIONAL_YES** | three live sittings, `docs/coupang_review_feasibility_v1.md` |
 | **POLICY** | **UNCLEAR** | §14 read and silent; three clauses reach obliquely; no permission anywhere. §5 is the enquiry that would resolve it |
-| **DEVELOPMENT** | **PILOT_ALLOWED** | product-owner decision, §6. Bounded by D1–D7 |
+| **DEVELOPMENT** | **PILOT_ALLOWED** | product-owner decision, §6. Bounded by D1–D4, D6–D8; **D5 lifted** (§6.1.1) |
 | **GA_RELEASE** | **POLICY_GATED** | G1–G6, §6.2 |
+| **PRODUCT** | **acquisition + VOC + locate** | list / detail / new-review notification, and `[쿠팡에서 보기]` → Action Window exact locate. **Never a reply channel** — WING offers no reply (D8) |
 
 `docs/multi-channel-connector-roadmap.md` §4.1 keeps Coupang REVIEW at **BLOCKED**, and the connector's
 `REVIEW_API` stays an honest `unsupportedScope`. Nothing here promotes anything.
@@ -277,3 +292,60 @@ says so.
   **Still open:** whether to send the §5 enquiry, and when to revisit **D5** (review body text), which is
   what separates a change-detection channel from a VOC-analysis one.
 - **Coupang decision:** Q1–Q5. Nobody else can answer these, and no amount of further reading will.
+
+---
+
+## 9. Live findings, 2026-08-14 — and two defects the data found in the probe
+
+Two `READ_ONLY` sittings on the operator's own 상품평 screen, one manifest each.
+
+### 9.1 What the screen is
+
+Ten reviews, each its own `TBODY`, resolved from the `노출상품ID (옵션ID)` column with 20 field labels
+agreeing. Every row carries a detail link, an image, and a star-class element. Row widths uniform at 15
+cells. Pager reaches page 5; **0 `input[type=date]`**; four `<select>`s carrying 6, 3, 3 and 3 options.
+
+### 9.2 The key question, answered: **there is none**
+
+| | |
+|---|---|
+| Best column (position 4) | 10 of 10 rows populated, **9 distinct values** |
+| `distinctRowSignatures` | **9 of 10** |
+| Verdict | **`NO_UNIQUE_POSITION`** |
+
+Two reviews are identical in every number the screen prints. No single-column key, and no composite key —
+the second is what `distinctRowSignatures` exists to say, and no per-column reading could have said it.
+
+### 9.3 The probe was wrong twice, and its own output is what proved it
+
+**First: bucketing by digit length.** The run reported a 10-digit identifier "unique where present, on 7 of
+10 rows" and called it `PARTIAL_COVERAGE`, 3 rows missing. The per-position reading showed the same column
+holding 8-, 9- and 10-digit values at 2 + 1 + 7 = 10. **No row was missing**, and two rows *collided*. A
+fully-populated non-unique column had been reported as a partially-covering key — the opposite state, stated
+confidently. Length is a property of a value, not of the question.
+
+**Second: counting runs instead of rows.** Rewriting the rule, the first version counted each digit run at a
+position separately. A date cell prints `2026`, `08`, `11` on every row, so three identical rows scored three
+distinct values and passed as a key. Caught by a fixture before any rerun. What is counted per position is
+now the row's whole tuple, sorted.
+
+Both are the same failure this workstream keeps meeting: **an indirect measurement answering wrongly and
+confidently.** It is the reason §5d of the approval contract now permits direct reading during seller-owned
+`READ_ONLY` calibration — a count-only probe does not merely answer slowly, it can answer backwards.
+
+### 9.4 The dropdowns are not what we guessed
+
+Zero of the four selects matched any period word we supplied, and — after adding `N개월` / `N일` / `N년`
+shape patterns — zero matched any period *shape* either. Whatever those dropdowns offer, it is not a period
+range in the vocabulary or the form we assumed. **Incremental acquisition by date range is unestablished**,
+and the pager (5 pages) is the only paging structure actually observed.
+
+### 9.5 What acquisition gets to use
+
+A **content hash**, which is the ingestion spine's existing fallback when a source carries no `external_id`.
+The two colliding rows differ in what the buyer wrote. This is available only because §6.1.1 lifted D5; the
+earlier instruction not to key on review body was given when review body was not stored, and is superseded
+by that decision rather than quietly ignored.
+
+**`[쿠팡에서 보기]` cannot be anchored on a number.** No per-row-unique value exists to re-find a review by,
+so locate has to match on what is visible — which §5d now permits and which the previous posture did not.

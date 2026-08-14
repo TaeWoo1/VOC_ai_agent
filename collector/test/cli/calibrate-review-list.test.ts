@@ -99,6 +99,21 @@ describe("the run declares what it is", () => {
     }
   });
 
+  it("**the scope names the measurements that were ADDED**, not only the ones it started with", () => {
+    // An approval that describes less than the run does is the same defect as one that describes more. The
+    // per-position reading, the row-width counts, and the dropdown option counting are all new work in the
+    // page, and the operator is approving those too.
+    const operation = REVIEW_DISCOVERY_OPERATION;
+    expect(operation).toContain("PER CELL POSITION");
+    expect(operation).toContain("how many cells each row holds");
+    expect(operation).toContain("options");
+
+    // And the budget states what those readings do NOT return, positively, so it is checkable.
+    const budget = COUPANG_WING_REVIEW_DISCOVERY_SCOPE.maxActions;
+    expect(budget).toContain("0 review identifier values");
+    expect(budget).toContain("0 dropdown option texts returned");
+  });
+
   it("the scope names the identifier reading, which is what the run is FOR", () => {
     for (const text of [REVIEW_DISCOVERY_OPERATION.toLowerCase(), DISCOVERY_BANNER_LINES.join(" ").toLowerCase()]) {
       expect(text).toContain("de-duplicat");
@@ -138,6 +153,27 @@ describe("the run declares what it is", () => {
     }
     // And the budget states the absence positively, so it is checkable rather than merely true.
     expect(COUPANG_WING_REVIEW_DISCOVERY_SCOPE.maxActions).toContain("0 reply-control lookups");
+  });
+
+  it("**the harness banner does not claim a measurement the run removed** — it did, and this pins it", () => {
+    // The bootstrap banner outlived the measurement it described: it told the operator the run establishes
+    // "whether a seller REPLY CONTROL exists" for two units after that measurement was deleted. The TypeScript
+    // surfaces were covered by the test above; the shell the operator actually reads was not.
+    const banner = readFileSync(resolve(HERE, "../../../tools/coupang-local/wing-review-bootstrap.sh"), "utf8");
+    expect(banner).not.toContain("REPLY CONTROL exists");
+    expect(banner).not.toContain("counts whether such a control exists");
+    // The run's actual product, named where the operator will read it.
+    expect(banner).toContain("PER CELL POSITION");
+
+    // The manifest the operator approves from must name the same additions. Under-describing a run is the
+    // same defect as over-describing it, and this file is what they read at the moment of granting.
+    const manifest = readFileSync(resolve(HERE, "../../../tools/coupang-local/wing-review-preflight.sh"), "utf8");
+    expect(manifest).toContain("CELL POSITION");
+    expect(manifest).toContain("how many cells each row");
+    expect(manifest).toContain("쿠팡에서 보기");
+    expect(manifest).toContain("period dropdown is counted");
+    // The word survived in a PASS line too. Every operator-visible mention had to go, not the prose ones only.
+    expect(manifest).not.toContain("reply readings");
   });
 
   it("**an undetermined acquisition answer is its own exit code**, never rounded up to success", () => {
@@ -203,8 +239,12 @@ describe("which frame gets reported", () => {
           unitPrintedDigitLengths: [],
           unitsWithDetailLink: 0,
           idCandidates: [],
+          leafCounts: [],
         },
         pagination: { dateInputCount: 0, selectCount: 0, numericPagerCount: 0, highestPagerNumber: 0 },
+        cells: [],
+        selects: [],
+        distinctRowSignatures: 0,
       },
     };
   }

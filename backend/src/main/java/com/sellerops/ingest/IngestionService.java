@@ -82,16 +82,18 @@ public class IngestionService {
     public IngestOutcome ingestReviews(UUID orgId, UUID channelId, List<CanonicalReview> rows) {
         Tally tally = new Tally();
         Set<String> seen = new HashSet<>();
-        // Resolve the channel's dedup-key formula version once per batch (not per row).
-        int keyVersion = ReviewDedupKey.versionFor(
-                channels.findById(channelId).map(Channel::getCode).orElse(null));
+        // The channel's formula, resolved once per batch. The VERSION is then decided per row: a textless
+        // review keys on its purchased option (v3) while a review with text keeps the channel's own version.
+        // `reviews.dedup_key_version` has always been a per-row column; this is the first source that needs it.
+        String channelCode = channels.findById(channelId).map(Channel::getCode).orElse(null);
         for (CanonicalReview row : rows) {
             try {
                 Product product = productService.resolveOrCreate(orgId, row.productName(), row.sku());
                 boolean hasExternal = isPresent(row.externalId());
+                int keyVersion = ReviewDedupKey.versionForRow(channelCode, row.textless());
                 String hash = hasExternal ? null
                         : ReviewDedupKey.contentHash(keyVersion, channelId, product.getId(),
-                        datePart(row.receivedAt()), row.body(), row.rating());
+                        datePart(row.receivedAt()), row.body(), row.rating(), row.sourceOptionId());
                 String token = hasExternal ? "ext:" + row.externalId() : "hash:" + hash;
 
                 // A duplicate — whether of a stored row or of an earlier row in THIS file — is still
@@ -126,6 +128,11 @@ public class IngestionService {
                 entity.setDedupKeyVersion(keyVersion);
                 entity.setReplyState(row.replyState());
                 entity.setRepliedAt(row.repliedAt());
+                // Source facts, written on INSERT only. They are not part of any dedup key, so a duplicate
+                // must not be able to rewrite them either — see refreshReplyState for why a re-import is
+                // deliberately allowed to change reply state and nothing else.
+                entity.setSourceOptionId(row.sourceOptionId());
+                entity.setMediaCount(row.mediaCount());
                 trySave(tally, row.sourceRow(),
                         () -> reviews.save(entity).getId(),
                         () -> existsReview(orgId, channelId, hasExternal, row.externalId(), hash));

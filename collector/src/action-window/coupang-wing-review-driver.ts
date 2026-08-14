@@ -82,6 +82,13 @@ export const WING_REVIEW_TEXT_SHAPES: readonly ReviewTextShape[] = Object.freeze
   { id: "dateTime", pattern: "^[0-9]{4}[-./][0-9]{1,2}[-./][0-9]{1,2}[ T][0-9]{1,2}:[0-9]{2}" },
   { id: "ratingNumber", pattern: "^[1-5](\\.[0-9])?$" },
   { id: "ratingStars", pattern: "^[★☆]{1,5}$" },
+  // Period SHAPES, added after the first live reading matched zero options against our exact period words
+  // while four dropdowns sat on the screen carrying 6, 3, 3 and 3 options. A guessed word answers only
+  // "is my guess there"; a shape answers "what kind of thing is in this list", which is the question when the
+  // screen's vocabulary is not ours to know.
+  { id: "periodMonths", pattern: "^[0-9]{1,2}\\s?개월$" },
+  { id: "periodDays", pattern: "^[0-9]{1,3}\\s?일$" },
+  { id: "periodYears", pattern: "^[0-9]{1,2}\\s?년$" },
 ]);
 
 /**

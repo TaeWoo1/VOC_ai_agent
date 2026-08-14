@@ -80,6 +80,25 @@ export class El {
   get parentElement(): El | null {
     return this.parent;
   }
+  /**
+   * The table interfaces, derived from the tree rather than stored — the acquisition reader addresses a row by
+   * `tHead` / `tBodies` / `rows`, and a fake that answered `undefined` to those would pass every reader test by
+   * finding nothing. `rows` follows the real semantics: a section's own `TR` children, and for a table, its
+   * sections' rows plus any `TR` sitting directly under it.
+   */
+  get tHead(): El | null {
+    return this.children.find((c) => c.tagName === "THEAD") ?? null;
+  }
+  get tBodies(): El[] {
+    return this.children.filter((c) => c.tagName === "TBODY");
+  }
+  get rows(): El[] {
+    if (this.tagName === "THEAD" || this.tagName === "TBODY" || this.tagName === "TFOOT") {
+      return this.children.filter((c) => c.tagName === "TR");
+    }
+    const sections = this.children.filter((c) => ["THEAD", "TBODY", "TFOOT"].includes(c.tagName));
+    return [...sections.flatMap((s) => s.rows), ...this.children.filter((c) => c.tagName === "TR")];
+  }
   /** DOM semantics: a shadow child's `parentNode` is the root, whose `host` is the element it hangs off. */
   get parentNode(): El | ShadowRoot | null {
     return this.parent ?? this.shadowParent;
@@ -106,6 +125,25 @@ export class El {
   }
   getAttribute(name: string): string | null {
     return this.attributes.find((a) => a.name === name)?.value ?? null;
+  }
+  /**
+   * The three mutations an ANNOTATION is allowed to make: a marker attribute, an inline outline, and a scroll.
+   * They live here so the locate tests can assert the ring landed on one row — and so a script that reached
+   * for anything beyond them (a click, a focus, a submit) would find nothing on this fake to reach for.
+   */
+  readonly style: Record<string, string> = {};
+  scrolledIntoView = false;
+  setAttribute(name: string, value: string): void {
+    const existing = this.attributes.find((a) => a.name === name);
+    if (existing) existing.value = value;
+    else this.attributes.push({ name, value });
+  }
+  removeAttribute(name: string): void {
+    const at = this.attributes.findIndex((a) => a.name === name);
+    if (at >= 0) this.attributes.splice(at, 1);
+  }
+  scrollIntoView(): void {
+    this.scrolledIntoView = true;
   }
   computedStyle(): { display: string; visibility: string } {
     return { display: this.display, visibility: this.display === "hidden" ? "hidden" : "visible" };

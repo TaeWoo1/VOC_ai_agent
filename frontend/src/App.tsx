@@ -22,6 +22,7 @@ import { SettingsHome } from "./pages/app/SettingsHome";
 // new IA; the ones scheduled for replacement are rebuilt in Slices 4-6.
 import { Orders } from "./pages/Orders";
 import { ChannelWorkspace } from "./pages/app/ChannelWorkspace";
+import { ChannelReviews } from "./pages/app/ChannelReviews";
 import { Upload } from "./pages/Upload";
 import { ReviewImport } from "./pages/ReviewImport";
 import { OperationsHome } from "./pages/OperationsHome";
@@ -98,6 +99,9 @@ export function App() {
             except "the list is over there". */}
         <Route path="/connect/channels" element={<Navigate to="/connect" replace />} />
         <Route path="/connect/channels/:accountId" element={<ChannelWorkspace />} />
+        {/* The channel's review record. Under the channel rather than beside the inbox: it is what
+            one connection collected, and it is read-only on a channel with no reply. */}
+        <Route path="/connect/channels/:accountId/reviews" element={<ChannelReviews />} />
         <Route path="/connect/upload" element={<Upload />} />
         <Route path="/connect/review-history" element={<ReviewImport />} />
         <Route path="/connect/imports" element={<OperationsHome />} />

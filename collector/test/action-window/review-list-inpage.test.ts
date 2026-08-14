@@ -32,6 +32,7 @@ import {
 } from "../../src/action-window/coupang-wing-review-driver";
 import {
   classifyAcquisitionFeasibility,
+  chooseDedupeKey,
   classifyOwnershipScope,
   sanitizeReviewListCensus,
   type ReviewDigitExpectation,
@@ -717,5 +718,302 @@ describe("the 노출상품ID (옵션ID) column", () => {
     // The option id differs per row; the product id does not. Both are printed, and only one is a key.
     expect(c.columnProbe.distinctFirstRunValues).toBeLessThan(c.columnProbe.cellsInColumn);
     expect(printed.length).toBeGreaterThan(0);
+  });
+});
+
+/* ────────────────── the five questions one sitting has to close ────────────────── */
+
+/**
+ * **Ten rows shaped exactly like the live reading: a per-review number on only some of them.**
+ *
+ * `mode` is the whole point. Two screens produce the same "7 of 10 carry a 10-digit run" summary and mean
+ * completely different things, and only a per-position reading can tell them apart:
+ *
+ *  - `MISSING_CELL` — three rows are a narrower row shape and never reach that position.
+ *  - `EMPTY_CELL`   — every row has the cell; on three of them it prints a placeholder.
+ *
+ * The option id is deliberately shared across rows. It is per OPTION, not per review, so it must not be
+ * mistaken for a key — and a screen where the only unique-per-row value is the review number is the one that
+ * proves the chooser is picking on uniqueness rather than on looking like an id.
+ */
+function coverageGrid(carriers: number, mode: "MISSING_CELL" | "EMPTY_CELL"): El {
+  const header = el({ tag: "div", attrs: { class: "rv-row rv-hdr" } }).add(
+    el({ tag: "span", text: "평점", box: rowBox(60, 0, 80) }),
+    el({ tag: "span", text: "작성일", box: rowBox(60, 90, 100) }),
+    el({ tag: "th", box: rowBox(60, CATALOG_X.left, CATALOG_X.width) }).add(
+      el({
+        tag: "div",
+        attrs: { class: "text-wrapper" },
+        text: "노출상품ID (옵션ID)",
+        box: rowBox(60, CATALOG_X.left, CATALOG_X.width),
+      }).add(el({ tag: "br" })),
+    ),
+  );
+  const rows: El[] = [];
+  for (let i = 0; i < 10; i++) {
+    const top = 100 + i * 30;
+    const cells: El[] = [];
+    if (i < carriers) {
+      cells.push(el({ tag: "span", text: `90000000${String(10 + i)}`, box: rowBox(top, 0, 80) }));
+    } else if (mode === "EMPTY_CELL") {
+      cells.push(el({ tag: "span", text: "-", box: rowBox(top, 0, 80) }));
+    }
+    cells.push(el({ tag: "span", text: REVIEW_DATE, box: rowBox(top, 90, 100) }));
+    // One product, three options across ten rows — an option id is not a review id.
+    cells.push(
+      el({
+        tag: "span",
+        text: `${PRODUCT} (8765432${i % 3})`,
+        box: rowBox(top, CATALOG_X.left, CATALOG_X.width),
+      }),
+    );
+    rows.push(el({ tag: "div", attrs: { class: "rv-row" } }).add(...cells));
+  }
+  // The header lives in its own container, as the live screen has it — a THEAD above ten TBODYs. Making it a
+  // sibling of the rows would count it as an eleventh row and quietly depress every coverage figure below.
+  return el({ tag: "body" }).add(
+    el({ tag: "div", attrs: { class: "rv-grid" } }).add(
+      el({ tag: "div", attrs: { class: "rv-head" } }).add(header),
+      el({ tag: "div", attrs: { class: "rv-body" } }).add(...rows),
+    ),
+  );
+}
+
+describe("why an identifier covers only some rows, and what may be keyed on", () => {
+  it("**a narrower row shape shows up in the leaf counts** — the cause, without a second sitting", () => {
+    const c = census(coverageGrid(7, "MISSING_CELL"));
+
+    expect(c.unit.unitCount).toBe(10);
+    // Seven rows carry three cells, three carry two. The split IS the answer to "why 7 of 10".
+    const wide = c.unit.leafCounts.filter((n) => n === 3).length;
+    const narrow = c.unit.leafCounts.filter((n) => n === 2).length;
+    expect(wide).toBe(7);
+    expect(narrow).toBe(3);
+  });
+
+  it("**an empty cell is a different screen, and reads differently** — same summary, opposite cause", () => {
+    const c = census(coverageGrid(7, "EMPTY_CELL"));
+
+    // Every row reaches every position, so the leaf counts are uniform...
+    expect(new Set(c.unit.leafCounts).size).toBe(1);
+    // ...and the shortfall is in the RUNS at that position, not in whether the position exists.
+    const first = c.cells.find((cell) => cell.cellIndex === 0);
+    expect(first?.unitsWithCell).toBe(10);
+    expect(first?.runs.find((r) => r.digitLength === 10)?.unitsCarrying).toBe(7);
+  });
+
+  it("**7 of 10 is PARTIAL_COVERAGE, and names the three rows it would drop**", () => {
+    const key = chooseDedupeKey(census(coverageGrid(7, "EMPTY_CELL")));
+
+    expect(key.verdict).toBe("PARTIAL_COVERAGE");
+    expect(key.digitLength).toBe(10);
+    expect(key.coverage).toBeCloseTo(0.7);
+    // The number that matters: an acquisition built on this key loses three reviews in ten, silently.
+    expect(key.unitsMissing).toBe(3);
+  });
+
+  it("full coverage at a known position is a KEY — and the position is what makes it extractable", () => {
+    const key = chooseDedupeKey(census(coverageGrid(10, "EMPTY_CELL")));
+
+    expect(key.verdict).toBe("KEY_FOUND");
+    expect(key.coverage).toBe(1);
+    expect(key.unitsMissing).toBe(0);
+    // A key we could store but not re-find would be worse than none — the locate anchor is this same reading.
+    expect(key.cellIndex).not.toBeNull();
+    expect(key.digitLength).toBe(10);
+  });
+
+  it("**an option id is not chosen**, though it is printed, numeric, and looks like an identifier", () => {
+    const c = census(coverageGrid(10, "EMPTY_CELL"));
+    const key = chooseDedupeKey(c);
+
+    // Three options across ten rows: present on every row, and useless as a key.
+    const catalog = c.cells.find((cell) => cell.runs.some((r) => r.digitLength === 8));
+    expect(catalog?.runs.find((r) => r.digitLength === 8)?.uniquePerUnit).toBe(false);
+    expect(key.digitLength).toBe(10);
+  });
+
+  it("an unresolved row yields UNDETERMINED — never 'there is no key'", () => {
+    // The confident zero this whole probe exists to avoid: a screen whose rows were never found produces
+    // "no unique position" and "we never looked" identically, and only one of them is a finding.
+    const bare = el({ tag: "body" }).add(el({ tag: "div" }).add(el({ tag: "span", text: "상품평" })));
+    expect(chooseDedupeKey(census(bare)).verdict).toBe("UNDETERMINED");
+  });
+
+  it("no cell position, no key — a census that never measured positions cannot assert one", () => {
+    expect(chooseDedupeKey(null).verdict).toBe("UNDETERMINED");
+    expect(chooseDedupeKey(undefined).verdict).toBe("UNDETERMINED");
+  });
+
+  it("**no review text, buyer name, or identifier value survives the per-position reading**", () => {
+    const serialized = JSON.stringify(census(coverageGrid(7, "EMPTY_CELL")));
+
+    expect(serialized).not.toContain(PRODUCT);
+    expect(serialized).not.toContain("9000000010");
+    expect(serialized).not.toContain(REVIEW_DATE);
+    expect(serialized).not.toContain("87654320");
+  });
+});
+
+describe("how much history one acquisition could reach", () => {
+  it("a dropdown is profiled for RANGE, not merely counted", () => {
+    const root = withControls(coverageGrid(10, "EMPTY_CELL"));
+    const c = census(root);
+
+    // The bare `selectCount` says a filter exists; the profile says what it can be asked for.
+    expect(c.pagination.selectCount).toBeGreaterThan(0);
+    expect(c.selects.length).toBe(c.pagination.selectCount);
+  });
+
+  it("options carrying a period word WE supplied are counted, and the words never travel", () => {
+    const withPeriods = el({ tag: "body" }).add(
+      el({ tag: "select" }).add(
+        el({ tag: "option", text: "1개월" }),
+        el({ tag: "option", text: "3개월" }),
+        el({ tag: "option", text: "직접입력" }),
+        el({ tag: "option", text: "전체" }),
+      ),
+      coverageGrid(10, "EMPTY_CELL"),
+    );
+    const c = census(withPeriods);
+    const select = c.selects[0];
+    expect(select).toBeDefined();
+
+    expect(select?.optionCount).toBe(4);
+    // 1개월 / 3개월 / 직접입력 are ours; 전체 is not one we supplied, so it is not counted.
+    expect(select?.optionsMatchingControlLabels).toBe(3);
+    expect(select?.insideUnit).toBe(false);
+  });
+});
+
+describe("the column the first live reading actually found", () => {
+  /**
+   * **The live shape, reproduced: one column, three digit lengths, and a collision hiding inside it.**
+   *
+   * Ten rows carried a number at the same position — two of 8 digits (the SAME value), one of 9, seven of 10
+   * (all different). Bucketed by length, the largest bucket looked like a key on 7 of 10 rows, and the run
+   * reported `PARTIAL_COVERAGE` with "3 rows missing". Both halves were wrong: no row was missing, and two
+   * rows were indistinguishable.
+   */
+  function liveShapedGrid(): El {
+    const header = el({ tag: "div", attrs: { class: "rv-row rv-hdr" } }).add(
+      el({ tag: "span", text: "작성일", box: rowBox(60, 90, 100) }),
+      el({ tag: "th", box: rowBox(60, CATALOG_X.left, CATALOG_X.width) }).add(
+        el({
+          tag: "div",
+          attrs: { class: "text-wrapper" },
+          text: "노출상품ID (옵션ID)",
+          box: rowBox(60, CATALOG_X.left, CATALOG_X.width),
+        }).add(el({ tag: "br" })),
+      ),
+    );
+    // Two rows share one 8-digit value, one row has 9 digits, seven have distinct 10-digit values.
+    const values = ["87654321", "87654321", "987654321", ...Array.from({ length: 7 }, (_, i) => `900000001${i}`)];
+    const rows = values.map((v, i) => {
+      const top = 100 + i * 30;
+      return el({ tag: "div", attrs: { class: "rv-row" } }).add(
+        el({ tag: "span", text: v, box: rowBox(top, 0, 80) }),
+        el({ tag: "span", text: REVIEW_DATE, box: rowBox(top, 90, 100) }),
+        el({
+          tag: "span",
+          text: `${PRODUCT} (8765432${i % 3})`,
+          box: rowBox(top, CATALOG_X.left, CATALOG_X.width),
+        }),
+      );
+    });
+    return el({ tag: "body" }).add(
+      el({ tag: "div", attrs: { class: "rv-grid" } }).add(
+        el({ tag: "div", attrs: { class: "rv-head" } }).add(header),
+        el({ tag: "div", attrs: { class: "rv-body" } }).add(...rows),
+      ),
+    );
+  }
+
+  it("**every row is populated — 'three rows missing' was an artefact of bucketing by length**", () => {
+    const c = census(liveShapedGrid());
+    const cell = c.cells.find((x) => x.cellIndex === 0);
+
+    expect(c.unit.unitCount).toBe(10);
+    // The per-length buckets still show 2 / 1 / 7 …
+    expect(cell?.runs.find((r) => r.digitLength === 8)?.unitsCarrying).toBe(2);
+    expect(cell?.runs.find((r) => r.digitLength === 10)?.unitsCarrying).toBe(7);
+    // … and the column-level reading says what they add up to.
+    expect(cell?.unitsWithAnyRun).toBe(10);
+  });
+
+  it("**and it is NOT a key — two rows carry the same value**, which the buckets could not show", () => {
+    const c = census(liveShapedGrid());
+    const cell = c.cells.find((x) => x.cellIndex === 0);
+
+    // Ten rows, nine distinct values. The 10-digit bucket alone reported 7 carriers and 7 distinct, which is
+    // what made a colliding column look like a partial key.
+    expect(cell?.distinctValuesAcrossLengths).toBe(9);
+    expect(chooseDedupeKey(c).verdict).not.toBe("KEY_FOUND");
+    expect(chooseDedupeKey(c).verdict).not.toBe("PARTIAL_COVERAGE");
+  });
+
+  it("a composite key is still available here, and is reported as its own answer", () => {
+    // The two colliding rows differ in their option ids, so their whole-row digit signatures differ. That is a
+    // real answer and a worse key: wider, order-dependent, and not one value a locate can be handed.
+    const c = census(liveShapedGrid());
+
+    expect(c.distinctRowSignatures).toBe(10);
+    expect(chooseDedupeKey(c).verdict).toBe("COMPOSITE_ONLY");
+  });
+
+  it("**two rows identical in every number means no key at all** — not 'we could not find one'", () => {
+    const twins = el({ tag: "body" }).add(
+      el({ tag: "div", attrs: { class: "rv-grid" } }).add(
+        el({ tag: "div", attrs: { class: "rv-head" } }).add(
+          el({ tag: "div", attrs: { class: "rv-row rv-hdr" } }).add(
+            el({ tag: "span", text: "작성일", box: rowBox(60, 90, 100) }),
+            el({ tag: "th", box: rowBox(60, CATALOG_X.left, CATALOG_X.width) }).add(
+              el({
+                tag: "div",
+                attrs: { class: "text-wrapper" },
+                text: "노출상품ID (옵션ID)",
+                box: rowBox(60, CATALOG_X.left, CATALOG_X.width),
+              }).add(el({ tag: "br" })),
+            ),
+          ),
+        ),
+        el({ tag: "div", attrs: { class: "rv-body" } }).add(
+          ...[0, 1, 2].map((i) =>
+            el({ tag: "div", attrs: { class: "rv-row" } }).add(
+              el({ tag: "span", text: REVIEW_DATE, box: rowBox(100 + i * 30, 90, 100) }),
+              el({
+                tag: "span",
+                text: `${PRODUCT} (87654321)`,
+                box: rowBox(100 + i * 30, CATALOG_X.left, CATALOG_X.width),
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+    const c = census(twins);
+
+    expect(c.unit.unitCount).toBe(3);
+    expect(c.distinctRowSignatures).toBe(1);
+    expect(chooseDedupeKey(c).verdict).toBe("NO_UNIQUE_POSITION");
+  });
+
+  it("dropdown options are profiled by SHAPE once the guessed words all miss", () => {
+    const withPeriods = el({ tag: "body" }).add(
+      el({ tag: "select" }).add(
+        el({ tag: "option", text: "1개월" }),
+        el({ tag: "option", text: "6개월" }),
+        el({ tag: "option", text: "7일" }),
+        el({ tag: "option", text: "전체" }),
+      ),
+      liveShapedGrid(),
+    );
+    const select = census(withPeriods).selects[0];
+
+    expect(select?.optionCount).toBe(4);
+    expect(select?.optionsMatchingShapes.find((s) => s.shapeId === "periodMonths")?.unitCount).toBe(2);
+    expect(select?.optionsMatchingShapes.find((s) => s.shapeId === "periodDays")?.unitCount).toBe(1);
+    // 전체 matches no shape, and no option TEXT appears anywhere in the result.
+    expect(JSON.stringify(select)).not.toContain("전체");
   });
 });

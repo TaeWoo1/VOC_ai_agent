@@ -9,6 +9,8 @@ import type {
   CapabilityView,
   ChannelCapabilityOverview,
   ChannelResponse,
+  ChannelReviewDetailView,
+  ChannelReviewPageView,
   ConnectionInfoView,
   ConnectionCapabilityView,
   NaverSetupView,
@@ -1202,6 +1204,35 @@ export const api = {
     const { data } = await http.post<ReviewIssueView>(
       `/api/review-issues/${encodeURIComponent(issueId)}/restore`,
       {},
+    );
+    return data;
+  },
+
+  /**
+   * One page of a connected channel's review record. NO mock fallback, deliberately: a dead backend
+   * rendering invented reviews would be the one failure a seller cannot detect — they have no other
+   * copy of what buyers wrote to check it against.
+   */
+  async getChannelReviewsStrict(
+    accountId: string,
+    params: { sort?: "newest" | "lowest"; page?: number; size?: number } = {},
+  ): Promise<ChannelReviewPageView> {
+    const query = new URLSearchParams();
+    if (params.sort) query.set("sort", params.sort);
+    if (params.page !== undefined) query.set("page", String(params.page));
+    if (params.size !== undefined) query.set("size", String(params.size));
+    const { data } = await http.get<ChannelReviewPageView>(
+      `/api/seller-accounts/${encodeURIComponent(accountId)}/channel-reviews${
+        query.toString() ? `?${query}` : ""
+      }`,
+    );
+    return data;
+  },
+
+  /** One review in full, with the target `[쿠팡에서 보기]` re-finds it by. No mock fallback, as above. */
+  async getChannelReviewStrict(accountId: string, reviewId: string): Promise<ChannelReviewDetailView> {
+    const { data } = await http.get<ChannelReviewDetailView>(
+      `/api/seller-accounts/${encodeURIComponent(accountId)}/channel-reviews/${encodeURIComponent(reviewId)}`,
     );
     return data;
   },

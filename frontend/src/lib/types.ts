@@ -1264,3 +1264,75 @@ export interface ReviewIssueDetailView {
   evidence: IssueEvidenceView[];
   history: IssueStateEventView[];
 }
+
+/* ─────────────────────── channel review record (Coupang WING 상품평) ─────────────────────── */
+
+/**
+ * One row of a connected channel's review record. `preview` is the redacted one-line snippet the
+ * backend produced, never the review body — and it is null when too little survived redaction to be
+ * worth showing, which must render as nothing rather than as an empty quote.
+ *
+ * There is no author field. Coupang prints the buyer's name beside every review on the seller's own
+ * screen; it is not read, not stored, and has no field here to arrive in.
+ */
+export interface ChannelReviewItemView {
+  id: string;
+  writtenOn: string | null;
+  rating: number | null;
+  negative: boolean;
+  preview: string | null;
+  productName: string | null;
+  productId: string | null;
+  vendorItemId: string | null;
+  mediaCount: number;
+  /**
+   * The buyer rated and wrote nothing. Render it as what it is — 별점만 남긴 상품평 — never as "본문을
+   * 표시할 수 없습니다", which would blame SellerOps for something the buyer chose.
+   */
+  textless: boolean;
+  /** Arrived in the most recent import — derived from that import's start, never a read flag. */
+  isNew: boolean;
+}
+
+/**
+ * One page of the record, plus what the last import claimed. `lastImportComplete` is load-bearing:
+ * a list of reviews cannot say whether it is all of them, and an acquisition that stopped early
+ * looks exactly like a channel with fewer reviews.
+ */
+export interface ChannelReviewPageView {
+  page: number;
+  size: number;
+  total: number;
+  newCount: number;
+  lastImportAt: string | null;
+  lastImportComplete: boolean;
+  items: ChannelReviewItemView[];
+}
+
+/** Exactly what `[쿠팡에서 보기]` re-finds the review by. Nothing here names a person. */
+export interface ChannelReviewLocateTarget {
+  productId: string | null;
+  vendorItemId: string | null;
+  writtenOn: string | null;
+  rating: number | null;
+  bodyFingerprint: string;
+}
+
+/**
+ * One review read in full. `body` is redacted (`bodyRedacted` says whether anything was replaced),
+ * and there is no reply field anywhere — Coupang gives sellers no way to answer a 상품평.
+ */
+export interface ChannelReviewDetailView {
+  id: string;
+  writtenOn: string | null;
+  rating: number | null;
+  negative: boolean;
+  body: string | null;
+  bodyRedacted: boolean;
+  productName: string | null;
+  mediaCount: number;
+  /** The buyer rated and wrote nothing — see `ChannelReviewItemView.textless`. */
+  textless: boolean;
+  isNew: boolean;
+  locateTarget: ChannelReviewLocateTarget;
+}

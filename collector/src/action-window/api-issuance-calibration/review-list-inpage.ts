@@ -46,6 +46,8 @@ import { CENSUS_PRIMITIVES_FRAGMENT } from "./wing-census-primitives";
 const REVIEW_FRAGMENT = `
   var MAX_UNITS = 200;
   var MAX_UNIT_NODES = 400;
+  /* Cell positions per row. A row wider than this is not one we could key on anyway. */
+  var MAX_CELLS_PER_UNIT = 32;
   /* **What counts as an element that PRINTS text.**
      The primitives call an element a leaf when it has no element children at all, and on the real WING
      상품평 header that rule reported
@@ -420,6 +422,110 @@ const REVIEW_FRAGMENT = `
       highestPagerNumber: highest
     };
   }
+  /* **The same identifier question, asked per cell POSITION instead of per row.**
+     A run that is unique-where-present tells acquisition nothing it can act on: it names no column, so nothing
+     can extract it, and it cannot say why some rows lack it. Both close here. Cells are indexed by their order
+     among the row's own text-printing leaves - a position, never a selector. Values are compared in this
+     function's own keys and never returned; what leaves is a count per length per position. */
+  function cellsOf(units, SHAPES, regexes) {
+    var byIndex = {}, leafCounts = [], i, j, k;
+    for (i = 0; i < units.length; i++) {
+      var leaves = textLeavesOf(within(units[i]));
+      leafCounts.push(leaves.length);
+      if (leaves.length > MAX_CELLS_PER_UNIT) { leaves = leaves.slice(0, MAX_CELLS_PER_UNIT); }
+      for (j = 0; j < leaves.length; j++) {
+        if (!byIndex[j]) { byIndex[j] = { cellIndex: j, units: {}, runs: {}, shapes: {}, anyUnits: {}, anyValues: {} }; }
+        var slot = byIndex[j];
+        slot.units[i] = 1;
+        var runs = textDigitRuns(leaves[j]);
+        for (k = 0; k < runs.length; k++) {
+          var len = runs[k].length;
+          if (!slot.runs[len]) { slot.runs[len] = { units: {}, values: {} }; }
+          slot.runs[len].units[i] = 1;
+          slot.runs[len].values[runs[k]] = 1;
+        }
+        /* The same question asked of the COLUMN rather than of a length bucket. A column holding 8-, 9- and
+           10-digit values is ONE column; bucketing reports its biggest bucket as a partial key and hides both
+           that every row is populated and that two of them collide. The first live reading did exactly that.
+           What is counted is the row's WHOLE tuple at this position, not each run separately: a date cell prints
+           2026, 08 and 11 on every row, and counting those individually makes three identical rows look like
+           three distinct values. Sorted so cell-internal order cannot manufacture a difference. */
+        if (runs.length > 0) {
+          slot.anyUnits[i] = 1;
+          slot.anyValues[runs.slice().sort().join(',')] = 1;
+        }
+        var text = textOf(leaves[j]);
+        for (k = 0; k < regexes.length; k++) {
+          if (!regexes[k] || !regexes[k].test(text)) { continue; }
+          var sid = SHAPES[k].id;
+          if (!slot.shapes[sid]) { slot.shapes[sid] = {}; }
+          slot.shapes[sid][i] = 1;
+        }
+      }
+    }
+    var out = [], key, x;
+    for (key in byIndex) {
+      var b = byIndex[key], u = 0, au = 0, av = 0;
+      for (x in b.units) { u++; }
+      for (x in b.anyUnits) { au++; }
+      for (x in b.anyValues) { av++; }
+      var runsOut = [];
+      for (var L in b.runs) {
+        var cu = 0, cv = 0;
+        for (x in b.runs[L].units) { cu++; }
+        for (x in b.runs[L].values) { cv++; }
+        runsOut.push({ digitLength: parseInt(L, 10), unitsCarrying: cu, distinctValues: cv });
+      }
+      var shapesOut = [];
+      for (var s in b.shapes) {
+        var sc = 0;
+        for (x in b.shapes[s]) { sc++; }
+        shapesOut.push({ shapeId: s, unitCount: sc });
+      }
+      out.push({
+        cellIndex: b.cellIndex, unitsWithCell: u, unitsWithAnyRun: au, distinctValuesAcrossLengths: av,
+        runs: runsOut, shapeHits: shapesOut
+      });
+    }
+    return { cells: out, leafCounts: leafCounts };
+  }
+  /* A dropdown profiled for RANGE REACH. Four selects and no date input says a period filter exists but not
+     what it can ask for; an option count plus how many options carry a period word WE supplied is the
+     difference between 'there is a dropdown' and 'the acquisition can request 6 months'. Option text is
+     compared here against our own literals and reduced to a count before anything is returned. */
+  function selectsOf(all, units, CONTROLS, SHAPES, regexes) {
+    var out = [], i, o, c, u, sx;
+    for (i = 0; i < all.length; i++) {
+      if (String(all[i].tagName || '').toUpperCase() !== 'SELECT') { continue; }
+      var opts; try { opts = slice(all[i].querySelectorAll('option')); } catch (e) { opts = []; }
+      var matching = 0, shapeTally = {};
+      for (o = 0; o < opts.length; o++) {
+        var t = norm(textOf(opts[o]));
+        for (c = 0; c < CONTROLS.length; c++) {
+          if (t === norm(CONTROLS[c].exactText)) { matching++; break; }
+        }
+        /* Exact literals answer 'is the word I guessed present'. A shape answers 'what KIND of thing is in this
+           list', which is the only answerable question when the screen's vocabulary is unknown - and the first
+           live reading matched ZERO options against our period words while four dropdowns sat on the screen. */
+        for (sx = 0; sx < regexes.length; sx++) {
+          if (!regexes[sx] || !regexes[sx].test(t)) { continue; }
+          var sk = SHAPES[sx].id;
+          shapeTally[sk] = (shapeTally[sk] || 0) + 1;
+        }
+      }
+      var shapeOut = [];
+      for (var sid in shapeTally) { shapeOut.push({ shapeId: sid, unitCount: shapeTally[sid] }); }
+      var inside = false;
+      for (u = 0; u < units.length; u++) {
+        if (units[u].contains && units[u].contains(all[i])) { inside = true; break; }
+      }
+      out.push({
+        optionCount: opts.length, optionsMatchingControlLabels: matching,
+        optionsMatchingShapes: shapeOut, insideUnit: inside
+      });
+    }
+    return out;
+  }
   function census(LABELS, CONTROLS, SHAPES, DIGITS, CLASS_TOKENS, HEADERS) {
     var collected = collectAll();
     if (collected === null) { return { reason: 'SCAN_TRUNCATED' }; }
@@ -543,6 +649,30 @@ const REVIEW_FRAGMENT = `
       textShapes.push({ id: SHAPES[j].id, leafCount: leafCount, unitCount: inUnit });
     }
 
+    /* The per-position reading. Computed from the SAME resolved units as everything above, so a key it reports
+       and a row count reported beside it can never describe different things. */
+    var cellReading = cellsOf(units, SHAPES, regexes);
+
+    /* **Are the rows distinguishable AT ALL?** When no single column is unique the real question is whether a
+       COMPOSITE key exists, and one integer answers it: the number of distinct combinations of every digit run
+       in a row. Equal to the row count means every row differs somewhere; below it means two rows carry the
+       same numbers everywhere and no key of any kind can be built from this screen. The combinations are built
+       and compared here and never returned. */
+    var sigSeen = {}, distinctSignatures = 0;
+    for (i = 0; i < units.length; i++) {
+      var sigNodes = within(units[i]), parts = [], sd, sr;
+      for (sd = 0; sd < sigNodes.length; sd++) {
+        var sruns = anchorRunsOf(sigNodes[sd]);
+        for (sr = 0; sr < sruns.length; sr++) { parts.push('a' + sruns[sr].digits); }
+        if (!printsText(sigNodes[sd])) { continue; }
+        var sprint = textDigitRuns(sigNodes[sd]);
+        for (sr = 0; sr < sprint.length; sr++) { parts.push('p' + sprint[sr]); }
+      }
+      parts.sort();
+      var sig = parts.join('|');
+      if (!sigSeen[sig]) { sigSeen[sig] = 1; distinctSignatures++; }
+    }
+
     return {
       reason: 'OK',
       elementsScanned: all.length,
@@ -576,9 +706,13 @@ const REVIEW_FRAGMENT = `
         unitAttributeDigitLengths: attrLengths,
         unitPrintedDigitLengths: printLengths,
         unitsWithDetailLink: withLink,
-        idCandidates: idCandidatesFrom(idTally)
+        idCandidates: idCandidatesFrom(idTally),
+        leafCounts: cellReading.leafCounts
       },
-      pagination: paginationOf(all)
+      pagination: paginationOf(all),
+      cells: cellReading.cells,
+      distinctRowSignatures: distinctSignatures,
+      selects: selectsOf(all, units, CONTROLS, SHAPES, regexes)
     };
   }
 `;

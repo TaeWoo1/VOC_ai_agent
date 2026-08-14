@@ -413,9 +413,38 @@ established a right to collect, and structure alone promotes nothing.
 
 ### What the next unit closes, in ONE sitting
 
-**Cleared to run.** `docs/coupang_review_policy_gate_v1.md` §6 sets development to `PILOT_ALLOWED`; the
-policy answer gates **GA**, not the sitting. The sitting is bounded by the data-minimization contract
-D1–D7 — in particular **no author values and no review body text**.
+**Ran, twice, 2026-08-14. The answer is negative and it is firm.**
+
+| Reading | Value |
+|---|---|
+| Rows resolved | 10 (`TBODY`, from the 노출상품ID (옵션ID) column, 20 labels agreeing) |
+| Row widths | **uniform — 15 cells on every row** |
+| Best column | position 4: 10 of 10 rows populated, **9 distinct values** |
+| `distinctRowSignatures` | **9 of 10** |
+| Key verdict | **`NO_UNIQUE_POSITION`** |
+
+**Two reviews on this page are identical in every number the screen prints** — same product, same option,
+same date, same rating, same everything numeric. So there is no single-column key *and no composite key
+either*: `distinctRowSignatures` below the row count is the reading that rules both out at once, and no
+per-column measurement could have produced it.
+
+The earlier "10-digit identifier covering 7 of 10" was an artefact of bucketing digit runs by length. Every
+row was populated; two collided. Both halves of the old summary were wrong, and the correction is recorded
+in `docs/coupang_review_policy_gate_v1.md` §9.
+
+**A review-level identifier is not present in the list screen's numbers.** It may exist in the detail view
+or in an XHR payload; neither was read, and neither is claimed.
+
+### What that means for acquisition
+
+The remaining honest key is a **content hash** — which is not a workaround but the path this repo's
+ingestion spine already implements (`external_id` first, content hash when there is none). The two colliding
+rows differ in what the buyer *wrote*, so text separates them where numbers cannot. That is available only
+because raw review text is now persisted (`coupang_review_policy_gate_v1.md` §6.1.1); under the previous
+constraint this channel would have had no key at all.
+
+The earlier instruction not to build a key on review body was given when review body was not being stored.
+It is superseded by that decision, and the substitution is recorded here rather than made silently.
 
 1. **Why the 10-digit identifier covers only 7 of 10 rows** — a different review type, a deleted one, or an
    id only some rows expose.

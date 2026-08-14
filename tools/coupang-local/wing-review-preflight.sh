@@ -89,7 +89,7 @@ check_browser_launchable
 # after the operator has granted one. The count is shown; the identifiers are not — they are ours, but they are
 # still account data.
 if [ -z "$PRODUCT_IDS" ]; then
-  pass "no product identifiers supplied — the structure and reply readings do not need one (catalog scope will report NOT_ESTABLISHED)"
+  pass "no product identifiers supplied — the structure and identifier readings do not need one (catalog scope will report NOT_ESTABLISHED)"
 else
   ID_COUNT="$(printf '%s' "$PRODUCT_IDS" | tr ',' '\n' | grep -cE '^[a-zA-Z][a-zA-Z0-9_]{0,32}:[0-9]{1,24}$' || true)"
   TOTAL_PAIRS="$(printf '%s' "$PRODUCT_IDS" | tr ',' '\n' | grep -c . || true)"
@@ -184,6 +184,18 @@ echo "      That needs a number that is on every review and DIFFERENT on each on
 echo "      counts two things — how many reviews carry one, and how many different values there are. Equal"
 echo "      counts mean a usable key; many reviews sharing one value means a category code that would fold"
 echo "      every review into a single row."
+echo "    • **NEW: it asks that question at each CELL POSITION in the row, not just 'somewhere in the row'.**"
+echo "      The last run found a 10-digit number that was different on every review carrying it — but only"
+echo "      7 reviews in 10 carried it, and nothing said WHICH column it was in. A key nobody can point to"
+echo "      cannot be read back out, so this run reports the position, and reports how many cells each row"
+echo "      holds. If three rows are simply narrower, that is the answer to the 7-in-10; if every row is the"
+echo "      same width, the cause is something else entirely. Same headline, opposite causes."
+echo "    • That one value would do double duty: the de-duplication key AND the anchor for [쿠팡에서 보기],"
+echo "      which has to find one specific review again on a re-drawn screen. One reading decides both, so"
+echo "      they cannot disagree — a key we could store but not find again would look like it worked."
+echo "    • **NEW: each period dropdown is counted** — how many options it has, and how many of them equal a"
+echo "      period word SellerOps supplied (1개월 · 3개월 · 6개월 …). The option TEXT is compared inside the"
+echo "      page and only the count comes out. This is what says how far back a collection could reach."
 echo "    • It has NO review number to look for. Coupang publishes no review API, so SellerOps holds none —"
 echo "      this screen is first contact. And a 상품ID is NOT a review id: many reviews share one product, so"
 echo "      collecting on it would fold them together. The counts are what tell those apart."
