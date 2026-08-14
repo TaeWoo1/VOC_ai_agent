@@ -164,6 +164,14 @@ describe("the run declares what it is", () => {
     expect(banner).not.toContain("counts whether such a control exists");
     // The run's actual product, named where the operator will read it.
     expect(banner).toContain("PER CELL POSITION");
+
+    // The manifest the operator approves from must name the same additions. Under-describing a run is the
+    // same defect as over-describing it, and this file is what they read at the moment of granting.
+    const manifest = readFileSync(resolve(HERE, "../../../tools/coupang-local/wing-review-preflight.sh"), "utf8");
+    expect(manifest).toContain("CELL POSITION");
+    expect(manifest).toContain("how many cells each row");
+    expect(manifest).toContain("쿠팡에서 보기");
+    expect(manifest).toContain("period dropdown is counted");
   });
 
   it("**an undetermined acquisition answer is its own exit code**, never rounded up to success", () => {
