@@ -98,6 +98,17 @@ export interface CoupangReviewPagerReading {
    */
   readonly childShapes: readonly string[];
   readonly regionLabels: readonly string[];
+  /**
+   * **The region's skeleton: tags and attribute NAMES, never a value.**
+   *
+   * Four readings refused, and each fix aimed at a marker the screen turned out not to use. The reason each
+   * was a guess is that nothing ever reported what the markup IS. Each entry is
+   * `depth + TAG + [attribute names] + textLength` — an attribute NAME is structure (`href`, `class`,
+   * `data-page`) and is exactly what distinguishes a current page from a link to one. No attribute value,
+   * no class string, no text: a length is not a text. Bounded to 40 elements of one region, emitted only
+   * on a refusal, and never persisted.
+   */
+  readonly regionSkeleton: readonly string[];
 }
 
 /** One document's reading: the structural verdict plus the rows, if any survived it. */
@@ -177,6 +188,7 @@ export const UNREAD_PAGER: CoupangReviewPagerReading = Object.freeze({
   nonLinkMarks: 0,
   childShapes: Object.freeze([]),
   regionLabels: Object.freeze([]),
+  regionSkeleton: Object.freeze([]),
 });
 
 /**
@@ -305,6 +317,7 @@ function sanitizePager(raw: unknown): CoupangReviewPagerReading {
     nonLinkMarks: count(p["nonLinkMarks"]),
     childShapes: shortStrings(p["childShapes"], 24),
     regionLabels: shortStrings(p["regionLabels"], 20),
+    regionSkeleton: shortStrings(p["regionSkeleton"], 40),
   };
 }
 

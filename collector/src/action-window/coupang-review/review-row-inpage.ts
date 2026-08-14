@@ -371,6 +371,25 @@ function reviewReaderFragment(
       var dis = disabledish(el) ? 'd' : '-';
       return tag + cls + link + aria + dis;
     }
+    /* **The region's skeleton — tags and attribute NAMES, never a value.**
+     *
+     * Four readings have now refused, and each fix was aimed at a marker the screen turned out not to use:
+     * an outer-cell class, an inner-cell class, aria, being the one non-link. The reason each guess was a
+     * guess is that nothing ever reported what the markup actually IS.
+     *
+     * So this returns the shape: per element, its depth, its tag, the NAMES of its attributes, and how long
+     * its text is. An attribute name is structure — href, class, data-page — and it is the thing that
+     * distinguishes a current page from a link to one. No attribute VALUE, no class string, and no text is
+     * returned; a length is not a text. Bounded to 40 elements of one region.
+     */
+    function skeletonOf(el, depth) {
+      var names = [], attrs = el.attributes || [];
+      for (var a = 0; a < attrs.length && names.length < 8; a++) { names.push(attrs[a].name); }
+      names.sort();
+      var len = norm(el.textContent).length;
+      return depth + String(el.tagName || '?').toUpperCase() + '[' + names.join(' ') + ']' + len;
+    }
+    var regionSkeleton = [];
     var childShapes = [], regionLabels = [];
     var region = host === null ? null : (parentOfEl(host) || host);
     if (host !== null) {
@@ -381,6 +400,13 @@ function reviewReaderFragment(
       }
     }
     if (region !== null) {
+      regionSkeleton.push(skeletonOf(region, 0));
+      var skelNodes = region.querySelectorAll ? region.querySelectorAll('*') : [];
+      for (var sk = 0; sk < skelNodes.length && regionSkeleton.length < 40; sk++) {
+        var d = 1, up = parentOfEl(skelNodes[sk]);
+        while (up && up !== region && d < 9) { d++; up = parentOfEl(up); }
+        regionSkeleton.push(skeletonOf(skelNodes[sk], d));
+      }
       var inRegion = region.querySelectorAll ? region.querySelectorAll('*') : [];
       for (var rl = 0; rl < inRegion.length && regionLabels.length < 20; rl++) {
         var leaf = inRegion[rl];
@@ -398,7 +424,7 @@ function reviewReaderFragment(
                hasNext: hasNext, nextEnabled: nextEnabled,
                clustersFound: clustersFound, clustersOfCells: clustersOfCells, clusterSize: 0,
                ariaCurrentMarks: 0, classMarks: 0, nonLinkMarks: 0,
-               childShapes: childShapes, regionLabels: regionLabels };
+               childShapes: childShapes, regionLabels: regionLabels, regionSkeleton: regionSkeleton };
     }
 
     var numbers = [], nodes = [], hostKids = host.children || [];
@@ -442,7 +468,7 @@ function reviewReaderFragment(
              hasNext: hasNext, nextEnabled: nextEnabled,
              clustersFound: clustersFound, clustersOfCells: clustersOfCells, clusterSize: nodes.length,
              ariaCurrentMarks: ariaMarks, classMarks: classMarks, nonLinkMarks: nonLinkMarks,
-             childShapes: childShapes, regionLabels: regionLabels };
+             childShapes: childShapes, regionLabels: regionLabels, regionSkeleton: regionSkeleton };
   }
 
   var tables = Array.prototype.slice.call(document.querySelectorAll('table'), 0, MAX_TABLES);

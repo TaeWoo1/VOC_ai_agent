@@ -481,6 +481,21 @@ describe("the pager census, executed", () => {
     expect(readWith(box).pager.currentPage).toBe(2);
   });
 
+  it("reports the region's skeleton as tags and attribute NAMES, and no value among them", () => {
+    const box = el({ tag: "div", attrs: { class: "paging" } }).add(
+      el({ tag: "span" }).add(el({ tag: "a", text: "1", attrs: { href: "/reviews?page=1", "data-page": "1" } })),
+      el({ tag: "span" }).add(el({ tag: "a", text: "2", attrs: { href: "/reviews?page=2", "data-page": "2" } })),
+    );
+    const reading = readWith(box);
+    const skeleton = reading.pager.regionSkeleton.join(" ");
+
+    // Names, not values: the attribute that distinguishes a current page from a link to one is a NAME.
+    expect(skeleton).toContain("data-page");
+    expect(skeleton).toContain("href");
+    expect(skeleton).not.toContain("/reviews?page=");
+    expect(skeleton).not.toContain("paging");
+  });
+
   it("reports the shape of each numeric child, so a refusal can be designed against", () => {
     const reading = readWith(pager({ numbers: [1, 2, 3], current: 2, next: "enabled" }));
 

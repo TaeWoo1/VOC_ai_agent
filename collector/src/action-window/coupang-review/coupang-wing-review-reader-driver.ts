@@ -167,6 +167,7 @@ export class CoupangWingReviewReaderDriver {
         : {
             pagerShapes: reading.pager.childShapes.join(","),
             pagerLabels: reading.pager.regionLabels.join(","),
+            pagerSkeleton: reading.pager.regionSkeleton.join(" "),
           }),
     });
     return reading;
