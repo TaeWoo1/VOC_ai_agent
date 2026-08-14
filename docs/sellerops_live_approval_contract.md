@@ -415,6 +415,55 @@ handoff cannot reach PREPARED on a screen nobody has measured. Full contract: [`
 
 ---
 
+## 5d. Reading during calibration — `do not persist`, not `do not read`
+
+**Product-owner decision, 2026-08-14.** On a **seller-owned** surface, under a `READ_ONLY` manifest, a
+calibration run **may read the screen directly**: visible text, DOM, and attributes, including review text,
+product names, `productId` / `vendorItemId`, links and pagination structure. Several hypotheses may be
+settled in one sitting.
+
+### Why the default changed
+
+The value-free census was built for a real reason and it worked: three 고객문의 sittings and three 상품평
+sittings produced readings that leaked nothing. But it costs a sitting per question, and on the 상품평 screen
+it cost more than that — the run reported a *partial key covering 7 of 10 rows* when the truth was *a fully
+populated column with two colliding values*. Counts could express neither, and the correction took two more
+rounds. **An indirect probe does not just answer slowly; it can answer wrongly and confidently**, which is
+the failure mode this repo has spent the most time on.
+
+The principle was always `do not expose`. It had hardened into `do not read`, and those are not the same
+rule. Reading a name off a screen the seller is already looking at exposes nothing; writing it into a
+database, a log, or a repo fixture does.
+
+### Still prohibited, and these are unchanged
+
+| | |
+|---|---|
+| **Secrets** | passwords, API secrets, cookies, session tokens — never collected, on any surface, in any mode. The `CREDENTIAL_READ` path (§5c) remains the only exception and keeps its own barrier. |
+| **Buyer identity at rest** | never persisted to a database, a log, or a repo fixture unless the product needs it. Seeing it during inspection is fine; keeping it is the act that matters. |
+| **Raw DOM / HTML** | never committed to the repository wholesale. |
+| **Marketplace actions** | a `READ_ONLY` sitting still performs 0 clicks, 0 inputs, 0 submissions. Reading more does not license acting. |
+| **Writes** | still require their own fresh, explicit `WRITE` approval. Nothing here touches that. |
+
+### What this does not relax
+
+- The **manifest still binds**. A run may only do what its own manifest says — a broader reading posture is
+  not a licence to exceed the approval in hand. The manifest wording changes first, then the run.
+- The **operator still presses**. Every barrier in §5a/§5b stands.
+- **Sanitized/count-only probing is still the right tool where the risk is real** — credential cells, and any
+  field whose exposure would be the harm itself. It is now a deliberate choice for those fields rather than
+  the default for every field.
+
+### The honest cost
+
+A direct read makes it *easier* to persist something by accident, because the value is now in hand rather
+than reduced to a count before it could travel. The protection moves from "it never crossed the boundary" to
+"we chose not to keep it" — a weaker guarantee that depends on the persistence layer being right. That is
+the trade the decision makes, stated plainly rather than left implicit, and it puts the weight on the
+storage tests: what a run may read is now wider than what it may keep, so the keeping is what gets pinned.
+
+---
+
 ## 6. UI / CLI display
 
 The approval-waiting screen/CLI shows only:

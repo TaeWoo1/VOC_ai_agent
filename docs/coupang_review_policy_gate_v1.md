@@ -292,3 +292,60 @@ says so.
   **Still open:** whether to send the §5 enquiry, and when to revisit **D5** (review body text), which is
   what separates a change-detection channel from a VOC-analysis one.
 - **Coupang decision:** Q1–Q5. Nobody else can answer these, and no amount of further reading will.
+
+---
+
+## 9. Live findings, 2026-08-14 — and two defects the data found in the probe
+
+Two `READ_ONLY` sittings on the operator's own 상품평 screen, one manifest each.
+
+### 9.1 What the screen is
+
+Ten reviews, each its own `TBODY`, resolved from the `노출상품ID (옵션ID)` column with 20 field labels
+agreeing. Every row carries a detail link, an image, and a star-class element. Row widths uniform at 15
+cells. Pager reaches page 5; **0 `input[type=date]`**; four `<select>`s carrying 6, 3, 3 and 3 options.
+
+### 9.2 The key question, answered: **there is none**
+
+| | |
+|---|---|
+| Best column (position 4) | 10 of 10 rows populated, **9 distinct values** |
+| `distinctRowSignatures` | **9 of 10** |
+| Verdict | **`NO_UNIQUE_POSITION`** |
+
+Two reviews are identical in every number the screen prints. No single-column key, and no composite key —
+the second is what `distinctRowSignatures` exists to say, and no per-column reading could have said it.
+
+### 9.3 The probe was wrong twice, and its own output is what proved it
+
+**First: bucketing by digit length.** The run reported a 10-digit identifier "unique where present, on 7 of
+10 rows" and called it `PARTIAL_COVERAGE`, 3 rows missing. The per-position reading showed the same column
+holding 8-, 9- and 10-digit values at 2 + 1 + 7 = 10. **No row was missing**, and two rows *collided*. A
+fully-populated non-unique column had been reported as a partially-covering key — the opposite state, stated
+confidently. Length is a property of a value, not of the question.
+
+**Second: counting runs instead of rows.** Rewriting the rule, the first version counted each digit run at a
+position separately. A date cell prints `2026`, `08`, `11` on every row, so three identical rows scored three
+distinct values and passed as a key. Caught by a fixture before any rerun. What is counted per position is
+now the row's whole tuple, sorted.
+
+Both are the same failure this workstream keeps meeting: **an indirect measurement answering wrongly and
+confidently.** It is the reason §5d of the approval contract now permits direct reading during seller-owned
+`READ_ONLY` calibration — a count-only probe does not merely answer slowly, it can answer backwards.
+
+### 9.4 The dropdowns are not what we guessed
+
+Zero of the four selects matched any period word we supplied, and — after adding `N개월` / `N일` / `N년`
+shape patterns — zero matched any period *shape* either. Whatever those dropdowns offer, it is not a period
+range in the vocabulary or the form we assumed. **Incremental acquisition by date range is unestablished**,
+and the pager (5 pages) is the only paging structure actually observed.
+
+### 9.5 What acquisition gets to use
+
+A **content hash**, which is the ingestion spine's existing fallback when a source carries no `external_id`.
+The two colliding rows differ in what the buyer wrote. This is available only because §6.1.1 lifted D5; the
+earlier instruction not to key on review body was given when review body was not stored, and is superseded
+by that decision rather than quietly ignored.
+
+**`[쿠팡에서 보기]` cannot be anchored on a number.** No per-row-unique value exists to re-find a review by,
+so locate has to match on what is visible — which §5d now permits and which the previous posture did not.
