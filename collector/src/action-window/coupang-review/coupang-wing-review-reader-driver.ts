@@ -160,6 +160,14 @@ export class CoupangWingReviewReaderDriver {
         ` at=${reading.pager.currentPage ?? "?"} next=${reading.pager.hasNext}/${reading.pager.nextEnabled}` +
         ` clusters=${reading.pager.clustersFound}(+${reading.pager.clustersOfCells} cells)/${reading.pager.clusterSize}` +
         ` marks=${reading.pager.ariaCurrentMarks}/${reading.pager.classMarks}/${reading.pager.nonLinkMarks}`,
+      // Only when the pager REFUSED. On a resolved read these add nothing, and a log line that carries the
+      // paging region's words on every page of every routine sync is a line that keeps more than it needs to.
+      ...(reading.pager.resolved
+        ? {}
+        : {
+            pagerShapes: reading.pager.childShapes.join(","),
+            pagerLabels: reading.pager.regionLabels.join(","),
+          }),
     });
     return reading;
   }

@@ -84,6 +84,20 @@ export interface CoupangReviewPagerReading {
   readonly ariaCurrentMarks: number;
   readonly classMarks: number;
   readonly nonLinkMarks: number;
+  /**
+   * **The shape of the paging region, for the sitting that has to design against it.**
+   *
+   * Two readings refused: the current page is marked by none of the four signals, and no next control
+   * matched any word or arrow supplied. Two failed guesses is where guessing stops, so the region reports
+   * itself — `childShapes` is one token per numeric child (`TAG` + class-present + is-link + aria-present +
+   * disabled), and `regionLabels` are the short control words beside them, each `text|shape`.
+   *
+   * A pager's labels are Coupang's own UI vocabulary (다음 · 이전 · 맨끝 · ›), never customer content:
+   * capped at 6 characters, capped at 20 entries, pure numbers excluded. They exist to be READ in a seated
+   * sitting and are never stored — no persistence path carries them.
+   */
+  readonly childShapes: readonly string[];
+  readonly regionLabels: readonly string[];
 }
 
 /** One document's reading: the structural verdict plus the rows, if any survived it. */
@@ -161,6 +175,8 @@ export const UNREAD_PAGER: CoupangReviewPagerReading = Object.freeze({
   ariaCurrentMarks: 0,
   classMarks: 0,
   nonLinkMarks: 0,
+  childShapes: Object.freeze([]),
+  regionLabels: Object.freeze([]),
 });
 
 /**
@@ -287,7 +303,19 @@ function sanitizePager(raw: unknown): CoupangReviewPagerReading {
     ariaCurrentMarks: count(p["ariaCurrentMarks"]),
     classMarks: count(p["classMarks"]),
     nonLinkMarks: count(p["nonLinkMarks"]),
+    childShapes: shortStrings(p["childShapes"], 24),
+    regionLabels: shortStrings(p["regionLabels"], 20),
   };
+}
+
+/** Bounded string list from the page: capped in count and in per-entry length, non-strings dropped. */
+function shortStrings(raw: unknown, max: number): readonly string[] {
+  if (!Array.isArray(raw)) return Object.freeze([]);
+  return Object.freeze(
+    (raw as unknown[])
+      .filter((v): v is string => typeof v === "string" && v.length > 0 && v.length <= 24)
+      .slice(0, max),
+  );
 }
 
 /** Where the pager says this page sits in the list. `UNKNOWN` is the only answer that stops a walk. */

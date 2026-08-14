@@ -310,11 +310,53 @@ function reviewReaderFragment(
     var hasNext = next !== null;
     var nextEnabled = hasNext && !disabledish(next);
 
+    /* **What the paging region actually looks like.** Two readings have now refused: the current page is
+       marked by none of aria-current / aria-selected / an active-ish class / being the one non-link, and no
+       next control matched any word or arrow we supply. Two guesses is where guessing stops.
+       So the region reports its own SHAPE — the tag of each numeric child, whether it carries a class
+       attribute at all, whether it is a link, and the short control words sitting beside it. A pager's
+       labels are Coupang's own UI vocabulary (다음 · 이전 · 맨끝 · ›), never customer content: they are
+       capped at 6 characters, capped at 20 of them, and pure numbers are excluded. They reach the run's
+       terminal output for this sitting and are never stored.
+       This is the measurement that replaces a third guess. */
+    function shapeOf(el) {
+      var tag = String(el.tagName || '').toUpperCase();
+      var cls = el.getAttribute && el.getAttribute('class') !== null ? 'c' : '-';
+      var link = pressable(el) ? 'a' : '-';
+      var aria = (el.getAttribute && (el.getAttribute('aria-current') !== null
+                  || el.getAttribute('aria-selected') !== null
+                  || el.getAttribute('aria-disabled') !== null)) ? 'r' : '-';
+      var dis = disabledish(el) ? 'd' : '-';
+      return tag + cls + link + aria + dis;
+    }
+    var childShapes = [], regionLabels = [];
+    var region = host === null ? null : (parentOfEl(host) || host);
+    if (host !== null) {
+      var shapeKids = host.children || [];
+      for (var sc = 0; sc < shapeKids.length && childShapes.length < 24; sc++) {
+        if (wholeNumber(shapeKids[sc]) === null) { continue; }
+        childShapes.push(shapeOf(shapeKids[sc]));
+      }
+    }
+    if (region !== null) {
+      var inRegion = region.querySelectorAll ? region.querySelectorAll('*') : [];
+      for (var rl = 0; rl < inRegion.length && regionLabels.length < 20; rl++) {
+        var leaf = inRegion[rl];
+        var lkids = leaf.children || [];
+        if (lkids.length > 0) { continue; }
+        var t = norm(leaf.textContent);
+        if (t.length === 0 || t.length > 6) { continue; }
+        if (/^[0-9]+$/.test(t)) { continue; }
+        if (regionLabels.indexOf(t) < 0) { regionLabels.push(t + '|' + shapeOf(leaf)); }
+      }
+    }
+
     if (host === null) {
       return { found: false, resolved: false, pageNumbers: [], currentPage: null,
                hasNext: hasNext, nextEnabled: nextEnabled,
                clustersFound: clustersFound, clustersOfCells: clustersOfCells, clusterSize: 0,
-               ariaCurrentMarks: 0, classMarks: 0, nonLinkMarks: 0 };
+               ariaCurrentMarks: 0, classMarks: 0, nonLinkMarks: 0,
+               childShapes: childShapes, regionLabels: regionLabels };
     }
 
     var numbers = [], nodes = [], hostKids = host.children || [];
@@ -366,7 +408,8 @@ function reviewReaderFragment(
     return { found: true, resolved: current !== null, pageNumbers: numbers, currentPage: current,
              hasNext: hasNext, nextEnabled: nextEnabled,
              clustersFound: clustersFound, clustersOfCells: clustersOfCells, clusterSize: nodes.length,
-             ariaCurrentMarks: ariaMarks, classMarks: classMarks, nonLinkMarks: nonLinkMarks };
+             ariaCurrentMarks: ariaMarks, classMarks: classMarks, nonLinkMarks: nonLinkMarks,
+             childShapes: childShapes, regionLabels: regionLabels };
   }
 
   var tables = Array.prototype.slice.call(document.querySelectorAll('table'), 0, MAX_TABLES);

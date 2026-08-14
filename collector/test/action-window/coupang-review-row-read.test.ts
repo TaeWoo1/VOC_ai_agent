@@ -429,6 +429,32 @@ describe("the pager census, executed", () => {
     expect(readWith(box).pager.currentPage).toBe(2);
   });
 
+  it("reports the shape of each numeric child, so a refusal can be designed against", () => {
+    const reading = readWith(pager({ numbers: [1, 2, 3], current: 2, next: "enabled" }));
+
+    // TAG + class-present + is-link + aria-present + disabled, one token per numeric child.
+    expect(reading.pager.childShapes).toHaveLength(3);
+    expect(reading.pager.childShapes[0]).toMatch(/^A/);
+    expect(reading.pager.childShapes[1]).toContain("SPAN");
+  });
+
+  it("reports the short control words beside the numbers, and no number among them", () => {
+    const reading = readWith(pager({ numbers: [1, 2, 3], current: 2, next: "enabled" }));
+
+    const labels = reading.pager.regionLabels.map((l) => l.split("|")[0]);
+    expect(labels).toContain("다음");
+    // Pure numbers are the page numbers themselves and are excluded — the labels are the vocabulary.
+    expect(labels.every((l) => !/^[0-9]+$/.test(l!))).toBe(true);
+  });
+
+  it("keeps a long string out of the labels, so the region cannot carry review text", () => {
+    const box = pager({ numbers: [1, 2], current: 1, next: "enabled" });
+    box.add(el({ tag: "span", text: "배송도 빠르고 포장도 꼼꼼해서 아주 만족합니다" }));
+    const reading = readWith(box);
+
+    expect(reading.pager.regionLabels.join(",")).not.toContain("배송도");
+  });
+
   it("is read even when the table could not be", () => {
     const withoutRating = HEADERS.filter((h) => h !== "평점");
     const root = el({ tag: "body" }).add(
