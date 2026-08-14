@@ -99,6 +99,21 @@ describe("the run declares what it is", () => {
     }
   });
 
+  it("**the scope names the measurements that were ADDED**, not only the ones it started with", () => {
+    // An approval that describes less than the run does is the same defect as one that describes more. The
+    // per-position reading, the row-width counts, and the dropdown option counting are all new work in the
+    // page, and the operator is approving those too.
+    const operation = REVIEW_DISCOVERY_OPERATION;
+    expect(operation).toContain("PER CELL POSITION");
+    expect(operation).toContain("how many cells each row holds");
+    expect(operation).toContain("options");
+
+    // And the budget states what those readings do NOT return, positively, so it is checkable.
+    const budget = COUPANG_WING_REVIEW_DISCOVERY_SCOPE.maxActions;
+    expect(budget).toContain("0 review identifier values");
+    expect(budget).toContain("0 dropdown option texts returned");
+  });
+
   it("the scope names the identifier reading, which is what the run is FOR", () => {
     for (const text of [REVIEW_DISCOVERY_OPERATION.toLowerCase(), DISCOVERY_BANNER_LINES.join(" ").toLowerCase()]) {
       expect(text).toContain("de-duplicat");

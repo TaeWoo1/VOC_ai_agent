@@ -1415,13 +1415,17 @@ export const COUPANG_WING_REVIEW_DISCOVERY_SCOPE = Object.freeze({
     "— how many cells, how many print two numbers, and how many DISTINCT products and options are on screen — " +
     "then uses those cells to find the review row, and measures whether any per-review number is unique to " +
     "its review, whether each review exposes its own detail link, what shape the rating / date columns have, " +
-    "and which sort / period / paging controls exist; it reads no review body, no buyer name, no product " +
-    "name and no image or video source, it does not look for or report a reply control, and it performs no " +
-    "click/input/navigation)",
+    "and which sort / period / paging controls exist; it repeats the identifier question PER CELL POSITION " +
+    "so a key can be read from a known place rather than merely known to exist somewhere in the row, counts " +
+    "how many cells each row holds so a partial identifier can be explained, and counts each dropdown's " +
+    "options and how many of them equal a period word SellerOps supplied; it reads no review body, no buyer " +
+    "name, no product name and no image or video source, it does not look for or report a reply control, and " +
+    "it performs no click/input/navigation)",
   maxActions:
     "1 sanitized structural census of the 상품평 screen (0 clicks, 0 inputs, 0 submissions; 0 review body " +
     "reads, 0 buyer name reads, 0 product name reads, 0 image/video source reads, 0 reply-control lookups, " +
-    "0 노출상품ID/옵션ID values returned (counts of distinct values only); " +
+    "0 노출상품ID/옵션ID values returned (counts of distinct values only), 0 review identifier values " +
+    "returned (position, digit length and coverage only), 0 dropdown option texts returned (counts only); " +
     "page text is compared " +
     "in-page against fixed Coupang words and date/rating SHAPE patterns SellerOps supplied, and only counts, " +
     "tag names and attribute kinds are returned; role / type / aria-valuenow / contenteditable are tested for " +
