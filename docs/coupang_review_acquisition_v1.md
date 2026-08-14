@@ -294,10 +294,17 @@ the option it was left on; and two textless reviews of ONE option on one day at 
 a known limit, accepted rather than fixed with a buyer name or a row position. The pre-decision sentence is
 gone, and a test fails if it returns.
 
-**Two of the nine fixes were exercised by the screen itself.** Page 3 reported `next=true/false` — a next
-control that is *drawn but dead* — which is the distinction the completion rule had been getting wrong: it
-now asks whether the arrow can be pressed, not whether one exists. And `expandable=0` across 24 rows says
-this account has no folded review bodies, which is why §7.5 stays open rather than being closed by a guess.
+**The screen settled an argument about the completion rule.** Page 3 reported `next=true/false` — a next
+control *drawn but dead* — and on a pager whose numbers resolve, that is exactly what distinguishes the last
+page from a windowed one, which is what the walk read. A review-driven change had briefly extended the same
+"is it pressable" question to the branch used when NO page numbers are found at all; a second independent
+review caught that this branch is reached only when the reader falls back to scanning the whole document for
+anything arrow-shaped, so a dead `›` in a site header would have completed a walk after page 1. It was
+reverted: with no numbers to place a control against, any control at all means the walk stops. The live
+sitting never touched that branch — its pager resolved on all three pages.
+
+**`expandable=0` across 24 rows** says this account has no folded review bodies, which is why §7.5 stays
+open rather than being closed by a guess.
 
 **`known=1` on pages 1 and 2** is the recorded limitation, visible in the run's own counts: two rows on one
 page were the same textless review by every field the screen publishes, and collapsed. 24 rows read, 22
@@ -342,7 +349,32 @@ identities.
    to, so "this account has no review media" and "the reader does not find media where WING puts it" are
    still indistinguishable. An account with photo reviews would settle it in one reading.
 
-7. **A sitting hands over at most 500 reviews.** The handoff is one bounded batch, and the backend refuses
+7. **Upgrading past commit `533cafc2` is a boundary, not a no-op — for rows stored before it.** Two of that
+   commit's fixes change what a stored review hashes to, and nothing recomputes an existing hash:
+
+   - a **textless** review whose 옵션ID cell was blank was keyed v2 and is now keyed v3, so a re-sync would
+     not recognise it and would store a second copy;
+   - a review whose body kept a trailing `더보기` now strips it, which changes both its hash and the
+     fingerprint `[쿠팡에서 보기]` matches on — the old row would be un-locatable and would re-store.
+
+   **Measured exposure today: zero rows, in every database that exists** (both proof databases return 0 for
+   each case; the live account prints 옵션ID on every row and none of its three text reviews was folded).
+   That is why there is no data migration — writing one against zero rows would be ceremony. It is recorded
+   here because the same upgrade against an account that *does* have those rows needs one, and the check is
+   the two queries above.
+
+8. **The agent and the backend must be at the same commit.** `AgentReviewHandoffRequest.Review` refuses an
+   unknown property by design — that is what makes "no author field exists" enforceable rather than
+   promised — so an agent from before `533cafc2`, still sending `bodyTruncated`, gets one 400 for the whole
+   sitting. Fail-closed and audible, but it costs the operator every page they turned; the harness pins the
+   commit for exactly this reason.
+
+9. **`V38` and `V39` are not exercised by any test.** The backend test profile disables Flyway and runs on
+   H2, so a green build says nothing about them. Both were applied to a real PostgreSQL instead — `V38` by
+   the backend that served the §6.6 sitting (`now at version v38`), `V39` by hand against the same database
+   — which is the stronger evidence, but it is evidence from a run rather than from CI.
+
+10. **A sitting hands over at most 500 reviews.** The handoff is one bounded batch, and the backend refuses
    an oversized one as a whole — so the walk stops at that bound with `REVIEW_LIMIT_REACHED` rather than
    spending an operator's whole sitting on pages that would then be refused together. What was read is
    stored; `complete` is false, and the sitting says so. A seller with more than 500 상품평 therefore cannot
@@ -350,5 +382,5 @@ identities.
    and the database dedupes it — correct, but it never reaches page 51. Closing that is the same work as
    §7.2, and it only becomes urgent on an account with more reviews than any yet seen.
 
-8. **GA gates G1–G6 are untouched** (`docs/coupang_review_policy_gate_v1.md` §6.2). Nothing in this unit
+11. **GA gates G1–G6 are untouched** (`docs/coupang_review_policy_gate_v1.md` §6.2). Nothing in this unit
    moves them; a written Coupang answer is still what releases this.

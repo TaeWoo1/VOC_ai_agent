@@ -302,6 +302,16 @@ class AgentReviewHandoffServiceTest {
         assertThat(reviews.findAll()).hasSize(1);
     }
 
+    @Test
+    void bounds_one_handoff_to_the_batch_the_agent_stops_collecting_at() {
+        // The agent stops its walk at this many reviews rather than spending an operator's whole sitting on
+        // pages this endpoint would then refuse together. The number lives in two places by necessity — the
+        // collector's session is pure and imports nothing from the wire — so each side asserts the literal,
+        // and moving one alone turns that side red. Collector: MAX_ACQUISITION_REVIEWS in
+        // collector/src/action-window/coupang-review/review-acquisition.ts.
+        assertThat(AgentReviewHandoffRequest.MAX_REVIEWS).isEqualTo(500);
+    }
+
     /* ───────────────────────────── the coverage claim ───────────────────────────── */
 
     @Test

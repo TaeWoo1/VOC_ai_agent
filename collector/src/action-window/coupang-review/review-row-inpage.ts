@@ -70,6 +70,15 @@ const MAX_BODY_CHARS = 8000;
 /** Bounds the whole-document walk the pager census needs. A page larger than this is not a list screen. */
 const MAX_SCAN_ELEMENTS = 4000;
 
+/**
+ * **The expander words, imported rather than repeated.** The offline half strips these off the end of a
+ * stored body; this half decides whether to REPORT that a body may be a prefix. Written twice they drifted
+ * within one commit — the stripper knew `펼쳐보기` and the detector did not, so a cell it trimmed was
+ * reported as un-truncated, and `expandable=N` (the only surviving prefix warning) under-counted exactly
+ * the rows that were cut off.
+ */
+import { BODY_EXPANDER_WORDS } from "./review-rows";
+
 /** The marker attribute a located row carries. Inert: an attribute and an outline, never a click target. */
 export const REVIEW_TARGET_ATTRIBUTE = "data-sellerops-review-target";
 
@@ -199,7 +208,9 @@ function reviewReaderFragment(
     var el = cells[byRole.body];
     if (!el) { return false; }
     var t = norm(el.textContent);
-    return t.indexOf('더보기') >= 0 || t.indexOf('전체보기') >= 0;
+    var words = ${JSON.stringify(BODY_EXPANDER_WORDS)};
+    for (var w = 0; w < words.length; w++) { if (t.indexOf(words[w]) >= 0) { return true; } }
+    return false;
   }
 
   /* ── the pager ──────────────────────────────────────────────────────────────────────────────

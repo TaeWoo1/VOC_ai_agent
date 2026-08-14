@@ -320,10 +320,23 @@ describe("every other ending refuses to claim coverage", () => {
     expect(result.complete).toBe(false);
   });
 
-  it("bounds the batch at the size the wire accepts", () => {
-    // Pinned to AgentReviewHandoffRequest.MAX_REVIEWS on the other side. If one moves, this fails.
+  it("clamps a caller who asks for a batch larger than the wire accepts", () => {
+    // The clamp, exercised rather than asserted about: 10,000 is asked for, 500 is what the walk takes.
+    // An earlier version of this test only checked that such a session was `open`, which is true of every
+    // possible argument — deleting the clamp left it green.
+    const session = new ReviewAcquisitionSession({ maxReviews: 10_000 });
+    const rows = (n: number, from: number) =>
+      Array.from({ length: n }, (_, i) => row(`후기 ${from + i}`, "2026.08.11", "5", String(100000 + from + i)));
+
+    expect(session.offerPage(readable(rows(300, 0), pagerAt(1, 9))).accepted).toBe(true);
+    expect(session.offerPage(readable(rows(200, 300), pagerAt(2, 9))).accepted).toBe(true);
+    // 501 would exceed the wire's batch; the page is refused whole rather than half-taken.
+    const over = session.offerPage(readable(rows(1, 500), pagerAt(3, 9)));
+
+    expect(over.accepted).toBe(false);
+    expect(over.stopReason).toBe("REVIEW_LIMIT_REACHED");
+    expect(session.result().reviews).toHaveLength(MAX_ACQUISITION_REVIEWS);
     expect(MAX_ACQUISITION_REVIEWS).toBe(500);
-    expect(new ReviewAcquisitionSession({ maxReviews: 10_000 }).open).toBe(true);
   });
 
   it("ignores pages offered after it stopped", () => {
@@ -412,36 +425,40 @@ describe("pagerPosition on its own", () => {
   });
 
   /**
-   * The one-page seller. WING draws its `<` and `>` arrows on every list, dead ones included, so a next
-   * control being PRESENT says nothing — and the un-numbered branch used to ask exactly that. The effect was
-   * that a channel whose entire 상품평 list fits on one page could never be told it was complete: every
-   * sitting would end `OPERATOR_FINISHED`, never `FINAL_PAGE_REACHED`. Whether the arrow can be PRESSED is
-   * the question.
+   * **A dead arrow the reader cannot place is not the end of a list.**
+   *
+   * This branch briefly asked `nextEnabled`, to let a one-page seller be told they were finished. It was
+   * the wrong trade twice over: a one-page list still prints the number `1` and so never reaches here, and
+   * this branch is reached precisely when NO cluster of page numbers was found — the case where the reader
+   * falls back to scanning the whole document for anything arrow-shaped. A disabled `›` in a site header
+   * would then have completed a walk after page 1, under a claim of full coverage. That is the one failure
+   * this module exists to prevent, so the un-numbered branch refuses on any control at all.
    */
-  it("completes an un-numbered list whose next arrow is drawn but dead", () => {
-    const onePage: CoupangReviewPagerReading = pagerReading({
+  it("refuses an un-numbered list that offers ANY next control, dead or live", () => {
+    for (const nextEnabled of [true, false]) {
+      const unplaceable: CoupangReviewPagerReading = pagerReading({
+        found: false,
+        resolved: false,
+        pageNumbers: [],
+        currentPage: null,
+        hasNext: true,
+        nextEnabled,
+      });
+
+      expect(pagerPosition(unplaceable)).toBe("UNKNOWN");
+    }
+  });
+
+  it("completes only when the screen offers nothing to press at all", () => {
+    const bare: CoupangReviewPagerReading = pagerReading({
       found: false,
       resolved: false,
       pageNumbers: [],
       currentPage: null,
-      hasNext: true,
+      hasNext: false,
       nextEnabled: false,
     });
 
-    expect(pagerPosition(onePage)).toBe("FINAL_PAGE");
-  });
-
-  it("still refuses an un-numbered list whose next arrow is live", () => {
-    const uncountable: CoupangReviewPagerReading = pagerReading({
-      found: false,
-      resolved: false,
-      pageNumbers: [],
-      currentPage: null,
-      hasNext: true,
-      nextEnabled: true,
-    });
-
-    // There IS more; there is simply nothing on the screen to count it by.
-    expect(pagerPosition(uncountable)).toBe("UNKNOWN");
+    expect(pagerPosition(bare)).toBe("FINAL_PAGE");
   });
 });

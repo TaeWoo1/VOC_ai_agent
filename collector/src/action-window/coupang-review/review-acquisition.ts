@@ -131,7 +131,9 @@ export const MAX_ACQUISITION_PAGES = 100;
  * turning pages and then store none of them. The walk stops here instead, with a stop reason that says so.
  *
  * Kept as a plain number rather than imported from the handoff client, which is the module that talks to the
- * network; the session stays pure. The two are pinned to each other by a test.
+ * network; the session stays pure. Both sides assert the literal 500 in their own test suite — this one in
+ * `coupang-review-acquisition.test.ts`, the wire's in `AgentReviewHandoffServiceTest` — so moving either
+ * constant alone turns that side red.
  */
 export const MAX_ACQUISITION_REVIEWS = 500;
 

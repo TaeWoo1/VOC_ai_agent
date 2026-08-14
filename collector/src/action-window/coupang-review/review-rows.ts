@@ -48,9 +48,10 @@ export interface CoupangReviewRowReading {
  *
  * The three states are deliberately distinct, and the middle one is why this type exists at all:
  *
- * - `found: false, nextEnabled: false` — there is no pager and nothing pressable. The list is one page, and
- *   this page IS the whole list. A small seller's channel is genuinely complete in one read. (A DRAWN but
- *   dead next arrow does not disturb this: WING prints its arrows either way.)
+ * - `found: false, hasNext: false` — there is no pager and nothing to press at all. The list is one page,
+ *   and this page IS the whole list. A next control that merely LOOKS dead is not enough here: with no
+ *   numbers to place it against, the reader cannot tell this list's arrow from any other arrow on the
+ *   document, so `hasNext` is what decides and a walk stops rather than claiming the end.
  * - `found: true, resolved: false` — a pager is there and which page it is showing could not be identified.
  *   This must never round up to "the end": rounding it up is precisely how a walk comes to claim a coverage
  *   it does not have.
@@ -300,7 +301,7 @@ const MAX_PAGE_NUMBERS = 200;
 
 /**
  * Sanitize the pager half. A malformed or absent pager becomes {@link UNREAD_PAGER} — never a
- * `found: false, nextEnabled: false` reading, which the session would correctly treat as "this is a
+ * `found: false, hasNext: false` reading, which the session would correctly treat as "this is a
  * one-page list" and complete on.
  */
 function sanitizePager(raw: unknown): CoupangReviewPagerReading {
@@ -361,12 +362,18 @@ export type PagerPosition = "FINAL_PAGE" | "MORE_PAGES" | "UNKNOWN";
  */
 export function pagerPosition(pager: CoupangReviewPagerReading): PagerPosition {
   if (!pager.found) {
-    // No numbered pager. What decides is whether the next control can be PRESSED, not whether one is
-    // drawn: WING renders its `<`/`>` arrows on every list, dead ones included, so asking `hasNext` here
-    // would answer UNKNOWN for a genuinely one-page channel — a small seller whose whole list is read in
-    // one page could never be told their list was complete. An enabled next with nothing numbered beside
-    // it still means there IS more and we cannot count it.
-    return pager.nextEnabled ? "UNKNOWN" : "FINAL_PAGE";
+    // **No numbers on the screen means no evidence of position, so the only safe answer is the absence of
+    // a control to press.** This branch briefly asked `nextEnabled` instead, reasoning that WING draws its
+    // arrows on every list and a one-page seller could otherwise never be told they were finished. Two
+    // things were wrong with that. A list of one page still prints the number `1`, so it resolves on the
+    // branch below and never arrives here. And this branch is reached only when NO cluster of page numbers
+    // was found anywhere — which is exactly when the reader falls back to scanning the whole document for
+    // anything arrow-shaped, so a dead `›` in a site header or a carousel would have been read as "the
+    // list ends here" and the walk would have claimed coverage after page 1.
+    //
+    // A drawn-but-dead arrow we cannot place is not evidence of the end. Only a screen offering nothing
+    // to press at all is a one-page list.
+    return pager.hasNext ? "UNKNOWN" : "FINAL_PAGE";
   }
   if (!pager.resolved || pager.currentPage === null) return "UNKNOWN";
   const highest = pager.pageNumbers[pager.pageNumbers.length - 1];
@@ -412,7 +419,7 @@ export const EMPTY_BODY_PLACEHOLDERS: readonly string[] = Object.freeze([
  * Stripped as a TRAILING word only, and only when the rest of the cell said something. A review that mentions
  * 더보기 in the middle of a sentence keeps it: that is a customer's word, in a customer's sentence.
  */
-const BODY_EXPANDER_WORDS: readonly string[] = Object.freeze(["더보기", "전체보기", "펼쳐보기"]);
+export const BODY_EXPANDER_WORDS: readonly string[] = Object.freeze(["더보기", "전체보기", "펼쳐보기"]);
 
 export function stripExpanderChrome(body: string): string {
   let out = body.trim();

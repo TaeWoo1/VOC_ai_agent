@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
 import { Panel } from "../../components/ui/Panel";
@@ -51,21 +51,35 @@ export function ChannelReviews() {
   const [detail, setDetail] = useState<ChannelReviewDetailView | null>(null);
   const [detailError, setDetailError] = useState(false);
 
+  /**
+   * **Only the newest request may write.** Two controls now change the query — the order and the page — so
+   * two reads can be in flight at once, and the slower one landing second would install rows that neither
+   * the pressed sort button nor the pager label describes. A monotonic ticket makes a superseded response
+   * inert rather than merely unlikely.
+   */
+  const requestSeq = useRef(0);
+
   const load = useCallback(
     async (nextSort: "newest" | "lowest", nextPage: number) => {
+      const ticket = ++requestSeq.current;
       setLoading(true);
       try {
-        setPage(
-          await api.getChannelReviewsStrict(accountId, { sort: nextSort, page: nextPage, size: PAGE_SIZE }),
-        );
+        const view = await api.getChannelReviewsStrict(accountId, {
+          sort: nextSort,
+          page: nextPage,
+          size: PAGE_SIZE,
+        });
+        if (ticket !== requestSeq.current) return;
+        setPage(view);
         setLoadError(false);
       } catch {
         // Fail closed: an unreachable backend shows nothing, never an invented list. The seller has
         // no other copy of what buyers wrote to check a fabrication against.
+        if (ticket !== requestSeq.current) return;
         setPage(null);
         setLoadError(true);
       } finally {
-        setLoading(false);
+        if (ticket === requestSeq.current) setLoading(false);
       }
     },
     [accountId],
@@ -144,6 +158,7 @@ export function ChannelReviews() {
           onClick={() => {
             setSort("newest");
             setPageIndex(0);
+            setSelectedId(null);
           }}
         >
           최신순
@@ -155,6 +170,7 @@ export function ChannelReviews() {
           onClick={() => {
             setSort("lowest");
             setPageIndex(0);
+            setSelectedId(null);
           }}
         >
           낮은 평점순
@@ -228,18 +244,29 @@ export function ChannelReviews() {
                   size="sm"
                   variant="outline"
                   disabled={pageIndex <= 0 || loading}
-                  onClick={() => setPageIndex((n) => Math.max(0, n - 1))}
+                  onClick={() => {
+                    setPageIndex((n) => Math.max(0, n - 1));
+                    // The chosen review is not on the page being moved to; a 상세 panel still showing it
+                    // would sit beside a list where no row is marked current.
+                    setSelectedId(null);
+                  }}
                 >
                   이전
                 </Btn>
                 <span className="text-sm text-muted">
-                  {pageIndex + 1} / {totalPages} 페이지
+                  {/* From the response, like the range label beside it — a number taken from local state
+                      would advance the moment the button was pressed, over rows still describing the
+                      previous page. */}
+                  {(page?.page ?? 0) + 1} / {totalPages} 페이지
                 </span>
                 <Btn
                   size="sm"
                   variant="outline"
                   disabled={pageIndex >= totalPages - 1 || loading}
-                  onClick={() => setPageIndex((n) => n + 1)}
+                  onClick={() => {
+                    setPageIndex((n) => n + 1);
+                    setSelectedId(null);
+                  }}
                 >
                   다음
                 </Btn>

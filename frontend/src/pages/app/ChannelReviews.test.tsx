@@ -262,6 +262,37 @@ describe("a list longer than one screen can be walked", () => {
     expect(screen.queryByRole("button", { name: "다음" })).toBeNull();
   });
 
+  /**
+   * Two controls now change the query, so two reads can be in flight; the slower one landing second used to
+   * install rows that neither the pressed sort button nor the page label described.
+   */
+  it("ignores a superseded response, so the rows always match the controls", async () => {
+    const slowPage3 = { ...LONG, page: 2, items: [{ ...PAGE.items[0]!, id: "stale", preview: "지나간 응답" }] };
+    const fastLowest = { ...LONG, page: 0, items: [{ ...PAGE.items[1]!, id: "fresh", preview: "새 응답" }] };
+    let releaseSlow: (v: unknown) => void = () => {};
+    getChannelReviewsStrict
+      .mockResolvedValueOnce(LONG)
+      .mockImplementationOnce(() => new Promise((res) => { releaseSlow = () => res(slowPage3); }))
+      .mockResolvedValueOnce(fastLowest);
+
+    renderPage();
+    await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요");
+    await userEvent.click(screen.getByRole("button", { name: "다음" }));
+    await userEvent.click(screen.getByRole("button", { name: "낮은 평점순" }));
+    await screen.findByText("새 응답");
+    releaseSlow(null);
+
+    // The overtaken page-3 read resolves last and must write nothing.
+    await waitFor(() => expect(screen.queryByText("지나간 응답")).toBeNull());
+    expect(screen.getByText("새 응답")).toBeInTheDocument();
+  });
+
+  it("labels the page from the response, so the label cannot describe rows that are not there", () => {
+    // The pager label and the range label are both read off the response; taken from local state the first
+    // would advance the instant the button was pressed, over rows still describing the previous page.
+    expect(shownRangeLabel({ ...LONG, page: 2 })).toBe("41–42번째 · 총 42개");
+  });
+
   it("returns to the first page when the order changes, rather than keeping a position that no longer means the same thing", async () => {
     getChannelReviewsStrict.mockResolvedValue(LONG);
     renderPage();
