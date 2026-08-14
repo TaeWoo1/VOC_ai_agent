@@ -16,9 +16,17 @@ import java.util.Map;
  */
 final class FakeCoupangHttpClient implements CoupangHttpClient {
 
-    record Sent(String method, URI uri, Map<String, String> headers) {
+    /**
+     * One recorded request. {@code body} is null for a GET and carries the POST payload otherwise —
+     * tests assert on it to prove the reply body was assembled as the official field names require,
+     * which is the one thing about the answer endpoint the repository cannot otherwise check.
+     */
+    record Sent(String method, URI uri, Map<String, String> headers, String body) {
 
-        /** Failed-assertion output must not echo the CEA signature. */
+        /**
+         * Failed-assertion output must not echo the CEA signature — nor the body, which on a reply
+         * POST is the seller's own answer text to a real customer.
+         */
         @Override
         public String toString() {
             Map<String, String> masked = null;
@@ -30,7 +38,8 @@ final class FakeCoupangHttpClient implements CoupangHttpClient {
                             "Authorization".equalsIgnoreCase(entry.getKey()) ? "<masked>" : entry.getValue());
                 }
             }
-            return "Sent[method=" + method + ", uri=" + uri + ", headers=" + masked + "]";
+            return "Sent[method=" + method + ", uri=" + uri + ", headers=" + masked
+                    + ", body=<masked:" + (body == null ? 0 : body.length()) + " chars>]";
         }
     }
 
@@ -50,11 +59,28 @@ final class FakeCoupangHttpClient implements CoupangHttpClient {
         responses.add(new IllegalStateException("simulated transport failure"));
     }
 
+    /**
+     * Enqueue the WRITE-side transport ambiguity — the request left and no response was read. The
+     * real client raises this only for a POST, because only a write is unanswerable that way.
+     */
+    void enqueueWriteAmbiguity() {
+        responses.add(new CoupangTransportAmbiguityException("simulated write ambiguity"));
+    }
+
     @Override
     public Response get(URI uri, Map<String, String> headers) {
-        sent.add(new Sent("GET", uri, headers));
+        return next("GET", uri, headers, null);
+    }
+
+    @Override
+    public Response post(URI uri, Map<String, String> headers, String body) {
+        return next("POST", uri, headers, body);
+    }
+
+    private Response next(String method, URI uri, Map<String, String> headers, String body) {
+        sent.add(new Sent(method, uri, headers, body));
         if (responses.isEmpty()) {
-            throw new AssertionError("Unexpected HTTP call: GET " + uri);
+            throw new AssertionError("Unexpected HTTP call: " + method + " " + uri);
         }
         Object next = responses.pop();
         if (next instanceof RuntimeException failure) {

@@ -28,6 +28,7 @@ import {
   CALIBRATION_PHASES,
   COUPANG_WING_CREDENTIAL_CALIBRATION_SCOPE,
   COUPANG_WING_CREDENTIAL_HANDOFF_SCOPE,
+  COUPANG_WING_INQUIRY_LIST_CALIBRATION_SCOPE,
   COUPANG_WING_ISSUANCE_REVEAL_ACTION,
   isWingCalibrationPhase,
   PHASE_ENTRYPOINTS,
@@ -123,11 +124,17 @@ export function runApprovalManifestCli(opts: ApprovalManifestCliOptions = {}): n
   // Both credential phases pin their scope, like the destructive one: the operator grants against these exact
   // sentences, so a leftover `SELLEROPS_APPROVAL_OPERATION` from another run must not be able to re-describe a
   // run that reads a secret.
+  const isInquiryCalibration = phase === "COUPANG_WING_INQUIRY_LIST_CALIBRATION";
   const credentialScope = isCredentialHandoff
     ? COUPANG_WING_CREDENTIAL_HANDOFF_SCOPE
     : isCredentialCalibration
       ? COUPANG_WING_CREDENTIAL_CALIBRATION_SCOPE
-      : null;
+      // The 고객문의 calibration pins its scope for the same reason both credential phases do: the operator
+      // grants against these exact sentences, and a leftover SELLEROPS_APPROVAL_OPERATION from another run
+      // must not be able to re-describe a run that stands in front of a page full of buyers' messages.
+      : isInquiryCalibration
+        ? COUPANG_WING_INQUIRY_LIST_CALIBRATION_SCOPE
+        : null;
   const isWingGuidedWalk = phase === "COUPANG_WING_GUIDED_ISSUANCE_WALK";
   // The shared list, NOT a fourth hand-maintained chain. Review caught this one still spelled out by hand after
   // the other three were consolidated: it decides whether the entry URL is screened against the WING host or
