@@ -16,8 +16,11 @@
  *
  * ## What it counts, and why each one is needed
  *
- *  - **container kind + row count** — whether there is one list to speak of. Rows found under two different
- *    container kinds is `CONTAINER_AMBIGUOUS`: "which list is THE list" is not a question this may guess at.
+ *  - **per-kind row counts** — structure, reported rather than chosen between. The first version REFUSED when
+ *    rows appeared under two kinds; against the real WING screen that refused immediately and correctly by its
+ *    own rule, because an application page has navigation `<li>`s and a data `<table>` at once. Targeting does
+ *    not need to know which list is the list — it needs exactly one element to carry the identifier, and a
+ *    navigation item never carries an inquiry id.
  *  - **rows carrying digits** — whether the page carries machine-readable ids at all. If this is 0, the whole
  *    targeting approach is refuted and the calibration says so instead of being retried with a text rule.
  *  - **per-expectation match counts** — the actual targeting question, asked once per digit string we hold.
@@ -98,22 +101,39 @@ const CENSUS_FRAGMENT = `
     for (var i = 0; i < links.length; i++) { if (paints(links[i])) { return true; } }
     return false;
   }
+  /* Keep only the INNERMOST matches. A <tr> that contains a matching <li> would otherwise count twice and
+     read as an ambiguous target — a false refusal on a page that actually identifies the row exactly once. */
+  function innermost(hits) {
+    var out = [];
+    for (var i = 0; i < hits.length; i++) {
+      var contained = false;
+      for (var j = 0; j < hits.length; j++) {
+        if (i !== j && hits[i].el !== hits[j].el && hits[i].el.contains && hits[i].el.contains(hits[j].el)) {
+          contained = true; break;
+        }
+      }
+      if (!contained) { out.push(hits[i]); }
+    }
+    return out;
+  }
   function census(DIGITS, LABELS) {
     var kinds = ['TABLE', 'LIST', 'GRID'];
-    var chosen = null, rows = [], populated = 0;
-    for (var k = 0; k < kinds.length; k++) {
+    var counts = { table: 0, list: 0, grid: 0 };
+    var rows = [], kindOf = [], i, j, k;
+    for (k = 0; k < kinds.length; k++) {
       var found = rowsOfKind(kinds[k]);
       if (found === null) { return { reason: 'SCAN_TRUNCATED' }; }
-      if (found.length > 0) { populated++; chosen = kinds[k]; rows = found; }
+      counts[kinds[k].toLowerCase()] = found.length;
+      for (i = 0; i < found.length; i++) {
+        /* Deduplicate across kinds: an <li role=row> is one row, not two. */
+        if (rows.indexOf(found[i]) < 0) { rows.push(found[i]); kindOf.push(kinds[k]); }
+      }
     }
-    if (populated === 0) { return { reason: 'NO_ROWS' }; }
-    /* More than one kind holds painting rows: which list is THE list is not decidable, and a page whose
-       inquiry rows are <tr> inside an <li> layout would otherwise be counted twice. */
-    if (populated > 1) { return { reason: 'CONTAINER_AMBIGUOUS' }; }
+    if (rows.length === 0) { return { reason: 'NO_ROWS' }; }
 
     var withDigits = 0, withDetail = 0;
-    var matches = [], i, j;
-    for (i = 0; i < DIGITS.length; i++) { matches.push({ id: DIGITS[i].id, rowMatchCount: 0, names: {} }); }
+    var matches = [];
+    for (i = 0; i < DIGITS.length; i++) { matches.push({ id: DIGITS[i].id, hits: [], names: {} }); }
     var labelCounts = [];
     for (i = 0; i < LABELS.length; i++) { labelCounts.push({ id: LABELS[i].id, rowCount: 0 }); }
 
@@ -127,27 +147,33 @@ const CENSUS_FRAGMENT = `
           /* Whole-run equality. A substring match here would target a different inquiry silently. */
           if (runs[r].digits === wantDigits) { hit = true; matches[j].names[runs[r].name] = 1; }
         }
-        if (hit) { matches[j].rowMatchCount++; }
+        if (hit) { matches[j].hits.push({ el: rows[i], kind: kindOf[i] }); }
       }
       for (j = 0; j < LABELS.length; j++) {
         if (hasLabel(rows[i], LABELS[j].exactText)) { labelCounts[j].rowCount++; }
       }
     }
-    var digitMatches = [];
+    var digitMatches = [], primaryKind = 'NONE';
     for (i = 0; i < matches.length; i++) {
+      var hits = innermost(matches[i].hits);
       var names = [];
       /* Attribute names only travel when the target is unambiguous — otherwise they describe several rows. */
-      if (matches[i].rowMatchCount === 1) { for (var key in matches[i].names) { names.push(key); } }
+      if (hits.length === 1) {
+        for (var key in matches[i].names) { names.push(key); }
+        /* The FIRST expectation is the primary one; its matched row is the kind worth naming. */
+        if (i === 0) { primaryKind = hits[0].kind; }
+      }
       digitMatches.push({
         id: matches[i].id,
-        rowMatchCount: matches[i].rowMatchCount,
+        rowMatchCount: hits.length,
         matchedAttributeNames: names
       });
     }
     return {
       reason: 'OK',
-      containerKind: chosen,
-      rowCount: rows.length,
+      containerKind: primaryKind,
+      rowCounts: counts,
+      rowsScanned: rows.length,
       rowsWithDigits: withDigits,
       rowsWithDetailAffordance: withDetail,
       digitMatches: digitMatches,

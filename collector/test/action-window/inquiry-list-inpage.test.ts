@@ -70,6 +70,10 @@ class El {
   ancestors(): El[] {
     return this.parent ? [this.parent, ...this.parent.ancestors()] : [];
   }
+  /** DOM semantics: an element contains itself. The innermost-match rule relies on it. */
+  contains(other: El): boolean {
+    return other === this || this.descendants().includes(other);
+  }
   querySelectorAll(sel: string): El[] {
     return select(this.descendants(), sel);
   }
@@ -218,7 +222,8 @@ describe("the 고객문의 list census counts rows without reading them", () => 
 
     expect(census.reason).toBe("OK");
     expect(census.containerKind).toBe("TABLE");
-    expect(census.rowCount).toBe(2);
+    expect(census.rowsScanned).toBe(2);
+    expect(census.rowCounts.table).toBe(2);
     const inquiryMatch = census.digitMatches.find((m) => m.id === "inquiryId")!;
     expect(inquiryMatch.rowMatchCount).toBe(1);
     // The name is what lets the next unit build a locator from a measurement instead of a guess.
@@ -295,7 +300,7 @@ describe("the 고객문의 list census counts rows without reading them", () => 
     const template = new El({ tag: "tr", display: "none" });
     const census = censusOf(wingInquiryList([hidden, template]));
 
-    expect(census.rowCount).toBe(1);
+    expect(census.rowsScanned).toBe(1);
   });
 });
 
@@ -355,15 +360,37 @@ describe("nothing a buyer wrote can leave the page", () => {
 });
 
 describe("the census fails closed rather than reporting a partial reading", () => {
-  it("refuses when rows appear under more than one container kind", () => {
+  it("**the page's own furniture does not refuse the census**", () => {
+    // The first version refused whenever rows appeared under two container kinds. Run against the real WING
+    // screen it refused instantly and correctly by its own rule — every application page has a navigation
+    // list beside its data table. Targeting never needed to know which list is THE list.
     const root = wingInquiryList([row({ inquiryId: INQUIRY_A, text: BUYER_TEXT_A, status: "답변완료" })]);
-    root.add(el({ tag: "ul" }).add(el({ tag: "li", text: "다른 목록" })));
+    root.add(
+      el({ tag: "ul" }).add(
+        el({ tag: "li", text: "주문관리" }),
+        el({ tag: "li", text: "상품관리" }),
+        el({ tag: "li", text: "고객문의" }),
+      ),
+    );
 
     const census = censusOf(root);
 
-    // "Which list is THE list" is not a question this may guess at.
-    expect(census.reason).toBe("CONTAINER_AMBIGUOUS");
-    expect(resolveInquiryTarget(census, "inquiryId")).toEqual({ ok: false, reason: "CENSUS_REFUSED" });
+    expect(census.reason).toBe("OK");
+    expect(census.rowCounts.list).toBe(3);
+    expect(census.rowCounts.table).toBe(1);
+    // A navigation item never carries an inquiry id, so the target is still exactly one.
+    expect(resolveInquiryTarget(census, "inquiryId")).toEqual({ ok: true, expectationId: "inquiryId" });
+  });
+
+  it("a row nested inside another matching row counts ONCE, as the innermost", () => {
+    // Otherwise a <tr> wrapping a matching <li> would read as two matches — a false ambiguity refusal on a
+    // page that actually identifies the row exactly once.
+    const inner = el({ tag: "li", attrs: { "data-inquiry-id": INQUIRY_A } });
+    const outer = el({ tag: "tr" }).add(el({ tag: "td" }).add(el({ tag: "ul" }).add(inner)));
+    const census = censusOf(el({ tag: "div" }).add(el({ tag: "table" }).add(el({ tag: "tbody" }).add(outer))));
+
+    expect(census.digitMatches.find((m) => m.id === "inquiryId")!.rowMatchCount).toBe(1);
+    expect(census.containerKind).toBe("LIST");
   });
 
   it("refuses an empty screen rather than reporting zero rows as a clean reading", () => {
@@ -371,7 +398,7 @@ describe("the census fails closed rather than reporting a partial reading", () =
   });
 
   it("a resolution against a refused census never claims a target", () => {
-    for (const reason of ["NO_ROWS", "CONTAINER_AMBIGUOUS", "SCAN_TRUNCATED", "UNREADABLE"] as const) {
+    for (const reason of ["NO_ROWS", "SCAN_TRUNCATED", "UNREADABLE"] as const) {
       const census = sanitizeInquiryListCensus({ reason }, DIGITS, LABELS);
       expect(resolveInquiryTarget(census, "inquiryId")).toEqual({ ok: false, reason: "CENSUS_REFUSED" });
     }
@@ -383,10 +410,13 @@ describe("the census fails closed rather than reporting a partial reading", () =
       undefined,
       "OK",
       { reason: "OK" },
-      { reason: "OK", containerKind: "TABLE", rowCount: -1 },
-      { reason: "OK", containerKind: "SOMETHING_NEW", rowCount: 1 },
-      // A container of NONE with rows counted is incoherent; reconciling it would invent a reading.
-      { reason: "OK", containerKind: "NONE", rowCount: 3, rowsWithDigits: 0, rowsWithDetailAffordance: 0 },
+      { reason: "OK", containerKind: "TABLE", rowCounts: { table: -1, list: 0, grid: 0 } },
+      { reason: "OK", containerKind: "SOMETHING_NEW", rowCounts: { table: 1, list: 0, grid: 0 } },
+      // More rows carrying digits than rows scanned is incoherent; reconciling it would invent a reading.
+      {
+        reason: "OK", containerKind: "TABLE", rowCounts: { table: 1, list: 0, grid: 0 },
+        rowsScanned: 1, rowsWithDigits: 5, rowsWithDetailAffordance: 0,
+      },
     ]) {
       expect(sanitizeInquiryListCensus(bad, DIGITS, LABELS).reason).not.toBe("OK");
     }
@@ -396,7 +426,8 @@ describe("the census fails closed rather than reporting a partial reading", () =
     const raw = {
       reason: "OK",
       containerKind: "TABLE",
-      rowCount: 1,
+      rowCounts: { table: 1, list: 0, grid: 0 },
+      rowsScanned: 1,
       rowsWithDigits: 1,
       rowsWithDetailAffordance: 1,
       // A hostile page answering with ids we never asked about, and a value shaped like a name.
@@ -426,7 +457,8 @@ describe("the census fails closed rather than reporting a partial reading", () =
     const raw = {
       reason: "OK",
       containerKind: "TABLE",
-      rowCount: 1,
+      rowCounts: { table: 1, list: 0, grid: 0 },
+      rowsScanned: 1,
       rowsWithDigits: 1,
       rowsWithDetailAffordance: 1,
       digitMatches: [{ id: "inquiryId", rowMatchCount: 1 }],

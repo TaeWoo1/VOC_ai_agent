@@ -75,7 +75,8 @@ export class CoupangWingInquiryDriver {
     log("aw_coupang_inquiry_census", {
       reason: census.reason,
       containerKind: census.containerKind,
-      rowCount: census.rowCount,
+      rowsScanned: census.rowsScanned,
+      rowCounts: `${census.rowCounts.table}/${census.rowCounts.list}/${census.rowCounts.grid}`,
       rowsWithDigits: census.rowsWithDigits,
       matches: census.digitMatches.map((m) => `${m.id}=${m.rowMatchCount}`),
       labels: census.labelCounts.map((l) => `${l.id}=${l.rowCount}`),

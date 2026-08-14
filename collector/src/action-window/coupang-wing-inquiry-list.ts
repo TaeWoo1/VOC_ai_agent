@@ -25,15 +25,15 @@
  * worked around. No fallback to text matching exists here, and none should be added without its own decision.
  */
 
-/** How the rows were arranged. A fixed enum — it names no element and no selector. */
+/** What kind of element the matched row turned out to be. A fixed enum — it names no element or selector. */
 export const INQUIRY_CONTAINER_KINDS = [
-  /** Rows are `<tr>` inside one `<table>`. */
+  /** The row is a `<tr>` inside a `<table>`. */
   "TABLE",
-  /** Rows are `<li>` inside one list. */
+  /** The row is an `<li>`. */
   "LIST",
-  /** Rows are elements carrying an explicit row role. */
+  /** The row carries an explicit row role. */
   "GRID",
-  /** No single container held the rows. Reported, never guessed past. */
+  /** Nothing matched, so nothing is named. */
   "NONE",
 ] as const;
 export type InquiryContainerKind = (typeof INQUIRY_CONTAINER_KINDS)[number];
@@ -69,8 +69,6 @@ export const INQUIRY_CENSUS_REFUSALS = [
   "SCAN_TRUNCATED",
   /** No row-shaped elements were found at all. */
   "NO_ROWS",
-  /** Rows were found under more than one container kind — which list is THE list is not decidable. */
-  "CONTAINER_AMBIGUOUS",
   /** The script returned something that is not a census. */
   "UNREADABLE",
 ] as const;
@@ -90,14 +88,36 @@ export interface InquiryLabelCount {
   readonly rowCount: number;
 }
 
+/** How many painting row-shaped elements each kind contributed. Structure, reported rather than chosen between. */
+export interface InquiryRowCounts {
+  readonly table: number;
+  readonly list: number;
+  readonly grid: number;
+}
+
 /**
- * The whole structural reading of one 고객문의 list. Integers, enums, booleans, and the ids we supplied —
- * nothing else. No row text, no selector, no href, no attribute VALUE.
+ * The whole structural reading of one 고객문의 screen. Integers, enums, and the ids we supplied — nothing
+ * else. No row text, no selector, no href, no attribute VALUE.
+ *
+ * **Why this counts every row-shaped element rather than picking one list.** The first version refused when
+ * rows appeared under more than one container kind, on the reasoning that "which list is THE list" should not
+ * be guessed. Run against the real WING screen it refused immediately, and correctly by its own rule: an
+ * application page has navigation `<li>`s and a data `<table>` at the same time, so that rule could never
+ * succeed anywhere.
+ *
+ * The rule was answering the wrong question. Targeting does not need to know which list is the list; it needs
+ * to know that **exactly one element on the page carries the identifier**. A navigation item will never carry
+ * an inquiry id. That property is simpler, stronger, and immune to the page's furniture — so the census now
+ * scans every row-shaped element and reports the per-kind counts as structure, and `containerKind` names the
+ * kind of the ONE row that matched (or `NONE`).
  */
 export interface InquiryListCensus {
   readonly reason: "OK" | InquiryCensusRefusal;
+  /** The kind of the single matching row, when exactly one matched the PRIMARY expectation; else `NONE`. */
   readonly containerKind: InquiryContainerKind;
-  readonly rowCount: number;
+  readonly rowCounts: InquiryRowCounts;
+  /** Every distinct row-shaped element scanned, deduplicated across kinds. */
+  readonly rowsScanned: number;
   /** Rows carrying at least one digit run anywhere in their attributes — the anchor's availability. */
   readonly rowsWithDigits: number;
   /** Rows carrying a link or button — whether a detail view is reachable from the row at all. */
@@ -177,7 +197,8 @@ export function sanitizeInquiryListCensus(
   const refused = (reason: "OK" | InquiryCensusRefusal): InquiryListCensus => ({
     reason,
     containerKind: "NONE",
-    rowCount: 0,
+    rowCounts: { table: 0, list: 0, grid: 0 },
+    rowsScanned: 0,
     rowsWithDigits: 0,
     rowsWithDetailAffordance: 0,
     digitMatches: [],
@@ -194,15 +215,19 @@ export function sanitizeInquiryListCensus(
   const containerKind = typeof r.containerKind === "string" && CONTAINER_KINDS.includes(r.containerKind)
     ? (r.containerKind as InquiryContainerKind)
     : null;
-  const rowCount = count(r.rowCount);
+  const rawCounts = (r.rowCounts && typeof r.rowCounts === "object" ? r.rowCounts : {}) as Record<string, unknown>;
+  const table = count(rawCounts.table);
+  const list = count(rawCounts.list);
+  const grid = count(rawCounts.grid);
+  const rowsScanned = count(r.rowsScanned);
   const rowsWithDigits = count(r.rowsWithDigits);
   const rowsWithDetailAffordance = count(r.rowsWithDetailAffordance);
-  if (containerKind === null || rowCount === null || rowsWithDigits === null
-      || rowsWithDetailAffordance === null) {
+  if (containerKind === null || table === null || list === null || grid === null || rowsScanned === null
+      || rowsWithDigits === null || rowsWithDetailAffordance === null) {
     return refused("UNREADABLE");
   }
-  // A container kind of NONE with rows counted is incoherent — refuse rather than reconcile it.
-  if (containerKind === "NONE" && rowCount > 0) {
+  // More rows carrying digits than rows scanned is incoherent — refuse rather than reconcile it.
+  if (rowsWithDigits > rowsScanned || rowsWithDetailAffordance > rowsScanned) {
     return refused("UNREADABLE");
   }
 
@@ -243,7 +268,8 @@ export function sanitizeInquiryListCensus(
   return {
     reason: "OK",
     containerKind,
-    rowCount,
+    rowCounts: { table, list, grid },
+    rowsScanned,
     rowsWithDigits,
     rowsWithDetailAffordance,
     digitMatches,
