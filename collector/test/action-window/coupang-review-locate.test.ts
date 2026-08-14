@@ -16,6 +16,7 @@ import { locateReviewOnPage, type ReviewLocateTarget } from "../../src/action-wi
 import { reviewBodyFingerprint } from "../../src/action-window/reply-submission/review-body-fingerprint";
 import {
   canonicalizeReviewRows,
+  pagerReading,
   type CoupangReviewPageReading,
   type CoupangReviewRowReading,
 } from "../../src/action-window/coupang-review/review-rows";
@@ -53,7 +54,7 @@ function reading(rows: readonly CoupangReviewRowReading[]): CoupangReviewPageRea
     rows,
     // Locate never consults the pager — it matches one review against the page in front of it. The field is
     // here because the reading type requires it, and a resolved single page is the least surprising filler.
-    pager: { found: false, resolved: false, pageNumbers: [], currentPage: null, hasNext: false, nextEnabled: false },
+    pager: pagerReading({ found: false, hasNext: false, nextEnabled: false }),
   };
 }
 

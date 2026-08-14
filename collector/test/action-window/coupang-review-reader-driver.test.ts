@@ -46,7 +46,8 @@ function reading(bodies: readonly string[]): Record<string, unknown> {
     rolesResolved: ["date", "rating", "product", "productName", "body"],
     widthMismatchRows: 0,
     rows: bodies.map((b, i) => row(i, b)),
-    pager: { found: false, resolved: false, pageNumbers: [], currentPage: null, hasNext: false, nextEnabled: false },
+    pager: { found: false, resolved: false, pageNumbers: [], currentPage: null, hasNext: false, nextEnabled: false,
+             clustersFound: 0, clustersOfCells: 0, clusterSize: 0, ariaCurrentMarks: 0, classMarks: 0, nonLinkMarks: 0 },
   };
 }
 

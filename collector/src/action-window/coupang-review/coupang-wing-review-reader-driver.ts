@@ -151,6 +151,15 @@ export class CoupangWingReviewReaderDriver {
       unmappedColumns: reading.unmappedColumns,
       widthMismatchRows: reading.widthMismatchRows,
       rows: reading.rows.length,
+      // The pager, in the same line as the rows. The first live sitting read ten rows perfectly and then
+      // stopped on an unresolved pager, and this log said nothing about the pager at all — so the run
+      // could not distinguish a screen with no page numbers from one whose current page is marked in a
+      // way we do not recognise. Integers and booleans only.
+      pager:
+        `found=${reading.pager.found}/${reading.pager.resolved} pages=${reading.pager.pageNumbers.length}` +
+        ` at=${reading.pager.currentPage ?? "?"} next=${reading.pager.hasNext}/${reading.pager.nextEnabled}` +
+        ` clusters=${reading.pager.clustersFound}(+${reading.pager.clustersOfCells} cells)/${reading.pager.clusterSize}` +
+        ` marks=${reading.pager.ariaCurrentMarks}/${reading.pager.classMarks}/${reading.pager.nonLinkMarks}`,
     });
     return reading;
   }

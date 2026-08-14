@@ -19,6 +19,7 @@ import {
   canonicalizeReviewRows,
   localBoundaryKey,
   pagerPosition,
+  pagerReading,
   UNREAD_PAGER,
   type CoupangReviewPagerReading,
   type CoupangReviewPageReading,
@@ -42,14 +43,14 @@ function row(body: string, date = "2026.08.11", rating = "5", product = "1112223
 
 /** A resolved five-page pager sitting on page `current`. The shape the live census actually found. */
 function pagerAt(current: number, last = 5): CoupangReviewPagerReading {
-  return {
+  return pagerReading({
     found: true,
     resolved: true,
     pageNumbers: Array.from({ length: last }, (_, i) => i + 1),
     currentPage: current,
     hasNext: current < last,
     nextEnabled: current < last,
-  };
+  });
 }
 
 function readable(
@@ -99,14 +100,14 @@ describe("a walk completes only when the pager says it reached the end", () => {
   });
 
   it("completes on a screen with no pager and nothing to press — a one-page list is a whole list", () => {
-    const single: CoupangReviewPagerReading = {
+    const single: CoupangReviewPagerReading = pagerReading({
       found: false,
       resolved: false,
       pageNumbers: [],
       currentPage: null,
       hasNext: false,
       nextEnabled: false,
-    };
+    });
     const session = new ReviewAcquisitionSession();
 
     session.offerPage(readable([row("하나뿐인 후기")], single));
@@ -148,14 +149,14 @@ describe("a walk completes only when the pager says it reached the end", () => {
 
   it("does not treat the highest PRINTED number as the end while the next control is still live", () => {
     // A windowed pager: 1…10 shown, 50 pages behind it, and 다음 still pressable on 10.
-    const windowed: CoupangReviewPagerReading = {
+    const windowed: CoupangReviewPagerReading = pagerReading({
       found: true,
       resolved: true,
       pageNumbers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
       currentPage: 10,
       hasNext: true,
       nextEnabled: true,
-    };
+    });
     const session = new ReviewAcquisitionSession();
 
     const outcome = session.offerPage(readable([row("열번째 페이지")], windowed));
@@ -195,14 +196,14 @@ describe("the operator's word ends the walk without completing it", () => {
 
 describe("a pager it cannot read stops the walk rather than continuing blind", () => {
   it("stops when a pager is present and its current page cannot be identified", () => {
-    const unresolved: CoupangReviewPagerReading = {
+    const unresolved: CoupangReviewPagerReading = pagerReading({
       found: true,
       resolved: false,
       pageNumbers: [1, 2, 3],
       currentPage: null,
       hasNext: true,
       nextEnabled: true,
-    };
+    });
     const session = new ReviewAcquisitionSession();
 
     const outcome = session.offerPage(readable([row("어느 페이지인지 모름")], unresolved));
@@ -215,15 +216,27 @@ describe("a pager it cannot read stops the walk rather than continuing blind", (
     });
   });
 
+  it("still reports the rows the READER saw, so a pager failure cannot read as a table failure", () => {
+    // The first live sitting printed `rows=0` over a page whose ten rows had been read perfectly. The one
+    // line the operator sees said the table had failed when only the pager had.
+    const unresolved = pagerReading({ found: true, resolved: false, pageNumbers: [1, 2, 3], hasNext: true, nextEnabled: true });
+    const session = new ReviewAcquisitionSession();
+
+    const outcome = session.offerPage(readable([row("a"), row("b"), row("c")], unresolved));
+
+    expect(outcome.stopReason).toBe("PAGER_UNRESOLVED");
+    expect(outcome.rowsRead).toBe(3);
+  });
+
   it("stops when there is a next control but no numbers to count it against", () => {
-    const nextOnly: CoupangReviewPagerReading = {
+    const nextOnly: CoupangReviewPagerReading = pagerReading({
       found: false,
       resolved: false,
       pageNumbers: [],
       currentPage: null,
       hasNext: true,
       nextEnabled: true,
-    };
+    });
 
     expect(new ReviewAcquisitionSession().offerPage(readable([row("x")], nextOnly)).stopReason).toBe(
       "PAGER_UNRESOLVED",
@@ -348,14 +361,14 @@ describe("pagerPosition on its own", () => {
   });
 
   it("refuses a current page the pager did not also offer", () => {
-    const inconsistent: CoupangReviewPagerReading = {
+    const inconsistent: CoupangReviewPagerReading = pagerReading({
       found: true,
       resolved: true,
       pageNumbers: [1, 2, 3],
       currentPage: 9,
       hasNext: false,
       nextEnabled: false,
-    };
+    });
 
     // "page 9 of 1,2,3" is a contradiction, not a position — and read as past-the-end it would COMPLETE a
     // walk. The reading is refused instead.

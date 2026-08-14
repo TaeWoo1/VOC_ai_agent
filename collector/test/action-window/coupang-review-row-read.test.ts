@@ -362,6 +362,73 @@ describe("the pager census, executed", () => {
     expect(reading.pager.found).toBe(false);
   });
 
+  it("says WHY it did not resolve, in counts — the first live sitting could only say that it had not", () => {
+    // A cluster of page numbers where none is marked as current: three signals, none firing uniquely.
+    const box = el({ tag: "div" }).add(
+      el({ tag: "a", text: "1", attrs: { href: "#" } }),
+      el({ tag: "a", text: "2", attrs: { href: "#" } }),
+      el({ tag: "a", text: "3", attrs: { href: "#" } }),
+    );
+    const reading = readWith(box);
+
+    expect(reading.pager.resolved).toBe(false);
+    // "one cluster, three numbers, and no signal marked any of them" — three different fixes, and without
+    // these counts all three arrive as the same silence.
+    expect(reading.pager.clustersFound).toBe(1);
+    expect(reading.pager.clusterSize).toBe(3);
+    expect(reading.pager.ariaCurrentMarks).toBe(0);
+    expect(reading.pager.classMarks).toBe(0);
+    expect(reading.pager.nonLinkMarks).toBe(0);
+  });
+
+  it("counts a signal that fired on TWO cells, which is a different problem from one that never fired", () => {
+    const box = el({ tag: "div" }).add(
+      el({ tag: "span", text: "1" }),
+      el({ tag: "span", text: "2" }),
+      el({ tag: "a", text: "3", attrs: { href: "#" } }),
+    );
+    const reading = readWith(box);
+
+    expect(reading.pager.resolved).toBe(false);
+    expect(reading.pager.nonLinkMarks).toBe(2);
+  });
+
+  it("counts the review rows it discarded as pager candidates, rather than discarding them silently", () => {
+    // Every review row prints 1 in 번호 and 5 in 평점 — two numeric children, and not a pager.
+    const reading = readWith(null);
+
+    expect(reading.pager.clustersOfCells).toBeGreaterThan(0);
+    expect(reading.pager.clustersFound).toBe(0);
+  });
+
+  it("no longer excludes a pager just because it sits inside a table", () => {
+    // The first rule excluded anything under a <table>, which would also have discarded a pager rendered in
+    // the list's own tfoot — a real layout whose exclusion is invisible.
+    const table = tableOf(HEADERS, [ROW_A]);
+    table.add(
+      el({ tag: "tfoot" }).add(
+        el({ tag: "tr" }).add(
+          el({ tag: "td" }).add(
+            pager({ numbers: [1, 2, 3], current: 2, next: "enabled" }),
+          ),
+        ),
+      ),
+    );
+    const reading = readPage(el({ tag: "body" }).add(table));
+
+    expect(reading.pager).toMatchObject({ found: true, resolved: true, currentPage: 2 });
+  });
+
+  it("reads aria-selected as well as aria-current", () => {
+    const box = el({ tag: "div" }).add(
+      el({ tag: "a", text: "1", attrs: { href: "#" } }),
+      el({ tag: "a", text: "2", attrs: { href: "#", "aria-selected": "true" } }),
+      el({ tag: "a", text: "3", attrs: { href: "#" } }),
+    );
+
+    expect(readWith(box).pager.currentPage).toBe(2);
+  });
+
   it("is read even when the table could not be", () => {
     const withoutRating = HEADERS.filter((h) => h !== "평점");
     const root = el({ tag: "body" }).add(

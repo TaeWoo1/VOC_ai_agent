@@ -256,29 +256,39 @@ function reviewReaderFragment(
   /* **A row of the review table is not a pager**, and it looks exactly like one: the 번호 cell prints 1 and
      the 평점 cell prints 5, so every review row is an element with two numeric children. The first version of
      this census resolved a REVIEW ROW as the paging control on the very first fixture it met.
-     Anything inside a table is therefore excluded. The cost is a pager rendered inside the list table's own
-     tfoot, which this would miss — and missing it yields found=false with a next control present, which is
-     UNKNOWN and stops the walk. Fail closed, and a live reading will say whether it matters. */
-  function insideTable(el) {
-    var node = el, depth = 0;
-    while (node && depth <= 12) {
-      if (String(node.tagName || '').toUpperCase() === 'TABLE') { return true; }
-      node = parentOfEl(node);
-      depth++;
+     The rule that excludes it is precise rather than broad: a cluster whose numeric children are table CELLS
+     is a row. An earlier version excluded anything inside a <table> at all, which would also have discarded a
+     pager rendered inside the list's own tfoot — a real layout, and one whose exclusion is invisible (it
+     yields found=false, which stops the walk with no way to tell why). */
+  function numericChildrenAreCells(el) {
+    var kids = el.children || [];
+    for (var i = 0; i < kids.length; i++) {
+      if (wholeNumber(kids[i]) === null) { continue; }
+      var tag = String(kids[i].tagName || '').toUpperCase();
+      if (tag === 'TD' || tag === 'TH') { return true; }
     }
     return false;
   }
   function pagerOf() {
     var all = Array.prototype.slice.call(document.querySelectorAll('*'), 0, ${MAX_SCAN_ELEMENTS});
     var host = null, hostCount = 1;
+    /* **Why a refusal is counted rather than just returned.** The first live sitting stopped on
+       PAGER_UNRESOLVED and the log said only that — so the reading could not distinguish "no cluster of
+       page numbers exists on this screen" from "several do" from "one does and none of the three
+       current-page signals fired on it". Three different fixes, one indistinguishable symptom, and one
+       seated sitting spent learning nothing. These counts are integers about structure; no page text,
+       class name or number reaches them. */
+    var clustersFound = 0, clustersOfCells = 0;
     for (var i = 0; i < all.length; i++) {
-      if (insideTable(all[i])) { continue; }
       var kids = all[i].children || [];
       var n = 0;
       for (var k = 0; k < kids.length; k++) { if (wholeNumber(kids[k]) !== null) { n++; } }
+      if (n < 2) { continue; }
+      if (numericChildrenAreCells(all[i])) { clustersOfCells++; continue; }
+      clustersFound++;
       /* >= 2 numeric siblings is what makes a cluster a PAGER rather than a cell that prints a
          number. Strictly greater wins, so the innermost cluster is chosen over its wrappers. */
-      if (n >= 2 && n > hostCount) { host = all[i]; hostCount = n; }
+      if (n > hostCount) { host = all[i]; hostCount = n; }
     }
 
     var next = null;
@@ -302,7 +312,9 @@ function reviewReaderFragment(
 
     if (host === null) {
       return { found: false, resolved: false, pageNumbers: [], currentPage: null,
-               hasNext: hasNext, nextEnabled: nextEnabled };
+               hasNext: hasNext, nextEnabled: nextEnabled,
+               clustersFound: clustersFound, clustersOfCells: clustersOfCells, clusterSize: 0,
+               ariaCurrentMarks: 0, classMarks: 0, nonLinkMarks: 0 };
     }
 
     var numbers = [], nodes = [], hostKids = host.children || [];
@@ -315,20 +327,31 @@ function reviewReaderFragment(
     numbers.sort(function (a, b) { return a - b; });
 
     /* Which page is being shown, by three signals in order of directness. Each must identify
-       EXACTLY ONE cell — two candidates identify nothing, and saying so is the point. */
+       EXACTLY ONE cell — two candidates identify nothing, and saying so is the point.
+       Each signal's HIT COUNT is kept, so a refusal says which signal fired and how often: 0 means the
+       screen does not mark the current page that way, and 2+ means it does but not uniquely. Those are
+       different problems, and without the counts they arrive as the same silence. */
     var current = null, marked = [];
+    var ariaMarks = 0, classMarks = 0, nonLinkMarks = 0;
     for (var m = 0; m < nodes.length; m++) {
       var ac = nodes[m].el.getAttribute ? nodes[m].el.getAttribute('aria-current') : null;
-      if (ac !== null && String(ac).toLowerCase() !== 'false') { marked.push(nodes[m].value); }
+      var sel = nodes[m].el.getAttribute ? nodes[m].el.getAttribute('aria-selected') : null;
+      if ((ac !== null && String(ac).toLowerCase() !== 'false')
+          || (sel !== null && String(sel).toLowerCase() === 'true')) {
+        marked.push(nodes[m].value);
+      }
     }
+    ariaMarks = marked.length;
     if (marked.length !== 1) {
       marked = [];
       for (var q = 0; q < nodes.length; q++) {
         var cls = classTokens(nodes[q].el);
-        if (cls.indexOf('active') >= 0 || cls.indexOf('current') >= 0 || cls.indexOf('selected') >= 0) {
+        if (cls.indexOf('active') >= 0 || cls.indexOf('current') >= 0 || cls.indexOf('selected') >= 0
+            || cls.indexOf('on') >= 0 || cls.indexOf('now') >= 0) {
           marked.push(nodes[q].value);
         }
       }
+      classMarks = marked.length;
     }
     if (marked.length !== 1) {
       /* The last signal: the page you are on is usually the one that is not a link. */
@@ -336,11 +359,14 @@ function reviewReaderFragment(
       for (var r = 0; r < nodes.length; r++) {
         if (!pressable(nodes[r].el)) { marked.push(nodes[r].value); }
       }
+      nonLinkMarks = marked.length;
     }
     if (marked.length === 1) { current = marked[0]; }
 
     return { found: true, resolved: current !== null, pageNumbers: numbers, currentPage: current,
-             hasNext: hasNext, nextEnabled: nextEnabled };
+             hasNext: hasNext, nextEnabled: nextEnabled,
+             clustersFound: clustersFound, clustersOfCells: clustersOfCells, clusterSize: nodes.length,
+             ariaCurrentMarks: ariaMarks, classMarks: classMarks, nonLinkMarks: nonLinkMarks };
   }
 
   var tables = Array.prototype.slice.call(document.querySelectorAll('table'), 0, MAX_TABLES);

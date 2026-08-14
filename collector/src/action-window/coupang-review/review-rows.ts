@@ -64,6 +64,26 @@ export interface CoupangReviewPagerReading {
   readonly currentPage: number | null;
   readonly hasNext: boolean;
   readonly nextEnabled: boolean;
+  /**
+   * **Why a refusal happened, in integers.**
+   *
+   * The first live sitting stopped on `PAGER_UNRESOLVED` and the run could say nothing more. Three
+   * different causes produce that one word — no cluster of page numbers on the screen at all, several
+   * clusters, or one cluster on which none of the current-page signals fired uniquely — and they need
+   * three different fixes. Without these counts they arrive as the same silence, and each guess costs a
+   * seated sitting.
+   *
+   * All structural: how many numeric-sibling clusters were seen, how many were discarded as table rows,
+   * how many numbers the chosen one holds, and how many cells each current-page signal marked. A signal
+   * count of 0 means the screen does not mark the current page that way; 2+ means it does but not
+   * uniquely. No page text, class name, or page number reaches any of them.
+   */
+  readonly clustersFound: number;
+  readonly clustersOfCells: number;
+  readonly clusterSize: number;
+  readonly ariaCurrentMarks: number;
+  readonly classMarks: number;
+  readonly nonLinkMarks: number;
 }
 
 /** One document's reading: the structural verdict plus the rows, if any survived it. */
@@ -135,7 +155,24 @@ export const UNREAD_PAGER: CoupangReviewPagerReading = Object.freeze({
   // control must not conclude there was nothing after this page.
   hasNext: true,
   nextEnabled: true,
+  clustersFound: 0,
+  clustersOfCells: 0,
+  clusterSize: 0,
+  ariaCurrentMarks: 0,
+  classMarks: 0,
+  nonLinkMarks: 0,
 });
+
+/**
+ * A pager reading with every field defaulted to the fail-closed value, overridden field by field.
+ *
+ * It exists so the diagnostic counts have ONE place that knows their defaults. Without it every caller and
+ * fixture repeats six integers whose only correct value is zero, and the next field added to this type
+ * silently means "0" in some of them and "missing" in others.
+ */
+export function pagerReading(over: Partial<CoupangReviewPagerReading> = {}): CoupangReviewPagerReading {
+  return { ...UNREAD_PAGER, ...over };
+}
 
 const EMPTY_READING: CoupangReviewPageReading = Object.freeze({
   reason: "UNREADABLE",
@@ -244,6 +281,12 @@ function sanitizePager(raw: unknown): CoupangReviewPagerReading {
     currentPage: resolved ? current : null,
     hasNext: p["hasNext"] === true,
     nextEnabled: p["hasNext"] === true && p["nextEnabled"] === true,
+    clustersFound: count(p["clustersFound"]),
+    clustersOfCells: count(p["clustersOfCells"]),
+    clusterSize: count(p["clusterSize"]),
+    ariaCurrentMarks: count(p["ariaCurrentMarks"]),
+    classMarks: count(p["classMarks"]),
+    nonLinkMarks: count(p["nonLinkMarks"]),
   };
 }
 

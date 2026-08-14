@@ -181,8 +181,12 @@ export class ReviewAcquisitionSession {
     if (position === "UNKNOWN") {
       // The pager is the ONLY thing that can end this walk in a completion, so a pager that cannot be read
       // ends it here instead of letting pages pile up under a claim that can never be made.
+      //
+      // `rowsRead` still reports what the READER saw. The first version returned 0 here, and the first live
+      // sitting printed `rows=0` over a page whose ten rows had been read perfectly — so the one line the
+      // operator sees said the table had failed when only the pager had.
       this.stopped = "PAGER_UNRESOLVED";
-      return { pageNumber, accepted: false, rowsRead: 0, newReviews: 0, alreadyKnown: 0, dropped: emptyDrops(), stopReason: this.stopped };
+      return { pageNumber, accepted: false, rowsRead: reading.rows.length, newReviews: 0, alreadyKnown: 0, dropped: emptyDrops(), stopReason: this.stopped };
     }
 
     // **The page NUMBER must move forward.** The row-set signature below catches a page that re-rendered
