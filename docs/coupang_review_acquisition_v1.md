@@ -3,9 +3,12 @@
 What SellerOps stores when it reads a seller's own WING 상품평 screen, how it recognises a review it
 already has, and how it finds one again on the screen.
 
-**Status: LIVE-PROVEN end to end on 2026-08-15** — first backfill (22 stored), same-range re-sync
-(`stored=0 / skipped=22`, database unchanged), and one stored review located and rung on the seller's own
-screen. §6.5 records what the sittings established, the defects they exposed, and what remains undetermined. Nothing here is promoted in `docs/multi-channel-connector-roadmap.md` §4.1.
+**Status: LIVE-PROVEN end to end on 2026-08-15, and re-proven on the corrected manifest at commit
+`533cafc2`** — first backfill (22 stored into an empty database), same-range re-sync (`stored=0 /
+skipped=22`, database unchanged), and one stored review located and rung on the seller's own screen. **§6.6
+is the proof of record**; §6.5 keeps how each fact was learned, including the five refusals and the two
+defects only a live screen could produce. Nothing here is promoted in
+`docs/multi-channel-connector-roadmap.md` §4.1.
 
 **Posture, unchanged from the gate:** `TECHNICALLY_POSSIBLE = CONDITIONAL_YES` / `POLICY = UNCLEAR` /
 `DEVELOPMENT = PILOT_ALLOWED` / `GA = POLICY_GATED`
@@ -153,6 +156,11 @@ outline, and a scroll: it never clicks, focuses, types, or submits.
 Six seated `READ_ONLY` sittings on the operator's own 상품평 screen. The first five refused; the sixth
 collected. Every refusal was the design working, and every fix came from a measurement rather than a guess.
 
+> **The run below is superseded as the proof of record by §6.6**, which repeated it on the corrected
+> manifest after nine review findings were fixed. What this section holds that §6.6 cannot is *how each
+> fact was learned* — the five refusals, the markup that ended them, and the two defects only a live screen
+> could produce. The numbers came out identical.
+
 ### The proof, end to end
 
 ```
@@ -235,6 +243,65 @@ product-owner decision (2026-08-15) is: **store them, keyed additionally on the 
 - The wire carries `textless` rather than inferring it from a blank body, and a row whose flag and body
   disagree is refused. A blank body could be a reader defect; the flag is the agent saying it saw a rating
   with no text, and the two key differently.
+
+---
+
+## 6.6 The final proof, on the corrected manifest — 2026-08-15
+
+§6.5's sitting was approved against manifest text that said a rating-only 상품평 was **"skipped and counted,
+not stored"** — while 19 of the 22 reviews it stored were exactly that. The text was corrected, along with
+eight other review findings, and the whole sequence was then repeated end to end. **This is the proof of
+record.**
+
+Approval `apr-06f26026cbc8` · run `wt-cfca7f76f844` · commit `533cafc2` (PINNED) · phase
+`COUPANG_WING_REVIEW_ACQUISITION` · mode `READ_ONLY`. A database created empty for the sitting — **0 reviews,
+0 review imports** before the first press — so the backfill is an insertion and not a re-read. The schema it
+ran on includes `V38`, applied at boot.
+
+```
+BACKFILL   page 1: rows=10 new=9 known=1   page 2: rows=10 new=9 known=1   page 3: rows=4 new=4 known=0
+           pages=3 rows=24 collected=22 textless=19 expandable=0
+           complete=true stop=FINAL_PAGE_REACHED lastPage=3 dropped(date=0 rating=0 product=0)
+           handoff: received=22 stored=22 skipped=0 failed=0
+LOCATE     verdict=LOCATED matches=1 rows=10 highlighted=true
+RE-SYNC    the same three pages walked again, 0 marketplace clicks
+           handoff: received=22 stored=0 skipped=22 failed=0
+DATABASE   22 rows before and after the re-sync
+           textless=19 / with text=3 · dedup_key_version v3=19 / v2=3 · source_option_id on 22 of 22
+           0 rows whose body holds Coupang's placeholder or a 더보기 control
+           reviews has NO author-shaped column at all
+HISTORY    AGENT_HANDOFF REVIEW SUCCESS 22/22/0  →  AGENT_HANDOFF REVIEW SUCCESS 22/0/22
+LOG        every event across both runs is a read, a confirm, a handoff or a locate —
+           0 clicks, 0 inputs, 0 submissions, 0 navigations
+```
+
+| What was asked | Result |
+|---|---|
+| 3-page full backfill | **PASS** — 24 rows read, walk closed by the pager itself at page 3 |
+| 22 stored | **PASS** — `stored=22 skipped=0 failed=0`, database 0 → 22 |
+| text 3 / textless 19 | **PASS** — and keyed accordingly, v2×3 / v3×19 |
+| placeholder body = 0 | **PASS** — 0 rows matching the placeholder or an expander control |
+| author persistence = 0 | **PASS** — `excludedColumns=1` every page; no author-shaped column exists to hold one |
+| same-range re-sync | **PASS** — `stored=0 skipped=22`, count unchanged at 22 |
+| exact locate | **PASS** — `matches=1 highlighted=true`, once per run, independently |
+| marketplace write = 0 | **PASS** — the operator turned all six page-transitions across the two runs |
+| manifest states the (c) rule | **PASS** — see below |
+
+**The manifest now says what is stored.** Both the scope sentence the gate validates and the operator-facing
+disclosure carry it: a 상품평 rated without writing **is stored**, as a review with no text; Coupang's
+`등록된 내용이 없습니다.` is never kept as though a customer had written it; such a review is told apart by
+the option it was left on; and two textless reviews of ONE option on one day at one rating merge into one —
+a known limit, accepted rather than fixed with a buyer name or a row position. The pre-decision sentence is
+gone, and a test fails if it returns.
+
+**Two of the nine fixes were exercised by the screen itself.** Page 3 reported `next=true/false` — a next
+control that is *drawn but dead* — which is the distinction the completion rule had been getting wrong: it
+now asks whether the arrow can be pressed, not whether one exists. And `expandable=0` across 24 rows says
+this account has no folded review bodies, which is why §7.5 stays open rather than being closed by a guess.
+
+**`known=1` on pages 1 and 2** is the recorded limitation, visible in the run's own counts: two rows on one
+page were the same textless review by every field the screen publishes, and collapsed. 24 rows read, 22
+identities.
 
 ---
 
