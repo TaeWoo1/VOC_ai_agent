@@ -2,10 +2,16 @@
 
 > The first Coupang vertical that is *operational work* rather than connection work: acquire the
 > seller's customer inquiries through an official API, carry them into the existing routine spine,
-> and hand the seller back to their own marketplace screen to answer. **Live-proven acquisition**
-> (2026-08-14, `docs/coupang_inquiry_live_proof_v1.md`); the routine chain is implemented and
-> offline-tested but has never had a live subject. Sanitized: no secret, key, vendor id, IP, buyer
-> identity, inquiry text, or seller data appears here.
+> and answer them — after the seller confirms the draft — through Coupang's own reply API.
+> **Live-proven acquisition** (2026-08-14, `docs/coupang_inquiry_live_proof_v1.md`); the routine
+> chain and the reply path are implemented and offline-tested but have never had a live subject.
+> Sanitized: no secret, key, vendor id, IP, buyer identity, inquiry text, or seller data appears here.
+>
+> **Revised 2026-08-14.** §5 originally described a guided-browser answer, built on the belief that
+> Coupang published no answer API. It does:
+> `POST …/v4/vendors/{vendorId}/onlineInquiries/{inquiryId}/replies`. The API is now the path and the
+> browser flow is demoted to a diagnostic. The superseded design and everything its three
+> calibration sittings measured are kept in §5-bis, because the measurements were real.
 
 ---
 
@@ -123,12 +129,94 @@ item bound to that connection; an already-ANSWERED one is stored as history with
 re-sweeping the overlapping window changes nothing; a platform answer flips the status and completes
 the open task; no buyer identity is persisted anywhere on the path.
 
-**SellerOps cannot post the reply.** `ChannelReplyAdapterRegistry` resolves adapters by channel and
-Coupang has none, so the dispatch path is structurally empty — not disabled by a flag, absent.
+**SellerOps posts the reply through Coupang's own API, after the seller confirms it.** See §5 —
+this superseded the guided-browser answer once the official endpoint was found.
 
 ---
 
-## 5. The guided answer (Action Window)
+## 5. The answer path — official API (superseded the guided browser answer)
+
+> **This section replaced a browser flow.** Everything below §5.3 is the record of that flow and of
+> what its calibration measured. It is kept because the measurements are real and the diagnostic is
+> still useful — not because it is the path.
+
+### 5.1 The endpoint
+
+```
+POST /v2/providers/openapi/apis/api/v4/vendors/{vendorId}/onlineInquiries/{inquiryId}/replies
+body: { "content": ..., "vendorId": ..., "replyBy": ... }
+```
+
+**The version asymmetry is Coupang's, not a mistake.** Collection is `v5`; this answer endpoint is
+`v4`. Aligning one to the other would be inventing an endpoint rather than calling a documented one.
+
+**What is not verified from this repository.** The three request field names come from Coupang's
+public API reference. No live call has exercised them. The client is written so the first live
+attempt either succeeds or fails loudly with the platform's numeric code — never a silent retry
+against a guess.
+
+### 5.2 The flow
+
+```
+UNANSWERED inquiry → work item → customer context → AI draft
+   → the seller confirms THAT exact draft version (immutable binding)
+   → CoupangChannelReplyAdapter → official reply API
+   → re-query the ANSWERED bucket → COMPLETED only when Coupang lists it as answered
+```
+
+The publish core needed no change: `InquiryPublishService` was already channel-neutral (confirm →
+bind → gated dispatch → verify), so Coupang is a **second adapter** beside ESM's, not a second flow.
+
+**Nothing auto-sends.** The adapter is registered only behind
+`sellerops.inquiry.publish.execution-enabled`; with the flag off no Coupang adapter bean exists and
+the registry resolves empty. A dispatch runs only from `ACTION_PENDING`, reached only by a seller's
+explicit confirmation of a specific draft fingerprint.
+
+**Never a resend.** A `POST` that times out may already have answered a customer, so the HTTP
+boundary has its own write verb and its own `CoupangTransportAmbiguityException` — every *other*
+fail-closed state in this connector means "nothing was sent", and that is the one distinction a
+reply path cannot lose. It maps to `DELIVERY_UNKNOWN`, which the core verifies and never resends.
+
+**Two places where the pessimistic reading is the honest one:**
+
+- A **200 that does not say success is not a success.** Coupang answers business rejections with
+  HTTP 200 and a non-OK envelope; reading only the status would record a reply that was never
+  posted, and the seller would believe a customer had been answered.
+- A **verification that could not run is `NOT_COMPLETED`**, never confirmed. "We could not check"
+  rounding up to "it landed" would close a work item on an answer nobody received.
+
+Verification asks the platform, not our own text: is this `inquiryId` now in the ANSWERED bucket.
+Comparing bodies would read customer-visible content back *and* turn a whitespace difference into a
+failed verification. The window brackets the inquiry's KST day by one day either side, because the
+stored timestamp is UTC.
+
+### 5.3 `replyBy` — a configuration gap, stated plainly
+
+Coupang stamps an answer with the WING operator id. **SellerOps does not hold it**: the credential
+handoff stores 업체코드 / Access Key / Secret Key and nothing else. It is configured explicitly
+(`sellerops.connector.coupang.reply-by`) and blank refuses to publish — `RETRYABLE`, not
+`PERMANENT`, because nothing was sent and the same approved draft becomes sendable the moment the
+deployment is corrected. Marking it permanent would throw away a seller's approved reply over a
+config gap.
+
+*Classification: product-owner / deployment decision. Where this value comes from per connected
+seller is not answered here.*
+
+### 5.4 Attachment gap — recorded, not investigated
+
+The official `onlineInquiries` response documents **no image or attachment field**. A buyer who
+attached a photo may therefore have an inquiry that is only fully visible in WING, and SellerOps
+would draft an answer without knowing a picture exists.
+
+This is recorded and **deliberately not acted on in this unit**. Investigating it means a separate
+READ_ONLY attachment discovery with its own decision about what may be read; extending the reply
+path into attachment scraping is explicitly out of scope.
+
+*Classification: external-research required.*
+
+---
+
+## 5-bis. The guided answer (Action Window) — DEMOTED to diagnostic
 
 `collector/src/action-window/coupang-inquiry/` — a three-step run at v2 intent `REPLY_SUBMISSION`:
 open the screened WING window → the seller confirms they reached their own 고객문의 screen → the
@@ -139,6 +227,26 @@ calibrated selector, no target signature, no observation predicate. So this run 
 and observes nothing. A guessed selector either points at the wrong control or silently matches
 nothing, and both are worse than an honest "you are on the screen; the draft is in the panel; post
 it yourself." Measuring that screen is a follow-up calibration sitting.
+
+### What the three READ_ONLY calibration sittings measured
+
+Kept because the measurements are real and each one killed a hypothesis. All three were READ_ONLY,
+on the seller's own account, with no click, input, or reply. No buyer text left the page.
+
+| Sitting | Reading | What it settled |
+|---|---|---|
+| 1 (`tr`/`li`/`[role=row]` rows) | `CONTAINER_AMBIGUOUS` | The refusal rule was unsatisfiable on any real app page — navigation `<li>` and a data table coexist. |
+| 2 (same, rule relaxed) | 54 rows · 0 id matches · **`답변완료` 0 AND `미답변` 0** | A row set containing neither status word is not the inquiry list. The scan had confidently measured the navigation. **The row tag was assumed before it was measured.** |
+| 3 (anchor-led, attributes only) | 2479 elements · 113 carrying ids · digit-run lengths **`[1,2,3,4,10,14]`** · 1 frame | Our ids are 9 and 11 digits. **Those lengths are absent.** The 접수번호 was never in an attribute — and there is no child frame to blame. |
+
+The operator then read the answer off the screen: the identifier is **printed**, as
+`주문문의 (158846709)`, under the column headed `문의유형(접수번호)` — and that 9-digit number is the
+API's own `inquiryId`. The official reply endpoint made the whole question moot a few minutes later.
+
+**The lesson that generalizes:** three sittings were spent because each probe decided what the page
+looked like before measuring it — first the row tag, then the attribute location. Both were
+structural mistakes, not tuning errors, and both produced *confident zeros* that read exactly like
+real refutations.
 
 Consequences that are contract-level:
 
@@ -180,7 +288,8 @@ Updated by the live proof of 2026-08-14 (`docs/coupang_inquiry_live_proof_v1.md`
 | Coupang INQUIRY (API) | **VERIFIED**, `CONFIRMED` | A real account collected through the official v5 path, and a re-sweep of the same window inserted nothing, skipped every row, and left the stored rows untouched. |
 | Coupang REVIEW | **BLOCKED**, unchanged | No official API. Nothing was built. |
 | Routine chain (queue → proposal → draft → Action Window) | **IMPLEMENTED · LIVE_UNPROVEN** | Offline-tested end to end; both live inquiries were already answered, so no work item opened and the chain had no subject. A live subject requires a real buyer question and cannot be manufactured. |
-| Coupang inquiry reply (write) | **guided only**, `UNVERIFIED` by design | SellerOps never submits; no adapter exists; the terminal is a report. No reply was posted in any sitting. |
+| Coupang inquiry reply (write) | **IMPLEMENTED · LIVE_UNPROVEN** | The official API path exists behind the execution flag with offline regression. **No live write has been attempted**, because there is no unanswered inquiry to answer and one cannot be manufactured. |
+| WING browser targeting | **DIAGNOSTIC · demoted** | Superseded by the official API. What its three calibration sittings measured is recorded in §5-bis. |
 
 `docs/multi-channel-connector-roadmap.md` §4.1 and the capability ledger were moved on this evidence
 and no more: INQUIRY is 라이브 검증 ✅ but **not** 운영 지원 — the connector flag stays off.
@@ -206,9 +315,14 @@ now paced to 4 calls/s — a fix that changes only timing and is not itself live
 
 ## 9. Follow-ups (not started)
 
-- **Calibrate the WING 고객문의 screen** so the guided run can highlight the actual composer and
-  observe the seller's own submit — the one thing that would upgrade the entry from "carried there"
-  to "guided".
+- **A live write.** The reply path has never posted. It needs one genuinely unanswered inquiry, a
+  configured `replyBy`, and a WRITE manifest with its own explicit approval — mode `WRITE` is never
+  covered by a READ_ONLY grant. Until then: IMPLEMENTED · LIVE_UNPROVEN.
+- **Attachment discovery** (§5.4) — whether an inquiry with a buyer photo is visible through the
+  API at all. Separate READ_ONLY unit, its own decision. Not attachment scraping.
+- **`replyBy` provisioning** — where the WING operator id comes from per connected seller.
+- **~~Calibrate the WING 고객문의 screen~~** — demoted. The official reply API removed the reason to
+  target a rendered page. The probe is kept as a diagnostic; it should not be extended.
 - **`callCenterInquiries`** as a separate stream, with its own PII decision.
 - **`backfillCursor` for INQUIRY** so an operator can re-collect an exact window without clearing
   the cursor (Coupang currently returns empty, so a windowed backfill fails closed).
