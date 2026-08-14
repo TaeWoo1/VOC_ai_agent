@@ -381,6 +381,77 @@ describe("the anchor leads, and the row shape comes back as a finding", () => {
   });
 });
 
+describe("a zero match is made interpretable, instead of being left ambiguous", () => {
+  it("**reports the LENGTHS of the ids the screen does carry**, so a miss is not two findings at once", () => {
+    // The live screen matched neither identifier while 113 elements carried digits in allowlisted attributes.
+    // "The screen carries no machine id" and "the screen carries an id of a different KIND than ours" both
+    // arrive as matchCount 0, and they lead to completely different next steps. Lengths tell them apart —
+    // and a length distribution identifies nothing and no one.
+    const root = el({ tag: "div" }).add(
+      el({ tag: "div" }).add(
+        el({ tag: "a", attrs: { href: "/cs/inquiries/9912345678901234" } }),
+        el({ tag: "a", attrs: { href: "/page/2" } }),
+        el({ tag: "div", attrs: { "data-seq": "77" } }),
+      ),
+    );
+
+    const census = censusOf(root);
+
+    expect(census.anchors.find((m) => m.id === "inquiryId")!.matchCount).toBe(0);
+    expect(census.anchorDigitRunLengths).toEqual([1, 2, 16]);
+  });
+
+  it("a repeat level reports the id lengths it carries, so the row's own id space is visible", () => {
+    const census = censusOf(
+      divGridInquiryList([
+        { inquiryId: INQUIRY_A, text: BUYER_TEXT_A, status: "답변완료" },
+        { inquiryId: INQUIRY_B, text: BUYER_TEXT_B, status: "답변완료" },
+      ]),
+    );
+
+    const level = census.anchors.find((m) => m.id === "inquiryId")!.topology!.repeatLevels[0]!;
+    expect(level.digitRunLengths).toEqual([INQUIRY_A.length]);
+  });
+
+  it("**a fixed platform word is an anchor too** — the structure around it is measured the same way", () => {
+    // When the screen does not carry OUR identifier, this is what is left: a word we supplied ourselves.
+    // Two leaves saying it inside two identically shaped siblings IS the row structure, found without
+    // reading anything a buyer wrote.
+    const census = censusOf(
+      divGridInquiryList([
+        { inquiryId: INQUIRY_A, text: BUYER_TEXT_A, status: "답변완료" },
+        { inquiryId: INQUIRY_B, text: BUYER_TEXT_B, status: "답변완료" },
+        { inquiryId: "158900001", text: "세 번째", status: "미답변" },
+      ]),
+    );
+
+    const answered = census.labelCounts.find((l) => l.id === "answeredTight")!;
+    expect(answered.elementCount).toBe(2);
+    expect(answered.hitsSharingRepeatShape).toBe(2);
+    // The chain reads outward: the status sits in a cell that repeats twice inside a row that repeats three
+    // times. Three identically shaped siblings for three inquiries on screen — that is the row level.
+    expect(answered.topology!.repeatLevels.map((l) => l.siblingCount)).toEqual([2, 3]);
+    const rowLevel = answered.topology!.repeatLevels[1]!;
+    // And the row it landed in carries a 9-digit number — the shape of the id WING would target by.
+    expect(rowLevel.digitRunLengths).toContain(INQUIRY_A.length);
+  });
+
+  it("two hits in unrelated corners are not a row structure", () => {
+    // A filter tab and a legend can both say 미답변 while no inquiry does. Shape agreement is what separates
+    // "these are rows" from "these are page furniture", and a count alone cannot.
+    const root = el({ tag: "div" }).add(
+      el({ tag: "nav" }).add(el({ tag: "span", text: "미답변" })),
+      el({ tag: "footer" }).add(el({ tag: "p", text: "미답변 건은 24시간 내 처리" })),
+    );
+
+    const census = censusOf(root);
+
+    const unanswered = census.labelCounts.find((l) => l.id === "unansweredTight")!;
+    expect(unanswered.elementCount).toBe(2);
+    expect(unanswered.hitsSharingRepeatShape).toBe(0);
+  });
+});
+
 describe("the status wording is measured, not guessed", () => {
   it("**several spellings are counted separately**, so one run settles which the screen uses", () => {
     // The first calibration supplied one spelling per state and came back with zero of both — which left "the
@@ -393,10 +464,10 @@ describe("the status wording is measured, not guessed", () => {
       ]),
     );
 
-    expect(census.labelCounts).toEqual([
-      { id: "answeredTight", elementCount: 0 },
-      { id: "answeredSpaced", elementCount: 2 },
-      { id: "unansweredTight", elementCount: 1 },
+    expect(census.labelCounts.map((l) => [l.id, l.elementCount])).toEqual([
+      ["answeredTight", 0],
+      ["answeredSpaced", 2],
+      ["unansweredTight", 1],
     ]);
   });
 

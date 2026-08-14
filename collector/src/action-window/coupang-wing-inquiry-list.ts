@@ -106,6 +106,14 @@ export interface InquiryRepeatLevel {
   readonly attributeKinds: readonly InquiryAttributeKind[];
   /** Whether this element offers a link or button — a way into a detail view at all. */
   readonly hasDetailAffordance: boolean;
+  /**
+   * **The LENGTHS of the digit runs this unit carries** in allowlisted attributes, deduplicated and sorted.
+   *
+   * Lengths, never values. This is what separates "the screen carries no machine id" from "the screen carries
+   * an id of a different kind than ours" — two findings that look identical as a match count of zero, and that
+   * lead to completely different next steps. A length distribution identifies nothing and no one.
+   */
+  readonly digitRunLengths: readonly number[];
 }
 
 /**
@@ -140,10 +148,22 @@ export interface InquiryAnchorMatch {
   readonly topology: InquiryAnchorTopology | null;
 }
 
-/** Per-label outcome: our own id, and how many leaf elements carried that exact platform literal. */
+/**
+ * Per-label outcome: our own id, how many leaf elements carried that exact platform literal, and the structure
+ * around them.
+ *
+ * **A fixed platform word is a legitimate anchor in its own right**, and measuring the topology around it is
+ * how a screen that does not carry our identifier can still be understood. If two leaves say `완료` and each
+ * sits inside one of two identically shaped siblings, the row structure has been found — using only a string we
+ * supplied. Nothing about the buyer's question is involved, and no text comes back.
+ */
 export interface InquiryLabelCount {
   readonly id: string;
   readonly elementCount: number;
+  /** The structure around the FIRST hit. Null when nothing matched. */
+  readonly topology: InquiryAnchorTopology | null;
+  /** How many hits share that first repeat level's tag and depth — whether they are the same kind of thing. */
+  readonly hitsSharingRepeatShape: number;
 }
 
 /**
@@ -156,8 +176,21 @@ export interface InquiryListCensus {
   readonly elementsScanned: number;
   /** Elements carrying at least one digit run in an allowlisted attribute — whether machine ids exist here. */
   readonly elementsWithAnchorAttributes: number;
+  /** Every distinct digit-run LENGTH the screen carries in allowlisted attributes, sorted. Lengths, not values. */
+  readonly anchorDigitRunLengths: readonly number[];
   readonly anchors: readonly InquiryAnchorMatch[];
   readonly labelCounts: readonly InquiryLabelCount[];
+}
+
+/**
+ * One frame's reading. WING embeds sub-applications, and a document-wide scan of the TOP document is still a
+ * scan of the wrong document when the list lives in a child frame — the same class of mistake as assuming the
+ * row tag, one level up. The frame is identified by INDEX only; a frame URL would carry the seller's own
+ * account path and has no business in a sanitized record.
+ */
+export interface InquiryFrameCensus {
+  readonly frameIndex: number;
+  readonly census: InquiryListCensus;
 }
 
 /** Why a target resolution refused. */
@@ -232,6 +265,17 @@ function attributeKinds(value: unknown): readonly InquiryAttributeKind[] {
 
 /** How many repeat levels may be reported. Enough to tell a cell from a row from a section; not a page dump. */
 const MAX_REPEAT_LEVELS = 4;
+/** How many distinct digit-run lengths may be reported. A distribution, not an inventory. */
+const MAX_DIGIT_LENGTHS = 12;
+
+/** Distinct digit-run LENGTHS, sorted ascending. Anything that is not a plausible length is dropped. */
+function digitRunLengths(value: unknown): readonly number[] {
+  const raw = Array.isArray(value) ? value : [];
+  const lengths = raw.filter(
+    (n): n is number => typeof n === "number" && Number.isInteger(n) && n >= 1 && n <= 64,
+  );
+  return [...new Set(lengths)].sort((a, b) => a - b).slice(0, MAX_DIGIT_LENGTHS);
+}
 
 /** One level, or null when any field is missing or incoherent. A bad level drops; it never degrades a good one. */
 function sanitizeRepeatLevel(raw: unknown): InquiryRepeatLevel | null {
@@ -261,6 +305,7 @@ function sanitizeRepeatLevel(raw: unknown): InquiryRepeatLevel | null {
     classTokenCount,
     attributeKinds: attributeKinds(l.attributeKinds),
     hasDetailAffordance: l.hasDetailAffordance === true,
+    digitRunLengths: digitRunLengths(l.digitRunLengths),
   };
 }
 
@@ -304,6 +349,7 @@ export function sanitizeInquiryListCensus(
     reason,
     elementsScanned: 0,
     elementsWithAnchorAttributes: 0,
+    anchorDigitRunLengths: [],
     anchors: [],
     labelCounts: [],
   });
@@ -347,11 +393,25 @@ export function sanitizeInquiryListCensus(
       (l) => l && typeof l === "object" && (l as Record<string, unknown>).id === expectation.id,
     ) as Record<string, unknown> | undefined;
     const elementCount = count(found?.elementCount);
+    const hitsSharingRepeatShape = count(found?.hitsSharingRepeatShape) ?? 0;
     if (elementCount === null) {
       return refused("UNREADABLE");
     }
-    labelCounts.push({ id: expectation.id, elementCount });
+    labelCounts.push({
+      id: expectation.id,
+      elementCount,
+      topology: elementCount > 0 ? sanitizeTopology(found?.topology) : null,
+      // No more hits can share a shape than there were hits.
+      hitsSharingRepeatShape: Math.min(hitsSharingRepeatShape, elementCount),
+    });
   }
 
-  return { reason: "OK", elementsScanned, elementsWithAnchorAttributes, anchors, labelCounts };
+  return {
+    reason: "OK",
+    elementsScanned,
+    elementsWithAnchorAttributes,
+    anchorDigitRunLengths: digitRunLengths(r.anchorDigitRunLengths),
+    anchors,
+    labelCounts,
+  };
 }

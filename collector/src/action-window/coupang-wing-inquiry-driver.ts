@@ -15,6 +15,7 @@ import { buildInquiryListCensusScript } from "./api-issuance-calibration/inquiry
 import {
   sanitizeInquiryListCensus,
   type InquiryDigitExpectation,
+  type InquiryFrameCensus,
   type InquiryLabelExpectation,
   type InquiryListCensus,
 } from "./coupang-wing-inquiry-list";
@@ -44,6 +45,13 @@ export interface CoupangWingInquiryDriverOptions {
 }
 
 const SETTLE_TIMEOUT_MS = 4000;
+/** Enough for a seller-center page's embedded applications; bounded so a frame-bomb cannot make this unbounded. */
+const MAX_FRAMES = 12;
+
+/** The minimum a frame must expose for this driver. Playwright's `Frame` satisfies it; so does a test double. */
+interface FrameLike {
+  evaluate<T>(script: string): Promise<T>;
+}
 
 export class CoupangWingInquiryDriver {
   private readonly page: Page;
@@ -84,13 +92,44 @@ export class CoupangWingInquiryDriver {
     const raw = await (page as unknown as { evaluate<T>(s: string): Promise<T> })
       .evaluate<unknown>(buildInquiryListCensusScript(digits, labels))
       .catch(() => null);
-    const census = sanitizeInquiryListCensus(raw, digits, labels);
-    // Counts and our own expectation ids. The log line is the same alphabet as the census itself — if this
-    // could print a row, so could the census, and neither may.
+    return this.record(sanitizeInquiryListCensus(raw, digits, labels));
+  }
+
+  /**
+   * **The same probe, once per frame.** A seller center embeds sub-applications, and a document-wide scan of
+   * the TOP document is still a scan of the wrong document when the list lives in a child frame — the same
+   * class of mistake as assuming the row tag, one level up.
+   *
+   * Frames are identified by INDEX only. A frame URL carries the seller's own account path, and a sanitized
+   * record has no business holding one. A frame that cannot be evaluated (cross-origin, detached mid-scan) is
+   * skipped rather than reported as an empty reading, which would read as "the list is not there".
+   */
+  async censusAllFrames(
+    digits: readonly InquiryDigitExpectation[],
+    labels: readonly InquiryLabelExpectation[] = WING_INQUIRY_STATUS_LABELS,
+  ): Promise<InquiryFrameCensus[]> {
+    const page = this.activePage();
+    await this.settle(page);
+    const framesOf = (page as unknown as { frames?: () => FrameLike[] }).frames;
+    const frames = typeof framesOf === "function" ? framesOf.call(page).slice(0, MAX_FRAMES) : [];
+    const script = buildInquiryListCensusScript(digits, labels);
+    const out: InquiryFrameCensus[] = [];
+    for (let frameIndex = 0; frameIndex < frames.length; frameIndex += 1) {
+      const raw = await frames[frameIndex]!.evaluate<unknown>(script).catch(() => null);
+      if (raw === null) continue;
+      out.push({ frameIndex, census: this.record(sanitizeInquiryListCensus(raw, digits, labels), frameIndex) });
+    }
+    return out;
+  }
+
+  /** The one log line. Its alphabet is the census's own — if this could print a row, so could the census. */
+  private record(census: InquiryListCensus, frameIndex?: number): InquiryListCensus {
     log("aw_coupang_inquiry_census", {
+      ...(frameIndex === undefined ? {} : { frameIndex }),
       reason: census.reason,
       elementsScanned: census.elementsScanned,
       elementsWithAnchorAttributes: census.elementsWithAnchorAttributes,
+      digitLengths: census.anchorDigitRunLengths.join("/"),
       matches: census.anchors.map((m) => `${m.id}=${m.matchCount}`),
       labels: census.labelCounts.map((l) => `${l.id}=${l.elementCount}`),
     });

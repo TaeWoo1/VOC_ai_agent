@@ -267,10 +267,21 @@ async function main(): Promise<void> {
       return;
     }
 
-    const census = await driver.censusInquiryList(targets, WING_INQUIRY_STATUS_LABELS);
+    // EVERY frame, not just the top document. A seller center embeds sub-applications, and scanning only the
+    // top document is the same class of mistake as assuming the row tag — one level up.
+    const frames = await driver.censusAllFrames(targets, WING_INQUIRY_STATUS_LABELS);
     // The primary target is the FIRST id the operator named — by convention the channel's own inquiryId.
     // Resolution is asked for that one only; a fallback to a product id would answer a different question.
     const primary = targets[0]!;
+    const resolved = frames.find((f) => resolveInquiryTarget(f.census, primary.id).ok);
+    // With no resolution anywhere, report against the frame that carried the most machine ids — the one most
+    // likely to BE the list — so the refusal describes the best candidate rather than an arbitrary frame.
+    const best =
+      resolved ??
+      [...frames].sort(
+        (a, b) => b.census.elementsWithAnchorAttributes - a.census.elementsWithAnchorAttributes,
+      )[0];
+    const census = best?.census ?? null;
     const resolution = resolveInquiryTarget(census, primary.id);
 
     // SANITIZED record → stdout. Integers, tag names, attribute KINDS, and our own expectation ids.
@@ -280,7 +291,10 @@ async function main(): Promise<void> {
         {
           urlCategory: screen.urlCategory,
           phase: CALIBRATION.phase,
-          census,
+          framesScanned: frames.length,
+          // Frames are named by INDEX. A frame URL carries the seller's own account path.
+          reportedFrameIndex: best?.frameIndex ?? null,
+          frames,
           primaryTargetId: primary.id,
           targetResolved: resolution.ok,
           ...(resolution.ok ? {} : { targetRefusal: resolution.reason }),
@@ -290,7 +304,7 @@ async function main(): Promise<void> {
       ),
     );
 
-    if (census.reason === "OK" && census.elementsWithAnchorAttributes === 0) {
+    if (census && census.reason === "OK" && census.elementsWithAnchorAttributes === 0) {
       console.error("");
       console.error("⚠ NOTHING on that screen carries a machine-readable number in href / id / data-*.");
       console.error("  That refutes id-based targeting for this surface. It is the measurement, not a failure to");

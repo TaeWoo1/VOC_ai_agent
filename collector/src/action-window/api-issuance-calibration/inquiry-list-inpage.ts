@@ -126,6 +126,26 @@ const CENSUS_FRAGMENT = `
     }
     return out;
   }
+  /* Distinct digit-run LENGTHS in this element's own allowlisted attributes, and optionally its descendants.
+     Lengths, never values — this is what tells "carries no machine id" apart from "carries an id of a different
+     kind than ours", two findings that both arrive as a match count of zero. */
+  function digitLengthsOf(el, includeDescendants) {
+    var seen = {}, out = [];
+    var nodes = [el];
+    if (includeDescendants) {
+      var kids; try { kids = slice(el.querySelectorAll('*')); } catch (e) { kids = []; }
+      if (kids.length > 500) { kids = kids.slice(0, 500); }
+      nodes = nodes.concat(kids);
+    }
+    for (var i = 0; i < nodes.length; i++) {
+      var runs = anchorRunsOf(nodes[i]);
+      for (var r = 0; r < runs.length; r++) {
+        var len = runs[r].digits.length;
+        if (!seen[len]) { seen[len] = 1; out.push(len); }
+      }
+    }
+    return out;
+  }
   /* The repeat chain above (and including) the anchor. A <td> repeats across and a <tr> repeats down; both are
      reported, because deciding which one is "the row" from inside a probe is exactly the guess that failed. */
   function repeatLevelsOf(el) {
@@ -150,7 +170,8 @@ const CENSUS_FRAGMENT = `
             siblingsSharingClassShape: sameShape,
             classTokenCount: classTokenCountOf(node),
             attributeKinds: attrKindsOf(node),
-            hasDetailAffordance: hasDetailAffordance(node)
+            hasDetailAffordance: hasDetailAffordance(node),
+            digitRunLengths: digitLengthsOf(node, true)
           });
         }
       }
@@ -159,13 +180,39 @@ const CENSUS_FRAGMENT = `
     }
     return { levels: levels, scanned: depth };
   }
-  /* Fixed-literal comparison on LEAF elements only. The comparison happens here; a boolean is what survives it.
-     Leaves keep it strictly innermost and keep the scan linear — a status word is rendered as leaf text. */
-  function countLabel(all, literal) {
-    var n = 0;
+  /* The topology reading, shared by digit anchors and label anchors — the structure question is the same one
+     whichever kind of thing we found, and one implementation means one set of rules about what may travel. */
+  function topologyOf(el, kindList) {
+    var walk = repeatLevelsOf(el);
+    return {
+      matchedTagName: String(el.tagName || '').toUpperCase(),
+      attributeKinds: kindList || attrKindsOf(el),
+      ancestorDepthScanned: walk.scanned,
+      repeatLevels: walk.levels
+    };
+  }
+  /* Fixed-literal comparison on LEAF elements only. The comparison happens here; what survives it is a list of
+     ELEMENTS, never their text. Leaves keep it strictly innermost and keep the scan linear — a status word is
+     rendered as leaf text, and counting ancestors too would report a row, its container, and the page body as
+     three answered inquiries. */
+  function labelHits(all, literal) {
+    var out = [];
     for (var i = 0; i < all.length; i++) {
       if (all[i].childElementCount !== 0) { continue; }
-      if (norm(all[i].textContent || '').indexOf(literal) >= 0) { n++; }
+      if (norm(all[i].textContent || '').indexOf(literal) >= 0) { out.push(all[i]); }
+    }
+    return out;
+  }
+  /* Do the hits sit in the same KIND of place? Two leaves saying the same word inside two identically shaped
+     siblings is a row structure; two leaves in unrelated corners of the page is a coincidence. */
+  function hitsSharingShape(hits, topology) {
+    if (!topology || topology.repeatLevels.length === 0) { return 0; }
+    var want = topology.repeatLevels[0], n = 0;
+    for (var i = 0; i < hits.length; i++) {
+      var walk = repeatLevelsOf(hits[i]);
+      if (walk.levels.length > 0 && walk.levels[0].tagName === want.tagName && walk.levels[0].depth === want.depth) {
+        n++;
+      }
     }
     return n;
   }
@@ -176,13 +223,17 @@ const CENSUS_FRAGMENT = `
     if (all.length === 0) { return { reason: 'NO_ELEMENTS' }; }
 
     var i, j, withAnchors = 0;
-    var hits = [], kinds = [];
+    var hits = [], kinds = [], seenLengths = {}, allLengths = [];
     for (j = 0; j < DIGITS.length; j++) { hits.push([]); kinds.push({}); }
 
     for (i = 0; i < all.length; i++) {
       var runs = anchorRunsOf(all[i]);
       if (runs.length === 0) { continue; }
       withAnchors++;
+      for (var q = 0; q < runs.length; q++) {
+        var qlen = runs[q].digits.length;
+        if (!seenLengths[qlen]) { seenLengths[qlen] = 1; allLengths.push(qlen); }
+      }
       for (j = 0; j < DIGITS.length; j++) {
         var want = DIGITS[j].digits, hit = false;
         for (var r = 0; r < runs.length; r++) {
@@ -201,26 +252,28 @@ const CENSUS_FRAGMENT = `
       if (matched.length === 1) {
         var kindList = [];
         for (var key in kinds[j]) { kindList.push(key); }
-        var walk = repeatLevelsOf(matched[0]);
-        topology = {
-          matchedTagName: String(matched[0].tagName || '').toUpperCase(),
-          attributeKinds: kindList,
-          ancestorDepthScanned: walk.scanned,
-          repeatLevels: walk.levels
-        };
+        topology = topologyOf(matched[0], kindList);
       }
       anchors.push({ id: DIGITS[j].id, matchCount: matched.length, topology: topology });
     }
 
     var labelCounts = [];
     for (j = 0; j < LABELS.length; j++) {
-      labelCounts.push({ id: LABELS[j].id, elementCount: countLabel(all, LABELS[j].exactText) });
+      var lhits = labelHits(all, LABELS[j].exactText);
+      var ltop = lhits.length > 0 ? topologyOf(lhits[0], null) : null;
+      labelCounts.push({
+        id: LABELS[j].id,
+        elementCount: lhits.length,
+        topology: ltop,
+        hitsSharingRepeatShape: hitsSharingShape(lhits, ltop)
+      });
     }
 
     return {
       reason: 'OK',
       elementsScanned: all.length,
       elementsWithAnchorAttributes: withAnchors,
+      anchorDigitRunLengths: allLengths,
       anchors: anchors,
       labelCounts: labelCounts
     };
