@@ -138,6 +138,14 @@ export const CALIBRATION_PHASES = [
   // design. The reply question is not asked: the operator confirmed WING has no seller reply feature, so this
   // channel is acquisition-and-analysis only.
   "COUPANG_WING_REVIEW_STRUCTURE_DISCOVERY",
+  // The 상품평 ACQUISITION. The discovery above measured whether a review could be collected; this one
+  // collects. It is the first Coupang phase whose agent returns review TEXT, and the reason it may is stated
+  // rather than assumed: the reviews are the seller's own, read under their own connection, and the approval
+  // contract §5d holds that the rule here is `do not persist unnecessarily`, not `do not read`. What that
+  // makes load-bearing is the BUYER — whose column this run resolves precisely so it can refuse to read it,
+  // and for whom no field exists anywhere along the path. It also rings ONE stored review on request, which
+  // is why it is the only 상품평 phase that allows a highlight.
+  "COUPANG_WING_REVIEW_ACQUISITION",
   // The credential HANDOFF. The ONLY phase in this list whose agent reads a credential VALUE — which is why it
   // is the only one whose mode is not `READ_ONLY`. After a trusted operator confirmation it takes ONE read of
   // 업체코드 / Access Key / Secret Key and hands them to the SellerOps backend vault, which verifies them with a
@@ -282,6 +290,23 @@ export const APPROVAL_ACTIONS = [
   // Alongside it: whether each unit exposes its own detail link, and which sort / period / paging controls
   // exist, which together decide whether acquisition could ever be incremental.
   "MEASURE_REVIEW_IDENTIFIER_CANDIDATES",
+  // **Read the 상품평 ROWS.** The first Coupang review action in this enum that returns TEXT: for each row of
+  // the screen the operator brought up, the review body, its rating, its date, and the 노출상품ID (옵션ID) the
+  // row prints. Every column is resolved from Coupang's own header word, and the BUYER's column is resolved
+  // too — so that it can be excluded by name rather than by luck. **No buyer value is read into any returned
+  // field**, and no field exists on the record for one. Photos and videos are COUNTED inside the review's own
+  // cell and never sourced. The paging control is read as structure (which numbers, which one is showing,
+  // whether a next control is pressable) so a walk can tell whether it reached the end of the list.
+  "READ_REVIEW_ROWS",
+  // Hand the rows just read to the SellerOps backend over the operator's own authenticated session. A write
+  // to SellerOps and to nothing else — no marketplace state is touched, and a replay stores nothing new
+  // because every row de-duplicates on its content.
+  "HAND_REVIEWS_TO_SELLEROPS_BACKEND",
+  // Ring ONE already-stored review on the screen: a marker attribute, an outline, and a scroll into view.
+  // The row is chosen OFFLINE by matching product, option, date, rating and the review body's fingerprint,
+  // and zero matches and two matches are BOTH refusals that ring nothing — a ring around the wrong review is
+  // the product telling the seller what a buyer said. It never clicks, focuses, types, or submits.
+  "HIGHLIGHT_ONE_REVIEW_ROW",
   "MEASURE_CREDENTIAL_CELL_STRUCTURE",
   // **Read the credential VALUES.** ONE in-page read of 업체코드 / Access Key / Secret Key, taken only after a
   // trusted operator confirmation, and taken at most once per run — not a poll, not a retry, not a per-field
@@ -717,6 +742,20 @@ export interface PhaseSpec {
    * cannot rule key creation out" into something more reassuring than the evidence supports.
    */
   requiresOperatorRevealAction?: boolean;
+  /**
+   * WHAT a highlighting phase rings, and therefore which precondition makes ringing it safe. Meaningful only
+   * when {@link PhaseSpec.allowsHighlight} is set.
+   *
+   * `CALIBRATED_SELECTOR` (the default, and every phase that predates this field) rings a CONTROL the run
+   * located by a selector, so the selector must have been measured against the real screen first —
+   * `SELECTORS_NOT_CALIBRATED` until it has.
+   *
+   * `CONTENT_MATCHED_ROW` rings a ROW the run identified by matching several stored fields at once, with no
+   * selector involved. Its safety is a different property and lives elsewhere: the match must be unique, and
+   * both zero matches and two matches ring nothing. Requiring a selector calibration for it would demand a
+   * measurement of a different surface as the condition for a different mechanism.
+   */
+  highlightTarget?: "CALIBRATED_SELECTOR" | "CONTENT_MATCHED_ROW";
   /** The guided walk's boundary descriptor. Present only on that phase; the harness verifies every field. */
   guidedWalkBoundary?: GuidedWalkBoundary;
   /** The canonical reveal-action descriptor emitted into the manifest (present iff the flag above is set). */
@@ -1132,6 +1171,29 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     allowsHighlight: false,
     mode: "READ_ONLY",
   },
+  COUPANG_WING_REVIEW_ACQUISITION: {
+    phase: "COUPANG_WING_REVIEW_ACQUISITION",
+    cli: "src/cli/acquire-coupang-reviews.ts",
+    driver: "CoupangWingReviewReaderDriver (상품평 row read + one-row locate highlight) + review handoff client",
+    capableActions: [
+      "OPEN_DEDICATED_WINDOW",
+      "WAIT_OPERATOR_LOGIN_NAV",
+      "CLASSIFY_SANITIZED_PAGE_CATEGORY",
+      "READ_REVIEW_ROWS",
+      "HAND_REVIEWS_TO_SELLEROPS_BACKEND",
+      "HIGHLIGHT_ONE_REVIEW_ROW",
+    ],
+    // The one 상품평 phase that may ring. The discovery next door may not, and the difference is real: a ring
+    // needs a target, and this is the only run that HAS one — a review SellerOps already stored, matched
+    // against the page on five fields at once. The ring is inert (a marker, an outline, a scroll).
+    allowsHighlight: true,
+    // ...and it is a ROW matched on content, not a control found by a selector. See `highlightTarget`.
+    highlightTarget: "CONTENT_MATCHED_ROW",
+    // READ_ONLY is about the MARKETPLACE, and on Coupang this run performs zero actions there — it does not
+    // even turn a page. The write it does perform is to SellerOps' own store, over the operator's own
+    // session, and the manifest says so in `maxActions` rather than leaving `READ_ONLY` to imply otherwise.
+    mode: "READ_ONLY",
+  },
   COUPANG_WING_CREDENTIAL_HANDOFF: {
     phase: "COUPANG_WING_CREDENTIAL_HANDOFF",
     cli: "src/cli/run-coupang-credential-handoff-live.ts",
@@ -1170,6 +1232,7 @@ export const WING_PHASES: readonly CalibrationPhase[] = [
   "COUPANG_WING_CREDENTIAL_CELL_CALIBRATION",
   "COUPANG_WING_INQUIRY_LIST_CALIBRATION",
   "COUPANG_WING_REVIEW_STRUCTURE_DISCOVERY",
+  "COUPANG_WING_REVIEW_ACQUISITION",
   "COUPANG_WING_CREDENTIAL_HANDOFF",
 ];
 export function isWingCalibrationPhase(phase: CalibrationPhase): boolean {
@@ -1293,6 +1356,7 @@ export const ENTRYPOINT_PHASES = [
   "COUPANG_WING_CREDENTIAL_CELL_CALIBRATION",
   "COUPANG_WING_INQUIRY_LIST_CALIBRATION",
   "COUPANG_WING_REVIEW_STRUCTURE_DISCOVERY",
+  "COUPANG_WING_REVIEW_ACQUISITION",
   "COUPANG_WING_CREDENTIAL_HANDOFF",
   "API_ISSUANCE_FE_LIVE_PROOF",
   "NAVER_GUIDED_CONNECTION",
@@ -1454,6 +1518,38 @@ export interface PinnedPhaseScope {
   readonly surface: string;
 }
 
+/**
+ * **The acquisition scope — the first Coupang review sentence that has to admit it takes text.**
+ *
+ * The discovery scope above is written around "no text leaves the page", which was true of it. This run
+ * stores the seller's reviews, and a scope sentence that softened that into "reads the list" would be the
+ * defect this file already records twice: an operator granting against a description of a different run.
+ *
+ * So it says what is taken, and then it says the two things that bound it — the buyer's column is LOCATED
+ * and not read, and the marketplace is not touched at all, including the pager.
+ */
+export const COUPANG_WING_REVIEW_ACQUISITION_SCOPE = Object.freeze({
+  operation:
+    "WING 상품평 READ_ONLY acquisition (agent COLLECTS the seller's own reviews from the 상품평 list screen " +
+    "the operator brought up: for each row it reads the review body, the rating, the 등록일 and the " +
+    "노출상품ID (옵션ID), resolving every column from Coupang's own header word; it counts photos/videos " +
+    "inside the review's own cell and reads no media address; it resolves the 구매자/작성자 column ONLY so " +
+    "that it can be excluded, and reads no buyer name into any field — no buyer field exists on the wire, in " +
+    "the canonical record, or in the database; it reads the paging control as structure (which page numbers " +
+    "are offered, which one is showing, whether a next control is pressable) so the run can tell whether it " +
+    "reached the end of the list, and it NEVER presses it — every page turn is the operator's; it hands what " +
+    "it read to the SellerOps backend over the operator's own session, where identical reviews de-duplicate " +
+    "rather than being stored twice; and, when asked, it rings ONE already-stored review on the screen by " +
+    "matching product, option, date, rating and the review body's fingerprint, refusing to ring anything at " +
+    "all unless exactly one row matches)",
+  maxActions:
+    "0 marketplace actions (0 clicks, 0 inputs, 0 submissions, 0 page turns, 0 navigations after the window " +
+    "opens; 0 buyer/작성자 names read, 0 image or video addresses read, 0 raw HTML/DOM/screenshots kept), " +
+    "1 read per page the OPERATOR brings up (bounded at 100 pages), 1 handoff of what was read to the " +
+    "SellerOps backend, and at most 1 inert highlight (a marker attribute + an outline + a scroll) on a " +
+    "single matched row",
+});
+
 export const COUPANG_WING_CREDENTIAL_HANDOFF_SCOPE = Object.freeze({
   operation:
     "WING credential handoff (after the seller's own confirmation, the agent reads 업체코드 / Access Key / " +
@@ -1484,6 +1580,10 @@ export const PINNED_PHASE_SCOPES: Partial<Record<CalibrationPhase, PinnedPhaseSc
   },
   COUPANG_WING_REVIEW_STRUCTURE_DISCOVERY: {
     ...COUPANG_WING_REVIEW_DISCOVERY_SCOPE,
+    surface: "Coupang WING 상품평",
+  },
+  COUPANG_WING_REVIEW_ACQUISITION: {
+    ...COUPANG_WING_REVIEW_ACQUISITION_SCOPE,
     surface: "Coupang WING 상품평",
   },
 });
@@ -1834,6 +1934,25 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
       "화면의 글자는 우리가 넣은 고정 단어와 날짜/별점 '모양' 패턴에 맞는지만 이 창 안에서 비교하고 개수만 " +
       "나옵니다 — **리뷰 본문·구매자 이름·상품명은 읽지 않고, 사진·동영상은 개수만 세며 주소는 읽지 않습니다.** " +
       "판매자 답글 기능은 찾지도 세지도 않습니다. 클릭·입력·전송 없음." +
+      WING_RUN_GRANT_SUMMARY +
+      WING_PROBE_CONFIRM_CHANNEL_SUMMARY,
+    emitsFrontendUrl: false,
+  },
+  COUPANG_WING_REVIEW_ACQUISITION: {
+    entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
+    cli: "src/cli/acquire-coupang-reviews.ts",
+    entrypointCommandId: "acquire-coupang-reviews",
+    operatorActionSummary:
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 상품평(리뷰) 목록 화면에 도착하신 뒤 " +
+      "'SellerOps 확인' 탭의 [현재 화면 확인]을 누르세요. 그때 SellerOps가 지금 보이는 페이지의 상품평을 읽어 " +
+      "**SellerOps에 저장**합니다 — 리뷰 본문, 별점, 등록일, 노출상품ID(옵션ID), 그리고 리뷰에 붙은 사진·동영상 " +
+      "**개수**. 열은 쿠팡이 화면에 쓴 머리글로 찾습니다. **구매자/작성자 열은 '읽지 않을 열'로 찾아두기만 하고 " +
+      "이름은 읽지 않습니다 — 보내는 곳에도, 저장하는 곳에도 작성자를 담을 자리가 아예 없습니다.** 사진·동영상은 " +
+      "개수만 세고 주소는 읽지 않으며, 화면 HTML이나 캡처는 남기지 않습니다. " +
+      "**다음 페이지는 직접 넘겨 주세요** — SellerOps는 페이지를 넘기지 않습니다. 페이지를 넘기신 뒤 다시 " +
+      "[현재 화면 확인]을 누르시면 그 페이지를 읽습니다. 같은 상품평은 몇 번을 읽어도 하나로 합쳐집니다. " +
+      "마지막 페이지에 도달했는지는 화면의 페이지 번호를 보고 판단하며, 판단할 수 없으면 '다 읽었다'고 하지 않고 " +
+      "그대로 중단합니다. 쿠팡 화면에서는 아무것도 눌리거나 입력되지 않고, 아무것도 전송되지 않습니다." +
       WING_RUN_GRANT_SUMMARY +
       WING_PROBE_CONFIRM_CHANNEL_SUMMARY,
     emitsFrontendUrl: false,
@@ -2225,9 +2344,20 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
   // calibration is currently WITHDRAWN, so no caller states it and the deletion phase does not reach PREPARED at
   // all — the whole destructive path is closed. The read-only WING selector probe never highlights, so the gate
   // below is skipped for it regardless.
+  //
+  // **A highlight of a CONTENT-MATCHED row is a different mechanism, and needs a different gate.** This rule
+  // exists because ringing a control the run located by a selector is only safe once that selector has been
+  // measured against the real screen. The 상품평 acquisition rings a ROW it matched on five stored fields at
+  // once (product, option, date, rating, body fingerprint), refusing to ring anything unless exactly one row
+  // matches — there is no selector to calibrate, and requiring the API-issuance selector probe would be asking
+  // for a measurement of a different surface as a condition for a different mechanism. So the phase declares
+  // WHICH kind of highlight it performs, and only the selector kind reaches the calibration gate. Declaring the
+  // content kind is not a way around the gate: it is checkable, and the refusals that make it safe (0 matches
+  // and 2 matches both ring nothing) live in `review-locate.ts` with their own tests.
   const isWingPhase = isWingCalibrationPhase(spec.phase);
   const calibrated = input.selectorsCalibrated ?? (isWingPhase ? false : SELECTORS_CALIBRATED);
-  if (spec.allowsHighlight && !calibrated) {
+  const needsSelectorCalibration = spec.allowsHighlight && spec.highlightTarget !== "CONTENT_MATCHED_ROW";
+  if (needsSelectorCalibration && !calibrated) {
     // Name the remediation for THIS surface: a WING phase is not fixed by a NAVER API-center observation.
     const remediation = isWingPhase
       ? `run ${PHASE_SPECS.COUPANG_WING_SELECTOR_PROBE.phase} (READ-ONLY) and land the real selectors`
