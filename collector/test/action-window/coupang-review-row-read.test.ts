@@ -429,6 +429,58 @@ describe("the pager census, executed", () => {
     expect(readWith(box).pager.currentPage).toBe(2);
   });
 
+  /**
+   * **The real WING pager, as three live readings measured it.** Each page is a class-less `<span>` wrapping
+   * an `<a>`, and the current-page marker is on the INNER element. Three sittings reported `SPAN-a--` and
+   * `marks=0/0/0` because every signal looked only at the outer cell.
+   */
+  function wrappedPager(current: number, marker: "class" | "aria"): El {
+    const box = el({ tag: "div" });
+    for (const n of [1, 2, 3]) {
+      const attrs: Record<string, string> =
+        n === current
+          ? marker === "class"
+            ? { href: "#", class: "on" }
+            : { href: "#", "aria-current": "page" }
+          : { href: "#" };
+      box.add(el({ tag: "span" }).add(el({ tag: "a", text: String(n), attrs })));
+    }
+    return box;
+  }
+
+  it("finds the current page when the marker is on the link INSIDE the cell", () => {
+    const reading = readWith(wrappedPager(2, "class"));
+
+    expect(reading.pager).toMatchObject({ found: true, resolved: true, currentPage: 2, pageNumbers: [1, 2, 3] });
+    expect(pagerPosition(reading.pager)).toBe("MORE_PAGES");
+  });
+
+  it("reads an inner aria-current the same way", () => {
+    expect(readWith(wrappedPager(3, "aria")).pager.currentPage).toBe(3);
+  });
+
+  it("calls the last numbered page final when the pager offers no next control at all", () => {
+    // The live screen's pager is numbers only — three pages, no 다음. On page 3 that IS the end.
+    const reading = readWith(wrappedPager(3, "class"));
+
+    expect(reading.pager.hasNext).toBe(false);
+    expect(pagerPosition(reading.pager)).toBe("FINAL_PAGE");
+  });
+
+  it("does not mark every cell just because the class contains the letters of a marker", () => {
+    // `pagination-link` contains "on"; a substring rule marks all three and identifies none.
+    const box = el({ tag: "div" });
+    for (const n of [1, 2, 3]) {
+      box.add(
+        el({ tag: "span" }).add(
+          el({ tag: "a", text: String(n), attrs: { href: "#", class: n === 2 ? "pagination-link on" : "pagination-link" } }),
+        ),
+      );
+    }
+
+    expect(readWith(box).pager.currentPage).toBe(2);
+  });
+
   it("reports the shape of each numeric child, so a refusal can be designed against", () => {
     const reading = readWith(pager({ numbers: [1, 2, 3], current: 2, next: "enabled" }));
 

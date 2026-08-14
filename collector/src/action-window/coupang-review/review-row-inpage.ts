@@ -220,6 +220,48 @@ function reviewReaderFragment(
     var v = el.getAttribute ? el.getAttribute('class') : null;
     return v === null || v === undefined ? '' : String(v).toLowerCase();
   }
+  /* **Whole class TOKENS, never substrings.** A substring test for 'on' matches pagination, button and
+     icon, so it marks every page cell on a screen whose links are class="pagination-link" — and a signal
+     that marks all of them identifies none of them. Splitting on whitespace and comparing whole tokens is
+     what makes 'on' (a very common Korean-site current marker) usable at all. */
+  var CURRENT_CLASS_TOKENS = ['active', 'current', 'selected', 'on', 'now', 'is-active', 'is-current'];
+  function hasCurrentClass(el) {
+    var parts = classTokens(el).split(' ');
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i].length === 0) { continue; }
+      for (var j = 0; j < CURRENT_CLASS_TOKENS.length; j++) {
+        if (parts[i] === CURRENT_CLASS_TOKENS[j]) { return true; }
+      }
+    }
+    return false;
+  }
+  /* **The cell and what it wraps.** The live screen renders each page as <span><a>2</a></span> with no class
+     on the span at all — so every signal that looked only at the numeric child found nothing on all three,
+     three readings running. The marker is on the element INSIDE. Bounded to a handful of descendants: a page
+     cell is a number and a link, not a subtree. */
+  function withInner(el) {
+    var nodes = [el];
+    var inner = el.querySelectorAll ? el.querySelectorAll('*') : [];
+    for (var i = 0; i < inner.length && nodes.length < 8; i++) { nodes.push(inner[i]); }
+    return nodes;
+  }
+  function markedByAria(el) {
+    var nodes = withInner(el);
+    for (var i = 0; i < nodes.length; i++) {
+      var ac = nodes[i].getAttribute ? nodes[i].getAttribute('aria-current') : null;
+      var sel = nodes[i].getAttribute ? nodes[i].getAttribute('aria-selected') : null;
+      if (ac !== null && String(ac).toLowerCase() !== 'false') { return true; }
+      if (sel !== null && String(sel).toLowerCase() === 'true') { return true; }
+    }
+    return false;
+  }
+  function markedByClass(el) {
+    var nodes = withInner(el);
+    for (var i = 0; i < nodes.length; i++) {
+      if (hasCurrentClass(nodes[i])) { return true; }
+    }
+    return false;
+  }
   function disabledish(el) {
     if (el.hasAttribute && el.hasAttribute('disabled')) { return true; }
     var ad = el.getAttribute ? el.getAttribute('aria-disabled') : null;
@@ -319,13 +361,13 @@ function reviewReaderFragment(
        capped at 6 characters, capped at 20 of them, and pure numbers are excluded. They reach the run's
        terminal output for this sitting and are never stored.
        This is the measurement that replaces a third guess. */
+    /* The cell's shape as the SIGNALS see it — descended, like they are. A shape read only off the outer
+       element is what made three readings report SPAN-a-- about a cell whose marker was one level in. */
     function shapeOf(el) {
       var tag = String(el.tagName || '').toUpperCase();
-      var cls = el.getAttribute && el.getAttribute('class') !== null ? 'c' : '-';
+      var cls = markedByClass(el) ? 'C' : (classTokens(el).length > 0 ? 'c' : '-');
       var link = pressable(el) ? 'a' : '-';
-      var aria = (el.getAttribute && (el.getAttribute('aria-current') !== null
-                  || el.getAttribute('aria-selected') !== null
-                  || el.getAttribute('aria-disabled') !== null)) ? 'r' : '-';
+      var aria = markedByAria(el) ? 'r' : '-';
       var dis = disabledish(el) ? 'd' : '-';
       return tag + cls + link + aria + dis;
     }
@@ -376,22 +418,13 @@ function reviewReaderFragment(
     var current = null, marked = [];
     var ariaMarks = 0, classMarks = 0, nonLinkMarks = 0;
     for (var m = 0; m < nodes.length; m++) {
-      var ac = nodes[m].el.getAttribute ? nodes[m].el.getAttribute('aria-current') : null;
-      var sel = nodes[m].el.getAttribute ? nodes[m].el.getAttribute('aria-selected') : null;
-      if ((ac !== null && String(ac).toLowerCase() !== 'false')
-          || (sel !== null && String(sel).toLowerCase() === 'true')) {
-        marked.push(nodes[m].value);
-      }
+      if (markedByAria(nodes[m].el)) { marked.push(nodes[m].value); }
     }
     ariaMarks = marked.length;
     if (marked.length !== 1) {
       marked = [];
       for (var q = 0; q < nodes.length; q++) {
-        var cls = classTokens(nodes[q].el);
-        if (cls.indexOf('active') >= 0 || cls.indexOf('current') >= 0 || cls.indexOf('selected') >= 0
-            || cls.indexOf('on') >= 0 || cls.indexOf('now') >= 0) {
-          marked.push(nodes[q].value);
-        }
+        if (markedByClass(nodes[q].el)) { marked.push(nodes[q].value); }
       }
       classMarks = marked.length;
     }
