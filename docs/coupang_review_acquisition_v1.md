@@ -3,10 +3,9 @@
 What SellerOps stores when it reads a seller's own WING 상품평 screen, how it recognises a review it
 already has, and how it finds one again on the screen.
 
-**Status: the first live backfill ran on 2026-08-15 and collected 22 reviews from the operator's own WING
-screen; one stored review was located and rung on that screen.** §6.5 records what it established and the two
-defects it exposed; the rating-only decision it forced is settled there and implemented. The **same-range
-re-sync proof has not run yet** — it is the remaining live step. Nothing here is promoted in `docs/multi-channel-connector-roadmap.md` §4.1.
+**Status: LIVE-PROVEN end to end on 2026-08-15** — first backfill (22 stored), same-range re-sync
+(`stored=0 / skipped=22`, database unchanged), and one stored review located and rung on the seller's own
+screen. §6.5 records what the sittings established, the defects they exposed, and what remains undetermined. Nothing here is promoted in `docs/multi-channel-connector-roadmap.md` §4.1.
 
 **Posture, unchanged from the gate:** `TECHNICALLY_POSSIBLE = CONDITIONAL_YES` / `POLICY = UNCLEAR` /
 `DEVELOPMENT = PILOT_ALLOWED` / `GA = POLICY_GATED`
@@ -27,8 +26,11 @@ Three measured facts decided nearly every design choice here. None of them was a
 ## 2. What is stored
 
 Per review: the review text as the screen printed it, the rating, the date, Coupang's 노출상품ID and —
-when the cell prints one — the 옵션ID, how many photos/videos the review itself carries, and whether the
-list cell had cut the text off.
+when the cell prints one — the 옵션ID, and how many photos/videos the review itself carries.
+
+The agent also reports whether the list cell cut the text off (`bodyTruncated`), and the backend accepts it
+and **does not store it** — so no surface can show it. That is a gap, named in §7 rather than left as a
+claim the product cannot keep.
 
 **The buyer is not stored, and the guarantee is structural rather than filtered.** There is no author
 field on the wire record, none on the canonical record, and no column on `reviews`. The wire record
@@ -145,15 +147,22 @@ outline, and a scroll: it never clicks, focuses, types, or submits.
 Six seated `READ_ONLY` sittings on the operator's own 상품평 screen. The first five refused; the sixth
 collected. Every refusal was the design working, and every fix came from a measurement rather than a guess.
 
-### The run that worked
+### The proof, end to end
 
 ```
-page 1: rows=10 new=9 known=1      page 2: rows=10 new=9 known=1
-page 3: rows=4  new=4 known=0  →  FINAL_PAGE_REACHED
-handoff: received=22 stored=22 skipped=0 failed=0   complete=true  lastPage=3
-dropped(date=0 rating=0 product=0 body=0)
-locate:  verdict=LOCATED matches=1 highlighted=true
+BACKFILL   page 1: rows=10 new=9   page 2: rows=10 new=9   page 3: rows=4 new=4 → FINAL_PAGE_REACHED
+           pages=3 rows=24 collected=22 textless=19 complete=true lastPage=3 dropped(0/0/0)
+           handoff: received=22 stored=22 skipped=0 failed=0
+LOCATE     verdict=LOCATED matches=1 rows=10 highlighted=true
+RE-SYNC    same three pages walked again
+           handoff: received=22 stored=0 skipped=22 failed=0
+DATABASE   22 rows before and after · dedup_key_version v2=3 / v3=19 · 22 distinct content hashes
+           0 rows whose body is Coupang's placeholder
+HISTORY    SUCCESS 22/22/0  →  SUCCESS 22/0/22
 ```
+
+A re-sync costs the same three page turns a backfill does — v1 walks the pager to the end either way — and
+stores nothing. That is the idempotence the incremental design rests on, read straight off the counts.
 
 | Question | Answer |
 |---|---|
@@ -165,7 +174,8 @@ locate:  verdict=LOCATED matches=1 highlighted=true
 | Locate | One match, one ring, on a real stored review |
 | Marketplace actions | **0.** The operator turned every page |
 | `mediaCount` | 0 everywhere — **cannot yet tell "no photos" from "not detected"** |
-| Body truncation | Undetermined; only 3 reviews had text to truncate |
+| Body truncation | Undetermined; only 3 of 22 reviews had text at all |
+| Idempotence | `stored=0 / skipped=22` on the second walk, database unchanged |
 
 ### The pager, which took five readings
 
@@ -224,17 +234,14 @@ product-owner decision (2026-08-15) is: **store them, keyed additionally on the 
 
 ## 7. What is NOT done
 
-1. **The live proof has not run.** First backfill, same-range re-sync proving `stored=0`, and one
-   locate/highlight on a real review all require a fresh seated approval. Until then, the reader has
-   never met the real header row — and the two things most likely to differ from the fixture are the
-   exact header words (§2's role literals are candidates, supplied generously) and whether every row's
-   cell count matches the header's, which currently fails the whole read closed.
-2. **The sitting has a harness but has never been run.** `COUPANG_WING_REVIEW_ACQUISITION` is its own
-   phase with its own bootstrap, preflight and CLI — separate from the structure discovery's, because that
-   manifest describes a run that returns no text and this one returns review bodies. One checkpoint per
-   page (the operator turns them), one handoff at the end, then an optional locate checkpoint. Every word
-   of its disclosure is pinned by a test that reads the shell files, because this workstream has twice
-   shipped a banner describing a measurement that no longer existed.
+1. **One account, one sitting's worth of screens.** Everything in §6.5 was measured on a single seller's
+   상품평 list of 3 pages and 24 rows. The header words, the `data-wuic-attrs` pager convention and the
+   placeholder sentence are WING's, not this account's — but a second account is what would prove that.
+2. **The agent does not pre-load what is already stored.** `ReviewAcquisitionSession` accepts `knownKeys`
+   and the CLI passes none, so its `new` / `known` counts are per-SITTING: they catch two identical rows on
+   one screen, not a review stored last week. That is deliberate for v1 — the walk covers the whole pager
+   regardless, and the DATABASE is the dedupe authority, which the re-sync proved (`stored=0 / skipped=22`).
+   It matters only if a future version stops walking to the end.
 3. **`[쿠팡에서 보기]` is not wired from the frontend.** The locate itself is built, tested, and performed
    live: the acquisition sitting offers a locate checkpoint after the handoff and rings one stored review on
    the operator's own screen. What is missing is the *product* entry — a button in the review detail that
@@ -249,10 +256,17 @@ product-owner decision (2026-08-15) is: **store them, keyed additionally on the 
    an approval manifest declaring an action the run never performs — a promise in the shared vocabulary. It
    lands with the slice that implements it. The detail page correspondingly renders the review and its
    catalog identity and offers **no button**, rather than a button that does nothing.
-4. **Truncated bodies are detected, not solved.** If the list cell cuts a review off, `bodyTruncated`
-   says so and the stored text is a prefix. Whether the real screen truncates is a live question.
-5. **The product SKU is Coupang's 노출상품ID with no channel prefix**, matching every other connector.
+4. **The product SKU is Coupang's 노출상품ID with no channel prefix**, matching every other connector.
    An org connected to two channels where a NAVER SKU is exactly a Coupang productId digit string would
    collide. Not observed; recorded here rather than silently assumed away.
-6. **GA gates G1–G6 are untouched** (`docs/coupang_review_policy_gate_v1.md` §6.2). Nothing in this unit
+5. **`bodyTruncated` is carried and discarded.** The agent knows whether the list cell truncated a review
+   and sends it; nothing persists it, so the product cannot warn that a stored body is a prefix. Either give
+   it a column or stop sending it — and the live run could not decide which, because only 3 of 22 reviews had
+   any text to truncate.
+
+6. **`mediaCount` was 0 on every row.** With 19 of 22 reviews textless there was nothing to attach a photo
+   to, so "this account has no review media" and "the reader does not find media where WING puts it" are
+   still indistinguishable. An account with photo reviews would settle it in one reading.
+
+7. **GA gates G1–G6 are untouched** (`docs/coupang_review_policy_gate_v1.md` §6.2). Nothing in this unit
    moves them; a written Coupang answer is still what releases this.
