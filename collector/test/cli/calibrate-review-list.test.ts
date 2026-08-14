@@ -155,6 +155,17 @@ describe("the run declares what it is", () => {
     expect(COUPANG_WING_REVIEW_DISCOVERY_SCOPE.maxActions).toContain("0 reply-control lookups");
   });
 
+  it("**the harness banner does not claim a measurement the run removed** — it did, and this pins it", () => {
+    // The bootstrap banner outlived the measurement it described: it told the operator the run establishes
+    // "whether a seller REPLY CONTROL exists" for two units after that measurement was deleted. The TypeScript
+    // surfaces were covered by the test above; the shell the operator actually reads was not.
+    const banner = readFileSync(resolve(HERE, "../../../tools/coupang-local/wing-review-bootstrap.sh"), "utf8");
+    expect(banner).not.toContain("REPLY CONTROL exists");
+    expect(banner).not.toContain("counts whether such a control exists");
+    // The run's actual product, named where the operator will read it.
+    expect(banner).toContain("PER CELL POSITION");
+  });
+
   it("**an undetermined acquisition answer is its own exit code**, never rounded up to success", () => {
     // 5 is "we could not decide whether the reviews carry an identifier" — the reading that must not be
     // recorded as "there is none", because a screen whose rows were never found produces it either way.
