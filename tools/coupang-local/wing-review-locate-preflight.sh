@@ -58,6 +58,10 @@ BOOTSTRAP_EPOCH="${WING_REVIEW_BOOTSTRAP_EPOCH:-}"
 PHASE="${SELLEROPS_APPROVAL_PHASE:-}"
 BACKEND_ORIGIN="${SELLEROPS_BASE_URL:-http://localhost:8080}"
 FRONTEND_ORIGIN="${SELLEROPS_FRONTEND_URL:-http://localhost:5173}"
+# The SAME defaults `collector/src/config.ts` applies. Checking a login the run would not use is a check that
+# can pass while the run fails, and — as it did on the first attempt here — fail while the run would succeed.
+LOGIN_EMAIL="${SELLEROPS_EMAIL:-demo@sellerops.ai}"
+LOGIN_PASSWORD="${SELLEROPS_PASSWORD:-demo1234}"
 
 echo "Coupang WING 상품평 locate preflight — run=${RUN_ID:-?} git=${RUN_GIT:-?} phase=${PHASE:-?}"
 echo "read-only local checks only — no browser, no Coupang call, no page read"
@@ -89,7 +93,7 @@ check_browser_launchable
 # sitting into an opened WING window and nothing to do with it, so both are checked before a manifest exists.
 if command -v curl >/dev/null 2>&1; then
   TOKEN="$(curl -s --max-time 8 -X POST -H 'Content-Type: application/json' \
-    -d "{\"email\":\"${SELLEROPS_EMAIL:-}\",\"password\":\"${SELLEROPS_PASSWORD:-}\"}" \
+    -d "{\"email\":\"$LOGIN_EMAIL\",\"password\":\"$LOGIN_PASSWORD\"}" \
     "$BACKEND_ORIGIN/api/auth/login" 2>/dev/null | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
   if [ -z "$TOKEN" ]; then
     fail "could not sign in to the backend at $BACKEND_ORIGIN — the press would have nothing to mint a binding with"
