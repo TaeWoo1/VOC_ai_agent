@@ -220,20 +220,44 @@ function reviewReaderFragment(
     var v = el.getAttribute ? el.getAttribute('class') : null;
     return v === null || v === undefined ? '' : String(v).toLowerCase();
   }
-  /* **Whole class TOKENS, never substrings.** A substring test for 'on' matches pagination, button and
-     icon, so it marks every page cell on a screen whose links are class="pagination-link" — and a signal
-     that marks all of them identifies none of them. Splitting on whitespace and comparing whole tokens is
-     what makes 'on' (a very common Korean-site current marker) usable at all. */
+  /* **WING states its component state in data-wuic-attrs, not in class.** Five readings failed on this,
+     and the markup the operator read off the screen is what settled it:
+
+       <span data-wuic-partial="prev" data-wuic-attrs="disabled"><a href="#"></a></span>
+       <span data-wuic-attrs="page:1 active"><a href="#">1</a></span>
+       <span data-wuic-attrs="page:2"><a href="#">2</a></span>
+       <span data-wuic-partial="next" data-wuic-attrs=""><a href="#"></a></span>
+
+     The current page carries the token 'active', the previous control carries 'disabled', and neither is a
+     class or an aria attribute. So the marker attribute is an ALLOWLIST, and data-wuic-attrs is on it.
+     Its value is compared, inside the page, against fixed tokens supplied here; the string itself never
+     travels — the same rule the 고객문의 census applies to its own structural attributes. */
+  var MARKER_ATTRS = ['class', 'data-wuic-attrs'];
+  /* **Whole TOKENS, never substrings.** A substring test for 'on' matches pagination, button and icon, so
+     it marks every page cell on a screen whose links are class="pagination-link" — and a signal that marks
+     all of them identifies none of them. */
   var CURRENT_CLASS_TOKENS = ['active', 'current', 'selected', 'on', 'now', 'is-active', 'is-current'];
-  function hasCurrentClass(el) {
-    var parts = classTokens(el).split(' ');
-    for (var i = 0; i < parts.length; i++) {
-      if (parts[i].length === 0) { continue; }
-      for (var j = 0; j < CURRENT_CLASS_TOKENS.length; j++) {
-        if (parts[i] === CURRENT_CLASS_TOKENS[j]) { return true; }
+  function markerTokens(el) {
+    var out = [];
+    for (var i = 0; i < MARKER_ATTRS.length; i++) {
+      var v = el.getAttribute ? el.getAttribute(MARKER_ATTRS[i]) : null;
+      if (v === null || v === undefined) { continue; }
+      var parts = String(v).toLowerCase().split(' ');
+      for (var j = 0; j < parts.length; j++) { if (parts[j].length > 0) { out.push(parts[j]); } }
+    }
+    return out;
+  }
+  function hasMarkerToken(el, wanted) {
+    var tokens = markerTokens(el);
+    for (var i = 0; i < tokens.length; i++) {
+      for (var j = 0; j < wanted.length; j++) {
+        if (tokens[i] === wanted[j]) { return true; }
       }
     }
     return false;
+  }
+  function hasCurrentClass(el) {
+    return hasMarkerToken(el, CURRENT_CLASS_TOKENS);
   }
   /* **The cell and what it wraps.** The live screen renders each page as <span><a>2</a></span> with no class
      on the span at all — so every signal that looked only at the numeric child found nothing on all three,
@@ -266,7 +290,9 @@ function reviewReaderFragment(
     if (el.hasAttribute && el.hasAttribute('disabled')) { return true; }
     var ad = el.getAttribute ? el.getAttribute('aria-disabled') : null;
     if (ad !== null && String(ad).toLowerCase() === 'true') { return true; }
-    return classTokens(el).indexOf('disabled') >= 0;
+    /* WING puts it in data-wuic-attrs: the previous control on page 1 reads data-wuic-attrs="disabled"
+       while the next control reads data-wuic-attrs="" — the presence of the token is the whole state. */
+    return hasMarkerToken(el, ['disabled']);
   }
   function wholeNumber(el) {
     var t = norm(el.textContent);
@@ -283,7 +309,16 @@ function reviewReaderFragment(
     return false;
   }
   var NEXT_WORDS = ['다음', 'next', '\\u203a', '>', '\\uff1e', '\\u00bb'];
+  /* **The arrows have no text.** WING renders prev/next as an empty <a> inside a span whose
+     data-wuic-partial says which one it is, and draws the glyph in CSS — so every rule that looked for the
+     word 다음 or a > character found nothing, on a screen that plainly shows < 1 2 3 >. The role attribute
+     is compared against the two fixed literals below and never returned. */
+  function partialRole(el) {
+    var v = el.getAttribute ? el.getAttribute('data-wuic-partial') : null;
+    return v === null || v === undefined ? '' : String(v).toLowerCase();
+  }
   function isNextControl(el) {
+    if (partialRole(el) === 'next') { return true; }
     var t = norm(el.textContent).toLowerCase();
     for (var i = 0; i < NEXT_WORDS.length; i++) {
       if (t === NEXT_WORDS[i]) { return true; }

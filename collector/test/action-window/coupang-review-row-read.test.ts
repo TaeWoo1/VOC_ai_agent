@@ -481,6 +481,74 @@ describe("the pager census, executed", () => {
     expect(readWith(box).pager.currentPage).toBe(2);
   });
 
+  /**
+   * **The real WING pager, copied from the screen.** Five readings failed against it, and every one failed
+   * for a reason this fixture now holds: the current-page marker is the token `active` inside
+   * `data-wuic-attrs` (not a class, not aria), the prev/next controls are empty `<a>`s whose glyph is drawn
+   * in CSS and whose identity is `data-wuic-partial`, and `disabled` is a token in the same attribute.
+   *
+   *   <span data-wuic-partial="prev" data-wuic-attrs="disabled"><a href="#"></a></span>
+   *   <span data-wuic-attrs="page:1 active"><a href="#">1</a></span>
+   *   <span data-wuic-attrs="page:2"><a href="#">2</a></span>
+   *   <span data-wuic-partial="next" data-wuic-attrs=""><a href="#"></a></span>
+   */
+  function wuicPager(current: number, last: number): El {
+    const box = el({ tag: "div" });
+    box.add(
+      el({ tag: "span", attrs: { "data-wuic-partial": "prev", "data-wuic-attrs": current === 1 ? "disabled" : "" } })
+        .add(el({ tag: "a", attrs: { href: "#" } })),
+    );
+    for (let n = 1; n <= last; n += 1) {
+      box.add(
+        el({ tag: "span", attrs: { "data-wuic-attrs": n === current ? `page:${n} active` : `page:${n}` } })
+          .add(el({ tag: "a", text: String(n), attrs: { href: "#" } })),
+      );
+    }
+    box.add(
+      el({ tag: "span", attrs: { "data-wuic-partial": "next", "data-wuic-attrs": current === last ? "disabled" : "" } })
+        .add(el({ tag: "a", attrs: { href: "#" } })),
+    );
+    return box;
+  }
+
+  it("resolves the real WING pager: the marker is a token in data-wuic-attrs, not a class", () => {
+    const reading = readWith(wuicPager(1, 3));
+
+    expect(reading.pager).toMatchObject({
+      found: true,
+      resolved: true,
+      currentPage: 1,
+      pageNumbers: [1, 2, 3],
+      hasNext: true,
+      nextEnabled: true,
+    });
+    expect(pagerPosition(reading.pager)).toBe("MORE_PAGES");
+  });
+
+  it("finds the next control by its role attribute, though its link has no text at all", () => {
+    // The glyph is CSS. Every rule that looked for the word 다음 or a > character found nothing on a screen
+    // that plainly shows < 1 2 3 >.
+    const reading = readWith(wuicPager(2, 3));
+
+    expect(reading.pager.hasNext).toBe(true);
+    expect(reading.pager.currentPage).toBe(2);
+    expect(pagerPosition(reading.pager)).toBe("MORE_PAGES");
+  });
+
+  it("calls the last page final, because next carries the disabled token there", () => {
+    const reading = readWith(wuicPager(3, 3));
+
+    expect(reading.pager).toMatchObject({ currentPage: 3, hasNext: true, nextEnabled: false });
+    expect(pagerPosition(reading.pager)).toBe("FINAL_PAGE");
+  });
+
+  it("does not read page:1 as the marker — only the active token is one", () => {
+    // Every cell carries a `page:N` token; a looser rule would mark all of them and identify none.
+    const reading = readWith(wuicPager(2, 3));
+
+    expect(reading.pager.classMarks).toBe(1);
+  });
+
   it("reports the region's skeleton as tags and attribute NAMES, and no value among them", () => {
     const box = el({ tag: "div", attrs: { class: "paging" } }).add(
       el({ tag: "span" }).add(el({ tag: "a", text: "1", attrs: { href: "/reviews?page=1", "data-page": "1" } })),
