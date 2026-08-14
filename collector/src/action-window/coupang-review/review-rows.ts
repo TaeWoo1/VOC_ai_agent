@@ -361,6 +361,31 @@ export function pagerPosition(pager: CoupangReviewPagerReading): PagerPosition {
   return pager.nextEnabled ? "MORE_PAGES" : "FINAL_PAGE";
 }
 
+/**
+ * **What Coupang prints where a buyer wrote nothing.**
+ *
+ * The design assumed a rating-only review leaves the body cell EMPTY. The first live backfill proved
+ * otherwise: WING renders the sentence `등록된 내용이 없습니다.` there, so the empty-cell guard never fired
+ * and **19 of 22 stored reviews carried a Coupang placeholder as if it were what a customer wrote**. Two of
+ * them then merged, which is exactly the silent collapse the guard existed to prevent — the placeholder is
+ * identical text, so two rating-only reviews of one product on one day at one score hash the same.
+ *
+ * Matched as a whole normalized cell, never as a substring: a real review that happens to contain the phrase
+ * is a real review.
+ */
+export const EMPTY_BODY_PLACEHOLDERS: readonly string[] = Object.freeze([
+  "등록된 내용이 없습니다.",
+  "등록된 내용이 없습니다",
+  "등록된 상품평이 없습니다.",
+  "내용 없음",
+]);
+
+/** True when the cell holds nothing a buyer wrote — blank, or the channel's own placeholder sentence. */
+export function isEmptyReviewBody(body: string): boolean {
+  const trimmed = body.trim();
+  return trimmed.length === 0 || EMPTY_BODY_PLACEHOLDERS.includes(trimmed);
+}
+
 /** `2026.08.11` / `2026-8-1` / `2026/08/11 14:03` → `2026-08-11`. Anything else → null; never a guess. */
 export function parseReviewDate(text: string | null): string | null {
   if (text === null) return null;
@@ -424,7 +449,7 @@ export function canonicalizeReviewRow(
   const { productId, vendorItemId } = parseProductIds(row.productText);
   if (productId === null) return { dropReason: "noProductId" };
   const body = row.bodyText.trim();
-  if (body.length === 0) return { dropReason: "noBody" };
+  if (isEmptyReviewBody(body)) return { dropReason: "noBody" };
   return {
     review: {
       writtenOn,

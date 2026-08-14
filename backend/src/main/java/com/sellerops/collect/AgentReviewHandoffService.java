@@ -104,9 +104,15 @@ public class AgentReviewHandoffService {
         }
 
         List<CanonicalReview> rows = mapRows(request.reviews());
+        // **Stamped BEFORE the write, and that is the whole point.** The import's start is what the review
+        // list uses to decide which rows arrived in it (`created_at >= startedAt`). Stamping it afterwards
+        // put every freshly-written review a few milliseconds BEFORE its own import, so a handoff that had
+        // just stored 22 reviews rendered "새 상품평 0". Found live; the clock was the bug, not the query.
+        Instant startedAt = Instant.now();
         IngestOutcome outcome = ingestion.ingestReviews(orgId, channel.getId(), rows);
 
-        SyncJob record = recordImport(orgId, channel.getId(), sellerAccountId, request, rows.size(), outcome);
+        SyncJob record = recordImport(orgId, channel.getId(), sellerAccountId, request, rows.size(), outcome,
+                startedAt);
         // Counts and enums only. The bodies are in hand at this point, which is exactly why they are not here.
         log.info("Coupang review handoff: received={} stored={} skipped={} failed={} complete={} stopReason={}",
                 rows.size(), outcome.success(), outcome.skipped(), outcome.failed(),
@@ -165,7 +171,8 @@ public class AgentReviewHandoffService {
      * the same reasoning the credential handoff applies to its post-store verification.
      */
     private SyncJob recordImport(UUID orgId, UUID channelId, UUID sellerAccountId,
-                                 AgentReviewHandoffRequest request, int received, IngestOutcome outcome) {
+                                 AgentReviewHandoffRequest request, int received, IngestOutcome outcome,
+                                 Instant startedAt) {
         try {
             SyncJob job = new SyncJob();
             job.setOrgId(orgId);
@@ -176,7 +183,7 @@ public class AgentReviewHandoffService {
             job.setJobType("AGENT_HANDOFF");
             job.setMethod(CollectionMethod.SELLER_CENTER_READ.name());
             job.setTrigger("ACTION_WINDOW");
-            job.setStartedAt(Instant.now());
+            job.setStartedAt(startedAt);
             job.setFinishedAt(Instant.now());
             job.setTotalRows(received);
             job.setSuccessRows(outcome.success());

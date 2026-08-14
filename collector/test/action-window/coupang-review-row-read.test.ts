@@ -225,6 +225,25 @@ describe("canonicalization decides what a cell means, once, offline", () => {
     expect(reviews[1]!.vendorItemId).toBeNull();
   });
 
+  it("drops a review whose body is Coupang's own placeholder, not a customer's words", () => {
+    // The first live backfill: WING renders 등록된 내용이 없습니다. where a buyer wrote nothing, so the
+    // empty-cell guard never fired and 19 of 22 stored reviews carried the placeholder as their body — two
+    // of which then merged, exactly the collapse the guard existed to prevent.
+    const placeholder = { ...ROW_A, body: "등록된 내용이 없습니다." };
+    const { reviews, dropped } = canonicalizeReviewRows(page(HEADERS, [placeholder, ROW_B]));
+
+    expect(dropped.noBody).toBe(1);
+    expect(reviews).toHaveLength(1);
+    expect(reviews[0]!.body).toBe(BODY_B);
+  });
+
+  it("keeps a real review that merely contains the phrase", () => {
+    // Matched as the whole cell, never as a substring: a review saying so is still a review.
+    const mentions = { ...ROW_A, body: "설명에 등록된 내용이 없습니다 라고만 써있어서 아쉬웠어요" };
+
+    expect(canonicalizeReviewRows(page(HEADERS, [mentions])).reviews).toHaveLength(1);
+  });
+
   it("drops a rating-only review instead of merging it with the next one", () => {
     const textless = { ...ROW_A, body: "" };
     const { reviews, dropped } = canonicalizeReviewRows(page(HEADERS, [textless, { ...textless, no: "2" }]));

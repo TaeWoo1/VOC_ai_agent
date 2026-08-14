@@ -233,6 +233,20 @@ class AgentReviewHandoffServiceTest {
     }
 
     @Test
+    void stamps_the_import_before_it_writes_so_the_reviews_it_stored_count_as_new() {
+        // Found live: the import's start was stamped AFTER the rows were written, so every freshly-stored
+        // review sat a few milliseconds before its own import and the review list rendered "새 상품평 0"
+        // over a handoff that had just stored 22. The list decides newness by created_at >= startedAt.
+        SellerAccount acc = account(org, "COUPANG");
+
+        service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
+
+        SyncJob job = syncJobs.findReviewImports(org, PageRequest.of(0, 10)).get(0);
+        Review stored = reviews.findAll().get(0);
+        assertThat(job.getStartedAt()).isBeforeOrEqualTo(stored.getCreatedAt());
+    }
+
+    @Test
     void an_incomplete_walk_is_recorded_as_partial_even_though_its_reviews_were_stored() {
         SellerAccount acc = account(org, "COUPANG");
 
