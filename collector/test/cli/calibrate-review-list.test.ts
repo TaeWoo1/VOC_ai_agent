@@ -172,6 +172,8 @@ describe("the run declares what it is", () => {
     expect(manifest).toContain("how many cells each row");
     expect(manifest).toContain("쿠팡에서 보기");
     expect(manifest).toContain("period dropdown is counted");
+    // The word survived in a PASS line too. Every operator-visible mention had to go, not the prose ones only.
+    expect(manifest).not.toContain("reply readings");
   });
 
   it("**an undetermined acquisition answer is its own exit code**, never rounded up to success", () => {

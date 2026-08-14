@@ -89,7 +89,7 @@ check_browser_launchable
 # after the operator has granted one. The count is shown; the identifiers are not — they are ours, but they are
 # still account data.
 if [ -z "$PRODUCT_IDS" ]; then
-  pass "no product identifiers supplied — the structure and reply readings do not need one (catalog scope will report NOT_ESTABLISHED)"
+  pass "no product identifiers supplied — the structure and identifier readings do not need one (catalog scope will report NOT_ESTABLISHED)"
 else
   ID_COUNT="$(printf '%s' "$PRODUCT_IDS" | tr ',' '\n' | grep -cE '^[a-zA-Z][a-zA-Z0-9_]{0,32}:[0-9]{1,24}$' || true)"
   TOTAL_PAIRS="$(printf '%s' "$PRODUCT_IDS" | tr ',' '\n' | grep -c . || true)"
