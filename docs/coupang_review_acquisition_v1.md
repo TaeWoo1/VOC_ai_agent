@@ -67,22 +67,37 @@ text, merge. That is recorded here as a known limitation rather than traded for 
 (root `CLAUDE.md`, "No hidden or chained platform clicks"), so the walk is the Action Window's shape:
 the operator pages, SellerOps reads whatever page is up.
 
-This makes routine sync free. A re-sync reads page one, finds nothing new, and stops — no page turn at
-all. Only a first backfill asks the seller to page, which is the operation they expect to sit through
-once.
+**v1 walks to the end of the pager — on a backfill and on a re-sync alike.** An earlier draft stopped at
+the first page that brought nothing new, reasoning that everything behind it must already be held. That
+reasoning holds only on a newest-first list, and **this screen's sort order has never been proven live**;
+the same screen's four dropdowns already turned out not to be the period filters they resembled (§1). On
+any other ordering, a page of familiar reviews says nothing whatever about the pages behind it, and the
+walk would stop early *while reporting full coverage* — silent, and shaped exactly like success. The
+optimisation returns as a follow-up if a live run proves the ordering, and not before.
 
-**The boundary is a page with nothing new on it**, not a page with something known on it. The stronger
-rule ("we met a review we already hold, so everything behind it is ours") is sound only on a
-newest-first list, and this screen's sort order has not been established live — the dropdowns already
-turned out not to be what we assumed. The conservative rule costs one extra page turn on a re-sync where
-a review arrived since the last one, and never claims a coverage that rests on a guess.
+So a re-sync costs the same page turns a backfill does. That is a real cost, taken deliberately.
 
-**`complete` is a claim, and it is carried rather than inferred.** Only a real boundary or the operator's
-own "that was the last page" sets it. A page that could not be read, a page that repeated the one before
-it, and the page bound each end the walk with `complete = false` and a named reason. The reviews already
-collected are still stored — dedupe makes that free — and what is withheld is the claim of having seen
-everything. The import record says `PARTIAL`, and the review list renders the warning in words rather
-than leaving the seller to infer it from a number that looks fine.
+**Completion is a reading, not an inference.** `complete` is true in exactly one case: the pager itself
+showed this was the last page — either it resolved and this page is its highest with the next control
+absent or dead, or there is no pager and nothing to press at all (a one-page list). A pager that is
+present but unreadable is `UNKNOWN`, which **stops** the walk, because "we could not tell" must never
+round up to "there was no more".
+
+**The operator's word ends the walk without completing it.** A person answering "that was the last page"
+is answering from memory of a screen; it is recorded as `operatorFinished`, next to `complete` rather
+than inside it — the same separation the Coupang inquiry reply run keeps between an operator's report and
+a verification.
+
+Everything collected is still stored on every ending — dedupe makes that free — and what is withheld is
+the claim. The import record says `PARTIAL`, and the review list renders the warning in words rather than
+leaving the seller to infer it from a number that looks fine.
+
+**The pager is read as structure, not guessed at**: which page numbers are offered, which one is marked
+as showing (`aria-current`, then an `active`/`current`/`selected` class, then the one that is not a
+link), and whether a next control exists and is pressable. That last one is what stops a *windowed* pager
+— 1…10 while 50 pages exist — from reading page 10 as the end. Candidates inside a `<table>` are excluded:
+a review row prints `1` in its 번호 cell and `5` in its 평점 cell, so every row is an element with two
+numeric children, and the first version of this census resolved a review row as the paging control.
 
 ## 5. `[쿠팡에서 보기]`
 

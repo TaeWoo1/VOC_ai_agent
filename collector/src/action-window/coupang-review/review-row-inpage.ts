@@ -67,6 +67,8 @@ const MAX_TABLES = 20;
 const MAX_ROWS = 200;
 /** Bounds one review body. Long enough for any real 상품평; short enough that a hostile page cannot flood. */
 const MAX_BODY_CHARS = 8000;
+/** Bounds the whole-document walk the pager census needs. A page larger than this is not a list screen. */
+const MAX_SCAN_ELEMENTS = 4000;
 
 /** The marker attribute a located row carries. Inert: an attribute and an outline, never a click target. */
 export const REVIEW_TARGET_ATTRIBUTE = "data-sellerops-review-target";
@@ -94,6 +96,9 @@ function reviewReaderFragment(
 
   function norm(s) {
     return String(s == null ? '' : s).replace(/[\\s\\u00a0\\u3000]+/g, ' ').replace(/^ /, '').replace(/ $/, '');
+  }
+  function parentOfEl(el) {
+    return el && el.parentElement ? el.parentElement : null;
   }
   function cellsOf(tr) {
     var out = [], kids = tr && tr.children ? tr.children : [];
@@ -197,6 +202,147 @@ function reviewReaderFragment(
     return t.indexOf('더보기') >= 0 || t.indexOf('전체보기') >= 0;
   }
 
+  /* ── the pager ──────────────────────────────────────────────────────────────────────────────
+     Acquisition may only claim it covered the list when it can SEE that it reached the end of the
+     list, and the only thing on the screen that says so is the paging control. So the pager is read
+     as structure, not guessed at: which page numbers are offered, which one the screen marks as the
+     one being shown, and whether a next control exists and is pressable.
+     Three outcomes, and they are deliberately different states:
+       - no pager cluster and no next control  → the list is one page, and this IS the end;
+       - a cluster whose current page cannot be identified → UNRESOLVED, which must never round up
+         to "the end", because that is exactly how a walk claims a coverage it does not have;
+       - a resolved cluster → the caller compares current against the highest offered.
+     Nothing here presses anything. Reading a pager is not turning a page. */
+  /* The class string, via getAttribute rather than .className. On an SVG element .className is an
+     SVGAnimatedString rather than a string, and the attribute is the one form that reads the same
+     everywhere. Class tokens are compared against fixed words we supply; the string never travels. */
+  function classTokens(el) {
+    var v = el.getAttribute ? el.getAttribute('class') : null;
+    return v === null || v === undefined ? '' : String(v).toLowerCase();
+  }
+  function disabledish(el) {
+    if (el.hasAttribute && el.hasAttribute('disabled')) { return true; }
+    var ad = el.getAttribute ? el.getAttribute('aria-disabled') : null;
+    if (ad !== null && String(ad).toLowerCase() === 'true') { return true; }
+    return classTokens(el).indexOf('disabled') >= 0;
+  }
+  function wholeNumber(el) {
+    var t = norm(el.textContent);
+    return /^[0-9]{1,3}$/.test(t) ? parseInt(t, 10) : null;
+  }
+  function pressable(el) {
+    var tag = String(el.tagName || '').toUpperCase();
+    if (tag === 'A' || tag === 'BUTTON') { return true; }
+    var kids = el.children || [];
+    for (var i = 0; i < kids.length; i++) {
+      var kt = String(kids[i].tagName || '').toUpperCase();
+      if (kt === 'A' || kt === 'BUTTON') { return true; }
+    }
+    return false;
+  }
+  var NEXT_WORDS = ['다음', 'next', '\\u203a', '>', '\\uff1e', '\\u00bb'];
+  function isNextControl(el) {
+    var t = norm(el.textContent).toLowerCase();
+    for (var i = 0; i < NEXT_WORDS.length; i++) {
+      if (t === NEXT_WORDS[i]) { return true; }
+    }
+    var al = el.getAttribute ? el.getAttribute('aria-label') : null;
+    if (al) {
+      var a = norm(al).toLowerCase();
+      if (a.indexOf('다음') >= 0 || a.indexOf('next') >= 0) { return true; }
+    }
+    return false;
+  }
+  /* **A row of the review table is not a pager**, and it looks exactly like one: the 번호 cell prints 1 and
+     the 평점 cell prints 5, so every review row is an element with two numeric children. The first version of
+     this census resolved a REVIEW ROW as the paging control on the very first fixture it met.
+     Anything inside a table is therefore excluded. The cost is a pager rendered inside the list table's own
+     tfoot, which this would miss — and missing it yields found=false with a next control present, which is
+     UNKNOWN and stops the walk. Fail closed, and a live reading will say whether it matters. */
+  function insideTable(el) {
+    var node = el, depth = 0;
+    while (node && depth <= 12) {
+      if (String(node.tagName || '').toUpperCase() === 'TABLE') { return true; }
+      node = parentOfEl(node);
+      depth++;
+    }
+    return false;
+  }
+  function pagerOf() {
+    var all = Array.prototype.slice.call(document.querySelectorAll('*'), 0, ${MAX_SCAN_ELEMENTS});
+    var host = null, hostCount = 1;
+    for (var i = 0; i < all.length; i++) {
+      if (insideTable(all[i])) { continue; }
+      var kids = all[i].children || [];
+      var n = 0;
+      for (var k = 0; k < kids.length; k++) { if (wholeNumber(kids[k]) !== null) { n++; } }
+      /* >= 2 numeric siblings is what makes a cluster a PAGER rather than a cell that prints a
+         number. Strictly greater wins, so the innermost cluster is chosen over its wrappers. */
+      if (n >= 2 && n > hostCount) { host = all[i]; hostCount = n; }
+    }
+
+    var next = null;
+    var scanForNext = host === null ? all : [];
+    if (host !== null) {
+      var around = [];
+      var hk = host.children || [];
+      for (var h = 0; h < hk.length; h++) { around.push(hk[h]); }
+      var parent = parentOfEl(host);
+      if (parent) {
+        var pk = parent.children || [];
+        for (var p = 0; p < pk.length; p++) { around.push(pk[p]); }
+      }
+      scanForNext = around;
+    }
+    for (var s = 0; s < scanForNext.length && next === null; s++) {
+      if (isNextControl(scanForNext[s])) { next = scanForNext[s]; }
+    }
+    var hasNext = next !== null;
+    var nextEnabled = hasNext && !disabledish(next);
+
+    if (host === null) {
+      return { found: false, resolved: false, pageNumbers: [], currentPage: null,
+               hasNext: hasNext, nextEnabled: nextEnabled };
+    }
+
+    var numbers = [], nodes = [], hostKids = host.children || [];
+    for (var c = 0; c < hostKids.length; c++) {
+      var v = wholeNumber(hostKids[c]);
+      if (v === null) { continue; }
+      if (numbers.indexOf(v) < 0) { numbers.push(v); }
+      nodes.push({ value: v, el: hostKids[c] });
+    }
+    numbers.sort(function (a, b) { return a - b; });
+
+    /* Which page is being shown, by three signals in order of directness. Each must identify
+       EXACTLY ONE cell — two candidates identify nothing, and saying so is the point. */
+    var current = null, marked = [];
+    for (var m = 0; m < nodes.length; m++) {
+      var ac = nodes[m].el.getAttribute ? nodes[m].el.getAttribute('aria-current') : null;
+      if (ac !== null && String(ac).toLowerCase() !== 'false') { marked.push(nodes[m].value); }
+    }
+    if (marked.length !== 1) {
+      marked = [];
+      for (var q = 0; q < nodes.length; q++) {
+        var cls = classTokens(nodes[q].el);
+        if (cls.indexOf('active') >= 0 || cls.indexOf('current') >= 0 || cls.indexOf('selected') >= 0) {
+          marked.push(nodes[q].value);
+        }
+      }
+    }
+    if (marked.length !== 1) {
+      /* The last signal: the page you are on is usually the one that is not a link. */
+      marked = [];
+      for (var r = 0; r < nodes.length; r++) {
+        if (!pressable(nodes[r].el)) { marked.push(nodes[r].value); }
+      }
+    }
+    if (marked.length === 1) { current = marked[0]; }
+
+    return { found: true, resolved: current !== null, pageNumbers: numbers, currentPage: current,
+             hasNext: hasNext, nextEnabled: nextEnabled };
+  }
+
   var tables = Array.prototype.slice.call(document.querySelectorAll('table'), 0, MAX_TABLES);
   var best = null, bestScore = -1, tiedAtBest = 0;
   for (var t = 0; t < tables.length; t++) {
@@ -220,8 +366,11 @@ export function buildReviewRowReadScript(
 ): string {
   return `(function () {
 ${reviewReaderFragment(roles, required)}
+  /* Read on EVERY path, including the refusals. A run that could not read the rows still learns
+     something worth reporting about why — and a pager that resolves on a page whose table did not
+     is a different diagnosis from a screen that is not the list at all. */
   var base = { tablesScanned: tables.length, headerWidth: 0, excludedColumns: 0, unmappedColumns: 0,
-               duplicateRoles: 0, rolesResolved: [], widthMismatchRows: 0, rows: [] };
+               duplicateRoles: 0, rolesResolved: [], widthMismatchRows: 0, rows: [], pager: pagerOf() };
   if (best === null || bestScore < REQUIRED.length) {
     base.reason = 'HEADERS_UNRESOLVED';
     if (best !== null) {

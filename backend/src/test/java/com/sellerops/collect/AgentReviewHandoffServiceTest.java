@@ -123,8 +123,12 @@ class AgentReviewHandoffServiceTest {
 
     private AgentReviewHandoffRequest request(String slot, boolean complete,
                                               List<AgentReviewHandoffRequest.Review> rows) {
+        // FINAL_PAGE_REACHED is the ONLY stop reason that carries complete=true: the agent completes a walk
+        // when the pager itself showed the last page, and an operator saying they were done is recorded as a
+        // report with complete=false. Pairing complete=true with OPERATOR_FINISHED here would encode a state
+        // the agent cannot produce.
         return new AgentReviewHandoffRequest(slot, "COUPANG", complete,
-                complete ? "OPERATOR_FINISHED" : "PAGE_UNREADABLE", rows);
+                complete ? "FINAL_PAGE_REACHED" : "PAGE_UNREADABLE", rows);
     }
 
     /* ───────────────────────────── storing ───────────────────────────── */

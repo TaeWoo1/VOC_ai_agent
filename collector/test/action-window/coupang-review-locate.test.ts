@@ -51,6 +51,9 @@ function reading(rows: readonly CoupangReviewRowReading[]): CoupangReviewPageRea
     rolesResolved: ["date", "rating", "product", "productName", "body"],
     widthMismatchRows: 0,
     rows,
+    // Locate never consults the pager — it matches one review against the page in front of it. The field is
+    // here because the reading type requires it, and a resolved single page is the least surprising filler.
+    pager: { found: false, resolved: false, pageNumbers: [], currentPage: null, hasNext: false, nextEnabled: false },
   };
 }
 

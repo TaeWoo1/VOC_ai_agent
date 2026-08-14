@@ -19,6 +19,7 @@ import { buildReviewRowReadScript } from "../../src/action-window/coupang-review
 import {
   canonicalizeReviewRows,
   localBoundaryKey,
+  pagerPosition,
   parseProductIds,
   parseReviewDate,
   parseReviewRating,
@@ -266,6 +267,114 @@ describe("canonicalization decides what a cell means, once, offline", () => {
 
     expect(serialized).not.toContain(BUYER_A);
     expect(serialized).not.toContain(BUYER_B);
+  });
+});
+
+describe("the pager census, executed", () => {
+  /** `<div class=paging><a>1</a><span class=active>2</span><a>3</a><a>다음</a></div>` and variants. */
+  function pager(opts: {
+    numbers: readonly number[];
+    current: number | null;
+    currentMarker?: "aria" | "class" | "not-a-link";
+    next?: "enabled" | "disabled" | "none";
+  }): El {
+    const box = el({ tag: "div", attrs: { class: "paging" } });
+    for (const n of opts.numbers) {
+      const isCurrent = n === opts.current;
+      if (isCurrent && opts.currentMarker === "aria") {
+        box.add(el({ tag: "a", text: String(n), attrs: { href: "#", "aria-current": "page" } }));
+      } else if (isCurrent && opts.currentMarker === "class") {
+        box.add(el({ tag: "a", text: String(n), attrs: { href: "#", class: "page active" } }));
+      } else if (isCurrent) {
+        box.add(el({ tag: "span", text: String(n) }));
+      } else {
+        box.add(el({ tag: "a", text: String(n), attrs: { href: "#" } }));
+      }
+    }
+    if (opts.next === "enabled") box.add(el({ tag: "a", text: "다음", attrs: { href: "#" } }));
+    if (opts.next === "disabled") box.add(el({ tag: "a", text: "다음", attrs: { class: "disabled" } }));
+    return box;
+  }
+
+  function readWith(pagerEl: El | null): CoupangReviewPageReading {
+    const root = el({ tag: "body" }).add(tableOf(HEADERS, [ROW_A]));
+    if (pagerEl) root.add(pagerEl);
+    return readPage(root);
+  }
+
+  it("reads the page numbers and which one is being shown, from a non-link current page", () => {
+    const reading = readWith(pager({ numbers: [1, 2, 3, 4, 5], current: 2, next: "enabled" }));
+
+    expect(reading.pager).toMatchObject({
+      found: true,
+      resolved: true,
+      pageNumbers: [1, 2, 3, 4, 5],
+      currentPage: 2,
+      hasNext: true,
+      nextEnabled: true,
+    });
+  });
+
+  it("prefers aria-current over every other signal", () => {
+    const reading = readWith(
+      pager({ numbers: [1, 2, 3], current: 3, currentMarker: "aria", next: "enabled" }),
+    );
+
+    expect(reading.pager.currentPage).toBe(3);
+  });
+
+  it("falls back to an active/current/selected class", () => {
+    const reading = readWith(pager({ numbers: [1, 2, 3], current: 2, currentMarker: "class", next: "enabled" }));
+
+    expect(reading.pager.currentPage).toBe(2);
+  });
+
+  it("reports a disabled next control as not pressable", () => {
+    const reading = readWith(pager({ numbers: [1, 2, 3], current: 3, next: "disabled" }));
+
+    expect(reading.pager).toMatchObject({ hasNext: true, nextEnabled: false });
+    expect(pagerPosition(reading.pager)).toBe("FINAL_PAGE");
+  });
+
+  it("reports a screen with no pager and nothing to press as a one-page list", () => {
+    const reading = readWith(null);
+
+    expect(reading.pager).toMatchObject({ found: false, hasNext: false });
+    expect(pagerPosition(reading.pager)).toBe("FINAL_PAGE");
+  });
+
+  it("refuses to resolve a pager whose current page cannot be told apart", () => {
+    // Every number is a link and none is marked — nothing says which page is showing.
+    const box = el({ tag: "div" }).add(
+      el({ tag: "a", text: "1", attrs: { href: "#" } }),
+      el({ tag: "a", text: "2", attrs: { href: "#" } }),
+      el({ tag: "a", text: "3", attrs: { href: "#" } }),
+    );
+    const reading = readWith(box);
+
+    expect(reading.pager).toMatchObject({ found: true, resolved: false, currentPage: null });
+    expect(pagerPosition(reading.pager)).toBe("UNKNOWN");
+  });
+
+  it("does not mistake a single number on the page for a pager", () => {
+    const reading = readWith(el({ tag: "div" }).add(el({ tag: "span", text: "7" })));
+
+    expect(reading.pager.found).toBe(false);
+  });
+
+  it("is read even when the table could not be", () => {
+    const withoutRating = HEADERS.filter((h) => h !== "평점");
+    const root = el({ tag: "body" }).add(
+      el({ tag: "table" }).add(
+        el({ tag: "thead" }).add(el({ tag: "tr" }).add(...withoutRating.map((h) => el({ tag: "th", text: h })))),
+      ),
+      pager({ numbers: [1, 2], current: 1, next: "enabled" }),
+    );
+    const reading = readPage(root);
+
+    // A resolved pager over an unreadable table is a different diagnosis from "this is not the list screen".
+    expect(reading.reason).toBe("HEADERS_UNRESOLVED");
+    expect(reading.pager.resolved).toBe(true);
   });
 });
 

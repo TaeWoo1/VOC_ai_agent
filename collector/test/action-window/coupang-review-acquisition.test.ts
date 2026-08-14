@@ -1,12 +1,14 @@
 /**
- * **The acquisition session.** What these hold is not "did it collect the reviews" — it is **when is it allowed
- * to say it collected all of them**.
+ * **The acquisition session.** What these hold is not "did it collect the reviews" — it is **when is it
+ * allowed to say it collected all of them**.
  *
- * `complete` is the field the product acts on: a complete walk is what a first backfill claims, and an
- * incomplete one is what must not silently become a stored coverage claim. So every ending that is not a real
- * boundary or an operator's own "that was the last page" is tested to leave it false, including the two that
- * look most like success — a page that could not be read after several that could, and a page that repeated
- * the one before it.
+ * v1 walks to the end of the pager, on a backfill and on a re-sync alike. The rule an earlier draft had —
+ * stop at the first page that brings nothing new — is only sound on a newest-first list, and this screen's
+ * sort order has never been proven live. On any other ordering that rule stops early while reporting full
+ * coverage, which is the worst failure available here: silent, and shaped exactly like success.
+ *
+ * So `complete` is true in one case only: the PAGER said this was the last page. Not when the reviews looked
+ * familiar, not when the operator said they were done — that is recorded, separately, as a report.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -16,6 +18,9 @@ import {
 import {
   canonicalizeReviewRows,
   localBoundaryKey,
+  pagerPosition,
+  UNREAD_PAGER,
+  type CoupangReviewPagerReading,
   type CoupangReviewPageReading,
   type CoupangReviewRowReading,
 } from "../../src/action-window/coupang-review/review-rows";
@@ -35,7 +40,22 @@ function row(body: string, date = "2026.08.11", rating = "5", product = "1112223
   };
 }
 
-function readable(rows: readonly CoupangReviewRowReading[]): CoupangReviewPageReading {
+/** A resolved five-page pager sitting on page `current`. The shape the live census actually found. */
+function pagerAt(current: number, last = 5): CoupangReviewPagerReading {
+  return {
+    found: true,
+    resolved: true,
+    pageNumbers: Array.from({ length: last }, (_, i) => i + 1),
+    currentPage: current,
+    hasNext: current < last,
+    nextEnabled: current < last,
+  };
+}
+
+function readable(
+  rows: readonly CoupangReviewRowReading[],
+  pager: CoupangReviewPagerReading = pagerAt(1),
+): CoupangReviewPageReading {
   return {
     reason: "OK",
     tablesScanned: 1,
@@ -46,83 +66,118 @@ function readable(rows: readonly CoupangReviewRowReading[]): CoupangReviewPageRe
     rolesResolved: ["date", "rating", "product", "productName", "body"],
     widthMismatchRows: 0,
     rows,
+    pager,
   };
 }
 
-const UNREADABLE: CoupangReviewPageReading = { ...readable([]), reason: "ROW_WIDTH_MISMATCH", widthMismatchRows: 1 };
+const UNREADABLE: CoupangReviewPageReading = {
+  ...readable([]),
+  reason: "ROW_WIDTH_MISMATCH",
+  widthMismatchRows: 1,
+};
 
-const PAGE_1 = readable([row("아주 만족합니다"), row("배송이 빨라요")]);
-const PAGE_2 = readable([row("포장이 아쉬웠어요"), row("크기가 작습니다")]);
+const PAGE_1 = readable([row("아주 만족합니다"), row("배송이 빨라요")], pagerAt(1, 2));
+const PAGE_2 = readable([row("포장이 아쉬웠어요"), row("크기가 작습니다")], pagerAt(2, 2));
 
 function keysOf(reading: CoupangReviewPageReading): string[] {
   return canonicalizeReviewRows(reading).reviews.map(localBoundaryKey);
 }
 
-describe("a first backfill", () => {
-  it("collects each page the operator brings up, and completes when they say it was the last", () => {
-    const session = new ReviewAcquisitionSession();
-
-    expect(session.offerPage(PAGE_1).newReviews).toBe(2);
-    expect(session.offerPage(PAGE_2).newReviews).toBe(2);
-    session.finish();
-
-    const result = session.result();
-    expect(result.complete).toBe(true);
-    expect(result.stopReason).toBe("OPERATOR_FINISHED");
-    expect(result.pagesAccepted).toBe(2);
-    expect(result.reviews).toHaveLength(4);
-  });
-
-  it("stops at a page that brings nothing new, without needing the operator to say so", () => {
+describe("a walk completes only when the pager says it reached the end", () => {
+  it("completes on the last page of the pager", () => {
     const session = new ReviewAcquisitionSession();
     session.offerPage(PAGE_1);
-    const second = session.offerPage(readable([row("아주 만족합니다"), row("완전히 새로운 후기")]));
 
-    // One of the two was already collected; the page still advanced because one was not.
-    expect(second.newReviews).toBe(1);
-    expect(second.alreadyKnown).toBe(1);
-    expect(session.open).toBe(true);
+    expect(session.offerPage(PAGE_2).stopReason).toBe("FINAL_PAGE_REACHED");
+    expect(session.result()).toMatchObject({
+      complete: true,
+      stopReason: "FINAL_PAGE_REACHED",
+      pagesAccepted: 2,
+      lastPageNumber: 2,
+    });
+    expect(session.result().reviews).toHaveLength(4);
   });
-});
 
-describe("a routine re-sync", () => {
-  it("reaches its boundary on the first page, with no page turn at all", () => {
+  it("completes on a screen with no pager and nothing to press — a one-page list is a whole list", () => {
+    const single: CoupangReviewPagerReading = {
+      found: false,
+      resolved: false,
+      pageNumbers: [],
+      currentPage: null,
+      hasNext: false,
+      nextEnabled: false,
+    };
+    const session = new ReviewAcquisitionSession();
+
+    session.offerPage(readable([row("하나뿐인 후기")], single));
+
+    expect(session.result()).toMatchObject({ complete: true, stopReason: "FINAL_PAGE_REACHED" });
+  });
+
+  it("keeps walking on a page that brought nothing new — familiarity is not the end of the list", () => {
+    // The rule that was removed. On a list not sorted newest-first, everything on page 1 being known says
+    // nothing whatever about pages 2..5, and stopping here would report full coverage of a list barely read.
     const session = new ReviewAcquisitionSession({ knownKeys: keysOf(PAGE_1) });
 
     const outcome = session.offerPage(PAGE_1);
 
     expect(outcome.newReviews).toBe(0);
     expect(outcome.alreadyKnown).toBe(2);
-    expect(session.result()).toMatchObject({ complete: true, stopReason: "BOUNDARY_REACHED", reviews: [] });
+    expect(outcome.stopReason).toBe("IN_PROGRESS");
+    expect(session.open).toBe(true);
+    expect(session.result().complete).toBe(false);
   });
 
-  it("collects only what is new when the top page has moved on, and keeps walking", () => {
-    const session = new ReviewAcquisitionSession({ knownKeys: keysOf(PAGE_1) });
+  it("makes a re-sync walk the same pages a backfill does", () => {
+    const backfill = new ReviewAcquisitionSession();
+    backfill.offerPage(PAGE_1);
+    backfill.offerPage(PAGE_2);
 
-    session.offerPage(readable([row("오늘 도착한 새 후기"), ...PAGE_1.rows]));
+    const resync = new ReviewAcquisitionSession({ knownKeys: [...keysOf(PAGE_1), ...keysOf(PAGE_2)] });
+    resync.offerPage(PAGE_1);
+    resync.offerPage(PAGE_2);
 
-    const result = session.result();
-    expect(result.reviews).toHaveLength(1);
-    expect(result.reviews[0]!.body).toBe("오늘 도착한 새 후기");
-    // A page holding known reviews is NOT the boundary — that shortcut is only sound on a newest-first list,
-    // and the screen's sort order has not been established live. One more page turn beats a coverage claim
-    // that rests on an assumption.
-    expect(result.complete).toBe(false);
-    expect(session.open).toBe(true);
+    expect(resync.result()).toMatchObject({
+      complete: true,
+      stopReason: "FINAL_PAGE_REACHED",
+      pagesAccepted: backfill.result().pagesAccepted,
+    });
+    // Same pages walked; nothing new collected. That is the idempotence, and it costs the same page turns.
+    expect(resync.result().reviews).toHaveLength(0);
+  });
+
+  it("does not treat the highest PRINTED number as the end while the next control is still live", () => {
+    // A windowed pager: 1…10 shown, 50 pages behind it, and 다음 still pressable on 10.
+    const windowed: CoupangReviewPagerReading = {
+      found: true,
+      resolved: true,
+      pageNumbers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      currentPage: 10,
+      hasNext: true,
+      nextEnabled: true,
+    };
+    const session = new ReviewAcquisitionSession();
+
+    const outcome = session.offerPage(readable([row("열번째 페이지")], windowed));
+
+    expect(outcome.stopReason).toBe("IN_PROGRESS");
+    expect(session.result().complete).toBe(false);
   });
 });
 
-describe("every ending that is not a boundary refuses to claim coverage", () => {
-  it("stops on a page it cannot read, and does not call the walk complete", () => {
+describe("the operator's word ends the walk without completing it", () => {
+  it("records the operator's finish separately from a pager-confirmed completion", () => {
     const session = new ReviewAcquisitionSession();
     session.offerPage(PAGE_1);
+    session.finish();
 
-    const outcome = session.offerPage(UNREADABLE);
-
-    expect(outcome.accepted).toBe(false);
-    expect(session.result()).toMatchObject({ complete: false, stopReason: "PAGE_UNREADABLE", pagesAccepted: 1 });
-    // What it DID read is still handed over — dedupe makes that free. Only the coverage claim is withheld.
-    expect(session.result().reviews).toHaveLength(2);
+    const result = session.result();
+    expect(result.stopReason).toBe("OPERATOR_FINISHED");
+    expect(result.operatorFinished).toBe(true);
+    // A person's recollection of a screen is a report, not a reading.
+    expect(result.complete).toBe(false);
+    // What was collected is still handed over.
+    expect(result.reviews).toHaveLength(2);
   });
 
   it("refuses to be finished out of a failed page", () => {
@@ -130,23 +185,105 @@ describe("every ending that is not a boundary refuses to claim coverage", () => 
     session.offerPage(UNREADABLE);
     session.finish();
 
-    expect(session.result()).toMatchObject({ complete: false, stopReason: "PAGE_UNREADABLE" });
+    expect(session.result()).toMatchObject({
+      complete: false,
+      operatorFinished: false,
+      stopReason: "PAGE_UNREADABLE",
+    });
+  });
+});
+
+describe("a pager it cannot read stops the walk rather than continuing blind", () => {
+  it("stops when a pager is present and its current page cannot be identified", () => {
+    const unresolved: CoupangReviewPagerReading = {
+      found: true,
+      resolved: false,
+      pageNumbers: [1, 2, 3],
+      currentPage: null,
+      hasNext: true,
+      nextEnabled: true,
+    };
+    const session = new ReviewAcquisitionSession();
+
+    const outcome = session.offerPage(readable([row("어느 페이지인지 모름")], unresolved));
+
+    expect(outcome.accepted).toBe(false);
+    expect(session.result()).toMatchObject({
+      complete: false,
+      stopReason: "PAGER_UNRESOLVED",
+      pagesAccepted: 0,
+    });
   });
 
-  it("stops when a page turn did not turn", () => {
+  it("stops when there is a next control but no numbers to count it against", () => {
+    const nextOnly: CoupangReviewPagerReading = {
+      found: false,
+      resolved: false,
+      pageNumbers: [],
+      currentPage: null,
+      hasNext: true,
+      nextEnabled: true,
+    };
+
+    expect(new ReviewAcquisitionSession().offerPage(readable([row("x")], nextOnly)).stopReason).toBe(
+      "PAGER_UNRESOLVED",
+    );
+  });
+
+  it("treats a pager that was never read as unknown, not as a one-page list", () => {
+    expect(pagerPosition(UNREAD_PAGER)).toBe("UNKNOWN");
+    expect(new ReviewAcquisitionSession().offerPage(readable([row("x")], UNREAD_PAGER)).stopReason).toBe(
+      "PAGER_UNRESOLVED",
+    );
+  });
+});
+
+describe("every other ending refuses to claim coverage", () => {
+  it("stops on a page it cannot read, and still hands over what it had", () => {
     const session = new ReviewAcquisitionSession();
     session.offerPage(PAGE_1);
 
-    const outcome = session.offerPage(PAGE_1);
+    const outcome = session.offerPage(UNREADABLE);
+
+    expect(outcome.accepted).toBe(false);
+    expect(session.result()).toMatchObject({ complete: false, stopReason: "PAGE_UNREADABLE", pagesAccepted: 1 });
+    expect(session.result().reviews).toHaveLength(2);
+  });
+
+  it("stops when the page number did not move forward", () => {
+    const session = new ReviewAcquisitionSession();
+    session.offerPage(readable([row("첫 페이지")], pagerAt(2, 5)));
+
+    // The operator pressed 이전: different rows, lower page. The row-set signature cannot catch this.
+    const outcome = session.offerPage(readable([row("완전히 다른 후기")], pagerAt(1, 5)));
 
     expect(outcome.stopReason).toBe("PAGE_DID_NOT_ADVANCE");
     expect(session.result()).toMatchObject({ complete: false, repeatedPages: 1, pagesAccepted: 1 });
   });
 
+  it("stops when the same page is offered twice", () => {
+    const session = new ReviewAcquisitionSession();
+    session.offerPage(readable([row("첫 페이지")], pagerAt(1, 5)));
+
+    expect(session.offerPage(readable([row("첫 페이지")], pagerAt(1, 5))).stopReason).toBe(
+      "PAGE_DID_NOT_ADVANCE",
+    );
+  });
+
+  it("stops when a page re-rendered identically under a number that did move", () => {
+    const session = new ReviewAcquisitionSession();
+    session.offerPage(readable([row("같은 내용")], pagerAt(1, 5)));
+
+    // The number advanced but the rows did not — a turn the screen reported and did not perform.
+    expect(session.offerPage(readable([row("같은 내용")], pagerAt(2, 5))).stopReason).toBe(
+      "PAGE_DID_NOT_ADVANCE",
+    );
+  });
+
   it("stops at the page bound and says nothing about what lay beyond it", () => {
     const session = new ReviewAcquisitionSession({ maxPages: 2 });
-    session.offerPage(PAGE_1);
-    session.offerPage(PAGE_2);
+    session.offerPage(readable([row("1")], pagerAt(1, 5)));
+    session.offerPage(readable([row("2")], pagerAt(2, 5)));
 
     expect(session.result()).toMatchObject({ complete: false, stopReason: "PAGE_LIMIT_REACHED" });
   });
@@ -160,18 +297,16 @@ describe("every ending that is not a boundary refuses to claim coverage", () => 
   });
 
   it("bounds maxPages to the module ceiling however it is asked", () => {
-    const session = new ReviewAcquisitionSession({ maxPages: 10_000 });
     expect(MAX_ACQUISITION_PAGES).toBe(100);
-    expect(session.open).toBe(true);
+    expect(new ReviewAcquisitionSession({ maxPages: 10_000 }).open).toBe(true);
   });
 });
 
-describe("a page of reviews that cannot be canonicalized is not a boundary", () => {
+describe("a page of reviews that cannot be canonicalized is still a page", () => {
   it("keeps walking past a page where every review was textless", () => {
     const session = new ReviewAcquisitionSession();
-    const textless = readable([row(""), row("")]);
 
-    const outcome = session.offerPage(textless);
+    const outcome = session.offerPage(readable([row(""), row("")], pagerAt(1, 5)));
 
     expect(outcome.dropped.noBody).toBe(2);
     expect(outcome.stopReason).toBe("IN_PROGRESS");
@@ -180,15 +315,15 @@ describe("a page of reviews that cannot be canonicalized is not a boundary", () 
 
   it("does not read a second all-dropped page as a page that did not advance", () => {
     const session = new ReviewAcquisitionSession();
-    session.offerPage(readable([row("")]));
+    session.offerPage(readable([row("")], pagerAt(1, 5)));
 
-    expect(session.offerPage(readable([row("")])).stopReason).toBe("IN_PROGRESS");
+    expect(session.offerPage(readable([row("")], pagerAt(2, 5))).stopReason).toBe("IN_PROGRESS");
   });
 
   it("accumulates drop counts across the whole walk", () => {
     const session = new ReviewAcquisitionSession();
-    session.offerPage(readable([row(""), row("좋아요")]));
-    session.offerPage(readable([row("", "어제"), row("괜찮아요")]));
+    session.offerPage(readable([row(""), row("좋아요")], pagerAt(1, 5)));
+    session.offerPage(readable([row("", "어제"), row("괜찮아요")], pagerAt(2, 5)));
 
     expect(session.result().dropped).toMatchObject({ noBody: 1, unparseableDate: 1 });
   });
@@ -199,7 +334,31 @@ describe("the session holds no review text it should not", () => {
     const session = new ReviewAcquisitionSession({ knownKeys: keysOf(PAGE_1) });
     session.offerPage(PAGE_1);
 
-    // The collected list is empty on a boundary, so the only state left is keys — fingerprints, not text.
     expect(JSON.stringify(session.result())).not.toContain("아주 만족합니다");
+  });
+});
+
+describe("pagerPosition on its own", () => {
+  it("calls a resolved pager on its last number with a dead next control the final page", () => {
+    expect(pagerPosition(pagerAt(5, 5))).toBe("FINAL_PAGE");
+  });
+
+  it("calls any earlier page more pages", () => {
+    expect(pagerPosition(pagerAt(3, 5))).toBe("MORE_PAGES");
+  });
+
+  it("refuses a current page the pager did not also offer", () => {
+    const inconsistent: CoupangReviewPagerReading = {
+      found: true,
+      resolved: true,
+      pageNumbers: [1, 2, 3],
+      currentPage: 9,
+      hasNext: false,
+      nextEnabled: false,
+    };
+
+    // "page 9 of 1,2,3" is a contradiction, not a position — and read as past-the-end it would COMPLETE a
+    // walk. The reading is refused instead.
+    expect(pagerPosition(inconsistent)).toBe("UNKNOWN");
   });
 });
