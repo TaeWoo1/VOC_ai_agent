@@ -130,6 +130,29 @@ if [ "$M_PHASE" != "$PHASE_EXPECTED" ]; then
 fi
 CUR_GIT="$(git_hardened rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
+# Bind the APPROVED PHASE into this run's env, from the MANIFEST (never from the run env it sourced) — the
+# three WALKTHROUGH_* identity variables are byte-identical across WING phases, so without this a grant given
+# for one phase would reach PREPARED in another. The CLI refuses when it is absent, which is how this being
+# missing was caught: the run stopped rather than starting under an unbound phase.
+if ! python3 -c 'import os, sys, tempfile
+path, phase = sys.argv[1], sys.argv[2]
+lines = [l for l in open(path).read().splitlines() if not l.startswith("SELLEROPS_WING_APPROVED_PHASE=")]
+q = "'"'"'"
+lines.append("SELLEROPS_WING_APPROVED_PHASE=" + q + phase.replace(q, q + chr(34) + q + chr(34) + q) + q)
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)))
+try:
+    with os.fdopen(fd, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    os.replace(tmp, path)
+except BaseException:
+    if os.path.exists(tmp):
+        os.unlink(tmp)
+    raise' "$RUN_ENV" "$M_PHASE" 2>/dev/null; then
+  echo "PREFLIGHT FAIL — could not bind the approved phase to $RUN_ENV; refusing to present a manifest the run may not honor."
+  exit 1
+fi
+pass "approved PHASE bound to the run env ($M_PHASE)"
+
 echo "PREFLIGHT PASS"
 echo "approval manifest (sanitized) → $MANIFEST_OUT"; sed 's/^/  /' "$MANIFEST_OUT"
 echo
