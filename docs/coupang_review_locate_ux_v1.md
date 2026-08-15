@@ -271,12 +271,26 @@ either way and were rewritten.
 4. **The look-again loop is bounded at ten minutes and says nothing when it stops.** The copy asks the seller
    to press `[다시 확인]` "한참 뒤라면" rather than promising it watches forever, which is honest but not the
    same as telling them the moment it gave up. A run that re-parked on expiry would.
-5. **The entry point cannot be found, and that is now measured.** The 상품평 screen is reached from the
-   channel workspace's header (`[상품평]`, rendered only when the channel resolves to `COUPANG`), and there
-   is no route to it from `/connect`. **Both live sittings stalled here** — at `c334b763` the operator could
-   not find the button, and at the §5.1 re-proof they reported the collected reviews as missing entirely. The
-   data was never missing: the API answered `total=22` for that account while they were looking at a screen
-   with no way in, and the sitting only continued because they were handed the URL directly. Twice is not a
-   discovery anecdote; the surface has no path to a working feature. Backlog #96 owns it.
+5. ~~**The entry point cannot be found, and that is now measured.**~~ **Fixed — see below.** The 상품평
+   screen was reached only from the channel workspace's header (`[상품평]`, rendered when the channel
+   resolved to `COUPANG`), with no route to it from `/connect`. **Both live sittings stalled here** — at
+   `c334b763` the operator could not find the button, and at the §5.1 re-proof they reported the collected
+   reviews as missing entirely. The data was never missing: the API answered `total=22` for that account
+   while they were looking at a screen with no way in, and the sitting only continued because they were
+   handed the URL directly. Twice is not a discovery anecdote; the surface had no path to a working feature.
+
+   Unit #96 (`feat(connect): put the 상품평 record where a seller can find it`) put the entry on the
+   `/connect` channel row itself, labelled with what is behind it (`상품평 22개 보기`), and restated the
+   record as a panel above the workspace's connection sections. The count fails soft — a failed read drops
+   the number and keeps the link — so the entry cannot disappear the way the feature did. Proven locally
+   against the same 22 stored 상품평: one click from `/connect` to the record at 1440px and at 390px.
 6. **No second-channel story.** `REVIEW_LOCATE` is Coupang-only by construction: the mint refuses any other
    channel, because the reader, the header roles and the pager all belong to the WING 상품평 screen.
+7. **The capability table and the record now disagree on the same screen, and this doc does not resolve it.**
+   `GET /api/channels/COUPANG/capabilities/overview` returns `REVIEW: supported=false, UNSUPPORTED`, which
+   the workspace renders as the badge `리뷰 미지원` — directly under the #96 panel saying 22 상품평 were
+   collected. Both statements are defensible: the registry describes what the **official API** auto-collects,
+   and the record was filled by the operator-confirmed Action Window acquisition, which the table has no row
+   for. A seller reading the page cannot see that distinction. Resolving it means either a scope word on the
+   badge or a second axis in the capability model — a **product-owner decision** touching the backend
+   registry and the roadmap's §4.1 living table, so #96 (frontend-only) reports it and changes neither.
