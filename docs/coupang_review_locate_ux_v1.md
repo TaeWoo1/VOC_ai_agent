@@ -112,6 +112,15 @@ Verified against the database and the log, not against the run's own summary:
 - **The band is visible.** The operator confirmed it on screen — which is the only check that matters here,
   and the one that found §6.
 
+> **This proof was taken at `c334b763`, and the independent review changed the code after it** (§6.1). None
+> of those fixes is visible on the happy path — they close races between two presses, retract rings the run
+> has moved on from, and refuse a row that changed under the read — and the real-Chromium regression covers
+> the ring and the new row check. But the sitting above did not exercise the merged code, and one change
+> could plausibly show up live: the annotate now refuses a row whose printed date / rating / product no
+> longer match what the reader saw, so a WING list that re-renders those cells between the read and the ring
+> would report "이 페이지에는 없습니다" where the old code rang it. Fail-closed, and worth one short
+> re-proof before this is put in front of a seller.
+
 ---
 
 ## 6. The ring landed where nobody looks, and no test could tell
