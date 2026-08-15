@@ -32,6 +32,9 @@ on:
       # The guided-connection walkthrough (NAVER issuance) renders from the shared Action Window run view, so
       # it consumes the contract directly (2026-08-05).
       - 'frontend/src/components/guidedConnection/**'
+      # 상품평 lives on a page, and `[쿠팡에서 보기]` is a contract consumer: ChannelReviews renders from the
+      # shared run view. Broad at the directory, like `lib/**` above and for the same reason (2026-08-16).
+      - 'frontend/src/pages/app/**'
       - 'tools/ci/check-contract-importers.sh'
       - '.github/workflows/collector-ci.yml'
   push:
@@ -44,6 +47,7 @@ on:
       - 'frontend/src/components/bridge/**'
       - 'frontend/src/components/reviewImport/**'
       - 'frontend/src/components/guidedConnection/**'
+      - 'frontend/src/pages/app/**'
       - 'tools/ci/check-contract-importers.sh'
       - '.github/workflows/collector-ci.yml'
 
