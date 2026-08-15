@@ -29,6 +29,10 @@ FILTERED_PREFIXES=(
   # Added 2026-08-05: the guided-connection walkthrough (NAVER issuance) renders from the shared Action
   # Window run view, so it imports the contract directly and must be a filtered path too.
   "frontend/src/components/guidedConnection/"
+  # Added 2026-08-16: 상품평 is a page, not a component — `[쿠팡에서 보기]` on ChannelReviews renders from the
+  # shared run view. This guard has been failing on main since that page merged, which is the guard working:
+  # the boundary went unchecked and it said so rather than going quiet.
+  "frontend/src/pages/app/"
 )
 
 echo "== every frontend contract importer must sit under a filtered path =="
