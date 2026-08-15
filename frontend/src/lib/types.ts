@@ -1309,13 +1309,27 @@ export interface ChannelReviewPageView {
   items: ChannelReviewItemView[];
 }
 
-/** Exactly what `[쿠팡에서 보기]` re-finds the review by. Nothing here names a person. */
+/**
+ * The channel-side identifiers the 상세 panel prints. Nothing here names a person.
+ *
+ * It is deliberately NOT what `[쿠팡에서 보기]` matches a live row on. That comparison also uses a one-way
+ * fingerprint of the review body, and it happens in the Local Agent — which resolves it from an opaque
+ * `locateRef` against the backend, so no description of a buyer's review passes through this browser.
+ */
 export interface ChannelReviewLocateTarget {
   productId: string | null;
   vendorItemId: string | null;
   writtenOn: string | null;
   rating: number | null;
-  bodyFingerprint: string;
+}
+
+/**
+ * What pressing `[쿠팡에서 보기]` returns: a single-use opaque binding to put in the Action Window
+ * `START_RUN`, and the channel whose screen the run will read. No target, by design — see above.
+ */
+export interface ChannelReviewLocateRun {
+  locateRef: string;
+  channelCode: string;
 }
 
 /**

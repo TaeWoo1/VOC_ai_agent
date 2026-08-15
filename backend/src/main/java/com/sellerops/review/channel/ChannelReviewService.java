@@ -2,7 +2,6 @@ package com.sellerops.review.channel;
 
 import com.sellerops.common.ApiException;
 import com.sellerops.common.RedactedBody;
-import com.sellerops.common.ReviewBodyFingerprint;
 import com.sellerops.common.SafePreviewResult;
 import com.sellerops.common.VocPreviewSanitizer;
 import com.sellerops.product.Product;
@@ -48,8 +47,9 @@ import org.springframework.stereotype.Service;
  * exactly like a channel with fewer reviews.
  *
  * <p>All text leaves through {@link VocPreviewSanitizer}: a redacted one-line preview in the list, the
- * redacted full body in the detail. The fingerprint that {@code [쿠팡에서 보기]} matches on is computed from
- * the STORED body, so what the locate compares is what the collector will compute in the page.
+ * redacted full body in the detail. What {@code [쿠팡에서 보기]} matches a live row on never leaves through
+ * here at all — it is resolved from the stored review by {@link ChannelReviewLocateService}, against the
+ * Local Agent's own session.
  */
 @Service
 public class ChannelReviewService {
@@ -131,9 +131,7 @@ public class ChannelReviewService {
                         product == null ? null : product.getSku(),
                         review.getSourceOptionId(),
                         writtenOn(review),
-                        review.getRating(),
-                        // From the STORED body, so the target and the live row are compared on one rule.
-                        ReviewBodyFingerprint.of(review.getBody())));
+                        review.getRating()));
     }
 
     private ChannelReviewItemView item(Review review, Product product, Instant newSince) {

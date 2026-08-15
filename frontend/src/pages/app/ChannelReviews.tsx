@@ -7,6 +7,13 @@ import { Chip } from "../../components/ui/Chip";
 import { Btn, BtnLink } from "../../components/ui/Btn";
 import { api } from "../../lib/apiClient";
 import type { ChannelReviewDetailView, ChannelReviewPageView } from "../../lib/types";
+import type { ActionWindowRunView } from "../../../../contracts/action-window/v2/index";
+import { locateMessage, locateUnavailableText } from "../../lib/actionWindow/locate/locateCopy";
+import {
+  useReviewLocate,
+  type LocateUnavailable,
+  type ReviewLocateBinding,
+} from "../../lib/actionWindow/locate/useReviewLocate";
 
 /**
  * **상품평** — the seller's own record of what buyers wrote on a connected channel.
@@ -38,8 +45,14 @@ export function shownRangeLabel(page: ChannelReviewPageView | null): string {
   return `${first}–${first + page.items.length - 1}번째 · 총 ${page.total}개`;
 }
 
-export function ChannelReviews() {
+export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocateBinding } = {}) {
   const { accountId = "" } = useParams();
+  /**
+   * `[쿠팡에서 보기]`. Inert until pressed: no agent socket is opened for a seller who only reads the list.
+   * The optional prop is the test seam — a rendered page never has to reach a bridge to be exercised.
+   */
+  const attached = useReviewLocate(accountId);
+  const locate = locateBinding ?? attached;
 
   const [sort, setSort] = useState<"newest" | "lowest">("newest");
   const [pageIndex, setPageIndex] = useState(0);
@@ -278,7 +291,15 @@ export function ChannelReviews() {
             {detailError ? (
               <p className="text-muted">상품평을 불러오지 못했습니다.</p>
             ) : detail ? (
-              <ReviewDetail detail={detail} />
+              <ReviewDetail
+                detail={detail}
+                locate={locate}
+                // The run belongs to whichever review was last pressed. Showing its state under a DIFFERENT
+                // review would tell the seller SellerOps found the one they are now looking at.
+                run={locate.reviewId === detail.id ? locate.view : null}
+                running={locate.reviewId === detail.id && locate.starting}
+                unavailable={locate.reviewId === detail.id ? locate.unavailable : null}
+              />
             ) : selectedId ? (
               <p className="text-muted">불러오는 중…</p>
             ) : (
@@ -291,7 +312,24 @@ export function ChannelReviews() {
   );
 }
 
-function ReviewDetail({ detail }: { detail: ChannelReviewDetailView }) {
+function ReviewDetail({
+  detail,
+  locate,
+  run,
+  running,
+  unavailable,
+}: {
+  detail: ChannelReviewDetailView;
+  locate: ReviewLocateBinding;
+  run: ActionWindowRunView | null;
+  running: boolean;
+  unavailable: LocateUnavailable | null;
+}) {
+  const message = locateMessage(run, running);
+  // Offered only when the RUNTIME says it is allowed. A recheck the run would refuse is a button that does
+  // nothing, and on a screen whose whole job is to be honest about what was found that is the wrong button.
+  const canRecheck = run?.allowedCommands.includes("REQUEST_STEP_RECHECK") ?? false;
+  const canRaise = run?.allowedCommands.includes("FIND_CURRENT_STEP") ?? false;
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -322,6 +360,57 @@ function ReviewDetail({ detail }: { detail: ChannelReviewDetailView }) {
         <dt className="text-muted">옵션ID</dt>
         <dd className="truncate text-ink">{detail.locateTarget.vendorItemId ?? "정보 없음"}</dd>
       </dl>
+
+      {/*
+        **[쿠팡에서 보기] — the one thing a seller can ask SellerOps to DO with a 상품평.**
+
+        Coupang publishes no per-review link, so this is not a hyperlink and cannot be: the review is found
+        again by matching it on the screen the seller has open. That is why the button lives beside a status
+        line rather than being a plain anchor — there is a run behind it, and it has things to say.
+      */}
+      <div className="space-y-2 border-t border-line pt-4">
+        <Btn
+          size="sm"
+          variant="outline"
+          disabled={running}
+          onClick={() => void locate.locate(detail.id)}
+        >
+          쿠팡에서 보기
+        </Btn>
+        <p className="text-sm leading-relaxed text-muted">
+          쿠팡 윙의 상품평 목록 화면을 띄워 두시면, 이 상품평이 있는 줄에 테두리를 그려 드립니다. 쿠팡
+          화면에서는 아무것도 눌리거나 입력되지 않습니다.
+        </p>
+        {unavailable ? (
+          <p className="text-sm leading-relaxed text-ink">{locateUnavailableText(unavailable)}</p>
+        ) : null}
+        {message ? (
+          <div className="space-y-2">
+            <p
+              className={`text-sm leading-relaxed ${
+                message.tone === "done" ? "text-ink" : message.tone === "failed" ? "text-ink" : "text-muted"
+              }`}
+              role="status"
+            >
+              {message.text}
+            </p>
+            {canRecheck || canRaise ? (
+              <div className="flex flex-wrap gap-2">
+                {canRecheck ? (
+                  <Btn size="sm" variant="outline" onClick={() => locate.send("REQUEST_STEP_RECHECK")}>
+                    다시 확인
+                  </Btn>
+                ) : null}
+                {canRaise ? (
+                  <Btn size="sm" variant="ghost" onClick={() => locate.send("FIND_CURRENT_STEP")}>
+                    쿠팡 창 앞으로
+                  </Btn>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

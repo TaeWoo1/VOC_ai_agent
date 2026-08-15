@@ -17,12 +17,24 @@ import {
   buildReviewRowAnnotateScript,
   buildReviewRowReadScript,
   REVIEW_TARGET_TEARDOWN,
+  type ReviewRowAnchors,
 } from "./review-row-inpage";
 import { locateReviewOnPage, type ReviewLocateOutcome, type ReviewLocateTarget } from "./review-locate";
 import { sanitizeReviewPageReading, type CoupangReviewPageReading } from "./review-rows";
 
 export interface CoupangWingReviewReaderOptions {
   readonly context?: BrowserContext;
+  /**
+   * Emit the pager DIAGNOSTIC fields when the pager will not resolve — its child shapes, its region labels,
+   * its skeleton. Default true, for the acquisition walk, whose completion claim depends on reading a pager
+   * it may have to be told about.
+   *
+   * <p>A locate sets this FALSE. It never uses the pager, and those fields are the only place on this path
+   * where arbitrary short strings harvested from the page reach a log — a masked 구매자 cell is exactly the
+   * shape that survives the filter. The acquisition takes that risk once per operator press; a locate re-reads
+   * every couple of seconds while the seller pages, which would turn a one-off diagnostic into a running dump.
+   */
+  readonly pagerDiagnostics?: boolean;
 }
 
 /** A locate that also says whether the ring actually landed. Never highlighted unless the verdict is LOCATED. */
@@ -57,8 +69,10 @@ export class CoupangWingReviewReaderDriver {
   }
 
   /** One document's rows. An evaluate that throws becomes `UNREADABLE`, never a page with no reviews on it. */
-  async readCurrentPage(): Promise<CoupangReviewPageReading> {
-    const page = this.activePage();
+  async readCurrentPage(on?: Page): Promise<CoupangReviewPageReading> {
+    // The caller may pin the page — a locate reads and rings the SAME document, and `activePage()` would
+    // otherwise re-resolve to whatever tab is newest at each call.
+    const page = on ?? this.activePage();
     await this.settle(page);
     const raw = await (page as unknown as { evaluate<T>(s: string): Promise<T> })
       .evaluate<unknown>(buildReviewRowReadScript())
@@ -72,13 +86,25 @@ export class CoupangWingReviewReaderDriver {
    * page that changed between the two steps rings nothing rather than the wrong thing.
    */
   async locate(target: ReviewLocateTarget): Promise<ReviewLocateResult> {
-    const reading = await this.readCurrentPage();
+    // ONE page for the read and the ring. `activePage()` re-resolves on every call, so a tab the seller
+    // opened in between would be read for the match and then annotated on the other document.
+    const page = this.activePage();
+    const reading = await this.readCurrentPage(page);
     const outcome = locateReviewOnPage(reading, target);
     if (outcome.verdict !== "LOCATED" || outcome.matchedRowIndex === null) {
       log("aw_coupang_review_locate", { verdict: outcome.verdict, matches: outcome.matches, rows: outcome.rowsConsidered });
       return { ...outcome, highlighted: false };
     }
-    const highlighted = await this.annotate(outcome.matchedRowIndex);
+    const matched = reading.rows.find((r) => r.rowIndex === outcome.matchedRowIndex);
+    const highlighted = await this.annotate(
+      outcome.matchedRowIndex,
+      {
+        dateText: matched?.dateText ?? null,
+        ratingText: matched?.ratingText ?? null,
+        productText: matched?.productText ?? null,
+      },
+      page,
+    );
     log("aw_coupang_review_locate", {
       verdict: highlighted ? outcome.verdict : "NOT_ON_PAGE",
       matches: outcome.matches,
@@ -100,13 +126,23 @@ export class CoupangWingReviewReaderDriver {
    * belonging to whichever target was rung, or the last refusal when none was.
    */
   async locateAny(targets: readonly ReviewLocateTarget[]): Promise<ReviewLocateResult> {
-    const reading = await this.readCurrentPage();
+    const page = this.activePage();
+    const reading = await this.readCurrentPage(page);
     let last: ReviewLocateOutcome = { verdict: "NOT_ON_PAGE", matchedRowIndex: null, rowsConsidered: reading.rows.length, matches: 0 };
     for (const target of targets) {
       const outcome = locateReviewOnPage(reading, target);
       last = outcome;
       if (outcome.verdict !== "LOCATED" || outcome.matchedRowIndex === null) continue;
-      const highlighted = await this.annotate(outcome.matchedRowIndex);
+      const matched = reading.rows.find((r) => r.rowIndex === outcome.matchedRowIndex);
+      const highlighted = await this.annotate(
+        outcome.matchedRowIndex,
+        {
+          dateText: matched?.dateText ?? null,
+          ratingText: matched?.ratingText ?? null,
+          productText: matched?.productText ?? null,
+        },
+        page,
+      );
       if (highlighted) {
         log("aw_coupang_review_locate", { verdict: "LOCATED", matches: 1, rows: outcome.rowsConsidered, highlighted: true });
         return { ...outcome, highlighted: true };
@@ -120,20 +156,31 @@ export class CoupangWingReviewReaderDriver {
     return { ...last, highlighted: false };
   }
 
-  private async annotate(rowIndex: number): Promise<boolean> {
-    const page = this.activePage();
+  private async annotate(rowIndex: number, anchors: ReviewRowAnchors, page: Page): Promise<boolean> {
     const marked = await (page as unknown as { evaluate<T>(s: string): Promise<T> })
-      .evaluate<number>(buildReviewRowAnnotateScript(rowIndex))
+      .evaluate<number>(buildReviewRowAnnotateScript(rowIndex, anchors))
       .catch(() => 0);
     return marked === 1;
   }
 
-  /** Take the ring back off. Safe on a page that never had one. */
+  /**
+   * Take the ring back off — from EVERY page in the context, not just the newest.
+   *
+   * <p>`activePage()` re-resolves on each call, so a seller who opened a 상품명 in a new tab between the ring
+   * and the clear would have had the teardown run on the wrong document: it returns 0, and the ring stays on
+   * the list tab for the life of the window. The teardown is idempotent and costs one evaluate per page, so
+   * sweeping is simply the version of this that cannot miss.
+   */
   async clearHighlight(): Promise<number> {
-    const page = this.activePage();
-    return await (page as unknown as { evaluate<T>(s: string): Promise<T> })
-      .evaluate<number>(REVIEW_TARGET_TEARDOWN)
-      .catch(() => 0);
+    const pages = this.opts.context?.pages() ?? [this.page];
+    const targets = pages.length > 0 ? pages : [this.page];
+    let cleared = 0;
+    for (const page of targets) {
+      cleared += await (page as unknown as { evaluate<T>(s: string): Promise<T> })
+        .evaluate<number>(REVIEW_TARGET_TEARDOWN)
+        .catch(() => 0);
+    }
+    return cleared;
   }
 
   /**
@@ -162,7 +209,7 @@ export class CoupangWingReviewReaderDriver {
         ` marks=${reading.pager.ariaCurrentMarks}/${reading.pager.classMarks}/${reading.pager.nonLinkMarks}`,
       // Only when the pager REFUSED. On a resolved read these add nothing, and a log line that carries the
       // paging region's words on every page of every routine sync is a line that keeps more than it needs to.
-      ...(reading.pager.resolved
+      ...(reading.pager.resolved || this.opts.pagerDiagnostics === false
         ? {}
         : {
             pagerShapes: reading.pager.childShapes.join(","),

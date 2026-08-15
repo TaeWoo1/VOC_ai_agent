@@ -33,6 +33,13 @@ import { makeImportRunMarker, recoverImportRuns } from "../action-window/initial
 import type { ImportProbeDriver } from "../action-window/initial-import/import-driver";
 import { ImportSegmentHost, type ResolvedLaunchScope, type SegmentAdmission } from "../action-window/initial-import/import-host";
 import { ApiIssuanceEndpoint } from "../bridge/api-issuance-endpoint";
+import { ReviewLocateEndpoint } from "../bridge/review-locate-endpoint";
+import { ReviewLocateEngine } from "../action-window/coupang-review/review-locate-engine";
+import {
+  ReviewLocateSession,
+  type ReviewLocateTargetResolver,
+} from "../action-window/coupang-review/review-locate-session";
+import type { ReviewLocateProbeDriver } from "../action-window/coupang-review/review-locate-driver";
 import { IssuanceEngine } from "../action-window/api-issuance/issuance-engine";
 import { IssuanceGuidanceSession } from "../action-window/api-issuance/issuance-session";
 import type { IssuanceProbeDriver } from "../action-window/api-issuance/issuance-driver";
@@ -185,6 +192,29 @@ export interface AgentCoupangIssuanceConfig {
   createDriver: () => CoupangIssuanceProbeDriver;
 }
 
+/**
+ * Optional ISOLATED review-locate hosting (v2). Mutually exclusive with the other carriers — an agent hosts
+ * ONE, and `locate` is its own carrier kind so a frontend expecting a guided walk cannot attach to an agent
+ * that only draws a ring.
+ *
+ * The narrowest of them all: one press of `[쿠팡에서 보기]`, one run for the agent's lifetime, no launch ref,
+ * no scope resolution, no host, and deliberately NO `persistDir` — a locate reads a page and annotates it, so
+ * an interrupted run has nothing to recover and a reboot simply means the seller presses again.
+ *
+ * `resolveTarget` is injected rather than built here for the same reason `createDriver` is: it is the one
+ * call that reaches the backend, and the default/dev boot supplies a synthetic one so nothing hosts a
+ * network dependency it does not need.
+ */
+export interface AgentReviewLocateConfig {
+  /** Opaque run identity announced to paired clients (assigned by the Runtime, never by the FE). */
+  runId: string;
+  /** Sanitized channel identity (SEMANTIC_CODE) — `coupang`. */
+  channelCode: string;
+  createDriver: () => ReviewLocateProbeDriver;
+  /** Spend the run's `locateRef` for what the matcher compares. Any refusal is one `null`. */
+  resolveTarget: ReviewLocateTargetResolver;
+}
+
 export interface AgentBridgeConfig {
   port: number;
   allowedOrigins: string[];
@@ -213,6 +243,8 @@ export interface AgentBridgeConfig {
   apiIssuance?: AgentApiIssuanceConfig;
   /** When present, hosts one ISOLATED Coupang WING issuance guidance run (v2). Mutually exclusive with the rest. */
   coupangIssuance?: AgentCoupangIssuanceConfig;
+  /** When present, hosts one ISOLATED review-locate run (v2). Mutually exclusive with the rest. */
+  reviewLocate?: AgentReviewLocateConfig;
   /**
    * Called when SellerOps asked to be connected to this agent — a pairing approved, or an authenticated tab
    * attaching. Passed straight through to {@link BridgeServer}; see its note for why the import mode brings the
@@ -248,14 +280,25 @@ export interface AgentBridge {
   readonly apiIssuanceSession: IssuanceGuidanceSession | undefined;
   /** Test-only access to the hosted Coupang WING issuance guidance session (undefined unless configured). */
   readonly coupangIssuanceSession: CoupangIssuanceGuidanceSession | undefined;
+  /** Test-only access to the hosted review-locate session (undefined unless configured). */
+  readonly reviewLocateSession: ReviewLocateSession | undefined;
 }
 
 export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
   // An agent hosts EXACTLY ONE carrier — export, reply, import, or issuance — never more (one carrier slot).
   // Fail fast before any I/O.
-  const carriersConfigured = [cfg.actionWindow, cfg.replySubmission, cfg.initialImport, cfg.apiIssuance, cfg.coupangIssuance].filter(Boolean).length;
+  const carriersConfigured = [
+    cfg.actionWindow,
+    cfg.replySubmission,
+    cfg.initialImport,
+    cfg.apiIssuance,
+    cfg.coupangIssuance,
+    cfg.reviewLocate,
+  ].filter(Boolean).length;
   if (carriersConfigured > 1) {
-    throw new Error("agent-bridge: actionWindow, replySubmission, initialImport, apiIssuance, and coupangIssuance are mutually exclusive — an agent hosts exactly one carrier");
+    throw new Error(
+      "agent-bridge: actionWindow, replySubmission, initialImport, apiIssuance, coupangIssuance, and reviewLocate are mutually exclusive — an agent hosts exactly one carrier",
+    );
   }
   const store = new FilePairingStore(cfg.pairingFile, { now: cfg.now ?? (() => Date.now()) });
   // Make durable-pairing restart recovery observable exactly once at boot. Sanitized: a coarse status enum
@@ -399,10 +442,32 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
     log("aw_coupang_issuance_run_hosted", {});
   }
 
+  // ISOLATED review-locate hosting (v2). The narrowest carrier there is: ONE run for the agent's lifetime,
+  // one press of `[쿠팡에서 보기]`, no launch ref / scope / host / persistence. It has its OWN endpoint
+  // (carrier kind `locate`) rather than reusing the issuance one, because a frontend expecting a guided walk
+  // and a frontend expecting a ring must not be able to attach to each other's agent. The driver is injected
+  // (a fixture by default — no browser); the runtime reads the visible page and draws on it, nothing else.
+  let reviewLocateEndpoint: ReviewLocateEndpoint | undefined;
+  let reviewLocateSession: ReviewLocateSession | undefined;
+  if (cfg.reviewLocate) {
+    const rl = cfg.reviewLocate;
+    reviewLocateEndpoint = new ReviewLocateEndpoint({ runId: rl.runId, channelCode: rl.channelCode });
+    reviewLocateSession = new ReviewLocateSession(
+      new ReviewLocateEngine({ runId: rl.runId, channelCode: rl.channelCode }),
+      rl.createDriver(),
+      reviewLocateEndpoint.transport,
+      rl.resolveTarget,
+    );
+    reviewLocateSession.attach();
+    log("aw_coupang_review_locate_run_hosted", {});
+  }
+
   // ONE carrier per agent. The order states the precedence explicitly rather than relying on which
   // config the CLI happened to build: import wins over reply, reply over issuance (NAVER, then Coupang),
-  // issuance over export. The CLI already refuses to build more than one, so this is defence in depth.
-  const carrier: AwCarrierEndpoint | undefined = importEndpoint ?? replyEndpoint ?? apiIssuanceEndpoint ?? coupangIssuanceEndpoint ?? actionWindow;
+  // issuance over locate, locate over export. The CLI already refuses to build more than one, so this is
+  // defence in depth.
+  const carrier: AwCarrierEndpoint | undefined =
+    importEndpoint ?? replyEndpoint ?? apiIssuanceEndpoint ?? coupangIssuanceEndpoint ?? reviewLocateEndpoint ?? actionWindow;
   const server = new BridgeServer({
     store,
     allowedOrigins: cfg.allowedOrigins,
@@ -424,6 +489,7 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
     importHost,
     apiIssuanceSession,
     coupangIssuanceSession,
+    reviewLocateSession,
     observer: { onConnectionSettled: (r) => settle.onConnectionSettled(r) },
     async listen(): Promise<AgentBridgeListenResult> {
       try {

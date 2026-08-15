@@ -10,6 +10,7 @@ import type {
   ChannelCapabilityOverview,
   ChannelResponse,
   ChannelReviewDetailView,
+  ChannelReviewLocateRun,
   ChannelReviewPageView,
   ConnectionInfoView,
   ConnectionCapabilityView,
@@ -1229,10 +1230,25 @@ export const api = {
     return data;
   },
 
-  /** One review in full, with the target `[쿠팡에서 보기]` re-finds it by. No mock fallback, as above. */
+  /** One review in full. No mock fallback, as above. */
   async getChannelReviewStrict(accountId: string, reviewId: string): Promise<ChannelReviewDetailView> {
     const { data } = await http.get<ChannelReviewDetailView>(
       `/api/seller-accounts/${encodeURIComponent(accountId)}/channel-reviews/${encodeURIComponent(reviewId)}`,
+    );
+    return data;
+  },
+
+  /**
+   * The seller pressed `[쿠팡에서 보기]`: mint the single-use binding their Local Agent will spend.
+   *
+   * A POST because it mints state — nothing is submitted to any marketplace by this call, or by the run it
+   * starts. It returns no locate target: the agent resolves that itself, so what identifies the review never
+   * passes through this browser.
+   */
+  async startChannelReviewLocateRun(accountId: string, reviewId: string): Promise<ChannelReviewLocateRun> {
+    const { data } = await http.post<ChannelReviewLocateRun>(
+      `/api/seller-accounts/${encodeURIComponent(accountId)}/channel-reviews/${encodeURIComponent(reviewId)}/locate-runs`,
+      {},
     );
     return data;
   },

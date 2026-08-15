@@ -248,10 +248,10 @@ class ChannelReviewServiceTest {
         assertThat(view.lastImportComplete()).isFalse();
     }
 
-    /* ───────────────────────────── the detail, and the locate target ───────────────────────────── */
+    /* ───────────────────────────── the detail, and the channel-side ids ───────────────────────────── */
 
     @Test
-    void hands_back_the_target_that_finds_this_review_on_the_sellers_own_screen() {
+    void hands_back_the_channel_side_identifiers_the_detail_panel_prints() {
         Product p = product("무선 이어폰", "15411270785");
         Review stored = review(BODY, 5, LocalDate.of(2026, 8, 11), p, Instant.now());
 
@@ -262,8 +262,21 @@ class ChannelReviewServiceTest {
         assertThat(target.vendorItemId()).isEqualTo("81234567890");
         assertThat(target.writtenOn()).isEqualTo(LocalDate.of(2026, 8, 11));
         assertThat(target.rating()).isEqualTo(5);
-        // The fingerprint is over the STORED body, on the shared contract the collector computes in the page.
-        assertThat(target.bodyFingerprint()).isEqualTo(ReviewBodyFingerprint.of(BODY));
+    }
+
+    /**
+     * The body's fingerprint is what a locate run MATCHES on, and it does not come through here. It reaches
+     * the Local Agent by resolving a locateRef against {@code ChannelReviewLocateService}, so no copy of it
+     * rides into the seller's browser on a view that has no use for one.
+     */
+    @Test
+    void the_detail_carries_no_body_fingerprint() {
+        Product p = product("무선 이어폰", "15411270785");
+        Review stored = review(BODY, 5, LocalDate.of(2026, 8, 11), p, Instant.now());
+
+        String rendered = service.detail(org, account.getId(), stored.getId()).locateTarget().toString();
+
+        assertThat(rendered).doesNotContain(ReviewBodyFingerprint.of(BODY));
     }
 
     @Test

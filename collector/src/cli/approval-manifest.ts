@@ -146,6 +146,14 @@ export const CALIBRATION_PHASES = [
   // and for whom no field exists anywhere along the path. It also rings ONE stored review on request, which
   // is why it is the only 상품평 phase that allows a highlight.
   "COUPANG_WING_REVIEW_ACQUISITION",
+  // The 상품평 LOCATE. The acquisition above stores reviews and can ring one on request; this phase is that
+  // ring by itself, reached the way the product reaches it — the seller presses `[쿠팡에서 보기]` on a review
+  // SellerOps already holds, and the run reads the 상품평 page they have up and outlines the one row that
+  // matches. It reads review text (it has to, to compare bodies) and stores NOTHING: there is no handoff on
+  // this path. It is a separate phase from the acquisition because the operator is agreeing to a different
+  // run — one read per look, no collection, no backend write — and a manifest that reused the acquisition's
+  // sentence would be describing a collection that does not happen.
+  "COUPANG_WING_REVIEW_LOCATE",
   // The credential HANDOFF. The ONLY phase in this list whose agent reads a credential VALUE — which is why it
   // is the only one whose mode is not `READ_ONLY`. After a trusted operator confirmation it takes ONE read of
   // 업체코드 / Access Key / Secret Key and hands them to the SellerOps backend vault, which verifies them with a
@@ -302,7 +310,7 @@ export const APPROVAL_ACTIONS = [
   // to SellerOps and to nothing else — no marketplace state is touched, and a replay stores nothing new
   // because every row de-duplicates on its content.
   "HAND_REVIEWS_TO_SELLEROPS_BACKEND",
-  // Ring ONE already-stored review on the screen: a marker attribute, an outline, and a scroll into view.
+  // Ring ONE already-stored review on the screen: a marker attribute, a band around the row, and a scroll.
   // The row is chosen OFFLINE by matching product, option, date, rating and the review body's fingerprint,
   // and zero matches and two matches are BOTH refusals that ring nothing — a ring around the wrong review is
   // the product telling the seller what a buyer said. It never clicks, focuses, types, or submits.
@@ -1185,13 +1193,31 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     ],
     // The one 상품평 phase that may ring. The discovery next door may not, and the difference is real: a ring
     // needs a target, and this is the only run that HAS one — a review SellerOps already stored, matched
-    // against the page on five fields at once. The ring is inert (a marker, an outline, a scroll).
+    // against the page on five fields at once. The ring is inert (a marker, a band, a scroll).
     allowsHighlight: true,
     // ...and it is a ROW matched on content, not a control found by a selector. See `highlightTarget`.
     highlightTarget: "CONTENT_MATCHED_ROW",
     // READ_ONLY is about the MARKETPLACE, and on Coupang this run performs zero actions there — it does not
     // even turn a page. The write it does perform is to SellerOps' own store, over the operator's own
     // session, and the manifest says so in `maxActions` rather than leaving `READ_ONLY` to imply otherwise.
+    mode: "READ_ONLY",
+  },
+  COUPANG_WING_REVIEW_LOCATE: {
+    phase: "COUPANG_WING_REVIEW_LOCATE",
+    cli: "src/cli/run-coupang-review-locate-live.ts",
+    driver: "CoupangWingReviewLocateDriver over CoupangWingReviewReaderDriver (one-row locate highlight)",
+    capableActions: [
+      "OPEN_DEDICATED_WINDOW",
+      "WAIT_OPERATOR_LOGIN_NAV",
+      "CLASSIFY_SANITIZED_PAGE_CATEGORY",
+      "READ_REVIEW_ROWS",
+      "HIGHLIGHT_ONE_REVIEW_ROW",
+    ],
+    allowsHighlight: true,
+    // A ROW matched on content, like the acquisition's — not a control found by a selector.
+    highlightTarget: "CONTENT_MATCHED_ROW",
+    // READ_ONLY on both sides here, unlike the acquisition: this run does not even write to SellerOps. The
+    // only thing it hands the backend is the binding it was given, and it gets a target back.
     mode: "READ_ONLY",
   },
   COUPANG_WING_CREDENTIAL_HANDOFF: {
@@ -1233,6 +1259,7 @@ export const WING_PHASES: readonly CalibrationPhase[] = [
   "COUPANG_WING_INQUIRY_LIST_CALIBRATION",
   "COUPANG_WING_REVIEW_STRUCTURE_DISCOVERY",
   "COUPANG_WING_REVIEW_ACQUISITION",
+  "COUPANG_WING_REVIEW_LOCATE",
   "COUPANG_WING_CREDENTIAL_HANDOFF",
 ];
 export function isWingCalibrationPhase(phase: CalibrationPhase): boolean {
@@ -1357,6 +1384,7 @@ export const ENTRYPOINT_PHASES = [
   "COUPANG_WING_INQUIRY_LIST_CALIBRATION",
   "COUPANG_WING_REVIEW_STRUCTURE_DISCOVERY",
   "COUPANG_WING_REVIEW_ACQUISITION",
+  "COUPANG_WING_REVIEW_LOCATE",
   "COUPANG_WING_CREDENTIAL_HANDOFF",
   "API_ISSUANCE_FE_LIVE_PROOF",
   "NAVER_GUIDED_CONNECTION",
@@ -1551,8 +1579,37 @@ export const COUPANG_WING_REVIEW_ACQUISITION_SCOPE = Object.freeze({
     "0 marketplace actions (0 clicks, 0 inputs, 0 submissions, 0 page turns, 0 navigations after the window " +
     "opens; 0 buyer/작성자 names read, 0 image or video addresses read, 0 raw HTML/DOM/screenshots kept), " +
     "1 read per page the OPERATOR brings up (bounded at 100 pages), 1 handoff of what was read to the " +
-    "SellerOps backend, and at most 1 inert highlight (a marker attribute + an outline + a scroll) on a " +
+    "SellerOps backend, and at most 1 inert highlight (a marker attribute + a band drawn around the row + a scroll) on a " +
     "single matched row",
+});
+
+/**
+ * **The locate scope — a run that reads review text and keeps none of it.**
+ *
+ * It is written next to the acquisition's deliberately, because the two are one word apart in what they do
+ * to the page and a world apart in what they leave behind. Both read the rows. The acquisition then STORES
+ * them; this one compares them to one review the seller already has, outlines a single row, and forgets the
+ * rest. A scope sentence that borrowed the acquisition's would promise a collection that never happens.
+ */
+export const COUPANG_WING_REVIEW_LOCATE_SCOPE = Object.freeze({
+  operation:
+    "WING 상품평 READ_ONLY locate (the seller presses [쿠팡에서 보기] on ONE review SellerOps already stored; " +
+    "the agent asks the SellerOps backend what that review's 노출상품ID · 옵션ID · 등록일 · 별점 and body " +
+    "fingerprint are — the review's own text never travels, only a one-way fingerprint of it — and then " +
+    "reads the 상품평 목록 page the operator has on screen, resolving every column from Coupang's own header " +
+    "word exactly as the acquisition does, and comparing each row against those five fields. It outlines the " +
+    "row ONLY when exactly one matches: zero matches and two matches are both refusals, and neither outlines " +
+    "anything, because a ring around a coin-flip would be SellerOps telling the seller which buyer wrote " +
+    "what. It resolves the 구매자/작성자 column only to exclude it and never matches on a buyer. It STORES " +
+    "NOTHING — no review is written to SellerOps on this path, and no raw HTML, DOM or screenshot is kept. " +
+    "It does not turn a page: when the review is not on the page in front of the seller, the run says so and " +
+    "waits for them to page there themselves, re-reading the visible page as they do)",
+  maxActions:
+    "0 marketplace actions (0 clicks, 0 inputs, 0 submissions, 0 page turns, 0 navigations after the window " +
+    "opens; 0 buyer/작성자 names read, 0 image or video addresses read, 0 raw HTML/DOM/screenshots kept), " +
+    "0 reviews stored, 1 backend call to resolve the single-use binding, repeated reads of the page the " +
+    "OPERATOR has up while the run is looking, and at most 1 inert highlight (a marker attribute + a band " +
+    "drawn around the row + a scroll) on a single matched row",
 });
 
 export const COUPANG_WING_CREDENTIAL_HANDOFF_SCOPE = Object.freeze({
@@ -1589,6 +1646,10 @@ export const PINNED_PHASE_SCOPES: Partial<Record<CalibrationPhase, PinnedPhaseSc
   },
   COUPANG_WING_REVIEW_ACQUISITION: {
     ...COUPANG_WING_REVIEW_ACQUISITION_SCOPE,
+    surface: "Coupang WING 상품평",
+  },
+  COUPANG_WING_REVIEW_LOCATE: {
+    ...COUPANG_WING_REVIEW_LOCATE_SCOPE,
     surface: "Coupang WING 상품평",
   },
 });
@@ -1958,6 +2019,23 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
       "[현재 화면 확인]을 누르시면 그 페이지를 읽습니다. 같은 상품평은 몇 번을 읽어도 하나로 합쳐집니다. " +
       "마지막 페이지에 도달했는지는 화면의 페이지 번호를 보고 판단하며, 판단할 수 없으면 '다 읽었다'고 하지 않고 " +
       "그대로 중단합니다. 쿠팡 화면에서는 아무것도 눌리거나 입력되지 않고, 아무것도 전송되지 않습니다." +
+      WING_RUN_GRANT_SUMMARY +
+      WING_PROBE_CONFIRM_CHANNEL_SUMMARY,
+    emitsFrontendUrl: false,
+  },
+  COUPANG_WING_REVIEW_LOCATE: {
+    entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
+    cli: "src/cli/run-coupang-review-locate-live.ts",
+    entrypointCommandId: "run-coupang-review-locate-live",
+    operatorActionSummary:
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 상품평 목록 화면에 도착하신 뒤, " +
+      "SellerOps 상품평 화면에서 보고 싶은 상품평을 고르고 [쿠팡에서 보기]를 누르세요. 그때 SellerOps가 지금 " +
+      "보이는 페이지의 상품평을 읽어, **고르신 그 한 줄에만 테두리를 그리고 그 줄로 스크롤합니다.** 상품·옵션·" +
+      "등록일·별점·본문이 모두 일치하는 줄이 **정확히 하나일 때만** 표시하고, 없거나 둘 이상이면 아무것도 " +
+      "표시하지 않습니다 — 둘 중 하나를 골라 표시하는 일은 없습니다. **이 실행은 상품평을 저장하지 않습니다.** " +
+      "구매자 이름은 읽지 않고, 화면 HTML이나 캡처도 남기지 않습니다. **페이지는 직접 넘겨 주세요** — " +
+      "SellerOps는 페이지를 넘기지 않으며, 넘기시는 동안 지금 보이는 페이지를 다시 확인합니다. 쿠팡 화면에서는 " +
+      "아무것도 눌리거나 입력되지 않고, 아무것도 전송되지 않습니다." +
       WING_RUN_GRANT_SUMMARY +
       WING_PROBE_CONFIRM_CHANNEL_SUMMARY,
     emitsFrontendUrl: false,
