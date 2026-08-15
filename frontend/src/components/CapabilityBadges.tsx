@@ -22,15 +22,20 @@ const METHOD_LABEL: Record<string, string> = {
   MANUAL: "직접 입력",
 };
 
-const PATH_STATUS_LABEL: Record<string, string> = {
-  LIVE_PROVEN: "수집 지원",
-  NEEDS_VERIFICATION: "수집 지원·확인 필요",
+/**
+ * A path's own evidence decides its wording AND its colour. An unproven route must not read stronger
+ * than a connector capability that is merely unverified, so it borrows the same warn tone the
+ * connector axis uses for `NEEDS_VERIFICATION`.
+ */
+const PATH_STATUS_STYLE: Record<string, { cls: string; label: string }> = {
+  LIVE_PROVEN: { cls: "bg-good/10 text-good", label: "수집 지원" },
+  NEEDS_VERIFICATION: { cls: "bg-warn/10 text-warn", label: "수집 지원·확인 필요" },
 };
 
 /** The first path we can actually describe. An unknown method or status is not rendered as a claim. */
 function describedPath(cap: DataTypeCapability) {
   return (cap.acquisitionPaths ?? []).find(
-    (path) => METHOD_LABEL[path.method] && PATH_STATUS_LABEL[path.verificationStatus],
+    (path) => METHOD_LABEL[path.method] && PATH_STATUS_STYLE[path.verificationStatus],
   );
 }
 
@@ -42,18 +47,25 @@ function describedPath(cap: DataTypeCapability) {
  * publishes no seller review API — and is collected anyway, through the Action Window. Rendering the
  * boolean alone printed 리뷰 미지원 on a page whose next panel counted 22 collected 상품평.
  *
- * So a described acquisition path replaces the connector's verdict on this badge, and says which route
- * it is. The missing official API is not inferred from `supported: false` here — that fact belongs to
- * the connector, which publishes it as its own 제외 범위 note (Coupang: `REVIEW_API`), rendered below.
+ * So an acquisition path speaks **where the connector cannot** — only when `supported` is false. A type
+ * its connector already serves keeps the connector's own verdict, because that verdict is then the
+ * stronger fact and replacing 확인됨 with a route name would hide it. (No type is both today; the rule
+ * is here so the first one that is does not silently lose its status.)
+ *
+ * The missing official API is not inferred from `supported: false` here — that fact belongs to the
+ * connector, which publishes it as its own 제외 범위 note (Coupang: `REVIEW_API`), rendered below.
  */
 function CapabilityBadge({ cap }: { cap: DataTypeCapability }) {
-  const path = describedPath(cap);
+  const path = cap.supported ? undefined : describedPath(cap);
   if (path) {
+    const pathStyle = PATH_STATUS_STYLE[path.verificationStatus];
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-xl bg-good/10 px-3 py-1.5 text-base font-semibold text-good">
+      <span
+        className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-base font-semibold ${pathStyle.cls}`}
+      >
         {cap.label}
         <span className="text-sm font-medium opacity-80">
-          {PATH_STATUS_LABEL[path.verificationStatus]} · {METHOD_LABEL[path.method]}
+          {pathStyle.label} · {METHOD_LABEL[path.method]}
         </span>
       </span>
     );

@@ -29,8 +29,12 @@ import java.util.Map;
  *
  * <p>Code-level and deliberately narrow: an entry belongs here only once a path is real, and its
  * status names the evidence. {@code LIVE_PROVEN} means a live sitting on a real seller account, on the
- * merged code, is written down — for Coupang REVIEW that is
- * {@code docs/coupang_review_locate_ux_v1.md} §5.1 (2026-08-15, at {@code f357fafe}).
+ * merged code, is written down — and it must be the sitting that proves THIS claim. For Coupang REVIEW
+ * the claim is acquisition, so the evidence is {@code docs/coupang_review_acquisition_v1.md} §6.6
+ * (2026-08-15, at {@code 533cafc2}: 3 pages / 24 rows / 22 stored into an empty database, then a
+ * same-range re-sync storing 0 and skipping 22). The locate re-proof in
+ * {@code docs/coupang_review_locate_ux_v1.md} §5.1 stored nothing by design and proves a different
+ * claim — that a stored review can be found again on the seller's screen.
  */
 public final class AcquisitionPathRegistry {
 

@@ -140,7 +140,7 @@ describe("수집 가능 데이터 — the acquisition axis", () => {
     expect(screen.queryByText(/TELEPATHY/)).toBeNull();
   });
 
-  it("marks a path that is not yet live-proven as needing confirmation", async () => {
+  it("marks a path that is not yet live-proven as needing confirmation, and does not dress it as proven", async () => {
     getChannelCapabilityOverview.mockResolvedValue(
       overview({
         dataTypes: [
@@ -155,7 +155,53 @@ describe("수집 가능 데이터 — the acquisition axis", () => {
       }),
     );
     renderBadges();
-    expect(await screen.findByText("수집 지원·확인 필요 · 파일 내보내기")).toBeInTheDocument();
+    // The status text lives in an inner span; the tone is on the badge wrapping it.
+    const badge = (await screen.findByText("수집 지원·확인 필요 · 파일 내보내기"))
+      .parentElement as HTMLElement;
+    // An unproven route must not read stronger than a connector capability that is merely unverified.
+    expect(badge.className).toContain("text-warn");
+    expect(badge.className).not.toContain("text-good");
+  });
+
+  it("makes no claim from a status it cannot describe, even with a known method", async () => {
+    getChannelCapabilityOverview.mockResolvedValue(
+      overview({
+        dataTypes: [
+          type({
+            dataType: "REVIEW",
+            label: "리뷰",
+            supported: false,
+            verificationStatus: "UNSUPPORTED",
+            // Known route, unknown evidence word. Rendering it would print an undefined status beside a
+            // real method name — a claim assembled out of half a fact.
+            acquisitionPaths: [{ method: "ACTION_WINDOW", verificationStatus: "POLICY_GATED" }],
+          }),
+        ],
+      }),
+    );
+    renderBadges();
+    expect(await screen.findByText("미지원")).toBeInTheDocument();
+    expect(screen.queryByText(/Action Window/)).toBeNull();
+    expect(screen.queryByText(/undefined/)).toBeNull();
+  });
+
+  it("keeps the connector's own verdict when it can serve the type itself", async () => {
+    getChannelCapabilityOverview.mockResolvedValue(
+      overview({
+        dataTypes: [
+          type({
+            dataType: "REVIEW",
+            label: "리뷰",
+            supported: true,
+            verificationStatus: "CONFIRMED",
+            // A second route beside a working connector must not hide 확인됨 behind a route name.
+            acquisitionPaths: [{ method: "ACTION_WINDOW", verificationStatus: "LIVE_PROVEN" }],
+          }),
+        ],
+      }),
+    );
+    renderBadges();
+    expect(await screen.findByText("확인됨")).toBeInTheDocument();
   });
 
   it("fails closed on a dead backend rather than showing a capability", async () => {

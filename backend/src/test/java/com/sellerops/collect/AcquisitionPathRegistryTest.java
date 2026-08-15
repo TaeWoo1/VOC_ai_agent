@@ -18,7 +18,9 @@ class AcquisitionPathRegistryTest {
                 .singleElement()
                 .satisfies(path -> {
                     assertThat(path.method()).isEqualTo("ACTION_WINDOW");
-                    // LIVE_PROVEN is a claim about evidence: docs/coupang_review_locate_ux_v1.md §5.1.
+                    // LIVE_PROVEN is a claim about evidence, and about the evidence for THIS claim:
+                    // docs/coupang_review_acquisition_v1.md §6.6 (22 stored), not the locate re-proof,
+                    // which deliberately stored nothing.
                     assertThat(path.verificationStatus()).isEqualTo("LIVE_PROVEN");
                 });
     }
