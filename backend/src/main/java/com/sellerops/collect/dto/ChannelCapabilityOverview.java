@@ -21,12 +21,33 @@ public record ChannelCapabilityOverview(
         List<DataTypeCapability> dataTypes,
         List<ScopeNote> unsupportedScopes) {
 
-    /** One collectable data type with its honest verification status. */
+    /**
+     * One data type, with the pull connector's answer and — separately — how SellerOps actually
+     * acquires it when that is not through the connector.
+     *
+     * <p>{@code supported} / {@code verificationStatus} are unchanged and still mean exactly one
+     * thing: what the resolved pull connector can serve. {@code acquisitionPaths} is the additive
+     * axis, empty for every type whose only route is that connector. Read them together — a type can
+     * be {@code supported=false} and still be collected, which is precisely the Coupang 상품평 case
+     * that a single boolean reported as 미지원.
+     */
     public record DataTypeCapability(
             String dataType,
             String label,
             boolean supported,
-            String verificationStatus) {
+            String verificationStatus,
+            List<AcquisitionPath> acquisitionPaths) {
+    }
+
+    /**
+     * One way a data type reaches SellerOps outside the pull connector, with the evidence for it.
+     *
+     * <p>The status rides on the path rather than beside a list of methods: several paths can serve
+     * one data type at once, and each is proven on its own. {@code method} is an
+     * {@code AcquisitionPathRegistry.Method} name, {@code verificationStatus} a
+     * {@code Verification} name.
+     */
+    public record AcquisitionPath(String method, String verificationStatus) {
     }
 
     /** A deliberate boundary the connector does not cover (board, write action, …). */

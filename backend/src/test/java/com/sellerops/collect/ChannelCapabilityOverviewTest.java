@@ -15,6 +15,7 @@ import com.sellerops.connector.FetchPage;
 import com.sellerops.connector.FetchRequest;
 import com.sellerops.connector.PullConnector;
 import com.sellerops.connector.UnsupportedScope;
+import com.sellerops.connector.coupang.CoupangApiConnector;
 import com.sellerops.connector.esm.EsmApiConnector;
 import java.util.List;
 import java.util.Map;
@@ -117,6 +118,79 @@ class ChannelCapabilityOverviewTest {
         assertThat(overview.dataTypes())
                 .extracting(ChannelCapabilityOverview.DataTypeCapability::verificationStatus)
                 .doesNotContain("CONFIRMED");
+    }
+
+    /**
+     * The case the acquisition axis exists for. Coupang's pull connector cannot serve REVIEW — Coupang
+     * publishes no seller review API — and SellerOps collects 상품평 anyway, through the operator-
+     * confirmed Action Window. The overview must carry BOTH facts on the same data type, because a
+     * reader with only the boolean prints 미지원 over a record that is not empty.
+     *
+     * <p>Uses the REAL {@link CoupangApiConnector}; {@code capabilities()} and
+     * {@code unsupportedScopes()} touch neither its clients nor the vault.
+     */
+    @Test
+    void coupangReviewIsUnsupportedByThePullConnectorAndStillAcquired() {
+        Channel coupang = new Channel();
+        coupang.setCode("COUPANG");
+        coupang.setNameKo("쿠팡");
+        when(channels.findByCode("COUPANG")).thenReturn(Optional.of(coupang));
+        ConnectorRegistry registry = new ConnectorRegistry(List.of(new CoupangApiConnector(null, null, null)));
+
+        ChannelCapabilityOverview overview = serviceWith(registry).channelCapabilityOverview("COUPANG");
+
+        ChannelCapabilityOverview.DataTypeCapability review = overview.dataTypes().stream()
+                .filter(d -> "REVIEW".equals(d.dataType()))
+                .findFirst()
+                .orElseThrow();
+        // The pull connector's answer is UNCHANGED by this axis — it still says it cannot serve REVIEW.
+        assertThat(review.supported()).isFalse();
+        assertThat(review.verificationStatus()).isEqualTo("UNSUPPORTED");
+        // And beside it, how the 상품평 actually arrive.
+        assertThat(review.acquisitionPaths())
+                .singleElement()
+                .satisfies(path -> {
+                    assertThat(path.method()).isEqualTo("ACTION_WINDOW");
+                    assertThat(path.verificationStatus()).isEqualTo("LIVE_PROVEN");
+                });
+        // The missing official API is the CONNECTOR's own statement, not something inferred from the
+        // boolean — that is what the badge is meant to render for it.
+        assertThat(overview.unsupportedScopes())
+                .extracting(ChannelCapabilityOverview.ScopeNote::code)
+                .contains("REVIEW_API");
+    }
+
+    /**
+     * Backward compatibility, stated as a rule rather than a spot check: every data type whose only
+     * route is its pull connector answers with an EMPTY path list. The axis is additive — it must not
+     * appear where nothing was proven, on any channel.
+     */
+    @Test
+    void everyOtherChannelAndTypeCarriesNoAcquisitionPath() {
+        Channel coupang = new Channel();
+        coupang.setCode("COUPANG");
+        when(channels.findByCode("COUPANG")).thenReturn(Optional.of(coupang));
+        Channel cafe24 = new Channel();
+        cafe24.setCode("CAFE24");
+        when(channels.findByCode("CAFE24")).thenReturn(Optional.of(cafe24));
+
+        CollectControlService coupangService =
+                serviceWith(new ConnectorRegistry(List.of(new CoupangApiConnector(null, null, null))));
+        CollectControlService cafe24Service =
+                serviceWith(new ConnectorRegistry(List.of(new StubCafe24Connector())));
+
+        // Coupang's OTHER types — the ones the official API does serve — gain nothing.
+        assertThat(coupangService.channelCapabilityOverview("COUPANG").dataTypes())
+                .filteredOn(d -> !"REVIEW".equals(d.dataType()))
+                .allSatisfy(d -> assertThat(d.acquisitionPaths()).isEmpty());
+        // And a different channel's REVIEW is untouched: CAFE24 collects reviews through its connector,
+        // so it stays supported with no acquisition path beside it.
+        assertThat(cafe24Service.channelCapabilityOverview("CAFE24").dataTypes())
+                .allSatisfy(d -> {
+                    assertThat(d.supported()).isTrue();
+                    assertThat(d.verificationStatus()).isEqualTo("CONFIRMED");
+                    assertThat(d.acquisitionPaths()).isEmpty();
+                });
     }
 
     /** Minimal CAFE24-dedicated pull connector with CONFIRMED caps + honest scopes. */

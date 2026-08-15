@@ -100,6 +100,37 @@ describe("수집 설정 섹션", () => {
     }
   });
 
+  it("gates on the connector capability alone — an acquisition path is not a schedule", () => {
+    // The acquisition axis added for #107 lives on the capability OVERVIEW, which this section does
+    // not read: these rows come from `connector_capabilities` and decide whether a schedule may be
+    // turned on. Coupang 상품평 arrive through an operator-confirmed Action Window, which is not a
+    // thing a cadence can run, so REVIEW must stay disabled here exactly as before.
+    const { container } = wrap(
+      <CollectionSettingsSection
+        accountId="acct-1"
+        schedules={[]}
+        capabilities={[
+          {
+            channelCode: "COUPANG",
+            connectorClass: "API",
+            dataType: "REVIEW",
+            supported: false,
+            verificationStatus: "UNSUPPORTED",
+            notes: null,
+          },
+        ]}
+        onChanged={vi.fn()}
+        onReport={vi.fn()}
+      />,
+    );
+    const section = screen.getByText("수집 설정").closest("section") as HTMLElement;
+    const reviewRow = within(section).getByText("리뷰").closest("div") as HTMLElement;
+    expect(
+      Array.from(reviewRow.querySelectorAll("button")).filter((b) => !b.hasAttribute("disabled")),
+    ).toHaveLength(0);
+    expect(container.textContent).not.toContain("Action Window");
+  });
+
   it("keeps controls disabled until capabilities are known", () => {
     // An absent capability row means "allowed" on the server, so the UI must not guess before the
     // list has loaded.

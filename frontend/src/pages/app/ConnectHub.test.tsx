@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { ConnectHub } from "./ConnectHub";
 import { expectNoAxeViolations } from "../../test/axe";
@@ -179,17 +179,22 @@ describe("채널·자료 연결 — the 상품평 entry", () => {
   it("keeps the entry when the count read fails — the number is optional, the way in is not", async () => {
     getChannels.mockResolvedValue([COUPANG]);
     getSellerAccountsStrict.mockResolvedValue([coupangAccount()]);
-    // Rejected by hand AFTER the first paint. Mocking a already-rejected promise and awaiting the
+    // Rejected by hand AFTER the first paint. Mocking an already-rejected promise and awaiting the
     // countless label would resolve on the loading render, and an implementation that turned a failed
     // read into `0` — the invented zero this whole entry exists to avoid — would pass unnoticed.
     let fail: (e: Error) => void = () => {};
-    getChannelReviewsStrict.mockReturnValue(
-      new Promise((_resolve, reject) => {
-        fail = reject;
-      }),
-    );
+    const pending = new Promise<never>((_resolve, reject) => {
+      fail = reject;
+    });
+    // The TEST holds this promise too, so the test must handle its rejection. Without this the reject
+    // below is an unhandled rejection on any run where the component has not chained it yet — which is
+    // a green suite locally and a red one on a slower machine.
+    pending.catch(() => {});
+    getChannelReviewsStrict.mockReturnValue(pending);
     renderHub();
     await screen.findByRole("link", { name: "쿠팡 상품평 보기" });
+    // Reject only once the component has actually asked, so the failure lands on a consumer.
+    await waitFor(() => expect(getChannelReviewsStrict).toHaveBeenCalled());
     await act(async () => {
       fail(new Error("backend down"));
     });

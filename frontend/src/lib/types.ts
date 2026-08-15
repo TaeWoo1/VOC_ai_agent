@@ -484,8 +484,27 @@ export interface CapabilityView {
 export interface DataTypeCapability {
   dataType: string;
   label: string;
+  /** What the resolved PULL CONNECTOR can serve. Not "does SellerOps have this" — see below. */
   supported: boolean;
   verificationStatus: string; // CONFIRMED | NEEDS_VERIFICATION | UNSUPPORTED
+  /**
+   * How SellerOps acquires this data type when that is NOT through the pull connector. Empty for
+   * every type whose only route is the connector.
+   *
+   * Read it beside `supported`, never folded into it: Coupang 상품평 is `supported: false` — Coupang
+   * publishes no seller review API — and is nonetheless collected, through the Action Window. Rendering
+   * the boolean alone printed 리뷰 미지원 over a record holding 22 of them.
+   *
+   * Optional on the type because a backend that predates the field simply omits it; treat a missing
+   * array as "no path", which is the same honest default the backend uses.
+   */
+  acquisitionPaths?: AcquisitionPathView[];
+}
+
+/** One non-connector acquisition route, carrying its own evidence. */
+export interface AcquisitionPathView {
+  method: string; // API | ACTION_WINDOW | EXPORT | MANUAL
+  verificationStatus: string; // NEEDS_VERIFICATION | LIVE_PROVEN
 }
 
 export interface ScopeNote {
