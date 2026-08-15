@@ -184,6 +184,12 @@ export class ReviewLocateSession {
         // has one honest response to all of them and telling them apart is not its business.
         const ref = this.engine.boundLocateRef();
         const resolved = ref === null ? null : await this.resolveTarget(ref).catch(() => null);
+        // **The binding this resolve was for must still be the run's.** A seller who presses the button on
+        // another review while this call is in flight re-arms the engine, and there are then two resolves
+        // racing to install a target. Whichever landed last would win — so the run for review B could be
+        // handed review A's fields and ring A's row while the screen says B. That is the one failure this
+        // whole design exists to prevent, arriving through the back door.
+        if (this.engine.boundLocateRef() !== ref) return;
         this.target = resolved;
         // Enums and booleans: whether a target was obtained, never any part of it.
         log("aw_coupang_review_locate_binding", { resolved: resolved !== null });

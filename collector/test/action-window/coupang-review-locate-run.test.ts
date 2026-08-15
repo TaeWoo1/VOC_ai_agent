@@ -343,6 +343,43 @@ describe("REVIEW_LOCATE — the run", () => {
     expect(latestView(h.link.frames)!.status).toBe("COMPLETED");
   });
 
+  /**
+   * A press that lands while the previous one is still resolving must not be able to hand the new run the
+   * OLD review's fields — that would ring one buyer's review under another's name, which is the exact
+   * failure the whole binding design exists to prevent.
+   */
+  it("never rings the review the seller pressed a moment ago instead of the one they just pressed", async () => {
+    const engine = new ReviewLocateEngine(
+      { runId: "run_locate1", channelCode: "coupang" },
+      { clock: makeReviewLocateClock() },
+    );
+    const driver = new ReviewLocateFixtureDriver([{ verdict: "LOCATED" }]);
+    const link = loopback();
+    const OTHER: ReviewLocateTarget = { ...TARGET, productId: "99999999999" };
+    // The STALE resolve lands FIRST, while the new run is still opening — the ordering that does the damage.
+    // (A stale one landing after the new run finished is harmless, and testing only that would prove nothing.)
+    const session = new ReviewLocateSession(
+      engine,
+      driver,
+      link.transport,
+      async (ref) => {
+        await new Promise<void>((r) => setTimeout(r, ref === REF ? 40 : 5));
+        return ref === REF ? TARGET : OTHER;
+      },
+      { retryPollMs: 0, retryTimeoutMs: 0 },
+    );
+    session.attach();
+
+    link.client({ kind: "aw_command", command: startRun(0, "00112233445566ff") });
+    link.client({ kind: "aw_command", command: startRun(0, REF) });
+    await new Promise<void>((r) => setTimeout(r, 80));
+    await session.whenSettled();
+
+    // Only the target belonging to the binding the run is actually bound to ever reached the page.
+    expect(driver.seen).not.toContainEqual(OTHER);
+    expect(driver.seen).toContainEqual(TARGET);
+  });
+
   it("treats the same binding delivered twice as one press", async () => {
     const h = harness([{ verdict: "LOCATED" }]);
     h.link.client({ kind: "aw_command", command: startRun() });
