@@ -60,7 +60,12 @@ export function useReviewLocate(accountId: string, inject?: LocateRuntime): Revi
   const adopt = useCallback((runtime: LocateRuntime) => {
     stopRef.current?.();
     stopRef.current = runtime.subscribe((next) => {
-      if (liveRef.current) setView(next);
+      if (!liveRef.current) return;
+      setView(next);
+      // A view is the agent answering THIS press — the runtime publishes none until it has acknowledged one.
+      // Clearing `starting` on "the frame was handed to the transport" instead meant the panel dropped back
+      // to the previous press's verdict for a round trip, and forever if the socket was down.
+      if (next !== null) setStarting(false);
     });
   }, []);
 
@@ -99,7 +104,9 @@ export function useReviewLocate(accountId: string, inject?: LocateRuntime): Revi
       sessionRef.current = result.session;
       const runtime = createLocateRuntime(result.session, {
         onStartRefused: () => {
-          if (liveRef.current) setUnavailable("start-refused");
+          if (!liveRef.current) return;
+          setUnavailable("start-refused");
+          setStarting(false);
         },
       });
       runtimeRef.current = runtime;
@@ -118,6 +125,9 @@ export function useReviewLocate(accountId: string, inject?: LocateRuntime): Revi
       setReviewId(nextReviewId);
       setUnavailable(null);
       setStarting(true);
+      // The previous press's verdict is about a different review. It goes off the screen now, not when the
+      // agent gets round to answering.
+      setView(null);
       try {
         // MINT FIRST, attach second. A binding is what makes the press meaningful, and a seller whose review
         // cannot produce one should be told that rather than watching a socket open for nothing.
@@ -126,15 +136,23 @@ export function useReviewLocate(accountId: string, inject?: LocateRuntime): Revi
           const run = await api.startChannelReviewLocateRun(accountId, nextReviewId);
           locateRef = run.locateRef;
         } catch {
-          if (ticket === pressSeq.current && liveRef.current) setUnavailable("mint-failed");
+          if (ticket === pressSeq.current && liveRef.current) {
+            setUnavailable("mint-failed");
+            setStarting(false);
+          }
           return;
         }
         const runtime = await attach();
         if (ticket !== pressSeq.current || !liveRef.current) return;
         // `attach` already recorded WHY it could not connect; there is nothing to add here.
-        if (!runtime) return;
+        if (!runtime) {
+          setStarting(false);
+          return;
+        }
         runtime.locate(locateRef);
-      } finally {
+        // `starting` stays TRUE here. It is cleared by the first view the agent publishes for this press, or
+        // by a refusal — never by "we handed the frame to the socket", which says nothing about arrival.
+      } catch {
         if (ticket === pressSeq.current && liveRef.current) setStarting(false);
       }
     },

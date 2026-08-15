@@ -607,11 +607,15 @@ ${reviewReaderFragment(roles, required)}
  *
  * ## Why the band is painted on the CELLS, not on the row
  *
- * It used to be `row.style.outline = '3px solid …'`, and on 2026-08-15 the first operator to actually LOOK at
- * the screen during a locate reported no ring — while the run logged `highlighted: true`. Both were correct.
- * **Chromium does not paint an outline on a `<tr>`:** the computed style reads back
- * `rgb(43, 108, 255) solid 3px` and the row's pixels do not change by one. The run had been reporting a fact
- * about the DOM and calling it a fact about the seller's screen.
+ * It used to be `row.style.outline = '3px solid …'` with `outlineOffset = '2px'`, and on 2026-08-15 the first
+ * operator to actually LOOK at the screen during a locate reported no ring — while the run logged
+ * `highlighted: true`. Both were correct: the offset paints the ring OUTSIDE the row's own box, so nothing
+ * changed inside the row, which is where a seller looks. The run had been reporting a fact about the DOM and
+ * calling it a fact about the seller's screen.
+ *
+ * The first version of this note said Chromium does not paint an outline on a `<tr>` at all. It does — that
+ * came from screenshotting only the row's own clip, which is the wrong region, and an independent review
+ * caught it. What was actually wrong is where the mark landed.
  *
  * So the treatment goes on every cell of the row, where it does paint:
  *
@@ -625,12 +629,25 @@ ${reviewReaderFragment(roles, required)}
  *
  * The row itself still carries the marker attribute, so what was rung remains one element to find.
  */
+export interface ReviewRowAnchors {
+  /** What the row printed in its date cell when the reader saw it. */
+  readonly dateText: string | null;
+  readonly ratingText: string | null;
+  readonly productText: string | null;
+}
+
 export function buildReviewRowAnnotateScript(
   rowIndex: number,
+  anchors: ReviewRowAnchors | null = null,
   roles: readonly ReviewColumnRole[] = REVIEW_COLUMN_ROLES,
   required: readonly string[] = REQUIRED_REVIEW_ROLES,
 ): string {
   const index = Number.isInteger(rowIndex) && rowIndex >= 0 ? rowIndex : -1;
+  const expected = JSON.stringify({
+    dateText: anchors?.dateText ?? null,
+    ratingText: anchors?.ratingText ?? null,
+    productText: anchors?.productText ?? null,
+  });
   return `(function () {
 ${reviewReaderFragment(roles, required)}
   if (best === null || bestScore < REQUIRED.length || tiedAtBest > 1) { return 0; }
@@ -639,12 +656,34 @@ ${reviewReaderFragment(roles, required)}
   if (!row) { return 0; }
   var cells = cellsOf(row);
   if (cells.length !== best.header.length) { return 0; }
+  // **The row at this index must still be the row the match chose.**
+  //
+  // An index and a header width are not an identity. A 상품평 list that re-renders with one new review at
+  // the top keeps its shape, passes both checks, and hands back a DIFFERENT review — so the run rang a 5★
+  // review when the seller had pressed on a 4★ one, and reported it as a successful locate. (Measured; the
+  // window is one evaluate round-trip, which the look-again poll re-enters every two seconds.)
+  //
+  // The anchors are what the READER already returned for that row — the same date, rating and product text
+  // it matched on. Nothing new leaves the page, and no buyer field is among them.
+  var expected = ${expected};
+  if (expected.dateText !== null || expected.ratingText !== null || expected.productText !== null) {
+    var byRole = best.mapped.byRole;
+    if (expected.dateText !== null && cellText(cells, byRole, 'date') !== expected.dateText) { return 0; }
+    if (expected.ratingText !== null && cellText(cells, byRole, 'rating') !== expected.ratingText) { return 0; }
+    if (expected.productText !== null && cellText(cells, byRole, 'product') !== expected.productText) { return 0; }
+  }
   row.setAttribute('${REVIEW_TARGET_ATTRIBUTE}', '1');
   for (var ci = 0; ci < cells.length; ci++) {
     var cell = cells[ci];
     var bands = ['inset 0 3px 0 0 ${REVIEW_TARGET_COLOR}', 'inset 0 -3px 0 0 ${REVIEW_TARGET_COLOR}'];
     if (ci === 0) { bands.push('inset 3px 0 0 0 ${REVIEW_TARGET_COLOR}'); }
     if (ci === cells.length - 1) { bands.push('inset -3px 0 0 0 ${REVIEW_TARGET_COLOR}'); }
+    // **Remember what the SELLER's page had here.** The teardown used to delete these properties outright,
+    // which took any inline background or shadow WING had put on the cell with them — a silent, permanent
+    // change to their page by a run whose whole claim is that it adds one ring and takes it off again.
+    if (!cell.hasAttribute('${REVIEW_TARGET_ATTRIBUTE}')) {
+      cell.setAttribute('${REVIEW_TARGET_PREV_STYLE}', cell.getAttribute('style') || '');
+    }
     cell.setAttribute('${REVIEW_TARGET_ATTRIBUTE}', '1');
     if (cell.style.setProperty) {
       cell.style.setProperty('box-shadow', bands.join(', '), 'important');
@@ -658,6 +697,9 @@ ${reviewReaderFragment(roles, required)}
   return 1;
 })()`;
 }
+
+/** Where a cell's own inline style is parked while the band is on it, so the teardown can put it back. */
+const REVIEW_TARGET_PREV_STYLE = "data-sellerops-review-prev-style";
 
 /** The band colour and the tint behind it. Named here so the teardown and the tests cannot drift from them. */
 const REVIEW_TARGET_COLOR = "#2b6cff";
@@ -674,6 +716,13 @@ export const REVIEW_TARGET_TEARDOWN = `(function () {
   for (var i = 0; i < marked.length; i++) {
     var el = marked[i];
     el.removeAttribute('${REVIEW_TARGET_ATTRIBUTE}');
+    // Put back exactly what was there, when we recorded it — not "nothing", which is a different page.
+    if (el.hasAttribute('${REVIEW_TARGET_PREV_STYLE}')) {
+      var prev = el.getAttribute('${REVIEW_TARGET_PREV_STYLE}');
+      el.removeAttribute('${REVIEW_TARGET_PREV_STYLE}');
+      if (prev) { el.setAttribute('style', prev); } else { el.removeAttribute('style'); }
+      continue;
+    }
     if (el.style.removeProperty) {
       el.style.removeProperty('box-shadow');
       el.style.removeProperty('background-color');

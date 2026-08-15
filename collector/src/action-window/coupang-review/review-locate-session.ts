@@ -56,6 +56,14 @@ export class ReviewLocateSession {
 
   /** The resolved target. Private, never published, never logged. Null until the binding is spent. */
   private target: ReviewLocateTarget | null = null;
+  /**
+   * WHICH binding that target belongs to.
+   *
+   * <p>Holding the target without holding whose it is was the hole under three separate races: a read that
+   * came back after the seller pressed on another review looked "current" because the target object had not
+   * been swapped yet. Every async step now compares this, not the object.
+   */
+  private targetRef: string | null = null;
 
   private started = false;
   private publishedSeq = 0;
@@ -166,6 +174,27 @@ export class ReviewLocateSession {
     }
   }
 
+  /**
+   * Is `ref` still the binding this run is aimed at?
+   *
+   * <p>The one question every `await` on this path has to ask when it returns. A press re-arms the run from
+   * any stage, so anything in flight belongs to a review the seller may already have moved on from — and
+   * applying it would ring one buyer's review while the screen names another's.
+   */
+  private stillBound(ref: string | null): boolean {
+    return ref !== null && this.engine.boundLocateRef() === ref;
+  }
+
+  /**
+   * A read that came back for a run the seller has moved on from may have DRAWN a ring before we noticed.
+   * Take it off: a mark left on the marketplace screen that no run is talking about is the worst of both —
+   * the panel describes one review and the page points at another.
+   */
+  private async retractStrayRing(drawn: boolean): Promise<void> {
+    if (!drawn) return;
+    await this.driver.clearHighlight().catch(() => 0);
+  }
+
   private async onDriveError(e: unknown): Promise<void> {
     // Most often a NAVIGATION RACE — an in-page read fired while the seller's own page was still moving,
     // destroying the execution context. Do NOT fail closed and leave the run idle: park recoverably so a
@@ -183,14 +212,19 @@ export class ReviewLocateSession {
         // expired, another tenant's, or a backend that could not be reached — is one `null`, because the run
         // has one honest response to all of them and telling them apart is not its business.
         const ref = this.engine.boundLocateRef();
+        // **Take the previous ring off before looking for a different review.** A press re-arms the run from
+        // any stage, including a completed one, and nothing else on this path clears. Without this, pressing
+        // on B while A is rung leaves BOTH rung when B is on the page — and when B is not, the run says "이
+        // 페이지에는 없습니다" while the only ring on screen is around a different buyer's review.
+        this.target = null;
+        this.targetRef = null;
+        await this.driver.clearHighlight().catch(() => 0);
         const resolved = ref === null ? null : await this.resolveTarget(ref).catch(() => null);
-        // **The binding this resolve was for must still be the run's.** A seller who presses the button on
-        // another review while this call is in flight re-arms the engine, and there are then two resolves
-        // racing to install a target. Whichever landed last would win — so the run for review B could be
-        // handed review A's fields and ring A's row while the screen says B. That is the one failure this
-        // whole design exists to prevent, arriving through the back door.
-        if (this.engine.boundLocateRef() !== ref) return;
+        // **The binding this resolve was for must still be the run's.** Two presses mean two resolves racing
+        // to install a target, and whichever landed last would win.
+        if (!this.stillBound(ref)) return;
         this.target = resolved;
+        this.targetRef = ref;
         // Enums and booleans: whether a target was obtained, never any part of it.
         log("aw_coupang_review_locate_binding", { resolved: resolved !== null });
         const next = this.engine.onTargetResolved(resolved !== null);
@@ -198,7 +232,8 @@ export class ReviewLocateSession {
         return this.drive(next);
       }
       case "LOCATE": {
-        const target = this.target;
+        const ref = this.engine.boundLocateRef();
+        const target = this.targetRef !== null && this.targetRef === ref ? this.target : null;
         if (target === null) {
           const next = this.engine.onTargetResolved(false);
           this.publishState();
@@ -206,6 +241,14 @@ export class ReviewLocateSession {
         }
         this.watchSurfaceClose();
         const outcome = await this.driver.locate(target);
+        // A read of a real page takes hundreds of milliseconds, and a press during it re-aims the run. Its
+        // answer is about the review the seller LEFT: applying it would complete the new run on the old
+        // one's evidence — `TARGET_HIGHLIGHTED` for review B over a ring drawn around review A.
+        if (!this.stillBound(ref)) return this.retractStrayRing(outcome.highlighted);
+        // The seller CANCELLED while this read was in flight. The binding is unchanged, so `stillBound`
+        // cannot see it — but the run is over, and a ring that lands after "찾기를 멈췄습니다" is a mark on
+        // their screen that nothing is talking about. The read that drew it is what takes it off.
+        if (isReviewLocateTerminal(this.engine.currentStage())) return this.retractStrayRing(outcome.highlighted);
         log("aw_coupang_review_locate_attempt", {
           verdict: outcome.verdict,
           matches: outcome.matches,
@@ -246,11 +289,20 @@ export class ReviewLocateSession {
     if (!isReviewLocatePark(this.engine.currentStage())) return;
     this.retrying = true;
     this.busyCount += 1;
+    const armedFor = this.engine.boundLocateRef();
     void this.retryLoop()
       .catch(() => undefined)
       .finally(() => {
         this.retrying = false;
         this.busyCount -= 1;
+        // **Re-arm when the binding changed under this loop.** `maybeRetry` is otherwise only reached from a
+        // command or the end of a drive chain — so a press that re-aimed the run mid-tick found `retrying`
+        // true, gave up, and then this loop exited on its stale-binding guard. Nothing restarted it: the new
+        // run sat parked under copy promising it was still looking, and no read ever happened again.
+        //
+        // ONLY on a changed binding. Re-arming on exhaustion would restart the ten-minute watch forever, and
+        // re-arming on any early exit would spin when there is nothing to look for yet.
+        if (this.engine.boundLocateRef() !== armedFor) this.maybeRetry();
       });
   }
 
@@ -268,7 +320,8 @@ export class ReviewLocateSession {
       if (this.surfaceClosed) return;
       if (isReviewLocateTerminal(this.engine.currentStage())) return;
       if (!isReviewLocatePark(this.engine.currentStage())) return;
-      const target = this.target;
+      const ref = this.engine.boundLocateRef();
+      const target = this.targetRef !== null && this.targetRef === ref ? this.target : null;
       if (target === null) return;
       let outcome;
       try {
@@ -282,12 +335,19 @@ export class ReviewLocateSession {
       }
       // The seller pressed the button on ANOTHER review while this read was in flight. Its answer is about
       // the review they left, and applying it would park (or complete) the new run on the old one's evidence.
-      if (this.target !== target) return;
-      const before = this.engine.currentStage();
+      // Compared on the BINDING, not on the target object: a re-arm whose own resolve has not landed yet has
+      // not replaced the object, so object identity said "still current" at exactly the wrong moment.
+      if (!this.stillBound(ref)) {
+        await this.retractStrayRing(outcome.highlighted);
+        return;
+      }
+      // REVISION, not stage. The engine's park is idempotent on stage AND blocker, so a same-stage park with
+      // a DIFFERENT blocker (surface-closed → not-a-list) emits events and advances the revision. Gating the
+      // publish on the stage alone left those unpublished — and the seller's next command, addressed to the
+      // revision they could see, was then refused as STALE_REVISION with no way to find out why.
+      const before = this.engine.view().revision;
       const next = this.engine.onLocateAttempt({ verdict: outcome.verdict, highlighted: outcome.highlighted });
-      // A park that re-parks the same way is not news: publishing every tick would push a view a second at a
-      // seller who has not moved. Only a CHANGE is published.
-      if (this.engine.currentStage() !== before) {
+      if (this.engine.view().revision !== before) {
         log("aw_coupang_review_locate_attempt", {
           verdict: outcome.verdict,
           matches: outcome.matches,

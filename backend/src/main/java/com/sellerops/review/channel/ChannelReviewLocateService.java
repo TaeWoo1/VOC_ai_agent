@@ -96,7 +96,11 @@ public class ChannelReviewLocateService {
         // Derived here so the refusal below is about THIS review's target, not about a run that will fail
         // ten seconds later in the seller's own browser.
         AgentReviewLocateTargetView target = targetOf(review);
-        if (target.productId() == null || target.rating() == null || target.writtenOn() == null) {
+        // The same bound the matcher applies (`review-locate.ts` refuses a rating outside 1..5 before it
+        // looks at the page). Checking only for null here meant an out-of-range rating passed the press and
+        // failed in the seller's browser as an expired-binding error instead.
+        boolean ratingUnusable = target.rating() == null || target.rating() < 1 || target.rating() > 5;
+        if (target.productId() == null || ratingUnusable || target.writtenOn() == null) {
             throw ApiException.conflict(
                     "이 상품평에는 쿠팡 화면에서 찾는 데 필요한 정보(상품·별점·등록일)가 부족해 찾아드릴 수 없습니다.");
         }
@@ -127,15 +131,19 @@ public class ChannelReviewLocateService {
             throw ApiException.badRequest("locateRef 형식이 올바르지 않습니다.");
         }
         Instant now = Instant.now();
-        ChannelReviewLocateRef row = refs.findByLocateRef(ref)
-                .filter(r -> orgId.equals(r.getOrgId()))
-                .filter(r -> r.getConsumedAt() == null)
-                .filter(r -> r.getExpiresAt().isAfter(now))
+        // SPEND FIRST, and let the database be the one that says whether it was spendable. A read-then-write
+        // is not single-use: two concurrent resolves both read `consumed_at` as null and both write it, and
+        // the token is spent twice. `spend` puts every condition in the UPDATE's own WHERE clause, so exactly
+        // one caller can see a row count of 1 — the org check included, which is why a cross-tenant token
+        // neither resolves nor gets consumed.
+        if (refs.spend(ref, orgId, now) != 1) {
+            throw ApiException.notFound("만료되었거나 이미 사용된 요청입니다.");
+        }
+        UUID reviewId = refs.findByLocateRef(ref)
+                .map(ChannelReviewLocateRef::getReviewId)
                 .orElseThrow(() -> ApiException.notFound("만료되었거나 이미 사용된 요청입니다."));
-        row.setConsumedAt(now);
-        refs.save(row);
 
-        Review review = reviews.findByIdAndOrgId(row.getReviewId(), orgId)
+        Review review = reviews.findByIdAndOrgId(reviewId, orgId)
                 .orElseThrow(() -> ApiException.notFound("상품평을 찾을 수 없습니다."));
         return targetOf(review);
     }

@@ -380,6 +380,198 @@ describe("REVIEW_LOCATE — the run", () => {
     expect(driver.seen).toContainEqual(TARGET);
   });
 
+  /* ── one ring at a time, whatever the seller does ─────────────────────── */
+
+  /**
+   * A press re-aims the run from ANY stage, including a completed one. Without a clear, pressing on B while
+   * A is rung leaves BOTH rung when B is on the page — and when B is not, the panel says "이 페이지에는
+   * 없습니다" while the only ring on screen is around a different buyer's review.
+   */
+  it("takes the previous ring off before looking for another review", async () => {
+    const h = harness([{ verdict: "LOCATED" }]);
+    h.link.client({ kind: "aw_command", command: startRun() });
+    await h.session.whenSettled();
+    const clearedAfterFirst = h.driver.cleared;
+
+    h.link.client({ kind: "aw_command", command: startRun(0, "00112233445566ff") });
+    await h.session.whenSettled();
+
+    expect(h.driver.cleared).toBeGreaterThan(clearedAfterFirst);
+  });
+
+  /**
+   * A real read takes hundreds of milliseconds, and a press during it re-aims the run. Its answer is about
+   * the review the seller LEFT — applying it completes the NEW run on the OLD one's evidence: a
+   * `TARGET_HIGHLIGHTED` for review B over a ring drawn around review A.
+   */
+  it("does not complete the new press with the read that belonged to the old one", async () => {
+    const engine = new ReviewLocateEngine(
+      { runId: "run_locate1", channelCode: "coupang" },
+      { clock: makeReviewLocateClock() },
+    );
+    // The first read is slow and finds it; the second is quick and does not.
+    const driver = new ReviewLocateFixtureDriver([
+      { verdict: "LOCATED", delayMs: 40 },
+      { verdict: "NOT_ON_PAGE" },
+    ]);
+    const link = loopback();
+    const session = new ReviewLocateSession(engine, driver, link.transport, async () => TARGET, {
+      retryPollMs: 0,
+      retryTimeoutMs: 0,
+    });
+    session.attach();
+
+    link.client({ kind: "aw_command", command: startRun() });
+    await new Promise<void>((r) => setTimeout(r, 5));
+    link.client({ kind: "aw_command", command: startRun(0, "00112233445566ff") });
+    await new Promise<void>((r) => setTimeout(r, 120));
+    await session.whenSettled();
+
+    // The run belongs to the SECOND press, which did not find it. It must not read as found.
+    expect(engine.currentStage()).not.toBe("highlighted");
+    expect(latestView(link.frames)!.status).not.toBe("COMPLETED");
+    // ...and the ring the stale read drew is taken back off, rather than left pointing at another review.
+    expect(driver.cleared).toBeGreaterThan(0);
+  });
+
+  /**
+   * The same race through the POLL rather than the first read. The guard cannot be object identity of the
+   * target: a re-arm whose own resolve has not landed yet has not replaced it, so identity says "current" at
+   * exactly the wrong moment.
+   */
+  it("does not complete the new press with a poll tick that belonged to the old one", async () => {
+    const engine = new ReviewLocateEngine(
+      { runId: "run_locate1", channelCode: "coupang" },
+      { clock: makeReviewLocateClock() },
+    );
+    const driver = new ReviewLocateFixtureDriver([
+      { verdict: "NOT_ON_PAGE" },
+      { verdict: "LOCATED", delayMs: 40 },
+      { verdict: "NOT_ON_PAGE" },
+    ]);
+    const link = loopback();
+    // The second press's resolve is SLOW, so the session still holds the first press's target object.
+    const session = new ReviewLocateSession(
+      engine,
+      driver,
+      link.transport,
+      async (ref) => {
+        if (ref !== REF) await new Promise<void>((r) => setTimeout(r, 60));
+        return TARGET;
+      },
+      { retryPollMs: 5, retryTimeoutMs: 500 },
+    );
+    session.attach();
+
+    link.client({ kind: "aw_command", command: startRun() });
+    await new Promise<void>((r) => setTimeout(r, 10));
+    link.client({ kind: "aw_command", command: startRun(0, "00112233445566ff") });
+    await new Promise<void>((r) => setTimeout(r, 150));
+
+    expect(engine.currentStage()).not.toBe("highlighted");
+  });
+
+  /** A ring that lands after the seller cancelled is a mark nothing is talking about. It comes off. */
+  it("retracts a ring that landed after the run was cancelled", async () => {
+    const engine = new ReviewLocateEngine(
+      { runId: "run_locate1", channelCode: "coupang" },
+      { clock: makeReviewLocateClock() },
+    );
+    const driver = new ReviewLocateFixtureDriver([{ verdict: "LOCATED", delayMs: 40 }]);
+    const link = loopback();
+    const session = new ReviewLocateSession(engine, driver, link.transport, async () => TARGET, {
+      retryPollMs: 0,
+      retryTimeoutMs: 0,
+    });
+    session.attach();
+
+    link.client({ kind: "aw_command", command: startRun() });
+    await new Promise<void>((r) => setTimeout(r, 5));
+    const revision = latestView(link.frames)!.revision;
+    link.client({ kind: "aw_command", command: command("CANCEL_RUN", revision) });
+    await new Promise<void>((r) => setTimeout(r, 120));
+    await session.whenSettled();
+
+    expect(engine.currentStage()).toBe("operator_aborted");
+    // ORDER, not count: the run start and the cancel both clear, so a count is satisfied without the fix.
+    // What matters is that a clear follows the ring the in-flight read drew after the cancel.
+    expect(driver.trace).toContain("ring");
+    expect(driver.trace.lastIndexOf("clear")).toBeGreaterThan(driver.trace.lastIndexOf("ring"));
+  });
+
+  /**
+   * The engine's park is idempotent on stage AND blocker, so a same-stage park with a DIFFERENT blocker
+   * advances the revision. Publishing on stage change alone left those unpublished — and the seller's next
+   * command, addressed to the revision they could see, was refused as STALE_REVISION with no way to know why.
+   */
+  it("keeps the seller's buttons working when a re-read changes only the blocker", async () => {
+    const engine = new ReviewLocateEngine(
+      { runId: "run_locate1", channelCode: "coupang" },
+      { clock: makeReviewLocateClock() },
+    );
+    // First read misses; every later read finds a screen that is not a 상품평 목록 at all.
+    const driver = new ReviewLocateFixtureDriver([{ verdict: "NOT_ON_PAGE" }, { verdict: "PAGE_UNREADABLE" }]);
+    const link = loopback();
+    const session = new ReviewLocateSession(engine, driver, link.transport, async () => TARGET, {
+      retryPollMs: 5,
+      retryTimeoutMs: 60,
+    });
+    session.attach();
+
+    link.client({ kind: "aw_command", command: startRun() });
+    await new Promise<void>((r) => setTimeout(r, 10));
+    // The seller closes the window: park `awaiting_page` with SURFACE_CLOSED, published.
+    driver.closeWindow();
+    await new Promise<void>((r) => setTimeout(r, 10));
+    const closedView = latestView(link.frames)!;
+    expect(closedView.blocker?.code).toBe("SURFACE_CLOSED");
+
+    // They re-open it and ask for it to be raised — which clears the latch and restarts the poll. The next
+    // tick parks on the SAME stage with a DIFFERENT blocker, so the revision moves.
+    link.client({ kind: "aw_command", command: command("FIND_CURRENT_STEP", closedView.revision) });
+    await new Promise<void>((r) => setTimeout(r, 80));
+    await session.whenSettled();
+
+    // Whatever the run's revision is now, the seller was TOLD it — so the command they can press is accepted.
+    const shown = latestView(link.frames)!;
+    expect(shown.revision).toBe(engine.view().revision);
+    expect(engine.command({ type: "REQUEST_STEP_RECHECK", expectedRevision: shown.revision }).ok).toBe(true);
+  });
+
+  /**
+   * A press that lands mid-tick used to LOSE the look-again loop: `maybeRetry` saw the old loop still
+   * running and gave up, then that loop exited on its stale-binding guard and nothing restarted it. The new
+   * run sat parked under copy promising it was still looking, and no read ever happened again.
+   */
+  it("keeps looking for the new review when the press landed mid-tick", async () => {
+    const engine = new ReviewLocateEngine(
+      { runId: "run_locate1", channelCode: "coupang" },
+      { clock: makeReviewLocateClock() },
+    );
+    // The first read misses; the loop's tick is SLOW; everything after misses too.
+    const driver = new ReviewLocateFixtureDriver([
+      { verdict: "NOT_ON_PAGE" },
+      { verdict: "NOT_ON_PAGE", delayMs: 60 },
+      { verdict: "NOT_ON_PAGE" },
+    ]);
+    const link = loopback();
+    const session = new ReviewLocateSession(engine, driver, link.transport, async () => TARGET, {
+      retryPollMs: 5,
+      retryTimeoutMs: 400,
+    });
+    session.attach();
+
+    link.client({ kind: "aw_command", command: startRun() });
+    await new Promise<void>((r) => setTimeout(r, 15)); // the loop's slow tick is now in flight
+    link.client({ kind: "aw_command", command: startRun(0, "00112233445566ff") });
+    await new Promise<void>((r) => setTimeout(r, 100)); // B has resolved, read, and parked
+    const afterRearm = driver.seen.length;
+    await new Promise<void>((r) => setTimeout(r, 100));
+
+    expect(engine.currentStage()).toBe("not_on_page");
+    expect(driver.seen.length).toBeGreaterThan(afterRearm);
+  });
+
   it("treats the same binding delivered twice as one press", async () => {
     const h = harness([{ verdict: "LOCATED" }]);
     h.link.client({ kind: "aw_command", command: startRun() });

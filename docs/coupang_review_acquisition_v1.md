@@ -141,11 +141,12 @@ band drawn around the row, and a scroll: it never clicks, focuses, types, or sub
 single-use `locateRef`, the button, and the live proof. Read it for anything about how a seller *asks* for
 a locate; this section stays the description of how a review is matched.
 
-> **Correction (2026-08-15, commit `c334b763`).** The highlight used to set `outline` on the matched
-> `<tr>`, and Chromium does not paint that: the DOM reported the ring and the screen showed nothing. Both
-> live records below report `highlighted=true` from their locate legs, and those runs did identify and mark
-> the right row — but nobody could SEE it until the band moved onto the cells. Read those claims as "the
-> right row was identified". See the locate doc §6.
+> **Correction (2026-08-15, commit `c334b763`).** The highlight used to set `outline` on the matched `<tr>`
+> with a 2px offset, which paints the ring OUTSIDE the row — nothing changed inside the row, and on the real
+> WING list the operator saw no mark. Both live records below report `highlighted=true` from their locate
+> legs, and those runs did identify and mark the right row — but nobody could SEE it until the band moved
+> onto the cells. Read those claims as "the right row was identified". See the locate doc §6, including its
+> note on the first, wrong diagnosis.
 
 ## 6. Where the pieces live
 

@@ -17,6 +17,8 @@ import com.sellerops.review.channel.dto.AgentReviewLocateTargetView;
 import com.sellerops.review.channel.dto.ChannelReviewLocateRunResponse;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -47,6 +49,24 @@ class ChannelReviewLocateServiceTest {
     @Autowired SellerAccountRepository accounts;
     @Autowired ChannelRepository channels;
     @Autowired ChannelReviewLocateRefRepository refs;
+    @PersistenceContext EntityManager em;
+
+    /**
+     * Age a binding past its TTL.
+     *
+     * <p>Native, because {@code expires_at} is {@code updatable = false} — an expiry is fixed at mint and JPA
+     * is right to ignore a write to it. A test that "aged" a row by setting the field and saving was silently
+     * changing nothing; it only looked like it worked while the service read back the same in-memory
+     * instance it had just modified.
+     */
+    private void expire(String ref) {
+        em.createNativeQuery("update channel_review_locate_ref set expires_at = ?1 where locate_ref = ?2")
+                .setParameter(1, Instant.now().minusSeconds(60))
+                .setParameter(2, ref)
+                .executeUpdate();
+        em.flush();
+        em.clear();
+    }
 
     private static final String BODY = "배송도 빠르고 포장도 꼼꼼해서 아주 만족합니다";
 
@@ -163,6 +183,56 @@ class ChannelReviewLocateServiceTest {
         assertThatThrownBy(() -> service.resolve(org, ref)).isInstanceOf(ApiException.class);
     }
 
+    /**
+     * Single-use has to be a fact the DATABASE enforces, not a check the service makes and then writes back.
+     * This pins the conditional update: with the condition removed from the UPDATE, a second spend of an
+     * already-spent row would report success.
+     */
+    @Test
+    void spending_an_already_spent_binding_reports_no_row() {
+        Review stored = review(BODY, 5, LocalDate.of(2026, 8, 11), product("무선 이어폰", "15411270785"));
+        String ref = service.mint(org, account.getId(), stored.getId(), user).locateRef();
+
+        assertThat(refs.spend(ref, org, Instant.now())).isEqualTo(1);
+        assertThat(refs.spend(ref, org, Instant.now())).isEqualTo(0);
+    }
+
+    /** The org check lives in the UPDATE too, so another tenant's token is never even consumed. */
+    @Test
+    void another_orgs_token_is_not_spendable() {
+        Review stored = review(BODY, 5, LocalDate.of(2026, 8, 11), product("무선 이어폰", "15411270785"));
+        String ref = service.mint(org, account.getId(), stored.getId(), user).locateRef();
+
+        assertThat(refs.spend(ref, UUID.randomUUID(), Instant.now())).isEqualTo(0);
+        assertThat(refs.findByLocateRef(ref).orElseThrow().getConsumedAt()).isNull();
+    }
+
+    /** An expired binding cannot be spent either — the TTL is in the same WHERE clause. */
+    @Test
+    void an_expired_binding_is_not_spendable() {
+        Review stored = review(BODY, 5, LocalDate.of(2026, 8, 11), product("무선 이어폰", "15411270785"));
+        String ref = service.mint(org, account.getId(), stored.getId(), user).locateRef();
+        expire(ref);
+
+        assertThat(refs.spend(ref, org, Instant.now())).isEqualTo(0);
+    }
+
+    /**
+     * The matcher refuses a rating outside 1..5 before it looks at the page, so a review carrying one can
+     * never be found. Refusing at the PRESS is the difference between that and a browser window opening to
+     * report an expired request.
+     */
+    @Test
+    void refuses_a_review_whose_rating_is_off_the_scale() {
+        Product p = product("무선 이어폰", "15411270785");
+        Review stored = review(BODY, 5, LocalDate.of(2026, 8, 11), p);
+        stored.setRating(9);
+        reviews.saveAndFlush(stored);
+
+        assertThatThrownBy(() -> service.mint(org, account.getId(), stored.getId(), user))
+                .isInstanceOf(ApiException.class);
+    }
+
     @Test
     void another_orgs_token_resolves_to_nothing() {
         Review stored = review(BODY, 5, LocalDate.of(2026, 8, 11), product("무선 이어폰", "15411270785"));
@@ -175,9 +245,7 @@ class ChannelReviewLocateServiceTest {
     void an_expired_token_resolves_to_nothing() {
         Review stored = review(BODY, 5, LocalDate.of(2026, 8, 11), product("무선 이어폰", "15411270785"));
         String ref = service.mint(org, account.getId(), stored.getId(), user).locateRef();
-        ChannelReviewLocateRef row = refs.findByLocateRef(ref).orElseThrow();
-        row.setExpiresAt(Instant.now().minusSeconds(1));
-        refs.save(row);
+        expire(ref);
 
         assertThatThrownBy(() -> service.resolve(org, ref)).isInstanceOf(ApiException.class);
     }

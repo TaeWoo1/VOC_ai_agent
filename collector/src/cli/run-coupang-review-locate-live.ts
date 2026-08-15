@@ -211,10 +211,38 @@ async function main(): Promise<void> {
     console.error("  Then, in SellerOps, choose a 상품평 and press [쿠팡에서 보기].");
 
     const runId = mintLocateRunId();
+    const surface = confirmHost.contextLike as unknown as BrowserContext;
     const reader = new CoupangWingReviewReaderDriver(confirmHost.entryPage as unknown as Page, {
-      context: confirmHost.contextLike as unknown as BrowserContext,
+      context: surface,
+      // A locate never reads the pager, and the diagnostic fields are the only place page text reaches a log.
+      pagerDiagnostics: false,
     });
-    const driver = new CoupangWingReviewLocateDriver(reader);
+    // **Both surface deps are wired, because unwired they are promises the product makes and does not keep.**
+    // Without `closed`, the session's "never re-read a window the seller CLOSED" latch can never trip and the
+    // poll keeps evaluating for ten minutes against a window that is gone. Without `raiseSurface`, the
+    // frontend's [쿠팡 창 앞으로] is a button that always answers `false`.
+    const driver = new CoupangWingReviewLocateDriver(reader, {
+      raiseSurface: async () => {
+        const pages = surface.pages();
+        const page = pages.length > 0 ? pages[pages.length - 1] : undefined;
+        if (!page) return false;
+        await page.bringToFront().catch(() => undefined);
+        return true;
+      },
+      closed: new Promise<void>((resolveClosed) => {
+        // The seller's window is "gone" when no page of theirs is left — the SellerOps confirmation tab is
+        // filtered out of this list, so closing WING alone is enough, and closing the whole context also is.
+        const check = (): void => {
+          if (surface.pages().length === 0) resolveClosed();
+        };
+        const watch = (page: Page): void => {
+          page.on("close", check);
+        };
+        for (const page of surface.pages()) watch(page);
+        surface.on("page", watch);
+        surface.on("close", () => resolveClosed());
+      }),
+    });
     const bridge = createAgentBridge({
       ...resolveAgentBridgeConfig(args, process.env),
       approvalPresenter: createApprovalPresenterFor(decideApprovalPresenter(process.env, process.platform)),

@@ -2,9 +2,14 @@
  * **Does the seller actually SEE the ring?** — the one question the DOM cannot answer.
  *
  * On 2026-08-15 a live locate reported `highlighted: true` and the operator, looking at the real WING screen,
- * reported no ring. Both were correct. The annotate script set `outline` on the matched `<tr>`, the computed
- * style read back `rgb(43, 108, 255) solid 3px`, and **Chromium painted nothing**: an outline on a table row
- * is not rendered. Every offline test passed, because every offline test asked the DOM.
+ * reported no ring. Both were correct. The annotate script set `outline` on the matched `<tr>` with
+ * `outline-offset: 2px`, which paints the ring OUTSIDE the row's own box — so nothing changed where a seller
+ * looks. Every offline test passed, because every offline test asked the DOM, and the DOM was telling the
+ * truth.
+ *
+ * (The first diagnosis recorded here was that Chromium does not paint an outline on a table row at all. It
+ * does. That conclusion came from screenshotting only the row's own clip — measuring the wrong region, not
+ * finding the wrong property — and an independent review caught it. The fix stands; the reason is this one.)
  *
  * So this one asks the PIXELS. It renders a WING-shaped 상품평 table in a real Chromium, screenshots the
  * matched row, runs the annotate script, screenshots it again, and asserts the two images differ — then runs
@@ -77,10 +82,18 @@ describe.skipIf(!RUN)("the locate ring, as the seller sees it", () => {
   });
 
   /**
-   * The failure this file exists for, pinned as its own case: the old treatment reports itself as applied and
-   * paints nothing. If someone puts it back, this fails while the DOM-level tests stay green.
+   * The failure this file exists for, pinned as its own case — and stated correctly, which it was not at
+   * first.
+   *
+   * The old treatment was `outline` on the `<tr>` with `outline-offset: 2px`. It IS painted; the offset puts
+   * it OUTSIDE the row's own box, so nothing inside the row changes. The first measurement here screenshotted
+   * only the row and concluded "Chromium does not paint an outline on a table row", which is false — the
+   * wrong region was being measured, not the wrong property.
+   *
+   * What was true, and what the operator observed on the real WING screen, is that the mark did not land
+   * where a seller looks: inside the row. That is what this pins.
    */
-  it("an outline on the ROW paints nothing — which is why the band is on the cells", async () => {
+  it("the old row outline leaves the row's own pixels untouched", async () => {
     const page = await reviewPage();
     const row = page.locator("tbody tr").nth(1);
 
@@ -93,8 +106,64 @@ describe.skipIf(!RUN)("the locate ring, as the seller sees it", () => {
     });
     const after = await row.screenshot();
 
-    expect(computed).toBe("rgb(43, 108, 255)"); // the DOM says yes...
-    expect(after.equals(before)).toBe(true); // ...and the screen says nothing happened
+    expect(computed).toBe("rgb(43, 108, 255)"); // the property applies...
+    expect(after.equals(before)).toBe(true); // ...and the row the seller is looking at is unchanged
+    await page.close();
+  });
+
+  /**
+   * The row the match chose must still be the row that is there. An index and a header width are not an
+   * identity: a list that re-renders with one new review on top keeps its shape and hands back a different
+   * review — and the run reported that as a successful locate.
+   */
+  it("refuses to ring a row that is no longer the one the match chose", async () => {
+    const page = await reviewPage();
+    const anchors = { dateText: "2026.08.10", ratingText: "4", productText: "15411270785 (81234567890)" };
+
+    // A new 상품평 arrives at the top: index 1 is now a different review.
+    await page.evaluate(() => {
+      const body = document.querySelector("tbody")!;
+      const fresh = body.rows[0]!.cloneNode(true) as HTMLElement;
+      body.insertBefore(fresh, body.rows[0]!);
+    });
+
+    expect(await page.evaluate(buildReviewRowAnnotateScript(1, anchors))).toBe(0);
+    expect(await page.locator(`[${REVIEW_TARGET_ATTRIBUTE}]`).count()).toBe(0);
+    await page.close();
+  });
+
+  /** The same anchors on an unchanged page still ring it — the check refuses drift, not the ordinary case. */
+  it("rings the row when its anchors still match", async () => {
+    const page = await reviewPage();
+    const anchors = { dateText: "2026.08.10", ratingText: "4", productText: "15411270785 (81234567890)" };
+
+    expect(await page.evaluate(buildReviewRowAnnotateScript(1, anchors))).toBe(1);
+    await page.close();
+  });
+
+  /**
+   * The seller's own inline styling must survive. The teardown used to delete `background-color` and
+   * `box-shadow` outright, taking WING's with them — a permanent change to their page by a run that promises
+   * it only adds a ring and takes it off.
+   */
+  it("puts the page's own inline styles back", async () => {
+    const page = await browser.newPage();
+    await page.setContent(WING_HTML);
+    await page.evaluate(() => {
+      for (const cell of Array.from(document.querySelectorAll("tbody tr:nth-child(2) td"))) {
+        (cell as HTMLElement).setAttribute("style", "background-color: rgb(255, 240, 200);");
+      }
+    });
+    const styleOf = () =>
+      page.evaluate(() =>
+        Array.from(document.querySelectorAll("tbody tr:nth-child(2) td")).map((c) => c.getAttribute("style")),
+      );
+    const before = await styleOf();
+
+    expect(await page.evaluate(buildReviewRowAnnotateScript(1))).toBe(1);
+    await page.evaluate(REVIEW_TARGET_TEARDOWN);
+
+    expect(await styleOf()).toEqual(before);
     await page.close();
   });
 

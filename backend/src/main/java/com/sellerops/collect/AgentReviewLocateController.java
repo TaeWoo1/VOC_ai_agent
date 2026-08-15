@@ -2,10 +2,12 @@ package com.sellerops.collect;
 
 import com.sellerops.auth.AuthPrincipal;
 import com.sellerops.review.channel.ChannelReviewLocateService;
+import com.sellerops.review.channel.dto.AgentReviewLocateTargetRequest;
 import com.sellerops.review.channel.dto.AgentReviewLocateTargetView;
+import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -22,6 +24,11 @@ import org.springframework.web.bind.annotation.RestController;
  * <p><b>A POST, because the ref is spent.</b> Resolving is not a repeatable read: the token is single-use
  * and this call is what uses it. A GET that quietly consumed its subject would be a lie about the verb.
  *
+ * <p><b>The ref travels in the BODY, not the path.</b> It is a single-use secret, and a path segment is
+ * written to every reverse-proxy access log it passes through in plaintext. The reply path's
+ * {@code submissionRef} — the same opaque shape, from the same generator — has always been a body field for
+ * this reason; this one was a path variable until an independent review pointed at the asymmetry.
+ *
  * <p>The org comes from the JWT principal and never from the path, so a token belonging to another tenant
  * resolves to the same refusal as one that never existed.
  */
@@ -35,9 +42,9 @@ public class AgentReviewLocateController {
         this.service = service;
     }
 
-    @PostMapping("/review-locate-targets/{locateRef}")
+    @PostMapping("/review-locate-targets")
     public AgentReviewLocateTargetView resolve(@AuthenticationPrincipal AuthPrincipal principal,
-                                               @PathVariable String locateRef) {
-        return service.resolve(principal.orgId(), locateRef);
+                                               @Valid @RequestBody AgentReviewLocateTargetRequest request) {
+        return service.resolve(principal.orgId(), request.locateRef());
     }
 }

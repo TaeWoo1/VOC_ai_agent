@@ -151,6 +151,45 @@ describe("the locate runtime", () => {
     expect(onStartRefused).toHaveBeenCalledWith("INVALID_PAYLOAD");
   });
 
+  /**
+   * A run view carries no press identity. A view that arrives between "the seller pressed on review B" and
+   * "the agent accepted that press" is A's — and rendered under B it says SellerOps outlined B while the ring
+   * on Coupang is around A. Frames are ordered, so the agent's own command result is the line between them.
+   */
+  it("publishes nothing between a press and the agent acknowledging it", () => {
+    const h = harness();
+    const seen: (ActionWindowRunView | null)[] = [];
+    h.runtime.subscribe((v) => seen.push(v));
+
+    h.runtime.locate(REF);
+    // The previous press's completed view, still in flight when this one was sent.
+    h.server({ kind: "aw_view", view: view({ status: "COMPLETED", allowedCommands: [], blocker: undefined }) });
+
+    expect(seen).toEqual([null]); // cleared on press, and nothing adopted from the old run
+    expect(h.runtime.view()).toBeNull();
+  });
+
+  it("publishes again once the agent has acknowledged the press", () => {
+    const h = harness();
+    h.runtime.locate(REF);
+    const commandId = (h.sent[0] as { command: { commandId: string } }).command.commandId;
+
+    h.server({ kind: "aw_command_result", commandId, accepted: true });
+    h.server({ kind: "aw_view", view: view() });
+
+    expect(h.runtime.view()).not.toBeNull();
+  });
+
+  /** A resync landing mid-press must not repaint the previous run's verdict either. */
+  it("ignores a resync that arrives before the press is acknowledged", () => {
+    const h = harness();
+    h.runtime.locate(REF);
+
+    h.server({ kind: "aw_resync_result", view: view({ status: "COMPLETED", allowedCommands: [] }), events: [] });
+
+    expect(h.runtime.view()).toBeNull();
+  });
+
   it("stops sending and stops publishing once disposed", () => {
     const h = harness();
     const seen: (ActionWindowRunView | null)[] = [];

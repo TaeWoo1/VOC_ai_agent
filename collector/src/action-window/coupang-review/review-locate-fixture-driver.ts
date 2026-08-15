@@ -14,6 +14,12 @@ import type { ReviewLocateTarget, ReviewLocateVerdict } from "./review-locate";
 
 export interface ScriptedLocateAnswer {
   readonly verdict: ReviewLocateVerdict;
+  /**
+   * How long this read takes. A real WING read is hundreds of milliseconds, and everything that can go wrong
+   * between two presses goes wrong DURING one — so a driver that always answers instantly cannot express the
+   * failures worth testing.
+   */
+  readonly delayMs?: number;
   /** Defaults to true for `LOCATED` and false otherwise — the only combination a real driver produces. */
   readonly highlighted?: boolean;
   readonly matches?: number;
@@ -25,6 +31,11 @@ export class ReviewLocateFixtureDriver implements ReviewLocateProbeDriver {
   private index = 0;
   /** Every target it was asked about, so a test can prove the resolved one is what reached the driver. */
   readonly seen: ReviewLocateTarget[] = [];
+  /**
+   * What happened, IN ORDER (`ring` / `clear`). Counts cannot express "the ring came off AFTER it was drawn",
+   * and that ordering is the whole question when a read is still in flight at the moment a run ends.
+   */
+  readonly trace: string[] = [];
   cleared = 0;
   cleanedUp = false;
   raised = 0;
@@ -47,7 +58,9 @@ export class ReviewLocateFixtureDriver implements ReviewLocateProbeDriver {
     this.seen.push(target);
     const answer = this.script[Math.min(this.index, this.script.length - 1)]!;
     this.index += 1;
+    if (answer.delayMs) await new Promise<void>((r) => setTimeout(r, answer.delayMs));
     const highlighted = answer.highlighted ?? answer.verdict === "LOCATED";
+    if (highlighted) this.trace.push("ring");
     return {
       verdict: answer.verdict,
       matchedRowIndex: answer.verdict === "LOCATED" ? 0 : null,
@@ -59,6 +72,7 @@ export class ReviewLocateFixtureDriver implements ReviewLocateProbeDriver {
 
   async clearHighlight(): Promise<number> {
     this.cleared += 1;
+    this.trace.push("clear");
     return 1;
   }
 

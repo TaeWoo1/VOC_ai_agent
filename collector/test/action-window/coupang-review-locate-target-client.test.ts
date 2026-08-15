@@ -45,13 +45,16 @@ describe("review locate target client", () => {
     });
   });
 
-  it("spends the binding with a POST to the agent route", async () => {
+  /** The token is a single-use secret: it goes in the body, never in a path a proxy log would keep. */
+  it("spends the binding with a POST that carries it in the body", async () => {
     const fetchImpl = respond(WIRE);
     await fetchReviewLocateTarget(BASE, TOKEN, REF, fetchImpl);
 
     const [url, init] = (fetchImpl as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls[0]!;
-    expect(url).toBe(`${BASE}/api/agent/review-locate-targets/${REF}`);
+    expect(url).toBe(`${BASE}/api/agent/review-locate-targets`);
+    expect(url).not.toContain(REF);
     expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({ locateRef: REF });
   });
 
   it("treats a row with no option id as a target that simply does not narrow on one", async () => {

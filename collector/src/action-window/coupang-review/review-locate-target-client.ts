@@ -44,9 +44,12 @@ export async function fetchReviewLocateTarget(
   }
   let res: Response;
   try {
-    res = await fetchImpl(`${baseUrl}/api/agent/review-locate-targets/${locateRef}`, {
+    // The binding rides in the BODY. It is a single-use secret, and a path segment is written verbatim into
+    // every access log between here and the backend — loopback today, not necessarily forever.
+    res = await fetchImpl(`${baseUrl}/api/agent/review-locate-targets`, {
       method: "POST",
-      headers: { authorization: `Bearer ${token}` },
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ locateRef }),
     });
   } catch {
     // The caught error is not inspected: a fetch failure can quote the request it failed on.

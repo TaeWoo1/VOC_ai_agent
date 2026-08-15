@@ -30,6 +30,9 @@ import { newCommandId } from "../../commandId";
 
 const LOCATE_INTENT = "REVIEW_LOCATE";
 
+/** How long a press waits to be acknowledged before the screen is told it did not get through. */
+const START_ACK_TIMEOUT_MS = 8_000;
+
 export interface LocateRuntime {
   /** Latest published run view, or null before the first view. */
   view(): ActionWindowRunView | null;
@@ -59,7 +62,25 @@ export function createLocateRuntime(
   let disposed = false;
   /** The commandIds of the presses we sent, so a refusal for one can be recognised as ours. */
   const startCommandIds = new Set<string>();
+  /**
+   * The press we are waiting to hear back about.
+   *
+   * <p>**Nothing is published while this is set.** A run view carries no press identity, so a view that
+   * arrives between "the seller pressed on review B" and "the agent accepted that press" is indistinguishable
+   * from B's — and it is A's. Rendered under B, it says SellerOps outlined B when the ring on Coupang is
+   * around A. Frames are ordered, so the agent's own `aw_command_result` is exactly the line between them.
+   */
+  let pendingStart: string | null = null;
+  let pendingTimer: ReturnType<typeof setTimeout> | null = null;
   const listeners = new Set<(view: ActionWindowRunView | null) => void>();
+
+  const settlePending = (): void => {
+    pendingStart = null;
+    if (pendingTimer !== null) {
+      clearTimeout(pendingTimer);
+      pendingTimer = null;
+    }
+  };
 
   const publish = (next: ActionWindowRunView | null): void => {
     latest = next;
@@ -81,19 +102,23 @@ export function createLocateRuntime(
     if (disposed) return;
     if (frame.kind === "aw_view") {
       runId = frame.view.runId;
+      // Belongs to the press before this one — see `pendingStart`.
+      if (pendingStart !== null) return;
       publish(frame.view);
       return;
     }
     if (frame.kind === "aw_resync_result") {
       if (frame.view) {
         runId = frame.view.runId;
+        if (pendingStart !== null) return;
         publish(frame.view);
       }
       return;
     }
     if (frame.kind === "aw_command_result") {
-      if (startCommandIds.has(frame.commandId) && !frame.accepted) {
-        options.onStartRefused?.(frame.reason ?? null);
+      if (startCommandIds.has(frame.commandId)) {
+        if (frame.commandId === pendingStart) settlePending();
+        if (!frame.accepted) options.onStartRefused?.(frame.reason ?? null);
       }
       return;
     }
@@ -115,6 +140,19 @@ export function createLocateRuntime(
         locateRef,
       } as CommandEnvelope["payload"]);
       startCommandIds.add(command.commandId);
+      settlePending();
+      pendingStart = command.commandId;
+      // The previous press's verdict is not this one's. Clear it rather than leave it on screen under a
+      // review it is not about.
+      publish(null);
+      // **A press that is never acknowledged has to say so.** With no live socket the transport drops
+      // outbound frames silently, so without this the screen would sit on "찾는 중…" forever — and a
+      // reconnect's resync would then repaint the OLD run's completed view under the new review.
+      pendingTimer = setTimeout(() => {
+        if (pendingStart !== command.commandId) return;
+        settlePending();
+        options.onStartRefused?.(null);
+      }, START_ACK_TIMEOUT_MS);
       transport.send({ kind: "aw_command", command });
     },
     send(type) {
@@ -130,6 +168,7 @@ export function createLocateRuntime(
     dispose() {
       if (disposed) return;
       disposed = true;
+      settlePending();
       stopViews();
       listeners.clear();
     },

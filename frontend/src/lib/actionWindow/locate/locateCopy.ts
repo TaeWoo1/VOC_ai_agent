@@ -82,13 +82,18 @@ export function locateMessage(view: ActionWindowRunView | null, starting: boolea
       if (code === "UNSUPPORTED_STATE") {
         return {
           tone: "waiting",
-          text: "쿠팡 창에 상품평 목록 화면을 띄워 주세요. 띄우시면 자동으로 다시 확인합니다.",
+          text: "쿠팡 창에 상품평 목록 화면을 띄워 주세요. 띄우시면 잠시 자동으로 다시 확인합니다.",
           looking: true,
         };
       }
       return {
         tone: "waiting",
-        text: "지금 보이는 쿠팡 페이지에는 이 상품평이 없습니다. 쿠팡 창에서 페이지를 넘겨 보세요 — 넘기시는 동안 계속 확인합니다.",
+        // It says "for a while" rather than "continuously": the look-again loop is BOUNDED (ten minutes), and
+        // when it ends nothing tells the seller. Promising it never stops would leave them paging at a run
+        // that had quietly stopped watching — so the copy points at the button that always works.
+        text:
+          "지금 보이는 쿠팡 페이지에는 이 상품평이 없습니다. 쿠팡 창에서 페이지를 넘겨 보세요 — 넘기시는 " +
+          "동안 잠시 자동으로 다시 확인합니다. 한참 뒤라면 [다시 확인]을 눌러 주세요.",
         looking: true,
       };
     case "FAILED":
