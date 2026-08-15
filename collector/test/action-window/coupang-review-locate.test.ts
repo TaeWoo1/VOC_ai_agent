@@ -180,14 +180,23 @@ describe("the highlight is inert, and lands on the row locate chose", () => {
     return el({ tag: "table" }).add(head, ...rows);
   }
 
+  /**
+   * ONE row is marked, and the marks that are not the row are its own cells — where the band is painted,
+   * because Chromium does not paint an outline on a `<tr>` (measured 2026-08-15; see the annotate script).
+   */
   it("marks the matched row and no other", () => {
     const root = el({ tag: "body" }).add(table([BODY_B, BODY_A, BODY_B]));
 
     expect(run<number>(buildReviewRowAnnotateScript(1), root)).toBe(1);
 
     const marked = root.descendants().filter((e) => e.hasAttribute(REVIEW_TARGET_ATTRIBUTE));
-    expect(marked).toHaveLength(1);
-    expect(marked[0]!.textContent).toContain(BODY_A);
+    const markedRows = marked.filter((e) => e.tagName === "TR");
+    expect(markedRows).toHaveLength(1);
+    expect(markedRows[0]!.textContent).toContain(BODY_A);
+    // Everything else marked is a cell OF that row — no other row is touched.
+    for (const el2 of marked) {
+      expect(markedRows[0]!.descendants().includes(el2) || el2 === markedRows[0]!).toBe(true);
+    }
   });
 
   it("marks nothing when the row it was told to mark is gone", () => {
@@ -220,7 +229,8 @@ describe("the highlight is inert, and lands on the row locate chose", () => {
     const root = el({ tag: "body" }).add(table([BODY_A]));
     run<number>(buildReviewRowAnnotateScript(0), root);
 
-    expect(run<number>(REVIEW_TARGET_TEARDOWN, root)).toBe(1);
+    // The row plus the cells the band was painted on — every mark comes off, in one pass.
+    expect(run<number>(REVIEW_TARGET_TEARDOWN, root)).toBeGreaterThan(0);
     expect(root.descendants().some((e) => e.hasAttribute(REVIEW_TARGET_ATTRIBUTE))).toBe(false);
     expect(run<number>(REVIEW_TARGET_TEARDOWN, root)).toBe(0);
   });

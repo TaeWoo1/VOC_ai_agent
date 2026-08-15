@@ -596,14 +596,34 @@ ${reviewReaderFragment(roles, required)}
 }
 
 /**
- * **Highlight one row and nothing else.** `[쿠팡에서 보기]` ends here: a marker attribute, an outline, and a
- * scroll. It never clicks, focuses a field, submits, or opens anything — the seller is looking at their own
- * screen and the only thing SellerOps adds is a ring around the review they asked about.
+ * **Highlight one row and nothing else.** `[쿠팡에서 보기]` ends here: a marker attribute, a band drawn
+ * around the row, and a scroll. It never clicks, focuses a field, submits, or opens anything — the seller is
+ * looking at their own screen and the only thing SellerOps adds is a ring around the review they asked about.
  *
  * The row is addressed by the index the READER produced, over the same table the reader resolved, and the row
  * is re-checked against the header width before it is marked. A page that changed under the operator between
  * the read and the highlight resolves to a different row set, fails one of those checks, and returns 0 —
  * which the driver reports as "not found" rather than ringing whatever now sits at that position.
+ *
+ * ## Why the band is painted on the CELLS, not on the row
+ *
+ * It used to be `row.style.outline = '3px solid …'`, and on 2026-08-15 the first operator to actually LOOK at
+ * the screen during a locate reported no ring — while the run logged `highlighted: true`. Both were correct.
+ * **Chromium does not paint an outline on a `<tr>`:** the computed style reads back
+ * `rgb(43, 108, 255) solid 3px` and the row's pixels do not change by one. The run had been reporting a fact
+ * about the DOM and calling it a fact about the seller's screen.
+ *
+ * So the treatment goes on every cell of the row, where it does paint:
+ *
+ *  - an **inset box-shadow** band on the top and bottom of every cell, closed off with a left band on the
+ *    first cell and a right band on the last — a rectangle around the row. `box-shadow` rather than a border
+ *    because a border changes the cell's size and would reflow the seller's table under them;
+ *  - a **background tint**, so the row reads as marked even where a band is clipped by the viewport edge or
+ *    a sticky column;
+ *  - both with `!important`, because this is a page SellerOps does not own and a marketplace stylesheet that
+ *    wins the cascade would put us back where we started.
+ *
+ * The row itself still carries the marker attribute, so what was rung remains one element to find.
  */
 export function buildReviewRowAnnotateScript(
   rowIndex: number,
@@ -617,22 +637,54 @@ ${reviewReaderFragment(roles, required)}
   var rows = bodyRowsOf(best.table);
   var row = rows[${index}];
   if (!row) { return 0; }
-  if (cellsOf(row).length !== best.header.length) { return 0; }
+  var cells = cellsOf(row);
+  if (cells.length !== best.header.length) { return 0; }
   row.setAttribute('${REVIEW_TARGET_ATTRIBUTE}', '1');
-  row.style.outline = '3px solid #2b6cff';
-  row.style.outlineOffset = '2px';
+  for (var ci = 0; ci < cells.length; ci++) {
+    var cell = cells[ci];
+    var bands = ['inset 0 3px 0 0 ${REVIEW_TARGET_COLOR}', 'inset 0 -3px 0 0 ${REVIEW_TARGET_COLOR}'];
+    if (ci === 0) { bands.push('inset 3px 0 0 0 ${REVIEW_TARGET_COLOR}'); }
+    if (ci === cells.length - 1) { bands.push('inset -3px 0 0 0 ${REVIEW_TARGET_COLOR}'); }
+    cell.setAttribute('${REVIEW_TARGET_ATTRIBUTE}', '1');
+    if (cell.style.setProperty) {
+      cell.style.setProperty('box-shadow', bands.join(', '), 'important');
+      cell.style.setProperty('background-color', '${REVIEW_TARGET_TINT}', 'important');
+    } else {
+      cell.style.boxShadow = bands.join(', ');
+      cell.style.backgroundColor = '${REVIEW_TARGET_TINT}';
+    }
+  }
   if (row.scrollIntoView) { row.scrollIntoView({ block: 'center' }); }
   return 1;
 })()`;
 }
 
-/** Remove the marker and the outline. Idempotent, read-only, and safe to run on a page that has neither. */
+/** The band colour and the tint behind it. Named here so the teardown and the tests cannot drift from them. */
+const REVIEW_TARGET_COLOR = "#2b6cff";
+const REVIEW_TARGET_TINT = "rgba(43, 108, 255, 0.16)";
+
+/**
+ * Remove the marker and everything it painted. Idempotent, read-only, and safe on a page that has neither.
+ *
+ * It still clears `outline` even though nothing sets one any more: a window left open from a build before the
+ * cell fix would otherwise keep an inert property nobody can see and nobody clears.
+ */
 export const REVIEW_TARGET_TEARDOWN = `(function () {
   var marked = document.querySelectorAll('[${REVIEW_TARGET_ATTRIBUTE}]');
   for (var i = 0; i < marked.length; i++) {
-    marked[i].removeAttribute('${REVIEW_TARGET_ATTRIBUTE}');
-    marked[i].style.outline = '';
-    marked[i].style.outlineOffset = '';
+    var el = marked[i];
+    el.removeAttribute('${REVIEW_TARGET_ATTRIBUTE}');
+    if (el.style.removeProperty) {
+      el.style.removeProperty('box-shadow');
+      el.style.removeProperty('background-color');
+      el.style.removeProperty('outline');
+      el.style.removeProperty('outline-offset');
+    } else {
+      el.style.boxShadow = '';
+      el.style.backgroundColor = '';
+      el.style.outline = '';
+      el.style.outlineOffset = '';
+    }
   }
   return marked.length;
 })()`;
