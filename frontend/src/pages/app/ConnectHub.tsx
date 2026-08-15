@@ -8,6 +8,8 @@ import { useOperationsStore } from "../../hooks/useOperationsStore";
 import { isFixturePreviewEnabled } from "../../lib/actionWindow/devMode";
 import { useOpenAlerts } from "../../lib/openAlerts";
 import { api } from "../../lib/apiClient";
+import { selectChannelAccount } from "../../lib/channelConnection";
+import { hasReviewRecord } from "../../lib/reviewRecord";
 import type {
   ChannelResponse,
   ConnectionStatusView,
@@ -31,6 +33,7 @@ export function ConnectHub() {
   const [accountsLoading, setAccountsLoading] = useState(true);
   const [accountsError, setAccountsError] = useState(false);
   const [health, setHealth] = useState<Map<string, ConnectionStatusView>>(new Map());
+  const [reviewCounts, setReviewCounts] = useState<Map<string, number>>(new Map());
   const [notice, setNotice] = useState<string | null>(null);
   const { openCount } = useOpenAlerts();
 
@@ -89,6 +92,44 @@ export function ConnectHub() {
     };
   }, [accounts]);
 
+  // How many 상품평 each review-record channel has actually collected, so the row can say so instead
+  // of making the seller open the page to find out. Read per account and fail-soft in both
+  // directions: a rejected read leaves that account out of the map, and a row with no entry in the
+  // map shows the way in without a number. The count is decoration on a link; it never gates it.
+  useEffect(() => {
+    const targets = channels
+      .filter((channel) => hasReviewRecord(channel.code))
+      .map((channel) => selectChannelAccount(accounts, channel.id))
+      .filter((account): account is SellerAccountResponse => account !== null);
+    if (targets.length === 0) {
+      return;
+    }
+    let cancelled = false;
+    // `size: 1` because only `total` is wanted here — the list itself belongs to the page this
+    // links to, and the hub has no business pulling a screenful of what buyers wrote.
+    void Promise.allSettled(
+      targets.map((account) =>
+        api
+          .getChannelReviewsStrict(account.id, { size: 1 })
+          .then((view) => [account.id, view.total] as const),
+      ),
+    ).then((results) => {
+      if (cancelled) {
+        return;
+      }
+      const map = new Map<string, number>();
+      for (const result of results) {
+        if (result.status === "fulfilled") {
+          map.set(result.value[0], result.value[1]);
+        }
+      }
+      setReviewCounts(map);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [channels, accounts]);
+
   const ops = useOperationsStore();
   const liveRun = ops.sourceMode === "bridge" || isFixturePreviewEnabled() ? ops.run : null;
 
@@ -127,6 +168,7 @@ export function ConnectHub() {
           accounts={accounts}
           health={health}
           statusLoading={accountsLoading}
+          reviewCounts={reviewCounts}
           onNotice={setNotice}
         />
       </Panel>

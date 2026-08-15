@@ -55,16 +55,23 @@ export function BtnLink({
   variant = "solid",
   size = "md",
   className,
+  ariaLabel,
   children,
 }: {
   to: string;
   variant?: BtnVariant;
   size?: BtnSize;
   className?: string;
+  /**
+   * Fuller accessible name, for a link whose visible label only reads correctly next to what it sits
+   * beside — a row's link that says "상품평 22개 보기" is unambiguous on screen and anonymous in a
+   * screen reader's link list. It must CONTAIN the visible label (WCAG 2.5.3), so prefix, never replace.
+   */
+  ariaLabel?: string;
   children: ReactNode;
 }) {
   return (
-    <Link to={to} className={classes(variant, size, className)}>
+    <Link to={to} className={classes(variant, size, className)} aria-label={ariaLabel}>
       {children}
     </Link>
   );

@@ -15,8 +15,10 @@ import {
 } from "../../components/connect/ChannelStatusSection";
 import { CollectionSettingsSection } from "../../components/connect/CollectionSettingsSection";
 import { CollectionHistorySection } from "../../components/connect/CollectionHistorySection";
+import { ReviewRecordPanel } from "../../components/connect/ReviewRecordPanel";
 import { nextActionFor, type ScrollTarget } from "../../components/connect/channelShared";
 import { api } from "../../lib/apiClient";
+import { hasReviewRecord, reviewRecordPath } from "../../lib/reviewRecord";
 import type {
   CapabilityView,
   ChannelResponse,
@@ -235,12 +237,15 @@ export function ChannelWorkspace() {
         meta={status ? <HealthBadge state={status.state} /> : undefined}
         action={
           <div className="flex flex-wrap gap-2">
-            {/* Only where the channel actually collects reviews this way. A link offered on a channel
-                with no review record would open a page that can only say "아직 없습니다", which reads
-                as a failure rather than as a capability this channel does not have. */}
-            {channel?.code === "COUPANG" ? (
-              <BtnLink to={`/connect/channels/${accountId}/reviews`} size="sm" variant="outline">
-                상품평
+            {/* Which channels have a record is decided in one place, shared with the channel list, so
+                the two surfaces cannot disagree about whether this channel offers one.
+
+                Solid, and named for what it opens. It was an outline control labelled 상품평 sitting
+                between page chrome, and it read as a filter or a section heading rather than as the
+                way to the seller's own review record. */}
+            {hasReviewRecord(channel?.code) ? (
+              <BtnLink to={reviewRecordPath(accountId)} size="sm">
+                상품평 보기
               </BtnLink>
             ) : null}
             <BtnLink to="/connect" size="sm" variant="outline">
@@ -260,6 +265,16 @@ export function ChannelWorkspace() {
         <div className="rounded-xl bg-brand-50 px-4 py-3 text-brand-700">{notice}</div>
       ) : null}
       {error ? <div className="rounded-xl bg-bad/10 px-4 py-3 text-bad">{error}</div> : null}
+
+      {/* Above the connection sections, because it is what the seller came for. Everything below is
+          about keeping the collection running; this is the collection. */}
+      {accountId && hasReviewRecord(channel?.code) ? (
+        <ReviewRecordPanel
+          accountId={accountId}
+          channelCode={channel?.code}
+          refreshKey={refreshKey}
+        />
+      ) : null}
 
       {accountId ? (
         <>
