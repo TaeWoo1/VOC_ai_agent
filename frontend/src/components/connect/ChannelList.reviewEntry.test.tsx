@@ -84,26 +84,41 @@ function renderList(options: {
 describe("ChannelList — the 상품평 entry", () => {
   it("appears on a review-record channel with an account, carrying the count", () => {
     renderList({ reviewCounts: new Map([["acc-cp", 22]]) });
-    expect(screen.getByRole("link", { name: "상품평 22개 보기" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "쿠팡 상품평 22개 보기" })).toHaveAttribute(
       "href",
       "/connect/channels/acc-cp/reviews",
     );
   });
 
-  it("appears without a count when none was supplied", () => {
-    renderList();
-    expect(screen.getByRole("link", { name: "상품평 보기" })).toBeInTheDocument();
+  it("names the channel to a screen reader, and still reads the count on screen", () => {
+    renderList({ reviewCounts: new Map([["acc-cp", 22]]) });
+    const link = screen.getByRole("link", { name: "쿠팡 상품평 22개 보기" });
+    // WCAG 2.5.3: the accessible name must contain the visible label, so this prefixes, never replaces.
+    expect(link).toHaveTextContent("상품평 22개 보기");
   });
 
-  it("is absent on a channel that keeps no record", () => {
-    renderList({ channels: [NAVER], accounts: [] });
+  it("appears without a count when none was supplied", () => {
+    renderList();
+    expect(screen.getByRole("link", { name: "쿠팡 상품평 보기" })).toBeInTheDocument();
+  });
+
+  it("is absent on a channel that keeps no record, even with a connected account", () => {
+    // The account is present ON PURPOSE. With `accounts: []` this assertion would hold whatever the
+    // channel predicate said, and deleting `hasReviewRecord(...)` from the row would break no test.
+    renderList({
+      channels: [NAVER],
+      accounts: [{ ...ACCOUNT, id: "acc-nv", channelId: "naver-ch", channelNameKo: "네이버" }],
+    });
+    expect(screen.getByRole("button", { name: "연결 관리" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /상품평/ })).toBeNull();
   });
 
   it("is the row's loud action while the connection is healthy", () => {
     renderList({ reviewCounts: new Map([["acc-cp", 22]]) });
     // `solid` — the record is where a connected seller is going; 연결 관리 is how it got there.
-    expect(screen.getByRole("link", { name: "상품평 22개 보기" }).className).toContain("bg-brand-700");
+    expect(screen.getByRole("link", { name: "쿠팡 상품평 22개 보기" }).className).toContain(
+      "bg-brand-700",
+    );
   });
 
   it("steps back when collection is failing, without going away", () => {
@@ -111,7 +126,7 @@ describe("ChannelList — the 상품평 entry", () => {
       reviewCounts: new Map([["acc-cp", 22]]),
       health: health({ consecutiveFailures: 2, lastError: "AUTH" }),
     });
-    const link = screen.getByRole("link", { name: "상품평 22개 보기" });
+    const link = screen.getByRole("link", { name: "쿠팡 상품평 22개 보기" });
     // Still there — the 상품평 collected before the break are still the seller's. Just not the
     // brightest thing on a row that is asking to be repaired.
     expect(link).toBeInTheDocument();
@@ -121,7 +136,7 @@ describe("ChannelList — the 상품평 entry", () => {
 
   it("wraps on a narrow row instead of hiding at a breakpoint", () => {
     renderList({ reviewCounts: new Map([["acc-cp", 22]]) });
-    const link = screen.getByRole("link", { name: "상품평 22개 보기" });
+    const link = screen.getByRole("link", { name: "쿠팡 상품평 22개 보기" });
     const actions = link.parentElement!;
     // Both actions sit in one wrapping group: at a narrow width they fall under the row's text
     // rather than being clipped or pushed off the edge.

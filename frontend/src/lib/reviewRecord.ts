@@ -14,8 +14,22 @@
  * concludes does not exist.
  */
 
-/** Channels whose acquisition writes a 상품평 record this product can show. */
-const REVIEW_RECORD_CHANNELS: readonly string[] = ["COUPANG"];
+/**
+ * Channels whose acquisition writes a 상품평 record this product can show, each with what the record
+ * screen may honestly say about that channel.
+ *
+ * **The note is stored beside the channel and not written into the panel** so that adding a channel
+ * here cannot silently carry Coupang's claim onto it. "쿠팡은 판매자 답글 기능이 없어" is true of
+ * Coupang and false of NAVER; a hardcoded sentence under a growing allowlist becomes a support claim
+ * about a channel nobody checked the moment the list grows by one.
+ */
+const REVIEW_RECORD_CHANNELS: Record<string, { note: string }> = {
+  COUPANG: {
+    note:
+      "상품평을 고르면 전체 내용을 읽고, 그 상품평이 쿠팡 화면 어디에 있는지 찾아 볼 수 있습니다. " +
+      "쿠팡은 판매자 답글 기능이 없어 답변 작성 기능은 제공하지 않습니다.",
+  },
+};
 
 /**
  * Does this channel keep a 상품평 record?
@@ -25,7 +39,18 @@ const REVIEW_RECORD_CHANNELS: readonly string[] = ["COUPANG"];
  * capability the channel does not have.
  */
 export function hasReviewRecord(channelCode: string | null | undefined): boolean {
-  return !!channelCode && REVIEW_RECORD_CHANNELS.includes(channelCode);
+  return !!channelCode && Object.prototype.hasOwnProperty.call(REVIEW_RECORD_CHANNELS, channelCode);
+}
+
+/**
+ * What this channel's record screen may say about itself, or null when the caller did not name a
+ * channel. Never a default sentence: a claim we cannot attribute to a channel is not made at all.
+ */
+export function reviewRecordNote(channelCode: string | null | undefined): string | null {
+  if (!channelCode) {
+    return null;
+  }
+  return REVIEW_RECORD_CHANNELS[channelCode]?.note ?? null;
 }
 
 /** The record's route. One definition, so a link and a redirect cannot disagree about the path. */

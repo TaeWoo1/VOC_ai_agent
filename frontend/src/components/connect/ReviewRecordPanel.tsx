@@ -2,7 +2,12 @@ import { Panel } from "../ui/Panel";
 import { BtnLink } from "../ui/Btn";
 import { useApiData } from "../../lib/useApiData";
 import { api } from "../../lib/apiClient";
-import { reviewEntryLabel, reviewRecordPath, reviewRecordSummary } from "../../lib/reviewRecord";
+import {
+  reviewEntryLabel,
+  reviewRecordNote,
+  reviewRecordPath,
+  reviewRecordSummary,
+} from "../../lib/reviewRecord";
 
 /**
  * 상품평 — the channel workspace's way into what this account collected.
@@ -20,17 +25,28 @@ import { reviewEntryLabel, reviewRecordPath, reviewRecordSummary } from "../../l
  */
 export function ReviewRecordPanel({
   accountId,
+  channelCode,
   refreshKey = 0,
 }: {
   accountId: string;
+  /** Whose record this is. Only this channel's own note may be printed under it. */
+  channelCode?: string | null;
   refreshKey?: number;
 }) {
   // `size: 1` — only the total is wanted. The reviews themselves belong to the page this links to.
-  const { data, loading } = useApiData(
+  const { data, loading, error } = useApiData(
     () => api.getChannelReviewsStrict(accountId, { size: 1 }),
     [accountId, refreshKey],
   );
-  const count = data?.total ?? null;
+  /**
+   * **`error` is read, and that is load-bearing.** `useApiData` keeps the last successful `data`
+   * across a re-read, so a refetch that fails — and this panel refetches, on every `refreshKey` bump
+   * the workspace's four child sections can cause — would otherwise keep stating the previous total
+   * as current. On a changed account it would state the PREVIOUS account's total beside a link to
+   * this one. A failed read is not zero reviews, and it is not the old number either.
+   */
+  const count = error ? null : data?.total ?? null;
+  const note = reviewRecordNote(channelCode);
 
   return (
     <Panel
@@ -39,15 +55,20 @@ export function ReviewRecordPanel({
         loading ? "수집한 상품평을 확인하는 중입니다." : reviewRecordSummary(count)
       }
       action={
-        <BtnLink to={reviewRecordPath(accountId)} size="sm">
+        // Outline: the panel is already the loud thing on the page — a titled region stating how many
+        // 상품평 are waiting. The page's one solid action stays in the header.
+        <BtnLink to={reviewRecordPath(accountId)} size="sm" variant="outline">
           {reviewEntryLabel(loading ? null : count)}
         </BtnLink>
       }
     >
-      <p className="break-keep text-base leading-relaxed text-muted">
-        상품평을 고르면 전체 내용을 읽고, 그 상품평이 쿠팡 화면 어디에 있는지 찾아 볼 수 있습니다.
-        쿠팡은 판매자 답글 기능이 없어 답변 작성 기능은 제공하지 않습니다.
-      </p>
+      {note ? (
+        <p className="break-keep text-base leading-relaxed text-muted">{note}</p>
+      ) : (
+        <p className="break-keep text-base leading-relaxed text-muted">
+          이 채널에서 수집한 구매자 상품평 기록입니다.
+        </p>
+      )}
     </Panel>
   );
 }

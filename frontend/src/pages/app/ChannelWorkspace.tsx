@@ -269,7 +269,11 @@ export function ChannelWorkspace() {
       {/* Above the connection sections, because it is what the seller came for. Everything below is
           about keeping the collection running; this is the collection. */}
       {accountId && hasReviewRecord(channel?.code) ? (
-        <ReviewRecordPanel accountId={accountId} refreshKey={refreshKey} />
+        <ReviewRecordPanel
+          accountId={accountId}
+          channelCode={channel?.code}
+          refreshKey={refreshKey}
+        />
       ) : null}
 
       {accountId ? (

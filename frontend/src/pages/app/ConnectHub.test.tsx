@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { ConnectHub } from "./ConnectHub";
 import { expectNoAxeViolations } from "../../test/axe";
@@ -163,25 +163,39 @@ describe("채널·자료 연결 — the 상품평 entry", () => {
     getChannels.mockResolvedValue([COUPANG]);
     getSellerAccountsStrict.mockResolvedValue([coupangAccount()]);
     renderHub();
-    const link = await screen.findByRole("link", { name: "상품평 22개 보기" });
+    const link = await screen.findByRole("link", { name: "쿠팡 상품평 22개 보기" });
     expect(link).toHaveAttribute("href", "/connect/channels/acc-cp/reviews");
+    expect(link).toHaveTextContent("상품평 22개 보기");
   });
 
   it("reads the total only, never a page of what buyers wrote", async () => {
     getChannels.mockResolvedValue([COUPANG]);
     getSellerAccountsStrict.mockResolvedValue([coupangAccount()]);
     renderHub();
-    await screen.findByRole("link", { name: "상품평 22개 보기" });
+    await screen.findByRole("link", { name: "쿠팡 상품평 22개 보기" });
     expect(getChannelReviewsStrict).toHaveBeenCalledWith("acc-cp", { size: 1 });
   });
 
   it("keeps the entry when the count read fails — the number is optional, the way in is not", async () => {
     getChannels.mockResolvedValue([COUPANG]);
     getSellerAccountsStrict.mockResolvedValue([coupangAccount()]);
-    getChannelReviewsStrict.mockRejectedValue(new Error("backend down"));
+    // Rejected by hand AFTER the first paint. Mocking a already-rejected promise and awaiting the
+    // countless label would resolve on the loading render, and an implementation that turned a failed
+    // read into `0` — the invented zero this whole entry exists to avoid — would pass unnoticed.
+    let fail: (e: Error) => void = () => {};
+    getChannelReviewsStrict.mockReturnValue(
+      new Promise((_resolve, reject) => {
+        fail = reject;
+      }),
+    );
     renderHub();
-    const link = await screen.findByRole("link", { name: "상품평 보기" });
+    await screen.findByRole("link", { name: "쿠팡 상품평 보기" });
+    await act(async () => {
+      fail(new Error("backend down"));
+    });
+    const link = screen.getByRole("link", { name: "쿠팡 상품평 보기" });
     expect(link).toHaveAttribute("href", "/connect/channels/acc-cp/reviews");
+    expect(screen.queryByRole("link", { name: /0개/ })).toBeNull();
   });
 
   it("keeps the entry when nothing has been collected yet", async () => {
@@ -189,7 +203,7 @@ describe("채널·자료 연결 — the 상품평 entry", () => {
     getSellerAccountsStrict.mockResolvedValue([coupangAccount()]);
     getChannelReviewsStrict.mockResolvedValue(reviewPage(0));
     renderHub();
-    expect(await screen.findByRole("link", { name: "상품평 0개 보기" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "쿠팡 상품평 0개 보기" })).toBeInTheDocument();
   });
 
   it("offers nothing on a channel with no connected account — there is no record to open", async () => {
@@ -201,7 +215,11 @@ describe("채널·자료 연결 — the 상품평 entry", () => {
     expect(getChannelReviewsStrict).not.toHaveBeenCalled();
   });
 
-  it("offers nothing on a channel that keeps no 상품평 record", async () => {
+  it("offers nothing on a channel that keeps no 상품평 record, account or not", async () => {
+    // The account is connected here ON PURPOSE: with no account the assertion would pass whatever
+    // the channel predicate said, and the hub could stop consulting it without a test noticing.
+    getChannels.mockResolvedValue([channel({ id: "c1", code: "NAVER", nameKo: "네이버" })]);
+    getSellerAccountsStrict.mockResolvedValue([{ ...coupangAccount(), channelId: "c1" }]);
     renderHub();
     await screen.findByLabelText("채널 목록");
     expect(screen.queryByRole("link", { name: /상품평/ })).toBeNull();
@@ -212,7 +230,7 @@ describe("채널·자료 연결 — the 상품평 entry", () => {
     getChannels.mockResolvedValue([COUPANG]);
     getSellerAccountsStrict.mockResolvedValue([coupangAccount()]);
     const { container } = renderHub();
-    const link = await screen.findByRole("link", { name: "상품평 22개 보기" });
+    const link = await screen.findByRole("link", { name: "쿠팡 상품평 22개 보기" });
     link.focus();
     expect(document.activeElement).toBe(link);
     await expectNoAxeViolations(container);
