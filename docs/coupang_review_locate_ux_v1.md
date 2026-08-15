@@ -112,14 +112,51 @@ Verified against the database and the log, not against the run's own summary:
 - **The band is visible.** The operator confirmed it on screen — which is the only check that matters here,
   and the one that found §6.
 
-> **This proof was taken at `c334b763`, and the independent review changed the code after it** (§6.1). None
-> of those fixes is visible on the happy path — they close races between two presses, retract rings the run
-> has moved on from, and refuse a row that changed under the read — and the real-Chromium regression covers
-> the ring and the new row check. But the sitting above did not exercise the merged code, and one change
-> could plausibly show up live: the annotate now refuses a row whose printed date / rating / product no
-> longer match what the reader saw, so a WING list that re-renders those cells between the read and the ring
-> would report "이 페이지에는 없습니다" where the old code rang it. Fail-closed, and worth one short
-> re-proof before this is put in front of a seller.
+That sitting was taken at `c334b763`, before the independent review changed the code (§6.1). §5.1 is the
+re-proof on the merged code, and it is the one that counts.
+
+---
+
+## 5.1 The re-proof on merged main — LIVE_PROVEN at `f357fafe`
+
+A second sitting, `COUPANG_WING_REVIEW_LOCATE`, READ_ONLY, run `wt-9c2caad10d47` / approval
+`apr-9503d9512dae`, pinned to `f357fafe` — merged main, review fixes included.
+
+**What nearly made this proof worthless.** The backend serving the first attempt had been started at 06:09;
+the review fixes were compiled at 15:14 and merged at 15:18, and the project runs `bootRun` without
+devtools, so that JVM had loaded the pre-fix classes and would have kept serving them. The four things this
+sitting exists to check — the read→highlight identity recheck, page pinning, the stale-binding guards, the
+teardown — are all *inside* those fixes. Run as-is, the sitting would have produced a clean green log
+proving the behaviour of code that is not what shipped, and the doc would have recorded it as LIVE_PROVEN.
+**A long-lived dev process is a silent version pin.** Backend and frontend were both restarted from
+`f357fafe` before the bootstrap; the harness pins the commit, but nothing pins a JVM that is already up.
+
+Two presses on the same review, on a 10-row 상품평 page:
+
+```
+07:31:35  run_grant                GRANTED
+07:37:14  locate_binding           resolved=true          ← press 1, its own binding
+07:37:18  review_read              rows=10 excludedColumns=1
+07:37:18  locate                   LOCATED matches=1 highlighted=true
+07:38:36  locate_binding           resolved=true          ← press 2, a different binding
+07:38:40  review_read              rows=10 excludedColumns=1
+07:38:40  locate                   LOCATED matches=1 highlighted=true
+```
+
+| | before | after |
+|---|---|---|
+| `reviews` | 22 | **22** |
+| `sync_jobs` | 2 | **2** |
+| `channel_review_locate_ref` | 3 | **5** (= presses), both rows `consumed_at` non-null |
+
+- **The four review-era additions do not block the happy path.** `matches=1` on both presses is the whole
+  answer: the identity recheck accepted a row it had just read, and the pinned page was still the page.
+- **The second press replaces the ring; it does not add one.** The operator confirmed **one row** outlined
+  after press 2. This is the only way to check it — `highlighted=true` is written identically whether or not
+  the previous ring was retracted, so the accumulation defect §6.1 fixed would leave exactly this log.
+- **0 marketplace actions.** Every click / type / submit / navigate string in the 52-line log is banner or
+  manifest prose.
+- **0 stored.** Not one review written, not one sync job — on a path that reads 10 rows twice.
 
 ---
 
@@ -234,10 +271,12 @@ either way and were rewritten.
 4. **The look-again loop is bounded at ten minutes and says nothing when it stops.** The copy asks the seller
    to press `[다시 확인]` "한참 뒤라면" rather than promising it watches forever, which is honest but not the
    same as telling them the moment it gave up. A run that re-parked on expiry would.
-5. **Discoverability of the entry point is unmeasured.** The 상품평 screen is reached from the channel
-   workspace's header (`[상품평]`, rendered only when the channel resolves to `COUPANG`), and there is no
-   route to it from `/connect`. During the live sitting the operator could not find that button; the API and
-   the render condition both check out, so what failed is discovery rather than the code — and that is a real
-   finding about the surface, not a defect I have reproduced.
+5. **The entry point cannot be found, and that is now measured.** The 상품평 screen is reached from the
+   channel workspace's header (`[상품평]`, rendered only when the channel resolves to `COUPANG`), and there
+   is no route to it from `/connect`. **Both live sittings stalled here** — at `c334b763` the operator could
+   not find the button, and at the §5.1 re-proof they reported the collected reviews as missing entirely. The
+   data was never missing: the API answered `total=22` for that account while they were looking at a screen
+   with no way in, and the sitting only continued because they were handed the URL directly. Twice is not a
+   discovery anecdote; the surface has no path to a working feature. Backlog #96 owns it.
 6. **No second-channel story.** `REVIEW_LOCATE` is Coupang-only by construction: the mint refuses any other
    channel, because the reader, the header roles and the pager all belong to the WING 상품평 screen.
