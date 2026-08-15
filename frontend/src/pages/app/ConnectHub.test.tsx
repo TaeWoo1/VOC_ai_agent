@@ -9,12 +9,14 @@ import type { ChannelResponse, SellerAccountResponse } from "../../lib/types";
 const getChannels = vi.fn();
 const getSellerAccountsStrict = vi.fn();
 const getConnectionStatusStrict = vi.fn();
+const getChannelReviewsStrict = vi.fn();
 
 vi.mock("../../lib/apiClient", () => ({
   api: {
     getChannels: () => getChannels(),
     getSellerAccountsStrict: () => getSellerAccountsStrict(),
     getConnectionStatusStrict: (id: string) => getConnectionStatusStrict(id),
+    getChannelReviewsStrict: (id: string, params: unknown) => getChannelReviewsStrict(id, params),
   },
   getToken: () => null,
 }));
@@ -47,11 +49,36 @@ function channel(over: Partial<ChannelResponse> & Pick<ChannelResponse, "id">): 
   } as ChannelResponse;
 }
 
+const COUPANG = channel({
+  id: "cp",
+  code: "COUPANG",
+  nameKo: "쿠팡",
+  status: "AVAILABLE",
+  actionLabel: "관리",
+});
+
+function coupangAccount(): SellerAccountResponse {
+  return {
+    id: "acc-cp",
+    channelId: "cp",
+    channelNameKo: "쿠팡",
+    alias: null,
+    connectionStatus: "CONNECTED",
+    lastSyncedAt: "2026-08-15T00:00:00Z",
+    fileUpload: false,
+  };
+}
+
+function reviewPage(total: number) {
+  return { page: 0, size: 1, total, newCount: 0, lastImportAt: null, lastImportComplete: true, items: [] };
+}
+
 beforeEach(() => {
   openCount.mockReturnValue(0);
   getChannels.mockResolvedValue([channel({ id: "c1" }), channel({ id: "c2", nameKo: "채널 나" })]);
   getSellerAccountsStrict.mockResolvedValue([] as SellerAccountResponse[]);
   getConnectionStatusStrict.mockResolvedValue({});
+  getChannelReviewsStrict.mockResolvedValue(reviewPage(22));
 });
 
 afterEach(() => {
@@ -122,6 +149,73 @@ describe("채널·자료 연결 — the hub", () => {
       "href",
       "/connect/imports",
     );
+  });
+});
+
+/**
+ * The hub is where a seller looks for what a channel collected, and until now the 상품평 record was
+ * reachable only from a header button one page deeper. Two live sittings stalled on exactly that:
+ * the data was there — the API answered with the full total — and the person in front of the screen
+ * still had to be told the URL. These tests hold the row's way in.
+ */
+describe("채널·자료 연결 — the 상품평 entry", () => {
+  it("puts the record one click from the hub, with the count on the button", async () => {
+    getChannels.mockResolvedValue([COUPANG]);
+    getSellerAccountsStrict.mockResolvedValue([coupangAccount()]);
+    renderHub();
+    const link = await screen.findByRole("link", { name: "상품평 22개 보기" });
+    expect(link).toHaveAttribute("href", "/connect/channels/acc-cp/reviews");
+  });
+
+  it("reads the total only, never a page of what buyers wrote", async () => {
+    getChannels.mockResolvedValue([COUPANG]);
+    getSellerAccountsStrict.mockResolvedValue([coupangAccount()]);
+    renderHub();
+    await screen.findByRole("link", { name: "상품평 22개 보기" });
+    expect(getChannelReviewsStrict).toHaveBeenCalledWith("acc-cp", { size: 1 });
+  });
+
+  it("keeps the entry when the count read fails — the number is optional, the way in is not", async () => {
+    getChannels.mockResolvedValue([COUPANG]);
+    getSellerAccountsStrict.mockResolvedValue([coupangAccount()]);
+    getChannelReviewsStrict.mockRejectedValue(new Error("backend down"));
+    renderHub();
+    const link = await screen.findByRole("link", { name: "상품평 보기" });
+    expect(link).toHaveAttribute("href", "/connect/channels/acc-cp/reviews");
+  });
+
+  it("keeps the entry when nothing has been collected yet", async () => {
+    getChannels.mockResolvedValue([COUPANG]);
+    getSellerAccountsStrict.mockResolvedValue([coupangAccount()]);
+    getChannelReviewsStrict.mockResolvedValue(reviewPage(0));
+    renderHub();
+    expect(await screen.findByRole("link", { name: "상품평 0개 보기" })).toBeInTheDocument();
+  });
+
+  it("offers nothing on a channel with no connected account — there is no record to open", async () => {
+    getChannels.mockResolvedValue([COUPANG]);
+    getSellerAccountsStrict.mockResolvedValue([]);
+    renderHub();
+    await screen.findByLabelText("채널 목록");
+    expect(screen.queryByRole("link", { name: /상품평/ })).toBeNull();
+    expect(getChannelReviewsStrict).not.toHaveBeenCalled();
+  });
+
+  it("offers nothing on a channel that keeps no 상품평 record", async () => {
+    renderHub();
+    await screen.findByLabelText("채널 목록");
+    expect(screen.queryByRole("link", { name: /상품평/ })).toBeNull();
+    expect(getChannelReviewsStrict).not.toHaveBeenCalled();
+  });
+
+  it("stays keyboard-reachable and has no axe violations with the entry present", async () => {
+    getChannels.mockResolvedValue([COUPANG]);
+    getSellerAccountsStrict.mockResolvedValue([coupangAccount()]);
+    const { container } = renderHub();
+    const link = await screen.findByRole("link", { name: "상품평 22개 보기" });
+    link.focus();
+    expect(document.activeElement).toBe(link);
+    await expectNoAxeViolations(container);
   });
 });
 

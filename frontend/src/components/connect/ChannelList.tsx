@@ -5,13 +5,14 @@ import { CAFE24_CONNECT_ROUTE } from "../../lib/cafe24Connect";
 import { frontendRunId, isWalkthroughMode, withWalkthroughRun } from "../../lib/guidedConnection/walkthrough";
 import { relativeTime } from "../../lib/format";
 import { expiryNeedsAttention, shouldOfferRenewal } from "../../lib/coupangExpiry";
+import { hasReviewRecord, reviewEntryLabel, reviewRecordPath } from "../../lib/reviewRecord";
 import { ExpiryChip, RENEW_CTA_LABEL } from "../coupang/CoupangExpiryPanel";
 import type {
   ChannelResponse,
   ConnectionStatusView,
   SellerAccountResponse,
 } from "../../lib/types";
-import { Btn } from "../ui/Btn";
+import { Btn, BtnLink } from "../ui/Btn";
 import { Chip } from "../ui/Chip";
 import { Empty } from "../ui/Empty";
 
@@ -30,12 +31,14 @@ function ChannelRow({
   account,
   health,
   statusLoading,
+  reviewCount,
   onNotice,
 }: {
   channel: ChannelResponse;
   account: SellerAccountResponse | null;
   health: ConnectionStatusView | null;
   statusLoading: boolean;
+  reviewCount: number | null;
   onNotice: (message: string) => void;
 }) {
   const navigate = useNavigate();
@@ -52,6 +55,12 @@ function ChannelRow({
   const expiry = health?.expiry ?? null;
   const expiryFlagged = !!expiry && expiryNeedsAttention(expiry.state);
   const offerRenewal = !!account && shouldOfferRenewal(expiry);
+
+  // The way into what this channel collected. It needs an account because the record is that
+  // account's, and it needs nothing else — not a count, not a healthy connection. A seller whose
+  // collection is failing still has the 상품평 gathered before it broke, and hiding the entry until
+  // the numbers look right is how a working feature became invisible in the first place.
+  const showReviewEntry = hasReviewRecord(channel.code) && !!account;
 
   // Route targets updated to the v2 IA; the decision logic itself is untouched.
   function handleAction() {
@@ -132,14 +141,36 @@ function ChannelRow({
           </Btn>
         ) : null}
       </div>
-      <Btn
-        size="sm"
-        variant={action.intent === "manage" ? "outline" : "solid"}
-        onClick={handleAction}
-        disabled={action.disabled || statusLoading}
-      >
-        {action.label}
-      </Btn>
+      {/*
+        Two actions at most, and they wrap rather than compete: on a narrow screen the row's text
+        column takes the full width and these fall underneath it, still at full size. Nothing here
+        collapses into an overflow menu — an entry point a seller has already failed to find twice
+        does not get hidden behind another press.
+
+        The 상품평 entry is the loud one on a healthy row, because the record is where the seller is
+        going and the connection is only how it got there. When collection is failing that ordering
+        inverts: the row is asking to be repaired, and a bright button pointing away from the repair
+        would be the wrong invitation.
+      */}
+      <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto">
+        {showReviewEntry && account ? (
+          <BtnLink
+            to={reviewRecordPath(account.id)}
+            size="sm"
+            variant={failing ? "outline" : "solid"}
+          >
+            {reviewEntryLabel(reviewCount)}
+          </BtnLink>
+        ) : null}
+        <Btn
+          size="sm"
+          variant={action.intent === "manage" ? "outline" : "solid"}
+          onClick={handleAction}
+          disabled={action.disabled || statusLoading}
+        >
+          {action.label}
+        </Btn>
+      </div>
     </li>
   );
 }
@@ -149,12 +180,15 @@ export function ChannelList({
   accounts,
   health,
   statusLoading,
+  /** Collected 상품평 per account, for the rows that have a record. Absent = unknown, never zero. */
+  reviewCounts,
   onNotice,
 }: {
   channels: readonly ChannelResponse[];
   accounts: SellerAccountResponse[] | null;
   health: Map<string, ConnectionStatusView>;
   statusLoading: boolean;
+  reviewCounts?: Map<string, number>;
   onNotice: (message: string) => void;
 }) {
   if (channels.length === 0) {
@@ -171,6 +205,7 @@ export function ChannelList({
             account={account}
             health={account ? health.get(account.id) ?? null : null}
             statusLoading={statusLoading}
+            reviewCount={account ? reviewCounts?.get(account.id) ?? null : null}
             onNotice={onNotice}
           />
         );
