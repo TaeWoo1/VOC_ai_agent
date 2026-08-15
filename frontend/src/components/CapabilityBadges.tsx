@@ -14,7 +14,50 @@ const STATUS_STYLE: Record<string, { cls: string; label: string }> = {
   UNSUPPORTED: { cls: "bg-ink/5 text-muted", label: "미지원" },
 };
 
+/** How each acquisition path reads to a seller. A method with no name here is not described at all. */
+const METHOD_LABEL: Record<string, string> = {
+  ACTION_WINDOW: "Action Window",
+  API: "공식 API",
+  EXPORT: "파일 내보내기",
+  MANUAL: "직접 입력",
+};
+
+const PATH_STATUS_LABEL: Record<string, string> = {
+  LIVE_PROVEN: "수집 지원",
+  NEEDS_VERIFICATION: "수집 지원·확인 필요",
+};
+
+/** The first path we can actually describe. An unknown method or status is not rendered as a claim. */
+function describedPath(cap: DataTypeCapability) {
+  return (cap.acquisitionPaths ?? []).find(
+    (path) => METHOD_LABEL[path.method] && PATH_STATUS_LABEL[path.verificationStatus],
+  );
+}
+
+/**
+ * One data type's badge.
+ *
+ * **Two questions, not one.** `supported` answers what the pull connector can serve; an acquisition
+ * path answers how SellerOps actually gets the data. Coupang 상품평 is `supported: false` — Coupang
+ * publishes no seller review API — and is collected anyway, through the Action Window. Rendering the
+ * boolean alone printed 리뷰 미지원 on a page whose next panel counted 22 collected 상품평.
+ *
+ * So a described acquisition path replaces the connector's verdict on this badge, and says which route
+ * it is. The missing official API is not inferred from `supported: false` here — that fact belongs to
+ * the connector, which publishes it as its own 제외 범위 note (Coupang: `REVIEW_API`), rendered below.
+ */
 function CapabilityBadge({ cap }: { cap: DataTypeCapability }) {
+  const path = describedPath(cap);
+  if (path) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-xl bg-good/10 px-3 py-1.5 text-base font-semibold text-good">
+        {cap.label}
+        <span className="text-sm font-medium opacity-80">
+          {PATH_STATUS_LABEL[path.verificationStatus]} · {METHOD_LABEL[path.method]}
+        </span>
+      </span>
+    );
+  }
   const style = STATUS_STYLE[cap.verificationStatus] ?? STATUS_STYLE.UNSUPPORTED;
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-base font-semibold ${style.cls}`}>

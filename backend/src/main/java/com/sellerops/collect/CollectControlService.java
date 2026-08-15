@@ -327,7 +327,10 @@ public class CollectControlService {
                         caps.supports(dt),
                         caps.supports(dt)
                                 ? caps.verificationStatus().getOrDefault(dt, "NEEDS_VERIFICATION")
-                                : "UNSUPPORTED"))
+                                : "UNSUPPORTED",
+                        // Read beside the connector's answer, never folded into it: a type the
+                        // connector cannot serve may still be one SellerOps collects another way.
+                        AcquisitionPathRegistry.pathsFor(channelCode, dt)))
                 .toList();
         List<ChannelCapabilityOverview.ScopeNote> scopes = connector.unsupportedScopes(channelCode).stream()
                 .map(s -> new ChannelCapabilityOverview.ScopeNote(s.code(), s.label()))
