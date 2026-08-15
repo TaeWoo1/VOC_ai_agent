@@ -134,8 +134,18 @@ to hold in order to re-find a review later — exactly the storage this pilot re
 
 **One match or nothing.** Zero and two are both refusals and neither highlights anything, because the
 failure a loose match produces is not "no ring" — it is a ring around someone else's review, which the
-seller reads as SellerOps telling them what a buyer said. The highlight itself is a marker attribute, an
-outline, and a scroll: it never clicks, focuses, types, or submits.
+seller reads as SellerOps telling them what a buyer said. The highlight itself is a marker attribute, a
+band drawn around the row, and a scroll: it never clicks, focuses, types, or submits.
+
+**The product entry point is `docs/coupang_review_locate_ux_v1.md`** — the `REVIEW_LOCATE` intent, the
+single-use `locateRef`, the button, and the live proof. Read it for anything about how a seller *asks* for
+a locate; this section stays the description of how a review is matched.
+
+> **Correction (2026-08-15, commit `c334b763`).** The highlight used to set `outline` on the matched
+> `<tr>`, and Chromium does not paint that: the DOM reported the ring and the screen showed nothing. Both
+> live records below report `highlighted=true` from their locate legs, and those runs did identify and mark
+> the right row — but nobody could SEE it until the band moved onto the cells. Read those claims as "the
+> right row was identified". See the locate doc §6.
 
 ## 6. Where the pieces live
 
@@ -322,20 +332,11 @@ identities.
    one screen, not a review stored last week. That is deliberate for v1 — the walk covers the whole pager
    regardless, and the DATABASE is the dedupe authority, which the re-sync proved (`stored=0 / skipped=22`).
    It matters only if a future version stops walking to the end.
-3. **`[쿠팡에서 보기]` is not wired from the frontend.** The locate itself is built, tested, and performed
-   live: the acquisition sitting offers a locate checkpoint after the handoff and rings one stored review on
-   the operator's own screen. What is missing is the *product* entry — a button in the review detail that
-   starts that locate without a terminal.
-
-   That needs a `REVIEW_LOCATE` run intent in `contracts/action-window/v2/`, a locate engine in the
-   collector, and a backend-minted `reviewRef` so neither the review nor its target crosses the frontend —
-   the same shape `submissionRef` has. The transport already exists: the Coupang guided issuance walk is
-   FE-initiated over the bridge and is live-proven, so this is choreography rather than new plumbing.
-
-   The intent is deliberately **not** in the contract yet. An intent no runtime honors is the same defect as
-   an approval manifest declaring an action the run never performs — a promise in the shared vocabulary. It
-   lands with the slice that implements it. The detail page correspondingly renders the review and its
-   catalog identity and offers **no button**, rather than a button that does nothing.
+3. ~~**`[쿠팡에서 보기]` is not wired from the frontend.**~~ **DONE — 2026-08-15**, and documented on its
+   own in `docs/coupang_review_locate_ux_v1.md`. The `REVIEW_LOCATE` intent, the single-use `locateRef` (the
+   `submissionRef` shape this item predicted), the `locate` carrier, the button and its four outcomes all
+   landed together and were proven on the real screen. The detail page now offers the button because there
+   is a run behind it.
 4. **The product SKU is Coupang's 노출상품ID with no channel prefix**, matching every other connector.
    An org connected to two channels where a NAVER SKU is exactly a Coupang productId digit string would
    collide. Not observed; recorded here rather than silently assumed away.

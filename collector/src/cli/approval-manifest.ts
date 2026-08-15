@@ -310,7 +310,7 @@ export const APPROVAL_ACTIONS = [
   // to SellerOps and to nothing else — no marketplace state is touched, and a replay stores nothing new
   // because every row de-duplicates on its content.
   "HAND_REVIEWS_TO_SELLEROPS_BACKEND",
-  // Ring ONE already-stored review on the screen: a marker attribute, an outline, and a scroll into view.
+  // Ring ONE already-stored review on the screen: a marker attribute, a band around the row, and a scroll.
   // The row is chosen OFFLINE by matching product, option, date, rating and the review body's fingerprint,
   // and zero matches and two matches are BOTH refusals that ring nothing — a ring around the wrong review is
   // the product telling the seller what a buyer said. It never clicks, focuses, types, or submits.
@@ -1193,7 +1193,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     ],
     // The one 상품평 phase that may ring. The discovery next door may not, and the difference is real: a ring
     // needs a target, and this is the only run that HAS one — a review SellerOps already stored, matched
-    // against the page on five fields at once. The ring is inert (a marker, an outline, a scroll).
+    // against the page on five fields at once. The ring is inert (a marker, a band, a scroll).
     allowsHighlight: true,
     // ...and it is a ROW matched on content, not a control found by a selector. See `highlightTarget`.
     highlightTarget: "CONTENT_MATCHED_ROW",
@@ -1579,7 +1579,7 @@ export const COUPANG_WING_REVIEW_ACQUISITION_SCOPE = Object.freeze({
     "0 marketplace actions (0 clicks, 0 inputs, 0 submissions, 0 page turns, 0 navigations after the window " +
     "opens; 0 buyer/작성자 names read, 0 image or video addresses read, 0 raw HTML/DOM/screenshots kept), " +
     "1 read per page the OPERATOR brings up (bounded at 100 pages), 1 handoff of what was read to the " +
-    "SellerOps backend, and at most 1 inert highlight (a marker attribute + an outline + a scroll) on a " +
+    "SellerOps backend, and at most 1 inert highlight (a marker attribute + a band drawn around the row + a scroll) on a " +
     "single matched row",
 });
 
@@ -1608,8 +1608,8 @@ export const COUPANG_WING_REVIEW_LOCATE_SCOPE = Object.freeze({
     "0 marketplace actions (0 clicks, 0 inputs, 0 submissions, 0 page turns, 0 navigations after the window " +
     "opens; 0 buyer/작성자 names read, 0 image or video addresses read, 0 raw HTML/DOM/screenshots kept), " +
     "0 reviews stored, 1 backend call to resolve the single-use binding, repeated reads of the page the " +
-    "OPERATOR has up while the run is looking, and at most 1 inert highlight (a marker attribute + an " +
-    "outline + a scroll) on a single matched row",
+    "OPERATOR has up while the run is looking, and at most 1 inert highlight (a marker attribute + a band " +
+    "drawn around the row + a scroll) on a single matched row",
 });
 
 export const COUPANG_WING_CREDENTIAL_HANDOFF_SCOPE = Object.freeze({
