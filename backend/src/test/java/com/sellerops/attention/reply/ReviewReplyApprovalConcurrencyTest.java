@@ -1,12 +1,14 @@
 package com.sellerops.attention.reply;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.AdditionalAnswers.delegatesTo;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 
 import com.sellerops.attention.VocItemRef;
+import com.sellerops.common.ApiException;
 import com.sellerops.attention.reply.dto.ReviewReplyApprovalResponse;
 import com.sellerops.attention.triage.ReviewTriageAuditRepository;
 import com.sellerops.attention.triage.ReviewTriageRepository;
@@ -287,26 +289,93 @@ class ReviewReplyApprovalConcurrencyTest {
      * existing row. Without it both read APPROVED and both append "from APPROVED" — two rows,
      * one predecessor, an impossible history that no constraint can catch because the command
      * ids differ.
+     *
+     * <p><b>Driven to an exact interleaving, not raced.</b> This test used to start two
+     * withdrawals on a latch and hope, and hoping is what made it fail 2 runs in 5 on CI while
+     * passing locally: it was not detecting a flaky test but a genuinely interleaving-dependent
+     * ANSWER. The loser was held past the gate here and answered 200; released after the winner
+     * committed, it answered 409. Both orders are now pinned, in this test and in
+     * {@link #aWithdrawalArrivingAfterTheExitIsAlreadyTakenAnswersTheSame}, and the two must
+     * agree — that agreement is the property, not either outcome on its own.
+     *
+     * <p>The loser is stalled at its fast-path lookup, i.e. AFTER its gate read APPROVED and
+     * before it can write: exactly the interleaving in which the old code let both through and
+     * appended a WITHDRAWN → WITHDRAWN edge.
      */
     @Test
     void concurrentTransitionsOnAnExistingRowRecordAContiguousHistory() throws Exception {
         // Establish the row so the lock (not the review_id constraint) is what serializes.
         service.decideApproval(org, account, ref, "APPROVED", 1, "cmd-seed", user);
 
-        CountDownLatch start = new CountDownLatch(1);
-        Future<?> w1 = submit(() -> {
-            start.await();
-            return service.decideApproval(org, account, ref, "WITHDRAWN", null, "cmd-w1", user);
-        });
-        Future<?> w2 = submit(() -> {
-            start.await();
-            return service.decideApproval(org, account, ref, "WITHDRAWN", null, "cmd-w2", user);
-        });
-        start.countDown();
-        w1.get(GATE_TIMEOUT_SEC, TimeUnit.SECONDS);
-        w2.get(GATE_TIMEOUT_SEC, TimeUnit.SECONDS);
+        AuditGate gate = new AuditGate();
+        ReviewReplyService gated = gate.serviceGatedOnFastPathLookup();
 
+        Future<ReviewReplyApprovalResponse> loser = submit(() ->
+                gated.decideApproval(org, account, ref, "WITHDRAWN", null, "cmd-w1", user));
+        try {
+            gate.awaitStalled();
+            // The winner withdraws underneath the loser, which has already passed the gate.
+            ReviewReplyApprovalResponse winner =
+                    service.decideApproval(org, account, ref, "WITHDRAWN", null, "cmd-w2", user);
+            assertThat(winner.replayed()).isFalse();
+        } finally {
+            gate.releaseAll();
+        }
+
+        ReviewReplyApprovalResponse r = loser.get(GATE_TIMEOUT_SEC, TimeUnit.SECONDS);
+        // It could not have short-circuited on its own command, so this is the writer's no-op.
+        assertThat(gate.fastPathSawNothing()).isTrue();
+        assertThat(r.replayed()).isTrue();
+        assertThat(r.state()).isEqualTo("WITHDRAWN");
+
+        // One seed edge and one withdrawal edge. The loser wrote NOTHING: no WITHDRAWN → WITHDRAWN
+        // row that moves nothing, and no reattribution of the standing decision to whoever was last.
+        assertThat(approvalAudits.findAll()).hasSize(2);
+        assertThat(approvalAudits.findByOrgIdAndCommandId(org, "cmd-w1")).isEmpty();
         assertTruthfulChain();
+    }
+
+    /**
+     * The other order, and the point of the pair: a withdrawal whose gate runs AFTER the exit was
+     * already taken must answer exactly what the one held past its gate answered. Sequential and
+     * concurrent-loser are the same request as far as the caller is concerned; a caller cannot
+     * see which side of a commit its read landed on, so the answer must not depend on it.
+     */
+    @Test
+    void aWithdrawalArrivingAfterTheExitIsAlreadyTakenAnswersTheSame() {
+        service.decideApproval(org, account, ref, "APPROVED", 1, "cmd-seed", user);
+        service.decideApproval(org, account, ref, "WITHDRAWN", null, "cmd-w1", user);
+
+        ReviewReplyApprovalResponse late =
+                service.decideApproval(org, account, ref, "WITHDRAWN", null, "cmd-w2", user);
+
+        assertThat(late.replayed()).isTrue();
+        assertThat(late.state()).isEqualTo("WITHDRAWN");
+        assertThat(approvalAudits.findAll()).hasSize(2);
+        assertThat(approvalAudits.findByOrgIdAndCommandId(org, "cmd-w2")).isEmpty();
+        assertTruthfulChain();
+    }
+
+    /**
+     * The idempotency is narrow. It softens ONE transition — a withdrawal onto an already
+     * withdrawn row — and nothing else: a review nobody ever approved still has no exit to take,
+     * and a command id already spent on a different decision is still a conflict.
+     */
+    @Test
+    void nothingElseWasSoftenedIntoSuccess() {
+        // Never approved: there is no exit, and the gate says so.
+        assertThatThrownBy(() ->
+                service.decideApproval(org, account, ref, "WITHDRAWN", null, "cmd-none", user))
+                .isInstanceOf(ApiException.class);
+        assertThat(approvalAudits.findAll()).isEmpty();
+
+        // A command id reused for a DIFFERENT decision stays a conflict, withdrawal or not.
+        service.decideApproval(org, account, ref, "APPROVED", 1, "cmd-shared", user);
+        assertThatThrownBy(() ->
+                service.decideApproval(org, account, ref, "WITHDRAWN", null, "cmd-shared", user))
+                .isInstanceOf(ApiException.class);
+        assertThat(approvalRepo.findByOrgIdAndReviewId(org, review.getId()).orElseThrow().getState())
+                .isEqualTo(ReviewReplyApprovalState.APPROVED);
     }
 
     /**

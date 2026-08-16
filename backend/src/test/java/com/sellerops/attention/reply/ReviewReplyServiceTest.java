@@ -621,8 +621,22 @@ class ReviewReplyServiceTest {
         assertThat(approvalAudits.findAll()).hasSize(1);
     }
 
+    /**
+     * Withdrawing an already-withdrawn reply changes nothing and says so, rather than failing.
+     *
+     * <p>This asserted a 409 until 2026-08-16, and that is what made the endpoint answer
+     * differently depending on thread scheduling: the gate deciding it is a check-then-act, so of
+     * two identical concurrent withdrawals the loser got 200 when it read before the winner
+     * committed and 409 when it read after. A caller cannot see which side of a commit its read
+     * landed on, so the answer must not depend on it — the exit is idempotent.
+     *
+     * <p>{@code canWithdraw} stays FALSE, and that is not a contradiction of the "every capability
+     * means what the write path does" rule below: the flag says there is nothing to withdraw, and
+     * the write path agrees by withdrawing nothing. What changed is the answer given to a caller
+     * who asks anyway — 200 with an empty trail rather than an error — not what the server does.
+     */
     @Test
-    void canWithdrawFalseBecauseAlreadyWithdrawnMeansWithdrawingIsRefused() {
+    void withdrawingWhatIsAlreadyWithdrawnChangesNothingAndSaysSo() {
         triage(TriageDisposition.RESPONSE_NEEDED);
         service.saveDraft(org, account, ref, "합성-답변 초안", 0, user);
         approveHead();
@@ -630,12 +644,12 @@ class ReviewReplyServiceTest {
                 UUID.randomUUID().toString(), user);
 
         assertThat(view().capabilities().canWithdraw()).isFalse();
-        assertThatThrownBy(() -> service.decideApproval(org, account, ref, "WITHDRAWN", null,
-                UUID.randomUUID().toString(), user))
-                .isInstanceOf(ApiException.class)
-                .satisfies(e -> assertThat(((ApiException) e).getStatus())
-                        .isEqualTo(HttpStatus.CONFLICT));
-        // No WITHDRAWN -> WITHDRAWN edge: the trail records transitions, not re-assertions.
+        var again = service.decideApproval(org, account, ref, "WITHDRAWN", null,
+                UUID.randomUUID().toString(), user);
+        assertThat(again.state()).isEqualTo("WITHDRAWN");
+        assertThat(again.replayed()).isTrue();
+        // No WITHDRAWN -> WITHDRAWN edge: the trail records transitions, not re-assertions, and
+        // the standing decision is not reattributed to whoever asked last.
         assertThat(approvalAudits.findAll()).hasSize(2);
     }
 
