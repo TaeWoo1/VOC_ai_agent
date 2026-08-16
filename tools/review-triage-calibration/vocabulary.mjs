@@ -51,6 +51,32 @@ export function stratumOf(rating, bodyCodePoints) {
   return `${band}_${size}`;
 }
 
+/**
+ * RUBRIC v2 section 7.3 — the rows both people label independently, by rating band rather than in
+ * the sample's own proportions. A uniform overlap would be ~26 rows of 5-star praise and would
+ * measure agreement on the easy class while saying nothing about the scarce one the gates are about.
+ */
+export const OVERLAP_ALLOCATION = {
+  LOW_S: 2,
+  LOW_M: 2,
+  LOW_L: 2,
+  MID_S: 4,
+  MID_M: 4,
+  MID_L: 2,
+  HIGH_L: 8,
+  HIGH_M: 4,
+  HIGH_S: 2,
+};
+
+/**
+ * RUBRIC v2 section 7.2 — the owner's worked examples, drawn from OUTSIDE the sample.
+ *
+ * Only the 4-5 star strata appear, and that is forced rather than chosen: every 1-3 star review in
+ * the frame is inside the sample, so no low-rated row exists outside it to teach on. The low-rating
+ * tie-breakers are taught by RUBRIC v1 section 2's own worked cases, printed on every page.
+ */
+export const CALIBRATION_ALLOCATION = { HIGH_L: 10, HIGH_M: 8, HIGH_S: 6 };
+
 /** The draw of RUBRIC v2 section 4.2, as counts per stratum. */
 export const ALLOCATION = {
   LOW_S: Infinity,

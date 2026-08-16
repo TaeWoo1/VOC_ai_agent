@@ -112,25 +112,61 @@ class ReviewTriageEvalIT {
                     + "every number below is suspect\n");
         }
 
-        for (String scope : List.of("ALL", "DEV", "HOLDOUT")) {
+        boolean spendHoldout = "true".equals(System.getenv("REVIEW_EVAL_SPEND_HOLDOUT"));
+        if (spendHoldout) {
+            out.append("""
+
+                    ════════════════════════════════════════════════════════════════════════
+                      SPENDING THE HOLDOUT. RUBRIC v2 §6.2: it is read ONCE, and the number
+                      below is the reported number. Re-tuning after this and reading again is
+                      how a threshold stops being a threshold — it needs a new split and a
+                      re-labeled sample, not a second look.
+                    ════════════════════════════════════════════════════════════════════════
+                    """);
+        }
+        for (String scope : spendHoldout ? List.of("DEV", "HOLDOUT", "ALL") : List.of("DEV")) {
             List<Row> scoped = scope.equals("ALL") ? rows : TriageEvalReport.only(rows, scope);
             out.append(section(scope, scoped));
+            out.append(populationOf(scoped, inFrame, frameRows.size(), scope));
+        }
+        if (!spendHoldout) {
+            out.append("""
+
+                      HOLDOUT withheld. The person designing the rule is the person running this
+                      harness, so §6.2's "read once" needs a mechanism rather than an intention.
+                      Set REVIEW_EVAL_SPEND_HOLDOUT=true when the candidate is final.
+                    """);
         }
 
-        Population population = TriageEvalReport.population(rows, new Frame(inFrame, drawnCounts));
-        out.append(String.format("""
-
-                  population estimate over all %d reviews in the frame (RUBRIC v2 §4.4 — descriptive)
-                    rule flags 확인 필요 for      %,8.0f  ± %,.0f
-                    a human would flag           %,8.0f  ± %,.0f
-                    the rule misses              %,8.0f
-                    unestimated (UNCERTAIN)      %,8.0f
-                    Six of nine strata are censused, so all of this uncertainty is the 4–5★ bands.
-                %n""", frameRows.size(), population.flagged(), population.flaggedHalfWidth(),
-                population.needsAttention(), population.needsAttentionHalfWidth(),
-                population.missed(), population.unestimated()));
-
         System.out.print(out);
+    }
+
+    /**
+     * The population reading for one scope.
+     *
+     * <p>The denominator is how many rows of that stratum are IN SCOPE, not how many the contract
+     * draws: a `DEV`-only reading is a stratified sample of half the size, and using the full drawn
+     * count would halve every weight and under-report the corpus by a factor of two.
+     */
+    private static String populationOf(List<Row> rows, Map<String, Integer> inFrame, int frameSize,
+                                       String scope) {
+        Map<String, Integer> drawn = new LinkedHashMap<>();
+        for (Row row : rows) {
+            drawn.merge(row.stratum(), 1, Integer::sum);
+        }
+        Population population = TriageEvalReport.population(rows, new Frame(inFrame, drawn));
+        return String.format("""
+
+                    population estimate from %s over all %,d reviews in the frame (RUBRIC v2 §4.4 — descriptive)
+                      rule flags 확인 필요 for      %,8.0f  ± %,.0f
+                      a human would flag           %,8.0f  ± %,.0f
+                      the rule misses              %,8.0f
+                      unestimated (UNCERTAIN)      %,8.0f
+                      Six of nine strata are censused in the full draw, so nearly all of this
+                      uncertainty is the 4–5★ bands.
+                %n""", scope, frameSize, population.flagged(), population.flaggedHalfWidth(),
+                population.needsAttention(), population.needsAttentionHalfWidth(),
+                population.missed(), population.unestimated());
     }
 
     private static String section(String scope, List<Row> rows) {

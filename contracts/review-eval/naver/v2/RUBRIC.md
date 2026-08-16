@@ -195,8 +195,15 @@ useful, and far too high-variance to gate on.
 
 ```json
 { "reviewIdFingerprint": "<64 hex>", "tier": "NEEDS_ATTENTION",
-  "reasonCode": "PRAISE_WITH_CONCESSION", "tags": ["배송"] }
+  "reasonCode": "PRAISE_WITH_CONCESSION", "tags": ["배송"], "source": "ADJUDICATED" }
 ```
+
+`source` is `OWNER`, `ANNOTATOR` or `ADJUDICATED` (§7). It says which human decided, never anything
+about the review, and it is what makes "the numbers rest on a second labeler for 190 of these rows"
+readable from the file rather than only from a document.
+
+The overlap rows of §7.3 also produce `agreement.json` beside it, carrying — for those rows only —
+both labels and whether they matched. Same closed vocabularies, same absence of everything else.
 
 **Not** the body, the raw `리뷰글번호`, the rating, the date, the length, the stratum, the product,
 or any seller identity. The stratum in particular is absent even though every metric needs it: it
@@ -257,7 +264,117 @@ here is exactly how much it misses" is a result. `v1` §6 already says the basel
 candidate must beat; a candidate that does not beat it does not become the product because effort
 was spent on it.
 
-## 7. An LLM is compared only against these same numbers
+## 7. Who labels
+
+> **Amended before any label existed.** The first version of this file assumed one person would label
+> all 220. The product owner judged that cost too high, and this section replaces the protocol. The
+> test for whether such an amendment is legitimate is narrow: **could it have been informed by a
+> result?** `labels.json` was empty, no metric had been computed, and §4's sample, §6's split and
+> `v1` §5's gates are untouched — so it could not. Every one of those becomes unamendable the moment
+> the first label lands.
+
+### 7.1 Three roles, and what each may see
+
+| role | labels | may see |
+|---|---|---|
+| **owner** (product owner) | 24 calibration rows from **outside** the sample, then the 30 overlap rows of §7.3, then the disagreements | review text and star rating |
+| **annotator** (one person) | all 220 | review text, star rating, and the owner's 24 worked examples |
+| **the rule's author** | nothing — **does not label** | `DEV` labels and `DEV` review text only, never `HOLDOUT` (§7.6) |
+
+**No model produces a gold label.** Not for a row, not for a tie-break, not as a "first pass a human
+then corrects" — a label a person confirmed after being shown a machine's answer measures the
+person's agreement with the machine, which is not the quantity any gate here is written against.
+
+### 7.2 The calibration rows come from outside the sample
+
+The owner's first 24 rows are drawn from the **3,638 frame reviews the sample did not take**, by the
+same deterministic order: 10 from `HIGH_L`, 8 from `HIGH_M`, 6 from `HIGH_S`.
+
+They exist to do two things at once: let the owner settle a consistent reading of `v1` §2 before any
+scored row is touched, and become the worked-example sheet the annotator is given. Both uses are why
+they must sit outside the 220 — worked examples shown to the annotator are, by construction, labels
+the annotator has been told the right answer for, and if they were evaluation rows they would be
+scored as independent agreement.
+
+⚠ **They are all 4–5★, and cannot be otherwise.** Every 1–3★ review in the frame is inside the
+sample (§4.2 censuses those strata), so there is no low-rated row left outside it to teach on. The
+gap is covered the only honest way available: the low-rating tie-breakers are taught by `v1` §2's own
+worked cases, which are printed on every labeling page, rather than by a real row pulled out of the
+evaluation set to serve as an example.
+
+### 7.3 The overlap is enriched, and that is stated rather than hidden
+
+30 of the 220 are labeled independently by both people, neither seeing the other's answer. Drawn
+deterministically, and **not** in the sample's own proportions:
+
+| band | overlap rows |
+|---|---|
+| 1–2★ (all strata) | 6 |
+| 3★ (all strata) | 10 |
+| 4–5★ long | 8 |
+| 4–5★ medium | 4 |
+| 4–5★ short | 2 |
+
+A uniform overlap would be ~26 rows of 5★ praise, and would measure agreement on the easy class while
+saying nothing about the scarce one the gates are about. The cost is that the resulting agreement is
+**not the corpus-wide agreement** — it is agreement on a positive-enriched subset — and every report
+of it has to say so.
+
+### 7.4 The agreement bar, fixed now
+
+Computed on the 30 overlap rows, `UNCERTAIN` on either side excluded and counted separately:
+
+- **Decisive: Cohen's κ ≥ 0.60 on the binary `NEEDS_ATTENTION` / not partition.** That is the
+  partition `v1` §5 gates on, so it is the one that has to hold.
+- **Descriptive: three-class κ and raw agreement**, reported alongside, never in place of it.
+
+**If κ falls below 0.60**, the annotator's 190 unverified rows are **not adequate as gold**. The
+pre-committed fallback, stated now so it is not invented afterwards: report the metrics on the
+owner-labeled rows only, say plainly that they are far below `v1` §4's floor and therefore
+descriptive, and treat closing the gap as its own piece of work. A low κ is a finding about the
+rubric's clarity, not a reason to relabel until the number improves.
+
+With 30 rows κ is itself imprecise; its confidence interval is reported and is wide. That is a known
+limit of an overlap this size, and it is the reason the bar is the binary one rather than a
+three-class number that would move on a single `WATCH`/`FYI` slip.
+
+### 7.5 How gold is assembled
+
+1. The 190 rows only the annotator labeled → the annotator's label, `source = ANNOTATOR`.
+2. The 30 overlap rows where both agreed → that label, `source = OWNER`.
+3. The overlap rows where they differed → the **owner adjudicates**, having seen both answers, and
+   may land on either or on a third. `source = ADJUDICATED`.
+
+Adjudication is deliberately the only step where one human sees another's answer, and it happens
+**after** the agreement number is computed. Computing κ from adjudicated labels would score the
+overlap against a label the owner wrote while looking at it.
+
+### 7.6 The rule's author stays blind to `HOLDOUT`
+
+§6.2 says the holdout is read once. With labeling split across people, that discipline needs a
+mechanism rather than an intention, because the person designing the rule is the person running the
+harness. So: the harness prints `DEV` only. `HOLDOUT` and the combined reading are withheld unless
+the run is explicitly told to spend the holdout, and a run that spends it says so loudly.
+
+The labeling surfaces are blind in the other direction, everywhere and not only on `HOLDOUT`: no
+page a labeler sees carries `ReviewTriageRules`' answer, a predicted tier, or any other model output.
+
+### 7.7 What the annotator receives, and what they do not
+
+A single self-contained page: **body text, star rating, an opaque row number, the rubric, and the
+worked examples.** No product, no date, no review id, no fingerprint, no seller identity, no channel.
+The row number is meaningless off this machine — the map from it back to a review is generated
+locally and never leaves.
+
+Packaging **fails closed** on a body that looks like it carries direct personal data (an email
+address, a phone number, a resident-registration-shaped string): such a row is refused rather than
+sent, and the refusal is counted in the run's output.
+
+The residual is real and is named: **a second person reads real customer review prose.** That is
+inherent to human labeling by anyone other than the seller, it is the product owner's decision, and
+the mitigations above bound what travels with the text rather than pretending nothing does.
+
+## 8. An LLM is compared only against these same numbers
 
 Optional, and only on this labeled set against the deterministic rule. The external-LLM fence stands:
 no review text leaves the machine. If a local classifier is tried, it is scored by §6.3's bars on the
