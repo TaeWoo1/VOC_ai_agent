@@ -1,0 +1,19 @@
+{
+  "contract": "review-eval/naver/v2",
+  "rubricVersion": "v2",
+  "set": "pilot",
+  "_comment": [
+    "EMPTY UNTIL THE OWNER LABELS. RUBRIC.md section 10.",
+    "",
+    "Written by tools/review-triage-calibration/derive-pilot.mjs from the owner's 54-row session:",
+    "the 24 calibration rows drawn from OUTSIDE the 220-row sample, plus the 13 DEV overlap rows",
+    "inside it. The 17 HOLDOUT overlap rows are not here and must never be — section 6.2 reads the",
+    "holdout once, and a pilot is not what it was saved for.",
+    "",
+    "This is NOT gold. It is a screen (section 10.4): 37 rows can rule a candidate out and cannot",
+    "rule one in. No Wilson lower bound computed on it can reach section 5's 0.80 precision gate",
+    "even on a perfect run, so a pilot number quoted as if it had cleared that gate misreads both",
+    "files. Same closed vocabularies, same absence of everything else, as labels.json."
+  ],
+  "labels": []
+}

@@ -409,3 +409,71 @@ Two consequences for anything built on this contract:
    less true when a classifier trained or tuned against them meets a different seller. The audit
    sample above is the mechanism for finding that out, and it is the thing to build before claiming
    the classifier generalises — not a bigger version of this session.
+
+## 10. The 54-row pilot
+
+**Product-owner decision, 2026-08-16.** Before spending an annotator's pass on 220 rows, use the
+owner's own labels to find out whether a classifier can do this job at all. Written before any pilot
+number exists, for the same reason everything else here was.
+
+### 10.1 What the pilot may look at — 37 rows, not 54
+
+The owner labels 24 calibration rows (outside the sample) and 30 overlap rows (inside it). Of those
+30, **13 are `DEV` and 17 are `HOLDOUT`.**
+
+The pilot runs on the **24 + 13 = 37** rows. The 17 `HOLDOUT` rows are withheld entirely, including
+from aggregate counts: §6.2 says the holdout is read once, and a "does the model look good?" reading
+is exactly the kind of soft look that mechanism exists to prevent.
+
+The pilot therefore does **not** wait on the annotator. Deciding whether the annotator's pass is
+worth doing is its whole purpose, so it cannot be downstream of it.
+
+⚠ **32 of the 37 are 4–5★, and that is structural.** §4.2 censuses every 1–3★ review into the
+sample, so nothing outside it is low-rated. It is also the right target: the reviews a rating-only
+rule cannot see are, by definition, the highly-rated ones. What the pilot cannot say anything about
+is the 1–2★ band — which the rating already handles, and which no candidate needs to be measured on.
+
+### 10.2 What is compared, in this order of importance
+
+1. **`NEEDS_LOOK` recall and the false negatives themselves**, by `reasonCode`. The rating-only rule's
+   known blindness is the whole subject; a candidate that does not recover those misses is not
+   interesting however well it agrees elsewhere.
+2. **Precision, and false positives on 4–5★ rows the human cleared** — `v1` §5's specific harm.
+3. **Tier agreement** overall (three-class), descriptive.
+4. **`reasonCode` and `tags` disagreement**, tallied. A candidate that gets the tier right for the
+   wrong stated reason is a different thing from one that agrees, and the difference matters for a
+   surface that shows its reasoning.
+5. **Inter-model agreement**, by the same Cohen's κ as §7.4. Two models that disagree with each other
+   are not a second opinion; they are one unreliable one.
+
+### 10.3 Blindness
+
+The human labels were made **before any candidate ran** and are never shown to a model. A model
+receives the review text, the star rating, and the rubric — the same three things a human labeler
+gets, and nothing else. No candidate's output is ever shown to a human labeler.
+
+### 10.4 The decision rule, fixed now
+
+Deliberately **asymmetric**, because 37 rows can rule a candidate out but cannot rule one in:
+
+- **Fall back to the full 220 human-gold protocol** if any of: recall < 0.30 (`v1` §5's bar);
+  4–5★ false-positive rate > 0.05; or inter-model κ < 0.60.
+- **A pass does NOT license skipping human gold.** `v1` §4's floor — 200 labeled, 40 positive, 30
+  high-rated `NO_ACTION` — exists because a sample this size lets a candidate pass on noise. On 37
+  rows a Wilson lower bound cannot reach 0.80 even on a perfect run, so no pilot result can clear
+  §5's precision gate. Anyone quoting one as if it had is misreading this section.
+- **What a pass DOES license** is changing *how* the 220 gets its labels, from "a human reads all
+  220" to **verification sampling**: the candidate labels all 220; a human then blind-labels a
+  targeted subset — every predicted `NEEDS_ATTENTION` row, plus a random sample of the rest — and the
+  metrics are reweighted by the known selection probabilities, exactly as §4.4 already reweights
+  strata. Every scored label is still a human's, made without seeing the candidate's answer. The
+  saving is real and comes from spending human attention where it moves the number, not from
+  trusting a model.
+- **Neither clear?** Extend the pilot with a further out-of-sample draw before deciding. Those rows
+  are outside the evaluation sample, so labeling more of them changes no pre-commitment — and they
+  are all 4–5★, which is where the class in question lives.
+
+### 10.5 What the pilot does not touch
+
+The 220-row sample, the `DEV`/`HOLDOUT` split, `v1` §5's gates, and the 54 human labels themselves.
+The labels are made blind and stay as made; a pilot result is never a reason to revisit one.

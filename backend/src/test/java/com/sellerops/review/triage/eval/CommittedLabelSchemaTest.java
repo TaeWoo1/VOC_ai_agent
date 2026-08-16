@@ -65,11 +65,12 @@ class CommittedLabelSchemaTest {
         return into;
     }
 
-    @Test
-    @DisplayName("labels.json carries only the fields the contract admits")
-    void labelsCarryOnlyTheCommittedSchema() throws Exception {
-        JsonNode root = read("labels.json");
-        assertThat(root).as("labels.json must exist").isNotNull();
+    @org.junit.jupiter.params.ParameterizedTest(name = "{0}")
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"labels.json", "pilot-labels.json"})
+    @DisplayName("a label file carries only the fields the contract admits")
+    void labelsCarryOnlyTheCommittedSchema(String file) throws Exception {
+        JsonNode root = read(file);
+        assertThat(root).as("%s must exist", file).isNotNull();
         Set<String> allowed = Set.of("reviewIdFingerprint", "tier", "reasonCode", "tags", "source");
         Set<String> tiers = Set.of("NEEDS_ATTENTION", "WATCH", "FYI", "UNCERTAIN");
         Set<String> sources = Set.of("OWNER", "ANNOTATOR", "ADJUDICATED");
@@ -126,7 +127,7 @@ class CommittedLabelSchemaTest {
         assertThat(vocabulary).as("the rubric must define the vocabulary this test checks against")
                 .contains("NEEDS_ATTENTION", "PRAISE_WITH_CONCESSION", "ANNOTATOR");
 
-        for (String name : List.of("labels.json", "agreement.json")) {
+        for (String name : List.of("labels.json", "pilot-labels.json", "agreement.json")) {
             JsonNode root = read(name);
             if (root == null) {
                 continue;

@@ -139,7 +139,10 @@ for (const item of [...sample, ...calibration]) {
     body: item.body,
     inSample: !key.startsWith("C"),
     overlap: overlapSet.has(item.fingerprint),
-    split: splitOf(item.fingerprint),
+    // Only a row INSIDE the evaluation sample has a DEV/HOLDOUT half. `splitOf` would happily
+    // return one for a calibration row too, and a stamped-but-meaningless HOLDOUT there is exactly
+    // the value a later "did any holdout row leak?" check would trip over and mis-report.
+    split: key.startsWith("C") ? null : splitOf(item.fingerprint),
   };
 }
 writeFileSync(resolve(OUT, "rows.json"), `${JSON.stringify(rows, null, 1)}\n`, "utf8");
