@@ -6,7 +6,18 @@ import { Empty } from "../../components/ui/Empty";
 import { Chip } from "../../components/ui/Chip";
 import { Btn, BtnLink } from "../../components/ui/Btn";
 import { api } from "../../lib/apiClient";
-import type { ChannelReviewDetailView, ChannelReviewPageView } from "../../lib/types";
+import type {
+  ChannelReviewDetailView,
+  ChannelReviewPageView,
+  ReviewTriageNote,
+  ReviewTriageTier,
+} from "../../lib/types";
+import {
+  TRIAGE_TAG_DISCLOSURE,
+  TRIAGE_TIERS,
+  TRIAGE_TIER_CLASS,
+  TRIAGE_TIER_LABEL,
+} from "../../lib/reviewTriage";
 import type { ActionWindowRunView } from "../../../../contracts/action-window/v2/index";
 import { locateMessage, locateUnavailableText } from "../../lib/actionWindow/locate/locateCopy";
 import {
@@ -21,7 +32,16 @@ import {
  * It is a record, not a work queue, and the difference is visible in what is missing. There is no
  * reply control, no draft, no "답변하기": Coupang gives sellers no way to answer a 상품평, and an
  * affordance for a capability the channel does not have would be a promise the product cannot keep.
- * The one ordering concession is 낮은 평점순, which surfaces complaints without calling them tasks.
+ *
+ * **Review Triage v1 added an order and an explanation, not a queue.** The list opens 확인 필요 순,
+ * every row says which tier it is in and why, and the summary says how the whole record divides.
+ * Nothing is hidden unless the seller presses a filter, nothing is marked done, and no tier promises
+ * that anything happens next — see `docs/slices/review-triage-v1.md`.
+ *
+ * **The tier comes from the rating and whether there is text to read, and from nothing else.** The
+ * 분류 tags beside it are a stored keyword classification with unmeasured accuracy, so they are
+ * rendered as citations under one plain disclosure and must never be used here to re-rank, re-colour
+ * or re-sort a row. That boundary is `contracts/review-eval/naver/v1/RUBRIC.md` §5.
  *
  * **The page says what it does not know.** A list of reviews cannot tell a seller whether it is all
  * of their reviews — an import that stopped early looks exactly like a channel with fewer reviews.
@@ -54,7 +74,8 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
   const attached = useReviewLocate(accountId);
   const locate = locateBinding ?? attached;
 
-  const [sort, setSort] = useState<"newest" | "lowest">("newest");
+  const [sort, setSort] = useState<"attention" | "newest" | "lowest">("attention");
+  const [tier, setTier] = useState<ReviewTriageTier | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
   const [page, setPage] = useState<ChannelReviewPageView | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -73,12 +94,17 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
   const requestSeq = useRef(0);
 
   const load = useCallback(
-    async (nextSort: "newest" | "lowest", nextPage: number) => {
+    async (
+      nextSort: "attention" | "newest" | "lowest",
+      nextTier: ReviewTriageTier | null,
+      nextPage: number,
+    ) => {
       const ticket = ++requestSeq.current;
       setLoading(true);
       try {
         const view = await api.getChannelReviewsStrict(accountId, {
           sort: nextSort,
+          tier: nextTier ?? undefined,
           page: nextPage,
           size: PAGE_SIZE,
         });
@@ -100,8 +126,8 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
 
   useEffect(() => {
     if (!accountId) return;
-    void load(sort, pageIndex);
-  }, [accountId, sort, pageIndex, load]);
+    void load(sort, tier, pageIndex);
+  }, [accountId, sort, tier, pageIndex, load]);
 
   useEffect(() => {
     if (!accountId || !selectedId) {
@@ -163,31 +189,69 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
         </p>
       ) : null}
 
+      {/*
+        **What to look at first, before the list itself.** The counts are of the WHOLE record, not the
+        page and not the current filter, so pressing a tier never changes the numbers describing the
+        others — otherwise choosing 확인 필요 would zero the chips that lead back out of it.
+      */}
+      {page ? <TriageSummary page={page} /> : null}
+
       <div className="flex flex-wrap items-center gap-2">
+        {(
+          [
+            ["attention", "확인 필요순"],
+            ["newest", "최신순"],
+            ["lowest", "낮은 평점순"],
+          ] as const
+        ).map(([value, label]) => (
+          <Btn
+            key={value}
+            variant={sort === value ? "solid" : "outline"}
+            size="sm"
+            aria-pressed={sort === value}
+            onClick={() => {
+              setSort(value);
+              setPageIndex(0);
+              setSelectedId(null);
+            }}
+          >
+            {label}
+          </Btn>
+        ))}
+      </div>
+
+      {/*
+        The tier filter is separate from the sort and survives a sort change — an operator who
+        narrowed to 확인 필요 and then asked for 최신순 wants the newest of those.
+      */}
+      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="분류 필터">
         <Btn
-          variant={sort === "newest" ? "solid" : "outline"}
+          variant={tier === null ? "solid" : "outline"}
           size="sm"
-          aria-pressed={sort === "newest"}
+          aria-pressed={tier === null}
           onClick={() => {
-            setSort("newest");
+            setTier(null);
             setPageIndex(0);
             setSelectedId(null);
           }}
         >
-          최신순
+          전체 {page ? page.triageSummary.needsAttention + page.triageSummary.watch + page.triageSummary.fyi : 0}
         </Btn>
-        <Btn
-          variant={sort === "lowest" ? "solid" : "outline"}
-          size="sm"
-          aria-pressed={sort === "lowest"}
-          onClick={() => {
-            setSort("lowest");
-            setPageIndex(0);
-            setSelectedId(null);
-          }}
-        >
-          낮은 평점순
-        </Btn>
+        {TRIAGE_TIERS.map((value) => (
+          <Btn
+            key={value}
+            variant={tier === value ? "solid" : "outline"}
+            size="sm"
+            aria-pressed={tier === value}
+            onClick={() => {
+              setTier(value);
+              setPageIndex(0);
+              setSelectedId(null);
+            }}
+          >
+            {TRIAGE_TIER_LABEL[value]} {page ? tierCount(page, value) : 0}
+          </Btn>
+        ))}
       </div>
 
       {loadError ? (
@@ -195,13 +259,28 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
           title="상품평을 불러오지 못했습니다"
           body="연결 상태를 확인한 뒤 다시 시도해 주세요. 불러오지 못한 목록을 임의로 채우지는 않습니다."
           action={
-            <Btn size="sm" onClick={() => void load(sort, pageIndex)}>
+            <Btn size="sm" onClick={() => void load(sort, tier, pageIndex)}>
               다시 시도
             </Btn>
           }
         />
       ) : loading && !page ? (
         <p className="text-muted">불러오는 중…</p>
+      ) : page && page.items.length === 0 && tier !== null ? (
+        /*
+          An empty FILTER is not an empty record. Reusing "아직 수집된 상품평이 없습니다" here would
+          tell a seller with 22 상품평 that they have none, because they pressed 확인 필요 and had
+          nothing in it — which is good news reported as a loss.
+        */
+        <Empty
+          title={`${TRIAGE_TIER_LABEL[tier]}에 해당하는 상품평이 없습니다`}
+          body="다른 분류를 눌러 보시거나 전체를 보세요. 수집된 상품평은 그대로 있습니다."
+          action={
+            <Btn size="sm" onClick={() => { setTier(null); setPageIndex(0); }}>
+              전체 보기
+            </Btn>
+          }
+        />
       ) : page && page.items.length === 0 ? (
         <Empty
           title="아직 수집된 상품평이 없습니다"
@@ -227,6 +306,7 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
                     }`}
                   >
                     <span className="flex flex-wrap items-center gap-2">
+                      <TriageTierChip tier={item.triage.tier} />
                       <span className="font-semibold text-ink">{ratingLabel(item.rating)}</span>
                       <span className="text-sm text-muted">{item.writtenOn ?? "날짜 없음"}</span>
                       {item.isNew ? <Chip tone="accent">새 상품평</Chip> : null}
@@ -238,6 +318,7 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
                       {/* A textless review is what the buyer chose, not something we failed to show. */}
                       {item.textless ? "별점만 남긴 상품평" : (item.preview ?? "표시할 수 있는 본문이 없습니다")}
                     </span>
+                    <TriageReason note={item.triage} />
                     <span className="mt-1 block truncate text-sm text-muted">
                       {item.productName ?? item.productId ?? "상품 정보 없음"}
                     </span>
@@ -333,11 +414,16 @@ function ReviewDetail({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
+        <TriageTierChip tier={detail.triage.tier} />
         <span className="font-semibold text-ink">{ratingLabel(detail.rating)}</span>
         <span className="text-sm text-muted">{detail.writtenOn ?? "날짜 없음"}</span>
         {detail.isNew ? <Chip tone="accent">새 상품평</Chip> : null}
         {detail.mediaCount > 0 ? <Chip>사진·영상 {detail.mediaCount}</Chip> : null}
       </div>
+      <TriageReason note={detail.triage} />
+      {detail.triage.tags.length > 0 ? (
+        <p className="text-sm leading-relaxed text-muted">{TRIAGE_TAG_DISCLOSURE}</p>
+      ) : null}
       {detail.textless ? (
         <p className="break-keep leading-relaxed text-muted">
           별점만 남기고 내용을 쓰지 않은 상품평입니다. 별점은 그대로 집계됩니다.
@@ -413,6 +499,81 @@ function ReviewDetail({
       </div>
     </div>
   );
+}
+
+/**
+ * The tier, as the one emphasised thing on the row.
+ *
+ * A `span` rather than a `Chip`: `Chip`'s palette is deliberately two-tone so that no chip can imply
+ * a status claim, and widening it to give 확인 필요 its colour would remove that fence for every
+ * other surface.
+ */
+function TriageTierChip({ tier }: { tier: ReviewTriageTier }) {
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold ${TRIAGE_TIER_CLASS[tier]}`}
+    >
+      {TRIAGE_TIER_LABEL[tier]}
+    </span>
+  );
+}
+
+/**
+ * Why this row is where it is, and what the seller might do about it.
+ *
+ * The reason is rendered as the backend composed it. `recommendedAction` is null for 참고 and renders
+ * as nothing — filling that slot with a reassuring sentence would make every row look equally
+ * actionable, which is the opposite of what this screen is for.
+ */
+function TriageReason({ note }: { note: ReviewTriageNote }) {
+  return (
+    <span className="mt-1 block text-sm text-muted">
+      <span>{note.reason}</span>
+      {note.recommendedAction ? (
+        <span className="mt-0.5 block break-keep text-ink">{note.recommendedAction}</span>
+      ) : null}
+    </span>
+  );
+}
+
+/**
+ * How the whole record divides, above the list.
+ *
+ * Every number here describes the CHANNEL, never the page and never the active filter — so the chips
+ * keep pointing at the parts of the record the operator is not currently looking at.
+ */
+function TriageSummary({ page }: { page: ChannelReviewPageView }) {
+  const { needsAttention, repeatedCategories } = page.triageSummary;
+  return (
+    <div className="rounded-xl border border-line bg-canvas px-4 py-3 text-sm leading-relaxed">
+      <p className="text-ink">
+        {needsAttention > 0 ? (
+          <>
+            지금 확인이 필요한 상품평 <b>{needsAttention}건</b>
+          </>
+        ) : (
+          "지금 확인이 필요한 상품평은 없습니다"
+        )}
+        {page.newCount > 0 ? <span className="text-muted"> · 새로 들어온 {page.newCount}건</span> : null}
+      </p>
+      {repeatedCategories.length > 0 ? (
+        <>
+          <p className="mt-1 text-muted">
+            반복되는 분류 ·{" "}
+            {repeatedCategories.map((c) => `${c.category} ${c.count}건`).join(" · ")}
+          </p>
+          <p className="mt-1 text-muted">{TRIAGE_TAG_DISCLOSURE}</p>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/** The summary count for one tier. Kept beside the chips so the label and its number cannot drift. */
+function tierCount(page: ChannelReviewPageView, tier: ReviewTriageTier): number {
+  if (tier === "NEEDS_ATTENTION") return page.triageSummary.needsAttention;
+  if (tier === "WATCH") return page.triageSummary.watch;
+  return page.triageSummary.fyi;
 }
 
 /** A rating renders as its number plus stars; an unread rating says so rather than showing zero stars. */

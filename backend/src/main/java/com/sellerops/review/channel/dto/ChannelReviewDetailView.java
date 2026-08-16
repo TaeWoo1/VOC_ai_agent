@@ -1,5 +1,6 @@
 package com.sellerops.review.channel.dto;
 
+import com.sellerops.review.triage.ReviewTriageNote;
 import java.time.LocalDate;
 import java.util.UUID;
 
@@ -35,6 +36,8 @@ public record ChannelReviewDetailView(
         /** The buyer rated and wrote nothing — see {@code ChannelReviewItemView.textless}. */
         boolean textless,
         boolean isNew,
+        /** The same suggestion the list row carries, so opening a review cannot change what it said. */
+        ReviewTriageNote triage,
         LocateTarget locateTarget) {
 
     /** The channel-side identifiers this review carries — nothing that names a person. */

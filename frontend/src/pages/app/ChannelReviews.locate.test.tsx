@@ -36,6 +36,7 @@ const PAGE: ChannelReviewPageView = {
   newCount: 0,
   lastImportAt: "2026-08-14T05:00:00Z",
   lastImportComplete: true,
+  triageSummary: { needsAttention: 0, watch: 0, fyi: 1, repeatedCategories: [] },
   items: [
     {
       id: "r1",
@@ -49,6 +50,7 @@ const PAGE: ChannelReviewPageView = {
       mediaCount: 0,
       textless: false,
       isNew: false,
+      triage: { tier: "FYI", reason: "5점", tags: [], recommendedAction: null },
     },
   ],
 };
@@ -64,6 +66,7 @@ const DETAIL: ChannelReviewDetailView = {
   mediaCount: 0,
   textless: false,
   isNew: false,
+  triage: { tier: "FYI", reason: "5점", tags: [], recommendedAction: null },
   locateTarget: {
     productId: "15411270785",
     vendorItemId: "81234567890",

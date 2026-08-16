@@ -21,5 +21,12 @@ public record ChannelReviewPageView(
         long newCount,
         Instant lastImportAt,
         boolean lastImportComplete,
+        /**
+         * How the channel's whole record divides by tier, and what repeats in it. Always the UNFILTERED
+         * picture, even when the page itself is filtered to one tier — a summary recomputed under its own
+         * filter would collapse to the one option the operator already chose, and there would be no way
+         * back. Same rule as the attention drill-down's category breakdown.
+         */
+        ChannelReviewTriageSummaryView triageSummary,
         List<ChannelReviewItemView> items) {
 }

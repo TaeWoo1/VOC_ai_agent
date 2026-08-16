@@ -42,6 +42,127 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
      */
     long countByOrgIdAndChannelIdAndCreatedAtGreaterThanEqual(UUID orgId, UUID channelId, Instant since);
 
+    // --- Review triage: the tier rank, and the three reads that must agree about it -------------
+
+    /**
+     * The triage tier as a sort key — {@code 0} = 확인 필요, {@code 1} = 지켜보기, {@code 2} = 참고.
+     *
+     * <p><b>The SQL half of a rule whose Java half is {@code ReviewTriageRules}.</b> Both exist
+     * because the tier must both render (per row, in Java) and sort/count (across pages the service
+     * never loads, in the database). Stated ONCE here and shared by the ordering, the filter and the
+     * summary count, for the same reason {@link #REPORTED_SUBMISSION_PREDICATE} is shared: three
+     * numbers read together on one screen must not be able to disagree about what they mean. The two
+     * halves are pinned equal over the rule's entire input space — every (rating × body) combination
+     * — by {@code ChannelReviewTriageIT}.
+     *
+     * <p>The literal ranks mirror {@code ReviewTriageRules.rank}, which names them deliberately
+     * rather than taking an enum ordinal. Changing either without the other fails that test.
+     *
+     * <p><b>Blankness, and the one place it is narrower than Java.</b> {@code trim(r.body) = ''} is
+     * the portable expression available in JPQL (the offline suite runs H2 in PostgreSQL mode), and
+     * it trims spaces. {@code ReviewTriageRules.isTextless} uses {@code String.isBlank}, which also
+     * treats tabs and newlines as blank. So a body consisting solely of tabs or newlines — which no
+     * ingest path produces — would rank 확인 필요 here while rendering as 별점만. Stated rather than
+     * hidden: it fails toward MORE operator attention on an input that does not occur, which is the
+     * safe direction for a disagreement this narrow.
+     */
+    String TRIAGE_TIER_RANK = """
+            (case
+               when r.rating is null then 1
+               when r.rating <= 2 and (r.body is null or trim(r.body) = '') then 1
+               when r.rating <= 2 then 0
+               when r.rating >= 4 then 2
+               else 1
+             end)
+            """;
+
+    /**
+     * One connected channel's reviews, worst-first — the 확인 필요 우선 order.
+     *
+     * <p>Within a tier the order is newest-first, because recency is the one further thing this
+     * surface can honestly say: it is a fact about arrival, not a judgement about content. {@code id}
+     * is an internal tiebreak only (never surfaced) and makes the order total, so paging can neither
+     * skip nor repeat a row when many reviews share a date — {@code received_at} is date-granular.
+     *
+     * <p>{@code tierRank} null means "every tier"; otherwise it selects exactly one, using the SAME
+     * expression the ordering does.
+     */
+    @Query("""
+            select r from Review r
+            where r.orgId = :orgId and r.channelId = :channelId
+              and (:tierRank is null or
+            """ + TRIAGE_TIER_RANK + """
+              = :tierRank)
+            order by
+            """ + TRIAGE_TIER_RANK + """
+              asc, r.receivedAt desc, r.id asc
+            """)
+    Page<Review> findByOrgIdAndChannelIdTriaged(@Param("orgId") UUID orgId,
+                                                @Param("channelId") UUID channelId,
+                                                @Param("tierRank") Integer tierRank,
+                                                Pageable pageable);
+
+    /**
+     * As {@link #findByOrgIdAndChannelIdTriaged}, but ordered by the caller's {@code Pageable} — the
+     * 최신순 / 낮은 평점순 lenses, which are plain property sorts and predate triage.
+     *
+     * <p>It exists so a tier filter applies to EVERY lens rather than only the triage one. An operator
+     * who filtered to 확인 필요 and then pressed 최신순 wants the newest of those; silently dropping the
+     * filter would show them rows they had just excluded, with the filter control still lit.
+     */
+    @Query("""
+            select r from Review r
+            where r.orgId = :orgId and r.channelId = :channelId
+              and (:tierRank is null or
+            """ + TRIAGE_TIER_RANK + """
+              = :tierRank)
+            """)
+    Page<Review> findByOrgIdAndChannelIdTriagedSorted(@Param("orgId") UUID orgId,
+                                                      @Param("channelId") UUID channelId,
+                                                      @Param("tierRank") Integer tierRank,
+                                                      Pageable pageable);
+
+    /**
+     * How many of this channel's reviews sit in one tier — the summary's 확인 필요 N건.
+     *
+     * <p>Counts over the WHOLE channel rather than the page, for the same reason
+     * {@link #countByOrgIdAndChannelIdAndCreatedAtGreaterThanEqual} does: a per-page count would
+     * shrink as the operator paged and read as the work disappearing.
+     */
+    @Query("""
+            select count(r) from Review r
+            where r.orgId = :orgId and r.channelId = :channelId
+              and
+            """ + TRIAGE_TIER_RANK + """
+              = :tierRank
+            """)
+    long countByOrgIdAndChannelIdAndTierRank(@Param("orgId") UUID orgId,
+                                             @Param("channelId") UUID channelId,
+                                             @Param("tierRank") int tierRank);
+
+    /**
+     * {@code [category, count]} over every stored review of this channel that carries an analysis —
+     * what the surface calls 같은 분류 N건.
+     *
+     * <p><b>Unwindowed, deliberately.</b> The natural phrasing is "최근 7일 동일 불만 N건", and it was
+     * dropped: {@code received_at} is date-granular and a stored record ages, so a fixed recent window
+     * over it silently empties, and a window widened until it finds something is a threshold chosen to
+     * fit the answer. This counts what it can defend — how many of the reviews you HAVE share a
+     * category — and claims nothing about when. See {@code docs/slices/review-triage-v1.md} §4.1.
+     *
+     * <p>The {@code a.orgId = r.orgId} clause is load-bearing rather than tidiness:
+     * {@code item_analyses.source_id} is a bare polymorphic reference with no FK, so a same-id row from
+     * another org would otherwise be counted against a review it does not describe.
+     */
+    @Query("""
+            select a.category, count(r) from Review r, ItemAnalysis a
+            where a.orgId = r.orgId and a.sourceType = 'REVIEW' and a.sourceId = r.id
+              and r.orgId = :orgId and r.channelId = :channelId
+            group by a.category
+            """)
+    List<Object[]> countByChannelGroupedByCategory(@Param("orgId") UUID orgId,
+                                                   @Param("channelId") UUID channelId);
+
     long countByOrgIdAndNegativeTrue(UUID orgId);
 
     List<Review> findAllByOrgId(UUID orgId);

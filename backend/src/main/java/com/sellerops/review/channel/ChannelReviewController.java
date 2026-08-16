@@ -38,14 +38,22 @@ public class ChannelReviewController {
         this.locates = locates;
     }
 
-    /** One page of this account's reviews. {@code sort} is {@code newest} (default) or {@code lowest}. */
+    /**
+     * One page of this account's reviews.
+     *
+     * <p>{@code sort} is {@code attention} (default — 확인 필요 우선), {@code newest} or {@code lowest}.
+     * {@code tier} optionally narrows to one triage tier; absent means the whole record, which is the
+     * default because this surface is a record and hiding part of it by default would make the seller's
+     * own VOC depend on a filter they never set.
+     */
     @GetMapping
     public ChannelReviewPageView list(@AuthenticationPrincipal AuthPrincipal principal,
                                       @PathVariable UUID accountId,
                                       @RequestParam(required = false) String sort,
+                                      @RequestParam(required = false) String tier,
                                       @RequestParam(defaultValue = "0") int page,
                                       @RequestParam(defaultValue = "20") int size) {
-        return service.list(principal.orgId(), accountId, sort, page, size);
+        return service.list(principal.orgId(), accountId, sort, tier, page, size);
     }
 
     /** One review in full, with the locate target `[쿠팡에서 보기]` re-finds it on the seller's screen by. */

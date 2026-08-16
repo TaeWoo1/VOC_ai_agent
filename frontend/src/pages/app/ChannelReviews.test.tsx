@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { ChannelReviews, shownRangeLabel } from "./ChannelReviews";
@@ -27,6 +27,12 @@ const PAGE: ChannelReviewPageView = {
   newCount: 1,
   lastImportAt: "2026-08-14T05:00:00Z",
   lastImportComplete: true,
+  triageSummary: {
+    needsAttention: 1,
+    watch: 0,
+    fyi: 1,
+    repeatedCategories: [{ category: "설치", count: 11 }],
+  },
   items: [
     {
       id: "r1",
@@ -40,6 +46,7 @@ const PAGE: ChannelReviewPageView = {
       mediaCount: 2,
       textless: false,
       isNew: true,
+      triage: { tier: "FYI", reason: "5점", tags: [], recommendedAction: null },
     },
     {
       id: "r2",
@@ -53,6 +60,12 @@ const PAGE: ChannelReviewPageView = {
       mediaCount: 0,
       textless: false,
       isNew: false,
+      triage: {
+        tier: "NEEDS_ATTENTION",
+        reason: "1점 · 설치 · 같은 분류 11건",
+        tags: ["설치"],
+        recommendedAction: "같은 분류의 상품평이 반복됩니다. 상품·포장 상태를 확인해 보세요.",
+      },
     },
   ],
 };
@@ -68,6 +81,7 @@ const DETAIL: ChannelReviewDetailView = {
   mediaCount: 2,
   textless: false,
   isNew: true,
+  triage: { tier: "FYI", reason: "5점", tags: [], recommendedAction: null },
   locateTarget: {
     productId: "15411270785",
     vendorItemId: "81234567890",
@@ -246,7 +260,10 @@ describe("a list longer than one screen can be walked", () => {
 
     await waitFor(() =>
       expect(getChannelReviewsStrict).toHaveBeenLastCalledWith("acc-1", {
-        sort: "newest",
+        // 확인 필요 우선 is the default as of Review Triage v1 — the question the seller opens this
+        // screen with is "what first", and the newest row was answering a different one.
+        sort: "attention",
+        tier: undefined,
         page: 1,
         size: 20,
       }),
@@ -304,10 +321,125 @@ describe("a list longer than one screen can be walked", () => {
     await waitFor(() =>
       expect(getChannelReviewsStrict).toHaveBeenLastCalledWith("acc-1", {
         sort: "lowest",
+        tier: undefined,
         page: 0,
         size: 20,
       }),
     );
+  });
+});
+
+/**
+ * Review Triage v1 — the list saying what to look at first, and why.
+ *
+ * The test that matters here is {@code the tags never re-rank anything}: the tier arrives from the
+ * backend, and the frontend must render it rather than re-derive one from the tags beside it.
+ * `contracts/review-eval/naver/v1/RUBRIC.md` §5 forbids surfacing an unmeasured text detector, and
+ * the frontend is exactly where such a thing would be added by accident — a `tags.includes("파손")`
+ * check that bumps a row's colour reads like polish and is the gated thing.
+ */
+describe("triage", () => {
+  it("says which tier a review is in and why, on the row", async () => {
+    renderPage();
+    await screen.findByText("생각보다 크기가 작아서 아쉬웠습니다");
+
+    expect(screen.getAllByText("확인 필요").length).toBeGreaterThan(0);
+    expect(screen.getByText("1점 · 설치 · 같은 분류 11건")).toBeInTheDocument();
+    expect(
+      screen.getByText("같은 분류의 상품평이 반복됩니다. 상품·포장 상태를 확인해 보세요."),
+    ).toBeInTheDocument();
+  });
+
+  it("offers a well-rated review no action rather than a reassuring sentence", async () => {
+    renderPage();
+    const praise = (await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요")).closest(
+      "li",
+    ) as HTMLElement;
+    const complaint = (screen.getByText("생각보다 크기가 작아서 아쉬웠습니다")).closest(
+      "li",
+    ) as HTMLElement;
+
+    // Scoped to each row, so this cannot pass on the other row's text. The 5★ row carries its
+    // reason and its tier and NOTHING in the action slot; the 1★ row beside it carries one.
+    expect(within(praise).getByText("참고")).toBeInTheDocument();
+    expect(within(praise).getByText("5점")).toBeInTheDocument();
+    expect(within(praise).queryByText(/확인해 보세요/)).toBeNull();
+    expect(within(complaint).getByText(/확인해 보세요/)).toBeInTheDocument();
+  });
+
+  it("summarises the whole record above the list", async () => {
+    renderPage();
+    await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요");
+
+    expect(screen.getByText(/지금 확인이 필요한 상품평/)).toBeInTheDocument();
+    expect(screen.getByText(/설치 11건/)).toBeInTheDocument();
+    // The tags are an unmeasured keyword classification and the surface says so.
+    expect(screen.getAllByText(/자동 분류한 것이라 정확하지 않을 수 있습니다/).length).toBeGreaterThan(0);
+  });
+
+  it("asks the backend to narrow to a tier, and keeps that filter across a sort change", async () => {
+    renderPage();
+    await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요");
+
+    await userEvent.click(screen.getByRole("button", { name: /^확인 필요 1$/ }));
+    await waitFor(() =>
+      expect(getChannelReviewsStrict).toHaveBeenLastCalledWith(
+        "acc-1",
+        expect.objectContaining({ tier: "NEEDS_ATTENTION", page: 0 }),
+      ),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "최신순" }));
+    await waitFor(() =>
+      expect(getChannelReviewsStrict).toHaveBeenLastCalledWith(
+        "acc-1",
+        // The filter must survive: a seller who narrowed and then re-sorted wants the newest of
+        // what they narrowed to, not the filter silently dropped with its chip still lit.
+        expect.objectContaining({ sort: "newest", tier: "NEEDS_ATTENTION" }),
+      ),
+    );
+  });
+
+  it("does not report an empty filter as an empty record", async () => {
+    getChannelReviewsStrict.mockResolvedValue({
+      ...PAGE,
+      items: [],
+      // The record still holds two reviews; the operator just narrowed to a tier holding none.
+      triageSummary: { needsAttention: 0, watch: 0, fyi: 2, repeatedCategories: [] },
+    });
+    renderPage();
+    await waitFor(() => expect(getChannelReviewsStrict).toHaveBeenCalled());
+
+    await userEvent.click(screen.getByRole("button", { name: /^확인 필요 0$/ }));
+
+    expect(await screen.findByText("확인 필요에 해당하는 상품평이 없습니다")).toBeInTheDocument();
+    expect(screen.queryByText("아직 수집된 상품평이 없습니다")).toBeNull();
+  });
+
+  it("renders the tier the backend sent, never one re-derived from the tags", async () => {
+    // A 1★ row whose body-derived tags scream 파손, and whose tier says 참고. If the frontend ever
+    // re-ranks from tags, this renders 확인 필요 and fails — which is the whole point.
+    getChannelReviewsStrict.mockResolvedValue({
+      ...PAGE,
+      total: 1,
+      triageSummary: { needsAttention: 0, watch: 0, fyi: 1, repeatedCategories: [] },
+      items: [
+        {
+          ...PAGE.items[1],
+          triage: {
+            tier: "FYI" as const,
+            reason: "1점 · 품질",
+            tags: ["품질", "파손"],
+            recommendedAction: null,
+          },
+        },
+      ],
+    });
+    renderPage();
+    await screen.findByText("생각보다 크기가 작아서 아쉬웠습니다");
+
+    expect(screen.getByText("참고")).toBeInTheDocument();
+    expect(screen.queryByText("확인 필요")).toBeNull();
   });
 });
 
