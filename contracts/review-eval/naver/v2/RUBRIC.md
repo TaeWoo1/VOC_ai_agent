@@ -469,6 +469,77 @@ work back to the full human-gold protocol; a model that passes licenses verifica
 model-authored gold set. §9's rule holds unchanged — **no model produces a gold label**, and a human
 confirming a label a model showed them measures agreement with the model.
 
+### 8.3 Production API transmission — NAVER review triage only
+
+**Product-owner decision, 2026-08-17.** §8.1 expired with the pilot and explicitly refused to be read
+as production permission. This is that permission, granted separately, and it is a **widening of the
+fence**: review text now leaves the machine as ordinary product behaviour, not as one screening
+exercise a person performed by hand.
+
+It is written before any client code exists, so that what the code is allowed to send was decided
+before anyone knew what would be convenient to send.
+
+**Permitted**
+
+- **NAVER review triage, and nothing else.** One purpose, one channel;
+- transmission to a **production LLM API**, automatically, as part of classifying a review;
+- payload limited to the **minimum**: the **star rating and the review body**. Not "those plus
+  whatever else is handy" — those two, and the §8.4 mechanism is what makes that testable rather
+  than aspirational.
+
+**Forbidden**
+
+- the review id, its fingerprint, the author, the seller, the shop, the channel, the product, the
+  date, and any other identifying metadata — **whether or not a model would classify better with
+  it**;
+- the human gold label, any stored prediction, and any other arm's answer, in any form, including as
+  an example inside a prompt;
+- **any Coupang review.** `docs/coupang_review_policy_gate_v1.md`'s D-limits are untouched and this
+  section does not reach them. A classifier that would happily accept a Coupang row must be prevented
+  from receiving one by construction, not by a caller remembering;
+- **Product Context** — product title, option, attribute or description. Out of scope here, and
+  `docs/slices/product-context-diagnosis-groundwork.md` keeps it a separate axis that never feeds a
+  tier.
+
+⚠ **This is production cloud transmission of real customer prose.** No vendor setting changes that.
+The mitigation is the payload floor above, which bounds what travels — it does not make the transfer
+local, and it is stated as the cost of the decision rather than as its absolution.
+
+### 8.4 The payload floor is a mechanism, not an instruction
+
+A rule about what may be sent, enforced by whoever remembers it, is the rule that fails the first
+time someone adds a field to improve a number. So:
+
+- the classifier's request is built from a **closed input record carrying a rating and a body, and
+  having nowhere else to put anything**;
+- a test asserts the serialized request against **the whole outgoing payload**, not against the
+  builder's intent — the same shape as `build-annotator-package.mjs`'s artifact check, and for the
+  same reason;
+- the channel is checked at the boundary, so a non-NAVER review **cannot reach the transport at
+  all**.
+
+### 8.5 Fail closed, and never toward silence
+
+A classification that fails — transport error, timeout, or a response that does not satisfy the
+output schema — yields `CLASSIFICATION_FAILED`. **It may never fall back to `FYI`.**
+
+`FYI` is the tier that means "nothing here for the seller". Defaulting a failure to it would convert
+every outage into a silent, invisible dismissal of real reviews, and the seller would have no way to
+tell an answered review from an unasked question. The failure states are visible states.
+
+### 8.6 What a DEV result may and may not do to the prompt
+
+§6.2 gives `DEV` to be looked at as often as needed, and that stays true — but a prompt tuned against
+`DEV` until the number rises is the same act as fitting a threshold, performed in prose.
+
+So the discipline is recorded rather than assumed: **every model, prompt and version run against
+`DEV` is written down — not only the one that wins.** The change log is part of the deliverable. One
+candidate is then frozen — model, prompt text, and version string together — and only after it is
+frozen may `HOLDOUT` be read, once, per §6.2.
+
+A candidate that needed many `DEV` passes to clear the bars is a different object from one that
+cleared them on the first, and the log is what lets a reader tell the two apart.
+
 ## 9. What this gold set is for, and what it is not
 
 **Product-owner decision, 2026-08-16.** Recorded here because it bounds the artifact: without it, the
