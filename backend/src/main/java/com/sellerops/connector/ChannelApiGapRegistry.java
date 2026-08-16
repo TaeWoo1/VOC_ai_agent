@@ -17,10 +17,12 @@ import java.util.Map;
  *
  * <p><b>What it deliberately is not.</b> It is not derived from {@code supported == false}. That
  * boolean answers "can the resolved pull connector serve this type", and a connector can decline a
- * type for reasons that have nothing to do with an API existing — the mock declines PRODUCT/SALES
- * while both APIs exist. Reading an absent API out of a false boolean would put a claim about Coupang
- * in the mouth of whatever stand-in was wired up. Each entry here is its own asserted, evidenced
- * fact.
+ * type for reasons that have nothing to do with an API existing: {@code CoupangApiConnector} serves
+ * only {@code ORDER_SUMMARY} and {@code INQUIRY}, so Coupang PRODUCT and SALES read
+ * {@code supported=false} while Coupang documents an API for both — its own notes call them
+ * "deferred", which is a roadmap fact, not a marketplace one. Reading an absent API out of a false
+ * boolean would manufacture three claims about Coupang out of one connector's scope. Each entry here
+ * is its own asserted, evidenced fact.
  *
  * <p><b>Nor is it the acquisition axis.</b> {@code AcquisitionPathRegistry} says how SellerOps DOES
  * get a data type; this says what the channel never offered. They are the two halves the operator

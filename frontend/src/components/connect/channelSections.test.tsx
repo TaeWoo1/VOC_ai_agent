@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { ChannelStatusSection } from "./ChannelStatusSection";
 import { CollectionSettingsSection } from "./CollectionSettingsSection";
@@ -40,6 +40,13 @@ const STATUS = {
 function wrap(ui: React.ReactElement) {
   return render(<MemoryRouter>{ui}</MemoryRouter>);
 }
+
+// Each capability-overview stub is scoped to its own test. Without this the last `mockResolvedValue`
+// in the file becomes every later test's backend, and the suite silently depends on its own order.
+beforeEach(() => {
+  getChannelCapabilityOverview.mockReset();
+  getChannelCapabilityOverview.mockResolvedValue(null);
+});
 
 describe("연결 상태 섹션", () => {
   it("shows the figures the server reported", () => {
@@ -117,9 +124,14 @@ describe("수집 설정 섹션", () => {
     return Array.from(row.querySelectorAll("button")).filter((b) => !b.hasAttribute("disabled"));
   }
 
-  function reviewRow() {
+  /**
+   * The whole REVIEW row — the `<li>`, not the label's own div. The controls this section gates live
+   * in a SIBLING of the label, so a locator that stops at the label returns a subtree with no buttons
+   * in it and reports zero enabled controls whatever the row actually rendered.
+   */
+  function reviewRow(label = "리뷰") {
     const section = screen.getByText("수집 설정").closest("section") as HTMLElement;
-    return within(section).getByText("리뷰").closest("div") as HTMLElement;
+    return within(section).getByText(label).closest("li") as HTMLElement;
   }
 
   it("gates on the connector capability alone — an acquisition path is not a schedule", () => {
@@ -127,7 +139,7 @@ describe("수집 설정 섹션", () => {
     // from `connector_capabilities` and are what decides whether a schedule may be turned on. Coupang
     // 상품평 arrive through an operator-confirmed Action Window, which is not a thing a cadence can
     // run, so REVIEW must stay disabled here exactly as before.
-    wrap(
+    const { container } = wrap(
       <CollectionSettingsSection
         accountId="acct-1"
         schedules={[]}
@@ -136,7 +148,13 @@ describe("수집 설정 섹션", () => {
         onReport={vi.fn()}
       />,
     );
+    // The cadence select and both action buttons are what "disabled" means here — assert they are
+    // absent, not merely that some subtree has no enabled button.
+    expect(reviewRow().querySelector("select")).toBeNull();
+    expect(reviewRow().querySelectorAll("button")).toHaveLength(0);
     expect(enabledButtonsIn(reviewRow())).toHaveLength(0);
+    // Without a channelCode there is no overview to read, so the section says nothing about routes.
+    expect(container.textContent).not.toContain("Action Window");
   });
 
   it("says the cadence is unsupported, not the channel", async () => {
@@ -156,8 +174,9 @@ describe("수집 설정 섹션", () => {
     expect(screen.queryByText("이 채널 미지원")).toBeNull();
   });
 
-  it("explains the operator-run route where one exists, and still schedules nothing", async () => {
-    getChannelCapabilityOverview.mockResolvedValue({
+  /** An overview whose REVIEW carries exactly the given acquisition paths. */
+  function overviewWithReviewPaths(paths: Array<{ method: string; verificationStatus: string }>) {
+    return {
       channelCode: "COUPANG",
       channelNameKo: "쿠팡",
       connectorClass: "API",
@@ -168,43 +187,107 @@ describe("수집 설정 섹션", () => {
           label: "리뷰",
           supported: false,
           verificationStatus: "UNSUPPORTED",
-          acquisitionPaths: [{ method: "ACTION_WINDOW", verificationStatus: "LIVE_PROVEN" }],
+          acquisitionPaths: paths,
         },
       ],
       unsupportedScopes: [],
-    });
-    wrap(
+    };
+  }
+
+  function renderSection(channelCode?: string) {
+    return wrap(
       <CollectionSettingsSection
         accountId="acct-1"
-        channelCode="COUPANG"
+        channelCode={channelCode}
         schedules={[]}
         capabilities={REVIEW_UNSUPPORTED as never}
         onChanged={vi.fn()}
         onReport={vi.fn()}
       />,
     );
+  }
+
+  it("explains the operator-run route where one exists, and still schedules nothing", async () => {
+    getChannelCapabilityOverview.mockResolvedValue(
+      overviewWithReviewPaths([{ method: "ACTION_WINDOW", verificationStatus: "LIVE_PROVEN" }]),
+    );
+    renderSection("COUPANG");
     expect(await screen.findByText(/Action Window는 판매자가 직접 실행하는/)).toBeInTheDocument();
-    // The sentence is an explanation, never a gate: the row is exactly as unschedulable as before.
-    expect(enabledButtonsIn(reviewRow())).toHaveLength(0);
+    // The sentence is an explanation, never a gate: the row still offers no cadence and no controls.
+    // Coupang's row is labelled 상품평, the same word as the badge and the record panel.
+    expect(reviewRow("상품평").querySelector("select")).toBeNull();
+    expect(reviewRow("상품평").querySelectorAll("button")).toHaveLength(0);
   });
 
-  it("stays silent about a route the channel has not got", async () => {
-    // Read strictly to explain: a channel with no acquisition path must not inherit Coupang's
-    // sentence, and a failed read must leave the row as it was.
-    getChannelCapabilityOverview.mockRejectedValue(new Error("backend down"));
-    wrap(
-      <CollectionSettingsSection
-        accountId="acct-1"
-        channelCode="NAVER"
-        schedules={[]}
-        capabilities={REVIEW_UNSUPPORTED as never}
-        onChanged={vi.fn()}
-        onReport={vi.fn()}
-      />,
+  it("says Action Window only about an Action Window", async () => {
+    // The sentence names one route and describes how that route is run. A path with a different
+    // method is a different story — a file export is not something the seller performs on the
+    // marketplace — so the row must not narrate it with Action Window's words.
+    getChannelCapabilityOverview.mockResolvedValue(
+      overviewWithReviewPaths([{ method: "EXPORT", verificationStatus: "LIVE_PROVEN" }]),
     );
+    renderSection("COUPANG");
     expect(await screen.findByText("자동 수집 미지원")).toBeInTheDocument();
     expect(screen.queryByText(/Action Window/)).toBeNull();
-    expect(enabledButtonsIn(reviewRow())).toHaveLength(0);
+  });
+
+  it("stays silent about a channel that has no acquisition path at all", async () => {
+    // A successful read that returns no path — not a failure. The row must not inherit Coupang's
+    // sentence just because it is also unschedulable.
+    getChannelCapabilityOverview.mockResolvedValue(overviewWithReviewPaths([]));
+    renderSection("NAVER");
+    expect(await screen.findByText("자동 수집 미지원")).toBeInTheDocument();
+    expect(screen.queryByText(/Action Window/)).toBeNull();
+    expect(reviewRow().querySelectorAll("button")).toHaveLength(0);
+  });
+
+  it("drops the previous channel's route the moment the account changes", async () => {
+    // `useApiData` keeps the last successful payload across a deps change, so between an account
+    // switch and the new read landing, the OLD channel's overview is still in state. If the row read
+    // it, a channel with no Action Window would be told it has one — a claim about the wrong channel,
+    // which is the one thing "read strictly to explain" must not produce.
+    let landNaver: (v: unknown) => void = () => {};
+    const naverPending = new Promise((resolve) => {
+      landNaver = resolve;
+    });
+    getChannelCapabilityOverview.mockImplementation((code: string) =>
+      code === "COUPANG"
+        ? Promise.resolve(
+            overviewWithReviewPaths([{ method: "ACTION_WINDOW", verificationStatus: "LIVE_PROVEN" }]),
+          )
+        : naverPending,
+    );
+    const { rerender } = renderSection("COUPANG");
+    await screen.findByText(/Action Window는 판매자가 직접 실행하는/);
+
+    rerender(
+      <MemoryRouter>
+        <CollectionSettingsSection
+          accountId="acct-2"
+          channelCode="NAVER"
+          schedules={[]}
+          capabilities={REVIEW_UNSUPPORTED as never}
+          onChanged={vi.fn()}
+          onReport={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    // NAVER's read has not landed, and Coupang's sentence is already gone.
+    expect(screen.queryByText(/Action Window/)).toBeNull();
+    await act(async () => {
+      landNaver(overviewWithReviewPaths([]));
+    });
+    expect(screen.queryByText(/Action Window/)).toBeNull();
+  });
+
+  it("leaves the row as it was when the overview cannot be read", async () => {
+    // Read strictly to explain: a failed read subtracts a sentence, never a control, and never
+    // invents one.
+    getChannelCapabilityOverview.mockRejectedValue(new Error("backend down"));
+    renderSection("NAVER");
+    expect(await screen.findByText("자동 수집 미지원")).toBeInTheDocument();
+    expect(screen.queryByText(/Action Window/)).toBeNull();
+    expect(reviewRow().querySelectorAll("button")).toHaveLength(0);
   });
 
   it("keeps controls disabled until capabilities are known", () => {

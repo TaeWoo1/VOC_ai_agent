@@ -1,4 +1,5 @@
 import { Section } from "./Section";
+import { channelDataTypeLabel } from "../lib/channelVocabulary";
 import { useApiData } from "../lib/useApiData";
 import { api } from "../lib/apiClient";
 import type { DataTypeCapability } from "../lib/types";
@@ -27,24 +28,14 @@ const METHOD_LABEL: Record<string, string> = {
  * than a connector capability that is merely unverified, so it borrows the same warn tone the
  * connector axis uses for `NEEDS_VERIFICATION`.
  *
- * **No 지원 here, deliberately.** `docs/channel-capability-registration-matrix.md` §4.1 reserves the
- * word a seller reads as 지원 for the last rung of the ladder — 운영 지원, an always-on promise, which
- * today only 파일 업로드 has reached. An acquisition path is a route with evidence behind it, not a
- * standing commitment, so it says what it is: which route, and how far it has been proven.
+ * **No 지원 here, deliberately.** `docs/channel-capability-registration-matrix.md` §0 reserves the word
+ * a seller reads as 지원 for the last rung of the roadmap's 4-stage ladder — 운영 지원, an always-on
+ * promise, which today only 파일 업로드 has reached. An acquisition path is a route with evidence behind
+ * it, not a standing commitment, so it says what it is: which route, and how far it has been proven.
  */
 const PATH_STATUS_STYLE: Record<string, { cls: string; label: string; evidence: string }> = {
   LIVE_PROVEN: { cls: "bg-good/10 text-good", label: "수집 경로 확인됨", evidence: "실계정 검증 완료" },
   NEEDS_VERIFICATION: { cls: "bg-warn/10 text-warn", label: "수집 경로 있음", evidence: "실계정 검증 전" },
-};
-
-/**
- * A channel's own word for a data type, where it differs from the generic one. Coupang calls reviews
- * 상품평, which is what its WING screen says and what /connect already puts on the entry point and the
- * record panel; a badge reading 리뷰 beside them is the same thing under a different name. Scoped by
- * channel so no other channel's copy moves.
- */
-const CHANNEL_DATA_TYPE_LABEL: Record<string, Record<string, string>> = {
-  COUPANG: { REVIEW: "상품평" },
 };
 
 /** The first path we can actually describe. An unknown method or status is not rendered as a claim. */
@@ -71,7 +62,7 @@ function describedPath(cap: DataTypeCapability) {
  * connector, which publishes it as its own 제외 범위 note (Coupang: `REVIEW_API`), rendered below.
  */
 function CapabilityBadge({ cap, channelCode }: { cap: DataTypeCapability; channelCode: string }) {
-  const label = CHANNEL_DATA_TYPE_LABEL[channelCode]?.[cap.dataType] ?? cap.label;
+  const label = channelDataTypeLabel(channelCode, cap.dataType, cap.label);
   const path = cap.supported ? undefined : describedPath(cap);
   if (path) {
     const pathStyle = PATH_STATUS_STYLE[path.verificationStatus];

@@ -320,8 +320,9 @@ either way and were rewritten.
       left with that connector. `ChannelApiGapRegistry` now holds it keyed by channel;
       `CoupangApiConnector` reads its own note from there, so there is still exactly one sentence about it,
       and `channelCapabilityOverview` merges connector scopes with channel gaps by `code` (connector
-      first, connector wins). It is **not** derived from `supported=false` — that boolean also goes false
-      for PRODUCT/SALES, which have APIs — and the registry stays narrow: NAVER's missing review API is
+      first, connector wins). It is **not** derived from `supported=false` — Coupang PRODUCT and SALES read
+      false too, because `CoupangApiConnector` serves neither, while Coupang documents an API for both —
+      and the registry stays narrow: NAVER's missing review API is
       just as real and deliberately not listed, because adding a channel changes that channel's screen and
       belongs to its own unit.
    2. ~~**The 수집 설정 section still says 이 채널 미지원 for 리뷰, one scroll below the new badge.**~~
@@ -337,6 +338,6 @@ either way and were rewritten.
       and its evidence separately — `상품평 수집 경로 확인됨 · Action Window` with `실계정 검증 완료`
       beneath it, and `수집 경로 있음` / `실계정 검증 전` for a path with no live sitting behind it. §4.1's
       셀러 표기 column is unchanged at 표기하지 않음; the vocabulary is written down in
-      `docs/channel-capability-registration-matrix.md` §1(취득 경로 표기 어휘). The badge also says 상품평
+      `docs/channel-capability-registration-matrix.md` §0(취득 경로 표기 어휘). The badge also says 상품평
       rather than 리뷰 on Coupang, matching the word the /connect entry point, the record panel and WING
       itself use — scoped to that channel, so no other channel's copy moved.

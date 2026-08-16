@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { Section } from "../Section";
 import { api } from "../../lib/apiClient";
+import { channelDataTypeLabel } from "../../lib/channelVocabulary";
 import { useApiData } from "../../lib/useApiData";
 import type { AcquisitionPathView, CapabilityView, ScheduleView } from "../../lib/types";
 import { DATA_TYPES, INTERVALS, backendMessage } from "./channelShared";
@@ -30,10 +31,14 @@ export function CollectionSettingsSection({
   // that: `capabilities` above is the connector_capabilities table, which answers whether a PULL
   // connector can serve the type and is what gates scheduling. Read here strictly to explain, never
   // to gate — a failed read leaves the row exactly as it was.
-  const { data: overview } = useApiData(
+  const { data, loading, error } = useApiData(
     () => (channelCode ? api.getChannelCapabilityOverview(channelCode) : Promise.resolve(null)),
     [channelCode],
   );
+  // `useApiData` keeps the last successful payload across a deps change, so on an account switch the
+  // PREVIOUS channel's overview is still in `data` until the new one lands. Honouring `loading` is
+  // what stops one channel's route being described on another channel's row.
+  const overview = loading || error ? null : data;
 
   return (
     <Section title="수집 설정">
@@ -43,7 +48,7 @@ export function CollectionSettingsSection({
             key={t.value}
             accountId={accountId}
             dataType={t.value}
-            label={t.label}
+            label={channelDataTypeLabel(channelCode, t.value, t.label)}
             schedule={schedules.find((s) => s.dataType === t.value) ?? null}
             capability={capabilities?.find((c) => c.dataType === t.value) ?? null}
             capabilitiesReady={capabilities !== null}
