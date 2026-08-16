@@ -40,45 +40,63 @@ public class ApiTriageClassifier implements ReviewTriageClassifier {
     }
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
-    private static final int MAX_OUTPUT_TOKENS = 300;
+
+    /**
+     * Every knob this classifier sets on the request, in one place, because RUBRIC v2 §8.6 makes all
+     * of them part of what produced a result.
+     *
+     * <p>They are a record rather than four constructor parameters so that adding one has to go
+     * through {@link #suffix()} — a knob that changed the request without changing the version would
+     * let two different candidates be measured under one name, which is the failure §8.6 exists to
+     * prevent.
+     *
+     * @param pinTemperature  pin {@code temperature: 0}. Reproducibility depends on it, and without
+     *     it the change log compares runs that were never the same experiment. But some models
+     *     reject any temperature but their own default and answer a pinned one with a 400, which
+     *     this classifier faithfully turns into {@code CLASSIFICATION_FAILED} on every row — visible,
+     *     and a wasted run. It is <b>not</b> retried without the field on a 400: a retry that changed
+     *     the request would be a second candidate wearing the first one's name.
+     * @param maxOutputTokens the output budget. On a reasoning model this budget is shared with the
+     *     model's internal reasoning, so a budget sized for the answer alone can be spent entirely
+     *     before any answer is emitted — arriving here as an empty message and, correctly but
+     *     uselessly, {@code UNCLASSIFIED} on every row.
+     * @param reasoningEffort OpenAI only, null to omit. Lower effort leaves more of the budget for
+     *     the answer and costs less; whether that trades away accuracy is a thing to measure on
+     *     {@code DEV}, one fixed value per run, not to assume.
+     */
+    public record Tuning(boolean pinTemperature, int maxOutputTokens, String reasoningEffort) {
+
+        public static final Tuning DEFAULT = new Tuning(true, 300, null);
+
+        String suffix() {
+            return (pinTemperature ? "+t0" : "+tdefault") + "+out" + maxOutputTokens
+                    + (reasoningEffort == null ? "" : "+effort:" + reasoningEffort);
+        }
+    }
 
     private final LlmHttpClient http;
     private final Vendor vendor;
     private final String modelId;
     private final String apiKey;
-    private final boolean sendTemperature;
+    private final Tuning tuning;
     private final String version;
 
     public ApiTriageClassifier(LlmHttpClient http, Vendor vendor, String modelId, String apiKey) {
-        this(http, vendor, modelId, apiKey, true);
+        this(http, vendor, modelId, apiKey, Tuning.DEFAULT);
     }
 
-    /**
-     * @param sendTemperature whether to pin {@code temperature: 0}.
-     *
-     *     <p>Configurable rather than always-on because some models reject any temperature but their
-     *     default and answer a pinned one with a 400 — which this classifier would faithfully turn
-     *     into {@code CLASSIFICATION_FAILED} on every single row. Visible, but a waste of a run.
-     *
-     *     <p>It is <b>not</b> silently retried without the field. A retry that changed the request
-     *     would mean two different candidates were measured under one name, and the whole point of
-     *     RUBRIC v2 §8.6 is that a version names exactly what produced a result. So the flag is
-     *     explicit, and it goes into {@link #version()}: a run at pinned zero and a run at the
-     *     model's default are different candidates and the change log has to be able to say which.
-     */
     public ApiTriageClassifier(LlmHttpClient http, Vendor vendor, String modelId, String apiKey,
-                               boolean sendTemperature) {
+                               Tuning tuning) {
         this.http = http;
         this.vendor = vendor;
         this.modelId = modelId;
         this.apiKey = apiKey;
-        this.sendTemperature = sendTemperature;
+        this.tuning = tuning;
         // All of RUBRIC §8.6's components in one string: the vendor and model, the prompt version,
-        // the schema the parser enforces, and the one sampling knob this classifier sets. A reader
-        // of a stored prediction can tell exactly what produced it without consulting anything else.
+        // the schema the parser enforces, and every request knob. A reader of a stored prediction can
+        // tell exactly what produced it without consulting anything else.
         this.version = "llm-triage/v1+" + vendor.name().toLowerCase() + ":" + modelId
-                + "+" + TriagePrompt.PROMPT_VERSION + "+schema/v1"
-                + (sendTemperature ? "+t0" : "+tdefault");
+                + "+" + TriagePrompt.PROMPT_VERSION + "+schema/v1" + tuning.suffix();
     }
 
     @Override
@@ -99,12 +117,21 @@ public class ApiTriageClassifier implements ReviewTriageClassifier {
             // the review.
             return Result.failed(version, "http " + response.status());
         }
-        String text;
+        JsonNode envelope;
         try {
-            text = extractText(MAPPER.readTree(response.body()));
+            envelope = MAPPER.readTree(response.body());
         } catch (Exception e) {
             return Result.failed(version, "unreadable response envelope");
         }
+        String stop = stopReason(envelope);
+        if ("length".equals(stop) || "max_tokens".equals(stop)) {
+            // Named rather than left to surface as "empty response". On a reasoning model the output
+            // budget is shared with internal reasoning, so this is the difference between "the model
+            // cannot do the task" and "the budget was too small" — and one of those is fixable by
+            // raising Tuning.maxOutputTokens rather than by abandoning the candidate.
+            return Result.failed(version, "output budget exhausted before an answer (" + stop + ")");
+        }
+        String text = extractText(envelope);
         if (text == null) {
             return Result.failed(version, "response envelope carried no message text");
         }
@@ -132,9 +159,7 @@ public class ApiTriageClassifier implements ReviewTriageClassifier {
     String requestBody(Input input) {
         ObjectNode root = MAPPER.createObjectNode();
         root.put("model", modelId);
-        if (sendTemperature) {
-            // Zero temperature is not a quality choice — it is what makes a DEV result reproducible,
-            // without which §8.6's change log compares runs that were never the same experiment.
+        if (tuning.pinTemperature()) {
             root.put("temperature", 0);
         }
         ArrayNode messages = root.putArray("messages");
@@ -142,16 +167,31 @@ public class ApiTriageClassifier implements ReviewTriageClassifier {
         user.put("role", "user");
         user.put("content", TriagePrompt.userTurn(input.rating(), input.body()));
         if (vendor == Vendor.ANTHROPIC) {
-            root.put("max_tokens", MAX_OUTPUT_TOKENS);
+            root.put("max_tokens", tuning.maxOutputTokens());
             root.put("system", TriagePrompt.SYSTEM);
         } else {
-            root.put("max_completion_tokens", MAX_OUTPUT_TOKENS);
+            root.put("max_completion_tokens", tuning.maxOutputTokens());
             root.putObject("response_format").put("type", "json_object");
+            if (tuning.reasoningEffort() != null) {
+                root.put("reasoning_effort", tuning.reasoningEffort());
+            }
             ObjectNode system = messages.insertObject(0);
             system.put("role", "system");
             system.put("content", TriagePrompt.SYSTEM);
         }
         return root.toString();
+    }
+
+    /**
+     * Why the model stopped, from whichever field the vendor calls it.
+     *
+     * <p>A vendor-controlled enum, not free text, so it can be quoted in a failure reason without
+     * carrying anything about the review.
+     */
+    private String stopReason(JsonNode envelope) {
+        return vendor == Vendor.ANTHROPIC
+                ? envelope.path("stop_reason").asText(null)
+                : envelope.path("choices").path(0).path("finish_reason").asText(null);
     }
 
     private String extractText(JsonNode envelope) {

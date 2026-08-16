@@ -108,6 +108,45 @@ class TriageFailClosedTest {
     }
 
     @Test
+    @DisplayName("an exhausted output budget says so, instead of surfacing as an empty response")
+    void anExhaustedBudgetIsNamed() {
+        // On a reasoning model the output budget is shared with internal reasoning, so this is the
+        // difference between "the model cannot do the task" and "the budget was too small" — and
+        // only one of those is fixed by raising a number rather than abandoning the candidate.
+        Result openai = new ApiTriageClassifier(
+                (u, h, b) -> new LlmHttpClient.Response(200,
+                        "{\"choices\":[{\"finish_reason\":\"length\",\"message\":{\"content\":\"\"}}]}"),
+                ApiTriageClassifier.Vendor.OPENAI, "m", "k").classify(new Input(1, "본문"));
+        assertThat(openai.status()).isEqualTo(Status.CLASSIFICATION_FAILED);
+        assertThat(openai.failureReason()).contains("output budget exhausted");
+
+        Result anthropic = new ApiTriageClassifier(
+                (u, h, b) -> new LlmHttpClient.Response(200,
+                        "{\"stop_reason\":\"max_tokens\",\"content\":[{\"type\":\"text\",\"text\":\"\"}]}"),
+                ApiTriageClassifier.Vendor.ANTHROPIC, "m", "k").classify(new Input(1, "본문"));
+        assertThat(anthropic.failureReason()).contains("output budget exhausted");
+    }
+
+    @Test
+    @DisplayName("every request knob is named in the version, so two candidates cannot share a name")
+    void everyKnobIsInTheVersion() {
+        // RUBRIC §8.6: a version names exactly what produced a result. A knob that changed the
+        // request without changing the version is how a change-log row starts describing a run that
+        // never happened.
+        java.util.Set<String> versions = new java.util.LinkedHashSet<>();
+        for (ApiTriageClassifier.Tuning tuning : List.of(
+                ApiTriageClassifier.Tuning.DEFAULT,
+                new ApiTriageClassifier.Tuning(false, 300, null),
+                new ApiTriageClassifier.Tuning(true, 4000, null),
+                new ApiTriageClassifier.Tuning(true, 300, "low"),
+                new ApiTriageClassifier.Tuning(false, 4000, "minimal"))) {
+            versions.add(new ApiTriageClassifier((u, h, b) -> new LlmHttpClient.Response(200, "{}"),
+                    ApiTriageClassifier.Vendor.OPENAI, "gpt-5", "k", tuning).version());
+        }
+        assertThat(versions).as("five distinct tunings must produce five distinct versions").hasSize(5);
+    }
+
+    @Test
     @DisplayName("a channel §8.3 does not permit cannot reach the transport")
     void coupangCannotBeClassified() {
         List<String> sent = new java.util.ArrayList<>();

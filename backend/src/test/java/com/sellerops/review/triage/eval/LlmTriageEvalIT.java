@@ -67,21 +67,41 @@ class LlmTriageEvalIT {
         Map<String, Label> labels = readLabels();
         Set<String> synthetic = readSynthetic();
 
-        List<DevRow> drawn = drawDevRows();
+        List<DevRow> drawn = new ArrayList<>(drawDevRows());
         StringBuilder out = new StringBuilder();
 
         String vendor = requireEnv("LLM_TRIAGE_VENDOR");
         String model = requireEnv("LLM_TRIAGE_MODEL");
-        // Some models reject any temperature but their own default and answer a pinned one with a
-        // 400 on every row. Explicit rather than retried-around: a retry that changed the request
-        // would measure two candidates under one name, and the flag is part of version() so the
-        // §8.6 change log can say which was run.
-        boolean pinTemperature = !"true".equals(System.getenv("LLM_TRIAGE_OMIT_TEMPERATURE"));
+        // Every request knob is read here and none is inferred, because all of them are part of
+        // version() and therefore part of what the §8.6 change log records. A knob that changed the
+        // request without changing the version would let two candidates be measured under one name.
+        ApiTriageClassifier.Tuning tuning = new ApiTriageClassifier.Tuning(
+                !"true".equals(System.getenv("LLM_TRIAGE_OMIT_TEMPERATURE")),
+                Integer.parseInt(envOr("LLM_TRIAGE_MAX_OUTPUT_TOKENS", "300")),
+                System.getenv("LLM_TRIAGE_REASONING_EFFORT"));
         NaverOnlyClassifierGate gate = new NaverOnlyClassifierGate(new ApiTriageClassifier(
                 new JdkLlmHttpClient(), ApiTriageClassifier.Vendor.valueOf(vendor), model,
-                requireEnv("LLM_TRIAGE_API_KEY"), pinTemperature));
+                requireEnv("LLM_TRIAGE_API_KEY"), tuning));
+
+        // A bounded wiring check, so the first contact with a new vendor costs a few calls instead of
+        // 107. It can never be mistaken for a result: the run is stamped WIRING CHECK, and §8.6's
+        // change log takes a row only from a full DEV pass. A truncated run that reported a recall
+        // would be reporting recall over whichever rows happened to sort first.
+        int limit = Integer.parseInt(envOr("LLM_TRIAGE_LIMIT", "0"));
+        boolean bounded = limit > 0 && limit < drawn.size();
+        if (bounded) {
+            drawn = drawn.subList(0, limit);
+        }
 
         out.append("\n\nreview-triage calibration — ").append(gate.version()).append("\n\n");
+        if (bounded) {
+            out.append(String.format("""
+                      ⚠⚠ WIRING CHECK, NOT A RESULT — %d of the DEV rows, taken in draw order.
+                         Nothing below is a candidate score and none of it may enter the §8.6
+                         change log. Unset LLM_TRIAGE_LIMIT for a real pass.
+
+                    """, limit));
+        }
         out.append(String.format("  DEV rows drawn %d, all labeled %s%n", drawn.size(),
                 drawn.stream().allMatch(r -> labels.containsKey(r.fingerprint()))));
         if (!drawn.stream().allMatch(r -> labels.containsKey(r.fingerprint()))) {
@@ -279,6 +299,11 @@ class LlmTriageEvalIT {
             fingerprints.add(entry.path("reviewIdFingerprint").asText());
         }
         return fingerprints;
+    }
+
+    private static String envOr(String name, String fallback) {
+        String value = System.getenv(name);
+        return value == null || value.isBlank() ? fallback : value;
     }
 
     private static String requireEnv(String name) {
