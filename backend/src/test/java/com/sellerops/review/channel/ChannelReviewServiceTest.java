@@ -8,6 +8,7 @@ import com.sellerops.channel.ChannelRepository;
 import com.sellerops.channel.ChannelStatus;
 import com.sellerops.common.ApiException;
 import com.sellerops.common.ReviewBodyFingerprint;
+import com.sellerops.itemanalysis.ItemAnalysisRepository;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.review.Review;
@@ -50,6 +51,7 @@ class ChannelReviewServiceTest {
     @Autowired SellerAccountRepository accounts;
     @Autowired ChannelRepository channels;
     @Autowired SyncJobRepository syncJobs;
+    @Autowired ItemAnalysisRepository analyses;
 
     private static final String BODY = "배송도 빠르고 포장도 꼼꼼해서 아주 만족합니다";
 
@@ -60,7 +62,7 @@ class ChannelReviewServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new ChannelReviewService(reviews, products, accounts, syncJobs);
+        service = new ChannelReviewService(reviews, products, accounts, syncJobs, analyses);
         account = account(org, "COUPANG");
         channelId = account.getChannelId();
     }
@@ -136,7 +138,7 @@ class ChannelReviewServiceTest {
         Product p = product("무선 이어폰", "15411270785");
         review(BODY, 5, LocalDate.of(2026, 8, 11), p, Instant.now());
 
-        ChannelReviewPageView view = service.list(org, account.getId(), null, 0, 20);
+        ChannelReviewPageView view = service.list(org, account.getId(), null, null, 0, 20);
 
         assertThat(view.total()).isEqualTo(1);
         assertThat(view.items()).hasSize(1);
@@ -153,13 +155,13 @@ class ChannelReviewServiceTest {
         review("최악입니다", 1, LocalDate.of(2026, 8, 1), p, Instant.now());
         review(BODY, 5, LocalDate.of(2026, 8, 11), p, Instant.now());
 
-        assertThat(service.list(org, account.getId(), "newest", 0, 20).items().get(0).rating()).isEqualTo(5);
-        assertThat(service.list(org, account.getId(), "lowest", 0, 20).items().get(0).rating()).isEqualTo(1);
+        assertThat(service.list(org, account.getId(), "newest", null, 0, 20).items().get(0).rating()).isEqualTo(5);
+        assertThat(service.list(org, account.getId(), "lowest", null, 0, 20).items().get(0).rating()).isEqualTo(1);
     }
 
     @Test
     void refuses_a_sort_it_does_not_recognise_rather_than_falling_back_to_the_default() {
-        assertThatThrownBy(() -> service.list(org, account.getId(), "worst-first", 0, 20))
+        assertThatThrownBy(() -> service.list(org, account.getId(), "worst-first", null, 0, 20))
                 .isInstanceOf(ApiException.class);
     }
 
@@ -168,16 +170,16 @@ class ChannelReviewServiceTest {
         Product p = product("무선 이어폰", "15411270785");
         review("연락처는 010-1234-5678 입니다 배송이 늦어서 아쉬웠습니다", 2, LocalDate.of(2026, 8, 11), p, Instant.now());
 
-        String preview = service.list(org, account.getId(), null, 0, 20).items().get(0).preview();
+        String preview = service.list(org, account.getId(), null, null, 0, 20).items().get(0).preview();
 
         assertThat(preview).doesNotContain("010-1234-5678");
     }
 
     @Test
     void clamps_the_page_size_rather_than_letting_a_client_ask_for_everything() {
-        assertThat(service.list(org, account.getId(), null, 0, 10_000).size())
+        assertThat(service.list(org, account.getId(), null, null, 0, 10_000).size())
                 .isEqualTo(ChannelReviewService.MAX_PAGE_SIZE);
-        assertThat(service.list(org, account.getId(), null, 0, 0).size())
+        assertThat(service.list(org, account.getId(), null, null, 0, 0).size())
                 .isEqualTo(ChannelReviewService.DEFAULT_PAGE_SIZE);
     }
 
@@ -191,7 +193,7 @@ class ChannelReviewServiceTest {
         review(BODY, 5, LocalDate.of(2026, 8, 11), p, importStart.plusSeconds(1));
         importAt(importStart, "SUCCESS");
 
-        ChannelReviewPageView view = service.list(org, account.getId(), "newest", 0, 20);
+        ChannelReviewPageView view = service.list(org, account.getId(), "newest", null, 0, 20);
 
         assertThat(view.newCount()).isEqualTo(1);
         assertThat(view.items().get(0).isNew()).isTrue();
@@ -217,7 +219,7 @@ class ChannelReviewServiceTest {
         job.setSellerAccountId(sibling.getId());
         syncJobs.save(job);
 
-        ChannelReviewPageView view = service.list(org, account.getId(), "newest", 0, 20);
+        ChannelReviewPageView view = service.list(org, account.getId(), "newest", null, 0, 20);
 
         assertThat(view.newCount()).isEqualTo(1);
         assertThat(view.items().get(0).isNew()).isTrue();
@@ -229,7 +231,7 @@ class ChannelReviewServiceTest {
         Product p = product("무선 이어폰", "15411270785");
         review(BODY, 5, LocalDate.of(2026, 8, 11), p, Instant.now());
 
-        ChannelReviewPageView view = service.list(org, account.getId(), null, 0, 20);
+        ChannelReviewPageView view = service.list(org, account.getId(), null, null, 0, 20);
 
         assertThat(view.newCount()).isZero();
         assertThat(view.items().get(0).isNew()).isFalse();
@@ -242,7 +244,7 @@ class ChannelReviewServiceTest {
         Instant importStart = Instant.now().truncatedTo(ChronoUnit.SECONDS);
         importAt(importStart, "PARTIAL");
 
-        ChannelReviewPageView view = service.list(org, account.getId(), null, 0, 20);
+        ChannelReviewPageView view = service.list(org, account.getId(), null, null, 0, 20);
 
         assertThat(view.lastImportAt()).isNotNull();
         assertThat(view.lastImportComplete()).isFalse();
@@ -335,7 +337,7 @@ class ChannelReviewServiceTest {
 
     @Test
     void another_orgs_account_reads_as_absent() {
-        assertThatThrownBy(() -> service.list(UUID.randomUUID(), account.getId(), null, 0, 20))
+        assertThatThrownBy(() -> service.list(UUID.randomUUID(), account.getId(), null, null, 0, 20))
                 .isInstanceOf(ApiException.class);
     }
 }

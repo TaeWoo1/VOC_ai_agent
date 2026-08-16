@@ -1,0 +1,111 @@
+package com.sellerops.review.triage;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Stream;
+import org.junit.jupiter.api.Test;
+
+/**
+ * The fourth RUBRIC §5 gate, made structural.
+ *
+ * <p>{@code contracts/review-eval/naver/v1/RUBRIC.md} §5's regression bar is
+ * "{@code LOW_RATING_REVIEW} counts unchanged — a detector may only ADD". Review Triage v1 satisfies
+ * it today by construction: it is a read-side suggestion on the channel review record and touches
+ * neither the attention surface nor anything the attention surface reads. But "today, by
+ * construction" is a property of the code as written, not a rule, and the whole point of a
+ * pre-committed gate is that it survives the next edit.
+ *
+ * <p>So it is asserted the way {@code ReviewIssueQueueIsolationTest} asserts the same boundary for
+ * the issue-memory package: structurally, over the package's own sources, rather than by checking a
+ * count in one scenario and hoping.
+ *
+ * <p><b>Comments are stripped before scanning.</b> This package's javadoc legitimately names the
+ * attention surface when explaining what it is NOT — the naming section in {@code ReviewTriageTier}
+ * exists precisely to distinguish the two — and a guard that failed on its own explanation would be
+ * deleted rather than fixed.
+ */
+class ReviewTriageQueueIsolationTest {
+
+    private static final Path PACKAGE_DIR =
+            Path.of("src", "main", "java", "com", "sellerops", "review", "triage");
+
+    /**
+     * Mechanisms that decide the needs-a-look queue, or that record a human's decision about a review.
+     *
+     * <p>{@code ReviewTriage} / {@code TriageDisposition} are on the list for a second reason beyond
+     * the gate: they are the OTHER thing called triage in this codebase. A tier that started reading a
+     * recorded disposition would make a computed suggestion depend on a durable human decision reached
+     * on a different screen, and the two would drift into one confused concept.
+     */
+    private static final List<String> FORBIDDEN_REFERENCES = List.of(
+            "com.sellerops.attention",
+            "AttentionSignal",
+            "OperatorAttention",
+            "VocItemSource",
+            "ReviewTriageRepository",
+            "TriageDisposition");
+
+    @Test
+    void thePackageIsNotEmptySoThisTestCannotPassVacuously() throws IOException {
+        assertThat(sources()).isNotEmpty();
+        assertThat(sources()).hasSizeGreaterThanOrEqualTo(3);
+    }
+
+    @Test
+    void nothingInThePackageReachesTheQueuesMechanisms() throws IOException {
+        List<String> offences = new ArrayList<>();
+        for (Path source : sources()) {
+            String code = stripComments(Files.readString(source));
+            for (String forbidden : FORBIDDEN_REFERENCES) {
+                if (code.contains(forbidden)) {
+                    offences.add(source.getFileName() + " → " + forbidden);
+                }
+            }
+        }
+        assertThat(offences)
+                .as("triage는 확인 필요 큐의 판정 경로에 닿을 수 없습니다 (RUBRIC.md §5 회귀 게이트)")
+                .isEmpty();
+    }
+
+    /**
+     * The tier is computed, never stored — so it cannot become a state that drifts from the review it
+     * describes, and it cannot write anything the attention queue reads.
+     */
+    @Test
+    void nothingInThePackagePersistsAnything() throws IOException {
+        List<String> offences = new ArrayList<>();
+        for (Path source : sources()) {
+            String code = stripComments(Files.readString(source));
+            for (String forbidden : List.of(".save(", ".saveAll(", ".delete(", "Repository",
+                    "@Entity", "@Transactional")) {
+                if (code.contains(forbidden)) {
+                    offences.add(source.getFileName() + " → " + forbidden);
+                }
+            }
+        }
+        assertThat(offences)
+                .as("triage는 읽기 시점 계산이며 어떤 것도 저장하지 않습니다")
+                .isEmpty();
+    }
+
+    private static List<Path> sources() throws IOException {
+        try (Stream<Path> walk = Files.walk(PACKAGE_DIR)) {
+            return walk.filter(p -> p.toString().endsWith(".java")).sorted().toList();
+        }
+    }
+
+    /**
+     * Remove block and line comments. Deliberately naive, and copied in spirit from
+     * {@code ReviewIssueQueueIsolationTest}: a {@code //} inside a string literal would truncate that
+     * line. No source in this package contains one, and a real Java lexer in a guard test would be
+     * more code than the thing it guards.
+     */
+    private static String stripComments(String source) {
+        return source.replaceAll("(?s)/\\*.*?\\*/", "").replaceAll("(?m)//.*$", "");
+    }
+}

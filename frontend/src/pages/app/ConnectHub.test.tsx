@@ -4,7 +4,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { ConnectHub } from "./ConnectHub";
 import { expectNoAxeViolations } from "../../test/axe";
-import type { ChannelResponse, SellerAccountResponse } from "../../lib/types";
+import type { ChannelResponse, ChannelReviewPageView, SellerAccountResponse } from "../../lib/types";
 
 const getChannels = vi.fn();
 const getSellerAccountsStrict = vi.fn();
@@ -69,8 +69,18 @@ function coupangAccount(): SellerAccountResponse {
   };
 }
 
-function reviewPage(total: number) {
-  return { page: 0, size: 1, total, newCount: 0, lastImportAt: null, lastImportComplete: true, items: [] };
+/** Typed, so it cannot silently stop matching the response this hub receives — see ReviewRecordPanel.test. */
+function reviewPage(total: number): ChannelReviewPageView {
+  return {
+    page: 0,
+    size: 1,
+    total,
+    newCount: 0,
+    lastImportAt: null,
+    lastImportComplete: true,
+    triageSummary: { needsAttention: 0, watch: 0, fyi: total, repeatedCategories: [] },
+    items: [],
+  };
 }
 
 beforeEach(() => {

@@ -6,6 +6,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { ReviewRecordPanel } from "./ReviewRecordPanel";
 import { expectNoAxeViolations } from "../../test/axe";
+import type { ChannelReviewPageView } from "../../lib/types";
 
 const getChannelReviewsStrict = vi.fn();
 vi.mock("../../lib/apiClient", () => ({
@@ -31,8 +32,22 @@ function renderPanel(props: { accountId?: string; channelCode?: string | null; r
   );
 }
 
-function page(total: number) {
-  return { page: 0, size: 1, total, newCount: 0, lastImportAt: null, lastImportComplete: true, items: [] };
+/**
+ * Typed on purpose. As an untyped literal this fixture silently stopped matching the response the
+ * panel receives when the page gained `triageSummary` — `tsc` had nothing to check it against, so
+ * the drift would only have surfaced the day something here read the new field.
+ */
+function page(total: number): ChannelReviewPageView {
+  return {
+    page: 0,
+    size: 1,
+    total,
+    newCount: 0,
+    lastImportAt: null,
+    lastImportComplete: true,
+    triageSummary: { needsAttention: 0, watch: 0, fyi: total, repeatedCategories: [] },
+    items: [],
+  };
 }
 
 describe("상품평 패널 — the entry point", () => {

@@ -12,6 +12,7 @@ import type {
   ChannelReviewDetailView,
   ChannelReviewLocateRun,
   ChannelReviewPageView,
+  ReviewTriageTier,
   ConnectionInfoView,
   ConnectionCapabilityView,
   NaverSetupView,
@@ -1216,10 +1217,17 @@ export const api = {
    */
   async getChannelReviewsStrict(
     accountId: string,
-    params: { sort?: "newest" | "lowest"; page?: number; size?: number } = {},
+    params: {
+      sort?: "attention" | "newest" | "lowest";
+      /** Narrow to one triage tier. Absent means the whole record, which is the default. */
+      tier?: ReviewTriageTier;
+      page?: number;
+      size?: number;
+    } = {},
   ): Promise<ChannelReviewPageView> {
     const query = new URLSearchParams();
     if (params.sort) query.set("sort", params.sort);
+    if (params.tier) query.set("tier", params.tier);
     if (params.page !== undefined) query.set("page", String(params.page));
     if (params.size !== undefined) query.set("size", String(params.size));
     const { data } = await http.get<ChannelReviewPageView>(

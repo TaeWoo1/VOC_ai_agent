@@ -1,5 +1,6 @@
 package com.sellerops.review.channel.dto;
 
+import com.sellerops.review.triage.ReviewTriageNote;
 import java.time.LocalDate;
 import java.util.UUID;
 
@@ -31,5 +32,10 @@ public record ChannelReviewItemView(
          * SellerOps lost something.
          */
         boolean textless,
-        boolean isNew) {
+        boolean isNew,
+        /**
+         * What SellerOps suggests about this row: which tier, why, and what the seller might do. Computed
+         * from the review at read time and stored nowhere — see {@link ReviewTriageNote}.
+         */
+        ReviewTriageNote triage) {
 }

@@ -1311,6 +1311,52 @@ export interface ChannelReviewItemView {
   textless: boolean;
   /** Arrived in the most recent import — derived from that import's start, never a read flag. */
   isNew: boolean;
+  triage: ReviewTriageNote;
+}
+
+/**
+ * Which triage tier a review is in. Computed by the backend from the rating and whether there is
+ * anything to read — never from what the review says.
+ */
+export type ReviewTriageTier = "NEEDS_ATTENTION" | "WATCH" | "FYI";
+
+/**
+ * What SellerOps suggests about one review: the tier, the short reason it landed there, the issue
+ * tags worth carrying, and one thing the seller might do.
+ *
+ * `reason` and `tags` EXPLAIN the tier; they never decided it. Body-derived material appears here
+ * only as a citation, because `contracts/review-eval/naver/v1/RUBRIC.md` §5 forbids surfacing an
+ * unmeasured text detector and the label seed behind it is empty. Do not add UI that re-ranks,
+ * re-orders or re-colours a row from `tags` — that would be the gated thing, arriving through the
+ * frontend.
+ *
+ * `recommendedAction` is null when there is genuinely nothing to do, and must render as nothing
+ * rather than as a reassuring sentence. None of these strings ever suggests replying: Coupang gives
+ * sellers no way to answer a 상품평.
+ */
+export interface ReviewTriageNote {
+  tier: ReviewTriageTier;
+  reason: string;
+  tags: string[];
+  recommendedAction: string | null;
+}
+
+/**
+ * How the channel's WHOLE record divides, and what repeats in it.
+ *
+ * Always the unfiltered picture, even when the list is filtered to one tier — a summary recomputed
+ * under its own filter would collapse to the option already chosen and leave the operator no way
+ * back.
+ *
+ * `repeatedCategories` is unwindowed: it says how many of the reviews the seller HAS share a
+ * category, and claims nothing about when. 기타 never appears — it is the analyzer's "fitted
+ * nothing", not an issue.
+ */
+export interface ChannelReviewTriageSummaryView {
+  needsAttention: number;
+  watch: number;
+  fyi: number;
+  repeatedCategories: { category: string; count: number }[];
 }
 
 /**
@@ -1325,6 +1371,7 @@ export interface ChannelReviewPageView {
   newCount: number;
   lastImportAt: string | null;
   lastImportComplete: boolean;
+  triageSummary: ChannelReviewTriageSummaryView;
   items: ChannelReviewItemView[];
 }
 
@@ -1367,5 +1414,7 @@ export interface ChannelReviewDetailView {
   /** The buyer rated and wrote nothing — see `ChannelReviewItemView.textless`. */
   textless: boolean;
   isNew: boolean;
+  /** The same note the list row carried — opening a review never changes what it said. */
+  triage: ReviewTriageNote;
   locateTarget: ChannelReviewLocateTarget;
 }
