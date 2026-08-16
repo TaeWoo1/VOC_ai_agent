@@ -56,6 +56,34 @@ class ReviewTriagePilotIT {
     private record Answer(ReviewTriageTier tier, String reasonCode, Set<String> tags) {
     }
 
+    /**
+     * The two sides of RUBRIC v2 §3.1's last column, used ONLY to spot a label whose tier and reason
+     * disagree — never to correct one. §3.1: "a pairing that crosses the column is a finding about
+     * the rubric and is reported, never auto-corrected."
+     */
+    private static final Set<String> ACTIONABLE_REASONS = Set.of(
+            "DEFECT_OR_DAMAGE", "WRONG_OR_MISSING", "DELIVERY_PROBLEM", "PACKAGING_PROBLEM",
+            "NOT_AS_DESCRIBED", "CANNOT_USE", "EXPLICIT_REQUEST", "PRAISE_WITH_CONCESSION");
+    private static final Set<String> NON_ACTIONABLE_REASONS = Set.of(
+            "PRAISE_ONLY", "CRITIQUE_NO_REQUEST", "NEUTRAL_DESCRIPTION", "TEXTLESS_OR_NOISE", "OFF_TOPIC");
+
+    /**
+     * A row whose tier and reason sit on opposite sides of §3.1's column.
+     *
+     * <p>Two such rows exist in this pilot — 3★ bodies the owner called 확인 필요 while coding the
+     * reason {@code TEXTLESS_OR_NOISE}. The gold is left exactly as labeled; what this predicate
+     * buys is a **sensitivity reading beside the primary one**, so a candidate's recall can be seen
+     * both with those rows counted and without. Neither reading is the "corrected" one.
+     */
+    private static boolean conflicted(PilotRow row) {
+        if (row.ownerReason() == null) {
+            return false;
+        }
+        boolean wanted = row.owner() == ReviewTriageTier.NEEDS_ATTENTION;
+        return wanted ? NON_ACTIONABLE_REASONS.contains(row.ownerReason())
+                : ACTIONABLE_REASONS.contains(row.ownerReason());
+    }
+
     @Test
     void screenTheCandidatesAgainstTheOwnersPilotLabels() throws Exception {
         Map<String, Answer> gold = readGold();
@@ -125,12 +153,42 @@ class ReviewTriagePilotIT {
                     Wilson lower bound over %d rows reaches v1 §5's 0.80 precision gate.
                 %n""", positives, positives == 0 ? 0.0 : 100.0 / positives, rows.size()));
 
-        List<String> armNames = rows.isEmpty() ? List.of() : List.copyOf(rows.get(0).arms().keySet());
-        for (String arm : armNames) {
-            out.append(armSection(arm, rows));
+        // Every reason code must sit on one side of §3.1's column or the other. A code in neither
+        // means the vocabulary moved and the conflict predicate below has quietly stopped working.
+        for (PilotRow row : rows) {
+            String reason = row.ownerReason();
+            if (reason != null && !ACTIONABLE_REASONS.contains(reason)
+                    && !NON_ACTIONABLE_REASONS.contains(reason)) {
+                throw new IllegalStateException("reason code outside RUBRIC §3.1's table: " + reason);
+            }
         }
-        out.append(contradictionSection(rows, armNames));
-        out.append(betweenModels(rows, armNames));
+
+        List<String> armNames = rows.isEmpty() ? List.of() : List.copyOf(rows.get(0).arms().keySet());
+        List<PilotRow> conflicted = rows.stream().filter(ReviewTriagePilotIT::conflicted).toList();
+        Map<String, Integer> conflictedByReason = new TreeMap<>();
+        for (PilotRow row : conflicted) {
+            conflictedByReason.merge(row.owner() + "/" + row.ownerReason(), 1, Integer::sum);
+        }
+        out.append(String.format("""
+                  rubric conflicts (RUBRIC §3.1): %d row(s) whose tier and reason cross the column
+                    %s
+                    Left in the gold exactly as labeled. Reported below twice — PRIMARY counts them,
+                    SENSITIVITY drops them. Neither reading is the corrected one.
+                %n""", conflicted.size(), conflictedByReason.isEmpty() ? "(none)" : conflictedByReason));
+
+        List<PilotRow> sensitivity = rows.stream().filter(r -> !conflicted(r)).toList();
+        for (String[] scope : new String[][] {{"PRIMARY", "all rows"}, {"SENSITIVITY", "rubric conflicts dropped"}}) {
+            List<PilotRow> scoped = scope[0].equals("PRIMARY") ? rows : sensitivity;
+            long scopedPositives = scoped.stream()
+                    .filter(r -> r.owner() == ReviewTriageTier.NEEDS_ATTENTION).count();
+            out.append(String.format("%n═══ %s — %d rows, %d 확인 필요 (%s) ═══%n",
+                    scope[0], scoped.size(), scopedPositives, scope[1]));
+            for (String arm : armNames) {
+                out.append(armSection(arm, scoped));
+            }
+            out.append(contradictionSection(scoped, armNames));
+            out.append(betweenModels(scoped, armNames));
+        }
 
         System.out.print(out);
     }
