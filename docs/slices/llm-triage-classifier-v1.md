@@ -255,7 +255,21 @@ reading are each insufficient. Candidate B is a different candidate on all three
 | candidate | identity |
 |---|---|
 | A (failed) | `openai:gpt-5` · `triage-prompt/v1` · no guard · 1 pass |
-| B (next) | `openai:gpt-5-2025-08-07` · `triage-prompt/v2` · `effort:low` · `out4000` · `additive-guard/v1` · 3 passes, worst-gated |
+| B | `openai:gpt-5-2025-08-07` · `triage-prompt/v2` · `effort:low` · `out4000` · `additive-guard/v1` · 3 passes, worst-gated |
+
+#### Candidate B — 3 passes, 2026-08-17
+
+| pass | tp | fp | fn | recall | precision (95% low) | 4–5★ FP | guard demotions | model *would* have demoted | failures |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | 29 | 0 | 6 | 0.829 | 1.000 (0.883) | 0.000 | 0 | 0 | 0 |
+| 2 | 28 | 1 | 7 | 0.800 | 0.966 (0.828) | 0.000 | 0 | 0 | 0 |
+| 3 | 30 | 0 | 5 | 0.857 | 1.000 (0.886) | 0.000 | 0 | 0 | 0 |
+| **gate (worst)** | | | | **0.800** | **(0.828)** | **0.000** | **0** | **0** | **0** |
+
+Bars: recall ≥ 0.30 **PASS** · precision Wilson LB ≥ 0.80 **PASS** · 4–5★ FP ≤ 0.05 **PASS**.
+
+SENSITIVITY (the 1 drawn synthetic row excluded) moves nothing that matters: recall 0.824 / 0.794 /
+0.853, precision LB 0.879 / 0.823 / 0.883, 4–5★ FP 0.000 throughout.
 
 Runs 1 and 2 are the **same candidate on the same rows** — identical model, prompt, schema and
 tuning, identical 107 reviews. They disagree. That is not noise to be averaged away, and both rows
