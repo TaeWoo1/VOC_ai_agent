@@ -9,11 +9,13 @@ import { DATA_TYPES, nextActionFor } from "./channelShared";
 import { expectNoAxeViolations } from "../../test/axe";
 import type { ConnectionStatusView, SyncRunView } from "../../lib/types";
 
+const getChannelCapabilityOverview = vi.fn(async (_code: string) => null as unknown);
 vi.mock("../../lib/apiClient", () => ({
   api: {
     putSchedule: vi.fn(),
     manualSync: vi.fn(),
     retryRun: vi.fn(),
+    getChannelCapabilityOverview: (code: string) => getChannelCapabilityOverview(code),
   },
   getToken: () => null,
 }));
@@ -100,35 +102,109 @@ describe("수집 설정 섹션", () => {
     }
   });
 
+  const REVIEW_UNSUPPORTED = [
+    {
+      channelCode: "COUPANG",
+      connectorClass: "API",
+      dataType: "REVIEW",
+      supported: false,
+      verificationStatus: "UNSUPPORTED",
+      notes: null,
+    },
+  ];
+
+  function enabledButtonsIn(row: HTMLElement) {
+    return Array.from(row.querySelectorAll("button")).filter((b) => !b.hasAttribute("disabled"));
+  }
+
+  function reviewRow() {
+    const section = screen.getByText("수집 설정").closest("section") as HTMLElement;
+    return within(section).getByText("리뷰").closest("div") as HTMLElement;
+  }
+
   it("gates on the connector capability alone — an acquisition path is not a schedule", () => {
-    // The acquisition axis added for #107 lives on the capability OVERVIEW, which this section does
-    // not read: these rows come from `connector_capabilities` and decide whether a schedule may be
-    // turned on. Coupang 상품평 arrive through an operator-confirmed Action Window, which is not a
-    // thing a cadence can run, so REVIEW must stay disabled here exactly as before.
-    const { container } = wrap(
+    // The acquisition axis added for #107 lives on the capability OVERVIEW; the rows themselves come
+    // from `connector_capabilities` and are what decides whether a schedule may be turned on. Coupang
+    // 상품평 arrive through an operator-confirmed Action Window, which is not a thing a cadence can
+    // run, so REVIEW must stay disabled here exactly as before.
+    wrap(
       <CollectionSettingsSection
         accountId="acct-1"
         schedules={[]}
-        capabilities={[
-          {
-            channelCode: "COUPANG",
-            connectorClass: "API",
-            dataType: "REVIEW",
-            supported: false,
-            verificationStatus: "UNSUPPORTED",
-            notes: null,
-          },
-        ]}
+        capabilities={REVIEW_UNSUPPORTED as never}
         onChanged={vi.fn()}
         onReport={vi.fn()}
       />,
     );
-    const section = screen.getByText("수집 설정").closest("section") as HTMLElement;
-    const reviewRow = within(section).getByText("리뷰").closest("div") as HTMLElement;
-    expect(
-      Array.from(reviewRow.querySelectorAll("button")).filter((b) => !b.hasAttribute("disabled")),
-    ).toHaveLength(0);
-    expect(container.textContent).not.toContain("Action Window");
+    expect(enabledButtonsIn(reviewRow())).toHaveLength(0);
+  });
+
+  it("says the cadence is unsupported, not the channel", async () => {
+    // 이 채널 미지원 sat one scroll under a panel counting 22 collected 상품평 — both rendered from
+    // true facts, and together they read as a contradiction. What this row can actually vouch for is
+    // the cadence.
+    wrap(
+      <CollectionSettingsSection
+        accountId="acct-1"
+        schedules={[]}
+        capabilities={REVIEW_UNSUPPORTED as never}
+        onChanged={vi.fn()}
+        onReport={vi.fn()}
+      />,
+    );
+    expect(await screen.findByText("자동 수집 미지원")).toBeInTheDocument();
+    expect(screen.queryByText("이 채널 미지원")).toBeNull();
+  });
+
+  it("explains the operator-run route where one exists, and still schedules nothing", async () => {
+    getChannelCapabilityOverview.mockResolvedValue({
+      channelCode: "COUPANG",
+      channelNameKo: "쿠팡",
+      connectorClass: "API",
+      autoCollectSupported: true,
+      dataTypes: [
+        {
+          dataType: "REVIEW",
+          label: "리뷰",
+          supported: false,
+          verificationStatus: "UNSUPPORTED",
+          acquisitionPaths: [{ method: "ACTION_WINDOW", verificationStatus: "LIVE_PROVEN" }],
+        },
+      ],
+      unsupportedScopes: [],
+    });
+    wrap(
+      <CollectionSettingsSection
+        accountId="acct-1"
+        channelCode="COUPANG"
+        schedules={[]}
+        capabilities={REVIEW_UNSUPPORTED as never}
+        onChanged={vi.fn()}
+        onReport={vi.fn()}
+      />,
+    );
+    expect(await screen.findByText(/Action Window는 판매자가 직접 실행하는/)).toBeInTheDocument();
+    // The sentence is an explanation, never a gate: the row is exactly as unschedulable as before.
+    expect(enabledButtonsIn(reviewRow())).toHaveLength(0);
+  });
+
+  it("stays silent about a route the channel has not got", async () => {
+    // Read strictly to explain: a channel with no acquisition path must not inherit Coupang's
+    // sentence, and a failed read must leave the row as it was.
+    getChannelCapabilityOverview.mockRejectedValue(new Error("backend down"));
+    wrap(
+      <CollectionSettingsSection
+        accountId="acct-1"
+        channelCode="NAVER"
+        schedules={[]}
+        capabilities={REVIEW_UNSUPPORTED as never}
+        onChanged={vi.fn()}
+        onReport={vi.fn()}
+      />,
+    );
+    expect(await screen.findByText("자동 수집 미지원")).toBeInTheDocument();
+    expect(screen.queryByText(/Action Window/)).toBeNull();
+    expect(enabledButtonsIn(reviewRow())).toHaveLength(0);
   });
 
   it("keeps controls disabled until capabilities are known", () => {

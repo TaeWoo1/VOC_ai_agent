@@ -12,6 +12,7 @@ import com.sellerops.collect.dto.SchedulePutRequest;
 import com.sellerops.collect.dto.ScheduleView;
 import com.sellerops.collect.dto.SyncRunView;
 import com.sellerops.common.ApiException;
+import com.sellerops.connector.ChannelApiGapRegistry;
 import com.sellerops.connector.ChannelConnectionStatus;
 import com.sellerops.connector.ChannelConnectionStatusRepository;
 import com.sellerops.connector.ConnectionVerifier;
@@ -44,8 +45,10 @@ import com.sellerops.sync.SyncSchedule;
 import com.sellerops.sync.SyncScheduleRepository;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Stream;
 import org.springframework.stereotype.Service;
 
 /**
@@ -332,11 +335,33 @@ public class CollectControlService {
                         // connector cannot serve may still be one SellerOps collects another way.
                         AcquisitionPathRegistry.pathsFor(channelCode, dt)))
                 .toList();
-        List<ChannelCapabilityOverview.ScopeNote> scopes = connector.unsupportedScopes(channelCode).stream()
-                .map(s -> new ChannelCapabilityOverview.ScopeNote(s.code(), s.label()))
-                .toList();
+        List<ChannelCapabilityOverview.ScopeNote> scopes = unsupportedScopes(connector, channelCode);
         return new ChannelCapabilityOverview(
                 channelCode, channelNameKo, caps.connectorClass(), true, dataTypes, scopes);
+    }
+
+    /**
+     * The boundaries this channel's operator screen must state: what the connector declines to do,
+     * plus what the marketplace never offered.
+     *
+     * <p>Two sources because the facts have two lifetimes. A connector's scopes belong to that
+     * connector and vanish when it does — the real Coupang connector sits behind a flag that is off
+     * by default, so on a default environment the honest 리뷰 API 없음 note disappeared and the
+     * acquisition badge stood there with nothing to answer it. {@link ChannelApiGapRegistry} holds
+     * the half that is about the marketplace and therefore has to survive whichever connector
+     * resolved.
+     *
+     * <p>Merged by {@code code}, connector first and winning, so a connector may still say a channel
+     * gap in its own words and the operator never reads one fact twice.
+     */
+    private List<ChannelCapabilityOverview.ScopeNote> unsupportedScopes(PullConnector connector,
+                                                                        String channelCode) {
+        LinkedHashMap<String, ChannelCapabilityOverview.ScopeNote> byCode = new LinkedHashMap<>();
+        Stream.concat(connector.unsupportedScopes(channelCode).stream(),
+                        ChannelApiGapRegistry.gapsFor(channelCode).stream())
+                .forEach(s -> byCode.putIfAbsent(
+                        s.code(), new ChannelCapabilityOverview.ScopeNote(s.code(), s.label())));
+        return List.copyOf(byCode.values());
     }
 
     /**

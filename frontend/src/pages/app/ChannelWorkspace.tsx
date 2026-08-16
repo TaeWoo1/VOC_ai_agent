@@ -303,6 +303,7 @@ export function ChannelWorkspace() {
       <div ref={collectSettingsRef}>
         <CollectionSettingsSection
           accountId={accountId}
+          channelCode={channel?.code}
           schedules={schedules}
           capabilities={capabilities}
           onChanged={reload}

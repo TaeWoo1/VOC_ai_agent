@@ -4,23 +4,37 @@
 import { useEffect, useState } from "react";
 import { Section } from "../Section";
 import { api } from "../../lib/apiClient";
-import type { CapabilityView, ScheduleView } from "../../lib/types";
+import { useApiData } from "../../lib/useApiData";
+import type { AcquisitionPathView, CapabilityView, ScheduleView } from "../../lib/types";
 import { DATA_TYPES, INTERVALS, backendMessage } from "./channelShared";
 
 /** 수집 설정 — one row per data type, each owning its own cadence + manual run. */
 export function CollectionSettingsSection({
   accountId,
+  channelCode,
   schedules,
   capabilities,
   onChanged,
   onReport,
 }: {
   accountId: string;
+  /** Optional: without it the rows simply say less, never something untrue. */
+  channelCode?: string | null;
   schedules: ScheduleView[];
   capabilities: CapabilityView[] | null;
   onChanged: () => void;
   onReport: (message: string, isError: boolean) => void;
 }) {
+  // A row that cannot be scheduled still owes the seller a reason, and the honest reason is
+  // sometimes "SellerOps collects this — just not on a cadence". Only the capability OVERVIEW knows
+  // that: `capabilities` above is the connector_capabilities table, which answers whether a PULL
+  // connector can serve the type and is what gates scheduling. Read here strictly to explain, never
+  // to gate — a failed read leaves the row exactly as it was.
+  const { data: overview } = useApiData(
+    () => (channelCode ? api.getChannelCapabilityOverview(channelCode) : Promise.resolve(null)),
+    [channelCode],
+  );
+
   return (
     <Section title="수집 설정">
       <ul className="divide-y divide-line">
@@ -33,6 +47,9 @@ export function CollectionSettingsSection({
             schedule={schedules.find((s) => s.dataType === t.value) ?? null}
             capability={capabilities?.find((c) => c.dataType === t.value) ?? null}
             capabilitiesReady={capabilities !== null}
+            acquisitionPaths={
+              overview?.dataTypes.find((d) => d.dataType === t.value)?.acquisitionPaths ?? []
+            }
             onChanged={onChanged}
             onReport={onReport}
           />
@@ -49,6 +66,7 @@ function ScheduleRow({
   schedule,
   capability,
   capabilitiesReady,
+  acquisitionPaths,
   onChanged,
   onReport,
 }: {
@@ -58,6 +76,7 @@ function ScheduleRow({
   schedule: ScheduleView | null;
   capability: CapabilityView | null;
   capabilitiesReady: boolean;
+  acquisitionPaths: AcquisitionPathView[];
   onChanged: () => void;
   onReport: (message: string, isError: boolean) => void;
 }) {
@@ -73,6 +92,9 @@ function ScheduleRow({
 
   const unsupported = capability !== null && !capability.supported;
   const needsVerification = capability?.verificationStatus === "NEEDS_VERIFICATION";
+  // A route the seller runs themselves on the marketplace. It is why this row can be uncollectable
+  // on a cadence and collected all the same; it never makes the row schedulable.
+  const operatorRunPath = acquisitionPaths.some((p) => p.method === "ACTION_WINDOW");
   const enabled = schedule?.enabled ?? false;
   // One guard for the whole row: a save and a manual sync must not overlap.
   const rowBusy = saving || syncing;
@@ -118,7 +140,10 @@ function ScheduleRow({
       <div className="flex items-center gap-3">
         <span className="w-24 text-lg font-semibold">{label}</span>
         {unsupported ? (
-          <span className="rounded-lg bg-ink/5 px-2.5 py-1 text-sm text-muted">이 채널 미지원</span>
+          // 자동 수집, not 이 채널: this row is about a cadence, and saying the CHANNEL does not
+          // support the data type overstated it — Coupang 상품평 sat under this chip while the panel
+          // one scroll above counted 22 of them, collected through the Action Window.
+          <span className="rounded-lg bg-ink/5 px-2.5 py-1 text-sm text-muted">자동 수집 미지원</span>
         ) : needsVerification ? (
           <span className="rounded-lg bg-warn/10 px-2.5 py-1 text-sm text-warn">확인 필요</span>
         ) : null}
@@ -130,7 +155,11 @@ function ScheduleRow({
       {!capabilitiesReady ? (
         <p className="text-sm text-muted">수집 지원 정보 확인 중…</p>
       ) : unsupported ? (
-        <p className="text-sm text-muted">{capability?.notes ?? "이 데이터는 파일 업로드로 채울 수 있습니다."}</p>
+        <p className="text-sm text-muted">
+          {operatorRunPath
+            ? "Action Window는 판매자가 직접 실행하는 수집 경로라 자동 수집 주기 대상이 아닙니다."
+            : capability?.notes ?? "이 데이터는 파일 업로드로 채울 수 있습니다."}
+        </p>
       ) : (
         <div className="flex flex-wrap items-center gap-3">
           <select
