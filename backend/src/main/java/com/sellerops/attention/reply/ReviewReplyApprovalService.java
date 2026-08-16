@@ -132,9 +132,11 @@ public class ReviewReplyApprovalService {
         }
 
         try {
-            writer.applyApproval(orgId, reviewId, target, approvedVersion, approvedFingerprint,
-                    command, actor);
-            return new ReviewReplyApprovalResponse(actionRef, target.name(), false);
+            // `applied == false` is the idempotent withdrawal of an already-withdrawn row: nothing
+            // was written, and the state the caller asked for is the state that holds.
+            boolean applied = writer.applyApproval(orgId, reviewId, target, approvedVersion,
+                    approvedFingerprint, command, actor);
+            return new ReviewReplyApprovalResponse(actionRef, target.name(), !applied);
         } catch (DataIntegrityViolationException race) {
             return resolveRace(race, orgId, reviewId, target, approvedVersion, approvedFingerprint,
                     command, actor, actionRef);
@@ -170,9 +172,9 @@ public class ReviewReplyApprovalService {
             throw race;
         }
         try {
-            writer.applyApproval(orgId, reviewId, target, approvedVersion, approvedFingerprint,
-                    command, actor);
-            return new ReviewReplyApprovalResponse(actionRef, target.name(), false);
+            boolean applied = writer.applyApproval(orgId, reviewId, target, approvedVersion,
+                    approvedFingerprint, command, actor);
+            return new ReviewReplyApprovalResponse(actionRef, target.name(), !applied);
         } catch (DataIntegrityViolationException stillRacing) {
             // Only our own command id can still collide (review_id cannot — the row is there),
             // which means an identical call committed while we retried.

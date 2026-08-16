@@ -79,20 +79,36 @@ public class ReviewReplyApprovalWriter {
      * {@code uq_review_reply_approval_review} and the caller resolves that as a retry. The two
      * mechanisms cover the two cases between them.
      *
+     * <p><b>A withdrawal of an already-withdrawn row writes nothing and answers {@code false}.</b>
+     * The exit is idempotent, and this is the only place that can decide so truthfully: the state
+     * is read UNDER the lock, so it is what the row really holds at the moment of writing rather
+     * than what a caller saw before queueing. Deciding it earlier — in the service's gate, which is
+     * a check-then-act with no lock across it — is what made two identical concurrent withdrawals
+     * answer differently depending on which one read first.
+     *
+     * @return whether anything was written: {@code true} for a real transition, {@code false} for
+     *         the idempotent no-op above. A caller reports the latter as {@code replayed}.
      * @throws org.springframework.dao.DataIntegrityViolationException when a concurrent caller
      *         won a UNIQUE race — on {@code (org_id, command_id)} (this exact command already
      *         landed) or on {@code review_id} (a different command created the row first). The
      *         caller distinguishes them by re-reading; see
      *         {@code ReviewReplyApprovalService.resolveRace}.
      */
-    public void applyApproval(UUID orgId, UUID reviewId, ReviewReplyApprovalState target,
-                              Integer approvedVersion, String approvedFingerprint,
-                              String commandId, String actor) {
-        tx.executeWithoutResult(status -> {
+    public boolean applyApproval(UUID orgId, UUID reviewId, ReviewReplyApprovalState target,
+                                 Integer approvedVersion, String approvedFingerprint,
+                                 String commandId, String actor) {
+        return Boolean.TRUE.equals(tx.execute(status -> {
             ReviewReplyApproval approval = approvals.lockByOrgIdAndReviewId(orgId, reviewId)
                     .orElse(null);
             // Read under the lock, so it is the real predecessor and not a stale one.
             ReviewReplyApprovalState from = approval == null ? null : approval.getState();
+            // The one transition that is a no-op rather than an edge. Appending WITHDRAWN →
+            // WITHDRAWN would move nothing while reattributing the standing decision to whoever
+            // fired last, and refusing it would make the answer depend on thread scheduling.
+            if (target == ReviewReplyApprovalState.WITHDRAWN
+                    && from == ReviewReplyApprovalState.WITHDRAWN) {
+                return false;
+            }
             if (approval == null) {
                 approval = new ReviewReplyApproval();
                 approval.setOrgId(orgId);
@@ -115,6 +131,7 @@ public class ReviewReplyApprovalWriter {
             audit.setApprovedFingerprint(approvedFingerprint);
             audit.setActor(actor);
             audits.save(audit);
-        });
+            return true;
+        }));
     }
 }

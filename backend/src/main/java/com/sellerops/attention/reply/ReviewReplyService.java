@@ -152,12 +152,22 @@ public class ReviewReplyService {
         if (target == ReviewReplyApprovalState.WITHDRAWN) {
             // No disposition gate: the exit is never blocked.
             //
-            // Tests the STATE, not merely the row's existence. A withdrawn row still exists, so
-            // an existence check would accept a second withdrawal — returning 200 at exactly the
-            // moment this message is true, and appending a WITHDRAWN→WITHDRAWN edge that moves
-            // nothing while reattributing the standing decision to whoever fired last.
+            // The gate asks whether there is anything to withdraw FROM — a review nobody ever
+            // approved has no exit to take, and that stays a conflict. It deliberately does NOT
+            // refuse a second withdrawal of an already-withdrawn row.
+            //
+            // It used to, by testing the STATE here, and that is what made this endpoint answer
+            // differently depending on thread scheduling: this check and the write are not one
+            // atomic step, so of two identical concurrent withdrawals the loser answered 200 when
+            // it read first and 409 when it read after the winner committed — same two callers,
+            // same intent, two contracts. The concern that motivated the state test — that a
+            // second withdrawal appends a WITHDRAWN→WITHDRAWN edge which moves nothing while
+            // reattributing the standing decision to whoever fired last — is real, and is now
+            // answered where it can be answered truthfully: the writer re-reads the state UNDER
+            // its row lock and writes nothing at all. The exit is idempotent, which is the honest
+            // shape for it — the caller asked for a state that already holds.
             gateOrReplay(orgId, reviewId, command, () -> {
-                if (!isApproved(orgId, reviewId)) {
+                if (approvals.current(orgId, reviewId).isEmpty()) {
                     throw ApiException.conflict("승인된 초안이 없습니다.");
                 }
             });
