@@ -113,6 +113,24 @@ class CommittedLabelSchemaTest {
                 .isEqualTo(0.60);
     }
 
+    @Test
+    @DisplayName("rubric-adjudication.json names reviews and a tier, and carries no reasoning about them")
+    void adjudicationsCarryOnlyAFingerprintAndATier() throws Exception {
+        JsonNode root = read("rubric-adjudication.json");
+        assertThat(root).as("rubric-adjudication.json must exist").isNotNull();
+        Set<String> tiers = Set.of("NEEDS_ATTENTION", "WATCH", "FYI", "UNCERTAIN");
+        for (JsonNode entry : root.path("adjudications")) {
+            List<String> fields = new ArrayList<>();
+            entry.fieldNames().forEachRemaining(fields::add);
+            // No free-text field here either. The REASONING for an adjudication belongs in RUBRIC
+            // §2.2 and in this file's `_comment`, where it is about the rule; a per-review note
+            // would be about the review.
+            assertThat(fields).isSubsetOf(Set.of("reviewIdFingerprint", "tier"));
+            assertThat(entry.path("reviewIdFingerprint").asText()).matches(FINGERPRINT);
+            assertThat(entry.path("tier").asText()).isIn(tiers);
+        }
+    }
+
     /**
      * The check free text cannot survive.
      *

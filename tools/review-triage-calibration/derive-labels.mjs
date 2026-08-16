@@ -22,11 +22,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cohenKappa, MIN_BINARY_KAPPA } from "./kappa.mjs";
 import { readLabelFile } from "./label-file.mjs";
+import { TIER_CODES } from "./vocabulary.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = resolve(HERE, "worksheet");
 const LABELS = resolve(HERE, "../../contracts/review-eval/naver/v2/labels.json");
 const AGREEMENT = resolve(HERE, "../../contracts/review-eval/naver/v2/agreement.json");
+const RUBRIC_ADJUDICATION = resolve(HERE, "../../contracts/review-eval/naver/v2/rubric-adjudication.json");
 function die(message, detail = []) {
   console.error(`\n  ${message}\n`);
   for (const d of detail.slice(0, 40)) console.error(`   · ${d}`);
@@ -104,6 +106,33 @@ if (problems.length > 0) {
   die(`REFUSED — ${problems.length} problem(s), nothing written:`, problems);
 }
 
+// RUBRIC §2.2 — applied LAST, and only to the tier that reaches gold. The raw labels above are
+// untouched, and the agreement figures below are computed from them, so an adjudication can never
+// reach back into the number that measures how far the two labelers actually agreed.
+const rubricAdjudications = JSON.parse(readFileSync(RUBRIC_ADJUDICATION, "utf8")).adjudications ?? [];
+const adjudicated = [];
+for (const entry of rubricAdjudications) {
+  const label = labels.find((l) => l.reviewIdFingerprint === entry.reviewIdFingerprint);
+  if (!label) {
+    // Silence here would be the whole failure: an adjudication that matched nothing would leave the
+    // un-adjudicated tier in gold while the file still claimed the decision had been applied.
+    problems.push(`rubric adjudication for ${entry.reviewIdFingerprint.slice(0, 12)}… matches no gold row`);
+    continue;
+  }
+  if (!TIER_CODES.has(entry.tier)) {
+    problems.push(`rubric adjudication tier "${entry.tier}" is not one of the four`);
+    continue;
+  }
+  if (label.tier !== entry.tier) {
+    adjudicated.push(`${label.tier} → ${entry.tier}`);
+    label.tier = entry.tier;
+    label.source = "ADJUDICATED";
+  }
+}
+if (problems.length > 0) {
+  die(`REFUSED — ${problems.length} problem(s) in the rubric adjudication, nothing written:`, problems);
+}
+
 // Sorted by fingerprint so the committed file is stable across re-derivations and a diff shows what
 // changed rather than how a worksheet happened to be ordered.
 labels.sort((a, b) => (a.reviewIdFingerprint < b.reviewIdFingerprint ? -1 : 1));
@@ -152,6 +181,8 @@ for (const l of labels) byTier[l.tier] = (byTier[l.tier] ?? 0) + 1;
 console.log(`\n  wrote ${labels.length} labels of ${sampleKeys.length} drawn rows`);
 console.log(`  by tier    ${Object.entries(byTier).map(([t, n]) => `${t} ${n}`).join("  ")}`);
 console.log(`  by source  ${Object.entries(bySource).map(([s, n]) => `${s} ${n}`).join("  ")}`);
+console.log(`  rubric adjudications applied (§2.2)  ${adjudicated.length}`
+    + (adjudicated.length ? `: ${adjudicated.join(", ")}` : ""));
 if (unlabelled.length > 0) {
   console.log(`  ⚠ ${unlabelled.length} drawn row(s) carry no label at all: ${unlabelled.slice(0, 20).join(", ")}`);
 }

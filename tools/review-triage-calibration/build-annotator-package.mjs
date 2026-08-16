@@ -22,8 +22,10 @@ import { REASON_CODE_SET, TIER_CODES } from "./vocabulary.mjs";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = resolve(HERE, "worksheet");
 
-function die(message) {
+function die(message, detail = []) {
   console.error(`\n  ${message}\n`);
+  for (const d of detail.slice(0, 20)) console.error(`   · ${d}`);
+  console.error("");
   process.exit(1);
 }
 
@@ -93,6 +95,30 @@ writeFileSync(resolve(OUT, "package", "annotator.html"), labelingPage({
   items,
   examples,
 }), "utf8");
+
+// Checked on the artifact, not on the intention that built it. The annotator must see the rubric
+// and the worked examples and NOTHING else — not a fingerprint, not a stratum, not a split, not the
+// owner's answer on a scored row, and not a word about how any candidate did.
+const written = readFileSync(resolve(OUT, "package", "annotator.html"), "utf8");
+const leaks = [];
+for (const [key, row] of Object.entries(rows)) {
+  if (written.includes(row.fingerprint)) leaks.push(`fingerprint of ${key}`);
+}
+for (const marker of ["HOLDOUT", "HIGH_L", "MID_S", "LOW_S", "rules-v1", "precision", "recall",
+  "PRIMARY", "SENSITIVITY", "confusion"]) {
+  if (written.includes(marker)) leaks.push(`the marker "${marker}"`);
+}
+// An example is allowed to carry a tier — that is what a worked example IS. A SAMPLE row carrying
+// one would be the owner's answer to a scored question, which is the leak that matters.
+const shown = JSON.parse(written.match(/const ITEMS=(\[.*?\]), TIERS=/s)[1].replace(/\\u003c/g, "<"));
+for (const item of shown) {
+  if (Object.keys(item).some((f) => !["key", "rating", "body", "section"].includes(f))) {
+    leaks.push(`extra field on item ${item.key}`);
+  }
+}
+if (leaks.length > 0) {
+  die(`REFUSED — the package leaks ${leaks.length} thing(s):`, [...new Set(leaks)]);
+}
 
 if (withheld.length > 0) {
   // Refused rows stay on this machine and fall to the owner, so the 220 keeps its size. A withheld

@@ -1,0 +1,35 @@
+{
+  "contract": "review-eval/naver/v2",
+  "rubricVersion": "v2",
+  "set": "rubric-adjudication",
+  "_comment": [
+    "Product-owner adjudications of RUBRIC.md section 2.2 — an ambiguity v1 section 2 does not",
+    "cover, applied at gold assembly only.",
+    "",
+    "WHAT THIS DOES NOT DO. It does not edit a raw label: the owner's answers stand exactly as",
+    "made, the pilot's PRIMARY and SENSITIVITY readings stand exactly as published, and the",
+    "overlap agreement in agreement.json is computed from raw answers before anything here is",
+    "applied. This file changes one thing: the tier that reaches labels.json for these reviews.",
+    "",
+    "THE ORDERING IS STATED BECAUSE IT MATTERS. The ambiguity surfaced while reading the pilot,",
+    "where these two rows were the only ones a model arm missed. A rule clarified after seeing",
+    "which rows a candidate got wrong is the exact move this contract exists to prevent, so what",
+    "protects it is written down rather than assumed: the raw labels are untouched, the pilot",
+    "numbers are not restated, the clarification lowers a tier rather than raising one (it can",
+    "only REDUCE the positive class every candidate is scored against), and for the 220-row gold",
+    "set it is a genuine pre-commitment — the annotator had labeled nothing when it was made.",
+    "",
+    "reasonCode is left as the owner wrote it. TEXTLESS_OR_NOISE beside WATCH no longer crosses",
+    "section 3.1's actionable column, which is what made the pairing a finding in the first place."
+  ],
+  "adjudications": [
+    {
+      "reviewIdFingerprint": "e83898c833bf614d0b79f1c8ba79d7db7e090748462b3ad7f96e318075c15837",
+      "tier": "WATCH"
+    },
+    {
+      "reviewIdFingerprint": "f37600470643b31167e0fcc437634c9210d455f5bbeeef0b000deb87668afcbf",
+      "tier": "WATCH"
+    }
+  ]
+}

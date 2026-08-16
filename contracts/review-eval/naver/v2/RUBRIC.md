@@ -63,6 +63,33 @@ request is `NO_ACTION`, any actionable topic in a mixed review makes the whole r
 They are reproduced in the labeling surface so a labeler never has to remember them, and they are
 not restated here — one copy, in `v1`, is the copy.
 
+### 2.2 A case `v1` §2 does not cover — 3★ with no actionable body
+
+**Product-owner adjudication, 2026-08-16.**
+
+> A 3★ review whose body carries **no actionable content** is `WATCH`, not `NEEDS_ATTENTION`.
+
+`NEEDS_ATTENTION` requires something the seller can check or act on **now**. Three stars is a signal
+worth keeping — so it does not fall to `FYI` either — but with nothing in the body to act on there is
+no basis for the stronger claim.
+
+This is not a relaxation of `v1` §2. That row covers a **low rating with an empty or emoji-only
+body**; this is a middling rating with a short body that says nothing actionable, which §2 is simply
+silent on. Two people read the silence differently, which is how it surfaced.
+
+⚠ **It surfaced while reading the §10 pilot**, on the two rows that were the only ones a model arm
+missed. A rule clarified after seeing which rows a candidate got wrong is precisely what this
+contract exists to prevent, so what keeps it honest is stated rather than assumed:
+
+- the owner's **raw labels are untouched**, and `agreement.json` is computed from raw answers;
+- the pilot's **PRIMARY and SENSITIVITY readings stand as published** and are not restated;
+- the clarification **lowers a tier**, so it can only shrink the positive class every candidate is
+  scored against — it cannot flatter one;
+- for the 220-row gold set it is a **genuine pre-commitment**: the annotator had labeled nothing.
+
+Applied at gold assembly through `rubric-adjudication.json`, which names the affected reviews and
+carries this reasoning with them.
+
 ## 3. What else the labeler records
 
 Two fields beyond the tier, both **closed vocabularies**. Neither may influence the tier; both exist
