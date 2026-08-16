@@ -716,7 +716,7 @@ export const api = {
   // must surface so the page can fail closed instead.
   async getChannelCapabilities(channelCode: string): Promise<CapabilityView[]> {
     if (USE_MOCKS) {
-      return mockCapabilities();
+      return mockCapabilities(channelCode);
     }
     const { data } = await http.get<CapabilityView[]>(`/api/channels/${channelCode}/capabilities`);
     return data;

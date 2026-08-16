@@ -9,9 +9,15 @@ import java.util.List;
  * unsupported-scope boundaries. Channel-generic by design: every API channel
  * answers the same shape, so the UI renders one component for all of them.
  *
- * <p>{@code connectorClass}/{@code dataTypes}/{@code unsupportedScopes} reflect the
- * connector actually wired for the channel (e.g. CAFE24 → the Cafe24 connector when
- * its feature flag is on), so the badges never claim more than what is resolved.
+ * <p>{@code connectorClass}/{@code dataTypes} reflect the connector actually wired for the
+ * channel (e.g. CAFE24 → the Cafe24 connector when its feature flag is on), so the badges
+ * never claim more than what is resolved.
+ *
+ * <p>{@code unsupportedScopes} is the one field that deliberately outlives the connector: it merges
+ * that connector's own boundaries with the channel-level gaps in
+ * {@code ChannelApiGapRegistry}. A marketplace publishing no review API is true whether or not the
+ * connector that used to say so is wired up, and when it vanished with a flagged-off connector the
+ * remaining badge overclaimed.
  */
 public record ChannelCapabilityOverview(
         String channelCode,

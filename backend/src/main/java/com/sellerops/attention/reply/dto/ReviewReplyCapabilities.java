@@ -16,6 +16,20 @@ package com.sellerops.attention.reply.dto;
  * strand a review in APPROVED with no exit — frozen against editing by its own approval, and frozen
  * against withdrawal by the gate.
  *
+ * <p><b>{@code canWithdraw=false} does not mean a withdrawal will be refused.</b> Every flag here
+ * answers one question — can this operator cause a new STATE TRANSITION right now — and once a reply
+ * is already WITHDRAWN there is no transition left to make, so the flag closes. A caller who asks
+ * anyway still gets 200 with {@code replayed=true}: the state they asked for is the state that holds,
+ * nothing is written, and no audit row is appended (see {@code ReviewReplyApprovalWriter}). The two
+ * statements are about different things — this one about a transition, that one about an outcome —
+ * and reading the flag as a prediction of the response code is what makes them look contradictory.
+ *
+ * <p>It has to work that way because the alternative is interleaving-dependent. Two concurrent
+ * withdrawals of one reply both see {@code canWithdraw=true}; if the second were a 409, one caller's
+ * answer would depend on which read the database served first. Refusing a withdrawal is reserved for
+ * a withdrawal that would contradict a DIFFERENT terminal state — that is a real conflict, and it
+ * still conflicts.
+ *
  * <p>{@code canStartSubmissionRun} (v1.6) gates offering the guided Action Window reply-submission
  * flow. It is the same rule as {@code canCopy} — you may guide a post only for an approved reply you
  * may copy — because a guided post is the copy step performed in the seller center rather than the
