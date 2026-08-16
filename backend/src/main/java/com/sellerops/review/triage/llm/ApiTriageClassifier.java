@@ -92,11 +92,12 @@ public class ApiTriageClassifier implements ReviewTriageClassifier {
         this.modelId = modelId;
         this.apiKey = apiKey;
         this.tuning = tuning;
-        // All of RUBRIC §8.6's components in one string: the vendor and model, the prompt version,
-        // the schema the parser enforces, and every request knob. A reader of a stored prediction can
-        // tell exactly what produced it without consulting anything else.
+        // RUBRIC v2 §8.8's table, in one string. A reader of a stored prediction can tell exactly
+        // what produced it without consulting anything else. The additive guard is in it because the guard is
+        // part of what decides the tier, so it is part of what produced the result.
         this.version = "llm-triage/v1+" + vendor.name().toLowerCase() + ":" + modelId
-                + "+" + TriagePrompt.PROMPT_VERSION + "+schema/v1" + tuning.suffix();
+                + "+" + TriagePrompt.PROMPT_VERSION + "+schema/v1" + tuning.suffix()
+                + "+" + AdditiveTriageDecision.GUARD_VERSION;
     }
 
     @Override

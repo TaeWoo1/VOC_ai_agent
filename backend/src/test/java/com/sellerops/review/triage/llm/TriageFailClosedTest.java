@@ -147,6 +147,23 @@ class TriageFailClosedTest {
     }
 
     @Test
+    @DisplayName("the version names every component §8.8 requires")
+    void theVersionNamesTheWholeCandidate() {
+        String version = new ApiTriageClassifier((u, h, b) -> new LlmHttpClient.Response(200, "{}"),
+                ApiTriageClassifier.Vendor.OPENAI, "gpt-5-2025-08-07", "k",
+                new ApiTriageClassifier.Tuning(false, 4000, "low")).version();
+
+        // A model SNAPSHOT, not a floating alias: gpt-5 moves under you, gpt-5-2025-08-07 does not,
+        // and a result measured against an alias describes a model that may no longer exist.
+        assertThat(version).contains("openai:gpt-5-2025-08-07");
+        assertThat(version).contains(TriagePrompt.PROMPT_VERSION);
+        assertThat(version).contains("schema/v1");
+        assertThat(version).contains("effort:low");
+        assertThat(version).contains("out4000");
+        assertThat(version).contains(AdditiveTriageDecision.GUARD_VERSION);
+    }
+
+    @Test
     @DisplayName("a channel §8.3 does not permit cannot reach the transport")
     void coupangCannotBeClassified() {
         List<String> sent = new java.util.ArrayList<>();

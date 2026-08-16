@@ -248,6 +248,15 @@ bars is a different object from one that cleared them on the first.
 | 1 | 2026-08-17 | openai · gpt-5 | `+tdefault+out4000` | 0.886 | 1.000 (0.890) | 0.000 | *not measured* | 0/107 | incomplete — the harness did not yet measure §6.3(4) |
 | 2 | 2026-08-17 | openai · gpt-5 | `+tdefault+out4000` | 0.857 | 0.968 (0.838) | 0.000 | **2** | 0/107 | **FAILS §6.3(4)** |
 
+**Candidate A is dead.** Runs 1 and 2 are kept as its failure evidence and are not to be deleted or
+re-run: they are what established that a floating alias, an unguarded model and a single-pass
+reading are each insufficient. Candidate B is a different candidate on all three counts.
+
+| candidate | identity |
+|---|---|
+| A (failed) | `openai:gpt-5` · `triage-prompt/v1` · no guard · 1 pass |
+| B (next) | `openai:gpt-5-2025-08-07` · `triage-prompt/v2` · `effort:low` · `out4000` · `additive-guard/v1` · 3 passes, worst-gated |
+
 Runs 1 and 2 are the **same candidate on the same rows** — identical model, prompt, schema and
 tuning, identical 107 reviews. They disagree. That is not noise to be averaged away, and both rows
 stay: see §10.2.

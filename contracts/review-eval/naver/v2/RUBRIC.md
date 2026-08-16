@@ -540,6 +540,69 @@ frozen may `HOLDOUT` be read, once, per §6.2.
 A candidate that needed many `DEV` passes to clear the bars is a different object from one that
 cleared them on the first, and the log is what lets a reader tell the two apart.
 
+### 8.7 A candidate is evaluated repeatedly, and gated on its worst pass
+
+**Product-owner decision, 2026-08-17.** §8.6 assumed one run of a candidate is one result. The first
+gpt-5 candidate showed that is false: two passes over the identical 107 rows, with the identical
+model, prompt, schema and tuning, produced recall 0.886 and 0.857, precision 1.000 and 0.968.
+
+The cause is that a reasoning model rejects a pinned `temperature`, so the classifier runs at the
+model's default and samples. **Exact reproducibility is therefore no longer required** — it is not
+available at any setting this candidate can use.
+
+What replaces it:
+
+- a candidate is evaluated **3 times on `DEV`**, same rows, same everything;
+- the gate reads the **worst** observed pass on every bar: lowest recall, lowest precision Wilson
+  lower bound, **highest** 4–5★ false-positive rate, highest classification-failure count;
+- the mean and the range are printed too, and are **descriptive only**.
+
+**Best-of is not a reading.** Neither is a mean used as the gate. A candidate whose worst pass fails
+has failed, and "it passed on the second try" is the sentence this section exists to make
+unsayable. The spread itself is a property of the candidate: one that swings 0.03 in recall between
+identical passes is a different product from one that does not, and the reader can see which.
+
+### 8.8 What a candidate's identity now includes
+
+A `classifierVersion` names **all** of these, and changing any one is a new candidate and a new
+change-log row:
+
+| component | why it is in the name |
+|---|---|
+| vendor | a different API |
+| **model snapshot**, never a floating alias | `gpt-5` moves under you; `gpt-5-2025-08-07` does not. A result measured against an alias describes a model that may no longer exist |
+| prompt version | a reworded prompt is a different classifier |
+| output-schema version | what the parser will accept |
+| reasoning effort | fixed to exactly one value per candidate; another value is another row, never a retry |
+| output budget | on a reasoning model it competes with the answer |
+| **additive-guard version** | the guard is part of what decides the tier, so it is part of what produced the result |
+
+### 8.9 The additive guard is code, not an instruction
+
+`v1` §5's fourth condition — *no review the rating-only rule already calls `NEEDS_ATTENTION` may be
+demoted; a detector may only ADD* — is enforced by an invariant:
+
+```
+final NEEDS_ATTENTION  =  rules-v1 NEEDS_ATTENTION  OR  candidate NEEDS_ATTENTION
+```
+
+**Product-owner decision, 2026-08-17**, after the first candidate demoted two low-star reviews the
+humans had also called 확인 필요. A prompt instruction not to do that is a request: unchecked,
+re-litigated by every prompt edit, and silently broken by the next model.
+
+This is **not** a retreat to the rule. The rule keeps only what it already had; the model may promote
+anything else, and the `WATCH`/`FYI` split is left entirely to it because both are `NO_ACTION` in the
+partition the gates score. What the floor removes is the single direction that loses a review the
+seller was already being shown.
+
+A failed classification lands on the **baseline**, never on `FYI` — so an outage makes the classifier
+exactly as good as the rule and no worse. Rows that failed are still scored, at that baseline tier,
+because a harness that dropped them would be measuring a system that skips reviews.
+
+The gate is computed on the **final decision**, not the raw model output. What the model would have
+done without the guard is reported separately, because "did the prompt fix the behaviour, or is the
+guard carrying it?" is a real question about the candidate.
+
 ## 9. What this gold set is for, and what it is not
 
 **Product-owner decision, 2026-08-16.** Recorded here because it bounds the artifact: without it, the

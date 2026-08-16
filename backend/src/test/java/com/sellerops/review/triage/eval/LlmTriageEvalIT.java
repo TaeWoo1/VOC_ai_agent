@@ -9,6 +9,7 @@ import com.sellerops.review.triage.ReviewTriageTier;
 import com.sellerops.review.triage.TriageReasonCode;
 import com.sellerops.review.triage.eval.TriageEvalReport.Row;
 import com.sellerops.review.triage.eval.TriageEvalReport.TierMetric;
+import com.sellerops.review.triage.llm.AdditiveTriageDecision;
 import com.sellerops.review.triage.llm.ApiTriageClassifier;
 import com.sellerops.review.triage.llm.JdkLlmHttpClient;
 import com.sellerops.review.triage.llm.NaverOnlyClassifierGate;
@@ -112,107 +113,129 @@ class LlmTriageEvalIT {
                     + "is suspect\n");
         }
 
-        List<Row> rows = new ArrayList<>();
-        List<Row> rowsWithoutSynthetic = new ArrayList<>();
-        Map<String, Integer> failures = new LinkedHashMap<>();
-        int reasonAgree = 0;
-        int reasonScored = 0;
-        int crossingRows = 0;
-        int crossingCaught = 0;
-        int demotions = 0;
+        int passes = Integer.parseInt(envOr("LLM_TRIAGE_PASSES", bounded ? "1" : "3"));
+        out.append(String.format("  passes %d — RUBRIC v2 §8.7 gates on the WORST observed, never the best%n",
+                passes));
+
+        List<EvalMetrics.Verdict> verdicts = new ArrayList<>();
+        List<EvalMetrics.Counts> allCounts = new ArrayList<>();
+        int worstFailures = 0;
         List<String> answers = new ArrayList<>();
 
-        for (DevRow row : drawn) {
-            Label label = labels.get(row.fingerprint());
-            if (label == null || label.tier() == null) {
-                continue; // UNCERTAIN, excluded from every metric by v1 §4.
-            }
-            ReviewTriageClassifier.Result result =
-                    gate.classify(NaverOnlyClassifierGate.PERMITTED_CHANNEL, row.rating(), row.body());
-            if (result.status() != ReviewTriageClassifier.Status.OK) {
-                // Counted, never silently skipped: a run that scored only the rows that happened to
-                // succeed would report the model's accuracy on its good days.
-                failures.merge(result.status() + " " + result.failureReason(), 1, Integer::sum);
-                continue;
-            }
-            // RUBRIC v2 §6.3 condition 4, restated from v1 §5's regression gate: "no review the
-            // rating-only rule already calls NEEDS_ATTENTION may be demoted by it — a detector may
-            // only ADD". It is one of the four pre-committed conditions and it is NOT implied by
-            // recall: a candidate can find many new positives while quietly dropping an old one.
-            ReviewTriageTier baseline = ReviewTriageRules.tier(row.rating(), row.body());
-            if (baseline == ReviewTriageTier.NEEDS_ATTENTION
-                    && result.tier() != ReviewTriageTier.NEEDS_ATTENTION) {
-                demotions++;
-            }
-            // Fingerprint, three tiers, a reason. No body, no id — the same shape labels.json holds,
-            // written locally so a later question about this run costs no further API calls.
-            answers.add(String.join(",", row.fingerprint(), row.stratum(),
-                    String.valueOf(row.rating()), baseline.name(), result.tier().name(),
-                    label.tier().name(), String.valueOf(result.reasonCode()),
-                    String.valueOf(label.reasonCode())));
+        for (int pass = 1; pass <= passes; pass++) {
+            List<Row> rows = new ArrayList<>();
+            List<Row> rowsWithoutSynthetic = new ArrayList<>();
+            Map<String, Integer> failures = new LinkedHashMap<>();
+            int reasonAgree = 0;
+            int reasonScored = 0;
+            int demotions = 0;
+            int rawDemotions = 0;
+            int crossingRows = 0;
+            int crossingCaught = 0;
 
-            Row scored = new Row(row.stratum(), "DEV", row.rating(), result.tier(),
-                    label.tier(), label.reasonCode());
-            rows.add(scored);
-            if (!synthetic.contains(row.fingerprint())) {
-                rowsWithoutSynthetic.add(scored);
-            }
-            if (label.reasonCode() != null) {
-                reasonScored++;
-                if (label.reasonCode().equals(result.reasonCode())) {
-                    reasonAgree++;
+            for (DevRow row : drawn) {
+                Label label = labels.get(row.fingerprint());
+                if (label == null || label.tier() == null) {
+                    continue; // UNCERTAIN, excluded from every metric by v1 §4.
+                }
+                ReviewTriageClassifier.Result result = gate.classify(
+                        NaverOnlyClassifierGate.PERMITTED_CHANNEL, row.rating(), row.body());
+                ReviewTriageTier baseline = ReviewTriageRules.tier(row.rating(), row.body());
+                ReviewTriageTier raw = result.status() == ReviewTriageClassifier.Status.OK
+                        ? result.tier() : null;
+                if (raw == null) {
+                    // Counted, never silently skipped. But the row is still SCORED, because the
+                    // guard gives it the baseline tier and that is what production would show — a
+                    // harness that dropped failed rows would measure a system that skips reviews.
+                    failures.merge(result.status() + " " + result.failureReason(), 1, Integer::sum);
+                }
+
+                // The gate scores the FINAL decision, which is what a seller would see. Scoring the
+                // raw model output would measure something the product does not contain.
+                ReviewTriageTier decided = AdditiveTriageDecision.decide(baseline, raw);
+                if (baseline == ReviewTriageTier.NEEDS_ATTENTION
+                        && decided != ReviewTriageTier.NEEDS_ATTENTION) {
+                    demotions++;
+                }
+                if (baseline == ReviewTriageTier.NEEDS_ATTENTION && raw != null
+                        && raw != ReviewTriageTier.NEEDS_ATTENTION) {
+                    // What the model WOULD have done without the guard. Descriptive, and the honest
+                    // way to say whether prompt/v2 fixed the behaviour or the guard is carrying it.
+                    rawDemotions++;
+                }
+
+                Row scored = new Row(row.stratum(), "DEV", row.rating(), decided,
+                        label.tier(), label.reasonCode());
+                rows.add(scored);
+                if (!synthetic.contains(row.fingerprint())) {
+                    rowsWithoutSynthetic.add(scored);
+                }
+                if (label.reasonCode() != null && result.reasonCode() != null) {
+                    reasonScored++;
+                    if (label.reasonCode().equals(result.reasonCode())) {
+                        reasonAgree++;
+                    }
+                }
+                if (crosses(label)) {
+                    crossingRows++;
+                    if (decided == label.tier()) {
+                        crossingCaught++;
+                    }
+                }
+                if (pass == 1) {
+                    answers.add(String.join(",", row.fingerprint(), row.stratum(),
+                            String.valueOf(row.rating()), baseline.name(),
+                            raw == null ? "FAILED" : raw.name(), decided.name(), label.tier().name(),
+                            String.valueOf(result.reasonCode()), String.valueOf(label.reasonCode())));
                 }
             }
-            if (crosses(label)) {
-                // The 16 gold rows whose reason sits on the other side of §3.1's description column.
-                // Tracked separately because they are the rows where the rubric itself is unclear,
-                // and a candidate should not be judged mainly on them.
-                crossingRows++;
-                if (result.tier() == label.tier()) {
-                    crossingCaught++;
-                }
-            }
+
+            int failed = failures.values().stream().mapToInt(Integer::intValue).sum();
+            worstFailures = Math.max(worstFailures, failed);
+            EvalMetrics.Counts counts = TriageEvalReport.gateCounts(rows);
+            allCounts.add(counts);
+            verdicts.add(EvalMetrics.evaluate(counts));
+
+            out.append(String.format("%n════ PASS %d of %d ════%n", pass, passes));
+            out.append(String.format("  classification failures %d of %d — the rows still score, at "
+                    + "the baseline tier the guard gives them%n", failed, drawn.size()));
+            failures.forEach((r, c) -> out.append(String.format("    %-48s %4d%n", r, c)));
+            out.append(String.format("  §6.3(4) demotions after the guard  %d   (must be 0 by construction)%n",
+                    demotions));
+            out.append(String.format("  the model WOULD have demoted        %d   (descriptive: is prompt/v2 "
+                    + "working, or is the guard carrying it?)%n", rawDemotions));
+            out.append(String.format("  reasonCode agreement %d/%d · gold crosses §3.1's column on %d rows, "
+                    + "tier matched on %d%n", reasonAgree, reasonScored, crossingRows, crossingCaught));
+            out.append(section("DEV · PRIMARY", rows));
+            out.append(section(String.format("DEV · SENSITIVITY (%d synthetic rows excluded)",
+                    rows.size() - rowsWithoutSynthetic.size()), rowsWithoutSynthetic));
         }
-
-        out.append(String.format("%n  classification failures %d of %d attempted%n",
-                failures.values().stream().mapToInt(Integer::intValue).sum(), drawn.size()));
-        failures.forEach((reason, count) -> out.append(String.format("    %-48s %4d%n", reason, count)));
-        if (!failures.isEmpty()) {
-            out.append("    ⚠ every metric below is over the rows that SUCCEEDED. Quote this rate "
-                    + "beside them.\n");
-        }
-
-        out.append("""
-
-                  ceiling on everything below (RUBRIC v2 §11.2)
-                    These labels were set from a body and a star rating, and so was this candidate's
-                    answer. NAVER's export carries 포토/영상 as column 5 of 25 and ReviewRowMapper does
-                    not read it, so media_count is 0 on every stored review. This bounds rules-v1,
-                    this candidate, and the two humans who set the labels — by the same amount.
-                """);
-
-        out.append(section("DEV · PRIMARY", rows));
-        out.append(section(String.format("DEV · SENSITIVITY (%d synthetic rows excluded)",
-                rows.size() - rowsWithoutSynthetic.size()), rowsWithoutSynthetic));
-
-        out.append(String.format("""
-                %n  descriptive, and gating nothing (RUBRIC v2 §3.1)
-                    reasonCode agreement with gold       %d/%d
-                    rows where gold crosses §3.1's column %d, tier matched on %d of them
-                    A crossing row is one the RUBRIC itself does not decide cleanly. They are
-                    reported apart so a candidate is not judged mainly on the rubric's own gaps.
-                %n""", reasonAgree, reasonScored, crossingRows, crossingCaught));
-
-        out.append(String.format("""
-                %n  §6.3 CONDITION 4 — a detector may only ADD
-                    reviews rules-v1 calls 확인 필요 that this candidate DEMOTES   %d
-                    Not implied by recall: a candidate can find many new positives while quietly
-                    dropping one the rating alone already caught. Any number but 0 fails the gate.
-                %n""", demotions));
 
         Files.writeString(Path.of("build", "llm-triage-dev-answers.csv"),
-                "fingerprint,stratum,rating,rulesV1,candidate,gold,candidateReason,goldReason\n"
+                "fingerprint,stratum,rating,rulesV1,modelRaw,finalDecision,gold,candidateReason,goldReason\n"
                         + String.join("\n", answers) + "\n");
+
+        // ── the gate, §8.7 ───────────────────────────────────────────────────────────────────
+        double worstRecall = verdicts.stream().mapToDouble(EvalMetrics.Verdict::recall).min().orElse(0);
+        double worstPrecisionLb =
+                verdicts.stream().mapToDouble(EvalMetrics.Verdict::precisionLowerBound).min().orElse(0);
+        double worstHighFp = verdicts.stream()
+                .mapToDouble(EvalMetrics.Verdict::highRatingFalsePositiveRate).max().orElse(1);
+        out.append(String.format("""
+                %n════════════════════════════════════════════════════════════════════════
+                  THE GATE — worst of %d passes (RUBRIC v2 §8.7)
+                    recall              worst %.3f   bar ≥ 0.30   %s
+                    precision 95%% low   worst %.3f   bar ≥ 0.80   %s
+                    4–5★ FP rate        worst %.3f   bar ≤ 0.05   %s
+                    failures            worst %d
+                  descriptive spread — recall %s
+                  A best-of reading of these passes is not a result. The worst is the number.
+                ════════════════════════════════════════════════════════════════════════
+                %n""",
+                passes, worstRecall, worstRecall >= 0.30 ? "PASS" : "FAIL",
+                worstPrecisionLb, worstPrecisionLb >= 0.80 ? "PASS" : "FAIL",
+                worstHighFp, worstHighFp <= 0.05 ? "PASS" : "FAIL", worstFailures,
+                verdicts.stream().map(v -> String.format("%.3f", v.recall())).toList()));
 
         out.append("""
                   HOLDOUT was not read, and this harness cannot read it. §6.2 spends it once, on the
