@@ -6,18 +6,20 @@
 # paths, the boundary stops being checked and NOTHING says so. The failure mode is silence — a green PR that
 # never ran the check — which is worse than a red one.
 #
-# So this asserts the four facts the filter depends on:
+# So this asserts the five facts the filter depends on:
 #   1. every frontend file importing `contracts/action-window` lives under a filtered path;
-#   2. the workflow's own two `paths:` lists (pull_request and push) are identical;
+#   2. the workflow's own two `paths:` lists (pull_request and push) filter the same set;
 #   3. the workflow's frontend paths and FILTERED_PREFIXES below name the same directories;
-#   4. the schemas and fixtures the contract conformance tests read are actually present (a .gitignore or
+#   4. the non-frontend surfaces this workflow exists for are still filtered at all;
+#   5. the schemas and fixtures the contract conformance tests read are actually present (a .gitignore or
 #      move that dropped them would otherwise turn 123 assertions into a silent 0).
 #
-# 2 and 3 exist because 1 cannot see them. The coverage check reads only THIS file's list, so a
-# directory added here and not to the workflow passes every assertion while the workflow keeps skipping
-# it — the guard would be satisfied by a filter that does not exist. And a directory added to
-# `pull_request` alone gives a green PR and an unchecked main. Both are the same failure as a stale
-# filter, arriving from the other side.
+# 2-4 exist because 1 cannot see them. The coverage check reads only THIS file's list, so a directory
+# added here and not to the workflow passes every assertion while the workflow keeps skipping it — the
+# guard would be satisfied by a filter that does not exist. A directory added to `pull_request` alone
+# gives a green PR and an unchecked main. And a path deleted from BOTH lists is invisible to a check
+# that only compares them to each other. All three are the same failure as a stale filter, arriving
+# from a direction the original guard did not look.
 #
 # Run locally exactly as CI does:  bash tools/ci/check-contract-importers.sh
 set -uo pipefail
@@ -74,24 +76,34 @@ done <<< "${IMPORTERS}"
 # reformat that breaks the shape empties the list and trips the guard below rather than passing quietly.
 workflow_paths() {
   awk -v want="$1" '
-    /^  [a-z_]+:[[:space:]]*$/ {
+    /^  [a-z_-]+:[[:space:]]*$/ {
       key = $0; sub(/^  /, "", key); sub(/:.*$/, "", key)
       want_here = (key == want); in_paths = 0; next
     }
     /^[^[:space:]]/ { want_here = 0; in_paths = 0 }
     # Only entries under this trigger`s own paths: key. Keyed rather than "any list item under the
-    # trigger" so a sibling list (types:, branches:) can never be counted as a path filter, and so a
-    # DELETED paths: block reads as an empty list — which the caller treats as a failure, not a pass.
-    want_here && /^    [a-z_]+:/ { in_paths = ($0 ~ /^    paths:[[:space:]]*$/); next }
+    # trigger" so a sibling list can never be counted as a path filter, and so a DELETED paths: block
+    # reads as an empty list — which the caller treats as a failure, not a pass. The key pattern
+    # allows hyphens: without them `paths-ignore:` / `branches-ignore:` would not close the block and
+    # their entries would be read as path filters.
+    want_here && /^    [a-z_-]+:/ { in_paths = ($0 ~ /^    paths:[[:space:]]*$/); next }
     want_here && in_paths && /^      - / {
-      entry = $0; sub(/^      - /, "", entry); gsub(/^'\''|'\''$/, "", entry); print entry
+      entry = $0
+      sub(/^      - /, "", entry)
+      sub(/[[:space:]]+#.*$/, "", entry)     # an inline comment is not part of the path
+      sub(/[[:space:]]+$/, "", entry)
+      gsub(/^["'\'']|["'\'']$/, "", entry)   # single- or double-quoted, or bare: the same path
+      print entry
     }
   ' "${WORKFLOW}"
 }
 
 echo "== the workflow's two paths: lists must be identical =="
-PR_PATHS="$(workflow_paths pull_request)"
-PUSH_PATHS="$(workflow_paths push)"
+# Sorted, because GitHub reads these as SETS: a reordering is not drift, and failing on one would
+# train people to route around the guard. Duplicates survive sorting, so an entry added twice to one
+# list still shows up as a difference.
+PR_PATHS="$(workflow_paths pull_request | sort)"
+PUSH_PATHS="$(workflow_paths push | sort)"
 if [ -z "${PR_PATHS}" ] || [ -z "${PUSH_PATHS}" ]; then
   # Not "the filter is gone, so everything runs". It means this guard can no longer verify anything,
   # and a guard that cannot see its subject must say so rather than pass.
@@ -133,6 +145,21 @@ else
   diff <(printf '%s\n' "${WORKFLOW_FE}") <(printf '%s\n' "${SCRIPT_FE}") | sed 's/^/         /'
   FAILS=$((FAILS + 1))
 fi
+
+echo "== the workflow must still filter the surfaces it exists to check =="
+# The equality check above compares the two lists to EACH OTHER, and the frontend check compares one
+# subset to FILTERED_PREFIXES. Neither notices a path deleted from both lists — so dropping
+# `collector/**` or `contracts/**` passed every assertion while a collector-only or contract-only PR
+# stopped running this workflow at all. These four are the workflow's own subject: the runtime, the
+# normative contract it speaks, and the two files that decide when any of it runs.
+for required in 'collector/**' 'contracts/**' 'tools/ci/check-contract-importers.sh' '.github/workflows/collector-ci.yml'; do
+  if printf '%s\n' "${PR_PATHS}" | grep -qxF "${required}"; then
+    echo "  [ok]   ${required}"
+  else
+    echo "  [FAIL] ${required} is no longer a filtered path — changes to it would not run Collector CI."
+    FAILS=$((FAILS + 1))
+  fi
+done
 
 echo "== contract schemas + fixtures the conformance tests read must be present =="
 for schema in contracts/action-window/v1/schema.json contracts/action-window/v2/schema.json; do

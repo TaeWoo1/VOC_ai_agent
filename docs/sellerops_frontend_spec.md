@@ -274,7 +274,9 @@ Backstage (2차 위계 — "연결·설정")
    요약으로 통합하고, 세부는 펼침으로.
 3. **capability 표기는 현행표 위임**: "수집 가능 데이터" 배지·문구는 커넥터 로드맵 §4.1의 셀러 표기
    열과 4단계 규칙(부록 A — 운영 지원만 "지원")을 따른다. 프론트에 별도 진실 목록을 두지 않는다 —
-   무엇을 지원하는지는 backend capability overview가 답한다. 프론트가 갖는 것은 **어휘**뿐이다:
+   무엇을 수집할 수 있는지는 backend가 **두 곳에서** 답하고 둘은 서로 다른 질문이다: 배지는
+   `capabilities/overview`(실제 resolve된 커넥터 + 채널 사실), 수집 주기 가능 여부는
+   `connector_capabilities`(`/capabilities`). 프론트가 갖는 것은 **어휘**뿐이다:
    채널이 같은 데이터를 다르게 부르는 경우의 표기(`lib/channelVocabulary.ts` — 쿠팡 REVIEW = 상품평)와
    상태 문구 매핑. 취득 축(`acquisitionPaths`)의 문구 규칙은
    `docs/channel-capability-registration-matrix.md` §0(취득 경로 표기 어휘)이고, 거기서 `지원`은

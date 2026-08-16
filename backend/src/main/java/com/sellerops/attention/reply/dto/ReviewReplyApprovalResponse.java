@@ -17,9 +17,9 @@ package com.sellerops.attention.reply.dto;
  *
  * <p>It is also {@code true} for a withdrawal of a reply that is already WITHDRAWN, under a NEW
  * command id — the exit is idempotent, so the second caller is told the state they asked for holds
- * and that they did not cause it. Why that is not in tension with
- * {@code ReviewReplyCapabilities.canWithdraw} being false at the same moment is written down there,
- * once.
+ * and that they did not cause it. {@code ReviewReplyCapabilities.canWithdraw} is false at that
+ * moment, which is not a contradiction and not a promise of a 409 either; that flag covers two
+ * situations with two different answers, and which is which is written down there, once.
  *
  * <p>Deliberately minimal, mirroring {@code TriageDecisionResponse} on this same surface — and
  * notably it does NOT carry the approved body. A client that has just approved re-reads the

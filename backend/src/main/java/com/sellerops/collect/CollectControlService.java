@@ -54,7 +54,9 @@ import org.springframework.stereotype.Service;
 /**
  * The operator-facing control surface for scheduled collection (Slice 6):
  * schedule settings, "지금 수집하기", retry, connection status, run history,
- * capability badges, and write-only credential intake. Controllers stay thin —
+ * both capability reads (the seeded {@code connector_capabilities} rows that gate scheduling, and
+ * the computed overview the badges render — see {@link ChannelCapabilityController}), and
+ * write-only credential intake. Controllers stay thin —
  * every org-scoping, validation, and state decision lives here.
  *
  * <p>Manual sync and retry execute synchronously through {@link SyncRunExecutor}

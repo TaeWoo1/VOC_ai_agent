@@ -16,19 +16,29 @@ package com.sellerops.attention.reply.dto;
  * strand a review in APPROVED with no exit — frozen against editing by its own approval, and frozen
  * against withdrawal by the gate.
  *
- * <p><b>{@code canWithdraw=false} does not mean a withdrawal will be refused.</b> Every flag here
- * answers one question — can this operator cause a new STATE TRANSITION right now — and once a reply
- * is already WITHDRAWN there is no transition left to make, so the flag closes. A caller who asks
- * anyway still gets 200 with {@code replayed=true}: the state they asked for is the state that holds,
- * nothing is written, and no audit row is appended (see {@code ReviewReplyApprovalWriter}). The two
- * statements are about different things — this one about a transition, that one about an outcome —
- * and reading the flag as a prediction of the response code is what makes them look contradictory.
+ * <p><b>{@code canWithdraw=false} is not a prediction of the response code.</b> It is exactly
+ * {@code approved} — "an approval stands right now, so there is something to withdraw" — and a false
+ * value covers two situations that answer a withdrawal DIFFERENTLY:
  *
- * <p>It has to work that way because the alternative is interleaving-dependent. Two concurrent
- * withdrawals of one reply both see {@code canWithdraw=true}; if the second were a 409, one caller's
- * answer would depend on which read the database served first. Refusing a withdrawal is reserved for
- * a withdrawal that would contradict a DIFFERENT terminal state — that is a real conflict, and it
- * still conflicts.
+ * <ol>
+ *   <li><b>No approval was ever recorded for this review.</b> Withdrawing is a 409
+ *       ({@code 승인된 초안이 없습니다}) — there is no exit to take, and the request is refused.
+ *   <li><b>An approval was recorded and has already been withdrawn.</b> Withdrawing again, under a
+ *       new command id, is 200 with {@code replayed=true}: the state the caller asked for is the
+ *       state that holds, nothing is written, and no audit row is appended (see
+ *       {@code ReviewReplyApprovalWriter}, which decides this under its row lock).
+ * </ol>
+ *
+ * <p>Both are "no new transition is available", which is all this flag claims. The second is 200
+ * because the alternative is interleaving-dependent: two identical concurrent withdrawals both see
+ * {@code canWithdraw=true}, and if the loser were a 409 its answer would depend on which read the
+ * database served first — same two callers, same intent, two contracts.
+ *
+ * <p>Nothing else was softened. A withdrawal on a review with no approval row still conflicts (1
+ * above), and a command id already spent on a DIFFERENT decision still conflicts
+ * ({@code ReviewReplyApprovalService.replay}). Neither state is terminal in the state-machine sense —
+ * a withdrawn reply may be approved again — so there is no "conflicting terminal state" rule here,
+ * and this note should not be read as inventing one.
  *
  * <p>{@code canStartSubmissionRun} (v1.6) gates offering the guided Action Window reply-submission
  * flow. It is the same rule as {@code canCopy} — you may guide a post only for an approved reply you

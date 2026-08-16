@@ -46,13 +46,38 @@ describe("demo capability fixtures", () => {
     expect(mockCapabilityOverview("NAVER").unsupportedScopes).toEqual([]);
   });
 
-  it("leaves the channels whose connector really does serve reviews alone", () => {
-    for (const code of ["CAFE24", "GMARKET"]) {
-      expect(reviewOf(code).supported).toBe(true);
-      expect(reviewOf(code).verificationStatus).toBe("CONFIRMED");
-    }
-    // Cafe24's documented exclusions are still its own.
+  it("claims for NAVER only the data type its connector actually serves", () => {
+    // `NaverApiConnector` serves ORDER_SUMMARY and says so; its own note calls INQUIRY deferred, and
+    // the seeded table agrees. 문의 확인됨 was a second overclaim written one line from the one this
+    // fixture was being changed to remove.
+    const byType = Object.fromEntries(
+      mockCapabilityOverview("NAVER").dataTypes.map((d) => [d.dataType, d]),
+    );
+    expect(byType.ORDER_SUMMARY.verificationStatus).toBe("CONFIRMED");
+    expect(byType.INQUIRY.supported).toBe(false);
+  });
+
+  it("leaves the one channel whose connector really does serve reviews alone", () => {
+    // CAFE24 only. Its review capability is live-verified through the 구매후기 board, which is why it
+    // is the single channel allowed to say 확인됨 about reviews here.
+    expect(reviewOf("CAFE24").supported).toBe(true);
+    expect(reviewOf("CAFE24").verificationStatus).toBe("CONFIRMED");
+    // And its documented exclusions are still its own.
     expect(mockCapabilityOverview("CAFE24").unsupportedScopes.map((s) => s.code)).toContain("BOARD_9");
+  });
+
+  it("never says 확인됨 for a channel nobody has verified", () => {
+    // The generic branch claimed CONFIRMED on all three data types for every remaining channel. None
+    // of them has a connector that could produce that: the default resolution is `MockApiConnector`,
+    // which supplies no verification map at all, so 확인 필요 is the true answer — and GMARKET's own
+    // skeleton connector serves nothing whatsoever.
+    for (const code of ["GMARKET", "ELEVENST", "SSG", "LOTTEON"]) {
+      const overview = mockCapabilityOverview(code);
+      expect(overview.dataTypes).not.toHaveLength(0);
+      for (const cap of overview.dataTypes) {
+        expect(cap.verificationStatus).not.toBe("CONFIRMED");
+      }
+    }
   });
 
   it("stops the demo offering a 리뷰 cadence where none can exist", () => {
