@@ -304,28 +304,40 @@ either way and were rewritten.
    an empty database, then a re-sync storing 0). §5.1 stored nothing by design and proves the other
    half — that a stored review can be found again. `supported` / `verificationStatus` keep their meaning, the
    `connector_capabilities` table and schedule gating are untouched (an acquisition path is not a cadence),
-   and the badge now reads `리뷰 수집 지원 · Action Window`. The absence of an official API is not inferred
-   from `supported=false`: it is the connector's own `REVIEW_API` 제외 범위 note.
+   and the badge read `리뷰 수집 지원 · Action Window`. The absence of an official API is not inferred
+   from `supported=false`: it is an asserted 제외 범위 note.
 
-   **Three things #107 did not fix, named here so they are not mistaken for done.**
+   **Three things #107 did not fix — all three closed by #110·#111·#112 (2026-08-16).**
 
-   1. **The counterweight is missing wherever the real connector is not resolved, and that is the default.**
-      `SELLEROPS_CONNECTOR_COUPANG_ENABLED` defaults to false, so the answering connector is
-      `MockApiConnector` — which also excludes REVIEW for COUPANG/NAVER, and declares **no** unsupported
-      scopes. The registry is keyed on channel+type, not on the resolved connector, so the badge reads
-      `리뷰 수집 지원 · Action Window` while `리뷰 API 없음 (쿠팡 미제공)` appears nowhere on the page. This
-      is the **overclaiming** direction, which is the direction this axis exists to prevent, and it is a
-      fixture gap in the dev/default configuration rather than a defect in the model. Fixing it means the
-      mock declaring the honest scope, or the overview refusing a path whose connector is a stand-in —
-      neither is a frontend copy change, and #107 was scoped not to chase it.
-   2. **The 수집 설정 section still says 이 채널 미지원 for 리뷰, one scroll below the new badge.** That
-      section reads a different endpoint (`connector_capabilities`, seeded `supported=false`) and gates
-      whether a cadence may be switched on — an Action Window acquisition is a seated operator run, not
-      something a schedule can trigger, so the row is correct to stay disabled. But nothing on screen
-      carries that reasoning, so a seller reads 수집 지원 and 미지원 within one scroll. The fix is copy in
-      the schedule row (e.g. 자동 수집 미지원), and that file was explicitly out of scope here.
-   3. **The word 지원.** `docs/channel-capability-registration-matrix.md` reserves seller-facing "지원"
-      for the 운영 지원 stage, and §4.1's Coupang REVIEW row still reads 셀러 표기 = 표기하지 않음 while GA
-      is `POLICY_GATED`. The copy `수집 지원 · Action Window` was an explicit product-owner instruction in
-      the #107 task, which outranks the matrix under the conflict priority — but the matrix and the shipped
-      UI now disagree, and that column is the product owner's to set.
+   1. ~~**The counterweight is missing wherever the real connector is not resolved, and that is the
+      default.**~~ **Fixed.** `SELLEROPS_CONNECTOR_COUPANG_ENABLED` defaults to false, so the answering
+      connector was `MockApiConnector`, which declares no unsupported scopes — the badge read
+      `수집 지원 · Action Window` while `리뷰 API 없음 (쿠팡 미제공)` appeared nowhere on the page. The
+      **overclaiming** direction, which is the direction this axis exists to prevent.
+
+      The cause was where the fact was written, not what it said: "쿠팡은 판매자 리뷰 API를 제공하지 않는다"
+      is a fact about the **marketplace**, and it lived on one connector's `unsupportedScopes()`, so it
+      left with that connector. `ChannelApiGapRegistry` now holds it keyed by channel;
+      `CoupangApiConnector` reads its own note from there, so there is still exactly one sentence about it,
+      and `channelCapabilityOverview` merges connector scopes with channel gaps by `code` (connector
+      first, connector wins). It is **not** derived from `supported=false` — Coupang PRODUCT and SALES read
+      false too, because `CoupangApiConnector` serves neither, while Coupang documents an API for both —
+      and the registry stays narrow: NAVER's missing review API is
+      just as real and deliberately not listed, because adding a channel changes that channel's screen and
+      belongs to its own unit.
+   2. ~~**The 수집 설정 section still says 이 채널 미지원 for 리뷰, one scroll below the new badge.**~~
+      **Fixed.** That section reads a different endpoint (`connector_capabilities`) and gates whether a
+      cadence may be switched on, so the row is right to stay disabled — but it was claiming the **channel**
+      could not do this, when all it can judge is the **cadence**. It now reads `자동 수집 미지원`, and where
+      an acquisition path actually exists it adds one line saying why there is no cadence to set:
+      `Action Window는 판매자가 직접 실행하는 수집 경로라 자동 수집 주기 대상이 아닙니다.` The section reads
+      the overview strictly to **explain** — never to gate — so a failed read leaves the row exactly as it
+      was, and a channel with no path gets no sentence.
+   3. ~~**The word 지원.**~~ **Resolved by the product owner (2026-08-16):** seller-facing `지원` stays
+      reserved for the 운영 지원 stage, so the acquisition axis stops using the word. It states the route
+      and its evidence separately — `상품평 수집 경로 확인됨 · Action Window` with `실계정 검증 완료`
+      beneath it, and `수집 경로 있음` / `실계정 검증 전` for a path with no live sitting behind it. §4.1's
+      셀러 표기 column is unchanged at 표기하지 않음; the vocabulary is written down in
+      `docs/channel-capability-registration-matrix.md` §0(취득 경로 표기 어휘). The badge also says 상품평
+      rather than 리뷰 on Coupang, matching the word the /connect entry point, the record panel and WING
+      itself use — scoped to that channel, so no other channel's copy moved.

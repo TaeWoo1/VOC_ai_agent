@@ -5,6 +5,10 @@
 // actually gets the data. Coupang 상품평 is `supported: false` — Coupang publishes no seller review
 // API — and is collected anyway through the Action Window, so rendering the boolean alone printed
 // 리뷰 미지원 on a page whose next panel counted 22 collected 상품평.
+//
+// The words matter as much as the split. 지원 is reserved by
+// `docs/channel-capability-registration-matrix.md` §4.1 for 운영 지원 — the always-on rung only 파일
+// 업로드 has reached — so the acquisition axis says which route and how far it is proven, never 지원.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { CapabilityBadges } from "./CapabilityBadges";
@@ -38,6 +42,14 @@ function overview(over: Partial<ChannelCapabilityOverview> = {}): ChannelCapabil
   };
 }
 
+/**
+ * The badge carrying a data type's name. A badge with an evidence line nests its label one level in,
+ * so anchor on the label and walk out to the element that carries the tone.
+ */
+function badgeFor(dataTypeLabel: string): HTMLElement {
+  return screen.getByText(dataTypeLabel).closest("span.rounded-xl") as HTMLElement;
+}
+
 /** The real Coupang shape: connector says no, the Action Window says yes, and the API gap is a scope. */
 const COUPANG = overview({
   dataTypes: [
@@ -62,22 +74,47 @@ describe("수집 가능 데이터 — the acquisition axis", () => {
   it("says how 상품평 are collected instead of calling them unsupported", async () => {
     getChannelCapabilityOverview.mockResolvedValue(COUPANG);
     renderBadges();
-    expect(await screen.findByText("수집 지원 · Action Window")).toBeInTheDocument();
+    expect(await screen.findByText("수집 경로 확인됨 · Action Window")).toBeInTheDocument();
+  });
+
+  it("names the route and the evidence as two separate claims", async () => {
+    getChannelCapabilityOverview.mockResolvedValue(COUPANG);
+    renderBadges();
+    await screen.findByText("수집 경로 확인됨 · Action Window");
+    // Which route it takes, and how far that route has been proven, are different facts.
+    expect(screen.getByText("실계정 검증 완료")).toBeInTheDocument();
+  });
+
+  it("never says 지원 about an acquisition path", async () => {
+    getChannelCapabilityOverview.mockResolvedValue(COUPANG);
+    renderBadges();
+    await screen.findByText("수집 경로 확인됨 · Action Window");
+    // §4.1 reserves the word for 운영 지원. A route with one live sitting behind it is not that, and
+    // 수집 지원 read exactly like the promise the matrix says only 파일 업로드 may make.
+    expect(badgeFor("상품평")).not.toHaveTextContent("지원");
+  });
+
+  it("calls Coupang reviews what Coupang calls them", async () => {
+    getChannelCapabilityOverview.mockResolvedValue(COUPANG);
+    renderBadges();
+    // The same word the /connect entry point and the record panel use; a badge saying 리뷰 beside them
+    // is the same thing under a second name.
+    expect(await screen.findByText("상품평")).toBeInTheDocument();
+    expect(screen.queryByText("리뷰")).toBeNull();
   });
 
   it("never prints 미지원 for a data type SellerOps actually collects", async () => {
     getChannelCapabilityOverview.mockResolvedValue(COUPANG);
     renderBadges();
-    await screen.findByText("수집 지원 · Action Window");
+    await screen.findByText("수집 경로 확인됨 · Action Window");
     // The exact regression: a record holding 22 상품평 under a badge reading 리뷰 미지원.
-    const review = screen.getByText("리뷰").closest("span") as HTMLElement;
-    expect(review).not.toHaveTextContent("미지원");
+    expect(badgeFor("상품평")).not.toHaveTextContent("미지원");
   });
 
   it("takes the missing official API from the connector's own note, not from the boolean", async () => {
     getChannelCapabilityOverview.mockResolvedValue(COUPANG);
     renderBadges();
-    await screen.findByText("수집 지원 · Action Window");
+    await screen.findByText("수집 경로 확인됨 · Action Window");
     // Both facts on one screen: collected via Action Window, and no official API to collect it with.
     expect(screen.getByText("제외 범위")).toBeInTheDocument();
     expect(screen.getByText("리뷰 API 없음 (쿠팡 미제공)")).toBeInTheDocument();
@@ -86,7 +123,7 @@ describe("수집 가능 데이터 — the acquisition axis", () => {
   it("leaves every other data type exactly as it was", async () => {
     getChannelCapabilityOverview.mockResolvedValue(COUPANG);
     renderBadges();
-    await screen.findByText("수집 지원 · Action Window");
+    await screen.findByText("수집 경로 확인됨 · Action Window");
     // 주문·매출 and 문의 both CONFIRMED, still rendered by the connector's own verdict.
     expect(screen.getAllByText("확인됨")).toHaveLength(2);
   });
@@ -104,8 +141,10 @@ describe("수집 가능 데이터 — the acquisition axis", () => {
     renderBadges("GMARKET");
     expect(await screen.findByText("확인 필요")).toBeInTheDocument();
     // No proven path here, so the honest answer is still 미지원. The axis adds a fact; it does not
-    // soften an absent one.
+    // soften an absent one. And 리뷰 stays 리뷰: the Coupang word is Coupang's, not everyone's.
     expect(screen.getByText("미지원")).toBeInTheDocument();
+    expect(screen.getByText("리뷰")).toBeInTheDocument();
+    expect(screen.queryByText("상품평")).toBeNull();
   });
 
   it("renders a backend that predates the field exactly as before", async () => {
@@ -143,6 +182,7 @@ describe("수집 가능 데이터 — the acquisition axis", () => {
   it("marks a path that is not yet live-proven as needing confirmation, and does not dress it as proven", async () => {
     getChannelCapabilityOverview.mockResolvedValue(
       overview({
+        channelCode: "GMARKET",
         dataTypes: [
           type({
             dataType: "REVIEW",
@@ -154,11 +194,13 @@ describe("수집 가능 데이터 — the acquisition axis", () => {
         ],
       }),
     );
-    renderBadges();
-    // The status text lives in an inner span; the tone is on the badge wrapping it.
-    const badge = (await screen.findByText("수집 지원·확인 필요 · 파일 내보내기"))
-      .parentElement as HTMLElement;
-    // An unproven route must not read stronger than a connector capability that is merely unverified.
+    renderBadges("GMARKET");
+    expect(await screen.findByText("수집 경로 있음 · 파일 내보내기")).toBeInTheDocument();
+    // The evidence line is where an unproven route has to admit it: 있음 is not 확인됨.
+    expect(screen.getByText("실계정 검증 전")).toBeInTheDocument();
+    // And an unproven route must not read stronger than a connector capability that is merely
+    // unverified — the tone is on the badge, not the words inside it.
+    const badge = badgeFor("리뷰");
     expect(badge.className).toContain("text-warn");
     expect(badge.className).not.toContain("text-good");
   });
@@ -207,14 +249,14 @@ describe("수집 가능 데이터 — the acquisition axis", () => {
   it("fails closed on a dead backend rather than showing a capability", async () => {
     getChannelCapabilityOverview.mockRejectedValue(new Error("backend down"));
     renderBadges();
-    expect(await screen.findByText(/수집 지원 정보를 불러오지 못했습니다/)).toBeInTheDocument();
+    expect(await screen.findByText(/불러오지 못했습니다/)).toBeInTheDocument();
     expect(screen.queryByText(/Action Window/)).toBeNull();
   });
 
   it("has no axe violations", async () => {
     getChannelCapabilityOverview.mockResolvedValue(COUPANG);
     const { container } = renderBadges();
-    await screen.findByText("수집 지원 · Action Window");
+    await screen.findByText("수집 경로 확인됨 · Action Window");
     await expectNoAxeViolations(container);
   });
 });

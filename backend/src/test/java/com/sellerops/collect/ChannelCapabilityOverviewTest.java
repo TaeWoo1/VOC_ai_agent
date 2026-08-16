@@ -13,6 +13,7 @@ import com.sellerops.connector.ConnectorRegistry;
 import com.sellerops.connector.DataType;
 import com.sellerops.connector.FetchPage;
 import com.sellerops.connector.FetchRequest;
+import com.sellerops.connector.MockApiConnector;
 import com.sellerops.connector.PullConnector;
 import com.sellerops.connector.UnsupportedScope;
 import com.sellerops.connector.coupang.CoupangApiConnector;
@@ -153,11 +154,65 @@ class ChannelCapabilityOverviewTest {
                     assertThat(path.method()).isEqualTo("ACTION_WINDOW");
                     assertThat(path.verificationStatus()).isEqualTo("LIVE_PROVEN");
                 });
-        // The missing official API is the CONNECTOR's own statement, not something inferred from the
-        // boolean — that is what the badge is meant to render for it.
+        // The missing official API is an asserted fact, not something inferred from the boolean —
+        // that is what the badge is meant to render for it. Exactly once: the connector and the
+        // channel registry both name it, and an operator must not read one fact twice.
         assertThat(overview.unsupportedScopes())
                 .extracting(ChannelCapabilityOverview.ScopeNote::code)
-                .contains("REVIEW_API");
+                .containsExactly("REVIEW_API");
+        assertThat(overview.unsupportedScopes())
+                .extracting(ChannelCapabilityOverview.ScopeNote::label)
+                .containsExactly("리뷰 API 없음 (쿠팡 미제공)");
+    }
+
+    /**
+     * The default environment, which is where operators actually looked. {@code CoupangApiConnector}
+     * is behind a feature flag that is off unless someone turns it on, so
+     * {@link ConnectorRegistry#resolvePullConnector} hands back the generic {@link MockApiConnector}
+     * — and the 리뷰 API 없음 note, which lived on the Coupang connector alone, silently went with it.
+     * The acquisition badge then stood on the screen with nothing answering it.
+     *
+     * <p>The fact is about the marketplace, so it must survive whichever connector answered.
+     */
+    @Test
+    void theMissingReviewApiSurvivesTheConnectorItWasWrittenOn() {
+        Channel coupang = new Channel();
+        coupang.setCode("COUPANG");
+        coupang.setNameKo("쿠팡");
+        when(channels.findByCode("COUPANG")).thenReturn(Optional.of(coupang));
+        // No dedicated Coupang connector registered at all — exactly the default wiring.
+        ConnectorRegistry registry = new ConnectorRegistry(List.of(new MockApiConnector()));
+
+        ChannelCapabilityOverview overview = serviceWith(registry).channelCapabilityOverview("COUPANG");
+
+        assertThat(overview.unsupportedScopes())
+                .extracting(ChannelCapabilityOverview.ScopeNote::code)
+                .containsExactly("REVIEW_API");
+        // And the two halves are both on the screen: what the channel never offered, beside how
+        // SellerOps gets 상품평 regardless.
+        ChannelCapabilityOverview.DataTypeCapability review = overview.dataTypes().stream()
+                .filter(d -> "REVIEW".equals(d.dataType()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(review.supported()).isFalse();
+        assertThat(review.acquisitionPaths())
+                .singleElement()
+                .satisfies(path -> assertThat(path.method()).isEqualTo("ACTION_WINDOW"));
+    }
+
+    /**
+     * The gap registry is narrow on purpose. A channel nobody has audited must not inherit a
+     * neighbour's boundary — the honest answer for it is silence, not a borrowed claim.
+     */
+    @Test
+    void aChannelWithNoAuditedGapGainsNothing() {
+        Channel gmarket = new Channel();
+        gmarket.setCode("GMARKET");
+        when(channels.findByCode("GMARKET")).thenReturn(Optional.of(gmarket));
+        ConnectorRegistry registry = new ConnectorRegistry(List.of(new EsmApiConnector(null, null)));
+
+        assertThat(serviceWith(registry).channelCapabilityOverview("GMARKET").unsupportedScopes())
+                .isEmpty();
     }
 
     /**

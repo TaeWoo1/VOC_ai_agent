@@ -1,4 +1,5 @@
 import { Section } from "./Section";
+import { channelDataTypeLabel } from "../lib/channelVocabulary";
 import { useApiData } from "../lib/useApiData";
 import { api } from "../lib/apiClient";
 import type { DataTypeCapability } from "../lib/types";
@@ -26,10 +27,15 @@ const METHOD_LABEL: Record<string, string> = {
  * A path's own evidence decides its wording AND its colour. An unproven route must not read stronger
  * than a connector capability that is merely unverified, so it borrows the same warn tone the
  * connector axis uses for `NEEDS_VERIFICATION`.
+ *
+ * **No 지원 here, deliberately.** `docs/channel-capability-registration-matrix.md` §0 reserves the word
+ * a seller reads as 지원 for the last rung of the roadmap's 4-stage ladder — 운영 지원, an always-on
+ * promise, which today only 파일 업로드 has reached. An acquisition path is a route with evidence behind
+ * it, not a standing commitment, so it says what it is: which route, and how far it has been proven.
  */
-const PATH_STATUS_STYLE: Record<string, { cls: string; label: string }> = {
-  LIVE_PROVEN: { cls: "bg-good/10 text-good", label: "수집 지원" },
-  NEEDS_VERIFICATION: { cls: "bg-warn/10 text-warn", label: "수집 지원·확인 필요" },
+const PATH_STATUS_STYLE: Record<string, { cls: string; label: string; evidence: string }> = {
+  LIVE_PROVEN: { cls: "bg-good/10 text-good", label: "수집 경로 확인됨", evidence: "실계정 검증 완료" },
+  NEEDS_VERIFICATION: { cls: "bg-warn/10 text-warn", label: "수집 경로 있음", evidence: "실계정 검증 전" },
 };
 
 /** The first path we can actually describe. An unknown method or status is not rendered as a claim. */
@@ -55,25 +61,30 @@ function describedPath(cap: DataTypeCapability) {
  * The missing official API is not inferred from `supported: false` here — that fact belongs to the
  * connector, which publishes it as its own 제외 범위 note (Coupang: `REVIEW_API`), rendered below.
  */
-function CapabilityBadge({ cap }: { cap: DataTypeCapability }) {
+function CapabilityBadge({ cap, channelCode }: { cap: DataTypeCapability; channelCode: string }) {
+  const label = channelDataTypeLabel(channelCode, cap.dataType, cap.label);
   const path = cap.supported ? undefined : describedPath(cap);
   if (path) {
     const pathStyle = PATH_STATUS_STYLE[path.verificationStatus];
     return (
       <span
-        className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-base font-semibold ${pathStyle.cls}`}
+        className={`inline-flex flex-col items-start gap-0.5 rounded-xl px-3 py-1.5 ${pathStyle.cls}`}
       >
-        {cap.label}
-        <span className="text-sm font-medium opacity-80">
-          {pathStyle.label} · {METHOD_LABEL[path.method]}
+        <span className="text-base font-semibold">
+          {label}
+          <span className="ml-1.5 text-sm font-medium opacity-80">
+            {pathStyle.label} · {METHOD_LABEL[path.method]}
+          </span>
         </span>
+        {/* The evidence, on its own line: which route is a different claim from how far it is proven. */}
+        <span className="text-sm font-medium opacity-80">{pathStyle.evidence}</span>
       </span>
     );
   }
   const style = STATUS_STYLE[cap.verificationStatus] ?? STATUS_STYLE.UNSUPPORTED;
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-base font-semibold ${style.cls}`}>
-      {cap.label}
+      {label}
       <span className="text-sm font-medium opacity-80">{style.label}</span>
     </span>
   );
@@ -101,7 +112,7 @@ export function CapabilityBadges({ channelCode }: { channelCode: string }) {
         <div className="space-y-4">
           <div className="flex flex-wrap gap-2">
             {data.dataTypes.map((cap) => (
-              <CapabilityBadge key={cap.dataType} cap={cap} />
+              <CapabilityBadge key={cap.dataType} cap={cap} channelCode={channelCode} />
             ))}
           </div>
           {data.unsupportedScopes.length > 0 ? (

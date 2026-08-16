@@ -1,5 +1,6 @@
 package com.sellerops.connector.coupang;
 
+import com.sellerops.connector.ChannelApiGapRegistry;
 import com.sellerops.connector.ConnectionVerifier;
 import com.sellerops.connector.ConnectorCapabilities;
 import com.sellerops.connector.DataType;
@@ -97,8 +98,11 @@ public class CoupangApiConnector implements PullConnector, ConnectionVerifier {
         if (!CHANNEL_CODE.equals(channelCode)) {
             return List.of();
         }
-        // An honest, operator-facing boundary: Coupang exposes no seller review API.
-        return List.of(new UnsupportedScope("REVIEW_API", "리뷰 API 없음 (쿠팡 미제공)"));
+        // An honest, operator-facing boundary: Coupang exposes no seller review API. The wording
+        // lives in ChannelApiGapRegistry rather than here, because the fact is about the
+        // marketplace and has to survive this connector being flagged off — see that class. The
+        // guard above stays: this connector answers for its own channel only.
+        return ChannelApiGapRegistry.gapsFor(CHANNEL_CODE);
     }
 
     @Override
