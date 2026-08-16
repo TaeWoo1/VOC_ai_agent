@@ -243,9 +243,16 @@ against that is a record a reader can count.
 Read this table before believing any number in it: a candidate that needed six passes to clear the
 bars is a different object from one that cleared them on the first.
 
-| # | date | vendor · model | prompt | DEV recall | DEV precision (95% low) | 4–5★ FP | failures | note |
-|---|---|---|---|---|---|---|---|---|
-| — | — | — | `triage-prompt/v1` | — | — | — | — | **no run yet — blocked on an API key (§7)** |
+| # | date | vendor · model | tuning | DEV recall | DEV precision (95% low) | 4–5★ FP | §6.3(4) demotions | failures | verdict |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | 2026-08-17 | openai · gpt-5 | `+tdefault+out4000` | 0.886 | 1.000 (0.890) | 0.000 | *not measured* | 0/107 | incomplete — the harness did not yet measure §6.3(4) |
+| 2 | 2026-08-17 | openai · gpt-5 | `+tdefault+out4000` | 0.857 | 0.968 (0.838) | 0.000 | **2** | 0/107 | **FAILS §6.3(4)** |
+
+Runs 1 and 2 are the **same candidate on the same rows** — identical model, prompt, schema and
+tuning, identical 107 reviews. They disagree. That is not noise to be averaged away, and both rows
+stay: see §10.2.
+
+Neither may be quoted alone as "gpt-5's DEV result".
 
 **Baseline for comparison**, from `ReviewTriageEvalIT` on the same `DEV` half:
 
@@ -257,7 +264,44 @@ bars is a different object from one that cleared them on the first.
 Bars, from `v1` §5, unchanged: recall ≥ 0.30, precision Wilson 95% lower bound ≥ 0.80,
 4–5★ false-positive rate ≤ 0.05.
 
-### 10.1 How a run is recorded
+### 10.2 The candidate is not reproducible, and that is a finding about the candidate
+
+Two runs, everything fixed, different answers:
+
+```
+              run 1     run 2
+tp               31        30
+fp                0         1
+fn                4         5
+recall        0.886     0.857
+precision     1.000     0.968
+```
+
+**Cause: `temperature` is at the model's default**, because a reasoning model rejects a pinned one
+(§7). The cost was written down before the run as "it costs reproducibility"; this is that cost,
+arriving.
+
+What it breaks is not one number but the shape of §8.6. A change log assumes one row is one
+candidate is one result. Here a row is one *sample* from a candidate, and the spread between two
+samples (0.857–0.886) is larger than the margin by which some future prompt edit would "improve"
+anything. **A single run of this candidate cannot support a freeze**, and comparing two prompts by
+one run each would be comparing sampling noise.
+
+Three honest ways forward, none of them chosen here because the choice is the product owner's:
+
+1. **Measure the variance.** Run the same candidate *n* times and report mean and spread instead of
+   a point estimate. Costs *n* × 107 calls, and changes what a change-log row means — which is a
+   contract amendment, not a harness tweak.
+2. **Find a reproducible configuration.** A fixed `seed`, or a `reasoning_effort` that is stable in
+   practice, verified by two identical runs agreeing exactly before any of it is believed.
+3. **Accept a non-deterministic classifier as the product** and gate on the worst observed run
+   rather than the best. Defensible, and it must then be said out loud that the shipped number is a
+   floor rather than an estimate.
+
+**What must not happen** is picking run 1 because it is the better one. Both are in the table above
+for that reason.
+
+### 10.3 How a run is recorded
 
 One row per `LlmTriageEvalIT` invocation. If a run is repeated with no change at all — a retry after
 a transport failure — it amends the existing row's failure count rather than adding one, because it

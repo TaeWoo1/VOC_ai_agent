@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sellerops.common.ReviewIdFingerprint;
 import com.sellerops.itemanalysis.eval.EvalMetrics;
+import com.sellerops.review.triage.ReviewTriageRules;
 import com.sellerops.review.triage.ReviewTriageTier;
 import com.sellerops.review.triage.TriageReasonCode;
 import com.sellerops.review.triage.eval.TriageEvalReport.Row;
@@ -118,6 +119,8 @@ class LlmTriageEvalIT {
         int reasonScored = 0;
         int crossingRows = 0;
         int crossingCaught = 0;
+        int demotions = 0;
+        List<String> answers = new ArrayList<>();
 
         for (DevRow row : drawn) {
             Label label = labels.get(row.fingerprint());
@@ -132,6 +135,22 @@ class LlmTriageEvalIT {
                 failures.merge(result.status() + " " + result.failureReason(), 1, Integer::sum);
                 continue;
             }
+            // RUBRIC v2 §6.3 condition 4, restated from v1 §5's regression gate: "no review the
+            // rating-only rule already calls NEEDS_ATTENTION may be demoted by it — a detector may
+            // only ADD". It is one of the four pre-committed conditions and it is NOT implied by
+            // recall: a candidate can find many new positives while quietly dropping an old one.
+            ReviewTriageTier baseline = ReviewTriageRules.tier(row.rating(), row.body());
+            if (baseline == ReviewTriageTier.NEEDS_ATTENTION
+                    && result.tier() != ReviewTriageTier.NEEDS_ATTENTION) {
+                demotions++;
+            }
+            // Fingerprint, three tiers, a reason. No body, no id — the same shape labels.json holds,
+            // written locally so a later question about this run costs no further API calls.
+            answers.add(String.join(",", row.fingerprint(), row.stratum(),
+                    String.valueOf(row.rating()), baseline.name(), result.tier().name(),
+                    label.tier().name(), String.valueOf(result.reasonCode()),
+                    String.valueOf(label.reasonCode())));
+
             Row scored = new Row(row.stratum(), "DEV", row.rating(), result.tier(),
                     label.tier(), label.reasonCode());
             rows.add(scored);
@@ -183,6 +202,17 @@ class LlmTriageEvalIT {
                     A crossing row is one the RUBRIC itself does not decide cleanly. They are
                     reported apart so a candidate is not judged mainly on the rubric's own gaps.
                 %n""", reasonAgree, reasonScored, crossingRows, crossingCaught));
+
+        out.append(String.format("""
+                %n  §6.3 CONDITION 4 — a detector may only ADD
+                    reviews rules-v1 calls 확인 필요 that this candidate DEMOTES   %d
+                    Not implied by recall: a candidate can find many new positives while quietly
+                    dropping one the rating alone already caught. Any number but 0 fails the gate.
+                %n""", demotions));
+
+        Files.writeString(Path.of("build", "llm-triage-dev-answers.csv"),
+                "fingerprint,stratum,rating,rulesV1,candidate,gold,candidateReason,goldReason\n"
+                        + String.join("\n", answers) + "\n");
 
         out.append("""
                   HOLDOUT was not read, and this harness cannot read it. §6.2 spends it once, on the
