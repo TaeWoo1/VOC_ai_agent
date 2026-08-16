@@ -32,10 +32,15 @@ export const TRIAGE_TIERS: ReviewTriageTier[] = ["NEEDS_ATTENTION", "WATCH", "FY
 /**
  * The one sentence that keeps the issue tags honest.
  *
- * The tags come from a stored keyword classification whose accuracy has never been measured — the
- * label seed in `contracts/review-eval/naver/v1/labels.json` is empty. product-scope §1.7 requires
- * that output always be presented as an unverified candidate, so the surface says so once, plainly,
- * where the tags are, rather than leaving the seller to assume a verdict.
+ * The tags come from `item_analyses.category`, a stored keyword classification whose accuracy has
+ * never been measured — the label seed in `contracts/review-eval/naver/v1/labels.json` is empty. So
+ * the surface says so once, plainly, where the tags are, rather than leaving the seller to assume a
+ * verdict.
+ *
+ * The nearest written rule is product-scope §1.7's carve-out, which requires **issue-memory**
+ * judgements always be worded as 검증되지 않은 이슈 후보. That clause is scoped to a different
+ * mechanism (`reviewissue`'s aspect+problem signatures), so it is the precedent here rather than the
+ * authority — the same posture applied to the same kind of unmeasured output.
  */
 export const TRIAGE_TAG_DISCLOSURE =
   "분류는 본문 키워드로 자동 분류한 것이라 정확하지 않을 수 있습니다. 확인 필요 여부는 별점과 본문 유무로만 판단합니다.";

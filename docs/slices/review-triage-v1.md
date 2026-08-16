@@ -7,7 +7,7 @@
 - **Workstream:** Review Operations (`docs/workstreams/review_operations_mvp.md`)
 - **Loop stages:** UNDERSTAND / PRIORITIZE
 - **Date:** 2026-08-16 · **Live contact:** none
-- **Surface:** `/app/channels/{accountId}/reviews` (상품평), the Coupang review record
+- **Surface:** `/connect/channels/{accountId}/reviews` (상품평), the Coupang review record
 
 ---
 
@@ -76,10 +76,14 @@ Three tiers, deliberately few, in the vocabulary the operator reads:
 
 Three of these rows deserve their reasoning written down:
 
-- **A 1★ with no text is `WATCH`, not `확인 필요`.** RUBRIC §2's tie-breakers label exactly this case
+- **A 1★ with no text is `WATCH`, not `확인 필요`.** RUBRIC §2's tie-breakers put this case at
   `NO_ACTION`: "There is nothing to detect. Rating already handles it." It is not demoted to 참고
   either — the rating is real and counts — but a seller cannot act on a review with no content, and
   putting it at the top of the worklist would spend their attention on a row that has nothing to say.
+  ⚠ **A strict subset, not a match.** RUBRIC's row reads "an empty **or emoji-only** body"; blankness
+  is all this rule tests, so a 1★ of "😡😡" is 확인 필요 here. Detecting emoji-only content means
+  reading the body's characters, which is the input this rule deliberately does not have — so the gap
+  is stated rather than closed, and the row is over-surfaced rather than hidden.
 - **A null rating is `WATCH`.** Unknown is not good news. Sorting it into 참고 would hide a review
   nobody has judged, which is the failure this product's fail-closed posture exists to prevent.
 - **`rating = 3` is `WATCH`.** The existing queue's band is 1–3★ (`IngestedReviewVocItemSource`); this
@@ -94,8 +98,15 @@ a page the service never fully loads. That duplication is a drift hazard, and it
 (`ReviewRepository.TRIAGE_TIER_RANK`) is used by the ordering, the filter and the summary count, so
 those three can never diverge from each other. Java-versus-JPQL agreement is then pinned by
 `ChannelReviewTriageIT`, which asserts the database's rank equals `ReviewTriageRules.rank(...)`
-for **every** combination of rating (null, 1–5) and body (null, blank, text) — 18 rows, exhaustive
-over the rule's whole input space.
+for every combination of rating (null, 1–5) and body (empty, whitespace, text) — 18 rows, exhaustive
+over the input space the database can actually hold. A null *body* is not among them: `reviews.body`
+is `not null`, so no row can exist to disagree about, and that case is covered where it is reachable,
+in `ReviewTriageRulesTest`.
+
+The same 18 combinations were also evaluated against the **local PostgreSQL** instance directly
+(`select … case … from (values …)`), and it returns the same rank as both the Java rule and H2 — so
+the offline suite's agreement is not an artifact of running H2 in PostgreSQL-compatibility mode. See
+§4.3 for the one input class where the two engines genuinely differ.
 
 ## 4. What is cited, and how
 
@@ -146,6 +157,27 @@ inputs** — a category count on this surface, an aspect+problem signature in th
 one into the other would mean a future revision of the DRAFT issue-memory thresholds silently
 redefining what this list calls repeated.
 
+### 4.3 The one input class where the two engines disagree
+
+`ReviewRepository.TRIAGE_TIER_RANK` tests blankness with `trim(r.body) = ''`, the portable JPQL
+expression; SQL `TRIM` strips `U+0020` only. `ReviewTriageRules.isTextless` uses `String.isBlank`, i.e.
+`Character.isWhitespace`. **The divergent set is every whitespace code point except `U+0020`** — not
+just tabs and newlines but `U+3000` IDEOGRAPHIC SPACE (which a Korean IME emits) and the whole
+`U+2000–U+200A` block. A body made only of those ranks 확인 필요 in SQL and 별점만 in Java.
+
+Two things about this are worth stating precisely, because the first draft got both wrong:
+
+- **The direction is not uniformly safe.** On the counts and the default order it over-surfaces,
+  which is harmless. Under `tier=WATCH` it does the opposite — the row is filtered out while its own
+  chip reads 지켜보기, unreachable through the filter that matches what it says.
+- **What makes it benign is that the input does not occur**, and that was checked rather than
+  assumed: the Coupang collector normalises `\s| |　` and trims (`review-row-inpage.ts`) then
+  maps the result to `""` (`review-rows.ts`); the upload path uses `String.strip()`
+  (`ingest/parse/FileParser`), which strips `U+3000`; `Cafe24ReviewPromoter` rejects `isBlank` content.
+
+Closing it properly would need a whitespace class SQL `TRIM` cannot express portably, so it is
+documented rather than papered over.
+
 ## 5. The recommended action never implies a reply
 
 Coupang gives sellers no way to answer a 상품평. `ChannelReviewService` and `ChannelReviews.tsx` both
@@ -185,13 +217,29 @@ the difference: a *disposition* is decided, a *tier* is calculated.
 
 ## 8. Verification
 
-- `ReviewTriageRulesTest` — the rule over its whole input space; body content cannot change a tier.
-- `ChannelReviewTriageIT` — the JPQL rank equals the Java rank for all 18 (rating × body) cases;
-  the filter and the summary count agree with the page they describe.
-- `ReviewTriageNoteTest` — the reason, the tags, the action map, and that no emitted string implies a reply.
-- `AttentionSignalRegressionTest` — `LOW_RATING_REVIEW` counts unchanged (RUBRIC §5's fourth gate).
-- Frontend: tier chip / reason / action rendering, the filter, the summary, and that
-  `[쿠팡에서 보기]` is unchanged.
+The boundary in §2 is guarded at **three** layers, because it can be broken at any of them and an
+independent review confirmed that guarding only the first leaves the other two open:
+
+| layer | guard | the mutation it catches |
+|---|---|---|
+| the rule | `ReviewTriageRulesTest.noAmountOfTextCanChangeATier` | a keyword branch inside `ReviewTriageRules` |
+| the note | `ReviewTriageNoteTest.theNoteExplainsTheTierAndCannotChangeIt` | a promotion in `ReviewTriageNote.of` — swept over **every** rating, not just 4★ |
+| the service | `ChannelReviewTriageIT.aBodyFullOfComplaintVocabularyStillTiersOnTheRatingAlone` | a promotion in `ChannelReviewService`, which holds the body-derived material and sits outside the triage package |
+
+The rest:
+
+- `ChannelReviewTriageIT` — the JPQL rank equals the Java rank for all 18 (rating × body) cases; the
+  filter, the summary count and the row's own note agree with the page they describe; 낮은 평점순 puts
+  an unrated review last on either database.
+- `ReviewTriageNoteTest` — the reason, the tags, the action map, that no emitted string implies a
+  reply, and that a category outside `ItemAnalysisCategories` is dropped rather than rendered.
+- `ReviewTriageQueueIsolationTest` — RUBRIC §5's fourth gate (`LOW_RATING_REVIEW` unchanged) made
+  structural: the triage package cannot reach the attention queue's mechanisms and persists nothing.
+  There is no separate attention-signal regression test; the gate is held by construction plus this
+  scan, and the existing `AttentionSignalRulesTest` is untouched.
+- Frontend: tier chip / reason / action rendering, the filter, the summary, that the row ORDER is the
+  server's and the chip is the server's tier, that a filtered list still reports the record's size,
+  and that `[쿠팡에서 보기]` is unchanged.
 - Local product proof on the 22 stored Coupang rows — see §9.
 
 ## 9. Local product proof, and what it does and does not show

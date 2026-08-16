@@ -1294,32 +1294,6 @@ export interface ReviewIssueDetailView {
  * There is no author field. Coupang prints the buyer's name beside every review on the seller's own
  * screen; it is not read, not stored, and has no field here to arrive in.
  */
-/**
- * Which triage tier a review is in. Computed by the backend from the rating and whether there is
- * anything to read — never from what the review says.
- */
-export type ReviewTriageTier = "NEEDS_ATTENTION" | "WATCH" | "FYI";
-
-/**
- * What SellerOps suggests about one review: the tier, the short reason it landed there, the issue
- * tags worth carrying, and one thing the seller might do.
- *
- * `reason` and `tags` EXPLAIN the tier; they never decided it. Body-derived material appears here
- * only as a citation, because `contracts/review-eval/naver/v1/RUBRIC.md` §5 forbids surfacing an
- * unmeasured text detector and the label seed behind it is empty. Do not add UI that re-ranks or
- * re-colours a row from `tags` — that would be the gated thing, arriving through the frontend.
- *
- * `recommendedAction` is null when there is genuinely nothing to do, and must render as nothing
- * rather than as a reassuring sentence. None of these strings ever suggests replying: Coupang gives
- * sellers no way to answer a 상품평.
- */
-export interface ReviewTriageNote {
-  tier: ReviewTriageTier;
-  reason: string;
-  tags: string[];
-  recommendedAction: string | null;
-}
-
 export interface ChannelReviewItemView {
   id: string;
   writtenOn: string | null;
@@ -1338,6 +1312,33 @@ export interface ChannelReviewItemView {
   /** Arrived in the most recent import — derived from that import's start, never a read flag. */
   isNew: boolean;
   triage: ReviewTriageNote;
+}
+
+/**
+ * Which triage tier a review is in. Computed by the backend from the rating and whether there is
+ * anything to read — never from what the review says.
+ */
+export type ReviewTriageTier = "NEEDS_ATTENTION" | "WATCH" | "FYI";
+
+/**
+ * What SellerOps suggests about one review: the tier, the short reason it landed there, the issue
+ * tags worth carrying, and one thing the seller might do.
+ *
+ * `reason` and `tags` EXPLAIN the tier; they never decided it. Body-derived material appears here
+ * only as a citation, because `contracts/review-eval/naver/v1/RUBRIC.md` §5 forbids surfacing an
+ * unmeasured text detector and the label seed behind it is empty. Do not add UI that re-ranks,
+ * re-orders or re-colours a row from `tags` — that would be the gated thing, arriving through the
+ * frontend.
+ *
+ * `recommendedAction` is null when there is genuinely nothing to do, and must render as nothing
+ * rather than as a reassuring sentence. None of these strings ever suggests replying: Coupang gives
+ * sellers no way to answer a 상품평.
+ */
+export interface ReviewTriageNote {
+  tier: ReviewTriageTier;
+  reason: string;
+  tags: string[];
+  recommendedAction: string | null;
 }
 
 /**

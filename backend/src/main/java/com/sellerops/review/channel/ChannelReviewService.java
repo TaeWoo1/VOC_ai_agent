@@ -120,14 +120,13 @@ public class ChannelReviewService {
                 : ReviewTriageRules.rank(ReviewTriageTier.parse(tier));
         Pageable pageable = PageRequest.of(Math.max(0, page), clampSize(size));
 
-        // The triage order lives in JPQL (one shared rank expression, so the order and the counts cannot
-        // disagree); the other two are plain property sorts. A tier filter applies to all three — an
-        // operator who filtered to 확인 필요 and then asked for 최신순 wants the newest of those, not the
-        // filter silently dropped.
-        Page<Review> found = SORT_ATTENTION.equals(requestedSort)
-                ? reviews.findByOrgIdAndChannelIdTriaged(orgId, channelId, tierRank, pageable)
-                : reviews.findByOrgIdAndChannelIdTriagedSorted(orgId, channelId, tierRank,
-                        PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), sortOf(requestedSort)));
+        // Two of the three orderings live in JPQL: the triage rank (one shared expression, so the
+        // order and the counts cannot disagree) and 낮은 평점순 (whose nullable rating needs an explicit
+        // NULLS-LAST case a `Pageable` sort cannot carry into a string query). 최신순 is a plain
+        // property sort on a not-null column. A tier filter applies to all three — an operator who
+        // filtered to 확인 필요 and then asked for 최신순 wants the newest of those, not the filter
+        // silently dropped.
+        Page<Review> found = findPage(orgId, channelId, requestedSort, tierRank, pageable);
 
         Map<UUID, Product> byProduct = productsOf(orgId, found.getContent());
         Map<UUID, String> categories = categoriesOf(orgId, found.getContent());
@@ -181,9 +180,10 @@ public class ChannelReviewService {
                 // redacted copy above. Redaction replaces PII-shaped spans with tokens, so building the
                 // note from it could flip a review to 별점만 for a buyer who wrote only a phone number,
                 // and the detail would then contradict the list it was opened from.
-                note(review,
-                        categoriesOf(orgId, List.of(review)),
-                        categoryCounts(orgId, account.getChannelId())),
+                //
+                // The count is for THIS review's category alone. Reusing the grouped breakdown made
+                // opening one review scan the channel's whole analysis join to read a single entry.
+                detailNote(orgId, account.getChannelId(), review),
                 new ChannelReviewDetailView.LocateTarget(
                         product == null ? null : product.getSku(),
                         review.getSourceOptionId(),
@@ -219,6 +219,19 @@ public class ChannelReviewService {
         String category = categories.get(review.getId());
         return ReviewTriageNote.of(review.getRating(), review.getBody(), category,
                 category == null ? 0 : counts.getOrDefault(category, 0L));
+    }
+
+    /**
+     * The note for one review read on its own — the same note the list row carried.
+     *
+     * <p>Reads one category's count rather than the channel's whole breakdown. The number has to match
+     * what the list showed, so it uses the same predicate and the same org scoping; a cheaper count
+     * that meant something slightly different would show the operator two answers for one review.
+     */
+    private ReviewTriageNote detailNote(UUID orgId, UUID channelId, Review review) {
+        String category = categoriesOf(orgId, List.of(review)).get(review.getId());
+        return ReviewTriageNote.of(review.getRating(), review.getBody(), category,
+                category == null ? 0 : reviews.countByChannelAndCategory(orgId, channelId, category));
     }
 
     /**
@@ -262,6 +275,11 @@ public class ChannelReviewService {
      * attention drill-down's category breakdown follows.
      */
     private ChannelReviewTriageSummaryView summary(UUID orgId, UUID channelId, Map<String, Long> categoryCounts) {
+        Map<Integer, Long> byTier = new LinkedHashMap<>();
+        for (Object[] row : reviews.countByChannelGroupedByTierRank(orgId, channelId)) {
+            byTier.put(((Number) row[0]).intValue(), ((Number) row[1]).longValue());
+        }
+
         List<ChannelReviewTriageSummaryView.RepeatedCategory> repeated = categoryCounts.entrySet().stream()
                 // 기타 is a stored verdict meaning "we looked and it fitted nothing". Listing it as a
                 // repeating issue would turn the analyzer's shrug into a finding about the seller's product.
@@ -276,14 +294,18 @@ public class ChannelReviewService {
                 .toList();
 
         return new ChannelReviewTriageSummaryView(
-                tierCount(orgId, channelId, ReviewTriageTier.NEEDS_ATTENTION),
-                tierCount(orgId, channelId, ReviewTriageTier.WATCH),
-                tierCount(orgId, channelId, ReviewTriageTier.FYI),
+                tierCount(byTier, ReviewTriageTier.NEEDS_ATTENTION),
+                tierCount(byTier, ReviewTriageTier.WATCH),
+                tierCount(byTier, ReviewTriageTier.FYI),
                 repeated);
     }
 
-    private long tierCount(UUID orgId, UUID channelId, ReviewTriageTier tier) {
-        return reviews.countByOrgIdAndChannelIdAndTierRank(orgId, channelId, ReviewTriageRules.rank(tier));
+    /**
+     * One tier's count. A tier the grouped query returned no row for is zero, not unknown — the query
+     * scanned the whole channel, so an absent group means there are none.
+     */
+    private long tierCount(Map<Integer, Long> byTier, ReviewTriageTier tier) {
+        return byTier.getOrDefault(ReviewTriageRules.rank(tier), 0L);
     }
 
     /**
@@ -351,12 +373,22 @@ public class ChannelReviewService {
      * for the complaints first and silently got the newest first would read the top of the list as their
      * worst reviews.
      */
-    private Sort sortOf(String sort) {
-        if (SORT_NEWEST.equals(sort)) {
-            return Sort.by(Sort.Order.desc("receivedAt"), Sort.Order.asc("id"));
+    private Page<Review> findPage(UUID orgId, UUID channelId, String sort, Integer tierRank, Pageable pageable) {
+        if (SORT_ATTENTION.equals(sort)) {
+            return reviews.findByOrgIdAndChannelIdTriaged(orgId, channelId, tierRank, pageable);
         }
         if (SORT_LOWEST.equals(sort)) {
-            return Sort.by(Sort.Order.asc("rating"), Sort.Order.desc("receivedAt"), Sort.Order.asc("id"));
+            // Its own query rather than a `Sort`, because the NULLS-LAST handling has to be inside the
+            // JPQL: `rating` is nullable here and a bare `rating asc` sorts nulls FIRST on H2 and LAST
+            // on PostgreSQL, which would make the top of 낮은 평점순 depend on the database. See
+            // ReviewRepository.findByOrgIdAndChannelIdTriagedLowestFirst.
+            return reviews.findByOrgIdAndChannelIdTriagedLowestFirst(orgId, channelId, tierRank, pageable);
+        }
+        if (SORT_NEWEST.equals(sort)) {
+            // `received_at` is not null, so a plain property sort carries no null-ordering exposure.
+            return reviews.findByOrgIdAndChannelIdTriagedSorted(orgId, channelId, tierRank,
+                    PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
+                            Sort.by(Sort.Order.desc("receivedAt"), Sort.Order.asc("id"))));
         }
         throw ApiException.badRequest("정렬 방식을 알 수 없습니다. (attention / newest / lowest)");
     }

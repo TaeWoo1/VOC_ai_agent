@@ -60,11 +60,23 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
      *
      * <p><b>Blankness, and the one place it is narrower than Java.</b> {@code trim(r.body) = ''} is
      * the portable expression available in JPQL (the offline suite runs H2 in PostgreSQL mode), and
-     * it trims spaces. {@code ReviewTriageRules.isTextless} uses {@code String.isBlank}, which also
-     * treats tabs and newlines as blank. So a body consisting solely of tabs or newlines — which no
-     * ingest path produces — would rank 확인 필요 here while rendering as 별점만. Stated rather than
-     * hidden: it fails toward MORE operator attention on an input that does not occur, which is the
-     * safe direction for a disagreement this narrow.
+     * SQL {@code TRIM} strips {@code U+0020} alone. {@code ReviewTriageRules.isTextless} uses
+     * {@code String.isBlank}, i.e. {@code Character.isWhitespace}. <b>The divergent set is therefore
+     * every whitespace code point except {@code U+0020}</b> — not merely tabs and newlines, but also
+     * {@code U+3000} IDEOGRAPHIC SPACE, which a Korean IME emits, and the whole {@code U+2000–U+200A}
+     * block. A body made only of those ranks 확인 필요 here while rendering as 별점만.
+     *
+     * <p>The claim that keeps this benign is that no ingest path stores such a body, and it was
+     * checked rather than assumed: the Coupang collector normalises {@code \s| |　} and trims
+     * ({@code review-row-inpage.ts}), then maps the result to {@code ""} ({@code review-rows.ts}); the
+     * upload path uses {@code String.strip()} ({@code ingest/parse/FileParser}), which strips
+     * {@code U+3000}; {@code Cafe24ReviewPromoter} rejects {@code isBlank} content outright.
+     *
+     * <p><b>The direction is not uniformly safe</b>, so do not lean on that as the reason. On the
+     * count and the default order the disagreement over-surfaces, which is harmless. Under
+     * {@code tier=WATCH} it does the opposite: the row is filtered OUT while its own chip reads
+     * 지켜보기, so it becomes unreachable through the filter that matches what it says. The reason
+     * this is acceptable is that the input does not occur — not that erring here is free.
      */
     String TRIAGE_TIER_RANK = """
             (case
@@ -123,22 +135,59 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
                                                       Pageable pageable);
 
     /**
-     * How many of this channel's reviews sit in one tier — the summary's 확인 필요 N건.
+     * As {@link #findByOrgIdAndChannelIdTriaged}, ordered worst-rated first — the 낮은 평점순 lens.
+     *
+     * <p><b>Its own query, because the null handling has to be in the JPQL.</b> {@code rating} is
+     * nullable on this lens (there is no {@code minRating} floor), and a bare {@code rating asc} sorts
+     * nulls FIRST on H2 and LAST on PostgreSQL — so 낮은 평점순 would open with a 평점 없음 row offline
+     * and bury it in production. {@link #findCommittedReplyWorkByChannel} states that rule and solves
+     * it with the same explicit CASE; a {@code Sort.Order.asc("rating").nullsLast()} on the caller's
+     * {@code Pageable} does NOT survive into a string {@code @Query}, which an offline test caught by
+     * still returning the unrated review first.
+     *
+     * <p>A 평점 없음 review is not the seller's worst review — it is the one nobody can judge — so it
+     * sorts last here, and {@code WATCH} is where the triage lens puts it for the same reason.
+     */
+    @Query("""
+            select r from Review r
+            where r.orgId = :orgId and r.channelId = :channelId
+              and (:tierRank is null or
+            """ + TRIAGE_TIER_RANK + """
+              = :tierRank)
+            order by case when r.rating is null then 1 else 0 end asc,
+                     r.rating asc, r.receivedAt desc, r.id asc
+            """)
+    Page<Review> findByOrgIdAndChannelIdTriagedLowestFirst(@Param("orgId") UUID orgId,
+                                                           @Param("channelId") UUID channelId,
+                                                           @Param("tierRank") Integer tierRank,
+                                                           Pageable pageable);
+
+    /**
+     * {@code [tierRank, count]} for this channel — the summary's 확인 필요 / 지켜보기 / 참고 numbers.
      *
      * <p>Counts over the WHOLE channel rather than the page, for the same reason
      * {@link #countByOrgIdAndChannelIdAndCreatedAtGreaterThanEqual} does: a per-page count would
      * shrink as the operator paged and read as the work disappearing.
+     *
+     * <p><b>One grouped scan, not three counts.</b> The tier is a CASE expression with no index behind
+     * it, so a count per tier meant three full channel scans on every list read — including the
+     * {@code size=1} reads {@code ConnectHub} and {@code ReviewRecordPanel} issue purely for a total,
+     * once per connected account. Grouping makes the summary one scan.
+     *
+     * <p>A tier with no rows is simply absent from the result; the caller defaults it to zero. Reading
+     * an absent group as "unknown" rather than zero would be the wrong repair — the query saw the
+     * whole channel.
      */
     @Query("""
-            select count(r) from Review r
-            where r.orgId = :orgId and r.channelId = :channelId
-              and
+            select
             """ + TRIAGE_TIER_RANK + """
-              = :tierRank
+              , count(r) from Review r
+            where r.orgId = :orgId and r.channelId = :channelId
+            group by
+            """ + TRIAGE_TIER_RANK + """
             """)
-    long countByOrgIdAndChannelIdAndTierRank(@Param("orgId") UUID orgId,
-                                             @Param("channelId") UUID channelId,
-                                             @Param("tierRank") int tierRank);
+    List<Object[]> countByChannelGroupedByTierRank(@Param("orgId") UUID orgId,
+                                                   @Param("channelId") UUID channelId);
 
     /**
      * {@code [category, count]} over every stored review of this channel that carries an analysis —
@@ -162,6 +211,22 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
             """)
     List<Object[]> countByChannelGroupedByCategory(@Param("orgId") UUID orgId,
                                                    @Param("channelId") UUID channelId);
+
+    /**
+     * How many of this channel's reviews carry ONE category — the 같은 분류 N건 beside a single review.
+     *
+     * <p>The detail panel needs one category's count, not the whole breakdown, and running the grouped
+     * query to read a single entry made opening one review scan the channel's entire analysis join.
+     * Same predicate and same org scoping as {@link #countByChannelGroupedByCategory}, so the number
+     * under a review is the same number the list showed beside it.
+     */
+    @Query("""
+            select count(r) from Review r, ItemAnalysis a
+            where a.orgId = r.orgId and a.sourceType = 'REVIEW' and a.sourceId = r.id
+              and r.orgId = :orgId and r.channelId = :channelId and a.category = :category
+            """)
+    long countByChannelAndCategory(@Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
+                                   @Param("category") String category);
 
     long countByOrgIdAndNegativeTrue(UUID orgId);
 

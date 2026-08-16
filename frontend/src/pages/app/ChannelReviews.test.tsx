@@ -416,6 +416,51 @@ describe("triage", () => {
     expect(screen.queryByText("아직 수집된 상품평이 없습니다")).toBeNull();
   });
 
+  it("renders the rows in the order the backend sent them", async () => {
+    // The chip test below covers the LABEL. This covers the ranking, which is the other half of
+    // "must never be used here to re-rank" — a client-side `.sort()` on tag count passed the whole
+    // suite before this existed. The fixture is built so tag-count order is the REVERSE of the
+    // server's order, so any re-rank from body-derived material flips it.
+    getChannelReviewsStrict.mockResolvedValue({
+      ...PAGE,
+      items: [
+        { ...PAGE.items[0], id: "first", preview: "서버가 먼저 준 줄", triage: { ...PAGE.items[0].triage, tags: [] } },
+        {
+          ...PAGE.items[1],
+          id: "second",
+          preview: "서버가 나중에 준 줄",
+          triage: { ...PAGE.items[1].triage, tags: ["설치", "품질", "배송"] },
+        },
+      ],
+    });
+    renderPage();
+    await screen.findByText("서버가 먼저 준 줄");
+
+    const previews = screen
+      .getAllByText(/서버가 (먼저|나중에) 준 줄/)
+      .map((n) => n.textContent);
+    expect(previews).toEqual(["서버가 먼저 준 줄", "서버가 나중에 준 줄"]);
+  });
+
+  it("counts the whole record in the header, even while a filter narrows the list", async () => {
+    // page.total narrows with the filter; newCount and the tier counts stay channel-wide. Rendering
+    // the filtered total beside them put "총 1개" next to "새로 들어온 1개" — two totals on one line.
+    getChannelReviewsStrict.mockResolvedValue({
+      ...PAGE,
+      total: 1,
+      newCount: 1,
+      items: [PAGE.items[1]],
+      triageSummary: { needsAttention: 1, watch: 3, fyi: 18, repeatedCategories: [] },
+    });
+    renderPage();
+    await screen.findByText("생각보다 크기가 작아서 아쉬웠습니다");
+
+    expect(screen.getByText("총 22개")).toBeInTheDocument();
+    expect(screen.queryByText("총 1개")).toBeNull();
+    // …and the range label under the list still describes the slice actually on screen.
+    expect(screen.getByText("1–1번째 · 총 1개")).toBeInTheDocument();
+  });
+
   it("renders the tier the backend sent, never one re-derived from the tags", async () => {
     // A 1★ row whose body-derived tags scream 파손, and whose tier says 참고. If the frontend ever
     // re-ranks from tags, this renders 확인 필요 and fails — which is the whole point.

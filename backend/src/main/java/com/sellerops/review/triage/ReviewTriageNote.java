@@ -75,12 +75,21 @@ public record ReviewTriageNote(
      * review. 기타 is a real stored verdict: something looked and it fitted no category. Neither is an
      * issue, and neither earns a chip — the same choice
      * {@code docs/slices/review-classification-queue-v1.md} made for an unanalyzed row.
+     *
+     * <p><b>Only a category from the known vocabulary is ever emitted.</b>
+     * {@code item_analyses.category} is a plain {@code varchar(40)} whose vocabulary lives in a column
+     * COMMENT and in {@link ItemAnalysisCategories} — there is no CHECK constraint — so without this
+     * test an arbitrary stored string would ride straight into {@link #reason} and {@link #tags},
+     * which are the one part of this note that does not pass through {@code VocPreviewSanitizer}.
+     * Today the only writer is the rule-based analyzer, so nothing unexpected is reachable; the point
+     * is that "every string this class can emit is a fixed literal, a rating or a known category"
+     * should be true by construction rather than by who happens to write the column.
      */
     private static String tagOf(String category) {
         if (category == null || category.isBlank() || ItemAnalysisCategories.FALLBACK.equals(category)) {
             return null;
         }
-        return category;
+        return ItemAnalysisCategories.isSupported(category) ? category : null;
     }
 
     /**

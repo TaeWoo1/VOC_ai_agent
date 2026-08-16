@@ -165,7 +165,13 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
         meta={
           page ? (
             <>
-              <Chip>총 {page.total}개</Chip>
+              {/*
+                The RECORD's size, not the filtered page's. `page.total` narrows with a tier filter
+                while `newCount` and the tier chips stay channel-wide by design, so rendering it here
+                put "총 1개" beside "새로 들어온 5개" — two numbers on one line claiming to be the same
+                total. Which slice is on screen is the range label's job, under the list.
+              */}
+              <Chip>총 {recordTotal(page)}개</Chip>
               {page.newCount > 0 ? <Chip tone="accent">새로 들어온 {page.newCount}개</Chip> : null}
               {page.lastImportAt ? (
                 <Chip>마지막 수집 {formatDateTime(page.lastImportAt)}</Chip>
@@ -235,7 +241,7 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
             setSelectedId(null);
           }}
         >
-          전체 {page ? page.triageSummary.needsAttention + page.triageSummary.watch + page.triageSummary.fyi : 0}
+          전체 {page ? recordTotal(page) : 0}
         </Btn>
         {TRIAGE_TIERS.map((value) => (
           <Btn
@@ -567,6 +573,18 @@ function TriageSummary({ page }: { page: ChannelReviewPageView }) {
       ) : null}
     </div>
   );
+}
+
+/**
+ * How many reviews the channel holds, whatever the current filter.
+ *
+ * Summed from the tier counts rather than read from `page.total`, which is the FILTERED total: every
+ * review lands in exactly one tier and the summary is always unfiltered, so the sum is the record's
+ * size and stays put while the operator narrows.
+ */
+function recordTotal(page: ChannelReviewPageView): number {
+  const { needsAttention, watch, fyi } = page.triageSummary;
+  return needsAttention + watch + fyi;
 }
 
 /** The summary count for one tier. Kept beside the chips so the label and its number cannot drift. */

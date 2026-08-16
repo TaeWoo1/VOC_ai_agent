@@ -20,8 +20,12 @@ package com.sellerops.review.triage;
  *
  * <ul>
  *   <li><b>1–2★ with no text is {@link ReviewTriageTier#WATCH}, not 확인 필요.</b> RUBRIC §2's
- *       tie-breakers label exactly this case {@code NO_ACTION}: "There is nothing to detect. Rating
+ *       tie-breakers put this case at {@code NO_ACTION}: "There is nothing to detect. Rating
  *       already handles it." It is not demoted to 참고 either — the rating is real and still counts.
+ *       A strict SUBSET of RUBRIC's row, which reads "an empty <i>or emoji-only</i> body":
+ *       {@link #isTextless} tests blankness only, so a 1★ of "😡😡" is 확인 필요 here. Recognising
+ *       emoji-only content means reading the body's characters — the input this rule deliberately
+ *       does not have — so the gap over-surfaces rather than hides, and is stated rather than closed.
  *   <li><b>A null rating is {@code WATCH}.</b> Unknown is not good news; sorting it into 참고 would
  *       hide a review nobody has judged.
  *   <li><b>3★ is {@code WATCH}.</b> The attention queue's band is 1–3★

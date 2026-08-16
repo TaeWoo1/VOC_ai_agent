@@ -182,6 +182,53 @@ class ChannelReviewTriageIT {
         }
     }
 
+    /**
+     * The boundary, checked where the note is actually assembled.
+     *
+     * <p>{@code ReviewTriageRulesTest} guards the rule and {@code ReviewTriageQueueIsolationTest}
+     * guards the triage package — but the note reaching the DTO is built one layer up, in
+     * {@link ChannelReviewService}, which is the only class on this path holding the body-derived
+     * material at all ({@code ItemAnalysisRepository}) and sits outside that package scan. A review
+     * found that a promotion there — "if the body mentions 파손, bump it up" — passed every test.
+     *
+     * <p>So the fixtures here are deliberately the tempting ones: bodies loaded with the complaint
+     * vocabulary a keyword pass would want to promote, at ratings whose honest tier is NOT 확인 필요,
+     * carrying a repeated category. If any layer starts reading them, the tier stops matching the rule
+     * and stops matching the tier the row was filtered under, and this fails.
+     */
+    @Test
+    void aBodyFullOfComplaintVocabularyStillTiersOnTheRatingAlone() {
+        List<String> tempting = List.of(
+                "제품이 파손되어 도착했습니다",
+                "불량입니다 환불해주세요",
+                "배송이 너무 늦었어요 최악",
+                "설치하다가 깨졌어요");
+        for (String body : tempting) {
+            for (Integer rating : new Integer[] {3, 4, 5}) {
+                analyse(review(rating, body, LocalDate.of(2026, 6, 1)), "설치");
+            }
+        }
+
+        ChannelReviewPageView all = service.list(org, account.getId(), null, null, 0, 100);
+        assertThat(all.items()).hasSize(tempting.size() * 3);
+        assertThat(all.triageSummary().needsAttention()).isZero();
+        for (var item : all.items()) {
+            assertThat(item.triage().tier())
+                    .as("a %s★ complaint must not be promoted by its own words", item.rating())
+                    .isEqualTo(ReviewTriageRules.tier(item.rating(), "본문"));
+        }
+
+        // And the note must agree with the tier the row was SELECTED by — a promotion in the service
+        // would otherwise print 확인 필요 on a row the database filed, sorted and counted as 지켜보기.
+        for (ReviewTriageTier tier : ReviewTriageTier.values()) {
+            for (var item : service.list(org, account.getId(), null, tier.name(), 0, 100).items()) {
+                assertThat(item.triage().tier())
+                        .as("row returned under tier=%s", tier)
+                        .isEqualTo(tier);
+            }
+        }
+    }
+
     /* ──────────────────────────────── the order ──────────────────────────────── */
 
     @Test
@@ -209,6 +256,21 @@ class ChannelReviewTriageIT {
                 .isEqualTo(5);
         assertThat(service.list(org, account.getId(), "lowest", null, 0, 20).items().get(0).rating())
                 .isEqualTo(1);
+    }
+
+    @Test
+    void lowestRatingFirstDoesNotOpenWithAReviewThatHasNoRating() {
+        // A bare `rating asc` sorts nulls FIRST on H2 and LAST on PostgreSQL, so without an explicit
+        // NULLS LAST the top of 낮은 평점순 depends on which database the seller is running against.
+        // A 평점 없음 row is not the worst review; it is the one nobody can judge.
+        review(null, "별점이 없는 상품평", LocalDate.of(2026, 6, 5));
+        review(1, "접착력이 약합니다", LocalDate.of(2026, 6, 1));
+        review(5, "만족합니다", LocalDate.of(2026, 6, 20));
+
+        List<Integer> ratings = service.list(org, account.getId(), "lowest", null, 0, 20).items()
+                .stream().map(i -> i.rating()).toList();
+
+        assertThat(ratings).containsExactly(1, 5, null);
     }
 
     @Test

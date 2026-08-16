@@ -66,6 +66,22 @@ class ReviewTriageNoteTest {
     }
 
     @Test
+    void aCategoryOutsideTheKnownVocabularyIsNotEmitted() {
+        // `item_analyses.category` is a bare varchar(40) — its vocabulary is a column comment, not a
+        // CHECK — and `reason`/`tags` are the one part of this note that no sanitizer sees. So an
+        // unknown value is dropped rather than passed through to the screen.
+        assertThat(ReviewTriageNote.of(1, BODY, "임의문자열", 99).tags()).isEmpty();
+        assertThat(ReviewTriageNote.of(1, BODY, "임의문자열", 99).reason()).isEqualTo("1점");
+        // Every value the vocabulary DOES contain still survives.
+        for (String known : ItemAnalysisCategories.ORDERED) {
+            boolean isFallback = ItemAnalysisCategories.FALLBACK.equals(known);
+            assertThat(ReviewTriageNote.of(1, BODY, known, 1).tags())
+                    .as("category %s", known)
+                    .isEqualTo(isFallback ? List.of() : List.of(known));
+        }
+    }
+
+    @Test
     void aWellRatedReviewIsOfferedNoActionAtAll() {
         ReviewTriageNote note = ReviewTriageNote.of(5, "튼튼하고 마감이 깔끔해요.", "품질", 11);
         assertThat(note.tier()).isEqualTo(ReviewTriageTier.FYI);
@@ -76,13 +92,25 @@ class ReviewTriageNoteTest {
 
     @Test
     void theNoteExplainsTheTierAndCannotChangeIt() {
-        // Same rating and body, every category and count the product can produce: the tier is fixed
-        // before any of it is read.
-        for (String category : new String[] {null, "설치", "배송", "품질", ItemAnalysisCategories.FALLBACK}) {
-            for (long count : new long[] {0, 1, 3, 999}) {
-                assertThat(ReviewTriageNote.of(4, BODY, category, count).tier())
-                        .as("category %s × count %s", category, count)
-                        .isEqualTo(ReviewTriageTier.FYI);
+        // Every rating, every body form, every category and every count the product can produce —
+        // asserted against ReviewTriageRules, which is the only thing allowed to decide a tier.
+        //
+        // It used to sweep rating 4 alone, so it pinned FYI and nothing else. A review found that
+        // `if (rating == 3 && categoryCount >= REPEAT_MIN) tier = NEEDS_ATTENTION` — a body-derived
+        // count promoting a tier, the exact gated thing — passed the whole suite. A promotion here
+        // is worse than wrong: the DTO's tier would disagree with the JPQL rank that sorted, filtered
+        // and counted the row, so the chip would read 확인 필요 on a row filed under 지켜보기.
+        for (Integer rating : new Integer[] {null, 1, 2, 3, 4, 5}) {
+            for (String body : new String[] {null, "", "   ", BODY}) {
+                for (String category : new String[] {null, "설치", "배송", "품질",
+                        ItemAnalysisCategories.FALLBACK}) {
+                    for (long count : new long[] {0, 1, ReviewTriageNote.REPEAT_MIN, 999}) {
+                        assertThat(ReviewTriageNote.of(rating, body, category, count).tier())
+                                .as("rating %s × body %s × category %s × count %s",
+                                        rating, body, category, count)
+                                .isEqualTo(ReviewTriageRules.tier(rating, body));
+                    }
+                }
             }
         }
     }
