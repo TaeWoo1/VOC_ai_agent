@@ -1,0 +1,19 @@
+{
+  "contract": "review-eval/naver/v2",
+  "rubricVersion": "v2",
+  "_comment": [
+    "EMPTY UNTIL A HUMAN LABELS. Same posture as review-eval/naver/v1/labels.json: an empty",
+    "seed is the honest state, not a placeholder to be filled with plausible-looking rows.",
+    "",
+    "Each entry carries ONLY the review-id fingerprint and the operator's judgment — tier,",
+    "reasonCode, tags — all from the closed vocabularies in RUBRIC.md sections 2 and 3. Never",
+    "the body, the raw 리뷰글번호, the rating, the date, the body length, the stratum, the",
+    "product, or any seller identity. The harness re-derives rating, length and stratum from",
+    "the local database at evaluation time. See RUBRIC.md section 5, and section 3.3 for why",
+    "there is no free-text rationale field.",
+    "",
+    "Produced by tools/review-triage-calibration/derive-labels.mjs from a local worksheet that",
+    "is never committed. Written by hand only to fix a schema error, never to add a label."
+  ],
+  "labels": []
+}
