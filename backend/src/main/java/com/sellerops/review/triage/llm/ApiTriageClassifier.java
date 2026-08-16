@@ -46,18 +46,39 @@ public class ApiTriageClassifier implements ReviewTriageClassifier {
     private final Vendor vendor;
     private final String modelId;
     private final String apiKey;
+    private final boolean sendTemperature;
     private final String version;
 
     public ApiTriageClassifier(LlmHttpClient http, Vendor vendor, String modelId, String apiKey) {
+        this(http, vendor, modelId, apiKey, true);
+    }
+
+    /**
+     * @param sendTemperature whether to pin {@code temperature: 0}.
+     *
+     *     <p>Configurable rather than always-on because some models reject any temperature but their
+     *     default and answer a pinned one with a 400 — which this classifier would faithfully turn
+     *     into {@code CLASSIFICATION_FAILED} on every single row. Visible, but a waste of a run.
+     *
+     *     <p>It is <b>not</b> silently retried without the field. A retry that changed the request
+     *     would mean two different candidates were measured under one name, and the whole point of
+     *     RUBRIC v2 §8.6 is that a version names exactly what produced a result. So the flag is
+     *     explicit, and it goes into {@link #version()}: a run at pinned zero and a run at the
+     *     model's default are different candidates and the change log has to be able to say which.
+     */
+    public ApiTriageClassifier(LlmHttpClient http, Vendor vendor, String modelId, String apiKey,
+                               boolean sendTemperature) {
         this.http = http;
         this.vendor = vendor;
         this.modelId = modelId;
         this.apiKey = apiKey;
-        // All four of RUBRIC §8.6's components in one string: the vendor and model, the prompt
-        // version, and the schema the parser enforces. A reader of a stored prediction can tell
-        // exactly what produced it without consulting anything else.
+        this.sendTemperature = sendTemperature;
+        // All of RUBRIC §8.6's components in one string: the vendor and model, the prompt version,
+        // the schema the parser enforces, and the one sampling knob this classifier sets. A reader
+        // of a stored prediction can tell exactly what produced it without consulting anything else.
         this.version = "llm-triage/v1+" + vendor.name().toLowerCase() + ":" + modelId
-                + "+" + TriagePrompt.PROMPT_VERSION + "+schema/v1";
+                + "+" + TriagePrompt.PROMPT_VERSION + "+schema/v1"
+                + (sendTemperature ? "+t0" : "+tdefault");
     }
 
     @Override
@@ -111,9 +132,11 @@ public class ApiTriageClassifier implements ReviewTriageClassifier {
     String requestBody(Input input) {
         ObjectNode root = MAPPER.createObjectNode();
         root.put("model", modelId);
-        // Zero temperature is not a quality choice — it is what makes a DEV result reproducible, and
-        // §8.6's change log meaningless without it.
-        root.put("temperature", 0);
+        if (sendTemperature) {
+            // Zero temperature is not a quality choice — it is what makes a DEV result reproducible,
+            // without which §8.6's change log compares runs that were never the same experiment.
+            root.put("temperature", 0);
+        }
         ArrayNode messages = root.putArray("messages");
         ObjectNode user = messages.addObject();
         user.put("role", "user");

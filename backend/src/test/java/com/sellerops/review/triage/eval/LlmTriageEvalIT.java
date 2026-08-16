@@ -72,9 +72,14 @@ class LlmTriageEvalIT {
 
         String vendor = requireEnv("LLM_TRIAGE_VENDOR");
         String model = requireEnv("LLM_TRIAGE_MODEL");
+        // Some models reject any temperature but their own default and answer a pinned one with a
+        // 400 on every row. Explicit rather than retried-around: a retry that changed the request
+        // would measure two candidates under one name, and the flag is part of version() so the
+        // §8.6 change log can say which was run.
+        boolean pinTemperature = !"true".equals(System.getenv("LLM_TRIAGE_OMIT_TEMPERATURE"));
         NaverOnlyClassifierGate gate = new NaverOnlyClassifierGate(new ApiTriageClassifier(
                 new JdkLlmHttpClient(), ApiTriageClassifier.Vendor.valueOf(vendor), model,
-                requireEnv("LLM_TRIAGE_API_KEY")));
+                requireEnv("LLM_TRIAGE_API_KEY"), pinTemperature));
 
         out.append("\n\nreview-triage calibration — ").append(gate.version()).append("\n\n");
         out.append(String.format("  DEV rows drawn %d, all labeled %s%n", drawn.size(),
@@ -91,7 +96,6 @@ class LlmTriageEvalIT {
         Map<String, Integer> failures = new LinkedHashMap<>();
         int reasonAgree = 0;
         int reasonScored = 0;
-        int tagAgree = 0;
         int crossingRows = 0;
         int crossingCaught = 0;
 

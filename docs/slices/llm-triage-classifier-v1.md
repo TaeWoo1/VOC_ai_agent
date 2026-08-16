@@ -199,10 +199,22 @@ measures agreement with the model — which does not become untrue because the h
 
 ## 7. What is blocked on the product owner
 
-- **The vendor and the API key.** No `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` is present in this
-  environment. Everything above is vendor-neutral and every offline test runs without a key; the
-  `DEV` run cannot start until one exists. Which vendor is a product decision, and the pilot's GPT
-  result is not evidence about an API model.
+- **The API key, and the exact OpenAI model id.** *Vendor decided 2026-08-17: **OpenAI**.* No
+  `OPENAI_API_KEY` is present in this environment, and the model id has to be named rather than
+  guessed. Every offline test runs without a key; the `DEV` run cannot start until both exist.
+
+  ⚠ Recorded so it is not forgotten when the numbers arrive: the pilot's GPT arm was **consumer
+  ChatGPT on 37 rows**, and §10.4 pre-committed that a pilot is a rule-out screen, never a rule-in.
+  Choosing this vendor because of that arm is legitimate **candidate selection**; quoting its 0.750 /
+  1.000 recall as an expectation for the API model is not, and this run measures the API model from
+  scratch against the same bars as everything else.
+
+  ⚠ **`temperature`.** The request pins `temperature: 0` for reproducibility, and some OpenAI models
+  reject any temperature but their own default with a 400 — which this classifier would faithfully
+  turn into `CLASSIFICATION_FAILED` on all 107 rows. That is visible rather than silent, but it is a
+  wasted run, so `LLM_TRIAGE_OMIT_TEMPERATURE=true` drops the field. It is not retried around: a
+  retry that changed the request would measure two candidates under one name. The flag is part of
+  `classifierVersion` (`+t0` / `+tdefault`), so the change log can say which was run.
 - **The `suggestedNextAction` vocabulary** (§4.1), which is new product language.
 - **A cost ceiling per classified review**, which is what decides between a frontier and a small
   model. It is not a technical question and this unit will not answer it by picking the model that
