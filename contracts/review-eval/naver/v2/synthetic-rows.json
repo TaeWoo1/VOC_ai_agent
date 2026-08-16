@@ -1,0 +1,145 @@
+{
+  "contract": "review-eval/naver/v2",
+  "rubricVersion": "v2",
+  "set": "synthetic-rows",
+  "_comment": [
+    "The rows of the section 4.1 frame that no customer wrote. Fixtures that reached the reviews",
+    "table through the production ingest path, so nothing stored distinguishes them from an export",
+    "row. Established in docs/slices/review-eval-corpus-lineage-v1.md.",
+    "",
+    "They are NOT removed. The section 4 sample is pre-committed and stays exactly as drawn, all 220",
+    "rows, and PRIMARY is the reading over all of it. This file exists so that every DEV and HOLDOUT",
+    "reading can also be reported with these rows excluded — SENSITIVITY — and so the harness can",
+    "notice if the count changes.",
+    "",
+    "All 23 frame rows are listed, not only the 4 that were drawn, because the population estimate",
+    "reweights by stratum: dropping sample rows without dropping the frame rows they stand for would",
+    "make the sensitivity reading estimate a corpus that does not exist.",
+    "",
+    "Fingerprints only. The bodies and the ids stay out, same rule as every other file here."
+  ],
+  "families": {
+    "COLLECTOR_TEST_UPLOAD": "collector/test/upload.test.ts — mints awfx-<uuid> ids per run, so every run adds three permanent rows",
+    "UNKNOWN_GENERATOR_SYN": "SYN-<date>-<hex>-000N — no generator survives in any ref of this repository",
+    "UNKNOWN_GENERATOR_SMOKE": "COLLECTOR-SMOKE-<timestamp>-N — no generator survives in any ref of this repository"
+  },
+  "inFrame": 23,
+  "inSample": 4,
+  "rows": [
+    {
+      "reviewIdFingerprint": "032e4a3794a4811f6a682c3adef8a84f8470ba6f8eeb03f8f27a79c2f048737a",
+      "family": "COLLECTOR_TEST_UPLOAD",
+      "inSample": true
+    },
+    {
+      "reviewIdFingerprint": "04020bbb8985d1bd68136afda3b3badaf2faffd906fcf321ff42f864aa1d2d36",
+      "family": "COLLECTOR_TEST_UPLOAD",
+      "inSample": false
+    },
+    {
+      "reviewIdFingerprint": "1048362d6ab9a8d32a47b0e96fbfcdcbcf130d4959a55f9f041639deecbf44ab",
+      "family": "COLLECTOR_TEST_UPLOAD",
+      "inSample": false
+    },
+    {
+      "reviewIdFingerprint": "110f0811e7394778e4eb4c87631b7cd035575bbe3803824e51fdec3df5622baf",
+      "family": "UNKNOWN_GENERATOR_SYN",
+      "inSample": false
+    },
+    {
+      "reviewIdFingerprint": "19f58920e7e040378fcb74d3186e11d18a7c73fbcc6b058a78d376e4e9335f01",
+      "family": "COLLECTOR_TEST_UPLOAD",
+      "inSample": false
+    },
+    {
+      "reviewIdFingerprint": "2c1199ff78787cb6c129d25796cf8b1fd4ca650e00a8bc533096c10943fe9b1a",
+      "family": "COLLECTOR_TEST_UPLOAD",
+      "inSample": false
+    },
+    {
+      "reviewIdFingerprint": "37cee175db2453efa8cc7bee4ecf4253d42fe8c87a0b81dd609007afa63b14e5",
+      "family": "COLLECTOR_TEST_UPLOAD",
+      "inSample": false
+    },
+    {
+      "reviewIdFingerprint": "4e13a646fb4e5ae8728e4660c7c4aa56690bcd803c165b714f9ecc5b50be9ea0",
+      "family": "UNKNOWN_GENERATOR_SMOKE",
+      "inSample": false
+    },
+    {
+      "reviewIdFingerprint": "55c1c0005354845443724e9a529f5897d604b99b9d9cb95bc07275aa84f06061",
+      "family": "UNKNOWN_GENERATOR_SMOKE",
+      "inSample": true
+    },
+    {
+      "reviewIdFingerprint": "6f966c0c081f4ee7814b76ae16031326066d281a8f894207f3a2f4aa4496fba9",
+      "family": "UNKNOWN_GENERATOR_SMOKE",
+      "inSample": false
+    },
+    {
+      "reviewIdFingerprint": "80f55d0d6a889b47df0ea2e64db5832d97975a7b845e5fad23dcc7cd27a78c2d",
+      "family": "COLLECTOR_TEST_UPLOAD",
+      "inSample": false
+    },
+    {
+      "reviewIdFingerprint": "95f30e15e452c68c1748c211a2f056c96903bab03c5182df3de2c38efade4490",
+      "family": "COLLECTOR_TEST_UPLOAD",
+      "inSample": false
+    },
+    {
+      "reviewIdFingerprint": "9b768fbd212a7f0f41617e93014229289df8adb6c274ceef3dd0dfec60103775",
+      "family": "UNKNOWN_GENERATOR_SYN",
+      "inSample": false
+    },
+    {
+      "reviewIdFingerprint": "b66bf89014b42ced70e67545f6152f9c545f9328a747501467ee8e7de496eabf",
+      "family": "COLLECTOR_TEST_UPLOAD",
+      "inSample": false
+    },
+    {
+      "reviewIdFingerprint": "b6e59fa2583f92651c37750834802b60d1b892813f2e57c6570a8a68fc9622f8",
+      "family": "COLLECTOR_TEST_UPLOAD",
+      "inSample": false
+    },
+    {
+      "reviewIdFingerprint": "cb9567cef5f79d952b67c5b2aadf74846ea6d9e4386db8794cd6d89da54ba58d",
+      "family": "COLLECTOR_TEST_UPLOAD",
+      "inSample": false
+    },
+    {
+      "reviewIdFingerprint": "ccb36c58a83d6c7914cb0c3fe42de82333e8a660a5c1f7f6570892b4aeda09dc",
+      "family": "UNKNOWN_GENERATOR_SMOKE",
+      "inSample": true
+    },
+    {
+      "reviewIdFingerprint": "d034403d0c6c59ddf48f9e4b5835ca0a4f2a82856ae4574b1a1c11b5efcc7f19",
+      "family": "UNKNOWN_GENERATOR_SYN",
+      "inSample": true
+    },
+    {
+      "reviewIdFingerprint": "d24c433c5d921e66b69e91809e7964217ec55fd275ed5d3742f75642d1c094cd",
+      "family": "COLLECTOR_TEST_UPLOAD",
+      "inSample": false
+    },
+    {
+      "reviewIdFingerprint": "e873190f7ffb29aec53b5e15a822db975e42cfeec159bd27b6ae86b68b65e2f7",
+      "family": "COLLECTOR_TEST_UPLOAD",
+      "inSample": false
+    },
+    {
+      "reviewIdFingerprint": "f2ce2c60da5e0e20fdee8495beba408a8354383f8b09da4a3b312fc91656cd48",
+      "family": "COLLECTOR_TEST_UPLOAD",
+      "inSample": false
+    },
+    {
+      "reviewIdFingerprint": "f56592d1d1c9fa393a6092959a443e53d9378304c9e681e329ef6e7b43a85f24",
+      "family": "UNKNOWN_GENERATOR_SMOKE",
+      "inSample": false
+    },
+    {
+      "reviewIdFingerprint": "fa763f247f2acb4d48c1d6c95a0c23cbd326a1f2dd81a712d34159389636462e",
+      "family": "COLLECTOR_TEST_UPLOAD",
+      "inSample": false
+    }
+  ]
+}

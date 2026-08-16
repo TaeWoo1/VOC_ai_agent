@@ -19,9 +19,11 @@ import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
@@ -50,8 +52,9 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 @EnabledIfEnvironmentVariable(named = "RUN_REVIEW_EVAL", matches = "true")
 class ReviewTriageEvalIT {
 
-    private static final Path LABELS =
-            Path.of("..", "contracts", "review-eval", "naver", "v2", "labels.json");
+    private static final Path DIR = Path.of("..", "contracts", "review-eval", "naver", "v2");
+    private static final Path LABELS = DIR.resolve("labels.json");
+    private static final Path SYNTHETIC = DIR.resolve("synthetic-rows.json");
 
     private record Label(ReviewTriageTier tier, String reasonCode) {
     }
@@ -64,6 +67,11 @@ class ReviewTriageEvalIT {
     void measureReviewTriageV1AgainstTheLabelledSample() throws Exception {
         Map<String, Label> labels = readLabels();
         List<FrameRow> frameRows = readFrame();
+        JsonNode syntheticDoc = new ObjectMapper().readTree(Files.readString(SYNTHETIC));
+        Set<String> synthetic = new HashSet<>();
+        for (JsonNode entry : syntheticDoc.path("rows")) {
+            synthetic.add(entry.path("reviewIdFingerprint").asText());
+        }
 
         Map<String, List<FrameRow>> byStratum = new LinkedHashMap<>();
         for (FrameRow row : frameRows) {
@@ -82,18 +90,41 @@ class ReviewTriageEvalIT {
             drawn.addAll(pool.subList(0, take));
         }
 
+        // Built in one pass, because the SENSITIVITY reading of RUBRIC v2 §11.1 is the same sample
+        // minus the synthetic rows — NOT a fresh draw. Re-drawing without them would pull an
+        // unlabeled 221st row into a censused stratum's neighbour and quietly change the sample.
         List<Row> rows = new ArrayList<>();
+        List<Row> rowsWithoutSynthetic = new ArrayList<>();
         int unlabelledInDraw = 0;
+        int syntheticDrawn = 0;
         for (FrameRow row : drawn) {
             Label label = labels.get(row.fingerprint());
             if (label == null) {
                 unlabelledInDraw++;
                 continue;
             }
-            rows.add(new Row(row.stratum(), CalibrationSample.splitOf(row.fingerprint()), row.rating(),
-                    row.rule(), label.tier(), label.reasonCode()));
+            Row scored = new Row(row.stratum(), CalibrationSample.splitOf(row.fingerprint()),
+                    row.rating(), row.rule(), label.tier(), label.reasonCode());
+            rows.add(scored);
+            if (synthetic.contains(row.fingerprint())) {
+                syntheticDrawn++;
+            } else {
+                rowsWithoutSynthetic.add(scored);
+            }
         }
         long labelledOutsideDraw = labels.size() - (drawn.size() - unlabelledInDraw);
+
+        // The frame reduced by ALL 23, not only the 4 that were drawn: §4.4 reweights by stratum, so
+        // dropping sample rows without dropping the frame rows they stand for would estimate a
+        // corpus that does not exist.
+        Map<String, Integer> inFrameWithoutSynthetic = new LinkedHashMap<>();
+        int syntheticInFrame = 0;
+        for (String stratum : CalibrationSample.STRATA) {
+            int here = (int) byStratum.getOrDefault(stratum, List.of()).stream()
+                    .filter(r -> synthetic.contains(r.fingerprint())).count();
+            syntheticInFrame += here;
+            inFrameWithoutSynthetic.put(stratum, inFrame.get(stratum) - here);
+        }
 
         StringBuilder out = new StringBuilder("\n\nreview-triage calibration — rules-v1 (rating + textless only)\n\n");
         out.append("  frame and draw\n    stratum   in frame    drawn        π   labeled\n");
@@ -112,6 +143,26 @@ class ReviewTriageEvalIT {
                     + "every number below is suspect\n");
         }
 
+        out.append(String.format("%n  synthetic rows (RUBRIC v2 §11.1)%n"
+                        + "    in frame  %d  (contract says %d)%n    in draw   %d  (contract says %d)%n",
+                syntheticInFrame, syntheticDoc.path("inFrame").asInt(),
+                syntheticDrawn, syntheticDoc.path("inSample").asInt()));
+        if (syntheticInFrame != syntheticDoc.path("inFrame").asInt()) {
+            // The generating test adds three rows every time it runs and cannot clean up after
+            // itself, so this drifting is expected eventually — it must say so, not reweight quietly.
+            out.append("    ⚠ the frame no longer holds the rows synthetic-rows.json lists. Re-derive\n"
+                    + "      the list before quoting a SENSITIVITY number: it is subtracting the wrong set.\n");
+        }
+        out.append("""
+
+                  ceiling on everything below (RUBRIC v2 §11.2)
+                    These labels were set from a body and a star rating. NAVER's export carries
+                    포토/영상 as column 5 of 25 and ReviewRowMapper does not read it, so media_count
+                    is 0 on every stored review. A 5★ "좋아요" beside three photographs of a damaged
+                    item is, in this corpus, identical to a 5★ "좋아요". This bounds rules-v1, any v2
+                    rule, every LLM arm, and the two humans who set the labels — by the same amount.
+                """);
+
         boolean spendHoldout = "true".equals(System.getenv("REVIEW_EVAL_SPEND_HOLDOUT"));
         if (spendHoldout) {
             out.append("""
@@ -124,10 +175,19 @@ class ReviewTriageEvalIT {
                     ════════════════════════════════════════════════════════════════════════
                     """);
         }
+        // Every scope is reported twice (§11.1). Both readings are printed together, always: a
+        // number quoted without saying which one it is, is not a result.
         for (String scope : spendHoldout ? List.of("DEV", "HOLDOUT", "ALL") : List.of("DEV")) {
-            List<Row> scoped = scope.equals("ALL") ? rows : TriageEvalReport.only(rows, scope);
-            out.append(section(scope, scoped));
-            out.append(populationOf(scoped, inFrame, frameRows.size(), scope));
+            for (String reading : List.of("PRIMARY", "SENSITIVITY")) {
+                boolean primary = reading.equals("PRIMARY");
+                List<Row> base = primary ? rows : rowsWithoutSynthetic;
+                List<Row> scoped = scope.equals("ALL") ? base : TriageEvalReport.only(base, scope);
+                String name = scope + " · " + reading
+                        + (primary ? "" : String.format(" (%d synthetic rows excluded)", syntheticDrawn));
+                out.append(section(name, scoped));
+                out.append(populationOf(scoped, primary ? inFrame : inFrameWithoutSynthetic,
+                        primary ? frameRows.size() : frameRows.size() - syntheticInFrame, name));
+            }
         }
         if (!spendHoldout) {
             out.append("""

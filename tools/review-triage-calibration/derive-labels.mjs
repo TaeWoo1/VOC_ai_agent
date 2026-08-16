@@ -29,6 +29,7 @@ const OUT = resolve(HERE, "worksheet");
 const LABELS = resolve(HERE, "../../contracts/review-eval/naver/v2/labels.json");
 const AGREEMENT = resolve(HERE, "../../contracts/review-eval/naver/v2/agreement.json");
 const RUBRIC_ADJUDICATION = resolve(HERE, "../../contracts/review-eval/naver/v2/rubric-adjudication.json");
+const SYNTHETIC = resolve(HERE, "../../contracts/review-eval/naver/v2/synthetic-rows.json");
 function die(message, detail = []) {
   console.error(`\n  ${message}\n`);
   for (const d of detail.slice(0, 40)) console.error(`   · ${d}`);
@@ -64,6 +65,14 @@ for (const [key, value] of withheld) {
   owner.set(key, value);
 }
 
+// RUBRIC §2.2's adjudications, read before assembly because they are one of the two ways a §7.5
+// step-3 disagreement may be resolved — the other being a per-row `--adjudication` file. A
+// disagreement covered by neither is still a refusal.
+const rubricAdjudications = JSON.parse(readFileSync(RUBRIC_ADJUDICATION, "utf8")).adjudications ?? [];
+const rubricTierOf = new Map(rubricAdjudications.map((e) => [e.reviewIdFingerprint, e.tier]));
+const syntheticSet = new Set(
+    (JSON.parse(readFileSync(SYNTHETIC, "utf8")).rows ?? []).map((r) => r.reviewIdFingerprint));
+
 const sampleKeys = Object.keys(rows).filter((key) => rows[key].inSample).sort((a, b) => Number(a) - Number(b));
 const labels = [];
 const bySource = { OWNER: 0, ANNOTATOR: 0, ADJUDICATED: 0 };
@@ -80,13 +89,21 @@ for (const key of sampleKeys) {
     const a = owner.get(key);
     const b = annotator.get(key);
     if (a.tier !== b.tier) {
-      // §7.5 step 3. Taking one side silently would turn an unresolved disagreement into a gold
-      // label nobody decided.
-      problems.push(`row ${key}: the two labelers differ (${a.tier} vs ${b.tier}) and it was not adjudicated`);
-      continue;
+      if (!rubricTierOf.has(row.fingerprint)) {
+        // §7.5 step 3. Taking one side silently would turn an unresolved disagreement into a gold
+        // label nobody decided.
+        problems.push(`row ${key}: the two labelers differ (${a.tier} vs ${b.tier}) and it was not adjudicated`);
+        continue;
+      }
+      // §2.2 decides this one on the rubric rather than row by row. The TIER comes from the
+      // adjudication pass below; the reason and the tags stay the owner's, because §7.5 makes the
+      // owner the adjudicating role and §2.2 is a statement about tiers only.
+      chosen = a;
+      source = "ADJUDICATED";
+    } else {
+      chosen = a;
+      source = "OWNER";
     }
-    chosen = a;
-    source = "OWNER";
   } else if (owner.has(key) && !annotator.has(key)) {
     chosen = owner.get(key);
     source = "OWNER";
@@ -109,7 +126,6 @@ if (problems.length > 0) {
 // RUBRIC §2.2 — applied LAST, and only to the tier that reaches gold. The raw labels above are
 // untouched, and the agreement figures below are computed from them, so an adjudication can never
 // reach back into the number that measures how far the two labelers actually agreed.
-const rubricAdjudications = JSON.parse(readFileSync(RUBRIC_ADJUDICATION, "utf8")).adjudications ?? [];
 const adjudicated = [];
 for (const entry of rubricAdjudications) {
   const label = labels.find((l) => l.reviewIdFingerprint === entry.reviewIdFingerprint);
@@ -183,6 +199,14 @@ console.log(`  by tier    ${Object.entries(byTier).map(([t, n]) => `${t} ${n}`).
 console.log(`  by source  ${Object.entries(bySource).map(([s, n]) => `${s} ${n}`).join("  ")}`);
 console.log(`  rubric adjudications applied (§2.2)  ${adjudicated.length}`
     + (adjudicated.length ? `: ${adjudicated.join(", ")}` : ""));
+const synthetic = JSON.parse(readFileSync(SYNTHETIC, "utf8"));
+const syntheticInGold = labels.filter((l) => syntheticSet.has(l.reviewIdFingerprint)).length;
+console.log(`  synthetic rows kept in gold (§11)    ${syntheticInGold} of ${synthetic.inSample} drawn`
+    + `, ${synthetic.inFrame} in the frame — every reading reports PRIMARY and SENSITIVITY`);
+if (syntheticInGold !== synthetic.inSample) {
+  console.log("  ⚠ a drawn synthetic row carries no gold label — the sensitivity reading will not"
+      + " subtract what the primary one counted");
+}
 if (unlabelled.length > 0) {
   console.log(`  ⚠ ${unlabelled.length} drawn row(s) carry no label at all: ${unlabelled.slice(0, 20).join(", ")}`);
 }

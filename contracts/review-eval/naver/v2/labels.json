@@ -15,5 +15,1623 @@
     "Produced by tools/review-triage-calibration/derive-labels.mjs from a local worksheet that",
     "is never committed. Written by hand only to fix a schema error, never to add a label."
   ],
-  "labels": []
+  "labels": [
+    {
+      "reviewIdFingerprint": "0188228b2f5e7b8d476d083b1825186e7f46755dbe9b2d2de45ece37c9e0a6b8",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "CANNOT_USE",
+      "tags": [
+        "설치"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "024927b27089456c2c2aec5dd7fda5ca3748deb052591486a6002ee428afdfe3",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "027c4827d81046342bd5a4f47003728a913eaa78da6e8f423d5c6d7e84faacec",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [
+        "제품정보"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "032e4a3794a4811f6a682c3adef8a84f8470ba6f8eeb03f8f27a79c2f048737a",
+      "tier": "UNCERTAIN",
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "04467430d9810ba91a7b2cd3c83ee35aba9f01cc83266dbf395c492a7d442bf5",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "061a18a4f860e027a9373eb2371fccdb9e0c153768086d0ccf53b1f56b08620d",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "0675544acd64fd50de0fd7299335962e7b6f4048ae30d33e8a7a42726d3e4b0f",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [
+        "설치"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "07bbc5ac009a15e933e2dee63af50f3715117db8c22e63d4a4404c3063c972c2",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "09c14edd30eb47d6891408999686de2c8cb051d70c389a04a0a8944c55428105",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "0b5030921076e3f615ea38b034e8a7f5104f285db8bc4c464c935139a51b08c1",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "0d80590aee3c9afd2acdfee036a3c83ae9820e4eb240c9f18a6185a8f1c2d2eb",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "0dfe09656186da7a2222532ce66877b3ed9e7bc9ee90772228578f374fa79e94",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [
+        "설치"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "0f1cc19984d66076c3e3212b27ac6af733c4b66328a872e29ad9b3efeb371001",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "CRITIQUE_NO_REQUEST",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "103334ad3d79d108c8d75e7ed5ab819b8d23280d50631b76ded5f4f925097c37",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "112c36583e4d0ed8d6e99eb5eb0e0ea312fd81e5baa6983f4c0c06742f4a2745",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "114e901f8683055f4c0a8e1aaf1dbfa20d97e2ade26f9afa6ba78128a3d887c6",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "1647f74d1d27cc3a8af40c68ded13cc4bc0c5a5d1b800943e43f8ecb39f37451",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "187ae7c6bc4a91969dbbfb848b4323d222a54474ef456b2d26ceaa382a67db2f",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "19fc34dd95071e3b8e91f6001b109a6a5eacec4476f024dd68b2c4d5e4e38c3c",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "2430f114a67cfb3f3ea2bea283cf14d58b315b65fb23ecebd196a15d2be89717",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "24c92371aed335e6e3ec2f892a7e64aed845b3fac5d2844a3c2354cf9b8e7d31",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "24f65052fcb55282e678403c0939a0d209d79151b55eec6ccc7a7134b5dc413b",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "2590826bbc65fabade290fe759f6e71219db1697243e3d6c0f85b26e6ae5c0a5",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "26f8375f0bedba48d3af4f633dce99e377abf7f7439088a3de2c2f646c6f609d",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "27a8a98cee9375236ecae0c7461fab44ae62795cbd317105e9bc88c3e5b68a5e",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "27cf1b1b14a880b2b0db209a644f40eda7e2dc207c35d88d63aa3f4a0d2fc69f",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "28056c4d644e2ce3aceb6b76530ee832a1e24cdfba75a5dbce6db9f015ffbc50",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "29831f444a0901466f756d50430c7c285ebc1e7ec1badc1884fa320450aa5b48",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [
+        "사이즈"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "2ab5d6545842e981fdfa7ed4282fa437e2b9270834fbbcf34b1e974a9f37abba",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "2b521487a429343cc4f8204527ae6f9d9b103eb65dd8bd137ab34cbaa24eb236",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "2c0724376a0e9cc6cd11f071e2d3f11f9601df5cdd7f6e782d23c2c961410c25",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "DELIVERY_PROBLEM",
+      "tags": [
+        "품질",
+        "배송"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "2f2379d02004b6475193f89231eec4ce76cb850558304f3f914e4ffc7aa81552",
+      "tier": "WATCH",
+      "reasonCode": "TEXTLESS_OR_NOISE",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "3482d2b7503d44faa812ed95c52adef573ef5e047e6dd0273e376277af769ede",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "34d9efdf63a90d18daeb7f1a36f2cef623bb557fff0b370f26d80e6324d442f5",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "372975089cf98ac0a2c1b572b274e69961685b5a54ece0408c5f93f3990c54c7",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "384df16161e10d95711856635809c36afa221923debad821f9718308499a49b4",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "3874205887e7598ab4c57740df52bd3a3b6b5946338c828cafe65f4f2b3836bf",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "39b71da8e55f60158a0906e5af53f81481e8abb61f1b0a2cb3afdfaf12490123",
+      "tier": "WATCH",
+      "reasonCode": "TEXTLESS_OR_NOISE",
+      "tags": [],
+      "source": "ADJUDICATED"
+    },
+    {
+      "reviewIdFingerprint": "3a7cee189286eef5614558d8d87b9641fc354bfac0817c13a3e5beb067011c87",
+      "tier": "WATCH",
+      "reasonCode": "TEXTLESS_OR_NOISE",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "3b1bbaf0569c305f22a356e6961f7c669f31932d9af3703ce017b1cae4b76579",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "3bd204bb1eed35d1eb82b6c82aaf18612c3ce1c437c08d004531ab2ab46657af",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [
+        "설치"
+      ],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "3eb06c94bd7a3f00d2da9863b3e721445840882f49f4a3e276d2818204d88d3c",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "CRITIQUE_NO_REQUEST",
+      "tags": [
+        "품질",
+        "배송"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "402443e9765881a9bb2948d746359417714faadcf3344c1cd2c891b0ec4d6ed1",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "4771486f7a7708652aa5096a29525e63f5e68360ece4ae082e4fa59dd028cb7c",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "4a67b58608af8b7d3072e0c158360f02474c78680bed39cfe0ce1c34d88fd13a",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "4b4704496d81cf71a4ed7d7d39fa48c0a6d9a516869b83e8293b382dcdacec63",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "4c45a5a9289939c37cc55a79185db0d65b9caf156411a1a166a9b2be294a6f17",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "4c4fe914bffc6691ec56bc2ad356013a89ba26b20f5decbadffe0fd3c36573b3",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "4d65d7bb34e93ae967627aeb334b4438db1e23a33a023a02bf3bbd2aaeb43c1d",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "4d85a4deddf27ab3fe6d24091ee0f8eb7faca45acc1bab958a11a36b9210a5c8",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [
+        "설치"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "4d94495852111e1881d003a5d834fd5171d55252c26dabd590b661df48d9d2cb",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "4dc4fd8d907d0f49618eb4b1013ca6ff448b2772413cbc468c0c52104b204cf1",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "NEUTRAL_DESCRIPTION",
+      "tags": [
+        "제품정보"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "4f06a2930e903bbe1806bf2bb4d6f1fd7a3b2d2eed36d13d3a689a4df7db0480",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [
+        "제품정보"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "4f6532c12e92ef68fdef39f70adc7127f9fb9ec5313761c204d47e368268d8e1",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "CANNOT_USE",
+      "tags": [
+        "설치"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "50b29f58247eb8c8aaf991ade13a9bae89f07d2ad09a256f73ab78b5179572c7",
+      "tier": "WATCH",
+      "reasonCode": "TEXTLESS_OR_NOISE",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "52023d92364e832b06ad43a3a17104702900afd0f854025916af81c6f2a18f92",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "CANNOT_USE",
+      "tags": [
+        "설치"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "545b2ba2c0d1a6c41d1bab0cb110bc06fe6db6ab7ce7b53e8ae63882a10d9621",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "5460ddec8f2814419cd158a6d277d4f3e3d4ed97a2153a65355f3531b79ed3e2",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "558b695e3df55a5e76db9bc659ca81de2a96de1638b0b8ea011fa9a8054eadff",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "55c1c0005354845443724e9a529f5897d604b99b9d9cb95bc07275aa84f06061",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "CRITIQUE_NO_REQUEST",
+      "tags": [
+        "품질"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "55ca39039beb5358f6855741cc65e13d55eb158cbd69af5adf67279cb8d7d232",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "CANNOT_USE",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "567725bbfe259ec424dc8a77f9a48e4d03aac8c7ff23307d212f74888a5fa54e",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "56d04c2d06127b57301784029cccf18a750f49454390184959ddb717bad6b32b",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "5780ab0f09fc52abb54d56f0fd17b2801cfa07944ad2c2308352dbba0a5e284a",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "57c411a08c907e8e7c4eb46ea0ac9a34d8bc83e0e72626c96d1e9fb986814a1e",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "57ff51797ff7a67f1bbb6f49124fa0486754c50aaeb04e31371016c502f3f535",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "58533c9d9ffff632946dd4edb4ee52bec32b6064278a8a8775b98dc08163b8f4",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "CANNOT_USE",
+      "tags": [
+        "설치"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "5a99584ea5933d0917202d0ec6ae7f83397f28d5ebf2f5333b83297061038b1c",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "5b1ec66532bd23a1c3723379727076c01c7acb28b4a5928ae049870963972c7f",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "5be14453cba8a469e6b2f88e0c5e700345a219b0df9e2289f1265dd7a62a1d9e",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "5c7e95de1af6885b7e5abaef5c38a309ab8448bb1f169289530513d1e6de8fef",
+      "tier": "WATCH",
+      "reasonCode": "TEXTLESS_OR_NOISE",
+      "tags": [],
+      "source": "ADJUDICATED"
+    },
+    {
+      "reviewIdFingerprint": "5e184b41cfed0fd799f24c99cba595b59327ada36239b234572d6d05d03c7257",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "5ed6e5ba604d5e87d01df202d78666d818e8526516e5cab37ee9cc9bec6090a4",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "CANNOT_USE",
+      "tags": [
+        "설치"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "5fa88696b6e3612a19ce426810ced6a7bf51b5db4996953764a232960726f2d4",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "CRITIQUE_NO_REQUEST",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "6135b459caf341fc81512dc989c110d0bf15562aee7a43e2ec68547924e6c45a",
+      "tier": "FYI",
+      "reasonCode": "TEXTLESS_OR_NOISE",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "617f8e158f33dcdc598343a295011a3ed53c37e84fae22a04b146d60d4334d62",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "61cf96c5933ebaa315189f344bb6ffbab24065f21f2c8a654fcbc7076730ed7b",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "DEFECT_OR_DAMAGE",
+      "tags": [
+        "품질"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "622d725305b5f530e075541894bc45f723acb0ef16cec16042a6ccf067a09e7a",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "636fa685e9519528f00bf8e98701b6ef084d146f89d03003bae083542334cc25",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "DEFECT_OR_DAMAGE",
+      "tags": [
+        "품질"
+      ],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "6383e82b00e460a822e54d3ae4f592b5d21e5439967741cd39c6c050c1b204a7",
+      "tier": "WATCH",
+      "reasonCode": "TEXTLESS_OR_NOISE",
+      "tags": [],
+      "source": "ADJUDICATED"
+    },
+    {
+      "reviewIdFingerprint": "64673f9e5eebd871a4f3c7b33ce41308abb2b9f52b6d6a58bf01475ae10ef031",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "CRITIQUE_NO_REQUEST",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "66497f0ba94fc785b191d93455a815cb6f79e8dba718a9ee06e1c98e8c984eee",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "CANNOT_USE",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "69f651aaa7b8253a7b33a83764e631291f577de97b931b7d7db584d8af7cf8ab",
+      "tier": "WATCH",
+      "reasonCode": "NEUTRAL_DESCRIPTION",
+      "tags": [
+        "제품정보"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "6af853bb65a18ca834bb93096e8d0c53edff6682e0437606b42fb8190253a824",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "CANNOT_USE",
+      "tags": [
+        "설치"
+      ],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "6c350da7ed6d149cb8ef301e9a9b8b6509a8797860b8b5ad5492382670349064",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "6d7c18e1d618a9710ec305677773b3076e6ed2085a9a6e8fdb6662dfdc78c924",
+      "tier": "WATCH",
+      "reasonCode": "NEUTRAL_DESCRIPTION",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "6de91e1a6809a0ac37ce2ad96bad6a707db77ff20d03092ee75c885d30c76ce5",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "6ef9d396c7f1dab1f2ca19c38b2200f35d8b35c14f3fcfd7e352e5722473fb2d",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "6f576b6235a9569defdd662169dd133e6e8c2820d9a5e2bf26f64969016f1233",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "70b59f2c2a53c6a3af4a0d1473c109ac730b4f806e0cda0dc7c366115ac33388",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "CRITIQUE_NO_REQUEST",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "738d7f0bda464a0cb8628407f1c2ec9cdbd963984ac24680f505139fe16a0460",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "CANNOT_USE",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "73d64db437ec49b6caae458f1418bcac4f5d638c04ab268f2d419db90c5b3274",
+      "tier": "WATCH",
+      "reasonCode": "CRITIQUE_NO_REQUEST",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "752421936b068d859f35d9073c161b2cddadbfe19498955d079a8b1a6823637e",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "75e89f0f96cf11bf27b3e8703a4677946a13a510b985ce965ab7a9c11d7128b9",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "75ff73133a9de779593ff6b6a58f0bda319355329244e73b94382159baa1a7a8",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "DEFECT_OR_DAMAGE",
+      "tags": [
+        "품질"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "765df087dad4303596e07563e1aa1992f026c89a1bfbc6f3798f1a2924a95e61",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "772b8f68a660205544a18126f626bd844541e1900c1d084ebc90845cf22a1a70",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "776303fe569d2bb9fa6224c51f243094da9f2e7adaa798a4de0ac869dc018337",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "7793da75dd8f2b3476c0c9cd569ce2c0c9f4babffda2c6deef969603f03d5698",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "796e607dd665f185d9a3ba362a2e1f9a241fda3c58f6747e9b747666cfdf42f2",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [
+        "설치"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "797a39a2b68037dfd49624e4e66b05b61b37c57f2d5a3dcbcd238b36e3e9c755",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "799a89c5cf7ed7f0a81faaead7db8b3f9cb7a126feb8c84429c2900b5e56729d",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "7bcaac421a6e3e732ea25118931ae9aed0f13dec59fece1993bc3d84a041f8b8",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "7dccae0e249067b6ff33bdc41d124f8d6f8635fa8f73411929751e817fd26444",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "7e13436995a7eac61e0013cf781f31cbf33384fc6bfa08824f3f7943638fd585",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "CANNOT_USE",
+      "tags": [
+        "설치"
+      ],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "7eaa1f8033a727fb111dc8b0e309e05efca171b3fb3f2c911e4c886714dc4280",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "CRITIQUE_NO_REQUEST",
+      "tags": [
+        "설치"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "7f0ada0d031e3bf11241462841de2eae2119ddc1da4b6e6cc4476a78b69a7878",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "7f1ddbbc4585174715a75a8102ef25fd47436beb8da917694fd4110e4ccfd33f",
+      "tier": "WATCH",
+      "reasonCode": "TEXTLESS_OR_NOISE",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "80d65c0f20aa1081fb66e95cf2aff9ef8cb3b13c571fade375e39afd396d22b2",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "830bd5121046040d0afc0491a89deee2cd85ab7fdaa3508134e24511e44c5b8b",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "8398fe24ac49426463b37f0574872a542a3fc435848926186da0d2ce60dff0e9",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "CRITIQUE_NO_REQUEST",
+      "tags": [
+        "설치"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "8494eebc74935c325227c6418478f9fd09d28dbd651236182747f431da2f1257",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "879d381d2432ae725287ec6750ae62f4f14c001f3d60f396e53efbb3f00fc034",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "87c391658de6bf69dde39bfa5d30671468340cdac9529c9640ad7fb6fe6319cf",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "CANNOT_USE",
+      "tags": [
+        "설치"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "87e666d1a065a0f72b691da3350bd1a1a9297126625c02b7b40444f714a1a656",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "88034b584b37d2a9c6c5e2127a44a3999c946ca82389db4960e04a6917ccf5ab",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "8902b849c35065f1ffc7fed4d2163967b61bd104e1b70bbc07cbdf0fdef01b36",
+      "tier": "WATCH",
+      "reasonCode": "NEUTRAL_DESCRIPTION",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "8c24901bc4bd3b2117d025ea54bf7442f5e857f06350246e9045dd67509e19aa",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "8c81a9efc1e2aad4d6cc02af10297ec32ff475ec8406cd8d08cd686bdced6e8b",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "8e7266b8238536fc05f0f307688e6006899da000965a3b04b90d888ad61e1852",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PACKAGING_PROBLEM",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "8f0745fb1ffecf7708ebf02580c4a4e78e3779e71e9c00606d77dbd832c9635b",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "8f893a03d07b5e40e461157ebacc2eb9145b0b2b74e5237886c268bb51cc97b2",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [
+        "제품정보"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "90e6ad5fca576f438017a30ce5d06bdaa85fd9bbffd766f730c72645cfdd845d",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "91571926bb30091f2de56df1e82c0ef23cd96ed5de38a6de6dfb2eb3c629b7a5",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "93145741fb374367704f17424aeddeb735f6f717d32f32067e03570defbbd2c8",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PACKAGING_PROBLEM",
+      "tags": [
+        "배송"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "9394ca8bd7be4425959c9b2e090c1866f1f527730583f9a57cfdc6309cd5a76b",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "9405a216885220f4b6b38b195823181ddd0cb9ae880bf3e388052b85ec2f2caa",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "9550ad60765abe6ec9987caec818dbdec8b11a4ddc2973904de250cf6c2f5434",
+      "tier": "WATCH",
+      "reasonCode": "TEXTLESS_OR_NOISE",
+      "tags": [],
+      "source": "ADJUDICATED"
+    },
+    {
+      "reviewIdFingerprint": "96eed26cbd5916ac760ed754e701a4f7337c048dfac50a2d867c34a073cae67c",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "97d03c306d808eb8064916b6048504363715832ce446755e47b069a08c0e6a42",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PACKAGING_PROBLEM",
+      "tags": [
+        "배송"
+      ],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "9baabf29f227be71366dbee28dc786aeefb0386de670538e7615d68a37f7549e",
+      "tier": "WATCH",
+      "reasonCode": "TEXTLESS_OR_NOISE",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "9d3308d1af53fa48c55c8f4c94cb785a6c6f9e231c9a24d8a404a276c08e4887",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "9f44a28f76a85b0a30c36abb16edd3bd0f328f10be8d9220582c47f044105b6c",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "a013ba7e60873333a6a4aa1ac4f7256953ab831474cf95188461b3fbedd56fb8",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "a09d057a8c56f6cb1f3dcbbf27f6bbe46cb5aa42ca121abc0adc1a88ebe1ce86",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "a2b425e9d7321ec8198220a8608389123f293654e4715b8b7cdc213e14095239",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "DEFECT_OR_DAMAGE",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "a36e8ba57cacf74edd86b047d0ffad7a087d6eedd32e91d1ee7ff2b207301b6f",
+      "tier": "WATCH",
+      "reasonCode": "OFF_TOPIC",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "a44ca85847ac70c0b20f9f298470d510456a1f45131ccda140b8911cd91491a5",
+      "tier": "WATCH",
+      "reasonCode": "TEXTLESS_OR_NOISE",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "a5757f0f66ec241eff4ee39f7e889b16a7b8ccdab2c9433c099f16c4f688f1dc",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "a8343d2b78b862471a2a61b94a213f4d8c2c20667b16527f96f70b3d8a277ae0",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [
+        "품질"
+      ],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "a960084243cb92b86b16e292d3dfe7a0116731085e6f988c4f619f5ec3b6ef0e",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "aa356098b8e419147145c954a21c4b70ca4bb0de11c46c1abc868d636d45c80f",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "ac9c9f20dcef857c233c0cfe2a16cb5320dd1711e1f60cc5cf0b246b623d38de",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "aee16fa546c25e7a7d36b5c7b536f4d8d1aee34307e5903aaec02621c6c3fe6b",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "b3754dc6179a3ab3847c16a98bef608377d9a7e7f894079b161d943127c49f0b",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "b46bdea249eb4ca1f1d2fbe6402c15a6d2bfd369bba5bac12876d99c6261de0d",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "b5596280211019ba036493ecdcbc807547d5ca374888fece8aa3e8a2278c78a4",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "b6d2b7445584e898a8adeb73259b53e870d881f093a57ed86b46b03cbcb9dfed",
+      "tier": "WATCH",
+      "reasonCode": "TEXTLESS_OR_NOISE",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "ba39a0485494cb20cccf223c6bc9641ba6a74bbb374c8d987062195a9e8e19d1",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "be59e1695adf04d800970cebb4d4b3a4b615a2c216bad149ca703dcbd54465f7",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "DEFECT_OR_DAMAGE",
+      "tags": [
+        "품질"
+      ],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "bf8520189f2eccb69bc6bfaf4af7d6fbf7ac594e0de5a8023c48cf0e3caf0723",
+      "tier": "WATCH",
+      "reasonCode": "TEXTLESS_OR_NOISE",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "bfbd3a6f596da43dd33310d5a92c37fc761aab4021498791805f7022af2b30e1",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "c033d485562a9e87d1f84c4c0783ff4cf2978037a9f3a221455806c5dfe1d80b",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "DEFECT_OR_DAMAGE",
+      "tags": [
+        "품질"
+      ],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "c086577eaf65fcde9b2defc9c9f783082741faa82479d6a31d3cfd1f75ddc552",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [
+        "설치"
+      ],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "c1135572b840eff5e2f99f4a7b2083a73926d7fe19222e20e6cba0266f021af7",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "c1a66d0ba1f0417d068fa1b7a69554af8aad3d84250cb03d13ce05fbe436cb79",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "NEUTRAL_DESCRIPTION",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "c30631f42c1eddf9748bc3cb4c92d04224e725cd6e89a2d91123e44265d6a4d1",
+      "tier": "WATCH",
+      "reasonCode": "TEXTLESS_OR_NOISE",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "c30b3f8ec2a10481d3a5e59c4ef866d5e286bdf02388de52b656c266a514ba82",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "c45e1e0c2b5521ecb5131db2ddce9aa5e660e956da9f76ab7f84022dc918fe75",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "c5c3fd7728b8f198cf1270cbaa5c7ad1cf19205ba2689c5f11c3efee3fcab899",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "DEFECT_OR_DAMAGE",
+      "tags": [
+        "품질"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "c62823eb18a32b59a9fd6c48689389ce9348670beedf16a915923e5765daefa4",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "c8840c8654476d2462766ddc2b899e1818a51b951a0c94a05eea7e5e2921c602",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "c9afdaffe8fcb45b6f850eaf1c19190aaaa314df0a9e9c67da8ee133b3a5e851",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "cbb5b6d470989ecc34e26fa3e94b44e3bced64071c3dea4c1b8afc2db3bce7fc",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "DEFECT_OR_DAMAGE",
+      "tags": [
+        "품질"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "cbd6debec50a0a324574c10239cf52d824a0100a05ad61f8d24d5beaec48e69d",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "cbf3b8c4c3b5b2718000fcc1199789e3650b08b24d64ec55c7355ef406394600",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "ccb36c58a83d6c7914cb0c3fe42de82333e8a660a5c1f7f6570892b4aeda09dc",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "DEFECT_OR_DAMAGE",
+      "tags": [
+        "배송"
+      ],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "ccd8c07f3689634a2c290ab72af1cfe33939e054fff0ff4e0a8b0dc91b442777",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "DEFECT_OR_DAMAGE",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "ce4a9116adb1d5d760b064fff5428ee29811e02d696a15ea88fc02fe04e2d0d0",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "ce861d71fea6489557ce0d8ac7478b233cf049e841f742e4a22b4ec565a1be80",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "ceecab97702b8c4ca25d93d8a1f569c23a8c4a77e6bb5d3eb590b63bbee0dfe5",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "cf2789abd7184d082b451f9d0dedf83af1d050a24d94c23c52388fea427b96d4",
+      "tier": "WATCH",
+      "reasonCode": "TEXTLESS_OR_NOISE",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "d034403d0c6c59ddf48f9e4b5835ca0a4f2a82856ae4574b1a1c11b5efcc7f19",
+      "tier": "UNCERTAIN",
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "d1329ad905bf6da34c1562ffc7c387131f5e7bba5e5a6ab5fddcbaa635b930a2",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "d1883663cb55d710e1383297779eac73d32ef92c33bb77b6ebe1cf6ebdaac44f",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "d314884e087b33c48ab1985784da8f6e0691f361954551bf5475995214a28de3",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "d48eb2683d2750ae7c07c50fb93326441d456179f735e5b9da06487cf789485b",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "CANNOT_USE",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "d4928445d1d217f66ce7558fdde714c281632f001aaa9721b68f0337628ce361",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "d4b834240ece14c9908eea7cb881bfc65c6e009b4788c2d8454cd473bda723f6",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "d600f2326a517be394e2544c9ef8324e2c306c65ca414b8b00ffbfa4ea90ab72",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "d7532d7ba2149c6b70fad5fe805fe135ec778194a87a4fe0281a35bb1ce181c0",
+      "tier": "WATCH",
+      "reasonCode": "TEXTLESS_OR_NOISE",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "d8f9c90a300900c336237c5bc73b2d1eb425160c897095b7688b3c5a4925d6df",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "d9efc2d6f2b27f11e393df64efb73d865825dd423f3ad70249da554a48169577",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "da1b7b932451ec02af6e7261da09b829dde3f0ee89e0b6c3f25ac1259f3d99fc",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "da4c705483edd97d55bbc67ed0222f8821efba0d4e22141f936e94a3f78a2a98",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "da566d8f95f174858f1c3c2ad5b8e9aa0fac929c59615c7abd9688fa8f3b479d",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "dba187d82036e00f52aba96299941c8ec8a521f0e1fb8554b90a58fb5d339588",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "dcb4d0ffbea6813204278b6d33ff3ff0a1cb1af556b60667f338cbee71b11973",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "de29f289d4869a7d5e03b6d312081cb4c0e1d93739d56d2b9dffc34d69bd2dbe",
+      "tier": "WATCH",
+      "reasonCode": "TEXTLESS_OR_NOISE",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "dfa7a61b53219896a275b6d9ae1db0d2f759dc6d78fe3ad6c2900cc1f297b268",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "DELIVERY_PROBLEM",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "e2534cbab1a55e63397098d24fb6a3cfefa54c53262ad881a302d7bbfd6bd779",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "e59b441b7cb5229fac8c60ba2ea1b6638505ecc3c9c83e2ca032160e563803c1",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "e6b22fa4fa48a9c63497daa643fbc160a8fde9937d1946d5453879fa90c81c5c",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "e713be713ec920b397dcb530fa22ac485ff50a8e2ea86b7883d322c406cd3a41",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "CRITIQUE_NO_REQUEST",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "e7c82ad1b3e8686378d44875e42632c637741a2f097b47735585f6aa06e3f4bb",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "e7d2c5385507b802df3ee5248ffd5a53286a675cdf3c50f331a8e81e41aed9ec",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PACKAGING_PROBLEM",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "e7fcf2519555bc3895a65cf0a968e6346ce9d57122fef0f6f528dac3e29b90f9",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "WRONG_OR_MISSING",
+      "tags": [
+        "품질",
+        "배송"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "e803da703c2b6b40a626ed4f387361e9c42e633b7984d8a9b179dc8544d40724",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "e83898c833bf614d0b79f1c8ba79d7db7e090748462b3ad7f96e318075c15837",
+      "tier": "WATCH",
+      "reasonCode": "TEXTLESS_OR_NOISE",
+      "tags": [],
+      "source": "ADJUDICATED"
+    },
+    {
+      "reviewIdFingerprint": "eb602ef2a0b3e953e627f88f9f26d6814289a996af61a477eac906b78ea14f80",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "DEFECT_OR_DAMAGE",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "ec28cf578c60aa0e2df1bb99cd0d095cff8b8a218b76758f72eb7a08d9831665",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "ee096312fa68e0fd09a24bb446c1eac90a0fdb9288c5ef14e3b8340e6e1d2f21",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "DELIVERY_PROBLEM",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "eedfe79872cec03953bb522eaa7495213ee1c10e6a785db984f6846f9b094370",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "NOT_AS_DESCRIBED",
+      "tags": [
+        "제품정보"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "ef9a0e45b271261b02e6f796a71bedfbf493605ee5ea41d3ac0dcb405df06151",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "f14db162ac33dba4632586c2b6c19f960b31ca416196c861803587e4ab4ecb9c",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "f16f3827d9b58199c0bc91e86b6a384a274aa956380c8192867e2133d575fcc5",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "f344810677797c38d963ae53caec8bfbad799881dcbe362fbf8db258b97c11ef",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "f37600470643b31167e0fcc437634c9210d455f5bbeeef0b000deb87668afcbf",
+      "tier": "WATCH",
+      "reasonCode": "TEXTLESS_OR_NOISE",
+      "tags": [],
+      "source": "ADJUDICATED"
+    },
+    {
+      "reviewIdFingerprint": "f41401de270e5b4f0b66f21dc07ef5f5f614735474068dfc1b190c7a7877732d",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "f4b168f8fb136c8d28e591a2b341f12ed66c0e5e85b08c1e8775f0a9d178215a",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "f81378791266fac629f65c9f815842553e63f04f544b75ce51103f6ba1e149b6",
+      "tier": "WATCH",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "f83a003ff052ee4fa4a89dfa56a83f2ca595f90981b63583ac018ba4db177fb5",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "f9bc6457ceea44b10e00c64ac2fc6b7ace26dbf279ba3f8f5651ffe490ae89c4",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "fad73a568dfb2c2fd5d49fa7c1be85f756fd6625be06cc706f98e32547cb21c0",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "fbd7a60730e447de98496d3f5cddab323eafa227e6b3b56c0aa248811f0c6970",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "CRITIQUE_NO_REQUEST",
+      "tags": [
+        "설치"
+      ],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "fc32a2eaa80fea2315700c6e51ee74702a3c3fa7e59b15e438cc1582d1065eef",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "fc46902e753cb1c1cda5aae20f4cfb00f5bf2c004a674c209dea7ceab143235f",
+      "tier": "WATCH",
+      "reasonCode": "TEXTLESS_OR_NOISE",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "fd89279349b2eb3560565593af008eb61624bf4fe4cb8365c2ff585b6562b129",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "CRITIQUE_NO_REQUEST",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "fddadaa930c6e7dfccf34bca54a724da5b8392ff1575230330f9c74f2fa356a2",
+      "tier": "WATCH",
+      "reasonCode": "NEUTRAL_DESCRIPTION",
+      "tags": [],
+      "source": "ANNOTATOR"
+    },
+    {
+      "reviewIdFingerprint": "ff425a6830fd316514af2dd8fbca5338c46c0bcb3f67ee12e1b8550167e1797b",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "ANNOTATOR"
+    }
+  ]
 }

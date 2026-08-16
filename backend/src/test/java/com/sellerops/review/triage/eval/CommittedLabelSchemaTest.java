@@ -132,6 +132,42 @@ class CommittedLabelSchemaTest {
     }
 
     /**
+     * The list the SENSITIVITY reading subtracts (RUBRIC v2 §11.1).
+     *
+     * <p>Its two summary counts are checked against its own rows, because the harness compares the
+     * frame it re-derives against those numbers and prints a warning when they differ. A summary that
+     * had drifted from its own list would make that warning fire on a correct frame, or — far worse —
+     * stay silent on a frame that had gained new fixtures.
+     */
+    @Test
+    @DisplayName("synthetic-rows.json names reviews and a family, and carries no review content")
+    void syntheticRowsCarryOnlyAFingerprintAFamilyAndAFlag() throws Exception {
+        JsonNode root = read("synthetic-rows.json");
+        assertThat(root).as("synthetic-rows.json must exist").isNotNull();
+
+        Set<String> families = new HashSet<>();
+        root.path("families").fieldNames().forEachRemaining(families::add);
+        assertThat(families).as("the families this file may use").isNotEmpty();
+
+        int rows = 0;
+        int inSample = 0;
+        for (JsonNode entry : root.path("rows")) {
+            List<String> fields = new ArrayList<>();
+            entry.fieldNames().forEachRemaining(fields::add);
+            assertThat(fields).isSubsetOf(Set.of("reviewIdFingerprint", "family", "inSample"));
+            assertThat(entry.path("reviewIdFingerprint").asText()).matches(FINGERPRINT);
+            assertThat(entry.path("family").asText()).isIn(families);
+            rows++;
+            if (entry.path("inSample").asBoolean()) {
+                inSample++;
+            }
+        }
+        assertThat(root.path("inFrame").asInt()).as("inFrame must count its own rows").isEqualTo(rows);
+        assertThat(root.path("inSample").asInt()).as("inSample must count its own drawn rows")
+                .isEqualTo(inSample);
+    }
+
+    /**
      * The check free text cannot survive.
      *
      * <p>A review body is Korean prose. A label file may hold only fingerprints, tokens the rubric

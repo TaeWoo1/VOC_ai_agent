@@ -90,6 +90,26 @@ contract exists to prevent, so what keeps it honest is stated rather than assume
 Applied at gold assembly through `rubric-adjudication.json`, which names the affected reviews and
 carries this reasoning with them.
 
+**What the annotator pass then showed (2026-08-17).** All **six** disagreements between the two
+labelers, out of 30 overlap rows, are this exact case: 3★, no actionable body, owner
+`NEEDS_ATTENTION`, annotator `WATCH`. Nothing else disagreed. The cause is visible in the artifacts —
+`owner.html` (built 20:43) contains no 3점 line; `annotator.html` (built 22:14) contains it. The owner
+labeled under the rubric before this section existed and the annotator labeled under the rubric
+after, so **part of what κ measured is a contract amendment, not two people disagreeing.**
+
+The product owner adjudicated all six to `WATCH` on this section, not row by row. Three things do not
+move as a result, and the mechanism enforces each:
+
+- **the raw labels**, on either side;
+- **binary κ = 0.614 ± 0.276**, computed from raw answers before any adjudication ran, and
+  `agreement.json`, which stores the raw pair on every row including the six;
+- **the pilot's published readings.**
+
+A descriptive figure, recorded here so nobody has to recompute it and be tempted to promote it: had
+both labelers read the same version of this section, they would have agreed on **30 of 30**. It is
+not the gate number, it does not replace 0.614, and it must never be quoted in its place — the gate
+was met at 0.614 on raw answers.
+
 ## 3. What else the labeler records
 
 Two fields beyond the tier, both **closed vocabularies**. Neither may influence the tier; both exist
@@ -545,3 +565,61 @@ Deliberately **asymmetric**, because 37 rows can rule a candidate out but cannot
 
 The 220-row sample, the `DEV`/`HOLDOUT` split, `v1` §5's gates, and the 54 human labels themselves.
 The labels are made blind and stay as made; a pilot result is never a reason to revisit one.
+
+## 11. Two things that are true of this corpus, and are reported with every number
+
+**Product-owner decisions, 2026-08-17.** Both were established by
+`docs/slices/review-eval-corpus-lineage-v1.md` after the annotator pass and before any triage metric
+had been computed on this gold set. Neither changes the §4 sample, the §6.1 split, or `v1` §5's
+gates.
+
+### 11.1 The frame contains rows no customer wrote — kept, and reported twice
+
+23 of the 3,858 frame rows (0.60%) are fixtures that reached `reviews` through the production ingest
+path, so nothing stored distinguishes them from an export row. Four of them are in the 220
+(1.8% — three times the frame rate, because §4.2 censuses the low-rating strata and a synthetic short
+low-rated row therefore cannot fail to be drawn). They are listed by fingerprint in
+`synthetic-rows.json`, all 23 and not only the 4, because the §4.4 population estimate reweights by
+stratum and dropping a sample row without dropping the frame rows it stands for would estimate a
+corpus that does not exist.
+
+**The decision: keep them.** The sample stays exactly as drawn. Every `DEV` and `HOLDOUT` reading is
+reported **twice**:
+
+| reading | over |
+|---|---|
+| `PRIMARY` | the whole sample, all 220 rows |
+| `SENSITIVITY` | the same sample with the 4 synthetic rows excluded, and the frame reduced by all 23 |
+
+Both are printed together, always. A reading quoted without saying which one it is, is not a result.
+
+This costs nothing pre-committed, which is why it is available: excluding the rows would edit an
+evaluation set after a finding was in view, and that is the move §4 exists to prevent. The
+sensitivity reading is an *addition*, and the same shape as §10's primary/sensitivity pair.
+
+**Why this could not have been fitted to a result.** None of the four appears in any computed metric.
+The §10 pilot is the 24 calibration rows plus the 13 `DEV` overlap rows; three of the four are not
+overlap rows at all and the fourth (`HOLDOUT`) was withheld from the pilot. No triage evaluation had
+been run against this gold set when the rows were found.
+
+The harness re-derives the frame, so if a synthetic count changes — the generating test is one that
+adds three rows every time it runs and cannot clean up after itself — it says so instead of silently
+reweighting.
+
+### 11.2 The gold set is rating + text, and it could not have been anything else
+
+The real NAVER export carries **`포토/영상` as column 5 of 25**. `ReviewRowMapper` maps eight columns;
+`포토/영상` is one of fifteen it does not read, and unlike the three PII-class columns it carries no
+refusal sentinel. So it is dropped silently, `CanonicalReview` writes `mediaCount = 0` as a literal,
+and `reviews.media_count` is `0` on all 3,927 stored rows across every channel.
+
+**Every label in this gold set was therefore made by a human reading a body and a star rating, for
+reviews that may have had photographs attached.** A 5★ `좋아요` beside three photographs of a damaged
+item is, in this corpus, identical to a 5★ `좋아요`.
+
+This is a **ceiling on the measurement, not a limit of one classifier.** It bounds `rules-v1`, any v2
+rule, Claude, GPT, and the two humans who set the labels, by exactly the same amount. It is printed
+with the harness output and it belongs beside every recall figure this contract produces.
+
+It is not a defect to be fixed inside this unit. Whether to alias `포토/영상` belongs with the Product
+Context unit, which will open the same mapper for `상품번호` and `상품명`.

@@ -1,0 +1,202 @@
+{
+  "contract": "review-eval/naver/v2",
+  "rubricVersion": "v2",
+  "_comment": [
+    "The overlap rows of RUBRIC.md section 7.3, as they stood BEFORE adjudication. Two human",
+    "judgments per review and whether they matched — no body, no id, no rating, nothing else.",
+    "",
+    "Measured on a positive-enriched subset, NOT in the corpus's own proportions, so it is not",
+    "the corpus-wide agreement and must never be quoted as one. binaryKappa is the decisive",
+    "number (section 7.4, bar 0.6); threeClassKappa is descriptive."
+  ],
+  "overlapRows": 30,
+  "scored": 30,
+  "uncertainEither": 0,
+  "rawAgreement": 0.8,
+  "threeClassKappa": 0.6691176470588236,
+  "binaryKappa": 0.6137339055793992,
+  "binaryKappaHalfWidth": 0.27644709340174906,
+  "minBinaryKappa": 0.6,
+  "pairs": [
+    {
+      "reviewIdFingerprint": "26f8375f0bedba48d3af4f633dce99e377abf7f7439088a3de2c2f646c6f609d",
+      "owner": "FYI",
+      "annotator": "FYI",
+      "agree": true
+    },
+    {
+      "reviewIdFingerprint": "39b71da8e55f60158a0906e5af53f81481e8abb61f1b0a2cb3afdfaf12490123",
+      "owner": "NEEDS_ATTENTION",
+      "annotator": "WATCH",
+      "agree": false
+    },
+    {
+      "reviewIdFingerprint": "3bd204bb1eed35d1eb82b6c82aaf18612c3ce1c437c08d004531ab2ab46657af",
+      "owner": "NEEDS_ATTENTION",
+      "annotator": "NEEDS_ATTENTION",
+      "agree": true
+    },
+    {
+      "reviewIdFingerprint": "4c4fe914bffc6691ec56bc2ad356013a89ba26b20f5decbadffe0fd3c36573b3",
+      "owner": "FYI",
+      "annotator": "FYI",
+      "agree": true
+    },
+    {
+      "reviewIdFingerprint": "567725bbfe259ec424dc8a77f9a48e4d03aac8c7ff23307d212f74888a5fa54e",
+      "owner": "FYI",
+      "annotator": "FYI",
+      "agree": true
+    },
+    {
+      "reviewIdFingerprint": "57c411a08c907e8e7c4eb46ea0ac9a34d8bc83e0e72626c96d1e9fb986814a1e",
+      "owner": "FYI",
+      "annotator": "FYI",
+      "agree": true
+    },
+    {
+      "reviewIdFingerprint": "5c7e95de1af6885b7e5abaef5c38a309ab8448bb1f169289530513d1e6de8fef",
+      "owner": "NEEDS_ATTENTION",
+      "annotator": "WATCH",
+      "agree": false
+    },
+    {
+      "reviewIdFingerprint": "636fa685e9519528f00bf8e98701b6ef084d146f89d03003bae083542334cc25",
+      "owner": "NEEDS_ATTENTION",
+      "annotator": "NEEDS_ATTENTION",
+      "agree": true
+    },
+    {
+      "reviewIdFingerprint": "6383e82b00e460a822e54d3ae4f592b5d21e5439967741cd39c6c050c1b204a7",
+      "owner": "NEEDS_ATTENTION",
+      "annotator": "WATCH",
+      "agree": false
+    },
+    {
+      "reviewIdFingerprint": "6af853bb65a18ca834bb93096e8d0c53edff6682e0437606b42fb8190253a824",
+      "owner": "NEEDS_ATTENTION",
+      "annotator": "NEEDS_ATTENTION",
+      "agree": true
+    },
+    {
+      "reviewIdFingerprint": "6de91e1a6809a0ac37ce2ad96bad6a707db77ff20d03092ee75c885d30c76ce5",
+      "owner": "FYI",
+      "annotator": "FYI",
+      "agree": true
+    },
+    {
+      "reviewIdFingerprint": "7bcaac421a6e3e732ea25118931ae9aed0f13dec59fece1993bc3d84a041f8b8",
+      "owner": "FYI",
+      "annotator": "FYI",
+      "agree": true
+    },
+    {
+      "reviewIdFingerprint": "7e13436995a7eac61e0013cf781f31cbf33384fc6bfa08824f3f7943638fd585",
+      "owner": "NEEDS_ATTENTION",
+      "annotator": "NEEDS_ATTENTION",
+      "agree": true
+    },
+    {
+      "reviewIdFingerprint": "80d65c0f20aa1081fb66e95cf2aff9ef8cb3b13c571fade375e39afd396d22b2",
+      "owner": "FYI",
+      "annotator": "FYI",
+      "agree": true
+    },
+    {
+      "reviewIdFingerprint": "8e7266b8238536fc05f0f307688e6006899da000965a3b04b90d888ad61e1852",
+      "owner": "NEEDS_ATTENTION",
+      "annotator": "NEEDS_ATTENTION",
+      "agree": true
+    },
+    {
+      "reviewIdFingerprint": "90e6ad5fca576f438017a30ce5d06bdaa85fd9bbffd766f730c72645cfdd845d",
+      "owner": "FYI",
+      "annotator": "FYI",
+      "agree": true
+    },
+    {
+      "reviewIdFingerprint": "9550ad60765abe6ec9987caec818dbdec8b11a4ddc2973904de250cf6c2f5434",
+      "owner": "NEEDS_ATTENTION",
+      "annotator": "WATCH",
+      "agree": false
+    },
+    {
+      "reviewIdFingerprint": "97d03c306d808eb8064916b6048504363715832ce446755e47b069a08c0e6a42",
+      "owner": "NEEDS_ATTENTION",
+      "annotator": "NEEDS_ATTENTION",
+      "agree": true
+    },
+    {
+      "reviewIdFingerprint": "a09d057a8c56f6cb1f3dcbbf27f6bbe46cb5aa42ca121abc0adc1a88ebe1ce86",
+      "owner": "FYI",
+      "annotator": "FYI",
+      "agree": true
+    },
+    {
+      "reviewIdFingerprint": "a8343d2b78b862471a2a61b94a213f4d8c2c20667b16527f96f70b3d8a277ae0",
+      "owner": "NEEDS_ATTENTION",
+      "annotator": "NEEDS_ATTENTION",
+      "agree": true
+    },
+    {
+      "reviewIdFingerprint": "be59e1695adf04d800970cebb4d4b3a4b615a2c216bad149ca703dcbd54465f7",
+      "owner": "NEEDS_ATTENTION",
+      "annotator": "NEEDS_ATTENTION",
+      "agree": true
+    },
+    {
+      "reviewIdFingerprint": "c033d485562a9e87d1f84c4c0783ff4cf2978037a9f3a221455806c5dfe1d80b",
+      "owner": "NEEDS_ATTENTION",
+      "annotator": "NEEDS_ATTENTION",
+      "agree": true
+    },
+    {
+      "reviewIdFingerprint": "c086577eaf65fcde9b2defc9c9f783082741faa82479d6a31d3cfd1f75ddc552",
+      "owner": "NEEDS_ATTENTION",
+      "annotator": "NEEDS_ATTENTION",
+      "agree": true
+    },
+    {
+      "reviewIdFingerprint": "c62823eb18a32b59a9fd6c48689389ce9348670beedf16a915923e5765daefa4",
+      "owner": "FYI",
+      "annotator": "FYI",
+      "agree": true
+    },
+    {
+      "reviewIdFingerprint": "ccb36c58a83d6c7914cb0c3fe42de82333e8a660a5c1f7f6570892b4aeda09dc",
+      "owner": "NEEDS_ATTENTION",
+      "annotator": "NEEDS_ATTENTION",
+      "agree": true
+    },
+    {
+      "reviewIdFingerprint": "d1883663cb55d710e1383297779eac73d32ef92c33bb77b6ebe1cf6ebdaac44f",
+      "owner": "FYI",
+      "annotator": "FYI",
+      "agree": true
+    },
+    {
+      "reviewIdFingerprint": "da566d8f95f174858f1c3c2ad5b8e9aa0fac929c59615c7abd9688fa8f3b479d",
+      "owner": "FYI",
+      "annotator": "FYI",
+      "agree": true
+    },
+    {
+      "reviewIdFingerprint": "e83898c833bf614d0b79f1c8ba79d7db7e090748462b3ad7f96e318075c15837",
+      "owner": "NEEDS_ATTENTION",
+      "annotator": "WATCH",
+      "agree": false
+    },
+    {
+      "reviewIdFingerprint": "f37600470643b31167e0fcc437634c9210d455f5bbeeef0b000deb87668afcbf",
+      "owner": "NEEDS_ATTENTION",
+      "annotator": "WATCH",
+      "agree": false
+    },
+    {
+      "reviewIdFingerprint": "f83a003ff052ee4fa4a89dfa56a83f2ca595f90981b63583ac018ba4db177fb5",
+      "owner": "FYI",
+      "annotator": "FYI",
+      "agree": true
+    }
+  ]
+}

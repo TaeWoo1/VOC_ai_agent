@@ -3,26 +3,38 @@
   "rubricVersion": "v2",
   "set": "rubric-adjudication",
   "_comment": [
-    "Product-owner adjudications of RUBRIC.md section 2.2 — an ambiguity v1 section 2 does not",
-    "cover, applied at gold assembly only.",
+    "RUBRIC v2 section 2.2, applied at gold assembly and nowhere else.",
     "",
-    "WHAT THIS DOES NOT DO. It does not edit a raw label: the owner's answers stand exactly as",
-    "made, the pilot's PRIMARY and SENSITIVITY readings stand exactly as published, and the",
-    "overlap agreement in agreement.json is computed from raw answers before anything here is",
-    "applied. This file changes one thing: the tier that reaches labels.json for these reviews.",
+    "Six reviews, every one of them 3 stars with no actionable body. All six are overlap rows where",
+    "the two labelers differed, and all six differed the SAME way: the owner labeled before section",
+    "2.2 existed and called them NEEDS_ATTENTION, the annotator labeled after it and called them",
+    "WATCH. The product owner adjudicated all six to WATCH on the rubric, not row by row.",
     "",
-    "THE ORDERING IS STATED BECAUSE IT MATTERS. The ambiguity surfaced while reading the pilot,",
-    "where these two rows were the only ones a model arm missed. A rule clarified after seeing",
-    "which rows a candidate got wrong is the exact move this contract exists to prevent, so what",
-    "protects it is written down rather than assumed: the raw labels are untouched, the pilot",
-    "numbers are not restated, the clarification lowers a tier rather than raising one (it can",
-    "only REDUCE the positive class every candidate is scored against), and for the 220-row gold",
-    "set it is a genuine pre-commitment — the annotator had labeled nothing when it was made.",
+    "What this file does NOT do. It does not edit either labeler raw answers, and it does not touch",
+    "the agreement figures: binary kappa 0.614 over 30 overlap rows was computed from the raw answers",
+    "before any of this was applied, and it stands. A tier here is the tier that reaches gold.",
     "",
-    "reasonCode is left as the owner wrote it. TEXTLESS_OR_NOISE beside WATCH no longer crosses",
-    "section 3.1's actionable column, which is what made the pairing a finding in the first place."
+    "A fingerprint and a tier. No reasoning per review — the reasoning is section 2.2, which is about",
+    "the rule. The reason code and tags on an adjudicated row stay the owner own, per section 7.5,",
+    "which makes the owner the adjudicating role."
   ],
   "adjudications": [
+    {
+      "reviewIdFingerprint": "39b71da8e55f60158a0906e5af53f81481e8abb61f1b0a2cb3afdfaf12490123",
+      "tier": "WATCH"
+    },
+    {
+      "reviewIdFingerprint": "5c7e95de1af6885b7e5abaef5c38a309ab8448bb1f169289530513d1e6de8fef",
+      "tier": "WATCH"
+    },
+    {
+      "reviewIdFingerprint": "6383e82b00e460a822e54d3ae4f592b5d21e5439967741cd39c6c050c1b204a7",
+      "tier": "WATCH"
+    },
+    {
+      "reviewIdFingerprint": "9550ad60765abe6ec9987caec818dbdec8b11a4ddc2973904de250cf6c2f5434",
+      "tier": "WATCH"
+    },
     {
       "reviewIdFingerprint": "e83898c833bf614d0b79f1c8ba79d7db7e090748462b3ad7f96e318075c15837",
       "tier": "WATCH"
