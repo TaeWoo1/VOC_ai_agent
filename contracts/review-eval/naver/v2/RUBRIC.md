@@ -380,3 +380,32 @@ Optional, and only on this labeled set against the deterministic rule. The exter
 no review text leaves the machine. If a local classifier is tried, it is scored by §6.3's bars on the
 same `DEV`/`HOLDOUT` split, and "an LLM would probably do better" is not a result — the only
 admissible claim is a measured one.
+
+## 9. What this gold set is for, and what it is not
+
+**Product-owner decision, 2026-08-16.** Recorded here because it bounds the artifact: without it, the
+obvious reading of a labeling protocol this careful is that every new seller gets one.
+
+**Human labeling is not an operating procedure.** It is not repeated per seller, per category or per
+onboarding. This gold set exists to **evaluate and calibrate a classifier**, once, on one corpus —
+and it is a fixed reference from that point on.
+
+What production is meant to look like, so nothing here is mistaken for it:
+
+- a classifier triages a new seller's reviews **automatically**;
+- only the few that are low-confidence, novel, or where the text and the rating point different ways
+  go to a human for QA;
+- a new seller or a new category does **not** trigger a full relabel;
+- when domain drift is actually observed, it is re-checked with a **small audit sample**, not a new
+  gold set.
+
+Two consequences for anything built on this contract:
+
+1. **An LLM is a candidate, never a source of gold.** It is scored on this fixed human gold set by
+   §6.3's bars, like any other candidate (§8). A gold label it produced, or a human's confirmation of
+   one it showed them, measures agreement with the model and is inadmissible as ground truth.
+2. **Numbers from this corpus are one seller, one channel, one category.** §4.1 already says the
+   numbers are NAVER's; §7.4 already says 190 of the labels rest on one annotator. Neither becomes
+   less true when a classifier trained or tuned against them meets a different seller. The audit
+   sample above is the mechanism for finding that out, and it is the thing to build before claiming
+   the classifier generalises — not a bigger version of this session.
