@@ -613,12 +613,42 @@ export function mockConnectorAlerts(): ConnectorAlertView[] {
   ];
 }
 
-export function mockCapabilities(): CapabilityView[] {
-  return [];
+/**
+ * The `connector_capabilities` rows the 수집 설정 section gates on. An EMPTY list means
+ * "default-allowed", so returning `[]` for every channel handed the demo a schedulable 리뷰 cadence on
+ * the two marketplaces that cannot have one — enabled controls one panel under a badge saying the
+ * opposite.
+ *
+ * Deliberately the REVIEW row alone, taken from `V3__scheduled_collection.sql`'s seed — not the whole
+ * seed. It is the row this contradiction ran through, and every row copied here is another row that
+ * can rot against the migration. Every other channel and data type keeps the permissive default,
+ * which is what an absent row honestly means.
+ */
+export function mockCapabilities(channelCode: string): CapabilityView[] {
+  if (channelCode !== "COUPANG" && channelCode !== "NAVER") {
+    return [];
+  }
+  return [
+    {
+      channelCode,
+      connectorClass: "API",
+      dataType: "REVIEW",
+      supported: false,
+      verificationStatus: "UNSUPPORTED",
+      notes: null,
+    },
+  ];
 }
 
 // Demo capability overview: a confirmed Cafe24-style channel. Other codes get a
 // generic "auto-collect supported, no documented exclusions" shape.
+//
+// **A demo fixture may flatter the product; it may not claim a capability the product does not have.**
+// The generic branch said every channel's REVIEW was 확인됨, and for the two marketplaces that publish
+// no seller review API that was simply false — the same overclaim the acquisition axis was built to
+// stop, arriving through the fixture instead of through the model. So COUPANG and NAVER answer REVIEW
+// the way a real backend does, and Coupang carries the two facts that go with it: the Action Window
+// route it really is collected through, and the API gap that is really there.
 export function mockCapabilityOverview(channelCode: string): ChannelCapabilityOverview {
   const confirmed = (dataType: string, label: string) => ({
     dataType,
@@ -626,6 +656,48 @@ export function mockCapabilityOverview(channelCode: string): ChannelCapabilityOv
     supported: true,
     verificationStatus: "CONFIRMED",
   });
+  // No official seller review API on either marketplace — the same fact `MockApiConnector` encodes for
+  // these two channel codes, and the reason neither can be scheduled.
+  const noReviewApi = {
+    dataType: "REVIEW",
+    label: "리뷰",
+    supported: false,
+    verificationStatus: "UNSUPPORTED",
+  };
+  if (channelCode === "COUPANG") {
+    return {
+      channelCode,
+      channelNameKo: "쿠팡",
+      connectorClass: "API",
+      autoCollectSupported: true,
+      dataTypes: [
+        confirmed("ORDER_SUMMARY", "주문·매출"),
+        // Collected, just not by the connector — mirrors AcquisitionPathRegistry's one entry.
+        { ...noReviewApi, acquisitionPaths: [{ method: "ACTION_WINDOW", verificationStatus: "LIVE_PROVEN" }] },
+        confirmed("INQUIRY", "문의"),
+      ],
+      // Mirrors ChannelApiGapRegistry: the marketplace fact, not the connector's.
+      unsupportedScopes: [{ code: "REVIEW_API", label: "리뷰 API 없음 (쿠팡 미제공)" }],
+    };
+  }
+  if (channelCode === "NAVER") {
+    return {
+      channelCode,
+      channelNameKo: "네이버 스마트스토어",
+      connectorClass: "API",
+      autoCollectSupported: true,
+      // ORDER_SUMMARY alone, which is all `NaverApiConnector` serves — its own note calls INQUIRY
+      // deferred, and the seeded table agrees. REVIEW carries no acquisition path and no API-gap
+      // note: NAVER 리뷰 has a supervised export precedent but is in neither registry, and a demo is
+      // not the place to promote it. 미지원 is the honest answer for both.
+      dataTypes: [
+        confirmed("ORDER_SUMMARY", "주문·매출"),
+        noReviewApi,
+        { dataType: "INQUIRY", label: "문의", supported: false, verificationStatus: "UNSUPPORTED" },
+      ],
+      unsupportedScopes: [],
+    };
+  }
   if (channelCode === "CAFE24") {
     return {
       channelCode,
@@ -645,15 +717,25 @@ export function mockCapabilityOverview(channelCode: string): ChannelCapabilityOv
       ],
     };
   }
+  // Every remaining channel resolves to a stand-in connector or a skeleton, and `MockApiConnector`
+  // supplies no verification map at all — so the real answer for all of them is 확인 필요, never
+  // 확인됨. CONFIRMED here was the same overclaim as the REVIEW one above, spread across six channels
+  // nobody had looked at; the fix for a channel that earns it is its own branch, with evidence.
+  const needsVerification = (dataType: string, label: string) => ({
+    dataType,
+    label,
+    supported: true,
+    verificationStatus: "NEEDS_VERIFICATION",
+  });
   return {
     channelCode,
     channelNameKo: null,
     connectorClass: "API",
     autoCollectSupported: true,
     dataTypes: [
-      confirmed("ORDER_SUMMARY", "주문·매출"),
-      confirmed("REVIEW", "리뷰"),
-      confirmed("INQUIRY", "문의"),
+      needsVerification("ORDER_SUMMARY", "주문·매출"),
+      needsVerification("REVIEW", "리뷰"),
+      needsVerification("INQUIRY", "문의"),
     ],
     unsupportedScopes: [],
   };

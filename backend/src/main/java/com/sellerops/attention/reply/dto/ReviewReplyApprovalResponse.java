@@ -15,6 +15,12 @@ package com.sellerops.attention.reply.dto;
  * caller's intent is satisfied either way. A command id reused for a DIFFERENT decision is the
  * conflict, and it never reaches this record.
  *
+ * <p>It is also {@code true} for a withdrawal of a reply that is already WITHDRAWN, under a NEW
+ * command id — the exit is idempotent, so the second caller is told the state they asked for holds
+ * and that they did not cause it. {@code ReviewReplyCapabilities.canWithdraw} is false at that
+ * moment, which is not a contradiction and not a promise of a 409 either; that flag covers two
+ * situations with two different answers, and which is which is written down there, once.
+ *
  * <p>Deliberately minimal, mirroring {@code TriageDecisionResponse} on this same surface — and
  * notably it does NOT carry the approved body. A client that has just approved re-reads the
  * prep view to obtain it, which is the same path it uses on load, so there is exactly one way

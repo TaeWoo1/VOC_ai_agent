@@ -9,9 +9,19 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Honest per-channel capability badges (CONFIRMED / NEEDS_VERIFICATION /
- * UNSUPPORTED) from the V3-seeded reference data. Auth-gated like every
- * non-auth endpoint; reference data, so not org-scoped.
+ * Two per-channel capability reads that answer different questions, and must not be described as
+ * one:
+ *
+ * <ul>
+ *   <li>{@code GET .../capabilities} — the V3-seeded {@code connector_capabilities} reference rows.
+ *       This is what gates the 수집 설정 schedule controls.
+ *   <li>{@code GET .../capabilities/overview} — computed live from the connector actually resolved,
+ *       plus the channel's own official-API gaps. This is what the capability BADGES render.
+ * </ul>
+ *
+ * <p>They disagree by design — several API connectors are never seeded into the table at all — so
+ * calling either one "the capability badges" is how a change to one gets reasoned about as if it
+ * moved the other. Auth-gated like every non-auth endpoint; reference data, so not org-scoped.
  */
 @RestController
 @RequestMapping("/api/channels/{code}/capabilities")
