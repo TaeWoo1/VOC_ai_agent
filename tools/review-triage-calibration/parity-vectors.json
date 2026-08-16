@@ -1,0 +1,134 @@
+{
+  "spec": "review-eval/naver/v2 sampling parity",
+  "note": "Synthetic fingerprints and synthetic bodies only - no real seller data. Pins the JavaScript that DREW the sample to the Java that WEIGHTS it; a disagreement would divide every population estimate by an inclusion probability the row was never drawn under. splitFirstByte is recorded so the Java side can prove it covers a byte above 127 - Java bytes are signed and an unmasked read would sort those rows the wrong way.",
+  "order": [
+    {
+      "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+      "sampleOrderKey": "6e8de295d6d2f6340cad48c2b0517bbb08354615af4c78d5ae07ae38b2df3e02",
+      "splitFirstByte": 16,
+      "split": "DEV"
+    },
+    {
+      "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "sampleOrderKey": "752010a39da38b5b9db4c9e925ad7ab47d46297113e1208a6e561255239d8164",
+      "splitFirstByte": 49,
+      "split": "HOLDOUT"
+    },
+    {
+      "fingerprint": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "sampleOrderKey": "b725702b7de924abde55c8ee10f58fb35b5e6c545c06ce457e49b83d7fab2790",
+      "splitFirstByte": 124,
+      "split": "DEV"
+    },
+    {
+      "fingerprint": "a3f1999999999999999999999999999999999999999999999999999999999999",
+      "sampleOrderKey": "3194e793622db13010cb5305f75f88a1241a3a3ea3055ae6620082f350d76624",
+      "splitFirstByte": 116,
+      "split": "DEV"
+    },
+    {
+      "fingerprint": "deadbeef00000000000000000000000000000000000000000000000000000000",
+      "sampleOrderKey": "900ba32802350ef962df2fca504ed69ddec659d0338072c39899ba3f241c44a8",
+      "splitFirstByte": 42,
+      "split": "DEV"
+    },
+    {
+      "fingerprint": "777777777777777777777777777777777777777777777777777777777777777e",
+      "sampleOrderKey": "5f43145ae0aa69862a8514f91688e1818f39a31034c8a3ea4c878da1f9b8b8c2",
+      "splitFirstByte": 52,
+      "split": "DEV"
+    },
+    {
+      "fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0",
+      "sampleOrderKey": "f52f2bab50a2a84856909837101a1f81deaab263c2138be82bd6a073b8674a79",
+      "splitFirstByte": 141,
+      "split": "HOLDOUT"
+    },
+    {
+      "fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2",
+      "sampleOrderKey": "addce501b2677c31b43ae4e480d3555f2515adb703ac1d61d072606a7fd2a877",
+      "splitFirstByte": 254,
+      "split": "DEV"
+    }
+  ],
+  "strata": [
+    {
+      "rating": 1,
+      "body": "가가가가가",
+      "note": "low short",
+      "stratum": "LOW_S"
+    },
+    {
+      "rating": 2,
+      "body": "가가가가가가가가가가가가가가가가가가가",
+      "note": "low, one below the M boundary",
+      "stratum": "LOW_S"
+    },
+    {
+      "rating": 2,
+      "body": "가가가가가가가가가가가가가가가가가가가가",
+      "note": "low, exactly the M boundary",
+      "stratum": "LOW_M"
+    },
+    {
+      "rating": 1,
+      "body": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+      "note": "low, one below L",
+      "stratum": "LOW_M"
+    },
+    {
+      "rating": 1,
+      "body": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+      "note": "low, exactly L",
+      "stratum": "LOW_L"
+    },
+    {
+      "rating": 3,
+      "body": "",
+      "note": "mid, empty body",
+      "stratum": "MID_S"
+    },
+    {
+      "rating": 3,
+      "body": "가가가가가가가가가가가가가가가가가가가가가가가가가",
+      "note": "mid M",
+      "stratum": "MID_M"
+    },
+    {
+      "rating": 3,
+      "body": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+      "note": "mid L",
+      "stratum": "MID_L"
+    },
+    {
+      "rating": 4,
+      "body": "가가가가가가가가가가가가가가가가가가가",
+      "note": "high S",
+      "stratum": "HIGH_S"
+    },
+    {
+      "rating": 5,
+      "body": "가가가가가가가가가가가가가가가가가가가가",
+      "note": "high M",
+      "stratum": "HIGH_M"
+    },
+    {
+      "rating": 5,
+      "body": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+      "note": "high L",
+      "stratum": "HIGH_L"
+    },
+    {
+      "rating": 5,
+      "body": "😊😊😊😊😊😊😊😊😊😊😊😊😊😊😊😊😊😊😊😊",
+      "note": "high, 20 emoji = 20 code points, not 40 UTF-16 units",
+      "stratum": "HIGH_M"
+    },
+    {
+      "rating": null,
+      "body": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+      "note": "no rating is outside the frame",
+      "stratum": null
+    }
+  ]
+}
