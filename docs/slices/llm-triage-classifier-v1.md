@@ -218,3 +218,38 @@ separate axis that never feeds a tier, in the order fixed in
 
 `DEV` evaluation → independent review → freeze exactly one candidate → **report and stop**. The
 `HOLDOUT` is read once, after the freeze, and only on the product owner's word.
+
+---
+
+## 10. The §8.6 change log
+
+Every model, prompt and version run against `DEV` goes in this table — **including the ones that
+scored badly, and including a run abandoned halfway.** §8.6 requires it because a prompt tuned
+against `DEV` until the number rises is threshold-fitting performed in prose, and the only defence
+against that is a record a reader can count.
+
+Read this table before believing any number in it: a candidate that needed six passes to clear the
+bars is a different object from one that cleared them on the first.
+
+| # | date | vendor · model | prompt | DEV recall | DEV precision (95% low) | 4–5★ FP | failures | note |
+|---|---|---|---|---|---|---|---|---|
+| — | — | — | `triage-prompt/v1` | — | — | — | — | **no run yet — blocked on an API key (§7)** |
+
+**Baseline for comparison**, from `ReviewTriageEvalIT` on the same `DEV` half:
+
+| candidate | recall | precision (95% low) | 4–5★ FP |
+|---|---|---|---|
+| `rules-v1` PRIMARY | 0.171 | 0.610 | 0.000 |
+| `rules-v1` SENSITIVITY | 0.147 | 0.566 | 0.000 |
+
+Bars, from `v1` §5, unchanged: recall ≥ 0.30, precision Wilson 95% lower bound ≥ 0.80,
+4–5★ false-positive rate ≤ 0.05.
+
+### 10.1 How a run is recorded
+
+One row per `LlmTriageEvalIT` invocation. If a run is repeated with no change at all — a retry after
+a transport failure — it amends the existing row's failure count rather than adding one, because it
+is the same candidate. Anything else is a new row.
+
+The freeze, when it comes, names a single line of this table and nothing else moves afterwards. Then
+and only then does `HOLDOUT` get read, once, by `ReviewTriageEvalIT`.
