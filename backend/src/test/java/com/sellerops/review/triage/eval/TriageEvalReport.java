@@ -8,6 +8,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 
 /**
@@ -253,5 +254,50 @@ public final class TriageEvalReport {
 
     public static List<Row> only(List<Row> rows, String split) {
         return rows.stream().filter(r -> r.split().equals(split)).toList();
+    }
+
+    /** {@code kappa} is {@code NaN} when expected agreement is total — see {@link #cohenKappa}. */
+    public record Kappa(double kappa, double observed, double expected, int n) {
+
+        public boolean defined() {
+            return !Double.isNaN(kappa);
+        }
+    }
+
+    /**
+     * Cohen's κ over two aligned label sequences.
+     *
+     * <p>Returns {@code NaN} rather than 1.0 when {@code pe == 1} — two raters who agree on
+     * everything because everything is one class. That is expected agreement, not agreement, and
+     * reporting 1.0 there would be the most flattering possible lie on exactly the corpus shape this
+     * one has: 28 of the 37 pilot rows are a single tier.
+     *
+     * <p>Mirrors {@code tools/review-triage-calibration/kappa.mjs}, which computes the human-human
+     * number. Two implementations, one definition — a divergence would make the human bar and the
+     * model bar incomparable while both looked fine.
+     */
+    public static Kappa cohenKappa(List<String> a, List<String> b) {
+        if (a.size() != b.size()) {
+            throw new IllegalArgumentException("κ needs aligned sequences");
+        }
+        int n = a.size();
+        if (n == 0) {
+            return new Kappa(Double.NaN, 0, 0, 0);
+        }
+        int agree = 0;
+        for (int i = 0; i < n; i++) {
+            if (a.get(i).equals(b.get(i))) {
+                agree++;
+            }
+        }
+        double po = (double) agree / n;
+        // Summed over the classes THIS rater used. A class only the other rater used contributes
+        // p_a(c) * p_b(c) = 0, so the union and this set give the same pe.
+        double pe = 0;
+        for (String c : Set.copyOf(a)) {
+            pe += (a.stream().filter(c::equals).count() / (double) n)
+                    * (b.stream().filter(c::equals).count() / (double) n);
+        }
+        return new Kappa(pe >= 1 ? Double.NaN : (po - pe) / (1 - pe), po, pe, n);
     }
 }

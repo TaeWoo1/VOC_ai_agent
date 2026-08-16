@@ -376,10 +376,51 @@ the mitigations above bound what travels with the text rather than pretending no
 
 ## 8. An LLM is compared only against these same numbers
 
-Optional, and only on this labeled set against the deterministic rule. The external-LLM fence stands:
-no review text leaves the machine. If a local classifier is tried, it is scored by §6.3's bars on the
-same `DEV`/`HOLDOUT` split, and "an LLM would probably do better" is not a result — the only
-admissible claim is a measured one.
+Optional, and only on a labeled set against the deterministic rule. Scored by §6.3's bars, and "an
+LLM would probably do better" is not a result — the only admissible claim is a measured one.
+
+### 8.1 The external-LLM fence, and the one hole cut in it
+
+The fence's default is unchanged and remains the rule everywhere else: **no review text leaves the
+machine.**
+
+**Product-owner decision, 2026-08-16**, narrowly scoped to the §10 pilot. It is written out in full
+because a permission this shape is only safe if its edges are exact.
+
+**Permitted**
+
+- the **37 pilot rows of §10.1 only** — NAVER corpus, nothing else;
+- **manual, blind evaluation in a Claude or ChatGPT consumer subscription** — a person pastes,
+  a person reads back;
+- payload limited to **body text, star rating, and an opaque evaluation key** minted for this pilot;
+- purpose limited to **candidate screening**.
+
+**Forbidden**
+
+- the review id or its fingerprint; the author; the seller, channel, product, or date; any other
+  identifying metadata;
+- **any Coupang review**, under any circumstances — `docs/coupang_review_policy_gate_v1.md`'s
+  D-limits are untouched by this;
+- showing a model the human gold labels, the heuristic's prediction, or any other candidate's answer;
+- reading this as permission for **production** external-LLM transmission, for an API integration, or
+  for a second corpus. It authorises one screening exercise and expires with it.
+
+**Privacy settings, required before a paste**
+
+- ChatGPT: **Temporary Chat**, model-improvement training **off**;
+- Claude: **Incognito**, model-improvement training **off**.
+
+⚠ **This is still cloud transmission.** Those settings reduce retention and training use; they do not
+make the paste local, and they are a vendor's setting rather than a guarantee this repository can
+verify. Real customer prose reaches a third party. That is the decision, stated plainly rather than
+softened by the mitigations around it.
+
+### 8.2 What a model result may be used for
+
+Exactly what §10.4 says and nothing more: a **rule-out screen**. A model that fails there sends the
+work back to the full human-gold protocol; a model that passes licenses verification sampling, not a
+model-authored gold set. §9's rule holds unchanged — **no model produces a gold label**, and a human
+confirming a label a model showed them measures agreement with the model.
 
 ## 9. What this gold set is for, and what it is not
 
