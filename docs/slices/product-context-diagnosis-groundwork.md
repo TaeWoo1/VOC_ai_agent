@@ -155,16 +155,29 @@ still offers no automatic reply, and this axis must not become a route to one:
 
 ## 6. What the next unit would have to do first
 
-In order, and none of it started:
+**Not before `Review Triage Calibration v1` closes** — the 220-row gold set, agreement, adjudication
+and the `DEV` evaluation come first, and none of the steps below may start until they are done
+(product owner, 2026-08-16).
 
-1. **Decide the product-identity question.** `channel_products` is the table for it and it is empty.
-   Until a product has a stable channel-side identity, "the same listing" is a name match.
-2. **Establish, per channel, whether an official product API exists** and what normalized fields it
-   returns. External research; no assumption in this document.
-3. **Build the normalized product-context record** — title, options, attributes, description text —
-   with the raw forms explicitly excluded.
-4. **Then** write the axis rubric and draw its own sample. Not before: an axis whose evidence cannot
-   be fetched is a taxonomy, not a feature.
+In this order, and none of it started:
+
+1. **Establish, per channel, whether an official seller-product API exists** — NAVER, Coupang,
+   Cafe24. External research; this document assumes none, and the roadmap §4.1 records none.
+2. **Confirm from the real API what it actually returns**: which identifier it is keyed by, what
+   coverage it has against the products already stored, and which normalized fields come back.
+3. **Then** settle what `channel_products` has to hold, from (2)'s findings.
+4. **Then** design the normalized product-context record — title, options, attributes, description
+   text — with the raw forms explicitly excluded.
+5. **Then** write the diagnosis rubric and draw its own sample.
+
+> ⚠ **Do not extend `channel_products`' schema or its identity model before step 2.** An earlier
+> draft of this section had that first, which is backwards: it would mean choosing the shape of a
+> channel-side identity before knowing which identifier the API is keyed by, and a schema chosen
+> that way is one the first real response has to be bent to fit. The empty table stays empty until
+> there is an API answer to design it against. (Corrected by the product owner, 2026-08-16.)
+
+An axis whose evidence cannot be fetched is a taxonomy, not a feature — which is why every step
+above is about the evidence and only the last is about the judgment.
 
 ## 7. What stays true meanwhile
 
