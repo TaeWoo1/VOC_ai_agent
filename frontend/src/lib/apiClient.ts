@@ -444,11 +444,15 @@ export const api = {
   // fallback, so a dead backend fails closed instead of rendering a fake feed of
   // inquiries/reviews. Honors the VITE_USE_MOCKS demo escape hatch. Mirrors the
   // other *Strict reads.
-  async getInboxStrict(): Promise<InboxResponse> {
+  async getInboxStrict(params: { type?: "INQUIRY" | "REVIEW"; limit?: number } = {}): Promise<InboxResponse> {
     if (USE_MOCKS) {
-      return mockInbox();
+      return mockInbox(params);
     }
-    const { data } = await http.get<InboxResponse>("/api/inbox");
+    const query = new URLSearchParams();
+    if (params.type) query.set("type", params.type);
+    if (params.limit !== undefined) query.set("limit", String(params.limit));
+    const suffix = query.toString();
+    const { data } = await http.get<InboxResponse>(`/api/inbox${suffix ? `?${suffix}` : ""}`);
     return data;
   },
   // Stored rule-based per-item analysis (read-only) for the org. Enrichment over

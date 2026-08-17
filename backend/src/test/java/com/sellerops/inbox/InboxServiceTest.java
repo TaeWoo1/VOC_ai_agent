@@ -79,6 +79,31 @@ class InboxServiceTest {
         assertThat(review.snippet()).isEqualTo(CLEAN_REVIEW_BODY);
     }
 
+    /**
+     * Product assembly A4: the unanswered count is counted server-side, not derived from the capped rows,
+     * and `type=INQUIRY` reads inquiries only.
+     */
+    @Test
+    void countsUnansweredInquiriesUncappedAndFiltersByType() {
+        for (int i = 0; i < 3; i++) {
+            Inquiry extra = new Inquiry();
+            extra.setOrgId(org);
+            extra.setChannelId(channel);
+            extra.setBody("추가 문의 " + i);
+            extra.setStatus("UNANSWERED");
+            extra.setReceivedAt(Instant.parse("2026-06-0" + (1 + i) + "T00:00:00Z"));
+            inquiries.save(extra);
+        }
+        var page = service.inbox(org, "INQUIRY", 2);
+        assertThat(page.items()).hasSize(2);
+        assertThat(page.items()).allMatch(item -> item.type().equals("INQUIRY"));
+        assertThat(page.unansweredInquiries())
+                .isEqualTo(inquiries.countByOrgIdAndStatus(org, "UNANSWERED"))
+                .isGreaterThanOrEqualTo(3);
+        var reviewsOnly = service.inbox(org, "REVIEW", 50);
+        assertThat(reviewsOnly.items()).isNotEmpty().allMatch(item -> item.type().equals("REVIEW"));
+    }
+
     /** Product assembly A2 (2026-08-18): a row carries its channel id so a client can resolve it to an account. */
     @Test
     void carriesTheChannelIdOnEveryRow() {

@@ -90,23 +90,28 @@ describe("Today — 확인이 필요한 리뷰", () => {
 });
 
 describe("Today — 답변이 필요한 문의", () => {
-  it("counts needsReply over the feed and links to the state-filtered 문의 page", () => {
+  it("takes the server's uncapped unanswered count — not the rows it happened to receive — and links to the state-filtered 문의 page", () => {
     const t = buildInquiryToday(
-      [
-        feed({ id: "i1", type: "INQUIRY", status: "UNANSWERED", productName: "몰딩 A" }),
-        feed({ id: "i2", type: "INQUIRY", status: "ANSWERED" }),
-        feed({ id: "r1", type: "REVIEW", status: "NEGATIVE", rating: 1 }),
-      ],
+      {
+        items: [
+          feed({ id: "i1", type: "INQUIRY", status: "UNANSWERED", productName: "몰딩 A" }),
+          feed({ id: "i2", type: "INQUIRY", status: "ANSWERED" }),
+        ],
+        // The preview window held one open row; the org has 37. The tile says 37, as /inquiries does.
+        unansweredInquiries: 37,
+      },
       new Map(),
     );
-    expect(t.signal).toEqual({ kind: "READY", count: 1 });
+    expect(t.signal).toEqual({ kind: "READY", count: 37 });
     expect(t.to).toBe(INQUIRY_NEEDS_REPLY_PATH);
     expect(t.rows).toEqual([{ key: "i1", title: "몰딩 A", meta: "채널 가", to: "/inquiries/i1" }]);
   });
 
-  it("is unavailable when the feed failed and not-connected when it is empty", () => {
+  it("is unavailable when the feed failed and not-connected when nothing arrived and nothing is open", () => {
     expect(buildInquiryToday(null, new Map()).signal).toEqual({ kind: "UNAVAILABLE" });
-    expect(buildInquiryToday([], new Map()).signal).toEqual({ kind: "NOT_CONNECTED" });
+    expect(buildInquiryToday({ items: [], unansweredInquiries: 0 }, new Map()).signal).toEqual({ kind: "NOT_CONNECTED" });
+    // Rows empty but the org has open inquiries elsewhere (a tiny window): still a real count.
+    expect(buildInquiryToday({ items: [], unansweredInquiries: 4 }, new Map()).signal).toEqual({ kind: "READY", count: 4 });
   });
 });
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
 import { Empty } from "../../components/ui/Empty";
 import { BtnLink } from "../../components/ui/Btn";
@@ -10,8 +10,10 @@ import { api } from "../../lib/apiClient";
 import { analysisKey, buildAnalysisIndex } from "../../lib/inboxView";
 import {
   DEFAULT_FILTERS,
+  INQUIRY_STATE_OPTIONS,
   STATE_OPTIONS,
   applyFilters,
+  channelOptions,
   resolveSelection,
   sortByPriority,
   type InboxFilters,
@@ -20,13 +22,15 @@ import {
 import type { FeedItem, ItemAnalysis } from "../../lib/types";
 
 /**
- * 고객 인박스 — 문의 and 리뷰 from every connected channel, in one worst-first queue.
+ * 문의 (`/inquiries`, scope="INQUIRY") — inquiries from every connected channel, reply-needed first.
+ * The same component still renders the mixed 문의+리뷰 queue with scope="ALL", which no route uses
+ * since product assembly A2 (`/inbox` redirects); it is kept only so nothing about the mixed mode has
+ * to be re-derived if a screen ever needs it again.
  *
- * Two doors into the same workspace. `/inquiries` renders it with `scope="INQUIRY"` — the 문의
- * destination of the workflow IA (`docs/product_assembly_ia_v1.md` §3): only inquiries, no type
- * filter, links stay under `/inquiries`. `/inbox` remains the mixed queue the home tiles and
- * memory evidence links still point at. Same data, same panes, same response workflow — the scope
- * only decides which rows are in play and where a row's link goes.
+ * On the 문의 surface (A4): the feed is read as `type=INQUIRY` up to the server's ceiling, the header
+ * count is the server's own uncapped `unansweredInquiries` — the same number the home shows — and
+ * `?state` / `?channel` ARE the filter state both ways (a press rewrites the URL with `replace`; an
+ * unknown value is scrubbed). Choosing a row keeps the filters in the URL.
  *
  * Three panes on desktop: filters, list, detail. On narrow screens the detail replaces the list
  * once a row is chosen, so the seller is never scrolled past a pane they cannot see.
@@ -45,22 +49,57 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
   const [workItems, setWorkItems] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-  // `?state=NEEDS_REPLY` is the home's deep-link seam (`lib/todayInbox.ts`): the tile's count is
-  // `needsReply` over this same feed, so landing under that filter shows exactly those rows. Read
-  // once; the rail owns the filters from then on. Unknown values fall back to the default.
-  const [searchParams] = useSearchParams();
-  const [filters, setFilters] = useState<InboxFilters>(() => {
-    const requested = searchParams.get("state");
-    const state = STATE_OPTIONS.find((option) => option.value === requested)?.value as StateFilter | undefined;
-    return state ? { ...DEFAULT_FILTERS, state } : DEFAULT_FILTERS;
-  });
+  const { search } = useLocation();
+  const [unanswered, setUnanswered] = useState<number | null>(null);
+  const [capped, setCapped] = useState(false);
+  const stateOptions = inquiriesOnly ? INQUIRY_STATE_OPTIONS : STATE_OPTIONS;
+  /**
+   * `?state` and `?channel` are the filter (product assembly A4): the home links here with
+   * `?state=NEEDS_REPLY`, and a press on the rail rewrites the URL (`replace`, no history pile-up).
+   * Type is fixed by the scope and period stays local — neither is a deep-link seam. Unknown values
+   * fall back to the default and are scrubbed once the rows (and so the channel list) have loaded.
+   */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawState = searchParams.get("state");
+  const rawChannel = searchParams.get("channel");
+  const state = (stateOptions.find((option) => option.value === rawState)?.value ?? "ALL") as StateFilter;
+  const [period, setPeriod] = useState<InboxFilters["period"]>(DEFAULT_FILTERS.period);
+  const filters: InboxFilters = useMemo(
+    () => ({
+      type: inquiriesOnly ? "INQUIRY" : DEFAULT_FILTERS.type,
+      state,
+      period,
+      channel: rawChannel,
+    }),
+    [inquiriesOnly, state, period, rawChannel],
+  );
+  const setFilters = useCallback(
+    (next: InboxFilters) => {
+      setPeriod(next.period);
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          if (next.state === "ALL") params.delete("state");
+          else params.set("state", next.state);
+          if (next.channel) params.set("channel", next.channel);
+          else params.delete("channel");
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
     setFailed(false);
     try {
-      const inbox = await api.getInboxStrict();
+      // 문의: inquiries only, up to the server ceiling; the count beside the list is the server's own.
+      const inbox = await api.getInboxStrict(inquiriesOnly ? { type: "INQUIRY", limit: 500 } : {});
       setItems(inbox.items);
+      setUnanswered(typeof inbox.unansweredInquiries === "number" ? inbox.unansweredInquiries : null);
+      setCapped(inquiriesOnly && inbox.items.length >= 500);
     } catch {
       setItems(null);
       setFailed(true);
@@ -93,6 +132,26 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
     void load();
   }, [load]);
 
+  // Scrub a stale filter once the rows are known: a state this surface does not offer, or a channel
+  // no loaded row belongs to, would silently show an empty list under a lit control.
+  useEffect(() => {
+    if (items === null) return;
+    const knownChannels = new Set(channelOptions(items).map((option) => option.value));
+    const badState = rawState !== null && !stateOptions.some((option) => option.value === rawState);
+    const badChannel = rawChannel !== null && !knownChannels.has(rawChannel);
+    if (badState || badChannel) {
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          if (badState) params.delete("state");
+          if (badChannel) params.delete("channel");
+          return params;
+        },
+        { replace: true },
+      );
+    }
+  }, [items, rawState, rawChannel, stateOptions, setSearchParams]);
+
   const analysisIndex = useMemo(() => buildAnalysisIndex(analyses), [analyses]);
   const all = useMemo(
     () => (inquiriesOnly ? (items ?? []).filter((item) => item.type === "INQUIRY") : items ?? []),
@@ -108,7 +167,24 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
   return (
     <>
       {inquiriesOnly ? (
-        <PageHead title="문의" description="채널에 들어온 문의를 답변이 필요한 것부터 확인합니다." />
+        <PageHead
+          title="문의"
+          description="답변 필요 → 답변함 순으로 봅니다. 답변은 SellerOps가 보내지 않고, 준비한 답을 채널에서 직접 등록합니다."
+          meta={
+            unanswered !== null ? (
+              <>
+                <span className="text-sm font-semibold text-ink">
+                  지금 답변이 필요한 문의 <span className="tabular-nums">{unanswered}</span>건
+                </span>
+                {capped ? (
+                  <span className="break-keep text-sm text-muted">
+                    목록은 최근 500건까지 표시됩니다.
+                  </span>
+                ) : null}
+              </>
+            ) : undefined
+          }
+        />
       ) : (
         <PageHead
           title="고객 인박스"
@@ -138,6 +214,7 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
               filters={filters}
               onChange={setFilters}
               showType={!inquiriesOnly}
+              stateOptions={stateOptions}
             />
           </div>
 
@@ -157,6 +234,7 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
                 analyses={analysisIndex}
                 selectedId={selection.kind === "FOUND" ? selection.item.id : null}
                 basePath={basePath}
+                search={search}
               />
             )}
           </div>

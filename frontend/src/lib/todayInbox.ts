@@ -8,7 +8,8 @@
 //      Failure is an honest absence, never 0.
 //   3. Sources are the workflow surfaces themselves: 리뷰 = the per-account record under
 //      `tier=NEEDS_ATTENTION` (its `total` IS what /reviews/:account?tier=NEEDS_ATTENTION shows);
-//      문의 = the inbox feed under `needsReply` (what /inquiries?state=NEEDS_REPLY shows); 연결 =
+//      문의 = the server's own uncapped UNANSWERED count (`InboxResponse.unansweredInquiries`, the
+//      number /inquiries prints in its header; its NEEDS_REPLY filter lists those rows); 연결 =
 //      channels whose own status asks for a person + open connector alerts.
 //   4. 주문 is absent: the order model has no actionable state yet (PAID / UNKNOWN only).
 
@@ -18,7 +19,7 @@ import { needsReply, priorityRank } from "./inboxWorkspace";
 import { analysisKey } from "./inboxView";
 import type { ReviewAccount } from "./reviewAccounts";
 import { reviewRecordPath, reviewWord } from "./reviewRecord";
-import type { ChannelReviewPageView, FeedItem, ItemAnalysis } from "./types";
+import type { ChannelReviewPageView, FeedItem, InboxResponse, ItemAnalysis } from "./types";
 
 /** One row under a Today item — a thing to open, never a summary. */
 export interface TodayRow {
@@ -138,19 +139,22 @@ export function buildReviewToday(sources: readonly ReviewSource[] | null): Today
 /**
  * 답변이 필요한 문의.
  *
- * `inbox` is null when the feed read failed; empty when nothing has arrived. The count is
- * `needsReply` over the feed — exactly what /inquiries?state=NEEDS_REPLY lists — so the headline is
- * always a link. Rows are the worst-first top few (urgent analysis first, then newest).
+ * `feed` is null when the read failed. The count is the server's own `unansweredInquiries` —
+ * counted over the whole org, never over the capped rows — which is the number /inquiries prints
+ * and whose rows its NEEDS_REPLY filter lists; so the headline is always a link. Rows are the
+ * worst-first top few of the rows that came back (urgent analysis first, then newest).
+ * "Nothing connected" is a feed with no rows and nothing unanswered.
  */
 export function buildInquiryToday(
-  inbox: readonly FeedItem[] | null,
+  feed: Pick<InboxResponse, "items" | "unansweredInquiries"> | null,
   index: Map<string, ItemAnalysis>,
 ): TodayItem {
   const label = "답변이 필요한 문의";
-  if (inbox === null) {
+  if (feed === null) {
     return item("inquiries", label, { kind: "UNAVAILABLE" }, INQUIRY_NEEDS_REPLY_PATH, [], [], null);
   }
-  if (inbox.length === 0) {
+  const inbox: readonly FeedItem[] = feed.items;
+  if (inbox.length === 0 && feed.unansweredInquiries === 0) {
     return item("inquiries", label, { kind: "NOT_CONNECTED" }, INQUIRY_NEEDS_REPLY_PATH, [], [], null);
   }
   const open = inbox.filter(needsReply);
@@ -171,7 +175,7 @@ export function buildInquiryToday(
   return item(
     "inquiries",
     label,
-    { kind: "READY", count: open.length },
+    { kind: "READY", count: feed.unansweredInquiries },
     INQUIRY_NEEDS_REPLY_PATH,
     [],
     rows,

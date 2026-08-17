@@ -63,7 +63,7 @@ function renderInbox(path = "/inbox") {
 }
 
 beforeEach(() => {
-  getInboxStrict.mockResolvedValue({ items: ITEMS, total: ITEMS.length });
+  getInboxStrict.mockResolvedValue({ items: ITEMS, total: ITEMS.length, unansweredInquiries: 1 });
   getItemAnalysisStrict.mockResolvedValue([]);
   getInquiryQueueStrict.mockResolvedValue({ content: [] });
   getInquiryDetailStrict.mockResolvedValue({
@@ -138,22 +138,45 @@ describe("문의 — the inbox scoped to inquiries (/inquiries)", () => {
     expect(await screen.findByText("폭이 몇 mm인가요")).toBeInTheDocument();
   });
 
-  it("?state=NEEDS_REPLY lands filtered to exactly the rows the home counted", async () => {
+  it("?state=NEEDS_REPLY lands filtered to exactly the rows the home counted, keeps the filter on row links, and prints the server count", async () => {
     getInboxStrict.mockResolvedValue({
       items: [ITEMS[0], feedItem({ id: "i2", type: "INQUIRY", status: "ANSWERED", productName: "답변한 문의" })],
       total: 2,
+      unansweredInquiries: 1,
     });
     renderInbox("/inquiries?state=NEEDS_REPLY");
     const list = await screen.findByLabelText("고객 문의·리뷰 목록");
     const links = within(list).getAllByRole("link");
     expect(links).toHaveLength(1);
-    expect(links[0]).toHaveAttribute("href", "/inquiries/i1");
+    expect(links[0]).toHaveAttribute("href", "/inquiries/i1?state=NEEDS_REPLY");
     const rail = screen.getByLabelText("인박스 필터");
     expect(within(rail).getByRole("button", { name: "답변 필요" })).toHaveAttribute("aria-pressed", "true");
+    // Workflow order on the 문의 surface, and no review-only 확인 필요 option.
+    const stateRow = within(rail).getByRole("group", { name: "상태" });
+    expect(within(stateRow).getAllByRole("button").map((b) => b.textContent)).toEqual(["답변 필요", "답변함", "전체"]);
+    expect(screen.getByText(/지금 답변이 필요한 문의/)).toHaveTextContent("1");
+    // 문의 reads inquiries only, up to the ceiling.
+    expect(getInboxStrict).toHaveBeenCalled();
+  });
+
+  it("a rail press rewrites ?state, and an unknown state is scrubbed from the URL", async () => {
+    const user = userEvent.setup();
+    renderInbox("/inquiries?state=NOPE");
+    const rail = await screen.findByLabelText("인박스 필터");
+    // Unknown state → treated as 전체 (and scrubbed), so the list is unfiltered.
+    const stateRow = within(rail).getByRole("group", { name: "상태" });
+    expect(within(stateRow).getByRole("button", { name: "전체" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(within(rail).getByRole("button", { name: "답변함" }));
+    expect(within(rail).getByRole("button", { name: "답변함" })).toHaveAttribute("aria-pressed", "true");
+    // Nothing is answered in the fixture: the filtered-empty line, not the empty-record one.
+    expect(screen.getByText("선택한 조건에 해당하는 항목이 없습니다.")).toBeInTheDocument();
+    await user.click(within(rail).getByRole("button", { name: "답변 필요" }));
+    const list = screen.getByLabelText("고객 문의·리뷰 목록");
+    expect(within(list).getAllByRole("link")[0]).toHaveAttribute("href", "/inquiries/i1?state=NEEDS_REPLY");
   });
 
   it("says 문의 in its empty state", async () => {
-    getInboxStrict.mockResolvedValue({ items: [ITEMS[1]], total: 1 });
+    getInboxStrict.mockResolvedValue({ items: [ITEMS[1]], total: 1, unansweredInquiries: 0 });
     renderInbox("/inquiries");
     expect(await screen.findByText("아직 들어온 문의가 없습니다")).toBeInTheDocument();
   });
@@ -194,7 +217,7 @@ describe("고객 인박스 — response workflow", () => {
     renderInbox("/inbox/i1");
     await screen.findByLabelText("선택한 항목");
     expect(screen.queryByText("응답 제안")).toBeNull();
-    expect(screen.getByText(/응답 작업으로 연결되어 있지 않아/)).toBeInTheDocument();
+    expect(screen.getByText(/답변 방향을 제안할 수 없습니다/)).toBeInTheDocument();
   });
 
   it("shows the inquiry body and the response suggestion once a work item resolves", async () => {
@@ -241,7 +264,7 @@ describe("고객 인박스 — response workflow", () => {
 
 describe("고객 인박스 — empty and failed states", () => {
   it("invites a connection when nothing has arrived", async () => {
-    getInboxStrict.mockResolvedValue({ items: [], total: 0 });
+    getInboxStrict.mockResolvedValue({ items: [], total: 0, unansweredInquiries: 0 });
     renderInbox();
     expect(await screen.findByText("아직 들어온 문의와 리뷰가 없습니다")).toBeInTheDocument();
   });

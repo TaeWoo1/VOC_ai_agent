@@ -119,6 +119,7 @@ beforeEach(() => {
       feedItem({ id: "r1", type: "REVIEW", status: "NEGATIVE", rating: 1 }),
     ],
     total: 3,
+    unansweredInquiries: 1,
   });
   getItemAnalysisStrict.mockResolvedValue([]);
   getReviewIssuesStrict.mockResolvedValue([{ id: "iss1", dismissed: false }, { id: "iss2", dismissed: true }]);
@@ -175,9 +176,15 @@ describe("홈 — every count is its destination's count", () => {
     expect(headline).toHaveAttribute("href", "/reviews/acc-nv?tier=NEEDS_ATTENTION");
   });
 
-  it("문의: counts needsReply over the feed and links to the state-filtered 문의 page and rows", async () => {
+  it("문의: shows the server's uncapped unanswered count and links to the state-filtered 문의 page and rows", async () => {
+    getInboxStrict.mockResolvedValue({
+      items: [feedItem({ id: "i1", type: "INQUIRY", status: "UNANSWERED", productName: "케이블 몰딩" })],
+      total: 1,
+      unansweredInquiries: 37,
+    });
     renderHome();
-    const headline = await screen.findByRole("link", { name: /답변이 필요한 문의 1/ });
+    const headline = await screen.findByRole("link", { name: /답변이 필요한 문의 37/ });
+    expect(getInboxStrict).toHaveBeenCalled();
     expect(headline).toHaveAttribute("href", "/inquiries?state=NEEDS_REPLY");
     const rows = screen.getByRole("list", { name: "답변이 필요한 문의 목록" });
     expect(within(rows).getByRole("link", { name: /케이블 몰딩/ })).toHaveAttribute("href", "/inquiries/i1");
@@ -198,7 +205,7 @@ describe("홈 — every count is its destination's count", () => {
 
 describe("홈 — a number only when a number was measured", () => {
   it("says 자료를 연결하면 표시됩니다 — not 0 — before anything has arrived", async () => {
-    getInboxStrict.mockResolvedValue({ items: [], total: 0 });
+    getInboxStrict.mockResolvedValue({ items: [], total: 0, unansweredInquiries: 0 });
     getSellerAccountsStrict.mockResolvedValue([]);
     renderHome();
     const reply = await screen.findByRole("link", { name: /답변이 필요한 문의/ });

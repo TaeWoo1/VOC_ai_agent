@@ -214,8 +214,8 @@ export function mockDashboard(): DashboardSummaryResponse {
   };
 }
 
-export function mockInbox(): InboxResponse {
-  const items: InboxResponse["items"] = [
+export function mockInbox(params: { type?: "INQUIRY" | "REVIEW"; limit?: number } = {}): InboxResponse {
+  const all: InboxResponse["items"] = [
     { id: "mock-inq-1", type: "INQUIRY", channelNameKo: "쿠팡", productName: "선바로 광폭 케이블 몰딩", snippet: "이 제품 폭이 몇 mm인가요? 굵은 전선도 들어가나요?", rating: null, status: "UNANSWERED", receivedAt: hoursAgoISO(2) },
     { id: "mock-rev-1", type: "REVIEW", channelNameKo: "네이버 스마트스토어", productName: "전선몰딩 1호 (백색)", snippet: "부착 후 며칠 지나니 접착력이 약해서 떨어졌어요.", rating: 1, status: "NEGATIVE", receivedAt: hoursAgoISO(5) },
     { id: "mock-inq-2", type: "INQUIRY", channelNameKo: "쿠팡", productName: "코너 마감 몰딩 세트", snippet: "곡면 벽에도 시공 가능한가요?", rating: null, status: "UNANSWERED", receivedAt: hoursAgoISO(9) },
@@ -225,7 +225,14 @@ export function mockInbox(): InboxResponse {
     { id: "mock-rev-4", type: "REVIEW", channelNameKo: "쿠팡", productName: "전선몰딩 2호 (아이보리)", snippet: "색상이 벽지랑 잘 어울려서 만족합니다.", rating: 4, status: "NORMAL", receivedAt: hoursAgoISO(32) },
     { id: "mock-rev-5", type: "REVIEW", channelNameKo: "네이버 스마트스토어", productName: "선바로 광폭 케이블 몰딩", snippet: "사진이랑 색이 조금 달라요. 실물이 더 누런 느낌입니다.", rating: 2, status: "NEGATIVE", receivedAt: hoursAgoISO(40) },
   ];
-  return { items, total: items.length };
+  const items = all
+    .filter((item) => !params.type || item.type === params.type)
+    .slice(0, params.limit ?? all.length);
+  return {
+    items,
+    total: items.length,
+    unansweredInquiries: all.filter((item) => item.type === "INQUIRY" && item.status === "UNANSWERED").length,
+  };
 }
 
 // Stored rule-based analyses for a SUBSET of the inbox mocks — so demo mode shows

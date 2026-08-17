@@ -11,7 +11,7 @@ import { buildAnalysisIndex } from "../../lib/inboxView";
 import { buildIssueAttention, summarizeConnections } from "../../lib/homeSignals";
 import { useReviewAttention } from "../../hooks/useReviewAttention";
 import { buildConnectionToday, buildInquiryToday, buildReviewToday } from "../../lib/todayInbox";
-import type { ChannelResponse, ConnectorAlertView, FeedItem, ItemAnalysis } from "../../lib/types";
+import type { ChannelResponse, ConnectorAlertView, InboxResponse, ItemAnalysis } from "../../lib/types";
 
 /**
  * 홈 — Today Inbox: "오늘 내가 확인하거나 조치할 일은 무엇인가?"
@@ -23,7 +23,7 @@ import type { ChannelResponse, ConnectorAlertView, FeedItem, ItemAnalysis } from
  * render zero. There is no "이번 주 흐름" and no metric nobody has verified is derivable.
  */
 export function HomeV2() {
-  const [inbox, setInbox] = useState<FeedItem[] | null>(null);
+  const [inbox, setInbox] = useState<InboxResponse | null>(null);
   const [inboxLoaded, setInboxLoaded] = useState(false);
   const [analyses, setAnalyses] = useState<ItemAnalysis[]>([]);
   const [issueCount, setIssueCount] = useState<number | null>(null);
@@ -38,9 +38,10 @@ export function HomeV2() {
   useEffect(() => {
     let active = true;
 
+    // 문의: inquiries only, a short preview window — the count comes from the response, uncapped.
     void api
-      .getInboxStrict()
-      .then((res) => active && setInbox(res.items))
+      .getInboxStrict({ type: "INQUIRY", limit: 20 })
+      .then((res) => active && setInbox(res))
       .catch(() => active && setInbox(null))
       .finally(() => active && setInboxLoaded(true));
 

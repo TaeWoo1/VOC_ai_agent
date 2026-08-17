@@ -238,7 +238,10 @@ export interface DashboardSummaryResponse {
 
 export interface InboxResponse {
   items: FeedItem[];
+  /** Rows returned (after the request's cap). */
   total: number;
+  /** The org's UNANSWERED inquiries, counted server-side and never capped — the canonical 답변 필요 count. */
+  unansweredInquiries: number;
 }
 
 export interface OrderSummaryResponse {

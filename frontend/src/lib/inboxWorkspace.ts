@@ -47,6 +47,16 @@ export const STATE_OPTIONS: ReadonlyArray<{ value: StateFilter; label: string }>
   { value: "HANDLED", label: "답변함" },
 ];
 
+/**
+ * The 문의 surface's state options, in workflow order — what needs a reply first, then what is
+ * done, then everything. 확인 필요 is a review condition and does not appear on that surface.
+ */
+export const INQUIRY_STATE_OPTIONS: ReadonlyArray<{ value: StateFilter; label: string }> = [
+  { value: "NEEDS_REPLY", label: "답변 필요" },
+  { value: "HANDLED", label: "답변함" },
+  { value: "ALL", label: "전체" },
+];
+
 export const PERIOD_OPTIONS: ReadonlyArray<{ value: PeriodFilter; label: string }> = [
   { value: "ALL", label: "전체 기간" },
   { value: "TODAY", label: "오늘" },

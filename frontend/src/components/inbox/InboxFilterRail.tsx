@@ -58,11 +58,14 @@ export function InboxFilterRail({
   onChange,
   /** False when the surface already fixes the type (the 문의 page): the 유형 row is then noise. */
   showType = true,
+  /** The state options this surface offers, in its own order (the 문의 page: 답변 필요 → 답변함 → 전체). */
+  stateOptions = STATE_OPTIONS,
 }: {
   items: readonly FeedItem[];
   filters: InboxFilters;
   onChange: (next: InboxFilters) => void;
   showType?: boolean;
+  stateOptions?: ReadonlyArray<{ value: StateFilter; label: string }>;
 }) {
   const channels = channelOptions(items);
 
@@ -78,7 +81,7 @@ export function InboxFilterRail({
       ) : null}
       <OptionRow<StateFilter>
         legend="상태"
-        options={STATE_OPTIONS}
+        options={stateOptions}
         value={filters.state}
         onChange={(state) => onChange({ ...filters, state })}
       />
