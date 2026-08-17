@@ -86,7 +86,7 @@ describe("ChannelList — the 상품평 entry", () => {
     renderList({ reviewCounts: new Map([["acc-cp", 22]]) });
     expect(screen.getByRole("link", { name: "쿠팡 상품평 22개 보기" })).toHaveAttribute(
       "href",
-      "/connect/channels/acc-cp/reviews",
+      "/reviews/acc-cp",
     );
   });
 
@@ -106,11 +106,23 @@ describe("ChannelList — the 상품평 entry", () => {
     // The account is present ON PURPOSE. With `accounts: []` this assertion would hold whatever the
     // channel predicate said, and deleting `hasReviewRecord(...)` from the row would break no test.
     renderList({
-      channels: [NAVER],
-      accounts: [{ ...ACCOUNT, id: "acc-nv", channelId: "naver-ch", channelNameKo: "네이버" }],
+      channels: [{ ...NAVER, code: "GMARKET", nameKo: "G마켓" }],
+      accounts: [{ ...ACCOUNT, id: "acc-gm", channelId: "naver-ch", channelNameKo: "G마켓" }],
     });
     expect(screen.getByRole("button", { name: "연결 관리" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /상품평/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /상품평|리뷰/ })).toBeNull();
+  });
+
+  it("speaks the product's word on NAVER — 리뷰, not Coupang's 상품평", () => {
+    renderList({
+      channels: [NAVER],
+      accounts: [{ ...ACCOUNT, id: "acc-nv", channelId: "naver-ch", channelNameKo: "네이버" }],
+      reviewCounts: new Map([["acc-nv", 3]]),
+    });
+    expect(screen.getByRole("link", { name: "네이버 리뷰 3개 보기" })).toHaveAttribute(
+      "href",
+      "/reviews/acc-nv",
+    );
   });
 
   it("is the row's loud action while the connection is healthy", () => {

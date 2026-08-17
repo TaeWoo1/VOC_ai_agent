@@ -26,10 +26,13 @@ export function InboxList({
   items,
   analyses,
   selectedId,
+  /** Where a row's link lives — `/inbox` for the mixed queue, `/inquiries` for the 문의 page. */
+  basePath = "/inbox",
 }: {
   items: readonly FeedItem[];
   analyses: Map<string, ItemAnalysis>;
   selectedId: string | null;
+  basePath?: string;
 }) {
   return (
     <ul aria-label="고객 문의·리뷰 목록" className="divide-y divide-line">
@@ -40,7 +43,7 @@ export function InboxList({
         return (
           <li key={`${item.type}:${item.id}`}>
             <Link
-              to={`/inbox/${item.id}`}
+              to={`${basePath}/${item.id}`}
               aria-current={selected ? "true" : undefined}
               className={`block px-4 py-4 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700 ${
                 selected ? "bg-brand-50" : "hover:bg-canvas"

@@ -160,9 +160,9 @@ function ChannelRow({
             variant={failing ? "outline" : "solid"}
             // On screen the row's heading says which channel this is; in a screen reader's link list
             // it does not, and a page of rows would offer several links differing only by a number.
-            ariaLabel={`${channel.nameKo} ${reviewEntryLabel(reviewCount)}`}
+            ariaLabel={`${channel.nameKo} ${reviewEntryLabel(reviewCount, channel.code)}`}
           >
-            {reviewEntryLabel(reviewCount)}
+            {reviewEntryLabel(reviewCount, channel.code)}
           </BtnLink>
         ) : null}
         <Btn

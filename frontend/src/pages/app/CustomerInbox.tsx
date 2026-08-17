@@ -20,6 +20,12 @@ import type { FeedItem, ItemAnalysis } from "../../lib/types";
 /**
  * 고객 인박스 — 문의 and 리뷰 from every connected channel, in one worst-first queue.
  *
+ * Two doors into the same workspace. `/inquiries` renders it with `scope="INQUIRY"` — the 문의
+ * destination of the workflow IA (`docs/product_assembly_ia_v1.md` §3): only inquiries, no type
+ * filter, links stay under `/inquiries`. `/inbox` remains the mixed queue the home tiles and
+ * memory evidence links still point at. Same data, same panes, same response workflow — the scope
+ * only decides which rows are in play and where a row's link goes.
+ *
  * Three panes on desktop: filters, list, detail. On narrow screens the detail replaces the list
  * once a row is chosen, so the seller is never scrolled past a pane they cannot see.
  *
@@ -28,8 +34,10 @@ import type { FeedItem, ItemAnalysis } from "../../lib/types";
  * joined client-side with no new endpoint. When that read fails the map is empty and the response
  * panel simply does not appear, which is the intended fail-closed behaviour rather than a defect.
  */
-export function CustomerInbox() {
+export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) {
   const { itemRef } = useParams();
+  const inquiriesOnly = scope === "INQUIRY";
+  const basePath = inquiriesOnly ? "/inquiries" : "/inbox";
   const [items, setItems] = useState<FeedItem[] | null>(null);
   const [analyses, setAnalyses] = useState<ItemAnalysis[]>([]);
   const [workItems, setWorkItems] = useState<Map<string, string>>(new Map());
@@ -76,7 +84,10 @@ export function CustomerInbox() {
   }, [load]);
 
   const analysisIndex = useMemo(() => buildAnalysisIndex(analyses), [analyses]);
-  const all = items ?? [];
+  const all = useMemo(
+    () => (inquiriesOnly ? (items ?? []).filter((item) => item.type === "INQUIRY") : items ?? []),
+    [items, inquiriesOnly],
+  );
   const visible = useMemo(
     () => sortByPriority(applyFilters(all, filters), analysisIndex),
     [all, filters, analysisIndex],
@@ -86,10 +97,14 @@ export function CustomerInbox() {
 
   return (
     <>
-      <PageHead
-        title="고객 인박스"
-        description="채널에 들어온 문의와 리뷰를 급한 것부터 확인합니다."
-      />
+      {inquiriesOnly ? (
+        <PageHead title="문의" description="채널에 들어온 문의를 답변이 필요한 것부터 확인합니다." />
+      ) : (
+        <PageHead
+          title="고객 인박스"
+          description="채널에 들어온 문의와 리뷰를 급한 것부터 확인합니다."
+        />
+      )}
 
       {loading ? (
         <p className="text-muted">불러오는 중…</p>
@@ -97,18 +112,23 @@ export function CustomerInbox() {
         <Empty
           title="목록을 불러오지 못했습니다"
           body="연결 상태를 확인한 뒤 다시 시도해 주세요."
-          action={<BtnLink to="/connect">채널·자료 연결 확인</BtnLink>}
+          action={<BtnLink to="/connect">채널 연결 확인</BtnLink>}
         />
       ) : all.length === 0 ? (
         <Empty
-          title="아직 들어온 문의와 리뷰가 없습니다"
+          title={inquiriesOnly ? "아직 들어온 문의가 없습니다" : "아직 들어온 문의와 리뷰가 없습니다"}
           body="채널을 연결하거나 정기 자료 가져오기로 자료를 넘겨주시면, 채널이 달라도 같은 형태로 모아 보여드립니다."
-          action={<BtnLink to="/connect">채널·자료 연결하기</BtnLink>}
+          action={<BtnLink to="/connect">채널 연결하기</BtnLink>}
         />
       ) : (
         <div className="grid gap-5 lg:grid-cols-[200px_minmax(0,1fr)_400px]">
           <div className="lg:sticky lg:top-4 lg:self-start">
-            <InboxFilterRail items={all} filters={filters} onChange={setFilters} />
+            <InboxFilterRail
+              items={all}
+              filters={filters}
+              onChange={setFilters}
+              showType={!inquiriesOnly}
+            />
           </div>
 
           {/* On narrow screens the chosen row replaces the list, so only one pane competes. */}
@@ -126,6 +146,7 @@ export function CustomerInbox() {
                 items={visible}
                 analyses={analysisIndex}
                 selectedId={selection.kind === "FOUND" ? selection.item.id : null}
+                basePath={basePath}
               />
             )}
           </div>

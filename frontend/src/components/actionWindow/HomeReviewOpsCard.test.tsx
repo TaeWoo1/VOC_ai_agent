@@ -21,7 +21,7 @@ describe("HomeReviewOpsCard", () => {
     expect(screen.queryByText(CHECKPOINT_PROMPT_TITLE)).toBeNull();
     expect(
       screen.getByRole("link", { name: new RegExp(HOME_REVIEW_OPS_COPY.open) }),
-    ).toHaveAttribute("href", "/operations");
+    ).toHaveAttribute("href", "/connect/imports");
   });
 
   it("checkpoint run: shows the run title, checkpoint prompt, and a link to the run detail", () => {
@@ -32,7 +32,7 @@ describe("HomeReviewOpsCard", () => {
     expect(screen.getByText(CHECKPOINT_PROMPT_TITLE)).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: new RegExp(HOME_REVIEW_OPS_COPY.goToCheckpoint) }),
-    ).toHaveAttribute("href", "/operations/current");
+    ).toHaveAttribute("href", "/connect/imports/current");
   });
 
   it("non-checkpoint run: shows progress and links to the landing, no checkpoint prompt", () => {
@@ -42,6 +42,6 @@ describe("HomeReviewOpsCard", () => {
     expect(screen.queryByText(CHECKPOINT_PROMPT_TITLE)).toBeNull();
     expect(
       screen.getByRole("link", { name: new RegExp(HOME_REVIEW_OPS_COPY.open) }),
-    ).toHaveAttribute("href", "/operations");
+    ).toHaveAttribute("href", "/connect/imports");
   });
 });

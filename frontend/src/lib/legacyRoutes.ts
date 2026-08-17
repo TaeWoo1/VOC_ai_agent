@@ -16,7 +16,6 @@ export interface LegacyRedirect {
 
 export const LEGACY_REDIRECTS: readonly LegacyRedirect[] = [
   { from: "/issues", to: "/memory" },
-  { from: "/inquiries", to: "/inbox" },
   { from: "/operations", to: "/connect/imports" },
   { from: "/operations/current", to: "/connect/imports/current" },
   { from: "/settings/channels", to: "/connect" },
@@ -27,6 +26,8 @@ export const LEGACY_REDIRECTS: readonly LegacyRedirect[] = [
   { from: "/channels/:accountId", to: "/connect/channels/:accountId" },
   { from: "/upload", to: "/connect/upload", keepSearch: true },
   { from: "/alerts", to: "/settings/alerts" },
+  // Product assembly (2026-08-17): the review record became the 리뷰 surface.
+  { from: "/connect/channels/:accountId/reviews", to: "/reviews/:accountId" },
 ];
 
 /** Builds the concrete destination for a matched legacy route. */

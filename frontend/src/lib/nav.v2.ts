@@ -1,15 +1,18 @@
-// Navigation model for the v2 product surface.
+// Navigation model for the product surface.
 //
 // ONE model, three renderers. The desktop side nav, the mobile bottom tabs, and the "더보기"
 // drawer all derive from `NAV_GROUPS` — the mobile surfaces select from it rather than declaring
 // their own lists, so the three IAs cannot drift apart.
 //
-// Two groups mirror the product's two altitudes: 운영 is the daily customer-operations work,
-// 연결·설정 is the setup and maintenance that is visited when something needs connecting or fixing.
+// The IA is workflow-centric, not channel-centric (product assembly, 2026-08-17 —
+// `docs/product_assembly_ia_v1.md` §3): 운영 answers "오늘 내가 확인하거나 조치할 일은 무엇인가?"
+// as 홈 / 리뷰 / 문의 / 주문, and 연결·설정 is where data comes from. A channel is a filter or a
+// capability inside those screens, never a destination of its own.
 //
-// `/agent` is deliberately absent. The operations agent is not a destination in the v2 product —
-// it is an action offered inside 운영 홈 / 인박스 / 메모리. Its route still exists; its menu entry
-// does not.
+// Deliberately absent from the menu: `/agent` (an action offered inside the operations screens,
+// not a destination), `/memory` and `/reports` (kept as routes, reached from 홈 and 설정, out of the
+// primary IA until the home/today-inbox unit decides their place), and every per-channel page
+// (`/connect/channels/:accountId`, the connect wizards) — those are reached from 채널 연결.
 
 export interface NavItem {
   to: string;
@@ -31,17 +34,16 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     heading: "운영",
     items: [
-      { to: "/", label: "운영 홈", short: "홈", icon: "home", end: true },
-      { to: "/inbox", label: "고객 인박스", short: "인박스", icon: "inbox" },
-      { to: "/memory", label: "고객운영 메모리", short: "메모리", icon: "memory" },
-      { to: "/orders", label: "주문·매출", short: "주문", icon: "orders" },
-      { to: "/reports", label: "리포트", short: "리포트", icon: "report" },
+      { to: "/", label: "홈", short: "홈", icon: "home", end: true },
+      { to: "/reviews", label: "리뷰", short: "리뷰", icon: "review" },
+      { to: "/inquiries", label: "문의", short: "문의", icon: "mail" },
+      { to: "/orders", label: "주문", short: "주문", icon: "orders" },
     ],
   },
   {
     heading: "연결·설정",
     items: [
-      { to: "/connect", label: "채널·자료 연결", short: "연결", icon: "link" },
+      { to: "/connect", label: "채널 연결", short: "연결", icon: "link" },
       { to: "/settings", label: "설정", short: "설정", icon: "settings" },
     ],
   },
@@ -55,10 +57,10 @@ export const ALERTS_ROUTE = "/settings/alerts";
 
 /**
  * Mobile bottom-tab destinations, in order. Four routes plus a "더보기" trigger (which is not a
- * route) make the five-tab bar. 주문·매출 is intentionally not a tab: it is operating context,
- * not a daily destination, and a five-destination bar leaves no room for the drawer trigger.
+ * route) make the five-tab bar. The four are the daily 운영 destinations; 채널 연결 and 설정 are
+ * setup work and live in the drawer.
  */
-export const MOBILE_TAB_ROUTES = ["/", "/inbox", "/memory", "/connect"] as const;
+export const MOBILE_TAB_ROUTES = ["/", "/reviews", "/inquiries", "/orders"] as const;
 
 /** Derived, never re-declared — a tab is the same item the side nav renders. */
 export const MOBILE_TABS: NavItem[] = MOBILE_TAB_ROUTES.map((route) => {

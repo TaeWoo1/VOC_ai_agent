@@ -216,7 +216,8 @@ describe("the page refuses to imply what it does not know", () => {
     getChannelReviewsStrict.mockRejectedValue(new Error("backend down"));
     renderPage();
 
-    expect(await screen.findByText("상품평을 불러오지 못했습니다")).toBeInTheDocument();
+    // Before a page has loaded there is no channel, so the product word (리뷰), not Coupang's.
+    expect(await screen.findByText("리뷰를 불러오지 못했습니다")).toBeInTheDocument();
     expect(screen.queryByText("배송도 빠르고 포장도 꼼꼼했어요")).toBeNull();
   });
 
@@ -551,7 +552,7 @@ describe("the AI pilot's mark and the feedback spine (RUBRIC v2 §13.7)", () => 
     renderPage();
     await userEvent.click((await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요")).closest("button")!);
     await screen.findByText(/원문 화면으로 바로 이동할 수 없습니다/);
-    expect(screen.queryByText("이 상품평, 확인이 필요한가요?")).toBeNull();
+    expect(screen.queryByText(/이 (상품평|리뷰), 확인이 필요한가요\?/)).toBeNull();
     expect(screen.queryByLabelText("분류 피드백")).toBeNull();
     expect(screen.queryByRole("button", { name: "쿠팡에서 보기" })).toBeNull();
     expect(recordBehavior).not.toHaveBeenCalled();

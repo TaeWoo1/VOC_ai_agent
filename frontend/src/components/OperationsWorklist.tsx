@@ -52,7 +52,7 @@ export function OperationsWorklist({ refreshKey = 0 }: { refreshKey?: number }) 
         <p className="text-base text-muted">
           아직 연결된 판매 채널이 없어요. 채널을 연결하면 확인할 일이 여기에 표시돼요.
         </p>
-        <Link to="/settings/channels" className="btn-ghost mt-3 inline-block">
+        <Link to="/connect" className="btn-ghost mt-3 inline-block">
           채널 연결하러 가기 →
         </Link>
       </Shell>

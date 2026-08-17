@@ -18,7 +18,7 @@ import { CollectionHistorySection } from "../../components/connect/CollectionHis
 import { ReviewRecordPanel } from "../../components/connect/ReviewRecordPanel";
 import { nextActionFor, type ScrollTarget } from "../../components/connect/channelShared";
 import { api } from "../../lib/apiClient";
-import { hasReviewRecord, reviewRecordPath } from "../../lib/reviewRecord";
+import { hasReviewRecord, reviewEntryLabel, reviewRecordPath } from "../../lib/reviewRecord";
 import type {
   CapabilityView,
   ChannelResponse,
@@ -245,7 +245,7 @@ export function ChannelWorkspace() {
                 way to the seller's own review record. */}
             {hasReviewRecord(channel?.code) ? (
               <BtnLink to={reviewRecordPath(accountId)} size="sm">
-                상품평 보기
+                {reviewEntryLabel(null, channel?.code)}
               </BtnLink>
             ) : null}
             <BtnLink to="/connect" size="sm" variant="outline">

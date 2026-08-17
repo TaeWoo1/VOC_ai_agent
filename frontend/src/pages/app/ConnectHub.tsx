@@ -17,7 +17,11 @@ import type {
 } from "../../lib/types";
 
 /**
- * 채널·자료 연결 — the one place every route into the product converges.
+ * 채널 연결 — where the product's data comes from, and the one place every route into it converges.
+ *
+ * Only the product channels are listed (NAVER / Coupang / Cafe24 — `lib/productChannels.ts`,
+ * `docs/product_assembly_ia_v1.md` §2): a channel on this screen is a channel a seller can actually
+ * use. The catalog rows the backend keeps for other channels are not shown here.
  *
  * The channel list lives here rather than on a separate page: splitting "the hub" from "the list"
  * meant the hub had nothing to say except "the list is over there". `/connect/channels` now
@@ -136,8 +140,8 @@ export function ConnectHub() {
   return (
     <>
       <PageHead
-        title="채널·자료 연결"
-        description="판매 채널과 자료 가져오기 상태를 한곳에서 관리합니다."
+        title="채널 연결"
+        description="판매 채널을 연결하고, 자료 가져오기 상태를 한곳에서 관리합니다."
       />
 
       {openCount > 0 ? (
@@ -161,7 +165,7 @@ export function ConnectHub() {
 
       <Panel
         title="채널"
-        description="채널마다 가능한 연결 방식이 다릅니다. 지금 가능한 범위만 표시합니다."
+        description="네이버 스마트스토어, 쿠팡, 카페24를 연결할 수 있습니다. 채널마다 가능한 연결 방식이 다르며, 지금 가능한 범위만 표시합니다."
       >
         <ChannelList
           channels={channels}
@@ -187,7 +191,7 @@ export function ConnectHub() {
             "가져올 자료를 고릅니다.",
             "형식과 기간이 맞는지 먼저 확인합니다.",
             "중복을 걸러내고 채널이 달라도 같은 형태로 정리합니다.",
-            "인박스와 리포트에 반영됩니다.",
+            "리뷰·문의 화면과 리포트에 반영됩니다.",
           ].map((step, index) => (
             <li key={step} className="flex gap-3 break-keep leading-relaxed text-muted">
               <span

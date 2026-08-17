@@ -52,10 +52,13 @@ describe("v2 app routes", () => {
   for (const [path, heading] of [
     // The menu item is 운영 홈; the page's own headline is the question it answers.
     ["/", "오늘 확인할 고객 신호"],
+    // 리뷰 / 문의 are the workflow doors; the mixed inbox and memory/reports stay as routes.
+    ["/reviews", "리뷰"],
+    ["/inquiries", "문의"],
     ["/inbox", "고객 인박스"],
     ["/memory", "고객운영 메모리"],
     ["/reports", "주간 고객운영 리포트"],
-    ["/connect", "채널·자료 연결"],
+    ["/connect", "채널 연결"],
     ["/settings", "설정"],
   ] as const) {
     it(`renders ${heading} at ${path}`, async () => {
@@ -75,11 +78,12 @@ describe("v2 app routes", () => {
 describe("legacy routes — live behaviour", () => {
   for (const [from, heading] of [
     ["/issues", "고객운영 메모리"],
-    ["/inquiries", "고객 인박스"],
-    ["/settings/channels", "채널·자료 연결"],
+    ["/settings/channels", "채널 연결"],
     // The separate channel list folded into the hub in Slice 6.
-    ["/connect/channels", "채널·자료 연결"],
-    ["/channels", "채널·자료 연결"],
+    ["/connect/channels", "채널 연결"],
+    ["/channels", "채널 연결"],
+    // The review record moved under 리뷰 (product assembly); the old path redirects.
+    ["/connect/channels/acc-1/reviews", "리뷰"],
   ] as const) {
     it(`${from} lands on ${heading}`, async () => {
       renderAt(from);

@@ -64,13 +64,17 @@ export function buildInboxAttention(inbox: readonly FeedItem[] | null): Attentio
     {
       id: "needs-reply",
       label: "답변이 필요한 문의",
-      to: "/inbox",
+      // The 문의 surface: the same rows, scoped to inquiries.
+      to: "/inquiries",
       signal: signalFor(needsReply),
       hint: "",
     },
     {
       id: "needs-check",
       label: "확인이 필요한 리뷰",
+      // Still the mixed queue: this count is the feed's low-rating rule, and the 리뷰 surface counts
+      // by triage tier per account. Sending the tile there would land on a different number. The
+      // home/today-inbox unit decides which count the tile carries.
       to: "/inbox",
       signal: signalFor(needsCheck),
       hint: "",

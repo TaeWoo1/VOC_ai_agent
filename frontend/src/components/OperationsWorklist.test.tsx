@@ -90,7 +90,7 @@ describe("OperationsWorklist", () => {
     expect(await screen.findByText(/연결된 판매 채널이 없어요/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /채널 연결하러 가기/ })).toHaveAttribute(
       "href",
-      "/settings/channels",
+      "/connect",
     );
   });
 

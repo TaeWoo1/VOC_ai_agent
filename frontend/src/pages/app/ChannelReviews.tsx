@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
+import { channelDataTypeLabel } from "../../lib/channelVocabulary";
 import { Panel } from "../../components/ui/Panel";
 import { Empty } from "../../components/ui/Empty";
 import { Chip } from "../../components/ui/Chip";
@@ -72,6 +73,27 @@ export function shownRangeLabel(page: ChannelReviewPageView | null): string {
   return `${first}–${first + page.items.length - 1}번째 · 총 ${page.total}개`;
 }
 
+/**
+ * What this screen calls one review. The product's word is 리뷰 (the nav item, the workflow); a
+ * channel with its own word for the same thing (Coupang: 상품평) keeps it here, from
+ * `channelVocabulary`, so the record reads in the channel's terms without the screen owning a
+ * per-channel branch. Before the page has loaded there is no channel yet, so the generic word.
+ */
+function reviewWord(channelCode: string | null | undefined): string {
+  return channelDataTypeLabel(channelCode, "REVIEW", "리뷰");
+}
+
+/**
+ * `word` + the particle that fits its last syllable — 리뷰를 / 상품평을. Hangul syllables encode the
+ * final consonant in their code point; anything else (Latin, digits) takes the vowel form.
+ */
+function josa(word: string, afterConsonant: string, afterVowel: string): string {
+  const last = word.charCodeAt(word.length - 1);
+  const hangul = last >= 0xac00 && last <= 0xd7a3;
+  const hasBatchim = hangul && (last - 0xac00) % 28 !== 0;
+  return `${word}${hasBatchim ? afterConsonant : afterVowel}`;
+}
+
 export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocateBinding } = {}) {
   const { accountId = "" } = useParams();
   /**
@@ -94,6 +116,7 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
   // route, so the page has no control.
   const capability = page?.channel ?? null;
   const pilotOn = (page?.aiPilotEnabled ?? false) && (capability?.aiTriage ?? false);
+  const word = reviewWord(capability?.channelCode);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ChannelReviewDetailView | null>(null);
@@ -205,11 +228,11 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
   return (
     <div className="space-y-6">
       <PageHead
-        title="상품평"
+        title={word}
         description={
-          capability?.channelCode === "COUPANG"
-            ? "연결된 채널에서 수집한 구매자 상품평입니다. 쿠팡은 판매자 답글 기능이 없어 답변 작성 기능은 제공하지 않습니다."
-            : "연결된 채널에서 수집한 구매자 상품평입니다. 이 화면에서는 답변을 작성하지 않습니다."
+          capability && !capability.replySupported
+            ? `연결된 채널에서 수집한 구매자 ${word}입니다. 이 채널에서는 SellerOps가 답변을 작성하지 않습니다.`
+            : `연결된 채널에서 수집한 구매자 ${word}입니다. 이 화면에서는 답변을 작성하지 않습니다.`
         }
         meta={
           page ? (
@@ -240,7 +263,7 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
       {page && page.lastImportAt && !page.lastImportComplete ? (
         <p className="rounded-xl border border-line bg-canvas px-4 py-3 text-sm leading-relaxed text-muted">
           마지막 수집이 목록 끝까지 확인되지 않은 상태로 끝났습니다. 아래 목록은 지금까지 가져온
-          상품평이며, 채널에 이보다 더 있을 수 있습니다.
+          {word}이며, 채널에 이보다 더 있을 수 있습니다.
         </p>
       ) : null}
 
@@ -249,7 +272,7 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
         page and not the current filter, so pressing a tier never changes the numbers describing the
         others — otherwise choosing 확인 필요 would zero the chips that lead back out of it.
       */}
-      {page ? <TriageSummary page={page} /> : null}
+      {page ? <TriageSummary page={page} word={word} /> : null}
 
       <div className="flex flex-wrap items-center gap-2">
         {(
@@ -311,7 +334,7 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
 
       {loadError ? (
         <Empty
-          title="상품평을 불러오지 못했습니다"
+          title={`${josa(word, "을", "를")} 불러오지 못했습니다`}
           body="연결 상태를 확인한 뒤 다시 시도해 주세요. 불러오지 못한 목록을 임의로 채우지는 않습니다."
           action={
             <Btn size="sm" onClick={() => void load(sort, tier, pageIndex)}>
@@ -328,8 +351,8 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
           nothing in it — which is good news reported as a loss.
         */
         <Empty
-          title={`${TRIAGE_TIER_LABEL[tier]}에 해당하는 상품평이 없습니다`}
-          body="다른 분류를 눌러 보시거나 전체를 보세요. 수집된 상품평은 그대로 있습니다."
+          title={`${TRIAGE_TIER_LABEL[tier]}에 해당하는 ${josa(word, "이", "가")} 없습니다`}
+          body={`다른 분류를 눌러 보시거나 전체를 보세요. 수집된 ${josa(word, "은", "는")} 그대로 있습니다.`}
           action={
             <Btn size="sm" onClick={() => { setTier(null); setPageIndex(0); }}>
               전체 보기
@@ -338,8 +361,8 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
         />
       ) : page && page.items.length === 0 ? (
         <Empty
-          title="아직 수집된 상품평이 없습니다"
-          body="채널 설정에서 상품평 수집을 한 번 실행하면 이 목록에 쌓입니다."
+          title={`아직 수집된 ${josa(word, "이", "가")} 없습니다`}
+          body={`채널 설정에서 ${word} 수집을 한 번 실행하면 이 목록에 쌓입니다.`}
           action={
             <BtnLink to={`/connect/channels/${accountId}`} size="sm">
               채널 설정으로
@@ -365,14 +388,14 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
                       {item.aiMark ? <AiMarkChip /> : null}
                       <span className="font-semibold text-ink">{ratingLabel(item.rating)}</span>
                       <span className="text-sm text-muted">{item.writtenOn ?? "날짜 없음"}</span>
-                      {item.isNew ? <Chip tone="accent">새 상품평</Chip> : null}
+                      {item.isNew ? <Chip tone="accent">새 {word}</Chip> : null}
                       {item.mediaCount > 0 ? <Chip>사진·영상 {item.mediaCount}</Chip> : null}
                     </span>
                     <span
                       className={`mt-1 block break-keep text-base ${item.textless ? "text-muted" : "text-ink"}`}
                     >
                       {/* A textless review is what the buyer chose, not something we failed to show. */}
-                      {item.textless ? "별점만 남긴 상품평" : (item.preview ?? "표시할 수 있는 본문이 없습니다")}
+                      {item.textless ? `별점만 남긴 ${word}` : (item.preview ?? "표시할 수 있는 본문이 없습니다")}
                     </span>
                     <TriageReason note={item.triage} />
                     <span className="mt-1 block truncate text-sm text-muted">
@@ -389,7 +412,7 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
               reach the other two. The buttons move the window; the label says which window is open.
             */}
             {totalPages > 1 ? (
-              <nav className="mt-4 flex items-center justify-between gap-3" aria-label="상품평 목록 페이지">
+              <nav className="mt-4 flex items-center justify-between gap-3" aria-label={`${word} 목록 페이지`}>
                 <Btn
                   size="sm"
                   variant="outline"
@@ -424,14 +447,15 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
             ) : null}
           </Panel>
 
-          <Panel title="상세" description={selectedId ? undefined : "왼쪽에서 상품평을 선택하세요"}>
+          <Panel title="상세" description={selectedId ? undefined : `왼쪽에서 ${josa(word, "을", "를")} 선택하세요`}>
             {detailError ? (
-              <p className="text-muted">상품평을 불러오지 못했습니다.</p>
+              <p className="text-muted">{josa(word, "을", "를")} 불러오지 못했습니다.</p>
             ) : detail ? (
               <ReviewDetail
                 accountId={accountId}
                 pilotOn={pilotOn}
                 capability={capability}
+                word={word}
                 recordBehavior={recordBehavior}
                 detail={detail}
                 locate={locate}
@@ -444,7 +468,7 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
             ) : selectedId ? (
               <p className="text-muted">불러오는 중…</p>
             ) : (
-              <p className="text-muted">선택한 상품평의 전체 내용이 여기에 표시됩니다.</p>
+              <p className="text-muted">선택한 {word}의 전체 내용이 여기에 표시됩니다.</p>
             )}
           </Panel>
         </div>
@@ -457,6 +481,7 @@ function ReviewDetail({
   accountId,
   pilotOn,
   capability,
+  word,
   recordBehavior,
   detail,
   locate,
@@ -467,6 +492,7 @@ function ReviewDetail({
   accountId: string;
   pilotOn: boolean;
   capability: ReviewChannelCapabilityView | null;
+  word: string;
   recordBehavior: (events: TriageBehaviorEvent[]) => void;
   detail: ChannelReviewDetailView;
   locate: ReviewLocateBinding;
@@ -502,7 +528,7 @@ function ReviewDetail({
         {detail.aiMark ? <AiMarkChip /> : null}
         <span className="font-semibold text-ink">{ratingLabel(detail.rating)}</span>
         <span className="text-sm text-muted">{detail.writtenOn ?? "날짜 없음"}</span>
-        {detail.isNew ? <Chip tone="accent">새 상품평</Chip> : null}
+        {detail.isNew ? <Chip tone="accent">새 {word}</Chip> : null}
         {detail.mediaCount > 0 ? <Chip>사진·영상 {detail.mediaCount}</Chip> : null}
       </div>
       <TriageReason note={detail.triage} />
@@ -516,7 +542,7 @@ function ReviewDetail({
       ) : null}
       {detail.textless ? (
         <p className="break-keep leading-relaxed text-muted">
-          별점만 남기고 내용을 쓰지 않은 상품평입니다. 별점은 그대로 집계됩니다.
+          별점만 남기고 내용을 쓰지 않은 {word}입니다. 별점은 그대로 집계됩니다.
         </p>
       ) : (
         <p className="whitespace-pre-wrap break-keep leading-relaxed text-ink">
@@ -544,7 +570,7 @@ function ReviewDetail({
         ) : null}
       </dl>
 
-      {pilotOn ? <TriageFeedbackControls accountId={accountId} detail={detail} /> : null}
+      {pilotOn ? <TriageFeedbackControls accountId={accountId} detail={detail} word={word} /> : null}
 
       {/*
         **[쿠팡에서 보기] — the one thing a seller can ask SellerOps to DO with a 상품평.**
@@ -608,7 +634,7 @@ function ReviewDetail({
       </div>
       ) : (
         <p className="border-t border-line pt-4 text-sm leading-relaxed text-muted">
-          이 채널의 상품평은 SellerOps에서 원문 화면으로 바로 이동할 수 없습니다. 판매자센터에서 직접 확인해 주세요.
+          이 채널의 {josa(word, "은", "는")} SellerOps에서 원문 화면으로 바로 이동할 수 없습니다. 판매자센터에서 직접 확인해 주세요.
         </p>
       )}
     </div>
@@ -641,7 +667,15 @@ function AiMarkChip() {
  * **Actions are three, and none of them submits anything anywhere.** 조치 시작 / 조치 완료 / 조치 불필요
  * are statements about what the seller did off this screen; the marketplace is not touched.
  */
-function TriageFeedbackControls({ accountId, detail }: { accountId: string; detail: ChannelReviewDetailView }) {
+function TriageFeedbackControls({
+  accountId,
+  detail,
+  word,
+}: {
+  accountId: string;
+  detail: ChannelReviewDetailView;
+  word: string;
+}) {
   const [answer, setAnswer] = useState<boolean | null>(null);
   const [lastAction, setLastAction] = useState<TriageActionKind | null>(null);
   const [failed, setFailed] = useState(false);
@@ -681,7 +715,7 @@ function TriageFeedbackControls({ accountId, detail }: { accountId: string; deta
 
   return (
     <div className="space-y-3 border-t border-line pt-4" aria-label="분류 피드백">
-      <p className="text-sm font-semibold text-ink">이 상품평, 확인이 필요한가요?</p>
+      <p className="text-sm font-semibold text-ink">이 {word}, 확인이 필요한가요?</p>
       <div className="flex flex-wrap gap-2">
         <Btn
           size="sm"
@@ -721,7 +755,7 @@ function TriageFeedbackControls({ accountId, detail }: { accountId: string; deta
         ))}
       </div>
       <p className="text-sm leading-relaxed text-muted">
-        답변은 기록만 됩니다. 이 화면의 분류가 바로 바뀌거나 상품평이 숨겨지지는 않으며, 다음 분류 기준을 검토할 때
+        답변은 기록만 됩니다. 이 화면의 분류가 바로 바뀌거나 {josa(word, "이", "가")} 숨겨지지는 않으며, 다음 분류 기준을 검토할 때
         근거로 씁니다. 마켓플레이스에는 아무것도 전송되지 않습니다.
       </p>
       {failed ? (
@@ -774,17 +808,17 @@ function TriageReason({ note }: { note: ReviewTriageNote }) {
  * Every number here describes the CHANNEL, never the page and never the active filter — so the chips
  * keep pointing at the parts of the record the operator is not currently looking at.
  */
-function TriageSummary({ page }: { page: ChannelReviewPageView }) {
+function TriageSummary({ page, word }: { page: ChannelReviewPageView; word: string }) {
   const { needsAttention, repeatedCategories } = page.triageSummary;
   return (
     <div className="rounded-xl border border-line bg-canvas px-4 py-3 text-sm leading-relaxed">
       <p className="text-ink">
         {needsAttention > 0 ? (
           <>
-            지금 확인이 필요한 상품평 <b>{needsAttention}건</b>
+            지금 확인이 필요한 {word} <b>{needsAttention}건</b>
           </>
         ) : (
-          "지금 확인이 필요한 상품평은 없습니다"
+          `지금 확인이 필요한 ${josa(word, "은", "는")} 없습니다`
         )}
         {page.newCount > 0 ? <span className="text-muted"> · 새로 들어온 {page.newCount}건</span> : null}
       </p>

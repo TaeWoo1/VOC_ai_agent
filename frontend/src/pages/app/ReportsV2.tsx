@@ -115,7 +115,7 @@ export function ReportsV2() {
         <Empty
           title="아직 정리할 자료가 없습니다"
           body="자료를 연결하면 그 기간의 고객 이슈를 모아 주간 고객운영 리포트를 구성합니다."
-          action={<BtnLink to="/connect">채널·자료 연결하기</BtnLink>}
+          action={<BtnLink to="/connect">채널 연결하기</BtnLink>}
         />
       </>
     );

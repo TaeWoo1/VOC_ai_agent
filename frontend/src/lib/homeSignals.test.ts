@@ -59,7 +59,7 @@ describe("attention signals — a number only when a number was measured", () =>
 
   it("points each card at where the operator acts on it", () => {
     const [reply, check] = buildInboxAttention([unanswered]);
-    expect(reply.to).toBe("/inbox");
+    expect(reply.to).toBe("/inquiries");
     expect(check.to).toBe("/inbox");
   });
 });

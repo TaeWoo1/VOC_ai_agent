@@ -55,6 +55,8 @@ function renderInbox(path = "/inbox") {
       <Routes>
         <Route path="/inbox" element={<CustomerInbox />} />
         <Route path="/inbox/:itemRef" element={<CustomerInbox />} />
+        <Route path="/inquiries" element={<CustomerInbox scope="INQUIRY" />} />
+        <Route path="/inquiries/:itemRef" element={<CustomerInbox scope="INQUIRY" />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -112,6 +114,34 @@ describe("고객 인박스 — three panes", () => {
     await user.click(within(rail).getByRole("button", { name: "답변 필요" }));
     const list = screen.getByLabelText("고객 문의·리뷰 목록");
     expect(within(list).getAllByRole("link")).toHaveLength(1);
+  });
+});
+
+describe("문의 — the inbox scoped to inquiries (/inquiries)", () => {
+  it("shows only inquiries, drops the type filter, and keeps links under /inquiries", async () => {
+    renderInbox("/inquiries");
+    expect(await screen.findByRole("heading", { level: 1, name: "문의" })).toBeInTheDocument();
+    const rail = screen.getByLabelText("인박스 필터");
+    expect(within(rail).queryByText("유형")).toBeNull();
+    // Only the inquiry's channel is offered — the review row is not in play on this surface.
+    expect(within(rail).getByRole("button", { name: /채널 가/ })).toBeInTheDocument();
+    expect(within(rail).queryByRole("button", { name: /채널 나/ })).toBeNull();
+    const list = screen.getByLabelText("고객 문의·리뷰 목록");
+    const links = within(list).getAllByRole("link");
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAttribute("href", "/inquiries/i1");
+  });
+
+  it("opens an inquiry deep link and offers the response workflow", async () => {
+    getInquiryQueueStrict.mockResolvedValue({ content: [{ inquiryId: "i1", workItemId: "w1" }] });
+    renderInbox("/inquiries/i1");
+    expect(await screen.findByText("폭이 몇 mm인가요")).toBeInTheDocument();
+  });
+
+  it("says 문의 in its empty state", async () => {
+    getInboxStrict.mockResolvedValue({ items: [ITEMS[1]], total: 1 });
+    renderInbox("/inquiries");
+    expect(await screen.findByText("아직 들어온 문의가 없습니다")).toBeInTheDocument();
   });
 });
 
