@@ -67,13 +67,38 @@ import java.util.stream.Collectors;
  * same reason v2 did — so the model is not fighting the guard on every low-star review — and the
  * guard remains what enforces it.
  *
+ * <h2>v4 — v3's escape clause was too wide, in the one class that matters most</h2>
+ *
+ * <p>v3's axis held. Its (나) clause did not. Measured over 220 rows, three passes: false positives
+ * fell to 0–1 and recall fell with them, from 0.828 to 0.516–0.548 — and <b>fourteen of the twenty
+ * gold {@code PRAISE_WITH_CONCESSION} rows were missed</b>, which is `v1` §2's first row, the one it
+ * calls <i>"the exact class the whole effort exists for"</i>.
+ *
+ * <p>The clause named 두께감·크기감·색감·재질·향·맛 as product opinion and then said <i>"however
+ * concrete, however negative, it is not NEEDS_ATTENTION"</i>. That <b>conflates the attribute a
+ * review mentions with the claim it makes about it</b>. "색이 마음에 안 든다" is a preference; "색이
+ * 사진과 다르다" is {@code NOT_AS_DESCRIBED} and the seller can fix the listing. v3 sent both to
+ * {@code WATCH}. Two further misses — a {@code PACKAGING_PROBLEM} and a {@code DELIVERY_PROBLEM},
+ * faults stage 1 names outright — suggest the absolutist sentence also pulled rows out of a stage
+ * that is supposed to be terminal.
+ *
+ * <p>v4 narrows (나) rather than widening (가). What remains below the line is <b>taste and expectation
+ * only</b> — the product arrived intact and the buyer would have preferred otherwise. A complaint that
+ * the thing is badly made is a fault, not a taste, and 품질 is one of §3.2's own stored tags while
+ * {@code DEFECT_OR_DAMAGE} is one of §3.1's own codes; a clause routing quality claims to opinion
+ * contradicted both. The instruction is to judge <b>what is being claimed</b>, not which word appeared.
+ *
+ * <p>The added contrast pair is invented for this purpose and describes no row in the corpus — the
+ * same standing §8.11 gives `v1` §2's illustrations. Nothing here was written because a particular
+ * review would flip; the fourteen misses are a class, and a class is what is being answered.
+ *
  * <p>Earlier prompt texts are not kept beside this one. They are in git history at the commits the
  * §8.6 change log names, which is where any reproduction of those runs would have to start anyway.
  */
 public final class TriagePrompt {
 
     /** Bump on ANY edit to {@link #SYSTEM}, including a rewording. */
-    public static final String PROMPT_VERSION = "triage-prompt/v3";
+    public static final String PROMPT_VERSION = "triage-prompt/v4";
 
     /**
      * `v1` §2's tie-breakers and §3's vocabularies, stated abstractly.
@@ -114,12 +139,21 @@ public final class TriagePrompt {
 
               3. 별점이 1~2점이고 본문에 읽을 내용이 있다.
 
+            (가)의 1·2·3을 하나씩 확인한 뒤에만 (나)로 내려가십시오.
+
             (나) (가)에 해당하지 않으면 NEEDS_ATTENTION이 아닙니다.
 
-              잘못된 일도 없고 요구도 없다면, 남은 것은 이 상품이 원래 어떤 물건인지에 대한
-              의견입니다. 두께감·크기감·색감·재질·향·맛·가격 대비 느낌에 대한 아쉬움은,
-              아무리 구체적이고 아무리 부정적이어도 NEEDS_ATTENTION이 아닙니다.
-              판매자가 지금 확인하거나 고칠 대상이 없기 때문입니다.
+              여기에 남는 것은 **취향과 기대의 차이**뿐입니다.
+              "내 취향은 아니다", "생각보다 크다/작다/두껍다", "가격이 아깝다"처럼
+              물건은 멀쩡히 왔고 다만 마음에 들지 않는다는 말입니다. 판매자가 확인하거나
+              고칠 대상이 없으므로 NEEDS_ATTENTION이 아닙니다.
+
+              **주의: 품질에 대한 불만은 취향이 아닙니다.**
+              바느질·마감·냄새·변질·내구성처럼 물건 자체가 제대로 만들어지지 않았다는 말은
+              (가)1의 하자에 해당합니다. 같은 부위를 말해도 무엇을 주장하는지가 다릅니다.
+                "색이 제 취향은 아니에요"   → 취향        → (나)
+                "색이 사진과 다르네요"      → 설명과 다름 → (가)1 → NEEDS_ATTENTION
+              어떤 단어가 나왔는지가 아니라 **무엇을 주장하는지**로 판단하십시오.
 
               헷갈릴 때 기준은 하나입니다.
                 "예쁜데 배송이 너무 늦었어요"  → 배송이 잘못됨   → (가)1 → NEEDS_ATTENTION
