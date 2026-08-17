@@ -73,6 +73,38 @@ class ClassifierBoundaryTest {
     }
 
     /**
+     * Exactly one file may read the holdout for the LLM path, and it needs a flag with no other use.
+     *
+     * <p>The separation is the mechanism: {@link #theDevHarnessCannotReachTheHoldout} keeps the
+     * re-run-constantly harness away from it, and this keeps the single-use one from multiplying. A
+     * second holdout reader appearing would be how §6.2's one reading quietly becomes several.
+     */
+    @Test
+    @DisplayName("only LlmTriageHoldoutIT reads the holdout, and only behind its own flag")
+    void oneHoldoutReaderOnly() throws IOException {
+        Path evalDir = Path.of("src", "test", "java", "com", "sellerops", "review", "triage", "eval");
+        List<String> readers = new ArrayList<>();
+        try (Stream<Path> walk = Files.walk(evalDir)) {
+            for (Path source : walk.filter(p -> p.toString().endsWith(".java")).toList()) {
+                // stripComments, not executableCode: the flag's NAME is a string literal, which
+                // executableCode() deliberately removes. Using it here found nothing at all, which
+                // is the shape of a guard that passes because it looks in the wrong place.
+                String code = stripComments(Files.readString(source));
+                if (code.contains("SPEND_HOLDOUT")) {
+                    readers.add(source.getFileName().toString());
+                }
+            }
+        }
+        // ReviewTriageEvalIT spends it for the rating-only rule; LlmTriageHoldoutIT for a candidate.
+        assertThat(readers).containsExactlyInAnyOrder(
+                "ReviewTriageEvalIT.java", "LlmTriageHoldoutIT.java");
+
+        String holdout = stripComments(Files.readString(evalDir.resolve("LlmTriageHoldoutIT.java")));
+        assertThat(holdout).as("the flag is checked, and returns without reading when unset")
+                .contains("LLM_TRIAGE_SPEND_HOLDOUT");
+    }
+
+    /**
      * Nothing in production reaches the transport around the channel check.
      *
      * <p>RUBRIC v2 §8.3 opens NAVER triage and nothing else, and §8.4 requires the check sit at the
