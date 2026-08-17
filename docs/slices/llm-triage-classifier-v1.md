@@ -419,11 +419,15 @@ So candidate B's three passes stand as measured, and no re-run is owed.
 llm-triage/v1+openai:gpt-5-2025-08-07+triage-prompt/v2+schema/v1+tdefault+out4000+effort:low+additive-guard/v1
 ```
 
-**Frozen tree:** `bf2405fc` — the review-fix commit. Candidate B's three passes were run at
+**Frozen tree:** `fb77dbcd` — the review-fix commit. Candidate B's three passes were run at
 `bbb94dda`; the fixes above changed no part of the request, the version, or the scoring, so the
 frozen artifact is the reviewed tree.
 
-**The gate, recomputed across both readings** from the three passes' own printed output:
+**The gate, recomputed across both readings** from the three passes' own printed output. Stated
+plainly because it matters: the harness that produced those passes printed a `PRIMARY`-only gate line
+(defect D2). The table below is derived by hand from the per-pass numbers that run printed, not
+re-measured — re-running to make the harness print it would have produced three *different* samples
+and thrown away the evidence this freeze rests on.
 
 | bar | worst observed | limit | |
 |---|---|---|---|
