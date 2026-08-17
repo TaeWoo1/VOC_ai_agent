@@ -43,6 +43,23 @@ sellerops:
     phase: ${SELLEROPS_CREDENTIAL_HANDOFF_PHASE:}
     # The bootstrap's own epoch. An arming older than the TTL (1h) is refused — the grant is single-sitting.
     armed-at-epoch-seconds: ${SELLEROPS_CREDENTIAL_HANDOFF_ARMED_AT:0}
+  # The LLM triage classifier's conservative production pilot — contracts/review-eval/naver/v2/RUBRIC.md
+  # §13.7. OFF by default and opt-in per organisation: an org not listed sees exactly what it saw before
+  # the pilot existed. Every request knob is here because all of them are part of the candidate's
+  # identity (§8.8); the defaults are frozen candidate C2's, and changing any is running a different
+  # candidate. NAVER only, through NaverOnlyClassifierGate; additive 확인 필요 promotion only; no
+  # marketplace write. The key is held in memory and never logged, stored, or versioned.
+  triage:
+    ai-pilot:
+      enabled: ${SELLEROPS_AI_TRIAGE_PILOT_ENABLED:false}
+      enabled-org-ids: ${SELLEROPS_AI_TRIAGE_PILOT_ORG_IDS:}
+      vendor: ${SELLEROPS_AI_TRIAGE_VENDOR:OPENAI}
+      model: ${SELLEROPS_AI_TRIAGE_MODEL:gpt-5-2025-08-07}
+      api-key: ${SELLEROPS_AI_TRIAGE_API_KEY:}
+      omit-temperature: ${SELLEROPS_AI_TRIAGE_OMIT_TEMPERATURE:true}
+      max-output-tokens: ${SELLEROPS_AI_TRIAGE_MAX_OUTPUT_TOKENS:4000}
+      reasoning-effort: ${SELLEROPS_AI_TRIAGE_REASONING_EFFORT:low}
+      max-per-run: ${SELLEROPS_AI_TRIAGE_MAX_PER_RUN:100}
   vault:
     # Credential vault master key: base64-encoded 32 bytes (AES-256). Local
     # throwaway only — never commit a real key; KMS-backed keys are a later

@@ -24,10 +24,15 @@ import org.springframework.transaction.annotation.Transactional;
  * {@link CorrectionDispositionKind#CLASSIFIER_ERROR} half of that ever reaches an evaluation set — a
  * frozen, numbered snapshot, offline, against the NEXT classifier version.
  *
- * <p><b>No surface reads any of this yet.</b> {@code contracts/review-eval/naver/v1/RUBRIC.md} §5
- * gates a text-derived detector behind precision, recall and false-positive bars that nothing has
- * cleared and a holdout that is unread. {@code ReviewTriageRules} still owns every tier a seller
- * sees; these rows exist to be measured.
+ * <p><b>One surface reads one of these, additively.</b> RUBRIC v2 §13.7's conservative pilot lets
+ * {@link AiTriageCurrent#isAiAttention()} raise a review the rule left lower and mark it
+ * {@code AI 확인 필요}. It may not lower anything, it does not own {@code WATCH}/{@code FYI}, and it is
+ * a candidate's suggestion displayed as such — never merged into the rules tier. Everything else
+ * here is written to be measured, not read.
+ *
+ * <p><b>Three strengths of evidence, in three tables</b> (feedback draft §7): a correction and an
+ * action are explicit — the seller answered a question or pressed a control that says what they did.
+ * A behaviour event is silver — a trace of navigation, weighted at snapshot time, never a label.
  */
 @Service
 public class TriageFeedbackService {
@@ -35,23 +40,35 @@ public class TriageFeedbackService {
     private final TriagePredictionRepository predictions;
     private final TriageCorrectionRepository corrections;
     private final CorrectionDispositionRepository dispositions;
+    private final AiTriageCurrentRepository current;
+    private final TriageActionRepository actions;
+    private final TriageBehaviorEventRepository behavior;
     private final Clock clock;
 
     @Autowired
     public TriageFeedbackService(TriagePredictionRepository predictions,
                                  TriageCorrectionRepository corrections,
-                                 CorrectionDispositionRepository dispositions) {
-        this(predictions, corrections, dispositions, Clock.systemUTC());
+                                 CorrectionDispositionRepository dispositions,
+                                 AiTriageCurrentRepository current,
+                                 TriageActionRepository actions,
+                                 TriageBehaviorEventRepository behavior) {
+        this(predictions, corrections, dispositions, current, actions, behavior, Clock.systemUTC());
     }
 
     /** Test seam: an explicit {@link Clock}, the same shape {@code ReviewReplyService} uses. */
     TriageFeedbackService(TriagePredictionRepository predictions,
                           TriageCorrectionRepository corrections,
                           CorrectionDispositionRepository dispositions,
+                          AiTriageCurrentRepository current,
+                          TriageActionRepository actions,
+                          TriageBehaviorEventRepository behavior,
                           Clock clock) {
         this.predictions = predictions;
         this.corrections = corrections;
         this.dispositions = dispositions;
+        this.current = current;
+        this.actions = actions;
+        this.behavior = behavior;
         this.clock = clock;
     }
 
@@ -88,7 +105,32 @@ public class TriageFeedbackService {
         row.setPromptHash(TriagePrompt.promptHash());
         row.setFailureReason(result.failureReason());
         row.setPredictedAt(Instant.now(clock));
-        return predictions.save(row);
+        TriagePrediction saved = predictions.save(row);
+        refreshCurrent(orgId, reviewId, baseline, saved);
+        return saved;
+    }
+
+    /**
+     * The one row the surface reads (RUBRIC v2 §13.7).
+     *
+     * <p>{@code aiAttention} is true exactly when the guarded tier is {@code NEEDS_ATTENTION} and the
+     * rule's own tier is not — i.e. when the classifier ADDED something. Where the rule already said
+     * 확인 필요 the mark is false, because there is nothing for the pilot to add and showing
+     * {@code AI 확인 필요} on a row the rating alone put there would let the seller credit the model
+     * for the rule's work. A failed classification lands on the baseline and therefore adds nothing.
+     */
+    private void refreshCurrent(UUID orgId, UUID reviewId, ReviewTriageTier baseline, TriagePrediction saved) {
+        boolean added = saved.getTier() == ReviewTriageTier.NEEDS_ATTENTION
+                && baseline != ReviewTriageTier.NEEDS_ATTENTION;
+        AiTriageCurrent row = current.findByReviewId(reviewId).orElseGet(AiTriageCurrent::new);
+        row.setOrgId(orgId);
+        row.setReviewId(reviewId);
+        row.setPredictionId(saved.getId());
+        row.setAiAttention(added);
+        row.setClassifierVersion(saved.getClassifierVersion());
+        row.setReasonCode(saved.getReasonCode());
+        row.setPredictedAt(saved.getPredictedAt());
+        current.save(row);
     }
 
     /**
@@ -113,14 +155,117 @@ public class TriageFeedbackService {
         if (reasonCode != null && TriageReasonCode.parse(reasonCode).isEmpty()) {
             throw ApiException.badRequest("알 수 없는 분류 사유입니다.");
         }
-        TriageCorrection row = corrections.findByPredictionId(predictionId).orElseGet(TriageCorrection::new);
+        TriageCorrection row = corrections.findByReviewId(prediction.getReviewId()).orElseGet(TriageCorrection::new);
         row.setOrgId(orgId);
+        row.setReviewId(prediction.getReviewId());
         row.setPredictionId(predictionId);
+        row.setShownTier(prediction.getTier());
+        row.setShownSource(TriageShownSource.AI);
         row.setCorrectedTier(tier);
         row.setCorrectedReasonCode(reasonCode);
         row.setCorrectedTags(tags == null || tags.isEmpty() ? null : String.join(",", tags));
         row.setCorrectedAt(Instant.now(clock));
         return corrections.save(row);
+    }
+
+    /**
+     * The seller's correction on a REVIEW — the pilot's write path.
+     *
+     * <p>Where the pilot has a current prediction for the review it is linked; where it does not,
+     * the correction is of the rule's own tier and says so ({@link TriageShownSource#RULES}). Both
+     * are strong evidence, neither is gold, and neither says why until dispositioned.
+     *
+     * <p>{@code tier} is the seller's binary answer, {@code NEEDS_ATTENTION} or not. A seller does
+     * not choose between {@code WATCH} and {@code FYI} here — that split is the rule's and the pilot
+     * does not own it (§13.7 item 1) — so "필요 없음" is stored as the rule's own non-attention tier
+     * for the row rather than as a tier the seller never saw.
+     */
+    @Transactional
+    public TriageCorrection correctReview(UUID orgId, UUID reviewId, Integer rating, String body,
+                                          boolean needsAttention, String reasonCode) {
+        if (reasonCode != null && TriageReasonCode.parse(reasonCode).isEmpty()) {
+            throw ApiException.badRequest("알 수 없는 분류 사유입니다.");
+        }
+        ReviewTriageTier ruleTier = ReviewTriageRules.tier(rating, body);
+        Shown shown = shown(reviewId, ruleTier);
+        TriageCorrection row = corrections.findByReviewId(reviewId).orElseGet(TriageCorrection::new);
+        row.setOrgId(orgId);
+        row.setReviewId(reviewId);
+        row.setPredictionId(shown.predictionId());
+        row.setShownTier(shown.tier());
+        row.setShownSource(shown.source());
+        row.setCorrectedTier(needsAttention ? ReviewTriageTier.NEEDS_ATTENTION
+                : ruleTier == ReviewTriageTier.NEEDS_ATTENTION ? ReviewTriageTier.WATCH : ruleTier);
+        row.setCorrectedReasonCode(reasonCode);
+        row.setCorrectedTags(null);
+        row.setCorrectedAt(Instant.now(clock));
+        return corrections.save(row);
+    }
+
+    /** An explicit act. Append-only; see {@link TriageActionKind}. */
+    @Transactional
+    public TriageAction act(UUID orgId, UUID reviewId, Integer rating, String body, TriageActionKind kind,
+                            UUID actorId) {
+        Shown shown = shown(reviewId, ReviewTriageRules.tier(rating, body));
+        TriageAction row = new TriageAction();
+        row.setOrgId(orgId);
+        row.setReviewId(reviewId);
+        row.setPredictionId(shown.predictionId());
+        row.setKind(kind);
+        row.setShownTier(shown.tier());
+        row.setShownSource(shown.source());
+        row.setActorId(actorId);
+        row.setActedAt(Instant.now(clock));
+        return actions.save(row);
+    }
+
+    /**
+     * A silver trace. Append-only, unweighted here — see {@link TriageBehaviorEvent}.
+     *
+     * <p>Batched by the caller because {@code EXPOSED} fires once per rendered row and a request per
+     * row would make the list slower to record than to read.
+     */
+    @Transactional
+    public int observe(UUID orgId, List<Observation> observations) {
+        List<TriageBehaviorEvent> rows = new java.util.ArrayList<>(observations.size());
+        Instant now = Instant.now(clock);
+        for (Observation o : observations) {
+            Shown shown = shown(o.reviewId(), ReviewTriageRules.tier(o.rating(), o.body()));
+            TriageBehaviorEvent row = new TriageBehaviorEvent();
+            row.setOrgId(orgId);
+            row.setReviewId(o.reviewId());
+            row.setPredictionId(shown.predictionId());
+            row.setKind(o.kind());
+            row.setShownTier(shown.tier());
+            row.setShownSource(shown.source());
+            row.setOccurredAt(now);
+            rows.add(row);
+        }
+        behavior.saveAll(rows);
+        return rows.size();
+    }
+
+    /** One behaviour observation, as the caller hands it in. Carries no content past this method. */
+    public record Observation(UUID reviewId, Integer rating, String body, TriageBehaviorKind kind) {
+    }
+
+    private record Shown(UUID predictionId, ReviewTriageTier tier, TriageShownSource source) {
+    }
+
+    /**
+     * What the seller was looking at: the pilot's mark if it added one, else the rule's tier.
+     *
+     * <p>Computed from the same inputs the surface used, not passed in by the caller — a client that
+     * could assert "I was shown AI" would be able to write feedback against a mechanism that never
+     * spoke.
+     */
+    private Shown shown(UUID reviewId, ReviewTriageTier ruleTier) {
+        return current.findByReviewId(reviewId)
+                .filter(AiTriageCurrent::isAiAttention)
+                .map(c -> new Shown(c.getPredictionId(), ReviewTriageTier.NEEDS_ATTENTION, TriageShownSource.AI))
+                .orElseGet(() -> new Shown(
+                        current.findByReviewId(reviewId).map(AiTriageCurrent::getPredictionId).orElse(null),
+                        ruleTier, TriageShownSource.RULES));
     }
 
     /**
@@ -167,5 +312,23 @@ public class TriageFeedbackService {
         }
         dispositions.saveAll(loose);
         return loose.size();
+    }
+
+    /**
+     * Cut a SILVER snapshot: stamp every loose action and behaviour event with a version.
+     *
+     * <p>A separate call and a separate version string from {@link #freezeSnapshot}, and it must stay
+     * that way — feedback draft §7.4: a silver snapshot may never be merged into a correction
+     * snapshot, because a single combined file is how the weaker evidence stops being visible.
+     */
+    @Transactional
+    public int freezeSilverSnapshot(UUID orgId, String snapshotVersion) {
+        List<TriageAction> looseActions = actions.findByOrgIdAndSnapshotVersionIsNull(orgId);
+        looseActions.forEach(a -> a.setSnapshotVersion(snapshotVersion));
+        actions.saveAll(looseActions);
+        List<TriageBehaviorEvent> looseEvents = behavior.findByOrgIdAndSnapshotVersionIsNull(orgId);
+        looseEvents.forEach(e -> e.setSnapshotVersion(snapshotVersion));
+        behavior.saveAll(looseEvents);
+        return looseActions.size() + looseEvents.size();
     }
 }

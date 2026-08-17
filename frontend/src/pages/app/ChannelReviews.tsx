@@ -11,8 +11,14 @@ import type {
   ChannelReviewPageView,
   ReviewTriageNote,
   ReviewTriageTier,
+  TriageActionKind,
+  TriageBehaviorEvent,
 } from "../../lib/types";
 import {
+  AI_TRIAGE_DISCLOSURE,
+  AI_TRIAGE_MARK_CLASS,
+  AI_TRIAGE_MARK_LABEL,
+  TRIAGE_FEEDBACK_LABEL,
   TRIAGE_TAG_DISCLOSURE,
   TRIAGE_TIERS,
   TRIAGE_TIER_CLASS,
@@ -93,6 +99,23 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
    */
   const requestSeq = useRef(0);
 
+  /**
+   * Silver never fails the screen: fire, forget, swallow — synchronously too. A throw from inside
+   * this call (a client without the route, a mocked api) must not reach the list's own catch and
+   * turn a rendered page into "불러오지 못했습니다" over a trace nobody will read.
+   */
+  const recordBehavior = useCallback(
+    (events: TriageBehaviorEvent[]) => {
+      if (!accountId || events.length === 0) return;
+      try {
+        void Promise.resolve(api.recordChannelReviewTriageBehavior(accountId, events)).catch(() => undefined);
+      } catch {
+        // Silver.
+      }
+    },
+    [accountId],
+  );
+
   const load = useCallback(
     async (
       nextSort: "attention" | "newest" | "lowest",
@@ -111,6 +134,15 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
         if (ticket !== requestSeq.current) return;
         setPage(view);
         setLoadError(false);
+        // Silver, §13.7: the rows the seller was SHOWN. Best-effort and after the list is set, so a
+        // failure to record a trace can never delay or fail the list. Only rows carrying the pilot's
+        // mark or a rules 확인 필요 are worth a trace — an FYI row's exposure says nothing anyone will
+        // weight — and there is no event for "not shown".
+        recordBehavior(
+          view.items
+            .filter((i) => i.aiMark !== null || i.triage.tier === "NEEDS_ATTENTION")
+            .map((i) => ({ reviewId: i.id, kind: "EXPOSED" as const })),
+        );
       } catch {
         // Fail closed: an unreachable backend shows nothing, never an invented list. The seller has
         // no other copy of what buyers wrote to check a fabrication against.
@@ -121,7 +153,7 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
         if (ticket === requestSeq.current) setLoading(false);
       }
     },
-    [accountId],
+    [accountId, recordBehavior],
   );
 
   useEffect(() => {
@@ -141,6 +173,9 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
         if (live) {
           setDetail(view);
           setDetailError(false);
+          if (view.aiMark !== null || view.triage.tier === "NEEDS_ATTENTION") {
+            recordBehavior([{ reviewId: view.id, kind: "OPENED" }]);
+          }
         }
       } catch {
         if (live) {
@@ -152,7 +187,7 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
     return () => {
       live = false;
     };
-  }, [accountId, selectedId]);
+  }, [accountId, selectedId, recordBehavior]);
 
   // Ceiling division on the size the SERVER reported, for the same reason the label uses it.
   const totalPages = page === null || page.size <= 0 ? 1 : Math.max(1, Math.ceil(page.total / page.size));
@@ -313,6 +348,7 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
                   >
                     <span className="flex flex-wrap items-center gap-2">
                       <TriageTierChip tier={item.triage.tier} />
+                      {item.aiMark ? <AiMarkChip /> : null}
                       <span className="font-semibold text-ink">{ratingLabel(item.rating)}</span>
                       <span className="text-sm text-muted">{item.writtenOn ?? "날짜 없음"}</span>
                       {item.isNew ? <Chip tone="accent">새 상품평</Chip> : null}
@@ -379,6 +415,8 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
               <p className="text-muted">상품평을 불러오지 못했습니다.</p>
             ) : detail ? (
               <ReviewDetail
+                accountId={accountId}
+                recordBehavior={recordBehavior}
                 detail={detail}
                 locate={locate}
                 // The run belongs to whichever review was last pressed. Showing its state under a DIFFERENT
@@ -400,12 +438,16 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
 }
 
 function ReviewDetail({
+  accountId,
+  recordBehavior,
   detail,
   locate,
   run,
   running,
   unavailable,
 }: {
+  accountId: string;
+  recordBehavior: (events: TriageBehaviorEvent[]) => void;
   detail: ChannelReviewDetailView;
   locate: ReviewLocateBinding;
   run: ActionWindowRunView | null;
@@ -421,12 +463,18 @@ function ReviewDetail({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <TriageTierChip tier={detail.triage.tier} />
+        {detail.aiMark ? <AiMarkChip /> : null}
         <span className="font-semibold text-ink">{ratingLabel(detail.rating)}</span>
         <span className="text-sm text-muted">{detail.writtenOn ?? "날짜 없음"}</span>
         {detail.isNew ? <Chip tone="accent">새 상품평</Chip> : null}
         {detail.mediaCount > 0 ? <Chip>사진·영상 {detail.mediaCount}</Chip> : null}
       </div>
       <TriageReason note={detail.triage} />
+      {detail.aiMark ? (
+        // The one sentence that keeps the mark honest: the rule did NOT call this 확인 필요, a frozen
+        // classifier did, and the seller is asked to correct it if it is wrong.
+        <p className="text-sm leading-relaxed text-muted">{AI_TRIAGE_DISCLOSURE}</p>
+      ) : null}
       {detail.triage.tags.length > 0 ? (
         <p className="text-sm leading-relaxed text-muted">{TRIAGE_TAG_DISCLOSURE}</p>
       ) : null}
@@ -453,6 +501,8 @@ function ReviewDetail({
         <dd className="truncate text-ink">{detail.locateTarget.vendorItemId ?? "정보 없음"}</dd>
       </dl>
 
+      <TriageFeedbackControls accountId={accountId} detail={detail} />
+
       {/*
         **[쿠팡에서 보기] — the one thing a seller can ask SellerOps to DO with a 상품평.**
 
@@ -465,7 +515,13 @@ function ReviewDetail({
           size="sm"
           variant="outline"
           disabled={running}
-          onClick={() => void locate.locate(detail.id)}
+          onClick={() => {
+            // Silver: the seller wanted the original. Recorded only for rows something raised.
+            if (detail.aiMark !== null || detail.triage.tier === "NEEDS_ATTENTION") {
+              recordBehavior([{ reviewId: detail.id, kind: "ORIGINAL_VIEWED" }]);
+            }
+            void locate.locate(detail.id);
+          }}
         >
           쿠팡에서 보기
         </Btn>
@@ -503,6 +559,124 @@ function ReviewDetail({
           </div>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+/** The pilot's mark — beside the rules tier, never in its place. */
+function AiMarkChip() {
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold ${AI_TRIAGE_MARK_CLASS}`}
+      title={AI_TRIAGE_DISCLOSURE}
+    >
+      {AI_TRIAGE_MARK_LABEL}
+    </span>
+  );
+}
+
+/**
+ * The feedback spine's controls — RUBRIC v2 §13.7, feedback draft §7–§8.
+ *
+ * **What these do: record.** A correction changes no tier on this screen, hides no row, and trains
+ * nothing; it becomes evidence a person later reads as CLASSIFIER_ERROR or SELLER_PREFERENCE, and a
+ * frozen snapshot the NEXT classifier version is measured against. The copy says so, once, because a
+ * seller pressing "확인할 필요 없어요" and watching the row stay put deserves to know why.
+ *
+ * **Binary on purpose.** 확인 필요, or not. The seller is not asked to pick 지켜보기 vs 참고 — that
+ * split is the rule's and the pilot does not own it.
+ *
+ * **Actions are three, and none of them submits anything anywhere.** 조치 시작 / 조치 완료 / 조치 불필요
+ * are statements about what the seller did off this screen; the marketplace is not touched.
+ */
+function TriageFeedbackControls({ accountId, detail }: { accountId: string; detail: ChannelReviewDetailView }) {
+  const [answer, setAnswer] = useState<boolean | null>(null);
+  const [lastAction, setLastAction] = useState<TriageActionKind | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  // A new review, a clean slate — the previous review's answer must not appear pressed on this one.
+  useEffect(() => {
+    setAnswer(null);
+    setLastAction(null);
+    setFailed(false);
+  }, [detail.id]);
+
+  const correct = async (needsAttention: boolean) => {
+    setBusy(true);
+    setFailed(false);
+    try {
+      const view = await api.correctChannelReviewTriage(accountId, detail.id, { needsAttention, reasonCode: null });
+      setAnswer(view.needsAttention);
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const act = async (kind: TriageActionKind) => {
+    setBusy(true);
+    setFailed(false);
+    try {
+      await api.recordChannelReviewTriageAction(accountId, detail.id, kind);
+      setLastAction(kind);
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3 border-t border-line pt-4" aria-label="분류 피드백">
+      <p className="text-sm font-semibold text-ink">이 상품평, 확인이 필요한가요?</p>
+      <div className="flex flex-wrap gap-2">
+        <Btn
+          size="sm"
+          variant={answer === true ? "solid" : "outline"}
+          aria-pressed={answer === true}
+          disabled={busy}
+          onClick={() => void correct(true)}
+        >
+          {TRIAGE_FEEDBACK_LABEL.needsAttention}
+        </Btn>
+        <Btn
+          size="sm"
+          variant={answer === false ? "solid" : "outline"}
+          aria-pressed={answer === false}
+          disabled={busy}
+          onClick={() => void correct(false)}
+        >
+          {TRIAGE_FEEDBACK_LABEL.notNeeded}
+        </Btn>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {(["STARTED", "COMPLETED", "NOT_NEEDED"] as const).map((kind) => (
+          <Btn
+            key={kind}
+            size="sm"
+            variant={lastAction === kind ? "solid" : "ghost"}
+            aria-pressed={lastAction === kind}
+            disabled={busy}
+            onClick={() => void act(kind)}
+          >
+            {kind === "STARTED"
+              ? TRIAGE_FEEDBACK_LABEL.started
+              : kind === "COMPLETED"
+                ? TRIAGE_FEEDBACK_LABEL.completed
+                : TRIAGE_FEEDBACK_LABEL.actionNotNeeded}
+          </Btn>
+        ))}
+      </div>
+      <p className="text-sm leading-relaxed text-muted">
+        답변은 기록만 됩니다. 이 화면의 분류가 바로 바뀌거나 상품평이 숨겨지지는 않으며, 다음 분류 기준을 검토할 때
+        근거로 씁니다. 마켓플레이스에는 아무것도 전송되지 않습니다.
+      </p>
+      {failed ? (
+        <p className="text-sm text-ink" role="status">
+          기록하지 못했습니다. 잠시 후 다시 눌러 주세요.
+        </p>
+      ) : null}
     </div>
   );
 }

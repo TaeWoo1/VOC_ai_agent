@@ -44,3 +44,28 @@ export const TRIAGE_TIERS: ReviewTriageTier[] = ["NEEDS_ATTENTION", "WATCH", "FY
  */
 export const TRIAGE_TAG_DISCLOSURE =
   "분류는 본문 키워드로 자동 분류한 것이라 정확하지 않을 수 있습니다. 확인 필요 여부는 별점과 본문 유무로만 판단합니다.";
+
+/**
+ * The pilot's mark, RUBRIC v2 §13.7 — and the sentence that keeps it honest.
+ *
+ * `AI 확인 필요` is rendered as its own chip BESIDE the rules tier, never in its place, so the seller
+ * can always tell which mechanism spoke. It is a candidate's suggestion: the rule did not call this
+ * review 확인 필요, a frozen classifier did, and the disclosure says so in one line. The chip uses
+ * the same emphasis as 확인 필요 because it sorts with 확인 필요; the wording carries the difference.
+ */
+export const AI_TRIAGE_MARK_LABEL = "AI 확인 필요";
+export const AI_TRIAGE_MARK_CLASS = "bg-warn/10 text-warn ring-1 ring-warn/40";
+export const AI_TRIAGE_DISCLOSURE =
+  "별점·본문 유무 기준으로는 확인 필요가 아니지만, AI 분류가 판매자가 확인할 내용이 있다고 판단한 상품평입니다. 틀렸다면 아래에서 바로잡아 주세요.";
+
+/**
+ * The feedback controls' words. Binary on purpose — 확인 필요, or 필요 없음. The seller is not asked
+ * to choose between 지켜보기 and 참고; that split is the rule's and the pilot does not own it.
+ */
+export const TRIAGE_FEEDBACK_LABEL = {
+  needsAttention: "확인 필요가 맞아요",
+  notNeeded: "확인할 필요 없어요",
+  started: "조치 시작",
+  completed: "조치 완료",
+  actionNotNeeded: "조치 불필요",
+} as const;

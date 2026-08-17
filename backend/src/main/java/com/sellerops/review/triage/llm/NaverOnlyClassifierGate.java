@@ -32,6 +32,21 @@ public final class NaverOnlyClassifierGate {
         this.classifier = classifier;
     }
 
+    /**
+     * The production constructor: a gate around an {@link ApiTriageClassifier}, built HERE.
+     *
+     * <p>{@code ClassifierBoundaryTest} asserts that nothing in {@code main} other than this file and
+     * the classifier's own constructs an {@link ApiTriageClassifier}. That is what makes the channel
+     * check unavoidable — a service holding the classifier directly would be a check nobody runs. So
+     * the pilot service asks this file for a gate rather than assembling one, and the transport, the
+     * vendor and the tuning are fixed at the same moment as the boundary.
+     */
+    public static NaverOnlyClassifierGate forApi(ApiTriageClassifier.Vendor vendor, String modelId,
+                                                 String apiKey, ApiTriageClassifier.Tuning tuning) {
+        return new NaverOnlyClassifierGate(
+                new ApiTriageClassifier(new JdkLlmHttpClient(), vendor, modelId, apiKey, tuning));
+    }
+
     public Result classify(String channelCode, Integer rating, String body) {
         if (!PERMITTED_CHANNEL.equals(channelCode)) {
             // The refusal names the channel, which is SellerOps' own vocabulary and carries nothing

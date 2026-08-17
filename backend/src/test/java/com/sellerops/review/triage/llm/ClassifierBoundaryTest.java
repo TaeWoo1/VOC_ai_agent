@@ -143,8 +143,16 @@ class ClassifierBoundaryTest {
                     continue;
                 }
                 String code = stripComments(Files.readString(source));
-                if (code.contains("new ApiTriageClassifier") || code.contains(".classify(new Input")) {
+                // The classifier's own constructor — `new ApiTriageClassifier(` — and not its nested
+                // Tuning record, which callers legitimately build to hand to the gate's factory.
+                if (code.contains("new ApiTriageClassifier(") || code.contains(".classify(new Input")) {
                     offenders.add(name);
+                }
+                // The pilot service holds a gate, and may only obtain one from the gate's own factory.
+                // A field of the classifier's type would be the direct hold this test forbids.
+                if (name.equals("AiTriagePilotService.java")
+                        && (code.contains("ApiTriageClassifier classifier") || code.contains("private final ApiTriageClassifier"))) {
+                    offenders.add(name + " (holds the classifier directly)");
                 }
             }
         }

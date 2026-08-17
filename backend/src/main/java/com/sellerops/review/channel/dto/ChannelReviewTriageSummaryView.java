@@ -15,9 +15,16 @@ import java.util.List;
  * disagree about what a tier is.
  */
 public record ChannelReviewTriageSummaryView(
+        /** 확인 필요 as the seller sees it: the rule's rows PLUS the pilot's additive marks. */
         long needsAttention,
         long watch,
         long fyi,
+        /**
+         * How many of {@link #needsAttention} are there because of the pilot's mark and not the rule
+         * — a subset, never an addition. Zero whenever the pilot is off for this org, so the summary
+         * then reads exactly as it did before the pilot existed.
+         */
+        long aiAttention,
         /**
          * Categories carried by at least {@code ReviewTriageNote.REPEAT_MIN} of this channel's reviews,
          * biggest first. <b>Unwindowed</b>: it says how many of the reviews you HAVE share a category and

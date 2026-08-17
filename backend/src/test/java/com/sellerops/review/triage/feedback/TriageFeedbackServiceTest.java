@@ -37,6 +37,9 @@ class TriageFeedbackServiceTest {
     private FakePredictions predictions;
     private FakeCorrections corrections;
     private FakeDispositions dispositions;
+    private FakeCurrent current;
+    private FakeActions actions;
+    private FakeBehavior behavior;
     private TriageFeedbackService service;
 
     @BeforeEach
@@ -44,7 +47,11 @@ class TriageFeedbackServiceTest {
         predictions = new FakePredictions();
         corrections = new FakeCorrections();
         dispositions = new FakeDispositions();
-        service = new TriageFeedbackService(predictions.repo, corrections.repo, dispositions.repo, FIXED);
+        current = new FakeCurrent();
+        actions = new FakeActions();
+        behavior = new FakeBehavior();
+        service = new TriageFeedbackService(predictions.repo, corrections.repo, dispositions.repo,
+                current.repo, actions.repo, behavior.repo, FIXED);
     }
 
     private TriagePrediction recordOk() {
@@ -172,6 +179,134 @@ class TriageFeedbackServiceTest {
                 "SOUNDS_BAD", List.of())).isInstanceOf(ApiException.class);
     }
 
+    // ── the pilot's read row, RUBRIC v2 §13.7 ─────────────────────────────────────────────
+
+    @Test
+    @DisplayName("the current row marks AI 확인 필요 only where the classifier ADDED something")
+    void theCurrentRowIsAdditiveOnly() {
+        // 5★ FYI by rule, model promotes → the pilot added it → marked.
+        service.record(ORG, REVIEW, 5, "좋은데 하나 아쉬워요", "m", ReviewTriageClassifier.Result.ok(
+                ReviewTriageTier.NEEDS_ATTENTION, "PRAISE_WITH_CONCESSION", List.of(),
+                TriageSuggestedAction.INVESTIGATE_PRODUCT, "v/1"));
+        assertThat(current.rows).hasSize(1);
+        assertThat(current.rows.get(0).isAiAttention()).isTrue();
+
+        // 1★ with text — the RULE already says 확인 필요. Whatever the model says, the pilot added
+        // nothing, so the mark is false: crediting the model for the rule's work would be a lie
+        // the seller could not detect.
+        UUID lowStar = UUID.randomUUID();
+        service.record(ORG, lowStar, 1, "깨졌어요", "m", ReviewTriageClassifier.Result.ok(
+                ReviewTriageTier.NEEDS_ATTENTION, "DEFECT_OR_DAMAGE", List.of(),
+                TriageSuggestedAction.INVESTIGATE_PRODUCT, "v/1"));
+        assertThat(current.rows.stream().filter(r -> r.getReviewId().equals(lowStar)).findFirst().orElseThrow()
+                .isAiAttention()).as("nothing to add on a rules positive").isFalse();
+
+        // Model says WATCH on a 5★ → nothing added → not marked. And a failure lands on the baseline
+        // → nothing added → not marked. Neither can ever produce a mark.
+        UUID watch = UUID.randomUUID();
+        service.record(ORG, watch, 5, "그냥 그래요", "m", ReviewTriageClassifier.Result.ok(
+                ReviewTriageTier.WATCH, "CRITIQUE_NO_REQUEST", List.of(), TriageSuggestedAction.MONITOR_REPEAT, "v/1"));
+        UUID failed = UUID.randomUUID();
+        service.record(ORG, failed, 5, "좋아요", "m", ReviewTriageClassifier.Result.failed("v/1", "http 500"));
+        assertThat(current.rows.stream().filter(r -> r.getReviewId().equals(watch) || r.getReviewId().equals(failed)))
+                .allMatch(r -> !r.isAiAttention());
+    }
+
+    @Test
+    @DisplayName("re-classifying rewrites the current row in place; the prediction history still grows")
+    void theCurrentRowIsRewrittenNotAppended() {
+        recordOk();
+        recordOk();
+        assertThat(predictions.rows).hasSize(2);
+        assertThat(current.rows).as("one live answer per review").hasSize(1);
+        assertThat(current.rows.get(0).getPredictionId()).isEqualTo(predictions.rows.get(1).getId());
+    }
+
+    // ── explicit feedback on a REVIEW ────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("a correction on a review the pilot marked is scoped to the AI prediction")
+    void aReviewCorrectionAgainstTheAiMark() {
+        TriagePrediction p = service.record(ORG, REVIEW, 5, "좋은데 하나 아쉬워요", "m",
+                ReviewTriageClassifier.Result.ok(ReviewTriageTier.NEEDS_ATTENTION, "PRAISE_WITH_CONCESSION",
+                        List.of(), TriageSuggestedAction.INVESTIGATE_PRODUCT, "v/1"));
+        TriageCorrection c = service.correctReview(ORG, REVIEW, 5, "좋은데 하나 아쉬워요", false, null);
+
+        assertThat(c.getPredictionId()).isEqualTo(p.getId());
+        assertThat(c.getShownSource()).isEqualTo(TriageShownSource.AI);
+        assertThat(c.getShownTier()).isEqualTo(ReviewTriageTier.NEEDS_ATTENTION);
+        // "필요 없음" is stored as the RULE's own non-attention tier for the row — the seller never
+        // chose between WATCH and FYI, and the pilot does not own that split.
+        assertThat(c.getCorrectedTier()).isEqualTo(ReviewTriageTier.FYI);
+    }
+
+    @Test
+    @DisplayName("a correction on a review no classifier saw is a correction of the RULE, and says so")
+    void aReviewCorrectionAgainstTheRule() {
+        // 1★ with text, no prediction anywhere: the seller says 필요 없음 to a rules 확인 필요.
+        TriageCorrection c = service.correctReview(ORG, REVIEW, 1, "별로", false, "CRITIQUE_NO_REQUEST");
+
+        assertThat(c.getPredictionId()).isNull();
+        assertThat(c.getShownSource()).isEqualTo(TriageShownSource.RULES);
+        assertThat(c.getShownTier()).isEqualTo(ReviewTriageTier.NEEDS_ATTENTION);
+        assertThat(c.getCorrectedTier()).isEqualTo(ReviewTriageTier.WATCH);
+        assertThat(c.getCorrectedReasonCode()).isEqualTo("CRITIQUE_NO_REQUEST");
+    }
+
+    @Test
+    @DisplayName("what was shown is computed from the store, never asserted by the caller")
+    void shownIsNotCallerSupplied() {
+        // No overload takes a shownSource. A client that could say "I was shown AI" could write
+        // feedback against a mechanism that never spoke.
+        assertThat(TriageFeedbackService.class.getMethods())
+                .filteredOn(m -> m.getName().equals("correctReview") || m.getName().equals("act"))
+                .allMatch(m -> java.util.Arrays.stream(m.getParameterTypes())
+                        .noneMatch(t -> t == TriageShownSource.class));
+    }
+
+    @Test
+    @DisplayName("actions append; a start and a completion are two rows, and neither trains anything")
+    void actionsAppend() {
+        service.act(ORG, REVIEW, 5, "좋아요", TriageActionKind.STARTED, null);
+        service.act(ORG, REVIEW, 5, "좋아요", TriageActionKind.COMPLETED, null);
+        assertThat(actions.rows).hasSize(2);
+        assertThat(actions.rows).extracting(TriageAction::getKind)
+                .containsExactly(TriageActionKind.STARTED, TriageActionKind.COMPLETED);
+    }
+
+    // ── silver ───────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("there is no IGNORED behaviour kind, and no weight column — silver stays silver")
+    void silverHasNoIgnoreAndNoWeight() {
+        assertThat(TriageBehaviorKind.values()).extracting(Enum::name)
+                .as("absence of rows is the record of being ignored, and absence is not a signal")
+                .noneMatch(n -> n.contains("IGNOR") || n.contains("SKIP") || n.contains("DISMISS"));
+        assertThat(TriageBehaviorEvent.class.getDeclaredFields())
+                .as("the weight is a snapshot-time policy, not a stored fact")
+                .noneMatch(f -> f.getName().toLowerCase().contains("weight"));
+    }
+
+    @Test
+    @DisplayName("silver and corrections freeze into SEPARATE snapshots, and neither call touches the other")
+    void silverIsFrozenApart() {
+        TriageCorrection error = correctionFor(recordOk());
+        service.disposition(ORG, error.getId(), CorrectionDispositionKind.CLASSIFIER_ERROR, null);
+        service.act(ORG, REVIEW, 5, "좋아요", TriageActionKind.COMPLETED, null);
+        service.observe(ORG, List.of(new TriageFeedbackService.Observation(REVIEW, 5, "좋아요",
+                TriageBehaviorKind.OPENED)));
+
+        assertThat(service.freezeSnapshot(ORG, "gold-eval/1")).isEqualTo(1);
+        assertThat(actions.rows.get(0).getSnapshotVersion()).as("a correction snapshot took no silver").isNull();
+        assertThat(behavior.rows.get(0).getSnapshotVersion()).isNull();
+
+        assertThat(service.freezeSilverSnapshot(ORG, "silver/1")).isEqualTo(2);
+        assertThat(actions.rows.get(0).getSnapshotVersion()).isEqualTo("silver/1");
+        assertThat(behavior.rows.get(0).getSnapshotVersion()).isEqualTo("silver/1");
+        assertThat(dispositions.rows.get(0).getSnapshotVersion())
+                .as("a silver snapshot took no correction").isEqualTo("gold-eval/1");
+    }
+
     @Test
     @DisplayName("a second correction supersedes rather than accumulating")
     void oneLiveCorrectionPerPrediction() {
@@ -277,7 +412,58 @@ class TriageFeedbackServiceTest {
                             .filter(r -> r.getId().equals(i.getArgument(0))).findFirst());
             org.mockito.Mockito.when(repo.findByPredictionId(org.mockito.ArgumentMatchers.any()))
                     .thenAnswer(i -> rows.stream()
-                            .filter(r -> r.getPredictionId().equals(i.getArgument(0))).findFirst());
+                            .filter(r -> i.getArgument(0).equals(r.getPredictionId())).findFirst());
+            org.mockito.Mockito.when(repo.findByReviewId(org.mockito.ArgumentMatchers.any()))
+                    .thenAnswer(i -> rows.stream()
+                            .filter(r -> i.getArgument(0).equals(r.getReviewId())).findFirst());
+        }
+    }
+
+    private static class FakeCurrent {
+        final List<AiTriageCurrent> rows = new ArrayList<>();
+        final AiTriageCurrentRepository repo = org.mockito.Mockito.mock(AiTriageCurrentRepository.class);
+
+        FakeCurrent() {
+            org.mockito.Mockito.when(repo.save(org.mockito.ArgumentMatchers.any()))
+                    .thenAnswer(i -> store(rows, i.getArgument(0)));
+            org.mockito.Mockito.when(repo.findByReviewId(org.mockito.ArgumentMatchers.any()))
+                    .thenAnswer(i -> rows.stream()
+                            .filter(r -> i.getArgument(0).equals(r.getReviewId())).findFirst());
+        }
+    }
+
+    private static class FakeActions {
+        final List<TriageAction> rows = new ArrayList<>();
+        final TriageActionRepository repo = org.mockito.Mockito.mock(TriageActionRepository.class);
+
+        FakeActions() {
+            org.mockito.Mockito.when(repo.save(org.mockito.ArgumentMatchers.any()))
+                    .thenAnswer(i -> store(rows, i.getArgument(0)));
+            org.mockito.Mockito.when(repo.saveAll(org.mockito.ArgumentMatchers.any()))
+                    .thenAnswer(i -> i.getArgument(0));
+            org.mockito.Mockito.when(repo.findByOrgIdAndSnapshotVersionIsNull(org.mockito.ArgumentMatchers.any()))
+                    .thenAnswer(i -> rows.stream()
+                            .filter(r -> r.getOrgId().equals(i.getArgument(0)) && r.getSnapshotVersion() == null)
+                            .toList());
+        }
+    }
+
+    private static class FakeBehavior {
+        final List<TriageBehaviorEvent> rows = new ArrayList<>();
+        final TriageBehaviorEventRepository repo = org.mockito.Mockito.mock(TriageBehaviorEventRepository.class);
+
+        FakeBehavior() {
+            org.mockito.Mockito.when(repo.saveAll(org.mockito.ArgumentMatchers.any()))
+                    .thenAnswer(i -> {
+                        for (TriageBehaviorEvent e : (List<TriageBehaviorEvent>) i.getArgument(0)) {
+                            store(rows, e);
+                        }
+                        return i.getArgument(0);
+                    });
+            org.mockito.Mockito.when(repo.findByOrgIdAndSnapshotVersionIsNull(org.mockito.ArgumentMatchers.any()))
+                    .thenAnswer(i -> rows.stream()
+                            .filter(r -> r.getOrgId().equals(i.getArgument(0)) && r.getSnapshotVersion() == null)
+                            .toList());
         }
     }
 

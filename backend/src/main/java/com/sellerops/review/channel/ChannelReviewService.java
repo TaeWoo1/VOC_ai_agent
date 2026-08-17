@@ -11,6 +11,7 @@ import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.review.Review;
 import com.sellerops.review.ReviewRepository;
+import com.sellerops.review.channel.dto.AiTriageMarkView;
 import com.sellerops.review.channel.dto.ChannelReviewDetailView;
 import com.sellerops.review.channel.dto.ChannelReviewItemView;
 import com.sellerops.review.channel.dto.ChannelReviewPageView;
@@ -18,6 +19,9 @@ import com.sellerops.review.channel.dto.ChannelReviewTriageSummaryView;
 import com.sellerops.review.triage.ReviewTriageNote;
 import com.sellerops.review.triage.ReviewTriageRules;
 import com.sellerops.review.triage.ReviewTriageTier;
+import com.sellerops.review.triage.feedback.AiTriageCurrent;
+import com.sellerops.review.triage.feedback.AiTriageCurrentRepository;
+import com.sellerops.review.triage.pilot.AiTriagePilotService;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
 import com.sellerops.sync.SyncJob;
@@ -30,6 +34,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -53,10 +58,16 @@ import org.springframework.stereotype.Service;
  * the operator asks, nothing is marked done, and no tier promises that anything happens next — see
  * {@code docs/slices/review-triage-v1.md}. {@code sort=lowest} and {@code sort=newest} are unchanged.
  *
- * <p><b>The tier is decided by the rating and whether there is text, and by nothing else.</b> Body-derived
- * material (the stored analysis category, and how often it repeats) reaches the operator only as a citation
- * inside the note. That boundary is {@code contracts/review-eval/naver/v1/RUBRIC.md} §5, which forbids
- * surfacing an unmeasured text detector, and the label seed behind it is still empty.
+ * <p><b>The rules tier is decided by the rating and whether there is text, and by nothing else.</b>
+ * Body-derived material (the stored analysis category, and how often it repeats) reaches the operator only
+ * as a citation inside the note. That boundary is {@code contracts/review-eval/naver/v1/RUBRIC.md} §5.
+ *
+ * <p><b>What the §13.7 pilot adds, and the only thing it adds.</b> For an org opted in, a review the frozen
+ * candidate promoted carries an {@link AiTriageMarkView} — {@code AI 확인 필요} — and sorts with 확인 필요.
+ * The rules tier on the row is unchanged and shown beside it, so the seller can always tell which mechanism
+ * spoke. Nothing here can lower a tier: the ordering is {@code ReviewRepository.FINAL_TIER_RANK}, whose
+ * one departure from the rules rank can only produce the top rank. For an org not opted in every row reads
+ * exactly as it did before the pilot existed — the join finds nothing and the mark is null.
  *
  * <p><b>New is derived, never stored.</b> A review is new when it was written into the database at or after
  * the most recent review import for this account started. No read flag, no per-review state: the question a
@@ -98,15 +109,20 @@ public class ChannelReviewService {
     private final SellerAccountRepository accounts;
     private final SyncJobRepository syncJobs;
     private final ItemAnalysisRepository analyses;
+    private final AiTriageCurrentRepository aiCurrent;
+    private final AiTriagePilotService pilot;
 
     public ChannelReviewService(ReviewRepository reviews, ProductRepository products,
                                 SellerAccountRepository accounts, SyncJobRepository syncJobs,
-                                ItemAnalysisRepository analyses) {
+                                ItemAnalysisRepository analyses, AiTriageCurrentRepository aiCurrent,
+                                AiTriagePilotService pilot) {
         this.reviews = reviews;
         this.products = products;
         this.accounts = accounts;
         this.syncJobs = syncJobs;
         this.analyses = analyses;
+        this.aiCurrent = aiCurrent;
+        this.pilot = pilot;
     }
 
     public ChannelReviewPageView list(UUID orgId, UUID accountId, String sort, String tier, int page, int size) {
@@ -126,14 +142,16 @@ public class ChannelReviewService {
         // property sort on a not-null column. A tier filter applies to all three — an operator who
         // filtered to 확인 필요 and then asked for 최신순 wants the newest of those, not the filter
         // silently dropped.
-        Page<Review> found = findPage(orgId, channelId, requestedSort, tierRank, pageable);
+        Page<Review> found = findPage(orgId, channelId, requestedSort, tierRank, pilot.isEnabledFor(orgId), pageable);
 
         Map<UUID, Product> byProduct = productsOf(orgId, found.getContent());
         Map<UUID, String> categories = categoriesOf(orgId, found.getContent());
         Map<String, Long> categoryCounts = categoryCounts(orgId, channelId);
+        Map<UUID, AiTriageMarkView> marks = marksOf(orgId, found.getContent());
 
         List<ChannelReviewItemView> items = found.getContent().stream()
-                .map(r -> item(r, productOf(byProduct, r), newSince, note(r, categories, categoryCounts)))
+                .map(r -> item(r, productOf(byProduct, r), newSince, note(r, categories, categoryCounts),
+                        marks.get(r.getId())))
                 .toList();
 
         long newCount = newSince == null ? 0
@@ -145,6 +163,35 @@ public class ChannelReviewService {
                 lastImport.map(j -> "SUCCESS".equals(j.getStatus())).orElse(false),
                 summary(orgId, channelId, categoryCounts),
                 items);
+    }
+
+    /**
+     * The pilot's marks for the rows on this page — one org-scoped batch query, the same shape as
+     * {@link #categoriesOf}. Empty when the pilot is off for this org, without touching the table.
+     *
+     * <p>Only rows with {@code aiAttention = true} become marks. A current row with {@code false} is
+     * the pilot saying "nothing to add", and nothing to add renders as nothing.
+     */
+    private Map<UUID, AiTriageMarkView> marksOf(UUID orgId, List<Review> page) {
+        if (!pilot.isEnabledFor(orgId) || page.isEmpty()) {
+            return Map.of();
+        }
+        // A rules 확인 필요 never carries a mark — there is nothing to add, and a mark there would let
+        // the seller credit the model for the rule's work. The write path already refuses to set one
+        // (TriageFeedbackService.refreshCurrent); this is the same rule at the boundary the seller
+        // sees, so a row that reached the table some other way still cannot render one.
+        Set<UUID> rulesPositive = page.stream()
+                .filter(r -> ReviewTriageRules.tier(r.getRating(), r.getBody()) == ReviewTriageTier.NEEDS_ATTENTION)
+                .map(Review::getId).collect(Collectors.toSet());
+        List<UUID> ids = page.stream().map(Review::getId).toList();
+        return aiCurrent.findByOrgIdAndReviewIdIn(orgId, ids).stream()
+                .filter(AiTriageCurrent::isAiAttention)
+                .filter(c -> !rulesPositive.contains(c.getReviewId()))
+                .collect(Collectors.toMap(AiTriageCurrent::getReviewId, ChannelReviewService::mark, (a, b) -> a));
+    }
+
+    private static AiTriageMarkView mark(AiTriageCurrent c) {
+        return new AiTriageMarkView(c.getClassifierVersion(), c.getReasonCode(), c.getPredictedAt());
     }
 
     /**
@@ -184,6 +231,7 @@ public class ChannelReviewService {
                 // The count is for THIS review's category alone. Reusing the grouped breakdown made
                 // opening one review scan the channel's whole analysis join to read a single entry.
                 detailNote(orgId, account.getChannelId(), review),
+                marksOf(orgId, List.of(review)).get(review.getId()),
                 new ChannelReviewDetailView.LocateTarget(
                         product == null ? null : product.getSku(),
                         review.getSourceOptionId(),
@@ -192,7 +240,7 @@ public class ChannelReviewService {
     }
 
     private ChannelReviewItemView item(Review review, Product product, Instant newSince,
-                                       ReviewTriageNote triage) {
+                                       ReviewTriageNote triage, AiTriageMarkView aiMark) {
         SafePreviewResult preview = VocPreviewSanitizer.sanitize(review.getBody());
         return new ChannelReviewItemView(
                 review.getId(),
@@ -206,7 +254,8 @@ public class ChannelReviewService {
                 review.getMediaCount(),
                 isTextless(review),
                 isNew(review, newSince),
-                triage);
+                triage,
+                aiMark);
     }
 
     /**
@@ -276,7 +325,7 @@ public class ChannelReviewService {
      */
     private ChannelReviewTriageSummaryView summary(UUID orgId, UUID channelId, Map<String, Long> categoryCounts) {
         Map<Integer, Long> byTier = new LinkedHashMap<>();
-        for (Object[] row : reviews.countByChannelGroupedByTierRank(orgId, channelId)) {
+        for (Object[] row : reviews.countByChannelGroupedByTierRank(orgId, channelId, pilot.isEnabledFor(orgId))) {
             byTier.put(((Number) row[0]).intValue(), ((Number) row[1]).longValue());
         }
 
@@ -297,6 +346,8 @@ public class ChannelReviewService {
                 tierCount(byTier, ReviewTriageTier.NEEDS_ATTENTION),
                 tierCount(byTier, ReviewTriageTier.WATCH),
                 tierCount(byTier, ReviewTriageTier.FYI),
+                // Zero, and no query, when the pilot is off — the summary then reads as it always did.
+                pilot.isEnabledFor(orgId) ? reviews.countAiAttentionByChannel(orgId, channelId) : 0,
                 repeated);
     }
 
@@ -373,20 +424,21 @@ public class ChannelReviewService {
      * for the complaints first and silently got the newest first would read the top of the list as their
      * worst reviews.
      */
-    private Page<Review> findPage(UUID orgId, UUID channelId, String sort, Integer tierRank, Pageable pageable) {
+    private Page<Review> findPage(UUID orgId, UUID channelId, String sort, Integer tierRank, boolean aiEnabled,
+                                  Pageable pageable) {
         if (SORT_ATTENTION.equals(sort)) {
-            return reviews.findByOrgIdAndChannelIdTriaged(orgId, channelId, tierRank, pageable);
+            return reviews.findByOrgIdAndChannelIdTriaged(orgId, channelId, tierRank, aiEnabled, pageable);
         }
         if (SORT_LOWEST.equals(sort)) {
             // Its own query rather than a `Sort`, because the NULLS-LAST handling has to be inside the
             // JPQL: `rating` is nullable here and a bare `rating asc` sorts nulls FIRST on H2 and LAST
             // on PostgreSQL, which would make the top of 낮은 평점순 depend on the database. See
             // ReviewRepository.findByOrgIdAndChannelIdTriagedLowestFirst.
-            return reviews.findByOrgIdAndChannelIdTriagedLowestFirst(orgId, channelId, tierRank, pageable);
+            return reviews.findByOrgIdAndChannelIdTriagedLowestFirst(orgId, channelId, tierRank, aiEnabled, pageable);
         }
         if (SORT_NEWEST.equals(sort)) {
             // `received_at` is not null, so a plain property sort carries no null-ordering exposure.
-            return reviews.findByOrgIdAndChannelIdTriagedSorted(orgId, channelId, tierRank,
+            return reviews.findByOrgIdAndChannelIdTriagedSorted(orgId, channelId, tierRank, aiEnabled,
                     PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
                             Sort.by(Sort.Order.desc("receivedAt"), Sort.Order.asc("id"))));
         }

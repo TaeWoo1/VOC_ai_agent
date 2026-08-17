@@ -38,6 +38,8 @@ public record ChannelReviewDetailView(
         boolean isNew,
         /** The same suggestion the list row carries, so opening a review cannot change what it said. */
         ReviewTriageNote triage,
+        /** The same pilot mark the list row carried, or null — see {@link ChannelReviewItemView#aiMark()}. */
+        AiTriageMarkView aiMark,
         LocateTarget locateTarget) {
 
     /** The channel-side identifiers this review carries — nothing that names a person. */

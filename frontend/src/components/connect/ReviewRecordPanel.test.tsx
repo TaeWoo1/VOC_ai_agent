@@ -45,7 +45,7 @@ function page(total: number): ChannelReviewPageView {
     newCount: 0,
     lastImportAt: null,
     lastImportComplete: true,
-    triageSummary: { needsAttention: 0, watch: 0, fyi: total, repeatedCategories: [] },
+    triageSummary: { needsAttention: 0, watch: 0, fyi: total, aiAttention: 0, repeatedCategories: [] },
     items: [],
   };
 }

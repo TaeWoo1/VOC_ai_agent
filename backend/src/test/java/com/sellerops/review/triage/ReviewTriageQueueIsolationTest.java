@@ -52,7 +52,7 @@ class ReviewTriageQueueIsolationTest {
      * check for them with the property that actually matters, and the tier rule itself stays
      * store-nothing.
      */
-    private static final List<String> PERSISTING_SUBPACKAGES = List.of("llm", "feedback");
+    private static final List<String> PERSISTING_SUBPACKAGES = List.of("llm", "feedback", "pilot");
 
     /**
      * Mechanisms that decide the needs-a-look queue, or that record a human's decision about a review.
@@ -122,13 +122,18 @@ class ReviewTriageQueueIsolationTest {
     }
 
     /**
-     * The classifier may persist, and only into its own three tables.
+     * The classifier may persist, and only into its own tables.
      *
      * <p>This is the property that replaces "stores nothing" for the subpackages, and it is the one
      * RUBRIC §5's regression bar actually needs: a prediction store cannot change a
      * {@code LOW_RATING_REVIEW} count if it never writes anything the attention queue reads. The
      * check is on the entity mappings rather than on intent, so a future entity pointed at
      * {@code reviews} or {@code review_triages} fails here rather than in production.
+     *
+     * <p><b>Six tables since the §13.7 pilot</b>, and the three added are still the classifier's own:
+     * the pilot's current-mark row that the channel review list joins (additively — see
+     * {@code ReviewRepository.FINAL_TIER_RANK}), and the two feedback tables for actions and silver
+     * behaviour. None of them is read by the attention queue.
      */
     @Test
     void theClassifierWritesOnlyItsOwnTables() throws IOException {
@@ -145,7 +150,8 @@ class ReviewTriageQueueIsolationTest {
         assertThat(tables)
                 .as("triage는 자기 테이블 밖에는 아무것도 쓰지 않습니다 (RUBRIC.md §5 회귀 게이트)")
                 .containsOnly("review_triage_predictions", "review_triage_corrections",
-                        "review_correction_dispositions");
+                        "review_correction_dispositions", "review_triage_ai_current",
+                        "review_triage_actions", "review_triage_behavior_events");
     }
 
     /** Only the tier rule's own files — the subpackages are covered by the two tests above. */

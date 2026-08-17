@@ -4,7 +4,10 @@ import com.sellerops.auth.AuthPrincipal;
 import com.sellerops.review.channel.dto.ChannelReviewDetailView;
 import com.sellerops.review.channel.dto.ChannelReviewLocateRunResponse;
 import com.sellerops.review.channel.dto.ChannelReviewPageView;
+import com.sellerops.review.channel.dto.TriageFeedbackRequests;
+import com.sellerops.review.triage.pilot.AiTriagePilotService;
 import java.util.UUID;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -32,10 +35,15 @@ public class ChannelReviewController {
 
     private final ChannelReviewService service;
     private final ChannelReviewLocateService locates;
+    private final ChannelReviewFeedbackService feedback;
+    private final AiTriagePilotService pilot;
 
-    public ChannelReviewController(ChannelReviewService service, ChannelReviewLocateService locates) {
+    public ChannelReviewController(ChannelReviewService service, ChannelReviewLocateService locates,
+                                   ChannelReviewFeedbackService feedback, AiTriagePilotService pilot) {
         this.service = service;
         this.locates = locates;
+        this.feedback = feedback;
+        this.pilot = pilot;
     }
 
     /**
@@ -76,5 +84,52 @@ public class ChannelReviewController {
                                                          @PathVariable UUID accountId,
                                                          @PathVariable UUID reviewId) {
         return locates.mint(principal.orgId(), accountId, reviewId, principal.userId());
+    }
+
+    // ── RUBRIC v2 §13.7 — the conservative pilot's feedback spine ──────────────────────────────
+    //
+    // Three write routes of decreasing evidential weight, and one operator-triggered run. None of
+    // them touches a marketplace, changes a tier, hides a row or marks anything done. They record.
+
+    /** The seller's answer: 확인 필요, or 필요 없음. Strong evidence; supersedes their previous answer. */
+    @PostMapping("/{reviewId}/triage-feedback/correction")
+    public TriageFeedbackRequests.CorrectionView correct(@AuthenticationPrincipal AuthPrincipal principal,
+                                                         @PathVariable UUID accountId,
+                                                         @PathVariable UUID reviewId,
+                                                         @RequestBody TriageFeedbackRequests.Correction request) {
+        return feedback.correct(principal.orgId(), accountId, reviewId, request);
+    }
+
+    /** The seller acted: started, completed, or declared not needed. Strong evidence; append-only. */
+    @PostMapping("/{reviewId}/triage-feedback/actions")
+    public void act(@AuthenticationPrincipal AuthPrincipal principal,
+                    @PathVariable UUID accountId,
+                    @PathVariable UUID reviewId,
+                    @RequestBody TriageFeedbackRequests.Action request) {
+        feedback.act(principal.orgId(), accountId, reviewId, request == null ? null : request.kind(),
+                principal.userId());
+    }
+
+    /**
+     * What the seller did on the way — exposed, opened, viewed the original. Silver, batched, never
+     * a label. There is deliberately no route to report "ignored".
+     */
+    @PostMapping("/triage-feedback/behavior")
+    public TriageFeedbackRequests.BehaviorResult observe(@AuthenticationPrincipal AuthPrincipal principal,
+                                                         @PathVariable UUID accountId,
+                                                         @RequestBody TriageFeedbackRequests.Behavior request) {
+        return feedback.observe(principal.orgId(), accountId, request);
+    }
+
+    /**
+     * Run the frozen candidate over this account's not-yet-classified reviews, bounded. A POST that
+     * sends review bodies to the configured vendor under §8.3 — for a NAVER account of an opted-in
+     * org, and refused as UNCLASSIFIED for anything else. Reads stored reviews, writes SellerOps' own
+     * tables, touches no marketplace.
+     */
+    @PostMapping("/ai-triage/runs")
+    public AiTriagePilotService.RunResult runAiTriage(@AuthenticationPrincipal AuthPrincipal principal,
+                                                      @PathVariable UUID accountId) {
+        return pilot.run(principal.orgId(), accountId);
     }
 }

@@ -14,6 +14,9 @@ import com.sellerops.product.ProductRepository;
 import com.sellerops.review.Review;
 import com.sellerops.review.ReviewReplyState;
 import com.sellerops.review.ReviewRepository;
+import com.sellerops.review.triage.feedback.AiTriageCurrentRepository;
+import com.sellerops.review.triage.pilot.AiTriagePilotProperties;
+import com.sellerops.review.triage.pilot.AiTriagePilotService;
 import com.sellerops.review.channel.dto.ChannelReviewDetailView;
 import com.sellerops.review.channel.dto.ChannelReviewPageView;
 import com.sellerops.selleraccount.SellerAccount;
@@ -52,6 +55,7 @@ class ChannelReviewServiceTest {
     @Autowired ChannelRepository channels;
     @Autowired SyncJobRepository syncJobs;
     @Autowired ItemAnalysisRepository analyses;
+    @Autowired AiTriageCurrentRepository aiCurrent;
 
     private static final String BODY = "배송도 빠르고 포장도 꼼꼼해서 아주 만족합니다";
 
@@ -62,7 +66,8 @@ class ChannelReviewServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new ChannelReviewService(reviews, products, accounts, syncJobs, analyses);
+        service = new ChannelReviewService(reviews, products, accounts, syncJobs, analyses, aiCurrent,
+                pilotOff());
         account = account(org, "COUPANG");
         channelId = account.getChannelId();
     }
@@ -339,5 +344,11 @@ class ChannelReviewServiceTest {
     void another_orgs_account_reads_as_absent() {
         assertThatThrownBy(() -> service.list(UUID.randomUUID(), account.getId(), null, null, 0, 20))
                 .isInstanceOf(ApiException.class);
+    }
+
+    /** The pilot OFF — what every org that has not opted in gets, and the baseline these tests assert. */
+    static AiTriagePilotService pilotOff() {
+        AiTriagePilotProperties off = new AiTriagePilotProperties(false, "", "OPENAI", "m", "", true, 4000, "low", 100);
+        return new AiTriagePilotService(off, null, null, null, null, null);
     }
 }
