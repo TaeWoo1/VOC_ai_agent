@@ -1065,3 +1065,67 @@ move the bar, and it may never be offered as a reason a failure does not count. 
 No classifier reaches a product surface. `ReviewTriageRules` remains what every seller sees, the
 prediction store stays unread by any surface (§2.1 of the slice), and every candidate C number is
 labeled in-sample per §12.1 wherever it is written down.
+
+### 13.8 How large a fresh frame has to be, and why a month of reviews is not one
+
+Computed 2026-08-17 from `labels.json` and the existing frame — committed labels and stratum counts
+only, no candidate result of any kind. It belongs in this section rather than in a slice note because
+it is what makes §13.2's target reachable or not, and finding that out after acquiring a sample would
+be finding it out too late.
+
+**The positive rate by stratum, over the 218 scored rows:**
+
+| stratum | in frame | labeled | gold `NEEDS_ATTENTION` | rate |
+|---|---|---|---|---|
+| `LOW_S` / `LOW_M` / `LOW_L` | 14 | 13 | 13 | 1.000 |
+| `MID_S` | 49 | 49 | 9 | 0.184 |
+| `MID_M` | 30 | 30 | 13 | 0.433 |
+| `MID_L` | 12 | 12 | 11 | 0.917 |
+| `HIGH_S` | 2,440 | 29 | 1 | 0.034 |
+| `HIGH_M` | 969 | 40 | 2 | 0.050 |
+| `HIGH_L` | 344 | 45 | 15 | 0.333 |
+
+Two things follow, and the second is not obvious.
+
+**1–3★ is 2.7% of this frame.** Censusing it, as §4.2 does, yields 0.442 positives per row — but only
+105 rows exist. A frame with this composition would need ≈5,000 reviews before the low bands alone
+carried 60 positives, and this store produces ≈297 reviews a month. **A one-month fresh window from
+the same seller cannot come close**, and neither can six.
+
+**`HIGH_L` is the dense stratum, not the low bands.** 4–5★ reviews with a body of 40 characters or
+more are positive at 0.333 — one in three — and there are 344 of them, 8.9% of the frame. That is
+where `PRAISE_WITH_CONCESSION` lives: a concession needs room to be written, which is the reason
+§4.2 tilted the high band toward long bodies in the first place. Per labeled row, `HIGH_L` is worth
+seven `HIGH_S` rows and three-quarters of a `MID_S` row.
+
+**So `HIGH_L` is censused too**, alongside 1–3★. Both are rating × body-length strata, both are
+label-blind, and neither reads a text feature — §13.3's fence is untouched by this. `HIGH_S` and
+`HIGH_M` are then sampled at roughly the §4.2 allocation, which is what keeps a denominator under the
+4–5★ false-positive bar.
+
+**The frame requirement that falls out**, using a deliberately conservative 0.25 for `HIGH_L` rather
+than the observed 0.333 — 15 of 45 is a wide interval and the fresh store is a different store:
+
+```
+positives  ≈  F × ( 0.027 × 0.442  +  0.089 × 0.25 )  ≈  0.034 × F
+```
+
+| target positives | fresh frame needed | rows to label |
+|---|---|---|
+| 40 | ≈ 1,200 reviews | ≈ 220 |
+| **60** | **≈ 1,800 reviews** | **≈ 290** |
+| 80 | ≈ 2,400 reviews | ≈ 360 |
+
+**≈1,800 reviews is the acquisition requirement** — about six months of this store's volume, or one
+comparable store's year. §13.2's floor of 300 labeled rows and this table agree at the 60 target,
+which is the reason the floor was set where it was.
+
+**What this enrichment costs, said out loud.** Censusing `HIGH_L` concentrates the sample on the
+stratum where the hardest calls live. The unweighted gate reading is therefore a statement about a
+sample deliberately made harder than the corpus, exactly as §4.4 has always required be said, and the
+Horvitz–Thompson population reading is printed beside it with its weights. It is not a way of making
+a candidate look good; it is the only way of getting enough positives to tell 0.88 from 0.70 at all.
+
+**If the fresh frame comes in smaller than ≈1,200 reviews**, the sample is drawn and read anyway and
+the §13.6 power diagnostic says what the bar could and could not have adjudicated. What does not
+happen is a smaller frame quietly producing a `FAIL` that reads like a measurement.
