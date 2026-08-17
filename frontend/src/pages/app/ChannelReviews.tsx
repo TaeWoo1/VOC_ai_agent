@@ -87,6 +87,10 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
   const [loadError, setLoadError] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // §13.7 item 6: for an org not opted in, this page is what it was before the pilot — no marks (the
+  // backend sends none), no controls, no silver. Read from the page, never inferred from marks.
+  const pilotOn = page?.aiPilotEnabled ?? false;
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ChannelReviewDetailView | null>(null);
   const [detailError, setDetailError] = useState(false);
@@ -138,11 +142,13 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
         // failure to record a trace can never delay or fail the list. Only rows carrying the pilot's
         // mark or a rules 확인 필요 are worth a trace — an FYI row's exposure says nothing anyone will
         // weight — and there is no event for "not shown".
-        recordBehavior(
-          view.items
-            .filter((i) => i.aiMark !== null || i.triage.tier === "NEEDS_ATTENTION")
-            .map((i) => ({ reviewId: i.id, kind: "EXPOSED" as const })),
-        );
+        if (view.aiPilotEnabled) {
+          recordBehavior(
+            view.items
+              .filter((i) => i.aiMark !== null || i.triage.tier === "NEEDS_ATTENTION")
+              .map((i) => ({ reviewId: i.id, kind: "EXPOSED" as const })),
+          );
+        }
       } catch {
         // Fail closed: an unreachable backend shows nothing, never an invented list. The seller has
         // no other copy of what buyers wrote to check a fabrication against.
@@ -173,7 +179,7 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
         if (live) {
           setDetail(view);
           setDetailError(false);
-          if (view.aiMark !== null || view.triage.tier === "NEEDS_ATTENTION") {
+          if (pilotOn && (view.aiMark !== null || view.triage.tier === "NEEDS_ATTENTION")) {
             recordBehavior([{ reviewId: view.id, kind: "OPENED" }]);
           }
         }
@@ -187,7 +193,7 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
     return () => {
       live = false;
     };
-  }, [accountId, selectedId, recordBehavior]);
+  }, [accountId, selectedId, recordBehavior, pilotOn]);
 
   // Ceiling division on the size the SERVER reported, for the same reason the label uses it.
   const totalPages = page === null || page.size <= 0 ? 1 : Math.max(1, Math.ceil(page.total / page.size));
@@ -416,6 +422,7 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
             ) : detail ? (
               <ReviewDetail
                 accountId={accountId}
+                pilotOn={pilotOn}
                 recordBehavior={recordBehavior}
                 detail={detail}
                 locate={locate}
@@ -439,6 +446,7 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
 
 function ReviewDetail({
   accountId,
+  pilotOn,
   recordBehavior,
   detail,
   locate,
@@ -447,6 +455,7 @@ function ReviewDetail({
   unavailable,
 }: {
   accountId: string;
+  pilotOn: boolean;
   recordBehavior: (events: TriageBehaviorEvent[]) => void;
   detail: ChannelReviewDetailView;
   locate: ReviewLocateBinding;
@@ -501,7 +510,7 @@ function ReviewDetail({
         <dd className="truncate text-ink">{detail.locateTarget.vendorItemId ?? "정보 없음"}</dd>
       </dl>
 
-      <TriageFeedbackControls accountId={accountId} detail={detail} />
+      {pilotOn ? <TriageFeedbackControls accountId={accountId} detail={detail} /> : null}
 
       {/*
         **[쿠팡에서 보기] — the one thing a seller can ask SellerOps to DO with a 상품평.**
@@ -517,7 +526,7 @@ function ReviewDetail({
           disabled={running}
           onClick={() => {
             // Silver: the seller wanted the original. Recorded only for rows something raised.
-            if (detail.aiMark !== null || detail.triage.tier === "NEEDS_ATTENTION") {
+            if (pilotOn && (detail.aiMark !== null || detail.triage.tier === "NEEDS_ATTENTION")) {
               recordBehavior([{ reviewId: detail.id, kind: "ORIGINAL_VIEWED" }]);
             }
             void locate.locate(detail.id);

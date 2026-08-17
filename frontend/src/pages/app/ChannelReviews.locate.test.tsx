@@ -36,6 +36,7 @@ const PAGE: ChannelReviewPageView = {
   newCount: 0,
   lastImportAt: "2026-08-14T05:00:00Z",
   lastImportComplete: true,
+  aiPilotEnabled: false,
   triageSummary: { needsAttention: 0, watch: 0, fyi: 1, aiAttention: 0, repeatedCategories: [] },
   items: [
     {

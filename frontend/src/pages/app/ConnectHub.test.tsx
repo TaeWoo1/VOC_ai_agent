@@ -78,6 +78,7 @@ function reviewPage(total: number): ChannelReviewPageView {
     newCount: 0,
     lastImportAt: null,
     lastImportComplete: true,
+  aiPilotEnabled: false,
     triageSummary: { needsAttention: 0, watch: 0, fyi: total, aiAttention: 0, repeatedCategories: [] },
     items: [],
   };

@@ -182,12 +182,12 @@ public class TriageFeedbackService {
      */
     @Transactional
     public TriageCorrection correctReview(UUID orgId, UUID reviewId, Integer rating, String body,
-                                          boolean needsAttention, String reasonCode) {
+                                          boolean needsAttention, String reasonCode, boolean aiSurfaceOn) {
         if (reasonCode != null && TriageReasonCode.parse(reasonCode).isEmpty()) {
             throw ApiException.badRequest("알 수 없는 분류 사유입니다.");
         }
         ReviewTriageTier ruleTier = ReviewTriageRules.tier(rating, body);
-        Shown shown = shown(reviewId, ruleTier);
+        Shown shown = shown(reviewId, ruleTier, aiSurfaceOn, current.findByReviewId(reviewId).orElse(null));
         TriageCorrection row = corrections.findByReviewId(reviewId).orElseGet(TriageCorrection::new);
         row.setOrgId(orgId);
         row.setReviewId(reviewId);
@@ -205,8 +205,9 @@ public class TriageFeedbackService {
     /** An explicit act. Append-only; see {@link TriageActionKind}. */
     @Transactional
     public TriageAction act(UUID orgId, UUID reviewId, Integer rating, String body, TriageActionKind kind,
-                            UUID actorId) {
-        Shown shown = shown(reviewId, ReviewTriageRules.tier(rating, body));
+                            UUID actorId, boolean aiSurfaceOn) {
+        Shown shown = shown(reviewId, ReviewTriageRules.tier(rating, body), aiSurfaceOn,
+                current.findByReviewId(reviewId).orElse(null));
         TriageAction row = new TriageAction();
         row.setOrgId(orgId);
         row.setReviewId(reviewId);
@@ -226,11 +227,19 @@ public class TriageFeedbackService {
      * row would make the list slower to record than to read.
      */
     @Transactional
-    public int observe(UUID orgId, List<Observation> observations) {
+    public int observe(UUID orgId, List<Observation> observations, boolean aiSurfaceOn) {
         List<TriageBehaviorEvent> rows = new java.util.ArrayList<>(observations.size());
         Instant now = Instant.now(clock);
+        // One query for the batch's current rows, not one or two per event: an EXPOSED batch fires
+        // once per rendered row, on every list load.
+        java.util.Map<UUID, AiTriageCurrent> currents = new java.util.HashMap<>();
+        for (AiTriageCurrent c : current.findByOrgIdAndReviewIdIn(orgId,
+                observations.stream().map(Observation::reviewId).toList())) {
+            currents.put(c.getReviewId(), c);
+        }
         for (Observation o : observations) {
-            Shown shown = shown(o.reviewId(), ReviewTriageRules.tier(o.rating(), o.body()));
+            Shown shown = shown(o.reviewId(), ReviewTriageRules.tier(o.rating(), o.body()), aiSurfaceOn,
+                    currents.get(o.reviewId()));
             TriageBehaviorEvent row = new TriageBehaviorEvent();
             row.setOrgId(orgId);
             row.setReviewId(o.reviewId());
@@ -253,19 +262,23 @@ public class TriageFeedbackService {
     }
 
     /**
-     * What the seller was looking at: the pilot's mark if it added one, else the rule's tier.
+     * What the seller was looking at: the pilot's mark if the surface showed one, else the rule's tier.
      *
-     * <p>Computed from the same inputs the surface used, not passed in by the caller — a client that
-     * could assert "I was shown AI" would be able to write feedback against a mechanism that never
-     * spoke.
+     * <p>Computed from the same predicate the surface uses, never asserted by the client. Three
+     * conditions, and all three are the read path's ({@code ChannelReviewService.marksOf}): the org's
+     * pilot is ON ({@code aiSurfaceOn}, decided server-side by the caller), the current row says
+     * {@code aiAttention}, and the rule did NOT already say 확인 필요. Miss any one and the seller saw
+     * the rules chip alone, so the row is {@code RULES} — an org switched off after a run must not
+     * keep producing {@code AI}-shown evidence for a mark nobody could see (independent review, D2).
+     * The prediction id is still linked where one exists, because the history is still the history.
      */
-    private Shown shown(UUID reviewId, ReviewTriageTier ruleTier) {
-        return current.findByReviewId(reviewId)
-                .filter(AiTriageCurrent::isAiAttention)
-                .map(c -> new Shown(c.getPredictionId(), ReviewTriageTier.NEEDS_ATTENTION, TriageShownSource.AI))
-                .orElseGet(() -> new Shown(
-                        current.findByReviewId(reviewId).map(AiTriageCurrent::getPredictionId).orElse(null),
-                        ruleTier, TriageShownSource.RULES));
+    private Shown shown(UUID reviewId, ReviewTriageTier ruleTier, boolean aiSurfaceOn, AiTriageCurrent row) {
+        UUID predictionId = row == null ? null : row.getPredictionId();
+        boolean aiShown = aiSurfaceOn && row != null && row.isAiAttention()
+                && ruleTier != ReviewTriageTier.NEEDS_ATTENTION;
+        return aiShown
+                ? new Shown(predictionId, ReviewTriageTier.NEEDS_ATTENTION, TriageShownSource.AI)
+                : new Shown(predictionId, ruleTier, TriageShownSource.RULES);
     }
 
     /**

@@ -25,7 +25,7 @@ public final class TriageFeedbackRequests {
      *                       purpose: that split is the rule's and the pilot does not own it.
      * @param reasonCode     an optional §3.1 code saying why, from the closed list, or null.
      */
-    public record Correction(boolean needsAttention, String reasonCode) {
+    public record Correction(Boolean needsAttention, String reasonCode) {
     }
 
     /** One explicit act — started, completed, or declared not needed. */

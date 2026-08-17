@@ -22,6 +22,9 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
      */
     Optional<Review> findByIdAndOrgId(UUID id, UUID orgId);
 
+    /** Org-scoped batch lookup — the feedback write path's answer to a per-row query per event. */
+    List<Review> findByOrgIdAndIdIn(UUID orgId, java.util.Collection<UUID> ids);
+
     long countByOrgIdAndReceivedAtAfter(UUID orgId, Instant after);
 
     /**
@@ -112,6 +115,18 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
     String FINAL_TIER_RANK = """
             (case
                when :aiEnabled = true and a.aiAttention = true then 0
+               else
+            """ + TRIAGE_TIER_RANK + """
+             end)
+            """;
+
+    /**
+     * {@link #FINAL_TIER_RANK} with the opt-in already decided in Java — for the one place a bound
+     * parameter inside the expression breaks PostgreSQL (a GROUP BY). Same single departing branch.
+     */
+    String AI_FINAL_TIER_RANK = """
+            (case
+               when a.aiAttention = true then 0
                else
             """ + TRIAGE_TIER_RANK + """
              end)
@@ -220,16 +235,38 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
      */
     @Query("""
             select
-            """ + FINAL_TIER_RANK + """
+            """ + TRIAGE_TIER_RANK + """
+              , count(r) from Review r
+            where r.orgId = :orgId and r.channelId = :channelId
+            group by
+            """ + TRIAGE_TIER_RANK + """
+            """)
+    List<Object[]> countByChannelGroupedByTierRank(@Param("orgId") UUID orgId,
+                                                   @Param("channelId") UUID channelId);
+
+    /**
+     * The same grouped count under the §13.7 pilot — the FINAL rank, with the pilot's marks folded in.
+     *
+     * <p><b>A second query rather than a parameter, and the reason is PostgreSQL.</b> The first cut
+     * put {@code :aiEnabled} inside the CASE in both SELECT and GROUP BY; Hibernate binds each
+     * occurrence as its own {@code $n}, the planner cannot prove the two expressions equal, and PG
+     * raises {@code 42803 — column "r.rating" must appear in the GROUP BY clause}. H2 tolerated it,
+     * which is why the offline suite passed and the independent review had to catch it. Found by
+     * running the shape against the local PG directly. So the opt-in is a Java branch
+     * ({@code ChannelReviewService.summary}) between two parameterless-in-the-CASE queries, and
+     * this one has no {@code :aiEnabled} at all — the join alone is the pilot.
+     */
+    @Query("""
+            select
+            """ + AI_FINAL_TIER_RANK + """
               , count(r) from Review r
             """ + AI_JOIN + """
             where r.orgId = :orgId and r.channelId = :channelId
             group by
-            """ + FINAL_TIER_RANK + """
+            """ + AI_FINAL_TIER_RANK + """
             """)
-    List<Object[]> countByChannelGroupedByTierRank(@Param("orgId") UUID orgId,
-                                                   @Param("channelId") UUID channelId,
-                                                   @Param("aiEnabled") boolean aiEnabled);
+    List<Object[]> countByChannelGroupedByFinalTierRank(@Param("orgId") UUID orgId,
+                                                        @Param("channelId") UUID channelId);
 
     /**
      * How many of this channel's reviews carry the pilot's additive mark — the {@code AI 확인 필요}

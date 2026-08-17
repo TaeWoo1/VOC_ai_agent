@@ -1395,6 +1395,12 @@ export interface ChannelReviewPageView {
   newCount: number;
   lastImportAt: string | null;
   lastImportComplete: boolean;
+  /**
+   * RUBRIC v2 §13.7's pilot is ON for this org. When false the page renders no mark, no feedback
+   * controls and records no behaviour — the screen is what it was before the pilot existed. Sent by
+   * the backend, never inferred from whether marks happen to be present.
+   */
+  aiPilotEnabled: boolean;
   triageSummary: ChannelReviewTriageSummaryView;
   items: ChannelReviewItemView[];
 }

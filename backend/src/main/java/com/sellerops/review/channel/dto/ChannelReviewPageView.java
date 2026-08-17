@@ -22,6 +22,14 @@ public record ChannelReviewPageView(
         Instant lastImportAt,
         boolean lastImportComplete,
         /**
+         * Whether RUBRIC v2 §13.7's pilot is ON for this org. False for every org not opted in — and
+         * then the surface renders no mark, no feedback controls, and records no behaviour, so the
+         * screen is what it was before the pilot existed. On the wire because the frontend must not
+         * guess this from the presence of marks: a page with no marks on it is not evidence the pilot
+         * is off.
+         */
+        boolean aiPilotEnabled,
+        /**
          * How the channel's whole record divides by tier, and what repeats in it. Always the UNFILTERED
          * picture, even when the page itself is filtered to one tier — a summary recomputed under its own
          * filter would collapse to the one option the operator already chose, and there would be no way

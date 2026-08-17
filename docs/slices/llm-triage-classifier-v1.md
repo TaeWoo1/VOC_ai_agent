@@ -860,7 +860,11 @@ For an org that is opted in, on a NAVER account, after an operator has pressed *
 
 For an org **not** opted in — every org today — the screen is byte-for-byte what it was before this
 unit. Not "the mark is hidden": the ordering CASE takes the opt-in as a parameter and forgets the
-rows too, so a row can never sort to the top with a 지켜보기 chip and nothing to say why.
+rows too, so a row can never sort to the top with a 지켜보기 chip and nothing to say why; the page
+carries `aiPilotEnabled=false` and the frontend then renders no feedback controls and records no
+behaviour either. (The independent review found the first cut rendered the controls for every org
+and recorded EXPOSED for rules 확인 필요 rows everywhere — a product-surface change outside the
+pilot's opt-in. Fixed by putting the switch on the wire rather than inferring it from marks.)
 
 ### 15.2 The invariants, and where each is enforced
 
@@ -900,9 +904,12 @@ SELLEROPS_AI_TRIAGE_API_KEY=<key>          # memory-only; never logged, stored o
 # is a different candidate, and the change log needs a row.
 ```
 
-Then `POST /api/seller-accounts/{accountId}/channel-reviews/ai-triage/runs` classifies at most
-`max-per-run` (default 100) not-yet-seen reviews of that account, oldest first, and returns counts
-only: considered / classified / marked / failed / refused / remaining. A review classified under an
+Then `POST /api/seller-accounts/{accountId}/channel-reviews/ai-triage/runs?limit=50` classifies at
+most `min(limit, max-per-run)` not-yet-seen reviews of that account, **newest first** — the pilot
+starts from the seller's most recent real reviews and works back only as far as an operator keeps
+pressing; the historical corpus is never classified by itself — and returns counts only: considered
+/ classified / marked / failed / refused / remaining. One run per account at a time; a second press
+during a run is a 409. `GET .../ai-triage/funnel` returns the §15.7 funnel. A review classified under an
 older `classifierVersion` is pending again, so a new frozen candidate re-reads the record rather than
 inheriting a predecessor's marks under its own name.
 

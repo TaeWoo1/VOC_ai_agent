@@ -114,12 +114,12 @@ public class AiTriagePilotService {
                 .filter(a -> orgId.equals(a.getOrgId()))
                 .orElseThrow(() -> ApiException.notFound("판매 계정을 찾을 수 없습니다."));
         String version = classifierVersion();
-        // The population: reviews on this account's channel the pilot currently marks.
-        List<UUID> marked = current.findByOrgIdAndAiAttentionTrue(orgId).stream()
-                .map(com.sellerops.review.triage.feedback.AiTriageCurrent::getReviewId)
-                .filter(id -> reviews.findByIdAndOrgId(id, orgId)
-                        .map(r -> account.getChannelId().equals(r.getChannelId())).orElse(false))
-                .toList();
+        if (!isEnabledFor(orgId)) {
+            // A switched-off org has no funnel: nothing is shown, so nothing is a step.
+            return new Funnel(version, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        }
+        // The population: reviews on this account's channel the pilot currently marks — one query.
+        List<UUID> marked = current.findMarkedReviewIds(orgId, account.getChannelId());
         if (marked.isEmpty()) {
             return new Funnel(version, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         }
@@ -171,6 +171,25 @@ public class AiTriagePilotService {
         if (!isEnabledFor(orgId)) {
             throw ApiException.badRequest("AI 분류 파일럿이 이 조직에서 활성화되어 있지 않습니다.");
         }
+        // One run per account at a time. Two concurrent POSTs would read the same pending set,
+        // spend the vendor twice on it, and race in refreshCurrent against the unique index.
+        // A refused second press is a 409 with a sentence, not a duplicated bill.
+        java.util.concurrent.locks.Lock lock = runLocks.computeIfAbsent(accountId,
+                k -> new java.util.concurrent.locks.ReentrantLock());
+        if (!lock.tryLock()) {
+            throw ApiException.conflict("이 계정에서 AI 분류가 이미 실행 중입니다. 끝난 뒤 다시 눌러 주세요.");
+        }
+        try {
+            return runLocked(orgId, accountId, limit);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private final java.util.concurrent.ConcurrentHashMap<UUID, java.util.concurrent.locks.Lock> runLocks =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private RunResult runLocked(UUID orgId, UUID accountId, Integer limit) {
         SellerAccount account = accounts.findById(accountId)
                 .filter(a -> orgId.equals(a.getOrgId()))
                 .orElseThrow(() -> ApiException.notFound("판매 계정을 찾을 수 없습니다."));
@@ -197,7 +216,16 @@ public class AiTriagePilotService {
                         marked++;
                     }
                 }
-                case UNCLASSIFIED -> refused++;
+                // UNCLASSIFIED is what the gate returns for a forbidden channel AND what the parser
+                // returns for a schema-invalid answer. Only the first is a refusal; the second is a
+                // failure on a permitted channel and is counted as one (independent review, D5).
+                case UNCLASSIFIED -> {
+                    if (NaverOnlyClassifierGate.PERMITTED_CHANNEL.equals(channelCode)) {
+                        failed++;
+                    } else {
+                        refused++;
+                    }
+                }
                 case CLASSIFICATION_FAILED -> failed++;
             }
         }

@@ -14,6 +14,12 @@ public interface AiTriageCurrentRepository extends JpaRepository<AiTriageCurrent
 
     long countByOrgIdAndReviewIdInAndAiAttentionTrue(UUID orgId, Collection<UUID> reviewIds);
 
-    /** Every review of this org the pilot currently marks — the funnel's population. */
-    List<AiTriageCurrent> findByOrgIdAndAiAttentionTrue(UUID orgId);
+    /** The funnel's population: reviews on this channel the pilot currently marks — one query. */
+    @org.springframework.data.jpa.repository.Query("""
+            select a.reviewId from AiTriageCurrent a
+            join com.sellerops.review.Review r on r.id = a.reviewId
+            where a.orgId = :orgId and r.channelId = :channelId and a.aiAttention = true
+            """)
+    List<UUID> findMarkedReviewIds(@org.springframework.data.repository.query.Param("orgId") UUID orgId,
+                                   @org.springframework.data.repository.query.Param("channelId") UUID channelId);
 }

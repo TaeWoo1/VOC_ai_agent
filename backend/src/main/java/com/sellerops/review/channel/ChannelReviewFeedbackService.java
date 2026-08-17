@@ -9,6 +9,7 @@ import com.sellerops.review.triage.feedback.TriageAction;
 import com.sellerops.review.triage.feedback.TriageActionKind;
 import com.sellerops.review.triage.feedback.TriageCorrection;
 import com.sellerops.review.triage.feedback.TriageFeedbackService;
+import com.sellerops.review.triage.pilot.AiTriagePilotService;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
 import java.util.ArrayList;
@@ -38,19 +39,25 @@ public class ChannelReviewFeedbackService {
     private final ReviewRepository reviews;
     private final SellerAccountRepository accounts;
     private final TriageFeedbackService feedback;
+    private final AiTriagePilotService pilot;
 
     public ChannelReviewFeedbackService(ReviewRepository reviews, SellerAccountRepository accounts,
-                                        TriageFeedbackService feedback) {
+                                        TriageFeedbackService feedback, AiTriagePilotService pilot) {
         this.reviews = reviews;
         this.accounts = accounts;
         this.feedback = feedback;
+        this.pilot = pilot;
     }
 
     public TriageFeedbackRequests.CorrectionView correct(UUID orgId, UUID accountId, UUID reviewId,
                                                          TriageFeedbackRequests.Correction request) {
+        if (request == null || request.needsAttention() == null) {
+            // A strong-evidence row from an absent field would be evidence of nothing.
+            throw ApiException.badRequest("확인 필요 여부가 필요합니다.");
+        }
         Review review = requireReview(orgId, accountId, reviewId);
         TriageCorrection row = feedback.correctReview(orgId, reviewId, review.getRating(), review.getBody(),
-                request.needsAttention(), request.reasonCode());
+                request.needsAttention(), request.reasonCode(), pilot.isEnabledFor(orgId));
         return new TriageFeedbackRequests.CorrectionView(reviewId,
                 row.getCorrectedTier() == ReviewTriageTier.NEEDS_ATTENTION,
                 row.getCorrectedReasonCode(),
@@ -62,7 +69,8 @@ public class ChannelReviewFeedbackService {
             throw ApiException.badRequest("조치 종류가 필요합니다.");
         }
         Review review = requireReview(orgId, accountId, reviewId);
-        TriageAction ignored = feedback.act(orgId, reviewId, review.getRating(), review.getBody(), kind, actorId);
+        TriageAction ignored = feedback.act(orgId, reviewId, review.getRating(), review.getBody(), kind, actorId,
+                pilot.isEnabledFor(orgId));
     }
 
     /**
@@ -79,17 +87,25 @@ public class ChannelReviewFeedbackService {
             throw ApiException.badRequest("한 번에 기록할 수 있는 항목 수를 넘었습니다.");
         }
         SellerAccount account = requireAccount(orgId, accountId);
+        // One org-scoped batch read for the whole request, then filter to this account's channel.
+        List<UUID> ids = request.events().stream()
+                .filter(e -> e != null && e.reviewId() != null && e.kind() != null)
+                .map(TriageFeedbackRequests.Behavior.Event::reviewId).distinct().toList();
+        java.util.Map<UUID, Review> owned = new java.util.HashMap<>();
+        for (Review r : reviews.findByOrgIdAndIdIn(orgId, ids)) {
+            if (account.getChannelId().equals(r.getChannelId())) {
+                owned.put(r.getId(), r);
+            }
+        }
         List<TriageFeedbackService.Observation> observations = new ArrayList<>(request.events().size());
         for (TriageFeedbackRequests.Behavior.Event e : request.events()) {
-            if (e == null || e.reviewId() == null || e.kind() == null) {
-                continue;
+            Review r = e == null || e.kind() == null ? null : owned.get(e.reviewId());
+            if (r != null) {
+                observations.add(new TriageFeedbackService.Observation(r.getId(), r.getRating(), r.getBody(), e.kind()));
             }
-            reviews.findByIdAndOrgId(e.reviewId(), orgId)
-                    .filter(r -> account.getChannelId().equals(r.getChannelId()))
-                    .ifPresent(r -> observations.add(new TriageFeedbackService.Observation(
-                            r.getId(), r.getRating(), r.getBody(), e.kind())));
         }
-        return new TriageFeedbackRequests.BehaviorResult(feedback.observe(orgId, observations));
+        return new TriageFeedbackRequests.BehaviorResult(
+                feedback.observe(orgId, observations, pilot.isEnabledFor(orgId)));
     }
 
     private Review requireReview(UUID orgId, UUID accountId, UUID reviewId) {

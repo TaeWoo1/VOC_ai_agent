@@ -33,6 +33,7 @@ const PAGE: ChannelReviewPageView = {
   newCount: 1,
   lastImportAt: "2026-08-14T05:00:00Z",
   lastImportComplete: true,
+  aiPilotEnabled: false,
   triageSummary: {
     needsAttention: 1,
     watch: 0,
@@ -509,6 +510,7 @@ describe("the AI pilot's mark and the feedback spine (RUBRIC v2 §13.7)", () => 
   it("renders AI 확인 필요 BESIDE the rules tier, never in its place, and says what it is", async () => {
     getChannelReviewsStrict.mockResolvedValue({
       ...PAGE,
+      aiPilotEnabled: true,
       triageSummary: { ...PAGE.triageSummary, needsAttention: 2, aiAttention: 1 },
       items: [{ ...PAGE.items[0], aiMark: MARK }, PAGE.items[1]],
     });
@@ -524,6 +526,18 @@ describe("the AI pilot's mark and the feedback spine (RUBRIC v2 §13.7)", () => 
     expect(await screen.findByText(/AI 분류가 판매자가 확인할 내용이 있다고 판단한/)).toBeInTheDocument();
   });
 
+  it("an org NOT opted in gets the pre-pilot screen: no controls, no silver — even if a mark arrived", async () => {
+    // The backend sends no marks for such an org; if one did arrive, the controls and the silver
+    // must still be absent, because aiPilotEnabled — not the presence of marks — is the switch.
+    getChannelReviewsStrict.mockResolvedValue({ ...PAGE, aiPilotEnabled: false });
+    renderPage();
+    await userEvent.click((await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요")).closest("button")!);
+    await screen.findByText(/노출상품ID/);
+    expect(screen.queryByText("이 상품평, 확인이 필요한가요?")).toBeNull();
+    expect(screen.queryByLabelText("분류 피드백")).toBeNull();
+    expect(recordBehavior).not.toHaveBeenCalled();
+  });
+
   it("shows nothing about AI on a row without a mark", async () => {
     renderPage();
     await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요");
@@ -533,6 +547,7 @@ describe("the AI pilot's mark and the feedback spine (RUBRIC v2 §13.7)", () => 
 
   it("records a correction and an action, and changes nothing on screen — no tier moves, no row hides", async () => {
     correctTriage.mockResolvedValue({ reviewId: "r1", needsAttention: false, reasonCode: null, shownSource: "RULES" });
+    getChannelReviewsStrict.mockResolvedValue({ ...PAGE, aiPilotEnabled: true });
     renderPage();
     await userEvent.click((await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요")).closest("button")!);
     await screen.findByText("이 상품평, 확인이 필요한가요?");
@@ -552,6 +567,7 @@ describe("the AI pilot's mark and the feedback spine (RUBRIC v2 §13.7)", () => 
   });
 
   it("offers a binary answer only — no 지켜보기 / 참고 choice, because the pilot does not own that split", async () => {
+    getChannelReviewsStrict.mockResolvedValue({ ...PAGE, aiPilotEnabled: true });
     renderPage();
     await userEvent.click((await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요")).closest("button")!);
     await screen.findByText("이 상품평, 확인이 필요한가요?");
@@ -564,6 +580,7 @@ describe("the AI pilot's mark and the feedback spine (RUBRIC v2 §13.7)", () => 
     recordBehavior.mockRejectedValue(new Error("down"));
     getChannelReviewsStrict.mockResolvedValue({
       ...PAGE,
+      aiPilotEnabled: true,
       items: [{ ...PAGE.items[0], aiMark: MARK }, PAGE.items[1]],
     });
     renderPage();

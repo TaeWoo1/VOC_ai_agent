@@ -161,6 +161,7 @@ public class ChannelReviewService {
                 newCount,
                 lastImport.map(SyncJob::getFinishedAt).orElse(null),
                 lastImport.map(j -> "SUCCESS".equals(j.getStatus())).orElse(false),
+                pilot.isEnabledFor(orgId),
                 summary(orgId, channelId, categoryCounts),
                 items);
     }
@@ -325,7 +326,12 @@ public class ChannelReviewService {
      */
     private ChannelReviewTriageSummaryView summary(UUID orgId, UUID channelId, Map<String, Long> categoryCounts) {
         Map<Integer, Long> byTier = new LinkedHashMap<>();
-        for (Object[] row : reviews.countByChannelGroupedByTierRank(orgId, channelId, pilot.isEnabledFor(orgId))) {
+        // Two queries and a Java branch, not one query and a parameter — see
+        // ReviewRepository.countByChannelGroupedByFinalTierRank for the PostgreSQL reason.
+        List<Object[]> grouped = pilot.isEnabledFor(orgId)
+                ? reviews.countByChannelGroupedByFinalTierRank(orgId, channelId)
+                : reviews.countByChannelGroupedByTierRank(orgId, channelId);
+        for (Object[] row : grouped) {
             byTier.put(((Number) row[0]).intValue(), ((Number) row[1]).longValue());
         }
 

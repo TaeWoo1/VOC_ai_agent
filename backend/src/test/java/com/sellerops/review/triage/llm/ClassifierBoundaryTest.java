@@ -145,8 +145,20 @@ class ClassifierBoundaryTest {
                 String code = stripComments(Files.readString(source));
                 // The classifier's own constructor — `new ApiTriageClassifier(` — and not its nested
                 // Tuning record, which callers legitimately build to hand to the gate's factory.
-                if (code.contains("new ApiTriageClassifier(") || code.contains(".classify(new Input")) {
+                // Every spelling of "hold or call the classifier around the gate" the review could
+                // name: the constructor, a constructor reference, and a direct .classify(...) with the
+                // Input built inline under either of its names or held in a variable. Still a
+                // tripwire and not a proof — LlmHttpClient.post is checked separately below.
+                boolean touchesClassifier = code.contains("ReviewTriageClassifier") || code.contains("ApiTriageClassifier");
+                if (code.contains("new ApiTriageClassifier(") || code.contains("ApiTriageClassifier::new")
+                        || code.contains(".classify(new Input") || code.contains(".classify(new ReviewTriageClassifier.Input")
+                        || (touchesClassifier && !name.equals("NaverOnlyClassifierGate.java")
+                            && code.matches("(?s).*\\.classify\\(\\s*[a-z]\\w*\\s*\\).*"))) {
                     offenders.add(name);
+                }
+                if (!name.equals("JdkLlmHttpClient.java") && code.contains("LlmHttpClient")
+                        && code.contains(".post(") ) {
+                    offenders.add(name + " (calls the transport directly)");
                 }
                 // The pilot service holds a gate, and may only obtain one from the gate's own factory.
                 // A field of the classifier's type would be the direct hold this test forbids.

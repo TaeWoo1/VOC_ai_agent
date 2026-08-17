@@ -230,7 +230,7 @@ class TriageFeedbackServiceTest {
         TriagePrediction p = service.record(ORG, REVIEW, 5, "좋은데 하나 아쉬워요", "m",
                 ReviewTriageClassifier.Result.ok(ReviewTriageTier.NEEDS_ATTENTION, "PRAISE_WITH_CONCESSION",
                         List.of(), TriageSuggestedAction.INVESTIGATE_PRODUCT, "v/1"));
-        TriageCorrection c = service.correctReview(ORG, REVIEW, 5, "좋은데 하나 아쉬워요", false, null);
+        TriageCorrection c = service.correctReview(ORG, REVIEW, 5, "좋은데 하나 아쉬워요", false, null, true);
 
         assertThat(c.getPredictionId()).isEqualTo(p.getId());
         assertThat(c.getShownSource()).isEqualTo(TriageShownSource.AI);
@@ -244,13 +244,41 @@ class TriageFeedbackServiceTest {
     @DisplayName("a correction on a review no classifier saw is a correction of the RULE, and says so")
     void aReviewCorrectionAgainstTheRule() {
         // 1★ with text, no prediction anywhere: the seller says 필요 없음 to a rules 확인 필요.
-        TriageCorrection c = service.correctReview(ORG, REVIEW, 1, "별로", false, "CRITIQUE_NO_REQUEST");
+        TriageCorrection c = service.correctReview(ORG, REVIEW, 1, "별로", false, "CRITIQUE_NO_REQUEST", true);
 
         assertThat(c.getPredictionId()).isNull();
         assertThat(c.getShownSource()).isEqualTo(TriageShownSource.RULES);
         assertThat(c.getShownTier()).isEqualTo(ReviewTriageTier.NEEDS_ATTENTION);
         assertThat(c.getCorrectedTier()).isEqualTo(ReviewTriageTier.WATCH);
         assertThat(c.getCorrectedReasonCode()).isEqualTo("CRITIQUE_NO_REQUEST");
+    }
+
+    @Test
+    @DisplayName("shown = AI only when the surface actually showed it: pilot on, mark set, rule not already positive")
+    void shownFollowsTheSurfaceNotTheTable() {
+        // A mark exists in the table.
+        TriagePrediction p = service.record(ORG, REVIEW, 5, "좋은데 하나 아쉬워요", "m",
+                ReviewTriageClassifier.Result.ok(ReviewTriageTier.NEEDS_ATTENTION, "PRAISE_WITH_CONCESSION",
+                        List.of(), TriageSuggestedAction.INVESTIGATE_PRODUCT, "v/1"));
+        assertThat(current.rows.get(0).isAiAttention()).isTrue();
+
+        // Pilot switched OFF for the org after the run: the seller saw the rules chip alone, so the
+        // evidence is RULES — an org switched off must not keep producing AI-shown rows for a mark
+        // nobody could see (independent review, D2). The prediction is still linked: history is history.
+        TriageCorrection off = service.correctReview(ORG, REVIEW, 5, "좋은데 하나 아쉬워요", false, null, false);
+        assertThat(off.getShownSource()).isEqualTo(TriageShownSource.RULES);
+        assertThat(off.getShownTier()).isEqualTo(ReviewTriageTier.FYI);
+        assertThat(off.getPredictionId()).isEqualTo(p.getId());
+
+        // Pilot ON, but the RULE already says 확인 필요 for this row: no mark is ever rendered there,
+        // so shown is RULES / NEEDS_ATTENTION — the same filter the read path applies.
+        UUID low = UUID.randomUUID();
+        service.record(ORG, low, 1, "깨졌어요", "m", ReviewTriageClassifier.Result.ok(
+                ReviewTriageTier.NEEDS_ATTENTION, "DEFECT_OR_DAMAGE", List.of(),
+                TriageSuggestedAction.INVESTIGATE_PRODUCT, "v/1"));
+        TriageAction a = service.act(ORG, low, 1, "깨졌어요", TriageActionKind.COMPLETED, null, true);
+        assertThat(a.getShownSource()).isEqualTo(TriageShownSource.RULES);
+        assertThat(a.getShownTier()).isEqualTo(ReviewTriageTier.NEEDS_ATTENTION);
     }
 
     @Test
@@ -267,8 +295,8 @@ class TriageFeedbackServiceTest {
     @Test
     @DisplayName("actions append; a start and a completion are two rows, and neither trains anything")
     void actionsAppend() {
-        service.act(ORG, REVIEW, 5, "좋아요", TriageActionKind.STARTED, null);
-        service.act(ORG, REVIEW, 5, "좋아요", TriageActionKind.COMPLETED, null);
+        service.act(ORG, REVIEW, 5, "좋아요", TriageActionKind.STARTED, null, true);
+        service.act(ORG, REVIEW, 5, "좋아요", TriageActionKind.COMPLETED, null, true);
         assertThat(actions.rows).hasSize(2);
         assertThat(actions.rows).extracting(TriageAction::getKind)
                 .containsExactly(TriageActionKind.STARTED, TriageActionKind.COMPLETED);
@@ -292,9 +320,9 @@ class TriageFeedbackServiceTest {
     void silverIsFrozenApart() {
         TriageCorrection error = correctionFor(recordOk());
         service.disposition(ORG, error.getId(), CorrectionDispositionKind.CLASSIFIER_ERROR, null);
-        service.act(ORG, REVIEW, 5, "좋아요", TriageActionKind.COMPLETED, null);
+        service.act(ORG, REVIEW, 5, "좋아요", TriageActionKind.COMPLETED, null, true);
         service.observe(ORG, List.of(new TriageFeedbackService.Observation(REVIEW, 5, "좋아요",
-                TriageBehaviorKind.OPENED)));
+                TriageBehaviorKind.OPENED)), true);
 
         assertThat(service.freezeSnapshot(ORG, "gold-eval/1")).isEqualTo(1);
         assertThat(actions.rows.get(0).getSnapshotVersion()).as("a correction snapshot took no silver").isNull();
@@ -429,6 +457,12 @@ class TriageFeedbackServiceTest {
             org.mockito.Mockito.when(repo.findByReviewId(org.mockito.ArgumentMatchers.any()))
                     .thenAnswer(i -> rows.stream()
                             .filter(r -> i.getArgument(0).equals(r.getReviewId())).findFirst());
+            org.mockito.Mockito.when(repo.findByOrgIdAndReviewIdIn(org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any()))
+                    .thenAnswer(i -> rows.stream()
+                            .filter(r -> r.getOrgId().equals(i.getArgument(0))
+                                    && ((java.util.Collection<?>) i.getArgument(1)).contains(r.getReviewId()))
+                            .toList());
         }
     }
 

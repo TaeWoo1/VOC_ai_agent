@@ -54,6 +54,21 @@ alter table review_triage_corrections add column if not exists review_id     uui
 alter table review_triage_corrections add column if not exists shown_tier    varchar(24);
 alter table review_triage_corrections add column if not exists shown_source  varchar(8);
 alter table review_triage_corrections alter column prediction_id drop not null;
+
+-- Backfill: every pre-V43 correction had a prediction, and the prediction knows its review. Then
+-- keep one live correction per review (the latest) so the unique index below can be created on a
+-- table that may already hold two corrections of two predictions of one review. In practice the
+-- table is empty — no surface wrote to it before this migration — but a migration that assumes
+-- that is a migration that fails on the one database where it is not true.
+update review_triage_corrections c
+   set review_id = p.review_id
+  from review_triage_predictions p
+ where c.prediction_id = p.id and c.review_id is null;
+delete from review_triage_corrections c
+ using review_triage_corrections newer
+ where c.review_id = newer.review_id and c.corrected_at < newer.corrected_at;
+alter table review_triage_corrections alter column review_id set not null;
+
 drop index if exists uq_triage_correction_prediction;
 create unique index if not exists uq_triage_correction_review on review_triage_corrections (review_id);
 create index if not exists idx_triage_correction_prediction on review_triage_corrections (prediction_id);
