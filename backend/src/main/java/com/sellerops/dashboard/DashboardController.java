@@ -29,6 +29,6 @@ public class DashboardController {
 
     @GetMapping("/channel-status")
     public List<ChannelResponse> channelStatus(@AuthenticationPrincipal AuthPrincipal principal) {
-        return channelService.listForOrg(principal.orgId());
+        return channelService.listVisibleForOrg(principal.orgId());
     }
 }

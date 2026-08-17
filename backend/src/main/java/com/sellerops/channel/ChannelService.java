@@ -32,7 +32,19 @@ public class ChannelService {
         this.registry = registry;
     }
 
-    /** Channel catalog with the calling org's effective status + last-sync overlaid. */
+    /**
+     * The product-visible catalog: {@link #listForOrg(UUID)} narrowed to {@link ProductChannels}.
+     * This is what every seller-facing surface reads; the full catalog stays available to
+     * internal callers (uploads, connectors, tests) through {@link #listForOrg(UUID)}.
+     */
+    @Transactional(readOnly = true)
+    public List<ChannelResponse> listVisibleForOrg(UUID orgId) {
+        return listForOrg(orgId).stream()
+                .filter(channel -> ProductChannels.isVisible(channel.code()))
+                .toList();
+    }
+
+    /** Full channel catalog with the calling org's effective status + last-sync overlaid. */
     @Transactional(readOnly = true)
     public List<ChannelResponse> listForOrg(UUID orgId) {
         Map<UUID, SellerAccount> byChannel = sellerAccounts.findAllByOrgId(orgId).stream()

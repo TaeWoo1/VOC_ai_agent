@@ -114,6 +114,7 @@ import {
   mockSyncRuns,
   mockVocItemTriage,
 } from "./mocks";
+import { visibleChannels } from "./productChannels";
 
 // Default to a SAME-ORIGIN relative base ("") so `/api/*` requests go through the Vite dev proxy (see
 // vite.config.ts) to whatever backend the dev server targets. This removes the two failure modes that
@@ -201,17 +202,21 @@ export const api = {
     const { data } = await http.get<UserView>("/api/users/me");
     return data;
   },
-  getChannels: (): Promise<ChannelResponse[]> => getOrMock("/api/channels", mockChannels),
+  // Both channel reads return the product-visible catalog only (`lib/productChannels.ts`). The
+  // backend already narrows `/api/channels` the same way; the client-side pass makes the demo
+  // catalog and any silent mock fallback obey the same rule.
+  getChannels: (): Promise<ChannelResponse[]> =>
+    getOrMock("/api/channels", mockChannels).then(visibleChannels),
   // Strict variants for the Naver collection workflow (ChannelDetail): no silent
   // mock fallback, so a dead/wrong backend fails closed instead of rendering a
   // fake "CONNECTED" page. The global VITE_USE_MOCKS demo escape hatch is still
   // honored. Mirrors the getChannelCapabilities fail-closed pattern below.
   async getChannelsStrict(): Promise<ChannelResponse[]> {
     if (USE_MOCKS) {
-      return mockChannels();
+      return visibleChannels(mockChannels());
     }
     const { data } = await http.get<ChannelResponse[]>("/api/channels");
-    return data;
+    return visibleChannels(data);
   },
   async getSellerAccountsStrict(): Promise<SellerAccountResponse[]> {
     if (USE_MOCKS) {
@@ -429,7 +434,7 @@ export const api = {
     return data;
   },
   getChannelStatus: (): Promise<ChannelResponse[]> =>
-    getOrMock("/api/dashboard/channel-status", mockChannels),
+    getOrMock("/api/dashboard/channel-status", mockChannels).then(visibleChannels),
   getSellerAccounts: (): Promise<SellerAccountResponse[]> =>
     getOrMock("/api/seller-accounts", mockSellerAccounts),
   getDashboardSummary: (): Promise<DashboardSummaryResponse> =>
