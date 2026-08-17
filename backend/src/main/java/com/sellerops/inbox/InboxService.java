@@ -65,12 +65,14 @@ public class InboxService {
                 continue;
             }
             items.add(new FeedItem(q.getId().toString(), "INQUIRY",
+                    q.getChannelId() == null ? null : q.getChannelId().toString(),
                     channelNames.getOrDefault(q.getChannelId(), "기타"),
                     productNames.getOrDefault(q.getProductId(), "-"),
                     snippet(q.getBody()), null, q.getStatus(), q.getReceivedAt()));
         }
         for (Review r : reviews.findTop50ByOrgIdOrderByReceivedAtDesc(orgId)) {
             items.add(new FeedItem(r.getId().toString(), "REVIEW",
+                    r.getChannelId() == null ? null : r.getChannelId().toString(),
                     channelNames.getOrDefault(r.getChannelId(), "기타"),
                     productNames.getOrDefault(r.getProductId(), "-"),
                     snippet(r.getBody()), r.getRating(),

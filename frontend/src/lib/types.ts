@@ -188,6 +188,8 @@ export interface TopProductIssue {
 export interface FeedItem {
   id: string; // source row UUID (inquiry/review); join key for item-analysis
   type: "INQUIRY" | "REVIEW";
+  /** Catalog channel id, so a row can be resolved to its account (older servers omit it). */
+  channelId?: string | null;
   channelNameKo: string;
   productName: string;
   snippet: string;

@@ -101,11 +101,11 @@ const DETAIL: ChannelReviewDetailView = {
   },
 };
 
-function renderPage() {
+function renderPage(path = "/reviews/acc-1") {
   return render(
-    <MemoryRouter initialEntries={["/connect/channels/acc-1/reviews"]}>
+    <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/connect/channels/:accountId/reviews" element={<ChannelReviews />} />
+        <Route path="/reviews/:accountId" element={<ChannelReviews />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -115,6 +115,26 @@ beforeEach(() => {
   vi.clearAllMocks();
   getChannelReviewsStrict.mockResolvedValue(PAGE);
   getChannelReviewStrict.mockResolvedValue(DETAIL);
+});
+
+describe("deep-link seams the home relies on", () => {
+  it("?tier=NEEDS_ATTENTION opens the list under that filter — the same filter whose total the home tile shows", async () => {
+    renderPage("/reviews/acc-1?tier=NEEDS_ATTENTION");
+    await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요");
+    expect(getChannelReviewsStrict).toHaveBeenCalledWith("acc-1", expect.objectContaining({ tier: "NEEDS_ATTENTION" }));
+  });
+
+  it("ignores an unknown tier value rather than sending it to the server", async () => {
+    renderPage("/reviews/acc-1?tier=WHATEVER");
+    await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요");
+    expect(getChannelReviewsStrict).toHaveBeenCalledWith("acc-1", expect.objectContaining({ tier: undefined }));
+  });
+
+  it("?review=<id> opens that review's detail without a press", async () => {
+    renderPage("/reviews/acc-1?review=r1");
+    await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요. 다음에도 구매할게요.");
+    expect(getChannelReviewStrict).toHaveBeenCalledWith("acc-1", "r1");
+  });
 });
 
 describe("the channel review record", () => {

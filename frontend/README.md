@@ -26,10 +26,10 @@ npm run typecheck  # types only
 ```
 
 ## Routes
-`/login` then the authenticated shell: `/` 홈, `/inbox` 인박스, `/orders`
-주문·매출, `/issues` 상품 이슈, `/operations` 리뷰 운영 (운영 에이전트 홈),
-`/operations/current` 진행 중 작업 (run detail), `/search` AI 검색, `/reports`
-리포트, `/channels` 채널 연결, `/alerts` 알림 설정.
+`/login` then the authenticated shell: `/` 홈 (Today Inbox), `/reviews` 리뷰, `/inquiries` 문의,
+`/orders` 주문, `/connect` 채널 연결, `/settings` 설정 (+ `/memory`, `/reports`, `/agent`,
+`/connect/imports` off the primary menu). Old paths redirect (`src/lib/legacyRoutes.ts`).
+IA canonical: `docs/product_assembly_ia_v1.md`.
 
 ## Structure
 - `lib/` — `apiClient` (axios + JWT + mock fallback), `auth` (context),

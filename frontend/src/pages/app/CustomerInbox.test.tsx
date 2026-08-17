@@ -138,6 +138,20 @@ describe("문의 — the inbox scoped to inquiries (/inquiries)", () => {
     expect(await screen.findByText("폭이 몇 mm인가요")).toBeInTheDocument();
   });
 
+  it("?state=NEEDS_REPLY lands filtered to exactly the rows the home counted", async () => {
+    getInboxStrict.mockResolvedValue({
+      items: [ITEMS[0], feedItem({ id: "i2", type: "INQUIRY", status: "ANSWERED", productName: "답변한 문의" })],
+      total: 2,
+    });
+    renderInbox("/inquiries?state=NEEDS_REPLY");
+    const list = await screen.findByLabelText("고객 문의·리뷰 목록");
+    const links = within(list).getAllByRole("link");
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAttribute("href", "/inquiries/i1");
+    const rail = screen.getByLabelText("인박스 필터");
+    expect(within(rail).getByRole("button", { name: "답변 필요" })).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("says 문의 in its empty state", async () => {
     getInboxStrict.mockResolvedValue({ items: [ITEMS[1]], total: 1 });
     renderInbox("/inquiries");

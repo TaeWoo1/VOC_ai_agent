@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useParams } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
 import { Empty } from "../../components/ui/Empty";
 import { BtnLink } from "../../components/ui/Btn";
@@ -25,6 +25,7 @@ import { ChannelReviews } from "./ChannelReviews";
  */
 export function Reviews() {
   const { accountId } = useParams();
+  const { search } = useLocation();
   const [accounts, setAccounts] = useState<SellerAccountResponse[] | null>(null);
   const [channels, setChannels] = useState<ChannelResponse[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -84,7 +85,8 @@ export function Reviews() {
     );
   }
   if (!accountId) {
-    return <Navigate to={reviewRecordPath(targets[0].account.id)} replace />;
+    // Carry `?tier=` / `?review=` through so a filtered deep link without an account still lands filtered.
+    return <Navigate to={`${reviewRecordPath(targets[0].account.id)}${search}`} replace />;
   }
 
   return (

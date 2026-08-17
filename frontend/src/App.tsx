@@ -14,6 +14,7 @@ import { Login } from "./pages/Login";
 import { HomeV2 } from "./pages/app/HomeV2";
 import { Reviews } from "./pages/app/Reviews";
 import { CustomerInbox } from "./pages/app/CustomerInbox";
+import { InboxItemRedirect } from "./pages/app/InboxItemRedirect";
 import { CustomerMemory } from "./pages/app/CustomerMemory";
 import { ReportsV2 } from "./pages/app/ReportsV2";
 import { ConnectHub } from "./pages/app/ConnectHub";
@@ -91,11 +92,11 @@ export function App() {
         {/* 문의: the customer inbox scoped to inquiries. */}
         <Route path="/inquiries" element={<CustomerInbox scope="INQUIRY" />} />
         <Route path="/inquiries/:itemRef" element={<CustomerInbox scope="INQUIRY" />} />
-        {/* The mixed 문의+리뷰 queue stays reachable (home tiles, memory evidence links, reports)
-            but is no longer a menu destination. Deep link to one row: the page resolves it against
-            everything loaded, so a shared link opens its item even when filters would hide it. */}
-        <Route path="/inbox" element={<CustomerInbox />} />
-        <Route path="/inbox/:itemRef" element={<CustomerInbox />} />
+        {/* The mixed 문의+리뷰 queue is absorbed (A2): reviews are on 리뷰, inquiries on 문의. The
+            bare path lands on 문의; an item deep link (memory evidence, reports, bookmarks) is
+            resolved to the surface that owns the row. */}
+        <Route path="/inbox" element={<Navigate to="/inquiries" replace />} />
+        <Route path="/inbox/:itemRef" element={<InboxItemRedirect />} />
         <Route path="/orders" element={<Orders />} />
         {/* Kept as routes, out of the primary nav (reached from 홈 and 설정) until the home unit
             decides their place. */}

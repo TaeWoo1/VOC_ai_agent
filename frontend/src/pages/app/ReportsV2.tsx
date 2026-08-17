@@ -148,13 +148,15 @@ export function ReportsV2() {
             label="답변이 필요한 문의"
             available={report.unansweredInquiries.available}
             value={report.unansweredInquiries.value}
-            to="/inbox"
+            to="/inquiries?state=NEEDS_REPLY"
           />
           <Figure
             label="확인이 필요한 리뷰"
             available={report.reviewsToCheck.available}
             value={report.reviewsToCheck.value}
-            to="/inbox"
+            // Counted by the feed's low-rating rule; 리뷰 counts by triage tier per account. The two
+            // definitions are not yet one — the number here is the report's, the screen has its own.
+            to="/reviews"
           />
         </div>
       </Panel>
@@ -201,13 +203,13 @@ export function ReportsV2() {
             label="자주 나오는 질문"
             available={report.faqCandidates.available}
             value={report.faqCandidates.value}
-            to="/inbox"
+            to="/inquiries"
           />
           <Figure
             label="상세페이지에서 다룰 내용"
             available={report.detailPageCandidates.available}
             value={report.detailPageCandidates.value}
-            to="/inbox"
+            to="/inquiries"
           />
         </div>
       </Panel>

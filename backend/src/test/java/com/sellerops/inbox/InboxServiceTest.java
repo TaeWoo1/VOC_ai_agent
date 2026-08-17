@@ -79,6 +79,14 @@ class InboxServiceTest {
         assertThat(review.snippet()).isEqualTo(CLEAN_REVIEW_BODY);
     }
 
+    /** Product assembly A2 (2026-08-18): a row carries its channel id so a client can resolve it to an account. */
+    @Test
+    void carriesTheChannelIdOnEveryRow() {
+        for (FeedItem item : service.inbox(org).items()) {
+            assertThat(item.channelId()).isEqualTo(channel.toString());
+        }
+    }
+
     @Test
     void preservesRawBodyInDatabase() {
         Inquiry stored = inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(org).get(0);

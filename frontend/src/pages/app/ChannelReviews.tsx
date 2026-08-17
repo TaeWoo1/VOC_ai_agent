@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
 import { channelDataTypeLabel } from "../../lib/channelVocabulary";
 import { Panel } from "../../components/ui/Panel";
@@ -94,8 +94,21 @@ function josa(word: string, afterConsonant: string, afterVowel: string): string 
   return `${word}${hasBatchim ? afterConsonant : afterVowel}`;
 }
 
+function parseTierParam(value: string | null): ReviewTriageTier | null {
+  return value !== null && (TRIAGE_TIERS as string[]).includes(value) ? (value as ReviewTriageTier) : null;
+}
+
 export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocateBinding } = {}) {
   const { accountId = "" } = useParams();
+  /**
+   * Deep-link seams the home uses (`lib/todayInbox.ts`): `?tier=NEEDS_ATTENTION` opens the list
+   * under that filter — the count on the home tile IS this page's `total` under the same filter —
+   * and `?review=<id>` opens one review's detail. Read once on mount; the page's own controls then
+   * own the state, as before. An unknown tier value is ignored rather than sent to the server.
+   */
+  const [searchParams] = useSearchParams();
+  const initialTier = parseTierParam(searchParams.get("tier"));
+  const initialReview = searchParams.get("review");
   /**
    * `[쿠팡에서 보기]`. Inert until pressed: no agent socket is opened for a seller who only reads the list.
    * The optional prop is the test seam — a rendered page never has to reach a bridge to be exercised.
@@ -104,7 +117,7 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
   const locate = locateBinding ?? attached;
 
   const [sort, setSort] = useState<"attention" | "newest" | "lowest">("attention");
-  const [tier, setTier] = useState<ReviewTriageTier | null>(null);
+  const [tier, setTier] = useState<ReviewTriageTier | null>(initialTier);
   const [pageIndex, setPageIndex] = useState(0);
   const [page, setPage] = useState<ChannelReviewPageView | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -118,7 +131,7 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
   const pilotOn = (page?.aiPilotEnabled ?? false) && (capability?.aiTriage ?? false);
   const word = reviewWord(capability?.channelCode);
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialReview);
   const [detail, setDetail] = useState<ChannelReviewDetailView | null>(null);
   const [detailError, setDetailError] = useState(false);
 

@@ -50,12 +50,13 @@ afterEach(() => {
 // that fetch would make this file a slow, flaky duplicate of tests those pages already own.
 describe("v2 app routes", () => {
   for (const [path, heading] of [
-    // The menu item is 운영 홈; the page's own headline is the question it answers.
-    ["/", "오늘 확인할 고객 신호"],
-    // 리뷰 / 문의 are the workflow doors; the mixed inbox and memory/reports stay as routes.
+    // The menu item is 홈; the page's own headline is the question it answers.
+    ["/", "오늘 확인하거나 조치할 일"],
+    // 리뷰 / 문의 are the workflow doors; memory/reports stay as routes.
     ["/reviews", "리뷰"],
     ["/inquiries", "문의"],
-    ["/inbox", "고객 인박스"],
+    // The mixed queue is absorbed: its bare path lands on 문의.
+    ["/inbox", "문의"],
     ["/memory", "고객운영 메모리"],
     ["/reports", "주간 고객운영 리포트"],
     ["/connect", "채널 연결"],
@@ -69,7 +70,7 @@ describe("v2 app routes", () => {
 
   it("mounts the v2 shell around app pages", async () => {
     renderAt("/");
-    await screen.findByRole("heading", { level: 1, name: "오늘 확인할 고객 신호" });
+    await screen.findByRole("heading", { level: 1, name: "오늘 확인하거나 조치할 일" });
     expect(screen.getByRole("navigation", { name: "주 메뉴" })).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "모바일 메뉴" })).toBeInTheDocument();
   });

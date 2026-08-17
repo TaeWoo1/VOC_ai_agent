@@ -35,7 +35,7 @@ SellerOps는 **채널 중심 제품이 아니라 업무 중심 제품**이다. �
 
 ```
 운영 (매일 여는 곳 — "오늘 확인·조치할 일")
-├─ 홈        /            오늘 확인할 고객 신호 + 연결 상태 (Today Inbox는 다음 unit)
+├─ 홈        /            Today Inbox — "오늘 확인하거나 조치할 일": 리뷰 · 문의 · 연결 (§4a)
 ├─ 리뷰      /reviews     연결된 채널의 리뷰 기록 — 확인 필요 순, 채널은 switcher (/reviews/:accountId)
 ├─ 문의      /inquiries   들어온 문의 — 답변 필요 순, 답변 준비 workflow (/inquiries/:itemRef)
 └─ 주문      /orders      기간·채널 필터 집계
@@ -45,27 +45,49 @@ SellerOps는 **채널 중심 제품이 아니라 업무 중심 제품**이다. �
 └─ 설정      /settings    워크스페이스·연결 알림·계정 (+ 더 보기: 메모리·리포트)
 
 route는 있으나 1차 메뉴에 없음
-├─ /inbox     문의+리뷰 혼합 큐 — 홈 신호 카드·메모리 근거 링크·리포트가 아직 가리킴
-├─ /memory    고객운영 메모리(반복 이슈 후보) — 홈 카드·설정에서 진입
-├─ /reports   기간 리포트 — 설정에서 진입
-└─ /agent     운영 에이전트 콘솔 — 화면 안 액션으로만
+├─ /inbox            → /inquiries 로 리다이렉트 (A2에서 혼합 큐 흡수)
+├─ /inbox/:itemRef   구 딥링크 resolver — 문의면 /inquiries/:id, 리뷰면 /reviews/:accountId?review=:id
+├─ /memory           고객운영 메모리(반복 이슈 후보) — 홈 "참고"·설정에서 진입
+├─ /reports          기간 리포트 — 홈 "참고"·설정에서 진입
+└─ /agent            운영 에이전트 콘솔 — 화면 안 액션으로만
 ```
 
 - 모바일 탭: 홈 / 리뷰 / 문의 / 주문 + 더보기(채널 연결·설정·나머지). 내비 모델은 `lib/nav.v2.ts` 하나이며
   세 렌더러(사이드·탭·드로어)가 이를 공유한다.
-- **메모리·리포트를 1차 IA 밖으로 둔 것은 되돌릴 수 있는 결정**이다: 두 화면은 삭제하지 않았고, 홈/Today
-  Inbox unit이 "오늘 확인할 일" 안에서 그 자리를 정한다.
+- **메모리·리포트를 1차 IA 밖으로 둔 것은 되돌릴 수 있는 결정**이다: 두 화면은 삭제하지 않았고, 홈은 이를
+  "참고"(오늘 할 일은 아니지만 살펴볼 것)로 노출한다.
 
 ## 4. 화면 책임 (원칙)
 
 | 화면 | 책임 | 채널 차이 처리 |
 |---|---|---|
-| 홈 | 사람이 봐야 할 것 · 돌아가는 것 · 연결해야 할 것. 숫자는 측정된 것만 | 채널명은 서버가 준 것 그대로 |
+| 홈 | Today Inbox(§4a): 리뷰 · 문의 · 연결의 "지금 사람이 봐야 할 것"만, 각 count는 그 destination이 세는 수. 진행 중 Action Window run · "참고"(메모리·리포트) | 채널은 리뷰 항목의 채널별 share(각자 정확한 링크)로만 등장 |
 | 리뷰 | 계정별 리뷰 기록(`ChannelReviews`)을 하나의 문 뒤에 모음. 규칙 tier가 순서를 소유, AI는 `AI 확인 필요` suggestion(C2 pilot candidate, org opt-in, default OFF), 피드백·행동 기록은 학습 자산으로 축적 | 서버의 `ReviewChannelCapabilityView`(aiTriage / originalLocate / replySupported)로 버튼·문구 결정. 채널 고유 어휘(쿠팡 상품평)는 `channelVocabulary` 한 곳 |
 | 문의 | 인박스 workflow를 문의로 scope. 답변 제안 생성, 발송 없음 | 채널 filter는 로드된 행에서만 |
 | 주문 | 기간·채널 집계 | 채널 select = `/api/channels`(=세 채널) |
 | 채널 연결 | 세 채널의 연결 진입(가이드 연결·OAuth·튜토리얼), 상태, 자료 가져오기, 리뷰 기록 진입 | 카드 액션은 계정 실제 상태에서 |
 | 설정 | 사실과 링크만. 토글 없음 | — |
+
+### 4a. Today Inbox 계약 (홈, A2 — 2026-08-18)
+
+홈은 "오늘 내가 확인하거나 조치할 일은 무엇인가?"에 **세 항목**으로 답한다. 순서 고정: **리뷰 · 문의 · 연결**.
+정본 코드: `frontend/src/lib/todayInbox.ts`(순수 파생) + `components/home/TodayInbox.tsx`.
+
+| 항목 | count source | destination (count가 정확히 같은 화면) |
+|---|---|---|
+| 확인이 필요한 리뷰 | 리뷰 기록 계정마다 `GET …/channel-reviews?tier=NEEDS_ATTENTION` 의 `total` (rules tier + pilot ON이면 AI 확인 필요 포함 — 서버의 같은 `FINAL_TIER_RANK` 식) | 채널별 share → `/reviews/:accountId?tier=NEEDS_ATTENTION`. 계정이 하나면 헤드라인도 링크; 여럿이면 헤드라인은 합계 표시만(링크 아님) |
+| 답변이 필요한 문의 | `/api/inbox` feed의 `needsReply`(UNANSWERED 문의) 개수 | `/inquiries?state=NEEDS_REPLY` (같은 feed·같은 규칙) |
+| 확인이 필요한 연결 | 채널 상태 `RECONNECT_REQUIRED`/`PENDING` + 미확인 connector alert | 채널 행 → `/connect`, 알림 행 → `/settings/alerts`; 둘 다 있으면 헤드라인은 링크 아님 |
+
+규칙:
+1. **count = destination count.** 한 화면이 그 수를 정확히 보여주지 않으면 그 숫자는 링크가 아니다.
+2. **측정된 것만 숫자.** 읽기 실패 = "지금은 확인할 수 없습니다", 미연결 = "자료를 연결하면 표시됩니다". 0은
+   성공한 읽기에서만. 리뷰는 계정별 fail-soft(실패한 채널을 문장으로 명시).
+3. **행(row)은 열 것**: 리뷰 3건(계정 횡단 최신순 → `/reviews/:acc?review=:id`), 문의 3건(urgent → 최신 →
+   `/inquiries/:id`), 연결은 채널·알림 각 행.
+4. **주문 없음** — 주문 모델에 actionable 상태가 없다(`NormalizedOrderStatus` = PAID/UNKNOWN). 생기면 4번째 항목.
+5. 딥링크 seam: `/reviews/:acc?tier=&review=`, `/inquiries?state=` (각 화면이 mount 시 한 번 읽음).
+6. `/inbox` 혼합 큐는 **흡수**: `/inbox` → `/inquiries`, `/inbox/:itemRef` → 소유 화면으로 resolve.
 
 공통 규칙: 로딩·빈·오류 상태는 `sellerops_frontend_spec.md` §13; 언어는 §12(셀러 언어, 로드맵 문구 금지);
 capability 정직성은 §15. **새 채널이 와도 FE 신규 화면이 최소가 되게** — 새 채널 = 목록 한 줄 + capability
@@ -82,7 +104,8 @@ row + 어휘 한 줄이 목표이며, 이를 깨는 설계는 이 문서를 먼�
 | unit | 내용 | 상태 |
 |---|---|---|
 | A1 (2026-08-17) | 문서 audit·정리 / 노출 채널 게이트(BE+FE) / 내비 홈·리뷰·문의·주문·채널 연결·설정 / `/reviews` switcher over 계정별 기록 / `/inquiries` scope / 리뷰 어휘 통일 / 채널 연결 3채널 카피 | 완료 (이 문서와 같은 브랜치) |
-| A2 (다음) | 홈 → Today Inbox: "오늘 확인·조치할 일" 한 목록 — 리뷰 tier·문의 답변 필요·연결 조치를 한 큐로, 홈 카드 count 정의 통일 | 제안 |
+| A2 (2026-08-18) | 홈 → Today Inbox(§4a): 리뷰·문의·연결 세 항목, count = destination count, `/inbox` 흡수(리다이렉트 + 딥링크 resolver), `FeedItem.channelId` 추가, 리포트/업로드 결과 링크가 리뷰·문의로 | 완료 |
+| A3 (다음) | 리뷰 화면 정리: 리뷰 count 정의 하나로(리포트의 "확인이 필요한 리뷰"는 아직 feed 저평점 규칙), 채널 switcher 아래 헤더·필터·리스트 wording을 workflow 언어로, 계정 하나면 switcher 최소화 | 제안 |
 
 ## 7. 라우터
 

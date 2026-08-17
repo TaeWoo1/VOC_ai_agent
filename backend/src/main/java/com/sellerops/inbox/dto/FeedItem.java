@@ -6,6 +6,7 @@ import java.time.Instant;
 public record FeedItem(
         String id,            // source row UUID (inquiry/review); join key for item-analysis
         String type,          // INQUIRY | REVIEW
+        String channelId,     // catalog channel UUID; lets a client resolve the row to its account (2026-08-18)
         String channelNameKo,
         String productName,
         String snippet,

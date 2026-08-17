@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
 import { Empty } from "../../components/ui/Empty";
 import { BtnLink } from "../../components/ui/Btn";
@@ -10,10 +10,12 @@ import { api } from "../../lib/apiClient";
 import { analysisKey, buildAnalysisIndex } from "../../lib/inboxView";
 import {
   DEFAULT_FILTERS,
+  STATE_OPTIONS,
   applyFilters,
   resolveSelection,
   sortByPriority,
   type InboxFilters,
+  type StateFilter,
 } from "../../lib/inboxWorkspace";
 import type { FeedItem, ItemAnalysis } from "../../lib/types";
 
@@ -43,7 +45,15 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
   const [workItems, setWorkItems] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-  const [filters, setFilters] = useState<InboxFilters>(DEFAULT_FILTERS);
+  // `?state=NEEDS_REPLY` is the home's deep-link seam (`lib/todayInbox.ts`): the tile's count is
+  // `needsReply` over this same feed, so landing under that filter shows exactly those rows. Read
+  // once; the rail owns the filters from then on. Unknown values fall back to the default.
+  const [searchParams] = useSearchParams();
+  const [filters, setFilters] = useState<InboxFilters>(() => {
+    const requested = searchParams.get("state");
+    const state = STATE_OPTIONS.find((option) => option.value === requested)?.value as StateFilter | undefined;
+    return state ? { ...DEFAULT_FILTERS, state } : DEFAULT_FILTERS;
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
