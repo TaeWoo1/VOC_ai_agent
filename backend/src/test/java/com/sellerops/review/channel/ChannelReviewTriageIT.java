@@ -14,6 +14,9 @@ import com.sellerops.product.ProductRepository;
 import com.sellerops.review.Review;
 import com.sellerops.review.ReviewReplyState;
 import com.sellerops.review.ReviewRepository;
+import com.sellerops.review.triage.feedback.AiTriageCurrentRepository;
+import com.sellerops.review.triage.pilot.AiTriagePilotProperties;
+import com.sellerops.review.triage.pilot.AiTriagePilotService;
 import com.sellerops.review.channel.dto.ChannelReviewPageView;
 import com.sellerops.review.triage.ReviewTriageRules;
 import com.sellerops.review.triage.ReviewTriageTier;
@@ -56,6 +59,7 @@ class ChannelReviewTriageIT {
     @Autowired ChannelRepository channels;
     @Autowired SyncJobRepository syncJobs;
     @Autowired ItemAnalysisRepository analyses;
+    @Autowired AiTriageCurrentRepository aiCurrent;
 
     /**
      * Every body form the database can hold, paired with what Java calls it.
@@ -74,7 +78,8 @@ class ChannelReviewTriageIT {
 
     @BeforeEach
     void setUp() {
-        service = new ChannelReviewService(reviews, products, accounts, syncJobs, analyses);
+        service = new ChannelReviewService(reviews, products, accounts, syncJobs, analyses, aiCurrent,
+                pilotOff());
         Channel ch = new Channel();
         ch.setCode("COUPANG");
         ch.setNameKo("쿠팡");
@@ -421,5 +426,11 @@ class ChannelReviewTriageIT {
             case WATCH -> page.triageSummary().watch();
             case FYI -> page.triageSummary().fyi();
         };
+    }
+
+    /** The pilot OFF — what every org that has not opted in gets, and the baseline these tests assert. */
+    static AiTriagePilotService pilotOff() {
+        AiTriagePilotProperties off = new AiTriagePilotProperties(false, "", "OPENAI", "m", "", true, 4000, "low", 100);
+        return new AiTriagePilotService(off, null, null, null, null, null, null);
     }
 }

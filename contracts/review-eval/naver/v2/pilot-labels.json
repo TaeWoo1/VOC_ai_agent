@@ -1,0 +1,294 @@
+{
+  "contract": "review-eval/naver/v2",
+  "rubricVersion": "v2",
+  "set": "pilot",
+  "_comment": [
+    "RUBRIC.md section 10. The owner's labels on the 24 calibration rows (outside the 220-row",
+    "sample) and the 13 DEV overlap rows inside it. The 17 HOLDOUT overlap rows are NOT here and",
+    "must never be: section 6.2 reads the holdout once, and a pilot is not what it was saved for.",
+    "",
+    "This is NOT gold. It is a screen (section 10.4): 37 rows can rule a candidate out and cannot",
+    "rule one in, and no Wilson lower bound computed on it can reach section 5's 0.80 precision",
+    "gate even on a perfect run. Quoting a pilot number as if it cleared that gate misreads both",
+    "files. Same closed vocabularies and same absence of everything else as labels.json."
+  ],
+  "labels": [
+    {
+      "reviewIdFingerprint": "0dec47badb7aea729da1daf02652247d7e2b16d9ef522b717d956b4497c9ac27",
+      "tier": "WATCH",
+      "reasonCode": "NEUTRAL_DESCRIPTION",
+      "tags": [
+        "설치"
+      ],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "14ed2576d3b5675dca12786394bf07c4c28529e8a498020b8135872cca2b7c80",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "16becf623066a315c7042d04beeb25443cff423b87306a8a9710fd68ac3a34d9",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "2428414757a20b4c82c4cd579df1d9e482dc6d22f0a4c2983cd9e68023e9f373",
+      "tier": "FYI",
+      "reasonCode": "NEUTRAL_DESCRIPTION",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "26f8375f0bedba48d3af4f633dce99e377abf7f7439088a3de2c2f646c6f609d",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "2c981619208f40550a0679796c1c5c1d230bc74c818f8abddbb1a9c682cdd763",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "2d60e476c2810fb075b29efaae53d25b983a53837afde536f88a046995e49ce9",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [
+        "배송"
+      ],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "3728a7a13ece6b18c2450a575ab984cb8c0cab7aa5e8ed783a03a1dc87c89799",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "37d96a1ba58b84f65c2730f98f1c834dc250760f8bc7b395ca91a275ab7fefec",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "3bd204bb1eed35d1eb82b6c82aaf18612c3ce1c437c08d004531ab2ab46657af",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [
+        "설치"
+      ],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "47adc9c2eddd22c0d82fc3afb0370481ac7abd69c09ceb6db32125e5bf802776",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [
+        "배송"
+      ],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "4c4fe914bffc6691ec56bc2ad356013a89ba26b20f5decbadffe0fd3c36573b3",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "567725bbfe259ec424dc8a77f9a48e4d03aac8c7ff23307d212f74888a5fa54e",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "57c411a08c907e8e7c4eb46ea0ac9a34d8bc83e0e72626c96d1e9fb986814a1e",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "61f258eaaa139bb14b640149d8eaefd827c4fbdb9deef95cae910037c26ac947",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [
+        "설치"
+      ],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "6a4cae1a98cdfa4bb9686f52d54eee9a0b432d14fda37ee74eaced43321c4732",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "71795374a50d58d150a6bfa817f13a726feb4eecd81e93451314ce1171c2e694",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "7c50b85b0f317d0c63088e28382c2d70957a7d046daa10fc07644ba919a44b81",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "80d65c0f20aa1081fb66e95cf2aff9ef8cb3b13c571fade375e39afd396d22b2",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "84229a15164cd5584f85afc4fad18afb78c0a93043a516cfd4456f9347d22fb3",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [
+        "가격"
+      ],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "8b5fd9b127424aa0b31f6a35ee30b67f158f2424a9f7b9477624e2e6a8eb666c",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "8e7266b8238536fc05f0f307688e6006899da000965a3b04b90d888ad61e1852",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PACKAGING_PROBLEM",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "90e6ad5fca576f438017a30ce5d06bdaa85fd9bbffd766f730c72645cfdd845d",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "9a1cec3a2eaa4a17015ed5d0349dea76c3e1dd12f79cbedd0c5a93c2a53f6ffc",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "a39f64bb5ea037cd7430d125f0bdd8c9c5d7a8206ae8ce980336c46020ac831a",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "a5153e253ea3bfaae731c9888300bb58ccbd94b94658301ab28fc01c5c112e9d",
+      "tier": "FYI",
+      "reasonCode": "NEUTRAL_DESCRIPTION",
+      "tags": [
+        "설치"
+      ],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "ad9f71489f8cb072ef97dfd57262789990b1195d7d2ebcb89693d2f3beadc0aa",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "be59e1695adf04d800970cebb4d4b3a4b615a2c216bad149ca703dcbd54465f7",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "DEFECT_OR_DAMAGE",
+      "tags": [
+        "품질"
+      ],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "c086577eaf65fcde9b2defc9c9f783082741faa82479d6a31d3cfd1f75ddc552",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "PRAISE_WITH_CONCESSION",
+      "tags": [
+        "설치"
+      ],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "c58b522cb74db733f4dc3ebe29c48e1bfacdca77abcd156fe1539f2f2b9ef63e",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "d1883663cb55d710e1383297779eac73d32ef92c33bb77b6ebe1cf6ebdaac44f",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "d5e8d1dc44986ccb58b0b0b83330e0d1783ab0d2b8cb84848832c1406c0712e7",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "dbd9fa0f6d06a7b4e2007ae3b7f96636b29c14f6ce77575e0fe5979d1b99a18f",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "e83898c833bf614d0b79f1c8ba79d7db7e090748462b3ad7f96e318075c15837",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "TEXTLESS_OR_NOISE",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "f37600470643b31167e0fcc437634c9210d455f5bbeeef0b000deb87668afcbf",
+      "tier": "NEEDS_ATTENTION",
+      "reasonCode": "TEXTLESS_OR_NOISE",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "f37baccdd61ff5649f6a6aba54db1db65e7aca9b6fd8496f22b9829c8263beef",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    },
+    {
+      "reviewIdFingerprint": "f9745752189dc3e9691027c523b229268e17f5d047edae7beb0b8e98091f2146",
+      "tier": "FYI",
+      "reasonCode": "PRAISE_ONLY",
+      "tags": [],
+      "source": "OWNER"
+    }
+  ]
+}

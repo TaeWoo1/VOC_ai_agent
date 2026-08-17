@@ -1,0 +1,47 @@
+{
+  "contract": "review-eval/naver/v2",
+  "rubricVersion": "v2",
+  "set": "rubric-adjudication",
+  "_comment": [
+    "RUBRIC v2 section 2.2, applied at gold assembly and nowhere else.",
+    "",
+    "Six reviews, every one of them 3 stars with no actionable body. All six are overlap rows where",
+    "the two labelers differed, and all six differed the SAME way: the owner labeled before section",
+    "2.2 existed and called them NEEDS_ATTENTION, the annotator labeled after it and called them",
+    "WATCH. The product owner adjudicated all six to WATCH on the rubric, not row by row.",
+    "",
+    "What this file does NOT do. It does not edit either labeler raw answers, and it does not touch",
+    "the agreement figures: binary kappa 0.614 over 30 overlap rows was computed from the raw answers",
+    "before any of this was applied, and it stands. A tier here is the tier that reaches gold.",
+    "",
+    "A fingerprint and a tier. No reasoning per review — the reasoning is section 2.2, which is about",
+    "the rule. The reason code and tags on an adjudicated row stay the owner own, per section 7.5,",
+    "which makes the owner the adjudicating role."
+  ],
+  "adjudications": [
+    {
+      "reviewIdFingerprint": "39b71da8e55f60158a0906e5af53f81481e8abb61f1b0a2cb3afdfaf12490123",
+      "tier": "WATCH"
+    },
+    {
+      "reviewIdFingerprint": "5c7e95de1af6885b7e5abaef5c38a309ab8448bb1f169289530513d1e6de8fef",
+      "tier": "WATCH"
+    },
+    {
+      "reviewIdFingerprint": "6383e82b00e460a822e54d3ae4f592b5d21e5439967741cd39c6c050c1b204a7",
+      "tier": "WATCH"
+    },
+    {
+      "reviewIdFingerprint": "9550ad60765abe6ec9987caec818dbdec8b11a4ddc2973904de250cf6c2f5434",
+      "tier": "WATCH"
+    },
+    {
+      "reviewIdFingerprint": "e83898c833bf614d0b79f1c8ba79d7db7e090748462b3ad7f96e318075c15837",
+      "tier": "WATCH"
+    },
+    {
+      "reviewIdFingerprint": "f37600470643b31167e0fcc437634c9210d455f5bbeeef0b000deb87668afcbf",
+      "tier": "WATCH"
+    }
+  ]
+}

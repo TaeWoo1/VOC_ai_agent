@@ -22,6 +22,9 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
      */
     Optional<Review> findByIdAndOrgId(UUID id, UUID orgId);
 
+    /** Org-scoped batch lookup — the feedback write path's answer to a per-row query per event. */
+    List<Review> findByOrgIdAndIdIn(UUID orgId, java.util.Collection<UUID> ids);
+
     long countByOrgIdAndReceivedAtAfter(UUID orgId, Instant after);
 
     /**
@@ -89,6 +92,52 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
             """;
 
     /**
+     * The rank a seller actually sees under RUBRIC v2 §13.7's conservative pilot: the rules rank,
+     * lowered to {@code 0} (확인 필요) when the pilot's additive mark is set, and NEVER raised.
+     *
+     * <p><b>This is §8.9's guard, in SQL.</b> The expression has exactly one branch that departs
+     * from {@link #TRIAGE_TIER_RANK}, and that branch can only produce {@code 0} — the top rank. A
+     * review the rule already ranks {@code 0} stays {@code 0} whatever the mark says (it takes the
+     * min), a review the rule ranks {@code 1} or {@code 2} moves to {@code 0} only on a {@code true},
+     * and there is no expression here that maps a rules {@code 0} to anything else. The pilot does
+     * not own {@code WATCH}/{@code FYI}: a mark of {@code false} leaves the rules rank exactly where it
+     * was.
+     *
+     * <p>Requires the query to have joined {@code AiTriageCurrent a} on the review — a left join, so
+     * a review the pilot has never seen has {@code a} null and falls straight through to the rule.
+     * The pilot's flag row is per-review and org-scoped; the join condition carries both.
+     *
+     * <p>{@code :aiEnabled} is the org's opt-in, passed by the caller on every read. It is in the
+     * expression rather than only in the service so that an org switched OFF after rows were
+     * classified reads exactly as it did before the pilot — the marks are hidden AND the ordering
+     * forgets them, in the same expression, so a row cannot sort to the top with no mark to say why.
+     */
+    String FINAL_TIER_RANK = """
+            (case
+               when :aiEnabled = true and a.aiAttention = true then 0
+               else
+            """ + TRIAGE_TIER_RANK + """
+             end)
+            """;
+
+    /**
+     * {@link #FINAL_TIER_RANK} with the opt-in already decided in Java — for the one place a bound
+     * parameter inside the expression breaks PostgreSQL (a GROUP BY). Same single departing branch.
+     */
+    String AI_FINAL_TIER_RANK = """
+            (case
+               when a.aiAttention = true then 0
+               else
+            """ + TRIAGE_TIER_RANK + """
+             end)
+            """;
+
+    /** The pilot join every §13.7 read shares. Left, so an unseen review is the rule's alone. */
+    String AI_JOIN = """
+            left join AiTriageCurrent a on a.reviewId = r.id and a.orgId = r.orgId
+            """;
+
+    /**
      * One connected channel's reviews, worst-first — the 확인 필요 우선 order.
      *
      * <p>Within a tier the order is newest-first, because recency is the one further thing this
@@ -101,17 +150,19 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
      */
     @Query("""
             select r from Review r
+            """ + AI_JOIN + """
             where r.orgId = :orgId and r.channelId = :channelId
               and (:tierRank is null or
-            """ + TRIAGE_TIER_RANK + """
+            """ + FINAL_TIER_RANK + """
               = :tierRank)
             order by
-            """ + TRIAGE_TIER_RANK + """
+            """ + FINAL_TIER_RANK + """
               asc, r.receivedAt desc, r.id asc
             """)
     Page<Review> findByOrgIdAndChannelIdTriaged(@Param("orgId") UUID orgId,
                                                 @Param("channelId") UUID channelId,
                                                 @Param("tierRank") Integer tierRank,
+                                                @Param("aiEnabled") boolean aiEnabled,
                                                 Pageable pageable);
 
     /**
@@ -124,14 +175,16 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
      */
     @Query("""
             select r from Review r
+            """ + AI_JOIN + """
             where r.orgId = :orgId and r.channelId = :channelId
               and (:tierRank is null or
-            """ + TRIAGE_TIER_RANK + """
+            """ + FINAL_TIER_RANK + """
               = :tierRank)
             """)
     Page<Review> findByOrgIdAndChannelIdTriagedSorted(@Param("orgId") UUID orgId,
                                                       @Param("channelId") UUID channelId,
                                                       @Param("tierRank") Integer tierRank,
+                                                @Param("aiEnabled") boolean aiEnabled,
                                                       Pageable pageable);
 
     /**
@@ -150,9 +203,10 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
      */
     @Query("""
             select r from Review r
+            """ + AI_JOIN + """
             where r.orgId = :orgId and r.channelId = :channelId
               and (:tierRank is null or
-            """ + TRIAGE_TIER_RANK + """
+            """ + FINAL_TIER_RANK + """
               = :tierRank)
             order by case when r.rating is null then 1 else 0 end asc,
                      r.rating asc, r.receivedAt desc, r.id asc
@@ -160,6 +214,7 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
     Page<Review> findByOrgIdAndChannelIdTriagedLowestFirst(@Param("orgId") UUID orgId,
                                                            @Param("channelId") UUID channelId,
                                                            @Param("tierRank") Integer tierRank,
+                                                @Param("aiEnabled") boolean aiEnabled,
                                                            Pageable pageable);
 
     /**
@@ -188,6 +243,73 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
             """)
     List<Object[]> countByChannelGroupedByTierRank(@Param("orgId") UUID orgId,
                                                    @Param("channelId") UUID channelId);
+
+    /**
+     * The same grouped count under the §13.7 pilot — the FINAL rank, with the pilot's marks folded in.
+     *
+     * <p><b>A second query rather than a parameter, and the reason is PostgreSQL.</b> The first cut
+     * put {@code :aiEnabled} inside the CASE in both SELECT and GROUP BY; Hibernate binds each
+     * occurrence as its own {@code $n}, the planner cannot prove the two expressions equal, and PG
+     * raises {@code 42803 — column "r.rating" must appear in the GROUP BY clause}. H2 tolerated it,
+     * which is why the offline suite passed and the independent review had to catch it. Found by
+     * running the shape against the local PG directly. So the opt-in is a Java branch
+     * ({@code ChannelReviewService.summary}) between two parameterless-in-the-CASE queries, and
+     * this one has no {@code :aiEnabled} at all — the join alone is the pilot.
+     */
+    @Query("""
+            select
+            """ + AI_FINAL_TIER_RANK + """
+              , count(r) from Review r
+            """ + AI_JOIN + """
+            where r.orgId = :orgId and r.channelId = :channelId
+            group by
+            """ + AI_FINAL_TIER_RANK + """
+            """)
+    List<Object[]> countByChannelGroupedByFinalTierRank(@Param("orgId") UUID orgId,
+                                                        @Param("channelId") UUID channelId);
+
+    /**
+     * How many of this channel's reviews carry the pilot's additive mark — the {@code AI 확인 필요}
+     * number in the summary. A subset of the final 확인 필요 count, never in addition to it, and it
+     * excludes rows the rule already ranks 확인 필요 for the reason the read path does: nothing was
+     * added there, so nothing is counted as added.
+     */
+    @Query("""
+            select count(r) from Review r
+            join AiTriageCurrent a on a.reviewId = r.id and a.orgId = r.orgId
+            where r.orgId = :orgId and r.channelId = :channelId and a.aiAttention = true
+              and
+            """ + TRIAGE_TIER_RANK + """
+              <> 0
+            """)
+    long countAiAttentionByChannel(@Param("orgId") UUID orgId, @Param("channelId") UUID channelId);
+
+    /**
+     * Reviews the pilot has not yet classified under {@code version}, <b>newest first</b> — what one
+     * run works through. Newest first because the pilot starts from the seller's most recent real
+     * reviews and works back only as far as an operator keeps pressing (product-owner decision,
+     * 2026-08-17: no automatic classification of the historical corpus). A review classified under
+     * an OLDER version is pending again, so a new frozen candidate re-reads the record rather than
+     * inheriting a predecessor's marks under its own name.
+     */
+    @Query("""
+            select r from Review r
+            where r.orgId = :orgId and r.channelId = :channelId
+              and not exists (select 1 from AiTriageCurrent a
+                              where a.reviewId = r.id and a.classifierVersion = :version)
+            order by r.receivedAt desc, r.id asc
+            """)
+    List<Review> findPendingAiTriage(@Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
+                                     @Param("version") String version, Pageable pageable);
+
+    @Query("""
+            select count(r) from Review r
+            where r.orgId = :orgId and r.channelId = :channelId
+              and not exists (select 1 from AiTriageCurrent a
+                              where a.reviewId = r.id and a.classifierVersion = :version)
+            """)
+    long countPendingAiTriage(@Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
+                              @Param("version") String version);
 
     /**
      * {@code [category, count]} over every stored review of this channel that carries an analysis —

@@ -37,5 +37,12 @@ public record ChannelReviewItemView(
          * What SellerOps suggests about this row: which tier, why, and what the seller might do. Computed
          * from the review at read time and stored nowhere — see {@link ReviewTriageNote}.
          */
-        ReviewTriageNote triage) {
+        ReviewTriageNote triage,
+        /**
+         * The pilot's additive {@code AI 확인 필요} mark, or null. Null on every row when the pilot is
+         * off for this org, and null on every row the rule already ranks 확인 필요 — see
+         * {@link AiTriageMarkView}. When present the row sorts with 확인 필요; {@code triage.tier} still
+         * says what the RULE decided, and the two are shown side by side rather than merged.
+         */
+        AiTriageMarkView aiMark) {
 }

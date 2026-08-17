@@ -7,6 +7,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
@@ -35,6 +37,24 @@ class ReviewTriageQueueIsolationTest {
             Path.of("src", "main", "java", "com", "sellerops", "review", "triage");
 
     /**
+     * Subpackages that were added AFTER this guard, and are allowed to persist.
+     *
+     * <p><b>Amended 2026-08-17, and the amendment is narrow on purpose.</b> {@code llm} and
+     * {@code feedback} implement the classifier of
+     * {@code docs/slices/llm-triage-classifier-v1.md}, which stores a prediction — so
+     * {@link #nothingInTheTierRulePersistsAnything} could no longer be true of the whole tree.
+     *
+     * <p>What the amendment does NOT do is relax the gate it was written for. RUBRIC §5's bar is
+     * "{@code LOW_RATING_REVIEW} counts unchanged — a detector may only ADD", and that is about the
+     * attention queue, not about persistence in general. So
+     * {@link #nothingInThePackageReachesTheQueuesMechanisms} still scans <b>every</b> source in the
+     * tree including these, {@link #theClassifierWritesOnlyItsOwnTables} replaces the persistence
+     * check for them with the property that actually matters, and the tier rule itself stays
+     * store-nothing.
+     */
+    private static final List<String> PERSISTING_SUBPACKAGES = List.of("llm", "feedback", "pilot");
+
+    /**
      * Mechanisms that decide the needs-a-look queue, or that record a human's decision about a review.
      *
      * <p>{@code ReviewTriage} / {@code TriageDisposition} are on the list for a second reason beyond
@@ -50,10 +70,14 @@ class ReviewTriageQueueIsolationTest {
             "ReviewTriageRepository",
             "TriageDisposition");
 
+    private static final Pattern TABLE = Pattern.compile("@Table\\(name = \"([a-z_]+)\"\\)");
+
     @Test
     void thePackageIsNotEmptySoThisTestCannotPassVacuously() throws IOException {
         assertThat(sources()).isNotEmpty();
         assertThat(sources()).hasSizeGreaterThanOrEqualTo(3);
+        assertThat(tierRuleSources()).as("the tier rule's own files").hasSizeGreaterThanOrEqualTo(3);
+        assertThat(PERSISTING_SUBPACKAGES).isNotEmpty();
     }
 
     @Test
@@ -73,13 +97,17 @@ class ReviewTriageQueueIsolationTest {
     }
 
     /**
-     * The tier is computed, never stored — so it cannot become a state that drifts from the review it
-     * describes, and it cannot write anything the attention queue reads.
+     * The tier rule is computed, never stored — so it cannot become a state that drifts from the
+     * review it describes, and it cannot write anything the attention queue reads.
+     *
+     * <p>Scoped to the tier rule's own sources since the classifier arrived. That is the object the
+     * property was ever about: {@code ReviewTriageRules} is what the list sorts by and the counts
+     * count, and a stored tier there is what would drift.
      */
     @Test
-    void nothingInThePackagePersistsAnything() throws IOException {
+    void nothingInTheTierRulePersistsAnything() throws IOException {
         List<String> offences = new ArrayList<>();
-        for (Path source : sources()) {
+        for (Path source : tierRuleSources()) {
             String code = stripComments(Files.readString(source));
             for (String forbidden : List.of(".save(", ".saveAll(", ".delete(", "Repository",
                     "@Entity", "@Transactional")) {
@@ -89,8 +117,53 @@ class ReviewTriageQueueIsolationTest {
             }
         }
         assertThat(offences)
-                .as("triage는 읽기 시점 계산이며 어떤 것도 저장하지 않습니다")
+                .as("triage 등급 규칙은 읽기 시점 계산이며 어떤 것도 저장하지 않습니다")
                 .isEmpty();
+    }
+
+    /**
+     * The classifier may persist, and only into its own tables.
+     *
+     * <p>This is the property that replaces "stores nothing" for the subpackages, and it is the one
+     * RUBRIC §5's regression bar actually needs: a prediction store cannot change a
+     * {@code LOW_RATING_REVIEW} count if it never writes anything the attention queue reads. The
+     * check is on the entity mappings rather than on intent, so a future entity pointed at
+     * {@code reviews} or {@code review_triages} fails here rather than in production.
+     *
+     * <p><b>Six tables since the §13.7 pilot</b>, and the three added are still the classifier's own:
+     * the pilot's current-mark row that the channel review list joins (additively — see
+     * {@code ReviewRepository.FINAL_TIER_RANK}), and the two feedback tables for actions and silver
+     * behaviour. None of them is read by the attention queue.
+     */
+    @Test
+    void theClassifierWritesOnlyItsOwnTables() throws IOException {
+        List<String> tables = new ArrayList<>();
+        for (Path source : sources()) {
+            String code = stripComments(Files.readString(source));
+            Matcher matcher = TABLE.matcher(code);
+            while (matcher.find()) {
+                tables.add(matcher.group(1));
+            }
+        }
+        assertThat(tables).as("the classifier's entities must be found, or this passes vacuously")
+                .isNotEmpty();
+        assertThat(tables)
+                .as("triage는 자기 테이블 밖에는 아무것도 쓰지 않습니다 (RUBRIC.md §5 회귀 게이트)")
+                .containsOnly("review_triage_predictions", "review_triage_corrections",
+                        "review_correction_dispositions", "review_triage_ai_current",
+                        "review_triage_actions", "review_triage_behavior_events");
+    }
+
+    /** Only the tier rule's own files — the subpackages are covered by the two tests above. */
+    private static List<Path> tierRuleSources() throws IOException {
+        List<Path> all = new ArrayList<>();
+        for (Path source : sources()) {
+            Path relative = PACKAGE_DIR.relativize(source);
+            if (relative.getNameCount() == 1) {
+                all.add(source);
+            }
+        }
+        return all;
     }
 
     private static List<Path> sources() throws IOException {

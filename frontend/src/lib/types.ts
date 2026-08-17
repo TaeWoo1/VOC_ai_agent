@@ -1312,6 +1312,27 @@ export interface ChannelReviewItemView {
   /** Arrived in the most recent import — derived from that import's start, never a read flag. */
   isNew: boolean;
   triage: ReviewTriageNote;
+  /**
+   * The pilot's additive `AI 확인 필요` mark, or null. Null on every row when the pilot is off for this
+   * org, and null on every row the rule already calls 확인 필요 — see `AiTriageMarkView`. When present
+   * the row sorts with 확인 필요; `triage.tier` still says what the RULE decided, and the surface shows
+   * both rather than merging them.
+   */
+  aiMark: AiTriageMarkView | null;
+}
+
+/**
+ * The pilot's additive mark on one review — RUBRIC v2 §13.7.
+ *
+ * Present only where the pilot ADDED something: never "the AI agrees", always "the AI raised this
+ * one, and the rule alone would not have". Rendered as a candidate's suggestion, marked as such,
+ * beside the rules tier and never in place of it. No confidence figure exists and none is invented.
+ */
+export interface AiTriageMarkView {
+  classifierVersion: string;
+  /** The §3.1 reason the candidate gave, or null. Descriptive; it did not decide the tier. */
+  reasonCode: string | null;
+  predictedAt: string;
 }
 
 /**
@@ -1353,9 +1374,12 @@ export interface ReviewTriageNote {
  * nothing", not an issue.
  */
 export interface ChannelReviewTriageSummaryView {
+  /** 확인 필요 as the seller sees it: the rule's rows PLUS the pilot's additive marks. */
   needsAttention: number;
   watch: number;
   fyi: number;
+  /** How many of `needsAttention` are the pilot's marks — a subset, never an addition. 0 when the pilot is off. */
+  aiAttention: number;
   repeatedCategories: { category: string; count: number }[];
 }
 
@@ -1371,6 +1395,12 @@ export interface ChannelReviewPageView {
   newCount: number;
   lastImportAt: string | null;
   lastImportComplete: boolean;
+  /**
+   * RUBRIC v2 §13.7's pilot is ON for this org. When false the page renders no mark, no feedback
+   * controls and records no behaviour — the screen is what it was before the pilot existed. Sent by
+   * the backend, never inferred from whether marks happen to be present.
+   */
+  aiPilotEnabled: boolean;
   triageSummary: ChannelReviewTriageSummaryView;
   items: ChannelReviewItemView[];
 }
@@ -1416,5 +1446,41 @@ export interface ChannelReviewDetailView {
   isNew: boolean;
   /** The same note the list row carried — opening a review never changes what it said. */
   triage: ReviewTriageNote;
+  /** The same pilot mark the list row carried, or null. */
+  aiMark: AiTriageMarkView | null;
   locateTarget: ChannelReviewLocateTarget;
+}
+
+// ── Review triage feedback — RUBRIC v2 §13.7's spine ─────────────────────────────────────────
+//
+// Three shapes of decreasing evidential weight. None carries free text, and none asserts what the
+// seller was SHOWN — the backend computes that from its own store.
+
+/** The seller's binary answer to the product question — 확인 필요, or not. */
+export interface TriageCorrectionRequest {
+  needsAttention: boolean;
+  /** An optional closed-vocabulary reason, or null. */
+  reasonCode: string | null;
+}
+
+export interface TriageCorrectionView {
+  reviewId: string;
+  needsAttention: boolean;
+  reasonCode: string | null;
+  /** RULES or AI — which mechanism produced the tier the seller corrected. */
+  shownSource: "RULES" | "AI" | null;
+}
+
+/** One explicit act. Append-only on the backend. */
+export type TriageActionKind = "STARTED" | "COMPLETED" | "NOT_NEEDED";
+
+/**
+ * Silver: what the seller did on the way. Weighted at snapshot time, never a label. There is
+ * deliberately no IGNORED kind — being passed over is not reported as if it were a signal.
+ */
+export type TriageBehaviorKind = "EXPOSED" | "OPENED" | "ORIGINAL_VIEWED";
+
+export interface TriageBehaviorEvent {
+  reviewId: string;
+  kind: TriageBehaviorKind;
 }

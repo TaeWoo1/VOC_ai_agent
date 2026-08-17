@@ -9,6 +9,9 @@ import type { ChannelReviewDetailView, ChannelReviewPageView } from "../../lib/t
 
 const getChannelReviewsStrict = vi.fn();
 const getChannelReviewStrict = vi.fn();
+const recordBehavior = vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined);
+const correctTriage = vi.fn<(...args: unknown[]) => Promise<unknown>>();
+const recordAction = vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined);
 
 vi.mock("../../lib/apiClient", () => ({
   api: {
@@ -16,6 +19,9 @@ vi.mock("../../lib/apiClient", () => ({
       getChannelReviewsStrict(accountId, params),
     getChannelReviewStrict: (accountId: string, reviewId: string) =>
       getChannelReviewStrict(accountId, reviewId),
+    recordChannelReviewTriageBehavior: (...args: unknown[]) => recordBehavior(...args),
+    correctChannelReviewTriage: (...args: unknown[]) => correctTriage(...args),
+    recordChannelReviewTriageAction: (...args: unknown[]) => recordAction(...args),
   },
   getToken: () => "token",
 }));
@@ -27,10 +33,11 @@ const PAGE: ChannelReviewPageView = {
   newCount: 1,
   lastImportAt: "2026-08-14T05:00:00Z",
   lastImportComplete: true,
+  aiPilotEnabled: false,
   triageSummary: {
     needsAttention: 1,
     watch: 0,
-    fyi: 1,
+    fyi: 1, aiAttention: 0,
     repeatedCategories: [{ category: "설치", count: 11 }],
   },
   items: [
@@ -47,6 +54,7 @@ const PAGE: ChannelReviewPageView = {
       textless: false,
       isNew: true,
       triage: { tier: "FYI", reason: "5점", tags: [], recommendedAction: null },
+    aiMark: null,
     },
     {
       id: "r2",
@@ -66,6 +74,7 @@ const PAGE: ChannelReviewPageView = {
         tags: ["설치"],
         recommendedAction: "같은 분류의 상품평이 반복됩니다. 상품·포장 상태를 확인해 보세요.",
       },
+    aiMark: null,
     },
   ],
 };
@@ -82,6 +91,7 @@ const DETAIL: ChannelReviewDetailView = {
   textless: false,
   isNew: true,
   triage: { tier: "FYI", reason: "5점", tags: [], recommendedAction: null },
+  aiMark: null,
   locateTarget: {
     productId: "15411270785",
     vendorItemId: "81234567890",
@@ -430,6 +440,7 @@ describe("triage", () => {
           id: "second",
           preview: "서버가 나중에 준 줄",
           triage: { ...PAGE.items[1].triage, tags: ["설치", "품질", "배송"] },
+        aiMark: null,
         },
       ],
     });
@@ -477,6 +488,7 @@ describe("triage", () => {
             tags: ["품질", "파손"],
             recommendedAction: null,
           },
+        aiMark: null,
         },
       ],
     });
@@ -485,6 +497,102 @@ describe("triage", () => {
 
     expect(screen.getByText("참고")).toBeInTheDocument();
     expect(screen.queryByText("확인 필요")).toBeNull();
+  });
+});
+
+describe("the AI pilot's mark and the feedback spine (RUBRIC v2 §13.7)", () => {
+  const MARK = {
+    classifierVersion: "llm-triage/v1+openai:gpt-5-2025-08-07+triage-prompt/v4+schema/v1+tdefault+out4000+effort:low+additive-guard/v1",
+    reasonCode: "PRAISE_WITH_CONCESSION",
+    predictedAt: "2026-08-17T00:00:00Z",
+  };
+
+  it("renders AI 확인 필요 BESIDE the rules tier, never in its place, and says what it is", async () => {
+    getChannelReviewsStrict.mockResolvedValue({
+      ...PAGE,
+      aiPilotEnabled: true,
+      triageSummary: { ...PAGE.triageSummary, needsAttention: 2, aiAttention: 1 },
+      items: [{ ...PAGE.items[0], aiMark: MARK }, PAGE.items[1]],
+    });
+    getChannelReviewStrict.mockResolvedValue({ ...DETAIL, aiMark: MARK });
+    renderPage();
+    const row = (await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요")).closest("li")!;
+
+    // Both chips on the same row: the rule's 참고 AND the pilot's AI 확인 필요.
+    expect(within(row).getByText("참고")).toBeInTheDocument();
+    expect(within(row).getByText("AI 확인 필요")).toBeInTheDocument();
+    // And the disclosure once the detail is open — the rule did not call this 확인 필요, a classifier did.
+    await userEvent.click(within(row).getByRole("button"));
+    expect(await screen.findByText(/AI 분류가 판매자가 확인할 내용이 있다고 판단한/)).toBeInTheDocument();
+  });
+
+  it("an org NOT opted in gets the pre-pilot screen: no controls, no silver — even if a mark arrived", async () => {
+    // The backend sends no marks for such an org; if one did arrive, the controls and the silver
+    // must still be absent, because aiPilotEnabled — not the presence of marks — is the switch.
+    getChannelReviewsStrict.mockResolvedValue({ ...PAGE, aiPilotEnabled: false });
+    renderPage();
+    await userEvent.click((await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요")).closest("button")!);
+    await screen.findByText(/노출상품ID/);
+    expect(screen.queryByText("이 상품평, 확인이 필요한가요?")).toBeNull();
+    expect(screen.queryByLabelText("분류 피드백")).toBeNull();
+    expect(recordBehavior).not.toHaveBeenCalled();
+  });
+
+  it("shows nothing about AI on a row without a mark", async () => {
+    renderPage();
+    await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요");
+    expect(screen.queryByText("AI 확인 필요")).toBeNull();
+    expect(screen.queryByText(/AI 분류가/)).toBeNull();
+  });
+
+  it("records a correction and an action, and changes nothing on screen — no tier moves, no row hides", async () => {
+    correctTriage.mockResolvedValue({ reviewId: "r1", needsAttention: false, reasonCode: null, shownSource: "RULES" });
+    getChannelReviewsStrict.mockResolvedValue({ ...PAGE, aiPilotEnabled: true });
+    renderPage();
+    await userEvent.click((await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요")).closest("button")!);
+    await screen.findByText("이 상품평, 확인이 필요한가요?");
+
+    await userEvent.click(screen.getByRole("button", { name: "확인할 필요 없어요" }));
+    await waitFor(() => expect(correctTriage).toHaveBeenCalledWith("acc-1", "r1", { needsAttention: false, reasonCode: null }));
+    // The answer is shown as pressed — and the row and the tier are exactly where they were.
+    expect(screen.getByRole("button", { name: "확인할 필요 없어요" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("배송도 빠르고 포장도 꼼꼼했어요")).toBeInTheDocument();
+    expect(screen.getAllByText("참고").length).toBeGreaterThan(0);
+
+    await userEvent.click(screen.getByRole("button", { name: "조치 완료" }));
+    await waitFor(() => expect(recordAction).toHaveBeenCalledWith("acc-1", "r1", "COMPLETED"));
+    // The copy says what happens: recorded, not applied, and nothing sent to a marketplace.
+    expect(screen.getByText(/답변은 기록만 됩니다/)).toBeInTheDocument();
+    expect(screen.getByText(/마켓플레이스에는 아무것도 전송되지 않습니다/)).toBeInTheDocument();
+  });
+
+  it("offers a binary answer only — no 지켜보기 / 참고 choice, because the pilot does not own that split", async () => {
+    getChannelReviewsStrict.mockResolvedValue({ ...PAGE, aiPilotEnabled: true });
+    renderPage();
+    await userEvent.click((await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요")).closest("button")!);
+    await screen.findByText("이 상품평, 확인이 필요한가요?");
+    const feedback = screen.getByLabelText("분류 피드백");
+    expect(within(feedback).queryByRole("button", { name: /지켜보기/ })).toBeNull();
+    expect(within(feedback).queryByRole("button", { name: /^참고$/ })).toBeNull();
+  });
+
+  it("reports exposure and opening as silver, only for rows something raised, and never fails the list on it", async () => {
+    recordBehavior.mockRejectedValue(new Error("down"));
+    getChannelReviewsStrict.mockResolvedValue({
+      ...PAGE,
+      aiPilotEnabled: true,
+      items: [{ ...PAGE.items[0], aiMark: MARK }, PAGE.items[1]],
+    });
+    renderPage();
+    await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요");
+    // Row 1 carries a mark → EXPOSED. Row 2 is a rules 확인 필요 (1★ with text) → EXPOSED. Nothing else.
+    await waitFor(() => expect(recordBehavior).toHaveBeenCalledWith("acc-1", [
+      { reviewId: "r1", kind: "EXPOSED" },
+      { reviewId: "r2", kind: "EXPOSED" },
+    ]));
+    // The recorder is DOWN, and the list is still there.
+    expect(screen.getByText("배송도 빠르고 포장도 꼼꼼했어요")).toBeInTheDocument();
+    expect(screen.queryByText(/불러오지 못했습니다/)).toBeNull();
   });
 });
 

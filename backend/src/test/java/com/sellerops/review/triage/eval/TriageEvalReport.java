@@ -1,0 +1,375 @@
+package com.sellerops.review.triage.eval;
+
+import com.sellerops.itemanalysis.eval.EvalMetrics;
+import com.sellerops.review.triage.ReviewTriageRules;
+import com.sellerops.review.triage.ReviewTriageTier;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+
+/**
+ * The arithmetic of a calibration run, separated from the harness that feeds it for the same reason
+ * {@link EvalMetrics} is: this decides what the numbers say, so it has to be verifiable without a
+ * database, a corpus, or a labeling session.
+ *
+ * <p><b>It never sees review text.</b> A {@link Row} carries a stratum, a split, a rating, two tiers
+ * and a reason code — everything needed to compute a metric and nothing that could be printed by
+ * accident.
+ *
+ * <p>Two readings, as RUBRIC v2 §4.4 requires. The <b>gate</b> reading is unweighted over the
+ * labeled set and is what {@code review-eval/naver/v1} §5 gates on. The <b>population</b> reading
+ * reweights each row by its stratum's inverse inclusion probability and answers "how many of the
+ * whole corpus" — reported separately, always with its standard error, because one flipped label in
+ * a thinly sampled stratum moves it by dozens of reviews.
+ */
+public final class TriageEvalReport {
+
+    /**
+     * One labeled review, already reduced to numbers.
+     *
+     * @param human the tier a person chose, or {@code null} for {@code UNCERTAIN} — excluded from
+     *              every metric (RUBRIC v1 §4) and reported separately
+     */
+    public record Row(String stratum, String split, Integer rating, ReviewTriageTier rule,
+                      ReviewTriageTier human, String reasonCode) {
+    }
+
+    /** Per-stratum frame size and how many rows the pre-committed allocation draws from it. */
+    public record Frame(Map<String, Integer> inFrame, Map<String, Integer> drawn) {
+
+        /** Inverse inclusion probability. A row in a censused stratum stands for itself alone. */
+        public double weight(String stratum) {
+            int n = drawn.getOrDefault(stratum, 0);
+            return n == 0 ? 0.0 : (double) inFrame.getOrDefault(stratum, 0) / n;
+        }
+    }
+
+    /** Estimated corpus totals, with the half-width of a 95% interval. */
+    public record Population(double flagged, double flaggedHalfWidth, double needsAttention,
+                             double needsAttentionHalfWidth, double missed, double unestimated) {
+    }
+
+    private static final List<ReviewTriageTier> TIERS =
+            List.of(ReviewTriageTier.NEEDS_ATTENTION, ReviewTriageTier.WATCH, ReviewTriageTier.FYI);
+
+    private TriageEvalReport() {
+    }
+
+    /** Human tier (row) × rule tier (column), by {@link ReviewTriageRules#rank}. */
+    public static int[][] confusion(List<Row> rows) {
+        int[][] matrix = new int[3][3];
+        for (Row row : rows) {
+            if (row.human() == null) {
+                continue;
+            }
+            matrix[ReviewTriageRules.rank(row.human())][ReviewTriageRules.rank(row.rule())]++;
+        }
+        return matrix;
+    }
+
+    public static int uncertain(List<Row> rows) {
+        return (int) rows.stream().filter(r -> r.human() == null).count();
+    }
+
+    /**
+     * The v1 gate counts, over the {@code NEEDS_LOOK} partition v1 defined.
+     *
+     * <p>{@code NEEDS_ATTENTION} is v1's {@code NEEDS_LOOK}; {@code WATCH} and {@code FYI} are both
+     * {@code NO_ACTION} (RUBRIC v2 §2). A {@code WATCH}/{@code FYI} confusion is a product-quality
+     * finding and must not move a review across this line.
+     */
+    public static EvalMetrics.Counts gateCounts(List<Row> rows) {
+        int tp = 0;
+        int fp = 0;
+        int fn = 0;
+        int tn = 0;
+        int highRatingFp = 0;
+        int highRatingNoAction = 0;
+        for (Row row : rows) {
+            if (row.human() == null) {
+                continue;
+            }
+            boolean needsLook = row.human() == ReviewTriageTier.NEEDS_ATTENTION;
+            boolean flagged = row.rule() == ReviewTriageTier.NEEDS_ATTENTION;
+            if (needsLook && flagged) {
+                tp++;
+            } else if (needsLook) {
+                fn++;
+            } else if (flagged) {
+                fp++;
+            } else {
+                tn++;
+            }
+            if (!needsLook && row.rating() != null && row.rating() >= 4) {
+                highRatingNoAction++;
+                if (flagged) {
+                    highRatingFp++;
+                }
+            }
+        }
+        return new EvalMetrics.Counts(tp, fp, fn, tn, uncertain(rows), highRatingFp, highRatingNoAction);
+    }
+
+    /** Precision, recall and the Wilson lower bound of precision, for one tier against itself. */
+    public record TierMetric(ReviewTriageTier tier, int predicted, int actual, int correct,
+                             double precision, double precisionLowerBound, double recall) {
+    }
+
+    public static List<TierMetric> perTier(int[][] matrix) {
+        List<TierMetric> out = new ArrayList<>();
+        for (ReviewTriageTier tier : TIERS) {
+            int i = ReviewTriageRules.rank(tier);
+            int correct = matrix[i][i];
+            int predicted = 0;
+            int actual = 0;
+            for (int k = 0; k < 3; k++) {
+                predicted += matrix[k][i];
+                actual += matrix[i][k];
+            }
+            out.add(new TierMetric(tier, predicted, actual, correct,
+                    predicted == 0 ? 0.0 : (double) correct / predicted,
+                    EvalMetrics.wilsonLowerBound(correct, predicted),
+                    actual == 0 ? 0.0 : (double) correct / actual));
+        }
+        return out;
+    }
+
+    /**
+     * What the rule missed, named rather than counted: reviews a human called
+     * {@code NEEDS_ATTENTION} that the rule did not, grouped by the reason the human gave.
+     *
+     * <p>This is the false-negative taxonomy RUBRIC v2 §6.2 reads on {@code DEV}. A single recall
+     * number says a rule is incomplete; this says what it is blind to, which is the only thing that
+     * can license a change.
+     */
+    public static Map<String, Integer> missedByReason(List<Row> rows) {
+        Map<String, Integer> counts = new TreeMap<>();
+        for (Row row : rows) {
+            if (row.human() == ReviewTriageTier.NEEDS_ATTENTION
+                    && row.rule() != ReviewTriageTier.NEEDS_ATTENTION) {
+                counts.merge(row.reasonCode() == null ? "(none)" : row.reasonCode(), 1, Integer::sum);
+            }
+        }
+        return sortedByCountDesc(counts);
+    }
+
+    /**
+     * The mirror of {@link #missedByReason}: reviews the candidate called {@code NEEDS_ATTENTION}
+     * that a human did not, grouped by the reason the human gave for the tier they chose.
+     *
+     * <p>Added 2026-08-17, under RUBRIC v2 §8.12. Candidate B was rejected on <b>precision</b> and
+     * the harness that rejected it reported its false positives as a count — three, on every pass,
+     * with nothing said about what they were. A false-negative taxonomy and no false-positive one
+     * measures the bar that was passing and not the bar that failed.
+     */
+    public static Map<String, Integer> falsePositivesByReason(List<Row> rows) {
+        Map<String, Integer> counts = new TreeMap<>();
+        for (Row row : rows) {
+            if (row.human() != null && row.human() != ReviewTriageTier.NEEDS_ATTENTION
+                    && row.rule() == ReviewTriageTier.NEEDS_ATTENTION) {
+                counts.merge(row.reasonCode() == null ? "(none)" : row.reasonCode(), 1, Integer::sum);
+            }
+        }
+        return sortedByCountDesc(counts);
+    }
+
+    /** False positives by rating band — which one is the 4–5★ harm `v1` §5 bars separately. */
+    public static Map<String, Integer> falsePositivesByRating(List<Row> rows) {
+        Map<String, Integer> counts = new TreeMap<>();
+        for (Row row : rows) {
+            if (row.human() != null && row.human() != ReviewTriageTier.NEEDS_ATTENTION
+                    && row.rule() == ReviewTriageTier.NEEDS_ATTENTION) {
+                counts.merge(row.rating() == null ? "none" : row.rating() + "★", 1, Integer::sum);
+            }
+        }
+        return counts;
+    }
+
+    /**
+     * How much evidence a precision bar actually has at this sample size.
+     *
+     * <p>RUBRIC v2 §13.1: candidate B's holdout reading had 25 predicted positives, at which a
+     * Wilson 95% lower bound clears 0.80 only at 24 correct — the bar tolerated exactly one false
+     * positive, and the candidate's own point estimate of 0.880 would have cleared it at 100. A
+     * verdict printed without this is a verdict that cannot be told apart from an underpowered one.
+     *
+     * <p><b>Descriptive.</b> It never moves the bar and is never a reason a failure does not count.
+     *
+     * @param predictedPositives  n — the denominator of precision
+     * @param maxFalsePositives   the most false positives the 0.80 bar tolerates at that n, or -1 if
+     *                            no count at this n can clear it
+     * @param nForObservedToPass  the smallest n at which the observed precision would clear 0.80
+     */
+    public record PrecisionPower(int predictedPositives, int maxFalsePositives,
+                                 int nForObservedToPass) {
+    }
+
+    public static PrecisionPower precisionPower(EvalMetrics.Counts counts, double bar) {
+        int n = counts.truePositives() + counts.falsePositives();
+        int maxFp = -1;
+        for (int fp = 0; fp <= n; fp++) {
+            if (EvalMetrics.wilsonLowerBound(n - fp, n) >= bar) {
+                maxFp = fp;
+            }
+        }
+        int needed = -1;
+        if (n > 0) {
+            double observed = (double) counts.truePositives() / n;
+            for (int m = n; m <= 20000; m++) {
+                if (EvalMetrics.wilsonLowerBound((int) Math.round(observed * m), m) >= bar) {
+                    needed = m;
+                    break;
+                }
+            }
+        }
+        return new PrecisionPower(n, maxFp, needed);
+    }
+
+    /** The same misses by rating band, which is what says whether the blindness is the 4–5★ one. */
+    public static Map<String, Integer> missedByRating(List<Row> rows) {
+        Map<String, Integer> counts = new TreeMap<>();
+        for (Row row : rows) {
+            if (row.human() == ReviewTriageTier.NEEDS_ATTENTION
+                    && row.rule() != ReviewTriageTier.NEEDS_ATTENTION) {
+                counts.merge(row.rating() == null ? "none" : row.rating() + "★", 1, Integer::sum);
+            }
+        }
+        return counts;
+    }
+
+    private static Map<String, Integer> sortedByCountDesc(Map<String, Integer> counts) {
+        Map<String, Integer> out = new LinkedHashMap<>();
+        counts.entrySet().stream()
+                .sorted(Comparator.<Map.Entry<String, Integer>>comparingInt(Map.Entry::getValue).reversed()
+                        .thenComparing(Map.Entry::getKey))
+                .forEach(e -> out.put(e.getKey(), e.getValue()));
+        return out;
+    }
+
+    /**
+     * Horvitz–Thompson totals over the whole frame, with a stratified 95% half-width.
+     *
+     * <p>The finite-population correction matters here rather than being a formality: six of the
+     * nine strata are censused, so they contribute exactly zero variance and all of the uncertainty
+     * comes from the three sampled 4–5★ strata. That is the honest shape of this estimate and the
+     * reason it is reported beside the gate reading rather than instead of it.
+     *
+     * <p>{@code UNCERTAIN} rows are not redistributed over the rest. Their weight is returned as
+     * {@code unestimated} — a named hole is a finding; silently inflating the labeled rows to cover
+     * it is not.
+     */
+    public static Population population(List<Row> rows, Frame frame) {
+        Map<String, List<Row>> byStratum = new LinkedHashMap<>();
+        for (Row row : rows) {
+            byStratum.computeIfAbsent(row.stratum(), k -> new ArrayList<>()).add(row);
+        }
+        double flagged = 0;
+        double needsAttention = 0;
+        double missed = 0;
+        double unestimated = 0;
+        double flaggedVar = 0;
+        double needsVar = 0;
+        for (Map.Entry<String, List<Row>> entry : byStratum.entrySet()) {
+            String stratum = entry.getKey();
+            List<Row> stratumRows = entry.getValue();
+            double weight = frame.weight(stratum);
+            double bigN = frame.inFrame().getOrDefault(stratum, 0);
+            int usable = 0;
+            int flaggedHere = 0;
+            int needsHere = 0;
+            for (Row row : stratumRows) {
+                if (row.human() == null) {
+                    unestimated += weight;
+                    continue;
+                }
+                usable++;
+                if (row.rule() == ReviewTriageTier.NEEDS_ATTENTION) {
+                    flaggedHere++;
+                }
+                if (row.human() == ReviewTriageTier.NEEDS_ATTENTION) {
+                    needsHere++;
+                    if (row.rule() != ReviewTriageTier.NEEDS_ATTENTION) {
+                        missed += weight;
+                    }
+                }
+            }
+            flagged += flaggedHere * weight;
+            needsAttention += needsHere * weight;
+            flaggedVar += stratumVariance(bigN, usable, flaggedHere);
+            needsVar += stratumVariance(bigN, usable, needsHere);
+        }
+        return new Population(flagged, 1.96 * Math.sqrt(flaggedVar), needsAttention,
+                1.96 * Math.sqrt(needsVar), missed, unestimated);
+    }
+
+    /**
+     * {@code N² (1 − n/N) p(1−p) / (n − 1)}; zero for a census and for a stratum of one.
+     *
+     * <p>{@code n} here is the number of rows actually SCORED, which is the drawn count minus the
+     * {@code UNCERTAIN} rows — while {@link Frame#weight} divides by the drawn count. The two differ
+     * only when a stratum contains an {@code UNCERTAIN} row, and the difference errs toward a wider
+     * interval. That is the right direction: an excluded row is genuinely unobserved, and the
+     * alternative — pretending the stratum was sampled as densely as it was drawn — would report
+     * more confidence than the session earned.
+     */
+    private static double stratumVariance(double bigN, int n, int successes) {
+        if (n < 2 || bigN <= 0 || n >= bigN) {
+            return 0.0;
+        }
+        double p = (double) successes / n;
+        return bigN * bigN * (1 - n / bigN) * p * (1 - p) / (n - 1);
+    }
+
+    public static List<Row> only(List<Row> rows, String split) {
+        return rows.stream().filter(r -> r.split().equals(split)).toList();
+    }
+
+    /** {@code kappa} is {@code NaN} when expected agreement is total — see {@link #cohenKappa}. */
+    public record Kappa(double kappa, double observed, double expected, int n) {
+
+        public boolean defined() {
+            return !Double.isNaN(kappa);
+        }
+    }
+
+    /**
+     * Cohen's κ over two aligned label sequences.
+     *
+     * <p>Returns {@code NaN} rather than 1.0 when {@code pe == 1} — two raters who agree on
+     * everything because everything is one class. That is expected agreement, not agreement, and
+     * reporting 1.0 there would be the most flattering possible lie on exactly the corpus shape this
+     * one has: 28 of the 37 pilot rows are a single tier.
+     *
+     * <p>Mirrors {@code tools/review-triage-calibration/kappa.mjs}, which computes the human-human
+     * number. Two implementations, one definition — a divergence would make the human bar and the
+     * model bar incomparable while both looked fine.
+     */
+    public static Kappa cohenKappa(List<String> a, List<String> b) {
+        if (a.size() != b.size()) {
+            throw new IllegalArgumentException("κ needs aligned sequences");
+        }
+        int n = a.size();
+        if (n == 0) {
+            return new Kappa(Double.NaN, 0, 0, 0);
+        }
+        int agree = 0;
+        for (int i = 0; i < n; i++) {
+            if (a.get(i).equals(b.get(i))) {
+                agree++;
+            }
+        }
+        double po = (double) agree / n;
+        // Summed over the classes THIS rater used. A class only the other rater used contributes
+        // p_a(c) * p_b(c) = 0, so the union and this set give the same pe.
+        double pe = 0;
+        for (String c : Set.copyOf(a)) {
+            pe += (a.stream().filter(c::equals).count() / (double) n)
+                    * (b.stream().filter(c::equals).count() / (double) n);
+        }
+        return new Kappa(pe >= 1 ? Double.NaN : (po - pe) / (1 - pe), po, pe, n);
+    }
+}

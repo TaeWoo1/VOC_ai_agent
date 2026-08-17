@@ -10,6 +10,10 @@ import type {
   ChannelCapabilityOverview,
   ChannelResponse,
   ChannelReviewDetailView,
+  TriageActionKind,
+  TriageBehaviorEvent,
+  TriageCorrectionRequest,
+  TriageCorrectionView,
   ChannelReviewLocateRun,
   ChannelReviewPageView,
   ReviewTriageTier,
@@ -1259,5 +1263,42 @@ export const api = {
       {},
     );
     return data;
+  },
+
+  // ── Review triage feedback (RUBRIC v2 §13.7) ────────────────────────────────────────────────
+  //
+  // Records; never changes a tier, hides a row, marks anything done, or touches a marketplace.
+
+  /** The seller's answer — 확인 필요 or 필요 없음. Strong evidence; supersedes their previous answer. */
+  async correctChannelReviewTriage(
+    accountId: string,
+    reviewId: string,
+    request: TriageCorrectionRequest,
+  ): Promise<TriageCorrectionView> {
+    const { data } = await http.post<TriageCorrectionView>(
+      `/api/seller-accounts/${encodeURIComponent(accountId)}/channel-reviews/${encodeURIComponent(reviewId)}/triage-feedback/correction`,
+      request,
+    );
+    return data;
+  },
+
+  /** The seller acted on the review. Append-only. */
+  async recordChannelReviewTriageAction(accountId: string, reviewId: string, kind: TriageActionKind): Promise<void> {
+    await http.post(
+      `/api/seller-accounts/${encodeURIComponent(accountId)}/channel-reviews/${encodeURIComponent(reviewId)}/triage-feedback/actions`,
+      { kind },
+    );
+  },
+
+  /**
+   * Silver, batched. Best-effort: a failure here is swallowed by the caller, because a trace of
+   * navigation is not worth an error the seller has to read.
+   */
+  async recordChannelReviewTriageBehavior(accountId: string, events: TriageBehaviorEvent[]): Promise<void> {
+    if (events.length === 0) return;
+    await http.post(
+      `/api/seller-accounts/${encodeURIComponent(accountId)}/channel-reviews/triage-feedback/behavior`,
+      { events },
+    );
   },
 };
