@@ -622,6 +622,61 @@ The gate is computed on the **final decision**, not the raw model output. What t
 done without the guard is reported separately, because "did the prompt fix the behaviour, or is the
 guard carrying it?" is a real question about the candidate.
 
+### 8.10 The final `HOLDOUT` evaluation of a frozen candidate
+
+**Product-owner decision, 2026-08-17, written and committed BEFORE any holdout row was read.** That
+ordering is the entire value of this section: a procedure fixed after seeing the number is not a
+procedure, and §6.2 gives the holdout exactly one reading to spend.
+
+**Procedure**
+
+1. The candidate is **frozen** — model snapshot, prompt, schema, tuning and guard version all fixed
+   and named. Nothing about it may change between this section and the reading.
+2. **3 independent passes** over the **113 `HOLDOUT` rows**, same candidate, same rows.
+3. Each pass is scored under **both** readings: `PRIMARY` (all rows) and `SENSITIVITY` (§11.1's
+   synthetic rows excluded).
+4. The final gate is the **worst observed value across 3 passes × both readings** — six readings per
+   bar.
+
+**The gate**
+
+| bar | statistic | limit |
+|---|---|---|
+| recall | **minimum** observed | ≥ 0.30 |
+| precision, Wilson 95% lower bound | **minimum** observed | ≥ 0.80 |
+| 4–5★ false-positive rate | **maximum** observed | ≤ 0.05 |
+
+**Reported beside it, always**
+
+- every classification failure, by kind and count, on every pass;
+- the **raw model demotion count** — how many baseline `NEEDS_ATTENTION` rows the model itself would
+  have lowered, separately from the guarded figure, because "did the prompt hold, or is the guard
+  carrying it?" is a different question from whether the gate passed;
+- the §11.1 synthetic sensitivity reading and the §11.2 media ceiling.
+
+The **production final tier applies §8.9's additive guard**, and the gate is computed on that tier —
+the one a seller would see — never on the raw model output.
+
+#### 8.10.1 One reading, and what happens after it
+
+**This is the only final `HOLDOUT` evaluation a frozen candidate gets.**
+
+**If any bar fails**, on any of the six readings:
+
+- the candidate is **REJECTED**;
+- the result is **recorded exactly as measured**, including the passes that would have cleared it;
+- the prompt, model, tuning or guard may **not** be adjusted and re-evaluated against this holdout.
+  That is the move this whole contract exists to prevent: a holdout read twice is a development set
+  with a ceremony attached;
+- a subsequent candidate's final verification requires a **new, untouched holdout** — which means a
+  new domain string, a fresh split, and a re-labeled sample (§6.2), not a second look at this one.
+
+**If every bar passes**, the result is recorded as `PASS` and **this holdout is never used again**.
+Not for candidate C, not for a re-check, not for a "quick sanity run" after an unrelated change.
+
+Passing here is not permission to ship. It clears `v1` §5's measurement gate; surfacing a classifier
+to an operator is a separate decision with its own scope.
+
 ## 9. What this gold set is for, and what it is not
 
 **Product-owner decision, 2026-08-16.** Recorded here because it bounds the artifact: without it, the
