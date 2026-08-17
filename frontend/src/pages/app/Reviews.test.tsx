@@ -121,7 +121,7 @@ describe("리뷰 — the workflow surface", () => {
     expect(getChannelReviewsStrict).toHaveBeenCalledWith("acc-nv", expect.anything());
   });
 
-  it("switches channel by account and lets the record speak the channel's own word", async () => {
+  it("switches channel by account; the h1 stays 리뷰 and the record heading names the channel", async () => {
     renderAt("/reviews/acc-cp");
     const nav = await screen.findByRole("navigation", { name: "리뷰 채널" });
     expect(within(nav).getAllByRole("link").map((l) => l.textContent)).toEqual([
@@ -129,16 +129,35 @@ describe("리뷰 — the workflow surface", () => {
       "쿠팡",
     ]);
     expect(within(nav).getByRole("link", { current: "page" })).toHaveTextContent("쿠팡");
-    expect(await screen.findByRole("heading", { level: 1, name: "상품평" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "리뷰" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 2, name: "쿠팡" })).toBeInTheDocument();
+    // The workflow sentence: order first, and what AI 확인 필요 is.
+    expect(screen.getByText(/확인 필요 → 지켜보기 → 참고/)).toBeInTheDocument();
+  });
+
+  it("keeps the tier filter and drops the review selection when switching channel", async () => {
+    renderAt("/reviews/acc-cp?tier=NEEDS_ATTENTION&review=r9");
+    const nav = await screen.findByRole("navigation", { name: "리뷰 채널" });
+    expect(within(nav).getByRole("link", { name: "네이버 스마트스토어" })).toHaveAttribute(
+      "href",
+      "/reviews/acc-nv?tier=NEEDS_ATTENTION",
+    );
   });
 
   it("names no channel that keeps no record, and no channel outside the product set", async () => {
     getChannelsStrict.mockResolvedValue([...CHANNELS, channel("gm", "GMARKET", "G마켓")]);
-    getSellerAccountsStrict.mockResolvedValue([account("acc-gm", "gm", "G마켓"), account("acc-cp", "cp", "쿠팡")]);
-    renderAt("/reviews");
+    getSellerAccountsStrict.mockResolvedValue([account("acc-gm", "gm", "G마켓"), account("acc-cp", "cp", "쿠팡"), account("acc-nv", "nv", "네이버 스마트스토어")]);
+    renderAt("/reviews/acc-cp");
     const nav = await screen.findByRole("navigation", { name: "리뷰 채널" });
     expect(within(nav).queryByText("G마켓")).toBeNull();
     expect(within(nav).getByRole("link", { current: "page" })).toHaveTextContent("쿠팡");
+  });
+
+  it("shows no switcher for a single account — the record heading already names it", async () => {
+    getSellerAccountsStrict.mockResolvedValue([account("acc-nv", "nv", "네이버 스마트스토어")]);
+    renderAt("/reviews");
+    expect(await screen.findByRole("heading", { level: 2, name: "네이버 스마트스토어" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "리뷰 채널" })).toBeNull();
   });
 
   it("points at 채널 연결 when no review-capable channel is connected", async () => {
@@ -159,7 +178,7 @@ describe("리뷰 — the workflow surface", () => {
   it("has no axe violations", async () => {
     const { container } = renderAt("/reviews/acc-nv");
     await screen.findByRole("navigation", { name: "리뷰 채널" });
-    await screen.findByRole("heading", { level: 1, name: "리뷰" });
+    await screen.findByRole("heading", { level: 2, name: "네이버 스마트스토어" });
     await expectNoAxeViolations(container);
   });
 });

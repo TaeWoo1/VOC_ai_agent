@@ -9,20 +9,9 @@ import { isFixturePreviewEnabled } from "../../lib/actionWindow/devMode";
 import { api } from "../../lib/apiClient";
 import { buildAnalysisIndex } from "../../lib/inboxView";
 import { buildIssueAttention, summarizeConnections } from "../../lib/homeSignals";
-import { reviewAccounts } from "../../lib/reviewAccounts";
-import {
-  buildConnectionToday,
-  buildInquiryToday,
-  buildReviewToday,
-  type ReviewSource,
-} from "../../lib/todayInbox";
-import type {
-  ChannelResponse,
-  ConnectorAlertView,
-  FeedItem,
-  ItemAnalysis,
-  SellerAccountResponse,
-} from "../../lib/types";
+import { useReviewAttention } from "../../hooks/useReviewAttention";
+import { buildConnectionToday, buildInquiryToday, buildReviewToday } from "../../lib/todayInbox";
+import type { ChannelResponse, ConnectorAlertView, FeedItem, ItemAnalysis } from "../../lib/types";
 
 /**
  * 홈 — Today Inbox: "오늘 내가 확인하거나 조치할 일은 무엇인가?"
@@ -41,11 +30,10 @@ export function HomeV2() {
   const [issuesLoaded, setIssuesLoaded] = useState(false);
   const [channels, setChannels] = useState<ChannelResponse[] | null>(null);
   const [channelsLoaded, setChannelsLoaded] = useState(false);
-  const [accounts, setAccounts] = useState<SellerAccountResponse[] | null>(null);
-  const [accountsLoaded, setAccountsLoaded] = useState(false);
   const [alerts, setAlerts] = useState<ConnectorAlertView[] | null>(null);
   const [alertsLoaded, setAlertsLoaded] = useState(false);
-  const [reviewSources, setReviewSources] = useState<ReviewSource[] | null | undefined>(undefined);
+  // 리뷰: the shared count source (also what Reports reads) — per account, attention-filtered.
+  const reviewSources = useReviewAttention();
 
   useEffect(() => {
     let active = true;
@@ -76,12 +64,6 @@ export function HomeV2() {
       .finally(() => active && setChannelsLoaded(true));
 
     void api
-      .getSellerAccountsStrict()
-      .then((list) => active && setAccounts(list))
-      .catch(() => active && setAccounts(null))
-      .finally(() => active && setAccountsLoaded(true));
-
-    void api
       .getConnectorAlertsStrict()
       .then((list) => active && setAlerts(list))
       .catch(() => active && setAlerts(null))
@@ -91,45 +73,6 @@ export function HomeV2() {
       active = false;
     };
   }, []);
-
-  // 리뷰: one read per review-capable account, under the same filter the destination opens with.
-  // `size` is only the preview depth — `total` is the count. Fail-soft per account.
-  const targets = useMemo(
-    () => (accountsLoaded && channelsLoaded ? reviewAccounts(accounts, channels) : null),
-    [accounts, channels, accountsLoaded, channelsLoaded],
-  );
-  useEffect(() => {
-    if (targets === null) {
-      return;
-    }
-    if (accounts === null || channels === null) {
-      setReviewSources(null);
-      return;
-    }
-    let cancelled = false;
-    void Promise.allSettled(
-      targets.map((target) =>
-        api.getChannelReviewsStrict(target.account.id, {
-          tier: "NEEDS_ATTENTION",
-          sort: "attention",
-          size: 3,
-        }),
-      ),
-    ).then((results) => {
-      if (cancelled) {
-        return;
-      }
-      setReviewSources(
-        results.map((result, i) => ({
-          account: targets[i],
-          page: result.status === "fulfilled" ? result.value : null,
-        })),
-      );
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [targets, accounts, channels]);
 
   // The operations store seeds a demo run even in production, so the in-progress zone shows one
   // ONLY when a live agent is driving it or the dev fixture preview is on.

@@ -9,8 +9,9 @@
 // true.
 
 import type { FeedItem, ItemAnalysis, ReviewIssueView } from "./types";
-import { needsCheck, needsReply } from "./inboxWorkspace";
+import { needsReply } from "./inboxWorkspace";
 import { changedIssues, improvedIssues } from "./reviewIssuesView";
+import { buildReviewToday, type ReviewSource, type TodayBreakdown } from "./todayInbox";
 
 /** The recommended-action vocabulary the rule-based analyzer emits that this report reports on. */
 export const FAQ_CANDIDATE = "FAQ 후보";
@@ -28,7 +29,17 @@ export interface WeeklyReport {
   issuesNeedingReview: ReportSection<ReviewIssueView[]>;
   issuesImproved: ReportSection<ReviewIssueView[]>;
   unansweredInquiries: ReportSection<number>;
+  /**
+   * 확인이 필요한 리뷰 — the canonical definition (triage tier NEEDS_ATTENTION per account, the same
+   * number the 리뷰 screen shows under that filter; `todayInbox.buildReviewToday`). Not the feed's
+   * low-rating rule: the report used to count 2-star-or-negative feed rows here, which put a
+   * different number on this page than on 홈 and 리뷰 for the same words.
+   */
   reviewsToCheck: ReportSection<number>;
+  /** Per-account shares of `reviewsToCheck`, each with the destination that shows exactly that count. */
+  reviewsToCheckShares: TodayBreakdown[];
+  /** Where the 확인이 필요한 리뷰 figure may link as a whole (one account), or null. */
+  reviewsToCheckTo: string | null;
   faqCandidates: ReportSection<number>;
   detailPageCandidates: ReportSection<number>;
   /** Sentences for the "대표 보고용" block. Only lines whose source loaded. */
@@ -50,10 +61,15 @@ export function buildWeeklyReport(
   issues: readonly ReviewIssueView[] | null,
   inbox: readonly FeedItem[] | null,
   analyses: readonly ItemAnalysis[],
+  reviewSources: readonly ReviewSource[] | null,
   topLimit = 5,
 ): WeeklyReport {
   const issuesAvailable = issues !== null;
   const inboxAvailable = inbox !== null;
+  const reviews = buildReviewToday(reviewSources);
+  // "Nothing connected" is a measured zero for a report; only a failed read is unavailable.
+  const reviewsAvailable = reviews.signal.kind !== "UNAVAILABLE";
+  const toCheck = reviews.signal.kind === "READY" ? reviews.signal.count : 0;
 
   const needsReviewList = issuesAvailable
     ? changedIssues([...(issues as ReviewIssueView[])]).slice(0, topLimit)
@@ -62,7 +78,6 @@ export function buildWeeklyReport(
     ? improvedIssues([...(issues as ReviewIssueView[])]).slice(0, topLimit)
     : [];
   const unanswered = inboxAvailable ? (inbox as FeedItem[]).filter(needsReply).length : 0;
-  const toCheck = inboxAvailable ? (inbox as FeedItem[]).filter(needsCheck).length : 0;
   const faq = inboxAvailable ? countAction(analyses, FAQ_CANDIDATE) : 0;
   const detailPage = inboxAvailable ? countAction(analyses, DETAIL_PAGE_CANDIDATE) : 0;
 
@@ -78,7 +93,15 @@ export function buildWeeklyReport(
     }
   }
   if (inboxAvailable) {
-    summaryLines.push(`답변이 필요한 문의 ${unanswered}건, 확인이 필요한 리뷰 ${toCheck}건입니다.`);
+    summaryLines.push(
+      reviewsAvailable
+        ? `답변이 필요한 문의 ${unanswered}건, 확인이 필요한 리뷰 ${toCheck}건입니다.`
+        : `답변이 필요한 문의 ${unanswered}건입니다.`,
+    );
+  } else if (reviewsAvailable) {
+    summaryLines.push(`확인이 필요한 리뷰 ${toCheck}건입니다.`);
+  }
+  if (inboxAvailable) {
     if (faq > 0 || detailPage > 0) {
       summaryLines.push(
         `자주 나오는 질문 ${faq}건, 상세페이지에서 다룰 만한 내용 ${detailPage}건이 후보로 잡혔습니다.`,
@@ -87,11 +110,14 @@ export function buildWeeklyReport(
   }
 
   return {
-    hasAnything: issuesAvailable || inboxAvailable,
+    hasAnything: issuesAvailable || inboxAvailable || reviewsAvailable,
     issuesNeedingReview: { available: issuesAvailable, value: needsReviewList },
     issuesImproved: { available: issuesAvailable, value: improvedList },
     unansweredInquiries: { available: inboxAvailable, value: unanswered },
-    reviewsToCheck: { available: inboxAvailable, value: toCheck },
+    reviewsToCheck: { available: reviewsAvailable, value: toCheck },
+    reviewsToCheckShares: reviews.breakdown,
+    // Unavailable still offers the way in; several accounts offer their shares instead.
+    reviewsToCheckTo: reviews.to ?? (reviewsAvailable ? null : "/reviews"),
     faqCandidates: { available: inboxAvailable, value: faq },
     detailPageCandidates: { available: inboxAvailable, value: detailPage },
     summaryLines,

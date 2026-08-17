@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { PageHead } from "../../components/ui/PageHead";
 import { channelDataTypeLabel } from "../../lib/channelVocabulary";
 import { Panel } from "../../components/ui/Panel";
 import { Empty } from "../../components/ui/Empty";
@@ -98,17 +97,59 @@ function parseTierParam(value: string | null): ReviewTriageTier | null {
   return value !== null && (TRIAGE_TIERS as string[]).includes(value) ? (value as ReviewTriageTier) : null;
 }
 
-export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocateBinding } = {}) {
+export function ChannelReviews({
+  locateBinding,
+  channelName,
+}: {
+  locateBinding?: ReviewLocateBinding;
+  /** What the 리뷰 surface calls this account (channel name, alias when several). Shown as the record's heading. */
+  channelName?: string;
+} = {}) {
   const { accountId = "" } = useParams();
   /**
-   * Deep-link seams the home uses (`lib/todayInbox.ts`): `?tier=NEEDS_ATTENTION` opens the list
-   * under that filter — the count on the home tile IS this page's `total` under the same filter —
-   * and `?review=<id>` opens one review's detail. Read once on mount; the page's own controls then
-   * own the state, as before. An unknown tier value is ignored rather than sent to the server.
+   * `?tier=` and `?review=` ARE the filter and the selection — the URL is the state, both ways
+   * (product assembly A3). The home and the report link here with `?tier=NEEDS_ATTENTION`, whose
+   * `total` is the count they show; a row press writes `?review=<id>`; a tier press rewrites `tier`
+   * and drops `review`. `replace`, so filtering does not pile up history. An unknown tier value is
+   * ignored (and scrubbed) rather than sent to the server. Sort and page stay local: they are not
+   * deep-link seams, and a stale `?page=` is exactly the kind of param this is meant to prevent.
    */
-  const [searchParams] = useSearchParams();
-  const initialTier = parseTierParam(searchParams.get("tier"));
-  const initialReview = searchParams.get("review");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawTier = searchParams.get("tier");
+  const tier = parseTierParam(rawTier);
+  const selectedId = searchParams.get("review");
+  const setTier = useCallback(
+    (next: ReviewTriageTier | null) => {
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          if (next) params.set("tier", next);
+          else params.delete("tier");
+          params.delete("review");
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+  const setSelectedId = useCallback(
+    (next: string | null) => {
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          if (next) params.set("review", next);
+          else params.delete("review");
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+  useEffect(() => {
+    if (rawTier !== null && tier === null) setTier(null);
+  }, [rawTier, tier, setTier]);
   /**
    * `[쿠팡에서 보기]`. Inert until pressed: no agent socket is opened for a seller who only reads the list.
    * The optional prop is the test seam — a rendered page never has to reach a bridge to be exercised.
@@ -117,7 +158,6 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
   const locate = locateBinding ?? attached;
 
   const [sort, setSort] = useState<"attention" | "newest" | "lowest">("attention");
-  const [tier, setTier] = useState<ReviewTriageTier | null>(initialTier);
   const [pageIndex, setPageIndex] = useState(0);
   const [page, setPage] = useState<ChannelReviewPageView | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -131,7 +171,6 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
   const pilotOn = (page?.aiPilotEnabled ?? false) && (capability?.aiTriage ?? false);
   const word = reviewWord(capability?.channelCode);
 
-  const [selectedId, setSelectedId] = useState<string | null>(initialReview);
   const [detail, setDetail] = useState<ChannelReviewDetailView | null>(null);
   const [detailError, setDetailError] = useState(false);
 
@@ -240,21 +279,24 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
 
   return (
     <div className="space-y-6">
-      <PageHead
-        title={word}
-        description={
-          capability && !capability.replySupported
-            ? `연결된 채널에서 수집한 구매자 ${word}입니다. 이 채널에서는 SellerOps가 답변을 작성하지 않습니다.`
-            : `연결된 채널에서 수집한 구매자 ${word}입니다. 이 화면에서는 답변을 작성하지 않습니다.`
-        }
-        meta={
-          page ? (
-            <>
+      {/*
+        The record's own heading — which channel, how big, how fresh. The screen's h1 ("리뷰") and the
+        workflow sentence live on the 리뷰 surface above; this row is what one account adds to it.
+      */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="break-keep text-lg font-semibold text-ink">{channelName ?? word}</h2>
+          <p className="mt-1 break-keep text-sm leading-relaxed text-muted">
+            {capability && !capability.replySupported
+              ? `이 채널에서는 SellerOps가 답변을 작성하지 않습니다. 확인할 ${josa(word, "을", "를")} 고르는 곳입니다.`
+              : `이 화면에서는 답변을 작성하지 않습니다. 확인할 ${josa(word, "을", "를")} 고르는 곳입니다.`}
+          </p>
+          {page ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
               {/*
                 The RECORD's size, not the filtered page's. `page.total` narrows with a tier filter
-                while `newCount` and the tier chips stay channel-wide by design, so rendering it here
-                put "총 1개" beside "새로 들어온 5개" — two numbers on one line claiming to be the same
-                total. Which slice is on screen is the range label's job, under the list.
+                while `newCount` and the tier chips stay channel-wide by design. Which slice is on
+                screen is the range label's job, under the list.
               */}
               <Chip>총 {recordTotal(page)}개</Chip>
               {page.newCount > 0 ? <Chip tone="accent">새로 들어온 {page.newCount}개</Chip> : null}
@@ -263,15 +305,13 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
               ) : (
                 <Chip>수집 기록 없음</Chip>
               )}
-            </>
-          ) : undefined
-        }
-        action={
-          <BtnLink to={`/connect/channels/${accountId}`} variant="outline" size="sm">
-            채널 설정
-          </BtnLink>
-        }
-      />
+            </div>
+          ) : null}
+        </div>
+        <BtnLink to={`/connect/channels/${accountId}`} variant="outline" size="sm">
+          채널 설정
+        </BtnLink>
+      </div>
 
       {page && page.lastImportAt && !page.lastImportComplete ? (
         <p className="rounded-xl border border-line bg-canvas px-4 py-3 text-sm leading-relaxed text-muted">
@@ -315,19 +355,12 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
         The tier filter is separate from the sort and survives a sort change — an operator who
         narrowed to 확인 필요 and then asked for 최신순 wants the newest of those.
       */}
+      {/*
+        The tier filter is separate from the sort and survives a sort change — an operator who
+        narrowed to 확인 필요 and then asked for 최신순 wants the newest of those. Order is the
+        workflow's: 확인 필요 → 지켜보기 → 참고, then 전체 — what to look at first comes first.
+      */}
       <div className="flex flex-wrap items-center gap-2" role="group" aria-label="분류 필터">
-        <Btn
-          variant={tier === null ? "solid" : "outline"}
-          size="sm"
-          aria-pressed={tier === null}
-          onClick={() => {
-            setTier(null);
-            setPageIndex(0);
-            setSelectedId(null);
-          }}
-        >
-          전체 {page ? recordTotal(page) : 0}
-        </Btn>
         {TRIAGE_TIERS.map((value) => (
           <Btn
             key={value}
@@ -337,12 +370,22 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
             onClick={() => {
               setTier(value);
               setPageIndex(0);
-              setSelectedId(null);
             }}
           >
             {TRIAGE_TIER_LABEL[value]} {page ? tierCount(page, value) : 0}
           </Btn>
         ))}
+        <Btn
+          variant={tier === null ? "solid" : "outline"}
+          size="sm"
+          aria-pressed={tier === null}
+          onClick={() => {
+            setTier(null);
+            setPageIndex(0);
+          }}
+        >
+          전체 {page ? recordTotal(page) : 0}
+        </Btn>
       </div>
 
       {loadError ? (

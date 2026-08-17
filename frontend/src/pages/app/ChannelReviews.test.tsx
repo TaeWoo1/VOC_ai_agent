@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { ChannelReviews, shownRangeLabel } from "./ChannelReviews";
 import { expectNoAxeViolations } from "../../test/axe";
 import type { ChannelReviewDetailView, ChannelReviewPageView } from "../../lib/types";
@@ -101,11 +101,25 @@ const DETAIL: ChannelReviewDetailView = {
   },
 };
 
+/** Reports the router's current location so a test can assert what the URL says. */
+function LocationProbe() {
+  const { pathname, search } = useLocation();
+  return <output data-testid="location">{`${pathname}${search}`}</output>;
+}
+
 function renderPage(path = "/reviews/acc-1") {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/reviews/:accountId" element={<ChannelReviews />} />
+        <Route
+          path="/reviews/:accountId"
+          element={
+            <>
+              <ChannelReviews />
+              <LocationProbe />
+            </>
+          }
+        />
       </Routes>
     </MemoryRouter>,
   );
@@ -124,10 +138,37 @@ describe("deep-link seams the home relies on", () => {
     expect(getChannelReviewsStrict).toHaveBeenCalledWith("acc-1", expect.objectContaining({ tier: "NEEDS_ATTENTION" }));
   });
 
-  it("ignores an unknown tier value rather than sending it to the server", async () => {
+  it("ignores an unknown tier value rather than sending it to the server, and scrubs it from the URL", async () => {
     renderPage("/reviews/acc-1?tier=WHATEVER");
     await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요");
     expect(getChannelReviewsStrict).toHaveBeenCalledWith("acc-1", expect.objectContaining({ tier: undefined }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/reviews/acc-1");
+    expect(screen.getByTestId("location").textContent).not.toContain("tier=");
+  });
+
+  it("the URL is the filter, both ways: a tier press writes ?tier and drops ?review; 전체 clears it", async () => {
+    renderPage("/reviews/acc-1?review=r1");
+    await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요");
+    await userEvent.click(screen.getByRole("button", { name: /^확인 필요 \d+$/ }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/reviews/acc-1?tier=NEEDS_ATTENTION");
+    expect(getChannelReviewsStrict).toHaveBeenLastCalledWith("acc-1", expect.objectContaining({ tier: "NEEDS_ATTENTION" }));
+    await userEvent.click(screen.getByRole("button", { name: /^전체 \d+$/ }));
+    expect(screen.getByTestId("location")).toHaveTextContent(/^\/reviews\/acc-1$/);
+  });
+
+  it("the URL is the selection, both ways: a row press writes ?review", async () => {
+    renderPage();
+    await userEvent.click((await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요")).closest("button")!);
+    expect(screen.getByTestId("location")).toHaveTextContent("/reviews/acc-1?review=r1");
+    expect(getChannelReviewStrict).toHaveBeenCalledWith("acc-1", "r1");
+  });
+
+  it("orders the filter as the workflow does — 확인 필요, 지켜보기, 참고, then 전체", async () => {
+    renderPage();
+    await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요");
+    const group = screen.getByRole("group", { name: "분류 필터" });
+    const labels = within(group).getAllByRole("button").map((b) => b.textContent?.replace(/\s*\d+$/, ""));
+    expect(labels).toEqual(["확인 필요", "지켜보기", "참고", "전체"]);
   });
 
   it("?review=<id> opens that review's detail without a press", async () => {

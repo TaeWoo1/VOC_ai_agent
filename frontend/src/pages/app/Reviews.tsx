@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, Navigate, useLocation, useParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
 import { Empty } from "../../components/ui/Empty";
 import { BtnLink } from "../../components/ui/Btn";
@@ -89,19 +89,25 @@ export function Reviews() {
     return <Navigate to={`${reviewRecordPath(targets[0].account.id)}${search}`} replace />;
   }
 
+  const selected = targets.find((t) => t.account.id === accountId) ?? null;
   return (
     <div className="space-y-5">
-      <ChannelSwitcher targets={targets} selectedAccountId={accountId} />
-      <ChannelReviews />
+      <PageHead title="리뷰" description={REVIEWS_DESCRIPTION} />
+      {/* One account: the record's own heading names it, so a one-chip switcher would only repeat it. */}
+      {targets.length > 1 ? <ChannelSwitcher targets={targets} selectedAccountId={accountId} /> : null}
+      <ChannelReviews channelName={selected?.label} />
     </div>
   );
 }
 
 /**
- * One chip per review-capable account. A single account still renders — the chip is then the
- * screen's statement of which channel it is showing, which the record page's own header (a count,
- * a last-import time) does not say.
+ * The workflow sentence: what this screen is for and in what order. 확인 필요 is the rules tier;
+ * AI 확인 필요 is the pilot's additive suggestion (rules own the tier — `docs/workstreams/review_ai_triage_demo.md`).
  */
+export const REVIEWS_DESCRIPTION =
+  "확인 필요 → 지켜보기 → 참고 순으로 봅니다. 확인 필요는 별점과 본문 유무로 정하고, AI 확인 필요는 AI가 더한 제안입니다.";
+
+/** One chip per review-capable account; rendered only when there are several. */
 function ChannelSwitcher({
   targets,
   selectedAccountId,
@@ -109,6 +115,12 @@ function ChannelSwitcher({
   targets: readonly ReviewAccount[];
   selectedAccountId: string;
 }) {
+  // Switching channel keeps the filter (`?tier=`) and drops the selection (`?review=` names a
+  // review of the account being left) — so no stale param crosses over.
+  const [searchParams] = useSearchParams();
+  const carried = new URLSearchParams(searchParams);
+  carried.delete("review");
+  const search = carried.toString() ? `?${carried.toString()}` : "";
   return (
     <nav aria-label="리뷰 채널" className="flex flex-wrap items-center gap-2">
       <span className="text-sm font-semibold text-muted">채널</span>
@@ -117,7 +129,7 @@ function ChannelSwitcher({
         return (
           <Link
             key={account.id}
-            to={reviewRecordPath(account.id)}
+            to={`${reviewRecordPath(account.id)}${search}`}
             aria-current={active ? "page" : undefined}
             className={`min-h-[36px] rounded-lg px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2 ${
               active ? "bg-brand-50 text-brand-700" : "text-muted hover:bg-canvas hover:text-ink"

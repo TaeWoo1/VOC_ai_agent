@@ -5,28 +5,34 @@ import { Panel } from "../../components/ui/Panel";
 import { Empty } from "../../components/ui/Empty";
 import { BtnLink } from "../../components/ui/Btn";
 import { api } from "../../lib/apiClient";
+import { useReviewAttention } from "../../hooks/useReviewAttention";
 import { buildWeeklyReport } from "../../lib/reportView";
+import type { TodayBreakdown } from "../../lib/todayInbox";
 import { SEVERITY_LABEL_KO, changeBadges } from "../../lib/reviewIssuesView";
 import type { FeedItem, ItemAnalysis, ReviewIssueView } from "../../lib/types";
 
 const UNAVAILABLE = "이 항목은 지금 확인할 수 없습니다.";
 
+/**
+ * One figure. It links only where the destination shows exactly this count (`to`); when the count
+ * is spread over several screens the figure is a heading and the `shares` under it carry the exact
+ * links — the same rule the home follows (`lib/todayInbox.ts`).
+ */
 function Figure({
   label,
   available,
   value,
   to,
+  shares = [],
 }: {
   label: string;
   available: boolean;
   value: number;
-  to: string;
+  to: string | null;
+  shares?: readonly TodayBreakdown[];
 }) {
-  return (
-    <Link
-      to={to}
-      className="block rounded-xl border border-line p-4 transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
-    >
+  const body = (
+    <>
       <p className="break-keep text-base text-muted">{label}</p>
       {available ? (
         <p className="mt-1.5 text-3xl font-bold tabular-nums text-ink">
@@ -36,7 +42,38 @@ function Figure({
       ) : (
         <p className="mt-2 break-keep text-base text-muted">{UNAVAILABLE}</p>
       )}
-    </Link>
+    </>
+  );
+  const box = "block rounded-xl border border-line p-4";
+  if (to) {
+    return (
+      <Link
+        to={to}
+        className={`${box} transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2`}
+      >
+        {body}
+      </Link>
+    );
+  }
+  return (
+    <div className={box}>
+      {body}
+      {shares.length > 0 ? (
+        <ul aria-label={`${label} 채널별`} className="mt-3 flex flex-wrap gap-2">
+          {shares.map((share) => (
+            <li key={share.key}>
+              <Link
+                to={share.to}
+                className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg bg-canvas px-3 text-sm font-medium text-ink transition hover:bg-brand-50 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
+              >
+                {share.label}
+                <span className="tabular-nums text-muted">{share.count}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 
@@ -76,6 +113,8 @@ export function ReportsV2() {
   const [inbox, setInbox] = useState<FeedItem[] | null>(null);
   const [analyses, setAnalyses] = useState<ItemAnalysis[]>([]);
   const [loading, setLoading] = useState(true);
+  // 확인이 필요한 리뷰: the shared canonical source (per account, attention-filtered) — same as 홈.
+  const reviewSources = useReviewAttention(1);
 
   useEffect(() => {
     let active = true;
@@ -97,9 +136,9 @@ export function ReportsV2() {
     };
   }, []);
 
-  const report = buildWeeklyReport(issues, inbox, analyses);
+  const report = buildWeeklyReport(issues, inbox, analyses, reviewSources === undefined ? null : reviewSources);
 
-  if (loading) {
+  if (loading || reviewSources === undefined) {
     return (
       <>
         <PageHead title="주간 고객운영 리포트" />
@@ -154,9 +193,8 @@ export function ReportsV2() {
             label="확인이 필요한 리뷰"
             available={report.reviewsToCheck.available}
             value={report.reviewsToCheck.value}
-            // Counted by the feed's low-rating rule; 리뷰 counts by triage tier per account. The two
-            // definitions are not yet one — the number here is the report's, the screen has its own.
-            to="/reviews"
+            to={report.reviewsToCheckTo}
+            shares={report.reviewsToCheckShares}
           />
         </div>
       </Panel>
