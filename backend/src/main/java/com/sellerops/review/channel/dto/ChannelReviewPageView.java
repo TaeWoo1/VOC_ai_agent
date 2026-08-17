@@ -30,6 +30,12 @@ public record ChannelReviewPageView(
          */
         boolean aiPilotEnabled,
         /**
+         * The channel's row of the contract's capability table. The UI renders `[쿠팡에서 보기]` only
+         * for {@code originalLocate=LOCATE_RUN}, feedback controls only for {@code aiTriage} (and the
+         * pilot on), and never invents a reply control — see {@link ReviewChannelCapabilityView}.
+         */
+        ReviewChannelCapabilityView channel,
+        /**
          * How the channel's whole record divides by tier, and what repeats in it. Always the UNFILTERED
          * picture, even when the page itself is filtered to one tier — a summary recomputed under its own
          * filter would collapse to the one option the operator already chose, and there would be no way

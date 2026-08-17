@@ -12,7 +12,7 @@ import com.sellerops.review.triage.eval.TriageEvalReport.TierMetric;
 import com.sellerops.review.triage.llm.AdditiveTriageDecision;
 import com.sellerops.review.triage.llm.ApiTriageClassifier;
 import com.sellerops.review.triage.llm.JdkLlmHttpClient;
-import com.sellerops.review.triage.llm.NaverOnlyClassifierGate;
+import com.sellerops.review.triage.llm.ReviewTriageChannelGate;
 import com.sellerops.review.triage.llm.ReviewTriageClassifier;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -99,7 +99,7 @@ class LlmTriageEvalIT {
                 !"true".equals(System.getenv("LLM_TRIAGE_OMIT_TEMPERATURE")),
                 Integer.parseInt(envOr("LLM_TRIAGE_MAX_OUTPUT_TOKENS", "300")),
                 System.getenv("LLM_TRIAGE_REASONING_EFFORT"));
-        NaverOnlyClassifierGate gate = new NaverOnlyClassifierGate(new ApiTriageClassifier(
+        ReviewTriageChannelGate gate = new ReviewTriageChannelGate(new ApiTriageClassifier(
                 new JdkLlmHttpClient(), ApiTriageClassifier.Vendor.valueOf(vendor), model,
                 requireEnv("LLM_TRIAGE_API_KEY"), tuning));
 
@@ -165,7 +165,7 @@ class LlmTriageEvalIT {
                     continue; // UNCERTAIN, excluded from every metric by v1 §4.
                 }
                 ReviewTriageClassifier.Result result = gate.classify(
-                        NaverOnlyClassifierGate.PERMITTED_CHANNEL, row.rating(), row.body());
+                        "NAVER", row.rating(), row.body());
                 ReviewTriageTier baseline = ReviewTriageRules.tier(row.rating(), row.body());
                 ReviewTriageTier raw = result.status() == ReviewTriageClassifier.Status.OK
                         ? result.tier() : null;

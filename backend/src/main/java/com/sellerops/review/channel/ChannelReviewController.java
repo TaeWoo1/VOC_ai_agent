@@ -6,6 +6,7 @@ import com.sellerops.review.channel.dto.ChannelReviewLocateRunResponse;
 import com.sellerops.review.channel.dto.ChannelReviewPageView;
 import com.sellerops.review.channel.dto.TriageFeedbackRequests;
 import com.sellerops.review.triage.pilot.AiTriagePilotService;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -100,7 +101,11 @@ public class ChannelReviewController {
         return feedback.correct(principal.orgId(), accountId, reviewId, request);
     }
 
-    /** The seller acted: started, completed, or declared not needed. Strong evidence; append-only. */
+    /**
+     * The seller acted: started, completed, or declared not needed — and, only where the channel has a
+     * reply flow, drafted or posted a reply. Strong evidence; append-only. A kind the channel cannot
+     * produce (any REPLY_* on Coupang) is a 400, never a row.
+     */
     @PostMapping("/{reviewId}/triage-feedback/actions")
     public void act(@AuthenticationPrincipal AuthPrincipal principal,
                     @PathVariable UUID accountId,
@@ -111,8 +116,9 @@ public class ChannelReviewController {
     }
 
     /**
-     * What the seller did on the way — exposed, opened, viewed the original. Silver, batched, never
-     * a label. There is deliberately no route to report "ignored".
+     * What the seller did on the way — shown the mark, opened, asked for the original, had it located.
+     * Silver, batched, never a label. There is deliberately no route to report "ignored". Kinds a
+     * channel cannot produce (an ORIGINAL_OPENED on a channel with no original surface) are dropped.
      */
     @PostMapping("/triage-feedback/behavior")
     public TriageFeedbackRequests.BehaviorResult observe(@AuthenticationPrincipal AuthPrincipal principal,
@@ -122,10 +128,23 @@ public class ChannelReviewController {
     }
 
     /**
+     * The review's recorded events, oldest first, in the vocabulary of
+     * {@code contracts/review-triage-events/v1} §2 — what was shown, what the seller answered, what
+     * they did. Read-only, no content; the same four records the funnel counts, seen for one review.
+     */
+    @GetMapping("/{reviewId}/triage-feedback/events")
+    public List<TriageFeedbackRequests.EventView> events(@AuthenticationPrincipal AuthPrincipal principal,
+                                                         @PathVariable UUID accountId,
+                                                         @PathVariable UUID reviewId) {
+        return feedback.events(principal.orgId(), accountId, reviewId);
+    }
+
+    /**
      * Run the frozen candidate over this account's not-yet-classified reviews, bounded. A POST that
-     * sends review bodies to the configured vendor under §8.3 — for a NAVER account of an opted-in
-     * org, and refused as UNCLASSIFIED for anything else. Reads stored reviews, writes SellerOps' own
-     * tables, touches no marketplace.
+     * sends review bodies to the configured vendor under §8.3/§8.3.1 — for a NAVER, Cafe24 or Coupang
+     * account of an opted-in org; a 404 for any other channel, and UNCLASSIFIED at the boundary for
+     * anything that got past that. Reads stored reviews, writes SellerOps' own tables, touches no
+     * marketplace.
      */
     @PostMapping("/ai-triage/runs")
     public AiTriagePilotService.RunResult runAiTriage(@AuthenticationPrincipal AuthPrincipal principal,

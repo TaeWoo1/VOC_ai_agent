@@ -19,7 +19,7 @@ import com.sellerops.review.triage.ReviewTriageTier;
 import com.sellerops.review.triage.feedback.AiTriageCurrent;
 import com.sellerops.review.triage.feedback.AiTriageCurrentRepository;
 import com.sellerops.review.triage.feedback.TriageFeedbackService;
-import com.sellerops.review.triage.llm.NaverOnlyClassifierGate;
+import com.sellerops.review.triage.llm.ReviewTriageChannelGate;
 import com.sellerops.review.triage.llm.ReviewTriageClassifier;
 import com.sellerops.review.triage.llm.TriageSuggestedAction;
 import com.sellerops.selleraccount.SellerAccount;
@@ -54,8 +54,8 @@ class AiTriagePilotServiceTest {
                 true, 4000, "low", 2);
     }
 
-    private NaverOnlyClassifierGate gate(ReviewTriageTier answer) {
-        return new NaverOnlyClassifierGate(new ReviewTriageClassifier() {
+    private ReviewTriageChannelGate gate(ReviewTriageTier answer) {
+        return new ReviewTriageChannelGate(new ReviewTriageClassifier() {
             @Override public String version() { return "llm-triage/test"; }
             @Override public Result classify(Input input) {
                 calls.incrementAndGet();
@@ -136,24 +136,46 @@ class AiTriagePilotServiceTest {
     }
 
     @Test
-    @DisplayName("a Coupang account is refused at the gate, and the refusal is recorded rather than skipped")
-    void coupangIsRefusedAndRecorded() {
-        account("COUPANG");
-        when(reviews.findPendingAiTriage(eq(ORG), eq(CHANNEL), anyString(), any(Pageable.class)))
-                .thenReturn(List.of(review(5, "좋아요")));
-        when(reviews.countPendingAiTriage(eq(ORG), eq(CHANNEL), anyString())).thenReturn(1L);
+    @DisplayName("Cafe24 and Coupang accounts run like NAVER — the three channels of the contract's §1")
+    void theThreeContractChannelsRun() {
+        for (String code : List.of("NAVER", "CAFE24", "COUPANG")) {
+            calls.set(0);
+            account(code);
+            when(reviews.findPendingAiTriage(eq(ORG), eq(CHANNEL), anyString(), any(Pageable.class)))
+                    .thenReturn(List.of(review(5, "좋아요")));
+            when(reviews.countPendingAiTriage(eq(ORG), eq(CHANNEL), anyString())).thenReturn(1L);
+            AiTriagePilotService pilot = new AiTriagePilotService(props(true, ORG), reviews, accounts, channels,
+                    current, feedback, gate(ReviewTriageTier.NEEDS_ATTENTION));
+            AiTriagePilotService.RunResult result = pilot.run(ORG, ACCOUNT, null);
+            assertThat(calls.get()).as(code).isEqualTo(1);
+            assertThat(result.classified()).as(code).isEqualTo(1);
+            assertThat(result.refused()).as(code).isZero();
+        }
+    }
 
+    @Test
+    @DisplayName("an account outside the three channels has no endpoint: 404 before any row is read, and the funnel too")
+    void outsideChannelsHaveNoDoor() {
+        account("GMARKET");
         AiTriagePilotService pilot = new AiTriagePilotService(props(true, ORG), reviews, accounts, channels, current,
                 feedback, gate(ReviewTriageTier.NEEDS_ATTENTION));
-        AiTriagePilotService.RunResult result = pilot.run(ORG, ACCOUNT, null);
-
+        assertThatThrownBy(() -> pilot.run(ORG, ACCOUNT, null)).isInstanceOf(ApiException.class)
+                .hasMessageContaining("대상이 아닙니다");
+        assertThatThrownBy(() -> pilot.funnel(ORG, ACCOUNT)).isInstanceOf(ApiException.class);
         assertThat(calls.get()).as("the classifier was never reached").isZero();
-        assertThat(result.refused()).isEqualTo(1);
-        assertThat(result.classified()).isZero();
-        // Recorded as UNCLASSIFIED — a run that quietly did nothing on a Coupang account would look
-        // identical to a run that classified it and found nothing.
-        verify(feedback).record(eq(ORG), any(), eq(5), eq("좋아요"), anyString(),
-                org.mockito.ArgumentMatchers.argThat(r -> r.status() == ReviewTriageClassifier.Status.UNCLASSIFIED));
+        verify(reviews, never()).findPendingAiTriage(any(), any(), any(), any());
+        verify(feedback, never()).record(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("if a row from a refused channel ever reached the gate it is UNCLASSIFIED and recorded, not skipped")
+    void theGateStillRefusesAndTheRefusalIsRecorded() {
+        // The 404 door above is the first line; the gate is the one that cannot be gone around. Prove
+        // the second still holds by classifying through the gate directly for a channel outside the list.
+        var gate = gate(ReviewTriageTier.NEEDS_ATTENTION);
+        var result = gate.classify("GMARKET", 5, "좋아요");
+        assertThat(result.status()).isEqualTo(ReviewTriageClassifier.Status.UNCLASSIFIED);
+        assertThat(calls.get()).isZero();
     }
 
     @Test
@@ -181,8 +203,9 @@ class AiTriagePilotServiceTest {
         // is the thing feedback draft §7.2 forbids, and it would fail here by name.
         assertThat(AiTriagePilotService.Funnel.class.getRecordComponents())
                 .extracting(java.lang.reflect.RecordComponent::getName)
-                .containsExactly("classifierVersion", "marked", "aiAttentionShown", "opened", "originalViewed",
-                        "agree", "disagree", "actionStarted", "actionCompleted", "actionNotNeeded")
+                .containsExactly("classifierVersion", "channelCode", "marked", "aiAttentionShown", "reviewOpened",
+                        "originalOpened", "marketplaceLocated", "aiAgree", "aiDisagree", "actionStarted",
+                        "actionCompleted", "actionNotNeeded", "replyDrafted", "replySubmitted")
                 .noneMatch(n -> n.toLowerCase().contains("ignor") || n.toLowerCase().contains("skip")
                         || n.toLowerCase().contains("rate"));
     }

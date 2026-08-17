@@ -79,7 +79,7 @@ class ChannelReviewTriageIT {
     @BeforeEach
     void setUp() {
         service = new ChannelReviewService(reviews, products, accounts, syncJobs, analyses, aiCurrent,
-                pilotOff());
+                pilotOff(), channels);
         Channel ch = new Channel();
         ch.setCode("COUPANG");
         ch.setNameKo("쿠팡");

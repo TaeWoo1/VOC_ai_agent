@@ -2,6 +2,8 @@ package com.sellerops.review.channel.dto;
 
 import com.sellerops.review.triage.feedback.TriageActionKind;
 import com.sellerops.review.triage.feedback.TriageBehaviorKind;
+import com.sellerops.review.triage.feedback.TriageEventKind;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -33,7 +35,7 @@ public final class TriageFeedbackRequests {
     }
 
     /**
-     * Silver, batched: several rows' worth of behaviour in one request, because {@code EXPOSED}
+     * Silver, batched: several rows' worth of behaviour in one request, because {@code AI_ATTENTION_SHOWN}
      * fires once per rendered row. Capped by the controller so a client cannot write a table.
      */
     public record Behavior(List<Event> events) {
@@ -43,6 +45,13 @@ public final class TriageFeedbackRequests {
 
     /** What one behaviour batch did — a count and nothing else. */
     public record BehaviorResult(int recorded) {
+    }
+
+    /**
+     * One recorded event, in the contract's vocabulary. {@code shownSource} says which mechanism was
+     * on screen when it happened; {@code at} is when. No content, no actor, no weight.
+     */
+    public record EventView(TriageEventKind kind, String shownSource, String shownTier, Instant at) {
     }
 
     /** What the seller's correction now says for this review, echoed back so the UI can render it. */

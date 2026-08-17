@@ -34,6 +34,7 @@ const PAGE: ChannelReviewPageView = {
   lastImportAt: "2026-08-14T05:00:00Z",
   lastImportComplete: true,
   aiPilotEnabled: false,
+  channel: { channelCode: "COUPANG", aiTriage: true, originalLocate: "LOCATE_RUN", replySupported: false },
   triageSummary: {
     needsAttention: 1,
     watch: 0,
@@ -538,6 +539,24 @@ describe("the AI pilot's mark and the feedback spine (RUBRIC v2 §13.7)", () => 
     expect(recordBehavior).not.toHaveBeenCalled();
   });
 
+  it("a channel outside the contract's three gets no controls and no silver, even with the org opted in", async () => {
+    // Contract §1: the server has no route for such a channel, so the page has no control. The switch is
+    // the channel row on the wire, not the channel's name and not the presence of marks.
+    getChannelReviewsStrict.mockResolvedValue({
+      ...PAGE,
+      aiPilotEnabled: true,
+      channel: { channelCode: "GMARKET", aiTriage: false, originalLocate: "NONE", replySupported: false },
+      items: [{ ...PAGE.items[0], aiMark: MARK }, PAGE.items[1]],
+    });
+    renderPage();
+    await userEvent.click((await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요")).closest("button")!);
+    await screen.findByText(/노출상품ID/);
+    expect(screen.queryByText("이 상품평, 확인이 필요한가요?")).toBeNull();
+    expect(screen.queryByLabelText("분류 피드백")).toBeNull();
+    expect(screen.queryByRole("button", { name: "쿠팡에서 보기" })).toBeNull();
+    expect(recordBehavior).not.toHaveBeenCalled();
+  });
+
   it("shows nothing about AI on a row without a mark", async () => {
     renderPage();
     await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요");
@@ -560,7 +579,7 @@ describe("the AI pilot's mark and the feedback spine (RUBRIC v2 §13.7)", () => 
     expect(screen.getAllByText("참고").length).toBeGreaterThan(0);
 
     await userEvent.click(screen.getByRole("button", { name: "조치 완료" }));
-    await waitFor(() => expect(recordAction).toHaveBeenCalledWith("acc-1", "r1", "COMPLETED"));
+    await waitFor(() => expect(recordAction).toHaveBeenCalledWith("acc-1", "r1", "ACTION_COMPLETED"));
     // The copy says what happens: recorded, not applied, and nothing sent to a marketplace.
     expect(screen.getByText(/답변은 기록만 됩니다/)).toBeInTheDocument();
     expect(screen.getByText(/마켓플레이스에는 아무것도 전송되지 않습니다/)).toBeInTheDocument();
@@ -585,10 +604,10 @@ describe("the AI pilot's mark and the feedback spine (RUBRIC v2 §13.7)", () => 
     });
     renderPage();
     await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요");
-    // Row 1 carries a mark → EXPOSED. Row 2 is a rules 확인 필요 (1★ with text) → EXPOSED. Nothing else.
+    // Row 1 carries a mark → AI_ATTENTION_SHOWN (a claim the server verifies). Row 2 is a rules
+    // 확인 필요 with no mark → nothing: a rendered rules row is not an event in contract v1.
     await waitFor(() => expect(recordBehavior).toHaveBeenCalledWith("acc-1", [
-      { reviewId: "r1", kind: "EXPOSED" },
-      { reviewId: "r2", kind: "EXPOSED" },
+      { reviewId: "r1", kind: "AI_ATTENTION_SHOWN" },
     ]));
     // The recorder is DOWN, and the list is still there.
     expect(screen.getByText("배송도 빠르고 포장도 꼼꼼했어요")).toBeInTheDocument();

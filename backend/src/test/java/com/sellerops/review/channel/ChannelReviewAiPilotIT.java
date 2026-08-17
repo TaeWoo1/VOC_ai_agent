@@ -92,12 +92,12 @@ class ChannelReviewAiPilotIT {
         // A gate is needed only to run; the read path asks isEnabledFor(), which is properties + a
         // non-null gate. Hand it a gate around a classifier that is never called.
         AiTriagePilotService pilot = new AiTriagePilotService(props, reviews, accounts, channels, aiCurrent, null,
-                pilotOnForOrg ? new com.sellerops.review.triage.llm.NaverOnlyClassifierGate(
+                pilotOnForOrg ? new com.sellerops.review.triage.llm.ReviewTriageChannelGate(
                         new com.sellerops.review.triage.llm.ReviewTriageClassifier() {
                             @Override public String version() { return "test/v"; }
                             @Override public Result classify(Input input) { throw new AssertionError("never called"); }
                         }) : null);
-        return new ChannelReviewService(reviews, products, accounts, syncJobs, analyses, aiCurrent, pilot);
+        return new ChannelReviewService(reviews, products, accounts, syncJobs, analyses, aiCurrent, pilot, channels);
     }
 
     private Review review(Integer rating, String body) {
@@ -214,6 +214,12 @@ class ChannelReviewAiPilotIT {
                 .allSatisfy(i -> assertThat(i.triage().tier()).isEqualTo(ReviewTriageTier.NEEDS_ATTENTION));
         assertThat(service.list(org, account.getId(), null, "NEEDS_ATTENTION", 0, 100).items())
                 .hasSize((int) rulesPositives);
+        // The channel's capability row travels with the page whatever the pilot state — the UI decides
+        // which controls exist from it, not from the presence of marks.
+        assertThat(page.aiPilotEnabled()).isFalse();
+        assertThat(page.channel().channelCode()).isEqualTo("NAVER");
+        assertThat(page.channel().aiTriage()).isTrue();
+        assertThat(page.channel().originalLocate()).isEqualTo("NONE");
     }
 
     @Test

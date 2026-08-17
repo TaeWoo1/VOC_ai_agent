@@ -14,6 +14,7 @@ import type {
   TriageBehaviorEvent,
   TriageCorrectionRequest,
   TriageCorrectionView,
+  TriageEventView,
   ChannelReviewLocateRun,
   ChannelReviewPageView,
   ReviewTriageTier,
@@ -1300,5 +1301,13 @@ export const api = {
       `/api/seller-accounts/${encodeURIComponent(accountId)}/channel-reviews/triage-feedback/behavior`,
       { events },
     );
+  },
+
+  /** The review's recorded events, oldest first, in the contract's vocabulary. Read-only. */
+  async getChannelReviewTriageEvents(accountId: string, reviewId: string): Promise<TriageEventView[]> {
+    const { data } = await http.get<TriageEventView[]>(
+      `/api/seller-accounts/${encodeURIComponent(accountId)}/channel-reviews/${encodeURIComponent(reviewId)}/triage-feedback/events`,
+    );
+    return data;
   },
 };

@@ -9,6 +9,7 @@ import { api } from "../../lib/apiClient";
 import type {
   ChannelReviewDetailView,
   ChannelReviewPageView,
+  ReviewChannelCapabilityView,
   ReviewTriageNote,
   ReviewTriageTier,
   TriageActionKind,
@@ -88,8 +89,11 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
   const [loading, setLoading] = useState(true);
 
   // §13.7 item 6: for an org not opted in, this page is what it was before the pilot — no marks (the
-  // backend sends none), no controls, no silver. Read from the page, never inferred from marks.
-  const pilotOn = page?.aiPilotEnabled ?? false;
+  // backend sends none), no controls, no silver. Read from the page, never inferred from marks. And
+  // only on a channel inside the contract's table (`channel.aiTriage`): outside it the server has no
+  // route, so the page has no control.
+  const capability = page?.channel ?? null;
+  const pilotOn = (page?.aiPilotEnabled ?? false) && (capability?.aiTriage ?? false);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ChannelReviewDetailView | null>(null);
@@ -138,15 +142,15 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
         if (ticket !== requestSeq.current) return;
         setPage(view);
         setLoadError(false);
-        // Silver, §13.7: the rows the seller was SHOWN. Best-effort and after the list is set, so a
-        // failure to record a trace can never delay or fail the list. Only rows carrying the pilot's
-        // mark or a rules 확인 필요 are worth a trace — an FYI row's exposure says nothing anyone will
-        // weight — and there is no event for "not shown".
-        if (view.aiPilotEnabled) {
+        // Silver, contract §2.1: the rows the seller was SHOWN the pilot's mark on. Best-effort and
+        // after the list is set, so a failure to record a trace can never delay or fail the list. Only
+        // rows carrying the mark are claimed — and it is a claim: the server writes AI_ATTENTION_SHOWN
+        // only where IT resolves the display to AI. There is no event for "not shown".
+        if (view.aiPilotEnabled && view.channel.aiTriage) {
           recordBehavior(
             view.items
-              .filter((i) => i.aiMark !== null || i.triage.tier === "NEEDS_ATTENTION")
-              .map((i) => ({ reviewId: i.id, kind: "EXPOSED" as const })),
+              .filter((i) => i.aiMark !== null)
+              .map((i) => ({ reviewId: i.id, kind: "AI_ATTENTION_SHOWN" as const })),
           );
         }
       } catch {
@@ -180,7 +184,7 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
           setDetail(view);
           setDetailError(false);
           if (pilotOn && (view.aiMark !== null || view.triage.tier === "NEEDS_ATTENTION")) {
-            recordBehavior([{ reviewId: view.id, kind: "OPENED" }]);
+            recordBehavior([{ reviewId: view.id, kind: "REVIEW_OPENED" }]);
           }
         }
       } catch {
@@ -423,6 +427,7 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
               <ReviewDetail
                 accountId={accountId}
                 pilotOn={pilotOn}
+                capability={capability}
                 recordBehavior={recordBehavior}
                 detail={detail}
                 locate={locate}
@@ -447,6 +452,7 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
 function ReviewDetail({
   accountId,
   pilotOn,
+  capability,
   recordBehavior,
   detail,
   locate,
@@ -456,6 +462,7 @@ function ReviewDetail({
 }: {
   accountId: string;
   pilotOn: boolean;
+  capability: ReviewChannelCapabilityView | null;
   recordBehavior: (events: TriageBehaviorEvent[]) => void;
   detail: ChannelReviewDetailView;
   locate: ReviewLocateBinding;
@@ -464,6 +471,22 @@ function ReviewDetail({
   unavailable: LocateUnavailable | null;
 }) {
   const message = locateMessage(run, running);
+  // Contract §1: the locate surface exists on exactly the channels the server says it does. A NAVER or
+  // Cafe24 account renders no `[쿠팡에서 보기]` — the server would refuse the press, and a button that is
+  // refused every time is a promise the product cannot keep.
+  const canLocate = capability?.originalLocate === "LOCATE_RUN";
+  // Silver worth a trace: rows something raised — the pilot's mark or a rules 확인 필요.
+  const raised = detail.aiMark !== null || detail.triage.tier === "NEEDS_ATTENTION";
+  // MARKETPLACE_LOCATED — contract §2.1: the run REPORTED the row found (COMPLETED), once per run, not
+  // on the press. The press is ORIGINAL_OPENED; the two are different facts and are recorded as two.
+  const locatedRunRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pilotOn || !raised || run === null || run.status !== "COMPLETED") return;
+    const key = `${detail.id}:${run.runId}`;
+    if (locatedRunRef.current === key) return;
+    locatedRunRef.current = key;
+    recordBehavior([{ reviewId: detail.id, kind: "MARKETPLACE_LOCATED" }]);
+  }, [pilotOn, raised, run, detail.id, recordBehavior]);
   // Offered only when the RUNTIME says it is allowed. A recheck the run would refuse is a button that does
   // nothing, and on a screen whose whole job is to be honest about what was found that is the wrong button.
   const canRecheck = run?.allowedCommands.includes("REQUEST_STEP_RECHECK") ?? false;
@@ -518,16 +541,20 @@ function ReviewDetail({
         Coupang publishes no per-review link, so this is not a hyperlink and cannot be: the review is found
         again by matching it on the screen the seller has open. That is why the button lives beside a status
         line rather than being a plain anchor — there is a run behind it, and it has things to say.
+
+        Rendered only where the channel has a locate surface (contract §1). On the other two channels there
+        is no "see the original" control at all, and the page says so once rather than offering a dead one.
       */}
+      {canLocate ? (
       <div className="space-y-2 border-t border-line pt-4">
         <Btn
           size="sm"
           variant="outline"
           disabled={running}
           onClick={() => {
-            // Silver: the seller wanted the original. Recorded only for rows something raised.
-            if (pilotOn && (detail.aiMark !== null || detail.triage.tier === "NEEDS_ATTENTION")) {
-              recordBehavior([{ reviewId: detail.id, kind: "ORIGINAL_VIEWED" }]);
+            // Silver: the seller asked for the original. Recorded only for rows something raised.
+            if (pilotOn && raised) {
+              recordBehavior([{ reviewId: detail.id, kind: "ORIGINAL_OPENED" }]);
             }
             void locate.locate(detail.id);
           }}
@@ -568,6 +595,11 @@ function ReviewDetail({
           </div>
         ) : null}
       </div>
+      ) : (
+        <p className="border-t border-line pt-4 text-sm leading-relaxed text-muted">
+          이 채널의 상품평은 SellerOps에서 원문 화면으로 바로 이동할 수 없습니다. 판매자센터에서 직접 확인해 주세요.
+        </p>
+      )}
     </div>
   );
 }
@@ -660,7 +692,7 @@ function TriageFeedbackControls({ accountId, detail }: { accountId: string; deta
         </Btn>
       </div>
       <div className="flex flex-wrap gap-2">
-        {(["STARTED", "COMPLETED", "NOT_NEEDED"] as const).map((kind) => (
+        {(["ACTION_STARTED", "ACTION_COMPLETED", "ACTION_NOT_NEEDED"] as const).map((kind) => (
           <Btn
             key={kind}
             size="sm"
@@ -669,9 +701,9 @@ function TriageFeedbackControls({ accountId, detail }: { accountId: string; deta
             disabled={busy}
             onClick={() => void act(kind)}
           >
-            {kind === "STARTED"
+            {kind === "ACTION_STARTED"
               ? TRIAGE_FEEDBACK_LABEL.started
-              : kind === "COMPLETED"
+              : kind === "ACTION_COMPLETED"
                 ? TRIAGE_FEEDBACK_LABEL.completed
                 : TRIAGE_FEEDBACK_LABEL.actionNotNeeded}
           </Btn>

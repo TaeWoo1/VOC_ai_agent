@@ -164,23 +164,30 @@ class TriageFailClosedTest {
     }
 
     @Test
-    @DisplayName("a channel §8.3 does not permit cannot reach the transport")
-    void coupangCannotBeClassified() {
+    @DisplayName("a channel §8.3/§8.3.1 does not permit cannot reach the transport; the three that are, can")
+    void outsideChannelsCannotBeClassified() {
         List<String> sent = new java.util.ArrayList<>();
-        NaverOnlyClassifierGate gate = new NaverOnlyClassifierGate(new ApiTriageClassifier(
+        ReviewTriageChannelGate gate = new ReviewTriageChannelGate(new ApiTriageClassifier(
                 (uri, headers, body) -> {
                     sent.add(body);
                     return new LlmHttpClient.Response(200, "{}");
                 }, ApiTriageClassifier.Vendor.ANTHROPIC, "m", "k"));
 
-        for (String channel : List.of("COUPANG", "GMARKET", "naver", "", "NAVER ")) {
-            Result result = gate.classify(channel, 1, "쿠팡 리뷰 본문");
+        // Outside the contract's table — and every lenient spelling of a channel that IS in it.
+        for (String channel : java.util.Arrays.asList("GMARKET", "AUCTION", "ELEVENST", "naver", "coupang",
+                "Cafe24", "", "NAVER ", null)) {
+            Result result = gate.classify(channel, 1, "리뷰 본문");
             assertThat(result.status()).as("channel %s", channel).isEqualTo(Status.UNCLASSIFIED);
         }
-        assertThat(sent).as("nothing left the machine for a channel §8.3 does not open").isEmpty();
+        assertThat(sent).as("nothing left the machine for a channel the contract does not open").isEmpty();
 
-        gate.classify("NAVER", 1, "네이버 리뷰 본문");
-        assertThat(sent).hasSize(1);
+        // The three of contracts/review-triage-events/v1 §1 (RUBRIC §8.3 + §8.3.1). Exactly these.
+        for (String channel : List.of("NAVER", "CAFE24", "COUPANG")) {
+            gate.classify(channel, 1, "리뷰 본문");
+        }
+        assertThat(sent).hasSize(3);
+        assertThat(String.join("\n", sent)).as("the payload floor: the channel does not travel either")
+                .doesNotContain("NAVER").doesNotContain("CAFE24").doesNotContain("COUPANG");
     }
 
     @Test

@@ -128,7 +128,7 @@ class ClassifierBoundaryTest {
      * Nothing in production reaches the transport around the channel check.
      *
      * <p>RUBRIC v2 §8.3 opens NAVER triage and nothing else, and §8.4 requires the check sit at the
-     * boundary rather than in a caller's memory. {@link NaverOnlyClassifierGate} is that boundary;
+     * boundary rather than in a caller's memory. {@link ReviewTriageChannelGate} is that boundary;
      * this asserts it is the only door, so a future service cannot hold an
      * {@link ApiTriageClassifier} directly and classify a Coupang review with it.
      */
@@ -139,7 +139,7 @@ class ClassifierBoundaryTest {
         try (Stream<Path> walk = Files.walk(MAIN)) {
             for (Path source : walk.filter(p -> p.toString().endsWith(".java")).toList()) {
                 String name = source.getFileName().toString();
-                if (name.equals("NaverOnlyClassifierGate.java") || name.equals("ApiTriageClassifier.java")) {
+                if (name.equals("ReviewTriageChannelGate.java") || name.equals("ApiTriageClassifier.java")) {
                     continue;
                 }
                 String code = stripComments(Files.readString(source));
@@ -152,7 +152,7 @@ class ClassifierBoundaryTest {
                 boolean touchesClassifier = code.contains("ReviewTriageClassifier") || code.contains("ApiTriageClassifier");
                 if (code.contains("new ApiTriageClassifier(") || code.contains("ApiTriageClassifier::new")
                         || code.contains(".classify(new Input") || code.contains(".classify(new ReviewTriageClassifier.Input")
-                        || (touchesClassifier && !name.equals("NaverOnlyClassifierGate.java")
+                        || (touchesClassifier && !name.equals("ReviewTriageChannelGate.java")
                             && code.matches("(?s).*\\.classify\\(\\s*[a-z]\\w*\\s*\\).*"))) {
                     offenders.add(name);
                 }
