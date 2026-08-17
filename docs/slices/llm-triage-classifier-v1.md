@@ -452,3 +452,84 @@ and thrown away the evidence this freeze rests on.
 6. **The `suggestedNextAction` vocabulary is still an unratified product decision.** It gates nothing.
 7. **No product surface reads any of this.** `ReviewTriageRules` still owns every tier a seller sees;
    `v1` §5's gate is cleared on `DEV` only, and `DEV` is not the reported number.
+
+
+---
+
+## 13. FINAL HOLDOUT — candidate B REJECTED
+
+**Spent 2026-08-17, once, per §8.10.** Frozen candidate, unchanged from the freeze:
+
+```
+llm-triage/v1+openai:gpt-5-2025-08-07+triage-prompt/v2+schema/v1+tdefault+out4000+effort:low+additive-guard/v1
+```
+
+113 rows, 3 passes, both readings, 0 classification failures anywhere.
+
+### 13.1 The gate — worst of 3 passes × both readings
+
+| bar | worst observed | limit | |
+|---|---|---|---|
+| recall | 0.679 | ≥ 0.30 | PASS |
+| **precision, Wilson 95% lower bound** | **0.667** | **≥ 0.80** | **FAIL** |
+| 4–5★ false-positive rate | 0.020 | ≤ 0.05 | PASS |
+| classification failures | 0 of 113, three times | — | |
+| model raw demotions | 0 | — | |
+
+### 13.2 Every reading, as measured
+
+| pass | reading | tp | fp | fn | tn | precision | 95% low | recall | 4–5★ FP |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | PRIMARY | 22 | 3 | 7 | 81 | 0.880 | 0.700 | 0.759 | 0.020 |
+| 1 | SENSITIVITY | 21 | 3 | 7 | 81 | 0.875 | 0.690 | 0.750 | 0.020 |
+| 2 | PRIMARY | 20 | 3 | 9 | 81 | 0.870 | 0.679 | 0.690 | 0.020 |
+| 2 | SENSITIVITY | 19 | 3 | 9 | 81 | 0.864 | 0.667 | 0.679 | 0.020 |
+| 3 | PRIMARY | 22 | 3 | 7 | 81 | 0.880 | 0.700 | 0.759 | 0.020 |
+| 3 | SENSITIVITY | 21 | 3 | 7 | 81 | 0.875 | 0.690 | 0.750 | 0.020 |
+
+**Not one of the six cleared the precision bar.** This is not a marginal miss decided by the
+worst-of rule: the *best* reading is 0.700 against 0.80.
+
+### 13.3 What actually happened, and what did not
+
+**The point estimate did not collapse — the interval did.** Precision on `HOLDOUT` is 0.864–0.880,
+against 0.966–1.000 on `DEV`. Three false positives instead of zero or one. On 25 predicted
+positives a Wilson 95% lower bound simply cannot reach 0.80 with 3 errors, and `v1` §5 gates on the
+lower bound precisely so that a small sample cannot pass on luck. It worked as designed, in the
+direction it was designed to work.
+
+**The `DEV` reading was optimistic, and the size of the gap is the finding.** `DEV` worst was 0.823;
+`HOLDOUT` worst is 0.667. The margin flagged at freeze as "0.023, with a spread twice that" turned
+out to understate the risk — the gap was not sampling noise inside one half, it was a difference
+between the halves.
+
+**Nothing else failed.** Recall 0.679–0.759 clears 0.30 comfortably and is four times `rules-v1`'s
+`DEV` figure. The 4–5★ false-positive rate is 0.020 against a 0.05 bar — 1 of 51 high-rated
+`NO_ACTION` reviews — so the specific harm `v1` §5 named is not what killed this. Zero classification
+failures in 339 calls. **Zero raw model demotions in all three passes**, so prompt/v2's precedence fix
+held on unseen rows and the additive guard never had to fire.
+
+**The misses are the same shape as on `DEV`**, which is the one encouraging sign: `CRITIQUE_NO_REQUEST`
+×4 in every pass, then `CANNOT_USE` and `PRAISE_WITH_CONCESSION`, concentrated at 3★. The model's
+failure mode is stable and describable rather than random.
+
+### 13.4 What §8.10.1 now forbids
+
+- The prompt, model, tuning and guard **may not be adjusted and re-measured against this holdout.**
+- **This holdout is spent.** It is not read again — not for a later candidate, not as a sanity check.
+- A candidate C's final verification requires a **new, untouched holdout**: a new domain string, a
+  fresh split, and a re-labeled sample (§6.2).
+
+Recorded exactly as measured, including the three passes whose `PRIMARY` readings reached 0.700 and
+which a best-of rule would have reported. They are in §13.2 for the same reason candidate A's better
+run is still in the change log.
+
+### 13.5 What is true after this
+
+`rules-v1` remains what every seller sees. It was never displaced: §2.1 kept the classifier's output
+in a prediction store that no surface reads, precisely so that a rejection here would cost a
+measurement and nothing else. That is what it cost.
+
+The 220-row gold set, the `DEV` half, the labeling protocol, the guard, the fail-closed paths, the
+payload floor and the feedback spine all stand. What does not stand is one candidate's claim to clear
+`v1` §5, and the claim was tested the only way that means anything.
