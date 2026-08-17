@@ -63,7 +63,7 @@ route는 있으나 1차 메뉴에 없음
 |---|---|---|
 | 홈 | Today Inbox(§4a): 리뷰 · 문의 · 연결의 "지금 사람이 봐야 할 것"만, 각 count는 그 destination이 세는 수. 진행 중 Action Window run · "참고"(메모리·리포트) | 채널은 리뷰 항목의 채널별 share(각자 정확한 링크)로만 등장 |
 | 리뷰 | h1 "리뷰" + workflow 문장; 계정별 리뷰 기록(`ChannelReviews`)을 하나의 문 뒤에 모음(채널 = h2/switcher). 규칙 tier가 순서를 소유, AI는 `AI 확인 필요` suggestion(C2 pilot candidate, org opt-in, default OFF), 피드백·행동 기록은 학습 자산으로 축적. 필터·선택은 URL과 양방향 | 서버의 `ReviewChannelCapabilityView`(aiTriage / originalLocate / replySupported)로 버튼·문구 결정. 채널 고유 어휘(쿠팡 상품평)는 `channelVocabulary` 한 곳 |
-| 문의 | 인박스 workflow를 문의로 scope. 답변 제안 생성, 발송 없음 | 채널 filter는 로드된 행에서만 |
+| 문의 | 인박스 workflow를 문의로 scope: 답변 필요 → 답변함, 서버 count 헤더, 답변 방향 제안(발송 없음), 필터는 URL과 양방향 | 채널 filter는 로드된 행에서만; 제안 불가는 capability 문장으로 |
 | 주문 | 기간·채널 집계 | 채널 select = `/api/channels`(=세 채널) |
 | 채널 연결 | 세 채널의 연결 진입(가이드 연결·OAuth·튜토리얼), 상태, 자료 가져오기, 리뷰 기록 진입 | 카드 액션은 계정 실제 상태에서 |
 | 설정 | 사실과 링크만. 토글 없음 | — |
@@ -76,7 +76,7 @@ route는 있으나 1차 메뉴에 없음
 | 항목 | count source | destination (count가 정확히 같은 화면) |
 |---|---|---|
 | 확인이 필요한 리뷰 | 리뷰 기록 계정마다 `GET …/channel-reviews?tier=NEEDS_ATTENTION` 의 `total` (rules tier + pilot ON이면 AI 확인 필요 포함 — 서버의 같은 `FINAL_TIER_RANK` 식) | 채널별 share → `/reviews/:accountId?tier=NEEDS_ATTENTION`. 계정이 하나면 헤드라인도 링크; 여럿이면 헤드라인은 합계 표시만(링크 아님) |
-| 답변이 필요한 문의 | `/api/inbox` feed의 `needsReply`(UNANSWERED 문의) 개수 | `/inquiries?state=NEEDS_REPLY` (같은 feed·같은 규칙) |
+| 답변이 필요한 문의 | 서버 count `InquiryRepository.countByOrgIdAndStatus(orgId, "UNANSWERED")` → `InboxResponse.unansweredInquiries` (A4). feed rows(`limit`, ceiling 500)는 목록·미리보기용일 뿐 count가 아니다 | `/inquiries?state=NEEDS_REPLY` — 헤더에 같은 서버 count를 인쇄하고, 필터가 그 행을 나열 |
 | 확인이 필요한 연결 | 채널 상태 `RECONNECT_REQUIRED`/`PENDING` + 미확인 connector alert | 채널 행 → `/connect`, 알림 행 → `/settings/alerts`; 둘 다 있으면 헤드라인은 링크 아님 |
 
 **"확인이 필요한 리뷰"의 정의는 하나다(A3):** 리뷰의 triage tier가 `NEEDS_ATTENTION`(rules tier; org opt-in 시
@@ -94,7 +94,10 @@ route는 있으나 1차 메뉴에 없음
 5. 딥링크 seam: `/reviews/:acc?tier=&review=` — **URL이 곧 필터·선택 상태(양방향)**: tier 버튼이 `?tier`를 쓰고
    `?review`를 지우며, 행 선택이 `?review`를 쓴다(replace, 히스토리 누적 없음). 모르는 tier 값은 무시하고 URL에서
    지운다. 채널 switcher는 `?tier`를 유지하고 `?review`는 버린다. `/inquiries?state=`는 mount 시 한 번 읽음.
-6. `/inbox` 혼합 큐는 **흡수**: `/inbox` → `/inquiries`, `/inbox/:itemRef` → 소유 화면으로 resolve.
+6. `/inbox` 혼합 큐는 **흡수**: `/inbox` → `/inquiries`, `/inbox/:itemRef` → 소유 화면으로 resolve (유지).
+7. **문의 URL 동기화(A4)**: `/inquiries?state=&channel=`이 곧 필터 상태(양방향, replace). 모르는 값은 행 로드 후
+   URL에서 지운다. 행 링크는 현재 필터를 그대로 싣는다. `/api/inbox?type=INQUIRY&limit=500`으로 문의만 읽는다.
+   **Residual**: 기간(period) 필터는 로컬 상태, `?channel` 값은 채널 코드가 아니라 표시명(`channelNameKo`)이다.
 
 공통 규칙: 로딩·빈·오류 상태는 `sellerops_frontend_spec.md` §13; 언어는 §12(셀러 언어, 로드맵 문구 금지);
 capability 정직성은 §15. **새 채널이 와도 FE 신규 화면이 최소가 되게** — 새 채널 = 목록 한 줄 + capability
@@ -113,7 +116,8 @@ row + 어휘 한 줄이 목표이며, 이를 깨는 설계는 이 문서를 먼�
 | A1 (2026-08-17) | 문서 audit·정리 / 노출 채널 게이트(BE+FE) / 내비 홈·리뷰·문의·주문·채널 연결·설정 / `/reviews` switcher over 계정별 기록 / `/inquiries` scope / 리뷰 어휘 통일 / 채널 연결 3채널 카피 | 완료 (이 문서와 같은 브랜치) |
 | A2 (2026-08-18) | 홈 → Today Inbox(§4a): 리뷰·문의·연결 세 항목, count = destination count, `/inbox` 흡수(리다이렉트 + 딥링크 resolver), `FeedItem.channelId` 추가, 리포트/업로드 결과 링크가 리뷰·문의로 | 완료 |
 | A3 (2026-08-18) | 리뷰 화면 정리: "확인이 필요한 리뷰" 정의 하나(triage NEEDS_ATTENTION; 홈·리포트 공용 hook), `/reviews` h1 "리뷰" + workflow 문장(확인 필요 → 지켜보기 → 참고, AI 확인 필요 = 제안), 채널은 h2·switcher(계정 하나면 숨김), 필터 순서 확인 필요→지켜보기→참고→전체, `?tier`/`?review` 양방향 URL 동기화 | 완료 |
-| A4 (다음) | 문의 화면 정리: `/inquiries` 헤더·필터를 같은 workflow 언어로(답변 필요 → 답변함), `?state`/`?channel`/선택 양방향 URL 동기화, 답변 준비 패널 wording, 홈 문의 행과의 count 정의 재확인 | 제안 |
+| A4 (2026-08-18) | 문의 화면 정리: 답변 필요 count = 서버 `countByOrgIdAndStatus(UNANSWERED)`(feed limit과 분리, 홈·`/inquiries` 동일), workflow 문장(답변 필요 → 답변함), 상태 옵션 순서·확인 필요 제외, `?state`/`?channel` 양방향 URL 동기화, 응답 불가 문구 capability 기반 | 완료 |
+| A5 (다음) | 채널 연결 hub cleanup: NAVER/Coupang/Cafe24 3개만, 연결 상태/재연결/오류/empty wording 정리, `/connect/imports` 역할 정리, unsupported/experimental 흔적 제거, 새 기능 없음 | 제안 |
 
 ## 7. 라우터
 
