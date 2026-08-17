@@ -533,3 +533,112 @@ measurement and nothing else. That is what it cost.
 The 220-row gold set, the `DEV` half, the labeling protocol, the guard, the fail-closed paths, the
 payload floor and the feedback spine all stand. What does not stand is one candidate's claim to clear
 `v1` §5, and the claim was tested the only way that means anything.
+
+---
+
+## 14. Candidate C
+
+The unit that follows the rejection. **Product-owner decision, 2026-08-17:** keep the LLM direction,
+build candidate C, and make the v2 corpus development evidence — recorded as RUBRIC v2 §12, §13,
+§8.11 and §8.12, all committed before candidate C existed or was measured on anything.
+
+### 14.1 What candidate B's errors actually were
+
+**The evidence had to be re-collected, and that is the first finding.** `LlmTriageHoldoutIT` reported
+"3 false positives" on every holdout pass and wrote down which rows they were nowhere, so those three
+reviews cannot be examined and never will be. RUBRIC v2 §8.12 exists because of that. What follows is
+a **fresh pass of the frozen candidate B over all 220 rows**, one pass, per-row records kept — a
+re-observation of the same candidate's error modes on the same rows, **not** the spent run's rows.
+The candidate is stochastic and this is stated rather than glossed.
+
+```
+llm-triage/v1+openai:gpt-5-2025-08-07+triage-prompt/v2+schema/v1+tdefault+out4000+effort:low+additive-guard/v1
+220 rows · 1 pass · 0 classification failures · 0 raw model demotions
+PRIMARY      tp=53 fp=2 fn=11 tn=152   precision 0.964 (95% low 0.877)  recall 0.828  4–5★ FP 0.010
+SENSITIVITY  tp=51 fp=2 fn=11 tn=152   precision 0.962 (95% low 0.872)  recall 0.823  4–5★ FP 0.010
+```
+
+#### The additive guard costs no precision at all
+
+Checked first, on committed labels, with no API call: **every `rules-v1` baseline positive in the 220
+is also a gold `NEEDS_ATTENTION`.** Zero rows where the guard forces a tier the humans declined. The
+hypothesis that candidate B failed on false positives it structurally could not avoid is dead, and
+the guard is free on this corpus. Every false positive was the model's own promotion.
+
+#### Eight of eleven false negatives are unreachable by any rubric-faithful prompt
+
+| gold `reasonCode` on the missed row | count | reachable? |
+|---|---|---|
+| `CRITIQUE_NO_REQUEST` | 6 | **no** — gold's own code says not-actionable |
+| `NEUTRAL_DESCRIPTION` | 1 | **no** — same |
+| `PRAISE_ONLY` | 1 | **no** — same |
+| `CANNOT_USE` | 2 | yes — a genuine miss |
+| `PRAISE_WITH_CONCESSION` | 1 | yes — a genuine miss |
+
+By rating: 3★ ×9, 5★ ×2.
+
+The gold set contains **14 rows whose own `reasonCode` contradicts their tier in this direction**, 11
+of them `CRITIQUE_NO_REQUEST → NEEDS_ATTENTION`. That pairing contradicts `v1` §2's *"product
+criticism with no request → `NO_ACTION`"* directly. §3.1 has always said the actionable column is a
+description and not a rule, and a pairing that crosses it is a finding about the rubric — this is
+that finding, at scale, concentrated at 3★.
+
+**Consequence: rubric-faithful recall on this corpus is capped near 50/64 ≈ 0.78–0.875**, and
+candidate B measured 0.828. Its recall bar was 0.30. **Recall was never the thing to fix**, and a
+prompt that reached these rows would have to promote criticism-without-a-request across the whole
+3★ band — which is precisely where the remaining precision would go.
+
+#### One of two false positives is prompt/v2's own item B
+
+| | rating | model said | gold said | structural cause |
+|---|---|---|---|---|
+| FP 1 | 3★ | `NEEDS_ATTENTION` / `DEFECT_OR_DAMAGE` | `WATCH` / `CRITIQUE_NO_REQUEST` | the model read a defect claim where the human read a gripe. **No prompt structure fixes this** — it is a judgment about the text |
+| FP 2 | 5★ | `NEEDS_ATTENTION` / `PRAISE_WITH_CONCESSION` | `FYI` / **`PRAISE_WITH_CONCESSION`** | prompt/v2 item B: *"satisfied but pointed at one concrete problem → NEEDS_ATTENTION, even at 5★"* |
+
+FP 2 is one of exactly **two** rows in the gold set where a human paired `PRAISE_WITH_CONCESSION`
+with a `NO_ACTION` tier — and both of those rows are in the former `HOLDOUT` half. The other 18
+`PRAISE_WITH_CONCESSION` rows are `NEEDS_ATTENTION`. So item B is right 18 times out of 20 and its
+two exceptions both sat in the half that decided candidate B's fate, where the §13.1 arithmetic gave
+the bar a tolerance of exactly one.
+
+That is not bad luck to be complained about. It is what a bar computed on 25 predicted positives
+does, and §13 is the answer to it.
+
+### 14.2 What candidate C changes, and what it does not
+
+**`triage-prompt/v3`.** One structural change, stated as a rubric reading rather than a patch.
+
+`v1` §2 puts *"예쁜데 배송이 너무 늦었어요"* on the `NEEDS_LOOK` side and *"생각보다 두꺼워요"* on the
+`NO_ACTION` side. Neither has a request. One has praise and the concession is still actionable. **The
+axis is what the complaint is about** — something that went wrong fulfilling this order, against an
+opinion about what the product is — and prompt/v2 asked neither question. It asked "is there a
+concrete problem?", which both rows answer yes to.
+
+So v3's stage 1 asks *"이 주문에서 무언가 잘못되었는가"* and asks nothing else, and stage 2 exists only
+to name a tier already decided. §8.11's requirement, met structurally: **no `reasonCode` list appears
+as a tier-forcing condition**, which is what v2's stage 1 did in the same prompt that told the model
+a reason code does not decide a tier.
+
+The gripe also gets a legitimate destination. Under v2 a praise-plus-gripe review had to be
+`NEEDS_ATTENTION` or `FYI`; under v3 it is `WATCH` — *"하나로는 할 일이 없지만 반복되면 문제가 될
+종류"* — which is what §2's tier table has always meant by the word.
+
+**Unchanged, deliberately:**
+
+| | why |
+|---|---|
+| model snapshot `gpt-5-2025-08-07` | changing two things at once measures neither |
+| `tdefault`, `out4000`, `effort:low` | same |
+| `schema/v1` | same |
+| `additive-guard/v1` | it costs nothing on this corpus and it is the false-negative floor |
+| the low-star rule as stage 1 item 3 | so the model is not fighting the guard on every low-star row |
+| `suggestedNextAction`'s vocabulary | still an unratified product decision; it gates nothing |
+
+**What was deliberately not done:** nothing was written into the prompt because a particular row
+would flip. No corpus review, phrase or fragment appears in it. The two illustrations are `v1` §2's
+own invented rows, written before this corpus was drawn, which §8.11 permits by name. The 8
+unreachable false negatives were **not** chased, because reaching them costs the bar that failed.
+
+```
+llm-triage/v1+openai:gpt-5-2025-08-07+triage-prompt/v3+schema/v1+tdefault+out4000+effort:low+additive-guard/v1
+```
