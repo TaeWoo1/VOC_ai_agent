@@ -1098,11 +1098,49 @@ predicted positives at which the observed precision *would* have cleared it. Des
 move the bar, and it may never be offered as a reason a failure does not count. It exists so that
 §13.1's arithmetic is visible at the moment it matters rather than a day later.
 
-### 13.7 Until it exists
+### 13.7 Until it exists — and the one pilot permitted before it
 
-No classifier reaches a product surface. `ReviewTriageRules` remains what every seller sees, the
-prediction store stays unread by any surface (§2.1 of the slice), and every candidate C number is
-labeled in-sample per §12.1 wherever it is written down.
+**As first written (2026-08-17, before candidate C):** no classifier reaches a product surface until
+the fresh holdout has been read and passed.
+
+**Product-owner amendment, 2026-08-17, after candidates C and C2 were measured on the 220.** Tuning
+ended at `triage-prompt/v4`; the fresh holdout is a second seller's corpus and does not exist yet. A
+**conservative production pilot** of C2 is permitted before it, under all of these — and the
+amendment is stated as a list of what the pilot may *not* do, because that is what makes it
+conservative rather than a rename of "ship":
+
+1. **Additive `확인 필요` promotion only.** The pilot may add an `AI 확인 필요` mark to a review that
+   `ReviewTriageRules` did not already call `NEEDS_ATTENTION`. It may not move any review *down*, and
+   it does not own `WATCH` / `FYI` — those remain the rating-only rule's, unchanged.
+2. **§8.9's guard, in the ordering as well as the store.** The final rank a seller sees is
+   `min(rules rank, AI rank)`; the SQL that orders the list has no expression that can lower a rules
+   `NEEDS_ATTENTION`.
+3. **`AI 확인 필요` is displayed as what it is** — a candidate's suggestion, marked as such, never
+   merged into the rules tier so that the seller cannot tell which mechanism spoke.
+4. **NAVER only, through `NaverOnlyClassifierGate`, per §8.3.** No Coupang review reaches the transport
+   under the pilot or any future one.
+5. **No marketplace write.** The pilot changes what the seller *sees* and records what they *do*; it
+   submits nothing anywhere. The existing human-in-the-loop boundary is untouched.
+6. **Opt-in per organisation**, and off by default. An org that has not enabled it sees exactly what
+   it saw before this section existed.
+7. **A pilot is not a `PASS`.** No metric produced by the pilot — correction rate, action rate,
+   anything — substitutes for the fresh holdout. §13.6's reading remains the only thing that clears
+   `v1` §5.
+
+**Where the fresh holdout comes from, in order of preference:** a **second real seller's corpus**
+first (§13.4's stated preference, now the primary route); a fresh time window of the same store
+second. The unlabeled remainder of the existing frame is **not** a holdout — it may be used only as
+**high-rating precision stress evidence**, so labeled wherever it is quoted, because §4.2 censused
+every 1–3★ row and what remains cannot test the 3★ band at all. The spent holdout is never reused
+(§8.10.1, §12.3).
+
+**What the pilot records is feedback, not learning.** Corrections, actions and behaviour events
+accumulate under `docs/slices/production-triage-feedback-draft-v1.md` §7–§8: explicit corrections
+are strong evidence, behaviour is weighted silver, ignore is never a negative label, and nothing
+changes a live classifier. A next version is built offline and measured against gold and a frozen
+snapshot before it is considered.
+
+**Every candidate C number remains labeled in-sample** per §12.1 wherever it is written down.
 
 ### 13.8 How large a fresh frame has to be, and why a month of reviews is not one
 
