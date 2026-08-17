@@ -44,10 +44,27 @@ public class TriagePrediction extends BaseEntity {
     @Column(nullable = false, length = 24)
     private ReviewTriageClassifier.Status status;
 
-    /** Null on any status but OK. Never FYI-by-default — RUBRIC v2 §8.5. */
+    /**
+     * The tier after RUBRIC v2 §8.9's additive guard — the only one anything downstream may read.
+     *
+     * <p>Never FYI-by-default (§8.5). Never below the rating-only rule's own answer (§8.9): a
+     * classification that failed lands here on the baseline, so this column is never emptier than
+     * what the product already shows.
+     */
     @Enumerated(EnumType.STRING)
     @Column(length = 24)
     private ReviewTriageTier tier;
+
+    /**
+     * What the model actually said, before the guard.
+     *
+     * <p>Kept because "did the prompt fix the behaviour, or is the guard carrying it?" is a real
+     * question about a candidate, and discarding the raw answer makes it permanently unanswerable.
+     * Null when the classification failed — which is exactly when the model said nothing.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "model_tier", length = 24)
+    private ReviewTriageTier modelTier;
 
     @Column(name = "reason_code", length = 32)
     private String reasonCode;

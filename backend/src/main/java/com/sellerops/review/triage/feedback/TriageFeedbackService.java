@@ -1,8 +1,10 @@
 package com.sellerops.review.triage.feedback;
 
 import com.sellerops.common.ApiException;
+import com.sellerops.review.triage.ReviewTriageRules;
 import com.sellerops.review.triage.ReviewTriageTier;
 import com.sellerops.review.triage.TriageReasonCode;
+import com.sellerops.review.triage.llm.AdditiveTriageDecision;
 import com.sellerops.review.triage.llm.ReviewTriageClassifier;
 import com.sellerops.review.triage.llm.TriagePrompt;
 import java.time.Clock;
@@ -58,15 +60,26 @@ public class TriageFeedbackService {
      *
      * <p>A failure is stored rather than dropped. A run whose failures vanished would report metrics
      * over the rows that happened to succeed and call that the model's accuracy.
+     *
+     * <p><b>The additive guard of RUBRIC v2 §8.9 is applied HERE</b>, not by the caller. It takes the
+     * rating and the body — the same two things the classifier was given — and computes the baseline
+     * itself, so no caller can weaken the invariant by supplying a baseline of its own. Neither value
+     * is stored; they exist inside this method only long enough to produce a tier.
+     *
+     * <p>Before the independent review of candidate B this guard ran in the evaluation harness and
+     * nowhere else, which meant every stored row stamped {@code +additive-guard/v1} onto a tier the
+     * guard had never seen.
      */
     @Transactional
-    public TriagePrediction record(UUID orgId, UUID reviewId, String modelId,
-                                   ReviewTriageClassifier.Result result) {
+    public TriagePrediction record(UUID orgId, UUID reviewId, Integer rating, String body,
+                                   String modelId, ReviewTriageClassifier.Result result) {
+        ReviewTriageTier baseline = ReviewTriageRules.tier(rating, body);
         TriagePrediction row = new TriagePrediction();
         row.setOrgId(orgId);
         row.setReviewId(reviewId);
         row.setStatus(result.status());
-        row.setTier(result.tier());
+        row.setModelTier(result.tier());
+        row.setTier(AdditiveTriageDecision.decide(baseline, result.tier()));
         row.setReasonCode(result.reasonCode());
         row.setTags(result.tags().isEmpty() ? null : String.join(",", result.tags()));
         row.setSuggestedNextAction(result.suggestedNextAction());
@@ -92,6 +105,9 @@ public class TriageFeedbackService {
                 .filter(p -> p.getOrgId().equals(orgId))
                 .orElseThrow(() -> ApiException.notFound("해당 분류 결과를 찾을 수 없습니다."));
         if (prediction.getStatus() != ReviewTriageClassifier.Status.OK) {
+            // A prediction with no model answer carries only the baseline, which is the rule's
+            // judgment rather than the classifier's. Correcting it would record a disagreement with
+            // an answer nobody gave.
             throw ApiException.badRequest("분류가 완료되지 않은 항목은 수정할 수 없습니다.");
         }
         if (reasonCode != null && TriageReasonCode.parse(reasonCode).isEmpty()) {

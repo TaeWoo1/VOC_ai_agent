@@ -332,3 +332,119 @@ is the same candidate. Anything else is a new row.
 
 The freeze, when it comes, names a single line of this table and nothing else moves afterwards. Then
 and only then does `HOLDOUT` get read, once, by `ReviewTriageEvalIT`.
+
+
+---
+
+## 11. Independent review of candidate B — 2026-08-17
+
+Scope as set by the product owner: contract, additive guard, prompt v2, fail-closed/privacy,
+evaluation harness, candidate identity. **No tuning was performed.** The `DEV` precision margin was
+not touched, and widening it is explicitly not this review's business — that uncertainty is what the
+holdout is for.
+
+### 11.1 Findings
+
+**D1 — the additive guard was harness-only. Real defect. Fixed.**
+`AdditiveTriageDecision` appeared in `main/` in exactly one place: as a *string* in
+`ApiTriageClassifier`'s version. The invariant itself ran only at `LlmTriageEvalIT:155`.
+`TriageFeedbackService.record` stored `result.tier()` — the raw model answer — while stamping
+`+additive-guard/v1` onto the row. **A version string asserting a property the row does not have is
+worse than one that says nothing.** Fixed by applying the guard on the write path, from a baseline
+the service computes itself out of the rating and body so no caller can weaken it, plus a
+`model_tier` column (`V42`) keeping the raw answer beside the guarded one.
+
+**D2 — the gate read `PRIMARY` only. Real defect. Fixed.**
+§11.1 requires both readings be reported, but `verdicts` was built from the primary row list alone.
+A candidate that passed on `PRIMARY` while `SENSITIVITY` failed would have been passing on four rows
+no customer wrote. It did not bite candidate B — but that is luck, not design.
+
+**D3 — two boundaries held only by construction. Hardened.**
+The holdout-unreachability and gate-is-the-only-door properties were true and verified by reading,
+which lasts until the next edit. `ClassifierBoundaryTest` now asserts all three structurally.
+
+**C1 — a genuine §8.5 / §8.9 contradiction, surfaced by fixing D1.** §8.5 said a failure may never
+fall back to `FYI`; §8.9 says a failure lands on the baseline, and for a 4–5★ review the baseline
+*is* `FYI`. Resolved in §8.5 by stating what the prohibition actually protects: the classifier may
+not **invent** `FYI` as its own answer. The row falls back to what the product already shows, carries
+`status = CLASSIFICATION_FAILED` and a null `model_tier`, and so is never mistakable for a judgment.
+Candidate B had 0 failures in all three passes, so this moves no number it produced.
+
+### 11.2 What passed review unchanged
+
+- **§6.3(4) meaning vs implementation** — `final = baseline OR candidate`, exhaustive over the whole
+  4×4 input space. The rubric says "may only ADD"; the code cannot do otherwise.
+- **The §8.7 amendment is not self-serving.** `v1` §5's three bars are carried verbatim — 0.30, 0.80,
+  0.05 appear unchanged in the gate. The amendment changed *how many readings* and *which one counts*,
+  and worst-of-three is **strictly stricter** than the single reading it replaced. It also could not
+  rescue candidate A, whose failure was §6.3(4) and is now structural.
+- **Holdout sealing** — one `splitOf` call, admitting `DEV` only; no `SPEND_HOLDOUT`; now asserted.
+- **Payload floor** — `Input` has two fields; the serialized request is asserted by allow-list, so any
+  new string fails by construction; Coupang and Product Context are blocked at the boundary.
+- **Fail-closed** — no path yields `FYI` except a model that said `FYI`, asserted exhaustively.
+- **Candidate identity** — vendor, model **snapshot**, prompt, schema, temperature, budget, effort and
+  guard all appear in `version()`; five distinct tunings give five distinct versions.
+- **The 3 passes ran one frozen candidate** — a single gate instance, constructed before the loop.
+- **The change log is not cherry-picked** — candidate A's better run is still in it.
+
+### 11.3 One risk accepted rather than fixed
+
+**Prompt v2's stage-1 item D enumerates four §3.1 reason codes as tier-forcing conditions**, while
+§3.1 says that column "is a description of the code, **not** a rule". The prompt is instructing a
+classifier rather than constraining a labeler, and D's direction only ever *raises* a tier — but the
+tension is real and is recorded rather than smoothed over. Changing it would be a new prompt version,
+a new candidate, and three fresh passes; doing that to tidy a wording question, with a passing gate in
+hand, would be tuning by another name.
+
+### 11.4 Do the fixes invalidate the measurement?
+
+No, and the reasoning is what matters:
+
+| fix | touches the request? | touches `version()`? | touches what the harness scored? |
+|---|---|---|---|
+| D1 write-path guard | no | no | no — the harness already applied the guard itself |
+| D2 both-readings gate | no | no | no — it re-reads numbers the passes already printed |
+| D3 boundary tests | no | no | no |
+| C1 §8.5 clarification | no | no | no — 0 failures in all three passes |
+
+So candidate B's three passes stand as measured, and no re-run is owed.
+
+---
+
+## 12. FREEZE — candidate B
+
+**Frozen 2026-08-17.**
+
+```
+llm-triage/v1+openai:gpt-5-2025-08-07+triage-prompt/v2+schema/v1+tdefault+out4000+effort:low+additive-guard/v1
+```
+
+**Frozen tree:** `bf2405fc` — the review-fix commit. Candidate B's three passes were run at
+`bbb94dda`; the fixes above changed no part of the request, the version, or the scoring, so the
+frozen artifact is the reviewed tree.
+
+**The gate, recomputed across both readings** from the three passes' own printed output:
+
+| bar | worst observed | limit | |
+|---|---|---|---|
+| recall | **0.794** (SENSITIVITY, pass 2) | ≥ 0.30 | PASS |
+| precision Wilson 95% low | **0.823** (SENSITIVITY, pass 2) | ≥ 0.80 | PASS |
+| 4–5★ false-positive rate | **0.000** (all six readings) | ≤ 0.05 | PASS |
+| classification failures | **0** of 107, three times | — | |
+
+### 12.1 Remaining known risks, stated before the holdout is opened
+
+1. **The precision margin is 0.023.** The bar is 0.80; the worst reading is 0.823. Across three
+   identical passes precision LB moved 0.060, so the run-to-run spread is more than twice the margin.
+   `HOLDOUT` is 113 rows, drawn the same way but never seen. **It is entirely plausible this lands
+   below 0.80 there, and that would be the reported result.** Deliberately not tuned against.
+2. **Recall has room; precision does not.** 0.794 against a 0.30 bar is not where the risk is.
+3. **The stable misses are `CANNOT_USE` ×2 in every pass**, plus `CRITIQUE_NO_REQUEST` and
+   `NEUTRAL_DESCRIPTION`, concentrated at 3★. Four of the seven rubric-crossing `DEV` rows still go
+   the annotator's way rather than the model's.
+4. **The §11.2 media ceiling is unchanged.** Every gold label and every candidate answer was made from
+   a body and a star rating, for reviews that may have carried photographs.
+5. **The classifier is non-deterministic**, and the frozen number is a floor, not an estimate.
+6. **The `suggestedNextAction` vocabulary is still an unratified product decision.** It gates nothing.
+7. **No product surface reads any of this.** `ReviewTriageRules` still owns every tier a seller sees;
+   `v1` §5's gate is cleared on `DEV` only, and `DEV` is not the reported number.

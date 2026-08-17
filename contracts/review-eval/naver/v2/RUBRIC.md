@@ -521,11 +521,30 @@ time someone adds a field to improve a number. So:
 ### 8.5 Fail closed, and never toward silence
 
 A classification that fails — transport error, timeout, or a response that does not satisfy the
-output schema — yields `CLASSIFICATION_FAILED`. **It may never fall back to `FYI`.**
+output schema — yields `CLASSIFICATION_FAILED`. **The classifier may never invent `FYI`.**
 
-`FYI` is the tier that means "nothing here for the seller". Defaulting a failure to it would convert
-every outage into a silent, invisible dismissal of real reviews, and the seller would have no way to
-tell an answered review from an unasked question. The failure states are visible states.
+`FYI` is the tier that means "nothing here for the seller". A classifier that defaulted a failure to
+it would convert every outage into a silent, invisible dismissal of real reviews, and the seller
+would have no way to tell an answered review from an unasked question. The failure states are visible
+states.
+
+**Clarified 2026-08-17, during the independent review of candidate B.** §8.9's guard makes a failed
+classification land on the **baseline** — and for a 4–5★ review the baseline *is* `FYI`, so the two
+sections read as contradicting each other. They do not, and the distinction is worth stating exactly:
+
+- what is forbidden is the **classifier producing `FYI` as its own answer** when it has no answer;
+- what happens instead is that the row falls back to **what the product already shows today**, which
+  for a 4–5★ review is `FYI` and for a 1–2★ review with text is `NEEDS_ATTENTION`;
+- the row carries `status = CLASSIFICATION_FAILED` and a **null `model_tier`**, so an outage is
+  never mistakable for a judgment — which is the harm this section names.
+
+The alternative — storing no tier at all on failure — was rejected because it puts the guard back in
+the reader, which is the defect this same review found in the write path.
+
+**Ordering honesty.** This clarification widens what may be stored, so it needs the §2.2 test: could
+it have been informed by a result? No. Candidate B recorded **0 classification failures across all
+three passes**, and the evaluation harness already scored failed rows at the baseline before this
+review began. It cannot move any number this contract has produced.
 
 ### 8.6 What a DEV result may and may not do to the prompt
 

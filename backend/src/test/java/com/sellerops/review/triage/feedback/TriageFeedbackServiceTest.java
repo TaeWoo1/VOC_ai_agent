@@ -48,7 +48,8 @@ class TriageFeedbackServiceTest {
     }
 
     private TriagePrediction recordOk() {
-        return service.record(ORG, REVIEW, "test-model", ReviewTriageClassifier.Result.ok(
+        // 5★ with text — the rule's own answer is FYI, so the guard leaves the model's answer alone.
+        return service.record(ORG, REVIEW, 5, "좋아요", "test-model", ReviewTriageClassifier.Result.ok(
                 ReviewTriageTier.FYI, "PRAISE_ONLY", List.of(), TriageSuggestedAction.NONE, "v/1"));
     }
 
@@ -69,16 +70,58 @@ class TriageFeedbackServiceTest {
     }
 
     @Test
-    @DisplayName("a failed classification is stored, not dropped")
+    @DisplayName("the stored tier passes through the additive guard, and the raw answer is kept beside it")
+    void theStoredTierIsGuarded() {
+        // The defect the independent review of candidate B found: this guard lived in the evaluation
+        // harness only, so every stored row stamped +additive-guard/v1 onto an unguarded tier.
+        // 2★ with text → the rule says 확인 필요; the model says WATCH; the row must hold both.
+        TriagePrediction row = service.record(ORG, REVIEW, 2, "포장이 눌렸어요", "test-model",
+                ReviewTriageClassifier.Result.ok(ReviewTriageTier.WATCH, "CRITIQUE_NO_REQUEST",
+                        List.of(), TriageSuggestedAction.MONITOR_REPEAT, "v/1"));
+
+        assertThat(row.getTier()).as("the guarded decision").isEqualTo(ReviewTriageTier.NEEDS_ATTENTION);
+        assertThat(row.getModelTier()).as("what the model actually said").isEqualTo(ReviewTriageTier.WATCH);
+    }
+
+    @Test
+    @DisplayName("a promotion is stored as the model gave it")
+    void promotionsPassThrough() {
+        // 5★ with text → the rule says FYI; the model promotes; the guard must not interfere.
+        TriagePrediction row = service.record(ORG, REVIEW, 5, "좋은데 하나 아쉬워요", "test-model",
+                ReviewTriageClassifier.Result.ok(ReviewTriageTier.NEEDS_ATTENTION,
+                        "PRAISE_WITH_CONCESSION", List.of(), TriageSuggestedAction.INVESTIGATE_PRODUCT, "v/1"));
+
+        assertThat(row.getTier()).isEqualTo(ReviewTriageTier.NEEDS_ATTENTION);
+        assertThat(row.getModelTier()).isEqualTo(ReviewTriageTier.NEEDS_ATTENTION);
+    }
+
+    @Test
+    @DisplayName("an outage stores the rule's own answer, never FYI and never null")
+    void aFailureStoresTheBaseline() {
+        TriagePrediction row = service.record(ORG, REVIEW, 1, "깨져서 왔어요", "test-model",
+                ReviewTriageClassifier.Result.failed("v/1", "http 529"));
+
+        assertThat(row.getTier()).as("an outage is no worse than the rule")
+                .isEqualTo(ReviewTriageTier.NEEDS_ATTENTION);
+        assertThat(row.getModelTier()).as("the model said nothing").isNull();
+    }
+
+    @Test
+    @DisplayName("a failed classification is stored, not dropped, and is never mistakable for a judgment")
     void failuresAreRecorded() {
         // A run whose failures vanished would report metrics over the rows that happened to succeed
         // and call that the model's accuracy.
-        TriagePrediction row = service.record(ORG, REVIEW, "test-model",
+        TriagePrediction row = service.record(ORG, REVIEW, 5, "좋아요", "test-model",
                 ReviewTriageClassifier.Result.failed("v/1", "http 529"));
 
         assertThat(row.getStatus()).isEqualTo(ReviewTriageClassifier.Status.CLASSIFICATION_FAILED);
-        assertThat(row.getTier()).as("a failure has no tier — never FYI").isNull();
         assertThat(row.getFailureReason()).isEqualTo("http 529");
+        // RUBRIC §8.5 as clarified: the tier here is the RULE's answer for a 5★ review, and it is
+        // marked CLASSIFICATION_FAILED with no model tier beside it. What §8.5 forbids is the
+        // classifier INVENTING FYI so an outage reads as a considered judgment; these three columns
+        // together make that impossible to mistake.
+        assertThat(row.getTier()).isEqualTo(ReviewTriageTier.FYI);
+        assertThat(row.getModelTier()).as("no model answer exists").isNull();
     }
 
     @Test
@@ -94,7 +137,7 @@ class TriageFeedbackServiceTest {
     @Test
     @DisplayName("a prediction that produced no tier cannot be corrected")
     void cannotCorrectAFailure() {
-        TriagePrediction failed = service.record(ORG, REVIEW, "m",
+        TriagePrediction failed = service.record(ORG, REVIEW, 5, "좋아요", "m",
                 ReviewTriageClassifier.Result.failed("v/1", "http 500"));
 
         // Otherwise it would record a disagreement with an answer nobody gave, and that row would
@@ -144,7 +187,7 @@ class TriageFeedbackServiceTest {
     @DisplayName("only CLASSIFIER_ERROR reaches a snapshot; SELLER_PREFERENCE never does")
     void theSeparationHolds() {
         TriageCorrection error = correctionFor(recordOk());
-        TriageCorrection preference = correctionFor(service.record(ORG, UUID.randomUUID(), "m",
+        TriageCorrection preference = correctionFor(service.record(ORG, UUID.randomUUID(), 5, "좋아요", "m",
                 ReviewTriageClassifier.Result.ok(ReviewTriageTier.FYI, "PRAISE_ONLY", List.of(),
                         TriageSuggestedAction.NONE, "v/1")));
 
