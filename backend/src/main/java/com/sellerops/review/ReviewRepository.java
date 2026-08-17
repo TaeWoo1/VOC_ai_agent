@@ -248,16 +248,19 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
     long countAiAttentionByChannel(@Param("orgId") UUID orgId, @Param("channelId") UUID channelId);
 
     /**
-     * Reviews the pilot has not yet classified under {@code version}, oldest first — what one run
-     * works through. A review classified under an OLDER version is pending again, so a new frozen
-     * candidate re-reads the record rather than inheriting a predecessor's marks under its own name.
+     * Reviews the pilot has not yet classified under {@code version}, <b>newest first</b> — what one
+     * run works through. Newest first because the pilot starts from the seller's most recent real
+     * reviews and works back only as far as an operator keeps pressing (product-owner decision,
+     * 2026-08-17: no automatic classification of the historical corpus). A review classified under
+     * an OLDER version is pending again, so a new frozen candidate re-reads the record rather than
+     * inheriting a predecessor's marks under its own name.
      */
     @Query("""
             select r from Review r
             where r.orgId = :orgId and r.channelId = :channelId
               and not exists (select 1 from AiTriageCurrent a
                               where a.reviewId = r.id and a.classifierVersion = :version)
-            order by r.receivedAt asc, r.id asc
+            order by r.receivedAt desc, r.id asc
             """)
     List<Review> findPendingAiTriage(@Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
                                      @Param("version") String version, Pageable pageable);

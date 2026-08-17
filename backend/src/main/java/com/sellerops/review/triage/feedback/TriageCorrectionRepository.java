@@ -13,4 +13,8 @@ public interface TriageCorrectionRepository extends JpaRepository<TriageCorrecti
     Optional<TriageCorrection> findByReviewId(UUID reviewId);
 
     List<TriageCorrection> findByOrgIdAndReviewIdIn(UUID orgId, Collection<UUID> reviewIds);
+
+    /** Corrections made while the pilot's mark was what was shown, over these reviews. */
+    List<TriageCorrection> findByOrgIdAndShownSourceAndReviewIdIn(UUID orgId, TriageShownSource shown,
+                                                                  Collection<UUID> reviewIds);
 }

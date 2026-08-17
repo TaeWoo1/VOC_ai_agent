@@ -42,6 +42,24 @@ public class AiTriagePilotService {
                             int refused, int remaining) {
     }
 
+    /**
+     * The pilot's funnel for one account — DISTINCT reviews at each step, over the reviews the pilot
+     * currently marks on that account's channel.
+     *
+     * <p><b>Ignore is not a number here.</b> {@code aiAttentionShown - opened} is how many marked
+     * reviews were rendered and not opened; that is reported as two rows and never as a step called
+     * "ignored", because a review nobody opened is a review nobody has said anything about
+     * (feedback draft §7.2). {@code agree} and {@code disagree} are the seller's explicit answers to
+     * an AI-shown row; every other row is unanswered, not negative.
+     *
+     * <p>Counts, not rates. A rate over a dozen rows would read as a measurement, and §13.7 item 7
+     * says nothing the pilot produces is one.
+     */
+    public record Funnel(String classifierVersion, long marked, long aiAttentionShown, long opened,
+                         long originalViewed, long agree, long disagree, long actionStarted,
+                         long actionCompleted, long actionNotNeeded) {
+    }
+
     private final AiTriagePilotProperties properties;
     private final ReviewRepository reviews;
     private final SellerAccountRepository accounts;
@@ -49,20 +67,36 @@ public class AiTriagePilotService {
     private final AiTriageCurrentRepository current;
     private final TriageFeedbackService feedback;
     private final NaverOnlyClassifierGate gate;
+    private final com.sellerops.review.triage.feedback.TriageCorrectionRepository corrections;
+    private final com.sellerops.review.triage.feedback.TriageActionRepository actions;
+    private final com.sellerops.review.triage.feedback.TriageBehaviorEventRepository behavior;
 
     @Autowired
     public AiTriagePilotService(AiTriagePilotProperties properties, ReviewRepository reviews,
                                 SellerAccountRepository accounts, ChannelRepository channels,
-                                AiTriageCurrentRepository current, TriageFeedbackService feedback) {
+                                AiTriageCurrentRepository current, TriageFeedbackService feedback,
+                                com.sellerops.review.triage.feedback.TriageCorrectionRepository corrections,
+                                com.sellerops.review.triage.feedback.TriageActionRepository actions,
+                                com.sellerops.review.triage.feedback.TriageBehaviorEventRepository behavior) {
         this(properties, reviews, accounts, channels, current, feedback,
-                properties.enabled() ? gateFrom(properties) : null);
+                properties.enabled() ? gateFrom(properties) : null, corrections, actions, behavior);
     }
 
     /** Test seam: a gate whose classifier is a fake, or null for "off". Public so read-path tests can compose it. */
     public AiTriagePilotService(AiTriagePilotProperties properties, ReviewRepository reviews,
-                         SellerAccountRepository accounts, ChannelRepository channels,
-                         AiTriageCurrentRepository current, TriageFeedbackService feedback,
-                         NaverOnlyClassifierGate gate) {
+                                SellerAccountRepository accounts, ChannelRepository channels,
+                                AiTriageCurrentRepository current, TriageFeedbackService feedback,
+                                NaverOnlyClassifierGate gate) {
+        this(properties, reviews, accounts, channels, current, feedback, gate, null, null, null);
+    }
+
+    private AiTriagePilotService(AiTriagePilotProperties properties, ReviewRepository reviews,
+                                 SellerAccountRepository accounts, ChannelRepository channels,
+                                 AiTriageCurrentRepository current, TriageFeedbackService feedback,
+                                 NaverOnlyClassifierGate gate,
+                                 com.sellerops.review.triage.feedback.TriageCorrectionRepository corrections,
+                                 com.sellerops.review.triage.feedback.TriageActionRepository actions,
+                                 com.sellerops.review.triage.feedback.TriageBehaviorEventRepository behavior) {
         this.properties = properties;
         this.reviews = reviews;
         this.accounts = accounts;
@@ -70,6 +104,43 @@ public class AiTriagePilotService {
         this.current = current;
         this.feedback = feedback;
         this.gate = gate;
+        this.corrections = corrections;
+        this.actions = actions;
+        this.behavior = behavior;
+    }
+
+    public Funnel funnel(UUID orgId, UUID accountId) {
+        SellerAccount account = accounts.findById(accountId)
+                .filter(a -> orgId.equals(a.getOrgId()))
+                .orElseThrow(() -> ApiException.notFound("판매 계정을 찾을 수 없습니다."));
+        String version = classifierVersion();
+        // The population: reviews on this account's channel the pilot currently marks.
+        List<UUID> marked = current.findByOrgIdAndAiAttentionTrue(orgId).stream()
+                .map(com.sellerops.review.triage.feedback.AiTriageCurrent::getReviewId)
+                .filter(id -> reviews.findByIdAndOrgId(id, orgId)
+                        .map(r -> account.getChannelId().equals(r.getChannelId())).orElse(false))
+                .toList();
+        if (marked.isEmpty()) {
+            return new Funnel(version, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        }
+        var shown = com.sellerops.review.triage.feedback.TriageShownSource.AI;
+        long agree = 0;
+        long disagree = 0;
+        for (var c : corrections.findByOrgIdAndShownSourceAndReviewIdIn(orgId, shown, marked)) {
+            if (c.getCorrectedTier() == com.sellerops.review.triage.ReviewTriageTier.NEEDS_ATTENTION) {
+                agree++;
+            } else {
+                disagree++;
+            }
+        }
+        return new Funnel(version, marked.size(),
+                behavior.countDistinctReviews(orgId, com.sellerops.review.triage.feedback.TriageBehaviorKind.EXPOSED, shown, marked),
+                behavior.countDistinctReviews(orgId, com.sellerops.review.triage.feedback.TriageBehaviorKind.OPENED, shown, marked),
+                behavior.countDistinctReviews(orgId, com.sellerops.review.triage.feedback.TriageBehaviorKind.ORIGINAL_VIEWED, shown, marked),
+                agree, disagree,
+                actions.countDistinctReviews(orgId, com.sellerops.review.triage.feedback.TriageActionKind.STARTED, shown, marked),
+                actions.countDistinctReviews(orgId, com.sellerops.review.triage.feedback.TriageActionKind.COMPLETED, shown, marked),
+                actions.countDistinctReviews(orgId, com.sellerops.review.triage.feedback.TriageActionKind.NOT_NEEDED, shown, marked));
     }
 
     private static NaverOnlyClassifierGate gateFrom(AiTriagePilotProperties p) {
@@ -89,10 +160,14 @@ public class AiTriagePilotService {
     }
 
     /**
-     * Classify the account's reviews the pilot has not yet seen under the current version, oldest
-     * first, up to the run bound.
+     * Classify the account's reviews the pilot has not yet seen under the current version, newest
+     * first, up to {@code limit} — clamped to the configured run bound, never above it.
+     *
+     * <p>{@code limit} is the operator's per-press choice ("50 this time"); the configured
+     * {@code maxPerRun} is the ceiling nobody at a keyboard can raise. Both exist so the pilot's
+     * spend is a number someone typed and a number someone configured, and the smaller wins.
      */
-    public RunResult run(UUID orgId, UUID accountId) {
+    public RunResult run(UUID orgId, UUID accountId, Integer limit) {
         if (!isEnabledFor(orgId)) {
             throw ApiException.badRequest("AI 분류 파일럿이 이 조직에서 활성화되어 있지 않습니다.");
         }
@@ -102,8 +177,9 @@ public class AiTriagePilotService {
         String channelCode = channels.findById(account.getChannelId()).map(Channel::getCode).orElse("UNKNOWN");
         String version = gate.version();
 
+        int bound = limit == null || limit <= 0 ? properties.maxPerRun() : Math.min(limit, properties.maxPerRun());
         List<Review> pending = reviews.findPendingAiTriage(orgId, account.getChannelId(), version,
-                org.springframework.data.domain.PageRequest.of(0, properties.maxPerRun()));
+                org.springframework.data.domain.PageRequest.of(0, bound));
         long remaining = reviews.countPendingAiTriage(orgId, account.getChannelId(), version);
 
         int classified = 0;

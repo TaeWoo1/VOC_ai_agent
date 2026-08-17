@@ -13,4 +13,7 @@ public interface AiTriageCurrentRepository extends JpaRepository<AiTriageCurrent
     List<AiTriageCurrent> findByOrgIdAndReviewIdIn(UUID orgId, Collection<UUID> reviewIds);
 
     long countByOrgIdAndReviewIdInAndAiAttentionTrue(UUID orgId, Collection<UUID> reviewIds);
+
+    /** Every review of this org the pilot currently marks — the funnel's population. */
+    List<AiTriageCurrent> findByOrgIdAndAiAttentionTrue(UUID orgId);
 }

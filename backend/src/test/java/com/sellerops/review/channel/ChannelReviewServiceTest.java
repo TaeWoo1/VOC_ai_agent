@@ -349,6 +349,6 @@ class ChannelReviewServiceTest {
     /** The pilot OFF — what every org that has not opted in gets, and the baseline these tests assert. */
     static AiTriagePilotService pilotOff() {
         AiTriagePilotProperties off = new AiTriagePilotProperties(false, "", "OPENAI", "m", "", true, 4000, "low", 100);
-        return new AiTriagePilotService(off, null, null, null, null, null);
+        return new AiTriagePilotService(off, null, null, null, null, null, null);
     }
 }

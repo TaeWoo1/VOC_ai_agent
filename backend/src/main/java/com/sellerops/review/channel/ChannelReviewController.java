@@ -129,7 +129,20 @@ public class ChannelReviewController {
      */
     @PostMapping("/ai-triage/runs")
     public AiTriagePilotService.RunResult runAiTriage(@AuthenticationPrincipal AuthPrincipal principal,
+                                                      @PathVariable UUID accountId,
+                                                      @RequestParam(required = false) Integer limit) {
+        return pilot.run(principal.orgId(), accountId, limit);
+    }
+
+    /**
+     * The pilot's funnel for this account — counts of DISTINCT reviews at each step, from
+     * {@code AI_ATTENTION_SHOWN} down to {@code ACTION_COMPLETED}. Read-only. What is NOT here is any
+     * "ignored" number: a review shown and not opened is a review nobody has said anything about,
+     * and it is reported as the difference between two rows, never as a verdict.
+     */
+    @GetMapping("/ai-triage/funnel")
+    public AiTriagePilotService.Funnel aiTriageFunnel(@AuthenticationPrincipal AuthPrincipal principal,
                                                       @PathVariable UUID accountId) {
-        return pilot.run(principal.orgId(), accountId);
+        return pilot.funnel(principal.orgId(), accountId);
     }
 }

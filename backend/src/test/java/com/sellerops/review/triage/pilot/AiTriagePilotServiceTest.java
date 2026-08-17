@@ -92,16 +92,16 @@ class AiTriagePilotServiceTest {
     @Test
     @DisplayName("off by default: an org not opted in cannot run, and nothing is sent")
     void offByDefault() {
-        AiTriagePilotService off = new AiTriagePilotService(props(false), reviews, accounts, channels, current, feedback);
+        AiTriagePilotService off = new AiTriagePilotService(props(false), reviews, accounts, channels, current, feedback, null);
         assertThat(off.isEnabledFor(ORG)).isFalse();
         assertThat(off.classifierVersion()).isNull();
-        assertThatThrownBy(() -> off.run(ORG, ACCOUNT)).isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> off.run(ORG, ACCOUNT, null)).isInstanceOf(ApiException.class);
 
         // Master switch on, but THIS org is not listed: still off for it.
         AiTriagePilotService other = new AiTriagePilotService(props(true, UUID.randomUUID()), reviews, accounts,
                 channels, current, feedback, gate(ReviewTriageTier.NEEDS_ATTENTION));
         assertThat(other.isEnabledFor(ORG)).isFalse();
-        assertThatThrownBy(() -> other.run(ORG, ACCOUNT)).isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> other.run(ORG, ACCOUNT, null)).isInstanceOf(ApiException.class);
         assertThat(calls.get()).isZero();
         verify(feedback, never()).record(any(), any(), any(), any(), any(), any());
     }
@@ -119,7 +119,7 @@ class AiTriagePilotServiceTest {
 
         AiTriagePilotService pilot = new AiTriagePilotService(props(true, ORG), reviews, accounts, channels, current,
                 feedback, gate(ReviewTriageTier.NEEDS_ATTENTION));
-        AiTriagePilotService.RunResult result = pilot.run(ORG, ACCOUNT);
+        AiTriagePilotService.RunResult result = pilot.run(ORG, ACCOUNT, null);
 
         assertThat(result.considered()).isEqualTo(2);
         assertThat(result.classified()).isEqualTo(2);
@@ -145,7 +145,7 @@ class AiTriagePilotServiceTest {
 
         AiTriagePilotService pilot = new AiTriagePilotService(props(true, ORG), reviews, accounts, channels, current,
                 feedback, gate(ReviewTriageTier.NEEDS_ATTENTION));
-        AiTriagePilotService.RunResult result = pilot.run(ORG, ACCOUNT);
+        AiTriagePilotService.RunResult result = pilot.run(ORG, ACCOUNT, null);
 
         assertThat(calls.get()).as("the classifier was never reached").isZero();
         assertThat(result.refused()).isEqualTo(1);
@@ -154,6 +154,37 @@ class AiTriagePilotServiceTest {
         // identical to a run that classified it and found nothing.
         verify(feedback).record(eq(ORG), any(), eq(5), eq("좋아요"), anyString(),
                 org.mockito.ArgumentMatchers.argThat(r -> r.status() == ReviewTriageClassifier.Status.UNCLASSIFIED));
+    }
+
+    @Test
+    @DisplayName("a per-press limit is honoured, and never above the configured ceiling")
+    void thePerPressLimitIsClampedToTheCeiling() {
+        account("NAVER");
+        when(reviews.findPendingAiTriage(eq(ORG), eq(CHANNEL), anyString(), any(Pageable.class))).thenReturn(List.of());
+        when(reviews.countPendingAiTriage(eq(ORG), eq(CHANNEL), anyString())).thenReturn(0L);
+        AiTriagePilotService pilot = new AiTriagePilotService(props(true, ORG), reviews, accounts, channels, current,
+                feedback, gate(ReviewTriageTier.NEEDS_ATTENTION));
+
+        pilot.run(ORG, ACCOUNT, 1);
+        verify(reviews).findPendingAiTriage(eq(ORG), eq(CHANNEL), anyString(),
+                org.mockito.ArgumentMatchers.argThat((Pageable p) -> p.getPageSize() == 1));
+        // maxPerRun in props() is 2. Asking for 500 gets 2.
+        pilot.run(ORG, ACCOUNT, 500);
+        verify(reviews).findPendingAiTriage(eq(ORG), eq(CHANNEL), anyString(),
+                org.mockito.ArgumentMatchers.argThat((Pageable p) -> p.getPageSize() == 2));
+    }
+
+    @Test
+    @DisplayName("the funnel counts distinct reviews per step, and has no step called ignored")
+    void theFunnelHasNoIgnoredStep() {
+        // Structural: the record's components ARE the funnel. Adding an "ignored" or "skipped" count
+        // is the thing feedback draft §7.2 forbids, and it would fail here by name.
+        assertThat(AiTriagePilotService.Funnel.class.getRecordComponents())
+                .extracting(java.lang.reflect.RecordComponent::getName)
+                .containsExactly("classifierVersion", "marked", "aiAttentionShown", "opened", "originalViewed",
+                        "agree", "disagree", "actionStarted", "actionCompleted", "actionNotNeeded")
+                .noneMatch(n -> n.toLowerCase().contains("ignor") || n.toLowerCase().contains("skip")
+                        || n.toLowerCase().contains("rate"));
     }
 
     @Test
