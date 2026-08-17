@@ -543,6 +543,34 @@ before anyone knew what would be convenient to send.
 The mitigation is the payload floor above, which bounds what travels — it does not make the transfer
 local, and it is stated as the cost of the decision rather than as its absolution.
 
+#### 8.3.1 Widened to three channels — NAVER, Cafe24, Coupang (2026-08-17)
+
+**Product-owner decision, 2026-08-17, made in the demo-readiness unit and recorded before the code
+that acts on it.** §8.3 above opened one channel. This subsection opens two more, **for the §13.7
+conservative pilot and the same purpose only**: the additive `AI 확인 필요` suggestion.
+
+- **Permitted channels:** `NAVER`, `CAFE24`, `COUPANG`. The list lives in one class
+  (`ReviewTriageChannelCapability`) and the boundary (`ReviewTriageChannelGate`, the renamed
+  `NaverOnlyClassifierGate`) refuses everything else as `UNCLASSIFIED`. Every other channel — ESM,
+  11번가, anything future — is outside until this list changes in writing.
+- **Payload floor unchanged.** Rating and body, nothing else, on every channel — §8.4's closed input
+  record has nowhere to put a channel, and the channel is not sent.
+- **Coupang.** §8.3's "any Coupang review" prohibition and `docs/coupang_review_policy_gate_v1.md`
+  D6 ("no transmission to external LLMs in this unit") said the same thing from two documents. Both
+  are amended today, by the same decision, and the Coupang document records its half as §6.1.2 in the
+  same shape as the D5 lifting: **a product decision, not a legal determination**, made with the
+  clauses in view. It runs under every other D-limit unchanged — D3 (no author value) is not touched
+  because the payload never had one; D8 (no reply, no marketplace write) is not touched because the
+  pilot writes nothing anywhere.
+- **What does not widen.** No claim about a Coupang or Cafe24 classifier's *accuracy* follows: the
+  gold rubric, the spent v2 holdout and every number in this contract are NAVER-only. The pilot on
+  those channels is a pilot on those channels; §13.7 item 7 (a pilot is not a PASS) applies with
+  extra force where there is no channel gold at all.
+
+⚠ **This is production cloud transmission of real customer prose from two more channels.** The
+mitigations are those of §8.3 — payload floor, opt-in per org, off by default, operator-triggered,
+bounded — and they are stated as the cost of the decision, not as its absolution.
+
 ### 8.4 The payload floor is a mechanism, not an instruction
 
 A rule about what may be sent, enforced by whoever remembers it, is the rule that fails the first
@@ -553,8 +581,8 @@ time someone adds a field to improve a number. So:
 - a test asserts the serialized request against **the whole outgoing payload**, not against the
   builder's intent — the same shape as `build-annotator-package.mjs`'s artifact check, and for the
   same reason;
-- the channel is checked at the boundary, so a non-NAVER review **cannot reach the transport at
-  all**.
+- the channel is checked at the boundary, so a review from a channel outside §8.3 / §8.3.1's list
+  **cannot reach the transport at all**.
 
 ### 8.5 Fail closed, and never toward silence
 
@@ -1117,8 +1145,9 @@ conservative rather than a rename of "ship":
    `NEEDS_ATTENTION`.
 3. **`AI 확인 필요` is displayed as what it is** — a candidate's suggestion, marked as such, never
    merged into the rules tier so that the seller cannot tell which mechanism spoke.
-4. **NAVER only, through `NaverOnlyClassifierGate`, per §8.3.** No Coupang review reaches the transport
-   under the pilot or any future one.
+4. **The §8.3 / §8.3.1 channels only — `NAVER`, `CAFE24`, `COUPANG` — through
+   `ReviewTriageChannelGate`.** No review from any other channel reaches the transport under the pilot
+   or any future one. *(Amended 2026-08-17 from "NAVER only"; §8.3.1 records the decision.)*
 5. **No marketplace write.** The pilot changes what the seller *sees* and records what they *do*; it
    submits nothing anywhere. The existing human-in-the-loop boundary is untouched.
 6. **Opt-in per organisation**, and off by default. An org that has not enabled it sees exactly what
