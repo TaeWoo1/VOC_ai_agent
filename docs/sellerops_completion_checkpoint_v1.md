@@ -247,6 +247,7 @@ the canonical contract `docs/sellerops_live_approval_contract.md` (§3: default 
    tests-only; guided-FE e2e walk vs the proven backend boundary; reply submission stays gate-locked).
 3. **ESM+ inquiry / API-first** — resolve the INQUIRY read skeleton `NEEDS_VERIFICATION` via a
    constrained read-only Gate-2 probe (separate approval), then decide API-first vs Excel import.
+   *(2026-08-17: **PAUSED** — channel expansion paused; visible channels NAVER/Coupang/Cafe24 only. `docs/product_assembly_ia_v1.md` §2.)*
 
 (Cross-reference the operational-capability roadmap in canonical §8 v1.7.)
 

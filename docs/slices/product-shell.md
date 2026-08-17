@@ -1,6 +1,9 @@
 # Slice: Product Shell (execution contract)
 
-> Status: **ACTIVE SLICE.** 이 문서는 첫 프론트 슬라이스의 정확한 실행 계약이다. 상위 정본은
+> Status: **SUPERSEDED (2026-08-17).** 이 슬라이스는 v2 프론트 재구성(커밋 `fc5f86ed`, 2026-08-03)으로 대체됐고,
+> 현재 IA·화면 책임의 정본은 `docs/product_assembly_ia_v1.md`다. 아래는 기록으로 남긴다.
+>
+> (원문) Status: ACTIVE SLICE. 이 문서는 첫 프론트 슬라이스의 정확한 실행 계약이다. 상위 정본은
 > `docs/sellerops_frontend_spec.md` §17-A(Product Shell 트랙)이며, 본 문서는 그 슬라이스의 포함/제외/
 > 수용 기준을 코드 착수 전에 못박는다. 승인된 구조만 구현하고, 미해결 UX는 [UX-DECISION]으로 남긴다.
 

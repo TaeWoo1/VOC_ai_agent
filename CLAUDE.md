@@ -9,6 +9,12 @@ It carries operational work between human decisions — normalizing reviews, inq
 reports across the seller's channels. It is **not** a scraper dump, a browser click-bot, or a
 VOC/cardnews project.
 
+**Product assembly (2026-08-17, product-owner decision):** the product is **workflow-centric**
+(홈 / 리뷰 / 문의 / 주문 / 채널 연결), not channel-centric; channel expansion is **paused** and the
+seller-visible channel set is exactly **NAVER / Coupang / Cafe24** (a channel on screen is a channel
+that is actually usable — `ProductChannels.java`, `lib/productChannels.ts`). Canonical:
+`docs/product_assembly_ia_v1.md`.
+
 Canonical product / strategy / state reference: `docs/sellerops_canonical_reference.md` (re-derive
 state before citing at any later commit).
 
@@ -79,10 +85,13 @@ Read the canonical documents before product/frontend work:
 0. `docs/product_operating_model.md` — anti-drift orientation: what SellerOps is, who for, the open
    channel set, acquisition posture, user journey. Orientation only; points, owns nothing.
 1. `docs/sellerops_canonical_reference.md` — product identity, strategy, honest state, authority.
-2. `docs/product-scope-v1.md` — product scope contract (**scope lock v1.6**).
-3. `docs/sellerops_frontend_spec.md` — frontend source of truth.
-4. `docs/multi-channel-connector-roadmap.md` — connector strategy; §4.1 = living capability table.
-5. `docs/sellerops_local_agent_runtime_adr.md` — local-agent runtime & guided-connection boundaries.
+2. `docs/product-scope-v1.md` — product scope contract (**scope lock v1.8**).
+3. `docs/product_assembly_ia_v1.md` — **product IA, screen responsibility, visible channel set** (supersedes
+   frontend spec §5–§8·§17-A).
+4. `docs/sellerops_frontend_spec.md` — frontend principles (states, seller language, a11y, capability
+   honesty, guided connection, Action Window screens).
+5. `docs/multi-channel-connector-roadmap.md` — connector strategy; §4.1 = living capability table.
+6. `docs/sellerops_local_agent_runtime_adr.md` — local-agent runtime & guided-connection boundaries.
 
 Channel lessons (derived from §4.1, non-authoritative): `docs/channel_capability_ledger.md`.
 
@@ -96,7 +105,8 @@ ESM live capture → `docs/esm/` (`live-capture-checklist.md`); review operation
 
 1. explicit product-owner decisions from the current task
 2. `docs/product-scope-v1.md`
-3. `docs/sellerops_frontend_spec.md`
+3. `docs/product_assembly_ia_v1.md` (IA / screens / visible channels), then `docs/sellerops_frontend_spec.md`
+   (frontend principles)
 4. `docs/sellerops_local_agent_runtime_adr.md`
 5. `docs/multi-channel-connector-roadmap.md` §4.1 (living capability table)
 6. the active slice document (`docs/slices/*`)

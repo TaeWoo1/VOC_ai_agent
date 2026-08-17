@@ -338,7 +338,8 @@ default production design, not yet realized as the cross-channel default).** **�
 - **정직성·게이트**: Action Window는 §4.1 현행표에 EXPORT 방식이 선언·검증된 채널에만 실제 배정하며,
   **실제 마켓 사용은 정책 해명(마켓 약관상 셀러-통제 오버레이·다운로드 감지 허용 범위) + 제품 오너 승인**
   선결(§8). **어떤 마켓의 승인도 받지 않았다**(§10). 첫 라이브 보정 후보 = **ESM+(Gmarket/Auction) 리뷰
-  export**(별도 승인).
+  export**(별도 승인). *(2026-08-17: **PAUSED** — 채널 확장 일시 중단, 노출 채널 NAVER/Coupang/Cafe24 3종
+  (`docs/product_assembly_ia_v1.md` §2). 두 번째 Action Window 채널은 실제로 Coupang REVIEW가 됐다(§4.1).)*
 
 ### 5.2 채널별 연결 결정 (2026-07-08, 보수적 — 구현/문서/라이브 검증/미래 분리)
 

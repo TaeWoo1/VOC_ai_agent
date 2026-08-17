@@ -6,6 +6,8 @@
 > - **Product / strategy / state authority:** [`docs/sellerops_canonical_reference.md`](sellerops_canonical_reference.md)
 > - **Repo overview & working rules:** [`README.md`](../README.md) · [`CLAUDE.md`](../CLAUDE.md)
 > - **Action Window / runtime status of record:** [`docs/action-window-runtime/HANDOFF.md`](action-window-runtime/HANDOFF.md)
+> - **Product IA / visible channels (2026-08-17):** [`docs/product_assembly_ia_v1.md`](product_assembly_ia_v1.md) —
+>   the "Product Shell IA" described in §4 below (채널·업로드·알림 under `/settings/*`) is superseded.
 >
 > Everything below is preserved unchanged for historical lineage. Do not rely on its paths,
 > commit SHAs, scope-lock versions, or 구현됨/미구현 claims as current.
