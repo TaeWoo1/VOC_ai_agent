@@ -986,3 +986,23 @@ What was proven, in order, against real PostgreSQL 15 with the backend started f
 
 **Not proven here, and not claimed**: that C2 generalises. One promotion in fifty recent reviews of
 the development store is one data point in a funnel, not a measurement of anything.
+
+## 16. Demo-ready close (2026-08-17)
+
+**Canonical entry point from here on: `docs/workstreams/review_ai_triage_demo.md`.** This section
+only records what the unit changed and points there.
+
+- **Channels:** RUBRIC §8.3.1 + Coupang gate §6.1.2 (product-owner decision) widen the pilot's
+  transmission to NAVER / Cafe24 / Coupang. `NaverOnlyClassifierGate` → `ReviewTriageChannelGate`,
+  reading `ReviewTriageChannelCapability` (the one place the table is stated). Everything else: 404
+  door on every triage route, `UNCLASSIFIED` at the gate.
+- **Events:** `contracts/review-triage-events/v1` — kinds renamed (V44), `AI_ATTENTION_SHOWN`
+  server-resolved, `REPLY_*` channel-gated (never Coupang), locate silver only where a locate surface
+  exists, no `IGNORED`. Per-review timeline endpoint; funnel in the contract's names.
+- **Separation:** `TriageDisplayDecision` is the single resolver for what was shown, used by the read
+  path and every event stamp; prediction / display / explicit feedback / behaviour remain four tables.
+- **Live evidence and its limits:** §8 of the demo doc — 3-channel vendor path LIVE_PROVEN
+  (3/3, 22/22, 10/10 classified, **0 AI-added marks this session**); mark→ordering→funnel live proof
+  is still the earlier single NAVER row; Cafe24/Coupang mark path integration-tested only; Coupang
+  `MARKETPLACE_LOCATED` from a local-agent press NOT LIVE_PROVEN.
+- **Still not a PASS.** Second-seller fresh holdout (§13) is the next gate; spent holdout sealed.
