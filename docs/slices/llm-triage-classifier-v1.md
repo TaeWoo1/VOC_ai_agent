@@ -938,3 +938,51 @@ inheriting a predecessor's marks under its own name.
    every tier.
 3. **The remaining-frame stress read** — permitted as high-rating precision stress evidence only, so
    labeled. Not started.
+
+### 15.7 The funnel
+
+`GET .../ai-triage/funnel` — distinct reviews at each step, over the reviews the pilot currently
+marks on the account:
+
+```
+AI_ATTENTION_SHOWN → OPENED → ORIGINAL_VIEWED → agree / disagree → ACTION_STARTED → ACTION_COMPLETED
+                                                                                (+ ACTION_NOT_NEEDED)
+```
+
+Counts, never rates. **There is no step called ignored** — `marked − aiAttentionShown` and
+`aiAttentionShown − opened` are differences between rows, never a verdict, because a review nobody
+opened is a review nobody has said anything about (feedback draft §7.2). A test pins the record's
+components by name so an "ignored" count cannot be added quietly. Zero for an org not opted in.
+
+### 15.8 Local product proof — first pilot org, one bounded run
+
+**2026-08-17.** Pilot org = the first seller org, owner of the 3,858-row NAVER corpus
+(`7146c50f-…`); NAVER account `bdccb7a7-…`. **Product-owner decision: this org's pilot is not
+generalization or fresh-holdout evidence** — it is the same store the candidate was developed on.
+
+What was proven, in order, against real PostgreSQL 15 with the backend started from
+`backend/.env.local`:
+
+1. **V41–V43 applied cleanly** — the first time these migrations ran anywhere outside H2.
+2. **Pilot OFF baseline**: list serves 3,880 rows (the D1 path exercised on PG), summary
+   14 / 91 / 3,775, `aiPilotEnabled=false`, run → 400, funnel empty.
+3. **Pilot ON, one run, `limit=50`, newest first**: 50 considered · **50 classified** · **1 marked** ·
+   0 failed · 0 refused · 3,830 remaining untouched. ~2 minutes. Version stamped on every row:
+   `llm-triage/v1+openai:gpt-5-2025-08-07+triage-prompt/v4+schema/v1+tdefault+out4000+effort:low+additive-guard/v1`.
+4. **The invariants on real data**: the one promoted row is 3★, rules `WATCH`, model
+   `NEEDS_ATTENTION` / `DEFECT_OR_DAMAGE`; it sorts to position 0 with its 지켜보기 chip intact and
+   the `AI 확인 필요` chip beside it; summary went **14 → 15 확인 필요, 91 → 90 지켜보기, aiAttention 1**
+   — additive, partition preserved. The other 49: 48 `FYI`/`FYI`, 1 `WATCH`/`WATCH` — model and
+   rule agree, no mark, no demotion possible.
+5. **The UI**: opened the marked row; disclosure line present; pressed 확인 필요가 맞아요 and 조치 시작.
+   Both showed pressed; **the row did not move and nothing was hidden**; `reviews` had zero rows
+   updated.
+6. **The funnel after that session**: marked 1 · shown 1 · opened 1 · originalViewed 0 · **agree 1**
+   · disagree 0 · **actionStarted 1** · completed 0. The spine holds one correction and one action
+   with `shown_source=AI` linked to the prediction, one `OPENED` and one `EXPOSED` for the marked
+   row as `AI`, and fourteen `EXPOSED` for the rules 확인 필요 rows on the page as `RULES` with no
+   prediction — exactly the separation §7 asks for.
+7. **The key never reached a log** — grep of the backend log for the key prefix: 0.
+
+**Not proven here, and not claimed**: that C2 generalises. One promotion in fifty recent reviews of
+the development store is one data point in a funnel, not a measurement of anything.
