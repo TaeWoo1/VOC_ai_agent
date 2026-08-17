@@ -193,3 +193,111 @@ Repository-verifiable facts are settled above. These are not, and each is named 
 - **Repository-verifiable, not yet checked** — whether `channel_products` can carry the product
   identity a `SELLER_PREFERENCE` policy would have to be scoped to. That is step 3 of the Product
   Context unit and must not be pre-empted here.
+
+---
+
+## 7. Implicit behaviour — silver, weighted, and never a label
+
+**Product-owner decision, 2026-08-17.** The spine also records what the operator *did*, not only what
+they said. Five signals:
+
+| signal | what it plausibly means | what else it plausibly means |
+|---|---|---|
+| opened the review | it looked worth reading | it was at the top of the queue |
+| viewed the original on the marketplace | the text was not enough | curiosity, or a habit |
+| started an action | the classifier was right | the operator was working the queue in order |
+| completed an action | **the classifier was right** | — this one is hard to explain away |
+| passed over it repeatedly | nothing to do here | lunch, a busy week, a long queue, a different operator |
+
+The right-hand column is the whole reason this section exists. **Every implicit signal is confounded
+by queue position, session length, notification timing, staffing and mood**, and none of them was
+produced by anyone answering a question. A correction is testimony; a click is a trace.
+
+### 7.1 Silver, and what that word forbids
+
+Implicit behaviour is stored as **weighted silver**. Concretely:
+
+- it is **never gold** and never enters `labels.json`, a gate, a precision figure or a recall figure —
+  not weighted, not discounted, not "as a tiebreaker";
+- it is **never sufficient on its own** to change a stored tier, a prediction, or a classifier;
+- it carries an explicit **weight and signal kind** wherever it is stored, so a consumer cannot
+  receive it without also receiving how much it is worth;
+- it is **asymmetric by design**, per §7.2.
+
+What it *may* do: rank candidates for the §4 human-QA queue, trigger a drift audit, and generate
+hypotheses for the next prompt or rubric amendment — each of which is then confirmed, or not, on
+labeled data.
+
+### 7.2 The asymmetry is the design, not a detail
+
+**Completing an action is a positive act with a cost.** Somebody opened a review, decided something
+had to be done, and did it. It is the strongest implicit evidence available that the review was
+actionable, and it is evidence in the direction of the positive class.
+
+**Being ignored is the default state of everything.** An unopened review is indistinguishable from an
+unopened review in a queue nobody worked that day. Treating "not acted on" as evidence of
+`NO_ACTION` would let a busy week teach the classifier that nothing matters — and it would do it
+fastest for the sellers with the most reviews, which is backwards.
+
+So: **ignore-signals may lower a silver weight, never a tier, and never a gate.** A review passed
+over fifty times is a reason to ask a human, not an answer.
+
+### 7.3 What is explicit and looks implicit
+
+A **dismissal with a recorded reason** is explicit feedback, not behaviour. So is "조치 불필요"
+pressed deliberately. The distinction is whether the operator was answering a question at the moment
+they acted. Anything that requires a choice from a list is explicit and follows §2.2/§2.3; anything
+inferred from navigation is silver and follows this section.
+
+### 7.4 Silver snapshots, same discipline as §3
+
+Behaviour accumulates into **numbered, frozen silver snapshots**, quoted with their version, cut and
+never reopened — the §3 rules verbatim, with one addition: **a silver snapshot may never be merged
+into a correction snapshot.** They answer different questions with different evidential weight, and a
+single combined file is how the weaker one stops being visible.
+
+**No online self-training, from either stream.** A classifier version is built, frozen, evaluated
+offline against gold, and only then considered. Nothing the operator does changes a live model.
+
+---
+
+## 8. Two layers, and why the seller does not edit the classifier
+
+**Product-owner decision, 2026-08-17.** §6 listed this as undecided. It is decided: `SELLER_PREFERENCE`
+becomes a **real policy layer**, kept strictly apart from the classifier.
+
+| layer | answers | scope | changed by |
+|---|---|---|---|
+| **global classifier** | *"이 리뷰로 인해 판매자가 확인하거나 조치할 일이 있는가?"* — RUBRIC v2 §2.3 | all sellers | a new frozen version, evaluated offline against gold |
+| **seller policy** | *"does this seller want this in their queue?"* | one org | the seller, immediately |
+
+**Order of composition, and it is fixed:**
+
+```
+classifier answer  →  additive guard (§8.9)  →  stored tier      ← measured, versioned, global
+                                             →  seller policy    ← per-org, immediate, reversible
+                                             →  what is displayed
+```
+
+**The stored tier is never overwritten by policy.** Two fields, not one: the classifier's answer and
+the display decision, with the policy that produced the difference named on the row. A seller who
+suppresses 포장 complaints has not made the classifier wrong about them, and a metric computed on the
+display decision would measure the seller's preferences and call it accuracy.
+
+**A policy may hide a `NEEDS_ATTENTION`, and that is allowed** — it is the seller's own queue. What it
+may not do is hide it *silently*: a suppression is visible, counted, and reversible, and the review is
+still there under the filter that suppressed it. The additive guard is a floor on what the
+*classifier* may conclude, not a floor on what a seller must look at.
+
+**Why the seller's corrections do not touch the global model.** A correction has two possible
+readings — the classifier was wrong, or this seller wants something different — and §2.3's disposition
+is what separates them. Feeding both back would train the global classifier on one seller's taste,
+which is exactly the failure that makes multi-tenant models drift toward whoever complains most.
+
+### 8.1 What this changes about §6
+
+The third open item in §6 is now closed. The remaining ones stand: whether corrections are surfaced
+as "training the AI" (they are not, and the UI must not imply it), who performs disposition, the
+media-terms research, and `channel_products` scoping — the last of which the policy layer above will
+need, since a preference like *"ignore 사이즈 complaints on this product line"* has to be scoped to
+something, and that is the Product Context unit's step 3, not this one's.
