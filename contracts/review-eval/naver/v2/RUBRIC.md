@@ -110,6 +110,44 @@ both labelers read the same version of this section, they would have agreed on *
 not the gate number, it does not replace 0.614, and it must never be quoted in its place — the gate
 was met at 0.614 on raw answers.
 
+### 2.3 What is being detected, fixed explicitly
+
+**Product-owner decision, 2026-08-17.** `v1` §1's question, sharpened and named:
+
+> **이 리뷰로 인해 판매자가 확인하거나 조치할 일이 있는가?**
+>
+> This is **seller actionability detection.** It is not sentiment analysis, not satisfaction scoring,
+> and not complaint detection.
+
+The distinction is not academic — it is the axis on which candidate B lost precision. Stated as the
+two directions it forbids:
+
+| | |
+|---|---|
+| A **negative** review with nothing to check or act on | is **not** `NEEDS_ATTENTION`. Disappointment is not an action item. |
+| A **positive** review that reports something going wrong | **is** `NEEDS_ATTENTION`. 5★ does not neutralise a delivery failure. |
+
+Both are already `v1` §2 rows — "생각보다 두꺼워요" and "예쁜데 배송이 너무 늦었어요". This section names
+the property those two rows share so it stops having to be re-derived from examples: **the signal is
+whether there is something for the seller to do, and the emotional register of the text is not
+evidence either way.**
+
+**What this section may and may not be used for.**
+
+- It **constrains prompts and rules** — §8.11 is its mechanism, and a prompt that asks "is the
+  customer unhappy?" or "is there a concrete problem?" is asking a question this contract does not
+  turn on.
+- It **does not touch a single label.** Fourteen gold rows pair a not-actionable `reasonCode` with
+  `NEEDS_ATTENTION` (§3.1's crossing column, quantified in the slice's §14.1). This section is
+  **not** licence to discount them, re-adjudicate them, or exclude them from a metric. They stay in,
+  they stay positive, and every candidate is scored against them. A rule fixed after a rejection that
+  conveniently removed the rows a candidate got wrong would be the exact move §6.2 exists to prevent.
+
+**Why fixing it now is not a favourable amendment.** It changes no tier, no label, no bar and no
+sample. It can only narrow what a prompt may ask, never widen what counts as a hit, and it makes the
+positive class no easier to reach. The one thing it could have been abused for — discounting the
+crossing rows — is forbidden in the paragraph above rather than left to good intentions.
+
 ## 3. What else the labeler records
 
 Two fields beyond the tier, both **closed vocabularies**. Neither may influence the tier; both exist
