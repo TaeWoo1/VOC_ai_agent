@@ -206,7 +206,11 @@ export function ChannelReviews({ locateBinding }: { locateBinding?: ReviewLocate
     <div className="space-y-6">
       <PageHead
         title="상품평"
-        description="연결된 채널에서 수집한 구매자 상품평입니다. 쿠팡은 판매자 답글 기능이 없어 답변 작성 기능은 제공하지 않습니다."
+        description={
+          capability?.channelCode === "COUPANG"
+            ? "연결된 채널에서 수집한 구매자 상품평입니다. 쿠팡은 판매자 답글 기능이 없어 답변 작성 기능은 제공하지 않습니다."
+            : "연결된 채널에서 수집한 구매자 상품평입니다. 이 화면에서는 답변을 작성하지 않습니다."
+        }
         meta={
           page ? (
             <>
@@ -527,10 +531,17 @@ function ReviewDetail({
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm">
         <dt className="text-muted">상품</dt>
         <dd className="truncate text-ink">{detail.productName ?? "정보 없음"}</dd>
-        <dt className="text-muted">노출상품ID</dt>
-        <dd className="truncate text-ink">{detail.locateTarget.productId ?? "정보 없음"}</dd>
-        <dt className="text-muted">옵션ID</dt>
-        <dd className="truncate text-ink">{detail.locateTarget.vendorItemId ?? "정보 없음"}</dd>
+        {canLocate ? (
+          // Coupang's own column words — the identifiers the locate run matches on. Other channels
+          // carry no such target, and printing "정보 없음" under a Coupang label would say SellerOps
+          // lost something it never had.
+          <>
+            <dt className="text-muted">노출상품ID</dt>
+            <dd className="truncate text-ink">{detail.locateTarget.productId ?? "정보 없음"}</dd>
+            <dt className="text-muted">옵션ID</dt>
+            <dd className="truncate text-ink">{detail.locateTarget.vendorItemId ?? "정보 없음"}</dd>
+          </>
+        ) : null}
       </dl>
 
       {pilotOn ? <TriageFeedbackControls accountId={accountId} detail={detail} /> : null}

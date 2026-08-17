@@ -550,7 +550,7 @@ describe("the AI pilot's mark and the feedback spine (RUBRIC v2 §13.7)", () => 
     });
     renderPage();
     await userEvent.click((await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요")).closest("button")!);
-    await screen.findByText(/노출상품ID/);
+    await screen.findByText(/원문 화면으로 바로 이동할 수 없습니다/);
     expect(screen.queryByText("이 상품평, 확인이 필요한가요?")).toBeNull();
     expect(screen.queryByLabelText("분류 피드백")).toBeNull();
     expect(screen.queryByRole("button", { name: "쿠팡에서 보기" })).toBeNull();
