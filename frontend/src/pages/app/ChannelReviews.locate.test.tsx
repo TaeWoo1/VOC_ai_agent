@@ -18,6 +18,7 @@ import type { ReviewLocateBinding } from "../../lib/actionWindow/locate/useRevie
 const getChannelReviewsStrict = vi.fn();
 const getChannelReviewStrict = vi.fn();
 const startChannelReviewLocateRun = vi.fn();
+const recordBehavior = vi.fn(async (..._args: unknown[]) => undefined);
 
 vi.mock("../../lib/apiClient", () => ({
   api: {
@@ -25,6 +26,7 @@ vi.mock("../../lib/apiClient", () => ({
     getChannelReviewStrict: (accountId: string, reviewId: string) => getChannelReviewStrict(accountId, reviewId),
     startChannelReviewLocateRun: (accountId: string, reviewId: string) =>
       startChannelReviewLocateRun(accountId, reviewId),
+    recordChannelReviewTriageBehavior: (accountId: string, events: unknown) => recordBehavior(accountId, events),
   },
   getToken: () => "token",
 }));
@@ -37,6 +39,7 @@ const PAGE: ChannelReviewPageView = {
   lastImportAt: "2026-08-14T05:00:00Z",
   lastImportComplete: true,
   aiPilotEnabled: false,
+  channel: { channelCode: "COUPANG", aiTriage: true, originalLocate: "LOCATE_RUN", replySupported: false },
   triageSummary: { needsAttention: 0, watch: 0, fyi: 1, aiAttention: 0, repeatedCategories: [] },
   items: [
     {
@@ -250,5 +253,72 @@ describe("[쿠팡에서 보기]", () => {
 
     await waitFor(() => expect(screen.getByText(/테두리를 그렸습니다/)).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "다시 확인" })).not.toBeInTheDocument();
+  });
+
+  /**
+   * Contract §1: the locate surface exists on exactly the channels the server says it does. NAVER and Cafe24
+   * accounts render no `[쿠팡에서 보기]` — the server would refuse the press — and say so once instead.
+   */
+  it("renders no locate control on a channel without a locate surface, and says so", async () => {
+    for (const channelCode of ["NAVER", "CAFE24"]) {
+      getChannelReviewsStrict.mockResolvedValue({
+        ...PAGE,
+        channel: { channelCode, aiTriage: true, originalLocate: "NONE", replySupported: channelCode === "NAVER" },
+      });
+      const { unmount } = renderPage(binding());
+      await selectTheReview();
+      expect(screen.queryByRole("button", { name: "쿠팡에서 보기" })).not.toBeInTheDocument();
+      expect(screen.getByText(/원문 화면으로 바로 이동할 수 없습니다/)).toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  /**
+   * Contract §2.1: the press is ORIGINAL_OPENED; the run REPORTING the row found is MARKETPLACE_LOCATED. Two
+   * facts, two events, and the second fires once per run — not on the press, and not on every re-render.
+   */
+  it("records ORIGINAL_OPENED on the press and MARKETPLACE_LOCATED once when the run completes — pilot on, marked row", async () => {
+    getChannelReviewsStrict.mockResolvedValue({ ...PAGE, aiPilotEnabled: true });
+    getChannelReviewStrict.mockResolvedValue({
+      ...DETAIL,
+      aiMark: { classifierVersion: "v", reasonCode: "DEFECT_OR_DAMAGE", predictedAt: "2026-08-17T00:00:00Z" },
+    });
+    const locate = binding();
+    const { rerender } = renderPage(locate);
+    await selectTheReview();
+
+    await userEvent.click(screen.getByRole("button", { name: "쿠팡에서 보기" }));
+    await waitFor(() =>
+      expect(recordBehavior).toHaveBeenCalledWith("acc-1", [{ reviewId: "r1", kind: "ORIGINAL_OPENED" }]),
+    );
+    expect(recordBehavior).not.toHaveBeenCalledWith("acc-1", [{ reviewId: "r1", kind: "MARKETPLACE_LOCATED" }]);
+
+    // The run completes; the page re-renders with it, twice.
+    const done = binding({ reviewId: "r1", view: view() });
+    for (let i = 0; i < 2; i++) {
+      rerender(
+        <MemoryRouter initialEntries={["/connect/channels/acc-1/reviews"]}>
+          <Routes>
+            <Route path="/connect/channels/:accountId/reviews" element={<ChannelReviews locateBinding={done} />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    }
+    await waitFor(() =>
+      expect(recordBehavior).toHaveBeenCalledWith("acc-1", [{ reviewId: "r1", kind: "MARKETPLACE_LOCATED" }]),
+    );
+    const located = recordBehavior.mock.calls.filter(
+      (c) => JSON.stringify(c[1]) === JSON.stringify([{ reviewId: "r1", kind: "MARKETPLACE_LOCATED" }]),
+    );
+    expect(located).toHaveLength(1);
+  });
+
+  it("records no locate silver at all when the pilot is off", async () => {
+    const locate = binding();
+    renderPage(locate);
+    await selectTheReview();
+    await userEvent.click(screen.getByRole("button", { name: "쿠팡에서 보기" }));
+    expect(locate.locate).toHaveBeenCalledWith("r1");
+    expect(recordBehavior).not.toHaveBeenCalled();
   });
 });

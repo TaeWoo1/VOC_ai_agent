@@ -89,7 +89,8 @@ Channel lessons (derived from §4.1, non-authoritative): `docs/channel_capabilit
 **Status lives in workstream homes, not here:** Action Window / R4 → `docs/action-window-runtime/`
 (`HANDOFF.md`); Action Window frontend → `docs/workstreams/action-window-frontend/` (`progress.md`);
 ESM live capture → `docs/esm/` (`live-capture-checklist.md`); review operations MVP →
-`docs/workstreams/review_operations_mvp.md`. A router carries paths, not state.
+`docs/workstreams/review_operations_mvp.md`; **review AI triage demo ("리뷰 AI 데모 준비" and the like) →
+`docs/workstreams/review_ai_triage_demo.md`** (canonical entry point). A router carries paths, not state.
 
 ### Conflict priority
 

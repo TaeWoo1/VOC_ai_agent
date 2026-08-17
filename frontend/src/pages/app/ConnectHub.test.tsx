@@ -79,6 +79,7 @@ function reviewPage(total: number): ChannelReviewPageView {
     lastImportAt: null,
     lastImportComplete: true,
   aiPilotEnabled: false,
+  channel: { channelCode: "COUPANG", aiTriage: true, originalLocate: "LOCATE_RUN", replySupported: false },
     triageSummary: { needsAttention: 0, watch: 0, fyi: total, aiAttention: 0, repeatedCategories: [] },
     items: [],
   };

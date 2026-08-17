@@ -10,6 +10,8 @@ public interface TriageBehaviorEventRepository extends JpaRepository<TriageBehav
 
     List<TriageBehaviorEvent> findByOrgIdAndSnapshotVersionIsNull(UUID orgId);
 
+    List<TriageBehaviorEvent> findByReviewIdOrderByOccurredAtAsc(UUID reviewId);
+
     /**
      * Distinct reviews of this org that produced this kind of event WHILE the pilot's mark was what
      * was shown. The funnel counts reviews, never events: a row opened five times is one review that

@@ -21,6 +21,11 @@ import com.sellerops.review.triage.ReviewTriageRules;
 import com.sellerops.review.triage.ReviewTriageTier;
 import com.sellerops.review.triage.feedback.AiTriageCurrent;
 import com.sellerops.review.triage.feedback.AiTriageCurrentRepository;
+import com.sellerops.review.triage.feedback.TriageDisplayDecision;
+import com.sellerops.review.channel.dto.ReviewChannelCapabilityView;
+import com.sellerops.channel.ChannelRepository;
+import com.sellerops.channel.Channel;
+import com.sellerops.review.triage.ReviewTriageChannelCapability;
 import com.sellerops.review.triage.pilot.AiTriagePilotService;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
@@ -34,7 +39,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -111,11 +115,13 @@ public class ChannelReviewService {
     private final ItemAnalysisRepository analyses;
     private final AiTriageCurrentRepository aiCurrent;
     private final AiTriagePilotService pilot;
+    private final ChannelRepository channels;
 
     public ChannelReviewService(ReviewRepository reviews, ProductRepository products,
                                 SellerAccountRepository accounts, SyncJobRepository syncJobs,
                                 ItemAnalysisRepository analyses, AiTriageCurrentRepository aiCurrent,
-                                AiTriagePilotService pilot) {
+                                AiTriagePilotService pilot, ChannelRepository channels) {
+        this.channels = channels;
         this.reviews = reviews;
         this.products = products;
         this.accounts = accounts;
@@ -162,6 +168,7 @@ public class ChannelReviewService {
                 lastImport.map(SyncJob::getFinishedAt).orElse(null),
                 lastImport.map(j -> "SUCCESS".equals(j.getStatus())).orElse(false),
                 pilot.isEnabledFor(orgId),
+                capabilityOf(channelId),
                 summary(orgId, channelId, categoryCounts),
                 items);
     }
@@ -174,21 +181,35 @@ public class ChannelReviewService {
      * the pilot saying "nothing to add", and nothing to add renders as nothing.
      */
     private Map<UUID, AiTriageMarkView> marksOf(UUID orgId, List<Review> page) {
-        if (!pilot.isEnabledFor(orgId) || page.isEmpty()) {
+        boolean surfaceOn = pilot.isEnabledFor(orgId);
+        if (!surfaceOn || page.isEmpty()) {
             return Map.of();
         }
-        // A rules 확인 필요 never carries a mark — there is nothing to add, and a mark there would let
-        // the seller credit the model for the rule's work. The write path already refuses to set one
-        // (TriageFeedbackService.refreshCurrent); this is the same rule at the boundary the seller
-        // sees, so a row that reached the table some other way still cannot render one.
-        Set<UUID> rulesPositive = page.stream()
-                .filter(r -> ReviewTriageRules.tier(r.getRating(), r.getBody()) == ReviewTriageTier.NEEDS_ATTENTION)
-                .map(Review::getId).collect(Collectors.toSet());
+        // The display decision is resolved by ONE function — the same one that stamps shownSource on
+        // every event (contract §3) — so a row renders the mark exactly when an event on it would say
+        // AI. It already encodes "a rules 확인 필요 never carries a mark": there is nothing to add, and a
+        // mark there would let the seller credit the model for the rule's work.
         List<UUID> ids = page.stream().map(Review::getId).toList();
-        return aiCurrent.findByOrgIdAndReviewIdIn(orgId, ids).stream()
-                .filter(AiTriageCurrent::isAiAttention)
-                .filter(c -> !rulesPositive.contains(c.getReviewId()))
-                .collect(Collectors.toMap(AiTriageCurrent::getReviewId, ChannelReviewService::mark, (a, b) -> a));
+        Map<UUID, AiTriageCurrent> currents = aiCurrent.findByOrgIdAndReviewIdIn(orgId, ids).stream()
+                .collect(Collectors.toMap(AiTriageCurrent::getReviewId, c -> c, (a, b) -> a));
+        Map<UUID, AiTriageMarkView> marks = new java.util.HashMap<>();
+        for (Review r : page) {
+            AiTriageCurrent c = currents.get(r.getId());
+            if (TriageDisplayDecision.resolve(ReviewTriageRules.tier(r.getRating(), r.getBody()), c, surfaceOn).aiShown()) {
+                marks.put(r.getId(), mark(c));
+            }
+        }
+        return marks;
+    }
+
+    /**
+     * The channel's row of the contract-§1 table, on the wire — so the UI renders no control the
+     * server would refuse (no `[쿠팡에서 보기]` on a NAVER account, no feedback control on a channel
+     * outside the three) and asserts nothing about the channel that the server did not say.
+     */
+    private ReviewChannelCapabilityView capabilityOf(UUID channelId) {
+        String code = channels.findById(channelId).map(Channel::getCode).orElse(null);
+        return ReviewChannelCapabilityView.of(ReviewTriageChannelCapability.of(code));
     }
 
     private static AiTriageMarkView mark(AiTriageCurrent c) {

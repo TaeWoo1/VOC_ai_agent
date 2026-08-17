@@ -873,7 +873,7 @@ pilot's opt-in. Fixed by putting the switch on the wire rather than inferring it
 | the mark can only ADD; a rules 확인 필요 is never lowered | 1, 2 | `AdditiveTriageDecision` in `TriageFeedbackService.record` | `ReviewRepository.FINAL_TIER_RANK` — one departing branch, and it can only produce rank 0 | `ChannelReviewAiPilotIT`, exhaustive over rating × body × {unmarked, false, true} |
 | no mark on a rules 확인 필요 | 3 | `refreshCurrent` sets `aiAttention` only when baseline ≠ `NEEDS_ATTENTION` | `marksOf` filters rules positives; `countAiAttentionByChannel` excludes them | same IT; `TriageFeedbackServiceTest.theCurrentRowIsAdditiveOnly` |
 | the AI is displayed as what it is | 3 | — | separate chip + `AI_TRIAGE_DISCLOSURE` | `ChannelReviews.test.tsx` |
-| NAVER only | 4 | `NaverOnlyClassifierGate.forApi` is the only door; the pilot hands the channel code to the gate rather than checking it | — | `ClassifierBoundaryTest.theGateIsTheOnlyDoor`; `AiTriagePilotServiceTest.coupangIsRefusedAndRecorded` |
+| NAVER only | 4 | `ReviewTriageChannelGate.forApi` is the only door; the pilot hands the channel code to the gate rather than checking it | — | `ClassifierBoundaryTest.theGateIsTheOnlyDoor`; `AiTriagePilotServiceTest.coupangIsRefusedAndRecorded` |
 | no marketplace write | 5 | the pilot and the feedback services hold no reply/submit path | — | `AiTriagePilotServiceTest.thePilotWritesNothingButFeedback` |
 | opt-in per org, off by default | 6 | `AiTriagePilotProperties.isEnabledFor` — master switch AND org listed AND key present | same predicate gates the ordering parameter and the marks | `AiTriagePilotServiceTest.offByDefault`; `ChannelReviewAiPilotIT.anOrgSwitchedOffForgetsTheMarksEverywhere` |
 | a pilot is not a PASS | 7 | — | — | §12.1 / §13.6: nothing the pilot records enters a gate |
@@ -986,3 +986,23 @@ What was proven, in order, against real PostgreSQL 15 with the backend started f
 
 **Not proven here, and not claimed**: that C2 generalises. One promotion in fifty recent reviews of
 the development store is one data point in a funnel, not a measurement of anything.
+
+## 16. Demo-ready close (2026-08-17)
+
+**Canonical entry point from here on: `docs/workstreams/review_ai_triage_demo.md`.** This section
+only records what the unit changed and points there.
+
+- **Channels:** RUBRIC §8.3.1 + Coupang gate §6.1.2 (product-owner decision) widen the pilot's
+  transmission to NAVER / Cafe24 / Coupang. `NaverOnlyClassifierGate` → `ReviewTriageChannelGate`,
+  reading `ReviewTriageChannelCapability` (the one place the table is stated). Everything else: 404
+  door on every triage route, `UNCLASSIFIED` at the gate.
+- **Events:** `contracts/review-triage-events/v1` — kinds renamed (V44), `AI_ATTENTION_SHOWN`
+  server-resolved, `REPLY_*` channel-gated (never Coupang), locate silver only where a locate surface
+  exists, no `IGNORED`. Per-review timeline endpoint; funnel in the contract's names.
+- **Separation:** `TriageDisplayDecision` is the single resolver for what was shown, used by the read
+  path and every event stamp; prediction / display / explicit feedback / behaviour remain four tables.
+- **Live evidence and its limits:** §8 of the demo doc — 3-channel vendor path LIVE_PROVEN
+  (3/3, 22/22, 10/10 classified, **0 AI-added marks this session**); mark→ordering→funnel live proof
+  is still the earlier single NAVER row; Cafe24/Coupang mark path integration-tested only; Coupang
+  `MARKETPLACE_LOCATED` from a local-agent press NOT LIVE_PROVEN.
+- **Still not a PASS.** Second-seller fresh holdout (§13) is the next gate; spent holdout sealed.

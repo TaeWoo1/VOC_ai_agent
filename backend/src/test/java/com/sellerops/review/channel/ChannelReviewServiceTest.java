@@ -67,7 +67,7 @@ class ChannelReviewServiceTest {
     @BeforeEach
     void setUp() {
         service = new ChannelReviewService(reviews, products, accounts, syncJobs, analyses, aiCurrent,
-                pilotOff());
+                pilotOff(), channels);
         account = account(org, "COUPANG");
         channelId = account.getChannelId();
     }

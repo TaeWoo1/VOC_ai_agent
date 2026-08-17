@@ -1401,8 +1401,23 @@ export interface ChannelReviewPageView {
    * the backend, never inferred from whether marks happen to be present.
    */
   aiPilotEnabled: boolean;
+  /**
+   * The channel's row of `contracts/review-triage-events/v1` §1. The page renders `[쿠팡에서 보기]`
+   * only for `originalLocate === "LOCATE_RUN"`, feedback controls only for `aiTriage` (and the pilot
+   * on), and never a reply control it would have to invent. Sent by the backend; the UI asserts
+   * nothing about a channel the server did not say.
+   */
+  channel: ReviewChannelCapabilityView;
   triageSummary: ChannelReviewTriageSummaryView;
   items: ChannelReviewItemView[];
+}
+
+/** One row of the contract's capability table, closed vocabularies only. */
+export interface ReviewChannelCapabilityView {
+  channelCode: string;
+  aiTriage: boolean;
+  originalLocate: "NONE" | "LOCATE_RUN";
+  replySupported: boolean;
 }
 
 /**
@@ -1471,14 +1486,42 @@ export interface TriageCorrectionView {
   shownSource: "RULES" | "AI" | null;
 }
 
-/** One explicit act. Append-only on the backend. */
-export type TriageActionKind = "STARTED" | "COMPLETED" | "NOT_NEEDED";
+/**
+ * One explicit act — `contracts/review-triage-events/v1` §2.1–§2.2. Append-only on the backend. The
+ * `REPLY_*` kinds are channel-gated server-side (NAVER's guided flow only; never Coupang) and this
+ * page renders no control for them.
+ */
+export type TriageActionKind =
+  | "ACTION_STARTED"
+  | "ACTION_COMPLETED"
+  | "ACTION_NOT_NEEDED"
+  | "REPLY_DRAFTED"
+  | "REPLY_SUBMITTED";
 
 /**
- * Silver: what the seller did on the way. Weighted at snapshot time, never a label. There is
- * deliberately no IGNORED kind — being passed over is not reported as if it were a signal.
+ * Silver: what the seller did on the way (contract §2.1). Weighted at snapshot time, never a label.
+ * There is deliberately no IGNORED kind — being passed over is not reported as if it were a signal.
+ * `AI_ATTENTION_SHOWN` is only ever a claim here; the server writes it only where IT resolves the
+ * display to AI. `ORIGINAL_OPENED` / `MARKETPLACE_LOCATED` are dropped server-side on a channel with
+ * no locate surface.
  */
-export type TriageBehaviorKind = "EXPOSED" | "OPENED" | "ORIGINAL_VIEWED";
+export type TriageBehaviorKind = "AI_ATTENTION_SHOWN" | "REVIEW_OPENED" | "ORIGINAL_OPENED" | "MARKETPLACE_LOCATED";
+
+/** One recorded event of the review, in the contract's vocabulary. No content. */
+export type TriageEventKind =
+  | TriageBehaviorKind
+  | TriageActionKind
+  | "AI_AGREE"
+  | "AI_DISAGREE"
+  | "RULE_AGREE"
+  | "RULE_DISAGREE";
+
+export interface TriageEventView {
+  kind: TriageEventKind;
+  shownSource: "RULES" | "AI" | null;
+  shownTier: ReviewTriageTier | null;
+  at: string | null;
+}
 
 export interface TriageBehaviorEvent {
   reviewId: string;

@@ -222,7 +222,7 @@ intention:
 | **D3** | **No author collection or storage** — 구매자 ID, nickname, masked ID, or any author-derived value. Not stored, not logged, not used in a dedupe key. |
 | **D4** | **No raw HTML, DOM, screenshots.** The value-free census discipline from the three discovery sittings carries forward. |
 | ~~**D5**~~ | ~~No permanent storage of review body text.~~ **Lifted 2026-08-14 — see §6.1.1.** |
-| **D6** | **No transmission to external LLMs** in this unit. Not required for the MVP. |
+| ~~**D6**~~ | ~~No transmission to external LLMs in this unit.~~ **Amended 2026-08-17 — see §6.1.2.** Rating + body of a Coupang review may reach the production LLM API **only** through the review AI triage pilot's boundary, under that pilot's bounds. |
 | **D7** | **Storable:** review raw text, rating, date, product identifiers (productId / vendorItemId), media metadata. Nothing else. |
 | **D8** | **No marketplace writes.** Coupang offers sellers no reply to a 상품평, so there is no reply, draft, or write flow to build — and none is built. |
 
@@ -242,6 +242,31 @@ holds back the part of the product that makes it worth building.
 **D3 did not move with it.** Author values remain excluded — no 구매자 ID, nickname, or masked ID, anywhere,
 including dedupe keys. Review text is stored; the person who wrote it is not identified. That separation is
 the reason this is defensible at all, and it is enforced by test.
+
+#### 6.1.2 D6 amended — the AI triage pilot may classify Coupang reviews
+
+**Product-owner decision, 2026-08-17, made in the review-AI-triage demo-readiness unit and recorded
+before the code that acts on it.** Coupang joins NAVER and Cafe24 as a channel whose reviews the
+§13.7 pilot of `contracts/review-eval/naver/v2/RUBRIC.md` may send — **rating and body only** — to
+the production LLM API for the additive `AI 확인 필요` suggestion. RUBRIC §8.3.1 records the same
+decision from the contract's side.
+
+**As with D5, this is recorded as a product decision, not as a legal determination.** `POLICY` stays
+`UNCLEAR`; the GA gate (§6.2) is unchanged. What is being weighed, said out loud: transmission of
+review prose to a third-party API is closer to 제3자 제공 than storage was, and G4 ("no external
+publication") is the clause it runs nearest to. The mitigations are the pilot's, and they are bounds
+rather than absolution:
+
+- **opt-in per organisation, off by default**; the seller's own reviews only (D1 unchanged);
+- **operator-triggered and bounded** — a run classifies at most a configured number of the newest
+  reviews and stops; nothing classifies on ingest;
+- **payload floor** — the request has nowhere to put an author, an id, a product, a date or a channel
+  (RUBRIC §8.4). D3 is not touched because it was never in the payload;
+- **no marketplace write, and no reply** — D8 unchanged; the pilot writes only SellerOps' own tables;
+- **additive only** — it can raise a review's position, never lower it, never mark it done.
+
+**What does not change:** D1–D4, D7, D8; the GA gate G1–G6; the "never a reply channel" product shape.
+If G1 fails, this amendment falls with the rest of the pilot.
 
 ### 6.2 GA release gate
 
@@ -273,7 +298,7 @@ says so.
 |---|---|---|
 | **TECHNICALLY_POSSIBLE** | **CONDITIONAL_YES** | three live sittings, `docs/coupang_review_feasibility_v1.md` |
 | **POLICY** | **UNCLEAR** | §14 read and silent; three clauses reach obliquely; no permission anywhere. §5 is the enquiry that would resolve it |
-| **DEVELOPMENT** | **PILOT_ALLOWED** | product-owner decision, §6. Bounded by D1–D4, D6–D8; **D5 lifted** (§6.1.1) |
+| **DEVELOPMENT** | **PILOT_ALLOWED** | product-owner decision, §6. Bounded by D1–D4, D7–D8; **D5 lifted** (§6.1.1); **D6 amended** for the AI triage pilot only (§6.1.2) |
 | **GA_RELEASE** | **POLICY_GATED** | G1–G6, §6.2 |
 | **PRODUCT** | **acquisition + VOC + locate** | list / detail / new-review notification, and `[쿠팡에서 보기]` → Action Window exact locate. **Never a reply channel** — WING offers no reply (D8) |
 

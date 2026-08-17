@@ -276,9 +276,61 @@ class TriageFeedbackServiceTest {
         service.record(ORG, low, 1, "깨졌어요", "m", ReviewTriageClassifier.Result.ok(
                 ReviewTriageTier.NEEDS_ATTENTION, "DEFECT_OR_DAMAGE", List.of(),
                 TriageSuggestedAction.INVESTIGATE_PRODUCT, "v/1"));
-        TriageAction a = service.act(ORG, low, 1, "깨졌어요", TriageActionKind.COMPLETED, null, true);
+        TriageAction a = service.act(ORG, low, 1, "깨졌어요", TriageActionKind.ACTION_COMPLETED, null, true);
         assertThat(a.getShownSource()).isEqualTo(TriageShownSource.RULES);
         assertThat(a.getShownTier()).isEqualTo(ReviewTriageTier.NEEDS_ATTENTION);
+    }
+
+    @Test
+    @DisplayName("AI_ATTENTION_SHOWN is written only where the server resolves the display to AI; a client claim elsewhere is dropped")
+    void aiAttentionShownIsServerResolved() {
+        // A marked row (5★, model says 확인 필요) and a rules-positive row (1★) — a client claims SHOWN on both,
+        // plus on a row no classifier ever saw.
+        service.record(ORG, REVIEW, 5, "좋은데 하나 아쉬워요", "m",
+                ReviewTriageClassifier.Result.ok(ReviewTriageTier.NEEDS_ATTENTION, "PRAISE_WITH_CONCESSION",
+                        List.of(), TriageSuggestedAction.INVESTIGATE_PRODUCT, "v/1"));
+        UUID low = UUID.randomUUID();
+        UUID unseen = UUID.randomUUID();
+        service.record(ORG, low, 1, "깨졌어요", "m", ReviewTriageClassifier.Result.ok(
+                ReviewTriageTier.NEEDS_ATTENTION, "DEFECT_OR_DAMAGE", List.of(),
+                TriageSuggestedAction.INVESTIGATE_PRODUCT, "v/1"));
+
+        int written = service.observe(ORG, List.of(
+                new TriageFeedbackService.Observation(REVIEW, 5, "좋은데 하나 아쉬워요", TriageBehaviorKind.AI_ATTENTION_SHOWN),
+                new TriageFeedbackService.Observation(low, 1, "깨졌어요", TriageBehaviorKind.AI_ATTENTION_SHOWN),
+                new TriageFeedbackService.Observation(unseen, 5, "좋아요", TriageBehaviorKind.AI_ATTENTION_SHOWN),
+                // REVIEW_OPENED is not gated this way: opening a rules row is still a (RULES-shown) trace.
+                new TriageFeedbackService.Observation(low, 1, "깨졌어요", TriageBehaviorKind.REVIEW_OPENED)), true);
+
+        assertThat(written).isEqualTo(2);
+        assertThat(behavior.rows).extracting(TriageBehaviorEvent::getKind, TriageBehaviorEvent::getShownSource)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(TriageBehaviorKind.AI_ATTENTION_SHOWN, TriageShownSource.AI),
+                        org.assertj.core.groups.Tuple.tuple(TriageBehaviorKind.REVIEW_OPENED, TriageShownSource.RULES));
+
+        // Surface OFF: the same claim on the marked row writes nothing — the seller could not have seen a mark.
+        behavior.rows.clear();
+        assertThat(service.observe(ORG, List.of(new TriageFeedbackService.Observation(REVIEW, 5, "좋은데 하나 아쉬워요",
+                TriageBehaviorKind.AI_ATTENTION_SHOWN)), false)).isZero();
+    }
+
+    @Test
+    @DisplayName("the display decision is one function, and it is the read path's predicate")
+    void theDisplayDecisionIsOneFunction() {
+        AiTriageCurrent marked = new AiTriageCurrent();
+        marked.setAiAttention(true);
+        AiTriageCurrent unmarked = new AiTriageCurrent();
+        unmarked.setAiAttention(false);
+        // AI exactly when: surface on ∧ row marked ∧ rule not already NEEDS_ATTENTION.
+        assertThat(TriageDisplayDecision.resolve(ReviewTriageTier.FYI, marked, true).aiShown()).isTrue();
+        assertThat(TriageDisplayDecision.resolve(ReviewTriageTier.WATCH, marked, true).aiShown()).isTrue();
+        assertThat(TriageDisplayDecision.resolve(ReviewTriageTier.NEEDS_ATTENTION, marked, true).aiShown()).isFalse();
+        assertThat(TriageDisplayDecision.resolve(ReviewTriageTier.FYI, marked, false).aiShown()).isFalse();
+        assertThat(TriageDisplayDecision.resolve(ReviewTriageTier.FYI, unmarked, true).aiShown()).isFalse();
+        assertThat(TriageDisplayDecision.resolve(ReviewTriageTier.FYI, null, true).aiShown()).isFalse();
+        // And when RULES, the tier shown is the rule's own, whatever the row said.
+        assertThat(TriageDisplayDecision.resolve(ReviewTriageTier.WATCH, marked, false).tier()).isEqualTo(ReviewTriageTier.WATCH);
+        assertThat(TriageDisplayDecision.resolve(ReviewTriageTier.FYI, marked, true).tier()).isEqualTo(ReviewTriageTier.NEEDS_ATTENTION);
     }
 
     @Test
@@ -295,11 +347,11 @@ class TriageFeedbackServiceTest {
     @Test
     @DisplayName("actions append; a start and a completion are two rows, and neither trains anything")
     void actionsAppend() {
-        service.act(ORG, REVIEW, 5, "좋아요", TriageActionKind.STARTED, null, true);
-        service.act(ORG, REVIEW, 5, "좋아요", TriageActionKind.COMPLETED, null, true);
+        service.act(ORG, REVIEW, 5, "좋아요", TriageActionKind.ACTION_STARTED, null, true);
+        service.act(ORG, REVIEW, 5, "좋아요", TriageActionKind.ACTION_COMPLETED, null, true);
         assertThat(actions.rows).hasSize(2);
         assertThat(actions.rows).extracting(TriageAction::getKind)
-                .containsExactly(TriageActionKind.STARTED, TriageActionKind.COMPLETED);
+                .containsExactly(TriageActionKind.ACTION_STARTED, TriageActionKind.ACTION_COMPLETED);
     }
 
     // ── silver ───────────────────────────────────────────────────────────────────────────────
@@ -320,9 +372,9 @@ class TriageFeedbackServiceTest {
     void silverIsFrozenApart() {
         TriageCorrection error = correctionFor(recordOk());
         service.disposition(ORG, error.getId(), CorrectionDispositionKind.CLASSIFIER_ERROR, null);
-        service.act(ORG, REVIEW, 5, "좋아요", TriageActionKind.COMPLETED, null, true);
+        service.act(ORG, REVIEW, 5, "좋아요", TriageActionKind.ACTION_COMPLETED, null, true);
         service.observe(ORG, List.of(new TriageFeedbackService.Observation(REVIEW, 5, "좋아요",
-                TriageBehaviorKind.OPENED)), true);
+                TriageBehaviorKind.REVIEW_OPENED)), true);
 
         assertThat(service.freezeSnapshot(ORG, "gold-eval/1")).isEqualTo(1);
         assertThat(actions.rows.get(0).getSnapshotVersion()).as("a correction snapshot took no silver").isNull();

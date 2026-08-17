@@ -5,10 +5,13 @@ import com.sellerops.channel.ChannelRepository;
 import com.sellerops.common.ApiException;
 import com.sellerops.review.Review;
 import com.sellerops.review.ReviewRepository;
+import com.sellerops.review.triage.ReviewTriageChannelCapability;
 import com.sellerops.review.triage.feedback.AiTriageCurrentRepository;
+import com.sellerops.review.triage.feedback.TriageActionKind;
+import com.sellerops.review.triage.feedback.TriageBehaviorKind;
 import com.sellerops.review.triage.feedback.TriageFeedbackService;
 import com.sellerops.review.triage.llm.ApiTriageClassifier;
-import com.sellerops.review.triage.llm.NaverOnlyClassifierGate;
+import com.sellerops.review.triage.llm.ReviewTriageChannelGate;
 import com.sellerops.review.triage.llm.ReviewTriageClassifier;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
@@ -27,9 +30,12 @@ import org.springframework.stereotype.Service;
  * can lower a tier: the only thing the read path consults is the additive mark that method writes.
  *
  * <p><b>The channel is checked at the boundary, not here.</b> This service does not compare channel
- * codes; it hands the code to {@link NaverOnlyClassifierGate}, which refuses anything but NAVER as
- * {@code UNCLASSIFIED}. The refusal is still recorded — a run that quietly did nothing on a Coupang
- * account would look identical to a run that classified it and found nothing.
+ * codes against a list of its own; it hands the code to {@link ReviewTriageChannelGate}, which refuses
+ * anything outside {@link ReviewTriageChannelCapability}'s three channels as {@code UNCLASSIFIED}. The
+ * refusal is still recorded — a run that quietly did nothing on such an account would look identical
+ * to a run that classified it and found nothing. The one thing this service does with the code is the
+ * contract-§1 door: an account on a channel outside the contract gets a 404 from run and funnel alike,
+ * before any pending row is even counted.
  *
  * <p><b>No marketplace write, ever.</b> The pilot reads stored reviews and writes to SellerOps' own
  * tables. The human-in-the-loop boundary is untouched.
@@ -46,18 +52,22 @@ public class AiTriagePilotService {
      * The pilot's funnel for one account — DISTINCT reviews at each step, over the reviews the pilot
      * currently marks on that account's channel.
      *
-     * <p><b>Ignore is not a number here.</b> {@code aiAttentionShown - opened} is how many marked
+     * <p><b>Ignore is not a number here.</b> {@code aiAttentionShown - reviewOpened} is how many marked
      * reviews were rendered and not opened; that is reported as two rows and never as a step called
      * "ignored", because a review nobody opened is a review nobody has said anything about
-     * (feedback draft §7.2). {@code agree} and {@code disagree} are the seller's explicit answers to
+     * (feedback draft §7.2). {@code aiAgree} and {@code aiDisagree} are the seller's explicit answers to
      * an AI-shown row; every other row is unanswered, not negative.
      *
      * <p>Counts, not rates. A rate over a dozen rows would read as a measurement, and §13.7 item 7
      * says nothing the pilot produces is one.
      */
-    public record Funnel(String classifierVersion, long marked, long aiAttentionShown, long opened,
-                         long originalViewed, long agree, long disagree, long actionStarted,
-                         long actionCompleted, long actionNotNeeded) {
+    public record Funnel(String classifierVersion, String channelCode, long marked, long aiAttentionShown,
+                         long reviewOpened, long originalOpened, long marketplaceLocated, long aiAgree,
+                         long aiDisagree, long actionStarted, long actionCompleted, long actionNotNeeded,
+                         long replyDrafted, long replySubmitted) {
+        static Funnel empty(String version, String channelCode) {
+            return new Funnel(version, channelCode, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        }
     }
 
     private final AiTriagePilotProperties properties;
@@ -66,7 +76,7 @@ public class AiTriagePilotService {
     private final ChannelRepository channels;
     private final AiTriageCurrentRepository current;
     private final TriageFeedbackService feedback;
-    private final NaverOnlyClassifierGate gate;
+    private final ReviewTriageChannelGate gate;
     private final com.sellerops.review.triage.feedback.TriageCorrectionRepository corrections;
     private final com.sellerops.review.triage.feedback.TriageActionRepository actions;
     private final com.sellerops.review.triage.feedback.TriageBehaviorEventRepository behavior;
@@ -86,14 +96,14 @@ public class AiTriagePilotService {
     public AiTriagePilotService(AiTriagePilotProperties properties, ReviewRepository reviews,
                                 SellerAccountRepository accounts, ChannelRepository channels,
                                 AiTriageCurrentRepository current, TriageFeedbackService feedback,
-                                NaverOnlyClassifierGate gate) {
+                                ReviewTriageChannelGate gate) {
         this(properties, reviews, accounts, channels, current, feedback, gate, null, null, null);
     }
 
     private AiTriagePilotService(AiTriagePilotProperties properties, ReviewRepository reviews,
                                  SellerAccountRepository accounts, ChannelRepository channels,
                                  AiTriageCurrentRepository current, TriageFeedbackService feedback,
-                                 NaverOnlyClassifierGate gate,
+                                 ReviewTriageChannelGate gate,
                                  com.sellerops.review.triage.feedback.TriageCorrectionRepository corrections,
                                  com.sellerops.review.triage.feedback.TriageActionRepository actions,
                                  com.sellerops.review.triage.feedback.TriageBehaviorEventRepository behavior) {
@@ -113,15 +123,17 @@ public class AiTriagePilotService {
         SellerAccount account = accounts.findById(accountId)
                 .filter(a -> orgId.equals(a.getOrgId()))
                 .orElseThrow(() -> ApiException.notFound("판매 계정을 찾을 수 없습니다."));
+        String channelCode = channelCodeOf(account);
+        requireInContract(channelCode);
         String version = classifierVersion();
         if (!isEnabledFor(orgId)) {
             // A switched-off org has no funnel: nothing is shown, so nothing is a step.
-            return new Funnel(version, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            return Funnel.empty(version, channelCode);
         }
         // The population: reviews on this account's channel the pilot currently marks — one query.
         List<UUID> marked = current.findMarkedReviewIds(orgId, account.getChannelId());
         if (marked.isEmpty()) {
-            return new Funnel(version, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            return Funnel.empty(version, channelCode);
         }
         var shown = com.sellerops.review.triage.feedback.TriageShownSource.AI;
         long agree = 0;
@@ -133,18 +145,36 @@ public class AiTriagePilotService {
                 disagree++;
             }
         }
-        return new Funnel(version, marked.size(),
-                behavior.countDistinctReviews(orgId, com.sellerops.review.triage.feedback.TriageBehaviorKind.EXPOSED, shown, marked),
-                behavior.countDistinctReviews(orgId, com.sellerops.review.triage.feedback.TriageBehaviorKind.OPENED, shown, marked),
-                behavior.countDistinctReviews(orgId, com.sellerops.review.triage.feedback.TriageBehaviorKind.ORIGINAL_VIEWED, shown, marked),
+        return new Funnel(version, channelCode, marked.size(),
+                behavior.countDistinctReviews(orgId, TriageBehaviorKind.AI_ATTENTION_SHOWN, shown, marked),
+                behavior.countDistinctReviews(orgId, TriageBehaviorKind.REVIEW_OPENED, shown, marked),
+                behavior.countDistinctReviews(orgId, TriageBehaviorKind.ORIGINAL_OPENED, shown, marked),
+                behavior.countDistinctReviews(orgId, TriageBehaviorKind.MARKETPLACE_LOCATED, shown, marked),
                 agree, disagree,
-                actions.countDistinctReviews(orgId, com.sellerops.review.triage.feedback.TriageActionKind.STARTED, shown, marked),
-                actions.countDistinctReviews(orgId, com.sellerops.review.triage.feedback.TriageActionKind.COMPLETED, shown, marked),
-                actions.countDistinctReviews(orgId, com.sellerops.review.triage.feedback.TriageActionKind.NOT_NEEDED, shown, marked));
+                actions.countDistinctReviews(orgId, TriageActionKind.ACTION_STARTED, shown, marked),
+                actions.countDistinctReviews(orgId, TriageActionKind.ACTION_COMPLETED, shown, marked),
+                actions.countDistinctReviews(orgId, TriageActionKind.ACTION_NOT_NEEDED, shown, marked),
+                actions.countDistinctReviews(orgId, TriageActionKind.REPLY_DRAFTED, shown, marked),
+                actions.countDistinctReviews(orgId, TriageActionKind.REPLY_SUBMITTED, shown, marked));
     }
 
-    private static NaverOnlyClassifierGate gateFrom(AiTriagePilotProperties p) {
-        return NaverOnlyClassifierGate.forApi(
+    private String channelCodeOf(SellerAccount account) {
+        return channels.findById(account.getChannelId()).map(Channel::getCode).orElse("UNKNOWN");
+    }
+
+    /**
+     * Contract §1: outside the three channels there is no endpoint. Not "disabled" — a 404, the same
+     * answer the surface gives for a review that is not there, so a client cannot learn from the shape
+     * of the refusal that a pilot exists for other channels.
+     */
+    private static void requireInContract(String channelCode) {
+        if (!ReviewTriageChannelCapability.of(channelCode).inContract()) {
+            throw ApiException.notFound("이 채널은 AI 분류 파일럿 대상이 아닙니다.");
+        }
+    }
+
+    private static ReviewTriageChannelGate gateFrom(AiTriagePilotProperties p) {
+        return ReviewTriageChannelGate.forApi(
                 ApiTriageClassifier.Vendor.valueOf(p.vendor()), p.model(), p.apiKey(),
                 new ApiTriageClassifier.Tuning(!p.omitTemperature(), p.maxOutputTokens(), p.reasoningEffort()));
     }
@@ -193,7 +223,8 @@ public class AiTriagePilotService {
         SellerAccount account = accounts.findById(accountId)
                 .filter(a -> orgId.equals(a.getOrgId()))
                 .orElseThrow(() -> ApiException.notFound("판매 계정을 찾을 수 없습니다."));
-        String channelCode = channels.findById(account.getChannelId()).map(Channel::getCode).orElse("UNKNOWN");
+        String channelCode = channelCodeOf(account);
+        requireInContract(channelCode);
         String version = gate.version();
 
         int bound = limit == null || limit <= 0 ? properties.maxPerRun() : Math.min(limit, properties.maxPerRun());
@@ -220,7 +251,7 @@ public class AiTriagePilotService {
                 // returns for a schema-invalid answer. Only the first is a refusal; the second is a
                 // failure on a permitted channel and is counted as one (independent review, D5).
                 case UNCLASSIFIED -> {
-                    if (NaverOnlyClassifierGate.PERMITTED_CHANNEL.equals(channelCode)) {
+                    if (ReviewTriageChannelGate.permits(channelCode)) {
                         failed++;
                     } else {
                         refused++;

@@ -35,7 +35,7 @@ public class TriageBehaviorEvent extends BaseEntity {
     private UUID predictionId;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 16)
+    @Column(nullable = false, length = 32)
     private TriageBehaviorKind kind;
 
     @Enumerated(EnumType.STRING)
