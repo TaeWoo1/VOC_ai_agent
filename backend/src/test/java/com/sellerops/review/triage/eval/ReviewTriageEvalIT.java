@@ -163,7 +163,20 @@ class ReviewTriageEvalIT {
                     rule, every LLM arm, and the two humans who set the labels — by the same amount.
                 """);
 
-        boolean spendHoldout = "true".equals(System.getenv("REVIEW_EVAL_SPEND_HOLDOUT"));
+        // RUBRIC v2 §12.3: the seal. Once holdout-spent.json exists the flag no longer opens
+        // anything — §6.2's one reading is gone, and an env var that still worked would mean the
+        // contract's "read once" was only ever a note to whoever ran it next.
+        boolean sealed = Files.exists(DIR.resolve("holdout-spent.json"));
+        boolean spendHoldout = !sealed && "true".equals(System.getenv("REVIEW_EVAL_SPEND_HOLDOUT"));
+        if (sealed) {
+            out.append("""
+
+                      HOLDOUT SEALED (§12.3). contracts/review-eval/naver/v2/holdout-spent.json
+                      exists, so this half has been read and is not read again — the flag is inert.
+                      DEV below; §12 makes all 220 rows development evidence and §13 designs the
+                      fresh sample that a later candidate is actually verified on.
+                    """);
+        }
         if (spendHoldout) {
             out.append("""
 

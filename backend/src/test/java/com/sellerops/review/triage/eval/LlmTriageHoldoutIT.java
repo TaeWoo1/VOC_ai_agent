@@ -65,6 +65,16 @@ class LlmTriageHoldoutIT {
 
     @Test
     void spendTheHoldoutOnceOnTheFrozenCandidate() throws Exception {
+        if (Files.exists(DIR.resolve("holdout-spent.json"))) {
+            // RUBRIC v2 §12.3. The one reading §6.2 grants was spent on 2026-08-17 and candidate B
+            // was rejected on it. §8.10.1 forbids a second, and a sentence in a contract forbidding
+            // something is a request — this is the mechanism. See holdout-spent.json.
+            System.out.print("\n\n  LlmTriageHoldoutIT: SEALED. contracts/review-eval/naver/v2/"
+                    + "holdout-spent.json exists, so this holdout has been read and §8.10.1 gives it\n"
+                    + "  no second reading. Candidate C is verified against the fresh sample §13\n"
+                    + "  designs, not this one. Nothing was read.\n\n");
+            return;
+        }
         if (!"true".equals(System.getenv("LLM_TRIAGE_SPEND_HOLDOUT"))) {
             System.out.print("\n\n  LlmTriageHoldoutIT: LLM_TRIAGE_SPEND_HOLDOUT is not set. "
                     + "Nothing was read.\n\n");

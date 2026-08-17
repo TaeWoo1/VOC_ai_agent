@@ -33,43 +33,63 @@ class ClassifierBoundaryTest {
         return source.replaceAll("(?s)/\\*.*?\\*/", "").replaceAll("(?m)//.*$", "");
     }
 
+    // A stripper that also removed string literals lived here, so that a harness PRINTING the word
+    // HOLDOUT could not trip a guard looking for a code path to one. It is gone with the assertion
+    // that needed it — every check below matches on a literal, and searching source with the
+    // literals removed is how a guard passes because it looked in the wrong place.
+
     /**
-     * Comments, text blocks and string literals removed — what is left is executable code.
+     * The candidate-iteration harness reads one corpus, and it is the spent one.
      *
-     * <p>Needed because the harness PRINTS the sentence "HOLDOUT was not read". A guard that could not
-     * tell a code path from the report describing its absence would fail on the honest version and
-     * pass on a silent one, which is precisely backwards.
+     * <p><b>This guard was rewritten on 2026-08-17 and the rewrite is the point.</b> It used to
+     * assert the development harness had no path to a {@code HOLDOUT} row. That was the right
+     * boundary while the v2 holdout was unspent; RUBRIC v2 §12 then made all 220 rows development
+     * evidence, so the old assertion would now be forbidding something the contract permits — and a
+     * guard that fails on the permitted thing gets deleted rather than fixed.
+     *
+     * <p>The constraint <b>moved</b> rather than went away. What must stay unreachable is the
+     * <i>fresh</i> sample §13 designs, which is the one that will actually verify a candidate. So:
+     * one corpus directory constant, pointing at {@code v2}, and no spend flag of any kind.
      */
-    private static String executableCode(String source) {
-        return stripComments(source)
-                .replaceAll("(?s)\"\"\".*?\"\"\"", "\"\"")
-                .replaceAll("\"(\\\\.|[^\"\\\\])*\"", "\"\"");
+    @Test
+    @DisplayName("the development harness reads only the spent v2 corpus, and no spend flag")
+    void theDevHarnessReadsOnlyTheSpentCorpus() throws IOException {
+        String code = stripComments(Files.readString(LLM_EVAL));
+
+        assertThat(code.split("Path\\.of\\(\"\\.\\.\", \"contracts\"", -1).length - 1)
+                .as("exactly one corpus directory, so there is one place to check").isEqualTo(1);
+        assertThat(code).as("and it is the v2 corpus, whose holdout is already spent")
+                .contains("Path.of(\"..\", \"contracts\", \"review-eval\", \"naver\", \"v2\")");
+        assertThat(code).as("no spend flag — this harness is re-run on every prompt edit")
+                .doesNotContain("SPEND_HOLDOUT");
+        assertThat(code).as("the split is still computed, for the §12.2 provenance column")
+                .contains("splitOf");
+        assertThat(code).as("but it selects nothing any more")
+                .doesNotContain("\"DEV\".equals(CalibrationSample.splitOf");
     }
 
     /**
-     * The candidate-iteration harness cannot spend the holdout.
+     * §8.10.1's "never again" is a file on disk, not a sentence in a contract.
      *
-     * <p>RUBRIC v2 §6.2 gives the holdout one reading, spent by the FINAL candidate. A harness whose
-     * whole purpose is to be re-run against successive candidates is the thing most likely to spend
-     * it early — so it must not be able to, and the guarantee cannot be "nobody passed the flag".
+     * <p>The v2 holdout was read once, on 2026-08-17, and candidate B was rejected on it. §12.3 seals
+     * it with {@code holdout-spent.json}: while that file exists both harnesses that can score a
+     * holdout row return without reading one. §8.9's reasoning about prompts applies to contracts
+     * too — an instruction not to do something is a request, re-litigated by whoever next needs the
+     * number to come out differently.
      */
     @Test
-    @DisplayName("the DEV harness has no code path that reads a HOLDOUT row")
-    void theDevHarnessCannotReachTheHoldout() throws IOException {
-        String source = Files.readString(LLM_EVAL);
-        String code = executableCode(source);
+    @DisplayName("both holdout readers are sealed by holdout-spent.json")
+    void theSpentHoldoutIsSealedByAFile() throws IOException {
+        Path seal = Path.of("..", "contracts", "review-eval", "naver", "v2", "holdout-spent.json");
+        assertThat(Files.exists(seal)).as("the seal exists and records what was spent").isTrue();
+        assertThat(Files.readString(seal)).contains("REJECTED").contains("§8.10.1");
 
-        assertThat(code).as("no HOLDOUT branch, flag or env var in executable code")
-                .doesNotContain("HOLDOUT");
-        assertThat(code).as("the split IS read, so this guard is not vacuous").contains("splitOf");
-        assertThat(code.split("splitOf", -1).length - 1)
-                .as("exactly one place decides which half is scored").isEqualTo(1);
-        // And that one place admits DEV only. Checked on the raw source, since the literal it
-        // compares against is exactly what executableCode() strips.
-        assertThat(stripComments(source))
-                .contains("\"DEV\".equals(CalibrationSample.splitOf(row.fingerprint()))");
-        assertThat(stripComments(source)).as("no env var could turn the holdout on")
-                .doesNotContain("SPEND_HOLDOUT");
+        Path evalDir = Path.of("src", "test", "java", "com", "sellerops", "review", "triage", "eval");
+        for (String reader : List.of("ReviewTriageEvalIT.java", "LlmTriageHoldoutIT.java")) {
+            assertThat(stripComments(Files.readString(evalDir.resolve(reader))))
+                    .as("%s checks the seal before it can score a holdout row", reader)
+                    .contains("holdout-spent.json");
+        }
     }
 
     /**

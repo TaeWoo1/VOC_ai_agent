@@ -157,6 +157,78 @@ public final class TriageEvalReport {
         return sortedByCountDesc(counts);
     }
 
+    /**
+     * The mirror of {@link #missedByReason}: reviews the candidate called {@code NEEDS_ATTENTION}
+     * that a human did not, grouped by the reason the human gave for the tier they chose.
+     *
+     * <p>Added 2026-08-17, under RUBRIC v2 §8.12. Candidate B was rejected on <b>precision</b> and
+     * the harness that rejected it reported its false positives as a count — three, on every pass,
+     * with nothing said about what they were. A false-negative taxonomy and no false-positive one
+     * measures the bar that was passing and not the bar that failed.
+     */
+    public static Map<String, Integer> falsePositivesByReason(List<Row> rows) {
+        Map<String, Integer> counts = new TreeMap<>();
+        for (Row row : rows) {
+            if (row.human() != null && row.human() != ReviewTriageTier.NEEDS_ATTENTION
+                    && row.rule() == ReviewTriageTier.NEEDS_ATTENTION) {
+                counts.merge(row.reasonCode() == null ? "(none)" : row.reasonCode(), 1, Integer::sum);
+            }
+        }
+        return sortedByCountDesc(counts);
+    }
+
+    /** False positives by rating band — which one is the 4–5★ harm `v1` §5 bars separately. */
+    public static Map<String, Integer> falsePositivesByRating(List<Row> rows) {
+        Map<String, Integer> counts = new TreeMap<>();
+        for (Row row : rows) {
+            if (row.human() != null && row.human() != ReviewTriageTier.NEEDS_ATTENTION
+                    && row.rule() == ReviewTriageTier.NEEDS_ATTENTION) {
+                counts.merge(row.rating() == null ? "none" : row.rating() + "★", 1, Integer::sum);
+            }
+        }
+        return counts;
+    }
+
+    /**
+     * How much evidence a precision bar actually has at this sample size.
+     *
+     * <p>RUBRIC v2 §13.1: candidate B's holdout reading had 25 predicted positives, at which a
+     * Wilson 95% lower bound clears 0.80 only at 24 correct — the bar tolerated exactly one false
+     * positive, and the candidate's own point estimate of 0.880 would have cleared it at 100. A
+     * verdict printed without this is a verdict that cannot be told apart from an underpowered one.
+     *
+     * <p><b>Descriptive.</b> It never moves the bar and is never a reason a failure does not count.
+     *
+     * @param predictedPositives  n — the denominator of precision
+     * @param maxFalsePositives   the most false positives the 0.80 bar tolerates at that n, or -1 if
+     *                            no count at this n can clear it
+     * @param nForObservedToPass  the smallest n at which the observed precision would clear 0.80
+     */
+    public record PrecisionPower(int predictedPositives, int maxFalsePositives,
+                                 int nForObservedToPass) {
+    }
+
+    public static PrecisionPower precisionPower(EvalMetrics.Counts counts, double bar) {
+        int n = counts.truePositives() + counts.falsePositives();
+        int maxFp = -1;
+        for (int fp = 0; fp <= n; fp++) {
+            if (EvalMetrics.wilsonLowerBound(n - fp, n) >= bar) {
+                maxFp = fp;
+            }
+        }
+        int needed = -1;
+        if (n > 0) {
+            double observed = (double) counts.truePositives() / n;
+            for (int m = n; m <= 20000; m++) {
+                if (EvalMetrics.wilsonLowerBound((int) Math.round(observed * m), m) >= bar) {
+                    needed = m;
+                    break;
+                }
+            }
+        }
+        return new PrecisionPower(n, maxFp, needed);
+    }
+
     /** The same misses by rating band, which is what says whether the blindness is the 4–5★ one. */
     public static Map<String, Integer> missedByRating(List<Row> rows) {
         Map<String, Integer> counts = new TreeMap<>();

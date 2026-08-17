@@ -677,6 +677,60 @@ Not for candidate C, not for a re-check, not for a "quick sanity run" after an u
 Passing here is not permission to ship. It clears `v1` §5's measurement gate; surfacing a classifier
 to an operator is a separate decision with its own scope.
 
+### 8.11 A prompt decides the tier first, and names it afterwards
+
+**Product-owner decision, 2026-08-17, before candidate C was written or measured.**
+
+§3.1's `actionable` / `not actionable` column is **a description of the code, not a rule** — that
+sentence has been in this contract since the labeling surface was built, and it binds a labeler. It
+now binds a prompt too:
+
+> A classifier prompt may not let a `reasonCode`, a `tag` or a `suggestedNextAction` **force,
+> promote or demote** a tier. The tier is decided from §2 / §2.1 / §2.2 alone. The descriptive
+> fields are assigned to a tier that has already been decided.
+
+Two things made this necessary, one measured and one recorded at the freeze:
+
+- Candidate A demoted two low-star reviews the humans called 확인 필요, **both carrying
+  `CRITIQUE_NO_REQUEST`** — the shape of a model that picked a label and reasoned backwards to a tier
+  that matched it.
+- `triage-prompt/v2` answered that by telling the model outright that `reasonCode` does not decide
+  the tier, and then **enumerated four §3.1 codes as tier-forcing conditions in its own stage 1.**
+  §11.3 of the slice recorded that tension as an accepted risk rather than fixing it, because fixing
+  it with a passing gate in hand would have been tuning by another name. The gate did not hold, so
+  the risk is now a defect and this section is where it is answered.
+
+**What the prompt states instead of a code list.** §2.1's two rows that a code list cannot separate:
+
+| `v1` §2 case | label | what actually distinguishes it |
+|---|---|---|
+| "예쁜데 배송이 너무 늦었어요" — praise with a concession | `NEEDS_LOOK` | the concession is an **operational failure** — something that went wrong in fulfilling this order |
+| "생각보다 두꺼워요" — product criticism with no request | `NO_ACTION` | it is an **opinion about what the product is**, and nothing went wrong |
+
+Neither is separated by whether praise is present, and neither is separated by whether a request was
+made — *both* lack a request. The axis is **what the complaint is about**. A prompt that asks
+"was there a request?" or "was there praise?" is asking the question §2 does not turn on, which is
+how a praise-plus-gripe review and a praise-plus-defect review end up on the same side of the line.
+
+This is a structural statement of §2, not a patch. **No specific review, phrase or row from this
+corpus may appear in a prompt as an example** — §6.3's rule against a term traceable to a specific
+review, applied to prose. The two cases above are `v1` §2's own invented illustrations and were
+written before this corpus was drawn.
+
+### 8.12 An evaluation that cannot show its errors did not measure them
+
+**Product-owner decision, 2026-08-17.** `LlmTriageHoldoutIT` reported that candidate B produced 3
+false positives on every pass and wrote **no record of which rows they were.** The holdout is spent
+and those three reviews can now never be examined. The `HOLDOUT` reading was therefore adequate to
+*fail* the candidate and useless for understanding *why* — and understanding why is the entire input
+to the next candidate.
+
+Every evaluation harness in this contract writes a **per-row record** of each pass: fingerprint,
+stratum, rating, baseline tier, raw model tier, final decided tier, gold tier, candidate
+`reasonCode`, gold `reasonCode`. Not only pass 1. The record is written to `build/` and is **never
+committed** — it pairs review fingerprints with content-derived judgments and §5 governs what may
+enter the repository.
+
 ## 9. What this gold set is for, and what it is not
 
 **Product-owner decision, 2026-08-16.** Recorded here because it bounds the artifact: without it, the
@@ -831,3 +885,183 @@ with the harness output and it belongs beside every recall figure this contract 
 
 It is not a defect to be fixed inside this unit. Whether to alias `포토/영상` belongs with the Product
 Context unit, which will open the same mapper for `상품번호` and `상품명`.
+
+## 12. What this corpus is after the holdout was spent
+
+**Product-owner decision, 2026-08-17, taken after candidate B was rejected and recorded.**
+
+§8.10.1 was executed: candidate B failed the precision bar on all six readings, the result was
+recorded as measured, and the 113 `HOLDOUT` rows are spent. This section says what the 220 rows are
+*now*, because leaving that unstated is how a spent holdout quietly returns to service.
+
+> **All 220 labeled rows become development evidence.** `DEV` and `HOLDOUT` alike may be read,
+> analysed row by row, and used to build the next candidate.
+>
+> **No candidate may ever again be finally verified on any of them.** Not the 113, not the 107, not
+> a re-split of the 220, not a subset drawn from them by any rule.
+
+### 12.1 What that costs, stated rather than absorbed
+
+Every number a later candidate produces on these 220 rows is **in-sample by construction.** It is
+diagnostic — it says which reviews a candidate gets wrong and why — and it is **not** evidence for
+`v1` §5. A candidate C `DEV` gate that clears every bar clears them on rows whose errors were read
+while the candidate was being written. That is the definition of the thing this contract was built
+to keep out of a shipping decision.
+
+So: §13's fresh holdout is not a formality to be arranged later. **Until it exists and has been
+read, no classifier claim rests on anything.** §7 of this decision is enforced structurally — see
+`docs/slices/llm-triage-classifier-v1.md` — and the product surface keeps `ReviewTriageRules`.
+
+### 12.2 The split is retired as a gate and kept as provenance
+
+§6.1's `review-eval-split/v2` domain string still computes, and every harness still prints which half
+a row came from. It now records one historical fact and nothing else: **which rows candidate B had
+never been shown when it was frozen.** That distinction is worth keeping legible — a candidate C
+error on a former-`HOLDOUT` row and the same error on a former-`DEV` row are the same error now, but
+candidate B's numbers came from halves and a reader tracing them needs to see which.
+
+It licenses nothing. A future harness that re-derived the split to gate on one half would be reading
+a holdout twice with a rename.
+
+### 12.3 The spend is sealed by a file, not by this paragraph
+
+`holdout-spent.json` in this directory records the spend: date, the frozen candidate string, the
+verdict, and the section that authorised it. `LlmTriageHoldoutIT` and `ReviewTriageEvalIT` **refuse
+to run while that file exists** and say why. §8.9's reasoning applies to contracts as well as
+prompts: an instruction not to do something is a request, re-litigated by whoever next needs the
+number to come out differently.
+
+Deleting the seal to run it anyway is possible, of course. It is also a commit with a message.
+
+## 13. The fresh final holdout — designed before it exists
+
+**Product-owner decision, 2026-08-17. Written and committed BEFORE a single fresh review was
+acquired, drawn or labeled, and before candidate C had been measured on anything.** §8.10 earned its
+authority the same way; this section is the same move made one step earlier, because the sizing rule
+below is exactly the kind of thing that would look like tuning if it arrived after a result.
+
+### 13.1 Why the spent holdout could not have adjudicated what it was asked to
+
+This is the finding that shapes everything below, and it is arithmetic, not hindsight.
+
+Candidate B's holdout reading had **25 predicted positives.** At n = 25, a Wilson 95% lower bound
+reaches 0.80 only at 24 correct — so the bar tolerated **exactly one false positive.** The candidate
+made three, and its point estimate, 0.880, would clear the same bar at 100 predicted positives.
+
+| predicted positives | max false positives the 0.80 bar tolerates | implied precision |
+|---|---|---|
+| 25 | 1 | 0.960 |
+| 40 | 3 | 0.925 |
+| 54 | 5 | 0.907 |
+| 70 | 7 | 0.900 |
+| 87 | 10 | 0.885 |
+| 100 | 12 | 0.880 |
+
+**The gate was correct and it was not wrong to fail candidate B** — a candidate that has not
+demonstrated 0.80 has not demonstrated it, and a lower bound is the statistic precisely so that a
+small sample cannot pass on luck. But a 113-row holdout could only ever have certified a classifier
+at ≈0.96 true precision. It had almost no power to tell 0.88 from 0.70, and both of those answers
+print as `FAIL`.
+
+A holdout that can only return one answer is not measuring. **The fresh sample is sized so the gate
+can come back either way.**
+
+### 13.2 The sizing rule
+
+> Draw enough rows that the frozen candidate is expected to produce **at least 60 predicted
+> positives** on the fresh sample.
+
+60 certifies a true precision of ≈0.91 and tolerates 5 false positives — one more than double
+candidate B's count, at a sample size that can still be labeled by two humans.
+
+The row count follows from a rate that is **known before the fresh sample is drawn**: the candidate's
+positive-prediction rate over the 220 development rows. Expected positives ≈ rate × rows, per
+stratum, so:
+
+```
+rows drawn  =  ceil( 60 / observed positive-prediction rate on the 220 )
+```
+
+with a **floor of 300 labeled rows** regardless of what that computes to, and the allocation across
+strata following §13.3. If the rate is the ≈22% candidate B showed, this is ≈280 rows and the floor
+binds.
+
+**The rate is measured on the development corpus, never on the fresh one.** Choosing a size after
+seeing how the fresh rows score is choosing a size that makes the answer come out.
+
+### 13.3 Strata — label-blind, and the same two axes
+
+**Rating band × `length(body)`**, the §4.2 definitions unchanged: `LOW` 1–2★, `MID` 3★, `HIGH` 4–5★
+crossed with `S` < 20, `M` 20–39, `L` ≥ 40.
+
+**No text-feature or keyword enrichment of any kind.** Not a complaint lexicon, not a negation
+pattern, not a length-of-longest-sentence heuristic — nothing a candidate's own signal reads.
+Stratifying on what the classifier looks at hands it the recall it is being measured for. Rating and
+body length are properties of the row that no tier rule in this contract consults as evidence.
+
+**The 1–3★ bands are censused**, as in §4.2. They are the scarce class, they carry most of the
+positives, and sampling inside them throws away exactly the rows the gate needs. Enrichment toward
+low ratings **is permitted and expected** — it is label-blind, it raises predicted positives per
+labeled row, and it makes the sample harder rather than easier. It also makes the unweighted gate
+reading a statement about an enriched sample, which §4.4 already requires be said out loud, and the
+§4.4 Horvitz–Thompson population reading is reported beside it with its weights.
+
+The 4–5★ allocation keeps §4.2's tilt toward longer bodies, and the 4–5★ false-positive bar is
+computed over the high-rated `NO_ACTION` rows in the sample, as before.
+
+### 13.4 Frame requirements
+
+1. **Real NAVER review rows**, acquired through the ordinary path — an export the seller produced.
+   No live marketplace run happens without the fresh, single-use approval `docs/sellerops_live_approval_contract.md`
+   requires; this section is not that approval and cannot become one.
+2. **Disjoint from the 3,858.** Enforced by `reviewIdFingerprint`: any row whose fingerprint appears
+   in the existing frame is dropped from the fresh frame before the draw. A fresh **seller** or a
+   fresh **time window** of the same store both satisfy this; a different seller is preferred,
+   because it also tests whether the candidate generalises past one store's product mix and one
+   store's customers.
+3. **Zero synthetic rows.** §11.1's three generator families are screened out of the fresh frame by
+   fingerprint before drawing, and the frame's synthetic count is asserted to be 0. §11.1's
+   `PRIMARY` / `SENSITIVITY` pair is still printed — it will read identically, and that identity is
+   the evidence that the screen worked.
+4. **The §11.2 media ceiling is unchanged and still printed.** If `포토/영상` is aliased by the
+   Product Context unit before this sample is labeled, that is a different corpus and this section is
+   re-derived rather than reused.
+5. **The frame's composition is reported before the draw**: row count, rows per stratum, and the
+   fingerprint-overlap count with the old frame.
+
+### 13.5 Labeling
+
+§2, §2.1, §2.2, §3 and §5 apply unchanged — **including §2.2, which both labelers now read from the
+start.** The version skew that consumed six of thirty overlap rows on the last pass was an artifact
+of one labeling surface being built before that section existed, and it does not recur by accident;
+the surface build asserts the section is present.
+
+- two labelers, roles per §7.1, the rule's author blind to the sample per §7.6;
+- an enriched overlap per §7.3, stated as enriched;
+- the agreement bar is **κ ≥ 0.60 on the binary `NEEDS_ATTENTION` partition**, per §7.4, computed on
+  **raw answers before any adjudication**, exactly as it was;
+- disagreements are adjudicated against this contract's text, never row by row against a candidate's
+  answers — and no candidate answer on a fresh row may be looked at until gold is assembled and
+  committed.
+
+### 13.6 The reading
+
+Identical to §8.10, and it inherits §8.10.1 whole:
+
+- one frozen candidate, 3 independent passes, both readings, worst observed across the six;
+- recall ≥ 0.30 · precision Wilson 95% LB ≥ 0.80 · 4–5★ FP ≤ 0.05;
+- classification failures and raw model demotions reported beside it;
+- the gate computed on the §8.9 final decision, the tier a seller would see;
+- **one reading, ever**, and a failure may not be answered by a prompt edit and a second look.
+
+**Reported beside the gate, and new:** the **power diagnostic** — the observed number of predicted
+positives, the maximum false positives the bar tolerates at that number, and the smallest number of
+predicted positives at which the observed precision *would* have cleared it. Descriptive. It does not
+move the bar, and it may never be offered as a reason a failure does not count. It exists so that
+§13.1's arithmetic is visible at the moment it matters rather than a day later.
+
+### 13.7 Until it exists
+
+No classifier reaches a product surface. `ReviewTriageRules` remains what every seller sees, the
+prediction store stays unread by any surface (§2.1 of the slice), and every candidate C number is
+labeled in-sample per §12.1 wherever it is written down.

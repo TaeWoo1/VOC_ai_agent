@@ -32,7 +32,23 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 /**
- * Measures a candidate LLM classifier against the same 220-row gold set, on {@code DEV} only.
+ * Measures a candidate LLM classifier against the 220-row gold set — <b>all of it</b>.
+ *
+ * <h2>What changed on 2026-08-17, and why it is not a relaxation</h2>
+ *
+ * <p>This harness used to score {@code DEV} only, and {@code ClassifierBoundaryTest} asserted it had
+ * no code path to a holdout row at all. That was right while the holdout was unspent. It has since
+ * been spent: candidate B was read against it once, rejected on precision, and RUBRIC v2 §12 makes
+ * <b>all 220 rows development evidence</b> as a result.
+ *
+ * <p>So the constraint moves rather than loosens. This harness may read every one of the 220 and may
+ * finally verify <b>nothing</b> — §12.1: every number it prints is in-sample by construction, because
+ * the rows' errors are read while the candidate is being written. The bars are still printed, and
+ * they are diagnostics here, not evidence for `v1` §5. A candidate is verified against the fresh
+ * sample §13 designs, in a harness that does not exist yet because that sample does not exist yet.
+ *
+ * <p>The §6.1 split is still computed and still printed per row, for the one thing §12.2 keeps it
+ * for: it records which rows candidate B had never been shown when it was frozen.
  *
  * <p><b>Gated twice over.</b> {@code RUN_LLM_TRIAGE_EVAL=true} plus a database, and separately an
  * API key — because unlike {@code ReviewTriageEvalIT} this one <b>sends real customer review text to
@@ -44,10 +60,10 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
  *   REVIEW_EVAL_JDBC_URL=… REVIEW_EVAL_DB_USER=… ./gradlew test --tests '*LlmTriageEvalIT*' --info
  * </pre>
  *
- * <p><b>{@code HOLDOUT} is never read here.</b> Not behind a flag, not with an environment variable —
- * this harness has no code path that scores a holdout row, because §6.2's "read once" is spent by
- * the final candidate and a prompt-iteration harness is exactly the thing that would spend it early.
- * The holdout reading is {@code ReviewTriageEvalIT}'s, after a freeze.
+ * <p><b>It cannot reach the fresh sample.</b> One corpus directory constant, pointing at
+ * {@code naver/v2}; no {@code SPEND_HOLDOUT} flag; asserted by {@code ClassifierBoundaryTest}. The
+ * thing most likely to spend a single-reading holdout early is a harness you re-run on every prompt
+ * edit, and this is that harness.
  *
  * <p><b>Every run belongs in the §8.6 change log</b> (`docs/slices/llm-triage-classifier-v1.md`),
  * including the ones that scored badly. A candidate that needed six passes to clear the bars is a
@@ -61,15 +77,17 @@ class LlmTriageEvalIT {
     private record Label(ReviewTriageTier tier, String reasonCode) {
     }
 
-    private record DevRow(String fingerprint, String stratum, Integer rating, String body) {
+    /** {@code split} is provenance only (§12.2) — it selects nothing. */
+    private record CorpusRow(String fingerprint, String stratum, String split, Integer rating,
+                             String body) {
     }
 
     @Test
-    void measureTheCandidateOnDevOnly() throws Exception {
+    void measureTheCandidateOnTheDevelopmentCorpus() throws Exception {
         Map<String, Label> labels = readLabels();
         Set<String> synthetic = readSynthetic();
 
-        List<DevRow> drawn = new ArrayList<>(drawDevRows());
+        List<CorpusRow> drawn = new ArrayList<>(drawCorpusRows());
         StringBuilder out = new StringBuilder();
 
         String vendor = requireEnv("LLM_TRIAGE_VENDOR");
@@ -96,15 +114,23 @@ class LlmTriageEvalIT {
         }
 
         out.append("\n\nreview-triage calibration — ").append(gate.version()).append("\n\n");
+        out.append("""
+                  ⚠ DEVELOPMENT CORPUS — RUBRIC v2 §12.1. The v2 holdout was spent on candidate B
+                    and all 220 rows are development evidence now. Every number below is IN-SAMPLE
+                    by construction: these rows' errors are read while the candidate is written.
+                    The bars are printed as diagnostics. They are not evidence for `v1` §5, and no
+                    candidate is verified here — §13's fresh sample is where that happens.
+
+                """);
         if (bounded) {
             out.append(String.format("""
-                      ⚠⚠ WIRING CHECK, NOT A RESULT — %d of the DEV rows, taken in draw order.
+                      ⚠⚠ WIRING CHECK, NOT A RESULT — %d of the corpus rows, taken in draw order.
                          Nothing below is a candidate score and none of it may enter the §8.6
                          change log. Unset LLM_TRIAGE_LIMIT for a real pass.
 
                     """, limit));
         }
-        out.append(String.format("  DEV rows drawn %d, all labeled %s%n", drawn.size(),
+        out.append(String.format("  corpus rows drawn %d, all labeled %s%n", drawn.size(),
                 drawn.stream().allMatch(r -> labels.containsKey(r.fingerprint()))));
         if (!drawn.stream().allMatch(r -> labels.containsKey(r.fingerprint()))) {
             // The draw and the gold set disagree, so nothing below means anything. Said loudly
@@ -133,7 +159,7 @@ class LlmTriageEvalIT {
             int crossingRows = 0;
             int crossingCaught = 0;
 
-            for (DevRow row : drawn) {
+            for (CorpusRow row : drawn) {
                 Label label = labels.get(row.fingerprint());
                 if (label == null || label.tier() == null) {
                     continue; // UNCERTAIN, excluded from every metric by v1 §4.
@@ -164,7 +190,7 @@ class LlmTriageEvalIT {
                     rawDemotions++;
                 }
 
-                Row scored = new Row(row.stratum(), "DEV", row.rating(), decided,
+                Row scored = new Row(row.stratum(), row.split(), row.rating(), decided,
                         label.tier(), label.reasonCode());
                 rows.add(scored);
                 if (!synthetic.contains(row.fingerprint())) {
@@ -182,12 +208,16 @@ class LlmTriageEvalIT {
                         crossingCaught++;
                     }
                 }
-                if (pass == 1) {
-                    answers.add(String.join(",", row.fingerprint(), row.stratum(),
-                            String.valueOf(row.rating()), baseline.name(),
-                            raw == null ? "FAILED" : raw.name(), decided.name(), label.tier().name(),
-                            String.valueOf(result.reasonCode()), String.valueOf(label.reasonCode())));
-                }
+                // §8.12: every pass, not only the first. An evaluation that reports "3 false
+                // positives" and cannot say which three has measured the bar and not the failure.
+                boolean goldPositive = label.tier() == ReviewTriageTier.NEEDS_ATTENTION;
+                boolean calledPositive = decided == ReviewTriageTier.NEEDS_ATTENTION;
+                answers.add(String.join(",", String.valueOf(pass), row.fingerprint(), row.stratum(),
+                        row.split(), String.valueOf(row.rating()), baseline.name(),
+                        raw == null ? "FAILED" : raw.name(), decided.name(), label.tier().name(),
+                        goldPositive == calledPositive ? (goldPositive ? "TP" : "TN")
+                                : (calledPositive ? "FP" : "FN"),
+                        String.valueOf(result.reasonCode()), String.valueOf(label.reasonCode())));
             }
 
             int failed = failures.values().stream().mapToInt(Integer::intValue).sum();
@@ -211,9 +241,11 @@ class LlmTriageEvalIT {
                     rows.size() - rowsWithoutSynthetic.size()), rowsWithoutSynthetic));
         }
 
-        Files.writeString(Path.of("build", "llm-triage-dev-answers.csv"),
-                "fingerprint,stratum,rating,rulesV1,modelRaw,finalDecision,gold,candidateReason,goldReason\n"
-                        + String.join("\n", answers) + "\n");
+        // §8.12. Written to build/, never committed: it pairs fingerprints with content-derived
+        // judgments and §5 governs what may enter the repository.
+        Files.writeString(Path.of("build", "llm-triage-answers.csv"),
+                "pass,fingerprint,stratum,split,rating,rulesV1,modelRaw,finalDecision,gold,outcome,"
+                        + "candidateReason,goldReason\n" + String.join("\n", answers) + "\n");
 
         // ── the gate, §8.7 ───────────────────────────────────────────────────────────────────
         double worstRecall = verdicts.stream().mapToDouble(EvalMetrics.Verdict::recall).min().orElse(0);
@@ -238,8 +270,9 @@ class LlmTriageEvalIT {
                 verdicts.stream().map(v -> String.format("%.3f", v.recall())).toList()));
 
         out.append("""
-                  HOLDOUT was not read, and this harness cannot read it. §6.2 spends it once, on the
-                  frozen candidate, through ReviewTriageEvalIT.
+                  §12.1: in-sample. Nothing above verifies a candidate. The fresh sample §13 designs
+                  does not exist yet, and until it has been read and passed, ReviewTriageRules stays
+                  what every seller sees.
                 """);
         System.out.print(out);
     }
@@ -278,23 +311,42 @@ class LlmTriageEvalIT {
                 counts.trueNegatives(), verdict.precision(), verdict.precisionLowerBound(),
                 verdict.recall(), verdict.highRatingFalsePositiveRate(), counts.highRatingNoAction(),
                 verdict.pass(), verdict.reason()));
+        TriageEvalReport.PrecisionPower power = TriageEvalReport.precisionPower(counts, 0.80);
+        out.append(String.format("""
+                %n    how much evidence the precision bar has here (§13.1, descriptive)
+                      predicted positives %d — at that n the 0.80 bar tolerates at most %d false
+                      positive(s); this candidate's observed precision would clear it at n=%d%n""",
+                power.predictedPositives(), power.maxFalsePositives(), power.nForObservedToPass()));
+
         Map<String, Integer> byReason = TriageEvalReport.missedByReason(rows);
-        out.append(String.format("%n    what the candidate missed (%d reviews a human called 확인 필요)%n",
+        out.append(String.format("%n    what the candidate missed — FN (%d reviews a human called 확인 필요)%n",
                 byReason.values().stream().mapToInt(Integer::intValue).sum()));
         byReason.forEach((reason, count) -> out.append(String.format("      %-26s %4d%n", reason, count)));
         out.append("      by rating: ").append(TriageEvalReport.missedByRating(rows)).append('\n');
+
+        // §8.12. Precision is the bar candidate B failed, so its taxonomy is printed too.
+        Map<String, Integer> fpByReason = TriageEvalReport.falsePositivesByReason(rows);
+        out.append(String.format("%n    what the candidate over-flagged — FP (%d reviews a human did not "
+                        + "call 확인 필요), by the reason the human gave%n",
+                fpByReason.values().stream().mapToInt(Integer::intValue).sum()));
+        fpByReason.forEach((reason, count) -> out.append(String.format("      %-26s %4d%n", reason, count)));
+        out.append("      by rating: ").append(TriageEvalReport.falsePositivesByRating(rows)).append('\n');
         return out.toString();
     }
 
     /**
-     * The §4 draw, re-derived, then narrowed to {@code DEV}.
+     * The §4 draw, re-derived — all 220 rows, both halves (§12).
      *
      * <p>Re-derived rather than read from a list, for the reason §4.3 gives: if the draw were not
      * reproducible, the labeled set and this set would silently differ. The integrity line above
      * reports whether every drawn row carries a gold label, which is what would catch it.
+     *
+     * <p>{@link CalibrationSample#splitOf} is still called, and its answer is carried onto every row
+     * and printed. It selects nothing — §12.2 keeps it as the record of which rows candidate B had
+     * never been shown.
      */
-    private static List<DevRow> drawDevRows() throws Exception {
-        Map<String, List<DevRow>> byStratum = new LinkedHashMap<>();
+    private static List<CorpusRow> drawCorpusRows() throws Exception {
+        Map<String, List<CorpusRow>> byStratum = new LinkedHashMap<>();
         Map<String, String> order = new HashMap<>();
         try (Connection db = DriverManager.getConnection(
                 requireEnv("REVIEW_EVAL_JDBC_URL"), requireEnv("REVIEW_EVAL_DB_USER"),
@@ -315,22 +367,19 @@ class LlmTriageEvalIT {
                     }
                     order.put(fingerprint, CalibrationSample.sampleOrderKey(fingerprint));
                     byStratum.computeIfAbsent(stratum, k -> new ArrayList<>())
-                            .add(new DevRow(fingerprint, stratum, rating, body));
+                            .add(new CorpusRow(fingerprint, stratum,
+                                    CalibrationSample.splitOf(fingerprint), rating, body));
                 }
             }
         }
-        List<DevRow> dev = new ArrayList<>();
+        List<CorpusRow> corpus = new ArrayList<>();
         for (String stratum : CalibrationSample.STRATA) {
-            List<DevRow> pool = new ArrayList<>(byStratum.getOrDefault(stratum, List.of()));
+            List<CorpusRow> pool = new ArrayList<>(byStratum.getOrDefault(stratum, List.of()));
             pool.sort(Comparator.comparing(r -> order.get(r.fingerprint())));
             int take = Math.min(pool.size(), CalibrationSample.ALLOCATION.get(stratum));
-            for (DevRow row : pool.subList(0, take)) {
-                if ("DEV".equals(CalibrationSample.splitOf(row.fingerprint()))) {
-                    dev.add(row);
-                }
-            }
+            corpus.addAll(pool.subList(0, take));
         }
-        return dev;
+        return corpus;
     }
 
     private static Map<String, Label> readLabels() throws Exception {

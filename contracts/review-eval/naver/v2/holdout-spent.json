@@ -1,0 +1,24 @@
+{
+  "contract": "review-eval/naver/v2",
+  "note": "RUBRIC.md §6.2 gives this holdout one reading. It has been read. While this file exists, every harness that can score a HOLDOUT row refuses to run. See §8.10.1 and §12.3.",
+  "spent": true,
+  "readings": [
+    {
+      "date": "2026-08-17",
+      "harness": "ReviewTriageEvalIT",
+      "subject": "rules-v1, the rating-only baseline",
+      "authorisedBy": "RUBRIC.md §6.2"
+    },
+    {
+      "date": "2026-08-17",
+      "harness": "LlmTriageHoldoutIT",
+      "subject": "llm-triage/v1+openai:gpt-5-2025-08-07+triage-prompt/v2+schema/v1+tdefault+out4000+effort:low+additive-guard/v1",
+      "authorisedBy": "RUBRIC.md §8.10",
+      "verdict": "REJECTED",
+      "failedBar": "precision, Wilson 95% lower bound — worst observed 0.667 against a bar of 0.80, on all six readings",
+      "recordedIn": "docs/slices/llm-triage-classifier-v1.md §13"
+    }
+  ],
+  "whatIsAllowedNow": "All 220 labeled rows are development evidence (§12). None of them may finally verify any candidate, ever. A candidate C requires the fresh holdout §13 designs.",
+  "howToRunTheseHarnessesAgain": "You cannot, and that is the point. Deleting this file is a commit with a message on it."
+}
