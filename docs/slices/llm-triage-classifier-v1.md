@@ -833,3 +833,101 @@ existing text.
 
 **What does not change under any of them:** no classifier reaches a product surface until a fresh
 holdout has been read and passed (§13.7). `ReviewTriageRules` is what every seller sees today.
+
+---
+
+## 15. The conservative production pilot — implemented, off by default
+
+**Product-owner decision, 2026-08-17:** tuning ended at C2 (`triage-prompt/v4`); C2 is the pilot
+candidate; RUBRIC v2 §13.7 amended to permit exactly one pilot before the fresh holdout, as a list of
+what it may not do. Commit `b5c42127`.
+
+### 15.1 What a seller sees
+
+For an org that is opted in, on a NAVER account, after an operator has pressed **run**:
+
+- A review the frozen candidate promoted carries an **`AI 확인 필요`** chip **beside** the rules chip
+  (지켜보기 / 참고), never in its place, and sorts with 확인 필요. One disclosure line under it says
+  the rule did *not* call this 확인 필요; a classifier did; correct it if wrong.
+- A review the rule already called 확인 필요 carries **no mark** — nothing was added, and crediting the
+  model for the rule's work would be a lie the seller cannot detect. Enforced on the write path
+  *and* on the read path, independently.
+- The summary's 확인 필요 count includes the marks; a separate `aiAttention` says how many are the
+  pilot's — a subset, never an addition.
+- Under the detail: **이 상품평, 확인이 필요한가요?** — 확인 필요가 맞아요 / 확인할 필요 없어요; and
+  조치 시작 / 조치 완료 / 조치 불필요. The copy says a press is recorded, moves no tier, hides no
+  row, and sends nothing to a marketplace.
+
+For an org **not** opted in — every org today — the screen is byte-for-byte what it was before this
+unit. Not "the mark is hidden": the ordering CASE takes the opt-in as a parameter and forgets the
+rows too, so a row can never sort to the top with a 지켜보기 chip and nothing to say why.
+
+### 15.2 The invariants, and where each is enforced
+
+| invariant | §13.7 | write path | read path | proof |
+|---|---|---|---|---|
+| the mark can only ADD; a rules 확인 필요 is never lowered | 1, 2 | `AdditiveTriageDecision` in `TriageFeedbackService.record` | `ReviewRepository.FINAL_TIER_RANK` — one departing branch, and it can only produce rank 0 | `ChannelReviewAiPilotIT`, exhaustive over rating × body × {unmarked, false, true} |
+| no mark on a rules 확인 필요 | 3 | `refreshCurrent` sets `aiAttention` only when baseline ≠ `NEEDS_ATTENTION` | `marksOf` filters rules positives; `countAiAttentionByChannel` excludes them | same IT; `TriageFeedbackServiceTest.theCurrentRowIsAdditiveOnly` |
+| the AI is displayed as what it is | 3 | — | separate chip + `AI_TRIAGE_DISCLOSURE` | `ChannelReviews.test.tsx` |
+| NAVER only | 4 | `NaverOnlyClassifierGate.forApi` is the only door; the pilot hands the channel code to the gate rather than checking it | — | `ClassifierBoundaryTest.theGateIsTheOnlyDoor`; `AiTriagePilotServiceTest.coupangIsRefusedAndRecorded` |
+| no marketplace write | 5 | the pilot and the feedback services hold no reply/submit path | — | `AiTriagePilotServiceTest.thePilotWritesNothingButFeedback` |
+| opt-in per org, off by default | 6 | `AiTriagePilotProperties.isEnabledFor` — master switch AND org listed AND key present | same predicate gates the ordering parameter and the marks | `AiTriagePilotServiceTest.offByDefault`; `ChannelReviewAiPilotIT.anOrgSwitchedOffForgetsTheMarksEverywhere` |
+| a pilot is not a PASS | 7 | — | — | §12.1 / §13.6: nothing the pilot records enters a gate |
+
+### 15.3 The feedback spine as built
+
+| table | evidence | written by | what it never is |
+|---|---|---|---|
+| `review_triage_predictions` | the classifier's answer, immutable | `record` | edited |
+| `review_triage_ai_current` | the one row the surface reads | `record` → `refreshCurrent` | a demotion |
+| `review_triage_corrections` | **strong** — the seller answered | `correctReview` (review-scoped; `shown_tier` + `shown_source` RULES\|AI computed from the store) | gold; the client's assertion of what was shown |
+| `review_triage_actions` | **strong** — the seller pressed a control | `act`, append-only | a tier change |
+| `review_triage_behavior_events` | **silver** — a trace | `observe`, batched, best-effort | a label; there is no `IGNORED` kind and no weight column |
+| `review_correction_dispositions` | a human's reading: `CLASSIFIER_ERROR` / `SELLER_PREFERENCE` | `disposition` | inferred |
+
+Snapshots: `freezeSnapshot` stamps `CLASSIFIER_ERROR` dispositions; `freezeSilverSnapshot` stamps
+actions and behaviour under a *different* version string, and the two may never be merged. Nothing
+in the spine has a method that trains anything; `TriageFeedbackServiceTest.nothingTrains` asserts it
+by name.
+
+### 15.4 Running it
+
+```
+SELLEROPS_AI_TRIAGE_PILOT_ENABLED=true
+SELLEROPS_AI_TRIAGE_PILOT_ORG_IDS=<org uuid>[,<org uuid>]
+SELLEROPS_AI_TRIAGE_API_KEY=<key>          # memory-only; never logged, stored or versioned
+# vendor / model / temperature / budget / effort default to C2's frozen values — change one and it
+# is a different candidate, and the change log needs a row.
+```
+
+Then `POST /api/seller-accounts/{accountId}/channel-reviews/ai-triage/runs` classifies at most
+`max-per-run` (default 100) not-yet-seen reviews of that account, oldest first, and returns counts
+only: considered / classified / marked / failed / refused / remaining. A review classified under an
+older `classifierVersion` is pending again, so a new frozen candidate re-reads the record rather than
+inheriting a predecessor's marks under its own name.
+
+### 15.5 What this unit did not do, deliberately
+
+- **No automatic classification on import.** The run is a POST someone sends. A pilot that spent
+  API calls on every sync of every opted-in account would be a cost nobody had approved and a run
+  nobody could reason about; the bound and the trigger are the same decision.
+- **No seller-policy layer yet.** Feedback draft §8 designs it (stored tier and display decision as
+  two fields, policy visible/counted/reversible). This unit records `SELLER_PREFERENCE` dispositions
+  it will consume; it does not consume them.
+- **No silver weighting.** The policy that turns behaviour into a weight is applied at snapshot time
+  and is not written yet — deliberately, so it is written against real rows and its first version is
+  a documented choice rather than a default.
+- **No `LOW_CONFIDENCE` QA route.** The candidate produces no calibrated confidence and none was
+  invented.
+- **No product-surface change for the rules tier.** 지켜보기 / 참고 are the rule's, untouched.
+- **No merge, no PR.** Branch `feat/review-triage-calibration-v1`; nothing is on `main`.
+
+### 15.6 What is still yours to decide
+
+1. **Which org, when.** The pilot is off until an org id and a key are set. That is a live-traffic
+   decision with a vendor bill attached.
+2. **The fresh holdout source** — a second seller's corpus first, per §13.7. Until it is read and
+   passed, the pilot is a pilot: nothing it records is a `PASS`, and `ReviewTriageRules` still owns
+   every tier.
+3. **The remaining-frame stress read** — permitted as high-rating precision stress evidence only, so
+   labeled. Not started.
