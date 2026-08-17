@@ -707,6 +707,77 @@ quality claims to opinion contradicts both.
 
 **Not done:** the 8 `CRITIQUE_NO_REQUEST` misses are still not chased, for §14.1's reason.
 
+### 14.3.1 Candidate C2 on the 220 — the concession class recovered, and where tuning stops
+
+```
+llm-triage/v1+openai:gpt-5-2025-08-07+triage-prompt/v4+schema/v1+tdefault+out4000+effort:low+additive-guard/v1
+220 rows · 3 passes · both readings · 1 classification failure in 660 calls · 0 raw model demotions
+```
+
+| bar | worst of 6 readings | limit | |
+|---|---|---|---|
+| recall | **0.710** | ≥ 0.30 | PASS |
+| precision, Wilson 95% low | **0.884** | ≥ 0.80 | PASS |
+| 4–5★ false-positive rate | **0.000** | ≤ 0.05 | PASS |
+| classification failures | 1 (`UNCLASSIFIED unknown tag`, pass 3) | reported | |
+
+**All three candidates, same rows, same reading:**
+
+| | B (v2) | C (v3) | **C2 (v4)** |
+|---|---|---|---|
+| predicted positives | 55 | 33–36 | 45–48 |
+| false positives | 2 | 0–1 | **1, the same row every pass** |
+| precision, point | 0.964 | 0.971–1.000 | **0.978–0.979** |
+| **precision, Wilson 95% low** | 0.877 | 0.851–0.898 | **0.884–0.891** |
+| **recall** | **0.828** | 0.516–0.548 | **0.710–0.734** |
+| 4–5★ FP rate | 0.010 | 0.000 | **0.000** |
+| `PRAISE_WITH_CONCESSION` missed (of 20) | 1 | 14 | **8, every pass** |
+| raw demotions | 0 | 0 | 0 |
+
+**What v4 fixed.** The named-fault misses did not recur as a pattern; the concession class came back
+from 14 missed to 8; precision held. The one false positive is **the same 3★ row on every pass, and
+the same row that was B's other FP** — a defect reading against a gripe reading, which no prompt
+structure has moved and which is a judgment about the text.
+
+**What C2 does not do, and it is B's recall.** 0.710–0.734 against B's 0.828. The remaining misses:
+
+| gold `reasonCode` on a missed row | C2 | reachable? |
+|---|---|---|
+| `PRAISE_WITH_CONCESSION` | 8 | in principle — but see below |
+| `CRITIQUE_NO_REQUEST` | 5 | no (§14.1) |
+| `PACKAGING_PROBLEM`, `DELIVERY_PROBLEM` | 1 each | yes — one row each, stochastic |
+| `PRAISE_ONLY`, `NEUTRAL_DESCRIPTION` | 1 each | no |
+
+Seven of the seventeen are gold's crossing rows and were never in play. The eight
+`PRAISE_WITH_CONCESSION` rows are the whole difference between C2 and B, and B reached them by
+promoting *every* praise-plus-problem review — which is the rule that produced the false positive
+that failed the holdout. **There is no third prompt that gets those eight without that rule.** The
+first candidate widened stage 1 and paid on precision; the second narrowed the escape clause and paid
+on recall; the third narrowed it back partway. The trade is now visible from three points and it is a
+trade, not a bug.
+
+### 14.3.2 Convergence — the tuning stops here
+
+Product-owner rule for this unit: one or two meaningful candidate improvements, then if the further
+gain is small, switch to conservative rollout. Two have been made. The measured shape:
+
+- **B → C:** precision LB moved −0.02 to +0.02, recall −0.28. Not an improvement.
+- **C → C2:** precision LB +0.03, recall +0.19, the concession class from 14 to 8. A real improvement.
+- **C2 → a v5:** the reachable misses are eight rows in one class, and the only rule that reaches them
+  is the one that failed. Any further gain is inside the run-to-run spread or paid for in the bar that
+  matters.
+
+**No further prompt version is written in this unit.** What follows is decided rather than tuned:
+
+1. **`triage-prompt/v4` is the last candidate prompt of this unit.** Both `v2` and `v4` are recorded;
+   they are two frozen points on the same trade, and which one a fresh holdout is spent on is a
+   product-owner decision, not a tuning decision. Stated plainly: **B has higher recall and one more
+   false positive; C2 has higher precision and misses more concessions.** Under §13.1's arithmetic
+   the difference in what a fresh holdout could certify is *small* — LB 0.877 vs 0.884–0.891 on ~50
+   predicted positives — and the difference in recall is not.
+2. **Every C/C2 number above is in-sample** (§12.1) and none of it verifies anything.
+3. **`ReviewTriageRules` stays what every seller sees** until a fresh holdout is read (§13.7).
+
 ### 14.4 The fresh holdout — what it would take, and a decision that is not mine
 
 RUBRIC v2 §13 fixes the *design*; this is what acquiring it actually costs. The numbers are from the
