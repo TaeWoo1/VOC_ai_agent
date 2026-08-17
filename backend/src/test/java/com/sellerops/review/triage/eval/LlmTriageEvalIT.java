@@ -236,8 +236,10 @@ class LlmTriageEvalIT {
                     + "working, or is the guard carrying it?)%n", rawDemotions));
             out.append(String.format("  reasonCode agreement %d/%d · gold crosses §3.1's column on %d rows, "
                     + "tier matched on %d%n", reasonAgree, reasonScored, crossingRows, crossingCaught));
-            out.append(section("DEV · PRIMARY", rows));
-            out.append(section(String.format("DEV · SENSITIVITY (%d synthetic rows excluded)",
+            // Labeled CORPUS, not DEV. The harness scores both halves now (§12) and a heading that
+            // still said DEV would be the report claiming a holdout was withheld when it was not.
+            out.append(section("CORPUS · PRIMARY", rows));
+            out.append(section(String.format("CORPUS · SENSITIVITY (%d synthetic rows excluded)",
                     rows.size() - rowsWithoutSynthetic.size()), rowsWithoutSynthetic));
         }
 

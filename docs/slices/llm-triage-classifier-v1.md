@@ -642,3 +642,123 @@ unreachable false negatives were **not** chased, because reaching them costs the
 ```
 llm-triage/v1+openai:gpt-5-2025-08-07+triage-prompt/v3+schema/v1+tdefault+out4000+effort:low+additive-guard/v1
 ```
+
+### 14.3 Candidate C on the 220 — a regression, recorded as measured
+
+```
+llm-triage/v1+openai:gpt-5-2025-08-07+triage-prompt/v3+schema/v1+tdefault+out4000+effort:low+additive-guard/v1
+220 rows · 3 passes · both readings · 0 classification failures in 660 calls · 0 raw model demotions
+```
+
+| bar | worst of 6 readings | limit | |
+|---|---|---|---|
+| recall | **0.516** | ≥ 0.30 | PASS |
+| precision, Wilson 95% low | **0.851** | ≥ 0.80 | PASS |
+| 4–5★ false-positive rate | **0.000** | ≤ 0.05 | PASS |
+
+Every bar cleared. **It is still worse than candidate B**, and the gate is not what says so.
+
+| | candidate B | candidate C |
+|---|---|---|
+| predicted positives | 55 | 33–36 |
+| true positives | 53 | 32–35 |
+| false positives | 2 | **0–1** |
+| precision, point | 0.964 | **0.971–1.000** |
+| precision, Wilson 95% low | 0.877 | 0.851–0.898 |
+| **recall** | **0.828** | **0.516–0.548** |
+| 4–5★ FP rate | 0.010 | **0.000** |
+
+(B is one pass on the 220, C is three; the recall gap is far outside C's own 0.516–0.548 spread, so
+the comparison holds regardless.)
+
+**The precision the prompt bought did not reach the bar the bar reads.** C makes almost no false
+positives — one, in three passes — and its Wilson lower bound is *no better* than B's, because it
+predicts 20 fewer positives and §13.1's arithmetic runs in both directions: a more conservative
+classifier needs a **higher** true precision to certify the same lower bound. At n=34 the bar
+tolerates 2 false positives; at n=55 it tolerates 5. Conservatism is not free under this gate, and
+that is worth knowing before the fresh holdout is designed around it.
+
+**What C actually gave up**, from the per-row records:
+
+| gold `reasonCode` on a missed row | C | B | reading |
+|---|---|---|---|
+| **`PRAISE_WITH_CONCESSION`** | **14** | 1 | **the damage** — `v1` §2's first row, *"the exact class the whole effort exists for"* |
+| `CRITIQUE_NO_REQUEST` | 8 | 6 | unreachable (§14.1), expected |
+| `CANNOT_USE` | 2 | 2 | unchanged |
+| `PACKAGING_PROBLEM` | 1 | 0 | **a fault stage 1 names outright, and it was still missed** |
+| `DELIVERY_PROBLEM` | 1 | 0 | **same** |
+| `PRAISE_ONLY` / `NEUTRAL_DESCRIPTION` | 2 | 2 | unreachable, expected |
+
+**The defect is mine and it is in v3's (나) clause, not in gold.** Eighteen of the twenty
+`PRAISE_WITH_CONCESSION` rows are `NEEDS_ATTENTION`; v3 now misses fourteen. The clause listed
+두께감·크기감·색감·재질·향·맛 as product opinion and then said *"아무리 구체적이고 아무리 부정적이어도
+NEEDS_ATTENTION이 아닙니다"* — which **conflates the attribute with the claim being made about it.**
+"색이 마음에 안 든다" is a preference. "색이 사진과 다르다" is `NOT_AS_DESCRIBED`, and the seller can fix
+the listing. Same attribute, opposite answers under §2.3, and v3 sent both to `WATCH`.
+
+The two named-fault misses say the same thing from the other side: an absolutist sentence in (나)
+appears to have pulled rows out of a stage 1 that is supposed to be terminal.
+
+**So the fix is structural again, and it is a narrower boundary rather than a wider one:** the axis
+is not *which attribute* the review mentions but *what it claims about it* — a fault or a gap against
+what the listing promised, against a preference about a correctly-delivered product. 품질 is one of
+§3.2's own stored tags and `DEFECT_OR_DAMAGE` is one of §3.1's own codes; a clause that routes
+quality claims to opinion contradicts both.
+
+**Not done:** the 8 `CRITIQUE_NO_REQUEST` misses are still not chased, for §14.1's reason.
+
+### 14.4 The fresh holdout — what it would take, and a decision that is not mine
+
+RUBRIC v2 §13 fixes the *design*; this is what acquiring it actually costs. The numbers are from the
+existing frame and `labels.json` only.
+
+**The requirement.** §13.8: ≈1,800 fresh reviews yield ≈60 predicted positives across ≈290 labeled
+rows, once 1–3★ and `HIGH_L` are both censused. 60 is the point at which a Wilson 95% lower bound can
+distinguish a 0.91-precision classifier from a failing one; at the 25 the spent holdout had, the bar
+tolerated exactly one false positive.
+
+**What the frame can supply today.**
+
+| | rows | 1–3★ | expected positives | available |
+|---|---|---|---|---|
+| **A** · the unlabeled remainder of the existing frame | 3,638 | **0** | ~100 from `HIGH_L` alone (299 rows) | **now** |
+| **B** · a fresh time window, same store | ~300/month; ~1 month exists | yes | ≈60 at ~1,800 rows | **≈2027-01** |
+| **C** · a second seller | unknown | yes | design as §13 | when a second org onboards |
+
+**Route A is real and it is stronger than it sounds.** §4.2 censused every 1–3★ row in the frame, so
+the 3,638 unlabeled rows are all 4–5★ — but 299 of them are `HIGH_L`, positive at 0.333, never
+labeled, never scored, never read by anyone. They satisfy what a holdout is actually for: rows that
+took no part in developing the candidate. And they test **the bar that failed**: candidate B's false
+positives were a 5★ praise-with-concession promotion and a 3★ defect reading, and the praise-plus-
+gripe class lives exactly in `HIGH_L`.
+
+**Route A's gap is real too, and it is not small.** There are **zero** unlabeled 3★ rows. Nine of
+candidate B's eleven false negatives and one of its two false positives were at 3★, and §2.2 — the
+section that consumed six of thirty overlap rows — is a 3★ rule. A holdout with no 3★ band cannot
+test the part of the rubric that has been hardest for two humans, let alone a model. Its recall
+figure would also not be comparable to any recall figure in this document, because the positive class
+would be a different population.
+
+Two further honesty notes on Route A: it is the same store, the same product mix and the same
+customers, so it tests generalization across rows and not across sellers, which §13.4 prefers; and
+§13.8's sizing used a `HIGH_L` positive rate estimated from 45 labeled rows of that same stratum —
+that informs how many rows to draw, never which rows or what they are labeled, and is disclosed
+rather than treated as harmless.
+
+**§13.4 as committed forbids Route A** — it requires the fresh frame be disjoint from the 3,858 by
+fingerprint. That was written to stop exactly this reasoning being invented after a rejection, and it
+did its job: the option is on the table as an amendment to be decided, not as something read into the
+existing text.
+
+**This is a product-owner decision**, and the three readings differ in what they buy:
+
+1. **Wait for B or C.** The strictest reading, the one §13.4 already says, and the slowest. Nothing
+   ships before roughly 2027-01 or a second seller.
+2. **Amend §13.4 to permit A, as the whole holdout.** Fastest — labeling could start today — and it
+   buys a verification that covers the failed bar well and the 3★ band not at all. Any `PASS` would
+   have to be stated with that gap attached, permanently.
+3. **A now for the 4–5★ band, B or C later for 1–3★.** Two frames in one sample, which complicates
+   the §4.4 population reading and needs its own pre-commitment about how they combine.
+
+**What does not change under any of them:** no classifier reaches a product surface until a fresh
+holdout has been read and passed (§13.7). `ReviewTriageRules` is what every seller sees today.
