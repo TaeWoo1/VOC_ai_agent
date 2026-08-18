@@ -39,7 +39,17 @@ public class SocialLoginSuccessHandler implements AuthenticationSuccessHandler {
             return;
         }
         SocialProfile profile = extract(token.getAuthorizedClientRegistrationId(), token.getPrincipal());
-        SocialLoginOutcome outcome = socialAuth.onProviderAuthenticated(profile);
+        SocialLoginOutcome outcome;
+        try {
+            outcome = socialAuth.onProviderAuthenticated(profile);
+        } catch (RuntimeException unusable) {
+            // A profile without a subject, or a DB refusal, inside the filter chain: no @RestControllerAdvice
+            // here, so without this the seller would see the container's 500 page. It is a failed sign-in.
+            log.warn("social login provider={} refused: {}", profile.provider(), unusable.getClass().getSimpleName());
+            invalidateSession(request);
+            response.sendRedirect(props.frontendUrl("/login?social=failed"));
+            return;
+        }
         log.info("social login provider={} outcome={}", profile.provider(), outcome.kind());
         invalidateSession(request);
         response.sendRedirect(props.frontendUrl(outcome.frontendPath()));

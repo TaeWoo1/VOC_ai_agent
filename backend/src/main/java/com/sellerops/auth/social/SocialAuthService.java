@@ -91,7 +91,7 @@ public class SocialAuthService {
         if (email == null) {
             return SocialLoginOutcome.emailMissing();
         }
-        if (users.existsByEmail(email)) {
+        if (users.existsByEmailIgnoreCase(email)) {
             // Fail closed: linking a social identity to an existing account is an explicit, signed-in act (§9),
             // never something an email match does on its own.
             log.info("social login refused: email already registered provider={}", provider);
@@ -147,9 +147,12 @@ public class SocialAuthService {
         if (identities.findByProviderAndProviderSubject(h.getProvider(), h.getProviderSubject()).isPresent()) {
             throw ApiException.conflict("이미 가입된 계정입니다. 다시 로그인해 주세요.");
         }
-        if (users.existsByEmail(email)) {
+        if (users.existsByEmailIgnoreCase(email)) {
             throw ApiException.conflict("이미 가입된 이메일입니다. 이메일과 비밀번호로 로그인해 주세요.");
         }
+        // From here every write is in this transaction; a unique-constraint race (two tokens for one identity or
+        // email completing at once) surfaces as a DataIntegrityViolation and rolls the whole thing back — the
+        // second seller sees an error and signs in again, never a half-made account.
         Organization org = new Organization();
         org.setName(orgName.trim());
         org = organizations.save(org);

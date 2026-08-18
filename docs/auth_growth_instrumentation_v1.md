@@ -22,12 +22,15 @@ optional PostHog), the canonical funnel, and what is deliberately **not** done i
    bytes, base64url; only its SHA-256 is stored; TTL 120 s), redirects the browser to `/auth/callback?code=…`,
    the frontend POSTs `/api/auth/social/exchange {code}`, the backend consumes the code atomically
    (`UPDATE … WHERE consumed_at IS NULL AND expires_at > now`) and answers with the **existing** `AuthResponse`
-   (`token`, `user`). A code is usable once; a replay is `401`.
+   (`token`, `user`). A code is usable once; a replay is `401`. Three handoff purposes, never interchangeable:
+   `SESSION` (URL code → JWT), `ONBOARDING` (URL code → body-only onboarding token), `ONBOARDING_TOKEN`
+   (body token → complete). Expired rows are deleted by `AuthHandoffJanitor` (every 15 min).
 2. **Social identity = `(provider, provider_subject)`** in `user_identities`. **No automatic account link by
    email.** If a first-time social identity arrives with an email that already belongs to a `users` row, the
    sign-in is **refused (fail closed)** and the login page says so (`/login?social=email_taken`); explicit
    account linking is a later, signed-in feature (§9). The same rule holds the other way: password sign-up
-   with an email a social user already holds is the existing `409`.
+   with an email a social user already holds is the existing `409`. Both checks are **case-insensitive**
+   (`existsByEmailIgnoreCase`); the social flow stores the email lower-cased.
 3. **No user without an org.** A first-time social identity does **not** create a user. The success handler
    writes a **pending onboarding handoff** (provider, subject, email, display name; TTL 30 min, one-time) and
    the exchange answers `ONBOARDING_REQUIRED` with an opaque `onboardingToken` (JSON body, never a URL). The
@@ -38,7 +41,8 @@ optional PostHog), the canonical funnel, and what is deliberately **not** done i
 4. Providers: **Google (OIDC)** and **NAVER (OAuth2, custom provider)** via Spring Security's
    `oauth2Login()` — the existing auth system is **not replaced**; a provider exists only when its client id is
    configured (`SELLEROPS_OAUTH_GOOGLE_CLIENT_ID/SECRET`, `SELLEROPS_OAUTH_NAVER_CLIENT_ID/SECRET`); with none
-   configured no OAuth endpoint or bean exists and the buttons are not rendered (`GET /api/auth/social/providers`).
+   configured there is no `ClientRegistrationRepository`, no `oauth2Login()` in the chain and no `/oauth2/**`
+   endpoint, and the buttons are not rendered (`GET /api/auth/social/providers`).
 5. A provider identity **without a verified email** is refused (`/login?social=email_missing`) — `users.email`
    is NOT NULL and is the seller's login identity; NAVER must have 이메일 consent enabled in the app.
 6. Password login for a social-only user (`password_hash IS NULL`) fails with the **same** generic message as a
@@ -57,9 +61,9 @@ optional PostHog), the canonical funnel, and what is deliberately **not** done i
 
 ## 3. Backend surface
 
-- Migration `V10__social_login.sql`: `users.password_hash` DROP NOT NULL; `user_identities(id, user_id → users,
+- Migration `V45__social_login.sql`: `users.password_hash` DROP NOT NULL; `user_identities(id, user_id → users,
   provider, provider_subject, email, created_at, updated_at, UNIQUE(provider, provider_subject))`;
-  `auth_handoffs(id, code_hash UNIQUE, purpose SESSION|ONBOARDING, user_id, provider, provider_subject,
+  `auth_handoffs(id, code_hash UNIQUE, purpose SESSION|ONBOARDING|ONBOARDING_TOKEN, user_id, provider, provider_subject,
   email, display_name, expires_at, consumed_at, created_at, updated_at)`.
 - `com.sellerops.auth.social`: `SocialLoginProperties`, `SocialLoginConfiguration` (conditional
   `ClientRegistrationRepository`: Google = `CommonOAuth2Provider.GOOGLE`, NAVER = custom
@@ -67,6 +71,8 @@ optional PostHog), the canonical funnel, and what is deliberately **not** done i
   (extracts provider/subject/email/name → `SocialAuthService.onProviderAuthenticated` → redirect),
   `SocialLoginFailureHandler` (→ `/login?social=failed`), `SocialAuthService`, `SocialAuthController`,
   entities `UserIdentity`, `AuthHandoff` + repositories, `AuthCodes` (random code + SHA-256).
+- A provider profile that cannot be used (no subject, DB refusal) inside the success handler is a failed sign-in
+  → `/login?social=failed`, never a container error page.
 - Endpoints (all `permitAll`): `GET /api/auth/social/providers` → `{google, naver}`;
   `POST /api/auth/social/exchange {code}` → `{status:"SIGNED_IN", token, user}` |
   `{status:"ONBOARDING_REQUIRED", onboardingToken, provider, email, name}`;
@@ -79,9 +85,9 @@ optional PostHog), the canonical funnel, and what is deliberately **not** done i
 
 ## 4. Frontend surface
 
-- `/login`, `/signup`: polished auth cards, **Google** (light "Google 계정으로 계속하기" per Google
-  branding: white, `#747775` border, G mark) and **NAVER** (`#03C75A`, white N mark, "네이버로 계속하기")
-  buttons — plain `<a href="/oauth2/authorization/{provider}">`; a divider "또는 이메일로"; buttons only for
+- `/login`, `/signup`: polished auth cards, **Google** (light theme per Google branding: white, `#747775`
+  border, G mark; "Google 계정으로 로그인" / "Google 계정으로 가입") and **NAVER** (`#03C75A`, white N mark,
+  "네이버 로그인") buttons — plain `<a href="/oauth2/authorization/{provider}">`; a divider "또는 이메일로"; buttons only for
   configured providers. `/auth/callback` (exchange), `/onboarding` (상호명 · 이름 → complete → `/connect`).
 - `AuthProvider.acceptSession(AuthResponse)`.
 - `analytics` initialised in `main.tsx`; `identify(userId)` / `reset()` follow the auth context.
@@ -96,7 +102,7 @@ optional PostHog), the canonical funnel, and what is deliberately **not** done i
 | `onboarding_completed` | — | `/onboarding` complete success (also for email sign-up: sign-up *is* the onboarding → fired right after `sign_up`) |
 | `channel_connect_started` | `channel` | `/connect/naver`, `/connect/coupang`, `/connect/cafe24` mounted |
 | `channel_connected` | `channel` | NAVER/Coupang connection test `SUCCESS`; Cafe24 result `status=connected` |
-| `first_sync_completed` | `channel` | NAVER/Coupang wizard first sync `SUCCESS` (once per channel per session); Cafe24: **gap** — the first sync runs from the channel workspace, not the wizard (§9) |
+| `first_sync_completed` | `channel` | NAVER/Coupang wizard first sync `SUCCESS` (transition only; `trackOnce` = once per channel per page load); Cafe24: **gap** — the first sync runs from the channel workspace, not the wizard (§9) |
 | `today_inbox_viewed` | — | 홈 `/` mounted |
 | `review_attention_opened` | — | `/reviews` mounted with the attention tier active |
 | `inquiry_opened` | — | `/inquiries` mounted |

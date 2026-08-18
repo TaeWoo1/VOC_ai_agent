@@ -292,6 +292,9 @@ sellerops:
     frontend-base-url: ${SELLEROPS_OAUTH_FRONTEND_BASE_URL:}
     code-ttl-seconds: ${SELLEROPS_OAUTH_CODE_TTL_SECONDS:120}
     onboarding-ttl-seconds: ${SELLEROPS_OAUTH_ONBOARDING_TTL_SECONDS:1800}
+    # Expired handoff rows (they carry the provider email/display name) are deleted on this cadence.
+    purge-initial-delay-ms: 300000
+    purge-interval-ms: 900000
   walkthrough:
     # Disposable NAVER walkthrough environment-identity endpoints (context + operator-tab handshake).
     # OFF by default → the WalkthroughController bean and its routes do not exist in production (any

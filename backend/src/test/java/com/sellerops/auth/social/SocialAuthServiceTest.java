@@ -83,7 +83,7 @@ class SocialAuthServiceTest {
     @Test
     void firstTimeIdentityWithFreeEmailGoesToOnboardingAndCreatesNoUser() {
         when(identities.findByProviderAndProviderSubject("naver", "n-9")).thenReturn(Optional.empty());
-        when(users.existsByEmail("new@x.io")).thenReturn(false);
+        when(users.existsByEmailIgnoreCase("new@x.io")).thenReturn(false);
 
         SocialLoginOutcome outcome = service.onProviderAuthenticated(new SocialProfile("naver", "n-9", "New@X.io ", "판매자"));
 
@@ -101,7 +101,7 @@ class SocialAuthServiceTest {
     @Test
     void emailAlreadyRegisteredIsRefusedNotLinked() {
         when(identities.findByProviderAndProviderSubject("google", "sub-2")).thenReturn(Optional.empty());
-        when(users.existsByEmail("owner@x.io")).thenReturn(true);
+        when(users.existsByEmailIgnoreCase("owner@x.io")).thenReturn(true);
 
         SocialLoginOutcome outcome = service.onProviderAuthenticated(new SocialProfile("google", "sub-2", "owner@x.io", "O"));
 
@@ -198,7 +198,7 @@ class SocialAuthServiceTest {
         when(handoffs.findByCodeHash(AuthCodes.hash("tok"))).thenReturn(Optional.of(h));
         when(handoffs.consume(AuthCodes.hash("tok"), AuthHandoff.Purpose.ONBOARDING_TOKEN, now)).thenReturn(1);
         when(identities.findByProviderAndProviderSubject("google", "sub-1")).thenReturn(Optional.empty());
-        when(users.existsByEmail("a@x.io")).thenReturn(false);
+        when(users.existsByEmailIgnoreCase("a@x.io")).thenReturn(false);
         when(tokens.createToken(any(), any(), eq("a@x.io"))).thenReturn("jwt-new");
 
         AuthResponse res = service.completeOnboarding("tok", " 우리 스토어 ", "판매자");
@@ -223,7 +223,7 @@ class SocialAuthServiceTest {
         when(handoffs.findByCodeHash(AuthCodes.hash("tok"))).thenReturn(Optional.of(h));
         when(handoffs.consume(any(), any(), any())).thenReturn(1);
         when(identities.findByProviderAndProviderSubject(any(), any())).thenReturn(Optional.empty());
-        when(users.existsByEmail("a@x.io")).thenReturn(true);
+        when(users.existsByEmailIgnoreCase("a@x.io")).thenReturn(true);
 
         assertThatThrownBy(() -> service.completeOnboarding("tok", "스토어", "A"))
                 .isInstanceOf(ApiException.class)

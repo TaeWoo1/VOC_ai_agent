@@ -33,7 +33,9 @@ public class AuthService {
 
     @Transactional
     public AuthResponse signup(SignupRequest req) {
-        if (users.existsByEmail(req.email())) {
+        // Case-insensitive: the social-login collision rule (docs/auth_growth_instrumentation_v1.md §2-2) and this
+        // check must agree, or "Seller@X.io" + "seller@x.io" would be two accounts for one person.
+        if (users.existsByEmailIgnoreCase(req.email())) {
             throw ApiException.conflict("이미 등록된 이메일입니다.");
         }
         Organization org = new Organization();
