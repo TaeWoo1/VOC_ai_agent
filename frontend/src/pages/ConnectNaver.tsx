@@ -30,6 +30,8 @@ import type {
   WalkthroughContextView,
 } from "../lib/types";
 import type { GuidedSyncStatus } from "../lib/guidedConnection";
+import { analytics } from "../lib/analytics";
+import { useTransitionEvent } from "../lib/analytics/useTransitionEvent";
 
 /**
  * NAVER guided-connection wizard page (contract §0 v1 ratification).
@@ -82,6 +84,13 @@ export function ConnectNaver() {
   const agentBridgeEnabled = import.meta.env.VITE_ENABLE_AGENT_BRIDGE === "true";
   const bridge = useBridge(agentBridgeEnabled);
   const [state, dispatch] = useReducer(guidedConnectionReducer, undefined, () => loadGuidedInitialState());
+  // Growth funnel (docs/auth_growth_instrumentation_v1.md §5): wizard opened; connection test passed; first
+  // sync done. Transitions only — a wizard re-opened in a state that was already reached fires nothing.
+  useEffect(() => {
+    analytics.track("channel_connect_started", { channel: "naver" });
+  }, []);
+  useTransitionEvent(state.milestones.tested, () => analytics.track("channel_connected", { channel: "naver" }));
+  useTransitionEvent(state.milestones.synced, () => analytics.trackOnce("first_sync_completed", { channel: "naver" }));
 
   const walkthrough = isWalkthroughMode();
   const [busy, setBusy] = useState(false);

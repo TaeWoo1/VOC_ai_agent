@@ -9,7 +9,11 @@ import { expectNoAxeViolations } from "../test/axe";
 
 const signup = vi.fn();
 vi.mock("../lib/auth", () => ({
-  useAuth: () => ({ user: null, ready: true, login: vi.fn(), signup, logout: vi.fn() }),
+  useAuth: () => ({ user: null, ready: true, login: vi.fn(), signup, acceptSession: vi.fn(), logout: vi.fn() }),
+}));
+// No social provider configured here — the social buttons are covered in components/auth/SocialSignInButtons.test.tsx.
+vi.mock("../lib/apiClient", () => ({
+  api: { socialProviders: async () => ({ google: false, naver: false }) },
 }));
 
 function renderSignup() {

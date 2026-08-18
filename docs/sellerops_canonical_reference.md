@@ -578,7 +578,7 @@ router.**
 | Document | Owns |
 |---|---|
 | **this document** | Product identity, strategy, honest state, authority map, standing fences |
-| `docs/product-scope-v1.md` (lock **v1.9**; Self-Pilot Runtime → `docs/self_pilot_runtime_v1.md`) | Product scope contract, operating loop, autonomy modes, pull-first/exception-push, Session Readiness, Company Voice, registration decisions, Manufacturer Track, visible-channel set |
+| `docs/product-scope-v1.md` (lock **v1.10**; Self-Pilot Runtime → `docs/self_pilot_runtime_v1.md`; Auth + Growth Instrumentation → `docs/auth_growth_instrumentation_v1.md`) | Product scope contract, operating loop, autonomy modes, pull-first/exception-push, Session Readiness, Company Voice, registration decisions, Manufacturer Track, visible-channel set |
 | `docs/product_assembly_ia_v1.md` (2026-08-17) | **Product IA, screen responsibility, seller-visible channel set** — supersedes `frontend_spec` §5–§8·§17-A |
 | `docs/sellerops_frontend_spec.md` | Frontend principles: states, seller language, a11y, capability honesty, guided connection, Action Window screens |
 | `docs/multi-channel-connector-roadmap.md` | Collection strategy; **§4.1 = capability truth**; §5.1, §5.2, §11 |

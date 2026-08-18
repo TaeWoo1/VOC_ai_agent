@@ -89,11 +89,16 @@ approval consequence `sellerops_live_approval_contract.md` §6a. What it changes
 
 **Deployer, once, before the service starts** (backend `.env.local`, names only): everything in §0.2's
 backend list **plus** `SELLEROPS_SELF_PILOT_SCOPE=LOCAL_SINGLE_USER` (instead of `SELLEROPS_SELF_PILOT_ORG_IDS`)
-and, if AI triage is wanted, `SELLEROPS_AI_TRIAGE_PILOT_ORG_IDS=*`. Start backend (`bootRun`) and frontend
-(`npm run dev:bridge`). Nothing here is ever touched again for a new sign-up.
+and, if AI triage is wanted, `SELLEROPS_AI_TRIAGE_PILOT_ORG_IDS=*`. Optional (2026-08-19,
+`docs/auth_growth_instrumentation_v1.md` §8): Google / NAVER 소셜 로그인 = `SELLEROPS_OAUTH_GOOGLE_CLIENT_ID/SECRET`,
+`SELLEROPS_OAUTH_NAVER_CLIENT_ID/SECRET` (redirect URI at the provider console:
+`http://localhost:5173/login/oauth2/code/{google|naver}`); growth analytics = frontend `VITE_GTM_ID`,
+`VITE_POSTHOG_KEY` — all absent by default, and absent means the buttons / sinks do not exist. Start backend
+(`bootRun`) and frontend (`npm run dev:bridge`). Nothing here is ever touched again for a new sign-up.
 
 **Seller, in the browser only:**
-1. `http://localhost:5173/signup` → 상호 · 이름 · 이메일 · 비밀번호 → 계정 만들기 → lands on **채널 연결**.
+1. `http://localhost:5173/signup` → 상호 · 이름 · 이메일 · 비밀번호 → 계정 만들기 → lands on **채널 연결**
+   (or, when offered, Google / 네이버 버튼 → 상호명 한 칸(`/onboarding`) → 채널 연결).
 2. 채널 연결 → NAVER (`/connect/naver` for 주문 keys; 리뷰 = 도우미) → Coupang (`/connect/coupang`, WING keys)
    → Cafe24 (`/connect/cafe24`, mall id → consent). One channel at a time.
 3. First collection: 지금 수집하기 on the channel page (or wait ≤5 min — routine schedules are created for the

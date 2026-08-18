@@ -1,11 +1,20 @@
-# Product Scope v1.9 — Drift Guard
+# Product Scope v1.10 — Drift Guard
 
 SellerOps 제품 범위를 **하나의 합의된 정의로 고정**하기 위한 문서. 목적은 "무엇을 만드는가"보다
 **"무엇을 지금 만들지 않는가"를 못 박는 것**이다. 멀티채널 확장(`docs/multi-channel-connector-roadmap.md`)이
 구체화되면서 범위가 넓어지는 자연스러운 drift를 막는다.
 
-> Status: SCOPE LOCK **v1.9** (planning only). 본 문서는 코드를 바꾸지 않으며, 라이브 접속/브라우저/업로드/
+> Status: SCOPE LOCK **v1.10** (planning only). 본 문서는 코드를 바꾸지 않으며, 라이브 접속/브라우저/업로드/
 > DB 변경을 지시하지 않는다. 범위 변경은 이 문서를 고쳐 합의한 뒤에만 이뤄진다.
+>
+> v1.10 변경 (2026-08-19, 제품 오너 결정 반영): **Auth + Growth Instrumentation v1.** 정본:
+> `docs/auth_growth_instrumentation_v1.md`. Google · NAVER 소셜 로그인을 **기존 email/password/JWT 위에** 추가(인증
+> 시스템 교체 없음): OAuth 성공은 JWT가 아니라 **one-time code** → `/auth/callback` → backend exchange → 기존 JWT;
+> 소셜 identity = `(provider, provider_subject)`, **같은 email 자동 연결 금지**(충돌은 fail closed → 명시적 linking은
+> 후속); org 없는 user는 만들지 않는다 — pending onboarding → 상호명 → org + user + identity를 한 transaction으로.
+> Frontend 분석은 **`analytics.track` 단일 abstraction**만(GTM/GA4 + optional PostHog, env 없으면 OFF, PII allow-list로
+> email/이름/상호/리뷰·문의 본문/마켓 id는 payload에 들어갈 수 없음, session replay OFF). 광고 conversion 태그는 GTM에서
+> 붙일 수 있게만 준비(이번 unit에서 firing 없음). 마켓 WRITE 승인 경계는 그대로.
 >
 > v1.9 변경 (2026-08-18, 제품 오너 결정 반영): **Self-Pilot Runtime v1.** 정본: `docs/self_pilot_runtime_v1.md`
 > (설계·구현·복구 매트릭스), 승인 계약 §6a (`docs/sellerops_live_approval_contract.md`). 아래는 이전 서술 중 상충

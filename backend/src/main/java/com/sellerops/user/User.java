@@ -20,7 +20,8 @@ public class User extends BaseEntity {
     @Column(nullable = false, unique = true)
     private String email;
 
-    @Column(name = "password_hash", nullable = false)
+    /** Null for a social-only user (Google/NAVER sign-up) — password login is then refused. */
+    @Column(name = "password_hash")
     private String passwordHash;
 
     @Column(nullable = false)

@@ -19,6 +19,17 @@ export interface UserView {
   orgName: string;
 }
 
+/** Which social providers this deployment offers (`GET /api/auth/social/providers`). */
+export interface SocialProvidersView {
+  google: boolean;
+  naver: boolean;
+}
+
+/** Answer to a one-time social login code (`POST /api/auth/social/exchange`). */
+export type SocialExchangeResponse =
+  | { status: "SIGNED_IN"; token: string; user: UserView; provider: string }
+  | { status: "ONBOARDING_REQUIRED"; onboardingToken: string; provider: string; email: string | null; name: string | null };
+
 export interface AuthResponse {
   token: string;
   user: UserView;

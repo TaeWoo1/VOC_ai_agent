@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { analytics } from "../../lib/analytics";
 import { useParams, useSearchParams } from "react-router-dom";
 import { channelDataTypeLabel } from "../../lib/channelVocabulary";
 import { Panel } from "../../components/ui/Panel";
@@ -125,6 +126,10 @@ export function ChannelReviews({
   const rawTier = searchParams.get("tier");
   const tier = parseTierParam(rawTier);
   const selectedId = searchParams.get("review");
+  // Growth funnel: the 확인 필요 view was opened (the tier only — never a review or an account id).
+  useEffect(() => {
+    if (tier === "NEEDS_ATTENTION") analytics.track("review_attention_opened");
+  }, [tier]);
   const setTier = useCallback(
     (next: ReviewTriageTier | null) => {
       setSearchParams(

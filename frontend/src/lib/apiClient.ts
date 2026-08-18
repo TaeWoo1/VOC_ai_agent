@@ -3,6 +3,8 @@ import type {
   AccountDashboardSummary,
   ArticleListResponse,
   AuthResponse,
+  SocialExchangeResponse,
+  SocialProvidersView,
   BackfillRequest,
   Cafe24CapabilityView,
   Cafe24ConnectStartView,
@@ -219,6 +221,27 @@ export const api = {
       return mockAuth();
     }
     const { data } = await http.post<AuthResponse>("/api/auth/signup", input);
+    return data;
+  },
+
+  // ── Social login (docs/auth_growth_instrumentation_v1.md §3). No mock fallback: with VITE_USE_MOCKS the
+  // providers read answers "none", so the buttons simply do not render, and the code paths are unreachable.
+  async socialProviders(): Promise<SocialProvidersView> {
+    if (USE_MOCKS) {
+      return { google: false, naver: false };
+    }
+    const { data } = await http.get<SocialProvidersView>("/api/auth/social/providers");
+    return data;
+  },
+
+  /** Spend the one-time code from `/auth/callback?code=…` — the JWT (or the onboarding token) arrives in the body. */
+  async socialExchange(code: string): Promise<SocialExchangeResponse> {
+    const { data } = await http.post<SocialExchangeResponse>("/api/auth/social/exchange", { code });
+    return data;
+  },
+
+  async socialOnboardingComplete(input: { onboardingToken: string; orgName: string; name: string }): Promise<AuthResponse> {
+    const { data } = await http.post<AuthResponse>("/api/auth/social/onboarding/complete", input);
     return data;
   },
 

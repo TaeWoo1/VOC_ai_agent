@@ -12,6 +12,7 @@ import { buildIssueAttention, summarizeConnections } from "../../lib/homeSignals
 import { useReviewAttention } from "../../hooks/useReviewAttention";
 import { buildConnectionToday, buildInquiryToday, buildReviewToday } from "../../lib/todayInbox";
 import type { ChannelResponse, ConnectorAlertView, InboxResponse, ItemAnalysis } from "../../lib/types";
+import { analytics } from "../../lib/analytics";
 
 /**
  * 홈 — Today Inbox: "오늘 내가 확인하거나 조치할 일은 무엇인가?"
@@ -34,6 +35,11 @@ export function HomeV2() {
   const [alertsLoaded, setAlertsLoaded] = useState(false);
   // 리뷰: the shared count source (also what Reports reads) — per account, attention-filtered.
   const reviewSources = useReviewAttention();
+
+  // Growth funnel: 홈 (Today Inbox) opened — no counts, no ids (docs/auth_growth_instrumentation_v1.md §5).
+  useEffect(() => {
+    analytics.track("today_inbox_viewed");
+  }, []);
 
   useEffect(() => {
     let active = true;
