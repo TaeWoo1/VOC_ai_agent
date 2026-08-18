@@ -19,7 +19,7 @@ export const SUPPORT_COPY = {
   naverVerifiedUpload: "네이버 리뷰 export 업로드 지원",
   connectionCheck: "연결 확인 가능",
   credentialSetup: "연결 정보 저장 가능",
-  preparing: "지원 준비 중",
+  preparing: "지금은 연결할 수 없음",
   footnote: "수집 가능 여부는 채널별 지원 상태에 따라 다릅니다.",
 } as const;
 

@@ -69,29 +69,33 @@ export function channelCardAction(
     }
     // CONNECTED (or any other settled state with an account): manage it. A connected
     // account whose collection is failing keeps the existing re-run affordance.
+    // The verb matches the state chip (`connectionState`): an erroring connection is something to
+    // 확인, a healthy one something to 관리. Both open the account's own page.
     return {
-      label: collectionFailing ? "재연결·테스트" : "연결 관리",
+      label: collectionFailing ? "확인하기" : "연결 관리",
       intent: "manage",
       disabled: false,
     };
   }
 
-  // No account yet.
+  // No account yet. The three product channels each have a real connect flow, so the label is the
+  // same verb for all of them — not the catalog's own status word, which for a channel the seeder
+  // marks CONNECTED reads "관리" over a button that starts a first connection.
   const prepping = channel.status === "PREPARING";
   if (channel.code === "CAFE24") {
-    return { label: channel.actionLabel, intent: "connect-cafe24", disabled: prepping };
+    return { label: "연결하기", intent: "connect-cafe24", disabled: prepping };
   }
   if (channel.code === "NAVER") {
     // First-time NAVER: the guided-connection wizard (§16.10) is the primary path — it connects
     // orders via the official API and hands off to Action Window review export. Upload stays
     // reachable from the channel detail.
-    return { label: channel.actionLabel, intent: "connect-naver", disabled: prepping };
+    return { label: "연결하기", intent: "connect-naver", disabled: prepping };
   }
   if (channel.code === "COUPANG") {
     // First-time Coupang: the connection setup surface shows the official prerequisites (issue the WING
     // API key, grant order-API access, register the deployment calling IP) then hosts credential entry +
     // the connection test. Orders connect via the official Coupang Open API.
-    return { label: channel.actionLabel, intent: "connect-coupang", disabled: prepping };
+    return { label: "연결하기", intent: "connect-coupang", disabled: prepping };
   }
   if (canUpload) {
     return { label: channel.actionLabel, intent: "upload", disabled: false };

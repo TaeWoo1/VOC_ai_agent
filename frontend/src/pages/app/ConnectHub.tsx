@@ -33,6 +33,8 @@ import type {
  */
 export function ConnectHub() {
   const [channels, setChannels] = useState<ChannelResponse[]>([]);
+  const [channelsLoading, setChannelsLoading] = useState(true);
+  const [channelsError, setChannelsError] = useState(false);
   const [accounts, setAccounts] = useState<SellerAccountResponse[] | null>(null);
   const [accountsLoading, setAccountsLoading] = useState(true);
   const [accountsError, setAccountsError] = useState(false);
@@ -43,10 +45,22 @@ export function ConnectHub() {
 
   useEffect(() => {
     let active = true;
+    // Strict: a dead backend says so here rather than rendering the demo catalog behind the seller's back.
     void api
-      .getChannels()
-      .then((list) => active && setChannels(list))
-      .catch(() => active && setChannels([]));
+      .getChannelsStrict()
+      .then((list) => {
+        if (active) {
+          setChannels(list);
+          setChannelsLoading(false);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setChannels([]);
+          setChannelsError(true);
+          setChannelsLoading(false);
+        }
+      });
     void api
       .getSellerAccountsStrict()
       .then((list) => {
@@ -174,6 +188,8 @@ export function ConnectHub() {
           statusLoading={accountsLoading}
           reviewCounts={reviewCounts}
           onNotice={setNotice}
+          channelsLoading={channelsLoading}
+          channelsError={channelsError}
         />
       </Panel>
 
@@ -214,11 +230,11 @@ export function ConnectHub() {
       </Panel>
 
       <Panel
-        title="가져오기 진행"
-        description="사람이 확인해야 하는 지점에서만 멈추고 알려드립니다."
+        title="리뷰 수집 실행 · 답변 준비"
+        description="리뷰 수집 실행 상태와 수집 이력, 확인이 필요한 리뷰의 답변 준비를 다루는 작업대입니다. 사람이 확인해야 하는 지점에서만 멈추고 알려드립니다."
         action={
           <BtnLink to="/connect/imports" size="sm" variant="outline">
-            진행 상황
+            작업대 열기
           </BtnLink>
         }
       >

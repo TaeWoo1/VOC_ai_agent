@@ -13,7 +13,7 @@ const getChannelReviewsStrict = vi.fn();
 
 vi.mock("../../lib/apiClient", () => ({
   api: {
-    getChannels: () => getChannels(),
+    getChannelsStrict: () => getChannels(),
     getSellerAccountsStrict: () => getSellerAccountsStrict(),
     getConnectionStatusStrict: (id: string) => getConnectionStatusStrict(id),
     getChannelReviewsStrict: (id: string, params: unknown) => getChannelReviewsStrict(id, params),
@@ -111,7 +111,7 @@ describe("채널 연결 — the hub", () => {
     expect(
       await screen.findByRole("heading", { level: 1, name: "채널 연결" }),
     ).toBeInTheDocument();
-    for (const section of ["채널", "정기 자료 가져오기", "가져오기 진행"]) {
+    for (const section of ["채널", "정기 자료 가져오기", "리뷰 수집 실행 · 답변 준비"]) {
       expect(screen.getByRole("heading", { name: section })).toBeInTheDocument();
     }
   });
@@ -157,7 +157,7 @@ describe("채널 연결 — the hub", () => {
       "href",
       "/connect/review-history",
     );
-    expect(screen.getByRole("link", { name: "진행 상황" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "작업대 열기" })).toHaveAttribute(
       "href",
       "/connect/imports",
     );

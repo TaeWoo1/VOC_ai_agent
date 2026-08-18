@@ -41,7 +41,11 @@ SellerOps는 **채널 중심 제품이 아니라 업무 중심 제품**이다. �
 └─ 주문      /orders      기간·채널 필터 집계
 
 연결·설정 (데이터가 어디서 오는가)
-├─ 채널 연결  /connect     세 채널의 연결·상태·자료 가져오기; 채널 상세 /connect/channels/:accountId
+├─ 채널 연결  /connect     세 채널의 연결·상태(연결됨/연결 필요/연결 중/재연결 필요/오류)·자료 가져오기
+│   ├─ /connect/channels/:accountId   채널 상세(연결 정보·수집 설정·이력·기간 수집)
+│   ├─ /connect/naver · /connect/coupang(+/renew/:id) · /connect/cafe24(+/tutorial,/result)  연결 wizard(live flow 유지)
+│   ├─ /connect/upload · /connect/review-history   파일 업로드 · 과거 리뷰 가져오기(Action Window backfill)
+│   └─ /connect/imports(+/current)   리뷰 수집 실행 · 답변 준비 작업대 (§4b)
 └─ 설정      /settings    워크스페이스·연결 알림·계정 (+ 더 보기: 메모리·리포트)
 
 route는 있으나 1차 메뉴에 없음
@@ -65,7 +69,7 @@ route는 있으나 1차 메뉴에 없음
 | 리뷰 | h1 "리뷰" + workflow 문장; 계정별 리뷰 기록(`ChannelReviews`)을 하나의 문 뒤에 모음(채널 = h2/switcher). 규칙 tier가 순서를 소유, AI는 `AI 확인 필요` suggestion(C2 pilot candidate, org opt-in, default OFF), 피드백·행동 기록은 학습 자산으로 축적. 필터·선택은 URL과 양방향 | 서버의 `ReviewChannelCapabilityView`(aiTriage / originalLocate / replySupported)로 버튼·문구 결정. 채널 고유 어휘(쿠팡 상품평)는 `channelVocabulary` 한 곳 |
 | 문의 | 인박스 workflow를 문의로 scope: 답변 필요 → 답변함, 서버 count 헤더, 답변 방향 제안(발송 없음), 필터는 URL과 양방향 | 채널 filter는 로드된 행에서만; 제안 불가는 capability 문장으로 |
 | 주문 | 기간·채널 집계 | 채널 select = `/api/channels`(=세 채널) |
-| 채널 연결 | 세 채널의 연결 진입(가이드 연결·OAuth·튜토리얼), 상태, 자료 가져오기, 리뷰 기록 진입 | 카드 액션은 계정 실제 상태에서 |
+| 채널 연결 | 세 채널의 연결 진입(가이드 연결·OAuth·튜토리얼), 상태 한 단어(§4b), 자료 가져오기, 리뷰 기록 진입 | 카드 액션·상태 단어는 계정 실제 상태(+health)에서만 |
 | 설정 | 사실과 링크만. 토글 없음 | — |
 
 ### 4a. Today Inbox 계약 (홈, A2 — 2026-08-18)
@@ -99,6 +103,20 @@ route는 있으나 1차 메뉴에 없음
    URL에서 지운다. 행 링크는 현재 필터를 그대로 싣는다. `/api/inbox?type=INQUIRY&limit=500`으로 문의만 읽는다.
    **Residual**: 기간(period) 필터는 로컬 상태, `?channel` 값은 채널 코드가 아니라 표시명(`channelNameKo`)이다.
 
+### 4b. 채널 연결 hub 계약 (A5 — 2026-08-18)
+
+- **행 = 세 채널(NAVER / Coupang / Cafe24)뿐.** 카탈로그 read는 strict(`getChannelsStrict`, 백엔드가 이미 3종으로
+  좁힘): 실패 시 "채널 정보를 불러오지 못했습니다", 로딩 시 "불러오는 중…", 데모 카탈로그로 조용히 대체하지 않는다.
+- **상태 단어는 하나**(`lib/connectionState.ts`, 계정 실제 상태 + health에서만): 연결됨 · 연결 필요 · 연결 중 ·
+  재연결 필요 · 오류. 버튼 동사도 상태당 하나: 연결하기 / 연결 계속하기 / 다시 연결하기 / 확인하기 / 연결 관리.
+  카탈로그의 자체 status 문구(관리/요청하기/준비 중)는 사용자에게 보이지 않는다.
+- **`/connect/imports` 결정: 유지(작업대).** `OperationsHome`은 (a) Action Window 리뷰 수집 실행 상태·이력·최근 실행,
+  (b) 계정별 attention worklist + **NAVER 리뷰 답변 준비·가이드 제출**(live-proven)의 유일한 홈이다 — 중복이 아니라
+  아직 workflow surface로 옮기지 못한 작업이다. hub 패널명을 "리뷰 수집 실행 · 답변 준비"로 바꿔 역할을 드러냈고,
+  경로·기능은 그대로 둔다. 답변 준비를 `/reviews`(capability: `replySupported`)로 흡수하는 것은 A6 후보.
+- 제거한 흔적: 도달 불가 notice 문구(로드맵 어투), `지원 준비 중` 라벨, dead 컴포넌트(`InboxFeed`, `DashboardGrid`,
+  `StatusBadge`). 연결 wizard/OAuth/튜토리얼 코드는 손대지 않았다.
+
 공통 규칙: 로딩·빈·오류 상태는 `sellerops_frontend_spec.md` §13; 언어는 §12(셀러 언어, 로드맵 문구 금지);
 capability 정직성은 §15. **새 채널이 와도 FE 신규 화면이 최소가 되게** — 새 채널 = 목록 한 줄 + capability
 row + 어휘 한 줄이 목표이며, 이를 깨는 설계는 이 문서를 먼저 고친다.
@@ -117,7 +135,8 @@ row + 어휘 한 줄이 목표이며, 이를 깨는 설계는 이 문서를 먼�
 | A2 (2026-08-18) | 홈 → Today Inbox(§4a): 리뷰·문의·연결 세 항목, count = destination count, `/inbox` 흡수(리다이렉트 + 딥링크 resolver), `FeedItem.channelId` 추가, 리포트/업로드 결과 링크가 리뷰·문의로 | 완료 |
 | A3 (2026-08-18) | 리뷰 화면 정리: "확인이 필요한 리뷰" 정의 하나(triage NEEDS_ATTENTION; 홈·리포트 공용 hook), `/reviews` h1 "리뷰" + workflow 문장(확인 필요 → 지켜보기 → 참고, AI 확인 필요 = 제안), 채널은 h2·switcher(계정 하나면 숨김), 필터 순서 확인 필요→지켜보기→참고→전체, `?tier`/`?review` 양방향 URL 동기화 | 완료 |
 | A4 (2026-08-18) | 문의 화면 정리: 답변 필요 count = 서버 `countByOrgIdAndStatus(UNANSWERED)`(feed limit과 분리, 홈·`/inquiries` 동일), workflow 문장(답변 필요 → 답변함), 상태 옵션 순서·확인 필요 제외, `?state`/`?channel` 양방향 URL 동기화, 응답 불가 문구 capability 기반 | 완료 |
-| A5 (다음) | 채널 연결 hub cleanup: NAVER/Coupang/Cafe24 3개만, 연결 상태/재연결/오류/empty wording 정리, `/connect/imports` 역할 정리, unsupported/experimental 흔적 제거, 새 기능 없음 | 제안 |
+| A5 (2026-08-18) | 채널 연결 hub cleanup(§4b): strict 카탈로그 read + 로딩/오류/빈 상태, 상태 단어·버튼 동사 통일, `/connect/imports` = 작업대로 명확화(유지), 도달 불가 문구·dead 컴포넌트 제거 | 완료 |
+| A6 (다음) | 리뷰 답변 준비를 workflow surface로: NAVER(`replySupported`) 계정의 답변 준비·가이드 제출 진입을 `/reviews` 상세에서 제공하고 `/connect/imports`는 수집 실행·이력 작업대로 축소 — 기존 reply live flow 보존, 새 기능 없음 | 제안 |
 
 ## 7. 라우터
 
