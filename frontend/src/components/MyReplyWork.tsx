@@ -38,7 +38,7 @@ export function MyReplyWork({ accountId }: { accountId: string }) {
   const [dismissedNotice, setDismissedNotice] = useState(false);
 
   // This surface is REUSED, not remounted, when the seller switches channels on the multi-account
-  // worklist (OperationsWorklist swaps `accountId` on one instance). Its transient acknowledgements
+  // surface (the 리뷰 screen swaps `accountId` on one instance). Its transient acknowledgements
   // are account-specific: a '제외했어요' banner — or an open 작업에서 제외 confirmation — from one
   // account must never carry onto the next, where the seller set nothing aside. Reset during render
   // (the React idiom for prop-derived state) so it clears before the switched-to worklist paints.

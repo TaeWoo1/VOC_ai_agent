@@ -19,6 +19,10 @@ import com.sellerops.review.triage.pilot.AiTriagePilotProperties;
 import com.sellerops.review.triage.pilot.AiTriagePilotService;
 import com.sellerops.review.channel.dto.ChannelReviewDetailView;
 import com.sellerops.review.channel.dto.ChannelReviewPageView;
+import com.sellerops.attention.reply.ReviewReplyApprovalRepository;
+import com.sellerops.attention.reply.ReviewReplyDraftRepository;
+import com.sellerops.attention.reply.ReviewReplyWorkLookup;
+import com.sellerops.attention.triage.ReviewTriageRepository;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
 import com.sellerops.sync.SyncJob;
@@ -56,6 +60,9 @@ class ChannelReviewServiceTest {
     @Autowired SyncJobRepository syncJobs;
     @Autowired ItemAnalysisRepository analyses;
     @Autowired AiTriageCurrentRepository aiCurrent;
+    @Autowired ReviewTriageRepository triages;
+    @Autowired ReviewReplyDraftRepository drafts;
+    @Autowired ReviewReplyApprovalRepository approvals;
 
     private static final String BODY = "배송도 빠르고 포장도 꼼꼼해서 아주 만족합니다";
 
@@ -67,7 +74,7 @@ class ChannelReviewServiceTest {
     @BeforeEach
     void setUp() {
         service = new ChannelReviewService(reviews, products, accounts, syncJobs, analyses, aiCurrent,
-                pilotOff(), channels);
+                pilotOff(), channels, new ReviewReplyWorkLookup(triages, drafts, approvals));
         account = account(org, "COUPANG");
         channelId = account.getChannelId();
     }
@@ -315,6 +322,56 @@ class ChannelReviewServiceTest {
 
         assertThat(detail.body()).doesNotContain("010-1234-5678");
         assertThat(detail.bodyRedacted()).isTrue();
+    }
+
+    /* ─────────────────────────── reply work (A6) ─────────────────────────── */
+
+    @Test
+    void a_coupang_review_carries_no_reply_work_because_the_channel_has_no_reply_flow() {
+        Product p = product("무선 이어폰", "15411270785");
+        Review stored = review("최악입니다", 1, LocalDate.of(2026, 8, 11), p, Instant.now());
+
+        assertThat(service.detail(org, account.getId(), stored.getId()).replyWork()).isNull();
+    }
+
+    @Test
+    void a_naver_review_carries_the_reply_flows_address_and_the_operators_current_decision() {
+        SellerAccount naver = account(org, "NAVER");
+        Review stored = reviewOn(naver.getChannelId(), "배송이 늦었어요", 2);
+
+        ChannelReviewDetailView before = service.detail(org, naver.getId(), stored.getId());
+        assertThat(before.replyWork()).isNotNull();
+        assertThat(before.replyWork().actionRef()).isEqualTo("review:" + stored.getId());
+        assertThat(before.replyWork().triageDisposition()).isNull();
+        assertThat(before.replyWork().hasReplyPreparation()).isFalse();
+
+        com.sellerops.attention.triage.ReviewTriage decision = new com.sellerops.attention.triage.ReviewTriage();
+        decision.setOrgId(org);
+        decision.setReviewId(stored.getId());
+        decision.setChannelId(naver.getChannelId());
+        decision.setDisposition(com.sellerops.attention.triage.TriageDisposition.RESPONSE_NEEDED);
+        decision.setDecidedBy("SELLER:test");
+        decision.setDecidedAt(Instant.now());
+        triages.save(decision);
+
+        ChannelReviewDetailView after = service.detail(org, naver.getId(), stored.getId());
+        assertThat(after.replyWork().triageDisposition()).isEqualTo("RESPONSE_NEEDED");
+    }
+
+    private Review reviewOn(UUID onChannel, String body, int rating) {
+        Review r = new Review();
+        r.setOrgId(org);
+        r.setChannelId(onChannel);
+        r.setBody(body);
+        r.setRating(rating);
+        r.setNegative(rating <= 2);
+        r.setReceivedAt(Instant.now());
+        r.setContentHash(UUID.randomUUID().toString());
+        r.setDedupKeyVersion(2);
+        r.setReplyState(ReviewReplyState.UNKNOWN);
+        r.setMediaCount(0);
+        r.setCreatedAt(Instant.now());
+        return reviews.save(r);
     }
 
     /* ───────────────────────────── scoping ───────────────────────────── */

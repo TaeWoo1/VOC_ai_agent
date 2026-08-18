@@ -7,6 +7,10 @@
 //      확인 필요" caveat — never "엑셀 업로드로 수집: 리뷰·문의·주문" (over-confirms).
 //   2. NAVER is the one verified-upload exception (its review-export parser shipped in
 //      f9aec15): NAVER alone may name a specific format — "네이버 리뷰 export 업로드 지원".
+//   3. Only what the seller GETS is shown (product assembly A6). The server also reports
+//      connector facts — "connection check supported", "credential template exists" — that
+//      describe how SellerOps is built, not what the channel row does for the seller; they used
+//      to render as boilerplate chips on every row and no longer render at all.
 //
 // Banned wording (coming-soon / completion / "operations normalized") never appears here.
 
@@ -17,8 +21,6 @@ export const SUPPORT_COPY = {
   fileUpload: "엑셀 업로드 지원",
   fileUploadQualifier: "리뷰·문의·주문 양식은 채널별 확인 필요",
   naverVerifiedUpload: "네이버 리뷰 export 업로드 지원",
-  connectionCheck: "연결 확인 가능",
-  credentialSetup: "연결 정보 저장 가능",
   preparing: "지금은 연결할 수 없음",
   footnote: "수집 가능 여부는 채널별 지원 상태에 따라 다릅니다.",
 } as const;
@@ -37,7 +39,7 @@ const NAVER_CODE = "NAVER";
 export interface ChannelSupportDisplay {
   /** Headline support-mode chip. */
   primaryLabel: string;
-  /** Honest secondary chips (verified upload, connection check, credential setup). */
+  /** Honest secondary chips — today only the verified upload path beside an auto-collect headline. */
   chips: string[];
   /** Conservative caveat shown under the upload representation; null for NAVER (verified)
    *  and for channels with no upload path. */
@@ -67,12 +69,6 @@ export function channelSupportDisplay(channel: ChannelResponse): ChannelSupportD
   // verified review export), surface the upload path as a secondary chip.
   if (autoCollects && uploadable) {
     chips.push(uploadLabel);
-  }
-  if (s.connectionCheckSupported) {
-    chips.push(SUPPORT_COPY.connectionCheck);
-  }
-  if (s.credentialSetupSupported) {
-    chips.push(SUPPORT_COPY.credentialSetup);
   }
 
   const uploadQualifier = uploadable && !isNaver ? SUPPORT_COPY.fileUploadQualifier : null;

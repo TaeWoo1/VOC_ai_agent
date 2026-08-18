@@ -1,17 +1,14 @@
-import { useCallback, useEffect, useState } from "react";
-import type { OperatorVocItem, TriageDisposition } from "../lib/types";
+import type { OperatorVocItem } from "../lib/types";
 import {
   categoryChip,
   previewText,
   productLabel,
   replyStatusLabel,
   reportedSubmissionLabel,
-  triageDispositionLabel,
 } from "../lib/vocItems";
-import { VocItemReplyPrep } from "./VocItemReplyPrep";
-import { VocItemTriageControl } from "./VocItemTriageControl";
+import { ReplyWorkControls } from "./ReplyWorkControls";
 
-// One drill-down row behind an attention signal: the product it concerns, a reply
+// One reply-work row (내 답변 작업 · 제외한 작업): the product it concerns, a reply
 // chip, ★rating, dates, and a sanitized preview line. The preview is produced/redacted
 // by the backend — this only renders it, or a neutral placeholder when none is
 // available. No raw text.
@@ -32,11 +29,10 @@ export function VocItemCard({
   /**
    * Whether this row offers to CHANGE the triage decision, or only shows it.
    *
-   * "edit" (default) renders the interactive control — the arrival-signal drill-down, where the
-   * decision is actually made. "readonly" renders a compact label instead, for the 내 답변 작업
+   * "edit" (default) renders the interactive control. "readonly" renders a compact label instead, for the 내 답변 작업
    * worklist: there a full toggle group reads as a competing "take it off my list" control beside
-   * 작업에서 제외, and moving a DRAFTED row to 지켜보기 silently fails to remove it. The reply flow
-   * itself is unchanged in both modes — only the triage toggle is withheld.
+   * 작업에서 제외, and moving a DRAFTED row to 지켜보기 silently fails to remove it. The decision is made
+   * on the 리뷰 screen's detail (product assembly A6). The reply flow itself is unchanged in both modes.
    */
   triageMode?: "edit" | "readonly";
 }) {
@@ -46,44 +42,6 @@ export function VocItemCard({
   const category = categoryChip(item.category);
   const reported = reportedSubmissionLabel(item.hasReportedSubmission);
 
-  // The row's LIVE decision, not the one the list last fetched.
-  //
-  // `item` is a snapshot: the list refetches only on its own deps, and nothing on the triage
-  // path bumps them. So a decision recorded in this session never reaches `item`, and a
-  // mount rule reading it would leave an operator who just clicked 대응 필요 looking at a
-  // pressed button and no panel — able to reach 답변 준비 only by reloading the page.
-  //
-  // Seeded from the row and advanced only on a server-confirmed decision (see
-  // VocItemTriageControl.onRecorded). Re-seeded when the row itself changes, so a real
-  // refetch — a new page, a new window — still wins over a stale session decision.
-  const [decided, setDecided] = useState<TriageDisposition | null>(item.triageDisposition);
-  useEffect(() => setDecided(item.triageDisposition), [item.triageDisposition]);
-
-  // Whether this row carries reply work — the server's batch answer, promoted locally the
-  // moment a draft is saved in this session.
-  //
-  // `item.hasReplyPreparation` is computed with the page, so it predates any draft written
-  // since. Without the promotion an operator could save a draft, change their mind to
-  // 지켜보기, and watch the panel take their draft with it — recoverable only by re-triaging
-  // or reopening the drill-down.
-  //
-  // MONOTONIC within a session: it goes false → true and never back. The panel's job here is
-  // to not vanish out from under work that exists, and nothing an operator does in this
-  // session destroys a draft (a withdrawal explicitly keeps it), so there is no true → false
-  // transition to model. The server is still the authority — reopening the drill-down
-  // re-seeds from the batch projection below.
-  const [prepared, setPrepared] = useState(item.hasReplyPreparation);
-  useEffect(() => setPrepared(item.hasReplyPreparation), [item.hasReplyPreparation]);
-
-  // Whether the panel is holding work that exists nowhere else — an unsaved edit, or a write
-  // in flight. Unmounting over either destroys it silently: the buffer lives only in the
-  // panel, and a write whose handler is unmounted reports neither success nor failure.
-  //
-  // Stable identity, so the panel's effect fires on the value changing rather than on this
-  // row re-rendering.
-  const [localWork, setLocalWork] = useState(false);
-  const noteLocalWork = useCallback((has: boolean) => setLocalWork(has), []);
-  const promote = useCallback(() => setPrepared(true), []);
   return (
     <li className="flex flex-col gap-2 py-3">
       {/* Subject line. The visually-redundant prefix is sr-only so the placeholder
@@ -138,52 +96,19 @@ export function VocItemCard({
       {/* Only for a row that can actually carry a decision. A null actionRef is a
           capability limit (a Cafe24 community article has no triage anchor), so the row
           stays fully readable and simply offers nothing — rendering a disabled control
-          would say "you may not", when the truth is "this row cannot be decided". */}
+          would say "you may not", when the truth is "this row cannot be decided".
+
+          The decision control and the reply panel are one shared cluster (`ReplyWorkControls`) —
+          the same one the 리뷰 detail mounts — so the two surfaces cannot drift in mount rule,
+          gate or copy. */}
       {item.actionRef != null ? (
-        triageMode === "readonly" ? (
-          // The decision, shown but not editable here — see `triageMode`. A label, never a
-          // disabled toggle: the operator is not being refused an action, the action simply
-          // lives on the drill-down. The word is the live decision (`decided`), so a row that
-          // arrived 대응 필요 says so.
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted">처리 상태</span>
-            <span
-              className="rounded-lg bg-canvas px-2.5 py-1 text-sm font-semibold text-ink"
-              data-testid="voc-triage-readonly"
-            >
-              {triageDispositionLabel(decided)}
-            </span>
-          </div>
-        ) : (
-          <VocItemTriageControl
-            accountId={accountId}
-            actionRef={item.actionRef}
-            disposition={item.triageDisposition}
-            onRecorded={setDecided}
-          />
-        )
-      ) : null}
-      {/* Reply preparation, for a row that can carry a decision AND either needs one now or
-          already carries work. Mounting it opens a read, so it stays off rows that offer
-          nothing.
-
-          The `|| prepared` half is what keeps work from being stranded: a draft written while
-          the review was 대응 필요 must stay readable — and any approval withdrawable — after
-          the operator moves it to 지켜보기. On the decision alone that row would render no
-          panel, leaving an approved reply the operator can neither see nor take back.
-
-          Both operands are free: `decided` is local, and `prepared` starts from a flag the
-          page already batch-computed and is promoted in-session by the panel's own save. So
-          the rule costs no request of its own — the panel reads once when it mounts, and
-          again only after its own writes. */}
-      {item.actionRef != null && (decided === "RESPONSE_NEEDED" || prepared || localWork) ? (
-        <VocItemReplyPrep
+        <ReplyWorkControls
           accountId={accountId}
           actionRef={item.actionRef}
-          disposition={decided}
-          onPrepared={promote}
+          disposition={item.triageDisposition}
+          hasReplyPreparation={item.hasReplyPreparation}
+          triageMode={triageMode}
           onOutcomeRecorded={onOutcomeRecorded}
-          onLocalWork={noteLocalWork}
         />
       ) : null}
     </li>

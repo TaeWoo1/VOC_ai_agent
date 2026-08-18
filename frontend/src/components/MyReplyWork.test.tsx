@@ -192,7 +192,7 @@ describe("MyReplyWork — 내 답변 작업", () => {
 
   it("does not carry a dismissal success banner across an account switch", async () => {
     // 내 답변 작업 is reused, not remounted, when the seller switches channels on the multi-account
-    // worklist (OperationsWorklist keeps one instance and swaps `accountId`). The success banner is
+    // surface (the 리뷰 screen keeps one instance and swaps `accountId`). The success banner is
     // account-specific: a '제외했어요' acknowledgement from account A must never read as an action on
     // account B, where the seller set nothing aside.
     const ref = "review:11111111-1111-1111-1111-111111111111";

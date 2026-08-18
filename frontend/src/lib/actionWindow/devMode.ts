@@ -1,6 +1,11 @@
-// The FE-1 mock scenario selector is a fixture/demo preview tool. It is DEV-only
-// and must never appear in the production UI: gated on Vite's build-time `DEV`
-// flag, so the production build tree-shakes it out entirely.
+// The FE-1 mock scenario selector, the bridge diagnostics panel and the "픽스처로 돌아가기"
+// escape hatch are fixture/demo preview tools for developers. They are DEV-only and must
+// never appear in the production UI: gated on Vite's build-time `DEV` flag, so the
+// production build tree-shakes them out entirely — AND, since product assembly A6, on an
+// explicit opt-in (`VITE_AW_FIXTURE_PREVIEW=1`). A local `npm run dev` is also how the
+// product is demonstrated and how live runs are supervised, and a seller-facing surface
+// with dashed "개발용" boxes on it is not the product; a developer who wants the chrome
+// asks for it.
 import {
   connectAwBridgeSession,
   type AwBridgeConnectResult,
@@ -8,7 +13,8 @@ import {
 } from "./wsTransport";
 
 export function isFixturePreviewEnabled(): boolean {
-  return import.meta.env.DEV === true;
+  const env = import.meta.env as Record<string, unknown>;
+  return env.DEV === true && env.VITE_AW_FIXTURE_PREVIEW === "1";
 }
 
 /**

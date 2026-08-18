@@ -20,6 +20,14 @@ vi.mock("../../lib/apiClient", () => ({
       getChannelReviewsStrict(accountId, params),
     getChannelReviewStrict: vi.fn(),
     recordChannelReviewTriageBehavior: vi.fn(),
+    // 내 답변 작업 mounts on a reply-capable (NAVER) account since A6; keep it empty and off the wire here.
+    getReplyWork: async (accountId: string) => ({
+      sellerAccountId: accountId,
+      channel: "NAVER",
+      coverage: "COVERED",
+      todo: [],
+      recentlyReported: [],
+    }),
   },
   getToken: () => "token",
 }));

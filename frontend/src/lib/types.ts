@@ -1469,6 +1469,20 @@ export interface ChannelReviewDetailView {
   /** The same pilot mark the list row carried, or null. */
   aiMark: AiTriageMarkView | null;
   locateTarget: ChannelReviewLocateTarget;
+  /**
+   * The reply work this review can carry, or null when the channel has no reply flow (capability
+   * `replySupported = false`: Coupang, Cafe24). Server-minted (product assembly A6): `actionRef` is the
+   * client-opaque address the reply endpoints take, `triageDisposition` the operator's current decision,
+   * `hasReplyPreparation` whether a draft or approval already exists — the same three facts a worklist row
+   * carries, so the 리뷰 detail can mount the one reply panel the product has.
+   */
+  replyWork: ChannelReviewReplyWork | null;
+}
+
+export interface ChannelReviewReplyWork {
+  actionRef: string;
+  triageDisposition: TriageDisposition | null;
+  hasReplyPreparation: boolean;
 }
 
 // ── Review triage feedback — RUBRIC v2 §13.7's spine ─────────────────────────────────────────

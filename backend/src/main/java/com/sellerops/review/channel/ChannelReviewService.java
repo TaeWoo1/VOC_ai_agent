@@ -27,6 +27,7 @@ import com.sellerops.channel.ChannelRepository;
 import com.sellerops.channel.Channel;
 import com.sellerops.review.triage.ReviewTriageChannelCapability;
 import com.sellerops.review.triage.pilot.AiTriagePilotService;
+import com.sellerops.attention.reply.ReviewReplyWorkLookup;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
 import com.sellerops.sync.SyncJob;
@@ -116,12 +117,15 @@ public class ChannelReviewService {
     private final AiTriageCurrentRepository aiCurrent;
     private final AiTriagePilotService pilot;
     private final ChannelRepository channels;
+    private final ReviewReplyWorkLookup replyWork;
 
     public ChannelReviewService(ReviewRepository reviews, ProductRepository products,
                                 SellerAccountRepository accounts, SyncJobRepository syncJobs,
                                 ItemAnalysisRepository analyses, AiTriageCurrentRepository aiCurrent,
-                                AiTriagePilotService pilot, ChannelRepository channels) {
+                                AiTriagePilotService pilot, ChannelRepository channels,
+                                ReviewReplyWorkLookup replyWork) {
         this.channels = channels;
+        this.replyWork = replyWork;
         this.reviews = reviews;
         this.products = products;
         this.accounts = accounts;
@@ -208,8 +212,11 @@ public class ChannelReviewService {
      * outside the three) and asserts nothing about the channel that the server did not say.
      */
     private ReviewChannelCapabilityView capabilityOf(UUID channelId) {
-        String code = channels.findById(channelId).map(Channel::getCode).orElse(null);
-        return ReviewChannelCapabilityView.of(ReviewTriageChannelCapability.of(code));
+        return ReviewChannelCapabilityView.of(ReviewTriageChannelCapability.of(channelCodeOf(channelId)));
+    }
+
+    private String channelCodeOf(UUID channelId) {
+        return channels.findById(channelId).map(Channel::getCode).orElse(null);
     }
 
     private static AiTriageMarkView mark(AiTriageCurrent c) {
@@ -258,7 +265,13 @@ public class ChannelReviewService {
                         product == null ? null : product.getSku(),
                         review.getSourceOptionId(),
                         writtenOn(review),
-                        review.getRating()));
+                        review.getRating()),
+                // The reply flow's address, only where the channel has one (A6). Same capability row as
+                // `capabilityOf`, so the detail never carries a ref the reply endpoints would refuse.
+                replyWork.forReview(orgId, channelCodeOf(account.getChannelId()), review.getId())
+                        .map(r -> new ChannelReviewDetailView.ReplyWork(
+                                r.actionRef(), r.triageDisposition(), r.hasReplyPreparation()))
+                        .orElse(null));
     }
 
     private ChannelReviewItemView item(Review review, Product product, Instant newSince,

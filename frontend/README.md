@@ -14,9 +14,11 @@ down — read GETs fall back to seeded mock data so the UI is never blank).
 
 To run the Action Window UI against a **paired local agent** over the Bridge, use
 `npm run dev:bridge` (= `VITE_AW_BRIDGE=1 vite`; optional `VITE_BRIDGE_URL`, default
-`http://127.0.0.1:47615`). With no agent reachable it stays on fixtures and the dev
-diagnostics panel reads `픽스처로 폴백됨`. See
-`docs/workstreams/action-window-frontend/live-verification-protocol.md` for the manual
+`http://127.0.0.1:47615`). With no agent reachable it stays on fixtures. The developer
+chrome on the Action Window screens (scenario selector, bridge diagnostics — where the fallback
+reads `픽스처로 폴백됨` — and `픽스처로 돌아가기`) is **opt-in even in dev**:
+`VITE_AW_FIXTURE_PREVIEW=1`; a plain `npm run dev` / `npm run dev:bridge` shows the product only.
+See `docs/workstreams/action-window-frontend/live-verification-protocol.md` for the manual
 verification protocol.
 
 ## Build

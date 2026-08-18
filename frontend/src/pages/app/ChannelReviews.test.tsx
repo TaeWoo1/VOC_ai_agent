@@ -9,6 +9,8 @@ import type { ChannelReviewDetailView, ChannelReviewPageView } from "../../lib/t
 
 const getChannelReviewsStrict = vi.fn();
 const getChannelReviewStrict = vi.fn();
+const getReplyWork = vi.fn();
+const getReviewReplyPrep = vi.fn();
 const recordBehavior = vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined);
 const correctTriage = vi.fn<(...args: unknown[]) => Promise<unknown>>();
 const recordAction = vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined);
@@ -22,6 +24,8 @@ vi.mock("../../lib/apiClient", () => ({
     recordChannelReviewTriageBehavior: (...args: unknown[]) => recordBehavior(...args),
     correctChannelReviewTriage: (...args: unknown[]) => correctTriage(...args),
     recordChannelReviewTriageAction: (...args: unknown[]) => recordAction(...args),
+    getReplyWork: (...args: unknown[]) => getReplyWork(...args),
+    getReviewReplyPrep: (...args: unknown[]) => getReviewReplyPrep(...args),
   },
   getToken: () => "token",
 }));
@@ -99,6 +103,8 @@ const DETAIL: ChannelReviewDetailView = {
     writtenOn: "2026-08-11",
     rating: 5,
   },
+
+  replyWork: null,
 };
 
 /** Reports the router's current location so a test can assert what the URL says. */
@@ -129,6 +135,91 @@ beforeEach(() => {
   vi.clearAllMocks();
   getChannelReviewsStrict.mockResolvedValue(PAGE);
   getChannelReviewStrict.mockResolvedValue(DETAIL);
+  getReplyWork.mockResolvedValue({
+    sellerAccountId: "acc-1",
+    channel: "NAVER",
+    coverage: "COVERED",
+    todo: [],
+    recentlyReported: [],
+  });
+});
+
+/**
+ * Product assembly A6: review work starts on the 리뷰 screen. Where the server says the channel has a
+ * reply flow (`replySupported`, and a server-minted `replyWork` on the detail), the detail carries the
+ * product's one reply cluster and the page ends with 내 답변 작업. Where it does not, nothing of the kind
+ * renders — no control the server would refuse.
+ */
+describe("reply work on the 리뷰 screen (A6)", () => {
+  const NAVER_PAGE: ChannelReviewPageView = {
+    ...PAGE,
+    channel: { channelCode: "NAVER", aiTriage: true, originalLocate: "NONE", replySupported: true },
+  };
+  const NAVER_DETAIL: ChannelReviewDetailView = {
+    ...DETAIL,
+    replyWork: { actionRef: "review:r1", triageDisposition: null, hasReplyPreparation: false },
+  };
+
+  it("NAVER: the detail offers the decision (대응 필요 …) and the page ends with 내 답변 작업", async () => {
+    getChannelReviewsStrict.mockResolvedValue(NAVER_PAGE);
+    getChannelReviewStrict.mockResolvedValue(NAVER_DETAIL);
+    renderPage("/reviews/acc-1?review=r1");
+
+    // The workflow sentence says the screen prepares replies here — and that posting stays with the seller.
+    expect(await screen.findByText(/여기서 답변을 준비합니다/)).toBeInTheDocument();
+    const reply = await screen.findByRole("region", { name: "답변" });
+    expect(within(reply).getByRole("button", { name: "대응 필요" })).toBeInTheDocument();
+    // Undecided and no work yet: the preparation panel stays off (it would open a read for nothing).
+    expect(within(reply).queryByRole("heading", { name: "답변 준비" })).toBeNull();
+    expect(getReviewReplyPrep).not.toHaveBeenCalled();
+    // The operator's committed work has its home on this page now, for this account.
+    expect(await screen.findByRole("heading", { name: "내 답변 작업" })).toBeInTheDocument();
+    expect(getReplyWork).toHaveBeenCalledWith("acc-1", expect.anything());
+  });
+
+  it("NAVER: a review already marked 대응 필요 mounts the preparation panel — the same flow, entered from here", async () => {
+    getChannelReviewsStrict.mockResolvedValue(NAVER_PAGE);
+    getChannelReviewStrict.mockResolvedValue({
+      ...NAVER_DETAIL,
+      replyWork: { actionRef: "review:r1", triageDisposition: "RESPONSE_NEEDED", hasReplyPreparation: false },
+    });
+    getReviewReplyPrep.mockResolvedValue({
+      actionRef: "review:r1",
+      redactedBody: "합성-리뷰-본문",
+      bodyRedacted: false,
+      triageDisposition: "RESPONSE_NEEDED",
+      suggestion: {
+        body: "합성-추천-초안",
+        category: "delivery_reply",
+        providerKind: "RULE_BASED",
+        providerName: "review-reply-template",
+        providerVersion: "templates-v1",
+      },
+      draft: null,
+      approval: null,
+      outcome: null,
+      capabilities: { canSave: true, canApprove: false, canWithdraw: false, canCopy: false, canStartSubmissionRun: false },
+      channelReplyState: "UNKNOWN",
+      productName: "무선 이어폰",
+      reviewDate: "2026-08-11",
+      rating: 5,
+    });
+    renderPage("/reviews/acc-1?review=r1");
+
+    const reply = await screen.findByRole("region", { name: "답변" });
+    expect(await within(reply).findByRole("heading", { name: "답변 준비" })).toBeInTheDocument();
+    expect(getReviewReplyPrep).toHaveBeenCalledWith("acc-1", "review:r1");
+  });
+
+  it("Coupang: no decision, no preparation, no 내 답변 작업 — the channel has no reply flow", async () => {
+    renderPage("/reviews/acc-1?review=r1");
+    await screen.findByText(/SellerOps가 답변을 작성하지 않습니다/);
+    await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요. 다음에도 구매할게요.");
+    expect(screen.queryByRole("region", { name: "답변" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "대응 필요" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "내 답변 작업" })).toBeNull();
+    expect(getReplyWork).not.toHaveBeenCalled();
+  });
 });
 
 describe("deep-link seams the home relies on", () => {

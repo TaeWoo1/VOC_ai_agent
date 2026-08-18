@@ -111,7 +111,7 @@ describe("채널 연결 — the hub", () => {
     expect(
       await screen.findByRole("heading", { level: 1, name: "채널 연결" }),
     ).toBeInTheDocument();
-    for (const section of ["채널", "정기 자료 가져오기", "리뷰 수집 실행 · 답변 준비"]) {
+    for (const section of ["채널", "정기 자료 가져오기", "리뷰 수집 실행"]) {
       expect(screen.getByRole("heading", { name: section })).toBeInTheDocument();
     }
   });

@@ -9,7 +9,7 @@ import {
 import { RunStatusBadge } from "./RunStatusBadge";
 
 /**
- * Home "리뷰 운영" activity strip — a compact, read-only summary of the current
+ * "리뷰 수집" activity strip — a compact, read-only summary of the current
  * review run that deep-links into the operations workbench. It NEVER starts or
  * commands a run (that lives on /operations); it only reflects and links.
  *

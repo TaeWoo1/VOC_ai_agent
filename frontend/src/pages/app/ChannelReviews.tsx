@@ -32,13 +32,20 @@ import {
   type LocateUnavailable,
   type ReviewLocateBinding,
 } from "../../lib/actionWindow/locate/useReviewLocate";
+import { ReplyWorkControls } from "../../components/ReplyWorkControls";
+import { MyReplyWork } from "../../components/MyReplyWork";
 
 /**
  * **상품평** — the seller's own record of what buyers wrote on a connected channel.
  *
- * It is a record, not a work queue, and the difference is visible in what is missing. There is no
- * reply control, no draft, no "답변하기": Coupang gives sellers no way to answer a 상품평, and an
- * affordance for a capability the channel does not have would be a promise the product cannot keep.
+ * It is a record first, and a work surface only where the channel allows one. On a channel whose
+ * capability says `replySupported` (NAVER), the detail panel carries the product's one reply flow
+ * (`ReplyWorkControls`: 대응 필요 → 답변 준비 → 승인 → 복사 → guided/manual handoff → outcome record) and
+ * the page ends with 내 답변 작업 — moved here from the 채널 연결 workbench in product assembly A6, so
+ * review work starts on the 리뷰 screen. Elsewhere there is no reply control, no draft, no "답변하기":
+ * Coupang gives sellers no way to answer a 상품평, Cafe24 has no reply flow built, and an affordance
+ * for a capability the channel does not have would be a promise the product cannot keep. The server
+ * says which case this is (`ChannelReviewDetailView.replyWork` is null where there is no flow).
  *
  * **Review Triage v1 added an order and an explanation, not a queue.** The list opens 확인 필요 순,
  * every row says which tier it is in and why, and the summary says how the whole record divides.
@@ -287,9 +294,11 @@ export function ChannelReviews({
         <div className="min-w-0">
           <h2 className="break-keep text-lg font-semibold text-ink">{channelName ?? word}</h2>
           <p className="mt-1 break-keep text-sm leading-relaxed text-muted">
-            {capability && !capability.replySupported
-              ? `이 채널에서는 SellerOps가 답변을 작성하지 않습니다. 확인할 ${josa(word, "을", "를")} 고르는 곳입니다.`
-              : `이 화면에서는 답변을 작성하지 않습니다. 확인할 ${josa(word, "을", "를")} 고르는 곳입니다.`}
+            {capability === null
+              ? `확인할 ${josa(word, "을", "를")} 고르는 곳입니다.`
+              : capability.replySupported
+                ? `확인할 ${josa(word, "을", "를")} 고르고, 답변이 필요한 ${josa(word, "은", "는")} 여기서 답변을 준비합니다. 올리는 일은 판매자센터 화면에서 직접 합니다.`
+                : `이 채널에서는 SellerOps가 답변을 작성하지 않습니다. 확인할 ${josa(word, "을", "를")} 고르는 곳입니다.`}
           </p>
           {page ? (
             <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -529,6 +538,13 @@ export function ChannelReviews({
           </Panel>
         </div>
       )}
+      {/*
+        The operator's OWN committed reply work — reviews marked 대응 필요 or holding a draft — with its
+        honest exits (작업에서 제외 · 복원). Only where the channel has a reply flow; the server says so.
+        It sits under the record rather than beside it because it is the record's follow-through, not
+        a second list of what needs a look: which reviews need attention is the tier list above.
+      */}
+      {capability?.replySupported ? <MyReplyWork accountId={accountId} /> : null}
     </div>
   );
 }
@@ -627,6 +643,33 @@ function ReviewDetail({
       </dl>
 
       {pilotOn ? <TriageFeedbackControls accountId={accountId} detail={detail} word={word} /> : null}
+
+      {/*
+        **답변 — the one thing a seller can DO with a NAVER review from here.**
+
+        Rendered only when the server minted `replyWork` for this review, which it does exactly on the
+        channels whose capability says `replySupported` (contract §1). The cluster is the same
+        `ReplyWorkControls` the 내 답변 작업 rows use — decision, then draft → approve → copy → guided or
+        manual handoff, then the operator's own outcome record — keyed by review so one review's unsaved
+        edit never leaks into the next. Nothing is posted from here: the reply is pasted by the seller in
+        their own SmartStore window, and the guided step only finds the row.
+      */}
+      {detail.replyWork ? (
+        <section aria-label="답변" className="space-y-3 border-t border-line pt-4">
+          <p className="text-sm font-semibold text-ink">답변</p>
+          <p className="text-sm leading-relaxed text-muted">
+            대응 필요로 표시하면 답변을 준비할 수 있습니다. 승인한 답변은 판매자센터에서 직접 올리고, 여기에는 올렸다는 기록만
+            남깁니다.
+          </p>
+          <ReplyWorkControls
+            key={detail.id}
+            accountId={accountId}
+            actionRef={detail.replyWork.actionRef}
+            disposition={detail.replyWork.triageDisposition}
+            hasReplyPreparation={detail.replyWork.hasReplyPreparation}
+          />
+        </section>
+      ) : null}
 
       {/*
         **[쿠팡에서 보기] — the one thing a seller can ask SellerOps to DO with a 상품평.**

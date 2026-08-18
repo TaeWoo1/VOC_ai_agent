@@ -36,7 +36,7 @@ SellerOps는 **채널 중심 제품이 아니라 업무 중심 제품**이다. �
 ```
 운영 (매일 여는 곳 — "오늘 확인·조치할 일")
 ├─ 홈        /            Today Inbox — "오늘 확인하거나 조치할 일": 리뷰 · 문의 · 연결 (§4a)
-├─ 리뷰      /reviews     연결된 채널의 리뷰 기록 — 확인 필요 순, 채널은 switcher (/reviews/:accountId)
+├─ 리뷰      /reviews     연결된 채널의 리뷰 기록 — 확인 필요 순, 채널은 switcher (/reviews/:accountId); NAVER는 답변 준비까지 (§4c)
 ├─ 문의      /inquiries   들어온 문의 — 답변 필요 순, 답변 준비 workflow (/inquiries/:itemRef)
 └─ 주문      /orders      기간·채널 필터 집계
 
@@ -45,7 +45,7 @@ SellerOps는 **채널 중심 제품이 아니라 업무 중심 제품**이다. �
 │   ├─ /connect/channels/:accountId   채널 상세(연결 정보·수집 설정·이력·기간 수집)
 │   ├─ /connect/naver · /connect/coupang(+/renew/:id) · /connect/cafe24(+/tutorial,/result)  연결 wizard(live flow 유지)
 │   ├─ /connect/upload · /connect/review-history   파일 업로드 · 과거 리뷰 가져오기(Action Window backfill)
-│   └─ /connect/imports(+/current)   리뷰 수집 실행 · 답변 준비 작업대 (§4b)
+│   └─ /connect/imports(+/current)   리뷰 수집 workbench — Action Window 수집 실행 · run 상태/이력만 (§4b·§4c)
 └─ 설정      /settings    워크스페이스·연결 알림·계정 (+ 더 보기: 메모리·리포트)
 
 route는 있으나 1차 메뉴에 없음
@@ -66,10 +66,10 @@ route는 있으나 1차 메뉴에 없음
 | 화면 | 책임 | 채널 차이 처리 |
 |---|---|---|
 | 홈 | Today Inbox(§4a): 리뷰 · 문의 · 연결의 "지금 사람이 봐야 할 것"만, 각 count는 그 destination이 세는 수. 진행 중 Action Window run · "참고"(메모리·리포트) | 채널은 리뷰 항목의 채널별 share(각자 정확한 링크)로만 등장 |
-| 리뷰 | h1 "리뷰" + workflow 문장; 계정별 리뷰 기록(`ChannelReviews`)을 하나의 문 뒤에 모음(채널 = h2/switcher). 규칙 tier가 순서를 소유, AI는 `AI 확인 필요` suggestion(C2 pilot candidate, org opt-in, default OFF), 피드백·행동 기록은 학습 자산으로 축적. 필터·선택은 URL과 양방향 | 서버의 `ReviewChannelCapabilityView`(aiTriage / originalLocate / replySupported)로 버튼·문구 결정. 채널 고유 어휘(쿠팡 상품평)는 `channelVocabulary` 한 곳 |
+| 리뷰 | h1 "리뷰" + workflow 문장; 계정별 리뷰 기록(`ChannelReviews`)을 하나의 문 뒤에 모음(채널 = h2/switcher). 규칙 tier가 순서를 소유, AI는 `AI 확인 필요` suggestion(C2 pilot candidate, org opt-in, default OFF), 피드백·행동 기록은 학습 자산으로 축적. 필터·선택은 URL과 양방향. **리뷰 행동의 시작점**: 답변 flow가 있는 채널(NAVER)은 상세의 "답변" 절에서 대응 필요 → 답변 준비 → 승인 → 복사 → guided/manual handoff → 결과 기록, 페이지 끝에 내 답변 작업(§4c) | 서버의 `ReviewChannelCapabilityView`(aiTriage / originalLocate / replySupported)와 상세의 `replyWork`(서버 mint, 없으면 null)로 버튼·문구 결정 — Coupang/Cafe24에는 답변 control이 렌더되지 않는다. 채널 고유 어휘(쿠팡 상품평)는 `channelVocabulary` 한 곳 |
 | 문의 | 인박스 workflow를 문의로 scope: 답변 필요 → 답변함, 서버 count 헤더, 답변 방향 제안(발송 없음), 필터는 URL과 양방향 | 채널 filter는 로드된 행에서만; 제안 불가는 capability 문장으로 |
 | 주문 | 기간·채널 집계 | 채널 select = `/api/channels`(=세 채널) |
-| 채널 연결 | 세 채널의 연결 진입(가이드 연결·OAuth·튜토리얼), 상태 한 단어(§4b), 자료 가져오기, 리뷰 기록 진입 | 카드 액션·상태 단어는 계정 실제 상태(+health)에서만 |
+| 채널 연결 | 세 채널의 연결 진입(가이드 연결·OAuth·튜토리얼), 상태 한 단어(§4b), 자료 가져오기, 리뷰 기록 진입, 리뷰 수집 실행 workbench 진입(§4c) | 카드 액션·상태 단어는 계정 실제 상태(+health)에서만; 행의 support chip은 셀러가 얻는 것(수집 방식·검증된 업로드 양식)만, 커넥터 내부 사실(연결 확인 가능·연결 정보 저장 가능)은 렌더하지 않는다 |
 | 설정 | 사실과 링크만. 토글 없음 | — |
 
 ### 4a. Today Inbox 계약 (홈, A2 — 2026-08-18)
@@ -110,12 +110,36 @@ route는 있으나 1차 메뉴에 없음
 - **상태 단어는 하나**(`lib/connectionState.ts`, 계정 실제 상태 + health에서만): 연결됨 · 연결 필요 · 연결 중 ·
   재연결 필요 · 오류. 버튼 동사도 상태당 하나: 연결하기 / 연결 계속하기 / 다시 연결하기 / 확인하기 / 연결 관리.
   카탈로그의 자체 status 문구(관리/요청하기/준비 중)는 사용자에게 보이지 않는다.
-- **`/connect/imports` 결정: 유지(작업대).** `OperationsHome`은 (a) Action Window 리뷰 수집 실행 상태·이력·최근 실행,
-  (b) 계정별 attention worklist + **NAVER 리뷰 답변 준비·가이드 제출**(live-proven)의 유일한 홈이다 — 중복이 아니라
-  아직 workflow surface로 옮기지 못한 작업이다. hub 패널명을 "리뷰 수집 실행 · 답변 준비"로 바꿔 역할을 드러냈고,
-  경로·기능은 그대로 둔다. 답변 준비를 `/reviews`(capability: `replySupported`)로 흡수하는 것은 A6 후보.
+- **`/connect/imports` 결정: 유지(작업대) → A6에서 축소.** A5 시점 `OperationsHome`은 (a) Action Window 리뷰 수집
+  실행 상태·이력·최근 실행, (b) 계정별 attention worklist + NAVER 리뷰 답변 준비·가이드 제출의 유일한 홈이었다.
+  A6에서 (b)를 `/reviews`로 옮기고 이 route는 (a)만 남겼다 — §4c. hub 패널명은 "리뷰 수집 실행".
 - 제거한 흔적: 도달 불가 notice 문구(로드맵 어투), `지원 준비 중` 라벨, dead 컴포넌트(`InboxFeed`, `DashboardGrid`,
   `StatusBadge`). 연결 wizard/OAuth/튜토리얼 코드는 손대지 않았다.
+
+### 4c. 리뷰 답변 준비 = workflow surface (A6 — 2026-08-18)
+
+- **리뷰 관련 행동은 `/reviews`에서 시작한다.** NAVER(`ReviewTriageChannelCapability.replySupported = true`) 계정의
+  리뷰 상세는 "답변" 절을 갖는다: 처리 결정(`VocItemTriageControl`: 대응 필요 / 지켜보기 / 조치 불필요) → 대응
+  필요이거나 이미 작업(초안·승인)이 있으면 답변 준비 패널(`VocItemReplyPrep`: 제안 → 초안 → 승인 → 복사 →
+  가이드(bridge) 또는 수동 handoff → 올렸다는 기록·검증 UNVERIFIED). 두 컴포넌트와 mount 규칙은 `ReplyWorkControls`
+  하나로 묶여 내 답변 작업 행(`VocItemCard`)과 리뷰 상세가 **같은 flow**를 쓴다 — live-proven NAVER reply flow의
+  컴포넌트·런타임(`useReplyRuntime`)은 그대로이고 진입점만 옮겼다.
+- **주소는 서버가 mint한다.** `ChannelReviewDetailView.replyWork { actionRef, triageDisposition, hasReplyPreparation }`
+  (`ReviewReplyWorkLookup`) — 클라이언트는 `review:<id>`를 만들지 않는다(`VocItemRef` 계약). 채널에 답변 flow가 없으면
+  `replyWork = null`이고 상세에는 답변 control이 **아예 없다**(Coupang: 판매자 답글 기능 없음, Cafe24: 미구축). 서버가
+  거절할 버튼은 렌더하지 않는다.
+- **내 답변 작업(`MyReplyWork` + 제외한 작업)**은 `/reviews/:accountId` 기록 아래(계정 단위, `capability.replySupported`일
+  때만). "무엇을 봐야 하나"는 위의 tier 목록(확인 필요, A3의 하나의 정의)이고, 이 절은 그 후속 작업이다.
+- **`/connect/imports` = 리뷰 수집 workbench.** 남긴 것: Action Window 수집 실행(ReviewWorkCard/ActiveRunCard), run
+  상태·타임라인·checkpoint(`/connect/imports/current`), 최근 가져오기 기록(persisted). 뺀 것: 기간별 attention
+  worklist(`AttentionSignalList` 계열 — 삭제; 같은 것을 두 번 세는 "현재 확인이 필요한 리뷰 N건"이었다), 내 답변 작업(→
+  `/reviews`). 완료 카드는 `/reviews?tier=NEEDS_ATTENTION`으로 안내한다. 옛 `/operations(/current)`는 계속 리다이렉트.
+- **개발용 chrome 격리.** 시나리오 선택·브리지 진단·픽스처로 돌아가기·시뮬레이션 reply 런타임은 DEV **이고**
+  `VITE_AW_FIXTURE_PREVIEW=1`일 때만(`isFixturePreviewEnabled`). 평범한 `npm run dev`(데모·라이브 감독)는 제품 표면만
+  보여 주고, 답변 패널은 bridge가 없으면 shipped build와 같은 수동 handoff를 제공한다.
+- 남은 것(정직하게): attention 신호 endpoint(`/attention`, `/attention/items`)와 `apiClient.getAccountAttention*`는 UI
+  소비자가 없어졌다(백엔드·client는 유지, 제거는 별도 판단). `MyReplyWork` 행은 `OperatorVocItem` 모양(수집일·분류 chip)
+  이라 리뷰 상세와 시각 언어가 완전히 같지는 않다.
 
 공통 규칙: 로딩·빈·오류 상태는 `sellerops_frontend_spec.md` §13; 언어는 §12(셀러 언어, 로드맵 문구 금지);
 capability 정직성은 §15. **새 채널이 와도 FE 신규 화면이 최소가 되게** — 새 채널 = 목록 한 줄 + capability
@@ -136,7 +160,8 @@ row + 어휘 한 줄이 목표이며, 이를 깨는 설계는 이 문서를 먼�
 | A3 (2026-08-18) | 리뷰 화면 정리: "확인이 필요한 리뷰" 정의 하나(triage NEEDS_ATTENTION; 홈·리포트 공용 hook), `/reviews` h1 "리뷰" + workflow 문장(확인 필요 → 지켜보기 → 참고, AI 확인 필요 = 제안), 채널은 h2·switcher(계정 하나면 숨김), 필터 순서 확인 필요→지켜보기→참고→전체, `?tier`/`?review` 양방향 URL 동기화 | 완료 |
 | A4 (2026-08-18) | 문의 화면 정리: 답변 필요 count = 서버 `countByOrgIdAndStatus(UNANSWERED)`(feed limit과 분리, 홈·`/inquiries` 동일), workflow 문장(답변 필요 → 답변함), 상태 옵션 순서·확인 필요 제외, `?state`/`?channel` 양방향 URL 동기화, 응답 불가 문구 capability 기반 | 완료 |
 | A5 (2026-08-18) | 채널 연결 hub cleanup(§4b): strict 카탈로그 read + 로딩/오류/빈 상태, 상태 단어·버튼 동사 통일, `/connect/imports` = 작업대로 명확화(유지), 도달 불가 문구·dead 컴포넌트 제거 | 완료 |
-| A6 (다음) | 리뷰 답변 준비를 workflow surface로: NAVER(`replySupported`) 계정의 답변 준비·가이드 제출 진입을 `/reviews` 상세에서 제공하고 `/connect/imports`는 수집 실행·이력 작업대로 축소 — 기존 reply live flow 보존, 새 기능 없음 | 제안 |
+| A6 (2026-08-18) | 리뷰 답변 준비를 workflow surface로(§4c): NAVER 리뷰 상세의 "답변" 절(결정 → 답변 준비, 서버 mint `replyWork`), 내 답변 작업을 `/reviews`로, `/connect/imports` = 수집 실행·run 이력 workbench(worklist 삭제, 완료 카드 → 리뷰 화면), 개발용 chrome opt-in(`VITE_AW_FIXTURE_PREVIEW`), 연결 행 support chip에서 커넥터 내부 사실 제거 | 완료 |
+| A7 (다음) | 전체 UI/UX polish + demo freeze: 화면 간 어휘·상태·빈/오류 문구 통일 점검, 데모 경로(홈 → 리뷰 → 답변 준비 → 문의 → 채널 연결) end-to-end 실사, 로컬 데모 실행 절차 고정 — 새 기능·새 채널 없음 | 제안 |
 
 ## 7. 라우터
 

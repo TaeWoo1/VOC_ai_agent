@@ -21,8 +21,13 @@ import java.util.UUID;
  * the browser. It used to ride here as well; nothing in the frontend read it, and a fingerprint of a
  * buyer's review sitting in a page nobody uses it in is a copy that exists for no reason.
  *
- * <p>There is no reply field, no draft, and no submit affordance. Coupang gives sellers no way to answer a
- * 상품평, and a surface that offered one would be inventing a capability the channel does not have.
+ * <p><b>{@code replyWork} is the one place this record touches the reply flow</b> (product assembly A6). It is
+ * the server-minted address of the review's reply work plus the two facts the panel mounts on — the operator's
+ * current decision and whether a draft or approval already exists — and it is {@code null} for every channel
+ * whose capability says {@code replySupported = false}. Coupang gives sellers no way to answer a 상품평 and
+ * Cafe24 has no reply flow built, so on those channels there is still no reply field, no draft, and no submit
+ * affordance: the surface renders no control the server would refuse. There is never a body here — the draft's
+ * text and the approval's state come from the reply read, addressed by {@code actionRef}.
  */
 public record ChannelReviewDetailView(
         UUID id,
@@ -40,7 +45,18 @@ public record ChannelReviewDetailView(
         ReviewTriageNote triage,
         /** The same pilot mark the list row carried, or null — see {@link ChannelReviewItemView#aiMark()}. */
         AiTriageMarkView aiMark,
-        LocateTarget locateTarget) {
+        LocateTarget locateTarget,
+        /** The reply work this review can carry, or null when the channel has no reply flow (capability §1). */
+        ReplyWork replyWork) {
+
+    /** The address (client-opaque, round-tripped to the reply endpoints) and state of one review's reply work. */
+    public record ReplyWork(
+            String actionRef,
+            /** The operator's current decision ({@code TriageDisposition} name), or null when none was recorded. */
+            String triageDisposition,
+            /** A draft or an approval already exists — the panel must stay reachable whatever the decision. */
+            boolean hasReplyPreparation) {
+    }
 
     /** The channel-side identifiers this review carries — nothing that names a person. */
     public record LocateTarget(

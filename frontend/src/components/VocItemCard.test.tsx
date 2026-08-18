@@ -307,7 +307,7 @@ describe("VocItemCard product context", () => {
    * The entry into the whole feature, and the case every fixture-only test above misses.
    *
    * `item` is the row as of the last list fetch, and nothing on the triage path refetches
-   * it: `OperatorVocItemList` reloads only on its own deps, and `refreshKey` is wired to
+   * it: the owning list reloads only on its own deps, and `refreshKey` is wired to
    * backfill/connection events. So a mount rule reading `item.triageDisposition` alone
    * would show a pressed 대응 필요 button beside no panel, and the operator's only way to
    * reach 답변 준비 would be a page reload — for the review they just marked as needing one.

@@ -83,9 +83,9 @@ function RunProgressBar({
   );
 }
 
-/** FE-1 Review Operations run detail (/operations/current) — the single surface
+/** Review acquisition run detail (`/connect/imports/current`) — the single surface
  *  that renders command controls from `allowedCommands`. State is shared with the
- *  operations home (/operations) via the operations store (FE-2/FE-2.5). */
+ *  collection workbench (`/connect/imports`) via the operations store. */
 export function Operations() {
   useBridgeBoot(); // FE-3: opt-in live Bridge connection (no-op without VITE_AW_BRIDGE=1)
   const state = useOperationsStore();
@@ -273,7 +273,7 @@ export function Operations() {
                   >
                     <h2 className="text-lg font-semibold text-ink">{SECTION_TITLE.nextRun}</h2>
                     <p className="mt-1 text-ink">
-                      이 작업은 끝났어요. 새 작업을 시작하거나 홈에서 전체 현황을 볼 수 있어요.
+                      이 작업은 끝났어요. 새 작업을 시작하거나 수집 화면에서 가져온 기록을 볼 수 있어요.
                     </p>
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       {connected ? (
@@ -286,10 +286,10 @@ export function Operations() {
                         </button>
                       ) : null}
                       <Link
-                        to="/operations"
+                        to="/connect/imports"
                         className="rounded-xl border border-line bg-surface px-4 py-2.5 font-medium text-ink transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
                       >
-                        홈으로
+                        수집 화면으로
                       </Link>
                     </div>
                     <p className="mt-2 text-sm text-muted sm:hidden">{DESKTOP_ONLY_COPY.startNew}</p>

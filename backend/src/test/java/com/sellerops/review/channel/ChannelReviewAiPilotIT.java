@@ -12,6 +12,10 @@ import com.sellerops.review.ReviewReplyState;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.review.channel.dto.ChannelReviewItemView;
 import com.sellerops.review.channel.dto.ChannelReviewPageView;
+import com.sellerops.attention.reply.ReviewReplyApprovalRepository;
+import com.sellerops.attention.reply.ReviewReplyDraftRepository;
+import com.sellerops.attention.reply.ReviewReplyWorkLookup;
+import com.sellerops.attention.triage.ReviewTriageRepository;
 import com.sellerops.review.triage.ReviewTriageRules;
 import com.sellerops.review.triage.ReviewTriageTier;
 import com.sellerops.review.triage.feedback.AiTriageCurrent;
@@ -56,6 +60,9 @@ class ChannelReviewAiPilotIT {
     @Autowired SyncJobRepository syncJobs;
     @Autowired ItemAnalysisRepository analyses;
     @Autowired AiTriageCurrentRepository aiCurrent;
+    @Autowired ReviewTriageRepository triages;
+    @Autowired ReviewReplyDraftRepository drafts;
+    @Autowired ReviewReplyApprovalRepository approvals;
 
     private static final List<String> BODIES = List.of("", "   ", "본문이 있는 상품평입니다");
     private static final List<Integer> RATINGS = new ArrayList<>(java.util.Arrays.asList(null, 1, 2, 3, 4, 5));
@@ -97,7 +104,8 @@ class ChannelReviewAiPilotIT {
                             @Override public String version() { return "test/v"; }
                             @Override public Result classify(Input input) { throw new AssertionError("never called"); }
                         }) : null);
-        return new ChannelReviewService(reviews, products, accounts, syncJobs, analyses, aiCurrent, pilot, channels);
+        return new ChannelReviewService(reviews, products, accounts, syncJobs, analyses, aiCurrent, pilot, channels,
+                new ReviewReplyWorkLookup(triages, drafts, approvals));
     }
 
     private Review review(Integer rating, String body) {

@@ -62,7 +62,7 @@ export function ActiveRunCard({
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <Link
-          to="/operations/current"
+          to="/connect/imports/current"
           className={
             "rounded-xl px-4 py-2.5 font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 " +
             (needsHuman

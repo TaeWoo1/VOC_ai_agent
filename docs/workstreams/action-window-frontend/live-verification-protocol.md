@@ -25,6 +25,11 @@ cd frontend && npm run dev:bridge     # = VITE_ENABLE_AGENT_BRIDGE=true VITE_AW_
 ```
 - `VITE_AW_BRIDGE=1` (string `"1"`) turns on the Action Window bridge mode (DEV-gated);
   `VITE_ENABLE_AGENT_BRIDGE=true` shows the **로컬 에이전트 연결 상태** pairing dock. `dev:bridge` sets **both**.
+- **Since product assembly A6 (2026-08-18) the developer chrome this protocol reads — the 브리지 진단
+  (개발용) panel, the scenario selector, `픽스처로 돌아가기` — is opt-in even in DEV:** run
+  `VITE_AW_FIXTURE_PREVIEW=1 npm run dev:bridge` for this protocol. A plain `npm run dev:bridge` shows the
+  product surface only (`docs/product_assembly_ia_v1.md` §4c). The Operations page is now
+  `/connect/imports` (리뷰 수집; old `/operations` redirects).
 - **Pair once to go live:** the AW transport only reuses a pairing token the status dock stored; it never
   pairs on its own. So on first load, click **`연결하기`** in the bottom-right `로컬 에이전트 연결 상태` dock
   (the harness auto-approves → token saved), then **hard-reload** — now the AW boot finds the token and the

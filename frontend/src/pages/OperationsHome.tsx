@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { Link } from "react-router-dom";
 import { HOME_SCENARIO_NAMES, type HomeScenarioName } from "../lib/actionWindow/homeFixtures";
 import {
   dispatchOperationsCommand,
@@ -22,27 +22,6 @@ import { SimulationPreview } from "../components/actionWindow/SimulationPreview"
 import { BridgeDiagnostics } from "../components/actionWindow/BridgeDiagnostics";
 import { RecentActivityList } from "../components/actionWindow/RecentActivityList";
 import { ImportHistoryList } from "../components/actionWindow/ImportHistoryList";
-import { OperationsWorklist } from "../components/OperationsWorklist";
-
-/**
- * Run statuses after which the backend may hold rows the worklist has not seen.
- *
- * COMPLETED is the one that matters — an export landed. FAILED and CANCELLED are included because a
- * run can fail AFTER a partial ingest (`PARTIAL` is a real import outcome), so treating them as
- * "nothing changed" would leave the seller looking at a list that silently predates their own work.
- * The in-flight statuses are deliberately absent: nothing has reached the backend yet, so refetching
- * would spend requests redrawing the same list.
- */
-const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
-
-/** Stable small integer from a runId — a changed value is the signal; its magnitude means nothing. */
-function hashRunId(runId: string): number {
-  let hash = 0;
-  for (let i = 0; i < runId.length; i += 1) {
-    hash = (hash * 31 + runId.charCodeAt(i)) | 0;
-  }
-  return hash;
-}
 
 const HOME_SCENARIO_LABEL: Record<HomeScenarioName, string> = {
   "home-empty": "처음 (기록 없음)",
@@ -54,10 +33,14 @@ const HOME_SCENARIO_LABEL: Record<HomeScenarioName, string> = {
 };
 
 /**
- * FE-2 Operations-agent home (/operations) — where the seller sees what the
- * operations agent is doing before drilling into the run detail
- * (/operations/current). Mock/fixture-driven; shares state with the detail page
- * via the operations store.
+ * 리뷰 수집 workbench (`/connect/imports`) — where the seller runs a review acquisition (Action Window:
+ * the seller clicks export in their own seller-center window, SellerOps detects and ingests) and sees
+ * what each import brought, before drilling into the run detail (`/connect/imports/current`). Shares
+ * state with the detail page via the operations store.
+ *
+ * Collection and record only, since product assembly A6. Reading, deciding and replying to reviews
+ * happens on the 리뷰 screen (`/reviews`), which this page points at; the worklist that used to sit
+ * here moved there so review work has one home and one count.
  */
 export function OperationsHome() {
   useBridgeBoot(); // FE-3: opt-in live Bridge connection (no-op without VITE_AW_BRIDGE=1)
@@ -75,19 +58,20 @@ export function OperationsHome() {
   const note = useOperationsNote();
   const reconnect = useBridgeReconnect(); // FE-4: manual live-Bridge reconnect
   const connected = connection === "connected";
-  // Changes only when a run SETTLES, not on every revision: an in-flight run has not handed
-  // anything to the backend yet, so refetching mid-run would spend requests to redraw the same list.
-  const worklistRefreshKey = useMemo(
-    () => (run !== null && TERMINAL_RUN_STATUSES.has(run.status) ? hashRunId(run.runId) : 0),
-    [run],
-  );
 
   return (
     <div className="flex flex-col gap-4">
-      {/* "운영 에이전트" wording lives in page copy only (IA decision) — nav keeps 리뷰 운영. */}
       <PageHeader
-        title="리뷰 운영"
-        description="운영 에이전트가 리뷰 내려받기 같은 반복 작업을 단계별로 대신 진행해요. 꼭 필요한 순간에만 확인을 요청해요."
+        title="리뷰 수집"
+        description="판매자센터에서 리뷰 파일을 내려받는 작업을 단계별로 안내하고, 지금까지 가져온 기록을 보여 줍니다. 리뷰를 읽고 답변하는 일은 리뷰 화면에서 합니다."
+        action={
+          <Link
+            to="/reviews"
+            className="rounded-xl border border-line bg-surface px-4 py-2 text-sm font-medium text-ink transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+          >
+            리뷰 화면으로
+          </Link>
+        }
       />
 
       {/* Fixture/demo preview — DEV-ONLY (never rendered in the production build);
@@ -170,38 +154,28 @@ export function OperationsHome() {
         onReconnect={sourceMode === "bridge" ? reconnect : undefined}
       />
 
-      {/* Review-ops workbench: the current task/state on the left, the seller's own import
-          history as a side rail (stacks below on mobile). Progressive disclosure stays at
-          the page level — the no-run start card vs. the active-run summary.
+      {/* Collection workbench: the current task/state on the left, the seller's own import history
+          as a side rail (stacks below on mobile). Progressive disclosure stays at the page level —
+          the no-run start card vs. the active-run summary.
 
-          The rail reads PERSISTED imports, not this session's runs: `recentRuns` lives in
-          browser memory, so it starts empty and vanishes on reload — yesterday's import left no
-          trace anywhere the seller looks. The session list is kept as what it always was, a DEV
+          The rail reads PERSISTED imports, not this session's runs: `recentRuns` lives in browser
+          memory, so it starts empty and vanishes on reload — yesterday's import left no trace
+          anywhere the seller looks. The session list is kept as what it always was, a DEV
           fixture-preview affordance, and is shown only under the fixture-preview gate. */}
       <WorkbenchLayout
         body={
-          <>
-            {run === null ? (
-              <ReviewWorkCard
-                connected={connected}
-                onStart={() => dispatchOperationsCommand("START_RUN")}
-              />
-            ) : (
-              <ActiveRunCard
-                run={run}
-                onStartNew={() => dispatchOperationsCommand("START_RUN")}
-                actionsEnabled={connected}
-              />
-            )}
-            {/* The work itself, on the page named for it. It belongs in `body` and not the rail:
-                the worklist is what the seller came to do, and the import history beside it is the
-                record of how it got here. Mobile stacks the rail after the body, so the work stays
-                above the record on both. */}
-            {/* Bumped when a run reaches a terminal, so the list below an import reflects it —
-                the completion copy points at this section by position ("아래"), and a stale list
-                would make that sentence untrue the one time a seller is certain to read it. */}
-            <OperationsWorklist refreshKey={worklistRefreshKey} />
-          </>
+          run === null ? (
+            <ReviewWorkCard
+              connected={connected}
+              onStart={() => dispatchOperationsCommand("START_RUN")}
+            />
+          ) : (
+            <ActiveRunCard
+              run={run}
+              onStartNew={() => dispatchOperationsCommand("START_RUN")}
+              actionsEnabled={connected}
+            />
+          )
         }
         rail={
           <div className="flex flex-col gap-4">

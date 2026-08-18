@@ -230,8 +230,8 @@ export function ConnectHub() {
       </Panel>
 
       <Panel
-        title="리뷰 수집 실행 · 답변 준비"
-        description="리뷰 수집 실행 상태와 수집 이력, 확인이 필요한 리뷰의 답변 준비를 다루는 작업대입니다. 사람이 확인해야 하는 지점에서만 멈추고 알려드립니다."
+        title="리뷰 수집 실행"
+        description="판매자센터에서 리뷰 파일을 내려받는 작업의 실행 상태와 수집 이력입니다. 사람이 확인해야 하는 지점에서만 멈추고 알려드립니다. 가져온 리뷰를 읽고 답변하는 일은 리뷰 화면에서 합니다."
         action={
           <BtnLink to="/connect/imports" size="sm" variant="outline">
             작업대 열기
