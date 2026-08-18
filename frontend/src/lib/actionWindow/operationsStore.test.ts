@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, beforeEach, vi } from "vitest";
 import {
   adoptBridgeSource,
   beginBridgeRetry,
@@ -45,14 +45,30 @@ function controllableSource(): { source: ActionWindowSource; emit: (u: SourceUpd
 
 describe("Action Window FE-2 shared operations store", () => {
   beforeEach(() => {
+    // The flagship checkpoint demo is the developer preview's world (A7): the product surface boots
+    // empty. These store tests exercise the demo world, so opt in.
+    vi.stubEnv("VITE_AW_FIXTURE_PREVIEW", "1");
     resetOperationsStateForTests();
   });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
 
-  it("starts on the flagship checkpoint demo with mock history", () => {
+  it("starts on the flagship checkpoint demo with mock history (developer preview)", () => {
     const s = getOperationsState();
     expect(s.homeScenario).toBe("home-active-checkpoint");
     expect(s.run?.status).toBe("WAITING_FOR_HUMAN");
     expect(s.recentRuns.length).toBeGreaterThan(0);
+  });
+
+  it("boots EMPTY on the product surface — no fixture run may pose as the seller's own (A7)", () => {
+    vi.unstubAllEnvs();
+    resetOperationsStateForTests();
+    const s = getOperationsState();
+    expect(s.homeScenario).toBe("home-empty");
+    expect(s.run).toBeNull();
+    expect(s.recentRuns).toEqual([]);
+    expect(s.sourceMode).toBe("fixture");
   });
 
   it("a disallowed command only updates the note (no run change, no archive)", () => {

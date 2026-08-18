@@ -16,7 +16,8 @@ that is actually usable — `ProductChannels.java`, `lib/productChannels.ts`). C
 `docs/product_assembly_ia_v1.md`.
 
 Canonical product / strategy / state reference: `docs/sellerops_canonical_reference.md` (re-derive
-state before citing at any later commit).
+state before citing at any later commit). **FE/IA is frozen as of A7 (2026-08-18)** —
+`docs/product_assembly_ia_v1.md` §8; the local demo procedure is `docs/demo_runbook_v1.md`.
 
 ## Where development happens
 

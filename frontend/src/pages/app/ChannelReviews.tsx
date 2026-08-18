@@ -180,6 +180,10 @@ export function ChannelReviews({
 
   const [detail, setDetail] = useState<ChannelReviewDetailView | null>(null);
   const [detailError, setDetailError] = useState(false);
+  // Bumped when the detail records a reply-work decision or outcome, so 내 답변 작업 below re-reads
+  // instead of showing the list as it was before the operator's own action on this page.
+  const [replyWorkVersion, setReplyWorkVersion] = useState(0);
+  const noteReplyWorkChanged = useCallback(() => setReplyWorkVersion((v) => v + 1), []);
 
   /**
    * **Only the newest request may write.** Two controls now change the query — the order and the page — so
@@ -523,6 +527,7 @@ export function ChannelReviews({
                 word={word}
                 recordBehavior={recordBehavior}
                 detail={detail}
+                onReplyWorkChanged={noteReplyWorkChanged}
                 locate={locate}
                 // The run belongs to whichever review was last pressed. Showing its state under a DIFFERENT
                 // review would tell the seller SellerOps found the one they are now looking at.
@@ -544,7 +549,7 @@ export function ChannelReviews({
         It sits under the record rather than beside it because it is the record's follow-through, not
         a second list of what needs a look: which reviews need attention is the tier list above.
       */}
-      {capability?.replySupported ? <MyReplyWork accountId={accountId} /> : null}
+      {capability?.replySupported ? <MyReplyWork accountId={accountId} refreshKey={replyWorkVersion} /> : null}
     </div>
   );
 }
@@ -556,6 +561,7 @@ function ReviewDetail({
   word,
   recordBehavior,
   detail,
+  onReplyWorkChanged,
   locate,
   run,
   running,
@@ -567,6 +573,7 @@ function ReviewDetail({
   word: string;
   recordBehavior: (events: TriageBehaviorEvent[]) => void;
   detail: ChannelReviewDetailView;
+  onReplyWorkChanged: () => void;
   locate: ReviewLocateBinding;
   run: ActionWindowRunView | null;
   running: boolean;
@@ -642,8 +649,6 @@ function ReviewDetail({
         ) : null}
       </dl>
 
-      {pilotOn ? <TriageFeedbackControls accountId={accountId} detail={detail} word={word} /> : null}
-
       {/*
         **답변 — the one thing a seller can DO with a NAVER review from here.**
 
@@ -667,9 +672,13 @@ function ReviewDetail({
             actionRef={detail.replyWork.actionRef}
             disposition={detail.replyWork.triageDisposition}
             hasReplyPreparation={detail.replyWork.hasReplyPreparation}
+            onDecided={onReplyWorkChanged}
+            onOutcomeRecorded={onReplyWorkChanged}
           />
         </section>
       ) : null}
+
+      {pilotOn ? <TriageFeedbackControls accountId={accountId} detail={detail} word={word} /> : null}
 
       {/*
         **[쿠팡에서 보기] — the one thing a seller can ask SellerOps to DO with a 상품평.**

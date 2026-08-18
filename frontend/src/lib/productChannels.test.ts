@@ -11,8 +11,9 @@ describe("productChannels — the seller-visible channel set", () => {
     expect(isProductChannel(undefined)).toBe(false);
   });
 
-  it("narrows the demo catalog to the three product channels, keeping catalog order", () => {
+  it("narrows the demo catalog to the three product channels, in product order (A7)", () => {
+    // The mock catalog lists Coupang first; every three-channel surface shows NAVER · Coupang · Cafe24.
     const codes = visibleChannels(mockChannels()).map((c) => c.code);
-    expect(codes).toEqual(["COUPANG", "NAVER", "CAFE24"]);
+    expect(codes).toEqual(["NAVER", "COUPANG", "CAFE24"]);
   });
 });

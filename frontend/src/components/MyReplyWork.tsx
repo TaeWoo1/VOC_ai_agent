@@ -22,7 +22,14 @@ import { attentionUncertaintyCopy } from "../lib/attention";
 /** Bounded — a record of recent work, not a history to page through. */
 const RECENT_LIMIT = 5;
 
-export function MyReplyWork({ accountId }: { accountId: string }) {
+export function MyReplyWork({
+  accountId,
+  refreshKey = 0,
+}: {
+  accountId: string;
+  /** Bumped by the owner when a decision or outcome was recorded elsewhere on the page (the 리뷰 detail), so this list re-reads. */
+  refreshKey?: number;
+}) {
   // Bumped when an operator records an outcome OR sets a review aside, so a row leaves the to-do
   // without a manual reload.
   const [reloadKey, setReloadKey] = useState(0);
@@ -51,7 +58,7 @@ export function MyReplyWork({ accountId }: { accountId: string }) {
 
   const { data, loading, error } = useApiData(
     () => api.getReplyWork(accountId, { recentLimit: RECENT_LIMIT }),
-    [accountId, reloadKey],
+    [accountId, reloadKey, refreshKey],
   );
 
   const requestDismiss = useCallback((actionRef: string) => {

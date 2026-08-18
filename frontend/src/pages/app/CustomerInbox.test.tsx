@@ -126,10 +126,12 @@ describe("문의 — the inbox scoped to inquiries (/inquiries)", () => {
     // Only the inquiry's channel is offered — the review row is not in play on this surface.
     expect(within(rail).getByRole("button", { name: /채널 가/ })).toBeInTheDocument();
     expect(within(rail).queryByRole("button", { name: /채널 나/ })).toBeNull();
-    const list = screen.getByLabelText("고객 문의·리뷰 목록");
+    const list = screen.getByLabelText("문의 목록");
     const links = within(list).getAllByRole("link");
     expect(links).toHaveLength(1);
     expect(links[0]).toHaveAttribute("href", "/inquiries/i1");
+    // A single-kind surface does not repeat its own name on every row (A7).
+    expect(within(list).queryByText("문의")).toBeNull();
   });
 
   it("opens an inquiry deep link and offers the response workflow", async () => {
@@ -145,7 +147,7 @@ describe("문의 — the inbox scoped to inquiries (/inquiries)", () => {
       unansweredInquiries: 1,
     });
     renderInbox("/inquiries?state=NEEDS_REPLY");
-    const list = await screen.findByLabelText("고객 문의·리뷰 목록");
+    const list = await screen.findByLabelText("문의 목록");
     const links = within(list).getAllByRole("link");
     expect(links).toHaveLength(1);
     expect(links[0]).toHaveAttribute("href", "/inquiries/i1?state=NEEDS_REPLY");
@@ -171,7 +173,7 @@ describe("문의 — the inbox scoped to inquiries (/inquiries)", () => {
     // Nothing is answered in the fixture: the filtered-empty line, not the empty-record one.
     expect(screen.getByText("선택한 조건에 해당하는 항목이 없습니다.")).toBeInTheDocument();
     await user.click(within(rail).getByRole("button", { name: "답변 필요" }));
-    const list = screen.getByLabelText("고객 문의·리뷰 목록");
+    const list = screen.getByLabelText("문의 목록");
     expect(within(list).getAllByRole("link")[0]).toHaveAttribute("href", "/inquiries/i1?state=NEEDS_REPLY");
   });
 

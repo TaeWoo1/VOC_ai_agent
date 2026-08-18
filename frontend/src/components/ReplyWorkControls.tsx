@@ -24,6 +24,7 @@ export function ReplyWorkControls({
   hasReplyPreparation,
   triageMode = "edit",
   onOutcomeRecorded,
+  onDecided,
 }: {
   accountId: string;
   /** Server-minted, client-opaque address of the review's reply work. */
@@ -43,6 +44,8 @@ export function ReplyWorkControls({
   triageMode?: "edit" | "readonly";
   /** Bubbled to the owner so a count or badge can reflect a reply the operator just posted. */
   onOutcomeRecorded?: () => void;
+  /** The server-confirmed decision, announced so an owner-level list (내 답변 작업) can re-read. */
+  onDecided?: (disposition: TriageDisposition) => void;
 }) {
   // The LIVE decision, not the one the owner last fetched.
   //
@@ -56,6 +59,13 @@ export function ReplyWorkControls({
   // page, a new review — still wins over a stale session decision.
   const [decided, setDecided] = useState<TriageDisposition | null>(disposition);
   useEffect(() => setDecided(disposition), [disposition, actionRef]);
+  const recordDecision = useCallback(
+    (next: TriageDisposition) => {
+      setDecided(next);
+      onDecided?.(next);
+    },
+    [onDecided],
+  );
 
   // Whether this review carries reply work — the server's answer, promoted locally the moment a draft is
   // saved in this session.
@@ -97,7 +107,7 @@ export function ReplyWorkControls({
           accountId={accountId}
           actionRef={actionRef}
           disposition={disposition}
-          onRecorded={setDecided}
+          onRecorded={recordDecision}
         />
       )}
       {/* Reply preparation, when the review needs a reply now or already carries work. Mounting it opens a

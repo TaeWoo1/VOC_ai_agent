@@ -22,7 +22,17 @@ export function isProductChannel(code: string | null | undefined): code is Produ
   return !!code && VISIBLE.has(code);
 }
 
-/** The visible subset of a channel list, in the order the list already had. */
+/**
+ * The visible subset of a channel list, in PRODUCT order (NAVER, Coupang, Cafe24) — the order the
+ * 리뷰 switcher, the home shares and every list of the three channels use, so the catalog's own
+ * sort order cannot make the same three channels appear in a different order on different screens
+ * (product assembly A7). Ties (several rows on one code) keep the list's own order.
+ */
 export function visibleChannels<T extends { code: string }>(list: readonly T[]): T[] {
-  return list.filter((channel) => isProductChannel(channel.code));
+  const rank = (code: string) => (PRODUCT_CHANNEL_CODES as readonly string[]).indexOf(code);
+  return list
+    .filter((channel) => isProductChannel(channel.code))
+    .map((channel, index) => ({ channel, index }))
+    .sort((a, b) => rank(a.channel.code) - rank(b.channel.code) || a.index - b.index)
+    .map(({ channel }) => channel);
 }

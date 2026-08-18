@@ -93,7 +93,9 @@ export function Operations() {
     state;
   const note = useOperationsNote();
   const reconnect = useBridgeReconnect(); // FE-4: manual live-Bridge reconnect
-  const connected = connection === "connected";
+  // Same gate as the workbench: commands only behind a live Bridge or the developer preview (A7).
+  const liveActions = sourceMode === "bridge" || isFixturePreviewEnabled();
+  const connected = connection === "connected" && liveActions;
 
   function handleCommand(type: CommandType) {
     dispatchOperationsCommand(type);
@@ -210,6 +212,12 @@ export function Operations() {
         retryPending={retryPending}
         onReconnect={sourceMode === "bridge" ? reconnect : undefined}
       />
+
+      {!liveActions ? (
+        <p role="note" className="rounded-2xl border border-line bg-canvas px-4 py-3 text-sm text-muted">
+          로컬 에이전트가 연결되어 있지 않아 지금은 작업을 시작하거나 조작할 수 없습니다.
+        </p>
+      ) : null}
 
       {run === null ? (
         <EmptyStartCard connected={connected} onStart={() => handleCommand("START_RUN")} />

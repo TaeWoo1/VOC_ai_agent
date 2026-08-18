@@ -98,6 +98,13 @@ describe("FE-7 Operations home page (store → DOM wiring)", () => {
     );
   });
 
+  it("product surface (fixture source, no preview): read-only, says the agent is not connected", () => {
+    seedHome("home-empty");
+    renderWithRouter(<OperationsHome />);
+    expect(screen.getByRole("note")).toHaveTextContent("로컬 에이전트가 연결되어 있지 않아");
+    expect(screen.queryByRole("button", { name: "내려받기 시작" })).toBeNull();
+  });
+
   it("offline (bridge): banner + reconnect shown, start affordance suppressed", () => {
     seedBridge()({ kind: "connection", connection: "offline" }); // run null, offline
     renderWithRouter(<OperationsHome />);

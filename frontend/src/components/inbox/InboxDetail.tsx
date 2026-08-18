@@ -57,9 +57,13 @@ export function InboxDetail({
         {item.rating != null ? <Meta label="별점" value={String(item.rating)} /> : null}
       </dl>
 
-      {item.type === "REVIEW" ? (
+      {/* The text itself. A review only ever has the feed's snippet; an inquiry gets its full body from
+          the response panel below WHEN a work item resolves — otherwise the snippet is all there is,
+          and a detail pane that named the product but never showed the question was a real gap (A7).
+          Either way it is labelled 발췌, not 원문. */}
+      {item.type === "REVIEW" || !workItemId ? (
         <section>
-          <h3 className="text-base font-bold text-ink">리뷰 발췌</h3>
+          <h3 className="text-base font-bold text-ink">{item.type === "REVIEW" ? "리뷰 발췌" : "문의 발췌"}</h3>
           <p className="mt-2 whitespace-pre-wrap break-keep leading-relaxed text-ink">
             {item.snippet}
           </p>
@@ -75,9 +79,9 @@ export function InboxDetail({
             {urgency ? <Chip>긴급도 {urgency.label}</Chip> : null}
             {sentiment ? <Chip>{sentiment.label}</Chip> : null}
           </div>
-          <p className="mt-2 text-xs text-muted">
-            {analysis.analyzerName} {analysis.analyzerVersion}
-          </p>
+          {/* Seller language, not the analyzer's name and version: the fact that matters is that this
+              is an automatic keyword classification that may be wrong. */}
+          <p className="mt-2 text-xs text-muted">키워드로 자동 분류한 것이라 정확하지 않을 수 있습니다.</p>
         </section>
       ) : null}
 

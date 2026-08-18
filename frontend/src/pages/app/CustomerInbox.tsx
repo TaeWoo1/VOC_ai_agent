@@ -235,6 +235,7 @@ export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) 
                 selectedId={selection.kind === "FOUND" ? selection.item.id : null}
                 basePath={basePath}
                 search={search}
+                showType={!inquiriesOnly}
               />
             )}
           </div>

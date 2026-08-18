@@ -175,4 +175,41 @@ class InboxServiceTest {
             assertThat(item.snippet()).doesNotContain("홍길동");
         }
     }
+
+    /* ── snippet: masked before it is cut, and bounded so a long body costs a window, not a scan (A7) ── */
+
+    @Test
+    void snippetMasksATokenThatStraddlesTheCutAndNeverSplitsIt() {
+        String body = "문의드립니다 ".repeat(5) + "010-1234-5678 로 연락 주세요 " + "x".repeat(300);
+        String snippet = InboxService.snippet(body);
+        assertThat(snippet).doesNotContain("010").doesNotContain("1234-5678");
+        assertThat(snippet).endsWith("…");
+        assertThat(snippet.length()).isLessThanOrEqualTo(InboxService.SNIPPET_LENGTH + 1);
+    }
+
+    @Test
+    void snippetOfAShortCleanBodyIsTheBodyItself() {
+        assertThat(InboxService.snippet("곡면 벽에도 시공 가능한가요?")).isEqualTo("곡면 벽에도 시공 가능한가요?");
+    }
+
+    @Test
+    void snippetOfAVeryLongBodyIsCutAndMarkedEvenWhenTheMaskedHeadIsShort() {
+        // A body longer than the window is truncated by definition — the marker must say so even if
+        // the masked head collapsed under the snippet length.
+        String body = "짧은 머리 " + "hong@example.com ".repeat(3) + "y".repeat(500);
+        String snippet = InboxService.snippet(body);
+        assertThat(snippet).contains("[이메일]").doesNotContain("hong@").endsWith("…");
+    }
+
+    @Test
+    void snippetOfAThousandLongBodiesStaysCheap() {
+        String body = "<h2>병원DB | 텔레그램 | 재테크</h2>" + "긴 게시글 본문 0123 4567 ".repeat(200);
+        long started = System.nanoTime();
+        for (int i = 0; i < 1000; i++) {
+            InboxService.snippet(body);
+        }
+        long elapsedMs = (System.nanoTime() - started) / 1_000_000;
+        // A generous bound; before the window this loop took seconds.
+        assertThat(elapsedMs).isLessThan(2_000);
+    }
 }

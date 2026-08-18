@@ -119,7 +119,7 @@ describe("Action Window FE-3 bridge source (loopback wire)", () => {
     resetOperationsStateForTests();
     expect(isClosed()).toBe(true);
     expect(getOperationsState().sourceMode).toBe("fixture");
-    expect(getOperationsState().run?.status).toBe("WAITING_FOR_HUMAN"); // initial demo state
+    expect(getOperationsState().run).toBeNull(); // the product surface's initial world is empty (A7)
   });
 
   it("connectBridgeIfEnabled is a no-op without the env opt-in (honest fallback)", async () => {

@@ -57,7 +57,11 @@ export function OperationsHome() {
   } = state;
   const note = useOperationsNote();
   const reconnect = useBridgeReconnect(); // FE-4: manual live-Bridge reconnect
-  const connected = connection === "connected";
+  // Commands are offered only where something real (a live Bridge) — or the developer's fixture
+  // preview — is behind them. On the product surface with no agent the workbench is read-only:
+  // the fixture source would otherwise "start" a scripted demo run and pass it off as the seller's.
+  const liveActions = sourceMode === "bridge" || isFixturePreviewEnabled();
+  const connected = connection === "connected" && liveActions;
 
   return (
     <div className="flex flex-col gap-4">
@@ -153,6 +157,12 @@ export function OperationsHome() {
         retryPending={retryPending}
         onReconnect={sourceMode === "bridge" ? reconnect : undefined}
       />
+
+      {!liveActions ? (
+        <p role="note" className="rounded-2xl border border-line bg-canvas px-4 py-3 text-sm text-muted">
+          로컬 에이전트가 연결되어 있지 않아 지금은 수집을 시작할 수 없습니다. 지금까지 가져온 기록은 아래에서 볼 수 있어요.
+        </p>
+      ) : null}
 
       {/* Collection workbench: the current task/state on the left, the seller's own import history
           as a side rail (stacks below on mobile). Progressive disclosure stays at the page level —

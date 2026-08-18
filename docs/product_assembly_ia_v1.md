@@ -161,15 +161,34 @@ row + 어휘 한 줄이 목표이며, 이를 깨는 설계는 이 문서를 먼�
 | A4 (2026-08-18) | 문의 화면 정리: 답변 필요 count = 서버 `countByOrgIdAndStatus(UNANSWERED)`(feed limit과 분리, 홈·`/inquiries` 동일), workflow 문장(답변 필요 → 답변함), 상태 옵션 순서·확인 필요 제외, `?state`/`?channel` 양방향 URL 동기화, 응답 불가 문구 capability 기반 | 완료 |
 | A5 (2026-08-18) | 채널 연결 hub cleanup(§4b): strict 카탈로그 read + 로딩/오류/빈 상태, 상태 단어·버튼 동사 통일, `/connect/imports` = 작업대로 명확화(유지), 도달 불가 문구·dead 컴포넌트 제거 | 완료 |
 | A6 (2026-08-18) | 리뷰 답변 준비를 workflow surface로(§4c): NAVER 리뷰 상세의 "답변" 절(결정 → 답변 준비, 서버 mint `replyWork`), 내 답변 작업을 `/reviews`로, `/connect/imports` = 수집 실행·run 이력 workbench(worklist 삭제, 완료 카드 → 리뷰 화면), 개발용 chrome opt-in(`VITE_AW_FIXTURE_PREVIEW`), 연결 행 support chip에서 커넥터 내부 사실 제거 | 완료 |
-| A7 (다음) | 전체 UI/UX polish + demo freeze: 화면 간 어휘·상태·빈/오류 문구 통일 점검, 데모 경로(홈 → 리뷰 → 답변 준비 → 문의 → 채널 연결) end-to-end 실사, 로컬 데모 실행 절차 고정 — 새 기능·새 채널 없음 | 제안 |
+| A7 (2026-08-18) | 전체 UI/UX polish + demo freeze(§8): 데모 경로(홈 → 확인 필요 리뷰 → NAVER 답변 준비 → 문의 → 채널 연결 → 주문·설정) 로컬 실사; 실제 결함 수정 — 문의 feed 500행 read 4.4s→<0.2s(`InboxService.snippet` 마스킹 창 + `PiiMasker` 사전 검사; 두 번 병렬 read 시 8s timeout으로 "목록을 불러오지 못했습니다"가 났다), 문의 상세에 발췌 없음, 상세의 분석기 이름·버전 노출; polish — 문의 행 "문의" chip 제거, 리뷰 상세 답변 절을 피드백 위로·결정 시 내 답변 작업 재읽기, 세 채널 표시 순서 통일(`visibleChannels` = 제품 순서), 주문 h1 "주문"; product surface에서 fixture run 노출 차단(`/connect/imports` 초기 상태 empty + 명령은 live bridge/preview에서만); `docs/demo_runbook_v1.md` 신설 | 완료 |
 
 ## 7. 라우터
 
 | 필요한 것 | 문서 |
 |---|---|
 | 프론트 상세 원칙(상태·언어·접근성·가이드 연결·AW 화면) | `docs/sellerops_frontend_spec.md` |
+| 로컬 데모 실행 절차·proof level·residual | `docs/demo_runbook_v1.md` |
 | 범위 계약 | `docs/product-scope-v1.md` |
 | capability 진실 | `docs/multi-channel-connector-roadmap.md` §4.1 |
 | 리뷰 AI 데모·파일럿 상태 | `docs/workstreams/review_ai_triage_demo.md` |
 | 리뷰 이벤트/네 기록 분리 계약 | `contracts/review-triage-events/v1/CONTRACT.md` |
 | 제품 정체성·전략·상태 | `docs/sellerops_canonical_reference.md` |
+
+## 8. FE / IA freeze (A7 — 2026-08-18)
+
+이 조립으로 아래는 **freeze**한다. 바꾸려면 이 문서를 먼저 고친다(product-owner decision).
+
+- **1차 메뉴와 route**: 운영 = 홈 `/` · 리뷰 `/reviews[/:accountId]` · 문의 `/inquiries[/:itemRef]` · 주문 `/orders`;
+  연결·설정 = 채널 연결 `/connect(…)` · 설정 `/settings`. off-menu route는 §3의 목록 그대로. 새 1차 메뉴 없음.
+- **화면 책임(§4)과 세 계약(§4a Today Inbox · §4b 채널 연결 hub · §4c 리뷰 답변 준비)**.
+- **노출 채널 = NAVER / Coupang / Cafe24** (`ProductChannels.java`, `lib/productChannels.ts`), 표시 순서도 그 순서.
+- **새 채널의 기본값**: connector + capability proof(§4.1 승격) **뒤에** 기존 surface에 끼운다 —
+  `/reviews`에는 계정 chip 하나 + `ReviewChannelCapabilityView` 행 하나 + 어휘 한 줄(`channelVocabulary`);
+  `/inquiries`에는 채널 filter 값 하나; `/orders`에는 select 항목 하나; `/connect`에는 행 하나 + wizard route.
+  새 채널 때문에 IA·공통 화면·Today Inbox 계약을 새로 만들지 않는다. per-channel 화면은 wizard/OAuth/튜토리얼처럼
+  연결 절차에만 허용된다.
+- **개발용 chrome**은 항상 `VITE_AW_FIXTURE_PREVIEW=1` 뒤에 있고, product surface는 live bridge 없이는 Action
+  Window 명령을 제공하지 않는다.
+- **데모 절차**는 `docs/demo_runbook_v1.md`가 소유한다. 다음 단계는 개발이 아니라 인터뷰·데모 준비이며, 이 문서·runbook의
+  residual 목록(§4c, runbook §7)은 인터뷰에서 확인할 질문이지 지금 고칠 backlog가 아니다.

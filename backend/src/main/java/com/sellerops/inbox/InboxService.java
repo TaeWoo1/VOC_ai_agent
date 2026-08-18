@@ -111,15 +111,34 @@ public class InboxService {
         return items.size() > limit ? items.subList(0, limit) : items;
     }
 
+    /** How much of a body the feed shows. */
+    static final int SNIPPET_LENGTH = 60;
+
+    /**
+     * How much of a body is masked before it is cut. Wide enough that any phone/email token that
+     * BEGINS inside the snippet is fully inside the window (an email or a spaced phone number is
+     * well under 140 characters), so masking-then-cutting still never splits a token — while a
+     * body that runs to thousands of characters (a board post, a spam article) no longer costs
+     * three regex passes over all of it for a 60-character preview. Reading 500 rows used to take
+     * seconds for exactly that reason (product assembly A7).
+     */
+    static final int MASK_WINDOW = 200;
+
     /**
      * Build the customer-facing snippet: mask obvious PII (phone/email) BEFORE
      * truncating so a token is never split. The raw body stays untouched in the DB.
      */
-    private String snippet(String body) {
+    static String snippet(String body) {
         if (body == null) {
             return "";
         }
-        String masked = PiiMasker.maskText(body).strip();
-        return masked.length() <= 60 ? masked : masked.substring(0, 60) + "…";
+        boolean windowed = body.length() > MASK_WINDOW;
+        String head = windowed ? body.substring(0, MASK_WINDOW) : body;
+        String masked = PiiMasker.maskText(head).strip();
+        if (!windowed && masked.length() <= SNIPPET_LENGTH) {
+            return masked;
+        }
+        String cut = masked.length() <= SNIPPET_LENGTH ? masked : masked.substring(0, SNIPPET_LENGTH);
+        return cut + "…";
     }
 }

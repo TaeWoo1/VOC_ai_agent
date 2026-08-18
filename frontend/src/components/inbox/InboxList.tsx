@@ -30,15 +30,18 @@ export function InboxList({
   basePath = "/inbox",
   /** Query string carried onto each row link (the surface's filters), so choosing a row keeps them. */
   search = "",
+  /** Whether each row names its kind (문의 / 리뷰). Off on a single-kind surface, where the chip repeats the h1. */
+  showType = true,
 }: {
   items: readonly FeedItem[];
   analyses: Map<string, ItemAnalysis>;
   selectedId: string | null;
   basePath?: string;
   search?: string;
+  showType?: boolean;
 }) {
   return (
-    <ul aria-label="고객 문의·리뷰 목록" className="divide-y divide-line">
+    <ul aria-label={showType ? "고객 문의·리뷰 목록" : "문의 목록"} className="divide-y divide-line">
       {items.map((item) => {
         const analysis = analyses.get(analysisKey(item.type, item.id));
         const status = statusLabel(item);
@@ -53,9 +56,11 @@ export function InboxList({
               }`}
             >
               <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-canvas px-2.5 py-0.5 text-xs font-semibold text-muted">
-                  {TYPE_LABEL[item.type]}
-                </span>
+                {showType ? (
+                  <span className="rounded-full bg-canvas px-2.5 py-0.5 text-xs font-semibold text-muted">
+                    {TYPE_LABEL[item.type]}
+                  </span>
+                ) : null}
                 {status ? (
                   <span
                     className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${status.cls}`}
