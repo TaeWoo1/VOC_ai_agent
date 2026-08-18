@@ -3,6 +3,9 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { signupFailure } from "../lib/signupError";
 import { PRODUCT_PATH } from "../lib/public/publicCta";
+import { analytics } from "../lib/analytics";
+import { AuthCard, authField, authLabel, authLink, authPrimaryButton } from "../components/auth/AuthCard";
+import { SocialSignInButtons } from "../components/auth/SocialSignInButtons";
 
 /** Where a brand-new org lands: nothing is connected yet, so the first thing to do IS 채널 연결. */
 export const FIRST_RUN_PATH = "/connect";
@@ -12,8 +15,8 @@ export const FIRST_RUN_PATH = "/connect";
  * (가입 → 채널 연결 → 첫 수집 → 홈). Uses the existing `POST /api/auth/signup`; the answer is a session
  * (token + user), so a successful sign-up goes straight to 채널 연결 with no second login form.
  *
- * Deliberately plain: four fields the backend contract names (email, password ≥ 6, name, orgName), one
- * error line in the seller's words, and no marketing. Nothing here touches a marketplace or a channel.
+ * Google / NAVER sign-up (when the deployment offers them) starts here too and finishes on `/onboarding`
+ * with the same 상호명 question. Email sign-up IS its own onboarding, so `onboarding_completed` fires with it.
  */
 export function Signup() {
   const { signup } = useAuth();
@@ -37,6 +40,8 @@ export function Signup() {
     setError(null);
     try {
       await signup({ email: email.trim(), password, name: name.trim(), orgName: orgName.trim() });
+      analytics.track("sign_up", { method: "email" });
+      analytics.track("onboarding_completed");
       navigate(FIRST_RUN_PATH, { replace: true });
     } catch (err) {
       setError(signupFailure(err).message);
@@ -45,109 +50,94 @@ export function Signup() {
     }
   }
 
-  const field =
-    "w-full rounded-xl border border-line px-4 py-3 text-lg focus:border-brand focus:outline-none";
-  const label = "mb-2 block text-base font-semibold text-ink";
-
   return (
-    <div className="flex min-h-[70vh] items-center justify-center px-4 py-16">
-      <div className="w-full max-w-md">
-        <div className="mb-8 text-center">
-          <p className="text-3xl font-extrabold text-brand-700">SellerOps</p>
-          <p className="mt-2 text-lg text-muted">계정을 만들고 첫 채널을 연결해 보세요</p>
-        </div>
-
-        <form className="card space-y-5" onSubmit={onSubmit} aria-label="회원가입">
-          <div>
-            <label className={label} htmlFor="signup-org">
-              상호 (스토어·회사 이름)
-            </label>
-            <input
-              id="signup-org"
-              value={orgName}
-              onChange={(e) => setOrgName(e.target.value)}
-              className={field}
-              autoComplete="organization"
-              required
-            />
-          </div>
-          <div>
-            <label className={label} htmlFor="signup-name">
-              이름
-            </label>
-            <input
-              id="signup-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className={field}
-              autoComplete="name"
-              required
-            />
-          </div>
-          <div>
-            <label className={label} htmlFor="signup-email">
-              이메일
-            </label>
-            <input
-              id="signup-email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className={field}
-              autoComplete="username"
-              required
-            />
-          </div>
-          <div>
-            <label className={label} htmlFor="signup-password">
-              비밀번호 <span className="font-normal text-muted">(6자 이상)</span>
-            </label>
-            <input
-              id="signup-password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className={field}
-              autoComplete="new-password"
-              minLength={6}
-              required
-              aria-invalid={passwordTooShort || undefined}
-            />
-          </div>
-          {error ? (
-            <p className="text-base text-bad" role="alert">
-              {error}
-            </p>
-          ) : null}
-          <button
-            type="submit"
-            className="inline-flex w-full items-center justify-center rounded-xl bg-brand-700 px-5 py-3 text-lg font-semibold text-white transition hover:bg-brand-600 disabled:opacity-50"
-            disabled={busy}
-          >
-            {busy ? "계정 만드는 중…" : "계정 만들기"}
-          </button>
-          <p className="break-keep text-center text-sm text-muted">
-            가입하면 바로 채널 연결 화면으로 이동합니다. 마켓 계정 정보는 그 화면에서 채널별로 직접 입력합니다.
-          </p>
-        </form>
-
-        <p className="mt-6 text-center text-sm text-muted">
+    <AuthCard
+      title="계정 만들기"
+      subtitle="계정을 만들고 첫 채널을 연결해 보세요"
+      footer={
+        <>
           이미 계정이 있으신가요?{" "}
-          <Link
-            to="/login"
-            className="rounded font-medium text-brand-700 transition hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
-          >
+          <Link to="/login" className={authLink}>
             로그인
           </Link>
           <span aria-hidden="true"> · </span>
-          <Link
-            to={PRODUCT_PATH}
-            className="rounded font-medium transition hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
-          >
+          <Link to={PRODUCT_PATH} className={`${authLink} text-muted`}>
             제품 소개 보기
           </Link>
+        </>
+      }
+    >
+      <SocialSignInButtons intent="signup" />
+
+      <form className="space-y-4" onSubmit={onSubmit} aria-label="회원가입">
+        <div>
+          <label className={authLabel} htmlFor="signup-org">
+            상호 (스토어·회사 이름)
+          </label>
+          <input
+            id="signup-org"
+            value={orgName}
+            onChange={(e) => setOrgName(e.target.value)}
+            className={authField}
+            autoComplete="organization"
+            required
+          />
+        </div>
+        <div>
+          <label className={authLabel} htmlFor="signup-name">
+            이름
+          </label>
+          <input
+            id="signup-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className={authField}
+            autoComplete="name"
+            required
+          />
+        </div>
+        <div>
+          <label className={authLabel} htmlFor="signup-email">
+            이메일
+          </label>
+          <input
+            id="signup-email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className={authField}
+            autoComplete="username"
+            required
+          />
+        </div>
+        <div>
+          <label className={authLabel} htmlFor="signup-password">
+            비밀번호 <span className="font-normal text-muted">(6자 이상)</span>
+          </label>
+          <input
+            id="signup-password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className={authField}
+            autoComplete="new-password"
+            minLength={6}
+            required
+            aria-invalid={passwordTooShort || undefined}
+          />
+        </div>
+        {error ? (
+          <p className="text-sm text-bad" role="alert">
+            {error}
+          </p>
+        ) : null}
+        <button type="submit" className={authPrimaryButton} disabled={busy}>
+          {busy ? "계정 만드는 중…" : "계정 만들기"}
+        </button>
+        <p className="break-keep text-center text-xs leading-relaxed text-muted">
+          가입하면 바로 채널 연결 화면으로 이동합니다. 마켓 계정 정보는 그 화면에서 채널별로 직접 입력합니다.
         </p>
-      </div>
-    </div>
+      </form>
+    </AuthCard>
   );
 }

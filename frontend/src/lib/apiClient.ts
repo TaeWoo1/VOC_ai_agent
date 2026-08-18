@@ -3,6 +3,8 @@ import type {
   AccountDashboardSummary,
   ArticleListResponse,
   AuthResponse,
+  SocialExchangeResponse,
+  SocialProvidersView,
   BackfillRequest,
   Cafe24CapabilityView,
   Cafe24ConnectStartView,
@@ -151,13 +153,15 @@ export const SESSION_EXPIRED_PATH = "/login?expired=1";
  * `?expired=1`, so the form can say "세션이 만료되었습니다" instead of the seller guessing.
  *
  * Deliberately narrow: only 401 (never 403 — that is a real authorization answer), only when a token was
- * present (an unauthenticated probe is not an expiry), never for the login call itself (a wrong password must
- * stay a form error, not a redirect loop). The redirect uses `location.assign` because the interceptor lives
+ * present (an unauthenticated probe is not an expiry), never for the auth calls themselves (a wrong password or a
+ * spent social-login code must stay a form/screen error, not a redirect loop). The redirect uses `location.assign` because the interceptor lives
  * outside the router; the token is cleared FIRST so `Protected` cannot bounce back in.
  */
 export function isSessionExpiry(status: number | undefined, url: string | undefined, hadToken: boolean): boolean {
   if (status !== 401 || !hadToken) return false;
-  return !(url ?? "").includes("/api/auth/login");
+  // Every /api/auth/* call is a public one (login, sign-up, social code exchange, onboarding complete): a 401
+  // there is that flow's own answer ("wrong password", "링크가 만료") and must render on that screen.
+  return !(url ?? "").includes("/api/auth/");
 }
 
 http.interceptors.response.use(
@@ -219,6 +223,27 @@ export const api = {
       return mockAuth();
     }
     const { data } = await http.post<AuthResponse>("/api/auth/signup", input);
+    return data;
+  },
+
+  // ── Social login (docs/auth_growth_instrumentation_v1.md §3). No mock fallback: with VITE_USE_MOCKS the
+  // providers read answers "none", so the buttons simply do not render, and the code paths are unreachable.
+  async socialProviders(): Promise<SocialProvidersView> {
+    if (USE_MOCKS) {
+      return { google: false, naver: false };
+    }
+    const { data } = await http.get<SocialProvidersView>("/api/auth/social/providers");
+    return data;
+  },
+
+  /** Spend the one-time code from `/auth/callback?code=…` — the JWT (or the onboarding token) arrives in the body. */
+  async socialExchange(code: string): Promise<SocialExchangeResponse> {
+    const { data } = await http.post<SocialExchangeResponse>("/api/auth/social/exchange", { code });
+    return data;
+  },
+
+  async socialOnboardingComplete(input: { onboardingToken: string; orgName: string; name: string }): Promise<AuthResponse> {
+    const { data } = await http.post<AuthResponse>("/api/auth/social/onboarding/complete", input);
     return data;
   },
 

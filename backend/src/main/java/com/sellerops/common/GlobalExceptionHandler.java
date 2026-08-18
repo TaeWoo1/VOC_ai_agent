@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -51,6 +52,13 @@ public class GlobalExceptionHandler {
         // error (405), not a server fault, which the catch-all would otherwise report as
         // 500 and thereby mask as a backend failure. Echo only the offending method name.
         return body(HttpStatus.METHOD_NOT_ALLOWED, "지원하지 않는 요청 방식입니다: " + ex.getMethod());
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Map<String, Object>> handleNoResource(NoResourceFoundException ex) {
+        // A path nothing serves (e.g. /oauth2/authorization/<provider that is not configured>) is "no such
+        // route" — 404, not the catch-all's 500 that reads as a backend fault. No path is echoed.
+        return body(HttpStatus.NOT_FOUND, "요청한 경로가 없습니다.");
     }
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);

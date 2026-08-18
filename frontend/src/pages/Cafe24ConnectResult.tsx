@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { parseCafe24Result, type Cafe24ResultStatus } from "../lib/cafe24Connect";
+import { analytics } from "../lib/analytics";
 
 // Success is shown ONLY from the backend-provided status param — never inferred from
 // client state. code/state/token params are never read (parseCafe24Result ignores them).
@@ -52,6 +53,8 @@ export function Cafe24ConnectResult() {
     if (status !== "connected") {
       return;
     }
+    // Growth funnel: Cafe24 connected (status only — never the account id).
+    analytics.track("channel_connected", { channel: "cafe24" });
     const query = new URLSearchParams({ status });
     if (accountId) {
       query.set("accountId", accountId);

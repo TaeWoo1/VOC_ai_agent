@@ -33,7 +33,9 @@ public class AuthService {
 
     @Transactional
     public AuthResponse signup(SignupRequest req) {
-        if (users.existsByEmail(req.email())) {
+        // Case-insensitive: the social-login collision rule (docs/auth_growth_instrumentation_v1.md §2-2) and this
+        // check must agree, or "Seller@X.io" + "seller@x.io" would be two accounts for one person.
+        if (users.existsByEmailIgnoreCase(req.email())) {
             throw ApiException.conflict("이미 등록된 이메일입니다.");
         }
         Organization org = new Organization();
@@ -55,7 +57,10 @@ public class AuthService {
     public AuthResponse login(LoginRequest req) {
         User user = users.findByEmail(req.email())
                 .orElseThrow(() -> ApiException.unauthorized("이메일 또는 비밀번호가 올바르지 않습니다."));
-        if (!passwordEncoder.matches(req.password(), user.getPasswordHash())) {
+        // A social-only user (Google/NAVER sign-up, no password) fails with the SAME sentence as a wrong
+        // password: which sign-in method an email uses is not information for whoever typed it.
+        if (user.getPasswordHash() == null
+                || !passwordEncoder.matches(req.password(), user.getPasswordHash())) {
             throw ApiException.unauthorized("이메일 또는 비밀번호가 올바르지 않습니다.");
         }
         String orgName = organizations.findById(user.getOrgId())

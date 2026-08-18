@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { analytics } from "../../lib/analytics";
 import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
 import { Empty } from "../../components/ui/Empty";
@@ -42,6 +43,10 @@ import type { FeedItem, ItemAnalysis } from "../../lib/types";
  */
 export function CustomerInbox({ scope = "ALL" }: { scope?: "ALL" | "INQUIRY" }) {
   const { itemRef } = useParams();
+  // Growth funnel: 문의 workflow opened (no item ref, no text).
+  useEffect(() => {
+    if (scope === "INQUIRY") analytics.track("inquiry_opened");
+  }, [scope]);
   const inquiriesOnly = scope === "INQUIRY";
   const basePath = inquiriesOnly ? "/inquiries" : "/inbox";
   const [items, setItems] = useState<FeedItem[] | null>(null);

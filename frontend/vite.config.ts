@@ -18,6 +18,12 @@ export default defineConfig({
         target: BACKEND_ORIGIN,
         changeOrigin: true,
       },
+      // Social login (Google · NAVER) is a top-level browser navigation to the backend's Spring Security
+      // OAuth2 endpoints. Proxied WITHOUT changeOrigin so the backend computes the redirect URI from the
+      // origin the browser used (http://localhost:5173/login/oauth2/code/<provider>) — the one registered
+      // at the provider console. docs/auth_growth_instrumentation_v1.md §3.
+      "/oauth2": { target: BACKEND_ORIGIN, changeOrigin: false },
+      "/login/oauth2": { target: BACKEND_ORIGIN, changeOrigin: false },
     },
   },
 });

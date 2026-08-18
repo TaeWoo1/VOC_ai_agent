@@ -10,6 +10,8 @@ import { LEGACY_REDIRECTS, resolveLegacyTarget, type LegacyRedirect } from "./li
 import { ProductLanding } from "./pages/ProductLanding";
 import { Login } from "./pages/Login";
 import { Signup } from "./pages/Signup";
+import { AuthCallback } from "./pages/AuthCallback";
+import { Onboarding } from "./pages/Onboarding";
 
 // v2 app surface
 import { HomeV2 } from "./pages/app/HomeV2";
@@ -74,6 +76,10 @@ export function App() {
         <Route path="/product/*" element={<Navigate to="/product" replace />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
+        {/* Social login (Google · NAVER): the one-time-code landing and the 상호명 step for a first-time
+            identity — auth surface, not menu (docs/auth_growth_instrumentation_v1.md §4). */}
+        <Route path="/auth/callback" element={<AuthCallback />} />
+        <Route path="/onboarding" element={<Onboarding />} />
       </Route>
 
       <Route

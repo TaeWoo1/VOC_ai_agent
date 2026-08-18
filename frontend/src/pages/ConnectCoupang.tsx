@@ -31,6 +31,7 @@ import type {
   SyncRunView,
   WalkthroughContextView,
 } from "../lib/types";
+import { analytics } from "../lib/analytics";
 
 /** The channel this page connects — used for the sanitized walkthrough banner + mismatch re-open path. */
 const COUPANG_CONNECT_PATH = "/connect/coupang";
@@ -69,6 +70,23 @@ type SyncWatch = { startedAt: number; observeStartedAt: number; polling: boolean
 export function ConnectCoupang() {
   const navigate = useNavigate();
   const [state, dispatch] = useReducer(coupangTutorialReducer, INITIAL_COUPANG_STATE);
+  // Growth funnel (docs/auth_growth_instrumentation_v1.md §5). `preparing` is reached only by a passing
+  // connection test from `submitting`; `connected` only by a finished first sync from `syncing` — the initial
+  // server read (`resolving` → any phase) is a returning seller, not a new connection, and fires nothing.
+  const previousPhase = useRef(state.phase);
+  useEffect(() => {
+    analytics.track("channel_connect_started", { channel: "coupang" });
+  }, []);
+  useEffect(() => {
+    const before = previousPhase.current;
+    previousPhase.current = state.phase;
+    if (before === "submitting" && state.phase === "preparing") {
+      analytics.track("channel_connected", { channel: "coupang" });
+    }
+    if (before === "syncing" && state.phase === "connected") {
+      analytics.trackOnce("first_sync_completed", { channel: "coupang" });
+    }
+  }, [state.phase]);
 
   // Walkthrough environment binding. Outside walkthrough mode the gate opens immediately (`matched`) so the
   // page behaves exactly as before; in walkthrough mode it stays `checking` until the 3-way run/origin match

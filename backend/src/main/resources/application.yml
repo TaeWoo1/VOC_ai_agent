@@ -276,6 +276,25 @@ sellerops:
     exp-minutes: ${SELLEROPS_JWT_EXP_MINUTES:720}
   cors:
     origin: ${SELLEROPS_CORS_ORIGIN:http://localhost:5173}
+  # Social login (Google OIDC · NAVER OAuth2) — docs/auth_growth_instrumentation_v1.md. Deployer values,
+  # prepared before service start; a provider without BOTH id and secret does not exist (no bean, no
+  # endpoint, no button). Success mints a one-time code (never a JWT in a URL); identity is
+  # (provider, subject); an email collision is refused, never auto-linked; a first-time identity creates
+  # nothing until 상호명 is given (org + user + identity in one transaction).
+  oauth:
+    google:
+      client-id: ${SELLEROPS_OAUTH_GOOGLE_CLIENT_ID:}
+      client-secret: ${SELLEROPS_OAUTH_GOOGLE_CLIENT_SECRET:}
+    naver:
+      client-id: ${SELLEROPS_OAUTH_NAVER_CLIENT_ID:}
+      client-secret: ${SELLEROPS_OAUTH_NAVER_CLIENT_SECRET:}
+    # "" = redirect targets are relative to the public origin the browser used (dev: vite proxy on :5173).
+    frontend-base-url: ${SELLEROPS_OAUTH_FRONTEND_BASE_URL:}
+    code-ttl-seconds: ${SELLEROPS_OAUTH_CODE_TTL_SECONDS:120}
+    onboarding-ttl-seconds: ${SELLEROPS_OAUTH_ONBOARDING_TTL_SECONDS:1800}
+    # Expired handoff rows (they carry the provider email/display name) are deleted on this cadence.
+    purge-initial-delay-ms: 300000
+    purge-interval-ms: 900000
   walkthrough:
     # Disposable NAVER walkthrough environment-identity endpoints (context + operator-tab handshake).
     # OFF by default → the WalkthroughController bean and its routes do not exist in production (any

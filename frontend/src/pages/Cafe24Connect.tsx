@@ -1,6 +1,7 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/apiClient";
+import { analytics } from "../lib/analytics";
 import { classifyStartError, normalizeMallId } from "../lib/cafe24Connect";
 
 /**
@@ -11,6 +12,10 @@ import { classifyStartError, normalizeMallId } from "../lib/cafe24Connect";
  */
 export function Cafe24Connect() {
   const [mallId, setMallId] = useState("");
+  // Growth funnel: the Cafe24 connect flow was opened (no mall id leaves the page).
+  useEffect(() => {
+    analytics.track("channel_connect_started", { channel: "cafe24" });
+  }, []);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

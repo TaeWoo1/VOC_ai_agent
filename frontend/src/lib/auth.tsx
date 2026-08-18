@@ -1,13 +1,16 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import type { UserView } from "./types";
+import type { AuthResponse, UserView } from "./types";
 import { api, clearToken, getToken, setToken } from "./apiClient";
+import { analytics } from "./analytics";
 
 interface AuthState {
   user: UserView | null;
   ready: boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (input: { email: string; password: string; name: string; orgName: string }) => Promise<void>;
+  /** A session the backend already issued (social login code exchange / onboarding complete). */
+  acceptSession: (session: AuthResponse) => void;
   logout: () => void;
 }
 
@@ -43,6 +46,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Product analytics identity = the opaque internal user id (never email/name/상호) — and cleared on sign-out.
+  useEffect(() => {
+    analytics.identify(user ? user.id : null);
+  }, [user]);
+
   const value = useMemo<AuthState>(
     () => ({
       user,
@@ -58,6 +66,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const res = await api.signup(input);
         setToken(res.token);
         setUser(res.user);
+      },
+      acceptSession(session) {
+        setToken(session.token);
+        setUser(session.user);
       },
       logout() {
         clearToken();
