@@ -52,6 +52,37 @@ Recording targets while it runs: auth/OAuth/session expiry + recovery, agent/bri
 incremental sync / duplicate ingest, count drift, stale UI/state, cross-channel UX mismatch,
 error/retry/reconnect UX, missing feedback/action events. Marketplace WRITE stays forbidden.
 
+### 0.2 Self-Pilot Runtime v1 — days of routine with only the UI open (2026-08-18)
+
+Design and honest state: `docs/self_pilot_runtime_v1.md`; scope decision `product-scope-v1.md` v1.9;
+approval consequence `sellerops_live_approval_contract.md` §6a. What it changes for this runbook:
+
+- **Backend once, before channel 1** (`backend/.env.local`, names only; then restart `bootRun`):
+  `SELLEROPS_SELF_PILOT_ENABLED=true` · `SELLEROPS_SELF_PILOT_ORG_IDS=<self-pilot org uuid>` ·
+  `SELLEROPS_SELF_PILOT_READ_GRANT_ID=<from tools/self-pilot/mint-read-grant.sh>` ·
+  `SELLEROPS_COLLECT_SCHEDULER_ENABLED=true` (supersedes the "false in every proof" line above for this
+  posture) · the connector + vault names of §0.1 · optionally `SELLEROPS_SELF_PILOT_TRIAGE_AUTO_ENABLED=true`
+  next to the AI-pilot env for the same org. `SELLEROPS_CONNECTOR_COUPANG_LIVE_APPROVAL_ID` is no longer
+  needed for Coupang **reads** (the read grant opens them); it is still the only key for any WRITE.
+- **After a channel becomes CONNECTED** nothing is pressed: within ~5 min the reconciler creates the 수집 설정
+  rows for the data types its real connector serves (Cafe24: 리뷰·문의·주문; Coupang: 문의·주문; NAVER: 주문),
+  due immediately, and the collect scheduler runs them on cadence (default 60 min). A row you turn off in
+  수집 설정 stays off. 지금 수집하기 / 기간 backfill work as before.
+- **Local agent** — replace the raw command of §0.1's NAVER row with the supervisor:
+  `cp tools/self-pilot/self-pilot.env.example tools/self-pilot/.run/self-pilot.env` (fill the self-pilot org
+  credentials, `NAVER_REVIEW_URL`; gitignored) → `tools/self-pilot/agent-supervisor.sh start` in a terminal
+  you can see (first pairing code appears there; pair from `/connect/review-history` 도우미 연결하기) →
+  after that `start -d` is fine (pairing persists). `[쿠팡에서 보기]`: `agent-supervisor.sh switch
+  coupang-locate` (needs `COUPANG_WING_URL` in the env; the walk's ids are minted for you; you still press
+  the in-browser grant), then `switch naver-import` back. `status` / `stop` / `logs`.
+- **What now surfaces instead of failing quietly**: a channel whose credential/token stopped working shows
+  재연결 필요 on `/connect` and under 홈 → 확인이 필요한 연결 (plus an alert), its 수집 설정 rows read
+  "인증이 만료되어 자동 수집을 멈췄습니다…", and reconnecting (연결 확인 success / 갱신 / Cafe24 재동의) resumes
+  them; an expired SellerOps session lands on `/login?expired=1` with "세션이 만료되었습니다".
+- **Still the seller's hands**: NAVER / WING login in the agent's Chrome, every export click and page turn,
+  the Coupang review acquisition walk (`wing-review-acquire-bootstrap.sh` + CLI — not schedulable), and
+  every marketplace WRITE (unchanged: explicit mode-WRITE approval).
+
 ## 1. Start (two terminals, one browser)
 
 ```bash

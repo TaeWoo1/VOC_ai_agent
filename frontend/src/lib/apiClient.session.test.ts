@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * **The identity read must not be able to fabricate a session.**
  *
@@ -15,13 +16,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const get = vi.fn();
+/** The response interceptor's rejection handler, captured at module load (see the expiry cases below). */
+const responseUse = vi.fn();
 
 vi.mock("axios", () => {
   const instance = {
     get,
     post: vi.fn(),
     put: vi.fn(),
-    interceptors: { request: { use: vi.fn() } },
+    interceptors: { request: { use: vi.fn() }, response: { use: responseUse } },
   };
   return { default: { create: () => instance } };
 });
@@ -69,5 +72,48 @@ describe("api.getMe", () => {
     const api = await client();
     await expect(api.getMe()).resolves.toBeDefined();
     expect(get).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Self-Pilot Runtime v1: an EXPIRED session mid-day is a reconnect, not a broken backend. The one response
+ * interceptor clears the stale token and sends the seller to `/login?expired=1`; a wrong password on the
+ * login call itself, a 403, or a 401 with no token present are NOT expiry and must not redirect.
+ */
+describe("in-session expiry (401 → /login?expired=1)", () => {
+  async function rejectionHandler() {
+    await import("./apiClient");
+    const calls = responseUse.mock.calls;
+    const call = calls[calls.length - 1];
+    if (!call) throw new Error("response interceptor was not installed");
+    return call[1] as (error: unknown) => Promise<never>;
+  }
+
+  beforeEach(() => {
+    responseUse.mockClear();
+    localStorage.clear();
+  });
+
+  it("clears the token and redirects when an authenticated call answers 401", async () => {
+    const mod = await import("./apiClient");
+    localStorage.setItem("sellerops_token", "stale");
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, pathname: "/reviews", assign });
+    const onRejected = await rejectionHandler();
+
+    await expect(onRejected({ response: { status: 401 }, config: { url: "/api/inbox" } })).rejects.toBeDefined();
+
+    expect(localStorage.getItem("sellerops_token")).toBeNull();
+    expect(assign).toHaveBeenCalledWith(mod.SESSION_EXPIRED_PATH);
+    vi.unstubAllGlobals();
+  });
+
+  it("does not treat the login call, a 403, or a token-less 401 as expiry", async () => {
+    const mod = await import("./apiClient");
+    expect(mod.isSessionExpiry(401, "/api/auth/login", true)).toBe(false); // wrong password stays a form error
+    expect(mod.isSessionExpiry(403, "/api/inbox", true)).toBe(false); // a real authorization answer
+    expect(mod.isSessionExpiry(401, "/api/inbox", false)).toBe(false); // never signed in — not an expiry
+    expect(mod.isSessionExpiry(401, "/api/inbox", true)).toBe(true);
+    expect(mod.isSessionExpiry(500, "/api/inbox", true)).toBe(false);
   });
 });

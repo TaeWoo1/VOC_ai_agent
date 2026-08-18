@@ -7,6 +7,8 @@ import com.sellerops.selleraccount.SellerAccountRepository;
 import java.time.Clock;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import com.sellerops.selfpilot.SellerAccountReauthService;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -40,8 +42,17 @@ public class Cafe24OnboardingConfiguration {
             @Value("${sellerops.connector.cafe24.oauth.redirect-uri:http://localhost:8080/api/connect/cafe24/callback}")
             String redirectUri,
             @Value("${sellerops.connector.cafe24.oauth.scopes:mall.read_community,mall.read_order}") String scopes,
-            @Value("${sellerops.connector.cafe24.oauth.state-ttl-seconds:600}") long stateTtlSeconds) {
-        return new Cafe24OnboardingService(accounts, channels, states, vault, oauthClient,
-                txManager, Clock.systemUTC(), clientId, clientSecret, redirectUri, scopes, stateTtlSeconds);
+            @Value("${sellerops.connector.cafe24.oauth.state-ttl-seconds:600}") long stateTtlSeconds,
+            ObjectProvider<SellerAccountReauthService> reauth) {
+        Cafe24OnboardingService service = new Cafe24OnboardingService(accounts, channels, states, vault,
+                oauthClient, txManager, Clock.systemUTC(), clientId, clientSecret, redirectUri, scopes,
+                stateTtlSeconds);
+        // Self-Pilot v1: a completed (re)consent resumes auth-paused schedules and closes the alert.
+        // Optional so the hermetic connector-configuration tests (no JPA graph) still start the context.
+        SellerAccountReauthService hook = reauth.getIfAvailable();
+        if (hook != null) {
+            service.onConnected(hook::onReconnected);
+        }
+        return service;
     }
 }

@@ -16,4 +16,7 @@ public interface TriagePredictionRepository extends JpaRepository<TriagePredicti
     Optional<TriagePrediction> findFirstByReviewIdOrderByPredictedAtDesc(UUID reviewId);
 
     long countByOrgIdAndClassifierVersion(UUID orgId, String classifierVersion);
+
+    /** Predictions an org has spent since {@code since} — the Self-Pilot daily budget's meter. */
+    long countByOrgIdAndPredictedAtGreaterThanEqual(UUID orgId, java.time.Instant since);
 }

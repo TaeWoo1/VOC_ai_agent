@@ -1,11 +1,30 @@
-# Product Scope v1.8 — Drift Guard
+# Product Scope v1.9 — Drift Guard
 
 SellerOps 제품 범위를 **하나의 합의된 정의로 고정**하기 위한 문서. 목적은 "무엇을 만드는가"보다
 **"무엇을 지금 만들지 않는가"를 못 박는 것**이다. 멀티채널 확장(`docs/multi-channel-connector-roadmap.md`)이
 구체화되면서 범위가 넓어지는 자연스러운 drift를 막는다.
 
-> Status: SCOPE LOCK **v1.8** (planning only). 본 문서는 코드를 바꾸지 않으며, 라이브 접속/브라우저/업로드/
+> Status: SCOPE LOCK **v1.9** (planning only). 본 문서는 코드를 바꾸지 않으며, 라이브 접속/브라우저/업로드/
 > DB 변경을 지시하지 않는다. 범위 변경은 이 문서를 고쳐 합의한 뒤에만 이뤄진다.
+>
+> v1.9 변경 (2026-08-18, 제품 오너 결정 반영): **Self-Pilot Runtime v1.** 정본: `docs/self_pilot_runtime_v1.md`
+> (설계·구현·복구 매트릭스), 승인 계약 §6a (`docs/sellerops_live_approval_contract.md`). 아래는 이전 서술 중 상충
+> 부분을 **명시적으로 대체**한다(삭제 없음).
+> ① **운영자 자기 org의 routine READ는 자동.** 공식 API 수집(NAVER ORDER · Coupang INQUIRY/ORDER · Cafe24
+>   REVIEW/INQUIRY/ORDER)은 기존 스케줄러로 실행되고, CONNECTED 계정의 수집 설정 행은 reconciler가 기본값으로
+>   만든다(운영자가 끈 행은 건드리지 않음). Coupang API READ는 per-run 승인 id 대신 **standing READ grant**
+>   (`SELLEROPS_SELF_PILOT_READ_GRANT_ID`)로 열린다. §7-1 "무인 스케줄 금지"와 §7-9 "라이브 접속 1회성 승인"은
+>   **운영자 자기 org의 official-API READ에 한해** 이 결정으로 대체된다; 브라우저 READ 경로(NAVER 리뷰 import,
+>   Coupang WING walk)는 여전히 **판매자가 앉아서 직접 클릭**하며(에이전트만 상주), 제3자 org·assistant 주도 proof
+>   run은 그대로 §7-9다.
+> ② **bounded 자동 AI triage** — org opt-in(§v1.8 ④ 그대로), tick당·KST 하루당 상한, 예측 행으로 계량. 모델·규칙
+>   순서는 바뀌지 않는다.
+> ③ **auth/session 만료 = RECONNECT_REQUIRED 작업.** 채널 인증 실패는 오류 카운트가 아니라 계정 상태 재연결 필요 +
+>   수집 일시 중지(사유 표시) + AUTH_EXPIRED 알림으로, SellerOps 세션 만료는 `/login?expired=1`로 surface한다.
+>   IA 동결(`product_assembly_ia_v1.md` §8) 안에서만 — 새 화면·새 상태어 없음.
+> ④ **WRITE 경계는 그대로.** §9의 모든 문장은 유효하다. 답변 제출 등 마켓 쓰기는 여전히 fresh single-use
+>   mode-`WRITE` 승인이며, READ grant는 코드상 WRITE 게이트에 전달될 수 없다.
+> ⑤ **capability 표기 불변.** 이 결정은 어떤 채널×타입도 운영 지원(✅)으로 승격하지 않는다(Roadmap §4.1 그대로).
 >
 > v1.8 변경 (2026-08-17, 제품 오너 결정 반영): **제품 조립(product assembly) 단계 전환.** 정본:
 > `docs/product_assembly_ia_v1.md`. 아래는 이전 서술 중 상충 부분을 **명시적으로 대체**한다(삭제 없음).

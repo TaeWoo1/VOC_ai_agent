@@ -68,8 +68,22 @@ public final class CoupangLiveCallGuard {
      * Backstop the live gate before any signed request leaves the process. A no-op for an
      * offline/loopback base URL; for a real host, throws {@link CoupangLiveApprovalRequiredException}
      * unless a non-blank approval id is armed.
+     *
+     * <p>This is the <b>WRITE-strength</b> check (the original single gate): only the per-run live
+     * approval id opens it. It stays the default for any caller that does not say otherwise, so a new
+     * call site is WRITE-gated unless it explicitly declares itself a READ.
      */
     static void ensureLiveCallAllowed(String baseUrl, String liveApprovalId) {
+        ensureLiveWriteAllowed(baseUrl, liveApprovalId);
+    }
+
+    /**
+     * WRITE gate — a marketplace-mutating call (inquiry reply POST). Opens ONLY on the per-run live
+     * approval id ({@code SELLEROPS_CONNECTOR_COUPANG_LIVE_APPROVAL_ID}). The Self-Pilot standing READ
+     * grant is deliberately not a parameter here: there is no way to hand it to this method, so no
+     * configuration can ever make a write ride on a read grant.
+     */
+    static void ensureLiveWriteAllowed(String baseUrl, String liveApprovalId) {
         if (isOfflineHost(baseUrl)) {
             return;
         }
@@ -77,6 +91,28 @@ public final class CoupangLiveCallGuard {
             throw new CoupangLiveApprovalRequiredException(
                     "쿠팡 라이브 API 호출이 승인 없이 시도되었습니다. 운영자 승인이 설정된 런에서만 실행됩니다 "
                     + "(SELLEROPS_CONNECTOR_COUPANG_LIVE_APPROVAL_ID). 자세한 내용: 라이브 승인 계약 문서.");
+        }
+    }
+
+    /**
+     * READ gate — a read-only signed GET (orders, inquiries, credential probes, answered-check). Opens on
+     * EITHER the per-run live approval id OR the Self-Pilot Runtime's <b>standing READ grant</b>
+     * ({@code SELLEROPS_SELF_PILOT_READ_GRANT_ID}; product-owner decision 2026-08-18 — routine READ on the
+     * operator's own org runs without a per-run ceremony, contract §6a). Still fails closed when neither
+     * is armed.
+     */
+    static void ensureLiveReadAllowed(String baseUrl, String liveApprovalId, String standingReadGrantId) {
+        if (isOfflineHost(baseUrl)) {
+            return;
+        }
+        if (standingReadGrantId != null && !standingReadGrantId.isBlank()) {
+            return;
+        }
+        if (liveApprovalId == null || liveApprovalId.isBlank()) {
+            throw new CoupangLiveApprovalRequiredException(
+                    "쿠팡 라이브 API 읽기 호출이 승인 없이 시도되었습니다. 운영자 승인이 설정된 런"
+                    + "(SELLEROPS_CONNECTOR_COUPANG_LIVE_APPROVAL_ID) 또는 셀프 파일럿 읽기 그랜트"
+                    + "(SELLEROPS_SELF_PILOT_READ_GRANT_ID)가 필요합니다. 자세한 내용: 라이브 승인 계약 문서 §6a.");
         }
     }
 }

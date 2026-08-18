@@ -148,6 +148,9 @@ tools/naver-local/.run/
 # Coupang live-proof + WING selector-probe run-identity (never commit)
 tools/coupang-local/.run/
 
+# Self-Pilot Runtime v1 — operator-owned env (org credentials, URLs) + supervisor state (never commit)
+tools/self-pilot/.run/
+
 # Calibration worksheet — real customer review text, generated locally by
 # tools/review-triage-calibration/draw-sample.mjs. Never committed; see that
 # directory README and contracts/review-eval/naver/v2/RUBRIC.md section 5.

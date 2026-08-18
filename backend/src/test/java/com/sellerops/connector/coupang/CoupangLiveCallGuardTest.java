@@ -75,4 +75,44 @@ class CoupangLiveCallGuardTest {
         assertThat(CoupangLiveCallGuard.isOfflineHost("http://LOCALHOST:18090")).isTrue();
         assertThat(CoupangLiveCallGuard.isOfflineHost("https://STUB.TEST")).isTrue();
     }
+
+    // --- Self-Pilot Runtime v1: READ gate accepts the standing read grant; WRITE gate never does ---
+
+    @Test
+    void readGateOpensOnEitherPerRunApprovalOrStandingReadGrant() {
+        assertThatCode(() -> CoupangLiveCallGuard.ensureLiveReadAllowed(REAL, "apr-abc123", ""))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> CoupangLiveCallGuard.ensureLiveReadAllowed(REAL, "", "spr-0123abcd"))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> CoupangLiveCallGuard.ensureLiveReadAllowed(REAL, null, "spr-0123abcd"))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void readGateStillFailsClosedWhenNeitherIsArmed() {
+        assertThatThrownBy(() -> CoupangLiveCallGuard.ensureLiveReadAllowed(REAL, "", ""))
+                .isInstanceOf(CoupangLiveApprovalRequiredException.class);
+        assertThatThrownBy(() -> CoupangLiveCallGuard.ensureLiveReadAllowed(REAL, null, null))
+                .isInstanceOf(CoupangLiveApprovalRequiredException.class);
+        assertThatThrownBy(() -> CoupangLiveCallGuard.ensureLiveReadAllowed(REAL, "  ", "  "))
+                .isInstanceOf(CoupangLiveApprovalRequiredException.class);
+    }
+
+    @Test
+    void writeGateHasNoParameterForTheReadGrantAndRefusesWithoutPerRunApproval() {
+        // The write gate's signature cannot even receive a read grant — the only key is the per-run id.
+        assertThatThrownBy(() -> CoupangLiveCallGuard.ensureLiveWriteAllowed(REAL, ""))
+                .isInstanceOf(CoupangLiveApprovalRequiredException.class);
+        assertThatCode(() -> CoupangLiveCallGuard.ensureLiveWriteAllowed(REAL, "apr-abc123"))
+                .doesNotThrowAnyException();
+        // The legacy single gate IS the write gate.
+        assertThatThrownBy(() -> CoupangLiveCallGuard.ensureLiveCallAllowed(REAL, ""))
+                .isInstanceOf(CoupangLiveApprovalRequiredException.class);
+    }
+
+    @Test
+    void offlineHostsNeedNeitherKeyOnTheReadGate() {
+        assertThatCode(() -> CoupangLiveCallGuard.ensureLiveReadAllowed("http://127.0.0.1:18090", "", ""))
+                .doesNotThrowAnyException();
+    }
 }

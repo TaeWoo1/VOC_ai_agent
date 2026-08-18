@@ -258,6 +258,17 @@ async function main(): Promise<void> {
     const listen = await bridge.listen();
     // Sanitized: the bridge listen result + the opaque runId + channel enum. No URL / value / target.
     console.log(JSON.stringify({ event: "COUPANG_REVIEW_LOCATE_BRIDGE", ...listen, runId, channelCode: WIRE_CHANNEL_CODE }));
+    if (!listen.ok) {
+      // Another agent (the resident self-pilot import agent, or the launchd service) already holds the
+      // bridge port. Hosting nothing while printing a "hosted" line would leave the seller pressing
+      // [쿠팡에서 보기] into a carrier that is not there. Refuse loudly instead (Self-Pilot Runtime v1 audit).
+      log("aw_coupang_review_locate_live_refused", { refusal: "BRIDGE_PORT_HELD" }, "error");
+      console.error(
+        "REFUSED: the bridge port is already held by another agent. Stop it first " +
+          "(tools/self-pilot/agent-supervisor.sh switch coupang-locate) and run this again.",
+      );
+      process.exit(8);
+    }
     log("aw_coupang_review_locate_live_hosted", { runId, channelCode: WIRE_CHANNEL_CODE });
     await waitForShutdown(bridge);
   } finally {

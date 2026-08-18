@@ -86,7 +86,8 @@ Read the canonical documents before product/frontend work:
 0. `docs/product_operating_model.md` — anti-drift orientation: what SellerOps is, who for, the open
    channel set, acquisition posture, user journey. Orientation only; points, owns nothing.
 1. `docs/sellerops_canonical_reference.md` — product identity, strategy, honest state, authority.
-2. `docs/product-scope-v1.md` — product scope contract (**scope lock v1.8**).
+2. `docs/product-scope-v1.md` — product scope contract (**scope lock v1.9**; v1.9 = Self-Pilot Runtime,
+   `docs/self_pilot_runtime_v1.md`).
 3. `docs/product_assembly_ia_v1.md` — **product IA, screen responsibility, visible channel set** (supersedes
    frontend spec §5–§8·§17-A).
 4. `docs/sellerops_frontend_spec.md` — frontend principles (states, seller language, a11y, capability

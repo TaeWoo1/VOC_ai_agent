@@ -135,6 +135,46 @@ http.interceptors.request.use((config) => {
   return config;
 });
 
+/**
+ * Where an expired SellerOps session sends the seller: the login form, told why (`?expired=1`).
+ * Exported so the login page and the tests agree on the one spelling.
+ */
+export const SESSION_EXPIRED_PATH = "/login?expired=1";
+
+/**
+ * In-session expiry of the seller's OWN SellerOps session (the JWT is 12h; a self-pilot day is longer).
+ *
+ * Before this handler a 401 mid-session looked like a broken backend: every `*Strict` read rejected and each
+ * screen printed its own "불러오지 못했습니다" — the same failure the `getMe` fix (2026-07-26) closed for the
+ * boot path but not for the hours after it. Self-Pilot Runtime v1: session expiry is a RECONNECT task, not an
+ * error. A 401 on any authenticated call clears the stale token and sends the seller to the login form with
+ * `?expired=1`, so the form can say "세션이 만료되었습니다" instead of the seller guessing.
+ *
+ * Deliberately narrow: only 401 (never 403 — that is a real authorization answer), only when a token was
+ * present (an unauthenticated probe is not an expiry), never for the login call itself (a wrong password must
+ * stay a form error, not a redirect loop). The redirect uses `location.assign` because the interceptor lives
+ * outside the router; the token is cleared FIRST so `Protected` cannot bounce back in.
+ */
+export function isSessionExpiry(status: number | undefined, url: string | undefined, hadToken: boolean): boolean {
+  if (status !== 401 || !hadToken) return false;
+  return !(url ?? "").includes("/api/auth/login");
+}
+
+http.interceptors.response.use(
+  (response) => response,
+  (error: unknown) => {
+    const status = (error as { response?: { status?: number } } | undefined)?.response?.status;
+    const url = (error as { config?: { url?: string } } | undefined)?.config?.url;
+    if (isSessionExpiry(status, url, getToken() !== null)) {
+      clearToken();
+      if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+        window.location.assign(SESSION_EXPIRED_PATH);
+      }
+    }
+    return Promise.reject(error);
+  },
+);
+
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }

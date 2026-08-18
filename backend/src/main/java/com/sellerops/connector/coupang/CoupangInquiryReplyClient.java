@@ -318,7 +318,9 @@ public class CoupangInquiryReplyClient {
 
     private CoupangHttpClient.Response signedPost(String path, String body,
                                                   String accessKey, String secretKey, String vendorId) {
-        CoupangLiveCallGuard.ensureLiveCallAllowed(baseUrl, liveApprovalId);
+        // WRITE gate, explicitly: a marketplace-mutating POST opens ONLY on the per-run live approval id.
+        // The Self-Pilot standing READ grant is not even reachable from here (Self-Pilot Runtime v1).
+        CoupangLiveCallGuard.ensureLiveWriteAllowed(baseUrl, liveApprovalId);
         pace();
         String authorization = signer.authorization(accessKey, secretKey, "POST", path, "");
         URI uri = URI.create(baseUrl + path);

@@ -75,6 +75,28 @@ describe("import mode gate — closed by default", () => {
   });
 
   /**
+   * Self-Pilot Runtime v1 audit: the list must name EVERY carrier the agent can host, or the import mode wins
+   * over the omitted one in silence. Pinned by flag so a new carrier fails this test until it is listed.
+   */
+  it("names every carrier flag the agent knows, including the live Coupang walk", () => {
+    expect(OTHER_CARRIER_FLAGS).toEqual(
+      expect.arrayContaining([
+        "--dev-action-window-reply",
+        "--dev-action-window-synthetic",
+        "--dev-action-window-naver-fixture",
+        "--dev-action-window-issuance",
+        "--dev-action-window-coupang-issuance",
+        "--dev-action-window-review-locate",
+        "--action-window-coupang-issuance-live",
+      ]),
+    );
+    expect(resolveImportMode([...BOTH, "--action-window-coupang-issuance-live"], {})).toEqual({
+      host: false,
+      reason: "CARRIER_CONFLICT",
+    });
+  });
+
+  /**
    * A conflicting command line reports the conflict even without the approval flag, so an operator is not
    * led one flag at a time toward a mode they cannot have.
    */

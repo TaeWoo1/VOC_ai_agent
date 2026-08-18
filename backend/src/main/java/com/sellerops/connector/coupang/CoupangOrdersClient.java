@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.sellerops.connector.ConnectorAuthException;
 import com.sellerops.connector.DataType;
 import com.sellerops.connector.FetchPage;
 import com.sellerops.ingest.canonical.CanonicalOrder;
@@ -114,15 +115,27 @@ public class CoupangOrdersClient {
      * base URL never consults it. See {@code docs/sellerops_live_approval_contract.md}.
      */
     private final String liveApprovalId;
+    /**
+     * Self-Pilot standing READ grant ({@code SELLEROPS_SELF_PILOT_READ_GRANT_ID}) — opens the READ gate
+     * only. Every call this client makes is a read-only signed GET, so this is the one grant it needs
+     * in routine operation; blank ⇒ the per-run live approval id is required as before.
+     */
+    private final String standingReadGrantId;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public CoupangOrdersClient(CoupangHttpClient http, CoupangSigner signer, Clock clock, String baseUrl,
                                String liveApprovalId) {
+        this(http, signer, clock, baseUrl, liveApprovalId, "");
+    }
+
+    public CoupangOrdersClient(CoupangHttpClient http, CoupangSigner signer, Clock clock, String baseUrl,
+                               String liveApprovalId, String standingReadGrantId) {
         this.http = http;
         this.signer = signer;
         this.clock = clock;
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
         this.liveApprovalId = liveApprovalId;
+        this.standingReadGrantId = standingReadGrantId == null ? "" : standingReadGrantId;
     }
 
     // --- order collection -------------------------------------------------
@@ -175,6 +188,11 @@ public class CoupangOrdersClient {
         CoupangHttpClient.Response response = signedGet(path, query, accessKey, secretKey, vendorId);
         if (response.statusCode() == 429) {
             throw CoupangRateLimitedException.fromResponse(response);
+        }
+        if (response.statusCode() == 401) {
+            // The gateway returns a fixed 401 for a bad HMAC / revoked key — an authentication verdict,
+            // not a transient failure. Typed so the runtime can surface RECONNECT_REQUIRED (Self-Pilot v1).
+            throw new ConnectorAuthException("쿠팡", ConnectorAuthException.Cause.CREDENTIAL_REJECTED);
         }
         if (response.statusCode() != 200) {
             throw new IllegalStateException(
@@ -456,8 +474,9 @@ public class CoupangOrdersClient {
                                                  String accessKey, String secretKey, String vendorId) {
         // Live-run approval interlock — the single backend choke point for EVERY Coupang request. A real
         // gateway host without an armed approval id fails closed here, before any signing or socket
-        // (docs/sellerops_live_approval_contract.md). Offline/loopback base URLs are exempt.
-        CoupangLiveCallGuard.ensureLiveCallAllowed(baseUrl, liveApprovalId);
+        // (docs/sellerops_live_approval_contract.md). Offline/loopback base URLs are exempt. Every call
+        // through here is a read-only GET, so it is the READ gate: per-run approval OR standing read grant.
+        CoupangLiveCallGuard.ensureLiveReadAllowed(baseUrl, liveApprovalId, standingReadGrantId);
         // The signer stamps a single signed-date and signs signedDate+method+path+query; the SAME
         // query string is what we send, so the signature always matches the request byte-for-byte.
         String authorization = signer.authorization(accessKey, secretKey, "GET", path, query);
