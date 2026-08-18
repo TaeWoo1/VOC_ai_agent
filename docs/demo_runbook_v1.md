@@ -31,6 +31,27 @@ collection → routine operation, done by the seller themself) changes only thes
   locate and reply *preparation* are read-only; posting a reply or any other seller-center submission needs
   its own mode-`WRITE` approval (`docs/sellerops_live_approval_contract.md`).
 
+### 0.1 Three-channel order and the command per channel (2026-08-18)
+
+Order: **NAVER → Coupang → Cafe24**, one channel completed (connect → first collection → 홈/리뷰/문의/주문
+checked) before the next, so a failure is attributable to one channel. Backend prerequisites (names only;
+the demo backend has none of these): `SELLEROPS_VAULT_MASTER_KEY` + `SELLEROPS_VAULT_KEY_ID`,
+`SELLEROPS_CONNECTOR_NAVER_ENABLED`, `SELLEROPS_CONNECTOR_COUPANG_ENABLED` (+ per-run
+`SELLEROPS_CONNECTOR_COUPANG_LIVE_APPROVAL_ID` from `tools/coupang-local/bootstrap.sh`),
+`SELLEROPS_CONNECTOR_CAFE24_ENABLED` + `_CLIENT_ID` / `_CLIENT_SECRET` / `_API_VERSION` / `_REDIRECT_URI` /
+`_RESULT_URL`; `SELLEROPS_COLLECT_SCHEDULER_ENABLED=false` (every live proof so far). Every live proof to
+date ran on a disposable backend/DB — a long-lived self-pilot on the persistent DB is a **new** posture.
+
+| Channel | Connect (seller, in the browser) | First collection | Command / trigger |
+|---|---|---|---|
+| NAVER | `/connect/naver` (Commerce API key form; ORDER only) or 리뷰: nothing to enter — the browser session is the connection | REVIEW = agent import carrier (seller downloads each monthly export in the agent's Chrome); ORDER = `/sync` button; INQUIRY = 파일 업로드 only | `cd collector && npx tsx src/cli/local-agent.ts --action-window-initial-review-import --i-understand-this-opens-live-naver` with `SELLEROPS_BASE_URL/_EMAIL/_PASSWORD` (self-pilot org) + `NAVER_REVIEW_URL`; trigger from `/connect/review-history` (도우미 연결하기 → 기간 선택 → 구간) |
+| Coupang | `/connect/coupang` (WING access/secret key + vendor id; guided issuance walk optional) | INQUIRY (official `onlineInquiries`) + ORDER = `/sync` on `/connect/channels/:accountId`; REVIEW = seated WING walk (no API, no FE trigger); `[쿠팡에서 보기]` = locate carrier | `SELLEROPS_REVIEW_ACCOUNT_SLOT=<24hex> npx tsx src/cli/acquire-coupang-reviews.ts -- --i-understand-this-opens-live-coupang-wing` (via `tools/coupang-local/wing-review-acquire-bootstrap.sh` + preflight); locate: `npx tsx src/cli/run-coupang-review-locate-live.ts -- --i-understand-this-opens-live-coupang-wing` |
+| Cafe24 | `/connect/cafe24` (mall id → OAuth consent, read-only scopes) | REVIEW (board 4) + INQUIRY (board 6) + ORDER = backend pull, no agent | `/connect/channels/:accountId` → 기간 backfill panel (`POST /backfill`) or `/sync` |
+
+Recording targets while it runs: auth/OAuth/session expiry + recovery, agent/bridge disconnect/reconnect,
+incremental sync / duplicate ingest, count drift, stale UI/state, cross-channel UX mismatch,
+error/retry/reconnect UX, missing feedback/action events. Marketplace WRITE stays forbidden.
+
 ## 1. Start (two terminals, one browser)
 
 ```bash
