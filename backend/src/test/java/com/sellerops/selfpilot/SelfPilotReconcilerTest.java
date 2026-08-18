@@ -108,13 +108,24 @@ class SelfPilotReconcilerTest {
         return a;
     }
 
-    private SelfPilotProperties props(boolean enabled, boolean triage) {
-        return new SelfPilotProperties(enabled, enabled ? org.toString() : "", "", 60, triage, 20, 50);
+    private static final String LOCAL_DB = "jdbc:postgresql://localhost:5432/sellerops";
+
+    /** ALLOW_LIST properties, the default posture. */
+    private static SelfPilotProperties allowList(boolean enabled, String orgIds, String grant, int interval,
+                                                 boolean triage, int perTick, int perDay) {
+        return new SelfPilotProperties(enabled, "ALLOW_LIST", orgIds, grant, interval, triage, perTick, perDay, LOCAL_DB);
     }
+
+    private SelfPilotProperties props(boolean enabled, boolean triage) {
+        return allowList(enabled, enabled ? org.toString() : "", "", 60, triage, 20, 50);
+    }
+
+    private final com.sellerops.organization.OrganizationRepository organizations =
+            mock(com.sellerops.organization.OrganizationRepository.class);
 
     private SelfPilotReconciler reconciler(SelfPilotProperties props, PullConnector... connectors) {
         return new SelfPilotReconciler(props, accounts, channels, new ConnectorRegistry(List.of(connectors)),
-                schedules, pilot, predictions);
+                schedules, pilot, predictions, organizations);
     }
 
     @Test
@@ -212,7 +223,7 @@ class SelfPilotReconcilerTest {
         assertThat(reconciler(props(false, true), dedicated("CAFE24", DataType.REVIEW)).tick(Instant.now()))
                 .isEqualTo(new SelfPilotReconciler.TickReport(0, 0, 0));
         // enabled but no org listed → fail closed
-        SelfPilotProperties noOrg = new SelfPilotProperties(true, "", "", 60, true, 20, 50);
+        SelfPilotProperties noOrg = allowList(true, "", "", 60, true, 20, 50);
         assertThat(reconciler(noOrg, dedicated("CAFE24", DataType.REVIEW)).tick(Instant.now()))
                 .isEqualTo(new SelfPilotReconciler.TickReport(0, 0, 0));
         verify(schedules, never()).save(any());
@@ -292,22 +303,66 @@ class SelfPilotReconcilerTest {
 
     @Test
     void readGrantMustHaveTheSprShapeOrTheBackendRefusesToStart() {
-        assertThatThrownBy(() -> new SelfPilotProperties(true, "", "apr-abc123", 60, false, 20, 200))
+        assertThatThrownBy(() -> allowList(true, "", "apr-abc123", 60, false, 20, 200))
                 .isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> new SelfPilotProperties(true, "", "spr-xyz", 60, false, 20, 200))
+        assertThatThrownBy(() -> allowList(true, "", "spr-xyz", 60, false, 20, 200))
                 .isInstanceOf(IllegalStateException.class);
-        SelfPilotProperties ok = new SelfPilotProperties(true, "", " spr-0123456789abcdef ", 5, false, 0, 0);
+        SelfPilotProperties ok = allowList(true, "", " spr-0123456789abcdef ", 5, false, 0, 0);
         assertThat(ok.readGrantId()).isEqualTo("spr-0123456789abcdef");
         assertThat(ok.defaultIntervalMinutes()).isEqualTo(15); // floor
         assertThat(ok.triagePerTick()).isEqualTo(20);
         assertThat(ok.triagePerDay()).isEqualTo(200);
-        assertThat(new SelfPilotProperties(false, "", "", 60, false, 20, 200).readGrantId()).isEmpty();
+        assertThat(allowList(false, "", "", 60, false, 20, 200).readGrantId()).isEmpty();
     }
 
     @Test
     void triageAutoRequiresTheMasterSwitch() {
-        assertThat(new SelfPilotProperties(false, "", "", 60, true, 20, 200).triageAutoEnabled()).isFalse();
-        assertThat(new SelfPilotProperties(true, "", "", 60, true, 20, 200).triageAutoEnabled()).isTrue();
+        assertThat(allowList(false, "", "", 60, true, 20, 200).triageAutoEnabled()).isFalse();
+        assertThat(allowList(true, "", "", 60, true, 20, 200).triageAutoEnabled()).isTrue();
+    }
+
+    // ── LOCAL_SINGLE_USER scope (browser-only new user: no org UUID env) ──
+
+    private static SelfPilotProperties localSingleUser(String db) {
+        return new SelfPilotProperties(true, "LOCAL_SINGLE_USER", "", "", 60, false, 20, 50, db);
+    }
+
+    @Test
+    void localSingleUserActsForEveryOrgInTheDatabaseWithoutAnAllowList() {
+        com.sellerops.organization.Organization o1 = new com.sellerops.organization.Organization();
+        o1.setId(org);
+        com.sellerops.organization.Organization o2 = new com.sellerops.organization.Organization();
+        o2.setId(UUID.randomUUID());
+        when(organizations.findAll()).thenReturn(List.of(o1, o2));
+        when(accounts.findAllByOrgId(org)).thenReturn(List.of(account(cafe24, ChannelStatus.CONNECTED, false)));
+        when(accounts.findAllByOrgId(o2.getId())).thenReturn(List.of(account(coupang, ChannelStatus.CONNECTED, false)));
+        SelfPilotReconciler r = reconciler(localSingleUser(LOCAL_DB),
+                dedicated("CAFE24", DataType.REVIEW), dedicated("COUPANG", DataType.INQUIRY));
+
+        assertThat(r.targetOrgIds()).containsExactlyInAnyOrder(org, o2.getId());
+        assertThat(r.tick(Instant.now()).schedulesCreated()).isEqualTo(2);
+        assertThat(localSingleUser(LOCAL_DB).isEnabledFor(UUID.randomUUID())).isTrue();
+    }
+
+    @Test
+    void localSingleUserRefusesToBootAgainstANonLoopbackDatabase() {
+        assertThatThrownBy(() -> localSingleUser("jdbc:postgresql://db.internal.example:5432/sellerops"))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> localSingleUser("")).isInstanceOf(IllegalStateException.class);
+        // Loopback spellings and in-memory H2 are local by construction.
+        for (String ok : new String[] {LOCAL_DB, "jdbc:postgresql://127.0.0.1/sellerops",
+                "jdbc:postgresql://[::1]:5432/x", "jdbc:h2:mem:testdb"}) {
+            assertThat(SelfPilotProperties.isLoopbackDatabase(ok)).as(ok).isTrue();
+        }
+        assertThat(SelfPilotProperties.isLoopbackDatabase("jdbc:postgresql://localhost.evil.com/x")).isFalse();
+        // The fence only bites when the scope is actually used: ALLOW_LIST against a remote DB is fine, and a
+        // disabled runtime never refuses to boot.
+        assertThat(new SelfPilotProperties(true, "ALLOW_LIST", "", "", 60, false, 20, 50,
+                "jdbc:postgresql://db.internal.example:5432/sellerops").scope()).isEqualTo(SelfPilotProperties.Scope.ALLOW_LIST);
+        assertThat(new SelfPilotProperties(false, "LOCAL_SINGLE_USER", "", "", 60, false, 20, 50,
+                "jdbc:postgresql://db.internal.example:5432/sellerops").actsForAllOrgs()).isFalse();
+        assertThatThrownBy(() -> new SelfPilotProperties(true, "EVERYONE", "", "", 60, false, 20, 50, LOCAL_DB))
+                .isInstanceOf(IllegalStateException.class);
     }
 
     @SuppressWarnings("unused")

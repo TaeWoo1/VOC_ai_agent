@@ -36,7 +36,24 @@ public class SelfPilotProperties {
     static final Pattern READ_GRANT_SHAPE = Pattern.compile("^spr-[0-9a-f]{8,32}$");
     static final int MIN_INTERVAL_MINUTES = 15;
 
+    /**
+     * Which organisations the runtime acts for.
+     *
+     * <ul>
+     *   <li>{@code ALLOW_LIST} (default) — only the UUIDs in {@code SELLEROPS_SELF_PILOT_ORG_IDS}. The
+     *       multi-tenant-safe posture: an org is never picked up unless the deployer named it.</li>
+     *   <li>{@code LOCAL_SINGLE_USER} — <b>every</b> org in this backend's own database. The one-seller local
+     *       deployment (product-owner decision 2026-08-18): a person who signs up in the browser must not
+     *       need anyone to copy an org UUID into an env file before routine collection starts. Fenced to a
+     *       loopback database ({@code SPRING_DATASOURCE_URL} host localhost / 127.0.0.1 / ::1) — on any other
+     *       host the backend refuses to start with this scope, so it can never be switched on against a
+     *       shared database by accident.</li>
+     * </ul>
+     */
+    public enum Scope { ALLOW_LIST, LOCAL_SINGLE_USER }
+
     private final boolean enabled;
+    private final Scope scope;
     private final List<UUID> orgIds;
     private final String readGrantId;
     private final int defaultIntervalMinutes;
@@ -46,13 +63,21 @@ public class SelfPilotProperties {
 
     public SelfPilotProperties(
             @Value("${sellerops.self-pilot.enabled:false}") boolean enabled,
+            @Value("${sellerops.self-pilot.scope:ALLOW_LIST}") String scope,
             @Value("${sellerops.self-pilot.org-ids:}") String orgIds,
             @Value("${sellerops.self-pilot.read-grant-id:}") String readGrantId,
             @Value("${sellerops.self-pilot.default-interval-minutes:60}") int defaultIntervalMinutes,
             @Value("${sellerops.self-pilot.triage.auto-enabled:false}") boolean triageAutoEnabled,
             @Value("${sellerops.self-pilot.triage.per-tick:20}") int triagePerTick,
-            @Value("${sellerops.self-pilot.triage.per-day:200}") int triagePerDay) {
+            @Value("${sellerops.self-pilot.triage.per-day:200}") int triagePerDay,
+            @Value("${spring.datasource.url:}") String datasourceUrl) {
         this.enabled = enabled;
+        this.scope = parseScope(scope);
+        if (enabled && this.scope == Scope.LOCAL_SINGLE_USER && !isLoopbackDatabase(datasourceUrl)) {
+            throw new IllegalStateException(
+                    "SELLEROPS_SELF_PILOT_SCOPE=LOCAL_SINGLE_USER is allowed only against a loopback database "
+                    + "(SPRING_DATASOURCE_URL host localhost/127.0.0.1); refusing to start.");
+        }
         this.orgIds = parseIds(orgIds);
         String grant = readGrantId == null ? "" : readGrantId.trim();
         if (!grant.isEmpty() && !READ_GRANT_SHAPE.matcher(grant).matches()) {
@@ -75,13 +100,63 @@ public class SelfPilotProperties {
                 .map(UUID::fromString).toList();
     }
 
+    private static Scope parseScope(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return Scope.ALLOW_LIST;
+        }
+        try {
+            return Scope.valueOf(raw.trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException(
+                    "SELLEROPS_SELF_PILOT_SCOPE must be ALLOW_LIST or LOCAL_SINGLE_USER; refusing to start.");
+        }
+    }
+
+    /** True for a JDBC URL whose host is the local loopback (the only place LOCAL_SINGLE_USER may run). */
+    static boolean isLoopbackDatabase(String jdbcUrl) {
+        if (jdbcUrl == null || jdbcUrl.isBlank()) {
+            return false;
+        }
+        String url = jdbcUrl.trim();
+        // jdbc:postgresql://host[:port]/db  |  jdbc:h2:mem:... (in-memory: local by construction)
+        if (url.startsWith("jdbc:h2:mem:") || url.startsWith("jdbc:h2:file:")) {
+            return true;
+        }
+        int schemeEnd = url.indexOf("://");
+        if (schemeEnd < 0) {
+            return false;
+        }
+        String rest = url.substring(schemeEnd + 3);
+        int slash = rest.indexOf('/');
+        String hostPort = slash < 0 ? rest : rest.substring(0, slash);
+        String host = hostPort.startsWith("[") ? hostPort.substring(1, Math.max(1, hostPort.indexOf(']')))
+                : (hostPort.contains(":") ? hostPort.substring(0, hostPort.indexOf(':')) : hostPort);
+        host = host.toLowerCase(java.util.Locale.ROOT);
+        return host.equals("localhost") || host.equals("127.0.0.1") || host.equals("::1");
+    }
+
     public boolean enabled() {
         return enabled;
     }
 
-    /** True when the runtime acts for this org: master switch on AND the org is listed. */
+    public Scope scope() {
+        return scope;
+    }
+
+    /**
+     * True when the runtime acts for this org: master switch on AND (LOCAL_SINGLE_USER, or the org is on
+     * the allow-list).
+     */
     public boolean isEnabledFor(UUID orgId) {
-        return enabled && orgId != null && orgIds.contains(orgId);
+        if (!enabled || orgId == null) {
+            return false;
+        }
+        return scope == Scope.LOCAL_SINGLE_USER || orgIds.contains(orgId);
+    }
+
+    /** True when the runtime acts for every org in this database (LOCAL_SINGLE_USER). */
+    public boolean actsForAllOrgs() {
+        return enabled && scope == Scope.LOCAL_SINGLE_USER;
     }
 
     public List<UUID> orgIds() {

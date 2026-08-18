@@ -181,6 +181,8 @@ row + 어휘 한 줄이 목표이며, 이를 깨는 설계는 이 문서를 먼�
 
 - **1차 메뉴와 route**: 운영 = 홈 `/` · 리뷰 `/reviews[/:accountId]` · 문의 `/inquiries[/:itemRef]` · 주문 `/orders`;
   연결·설정 = 채널 연결 `/connect(…)` · 설정 `/settings`. off-menu route는 §3의 목록 그대로. 새 1차 메뉴 없음.
+  (2026-08-18 Self-Pilot 첫 실행 UX: 인증 surface에 `/signup` 추가 — `/login`과 같은 public shell의 계정 화면이며
+  1차 메뉴가 아니다. 가입 → `/connect` → 첫 수집 → 홈. `docs/self_pilot_runtime_v1.md` §8.)
 - **화면 책임(§4)과 세 계약(§4a Today Inbox · §4b 채널 연결 hub · §4c 리뷰 답변 준비)**.
 - **노출 채널 = NAVER / Coupang / Cafe24** (`ProductChannels.java`, `lib/productChannels.ts`), 표시 순서도 그 순서.
 - **새 채널의 기본값**: connector + capability proof(§4.1 승격) **뒤에** 기존 surface에 끼운다 —
