@@ -11,6 +11,26 @@
 > **Safety fences apply unchanged** (`CLAUDE.md`): no live marketplace run without a fresh single-use
 > approval; no automatic export/download/submit; the seller performs every platform action.
 
+## 0. Self-pilot mode (2026-08-18 — the product owner runs the product on their own seller accounts)
+
+The demo procedure below assumes the seeded demo org. A **self-pilot** (initial connection → first
+collection → routine operation, done by the seller themself) changes only these points:
+
+- **Clean org.** Do NOT log in as `demo@sellerops.ai`. Create a fresh org once with `POST /api/auth/signup`
+  (fields: `email`, `password` ≥ 6 chars, `name`, `orgName`) and log in with it at `/login` (replace the
+  pre-filled demo credentials). Nothing from the demo/fixture data is visible from that org.
+- **Real channels only.** Connect only the channels the seller actually uses, from `/connect`; the visible
+  set stays NAVER / Coupang / Cafe24 and no seller account is seeded.
+- **Agent required.** 첫 수집 (NAVER review import), guided reply and `[쿠팡에서 보기]` need the local
+  agent (`collector`) paired over the bridge (`npm run dev:bridge` on the FE, agent on `47615`). Start the
+  agent with `SELLEROPS_EMAIL/SELLEROPS_PASSWORD` of the **self-pilot org** — its defaults are the demo
+  account, and an agent in another org fails three steps later (`naver-import-cta-live-runbook.md` trap 6).
+  One agent hosts one carrier; the import carrier is
+  `--action-window-initial-review-import --i-understand-this-opens-live-naver`.
+- **Marketplace WRITE is forbidden until the product owner's explicit in-turn approval.** Import,
+  locate and reply *preparation* are read-only; posting a reply or any other seller-center submission needs
+  its own mode-`WRITE` approval (`docs/sellerops_live_approval_contract.md`).
+
 ## 1. Start (two terminals, one browser)
 
 ```bash
