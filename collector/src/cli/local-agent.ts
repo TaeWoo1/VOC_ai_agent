@@ -1536,16 +1536,17 @@ if (invokedPath !== undefined && import.meta.url === pathToFileURL(invokedPath).
   // Self-Pilot Runtime v1: a resident agent must FAIL LOUD, not hang. Before this, an unhandled rejection
   // inside a driver / WS handler / Playwright call either killed the process with a bare stack trace or (a
   // rejected promise nobody awaited) left a half-alive agent whose bridge still answered /health. Now both
-  // paths log one sanitized line (error class + message, never a URL/selector/value) and exit non-zero, so a
-  // supervisor (tools/self-pilot/agent-supervisor.sh, or the launchd KeepAlive) restarts it. Exit code 9 is
-  // reserved for "crashed, restart me" so it never collides with the boot refusals (2..7).
+  // paths log one sanitized line — the error CLASS and the message LENGTH only, never the message itself: a
+  // Playwright/HTTP message can carry a raw URL, a selector, or page text (contract §1.7) — and exit non-zero,
+  // so a supervisor (tools/self-pilot/agent-supervisor.sh, or the launchd KeepAlive) restarts it. Exit code 9
+  // is reserved for "crashed, restart me" so it never collides with the boot refusals (2..8).
   process.on("unhandledRejection", (reason) => {
     const err = reason instanceof Error ? reason : new Error(String(reason));
-    log("agent_unhandled_rejection", { error: err.constructor.name, message: err.message.slice(0, 200) }, "error");
+    log("agent_unhandled_rejection", { error: err.constructor.name, messageLength: err.message.length }, "error");
     process.exit(9);
   });
   process.on("uncaughtException", (err) => {
-    log("agent_uncaught_exception", { error: err.constructor.name, message: err.message.slice(0, 200) }, "error");
+    log("agent_uncaught_exception", { error: err.constructor.name, messageLength: err.message.length }, "error");
     process.exit(9);
   });
   void main();

@@ -157,6 +157,13 @@ can perform it.
   the constraint. Coupang review acquisition stays a per-run bootstrapped CLI.
 - Coupang locate/acquire CLIs hold one JWT for the process; a 401 mid-run still degrades to "no target".
 - The reconciler is single-instance in spirit (schedules are, too); multi-instance safety relies on the
-  existing `SKIP LOCKED` claim and the sync gate.
+  existing `SKIP LOCKED` claim and the sync gate. A concurrent duplicate schedule insert is skipped (unique
+  index holds); the per-day triage meter is read-then-spend, so two instances ticking together could exceed
+  the day by up to one tick's worth — single-instance is exact.
+- The standing READ grant is **process-scoped**: it arms the backend process only while
+  `SELLEROPS_SELF_PILOT_ENABLED=true` (a leftover grant with the runtime off arms nothing — pinned by test),
+  but within an enabled process it opens Coupang READs for any org's account on that backend;
+  `SELLEROPS_SELF_PILOT_ORG_IDS` scopes what the reconciler/triage act on, not the gate. Correct for the
+  one-operator local backend this runtime is for; a shared deployment would need an org-aware gate.
 - Capability wording is unchanged: nothing here promotes any channel×type to 운영 지원 (roadmap §4.1); the
   self-pilot is the operator's own use, not a support claim.

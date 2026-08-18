@@ -23,6 +23,7 @@ import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
 /**
@@ -150,8 +151,15 @@ public class SelfPilotReconciler {
                 fresh.setEnabled(true);
                 fresh.setPausedReason(null);
                 fresh.setNextRunAt(now);
-                schedules.save(fresh);
-                created++;
+                try {
+                    schedules.save(fresh);
+                    created++;
+                } catch (DataIntegrityViolationException raced) {
+                    // Another tick/instance (or an operator PUT) inserted the same (account, type) between our
+                    // check and our save — the unique index held, so the row exists exactly once. Not ours to
+                    // touch; keep reconciling the rest of the org instead of abandoning the tick.
+                    log.debug("Schedule for account {} {} already created concurrently", account.getId(), type);
+                }
             }
         }
         return created;

@@ -185,6 +185,28 @@ class SelfPilotReconcilerTest {
     }
 
     @Test
+    void aConcurrentInsertOfTheSameRowIsSkippedAndTheTickContinues() {
+        // Independent review: two ticks/instances can both pass the isPresent() check; the unique index makes
+        // the loser throw. That must skip ONE row, not abandon the rest of the org for the tick.
+        SellerAccount acc = account(cafe24, ChannelStatus.CONNECTED, false);
+        when(accounts.findAllByOrgId(org)).thenReturn(List.of(acc));
+        when(schedules.save(any())).thenAnswer(inv -> {
+            SyncSchedule s = inv.getArgument(0);
+            if ("REVIEW".equals(s.getDataType())) {
+                throw new org.springframework.dao.DataIntegrityViolationException("uq_sync_schedules_account_data_type");
+            }
+            return s;
+        });
+        SelfPilotReconciler r = reconciler(props(true, false),
+                dedicated("CAFE24", DataType.REVIEW, DataType.INQUIRY, DataType.ORDER_SUMMARY));
+
+        SelfPilotReconciler.TickReport report = r.tick(Instant.now());
+
+        assertThat(report.schedulesCreated()).isEqualTo(2); // INQUIRY + ORDER_SUMMARY still created
+        verify(schedules, times(3)).save(any());
+    }
+
+    @Test
     void disabledOrUnlistedOrgDoesNothingAtAll() {
         when(accounts.findAllByOrgId(any())).thenReturn(List.of(account(cafe24, ChannelStatus.CONNECTED, false)));
         assertThat(reconciler(props(false, true), dedicated("CAFE24", DataType.REVIEW)).tick(Instant.now()))

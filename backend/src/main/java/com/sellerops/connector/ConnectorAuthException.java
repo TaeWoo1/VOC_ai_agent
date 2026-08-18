@@ -14,8 +14,14 @@ package com.sellerops.connector;
  *
  * <p>The message is sanitized (channel label + cause class only). No credential material, response
  * body, or account identifier is ever carried here.
+ *
+ * <p>Extends {@link IllegalStateException} on purpose: every connector already reports "credential or
+ * transport problem" as {@code IllegalStateException}, and the verify/probe paths catch exactly that to
+ * answer with a verdict instead of a 500 (e.g. {@code NaverApiConnector.orderAccessOutcome}). A sibling
+ * type would have slipped past those catches (independent review, 2026-08-18); a subtype keeps them
+ * intact while the collection runtime can still recognise the auth case by {@code instanceof}.
  */
-public class ConnectorAuthException extends RuntimeException {
+public class ConnectorAuthException extends IllegalStateException {
 
     /** Why the provider refused — coarse, closed set; safe to log and to show. */
     public enum Cause {
