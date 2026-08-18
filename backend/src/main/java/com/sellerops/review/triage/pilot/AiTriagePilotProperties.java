@@ -23,6 +23,7 @@ import org.springframework.stereotype.Component;
 public class AiTriagePilotProperties {
 
     private final boolean enabled;
+    private final boolean allOrgs;
     private final List<UUID> enabledOrgIds;
     private final String vendor;
     private final String model;
@@ -43,7 +44,11 @@ public class AiTriagePilotProperties {
             @Value("${sellerops.triage.ai-pilot.reasoning-effort:low}") String reasoningEffort,
             @Value("${sellerops.triage.ai-pilot.max-per-run:100}") int maxPerRun) {
         this.enabled = enabled;
-        this.enabledOrgIds = parseIds(enabledOrgIds);
+        // "*" = every org in this backend — the local single-user deployment (Self-Pilot Runtime v1), where a
+        // person who signed up in the browser must not need their org UUID copied into an env file. Any other
+        // value stays the explicit allow-list (the multi-tenant-safe posture).
+        this.allOrgs = enabledOrgIds != null && enabledOrgIds.trim().equals("*");
+        this.enabledOrgIds = allOrgs ? List.of() : parseIds(enabledOrgIds);
         this.vendor = vendor;
         this.model = model;
         this.apiKey = apiKey;
@@ -60,9 +65,10 @@ public class AiTriagePilotProperties {
         return Arrays.stream(csv.split(",")).map(String::trim).filter(s -> !s.isEmpty()).map(UUID::fromString).toList();
     }
 
-    /** True only when the master switch is on AND the org is listed AND a key is present. */
+    /** True only when the master switch is on AND the org is listed (or the list is {@code *}) AND a key is present. */
     public boolean isEnabledFor(UUID orgId) {
-        return enabled && apiKey != null && !apiKey.isBlank() && orgId != null && enabledOrgIds.contains(orgId);
+        return enabled && apiKey != null && !apiKey.isBlank() && orgId != null
+                && (allOrgs || enabledOrgIds.contains(orgId));
     }
 
     public boolean enabled() {

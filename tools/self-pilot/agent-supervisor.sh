@@ -23,9 +23,13 @@
 #   agent-supervisor.sh switch <naver-import|coupang-locate>        # stop + start, same env
 #   agent-supervisor.sh logs                                         # tail the supervisor log
 #
-# Env: read from tools/self-pilot/.run/self-pilot.env (gitignored; NAMES in README.md — never printed here).
-#      Required for every carrier: SELLEROPS_BASE_URL SELLEROPS_EMAIL SELLEROPS_PASSWORD (the self-pilot org).
-#      naver-import: NAVER_REVIEW_URL.   coupang-locate: COUPANG_WING_URL (the walk ids are minted per start).
+# Env: tools/self-pilot/.run/self-pilot.env (gitignored, 0600; NAMES in README.md — never printed here).
+#      First `start` with no env file asks for the SellerOps login + NAVER review URL on the terminal and
+#      writes the file (no file editing by the seller). Required for every carrier: SELLEROPS_BASE_URL
+#      SELLEROPS_EMAIL SELLEROPS_PASSWORD. naver-import: NAVER_REVIEW_URL. coupang-locate: COUPANG_WING_URL.
+# Product gap (recorded, docs/self_pilot_runtime_v1.md §7): the seller still chooses the carrier here
+#      (`switch coupang-locate` for [쿠팡에서 보기]); the target is one resident helper that hosts every
+#      READ carrier and takes work only from the SellerOps UI.
 #
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -46,11 +50,38 @@ log() { # one sanitized line: ts level event k=v… — no URL, no credential, n
   printf '%s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "${*:2}" | tee -a "$LOG_FILE" >&2
 }
 
-require_env_file() {
-  [ -f "$ENV_FILE" ] || {
-    echo "FAIL-CLOSED: no env at $ENV_FILE — copy tools/self-pilot/self-pilot.env.example there and fill it (values are yours; never commit)." >&2
+# First run: no env yet → sign the helper in interactively (like a desktop app's first launch) instead of
+# asking the seller to edit a file. Values go to the 0600 env file; the password is read without echo and
+# never printed. Non-interactive (no TTY) still fails closed with the copy-the-example instruction.
+first_run_sign_in() {
+  if [ ! -t 0 ]; then
+    echo "FAIL-CLOSED: no env at $ENV_FILE and no terminal to ask — copy tools/self-pilot/self-pilot.env.example there and fill it (values are yours; never commit)." >&2
     exit 2
-  }
+  fi
+  echo "SellerOps 도우미 첫 실행 — SellerOps 계정으로 도우미를 로그인합니다 (한 번만 묻습니다)."
+  local email pw url base app
+  read -r -p "  SellerOps 이메일: " email
+  read -r -s -p "  SellerOps 비밀번호 (입력이 보이지 않습니다): " pw; echo
+  read -r -p "  스마트스토어센터 리뷰 페이지 URL (NAVER 리뷰를 쓰지 않으면 비워두기): " url
+  base="${SELLEROPS_BASE_URL:-http://127.0.0.1:8080}"
+  app="${SELLEROPS_APP_URL:-http://localhost:5173}"
+  [ -n "$email" ] && [ -n "$pw" ] || { echo "REFUSED: 이메일/비밀번호가 비어 있습니다." >&2; exit 2; }
+  umask 077
+  cat > "$ENV_FILE" <<ENV
+# Self-Pilot helper env — written by agent-supervisor.sh first run. 0600, gitignored, never printed.
+SELLEROPS_BASE_URL=$base
+SELLEROPS_APP_URL=$app
+SELLEROPS_EMAIL=$email
+SELLEROPS_PASSWORD=$pw
+NAVER_REVIEW_URL=$url
+COUPANG_WING_URL=
+ENV
+  chmod 600 "$ENV_FILE"
+  echo "  저장했습니다 → $ENV_FILE (비밀번호를 바꾸면 이 파일을 지우고 다시 start 하세요)."
+}
+
+require_env_file() {
+  [ -f "$ENV_FILE" ] || first_run_sign_in
   # shellcheck disable=SC1090
   set -a; . "$ENV_FILE"; set +a
   for name in SELLEROPS_BASE_URL SELLEROPS_EMAIL SELLEROPS_PASSWORD; do

@@ -83,6 +83,27 @@ approval consequence `sellerops_live_approval_contract.md` §6a. What it changes
   the Coupang review acquisition walk (`wing-review-acquire-bootstrap.sh` + CLI — not schedulable), and
   every marketplace WRITE (unchanged: explicit mode-WRITE approval).
 
+### 0.3 Browser-only new user (2026-08-18) — the seller's path, and the deployer's one-time prep
+
+`docs/self_pilot_runtime_v1.md` §8. Two roles, deliberately separated:
+
+**Deployer, once, before the service starts** (backend `.env.local`, names only): everything in §0.2's
+backend list **plus** `SELLEROPS_SELF_PILOT_SCOPE=LOCAL_SINGLE_USER` (instead of `SELLEROPS_SELF_PILOT_ORG_IDS`)
+and, if AI triage is wanted, `SELLEROPS_AI_TRIAGE_PILOT_ORG_IDS=*`. Start backend (`bootRun`) and frontend
+(`npm run dev:bridge`). Nothing here is ever touched again for a new sign-up.
+
+**Seller, in the browser only:**
+1. `http://localhost:5173/signup` → 상호 · 이름 · 이메일 · 비밀번호 → 계정 만들기 → lands on **채널 연결**.
+2. 채널 연결 → NAVER (`/connect/naver` for 주문 keys; 리뷰 = 도우미) → Coupang (`/connect/coupang`, WING keys)
+   → Cafe24 (`/connect/cafe24`, mall id → consent). One channel at a time.
+3. First collection: 지금 수집하기 on the channel page (or wait ≤5 min — routine schedules are created for the
+   new org automatically) → 홈 shows 리뷰 · 문의 · 연결.
+4. Helper for NAVER reviews / `[쿠팡에서 보기]`: **one command in a terminal, once** —
+   `tools/self-pilot/agent-supervisor.sh start` — it asks for the SellerOps login (same as the browser) and the
+   스마트스토어센터 리뷰 URL, then keeps running; pair from `/connect/review-history` 도우미 연결하기. (Carrier
+   switching for `[쿠팡에서 보기]` is a recorded product gap.)
+5. Come back daily: 홈 → 리뷰/문의/주문. Auth expiry shows as 재연결 필요; session expiry as 로그인 화면.
+
 ## 1. Start (two terminals, one browser)
 
 ```bash

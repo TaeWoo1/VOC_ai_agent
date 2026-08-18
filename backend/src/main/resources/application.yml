@@ -52,6 +52,8 @@ sellerops:
   triage:
     ai-pilot:
       enabled: ${SELLEROPS_AI_TRIAGE_PILOT_ENABLED:false}
+      # Comma-separated org UUIDs, or "*" for every org in this backend (local single-user deployment —
+      # pair with sellerops.self-pilot.scope=LOCAL_SINGLE_USER; never "*" on a shared multi-tenant backend).
       enabled-org-ids: ${SELLEROPS_AI_TRIAGE_PILOT_ORG_IDS:}
       vendor: ${SELLEROPS_AI_TRIAGE_VENDOR:OPENAI}
       model: ${SELLEROPS_AI_TRIAGE_MODEL:gpt-5-2025-08-07}
@@ -87,7 +89,11 @@ sellerops:
     # approval ceremony; marketplace WRITE is untouched. Off by default; with it off nothing
     # here exists (no reconciler bean, no ticks) and every gate below behaves as before.
     enabled: ${SELLEROPS_SELF_PILOT_ENABLED:false}
-    # Comma-separated org UUIDs the runtime acts for. Empty ⇒ acts for nobody, even when enabled.
+    # ALLOW_LIST (default): only org-ids below. LOCAL_SINGLE_USER: every org in THIS backend's database —
+    # the one-seller local deployment, where a person who signs up in the browser is picked up with no env
+    # edit. LOCAL_SINGLE_USER refuses to boot unless SPRING_DATASOURCE_URL points at localhost/127.0.0.1.
+    scope: ${SELLEROPS_SELF_PILOT_SCOPE:ALLOW_LIST}
+    # Comma-separated org UUIDs the runtime acts for under ALLOW_LIST. Empty ⇒ acts for nobody.
     org-ids: ${SELLEROPS_SELF_PILOT_ORG_IDS:}
     # Standing READ grant (spr-<8..32 hex>): opens READ-only Coupang signed GETs for the runtime's
     # lifetime instead of a per-run SELLEROPS_CONNECTOR_COUPANG_LIVE_APPROVAL_ID. Environment-binding

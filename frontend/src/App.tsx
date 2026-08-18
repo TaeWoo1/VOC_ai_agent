@@ -9,6 +9,7 @@ import { LEGACY_REDIRECTS, resolveLegacyTarget, type LegacyRedirect } from "./li
 // Public surface
 import { ProductLanding } from "./pages/ProductLanding";
 import { Login } from "./pages/Login";
+import { Signup } from "./pages/Signup";
 
 // v2 app surface
 import { HomeV2 } from "./pages/app/HomeV2";
@@ -72,6 +73,7 @@ export function App() {
         <Route path="/product" element={<ProductLanding />} />
         <Route path="/product/*" element={<Navigate to="/product" replace />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
       </Route>
 
       <Route

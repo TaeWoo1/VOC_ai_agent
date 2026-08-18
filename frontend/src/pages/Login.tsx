@@ -15,8 +15,10 @@ export function Login() {
   // longer self-pilot days). It changes nothing about authentication — it tells the seller, plainly, that
   // nothing is broken and the one thing to do is sign in again.
   const sessionExpired = searchParams.get("expired") === "1";
-  const [email, setEmail] = useState("demo@sellerops.ai");
-  const [password, setPassword] = useState("demo1234");
+  // The demo account is pre-filled ONLY on the demo entry. A real seller (Self-Pilot first-run) starts from an
+  // empty form — a product whose login form arrives filled with someone else's account is not a product.
+  const [email, setEmail] = useState(fromDemoEntry ? "demo@sellerops.ai" : "");
+  const [password, setPassword] = useState(fromDemoEntry ? "demo1234" : "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -98,12 +100,17 @@ export function Login() {
           >
             {busy ? "로그인 중…" : "로그인"}
           </button>
-          {fromDemoEntry ? null : (
-            <p className="text-center text-sm text-muted">데모 계정이 미리 입력되어 있습니다.</p>
-          )}
         </form>
 
         <p className="mt-6 text-center text-sm text-muted">
+          처음이신가요?{" "}
+          <Link
+            to="/signup"
+            className="rounded font-medium text-brand-700 transition hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
+          >
+            계정 만들기
+          </Link>
+          <span aria-hidden="true"> · </span>
           <Link
             to={PRODUCT_PATH}
             className="rounded font-medium transition hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"

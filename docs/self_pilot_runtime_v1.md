@@ -167,3 +167,39 @@ can perform it.
   one-operator local backend this runtime is for; a shared deployment would need an org-aware gate.
 - Capability wording is unchanged: nothing here promotes any channel×type to 운영 지원 (roadmap §4.1); the
   self-pilot is the operator's own use, not a support claim.
+- The helper (local agent) is still one carrier per process, chosen on the command line
+  (`agent-supervisor.sh switch coupang-locate` for `[쿠팡에서 보기]`). **Product gap**: the target is one
+  resident helper hosting every READ carrier and taking work only from the SellerOps UI. §8 records the
+  posture the first-run UX assumes today.
+
+## 8. Browser-only new-user posture (product-owner decision, 2026-08-18)
+
+**The bar.** One seller uses a deployed SellerOps from scratch, in the browser: no `.env` edit, no curl, no
+org-UUID copy, no grant minting, no connector flag, no backend restart, no carrier CLI choice.
+Infra secrets, vault key, app credentials, connector flags and runtime flags are **prepared before the
+service starts** (deployer's job, once). What changed for that:
+
+| Step | Before | Now |
+|---|---|---|
+| Account | `POST /api/auth/signup` by curl | **`/signup`** page (existing API); sign-up ends signed in and lands on **`/connect`** (first-run: 가입 → 채널 연결 → 첫 수집 → 홈). `/login` starts empty (demo pre-fill only under `?demo=1`) and links to 계정 만들기. |
+| Self-pilot for the new org | deployer copies the org UUID into `SELLEROPS_SELF_PILOT_ORG_IDS` | **`SELLEROPS_SELF_PILOT_SCOPE=LOCAL_SINGLE_USER`** — the reconciler acts for every org in this backend's own database; refuses to boot unless `SPRING_DATASOURCE_URL` is loopback (`SelfPilotProperties.isLoopbackDatabase`). `ALLOW_LIST` (default) stays the multi-tenant-safe posture. |
+| AI triage for the new org | org UUID in `SELLEROPS_AI_TRIAGE_PILOT_ORG_IDS` | `SELLEROPS_AI_TRIAGE_PILOT_ORG_IDS=*` (every org; pair only with LOCAL_SINGLE_USER). |
+| Read grant / vault / connectors | operator-minted per self-pilot | deploy-time env; the seller never sees them. |
+| Channels | UI (`/connect/naver`, `/connect/coupang`, `/connect/cafe24`) | unchanged — the seller types their own marketplace credentials / consents OAuth in the UI. |
+| Helper (agent) | edit an env file, pick a carrier | first `agent-supervisor.sh start` **asks** for the SellerOps login on the terminal (0600 file, password never echoed), default carrier `naver-import`; pairing from `/connect/review-history`. Carrier switching remains (product gap above). |
+
+**Multi-tenant boundary, plainly.** LOCAL_SINGLE_USER and `*` are for the one-seller local deployment
+only: both are refused/meaningless off a loopback database, both are opt-in env, and neither changes any
+per-request org scoping (every read is still `principal.orgId()`-scoped). A production multi-tenant backend
+keeps ALLOW_LIST + explicit org lists.
+
+**Deploy-time env for this posture (names; values are the deployer's):** `SELLEROPS_SELF_PILOT_ENABLED=true`,
+`SELLEROPS_SELF_PILOT_SCOPE=LOCAL_SINGLE_USER`, `SELLEROPS_SELF_PILOT_READ_GRANT_ID`,
+`SELLEROPS_COLLECT_SCHEDULER_ENABLED=true`, vault (`SELLEROPS_VAULT_MASTER_KEY/_KEY_ID`), connectors
+(`SELLEROPS_CONNECTOR_{NAVER,COUPANG,CAFE24}_ENABLED` + Cafe24 app `_CLIENT_ID/_CLIENT_SECRET/_API_VERSION/
+_RESULT_URL`), optionally `SELLEROPS_AI_TRIAGE_PILOT_ENABLED=true` + `_ORG_IDS=*` + `_API_KEY` +
+`SELLEROPS_SELF_PILOT_TRIAGE_AUTO_ENABLED=true`. WRITE boundary: unchanged (§6).
+
+**Residual (product-owner decisions, not built here):** a 계정 만들기 CTA on the public landing (the landing's
+CTAs are a v1 PO decision: 진단 / 데모); one resident helper hosting all READ carriers; helper sign-in through
+the pairing handshake instead of a SellerOps password on the terminal.

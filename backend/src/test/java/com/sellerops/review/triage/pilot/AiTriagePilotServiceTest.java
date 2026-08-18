@@ -222,4 +222,24 @@ class AiTriagePilotServiceTest {
                 .extracting(f -> f.getType().getSimpleName())
                 .doesNotContain("ReviewTriageTier", "Review", "TriagePredictionRepository");
     }
+
+    /**
+     * Self-Pilot local single-user deployment: {@code enabled-org-ids="*"} means every org — a seller who
+     * signed up in the browser needs no UUID copied into an env. Any other value stays an explicit list, and
+     * the master switch + key are still required.
+     */
+    @Test
+    void starMeansEveryOrgWhileTheOtherGatesStillHold() {
+        AiTriagePilotProperties star = new AiTriagePilotProperties(true, "*", "OPENAI", "m", "k", true, 4000, "low", 100);
+        assertThat(star.isEnabledFor(UUID.randomUUID())).isTrue();
+        assertThat(star.isEnabledFor(null)).isFalse();
+        AiTriagePilotProperties starNoKey = new AiTriagePilotProperties(true, "*", "OPENAI", "m", "", true, 4000, "low", 100);
+        assertThat(starNoKey.isEnabledFor(UUID.randomUUID())).isFalse();
+        AiTriagePilotProperties starOff = new AiTriagePilotProperties(false, "*", "OPENAI", "m", "k", true, 4000, "low", 100);
+        assertThat(starOff.isEnabledFor(UUID.randomUUID())).isFalse();
+        UUID listed = UUID.randomUUID();
+        AiTriagePilotProperties list = new AiTriagePilotProperties(true, listed.toString(), "OPENAI", "m", "k", true, 4000, "low", 100);
+        assertThat(list.isEnabledFor(listed)).isTrue();
+        assertThat(list.isEnabledFor(UUID.randomUUID())).isFalse();
+    }
 }

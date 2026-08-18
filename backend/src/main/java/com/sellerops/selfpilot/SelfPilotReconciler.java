@@ -7,6 +7,8 @@ import com.sellerops.common.ApiException;
 import com.sellerops.connector.ConnectorRegistry;
 import com.sellerops.connector.DataType;
 import com.sellerops.connector.PullConnector;
+import com.sellerops.organization.Organization;
+import com.sellerops.organization.OrganizationRepository;
 import com.sellerops.review.triage.ReviewTriageChannelCapability;
 import com.sellerops.review.triage.feedback.TriagePredictionRepository;
 import com.sellerops.review.triage.pilot.AiTriagePilotService;
@@ -72,11 +74,14 @@ public class SelfPilotReconciler {
     private final SyncScheduleRepository schedules;
     private final AiTriagePilotService pilot;
     private final TriagePredictionRepository predictions;
+    /** Org source for LOCAL_SINGLE_USER scope; unused under ALLOW_LIST. */
+    private final OrganizationRepository organizations;
 
     public SelfPilotReconciler(SelfPilotProperties props, SellerAccountRepository accounts,
                                ChannelRepository channels, ConnectorRegistry registry,
                                SyncScheduleRepository schedules, AiTriagePilotService pilot,
-                               TriagePredictionRepository predictions) {
+                               TriagePredictionRepository predictions,
+                               OrganizationRepository organizations) {
         this.props = props;
         this.accounts = accounts;
         this.channels = channels;
@@ -84,17 +89,34 @@ public class SelfPilotReconciler {
         this.schedules = schedules;
         this.pilot = pilot;
         this.predictions = predictions;
+        this.organizations = organizations;
+    }
+
+    /**
+     * The orgs this tick acts for: every org in the database under LOCAL_SINGLE_USER (a person who signed
+     * up in the browser is picked up without any env edit), else the deployer's allow-list.
+     */
+    List<UUID> targetOrgIds() {
+        if (!props.enabled()) {
+            return List.of();
+        }
+        if (props.actsForAllOrgs()) {
+            return organizations == null ? List.of()
+                    : organizations.findAll().stream().map(Organization::getId).toList();
+        }
+        return props.orgIds();
     }
 
     /** One reconcile pass. Safe to call from a scheduler tick or a test with any {@code now}. */
     public TickReport tick(Instant now) {
-        if (!props.enabled() || props.orgIds().isEmpty()) {
+        List<UUID> targets = targetOrgIds();
+        if (targets.isEmpty()) {
             return new TickReport(0, 0, 0);
         }
         int created = 0;
         int classified = 0;
         int skippedBudget = 0;
-        for (UUID orgId : props.orgIds()) {
+        for (UUID orgId : targets) {
             try {
                 created += ensureDefaultSchedules(orgId, now);
             } catch (RuntimeException e) {
