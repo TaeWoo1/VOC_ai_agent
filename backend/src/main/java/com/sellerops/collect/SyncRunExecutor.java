@@ -3,10 +3,14 @@ package com.sellerops.collect;
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.common.ApiException;
+import com.sellerops.connector.ConnectorAuthException;
 import com.sellerops.connector.ConnectorRegistry;
 import com.sellerops.connector.DataType;
+import com.sellerops.connector.cafe24.Cafe24OAuthException;
 import com.sellerops.connector.naver.NaverApiConnector;
 import com.sellerops.connector.coupang.CoupangApiConnector;
+import com.sellerops.connector.coupang.CoupangLiveApprovalRequiredException;
+import com.sellerops.selfpilot.SellerAccountReauthService;
 import com.sellerops.connector.coupang.onboarding.CoupangConnectionLifecycle;
 import com.sellerops.connector.naver.onboarding.NaverConnectionLifecycle;
 import com.sellerops.connector.FetchPage;
@@ -96,7 +100,14 @@ public class SyncRunExecutor {
      * existing unit tests are unaffected. See {@link SyncRunGate}.
      */
     private final SyncRunGate runGate;
+    /**
+     * Optional (Self-Pilot Runtime v1): turns an unambiguous auth failure into RECONNECT_REQUIRED +
+     * paused schedules + an AUTH_EXPIRED alert. Null in the older test constructors (the run then
+     * simply ends FAILED as before).
+     */
+    private final SellerAccountReauthService reauth;
 
+    /** Full production wiring (Spring). Every optional collaborator is present here. */
     @Autowired
     public SyncRunExecutor(SellerAccountRepository sellerAccounts, ChannelRepository channels,
                            ConnectorRegistry registry, IngestionService ingestionService,
@@ -107,7 +118,8 @@ public class SyncRunExecutor {
                            Cafe24ReviewPromotionReconciler reviewIssueReconciler,
                            NaverConnectionLifecycle naverLifecycle,
                            CoupangConnectionLifecycle coupangLifecycle,
-                           SyncRunGate runGate) {
+                           SyncRunGate runGate,
+                           SellerAccountReauthService reauth) {
         this.sellerAccounts = sellerAccounts;
         this.channels = channels;
         this.registry = registry;
@@ -121,6 +133,23 @@ public class SyncRunExecutor {
         this.naverLifecycle = naverLifecycle;
         this.coupangLifecycle = coupangLifecycle;
         this.runGate = runGate;
+        this.reauth = reauth;
+    }
+
+    /** Pre-Self-Pilot signature (no reauth service) — kept for the tests that construct it directly. */
+    public SyncRunExecutor(SellerAccountRepository sellerAccounts, ChannelRepository channels,
+                           ConnectorRegistry registry, IngestionService ingestionService,
+                           ChannelOrderIngestionService orderIngestionService,
+                           SyncJobRepository syncJobs, SyncCursorRepository cursors,
+                           ChannelConnectionStatusRepository connectionStatus,
+                           Cafe24ReviewIssueBridge reviewIssueBridge,
+                           Cafe24ReviewPromotionReconciler reviewIssueReconciler,
+                           NaverConnectionLifecycle naverLifecycle,
+                           CoupangConnectionLifecycle coupangLifecycle,
+                           SyncRunGate runGate) {
+        this(sellerAccounts, channels, registry, ingestionService, orderIngestionService, syncJobs, cursors,
+                connectionStatus, reviewIssueBridge, reviewIssueReconciler, naverLifecycle, coupangLifecycle,
+                runGate, null);
     }
 
     /**
@@ -268,6 +297,9 @@ public class SyncRunExecutor {
         boolean rateLimited = false;
         Integer retryAfterSeconds = null;
         boolean errored = false;
+        // Self-Pilot v1 classification of the failure that ended the loop (null / false = ordinary).
+        String authFailure = null;
+        boolean approvalMissing = false;
         String firstError = null;
         boolean hasMore = true;
         int guard = 0;
@@ -308,6 +340,11 @@ public class SyncRunExecutor {
             if (firstError == null) {
                 firstError = "수집 실패: " + e.getMessage();
             }
+            // Self-Pilot Runtime v1: two failures are NOT connectivity and must not read as one.
+            //  - an unambiguous auth verdict → the account needs the seller (RECONNECT_REQUIRED task);
+            //  - a missing live/read approval → a configuration state, not a channel that failed.
+            authFailure = classifyAuthFailure(e);
+            approvalMissing = e instanceof CoupangLiveApprovalRequiredException;
         }
 
         if (hasMore && !rateLimited && !errored) {
@@ -329,7 +366,22 @@ public class SyncRunExecutor {
             job.setNextRetryAt(Instant.now().plusSeconds(retryAfterSeconds));
         }
         finishJob(job, success, skipped, failed, status, errorMessage, rateLimited);
-        updateHealth(account, status, errorMessage, rateLimited);
+        if (authFailure != null) {
+            // Health is owned by the reauth path: NEEDS_REAUTH + paused schedules + AUTH_EXPIRED alert,
+            // never a consecutive-failure tick that would later masquerade as DEGRADED. Without the
+            // service (older test wiring) the run still ends FAILED and health records the failure.
+            if (reauth != null) {
+                reauth.markReconnectRequired(orgId, account.getId(), authFailure);
+            } else {
+                updateHealth(account, status, errorMessage, rateLimited);
+            }
+        } else if (approvalMissing) {
+            // Recorded on the run (errorMessage names the env), not on connection health: nothing about
+            // the channel or the credential failed. Fast retries cannot fix configuration.
+            log.warn("Collection refused for lack of a live/read approval (account {}, {})", account.getId(), dataType);
+        } else {
+            updateHealth(account, status, errorMessage, rateLimited);
+        }
         // A collected first ORDER_SUMMARY sync is the second half of the NAVER connect gate: it advances
         // an already-verified (PREPARING) account to CONNECTED. Only a run that collected rows counts —
         // an ordinary FAILED sync leaves the status untouched — and only for NAVER (the lifecycle no-ops
@@ -419,6 +471,23 @@ public class SyncRunExecutor {
 
     private static <T> List<T> typed(FetchPage page, Class<T> type) {
         return page.records().stream().map(type::cast).toList();
+    }
+
+    /**
+     * The sanitized reason when {@code e} is an unambiguous authentication verdict, else null.
+     * Recognised: {@link ConnectorAuthException} (Coupang 401 / NAVER token refusal) and a Cafe24
+     * {@code invalid_grant} on refresh (the stored refresh token was revoked; the authorizer has already
+     * retried once against a possibly-rotated token before letting it out).
+     */
+    static String classifyAuthFailure(Exception e) {
+        if (e instanceof ConnectorAuthException auth) {
+            return auth.getMessage();
+        }
+        if (e instanceof Cafe24OAuthException oauth
+                && oauth.kind() == Cafe24OAuthException.Kind.INVALID_GRANT) {
+            return "카페24 인증이 더 이상 유효하지 않습니다 (REFRESH_TOKEN_REVOKED). 채널을 다시 연결해 주세요.";
+        }
+        return null;
     }
 
     private String resolveStatus(int success, int skipped, int failed, boolean rateLimited, boolean errored) {

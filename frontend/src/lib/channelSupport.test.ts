@@ -60,11 +60,10 @@ describe("honest copy rules", () => {
 });
 
 describe("per-channel display", () => {
-  it("NAVER: auto-collect order + verified review-export upload + connection check, no caveat", () => {
+  it("NAVER: auto-collect order + verified review-export upload, no caveat", () => {
     const d = channelSupportDisplay(byCode("NAVER"));
     expect(d.primaryLabel).toBe(`${SUPPORT_COPY.autoCollect}: 주문`);
-    expect(d.chips).toContain(SUPPORT_COPY.naverVerifiedUpload);
-    expect(d.chips).toContain(SUPPORT_COPY.connectionCheck);
+    expect(d.chips).toEqual([SUPPORT_COPY.naverVerifiedUpload]);
     expect(d.uploadQualifier).toBeNull(); // NAVER is the verified-format exception
   });
 
@@ -72,13 +71,24 @@ describe("per-channel display", () => {
     const d = channelSupportDisplay(byCode("GMARKET"));
     expect(d.primaryLabel).toBe(SUPPORT_COPY.fileUpload);
     expect(d.uploadQualifier).toBe(SUPPORT_COPY.fileUploadQualifier);
-    expect(d.chips).toContain(SUPPORT_COPY.credentialSetup);
+    expect(d.chips).toEqual([]);
   });
 
-  it("OHOUSE (no template): upload only, no credential-setup chip, still caveated", () => {
+  it("OHOUSE (no template): upload only, still caveated", () => {
     const d = channelSupportDisplay(byCode("OHOUSE"));
     expect(d.primaryLabel).toBe(SUPPORT_COPY.fileUpload);
-    expect(d.chips).not.toContain(SUPPORT_COPY.credentialSetup);
+    expect(d.chips).toEqual([]);
     expect(d.uploadQualifier).toBe(SUPPORT_COPY.fileUploadQualifier);
+  });
+
+  it("connector facts (connection check, credential template) never render as chips (A6)", () => {
+    // They describe how SellerOps is built, not what the row does for the seller — every row used to
+    // carry "연결 확인 가능 · 연결 정보 저장 가능" as boilerplate.
+    for (const c of channels) {
+      for (const text of allStrings(c)) {
+        expect(text).not.toContain("연결 확인 가능");
+        expect(text).not.toContain("연결 정보 저장 가능");
+      }
+    }
   });
 });

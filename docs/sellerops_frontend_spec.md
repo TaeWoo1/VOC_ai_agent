@@ -1,7 +1,15 @@
 # SellerOps Frontend Spec — 통합 셀러센터 리디자인 정본
 
-> Status: **CANONICAL (frontend).** SellerOps 프론트엔드 리디자인의 단일 source of truth.
-> 작성 2026-07-07. 근거: 프론트 정찰(코드 전수 열람)·문서 감사(2026-07-07 세션) + 제품 결정.
+> Status: **CANONICAL (frontend principles).** SellerOps 프론트엔드의 상태 규칙·언어 사전·접근성·capability
+> 정직성·가이드 연결·Action Window 화면 원칙의 source of truth. 작성 2026-07-07. 근거: 프론트 정찰(코드 전수
+> 열람)·문서 감사(2026-07-07 세션) + 제품 결정.
+>
+> **2026-08-17 갱신 (제품 조립 — 제품 오너 결정).** **IA·내비게이션·라우트·화면 처분·슬라이스 표(§5·§6·§7·§8·
+> §17-A)는 `docs/product_assembly_ia_v1.md`로 대체된다.** 그 절들은 2026-07-07 시점의 목표(대시보드/주문·매출/
+> 고객 응대/상품 이슈/리포트)와 이후 코드로만 실려 있던 v2 IA(운영 홈/고객 인박스/고객운영 메모리/…, 커밋
+> `fc5f86ed`, 2026-08-03 — 문서 갱신 없이 출하됨) 사이의 기록으로 남기며 삭제하지 않는다. 현재 IA는 **홈 / 리뷰
+> / 문의 / 주문 · 채널 연결 / 설정**이고, **사용자 노출 채널은 NAVER / Coupang / Cafe24 3종**이다(§5의 [TODO-PO]
+> 카탈로그 노출 결정은 이로써 종결). §9~§16·§18의 원칙은 그대로 유효하다.
 >
 > **2026-07-26 갱신 (Agent-first / UI-light — 제품 오너 결정 반영).** 정본:
 > `docs/action-window-runtime/agent-first-ui-light-adr.md`(Accepted), 범위: `docs/product-scope-v1.md`
@@ -140,6 +148,11 @@
 
 ## 5. 목표 정보 구조 (IA)
 
+> **[SUPERSEDED 2026-08-17]** 이 절의 트리는 2026-07-07 목표이며 출하되지 않았다. 현재 IA 정본:
+> `docs/product_assembly_ia_v1.md` §3. 아래 [TODO-PO]는 **결정됨**: 사용자 노출 채널 = NAVER / Coupang / Cafe24
+> 3종, 그 외 카드 노출 없음(요청하기 카드 포함). "운영 메모리 = 패널로만" 제외 항목은 `/memory` 페이지가 v2
+> 재구성(`fc5f86ed`)으로 출하되어 사실상 대체됐다 — 그 화면의 자리는 조립 정본 §3이 정한다.
+
 ```
 Frontstage (1차 내비게이션)
 ├─ 대시보드            오늘의 운영 현황 + 확인 필요 항목 (org 횡단)
@@ -168,6 +181,9 @@ Backstage (2차 위계 — "연결·설정")
 
 ## 6. 내비게이션과 모바일 내비게이션
 
+> **[SUPERSEDED 2026-08-17]** 현재 내비 = `frontend/src/lib/nav.v2.ts` 하나(사이드·모바일 탭·드로어 공유), 구성은
+> `docs/product_assembly_ia_v1.md` §3. 아래는 기록.
+
 - [현행] 데스크톱 좌측 사이드바 10개 메뉴(`Sidebar.tsx`), **`md` 미만에서 사이드바가 사라지고 대체
   내비게이션 없음** — 모바일 탐색 불가(정찰 F2, Critical).
 - [목표-데스크톱] 사이드바 2그룹: Frontstage 5개 + "연결·설정" 그룹(Backstage). 연결 알림 배지는
@@ -178,6 +194,9 @@ Backstage (2차 위계 — "연결·설정")
 - 이모지 아이콘은 아이콘 세트로 교체 [목표 — 시각 폴리시 슬라이스에서].
 
 ## 7. 현행 → 목표 라우트 매핑
+
+> **[SUPERSEDED 2026-08-17]** 현재 라우트는 `frontend/src/App.tsx`, 구 경로 리다이렉트는
+> `frontend/src/lib/legacyRoutes.ts`, IA는 `docs/product_assembly_ia_v1.md` §3. 아래 표는 기록.
 
 | 현행 라우트 | 현행 화면 | 목표 | 비고 |
 |---|---|---|---|
@@ -445,6 +464,9 @@ Backstage (2차 위계 — "연결·설정")
 
 ### 17-A. Product Shell 트랙 (프론트 IA·화면 — 새 백엔드/에이전트 능력 불필요 우선)
 
+> **[SUPERSEDED 2026-08-17]** 이 슬라이스 표는 v2 재구성(`fc5f86ed`)과 제품 조립(`docs/product_assembly_ia_v1.md`
+> §6)으로 대체됐다. 기록으로 남긴다.
+
 | # | 슬라이스 | 내용 | 의존성 |
 |---|---|---|---|
 | S1 | 오류 카피·셀러 언어 교체 | §12 사전 적용 + 카피 가드 테스트 확장 | FE only |
@@ -477,6 +499,8 @@ Backstage (2차 위계 — "연결·설정")
 > → AW-4 ESM+ 라이브 보정(별도 승인) → AW-5 채널 확장)는 `docs/slices/action-window-v1.md`가 정본이며,
 > **G3 가이드 상태 엔진을 공유**한다(마켓 로직 중복 금지). "Projected Direct Action"은 채널별 정책·제품
 > 리뷰 후 이후에 활성화될 수 있다.
+> *(2026-08-17: AW-3/AW-4/AW-5의 ESM+ 우선 채널 확장 순서는 **PAUSED** — 채널 확장 일시 중단, 노출 채널 3종
+> (`docs/product_assembly_ia_v1.md` §2). 두 번째 Action Window 채널은 실제로 Coupang REVIEW가 됐다(로드맵 §4.1).)*
 
 이연(별도 승인): 리포트 데이터 연동, 운영 메모리 패널, **문의** 답변 워크플로 노출, 주문 목록/상세,
 클라우드 관리형 런타임.

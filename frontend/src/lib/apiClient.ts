@@ -114,6 +114,7 @@ import {
   mockSyncRuns,
   mockVocItemTriage,
 } from "./mocks";
+import { visibleChannels } from "./productChannels";
 
 // Default to a SAME-ORIGIN relative base ("") so `/api/*` requests go through the Vite dev proxy (see
 // vite.config.ts) to whatever backend the dev server targets. This removes the two failure modes that
@@ -133,6 +134,46 @@ http.interceptors.request.use((config) => {
   }
   return config;
 });
+
+/**
+ * Where an expired SellerOps session sends the seller: the login form, told why (`?expired=1`).
+ * Exported so the login page and the tests agree on the one spelling.
+ */
+export const SESSION_EXPIRED_PATH = "/login?expired=1";
+
+/**
+ * In-session expiry of the seller's OWN SellerOps session (the JWT is 12h; a self-pilot day is longer).
+ *
+ * Before this handler a 401 mid-session looked like a broken backend: every `*Strict` read rejected and each
+ * screen printed its own "불러오지 못했습니다" — the same failure the `getMe` fix (2026-07-26) closed for the
+ * boot path but not for the hours after it. Self-Pilot Runtime v1: session expiry is a RECONNECT task, not an
+ * error. A 401 on any authenticated call clears the stale token and sends the seller to the login form with
+ * `?expired=1`, so the form can say "세션이 만료되었습니다" instead of the seller guessing.
+ *
+ * Deliberately narrow: only 401 (never 403 — that is a real authorization answer), only when a token was
+ * present (an unauthenticated probe is not an expiry), never for the login call itself (a wrong password must
+ * stay a form error, not a redirect loop). The redirect uses `location.assign` because the interceptor lives
+ * outside the router; the token is cleared FIRST so `Protected` cannot bounce back in.
+ */
+export function isSessionExpiry(status: number | undefined, url: string | undefined, hadToken: boolean): boolean {
+  if (status !== 401 || !hadToken) return false;
+  return !(url ?? "").includes("/api/auth/login");
+}
+
+http.interceptors.response.use(
+  (response) => response,
+  (error: unknown) => {
+    const status = (error as { response?: { status?: number } } | undefined)?.response?.status;
+    const url = (error as { config?: { url?: string } } | undefined)?.config?.url;
+    if (isSessionExpiry(status, url, getToken() !== null)) {
+      clearToken();
+      if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+        window.location.assign(SESSION_EXPIRED_PATH);
+      }
+    }
+    return Promise.reject(error);
+  },
+);
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -201,17 +242,21 @@ export const api = {
     const { data } = await http.get<UserView>("/api/users/me");
     return data;
   },
-  getChannels: (): Promise<ChannelResponse[]> => getOrMock("/api/channels", mockChannels),
+  // Both channel reads return the product-visible catalog only (`lib/productChannels.ts`). The
+  // backend already narrows `/api/channels` the same way; the client-side pass makes the demo
+  // catalog and any silent mock fallback obey the same rule.
+  getChannels: (): Promise<ChannelResponse[]> =>
+    getOrMock("/api/channels", mockChannels).then(visibleChannels),
   // Strict variants for the Naver collection workflow (ChannelDetail): no silent
   // mock fallback, so a dead/wrong backend fails closed instead of rendering a
   // fake "CONNECTED" page. The global VITE_USE_MOCKS demo escape hatch is still
   // honored. Mirrors the getChannelCapabilities fail-closed pattern below.
   async getChannelsStrict(): Promise<ChannelResponse[]> {
     if (USE_MOCKS) {
-      return mockChannels();
+      return visibleChannels(mockChannels());
     }
     const { data } = await http.get<ChannelResponse[]>("/api/channels");
-    return data;
+    return visibleChannels(data);
   },
   async getSellerAccountsStrict(): Promise<SellerAccountResponse[]> {
     if (USE_MOCKS) {
@@ -429,7 +474,7 @@ export const api = {
     return data;
   },
   getChannelStatus: (): Promise<ChannelResponse[]> =>
-    getOrMock("/api/dashboard/channel-status", mockChannels),
+    getOrMock("/api/dashboard/channel-status", mockChannels).then(visibleChannels),
   getSellerAccounts: (): Promise<SellerAccountResponse[]> =>
     getOrMock("/api/seller-accounts", mockSellerAccounts),
   getDashboardSummary: (): Promise<DashboardSummaryResponse> =>
@@ -439,11 +484,15 @@ export const api = {
   // fallback, so a dead backend fails closed instead of rendering a fake feed of
   // inquiries/reviews. Honors the VITE_USE_MOCKS demo escape hatch. Mirrors the
   // other *Strict reads.
-  async getInboxStrict(): Promise<InboxResponse> {
+  async getInboxStrict(params: { type?: "INQUIRY" | "REVIEW"; limit?: number } = {}): Promise<InboxResponse> {
     if (USE_MOCKS) {
-      return mockInbox();
+      return mockInbox(params);
     }
-    const { data } = await http.get<InboxResponse>("/api/inbox");
+    const query = new URLSearchParams();
+    if (params.type) query.set("type", params.type);
+    if (params.limit !== undefined) query.set("limit", String(params.limit));
+    const suffix = query.toString();
+    const { data } = await http.get<InboxResponse>(`/api/inbox${suffix ? `?${suffix}` : ""}`);
     return data;
   },
   // Stored rule-based per-item analysis (read-only) for the org. Enrichment over

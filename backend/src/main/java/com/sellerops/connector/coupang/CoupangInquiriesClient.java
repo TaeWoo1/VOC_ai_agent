@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sellerops.connector.ConnectorAuthException;
 import com.sellerops.connector.DataType;
 import com.sellerops.connector.FetchPage;
 import com.sellerops.ingest.canonical.CanonicalInquiry;
@@ -131,6 +132,8 @@ public class CoupangInquiriesClient {
     private final String baseUrl;
     /** The armed live-run approval id — see {@link CoupangOrdersClient}; blank ⇒ a real host is refused. */
     private final String liveApprovalId;
+    /** Self-Pilot standing READ grant — see {@link CoupangOrdersClient}; opens the READ gate only. */
+    private final String standingReadGrantId;
     private final Pacer pacer;
     private final ObjectMapper mapper = new ObjectMapper();
     /** Epoch millis of the last signed call, or 0 before the first. Per-client, like the sweep itself. */
@@ -138,16 +141,27 @@ public class CoupangInquiriesClient {
 
     public CoupangInquiriesClient(CoupangHttpClient http, CoupangSigner signer, Clock clock,
                                   String baseUrl, String liveApprovalId) {
-        this(http, signer, clock, baseUrl, liveApprovalId, SLEEPING_PACER);
+        this(http, signer, clock, baseUrl, liveApprovalId, "", SLEEPING_PACER);
+    }
+
+    public CoupangInquiriesClient(CoupangHttpClient http, CoupangSigner signer, Clock clock,
+                                  String baseUrl, String liveApprovalId, String standingReadGrantId) {
+        this(http, signer, clock, baseUrl, liveApprovalId, standingReadGrantId, SLEEPING_PACER);
     }
 
     CoupangInquiriesClient(CoupangHttpClient http, CoupangSigner signer, Clock clock,
                            String baseUrl, String liveApprovalId, Pacer pacer) {
+        this(http, signer, clock, baseUrl, liveApprovalId, "", pacer);
+    }
+
+    CoupangInquiriesClient(CoupangHttpClient http, CoupangSigner signer, Clock clock,
+                           String baseUrl, String liveApprovalId, String standingReadGrantId, Pacer pacer) {
         this.http = http;
         this.signer = signer;
         this.clock = clock;
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
         this.liveApprovalId = liveApprovalId;
+        this.standingReadGrantId = standingReadGrantId == null ? "" : standingReadGrantId;
         this.pacer = pacer;
     }
 
@@ -225,6 +239,10 @@ public class CoupangInquiriesClient {
         CoupangHttpClient.Response response = signedGet(path, query, accessKey, secretKey, vendorId);
         if (response.statusCode() == 429) {
             throw CoupangRateLimitedException.fromResponse(response);
+        }
+        if (response.statusCode() == 401) {
+            // Fixed 401 = bad HMAC / revoked key: an auth verdict, typed for RECONNECT_REQUIRED (Self-Pilot v1).
+            throw new ConnectorAuthException("쿠팡", ConnectorAuthException.Cause.CREDENTIAL_REJECTED);
         }
         if (response.statusCode() != 200) {
             throw new IllegalStateException(
@@ -349,8 +367,9 @@ public class CoupangInquiriesClient {
 
     private CoupangHttpClient.Response signedGet(String path, String query,
                                                  String accessKey, String secretKey, String vendorId) {
-        // Live-run approval interlock — the same backend choke point every Coupang request passes.
-        CoupangLiveCallGuard.ensureLiveCallAllowed(baseUrl, liveApprovalId);
+        // Live-run approval interlock — the same backend choke point every Coupang request passes. This
+        // client only ever GETs, so it is the READ gate: per-run approval OR the standing read grant.
+        CoupangLiveCallGuard.ensureLiveReadAllowed(baseUrl, liveApprovalId, standingReadGrantId);
         pace();
         String authorization = signer.authorization(accessKey, secretKey, "GET", path, query);
         Map<String, String> headers = new LinkedHashMap<>();

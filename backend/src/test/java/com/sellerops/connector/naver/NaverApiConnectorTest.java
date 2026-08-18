@@ -128,6 +128,23 @@ class NaverApiConnectorTest {
         assertThat(http.sent.get(2).uri().toString()).contains("lastChangedType=PAYED");
     }
 
+    /**
+     * Regression pinned by the Self-Pilot v1 independent review: the probe's OWN token mint answering 401
+     * (now a typed {@code ConnectorAuthException}) must still land in the "inconclusive → keep the credential
+     * verify() just accepted" branch, never escape verifyConnection as a 500.
+     */
+    @Test
+    void verifyConnectionStaysSuccessWhenTheProbeTokenMintIsRefusedAfterVerifyAccepted() {
+        storeNaverCredential();
+        http.enqueue(FakeNaverHttpClient.tokenOk("token-1", 3000)); // verify(): accepted
+        http.enqueue(new NaverHttpClient.Response(401, "{\"code\":\"GW.UNAUTHORIZED\"}", Map.of())); // probe mint
+
+        VerifyOutcome outcome = connector.verifyConnection(verifyContext());
+
+        assertThat(outcome.status()).isEqualTo(VerifyOutcome.Status.SUCCESS);
+        assertThat(http.sent).hasSize(2); // no order GET was attempted without a token
+    }
+
     @Test
     void verifyConnectionFailsOrderAccessDeniedOnForbiddenProbe() {
         storeNaverCredential();

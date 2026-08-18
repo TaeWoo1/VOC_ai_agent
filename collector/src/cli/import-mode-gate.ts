@@ -27,11 +27,22 @@ export const ACTION_WINDOW_IMPORT_FLAG = "--action-window-initial-review-import"
 /** The live approval flag every live-NAVER CLI in this package already requires. */
 export const IMPORT_LIVE_APPROVAL_FLAG = "--i-understand-this-opens-live-naver";
 
-/** Flags that select a DIFFERENT carrier. Present alongside the import flag ⇒ refuse. */
+/**
+ * Flags that select a DIFFERENT carrier. Present alongside the import flag ⇒ refuse.
+ *
+ * Every carrier flag the agent knows, not just the three that existed when this gate was written: the
+ * Self-Pilot Runtime v1 audit found the four later carriers missing, so an import command line that also
+ * named `--action-window-coupang-issuance-live` passed this gate and the live walk was dropped without a
+ * word — the exact silent-winner failure the gate's own docblock forbids.
+ */
 export const OTHER_CARRIER_FLAGS: readonly string[] = [
   "--dev-action-window-reply",
   "--dev-action-window-synthetic",
   "--dev-action-window-naver-fixture",
+  "--dev-action-window-issuance",
+  "--dev-action-window-coupang-issuance",
+  "--dev-action-window-review-locate",
+  "--action-window-coupang-issuance-live",
 ];
 
 /**

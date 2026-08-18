@@ -2,6 +2,8 @@ package com.sellerops.common;
 
 import java.time.Instant;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
@@ -51,8 +53,13 @@ public class GlobalExceptionHandler {
         return body(HttpStatus.METHOD_NOT_ALLOWED, "지원하지 않는 요청 방식입니다: " + ex.getMethod());
     }
 
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleOther(Exception ex) {
+        // The client gets a sanitized sentence; the operator log gets the trace. Swallowing it here
+        // left a 500 on /api/inbox undiagnosable from outside the JVM (product assembly A2).
+        log.error("Unhandled exception → 500", ex);
         return body(HttpStatus.INTERNAL_SERVER_ERROR, "서버 오류가 발생했습니다.");
     }
 

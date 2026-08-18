@@ -80,6 +80,28 @@ sellerops:
     # run is never falsely reclaimed) while still recovering an orphan within the hour.
     # Raise it for stores whose syncs legitimately run longer.
     sync-stale-after-minutes: ${SELLEROPS_COLLECT_SYNC_STALE_AFTER_MINUTES:60}
+  self-pilot:
+    # Self-Pilot Runtime v1 (product-owner decision 2026-08-18; docs/self_pilot_runtime_v1.md).
+    # The operator runs SellerOps on their own seller accounts for days: routine READ work —
+    # official-API collection on the scheduler + bounded AI triage — runs without a per-run
+    # approval ceremony; marketplace WRITE is untouched. Off by default; with it off nothing
+    # here exists (no reconciler bean, no ticks) and every gate below behaves as before.
+    enabled: ${SELLEROPS_SELF_PILOT_ENABLED:false}
+    # Comma-separated org UUIDs the runtime acts for. Empty ⇒ acts for nobody, even when enabled.
+    org-ids: ${SELLEROPS_SELF_PILOT_ORG_IDS:}
+    # Standing READ grant (spr-<8..32 hex>): opens READ-only Coupang signed GETs for the runtime's
+    # lifetime instead of a per-run SELLEROPS_CONNECTOR_COUPANG_LIVE_APPROVAL_ID. Environment-binding
+    # token, never a credential; refused by every WRITE gate (CoupangLiveCallGuard.ensureLiveWriteAllowed).
+    read-grant-id: ${SELLEROPS_SELF_PILOT_READ_GRANT_ID:}
+    # Cadence of the schedules the reconciler creates for a newly CONNECTED account (floor 15).
+    default-interval-minutes: ${SELLEROPS_SELF_PILOT_DEFAULT_INTERVAL_MINUTES:60}
+    reconcile-interval-ms: ${SELLEROPS_SELF_PILOT_RECONCILE_INTERVAL_MS:300000}
+    reconcile-initial-delay-ms: ${SELLEROPS_SELF_PILOT_RECONCILE_INITIAL_DELAY_MS:15000}
+    triage:
+      # Bounded automatic AI triage — needs sellerops.triage.ai-pilot enabled for the org too.
+      auto-enabled: ${SELLEROPS_SELF_PILOT_TRIAGE_AUTO_ENABLED:false}
+      per-tick: ${SELLEROPS_SELF_PILOT_TRIAGE_PER_TICK:20}
+      per-day: ${SELLEROPS_SELF_PILOT_TRIAGE_PER_DAY:200}
   admin:
     inquiry-dismissal:
       # Operator-only bulk inquiry-dismissal admin endpoints (audited spam set-aside

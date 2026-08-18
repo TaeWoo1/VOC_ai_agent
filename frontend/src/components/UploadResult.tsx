@@ -12,6 +12,8 @@ export function UploadResult({ result }: { result: IngestResult }) {
   // 주문·매출 has no inbox surface, so its primary CTA is the Orders dashboard;
   // 문의/리뷰 land on the inbox work surface.
   const toOrders = result.uploadType === "ORDER_SUMMARY";
+  // The uploaded rows land on the surface that owns them: 리뷰 for a review file, 문의 otherwise.
+  const toReviews = result.uploadType === "REVIEW";
 
   return (
     <div className="space-y-4">
@@ -49,19 +51,19 @@ export function UploadResult({ result }: { result: IngestResult }) {
         {toOrders ? (
           <>
             <Link to="/orders" className="btn-primary inline-flex">
-              주문·매출 보기
+              주문 보기
             </Link>
             <Link to="/" className="btn-ghost inline-flex">
-              대시보드에서 확인하기
+              홈에서 확인하기
             </Link>
           </>
         ) : (
           <>
-            <Link to="/inbox" className="btn-primary inline-flex">
-              인박스에서 확인하기
+            <Link to={toReviews ? "/reviews" : "/inquiries"} className="btn-primary inline-flex">
+              {toReviews ? "리뷰에서 확인하기" : "문의에서 확인하기"}
             </Link>
             <Link to="/" className="btn-ghost inline-flex">
-              대시보드에서 확인하기
+              홈에서 확인하기
             </Link>
           </>
         )}

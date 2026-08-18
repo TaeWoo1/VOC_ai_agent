@@ -32,7 +32,7 @@ import { Operations } from "./Operations";
 import { renderWithRouter, screen, within, waitFor, userEvent } from "../test/renderWithRouter";
 import { resetOps, seedRun, seedBridge, seedBridgeRun } from "../test/opsStoreHarness";
 import { UI_SCENARIOS } from "../lib/actionWindow/fixtures";
-import { CONNECTION_VIEW, commandLabel } from "../lib/actionWindow/copy";
+import { CONNECTION_VIEW, SECTION_TITLE, commandLabel } from "../lib/actionWindow/copy";
 
 const CHECKPOINT = "확인이 필요한 작업"; // HumanCheckpointCard section
 const CONTROLS = "가능한 동작"; // ActionWindowControlPanel section
@@ -60,6 +60,9 @@ describe("FE-7 Operations run-detail page (store → DOM wiring)", () => {
   });
 
   it("connected + WAITING_FOR_HUMAN: checkpoint + controls + timeline are shown, no banner", () => {
+    // Commands render only behind a live Bridge or the developer preview (A7); the fixture world
+    // stands in for a live one here, so opt in.
+    devModeMock.isFixturePreviewEnabled.mockReturnValue(true);
     seedRun("human-action-required"); // connected fixture, status WAITING_FOR_HUMAN
     renderWithRouter(<Operations />);
     expect(screen.getByRole("region", { name: CHECKPOINT })).toBeInTheDocument();
@@ -71,6 +74,7 @@ describe("FE-7 Operations run-detail page (store → DOM wiring)", () => {
   });
 
   it("checkpoint dedup: the recheck action renders once (checkpoint card), not again in the rail", () => {
+    devModeMock.isFixturePreviewEnabled.mockReturnValue(true);
     seedRun("human-action-required"); // WAITING_FOR_HUMAN, allows recheck + manual + guidance + cancel
     renderWithRouter(<Operations />);
     const recheck = commandLabel("REQUEST_STEP_RECHECK");
@@ -90,6 +94,16 @@ describe("FE-7 Operations run-detail page (store → DOM wiring)", () => {
     seedRun("ready-to-start"); // run === null, connected
     renderWithRouter(<Operations />);
     expect(screen.getByRole("region", { name: "시작하기" })).toBeInTheDocument();
+  });
+
+  it("product surface (fixture source, no preview): read-only — says the agent is not connected, offers no command", () => {
+    // A plain dev server or a shipped build without a paired agent must not let the fixture source
+    // "start" a scripted run and pass it off as the seller's (A7).
+    seedRun("human-action-required");
+    renderWithRouter(<Operations />);
+    expect(screen.getByText(/로컬 에이전트가 연결되어 있지 않아/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: commandLabel("CANCEL_RUN") })).toBeNull();
+    expect(screen.queryByRole("region", { name: SECTION_TITLE.controls })).toBeNull();
   });
 
   it("offline (bridge) with a last-known run: banner + reconnect shown, commands suppressed, timeline stays", () => {

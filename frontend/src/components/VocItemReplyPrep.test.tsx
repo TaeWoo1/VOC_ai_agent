@@ -630,6 +630,9 @@ describe("VocItemReplyPrep", () => {
 describe("VocItemReplyPrep — guided submission (v1.6)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // The simulated guided runtime is developer chrome (A6): DEV AND the fixture-preview opt-in.
+    // Without the opt-in the panel resolves to the manual handoff, exactly like a shipped build.
+    vi.stubEnv("VITE_AW_FIXTURE_PREVIEW", "1");
   });
 
   const OUTCOME_SUBMITTED: ReviewReplyPrep = {
@@ -872,6 +875,9 @@ describe("VocItemReplyPrep — guided submission (v1.6)", () => {
 });
 
 describe("VocItemReplyPrep — the channel already answered", () => {
+  beforeEach(() => {
+    vi.stubEnv("VITE_AW_FIXTURE_PREVIEW", "1"); // simulated runtime = developer chrome, opt-in (A6)
+  });
   // The server withholds `canStartSubmissionRun` and 409s the call for a review the channel has
   // already answered. The panel's job is to say WHY, so an operator does not read a missing control
   // as a bug — and to keep copy available, because the clipboard is theirs.

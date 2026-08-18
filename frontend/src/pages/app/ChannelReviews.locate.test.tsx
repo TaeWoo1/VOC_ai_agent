@@ -27,6 +27,8 @@ vi.mock("../../lib/apiClient", () => ({
     startChannelReviewLocateRun: (accountId: string, reviewId: string) =>
       startChannelReviewLocateRun(accountId, reviewId),
     recordChannelReviewTriageBehavior: (accountId: string, events: unknown) => recordBehavior(accountId, events),
+    // 내 답변 작업 mounts on a reply-capable channel (A6); this file is about locate, so keep it empty.
+    getReplyWork: async () => ({ sellerAccountId: "acc-1", channel: "NAVER", coverage: "COVERED", todo: [], recentlyReported: [] }),
   },
   getToken: () => "token",
 }));
@@ -79,6 +81,8 @@ const DETAIL: ChannelReviewDetailView = {
     writtenOn: "2026-08-11",
     rating: 5,
   },
+
+  replyWork: null,
 };
 
 function view(over: Partial<ActionWindowRunView> = {}): ActionWindowRunView {

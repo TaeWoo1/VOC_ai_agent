@@ -64,9 +64,9 @@ describe("channelCardAction — driven by real account status", () => {
     });
   });
 
-  it("CONNECTED but collection failing → 재연결·테스트 (still manage, not an OAuth reconnect)", () => {
+  it("CONNECTED but collection failing → 확인하기 (still manage, not an OAuth reconnect)", () => {
     expect(channelCardAction(cafe24, acc({ connectionStatus: "CONNECTED" }), false, true)).toEqual({
-      label: "재연결·테스트",
+      label: "확인하기",
       intent: "manage",
       disabled: false,
     });

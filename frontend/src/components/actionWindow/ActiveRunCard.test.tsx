@@ -41,7 +41,7 @@ describe("FE-11 ActiveRunCard (DOM/a11y)", () => {
   it("links to the run detail and offers no start-new affordance on a non-terminal run", () => {
     renderWithRouter(<ActiveRunCard run={running} onStartNew={() => {}} />);
     const link = screen.getByRole("link", { name: "자세히 보기" });
-    expect(link).toHaveAttribute("href", "/operations/current");
+    expect(link).toHaveAttribute("href", "/connect/imports/current");
     // Non-terminal ⇒ no start-new button, no desktop-only start-new note.
     expect(screen.queryByRole("button", { name: START_NEW_RUN_LABEL })).toBeNull();
     expect(screen.queryByText(DESKTOP_ONLY_COPY.startNew)).toBeNull();
@@ -55,7 +55,7 @@ describe("FE-11 ActiveRunCard (DOM/a11y)", () => {
       resolveCopy(checkpoint.currentStep!.copyKey, checkpoint.currentStep!.copyParams),
     );
     const link = screen.getByRole("link", { name: "확인하러 가기" });
-    expect(link).toHaveAttribute("href", "/operations/current");
+    expect(link).toHaveAttribute("href", "/connect/imports/current");
     // Still not terminal ⇒ no start-new affordance.
     expect(screen.queryByRole("button", { name: START_NEW_RUN_LABEL })).toBeNull();
   });
@@ -74,7 +74,7 @@ describe("FE-11 ActiveRunCard (DOM/a11y)", () => {
     expect(region).toHaveTextContent(DESKTOP_ONLY_COPY.startNew);
     expect(screen.getByRole("link", { name: "자세히 보기" })).toHaveAttribute(
       "href",
-      "/operations/current",
+      "/connect/imports/current",
     );
   });
 

@@ -2,7 +2,7 @@
 // The runtime's owner: what the hook resolves, and — the disposal contract's last item — that it
 // releases on unmount exactly what it created, and nothing it was handed.
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GuidedReplyConnectResult } from "./replyBridge";
 import { ReplyRuntimeDisposedError, type ReplyRuntime } from "./replyRuntime";
 import { useReplyRuntime } from "./useReplyRuntime";
@@ -11,6 +11,10 @@ import { useReplyRuntime } from "./useReplyRuntime";
 // leaves the stub live for every describe after it.
 afterEach(() => {
   vi.unstubAllEnvs();
+});
+beforeEach(() => {
+  // The simulated fallback is developer chrome (A6): DEV AND the fixture-preview opt-in.
+  vi.stubEnv("VITE_AW_FIXTURE_PREVIEW", "1");
 });
 
 function stubRuntime(): ReplyRuntime & { disposed: boolean } {

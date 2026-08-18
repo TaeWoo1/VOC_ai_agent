@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,10 +37,26 @@ public class InboxService {
         this.products = products;
     }
 
+    /** The feed's default and ceiling. The ceiling keeps one read bounded; the count beside it is not capped. */
+    public static final int DEFAULT_LIMIT = 50;
+    public static final int MAX_LIMIT = 500;
+
     @Transactional(readOnly = true)
     public InboxResponse inbox(UUID orgId) {
-        List<FeedItem> items = recentFeed(orgId, 50);
-        return new InboxResponse(items, items.size());
+        return inbox(orgId, null, DEFAULT_LIMIT);
+    }
+
+    /**
+     * @param type {@code INQUIRY} or {@code REVIEW} to read one kind only; null for the mixed feed
+     * @param limit rows to return, clamped to [1, {@link #MAX_LIMIT}]
+     */
+    @Transactional(readOnly = true)
+    public InboxResponse inbox(UUID orgId, String type, int limit) {
+        int size = Math.max(1, Math.min(MAX_LIMIT, limit));
+        List<FeedItem> items = recentFeed(orgId, size, true, type);
+        // Counted, not derived from the capped rows: the number is the same however few rows a page asked for.
+        long unanswered = inquiries.countByOrgIdAndStatus(orgId, "UNANSWERED");
+        return new InboxResponse(items, items.size(), unanswered);
     }
 
     @Transactional(readOnly = true)
@@ -54,23 +71,37 @@ public class InboxService {
      */
     @Transactional(readOnly = true)
     public List<FeedItem> recentFeed(UUID orgId, int limit, boolean includeSecret) {
+        return recentFeed(orgId, limit, includeSecret, null);
+    }
+
+    /**
+     * @param type {@code INQUIRY} / {@code REVIEW} to read one kind only; null for both. Each kind is
+     *     read newest-first up to {@code limit}, then merged and cut to {@code limit}.
+     */
+    @Transactional(readOnly = true)
+    public List<FeedItem> recentFeed(UUID orgId, int limit, boolean includeSecret, String type) {
+        boolean wantInquiries = type == null || "INQUIRY".equals(type);
+        boolean wantReviews = type == null || "REVIEW".equals(type);
+        var window = PageRequest.of(0, Math.max(1, limit));
         Map<UUID, String> channelNames = channels.findAll().stream()
                 .collect(Collectors.toMap(Channel::getId, Channel::getNameKo, (a, b) -> a));
         Map<UUID, String> productNames = products.findAllByOrgId(orgId).stream()
                 .collect(Collectors.toMap(Product::getId, Product::getName, (a, b) -> a));
 
         List<FeedItem> items = new ArrayList<>();
-        for (Inquiry q : inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(orgId)) {
+        for (Inquiry q : wantInquiries ? inquiries.findByOrgIdOrderByReceivedAtDesc(orgId, window) : List.<Inquiry>of()) {
             if (!includeSecret && Boolean.TRUE.equals(q.getSecret())) {
                 continue;
             }
             items.add(new FeedItem(q.getId().toString(), "INQUIRY",
+                    q.getChannelId() == null ? null : q.getChannelId().toString(),
                     channelNames.getOrDefault(q.getChannelId(), "기타"),
                     productNames.getOrDefault(q.getProductId(), "-"),
                     snippet(q.getBody()), null, q.getStatus(), q.getReceivedAt()));
         }
-        for (Review r : reviews.findTop50ByOrgIdOrderByReceivedAtDesc(orgId)) {
+        for (Review r : wantReviews ? reviews.findByOrgIdOrderByReceivedAtDesc(orgId, window) : List.<Review>of()) {
             items.add(new FeedItem(r.getId().toString(), "REVIEW",
+                    r.getChannelId() == null ? null : r.getChannelId().toString(),
                     channelNames.getOrDefault(r.getChannelId(), "기타"),
                     productNames.getOrDefault(r.getProductId(), "-"),
                     snippet(r.getBody()), r.getRating(),
@@ -80,15 +111,34 @@ public class InboxService {
         return items.size() > limit ? items.subList(0, limit) : items;
     }
 
+    /** How much of a body the feed shows. */
+    static final int SNIPPET_LENGTH = 60;
+
+    /**
+     * How much of a body is masked before it is cut. Wide enough that any phone/email token that
+     * BEGINS inside the snippet is fully inside the window (an email or a spaced phone number is
+     * well under 140 characters), so masking-then-cutting still never splits a token — while a
+     * body that runs to thousands of characters (a board post, a spam article) no longer costs
+     * three regex passes over all of it for a 60-character preview. Reading 500 rows used to take
+     * seconds for exactly that reason (product assembly A7).
+     */
+    static final int MASK_WINDOW = 200;
+
     /**
      * Build the customer-facing snippet: mask obvious PII (phone/email) BEFORE
      * truncating so a token is never split. The raw body stays untouched in the DB.
      */
-    private String snippet(String body) {
+    static String snippet(String body) {
         if (body == null) {
             return "";
         }
-        String masked = PiiMasker.maskText(body).strip();
-        return masked.length() <= 60 ? masked : masked.substring(0, 60) + "…";
+        boolean windowed = body.length() > MASK_WINDOW;
+        String head = windowed ? body.substring(0, MASK_WINDOW) : body;
+        String masked = PiiMasker.maskText(head).strip();
+        if (!windowed && masked.length() <= SNIPPET_LENGTH) {
+            return masked;
+        }
+        String cut = masked.length() <= SNIPPET_LENGTH ? masked : masked.substring(0, SNIPPET_LENGTH);
+        return cut + "…";
     }
 }

@@ -12,6 +12,14 @@
 **Anchored at `main` = `ca470e2056bf69a6fe899cca87fbdd408689fff1`**
 (PR #317 NAVER SmartStore v1 · PR #318 ESM marketplace attribution · PR #319 Cafe24 callback dev receiver, all merged).
 
+> **Forward pointer (2026-08-17).** This anchor is stale: `main` has since carried the v2 frontend
+> reconstruction (`fc5f86ed`), Coupang review acquisition/locate live proofs, the review AI triage pilot
+> (PR #458/#459), and the **product-assembly decision** — channel expansion paused, seller-visible
+> channels = NAVER / Coupang / Cafe24, workflow-centric IA (홈 / 리뷰 / 문의 / 주문 / 채널 연결):
+> `docs/product_assembly_ia_v1.md`, `docs/product-scope-v1.md` v1.8. §3–§5 state claims must be
+> re-derived at the current commit; §5's Coupang "skeleton only" line in particular is superseded by
+> `docs/multi-channel-connector-roadmap.md` §4.1.
+
 Every state claim in §3–§5 is true **as of that commit** and must be re-derived, never assumed, at a
 later commit. A recorded SHA is a snapshot, not a fact — including this one.
 
@@ -126,7 +134,9 @@ facets and points; it does not restate scope.
 
 - **Multi-channel from the start.** SellerOps is a multi-channel customer-operations agent across
   NAVER · Coupang · Cafe24 · ESM+ · 11번가 · 오늘의집 and beyond — never a NAVER-only review tool. The
-  channel set is open (§1). NAVER is the wedge, not the boundary.
+  channel set is open (§1). NAVER is the wedge, not the boundary. *(2026-08-17: open as **strategy**;
+  the **product surface** shows NAVER / Coupang / Cafe24 only until further channels are proven —
+  `docs/product_assembly_ia_v1.md` §2.)*
 - **Default experience is pull-first / exception-push.** The seller re-checks when needed; routine
   results surface on return or as a daily summary; only defined exceptions push immediately (new
   inquiry, severe negative review, spike, safety/refund/legal risk, reply delay, important collection
@@ -522,9 +532,11 @@ Direction and sequence. **No dates.** Each step requires its own approval.
    Cafe24 REVIEW/INQUIRY. **`운영 지원` stays file-upload-only**; that must not quietly change as a
    side effect.
 3. **Unblock ESM+ GMARKET REVIEW** — resolve the selected-state contract (dropdown, not tablist),
-   *then* seek a fresh single-use grant.
+   *then* seek a fresh single-use grant. **PAUSED 2026-08-17** (channel expansion paused —
+   `docs/product_assembly_ia_v1.md` §2).
 4. **Second-channel Action Window calibration** — the real post-v1 thesis test: does the pattern
-   survive a channel it was not designed against.
+   survive a channel it was not designed against. **Answered in practice by Coupang REVIEW
+   (LIVE_PROVEN, §4.1); further channels PAUSED 2026-08-17.**
 5. **Cafe24 as a first-class channel** — the code already carries `CONFIRMED` capabilities; the
    fence, not the implementation, is what lags.
 6. **Guided reply live submission** — deliberately deferred out of v1. Requires the 6th G3 scope +
@@ -566,8 +578,9 @@ router.**
 | Document | Owns |
 |---|---|
 | **this document** | Product identity, strategy, honest state, authority map, standing fences |
-| `docs/product-scope-v1.md` (lock **v1.7**) | Product scope contract, operating loop, autonomy modes, pull-first/exception-push, Session Readiness, Company Voice, registration decisions, Manufacturer Track |
-| `docs/sellerops_frontend_spec.md` | Frontend IA, screens, journeys, frontstage/backstage |
+| `docs/product-scope-v1.md` (lock **v1.9**; Self-Pilot Runtime → `docs/self_pilot_runtime_v1.md`) | Product scope contract, operating loop, autonomy modes, pull-first/exception-push, Session Readiness, Company Voice, registration decisions, Manufacturer Track, visible-channel set |
+| `docs/product_assembly_ia_v1.md` (2026-08-17) | **Product IA, screen responsibility, seller-visible channel set** — supersedes `frontend_spec` §5–§8·§17-A |
+| `docs/sellerops_frontend_spec.md` | Frontend principles: states, seller language, a11y, capability honesty, guided connection, Action Window screens |
 | `docs/multi-channel-connector-roadmap.md` | Collection strategy; **§4.1 = capability truth**; §5.1, §5.2, §11 |
 | `docs/sellerops_local_agent_runtime_adr.md` | Local-agent runtime boundary, projection direction |
 
@@ -701,10 +714,10 @@ Classified per the standing assumption rule. **None is resolved here.**
 |---|---|
 | P1 | **Formally declare NAVER v1 closed** — the precondition for §8 and for D1/D3/D13/D14/D16 |
 | P2 | **Retire or subordinate `docs/sellerops_current_state.md`** — decided in principle (§0); the mechanism and slice are open |
-| P3 | Which channel is the **second** Action Window calibration target: ESM+ (blocked on E1) or Cafe24 (code ahead of fence)? |
+| P3 | ~~Which channel is the **second** Action Window calibration target: ESM+ (blocked on E1) or Cafe24 (code ahead of fence)?~~ **Closed 2026-08-17** — Coupang REVIEW became the second live-proven Action Window channel; further channel work is paused (`docs/product_assembly_ia_v1.md` §2). |
 | P4 | Should a selected date range **gate** export, or stay observe-only? (D-025 leaves it explicitly non-gating and calls the gating question a PO call) |
 | P5 | When does any capability move from **라이브 검증** to **운영 지원**, and what is the bar? Today the answer is "nothing has, except file upload" |
-| P6 | Final mobile navigation composition; final naming for the unified customer-response screen |
+| P6 | ~~Final mobile navigation composition; final naming for the unified customer-response screen~~ **Closed 2026-08-17** — 홈 / 리뷰 / 문의 / 주문 tabs + 더보기; the response surface is 문의 (`/inquiries`) with reviews on 리뷰 (`docs/product_assembly_ia_v1.md` §3). |
 | P7 | Legacy-lineage quarantine: move, mark, or leave the ~18 non-product docs (D21) |
 
 ---

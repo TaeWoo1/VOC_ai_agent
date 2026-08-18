@@ -1,3 +1,4 @@
+import { PageHead } from "../components/ui/PageHead";
 import { useState } from "react";
 import { StatCard } from "../components/StatCard";
 import { Section } from "../components/Section";
@@ -39,7 +40,10 @@ export function Orders() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">주문 · 매출</h1>
+      <PageHead
+        title="주문"
+        description="연결된 채널의 주문과 매출을 기간·채널별로 집계합니다. 주문 처리는 각 판매자센터에서 합니다."
+      />
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex gap-1">

@@ -681,4 +681,145 @@ class SyncRunExecutorTest {
         // A config issue, not a connectivity failure → no health row touched.
         assertThat(connectionStatus.findBySellerAccountId(acc.getId())).isEmpty();
     }
+
+    // ── Self-Pilot Runtime v1: auth failure → RECONNECT_REQUIRED task, approval-missing → config ──
+
+    @Autowired com.sellerops.sync.SyncScheduleRepository schedules;
+    @Autowired com.sellerops.connector.ConnectorAlertRepository alerts;
+
+    private SyncRunExecutor executorThrowing(RuntimeException failure) {
+        PullConnector failing = new PullConnector() {
+            @Override
+            public String kind() {
+                return "MOCK_API";
+            }
+
+            @Override
+            public ConnectorCapabilities capabilities(String channelCode) {
+                return mock.capabilities(channelCode);
+            }
+
+            @Override
+            public FetchPage fetch(FetchRequest request) {
+                throw failure;
+            }
+        };
+        ConnectorRegistry registry = new ConnectorRegistry(List.of(failing));
+        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
+        com.sellerops.selfpilot.SellerAccountReauthService reauth =
+                new com.sellerops.selfpilot.SellerAccountReauthService(sellerAccounts, schedules, connectionStatus, alerts, txManager);
+        return new SyncRunExecutor(sellerAccounts, channels, registry, ingestion, orderIngestion, syncJobs, cursors,
+                connectionStatus, null, null, null, null, null, reauth);
+    }
+
+    private com.sellerops.sync.SyncSchedule enabledSchedule(SellerAccount acc, DataType type) {
+        com.sellerops.sync.SyncSchedule s = new com.sellerops.sync.SyncSchedule();
+        s.setOrgId(org);
+        s.setSellerAccountId(acc.getId());
+        s.setDataType(type.name());
+        s.setCadenceKind("INTERVAL");
+        s.setIntervalMinutes(60);
+        s.setEnabled(true);
+        s.setNextRunAt(java.time.Instant.now());
+        return schedules.save(s);
+    }
+
+    @Test
+    void authFailureBecomesReconnectRequiredPausesSchedulesAndOpensAlert() {
+        SellerAccount acc = account("GMARKET");
+        enabledSchedule(acc, DataType.INQUIRY);
+        enabledSchedule(acc, DataType.ORDER_SUMMARY);
+        SyncRunExecutor exec = executorThrowing(new com.sellerops.connector.ConnectorAuthException(
+                "테스트채널", com.sellerops.connector.ConnectorAuthException.Cause.CREDENTIAL_REJECTED));
+
+        SyncJob job = exec.execute(org, acc.getId(), DataType.INQUIRY, "SCHEDULED");
+
+        assertThat(job.getStatus()).isEqualTo("FAILED");
+        assertThat(job.getErrorMessage()).contains("인증이 더 이상 유효하지 않습니다");
+        // The account itself asks for the seller — the word the hub and the home already show.
+        assertThat(sellerAccounts.findById(acc.getId()).orElseThrow().getConnectionStatus())
+                .isEqualTo(ChannelStatus.RECONNECT_REQUIRED);
+        // Every enabled schedule is paused WITH a reason (system pause), none is silently deleted.
+        assertThat(schedules.findByOrgIdAndSellerAccountId(org, acc.getId()))
+                .hasSize(2)
+                .allSatisfy(s -> {
+                    assertThat(s.isEnabled()).isFalse();
+                    assertThat(s.getPausedReason()).contains("인증이 만료");
+                });
+        // Health reads NEEDS_REAUTH, not a failure count that would later masquerade as DEGRADED.
+        assertThat(connectionStatus.findBySellerAccountId(acc.getId()).orElseThrow().getState())
+                .isEqualTo("NEEDS_REAUTH");
+        assertThat(alerts.existsBySellerAccountIdAndTypeAndAcknowledgedAtIsNull(acc.getId(), "AUTH_EXPIRED")).isTrue();
+    }
+
+    @Test
+    void secondAuthFailureIsIdempotentOneAlertOnly() {
+        SellerAccount acc = account("GMARKET");
+        SyncRunExecutor exec = executorThrowing(new com.sellerops.connector.ConnectorAuthException(
+                "테스트채널", com.sellerops.connector.ConnectorAuthException.Cause.CREDENTIAL_REJECTED));
+        exec.execute(org, acc.getId(), DataType.INQUIRY, "SCHEDULED");
+        exec.execute(org, acc.getId(), DataType.INQUIRY, "SCHEDULED");
+        assertThat(alerts.findBySellerAccountIdAndTypeIn(acc.getId(), List.of("AUTH_EXPIRED"))).hasSize(1);
+    }
+
+    @Test
+    void reconnectResumesPausedSchedulesAndClosesTheAlert() {
+        SellerAccount acc = account("GMARKET");
+        enabledSchedule(acc, DataType.INQUIRY);
+        SyncRunExecutor exec = executorThrowing(new com.sellerops.connector.ConnectorAuthException(
+                "테스트채널", com.sellerops.connector.ConnectorAuthException.Cause.CREDENTIAL_REJECTED));
+        exec.execute(org, acc.getId(), DataType.INQUIRY, "SCHEDULED");
+
+        new com.sellerops.selfpilot.SellerAccountReauthService(sellerAccounts, schedules, connectionStatus, alerts, txManager)
+                .onReconnected(org, acc.getId());
+
+        assertThat(schedules.findByOrgIdAndSellerAccountId(org, acc.getId()))
+                .singleElement()
+                .satisfies(s -> {
+                    assertThat(s.isEnabled()).isTrue();
+                    assertThat(s.getPausedReason()).isNull();
+                    assertThat(s.getNextRunAt()).isNotNull();
+                });
+        assertThat(connectionStatus.findBySellerAccountId(acc.getId()).orElseThrow().getState()).isEqualTo("CONNECTED");
+        assertThat(alerts.existsBySellerAccountIdAndTypeAndAcknowledgedAtIsNull(acc.getId(), "AUTH_EXPIRED")).isFalse();
+    }
+
+    @Test
+    void operatorDisabledScheduleIsNotResumedByReconnect() {
+        SellerAccount acc = account("GMARKET");
+        com.sellerops.sync.SyncSchedule off = enabledSchedule(acc, DataType.INQUIRY);
+        off.setEnabled(false); // operator turned it off: no paused_reason
+        off.setNextRunAt(null);
+        schedules.save(off);
+
+        new com.sellerops.selfpilot.SellerAccountReauthService(sellerAccounts, schedules, connectionStatus, alerts, txManager)
+                .onReconnected(org, acc.getId());
+
+        assertThat(schedules.findById(off.getId()).orElseThrow().isEnabled()).isFalse();
+    }
+
+    @Test
+    void cafe24InvalidGrantIsAnAuthFailure() {
+        assertThat(SyncRunExecutor.classifyAuthFailure(
+                com.sellerops.connector.cafe24.Cafe24OAuthException.fromTokenError(400, "{\"error\":\"invalid_grant\"}",
+                        new com.fasterxml.jackson.databind.ObjectMapper())))
+                .contains("REFRESH_TOKEN_REVOKED");
+        assertThat(SyncRunExecutor.classifyAuthFailure(new RuntimeException("boom"))).isNull();
+    }
+
+    @Test
+    void missingLiveApprovalIsAConfigFailureNotAConnectionFailure() {
+        SellerAccount acc = account("COUPANG");
+        SyncRunExecutor exec = executorThrowing(
+                new com.sellerops.connector.coupang.CoupangLiveApprovalRequiredException("승인 없음"));
+
+        SyncJob job = exec.execute(org, acc.getId(), DataType.INQUIRY, "SCHEDULED");
+
+        assertThat(job.getStatus()).isEqualTo("FAILED");
+        assertThat(job.getErrorMessage()).contains("승인 없음");
+        // Nothing about the channel failed: no health row, account untouched.
+        assertThat(connectionStatus.findBySellerAccountId(acc.getId())).isEmpty();
+        assertThat(sellerAccounts.findById(acc.getId()).orElseThrow().getConnectionStatus())
+                .isEqualTo(ChannelStatus.CONNECTED);
+    }
 }

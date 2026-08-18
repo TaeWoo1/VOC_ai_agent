@@ -479,6 +479,36 @@ The long allow/deny lists and the Standing Safety Contract live behind a collaps
 
 ---
 
+## 6a. Self-Pilot Runtime — the operator's standing READ grant (product-owner decision, 2026-08-18)
+
+**What changed.** For the operator's **own** organisation(s), routine **READ** work is authorized once, for
+the lifetime of the armed backend process, instead of per run: official-API collection on the scheduler
+(NAVER ORDER · Coupang INQUIRY/ORDER · Cafe24 REVIEW/INQUIRY/ORDER) and bounded automatic AI triage
+(SellerOps' own tables, no marketplace call). Design + code: `docs/self_pilot_runtime_v1.md`.
+
+**The grant.** `SELLEROPS_SELF_PILOT_READ_GRANT_ID` = `spr-` + 8–32 hex, minted by
+`tools/self-pilot/mint-read-grant.sh`, entered by the operator into the backend env, shape-validated at
+boot (`SelfPilotProperties`), scoped by `SELLEROPS_SELF_PILOT_ORG_IDS`. It is an environment-binding token
+like the per-run approval id — never a credential — and it dies with the process; re-mint to rotate.
+
+**Where it opens.** Exactly one code gate: `CoupangLiveCallGuard.ensureLiveReadAllowed(baseUrl,
+liveApprovalId, standingReadGrantId)` — the READ-only signed GETs (orders, inquiries, connect probes).
+
+**Where it can never open — the WRITE boundary is unchanged.** `ensureLiveWriteAllowed(baseUrl,
+liveApprovalId)` has no parameter for it; `CoupangInquiryReplyClient.signedPost` calls that gate; every
+marketplace-mutating action (reply submission on any channel, credential entry on a marketplace, anything in
+§5b's ACTION BARRIER list) still needs its own fresh, single-use, mode-`WRITE` approval under §3. A READ
+grant is not a schedule for WRITE, and this section authorizes nothing about proof/dispatch runs driven by
+the assistant — those keep §3.
+
+**What is not relaxed for browser READ carriers.** The seated NAVER review import and the Coupang WING
+walks remain seller-performed (login, every click, the in-browser grant press); the change there is
+operational only — a supervisor keeps the agent resident and mints the READ walk's environment ids so the
+operator does not run a bootstrap by hand (`tools/self-pilot/agent-supervisor.sh`). §1.1–1.4 and 1.7 hold
+verbatim; §1.5 ("single-use") is superseded **only** for the READ grant above, by this decision.
+
+---
+
 ## 7. Applied: NAVER API-center calibration — TWO phases, TWO manifests
 
 API-center selector calibration is split into two phases whose **tools differ**, so each has its own

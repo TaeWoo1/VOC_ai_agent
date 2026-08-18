@@ -60,6 +60,27 @@ class ChannelServiceTest {
         return all.stream().filter(c -> c.code().equals(code)).findFirst().orElseThrow();
     }
 
+    /**
+     * Product assembly (2026-08-17): seller-facing surfaces read the visible catalog, which is
+     * exactly NAVER / COUPANG / CAFE24 in product order. The full catalog is untouched underneath.
+     */
+    @Test
+    void visibleCatalogIsExactlyTheThreeProductChannels() {
+        saveChannel("GMARKET", 0);
+        saveChannel("COUPANG", 1);
+        saveChannel("NAVER", 2);
+        saveChannel("FILE_UPLOAD", 3);
+        saveChannel("CAFE24", 4);
+        saveChannel("OHOUSE", 5);
+        ChannelService service = serviceWith(new ConnectorRegistry(List.of(new MockApiConnector())));
+
+        assertThat(service.listVisibleForOrg(org)).extracting(ChannelResponse::code)
+                .containsExactly("COUPANG", "NAVER", "CAFE24");
+        assertThat(service.listForOrg(org)).hasSize(6);
+        assertThat(ProductChannels.isVisible("GMARKET")).isFalse();
+        assertThat(ProductChannels.isVisible(null)).isFalse();
+    }
+
     @Test
     void mockFallbackNeverReadsAsAutoCollectAndStaysHonest() {
         saveChannel("NAVER", 0);

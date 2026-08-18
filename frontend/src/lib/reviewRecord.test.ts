@@ -9,12 +9,14 @@ import {
 } from "./reviewRecord";
 
 describe("hasReviewRecord", () => {
-  it("is true for the channel whose acquisition actually writes a record", () => {
-    expect(hasReviewRecord("COUPANG")).toBe(true);
+  it("is true for each product channel — every one keeps a review record", () => {
+    for (const code of ["NAVER", "COUPANG", "CAFE24"]) {
+      expect(hasReviewRecord(code)).toBe(true);
+    }
   });
 
   it("is false for every other channel, and for a channel that has not loaded", () => {
-    for (const code of ["NAVER", "CAFE24", "ESM", "", "coupang"]) {
+    for (const code of ["GMARKET", "ESM", "", "coupang"]) {
       expect(hasReviewRecord(code)).toBe(false);
     }
     expect(hasReviewRecord(null)).toBe(false);
@@ -23,23 +25,28 @@ describe("hasReviewRecord", () => {
 });
 
 describe("reviewRecordPath", () => {
-  it("is the route the record already lives at", () => {
-    expect(reviewRecordPath("acc-1")).toBe("/connect/channels/acc-1/reviews");
+  it("is the 리뷰 surface, keyed by account", () => {
+    expect(reviewRecordPath("acc-1")).toBe("/reviews/acc-1");
   });
 });
 
 describe("reviewEntryLabel", () => {
-  it("carries the count when the count is known", () => {
-    expect(reviewEntryLabel(22)).toBe("상품평 22개 보기");
+  it("carries the count when the count is known, in the product's word", () => {
+    expect(reviewEntryLabel(22)).toBe("리뷰 22개 보기");
+    expect(reviewEntryLabel(22, "NAVER")).toBe("리뷰 22개 보기");
+  });
+
+  it("uses the channel's own word where it has one (Coupang: 상품평)", () => {
+    expect(reviewEntryLabel(22, "COUPANG")).toBe("상품평 22개 보기");
   });
 
   it("says zero rather than hiding an empty record", () => {
-    expect(reviewEntryLabel(0)).toBe("상품평 0개 보기");
+    expect(reviewEntryLabel(0)).toBe("리뷰 0개 보기");
   });
 
   it("drops the number when it is unknown, and never invents a zero", () => {
     for (const unknown of [null, undefined, Number.NaN, -1, 1.5]) {
-      expect(reviewEntryLabel(unknown)).toBe("상품평 보기");
+      expect(reviewEntryLabel(unknown)).toBe("리뷰 보기");
     }
   });
 });
@@ -51,8 +58,9 @@ describe("reviewRecordSummary", () => {
 
   it("explains an empty record instead of reading as a failure", () => {
     const empty = reviewRecordSummary(0);
-    expect(empty).toContain("아직 수집된 상품평이 없습니다");
+    expect(empty).toContain("아직 수집된 리뷰가 없습니다");
     expect(empty).toContain("수집");
+    expect(reviewRecordSummary(0, "COUPANG")).toContain("아직 수집된 상품평이 없습니다");
   });
 
   it("admits an unreadable count while still promising the list opens", () => {

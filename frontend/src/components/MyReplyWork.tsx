@@ -22,7 +22,14 @@ import { attentionUncertaintyCopy } from "../lib/attention";
 /** Bounded — a record of recent work, not a history to page through. */
 const RECENT_LIMIT = 5;
 
-export function MyReplyWork({ accountId }: { accountId: string }) {
+export function MyReplyWork({
+  accountId,
+  refreshKey = 0,
+}: {
+  accountId: string;
+  /** Bumped by the owner when a decision or outcome was recorded elsewhere on the page (the 리뷰 detail), so this list re-reads. */
+  refreshKey?: number;
+}) {
   // Bumped when an operator records an outcome OR sets a review aside, so a row leaves the to-do
   // without a manual reload.
   const [reloadKey, setReloadKey] = useState(0);
@@ -38,7 +45,7 @@ export function MyReplyWork({ accountId }: { accountId: string }) {
   const [dismissedNotice, setDismissedNotice] = useState(false);
 
   // This surface is REUSED, not remounted, when the seller switches channels on the multi-account
-  // worklist (OperationsWorklist swaps `accountId` on one instance). Its transient acknowledgements
+  // surface (the 리뷰 screen swaps `accountId` on one instance). Its transient acknowledgements
   // are account-specific: a '제외했어요' banner — or an open 작업에서 제외 confirmation — from one
   // account must never carry onto the next, where the seller set nothing aside. Reset during render
   // (the React idiom for prop-derived state) so it clears before the switched-to worklist paints.
@@ -51,7 +58,7 @@ export function MyReplyWork({ accountId }: { accountId: string }) {
 
   const { data, loading, error } = useApiData(
     () => api.getReplyWork(accountId, { recentLimit: RECENT_LIMIT }),
-    [accountId, reloadKey],
+    [accountId, reloadKey, refreshKey],
   );
 
   const requestDismiss = useCallback((actionRef: string) => {

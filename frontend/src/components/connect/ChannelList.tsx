@@ -6,6 +6,7 @@ import { frontendRunId, isWalkthroughMode, withWalkthroughRun } from "../../lib/
 import { relativeTime } from "../../lib/format";
 import { expiryNeedsAttention, shouldOfferRenewal } from "../../lib/coupangExpiry";
 import { hasReviewRecord, reviewEntryLabel, reviewRecordPath } from "../../lib/reviewRecord";
+import { connectionState, type ConnectionState } from "../../lib/connectionState";
 import { ExpiryChip, RENEW_CTA_LABEL } from "../coupang/CoupangExpiryPanel";
 import type {
   ChannelResponse,
@@ -48,6 +49,8 @@ function ChannelRow({
   const lastCollected = health?.lastSyncedAt ?? channel.lastSyncedAt;
   const failing = !!health && (health.consecutiveFailures > 0 || !!health.lastError);
   const action = channelCardAction(channel, account, canUpload, failing);
+  // One word for how this channel stands (A5): 연결됨 · 연결 필요 · 연결 중 · 재연결 필요 · 오류.
+  const state = connectionState(account, health);
 
   // Credential-expiry surfacing (Coupang). The backend supplies the expiry sub-view on the health read;
   // WARN_* / DATE_PASSED / EXPIRED flag "만료 예정·조치 필요", and from WARN_14 (renewRecommended) the row
@@ -94,11 +97,9 @@ function ChannelRow({
         navigate(`/connect/upload?channelId=${channel.id}`);
         return;
       case "notice":
-        onNotice(
-          channel.support.credentialSetupSupported
-            ? "이 채널은 연결 정보를 등록한 뒤 연결할 수 있습니다."
-            : "이 채널은 아직 연결 방식을 확인하는 중입니다.",
-        );
+        // Unreachable for the three product channels (each has a connect flow); kept as the honest
+        // answer if the catalog ever hands this list a channel without one.
+        onNotice("이 채널은 지금 연결할 수 없습니다.");
         return;
     }
   }
@@ -106,7 +107,10 @@ function ChannelRow({
   return (
     <li className="flex flex-wrap items-start justify-between gap-4 px-5 py-5">
       <div className="min-w-0 flex-1">
-        <p className="break-keep font-semibold text-ink">{channel.nameKo}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="break-keep font-semibold text-ink">{channel.nameKo}</p>
+          <StatePill state={state} loading={statusLoading && !!account} />
+        </div>
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <Chip>{support.primaryLabel}</Chip>
           {support.chips.map((chip) => (
@@ -121,7 +125,7 @@ function ChannelRow({
         </p>
         {failing ? (
           <p className="mt-1 break-keep text-sm font-medium text-warn">
-            최근 수집에서 확인이 필요한 문제가 있었습니다.
+            최근 수집에서 오류가 있었습니다. 연결 관리에서 확인해 주세요.
           </p>
         ) : null}
         {expiryFlagged && expiry ? (
@@ -160,9 +164,9 @@ function ChannelRow({
             variant={failing ? "outline" : "solid"}
             // On screen the row's heading says which channel this is; in a screen reader's link list
             // it does not, and a page of rows would offer several links differing only by a number.
-            ariaLabel={`${channel.nameKo} ${reviewEntryLabel(reviewCount)}`}
+            ariaLabel={`${channel.nameKo} ${reviewEntryLabel(reviewCount, channel.code)}`}
           >
-            {reviewEntryLabel(reviewCount)}
+            {reviewEntryLabel(reviewCount, channel.code)}
           </BtnLink>
         ) : null}
         <Btn
@@ -178,6 +182,28 @@ function ChannelRow({
   );
 }
 
+/** The state chip. While the account's health is still loading it says so rather than guessing 연결됨. */
+function StatePill({ state, loading }: { state: ConnectionState; loading: boolean }) {
+  if (loading) {
+    return (
+      <span className="rounded-full bg-canvas px-2.5 py-0.5 text-xs font-semibold text-muted">
+        상태 확인 중
+      </span>
+    );
+  }
+  const tone = {
+    good: "bg-good/10 text-good",
+    muted: "bg-canvas text-muted",
+    warn: "bg-warn/10 text-warn",
+    bad: "bg-bad/10 text-bad",
+  }[state.tone];
+  return (
+    <span data-testid="connection-state" className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${tone}`}>
+      {state.label}
+    </span>
+  );
+}
+
 export function ChannelList({
   channels,
   accounts,
@@ -186,6 +212,10 @@ export function ChannelList({
   /** Collected 상품평 per account, for the rows that have a record. Absent = unknown, never zero. */
   reviewCounts,
   onNotice,
+  /** True while the catalog itself is still loading (as opposed to loaded-and-empty or failed). */
+  channelsLoading = false,
+  /** True when the catalog read failed — the list then says so instead of rendering nothing. */
+  channelsError = false,
 }: {
   channels: readonly ChannelResponse[];
   accounts: SellerAccountResponse[] | null;
@@ -193,9 +223,21 @@ export function ChannelList({
   statusLoading: boolean;
   reviewCounts?: Map<string, number>;
   onNotice: (message: string) => void;
+  channelsLoading?: boolean;
+  channelsError?: boolean;
 }) {
+  if (channelsLoading && channels.length === 0) {
+    return <p className="text-muted">불러오는 중…</p>;
+  }
   if (channels.length === 0) {
-    return <Empty title="채널 정보를 불러오지 못했습니다" body="잠시 후 다시 시도해 주세요." />;
+    return channelsError ? (
+      <Empty title="채널 정보를 불러오지 못했습니다" body="연결 상태를 확인한 뒤 다시 시도해 주세요." />
+    ) : (
+      <Empty
+        title="연결할 수 있는 채널이 없습니다"
+        body="네이버 스마트스토어, 쿠팡, 카페24가 표시되어야 합니다. 잠시 후 다시 시도해 주세요."
+      />
+    );
   }
   return (
     <ul aria-label="채널 목록" className="-mx-5 divide-y divide-line">

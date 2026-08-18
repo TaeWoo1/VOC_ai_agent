@@ -57,7 +57,7 @@ describe("상품평 패널 — the entry point", () => {
     getChannelReviewsStrict.mockResolvedValue(page(22));
     renderPanel();
     const link = await screen.findByRole("link", { name: "상품평 22개 보기" });
-    expect(link).toHaveAttribute("href", "/connect/channels/acc-cp/reviews");
+    expect(link).toHaveAttribute("href", "/reviews/acc-cp");
     expect(screen.getByText(/22개를 모아 두었습니다/)).toBeInTheDocument();
   });
 
@@ -73,7 +73,7 @@ describe("상품평 패널 — the entry point", () => {
     renderPanel();
     expect(await screen.findByRole("link", { name: "상품평 0개 보기" })).toHaveAttribute(
       "href",
-      "/connect/channels/acc-cp/reviews",
+      "/reviews/acc-cp",
     );
     expect(screen.getByText(/아직 수집된 상품평이 없습니다/)).toBeInTheDocument();
   });
@@ -82,7 +82,7 @@ describe("상품평 패널 — the entry point", () => {
     getChannelReviewsStrict.mockRejectedValue(new Error("backend down"));
     renderPanel();
     const link = await screen.findByRole("link", { name: "상품평 보기" });
-    expect(link).toHaveAttribute("href", "/connect/channels/acc-cp/reviews");
+    expect(link).toHaveAttribute("href", "/reviews/acc-cp");
     // No fabricated total, and no claim the record is empty — a failed read is not zero reviews.
     expect(await screen.findByText(/확인하지 못했습니다/)).toBeInTheDocument();
     expect(screen.queryByText(/0개/)).toBeNull();
@@ -104,15 +104,21 @@ describe("상품평 패널 — the entry point", () => {
   });
 
   it("makes no channel-specific claim about a channel it was not told", async () => {
-    // The gate that mounts this panel is an allowlist built to grow. If the note were hardcoded,
-    // the first channel added to it — one that DOES have seller replies — would inherit Coupang's
-    // claim on its own workspace, with nothing to catch it.
+    // Each channel's note is stored beside it. A NAVER panel must not inherit Coupang's claim, and
+    // it speaks in the product's word (리뷰), not Coupang's (상품평).
     getChannelReviewsStrict.mockResolvedValue(page(22));
     renderPanel({ channelCode: "NAVER" });
-    await screen.findByRole("link", { name: "상품평 22개 보기" });
+    await screen.findByRole("link", { name: "리뷰 22개 보기" });
     expect(screen.queryByText(/쿠팡/)).toBeNull();
     expect(screen.queryByText(/답변 작성 기능은 제공하지 않습니다/)).toBeNull();
-    expect(screen.getByText(/이 채널에서 수집한 구매자 상품평 기록입니다/)).toBeInTheDocument();
+    expect(screen.getByText(/스마트스토어센터에서 직접 작성/)).toBeInTheDocument();
+  });
+
+  it("falls back to the generic sentence for a channel with no note of its own", async () => {
+    getChannelReviewsStrict.mockResolvedValue(page(22));
+    renderPanel({ channelCode: null });
+    await screen.findByRole("link", { name: "리뷰 22개 보기" });
+    expect(screen.getByText(/이 채널에서 수집한 구매자 리뷰 기록입니다/)).toBeInTheDocument();
   });
 
   it("stops stating the old total once a re-read fails", async () => {
@@ -151,7 +157,7 @@ describe("상품평 패널 — the entry point", () => {
     // be a number about one seller account printed under another.
     expect(screen.getByRole("link", { name: "상품평 보기" })).toHaveAttribute(
       "href",
-      "/connect/channels/acc-other/reviews",
+      "/reviews/acc-other",
     );
     expect(screen.queryByText(/22개/)).toBeNull();
   });

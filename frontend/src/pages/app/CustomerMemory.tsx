@@ -88,13 +88,13 @@ export function CustomerMemory() {
         <Empty
           title="기록을 불러오지 못했습니다"
           body="연결 상태를 확인한 뒤 다시 시도해 주세요."
-          action={<BtnLink to="/connect">채널·자료 연결 확인</BtnLink>}
+          action={<BtnLink to="/connect">채널 연결 확인</BtnLink>}
         />
       ) : visible.length === 0 ? (
         <Empty
           title="아직 쌓인 기록이 없습니다"
           body="문의와 리뷰가 모이면, 같은 문제가 몇 번 반복됐는지와 무엇을 근거로 그렇게 보는지를 여기에서 확인합니다."
-          action={<BtnLink to="/connect">채널·자료 연결하기</BtnLink>}
+          action={<BtnLink to="/connect">채널 연결하기</BtnLink>}
         />
       ) : (
         <div className="grid gap-5 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">

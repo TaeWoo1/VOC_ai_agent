@@ -42,6 +42,7 @@ import {
 } from "./homeFixtures";
 import { COMMAND_REJECTED_COPY, CONNECTION_RETRY_FAILED_NOTE } from "./copy";
 import { createFixtureSource, type FixtureSource } from "./fixtureSource";
+import { isFixturePreviewEnabled } from "./devMode";
 import type { ActionWindowSource, SourceConnection, SourceUpdate, SteppableSource } from "./source";
 import type { SimScenarioName } from "./simulatedSource";
 
@@ -94,7 +95,17 @@ export interface OperationsState {
   simulationRemaining: number;
 }
 
-const INITIAL_HOME: HomeScenarioName = "home-active-checkpoint";
+/**
+ * The world the store boots into when no live Bridge is adopted.
+ *
+ * Under the developer fixture preview it is the flagship checkpoint demo (a run mid-checkpoint with
+ * history), so the whole surface can be inspected without an agent. On the product surface — a
+ * shipped build, or a plain `npm run dev` demo — it is EMPTY: no fixture run may pose as the
+ * seller's own (product assembly A7). Read at boot rather than at import so tests can stub the env.
+ */
+function initialHome(): HomeScenarioName {
+  return isFixturePreviewEnabled() ? "home-active-checkpoint" : "home-empty";
+}
 
 /** How many recent connection literals the diagnostics trail retains. */
 const CONNECTION_TRAIL_LIMIT = 6;
@@ -109,7 +120,8 @@ function freshConnectionDiagnostics(): Pick<
 }
 
 function initialState(): OperationsState {
-  const view = HOME_SCENARIOS[INITIAL_HOME].view;
+  const home = initialHome();
+  const view = HOME_SCENARIOS[home].view;
   return {
     run: view.activeRun,
     recentRuns: view.recentRuns,
@@ -121,7 +133,7 @@ function initialState(): OperationsState {
     bridgeRefusal: null,
     sourceMode: "fixture",
     runScenario: "human-action-required",
-    homeScenario: INITIAL_HOME,
+    homeScenario: home,
     simulation: null,
     simulationRemaining: 0,
   };
@@ -339,7 +351,7 @@ export function endBridgeRetry(succeeded: boolean): void {
  *  bridge mode, so this is the way back). Reuses the existing fixture-load
  *  teardown path. */
 export function returnToFixtureForDev(): void {
-  loadHomeScenario(INITIAL_HOME);
+  loadHomeScenario(initialHome());
 }
 
 // ── DEV fixture loads — wholesale previews, so no archiving. Loading a fixture

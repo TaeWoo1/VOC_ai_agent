@@ -15,7 +15,7 @@ vi.mock("axios", () => {
   const instance = {
     post,
     get: vi.fn(),
-    interceptors: { request: { use: vi.fn() } },
+    interceptors: { request: { use: vi.fn() }, response: { use: vi.fn() } },
   };
   return { default: { create: () => instance } };
 });

@@ -51,6 +51,26 @@ class CoupangConnectorConfigurationTest {
                 });
     }
 
+    /**
+     * Self-Pilot v1 independent review: a standing READ grant left in the environment while the runtime is
+     * OFF must arm nothing — otherwise it is a global read key for every org and every deployment.
+     */
+    @Test
+    void standingReadGrantIsInertUnlessSelfPilotIsEnabled() {
+        assertThat(CoupangConnectorConfiguration.effectiveReadGrant(false, "spr-0123456789abcdef")).isEmpty();
+        assertThat(CoupangConnectorConfiguration.effectiveReadGrant(true, "spr-0123456789abcdef"))
+                .isEqualTo("spr-0123456789abcdef");
+        assertThat(CoupangConnectorConfiguration.effectiveReadGrant(true, "")).isEmpty();
+    }
+
+    /** The auth verdict type must stay catchable by every existing IllegalStateException handler. */
+    @Test
+    void connectorAuthExceptionIsAnIllegalStateException() {
+        assertThat(new com.sellerops.connector.ConnectorAuthException("쿠팡",
+                com.sellerops.connector.ConnectorAuthException.Cause.CREDENTIAL_REJECTED))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
     /** The production bean graph (registry + connectors), not a hand-built registry. */
     private ApplicationContextRunner registryGraph() {
         return runner()

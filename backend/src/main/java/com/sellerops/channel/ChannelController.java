@@ -19,6 +19,6 @@ public class ChannelController {
 
     @GetMapping
     public List<ChannelResponse> list(@AuthenticationPrincipal AuthPrincipal principal) {
-        return channelService.listForOrg(principal.orgId());
+        return channelService.listVisibleForOrg(principal.orgId());
     }
 }

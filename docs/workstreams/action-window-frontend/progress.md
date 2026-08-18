@@ -1,5 +1,11 @@
 # Action Window Frontend — Progress (session handoff)
 
+> **⚠ Frozen record (last real update 2026-07-11, FE-9).** This file describes the Action Window
+> frontend slices FE-1…FE-9 and does **not** describe the shipped product frontend: the v2 IA
+> reconstruction (`fc5f86ed`, 2026-08-03) and the product-assembly IA (`docs/product_assembly_ia_v1.md`,
+> 2026-08-17) came after it, and the worktree path named under "Base" no longer exists. Read it for
+> Action Window FE lineage; for current frontend structure read the assembly doc and `frontend/src`.
+>
 > Update this document before stopping in every FE task.
 
 - **Workstream:** UI/UX + Frontend

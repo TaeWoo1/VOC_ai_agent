@@ -12,7 +12,9 @@ import { Login } from "./pages/Login";
 
 // v2 app surface
 import { HomeV2 } from "./pages/app/HomeV2";
+import { Reviews } from "./pages/app/Reviews";
 import { CustomerInbox } from "./pages/app/CustomerInbox";
+import { InboxItemRedirect } from "./pages/app/InboxItemRedirect";
 import { CustomerMemory } from "./pages/app/CustomerMemory";
 import { ReportsV2 } from "./pages/app/ReportsV2";
 import { ConnectHub } from "./pages/app/ConnectHub";
@@ -22,7 +24,6 @@ import { SettingsHome } from "./pages/app/SettingsHome";
 // new IA; the ones scheduled for replacement are rebuilt in Slices 4-6.
 import { Orders } from "./pages/Orders";
 import { ChannelWorkspace } from "./pages/app/ChannelWorkspace";
-import { ChannelReviews } from "./pages/app/ChannelReviews";
 import { Upload } from "./pages/Upload";
 import { ReviewImport } from "./pages/ReviewImport";
 import { OperationsHome } from "./pages/OperationsHome";
@@ -82,15 +83,25 @@ export function App() {
           </Protected>
         }
       >
-        {/* 운영 — the daily customer-operations surface */}
+        {/* 운영 — the workflow surfaces: 홈 / 리뷰 / 문의 / 주문 (docs/product_assembly_ia_v1.md §3) */}
         <Route path="/" element={<HomeV2 />} />
-        <Route path="/inbox" element={<CustomerInbox />} />
-        {/* Deep link to one row. The page resolves it against everything loaded, so a shared link
-            opens its item even when the reader's filters would have hidden it. */}
-        <Route path="/inbox/:itemRef" element={<CustomerInbox />} />
+        {/* 리뷰: one surface over the per-account review records; the account is a switcher, not a
+            destination. `/reviews` alone opens the first review-capable account. */}
+        <Route path="/reviews" element={<Reviews />} />
+        <Route path="/reviews/:accountId" element={<Reviews />} />
+        {/* 문의: the customer inbox scoped to inquiries. */}
+        <Route path="/inquiries" element={<CustomerInbox scope="INQUIRY" />} />
+        <Route path="/inquiries/:itemRef" element={<CustomerInbox scope="INQUIRY" />} />
+        {/* The mixed 문의+리뷰 queue is absorbed (A2): reviews are on 리뷰, inquiries on 문의. The
+            bare path lands on 문의; an item deep link (memory evidence, reports, bookmarks) is
+            resolved to the surface that owns the row. */}
+        <Route path="/inbox" element={<Navigate to="/inquiries" replace />} />
+        <Route path="/inbox/:itemRef" element={<InboxItemRedirect />} />
+        <Route path="/orders" element={<Orders />} />
+        {/* Kept as routes, out of the primary nav (reached from 홈 and 설정) until the home unit
+            decides their place. */}
         <Route path="/memory" element={<CustomerMemory />} />
         <Route path="/memory/:issueId" element={<CustomerMemory />} />
-        <Route path="/orders" element={<Orders />} />
         <Route path="/reports" element={<ReportsV2 />} />
 
         {/* 연결·설정 — everything about getting data in and keeping it flowing */}
@@ -99,9 +110,8 @@ export function App() {
             except "the list is over there". */}
         <Route path="/connect/channels" element={<Navigate to="/connect" replace />} />
         <Route path="/connect/channels/:accountId" element={<ChannelWorkspace />} />
-        {/* The channel's review record. Under the channel rather than beside the inbox: it is what
-            one connection collected, and it is read-only on a channel with no reply. */}
-        <Route path="/connect/channels/:accountId/reviews" element={<ChannelReviews />} />
+        {/* The channel's review record moved to the 리뷰 surface (`/reviews/:accountId`); the old
+            `/connect/channels/:accountId/reviews` path redirects via the legacy map below. */}
         <Route path="/connect/upload" element={<Upload />} />
         <Route path="/connect/review-history" element={<ReviewImport />} />
         <Route path="/connect/imports" element={<OperationsHome />} />

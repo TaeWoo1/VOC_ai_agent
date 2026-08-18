@@ -62,7 +62,8 @@ outgoing request in `TriageFailClosedTest`).
 ## 5. Demo order (operator)
 
 1. Backend up with §3 env for the demo org; frontend up; log in as that org.
-2. Per channel: open **채널 → 상품평**. Point out: rules tier chips, `aiPilotEnabled`, the channel row
+2. Open **리뷰** (`/reviews`, product assembly 2026-08-17) and switch channel with the chips at the
+   top — one surface, one record per account. Point out: rules tier chips, `aiPilotEnabled`, the channel row
    (Coupang shows `[쿠팡에서 보기]`; NAVER/Cafe24 show the "원문 이동 불가" line instead).
 3. Press one bounded run per account (§4, `limit` 25–50). Reload the list.
 4. If a row is marked: `AI 확인 필요` chip beside the rules chip, sorted with 확인 필요, disclosure line

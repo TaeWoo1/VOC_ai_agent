@@ -1,6 +1,7 @@
 package com.sellerops.connector.naver;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sellerops.connector.ConnectorAuthException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -186,6 +187,11 @@ public class NaverTokenClient {
         NaverHttpClient.Response response = http.postForm(tokenUri, form);
         if (response.statusCode() == 429) {
             throw NaverRateLimitedException.fromResponse(response);
+        }
+        if (response.statusCode() == 401 || response.statusCode() == 403) {
+            // The token endpoint refused the client credential itself (not a resource 4xx): the stored
+            // application id/secret no longer mints — an auth verdict, typed for RECONNECT_REQUIRED.
+            throw new ConnectorAuthException("네이버", ConnectorAuthException.Cause.CREDENTIAL_REJECTED);
         }
         if (response.statusCode() != 200) {
             throw new IllegalStateException(

@@ -50,12 +50,16 @@ afterEach(() => {
 // that fetch would make this file a slow, flaky duplicate of tests those pages already own.
 describe("v2 app routes", () => {
   for (const [path, heading] of [
-    // The menu item is 운영 홈; the page's own headline is the question it answers.
-    ["/", "오늘 확인할 고객 신호"],
-    ["/inbox", "고객 인박스"],
+    // The menu item is 홈; the page's own headline is the question it answers.
+    ["/", "오늘 확인하거나 조치할 일"],
+    // 리뷰 / 문의 are the workflow doors; memory/reports stay as routes.
+    ["/reviews", "리뷰"],
+    ["/inquiries", "문의"],
+    // The mixed queue is absorbed: its bare path lands on 문의.
+    ["/inbox", "문의"],
     ["/memory", "고객운영 메모리"],
     ["/reports", "주간 고객운영 리포트"],
-    ["/connect", "채널·자료 연결"],
+    ["/connect", "채널 연결"],
     ["/settings", "설정"],
   ] as const) {
     it(`renders ${heading} at ${path}`, async () => {
@@ -66,7 +70,7 @@ describe("v2 app routes", () => {
 
   it("mounts the v2 shell around app pages", async () => {
     renderAt("/");
-    await screen.findByRole("heading", { level: 1, name: "오늘 확인할 고객 신호" });
+    await screen.findByRole("heading", { level: 1, name: "오늘 확인하거나 조치할 일" });
     expect(screen.getByRole("navigation", { name: "주 메뉴" })).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "모바일 메뉴" })).toBeInTheDocument();
   });
@@ -75,11 +79,12 @@ describe("v2 app routes", () => {
 describe("legacy routes — live behaviour", () => {
   for (const [from, heading] of [
     ["/issues", "고객운영 메모리"],
-    ["/inquiries", "고객 인박스"],
-    ["/settings/channels", "채널·자료 연결"],
+    ["/settings/channels", "채널 연결"],
     // The separate channel list folded into the hub in Slice 6.
-    ["/connect/channels", "채널·자료 연결"],
-    ["/channels", "채널·자료 연결"],
+    ["/connect/channels", "채널 연결"],
+    ["/channels", "채널 연결"],
+    // The review record moved under 리뷰 (product assembly); the old path redirects.
+    ["/connect/channels/acc-1/reviews", "리뷰"],
   ] as const) {
     it(`${from} lands on ${heading}`, async () => {
       renderAt(from);

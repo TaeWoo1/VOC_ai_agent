@@ -80,8 +80,9 @@ export async function startReplySubmission(
  * A null is not a degraded guided run — it is the honest statement that this build cannot guide, and
  * the panel answers it with a clearly-labelled manual handoff that records NO run ref at all.
  *
- * Simulation stays DEV/test-only: `isFixturePreviewEnabled()` is `import.meta.env.DEV`, so the
- * production bundle tree-shakes the branch out entirely.
+ * Simulation stays DEV/test-only AND opt-in: `isFixturePreviewEnabled()` is `import.meta.env.DEV`
+ * plus `VITE_AW_FIXTURE_PREVIEW=1` (product assembly A6 — a plain dev server shows the product's
+ * manual handoff, not a simulated run), so the production bundle tree-shakes the branch out entirely.
  */
 export function resolveReplyRuntime(): ReplyRuntime | null {
   return isFixturePreviewEnabled() ? createSimulatedReplyRuntime() : null;

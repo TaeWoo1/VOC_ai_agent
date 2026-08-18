@@ -61,6 +61,26 @@ export function SettingsHome() {
           </p>
         </Panel>
 
+        <Panel
+          title="더 보기"
+          description="주 메뉴에 두지 않은 화면입니다. 홈의 신호 카드에서도 열립니다."
+        >
+          <ul className="space-y-2">
+            <li>
+              <BtnLink to="/memory" size="sm" variant="outline">
+                고객운영 메모리
+              </BtnLink>
+              <span className="ml-3 break-keep text-sm text-muted">반복되는 고객 문제와 그 근거</span>
+            </li>
+            <li>
+              <BtnLink to="/reports" size="sm" variant="outline">
+                리포트
+              </BtnLink>
+              <span className="ml-3 break-keep text-sm text-muted">수집된 자료로 만든 기간 요약</span>
+            </li>
+          </ul>
+        </Panel>
+
         <Panel title="계정">
           <p className="break-keep leading-relaxed text-muted">
             이 브라우저에서 로그아웃합니다. 수집된 자료는 그대로 남습니다.

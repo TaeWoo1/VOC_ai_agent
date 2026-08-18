@@ -38,7 +38,15 @@
   live the same day** — one segment, 62 rows, two marketplace interactions, the seller working only in their
   SmartStore window. ⚠ The panel's **blocked** state is still offline-proven only (the gate matched on the first
   read), and §4.1 promotes nothing.
-- **Last updated:** 2026-07-26
+- **Surface note (2026-08-18, product assembly A6):** the guided-response entry point moved. The
+  per-account attention worklist ("오늘 확인할 일", `AttentionSignalList` + drill-down) that hosted
+  대응 필요 → 답변 준비 on the review-ops home was **removed from the UI**; the same reply flow
+  (`VocItemTriageControl` + `VocItemReplyPrep`, now `ReplyWorkControls`) is entered from the **리뷰
+  screen's detail** (`/reviews/:accountId?review=…`, NAVER only — server-minted
+  `ChannelReviewDetailView.replyWork`), and 내 답변 작업 lives on the same page. `/connect/imports` is the
+  acquisition workbench only. Canonical: `docs/product_assembly_ia_v1.md` §4c. Live evidence status is
+  unchanged by this move (no live run was performed for it).
+- **Last updated:** 2026-08-18 (surface note only; capability status as of 2026-07-26)
 - **Owner:** SellerOps product/engineering
 
 ---

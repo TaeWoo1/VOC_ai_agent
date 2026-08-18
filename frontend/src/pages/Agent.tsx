@@ -25,7 +25,7 @@ import type {
  * brief (issue). This page shows the run phase/tool trail and the checkpoint approve/reject
  * controls, and renders the issue brief — but it NEVER shows raw customer 원문. The customer's
  * original inquiry/review text is read only on the existing authorized detail screens (문의 응답 /
- * 리뷰 운영 / 상품 이슈), which this page links to. It also does not re-implement any domain
+ * 리뷰 / 상품 이슈), which this page links to. It also does not re-implement any domain
  * endpoint: every action goes through the Agent Runtime, which calls the backend.
  */
 export function Agent() {
@@ -483,8 +483,8 @@ function ReviewCheckpointCard({
       </dl>
       <p className="mt-3 text-sm text-muted">
         리뷰 원문과 답변 초안은
-        <Link to="/operations" className="mx-1 text-brand underline">
-          리뷰 운영
+        <Link to="/reviews" className="mx-1 text-brand underline">
+          리뷰
         </Link>
         화면에서 확인·수정하세요. 여기서는 저장된 버전(v{checkpoint.draftVersion})을 승인/거절만 합니다.
       </p>
@@ -520,8 +520,8 @@ function OutcomeCard({ domain, outcome }: { domain: string; outcome: InquiryOutc
       {domain === "REVIEW" && decision === "NONE" ? (
         <p className="mt-1 text-sm text-muted">
           준비·승인된 답변은
-          <Link to="/operations" className="mx-1 text-brand underline">
-            리뷰 운영
+          <Link to="/reviews" className="mx-1 text-brand underline">
+            리뷰
           </Link>
           에서 등록합니다.
         </p>
@@ -529,8 +529,8 @@ function OutcomeCard({ domain, outcome }: { domain: string; outcome: InquiryOutc
       {domain === "REVIEW" && outcome && "guidedSessionPrepared" in outcome && outcome.guidedSessionPrepared ? (
         <p className="mt-1 text-sm text-muted">
           안내형 등록 준비가 완료되었습니다.
-          <Link to="/operations" className="mx-1 text-brand underline">
-            리뷰 운영
+          <Link to="/reviews" className="mx-1 text-brand underline">
+            리뷰
           </Link>
           에서 사람이 직접 등록합니다.
         </p>

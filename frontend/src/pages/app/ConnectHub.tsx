@@ -17,7 +17,11 @@ import type {
 } from "../../lib/types";
 
 /**
- * 채널·자료 연결 — the one place every route into the product converges.
+ * 채널 연결 — where the product's data comes from, and the one place every route into it converges.
+ *
+ * Only the product channels are listed (NAVER / Coupang / Cafe24 — `lib/productChannels.ts`,
+ * `docs/product_assembly_ia_v1.md` §2): a channel on this screen is a channel a seller can actually
+ * use. The catalog rows the backend keeps for other channels are not shown here.
  *
  * The channel list lives here rather than on a separate page: splitting "the hub" from "the list"
  * meant the hub had nothing to say except "the list is over there". `/connect/channels` now
@@ -29,6 +33,8 @@ import type {
  */
 export function ConnectHub() {
   const [channels, setChannels] = useState<ChannelResponse[]>([]);
+  const [channelsLoading, setChannelsLoading] = useState(true);
+  const [channelsError, setChannelsError] = useState(false);
   const [accounts, setAccounts] = useState<SellerAccountResponse[] | null>(null);
   const [accountsLoading, setAccountsLoading] = useState(true);
   const [accountsError, setAccountsError] = useState(false);
@@ -39,10 +45,22 @@ export function ConnectHub() {
 
   useEffect(() => {
     let active = true;
+    // Strict: a dead backend says so here rather than rendering the demo catalog behind the seller's back.
     void api
-      .getChannels()
-      .then((list) => active && setChannels(list))
-      .catch(() => active && setChannels([]));
+      .getChannelsStrict()
+      .then((list) => {
+        if (active) {
+          setChannels(list);
+          setChannelsLoading(false);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setChannels([]);
+          setChannelsError(true);
+          setChannelsLoading(false);
+        }
+      });
     void api
       .getSellerAccountsStrict()
       .then((list) => {
@@ -136,8 +154,8 @@ export function ConnectHub() {
   return (
     <>
       <PageHead
-        title="채널·자료 연결"
-        description="판매 채널과 자료 가져오기 상태를 한곳에서 관리합니다."
+        title="채널 연결"
+        description="판매 채널을 연결하고, 자료 가져오기 상태를 한곳에서 관리합니다."
       />
 
       {openCount > 0 ? (
@@ -161,7 +179,7 @@ export function ConnectHub() {
 
       <Panel
         title="채널"
-        description="채널마다 가능한 연결 방식이 다릅니다. 지금 가능한 범위만 표시합니다."
+        description="네이버 스마트스토어, 쿠팡, 카페24를 연결할 수 있습니다. 채널마다 가능한 연결 방식이 다르며, 지금 가능한 범위만 표시합니다."
       >
         <ChannelList
           channels={channels}
@@ -170,6 +188,8 @@ export function ConnectHub() {
           statusLoading={accountsLoading}
           reviewCounts={reviewCounts}
           onNotice={setNotice}
+          channelsLoading={channelsLoading}
+          channelsError={channelsError}
         />
       </Panel>
 
@@ -187,7 +207,7 @@ export function ConnectHub() {
             "가져올 자료를 고릅니다.",
             "형식과 기간이 맞는지 먼저 확인합니다.",
             "중복을 걸러내고 채널이 달라도 같은 형태로 정리합니다.",
-            "인박스와 리포트에 반영됩니다.",
+            "리뷰·문의 화면과 리포트에 반영됩니다.",
           ].map((step, index) => (
             <li key={step} className="flex gap-3 break-keep leading-relaxed text-muted">
               <span
@@ -210,11 +230,11 @@ export function ConnectHub() {
       </Panel>
 
       <Panel
-        title="가져오기 진행"
-        description="사람이 확인해야 하는 지점에서만 멈추고 알려드립니다."
+        title="리뷰 수집 실행"
+        description="판매자센터에서 리뷰 파일을 내려받는 작업의 실행 상태와 수집 이력입니다. 사람이 확인해야 하는 지점에서만 멈추고 알려드립니다. 가져온 리뷰를 읽고 답변하는 일은 리뷰 화면에서 합니다."
         action={
           <BtnLink to="/connect/imports" size="sm" variant="outline">
-            진행 상황
+            작업대 열기
           </BtnLink>
         }
       >

@@ -11,6 +11,10 @@ export function Login() {
   // `?demo=1` is the entry the public page's "데모 화면 보기" CTA uses. It changes nothing about
   // authentication — it only tells the visitor, plainly, what they are about to look at.
   const fromDemoEntry = searchParams.get("demo") === "1";
+  // `?expired=1` is where the API client sends a session whose token stopped being accepted (12h JWT,
+  // longer self-pilot days). It changes nothing about authentication — it tells the seller, plainly, that
+  // nothing is broken and the one thing to do is sign in again.
+  const sessionExpired = searchParams.get("expired") === "1";
   const [email, setEmail] = useState("demo@sellerops.ai");
   const [password, setPassword] = useState("demo1234");
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +43,16 @@ export function Login() {
           <p className="text-3xl font-extrabold text-brand-700">SellerOps</p>
           <p className="mt-2 text-lg text-muted">채널에 흩어진 고객 응대를 한곳에서</p>
         </div>
+
+        {sessionExpired ? (
+          <div className="mb-5 rounded-xl border border-line bg-canvas px-5 py-4" role="status">
+            <p className="text-base font-semibold text-ink">세션이 만료되었습니다</p>
+            <p className="mt-1 text-sm leading-relaxed text-muted">
+              오래 사용하지 않아 로그인 상태가 풀렸습니다. 다시 로그인하면 하던 자리로 이어집니다. 채널 연결과
+              수집 설정은 그대로 남아 있습니다.
+            </p>
+          </div>
+        ) : null}
 
         {fromDemoEntry ? (
           <div className="mb-5 rounded-xl border border-line bg-canvas px-5 py-4">

@@ -215,9 +215,13 @@ describe("resolveReplyRuntime — production may not mint a run", () => {
     expect(resolveReplyRuntime()).toBeNull();
   });
 
-  it("gives DEV builds the simulated runtime, which is the only place it belongs", () => {
+  it("gives DEV builds the simulated runtime only under the fixture-preview opt-in (A6)", () => {
     vi.stubEnv("DEV", true);
+    // A plain `npm run dev` — the demo, the supervised live run — resolves like a shipped build:
+    // no simulated run, the manual handoff. The simulation is developer chrome, asked for explicitly.
+    expect(resolveReplyRuntime()).toBeNull();
 
+    vi.stubEnv("VITE_AW_FIXTURE_PREVIEW", "1");
     expect(resolveReplyRuntime()).not.toBeNull();
   });
 

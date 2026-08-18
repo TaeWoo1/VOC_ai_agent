@@ -77,12 +77,12 @@ export function expiryLabel(iso: string | null): { text: string; expired: boolea
 // Calm, high-level per-channel guidance on what kind of connection info the
 // channel needs — keyed by ChannelResponse.code. Describes the *kind* of info,
 // never the connector's exact secret-key names, never a password-casual ask.
+// Only the product channels carry a sentence (`lib/productChannels.ts`); a
+// channel outside that set is not shown, so it gets no connection claim here.
 
 export const CHANNEL_GUIDANCE: Record<string, string> = {
   COUPANG: "쿠팡 판매자센터(쿠팡 윙)에서 발급한 API 키로 연결합니다.",
   NAVER: "네이버 커머스 API 센터에서 발급한 애플리케이션 키로 연결합니다.",
-  GMARKET: "ESM 판매자센터에서 발급한 API 인증 정보로 연결합니다.",
-  ELEVENST: "11번가 셀러오피스에서 발급한 오픈 API 키로 연결합니다.",
   CAFE24: "자사몰 관리자에서 앱 연동(OAuth)으로 연결합니다.",
 };
 export const GENERIC_GUIDANCE =

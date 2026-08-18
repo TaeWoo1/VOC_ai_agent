@@ -446,15 +446,16 @@ export const REVIEW_WORK_COPY = {
   actionLabel: "내려받기 시작",
 } as const;
 
-// Home "리뷰 운영" activity strip (seller-center overhaul, Slice 2). A read-only
-// summary of the current review run shown on the Home dashboard that deep-links
-// into the operations workbench — it never starts or commands a run. "리뷰 운영"
-// matches the nav label and the /operations page title so the surface name never
-// drifts. The empty body is a calm honest state (shown when there is no live run).
+// "리뷰 수집" activity strip (Home 참고 panel · 채널 연결 hub). A read-only summary of the
+// current review acquisition run that deep-links into the collection workbench
+// (`/connect/imports`) — it never starts or commands a run. "리뷰 수집" matches the
+// workbench's page title so the surface name never drifts (product assembly A6: the
+// workbench collects; review work lives on the 리뷰 screen). The empty body is a calm
+// honest state (shown when there is no live run).
 export const HOME_REVIEW_OPS_COPY = {
-  sectionTitle: "리뷰 운영",
-  emptyBody: "진행 중인 리뷰 작업이 없어요.",
-  open: "리뷰 운영 열기",
+  sectionTitle: "리뷰 수집",
+  emptyBody: "진행 중인 리뷰 수집 작업이 없어요.",
+  open: "리뷰 수집 열기",
   goToCheckpoint: "확인하러 가기",
 } as const;
 

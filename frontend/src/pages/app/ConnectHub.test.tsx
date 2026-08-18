@@ -13,7 +13,7 @@ const getChannelReviewsStrict = vi.fn();
 
 vi.mock("../../lib/apiClient", () => ({
   api: {
-    getChannels: () => getChannels(),
+    getChannelsStrict: () => getChannels(),
     getSellerAccountsStrict: () => getSellerAccountsStrict(),
     getConnectionStatusStrict: (id: string) => getConnectionStatusStrict(id),
     getChannelReviewsStrict: (id: string, params: unknown) => getChannelReviewsStrict(id, params),
@@ -105,13 +105,13 @@ function renderHub() {
   );
 }
 
-describe("채널·자료 연결 — the hub", () => {
+describe("채널 연결 — the hub", () => {
   it("carries the four things this area is for", async () => {
     renderHub();
     expect(
-      await screen.findByRole("heading", { level: 1, name: "채널·자료 연결" }),
+      await screen.findByRole("heading", { level: 1, name: "채널 연결" }),
     ).toBeInTheDocument();
-    for (const section of ["채널", "정기 자료 가져오기", "가져오기 진행"]) {
+    for (const section of ["채널", "정기 자료 가져오기", "리뷰 수집 실행"]) {
       expect(screen.getByRole("heading", { name: section })).toBeInTheDocument();
     }
   });
@@ -157,7 +157,7 @@ describe("채널·자료 연결 — the hub", () => {
       "href",
       "/connect/review-history",
     );
-    expect(screen.getByRole("link", { name: "진행 상황" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "작업대 열기" })).toHaveAttribute(
       "href",
       "/connect/imports",
     );
@@ -170,13 +170,13 @@ describe("채널·자료 연결 — the hub", () => {
  * the data was there — the API answered with the full total — and the person in front of the screen
  * still had to be told the URL. These tests hold the row's way in.
  */
-describe("채널·자료 연결 — the 상품평 entry", () => {
+describe("채널 연결 — the 상품평 entry", () => {
   it("puts the record one click from the hub, with the count on the button", async () => {
     getChannels.mockResolvedValue([COUPANG]);
     getSellerAccountsStrict.mockResolvedValue([coupangAccount()]);
     renderHub();
     const link = await screen.findByRole("link", { name: "쿠팡 상품평 22개 보기" });
-    expect(link).toHaveAttribute("href", "/connect/channels/acc-cp/reviews");
+    expect(link).toHaveAttribute("href", "/reviews/acc-cp");
     expect(link).toHaveTextContent("상품평 22개 보기");
   });
 
@@ -211,7 +211,7 @@ describe("채널·자료 연결 — the 상품평 entry", () => {
       fail(new Error("backend down"));
     });
     const link = screen.getByRole("link", { name: "쿠팡 상품평 보기" });
-    expect(link).toHaveAttribute("href", "/connect/channels/acc-cp/reviews");
+    expect(link).toHaveAttribute("href", "/reviews/acc-cp");
     expect(screen.queryByRole("link", { name: /0개/ })).toBeNull();
   });
 
@@ -232,15 +232,24 @@ describe("채널·자료 연결 — the 상품평 entry", () => {
     expect(getChannelReviewsStrict).not.toHaveBeenCalled();
   });
 
-  it("offers nothing on a channel that keeps no 상품평 record, account or not", async () => {
+  it("offers nothing on a channel that keeps no review record, account or not", async () => {
     // The account is connected here ON PURPOSE: with no account the assertion would pass whatever
     // the channel predicate said, and the hub could stop consulting it without a test noticing.
-    getChannels.mockResolvedValue([channel({ id: "c1", code: "NAVER", nameKo: "네이버" })]);
+    getChannels.mockResolvedValue([channel({ id: "c1", code: "GMARKET", nameKo: "G마켓" })]);
     getSellerAccountsStrict.mockResolvedValue([{ ...coupangAccount(), channelId: "c1" }]);
     renderHub();
     await screen.findByLabelText("채널 목록");
-    expect(screen.queryByRole("link", { name: /상품평/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /(상품평|리뷰)( \d+개)? 보기/ })).toBeNull();
     expect(getChannelReviewsStrict).not.toHaveBeenCalled();
+  });
+
+  it("speaks the product's word on a channel without one of its own — 리뷰 N개 보기 on NAVER", async () => {
+    getChannels.mockResolvedValue([channel({ id: "c1", code: "NAVER", nameKo: "네이버" })]);
+    getSellerAccountsStrict.mockResolvedValue([{ ...coupangAccount(), id: "acc-nv", channelId: "c1" }]);
+    getChannelReviewsStrict.mockResolvedValue(reviewPage(7));
+    renderHub();
+    const link = await screen.findByRole("link", { name: "네이버 리뷰 7개 보기" });
+    expect(link).toHaveAttribute("href", "/reviews/acc-nv");
   });
 
   it("stays keyboard-reachable and has no axe violations with the entry present", async () => {
@@ -254,7 +263,7 @@ describe("채널·자료 연결 — the 상품평 entry", () => {
   });
 });
 
-describe("채널·자료 연결 — honesty", () => {
+describe("채널 연결 — honesty", () => {
   it("makes no automatic-integration claim", async () => {
     renderHub();
     await screen.findByLabelText("채널 목록");
@@ -280,7 +289,7 @@ describe("채널·자료 연결 — honesty", () => {
   });
 });
 
-describe("채널·자료 연결 — accessibility", () => {
+describe("채널 연결 — accessibility", () => {
   it("has no axe violations", async () => {
     const { container } = renderHub();
     await screen.findByLabelText("채널 목록");

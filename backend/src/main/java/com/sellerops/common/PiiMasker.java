@@ -34,15 +34,36 @@ public final class PiiMasker {
     private PiiMasker() {
     }
 
-    /** Replace email then phone (mobile, landline) with full tokens. Null/blank safe. */
+    /**
+     * Replace email then phone (mobile, landline) with full tokens. Null/blank safe.
+     *
+     * <p>Each pattern runs only when its cheapest necessary character is present ({@code @} for an
+     * email, a digit for a phone number). Not an optimisation for its own sake: the email pattern's
+     * leading {@code [..]+} re-scans every alphanumeric run from every position when there is no
+     * {@code @} to stop at, and on board-post bodies that made the inbox feed read in seconds
+     * (product assembly A7). The masking result is identical.
+     */
     public static String maskText(String text) {
         if (text == null || text.isBlank()) {
             return text;
         }
-        String out = EMAIL.matcher(text).replaceAll(EMAIL_TOKEN);
+        String out = text.indexOf('@') >= 0 ? EMAIL.matcher(text).replaceAll(EMAIL_TOKEN) : text;
+        if (!hasDigit(out)) {
+            return out;
+        }
         out = MOBILE.matcher(out).replaceAll(PHONE_TOKEN);
         out = LANDLINE.matcher(out).replaceAll(PHONE_TOKEN);
         return out;
+    }
+
+    private static boolean hasDigit(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c >= '0' && c <= '9') {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

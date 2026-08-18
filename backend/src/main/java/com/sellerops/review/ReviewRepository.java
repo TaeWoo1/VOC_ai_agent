@@ -14,6 +14,9 @@ import org.springframework.data.repository.query.Param;
 public interface ReviewRepository extends JpaRepository<Review, UUID> {
     List<Review> findTop50ByOrgIdOrderByReceivedAtDesc(UUID orgId);
 
+    /** Newest first, caller-sized — the inbox feed's read (product assembly A4). */
+    List<Review> findByOrgIdOrderByReceivedAtDesc(UUID orgId, org.springframework.data.domain.Pageable pageable);
+
     /**
      * One review, org-scoped at the query boundary — a cross-org id reads as absent rather
      * than as a row the caller may not have. Used where an id arrives from a client (the

@@ -13,13 +13,12 @@ describe("nav.v2 — structure", () => {
     expect(NAV_GROUPS.map((group) => group.heading)).toEqual(["운영", "연결·설정"]);
   });
 
-  it("declares the v2 destinations, in order", () => {
+  it("declares the workflow destinations, in order — 홈 / 리뷰 / 문의 / 주문, then 채널 연결 / 설정", () => {
     expect(NAV_ITEMS.map((item) => item.to)).toEqual([
       "/",
-      "/inbox",
-      "/memory",
+      "/reviews",
+      "/inquiries",
       "/orders",
-      "/reports",
       "/connect",
       "/settings",
     ]);
@@ -27,14 +26,26 @@ describe("nav.v2 — structure", () => {
 
   it("labels every destination in seller language", () => {
     expect(NAV_ITEMS.map((item) => item.label)).toEqual([
-      "운영 홈",
-      "고객 인박스",
-      "고객운영 메모리",
-      "주문·매출",
-      "리포트",
-      "채널·자료 연결",
+      "홈",
+      "리뷰",
+      "문의",
+      "주문",
+      "채널 연결",
       "설정",
     ]);
+  });
+
+  it("names no channel — a channel is a filter inside a screen, never a destination", () => {
+    for (const item of NAV_ITEMS) {
+      expect(item.label).not.toMatch(/네이버|쿠팡|카페24|스마트스토어/);
+      expect(item.to).not.toMatch(/naver|coupang|cafe24|channels\//);
+    }
+  });
+
+  it("keeps 메모리 and 리포트 as routes but out of the primary IA", () => {
+    expect(NAV_ITEMS.map((item) => item.to)).not.toContain("/memory");
+    expect(NAV_ITEMS.map((item) => item.to)).not.toContain("/reports");
+    expect(NAV_ITEMS.map((item) => item.to)).not.toContain("/inbox");
   });
 
   it("exact-match highlights only the home route", () => {
@@ -63,8 +74,8 @@ describe("nav.v2 — the operations agent is not a destination", () => {
 });
 
 describe("nav.v2 — mobile derives from the same model", () => {
-  it("uses four tab destinations plus a 더보기 trigger", () => {
-    expect(MOBILE_TAB_ROUTES).toEqual(["/", "/inbox", "/memory", "/connect"]);
+  it("uses the four 운영 destinations plus a 더보기 trigger", () => {
+    expect(MOBILE_TAB_ROUTES).toEqual(["/", "/reviews", "/inquiries", "/orders"]);
     expect(MOBILE_TABS).toHaveLength(4);
   });
 
@@ -74,8 +85,9 @@ describe("nav.v2 — mobile derives from the same model", () => {
     }
   });
 
-  it("keeps 주문·매출 out of the tab bar", () => {
-    expect(MOBILE_TABS.map((tab) => tab.to)).not.toContain("/orders");
+  it("keeps setup work (채널 연결, 설정) out of the tab bar", () => {
+    expect(MOBILE_TABS.map((tab) => tab.to)).not.toContain("/connect");
+    expect(MOBILE_TABS.map((tab) => tab.to)).not.toContain("/settings");
   });
 
   it("gives every destination a short label for the narrow bar", () => {

@@ -9,7 +9,7 @@ import {
 import { RunStatusBadge } from "./RunStatusBadge";
 
 /**
- * Home "리뷰 운영" activity strip — a compact, read-only summary of the current
+ * "리뷰 수집" activity strip — a compact, read-only summary of the current
  * review run that deep-links into the operations workbench. It NEVER starts or
  * commands a run (that lives on /operations); it only reflects and links.
  *
@@ -57,7 +57,7 @@ function RunSummary({ run }: { run: ActionWindowRunView }) {
 
       <div className="mt-4">
         <Link
-          to={needsHuman ? "/operations/current" : "/operations"}
+          to={needsHuman ? "/connect/imports/current" : "/connect/imports"}
           className={needsHuman ? "btn-primary" : "btn-ghost"}
         >
           {needsHuman ? HOME_REVIEW_OPS_COPY.goToCheckpoint : HOME_REVIEW_OPS_COPY.open} →
@@ -71,7 +71,7 @@ function EmptyReviewOps() {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
       <p className="text-muted">{HOME_REVIEW_OPS_COPY.emptyBody}</p>
-      <Link to="/operations" className="btn-ghost">
+      <Link to="/connect/imports" className="btn-ghost">
         {HOME_REVIEW_OPS_COPY.open} →
       </Link>
     </div>

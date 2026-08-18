@@ -21,6 +21,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.BiConsumer;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -73,6 +74,17 @@ public class Cafe24OnboardingService {
     private final String redirectUri;
     private final String scopes;
     private final long stateTtlSeconds;
+    /**
+     * Optional (Self-Pilot v1): invoked with {@code (orgId, sellerAccountId)} after a completion that
+     * ended CONNECTED, so a reconnect can resume auth-paused schedules. Best-effort; a throw here
+     * never undoes the stored credential or the CONNECTED status.
+     */
+    private volatile BiConsumer<UUID, UUID> onConnected = (org, account) -> { };
+
+    /** Register the post-connect hook (see {@link #onConnected}). */
+    public void onConnected(BiConsumer<UUID, UUID> hook) {
+        this.onConnected = hook == null ? (org, account) -> { } : hook;
+    }
 
     public Cafe24OnboardingService(SellerAccountRepository accounts, ChannelRepository channels,
                                    Cafe24OAuthStateRepository states, CredentialVault vault,
@@ -175,6 +187,23 @@ public class Cafe24OnboardingService {
      * INVALID without touching any account.
      */
     public CompletionResult complete(String rawState, String code, String error, String callbackMallId) {
+        // The org of a completion that ended CONNECTED, captured inside the transaction so the
+        // post-connect hook (Self-Pilot v1: resume paused schedules) runs AFTER the commit — never inside
+        // it, where a hook failure could roll back a credential that already stored.
+        UUID[] connectedOrg = new UUID[1];
+        CompletionResult result = completeInTransaction(rawState, code, error, callbackMallId, connectedOrg);
+        if (result != null && result.status() == CompletionStatus.CONNECTED && connectedOrg[0] != null) {
+            try {
+                onConnected.accept(connectedOrg[0], result.sellerAccountId());
+            } catch (RuntimeException ignore) {
+                // Best-effort by contract; the connection itself is already committed and CONNECTED.
+            }
+        }
+        return result;
+    }
+
+    private CompletionResult completeInTransaction(String rawState, String code, String error,
+                                                   String callbackMallId, UUID[] connectedOrg) {
         Instant now = clock.instant();
         return tx.execute(status -> {
             Optional<Cafe24OAuthState> found = (rawState == null || rawState.isBlank())
@@ -247,6 +276,7 @@ public class Cafe24OnboardingService {
                         secrets, null, null, state.getInitiatedBy());
                 account.setConnectionStatus(ChannelStatus.CONNECTED);
                 accounts.save(account);
+                connectedOrg[0] = state.getOrgId();
                 return new CompletionResult(CompletionStatus.CONNECTED, account.getId());
             } catch (RuntimeException e) {
                 // Code exchange or encrypted persistence failed — no credential written.

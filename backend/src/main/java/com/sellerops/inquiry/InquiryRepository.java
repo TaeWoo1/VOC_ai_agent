@@ -12,6 +12,9 @@ import org.springframework.data.repository.query.Param;
 public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
     List<Inquiry> findTop50ByOrgIdOrderByReceivedAtDesc(UUID orgId);
 
+    /** Newest first, caller-sized — the inbox feed's read (product assembly A4). */
+    List<Inquiry> findByOrgIdOrderByReceivedAtDesc(UUID orgId, org.springframework.data.domain.Pageable pageable);
+
     long countByOrgIdAndReceivedAtAfter(UUID orgId, Instant after);
 
     long countByOrgIdAndStatus(UUID orgId, String status);

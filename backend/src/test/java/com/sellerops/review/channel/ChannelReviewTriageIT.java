@@ -18,6 +18,10 @@ import com.sellerops.review.triage.feedback.AiTriageCurrentRepository;
 import com.sellerops.review.triage.pilot.AiTriagePilotProperties;
 import com.sellerops.review.triage.pilot.AiTriagePilotService;
 import com.sellerops.review.channel.dto.ChannelReviewPageView;
+import com.sellerops.attention.reply.ReviewReplyApprovalRepository;
+import com.sellerops.attention.reply.ReviewReplyDraftRepository;
+import com.sellerops.attention.reply.ReviewReplyWorkLookup;
+import com.sellerops.attention.triage.ReviewTriageRepository;
 import com.sellerops.review.triage.ReviewTriageRules;
 import com.sellerops.review.triage.ReviewTriageTier;
 import com.sellerops.selleraccount.SellerAccount;
@@ -60,6 +64,9 @@ class ChannelReviewTriageIT {
     @Autowired SyncJobRepository syncJobs;
     @Autowired ItemAnalysisRepository analyses;
     @Autowired AiTriageCurrentRepository aiCurrent;
+    @Autowired ReviewTriageRepository triages;
+    @Autowired ReviewReplyDraftRepository drafts;
+    @Autowired ReviewReplyApprovalRepository approvals;
 
     /**
      * Every body form the database can hold, paired with what Java calls it.
@@ -79,7 +86,7 @@ class ChannelReviewTriageIT {
     @BeforeEach
     void setUp() {
         service = new ChannelReviewService(reviews, products, accounts, syncJobs, analyses, aiCurrent,
-                pilotOff(), channels);
+                pilotOff(), channels, new ReviewReplyWorkLookup(triages, drafts, approvals));
         Channel ch = new Channel();
         ch.setCode("COUPANG");
         ch.setNameKo("쿠팡");

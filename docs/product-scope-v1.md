@@ -1,11 +1,46 @@
-# Product Scope v1.7 — Drift Guard
+# Product Scope v1.9 — Drift Guard
 
 SellerOps 제품 범위를 **하나의 합의된 정의로 고정**하기 위한 문서. 목적은 "무엇을 만드는가"보다
 **"무엇을 지금 만들지 않는가"를 못 박는 것**이다. 멀티채널 확장(`docs/multi-channel-connector-roadmap.md`)이
 구체화되면서 범위가 넓어지는 자연스러운 drift를 막는다.
 
-> Status: SCOPE LOCK **v1.7** (planning only). 본 문서는 코드를 바꾸지 않으며, 라이브 접속/브라우저/업로드/
+> Status: SCOPE LOCK **v1.9** (planning only). 본 문서는 코드를 바꾸지 않으며, 라이브 접속/브라우저/업로드/
 > DB 변경을 지시하지 않는다. 범위 변경은 이 문서를 고쳐 합의한 뒤에만 이뤄진다.
+>
+> v1.9 변경 (2026-08-18, 제품 오너 결정 반영): **Self-Pilot Runtime v1.** 정본: `docs/self_pilot_runtime_v1.md`
+> (설계·구현·복구 매트릭스), 승인 계약 §6a (`docs/sellerops_live_approval_contract.md`). 아래는 이전 서술 중 상충
+> 부분을 **명시적으로 대체**한다(삭제 없음).
+> ① **운영자 자기 org의 routine READ는 자동.** 공식 API 수집(NAVER ORDER · Coupang INQUIRY/ORDER · Cafe24
+>   REVIEW/INQUIRY/ORDER)은 기존 스케줄러로 실행되고, CONNECTED 계정의 수집 설정 행은 reconciler가 기본값으로
+>   만든다(운영자가 끈 행은 건드리지 않음). Coupang API READ는 per-run 승인 id 대신 **standing READ grant**
+>   (`SELLEROPS_SELF_PILOT_READ_GRANT_ID`)로 열린다. §7-1 "무인 스케줄 금지"와 §7-9 "라이브 접속 1회성 승인"은
+>   **운영자 자기 org의 official-API READ에 한해** 이 결정으로 대체된다; 브라우저 READ 경로(NAVER 리뷰 import,
+>   Coupang WING walk)는 여전히 **판매자가 앉아서 직접 클릭**하며(에이전트만 상주), 제3자 org·assistant 주도 proof
+>   run은 그대로 §7-9다.
+> ② **bounded 자동 AI triage** — org opt-in(§v1.8 ④ 그대로), tick당·KST 하루당 상한, 예측 행으로 계량. 모델·규칙
+>   순서는 바뀌지 않는다.
+> ③ **auth/session 만료 = RECONNECT_REQUIRED 작업.** 채널 인증 실패는 오류 카운트가 아니라 계정 상태 재연결 필요 +
+>   수집 일시 중지(사유 표시) + AUTH_EXPIRED 알림으로, SellerOps 세션 만료는 `/login?expired=1`로 surface한다.
+>   IA 동결(`product_assembly_ia_v1.md` §8) 안에서만 — 새 화면·새 상태어 없음.
+> ④ **WRITE 경계는 그대로.** §9의 모든 문장은 유효하다. 답변 제출 등 마켓 쓰기는 여전히 fresh single-use
+>   mode-`WRITE` 승인이며, READ grant는 코드상 WRITE 게이트에 전달될 수 없다.
+> ⑤ **capability 표기 불변.** 이 결정은 어떤 채널×타입도 운영 지원(✅)으로 승격하지 않는다(Roadmap §4.1 그대로).
+>
+> v1.8 변경 (2026-08-17, 제품 오너 결정 반영): **제품 조립(product assembly) 단계 전환.** 정본:
+> `docs/product_assembly_ia_v1.md`. 아래는 이전 서술 중 상충 부분을 **명시적으로 대체**한다(삭제 없음).
+> ① **채널 확장 일시 중단 · 노출 채널 = NAVER / Coupang / Cafe24 3종.** "채널 집합은 열려 있다"(v1.7 ①, §1)는
+>   **전략**으로 유지되나 **제품 표면**에서는 이 3종만 보인다 — 화면에 보이는 채널 = 실제 usable한 채널. 그 외
+>   채널은 어떤 사용자 UI에도 노출하지 않는다(카탈로그·업로드 채널 선택·필터 포함). 이후 채널 추가는
+>   connector/capability proof 후 **기존 UX에 끼우는 방식**으로만(§7-8 신설).
+> ② **업무 중심 IA** — 홈 / 리뷰 / 문의 / 주문 / 채널 연결(+설정). Frontend Spec §5의 "대시보드·주문·매출·고객
+>   응대·상품 이슈·리포트" IA와 §6·§7·§17-A는 대체된다. 핵심 질문: "오늘 내가 확인하거나 조치할 일은 무엇인가?"
+> ③ **FE 동결(v1.7 ⑧)의 해석** — 동결은 "능력마다 새 화면/카드/훅"에 대한 것이며, **기존 live-proven 능력을
+>   workflow surface로 조립하는 작업은 동결 대상이 아니다.** 여전히 새 채널·새 능력마다 전용 화면을 더하지 않는다.
+> ④ **리뷰 AI 상태 명시** — 리뷰 AI는 **C2 pilot candidate**(PASS 아님)이며 rules tier가 순서를 소유하고 AI는
+>   `AI 확인 필요` suggestion만 더한다(org opt-in, default OFF). 실제 셀러 행동·피드백은 이후 학습 자산으로
+>   축적하되 지금 모델을 바꾸지 않는다(`docs/workstreams/review_ai_triage_demo.md`,
+>   `contracts/review-triage-events/v1/CONTRACT.md`). §1.7 ④·§5.2의 "Company Voice 기반 AI 초안"은 방향으로
+>   유지되며 이 결정이 승격하지 않는다.
 >
 > v1.7 변경 (2026-07-26, 제품 오너 결정 반영): **Agent-first / pull-first 제품 정본 갱신.** 최신 제품 결정을
 > 범위 계약에 반영한다. 아래 결정은 이전 서술 중 상충하는 부분을 **명시적으로 대체**한다(대체 대상은 삭제하지
@@ -115,6 +150,8 @@ Connector Roadmap 부록 A를 따른다.
 > 통합 셀러센터.** 채널별 최선의 수집 방식(Connector Roadmap §5)으로 주문·문의·리뷰·상품 데이터를
 > 하나의 canonical 모델에 모아, 판매 운영자가 채널마다 로그인하지 않고 **한 화면에서 하루 운영을
 > 보고 대응**할 수 있게 하는 multi-commerce 운영 플랫폼.
+> *(v1.8: 여기 명명된 채널은 **목적지**이며 노출 약속이 아니다. 사용자에게 보이는 채널은
+> `docs/product_assembly_ia_v1.md` §2의 3종으로 제한된다.)*
 
 핵심 데이터(범위 내): **주문 / 문의 / 리뷰 / 상품 / 운영 리포트**. 이 다섯 외 데이터(광고·정산·물류
 트래킹 등)는 v1 범위 밖.
@@ -543,6 +580,9 @@ method는 "미지원"으로 표기하거나 숨김(`no_roadmap_language_in_ui`, 
 6. **canonical 스키마 확장으로 문제 풀기** — 새 채널/Track 요구를 raw 스키마 추가로 해결하려 하지 말 것.
    매핑/뷰/링크 레이어로 흡수.
 7. **멀티유저 RBAC / 결제 / 정산 / 광고 / 재고·가격 동기화** — 전부 v1 범위 밖.
+8. **(v1.8) 신규 채널 노출·per-channel 신규 화면** — 채널 확장은 일시 중단. NAVER/Coupang/Cafe24 외 채널을
+   사용자 UI에 노출하거나, 채널마다 별도 화면을 더하는 작업은 시작하지 않는다. 채널 추가는 capability proof
+   후 기존 workflow surface에 끼우는 방식으로만(`docs/product_assembly_ia_v1.md` §2·§4).
 8. **두 Track을 위한 수집 코어 분기** — 수집·dedup은 단일 경로 유지. Track은 뷰에서만 분기.
 9. **라이브 채널 접속을 표준 안전 규칙으로 자동 진행** — 모든 라이브 실행은 1회성 명시 승인
    (Connector Roadmap §8). Stop-hook 목표 압박은 승인이 아니다.
@@ -616,8 +656,8 @@ method는 "미지원"으로 표기하거나 숨김(`no_roadmap_language_in_ui`, 
 - **현재 작업은 Seller Track**이다. Manufacturer Track 요구가 Seller 프론트에 섞이면 멈추고 §3 경계를
   확인한다. 두 Track은 **같은 canonical 모델을 공유**하며, 수집 코어를 Track별로 분기시키는 요청은
   거절한다.
-- **Frontstage(운영 표면) 1차, Backstage(연결·수집 관리) 2차**의 위계를 흔드는 IA 요청은 Frontend
-  Spec을 먼저 고쳐 합의한다. 단 기본 UX는 **pull-first / exception-push**(§1.8)이고 FE는 **Agent Control Plane
+- **Frontstage(운영 표면) 1차, Backstage(연결·수집 관리) 2차**의 위계를 흔드는 IA 요청은
+  `docs/product_assembly_ia_v1.md`(IA 정본, v1.8)를 먼저 고쳐 합의한다. 단 기본 UX는 **pull-first / exception-push**(§1.8)이고 FE는 **Agent Control Plane
   projection/command adapter**이며 신규 기능은 동결이다 — 새 화면/카드/훅을 능력마다 추가하는 요청은 멈추고
   ADR(`agent-first-ui-light-adr.md`)·§1.8을 확인한다.
 - 새 채널/Track은 **어댑터·매핑·뷰**로 흡수한다. canonical raw 스키마 확장으로 푸는 요청은 멈추고 검토.

@@ -7,6 +7,7 @@ import {
   reviewRecordNote,
   reviewRecordPath,
   reviewRecordSummary,
+  reviewWord,
 } from "../../lib/reviewRecord";
 
 /**
@@ -47,18 +48,19 @@ export function ReviewRecordPanel({
    */
   const count = error ? null : data?.total ?? null;
   const note = reviewRecordNote(channelCode);
+  const word = reviewWord(channelCode);
 
   return (
     <Panel
-      title="상품평"
+      title={word}
       description={
-        loading ? "수집한 상품평을 확인하는 중입니다." : reviewRecordSummary(count)
+        loading ? `수집한 ${word} 수를 확인하는 중입니다.` : reviewRecordSummary(count, channelCode)
       }
       action={
         // Outline: the panel is already the loud thing on the page — a titled region stating how many
         // 상품평 are waiting. The page's one solid action stays in the header.
         <BtnLink to={reviewRecordPath(accountId)} size="sm" variant="outline">
-          {reviewEntryLabel(loading ? null : count)}
+          {reviewEntryLabel(loading ? null : count, channelCode)}
         </BtnLink>
       }
     >
@@ -66,7 +68,7 @@ export function ReviewRecordPanel({
         <p className="break-keep text-base leading-relaxed text-muted">{note}</p>
       ) : (
         <p className="break-keep text-base leading-relaxed text-muted">
-          이 채널에서 수집한 구매자 상품평 기록입니다.
+          이 채널에서 수집한 구매자 {word} 기록입니다.
         </p>
       )}
     </Panel>

@@ -81,12 +81,30 @@ function renderList(options: {
   );
 }
 
+describe("ChannelList — the connection state word (A5)", () => {
+  it("shows 연결됨 on a healthy connected row and 연결 필요 with 연결하기 when there is no account", () => {
+    renderList();
+    expect(screen.getByTestId("connection-state")).toHaveTextContent("연결됨");
+    renderList({ channels: [NAVER], accounts: [] });
+    const pills = screen.getAllByTestId("connection-state");
+    expect(pills[pills.length - 1]).toHaveTextContent("연결 필요");
+    expect(screen.getByRole("button", { name: "연결하기" })).toBeInTheDocument();
+  });
+
+  it("shows 오류 with 확인하기 when collection is failing", () => {
+    renderList({ health: health({ consecutiveFailures: 1 }) });
+    expect(screen.getByTestId("connection-state")).toHaveTextContent("오류");
+    expect(screen.getByRole("button", { name: "확인하기" })).toBeInTheDocument();
+    expect(screen.getByText(/최근 수집에서 오류가 있었습니다/)).toBeInTheDocument();
+  });
+});
+
 describe("ChannelList — the 상품평 entry", () => {
   it("appears on a review-record channel with an account, carrying the count", () => {
     renderList({ reviewCounts: new Map([["acc-cp", 22]]) });
     expect(screen.getByRole("link", { name: "쿠팡 상품평 22개 보기" })).toHaveAttribute(
       "href",
-      "/connect/channels/acc-cp/reviews",
+      "/reviews/acc-cp",
     );
   });
 
@@ -106,11 +124,23 @@ describe("ChannelList — the 상품평 entry", () => {
     // The account is present ON PURPOSE. With `accounts: []` this assertion would hold whatever the
     // channel predicate said, and deleting `hasReviewRecord(...)` from the row would break no test.
     renderList({
-      channels: [NAVER],
-      accounts: [{ ...ACCOUNT, id: "acc-nv", channelId: "naver-ch", channelNameKo: "네이버" }],
+      channels: [{ ...NAVER, code: "GMARKET", nameKo: "G마켓" }],
+      accounts: [{ ...ACCOUNT, id: "acc-gm", channelId: "naver-ch", channelNameKo: "G마켓" }],
     });
     expect(screen.getByRole("button", { name: "연결 관리" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /상품평/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /상품평|리뷰/ })).toBeNull();
+  });
+
+  it("speaks the product's word on NAVER — 리뷰, not Coupang's 상품평", () => {
+    renderList({
+      channels: [NAVER],
+      accounts: [{ ...ACCOUNT, id: "acc-nv", channelId: "naver-ch", channelNameKo: "네이버" }],
+      reviewCounts: new Map([["acc-nv", 3]]),
+    });
+    expect(screen.getByRole("link", { name: "네이버 리뷰 3개 보기" })).toHaveAttribute(
+      "href",
+      "/reviews/acc-nv",
+    );
   });
 
   it("is the row's loud action while the connection is healthy", () => {
@@ -131,7 +161,7 @@ describe("ChannelList — the 상품평 entry", () => {
     // brightest thing on a row that is asking to be repaired.
     expect(link).toBeInTheDocument();
     expect(link.className).not.toContain("bg-brand-700");
-    expect(screen.getByRole("button", { name: "재연결·테스트" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "확인하기" })).toBeInTheDocument();
   });
 
   it("wraps on a narrow row instead of hiding at a breakpoint", () => {

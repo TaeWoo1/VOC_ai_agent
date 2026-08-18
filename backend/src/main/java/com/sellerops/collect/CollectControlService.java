@@ -39,6 +39,8 @@ import com.sellerops.selleraccount.AccountSessionSlotService;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
 import com.sellerops.selleraccount.SessionReadinessState;
+import com.sellerops.selfpilot.SellerAccountReauthService;
+import org.springframework.beans.factory.annotation.Autowired;
 import com.sellerops.sync.SyncJob;
 import com.sellerops.sync.SyncJobRepository;
 import com.sellerops.sync.SyncSchedule;
@@ -95,8 +97,11 @@ public class CollectControlService {
     private final AccountSessionSlotService accountSlots;
     private final NaverConnectionLifecycle naverLifecycle;
     private final CoupangConnectionLifecycle coupangLifecycle;
+    /** Optional (Self-Pilot v1): resumes auth-paused schedules once a credential verifies again. */
+    private final SellerAccountReauthService reauth;
     private final ConnectorAlertService alertService;
 
+    /** Pre-Self-Pilot signature (no reauth service) — kept for the tests that construct it directly. */
     public CollectControlService(SellerAccountRepository sellerAccounts, ChannelRepository channels,
                                  SyncScheduleRepository schedules, SyncJobRepository syncJobs,
                                  ChannelConnectionStatusRepository connectionStatus,
@@ -106,6 +111,22 @@ public class CollectControlService {
                                  NaverConnectionLifecycle naverLifecycle,
                                  CoupangConnectionLifecycle coupangLifecycle,
                                  ConnectorAlertService alertService) {
+        this(sellerAccounts, channels, schedules, syncJobs, connectionStatus, capabilities, registry, executor,
+                vault, accountSlots, naverLifecycle, coupangLifecycle, alertService, null);
+    }
+
+    @Autowired
+    public CollectControlService(SellerAccountRepository sellerAccounts, ChannelRepository channels,
+                                 SyncScheduleRepository schedules, SyncJobRepository syncJobs,
+                                 ChannelConnectionStatusRepository connectionStatus,
+                                 ConnectorCapabilityRepository capabilities, ConnectorRegistry registry,
+                                 SyncRunExecutor executor, CredentialVault vault,
+                                 AccountSessionSlotService accountSlots,
+                                 NaverConnectionLifecycle naverLifecycle,
+                                 CoupangConnectionLifecycle coupangLifecycle,
+                                 ConnectorAlertService alertService,
+                                 SellerAccountReauthService reauth) {
+        this.reauth = reauth;
         this.sellerAccounts = sellerAccounts;
         this.channels = channels;
         this.schedules = schedules;
@@ -474,6 +495,10 @@ public class CollectControlService {
             //     back a credential that already verified.
             try {
                 resumePausedSchedules(orgId, sellerAccountId);
+                if (reauth != null) {
+                    // Self-Pilot v1: also closes an AUTH_EXPIRED alert and clears NEEDS_REAUTH health.
+                    reauth.onReconnected(orgId, sellerAccountId);
+                }
                 // The renewed credential's expiry is fresh — clear the stale expiring/expired nudges so a
                 // future cycle can raise a new one. Best-effort; never rolls back a verified credential.
                 alertService.clearCoupangExpiryAlerts(sellerAccountId);
@@ -583,6 +608,10 @@ public class CollectControlService {
             // is safe — the account's channel decides which one records the PREPARING transition.
             naverLifecycle.onCredentialTestVerified(orgId, sellerAccountId);
             coupangLifecycle.onCredentialTestVerified(orgId, sellerAccountId);
+            // Self-Pilot v1: a verified credential lifts an auth pause — schedules resume, alert closes.
+            if (reauth != null) {
+                reauth.onReconnected(orgId, sellerAccountId);
+            }
             return testResult(sellerAccountId, TEST_STATUS_SUCCESS, null, "연결 정보가 확인되었습니다.");
         }
         if (VerifyOutcome.REASON_INVALID_CREDENTIAL.equals(outcome.reasonCode())) {

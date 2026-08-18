@@ -42,7 +42,8 @@ enterprise. Canonical audience + scope exclusions: `docs/product-scope-v1.md` §
 
 ## 3. The channel truth (this is the anti-drift core)
 
-**SellerOps targets all channels a seller uses, over time.** Named today, in no priority order:
+**SellerOps targets all channels a seller uses, over time.** Named today, in no priority order
+(**strategy — not the product surface**; see the box below):
 
 `NAVER` · `Coupang` · `ESM+ (Gmarket / Auction)` · `Cafe24` · `오늘의집` · `SSG` · `11번가` ·
 `자사몰` · **review apps** · **and future marketplaces as sellers adopt them.**
@@ -62,6 +63,13 @@ Three rules that keep this from collapsing:
    capability. What is actually available / verified / operational is **only** what
    `docs/multi-channel-connector-roadmap.md` §4.1 says, mirrored as lessons in
    `docs/channel_capability_ledger.md`. Never promote status here.
+
+> **Product surface (2026-08-17, product-owner decision — `docs/product_assembly_ia_v1.md` §2).**
+> Channel expansion is **paused**. The seller-visible channel set is exactly **NAVER / Coupang / Cafe24**;
+> a channel on screen is a channel that is actually usable. Everything else named above stays a
+> strategic destination and appears on **no** user surface until a connector/capability proof adds it
+> to the existing UX (no new per-channel screens). The product is **workflow-centric** (홈 / 리뷰 / 문의 /
+> 주문 / 채널 연결), not channel-centric — a channel is a filter or a capability inside a screen.
 
 ## 4. How SellerOps acquires data — the honest posture
 
@@ -189,5 +197,7 @@ From `CLAUDE.md` safety fences and `docs/product-scope-v1.md`:
 | Connection & setup modes | `docs/multi-channel-connector-roadmap.md` §11 |
 | Action Window contract | `docs/slices/action-window-v1.md` |
 | Action Window runtime status | `docs/action-window-runtime/HANDOFF.md` |
-| Frontend source of truth | `docs/sellerops_frontend_spec.md` |
+| Product IA · screen responsibility · visible channels | `docs/product_assembly_ia_v1.md` |
+| Frontend principles (states, language, a11y, guided connection, AW screens) | `docs/sellerops_frontend_spec.md` |
+| Review AI triage demo / pilot state | `docs/workstreams/review_ai_triage_demo.md` |
 | Review operations wedge (this MVP) | `docs/workstreams/review_operations_mvp.md` |
