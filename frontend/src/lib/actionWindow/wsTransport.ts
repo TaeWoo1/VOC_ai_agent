@@ -217,7 +217,18 @@ async function openAnnouncedSocket(d: ResolvedDeps): Promise<OpenedSocket | AwRe
       }
       resolve(announcedCarrier ? { ok: false, reason, announcedCarrier } : refuse(reason));
     };
-    const timer = setTimeout(() => giveUp("no-announcement"), d.sessionTimeoutMs);
+    /**
+     * A carrier announcement that is not ours, seen while we were asking for a different one.
+     *
+     * Kept so the eventual refusal can still say `carrier-mismatch` rather than the vaguer
+     * `no-announcement` — the diagnosis is the useful half of that refusal ("this agent hosts
+     * replies" is actionable where "offline" is not).
+     */
+    let sawOtherCarrier: AwCarrierKind | null = null;
+    const timer = setTimeout(
+      () => (sawOtherCarrier ? giveUp("carrier-mismatch", sawOtherCarrier) : giveUp("no-announcement")),
+      d.sessionTimeoutMs,
+    );
     // Name the carrier we want (on-demand hosting). Only when the caller said which channel — the wire message
     // carries nothing else, and an agent that cannot serve it simply stays silent, which is the existing
     // `no-announcement` path.
@@ -267,6 +278,30 @@ async function openAnnouncedSocket(d: ResolvedDeps): Promise<OpenedSocket | AwRe
       // mis-attach would come back.
       const announced = parseAwCarrierKind(m.carrier);
       if (announced !== d.expectedCarrier) {
+        /**
+         * **We ASKED for a carrier: keep waiting rather than give up on the first announcement.**
+         *
+         * An on-demand host announces whatever it is currently hosting to every socket the moment it
+         * connects — before that socket has had a chance to say which carrier it wants. So a seller
+         * pressing `[쿠팡에서 보기]` while an abandoned renewal walk still held the slot met the
+         * renewal announcement, refused `carrier-mismatch`, and read "SellerOps 도우미가 지금 다른
+         * 작업을 하고 있어…" — even though the host handed the slot over ~170 ms later and the right
+         * announcement was already on its way (live, 2026-08-20). The seller pressed again and it
+         * worked, which is the shape of a race, not of a real refusal.
+         *
+         * **Nothing is loosened.** No client is built for the wrong carrier — that is the invariant,
+         * and it still holds byte for byte. The only change is WHEN the decision is made: at the
+         * session timeout instead of on the first frame, and the timeout still refuses with
+         * `carrier-mismatch` (see `sawOtherCarrier`), so a genuinely fixed-carrier agent of the wrong
+         * kind is diagnosed exactly as before — 4 s later.
+         *
+         * A caller that did NOT ask for a carrier keeps the immediate refusal: it has no handover to
+         * wait for, so waiting would only make an honest "wrong agent" answer slower.
+         */
+        if (d.attachChannelCode) {
+          sawOtherCarrier = announced ?? sawOtherCarrier;
+          return;
+        }
         // The announced carrier travels with the refusal when it is a KNOWN one: "this agent hosts
         // replies" is actionable where "offline" is not. A null announced value stays absent rather
         // than being reported as a carrier, since it is precisely the thing we could not identify.

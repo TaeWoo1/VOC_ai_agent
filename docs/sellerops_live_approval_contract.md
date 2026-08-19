@@ -59,6 +59,36 @@ distinct, non-substitutable approval flags per operation class:
 A READ approval never authorizes a WRITE, and vice-versa; the manifest's `mode` field (§2) states
 which, and a WRITE/submission always needs its own explicit approval (§3 exceptions).
 
+### A third class, and it is NOT a WRITE: the operator-required connection action
+
+Entering a Coupang Access/Secret key, entering NAVER application credentials, and granting Cafe24
+OAuth are **operator-required connection actions**. Calling them "marketplace WRITE" was a shorthand
+that has been used in reporting and it is wrong in the direction that matters — it borrows the
+vocabulary of the one thing this contract exists to fence, and it makes an ordinary setup step look
+like the reply-submission path.
+
+They are not marketplace-mutating. Nothing is posted to a seller's storefront, no buyer sees
+anything, no marketplace record changes. What they change is **SellerOps's own connection state**: a
+credential lands in the vault, or an OAuth grant is exchanged for a token. That is a write to the
+system of record, not to a marketplace.
+
+What they DO share with a WRITE is who has to perform them: **only the operator/seller can.** A
+credential is theirs to type and an OAuth consent is theirs to give, so no automation — and no
+assistant acting on their behalf — supplies either. That is a handling rule about authorship, not a
+risk class, and it is why the guided walks stop at "the seller copies the key into SellerOps's own
+masked form" rather than reading it.
+
+| | marketplace WRITE | operator-required connection action |
+|---|---|---|
+| what changes | a record on the marketplace | SellerOps's own connection state |
+| who can perform it | the seller, at a human checkpoint | the operator/seller, always |
+| approval | its own fresh, single-use mode-`WRITE` grant | the ordinary connect flow; no live-run grant |
+| examples | Coupang inquiry reply publish; NAVER guided reply submission | Coupang key entry; NAVER app credentials; Cafe24 OAuth |
+
+A proof run that stops before connecting a channel has therefore stopped at an **operator-required
+connection action**, and should say so — not "stopped before a marketplace WRITE", which claims a
+boundary it did not reach.
+
 ---
 
 ## 2. Approval Manifest (prepared by `bootstrap`/`preflight` **before** the approval request)
