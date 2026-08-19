@@ -6,6 +6,7 @@ import { PRODUCT_PATH } from "../lib/public/publicCta";
 import { analytics } from "../lib/analytics";
 import { AuthCard, authField, authLabel, authLink, authPrimaryButton } from "../components/auth/AuthCard";
 import { SocialSignInButtons } from "../components/auth/SocialSignInButtons";
+import { ConsentFields } from "../components/auth/ConsentFields";
 
 /** Where a brand-new org lands: nothing is connected yet, so the first thing to do IS 채널 연결. */
 export const FIRST_RUN_PATH = "/connect";
@@ -25,6 +26,8 @@ export function Signup() {
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [orgName, setOrgName] = useState("");
+  const [terms, setTerms] = useState(false);
+  const [marketing, setMarketing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -36,10 +39,21 @@ export function Signup() {
       setError("비밀번호는 6자 이상이어야 합니다.");
       return;
     }
+    if (!terms) {
+      setError("이용약관과 개인정보처리방침에 동의해야 가입할 수 있습니다.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      await signup({ email: email.trim(), password, name: name.trim(), orgName: orgName.trim() });
+      await signup({
+        email: email.trim(),
+        password,
+        name: name.trim(),
+        orgName: orgName.trim(),
+        termsAccepted: true,
+        marketingConsent: marketing,
+      });
       analytics.track("sign_up", { method: "email" });
       analytics.track("onboarding_completed");
       navigate(FIRST_RUN_PATH, { replace: true });
@@ -126,6 +140,7 @@ export function Signup() {
             aria-invalid={passwordTooShort || undefined}
           />
         </div>
+        <ConsentFields idPrefix="signup" terms={terms} marketing={marketing} onTerms={setTerms} onMarketing={setMarketing} />
         {error ? (
           <p className="text-sm text-bad" role="alert">
             {error}

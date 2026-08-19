@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../lib/auth";
+import { api } from "../lib/apiClient";
 import { loginFailure } from "../lib/loginError";
 import { PRODUCT_PATH } from "../lib/public/publicCta";
 import { analytics } from "../lib/analytics";
 import { AuthCard, authField, authLabel, authLink, authPrimaryButton } from "../components/auth/AuthCard";
+import { AuthNotice } from "../components/auth/AuthNotice";
 import { SocialSignInButtons } from "../components/auth/SocialSignInButtons";
 
 /**
@@ -40,6 +42,21 @@ export function Login() {
   // nothing is broken and the one thing to do is sign in again.
   const sessionExpired = searchParams.get("expired") === "1";
   const socialNotice = SOCIAL_NOTICE[searchParams.get("social") ?? ""] ?? null;
+  // `?reset=1` — the seller just set a new password on /reset-password (docs/service_readiness_v1.md §6).
+  const passwordReset = searchParams.get("reset") === "1";
+  // The reset entry exists only when a mailed link can reach someone (SMTP or the dev outbox) — a link to a
+  // form whose mail is dropped would be a lie. Until the answer arrives, no link (never a flicker of a dead one).
+  const [resetAvailable, setResetAvailable] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    api
+      .passwordResetConfig()
+      .then((c) => alive && setResetAvailable(c.enabled))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
   // The demo account is pre-filled ONLY on the demo entry. A real seller (Self-Pilot first-run) starts from an
   // empty form — a product whose login form arrives filled with someone else's account is not a product.
   const [email, setEmail] = useState(fromDemoEntry ? "demo@sellerops.ai" : "");
@@ -82,29 +99,26 @@ export function Login() {
       }
     >
       {sessionExpired ? (
-        <div className="rounded-xl border border-line bg-canvas px-5 py-4" role="status">
-          <p className="text-base font-semibold text-ink">세션이 만료되었습니다</p>
-          <p className="mt-1 text-sm leading-relaxed text-muted">
-            오래 사용하지 않아 로그인 상태가 풀렸습니다. 다시 로그인하면 하던 자리로 이어집니다. 채널 연결과
-            수집 설정은 그대로 남아 있습니다.
-          </p>
-        </div>
+        <AuthNotice title="세션이 만료되었습니다">
+          오래 사용하지 않아 로그인 상태가 풀렸습니다. 다시 로그인하면 하던 자리로 이어집니다. 채널 연결과 수집 설정은
+          그대로 남아 있습니다.
+        </AuthNotice>
+      ) : null}
+
+      {passwordReset ? (
+        <AuthNotice tone="success" title="비밀번호가 바뀌었어요">
+          새 비밀번호로 로그인해 주세요.
+        </AuthNotice>
       ) : null}
 
       {socialNotice ? (
-        <div className="rounded-xl border border-line bg-canvas px-5 py-4" role="status">
-          <p className="text-base font-semibold text-ink">{socialNotice.title}</p>
-          <p className="mt-1 text-sm leading-relaxed text-muted">{socialNotice.body}</p>
-        </div>
+        <AuthNotice title={socialNotice.title}>{socialNotice.body}</AuthNotice>
       ) : null}
 
       {fromDemoEntry ? (
-        <div className="rounded-xl border border-line bg-canvas px-5 py-4">
-          <p className="text-base font-semibold text-ink">데모 계정으로 둘러보는 중입니다</p>
-          <p className="mt-1 text-sm leading-relaxed text-muted">
-            계정 정보가 미리 입력되어 있습니다. 화면에 보이는 내용은 실제 판매 데이터가 아닙니다.
-          </p>
-        </div>
+        <AuthNotice title="데모 계정으로 둘러보는 중입니다">
+          계정 정보가 미리 입력되어 있습니다. 화면에 보이는 내용은 실제 판매 데이터가 아닙니다.
+        </AuthNotice>
       ) : null}
 
       <SocialSignInButtons intent="login" />
@@ -125,9 +139,16 @@ export function Login() {
           />
         </div>
         <div>
-          <label className={authLabel} htmlFor="login-password">
-            비밀번호
-          </label>
+          <div className="mb-1.5 flex items-baseline justify-between">
+            <label className={`${authLabel} mb-0`} htmlFor="login-password">
+              비밀번호
+            </label>
+            {resetAvailable ? (
+              <Link to="/forgot-password" className={`${authLink} text-sm`}>
+                비밀번호를 잊으셨나요?
+              </Link>
+            ) : null}
+          </div>
           <input
             id="login-password"
             type="password"

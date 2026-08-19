@@ -17,7 +17,8 @@ The demo procedure below assumes the seeded demo org. A **self-pilot** (initial 
 collection → routine operation, done by the seller themself) changes only these points:
 
 - **Clean org.** Do NOT log in as `demo@sellerops.ai`. Create a fresh org once with `POST /api/auth/signup`
-  (fields: `email`, `password` ≥ 6 chars, `name`, `orgName`) and log in with it at `/login` (replace the
+  (fields: `email`, `password` ≥ 6 chars, `name`, `orgName`, `termsAccepted: true` — 2026-08-19,
+  `docs/service_readiness_v1.md` §2-4) and log in with it at `/login` (replace the
   pre-filled demo credentials). Nothing from the demo/fixture data is visible from that org.
 - **Real channels only.** Connect only the channels the seller actually uses, from `/connect`; the visible
   set stays NAVER / Coupang / Cafe24 and no seller account is seeded.
@@ -93,7 +94,11 @@ and, if AI triage is wanted, `SELLEROPS_AI_TRIAGE_PILOT_ORG_IDS=*`. Optional (20
 `docs/auth_growth_instrumentation_v1.md` §8): Google / NAVER 소셜 로그인 = `SELLEROPS_OAUTH_GOOGLE_CLIENT_ID/SECRET`,
 `SELLEROPS_OAUTH_NAVER_CLIENT_ID/SECRET` (redirect URI at the provider console:
 `http://localhost:5173/login/oauth2/code/{google|naver}`); growth analytics = frontend `VITE_GTM_ID`,
-`VITE_POSTHOG_KEY` — all absent by default, and absent means the buttons / sinks do not exist. Start backend
+`VITE_POSTHOG_KEY` — all absent by default, and absent means the buttons / sinks do not exist. Optional (2026-08-19,
+`docs/service_readiness_v1.md` §5): password reset mail — local without SMTP: `SELLEROPS_MAIL_MODE=dev-outbox` (the
+reset link is printed in the backend log under `[DEV MAIL OUTBOX]`; without it the "비밀번호를 잊으셨나요?" entry does
+not exist); error monitoring `SENTRY_DSN` / `VITE_SENTRY_DSN` (absent = OFF); the consent banner appears only when
+`VITE_GTM_ID` / `VITE_POSTHOG_KEY` is set. Start backend
 (`bootRun`) and frontend (`npm run dev:bridge`). Nothing here is ever touched again for a new sign-up.
 
 **Seller, in the browser only:**

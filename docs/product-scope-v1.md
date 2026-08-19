@@ -1,11 +1,19 @@
-# Product Scope v1.10 — Drift Guard
+# Product Scope v1.11 — Drift Guard
 
 SellerOps 제품 범위를 **하나의 합의된 정의로 고정**하기 위한 문서. 목적은 "무엇을 만드는가"보다
 **"무엇을 지금 만들지 않는가"를 못 박는 것**이다. 멀티채널 확장(`docs/multi-channel-connector-roadmap.md`)이
 구체화되면서 범위가 넓어지는 자연스러운 drift를 막는다.
 
-> Status: SCOPE LOCK **v1.10** (planning only). 본 문서는 코드를 바꾸지 않으며, 라이브 접속/브라우저/업로드/
+> Status: SCOPE LOCK **v1.11** (planning only). 본 문서는 코드를 바꾸지 않으며, 라이브 접속/브라우저/업로드/
 > DB 변경을 지시하지 않는다. 범위 변경은 이 문서를 고쳐 합의한 뒤에만 이뤄진다.
+>
+> v1.11 변경 (2026-08-19, 제품 오너 결정 반영): **Service Readiness v1.** 정본: `docs/service_readiness_v1.md`.
+> 새 핵심 기능·채널 없음. 일반 SaaS 수준의 가입/운영/계측 기반 마무리: Sentry(frontend+backend, env 있을 때만,
+> replay OFF, PII·secret scrub), 비밀번호 찾기/재설정(`/forgot-password` → 메일 one-time link, SHA-256 at rest,
+> replay 불가, 계정 존재 비노출, mailer abstraction: smtp | dev-outbox | off), consent 구조(필수 약관 동의 기록 +
+> 선택 마케팅 수신 — 법률 문구는 작성하지 않음, `/legal/*`는 placeholder; 브라우저 분석/마케팅 동의 → analytics layer
+> + GTM Consent Mode v2), security headers/CSP(백엔드 + 빌드 타임 SPA CSP), auth shell 통일. 이 unit 이후 개발을
+> 멈추고 신규 사용자 self-pilot을 시작한다. 마켓 WRITE 승인 경계는 그대로.
 >
 > v1.10 변경 (2026-08-19, 제품 오너 결정 반영): **Auth + Growth Instrumentation v1.** 정본:
 > `docs/auth_growth_instrumentation_v1.md`. Google · NAVER 소셜 로그인을 **기존 email/password/JWT 위에** 추가(인증

@@ -1,5 +1,6 @@
 package com.sellerops.auth.social;
 
+import com.sellerops.auth.password.PasswordResetService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.EnableScheduling;
@@ -18,9 +19,11 @@ public class AuthHandoffJanitor {
     private static final Logger log = LoggerFactory.getLogger(AuthHandoffJanitor.class);
 
     private final SocialAuthService socialAuth;
+    private final PasswordResetService passwordReset;
 
-    public AuthHandoffJanitor(SocialAuthService socialAuth) {
+    public AuthHandoffJanitor(SocialAuthService socialAuth, PasswordResetService passwordReset) {
         this.socialAuth = socialAuth;
+        this.passwordReset = passwordReset;
     }
 
     @Scheduled(initialDelayString = "${sellerops.oauth.purge-initial-delay-ms:300000}",
@@ -29,6 +32,11 @@ public class AuthHandoffJanitor {
         int removed = socialAuth.purgeExpired();
         if (removed > 0) {
             log.info("auth handoffs purged: {}", removed);
+        }
+        // Expired password-reset rows (docs/service_readiness_v1.md §2-2) — same cadence, same reason.
+        int resets = passwordReset.purgeExpired();
+        if (resets > 0) {
+            log.info("password reset tokens purged: {}", resets);
         }
     }
 }

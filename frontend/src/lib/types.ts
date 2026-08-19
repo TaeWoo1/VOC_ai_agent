@@ -25,6 +25,13 @@ export interface SocialProvidersView {
   naver: boolean;
 }
 
+/** `GET /api/auth/password/config` — whether a mailed reset link can reach anyone (docs/service_readiness_v1.md §2-3). */
+export interface PasswordResetConfigView {
+  enabled: boolean;
+  /** Dev outbox: the mail lands in the local backend log — the UI may say so. */
+  devOutbox: boolean;
+}
+
 /** Answer to a one-time social login code (`POST /api/auth/social/exchange`). */
 export type SocialExchangeResponse =
   | { status: "SIGNED_IN"; token: string; user: UserView; provider: string }

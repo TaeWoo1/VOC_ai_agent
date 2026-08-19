@@ -13,7 +13,10 @@ vi.mock("../lib/auth", () => ({
 }));
 // No social provider configured here — the social buttons are covered in components/auth/SocialSignInButtons.test.tsx.
 vi.mock("../lib/apiClient", () => ({
-  api: { socialProviders: async () => ({ google: false, naver: false }) },
+  api: {
+    socialProviders: async () => ({ google: false, naver: false }),
+    passwordResetConfig: async () => ({ enabled: false, devOutbox: false }),
+  },
 }));
 
 function renderSignup() {
@@ -33,6 +36,7 @@ function fill() {
   fireEvent.change(screen.getByLabelText("이름"), { target: { value: "판매자" } });
   fireEvent.change(screen.getByLabelText("이메일"), { target: { value: "seller@example.test" } });
   fireEvent.change(screen.getByLabelText(/비밀번호/), { target: { value: "secret123" } });
+  fireEvent.click(screen.getByLabelText(/\(필수\)/));
 }
 
 afterEach(() => vi.clearAllMocks());
@@ -53,7 +57,27 @@ describe("회원가입", () => {
       password: "secret123",
       name: "판매자",
       orgName: "테스트 스토어",
+      termsAccepted: true,
+      marketingConsent: false,
     });
+  });
+
+  it("refuses to submit without the 필수 consent and passes the 선택 one through (docs/service_readiness_v1.md §2-4)", async () => {
+    signup.mockResolvedValue(undefined);
+    renderSignup();
+    fill();
+    // The consent links go to the legal placeholders.
+    expect(screen.getByRole("link", { name: "이용약관" })).toHaveAttribute("href", "/legal/terms");
+    expect(screen.getByRole("link", { name: "개인정보처리방침" })).toHaveAttribute("href", "/legal/privacy");
+    fireEvent.click(screen.getByLabelText(/\(필수\)/)); // un-tick
+    // The checkbox is `required` (the browser blocks the click natively); the form's own guard is the same answer.
+    fireEvent.submit(screen.getByRole("form", { name: "회원가입" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("동의");
+    expect(signup).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText(/\(필수\)/));
+    fireEvent.click(screen.getByLabelText(/\(선택\)/));
+    fireEvent.click(screen.getByRole("button", { name: "계정 만들기" }));
+    await waitFor(() => expect(signup).toHaveBeenCalledWith(expect.objectContaining({ termsAccepted: true, marketingConsent: true })));
   });
 
   it("refuses a short password before calling the backend", async () => {

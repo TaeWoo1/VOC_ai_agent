@@ -3,6 +3,7 @@ import type {
   AccountDashboardSummary,
   ArticleListResponse,
   AuthResponse,
+  PasswordResetConfigView,
   SocialExchangeResponse,
   SocialProvidersView,
   BackfillRequest,
@@ -117,6 +118,7 @@ import {
   mockVocItemTriage,
 } from "./mocks";
 import { visibleChannels } from "./productChannels";
+import { captureApiError } from "./telemetry/sentry";
 
 // Default to a SAME-ORIGIN relative base ("") so `/api/*` requests go through the Vite dev proxy (see
 // vite.config.ts) to whatever backend the dev server targets. This removes the two failure modes that
@@ -175,6 +177,8 @@ http.interceptors.response.use(
         window.location.assign(SESSION_EXPIRED_PATH);
       }
     }
+    // Error monitoring (docs/service_readiness_v1.md §2-1): ≥ 500 / no answer is an incident; a no-op without Sentry.
+    captureApiError(error);
     return Promise.reject(error);
   },
 );
@@ -218,6 +222,9 @@ export const api = {
     password: string;
     name: string;
     orgName: string;
+    /** 필수 동의 — the backend refuses without it (docs/service_readiness_v1.md §2-4). */
+    termsAccepted: boolean;
+    marketingConsent: boolean;
   }): Promise<AuthResponse> {
     if (USE_MOCKS) {
       return mockAuth();
@@ -242,9 +249,34 @@ export const api = {
     return data;
   },
 
-  async socialOnboardingComplete(input: { onboardingToken: string; orgName: string; name: string }): Promise<AuthResponse> {
+  async socialOnboardingComplete(input: {
+    onboardingToken: string;
+    orgName: string;
+    name: string;
+    termsAccepted: boolean;
+    marketingConsent: boolean;
+  }): Promise<AuthResponse> {
     const { data } = await http.post<AuthResponse>("/api/auth/social/onboarding/complete", input);
     return data;
+  },
+
+  // ── Password reset (docs/service_readiness_v1.md §2-2, §6). `config` decides whether the entry exists at all.
+  async passwordResetConfig(): Promise<PasswordResetConfigView> {
+    if (USE_MOCKS) {
+      return { enabled: false, devOutbox: false };
+    }
+    const { data } = await http.get<PasswordResetConfigView>("/api/auth/password/config");
+    return data;
+  },
+
+  /** Always resolves the same way — the server never says whether the address exists. */
+  async forgotPassword(email: string): Promise<void> {
+    await http.post("/api/auth/password/forgot", { email });
+  },
+
+  /** 401 = expired / used / unknown link; the page turns that into "다시 요청". */
+  async resetPassword(token: string, newPassword: string): Promise<void> {
+    await http.post("/api/auth/password/reset", { token, newPassword });
   },
 
   /**

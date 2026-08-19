@@ -184,7 +184,9 @@ row + 어휘 한 줄이 목표이며, 이를 깨는 설계는 이 문서를 먼�
   (2026-08-18 Self-Pilot 첫 실행 UX: 인증 surface에 `/signup` 추가 — `/login`과 같은 public shell의 계정 화면이며
   1차 메뉴가 아니다. 가입 → `/connect` → 첫 수집 → 홈. `docs/self_pilot_runtime_v1.md` §8.
   2026-08-19 Auth + Growth Instrumentation v1: 같은 auth surface에 `/auth/callback`(소셜 로그인 one-time code
-  landing)과 `/onboarding`(첫 소셜 가입의 상호명 단계) 추가 — `docs/auth_growth_instrumentation_v1.md` §4.)
+  landing)과 `/onboarding`(첫 소셜 가입의 상호명 단계) 추가 — `docs/auth_growth_instrumentation_v1.md` §4.
+  2026-08-19 Service Readiness v1: 같은 auth shell에 `/forgot-password`, `/reset-password`; public shell에
+  `/legal/terms`, `/legal/privacy`(확정 전 placeholder) — `docs/service_readiness_v1.md` §2-4·§2-6·§4.)
 - **화면 책임(§4)과 세 계약(§4a Today Inbox · §4b 채널 연결 hub · §4c 리뷰 답변 준비)**.
 - **노출 채널 = NAVER / Coupang / Cafe24** (`ProductChannels.java`, `lib/productChannels.ts`), 표시 순서도 그 순서.
 - **새 채널의 기본값**: connector + capability proof(§4.1 승격) **뒤에** 기존 surface에 끼운다 —

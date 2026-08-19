@@ -38,6 +38,7 @@ public class SocialAuthController {
 
     @PostMapping("/onboarding/complete")
     public AuthResponse completeOnboarding(@Valid @RequestBody SocialOnboardingRequest request) {
-        return socialAuth.completeOnboarding(request.onboardingToken(), request.orgName(), request.name());
+        return socialAuth.completeOnboarding(request.onboardingToken(), request.orgName(), request.name(),
+                request.marketingConsentGiven());
     }
 }

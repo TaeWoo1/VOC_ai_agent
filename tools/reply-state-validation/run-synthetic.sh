@@ -56,7 +56,7 @@ echo "== register single-NAVER-account org + pin resolution =="
 EMAIL="rsv-${STAMP}@rsv.local"; PASS="rsv-$(openssl rand -hex 12)"
 umask 077; printf 'SELLEROPS_BASE_URL=http://127.0.0.1:%s\nSELLEROPS_EMAIL=%s\nSELLEROPS_PASSWORD=%s\n' "${PORT}" "${EMAIL}" "${PASS}" >"${ENVF}"
 curl -s -o /dev/null -w '  signup HTTP %{http_code}\n' -X POST "http://127.0.0.1:${PORT}/api/auth/signup" -H 'Content-Type: application/json' \
-  -d "{\"email\":\"${EMAIL}\",\"password\":\"${PASS}\",\"name\":\"RSV Operator\",\"orgName\":\"RSV Disposable Org\"}"
+  -d "{\"email\":\"${EMAIL}\",\"password\":\"${PASS}\",\"name\":\"RSV Operator\",\"orgName\":\"RSV Disposable Org\",\"termsAccepted\":true}"
 TOKEN="$(curl -s -X POST "http://127.0.0.1:${PORT}/api/auth/login" -H 'Content-Type: application/json' -d "{\"email\":\"${EMAIL}\",\"password\":\"${PASS}\"}" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>process.stdout.write((JSON.parse(d).token)||""))')"
 NAVER_CH="$(curl -s "http://127.0.0.1:${PORT}/api/channels" -H "Authorization: Bearer ${TOKEN}" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const a=JSON.parse(d);const l=Array.isArray(a)?a:(a.content||a.channels||[]);process.stdout.write((l.find(c=>c.code==="NAVER")||{}).id||"")})')"
 ACCT="$(curl -s -X POST "http://127.0.0.1:${PORT}/api/seller-accounts/file-channel" -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' -d "{\"channelId\":\"${NAVER_CH}\",\"alias\":\"RSV NAVER\"}" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const o=JSON.parse(d);process.stdout.write(o.id||o.accountId||o.sellerAccountId||"")})')"

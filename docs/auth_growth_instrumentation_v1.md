@@ -135,4 +135,6 @@ Backend: `SELLEROPS_OAUTH_GOOGLE_CLIENT_ID`, `SELLEROPS_OAUTH_GOOGLE_CLIENT_SECR
 - Cafe24 `first_sync_completed` (its first sync is not observed by the wizard).
 - Server-side analytics sink / Meta CAPI; consent banner (no cookies are set by the app itself; GTM/PostHog
   cookies appear only when the deployer enables them).
-- Landing `page_view` is GTM's own trigger (All Pages), not an app event.
+- Landing `page_view` is GTM's own trigger (All Pages), not an app event. (2026-08-19, `docs/service_readiness_v1.md`
+  §1/§8: sinks now start eagerly under 분석 consent so the container IS on the landing page; before that it loaded
+  only on the first tracked event.)

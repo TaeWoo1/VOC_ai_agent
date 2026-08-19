@@ -8,7 +8,14 @@ interface AuthState {
   user: UserView | null;
   ready: boolean;
   login: (email: string, password: string) => Promise<void>;
-  signup: (input: { email: string; password: string; name: string; orgName: string }) => Promise<void>;
+  signup: (input: {
+    email: string;
+    password: string;
+    name: string;
+    orgName: string;
+    termsAccepted: boolean;
+    marketingConsent: boolean;
+  }) => Promise<void>;
   /** A session the backend already issued (social login code exchange / onboarding complete). */
   acceptSession: (session: AuthResponse) => void;
   logout: () => void;

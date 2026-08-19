@@ -12,6 +12,8 @@ export interface PosthogLike {
   capture(event: string, props?: Record<string, unknown>): void;
   identify(id: string): void;
   reset(): void;
+  opt_in_capturing?(): void;
+  opt_out_capturing?(): void;
 }
 
 export interface PosthogWindow {
@@ -69,6 +71,10 @@ export function createPosthogSink(
         for (const fn of queue.splice(0)) fn(ph);
       };
       doc.head.appendChild(script);
+    },
+    // 분석 consent withdrawn/regranted after start (docs/service_readiness_v1.md §2-4). Loaded only after grant.
+    consent(grant) {
+      withPosthog((ph) => (grant.analytics ? ph.opt_in_capturing?.() : ph.opt_out_capturing?.()));
     },
     track(event: AnalyticsEventName, props: Record<string, string>) {
       withPosthog((ph) => ph.capture(event, props));
