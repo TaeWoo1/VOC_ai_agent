@@ -113,7 +113,9 @@ idempotency, policy, and audit.
 ## 4. Backend connectors & domains (Spring)
 
 **Connectors** (`backend/.../connector/`): `naver` (implemented), `cafe24` (implemented),
-`esm` + `esm/inquiry` (skeleton/unwired), `coupang` / `elevenst` / `ssg` (auth skeleton only),
+`esm` + `esm/inquiry` (skeleton/unwired), **`coupang` (implemented — ORDER_SUMMARY + INQUIRY, both
+live-verified; the "auth skeleton" wording here was corrected 2026-08-19, see
+`docs/channel_integration_completeness_audit_v1.md` §5)**, `elevenst` / `ssg` (auth skeleton only),
 `FileUploadConnector` (production), `MockApiConnector` (test). Connector flags default **off**; the
 scheduler defaults off; credentials live in an AES-256-GCM vault.
 
@@ -168,9 +170,10 @@ never unattended. **운영 지원 (production-supported) is still file-upload-on
 | INQUIRY | API skeleton + MANUAL (Excel) | **partial / unwired** | Read skeleton `NEEDS_VERIFICATION` (endpoint/fields/paging unverified) + Excel import backend (not surfaced in FE). Gate-1 surface confirmed only. Next = constrained read-only Gate-2 probe (separate approval). |
 | REVIEW | EXPORT candidate | **blocked** | GMARKET selected-state contract unknown (REVIEW uses a dropdown, not a tablist); only the market-tab surface confirmed (2026-07-07). Gmarket ↔ Auction must be attribution-separated. |
 
-Other channels (Coupang / 11번가 / SSG / 오늘의집): see §4.1 + canonical §5 — auth skeleton or
-MANUAL-only; Coupang has no official REVIEW API (confirmed), 11번가 holds the set's only official
-REVIEW API (behind a login wall), SSG has no REVIEW surface.
+Other channels: see §4.1. **Coupang is not an auth skeleton** — ORDER_SUMMARY and INQUIRY are both
+implemented and live-verified (2026-08-06 / 2026-08-14), though neither is 운영 지원 (flags off); it has
+no official REVIEW API (confirmed). 11번가 / SSG are auth skeletons and 오늘의집 is MANUAL-only; 11번가
+holds the set's only official REVIEW API (behind a login wall), SSG has no REVIEW surface.
 
 ---
 
@@ -236,7 +239,7 @@ the canonical contract `docs/sellerops_live_approval_contract.md` (§3: default 
 > **UPDATE 2026-07-31 (`97ad192`) — Cafe24 pilot channel v1 is COMPLETE.** Priority 1 below (Cafe24
 > REVIEW acquisition completion, #386) plus the REVIEW → Issue-Memory bridge + historical reconciler
 > (#387) merged; Cafe24 v1 is declared complete (pilot-level, not production-supported). Baseline:
-> `docs/sellerops_cafe24_channel_v1_completion.md`. **Cafe24 v1.1 deferred items** now lead: live
+> `docs/evidence/INDEX.md`. **Cafe24 v1.1 deferred items** now lead: live
 > complaint-issue creation, live `N`/`P`/`C` distribution + secret-review exclusion + fresh board-4
 > insert, CSV dual-ingest hard fence, scheduled historical reconciliation, reply/comment write +
 > Guided Handoff. **The next channel priority is now NAVER v1 completion (item 2).**

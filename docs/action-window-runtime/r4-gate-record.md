@@ -17,7 +17,7 @@ No raw seller/account ID, email, username, raw URL, credential, cookie, token, o
 appears — the pilot seller is referenced ONLY as the sanitized label `NAVER_DEV_SELLER_SELF_01`. This
 is the same contract the adapter enforces on the wire and the persisted store.
 
-This register is the source of truth for [`r4-preparation.md`](r4-preparation.md) §3 (G2/G3/G5/G6) and
+This register is the source of truth for [`r4-preparation.md`](r4-gate-record.md) §3 (G2/G3/G5/G6) and
 the §8-1 gate row in [`r4-evidence-pack.md`](r4-evidence-pack.md).
 
 ---
@@ -25,7 +25,7 @@ the §8-1 gate row in [`r4-evidence-pack.md`](r4-evidence-pack.md).
 ## G1 — Channel ratified · ✅
 
 NAVER SmartStore review export — [`decisions.md`](decisions.md) D-021 (2026-07-09). See
-[`r4-preparation.md`](r4-preparation.md) §2 for the selection rationale.
+[`r4-preparation.md`](r4-gate-record.md) §2 for the selection rationale.
 
 ---
 
@@ -53,7 +53,7 @@ this record acknowledges verbatim:
 The full §4 boundary above governs any later, separately-approved export pilot.
 
 *Consent basis:* self-consent by the operator/product-owner (same person as the pilot seller),
-affirmed by ratifying D-024 and this record. Satisfies [`r4-preparation.md`](r4-preparation.md) §1
+affirmed by ratifying D-024 and this record. Satisfies [`r4-preparation.md`](r4-gate-record.md) §1
 **P7**.
 
 ---
@@ -84,7 +84,7 @@ It is none of the other four: it is read-only *in effect* (zero clicks, no downl
 **`Bridge paired` — SCOPED OUT for `session recovery`, RESOLVED 2026-07-17 (product owner).** For this
 scope the box is recorded **N/A, with its reason**, never ☑ and never silently dropped: the run is a **CLI
 run over a loopback**, and the live driver **is not Bridge-wired** — §6's Bridge rung
-([`r4-preparation.md`](r4-preparation.md)) says verbatim *"the live driver is not yet Bridge-wired,"* and
+([`r4-preparation.md`](r4-gate-record.md)) says verbatim *"the live driver is not yet Bridge-wired,"* and
 [`r4-evidence-pack.md`](r4-evidence-pack.md) §8 records that the entrypoint *"uses a loopback channel."*
 **Bridge pairing is not this run's control boundary — the CLI is.** A ☑ would assert a fact not in
 evidence; a drop would hide the question.
@@ -101,7 +101,7 @@ run needs a fresh G3 + G6.
 **`reply submission` — RATIFIED as a SIXTH scope 2026-07-18 (product owner, [D-032](decisions.md); D-026
 extended, not superseded).** It is the first **MUTATING** scope — the seller performs a marketplace **write**
 (composes + submits a NAVER review reply); all five earlier scopes are read/non-writing. SellerOps highlights
-the composer read-only and **observes only** — never types, never clicks submit ([`r4-preparation.md`](r4-preparation.md)
+the composer read-only and **observes only** — never types, never clicks submit ([`r4-preparation.md`](r4-gate-record.md)
 §4.1). No read-back oracle exists, so the run terminates `OPERATOR_REPORTED` (`operatorOutcome` +
 `verification=UNVERIFIED`), **never `COMPLETED`**. `submissionRef` is single-use; an interrupted run parks
 (no auto-re-drive). Contract: `contracts/action-window/v2/` (side-by-side; v1 untouched).
@@ -217,7 +217,7 @@ here, executed outside the repo):
 | **NAVER-specific** | **None required** for a seller-owned export on the seller's own session per §5; Solution Market remains a long-term option, not a prerequisite. |
 
 No platform is marked "승인됨/approved" (matrix §3 rule). The parallel track is **opened and logged** —
-this satisfies [`r4-preparation.md`](r4-preparation.md) §1 **P8**. It does **not** authorize any live
+this satisfies [`r4-preparation.md`](r4-gate-record.md) §1 **P8**. It does **not** authorize any live
 action; live is governed by G3 + G6.
 
 ---
@@ -325,13 +325,13 @@ rehearsal (no submit, one submissionRef, ≤20 min, recover only to PARKED / `SU
 note (resolved before mint/launch): **G4** was operator-waived (real-browser proof not re-run this session); **stable
 location/IP** is **operator-CONFIRMED this turn (2026-07-18)**; checkout SHA corrected to the **verified current
 origin/main tip `666d334`** (HEAD == main, contained, clean). Choreography:
-[`r4-reply-submission-abort-rehearsal-dispatch-record.md`](r4-reply-submission-abort-rehearsal-dispatch-record.md).
+[`r4-reply-submission-abort-rehearsal-dispatch-record.md`](../evidence/INDEX.md).
 
-*Live reply-run kickoff checklist:* [`r4-reply-submission-live-kickoff.md`](r4-reply-submission-live-kickoff.md)
+*Live reply-run kickoff checklist:* [`r4-reply-submission-live-kickoff.md`](../evidence/INDEX.md)
 — the pre-dispatch runbook (build prerequisites now MET offline; every run-gate still ☐). It grants nothing.
 
 *First reply-submission dispatch record (scaffold):*
-[`r4-reply-submission-abort-rehearsal-dispatch-record.md`](r4-reply-submission-abort-rehearsal-dispatch-record.md)
+[`r4-reply-submission-abort-rehearsal-dispatch-record.md`](../evidence/INDEX.md)
 — choreography + evidence sheet for one **abort-path rehearsal** (operator reaches the composer and does NOT
 submit → `SUBMISSION_ABORTED · UNVERIFIED`, non-mutating by construction). ☐ NOT AUTHORIZED, all gates blank;
 it grants nothing.
@@ -747,7 +747,7 @@ authorization.
 > P6 to date is **CONSUMED**, so *any* further live contact (including a read-only diagnostic) needs a
 > **fresh** G3-export + G6 in its own dispatching turn. A past success is not a standing authorization.
 >
-> **Operator choreography for the run itself:** [`r4-operator-runbook.md`](r4-operator-runbook.md) —
+> **Operator choreography for the run itself:** [`r4-operator-runbook.md`](../sellerops_live_approval_contract.md) —
 > what the human does, in order, including the ~60 s click+confirm window. It grants nothing either.
 
 ### Scope of the first authorized export pilot
@@ -758,7 +758,7 @@ ONE supervised, seller-consented, **user-direct** export run on `NAVER_DEV_SELLE
 precondition → highlights the one control → **observes** (never simulates) the click → verifies the
 transition → **detects** the download read-only → quarantine-validates the artifact (temporary save →
 magic sniff → delete) → hands it to the existing ingestion path → persists the audited Operation Run.
-Governed verbatim by [`r4-preparation.md`](r4-preparation.md) §4. **Not** in scope: unattended/scheduled
+Governed verbatim by [`r4-preparation.md`](r4-gate-record.md) §4. **Not** in scope: unattended/scheduled
 operation, multiple runs, or any SellerOps-performed click.
 
 ### 1 · G3 environment + pause re-affirmation for an EXPORT run (operator's "P4")
@@ -778,7 +778,7 @@ full §4 scope** (all ☐ until the dispatching turn):
 
 ### 2 · P6 supervised-pilot internal sign-off requirements
 
-P6 ([`r4-preparation.md`](r4-preparation.md) §1) is signed **only** when, for this export run:
+P6 ([`r4-preparation.md`](r4-gate-record.md) §1) is signed **only** when, for this export run:
 
 - ☐ G1, G2, G4, G5 all ✅ (already: D-021/D-024; G4 synthetic ladder green). **G3 is not in this list** —
   it is per-run (D-026) and is carried by the next box, matching the signed
@@ -793,7 +793,7 @@ runbook does not sign P6.**
 
 ### 3 · Abort criteria
 
-Full definitions in [`r4-preparation.md`](r4-preparation.md) §7 (not re-authored here). Summary:
+Full definitions in [`r4-preparation.md`](r4-gate-record.md) §7 (not re-authored here). Summary:
 
 - **Operator-immediate:** withdrawn consent; any unrecognized prompt/dialog; any anti-abuse signal
   (CAPTCHA storm / lockout warning); any on-screen data the seller did not expect to share. The human
@@ -804,7 +804,7 @@ Full definitions in [`r4-preparation.md`](r4-preparation.md) §7 (not re-authore
   `LOGIN_REQUIRED` / `SESSION_EXPIRED` session now **parks** recoverable instead (the seller can fix it;
   a recheck re-probes). Everything else still fails closed to FAILED. **The four guarantees above are
   unchanged** — blocker code, zero clicks, manual progress, persisted+resumable. Normative text is
-  [`r4-preparation.md`](r4-preparation.md) §7; **this register restates it as a convenience and §7 wins.**
+  [`r4-preparation.md`](r4-gate-record.md) §7; **this register restates it as a convenience and §7 wins.**
 - **Before a run drives:** Ctrl-C aborts; a sentinel timeout aborts without driving a run.
 
 ### 4 · Live entrypoint command — DO NOT RUN (future dispatch documentation only)
@@ -860,7 +860,7 @@ including its mutation note:
 
 ## Related
 
-- Gate definitions + readiness → [`r4-preparation.md`](r4-preparation.md) §3/§4/§5/§9
+- Gate definitions + readiness → [`r4-preparation.md`](r4-gate-record.md) §3/§4/§5/§9
 - Durable decisions → [`decisions.md`](decisions.md) D-019/D-021/D-024
 - Dated readiness evidence → [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-1/§8-5
-- Living handoff state → [`current-state.md`](current-state.md)
+- Living handoff state → [`current-state.md`](HANDOFF.md)

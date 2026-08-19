@@ -6,7 +6,7 @@
 > the child-frame hypothesis; Run-1 root cause pinned to a false-positive-empty readiness verdict** (full
 > sanitized result in [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-10, block F below). **The read-only
 > G6 is now CONSUMED** — any further live contact needs a fresh read-only-scoped (or export-scoped) G6.
-> Source of truth: [`r4-gate-record.md`](r4-gate-record.md) §G3/§G6/§7 + [`r4-preparation.md`](r4-preparation.md) §7/§9.
+> Source of truth: [`r4-gate-record.md`](r4-gate-record.md) §G3/§G6/§7 + [`r4-preparation.md`](r4-gate-record.md) §7/§9.
 
 **Probe:** the frame-aware read-only export-surface probe (`probe-export-same-session`) — the diagnostic
 proposed after Run 1 fail-closed `UNSUPPORTED_STATE` ([`r4-evidence-pack.md`](r4-evidence-pack.md) §8-8).
@@ -46,7 +46,7 @@ The recorded G3 read-only lift was scoped to the §8-4 session-precondition prob
 - ☐ Stable network / IP / location still holds (the condition that paused NAVER live work).
 - ☐ Dedicated Chrome connection profile intact · Bridge paired · Operation Run persistence enabled.
 - ☐ **NAVER live-work pause lifted FOR THIS READ-ONLY PROBE ONLY** — a fresh, read-only-scoped lift
-  ([`r4-preparation.md`](r4-preparation.md) §9 item 3); **not** a general lift and **not** an export lift.
+  ([`r4-preparation.md`](r4-gate-record.md) §9 item 3); **not** a general lift and **not** an export lift.
 
 *Affirmed by:* ______  *Date:* ______  *Scope:* one read-only frame-aware surface probe on `NAVER_DEV_SELLER_SELF_01`.
 
@@ -71,7 +71,7 @@ ends — never standing for a later turn.
 
 ## D · §7 abort criteria · ☐ ACKNOWLEDGE IN THE DISPATCHING TURN
 
-(reference — [`r4-preparation.md`](r4-preparation.md) §7)
+(reference — [`r4-preparation.md`](r4-gate-record.md) §7)
 
 - ☐ **Operator-immediate:** withdrawn consent · any unrecognized prompt/dialog · any anti-abuse signal
   (CAPTCHA storm / lockout) · any unexpected on-screen data → the human completes or walks away; the probe

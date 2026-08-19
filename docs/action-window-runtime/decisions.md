@@ -324,7 +324,7 @@ Format: `D-NNN` · status (`ACTIVE` / `SUPERSEDED`) · decision · rationale.
   decision you renew — **not lifetime**. Both have one lifetime: one run. Splitting them would have
   preserved the exact standing ✅ this decision exists to remove.
   *Gate effect:* G3's status becomes **`☐ per-run`** ([`r4-gate-record.md`](r4-gate-record.md) §G3,
-  [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-1), and [`r4-preparation.md`](r4-preparation.md) §3's G3
+  [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-1), and [`r4-preparation.md`](r4-gate-record.md) §3's G3
   definition now names the §9-3 lift and the per-run lifetime (§3 defined G3 as environment only — the one
   normative text out of step with D-024, the register, and 8/8 dispatch records). P6's *"already"* list
   (`r4-gate-record.md:263`) drops G3 to match signed block A; G3 stays with `:265`'s existing run-scoped
@@ -604,7 +604,7 @@ Format: `D-NNN` · status (`ACTIVE` / `SUPERSEDED`) · decision · rationale.
   question.** N/A **with a reason** is the third answer, and it is a *recorded* answer, not a waived box.
   **(a) Why it is inapplicable to this scope.** Run 6 is a **CLI run over a loopback**, and the live driver is
   **not Bridge-wired** — two independent sources say so: §6's Bridge rung
-  ([`r4-preparation.md`](r4-preparation.md)) verbatim *"the live driver is not yet Bridge-wired,"* and
+  ([`r4-preparation.md`](r4-gate-record.md)) verbatim *"the live driver is not yet Bridge-wired,"* and
   [`r4-evidence-pack.md`](r4-evidence-pack.md) §8, *"the entrypoint uses a loopback channel."* There is
   nothing for the box to assert.
   **(b) What the control boundary actually is for this scope** — the box is scoped out because control lives
@@ -632,7 +632,7 @@ Format: `D-NNN` · status (`ACTIVE` / `SUPERSEDED`) · decision · rationale.
   **submission** — the first MUTATING Action Window capability. Every prior G3 scope
   (`read-only probe` | `export pilot` | `export+ingest` | `real-click barrier` | `session recovery`) shares a
   read/non-writing premise; a submission breaks it, so it needs its own scope, its own §4 write-side boundary
-  ([`r4-preparation.md`](r4-preparation.md) §4.1), and its own contract (`contracts/action-window/v2/`).
+  ([`r4-preparation.md`](r4-gate-record.md) §4.1), and its own contract (`contracts/action-window/v2/`).
   **(a) `reply submission` is a sixth G3 scope.** It is NOT any of the five: the seller performs a marketplace
   **write** (composes + submits the reply), which none of the read scopes contemplate. D-026 is **extended, not
   superseded** — G3 stays per-run and scopes stay non-substitutable; only the enum grows. Critically it has **no

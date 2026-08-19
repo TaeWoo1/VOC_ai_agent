@@ -5,7 +5,7 @@
 > by an opaque `PROVIDER_UNAVAILABLE`, with no way to see the real HTTP status.
 >
 > Canonical live-run rules: [`sellerops_live_approval_contract.md`](./sellerops_live_approval_contract.md).
-> Interlock/harness this builds on: [`coupang_live_approval_harness_v1.md`](./coupang_live_approval_harness_v1.md).
+> Interlock/harness this builds on: [`coupang_live_approval_harness_v1.md`](sellerops_live_approval_contract.md).
 
 ## What went wrong (the live finding)
 

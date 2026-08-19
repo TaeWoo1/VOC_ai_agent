@@ -23,7 +23,7 @@ existing Bridge protocol; ship contract fixtures for both sides.
 sanitization test proving no prohibited payload (see
 [`contract-boundary.md`](contract-boundary.md) §3).
 **Required evidence:** contract file path + version recorded in
-[`current-state.md`](current-state.md) and
+[`current-state.md`](HANDOFF.md) and
 [`contract-boundary.md`](contract-boundary.md) §1.
 **Merge gate:** contract reviewed by FE + Runtime; fixtures green; no prohibited
 payload representable.
@@ -47,7 +47,7 @@ persistence, auto-click, scheduling.
 synthetic-fixture browser QA; privacy test (no frames/input/secrets logged).
 **Required evidence:** passing tests + fixture run notes; acceptance checklist
 from `../slices/action-window-v1.md` §14.
-**Merge gate:** all ten V1 definition-of-done points (see [`goal.md`](goal.md)
+**Merge gate:** all ten V1 definition-of-done points (see [`goal.md`](../architecture.md)
 §6) hold against fixtures.
 
 ## R2 — Runtime/FE synthetic integration
@@ -114,5 +114,5 @@ owner, not by this document. See
 
 ## Related
 
-- Per-item status → [`checklist.md`](checklist.md)
-- Current active slice → [`current-state.md`](current-state.md)
+- Per-item status → [`checklist.md`](../evidence/INDEX.md)
+- Current active slice → [`current-state.md`](HANDOFF.md)

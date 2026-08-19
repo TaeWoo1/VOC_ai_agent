@@ -4,7 +4,7 @@
 > Terminal `OPERATOR_REPORTED / SUBMISSION_ABORTED / UNVERIFIED`, `runId = run_b3e351d537b0`, channel `naver`.
 > This is the row-match abort rehearsal only; the exact limited claims are enumerated below and must not be
 > broadened. Supersedes the prior *composer-based* [abort-rehearsal dispatch
-> record](r4-reply-submission-abort-rehearsal-dispatch-record.md) for the executed path.
+> record](../evidence/INDEX.md) for the executed path.
 
 ## Gates affirmed in the dispatching turn (PO, 2026-07-20)
 A single escalation checkpoint before the mutating run, all fresh/single-use, affirmed by the product owner:

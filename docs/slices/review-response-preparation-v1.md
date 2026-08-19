@@ -149,5 +149,5 @@ cd backend && ./gradlew test
 
 - scope v1.4 §9 예외 문안 검토 — 유일하게 가드를 **느슨하게 하는** 편집이므로, "redacted · 판매자 대면 ·
   운영자 화면"으로 좁게 읽히는지 확인 필요.
-- `docs/sellerops_current_state.md` §10 staleness — 이 문서는 리뷰 트리아지가 머지된 사실을 모른다
+- `docs/sellerops_canonical_reference.md` §10 staleness — 이 문서는 리뷰 트리아지가 머지된 사실을 모른다
   (기준일 2026-07-08). 보고만 하고 임의 수정하지 않음.

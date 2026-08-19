@@ -48,9 +48,9 @@ later commit. A recorded SHA is a snapshot, not a fact — including this one.
 - **Not a history.** Executed records stay frozen; later truth arrives as a forward-pointer,
   never as an edit.
 
-### Relationship to `docs/sellerops_current_state.md`
+### Relationship to `docs/sellerops_canonical_reference.md`
 
-**`docs/sellerops_current_state.md` is no longer the canonical Product / Strategy / Current State
+**`docs/sellerops_canonical_reference.md` is no longer the canonical Product / Strategy / Current State
 authority. This document is.**
 
 `sellerops_current_state.md` is left **untouched and unrebased by deliberate decision**. Its §1
@@ -250,7 +250,7 @@ The four-stage model is defined in `docs/multi-channel-connector-roadmap.md` 부
   `collector/instruments/calibration/discover-reply-target.ts`; byte-derived file-family classification in
   `collector/src/naver/review-download-save.ts`.
 - *Governance*: the `CLAUDE.md` phase anchor and the mandatory product-boundary check;
-  `docs/action-window-runtime/naver-smartstore-v1-plan.md`; `naver-v1-integration-manifest.md`.
+  `docs/action-window-runtime/HANDOFF.md`; `naver-v1-integration-manifest.md`.
 
 **PR #318 — `feat/esm-review-marketplace-attribution`** (merge `de91bb9`, 8 files, +826/−10)
 
@@ -302,7 +302,7 @@ The four-stage model is defined in `docs/multi-channel-connector-roadmap.md` 부
 > graph, no new pipeline/LangGraph/migration). Cafe24 v1 = connect + orders/inquiries/reviews +
 > exact-window/dedup + privacy + Attention/Issue-Memory + agent draft/brief; reply/comment **write**
 > stays deferred (shown honestly). **Still pilot-only — production-support remains file-upload-only.**
-> Baseline: `docs/sellerops_cafe24_channel_v1_completion.md`.
+> Baseline: `docs/evidence/INDEX.md`.
 
 ---
 
@@ -310,7 +310,7 @@ The four-stage model is defined in `docs/multi-channel-connector-roadmap.md` 부
 
 NAVER SmartStore v1 = one channel, four surfaces: (1) guided API onboarding (orders),
 (2) review export (Action Window), (3) session readiness, (4) guided review reply.
-Phase source of truth: `docs/action-window-runtime/naver-smartstore-v1-plan.md`.
+Phase source of truth: `docs/action-window-runtime/HANDOFF.md`.
 
 ### 4.1 Proved
 
@@ -598,11 +598,11 @@ router.**
 
 ### 9.4 Subordinate (own their domain; not identity or strategy authorities)
 
-`docs/action-window-runtime/naver-smartstore-v1-plan.md` (self-declares it does not outrank the
+`docs/action-window-runtime/HANDOFF.md` (self-declares it does not outrank the
 canonical product docs) · `docs/channel-capability-registration-matrix.md` (derived view of §4.1) ·
 `docs/sellerops_completion_checkpoint_v1.md` (point-in-time recovery baseline at `026c113`; derived
 from §4.1 + this document, never redefines them) ·
-`docs/sellerops_cafe24_channel_v1_completion.md` (Cafe24 pilot-v1 completion baseline at `97ad192`;
+`docs/evidence/INDEX.md` (Cafe24 pilot-v1 completion baseline at `97ad192`;
 derived, pilot-level, not production-supported) · `docs/slices/*` ·
 `docs/workstreams/action-window-frontend/*`.
 
@@ -617,7 +617,7 @@ All `docs/action-window-runtime/r4-*` dispatch and run records ·
 
 ### 9.6 Stale — cite as superseded, do not fix here
 
-`docs/sellerops_current_state.md` (see §0) · `docs/PROJECT.md` (describes a different product) ·
+`docs/sellerops_canonical_reference.md` (see §0) · `docs/PROJECT.md` (describes a different product) ·
 root `README.md` lede · `docs/sellerops_product_roadmap.md` (self-banners 2026-06-15) ·
 `docs/sellerops_ceo_connector_status_onepager.md` (self-banners 2026-06-13) ·
 `docs/sellerops_ui_reference.md` (already SUPERSEDED) · `docs/sellerops_phase{0,1,2,3a,3b,3c,3d}*.md`
@@ -658,7 +658,7 @@ in this section is fixed by this document.
 | D2 | root `CLAUDE.md`, "Working directory" | Names `/Users/taewookang/Downloads/workspace/aiagent-sellerops` — **that directory does not exist**. |
 | D3 | root `CLAUDE.md`, "Scope fence" | "Coupang and Cafe24 … Do not start them" — #319 merged Cafe24 tooling; Cafe24 REVIEW/INQUIRY are already `CONFIRMED` in code. Superseded by §6.3 here. |
 | D4 | root `CLAUDE.md`, required reading order | Cites `product-scope-v1.md` as **v1.1**; the actual lock is **v1.7** (2026-07-26). The doc title itself is now v1.7; `CLAUDE.md` still lags. |
-| D5 | `docs/sellerops_current_state.md` §1, §9, §10 | Baseline 2026-07-08 with two stacked partial-update banners; §10 predates #316–#319; §9 "Truth snapshot" still says the Action Window is not implemented. **Deliberately not rebased** (§0). |
+| D5 | `docs/sellerops_canonical_reference.md` §1, §9, §10 | Baseline 2026-07-08 with two stacked partial-update banners; §10 predates #316–#319; §9 "Truth snapshot" still says the Action Window is not implemented. **Deliberately not rebased** (§0). |
 | D6 | `docs/product-scope-v1.md` §1.5, §6.1, §7-15 | ~~Still states Action Window is 미구현~~ — **RESOLVED (v1.7, 2026-07-26):** corrected to "NAVER 리뷰 라이브 검증됨(1계정·disposable·운영 지원 아님), 그 외 미구현", consistent with §4.1. |
 | D7 | `docs/sellerops_frontend_spec.md` §18 | Same 미구현 claim for the Action Window review screen. Also cites product-scope as v1.2 in its appendix. |
 | D8 | `docs/multi-channel-connector-roadmap.md` §4.1 | Header reads "그 외 행·열은 2026-07-07 기준"; rows not refreshed for #316–#318. Note: `HANDOFF.md` instructs that this staleness be **reported, not edited** from a runtime branch. |
@@ -666,8 +666,8 @@ in this section is fixed by this document.
 | D10 | `docs/esm/decisions.md` D2, `live-capture-plan.md` §1/§3-G2 | Still encode the **tablist** model (index 0 = GMARKET, 1 = AUCTION) that #318 disproved. |
 | D11 | `collector/src/esm/esm-marketplace-verify.ts` | Ships `MARKETPLACE_VERIFICATION_METHOD = "selected-tab-label"` — a code-level name for a contract the same PR states is unknown. **Code-level drift, not doc-level.** |
 | D12 | `docs/esm/live-capture-checklist.md` | G1/G2 marked `[x]` PASSED on a signal later shown to be non-discriminating; a "Next single action" line contradicts the "not currently runnable" blocker 60 lines below. |
-| D13 | `docs/action-window-runtime/naver-v1-integration-manifest.md` §0 | "**PLAN-ONLY. Nothing here is executed.**" — it was executed (#317). Ahead/behind counts stale. |
-| D14 | `docs/action-window-runtime/naver-smartstore-v1-plan.md` §8, §9, §10 | "No branch integration is performed now"; "single remote git integration happens only at this completion point" — now past. |
+| D13 | `docs/action-window-runtime/HANDOFF.md` §0 | "**PLAN-ONLY. Nothing here is executed.**" — it was executed (#317). Ahead/behind counts stale. |
+| D14 | `docs/action-window-runtime/HANDOFF.md` §8, §9, §10 | "No branch integration is performed now"; "single remote git integration happens only at this completion point" — now past. |
 | D15 | `docs/action-window-runtime/HANDOFF.md` | Internal contradiction: "✅ No `[PO]` item remains open" vs a trailing "Next — two OPEN product-owner decisions from Run 5". Also: "§8-24 is now the last live contact" (false — 07-20 runs followed). |
 | D16 | `docs/action-window-runtime/decisions.md` D-012 | "The parked ESM marketplace-attribution experiment is neither completed nor merged" — merged as #318. Retire by forward-pointer (append-only). |
 | D17 | root `README.md` | Lede frames the product for a "manufacturing CEO" and says "Real channel APIs … are not implemented yet". Links `docs/PROJECT.md` as the architecture doc — a different product. |
@@ -713,7 +713,7 @@ Classified per the standing assumption rule. **None is resolved here.**
 | # | Question |
 |---|---|
 | P1 | **Formally declare NAVER v1 closed** — the precondition for §8 and for D1/D3/D13/D14/D16 |
-| P2 | **Retire or subordinate `docs/sellerops_current_state.md`** — decided in principle (§0); the mechanism and slice are open |
+| P2 | **Retire or subordinate `docs/sellerops_canonical_reference.md`** — decided in principle (§0); the mechanism and slice are open |
 | P3 | ~~Which channel is the **second** Action Window calibration target: ESM+ (blocked on E1) or Cafe24 (code ahead of fence)?~~ **Closed 2026-08-17** — Coupang REVIEW became the second live-proven Action Window channel; further channel work is paused (`docs/product_assembly_ia_v1.md` §2). |
 | P4 | Should a selected date range **gate** export, or stay observe-only? (D-025 leaves it explicitly non-gating and calls the gating question a PO call) |
 | P5 | When does any capability move from **라이브 검증** to **운영 지원**, and what is the bar? Today the answer is "nothing has, except file upload" |

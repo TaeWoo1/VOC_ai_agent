@@ -3,7 +3,7 @@
 > **This file authorizes no live NAVER contact.** It is the choreography and evidence sheet for a run that
 > must be authorized elsewhere: a **fresh, scope-matched G3** and a **fresh, single-use, Run-6-scoped G6**
 > recorded in the dispatching turn ([`r4-gate-record.md`](r4-gate-record.md)). **Every G6 to date is
-> CONSUMED.** **The boundary** is [`r4-preparation.md`](r4-preparation.md) §4/§7 — binding, and it wins
+> CONSUMED.** **The boundary** is [`r4-preparation.md`](r4-gate-record.md) §4/§7 — binding, and it wins
 > over this file.
 
 **Status:** **EXECUTED 2026-07-17 · recovery LIVE-PROVEN · non-mutating · G6 CONSUMED.** In the dispatching
@@ -126,7 +126,7 @@ because Run 6 is none of the other four: read-only *in effect* (zero clicks, no 
   `session recovery` scope it is inapplicable, and it is recorded as N/A with a reason rather than
   affirmed or dropped.** Basis, from two independent sources: this run is a **CLI run over a loopback**, and
   the live driver **is not Bridge-wired** — §6's Bridge rung says verbatim *"the live driver is not yet
-  Bridge-wired"* ([`r4-preparation.md`](r4-preparation.md) §6), and the evidence pack says the entrypoint
+  Bridge-wired"* ([`r4-preparation.md`](r4-gate-record.md) §6), and the evidence pack says the entrypoint
   *"uses a loopback channel"* ([`r4-evidence-pack.md`](r4-evidence-pack.md) §8). **Bridge pairing is not
   this run's control boundary** — the CLI is; there is nothing for the box to assert, so **affirming it
   would assert a fact not in evidence** and a silent drop would hide the question.
@@ -219,7 +219,7 @@ happens before authorization, which is precisely why it must not be mistaken for
 
 ## 4. Operator choreography — this DEVIATES from the operator runbook, on purpose
 
-⚠ [`r4-operator-runbook.md`](r4-operator-runbook.md) §2 tells the operator to **log in during Phase A and
+⚠ [`r4-operator-runbook.md`](../sellerops_live_approval_contract.md) §2 tells the operator to **log in during Phase A and
 then signal ready.** **Run 6 requires the opposite.** The runbook describes the **export pilot** and is
 correct for it; **it must not be rewritten to describe Run 6, and the two must not be "reconciled"** — the
 same rule Run 5 established. This record is the sole choreography for this run.
@@ -304,7 +304,7 @@ that attempt.** A3 mitigates the *lie* at the CLI boundary; it does not prevent 
 
 ## 7. Abort criteria
 
-Full definitions in [`r4-preparation.md`](r4-preparation.md) §7 — **binding, not re-authored here.** Three
+Full definitions in [`r4-preparation.md`](r4-gate-record.md) §7 — **binding, not re-authored here.** Three
 points this record restates, because Run 6 **removes** a carve-out rather than inverting one:
 
 - 🛑 **There is NO expected dialog in this run.** Run 4's confirmation-dialog carve-out **DOES NOT APPLY** —
@@ -320,8 +320,8 @@ points this record restates, because Run 6 **removes** a carve-out rather than i
 ---
 
 **Related:** [`r4-gate-record.md`](r4-gate-record.md) (gates + templates — authorization; **this run's G6
-template now exists there and is BLANK** — [D-030](decisions.md)) · [`r4-preparation.md`](r4-preparation.md) (§3 gates, §4 boundary, §6
-ladder, §7 abort — normative) · [`r4-operator-runbook.md`](r4-operator-runbook.md) (the **export-pilot**
+template now exists there and is BLANK** — [D-030](decisions.md)) · [`r4-preparation.md`](r4-gate-record.md) (§3 gates, §4 boundary, §6
+ladder, §7 abort — normative) · [`r4-operator-runbook.md`](../sellerops_live_approval_contract.md) (the **export-pilot**
 choreography — deliberately different from §4 above) · [`r4-evidence-pack.md`](r4-evidence-pack.md) (§8-20
 A2-B and §8-21 A3 are the code under test; §8-16 Run 3 is this run's terminal shape) ·
 [`decisions.md`](decisions.md) ([D-025](decisions.md) period/scope · [D-026](decisions.md) G3 per-run ·

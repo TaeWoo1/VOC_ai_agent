@@ -15,7 +15,7 @@ cross-stack test** — `collector/test/crossstack/fe-transport-real-bridge.test.
 FE's OWN transport modules (`wsTransport.ts` → `bridgeAdapter.ts` → `bridgeSource.ts`, unmodified)
 against a **real** `BridgeServer`, proving all six wire behaviours below (pairing→token, ws-ticket,
 `aw_session` < 4 s, `aw_view`/`aw_event` frames, `aw_resync`, and deterministic
-same-run-reconnect + different-run→offline). See [`../../action-window-runtime/checklist.md`](../../action-window-runtime/checklist.md) row **12c**.
+same-run-reconnect + different-run→offline). See [`../../action-window-runtime/checklist.md`](../../evidence/INDEX.md) row **12c**.
 
 **What still requires the manual protocol (approval-gated):** the cross-stack test proves the FE
 *transport/adapter/source* over the real socket; it does **not** exercise the browser-rendered

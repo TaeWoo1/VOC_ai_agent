@@ -80,7 +80,7 @@ and the standing recency/sanitization rules.
 - **View Model:** current state (enum), step descriptor (enum + coarse hints,
   no selector), pending-user-action (enum), progress bucket, blocker code.
 - **Blocker codes:** enum-only (see fail-closed exits in
-  [`architecture.md`](architecture.md) §3); ratified in R0.
+  [`architecture.md`](../architecture.md) §3); ratified in R0.
 - **Commands (FE→Runtime):** request-open, request-step-recheck, request-cancel,
   request-manual-progress — all as intents; each idempotent and revision-checked.
 - **Events (Runtime→FE):** state-changed, blocked, artifact-ready,
@@ -90,5 +90,5 @@ Exact names/enums are **owned by the shared contract (R0)**, not by this file.
 
 ## 5. Related
 
-- Component owners of each payload → [`architecture.md`](architecture.md)
+- Component owners of each payload → [`architecture.md`](../architecture.md)
 - Contract slice (R0) scope → [`implementation-plan.md`](implementation-plan.md)

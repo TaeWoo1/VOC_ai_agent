@@ -85,31 +85,39 @@ Map of how these connect, and which document owns each part: `docs/architecture.
 - Never print secrets. Stage exact files — never `git add .`; never stage `.env`, `.profile/`,
   `.status/`, `.connections/`, `downloads/`, credentials, or real seller data.
 
-## Product / frontend reading order
+## Canonical reading path
 
-Read the canonical documents before product/frontend work:
+Six stops, in order. Everything else in `docs/` is evidence or lineage reached **from** these — if a
+document is not on this path and nothing here links to it, it does not carry current truth.
 
-0. `docs/product_operating_model.md` — anti-drift orientation: what SellerOps is, who for, the open
-   channel set, acquisition posture, user journey. Orientation only; points, owns nothing.
-1. `docs/sellerops_canonical_reference.md` — product identity, strategy, honest state, authority.
-2. `docs/product-scope-v1.md` — product scope contract (**scope lock v1.11**; v1.9 = Self-Pilot Runtime,
-   `docs/self_pilot_runtime_v1.md`; v1.10 = Auth + Growth Instrumentation, `docs/auth_growth_instrumentation_v1.md`;
-   v1.11 = Service Readiness — Sentry / password reset / consent / CSP, `docs/service_readiness_v1.md`).
-3. `docs/product_assembly_ia_v1.md` — **product IA, screen responsibility, visible channel set** (supersedes
-   frontend spec §5–§8·§17-A).
-4. `docs/sellerops_frontend_spec.md` — frontend principles (states, seller language, a11y, capability
-   honesty, guided connection, Action Window screens).
-5. `docs/multi-channel-connector-roadmap.md` — connector strategy; §4.1 = living capability table.
-6. `docs/sellerops_local_agent_runtime_adr.md` — local-agent runtime & guided-connection boundaries.
+| # | Stop | Owns | Document |
+|---|---|---|---|
+| 0 | orientation | what SellerOps is, who for, channel posture, user journey — **points, owns nothing** | `docs/product_operating_model.md` |
+| 1 | **product scope / journeys** | identity, strategy, honest state, authority · the scope contract | `docs/sellerops_canonical_reference.md` · `docs/product-scope-v1.md` (**scope lock v1.11**) |
+| 2 | **architecture** | the five runtimes, how they connect, the fail-closed gates — **a pointer page** | `docs/architecture.md` |
+| 3 | **capability truth** | channel × DataType × method × status — **the single declaration** | `docs/multi-channel-connector-roadmap.md` §4.1 |
+| 4 | **decisions** | ADRs and standing contracts | `docs/decisions/` · `docs/sellerops_live_approval_contract.md` · `docs/sellerops_local_agent_runtime_adr.md` · `docs/sellerops_local_to_pilot_connectivity_decision.md` (NAVER egress IP · Cafe24 callback) · `docs/coupang_review_policy_gate_v1.md` |
+| 5 | **evidence** | every live run: date, channel, capability, commit, approval id, outcome | `docs/evidence/INDEX.md` |
 
-Channel lessons (derived from §4.1, non-authoritative): `docs/channel_capability_ledger.md`.
+**Screens:** `docs/product_assembly_ia_v1.md` owns product IA, screen responsibility and the visible
+channel set (supersedes frontend spec §5–§8·§17-A); `docs/sellerops_frontend_spec.md` owns frontend
+principles (states, seller language, a11y, capability honesty, guided connection, Action Window screens).
 
-**Live-proof evidence:** every live run is indexed in `docs/evidence/INDEX.md` — date, channel,
-capability, commit, approval id, outcome, evidence file. **Landing a proof document without a row there
-is a defect**: an unlinked proof is how Coupang `ORDER_SUMMARY` stayed recorded as "인증 골격만" for two
-weeks after it was live-proven (`docs/channel_integration_completeness_audit_v1.md` §5).
+**Scope-lock companions:** v1.9 Self-Pilot Runtime → `docs/self_pilot_runtime_v1.md`; v1.10 Auth + Growth
+Instrumentation → `docs/auth_growth_instrumentation_v1.md`; v1.11 Service Readiness →
+`docs/service_readiness_v1.md`.
 
-**Status lives in workstream homes, not here:** Action Window / R4 → `docs/action-window-runtime/`
+**Derived views (never promote a status):** `docs/channel_capability_ledger.md` (channel lessons) ·
+`docs/channel-capability-registration-matrix.md` (registration cross-view) ·
+`docs/channel_integration_completeness_audit_v1.md` (per-capability reachability).
+
+**Evidence rule.** Every live run gets a row in `docs/evidence/INDEX.md` in the same PR that lands its
+proof. **Landing a proof document without a row there is a defect** — an unlinked proof is how Coupang
+`ORDER_SUMMARY` stayed recorded as "인증 골격만" for two weeks after it was live-proven
+(`docs/channel_integration_completeness_audit_v1.md` §5). A proof file may only be retired once its row
+carries its whole unique claim.
+
+**Status lives in workstream homes, not here:** Action Window runtime → `docs/action-window-runtime/`
 (`HANDOFF.md`); Action Window frontend → `docs/workstreams/action-window-frontend/` (`progress.md`);
 ESM live capture → `docs/esm/` (`live-capture-checklist.md`); review operations MVP →
 `docs/workstreams/review_operations_mvp.md`; **review AI triage demo ("리뷰 AI 데모 준비" and the like) →
@@ -123,12 +131,13 @@ ESM live capture → `docs/esm/` (`live-capture-checklist.md`); review operation
    (frontend principles)
 4. `docs/sellerops_local_agent_runtime_adr.md`
 5. `docs/multi-channel-connector-roadmap.md` §4.1 (living capability table)
-6. the active slice document (`docs/slices/*`)
+6. the active slice document (`docs/slices/*` — index: `docs/slices/README.md`)
 7. current implementation evidence
-8. historical roadmap and phase records
+8. historical records under `docs/archive/` and the r4 evidence in `docs/action-window-runtime/`
 
 Implementation evidence may reveal docs are stale, but must not silently redefine product intent —
-**report the conflict** instead. For Action Window *status*, `docs/action-window-runtime/` wins.
+**report the conflict** instead. That is exactly how the Coupang `ORDER_SUMMARY` correction happened.
+For Action Window *status*, `docs/action-window-runtime/HANDOFF.md` wins.
 
 ### Assumption rule
 

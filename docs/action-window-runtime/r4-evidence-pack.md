@@ -16,7 +16,7 @@ or commit SHA. No raw review/inquiry content, reviewer/seller/account identity, 
 amounts, tokens, cookies, raw URLs/HTML/screenshots, raw timestamps, `eventTimeMs`, filenames, or local
 paths appears in this document. This is the same contract the pack certifies (§8-7).
 
-This pack satisfies [`r4-preparation.md`](r4-preparation.md) §8 items 1–7 and P11; it is the readiness
+This pack satisfies [`r4-preparation.md`](r4-gate-record.md) §8 items 1–7 and P11; it is the readiness
 evidence for §1 P9/P10/P11.
 
 ---
@@ -794,7 +794,7 @@ deliberately **no G6 template is pre-written for it** (shipping a capability is 
   DOM** (see §8-2 note). **No live NAVER.** Session-wiring: the gated live entrypoint's `assembleLiveRun`
   seam is now **proven** by a synthetic-browser integration test with real Operation Run persistence
   (§8-9) — automated cases PASSED 2026-07-12 + the headed real-human-click case PASSED 2026-07-13; the
-  live driver is **not** Bridge-wired (the entrypoint uses a loopback channel). The §6 checklist body in [`r4-preparation.md`](r4-preparation.md) §6 is reconciled to
+  live driver is **not** Bridge-wired (the entrypoint uses a loopback channel). The §6 checklist body in [`r4-preparation.md`](r4-gate-record.md) §6 is reconciled to
   match P9/§8-2 accordingly (fixture / synthetic-browser green; live still gated).
 - **Live-driver headed synthetic proof (2026-07-12):** ✅ **PASSED with a real seated-operator click** (§8-3
   addendum) — proves the live driver's real-browser observe → download-detect → quarantine-validate →
@@ -1167,7 +1167,7 @@ already spent.** Any follow-up classification probe needs a **fresh single-use G
 
 ## Related
 
-- Gate + readiness source → [`r4-preparation.md`](r4-preparation.md) §1/§3/§6/§7/§8
+- Gate + readiness source → [`r4-preparation.md`](r4-gate-record.md) §1/§3/§6/§7/§8
 - Durable decisions → [`decisions.md`](decisions.md) D-019/D-020/D-021/D-022/D-023
-- Living handoff state → [`current-state.md`](current-state.md)
-- Capability ledger → [`checklist.md`](checklist.md) row 14
+- Living handoff state → [`current-state.md`](HANDOFF.md)
+- Capability ledger → [`checklist.md`](../evidence/INDEX.md) row 14

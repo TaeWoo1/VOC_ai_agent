@@ -989,13 +989,13 @@ existing-app 사용자의 첫 연결 전체 흐름(`/connect/naver` → credenti
 - **불변식 유지:** Secret·account id·job id·selector·raw URL을 상태/이벤트/문구에 담지 않음. no-running 초기 연결·happy path·sync-FAILED 재시도·invalid-credential 반송·completed/saved-key/fresh resume·walkthrough 환경-바인딩 모두 회귀 없음(초기 비-coalesce run은 동기 `manualSync` await로 완료 — `polling:false`, 기존 동작 보존).
 - **테스트:** `state.test.ts`(+3: syncing→first_order_sync·completed 우선·resume 후 SUCCESS→completed) + `GuidedConnectionWizard.test.tsx`(+5: 진행 elapsed·slow note·stalled recheck·진행/stalled 화면 axe) + `ConnectNaver.test.tsx`(+5, fake-timer 폴링: refresh RUNNING resume → 관찰·**test/sync POST 0** → 폴링 SUCCESS → 완료 / 폴링 FAILED → 오류+재시도 / coalesced RUNNING → 진행 → 폴링 완료·**manualSync 1회** / 타임아웃 → stalled → recheck는 폴링만·**새 sync 0** / 이중 클릭 → test 1·sync 1). **게이트: FE 전체 97 files / 1248 tests / 0 fail**(+17), `tsc --noEmit` clean.
 - **접근성/모바일:** 진행·stalled 화면 axe 위반 0. 경과 tick은 aria-hidden, 설명은 politely 안내. 상대 단위·기존 위저드 카드 레이아웃 유지(모바일 뷰포트 회귀 없음).
-- **정합성/거버넌스:** `frontend/CLAUDE.md`는 FE 작업의 문서 수정을 `frontend/**` + `docs/workstreams/action-window-frontend/**`로 제한하고 `docs/sellerops_current_state.md` 수정을 명시적으로 금지한다. 따라서 본 FE 단위는 이 슬라이스(§0.2.25가 후속 FE 단위로 예고한 자연 귀속처)와 메모리에만 기록하고 **`sellerops_current_state.md`는 건드리지 않았다**(부록(20)의 "남은 FE 공백"은 백엔드 단위 소유 기록이라 그대로 둠 — FE 펜스 준수).
+- **정합성/거버넌스:** `frontend/CLAUDE.md`는 FE 작업의 문서 수정을 `frontend/**` + `docs/workstreams/action-window-frontend/**`로 제한하고 `docs/sellerops_canonical_reference.md` 수정을 명시적으로 금지한다. 따라서 본 FE 단위는 이 슬라이스(§0.2.25가 후속 FE 단위로 예고한 자연 귀속처)와 메모리에만 기록하고 **`sellerops_current_state.md`는 건드리지 않았다**(부록(20)의 "남은 FE 공백"은 백엔드 단위 소유 기록이라 그대로 둠 — FE 펜스 준수).
 - **남은 clean-E2E 조건(범위 밖):** ⓐ 초기 동기 `manualSync`가 여전히 HTTP 요청을 ~8.6분 붙잡음(홀드된 요청이 프록시/브라우저 타임아웃에 취약) — 진짜 async 트리거(즉시 RUNNING 반환 + 잡 백그라운드 실행)는 **백엔드 변경**이라 본 단위 밖; 현재는 진행 화면 + refresh-resume이 이를 방어. ⓑ approval-compliant clean E2E 재증명(fresh 승인 필요, §0.2.24). ⓒ 승인 maxActions 상한의 런타임 강제(거버넌스/PO 결정, §0.2.24 GAP④).
 
 ## 0. v1 비준 (Ratification 2026-07-19) — 오프라인 구현 착수
 
 제품 오너가 본 계약을 **NAVER SmartStore v1 흐름으로 비준**한다(우선순위 ① 현재 태스크 결정 +
-`docs/action-window-runtime/naver-smartstore-v1-plan.md`). 아래를 넘어서는 UX는 발명하지 않는다.
+`docs/action-window-runtime/HANDOFF.md`). 아래를 넘어서는 UX는 발명하지 않는다.
 
 - **착수 범위 = G3-A + G3-B (오프라인)**: 가이드 상태 엔진 + 합성 흐름(§19 G3-A), 안전 자격증명 등록·연결
   테스트·첫 sync를 **기존 백엔드 경계 어댑터/합성**으로(§19 G3-B). **G3-C(라이브 정찰)·G3-D(하드닝)은 여전히
