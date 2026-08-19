@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-// The hook's job is lifecycle: attach once (resync → START_RUN once), hold the session for the walk, release the
-// socket on a terminal run and on unmount. It drives the REAL runtime over a fake transport, so the exactly-once
+// The hook's job is lifecycle: attach once (resync → START_RUN once), hold the session for the walk (a terminal
+// run keeps it — the completion screen is live), release the socket on unmount. It drives the REAL runtime over a fake transport, so the exactly-once
 // START_RUN and the refresh-safe reattach are proven end to end, not just at the runtime seam.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
@@ -145,7 +145,7 @@ describe("useGuidedIssuance", () => {
     expect(result.current.unavailable).toBe("carrier-mismatch");
   });
 
-  it("releases the socket on a terminal run but keeps the last view (for the completion CTA)", async () => {
+  it("KEEPS the socket on a terminal run (the completion screen still raises the WING window) and keeps the last view", async () => {
     const t = fakeTransport();
     const close = vi.fn();
     connectIssuanceSession.mockResolvedValue({
@@ -157,8 +157,14 @@ describe("useGuidedIssuance", () => {
       await result.current.attach();
     });
     act(() => t.emit({ kind: "aw_view", view: hostedView({ status: "COMPLETED", allowedCommands: [] }) }));
-    expect(close).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled();
     expect(result.current.view?.status).toBe("COMPLETED"); // retained for the CTA
+    // A repeat attach after completion returns the live runtime and starts nothing new.
+    const before = t.sent.length;
+    await act(async () => {
+      await result.current.attach();
+    });
+    expect(t.sent.length).toBe(before);
   });
 
   it("closes the session on unmount", async () => {

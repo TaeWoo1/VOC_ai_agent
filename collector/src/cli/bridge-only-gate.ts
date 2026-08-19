@@ -21,8 +21,10 @@
  *  - **`--connections` alongside** — two boots were asked for. Refuse rather than pick one: an operator who
  *    added `--bridge-only` to a connections command must not silently lose the connections, and one who
  *    added `--connections` to a resident helper must not silently start connectors.
- *  - **any carrier flag alongside** — the resident bridge hosts NO carrier (a carrier is a promise that a
- *    run will be served; there is no run here). Same exclusivity rule as the import gate.
+ *  - **any carrier flag alongside** — the resident bridge hosts no FLAG-selected carrier (a flag carrier is a
+ *    promise that one fixed run will be served from boot). Same exclusivity rule as the import gate. The
+ *    resident helper's single carrier slot holds the on-demand host instead (`bridge/on-demand-carrier-host.ts`,
+ *    2026-08-19): idle until a SellerOps tab asks for the Coupang guided walk, bridge-only again after it.
  */
 import { ACTION_WINDOW_IMPORT_FLAG, OTHER_CARRIER_FLAGS } from "./import-mode-gate";
 
@@ -65,6 +67,6 @@ export function bridgeOnlyRefusalMessage(reason: BridgeOnlyRefusal): string | nu
     case "CONNECTIONS_CONFLICT":
       return `${BRIDGE_ONLY_FLAG} cannot be combined with --connections — run either the resident bridge or the connector boot, not both.`;
     case "CARRIER_CONFLICT":
-      return `${BRIDGE_ONLY_FLAG} hosts no carrier — remove the Action Window carrier flag or start the agent without ${BRIDGE_ONLY_FLAG}.`;
+      return `${BRIDGE_ONLY_FLAG} hosts no flag-selected carrier (the Coupang guided walk comes up on demand) — remove the Action Window carrier flag or start the agent without ${BRIDGE_ONLY_FLAG}.`;
   }
 }

@@ -700,3 +700,42 @@ describe("coupang issuance session — the credential-state read, and what happe
     expect(engine.view().credentialState).toBe("KEY_PRESENT");
   });
 });
+
+describe("coupang issuance session — a RELEASED session stops touching the surface (2026-08-19)", () => {
+  const LOGIN = { ok: false, pageCategory: "login", blockerCode: "LOGIN_REQUIRED" } as const;
+  const ISSUANCE = { ok: true, pageCategory: "open_api_issuance" } as const;
+
+  it("**the surface-wait loop stops on teardown** — a released walk must not probe (and so re-open) the window", async () => {
+    // Live-observed on the first on-demand release: the resident helper released the walk and closed the WING
+    // window, and one second later the window was BACK. The session's own `awaitSurface` loop was still polling
+    // `probeSurface()` once a second — its only exits were "paused" and "terminal", neither of which describes
+    // "nobody is hosting this run any more" — and the lazy driver re-opens on any call.
+    const { engine, io, driver, session } = build(
+      { probeSequence: [LOGIN, LOGIN, LOGIN, LOGIN, LOGIN, LOGIN, ISSUANCE] },
+      { surfaceWaitPollMs: 1, surfaceWaitTimeoutMs: 500 },
+    );
+    startRun(io);
+    for (let i = 0; i < 50 && engine.currentStage() !== "waiting_login"; i++) await tick();
+    expect(engine.currentStage()).toBe("waiting_login");
+
+    // The host tears the session down (release / shutdown).
+    session.attach()();
+    expect(session.isStopped()).toBe(true);
+    const callsAfterStop = driver.calls.length;
+    for (let i = 0; i < 60; i++) await tick();
+    // Not one more driver call — no probe, no locate, no highlight, nothing that could bring a window up.
+    expect(driver.calls.slice(callsAfterStop)).toEqual([]);
+  });
+
+  it("**a torn-down session drives nothing on a late command either**", async () => {
+    const { io, driver, session } = build();
+    startRun(io);
+    await session.whenSettled();
+    session.attach()();
+    const callsAfterStop = driver.calls.length;
+    // The transport is unsubscribed, so this cannot even reach the engine; the assertion is the driver's silence.
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision, "late");
+    for (let i = 0; i < 20; i++) await tick();
+    expect(driver.calls.slice(callsAfterStop)).toEqual([]);
+  });
+});

@@ -40,6 +40,7 @@ import type { BridgeEventPort } from "./event-adapter";
 import { PROJECTION_CLIENT_MAX_BYTES } from "./projection-protocol";
 import type { ProjectionEndpoint } from "./projection-endpoint";
 import type { AwCarrierEndpoint } from "./aw-carrier";
+import { parseAwCarrierKind } from "../../../contracts/action-window/aw-carrier-kind";
 
 const LOOPBACK = "127.0.0.1";
 const MAX_BODY_BYTES = 16 * 1024;
@@ -649,6 +650,18 @@ export class BridgeServer {
         // inspecting it. Only reachable on an authenticated socket; ignored when no endpoint is mounted
         // (exactly how unknown client message types were already ignored).
         if (this.actionWindow && typeof msg.payload === "string") this.actionWindow.onClientPayload(ws, msg.payload);
+        return;
+      }
+      if (msg?.type === "aw_attach") {
+        // A SellerOps tab naming the carrier it wants (on-demand hosting). Validated to two short enumerable
+        // strings BEFORE it reaches any endpoint — a carrier kind from the closed list and a lower-case channel
+        // code — and ignored outright when the mounted endpoint has no on-demand seam (a fixed-carrier agent
+        // already announced on connect) or when nothing is mounted. Never logged with its values beyond those two.
+        const carrier = parseAwCarrierKind(msg.carrier);
+        const channelCode = typeof msg.channelCode === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(msg.channelCode) ? msg.channelCode : null;
+        if (carrier && channelCode && this.actionWindow?.onClientAttachRequest) {
+          this.actionWindow.onClientAttachRequest(ws, { carrier, channelCode });
+        }
         return;
       }
       const typed = msg as ClientMessage | null;

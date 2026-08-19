@@ -66,6 +66,15 @@ export interface AwWsDeps {
    * state which world it lives in instead of hardcoding v1's.
    */
   expectedCarrier?: AwCarrierKind;
+  /**
+   * OPTIONAL (2026-08-19): ASK the agent for the carrier by name, on the socket, right after it opens —
+   * `{type:"aw_attach", carrier, channelCode}`. The resident SellerOps 도우미 (`--bridge-only`) hosts no carrier
+   * until asked; on this request it brings the named one up (the Coupang guided walk) and announces it, and the
+   * rest of this handshake is unchanged. A fixed-carrier agent already announced on connect and ignores the
+   * request; an older agent ignores unknown message types. So the request is additive: with it absent the
+   * transport is byte-identical to before. Sent on every (re)open of this session, so a reconnect re-asks.
+   */
+  attachChannelCode?: string;
 }
 
 /** A live Action Window transport bound to the run the local agent announced. */
@@ -88,6 +97,7 @@ interface ResolvedDeps {
   maxReconnectAttempts: number;
   onStatus?: (status: AwConnectionStatus) => void;
   expectedCarrier: AwCarrierKind;
+  attachChannelCode?: string;
 }
 
 /**
@@ -118,6 +128,7 @@ function resolveDeps(deps: AwWsDeps): ResolvedDeps {
     maxReconnectAttempts: deps.maxReconnectAttempts ?? 5,
     onStatus: deps.onStatus,
     expectedCarrier: deps.expectedCarrier ?? AW_CARRIER_EXPORT,
+    ...(deps.attachChannelCode ? { attachChannelCode: deps.attachChannelCode } : {}),
   };
 }
 
@@ -207,6 +218,19 @@ async function openAnnouncedSocket(d: ResolvedDeps): Promise<OpenedSocket | AwRe
       resolve(announcedCarrier ? { ok: false, reason, announcedCarrier } : refuse(reason));
     };
     const timer = setTimeout(() => giveUp("no-announcement"), d.sessionTimeoutMs);
+    // Name the carrier we want (on-demand hosting). Only when the caller said which channel — the wire message
+    // carries nothing else, and an agent that cannot serve it simply stays silent, which is the existing
+    // `no-announcement` path.
+    if (d.attachChannelCode) {
+      const ask = (): void => {
+        try {
+          ws.send(JSON.stringify({ type: "aw_attach", carrier: d.expectedCarrier, channelCode: d.attachChannelCode }));
+        } catch {
+          /* the socket closed first; onclose follows */
+        }
+      };
+      ws.onopen = ask;
+    }
     ws.onmessage = (ev) => {
       if (settled) return;
       let msg: unknown;

@@ -121,7 +121,7 @@ export function NaverIssuanceGuidedWalkthrough({
 
   // Live issuance run host — the shared host for BOTH onboarding paths (the runtime picks open-vs-create by
   // observing the API center, so the host carries no path). Inert until `attach()` is called.
-  const issuance = useGuidedIssuance(hostRuntime);
+  const issuance = useGuidedIssuance(hostRuntime, { channelCode: "naver" });
   const attach = issuance.attach;
   // Attach exactly once, and only once the seller has started AND the agent is paired — a ref keeps StrictMode's
   // double-invoke and any re-render from opening a second socket or starting a second walk (the host also guards

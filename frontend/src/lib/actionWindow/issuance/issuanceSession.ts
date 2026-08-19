@@ -79,6 +79,12 @@ function asV2Transport(v1: V1ClientTransport): V2ClientTransport {
  */
 export async function connectIssuanceSession(deps?: {
   onStatus?: (status: "connected" | "reconnecting" | "offline") => void;
+  /**
+   * WHICH channel's issuance walk this caller wants (`coupang`, `naver`). Sent to the agent as an attach request
+   * so the resident helper can bring that walk up on demand; the announced `channelCode` still wins for the
+   * session. Absent ⇒ no request is sent (a fixed-carrier agent announces regardless).
+   */
+  channelCode?: string;
 }): Promise<IssuanceSessionResult> {
   const httpBase = bridgeBase();
   const result = await connectAwBridgeSession({
@@ -86,6 +92,7 @@ export async function connectIssuanceSession(deps?: {
     wsBase: httpBase.replace(/^http/, "ws"),
     expectedCarrier: AW_CARRIER_ISSUANCE,
     ...(deps?.onStatus ? { onStatus: deps.onStatus } : {}),
+    ...(deps?.channelCode ? { attachChannelCode: deps.channelCode } : {}),
   });
   if (!result.ok) return { ok: false, reason: result.reason };
   const { session } = result;

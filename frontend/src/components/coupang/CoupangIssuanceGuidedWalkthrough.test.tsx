@@ -82,6 +82,38 @@ function issuanceRun(over: Partial<ActionWindowRunView> = {}): ActionWindowRunVi
 
 const blocked = (code: BlockerCode) => issuanceRun({ blocker: { code, recoverable: true } });
 
+describe("a walk the seller ENDED hands over to the text checklist (2026-08-19)", () => {
+  // Live-observed on the first real on-demand walk: pressing 취소 left the screen saying "쿠팡(윙) 창에서 화면
+  // 안내를 따라 진행하세요 · 0/8 단계 완료" next to "지금은 할 수 있는 동작이 없어요" — a finished walk shown as
+  // one in progress, with nothing to press and no way on. Cancelling is not an error; it means "I will do this
+  // myself", which is exactly what the text checklist is.
+  it.each(["CANCELLED", "FAILED"] as const)("%s → the text checklist, no in-progress status, no error", (status) => {
+    render(
+      <CoupangIssuanceGuidedWalkthrough
+        onIssued={vi.fn()}
+        run={issuanceRun({ status, allowedCommands: [] })}
+        onCommand={vi.fn()}
+      />,
+    );
+    expect(screen.getByLabelText("쿠팡 Open API 키 발급 (텍스트 안내)")).toBeInTheDocument();
+    expect(screen.queryByText(/화면 안내를 따라 진행하세요/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/할 수 있는 동작이 없어요/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("a COMPLETED walk is NOT sent to the text flow — it keeps its completion + hand-off", () => {
+    render(
+      <CoupangIssuanceGuidedWalkthrough
+        onIssued={vi.fn()}
+        run={issuanceRun({ status: "COMPLETED", allowedCommands: ["FIND_CURRENT_STEP"] })}
+        onCommand={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Open API 키 발급 완료")).toBeInTheDocument();
+    expect(screen.queryByLabelText("쿠팡 Open API 키 발급 (텍스트 안내)")).not.toBeInTheDocument();
+  });
+});
+
 beforeEach(() => {
   h.bridge = { phase: "paired", maybeNeedsLocalNetworkAccess: false };
   h.requestPairing.mockClear();

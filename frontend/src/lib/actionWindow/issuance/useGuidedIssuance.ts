@@ -2,9 +2,11 @@
 //
 // Owns ONE connection attempt (`attach`) and holds the session for the life of the walk — a guided issuance is a
 // single run, not a sequence, so unlike the import binding there is no per-segment re-arm. Unmounting releases
-// both the runtime and the socket; reaching a terminal state releases the socket early while KEEPING the last
-// view, so the walkthrough's completion label + "돌아가 연결 정보 입력하기" CTA still render after the agent
-// has gone quiet.
+// both the runtime and the socket. A terminal run KEEPS the socket (2026-08-19): the completion screen still has
+// a live control on it — "쿠팡 윙 키 화면 다시 보기" raises the WING window where the secret is shown once — and the
+// resident helper reads an attached tab as "the seller is still here", which is what keeps it from releasing
+// that window under them. The socket goes when the walkthrough unmounts (the seller moved on to credential
+// entry, or left); the last view is kept throughout, so the completion label + CTA render until then.
 //
 // **Attach is inert until called.** The hook opens no socket on mount — it connects only when the walkthrough
 // calls `attach()` (which it does once the agent is paired). So a controlled/fixture render (the component given
@@ -33,7 +35,7 @@ export interface GuidedIssuanceBinding {
   send: GuidedIssuanceRuntime["send"];
 }
 
-/** Terminal run statuses — once reached, the socket can be released while the last view is retained for the CTA. */
+/** Terminal run statuses — once reached, `attach()` will not start another run (the walk is over). */
 function isTerminal(status: ActionWindowRunView["status"]): boolean {
   return status === "COMPLETED" || status === "CANCELLED" || status === "FAILED";
 }
@@ -43,7 +45,14 @@ function isTerminal(status: ActionWindowRunView["status"]): boolean {
  *   use, so a component test never depends on a bridge being reachable. An injected runtime is NOT disposed on
  *   unmount (it belongs to its owner).
  */
-export function useGuidedIssuance(inject?: GuidedIssuanceRuntime): GuidedIssuanceBinding {
+export function useGuidedIssuance(
+  inject?: GuidedIssuanceRuntime,
+  opts?: {
+    /** The channel whose issuance walk to ask the agent for (`coupang` / `naver`). See `connectIssuanceSession`. */
+    channelCode?: string;
+  },
+): GuidedIssuanceBinding {
+  const channelCode = opts?.channelCode;
   const [view, setView] = useState<ActionWindowRunView | null>(inject?.view() ?? null);
   const [unavailable, setUnavailable] = useState<IssuanceUnavailable | null>(null);
   const runtimeRef = useRef<GuidedIssuanceRuntime | null>(inject ?? null);
@@ -51,8 +60,10 @@ export function useGuidedIssuance(inject?: GuidedIssuanceRuntime): GuidedIssuanc
   const stopRef = useRef<(() => void) | null>(null);
   const connectingRef = useRef<Promise<GuidedIssuanceRuntime | null> | null>(null);
   const liveRef = useRef(true);
-  /** Once a terminal view has released the socket, stay released — a late reconnect must not re-open it. */
+  /** Once the hook has torn its session down (unmount), stay released — a late attach must not re-open it. */
   const releasedRef = useRef(false);
+  /** The walk reached a terminal state: `attach()` returns the live runtime but never starts a second run. */
+  const finishedRef = useRef(false);
 
   const adopt = useCallback((runtime: GuidedIssuanceRuntime) => {
     stopRef.current?.();
@@ -62,20 +73,11 @@ export function useGuidedIssuance(inject?: GuidedIssuanceRuntime): GuidedIssuanc
     });
   }, []);
 
-  /** Dispose the runtime + close the socket, but KEEP the last view (so a completed walk still shows its CTA). */
-  const releaseSocket = useCallback(() => {
-    if (releasedRef.current || inject) return; // an injected runtime belongs to its owner
-    releasedRef.current = true;
-    stopRef.current?.();
-    stopRef.current = null;
-    runtimeRef.current?.dispose();
-    sessionRef.current?.close();
-    runtimeRef.current = null;
-    sessionRef.current = null;
-  }, [inject]);
-
   useEffect(() => {
     liveRef.current = true;
+    // Cleared on every (re)mount, not only the first: StrictMode's mount → cleanup → mount would otherwise leave
+    // the hook permanently "released" from its own simulated unmount, and `attach()` would return null forever.
+    releasedRef.current = false;
     if (inject) adopt(inject);
     return () => {
       liveRef.current = false;
@@ -83,6 +85,7 @@ export function useGuidedIssuance(inject?: GuidedIssuanceRuntime): GuidedIssuanc
       stopRef.current = null;
       // Only tear down what this hook created. An injected runtime belongs to its owner.
       if (!inject) {
+        releasedRef.current = true;
         runtimeRef.current?.dispose();
         sessionRef.current?.close();
         runtimeRef.current = null;
@@ -91,22 +94,22 @@ export function useGuidedIssuance(inject?: GuidedIssuanceRuntime): GuidedIssuanc
     };
   }, [inject, adopt]);
 
-  // A terminal run has nothing more to publish: release the socket, keep the view for the completion CTA.
+  // A terminal run has nothing more to start. The socket stays (see the module note); the view is kept for the CTA.
   useEffect(() => {
-    if (view && isTerminal(view.status)) releaseSocket();
-  }, [view, releaseSocket]);
+    if (view && isTerminal(view.status)) finishedRef.current = true;
+  }, [view]);
 
   const attach = useCallback(async (): Promise<GuidedIssuanceRuntime | null> => {
     if (runtimeRef.current) {
-      runtimeRef.current.ensureStarted(); // idempotent — safe on a repeat attach
+      if (!finishedRef.current) runtimeRef.current.ensureStarted(); // idempotent — safe on a repeat attach
       return runtimeRef.current;
     }
-    if (releasedRef.current) return null; // a finished walk is not re-attached
+    if (releasedRef.current || finishedRef.current) return null; // a torn-down or finished walk is not re-attached
     // One attach at a time: two fast triggers would otherwise open two sockets, and the second announcement
     // would leave the first runtime addressing a run nobody is publishing.
     if (connectingRef.current) return connectingRef.current;
     const attempt = (async () => {
-      const result = await connectIssuanceSession();
+      const result = await connectIssuanceSession(channelCode ? { channelCode } : undefined);
       if (!result.ok) {
         if (liveRef.current) setUnavailable(result.reason);
         return null;
@@ -133,7 +136,7 @@ export function useGuidedIssuance(inject?: GuidedIssuanceRuntime): GuidedIssuanc
     });
     connectingRef.current = attempt;
     return attempt;
-  }, [adopt]);
+  }, [adopt, channelCode]);
 
   const send = useCallback<GuidedIssuanceRuntime["send"]>((type) => {
     runtimeRef.current?.send(type);

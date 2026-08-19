@@ -180,6 +180,11 @@ can perform it.
   (`agent-supervisor.sh switch coupang-locate` for `[쿠팡에서 보기]`). **Product gap**: the target is one
   resident helper hosting every READ carrier and taking work only from the SellerOps UI. §8 records the
   posture the first-run UX assumes today.
+  **Partly closed 2026-08-19** for the Coupang guided WING issuance walk: the resident `--bridge-only` helper
+  now hosts that carrier **on demand** — idle (no browser) until a SellerOps tab asks for it on the socket,
+  then the existing walk, then idle again, with no flag/env/`switch` in the seller's hands. Design + code:
+  `docs/resident_helper_on_demand_carrier_v1.md`. NAVER import and Coupang locate still need their
+  flag-selected boots.
 
 ## 8. Browser-only new-user posture (product-owner decision, 2026-08-18)
 

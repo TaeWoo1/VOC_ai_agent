@@ -139,3 +139,155 @@ describe("--connections path regression", () => {
     expect(decideRun([BRIDGE_ONLY_FLAG], "[]", DEV)).toMatchObject({ mode: "PARSE_ERROR" });
   });
 });
+
+// ── the on-demand guided walk (2026-08-19) ─────────────────────────────────────────────────────────
+import WebSocket from "ws";
+import { randomBytes } from "node:crypto";
+import {
+  ACTION_WINDOW_PROTOCOL_VERSION,
+  type ActionWindowRunView,
+} from "../../../contracts/action-window/v2/index";
+import { deserializeFrame, serializeFrame, type AwServerFrame } from "../../../contracts/action-window/v2/transport";
+import { AW_CARRIER_ISSUANCE } from "../../../contracts/action-window/aw-carrier-kind";
+import { activateCoupangGuidedWalk, type CoupangIssuanceLiveCarrier } from "../../src/cli/local-agent";
+import { CoupangIssuanceFixtureDriver } from "../../src/action-window/coupang-issuance/coupang-issuance-fixture-driver";
+
+const APP = "http://localhost:5173";
+
+/** A carrier shaped like the live one, driven by the SYNTHETIC fixture — no browser can open in a test. */
+function fixtureCarrier(): CoupangIssuanceLiveCarrier & { closed: number } {
+  const driver = new CoupangIssuanceFixtureDriver();
+  const c = {
+    closed: 0,
+    config: { runId: `run_${randomBytes(6).toString("hex")}`, channelCode: "coupang", createDriver: () => driver },
+    closeSurface: async () => void c.closed++,
+    isSurfaceOpen: () => false,
+  };
+  return c;
+}
+
+async function pairedTicket(port: number): Promise<string> {
+  const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+    fetch(`http://127.0.0.1:${port}${path}`, { method: "POST", headers: { "Content-Type": "application/json", Origin: APP, ...headers }, body: JSON.stringify(body) });
+  const req = (await (await post("/bridge/pair/request", { workspaceLabel: "t" })).json()) as { requestId: string };
+  const token = ((await (await post("/bridge/pair/poll", { requestId: req.requestId })).json()) as { pairingToken: string }).pairingToken;
+  return ((await (await post("/bridge/ws-ticket", { clientProtocolVersion: 1 }, { Authorization: `Bearer ${token}` })).json()) as { ticket: string }).ticket;
+}
+
+function openTab(port: number, ticket: string) {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/bridge/ws?ticket=${encodeURIComponent(ticket)}`, { headers: { Origin: APP } });
+  const announcements: Array<Record<string, unknown>> = [];
+  const frames: AwServerFrame[] = [];
+  let view: ActionWindowRunView | null = null;
+  ws.on("message", (data: WebSocket.RawData) => {
+    const msg = JSON.parse(data.toString()) as Record<string, unknown>;
+    if (msg.type === "aw_session") announcements.push(msg);
+    if (msg.type === "aw" && typeof msg.payload === "string") {
+      const f = deserializeFrame(msg.payload) as AwServerFrame;
+      frames.push(f);
+      if (f.kind === "aw_view") view = f.view;
+      if (f.kind === "aw_resync_result" && f.view) view = f.view;
+    }
+  });
+  const opened = new Promise<void>((r) => ws.once("open", () => r()));
+  const until = async (pred: () => boolean, ms = 3000) => {
+    const t0 = Date.now();
+    while (!pred()) {
+      if (Date.now() - t0 > ms) throw new Error("timeout");
+      await new Promise((r) => setTimeout(r, 15));
+    }
+  };
+  return { ws, opened, announcements, frames, view: () => view, until };
+}
+
+describe("activateCoupangGuidedWalk", () => {
+  it("serves exactly issuance/coupang and nothing else; building it opens no window", () => {
+    expect(activateCoupangGuidedWalk({ carrier: "import", channelCode: "naver" })).toBeNull();
+    expect(activateCoupangGuidedWalk({ carrier: AW_CARRIER_ISSUANCE, channelCode: "naver" })).toBeNull();
+    expect(activateCoupangGuidedWalk({ carrier: "locate", channelCode: "coupang" })).toBeNull();
+    const live = fixtureCarrier();
+    let built = 0;
+    const c = activateCoupangGuidedWalk({ carrier: AW_CARRIER_ISSUANCE, channelCode: "coupang" }, { buildCarrier: () => (built++, live) });
+    expect(c).not.toBeNull();
+    expect(built).toBe(1);
+    expect(c!.isSettled()).toBe(true); // no run started yet
+    expect(c!.isSurfaceOpen()).toBe(false);
+  });
+});
+
+describe("runBridgeOnlyBoot — the guided walk on demand", () => {
+  const cleanups: Array<() => Promise<void> | void> = [];
+  afterEach(async () => {
+    while (cleanups.length) await cleanups.pop()!();
+  });
+
+  it("idle announces nothing; aw_attach issuance/coupang activates + announces; START_RUN runs the walk on the EXISTING session; release → idle; shutdown tears down", async () => {
+    const dir = mkdtempSync(join(tmpdir(), `bridge-only-od-${randomUUID()}-`));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    const lines: string[] = [];
+    const live = fixtureCarrier();
+    const handle = await runBridgeOnlyBoot([BRIDGE_ONLY_FLAG], { NODE_ENV: "test" } as NodeJS.ProcessEnv, {
+      bridgeConfigOverride: { port: 0, pairingFile: join(dir, "pairings.json"), autoApprovePairing: true },
+      onSignal: () => undefined,
+      print: (l) => void lines.push(l),
+      exit: () => undefined,
+      activateCarrier: (req) => activateCoupangGuidedWalk(req, { buildCarrier: () => live }),
+    });
+    cleanups.push(() => handle.shutdown());
+    expect(handle.listen.ok).toBe(true);
+    const port = (handle.listen as { ok: true; port: number }).port;
+    const boot = JSON.parse(lines[0]!) as Record<string, unknown>;
+    expect(boot).toMatchObject({ mode: "BRIDGE_ONLY", browserLaunched: false, marketplaceOpened: false, onDemandCarriers: ["issuance/coupang"] });
+
+    // 1. A tab that does not ask sees bridge-only as it always was: hello + snapshot, NO aw_session.
+    const ticket1 = await pairedTicket(port);
+    const quiet = openTab(port, ticket1);
+    await quiet.opened;
+    await new Promise((r) => setTimeout(r, 150));
+    expect(quiet.announcements).toHaveLength(0);
+    expect(handle.carrierHost.state().active).toBe(false);
+
+    // 2. The connect screen asks for the guided walk → activation + announcement, to the asking tab AND the quiet one.
+    const tab = openTab(port, await pairedTicket(port));
+    await tab.opened;
+    // Malformed / unknown requests are dropped at the server before any endpoint sees them.
+    tab.ws.send(JSON.stringify({ type: "aw_attach", carrier: AW_CARRIER_ISSUANCE, channelCode: "Coupang; drop" }));
+    tab.ws.send(JSON.stringify({ type: "aw_attach", carrier: "not-a-carrier", channelCode: "coupang" }));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(handle.carrierHost.state().active).toBe(false);
+    tab.ws.send(JSON.stringify({ type: "aw_attach", carrier: AW_CARRIER_ISSUANCE, channelCode: "coupang" }));
+    await tab.until(() => tab.announcements.length > 0);
+    expect(tab.announcements[0]).toMatchObject({ type: "aw_session", carrier: AW_CARRIER_ISSUANCE, channelCode: "coupang", runId: live.config.runId });
+    await quiet.until(() => quiet.announcements.length > 0);
+    expect(handle.carrierHost.state()).toMatchObject({ active: true, carrier: "issuance", channelCode: "coupang", attachedClients: 1 });
+    expect(live.closed).toBe(0); // nothing opened, nothing closed
+
+    // 3. START_RUN on the announced run → the real engine/session publish a view (fixture driver, no browser).
+    tab.ws.send(JSON.stringify({ type: "aw", payload: serializeFrame({ kind: "aw_command", command: {
+      protocolVersion: ACTION_WINDOW_PROTOCOL_VERSION, commandId: `${live.config.runId}-t1`, runId: live.config.runId, expectedRevision: 0,
+      type: "START_RUN" as never, payload: { channelCode: "coupang", intent: "API_ISSUANCE_GUIDANCE" } as never } }) }));
+    await tab.until(() => tab.view() !== null);
+    expect(tab.view()!.runId).toBe(live.config.runId);
+    expect(tab.view()!.channelCode).toBe("coupang");
+    expect(JSON.stringify(tab.view())).not.toMatch(/secret|password|token/i);
+
+    // 4. The fixture walk runs to COMPLETED on the runtime's own advances (no FE step). The tab leaves: settled +
+    //    no window → the host releases and the helper is bridge-only again.
+    await tab.until(() => tab.view()!.status === "COMPLETED", 5000);
+    tab.ws.close();
+    await new Promise((r) => setTimeout(r, 100));
+    expect(await handle.carrierHost.maybeRelease()).toBe(true);
+    expect(handle.carrierHost.state().active).toBe(false);
+    expect(live.closed).toBe(1);
+
+    // 5. Idle again: a fresh tab gets no announcement until it asks; a fresh ask activates a NEW run.
+    const tab3 = openTab(port, await pairedTicket(port));
+    await tab3.opened;
+    await new Promise((r) => setTimeout(r, 100));
+    expect(tab3.announcements).toHaveLength(0);
+    quiet.ws.close();
+    tab3.ws.close();
+    await handle.shutdown();
+    expect(lines.at(-1)).toBe(JSON.stringify({ mode: "BRIDGE_ONLY", stopped: true }));
+  });
+});
