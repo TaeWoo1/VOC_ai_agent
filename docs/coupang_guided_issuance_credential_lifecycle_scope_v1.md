@@ -5,7 +5,7 @@
 > **PR #402** (guided issuance + WING walkthrough binding + already-issued live calibration) and **PR #403**
 > (credential expiry + guided renewal). Read this before relying on any Coupang WING guided/renewal behavior.
 >
-> Detail lives in the feature docs: [`coupang_wing_guided_issuance_tutorial_v1.md`](./coupang_wing_guided_issuance_tutorial_v1.md),
+> Detail lives in the feature docs: [`coupang_wing_guided_issuance_tutorial_v1.md`](resident_helper_on_demand_carrier_v1.md),
 > [`coupang_wing_live_calibration_v1.md`](./coupang_wing_live_calibration_v1.md),
 > [`coupang_credential_expiry_guided_renewal_v1.md`](./coupang_credential_expiry_guided_renewal_v1.md),
 > [`coupang_credential_expiry_audit_v1.md`](./coupang_credential_expiry_audit_v1.md).

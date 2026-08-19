@@ -6,7 +6,7 @@
 > on the 발급 target, reported a confident unique match against a node that does not render. And `role: "button"`
 > was never measured: it came from the hardcoded EXPECTED-role table. The record's state is
 > `LIVE_DOM_CALIBRATION_APPARATUS_UNSOUND` — unsupported, not disproved. Everything below is retained as history.
-> See `docs/coupang_wing_delete_calibration_withdrawal_v1.md`.
+> See `docs/evidence/INDEX.md`.
 
 > **Status:** `DELETE_SELECTOR_LIVE_CALIBRATION_PASS`, captured 2026-08-07 on `main @ a666ad1`. Real Coupang
 > WING, an **already-issued** account, fully sanitized. **Zero 삭제 press, zero highlight, zero click/type,

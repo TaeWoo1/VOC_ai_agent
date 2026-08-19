@@ -130,7 +130,7 @@ sits behind a **policy-clarification gate**.
   **Cafe24 pilot channel v1 is declared complete** (connect + orders/inquiries/reviews acquisition +
   exact-window/dedup + privacy + Attention/Issue-Memory + agent draft/brief; reply/comment **write**
   remains deferred, shown honestly). Still **not production-supported** (file-upload only). Baseline:
-  `docs/sellerops_cafe24_channel_v1_completion.md`.
+  `docs/evidence/INDEX.md`.
 - **(structural) — Coupang / ESM+ ORDER_SUMMARY.** Provider/seller-tool registration can require
   **사업자등록 first** and may create **dual seller-tool conflicts**. Registration strategy is a
   parallel track, not a code blocker — see `docs/channel-capability-registration-matrix.md`.

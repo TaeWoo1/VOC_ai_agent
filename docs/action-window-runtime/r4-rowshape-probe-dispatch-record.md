@@ -6,7 +6,7 @@
 > counted rows; Run 1's false-positive-empty is **not** a row-shape miss. Diagnosis widens to a **render-timing**
 > gap. Full sanitized reading → [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-11. Gates B/C/D as originally
 > filled are retained below for the record. Source of truth:
-> [`r4-gate-record.md`](r4-gate-record.md) §G3/§G6/§7 + [`r4-preparation.md`](r4-preparation.md) §7/§9.
+> [`r4-gate-record.md`](r4-gate-record.md) §G3/§G6/§7 + [`r4-preparation.md`](r4-gate-record.md) §7/§9.
 
 **Probe:** the frame-aware read-only export-surface probe (`probe-export-same-session`) — **unchanged CLI**,
 now emitting two additional sanitized row-shape signals (commit `802f0a0`,
@@ -50,7 +50,7 @@ Re-affirmed, **scoped to this read-only row-shape probe only** (no click / expor
 - ☑ Stable network / IP / location still holds (the condition that paused NAVER live work).
 - ☑ Dedicated Chrome connection profile intact · Bridge paired · Operation Run persistence enabled.
 - ☑ **NAVER live-work pause lifted FOR THIS READ-ONLY PROBE ONLY** — a fresh, read-only-scoped lift
-  ([`r4-preparation.md`](r4-preparation.md) §9 item 3); **not** a general lift and **not** an export lift.
+  ([`r4-preparation.md`](r4-gate-record.md) §9 item 3); **not** a general lift and **not** an export lift.
 
 *Affirmed by:* operator (PO)  *Date:* 2026-07-13  *Scope:* one read-only row-shape surface probe on `NAVER_DEV_SELLER_SELF_01`.
 
@@ -76,7 +76,7 @@ session/context ends — never standing for a later turn.
 
 ## D · §7 abort criteria · ☑ ACKNOWLEDGED 2026-07-13
 
-(reference — [`r4-preparation.md`](r4-preparation.md) §7)
+(reference — [`r4-preparation.md`](r4-gate-record.md) §7)
 
 - ☑ **Operator-immediate:** withdrawn consent · any unrecognized prompt/dialog · any anti-abuse signal
   (CAPTCHA storm / lockout) · any unexpected on-screen data → the human completes or walks away; the probe

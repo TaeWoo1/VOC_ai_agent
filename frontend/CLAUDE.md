@@ -11,7 +11,7 @@ Must **not** modify: `collector/**`, `backend/**`, `docs/esm/**`, Chrome/CDP/run
 code, marketplace adapters, the shared contract (`contracts/action-window/v1/**`), or
 canonical product/runtime docs (`docs/product-scope-v1.md`,
 `docs/sellerops_frontend_spec.md`, `docs/slices/action-window-v1.md`,
-`docs/sellerops_current_state.md`, `docs/multi-channel-connector-roadmap.md`,
+`docs/sellerops_canonical_reference.md`, `docs/multi-channel-connector-roadmap.md`,
 `docs/channel-capability-registration-matrix.md`,
 `docs/sellerops_local_agent_runtime_adr.md`, `docs/action-window-runtime/**`).
 

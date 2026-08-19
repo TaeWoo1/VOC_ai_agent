@@ -8,7 +8,7 @@
 > **The one-run G6 is now CONSUMED / spent** (single-use; a fail-closed run does not refund it). Any further
 > live contact — including a read-only diagnostic probe of the failed surface — needs a **new** G3-export +
 > G6 in a fresh dispatching turn. This record now authorizes nothing further. Source of truth:
-> [`r4-gate-record.md`](r4-gate-record.md) pre-dispatch runbook + [`r4-preparation.md`](r4-preparation.md)
+> [`r4-gate-record.md`](r4-gate-record.md) pre-dispatch runbook + [`r4-preparation.md`](r4-gate-record.md)
 > §3/§4/§7/§9.
 
 **Channel:** NAVER SmartStore review export (G1 ratified — [`decisions.md`](decisions.md) D-021).
@@ -70,7 +70,7 @@ becomes standing authorization for a later turn.
 
 ## D · P6 — supervised-pilot internal sign-off · ☑ SIGNED 2026-07-13
 
-P6 ([`r4-preparation.md`](r4-preparation.md) §1/§3), for this export run:
+P6 ([`r4-preparation.md`](r4-gate-record.md) §1/§3), for this export run:
 
 - ☑ G1–G5 all ✅ (block A).
 - ☑ Export-scoped G6 recorded (block C, filled).
@@ -86,7 +86,7 @@ executed this session.**
 
 ## E · §7 abort criteria · ☑ ACKNOWLEDGED by the operator for this run — 2026-07-13
 
-(reference — full text in [`r4-preparation.md`](r4-preparation.md) §7)
+(reference — full text in [`r4-preparation.md`](r4-gate-record.md) §7)
 
 - **Operator-immediate:** withdrawn consent · any unrecognized prompt/dialog · any anti-abuse signal
   (CAPTCHA storm / lockout) · any unexpected on-screen data → the human completes or walks away; the
@@ -144,6 +144,6 @@ per-run PO approval for the one run, now spent. **Block F was RUN on 2026-07-13 
 authorized by this record — a **new** G3-export + G6 is required for any next run or read-only diagnostic.
 
 > **Canonical-register sync — still deferred by design.** The living gate registers
-> ([`r4-gate-record.md`](r4-gate-record.md) §G6 / [`r4-preparation.md`](r4-preparation.md) §1 P6·P12) are
+> ([`r4-gate-record.md`](r4-gate-record.md) §G6 / [`r4-preparation.md`](r4-gate-record.md) §1 P6·P12) are
 > **not** flipped to a satisfied/passing state: the pilot **fail-closed**, so nothing here represents a
 > successful supervised export. The registers record the §8-8 FAILED evidence, not a passed gate.

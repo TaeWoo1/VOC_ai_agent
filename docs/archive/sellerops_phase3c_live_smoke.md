@@ -53,7 +53,7 @@ walked its window range under pacing and converged cleanly.
   errors. **Caveat:** because the delta was empty (`totalRows=0`), no order rows
   were parsed, so the §F amount-field *shape* (`initialPaymentAmount`,
   `data.more` pagination, batch limits) is **still unconfirmed against live
-  data** — it remains open in `docs/sellerops_phase3c.md` §12 and needs a smoke
+  data** — it remains open in `docs/multi-channel-connector-roadmap.md` (the Phase 3C planning doc it referred to was retired in R5) §12 and needs a smoke
   against an account with a recent paid order.
 - **Cursor preservation** — `sync_cursors` row is valid Naver JSON with the
   expected keys (`windowFrom`, `windowTo`, `moreFrom`, `moreSequence`,
@@ -114,7 +114,7 @@ walked its window range under pacing and converged cleanly.
   credentials**: token issuance (signature/timestamp), the
   `last-changed-statuses` response shape, `product-orders/query` amount fields,
   pagination (`data.more`), and cursor behavior.
-- Close the open schema items recorded in `docs/sellerops_phase3c.md` §12
+- Close the open schema items recorded in `docs/multi-channel-connector-roadmap.md` (the Phase 3C planning doc it referred to was retired in R5) §12
   (live-smoke checklist).
 - **This is not a production rollout.** One account, one data type
   (ORDER_SUMMARY), manual sync only, then everything is turned back off.
@@ -226,7 +226,7 @@ order-query activity or a SUCCESS/empty run means the token path works).
 
 ## F. Fields to verify from the live response
 
-Record these findings (they close `docs/sellerops_phase3c.md` §12); inspect
+Record these findings (they close `docs/multi-channel-connector-roadmap.md` (the Phase 3C planning doc it referred to was retired in R5) §12); inspect
 via the optional curl probe or DB evidence, never by pasting full bodies:
 
 1. `data.lastChangeStatuses[]` item shape — confirm the six assumed fields
@@ -281,7 +281,7 @@ via the optional curl probe or DB evidence, never by pasting full bodies:
 5. Delete the `NAVER_COMMERCE_*` values from `backend/.env.local` (or the
    whole file); clear shell history if secrets were ever typed inline (they
    should not have been).
-6. Record the §F findings in `docs/sellerops_phase3c.md` §12 (schema items
+6. Record the §F findings in `docs/multi-channel-connector-roadmap.md` (the Phase 3C planning doc it referred to was retired in R5) §12 (schema items
    confirmed/refuted) — findings only, never response bodies.
 
 ## J. Post-smoke decision

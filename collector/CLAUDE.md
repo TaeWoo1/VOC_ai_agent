@@ -266,7 +266,7 @@ guidelines.
    **B3 Run B (2026-07-20) is NOT precedent for product behavior** — it was a
    single supervised diagnostic exception taken to classify one artifact. **No
    further B3 live download probes.** See the §8 note in
-   `docs/action-window-runtime/naver-smartstore-v1-plan.md`.
+   `docs/action-window-runtime/HANDOFF.md`.
 
 ---
 

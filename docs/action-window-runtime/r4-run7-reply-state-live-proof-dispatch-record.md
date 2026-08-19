@@ -62,7 +62,7 @@
 > environment the G3 affirmation described.
 >
 > **G3's first box — "stable network / IP / location still holds" — is therefore FALSE**, and it is the
-> very condition that paused NAVER live work in the first place ([`r4-preparation.md`](r4-preparation.md)
+> very condition that paused NAVER live work in the first place ([`r4-preparation.md`](r4-gate-record.md)
 > §3, §9-3). A G3 affirmed against a different environment cannot be carried into this one.
 >
 > **State of the gates:**
@@ -89,7 +89,7 @@
 > the only thing that authorizes live contact. A live NAVER run needs a **per-run G3** (`export+ingest`
 > scope) **and a fresh single-use G6** naming channel / seller account owner / date / operator / the
 > §7 abort criteria / `max live window:` — both affirmed **in the dispatching turn**
-> ([`r4-preparation.md`](r4-preparation.md) §3, [`r4-gate-record.md`](r4-gate-record.md)). A plan, a
+> ([`r4-preparation.md`](r4-gate-record.md) §3, [`r4-gate-record.md`](r4-gate-record.md)). A plan, a
 > prior approval, and goal pressure are never authorization.
 
 - **Proposed run:** Run 7 — reply-state live proof
@@ -297,7 +297,7 @@ at least one answered low-rating review.**
 
 ## 9. Abort criteria
 
-[`r4-preparation.md`](r4-preparation.md) §7 applies verbatim and unchanged — including the carve-out
+[`r4-preparation.md`](r4-gate-record.md) §7 applies verbatim and unchanged — including the carve-out
 that the **expected** NAVER export confirmation dialog is not an abort trigger while every
 *unrecognized* prompt is. Run-specific additions:
 
@@ -389,7 +389,7 @@ be inherited from Run 4 or from anything else:
   this record proposed ☑ on the reasoning that the `session recovery` carve-out belongs to that scope
   alone. That is true of the carve-out's *scope* but wrong about *this run's control boundary*: this
   is a **CLI run over a loopback**, and the live driver **is not Bridge-wired**
-  ([`r4-preparation.md`](r4-preparation.md) §6 says so verbatim). A ☑ would assert a fact the run does
+  ([`r4-preparation.md`](r4-gate-record.md) §6 says so verbatim). A ☑ would assert a fact the run does
   not exercise; a silent drop would hide the question. **The CLI is the control boundary here.**
 - ☐ Operation Run persistence enabled.
 - ☐ §9 item 3 pause lift, **for `export+ingest` only** — not a blanket lift, not inherited.

@@ -60,7 +60,7 @@ a worktree, and a "current slice" that no longer exist.
 
 ## Where to read first
 
-1. [`current-state.md`](current-state.md) — the living handoff state. ⚠ Its **top fixed-metadata block** is
+1. [`current-state.md`](HANDOFF.md) — the living handoff state. ⚠ Its **top fixed-metadata block** is
    current (refreshed 2026-07-18: baseline `ab4a9fa`, tests 3120/32) and its **newest dated bullet** carries
    the Run 5 → Run 6 close-out; **but the accreted body below that stops around Run 4** and reads pre-live in
    places. **Trust the top block + the newest bullet, not the older accreted narrative** — and for Runtime
@@ -73,10 +73,10 @@ a worktree, and a "current slice" that no longer exist.
    §8-21 (A3) and §8-22 (A4) are **offline** slices — **live-verified by nothing**. Milestone A shipped a
    capability, not a live proof; A4 rehearsed recovery in a browser over a synthetic DOM, which is **not** a
    live proof either — Run 6 (§8-23) is what proved the recovery loop live.
-3. [`r4-preparation.md`](r4-preparation.md) — **normative**: §3 gates G1–G6, §4 live-action safety
+3. [`r4-preparation.md`](r4-gate-record.md) — **normative**: §3 gates G1–G6, §4 live-action safety
    boundary, §6 adapter ladder, §7 abort criteria.
 4. [`r4-gate-record.md`](r4-gate-record.md) — recorded gate sign-offs + the export-pilot pre-dispatch runbook.
-5. [`r4-operator-runbook.md`](r4-operator-runbook.md) — **the only operator-facing doc here**; the other
+5. [`r4-operator-runbook.md`](../sellerops_live_approval_contract.md) — **the only operator-facing doc here**; the other
    entries are engineering records. Read it if a human is about to run an **export**: Phase A prep, the
    click and confirm windows, what a lapse costs, when to abort. **Grants nothing.**
    ⚠ **It describes the EXPORT pilot. Run 5 deliberately inverts its §3** (click, do NOT confirm) — that
@@ -168,7 +168,7 @@ follow-up (a classification probe that needs a fresh single-use G6), and product
 raises an **expected NAVER confirmation dialog** the operator must manually confirm; the download fires only
 on that confirmation. Both steps must land inside the ~60 s detect window. That dialog is **expected and is
 NOT a §7 abort trigger**; §7's "any *unrecognized* prompt/dialog → abort" still stands for everything else.
-Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3; normative:
+Operator-facing version: [`r4-operator-runbook.md`](../sellerops_live_approval_contract.md) §3; normative:
 `r4-preparation.md` §7.
 
 **Timing facts a cold session re-derives WRONG (code-verified, not run-verified):**
@@ -483,7 +483,7 @@ paragraph is currently the decision's only home in the repo.
 Run 4 proved the path; the human choreography was scattered and the one text an operator reads at run time
 was stale. Now closed, offline, in one commit:
 
-- **NEW [`r4-operator-runbook.md`](r4-operator-runbook.md)** — the run-time choreography (Phase A prep,
+- **NEW [`r4-operator-runbook.md`](../sellerops_live_approval_contract.md)** — the run-time choreography (Phase A prep,
   the ~60 s window, timeout cost, abort, evidence). Choreography **only**: it links to the gate record for
   authorization and §8-17 for evidence rather than restating them. **It grants nothing.**
 - **`r4-preparation.md` §7** — the expected-dialog carve-out, now explicit in the normative section, and

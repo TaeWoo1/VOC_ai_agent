@@ -2,7 +2,7 @@
 
 **Status:** landed · offline unit · no live run
 **Lands:** the READ-ONLY live measurement taken on 2026-08-09 at `e8e62981`
-**Predecessors:** `docs/coupang_wing_issue_selector_recalibration_v1.md` (the withdrawal this closes) ·
+**Predecessors:** `docs/coupang_wing_issue_selector_calibration_landing_v2.md` (the withdrawal this closes) ·
 `docs/coupang_wing_issuance_form_reveal_v1.md` (the record it falsified)
 
 ## What this unit is, and what it is not
@@ -194,7 +194,7 @@ table, through the same `role`-named field, as the 발급 claim that was refuted
 contradict each other on that record. Deliberately not touched here (deletion tooling is out of scope for this
 unit), and a source reader who consults only the comment gets the wrong answer until it is.
 
-> **Closed in the next unit** (`docs/coupang_wing_delete_calibration_withdrawal_v1.md`), which also found the
+> **Closed in the next unit** (`docs/evidence/INDEX.md`), which also found the
 > harder problem: that record's `matchCount: 1` was captured at `a666ad1`, **before** the visibility filter
 > landed at `a3ef479e`. The 삭제 calibration is withdrawn and the destructive path is fail-closed.
 

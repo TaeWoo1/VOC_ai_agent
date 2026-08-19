@@ -102,10 +102,10 @@ the separate sanitized count, not folded into totalRows.
 
 ## Prior HALT records → historical, not final
 
-- `docs/sellerops_cafe24_backfill_exact_window_fix.md` — recorded the live run that
+- `docs/sellerops_cafe24_inquiry_read_live_proof.md` — recorded the live run that
   **disproved** the exact-window contract (a single-day window ingesting a 2025-03-27 row) and
   the fix. That HALT is now **historical**: the fix it describes is the code proven here.
-- `docs/sellerops_cafe24_inquiry_read_live_proof_halt.md` (scratch, untracked) — an earlier
+- `docs/sellerops_cafe24_inquiry_read_live_proof.md` (scratch, untracked) — an earlier
   paused attempt. **Historical**; superseded by this success.
 
 Neither HALT is a statement of current capability; both are retained only as the audit trail
