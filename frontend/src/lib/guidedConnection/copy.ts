@@ -153,9 +153,9 @@ export const CALL_IP_COPY = {
 export const REVIEW_SETUP_COPY = {
   title: "리뷰 가져오기 설정 (선택)",
   setupRequiredBody:
-    "주문 연결은 끝났습니다. 리뷰 가져오기는 별도 단계로, 내 PC의 SellerOps 로컬 에이전트를 실행·연결하고 판매자센터에 직접 로그인한 뒤 작업 창에서 공식 내보내기로 진행합니다. 지금 하지 않아도 주문 연결에는 영향이 없습니다.",
+    "주문 연결은 끝났습니다. 리뷰 가져오기는 별도 단계로, 내 PC의 SellerOps 도우미를 실행·연결하고 판매자센터에 직접 로그인한 뒤 작업 창에서 공식 내보내기로 진행합니다. 지금 하지 않아도 주문 연결에는 영향이 없습니다.",
   readyBody:
-    "로컬 에이전트가 연결되어 있어 리뷰 가져오기를 진행할 수 있습니다. 리뷰는 판매자센터 공식 내보내기를 작업 창에서 직접 진행합니다 (자동 수집이 아닙니다).",
+    "SellerOps 도우미가 연결되어 있어 리뷰 가져오기를 진행할 수 있습니다. 리뷰는 판매자센터 공식 내보내기를 작업 창에서 직접 진행합니다 (자동 수집이 아닙니다).",
   cta: "리뷰 가져오기 설정으로 이동",
 } as const;
 
@@ -186,7 +186,7 @@ export const CAPABILITY_REASON_COPY: Record<string, string> = {
   RECONNECT_REQUIRED: "연결 정보를 확인하지 못했습니다. 카페24 동의를 다시 진행해 주세요.",
   PROVIDER_ERROR: "카페24 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요.",
   GUIDED_EXPORT_ONLY: "네이버 리뷰는 공식 API가 없어, 작업 창에서 직접 내보내기로 가져옵니다.",
-  REVIEW_SETUP_REQUIRED: "리뷰 가져오기는 로컬 에이전트를 설정한 뒤 작업 창에서 진행합니다.",
+  REVIEW_SETUP_REQUIRED: "리뷰 가져오기는 SellerOps 도우미를 연결한 뒤 작업 창에서 진행합니다.",
   REPLY_UNVERIFIED: "리뷰 답변 자동 전송은 제공하지 않습니다.",
   INTEGRATION_PENDING: "네이버 문의 연동은 준비 중입니다.",
 };

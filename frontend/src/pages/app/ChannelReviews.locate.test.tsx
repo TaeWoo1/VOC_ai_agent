@@ -216,7 +216,7 @@ describe("[쿠팡에서 보기]", () => {
     renderPage(binding({ reviewId: "r1", unavailable: "unreachable" }));
     await selectTheReview();
 
-    expect(await screen.findByText(/로컬 에이전트가 실행 중이 아닙니다/)).toBeInTheDocument();
+    expect(await screen.findByText(/도우미가 실행 중이 아니에요/)).toBeInTheDocument();
   });
 
   /** A run belongs to the review it was pressed on. Showing it under another is a false claim. */

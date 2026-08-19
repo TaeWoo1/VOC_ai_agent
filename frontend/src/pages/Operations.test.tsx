@@ -101,7 +101,7 @@ describe("FE-7 Operations run-detail page (store → DOM wiring)", () => {
     // "start" a scripted run and pass it off as the seller's (A7).
     seedRun("human-action-required");
     renderWithRouter(<Operations />);
-    expect(screen.getByText(/로컬 에이전트가 연결되어 있지 않아/)).toBeInTheDocument();
+    expect(screen.getByText(/SellerOps 도우미가 필요합니다/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: commandLabel("CANCEL_RUN") })).toBeNull();
     expect(screen.queryByRole("region", { name: SECTION_TITLE.controls })).toBeNull();
   });

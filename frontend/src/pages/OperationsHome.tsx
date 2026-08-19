@@ -118,7 +118,7 @@ export function OperationsHome() {
               onClick={() => void retryBridgeBoot()}
               className="mt-3 rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-muted transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
             >
-              <span aria-hidden="true">🔌 </span>로컬 에이전트 다시 연결 (개발용)
+              <span aria-hidden="true">🔌 </span>SellerOps 도우미 다시 연결 (개발용)
             </button>
           ) : null}
         </nav>
@@ -160,7 +160,7 @@ export function OperationsHome() {
 
       {!liveActions ? (
         <p role="note" className="rounded-2xl border border-line bg-canvas px-4 py-3 text-sm text-muted">
-          로컬 에이전트가 연결되어 있지 않아 지금은 수집을 시작할 수 없습니다. 지금까지 가져온 기록은 아래에서 볼 수 있어요.
+          SellerOps 도우미가 필요합니다. 도우미가 연결되어 있지 않아 지금은 수집을 시작할 수 없어요. 지금까지 가져온 기록은 아래에서 볼 수 있어요.
         </p>
       ) : null}
 

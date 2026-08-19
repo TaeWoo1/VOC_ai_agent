@@ -3,14 +3,14 @@
  *
  * ## Why this exists (proof record, finding 14)
  *
- * The pairing UI already existed — `BridgeStatus` — but it is mounted only when `VITE_ENABLE_AGENT_BRIDGE=true`,
+ * The pairing UI already existed — the shell dock (now `AgentDock`) — but it is mounted only when `VITE_ENABLE_AGENT_BRIDGE=true`,
  * which is a developer flag. On the 2026-07-25 live run the seated operator could not find any way to connect
  * their local helper from the product, and the run only proceeded because the flag was set by hand. A guided
  * import that cannot start without an environment variable has no seller-facing entry point at all.
  *
  * So the pairing action lives HERE, on the card that is blocked without it, ungated. It is deliberately not a
- * second copy of `BridgeStatus`: that surface is an operator status console (per-connection states, revoke), and
- * this is the two sentences and one button a seller needs at the moment they are stopped.
+ * second copy of the dock: that surface is quiet unless the helper is connected or was and broke, and this is the
+ * "SellerOps 도우미가 필요합니다" — two sentences and one button — a seller needs at the moment they are stopped.
  *
  * ## Props, not a hook
  *
@@ -62,6 +62,9 @@ export function AgentPairingPanel({
 
   return (
     <div className="flex flex-col gap-2 rounded-xl bg-canvas px-4 py-3" data-testid="agent-pairing">
+      {/* Why the seller is stopped, in one line, before the fix. The dock says nothing on the screens that do
+          not need the helper — this is where "the helper is needed" is said. */}
+      <p className="text-sm font-semibold text-ink" data-testid="agent-pairing-title">SellerOps 도우미가 필요합니다</p>
       {phase === "pairing_pending" ? (
         <>
           <p className="text-sm text-ink break-keep">
@@ -117,9 +120,9 @@ export function AgentPairingPanel({
         <>
           <p className="text-sm text-ink break-keep">
             {phase === "pairing_denied"
-              ? "연결이 거부됐어요. 다시 연결하고, 내 PC에 열리는 창에서 허용을 눌러 주세요."
+              ? "SellerOps 도우미 연결이 거부됐어요. 다시 연결하고, 내 PC에 열리는 창에서 허용을 눌러 주세요."
               : phase === "revoked"
-                ? "연결이 해제됐어요. 다시 연결해 주세요."
+                ? "SellerOps 도우미 연결이 해제됐어요. 다시 연결해 주세요."
                 : "이 브라우저를 내 PC의 SellerOps 도우미와 연결해 주세요."}
           </p>
           <button

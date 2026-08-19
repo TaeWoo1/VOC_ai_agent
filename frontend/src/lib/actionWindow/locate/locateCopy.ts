@@ -22,15 +22,15 @@ export interface LocateMessage {
 
 /** Why the press never reached a run. Each names a different thing to do about it. */
 const UNAVAILABLE_TEXT: Record<LocateUnavailable, string> = {
-  "bridge-disabled": "이 환경에서는 로컬 에이전트 연결이 꺼져 있습니다.",
-  unpaired: "SellerOps 로컬 에이전트와 아직 연결되지 않았습니다. 채널 설정에서 연결한 뒤 다시 눌러 주세요.",
-  "ticket-rejected": "로컬 에이전트 연결이 거절되었습니다. 채널 설정에서 다시 연결해 주세요.",
-  unreachable: "SellerOps 로컬 에이전트가 실행 중이 아닙니다. 에이전트를 켠 뒤 다시 눌러 주세요.",
-  "no-announcement": "로컬 에이전트가 응답하지 않습니다. 에이전트를 다시 시작한 뒤 눌러 주세요.",
-  "transport-version-mismatch": "로컬 에이전트 버전이 맞지 않습니다. 에이전트를 업데이트해 주세요.",
+  "bridge-disabled": "이 환경에서는 SellerOps 도우미 연결이 꺼져 있습니다.",
+  unpaired: "SellerOps 도우미가 필요합니다. 아직 연결되지 않았어요 — 채널 설정에서 도우미를 연결한 뒤 다시 눌러 주세요.",
+  "ticket-rejected": "SellerOps 도우미 연결이 거절되었습니다. 채널 설정에서 다시 연결해 주세요.",
+  unreachable: "SellerOps 도우미가 필요합니다. 내 PC의 도우미가 실행 중이 아니에요 — 도우미를 켠 뒤 다시 눌러 주세요.",
+  "no-announcement": "SellerOps 도우미가 응답하지 않습니다. 도우미를 다시 시작한 뒤 눌러 주세요.",
+  "transport-version-mismatch": "SellerOps 도우미 버전이 맞지 않습니다. 도우미를 업데이트해 주세요.",
   // The agent is up but doing something else entirely — say that, rather than "연결할 수 없습니다".
-  "carrier-mismatch": "로컬 에이전트가 지금 다른 작업을 하고 있어 상품평을 찾아드릴 수 없습니다.",
-  "start-refused": "로컬 에이전트가 이 요청을 받지 않았습니다. 잠시 후 다시 눌러 주세요.",
+  "carrier-mismatch": "SellerOps 도우미가 지금 다른 작업을 하고 있어 상품평을 찾아드릴 수 없습니다.",
+  "start-refused": "SellerOps 도우미가 이 요청을 받지 않았습니다. 잠시 후 다시 눌러 주세요.",
   "mint-failed": "이 상품평은 지금 찾아드릴 수 없습니다. 잠시 후 다시 시도해 주세요.",
 };
 

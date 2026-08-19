@@ -40,7 +40,7 @@ export function ProjectionView() {
       {STATUS_MESSAGE[state.phase] && <p className="mb-3 text-muted">{STATUS_MESSAGE[state.phase]}</p>}
 
       {state.phase === "desktop_only" && (
-        <p className="text-muted">브라우저 화면 보기는 로컬 에이전트가 실행 중인 <strong className="text-ink">컴퓨터</strong>에서 사용해 주세요.</p>
+        <p className="text-muted">브라우저 화면 보기는 SellerOps 도우미가 실행 중인 <strong className="text-ink">컴퓨터</strong>에서 사용해 주세요.</p>
       )}
       {(state.phase === "unreachable" || state.phase === "unavailable" || state.phase === "disconnected" || state.phase === "target_closed") && (
         <button className="btn-ghost mt-1" onClick={retry}>다시 시도</button>
@@ -89,7 +89,7 @@ export function ProjectionView() {
 
 const STATUS_MESSAGE: Partial<Record<string, string>> = {
   connecting: "연결하는 중…",
-  unreachable: "로컬 에이전트에 연결하지 못했습니다.",
+  unreachable: "SellerOps 도우미에 연결하지 못했습니다.",
   unpaired: "먼저 내 PC와 연결(페어링)해 주세요.",
   unavailable: "지금은 보여줄 브라우저 화면이 없습니다.",
   starting: "화면을 준비하는 중…",
