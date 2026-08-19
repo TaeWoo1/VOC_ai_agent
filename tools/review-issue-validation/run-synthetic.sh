@@ -86,7 +86,7 @@ echo "== register org + resolve the NAVER file channel =="
 EMAIL="issueproof-${STAMP}@riv.local"; PASS="riv-$(openssl rand -hex 12)"
 curl -s -o /dev/null -w '  signup HTTP %{http_code}\n' -X POST "http://127.0.0.1:${PORT}/api/auth/signup" \
   -H 'Content-Type: application/json' \
-  -d "{\"email\":\"${EMAIL}\",\"password\":\"${PASS}\",\"name\":\"Issue Proof\",\"orgName\":\"Issue Proof Org\"}"
+  -d "{\"email\":\"${EMAIL}\",\"password\":\"${PASS}\",\"name\":\"Issue Proof\",\"orgName\":\"Issue Proof Org\",\"termsAccepted\":true}"
 TOKEN="$(curl -s -X POST "http://127.0.0.1:${PORT}/api/auth/login" -H 'Content-Type: application/json' \
   -d "{\"email\":\"${EMAIL}\",\"password\":\"${PASS}\"}" \
   | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>process.stdout.write(JSON.parse(d).token||""))')"

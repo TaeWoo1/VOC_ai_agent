@@ -1,6 +1,7 @@
 package com.sellerops.auth.social;
 
 import com.sellerops.auth.JwtTokenProvider;
+import com.sellerops.auth.consent.AccountConsent;
 import com.sellerops.auth.dto.AuthResponse;
 import com.sellerops.auth.social.dto.SocialExchangeResponse;
 import com.sellerops.common.ApiException;
@@ -132,6 +133,12 @@ public class SocialAuthService {
     /** 상호명 given: org + user + identity in one transaction; both collision checks repeated here. */
     @Transactional
     public AuthResponse completeOnboarding(String onboardingToken, String orgName, String name) {
+        return completeOnboarding(onboardingToken, orgName, name, false);
+    }
+
+    @Transactional
+    public AuthResponse completeOnboarding(String onboardingToken, String orgName, String name,
+                                           boolean marketingConsent) {
         Instant now = clock.instant();
         String hash = AuthCodes.hash(onboardingToken);
         AuthHandoff h = handoffs.findByCodeHash(hash)
@@ -163,6 +170,7 @@ public class SocialAuthService {
         user.setPasswordHash(null);
         user.setName(name.trim());
         user.setRole("OWNER");
+        AccountConsent.record(user, marketingConsent, now);
         user = users.save(user);
 
         UserIdentity identity = new UserIdentity();

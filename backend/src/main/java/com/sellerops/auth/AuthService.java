@@ -1,5 +1,6 @@
 package com.sellerops.auth;
 
+import com.sellerops.auth.consent.AccountConsent;
 import com.sellerops.auth.dto.AuthResponse;
 import com.sellerops.auth.dto.LoginRequest;
 import com.sellerops.auth.dto.SignupRequest;
@@ -9,6 +10,7 @@ import com.sellerops.organization.OrganizationRepository;
 import com.sellerops.user.User;
 import com.sellerops.user.UserRepository;
 import com.sellerops.user.UserView;
+import java.time.Instant;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -48,6 +50,7 @@ public class AuthService {
         user.setPasswordHash(passwordEncoder.encode(req.password()));
         user.setName(req.name());
         user.setRole("OWNER");
+        AccountConsent.record(user, req.marketingConsentGiven(), Instant.now());
         user = users.save(user);
 
         return toAuthResponse(user, org.getName());

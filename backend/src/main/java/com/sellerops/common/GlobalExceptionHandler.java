@@ -1,5 +1,6 @@
 package com.sellerops.common;
 
+import io.sentry.Sentry;
 import java.time.Instant;
 import java.util.Map;
 import org.slf4j.Logger;
@@ -68,6 +69,8 @@ public class GlobalExceptionHandler {
         // The client gets a sanitized sentence; the operator log gets the trace. Swallowing it here
         // left a 500 on /api/inbox undiagnosable from outside the JVM (product assembly A2).
         log.error("Unhandled exception → 500", ex);
+        // Error monitoring (docs/service_readiness_v1.md §2-1): a no-op without SENTRY_DSN; scrubbed by SentryScrub.
+        Sentry.captureException(ex);
         return body(HttpStatus.INTERNAL_SERVER_ERROR, "서버 오류가 발생했습니다.");
     }
 

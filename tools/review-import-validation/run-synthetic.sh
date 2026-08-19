@@ -65,7 +65,7 @@ done
 echo "== org + NAVER file-channel account =="
 EMAIL="riv-${STAMP}@riv.local"; PASS="riv-$(openssl rand -hex 12)"
 curl -s -o /dev/null -X POST "${BASE}/api/auth/signup" -H 'Content-Type: application/json' \
-  -d "{\"email\":\"${EMAIL}\",\"password\":\"${PASS}\",\"name\":\"RIV\",\"orgName\":\"RIV Disposable Org\"}"
+  -d "{\"email\":\"${EMAIL}\",\"password\":\"${PASS}\",\"name\":\"RIV\",\"orgName\":\"RIV Disposable Org\",\"termsAccepted\":true}"
 TOKEN="$(curl -s -X POST "${BASE}/api/auth/login" -H 'Content-Type: application/json' -d "{\"email\":\"${EMAIL}\",\"password\":\"${PASS}\"}" | jq_field token)"
 AUTH="Authorization: Bearer ${TOKEN}"
 NAVER_CH="$(curl -s "${BASE}/api/channels" -H "${AUTH}" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const a=JSON.parse(d);const l=Array.isArray(a)?a:(a.content||a.channels||[]);process.stdout.write((l.find(c=>c.code==="NAVER")||{}).id||"")})')"

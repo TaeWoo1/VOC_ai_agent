@@ -52,9 +52,17 @@ describe("/onboarding", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Google 계정 · a@gmail.com");
     expect(screen.getByLabelText("이름")).toHaveValue("A");
     fireEvent.change(screen.getByLabelText(/상호/), { target: { value: " 우리 스토어 " } });
+    // 필수 consent first (docs/service_readiness_v1.md §2-4): the checkbox is `required` (browser-blocked) and the
+    // form's own guard says the same thing.
+    fireEvent.submit(screen.getByRole("form", { name: "가입 마무리" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("동의");
+    expect(complete).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText(/\(필수\)/));
     fireEvent.click(screen.getByRole("button", { name: "시작하기" }));
     await waitFor(() => expect(screen.getByText("채널 연결 화면")).toBeInTheDocument());
-    expect(complete).toHaveBeenCalledWith({ onboardingToken: "tok-1", orgName: "우리 스토어", name: "A" });
+    expect(complete).toHaveBeenCalledWith({
+      onboardingToken: "tok-1", orgName: "우리 스토어", name: "A", termsAccepted: true, marketingConsent: false,
+    });
     expect(acceptSession).toHaveBeenCalledWith(session);
     expect(readPendingOnboarding()).toBeNull();
     expect(analytics.emitted.slice(before)).toEqual([
@@ -74,6 +82,7 @@ describe("/onboarding", () => {
     complete.mockRejectedValue({ response: { status: 401 } });
     renderOnboarding();
     fireEvent.change(screen.getByLabelText(/상호/), { target: { value: "스토어" } });
+    fireEvent.click(screen.getByLabelText(/\(필수\)/));
     fireEvent.click(screen.getByRole("button", { name: "시작하기" }));
     expect(await screen.findByText("가입 세션이 만료되었어요")).toBeInTheDocument();
     expect(readPendingOnboarding()).toBeNull();
@@ -85,6 +94,7 @@ describe("/onboarding", () => {
     complete.mockRejectedValue({ response: { status: 409, data: { message: "이미 가입된 이메일입니다. 이메일과 비밀번호로 로그인해 주세요." } } });
     renderOnboarding();
     fireEvent.change(screen.getByLabelText(/상호/), { target: { value: "스토어" } });
+    fireEvent.click(screen.getByLabelText(/\(필수\)/));
     fireEvent.click(screen.getByRole("button", { name: "시작하기" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("이미 가입된 이메일");
     expect(acceptSession).not.toHaveBeenCalled();

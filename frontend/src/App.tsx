@@ -12,6 +12,11 @@ import { Login } from "./pages/Login";
 import { Signup } from "./pages/Signup";
 import { AuthCallback } from "./pages/AuthCallback";
 import { Onboarding } from "./pages/Onboarding";
+import { ForgotPassword } from "./pages/ForgotPassword";
+import { ResetPassword } from "./pages/ResetPassword";
+import { LegalPlaceholder } from "./pages/LegalPlaceholder";
+import { ConsentBanner } from "./lib/consent/ConsentBanner";
+import { PRIVACY_PATH, TERMS_PATH } from "./lib/legal";
 
 // v2 app surface
 import { HomeV2 } from "./pages/app/HomeV2";
@@ -63,6 +68,7 @@ export function App() {
     );
   }
   return (
+    <>
     <Routes>
       {/* Public surface — renders with no token, no org, no app state. `PublicShell` must stay
           free of auth/alert providers so an unauthenticated visitor can reach it.
@@ -80,6 +86,12 @@ export function App() {
             identity — auth surface, not menu (docs/auth_growth_instrumentation_v1.md §4). */}
         <Route path="/auth/callback" element={<AuthCallback />} />
         <Route path="/onboarding" element={<Onboarding />} />
+        {/* Service Readiness v1 (docs/service_readiness_v1.md): password reset on the same auth shell; legal
+            placeholders behind the footer / consent links. */}
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path={TERMS_PATH} element={<LegalPlaceholder kind="terms" />} />
+        <Route path={PRIVACY_PATH} element={<LegalPlaceholder kind="privacy" />} />
       </Route>
 
       <Route
@@ -154,5 +166,9 @@ export function App() {
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
+    {/* Browser consent (docs/service_readiness_v1.md §2-4): exists only while a decision is pending under the
+        banner policy (an analytics vendor is configured). Outside both shells so it needs no app state. */}
+    <ConsentBanner />
+    </>
   );
 }

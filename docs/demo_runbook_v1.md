@@ -93,7 +93,11 @@ and, if AI triage is wanted, `SELLEROPS_AI_TRIAGE_PILOT_ORG_IDS=*`. Optional (20
 `docs/auth_growth_instrumentation_v1.md` §8): Google / NAVER 소셜 로그인 = `SELLEROPS_OAUTH_GOOGLE_CLIENT_ID/SECRET`,
 `SELLEROPS_OAUTH_NAVER_CLIENT_ID/SECRET` (redirect URI at the provider console:
 `http://localhost:5173/login/oauth2/code/{google|naver}`); growth analytics = frontend `VITE_GTM_ID`,
-`VITE_POSTHOG_KEY` — all absent by default, and absent means the buttons / sinks do not exist. Start backend
+`VITE_POSTHOG_KEY` — all absent by default, and absent means the buttons / sinks do not exist. Optional (2026-08-19,
+`docs/service_readiness_v1.md` §5): password reset mail — local without SMTP: `SELLEROPS_MAIL_MODE=dev-outbox` (the
+reset link is printed in the backend log under `[DEV MAIL OUTBOX]`; without it the "비밀번호를 잊으셨나요?" entry does
+not exist); error monitoring `SENTRY_DSN` / `VITE_SENTRY_DSN` (absent = OFF); the consent banner appears only when
+`VITE_GTM_ID` / `VITE_POSTHOG_KEY` is set. Start backend
 (`bootRun`) and frontend (`npm run dev:bridge`). Nothing here is ever touched again for a new sign-up.
 
 **Seller, in the browser only:**

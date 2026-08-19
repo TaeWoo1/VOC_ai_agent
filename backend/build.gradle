@@ -24,6 +24,10 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     // Social login (Google OIDC · NAVER OAuth2) on top of the existing JWT — docs/auth_growth_instrumentation_v1.md
     implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
+    // Service Readiness v1 (docs/service_readiness_v1.md): error monitoring (OFF without SENTRY_DSN) and the
+    // password-reset mailer (OFF without SELLEROPS_MAIL_MODE).
+    implementation 'io.sentry:sentry-spring-boot-starter-jakarta:8.53.0'
+    implementation 'org.springframework.boot:spring-boot-starter-mail'
     implementation 'org.flywaydb:flyway-core'
     implementation 'org.flywaydb:flyway-database-postgresql'
 
@@ -51,4 +55,31 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+}
+
+// Release identity for Sentry only (docs/service_readiness_v1.md §2-7): the short git SHA at build time lands in
+// META-INF/build-info.properties as `build.git`; SELLEROPS_RELEASE overrides it at run time. Never shown to a seller.
+def gitShortSha = {
+    try {
+        def out = new ByteArrayOutputStream()
+        exec {
+            commandLine 'git', 'rev-parse', '--short=12', 'HEAD'
+            workingDir projectDir
+            standardOutput = out
+            errorOutput = new ByteArrayOutputStream()
+            ignoreExitValue = true
+        }
+        def sha = out.toString().trim()
+        sha ? sha : 'unknown'
+    } catch (Exception ignored) {
+        'unknown'
+    }
+}()
+
+springBoot {
+    buildInfo {
+        properties {
+            additional = [git: gitShortSha]
+        }
+    }
 }

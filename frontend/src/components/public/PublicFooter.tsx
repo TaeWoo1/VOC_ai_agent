@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { PRODUCT_PATH } from "../../lib/public/publicCta";
+import { PRIVACY_PATH, TERMS_PATH } from "../../lib/legal";
 
 /**
  * Public-surface footer. Minimal by intent — business/legal detail is added when the
@@ -27,6 +28,19 @@ export function PublicFooter() {
             className="rounded transition hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
           >
             로그인
+          </Link>
+          {/* Legal surface (docs/service_readiness_v1.md §2-4): placeholders until the documents are confirmed. */}
+          <Link
+            to={TERMS_PATH}
+            className="rounded transition hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
+          >
+            이용약관
+          </Link>
+          <Link
+            to={PRIVACY_PATH}
+            className="rounded transition hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
+          >
+            개인정보처리방침
           </Link>
         </nav>
       </div>

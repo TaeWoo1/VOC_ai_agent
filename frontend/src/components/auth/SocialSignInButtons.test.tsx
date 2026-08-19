@@ -8,7 +8,7 @@ import { expectNoAxeViolations } from "../../test/axe";
 
 const socialProviders = vi.fn();
 vi.mock("../../lib/apiClient", () => ({
-  api: { socialProviders: () => socialProviders() },
+  api: { socialProviders: () => socialProviders(), passwordResetConfig: async () => ({ enabled: false, devOutbox: false }) },
 }));
 vi.mock("../../lib/auth", () => ({
   useAuth: () => ({ user: null, ready: true, login: vi.fn(), signup: vi.fn(), acceptSession: vi.fn(), logout: vi.fn() }),

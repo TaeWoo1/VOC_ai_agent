@@ -11,6 +11,8 @@ import {
   readPendingOnboarding,
 } from "../lib/socialOnboarding";
 import { AuthCard, authField, authLabel, authLink, authPrimaryButton } from "../components/auth/AuthCard";
+import { AuthNotice } from "../components/auth/AuthNotice";
+import { ConsentFields } from "../components/auth/ConsentFields";
 import { FIRST_RUN_PATH } from "./Signup";
 
 /**
@@ -25,6 +27,8 @@ export function Onboarding() {
   const pending = useMemo(() => readPendingOnboarding(), []);
   const [orgName, setOrgName] = useState("");
   const [name, setName] = useState(pending?.name ?? "");
+  const [terms, setTerms] = useState(false);
+  const [marketing, setMarketing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expired, setExpired] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -44,6 +48,10 @@ export function Onboarding() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!pending) return;
+    if (!terms) {
+      setError("이용약관과 개인정보처리방침에 동의해야 가입할 수 있습니다.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -51,6 +59,8 @@ export function Onboarding() {
         onboardingToken: pending.onboardingToken,
         orgName: orgName.trim(),
         name: name.trim(),
+        termsAccepted: true,
+        marketingConsent: marketing,
       });
       clearPendingOnboarding();
       acceptSession(session);
@@ -74,8 +84,9 @@ export function Onboarding() {
   if (expired) {
     return (
       <AuthCard title="가입 세션이 만료되었어요">
-        <p className="text-base text-ink">시간이 지나 가입을 이어갈 수 없습니다.</p>
-        <p className="text-sm text-muted">{providerLabel} 계정으로 다시 로그인하면 이 화면으로 돌아옵니다.</p>
+        <AuthNotice tone="error" title="시간이 지나 가입을 이어갈 수 없습니다">
+          {providerLabel} 계정으로 다시 로그인하면 이 화면으로 돌아옵니다.
+        </AuthNotice>
         <Link to="/signup" className={`${authLink} block text-center text-base`}>
           계정 만들기로 돌아가기
         </Link>
@@ -118,6 +129,7 @@ export function Onboarding() {
             required
           />
         </div>
+        <ConsentFields idPrefix="onboarding" terms={terms} marketing={marketing} onTerms={setTerms} onMarketing={setMarketing} />
         {error ? (
           <p className="text-sm text-bad" role="alert">
             {error}

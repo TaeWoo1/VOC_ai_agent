@@ -295,6 +295,18 @@ sellerops:
     # Expired handoff rows (they carry the provider email/display name) are deleted on this cadence.
     purge-initial-delay-ms: 300000
     purge-interval-ms: 900000
+  # Service Readiness v1 — docs/service_readiness_v1.md §5. Public origin of the frontend, used to build links
+  # that leave the product (password-reset mail). Not a secret.
+  public-base-url: ${SELLEROPS_PUBLIC_BASE_URL:http://localhost:5173}
+  # Password reset by mailed one-time link (§2-2): SHA-256 at rest, single use, this TTL. Needs a mailer (below).
+  password-reset:
+    ttl-seconds: ${SELLEROPS_PASSWORD_RESET_TTL_SECONDS:1800}
+  # Mailer (§2-3): smtp (spring.mail.* / SPRING_MAIL_HOST… — boot fails without a host) | dev-outbox (mail is
+  # written to THIS LOG, links included — local/self-pilot only, never production) | off (default: reset link
+  # hidden, mails dropped without naming an address).
+  mail:
+    mode: ${SELLEROPS_MAIL_MODE:off}
+    from: ${SELLEROPS_MAIL_FROM:no-reply@localhost}
   walkthrough:
     # Disposable NAVER walkthrough environment-identity endpoints (context + operator-tab handshake).
     # OFF by default → the WalkthroughController bean and its routes do not exist in production (any
@@ -341,3 +353,19 @@ sellerops:
 logging:
   level:
     org.springframework.security: INFO
+
+# Error monitoring (docs/service_readiness_v1.md §2-1). `sentry.dsn` is deliberately NOT declared here: Sentry's
+# auto-configuration exists only when the SENTRY_DSN environment variable (relaxed-bound to sentry.dsn) is set —
+# local/dev default = OFF, nothing initialises. The knobs below apply when it is on. Every event passes
+# com.sellerops.telemetry.SentryScrub (no query strings, auth headers, cookies, bodies, users). Log→Sentry
+# forwarding is off (log lines are not audited for PII); trace headers propagate to NO outgoing host.
+sentry:
+  environment: ${SELLEROPS_ENV:local}
+  release: ${SELLEROPS_RELEASE:}
+  send-default-pii: false
+  max-request-body-size: none
+  traces-sample-rate: ${SELLEROPS_SENTRY_TRACES_SAMPLE_RATE:0.1}
+  trace-propagation-targets: []
+  attach-threads: false
+  logging:
+    enabled: false
