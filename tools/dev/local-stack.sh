@@ -62,8 +62,26 @@ start_one() {
   echo "$name: starting…"
   # `setsid`-less on purpose: these are foreground dev servers whose children must die with them, and the
   # process group is what `down` kills. macOS has no setsid, so the pid we record is the group leader.
-  ( cd "$REPO_ROOT/$dir" && exec "$@" ) >"$(log_file "$name")" 2>&1 &
+  #
+  # **`.env.local` is sourced, because otherwise this script silently starts a DIFFERENT deployment.**
+  # Spring does not read a dotenv file; the house convention is `set -a; . ./.env.local; set +a` before
+  # `bootRun` (docs/demo_runbook_v1.md), and a stack that skipped it would come up with every connector,
+  # the self-pilot, the OAuth providers and the AI capabilities off — looking healthy while being a
+  # deployment nobody configured. Absent is fine and silent: a checkout without one is the default posture.
+  # The file is gitignored and never printed; only the fact that it was loaded is.
+  (
+    cd "$REPO_ROOT/$dir"
+    if [ -f .env.local ]; then
+      set -a
+      # shellcheck disable=SC1091
+      . ./.env.local
+      set +a
+    fi
+    exec "$@"
+  ) >"$(log_file "$name")" 2>&1 &
   echo $! > "$(pid_file "$name")"
+  [ -f "$REPO_ROOT/$dir/.env.local" ] && echo "$name: loaded $dir/.env.local"
+  return 0
 }
 
 wait_for() {

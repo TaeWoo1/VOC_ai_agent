@@ -27,15 +27,16 @@ readings were measured live, the end-to-end walk was not; `OFFLINE_ONLY` = tests
 | **NAVER — issuance selector probe / highlight** | `probe-issuance-selectors.ts` (read-only recorder) + `visual-recon-adopted` | `IMPLEMENTED_AND_WIRED` — four fixed-label locators (`create_app`, `api_group`, `application_id`, `application_secret`) derived from the adopted set, re-scored through the frozen adoption gate | `LIVE_CALIBRATED` — `matchCount === 1` on the real API center, runs #4/#5/#6 | none needed | `open_app` is deliberately NOT a highlight target (a live row anchor measured 44 matches) — it is navigation guidance + an observed transition; `return` is text only |
 | **NAVER — credential / permission / IP probe** | advertised call IP from the backend setup view; order-access probed by the connection test | `IMPLEMENTED_AND_WIRED` | `LIVE_PROVEN` (order-access, 2026-06-14) | none | **this machine's env has `SELLEROPS_CONNECTOR_NAVER_ADVERTISED_EGRESS_IPS` unset**, so the guided screen honestly says "고정 호출 IP가 아직 설정되지 않았습니다" while Coupang's is set. Config, not code |
 | **NAVER — first ORDER sync** | backend API connector | `IMPLEMENTED_AND_WIRED` | `LIVE_PROVEN` once (2026-06-14) | none | scheduling flag off; not production-supported (§4.1) |
-| **NAVER — review import (guided segment)** | Action Window import carrier | `IMPLEMENTED_AND_WIRED` **to its own boot** (`--action-window-initial-review-import` + `--i-understand-this-opens-live-naver` + `NAVER_REVIEW_URL`); **NOT reachable from the resident helper** | `LIVE_PROVEN` (2026-07-25 / 07-26, 1 account · 1 segment · disposable backend) | **not wired** — see §3.1 | the import boot opens a browser AT BOOT by product-owner decision (2026-07-25) and needs an operator-owned env var; making it on-demand is a product decision, not a missing line |
-| **NAVER — guided review reply (submission)** | `reply-submission` carrier; dev flag drives `SyntheticReplySubmitDriver` | `ONLY_PROBE_OR_FIXTURE` in the product path; the real driver has only `run-reply-submission-live-naver.ts` | `OFFLINE_ONLY` — never run live | **not wired** (marketplace WRITE — the stop rule) | §4.1 already forbids "답변 등록 지원" wording; unchanged |
+| **NAVER — review import (guided segment)** | Action Window import carrier, reachable only from its own flag boot | **`IMPLEMENTED_AND_WIRED` to the resident helper (2026-08-20)** — `/connect/review-history` → `aw_attach{import,naver}` → `activateNaverReviewImport` → `buildNaverImportCarrierCore` (extracted from the flag boot unchanged) → `ImportSegmentHost`. The FLAG boot and its gate are untouched: it still refuses production, refuses a scheduled host, and still demands `--i-understand-this-opens-live-naver`, because THAT boot opens a browser at startup on nobody's request | `LIVE_PROVEN` (2026-07-25 / 07-26, 1 account · 1 segment · disposable backend) for the carrier itself; the on-demand ACTIVATION is offline-proven (`local-agent-bridge-only.test.ts`) and the resident boot line advertises `import/naver` | **wired** — product-owner decision, Full Product Integration v1 | the seller-center URL now falls back to the value `docs/action-window-runtime/naver-surface-urls.md` records when `NAVER_REVIEW_URL` is unset (the operator's env still wins); no on-demand import has been driven end-to-end on a live account yet |
+| **NAVER — guided review reply (submission)** | `reply-submission` carrier; a DEV-only build gate made the FE path unreachable in every shipped build | **FE gate removed (2026-08-20)** — `connectGuidedReplyRuntime` no longer short-circuits on `VITE_AW_BRIDGE`, so a shipped build attaches when an agent hosts the `reply` carrier. It still reaches ONLY that: the resident helper refuses `reply` by construction, and the sole host that announces it is `run-guided-reply-session-live-naver.ts`, which performs the account-fingerprint, chrome-identity and selector-store preflights first | `OFFLINE_ONLY` — still never run live | **FE un-gated; the carrier is deliberately NOT put on the resident helper** — its preflights are the safety, and reproducing them as an on-demand carrier would be the rewrite the integration brief forbids | §4.1 still forbids "답변 등록 지원" wording. The runtime never types or submits; the only terminal it can reach alone is `SUBMISSION_ABORTED` |
 | **Coupang — issuance guided walk** | #468 put it on the resident helper | `IMPLEMENTED_AND_WIRED` | `LIVE_PROVEN` (2026-08-19 ×2, re-verified in this PR on the same helper as the NAVER walk) | regression-checked only | — |
+| **Coupang — credential RENEWAL guided walk** | five-step engine + session + stage plan + live driver shipped with the renewal slice; FE screen complete | **was BROKEN, now `IMPLEMENTED_AND_WIRED` (2026-08-20).** Not merely unwired: `/connect/coupang/renew/:accountId` asked for `issuance`/`coupang` — byte-identical to what the FIRST-TIME walk asks for — so the resident helper answered with the eight-step NEW-KEY engine underneath a page rendering 갱신 copy, and every step arrived under an `actionWindow.coupangIssuance.*` key `renewalStepDetail` has no mapping for (it rendered no detail at all). `renewal` is now its own carrier kind; asking for the wrong one fails CLOSED with `carrier-mismatch` | `OFFLINE_ONLY` | **wired** — the dedicated carrier + the mis-routing fix | ⚠ `WING_RENEWAL_HIGHLIGHT_LABELS` are `LIVE_DOM_CALIBRATION_PENDING` (proposed, not measured). It degrades HONESTLY — a label that resolves 0 or 2 fails the uniqueness check, the run parks on `TARGET_NOT_FOUND`, and the screen offers its text checklist — which is strictly better than answering a renewal request with the first-time walk. Latent in the demo either way: the CTA needs backend `renewRecommended` |
 | **Coupang — `COUPANG_WING_SELECTOR_PROBE` / RECORD** | `probe-wing-issuance-selectors.ts` | `ONLY_PROBE_OR_FIXTURE` **by design** — a read-only calibration recorder CLI with no promotion path; it is not, and was never meant to be, product runtime | `LIVE_PROVEN` as an instrument (2026-08-08 / 08-11 / 08-12 sittings) | none | see §2.1 — what it measured, and what the shipped walk actually uses |
 | **Coupang — 기존 키가 있는 사용자 경로** | `KEY_PRESENT` → hand-off branch in the issuance engine | `IMPLEMENTED_AND_WIRED` — engine publishes `credentialState`; `CoupangIssuanceGuidedWalkthrough` reads it (`alreadyHadKey`) and the walk guides ONLY the hand-off, never 발급 | `OFFLINE_ONLY` for the branch itself | none needed | never exercised live on an account that already holds a key |
 | **Coupang — 키 있음/없음 자동 detection** | `coupang-credential-state.ts` | `IMPLEMENTED_AND_WIRED` — three-valued (`NO_KEY` / `KEY_PRESENT` / `UNKNOWN`); `NO_KEY` requires a POSITIVE non-empty-cell reading, `UNKNOWN` parks rather than issuing | `OFFLINE_ONLY` | none needed | yes, it was really implemented — but its live proof is the cell calibration, not a two-account A/B |
 | **Coupang — credential handoff / order-access probe** | `run-coupang-credential-handoff-live.ts` + `CoupangWingCredentialDriver` | handoff: `IMPLEMENTED_BUT_UNWIRED` in the resident runtime; order-access: **`IMPLEMENTED_AND_WIRED`** — ~~`NEVER_IMPLEMENTED` (the Coupang API connector is an auth skeleton, §4.1)~~ **corrected 2026-08-19, see §5**: `CoupangApiConnector.verifyConnection` runs a two-stage probe (credential → `CoupangOrdersClient.probeOrderAccess`), reached from the 연결 테스트 button | handoff `LIVE_PROVEN` under its own gate | **not wired** — the handoff moves a real Access/Secret key (secret write); the stop rule applies | — |
 | **Coupang — first ORDER sync** | backend API connector (`CoupangOrdersClient`, 657 L, official v5 `ordersheets` day-paging) | **`IMPLEMENTED_AND_WIRED`** — ~~`NEVER_IMPLEMENTED` (인증 골격만, §4.1)~~ **corrected 2026-08-19, see §5** | `LIVE_PROVEN` (2026-08-06, `main` `59c2e6c`, approval `apr-01212e2da29a`, preflight 9/9): first connection → first `ORDER_SUMMARY` sync → `PREPARING→CONNECTED` → same-window idempotent re-sync | none — the row was wrong, not the code | scheduling flag off; not production-supported (§4.1 운영 지원 ❌, 셀러 표기 unchanged) |
-| **Coupang — locate (`[쿠팡에서 보기]`)** | `run-coupang-review-locate-live.ts` | `IMPLEMENTED_BUT_UNWIRED` in the resident runtime: the FE's `locateSession` sends no `aw_attach`, and the run needs a backend session + a seller already on the 상품평 목록 page | `LIVE_PROVEN` (2026-08-15, `matches=1` ×2, 0 stored) | **not wired** — see §3.2 | the two blockers are design decisions (agent-held backend session; where the window lands), not wiring |
+| **Coupang — locate (`[쿠팡에서 보기]`)** | `run-coupang-review-locate-live.ts` only; the FE's `locateSession` sent no `aw_attach` at all | **`IMPLEMENTED_AND_WIRED` (2026-08-20)** — both halves: `locateSession` now names `locate`/`coupang`, and `activateCoupangReviewLocate` serves it on the resident helper. Both §3.2 blockers are answered rather than removed: the agent spends the binding under its OWN SellerOps session (fetched lazily on the first press, never at activation), and the window lands on WING's front door — the seller still reaches 상품평 목록 themselves, exactly as the proven run requires | `LIVE_PROVEN` (2026-08-15, `matches=1` ×2, 0 stored) for the carrier; the on-demand activation is offline-proven and advertised in the resident boot line | **wired** — product-owner decision, Full Product Integration v1 | no live press has been driven through the resident helper yet (browser↔helper pairing needs the operator's own approval) |
 | **Cafe24 — OAuth** | FE `/connect/cafe24` → `api.startCafe24Connect` → `Cafe24Authorizer` / `Cafe24TokenClient` | `IMPLEMENTED_AND_WIRED` (no local agent on this channel at all) | `LIVE_PROVEN` (token rotation included) | none | — |
 | **Cafe24 — order sync** | `Cafe24OrdersClient` + aggregator | `IMPLEMENTED_AND_WIRED` | `LIVE_PROVEN` (E2E PASS incl. amount reconciliation) | none | scheduling flag off |
 | **Cafe24 — review sync (board 4)** | `Cafe24BoardArticlesClient` → `CanonicalCommunityArticle` | `IMPLEMENTED_AND_WIRED` | `LIVE_PROVEN` (2026-07-30 / 07-31) | none | `reply_status` only ever observed as `UNKNOWN` live |
@@ -73,25 +74,64 @@ prose lives in **doc comments** and in the collector's **operator-confirm termin
 
 ## 3. What was deliberately NOT wired, and why
 
+> **Resolved 2026-08-20 (Full Product Integration v1).** All three below said the same thing — *"product-owner
+> decision required"* — and the product owner made it: wire every capability with a real implementation onto
+> the resident helper, without weakening a gate or rewriting a live-proven path. §3.1 and §3.2 are now wired;
+> §3.3 is deliberately still not, and the reason changed. The original text is kept below the line because
+> what each decision was ABOUT is still what a future reader needs.
+
+### 3.1 NAVER review import — **now wired (on demand)**
+The premise the original blocker rested on turns out to belong to the FLAG boot alone. That boot opens a
+browser at startup so a seated operator can log in before anything runs, and its gate exists because of that
+— it is untouched. The RESIDENT path opens nothing at activation: the marketplace window comes up on the
+seller's own segment START_RUN, after the SERVER has resolved their launch ref into an account slot, in that
+account's own persistent profile. The single-window premise is preserved from the other side — the seller
+already has SellerOps open in their own browser, so the helper opening a second one was the thing to avoid.
+`NAVER_REVIEW_URL` still wins when set; when it is not, the landing is the value
+`docs/action-window-runtime/naver-surface-urls.md` records, which that document committed deliberately.
+
+### 3.2 Coupang review locate — **now wired (on demand)**
+Both blockers are answered rather than waived. (a) The helper spends the `locateRef` under its OWN SellerOps
+session, fetched lazily on the first press and never at activation — which is the same posture the import
+carrier's ingest already had, so it is not a new class of secret for the helper to hold. (b) The window lands
+on WING's front door and no deeper: the seller reaches 상품평 목록 themselves, exactly as the live-proven run
+has always required ("SellerOps does not navigate for you and presses nothing, not even the pager"). No
+상품평 deep link was invented, because this repository has never observed one.
+
+### 3.3 NAVER guided review reply — **still not on the resident helper, for a better-stated reason**
+The FE half was un-gated (see the table): `connectGuidedReplyRuntime` no longer refuses in shipped builds, so
+the product screen can drive the carrier when an agent hosts it. The CARRIER stays off the resident helper,
+and this is now a considered exclusion rather than the stop rule alone: the live host performs an account
+fingerprint check against the connection registry, a chrome-identity verification, and a selector-store load
+BEFORE it will host a run at all. Those preflights are the safety of that path. Reproducing them inside an
+on-demand activator would be exactly the rewrite of a live-proven implementation the integration brief
+forbids, and dropping them would be weakening a WRITE-adjacent guard. So: the screen is connected, the
+carrier is hosted only by the harness that can satisfy its preconditions.
+
+---
+
+<details>
+<summary>Original §3 text (2026-08-19), superseded above</summary>
+
 The instruction was to re-wire everything `IMPLEMENTED_BUT_UNWIRED` by reusing what exists, and to invent
 nothing. Three capabilities are unwired in the resident runtime and stay that way, because closing each one
 requires a decision rather than a connection.
 
-### 3.1 NAVER review import
-Its boot launches a browser AT BOOT and opens SellerOps in it — an explicit product-owner decision
-(2026-07-25) so the seller works in one window with one session — and it refuses to start without
-`NAVER_REVIEW_URL`. An on-demand version would either drop that single-window premise or need the seller to
-supply a marketplace URL. **Product-owner decision required.**
+**3.1 NAVER review import.** Its boot launches a browser AT BOOT and opens SellerOps in it — an explicit
+product-owner decision (2026-07-25) so the seller works in one window with one session — and it refuses to
+start without `NAVER_REVIEW_URL`. An on-demand version would either drop that single-window premise or need
+the seller to supply a marketplace URL. **Product-owner decision required.**
 
-### 3.2 Coupang review locate
-Two blockers, neither of them wiring: (a) the run resolves its one-time `locateRef` against the backend with a
-session the CLI establishes from operator credentials — a resident helper holding a seller's backend session is
-a security decision; (b) the run reads *the 상품평 목록 page the seller already has up*, which the CLI's
-operator arranges before pressing. Activating on demand would open a WING window that is not on that page, so
-every locate would answer `NOT_ON_PAGE`. **Product-owner decision required.**
+**3.2 Coupang review locate.** Two blockers, neither of them wiring: (a) the run resolves its one-time
+`locateRef` against the backend with a session the CLI establishes from operator credentials — a resident
+helper holding a seller's backend session is a security decision; (b) the run reads *the 상품평 목록 page the
+seller already has up*, which the CLI's operator arranges before pressing. Activating on demand would open a
+WING window that is not on that page, so every locate would answer `NOT_ON_PAGE`. **Product-owner decision
+required.**
 
-### 3.3 NAVER guided review reply
-A marketplace WRITE path, never run live. Out of scope by the stop rule.
+**3.3 NAVER guided review reply.** A marketplace WRITE path, never run live. Out of scope by the stop rule.
+
+</details>
 
 ---
 

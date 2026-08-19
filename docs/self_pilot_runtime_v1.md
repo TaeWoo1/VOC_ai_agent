@@ -176,15 +176,18 @@ can perform it.
   one-operator local backend this runtime is for; a shared deployment would need an org-aware gate.
 - Capability wording is unchanged: nothing here promotes any channel×type to 운영 지원 (roadmap §4.1); the
   self-pilot is the operator's own use, not a support claim.
-- The helper (local agent) is still one carrier per process, chosen on the command line
-  (`agent-supervisor.sh switch coupang-locate` for `[쿠팡에서 보기]`). **Product gap**: the target is one
-  resident helper hosting every READ carrier and taking work only from the SellerOps UI. §8 records the
-  posture the first-run UX assumes today.
-  **Partly closed 2026-08-19** for the Coupang guided WING issuance walk: the resident `--bridge-only` helper
-  now hosts that carrier **on demand** — idle (no browser) until a SellerOps tab asks for it on the socket,
-  then the existing walk, then idle again, with no flag/env/`switch` in the seller's hands. Design + code:
-  `docs/resident_helper_on_demand_carrier_v1.md`. NAVER import and Coupang locate still need their
-  flag-selected boots.
+- ~~The helper (local agent) is still one carrier per process, chosen on the command line~~
+  **CLOSED 2026-08-20 for every guided READ carrier.** The target this gap named — *one resident helper
+  hosting every READ carrier and taking work only from the SellerOps UI* — is reached: the resident
+  `--bridge-only` helper hosts all five on demand (`issuance/coupang`, `issuance/naver`, `renewal/coupang`,
+  `locate/coupang`, `import/naver`), idle with no browser until a SellerOps tab asks for one by name, then
+  idle again. `agent-supervisor.sh start` now defaults to that helper (`resident`); the two fixed-carrier
+  modes remain selectable for a seated operator reproducing a live proof, and are no longer the product path.
+  Design + code: `docs/resident_helper_on_demand_carrier_v1.md` (v1.2).
+  **Still outside it, deliberately:** the NAVER guided review REPLY carrier — its host performs account
+  fingerprint / chrome-identity / selector-store preflights that are the safety of that path, and
+  reproducing them in an activator would be a rewrite of a live-proven implementation
+  (`docs/channel_integration_completeness_audit_v1.md` §3.3).
 
 ## 8. Browser-only new-user posture (product-owner decision, 2026-08-18)
 
@@ -200,7 +203,7 @@ service starts** (deployer's job, once). What changed for that:
 | AI triage for the new org | org UUID in `SELLEROPS_AI_TRIAGE_PILOT_ORG_IDS` | `SELLEROPS_AI_TRIAGE_PILOT_ORG_IDS=*` (every org; pair only with LOCAL_SINGLE_USER). |
 | Read grant / vault / connectors | operator-minted per self-pilot | deploy-time env; the seller never sees them. |
 | Channels | UI (`/connect/naver`, `/connect/coupang`, `/connect/cafe24`) | unchanged — the seller types their own marketplace credentials / consents OAuth in the UI. |
-| Helper (agent) | edit an env file, pick a carrier | first `agent-supervisor.sh start` **asks** for the SellerOps login on the terminal (0600 file, password never echoed), default carrier `naver-import`; pairing from `/connect/review-history`. Carrier switching remains (product gap above). |
+| Helper (agent) | edit an env file, pick a carrier | first `agent-supervisor.sh start` **asks** for the SellerOps login on the terminal (0600 file, password never echoed); default carrier is now `resident` — one helper, every guided walk on demand, no carrier switching (the product gap above is closed). Pairing from `/connect/review-history` or any connect screen. |
 
 **Multi-tenant boundary, plainly.** LOCAL_SINGLE_USER and `*` are for the one-seller local deployment
 only: both are refused/meaningless off a loopback database, both are opt-in env, and neither changes any

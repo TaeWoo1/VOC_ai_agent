@@ -108,13 +108,29 @@ not exist); error monitoring `SENTRY_DSN` / `VITE_SENTRY_DSN` (absent = OFF); th
    → Cafe24 (`/connect/cafe24`, mall id → consent). One channel at a time.
 3. First collection: 지금 수집하기 on the channel page (or wait ≤5 min — routine schedules are created for the
    new org automatically) → 홈 shows 리뷰 · 문의 · 연결.
-4. Helper for NAVER reviews / `[쿠팡에서 보기]`: **one command in a terminal, once** —
-   `tools/self-pilot/agent-supervisor.sh start` — it asks for the SellerOps login (same as the browser) and the
-   스마트스토어센터 리뷰 URL, then keeps running; pair from `/connect/review-history` 도우미 연결하기. (Carrier
-   switching for `[쿠팡에서 보기]` is a recorded product gap.)
+4. Helper for every guided walk: **one command in a terminal, once** —
+   `tools/self-pilot/agent-supervisor.sh start` — it asks for the SellerOps login (same as the browser), then
+   keeps running; pair from any connect screen (`/connect/review-history` 도우미 연결하기). It now defaults to
+   the RESIDENT helper, which hosts all five guided carriers on demand (Coupang/NAVER 발급, Coupang 갱신,
+   `[쿠팡에서 보기]`, NAVER 리뷰 가져오기) — **no carrier switching**, and no browser until the seller presses
+   시작. `NAVER_REVIEW_URL` is now optional (a recorded seller-center default is used when it is unset).
 5. Come back daily: 홈 → 리뷰/문의/주문. Auth expiry shows as 재연결 필요; session expiry as 로그인 화면.
 
-## 1. Start (two terminals, one browser)
+## 1. Start (one command, one browser)
+
+```bash
+tools/dev/local-stack.sh up      # backend :8080 + agent-runtime :8787 + frontend :5173
+tools/dev/local-stack.sh down    # stops all three
+tools/dev/local-stack.sh logs    # tails all three
+```
+
+It sources each service's own `.env.local` (git-ignored, never printed) and waits for health before
+starting the next. **The agent-runtime is in it deliberately**: `/agent` is a shipped route backed by that
+service, nothing in the old two-terminal loop ever started it, and the honest result was
+"에이전트 서비스에 연결하지 못했습니다" on a correctly built checkout, every time.
+
+<details>
+<summary>The two-terminal form it replaces (still valid)</summary>
 
 ```bash
 # Terminal A — backend (Postgres `sellerops` on localhost:5432; Flyway owns the schema)
@@ -125,7 +141,13 @@ set -a; . ./.env.local; set +a       # git-ignored; never print it
 # Terminal B — frontend
 cd frontend
 npm run dev                           # http://localhost:5173 — proxies /api/* to :8080
+
+# Terminal C — agent runtime (needed by /agent)
+cd agent-runtime
+npm run serve                         # http://127.0.0.1:8787
 ```
+
+</details>
 
 - **A long-lived `bootRun` is a version pin** — restart it after pulling; it serves the classes it
   started with.
