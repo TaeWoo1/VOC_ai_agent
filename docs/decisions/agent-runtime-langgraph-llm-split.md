@@ -1,9 +1,14 @@
 # ADR — the LangGraph runtime and the LLM are two disjoint subsystems
 
-> **Status: OPEN — recorded, not decided.** Raised 2026-08-19 by the repository simplification audit
-> (`main` `4b84bf2e`). **No migration in either direction is planned, in progress, or authorized by this
-> document.** It exists so the question stops being re-discovered from scratch, and so no refactor
-> quietly resolves it as a side effect.
+> **Status: DECIDED (2026-08-20) — Option 2, for ONE seam.** Raised 2026-08-19 by the repository
+> simplification audit (`main` `4b84bf2e`) and left open by product-owner instruction; resolved by
+> product-owner instruction on 2026-08-20 (Full Product Integration v1): *connect a real LLM at the
+> agent workflow's model seam, keep the four StateGraphs / tools / `interrupt` / resume / durable
+> RunStore unchanged, and do NOT migrate review triage.*
+>
+> **What changed:** `DraftModelSeam` is filled — see "Decision" below. **What did not:** `parseGoal`
+> is still the deterministic keyword table; `ApiTriageClassifier` still owns review triage and was not
+> moved behind a graph; no graph was added, removed, or restructured.
 >
 > This ADR owns **one question**. Capability truth stays `docs/multi-channel-connector-roadmap.md` §4.1;
 > the AI triage pilot's canonical home stays `docs/workstreams/review_ai_triage_demo.md`; the migration
@@ -31,12 +36,14 @@ Re-derived from code at `4b84bf2e`, not from documents.
   `frontend/src/components/home/TodayInbox.tsx:27`; client `lib/agentRuntime/agentClient.ts:20`.
 - Durable: run state is backend-owned (`V33__agent_run_store.sql`, `agentrun/AgentRunStoreController`).
 
-And yet **there is no model call anywhere inside it**:
+And yet — **at `4b84bf2e`, when this was written** — there was no model call anywhere inside it:
 
 - `goal/parseGoal.ts:1-8` — *"Goal parsing — deterministic, no LLM… A real LLM planner can replace this
   later behind the same `parseGoal` seam."* Intents are a keyword table.
 - `provider/DraftModelSeam.ts:1-13` — *"there is **no live LLM call**: the only implementation is
   deterministic and local"*; the drafts are a Korean template table at `:56-87`.
+  **(Superseded 2026-08-20 — this is the seam that was filled. The template table remains, as the
+  fallback every failure path lands on.)**
 - `graph/reviewGraph.ts:15` — *"The draft body comes from the backend's own rule-based suggestion
   (no LLM)."*
 - The LangChain tools are real `StructuredTool`s with zod schemas (`tools/inquiryTools.ts:10-11` etc.),
@@ -92,17 +99,62 @@ has no model.
    value is precisely its narrowness (four gates, a payload floor asserted on bytes, a structural
    boundary test), and a graph would have to preserve all of it.
 
-## Decision
+## Decision (2026-08-20)
 
-**None.** Deliberately deferred by product-owner instruction during the 2026-08-19 simplification
-refactor: *report the facts, change nothing.* No PR in that refactor migrates, deletes, or rewires any
-of the above.
+**Option 2, for the `DraftModelSeam` only — and the model is reached THROUGH the backend, not from the
+runtime.**
 
-## Consequences of deferring
+That last clause is the whole of the design, and it is what makes Option 2 affordable. This ADR's own
+statement of the option flagged the cost: *"it newly puts seller inquiry/review content in front of a
+vendor, which is a data-minimization decision, not a wiring one (compare the triage pilot's rating +
+body floor)."* Answering that in `agent-runtime/` would have meant putting a vendor key in a service
+whose `.env.example` opens by saying it holds none, and putting the per-org privacy gate in a stateless
+orchestrator that derives org membership from a token it merely forwards.
 
-- `agent-runtime/` stays deployed, CI-guarded, and reachable — and stays LLM-free.
+So the model lives where the other one already does:
+
+- **Backend** — `backend/.../agent/llm/`: its own transport (`AgentLlmTransport` /
+  `JdkAgentLlmTransport`), its own prompt (`AgentDraftPrompt`, `PROMPT_VERSION = "agent-draft-prompt/v1"`),
+  its own validating parser, its own gate (`AgentDraftService`), its own flag and key
+  (`sellerops.agent.draft.*` — off by default, keyed, opt-in per organisation), and its own payload
+  floor asserted on the serialized request bytes (`AgentDraftPayloadFloorTest`): exactly the inquiry's
+  own `title` and `details` leave, and nothing else. Exposed as `POST /api/agent/inquiry-draft`.
+- **Runtime** — `provider/SpringDraftProvider.ts` implements the unchanged `DraftModelProvider`
+  interface and calls that endpoint with the operator's forwarded bearer. `DraftModelProvider.draft`
+  widened from `DraftCandidate` to `Promise<DraftCandidate>`; nothing else about the seam moved.
+
+**Deliberately separate from the triage pilot**, in flag, key, transport and prompt. They are different
+exposures — a review's rating and body vs an inquiry's title and body — and a deployment must be able to
+run either without the other. `AgentDraftBoundaryTest` asserts the draft package never reads the triage
+flag, transport, or classifier, and `ClassifierBoundaryTest` (unchanged) still asserts the reverse.
+
+**Every failure is the shipped behaviour.** Capability off for the org, no endpoint, transport error,
+vendor refusal, off-schema answer, partial body → the deterministic rule drafter, whose provenance the
+candidate carries. `/agent` renders the label from that provenance (`draftKindLabel`) rather than
+hardcoding one, so a template is never called AI and an AI draft is never called a template.
+
+**One correctness fix the model forced into the open.** `InquiryAgentRuntime.resume()` re-derived the
+draft because `RunSnapshot` stores none — free while the only drafter was a template table, and a silent
+integrity failure with a model behind the seam: it would record a reply the human never read, under an
+approval given to a different one. Resume now always reconstructs with the RULE drafter, and the
+frontend sends the text it displayed on every approve, not only on an edit. The RunStore contract is
+unchanged, which is why the fix had to go here.
+
+### Still open, and deliberately
+
+- **`parseGoal`** — untouched. Free-text routing is still a keyword table that fails closed on an
+  unrecognized request. Filling it is the same shape of decision and has not been made.
+- **Review triage** — untouched. Option 4 stays rejected for the reason recorded above: the
+  classifier's value is its narrowness, and a graph would have to preserve all of it.
+- **`reviewGraph`'s draft body** — still the backend's own rule-based suggestion, not this seam.
+
+## Consequences
+
+- `agent-runtime/` stays deployed, CI-guarded, and reachable — and **still holds no credential of any
+  kind.** "The backend is the only LLM egress" (`CLAUDE.md` §"Active source ownership") is unchanged,
+  and remains the property to check when reading this service.
 - Anyone reading "LangGraph orchestration runtime" in `agent-runtime/package.json:4` should read this
-  ADR before assuming a model is involved.
+  ADR: a model IS now involved in one node of two graphs, and in none of the others.
 - **`agent-runtime/` was missing from `CLAUDE.md` §"Active source ownership"** despite being a compose
   service with its own status check and a live route. Added 2026-08-19; that omission is part of why the
   split went unexamined for so long.

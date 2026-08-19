@@ -62,6 +62,31 @@ sellerops:
       max-output-tokens: ${SELLEROPS_AI_TRIAGE_MAX_OUTPUT_TOKENS:4000}
       reasoning-effort: ${SELLEROPS_AI_TRIAGE_REASONING_EFFORT:low}
       max-per-run: ${SELLEROPS_AI_TRIAGE_MAX_PER_RUN:100}
+  # The Agent Runtime's model seam — the LLM behind the LangGraph inquiry reply-draft node.
+  #
+  # A SEPARATE switch and a SEPARATE key from the triage pilot above, deliberately: they are different
+  # exposures. Triage sends a review's rating and body; this sends an INQUIRY's title and body, which is the
+  # content `agent-runtime/src/provider/DraftModelSeam.ts` named as the reason no live model had been wired.
+  # A deployment that wants one and not the other must be able to have exactly that.
+  #
+  # OFF by default and opt-in per organisation. Off, unkeyed, or an org outside the list all mean the same
+  # thing to the graph — no model draft — and it falls back to its own deterministic rule drafter, which is the
+  # behaviour that shipped. `agent-runtime` never sees this key: it calls /api/agent/inquiry-draft with the
+  # operator's own bearer token, so the backend stays the only LLM egress in the repository.
+  agent:
+    draft:
+      enabled: ${SELLEROPS_AGENT_DRAFT_ENABLED:false}
+      # Comma-separated org UUIDs, or "*" for every org in this backend (local single-user deployment —
+      # pair with sellerops.self-pilot.scope=LOCAL_SINGLE_USER; never "*" on a shared multi-tenant backend).
+      enabled-org-ids: ${SELLEROPS_AGENT_DRAFT_ORG_IDS:}
+      vendor: ${SELLEROPS_AGENT_DRAFT_VENDOR:OPENAI}
+      model: ${SELLEROPS_AGENT_DRAFT_MODEL:gpt-5-2025-08-07}
+      api-key: ${SELLEROPS_AGENT_DRAFT_API_KEY:}
+      # On a reasoning model this budget is SHARED with internal reasoning, so a budget sized for a two-sentence
+      # reply can be spent before any answer is emitted — arriving as `budget_exhausted` and, correctly but
+      # uselessly, a rule-based fallback on every inquiry.
+      max-output-tokens: ${SELLEROPS_AGENT_DRAFT_MAX_OUTPUT_TOKENS:4000}
+      reasoning-effort: ${SELLEROPS_AGENT_DRAFT_REASONING_EFFORT:low}
   vault:
     # Credential vault master key: base64-encoded 32 bytes (AES-256). Local
     # throwaway only — never commit a real key; KMS-backed keys are a later

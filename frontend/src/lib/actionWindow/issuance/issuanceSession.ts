@@ -21,6 +21,7 @@
 // a refusal is reported as itself so the walkthrough can offer the text fallback with the right reason.
 import {
   AW_CARRIER_ISSUANCE,
+  type AwCarrierKind,
 } from "../../../../../contracts/action-window/aw-carrier-kind";
 import type {
   AwClientFrame as V2ClientFrame,
@@ -85,12 +86,23 @@ export async function connectIssuanceSession(deps?: {
    * session. Absent ⇒ no request is sent (a fixed-carrier agent announces regardless).
    */
   channelCode?: string;
+  /**
+   * WHICH guidance carrier — `issuance` (default) or `renewal`.
+   *
+   * The renewal screen passes `renewal`, and that is the whole fix for a real defect: it used to ask for
+   * `issuance`/`coupang`, byte-identical to what the FIRST-TIME walk asks for, so the resident helper answered
+   * with the eight-step NEW-KEY engine while the page rendered 갱신 copy and every step arrived under an
+   * `actionWindow.coupangIssuance.*` key `renewalStepDetail` has no mapping for (it rendered no detail at all).
+   * `expectedCarrier` is matched against the agent's announcement inside the shared transport, so asking for
+   * the wrong one now FAILS CLOSED with `carrier-mismatch` instead of silently driving the other walk.
+   */
+  carrier?: Extract<AwCarrierKind, "issuance" | "renewal">;
 }): Promise<IssuanceSessionResult> {
   const httpBase = bridgeBase();
   const result = await connectAwBridgeSession({
     httpBase,
     wsBase: httpBase.replace(/^http/, "ws"),
-    expectedCarrier: AW_CARRIER_ISSUANCE,
+    expectedCarrier: deps?.carrier ?? AW_CARRIER_ISSUANCE,
     ...(deps?.onStatus ? { onStatus: deps.onStatus } : {}),
     ...(deps?.channelCode ? { attachChannelCode: deps.channelCode } : {}),
   });

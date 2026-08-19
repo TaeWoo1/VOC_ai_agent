@@ -45,13 +45,26 @@ function fakeSession(): {
 }
 
 describe("connectGuidedReplyRuntime", () => {
-  it("refuses `bridge-disabled` in a build that did not opt in — before touching the network", async () => {
-    // Vitest runs DEV=true but without VITE_AW_BRIDGE, which is exactly a shipped build's posture
-    // toward the bridge: not asked for, so never attempted.
-    const connectFn = vi.fn<(d: AwWsDeps) => Promise<AwBridgeConnectResult>>();
+  /**
+   * The `VITE_AW_BRIDGE` gate is GONE, and its absence is the property now asserted.
+   *
+   * It used to refuse `bridge-disabled` before touching the network in any build that had not opted
+   * in — which read as "production keeps the honest manual handoff" and was really "the guided reply
+   * path cannot be reached even when an agent is hosting it". Nothing is opened by removing it: the
+   * transport matches `expectedCarrier` against the agent's own announcement, the resident helper
+   * refuses `reply` by construction, and the only host that announces it is the seated-operator
+   * harness with its account / chrome-identity / selector preflights. A build with no agent at all
+   * still lands on a transport refusal, which is what the manual handoff is keyed off.
+   */
+  it("attempts the connection in every build — the DEV-only gate is gone", async () => {
+    // Vitest runs DEV=true but WITHOUT VITE_AW_BRIDGE, which was exactly the posture that used to
+    // short-circuit. The refusal must now come from the transport, not from a build flag.
+    const connectFn = vi.fn<(d: AwWsDeps) => Promise<AwBridgeConnectResult>>()
+      .mockResolvedValue({ ok: false, reason: "unreachable" });
 
-    expect(await connectGuidedReplyRuntime({}, connectFn)).toEqual({ ok: false, reason: "bridge-disabled" });
-    expect(connectFn).not.toHaveBeenCalled();
+    expect(await connectGuidedReplyRuntime({}, connectFn)).toEqual({ ok: false, reason: "unreachable" });
+    expect(connectFn).toHaveBeenCalledTimes(1);
+    expect(connectFn.mock.calls[0]![0].expectedCarrier).toBe("reply");
   });
 
   it("declares the REPLY carrier and derives the ws base — the session is born into the v2 world", async () => {

@@ -1,4 +1,21 @@
-# Resident helper — the guided walks on demand (2026-08-19, v1.1)
+# Resident helper — the guided walks on demand (2026-08-19, v1.1; extended 2026-08-20, v1.2)
+
+> **v1.2 (2026-08-20) — the same mechanism, five carriers.** Nothing in the design below changed: one helper,
+> one slot, an `OnDemandCarrierHost` that is idle until a SellerOps tab asks for a carrier by name, and no
+> browser until the seller's own START_RUN. What changed is the length of `RESIDENT_CARRIER_ACTIVATORS`.
+> The boot line now reads
+> `onDemandCarriers: ["issuance/coupang","issuance/naver","renewal/coupang","locate/coupang","import/naver"]`.
+>
+> Three of the three additions were capabilities that already existed and were reachable only from a
+> seated-operator boot — `locate` (live-proven 2026-08-15), `import` (live-proven 2026-07-25/26) — and one was
+> a **defect**: `/connect/coupang/renew/:accountId` asked for `issuance`/`coupang`, byte-identical to what the
+> first-time walk asks for, so this very host answered a renewal request with the eight-step NEW-KEY engine.
+> `renewal` is now its own carrier kind and a wrong ask fails closed with `carrier-mismatch`.
+>
+> The one carrier still deliberately NOT here is `reply` — see
+> `docs/channel_integration_completeness_audit_v1.md` §3.3 for why its preflights, not the stop rule, are the
+> reason. The flag-selected import boot and its gate are also untouched: that boot opens a browser at startup,
+> which is what its gate is for.
 
 > **What this is.** One unit of work: audit → design → implementation → regression → live proof, restoring the
 > **guided WING issuance walk as the PRIMARY Coupang connect path** while keeping the seller on exactly ONE

@@ -29,7 +29,7 @@
  * (`createAgentBridge` throws when both are configured), so this reports a fact about the agent, not
  * a menu to choose from.
  */
-export const AW_CARRIER_KINDS = ["export", "reply", "import", "issuance", "locate"] as const;
+export const AW_CARRIER_KINDS = ["export", "reply", "import", "issuance", "locate", "renewal"] as const;
 
 export type AwCarrierKind = (typeof AW_CARRIER_KINDS)[number];
 
@@ -90,6 +90,33 @@ export const AW_CARRIER_ISSUANCE = "issuance";
  * <p>Unannotated for the same reason as {@link AW_CARRIER_EXPORT}.
  */
 export const AW_CARRIER_LOCATE = "locate";
+
+/**
+ * The v2 **credential-RENEWAL guidance** carrier — walking a seller whose Coupang Open API key is expiring
+ * through re-issuing it at WING.
+ *
+ * <p>It speaks v2 envelopes like `reply`, `import`, `issuance` and `locate`, so version alone cannot separate
+ * the five. It is its OWN kind rather than a second channel of `issuance`, and the reason is a defect this
+ * field exists to make impossible: the renewal screen used to ask for `issuance`/`coupang` — byte-identical to
+ * what the FIRST-TIME walk asks for — so the resident helper answered with the eight-step NEW-KEY engine while
+ * the page rendered 갱신 copy, and every step arrived under a `actionWindow.coupangIssuance.*` key the renewal
+ * screen has no mapping for (it rendered no detail at all). Two different choreographies over the same
+ * (carrier, channel) pair is exactly the mis-attach `parseAwCarrierKind`'s docblock describes, one level up.
+ *
+ * <p>The choreographies really are different: issuance is eight steps ending in a key that did not exist
+ * before; renewal is five (`reach open API → check 유효기간 → press 재발급 → copy the new keys → return`), it
+ * begins from a key that already exists, and its whole point is the expiry date. Renewal also has the one
+ * value read no other guidance carrier has — the 유효기간 DATE, through an allowlisted seam — while still
+ * never reading an Access Key, a Secret Key, or a 업체코드.
+ *
+ * <p>Like every other guidance carrier it NEVER logs in, clicks, types, submits, or re-issues: the seller
+ * presses `재발급` themselves and SellerOps highlights and observes. READ-only, so the WRITE boundary is
+ * untouched.
+ *
+ * <p>Unannotated for the same reason as {@link AW_CARRIER_EXPORT}.
+ */
+export const AW_CARRIER_RENEWAL = "renewal";
+
 
 /**
  * Narrow an announced value to a known carrier, or `null` when it is absent or unrecognised.

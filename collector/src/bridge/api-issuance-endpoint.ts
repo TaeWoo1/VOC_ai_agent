@@ -30,7 +30,7 @@
  * frame body.
  */
 import { WebSocket } from "ws";
-import { AW_CARRIER_ISSUANCE } from "../../../contracts/action-window/aw-carrier-kind";
+import { AW_CARRIER_ISSUANCE, type AwCarrierKind } from "../../../contracts/action-window/aw-carrier-kind";
 import {
   ACTION_WINDOW_TRANSPORT_VERSION,
   deserializeFrame,
@@ -42,11 +42,17 @@ import {
 import type { AwCarrierEndpoint } from "./aw-carrier";
 import { log } from "../log";
 
-/** Agent → client announcement of the hosted issuance run. Values are sanitized. */
+/** Agent → client announcement of the hosted guidance run. Values are sanitized. */
 export interface IssuanceAwSessionAnnouncement {
   type: "aw_session";
-  /** Always `issuance` for this endpoint. A reply/import/export-expecting client must fail closed on it. */
-  carrier: typeof AW_CARRIER_ISSUANCE;
+  /**
+   * `issuance` by default; `renewal` when this endpoint carries the Coupang credential-renewal walk.
+   *
+   * <p>NOT widened to the whole union: those are the two guidance choreographies that share this framing
+   * (one run for the endpoint's lifetime, no launch ref, no artifact). A reply/import/export/locate-expecting
+   * client must still fail closed on either value.
+   */
+  carrier: typeof AW_CARRIER_ISSUANCE | "renewal";
   transportVersion: number;
   runId: string;
   channelCode: string;
@@ -57,11 +63,23 @@ export interface ApiIssuanceEndpointDeps {
   runId: string;
   /** Sanitized channel identity (SEMANTIC_CODE, e.g. `naver`). */
   channelCode: string;
+  /**
+   * WHICH guidance carrier this endpoint announces. Defaults to `issuance`.
+   *
+   * <p>The renewal walk passes `renewal` so its screen cannot be answered by the first-time issuance engine —
+   * the mis-attach that made a five-step 갱신 page render an eight-step 발급 walk with no step detail at all
+   * (every step arrived under an `actionWindow.coupangIssuance.*` key the renewal screen has no mapping for).
+   * Parameterised rather than duplicated because ONLY this string differs: the framing, the announcement
+   * shape, the malformed-frame drop and the directed-reply routing are the same in both worlds, and a second
+   * copy of them would be a second thing to keep correct.
+   */
+  carrier?: Extract<AwCarrierKind, "issuance" | "renewal">;
 }
 
 export class ApiIssuanceEndpoint implements AwCarrierEndpoint {
   private runId: string;
   private channelCode: string;
+  private readonly carrier: Extract<AwCarrierKind, "issuance" | "renewal">;
   private announcing = true;
   private readonly sockets = new Set<WebSocket>();
   private readonly listeners = new Set<(frame: AwClientFrame) => void>();
@@ -70,6 +88,7 @@ export class ApiIssuanceEndpoint implements AwCarrierEndpoint {
   constructor(deps: ApiIssuanceEndpointDeps) {
     this.runId = deps.runId;
     this.channelCode = deps.channelCode;
+    this.carrier = deps.carrier ?? AW_CARRIER_ISSUANCE;
   }
 
   /** The Runtime end the {@link IssuanceGuidanceSession} binds to (same interface the v2 loopback implements). */
@@ -85,7 +104,7 @@ export class ApiIssuanceEndpoint implements AwCarrierEndpoint {
     this.sockets.add(ws);
     if (this.announcing) {
       const announcement: IssuanceAwSessionAnnouncement = {
-        carrier: AW_CARRIER_ISSUANCE,
+        carrier: this.carrier,
         type: "aw_session",
         transportVersion: ACTION_WINDOW_TRANSPORT_VERSION,
         runId: this.runId,
@@ -93,7 +112,7 @@ export class ApiIssuanceEndpoint implements AwCarrierEndpoint {
       };
       this.sendRaw(ws, JSON.stringify(announcement));
     }
-    log("aw_issuance_client_attached", { clients: this.sockets.size, announced: this.announcing });
+    log("aw_issuance_client_attached", { carrier: this.carrier, clients: this.sockets.size, announced: this.announcing });
   }
 
   /** DEV/TEST: pause/resume the `aw_session` announcement (models the agent being down/up). */

@@ -27,6 +27,7 @@ import { ReviewAgentRuntime } from "../reviewRuntime";
 import type { ReviewRunResult } from "../reviewRuntime";
 import { IssueAgentRuntime } from "../issueRuntime";
 import type { IssueRunResult } from "../issueRuntime";
+import { SpringDraftProvider } from "../provider/SpringDraftProvider";
 import { parseGoal, routeIntent, UnrecognizedGoalError } from "../goal/parseGoal";
 import type { GoalRequest } from "../goal/parseGoal";
 import type { SpringClient } from "../spring/SpringClient";
@@ -134,12 +135,19 @@ export class AgentRunService {
     issue: IssueAgentRuntime;
   } {
     return {
-      inquiry: new InquiryAgentRuntime({ client: bundle.inquiry, runStore: stores.inquiry }),
+      inquiry: new InquiryAgentRuntime({
+        client: bundle.inquiry,
+        runStore: stores.inquiry,
+        draftProvider: new SpringDraftProvider(bundle.inquiry),
+      }),
       // Draft preparation is a TERMINAL read (no checkpoint, no pause): it returns the draft in the
       // response and retains nothing. So it takes no store from the durable provider — its default
       // in-memory store is per-request scratch, and there is no paused state to survive a restart.
       // This is why it is safe even under APP_ENV=production despite not being the spring store.
-      inquiryDraft: new InquiryDraftAgentRuntime({ client: bundle.inquiry }),
+      inquiryDraft: new InquiryDraftAgentRuntime({
+        client: bundle.inquiry,
+        draftProvider: new SpringDraftProvider(bundle.inquiry),
+      }),
       review: new ReviewAgentRuntime({ client: bundle.review, runStore: stores.review }),
       issue: new IssueAgentRuntime({ client: bundle.issue, runStore: stores.issue }),
     };

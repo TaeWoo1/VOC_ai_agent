@@ -12,6 +12,7 @@ const getItemAnalysisStrict = vi.fn();
 const getInquiryQueueStrict = vi.fn();
 const getInquiryDetailStrict = vi.fn();
 const generateInquiryProposal = vi.fn();
+const getInquiryPublishCapability = vi.fn();
 
 vi.mock("../../lib/apiClient", () => ({
   api: {
@@ -20,6 +21,7 @@ vi.mock("../../lib/apiClient", () => ({
     getInquiryQueueStrict: (params: unknown) => getInquiryQueueStrict(params),
     getInquiryDetailStrict: (id: string) => getInquiryDetailStrict(id),
     generateInquiryProposal: (id: string) => generateInquiryProposal(id),
+    getInquiryPublishCapability: () => getInquiryPublishCapability(),
   },
   getToken: () => null,
 }));
@@ -71,6 +73,9 @@ beforeEach(() => {
     inquiryId: "i1",
     sellerAccountId: "s1",
     channelId: "c1",
+    channelCode: "CAFE24",
+    channelNameKo: "카페24",
+    isSecret: false,
     phase: "OPEN",
     status: "UNANSWERED",
     informStatus: null,
@@ -78,7 +83,12 @@ beforeEach(() => {
     details: "굵은 전선도 들어가나요?",
     receivedAt: "2026-08-03T10:00:00Z",
     proposal: null,
+    draft: null,
   });
+  // The DEFAULT deployment posture: the send path is off and no channel has a reply adapter. Every
+  // assertion below about "never offers to send" is therefore about the real default, not a mock
+  // convenience — the send only appears when the backend says BOTH are true.
+  getInquiryPublishCapability.mockResolvedValue({ executionEnabled: false, replyAdapterChannelCodes: [] });
 });
 
 afterEach(() => {

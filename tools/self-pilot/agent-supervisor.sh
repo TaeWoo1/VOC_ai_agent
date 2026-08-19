@@ -17,19 +17,20 @@
 # carrier is a development-posture agent by contract).
 #
 # Usage:
-#   agent-supervisor.sh start [naver-import|coupang-locate] [-d]   # default carrier: naver-import
+#   agent-supervisor.sh start [resident|naver-import|coupang-locate] [-d]   # default: resident
 #   agent-supervisor.sh stop
 #   agent-supervisor.sh status
-#   agent-supervisor.sh switch <naver-import|coupang-locate>        # stop + start, same env
+#   agent-supervisor.sh switch <resident|naver-import|coupang-locate>  # stop + start, same env
 #   agent-supervisor.sh logs                                         # tail the supervisor log
 #
 # Env: tools/self-pilot/.run/self-pilot.env (gitignored, 0600; NAMES in README.md — never printed here).
 #      First `start` with no env file asks for the SellerOps login + NAVER review URL on the terminal and
 #      writes the file (no file editing by the seller). Required for every carrier: SELLEROPS_BASE_URL
 #      SELLEROPS_EMAIL SELLEROPS_PASSWORD. naver-import: NAVER_REVIEW_URL. coupang-locate: COUPANG_WING_URL.
-# Product gap (recorded, docs/self_pilot_runtime_v1.md §7): the seller still chooses the carrier here
-#      (`switch coupang-locate` for [쿠팡에서 보기]); the target is one resident helper that hosts every
-#      READ carrier and takes work only from the SellerOps UI.
+# Product gap, CLOSED: the seller no longer chooses a carrier here. `start` defaults to `resident`, one
+#      `--bridge-only` helper that hosts every guided READ carrier on demand and takes work only from the
+#      SellerOps UI — the target docs/self_pilot_runtime_v1.md §7 recorded. The two fixed-carrier modes
+#      stay selectable for a seated operator reproducing a live proof; they are not the product path.
 #
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -95,6 +96,15 @@ require_env_file() {
 # The carrier → exact command. Adding a carrier here is the ONLY place a new routine command lives.
 carrier_command() {
   case "$1" in
+    resident)
+      # **The product path, and now the default.** One `--bridge-only` helper that hosts every guided
+      # carrier ON DEMAND — issuance (Coupang, NAVER), renewal (Coupang), locate (Coupang) and review
+      # import (NAVER) — chosen by whichever SellerOps screen the seller opens, never by a flag here.
+      # It needs no NAVER_REVIEW_URL and no approval-phase token: it opens no browser at boot and no
+      # marketplace window until the seller's own START_RUN, which is what makes it safe to leave
+      # resident for days. `switch` below exists for the two legacy fixed-carrier modes only.
+      CMD=(npm run local-agent -- --bridge-only)
+      ;;
     naver-import)
       [ -n "${NAVER_REVIEW_URL:-}" ] || { echo "FAIL-CLOSED: NAVER_REVIEW_URL is not set (naver-import carrier)." >&2; exit 2; }
       CMD=(npm run local-agent -- --action-window-initial-review-import --i-understand-this-opens-live-naver)
@@ -112,7 +122,7 @@ carrier_command() {
       CMD=(npx tsx instruments/live-runs/run-coupang-review-locate-live.ts -- --i-understand-this-opens-live-coupang-wing)
       ;;
     *)
-      echo "unknown carrier '$1' — use naver-import or coupang-locate" >&2; exit 2 ;;
+      echo "unknown carrier '$1' — use resident (recommended), naver-import, or coupang-locate" >&2; exit 2 ;;
   esac
 }
 
@@ -176,9 +186,9 @@ supervise() {
 case "${1:-}" in
   start)
     require_env_file
-    carrier="${2:-naver-import}"; detach=0
+    carrier="${2:-resident}"; detach=0
     for a in "${@:2}"; do [ "$a" = "-d" ] && detach=1; done
-    [ "$carrier" = "-d" ] && carrier=naver-import
+    [ "$carrier" = "-d" ] && carrier=resident
     if is_running; then echo "already running (pid $(cat "$PID_FILE"), carrier $(cat "$CARRIER_FILE" 2>/dev/null))"; exit 0; fi
     if [ "$detach" = 1 ]; then
       if [ ! -s "$COLLECTOR_DIR/.bridge/pairings.json" ]; then

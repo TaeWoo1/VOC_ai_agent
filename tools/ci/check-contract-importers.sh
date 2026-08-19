@@ -45,6 +45,11 @@ FILTERED_PREFIXES=(
   # shared run view. This guard has been failing on main since that page merged, which is the guard working:
   # the boundary went unchecked and it said so rather than going quiet.
   "frontend/src/pages/app/"
+  # Added 2026-08-20: the Coupang renewal walkthrough now names the carrier it wants
+  # (`AW_CARRIER_RENEWAL`) instead of silently asking for the issuance one, so it imports the shared
+  # contract directly. It always rendered from the shared run view; the import is what makes that
+  # visible to this guard.
+  "frontend/src/components/coupang/"
 )
 
 echo "== every frontend contract importer must sit under a filtered path =="

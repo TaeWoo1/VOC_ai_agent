@@ -36,6 +36,9 @@ import type {
   IngestResult,
   InboxResponse,
   InquiryDetail,
+  PublishCapabilityView,
+  PublishStatusView,
+  ReplyDraftView,
   InquiryQueueResponse,
   ItemAnalysis,
   ProposalResult,
@@ -622,6 +625,67 @@ export const api = {
   // (generation unavailable) from the thrown axios error.
   async generateInquiryProposal(workItemId: string): Promise<ProposalResult> {
     const { data } = await http.post<ProposalResult>(`/api/inquiries/${workItemId}/proposal`);
+    return data;
+  },
+
+  /**
+   * Whether this deployment can post an inquiry reply at all, and for which channels.
+   *
+   * Read BEFORE any send control is rendered, never after. On the default configuration it answers
+   * `{executionEnabled: false, replyAdapterChannelCodes: []}` and the reply UI shows the manual
+   * hand-off — a screen that offered "등록" and then discovered the send path was off would have
+   * promised the seller something the backend fails closed on.
+   */
+  async getInquiryPublishCapability(): Promise<PublishCapabilityView> {
+    const { data } = await http.get<PublishCapabilityView>(`/api/inquiry-publish/capability`);
+    return data;
+  },
+
+  /**
+   * Save a new append-only reply-draft version. `baseVersion` is the version being edited from (`0`
+   * for the first save); a stale base is a 409, which is the seller's own draft having moved under
+   * them rather than an error to swallow.
+   */
+  async saveInquiryReplyDraft(
+    workItemId: string,
+    request: { title: string; comments: string; baseVersion: number },
+  ): Promise<ReplyDraftView> {
+    const { data } = await http.put<ReplyDraftView>(`/api/inquiries/${workItemId}/draft`, request);
+    return data;
+  },
+
+  /**
+   * **The only marketplace WRITE the product has**, and the only client call that reaches it.
+   *
+   * `commandId` is the idempotency key of THIS confirm — generated once per press, so a retry after a
+   * timeout cannot become a second reply. `expectedFingerprint` is the exact draft the seller read;
+   * a mismatch is a 409, which means the draft changed after they reviewed it and the approval no
+   * longer describes what would be sent.
+   */
+  async confirmInquiryPublish(
+    workItemId: string,
+    request: { commandId: string; expectedFingerprint: string },
+  ): Promise<PublishStatusView> {
+    const { data } = await http.post<PublishStatusView>(
+      `/api/inquiries/${workItemId}/confirm-publish`,
+      request,
+    );
+    return data;
+  },
+
+  /** Verify-only: re-query the channel's own status and advance on 처리완료. NEVER resends. */
+  async verifyInquiryPublish(workItemId: string): Promise<PublishStatusView> {
+    const { data } = await http.post<PublishStatusView>(`/api/inquiries/${workItemId}/verify`);
+    return data;
+  },
+
+  /**
+   * Resume a publish that was confirmed but not delivered — a retry dispatches only from
+   * ACTION_PENDING; an abandoned DISPATCHING is recovered to DELIVERY_UNKNOWN and verified, never
+   * resent, because a delivery nobody observed is ambiguous and a resend would be a second reply.
+   */
+  async resumeInquiryPublish(workItemId: string): Promise<PublishStatusView> {
+    const { data } = await http.post<PublishStatusView>(`/api/inquiries/${workItemId}/resume`);
     return data;
   },
 

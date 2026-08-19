@@ -38,13 +38,18 @@ one place on disk and are **not** recoverable from git.
 
 ## Active source ownership
 
-- `backend/` — Spring Boot service (Java, Gradle, Postgres/Flyway, JWT). **The only LLM egress.**
+- `backend/` — Spring Boot service (Java, Gradle, Postgres/Flyway, JWT). **The only LLM egress** — now
+  two capabilities, each with its own flag, key, transport, prompt and payload floor, and each provably
+  unable to reach the other's (`review/triage/llm/` for review triage; `agent/llm/` for the agent
+  runtime's draft seam).
 - `frontend/` — React/Vite operations UI.
 - `collector/` — TypeScript local agent: channel acquisition + Action Window (NAVER, ESM, Cafe24).
 - `agent-runtime/` — standalone Node/TS **LangGraph** orchestration service (port 8787): four compiled
   graphs with human `interrupt`/resume, tools adapting onto Spring. It is a docker-compose service with
-  its own CI status check and a live `/agent` route — and it contains **no LLM call at all**
-  (`docs/decisions/agent-runtime-langgraph-llm-split.md`).
+  its own CI status check and a live `/agent` route. It **holds no credential of any kind**: since
+  2026-08-20 one node of two graphs produces a real LLM draft, and it does so by calling the BACKEND
+  with the operator's forwarded bearer — so "the backend is the only LLM egress" is still the property
+  to check here (`docs/decisions/agent-runtime-langgraph-llm-split.md`).
 - `contracts/` — shared contracts (Action Window, review fingerprint).
 - `tools/` — dev/support tooling.
 - `docs/` — current SellerOps docs; `docs/archive/` holds historical material.
