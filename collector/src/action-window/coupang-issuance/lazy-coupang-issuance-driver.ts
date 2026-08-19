@@ -24,6 +24,7 @@ import type {
   CoupangIssuanceTarget,
   WingSurfaceProbe,
 } from "./coupang-issuance-driver";
+import type { CoupangCredentialState } from "../coupang-credential-state";
 
 export interface LazyCoupangIssuanceDriverDeps {
   /**
@@ -109,6 +110,29 @@ export class LazyCoupangIssuanceDriver implements CoupangIssuanceProbeDriver {
       });
     }
     return this.opening;
+  }
+
+  /**
+   * **The account's key state — the one method this wrapper forgot, and the walk stopped there.**
+   *
+   * `CoupangIssuanceGuidanceSession`'s `CHECK_CREDENTIAL_STATE` reads this OPTIONALLY and treats an absent
+   * method as `UNKNOWN`, which parks — deliberately, because "a driver that cannot answer" must never be
+   * mistaken for "this account has no key" (that wrong answer creates a second real credential). The real
+   * driver has implemented it since the credential-state slice; this delegate was never extended, so on the
+   * PRODUCT path — which is always the lazy driver — the answer was `UNKNOWN` every single time.
+   *
+   * Live 2026-08-19: the seller reached the real open-API page, the runtime classified it correctly
+   * (`pageCategory: open_api_issuance`, 76 times), and then read `state: UNKNOWN` 76 times and parked — so the
+   * walk never guided a control and no highlight ever appeared on the page they had just reached. The
+   * driver's own `aw_coupang_issuance_credential_state_probe` line, which carries the census refusal reason,
+   * is absent from that whole session: proof the real implementation was never reached.
+   *
+   * Optional on the interface and optional here: forwarded only when the underlying driver has it, so a
+   * driver that genuinely cannot answer still produces the fail-closed `UNKNOWN` rather than a fabricated one.
+   */
+  async probeCredentialState(): Promise<CoupangCredentialState> {
+    const d = await this.driver();
+    return (await d.probeCredentialState?.()) ?? "UNKNOWN";
   }
 
   async probeSurface(): Promise<WingSurfaceProbe> {

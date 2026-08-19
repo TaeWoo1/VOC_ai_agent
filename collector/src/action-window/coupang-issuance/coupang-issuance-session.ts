@@ -290,6 +290,22 @@ export class CoupangIssuanceGuidanceSession {
       if (this.stopped || this.engine.isPaused() || isCoupangIssuanceTerminal(this.engine.currentStage())) return "NONE";
       await new Promise<void>((resolve) => setTimeout(resolve, this.surfaceWaitPollMs));
       if (this.stopped || this.engine.isPaused() || isCoupangIssuanceTerminal(this.engine.currentStage())) return "NONE";
+      /**
+       * **NEVER poll a surface the seller CLOSED.** The same rule `maybeRecoverPark` states and guards on, and
+       * this loop was the one place missing it — which is what made it visible.
+       *
+       * `probeSurface` goes through the LAZY driver, and a lazy driver's contract is "re-open on the next
+       * call". So once the seller closed the WING window, every tick of this loop re-opened one — and because
+       * the landing is once-per-carrier (`aw_coupang_walk_landing_skipped: ALREADY_NAVIGATED_ONCE`), what it
+       * re-opened was a BLANK tab. Live 2026-08-19: 13 `aw_coupang_walk_surface_closed` events, each followed
+       * within a second by a re-open, 696 of 744 probes reading `unknown` — a seller closing a tab and getting
+       * an empty one back, once a second, for as long as the run lived.
+       *
+       * Closing the window is already a first-class outcome: `onSurfaceClosed` latches this flag and parks the
+       * run, and the park's recovery is the seller's own `REQUEST_STEP_RECHECK` (which clears the latch at
+       * `command`). Returning here hands the loop back to that park instead of racing it.
+       */
+      if (this.surfaceClosed) return "NONE";
       const again = await this.driver.probeSurface();
       const next = this.engine.onSurfaceProbed(again);
       this.publishState();

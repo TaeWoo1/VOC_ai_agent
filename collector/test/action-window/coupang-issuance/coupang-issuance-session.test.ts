@@ -727,6 +727,41 @@ describe("coupang issuance session — a RELEASED session stops touching the sur
     expect(driver.calls.slice(callsAfterStop)).toEqual([]);
   });
 
+  /**
+   * **The runaway blank tab.** The seller closes the WING window; the surface-wait loop polls `probeSurface()`
+   * a second later; the LAZY driver's contract is "re-open on the next call"; and because the walk's landing is
+   * once-per-carrier, what comes back is a BLANK tab. Then the probe reads `unknown`, the loop waits, and it
+   * happens again.
+   *
+   * Live 2026-08-19, in one seller session: 13 `aw_coupang_walk_surface_closed` events, each followed within a
+   * second by `aw_coupang_walk_landing_skipped: ALREADY_NAVIGATED_ONCE`, and 696 of 744 probes reading
+   * `unknown`. Closing a tab gave the seller an empty one back, once a second, for as long as the run lived.
+   *
+   * `maybeRecoverPark` already states this rule and guards on it ("NEVER auto-recover a surface the seller
+   * CLOSED"); this loop was the one that did not.
+   */
+  it("**the surface-wait loop stops when the SELLER closes the window** — no timer re-opens it", async () => {
+    const { engine, io, driver, session } = build(
+      { probeSequence: [LOGIN, LOGIN, LOGIN, LOGIN, LOGIN, LOGIN, LOGIN, LOGIN, ISSUANCE] },
+      { surfaceWaitPollMs: 1, surfaceWaitTimeoutMs: 500 },
+    );
+    startRun(io);
+    for (let i = 0; i < 50 && engine.currentStage() !== "waiting_login"; i++) await tick();
+    expect(engine.currentStage()).toBe("waiting_login");
+
+    // The seller closes the WING window themselves. The session latches it and parks.
+    driver.closeSurface();
+    for (let i = 0; i < 20; i++) await tick();
+    const callsAfterClose = driver.calls.length;
+
+    for (let i = 0; i < 80; i++) await tick();
+    // Not one further probe. A probe here would go through the lazy driver and bring a window back up — which
+    // is precisely what the seller just declined.
+    expect(driver.calls.slice(callsAfterClose).filter((c) => c === "probeSurface")).toEqual([]);
+    // The session is NOT stopped: the walk is recoverable, it just waits for the seller instead of a timer.
+    expect(session.isStopped()).toBe(false);
+  });
+
   it("**a torn-down session drives nothing on a late command either**", async () => {
     const { io, driver, session } = build();
     startRun(io);

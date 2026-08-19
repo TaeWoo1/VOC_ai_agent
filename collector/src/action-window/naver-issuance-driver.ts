@@ -573,8 +573,33 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
       return { count: 1, sig: RETURN_GUIDANCE_SIG };
     }
     if (target === "open_app") {
-      await this.mountStepOverlay(page, "open_app");
-      return { count: 1, sig: OPEN_APP_GUIDANCE_SIG };
+      /**
+       * **The DOCKED panel, and a paint check — `open_app` has no anchor to ring.**
+       *
+       * `open_app` is deliberately not a highlight target: a live row anchor measured 44 matches, so the step
+       * is guidance ("발급한 애플리케이션 열기") plus an observed page transition, and nothing here tags an
+       * element. That is exactly the case `mountOverlay` returns from without painting —
+       * `if (!target && !o.dockedPanelOnly) return;` — so this call created NOTHING, silently, on the FIRST
+       * guided step of the walk. Live 2026-08-19: the API-center window opened, the app list was read
+       * (`aw_issuance_probe pageCategory=app_list`, `aw_issuance_read_apps hasEntries=true`), and the seller
+       * saw no overlay at all for the whole walk.
+       *
+       * The Coupang driver already hit and fixed this on its own text-guided steps, and its comment is the
+       * specification: *"the panel ALONE, docked. Without `dockedPanelOnly` the mount finds no anchor and
+       * returns having created nothing, which is why these steps had no presentation of their own."* This is
+       * that fix applied to the sibling it was never carried to.
+       *
+       * Three parts, in the order the Coupang path established:
+       *  - **clear the prior tag first** — a step that claims no locator must leave no anchor behind, or the
+       *    mount finds the PREVIOUS step's `data-aw-target` and rings a control this step is not about;
+       *  - **mount docked**, so the panel is its own presentation;
+       *  - **verify it painted**, so a lost context reads as `count: 0` (→ recoverable park) instead of a
+       *    fail-OPEN "highlighted" with nothing on screen — the same asymmetry `resolveFixedLabelTarget`'s
+       *    `visible_check` stage enforces for the anchored targets.
+       */
+      await this.evalStr(page, IN_PAGE_CLEAR_TAG).catch(() => undefined);
+      await this.mountStepOverlay(page, "open_app", true);
+      return (await overlayMounted(page)) ? { count: 1, sig: OPEN_APP_GUIDANCE_SIG } : { count: 0 };
     }
     if (!isIssuanceHighlightTarget(target)) return { count: 0 };
     // Anti-drift + SPA-safe mount: the locator RE-resolves the unique match (surviving soft-navs) and scrolls it
@@ -598,9 +623,11 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
    * flow is byte-identical: the identical error still propagates, so `resolveFixedLabelTarget`'s `mount`-stage
    * catch and every downstream recovery path behave exactly as before — this only observes on the way out.
    */
-  private async mountStepOverlay(page: Page, target: IssuanceTarget): Promise<void> {
+  private async mountStepOverlay(page: Page, target: IssuanceTarget, dockedPanelOnly = false): Promise<void> {
     try {
       await mountOverlay(page, {
+        // Set only for a step with no anchor to ring; without it the mount finds no target and paints nothing.
+        ...(dockedPanelOnly ? { dockedPanelOnly: true } : {}),
         stepNumber: OVERLAY_STEP[target],
         totalSteps: ISSUANCE_TOTAL_STEPS,
         copyKey: `actionWindow.issuance.step.${target}`,

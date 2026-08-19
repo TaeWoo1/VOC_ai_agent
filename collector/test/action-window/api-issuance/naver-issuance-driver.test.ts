@@ -487,6 +487,60 @@ describe("NaverIssuanceDriver — the EXISTING-app branch (open_app = navigation
     expect(page.clickCalls).toBe(0);
   });
 
+  /**
+   * **`open_app` must PAINT something.** It is the first guided step of the walk and it has no anchor to ring
+   * (a live row anchor measured 44 matches), so it mounts the DOCKED panel. Without `dockedPanelOnly` the
+   * mount finds no `[data-aw-target]`, returns from `if (!target && !o.dockedPanelOnly) return;`, and paints
+   * NOTHING — silently. Live 2026-08-19: the API-center window opened, the app list was read, and the seller
+   * saw no overlay for the entire walk.
+   */
+  it("open_app clears the prior tag, mounts the DOCKED panel, and verifies it painted", async () => {
+    const { io, session, page } = build({ appEntryCount: 1 });
+    startRun(io);
+    await session.whenSettled();
+
+    const mounts = page.scripts.filter((x) => x.includes("scrollIntoView") && x.includes("[fn]"));
+    expect(mounts.length, "the walk mounted at least one overlay").toBeGreaterThan(0);
+    // The step's own presentation exists: a TARGET_HIGHLIGHTED for step 2 means highlightTarget returned count 1,
+    // which now REQUIRES a verified paint.
+    const highlighted = io.events().filter((e) => e.type === "TARGET_HIGHLIGHTED").map((e) => e.payload.stepId);
+    expect(highlighted).toContain("aw.issuance_open_or_create_app");
+    // A step that claims no locator must leave no anchor behind, or the mount rings the PREVIOUS step's control.
+    expect(page.scripts.some((x) => x.includes("issuance-cleartag"))).toBe(true);
+  });
+
+  /**
+   * And the paint check is load-bearing in the other direction: a mount that ran but painted nothing must read
+   * back as NOT highlighted, so the run parks recoverably instead of reporting a highlight that is not on screen.
+   */
+  it("open_app reports NOT highlighted when the mount painted nothing — never a fail-open highlight", async () => {
+    const { io, session, page } = build({ appEntryCount: 1 });
+    // Model "the mount ran but painted nothing" (the tag was lost to a soft-nav between tag and mount) by
+    // answering the FIRST post-mount paint verify with `false`. `open_app` is the first step that mounts and
+    // verifies, so this is its verify — reached through the public `evaluate` seam, not the fake's internals.
+    const realEvaluate = page.evaluate.bind(page);
+    let firstVerifyAnswered = false;
+    page.evaluate = async (fnOrStr: unknown, arg?: unknown): Promise<unknown> => {
+      const src = typeof fnOrStr === "string" ? fnOrStr : `[fn] ${String(fnOrStr)}`;
+      const isOverlayVerify =
+        typeof fnOrStr !== "string" &&
+        src.includes("getElementById") &&
+        !src.includes("scrollIntoView") &&
+        !src.includes("untrack");
+      const result = await realEvaluate(fnOrStr, arg);
+      if (isOverlayVerify && !firstVerifyAnswered) {
+        firstVerifyAnswered = true;
+        return false;
+      }
+      return result;
+    };
+    startRun(io);
+    await session.whenSettled();
+
+    const highlighted = io.events().filter((e) => e.type === "TARGET_HIGHLIGHTED").map((e) => e.payload.stepId);
+    expect(highlighted).not.toContain("aw.issuance_open_or_create_app");
+  });
+
   it("COMPLETES when the existing-app detail page classifies as credential_issuance (issued keys shown read-only)", async () => {
     // The seller opens their EXISTING app; its detail page already shows the issued Application ID/Secret read-only,
     // so the shared classifier lands it on `credential_issuance` (read-only wins over the editable app_detail
