@@ -155,13 +155,17 @@ describe("browser launch reachability", () => {
     const calls = [...cli.matchAll(/launchNaverContext\(/g)].map((m) => m.index!);
     expect(calls.length).toBeGreaterThanOrEqual(1);
 
-    // TWO gated builders now: the initial-import one, and the Coupang guided walk's live carrier (whose launch
-    // is deferred into `open()` and only reached once every approval binding is present). The property is
-    // unchanged and still the point — every launch is inside a builder that a gate stands in front of, so none
-    // is reachable by booting the agent alone. Widening this to "anywhere" would retire the guard, not update it.
+    // THREE gated builders now: the initial-import one, and the two guided walks' live carriers (WING and the
+    // NAVER API center). In BOTH walks the launch is deferred into `open()`, which the session calls on the
+    // seller's own START_RUN — so building the carrier launches nothing, and the carrier is only built when a
+    // paired, authenticated SellerOps tab asks for it by name (or, on the flag boot, once every approval
+    // binding is present). The property is unchanged and still the point — every launch is inside a builder
+    // that a gate stands in front of, so none is reachable by booting the agent alone. Widening this to
+    // "anywhere" would retire the guard, not update it.
     const spans = [
       ["export async function buildInitialImportConfig", "/**\n * Build the {@link AgentActionWindowConfig}"],
       ["export function buildCoupangIssuanceLiveConfig", "\nexport function buildCoupangIssuanceConfig"],
+      ["export function buildNaverIssuanceLiveConfig", "\nexport function activateNaverGuidedWalk"],
     ].map(([from, to]) => {
       const start = cli.indexOf(from!);
       const end = cli.indexOf(to!, start);

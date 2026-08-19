@@ -847,3 +847,39 @@ describe("issuance session — loopback E2E over the real v2 transport", () => {
     for (const v of clientViews) expect(validateRunView(v)).toEqual({ ok: true });
   });
 });
+
+describe("naver issuance session — a RELEASED session stops touching the surface (2026-08-19)", () => {
+  const tick = () => new Promise<void>((r) => setTimeout(r, 1));
+
+  it("**the barrier re-arm loop stops on teardown** — a released walk must not call a driver that would re-open the window", async () => {
+    // The Coupang sibling was live-observed re-opening the marketplace window one second after the resident
+    // helper released the walk: its own poll kept calling the lazy driver, and a lazy driver's `markClosed`
+    // means "re-open on the next call". This session has the same shape — `watchBarrier` re-arms every
+    // `rearmDelayMs` for as long as the engine rests on the barrier — so it gets the same latch, proven here
+    // before it can be observed live.
+    const { io, engine, driver, session } = build(EXISTING);
+    startRun(io);
+    await session.whenSettled();
+    // The run is resting on a seller barrier: the loop is live and re-arming.
+    expect(engine.isStarted()).toBe(true);
+
+    session.attach()(); // the host releases the walk (or the agent shuts down)
+    expect(session.isStopped()).toBe(true);
+    const callsAfterStop = driver.calls.length;
+    for (let i = 0; i < 60; i++) await tick();
+    // Not one more driver call — no probe, no locate, no highlight, no arm; nothing that could bring a window up.
+    expect(driver.calls.slice(callsAfterStop)).toEqual([]);
+  });
+
+  it("**a torn-down session drives nothing on a late command either**", async () => {
+    const { io, driver, session } = build(EXISTING);
+    startRun(io);
+    await session.whenSettled();
+    session.attach()();
+    const callsAfterStop = driver.calls.length;
+    // The transport is unsubscribed, so this cannot even reach the engine; the assertion is the driver's silence.
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision, "late");
+    for (let i = 0; i < 20; i++) await tick();
+    expect(driver.calls.slice(callsAfterStop)).toEqual([]);
+  });
+});

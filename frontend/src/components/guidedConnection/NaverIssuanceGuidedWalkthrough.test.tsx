@@ -440,3 +440,37 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
     });
   });
 });
+
+describe("NaverIssuanceGuidedWalkthrough — an ENDED walk is never a dead end (2026-08-19)", () => {
+  it("CANCELLED / FAILED hand over to the text checklist; COMPLETED keeps its own hand-off", async () => {
+    // Before this, a cancelled walk left the timeline on screen ("1 / 7") beside an EMPTY control panel: a step
+    // count with nothing to press. The Coupang sibling had the identical dead end.
+    for (const status of ["CANCELLED", "FAILED"] as const) {
+      const dispatch = vi.fn();
+      const { unmount } = render(
+        <NaverIssuanceGuidedWalkthrough
+          dispatch={dispatch}
+          run={issuanceRun({ status, allowedCommands: [] })}
+          onCommand={vi.fn()}
+        />,
+      );
+      const fallback = screen.getByRole("button", { name: "텍스트로 직접 진행하기" });
+      expect(fallback).toBeInTheDocument();
+      await userEvent.click(fallback);
+      expect(dispatch).toHaveBeenCalledWith({ type: "APPLICATION_ISSUANCE_MODE", mode: "text" });
+      unmount();
+    }
+
+    // A COMPLETED walk is NOT an ended-without-completing walk: it keeps its credential hand-off and offers no
+    // text fallback — guided stays the primary path right through to the end.
+    render(
+      <NaverIssuanceGuidedWalkthrough
+        dispatch={vi.fn()}
+        run={issuanceRun({ status: "COMPLETED", allowedCommands: [] })}
+        onCommand={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "SellerOps로 돌아가 연결 정보 입력하기" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "텍스트로 직접 진행하기" })).toBeNull();
+  });
+});

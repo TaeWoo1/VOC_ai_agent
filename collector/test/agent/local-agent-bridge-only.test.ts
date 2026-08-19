@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import {
   BRIDGE_ONLY_FLAG,
@@ -149,8 +150,16 @@ import {
 } from "../../../contracts/action-window/v2/index";
 import { deserializeFrame, serializeFrame, type AwServerFrame } from "../../../contracts/action-window/v2/transport";
 import { AW_CARRIER_ISSUANCE } from "../../../contracts/action-window/aw-carrier-kind";
-import { activateCoupangGuidedWalk, type CoupangIssuanceLiveCarrier } from "../../src/cli/local-agent";
+import {
+  activateCoupangGuidedWalk,
+  activateNaverGuidedWalk,
+  activateResidentCarrier,
+  RESIDENT_ON_DEMAND_CARRIERS,
+  type CoupangIssuanceLiveCarrier,
+  type NaverIssuanceLiveCarrier,
+} from "../../src/cli/local-agent";
 import { CoupangIssuanceFixtureDriver } from "../../src/action-window/coupang-issuance/coupang-issuance-fixture-driver";
+import { IssuanceFixtureDriver } from "../../src/action-window/api-issuance/issuance-fixture-driver";
 
 const APP = "http://localhost:5173";
 
@@ -160,6 +169,18 @@ function fixtureCarrier(): CoupangIssuanceLiveCarrier & { closed: number } {
   const c = {
     closed: 0,
     config: { runId: `run_${randomBytes(6).toString("hex")}`, channelCode: "coupang", createDriver: () => driver },
+    closeSurface: async () => void c.closed++,
+    isSurfaceOpen: () => false,
+  };
+  return c;
+}
+
+/** The NAVER twin of {@link fixtureCarrier} — the real session/engine over the SYNTHETIC API-center driver. */
+function naverFixtureCarrier(): NaverIssuanceLiveCarrier & { closed: number } {
+  const driver = new IssuanceFixtureDriver();
+  const c = {
+    closed: 0,
+    config: { runId: `run_${randomBytes(6).toString("hex")}`, channelCode: "naver", createDriver: () => driver },
     closeSurface: async () => void c.closed++,
     isSurfaceOpen: () => false,
   };
@@ -237,7 +258,7 @@ describe("runBridgeOnlyBoot — the guided walk on demand", () => {
     expect(handle.listen.ok).toBe(true);
     const port = (handle.listen as { ok: true; port: number }).port;
     const boot = JSON.parse(lines[0]!) as Record<string, unknown>;
-    expect(boot).toMatchObject({ mode: "BRIDGE_ONLY", browserLaunched: false, marketplaceOpened: false, onDemandCarriers: ["issuance/coupang"] });
+    expect(boot).toMatchObject({ mode: "BRIDGE_ONLY", browserLaunched: false, marketplaceOpened: false, onDemandCarriers: ["issuance/coupang", "issuance/naver"] });
 
     // 1. A tab that does not ask sees bridge-only as it always was: hello + snapshot, NO aw_session.
     const ticket1 = await pairedTicket(port);
@@ -289,5 +310,149 @@ describe("runBridgeOnlyBoot — the guided walk on demand", () => {
     tab3.ws.close();
     await handle.shutdown();
     expect(lines.at(-1)).toBe(JSON.stringify({ mode: "BRIDGE_ONLY", stopped: true }));
+  });
+});
+
+// ── the NAVER guided walk, on demand from the SAME resident helper (2026-08-19) ────────────────────
+describe("activateNaverGuidedWalk", () => {
+  it("serves exactly issuance/naver and nothing else; building it opens no window", () => {
+    expect(activateNaverGuidedWalk({ carrier: "import", channelCode: "naver" })).toBeNull();
+    expect(activateNaverGuidedWalk({ carrier: AW_CARRIER_ISSUANCE, channelCode: "coupang" })).toBeNull();
+    expect(activateNaverGuidedWalk({ carrier: "locate", channelCode: "naver" })).toBeNull();
+    const live = naverFixtureCarrier();
+    let built = 0;
+    const c = activateNaverGuidedWalk({ carrier: AW_CARRIER_ISSUANCE, channelCode: "naver" }, { buildCarrier: () => (built++, live) });
+    expect(c).not.toBeNull();
+    expect(built).toBe(1);
+    expect(c!.isSettled()).toBe(true); // no run started yet
+    expect(c!.isSurfaceOpen()).toBe(false);
+  });
+});
+
+describe("activateResidentCarrier", () => {
+  it("routes BOTH channel walks and refuses everything else — the seller never picks a carrier", () => {
+    // Each activator builds its own real carrier here (no injected fixture), which is safe precisely because
+    // building opens NO window — the lazy driver launches on the run's first call, and no run is started.
+    const coupang = activateResidentCarrier({ carrier: AW_CARRIER_ISSUANCE, channelCode: "coupang" });
+    const naver = activateResidentCarrier({ carrier: AW_CARRIER_ISSUANCE, channelCode: "naver" });
+    expect(coupang).not.toBeNull();
+    expect(naver).not.toBeNull();
+    expect(coupang!.isSurfaceOpen()).toBe(false);
+    expect(naver!.isSurfaceOpen()).toBe(false);
+    // Unwired carriers stay unwired rather than being served by the wrong walk (see the audit: `locate`,
+    // `import` and `reply` are hosted by their own boots, not by the resident helper).
+    expect(activateResidentCarrier({ carrier: "locate", channelCode: "coupang" })).toBeNull();
+    expect(activateResidentCarrier({ carrier: "import", channelCode: "naver" })).toBeNull();
+    expect(activateResidentCarrier({ carrier: "reply", channelCode: "naver" })).toBeNull();
+    expect(activateResidentCarrier({ carrier: AW_CARRIER_ISSUANCE, channelCode: "cafe24" })).toBeNull();
+    // The advertised names and what is actually servable are the same list.
+    expect([...RESIDENT_ON_DEMAND_CARRIERS]).toEqual(["issuance/coupang", "issuance/naver"]);
+  });
+});
+
+describe("runBridgeOnlyBoot — the NAVER guided walk on demand", () => {
+  const cleanups: Array<() => Promise<void> | void> = [];
+  afterEach(async () => {
+    while (cleanups.length) await cleanups.pop()!();
+  });
+
+  it("aw_attach issuance/naver activates + announces the NAVER walk on the resident helper; a second, different carrier is refused; shutdown tears the window down", async () => {
+    const dir = mkdtempSync(join(tmpdir(), `bridge-only-naver-${randomUUID()}-`));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    const lines: string[] = [];
+    const live = naverFixtureCarrier();
+    const handle = await runBridgeOnlyBoot([BRIDGE_ONLY_FLAG], { NODE_ENV: "test" } as NodeJS.ProcessEnv, {
+      bridgeConfigOverride: { port: 0, pairingFile: join(dir, "pairings.json"), autoApprovePairing: true },
+      onSignal: () => undefined,
+      print: (l) => void lines.push(l),
+      exit: () => undefined,
+      // The COMPOSED activator, with only the NAVER carrier's construction replaced by the fixture — so this
+      // exercises the same routing the product boot uses.
+      activateCarrier: (req) =>
+        activateCoupangGuidedWalk(req) ?? activateNaverGuidedWalk(req, { buildCarrier: () => live }),
+    });
+    cleanups.push(() => handle.shutdown());
+    expect(handle.listen.ok).toBe(true);
+    const port = (handle.listen as { ok: true; port: number }).port;
+
+    const tab = openTab(port, await pairedTicket(port));
+    await tab.opened;
+    await new Promise((r) => setTimeout(r, 100));
+    expect(tab.announcements).toHaveLength(0); // idle: the resident helper announces nothing
+
+    tab.ws.send(JSON.stringify({ type: "aw_attach", carrier: AW_CARRIER_ISSUANCE, channelCode: "naver" }));
+    await tab.until(() => tab.announcements.length > 0);
+    expect(tab.announcements[0]).toMatchObject({ type: "aw_session", carrier: AW_CARRIER_ISSUANCE, channelCode: "naver", runId: live.config.runId });
+    expect(handle.carrierHost.state()).toMatchObject({ active: true, carrier: "issuance", channelCode: "naver", attachedClients: 1 });
+    expect(live.closed).toBe(0); // attaching opens nothing and closes nothing
+
+    // START_RUN drives the REAL engine/session over the synthetic API-center driver — no browser exists.
+    tab.ws.send(JSON.stringify({ type: "aw", payload: serializeFrame({ kind: "aw_command", command: {
+      protocolVersion: ACTION_WINDOW_PROTOCOL_VERSION, commandId: `${live.config.runId}-n1`, runId: live.config.runId, expectedRevision: 0,
+      type: "START_RUN" as never, payload: { channelCode: "naver", intent: "API_ISSUANCE_GUIDANCE" } as never } }) }));
+    await tab.until(() => tab.view() !== null);
+    expect(tab.view()!.runId).toBe(live.config.runId);
+    expect(tab.view()!.channelCode).toBe("naver");
+    expect(JSON.stringify(tab.view())).not.toMatch(/secret|password|token|apicenter/i);
+
+    // ONE slot: a Coupang tab asking while the NAVER walk is live gets no announcement (it takes its own
+    // fallback), and the live walk is untouched.
+    const other = openTab(port, await pairedTicket(port));
+    await other.opened;
+    other.ws.send(JSON.stringify({ type: "aw_attach", carrier: AW_CARRIER_ISSUANCE, channelCode: "coupang" }));
+    await new Promise((r) => setTimeout(r, 150));
+    expect(handle.carrierHost.state()).toMatchObject({ active: true, channelCode: "naver" });
+    other.ws.close();
+
+    tab.ws.close();
+    await new Promise((r) => setTimeout(r, 80));
+    await handle.shutdown();
+    expect(live.closed).toBe(1); // the window the walk would have opened is closed with the helper
+    expect(handle.carrierHost.state().active).toBe(false);
+  });
+});
+
+describe("the NAVER live carrier — the same structural promises the WING one is held to", () => {
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(resolve(HERE, "../../src/cli/local-agent.ts"), "utf8");
+  const fn = (() => {
+    const from = src.indexOf("export function buildNaverIssuanceLiveConfig");
+    return src.slice(from, src.indexOf("\nexport function activateNaverGuidedWalk", from));
+  })();
+  const codeOnly = fn.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+
+  it("opens NO window at agent boot, and navigates EXACTLY ONCE — the landing, screened first", () => {
+    // Lazily: the launch lives inside `open()`, which the session calls on the seller's own START_RUN.
+    expect(codeOnly).toContain("new LazyNaverIssuanceDriver({");
+    expect(codeOnly).toContain("open: async () =>");
+    // ONE navigation, and it is named. A second goto would be a route THROUGH the flow — a different capability.
+    expect(codeOnly.split(".goto(").length - 1).toBe(1);
+    expect(codeOnly).toContain("NAVER_API_CENTER_GUIDED_WALK_LANDING_URL");
+    // Screened BEFORE it is used — an off-target destination opens nothing.
+    expect(codeOnly.indexOf("screenApiCenterUrl")).toBeLessThan(codeOnly.indexOf(".goto("));
+    expect(codeOnly).toContain("if (screened.ok)");
+    // ONE driver for the carrier's lifetime — a re-attach reuses the seller's window, never opens a second.
+    expect(codeOnly).toContain("createDriver: () => driver");
+    // Release RETIRES the driver; `markClosed` alone means "re-open on the next call", which is what brought
+    // the WING window back on the first on-demand release (2026-08-19).
+    expect(codeOnly).toContain("driver.retire()");
+  });
+
+  it("never clicks, types, submits, or reads a value — it has no method that could", () => {
+    for (const name of ["click(", ".fill(", ".type(", ".press(", "setInputFiles(", "textContent", "innerText"]) {
+      expect(codeOnly, name).not.toContain(name);
+    }
+  });
+
+  it("lands on the SAME API-center entry the product's own text checklist opens", () => {
+    const tutorial = readFileSync(
+      resolve(HERE, "../../../frontend/src/lib/guidedConnection/tutorial.ts"),
+      "utf8",
+    );
+    const landing = /NAVER_API_CENTER_GUIDED_WALK_LANDING_URL = "([^"]+)"/.exec(src)?.[1];
+    const checklist = /NAVER_API_CENTER_URL = "([^"]+)"/.exec(tutorial)?.[1];
+    expect(landing).toBeTruthy();
+    // Guided and text must not drift apart about where the seller goes.
+    expect(landing).toBe(checklist);
   });
 });
