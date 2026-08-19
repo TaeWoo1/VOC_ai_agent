@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CLI_PATH = join(__dirname, "..", "..", "src", "cli", "classify-esm-review.ts");
+const CLI_PATH = join(__dirname, "..", "..", "instruments", "calibration", "classify-esm-review.ts");
 
 /** Remove block + line comments so the guard checks only executable source, not prose. */
 function stripComments(src: string): string {
@@ -50,11 +50,11 @@ describe("classify-esm-review — strict no-click boundary (cannot trigger/captu
       .split("\n")
       .filter((l) => /^\s*import\b/.test(l) || /\bfrom\s+["']/.test(l));
     const imports = importLines.join("\n");
-    expect(/from\s+["']\.\.\/esm\/esm-review-live-scan["']/.test(imports)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/esm\/esm-review-live-scan["']/.test(imports)).toBe(true);
     expect(/classifyOpenEsmReviewPage\s*\(/.test(code)).toBe(true);
     expect(/review-export/.test(imports)).toBe(false);
     expect(/from\s+["'][^"']*upload[^"']*["']/.test(imports)).toBe(false);
-    expect(/from\s+["']\.\.\/status["']/.test(imports)).toBe(false);
+    expect(/from\s+["']\.\.\/\.\.\/src\/status["']/.test(imports)).toBe(false);
   });
 
   it("uses the SEPARATE ESM profile dir, not the NAVER one", () => {
@@ -98,7 +98,7 @@ describe("classify-esm-review — ESM sentinel continuation (no terminal stdin, 
   });
 
   it("derives the sentinel path from the dedicated ESM helper (distinct from NAVER)", () => {
-    expect(/from\s+["']\.\.\/esm\/esm-sentinel["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/esm\/esm-sentinel["']/.test(code)).toBe(true);
     expect(/esmSentinelPathFor\s*\(/.test(code)).toBe(true);
     expect(/probe-sentinel/.test(code)).toBe(false);
   });

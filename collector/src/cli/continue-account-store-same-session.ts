@@ -36,6 +36,7 @@ import { approvalRequiredMessage, hasLiveRunApproval } from "./live-run-approval
 import type { OperatorConfirmAsk } from "./operator-confirm";
 import { attachOperatorConfirmTab, type ConfirmHostContext } from "./operator-confirm-host";
 import { actionBarrierRefusedMessage, barrierRefusedRecord, confirmActionBarrier } from "./operator-action-barrier";
+import { pathToFileURL } from "node:url";
 
 const HYDRATION_TIMEOUT_MS = 15_000;
 // The human may need to clear 2FA/CAPTCHA and reach the reconnect-continue screen.
@@ -218,4 +219,10 @@ async function main(): Promise<void> {
   }
 }
 
-void main();
+// Run only when executed directly, NEVER on import — importing must have no side effects.
+// Before R2 this called `main()` at module top level, so merely importing the file (a test, a tooling
+// script, an editor's auto-import) ran the whole entrypoint, argv parse and all.
+const invokedPath = process.argv[1];
+if (invokedPath !== undefined && import.meta.url === pathToFileURL(invokedPath).href) {
+  void main();
+}

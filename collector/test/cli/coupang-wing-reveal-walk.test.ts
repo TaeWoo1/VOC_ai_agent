@@ -27,7 +27,7 @@ import {
   type RevealWalkDriverLike,
   type RevealWalkIo,
   type RevealWalkStop,
-} from "../../src/cli/run-coupang-wing-reveal-live";
+} from "../../instruments/live-runs/run-coupang-wing-reveal-live";
 import { OPERATOR_CONFIRM_BUTTON_LABEL, OPERATOR_UI_CONFIRMED } from "../../src/cli/operator-confirm";
 import {
   STAGE2_DISJUNCTS,
@@ -44,7 +44,7 @@ const PRESS_HINT = `SellerOps 확인 탭의 [${OPERATOR_CONFIRM_BUTTON_LABEL}] �
 
 const SRC = resolve(
   dirname(fileURLToPath(import.meta.url)),
-  "../../src/cli/run-coupang-wing-reveal-live.ts",
+  "../../instruments/live-runs/run-coupang-wing-reveal-live.ts",
 );
 
 /* ────────────────────────────── fixtures ────────────────────────────── */
@@ -548,7 +548,7 @@ describe("the walk cannot reach a browser, and importing the module runs nothing
   it("importing this module launches nothing (the direct-invocation guard)", async () => {
     // vitest imports the module at the top of this file; if the guard were wrong, a browser would already have
     // been launched by the time this runs. Asserted on the guard too, so the reason stays visible.
-    const mod = await import("../../src/cli/run-coupang-wing-reveal-live");
+    const mod = await import("../../instruments/live-runs/run-coupang-wing-reveal-live");
     expect(typeof mod.runRevealWalk).toBe("function");
     expect(src).toContain("import.meta.url === pathToFileURL(process.argv[1]).href");
   });

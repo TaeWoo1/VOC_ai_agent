@@ -3,7 +3,7 @@
  *
  * This module is where every sanitization and acceptance rule for live selector calibration lives, so the
  * rules are testable offline and there is ONE place a reviewer must trust. The live CLI
- * (`src/cli/calibrate-api-center.ts`) and the in-page scripts (`calibration-inpage.ts`) only *gather* a raw,
+ * (`instruments/calibration/calibrate-api-center.ts`) and the in-page scripts (`calibration-inpage.ts`) only *gather* a raw,
  * structural capture of an element the operator hovered; this module decides what — if anything — may be kept,
  * and splits it into a SANITIZED candidate (safe to log / document) and a RAW artifact entry (gitignored,
  * owner-only, for later code adoption after an independent security review).

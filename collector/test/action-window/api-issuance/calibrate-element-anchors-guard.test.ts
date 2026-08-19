@@ -16,10 +16,10 @@ import {
   calibrationDonePathFor,
   CALIBRATION_DONE_FILENAME,
   CALIBRATION_PRODUCTION_REFUSAL,
-} from "../../../src/cli/calibrate-element-anchors";
+} from "../../../instruments/calibration/calibrate-element-anchors";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const CLI = resolve(HERE, "../../../src/cli/calibrate-element-anchors.ts");
+const CLI = resolve(HERE, "../../../instruments/calibration/calibrate-element-anchors.ts");
 
 function codeOnly(path: string): string {
   const raw = readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");

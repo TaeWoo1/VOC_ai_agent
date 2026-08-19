@@ -1,7 +1,7 @@
 /**
  * **API-center VISUAL RECON — the in-page REDACTION + CENSUS scripts (value-free OUTPUT).**
  *
- * The browser-side half of `src/cli/capture-api-center-visual.ts`. Three string IIFEs:
+ * The browser-side half of `instruments/calibration/capture-api-center-visual.ts`. Three string IIFEs:
  *  - {@link buildRedactionScript}(`"apply"`) — draw an opaque overlay over every sensitive region, then return a
  *    per-frame {@link RawRedactionReport} of how many sensitive elements were DETECTED vs COVERED.
  *  - {@link buildRedactionScript}(`"verify"`) — re-run the SAME detection WITHOUT drawing new overlays and

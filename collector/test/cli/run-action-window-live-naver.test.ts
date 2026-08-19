@@ -1,5 +1,5 @@
 /**
- * Hermetic tests for the GATED live NAVER Action Window entrypoint (`src/cli/run-action-window-live-naver.ts`).
+ * Hermetic tests for the GATED live NAVER Action Window entrypoint (`instruments/live-runs/run-action-window-live-naver.ts`).
  * NO browser, NO live NAVER, NO network — importing the module launches nothing (`main()` is guarded by
  * the `import.meta.url` check). Covers: the pure refusal gate (approval flag + production hard-gate), the
  * downstream-deps assembly, the `driveOneRun` operator-command orchestration over an in-process loopback
@@ -24,7 +24,7 @@ import {
   CLASSIFY_ONLY_EXIT_CODE,
   confirmPrompt,
   type SentinelWait,
-} from "../../src/cli/run-action-window-live-naver";
+} from "../../instruments/live-runs/run-action-window-live-naver";
 import {
   APPROVAL_FLAG,
   CLASSIFY_ONLY_FLAGS,
@@ -910,7 +910,7 @@ describe("recoveryPrompt — the prose a parked seller reads (A3, D-029)", () =>
 });
 
 describe("run-action-window-live-naver — module source guard", () => {
-  const srcPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../src/cli/run-action-window-live-naver.ts");
+  const srcPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../instruments/live-runs/run-action-window-live-naver.ts");
   const raw = readFileSync(srcPath, "utf8");
   const stripComments = (code: string): string =>
     code
@@ -922,7 +922,7 @@ describe("run-action-window-live-naver — module source guard", () => {
   const importStatements = code.match(/import[\s\S]*?from\s*["'][^"']+["']/g) ?? [];
 
   it("is gated and wires the live driver + engine seams", () => {
-    expect(importStatements.some((s) => /\.\/live-run-approval/.test(s))).toBe(true);
+    expect(importStatements.some((s) => /\.\.\/\.\.\/src\/cli\/live-run-approval/.test(s))).toBe(true);
     expect(importStatements.some((s) => /naver-live-driver/.test(s))).toBe(true);
     expect(importStatements.some((s) => /run-lifecycle/.test(s))).toBe(true);
     expect(/createLoopbackChannel/.test(code)).toBe(true);
@@ -956,7 +956,7 @@ describe("run-action-window-live-naver — module source guard", () => {
       /review-download-save/,
       /review-upload-diagnostic/,
       /live-export-target-probe/,
-      /\.\.\/upload/,
+      /\.\.\/\.\.\/src\/upload/,
     ];
     for (const statement of importStatements) {
       for (const re of banned) {

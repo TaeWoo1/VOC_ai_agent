@@ -7,7 +7,7 @@ import { describe, it, expect } from "vitest";
 import {
   mappingFromCalibration,
   CALIBRATION_INCOMPLETE_EXIT_CODE,
-} from "../../src/cli/calibrate-reply-target";
+} from "../../instruments/calibration/calibrate-reply-target";
 import { ROW_MAPPING_SCHEMA_VERSION } from "../../src/action-window/reply-submission/reply-row-mapping-artifact";
 import type { CalibrationReadState } from "../../src/action-window/reply-submission/reply-calibrate-inpage";
 

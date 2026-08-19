@@ -7,7 +7,7 @@
  * true, rather than when someone remembers to reword it.
  */
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync , existsSync} from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -19,7 +19,17 @@ import {
 } from "../../src/cli/approval-manifest";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const src = (rel: string) => readFileSync(resolve(HERE, "../../src", rel), "utf8");
+/**
+ * Reads a source file by a path relative to `src` (product code) OR to the collector root
+ * (`instruments/...`, where R2 moved the calibration recorders and live-run harnesses).
+ */
+const src = (rel: string): string => {
+  for (const root of [resolve(HERE, "../../src"), resolve(HERE, "../..")]) {
+    const full = resolve(root, rel);
+    if (existsSync(full)) return readFileSync(full, "utf8");
+  }
+  throw new Error(`source not found: ${rel}`);
+};
 
 /** A PREPARED handoff manifest, built the way the CLI builds one. */
 function handoffManifest() {
@@ -80,7 +90,7 @@ describe("the credential manifest discloses what happens to the seller's values"
 describe("each promise is pinned to the code that keeps it", () => {
   it("ACCOUNT: the slot selects and the JWT authorizes — refused when unset", () => {
     expect(D.accountBinding).toContain("SELLEROPS_ACCOUNT_SLOT");
-    const cli = src("cli/run-coupang-credential-handoff-live.ts");
+    const cli = src("instruments/live-runs/run-coupang-credential-handoff-live.ts");
     // The CLI reads the slot and requires the exact 24-hex shape; there is no default.
     expect(cli).toContain('env("SELLEROPS_ACCOUNT_SLOT")');
     expect(cli).toContain("/^[0-9a-f]{24}$/");
@@ -101,7 +111,7 @@ describe("each promise is pinned to the code that keeps it", () => {
     expect(D.transport).toContain("/api/agent/credential-handoff");
     expect(src("credential/credential-handoff-client.ts")).toContain("/api/agent/credential-handoff");
     // The destination is screened before anything is read — the boundary guard pins this too.
-    expect(src("cli/run-coupang-credential-handoff-live.ts")).toContain("screenCredentialBackendOrigin(cfg.baseUrl)");
+    expect(src("instruments/live-runs/run-coupang-credential-handoff-live.ts")).toContain("screenCredentialBackendOrigin(cfg.baseUrl)");
     expect(src("credential/backend-origin.ts")).toMatch(/loopback/i);
   });
 
@@ -115,7 +125,7 @@ describe("each promise is pinned to the code that keeps it", () => {
       "credential/coupang-credential-handoff.ts",
       "credential/credential-handoff-client.ts",
       "action-window/coupang-wing-credential-driver.ts",
-      "cli/run-coupang-credential-handoff-live.ts",
+      "instruments/live-runs/run-coupang-credential-handoff-live.ts",
     ];
     for (const f of holders) {
       const code = src(f)

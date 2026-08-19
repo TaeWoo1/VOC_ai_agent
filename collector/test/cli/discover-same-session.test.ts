@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CLI_PATH = join(__dirname, "..", "..", "src", "cli", "discover-same-session.ts");
+const CLI_PATH = join(__dirname, "..", "..", "instruments", "calibration", "discover-same-session.ts");
 
 /** Remove block + line comments so the guard checks only executable source, not prose. */
 function stripComments(src: string): string {
@@ -44,12 +44,12 @@ describe("discover-same-session — classify-only is strictly NO-CLICK (cannot t
       .split("\n")
       .filter((l) => /^\s*import\b/.test(l) || /\bfrom\s+["']/.test(l));
     const imports = importLines.join("\n");
-    expect(/from\s+["']\.\.\/naver\/review-export["']/.test(imports)).toBe(false);
+    expect(/from\s+["']\.\.\/\.\.\/src\/naver\/review-export["']/.test(imports)).toBe(false);
     expect(/from\s+["'][^"']*upload[^"']*["']/.test(imports)).toBe(false);
   });
 
   it("classifies via the PURE no-click planner", () => {
-    expect(/from\s+["']\.\.\/naver\/export-classify["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/naver\/export-classify["']/.test(code)).toBe(true);
     expect(/planExportAction/.test(code)).toBe(true);
     expect(/classifyOnlyStatusFromPlan/.test(code)).toBe(true);
   });

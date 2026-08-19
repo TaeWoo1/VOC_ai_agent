@@ -6,7 +6,7 @@ import { describe, it, expect } from "vitest";
 import {
   DIAGNOSTIC_PRODUCTION_REFUSAL,
   diagnosticRefusal,
-} from "../../src/cli/run-store-identity-diagnostic-live-naver";
+} from "../../instruments/live-runs/run-store-identity-diagnostic-live-naver";
 import {
   APPROVAL_FLAG,
   NO_INGEST_FLAG,

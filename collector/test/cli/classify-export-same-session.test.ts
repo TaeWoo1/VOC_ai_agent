@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CLI_PATH = join(__dirname, "..", "..", "src", "cli", "classify-export-same-session.ts");
+const CLI_PATH = join(__dirname, "..", "..", "instruments", "calibration", "classify-export-same-session.ts");
 
 /** Remove block + line comments so the guard checks only executable source, not prose. */
 function stripComments(src: string): string {
@@ -47,11 +47,11 @@ describe("classify-export-same-session — strict no-click boundary (cannot trig
     const imports = importLines.join("\n");
     expect(/review-export/.test(imports)).toBe(false);
     expect(/from\s+["'][^"']*upload[^"']*["']/.test(imports)).toBe(false);
-    expect(/from\s+["']\.\.\/status["']/.test(imports)).toBe(false);
+    expect(/from\s+["']\.\.\/\.\.\/src\/status["']/.test(imports)).toBe(false);
   });
 
   it("imports only the PURE no-click planner for classification", () => {
-    expect(/from\s+["']\.\.\/naver\/export-classify["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/naver\/export-classify["']/.test(code)).toBe(true);
     expect(/planExportAction/.test(code)).toBe(true);
   });
 

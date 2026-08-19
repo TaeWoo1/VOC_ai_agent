@@ -40,7 +40,7 @@ import {
   discoveryScopeRefusal,
   runWingSelectorRecord,
   stage2RecordFor,
-} from "../../../src/cli/probe-wing-issuance-selectors";
+} from "../../../instruments/calibration/probe-wing-issuance-selectors";
 import { observeFrom } from "../../../src/cli/coupang-wing-classifier";
 import { OPERATOR_CONFIRMED } from "../../fixtures/operator-confirmation";
 

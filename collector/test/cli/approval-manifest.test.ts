@@ -287,7 +287,7 @@ describe("calibration phase separation", () => {
   });
 
   it("Phase A is now the multi-checkpoint calibrator, and its manifest surfaces the hotkey + gitignored artifact path", () => {
-    expect(OBS.cli).toBe("src/cli/calibrate-api-center.ts");
+    expect(OBS.cli).toBe("instruments/calibration/calibrate-api-center.ts");
     expect(OBS.driver).toContain("calibrate-api-center");
     const r = validateApprovalPrerequisites(baseObservation());
     expect(r.ok).toBe(true);
@@ -481,7 +481,7 @@ describe("Coupang WING candidate-label recon phase (COUPANG_WING_LABEL_RECON)", 
       expect(m.mode).toBe("READ_ONLY");
       expect(m.allowedActions).not.toContain("HIGHLIGHT_REAL_CONTROL");
       expect(m.allowedActions).toContain("PROBE_TARGET_MATCHCOUNT");
-      expect(m.cli).toBe("src/cli/probe-wing-issuance-selectors.ts");
+      expect(m.cli).toBe("instruments/calibration/probe-wing-issuance-selectors.ts");
       expect(m.apiCenterHost).toBe("wing_host");
       expect(m.entrypointType).toBe("CLI_LAUNCHED_DEDICATED_WINDOW");
     }
@@ -550,7 +550,7 @@ describe("Coupang WING selector-probe phase (COUPANG_WING_SELECTOR_PROBE)", () =
       const m = r.manifest;
       expect(m.phase).toBe("COUPANG_WING_SELECTOR_PROBE");
       expect(m.channel).toBe("COUPANG");
-      expect(m.cli).toBe("src/cli/probe-wing-issuance-selectors.ts");
+      expect(m.cli).toBe("instruments/calibration/probe-wing-issuance-selectors.ts");
       expect(m.driver).toBe(WSP.driver);
       expect(m.mode).toBe("READ_ONLY");
       expect(m.selectorsCalibrated).toBe(false); // WING is LIVE_DOM_CALIBRATION_PENDING; the probe does not need it
@@ -594,7 +594,7 @@ describe("Coupang WING selector-probe phase (COUPANG_WING_SELECTOR_PROBE)", () =
   });
 
   it("wrong cli/driver (e.g. the NAVER probe) → FAIL (CLI_DRIVER_UNCONFIRMED)", () => {
-    const r = validateApprovalPrerequisites({ ...baseWingSelectorProbe(), cli: "src/cli/probe-issuance-selectors.ts" });
+    const r = validateApprovalPrerequisites({ ...baseWingSelectorProbe(), cli: "instruments/calibration/probe-issuance-selectors.ts" });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.cause).toBe("CLI_DRIVER_UNCONFIRMED");
   });
@@ -618,7 +618,7 @@ describe("Coupang WING selector-probe phase (COUPANG_WING_SELECTOR_PROBE)", () =
     // to do. Until 2026-08-13 these summaries said "ready 를 보내세요" while a sentinel file did the advancing —
     // and the file was created on a chat line nobody wrote. A summary left behind would re-open that door.
     const probePhases = (Object.keys(PHASE_ENTRYPOINTS) as (keyof typeof PHASE_ENTRYPOINTS)[]).filter(
-      (phase) => PHASE_ENTRYPOINTS[phase].cli === "src/cli/probe-wing-issuance-selectors.ts",
+      (phase) => PHASE_ENTRYPOINTS[phase].cli === "instruments/calibration/probe-wing-issuance-selectors.ts",
     );
     expect(probePhases.length).toBe(6);
     for (const phase of probePhases) {
@@ -848,7 +848,7 @@ describe("Coupang WING key-deletion destructive phase (COUPANG_WING_KEY_DELETION
     const r = validateApprovalPrerequisites({
       ...baseWingKeyDeletion(),
       selectorsCalibrated: true,
-      cli: "src/cli/probe-wing-issuance-selectors.ts",
+      cli: "instruments/calibration/probe-wing-issuance-selectors.ts",
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.cause).toBe("CLI_DRIVER_UNCONFIRMED");
@@ -875,13 +875,13 @@ describe("Coupang WING key-deletion destructive phase (COUPANG_WING_KEY_DELETION
     expect(WKD.requiresOperatorDestructiveAction).toBe(true);
     expect(WKD.operatorDestructiveAction).toEqual(COUPANG_WING_KEY_DELETION_DESTRUCTIVE_ACTION);
     // The planned deletion driver/CLI is deliberately not yet built — the real CLI wrapper double-fails-closed.
-    expect(WKD.cli).toBe("src/cli/run-coupang-wing-deletion-live.ts");
+    expect(WKD.cli).toBe("instruments/live-runs/run-coupang-wing-deletion-live.ts");
   });
 });
 
 describe("visual-recon phase — redacted-screenshot recon manifest", () => {
   it("the phase spec is the redacted-screenshot recon: read-only, no highlight, capture screens = the driver's fixed set", () => {
-    expect(VR.cli).toBe("src/cli/capture-api-center-visual.ts");
+    expect(VR.cli).toBe("instruments/calibration/capture-api-center-visual.ts");
     expect(VR.driver).toContain("capture-api-center-visual");
     expect(VR.allowsHighlight).toBe(false);
     expect(VR.mode).toBe("READ_ONLY");
@@ -899,7 +899,7 @@ describe("visual-recon phase — redacted-screenshot recon manifest", () => {
     if (r.ok) {
       const m = r.manifest;
       expect(m.phase).toBe("API_CENTER_VISUAL_RECON");
-      expect(m.cli).toBe("src/cli/capture-api-center-visual.ts");
+      expect(m.cli).toBe("instruments/calibration/capture-api-center-visual.ts");
       expect(m.driver).toContain("capture-api-center-visual");
       expect(m.mode).toBe("READ_ONLY");
       expect(m.entrypointType).toBe("CLI_LAUNCHED_DEDICATED_WINDOW");
@@ -1100,7 +1100,7 @@ describe("per-phase operator ENTRYPOINT contract — one true action, never a wr
   });
 
   it("a frontend phase that names a CLI or describes a CLI-only action → FAIL (CLI_DESC_IN_FRONTEND_ENTRYPOINT)", () => {
-    const withCli: EntrypointSpec = { ...PHASE_ENTRYPOINTS.NAVER_GUIDED_CONNECTION, cli: "src/cli/calibrate-api-center.ts" };
+    const withCli: EntrypointSpec = { ...PHASE_ENTRYPOINTS.NAVER_GUIDED_CONNECTION, cli: "instruments/calibration/calibrate-api-center.ts" };
     const r = validateEntrypointContract("NAVER_GUIDED_CONNECTION", withCli);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.cause).toBe("CLI_DESC_IN_FRONTEND_ENTRYPOINT");
@@ -1151,7 +1151,7 @@ describe("FE-run-host issuance live proof (API_ISSUANCE_FE_LIVE_PROOF)", () => {
       expect(m.allowedActions).toContain("REVEAL_SECTION_IN_VIEWPORT");
       expect(m.selectorsCalibrated).toBe(true);
       // The supporting host tool is disclosed as the cli, but it is never the operator entrypoint.
-      expect(m.cli).toBe("src/cli/run-api-issuance-live-naver.ts");
+      expect(m.cli).toBe("instruments/live-runs/run-api-issuance-live-naver.ts");
       // Sanitized: the raw API-center URL never enters the manifest.
       expect(JSON.stringify(m)).not.toContain("apicenter.commerce.naver.com");
       expect(m.apiCenterHost).toBe("api_center_host");

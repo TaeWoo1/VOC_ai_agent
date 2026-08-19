@@ -14,7 +14,7 @@ import {
   replyRunModeFrom,
   watchForAbort,
   type AbortWatchDeps,
-} from "../../src/cli/run-reply-submission-live-naver";
+} from "../../instruments/live-runs/run-reply-submission-live-naver";
 
 const REF = "a1b2c3d4e5f60718";
 

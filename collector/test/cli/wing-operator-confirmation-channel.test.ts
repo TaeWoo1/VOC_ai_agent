@@ -25,12 +25,12 @@ import {
   runWingSelectorRecord,
   type WingOperatorAsk,
   type WingSelectorRecordDeps,
-} from "../../src/cli/probe-wing-issuance-selectors";
+} from "../../instruments/calibration/probe-wing-issuance-selectors";
 import { withConfirmTail } from "../../src/cli/operator-confirm-host";
 import { observeFrom, type WingStructuralCensus } from "../../src/cli/coupang-wing-classifier";
 import { OPERATOR_ABORTED, OPERATOR_CONFIRMED, OPERATOR_TIMED_OUT } from "../fixtures/operator-confirmation";
 
-const SOURCE = readFileSync(resolve(__dirname, "../../src/cli/probe-wing-issuance-selectors.ts"), "utf8");
+const SOURCE = readFileSync(resolve(__dirname, "../../instruments/calibration/probe-wing-issuance-selectors.ts"), "utf8");
 /**
  * The source with COMMENTS STRIPPED. The doc comment above the abort sentinel names the readiness file it
  * replaced — deliberately, because a reader deserves to know what used to be there — and a bare substring sweep

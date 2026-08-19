@@ -33,7 +33,7 @@ import {
   locateRowByReviewId,
 } from "../../../src/action-window/reply-submission/review-id-locator";
 import { REVIEW_ID_VECTORS } from "./review-id-fingerprint.test";
-import { parseLadderResult } from "../../../src/cli/run-review-id-reconciliation-live-naver";
+import { parseLadderResult } from "../../../instruments/live-runs/run-review-id-reconciliation-live-naver";
 
 const RUN = process.env.RUN_INTEGRATION === "1";
 const AS_OF = { year: 2026, month: 7, day: 20 };

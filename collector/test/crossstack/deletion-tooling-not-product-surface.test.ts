@@ -128,7 +128,7 @@ describe("the WING key-deletion tooling stays out of every seller-facing tree", 
     // The decision is "internal only", not "delete the tooling". If these disappear, the fence is passing
     // for the wrong reason and the live-proof capability was lost silently.
     for (const f of [
-      "collector/src/cli/run-coupang-wing-deletion-live.ts",
+      "collector/instruments/live-runs/run-coupang-wing-deletion-live.ts",
       "collector/src/action-window/coupang-wing-deletion-driver.ts",
       "tools/coupang-local/wing-deletion-preflight.sh",
     ]) {

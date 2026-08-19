@@ -107,8 +107,8 @@ closed otherwise — a real capture never defaults its scope. Live entry (gated,
 ```
 set -a && . ./.env && set +a          # NAVER_API_CENTER_URL (operator-owned; never logged)
 export SELLEROPS_VISUAL_RECON_SCREENS=app_list,app_detail   # the EXACT scope the manifest approved (or all four)
-npx tsx collector/src/cli/capture-api-center-visual.ts -- --i-understand-this-opens-live-naver
-npx tsx collector/src/cli/capture-api-center-visual.ts -- --cleanup   # delete recon artifacts, launch nothing
+npx tsx collector/instruments/calibration/capture-api-center-visual.ts -- --i-understand-this-opens-live-naver
+npx tsx collector/instruments/calibration/capture-api-center-visual.ts -- --cleanup   # delete recon artifacts, launch nothing
 ```
 
 Per screen the operator navigates manually and signals `ready`; the tool then, **fail-closed**:

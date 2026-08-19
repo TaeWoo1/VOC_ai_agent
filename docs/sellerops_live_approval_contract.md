@@ -541,7 +541,7 @@ NAVER · API Center structure observation · READ_ONLY · run <prefix>
 
 ### Phase B — `API_ISSUANCE_HIGHLIGHT_PROOF` (READ_ONLY, highlight proof)
 
-- CLI `src/cli/run-api-issuance-live-naver.ts`; driver = `NaverIssuanceDriver` (Action Window).
+- CLI `instruments/live-runs/run-api-issuance-live-naver.ts`; driver = `NaverIssuanceDriver` (Action Window).
 - Runs **only after Phase A's findings are reflected into the selector adapter in code** and
   `SELECTORS_CALIBRATED` is `true`. Until then the manifest is refused
   (`SELECTORS_NOT_CALIBRATED`) — the fixture markers park every highlight `target_not_found`, so a

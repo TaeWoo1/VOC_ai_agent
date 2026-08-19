@@ -14,7 +14,7 @@ import {
   runSelectorProbeSession,
   type SelectorProbeDeps,
   type SelectorProbeSignal,
-} from "../../src/cli/probe-issuance-selectors";
+} from "../../instruments/calibration/probe-issuance-selectors";
 import type { IssuanceHighlightTarget } from "../../src/action-window/api-issuance-calibration/issuance-highlight-selectors";
 
 /** Every calibrated highlight target resolves uniquely by default. */

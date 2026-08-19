@@ -24,11 +24,11 @@ KIND="${1:-}"
 case "$KIND" in
   calibration)
     PHASE_EXPECTED="COUPANG_WING_CREDENTIAL_CELL_CALIBRATION"
-    CLI_REL="src/cli/calibrate-credential-cells.ts"
+    CLI_REL="instruments/calibration/calibrate-credential-cells.ts"
     ;;
   handoff)
     PHASE_EXPECTED="COUPANG_WING_CREDENTIAL_HANDOFF"
-    CLI_REL="src/cli/run-coupang-credential-handoff-live.ts"
+    CLI_REL="instruments/live-runs/run-coupang-credential-handoff-live.ts"
     ;;
   *)
     echo "PREFLIGHT FAIL — say which phase: 'calibration' or 'handoff'. There is no default."

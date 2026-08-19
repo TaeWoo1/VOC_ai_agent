@@ -19,8 +19,8 @@ import {
   WING_DEFAULT_ACCOUNT_BINDING,
 } from "../../src/cli/approval-manifest";
 import { runGrantAsk } from "../../src/cli/operator-run-grant";
-import { calibrationRunGrantBinding } from "../../src/cli/calibrate-credential-cells";
-import { handoffRunGrantBinding } from "../../src/cli/run-coupang-credential-handoff-live";
+import { calibrationRunGrantBinding } from "../../instruments/calibration/calibrate-credential-cells";
+import { handoffRunGrantBinding } from "../../instruments/live-runs/run-coupang-credential-handoff-live";
 
 interface RenderedManifest {
   accountBinding?: string;

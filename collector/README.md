@@ -42,7 +42,7 @@ src/profile.ts  launchPersistentContext() wrapper + profile-dir path guard (LIVE
 src/naver/session-check.ts  live Page -> SessionSignals -> detectSession()
 src/naver/review-export.ts  classify export (sync/async/unknown) + capture (LIVE)
 src/cli/upload-file.ts      offline manual check: upload a local .xlsx to SellerOps
-src/cli/discover-export.ts  LIVE export discovery (--login / --discover); gated
+instruments/calibration/discover-export.ts  LIVE export discovery (--login / --discover); gated
 test/           vitest unit tests + one gated live-backend integration test
 fixtures/       session + export HTML stand-ins (markers are PLACEHOLDERS, see below)
 findings/       milestone1.md — static template; real findings only after a live run
@@ -160,7 +160,7 @@ deleted/handled manually after the run — never committed.
 When classify-only discovery keeps reporting `SESSION_EXPIRED` on a page you know
 is logged in, the cause is usually the placeholder session markers and/or SPA
 hydration timing (the review route is a client-rendered SPA, so `page.content()`
-right after `domcontentloaded` is an un-hydrated shell). `src/cli/probe-session.ts`
+right after `domcontentloaded` is an un-hydrated shell). `instruments/calibration/probe-session.ts`
 helps confirm what the real logged-in DOM looks like **without exposing any
 sensitive content**:
 
@@ -199,7 +199,7 @@ set -a && . ./.env && set +a    # load NAVER_REVIEW_URL + COLLECTOR_BROWSER_CHAN
 npm run discover-same-session -- --i-understand-this-opens-live-naver
 ```
 
-Flow (`src/cli/discover-same-session.ts`):
+Flow (`instruments/calibration/discover-same-session.ts`):
 
 1. Launches installed Chrome (`COLLECTOR_BROWSER_CHANNEL=chrome`) with the
    dedicated profile (`collector/.profile/naver`) and `chromiumSandbox: true`,

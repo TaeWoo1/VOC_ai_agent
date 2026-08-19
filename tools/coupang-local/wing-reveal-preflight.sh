@@ -80,7 +80,7 @@ else
 fi
 
 check_no_code_drift "$RUN_GIT"
-check_toolchain "$COLLECTOR_DIR" "src/cli/run-coupang-wing-reveal-live.ts" "reveal"
+check_toolchain "$COLLECTOR_DIR" "instruments/live-runs/run-coupang-wing-reveal-live.ts" "reveal"
 check_dedicated_profile "$COLLECTOR_DIR"
 check_browser_launchable
 

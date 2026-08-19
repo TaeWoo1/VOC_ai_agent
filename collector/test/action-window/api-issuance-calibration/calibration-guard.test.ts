@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const INPAGE = join(__dirname, "..", "..", "..", "src", "action-window", "api-issuance-calibration", "calibration-inpage.ts");
 const BINDING = join(__dirname, "..", "..", "..", "src", "action-window", "api-issuance-calibration", "calibration-binding.ts");
-const CLI = join(__dirname, "..", "..", "..", "src", "cli", "calibrate-api-center.ts");
+const CLI = join(__dirname, "..", "..", "..", "instruments", "calibration", "calibrate-api-center.ts");
 
 /** Remove block + line comments so the guard checks only executable source, not prose. */
 function stripComments(src: string): string {

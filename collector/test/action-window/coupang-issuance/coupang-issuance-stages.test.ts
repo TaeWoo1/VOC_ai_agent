@@ -216,12 +216,12 @@ describe("the fence is LIFTED, and every clause of it was answered in code", () 
   // gate, no phase binding, no repo-identity check, and navigates the page itself. Lifting it had to be a
   // deliberate, reviewable diff — so these assert the REPLACEMENTS, not the absence.
   const SRC = readFileSync(
-    resolve(dirname(fileURLToPath(import.meta.url)), "../../../src/cli/run-coupang-wing-issuance-live.ts"),
+    resolve(dirname(fileURLToPath(import.meta.url)), "../../../instruments/live-runs/run-coupang-wing-issuance-live.ts"),
     "utf8",
   );
 
   it("the fence constants are GONE — not left true, not left dangling", async () => {
-    const cli = await import("../../../src/cli/run-coupang-wing-issuance-live");
+    const cli = await import("../../../instruments/live-runs/run-coupang-wing-issuance-live");
     expect("COUPANG_WING_GUIDED_ISSUANCE_FENCED" in cli).toBe(false);
     expect("COUPANG_WING_GUIDED_ISSUANCE_FENCE_REASON" in cli).toBe(false);
     expect(cli.COUPANG_WING_GUIDED_ISSUANCE_WALK_PHASE).toBe("COUPANG_WING_GUIDED_ISSUANCE_WALK");

@@ -109,7 +109,7 @@ carrier_command() {
       export WALKTHROUGH_RUN_ID="${WALKTHROUGH_RUN_ID:-sp-$(openssl rand -hex 6)}"
       export WALKTHROUGH_APPROVAL_ID="${WALKTHROUGH_APPROVAL_ID:-apr-$(openssl rand -hex 6)}"
       export WALKTHROUGH_GIT_COMMIT="${WALKTHROUGH_GIT_COMMIT:-$(git -C "$REPO_ROOT" rev-parse HEAD)}"
-      CMD=(npx tsx src/cli/run-coupang-review-locate-live.ts -- --i-understand-this-opens-live-coupang-wing)
+      CMD=(npx tsx instruments/live-runs/run-coupang-review-locate-live.ts -- --i-understand-this-opens-live-coupang-wing)
       ;;
     *)
       echo "unknown carrier '$1' — use naver-import or coupang-locate" >&2; exit 2 ;;

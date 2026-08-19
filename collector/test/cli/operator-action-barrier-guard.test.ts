@@ -10,7 +10,7 @@
  * presses forty times is one they stop reading, and that would cost more than it buys.
  */
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync , existsSync} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -24,7 +24,27 @@ import {
 } from "../../src/cli/operator-action-barrier";
 import { OPERATOR_UI_CONFIRMED, type OperatorConfirmAsk, type OperatorConfirmation } from "../../src/cli/operator-confirm";
 
-const CLI_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../src/cli");
+const HERE_DIR = dirname(fileURLToPath(import.meta.url));
+/**
+ * R2 moved the calibration recorders and the one-off live-run harnesses out of `src/cli` into
+ * `instruments/`. This fence is a COVERAGE fence: if it kept scanning only `src/cli` it would still be
+ * green while silently covering ~45 fewer entrypoints. It scans every tree a live CLI can live in.
+ */
+const CLI_DIRS = [
+  resolve(HERE_DIR, "../../src/cli"),
+  resolve(HERE_DIR, "../../instruments/calibration"),
+  resolve(HERE_DIR, "../../instruments/live-runs"),
+];
+
+/** The tree a given CLI actually lives in (src/cli, or the instruments trees R2 moved it to). */
+function cliPath(file: string): string {
+  for (const dir of CLI_DIRS) {
+    const full = join(dir, file);
+    if (existsSync(full)) return full;
+  }
+  throw new Error(`CLI not found in any tree: ${file}`);
+}
+
 
 /**
  * The calls that ACT, and the file each is expected to be reached from. A name here is a promise that a press
@@ -123,15 +143,17 @@ function code(path: string): string {
  */
 const NO_PAGE_TO_READ: readonly string[] = ["upload-file.ts"];
 
-const FILES = readdirSync(CLI_DIR)
-  .filter((f) => f.endsWith(".ts"))
-  .filter((f) => !NO_PAGE_TO_READ.includes(f));
+const FILES = CLI_DIRS.flatMap((dir) =>
+  readdirSync(dir)
+    .filter((f) => f.endsWith(".ts"))
+    .filter((f) => !NO_PAGE_TO_READ.includes(f)),
+);
 
 describe("every act in a live CLI has a press in front of it", () => {
   it("**a CLI that reaches an acting call also confirms an action barrier**", () => {
     const offenders: string[] = [];
     for (const f of FILES) {
-      const src = code(join(CLI_DIR, f));
+      const src = code(cliPath(f));
       // The boundary modules DEFINE these calls; the CLIs are what reach them.
       if (f === "operator-action-barrier.ts") continue;
       for (const { call, why } of ACTING_CALLS) {
@@ -155,7 +177,7 @@ describe("every act in a live CLI has a press in front of it", () => {
     // which silently skipped `discover-export.ts` entirely, the one file where main() is at the bottom and both
     // the barrier and the acts live in helpers above it. A check that skips the hardest case is not a check.
     for (const f of FILES) {
-      const src = code(join(CLI_DIR, f));
+      const src = code(cliPath(f));
       if (!src.includes("confirmActionBarrier(")) continue;
       for (const { call } of ACTING_CALLS) {
         for (const m of src.matchAll(new RegExp(`[^\\w.]${escapeForRegExp(call)}`, "g"))) {
@@ -193,7 +215,7 @@ describe("every act in a live CLI has a press in front of it", () => {
     // `return`, which the statement AFTER the block satisfied — deleting the refusal's own `return` left the
     // test green while a refused run fell straight through to the full capture leg.
     for (const f of FILES) {
-      const src = code(join(CLI_DIR, f));
+      const src = code(cliPath(f));
       if (!src.includes("confirmActionBarrier(")) continue;
       // Whatever the refusal was assigned to, not a fixed `allowed` prefix.
       for (const assign of src.matchAll(/(?:const|let)\s+([\w$]+)\s*=\s*await confirmActionBarrier\(/g)) {
@@ -213,7 +235,7 @@ describe("every act in a live CLI has a press in front of it", () => {
     // Four CLIs each inventing their own refusal shape is four things a harness has to know, and one that
     // printed nothing at all could not be told from a process that died before its first write.
     for (const f of FILES) {
-      const src = code(join(CLI_DIR, f));
+      const src = code(cliPath(f));
       if (!src.includes("confirmActionBarrier(")) continue;
       const refusals = (src.match(/actionBarrierRefusedMessage\(/g) ?? []).length;
       const records = (src.match(/barrierRefusedRecord\(/g) ?? []).length;
@@ -223,7 +245,7 @@ describe("every act in a live CLI has a press in front of it", () => {
 
   it("**a refusal writes no status file** — no CollectorState describes 'nothing happened'", () => {
     for (const f of FILES) {
-      const src = code(join(CLI_DIR, f));
+      const src = code(cliPath(f));
       if (!src.includes("confirmActionBarrier(")) continue;
       for (const m of src.matchAll(/barrierRefusedRecord\([\s\S]{0,400}/g)) {
         expect(m[0], `${f}: a refusal wrote a status file`).not.toContain("writeStatus(");
@@ -234,7 +256,7 @@ describe("every act in a live CLI has a press in front of it", () => {
   it("**`discover-reply-target` is left alone** — it crosses no barrier, so it asks for nothing", () => {
     // The policy's other half. It reads a row census and does nothing else; a confirmation here would be the
     // prompt-on-every-read that teaches operators to press without looking.
-    const src = code(join(CLI_DIR, "discover-reply-target.ts"));
+    const src = code(cliPath("discover-reply-target.ts"));
     expect(src).not.toContain("confirmActionBarrier(");
     for (const forbidden of [".click(", ".fill(", "runExport", "uploadReviewFile", "writeStatus"]) {
       expect(src, `discover-reply-target reached ${forbidden}, so it now needs a barrier`).not.toContain(forbidden);
@@ -250,7 +272,7 @@ describe("the two provenances cannot be mistaken for each other", () => {
 
   it("no CLI records an auto-read as the thing that approved something", () => {
     for (const f of FILES) {
-      const src = code(join(CLI_DIR, f));
+      const src = code(cliPath(f));
       for (const m of src.matchAll(/(provenance|approvedBy|confirmedBy)\s*:\s*([^,\n]+)/g)) {
         expect(m[2] ?? "", `${f}: an auto-read recorded as an approval`).not.toContain("AUTO_READ");
       }

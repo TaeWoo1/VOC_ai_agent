@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CLI_PATH = join(__dirname, "..", "..", "src", "cli", "capture-export-same-session.ts");
+const CLI_PATH = join(__dirname, "..", "..", "instruments", "calibration", "capture-export-same-session.ts");
 
 /** Remove block + line comments so the guards check executable source, not prose. */
 function stripComments(src: string): string {
@@ -154,7 +154,7 @@ describe("capture-export-same-session — reconnect pre-step is delegated, not d
   });
 
   it("imports the resolver helper and never calls the continue boundary directly", () => {
-    expect(/from\s+["']\.\.\/naver\/reconnect-resolve["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/naver\/reconnect-resolve["']/.test(code)).toBe(true);
     // The single guarded continue click lives inside the boundary, reached only via the helper.
     expect(code.includes("continueAtCardOnce")).toBe(false);
   });
@@ -378,7 +378,7 @@ describe("capture-export-same-session — supervised review-usage 확인 confirm
   const fastBranch = mainFn.slice(fastBranchStart, stableStart);
 
   it("imports the confirm adapter and the pure ATTEMPT decision", () => {
-    expect(/from\s+["']\.\.\/naver\/review-usage-confirm["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/naver\/review-usage-confirm["']/.test(code)).toBe(true);
     expect(/confirmReviewUsageOnce/.test(code)).toBe(true);
     expect(/decideReviewUsageConfirm/.test(code)).toBe(true);
   });
@@ -512,8 +512,8 @@ describe("capture-export-same-session — export-target readiness gate stops emp
 
 describe("capture-export-same-session — read-only live-DOM probe enriches the diagnostic halt ONLY", () => {
   it("imports the pure probe core AND the live read adapter (decision pure, reads live)", () => {
-    expect(/from\s+["']\.\.\/naver\/live-export-target-probe["']/.test(code)).toBe(true);
-    expect(/from\s+["']\.\.\/naver\/live-export-target-probe-reads["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/naver\/live-export-target-probe["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/naver\/live-export-target-probe-reads["']/.test(code)).toBe(true);
     expect(/probeLiveExportTargetReadiness/.test(code)).toBe(true);
     expect(/readLiveProbeSignals/.test(code)).toBe(true);
   });
@@ -619,7 +619,7 @@ describe("capture-export-same-session — controlled diagnostic download save, f
   const fastBranch = mainFn.slice(fastBranchStart, stableStart);
 
   it("imports the save module fn and the pure save decision", () => {
-    expect(/from\s+["']\.\.\/naver\/review-download-save["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/naver\/review-download-save["']/.test(code)).toBe(true);
     expect(/saveAndInspectDownload/.test(code)).toBe(true);
     expect(/decideSaveReviewDownload/.test(code)).toBe(true);
   });
@@ -671,7 +671,7 @@ describe("capture-export-same-session — controlled backend upload diagnostic, 
   const fastBranch = mainFn.slice(fastBranchStart, stableStart);
 
   it("imports the upload-diagnostic module fn and the pure upload decision", () => {
-    expect(/from\s+["']\.\.\/naver\/review-upload-diagnostic["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/naver\/review-upload-diagnostic["']/.test(code)).toBe(true);
     expect(/uploadSavedReviewDownload/.test(code)).toBe(true);
     expect(/decideUploadSavedReviewDownload/.test(code)).toBe(true);
   });
@@ -735,7 +735,7 @@ describe("capture-export-same-session — diagnostic status progression after up
   it("imports the pure status mapping and REUSES the existing decideState/writeStatus", () => {
     expect(/decideStatusSignalsAfterUpload/.test(code)).toBe(true);
     expect(/statusDetailAfterUpload/.test(code)).toBe(true);
-    expect(/import \{ decideState, writeStatus,.*\} from "\.\.\/status"/.test(code)).toBe(true);
+    expect(/import \{ decideState, writeStatus,.*\} from "\.\.\/\.\.\/src\/status"/.test(code)).toBe(true);
   });
 
   it("parses --diagnose-write-status-after-upload and is INERT without the upload flag", () => {

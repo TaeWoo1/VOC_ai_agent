@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CLI_PATH = join(__dirname, "..", "..", "src", "cli", "capture-esm-review-upload.ts");
+const CLI_PATH = join(__dirname, "..", "..", "instruments", "calibration", "capture-esm-review-upload.ts");
 
 function stripComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/.*$/gm, "$1");
@@ -18,7 +18,7 @@ describe("capture-esm-review-upload — supervised single capture → backend up
     expect(/esmApprovalRequiredMessage\s*\(/.test(code)).toBe(true);
     expect(/hasEsmUploadApproval\s*\(/.test(code)).toBe(true);
     expect(/esmUploadApprovalRequiredMessage\s*\(/.test(code)).toBe(true);
-    expect(/from\s+["']\.\.\/esm\/esm-upload-approval["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/esm\/esm-upload-approval["']/.test(code)).toBe(true);
   });
 
   it("REQUIRES an explicit approved index (refuses when absent)", () => {
@@ -44,7 +44,7 @@ describe("capture-esm-review-upload — supervised single capture → backend up
   });
 
   it("uses the pure capture-gate decisions + structural validation (reused, unchanged)", () => {
-    expect(/from\s+["']\.\.\/esm\/esm-capture-gate["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/esm\/esm-capture-gate["']/.test(code)).toBe(true);
     expect(/capturePreconditionMet\s*\(/.test(code)).toBe(true);
     expect(/decideApprovedCapture\s*\(/.test(code)).toBe(true);
     expect(/classifyPostClickOutcome\s*\(/.test(code)).toBe(true);
@@ -60,7 +60,7 @@ describe("capture-esm-review-upload — supervised single capture → backend up
   it("delegates the save→UPLOAD-BEFORE-DELETE→delete leg to the extracted, offline-tested helper", () => {
     // The save/validate/upload/delete cycle lives in esm-review-upload.ts (hermetically tested in
     // test/esm/esm-review-upload.test.ts); the CLI never names saveAs / uploadReviewFile itself.
-    expect(/from\s+["']\.\.\/esm\/esm-review-upload["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/esm\/esm-review-upload["']/.test(code)).toBe(true);
     expect(/saveValidateUploadDeleteEsmReview\s*\(/.test(code)).toBe(true);
     expect(/buildEsmReviewUploadReport\s*\(/.test(code)).toBe(true);
     expect(code.includes("saveAs")).toBe(false);
@@ -87,7 +87,7 @@ describe("capture-esm-review-upload — supervised single capture → backend up
     ]) {
       expect(code.includes(token)).toBe(false);
     }
-    expect(/from\s+["']\.\.\/status["']/.test(code)).toBe(false);
+    expect(/from\s+["']\.\.\/\.\.\/src\/status["']/.test(code)).toBe(false);
   });
 
   it("keeps the honest non-goal markers (no row parse / schema infer / dedup-key claim)", () => {

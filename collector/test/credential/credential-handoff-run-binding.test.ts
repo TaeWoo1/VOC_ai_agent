@@ -68,7 +68,7 @@ describe("the credential handoff presents the run identity it was approved under
   });
 
   it("the CLI builds the binding from the run env — not from a second source that can disagree", () => {
-    const cli = readFileSync(resolve(HERE, "../../src/cli/run-coupang-credential-handoff-live.ts"), "utf8");
+    const cli = readFileSync(resolve(HERE, "../../instruments/live-runs/run-coupang-credential-handoff-live.ts"), "utf8");
     const fn = cli.slice(cli.indexOf("export function handoffRunBinding()"));
     const body = fn.slice(0, fn.indexOf("\n}"));
     for (const key of ["WALKTHROUGH_APPROVAL_ID", "WALKTHROUGH_RUN_ID", "WALKTHROUGH_GIT_COMMIT"]) {

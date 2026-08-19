@@ -21,7 +21,7 @@ import {
   runCalibrationSession,
   type CalibrationCheckpointSignal,
   type CalibrationSessionDeps,
-} from "../../../src/cli/calibrate-api-center";
+} from "../../../instruments/calibration/calibrate-api-center";
 import {
   createCaptureChannel,
   type CaptureChannel,

@@ -18,12 +18,12 @@ import {
   type WingRecordSignal,
   type WingRecordTarget,
   type WingSelectorRecordDeps,
-} from "../../src/cli/probe-wing-issuance-selectors";
+} from "../../instruments/calibration/probe-wing-issuance-selectors";
 import { WING_PROBE_TARGET_NAMES, type WingObservation } from "../../src/cli/coupang-wing-classifier";
 import { OPERATOR_CONFIRMED, confirmationFor } from "../fixtures/operator-confirmation";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const CLI = resolve(HERE, "../../src/cli/probe-wing-issuance-selectors.ts");
+const CLI = resolve(HERE, "../../instruments/calibration/probe-wing-issuance-selectors.ts");
 
 /** Strip block comments + comment/JSDoc lines so prose mentioning a forbidden token never trips the guard. */
 function codeOnly(path: string): string {

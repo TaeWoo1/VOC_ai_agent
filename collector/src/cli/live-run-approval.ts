@@ -94,7 +94,7 @@ export function selectorDiscoveryApprovalRequiredMessage(): string {
     "stores the selector specifications. It binds nothing and stores no identity value.",
     "",
     "Re-run with:",
-    "  npx tsx src/cli/run-chrome-selector-discovery-live-naver.ts -- " + REVIEW_ID_PROBE_FLAG,
+    "  npx tsx instruments/live-runs/run-chrome-selector-discovery-live-naver.ts -- " + REVIEW_ID_PROBE_FLAG,
   ].join("\n");
 }
 
@@ -108,7 +108,7 @@ export function storeIdentityDiagnosticApprovalRequiredMessage(): string {
     "opens no composer, and calls no backend. It never clicks, types, pastes, navigates or submits.",
     "",
     "Re-run with:",
-    "  npx tsx src/cli/run-store-identity-diagnostic-live-naver.ts -- " + REVIEW_ID_PROBE_FLAG,
+    "  npx tsx instruments/live-runs/run-store-identity-diagnostic-live-naver.ts -- " + REVIEW_ID_PROBE_FLAG,
   ].join("\n");
 }
 
@@ -123,7 +123,7 @@ export function reviewIdProbeApprovalRequiredMessage(): string {
     "  - Use only a user-owned test seller account.",
     "",
     "Re-run with the read-only approval flag:",
-    `  npx tsx src/cli/run-review-id-reconciliation-live-naver.ts -- ${REVIEW_ID_PROBE_FLAG}`,
+    `  npx tsx instruments/live-runs/run-review-id-reconciliation-live-naver.ts -- ${REVIEW_ID_PROBE_FLAG}`,
   ].join("\n");
 }
 
@@ -165,8 +165,8 @@ export function coupangWingApprovalRequiredMessage(): string {
     "  - This requires explicit per-run approval — a NAVER grant does NOT authorize a WING run.",
     "",
     "Re-run with the Coupang WING approval flag:",
-    `  npx tsx src/cli/run-coupang-wing-issuance-live.ts -- ${COUPANG_WING_APPROVAL_FLAG}`,
-    `  npx tsx src/cli/probe-wing-issuance-selectors.ts -- ${COUPANG_WING_APPROVAL_FLAG}`,
+    `  npx tsx instruments/live-runs/run-coupang-wing-issuance-live.ts -- ${COUPANG_WING_APPROVAL_FLAG}`,
+    `  npx tsx instruments/calibration/probe-wing-issuance-selectors.ts -- ${COUPANG_WING_APPROVAL_FLAG}`,
   ].join("\n");
 }
 
@@ -188,7 +188,7 @@ export function replyApprovalRequiredMessage(): string {
     "  - This requires explicit per-run approval AND a fresh scope-matched G3 + single-use G6.",
     "",
     "Re-run with the reply approval flag:",
-    `  npx tsx src/cli/run-reply-submission-live-naver.ts -- ${REPLY_APPROVAL_FLAG}`,
+    `  npx tsx instruments/live-runs/run-reply-submission-live-naver.ts -- ${REPLY_APPROVAL_FLAG}`,
   ].join("\n");
 }
 

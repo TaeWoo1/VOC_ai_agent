@@ -2,10 +2,10 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { parseNamedPathArg } from "../../src/cli/compare-esm-overlap";
+import { parseNamedPathArg } from "../../instruments/calibration/compare-esm-overlap";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CLI_PATH = join(__dirname, "..", "..", "src", "cli", "compare-esm-overlap.ts");
+const CLI_PATH = join(__dirname, "..", "..", "instruments", "calibration", "compare-esm-overlap.ts");
 
 function stripComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/.*$/gm, "$1");
@@ -26,7 +26,7 @@ describe("compare-esm-overlap — OFFLINE, read-only purity (no browser / click 
   const importLines = code.split("\n").filter((l) => /^\s*import\b/.test(l));
 
   it("imports no browser / upload / status / scheduler module", () => {
-    for (const forbidden of ["playwright", "../upload", "../status", "review-download-save", "review-upload", "child_process", "node:http"]) {
+    for (const forbidden of ["playwright", "../../src/upload", "../../src/status", "review-download-save", "review-upload", "child_process", "node:http"]) {
       expect(importLines.some((l) => l.includes(forbidden))).toBe(false);
     }
   });
@@ -50,7 +50,7 @@ describe("compare-esm-overlap — OFFLINE, read-only purity (no browser / click 
   });
 
   it("delegates the comparison to the pure overlap module", () => {
-    expect(/from\s+["']\.\.\/esm\/esm-review-overlap["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/esm\/esm-review-overlap["']/.test(code)).toBe(true);
     expect(/summarizeOverlap\s*\(/.test(code)).toBe(true);
   });
 

@@ -468,7 +468,7 @@ FAKE
   OTHER_COLLECTOR="$FIXTURES/other/collector"
   mkdir -p "$OTHER_COLLECTOR/node_modules/.bin" "$OTHER_COLLECTOR/src/cli"
   : > "$OTHER_COLLECTOR/node_modules/.bin/tsx"; chmod +x "$OTHER_COLLECTOR/node_modules/.bin/tsx"
-  : > "$OTHER_COLLECTOR/src/cli/run-coupang-wing-reveal-live.ts"
+  : > "$OTHER_COLLECTOR/instruments/live-runs/run-coupang-wing-reveal-live.ts"
   run_case "COLLECTOR_ESCAPE (out-of-repo collector refused ON CONTAINMENT)" nonzero \
     "points outside this repository" "$FIXTURES/normal.env" "SELLEROPS_COLLECTOR_DIR=$OTHER_COLLECTOR"
 

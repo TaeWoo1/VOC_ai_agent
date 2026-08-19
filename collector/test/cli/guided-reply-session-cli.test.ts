@@ -5,11 +5,11 @@
  * The record is the only artefact a live run leaves behind, so its shape is pinned here rather than trusted.
  */
 import { describe, it, expect } from "vitest";
-import { buildGuidedRecord, type GuidedRecordInput } from "../../src/cli/run-guided-reply-session-live-naver";
+import { buildGuidedRecord, type GuidedRecordInput } from "../../instruments/live-runs/run-guided-reply-session-live-naver";
 import { fingerprintHash } from "../../src/connection/connection";
 import { sellerAccountFingerprint } from "../../src/connection/seller-account-fingerprint";
 import type { ChromeIdentityVerification } from "../../src/action-window/reply-submission/session-chrome-identity";
-import type { ChromeReadResult } from "../../src/cli/run-guided-reply-session-live-naver";
+import type { ChromeReadResult } from "../../instruments/live-runs/run-guided-reply-session-live-naver";
 
 const ACCOUNT = "11111111-2222-3333-4444-555555555555";
 const STORE_TOKEN = "channelNo=100200300";

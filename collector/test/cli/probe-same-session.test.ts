@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CLI_PATH = join(__dirname, "..", "..", "src", "cli", "probe-same-session.ts");
+const CLI_PATH = join(__dirname, "..", "..", "instruments", "calibration", "probe-same-session.ts");
 
 /** Remove block + line comments so the guard checks only executable source, not prose. */
 function stripComments(src: string): string {

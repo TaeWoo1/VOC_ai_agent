@@ -10,7 +10,7 @@
  * ordering property — a test that only checked "clear was called" would pass with the old, late behaviour.
  */
 import { describe, it, expect } from "vitest";
-import { finishDeletionRun, type DeletionRunDriver } from "../../src/cli/run-coupang-wing-deletion-live";
+import { finishDeletionRun, type DeletionRunDriver } from "../../instruments/live-runs/run-coupang-wing-deletion-live";
 import type { WingPageCategory } from "../../src/cli/coupang-wing-classifier";
 
 /** Records every call in order. `clearThrows` simulates a page that closed/navigated under the clear. */

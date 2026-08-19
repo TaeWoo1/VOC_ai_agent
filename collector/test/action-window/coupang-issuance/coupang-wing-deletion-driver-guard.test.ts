@@ -17,7 +17,7 @@ import {
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DRIVER = resolve(HERE, "../../../src/action-window/coupang-wing-deletion-driver.ts");
-const CLI = resolve(HERE, "../../../src/cli/run-coupang-wing-deletion-live.ts");
+const CLI = resolve(HERE, "../../../instruments/live-runs/run-coupang-wing-deletion-live.ts");
 const LABELS_MODULE = resolve(HERE, "../../../src/action-window/coupang-wing-issuance-driver.ts");
 
 function codeOnly(path: string): string {

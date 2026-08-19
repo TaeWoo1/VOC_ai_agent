@@ -247,7 +247,7 @@ The four-stage model is defined in `docs/multi-channel-connector-roadmap.md` 부
   **page-category** observer. Never logs in, issues, links, clicks, types, or submits, and
   **never reads Client ID or Secret**.
 - *Product-adjacent runtime*: bounded row-census settle + same-session sentinel in
-  `collector/src/cli/discover-reply-target.ts`; byte-derived file-family classification in
+  `collector/instruments/calibration/discover-reply-target.ts`; byte-derived file-family classification in
   `collector/src/naver/review-download-save.ts`.
 - *Governance*: the `CLAUDE.md` phase anchor and the mandatory product-boundary check;
   `docs/action-window-runtime/naver-smartstore-v1-plan.md`; `naver-v1-integration-manifest.md`.

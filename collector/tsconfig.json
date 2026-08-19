@@ -10,7 +10,8 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src", "test"],
+  "include": ["src", "instruments", "test"],
+  "//include": "`instruments` holds the live-calibration recorders and the one-off operator live-run harnesses moved out of `src/cli` (R2). They are NOT product runtime, but they stay typechecked and tested: a recorder that no longer compiles cannot re-derive a selector constant the next time a marketplace screen changes.",
   "//exclude": "test/crossstack imports REAL frontend/src modules; it has its own tsconfig (test/crossstack/tsconfig.json) so the frontend source is not re-checked under the collector's stricter defaults (noUncheckedIndexedAccess). Vitest still runs it.",
   "exclude": ["test/crossstack"]
 }

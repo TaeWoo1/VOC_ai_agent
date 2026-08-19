@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from "vitest";
 import type { BrowserContext } from "playwright";
-import { waitForEntryTransition } from "../../src/cli/run-composer-abort-rehearsal-live-naver";
+import { waitForEntryTransition } from "../../instruments/live-runs/run-composer-abort-rehearsal-live-naver";
 
 const LIST = "https://sell.example/reviews";
 const DETAIL = "https://sell.example/reviews/detail/123";

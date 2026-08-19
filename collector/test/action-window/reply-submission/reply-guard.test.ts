@@ -61,7 +61,7 @@ const NO_DOWNSTREAM_IMPORTS = [
   "capture-export",
   "runExport",
   "quarantine",
-  "../upload",
+  "../../src/upload",
 ] as const;
 
 describe("naver reply driver — source guard (no submit, no type, no downstream)", () => {
@@ -157,7 +157,7 @@ describe("reply-submission live-seam surface — source guard (dispatch + Bridge
     "reply-dispatch.ts": resolve(SRC, "reply-dispatch.ts"),
     "reply-run-store.ts": resolve(SRC, "reply-run-store.ts"),
     "reply-submission-endpoint.ts": resolve(SRC, "../../../src/bridge/reply-submission-endpoint.ts"),
-    "run-reply-submission-live-naver.ts": resolve(SRC, "../../../src/cli/run-reply-submission-live-naver.ts"),
+    "run-reply-submission-live-naver.ts": resolve(SRC, "../../../instruments/live-runs/run-reply-submission-live-naver.ts"),
     "review-body-fingerprint.ts": resolve(SRC, "review-body-fingerprint.ts"),
     "reply-target-bundle.ts": resolve(SRC, "reply-target-bundle.ts"),
     // Operator-assisted live-match slice: in-page scripts + calibration + mapping/cross-source + calibration CLI.
@@ -167,7 +167,7 @@ describe("reply-submission live-seam surface — source guard (dispatch + Bridge
     "reply-row-mapping-artifact.ts": resolve(SRC, "reply-row-mapping-artifact.ts"),
     "reply-cross-source.ts": resolve(SRC, "reply-cross-source.ts"),
     "handle-reply-row-driver.ts": resolve(SRC, "handle-reply-row-driver.ts"),
-    "calibrate-reply-target.ts": resolve(SRC, "../../../src/cli/calibrate-reply-target.ts"),
+    "calibrate-reply-target.ts": resolve(SRC, "../../../instruments/calibration/calibrate-reply-target.ts"),
     // Composer abort rehearsal: the retained-composer driver + its in-page scripts (read-only, no submit).
     "handle-reply-composer-driver.ts": resolve(SRC, "handle-reply-composer-driver.ts"),
     "reply-composer-inpage.ts": resolve(SRC, "reply-composer-inpage.ts"),
@@ -251,7 +251,7 @@ describe("prepare-reply-target CLI — source guard (no submit/type/click; backe
  * control — it captures the operator's own click (preventDefault) and highlights the retained element read-only.
  */
 describe("run-abort-rehearsal-live-naver CLI — source guard (no submit/type/click)", () => {
-  const code = codeOnly(resolve(SRC, "../../../src/cli/run-abort-rehearsal-live-naver.ts"));
+  const code = codeOnly(resolve(SRC, "../../../instruments/live-runs/run-abort-rehearsal-live-naver.ts"));
   it.each(NO_SUBMIT_TOKENS)("never contains %s", (token) => {
     expect(code).not.toContain(token);
   });
@@ -265,7 +265,7 @@ describe("run-abort-rehearsal-live-naver CLI — source guard (no submit/type/cl
  * retained row + composer read-only.
  */
 describe("run-composer-abort-rehearsal-live-naver CLI — source guard (no submit/type/click)", () => {
-  const code = codeOnly(resolve(SRC, "../../../src/cli/run-composer-abort-rehearsal-live-naver.ts"));
+  const code = codeOnly(resolve(SRC, "../../../instruments/live-runs/run-composer-abort-rehearsal-live-naver.ts"));
   it.each(NO_SUBMIT_TOKENS)("never contains %s", (token) => {
     expect(code).not.toContain(token);
   });
@@ -279,7 +279,7 @@ describe("run-composer-abort-rehearsal-live-naver CLI — source guard (no submi
  * composer surface at all.
  */
 describe("run-review-id-reconciliation-live-naver CLI — source guard (read-only, single goto, no composer)", () => {
-  const path = resolve(SRC, "../../../src/cli/run-review-id-reconciliation-live-naver.ts");
+  const path = resolve(SRC, "../../../instruments/live-runs/run-review-id-reconciliation-live-naver.ts");
   const code = codeOnly(path);
 
   it.each(NO_SUBMIT_TOKENS)("never contains %s", (token) => {
@@ -314,7 +314,7 @@ describe("run-review-id-reconciliation-live-naver CLI — source guard (read-onl
   it("imports only the read-only identity reader from the backend client", () => {
     const uploadImport = code
       .split("\n")
-      .filter((l) => l.includes('from "../upload"'))
+      .filter((l) => l.includes('from "../../src/upload"'))
       .join("");
     expect(uploadImport).toContain("fetchReviewIdentityFingerprint");
     expect(uploadImport).not.toContain("startReplySubmissionRun");
@@ -329,7 +329,7 @@ describe("run-review-id-reconciliation-live-naver CLI — source guard (read-onl
  * probe — no navigation of its own. Every page transition after the single opening `goto` is the operator's.
  */
 describe("run-guided-reply-session-live-naver CLI — source guard (no submit/type/click, single goto)", () => {
-  const path = resolve(SRC, "../../../src/cli/run-guided-reply-session-live-naver.ts");
+  const path = resolve(SRC, "../../../instruments/live-runs/run-guided-reply-session-live-naver.ts");
   const code = codeOnly(path);
 
   it.each(NO_SUBMIT_TOKENS)("never contains %s", (token) => {
@@ -490,7 +490,7 @@ describe("run-guided-reply-session-live-naver CLI — source guard (no submit/ty
  * absence of the import, which is the only form of "cannot" a source guard can express honestly.
  */
 describe("run-store-identity-diagnostic-live-naver CLI — source guard (cannot bind, look up, or post)", () => {
-  const path = resolve(SRC, "../../../src/cli/run-store-identity-diagnostic-live-naver.ts");
+  const path = resolve(SRC, "../../../instruments/live-runs/run-store-identity-diagnostic-live-naver.ts");
   const code = codeOnly(path);
 
   it.each(NO_SUBMIT_TOKENS)("never contains %s", (token) => {
@@ -518,7 +518,7 @@ describe("run-store-identity-diagnostic-live-naver CLI — source guard (cannot 
     ["the review ladder", "review-id-probe-inpage"],
     ["the composer", "reply-composer-inpage"],
     ["the composer driver", "handle-reply-composer-driver"],
-    ["the backend client", "../upload"],
+    ["the backend client", "../../src/upload"],
     ["the reply dispatcher", "reply-dispatch"],
   ])("cannot reach %s — the module is not imported (%s)", (_label, mod) => {
     // Scanning only lines that START with `import` is vacuous here: five of this file's imports are

@@ -1,7 +1,7 @@
 /**
  * **API-center calibration — the in-page INIT SCRIPT (STRUCTURE ONLY, value-free).**
  *
- * This is the browser-side half of the multi-surface selector calibrator (`src/cli/calibrate-api-center.ts`).
+ * This is the browser-side half of the multi-surface selector calibrator (`instruments/calibration/calibrate-api-center.ts`).
  * It gathers a RAW STRUCTURAL capture of the element the operator hovered and confirmed with a hotkey; it
  * NEVER decides what is kept — that is the pure gate in `./calibration.ts` (`sanitizeCapture`). The strict
  * division of labour is the whole safety story: the page gathers structure, `calibration.ts` sanitizes.

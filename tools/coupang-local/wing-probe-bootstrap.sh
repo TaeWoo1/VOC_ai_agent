@@ -2,7 +2,7 @@
 #
 # Coupang WING READ-ONLY selector-probe BOOTSTRAP (browser-only: no backend, no DB, no frontend).
 #
-# The WING selector probe (`collector/src/cli/probe-wing-issuance-selectors.ts`) opens the seller's dedicated
+# The WING selector probe (`collector/instruments/calibration/probe-wing-issuance-selectors.ts`) opens the seller's dedicated
 # Chrome window and MEASURES fixed-label match counts on the page the seller navigated to themselves. It needs
 # none of the backend/DB/frontend environment the order-routine proof needs, so it gets its own two-step
 # harness: this bootstrap mints the run identity, and `wing-probe-preflight.sh` prepares + displays the

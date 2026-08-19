@@ -17,11 +17,11 @@ import {
   geometryLaunchOptions,
   geometryProbeProfileDir,
   type WindowGeometryReading,
-} from "../../src/cli/measure-walk-window-geometry";
+} from "../../instruments/calibration/measure-walk-window-geometry";
 import { buildLaunchOptions } from "../../src/profile";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const PROBE = resolve(HERE, "../../src/cli/measure-walk-window-geometry.ts");
+const PROBE = resolve(HERE, "../../instruments/calibration/measure-walk-window-geometry.ts");
 
 /** The AS_SHIPPED numbers real Chrome returned on 2026-08-12 — the crop, as measured. */
 const AS_SHIPPED_LIVE: WindowGeometryReading = {

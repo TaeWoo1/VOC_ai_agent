@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const CLI = resolve(HERE, "../../src/cli/coupang-issuance-live-proof.ts");
+const CLI = resolve(HERE, "../../instruments/live-runs/coupang-issuance-live-proof.ts");
 
 function codeOnly(path: string): string {
   const raw = readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");

@@ -77,7 +77,7 @@ A code / branch / run / scope change after preflight also `REVOKED`s the approva
 ## The WING selector probe — a second, browser-only harness
 
 `wing-probe-bootstrap.sh` / `wing-probe-preflight.sh` prepare a **different** kind of run: the read-only
-Coupang WING **selector probe** (`collector/src/cli/probe-wing-issuance-selectors.ts`), which opens the
+Coupang WING **selector probe** (`collector/instruments/calibration/probe-wing-issuance-selectors.ts`), which opens the
 seller's dedicated Chrome window and measures each target's fixed-label **match count** on the page the
 seller navigated to themselves.
 
@@ -100,7 +100,7 @@ tools/coupang-local/wing-probe-preflight.sh
 #    then run the probe with the approved scope, exactly as the preflight prints it:
 cd collector && SELLEROPS_APPROVAL_PHASE=COUPANG_WING_SELECTOR_PROBE \
   SELLEROPS_WING_PROBE_TARGETS=delete SELLEROPS_WING_APPROVED_TARGETS=delete \
-  npx tsx src/cli/probe-wing-issuance-selectors.ts -- --i-understand-this-opens-live-coupang-wing
+  npx tsx instruments/calibration/probe-wing-issuance-selectors.ts -- --i-understand-this-opens-live-coupang-wing
 ```
 
 ### The same harness, two READ_ONLY phases
@@ -213,7 +213,7 @@ nothing in the agent — ever deletes.
 tools/coupang-local/wing-deletion-bootstrap.sh   # mint identity + PIN HEAD (refuses a dirty tree)
 tools/coupang-local/wing-deletion-preflight.sh   # checks + destructive manifest + disclosure (no browser)
 # on "Seated and ready.":
-cd collector && npx tsx src/cli/run-coupang-wing-deletion-live.ts -- --i-understand-this-opens-live-coupang-wing
+cd collector && npx tsx instruments/live-runs/run-coupang-wing-deletion-live.ts -- --i-understand-this-opens-live-coupang-wing
 ```
 
 Both harnesses share `wing-harness-common.sh` (ambient-git stripping, identity/freshness, drift + clean-tree,

@@ -281,7 +281,7 @@ export const ACTION_WINDOW_COUPANG_ISSUANCE_FLAG = "--dev-action-window-coupang-
  * `[쿠팡에서 보기]`.
  *
  * Never honored under `NODE_ENV=production`, and mutually exclusive with the other carriers. The product path
- * is the gated live host (`src/cli/run-coupang-review-locate-live.ts`), which opens the seller's own window;
+ * is the gated live host (`instruments/live-runs/run-coupang-review-locate-live.ts`), which opens the seller's own window;
  * this flag opens nothing and reads nothing.
  */
 export const ACTION_WINDOW_REVIEW_LOCATE_FLAG = "--dev-action-window-review-locate";

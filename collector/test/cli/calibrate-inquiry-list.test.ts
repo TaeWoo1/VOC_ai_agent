@@ -16,7 +16,7 @@ import {
   calibrationAsk,
   calibrationExitCode,
   parseTargetIds,
-} from "../../src/cli/calibrate-inquiry-list";
+} from "../../instruments/calibration/calibrate-inquiry-list";
 import { PHASE_SPECS } from "../../src/cli/approval-manifest";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -104,7 +104,7 @@ describe("the run declares what it is", () => {
   });
 
   it("has no click, type, or navigation path in its source", () => {
-    const source = readFileSync(resolve(HERE, "../../src/cli/calibrate-inquiry-list.ts"), "utf8");
+    const source = readFileSync(resolve(HERE, "../../instruments/calibration/calibrate-inquiry-list.ts"), "utf8");
     const code = source
       .split("\n")
       .filter((l) => !l.trimStart().startsWith("*") && !l.trimStart().startsWith("//") && !l.trimStart().startsWith("/*"))

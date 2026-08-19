@@ -11,6 +11,7 @@ import { loadConfig } from "../config";
 import { log } from "../log";
 import { decideState, writeStatus, type RunSignals } from "../status";
 import { login, resolveChannelId, uploadReviewFile, UploadError } from "../upload";
+import { pathToFileURL } from "node:url";
 
 async function main(): Promise<void> {
   const filePath = process.argv[2];
@@ -51,4 +52,10 @@ async function main(): Promise<void> {
   }
 }
 
-void main();
+// Run only when executed directly, NEVER on import — importing must have no side effects.
+// Before R2 this called `main()` at module top level, so merely importing the file (a test, a tooling
+// script, an editor's auto-import) ran the whole entrypoint, argv parse and all.
+const invokedPath = process.argv[1];
+if (invokedPath !== undefined && import.meta.url === pathToFileURL(invokedPath).href) {
+  void main();
+}

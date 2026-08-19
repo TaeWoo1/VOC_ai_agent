@@ -14,7 +14,7 @@ import {
   ladderExposure,
   parseLadderResult,
   reviewIdProbeRefusal,
-} from "../../src/cli/run-review-id-reconciliation-live-naver";
+} from "../../instruments/live-runs/run-review-id-reconciliation-live-naver";
 import {
   APPROVAL_FLAG,
   REPLY_APPROVAL_FLAG,

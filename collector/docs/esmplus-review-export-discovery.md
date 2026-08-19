@@ -64,7 +64,7 @@ emitting only sanitized booleans / bucketed counts / category enums. **Strict
 no-click**: no `.click(`, no `waitForEvent("download")`, no `saveAs`, no upload,
 no status write. Classifies sync-vs-async and locates the export UI without
 triggering it. **Status: OBJECTIVE MET (sanitized).** The classifier
-(`src/cli/classify-esm-review.ts` + pure `src/esm/esm-review-probe.ts` +
+(`instruments/calibration/classify-esm-review.ts` + pure `src/esm/esm-review-probe.ts` +
 `esm-export-visibility.ts` + `esm-frame-scan.ts`) ran **four** times under
 human-attended login. Run #4 (with the ESM-family frame allowlist active) located
 **one actionable export control** (`actionableScope: allowlisted-frame`) — Gate 2's

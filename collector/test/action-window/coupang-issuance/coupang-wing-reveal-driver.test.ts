@@ -598,7 +598,7 @@ describe("the issue calibration is LIVE-CONFIRMED, on exactly one measurement", 
   });
 
   it("the MEASURED tag AGREES with the EXPECTED role — the comparison whose absence let the failure through", async () => {
-    const { WING_TARGET_EXPECTED_ROLE } = await import("../../../src/cli/probe-wing-issuance-selectors");
+    const { WING_TARGET_EXPECTED_ROLE } = await import("../../../instruments/calibration/probe-wing-issuance-selectors");
     expect(WING_TARGET_EXPECTED_ROLE.issue).toBe("button");
     expect(WING_ISSUE_CALIBRATION_EVIDENCE.measured.observedTag.toLowerCase()).toBe(WING_TARGET_EXPECTED_ROLE.issue);
   });

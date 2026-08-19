@@ -9,7 +9,7 @@ import { dirname, resolve } from "node:path";
 import {
   DISCOVERY_PRODUCTION_REFUSAL,
   discoveryRefusal,
-} from "../../src/cli/run-chrome-selector-discovery-live-naver";
+} from "../../instruments/live-runs/run-chrome-selector-discovery-live-naver";
 import {
   APPROVAL_FLAG,
   NO_INGEST_FLAG,
@@ -19,7 +19,7 @@ import {
 } from "../../src/cli/live-run-approval";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const PATH = resolve(HERE, "../../src/cli/run-chrome-selector-discovery-live-naver.ts");
+const PATH = resolve(HERE, "../../instruments/live-runs/run-chrome-selector-discovery-live-naver.ts");
 const code = readFileSync(PATH, "utf8")
   .replace(/\/\*[\s\S]*?\*\//g, "")
   .split("\n")

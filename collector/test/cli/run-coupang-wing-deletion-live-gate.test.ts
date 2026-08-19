@@ -15,7 +15,7 @@ import {
   DELETION_ABORT_FILENAME,
   deletionAskFor,
   gateRefusalCause,
-} from "../../src/cli/run-coupang-wing-deletion-live";
+} from "../../instruments/live-runs/run-coupang-wing-deletion-live";
 import { WING_DELETION_WARNING_LABEL } from "../../src/action-window/coupang-wing-deletion-driver";
 import { COUPANG_WING_KEY_DELETION_SCOPE, PHASE_SPECS } from "../../src/cli/approval-manifest";
 import { WING_DEFAULT_URL } from "../../src/cli/coupang-wing-classifier";
@@ -177,7 +177,7 @@ describe("deletion CLI gate — the run it authorizes is the one the manifest de
 
   it("the phase spec the CLI binds to is the destructive one, with its pinned scope and descriptor", () => {
     const spec = PHASE_SPECS.COUPANG_WING_KEY_DELETION;
-    expect(spec.cli).toBe("src/cli/run-coupang-wing-deletion-live.ts");
+    expect(spec.cli).toBe("instruments/live-runs/run-coupang-wing-deletion-live.ts");
     expect(spec.requiresOperatorDestructiveAction).toBe(true);
     expect(spec.destructiveScope).toBe(COUPANG_WING_KEY_DELETION_SCOPE);
     expect(spec.operatorDestructiveAction).toMatchObject({
@@ -221,7 +221,7 @@ describe("deletion CLI gate — the run it authorizes is the one the manifest de
  */
 describe("the deletion run advances on a verified press and on nothing else", () => {
   const SRC = readFileSync(
-    resolve(dirname(fileURLToPath(import.meta.url)), "../../src/cli/run-coupang-wing-deletion-live.ts"),
+    resolve(dirname(fileURLToPath(import.meta.url)), "../../instruments/live-runs/run-coupang-wing-deletion-live.ts"),
     "utf8",
   );
 

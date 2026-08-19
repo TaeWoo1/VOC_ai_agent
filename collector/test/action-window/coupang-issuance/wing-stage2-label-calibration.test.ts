@@ -12,7 +12,7 @@
  * a purpose, presses 확인, promotes a selector, or records a single character of the page's own wording.
  */
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync , existsSync} from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -50,7 +50,7 @@ import {
   runWingSelectorRecord,
   stage2RecordFor,
   type WingSelectorRecordDeps,
-} from "../../../src/cli/probe-wing-issuance-selectors";
+} from "../../../instruments/calibration/probe-wing-issuance-selectors";
 import { CoupangWingIssuanceDriver } from "../../../src/action-window/coupang-wing-issuance-driver";
 import {
   PHASE_SPECS,
@@ -63,7 +63,17 @@ import { WING_DEFAULT_URL, observeFrom, type WingStructuralCensus } from "../../
 import { OPERATOR_CONFIRMED } from "../../fixtures/operator-confirmation";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SRC = (p: string): string => readFileSync(resolve(HERE, "../../../src", p), "utf8");
+/**
+ * Reads a source file by a path relative to `src` (product code) OR to the collector root
+ * (`instruments/...`, where R2 moved the calibration recorders and live-run harnesses).
+ */
+const SRC = (p: string): string => {
+  for (const root of [resolve(HERE, "../../../src"), resolve(HERE, "../../..")]) {
+    const full = resolve(root, p);
+    if (existsSync(full)) return readFileSync(full, "utf8");
+  }
+  throw new Error(`source not found: ${p}`);
+};
 
 /* ══════════════════════════ the CONTAINMENT probe ══════════════════════════ */
 
@@ -1089,7 +1099,7 @@ describe("the sweep runs the calibration reads ONLY under the calibration phase"
     // Narrowly scoped on purpose: this pins the `return`, and nothing else. Sliced to the refusal block itself
     // rather than to "somewhere before the launch", because `process.exitCode = 2;\n    return;` appears at
     // several gates in this file and a whole-region search would pass on any of them.
-    const cli = SRC("cli/probe-wing-issuance-selectors.ts");
+    const cli = SRC("instruments/calibration/probe-wing-issuance-selectors.ts");
     const at = cli.indexOf("const blindRefusal = calibrationLaunchRefusal(");
     expect(at).toBeGreaterThan(0);
     expect(at).toBeLessThan(cli.indexOf("await launchNaverContext"));
@@ -1164,7 +1174,7 @@ describe("the sweep runs the calibration reads ONLY under the calibration phase"
     // Over the WHOLE of main(), not a 300-character window at the call site. A window that size is defeated by
     // hoisting the option into a variable and spreading it in, which leaves production running every live
     // calibration against an empty list.
-    const cli = SRC("cli/probe-wing-issuance-selectors.ts");
+    const cli = SRC("instruments/calibration/probe-wing-issuance-selectors.ts");
     const main = cli.slice(cli.indexOf("async function main()"));
     expect(main).not.toContain("purposeOptionCandidates");
     // …and the injection point exists exactly where it is supposed to: the options type and the sweep default.
@@ -1235,7 +1245,7 @@ describe("the emitted calibration record", () => {
   });
 
   it("main() EMITS the association and the calibration flag, not just the sweep", () => {
-    const cli = SRC("cli/probe-wing-issuance-selectors.ts");
+    const cli = SRC("instruments/calibration/probe-wing-issuance-selectors.ts");
     expect(cli).toContain("stage2: stage2RecordFor(result.stage2),");
     expect(cli).toContain("stage2Calibration: result.stage2?.calibration");
     expect(cli).toContain("stage2AssociationRows: result.stage2?.association?.rows.length ?? -1");

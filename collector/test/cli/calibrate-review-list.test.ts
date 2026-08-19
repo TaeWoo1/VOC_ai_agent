@@ -16,7 +16,7 @@ import {
   discoveryExitCode,
   parseProductIds,
   reportableFrame,
-} from "../../src/cli/calibrate-review-list";
+} from "../../instruments/calibration/calibrate-review-list";
 import { COUPANG_WING_REVIEW_DISCOVERY_SCOPE, PHASE_SPECS, WING_PHASES } from "../../src/cli/approval-manifest";
 import type { ReviewFrameCensus } from "../../src/action-window/coupang-wing-review-list";
 
@@ -50,7 +50,7 @@ describe("the identifiers that reach into the page", () => {
     // Coupang publishes no review API, so SellerOps holds no review identifier. A run that refused to start
     // without one could never measure the screen it exists to measure.
     expect(parseProductIds(undefined)).toEqual([]);
-    const source = readFileSync(resolve(HERE, "../../src/cli/calibrate-review-list.ts"), "utf8");
+    const source = readFileSync(resolve(HERE, "../../instruments/calibration/calibrate-review-list.ts"), "utf8");
     expect(source).not.toContain("Refusing to start: SELLEROPS_REVIEW_PRODUCT_IDS");
   });
 });
@@ -186,7 +186,7 @@ describe("the run declares what it is", () => {
   });
 
   it("has no click, type, navigation, or network path in its source", () => {
-    const source = readFileSync(resolve(HERE, "../../src/cli/calibrate-review-list.ts"), "utf8");
+    const source = readFileSync(resolve(HERE, "../../instruments/calibration/calibrate-review-list.ts"), "utf8");
     const code = source
       .split("\n")
       .filter(

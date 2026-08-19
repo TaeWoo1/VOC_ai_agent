@@ -28,7 +28,7 @@ import {
   type WingRecordSignal,
   type WingRecordTarget,
   type WingSelectorRecordDeps,
-} from "../../src/cli/probe-wing-issuance-selectors";
+} from "../../instruments/calibration/probe-wing-issuance-selectors";
 import {
   WING_LABEL_RECON_CANDIDATES,
   WING_RECON_TARGETS,
@@ -420,7 +420,7 @@ describe("reconRecordFor — the printed shape carries counts, booleans and our 
 /* ────────────────────────────── source guard ────────────────────────────── */
 
 describe("the recon runner cannot promote a candidate during a live run", () => {
-  const CLI = resolve(dirname(fileURLToPath(import.meta.url)), "../../src/cli/probe-wing-issuance-selectors.ts");
+  const CLI = resolve(dirname(fileURLToPath(import.meta.url)), "../../instruments/calibration/probe-wing-issuance-selectors.ts");
   const src = readFileSync(CLI, "utf8");
   const code = src
     .replace(/\/\*[\s\S]*?\*\//g, "")

@@ -21,7 +21,7 @@ import {
   REVEAL_ABORT_FILENAME,
   REVEAL_BANNER_LINES,
   sentinelPath,
-} from "../../src/cli/run-coupang-wing-reveal-live";
+} from "../../instruments/live-runs/run-coupang-wing-reveal-live";
 import {
   WING_DEFAULT_URL,
   WING_KEY_CREATION_ACTION,
@@ -30,7 +30,7 @@ import {
 import { COUPANG_WING_ISSUANCE_REVEAL_ACTION } from "../../src/cli/approval-manifest";
 import { WING_REVEAL_CHECKPOINT_LABEL } from "../../src/action-window/coupang-wing-reveal-driver";
 
-const CLI = resolve(dirname(fileURLToPath(import.meta.url)), "../../src/cli/run-coupang-wing-reveal-live.ts");
+const CLI = resolve(dirname(fileURLToPath(import.meta.url)), "../../instruments/live-runs/run-coupang-wing-reveal-live.ts");
 const REVEAL_PHASE = "COUPANG_WING_ISSUANCE_FORM_REVEAL";
 const DELETION_PHASE = "COUPANG_WING_KEY_DELETION";
 
@@ -73,7 +73,7 @@ describe("the PHASE binding — a grant for one WING action never authorizes ano
   });
 
   it("…and the DELETION CLI refuses a reveal run env, which is the direction that mattered", async () => {
-    const deletion = await import("../../src/cli/run-coupang-wing-deletion-live");
+    const deletion = await import("../../instruments/live-runs/run-coupang-wing-deletion-live");
     setEnv({ ...IDENTITY }); // a REVEAL run env, verbatim
     expect(deletion.gateRefusalCause(WING_DEFAULT_URL, okIdentity as never)).toMatch(/^WRONG_RUN_PHASE:/);
   });

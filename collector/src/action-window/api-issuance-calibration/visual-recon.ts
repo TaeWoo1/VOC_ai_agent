@@ -6,7 +6,7 @@
  * real API-center screen the operator navigated to, plus a sanitized structural summary, and a HUMAN reviewer
  * (Claude) reads that redacted image + limited structure to identify the target control and later propose a
  * selector candidate. This module is where every rule that keeps that capture safe lives, so a reviewer has ONE
- * place to trust. The live CLI (`src/cli/capture-api-center-visual.ts`) and the in-page scripts
+ * place to trust. The live CLI (`instruments/calibration/capture-api-center-visual.ts`) and the in-page scripts
  * (`./visual-recon-inpage.ts`) only *gather* — this module decides:
  *
  *  1. **May a screenshot be taken at all?** ({@link verifyRedaction} → {@link mayScreenshot}.) The in-page

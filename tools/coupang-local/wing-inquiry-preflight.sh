@@ -18,7 +18,7 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 COLLECTOR_DIR="${SELLEROPS_COLLECTOR_DIR:-$REPO_ROOT/collector}"
 
 PHASE_EXPECTED="COUPANG_WING_INQUIRY_LIST_CALIBRATION"
-CLI_REL="src/cli/calibrate-inquiry-list.ts"
+CLI_REL="instruments/calibration/calibrate-inquiry-list.ts"
 RUN_ENV="${SELLEROPS_WING_INQUIRY_RUN_ENV:-$HERE/.run/wing-inquiry-calibration.env}"
 
 FAILED=0

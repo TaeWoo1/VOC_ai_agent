@@ -9,16 +9,32 @@
  * exactly one module puts it on a wire, and nothing anywhere writes it down.**
  */
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { COUPANG_CREDENTIAL_FIELDS } from "../../src/action-window/coupang-wing-credential-cells";
 import { WING_HIGHLIGHT_LABELS } from "../../src/action-window/coupang-wing-issuance-driver";
 
-const SRC = resolve(dirname(fileURLToPath(import.meta.url)), "../../src");
+const HERE_DIR = dirname(fileURLToPath(import.meta.url));
+/**
+ * R2 moved the calibration recorders and one-off live-run harnesses out of `src/cli` into `instruments/`.
+ * This is a COVERAGE fence — scanning only `src` after that move would keep it green while quietly
+ * dropping ~45 entrypoints, several of which touch real credentials. Both roots are scanned, and each
+ * file is addressed by its root so `read()` stays a single lookup.
+ */
+const COLLECTOR = resolve(HERE_DIR, "../..");
+const SRC = resolve(COLLECTOR, "src");
+/** Scanned trees. `src` entries are named relative to `src`; `instruments` entries keep their own prefix. */
+const SCAN: ReadonlyArray<readonly [string, string]> = [
+  [SRC, ""],
+  [resolve(COLLECTOR, "instruments"), "instruments/"],
+];
+/** A scanned name resolves under `src` (product) or under the collector root (instruments). */
+const ROOTS = [SRC, COLLECTOR];
 
 /** Every `.ts` under `src/`, repo-relative to `src`. */
-function sourceFiles(dir = SRC, prefix = ""): string[] {
+function sourceFiles(dir?: string, prefix = ""): string[] {
+  if (dir === undefined) return SCAN.flatMap(([root, prefix]) => sourceFiles(root, prefix));
   return readdirSync(dir).flatMap((name) => {
     const full = join(dir, name);
     if (statSync(full).isDirectory()) return sourceFiles(full, `${prefix}${name}/`);
@@ -26,8 +42,13 @@ function sourceFiles(dir = SRC, prefix = ""): string[] {
   });
 }
 
+/** Resolve a scanned path against whichever root actually holds it. */
 function read(rel: string): string {
-  return readFileSync(join(SRC, rel), "utf8");
+  for (const root of ROOTS) {
+    const full = join(root, rel);
+    if (existsSync(full)) return readFileSync(full, "utf8");
+  }
+  throw new Error(`source not found under any root: ${rel}`);
 }
 
 /** Source with comment lines stripped — prose mentioning a forbidden token has produced false failures before. */
@@ -59,17 +80,17 @@ describe("the read exists in exactly one place, and is reached from exactly one 
 
   it("only the handoff CLI calls the driver's read", () => {
     const users = filesContaining("readCredentialValues(", ["action-window/coupang-wing-credential-driver.ts"]);
-    expect(users).toEqual(["cli/run-coupang-credential-handoff-live.ts"]);
+    expect(users).toEqual(["instruments/live-runs/run-coupang-credential-handoff-live.ts"]);
   });
 
   it("only the handoff CLI puts the values on a wire", () => {
     const users = filesContaining("postCoupangCredentialHandoff", ["credential/credential-handoff-client.ts"]);
-    expect(users).toEqual(["cli/run-coupang-credential-handoff-live.ts"]);
+    expect(users).toEqual(["instruments/live-runs/run-coupang-credential-handoff-live.ts"]);
   });
 
   it("only the handoff CLI runs the flow that holds them", () => {
     const users = filesContaining("handOffCoupangCredential", ["credential/coupang-credential-handoff.ts"]);
-    expect(users).toEqual(["cli/run-coupang-credential-handoff-live.ts"]);
+    expect(users).toEqual(["instruments/live-runs/run-coupang-credential-handoff-live.ts"]);
   });
 });
 
@@ -79,7 +100,7 @@ describe("nothing writes a value down", () => {
     "credential/coupang-credential-handoff.ts",
     "credential/credential-handoff-client.ts",
     "action-window/coupang-wing-credential-driver.ts",
-    "cli/run-coupang-credential-handoff-live.ts",
+    "instruments/live-runs/run-coupang-credential-handoff-live.ts",
   ];
 
   it("no filesystem, clipboard, or storage sink in any module that can hold one", () => {
@@ -140,7 +161,7 @@ describe("nothing writes a value down", () => {
   it("the destination of the POST is screened before anything is read", () => {
     // The one place all three plaintext values leave the process. Every other boundary here is screened;
     // review found this one was not, and an unscreened `SELLEROPS_BASE_URL` sends a Secret Key to any host.
-    const cli = code("cli/run-coupang-credential-handoff-live.ts");
+    const cli = code("instruments/live-runs/run-coupang-credential-handoff-live.ts");
     expect(cli).toContain("screenCredentialBackendOrigin(cfg.baseUrl)");
     // …and the raw configured value must not survive past the screen.
     const call = "screenCredentialBackendOrigin(cfg.baseUrl)";
@@ -160,7 +181,7 @@ describe("nothing writes a value down", () => {
 });
 
 describe("the read is behind a barrier, and the barrier names the whole chain", () => {
-  const cli = code("cli/run-coupang-credential-handoff-live.ts");
+  const cli = code("instruments/live-runs/run-coupang-credential-handoff-live.ts");
 
   it("the CLI's confirm seam is the action barrier, at the CREDENTIAL_REVEAL kind", () => {
     expect(cli).toContain("confirmActionBarrier(");
@@ -169,7 +190,7 @@ describe("the read is behind a barrier, and the barrier names the whole chain", 
 
   it("the barrier discloses the send and the verification, not only the read", () => {
     // A press that authorizes a chain and names its first link has told the operator less than they agreed to.
-    const spec = read("cli/run-coupang-credential-handoff-live.ts");
+    const spec = read("instruments/live-runs/run-coupang-credential-handoff-live.ts");
     expect(spec).toContain("연결 정보 저장소로 바로 보내");
     expect(spec).toContain("읽기 전용");
   });

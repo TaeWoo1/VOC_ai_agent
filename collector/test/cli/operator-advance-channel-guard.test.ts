@@ -14,11 +14,31 @@
  * quotes this list to operators. It is a debt register, and it may only get shorter.
  */
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync , existsSync} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const CLI_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../src/cli");
+const HERE_DIR = dirname(fileURLToPath(import.meta.url));
+/**
+ * R2 moved the calibration recorders and the one-off live-run harnesses out of `src/cli` into
+ * `instruments/`. This fence is a COVERAGE fence: if it kept scanning only `src/cli` it would still be
+ * green while silently covering ~45 fewer entrypoints. It scans every tree a live CLI can live in.
+ */
+const CLI_DIRS = [
+  resolve(HERE_DIR, "../../src/cli"),
+  resolve(HERE_DIR, "../../instruments/calibration"),
+  resolve(HERE_DIR, "../../instruments/live-runs"),
+];
+
+/** The tree a given CLI actually lives in (src/cli, or the instruments trees R2 moved it to). */
+function cliPath(file: string): string {
+  for (const dir of CLI_DIRS) {
+    const full = join(dir, file);
+    if (existsSync(full)) return full;
+  }
+  throw new Error(`CLI not found in any tree: ${file}`);
+}
+
 
 /**
  * The CLIs that still take an operator ADVANCE from the filesystem. Each needs a surface that can carry more
@@ -97,14 +117,14 @@ function readsAnAdvanceSentinel(src: string): boolean {
   );
 }
 
-const FILES = readdirSync(CLI_DIR)
+const FILES = CLI_DIRS.flatMap((dir) => readdirSync(dir))
   .filter((f) => f.endsWith(".ts"))
   .filter((f) => !NOT_A_LIVE_ENTRYPOINT.includes(f));
 
 describe("the operator-advance channel is a ratchet", () => {
   it("**every CLI outside the debt register advances on a press, never on a file**", () => {
     const regressed = FILES.filter((f) => !NOT_YET_MIGRATED.includes(f)).filter((f) =>
-      readsAnAdvanceSentinel(code(join(CLI_DIR, f))),
+      readsAnAdvanceSentinel(code(cliPath(f))),
     );
     expect(regressed, `these CLIs read an advance sentinel again: ${regressed.join(", ")}`).toEqual([]);
   });
@@ -113,7 +133,7 @@ describe("the operator-advance channel is a ratchet", () => {
     // A register that keeps names it has outgrown is a register nobody trusts. When a CLI is migrated, its name
     // comes off this list in the same change, and §5a of the approval contract is updated with it.
     const stale = NOT_YET_MIGRATED.filter(
-      (f) => FILES.includes(f) && !readsAnAdvanceSentinel(code(join(CLI_DIR, f))),
+      (f) => FILES.includes(f) && !readsAnAdvanceSentinel(code(cliPath(f))),
     );
     expect(stale, `these are migrated and should be removed from NOT_YET_MIGRATED: ${stale.join(", ")}`).toEqual([]);
   });
@@ -143,7 +163,7 @@ describe("the operator-advance channel is a ratchet", () => {
 
 describe("the migrated CLIs reach the channel through the shared host", () => {
   const MIGRATED = FILES.filter((f) => !NOT_YET_MIGRATED.includes(f)).filter((f) =>
-    code(join(CLI_DIR, f)).includes("attachOperatorConfirmTab("),
+    code(cliPath(f)).includes("attachOperatorConfirmTab("),
   );
 
   it("there are enough of them that this file is measuring something", () => {
@@ -157,7 +177,7 @@ describe("the migrated CLIs reach the channel through the shared host", () => {
     // delete every `confirmHost.confirm(...)` while keeping the `attachOperatorConfirmTab(...)` call and this
     // file would stay green with every checkpoint gone. "No sentinel" is not "advances on a press".
     for (const f of MIGRATED) {
-      const src = code(join(CLI_DIR, f));
+      const src = code(cliPath(f));
       expect(src, `${f} attaches a confirmation surface but never waits on it`).toMatch(
         // …by any of the shapes that reach `host.confirm` — a checkpoint, a run grant, or an action barrier.
         /confirmHost\.confirm\(|confirm\(ask\)|confirmCheckpoint\(|confirmRunGrant\(|confirmActionBarrier\(/,
@@ -169,7 +189,7 @@ describe("the migrated CLIs reach the channel through the shared host", () => {
     // Each CLI's own suite pins WHAT it must not do after a refusal; this pins that a refusal is handled at
     // all. `observe-api-center` printed a line and carried on into the read for one commit.
     for (const f of MIGRATED) {
-      const src = code(join(CLI_DIR, f));
+      const src = code(cliPath(f));
       if (!/confirmation\.signal !== "ready"/.test(src)) continue;
       for (const m of src.matchAll(/confirmation\.signal !== "ready"\)\s*\{?([\s\S]{0,400})/g)) {
         // `break` counts: the WING recorder's checkpoint loop leaves before its reading rather than returning
@@ -185,7 +205,7 @@ describe("the migrated CLIs reach the channel through the shared host", () => {
     // One implementation of the trusted-press gate. A second copy is a second thing to get wrong, in a file
     // that also prints to a terminal.
     for (const f of MIGRATED) {
-      const src = code(join(CLI_DIR, f));
+      const src = code(cliPath(f));
       expect(src, f).not.toContain("buildOperatorConfirmArmScript");
       expect(src, f).not.toContain("mintOperatorConfirmToken");
       expect(src, f).not.toContain("OPERATOR_CONFIRM_STATE_KEY");
@@ -196,7 +216,7 @@ describe("the migrated CLIs reach the channel through the shared host", () => {
     // `activePage()` takes the NEWEST tab, so an unfiltered context resolves to the blank SellerOps surface the
     // moment it opens: measurements land there, screenshots are taken of it, and the reading reads as confident.
     for (const f of MIGRATED) {
-      const src = code(join(CLI_DIR, f));
+      const src = code(cliPath(f));
       if (!src.includes("context:")) continue;
       expect(src, f).not.toMatch(/context:\s*ctx\b/);
       expect(src, f).not.toMatch(/ctx\.pages\(\)\[\s*ctx\.pages\(\)\.length/);

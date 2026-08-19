@@ -9,7 +9,7 @@ import {
   OPERATOR_UI_CONFIRMED,
   type OperatorConfirmation,
 } from "../../src/cli/operator-confirm";
-import type { WingRecordSignal } from "../../src/cli/probe-wing-issuance-selectors";
+import type { WingRecordSignal } from "../../instruments/calibration/probe-wing-issuance-selectors";
 
 /** A confirmed press of the primary button. */
 export const OPERATOR_CONFIRMED: OperatorConfirmation = {

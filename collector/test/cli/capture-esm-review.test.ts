@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CLI_PATH = join(__dirname, "..", "..", "src", "cli", "capture-esm-review.ts");
+const CLI_PATH = join(__dirname, "..", "..", "instruments", "calibration", "capture-esm-review.ts");
 
 function stripComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/.*$/gm, "$1");
@@ -42,13 +42,13 @@ describe("capture-esm-review — exactly-one-click / observe-and-discard boundar
   });
 
   it("delegates save+validate+DELETE to review-download-save (never names saveAs itself)", () => {
-    expect(/from\s+["']\.\.\/naver\/review-download-save["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/naver\/review-download-save["']/.test(code)).toBe(true);
     expect(/saveAndInspectDownload(?:<[^>]*>)?\s*\(/.test(code)).toBe(true);
     expect(code.includes("saveAs")).toBe(false);
   });
 
   it("uses the pure capture-gate decisions + structural validation", () => {
-    expect(/from\s+["']\.\.\/esm\/esm-capture-gate["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/esm\/esm-capture-gate["']/.test(code)).toBe(true);
     expect(/capturePreconditionMet\s*\(/.test(code)).toBe(true);
     expect(/decideApprovedCapture\s*\(/.test(code)).toBe(true);
     expect(/classifyPostClickOutcome\s*\(/.test(code)).toBe(true);
@@ -75,8 +75,8 @@ describe("capture-esm-review — exactly-one-click / observe-and-discard boundar
       expect(code.includes(token)).toBe(false);
     }
     // No import of the backend-upload or run-status modules.
-    expect(/from\s+["']\.\.\/upload["']/.test(code)).toBe(false);
-    expect(/from\s+["']\.\.\/status["']/.test(code)).toBe(false);
+    expect(/from\s+["']\.\.\/\.\.\/src\/upload["']/.test(code)).toBe(false);
+    expect(/from\s+["']\.\.\/\.\.\/src\/status["']/.test(code)).toBe(false);
     expect(/from\s+["'][^"']*review-upload[^"']*["']/.test(code)).toBe(false);
   });
 
@@ -86,7 +86,7 @@ describe("capture-esm-review — exactly-one-click / observe-and-discard boundar
     expect(/--connection-id/.test(code)).toBe(true);
     expect(/--connections/.test(code)).toBe(true);
     expect(/resolveCaptureConnectionProfile\s*\(/.test(code)).toBe(true);
-    expect(/from\s+["']\.\/esm-capture-connection["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/cli\/esm-capture-connection["']/.test(code)).toBe(true);
     expect(/cfg\.profileBaseDir/.test(code)).toBe(true);
     // No implicit `.profile/esm` fallback for a live capture, and never NAVER's profile.
     expect(/cfg\.esmProfileDir/.test(code)).toBe(false);
@@ -124,7 +124,7 @@ describe("capture-esm-review — Gate 4 opt-in schema-shape inspection (--inspec
   it("wires the opt-in inspectors via the esm-capture-inspect helper as the pre-delete hook", () => {
     // The schema-shape composition (readWorkbookShape → summarizeSchemaShape) now lives in the
     // helper; the CLI delegates to it and passes the combined hook to the SAME save module.
-    expect(/from\s+["']\.\.\/esm\/esm-capture-inspect["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/esm\/esm-capture-inspect["']/.test(code)).toBe(true);
     expect(/buildCaptureInspectFn\s*\(/.test(code)).toBe(true);
     expect(/saveAndInspectDownload<CaptureInspection>\s*\(/.test(code)).toBe(true);
     expect(/inspectFn/.test(code)).toBe(true);
@@ -156,8 +156,8 @@ describe("capture-esm-review — Gate 4 opt-in schema-shape inspection (--inspec
     for (const token of ["uploadReviewFile", "writeStatus", "runExport", "manualSync", "scheduler", "setInterval", "cron"]) {
       expect(code.includes(token)).toBe(false);
     }
-    expect(/from\s+["']\.\.\/upload["']/.test(code)).toBe(false);
-    expect(/from\s+["']\.\.\/status["']/.test(code)).toBe(false);
+    expect(/from\s+["']\.\.\/\.\.\/src\/upload["']/.test(code)).toBe(false);
+    expect(/from\s+["']\.\.\/\.\.\/src\/status["']/.test(code)).toBe(false);
   });
 });
 
@@ -242,7 +242,7 @@ describe("capture-esm-review — Slice 2b opt-in header-label capture (--capture
   });
 
   it("wires the header-label capture through the one inspect hook + local artifact path", () => {
-    expect(/from\s+["']\.\.\/esm\/esm-review-header-quarantine["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/esm\/esm-review-header-quarantine["']/.test(code)).toBe(true);
     expect(/headerLabelArtifactPath\s*\(/.test(code)).toBe(true);
     expect(/captureHeaderLabels:\s*captureReviewHeaders/.test(code)).toBe(true);
     expect(/inspection\.inspection\?\.headerLabels/.test(code)).toBe(true);

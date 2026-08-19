@@ -116,7 +116,7 @@ check_no_code_drift "$RUN_GIT"
 
 # 5–7. The local toolchain must be able to start the probe with nothing more installed or asked; the dedicated
 #      Chrome profile must resolve inside the collector tree; a browser must be launchable.
-check_toolchain "$COLLECTOR_DIR" "src/cli/probe-wing-issuance-selectors.ts" "probe"
+check_toolchain "$COLLECTOR_DIR" "instruments/calibration/probe-wing-issuance-selectors.ts" "probe"
 check_dedicated_profile "$COLLECTOR_DIR"
 check_browser_launchable
 

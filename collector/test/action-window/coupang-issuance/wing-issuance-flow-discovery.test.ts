@@ -43,7 +43,7 @@ import {
   runWingFlowDiscovery,
   wingPhaseCalibrates,
   type WingSelectorRecordDeps,
-} from "../../../src/cli/probe-wing-issuance-selectors";
+} from "../../../instruments/calibration/probe-wing-issuance-selectors";
 import { observeFrom, WING_PROBE_TARGET_NAMES, type WingStructuralCensus } from "../../../src/cli/coupang-wing-classifier";
 import { coupangLiveWalkRefusal } from "../../../src/cli/local-agent";
 import {
@@ -533,7 +533,7 @@ describe("the discovery PHASE is wired everywhere a Stage-2 phase must be", () =
 describe("the widening is in what the OPERATOR does — the agent's budget is unchanged", () => {
   it("the discovery runner reaches no click, selection, or input path", () => {
     // A phase whose whole subject is selecting a radio is exactly where a `.check()` would look reasonable.
-    const src = readFileSync(resolve(HERE, "../../../src/cli/probe-wing-issuance-selectors.ts"), "utf8");
+    const src = readFileSync(resolve(HERE, "../../../instruments/calibration/probe-wing-issuance-selectors.ts"), "utf8");
     const body = src.slice(src.indexOf("export async function runWingFlowDiscovery"));
     const runner = body.slice(0, body.indexOf("\n/* ─"));
     for (const f of [".click(", ".check(", ".selectOption(", ".fill(", ".type(", ".press(", ".goto(", ".setChecked("]) {
@@ -634,7 +634,7 @@ describe("the terms screen — transcribed verbatim, and the key-creation bounda
   });
 
   it("the last checkpoint's copy forbids the press, and says why, in the operator's own terms", () => {
-    const src = readFileSync(resolve(HERE, "../../../src/cli/probe-wing-issuance-selectors.ts"), "utf8");
+    const src = readFileSync(resolve(HERE, "../../../instruments/calibration/probe-wing-issuance-selectors.ts"), "utf8");
     const from = src.indexOf("the TERMS screen. Tick the two consent boxes YOURSELF");
     expect(from).toBeGreaterThan(-1);
     const block = src.slice(from, src.indexOf("\n  }", from));
@@ -883,7 +883,7 @@ describe("the operator-facing step counter is computed, not typed", () => {
   });
 
   it("the copy builder interpolates the counter and contains no hard-coded N/M", () => {
-    const src = readFileSync(resolve(HERE, "../../../src/cli/probe-wing-issuance-selectors.ts"), "utf8");
+    const src = readFileSync(resolve(HERE, "../../../instruments/calibration/probe-wing-issuance-selectors.ts"), "utf8");
     const from = src.indexOf("export function discoveryCheckpointCopy");
     const body = src.slice(from, src.indexOf("\nexport function baselineAskCopy", from));
     expect(body).toContain("const title = `DISCOVERY ${index + 1}/${total}`");

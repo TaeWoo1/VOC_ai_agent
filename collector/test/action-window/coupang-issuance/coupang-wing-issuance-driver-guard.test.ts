@@ -15,7 +15,7 @@ import { COUPANG_ISSUANCE_TARGETS } from "../../../src/action-window/coupang-iss
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DRIVER = resolve(HERE, "../../../src/action-window/coupang-wing-issuance-driver.ts");
-const CLI = resolve(HERE, "../../../src/cli/run-coupang-wing-issuance-live.ts");
+const CLI = resolve(HERE, "../../../instruments/live-runs/run-coupang-wing-issuance-live.ts");
 
 /** Strip block comments and comment/JSDoc lines so prose mentioning a forbidden token never trips. */
 function codeOnly(path: string): string {

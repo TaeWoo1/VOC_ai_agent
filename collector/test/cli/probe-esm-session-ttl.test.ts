@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CLI = join(__dirname, "..", "..", "src", "cli", "probe-esm-session-ttl.ts");
+const CLI = join(__dirname, "..", "..", "instruments", "calibration", "probe-esm-session-ttl.ts");
 
 function stripComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/.*$/gm, "$1");
@@ -19,9 +19,9 @@ describe("probe-esm-session-ttl — keep-open, no-click, no-scheduler boundary",
   });
 
   it("reuses the SHARED no-click classification + pure schedule (no duplicated scan logic)", () => {
-    expect(/from\s+["']\.\.\/esm\/esm-review-live-scan["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/esm\/esm-review-live-scan["']/.test(code)).toBe(true);
     expect(/classifyOpenEsmReviewPage\s*\(/.test(code)).toBe(true);
-    expect(/from\s+["']\.\.\/esm\/esm-ttl-schedule["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/esm\/esm-ttl-schedule["']/.test(code)).toBe(true);
     expect(/runTtlCheckpoints\s*\(/.test(code)).toBe(true);
     expect(/parseCheckpointOffsets\s*\(/.test(code)).toBe(true);
     // No re-implemented scan mechanics in the CLI.
@@ -50,7 +50,7 @@ describe("probe-esm-session-ttl — keep-open, no-click, no-scheduler boundary",
   });
 
   it("persists each checkpoint incrementally to a gitignored .status JSONL (partial-safe)", () => {
-    expect(/from\s+["']\.\.\/esm\/esm-ttl-schedule["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/esm\/esm-ttl-schedule["']/.test(code)).toBe(true);
     expect(/esmTtlResultsPath\s*\(/.test(code)).toBe(true);
     // Fresh file at startup, then append each row the moment it completes (onCheckpoint).
     expect(/writeFileSync\s*\(/.test(code)).toBe(true);
@@ -84,8 +84,8 @@ describe("probe-esm-session-ttl — keep-open, no-click, no-scheduler boundary",
     ]) {
       expect(code.includes(token)).toBe(false);
     }
-    expect(/from\s+["']\.\.\/upload["']/.test(code)).toBe(false);
-    expect(/from\s+["']\.\.\/status["']/.test(code)).toBe(false);
+    expect(/from\s+["']\.\.\/\.\.\/src\/upload["']/.test(code)).toBe(false);
+    expect(/from\s+["']\.\.\/\.\.\/src\/status["']/.test(code)).toBe(false);
   });
 
   it("uses NO production scheduler (no cron / setInterval / manualSync)", () => {

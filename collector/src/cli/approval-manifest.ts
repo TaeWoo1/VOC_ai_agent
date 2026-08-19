@@ -803,7 +803,7 @@ const VISUAL_RECON_SUMMARY_POLICY = "sanitized closed-vocabulary only";
 export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   API_CENTER_STRUCTURE_OBSERVATION: {
     phase: "API_CENTER_STRUCTURE_OBSERVATION",
-    cli: "src/cli/calibrate-api-center.ts",
+    cli: "instruments/calibration/calibrate-api-center.ts",
     driver: "calibrate-api-center (multi-checkpoint read-only calibrator)",
     capableActions: [
       "OPEN_DEDICATED_WINDOW",
@@ -817,7 +817,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   },
   API_ISSUANCE_HIGHLIGHT_PROOF: {
     phase: "API_ISSUANCE_HIGHLIGHT_PROOF",
-    cli: "src/cli/run-api-issuance-live-naver.ts",
+    cli: "instruments/live-runs/run-api-issuance-live-naver.ts",
     driver: "NaverIssuanceDriver (Action Window highlight/observe)",
     capableActions: [
       "OPEN_DEDICATED_WINDOW",
@@ -834,7 +834,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   },
   API_CENTER_VISUAL_RECON: {
     phase: "API_CENTER_VISUAL_RECON",
-    cli: "src/cli/capture-api-center-visual.ts",
+    cli: "instruments/calibration/capture-api-center-visual.ts",
     driver: "capture-api-center-visual (redacted-screenshot visual recon)",
     // Read-only: open window, wait for the operator to navigate, classify + census the sanitized page, then
     // redact every sensitive region and (only after coverage verifies) screenshot the redacted viewport. It
@@ -858,7 +858,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     phase: "API_ISSUANCE_FE_LIVE_PROOF",
     // The SUPPORTING host: it opens the dedicated NAVER Chrome + `/bridge/ws` carrier so the FE can attach and
     // drive. It sends NO START_RUN (verified: the CLI carries no START_RUN / issuance-live-proof / spawn path).
-    cli: "src/cli/run-api-issuance-live-naver.ts",
+    cli: "instruments/live-runs/run-api-issuance-live-naver.ts",
     driver: "NaverIssuanceDriver (Action Window highlight/observe) — hosted; the SellerOps FE run-host is the sole run client",
     // Same live capability as the highlight proof (existing-app branch): observe the app_list→detail
     // transition (open_app), then reveal + highlight the order API group and the Application ID/Secret section.
@@ -876,7 +876,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   },
   API_ISSUANCE_SELECTOR_PROBE: {
     phase: "API_ISSUANCE_SELECTOR_PROBE",
-    cli: "src/cli/probe-issuance-selectors.ts",
+    cli: "instruments/calibration/probe-issuance-selectors.ts",
     driver: "NaverIssuanceDriver (read-only fixed-label matchCount probe)",
     // Read-only: open window, wait for the operator to navigate each screen, classify + census the sanitized
     // page, then COUNT how many candidates each highlight target's calibrated fixed-label locator matches
@@ -894,7 +894,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   },
   COUPANG_WING_SELECTOR_PROBE: {
     phase: "COUPANG_WING_SELECTOR_PROBE",
-    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    cli: "instruments/calibration/probe-wing-issuance-selectors.ts",
     driver: "CoupangWingIssuanceDriver (read-only fixed-label matchCount probe)",
     // Read-only: open the dedicated window, wait for the operator to log in + navigate to the WING open-API
     // issuance page, classify + census the sanitized page, then COUNT how many candidates each highlight
@@ -918,7 +918,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   },
   COUPANG_WING_LABEL_RECON: {
     phase: "COUPANG_WING_LABEL_RECON",
-    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    cli: "instruments/calibration/probe-wing-issuance-selectors.ts",
     driver: "CoupangWingIssuanceDriver (read-only fixed-label matchCount probe, candidate-label sweep)",
     // Identical capability to the selector probe — the sweep is N invocations of the SAME read-only
     // `probeFixedLabelMatch` seam, differing only in which fixed label each one counts. It therefore adds no
@@ -940,7 +940,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   },
   COUPANG_WING_STAGE2_RECON: {
     phase: "COUPANG_WING_STAGE2_RECON",
-    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    cli: "instruments/calibration/probe-wing-issuance-selectors.ts",
     driver: "CoupangWingIssuanceDriver (read-only Stage-2 candidate sweep + choice-control shape census)",
     // Same read-only capability as the label recon, plus ONE new measurement: the choice-control shape census
     // (closed-vocabulary tag/type/role categories and counts — no text, no attributes, no values). What makes
@@ -960,7 +960,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   },
   COUPANG_WING_STAGE2_LABEL_CALIBRATION: {
     phase: "COUPANG_WING_STAGE2_LABEL_CALIBRATION",
-    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    cli: "instruments/calibration/probe-wing-issuance-selectors.ts",
     driver: "CoupangWingIssuanceDriver (read-only Stage-2 sweep + containment probe + label-association census)",
     // Everything the Stage-2 recon can do, plus the two measurements that read HOW a control is labelled rather
     // than how many elements carry a label. Still no highlight, no tag, no click, no selection, no value read —
@@ -982,7 +982,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   },
   COUPANG_WING_ISSUANCE_FLOW_DISCOVERY: {
     phase: "COUPANG_WING_ISSUANCE_FLOW_DISCOVERY",
-    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    cli: "instruments/calibration/probe-wing-issuance-selectors.ts",
     driver: "CoupangWingIssuanceDriver (the calibration reads plus a consent-block census, at each checkpoint the OPERATOR advances)",
     // The calibration's eight reads plus ONE: the consent-BLOCK census, which exists only because the terms
     // checkboxes have no accessible name and the pairing must be established structurally or not at all. It is
@@ -1008,7 +1008,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   },
   COUPANG_WING_VENDOR_METHOD_DISCOVERY: {
     phase: "COUPANG_WING_VENDOR_METHOD_DISCOVERY",
-    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    cli: "instruments/calibration/probe-wing-issuance-selectors.ts",
     driver: "CoupangWingIssuanceDriver (the discovery reads, carried two checkpoints further onto the vendor-method screen)",
     // It was IDENTICAL to the discovery phase's list, and the sentence explaining why was worth keeping until it
     // stopped being true: this phase measured nothing the other could not, and differed entirely in WHERE the
@@ -1083,7 +1083,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   },
   COUPANG_WING_ISSUANCE_FORM_REVEAL: {
     phase: "COUPANG_WING_ISSUANCE_FORM_REVEAL",
-    cli: "src/cli/run-coupang-wing-reveal-live.ts",
+    cli: "instruments/live-runs/run-coupang-wing-reveal-live.ts",
     driver: "CoupangWingRevealDriver (highlight 발급 + rest; the operator presses it; one sanitized observation)",
     // AGENT capability is highlight + observe. It HIGHLIGHTS a real control ⇒ `allowsHighlight: true` ⇒ it fails
     // closed (`SELECTORS_NOT_CALIBRATED`) unless the caller states the `issue` calibration
@@ -1111,7 +1111,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     // needs the CALLER to state the calibration (this module still defaults every WING phase to `false`, so a
     // caller who omits it fails closed), the destructive descriptor to match the immutable canonical values
     // exactly, and the `WALKTHROUGH_*` identity to be bound. PREPARED is still not APPROVED.
-    cli: "src/cli/run-coupang-wing-deletion-live.ts",
+    cli: "instruments/live-runs/run-coupang-wing-deletion-live.ts",
     driver: "CoupangWingDeletionDriver (Action Window highlight/observe — the operator deletes; the agent never clicks)",
     // AGENT capability is READ_ONLY highlight/observe: open the window, wait for the operator to reach the
     // already-issued page, classify it, reveal + highlight the 삭제 control, and rest at the checkpoint. It NEVER
@@ -1131,7 +1131,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   },
   COUPANG_WING_CREDENTIAL_CELL_CALIBRATION: {
     phase: "COUPANG_WING_CREDENTIAL_CELL_CALIBRATION",
-    cli: "src/cli/calibrate-credential-cells.ts",
+    cli: "instruments/calibration/calibrate-credential-cells.ts",
     driver: "CoupangWingCredentialDriver (value-free credential-cell census)",
     capableActions: [
       "OPEN_DEDICATED_WINDOW",
@@ -1148,7 +1148,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   },
   COUPANG_WING_INQUIRY_LIST_CALIBRATION: {
     phase: "COUPANG_WING_INQUIRY_LIST_CALIBRATION",
-    cli: "src/cli/calibrate-inquiry-list.ts",
+    cli: "instruments/calibration/calibrate-inquiry-list.ts",
     driver: "CoupangWingInquiryDriver (value-free 고객문의 list census)",
     capableActions: [
       "OPEN_DEDICATED_WINDOW",
@@ -1164,7 +1164,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   },
   COUPANG_WING_REVIEW_STRUCTURE_DISCOVERY: {
     phase: "COUPANG_WING_REVIEW_STRUCTURE_DISCOVERY",
-    cli: "src/cli/calibrate-review-list.ts",
+    cli: "instruments/calibration/calibrate-review-list.ts",
     driver: "CoupangWingReviewDriver (value-free 상품평 structure census)",
     capableActions: [
       "OPEN_DEDICATED_WINDOW",
@@ -1204,7 +1204,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   },
   COUPANG_WING_REVIEW_LOCATE: {
     phase: "COUPANG_WING_REVIEW_LOCATE",
-    cli: "src/cli/run-coupang-review-locate-live.ts",
+    cli: "instruments/live-runs/run-coupang-review-locate-live.ts",
     driver: "CoupangWingReviewLocateDriver over CoupangWingReviewReaderDriver (one-row locate highlight)",
     capableActions: [
       "OPEN_DEDICATED_WINDOW",
@@ -1222,7 +1222,7 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   },
   COUPANG_WING_CREDENTIAL_HANDOFF: {
     phase: "COUPANG_WING_CREDENTIAL_HANDOFF",
-    cli: "src/cli/run-coupang-credential-handoff-live.ts",
+    cli: "instruments/live-runs/run-coupang-credential-handoff-live.ts",
     driver: "CoupangWingCredentialDriver (one-shot credential read) + credential handoff client",
     capableActions: [
       "OPEN_DEDICATED_WINDOW",
@@ -1716,7 +1716,7 @@ export const WING_PROBE_CONFIRM_CHANNEL_SUMMARY =
 export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>> = {
   API_CENTER_STRUCTURE_OBSERVATION: {
     entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
-    cli: "src/cli/calibrate-api-center.ts",
+    cli: "instruments/calibration/calibrate-api-center.ts",
     entrypointCommandId: "calibrate-api-center",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 열린 창에서 직접 로그인·이동한 뒤 캡처 단축키로 대상을 확정하세요.",
@@ -1724,7 +1724,7 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
   },
   API_ISSUANCE_HIGHLIGHT_PROOF: {
     entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
-    cli: "src/cli/run-api-issuance-live-naver.ts",
+    cli: "instruments/live-runs/run-api-issuance-live-naver.ts",
     entrypointCommandId: "run-api-issuance-live-naver",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 강조된 실제 컨트롤을 직접 클릭하면 SellerOps가 관찰합니다. " +
@@ -1733,7 +1733,7 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
   },
   API_CENTER_VISUAL_RECON: {
     entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
-    cli: "src/cli/capture-api-center-visual.ts",
+    cli: "instruments/calibration/capture-api-center-visual.ts",
     entrypointCommandId: "capture-api-center-visual",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 직접 로그인·이동한 뒤 각 화면에서 준비되면 ready 를 보내세요. SellerOps는 민감 영역을 가린 뒤에만 화면을 캡처합니다.",
@@ -1741,7 +1741,7 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
   },
   API_ISSUANCE_SELECTOR_PROBE: {
     entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
-    cli: "src/cli/probe-issuance-selectors.ts",
+    cli: "instruments/calibration/probe-issuance-selectors.ts",
     entrypointCommandId: "probe-issuance-selectors",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 직접 로그인·이동한 뒤 각 화면에서 준비되면 ready 를 보내세요. SellerOps는 강조 없이 각 대상의 고정 라벨 일치 수만 읽습니다(클릭·입력·값 읽기 없음).",
@@ -1752,7 +1752,7 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
   // count — no highlight, no click, no input, no value read.
   COUPANG_WING_SELECTOR_PROBE: {
     entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
-    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    cli: "instruments/calibration/probe-wing-issuance-selectors.ts",
     entrypointCommandId: "probe-wing-issuance-selectors",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 오픈API 발급 화면에서 멈춘 뒤 '현재 화면 확인'을 누르세요. SellerOps는 강조 없이 각 대상의 고정 라벨 일치 수만 읽습니다(클릭·입력·값 읽기 없음)." +
@@ -1764,7 +1764,7 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
   // should read "여러 후보 라벨", not "각 대상", before granting.
   COUPANG_WING_LABEL_RECON: {
     entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
-    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    cli: "instruments/calibration/probe-wing-issuance-selectors.ts",
     entrypointCommandId: "probe-wing-issuance-selectors",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 오픈API 발급 화면에서 멈춘 뒤 '현재 화면 확인'을 누르세요. SellerOps는 아직 확정되지 않은 대상들의 여러 후보 라벨에 대해 일치 수만 읽습니다(강조·클릭·입력·값 읽기 없음). 후보가 하나로 좁혀져도 이 실행은 선택자를 바꾸지 않습니다." +
@@ -1777,7 +1777,7 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
   // that they must stop at the purpose screen without choosing anything or pressing 확인.
   COUPANG_WING_STAGE2_RECON: {
     entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
-    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    cli: "instruments/calibration/probe-wing-issuance-selectors.ts",
     entrypointCommandId: "probe-wing-issuance-selectors",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동한 뒤, 오픈API 화면에서 'API Key 발급 받기'를 " +
@@ -1793,7 +1793,7 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
   // because the point of the run is to learn what the options are BEFORE anyone picks one.
   COUPANG_WING_STAGE2_LABEL_CALIBRATION: {
     entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
-    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    cli: "instruments/calibration/probe-wing-issuance-selectors.ts",
     entrypointCommandId: "probe-wing-issuance-selectors",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동한 뒤, 오픈API 화면에서 'API Key 발급 받기'를 " +
@@ -1810,7 +1810,7 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
   // than filling anything in. It must not promise what 확인 does: no run has ever pressed it.
   COUPANG_WING_ISSUANCE_FLOW_DISCOVERY: {
     entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
-    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    cli: "instruments/calibration/probe-wing-issuance-selectors.ts",
     entrypointCommandId: "probe-wing-issuance-selectors",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 이 단계에서는 판매자가 화면을 직접 진행합니다(SellerOps는 클릭·선택·입력을 " +
@@ -1832,7 +1832,7 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
   // then say, in the same breath, exactly which control on the next screen is the key-issuing one.
   COUPANG_WING_VENDOR_METHOD_DISCOVERY: {
     entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
-    cli: "src/cli/probe-wing-issuance-selectors.ts",
+    cli: "instruments/calibration/probe-wing-issuance-selectors.ts",
     entrypointCommandId: "probe-wing-issuance-selectors",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 판매자가 화면을 직접 진행합니다(SellerOps는 클릭·선택·입력을 일절 하지 " +
@@ -1926,7 +1926,7 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
   // has confirmed it, and must state that key creation is not part of this step.
   COUPANG_WING_ISSUANCE_FORM_REVEAL: {
     entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
-    cli: "src/cli/run-coupang-wing-reveal-live.ts",
+    cli: "instruments/live-runs/run-coupang-wing-reveal-live.ts",
     entrypointCommandId: "run-coupang-wing-reveal-live",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 오픈API 화면에 도착하신 뒤 " +
@@ -1946,7 +1946,7 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
   // value (Access Key / Secret Key / 업체코드).
   COUPANG_WING_KEY_DELETION: {
     entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
-    cli: "src/cli/run-coupang-wing-deletion-live.ts",
+    cli: "instruments/live-runs/run-coupang-wing-deletion-live.ts",
     entrypointCommandId: "run-coupang-wing-deletion-live",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 이미 발급된 오픈API 화면에 도착하신 뒤 " +
@@ -1959,7 +1959,7 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
   },
   COUPANG_WING_CREDENTIAL_CELL_CALIBRATION: {
     entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
-    cli: "src/cli/calibrate-credential-cells.ts",
+    cli: "instruments/calibration/calibrate-credential-cells.ts",
     entrypointCommandId: "calibrate-credential-cells",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 이미 발급된 오픈API 키가 보이는 " +
@@ -1972,7 +1972,7 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
   },
   COUPANG_WING_INQUIRY_LIST_CALIBRATION: {
     entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
-    cli: "src/cli/calibrate-inquiry-list.ts",
+    cli: "instruments/calibration/calibrate-inquiry-list.ts",
     entrypointCommandId: "calibrate-inquiry-list",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 고객문의 목록 화면에 도착하신 뒤 " +
@@ -1988,7 +1988,7 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
   },
   COUPANG_WING_REVIEW_STRUCTURE_DISCOVERY: {
     entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
-    cli: "src/cli/calibrate-review-list.ts",
+    cli: "instruments/calibration/calibrate-review-list.ts",
     entrypointCommandId: "calibrate-review-list",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 상품평(리뷰) 목록 화면에 도착하신 뒤 " +
@@ -2025,7 +2025,7 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
   },
   COUPANG_WING_REVIEW_LOCATE: {
     entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
-    cli: "src/cli/run-coupang-review-locate-live.ts",
+    cli: "instruments/live-runs/run-coupang-review-locate-live.ts",
     entrypointCommandId: "run-coupang-review-locate-live",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 상품평 목록 화면에 도착하신 뒤, " +
@@ -2042,7 +2042,7 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
   },
   COUPANG_WING_CREDENTIAL_HANDOFF: {
     entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
-    cli: "src/cli/run-coupang-credential-handoff-live.ts",
+    cli: "instruments/live-runs/run-coupang-credential-handoff-live.ts",
     entrypointCommandId: "run-coupang-credential-handoff-live",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 쿠팡(윙)에 직접 로그인·이동해 방금 발급하신 키가 보이는 화면에 " +

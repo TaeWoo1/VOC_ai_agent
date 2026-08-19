@@ -19,7 +19,7 @@ import {
   type ExpectedHintFileDeps,
   type RowCensus,
   type RowCensusEntry,
-} from "../../src/cli/discover-reply-target";
+} from "../../instruments/calibration/discover-reply-target";
 import type { ReplyTargetHint } from "../../src/action-window/reply-submission/reply-surface";
 
 const HINT: ReplyTargetHint = { rating: 2, recencyBucket: "THIS_WEEK", bodyFingerprint: "fp_match_0001" };

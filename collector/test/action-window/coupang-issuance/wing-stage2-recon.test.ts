@@ -38,7 +38,7 @@ import {
   stage2RefusalMessage,
   stage2RecordFor,
   type WingSelectorRecordDeps,
-} from "../../../src/cli/probe-wing-issuance-selectors";
+} from "../../../instruments/calibration/probe-wing-issuance-selectors";
 import { CoupangWingIssuanceDriver } from "../../../src/action-window/coupang-wing-issuance-driver";
 import { OPERATOR_ABORTED, OPERATOR_CONFIRMED } from "../../fixtures/operator-confirmation";
 
@@ -790,7 +790,7 @@ describe("the emitted Stage-2 record", () => {
   it("main() EMITS it — the record is on the wire, not just computable", () => {
     // Pinned at the call site because the defect was precisely that a correct, exported, tested sanitizer was
     // never wired into the printed record.
-    const code = readFileSync(resolve(HERE, "../../../src/cli/probe-wing-issuance-selectors.ts"), "utf8");
+    const code = readFileSync(resolve(HERE, "../../../instruments/calibration/probe-wing-issuance-selectors.ts"), "utf8");
     expect(code).toContain("stage2: stage2RecordFor(result.stage2),");
     expect(code).toContain("stage2Precondition: result.stage2?.precondition");
   });

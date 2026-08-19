@@ -22,7 +22,7 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 COLLECTOR_DIR="${SELLEROPS_COLLECTOR_DIR:-$REPO_ROOT/collector}"
 
 PHASE_EXPECTED="COUPANG_WING_REVIEW_LOCATE"
-CLI_REL="src/cli/run-coupang-review-locate-live.ts"
+CLI_REL="instruments/live-runs/run-coupang-review-locate-live.ts"
 RUN_ENV="${SELLEROPS_WING_REVIEW_LOCATE_RUN_ENV:-$HERE/.run/wing-review-locate.env}"
 
 FAILED=0

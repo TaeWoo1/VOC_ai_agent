@@ -1,6 +1,6 @@
 import { isAbsolute } from "node:path";
 import { describe, expect, it } from "vitest";
-import { SENTINEL_FILENAME, sentinelPathFor } from "../../src/cli/probe-sentinel";
+import { SENTINEL_FILENAME, sentinelPathFor } from "../../instruments/calibration/probe-sentinel";
 
 describe("sentinelPathFor", () => {
   it("places the sentinel in the status file's directory with the fixed filename", () => {

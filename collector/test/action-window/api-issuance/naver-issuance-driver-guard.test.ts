@@ -14,9 +14,9 @@ import { dirname, resolve } from "node:path";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DRIVER = resolve(HERE, "../../../src/action-window/naver-issuance-driver.ts");
-const CLI = resolve(HERE, "../../../src/cli/run-api-issuance-live-naver.ts");
-const PROBE_CLI = resolve(HERE, "../../../src/cli/probe-issuance-selectors.ts");
-const LIVE_PROOF_CLI = resolve(HERE, "../../../src/cli/issuance-live-proof.ts");
+const CLI = resolve(HERE, "../../../instruments/live-runs/run-api-issuance-live-naver.ts");
+const PROBE_CLI = resolve(HERE, "../../../instruments/calibration/probe-issuance-selectors.ts");
+const LIVE_PROOF_CLI = resolve(HERE, "../../../instruments/live-runs/issuance-live-proof.ts");
 
 /** Strip block comments and comment/JSDoc lines so prose mentioning a forbidden token never trips. */
 function codeOnly(path: string): string {

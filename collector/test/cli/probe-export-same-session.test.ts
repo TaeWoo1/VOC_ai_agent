@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CLI_PATH = join(__dirname, "..", "..", "src", "cli", "probe-export-same-session.ts");
+const CLI_PATH = join(__dirname, "..", "..", "instruments", "calibration", "probe-export-same-session.ts");
 
 /** Remove block + line comments so the guard checks only executable source, not prose. */
 function stripComments(src: string): string {
@@ -42,12 +42,12 @@ describe("probe-export-same-session — structurally cannot reach export / downl
     const imports = importLines.join("\n");
     expect(/review-export/.test(imports)).toBe(false);
     expect(/from\s+["'][^"']*upload[^"']*["']/.test(imports)).toBe(false);
-    expect(/from\s+["']\.\.\/status["']/.test(imports)).toBe(false);
+    expect(/from\s+["']\.\.\/\.\.\/src\/status["']/.test(imports)).toBe(false);
   });
 
   it("reuses the sanitized export-area sanitizer (allowed — it is not review-export)", () => {
     // extractExportProbeSignals lives in export-probe.ts (pure, sanitized), NOT review-export.ts.
-    expect(/from\s+["']\.\.\/naver\/export-probe["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/naver\/export-probe["']/.test(code)).toBe(true);
     expect(/extractExportProbeSignals/.test(code)).toBe(true);
     expect(/summarizeFrameExportProbes/.test(code)).toBe(true);
   });

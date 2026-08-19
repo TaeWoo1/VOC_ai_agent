@@ -18,7 +18,7 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 COLLECTOR_DIR="${SELLEROPS_COLLECTOR_DIR:-$REPO_ROOT/collector}"
 
 PHASE_EXPECTED="COUPANG_WING_REVIEW_STRUCTURE_DISCOVERY"
-CLI_REL="src/cli/calibrate-review-list.ts"
+CLI_REL="instruments/calibration/calibrate-review-list.ts"
 RUN_ENV="${SELLEROPS_WING_REVIEW_RUN_ENV:-$HERE/.run/wing-review-discovery.env}"
 
 FAILED=0

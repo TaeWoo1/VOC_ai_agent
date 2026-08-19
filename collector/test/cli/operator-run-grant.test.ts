@@ -10,7 +10,7 @@
  * surface and refuses to start without a verified press, with the flag demoted to a statement of intent.
  */
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync , existsSync} from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,11 +26,25 @@ import {
   runGrantRefusalMessage,
   type RunGrantBinding,
 } from "../../src/cli/operator-run-grant";
-import { revealRunGrantBinding } from "../../src/cli/run-coupang-wing-reveal-live";
-import { deletionRunGrantBinding } from "../../src/cli/run-coupang-wing-deletion-live";
-import { issuanceRunGrantBinding } from "../../src/cli/run-coupang-wing-issuance-live";
+import { revealRunGrantBinding } from "../../instruments/live-runs/run-coupang-wing-reveal-live";
+import { deletionRunGrantBinding } from "../../instruments/live-runs/run-coupang-wing-deletion-live";
+import { issuanceRunGrantBinding } from "../../instruments/live-runs/run-coupang-wing-issuance-live";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * A CLI's source, by bare filename. R2 split the entrypoints across `src/cli` (product CLIs) and
+ * `instruments/{calibration,live-runs}` (recorders and one-off live-run harnesses), so the lookup tries
+ * each tree rather than assuming one.
+ */
+const cliSource = (f: string): string => {
+  for (const dir of ["../../src/cli", "../../instruments/live-runs", "../../instruments/calibration"]) {
+    const full = resolve(HERE, dir, f);
+    if (existsSync(full)) return readFileSync(full, "utf8");
+  }
+  throw new Error(`CLI not found in any tree: ${f}`);
+};
+
 
 /**
  * Drive the REAL manifest CLI for the reveal phase and parse what it printed. Not a fixture: the whole point is
@@ -256,7 +270,7 @@ describe("the CLIs that hold a manifest bind their grant to it", () => {
   it("the string the two copies had drifted to is gone from the runs that render this screen", () => {
     // It is still a true description of the WING side alone, which is exactly why it came back once.
     const src = ["run-coupang-wing-reveal-live.ts", "run-coupang-wing-issuance-live.ts", "operator-run-grant.ts"]
-      .map((f) => readFileSync(resolve(HERE, "../../src/cli/", f), "utf8"))
+      .map((f) => cliSource(f))
       .join("\n");
     expect(src).not.toContain('"operator-owned Coupang WING test account"');
   });
@@ -268,7 +282,7 @@ describe("the CLIs that hold a manifest bind their grant to it", () => {
 });
 
 describe("the grant is taken BEFORE the run does anything", () => {
-  const src = (f: string): string => readFileSync(resolve(HERE, "../../src/cli/", f), "utf8");
+  const src = cliSource;
 
   it("**the reveal walk cannot start before the grant**", () => {
     const body = src("run-coupang-wing-reveal-live.ts");

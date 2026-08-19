@@ -13,7 +13,7 @@ import {
   visualSummaryAbsPath,
   type VisualCheckpointSignal,
   type VisualReconSessionDeps,
-} from "../../src/cli/capture-api-center-visual";
+} from "../../instruments/calibration/capture-api-center-visual";
 import type { RawRedactionReport, RawVisualSummary, RedactionCounts, SanitizedVisualSummary } from "../../src/action-window/api-issuance-calibration/visual-recon";
 
 function zero(): RedactionCounts {

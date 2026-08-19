@@ -35,7 +35,7 @@ import {
   type CalibrationReadState,
 } from "../../../src/action-window/reply-submission/reply-calibrate-inpage";
 import { ROW_MAPPING_SCHEMA_VERSION, type ReplyRowMapping } from "../../../src/action-window/reply-submission/reply-row-mapping-artifact";
-import { mappingFromCalibration } from "../../../src/cli/calibrate-reply-target";
+import { mappingFromCalibration } from "../../../instruments/calibration/calibrate-reply-target";
 
 const RUN = process.env.RUN_INTEGRATION === "1";
 const HEX16 = /^[0-9a-f]{16}$/;

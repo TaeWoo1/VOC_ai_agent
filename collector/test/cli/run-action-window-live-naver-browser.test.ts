@@ -32,7 +32,7 @@ import {
   assembleLiveRun,
   driveOneRun,
   type LiveRunDeps,
-} from "../../src/cli/run-action-window-live-naver";
+} from "../../instruments/live-runs/run-action-window-live-naver";
 import {
   NAVER_CHANNEL_CODE,
   NAVER_RUN_COPY_KEY,

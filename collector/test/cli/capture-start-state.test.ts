@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { waitForCaptureStartState } from "../../src/cli/capture-start-state";
+import { waitForCaptureStartState } from "../../instruments/calibration/capture-start-state";
 import type { SessionVerdict } from "../../src/naver/session-verdict";
 import type { PwPage } from "../../src/profile";
 
@@ -120,7 +120,7 @@ describe("waitForCaptureStartState — bounded timeout halts honestly", () => {
 
 describe("capture-start-state.ts — source guard: read-only", () => {
   const __dirname = dirname(fileURLToPath(import.meta.url));
-  const SRC = join(__dirname, "..", "..", "src", "cli", "capture-start-state.ts");
+  const SRC = join(__dirname, "..", "..", "instruments", "calibration", "capture-start-state.ts");
   const code = readFileSync(SRC, "utf8")
     .replace(/\/\*[\s\S]*?\*\//g, " ")
     .replace(/(^|[^:])\/\/.*$/gm, "$1");

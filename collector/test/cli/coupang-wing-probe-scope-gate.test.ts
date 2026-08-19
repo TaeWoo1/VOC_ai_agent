@@ -18,7 +18,7 @@ import {
   WING_PROBE_TARGET_NAMES,
   WING_RUN_TARGETS_ENV,
 } from "../../src/cli/coupang-wing-classifier";
-import { scopedRecordTargetsFor, scopeRefusalMessage, WING_RECORD_TARGETS } from "../../src/cli/probe-wing-issuance-selectors";
+import { scopedRecordTargetsFor, scopeRefusalMessage, WING_RECORD_TARGETS } from "../../instruments/calibration/probe-wing-issuance-selectors";
 
 /** Both env vars set to the same scope — the shape the preflight binds. */
 function approved(scope: string, run: string = scope): Record<string, string | undefined> {
@@ -172,7 +172,7 @@ describe("the manifest's own scope resolution is unchanged", () => {
 });
 
 describe("the live CLI wires the gate, not the manifest resolver", () => {
-  const source = readFileSync(fileURLToPath(new URL("../../src/cli/probe-wing-issuance-selectors.ts", import.meta.url)), "utf8");
+  const source = readFileSync(fileURLToPath(new URL("../../instruments/calibration/probe-wing-issuance-selectors.ts", import.meta.url)), "utf8");
   const code = source
     .split("\n")
     .filter((l) => !l.trimStart().startsWith("*") && !l.trimStart().startsWith("//") && !l.trimStart().startsWith("/*"))

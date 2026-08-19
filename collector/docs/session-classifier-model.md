@@ -117,7 +117,7 @@ Bridging an interactive `--login` to a later separate-launch `probe-session` los
 NAVER/Commerce session on the browser restart, so the probe always re-reads a login page
 (diagnosed: same `profileDir`/channel, not a path bug — the *restart* is the failing
 variable). To read the verdict in the session the human actually established, use
-`src/cli/probe-same-session.ts` (`npm run probe-same-session -- --i-understand-this-opens-live-naver`):
+`instruments/calibration/probe-same-session.ts` (`npm run probe-same-session -- --i-understand-this-opens-live-naver`):
 one persistent-context lifetime — open NAVER → the human logs in / clears 2FA-CAPTCHA /
 picks the Commerce account+store and navigates to the target → **signals readiness by
 creating the sentinel file the probe prints** → the **same** context reads the page **as
@@ -126,7 +126,7 @@ left** and prints the sanitized `extractProbeSignals` output (including `session
 **Continuation = a sentinel file, not a terminal Enter.** The Bash tool's stdin does not
 reliably deliver an Enter keypress, so the probe polls for a sentinel file whose exact
 absolute path it prints — default `.status/probe-same-session.ready`, derived by the pure
-`src/cli/probe-sentinel.ts` (`sentinelPathFor`). When ready, the operator (or Claude on
+`instruments/calibration/probe-sentinel.ts` (`sentinelPathFor`). When ready, the operator (or Claude on
 their behalf) creates that file with constant non-secret content
 (`printf 'ready\n' > .status/probe-same-session.ready`). The probe clears any stale
 sentinel at startup (so a leftover can never auto-proceed), proceeds only when it appears
@@ -145,7 +145,7 @@ the export structure and persists a status record.
 `probe-same-session` reads only the **top document**, so on the review route a `LOGGED_IN`
 page still reports `exportCandidateCount: "none"` — and that one reading **cannot tell apart**
 a nested iframe, a shadow DOM, a sub-route, a gated/hidden control, or a marker mismatch (all
-read identically as "none"). `src/cli/probe-export-same-session.ts`
+read identically as "none"). `instruments/calibration/probe-export-same-session.ts`
 (`npm run probe-export-same-session -- --i-understand-this-opens-live-naver`) keeps the **same**
 one-context + sentinel flow but reads the **top document plus every child frame** so the next
 live run can *observe* which frame (if any) hosts export controls instead of guessing.
@@ -184,7 +184,7 @@ structure alone**. `src/naver/export-classify.ts` adds a pure `planExportAction(
   (the raw selector strings, which can embed ids/keywords, are never emitted);
 - `asyncMarkerPresent` — an async download-center/job affordance is present (it wins over sync).
 
-`src/cli/classify-export-same-session.ts`
+`instruments/calibration/classify-export-same-session.ts`
 (`npm run classify-export-same-session -- --i-understand-this-opens-live-naver`) keeps the **same**
 one-context + sentinel flow as the probes, reads the page **as the human left it** (no re-nav),
 and prints `{ sessionVerdict, plan, exportSignals }` — the verdict gate, the no-click plan, and the

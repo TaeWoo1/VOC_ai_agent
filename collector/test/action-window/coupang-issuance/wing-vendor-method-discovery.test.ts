@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync , existsSync} from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -59,12 +59,22 @@ import {
   wingPhaseCalibrates,
   wingPhaseFlowPlan,
   type WingSelectorRecordDeps,
-} from "../../../src/cli/probe-wing-issuance-selectors";
+} from "../../../instruments/calibration/probe-wing-issuance-selectors";
 import { observeFrom, type WingStructuralCensus } from "../../../src/cli/coupang-wing-classifier";
 import { OPERATOR_CONFIRMED } from "../../fixtures/operator-confirmation";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SRC = (rel: string): string => readFileSync(resolve(HERE, "../../../src", rel), "utf8");
+/**
+ * Reads a source file by a path relative to `src` (product code) OR to the collector root
+ * (`instruments/...`, where R2 moved the calibration recorders and live-run harnesses).
+ */
+const SRC = (rel: string): string => {
+  for (const root of [resolve(HERE, "../../../src"), resolve(HERE, "../../..")]) {
+    const full = resolve(root, rel);
+    if (existsSync(full)) return readFileSync(full, "utf8");
+  }
+  throw new Error(`source not found: ${rel}`);
+};
 
 /* ══════════════════════════ the PLAN, and where each one ends ══════════════════════════ */
 
@@ -144,7 +154,7 @@ describe("a phase resolves to its OWN plan, or to none", () => {
   it("the consent-block census is gated on HAVING A PLAN, not on one phase's name", () => {
     // The vendor run walks through the same terms screen. An equality check against the discovery phase would
     // have taken no census on it — the shape that silently downgraded discovery to a bare recon once already.
-    const src = SRC("cli/probe-wing-issuance-selectors.ts");
+    const src = SRC("instruments/calibration/probe-wing-issuance-selectors.ts");
     expect(src).toContain("wingPhaseFlowPlan(phase) !== null && consentInScope");
   });
 });
@@ -544,7 +554,7 @@ describe("runWingFlowDiscovery under the vendor plan", () => {
 /* ══════════════════════════ what the operator is told ══════════════════════════ */
 
 describe("the instructions the operator reads", () => {
-  const CLI_SRC = SRC("cli/probe-wing-issuance-selectors.ts");
+  const CLI_SRC = SRC("instruments/calibration/probe-wing-issuance-selectors.ts");
 
   it("**the vendor checkpoint attributes the no-key claim to the OPERATOR**, not to a measurement", () => {
     // The justification for asking anyone to press this control. It read "MEASURED not to create a key" in

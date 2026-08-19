@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CLI_PATH = join(__dirname, "..", "..", "src", "cli", "probe-session-precondition-same-session.ts");
+const CLI_PATH = join(__dirname, "..", "..", "instruments", "calibration", "probe-session-precondition-same-session.ts");
 
 /** Remove block + line comments so the guard checks only executable source, not prose. */
 function stripComments(src: string): string {
@@ -52,7 +52,7 @@ describe("probe-session-precondition-same-session — read-only, stops at the se
     const imports = importLines.join("\n");
     expect(/review-export/.test(imports)).toBe(false);
     expect(/from\s+["'][^"']*upload[^"']*["']/.test(imports)).toBe(false);
-    expect(/from\s+["']\.\.\/status["']/.test(imports)).toBe(false);
+    expect(/from\s+["']\.\.\/\.\.\/src\/status["']/.test(imports)).toBe(false);
     expect(/from\s+["'][^"']*\/engine["']/.test(imports)).toBe(false);
     expect(/from\s+["'][^"']*action-window\/session["']/.test(imports)).toBe(false);
     expect(/from\s+["'][^"']*quarantine[^"']*["']/.test(imports)).toBe(false);
@@ -62,9 +62,9 @@ describe("probe-session-precondition-same-session — read-only, stops at the se
   });
 
   it("imports ONLY the read-only verdict seam + the pure precondition mapping", () => {
-    expect(/from\s+["']\.\.\/naver\/session-check["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/naver\/session-check["']/.test(code)).toBe(true);
     expect(/checkLiveSessionVerdict/.test(code)).toBe(true);
-    expect(/from\s+["']\.\.\/action-window\/naver-session-precondition["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/action-window\/naver-session-precondition["']/.test(code)).toBe(true);
     expect(/naverSessionPrecondition/.test(code)).toBe(true);
   });
 
@@ -80,7 +80,7 @@ describe("probe-session-precondition-same-session — read-only, stops at the se
 
   it("is gated by the explicit per-run live-run approval flag", () => {
     expect(/hasLiveRunApproval\s*\(/.test(code)).toBe(true);
-    expect(/from\s+["']\.\/live-run-approval["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/\.\.\/src\/cli\/live-run-approval["']/.test(code)).toBe(true);
   });
 });
 

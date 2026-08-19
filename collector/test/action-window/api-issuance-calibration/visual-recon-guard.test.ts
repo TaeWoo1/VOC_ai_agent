@@ -13,7 +13,7 @@ import { buildFixedLabelLocateScript, buildRedactionScript, EXTRACT_VISUAL_CONTR
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const INPAGE = join(__dirname, "..", "..", "..", "src", "action-window", "api-issuance-calibration", "visual-recon-inpage.ts");
-const CLI = join(__dirname, "..", "..", "..", "src", "cli", "capture-api-center-visual.ts");
+const CLI = join(__dirname, "..", "..", "..", "instruments", "calibration", "capture-api-center-visual.ts");
 
 function stripComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/.*$/gm, "$1");
