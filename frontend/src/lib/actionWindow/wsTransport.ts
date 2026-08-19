@@ -308,6 +308,28 @@ async function openAnnouncedSocket(d: ResolvedDeps): Promise<OpenedSocket | AwRe
         giveUp("carrier-mismatch", announced ?? undefined);
         return;
       }
+      /**
+       * **The CHANNEL too, when we named one — `carrier` alone does not identify a walk.**
+       *
+       * The Coupang and NAVER guided walks both announce `carrier: "issuance"`; the only field that tells them
+       * apart is `channelCode`. So a tab on `/connect/coupang` that attached while the NAVER walk still held the
+       * slot matched on `issuance`, ACCEPTED the NAVER announcement, and built a runtime addressing that run —
+       * which the host then released. Its commands went to a run that no longer existed, and the screen waited
+       * forever; a refresh made a fresh session that met the Coupang announcement and worked.
+       *
+       * Live 2026-08-19: `handover naver→coupang` at 18:06:52.215, Coupang carrier up at .397, and then no
+       * `profile.launch` at all for 30 s — the browser never opened because START_RUN never reached the Coupang
+       * engine. The seller refreshed at 18:07:23 and the window came up 5 ms later.
+       *
+       * Treated exactly like a carrier mismatch: remembered, not fatal, so a handover still resolves on the
+       * correct announcement that follows. `attachChannelCode` is what the caller asked for; a caller that
+       * named no channel is unchanged (a fixed-carrier agent announces one run and there is nothing to confuse
+       * it with).
+       */
+      if (d.attachChannelCode && m.channelCode !== d.attachChannelCode) {
+        sawOtherCarrier = announced ?? sawOtherCarrier;
+        return;
+      }
       settled = true;
       clearTimeout(timer);
       resolve({ ok: true, ws, runId: m.runId, channelCode: m.channelCode });

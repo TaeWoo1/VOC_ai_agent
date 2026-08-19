@@ -345,11 +345,11 @@ describe("actionWindow/wsTransport — carrier discrimination", () => {
     const ws = await until(() => h.sockets[0]);
 
     // What the host was still hosting when this socket connected.
-    ws.receive({ ...ANNOUNCEMENT, carrier: "renewal" });
+    ws.receive({ ...ANNOUNCEMENT, carrier: "renewal", channelCode: "coupang" });
     // NOT settled: no client is built for the wrong carrier, but the decision is not made yet either.
     expect(ws.closedByClient).toBe(false);
 
-    ws.receive({ ...ANNOUNCEMENT, carrier: "locate", runId: "run_locate_1" });
+    ws.receive({ ...ANNOUNCEMENT, carrier: "locate", channelCode: "coupang", runId: "run_locate_1" });
 
     const result = await pending;
     expect(result.ok).toBe(true);
@@ -357,11 +357,40 @@ describe("actionWindow/wsTransport — carrier discrimination", () => {
     expect(result.session.runId).toBe("run_locate_1");
   });
 
+  /**
+   * **`carrier` alone does not identify a walk.** The Coupang and NAVER guided walks BOTH announce
+   * `carrier: "issuance"`; only `channelCode` separates them.
+   *
+   * Live 2026-08-19: a tab on `/connect/coupang` attached while the NAVER walk still held the slot, matched on
+   * `issuance`, accepted the NAVER announcement, and built a runtime addressing a run the host then released.
+   * Its START_RUN went nowhere, the browser never opened, and the screen waited — until the seller refreshed,
+   * which made a fresh session that met the Coupang announcement and worked 5 ms later.
+   */
+  it("does not accept the SAME carrier on a DIFFERENT channel — it waits for the one it asked for", async () => {
+    const h = harness({ attachChannelCode: "coupang", expectedCarrier: "issuance" });
+    const pending = connectAwBridgeSession(h.deps);
+    const ws = await until(() => h.sockets[0]);
+
+    // The other channel's walk, still holding the slot. Same carrier kind — the field that used to be the
+    // whole check.
+    ws.receive({ ...ANNOUNCEMENT, carrier: "issuance", channelCode: "naver", runId: "run_naver_1" });
+    expect(ws.closedByClient).toBe(false);
+
+    ws.receive({ ...ANNOUNCEMENT, carrier: "issuance", channelCode: "coupang", runId: "run_coupang_1" });
+
+    const result = await pending;
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    // The run it drives is the one it asked for — not the one that happened to be announced first.
+    expect(result.session.runId).toBe("run_coupang_1");
+    expect(result.session.channelCode).toBe("coupang");
+  });
+
   it("…and still refuses with carrier-mismatch if the right announcement never comes", async () => {
     const h = harness({ attachChannelCode: "coupang", expectedCarrier: "locate", sessionTimeoutMs: 20 });
     const pending = connectAwBridgeSession(h.deps);
     const ws = await until(() => h.sockets[0]);
-    ws.receive({ ...ANNOUNCEMENT, carrier: "renewal" });
+    ws.receive({ ...ANNOUNCEMENT, carrier: "renewal", channelCode: "coupang" });
 
     // The diagnosis survives the wait — a genuinely fixed-carrier agent of the wrong kind is still
     // named, just at the timeout instead of on the first frame.
