@@ -5,12 +5,11 @@ import { blockerView } from "../../lib/actionWindow/copy";
 import { ActionWindowControlPanel } from "../actionWindow/ActionWindowControlPanel";
 import { BlockerNotice } from "../actionWindow/BlockerNotice";
 import { AgentPairingPanel } from "../reviewImport/AgentPairingPanel";
-import { AgentEnvNotice } from "../guidedConnection/AgentEnvNotice";
 import { AdvertisedCallIpPanel } from "../guidedConnection/AdvertisedCallIpPanel";
+import { Spinner } from "../ui/Spinner";
 import { CoupangIssuanceTutorial } from "./CoupangIssuanceTutorial";
 import { useGuidedIssuance } from "../../lib/actionWindow/issuance/useGuidedIssuance";
 import type { GuidedIssuanceRuntime } from "../../lib/actionWindow/issuance/issuanceRuntime";
-import { classifyAgentEnv, type AgentEnvStatus } from "../../lib/guidedConnection";
 import { isIssuanceResumeReturn } from "../../lib/coupangTutorial";
 
 /**
@@ -24,9 +23,12 @@ import { isIssuanceResumeReturn } from "../../lib/coupangTutorial";
  *
  * The bridge lives INSIDE this component, which mounts only in the `issuance` journey phase. Credential
  * entry, the connection test, the first sync, and every already-progressed path never see it. A seller with
- * no helper — or who declines pairing — is never blocked: a persistent "텍스트로 직접 진행하기" affordance
- * (offered only when guidance cannot run) switches to the static WING checklist, and a "이미 키가 있어요"
- * skip on the start gate jumps straight to credential entry. Issuance can always be completed with text alone.
+ * no helper — or who declines pairing — is never blocked: the screen walk is used ONLY when it can actually
+ * run; the moment it is known that it cannot (no helper, pairing will not fix it, or the paired helper hosts
+ * no walk) the component is the static WING text checklist — with no error, because that is an ordinary way
+ * to issue the key, not a failure. While the walk is being prepared a "텍스트로 직접 진행하기" affordance
+ * is one click away, and an "이미 키가 있어요" skip on the start gate jumps straight to credential entry.
+ * Issuance can always be completed with text alone.
  *
  * ## Never a credential, never a scripted page
  *
@@ -87,8 +89,8 @@ export function CoupangIssuanceGuidedWalkthrough({
   // press themselves and adopts whatever run the agent is hosting — it authorizes nothing.
   const resumed = !controlled && isIssuanceResumeReturn(typeof window === "undefined" ? "" : window.location.search);
   const [started, setStarted] = useState(controlled || resumed);
-  // The failure-only text fallback: the static WING checklist. Local to this phase — the pure journey reducer
-  // only owns the issuance→connect transition (via `onIssued`), not the guided/text sub-mode.
+  // The seller's explicit switch to the text checklist. Local to this phase — the pure journey reducer only
+  // owns the issuance→connect transition (via `onIssued`), not the guided/text sub-mode.
   const [textMode, setTextMode] = useState(false);
 
   // The bridge is confined to this component (this phase). Enabled ONLY after the seller starts; the order
@@ -96,12 +98,13 @@ export function CoupangIssuanceGuidedWalkthrough({
   const bridge = useBridge(started);
   const phase = bridge.state.phase;
   const paired = phase === "paired";
-  // The agent cannot guide and pairing will not fix it → switch to text. `incompatible_version` needs an app
-  // update (AgentPairingPanel renders nothing for it); a denial/revocation is an explicit refusal.
+  // The agent cannot guide and pairing will not fix it. `incompatible_version` needs an app update; a
+  // denial/revocation is an explicit refusal.
   const cannotPair = phase === "incompatible_version" || phase === "pairing_denied" || phase === "revoked";
-  // The agent is simply not there (off / not installed / LNA-blocked). AgentPairingPanel offers a retry; we
-  // ALSO surface the text fallback, because a seller with no Local Agent must have a way forward.
+  // The agent is simply not there (off / not installed / LNA-blocked).
   const agentUnreachable = phase === "unreachable";
+  // The bridge is still finding out (first detection, a websocket reconnect). Not a verdict yet.
+  const agentSettling = phase === "connecting" || phase === "connecting_ws" || phase === "disconnected";
 
   // Live issuance run host — the SHARED host for every channel (the run's channelCode comes from the agent
   // announcement). Inert until `attach()` is called.
@@ -130,22 +133,23 @@ export function CoupangIssuanceGuidedWalkthrough({
   const alreadyHadKey = credentialState === "KEY_PRESENT";
   const effectiveRun = controlled ? (run ?? null) : liveView;
   const effectiveCommand = controlled ? onCommand : issuance.send;
-  // The host refused (wrong carrier / unreachable / START_RUN rejected) → guidance can't run; point at text.
+  // The host refused (no carrier announced / wrong carrier / unreachable / START_RUN rejected) → guidance can't
+  // run on this helper. WHICH of those it was is an internal agent-runtime fact (which carrier the resident
+  // helper happens to host); a seller cannot act on it and is not shown it.
   const hostRefusal = controlled ? null : issuance.unavailable;
   const hostRefused = hostRefusal !== null;
-  const cannotGuide = cannotPair || hostRefused;
-  // Classify the host-refusal into a DISTINCT situation so "hosting a different run/session"
-  // (carrier-mismatch → SESSION_MISMATCH) is guided differently from "cannot host" or "not running".
-  // `start-refused` is an issuance-level reason: the agent is paired but the run would not start.
-  const hostAgentEnv: AgentEnvStatus | null = !hostRefused
-    ? null
-    : hostRefusal === "start-refused"
-      ? { code: "HOST_UNAVAILABLE", fault: "agent", canRetry: true, offerTextFallback: true }
-      : classifyAgentEnv({ bridgePhase: phase, hostRefusal });
-  // Text is a FALLBACK, never a co-equal choice: offered ONLY when guidance cannot run — the agent can't pair
-  // (incompatible/denied/revoked), the host refused, or the agent is unreachable. On the healthy paired path
-  // it never appears.
-  const offerTextFallback = cannotGuide || agentUnreachable;
+  // **Guidance only when it can actually run.** Whenever the screen walk is known to be impossible — the agent
+  // is not there, pairing will not fix it, or the paired helper cannot host the walk — the walkthrough goes
+  // straight to the ordinary text issuance flow. No error is shown for it: the text flow is a complete,
+  // first-class way to issue the key and connect (credential → verify → first sync), not a degraded one.
+  // Reported live 2026-08-19: a resident helper without an Action Window carrier left the seller on
+  // "화면 안내를 실행할 수 없어요" after a 4s timeout, for a state that was never theirs to fix.
+  const guidanceImpossible = agentUnreachable || cannotPair || hostRefused;
+  // Still deciding: detecting the helper, pairing, or attaching to the host (no run yet, no refusal yet).
+  const guidancePreparing = !guidanceImpossible && !effectiveRun;
+  // The text flow is the way out of every waiting state too — a seller never has to wait on (or pair) the
+  // helper to proceed. It disappears only once a hosted run is actually on screen.
+  const offerTextFallback = guidancePreparing;
 
   // WING-RESIDENT walk: the FE is NOT the per-step controller. Step advance happens ON the WING page (the
   // overlay's own "다음" button), so this screen surfaces NO per-step recheck control during a healthy barrier —
@@ -166,14 +170,6 @@ export function CoupangIssuanceGuidedWalkthrough({
     ? effectiveRun.allowedCommands.filter((c) => !OFFERED_COMMANDS.includes(c))
     : [];
 
-  // Retry for a HOST refusal (agent paired but hosting a different run / cannot host right now). The bridge is
-  // already paired, so re-detecting it is not the fix — the issuance HOST must be re-attached. `attach()` is
-  // idempotent, so this cannot open a second socket.
-  const retryHost = () => {
-    attachedRef.current = false;
-    void attach();
-  };
-
   const toText = () => {
     // Switching to text IS the manual path: if a guided run is live and the runtime accepts it, tell the
     // runtime first (SWITCH_TO_MANUAL → the run aborts cleanly) so it is not left orphaned, then show the
@@ -184,9 +180,11 @@ export function CoupangIssuanceGuidedWalkthrough({
     setTextMode(true);
   };
 
-  // Text fallback: the static WING checklist. The seller completes issuance here and hands off to credential
-  // entry via `onIssued`. SellerOps never scripts WING — the checklist only opens it in a new tab.
-  if (textMode) {
+  // The text flow: the static WING checklist. Entered by the seller's own click, or automatically the moment
+  // guidance is known to be impossible (once started, never on the start gate). The seller completes issuance
+  // here and hands off to credential entry via `onIssued`. SellerOps never scripts WING — the checklist only
+  // opens it in a new tab.
+  if (textMode || (started && guidanceImpossible)) {
     return (
       <div className="space-y-3" aria-label="쿠팡 Open API 키 발급 (텍스트 안내)">
         <p className="text-sm text-muted break-keep">
@@ -247,8 +245,18 @@ export function CoupangIssuanceGuidedWalkthrough({
         <AdvertisedCallIpPanel ips={advertisedEgressIps} />
       </section>
 
-      {/* Pairing (guided path only). AgentPairingPanel self-hides when paired or on an incompatible version. */}
-      {!paired && (
+      {/* Still deciding whether the walk can run. Two honest faces, neither an error: a neutral "preparing"
+          line (detecting the helper / attaching to the host) and, when the helper is there but not yet paired,
+          the pairing action itself. An impossible state never reaches this render — it is the text flow above. */}
+      {guidancePreparing && (paired || agentSettling) && (
+        <div className="flex items-center gap-3 rounded-xl bg-canvas px-4 py-3" role="status">
+          <Spinner />
+          <p className="text-sm text-muted break-keep">
+            {paired ? "도우미가 연결됐어요. 쿠팡 윙 안내를 준비하고 있어요." : "내 PC의 SellerOps 도우미를 찾고 있어요…"}
+          </p>
+        </div>
+      )}
+      {guidancePreparing && !paired && !agentSettling && (
         <AgentPairingPanel
           phase={phase}
           confirmationCode={bridge.state.confirmationCode ?? null}
@@ -259,30 +267,12 @@ export function CoupangIssuanceGuidedWalkthrough({
         />
       )}
 
-      {/* Pairing itself won't help (needs an update / declined / revoked) — the generic guidance to text. */}
-      {cannotPair && (
-        <p className="rounded-xl bg-warn/10 px-4 py-3 text-sm text-ink break-keep" role="status">
-          화면 안내를 사용할 수 없어요. 텍스트로 진행해 주세요.
-        </p>
-      )}
-
-      {/* Agent paired but the host refused → a DISTINCT notice, never conflated with "the agent is not
-          running". */}
-      {hostAgentEnv && <AgentEnvNotice status={hostAgentEnv} onRetry={retryHost} />}
-
-      {/* Text is a FALLBACK, shown ONLY when guidance cannot run. On the healthy paired path it never
-          appears. */}
+      {/* The text flow is always one click away while the walk is being prepared; it disappears once a hosted
+          run is on screen (the walk is then really running). */}
       {offerTextFallback && (
         <button type="button" className="btn-ghost text-sm" onClick={toText} disabled={busy}>
           텍스트로 직접 진행하기
         </button>
-      )}
-
-      {/* Paired but no run yet: the agent is connected; the guidance run is starting. */}
-      {paired && !effectiveRun && !cannotGuide && (
-        <p className="rounded-xl bg-canvas px-4 py-3 text-sm text-muted break-keep" role="status">
-          도우미가 연결됐어요. 쿠팡 윙 안내를 준비하고 있어요.
-        </p>
       )}
 
       {/* A hosted run → the WING-resident status surface. The seller's primary screen is the 쿠팡 윙 창; this

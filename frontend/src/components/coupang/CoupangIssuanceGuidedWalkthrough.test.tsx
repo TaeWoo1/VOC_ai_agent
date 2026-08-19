@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 // The Action Window guided walkthrough for Coupang WING Open API key issuance. It reuses the shared AW
-// surfaces (timeline / controls / blocker) from a fixture run view, offers a text fallback when the agent
-// cannot guide (and an "이미 키가 있어요" skip on the start gate), and never renders a credential/selector/
-// url/account id. The bridge (useBridge) is mocked so the component renders with no live bridge.
+// surfaces (timeline / controls / blocker) from a fixture run view, IS the text issuance flow whenever the
+// screen walk cannot actually run (no error shown; plus an "이미 키가 있어요" skip on the start gate), and
+// never renders a credential/selector/url/account id. The bridge (useBridge) is mocked so the component renders with no live bridge.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, act, fireEvent } from "@testing-library/react";
 import { screen, userEvent } from "../../test/renderWithRouter";
@@ -266,22 +266,43 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
     expect(screen.queryByRole("button", { name: "텍스트로 직접 진행하기" })).toBeNull();
   });
 
-  it("agent incompatible (pairing won't help) → the text FALLBACK appears and shows the WING checklist", async () => {
+  it("agent incompatible (pairing won't help) → the text flow directly, with NO error notice and NO extra click", async () => {
     h.bridge = { phase: "incompatible_version", maybeNeedsLocalNetworkAccess: false } as BridgeState;
     const onIssued = vi.fn();
     render(<CoupangIssuanceGuidedWalkthrough onIssued={onIssued} run={null} onCommand={vi.fn()} />);
-    expect(screen.getByText("화면 안내를 사용할 수 없어요. 텍스트로 진행해 주세요.")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "텍스트로 직접 진행하기" }));
-    // The static WING checklist takes over; completing it hands off to credential entry.
+    // The static WING checklist IS the screen; nothing says "cannot" / "error", and nothing mentions the helper.
     expect(screen.getByLabelText("쿠팡 Open API 키 발급 안내")).toBeInTheDocument();
+    expect(screen.queryByText(/화면 안내를 사용할 수 없어요/)).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByTestId("agent-pairing")).toBeNull();
+    expect(screen.queryByRole("button", { name: "텍스트로 직접 진행하기" })).toBeNull();
+    // Completing it hands off to credential entry.
     await userEvent.click(screen.getByRole("button", { name: "발급을 완료했어요" }));
     expect(onIssued).toHaveBeenCalledTimes(1);
   });
 
-  it("agent unreachable (not installed / off) → pairing panel retry PLUS a text fallback", () => {
+  it("agent unreachable (not installed / off) → the text flow directly; no pairing panel, no retry, no error", () => {
     h.bridge = { phase: "unreachable", maybeNeedsLocalNetworkAccess: false } as BridgeState;
     render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} run={null} onCommand={vi.fn()} />);
+    expect(screen.getByLabelText("쿠팡 Open API 키 발급 안내")).toBeInTheDocument();
+    expect(screen.queryByTestId("agent-pairing")).toBeNull();
+    expect(screen.queryByText(/찾지 못했어요/)).toBeNull();
+  });
+
+  it("agent still being detected → a neutral preparing line (spinner), never the 'not found' wording, and the text flow one click away", () => {
+    h.bridge = { phase: "connecting", maybeNeedsLocalNetworkAccess: false } as BridgeState;
+    render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} run={null} onCommand={vi.fn()} />);
+    expect(screen.getByRole("status")).toHaveTextContent("도우미를 찾고 있어요");
+    expect(screen.getByTestId("spinner")).toBeInTheDocument();
+    expect(screen.queryByText(/찾지 못했어요/)).toBeNull();
+    expect(screen.getByRole("button", { name: "텍스트로 직접 진행하기" })).toBeInTheDocument();
+  });
+
+  it("helper running but not paired → the pairing action (not an error) plus the text flow one click away", () => {
+    h.bridge = { phase: "unpaired", maybeNeedsLocalNetworkAccess: false } as BridgeState;
+    render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} run={null} onCommand={vi.fn()} />);
     expect(screen.getByTestId("agent-pairing")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "도우미 연결하기" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "텍스트로 직접 진행하기" })).toBeInTheDocument();
   });
 
@@ -433,8 +454,10 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
       const host = fakeHost();
       render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} />);
       start();
-      // After start: paired, no run yet → the preparing line.
+      // After start: paired, no run yet → the preparing line (spinner, neutral), with the text flow one click away.
       expect(screen.getByText("도우미가 연결됐어요. 쿠팡 윙 안내를 준비하고 있어요.")).toBeInTheDocument();
+      expect(screen.getByTestId("spinner")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "텍스트로 직접 진행하기" })).toBeInTheDocument();
       act(() => host.publish(issuanceRun()));
       // A healthy barrier shows the WING-resident status (not a step-by-step timeline / 다음).
       expect(screen.getByText("쿠팡(윙) 창에서 화면 안내를 따라 진행하세요")).toBeInTheDocument();

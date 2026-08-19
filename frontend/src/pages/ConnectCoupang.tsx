@@ -6,6 +6,7 @@ import { CoupangConnectTutorial } from "../components/coupang/CoupangConnectTuto
 import { CoupangIssuanceGuidedWalkthrough } from "../components/coupang/CoupangIssuanceGuidedWalkthrough";
 import { WalkthroughBanner } from "../components/guidedConnection/WalkthroughBanner";
 import { WalkthroughMismatch } from "../components/guidedConnection/WalkthroughMismatch";
+import { Spinner } from "../components/ui/Spinner";
 import {
   evaluateBinding,
   expectedWalkthroughUrl,
@@ -106,6 +107,10 @@ export function ConnectCoupang() {
   const [advertisedEgressIps, setAdvertisedEgressIps] = useState<readonly string[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatusView | null>(null);
   const [busy, setBusy] = useState(false);
+  // Which part of the credential submit is in flight, for the waiting screen: saving the key (our vault) or
+  // verifying it against Coupang (the backend's authentication + order-access probes, one call). Honest
+  // granularity only — the two probes are one backend call, so they are one stage here, never two pretend ones.
+  const [submitStage, setSubmitStage] = useState<"storing" | "verifying" | null>(null);
 
   const [accountId, setAccountId] = useState<string | null>(null);
   const accountIdRef = useRef<string | null>(null); // synchronous mirror so a just-created id is usable at once
@@ -320,6 +325,7 @@ export function ConnectCoupang() {
       inFlightRef.current = true;
       dispatch({ type: "SUBMIT" });
       setBusy(true);
+      setSubmitStage("storing");
       try {
         let id = accountIdRef.current;
         if (!id) {
@@ -334,12 +340,14 @@ export function ConnectCoupang() {
           authType: template.authType,
           secrets,
         });
+        setSubmitStage("verifying");
         await testStep(id);
       } catch {
         dispatch({ type: "SUBMIT_FAILED" });
       } finally {
         inFlightRef.current = false;
         setBusy(false);
+        setSubmitStage(null);
       }
     },
     [template, coupangChannelId, testStep],
@@ -352,11 +360,13 @@ export function ConnectCoupang() {
     inFlightRef.current = true;
     dispatch({ type: "RETEST" });
     setBusy(true);
+    setSubmitStage("verifying");
     try {
       await testStep(id);
     } finally {
       inFlightRef.current = false;
       setBusy(false);
+      setSubmitStage(null);
     }
   }, [testStep]);
 
@@ -507,7 +517,8 @@ export function ConnectCoupang() {
   const journey = (() => {
     if (loading || state.phase === "resolving") {
       return (
-        <div className="mx-auto max-w-2xl px-5 py-10">
+        <div className="mx-auto flex max-w-2xl items-center gap-3 px-5 py-10" role="status">
+          <Spinner />
           <p className="text-base text-muted">{C.loading}</p>
         </div>
       );
@@ -559,6 +570,7 @@ export function ConnectCoupang() {
               state={state}
               template={template}
               busy={busy}
+              submitStage={submitStage}
               advertisedEgressIps={advertisedEgressIps}
               connectionStatus={connectionStatus}
               syncProgress={syncProgress}

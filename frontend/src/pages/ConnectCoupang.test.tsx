@@ -4,7 +4,7 @@
 // lands on PREPARING (not a completed connection), the explicit first-sync CTA → CONNECTED, refresh
 // recovery from persisted state, per-reason error recovery, and the single-flight guards.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, render } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { screen, userEvent } from "../test/renderWithRouter";
 import type { ConnectionTestResultView, SellerAccountResponse, SyncRunView } from "../lib/types";
@@ -190,6 +190,28 @@ describe("ConnectCoupang tutorial", () => {
     await skipIssuance(user);
     expect(await screen.findByTestId("coupang-prereqs")).toBeInTheDocument();
     expect(await screen.findByText(/아직 설정되지 않았습니다/)).toBeInTheDocument();
+  });
+
+  it("while the submit is in flight the page shows the IN-PROGRESS waiting screen (save → verify), never the form or an error", async () => {
+    let finishTest!: () => void;
+    h.testConnection.mockImplementationOnce(
+      () => new Promise((resolve) => { finishTest = () => resolve(h.testResult); }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await skipIssuance(user);
+    await screen.findByTestId("coupang-prereqs");
+    await fillCredentials(user);
+    await user.click(screen.getByRole("button", { name: "연결 정보 저장" }));
+    // Stored → now verifying against Coupang: the waiting panel names the current stage.
+    const waiting = await screen.findByTestId("coupang-verifying");
+    await waitFor(() => expect(waiting).toHaveTextContent("쿠팡에 연결을 확인하고 있어요"));
+    expect(waiting).toHaveAttribute("role", "status");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("button", { name: "연결 정보 저장" })).toBeNull();
+    finishTest();
+    expect(await screen.findByTestId("coupang-preparing")).toBeInTheDocument();
+    expect(screen.queryByTestId("coupang-verifying")).toBeNull();
   });
 
   it("submit → lazy account-create → store → test lands on PREPARING (not completed), with an explicit CTA", async () => {

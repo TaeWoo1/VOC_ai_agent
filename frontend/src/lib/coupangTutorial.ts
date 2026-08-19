@@ -364,6 +364,14 @@ export const COUPANG_TUTORIAL_COPY = {
   step3Body:
     "입력한 키는 암호화되어 저장되고, 즉시 연결 확인만 수행합니다. 주문 상태를 바꾸거나 어떤 것도 전송하지 않습니다.",
 
+  // Step 3 — submitting (the waiting screen). In-progress wording only — never "실패/오류" here.
+  verifyingStoringTitle: "연결 정보를 저장하고 있어요",
+  verifyingTitle: "쿠팡에 연결을 확인하고 있어요",
+  verifyingBody: "보통 몇 초 걸려요. 키는 암호화되어 저장되고, 주문 상태를 바꾸거나 어떤 것도 전송하지 않습니다.",
+  verifyingStageStore: "연결 정보 저장",
+  verifyingStageAuth: "쿠팡 인증 확인",
+  verifyingStageOrders: "주문 조회 권한 확인",
+
   // Step 4 — PREPARING
   step4Title: "연결 정보가 확인되었어요",
   step4Body:
@@ -371,6 +379,7 @@ export const COUPANG_TUTORIAL_COPY = {
   step4Cta: "첫 주문 불러오기",
 
   // Step 5 — sync progress
+  syncTitle: "첫 주문을 불러오고 있어요",
   syncBody: "쿠팡에서 첫 주문을 불러오는 중이에요. 창을 닫아도 수집은 계속됩니다.",
   syncElapsedLabel: "경과 시간",
   syncReassurance: "이 화면을 새로 고쳐도 같은 수집을 이어서 확인해요. 다시 시작되지 않습니다.",
