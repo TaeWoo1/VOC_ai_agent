@@ -14,7 +14,13 @@ export interface CspEnv {
   VITE_SENTRY_DSN?: string;
   VITE_API_BASE_URL?: string;
   VITE_AGENT_RUNTIME_URL?: string;
+  VITE_ENABLE_AGENT_BRIDGE?: string;
+  VITE_BRIDGE_URL?: string;
 }
+
+/** Code defaults the CSP must mirror: `agentClient.ts` (Agent Runtime) and `bridgeClient.ts` (Local Agent Bridge). */
+export const AGENT_RUNTIME_DEFAULT = "http://127.0.0.1:8787";
+export const BRIDGE_DEFAULT = "http://127.0.0.1:47615";
 
 const GA_ORIGINS = ["https://*.google-analytics.com", "https://*.analytics.google.com", "https://*.googletagmanager.com"];
 const GTM_SCRIPT = "https://www.googletagmanager.com";
@@ -56,9 +62,16 @@ export function buildCsp(env: CspEnv): string {
   }
   const sentry = sentryIngestOrigin(env.VITE_SENTRY_DSN);
   if (sentry) connect.add(sentry);
-  for (const extra of [env.VITE_API_BASE_URL, env.VITE_AGENT_RUNTIME_URL]) {
-    const o = originOf(extra);
-    if (o) connect.add(o);
+  const api = originOf(env.VITE_API_BASE_URL);
+  if (api) connect.add(api);
+  // The Agent Runtime is a separate local origin the app always talks to (`agentClient.ts` default 8787).
+  connect.add(originOf(env.VITE_AGENT_RUNTIME_URL) ?? AGENT_RUNTIME_DEFAULT);
+  // The Local Agent Bridge (Action Window) — http + websocket on one origin, and blob: frames in <img>.
+  if (env.VITE_ENABLE_AGENT_BRIDGE?.trim() === "true") {
+    const bridge = originOf(env.VITE_BRIDGE_URL) ?? BRIDGE_DEFAULT;
+    connect.add(bridge);
+    connect.add(bridge.replace(/^http/, "ws"));
+    img.add("blob:");
   }
   return [
     "default-src 'self'",

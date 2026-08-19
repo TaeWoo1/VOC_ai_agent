@@ -49,7 +49,7 @@ export async function signup(baseUrl: string, email: string, password: string, o
   const res = await fetch(`${baseUrl}/api/auth/signup`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email, password, name: "spine-e2e", orgName }),
+    body: JSON.stringify({ email, password, name: "spine-e2e", orgName, termsAccepted: true }),
   });
   const data = (await jsonOrThrow(res, "signup")) as { token?: string };
   if (!data.token) throw new Error("signup returned no token");

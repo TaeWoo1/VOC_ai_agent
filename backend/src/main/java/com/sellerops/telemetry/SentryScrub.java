@@ -28,6 +28,8 @@ public class SentryScrub {
 
     static final Pattern SECRET_SHAPED = Pattern.compile(
             "(?i)(bearer\\s+[A-Za-z0-9._~+/=-]{8,}|([?&]|\\b)(code|token|onboardingToken|access_token|refresh_token|client_secret|password)=[^&\\s]*)");
+    /** An email address in free text (a DB unique-key detail, a validation message) is the seller's identity. */
+    static final Pattern EMAIL_SHAPED = Pattern.compile("[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}");
     private static final List<String> HEADER_DROP = List.of("authorization", "cookie", "set-cookie", "x-api-key");
 
     @Bean
@@ -60,6 +62,8 @@ public class SentryScrub {
         return transaction;
     }
 
+    private static final List<String> URL_DATA_KEYS = List.of("url", "from", "to");
+
     private static void scrubBase(SentryBaseEvent event) {
         event.setUser(null);
         Request request = event.getRequest();
@@ -76,9 +80,11 @@ public class SentryScrub {
         List<Breadcrumb> crumbs = event.getBreadcrumbs();
         if (crumbs != null) {
             for (Breadcrumb b : new ArrayList<>(crumbs)) {
-                Object url = b.getData("url");
-                if (url instanceof String s) {
-                    b.setData("url", stripQuery(s));
+                for (String key : URL_DATA_KEYS) {
+                    Object url = b.getData(key);
+                    if (url instanceof String s) {
+                        b.setData(key, stripQuery(s));
+                    }
                 }
                 b.removeData("http.query");
                 b.removeData("http.fragment");
@@ -103,7 +109,8 @@ public class SentryScrub {
         if (text == null) {
             return null;
         }
-        return SECRET_SHAPED.matcher(text).replaceAll(m -> m.group(1).toLowerCase(Locale.ROOT).startsWith("bearer")
+        String secrets = SECRET_SHAPED.matcher(text).replaceAll(m -> m.group(1).toLowerCase(Locale.ROOT).startsWith("bearer")
                 ? "bearer [redacted]" : (m.group(2) == null ? "" : m.group(2)) + m.group(3) + "=[redacted]");
+        return EMAIL_SHAPED.matcher(secrets).replaceAll("[email]");
     }
 }

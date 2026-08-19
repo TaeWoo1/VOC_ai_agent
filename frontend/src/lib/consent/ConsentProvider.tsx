@@ -1,6 +1,14 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { analytics } from "../analytics";
-import { consentPolicy, readConsent, writeConsent, type ConsentDecision, type ConsentEnv, type ConsentPolicy } from "./consent";
+import {
+  clearConsent,
+  consentPolicy,
+  readConsent,
+  writeConsent,
+  type ConsentDecision,
+  type ConsentEnv,
+  type ConsentPolicy,
+} from "./consent";
 
 /**
  * Consent for the browser (docs/service_readiness_v1.md §2-4). Holds the stored decision, exposes the policy
@@ -13,6 +21,8 @@ export interface ConsentState {
   /** True when the banner should be on screen: banner policy and no decision yet. */
   pending: boolean;
   decide(choice: { analytics: boolean; marketing: boolean }): void;
+  /** Forget the decision and show the banner again ("언제든 바꿀 수 있습니다" — the footer's 쿠키·분석 설정). */
+  reopen(): void;
 }
 
 const ConsentContext = createContext<ConsentState | undefined>(undefined);
@@ -33,9 +43,17 @@ export function ConsentProvider({
     analytics.setConsent({ analytics: next.analytics, marketing: next.marketing });
   }, []);
 
+  const reopen = useCallback(() => {
+    clearConsent();
+    setDecision(null);
+    // Until the new decision: nothing more leaves the browser (a running sink is told to stop by a refusal;
+    // "pending" buffers). A previously granted sink keeps its state until the seller decides again.
+    analytics.setConsent({ analytics: false, marketing: false });
+  }, []);
+
   const value = useMemo<ConsentState>(
-    () => ({ policy, decision, pending: policy === "banner" && decision === null, decide }),
-    [policy, decision, decide],
+    () => ({ policy, decision, pending: policy === "banner" && decision === null, decide, reopen }),
+    [policy, decision, decide, reopen],
   );
   return <ConsentContext.Provider value={value}>{children}</ConsentContext.Provider>;
 }

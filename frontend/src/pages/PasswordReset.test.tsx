@@ -74,6 +74,8 @@ describe("password reset", () => {
     resetPassword.mockResolvedValue(undefined);
     passwordResetConfig.mockResolvedValue({ enabled: true, devOutbox: false });
     renderAt("/reset-password?token=ONE-TIME");
+    // The page itself replaces the URL without the token (fallback path; main.tsx normally did it before mount).
+    await waitFor(() => expect(screen.getByRole("form", { name: "새 비밀번호 설정" })).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText(/새 비밀번호 \(6자 이상\)/), { target: { value: "newpass1" } });
     fireEvent.change(screen.getByLabelText("새 비밀번호 확인"), { target: { value: "newpass2" } });
     fireEvent.click(screen.getByRole("button", { name: "비밀번호 변경" }));
@@ -84,6 +86,20 @@ describe("password reset", () => {
     await waitFor(() => expect(resetPassword).toHaveBeenCalledWith("ONE-TIME", "newpass1"));
     expect(await screen.findByText("비밀번호가 바뀌었어요")).toBeInTheDocument();
     expect(RESET_DONE_PATH).toBe("/login?reset=1");
+  });
+
+  it("/reset-password takes the token main.tsx lifted out of the URL (sessionStorage), so the address never carried it", async () => {
+    resetPassword.mockResolvedValue(undefined);
+    sessionStorage.setItem("sellerops_url_secret", JSON.stringify({ path: "/reset-password", token: "FROM-STORAGE" }));
+    // jsdom's location is the router-independent window path the helper compares against.
+    window.history.replaceState(null, "", "/reset-password");
+    renderAt("/reset-password");
+    fireEvent.change(screen.getByLabelText(/새 비밀번호 \(6자 이상\)/), { target: { value: "newpass1" } });
+    fireEvent.change(screen.getByLabelText("새 비밀번호 확인"), { target: { value: "newpass1" } });
+    fireEvent.click(screen.getByRole("button", { name: "비밀번호 변경" }));
+    await waitFor(() => expect(resetPassword).toHaveBeenCalledWith("FROM-STORAGE", "newpass1"));
+    expect(sessionStorage.getItem("sellerops_url_secret")).toBeNull();
+    window.history.replaceState(null, "", "/");
   });
 
   it("/reset-password: a spent link (401) and a missing token both explain and offer a new request", async () => {

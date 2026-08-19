@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { CONSENT_KEY, clearConsent, consentPolicy, readConsent, writeConsent } from "./consent";
-import { ConsentProvider } from "./ConsentProvider";
+import { ConsentProvider, useConsent } from "./ConsentProvider";
 import { ConsentBanner } from "./ConsentBanner";
 import { analytics } from "../analytics";
 
@@ -16,6 +16,8 @@ describe("consent", () => {
     expect(consentPolicy({ VITE_GTM_ID: "GTM-ABC123" })).toBe("banner");
     expect(consentPolicy({ VITE_POSTHOG_KEY: "phc" })).toBe("banner");
     expect(consentPolicy({ VITE_CONSENT_BANNER: "always" })).toBe("banner");
+    // A malformed container id builds no sink (sinksFromEnv) → nothing to consent to.
+    expect(consentPolicy({ VITE_GTM_ID: "G-12345" })).toBe("not-applicable");
   });
 
   it("stores a versioned decision and ignores a foreign one", () => {
@@ -54,6 +56,27 @@ describe("consent", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(readConsent()).toMatchObject({ analytics: true, marketing: true });
     expect(analytics.consent).toEqual({ analytics: true, marketing: true });
+  });
+
+  it("a decided visitor can reopen the banner (footer 쿠키·분석 설정) — the decision is forgotten until re-made", () => {
+    writeConsent({ analytics: true, marketing: true });
+    function Reopen() {
+      const { reopen, pending } = useConsent();
+      return <button onClick={reopen}>{pending ? "pending" : "reopen"}</button>;
+    }
+    render(
+      <MemoryRouter>
+        <ConsentProvider env={{ VITE_GTM_ID: "GTM-ABC123" }}>
+          <Reopen />
+          <ConsentBanner />
+        </ConsentProvider>
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "reopen" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(readConsent()).toBeNull();
+    expect(analytics.consent).toEqual({ analytics: false, marketing: false });
   });
 
   it("banner: 필수만 사용 refuses both optional categories", () => {

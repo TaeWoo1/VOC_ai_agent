@@ -37,6 +37,8 @@ class SentryScrubTest {
         Breadcrumb crumb = new Breadcrumb();
         crumb.setData("url", "https://app/reset-password?token=abc");
         crumb.setData("http.query", "token=abc");
+        crumb.setData("from", "/reset-password?token=abc");
+        crumb.setData("to", "/login?reset=1");
         crumb.setMessage("Bearer abcdefghijkl and token=xyz");
         event.setBreadcrumbs(new ArrayList<>(List.of(crumb)));
 
@@ -51,6 +53,8 @@ class SentryScrubTest {
         Breadcrumb scrubbed = event.getBreadcrumbs().get(0);
         assertThat(scrubbed.getData("url")).isEqualTo("https://app/reset-password");
         assertThat(scrubbed.getData("http.query")).isNull();
+        assertThat(scrubbed.getData("from")).isEqualTo("/reset-password");
+        assertThat(scrubbed.getData("to")).isEqualTo("/login");
         assertThat(scrubbed.getMessage()).doesNotContain("abcdefghijkl").doesNotContain("xyz");
     }
 
@@ -69,6 +73,9 @@ class SentryScrubTest {
         assertThat(event.getMessage().getFormatted()).doesNotContain("SECRET").doesNotContain("OTHER").doesNotContain("AAAAAAAAAAAA")
                 .contains("token=[redacted]").contains("bearer [redacted]");
         assertThat(event.getExceptions().get(0).getValue()).isEqualTo("bad access_token=[redacted]");
+        // A DB unique-key detail carries the seller's email — redacted as well (review S3).
+        assertThat(SentryScrub.scrubText("ERROR: duplicate key value violates unique constraint \"users_email_key\" Detail: Key (email)=(Seller.One@Example.co.kr) already exists."))
+                .doesNotContain("Seller.One").contains("Key (email)=([email])");
         assertThat(SentryScrub.scrubText("plain 이메일 또는 비밀번호가 올바르지 않습니다")).isEqualTo("plain 이메일 또는 비밀번호가 올바르지 않습니다");
         assertThat(SentryScrub.stripQuery("/a?b=c")).isEqualTo("/a");
         assertThat(SentryScrub.stripQuery(null)).isNull();

@@ -18,7 +18,7 @@ no new channel**. After it merges, development stops and the new-user self-pilot
 | Analytics | `lib/analytics` (v1.10): sinks are started lazily on the first `track` — on `/product` there is no `track`, so **GTM never loaded on the landing page** and the landing `page_view` (the UTM carrier) never fired | Start sinks eagerly at init (after consent); no UTM handling in app code — GA4/PostHog read `utm_*` from `page_location` natively |
 | Consent | none — no banner, no terms/privacy surface, no consent record on `users`, GTM without Consent Mode | Add consent state (필수 / 분석 / 마케팅), Consent Mode v2 signals in the GTM sink, `users.terms_accepted_at / terms_version / marketing_consent_at`, `/legal/terms` + `/legal/privacy` placeholders |
 | Security headers | Spring Security defaults only (nosniff, `X-Frame-Options: DENY`, `Cache-Control: no-store`, HSTS on https, `X-XSS-Protection: 0`); no CSP, no Referrer-Policy, no Permissions-Policy on the API; the SPA (`index.html`) ships no CSP at all | Backend: CSP `default-src 'none'; frame-ancestors 'none'` + Referrer-Policy + Permissions-Policy. Frontend: **build-time** CSP `<meta>` computed from the same env that enables each vendor |
-| Token leak surfaces | one-time social code in `/auth/callback?code=` (v1.10, by design, 120 s single-use); JWT only in `localStorage` + `Authorization` header; `sellerops_social_onboarding` token in `sessionStorage`; no analytics prop can hold a string | New reset token in `/reset-password?token=` (by design — a mailed link); the page strips it from the URL on load. Sentry scrubs query strings, auth headers, cookies, users; nothing new reaches analytics |
+| Token leak surfaces | one-time social code in `/auth/callback?code=` (v1.10, by design, 120 s single-use); JWT only in `localStorage` + `Authorization` header; `sellerops_social_onboarding` token in `sessionStorage`; no analytics prop can hold a string | New reset token in `/reset-password?token=` (by design — a mailed link). **Both URL-borne secrets are lifted out of the address bar by `main.tsx` before Sentry or any analytics sink starts** (`lib/urlSecrets.ts`: sessionStorage + `history.replaceState`), so no vendor `page_view`, breadcrumb, referrer or history entry ever sees them; the page reads the value back once. Sentry additionally scrubs query strings, `from`/`to` navigation crumbs, auth headers, cookies, users and email-shaped text |
 | Auth UX | `AuthCard` frame shared by `/login` `/signup` `/onboarding` `/auth/callback` (v1.10) | Extend the same frame to `/forgot-password`, `/reset-password`; one loading / error / success vocabulary (`AuthNotice`) |
 | Release identity | none — neither side knows its git SHA | Backend: `bootBuildInfo` + `SELLEROPS_RELEASE`; frontend: `__SELLEROPS_RELEASE__` from `SELLEROPS_RELEASE` or `git rev-parse` at build |
 
@@ -29,8 +29,9 @@ no new channel**. After it merges, development stops and the new-user self-pilot
    `SELLEROPS_RELEASE` / build-time git SHA. Session replay is **not loaded** (the integration is not imported).
    `sendDefaultPii=false` on both sides. Everything below is enforced in code (`SentryScrub` / `sentryScrub.ts`):
    request query strings, `Authorization` / `Cookie` / `Set-Cookie` headers, cookies, request bodies, `user`
-   (replaced by nothing — not even the id), breadcrumb URLs' query parts, and any string value that looks like
-   a bearer token or a `code=` / `token=` pair are removed before send. What is captured: backend unhandled
+   (replaced by nothing — not even the id), breadcrumb URLs' query parts (`url`, and the navigation crumb's
+   `from` / `to`), and any string value that looks like a bearer token, a `code=` / `token=` pair, or an
+   **email address** (a DB unique-key detail carries one) are removed before send. What is captured: backend unhandled
    exceptions (`GlobalExceptionHandler.handleOther` → 500) and Sentry's own resolver for anything outside it;
    frontend uncaught errors, the root `ErrorBoundary`, and **API errors** = axios failures with status ≥ 500 or no
    response (4xx are the flow's own answers, not incidents). Performance: `tracesSampleRate` from
@@ -46,8 +47,9 @@ no new channel**. After it merges, development stops and the new-user self-pilot
    AND expires_at > now`) — replay = `401`; issuing a new token consumes the user's older live tokens; the
    janitor purges expired rows. `POST /api/auth/password/reset {token, newPassword}` sets the BCrypt hash and
    answers `204`; the seller then signs in (no auto-session from a mailed link). Throttle: at most 3 mails per
-   email per 15 min (in-memory) — the answer does not change. Existing JWTs stay valid until they expire (12 h;
-   there is no server-side session list — recorded as a gap).
+   email per 15 min (in-memory) — the answer does not change; a mailer failure (SMTP outage) is swallowed
+   with an address-free WARN and the same answer (no oracle, no 500). Existing JWTs stay valid until they
+   expire (12 h; there is no server-side session list — recorded as a gap).
 3. **Mailer abstraction, three modes** (`SELLEROPS_MAIL_MODE`): `smtp` (JavaMail via `spring.mail.*`), `dev-outbox`
    (in-memory outbox + the full mail **logged at INFO with a `[DEV MAIL OUTBOX]` prefix**, so the local seller can
    copy the reset link from the backend log — allowed only because it is a separate mode that production never
@@ -69,9 +71,12 @@ no new channel**. After it merges, development stops and the new-user self-pilot
      defaults (`analytics_storage`, `ad_storage`, `ad_user_data`, `ad_personalization` = `denied`) before
      `gtm.js` and an `update` on every change (분석 → `analytics_storage`; 마케팅 → the three `ad_*`). PostHog
      `opt_out_capturing()` mirrors 분석. Sentry is 필수 (no PII, service integrity) and does not wait for consent.
+   - A decided visitor can change their mind: the public footer's **쿠키·분석 설정** forgets the decision (sinks
+     told to stop) and shows the banner again.
    - **Dev policy (local / self-pilot):** the banner exists only when at least one analytics vendor is
-     configured (`VITE_GTM_ID` / `VITE_POSTHOG_KEY`); with none, there is nothing to consent to, no banner is
-     shown and consent state is `not-applicable`. `VITE_CONSENT_BANNER=always` forces the banner (UI review).
+     configured (a valid `VITE_GTM_ID` / `VITE_POSTHOG_KEY`); with none, there is nothing to consent to, no
+     banner is shown and consent state is `not-applicable`. `VITE_CONSENT_BANNER=always` forces the banner (UI
+     review).
    - **Legal pages** `/legal/terms`, `/legal/privacy` render a titled **placeholder** that says the document is
      not yet confirmed — never generated legal wording. Footer + sign-up + onboarding link to them.
 5. **Security headers.** Backend (all responses): CSP `default-src 'none'; frame-ancestors 'none'; base-uri
@@ -81,11 +86,15 @@ no new channel**. After it merges, development stops and the new-user self-pilot
    `script-src 'self'` + `https://www.googletagmanager.com` iff `VITE_GTM_ID` + the PostHog host iff
    `VITE_POSTHOG_KEY`; `connect-src 'self'` + Sentry ingest origin (from the DSN) + GA collection origins
    (`https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com`) iff GTM +
-   PostHog host + `VITE_API_BASE_URL` / `VITE_AGENT_RUNTIME_URL` origins when set; `img-src 'self' data:` + GA
-   origins iff GTM; `style-src 'self' 'unsafe-inline'`; `frame-ancestors 'none'`; `object-src 'none'`;
-   `base-uri 'self'`; `form-action 'self'`. Google / NAVER OAuth are top-level navigations and need no CSP
-   entry. Dev (`vite` server) sets no CSP (React refresh needs inline scripts). **Adding an ad tag inside GTM
-   later requires adding its origins here** — recorded in §7.
+   PostHog host + `VITE_API_BASE_URL` origin when set + the **Agent Runtime** origin (`VITE_AGENT_RUNTIME_URL`,
+   default `http://127.0.0.1:8787` — the code default) + the **Local Agent Bridge** origin (http and ws,
+   `VITE_BRIDGE_URL`, default `http://127.0.0.1:47615`) iff `VITE_ENABLE_AGENT_BRIDGE=true`; `img-src 'self'
+   data:` + GA origins iff GTM + `blob:` iff bridge (projection frames); `style-src 'self' 'unsafe-inline'`;
+   `object-src 'none'`; `base-uri 'self'`; `form-action 'self'`. `frame-ancestors` cannot be expressed in a
+   `<meta>` (browsers ignore it there) — the framing fence for the hosted SPA is nginx's `X-Frame-Options:
+   DENY` (`frontend/nginx.conf`). Google / NAVER OAuth are top-level navigations and need no CSP entry. Dev
+   (`vite` server) sets no CSP (React refresh needs inline scripts). **Adding an ad tag inside GTM later
+   requires adding its origins here** — recorded in §7.
 6. **Auth shell.** `/login`, `/signup`, `/auth/callback`, `/onboarding`, `/forgot-password`, `/reset-password`
    share `AuthCard` + `AuthNotice` (info / success / error tones, `role=status|alert`), the same field / button
    styles, and the same footer links; Google / NAVER buttons keep their official branding from v1.10.
@@ -106,7 +115,8 @@ no new channel**. After it merges, development stops and the new-user self-pilot
 - `com.sellerops.mail`: `Mailer` (`send(OutboundMail)`), `OutboundMail(to, subject, text)`, `SmtpMailer`,
   `DevOutboxMailer` (bounded in-memory outbox + INFO log), `NoopMailer`, `MailerConfiguration` (mode switch;
   `smtp` without `spring.mail.host` fails the boot — misconfiguration is not silently `off`).
-- `com.sellerops.telemetry`: `SentryScrub` (`BeforeSendCallback` + `BeforeSendTransactionCallback`),
+- `com.sellerops.telemetry`: `SentryScrub` (`BeforeSendCallback` + `BeforeSendTransactionCallback`; logs one
+  INFO line `sentry: enabled environment=… release=…` when a DSN is present — never the DSN),
   `SentryReleaseConfiguration` (release from `SELLEROPS_RELEASE` else `BuildProperties.git`).
   `GlobalExceptionHandler.handleOther` → `Sentry.captureException(ex)` (a no-op with no DSN).
 - `SecurityConfig.headers(...)`: CSP / Referrer-Policy / Permissions-Policy as §2-5.
@@ -116,6 +126,8 @@ no new channel**. After it merges, development stops and the new-user self-pilot
 
 ## 4. Frontend surface
 
+- `lib/urlSecrets.ts` (`captureUrlSecrets` in `main.tsx` before anything else; `takeUrlSecret` in
+  `/reset-password` and `/auth/callback`).
 - `@sentry/react` 10.x: `lib/telemetry/{sentry.ts,sentryScrub.ts}` (`initSentryFromEnv`, `captureApiError`),
   `components/app/RootErrorBoundary.tsx`; `apiClient` response interceptor reports ≥ 500 / no-response.
 - `lib/consent/{consent.ts,ConsentProvider.tsx,ConsentBanner.tsx}`; analytics gains `setConsent(granted)` +
@@ -146,6 +158,7 @@ no new channel**. After it merges, development stops and the new-user self-pilot
 | `VITE_SENTRY_TRACES_SAMPLE_RATE` | frontend build | `0.1` | performance sampling |
 | `VITE_GTM_ID`, `VITE_POSTHOG_KEY`, `VITE_POSTHOG_HOST` | frontend build | unset = OFF | v1.10, unchanged; also drive the CSP and the consent banner |
 | `VITE_CONSENT_BANNER` | frontend build | unset | `always` forces the banner without vendors |
+| `VITE_AGENT_RUNTIME_URL`, `VITE_ENABLE_AGENT_BRIDGE`, `VITE_BRIDGE_URL` | frontend build | code defaults | pre-existing; now also shape the CSP `connect-src` (§2-5) |
 | v1.10 OAuth vars | backend | unset | unchanged |
 
 ## 6. Password reset lifecycle
@@ -170,6 +183,9 @@ no new channel**. After it merges, development stops and the new-user self-pilot
 - [ ] Sentry projects (backend, frontend) + DSNs; alert routing; `SELLEROPS_ENV=production`; release tagging in CI.
 - [ ] Mail provider (SMTP / SES / …) → `SELLEROPS_MAIL_MODE=smtp` + `SPRING_MAIL_*`, `SELLEROPS_MAIL_FROM`,
       SPF/DKIM; `SELLEROPS_PUBLIC_BASE_URL` = the public origin.
+- [ ] Web-server access log of the hosted SPA: the backend never logs a reset URL, but nginx's default
+      `access_log` records `GET /reset-password?token=…` — scrub the query for that path or disable the access
+      log for it (`frontend/nginx.conf` is the place).
 - [ ] Production origin: CORS (`SELLEROPS_CORS_ORIGIN`), OAuth redirect URIs at Google / NAVER, HTTPS (HSTS is
       emitted by Spring only on https), `SELLEROPS_OAUTH_FRONTEND_BASE_URL` if split-origin.
 - [ ] Ad tags (Google Ads / Meta / NAVER Ads) inside GTM → **extend the CSP origins** (`lib/security/csp.ts`) and

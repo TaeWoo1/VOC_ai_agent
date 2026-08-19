@@ -7,8 +7,12 @@ import { initAnalyticsFromEnv } from "./lib/analytics";
 import { initSentryFromEnv } from "./lib/telemetry/sentry";
 import { ConsentProvider } from "./lib/consent/ConsentProvider";
 import { RootErrorBoundary } from "./components/app/RootErrorBoundary";
+import { captureUrlSecrets } from "./lib/urlSecrets";
 import "./index.css";
 
+// FIRST: a one-time code / reset token in the URL leaves the address bar before any vendor can see it
+// (docs/service_readiness_v1.md §2-1). The page reads it back from sessionStorage.
+captureUrlSecrets();
 // Error monitoring first, env-gated: no VITE_SENTRY_DSN (local/dev) → nothing initialises
 // (docs/service_readiness_v1.md §2-1).
 initSentryFromEnv();

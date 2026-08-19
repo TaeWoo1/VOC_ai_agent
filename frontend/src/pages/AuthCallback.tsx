@@ -4,6 +4,7 @@ import { api } from "../lib/apiClient";
 import { useAuth } from "../lib/auth";
 import { analytics } from "../lib/analytics";
 import { authMethodOf, savePendingOnboarding } from "../lib/socialOnboarding";
+import { takeUrlSecret } from "../lib/urlSecrets";
 import { AuthCard, authLink } from "../components/auth/AuthCard";
 
 export const ONBOARDING_PATH = "/onboarding";
@@ -21,8 +22,14 @@ export function AuthCallback() {
   const [failed, setFailed] = useState(false);
   const spent = useRef(false);
 
+  // `main.tsx` lifted the code out of the URL before any vendor started (docs/service_readiness_v1.md §2-1);
+  // the query is the fallback for a direct render (tests). Read once, synchronously, so StrictMode's second
+  // effect run sees the same value.
+  const initialCode = useRef<string | null>(null);
+  if (initialCode.current === null) initialCode.current = takeUrlSecret("code") ?? searchParams.get("code") ?? "";
+
   useEffect(() => {
-    const code = searchParams.get("code");
+    const code = initialCode.current;
     if (!code) {
       navigate("/login?social=failed", { replace: true });
       return;

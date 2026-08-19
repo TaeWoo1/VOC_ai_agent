@@ -201,7 +201,7 @@ class SocialAuthServiceTest {
         when(users.existsByEmailIgnoreCase("a@x.io")).thenReturn(false);
         when(tokens.createToken(any(), any(), eq("a@x.io"))).thenReturn("jwt-new");
 
-        AuthResponse res = service.completeOnboarding("tok", " 우리 스토어 ", "판매자");
+        AuthResponse res = service.completeOnboarding("tok", " 우리 스토어 ", "판매자", true);
 
         assertThat(res.token()).isEqualTo("jwt-new");
         assertThat(res.user().orgName()).isEqualTo("우리 스토어");
@@ -210,6 +210,10 @@ class SocialAuthServiceTest {
         verify(users).save(user.capture());
         assertThat(user.getValue().getPasswordHash()).isNull();
         assertThat(user.getValue().getEmail()).isEqualTo("a@x.io");
+        // Account consent record (docs/service_readiness_v1.md §2-4): 필수 stamped with the draft version, 선택 as given.
+        assertThat(user.getValue().getTermsAcceptedAt()).isEqualTo(now);
+        assertThat(user.getValue().getTermsVersion()).isEqualTo(com.sellerops.auth.consent.AccountConsent.TERMS_VERSION);
+        assertThat(user.getValue().getMarketingConsentAt()).isEqualTo(now);
         ArgumentCaptor<UserIdentity> identity = ArgumentCaptor.forClass(UserIdentity.class);
         verify(identities).save(identity.capture());
         assertThat(identity.getValue().getUserId()).isEqualTo(user.getValue().getId());
@@ -225,7 +229,7 @@ class SocialAuthServiceTest {
         when(identities.findByProviderAndProviderSubject(any(), any())).thenReturn(Optional.empty());
         when(users.existsByEmailIgnoreCase("a@x.io")).thenReturn(true);
 
-        assertThatThrownBy(() -> service.completeOnboarding("tok", "스토어", "A"))
+        assertThatThrownBy(() -> service.completeOnboarding("tok", "스토어", "A", false))
                 .isInstanceOf(ApiException.class)
                 .satisfies(e -> assertThat(((ApiException) e).getStatus()).isEqualTo(HttpStatus.CONFLICT));
         verify(users, never()).save(any());
@@ -236,7 +240,7 @@ class SocialAuthServiceTest {
     void anExchangeCodeCannotCompleteOnboardingDirectly() {
         AuthHandoff h = handoff("code-2", AuthHandoff.Purpose.ONBOARDING, null);
         when(handoffs.findByCodeHash(AuthCodes.hash("code-2"))).thenReturn(Optional.of(h));
-        assertThatThrownBy(() -> service.completeOnboarding("code-2", "스토어", "A")).isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> service.completeOnboarding("code-2", "스토어", "A", false)).isInstanceOf(ApiException.class);
         verify(users, never()).save(any());
     }
 
@@ -245,7 +249,7 @@ class SocialAuthServiceTest {
         AuthHandoff h = handoff("tok", AuthHandoff.Purpose.ONBOARDING_TOKEN, null);
         when(handoffs.findByCodeHash(AuthCodes.hash("tok"))).thenReturn(Optional.of(h));
         when(handoffs.consume(any(), any(), any())).thenReturn(0);
-        assertThatThrownBy(() -> service.completeOnboarding("tok", "스토어", "A")).isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> service.completeOnboarding("tok", "스토어", "A", false)).isInstanceOf(ApiException.class);
         verify(users, never()).save(any());
     }
 }

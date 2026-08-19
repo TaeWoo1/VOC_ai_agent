@@ -37,7 +37,11 @@ describe("Sentry — env-gated, scrubbed", () => {
         data: "{}",
         headers: { Authorization: "Bearer eyJ.abc.def", Cookie: "x", Accept: "*/*" },
       },
-      breadcrumbs: [{ message: "fetch token=T", data: { url: "/reset-password?token=T", "http.query": "token=T", arguments: ["seller@x.io"] } }],
+      breadcrumbs: [
+        { message: "fetch token=T", data: { url: "/reset-password?token=T", "http.query": "token=T", arguments: ["seller@x.io"] } },
+        // The SDK's navigation crumb: from/to = path + query (review B2).
+        { data: { from: "/reset-password?token=T", to: "/login?reset=1" } },
+      ],
       message: "Bearer AAAAAAAAAAAA failed",
       exception: { values: [{ value: "onboardingToken=abc expired" }] },
       transaction: "/reset-password?token=T",
@@ -49,6 +53,14 @@ describe("Sentry — env-gated, scrubbed", () => {
     expect(event.request!.url).toBe("https://app/auth/callback");
     expect(event.request!.headers).toEqual({ Accept: "*/*" });
     expect(event.transaction).toBe("/reset-password");
+    expect(event.breadcrumbs![1].data).toEqual({ from: "/reset-password", to: "/login" });
+    // An email in free text (a DB unique-key detail) is redacted too (review S3).
+    expect(scrubText('Key (email)=(Seller.One@Example.co.kr) already exists')).toBe("Key (email)=([email]) already exists");
+    // beforeBreadcrumb applies the same rule to a live SDK crumb.
+    const opts = sentryOptionsFromEnv({ VITE_SENTRY_DSN: "https://k@h/1" })!;
+    const crumb = opts.beforeBreadcrumb!({ category: "navigation", data: { from: "/auth/callback?code=C", to: "/" } }, {});
+    expect(crumb!.data).toEqual({ from: "/auth/callback", to: "/" });
+    expect(opts.beforeBreadcrumb!({ category: "console", message: "x" }, {})).toBeNull();
     expect(event.contexts).toEqual({ browser: { name: "Chrome" } });
     expect(scrubText("이메일 또는 비밀번호가 올바르지 않습니다")).toBe("이메일 또는 비밀번호가 올바르지 않습니다");
     expect(stripQuery(undefined)).toBeUndefined();
@@ -65,10 +77,18 @@ describe("frontend CSP from env", () => {
     const csp = buildCsp({});
     expect(csp).toContain("default-src 'self'");
     expect(csp).toContain("script-src 'self';");
-    expect(csp).toContain("connect-src 'self';");
+    expect(csp).toContain("connect-src 'self' http://127.0.0.1:8787;");
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain("object-src 'none'");
     expect(csp).not.toMatch(/googletagmanager|posthog|sentry/);
+    // The Agent Runtime default origin is always reachable; the bridge only when enabled.
+    expect(csp).toContain("http://127.0.0.1:8787");
+    expect(csp).not.toContain("47615");
+    expect(csp).not.toContain("blob:");
+    const bridged = buildCsp({ VITE_ENABLE_AGENT_BRIDGE: "true" });
+    expect(bridged).toContain("http://127.0.0.1:47615");
+    expect(bridged).toContain("ws://127.0.0.1:47615");
+    expect(bridged).toMatch(/img-src [^;]*blob:/);
   });
 
   it("adds GTM/GA, PostHog, Sentry ingest and split-origin API/agent origins — each only when set", () => {

@@ -1,5 +1,5 @@
 import * as Sentry from "@sentry/react";
-import { scrubEvent, scrubText, stripQuery } from "./sentryScrub";
+import { scrubBreadcrumbData, scrubEvent, scrubText, stripQuery } from "./sentryScrub";
 
 /**
  * Error monitoring — docs/service_readiness_v1.md §2-1. Env-gated: no `VITE_SENTRY_DSN` (the local/dev
@@ -42,7 +42,8 @@ export function sentryOptionsFromEnv(env: SentryEnv): Sentry.BrowserOptions | nu
     },
     beforeBreadcrumb(crumb) {
       if (crumb.category === "console") return null;
-      if (crumb.data && typeof crumb.data.url === "string") crumb.data.url = stripQuery(crumb.data.url);
+      // Navigation crumbs carry `from`/`to` (path + query), fetch/xhr crumbs `url` — none may keep a query.
+      scrubBreadcrumbData(crumb.data);
       if (crumb.message) crumb.message = scrubText(crumb.message);
       return crumb;
     },
@@ -70,6 +71,8 @@ export function sentryActive(): boolean {
  */
 export function captureApiError(error: unknown): void {
   if (!active) return;
+  // A request the app itself cancelled (unmount, timeout race) is not an incident.
+  if ((error as { code?: string } | undefined)?.code === "ERR_CANCELED") return;
   const status = (error as { response?: { status?: number } } | undefined)?.response?.status;
   const config = (error as { config?: { method?: string; url?: string } } | undefined)?.config;
   if (typeof status === "number" && status < 500) return;
@@ -88,5 +91,3 @@ const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 export function pathTemplate(path: string): string {
   return path.replace(UUID, ":id");
 }
-
-export const SentryErrorBoundary = Sentry.ErrorBoundary;

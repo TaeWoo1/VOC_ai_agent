@@ -3,20 +3,22 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../lib/apiClient";
 import { AuthCard, authField, authLabel, authLink, authPrimaryButton } from "../components/auth/AuthCard";
 import { AuthNotice } from "../components/auth/AuthNotice";
+import { takeUrlSecret } from "../lib/urlSecrets";
 
 export const RESET_DONE_PATH = "/login?reset=1";
 
 /**
- * `/reset-password?token=…` (docs/service_readiness_v1.md §6). The token is read once and the URL is replaced
- * without it (history / referrer hygiene — it is a one-time secret); it lives only in component state until the
- * form is sent. 401 = the link is spent or expired → "다시 요청".
+ * `/reset-password?token=…` (docs/service_readiness_v1.md §6). `main.tsx` already lifted the token out of the
+ * URL before Sentry/analytics started (`captureUrlSecrets`); this page takes it from there (falling back to the
+ * query for a direct render) and keeps it only in component state until the form is sent. 401 = the link is
+ * spent or expired → "다시 요청".
  */
 export function ResetPassword() {
   const location = useLocation();
   const navigate = useNavigate();
   const initialToken = useRef<string | null>(null);
   if (initialToken.current === null) {
-    initialToken.current = new URLSearchParams(location.search).get("token") ?? "";
+    initialToken.current = takeUrlSecret("token") ?? new URLSearchParams(location.search).get("token") ?? "";
   }
   const [token] = useState(() => initialToken.current ?? "");
   const [password, setPassword] = useState("");

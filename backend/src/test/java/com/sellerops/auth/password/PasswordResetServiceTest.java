@@ -109,6 +109,18 @@ class PasswordResetServiceTest {
     }
 
     @Test
+    void aMailerFailureIsSwallowedAddressFreeAndTheAnswerDoesNotChange() {
+        com.sellerops.mail.Mailer broken = new com.sellerops.mail.Mailer() {
+            @Override public boolean deliverable() { return true; }
+            @Override public void send(OutboundMail mail) { throw new org.springframework.mail.MailSendException("smtp down for " + mail.to()); }
+        };
+        PasswordResetService svc = new PasswordResetService(users, tokens, encoder, broken, props, clock,
+                new PasswordResetThrottle(3, Duration.ofMinutes(15), clock));
+        when(users.findByEmailIgnoreCase("owner@x.io")).thenReturn(Optional.of(passwordUser("owner@x.io")));
+        assertThat(svc.requestReset("owner@x.io")).isFalse(); // no exception → the controller still answers 202
+    }
+
+    @Test
     void mailOffMeansDisabledAndNoTokenIsMinted() {
         PasswordResetService off = new PasswordResetService(users, tokens, encoder, new NoopMailer(), props, clock,
                 new PasswordResetThrottle(3, Duration.ofMinutes(15), clock));

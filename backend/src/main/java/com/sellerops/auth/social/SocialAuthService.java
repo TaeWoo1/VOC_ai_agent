@@ -132,11 +132,6 @@ public class SocialAuthService {
 
     /** 상호명 given: org + user + identity in one transaction; both collision checks repeated here. */
     @Transactional
-    public AuthResponse completeOnboarding(String onboardingToken, String orgName, String name) {
-        return completeOnboarding(onboardingToken, orgName, name, false);
-    }
-
-    @Transactional
     public AuthResponse completeOnboarding(String onboardingToken, String orgName, String name,
                                            boolean marketingConsent) {
         Instant now = clock.instant();

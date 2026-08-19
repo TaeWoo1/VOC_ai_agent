@@ -7,6 +7,10 @@
  */
 
 const SECRET_SHAPED = /(bearer\s+[A-Za-z0-9._~+/=-]{8,})|(([?&]|\b)(code|token|onboardingToken|access_token|refresh_token|client_secret|password)=[^&\s]*)/gi;
+/** An email address anywhere in free text (a DB unique-key message, an axios error string) is the seller's identity. */
+const EMAIL_SHAPED = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+/** Breadcrumb data keys that carry a URL (fetch/xhr `url`, navigation `from`/`to`). */
+const URL_DATA_KEYS = ["url", "from", "to"] as const;
 const HEADER_DROP = new Set(["authorization", "cookie", "set-cookie", "x-api-key"]);
 
 export function stripQuery(url: string | undefined | null): string | undefined {
@@ -17,9 +21,23 @@ export function stripQuery(url: string | undefined | null): string | undefined {
 
 export function scrubText(text: string | undefined | null): string | undefined {
   if (typeof text !== "string") return undefined;
-  return text.replace(SECRET_SHAPED, (_m, bearer: string | undefined, _pair, prefix: string | undefined, key: string | undefined) =>
-    bearer ? "bearer [redacted]" : `${prefix ?? ""}${key}=[redacted]`,
-  );
+  return text
+    .replace(SECRET_SHAPED, (_m, bearer: string | undefined, _pair, prefix: string | undefined, key: string | undefined) =>
+      bearer ? "bearer [redacted]" : `${prefix ?? ""}${key}=[redacted]`,
+    )
+    .replace(EMAIL_SHAPED, "[email]");
+}
+
+/** Strip the query/fragment from every URL-bearing key of a breadcrumb's data (shared by beforeBreadcrumb and scrubEvent). */
+export function scrubBreadcrumbData(data: Record<string, unknown> | undefined): void {
+  if (!data) return;
+  for (const key of URL_DATA_KEYS) {
+    if (typeof data[key] === "string") data[key] = stripQuery(data[key] as string);
+  }
+  delete data["http.query"];
+  delete data["http.fragment"];
+  // A console breadcrumb carries the console arguments — free-form text nobody audited.
+  delete data.arguments;
 }
 
 /** The subset of a Sentry event / transaction this scrubber touches. Structural, so it accepts the SDK's types. */
@@ -56,13 +74,7 @@ export function scrubEvent<E extends ScrubbableEvent>(event: E): E {
   if (event.breadcrumbs) {
     for (const crumb of event.breadcrumbs) {
       if (crumb.message) crumb.message = scrubText(crumb.message);
-      if (crumb.data) {
-        if (typeof crumb.data.url === "string") crumb.data.url = stripQuery(crumb.data.url);
-        delete crumb.data["http.query"];
-        delete crumb.data["http.fragment"];
-        // A console breadcrumb carries the console arguments — free-form text nobody audited.
-        delete crumb.data.arguments;
-      }
+      scrubBreadcrumbData(crumb.data);
     }
   }
   if (event.message) event.message = scrubText(event.message);

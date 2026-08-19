@@ -114,7 +114,16 @@ public class PasswordResetService {
         tokens.save(row);
 
         String link = props.publicUrl("/reset-password?token=" + URLEncoder.encode(token, StandardCharsets.UTF_8));
-        mailer.send(new OutboundMail(user.getEmail(), SUBJECT, body(link, props.ttl())));
+        try {
+            mailer.send(new OutboundMail(user.getEmail(), SUBJECT, body(link, props.ttl())));
+        } catch (RuntimeException mailFailure) {
+            // A mail outage must not become an oracle (500 only for real accounts) nor carry the address into a
+            // log or Sentry: same outcome for the caller, an address-free WARN for the operator. The unsent
+            // token simply expires.
+            log.warn("password reset mail could not be sent ({}); the request was accepted anyway",
+                    mailFailure.getClass().getSimpleName());
+            return false;
+        }
         return true;
     }
 

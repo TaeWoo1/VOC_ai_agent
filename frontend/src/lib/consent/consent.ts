@@ -6,6 +6,8 @@
  * Dev policy: with no analytics vendor configured there is nothing to consent to — the banner does not exist and
  * the policy is `not-applicable`. `VITE_CONSENT_BANNER=always` forces the banner (UI review).
  */
+import { isValidGtmId } from "../analytics/gtmSink";
+
 export const CONSENT_KEY = "sellerops_consent_v1";
 export const CONSENT_VERSION = 1;
 
@@ -26,7 +28,8 @@ export interface ConsentEnv {
 
 export function consentPolicy(env: ConsentEnv): ConsentPolicy {
   if (env.VITE_CONSENT_BANNER?.trim() === "always") return "banner";
-  return env.VITE_GTM_ID?.trim() || env.VITE_POSTHOG_KEY?.trim() ? "banner" : "not-applicable";
+  // The same validity rule as `sinksFromEnv`: a malformed GTM id builds no sink, so it asks for no consent.
+  return isValidGtmId(env.VITE_GTM_ID?.trim()) || env.VITE_POSTHOG_KEY?.trim() ? "banner" : "not-applicable";
 }
 
 interface StorageLike {
