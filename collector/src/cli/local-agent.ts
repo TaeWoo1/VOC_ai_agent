@@ -3,6 +3,7 @@
  * connections through the multi-channel **Connector Orchestrator**.
  *
  *   tsx src/cli/local-agent.ts --connections <path.json> [--i-understand-this-launches-local-agent-chrome]
+ *   tsx src/cli/local-agent.ts --bridge-only        (resident SellerOps 도우미: pairing/health bridge, nothing else)
  *
  * This is the thin LIVE wrapper around the pure {@link LocalAgentConnectorStartup} composition root: it
  * loads the sanitized MIXED device connection config (browser channels NAVER/ESM, API Cafe24, and the
@@ -72,6 +73,7 @@ import {
   importModeRefusalMessage,
   resolveImportMode,
 } from "./import-mode-gate";
+import { BRIDGE_ONLY_FLAG, bridgeOnlyRefusalMessage, resolveBridgeOnlyMode } from "./bridge-only-gate";
 import { SyntheticProbeDriver } from "../action-window/session";
 import { SyntheticReplySubmitDriver } from "../action-window/reply-submission/reply-driver";
 import { defaultReplyRunDirFor, mintReplyRunId } from "../action-window/reply-submission/reply-dispatch";
@@ -1031,6 +1033,88 @@ async function runImportOnlyBoot(args: readonly string[], env: NodeJS.ProcessEnv
   });
 }
 
+/** Injectable seams for {@link runBridgeOnlyBoot} so a test can boot on an ephemeral port without signals. */
+export interface BridgeOnlyBootDeps {
+  /** Bridge factory; defaults to `createAgentBridge`. */
+  createBridge?: (cfg: Parameters<typeof createAgentBridge>[0]) => ReturnType<typeof createAgentBridge>;
+  /** Overrides the resolved bridge config (a test passes `{ port: 0, pairingFile: <tmp> }`). */
+  bridgeConfigOverride?: Partial<ReturnType<typeof resolveAgentBridgeConfig>>;
+  /** Registers signal handlers; defaults to `process.on`. A test passes a recorder instead. */
+  onSignal?: (signal: "SIGINT" | "SIGTERM", handler: () => void) => void;
+  /** Sanitized JSON printer; defaults to `console.log`. */
+  print?: (line: string) => void;
+  /** Called after shutdown completes on a signal; defaults to `process.exit(0)`. */
+  exit?: () => void;
+}
+
+/** What {@link runBridgeOnlyBoot} hands back — enough for a test to probe the bridge and to stop it. */
+export interface BridgeOnlyBootHandle {
+  listen: Awaited<ReturnType<ReturnType<typeof createAgentBridge>["listen"]>>;
+  /** Idempotent: closes the bridge exactly once, on every path. */
+  shutdown: () => Promise<void>;
+  /** Resolves when the boot has been stopped (a signal, or `shutdown()`). */
+  stopped: Promise<void>;
+}
+
+/**
+ * **The bridge-only resident boot** (`--bridge-only`, see `bridge-only-gate.ts` for the why).
+ *
+ * The whole job: resolve the same bridge config the connector boot uses (port 47615, the shared
+ * `pairings.json` — so an existing pairing is REUSED and the seller is not asked to pair again), wire the same
+ * approval presenter, listen, and stay alive until SIGINT/SIGTERM. Deliberately nothing else: no connections,
+ * no `decideRun`, no browser, no marketplace env, no carrier, no status sentinels. The frontend sees a paired
+ * helper with an empty connection list, which its dock renders as "연결된 채널 없음" — true, and quiet.
+ *
+ * Fails closed the same way as every other boot: a port already bound is a `skipped` listen and a non-zero
+ * exit (a second resident helper must not silently think it is serving); a `none` presenter still yields a
+ * bridge that answers /bridge/health but refuses to pair (503).
+ */
+export async function runBridgeOnlyBoot(
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+  deps: BridgeOnlyBootDeps = {},
+): Promise<BridgeOnlyBootHandle> {
+  const createBridge = deps.createBridge ?? createAgentBridge;
+  const registerSignal = deps.onSignal ?? ((signal, handler) => void process.on(signal, handler));
+  const print = deps.print ?? ((line: string) => console.log(line));
+  const exit = deps.exit ?? (() => process.exit(0));
+  const approvalKind = decideApprovalPresenter(env, process.platform);
+  const bridge = createBridge({
+    ...resolveAgentBridgeConfig(args, env),
+    ...deps.bridgeConfigOverride,
+    approvalPresenter: createApprovalPresenterFor(approvalKind),
+  });
+  const listen = await bridge.listen();
+  print(
+    JSON.stringify({
+      mode: "BRIDGE_ONLY",
+      ...listen,
+      approvalPresenter: approvalKind,
+      // Two booleans an operator reads to know what to look for: nothing is on screen and nothing was opened.
+      browserLaunched: false,
+      marketplaceOpened: false,
+    }),
+  );
+  if (!listen.ok) {
+    // Nothing is listening, so nothing to keep resident — the caller (main) exits non-zero.
+    return { listen, shutdown: async () => {}, stopped: Promise.resolve() };
+  }
+  bridge.markAgentStarted();
+
+  let resolveStopped: () => void = () => {};
+  const stopped = new Promise<void>((r) => (resolveStopped = r));
+  const shutdown = createSignalShutdown(async () => {
+    bridge.markAgentStopping();
+    await bridge.close().catch(() => {});
+    print(JSON.stringify({ mode: "BRIDGE_ONLY", stopped: true }));
+    resolveStopped();
+  });
+  const handler = (): void => void shutdown().then(() => exit());
+  registerSignal("SIGINT", handler);
+  registerSignal("SIGTERM", handler);
+  return { listen, shutdown, stopped };
+}
+
 /**
  * Build the {@link AgentActionWindowConfig} for the resolved channel — pure aside from reading the
  * SellerOps dev config only when the local-ingest opt-in is present. The run identity is Runtime-assigned
@@ -1303,6 +1387,7 @@ function usage(): string {
   return [
     "usage:",
     `  tsx src/cli/local-agent.ts --connections <path.json> [${LOCAL_AGENT_APPROVAL_FLAG}]`,
+    `  tsx src/cli/local-agent.ts ${BRIDGE_ONLY_FLAG}   (resident SellerOps 도우미: pairing/health bridge only, no browser)`,
     "",
     "Without the approval flag (or with missing live config) this is a DRY RUN — it validates and",
     "counts the configured connections and launches nothing.",
@@ -1311,6 +1396,22 @@ function usage(): string {
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+
+  // The bridge-only resident mode is its own boot, decided FIRST: it touches no connections file, no
+  // decideRun, no browser and no marketplace env — see bridge-only-gate.ts. Refusals print and exit 7.
+  const bridgeOnlyGate = resolveBridgeOnlyMode(args, process.env);
+  if (bridgeOnlyGate.host) {
+    const handle = await runBridgeOnlyBoot(args, process.env);
+    if (!handle.listen.ok) process.exit(7);
+    await handle.stopped;
+    return;
+  }
+  const bridgeOnlyRefusal = bridgeOnlyRefusalMessage(bridgeOnlyGate.reason);
+  if (bridgeOnlyRefusal) {
+    console.error(`[local-agent] ${bridgeOnlyRefusal}`);
+    process.exit(7);
+    return;
+  }
 
   // The import mode is its own boot and is decided BEFORE anything else, including the connections gate —
   // see runImportOnlyBoot for why coupling it to the connector lineage was wrong.
