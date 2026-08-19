@@ -3,7 +3,7 @@
  * connections through the multi-channel **Connector Orchestrator**.
  *
  *   tsx src/cli/local-agent.ts --connections <path.json> [--i-understand-this-launches-local-agent-chrome]
- *   tsx src/cli/local-agent.ts --bridge-only        (resident SellerOps 도우미: pairing/health bridge, nothing else)
+ *   tsx src/cli/local-agent.ts --bridge-only        (resident SellerOps 도우미: pairing/health bridge; the Coupang guided walk on demand)
  *
  * This is the thin LIVE wrapper around the pure {@link LocalAgentConnectorStartup} composition root: it
  * loads the sanitized MIXED device connection config (browser channels NAVER/ESM, API Cafe24, and the
@@ -49,6 +49,12 @@ import { IssuanceFixtureDriver } from "../action-window/api-issuance/issuance-fi
 import { CoupangIssuanceFixtureDriver } from "../action-window/coupang-issuance/coupang-issuance-fixture-driver";
 import { ReviewLocateFixtureDriver } from "../action-window/coupang-review/review-locate-fixture-driver";
 import { LazyCoupangIssuanceDriver } from "../action-window/coupang-issuance/lazy-coupang-issuance-driver";
+import { CoupangIssuanceEngine } from "../action-window/coupang-issuance/coupang-issuance-engine";
+import { CoupangIssuanceGuidanceSession } from "../action-window/coupang-issuance/coupang-issuance-session";
+import { ApiIssuanceEndpoint } from "../bridge/api-issuance-endpoint";
+import { OnDemandCarrierHost, type ActivatedCarrier } from "../bridge/on-demand-carrier-host";
+import type { AwAttachRequest } from "../bridge/aw-carrier";
+import { AW_CARRIER_ISSUANCE } from "../../../contracts/action-window/aw-carrier-kind";
 import { verifyRepoIdentity } from "./repo-identity";
 import { screenWingUrl } from "./coupang-wing-classifier";
 import { screenSellerOpsReturnUrl } from "./sellerops-return-url";
@@ -370,6 +376,8 @@ export interface CoupangIssuanceLiveCarrier {
   config: AgentCoupangIssuanceConfig;
   /** Close the dedicated window if one was ever brought up. Safe on a carrier that never opened one. */
   closeSurface: () => Promise<void>;
+  /** Sanitized: is the dedicated window up right now? `false` before the first open and after the seller closed it. */
+  isSurfaceOpen: () => boolean;
 }
 
 export function buildCoupangIssuanceLiveConfig(): CoupangIssuanceLiveCarrier {
@@ -519,8 +527,64 @@ export function buildCoupangIssuanceLiveConfig(): CoupangIssuanceLiveCarrier {
     closeSurface: async () => {
       const ctx = walkContext;
       walkContext = null;
-      driver.markClosed();
+      // RETIRE, not just forget: a released walk's own loops may still be unwinding, and `markClosed` alone
+      // means "re-open on the next call" — which is exactly what brought the window back on the first
+      // on-demand release (2026-08-19).
+      driver.retire();
       await ctx?.close().catch(() => undefined);
+    },
+    // The lazy driver forgets a window the seller closed (`markClosed` off the page/context close events), so
+    // its own open-ness is the honest reading — and it is the reading the on-demand host uses to decide that
+    // the seller is done with the key screen.
+    isSurfaceOpen: () => driver.isOpen(),
+  };
+}
+
+/**
+ * **The guided WING walk, brought up on demand by the resident helper.**
+ *
+ * The activator the bridge-only boot hands its {@link OnDemandCarrierHost}: for `issuance`/`coupang` (and
+ * nothing else — the resident helper serves exactly this one guided walk today) it assembles the SAME carrier
+ * the flag-selected boot assembles — {@link buildCoupangIssuanceLiveConfig} (lazy real-WING driver, landing
+ * navigated once, window closed on release) + {@link ApiIssuanceEndpoint} + {@link CoupangIssuanceEngine} +
+ * {@link CoupangIssuanceGuidanceSession} — with a fresh run identity per activation. Nothing is re-implemented
+ * and no capability is added: the runtime still never logs in, clicks, types, submits, issues a key, or reads
+ * a value; the seller presses every WING control, and SellerOps only highlights and observes. The WRITE
+ * boundary is untouched (this is a READ-only guidance walk; `docs/sellerops_live_approval_contract.md` §3 —
+ * the walk begins on the seller's own 시작 press in SellerOps, §6a — browser READ carriers stay
+ * seller-performed).
+ *
+ * Building the carrier opens NO browser: the window comes up on the session's first driver call, which happens
+ * only after the seller's START_RUN. Pure over its inputs apart from reading the collector config (profile dir,
+ * browser channel, app URL — no credential).
+ */
+export function activateCoupangGuidedWalk(
+  request: AwAttachRequest,
+  deps: { buildCarrier?: () => CoupangIssuanceLiveCarrier } = {},
+): ActivatedCarrier | null {
+  if (request.carrier !== AW_CARRIER_ISSUANCE || request.channelCode !== "coupang") return null;
+  const live = (deps.buildCarrier ?? buildCoupangIssuanceLiveConfig)();
+  const { runId, channelCode } = live.config;
+  const endpoint = new ApiIssuanceEndpoint({ runId, channelCode });
+  const engine = new CoupangIssuanceEngine({ runId, channelCode });
+  const session = new CoupangIssuanceGuidanceSession(engine, live.config.createDriver(), endpoint.transport);
+  const detach = session.attach();
+  log("aw_coupang_issuance_run_hosted", { onDemand: true });
+  let disposed = false;
+  return {
+    endpoint,
+    isSettled: () => {
+      if (!engine.isStarted()) return true;
+      const status = engine.view().status;
+      return status === "COMPLETED" || status === "CANCELLED" || status === "FAILED";
+    },
+    isSurfaceOpen: () => live.isSurfaceOpen(),
+    dispose: async () => {
+      if (disposed) return;
+      disposed = true;
+      detach();
+      endpoint.close();
+      await live.closeSurface();
     },
   };
 }
@@ -1045,6 +1109,11 @@ export interface BridgeOnlyBootDeps {
   print?: (line: string) => void;
   /** Called after shutdown completes on a signal; defaults to `process.exit(0)`. */
   exit?: () => void;
+  /**
+   * The on-demand carrier activator; defaults to {@link activateCoupangGuidedWalk}. A test passes one that builds
+   * a fixture-driven carrier so no window can open.
+   */
+  activateCarrier?: (request: AwAttachRequest) => ActivatedCarrier | null;
 }
 
 /** What {@link runBridgeOnlyBoot} hands back — enough for a test to probe the bridge and to stop it. */
@@ -1054,6 +1123,8 @@ export interface BridgeOnlyBootHandle {
   shutdown: () => Promise<void>;
   /** Resolves when the boot has been stopped (a signal, or `shutdown()`). */
   stopped: Promise<void>;
+  /** The on-demand carrier host mounted in the bridge's single slot — sanitized state for tests/operators. */
+  carrierHost: OnDemandCarrierHost;
 }
 
 /**
@@ -1061,9 +1132,17 @@ export interface BridgeOnlyBootHandle {
  *
  * The whole job: resolve the same bridge config the connector boot uses (port 47615, the shared
  * `pairings.json` — so an existing pairing is REUSED and the seller is not asked to pair again), wire the same
- * approval presenter, listen, and stay alive until SIGINT/SIGTERM. Deliberately nothing else: no connections,
- * no `decideRun`, no browser, no marketplace env, no carrier, no status sentinels. The frontend sees a paired
+ * approval presenter, listen, and stay alive until SIGINT/SIGTERM. Deliberately nothing else at boot: no
+ * connections, no `decideRun`, no browser, no marketplace env, no status sentinels. The frontend sees a paired
  * helper with an empty connection list, which its dock renders as "연결된 채널 없음" — true, and quiet.
+ *
+ * **Idle, not capability-less (2026-08-19).** The single carrier slot holds an {@link OnDemandCarrierHost}: it
+ * announces nothing and holds no browser until a SellerOps tab on `/connect/coupang` asks for the
+ * `issuance`/`coupang` carrier, at which point the EXISTING guided WING walk is assembled
+ * ({@link activateCoupangGuidedWalk}), announced, and driven exactly as the flag-selected boot drives it; when
+ * the walk is over and the seller is done with the window, the host releases it and the helper is bridge-only
+ * again. The seller never picks a carrier, flag, or env. `--bridge-only` still refuses every carrier FLAG
+ * alongside (the gate is unchanged): the resident helper's carrier is the on-demand one, by construction.
  *
  * Fails closed the same way as every other boot: a port already bound is a `skipped` listen and a non-zero
  * exit (a second resident helper must not silently think it is serving); a `none` presenter still yields a
@@ -1079,10 +1158,21 @@ export async function runBridgeOnlyBoot(
   const print = deps.print ?? ((line: string) => console.log(line));
   const exit = deps.exit ?? (() => process.exit(0));
   const approvalKind = decideApprovalPresenter(env, process.platform);
+  const carrierHost = new OnDemandCarrierHost({
+    activate: deps.activateCarrier ?? activateCoupangGuidedWalk,
+    ...(() => {
+      // Ops knob, not a product control: how long a walk's window is kept once no SellerOps tab is attached.
+      // The product default (15 min) is the "seller is copying the secret key" window; a proof run shortens it
+      // so the idle→guided→idle cycle can be observed end to end. Ignored unless it parses to a sane duration.
+      const raw = Number(env.SELLEROPS_AGENT_CARRIER_IDLE_GRACE_MS ?? "");
+      return Number.isFinite(raw) && raw >= 5_000 && raw <= 2 * 60 * 60_000 ? { windowGraceMs: raw } : {};
+    })(),
+  });
   const bridge = createBridge({
     ...resolveAgentBridgeConfig(args, env),
     ...deps.bridgeConfigOverride,
     approvalPresenter: createApprovalPresenterFor(approvalKind),
+    carrierEndpoint: carrierHost,
   });
   const listen = await bridge.listen();
   print(
@@ -1093,11 +1183,13 @@ export async function runBridgeOnlyBoot(
       // Two booleans an operator reads to know what to look for: nothing is on screen and nothing was opened.
       browserLaunched: false,
       marketplaceOpened: false,
+      // What this resident helper can bring up when a SellerOps tab asks — names only.
+      onDemandCarriers: ["issuance/coupang"],
     }),
   );
   if (!listen.ok) {
     // Nothing is listening, so nothing to keep resident — the caller (main) exits non-zero.
-    return { listen, shutdown: async () => {}, stopped: Promise.resolve() };
+    return { listen, shutdown: async () => {}, stopped: Promise.resolve(), carrierHost };
   }
   bridge.markAgentStarted();
 
@@ -1105,6 +1197,8 @@ export async function runBridgeOnlyBoot(
   const stopped = new Promise<void>((r) => (resolveStopped = r));
   const shutdown = createSignalShutdown(async () => {
     bridge.markAgentStopping();
+    // A window the on-demand walk opened must not outlive the helper that opened it.
+    await carrierHost.disposeActive().catch(() => {});
     await bridge.close().catch(() => {});
     print(JSON.stringify({ mode: "BRIDGE_ONLY", stopped: true }));
     resolveStopped();
@@ -1112,7 +1206,7 @@ export async function runBridgeOnlyBoot(
   const handler = (): void => void shutdown().then(() => exit());
   registerSignal("SIGINT", handler);
   registerSignal("SIGTERM", handler);
-  return { listen, shutdown, stopped };
+  return { listen, shutdown, stopped, carrierHost };
 }
 
 /**
@@ -1387,7 +1481,7 @@ function usage(): string {
   return [
     "usage:",
     `  tsx src/cli/local-agent.ts --connections <path.json> [${LOCAL_AGENT_APPROVAL_FLAG}]`,
-    `  tsx src/cli/local-agent.ts ${BRIDGE_ONLY_FLAG}   (resident SellerOps 도우미: pairing/health bridge only, no browser)`,
+    `  tsx src/cli/local-agent.ts ${BRIDGE_ONLY_FLAG}   (resident SellerOps 도우미: pairing/health bridge; no browser until a SellerOps tab starts the Coupang guided walk)`,
     "",
     "Without the approval flag (or with missing live config) this is a DRY RUN — it validates and",
     "counts the configured connections and launches nothing.",

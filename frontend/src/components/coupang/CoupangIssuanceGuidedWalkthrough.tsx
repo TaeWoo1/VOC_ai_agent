@@ -23,12 +23,14 @@ import { isIssuanceResumeReturn } from "../../lib/coupangTutorial";
  *
  * The bridge lives INSIDE this component, which mounts only in the `issuance` journey phase. Credential
  * entry, the connection test, the first sync, and every already-progressed path never see it. A seller with
- * no helper — or who declines pairing — is never blocked: the screen walk is used ONLY when it can actually
- * run; the moment it is known that it cannot (no helper, pairing will not fix it, or the paired helper hosts
- * no walk) the component is the static WING text checklist — with no error, because that is an ordinary way
- * to issue the key, not a failure. While the walk is being prepared a "텍스트로 직접 진행하기" affordance
- * is one click away, and an "이미 키가 있어요" skip on the start gate jumps straight to credential entry.
- * Issuance can always be completed with text alone.
+ * no helper — or who declines pairing — is never blocked: the screen walk is the PRIMARY path and the resident
+ * SellerOps 도우미 brings it up on demand (the tab asks for the `issuance`/`coupang` carrier; the helper
+ * assembles the walk and announces it; the WING window opens on the seller's 시작). The text checklist is the
+ * FALLBACK, entered only when the walk is known to be impossible on this machine (no helper, pairing will not
+ * fix it, or the paired helper cannot host the walk — an older helper, or one holding a different carrier) —
+ * with no error, because that is an ordinary way to issue the key, not a failure. While the walk is being
+ * prepared a "텍스트로 직접 진행하기" affordance is one click away, and an "이미 키가 있어요" skip on the start
+ * gate jumps straight to credential entry. Issuance can always be completed with text alone.
  *
  * ## Never a credential, never a scripted page
  *
@@ -107,8 +109,10 @@ export function CoupangIssuanceGuidedWalkthrough({
   const agentSettling = phase === "connecting" || phase === "connecting_ws" || phase === "disconnected";
 
   // Live issuance run host — the SHARED host for every channel (the run's channelCode comes from the agent
-  // announcement). Inert until `attach()` is called.
-  const issuance = useGuidedIssuance(hostRuntime);
+  // announcement). Inert until `attach()` is called. `channelCode` here is the ASK, not the answer: the resident
+  // SellerOps 도우미 hosts no carrier until a tab asks, and this is the tab asking for the Coupang guided walk —
+  // the announced channelCode still decides what the run is.
+  const issuance = useGuidedIssuance(hostRuntime, { channelCode: "coupang" });
   const attach = issuance.attach;
   // Attach exactly once, and only once the seller has started AND the agent is paired — a ref keeps
   // StrictMode's double-invoke and any re-render from opening a second socket or starting a second walk (the
@@ -145,6 +149,11 @@ export function CoupangIssuanceGuidedWalkthrough({
   // Reported live 2026-08-19: a resident helper without an Action Window carrier left the seller on
   // "화면 안내를 실행할 수 없어요" after a 4s timeout, for a state that was never theirs to fix.
   const guidanceImpossible = agentUnreachable || cannotPair || hostRefused;
+  // **The seller ENDED the walk** (취소, or the runtime failed it). Live-observed 2026-08-19: the screen kept
+  // saying "쿠팡(윙) 창에서 화면 안내를 따라 진행하세요 · 0/8" beside "지금은 할 수 있는 동작이 없어요" — a walk
+  // that is over, presented as one in progress, with nothing to press. A cancelled walk is not an error and not
+  // a dead end: it hands over to the ordinary text checklist, which finishes the issuance.
+  const walkEnded = !!effectiveRun && (effectiveRun.status === "CANCELLED" || effectiveRun.status === "FAILED");
   // Still deciding: detecting the helper, pairing, or attaching to the host (no run yet, no refusal yet).
   const guidancePreparing = !guidanceImpossible && !effectiveRun;
   // The text flow is the way out of every waiting state too — a seller never has to wait on (or pair) the
@@ -180,11 +189,11 @@ export function CoupangIssuanceGuidedWalkthrough({
     setTextMode(true);
   };
 
-  // The text flow: the static WING checklist. Entered by the seller's own click, or automatically the moment
-  // guidance is known to be impossible (once started, never on the start gate). The seller completes issuance
+  // The text flow: the static WING checklist. Entered by the seller's own click, automatically the moment
+  // guidance is known to be impossible, or after the seller ended the walk (once started, never on the start gate). The seller completes issuance
   // here and hands off to credential entry via `onIssued`. SellerOps never scripts WING — the checklist only
   // opens it in a new tab.
-  if (textMode || (started && guidanceImpossible)) {
+  if (textMode || (started && (guidanceImpossible || walkEnded))) {
     return (
       <div className="space-y-3" aria-label="쿠팡 Open API 키 발급 (텍스트 안내)">
         <p className="text-sm text-muted break-keep">

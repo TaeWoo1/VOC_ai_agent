@@ -246,6 +246,12 @@ export interface AgentBridgeConfig {
   /** When present, hosts one ISOLATED review-locate run (v2). Mutually exclusive with the rest. */
   reviewLocate?: AgentReviewLocateConfig;
   /**
+   * A PREBUILT carrier endpoint for the single slot — the resident `--bridge-only` helper's on-demand host
+   * (`bridge/on-demand-carrier-host.ts`), which is idle until a SellerOps tab asks for a carrier by name.
+   * Mutually exclusive with every carrier config above: it IS the one carrier of that agent.
+   */
+  carrierEndpoint?: AwCarrierEndpoint;
+  /**
    * Called when SellerOps asked to be connected to this agent — a pairing approved, or an authenticated tab
    * attaching. Passed straight through to {@link BridgeServer}; see its note for why the import mode brings the
    * seller's marketplace window up at this moment and not earlier or later.
@@ -294,10 +300,11 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
     cfg.apiIssuance,
     cfg.coupangIssuance,
     cfg.reviewLocate,
+    cfg.carrierEndpoint,
   ].filter(Boolean).length;
   if (carriersConfigured > 1) {
     throw new Error(
-      "agent-bridge: actionWindow, replySubmission, initialImport, apiIssuance, coupangIssuance, and reviewLocate are mutually exclusive — an agent hosts exactly one carrier",
+      "agent-bridge: actionWindow, replySubmission, initialImport, apiIssuance, coupangIssuance, reviewLocate, and carrierEndpoint are mutually exclusive — an agent hosts exactly one carrier",
     );
   }
   const store = new FilePairingStore(cfg.pairingFile, { now: cfg.now ?? (() => Date.now()) });
@@ -467,7 +474,7 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
   // issuance over locate, locate over export. The CLI already refuses to build more than one, so this is
   // defence in depth.
   const carrier: AwCarrierEndpoint | undefined =
-    importEndpoint ?? replyEndpoint ?? apiIssuanceEndpoint ?? coupangIssuanceEndpoint ?? reviewLocateEndpoint ?? actionWindow;
+    importEndpoint ?? replyEndpoint ?? apiIssuanceEndpoint ?? coupangIssuanceEndpoint ?? reviewLocateEndpoint ?? actionWindow ?? cfg.carrierEndpoint;
   const server = new BridgeServer({
     store,
     allowedOrigins: cfg.allowedOrigins,

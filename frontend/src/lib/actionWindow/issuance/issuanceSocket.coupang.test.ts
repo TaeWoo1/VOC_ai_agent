@@ -163,6 +163,33 @@ describe("Coupang issuance over the bridge-WS transport (issuance carrier)", () 
     expect(h.sockets).toHaveLength(0);
   });
 
+  it("ASKS the resident helper for the Coupang walk on open (`aw_attach` issuance/coupang), then attaches on its announcement; re-asks on reconnect", async () => {
+    const h = harness();
+    h.deps = { ...h.deps, attachChannelCode: "coupang" };
+    const pending = connectAwBridgeSession(h.deps);
+    const ws = await until(() => h.sockets[0]);
+    expect(ws.sent).toHaveLength(0); // nothing before the socket is open
+    ws.onopen?.();
+    expect(ws.sent.map((s) => JSON.parse(s))).toEqual([{ type: "aw_attach", carrier: AW_CARRIER_ISSUANCE, channelCode: "coupang" }]);
+    ws.receive(ANNOUNCEMENT);
+    const result = await pending;
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    // The drop → a fresh socket asks again before the resync.
+    ws.drop();
+    const ws2 = await until(() => h.sockets[1]);
+    ws2.onopen?.();
+    expect(JSON.parse(ws2.sent[0]!)).toEqual({ type: "aw_attach", carrier: AW_CARRIER_ISSUANCE, channelCode: "coupang" });
+    result.session.close();
+  });
+
+  it("sends NO attach request when no channel was asked for (byte-identical legacy handshake)", async () => {
+    const h = harness();
+    const { ws } = await connected(h);
+    ws.onopen?.();
+    expect(ws.sent).toHaveLength(0);
+  });
+
   it("attaches to an ISSUANCE-carrier agent announcing channelCode coupang", async () => {
     const h = harness();
     const { session } = await connected(h);

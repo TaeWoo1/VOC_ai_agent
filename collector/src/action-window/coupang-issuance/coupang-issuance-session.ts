@@ -50,6 +50,17 @@ export class CoupangIssuanceGuidanceSession {
    */
   private surfaceClosed = false;
 
+  /**
+   * **Stopped for good** — the host tore this session down (the resident helper releasing the walk, or the agent
+   * shutting down). Every automatic loop checks it at each poll and every drive refuses.
+   *
+   * Without it a released session kept its own timers: `awaitSurface` polls `probeSurface()` once a second, the
+   * lazy driver re-opens a window it has been told to forget, and the marketplace window the host had just
+   * closed came straight back (observed 2026-08-19, on the first on-demand release). `isPaused` / terminal were
+   * the only exits those loops had, and neither describes "nobody is hosting this run any more".
+   */
+  private stopped = false;
+
   private started = false;
   private publishedSeq = 0;
   /** Refcount of automatic drives in flight — NOT a boolean (the START drive and a detached watchBarrier run
@@ -80,9 +91,15 @@ export class CoupangIssuanceGuidanceSession {
     const stopTransport = this.transport.subscribe((frame) => this.handle(frame));
     this.unsubscribe = () => {
       this.surfaceCloseToken += 1;
+      this.stopped = true;
       stopTransport();
     };
     return this.unsubscribe;
+  }
+
+  /** Whether this session has been torn down. Sanitized boolean, for the host and for tests. */
+  isStopped(): boolean {
+    return this.stopped;
   }
 
   /** Resolves once no automatic drive is in flight (test-facing determinism hook). */
@@ -152,6 +169,9 @@ export class CoupangIssuanceGuidanceSession {
   }
 
   private async onDriveError(e: unknown): Promise<void> {
+    // A fault on a torn-down session is the teardown itself — the retired driver refusing a call from a loop
+    // that was still unwinding. There is nobody to publish a park to, and parking a released run would be a lie.
+    if (this.stopped) return;
     // A drive fault is most often a NAVIGATION RACE — an in-page locate/highlight read fired while the seller's
     // own page was still moving, destroying the execution context. Do NOT fail closed and leave the run idle:
     // ask the engine to PARK recoverably on page_mismatch, so a `REQUEST_STEP_RECHECK` re-settles and re-guides.
@@ -169,6 +189,9 @@ export class CoupangIssuanceGuidanceSession {
   }
 
   private async drive(effect: CoupangIssuanceEffect): Promise<void> {
+    // A torn-down session drives nothing: every effect below either touches the driver (which would re-open a
+    // window the host just closed) or publishes to a transport nobody is subscribed to.
+    if (this.stopped) return;
     if (typeof effect === "object") {
       if ("guide" in effect) return this.guide(effect.guide);
       // `observe` rests at a seller barrier. The watcher runs detached so the drive chain unwinds and the run is
@@ -260,9 +283,9 @@ export class CoupangIssuanceGuidanceSession {
   private async awaitSurface(): Promise<CoupangIssuanceEffect> {
     const maxPolls = Math.max(1, Math.ceil(this.surfaceWaitTimeoutMs / Math.max(1, this.surfaceWaitPollMs)));
     for (let i = 0; i < maxPolls; i++) {
-      if (this.engine.isPaused() || isCoupangIssuanceTerminal(this.engine.currentStage())) return "NONE";
+      if (this.stopped || this.engine.isPaused() || isCoupangIssuanceTerminal(this.engine.currentStage())) return "NONE";
       await new Promise<void>((resolve) => setTimeout(resolve, this.surfaceWaitPollMs));
-      if (this.engine.isPaused() || isCoupangIssuanceTerminal(this.engine.currentStage())) return "NONE";
+      if (this.stopped || this.engine.isPaused() || isCoupangIssuanceTerminal(this.engine.currentStage())) return "NONE";
       const again = await this.driver.probeSurface();
       const next = this.engine.onSurfaceProbed(again);
       this.publishState();
@@ -283,7 +306,7 @@ export class CoupangIssuanceGuidanceSession {
    * has been applied and nothing else is going to move the run.
    */
   private maybeRecoverPark(): void {
-    if (this.recovering) return;
+    if (this.recovering || this.stopped) return;
     // **NEVER auto-recover a surface the seller CLOSED.** Self-recovery drives a `{guide}`, which settles and
     // locates — and the lazy driver brings a window up on its first call, so a timer-issued recheck would
     // re-open the marketplace window the seller had just deliberately closed, once a second for ten minutes.
@@ -309,6 +332,7 @@ export class CoupangIssuanceGuidanceSession {
    * before its `TARGET_HIGHLIGHTED` event exists.
    */
   private async guide(target: CoupangIssuanceTarget): Promise<void> {
+    if (this.stopped) return;
     // Settle the surface BEFORE the locate so a fixed-label locate/highlight never fires on a still-settling
     // post-navigation page. Best-effort and value-free; a driver without a real page omits it. If a read still
     // races a navigation and throws, `onDriveError → engine.onDriveFault` parks recoverably.
@@ -337,11 +361,12 @@ export class CoupangIssuanceGuidanceSession {
    * should be abandoned. Bounded: the loop exits the moment the engine leaves this barrier.
    */
   private async watchBarrier(target: CoupangIssuanceTarget): Promise<void> {
+    if (this.stopped) return;
     let acted = await this.driver.observeUserAction(target);
     while (!acted) {
-      if (!this.stillWaitingOn(target)) return;
+      if (this.stopped || !this.stillWaitingOn(target)) return;
       await new Promise<void>((resolve) => setTimeout(resolve, this.rearmDelayMs));
-      if (!this.stillWaitingOn(target)) return;
+      if (this.stopped || !this.stillWaitingOn(target)) return;
       await this.driver.armObserve(target);
       acted = await this.driver.observeUserAction(target);
     }
@@ -377,7 +402,7 @@ export class CoupangIssuanceGuidanceSession {
     const maxPolls = Math.max(1, Math.ceil(this.surfaceWaitTimeoutMs / Math.max(1, this.surfaceWaitPollMs)));
     for (let i = 0; i < maxPolls; i++) {
       await new Promise<void>((resolve) => setTimeout(resolve, this.surfaceWaitPollMs));
-      if (this.engine.isPaused() || isCoupangIssuanceTerminal(this.engine.currentStage())) return;
+      if (this.stopped || this.engine.isPaused() || isCoupangIssuanceTerminal(this.engine.currentStage())) return;
       if (!isCoupangIssuancePark(this.engine.currentStage())) return;
       const outcome = this.engine.command({ type: "REQUEST_STEP_RECHECK", expectedRevision: this.engine.view().revision });
       if (!outcome.ok) return;
@@ -411,6 +436,7 @@ export class CoupangIssuanceGuidanceSession {
   }
 
   private onSurfaceClosed(token: number): void {
+    if (this.stopped) return;
     if (token !== this.surfaceCloseToken) return;
     if (isCoupangIssuanceTerminal(this.engine.currentStage())) return;
     // Latched BEFORE the park is driven, so the `CLEAR_HIGHLIGHT` chain that follows cannot end in a recovery

@@ -66,6 +66,22 @@ export class LazyCoupangIssuanceDriver implements CoupangIssuanceProbeDriver {
     return this.opened !== null;
   }
 
+  /**
+   * **Retired for good** — the host tore this walk down (the resident helper released it, or the agent is
+   * shutting down). Distinct from {@link markClosed}, which means "the seller closed their window; re-open it
+   * on their next command". After this, every call refuses rather than launching: a released walk whose loops
+   * are still unwinding must not be able to bring the marketplace window back (observed 2026-08-19).
+   */
+  private retired = false;
+
+  /** Retire the driver: no call may open a window again. Idempotent, and it opens/closes nothing itself. */
+  retire(): void {
+    this.retired = true;
+    this.opened = null;
+    this.opening = null;
+    this.context = null;
+  }
+
   /** Forget a closed window so the next call re-opens it in the same persistent profile. */
   markClosed(): void {
     this.opened = null;
@@ -74,6 +90,7 @@ export class LazyCoupangIssuanceDriver implements CoupangIssuanceProbeDriver {
   }
 
   private async driver(): Promise<CoupangWingIssuanceDriver> {
+    if (this.retired) throw new Error("coupang issuance driver: retired (the walk was released)");
     if (this.opened) return this.opened;
     if (!this.opening) {
       this.opening = this.deps.open().then(({ context, page }) => {

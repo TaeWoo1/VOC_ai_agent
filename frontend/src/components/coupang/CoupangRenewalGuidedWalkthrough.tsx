@@ -74,7 +74,7 @@ export function CoupangRenewalGuidedWalkthrough({
   const cannotPair = phase === "incompatible_version" || phase === "pairing_denied" || phase === "revoked";
   const agentUnreachable = phase === "unreachable";
 
-  const issuance = useGuidedIssuance(hostRuntime);
+  const issuance = useGuidedIssuance(hostRuntime, { channelCode: "coupang" });
   const attach = issuance.attach;
   const attachedRef = useRef(false);
   useEffect(() => {

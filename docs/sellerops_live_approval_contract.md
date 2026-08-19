@@ -161,6 +161,14 @@ seller presses 시작 on the SellerOps screen, which is already a real press by 
 SellerOps-owned surface. Its manifest says that, and deliberately does not promise a confirmation
 tab that entrypoint never opens.
 
+**2026-08-19 — the same exception, with the resident helper as the entrypoint.** The seller's one
+resident SellerOps 도우미 (`--bridge-only`) now brings that walk up **on demand**: a paired SellerOps
+tab asks for the carrier on the already-authenticated socket, the helper assembles the existing walk,
+and the WING window opens on the seller's own 시작 → `START_RUN` — no flag, no phase/approval env, no
+repo-identity ceremony, because there is no CLI-launched run to gate and the authorizing press is the
+one this paragraph already names. Every **CLI-launched** WING run keeps that ceremony unchanged, and
+the WRITE boundary is untouched (§6a). Design: `docs/resident_helper_on_demand_carrier_v1.md`.
+
 **Additional detail is requested ONLY when** one of these is true (otherwise, ask for nothing more):
 
 - No manifest is prepared/displayed.

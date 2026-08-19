@@ -1231,6 +1231,18 @@ describe("the live guided-walk carrier is gated, and never downgrades silently",
     expect(fn.indexOf('page.once("close"')).toBeGreaterThan(fn.indexOf("open: async () =>"));
   });
 
+  it("**a RELEASED walk retires its driver** — a closed window must not come back on an unwinding loop", () => {
+    // Live-observed 2026-08-19 on the first on-demand release: `closeSurface` called `markClosed()`, which means
+    // "the seller closed it; re-open on the next call" — and the session's still-running surface-wait loop made
+    // that next call one second later. Releasing is not the seller closing a window: nothing may re-open it.
+    const src = readFileSync(resolve(HERE, "../../../src/cli/local-agent.ts"), "utf8");
+    const from = src.indexOf("export function buildCoupangIssuanceLiveConfig");
+    const fn = src.slice(from, src.indexOf("\nexport function activateCoupangGuidedWalk", from));
+    const close = fn.slice(fn.indexOf("closeSurface: async ()"));
+    expect(close).toContain("driver.retire()");
+    expect(close).not.toContain("driver.markClosed()");
+  });
+
   it("the walk's window is closed with the agent that opened it", () => {
     // The teardown was unreachable — the driver is a local `const` inside the builder — so an orphaned dedicated
     // Chrome outlived the stopped service and kept its persistent profile dir locked against the next boot.
