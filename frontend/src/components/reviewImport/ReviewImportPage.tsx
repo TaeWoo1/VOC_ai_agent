@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useApiData } from "../../lib/useApiData";
 import { api } from "../../lib/apiClient";
+import { productAccounts } from "../../lib/productAccounts";
 import { useBridge } from "../../hooks/useBridge";
 import { agentAvailabilityFromBridgePhase, planStatusLabel } from "../../lib/reviewImport";
 import type {
@@ -48,6 +49,18 @@ export function ReviewImportPage() {
     .filter((c) => GUIDED_CHANNEL_CODES.includes(c.code))
     .map((c) => c.id);
   /**
+   * **Product channels only.** The picker below used to render `getSellerAccountsStrict()` raw, so it listed
+   * `G마켓/옥션 · ESM 문의 엑셀 가져오기` — a channel the product deliberately does not show (2026-08-17: ESM /
+   * 11번가 / SSG stay in the catalog and the connector layer, "not returned to product surfaces"). Offering it
+   * here was worse than untidy: this screen's whole choreography is marketplace-specific, and the account it
+   * named was one no import runtime can drive.
+   *
+   * The channel read already existed for `guidedChannelIds`, so this costs no extra request. It fails CLOSED
+   * on a channel read that did not land (`productAccounts` returns `[]`), which the empty state below states
+   * honestly rather than papering over with the unfiltered list.
+   */
+  const visibleAccounts = productAccounts(accounts.data, channels.data).map((entry) => entry.account);
+  /**
    * The account this screen works on.
    *
    * Defaults to one the guided flow can actually drive, NOT to whichever came back first. On 2026-07-26 the
@@ -56,9 +69,9 @@ export function ReviewImportPage() {
    * be done; the runtime now refuses such a ticket outright, and this stops the seller being sent there at all.
    */
   const active =
-    accounts.data?.find((a) => a.id === accountId) ??
-    accounts.data?.find((a) => guidedChannelIds.includes(a.channelId)) ??
-    accounts.data?.[0] ??
+    visibleAccounts.find((a) => a.id === accountId) ??
+    visibleAccounts.find((a) => guidedChannelIds.includes(a.channelId)) ??
+    visibleAccounts[0] ??
     null;
 
   const plans = useApiData<ReviewImportPlanView[]>(
@@ -85,7 +98,23 @@ export function ReviewImportPage() {
       </p>
     );
   }
-  if (accounts.data.length === 0) {
+  /**
+   * **A dead channel read is its own state, and it says so.**
+   *
+   * `productAccounts` fails CLOSED without the channel list — it cannot tell which marketplace an account
+   * belongs to, and answering "all of them" is how an ESM row would reappear on this screen the first time a
+   * channel read failed. But failing closed must not borrow the sentence below it: the seller HAS accounts,
+   * so "먼저 판매 채널 계정을 연결해 주세요" would send them to connect a channel they already connected. Two
+   * different problems, two different sentences, and this one is retryable.
+   */
+  if (channels.error && (accounts.data?.length ?? 0) > 0) {
+    return (
+      <p className="rounded-xl bg-bad/5 px-4 py-3 text-base text-bad" role="alert">
+        채널 정보를 불러오지 못해 계정을 표시할 수 없어요. 잠시 후 다시 시도해 주세요.
+      </p>
+    );
+  }
+  if (visibleAccounts.length === 0) {
     return (
       <p className="rounded-2xl bg-surface p-5 text-base text-muted shadow-card">
         먼저 판매 채널 계정을 연결해 주세요.
@@ -113,7 +142,7 @@ export function ReviewImportPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      {accounts.data.length > 1 ? (
+      {visibleAccounts.length > 1 ? (
         <label className="text-sm text-ink">
           계정
           <select
@@ -121,7 +150,7 @@ export function ReviewImportPage() {
             onChange={(e) => setAccountId(e.target.value)}
             className="ml-2 rounded-lg border border-line px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
           >
-            {accounts.data.map((a) => (
+            {visibleAccounts.map((a) => (
               // The channel is always shown, even when the seller gave the account a nickname. An alias like
               // "라이브 2구간 테스트" tells you nothing about WHICH marketplace it is, and this screen's whole
               // choreography is marketplace-specific.

@@ -155,17 +155,28 @@ describe("browser launch reachability", () => {
     const calls = [...cli.matchAll(/launchNaverContext\(/g)].map((m) => m.index!);
     expect(calls.length).toBeGreaterThanOrEqual(1);
 
-    // THREE gated builders now: the initial-import one, and the two guided walks' live carriers (WING and the
-    // NAVER API center). In BOTH walks the launch is deferred into `open()`, which the session calls on the
-    // seller's own START_RUN — so building the carrier launches nothing, and the carrier is only built when a
-    // paired, authenticated SellerOps tab asks for it by name (or, on the flag boot, once every approval
-    // binding is present). The property is unchanged and still the point — every launch is inside a builder
+    // SIX gated builders now. The property is unchanged and still the point — every launch is inside a builder
     // that a gate stands in front of, so none is reachable by booting the agent alone. Widening this to
-    // "anywhere" would retire the guard, not update it.
+    // "anywhere" would retire the guard, not update it; naming each new builder keeps it a list of doors.
+    //
+    //  - `buildInitialImportConfig` — the approval-gated FLAG boot. It is the only one that launches while
+    //    BUILDING (the boot window on SellerOps, product-owner decision 2026-07-26), which is exactly why its
+    //    gate refuses production, refuses a scheduled host, and demands the live-approval flag;
+    //  - `buildNaverImportCarrierCore` — the piece both import hosts share, extracted from the above unchanged.
+    //    Its launch is the account-scoped seller-center context, deferred into `openSurface`, which nothing
+    //    calls until the SERVER has resolved a run's launch ref into an account slot;
+    //  - the four RESIDENT carriers (`buildCoupangIssuanceLiveConfig`, `buildNaverIssuanceLiveConfig`,
+    //    `buildCoupangRenewalLiveConfig`, `buildCoupangReviewLocateLiveConfig`) — in every one the launch is
+    //    deferred into `open()`, which the session calls on the seller's own START_RUN. Building the carrier
+    //    launches nothing, and the carrier is only built when a paired, authenticated SellerOps tab asks for it
+    //    by name.
     const spans = [
       ["export async function buildInitialImportConfig", "/**\n * Build the {@link AgentActionWindowConfig}"],
+      ["function buildNaverImportCarrierCore", "\n/**\n * Build the {@link AgentImportConfig} for the approval-only import mode."],
       ["export function buildCoupangIssuanceLiveConfig", "\nexport function buildCoupangIssuanceConfig"],
       ["export function buildNaverIssuanceLiveConfig", "\nexport function activateNaverGuidedWalk"],
+      ["export function buildCoupangRenewalLiveConfig", "\nexport function activateCoupangRenewalWalk"],
+      ["export function buildCoupangReviewLocateLiveConfig", "\nexport function activateCoupangReviewLocate"],
     ].map(([from, to]) => {
       const start = cli.indexOf(from!);
       const end = cli.indexOf(to!, start);

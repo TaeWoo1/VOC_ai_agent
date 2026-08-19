@@ -86,12 +86,24 @@ function asV2Transport(v1: V1ClientTransport): V2ClientTransport {
  */
 export async function connectImportSession(deps?: {
   onStatus?: (status: "connected" | "reconnecting" | "offline") => void;
+  /**
+   * WHICH channel's import carrier to ask the agent for. Defaults to `naver` — the only channel with an import
+   * surface (`GUIDED_CHANNEL_CODES` on the screen says the same thing, and the runtime refuses any other).
+   *
+   * **This request is what lets the resident helper carry the import at all.** Without it the session attached
+   * and waited for an announcement only a FIXED-carrier import agent ever sends — and the only thing that ever
+   * booted one was `--action-window-initial-review-import` behind a live-approval flag and an operator-owned
+   * `NAVER_REVIEW_URL`. So `/connect/review-history` offered a guided import that no seller's helper could
+   * carry. Naming the carrier brings it up on demand, exactly as `/connect/naver` does for the guided walk.
+   */
+  channelCode?: string;
 }): Promise<ImportSessionResult> {
   const httpBase = bridgeBase();
   const result = await connectAwBridgeSession({
     httpBase,
     wsBase: httpBase.replace(/^http/, "ws"),
     expectedCarrier: AW_CARRIER_IMPORT,
+    attachChannelCode: deps?.channelCode ?? "naver",
     ...(deps?.onStatus ? { onStatus: deps.onStatus } : {}),
   });
   if (!result.ok) return { ok: false, reason: result.reason };

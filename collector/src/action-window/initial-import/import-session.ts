@@ -30,7 +30,7 @@
  *  - a barrier's watcher only advances a barrier that is still open for that same target, so a late or
  *    duplicated observation cannot skip a step.
  */
-import { validateCommandEnvelope } from "../../../../contracts/action-window/v2/index";
+import { validateCommandEnvelope, type ActionWindowRunView } from "../../../../contracts/action-window/v2/index";
 import {
   AW_GUIDANCE_INTENTS,
   type AwGuidanceIntent,
@@ -204,6 +204,18 @@ export class ImportSegmentSession {
       .clearTargetHighlight()
       .catch((e) => log("aw_import_clear_highlight_failed", { reason: errName(e) }, "warn"));
     this.publishState();
+  }
+
+  /**
+   * The hosted run's sanitized status — the one enum a HOST needs to answer "is this segment over?".
+   *
+   * Added for the resident helper's on-demand carrier, which decides whether to release the seller's
+   * marketplace window from exactly this reading (plus "no tab is attached"). Deliberately the status ALONE
+   * rather than the whole view: a host has no business reading a run's step, target ref, or event log, and a
+   * release decision made from more than it needs is a release decision that breaks when the view changes.
+   */
+  runStatus(): ActionWindowRunView["status"] {
+    return this.engine.view().status;
   }
 
   /** Resolves once no automatic drive is in flight (test-facing determinism hook). */

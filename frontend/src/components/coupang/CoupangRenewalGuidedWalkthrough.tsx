@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useBridge } from "../../hooks/useBridge";
 import type { ActionWindowRunView, CommandType } from "../../lib/actionWindow/contract";
 import { blockerView, renewalStepDetail } from "../../lib/actionWindow/copy";
+import { AW_CARRIER_RENEWAL } from "../../../../contracts/action-window/aw-carrier-kind";
 import { OperationRunTimeline } from "../actionWindow/OperationRunTimeline";
 import { ActionWindowControlPanel } from "../actionWindow/ActionWindowControlPanel";
 import { BlockerNotice } from "../actionWindow/BlockerNotice";
@@ -74,7 +75,16 @@ export function CoupangRenewalGuidedWalkthrough({
   const cannotPair = phase === "incompatible_version" || phase === "pairing_denied" || phase === "revoked";
   const agentUnreachable = phase === "unreachable";
 
-  const issuance = useGuidedIssuance(hostRuntime, { channelCode: "coupang" });
+  // **`renewal`, not `issuance` — the whole point of this line.**
+  //
+  // It used to ask for `issuance`/`coupang`, byte-identical to what `CoupangIssuanceGuidedWalkthrough` asks
+  // for, so the resident helper's first matching activator stood up the eight-step FIRST-TIME engine under
+  // this five-step 갱신 page: every step arrived under an `actionWindow.coupangIssuance.*` copy key, and
+  // `renewalStepDetail` (which only maps `actionWindow.coupangRenewal.*`) returned null for every one of
+  // them. Asking for the renewal carrier by name gets the renewal engine — and if no agent hosts it, the
+  // shared transport now fails closed with `carrier-mismatch` and this screen offers its text checklist,
+  // instead of quietly driving the other walk.
+  const issuance = useGuidedIssuance(hostRuntime, { channelCode: "coupang", carrier: AW_CARRIER_RENEWAL });
   const attach = issuance.attach;
   const attachedRef = useRef(false);
   useEffect(() => {

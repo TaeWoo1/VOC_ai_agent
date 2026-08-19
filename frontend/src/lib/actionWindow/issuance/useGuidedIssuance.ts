@@ -16,6 +16,7 @@ import type { ActionWindowRunView } from "../../../../../contracts/action-window
 import { connectIssuanceSession, type IssuanceBridgeSession } from "./issuanceSession";
 import { createGuidedIssuanceRuntime, type GuidedIssuanceRuntime } from "./issuanceRuntime";
 import type { AwRefusalReason } from "../wsTransport";
+import type { AwCarrierKind } from "../../../../../contracts/action-window/aw-carrier-kind";
 
 /** Why a guided issuance could not be hosted — a transport refusal, or a START_RUN the agent rejected. */
 export type IssuanceUnavailable = AwRefusalReason | "start-refused";
@@ -50,9 +51,15 @@ export function useGuidedIssuance(
   opts?: {
     /** The channel whose issuance walk to ask the agent for (`coupang` / `naver`). See `connectIssuanceSession`. */
     channelCode?: string;
+    /**
+     * WHICH guidance carrier — `issuance` (default) or `renewal`. The renewal screen must pass `renewal`, or it
+     * gets the first-time walk under its own copy. See `connectIssuanceSession`.
+     */
+    carrier?: Extract<AwCarrierKind, "issuance" | "renewal">;
   },
 ): GuidedIssuanceBinding {
   const channelCode = opts?.channelCode;
+  const carrier = opts?.carrier;
   const [view, setView] = useState<ActionWindowRunView | null>(inject?.view() ?? null);
   const [unavailable, setUnavailable] = useState<IssuanceUnavailable | null>(null);
   const runtimeRef = useRef<GuidedIssuanceRuntime | null>(inject ?? null);
@@ -109,7 +116,10 @@ export function useGuidedIssuance(
     // would leave the first runtime addressing a run nobody is publishing.
     if (connectingRef.current) return connectingRef.current;
     const attempt = (async () => {
-      const result = await connectIssuanceSession(channelCode ? { channelCode } : undefined);
+      const result = await connectIssuanceSession({
+        ...(channelCode ? { channelCode } : {}),
+        ...(carrier ? { carrier } : {}),
+      });
       if (!result.ok) {
         if (liveRef.current) setUnavailable(result.reason);
         return null;
@@ -136,7 +146,7 @@ export function useGuidedIssuance(
     });
     connectingRef.current = attempt;
     return attempt;
-  }, [adopt, channelCode]);
+  }, [adopt, channelCode, carrier]);
 
   const send = useCallback<GuidedIssuanceRuntime["send"]>((type) => {
     runtimeRef.current?.send(type);

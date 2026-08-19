@@ -258,7 +258,12 @@ describe("runBridgeOnlyBoot — the guided walk on demand", () => {
     expect(handle.listen.ok).toBe(true);
     const port = (handle.listen as { ok: true; port: number }).port;
     const boot = JSON.parse(lines[0]!) as Record<string, unknown>;
-    expect(boot).toMatchObject({ mode: "BRIDGE_ONLY", browserLaunched: false, marketplaceOpened: false, onDemandCarriers: ["issuance/coupang", "issuance/naver"] });
+    expect(boot).toMatchObject({
+      mode: "BRIDGE_ONLY",
+      browserLaunched: false,
+      marketplaceOpened: false,
+      onDemandCarriers: ["issuance/coupang", "issuance/naver", "renewal/coupang", "locate/coupang", "import/naver"],
+    });
 
     // 1. A tab that does not ask sees bridge-only as it always was: hello + snapshot, NO aw_session.
     const ticket1 = await pairedTicket(port);
@@ -330,23 +335,47 @@ describe("activateNaverGuidedWalk", () => {
 });
 
 describe("activateResidentCarrier", () => {
-  it("routes BOTH channel walks and refuses everything else — the seller never picks a carrier", () => {
+  it("routes every wired carrier and refuses everything else — the seller never picks a carrier", () => {
     // Each activator builds its own real carrier here (no injected fixture), which is safe precisely because
     // building opens NO window — the lazy driver launches on the run's first call, and no run is started.
-    const coupang = activateResidentCarrier({ carrier: AW_CARRIER_ISSUANCE, channelCode: "coupang" });
-    const naver = activateResidentCarrier({ carrier: AW_CARRIER_ISSUANCE, channelCode: "naver" });
-    expect(coupang).not.toBeNull();
-    expect(naver).not.toBeNull();
-    expect(coupang!.isSurfaceOpen()).toBe(false);
-    expect(naver!.isSurfaceOpen()).toBe(false);
-    // Unwired carriers stay unwired rather than being served by the wrong walk (see the audit: `locate`,
-    // `import` and `reply` are hosted by their own boots, not by the resident helper).
-    expect(activateResidentCarrier({ carrier: "locate", channelCode: "coupang" })).toBeNull();
-    expect(activateResidentCarrier({ carrier: "import", channelCode: "naver" })).toBeNull();
+    // That property is the whole reason the resident helper can host five carriers and still be idle.
+    const wired: readonly (readonly [string, string])[] = [
+      [AW_CARRIER_ISSUANCE, "coupang"],
+      [AW_CARRIER_ISSUANCE, "naver"],
+      // The renewal walk is its OWN carrier. It used to ask for `issuance`/`coupang`, so the first-time engine
+      // answered a 갱신 page and every step arrived under a copy key that screen cannot render.
+      ["renewal", "coupang"],
+      // Live-proven since 2026-08-15 and 2026-07-25 respectively, but hosted only by seated-operator harnesses
+      // until now — a seller with the resident helper paired pressed [쿠팡에서 보기] / 가져오기 into nothing.
+      ["locate", "coupang"],
+      ["import", "naver"],
+    ];
+    for (const [carrier, channelCode] of wired) {
+      const activated = activateResidentCarrier({ carrier, channelCode });
+      expect(activated, `${carrier}/${channelCode}`).not.toBeNull();
+      // Building opened NOTHING. This is the assertion that keeps "idle helper" true as carriers are added.
+      expect(activated!.isSurfaceOpen(), `${carrier}/${channelCode}`).toBe(false);
+    }
+    // Still unwired, and refused rather than served by the wrong walk: the NAVER guided REPLY carrier is
+    // hosted by its own boot, and no channel other than the three named above has any of these surfaces.
     expect(activateResidentCarrier({ carrier: "reply", channelCode: "naver" })).toBeNull();
     expect(activateResidentCarrier({ carrier: AW_CARRIER_ISSUANCE, channelCode: "cafe24" })).toBeNull();
-    // The advertised names and what is actually servable are the same list.
-    expect([...RESIDENT_ON_DEMAND_CARRIERS]).toEqual(["issuance/coupang", "issuance/naver"]);
+    expect(activateResidentCarrier({ carrier: "renewal", channelCode: "naver" })).toBeNull();
+    expect(activateResidentCarrier({ carrier: "locate", channelCode: "naver" })).toBeNull();
+    expect(activateResidentCarrier({ carrier: "import", channelCode: "coupang" })).toBeNull();
+    // The advertised names and what is actually servable are the same list — a boot line that promised a
+    // carrier nobody serves would send a seller to a screen that then reports "no agent".
+    expect([...RESIDENT_ON_DEMAND_CARRIERS]).toEqual([
+      "issuance/coupang",
+      "issuance/naver",
+      "renewal/coupang",
+      "locate/coupang",
+      "import/naver",
+    ]);
+    for (const name of RESIDENT_ON_DEMAND_CARRIERS) {
+      const [carrier, channelCode] = name.split("/") as [string, string];
+      expect(activateResidentCarrier({ carrier, channelCode }), name).not.toBeNull();
+    }
   });
 });
 

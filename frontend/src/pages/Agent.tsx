@@ -5,6 +5,7 @@ import { Section } from "../components/Section";
 import { useApiData } from "../lib/useApiData";
 import { useAuth } from "../lib/auth";
 import { api } from "../lib/apiClient";
+import { productAccounts } from "../lib/productAccounts";
 import { agentRuntime, AgentRuntimeError } from "../lib/agentRuntime/agentClient";
 import type {
   AgentRunView,
@@ -31,7 +32,17 @@ import type {
 export function Agent() {
   const { user } = useAuth();
   const caps = useApiData(() => agentRuntime.capabilities(), []);
+  // **Product channels only.** This picker used to render `getSellerAccountsStrict()` raw, so it listed
+  // `G마켓/옥션 · ESM 문의 엑셀 가져오기` — a channel the product deliberately does not show (2026-08-17: ESM /
+  // 11번가 / SSG stay in the catalog and the connector layer, and are "not returned to product surfaces"). An
+  // account picker IS a product surface, and offering an account no runtime here can act on is offering work
+  // that cannot be done. Both reads degrade to `[]`, which `productAccounts` turns into an empty picker.
   const accounts = useApiData(() => api.getSellerAccountsStrict().catch(() => []), []);
+  const channels = useApiData(() => api.getChannelsStrict().catch(() => []), []);
+  const selectableAccounts = useMemo(
+    () => productAccounts(accounts.data, channels.data),
+    [accounts.data, channels.data],
+  );
 
   const [command, setCommand] = useState("");
   const [accountId, setAccountId] = useState("");
@@ -132,10 +143,9 @@ export function Agent() {
                 onChange={(e) => setAccountId(e.target.value)}
               >
                 <option value="">선택 안 함</option>
-                {(accounts.data ?? []).map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.channelNameKo}
-                    {a.alias ? ` · ${a.alias}` : ""}
+                {selectableAccounts.map(({ account, label }) => (
+                  <option key={account.id} value={account.id}>
+                    {label}
                   </option>
                 ))}
               </select>

@@ -48,18 +48,27 @@ import { createAgentBridge, type AgentActionWindowConfig, type AgentApiIssuanceC
 import { IssuanceFixtureDriver } from "../action-window/api-issuance/issuance-fixture-driver";
 import { CoupangIssuanceFixtureDriver } from "../action-window/coupang-issuance/coupang-issuance-fixture-driver";
 import { ReviewLocateFixtureDriver } from "../action-window/coupang-review/review-locate-fixture-driver";
+import { LazyReviewLocateDriver } from "../action-window/coupang-review/lazy-review-locate-driver";
+import { ReviewLocateEngine } from "../action-window/coupang-review/review-locate-engine";
+import { ReviewLocateSession } from "../action-window/coupang-review/review-locate-session";
+import { ReviewLocateEndpoint } from "../bridge/review-locate-endpoint";
+import { fetchReviewLocateTarget } from "../action-window/coupang-review/review-locate-target-client";
+import type { ReviewLocateTarget } from "../action-window/coupang-review/review-locate";
 import { LazyCoupangIssuanceDriver } from "../action-window/coupang-issuance/lazy-coupang-issuance-driver";
 import { LazyNaverIssuanceDriver } from "../action-window/api-issuance/lazy-naver-issuance-driver";
 import { IssuanceEngine } from "../action-window/api-issuance/issuance-engine";
 import { IssuanceGuidanceSession } from "../action-window/api-issuance/issuance-session";
 import { CoupangIssuanceEngine } from "../action-window/coupang-issuance/coupang-issuance-engine";
 import { CoupangIssuanceGuidanceSession } from "../action-window/coupang-issuance/coupang-issuance-session";
+import { CoupangRenewalEngine } from "../action-window/coupang-renewal/coupang-renewal-engine";
+import { CoupangRenewalGuidanceSession } from "../action-window/coupang-renewal/coupang-renewal-session";
+import { LazyCoupangRenewalDriver } from "../action-window/coupang-renewal/lazy-coupang-renewal-driver";
 import { ApiIssuanceEndpoint } from "../bridge/api-issuance-endpoint";
 import { OnDemandCarrierHost, type ActivatedCarrier } from "../bridge/on-demand-carrier-host";
 import type { AwAttachRequest } from "../bridge/aw-carrier";
-import { AW_CARRIER_ISSUANCE } from "../../../contracts/action-window/aw-carrier-kind";
+import { AW_CARRIER_IMPORT, AW_CARRIER_ISSUANCE, AW_CARRIER_LOCATE, AW_CARRIER_RENEWAL } from "../../../contracts/action-window/aw-carrier-kind";
 import { verifyRepoIdentity } from "./repo-identity";
-import { screenWingUrl } from "./coupang-wing-classifier";
+import { screenWingUrl, WING_DEFAULT_URL } from "./coupang-wing-classifier";
 import { screenApiCenterUrl } from "./observe-api-center";
 import { screenSellerOpsReturnUrl } from "./sellerops-return-url";
 import { planOsOpen } from "./os-open-url";
@@ -69,6 +78,8 @@ import { defaultImportRunDirFor } from "../action-window/initial-import/import-d
 import { LazyImportDriver } from "../action-window/initial-import/lazy-import-driver";
 import { ReadinessObservingImportDriver } from "../action-window/initial-import/readiness-observing-driver";
 import { ImportAcquisitionCoordinator } from "../action-window/initial-import/import-acquisition-coordinator";
+import { ImportSegmentHost } from "../action-window/initial-import/import-host";
+import { InitialImportEndpoint } from "../bridge/initial-import-endpoint";
 import { checkGuidedPreflight, PREFLIGHT_RECOVERY } from "../action-window/initial-import/guided-preflight";
 import type { ImportProbeDriver } from "../action-window/initial-import/import-driver";
 import type { ResolvedLaunchScope } from "../action-window/initial-import/import-host";
@@ -374,6 +385,19 @@ export function resolveReviewLocateChannel(args: readonly string[], env: NodeJS.
  */
 export const COUPANG_WING_GUIDED_WALK_LANDING_URL =
   "https://wing.coupang.com/tenants/wing-account/vendor/salesinfo?isTARegion=false&currentPlatform=DESKTOP&currentLocale=ko";
+
+/**
+ * Where the RENEWAL walk's dedicated window LANDS — the seller's own WING open-API key page.
+ *
+ * One step further in than {@link COUPANG_WING_GUIDED_WALK_LANDING_URL}, and deliberately: a renewing seller
+ * already HAS a key, and what they came to read is its 유효기간, which lives on this page. Landing them on
+ * sales-info would make the walk's own step 1 ("판매자정보 › 오픈API 키 발급으로 이동") a step they must redo.
+ *
+ * A landing, not a route: the walk navigates here once, at open, and never again — and it is screened by
+ * `screenWingUrl` before it is used, fail-closed, exactly as the issuance landing is.
+ */
+export const COUPANG_WING_RENEWAL_WALK_LANDING_URL =
+  "https://wing.coupang.com/tenants/wing-account/vendor/openapi?currentPlatform=DESKTOP&currentLocale=ko";
 
 /** The live walk's carrier: the bridge config, plus the teardown for the window it may have opened. */
 export interface CoupangIssuanceLiveCarrier {
@@ -742,6 +766,405 @@ export function activateNaverGuidedWalk(
   };
 }
 
+/** The live RENEWAL walk's carrier: the bridge config, plus the teardown for the window it may have opened. */
+export interface CoupangRenewalLiveCarrier {
+  runId: string;
+  channelCode: string;
+  createDriver: () => LazyCoupangRenewalDriver;
+  /** Close the dedicated window if one was ever brought up. Safe on a carrier that never opened one. */
+  closeSurface: () => Promise<void>;
+  /** Sanitized: is the dedicated window up right now? `false` before the first open and after the seller closed it. */
+  isSurfaceOpen: () => boolean;
+}
+
+/**
+ * **The REAL Coupang WING credential-RENEWAL carrier, assembled the way the issuance carrier is assembled** —
+ * the {@link CoupangWingRenewalDriver} behind {@link LazyCoupangRenewalDriver}, so no browser exists until the
+ * seller's own START_RUN reaches the session's first driver call.
+ *
+ * Structurally identical to {@link buildCoupangIssuanceLiveConfig}; read that function's comments for why the
+ * context is held out here rather than in the driver, why the landing is ONE navigation per carrier, and why a
+ * page the seller closes is forgotten rather than re-navigated. Two things are deliberately different:
+ *
+ *  - **the landing is the open-API key page itself**, not the sales-info page the FIRST-TIME walk lands on. A
+ *    renewing seller already has a key; what they came for is its 유효기간, which is on that page. Landing them
+ *    a step earlier would make step 1 ("판매자정보 › 오픈API 키 발급으로 이동") busywork they have already done.
+ *    Same screening (`screenWingUrl`, fail-closed) and the same one-navigation budget;
+ *  - **there is no `returnToSellerOps`.** The renewal walk's last step hands the seller back to the masked
+ *    REPLACE form on the connect screen, and that hand-off is the FE's — the walk records the step and the
+ *    screen the seller is already looking at moves on. Nothing is launched from a marketplace page here.
+ *
+ * ⚠ The renewal driver's fixed labels are `LIVE_DOM_CALIBRATION_PENDING` — proposed from WING's Korean UI and
+ * NOT yet proven at `matchCount === 1` against the real DOM (unlike the issuance walk's four, which were).
+ * That is safe because it degrades HONESTLY rather than dangerously: a label that resolves 0 or 2 fails the
+ * engine's uniqueness check, the run parks on `TARGET_NOT_FOUND`, and the walkthrough offers its text
+ * checklist — which is strictly better than today, where the screen answers a renewal request with the
+ * eight-step FIRST-TIME engine and renders no step detail at all. The driver still never clicks, types,
+ * submits, or re-issues, and reads no credential value, calibrated or not.
+ */
+export function buildCoupangRenewalLiveConfig(): CoupangRenewalLiveCarrier {
+  const cfg = loadConfig();
+  let walkContext: BrowserContext | null = null;
+  let navigated = false;
+  const driver = new LazyCoupangRenewalDriver({
+    open: async () => {
+      if (!walkContext) {
+        // `followWindow` for the live-measured reason the issuance twin needs it: without it Playwright pins
+        // every page to 1280×720 at DPR 1, which crops the very controls the walk points at.
+        const launched = await launchNaverContext(cfg.profileDir, cfg.browserChannel, { followWindow: true });
+        launched.once("close", () => {
+          walkContext = null;
+        });
+        walkContext = launched;
+      }
+      const context = walkContext;
+      const page = (context.pages()[0] ?? (await context.newPage())) as Page;
+      const screened = screenWingUrl(COUPANG_WING_RENEWAL_WALK_LANDING_URL);
+      if (navigated) {
+        log("aw_coupang_renewal_landing_skipped", { reason: "ALREADY_NAVIGATED_ONCE" });
+      } else if (screened.ok) {
+        navigated = true;
+        log("aw_coupang_renewal_landing", { urlCategory: screened.urlCategory });
+        await page.goto(COUPANG_WING_RENEWAL_WALK_LANDING_URL, { waitUntil: "domcontentloaded" }).catch(() => undefined);
+      } else {
+        log("aw_coupang_renewal_landing_refused", { reason: screened.reason }, "warn");
+      }
+      // Forget a window the seller closed — and only when the CONTEXT has no page left, since WING opening a
+      // second tab means the run continues there while this one's close still fires.
+      page.once("close", () => {
+        if (context.pages().length > 0) {
+          log("aw_coupang_renewal_tab_closed", { remainingPages: context.pages().length > 0 });
+          return;
+        }
+        log("aw_coupang_renewal_surface_closed", {});
+        driver.markClosed();
+      });
+      return { context, page };
+    },
+    raiseSurface: async () => {
+      const pages = walkContext?.pages() ?? [];
+      const page = pages.length > 0 ? pages[pages.length - 1] : undefined;
+      if (!page) {
+        log("aw_coupang_renewal_surface_raise", { raised: false, reason: "NO_PAGE" });
+        return false;
+      }
+      await page.bringToFront().catch(() => undefined);
+      const raised = await raiseWindowOf(page);
+      log("aw_coupang_renewal_surface_raise", { raised });
+      return raised;
+    },
+  });
+  return {
+    runId: `run_${randomBytes(6).toString("hex")}`,
+    channelCode: "coupang",
+    // ONE driver for the carrier's lifetime, so a re-attach reuses the window the seller is already in.
+    createDriver: () => driver,
+    closeSurface: async () => {
+      const ctx = walkContext;
+      walkContext = null;
+      // RETIRE, not just forget — `markClosed` alone means "re-open on the next call", which is what brought
+      // the WING window back on the first on-demand release (2026-08-19). Same latch, same reason.
+      driver.retire();
+      await ctx?.close().catch(() => undefined);
+    },
+    isSurfaceOpen: () => driver.isOpen(),
+  };
+}
+
+/**
+ * **The guided WING credential-RENEWAL walk, brought up on demand by the resident helper.**
+ *
+ * The `renewal`/`coupang` sibling of {@link activateCoupangGuidedWalk}, assembling
+ * {@link buildCoupangRenewalLiveConfig} + {@link ApiIssuanceEndpoint} (announcing `renewal`) +
+ * {@link CoupangRenewalEngine} + {@link CoupangRenewalGuidanceSession}, with a fresh run identity per
+ * activation.
+ *
+ * **This closes a MIS-ROUTING, not only a runtime gap.** Before it, `/connect/coupang/renew/:accountId` asked
+ * the helper for `issuance`/`coupang` — byte-identical to what the first-time walk asks for — so
+ * {@link activateCoupangGuidedWalk} matched first and stood up the eight-step NEW-KEY engine underneath a page
+ * rendering 갱신 copy. Every step then arrived under an `actionWindow.coupangIssuance.*` key, which the renewal
+ * screen's `renewalStepDetail` has no mapping for, so it rendered no detail at all. The five-step renewal
+ * engine, session, stage plan and driver had all existed since the renewal slice; nothing hosted them.
+ *
+ * Nothing is added here. The runtime still never logs in, clicks, types, submits, selects, or re-issues — the
+ * seller presses `재발급` themselves — and it reads no Access Key, Secret Key, or 업체코드. READ-only guidance,
+ * so the WRITE boundary is untouched (`docs/sellerops_live_approval_contract.md` §3/§6a).
+ */
+export function activateCoupangRenewalWalk(
+  request: AwAttachRequest,
+  deps: { buildCarrier?: () => CoupangRenewalLiveCarrier } = {},
+): ActivatedCarrier | null {
+  if (request.carrier !== AW_CARRIER_RENEWAL || request.channelCode !== "coupang") return null;
+  const live = (deps.buildCarrier ?? buildCoupangRenewalLiveConfig)();
+  const { runId, channelCode } = live;
+  const endpoint = new ApiIssuanceEndpoint({ runId, channelCode, carrier: AW_CARRIER_RENEWAL });
+  const engine = new CoupangRenewalEngine({ runId, channelCode });
+  const session = new CoupangRenewalGuidanceSession(engine, live.createDriver(), endpoint.transport);
+  const detach = session.attach();
+  log("aw_coupang_renewal_run_hosted", { onDemand: true });
+  let disposed = false;
+  return {
+    endpoint,
+    isSettled: () => {
+      if (!engine.isStarted()) return true;
+      const status = engine.view().status;
+      return status === "COMPLETED" || status === "CANCELLED" || status === "FAILED";
+    },
+    isSurfaceOpen: () => live.isSurfaceOpen(),
+    dispose: async () => {
+      if (disposed) return;
+      disposed = true;
+      detach();
+      endpoint.close();
+      await live.closeSurface();
+    },
+  };
+}
+
+/**
+ * Where the resident LOCATE carrier's dedicated window lands — WING's own front door, and nothing deeper.
+ *
+ * Deliberately NOT a 상품평 목록 deep link: this repository has never observed one, and inventing a marketplace
+ * URL is exactly the guess the assumption rule forbids (a wrong one would put the seller on an error page and
+ * make every locate read `NOT_ON_PAGE`). The live-proven locate run has always had the seller reach 상품평 목록
+ * themselves — "SellerOps does not navigate for you and presses nothing, not even the pager" — and this keeps
+ * that true while still sparing them "find WING yourself". Reuses the constant the product's own Coupang
+ * classifier already treats as WING's canonical entry, so nothing here invents a destination.
+ */
+export const COUPANG_WING_LOCATE_LANDING_URL = WING_DEFAULT_URL;
+
+/** The live locate carrier: its lazy driver, plus the teardown for the window it may have opened. */
+export interface CoupangReviewLocateLiveCarrier {
+  runId: string;
+  channelCode: string;
+  createDriver: () => LazyReviewLocateDriver;
+  /** Resolve the run's opaque binding into something to look for. One backend call, every refusal a `null`. */
+  resolveTarget: (locateRef: string) => Promise<ReviewLocateTarget | null>;
+  closeSurface: () => Promise<void>;
+  isSurfaceOpen: () => boolean;
+}
+
+/**
+ * **The REAL Coupang review-locate carrier, assembled for the resident helper.**
+ *
+ * Structurally the {@link buildCoupangIssuanceLiveConfig} shape with one extra dependency the guidance walks do
+ * not have: `resolveTarget`, the single call that reaches the backend. The binding the frontend hands over is
+ * spent HERE, by the agent, under the agent's own SellerOps session — never resolved in the browser — which is
+ * the property `review-locate-target-client` was written for and the reason the locate carrier could not simply
+ * be announced from a fixed-carrier boot.
+ *
+ * **The login is lazy and it is not fatal.** A token is fetched on the first press, not at activation: the
+ * resident helper must not hold a SellerOps session for a carrier nobody has used, and a backend that is down
+ * when the seller presses must produce the ordinary "we did not get a target" ending (the run ends, they press
+ * again) rather than an activation that throws and reads to the tab as "no agent".
+ *
+ * Nothing marketplace-facing is added. The driver reads rows and rings one of them read-only; it clicks
+ * nothing, types nothing, submits nothing, and never presses the pager — the seller turns every page.
+ */
+export function buildCoupangReviewLocateLiveConfig(): CoupangReviewLocateLiveCarrier {
+  const cfg = loadConfig();
+  let walkContext: BrowserContext | null = null;
+  let navigated = false;
+  const driver = new LazyReviewLocateDriver({
+    open: async () => {
+      if (!walkContext) {
+        // `followWindow` for the same live-measured reason the guidance walks need it: without it Playwright
+        // pins every page to 1280×720 at DPR 1, and a ring drawn off-screen is a ring the seller cannot see.
+        const launched = await launchNaverContext(cfg.profileDir, cfg.browserChannel, { followWindow: true });
+        launched.once("close", () => {
+          walkContext = null;
+        });
+        walkContext = launched;
+      }
+      const context = walkContext;
+      const page = (context.pages()[0] ?? (await context.newPage())) as Page;
+      const screened = screenWingUrl(COUPANG_WING_LOCATE_LANDING_URL);
+      if (navigated) {
+        log("aw_coupang_locate_landing_skipped", { reason: "ALREADY_NAVIGATED_ONCE" });
+      } else if (screened.ok) {
+        navigated = true;
+        log("aw_coupang_locate_landing", { urlCategory: screened.urlCategory });
+        await page.goto(COUPANG_WING_LOCATE_LANDING_URL, { waitUntil: "domcontentloaded" }).catch(() => undefined);
+      } else {
+        log("aw_coupang_locate_landing_refused", { reason: screened.reason }, "warn");
+      }
+      page.once("close", () => {
+        if (context.pages().length > 0) return;
+        log("aw_coupang_locate_surface_closed", {});
+        driver.markClosed();
+      });
+      return { context, page };
+    },
+    raiseSurface: async () => {
+      const pages = walkContext?.pages() ?? [];
+      const page = pages.length > 0 ? pages[pages.length - 1] : undefined;
+      if (!page) return false;
+      await page.bringToFront().catch(() => undefined);
+      return raiseWindowOf(page);
+    },
+  });
+  // One session for the carrier's lifetime, re-used across presses. Held rather than re-fetched so a seller
+  // ringing ten reviews logs in once; cleared on failure so a recoverable outage is retried on the next press.
+  let token: string | null = null;
+  return {
+    runId: `run_${randomBytes(6).toString("hex")}`,
+    channelCode: "coupang",
+    createDriver: () => driver,
+    resolveTarget: async (locateRef: string) => {
+      try {
+        if (!token) token = await login(cfg.baseUrl, cfg.email, cfg.password);
+      } catch {
+        // Never the caught error: a login failure can quote the request it failed on. One refusal, no detail.
+        token = null;
+        log("aw_coupang_locate_target_refused", { reason: "NO_SESSION" });
+        return null;
+      }
+      const target = await fetchReviewLocateTarget(cfg.baseUrl, token, locateRef);
+      // A rejected token is the one failure worth re-trying differently: drop it so the next press logs in again.
+      if (!target) token = null;
+      return target;
+    },
+    closeSurface: async () => {
+      const ctx = walkContext;
+      walkContext = null;
+      driver.retire();
+      await ctx?.close().catch(() => undefined);
+    },
+    isSurfaceOpen: () => driver.isOpen(),
+  };
+}
+
+/**
+ * **`[쿠팡에서 보기]`, brought up on demand by the resident helper.**
+ *
+ * The `locate`/`coupang` sibling of {@link activateCoupangGuidedWalk}. Before it, the locate carrier existed
+ * and was live-proven (2026-08-15, `matches=1` twice, 0 stored) but the ONLY agent that ever hosted it was
+ * `instruments/live-runs/run-coupang-review-locate-live.ts` — a seated-operator harness behind an approval
+ * manifest — so a seller with the resident helper paired pressed `[쿠팡에서 보기]` into a carrier that was not
+ * there. The frontend's own session did not even ask for it by name; this activation is the other half of that
+ * fix (see `locate/locateSession.ts`).
+ *
+ * The window opens LAZILY, on the seller's first press, and lands on WING's front door once — they reach
+ * 상품평 목록 themselves, exactly as the proven run has always required.
+ */
+export function activateCoupangReviewLocate(
+  request: AwAttachRequest,
+  deps: { buildCarrier?: () => CoupangReviewLocateLiveCarrier } = {},
+): ActivatedCarrier | null {
+  if (request.carrier !== AW_CARRIER_LOCATE || request.channelCode !== "coupang") return null;
+  const live = (deps.buildCarrier ?? buildCoupangReviewLocateLiveConfig)();
+  const { runId, channelCode } = live;
+  const endpoint = new ReviewLocateEndpoint({ runId, channelCode });
+  const engine = new ReviewLocateEngine({ runId, channelCode });
+  const session = new ReviewLocateSession(engine, live.createDriver(), endpoint.transport, live.resolveTarget);
+  session.attach();
+  log("aw_coupang_review_locate_run_hosted", { onDemand: true });
+  let disposed = false;
+  return {
+    endpoint,
+    // A locate settles CONSTANTLY — every ring, refusal and cancel is terminal, and the seller's next press is
+    // another run. That is safe here because the host only considers releasing once NO tab is attached, and a
+    // seller still on the 리뷰 screen holds the socket. "Settled with the seller gone" is exactly when the
+    // window should go.
+    isSettled: () => {
+      if (!engine.isStarted()) return true;
+      const status = engine.view().status;
+      return status === "COMPLETED" || status === "CANCELLED" || status === "FAILED";
+    },
+    isSurfaceOpen: () => live.isSurfaceOpen(),
+    dispose: async () => {
+      if (disposed) return;
+      disposed = true;
+      endpoint.close();
+      await live.closeSurface();
+    },
+  };
+}
+
+/**
+ * Where the resident IMPORT carrier's dedicated window lands — the NAVER seller center's review-management
+ * page, the surface every guided review flow starts from.
+ *
+ * NOT invented and NOT a test fixture promoted by accident: it is the value
+ * `docs/action-window-runtime/naver-surface-urls.md` records for `NAVER_REVIEW_URL`, committed there
+ * deliberately ("a public seller-center application route… it carries no account, no store, no token") after a
+ * live run was blocked twice for want of a value nobody had written down. The operator-owned env var still
+ * WINS wherever it is set; this is the answer for the seller running the resident helper, who has no way to
+ * set one — the same gap `NAVER_API_CENTER_GUIDED_WALK_LANDING_URL` closed for the guided issuance walk.
+ *
+ * A changed route surfaces as a fail-closed `UNSUPPORTED_STATE` from the surface probe, never as a silent
+ * wrong-page run (that doc's own "If a route changes" note).
+ */
+export const NAVER_REVIEW_MANAGEMENT_LANDING_URL = "https://sell.smartstore.naver.com/#/review/search";
+
+/**
+ * **The NAVER initial-review-import segment, brought up on demand by the resident helper.**
+ *
+ * The `import`/`naver` sibling of {@link activateCoupangGuidedWalk}. The carrier itself — engine, session,
+ * host, live driver, the whole `initial-import/` runtime — has existed and been live-proven since 2026-07-25/26
+ * (1 account, 1 segment, disposable backend). What did not exist was any way for a SELLER to reach it: the only
+ * agent that ever hosted it was the flag boot, behind `--action-window-initial-review-import` +
+ * `--i-understand-this-opens-live-naver` + an operator-owned `NAVER_REVIEW_URL`, so `/connect/review-history`
+ * offered a guided import that no resident helper could carry.
+ *
+ * **What this does NOT change: the flag gate.** `resolveImportMode` is untouched — the FLAG boot still refuses
+ * production, refuses a scheduled/non-interactive host, and still demands the live-approval flag, because that
+ * boot opens a browser AT STARTUP on nobody's request. This path opens nothing at activation: the window comes
+ * up on the seller's own segment START_RUN, after the SERVER has resolved their launch ref, in the profile
+ * bound to that ref's account. That is the same posture the two guided issuance walks already run in on this
+ * helper, and it is the difference the flag gate was protecting.
+ *
+ * The seller still performs every marketplace action — they set the dates, press 엑셀 다운로드, and give
+ * consent; SellerOps highlights, observes, and ingests the file they downloaded. Nothing here clicks, types,
+ * submits, or consents.
+ */
+export function activateNaverReviewImport(
+  request: AwAttachRequest,
+  deps: { buildCore?: typeof buildNaverImportCarrierCore; env?: NodeJS.ProcessEnv } = {},
+): ActivatedCarrier | null {
+  if (request.carrier !== AW_CARRIER_IMPORT || request.channelCode !== NAVER_CHANNEL_CODE) return null;
+  const cfg = loadConfig(deps.env ?? process.env);
+  const reviewUrl = cfg.naverReviewUrl ?? NAVER_REVIEW_MANAGEMENT_LANDING_URL;
+  const core = (deps.buildCore ?? buildNaverImportCarrierCore)(cfg, reviewUrl);
+  const { announceRunId, channelCode } = core.config;
+  const endpoint = new InitialImportEndpoint({ runId: announceRunId, channelCode });
+  const host = new ImportSegmentHost({
+    endpoint,
+    channelCode,
+    resolveScope: core.config.resolveScope,
+    driver: core.config.driver,
+    ...(core.config.admit ? { admit: core.config.admit } : {}),
+    ...(core.config.persistDir ? { persistDir: core.config.persistDir } : {}),
+  });
+  host.attach();
+  // AGENT_START readiness probe, at the moment the carrier becomes available rather than at agent boot — on
+  // the resident helper "the agent started" and "the import carrier exists" are different events, and the one
+  // that matters to the readiness projector is this one. No marketplace tab exists yet, so it records
+  // UNOBSERVED_EXTERNAL, never a guessed READY.
+  core.onAgentStart();
+  log("aw_import_run_hosted", { onDemand: true });
+  let disposed = false;
+  return {
+    endpoint,
+    // A segment run settles and the NEXT one is a fresh START_RUN on the same host, exactly as a locate press
+    // is. Safe for the same reason: the host only considers releasing once no tab is attached, and a seller
+    // working through their months holds the socket.
+    isSettled: () => {
+      const session = host.activeSession();
+      if (!session) return true;
+      const status = session.runStatus();
+      return status === "COMPLETED" || status === "CANCELLED" || status === "FAILED";
+    },
+    isSurfaceOpen: () => core.isSurfaceOpen(),
+    dispose: async () => {
+      if (disposed) return;
+      disposed = true;
+      endpoint.close();
+      await core.closeMarketplace();
+    },
+  };
+}
+
 /**
  * **What the ONE resident helper can bring up, in order.**
  *
@@ -755,10 +1178,19 @@ export function activateNaverGuidedWalk(
 export const RESIDENT_CARRIER_ACTIVATORS: readonly ((request: AwAttachRequest) => ActivatedCarrier | null)[] = [
   (request) => activateCoupangGuidedWalk(request),
   (request) => activateNaverGuidedWalk(request),
+  (request) => activateCoupangRenewalWalk(request),
+  (request) => activateCoupangReviewLocate(request),
+  (request) => activateNaverReviewImport(request),
 ];
 
 /** The names of what {@link RESIDENT_CARRIER_ACTIVATORS} can serve — for the boot line only. */
-export const RESIDENT_ON_DEMAND_CARRIERS: readonly string[] = ["issuance/coupang", "issuance/naver"];
+export const RESIDENT_ON_DEMAND_CARRIERS: readonly string[] = [
+  "issuance/coupang",
+  "issuance/naver",
+  "renewal/coupang",
+  "locate/coupang",
+  "import/naver",
+];
 
 /** Try each resident walk in turn; `null` when none of them serves this (carrier, channel) pair. */
 export function activateResidentCarrier(request: AwAttachRequest): ActivatedCarrier | null {
@@ -877,88 +1309,35 @@ async function raiseWindowOf(page: Page): Promise<boolean> {
 }
 
 /**
- * Build the {@link AgentImportConfig} for the approval-only import mode.
+ * **The NAVER review-import carrier, assembled WITHOUT opening anything** — the piece both import hosts share.
  *
- * **The browser opens on SELLEROPS, and the marketplace tab comes later** (product-owner decision, 2026-07-26,
- * reversing 2026-07-25). It used to launch straight into the NAVER review surface while starting up, on the
- * reasoning that the operator has to log in there anyway. Watching it in use answered that twice over: a
- * marketplace window that appears before the seller has asked for anything arrives while they are still in
- * SellerOps deciding how far back to import — and splitting the two across separate browser profiles gives them
- * two sessions and an account picker to get right twice.
+ * Extracted from {@link buildInitialImportConfig} unchanged, because there are now two ways to host this
+ * carrier and only ONE of them wants a browser at build time:
  *
- * So the journey is one profile, in the order the seller experiences it:
+ *  - the approval-gated FLAG boot (`--action-window-initial-review-import`) launches a window on SellerOps
+ *    first, by product-owner decision (2026-07-26), so the seated operator can log in before anything runs;
+ *  - the RESIDENT helper brings the carrier up on demand from `/connect/review-history`, and the seller
+ *    already has SellerOps open in their own browser — a second one at agent boot is the unasked-for window
+ *    the on-demand host exists to avoid.
  *
- *  1. **boot** — launch the profile and open SellerOps. Nothing marketplace-facing exists yet.
- *  2. **the seller asks to be connected** (a pairing approved, or their tab attaching) — the bridge's
- *     `onSellerOpsConnected` hook warms the surface up, and the seller center opens as a second tab.
- *  3. **a run** — `START_RUN` with a server-resolved ticket. If step 2 never happened, the first call that needs
- *     the page opens it; `LazyImportDriver` also spells out the four calls that must never cause one.
- *
- * The gate in `import-mode-gate.ts` still keeps this mode off every other path — normal agent, production,
- * scheduled and non-interactive hosts all refuse, and no other carrier flag may be combined with it.
- *
- * **A browser is NOT a run.** `ImportSegmentHost` waits for a valid `START_RUN` carrying a launch ref and
- * resolves that ref against the SERVER before assembling anything. An open seller center is a window the seller
- * asked for, not work in progress.
- *
- * **Nothing is resumed and no ref is stored.** The launch ref lives only in memory for the life of one
- * run; `.import-runs/` markers carry no ref, and restart recovery ABANDONS rather than resuming (see
- * `import-run-store`). The server holds the plan, so the next run picks the same segment up with a fresh
- * ticket.
+ * Everything below the boot window is identical in both, which is why it is one function rather than two: the
+ * lazy marketplace surface, the account-scoped persistent profile, the readiness supervisor, the ingest
+ * upload, and the server-side scope resolve. Nothing here opens a browser or reaches the network — the first
+ * window comes up on {@link LazyImportDriver}'s first call, which happens only after a run's scope has
+ * resolved an account slot.
  */
-export async function buildInitialImportConfig(
-  env: NodeJS.ProcessEnv,
-): Promise<{
+function buildNaverImportCarrierCore(
+  cfg: ReturnType<typeof loadConfig>,
+  reviewUrl: string,
+): {
   config: AgentImportConfig;
-  close: () => Promise<void>;
+  /** Close the account-scoped seller-center context, if a run ever opened one. Safe when none did. */
+  closeMarketplace: () => Promise<void>;
+  /** Sanitized: is the seller-center window up right now? */
+  isSurfaceOpen: () => boolean;
   warmUpSurface: () => Promise<void>;
-  /** AGENT_START readiness probe — the boot fires it once the agent is up (no marketplace tab exists yet). */
   onAgentStart: () => void;
-}> {
-  const cfg = loadConfig(env);
-  // Same requirement every other live NAVER CLI in this package has, and it is checked HERE — at boot, before
-  // the seller has pressed anything — precisely because the browser no longer opens at boot. A misconfigured
-  // agent must fail while an operator is still looking at its output, not halfway through a guided run.
-  if (!cfg.naverReviewUrl) {
-    throw new Error(
-      "NAVER_REVIEW_URL is not set. The import mode needs the review-management page URL; set it in the environment before starting the agent.",
-    );
-  }
-  const reviewUrl = cfg.naverReviewUrl;
-
-  // **Guided Acquisition Reliability — agent-side pre-flight self-check.** Catches, at boot, the exact wiring
-  // faults the first live runs hit: a backend that is down, an empty bridge allow-list, or a SellerOps origin
-  // the bridge will reject (the `:5174` vs `:5173` gotcha that shows the seller "로컬 도우미가 실행되지 않았어요"
-  // with no cause). Sanitized: only the issue enum and its one recovery-action key are logged — never a URL,
-  // host, or port. It WARNS rather than refuses: the operator is still at the terminal and can fix env before
-  // seating, and a false alarm must not block a correctly-tunnelled setup.
-  const backendReachable = await probeBackendReachable(cfg.baseUrl);
-  const preflight = checkGuidedPreflight({
-    appUrl: cfg.appUrl,
-    allowedOrigins: parseAllowedOrigins(env.BRIDGE_ALLOWED_ORIGINS ?? DEV_DEFAULT_BRIDGE_ORIGINS),
-    backendReachable,
-  });
-  for (const issue of preflight.issues) {
-    log("aw_guided_preflight", { issue, recovery: PREFLIGHT_RECOVERY[issue] }, "warn");
-  }
-  log("aw_guided_preflight_summary", { ok: preflight.ok, issues: preflight.issues.length });
-
-  /**
-   * ONE browser profile for the whole journey, opened on SellerOps.
-   *
-   * The seller works in a single window: SellerOps first, and the seller center appears next to it when they ask
-   * to be connected. Two profiles would mean two sessions and an account picker they have to get right twice —
-   * which is what the product owner flagged, and the reason this launches here rather than leaving the seller to
-   * find SellerOps in whichever browser their machine happens to default to.
-   *
-   * The marketplace tab is deliberately NOT opened here; see `openSurface` below.
-   */
-  const context = await launchNaverContext(cfg.profileDir);
-  const appPage = context.pages()[0] ?? (await context.newPage());
-  // Neither URL is ever logged: raw URLs are prohibited output (roadmap §9), so only the fact is.
-  await appPage.goto(cfg.appUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
-  log("aw_import_app_opened", {});
-
+} {
   // The launch ref is only known per run, long after this capability is built — it arrives in START_RUN.
   // `buildSegmentIngestUpload` reads it inside the returned upload function via a getter, so the answer is
   // read at ingest time, which is when it exists. The scope evidence is NOT read here: the session passes the
@@ -1171,18 +1550,114 @@ export async function buildInitialImportConfig(
   };
   return {
     config,
+    closeMarketplace: async () => {
+      if (naverContext) await naverContext.close().catch(() => undefined);
+      naverContext = null;
+    },
+    isSurfaceOpen: () => naverContext !== null && naverContext.pages().length > 0,
+    warmUpSurface: () => lazy.warmUp(),
+    onAgentStart: () => coordinator.onAgentStart(),
+  };
+}
+
+/**
+ * Build the {@link AgentImportConfig} for the approval-only import mode.
+ *
+ * **The browser opens on SELLEROPS, and the marketplace tab comes later** (product-owner decision, 2026-07-26,
+ * reversing 2026-07-25). It used to launch straight into the NAVER review surface while starting up, on the
+ * reasoning that the operator has to log in there anyway. Watching it in use answered that twice over: a
+ * marketplace window that appears before the seller has asked for anything arrives while they are still in
+ * SellerOps deciding how far back to import — and splitting the two across separate browser profiles gives them
+ * two sessions and an account picker to get right twice.
+ *
+ * So the journey is one profile, in the order the seller experiences it:
+ *
+ *  1. **boot** — launch the profile and open SellerOps. Nothing marketplace-facing exists yet.
+ *  2. **the seller asks to be connected** (a pairing approved, or their tab attaching) — the bridge's
+ *     `onSellerOpsConnected` hook warms the surface up, and the seller center opens as a second tab.
+ *  3. **a run** — `START_RUN` with a server-resolved ticket. If step 2 never happened, the first call that needs
+ *     the page opens it; `LazyImportDriver` also spells out the four calls that must never cause one.
+ *
+ * The gate in `import-mode-gate.ts` still keeps this mode off every other path — normal agent, production,
+ * scheduled and non-interactive hosts all refuse, and no other carrier flag may be combined with it.
+ *
+ * **A browser is NOT a run.** `ImportSegmentHost` waits for a valid `START_RUN` carrying a launch ref and
+ * resolves that ref against the SERVER before assembling anything. An open seller center is a window the seller
+ * asked for, not work in progress.
+ *
+ * **Nothing is resumed and no ref is stored.** The launch ref lives only in memory for the life of one
+ * run; `.import-runs/` markers carry no ref, and restart recovery ABANDONS rather than resuming (see
+ * `import-run-store`). The server holds the plan, so the next run picks the same segment up with a fresh
+ * ticket.
+ */
+export async function buildInitialImportConfig(
+  env: NodeJS.ProcessEnv,
+): Promise<{
+  config: AgentImportConfig;
+  close: () => Promise<void>;
+  warmUpSurface: () => Promise<void>;
+  /** AGENT_START readiness probe — the boot fires it once the agent is up (no marketplace tab exists yet). */
+  onAgentStart: () => void;
+}> {
+  const cfg = loadConfig(env);
+  // Same requirement every other live NAVER CLI in this package has, and it is checked HERE — at boot, before
+  // the seller has pressed anything — precisely because the browser no longer opens at boot. A misconfigured
+  // agent must fail while an operator is still looking at its output, not halfway through a guided run.
+  if (!cfg.naverReviewUrl) {
+    throw new Error(
+      "NAVER_REVIEW_URL is not set. The import mode needs the review-management page URL; set it in the environment before starting the agent.",
+    );
+  }
+  const reviewUrl = cfg.naverReviewUrl;
+
+  // **Guided Acquisition Reliability — agent-side pre-flight self-check.** Catches, at boot, the exact wiring
+  // faults the first live runs hit: a backend that is down, an empty bridge allow-list, or a SellerOps origin
+  // the bridge will reject (the `:5174` vs `:5173` gotcha that shows the seller "로컬 도우미가 실행되지 않았어요"
+  // with no cause). Sanitized: only the issue enum and its one recovery-action key are logged — never a URL,
+  // host, or port. It WARNS rather than refuses: the operator is still at the terminal and can fix env before
+  // seating, and a false alarm must not block a correctly-tunnelled setup.
+  const backendReachable = await probeBackendReachable(cfg.baseUrl);
+  const preflight = checkGuidedPreflight({
+    appUrl: cfg.appUrl,
+    allowedOrigins: parseAllowedOrigins(env.BRIDGE_ALLOWED_ORIGINS ?? DEV_DEFAULT_BRIDGE_ORIGINS),
+    backendReachable,
+  });
+  for (const issue of preflight.issues) {
+    log("aw_guided_preflight", { issue, recovery: PREFLIGHT_RECOVERY[issue] }, "warn");
+  }
+  log("aw_guided_preflight_summary", { ok: preflight.ok, issues: preflight.issues.length });
+
+  /**
+   * ONE browser profile for the whole journey, opened on SellerOps.
+   *
+   * The seller works in a single window: SellerOps first, and the seller center appears next to it when they ask
+   * to be connected. Two profiles would mean two sessions and an account picker they have to get right twice —
+   * which is what the product owner flagged, and the reason this launches here rather than leaving the seller to
+   * find SellerOps in whichever browser their machine happens to default to.
+   *
+   * The marketplace tab is deliberately NOT opened here; see `openSurface` below.
+   */
+  const context = await launchNaverContext(cfg.profileDir);
+  const appPage = context.pages()[0] ?? (await context.newPage());
+  // Neither URL is ever logged: raw URLs are prohibited output (roadmap §9), so only the fact is.
+  await appPage.goto(cfg.appUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
+  log("aw_import_app_opened", {});
+
+  const core = buildNaverImportCarrierCore(cfg, reviewUrl);
+  return {
+    config: core.config,
     // Close both windows: the boot/SellerOps context and, if a run opened it, the account-scoped seller-center
     // context. The account context is closed first so its persistent profile is flushed cleanly on the way out.
     close: async () => {
-      if (naverContext) await naverContext.close().catch(() => undefined);
+      await core.closeMarketplace();
       await context.close();
     },
     // The middle arrow of the journey the product owner described — open SellerOps, ask to connect, and THEN the
     // seller center appears. It warms up the LAZY driver directly (not through the readiness decorator, which
     // only observes `prepareSurface`). Until a run has resolved its account slot the warm-up is a deliberate
     // no-op (see `openSurface`): the seller center opens with the run, in the account's own profile.
-    warmUpSurface: () => lazy.warmUp(),
-    onAgentStart: () => coordinator.onAgentStart(),
+    warmUpSurface: () => core.warmUpSurface(),
+    onAgentStart: () => core.onAgentStart(),
   };
 }
 

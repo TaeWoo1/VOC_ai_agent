@@ -92,16 +92,26 @@ describe("ReviewImportPage — which account the guided import lands on", () => 
     expect(label).toHaveTextContent("네이버 스마트스토어");
   });
 
-  /** A dead channel read must not blank the screen: it degrades to "no preference", the old behaviour. */
-  it("still shows a card when the channel list cannot be read", async () => {
+  /**
+   * A dead channel read is now a NAMED, retryable state rather than a degraded card.
+   *
+   * It used to fall back to "no preference" and render whatever came back, which was the old behaviour and
+   * also the hole: without the channel list the screen cannot tell which marketplace an account belongs to,
+   * so the fallback would show a non-product channel (`G마켓/옥션 · ESM …`) the moment a channel read failed —
+   * the exact leak `productAccounts` closes. What it must NOT do is borrow the "먼저 판매 채널 계정을 연결해
+   * 주세요" empty state: the seller has accounts, and telling them to connect one is a wrong instruction.
+   */
+  it("names the channel-read failure instead of showing an unfiltered card", async () => {
     vi.spyOn(api, "getChannels").mockRejectedValue(new Error("down"));
     vi.spyOn(api, "getSellerAccountsStrict").mockResolvedValue([
       account("acc-coupang", COUPANG.id, "쿠팡", null),
     ]);
 
     render(<ReviewImportPage />);
-    await waitFor(() => expect(screen.getByTestId("guided-account")).toBeInTheDocument());
-    expect(screen.getByTestId("guided-account")).toHaveTextContent("쿠팡");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("채널 정보를 불러오지 못해");
+    expect(screen.queryByTestId("guided-account")).not.toBeInTheDocument();
+    expect(screen.queryByText(/먼저 판매 채널 계정을 연결해 주세요/)).not.toBeInTheDocument();
   });
 
   /** With no NAVER account there is nothing to prefer, and the screen still works for the manual paths below it. */

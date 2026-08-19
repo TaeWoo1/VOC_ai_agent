@@ -64,12 +64,24 @@ function asV2Transport(v1: V1ClientTransport): V2ClientTransport {
  */
 export async function connectLocateSession(deps?: {
   onStatus?: (status: "connected" | "reconnecting" | "offline") => void;
+  /**
+   * WHICH channel's locate carrier to ask the agent for. Defaults to `coupang` — the only channel with a
+   * locate surface (`[쿠팡에서 보기]` is the only control that reaches here).
+   *
+   * **This request is what makes the resident helper able to answer at all.** Without it the session attached
+   * silently and waited for an announcement, which only a FIXED-carrier locate agent ever sends — and the only
+   * thing that ever booted one was a seated-operator harness behind an approval manifest. A seller with the
+   * SellerOps 도우미 paired pressed the button into nothing. Naming the carrier lets the resident helper bring
+   * it up on demand, exactly as `/connect/coupang` does for the guided walk.
+   */
+  channelCode?: string;
 }): Promise<LocateSessionResult> {
   const httpBase = bridgeBase();
   const result = await connectAwBridgeSession({
     httpBase,
     wsBase: httpBase.replace(/^http/, "ws"),
     expectedCarrier: AW_CARRIER_LOCATE,
+    attachChannelCode: deps?.channelCode ?? "coupang",
     ...(deps?.onStatus ? { onStatus: deps.onStatus } : {}),
   });
   if (!result.ok) return { ok: false, reason: result.reason };
