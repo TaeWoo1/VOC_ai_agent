@@ -11,11 +11,23 @@ describe("captureUrlSecrets", () => {
     expect(captureUrlSecrets()).toBe(true);
     expect(location.pathname + location.search + location.hash).toBe("/reset-password?x=1#frag");
     expect(takeUrlSecret("token")).toBe("ONE-TIME");
-    expect(takeUrlSecret("token")).toBeNull(); // taken once
+    expect(sessionStorage.getItem("sellerops_url_secret")).toBeNull(); // out of storage on first read
+    expect(takeUrlSecret("token")).toBe("ONE-TIME"); // same page load, same answer (StrictMode double mount)
     history.replaceState(null, "", "/auth/callback?code=C1");
     captureUrlSecrets();
     expect(location.search).toBe("");
     expect(takeUrlSecret("code")).toBe("C1");
+  });
+
+  it("StrictMode double mount: the second (fresh-state) render still gets the code; a later page load does not", () => {
+    history.replaceState(null, "", "/auth/callback?code=STRICT");
+    captureUrlSecrets();
+    expect(takeUrlSecret("code")).toBe("STRICT");
+    expect(takeUrlSecret("code")).toBe("STRICT");
+    // a new capture (next sign-in) forgets the previous page load's value
+    history.replaceState(null, "", "/auth/callback?code=NEXT");
+    captureUrlSecrets();
+    expect(takeUrlSecret("code")).toBe("NEXT");
   });
 
   it("does nothing on a URL without a secret, and does not hand a secret to another path", () => {
