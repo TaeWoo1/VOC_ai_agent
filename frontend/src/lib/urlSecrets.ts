@@ -10,6 +10,14 @@ export type UrlSecretKey = (typeof URL_SECRET_KEYS)[number];
 
 const STORAGE_KEY = "sellerops_url_secret";
 
+/**
+ * What this page load already took, by path+key. React 18 StrictMode (dev) mounts a component twice with FRESH
+ * hook state, so a "delete on first read" secret vanished between the two renders and every social login /
+ * password reset failed in the dev server (self-pilot, 2026-08-19). The value therefore stays in module memory
+ * for the rest of this page load (never back in storage, never across tabs) and every read in this load agrees.
+ */
+const taken = new Map<string, string>();
+
 interface WindowLike {
   location: { pathname: string; search: string; hash: string };
   history: { replaceState(data: unknown, unused: string, url?: string): void };
@@ -28,6 +36,7 @@ export function captureUrlSecrets(win: WindowLike = window): boolean {
     }
   }
   if (Object.keys(found).length === 0) return false;
+  taken.clear();
   try {
     win.sessionStorage?.setItem(STORAGE_KEY, JSON.stringify({ path: win.location.pathname, ...found }));
   } catch {
@@ -39,8 +48,11 @@ export function captureUrlSecrets(win: WindowLike = window): boolean {
   return true;
 }
 
-/** Read (and forget) a captured secret for the current path. */
+/** Read a captured secret for the current path: removed from storage on first read, same answer for the rest of this page load. */
 export function takeUrlSecret(key: UrlSecretKey, win: WindowLike = window): string | null {
+  const cacheKey = `${win.location.pathname}\u0000${key}`;
+  const already = taken.get(cacheKey);
+  if (already !== undefined) return already;
   try {
     const raw = win.sessionStorage?.getItem(STORAGE_KEY);
     if (!raw) return null;
@@ -49,6 +61,7 @@ export function takeUrlSecret(key: UrlSecretKey, win: WindowLike = window): stri
     const value = parsed[key];
     if (!value) return null;
     win.sessionStorage?.removeItem(STORAGE_KEY);
+    taken.set(cacheKey, value);
     return value;
   } catch {
     return null;
