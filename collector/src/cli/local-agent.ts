@@ -3,7 +3,7 @@
  * connections through the multi-channel **Connector Orchestrator**.
  *
  *   tsx src/cli/local-agent.ts --connections <path.json> [--i-understand-this-launches-local-agent-chrome]
- *   tsx src/cli/local-agent.ts --bridge-only        (resident SellerOps 도우미: pairing/health bridge; the Coupang guided walk on demand)
+ *   tsx src/cli/local-agent.ts --bridge-only        (resident SellerOps 도우미: pairing/health bridge; the NAVER/Coupang guided walks on demand)
  *
  * This is the thin LIVE wrapper around the pure {@link LocalAgentConnectorStartup} composition root: it
  * loads the sanitized MIXED device connection config (browser channels NAVER/ESM, API Cafe24, and the
@@ -49,6 +49,9 @@ import { IssuanceFixtureDriver } from "../action-window/api-issuance/issuance-fi
 import { CoupangIssuanceFixtureDriver } from "../action-window/coupang-issuance/coupang-issuance-fixture-driver";
 import { ReviewLocateFixtureDriver } from "../action-window/coupang-review/review-locate-fixture-driver";
 import { LazyCoupangIssuanceDriver } from "../action-window/coupang-issuance/lazy-coupang-issuance-driver";
+import { LazyNaverIssuanceDriver } from "../action-window/api-issuance/lazy-naver-issuance-driver";
+import { IssuanceEngine } from "../action-window/api-issuance/issuance-engine";
+import { IssuanceGuidanceSession } from "../action-window/api-issuance/issuance-session";
 import { CoupangIssuanceEngine } from "../action-window/coupang-issuance/coupang-issuance-engine";
 import { CoupangIssuanceGuidanceSession } from "../action-window/coupang-issuance/coupang-issuance-session";
 import { ApiIssuanceEndpoint } from "../bridge/api-issuance-endpoint";
@@ -57,6 +60,7 @@ import type { AwAttachRequest } from "../bridge/aw-carrier";
 import { AW_CARRIER_ISSUANCE } from "../../../contracts/action-window/aw-carrier-kind";
 import { verifyRepoIdentity } from "./repo-identity";
 import { screenWingUrl } from "./coupang-wing-classifier";
+import { screenApiCenterUrl } from "./observe-api-center";
 import { screenSellerOpsReturnUrl } from "./sellerops-return-url";
 import { planOsOpen } from "./os-open-url";
 import { NaverLiveProbeDriver } from "../action-window/naver-live-driver";
@@ -598,6 +602,174 @@ export function buildCoupangIssuanceConfig(): AgentCoupangIssuanceConfig {
 }
 
 /**
+ * Where the guided NAVER walk's dedicated window LANDS — the official Commerce API Center entry.
+ *
+ * NOT a new destination: it is the SAME URL the product's own text checklist already opens for the seller
+ * (`frontend/src/lib/guidedConnection/tutorial.ts` → `NAVER_API_CENTER_URL`, the `open_center` step). The
+ * guided path was the one that could not open it, because its only host — `run-api-issuance-live-naver.ts` —
+ * reads an operator-owned `NAVER_API_CENTER_URL` from the environment, which a seller running the resident
+ * helper has no way to set. Reusing the checklist's constant keeps ONE answer to "where does the seller go",
+ * so guided and text cannot drift apart.
+ *
+ * A landing, not a route through the flow: the walk navigates here once, at open, and never again. Every
+ * screen after this one the seller reaches themselves. Screened fail-closed by `screenApiCenterUrl` before it
+ * is used, exactly as the standalone entrypoint screens its env value.
+ */
+export const NAVER_API_CENTER_GUIDED_WALK_LANDING_URL = "https://apicenter.commerce.naver.com/";
+
+/** The live NAVER walk's carrier: the bridge config, plus the teardown for the window it may have opened. */
+export interface NaverIssuanceLiveCarrier {
+  config: AgentApiIssuanceConfig;
+  /** Close the dedicated window if one was ever brought up. Safe on a carrier that never opened one. */
+  closeSurface: () => Promise<void>;
+  /** Sanitized: is the dedicated window up right now? `false` before the first open and after the seller closed it. */
+  isSurfaceOpen: () => boolean;
+}
+
+/**
+ * **The REAL NAVER API-center issuance carrier, assembled the way the live entrypoint assembles it** — the
+ * calibrated {@link NaverIssuanceDriver} behind a lazy opener, so no browser exists until the seller's own
+ * START_RUN reaches the session's first driver call.
+ *
+ * Structurally identical to {@link buildCoupangIssuanceLiveConfig} and for the same reasons; read that
+ * function's comments for why the context is held out here rather than in the driver, why the landing is ONE
+ * navigation per carrier, and why a page the seller closes is forgotten rather than re-navigated.
+ */
+export function buildNaverIssuanceLiveConfig(): NaverIssuanceLiveCarrier {
+  const cfg = loadConfig();
+  let walkContext: BrowserContext | null = null;
+  let navigated = false;
+  const driver = new LazyNaverIssuanceDriver({
+    open: async () => {
+      if (!walkContext) {
+        // `followWindow` for the same live-measured reason the WING walk needs it: without it Playwright pins
+        // every page to 1280x720 at DPR 1, which crops the very controls the walk points at.
+        const launched = await launchNaverContext(cfg.profileDir, cfg.browserChannel, { followWindow: true });
+        launched.once("close", () => {
+          walkContext = null;
+        });
+        walkContext = launched;
+      }
+      const context = walkContext;
+      const page = (context.pages()[0] ?? (await context.newPage())) as Page;
+      const screened = screenApiCenterUrl(NAVER_API_CENTER_GUIDED_WALK_LANDING_URL);
+      if (navigated) {
+        log("aw_issuance_walk_landing_skipped", { reason: "ALREADY_NAVIGATED_ONCE" });
+      } else if (screened.ok) {
+        navigated = true;
+        log("aw_issuance_walk_landing", { urlCategory: screened.urlCategory });
+        await page
+          .goto(NAVER_API_CENTER_GUIDED_WALK_LANDING_URL, { waitUntil: "domcontentloaded" })
+          .catch(() => undefined);
+      } else {
+        log("aw_issuance_walk_landing_refused", { reason: screened.reason }, "warn");
+      }
+      // The seller closing their own window must FORGET it, and only when the CONTEXT has no page left (the
+      // API center opens the login host in the same window, and a second tab must not drop a live run).
+      page.once("close", () => {
+        if (context.pages().length > 0) {
+          log("aw_issuance_walk_tab_closed", { remainingPages: context.pages().length > 0 });
+          return;
+        }
+        log("aw_issuance_walk_surface_closed", {});
+        driver.markClosed();
+      });
+      return { context, page };
+    },
+  });
+  return {
+    config: {
+      runId: `run_${randomBytes(6).toString("hex")}`,
+      channelCode: "naver",
+      // ONE driver for the carrier's lifetime, so a re-attach reuses the window the seller is already in.
+      createDriver: () => driver,
+    },
+    closeSurface: async () => {
+      const ctx = walkContext;
+      walkContext = null;
+      // RETIRE, not just forget — `markClosed` alone means "re-open on the next call", which is what brought
+      // the WING window back on the first on-demand release (2026-08-19). Same latch, same reason.
+      driver.retire();
+      await ctx?.close().catch(() => undefined);
+    },
+    isSurfaceOpen: () => driver.isOpen(),
+  };
+}
+
+/**
+ * **The guided NAVER API-center walk, brought up on demand by the resident helper.**
+ *
+ * The `issuance`/`naver` twin of {@link activateCoupangGuidedWalk}, assembling the SAME carrier the live
+ * entrypoint assembles — {@link buildNaverIssuanceLiveConfig} + {@link ApiIssuanceEndpoint} +
+ * {@link IssuanceEngine} + {@link IssuanceGuidanceSession} — with a fresh run identity per activation.
+ *
+ * This closes a RUNTIME gap, not a capability gap: the driver, the engine, the session and the four
+ * live-calibrated fixed-label locators (`create_app` / `api_group` / `application_id` / `application_secret`,
+ * measured at `matchCount === 1` on the real API center) have all existed since the issuance phase; the only
+ * agent that ever mounted them was `run-api-issuance-live-naver.ts`, behind an operator-owned env var. Nothing
+ * is added here: the runtime still never logs in, clicks, types, submits, creates an application, selects a
+ * group, or reads a credential value — the seller performs every step and SellerOps highlights and observes.
+ * READ-only guidance, so the WRITE boundary is untouched (`docs/sellerops_live_approval_contract.md` §3/§6a).
+ */
+export function activateNaverGuidedWalk(
+  request: AwAttachRequest,
+  deps: { buildCarrier?: () => NaverIssuanceLiveCarrier } = {},
+): ActivatedCarrier | null {
+  if (request.carrier !== AW_CARRIER_ISSUANCE || request.channelCode !== "naver") return null;
+  const live = (deps.buildCarrier ?? buildNaverIssuanceLiveConfig)();
+  const { runId, channelCode } = live.config;
+  const endpoint = new ApiIssuanceEndpoint({ runId, channelCode });
+  const engine = new IssuanceEngine({ runId, channelCode });
+  const session = new IssuanceGuidanceSession(engine, live.config.createDriver(), endpoint.transport);
+  const detach = session.attach();
+  log("aw_issuance_run_hosted", { onDemand: true });
+  let disposed = false;
+  return {
+    endpoint,
+    isSettled: () => {
+      if (!engine.isStarted()) return true;
+      const status = engine.view().status;
+      return status === "COMPLETED" || status === "CANCELLED" || status === "FAILED";
+    },
+    isSurfaceOpen: () => live.isSurfaceOpen(),
+    dispose: async () => {
+      if (disposed) return;
+      disposed = true;
+      detach();
+      endpoint.close();
+      await live.closeSurface();
+    },
+  };
+}
+
+/**
+ * **What the ONE resident helper can bring up, in order.**
+ *
+ * The seller keeps a single SellerOps 도우미 running and never picks a carrier; the connect screen they open
+ * decides which walk exists. So the activator is a LIST of the channel walks, tried in turn, and the first one
+ * that recognises the request wins — the host still holds exactly one carrier at a time (a second, different
+ * request while one is active is refused there, not here).
+ *
+ * Adding a channel to this list is the whole wiring: nothing else in the boot knows a channel name.
+ */
+export const RESIDENT_CARRIER_ACTIVATORS: readonly ((request: AwAttachRequest) => ActivatedCarrier | null)[] = [
+  (request) => activateCoupangGuidedWalk(request),
+  (request) => activateNaverGuidedWalk(request),
+];
+
+/** The names of what {@link RESIDENT_CARRIER_ACTIVATORS} can serve — for the boot line only. */
+export const RESIDENT_ON_DEMAND_CARRIERS: readonly string[] = ["issuance/coupang", "issuance/naver"];
+
+/** Try each resident walk in turn; `null` when none of them serves this (carrier, channel) pair. */
+export function activateResidentCarrier(request: AwAttachRequest): ActivatedCarrier | null {
+  for (const activate of RESIDENT_CARRIER_ACTIVATORS) {
+    const carrier = activate(request);
+    if (carrier) return carrier;
+  }
+  return null;
+}
+
+/**
  * Build the dev review-locate carrier — a scripted fixture driver (no browser) and a resolver that answers
  * with a fixed, obviously-synthetic target.
  *
@@ -1110,7 +1282,7 @@ export interface BridgeOnlyBootDeps {
   /** Called after shutdown completes on a signal; defaults to `process.exit(0)`. */
   exit?: () => void;
   /**
-   * The on-demand carrier activator; defaults to {@link activateCoupangGuidedWalk}. A test passes one that builds
+   * The on-demand carrier activator; defaults to {@link activateResidentCarrier}. A test passes one that builds
    * a fixture-driven carrier so no window can open.
    */
   activateCarrier?: (request: AwAttachRequest) => ActivatedCarrier | null;
@@ -1137,12 +1309,13 @@ export interface BridgeOnlyBootHandle {
  * helper with an empty connection list, which its dock renders as "연결된 채널 없음" — true, and quiet.
  *
  * **Idle, not capability-less (2026-08-19).** The single carrier slot holds an {@link OnDemandCarrierHost}: it
- * announces nothing and holds no browser until a SellerOps tab on `/connect/coupang` asks for the
- * `issuance`/`coupang` carrier, at which point the EXISTING guided WING walk is assembled
- * ({@link activateCoupangGuidedWalk}), announced, and driven exactly as the flag-selected boot drives it; when
- * the walk is over and the seller is done with the window, the host releases it and the helper is bridge-only
- * again. The seller never picks a carrier, flag, or env. `--bridge-only` still refuses every carrier FLAG
- * alongside (the gate is unchanged): the resident helper's carrier is the on-demand one, by construction.
+ * announces nothing and holds no browser until a SellerOps tab asks for a carrier by name, at which point the
+ * EXISTING guided walk for that channel is assembled ({@link activateResidentCarrier} — `issuance`/`coupang`
+ * from `/connect/coupang`, `issuance`/`naver` from `/connect/naver`), announced, and driven exactly as the
+ * flag-selected boot drives it; when the walk is over and the seller is done with the window, the host releases
+ * it and the helper is bridge-only again. The seller never picks a carrier, flag, or env. `--bridge-only` still
+ * refuses every carrier FLAG alongside (the gate is unchanged): the resident helper's carrier is the on-demand
+ * one, by construction.
  *
  * Fails closed the same way as every other boot: a port already bound is a `skipped` listen and a non-zero
  * exit (a second resident helper must not silently think it is serving); a `none` presenter still yields a
@@ -1159,7 +1332,7 @@ export async function runBridgeOnlyBoot(
   const exit = deps.exit ?? (() => process.exit(0));
   const approvalKind = decideApprovalPresenter(env, process.platform);
   const carrierHost = new OnDemandCarrierHost({
-    activate: deps.activateCarrier ?? activateCoupangGuidedWalk,
+    activate: deps.activateCarrier ?? activateResidentCarrier,
     ...(() => {
       // Ops knob, not a product control: how long a walk's window is kept once no SellerOps tab is attached.
       // The product default (15 min) is the "seller is copying the secret key" window; a proof run shortens it
@@ -1184,7 +1357,7 @@ export async function runBridgeOnlyBoot(
       browserLaunched: false,
       marketplaceOpened: false,
       // What this resident helper can bring up when a SellerOps tab asks — names only.
-      onDemandCarriers: ["issuance/coupang"],
+      onDemandCarriers: RESIDENT_ON_DEMAND_CARRIERS,
     }),
   );
   if (!listen.ok) {

@@ -1,4 +1,4 @@
-# Resident helper — the guided walk on demand (2026-08-19)
+# Resident helper — the guided walks on demand (2026-08-19, v1.1)
 
 > **What this is.** One unit of work: audit → design → implementation → regression → live proof, restoring the
 > **guided WING issuance walk as the PRIMARY Coupang connect path** while keeping the seller on exactly ONE
@@ -167,9 +167,61 @@ gated) still exist for CLI proofs and are unchanged.
   the exception §3 already states. Recorded here because the on-demand host is the first thing that reaches the
   real WING driver without a flag.
 
+## 5a. v1.1 — the NAVER API-center walk on the same resident helper (2026-08-19)
+
+The Coupang walk was the first carrier through the on-demand seam; it was not the only one that had lost its
+runtime. `/connect/naver`'s guided walkthrough already sent `{type:"aw_attach", carrier:"issuance",
+channelCode:"naver"}` — the FE has been channel-parameterised since this unit's first commit — and the resident
+helper's activator only knew `issuance`/`coupang`, so the host refused `NOT_SERVABLE` and the screen sat on
+"도우미는 연결됐지만 안내 실행을 준비하지 못했어요". Everything behind it existed: `NaverIssuanceDriver`, the
+`IssuanceEngine`/`IssuanceGuidanceSession` pair, and four fixed-label locators live-measured at
+`matchCount === 1` on the real API center. The ONLY agent that ever mounted them was
+`run-api-issuance-live-naver.ts`, behind an operator-owned `NAVER_API_CENTER_URL` a seller cannot set.
+
+What was added is plumbing, not capability:
+
+- `LazyNaverIssuanceDriver` (`api-issuance/lazy-naver-issuance-driver.ts`) — the sibling of
+  `LazyCoupangIssuanceDriver`, same shape and same two properties (one launch shared by concurrent first
+  calls; a window the seller closed is forgotten). `retire()` for release.
+- `buildNaverIssuanceLiveConfig()` + `activateNaverGuidedWalk()` in `local-agent.ts` — the same assembly the
+  live entrypoint performs. The landing is `NAVER_API_CENTER_GUIDED_WALK_LANDING_URL`, which is the SAME URL
+  the product's own text checklist opens (`frontend/src/lib/guidedConnection/tutorial.ts`), pinned equal by
+  test so guided and text cannot drift apart about where the seller goes. One navigation per carrier,
+  `screenApiCenterUrl`-screened before it is used.
+- `RESIDENT_CARRIER_ACTIVATORS` / `activateResidentCarrier()` — the activator is now a LIST tried in turn, so
+  the boot knows no channel name. `onDemandCarriers` prints `["issuance/coupang","issuance/naver"]`.
+- `IssuanceGuidanceSession` gained the `stopped` latch the Coupang session got after a released walk re-opened
+  the window it had just closed. This session's `watchBarrier` has the same re-arm shape, so it got the same
+  latch before the same thing could be observed here. Both sessions' detached barrier watchers now catch — a
+  driver retired mid-await would otherwise reject a floating promise.
+- `NaverIssuanceGuidedWalkthrough` — a CANCELLED/FAILED walk hands over to the text checklist. It previously
+  kept the timeline on screen beside an empty control panel: a step count with nothing to press. Same dead end
+  the Coupang sibling had, same fix. COMPLETED is untouched (it has its own credential hand-off).
+
+Live proof, one resident helper, both walks in sequence (see §3a for the Coupang cycle's shape):
+
+```
+BRIDGE_ONLY … onDemandCarriers:["issuance/coupang","issuance/naver"]   0 walk browsers
+/connect/naver → "네이버 연결 안내 시작"
+  aw_on_demand_carrier_activated {carrier:issuance, channelCode:naver}
+  aw_issuance_walk_landing        {urlCategory:api_center_host}
+  aw_issuance_probe               {pageCategory:app_list, ok:true}
+  SellerOps: 진행 단계 0/7 · step-1 copy · [취소]      (no text fallback, no refusal notice)
+  취소 → "화면 안내를 끝냈어요. 아래에서 텍스트 안내로 계속 진행하실 수 있습니다." + [텍스트로 직접 진행하기]
+  tab closed → aw_on_demand_carrier_released {SETTLED_GRACE_ELAPSED} → aw_issuance_walk_surface_closed → 0 browsers
+/connect/coupang → "쿠팡 연결 안내 시작"   (the SAME helper, no restart, no flag, no env)
+  aw_on_demand_carrier_activated {carrier:issuance, channelCode:coupang}
+  aw_coupang_walk_landing         {urlCategory:wing_host}
+  SellerOps: 0 / 8 단계 완료 · [쿠팡 윙 창 앞으로 가져오기] · [취소]
+  → aw_on_demand_carrier_released {SETTLED_SURFACE_CLOSED} → aw_coupang_walk_surface_closed → 0 browsers
+```
+
+Zero marketplace clicks, types, submissions or key issuances on either walk; one screened navigation each.
+
 ## 6. Known gaps (recorded, not hidden)
-- Only `issuance`/`coupang` is servable on demand. NAVER import and Coupang locate still need their
-  flag-selected boots (`agent-supervisor.sh switch`); the seam (`activate`) is where they would be added.
+- `issuance`/`coupang` and `issuance`/`naver` are servable on demand. NAVER review import and Coupang review
+  locate still need their own boots — see `docs/channel_integration_completeness_audit_v1.md` §3 for why each
+  is a product-owner decision rather than a missing line of wiring; the seam (`activate`) is where they go.
 - A resident helper that is already hosting a walk refuses a *different* carrier request rather than queueing
   it; the asking tab falls back exactly as it does against a fixed-carrier agent of the other kind.
 - The release grace is time-based (15 min, ops-overridable with `SELLEROPS_AGENT_CARRIER_IDLE_GRACE_MS` —

@@ -37,6 +37,18 @@ export class IssuanceGuidanceSession {
   private readonly onStatePublished: (() => void) | undefined;
   private readonly rearmDelayMs: number;
 
+  /**
+   * **The session has been torn down** — its host released it (the resident helper's on-demand carrier), or the
+   * agent is shutting down. Every automatic loop checks it at each poll and every drive refuses.
+   *
+   * The Coupang sibling gained this on 2026-08-19 after a released walk's own poll re-opened the marketplace
+   * window the host had just closed. This session's `watchBarrier` has the same shape — it re-arms an
+   * observation every `rearmDelayMs` for as long as the engine rests on the barrier — and `isPaused` / terminal
+   * are its only exits, neither of which says "nobody is hosting this run any more". So it gets the same latch,
+   * for the same reason, before the same thing is observed here.
+   */
+  private stopped = false;
+
   private started = false;
   private publishedSeq = 0;
   /**
@@ -66,9 +78,15 @@ export class IssuanceGuidanceSession {
     this.unsubscribe = () => {
       // Retire the current window's close watch so a late close after release cannot park a released run.
       this.surfaceCloseToken += 1;
+      this.stopped = true;
       stopTransport();
     };
     return this.unsubscribe;
+  }
+
+  /** Whether this session has been torn down. Sanitized boolean, for the host and for tests. */
+  isStopped(): boolean {
+    return this.stopped;
   }
 
   /** Resolves once no automatic drive is in flight (test-facing determinism hook). */
@@ -127,6 +145,9 @@ export class IssuanceGuidanceSession {
     // NOT fail the run closed and leave it idle with no barrier: ask the engine to PARK recoverably on
     // page_mismatch, so a `REQUEST_STEP_RECHECK` re-settles and re-guides. The engine bounds this — a permanent
     // fault stops re-guiding after a few consecutive faults. Sanitized name only in the log.
+    // A released session's unwinding loops throw against a retired driver; that is the teardown working, not a
+    // fault to park on. Nothing is published and no recovery drive is started.
+    if (this.stopped) return;
     log("aw_issuance_drive_error", { reason: errName(e) }, "warn");
     const effect = this.engine.onDriveFault();
     this.publishState();
@@ -142,12 +163,17 @@ export class IssuanceGuidanceSession {
   }
 
   private async drive(effect: IssuanceEffect): Promise<void> {
+    if (this.stopped) return;
     if (typeof effect === "object") {
       if ("guide" in effect) return this.guide(effect.guide);
       // `observe` rests at a seller barrier. The watcher runs detached so the drive chain unwinds and the run
       // is genuinely idle while the seller works in the API-center window.
       await this.driver.armObserve(effect.observe);
-      void this.watchBarrier(effect.observe);
+      // Detached, but never UNHANDLED: the barrier's first `observeUserAction` is awaited outside its own
+      // try, so a driver that is retired mid-await (the host released this walk) would reject a floating
+      // promise and, on this Node major, take the agent down with it. A released session's `onDriveError`
+      // returns at once, so this catch is a teardown sink, not a second park path.
+      void this.watchBarrier(effect.observe).catch((e) => this.onDriveError(e));
       return;
     }
     switch (effect) {
@@ -196,6 +222,7 @@ export class IssuanceGuidanceSession {
    * stage before its `TARGET_HIGHLIGHTED` event exists.
    */
   private async guide(target: IssuanceTarget): Promise<void> {
+    if (this.stopped) return;
     // Settle the surface BEFORE the locate so a fixed-label locate/highlight never fires on a still-settling
     // post-navigation page (the `app_list → app_detail` transition that destroyed the execution context and left
     // the run idle in the live proof). Best-effort and value-free; a driver without a real page omits it. If a
@@ -220,14 +247,16 @@ export class IssuanceGuidanceSession {
    * run should be abandoned. Bounded: the loop exits the moment the engine leaves this barrier.
    */
   private async watchBarrier(target: IssuanceTarget): Promise<void> {
+    if (this.stopped) return;
     let acted = await this.driver.observeUserAction(target);
     while (!acted) {
-      if (!this.stillWaitingOn(target)) return;
+      if (this.stopped || !this.stillWaitingOn(target)) return;
       await new Promise<void>((resolve) => setTimeout(resolve, this.rearmDelayMs));
-      if (!this.stillWaitingOn(target)) return;
+      if (this.stopped || !this.stillWaitingOn(target)) return;
       await this.driver.armObserve(target);
       acted = await this.driver.observeUserAction(target);
     }
+    if (this.stopped) return;
     this.busyCount += 1;
     try {
       const next = this.engine.onUserActionObserved(target);
@@ -258,6 +287,7 @@ export class IssuanceGuidanceSession {
   }
 
   private onSurfaceClosed(token: number): void {
+    if (this.stopped) return;
     if (token !== this.surfaceCloseToken) return;
     if (isIssuanceTerminal(this.engine.currentStage())) return;
     // A closed API-center window is the seller not being where they can act. Park recoverably on

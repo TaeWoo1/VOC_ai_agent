@@ -197,7 +197,11 @@ export class CoupangIssuanceGuidanceSession {
       // `observe` rests at a seller barrier. The watcher runs detached so the drive chain unwinds and the run is
       // genuinely idle while the seller works in the WING window.
       await this.driver.armObserve(effect.observe);
-      void this.watchBarrier(effect.observe);
+      // Detached, but never UNHANDLED: the barrier's first `observeUserAction` is awaited outside its own
+      // try, so a driver that is retired mid-await (the host released this walk) would reject a floating
+      // promise and, on this Node major, take the agent down with it. A released session's `onDriveError`
+      // returns at once, so this catch is a teardown sink, not a second park path.
+      void this.watchBarrier(effect.observe).catch((e) => this.onDriveError(e));
       return;
     }
     switch (effect) {

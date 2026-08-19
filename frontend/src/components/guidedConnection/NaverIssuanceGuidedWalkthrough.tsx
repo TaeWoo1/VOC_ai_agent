@@ -154,10 +154,16 @@ export function NaverIssuanceGuidedWalkthrough({
     : hostRefusal === "start-refused"
       ? { code: "HOST_UNAVAILABLE", fault: "agent", canRetry: true, offerTextFallback: true }
       : classifyAgentEnv({ bridgePhase: phase, hostRefusal });
+  // A guided walk that ENDED WITHOUT COMPLETING — the seller pressed 취소, or the runtime failed. The run view
+  // survives, so without this the screen kept showing the timeline ("0 / N 단계 완료") beside an empty control
+  // panel: a step count, no allowed command, and nothing to press. The Coupang sibling had the identical dead
+  // end and it was fixed the same way on 2026-08-19 — an ended walk hands over to the text checklist. COMPLETED
+  // is deliberately NOT here: that path has its own hand-off CTA below.
+  const walkEnded = !!effectiveRun && (effectiveRun.status === "CANCELLED" || effectiveRun.status === "FAILED");
   // Text is a FALLBACK, never a co-equal choice: it is offered ONLY when guidance cannot run — the agent can't
-  // pair (incompatible/denied/revoked), the host refused, or the agent is unreachable. On the healthy paired
-  // path it never appears.
-  const offerTextFallback = cannotGuide || agentUnreachable;
+  // pair (incompatible/denied/revoked), the host refused, the agent is unreachable, or the walk ended without
+  // completing. On the healthy paired path it never appears.
+  const offerTextFallback = cannotGuide || agentUnreachable || walkEnded;
 
   // The runtime reveals existing-vs-new by OBSERVING NAVER's application list, and publishes that as the
   // sanitized `appBranch` on the issuance run view (contract). Read it once and set the journey path so
@@ -261,8 +267,16 @@ export function NaverIssuanceGuidedWalkthrough({
           with "the agent is not running". */}
       {hostAgentEnv && <AgentEnvNotice status={hostAgentEnv} onRetry={retryHost} />}
 
+      {/* The walk ended without completing → say so, then offer the way forward. Without this the seller is
+          left reading a step counter with no control under it. */}
+      {walkEnded && (
+        <p className="rounded-xl bg-canvas px-4 py-3 text-sm text-ink break-keep" role="status">
+          화면 안내를 끝냈어요. 아래에서 텍스트 안내로 계속 진행하실 수 있습니다.
+        </p>
+      )}
+
       {/* Text is a FALLBACK, shown ONLY when guidance cannot run (can't pair / host refused / agent
-          unreachable). On the healthy paired path it never appears. */}
+          unreachable) or the walk ended without completing. On the healthy paired path it never appears. */}
       {offerTextFallback && (
         <button type="button" className="btn-ghost text-sm" onClick={toText} disabled={busy}>
           텍스트로 직접 진행하기
