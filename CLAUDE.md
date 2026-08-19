@@ -38,12 +38,18 @@ one place on disk and are **not** recoverable from git.
 
 ## Active source ownership
 
-- `backend/` — Spring Boot service (Java, Gradle, Postgres/Flyway, JWT).
+- `backend/` — Spring Boot service (Java, Gradle, Postgres/Flyway, JWT). **The only LLM egress.**
 - `frontend/` — React/Vite operations UI.
 - `collector/` — TypeScript local agent: channel acquisition + Action Window (NAVER, ESM, Cafe24).
+- `agent-runtime/` — standalone Node/TS **LangGraph** orchestration service (port 8787): four compiled
+  graphs with human `interrupt`/resume, tools adapting onto Spring. It is a docker-compose service with
+  its own CI status check and a live `/agent` route — and it contains **no LLM call at all**
+  (`docs/decisions/agent-runtime-langgraph-llm-split.md`).
 - `contracts/` — shared contracts (Action Window, review fingerprint).
 - `tools/` — dev/support tooling.
 - `docs/` — current SellerOps docs; `docs/archive/` holds historical material.
+
+Map of how these connect, and which document owns each part: `docs/architecture.md` (pointer only).
 
 ## Safety fences
 
@@ -97,6 +103,11 @@ Read the canonical documents before product/frontend work:
 6. `docs/sellerops_local_agent_runtime_adr.md` — local-agent runtime & guided-connection boundaries.
 
 Channel lessons (derived from §4.1, non-authoritative): `docs/channel_capability_ledger.md`.
+
+**Live-proof evidence:** every live run is indexed in `docs/evidence/INDEX.md` — date, channel,
+capability, commit, approval id, outcome, evidence file. **Landing a proof document without a row there
+is a defect**: an unlinked proof is how Coupang `ORDER_SUMMARY` stayed recorded as "인증 골격만" for two
+weeks after it was live-proven (`docs/channel_integration_completeness_audit_v1.md` §5).
 
 **Status lives in workstream homes, not here:** Action Window / R4 → `docs/action-window-runtime/`
 (`HANDOFF.md`); Action Window frontend → `docs/workstreams/action-window-frontend/` (`progress.md`);

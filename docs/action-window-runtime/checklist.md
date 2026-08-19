@@ -1,5 +1,18 @@
 # Checklist — Action Window Runtime
 
+> **⚠ HISTORICAL — SUPERSEDED, do not cite for current state (banner added 2026-08-19).**
+> An r4-era progress ledger. Its `MERGED` / `VERIFIED` rows are accurate about the PRs they name and are
+> good lineage, but the ledger stopped being maintained during the r4 phase and does not cover the
+> resident-helper work (PRs #466–#469) or anything after it.
+>
+> - **Current runtime state:** [`HANDOFF.md`](HANDOFF.md) (header block).
+> - **Per-capability status, current:** [`../channel_integration_completeness_audit_v1.md`](../channel_integration_completeness_audit_v1.md).
+> - **Capability truth:** `docs/multi-channel-connector-roadmap.md` §4.1.
+> - **Live evidence:** [`../evidence/INDEX.md`](../evidence/INDEX.md).
+>
+> Retained unchanged below for lineage.
+
+
 Durable progress ledger. Update **only at meaningful implementation /
 verification milestones**, not per tiny edit. Every `VERIFIED` or `MERGED`
 requires linked evidence.

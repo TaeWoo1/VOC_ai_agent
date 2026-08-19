@@ -33,8 +33,8 @@ readings were measured live, the end-to-end walk was not; `OFFLINE_ONLY` = tests
 | **Coupang — `COUPANG_WING_SELECTOR_PROBE` / RECORD** | `probe-wing-issuance-selectors.ts` | `ONLY_PROBE_OR_FIXTURE` **by design** — a read-only calibration recorder CLI with no promotion path; it is not, and was never meant to be, product runtime | `LIVE_PROVEN` as an instrument (2026-08-08 / 08-11 / 08-12 sittings) | none | see §2.1 — what it measured, and what the shipped walk actually uses |
 | **Coupang — 기존 키가 있는 사용자 경로** | `KEY_PRESENT` → hand-off branch in the issuance engine | `IMPLEMENTED_AND_WIRED` — engine publishes `credentialState`; `CoupangIssuanceGuidedWalkthrough` reads it (`alreadyHadKey`) and the walk guides ONLY the hand-off, never 발급 | `OFFLINE_ONLY` for the branch itself | none needed | never exercised live on an account that already holds a key |
 | **Coupang — 키 있음/없음 자동 detection** | `coupang-credential-state.ts` | `IMPLEMENTED_AND_WIRED` — three-valued (`NO_KEY` / `KEY_PRESENT` / `UNKNOWN`); `NO_KEY` requires a POSITIVE non-empty-cell reading, `UNKNOWN` parks rather than issuing | `OFFLINE_ONLY` | none needed | yes, it was really implemented — but its live proof is the cell calibration, not a two-account A/B |
-| **Coupang — credential handoff / order-access probe** | `run-coupang-credential-handoff-live.ts` + `CoupangWingCredentialDriver` | handoff: `IMPLEMENTED_BUT_UNWIRED` in the resident runtime; order-access: **`NEVER_IMPLEMENTED`** (the Coupang API connector is an auth skeleton, §4.1) | handoff `LIVE_PROVEN` under its own gate | **not wired** — the handoff moves a real Access/Secret key (secret write); the stop rule applies | — |
-| **Coupang — first ORDER sync** | — | `NEVER_IMPLEMENTED` (인증 골격만, §4.1) | none | none — and it must not be described as working | — |
+| **Coupang — credential handoff / order-access probe** | `run-coupang-credential-handoff-live.ts` + `CoupangWingCredentialDriver` | handoff: `IMPLEMENTED_BUT_UNWIRED` in the resident runtime; order-access: **`IMPLEMENTED_AND_WIRED`** — ~~`NEVER_IMPLEMENTED` (the Coupang API connector is an auth skeleton, §4.1)~~ **corrected 2026-08-19, see §5**: `CoupangApiConnector.verifyConnection` runs a two-stage probe (credential → `CoupangOrdersClient.probeOrderAccess`), reached from the 연결 테스트 button | handoff `LIVE_PROVEN` under its own gate | **not wired** — the handoff moves a real Access/Secret key (secret write); the stop rule applies | — |
+| **Coupang — first ORDER sync** | backend API connector (`CoupangOrdersClient`, 657 L, official v5 `ordersheets` day-paging) | **`IMPLEMENTED_AND_WIRED`** — ~~`NEVER_IMPLEMENTED` (인증 골격만, §4.1)~~ **corrected 2026-08-19, see §5** | `LIVE_PROVEN` (2026-08-06, `main` `59c2e6c`, approval `apr-01212e2da29a`, preflight 9/9): first connection → first `ORDER_SUMMARY` sync → `PREPARING→CONNECTED` → same-window idempotent re-sync | none — the row was wrong, not the code | scheduling flag off; not production-supported (§4.1 운영 지원 ❌, 셀러 표기 unchanged) |
 | **Coupang — locate (`[쿠팡에서 보기]`)** | `run-coupang-review-locate-live.ts` | `IMPLEMENTED_BUT_UNWIRED` in the resident runtime: the FE's `locateSession` sends no `aw_attach`, and the run needs a backend session + a seller already on the 상품평 목록 page | `LIVE_PROVEN` (2026-08-15, `matches=1` ×2, 0 stored) | **not wired** — see §3.2 | the two blockers are design decisions (agent-held backend session; where the window lands), not wiring |
 | **Cafe24 — OAuth** | FE `/connect/cafe24` → `api.startCafe24Connect` → `Cafe24Authorizer` / `Cafe24TokenClient` | `IMPLEMENTED_AND_WIRED` (no local agent on this channel at all) | `LIVE_PROVEN` (token rotation included) | none | — |
 | **Cafe24 — order sync** | `Cafe24OrdersClient` + aggregator | `IMPLEMENTED_AND_WIRED` | `LIVE_PROVEN` (E2E PASS incl. amount reconciliation) | none | scheduling flag off |
@@ -114,7 +114,7 @@ A marketplace WRITE path, never run live. Out of scope by the stop rule.
 - Coupang WING highlight labels "calibrated" (§2.1) — two sets, one calibrated.
 - The guided walk covering 자체개발 / 업체명 / 호출 IP (§2.2) — those screens are not in the flow.
 - Consent pairing proven per row (§2.3) — it is an aggregate boolean.
-- Coupang ORDER_SUMMARY sync — auth skeleton only; there has never been a working first sync.
+- ~~Coupang ORDER_SUMMARY sync — auth skeleton only; there has never been a working first sync.~~ **This bullet was itself the mis-memory — withdrawn 2026-08-19, see §5.**
 - NAVER review reply — offline only, never live.
 - The `**` rendering defect (§2.4) — not reproducible; nothing to fix.
 
@@ -129,3 +129,62 @@ Nothing here is a user error. Two honest asymmetries that read like one:
   behind it is guided-first and the Coupang screen is guided-first. That is a screen that disagrees with the
   stated product intent — **recorded, not changed**, because it is a journey/UX decision, not a wiring gap.
   In today's live run the journey entered the guided walkthrough directly, so the fork was not on the path.
+
+---
+
+## 5. Correction (2026-08-19) — the audit understated Coupang ORDER_SUMMARY
+
+A repo-wide simplification audit re-derived §1 from code at `4b84bf2e` and found that **three rows above
+were wrong in the same direction**: they recorded a live-proven, currently-reachable capability as
+non-existent. The rows are struck through and corrected in place; this section records why, because the
+*cause* matters more than the cells.
+
+### 5.1 What the code says
+
+- `CoupangApiConnector.capabilities()` (`:78-90`) returns `Set.of(DataType.ORDER_SUMMARY,
+  DataType.INQUIRY)` with **both marked `"CONFIRMED"`** — not an empty capability set.
+- `CoupangOrdersClient` is **657 lines** implementing the official v5 `ordersheets` PO-list flow: day
+  paging, `nextToken` continuation, per-status sweep, `shipmentBoxId` dedup, `dailySummaries()` (`:429`)
+  and `CanonicalOrder` emission (`:450`). `CoupangSigner` (85 L) is a real CEA HMAC-SHA256 signer.
+- `verifyConnection` runs two *distinct* probes — a low-privilege credential check and then a read-only
+  `ordersheets` order-access probe (`:217-219`) — so a bad credential is never misreported as an IP
+  problem, and an ungranted order scope returns the hedged `ORDER_ACCESS_DENIED`.
+- 14 test files under `backend/src/test/java/com/sellerops/connector/coupang/` cover it.
+
+### 5.2 What the live record says
+
+`docs/coupang_final_main_first_connection_order_routine_proof_v1.md` — **COMPLETE, live-proven
+2026-08-06** on `main` `59c2e6c` in a disposable environment, approval `apr-01212e2da29a` / run
+`cp-781c4c7a2484`, mode WRITE (credential=1, test=1, sync=1, re-sync=1), preflight **9/9 PASS**: on a
+pristine database a real WING credential achieved first connection, first `ORDER_SUMMARY` sync,
+`PREPARING → CONNECTED`, and a same-window idempotent re-sync — zero code modification, read-only GETs
+only (`returnShippingCenters`, `ordersheets`), no secret/PII/provider-body leakage.
+
+### 5.3 Why the audit missed it
+
+The audit deferred to §4.1 for capability truth, exactly as its own rules require. But §4.1's Coupang
+`ORDER_SUMMARY` row cited **`docs/sellerops_phase3d_completion_summary.md` §3** — an *archived* phase
+document from the connector-skeleton era — and had never been updated. Deferring to a canonical row is
+correct; the row was stale.
+
+The root cause is upstream of both: **the 2026-08-06 proof document had zero inbound references
+anywhere in the repository.** Nothing linked it, so no canonical row was ever prompted to move, and
+three documents went on repeating a claim the code had already outgrown.
+
+### 5.4 What changed, and what deliberately did not
+
+- **Changed (the record):** §4.1's `구현됨` and `라이브 검증` columns, §1's connector-status table,
+  `docs/channel_capability_ledger.md`'s Coupang `ORDER_SUMMARY` cell, and the three rows above.
+- **Not changed (the product):** `운영 지원` stays **❌** (flag off, schedule off) and the seller-facing
+  label stays **표기하지 않음**. Promoting a channel×type to 운영 지원, or showing it to a seller, is a
+  **product-owner decision** and is out of scope for a correction of the record.
+- **Added, so this cannot recur:** `docs/evidence/INDEX.md` — every live-proof document indexed with its
+  date, channel, capability, commit, approval id and outcome. An unlinked proof is how this happened.
+
+### 5.5 The general lesson
+
+The audit's own §2 was titled "what the audit corrected about our own memory", and every entry there
+corrected an **over**-claim. This correction runs the other way. Both directions are drift, but they fail
+differently: an over-claim gets caught the first time someone tries to use the feature, while an
+under-claim is silent — the capability simply stops being counted, and eventually stops being maintained.
+A capability ledger needs a mechanical link from evidence to row, not only a rule about who wins.

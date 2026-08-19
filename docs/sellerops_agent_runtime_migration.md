@@ -29,6 +29,22 @@ A repo-wide audit (2026-07-30) established the starting point:
   extraction) ships a **rule-based** implementation with an `ai` adapter *reserved behind
   a flag but unimplemented*.
 
+> **⚠ Superseded on this one point (noted 2026-08-19, text above left intact as lineage).**
+> "**zero live LLM calls** anywhere" was accurate when written (2026-07-31) and is **no longer true**.
+> A real vendor call shipped on 2026-08-17 — but **not in `agent-runtime/`, and not through LangChain**:
+> `backend/src/main/java/com/sellerops/review/triage/llm/ApiTriageClassifier.java:32-33` posts to
+> `api.anthropic.com/v1/messages` / `api.openai.com/v1/chat/completions` over the plain JDK client
+> `JdkLlmHttpClient`, behind four gates (master flag + non-blank key + org allow-list + a three-channel
+> gate), off by default. Canonical: `docs/workstreams/review_ai_triage_demo.md`.
+>
+> The rest of the bullet still holds, and the split it implies is the interesting part: as of `4b84bf2e`
+> **`agent-runtime/` still contains no model call at all** — `goal/parseGoal.ts` is a keyword table and
+> `provider/DraftModelSeam.ts` is a Korean template table, and nothing binds the LangChain tools
+> (`bindTools` / `ChatOpenAI` / `createReactAgent`: zero occurrences repo-wide). So the repository today
+> has a **graph runtime with no model, and a model with no graph**. That is recorded as an open
+> architecture question in `docs/decisions/agent-runtime-langgraph-llm-split.md`; **no migration in
+> either direction is planned or in progress.**
+
 So "how far was the whole migration reflected?" — **it wasn't.** What existed was a
 narrow, LLM-free LangGraph experiment on one NAVER journey and a consistent
 "provider-seam-with-reserved-AI-adapter" pattern in the backend. This document defines

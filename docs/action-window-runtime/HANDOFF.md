@@ -1,32 +1,62 @@
-# HANDOFF — R4 Action Window NAVER Runtime
+# HANDOFF — Action Window Runtime (NAVER / Coupang)
 
-> **Purpose:** a short orientation for a future Claude session picking this workstream up cold.
+> **Purpose:** a short orientation for a future session picking this workstream up cold.
 > **This file grants nothing.** It authorizes no live action, no commit, no push. It is a map, not a gate.
 > Canonical detail lives in the docs linked below; where this file and they disagree, **they win**.
 
-**Updated:** 2026-07-18 · **Worktree:** `BE/worktrees/sellerops-r4-runtime` (dedicated BE writer, owner file
-`.claude-worktree-owner` — never stage it) · **Branch:** `feat/naver-smartstore-v1`
+**Updated: 2026-08-19.** ⚠ **Everything below "Where to read first" is r4-era narrative (2026-07-08 →
+2026-07-25) and is retained as lineage, not as current state.** Read this header first; it supersedes
+any status claim later in the file.
 
-> ⚠ **Branch moved for the NAVER SmartStore v1 phase** (`feat/r4-supervised-channel-runtime` →
-> `feat/naver-smartstore-v1`). The **Git state** block below predates this phase and is stale on
-> sync/ahead-behind/local-commit counts — **re-derive from `git log`**, and follow the phase git
-> cadence in root `CLAUDE.md` "Current phase" (local commits only on explicit instruction; no remote
-> integration until final v1). Historical narrative that names the old branch (e.g. the pre-#263
-> push lessons) is left intact as accurate r4-era history.
+## Current state, in one block
+
+- **Branch / worktree:** none. The r4 phase branch (`feat/naver-smartstore-v1`) and the dedicated
+  worktree (`BE/worktrees/sellerops-r4-runtime`) that this file used to name are **gone** — that work is
+  fully contained in `main`. Develop in `sellerops/repo` or a fresh worktree; **re-derive `HEAD` from
+  `git log`**, never from this file.
+- **What shipped since:** the Action Window is no longer one flag-selected carrier per process. PRs
+  #466–#469 made the **resident helper** (`local-agent.ts --bridge-only`) the seller-facing shape: idle
+  with **no browser**, and it activates a carrier **on demand** when a SellerOps tab asks for one over
+  the already-authenticated socket (`{type:"aw_attach", carrier, channelCode}`).
+  Servable on demand today: `issuance/coupang`, `issuance/naver`.
+  **Design + live proof: [`../resident_helper_on_demand_carrier_v1.md`](../resident_helper_on_demand_carrier_v1.md)** — that
+  document, not this one, is the current architecture of record for the carrier seam.
+- **Reachability per capability:** [`../channel_integration_completeness_audit_v1.md`](../channel_integration_completeness_audit_v1.md)
+  audits the full chain (seller control → FE → bridge → carrier → driver → UI) for every NAVER / Coupang /
+  Cafe24 capability, and separates *past live proof* from *current reachability* — several capabilities
+  are live-proven **and** currently unreachable from the resident helper.
+- **Still unwired, by decision not by omission:** NAVER review import (its boot opens a browser at boot
+  and needs an operator-owned `NAVER_REVIEW_URL`), Coupang review locate (needs an agent-held backend
+  session and the seller already on the 상품평 목록 page), Coupang credential renewal (FE complete, no
+  carrier hosts it), NAVER guided review reply (marketplace WRITE — the stop rule). Each is a
+  **product-owner decision**; the seam they would attach to is `activateResidentCarrier`.
+- **Live evidence:** every run is indexed in [`../evidence/INDEX.md`](../evidence/INDEX.md). The r4
+  dispatch records in this directory are indexed there as a group.
+
+## What in this directory is still current
+
+| File | Status |
+|---|---|
+| `HANDOFF.md` (this header) | **CURRENT** |
+| `r4-*-dispatch-record.md`, `r4-evidence-pack.md`, `r4-gate-record.md` | **HISTORICAL — live evidence.** Accurate about the runs they record; indexed in `../evidence/INDEX.md` |
+| `decisions.md`, `contract-boundary.md`, `agent-first-ui-light-adr.md` | **HISTORICAL — decisions.** Still readable as lineage |
+| `current-state.md`, `checklist.md`, `r4-preparation.md`, `naver-smartstore-v1-plan.md` | **HISTORICAL — superseded.** `current-state.md` already declares its own body stale in its first bullet. Do not cite for current state |
+| everything else here | **HISTORICAL** unless it says otherwise |
+
+**`docs/multi-channel-connector-roadmap.md` §4.1** — the capability table — outranks this file (conflict
+priority #5) and is *not* mirrored here. Runtime evidence may show it stale; **report that** (that is
+exactly how the Coupang `ORDER_SUMMARY` correction of 2026-08-19 happened), do not edit it silently.
 
 **Discovery:** the root `CLAUDE.md` workstream routing table points here, and the `r4-runtime-handoff`
 skill (`.claude/skills/r4-runtime-handoff/SKILL.md`) routes here. **Both carry paths only** — they
 deliberately restate no status, so a fact landing in this workstream should never require editing them.
-**This directory is status-of-record for Runtime detail** and wins over any status claim in a router or
-in `docs/sellerops_current_state.md`, whose Action Window entries are a scoped summary, not a substitute.
 
-**`docs/multi-channel-connector-roadmap.md` §4.1** — the capability table — outranks this file (conflict
-priority #5) and is *not* mirrored here. Runtime evidence may show it stale; **report that, do not edit
-it from this branch.**
+---
 
-⚠ **Still stale, by decision, not oversight:** `docs/slices/action-window-v1.md` (DRAFT) still says the
-overlay / download-detection seams are 미구현. That is a product-owner decision, deliberately not taken
-here. Report it; do not silently edit it.
+## ⬇ Everything below is r4-era lineage (2026-07), retained unchanged
+
+Read it for *why* things are shaped the way they are, never for *what is true now*. It names a branch,
+a worktree, and a "current slice" that no longer exist.
 
 ## Where to read first
 

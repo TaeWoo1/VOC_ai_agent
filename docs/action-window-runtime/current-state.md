@@ -1,5 +1,20 @@
 # Current State — Action Window Runtime
 
+> **⚠ HISTORICAL — SUPERSEDED, do not cite for current state (banner added 2026-08-19).**
+> This file's own first bullet already said only two lines of it were current, back in 2026-07-18. It is
+> now fully superseded: the branch (`feat/naver-smartstore-v1`), the worktree
+> (`BE/worktrees/sellerops-r4-runtime`) and the "current slice" it names **no longer exist**, and the
+> carrier architecture it describes (one flag-selected carrier per process) was replaced by the
+> on-demand resident helper in PRs #466–#469.
+>
+> - **Current runtime state:** [`HANDOFF.md`](HANDOFF.md) (header block).
+> - **Current carrier architecture:** [`../resident_helper_on_demand_carrier_v1.md`](../resident_helper_on_demand_carrier_v1.md).
+> - **Per-capability reachability:** [`../channel_integration_completeness_audit_v1.md`](../channel_integration_completeness_audit_v1.md).
+> - **Live evidence:** [`../evidence/INDEX.md`](../evidence/INDEX.md).
+>
+> Retained unchanged below for lineage. Re-derive `HEAD`, branch and test counts from `git log`.
+
+
 <!-- Update this file when starting or changing the active slice. Fixed top section below. -->
 
 - **updated at:** 2026-07-18 — ⚠ **only this line and the `2026-07-18 CONSOLIDATED` bullet at the end of
