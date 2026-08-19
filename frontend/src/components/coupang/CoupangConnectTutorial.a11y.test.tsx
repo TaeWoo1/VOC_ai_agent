@@ -2,8 +2,8 @@
 // Automated axe-core a11y scans of the Coupang first-connection tutorial across its rendered phases, plus
 // the agent-driven WING issuance walkthrough states. The tutorial is CONTROLLED and offline (no api); the
 // walkthrough renders from a fixture run view with the bridge (useBridge) mocked inert.
-import { describe, it, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { render, screen, within } from "@testing-library/react";
 import { expectNoAxeViolations } from "../../test/axe";
 import type { CoupangState } from "../../lib/coupangTutorial";
 import type { ConnectionStatusView, CredentialTemplateView } from "../../lib/types";
@@ -69,6 +69,60 @@ describe("CoupangConnectTutorial — axe a11y scans", () => {
   it("connect stage (prereqs + credential form) has no violations", async () => {
     const { container } = renderPhase({ phase: "connect", reasonCode: null });
     await expectNoAxeViolations(container);
+  });
+
+  it("submitting (the waiting screen) has no violations, reads as IN PROGRESS, and carries the current stage", async () => {
+    const { container, rerender } = renderPhase({ phase: "submitting", reasonCode: null }, { submitStage: "storing" });
+    const status = screen.getByTestId("coupang-verifying");
+    expect(status).toHaveAttribute("role", "status");
+    expect(status).toHaveTextContent("연결 정보를 저장하고 있어요");
+    expect(within(status).getByTestId("spinner")).toBeInTheDocument();
+    // Nothing on the waiting screen reads as a failure, and the form is gone (no second submit).
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(status).not.toHaveTextContent(/실패|오류|못했/);
+    expect(screen.queryByRole("button", { name: "연결 정보 저장" })).toBeNull();
+    await expectNoAxeViolations(container);
+    rerender(
+      <CoupangConnectTutorial
+        state={{ phase: "submitting", reasonCode: null }}
+        template={TEMPLATE}
+        busy
+        submitStage="verifying"
+        advertisedEgressIps={[]}
+        connectionStatus={null}
+        syncProgress={null}
+        onSubmitCredentials={() => {}}
+        onRetest={() => {}}
+        onReenter={() => {}}
+        onRunSync={() => {}}
+        onRecheckSync={() => {}}
+        onGoToOrders={() => {}}
+        onViewChannelRuns={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("coupang-verifying")).toHaveTextContent("쿠팡에 연결을 확인하고 있어요");
+    expect(screen.getByTestId("coupang-verifying")).toHaveTextContent("✓ 연결 정보 저장");
+  });
+
+  it("the three async faces are visually distinct: in-progress (brand), error (bad/alert), success (good/status)", () => {
+    const a = renderPhase({ phase: "syncing", reasonCode: null });
+    const syncing = a.getByTestId("coupang-syncing");
+    expect(syncing.className).toContain("border-brand");
+    expect(syncing).toHaveAttribute("role", "status");
+    expect(within(syncing).getByTestId("spinner")).toBeInTheDocument();
+    expect(syncing).toHaveTextContent("첫 주문을 불러오고 있어요");
+    a.unmount();
+    const b = renderPhase({ phase: "sync_error", reasonCode: null });
+    const err = b.getByTestId("coupang-sync-error");
+    expect(err.className).toContain("border-bad");
+    expect(err).toHaveAttribute("role", "alert");
+    expect(within(err).queryByTestId("spinner")).toBeNull();
+    b.unmount();
+    const c = renderPhase({ phase: "connect_error", reasonCode: "INVALID_CREDENTIAL" });
+    expect(within(c.getByTestId("coupang-connect-error")).getByRole("alert").className).toContain("border-bad");
+    c.unmount();
+    const d = renderPhase({ phase: "connected", reasonCode: null });
+    expect(d.container.querySelector('[class*="bg-good"]')).not.toBeNull();
   });
 
   it("connect_error (IP-mismatch recovery + IP panel) has no violations", async () => {

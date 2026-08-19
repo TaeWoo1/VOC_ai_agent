@@ -114,7 +114,7 @@ export function CoupangRenewalFlow({ template, onReplace, onDone, walkthroughSea
       </section>
 
       {errorCopy && (
-        <div className="rounded-xl border border-danger/40 bg-danger/5 p-4" role="alert" data-testid="coupang-renewal-error">
+        <div className="rounded-xl border border-bad/40 bg-bad/5 p-4" role="alert" data-testid="coupang-renewal-error">
           <p className="font-semibold text-ink">{errorCopy.title}</p>
           <p className="mt-1 text-sm text-muted break-keep">{errorCopy.body}</p>
         </div>

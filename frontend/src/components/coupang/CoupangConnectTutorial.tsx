@@ -3,6 +3,7 @@ import { relativeTime } from "../../lib/format";
 import { HealthBadge } from "../HealthBadge";
 import { SecureCredentialForm } from "../guidedConnection/SecureCredentialForm";
 import { AdvertisedCallIpPanel } from "../guidedConnection/AdvertisedCallIpPanel";
+import { Spinner } from "../ui/Spinner";
 import { CoupangExpiryPanel } from "./CoupangExpiryPanel";
 import {
   COUPANG_TUTORIAL_COPY as C,
@@ -25,6 +26,9 @@ export interface CoupangConnectTutorialProps {
   state: CoupangState;
   template: CredentialTemplateView | null;
   busy: boolean;
+  /** Which part of a credential submit is in flight (`submitting` phase): saving the key, or verifying it
+   *  against Coupang. null outside a submit. Drives the waiting screen's current-stage line. */
+  submitStage?: "storing" | "verifying" | null;
   advertisedEgressIps: readonly string[];
   /** Real connection health, read after completion (§ step 6). null → the summary block is omitted. */
   connectionStatus: ConnectionStatusView | null;
@@ -57,6 +61,7 @@ export function CoupangConnectTutorial({
   state,
   template,
   busy,
+  submitStage = null,
   advertisedEgressIps,
   connectionStatus,
   syncProgress,
@@ -78,14 +83,16 @@ export function CoupangConnectTutorial({
       <StepIndicator steps={steps} />
 
       <div className="mt-6">
-        {(phase === "connect" || phase === "submitting") && (
+        {phase === "connect" && (
           <ConnectStage
             template={template}
             advertisedEgressIps={advertisedEgressIps}
-            busy={busy || phase === "submitting"}
+            busy={busy}
             onSubmitCredentials={onSubmitCredentials}
           />
         )}
+
+        {phase === "submitting" && <Verifying stage={submitStage} />}
 
         {phase === "connect_error" && (
           <ConnectError
@@ -219,6 +226,46 @@ function ConnectStage({
   );
 }
 
+/**
+ * submitting: the waiting screen between "연결 정보 저장" and the test result. Unmistakably IN PROGRESS — a
+ * spinner, a title that says so, and the current stage — and visually unlike both the error box (bad/alert)
+ * and the verified panel (brand). The stages are the honest ones: saving the key, then ONE verification
+ * call in which the backend checks authentication and then order access; those two probes are not split into
+ * pretend progress here because the client cannot see between them. No "실패/오류" wording can appear while
+ * this is on screen.
+ */
+function Verifying({ stage }: { stage: "storing" | "verifying" | null }) {
+  const storing = stage === "storing";
+  return (
+    <div
+      className="space-y-3 rounded-xl border border-brand/40 bg-brand/5 p-5"
+      role="status"
+      aria-live="polite"
+      data-testid="coupang-verifying"
+    >
+      <div className="flex items-center gap-3">
+        <Spinner />
+        <p className="font-semibold text-ink">{storing ? C.verifyingStoringTitle : C.verifyingTitle}</p>
+      </div>
+      <p className="text-sm text-muted break-keep">{C.verifyingBody}</p>
+      <ol className="space-y-1 text-sm" aria-label="연결 확인 단계">
+        <li className={storing ? "font-medium text-ink" : "text-muted"}>
+          {storing ? "▸ " : "✓ "}
+          {C.verifyingStageStore}
+        </li>
+        <li className={storing ? "text-muted" : "font-medium text-ink"}>
+          {storing ? "· " : "▸ "}
+          {C.verifyingStageAuth}
+        </li>
+        <li className={storing ? "text-muted" : "font-medium text-ink"}>
+          {storing ? "· " : "▸ "}
+          {C.verifyingStageOrders}
+        </li>
+      </ol>
+    </div>
+  );
+}
+
 /** connect_error: reason-aware recovery. Re-verify the stored credential, and (when the fix is the key
  *  itself) re-open the form. Never exposes the provider body or the internal test fallback. */
 function ConnectError({
@@ -239,7 +286,7 @@ function ConnectError({
   const copy = recoveryCopy(state.reasonCode);
   return (
     <div className="space-y-4" data-testid="coupang-connect-error">
-      <div className="rounded-xl border border-danger/40 bg-danger/5 p-4" role="alert">
+      <div className="rounded-xl border border-bad/40 bg-bad/5 p-4" role="alert">
         <p className="font-semibold text-ink">{copy.title}</p>
         <p className="mt-1 text-sm text-muted break-keep">{copy.body}</p>
       </div>
@@ -294,15 +341,24 @@ function FirstSyncProgress({
 }) {
   if (!progress) {
     return (
-      <p className="text-muted" role="status" aria-live="polite" data-testid="coupang-syncing">
-        {C.syncBody}
-      </p>
+      <div
+        className="flex items-center gap-3 rounded-xl border border-brand/40 bg-brand/5 p-5"
+        role="status"
+        aria-live="polite"
+        data-testid="coupang-syncing"
+      >
+        <Spinner />
+        <div>
+          <p className="font-semibold text-ink">{C.syncTitle}</p>
+          <p className="mt-1 text-sm text-muted break-keep">{C.syncBody}</p>
+        </div>
+      </div>
     );
   }
   if (progress.stalled) {
     return (
-      <div className="space-y-2" data-testid="coupang-syncing">
-        <p className="text-sm font-medium text-ink">{C.syncStalledTitle}</p>
+      <div className="space-y-2 rounded-xl border border-brand/40 bg-brand/5 p-5" data-testid="coupang-syncing">
+        <p className="font-semibold text-ink">{C.syncStalledTitle}</p>
         <p className="text-muted break-keep">{C.syncStalledBody}</p>
         <p className="text-sm text-muted" aria-hidden="true">
           {C.syncElapsedLabel}: {formatElapsed(progress.elapsedMs)}
@@ -315,14 +371,20 @@ function FirstSyncProgress({
   }
   const slow = progress.elapsedMs >= SYNC_SLOW_AFTER_MS;
   return (
-    <div className="space-y-2" role="status" aria-live="polite" data-testid="coupang-syncing">
-      <p className="text-muted break-keep">{C.syncBody}</p>
-      <div className="flex items-center gap-2" aria-hidden="true">
-        <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-current text-muted" />
-        <span className="text-sm text-muted">
-          {C.syncElapsedLabel}: {formatElapsed(progress.elapsedMs)}
-        </span>
+    <div
+      className="space-y-2 rounded-xl border border-brand/40 bg-brand/5 p-5"
+      role="status"
+      aria-live="polite"
+      data-testid="coupang-syncing"
+    >
+      <div className="flex items-center gap-3">
+        <Spinner />
+        <p className="font-semibold text-ink">{C.syncTitle}</p>
       </div>
+      <p className="text-sm text-muted break-keep">{C.syncBody}</p>
+      <p className="text-sm text-muted" aria-hidden="true">
+        {C.syncElapsedLabel}: {formatElapsed(progress.elapsedMs)}
+      </p>
       <p className="text-sm text-muted break-keep">{C.syncReassurance}</p>
       {slow && <p className="rounded-lg bg-canvas px-3 py-2 text-sm text-muted break-keep">{C.syncSlowNote}</p>}
     </div>
@@ -332,7 +394,7 @@ function FirstSyncProgress({
 /** Step 5 terminal FAILED: a safe reason + an explicit retry (a single new run, guarded by the page). */
 function SyncError({ busy, onRetry }: { busy: boolean; onRetry: () => void }) {
   return (
-    <div className="space-y-3 rounded-xl border border-danger/40 bg-danger/5 p-4" role="alert" data-testid="coupang-sync-error">
+    <div className="space-y-3 rounded-xl border border-bad/40 bg-bad/5 p-4" role="alert" data-testid="coupang-sync-error">
       <p className="font-semibold text-ink">{C.syncErrorTitle}</p>
       <p className="text-sm text-muted break-keep">{C.syncErrorBody}</p>
       <button type="button" className="btn-primary" onClick={onRetry} disabled={busy}>
