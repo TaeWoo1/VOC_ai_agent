@@ -53,7 +53,7 @@ describe("GuidedConnectionWizard — status panel", () => {
     // The order connection carries no agent/login step; the fork is reached directly.
     renderWizard(stateAt("application_path_choice"));
     expect(screen.queryByRole("button", { name: "로그인했어요" })).toBeNull();
-    expect(screen.queryByText(/로컬 에이전트/)).toBeNull();
+    expect(screen.queryByText(/로컬 에이전트|SellerOps 도우미/)).toBeNull();
   });
 });
 
@@ -192,7 +192,7 @@ describe("GuidedConnectionWizard — completed screen (order done, review import
   it("review-setup card: NOT paired → SETUP_REQUIRED copy (local agent needed) + CTA dispatches the handoff", async () => {
     const { props } = renderWizard(stateAt("completed"), { reviewImportReady: false });
     const card = screen.getByRole("note", { name: "리뷰 가져오기 설정" });
-    expect(card).toHaveTextContent(/로컬 에이전트/); // the review step is the only place the agent appears
+    expect(card).toHaveTextContent(/SellerOps 도우미/); // the review step is the only place the helper appears
     await userEvent.click(screen.getByRole("button", { name: REVIEW_SETUP_COPY.cta }));
     expect(props.dispatch).toHaveBeenCalledWith({ type: "CONTINUE_TO_REVIEW_EXPORT" });
   });

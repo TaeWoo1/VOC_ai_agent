@@ -405,7 +405,7 @@ export const CONNECTION_VIEW: Record<Exclude<SourceConnection, "connected">, Con
  *  (agent still off / unpaired) — surfaced via the note channel, never a raw
  *  transport reason. */
 export const CONNECTION_RETRY_FAILED_NOTE =
-  "아직 연결할 수 없어요. 로컬 에이전트가 실행 중인지 확인해 주세요.";
+  "아직 연결할 수 없어요. 내 PC의 SellerOps 도우미가 실행 중인지 확인해 주세요.";
 
 // Safe FE copy when a source rejects a command — never a raw reason code.
 export const COMMAND_REJECTED_COPY: Record<CommandRejectionReason, string> = {

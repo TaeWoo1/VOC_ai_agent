@@ -5,12 +5,13 @@ import { AppTopBar } from "./AppTopBar";
 import { MobileBottomNav } from "./MobileBottomNav";
 import { MoreDrawer } from "./MoreDrawer";
 import { DemoRibbon } from "../DemoRibbon";
-import { BridgeStatus } from "../bridge/BridgeStatus";
+import { AgentDock } from "../bridge/AgentDock";
 import { ProjectionView } from "../bridge/ProjectionView";
 
 // Opt-in guided-connection infrastructure surfaces. Absent from the default app; they mount only
-// when explicitly enabled and do not participate in navigation. Carried over unchanged from the
-// previous shell — these are runtime tools, not product surface.
+// when explicitly enabled and do not participate in navigation. Carried over from the previous
+// shell — these are runtime tools, not product surface. The dock itself is quiet unless the
+// SellerOps 도우미 is connected, or was and broke (`lib/bridge/agentDock.ts`).
 const AGENT_BRIDGE_ENABLED = import.meta.env.VITE_ENABLE_AGENT_BRIDGE === "true";
 const AGENT_PROJECTION_ENABLED = import.meta.env.VITE_ENABLE_AGENT_PROJECTION === "true";
 
@@ -65,7 +66,7 @@ export function AppShellV2() {
 
       {AGENT_BRIDGE_ENABLED && (
         <div className="fixed bottom-24 right-4 z-30 w-80 max-w-[calc(100vw-2rem)] md:bottom-4">
-          <BridgeStatus />
+          <AgentDock />
         </div>
       )}
     </div>

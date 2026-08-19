@@ -565,7 +565,7 @@ export function ConnectNaver() {
     <div className="space-y-6">
       <PageHeader
         title="NAVER 스마트스토어 연결"
-        description="주문은 공식 API로 연결합니다. 로컬 에이전트 없이 진행할 수 있고, 리뷰 가져오기는 연결 후 별도로 설정합니다."
+        description="주문은 공식 API로 연결합니다. SellerOps 도우미 없이 진행할 수 있고, 리뷰 가져오기는 연결 후 별도로 설정합니다."
       />
 
       {walkthrough && <WalkthroughBanner context={wtContext} channelCode="NAVER" channelCalls={naverCalls} />}
