@@ -23,9 +23,15 @@
  *    the session's first call (`LazyCoupangIssuanceDriver`) — attaching opens no window;
  *  - **releasing → idle** — the walk is over and nobody needs the window: see {@link maybeRelease}.
  *
- * One carrier at a time (the slot is still one slot): a second, different request while one is active is
- * ignored — the asking tab times out into its own fallback, exactly as against a fixed-carrier agent of the
- * other kind. A request for the SAME carrier re-announces the live run (page refresh → resync).
+ * One carrier at a time (the slot is still one slot). A request for the SAME carrier re-announces the live run
+ * (page refresh → resync). A DIFFERENT request while one is active is answered one of two ways:
+ *
+ *  - **handed over** when NO tab is attached to the active carrier — nobody is on that screen, so the slot
+ *    moves with the seller. The old carrier is released (window closed) before the new one is built, so two
+ *    carriers never hold a browser at once;
+ *  - **refused** while a tab IS attached. A tab on the screen is the only evidence a human is mid-walk, and
+ *    it is the evidence this uses. The asking tab times out into its own fallback, exactly as against a
+ *    fixed-carrier agent of the other kind. That is the one-slot guarantee and it does not move.
  *
  * ## When it goes idle again — and when it deliberately does not
  *
@@ -36,6 +42,11 @@
  * window has been sitting with no tab for the long grace (`windowGraceMs`, 15 min). A walk abandoned mid-way
  * with the SellerOps tab gone is released after the same grace. Nothing here clicks, navigates, or reads a
  * value; release = `dispose()` on the active carrier, which closes a window the agent itself opened.
+ *
+ * **…and what the grace is NOT.** It keeps a finished walk's window up in case the seller comes back to it. It
+ * was never meant to make the helper unavailable to a DIFFERENT screen meanwhile — see the handover in
+ * `onClientAttachRequest`, which is the same two readings this rule waits out, applied when somebody else
+ * actually wants the slot.
  */
 import type { WebSocket } from "ws";
 import { log } from "../log";
@@ -111,16 +122,85 @@ export class OnDemandCarrierHost implements AwCarrierEndpoint {
     if (this.closed) return;
     if (this.active) {
       const same = this.active.request.carrier === request.carrier && this.active.request.channelCode === request.channelCode;
-      if (!same) {
-        // One slot. The other world's tab gets no announcement and takes its own fallback.
-        log("aw_on_demand_attach_refused", { reason: "OTHER_CARRIER_ACTIVE", carrier: request.carrier, channelCode: request.channelCode });
+      if (same) {
+        this.markAttached(ws);
+        // Re-announce to this socket (a refresh, or a second tab of the same walk). Idempotent on the endpoint.
+        this.active.carrier.endpoint.onClientConnected(ws);
         return;
       }
-      this.markAttached(ws);
-      // Re-announce to this socket (a refresh, or a second tab of the same walk). Idempotent on the endpoint.
-      this.active.carrier.endpoint.onClientConnected(ws);
+      /**
+       * **A DIFFERENT carrier, and the active one is finished and unwatched — hand the slot over.**
+       *
+       * The slot is still ONE slot; what changes is who has to wait. Before this, a different request
+       * was refused outright, and the seller's screen said "SellerOps 도우미가 지금 다른 작업을 하고
+       * 있어…" for as long as the window grace lasted — **fifteen minutes** on the product default.
+       * Live on 2026-08-20: a seller who started the Coupang renewal walk, left it, and then pressed
+       * `[쿠팡에서 보기]` on 리뷰 was told the helper was busy, by a walk they had already abandoned.
+       *
+       * The reason it lasted that long is the grace, and the grace is right: the guided walks end with
+       * WING showing the secret key ONCE, so a settled walk whose window is still open is deliberately
+       * NOT released — the seller is copying that key. But "keep the window up in case they come back"
+       * and "refuse everyone else while it is up" are different promises, and only the first one was
+       * ever intended. The import carrier hid this for a year of screens because it opens no window at
+       * all, so it always released instantly on `SETTLED_SURFACE_CLOSED`.
+       *
+       * **The precondition is NO ATTACHED TAB, and that is the whole of it.**
+       *
+       * Not "and the run is settled" — that was the first cut of this fix and a live chain on
+       * 2026-08-20 showed it declining exactly where it was needed: the seller had started the
+       * renewal walk (so the run was mid-flight, not settled) and then left it. An in-flight run with
+       * no tab on it is not being driven by anyone — the frontend is the only thing that sends
+       * commands — it is parked, waiting for a tab that has gone. `maybeRelease` already agrees and
+       * releases precisely this case, as `ABANDONED_GRACE_ELAPSED`; the handover just stops making
+       * somebody else wait fifteen minutes for it.
+       *
+       * **The one-slot guarantee does not move: a tab still attached always refuses.** A tab on the
+       * screen is the only evidence that a human is in the middle of that walk, and it is the
+       * evidence this checks.
+       *
+       * **And the key-copying case is untouched**, which is worth stating because it is what the
+       * grace exists for. A seller finishing the Coupang issuance walk goes back to
+       * `/connect/coupang` to paste the secret — that screen asks for the SAME carrier, so it takes
+       * the `same` branch above and re-announces. It never reaches here. Reaching here means they
+       * asked for a DIFFERENT walk, which is a clearer statement of intent than the grace's guess.
+       */
+      if (this.canHandOver()) {
+        log("aw_on_demand_carrier_handover", {
+          from: this.active.request.carrier,
+          fromChannel: this.active.request.channelCode,
+          to: request.carrier,
+          toChannel: request.channelCode,
+        });
+        // Sequenced, not raced: the previous carrier's window is closed and its endpoint torn down
+        // BEFORE the new one is built, so two carriers never hold a browser at the same moment.
+        void this.release("HANDOVER").then(() => {
+          if (this.closed || this.active) return;
+          this.activateFor(ws, request);
+        });
+        return;
+      }
+      // One slot, and this one is busy or being watched. The other world's tab gets no announcement
+      // and takes its own fallback.
+      log("aw_on_demand_attach_refused", { reason: "OTHER_CARRIER_ACTIVE", carrier: request.carrier, channelCode: request.channelCode });
       return;
     }
+    this.activateFor(ws, request);
+  }
+
+  /**
+   * May the active carrier give up the slot to a different request right now?
+   *
+   * One reading: is any tab still attached to it. A carrier already being torn down is not
+   * handed over either — the release in flight will land the host in idle, and the asking tab
+   * retries or falls back.
+   */
+  private canHandOver(): boolean {
+    if (!this.active || this.releasing) return false;
+    return this.attached.size === 0;
+  }
+
+  /** Build, announce and start polling a carrier for `request`. Refuses (logging why) when unservable. */
+  private activateFor(ws: WebSocket, request: AwAttachRequest): void {
     let carrier: ActivatedCarrier | null = null;
     try {
       carrier = this.deps.activate(request);

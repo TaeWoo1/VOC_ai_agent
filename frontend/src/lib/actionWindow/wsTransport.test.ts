@@ -59,7 +59,16 @@ interface Harness {
   ticketCalls: number;
 }
 
-function harness(opts: { withToken?: boolean; ticketStatus?: number } = {}): Harness {
+function harness(
+  opts: {
+    withToken?: boolean;
+    ticketStatus?: number;
+    /** Ask the agent for a carrier by name (on-demand hosting) — what every product session now does. */
+    attachChannelCode?: string;
+    expectedCarrier?: string;
+    sessionTimeoutMs?: number;
+  } = {},
+): Harness {
   const sockets: FakeWs[] = [];
   const h: Harness = {
     sockets,
@@ -68,7 +77,7 @@ function harness(opts: { withToken?: boolean; ticketStatus?: number } = {}): Har
       httpBase: "http://127.0.0.1:47615",
       wsBase: "ws://127.0.0.1:47615",
       storage: makeStorage(opts.withToken ?? true),
-      sessionTimeoutMs: 200,
+      sessionTimeoutMs: opts.sessionTimeoutMs ?? 200,
       retryDelayMs: 0,
       maxReconnectAttempts: 3,
       fetchFn: (async () => {
@@ -80,6 +89,8 @@ function harness(opts: { withToken?: boolean; ticketStatus?: number } = {}): Har
           json: async () => ({ ticket: `ticket-${h.ticketCalls}`, expiresInMs: 10_000 }),
         } as Response;
       }) as typeof fetch,
+      ...(opts.attachChannelCode ? { attachChannelCode: opts.attachChannelCode } : {}),
+      ...(opts.expectedCarrier ? { expectedCarrier: opts.expectedCarrier as never } : {}),
       wsFactory: () => {
         const ws = new FakeWs();
         sockets.push(ws);
@@ -316,6 +327,45 @@ describe("actionWindow/wsTransport — carrier discrimination", () => {
     const { session } = await announce({ carrier: "something-new" });
 
     expect(session).toEqual({ ok: false, reason: "carrier-mismatch" });
+  });
+
+  /**
+   * **The handover race.** An on-demand host announces whatever it is currently hosting to every socket
+   * the moment it connects — before that socket has said which carrier it wants. A client that DID ask
+   * must not take that first frame as the answer.
+   *
+   * Live on 2026-08-20: a seller pressed `[쿠팡에서 보기]` while an abandoned renewal walk still held the
+   * slot, met the renewal announcement, and read "SellerOps 도우미가 지금 다른 작업을 하고 있어…" — while
+   * the host handed the slot over ~170 ms later and the correct announcement was already on its way.
+   * Pressing again worked, which is the shape of a race and not of a refusal.
+   */
+  it("waits out a handover when it ASKED for a carrier — the later, correct announcement wins", async () => {
+    const h = harness({ attachChannelCode: "coupang", expectedCarrier: "locate" });
+    const pending = connectAwBridgeSession(h.deps);
+    const ws = await until(() => h.sockets[0]);
+
+    // What the host was still hosting when this socket connected.
+    ws.receive({ ...ANNOUNCEMENT, carrier: "renewal" });
+    // NOT settled: no client is built for the wrong carrier, but the decision is not made yet either.
+    expect(ws.closedByClient).toBe(false);
+
+    ws.receive({ ...ANNOUNCEMENT, carrier: "locate", runId: "run_locate_1" });
+
+    const result = await pending;
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    expect(result.session.runId).toBe("run_locate_1");
+  });
+
+  it("…and still refuses with carrier-mismatch if the right announcement never comes", async () => {
+    const h = harness({ attachChannelCode: "coupang", expectedCarrier: "locate", sessionTimeoutMs: 20 });
+    const pending = connectAwBridgeSession(h.deps);
+    const ws = await until(() => h.sockets[0]);
+    ws.receive({ ...ANNOUNCEMENT, carrier: "renewal" });
+
+    // The diagnosis survives the wait — a genuinely fixed-carrier agent of the wrong kind is still
+    // named, just at the timeout instead of on the first frame.
+    expect(await pending).toEqual({ ok: false, reason: "carrier-mismatch", announcedCarrier: "renewal" });
   });
 
   it("REFUSES a carrier switch on RECONNECT — an agent that came back hosting replies is not spliced", async () => {
