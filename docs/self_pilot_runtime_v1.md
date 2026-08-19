@@ -125,6 +125,15 @@ Local agent: `tools/self-pilot/.run/self-pilot.env` from the example (self-pilot
 도우미 연결하기 with the code on that terminal) → later `start -d`; `switch coupang-locate` for
 `[쿠팡에서 보기]`, `switch naver-import` back; `status` / `stop` / `logs`.
 
+Resident helper without a carrier (2026-08-19): `cd collector && npx tsx src/cli/local-agent.ts --bridge-only`
+keeps only the pairing/health bridge resident (loopback `47615`, the shared `collector/.bridge/pairings.json`
+— an existing pairing is reused, so the frontend chip returns on its own after a restart). No connections
+file, no `decideRun`, no browser, no marketplace env, no approval flag; it hosts no carrier, so a run still
+needs the carrier boots above. Refuses `--connections` or any carrier flag alongside (exit 7); a bound port
+is a skipped listen (exit 7), never a second silent helper. Gate: `collector/src/cli/bridge-only-gate.ts`;
+boot: `runBridgeOnlyBoot` in `local-agent.ts`. Measured 2026-08-19: idle RSS ≈ 37–110 MB (node + tsx
+loader), 0.0 % CPU, no Chromium process.
+
 What still needs the seller's hands (by contract, not by omission): logging into NAVER / WING in the agent's
 Chrome; every export click / page turn; the in-browser grant press for a Coupang walk; the Coupang review
 **acquisition** walk (`acquire-coupang-reviews.ts`) which remains a bootstrap+preflight run — no schedule
