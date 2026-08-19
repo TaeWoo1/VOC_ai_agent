@@ -60,6 +60,7 @@ export class InquiryAgentRuntime {
   private readonly graph: ReturnType<ReturnType<typeof buildInquiryGraph>["compile"]>;
   private readonly registry: ToolRegistry;
   private readonly drafter: DraftModelProvider;
+  private readonly deterministicDrafter: RuleBasedDraftProvider;
   private readonly client: SpringClient;
   readonly runStore: RunStore;
   /** Threads this PROCESS has parked at a checkpoint (empty after a restart). */
@@ -69,6 +70,9 @@ export class InquiryAgentRuntime {
     this.client = deps.client;
     this.registry = buildInquiryToolRegistry(deps.client);
     this.drafter = deps.draftProvider ?? new RuleBasedDraftProvider();
+    // The restart-safe reconstruction drafter. Always the rule one, never `deps.draftProvider` — see
+    // the note in `resume()` for why a model must not re-derive an already-approved draft.
+    this.deterministicDrafter = new RuleBasedDraftProvider();
     const graph = buildInquiryGraph({ registry: this.registry, draftProvider: this.drafter });
     this.graph = graph.compile({ checkpointer: deps.checkpointer ?? createCheckpointer() });
     this.runStore = deps.runStore ?? new InMemoryRunStore();
@@ -128,10 +132,26 @@ export class InquiryAgentRuntime {
     }
 
     const parsed = parseDecision(decision);
-    // Re-fetch detail from the backend (system of record — not replicated in the store)
-    // and regenerate the draft deterministically. Raw content never came from the store.
+    // Re-fetch detail from the backend (system of record — not replicated in the store). Raw content
+    // never came from the store; the durable snapshot holds ids, a coarse category and the trail.
     const detail = await this.registry.invoke<InquiryDetail>(TOOL.GET_DETAIL, { workItemId: snap.workItemId });
-    const candidate = this.drafter.draft({
+    /**
+     * **The reconstruction is DETERMINISTIC, and that is now a deliberate choice rather than a
+     * property of the only provider that existed.**
+     *
+     * A resume happens after a restart, against a snapshot that holds no draft text (`RunSnapshot`'s
+     * contract: no title/body/comments/candidate, ever). So whatever is recorded here has to be
+     * re-derived. With a rule drafter that was free — same input, same output. With a MODEL behind the
+     * seam it is not: re-asking would record a draft the human never saw, under an approval they gave
+     * to a different one. That is a silent integrity failure, not a cosmetic one.
+     *
+     * So the resume path uses the RULE drafter, always, and the human's own text wins over it. The
+     * frontend sends the text it displayed on every approve (not only on an edit), so in practice this
+     * value is overridden and exists to keep a client that sends nothing from recording an empty
+     * reply. The LLM's place is the GENERATION node — the draft a human reads and approves — which is
+     * exactly where a non-deterministic provider belongs.
+     */
+    const candidate = this.deterministicDrafter.draftNow({
       title: detail.title,
       details: detail.details,
       status: detail.status,

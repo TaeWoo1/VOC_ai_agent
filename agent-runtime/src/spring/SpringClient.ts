@@ -13,6 +13,7 @@
  * scope and is done by the caller.
  */
 import type {
+  AgentDraftView,
   ConfirmPublishRequest,
   InquiryDetail,
   InquiryQueueResponse,
@@ -53,6 +54,19 @@ export interface SpringClient {
   proposeInquiry(workItemId: string): Promise<ProposalResult>;
   saveDraft(workItemId: string, request: ReplyDraftRequest): Promise<ReplyDraftView>;
   confirmPublish(workItemId: string, request: ConfirmPublishRequest): Promise<PublishStatusView>;
+  /**
+   * Ask the backend's model seam for a starter reply draft.
+   *
+   * **OPTIONAL on purpose.** The graph's drafting node must work against a client that does not have
+   * it — every test fake, and any deployment whose backend predates the endpoint — and the honest
+   * behaviour there is the same one an org outside the allow-list gets: the deterministic rule draft.
+   * Making it required would have turned "this backend has no draft endpoint" into a crash instead of
+   * a fallback.
+   *
+   * The runtime holds NO vendor key; this call carries the operator's own bearer, and the backend
+   * derives the org from it. That is what keeps the backend the only LLM egress in the repository.
+   */
+  generateInquiryDraft?(request: { title: string; details: string | null }): Promise<AgentDraftView>;
 }
 
 /**
@@ -142,6 +156,16 @@ export class HttpSpringClient implements SpringClient, ReviewSpringClient, Issue
       `/api/inquiries/${encodeURIComponent(workItemId)}/confirm-publish`,
       request,
     );
+  }
+
+  /**
+   * The model seam. Takes the two fields that may leave and no id: the runtime already holds the
+   * detail (it fetched it through its own authorized tool call), and passing a work-item id would
+   * make the endpoint a second reader of inquiry content with its own authorization story to get
+   * right. Reads nothing, writes nothing, moves no state.
+   */
+  async generateInquiryDraft(request: { title: string; details: string | null }): Promise<AgentDraftView> {
+    return this.request<AgentDraftView>("POST", `/api/agent/inquiry-draft`, request);
   }
 
   // --- review-reply domain (ReviewSpringClient) -------------------------------------

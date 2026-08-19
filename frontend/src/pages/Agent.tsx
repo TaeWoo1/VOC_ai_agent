@@ -9,6 +9,7 @@ import { productAccounts } from "../lib/productAccounts";
 import { agentRuntime, AgentRuntimeError } from "../lib/agentRuntime/agentClient";
 import type {
   AgentRunView,
+  DraftProvenance,
   InquiryCheckpointView,
   InquiryDraftPreparationView,
   InquiryOutcome,
@@ -29,6 +30,21 @@ import type {
  * 리뷰 / 상품 이슈), which this page links to. It also does not re-implement any domain
  * endpoint: every action goes through the Agent Runtime, which calls the backend.
  */
+/**
+ * What actually wrote this draft, in the seller's words.
+ *
+ * **Read from the run's own provenance, never hardcoded.** These lines used to say "규칙 기반" because
+ * that was the only drafter that existed; with a model behind the seam the same sentence would be a
+ * claim about a specific run that can be false in either direction — calling an AI draft rule-based,
+ * or (worse, and the failure this product has been careful to avoid) calling a template "AI".
+ *
+ * A missing provenance is the rule drafter: that is what the runtime falls back to whenever the model
+ * capability is off or declines, so the honest default is the conservative one.
+ */
+function draftKindLabel(provenance: DraftProvenance | null | undefined): string {
+  return provenance?.providerKind === "LLM" ? "AI 생성" : "규칙 기반";
+}
+
 export function Agent() {
   const { user } = useAuth();
   const caps = useApiData(() => agentRuntime.capabilities(), []);
@@ -160,8 +176,9 @@ export function Agent() {
 
       <Section title="문의 답변 초안">
         <p className="text-sm text-muted">
-          미답변 문의를 하나 골라 규칙 기반 답변 <b>초안</b>을 만들어 보여드립니다. 초안은 검토·편집용이며,
-          SellerOps가 채널로 대신 전송하지 않습니다 <span className="text-good">(외부 발송 없음)</span>.
+          미답변 문의를 하나 골라 답변 <b>초안</b>을 만들어 보여드립니다. 무엇이 초안을 썼는지는 결과 카드의
+          &quot;생성 방식&quot;에 그대로 표시됩니다. 초안은 검토·편집용이며, SellerOps가 채널로 대신 전송하지
+          않습니다 <span className="text-good">(외부 발송 없음)</span>.
         </p>
         <button type="button" className="btn-primary mt-3" disabled={busy} onClick={prepareDraft}>
           {busy ? "생성 중…" : "초안 생성"}
@@ -311,7 +328,7 @@ function InquiryCheckpointCard({
   return (
     <div className="rounded-2xl border border-line bg-surface p-4" role="group" aria-label="문의 답변 승인">
       <p className="text-sm text-muted">
-        규칙 기반 초안입니다. 고객 원문은
+        {draftKindLabel(checkpoint.provenance)} 초안입니다. 고객 원문은
         <Link to="/inquiries" className="mx-1 text-brand underline">
           문의 응답
         </Link>
@@ -334,7 +351,15 @@ function InquiryCheckpointCard({
         <button
           className="btn-primary"
           disabled={busy || checkpoint.replyDraft === undefined}
-          onClick={() => onDecide(threadId, true, reply !== checkpoint.replyDraft ? reply : undefined)}
+          // **Always the text on screen, not only when it was edited.**
+          //
+          // The runtime cannot replay a draft it never stored (`RunSnapshot` holds no draft text, by
+          // contract), so on resume it re-derives one. Sending nothing meant "record whatever the
+          // re-derivation produces" — invisible while the only drafter was a template table, and a
+          // silent integrity failure the moment a model is behind the seam: the recorded reply would
+          // not be the one this person read and approved. Sending it makes the approval bind to the
+          // text, which is what an approval is for.
+          onClick={() => onDecide(threadId, true, reply)}
         >
           승인 (기록)
         </button>
@@ -381,7 +406,7 @@ function InquiryDraftPreparationCard({
   const edited = reply !== (prep.replyDraft ?? "");
   const statusLabel = prep.inquiryStatus === "ANSWERED" ? "답변완료" : "미답변";
   const provenanceText = prep.provenance
-    ? `규칙 기반 · ${prep.provenance.name} ${prep.provenance.version}`
+    ? `${draftKindLabel(prep.provenance)} · ${prep.provenance.name} ${prep.provenance.version}`
     : "규칙 기반";
   const generatedLabel = prep.generatedAt ? new Date(prep.generatedAt).toLocaleString("ko-KR") : "—";
 
@@ -421,7 +446,7 @@ function InquiryDraftPreparationCard({
       </dl>
 
       <p className="mt-3 text-sm text-muted">
-        규칙 기반 초안입니다. 고객 원문은
+        {draftKindLabel(prep.provenance)} 초안입니다. 고객 원문은
         <Link to="/inquiries" className="mx-1 text-brand underline">
           문의 응답
         </Link>

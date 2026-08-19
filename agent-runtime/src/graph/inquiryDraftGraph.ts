@@ -95,9 +95,9 @@ export function buildInquiryDraftGraph(deps: InquiryDraftGraphDeps) {
     return { detail: d, trail: ["detailed"] };
   }
 
-  function generateDraft(state: AgentState): Partial<AgentState> {
+  async function generateDraft(state: AgentState): Promise<Partial<AgentState>> {
     const d = state.detail!;
-    const candidate = drafter.draft({
+    const candidate = await drafter.draft({
       title: d.title,
       details: d.details,
       status: d.status,

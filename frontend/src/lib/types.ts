@@ -1200,6 +1200,11 @@ export interface InquiryDetail {
   inquiryId: string;
   sellerAccountId: string;
   channelId: string;
+  /** Resolved catalog labels for `channelId`, so a reader can name the target channel without a lookup. */
+  channelCode: string | null;
+  channelNameKo: string | null;
+  /** `true` for a Cafe24 비밀글 (fail-closed), `false` for a positively-public post, `null` if unclassified. */
+  isSecret: boolean | null;
   phase: string;
   status: string;
   informStatus: string | null;
@@ -1207,6 +1212,56 @@ export interface InquiryDetail {
   details: string | null;
   receivedAt: string;
   proposal: ProposalView | null;
+  /** The current (latest) reply draft, present once the seller has saved one. */
+  draft: ReplyDraftView | null;
+}
+
+/**
+ * Mirrors com.sellerops.inquiry.reply.dto.ReplyDraftView — the append-only reply draft.
+ *
+ * `contentFingerprint` is what an approval binds to: the seller confirms a specific version's exact
+ * content, and a draft that changed between the read and the confirm is a 409 rather than a reply
+ * nobody reviewed. `version` is the `baseVersion` of the next save.
+ */
+export interface ReplyDraftView {
+  version: number;
+  answerStatus: number;
+  title: string;
+  comments: string;
+  contentFingerprint: string;
+  fingerprintAlgorithm: string;
+  createdAt: string;
+}
+
+/**
+ * Mirrors com.sellerops.inquiry.publish.dto.PublishCapabilityView — the fail-closed capability read.
+ *
+ * On the default configuration `executionEnabled` is false and `replyAdapterChannelCodes` is empty,
+ * and the reply UI shows the manual hand-off. It carries no secret, token, or credential.
+ */
+export interface PublishCapabilityView {
+  executionEnabled: boolean;
+  replyAdapterChannelCodes: string[];
+}
+
+/** Mirrors com.sellerops.inquiry.publish.PublishOutcomeCategory — the coarse outcome the UI renders. */
+export type PublishOutcomeCategory =
+  | "PUBLISHING"
+  | "COMPLETED"
+  | "CHECKING_REQUIRED"
+  | "RETRYABLE"
+  | "PERMANENT";
+
+/** Mirrors com.sellerops.inquiry.publish.dto.PublishStatusView. No token, no provider message text. */
+export interface PublishStatusView {
+  workItemId: string;
+  phase: string;
+  executionStatus: string;
+  category: PublishOutcomeCategory;
+  approvedDraftVersion: number | null;
+  approvedFingerprint: string | null;
+  providerMessageNo: string | null;
+  resultCode: number | null;
 }
 
 // Mirrors com.sellerops.inquiry.proposal.dto.ProposalResult (POST response).
