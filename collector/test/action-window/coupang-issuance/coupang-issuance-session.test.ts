@@ -16,6 +16,7 @@ import {
 import { createLoopbackChannel, type AwClientFrame, type AwServerFrame, type AwServerTransport } from "../../../../contracts/action-window/v2/transport";
 import { CoupangIssuanceEngine, makeCoupangIssuanceClock } from "../../../src/action-window/coupang-issuance/coupang-issuance-engine";
 import { CoupangIssuanceFixtureDriver, type CoupangIssuanceFixtureScript } from "../../../src/action-window/coupang-issuance/coupang-issuance-fixture-driver";
+import type { CredentialHandoffSeamResult } from "../../../src/action-window/coupang-issuance/coupang-issuance-session";
 import { CoupangIssuanceGuidanceSession } from "../../../src/action-window/coupang-issuance/coupang-issuance-session";
 
 const RUN_ID = "run_coupang01";
@@ -54,15 +55,33 @@ function loopback() {
   };
 }
 
-function build(script: CoupangIssuanceFixtureScript = {}, waitOpts?: { surfaceWaitPollMs?: number; surfaceWaitTimeoutMs?: number }) {
+function build(
+  script: CoupangIssuanceFixtureScript = {},
+  waitOpts?: {
+    surfaceWaitPollMs?: number;
+    surfaceWaitTimeoutMs?: number;
+    /**
+     * The handoff seam. Present by DEFAULT and storing, because the walk no longer completes on the seller's
+     * return from WING — it rests on their consent, and the credential reaching the vault is what finishes it.
+     * A test that is about the refusal path passes its own (or `null` to have none at all).
+     */
+    credentialHandoff?: ((capability: string) => Promise<CredentialHandoffSeamResult>) | null;
+  },
+) {
   const io = loopback();
   const engine = new CoupangIssuanceEngine({ runId: RUN_ID, channelCode: "coupang" }, { clock: makeCoupangIssuanceClock() });
   const driver = new CoupangIssuanceFixtureDriver(script);
+  const handoff =
+    waitOpts && "credentialHandoff" in waitOpts
+      ? waitOpts.credentialHandoff
+      : async () => ({ stored: true, connectionStatus: "SUCCESS" });
+  const { credentialHandoff: _ignored, ...waits } = waitOpts ?? {};
   const session = new CoupangIssuanceGuidanceSession(engine, driver, io.transport, {
     rearmDelayMs: 1,
     surfaceWaitPollMs: 0,
     surfaceWaitTimeoutMs: 20,
-    ...waitOpts,
+    ...waits,
+    ...(handoff ? { credentialHandoff: handoff } : {}),
   });
   session.attach();
   return { io, engine, driver, session };
@@ -96,9 +115,39 @@ function command(io: ReturnType<typeof loopback>, type: string, revision: number
  * At a recoverable park a REQUEST_STEP_RECHECK also re-probes/re-guides, so this drives those recoveries too. */
 async function pressNextToComplete(io: ReturnType<typeof loopback>, engine: CoupangIssuanceEngine, session: CoupangIssuanceGuidanceSession): Promise<void> {
   for (let i = 0; i < 12 && engine.currentStage() !== "guidance_complete"; i++) {
+    if (engine.currentStage() === "awaiting_handoff_consent") {
+      await consentToHandoff(io, session, `hx${i}`);
+      continue;
+    }
     command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision, `nx${i}`);
     await session.whenSettled();
   }
+}
+
+/**
+ * The seller's "키 읽어서 저장하기" press — the ONE thing that finishes this walk.
+ *
+ * The run rests in `awaiting_handoff_consent` until this arrives; the credential reaching the vault is what
+ * completes it. A test that drives to COMPLETED without this is asserting the old flow, where the walk finished
+ * over an empty vault and the product then asked the seller to type the keys by hand.
+ */
+async function consentToHandoff(
+  io: ReturnType<typeof loopback>,
+  session: CoupangIssuanceGuidanceSession,
+  id = "handoff",
+): Promise<void> {
+  io.send({
+    kind: "aw_command",
+    command: {
+      protocolVersion: 2,
+      commandId: id,
+      runId: RUN_ID,
+      expectedRevision: io.lastView()!.revision,
+      type: "REQUEST_STEP_RECHECK",
+      payload: { credentialHandoffAuthorization: "f".repeat(32) } as never,
+    },
+  });
+  await session.whenSettled();
 }
 
 describe("coupang issuance session — the full linear walkthrough (offline)", () => {
@@ -110,6 +159,10 @@ describe("coupang issuance session — the full linear walkthrough (offline)", (
     // every same-page checkpoint advances when the driver reports the seller pressed its WING-RESIDENT advance
     // button (the fixture's default action) — no REQUEST_STEP_RECHECK from the FE is ever sent.
 
+    // The walk drives itself to the seller's consent and RESTS there — the return from WING is a navigation,
+    // not a completion. The credential reaching the vault is what finishes this run, so the press is part of
+    // the happy path now rather than an extra.
+    await consentToHandoff(io, session);
     expect(engine.currentStage()).toBe("guidance_complete");
     expect(io.lastView()?.status).toBe("COMPLETED");
     expect(driver.calls).toEqual([
@@ -156,9 +209,11 @@ describe("coupang issuance session — the full linear walkthrough (offline)", (
       "wait:credentials",
       "cleanup",
     ]);
-    // PROOF the FE never drove a step: the ONLY command the session received was the single START_RUN.
+    // PROOF the FE never drove a STEP. Two commands reach the session across the whole walk and neither one
+    // advances anything in WING: the seller's START_RUN, and their consent to store the key at the end. Every
+    // step in between advanced on the WING-resident button, observed.
     const commandResults = io.sent.filter((f) => f.kind === "aw_command_result");
-    expect(commandResults).toHaveLength(1);
+    expect(commandResults).toHaveLength(2);
   });
 
   it("keeps totalSteps a fixed 8, carrying the coupang channel + issuance intent + NO appBranch on every view", async () => {
@@ -219,6 +274,10 @@ describe("coupang issuance session — the 발급 (issue) human checkpoint", () 
     }
     await session.whenSettled();
     // Advancing the checkpoint runs the rest of the walk (copy keys → return) on the same WING-resident presses.
+    // The walk drives itself to the seller's consent and RESTS there — the return from WING is a navigation,
+    // not a completion. The credential reaching the vault is what finishes this run, so the press is part of
+    // the happy path now rather than an extra.
+    await consentToHandoff(io, session);
     expect(engine.currentStage()).toBe("guidance_complete");
     expect(io.lastView()?.status).toBe("COMPLETED");
   });
@@ -236,6 +295,10 @@ describe("coupang issuance session — TARGET RE-FIND after a navigation race", 
     // frontend button would have sent, re-locates the SAME section in place, and the walk finishes.
     expect(io.blockers()).toContainEqual({ code: "UI_DRIFT", recoverable: true });
     expect(io.eventTypes()).not.toContain("RUN_FAILED");
+    // The walk drives itself to the seller's consent and RESTS there — the return from WING is a navigation,
+    // not a completion. The credential reaching the vault is what finishes this run, so the press is part of
+    // the happy path now rather than an extra.
+    await consentToHandoff(io, session);
     expect(engine.currentStage()).toBe("guidance_complete");
     // Re-located (target re-find) — more than the one throwing attempt.
     expect(driver.calls.filter((c) => c === "locate:confirm_purpose").length).toBeGreaterThan(1);
@@ -254,6 +317,10 @@ describe("coupang issuance session — TARGET RE-FIND after a navigation race", 
     const { io, engine, driver, session } = build({ locateThrows: { confirm_purpose: 2 } });
     startRun(io);
     await session.whenSettled();
+    // The walk drives itself to the seller's consent and RESTS there — the return from WING is a navigation,
+    // not a completion. The credential reaching the vault is what finishes this run, so the press is part of
+    // the happy path now rather than an extra.
+    await consentToHandoff(io, session);
     expect(engine.currentStage()).toBe("guidance_complete");
     // Three attempts: the two that raced and the one that landed.
     expect(driver.calls.filter((c) => c === "locate:confirm_purpose").length).toBeGreaterThanOrEqual(3);
@@ -422,7 +489,13 @@ describe("coupang issuance session — loopback E2E over the real v2 transport",
     const { client, server } = createLoopbackChannel();
     const engine = new CoupangIssuanceEngine({ runId: RUN_ID, channelCode: "coupang" }, { clock: makeCoupangIssuanceClock() });
     const driver = new CoupangIssuanceFixtureDriver();
-    const session = new CoupangIssuanceGuidanceSession(engine, driver, server, { rearmDelayMs: 1, surfaceWaitPollMs: 0, surfaceWaitTimeoutMs: 20 });
+    const session = new CoupangIssuanceGuidanceSession(engine, driver, server, {
+      rearmDelayMs: 1,
+      surfaceWaitPollMs: 0,
+      surfaceWaitTimeoutMs: 20,
+      // The walk rests on the seller's consent; a stored credential is what completes it.
+      credentialHandoff: async () => ({ stored: true, connectionStatus: "SUCCESS" }),
+    });
     session.attach();
 
     const clientViews: ActionWindowRunView[] = [];
@@ -443,6 +516,22 @@ describe("coupang issuance session — loopback E2E over the real v2 transport",
       });
       await session.whenSettled();
     }
+
+    // The walk drives itself to the seller's consent and RESTS there — the return from WING is a navigation,
+    // not a completion. The credential reaching the vault is what finishes this run, so the press is part of
+    // the happy path now rather than an extra.
+    client.send({
+      kind: "aw_command",
+      command: {
+        protocolVersion: 2,
+        commandId: "e2e-handoff",
+        runId: RUN_ID,
+        expectedRevision: clientViews[clientViews.length - 1]!.revision,
+        type: "REQUEST_STEP_RECHECK",
+        payload: { credentialHandoffAuthorization: "f".repeat(32) } as never,
+      },
+    });
+    await session.whenSettled();
 
     expect(engine.currentStage()).toBe("guidance_complete");
     const last = clientViews[clientViews.length - 1];
@@ -468,6 +557,10 @@ describe("coupang issuance session — observed waits recover inside WING", () =
     await session.whenSettled();
     // No command was sent from SellerOps — the wait noticed the page change by itself, and the walk then ran to
     // the end on the fixture seller's own advances.
+    // The walk drives itself to the seller's consent and RESTS there — the return from WING is a navigation,
+    // not a completion. The credential reaching the vault is what finishes this run, so the press is part of
+    // the happy path now rather than an extra.
+    await consentToHandoff(io, session);
     expect(engine.currentStage()).toBe("guidance_complete");
     expect(engine.view().blocker).toBeUndefined();
   });
@@ -513,6 +606,10 @@ describe("coupang issuance session — observed waits recover inside WING", () =
 
     command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
     await session.whenSettled();
+    // The walk drives itself to the seller's consent and RESTS there — the return from WING is a navigation,
+    // not a completion. The credential reaching the vault is what finishes this run, so the press is part of
+    // the happy path now rather than an extra.
+    await consentToHandoff(io, session);
     expect(engine.currentStage()).toBe("guidance_complete");
     expect(io.lastView()?.blocker).toBeUndefined();
   });
@@ -553,6 +650,10 @@ describe("coupang issuance session — observed waits recover inside WING", () =
     const { engine, io, session } = build({ probeSequence: [LOGIN, LOGIN, ISSUANCE] });
     startRun(io);
     await session.whenSettled();
+    // The walk drives itself to the seller's consent and RESTS there — the return from WING is a navigation,
+    // not a completion. The credential reaching the vault is what finishes this run, so the press is part of
+    // the happy path now rather than an extra.
+    await consentToHandoff(io, session);
     expect(engine.currentStage()).toBe("guidance_complete");
     // The seller WAS told to log in — that blocker is real and must have been surfaced once.
     expect(io.blockers().map((b) => b.code)).toContain("LOGIN_REQUIRED");
@@ -924,16 +1025,19 @@ describe("coupang issuance session — the credential handoff runs only where an
     return views[views.length - 1]!.view.revision;
   }
 
-  function handoffHarness(result: { stored: boolean; connectionStatus?: string; reason?: string }) {
+  function handoffHarness(
+    result: { stored: boolean; connectionStatus?: string; reason?: string },
+    script: CoupangIssuanceFixtureScript = { credentialState: "KEY_PRESENT" },
+  ) {
     const seen: string[] = [];
     const built = build(
-      { credentialState: "KEY_PRESENT" },
+      script,
       {
         credentialHandoff: async (capability: string) => {
           seen.push(capability);
           return result;
         },
-      } as never,
+      },
     );
     return { ...built, seen };
   }
@@ -958,8 +1062,10 @@ describe("coupang issuance session — the credential handoff runs only where an
     return results[results.length - 1] as unknown as { accepted: boolean; reason?: string };
   }
 
-  it("**refuses before reading anything** when the run is not at the credential step", async () => {
-    const { io, session, seen } = handoffHarness({ stored: true });
+  it("**refuses before reading anything** when the run is not at the consent stage", async () => {
+    // A run resting mid-walk in WING. The seller has not been asked anything, so there is nothing to consent
+    // to — and a capability arriving here must read no screen at all.
+    const { io, session, seen } = handoffHarness({ stored: true }, { action: { issue: false } });
     startRun(io);
     await session.whenSettled();
 
@@ -972,7 +1078,7 @@ describe("coupang issuance session — the credential handoff runs only where an
   });
 
   it("refuses on a host that cannot perform one at all — a scripted driver never reads a credential", async () => {
-    const { io, session } = build({ credentialState: "KEY_PRESENT" });
+    const { io, session } = build({ credentialState: "KEY_PRESENT" }, { credentialHandoff: null });
     startRun(io);
     await session.whenSettled();
 

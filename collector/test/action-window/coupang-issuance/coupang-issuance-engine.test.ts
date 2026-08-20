@@ -44,7 +44,9 @@ function driveCheckpoint(eng: CoupangIssuanceEngine, target: string, nextTarget:
   expect(eng.onTargetHighlighted(target as never, { count: 1, sig: SIG[target]! })).toEqual({ observe: target });
   expect(eng.currentStage()).toBe(BARRIER[target]);
   const out = eng.onUserActionObserved(target as never);
-  expect(out).toEqual(nextTarget ? { guide: nextTarget } : "CLEANUP");
+  // The LAST checkpoint no longer ends the run. Returning to SellerOps is a navigation; the walk rests on the
+  // seller's consent to store the key, and only a credential reaching the vault completes it.
+  expect(out).toEqual(nextTarget ? { guide: nextTarget } : "NONE");
 }
 
 /** Drive one checkpoint via the FALLBACK path (FE 다음 = REQUEST_STEP_RECHECK) → guide → locate → highlight. */
@@ -91,6 +93,9 @@ describe("coupang issuance engine — the linear walkthrough from the WING home"
     // The LAST step. Its own CTA returns the seller to SellerOps, so its observed press completes the
     // guidance — there is no step after it to advance to.
     driveCheckpoint(eng, "credentials", null);
+    // The walk rests on the seller's consent; the credential reaching the vault is what completes it.
+    expect(eng.currentStage()).toBe("awaiting_handoff_consent");
+    expect(eng.completeAfterCredentialHandoff()).toBe("CLEANUP");
     expect(eng.currentStage()).toBe("guidance_complete");
     expect(eng.view().status).toBe("COMPLETED");
     expect(eng.view().progress).toEqual({ completedSteps: 8, totalSteps: 8 });

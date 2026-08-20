@@ -953,7 +953,7 @@ const ADVANCE_BUTTON_LABEL: Readonly<Partial<Record<CoupangIssuanceTarget, strin
    * Pressing this returns to SellerOps — there is no separate return step any more. Two consecutive buttons
    * both meaning "go to SellerOps" is exactly the confusion the old `return` step's own comment warned about.
    */
-  credentials: "SellerOps에 연결",
+  credentials: "SellerOps로 돌아가기",
 };
 
 /**
@@ -1199,7 +1199,7 @@ export const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string
   vendor_confirm: "업체명 · URL을 입력하고, IP 주소는 입력한 뒤 옆의 '추가'를 눌러 등록하세요 — 추가하지 않으면 IP가 등록되지 않습니다. 그 다음 '확인'을 직접 누르세요. ⚠ 여기서 실제 API 키가 발급되어 라이브 계정 상태가 바뀝니다(지우려면 나중에 별도의 삭제 작업이 필요합니다). SellerOps는 이 버튼을 절대 누르지 않고, 입력란에 아무것도 쓰지 않습니다. 키가 화면에 표시되면 자동으로 넘어갑니다.",
   // No copy request. The seller issued the key; SellerOps fetches what it needs, and the ASKING happens on a
   // SellerOps surface where a press can be verified — not here, on a marketplace page.
-  credentials: "API 키 발급이 확인됐습니다. SellerOps가 연결에 필요한 정보를 안전하게 가져올 준비가 됐어요. 아래 버튼을 누르시면 SellerOps로 돌아가고, 거기서 가져와도 될지 한 번 더 여쭙니다.",
+  credentials: "API 키 발급이 확인됐습니다. 아래 버튼을 누르면 SellerOps로 돌아갑니다. 키를 읽어 저장할지는 거기서 여쭙고, 승인하시기 전에는 아무것도 읽지 않습니다.",
 };
 
 /**
@@ -1227,7 +1227,7 @@ export const OPERATOR_STEP_BRIEF: Readonly<Record<CoupangIssuanceTarget, string>
   // with an empty form.
   vendor_method: "'자체개발(직접입력)'을 직접 선택한 뒤, 업체명 · URL을 입력하고 IP는 '추가'까지 누르세요. 다 채우면 자동으로 넘어갑니다.",
   vendor_confirm: "⚠ 이 화면의 '확인'에서 실제 API 키가 발급됩니다. 업체명 · URL을 입력하고 IP는 '추가'까지 누른 뒤, '확인'을 직접 누르세요.",
-  credentials: "API 키 발급이 확인됐습니다. SellerOps가 연결에 필요한 정보를 가져올 준비가 됐어요.",
+  credentials: "SellerOps로 돌아가 키 저장을 승인해 주세요.",
 };
 
 /**
@@ -1285,7 +1285,7 @@ export const OPERATOR_STEP_TITLES: Readonly<Record<CoupangIssuanceTarget, string
   // The one chip in the walk that names a CONSEQUENCE, because this control creates a real credential.
   // Every other chip names the control; this is the exception the panel copy alone should not have to carry.
   vendor_confirm: "'확인' 누르기 (키 발급)",
-  credentials: "SellerOps에 연결",
+  credentials: "SellerOps로 돌아가기",
 };
 
 /** A browser context whose newest tab may hold the step the seller opened. Structural subset of Playwright's. */

@@ -44,7 +44,10 @@ import { IssuanceEngine } from "../action-window/api-issuance/issuance-engine";
 import { IssuanceGuidanceSession } from "../action-window/api-issuance/issuance-session";
 import type { IssuanceProbeDriver } from "../action-window/api-issuance/issuance-driver";
 import { CoupangIssuanceEngine } from "../action-window/coupang-issuance/coupang-issuance-engine";
-import { CoupangIssuanceGuidanceSession } from "../action-window/coupang-issuance/coupang-issuance-session";
+import {
+  CoupangIssuanceGuidanceSession,
+  type CredentialHandoffSeamResult,
+} from "../action-window/coupang-issuance/coupang-issuance-session";
 import type { CoupangIssuanceProbeDriver } from "../action-window/coupang-issuance/coupang-issuance-driver";
 import type { AwCarrierEndpoint } from "../bridge/aw-carrier";
 import type { ConnectorOrchestratorObserver } from "../connector/connector-orchestrator";
@@ -190,6 +193,14 @@ export interface AgentCoupangIssuanceConfig {
   /** Sanitized channel identity (SEMANTIC_CODE) — always `coupang`. */
   channelCode: string;
   createDriver: () => CoupangIssuanceProbeDriver;
+  /**
+   * Perform the credential handoff for this run, with the seller's one-shot capability.
+   *
+   * Optional, and absent means the walk cannot store a credential: it rests on the seller's consent and their
+   * press is refused with `HANDOFF_NOT_SUPPORTED_HERE`. Every scripted/dev host is in that position by default,
+   * which is the right default for a seam whose real implementation reads three secrets off a live page.
+   */
+  credentialHandoff?: (capability: string) => Promise<CredentialHandoffSeamResult>;
 }
 
 /**
@@ -444,6 +455,7 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
       new CoupangIssuanceEngine({ runId: ci.runId, channelCode: ci.channelCode }),
       ci.createDriver(),
       coupangIssuanceEndpoint.transport,
+      ...(ci.credentialHandoff ? [{ credentialHandoff: ci.credentialHandoff }] : []),
     );
     coupangIssuanceSession.attach();
     log("aw_coupang_issuance_run_hosted", {});

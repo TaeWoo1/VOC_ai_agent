@@ -444,13 +444,17 @@ export function CoupangIssuanceGuidedWalkthrough({
               <p className="text-sm font-medium text-ink break-keep" role="status">
                 {alreadyHadKey ? "이미 발급된 Open API 키를 확인했어요" : "Open API 키 발급 완료"}
               </p>
+              {/* COMPLETED now means the credential is IN THE VAULT — the run rests on the seller's consent
+                  until the handoff stores and verifies, and only that completes it. Said out loud, because the
+                  button under it used to say "돌아가 연결 정보 입력하기" and there is nothing left to type. */}
+              <p className="text-sm text-muted break-keep">연결 정보를 저장했어요.</p>
               <button
                 type="button"
                 className="btn-primary block w-full"
                 onClick={onIssued}
                 disabled={busy}
               >
-                SellerOps로 돌아가 연결 정보 입력하기
+                연결 상태 확인하기
               </button>
               {/* The keys are on a WING window SellerOps opened, and WING shows the secret key ONCE — so the
                   end of the walk is the WORST moment to lose that window behind the others. The label says

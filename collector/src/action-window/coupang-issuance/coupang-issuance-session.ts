@@ -231,7 +231,12 @@ export class CoupangIssuanceGuidanceSession {
       this.transport.send({ kind: "aw_command_result", commandId: command.commandId, accepted: false, reason });
     };
     if (!this.credentialHandoff) return refuse("HANDOFF_NOT_SUPPORTED_HERE");
-    if (this.engine.activeTarget() !== "credentials") return refuse("HANDOFF_NOT_AT_CREDENTIAL_STEP");
+    // The STAGE, not the target: the run must be resting on the seller's consent, which it reaches only after
+    // the walk confirmed the key exists and the seller came back to SellerOps. A target alone would also be true
+    // while they were still in WING, before anyone had been asked anything.
+    if (this.engine.currentStage() !== "awaiting_handoff_consent") {
+      return refuse("HANDOFF_NOT_AT_CREDENTIAL_STEP");
+    }
     if (this.handoffAttempted) return refuse("HANDOFF_ALREADY_ATTEMPTED");
     if (this.surfaceClosed) return refuse("HANDOFF_SURFACE_CLOSED");
     this.handoffAttempted = true;
@@ -257,15 +262,12 @@ export class CoupangIssuanceGuidanceSession {
         return;
       }
       this.transport.send({ kind: "aw_command_result", commandId: command.commandId, accepted: true });
-      // Stored. NOW the checkpoint may complete — the walk's last step is "the credential is with SellerOps",
-      // and completing it before the store would say so while the vault was empty.
-      // Re-issued to the engine WITHOUT the payload: the capability has been spent and the engine's job is the
-      // ordinary checkpoint advance, which takes no payload and must not learn about capabilities at all.
-      const outcome = this.engine.command({ type: command.type, expectedRevision: command.expectedRevision });
+      // **Stored and verified. NOW — and only now — the run is done.** Completing on the press, or on the
+      // navigation before it, would have said "connected" over an empty vault. Not a command: this transition
+      // is the runtime's own conclusion from a result the seller cannot fake.
+      const next = this.engine.completeAfterCredentialHandoff();
       this.publishState();
-      if (outcome.ok && "effect" in outcome && !isNoop(outcome.effect)) {
-        await this.drive(outcome.effect);
-      }
+      if (!isNoop(next)) await this.drive(next);
     } catch (e) {
       // The error is NOT echoed: a transport failure can quote the request it failed on.
       log("aw_coupang_issuance_handoff", { runId: this.runId, stored: false, reason: errName(e) }, "warn");

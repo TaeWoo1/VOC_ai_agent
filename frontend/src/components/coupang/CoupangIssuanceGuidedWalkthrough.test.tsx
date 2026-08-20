@@ -242,7 +242,7 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
     await userEvent.click(screen.getByRole("button", { name: "쿠팡 윙 키 화면 다시 보기" }));
     expect(onCommand).toHaveBeenCalledWith("FIND_CURRENT_STEP");
     // …and the hand-off to credential entry is still the primary action.
-    expect(screen.getByRole("button", { name: "SellerOps로 돌아가 연결 정보 입력하기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "연결 상태 확인하기" })).toBeInTheDocument();
   });
 
   it("…and shows neither when the completed run does not allow it — no window to raise", () => {
@@ -307,7 +307,7 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
       />,
     );
     expect(screen.getByText("Open API 키 발급 완료")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "SellerOps로 돌아가 연결 정보 입력하기" }));
+    await userEvent.click(screen.getByRole("button", { name: "연결 상태 확인하기" }));
     expect(onIssued).toHaveBeenCalledTimes(1);
   });
 

@@ -299,10 +299,38 @@ describe("runBridgeOnlyBoot — the guided walk on demand", () => {
     expect(tab.view()!.channelCode).toBe("coupang");
     expect(JSON.stringify(tab.view())).not.toMatch(/secret|password|token/i);
 
-    // 4. The fixture walk runs to COMPLETED on the runtime's own advances (no FE step). The tab leaves: settled +
-    //    no window → the host releases and the helper is bridge-only again.
-    await tab.until(() => tab.view()!.status === "COMPLETED", 5000);
+    // 4. The fixture walk runs on the runtime's own advances (no FE step) and RESTS on the seller's consent —
+    //    it does not complete by itself, because nothing has been stored. The tab leaves: no window → the host
+    //    releases and the helper is bridge-only again.
+    await tab.until(
+      () => tab.view()!.currentStep?.stepNumber === tab.view()!.currentStep?.totalSteps
+        && tab.view()!.status === "WAITING_FOR_HUMAN",
+      5000,
+    );
+    expect(tab.view()!.status).not.toBe("COMPLETED");
+    const lastRevision = tab.view()!.revision;
     tab.ws.close();
+    await new Promise((r) => setTimeout(r, 100));
+    // **NOT released, and that is the point.** The run is resting on a decision the seller makes in SellerOps,
+    // and the thing that decision authorizes is a READ of the WING window. Releasing here would close the very
+    // screen the handoff has to read, turning a seller who steps away for a minute into one who has to redo the
+    // whole walk. The slot is not stuck: another carrier request hands over while no tab is attached (see
+    // `on-demand-carrier-host.test.ts`), and an abandoned run still ends in the host's bounded window grace.
+    expect(await handle.carrierHost.maybeRelease()).toBe(false);
+    expect(handle.carrierHost.state().active).toBe(true);
+    expect(live.closed).toBe(0);
+
+    // …and once the run is over — the seller cancelled, here — the release happens exactly as before.
+    const tab2 = openTab(port, await pairedTicket(port));
+    await tab2.opened;
+    await tab2.until(() => tab2.announcements.length > 0);
+    // The revision the run is actually at — carried over from the first tab's last view, because a freshly
+    // attached tab has an announcement but no view until it resyncs.
+    tab2.ws.send(JSON.stringify({ type: "aw", payload: serializeFrame({ kind: "aw_command", command: {
+      protocolVersion: ACTION_WINDOW_PROTOCOL_VERSION, commandId: `${live.config.runId}-cancel`, runId: live.config.runId,
+      expectedRevision: lastRevision, type: "CANCEL_RUN" as never } }) }));
+    await tab2.until(() => tab2.view()?.status === "CANCELLED");
+    tab2.ws.close();
     await new Promise((r) => setTimeout(r, 100));
     expect(await handle.carrierHost.maybeRelease()).toBe(true);
     expect(handle.carrierHost.state().active).toBe(false);

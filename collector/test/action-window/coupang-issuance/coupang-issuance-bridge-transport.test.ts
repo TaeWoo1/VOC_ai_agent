@@ -89,6 +89,9 @@ async function bootCoupangBridge(script: CoupangIssuanceFixtureScript = {}): Pro
     runId,
     channelCode: "coupang",
     createDriver: () => new CoupangIssuanceFixtureDriver(script),
+    // The walk rests on the seller's consent; a stored credential completes it. Faked here — what this file
+    // proves is that the capability rides the REAL Bridge WS and reaches the session.
+    credentialHandoff: async () => ({ stored: true, connectionStatus: "SUCCESS" }),
   };
   const bridge = createAgentBridge({
     port: 0, // ephemeral — the client discovers the actual port from listen()
@@ -239,10 +242,28 @@ async function openClient(handle: CoupangBridgeHandle, token?: string, label = "
 async function driveToCompleted(client: CoupangWireClient, session: { whenSettled(): Promise<void> }): Promise<void> {
   for (let i = 0; i < 16 && client.view?.status !== "COMPLETED"; i++) {
     const before = client.view?.revision ?? -1;
-    client.send("REQUEST_STEP_RECHECK");
+    // At the consent stage the press carries the seller's one-shot capability — over the real WS, in the one
+    // payload field the v2 contract admits for it.
+    if (atConsent(client.view)) {
+      client.send("REQUEST_STEP_RECHECK", { credentialHandoffAuthorization: "f".repeat(32) });
+    } else {
+      client.send("REQUEST_STEP_RECHECK");
+    }
     await session.whenSettled();
     await waitFor(() => (client.view?.revision ?? -1) > before || client.view?.status === "COMPLETED");
   }
+}
+
+/**
+ * The run resting on the seller's consent: last step, waiting on a human. The SAME signal the frontend keys its
+ * card off, deliberately — if the two ever disagree, one of them is showing the seller the wrong thing.
+ */
+function atConsent(view: { status?: string; currentStep?: { stepNumber: number; totalSteps: number } } | null | undefined): boolean {
+  return (
+    view?.status === "WAITING_FOR_HUMAN" &&
+    !!view.currentStep &&
+    view.currentStep.stepNumber === view.currentStep.totalSteps
+  );
 }
 
 function assertSanitizedWire(client: CoupangWireClient, label: string): void {
@@ -283,6 +304,12 @@ describe("Coupang issuance carrier over the real Bridge WS (dev-host boot wiring
     // (the synthetic driver's default). No REQUEST_STEP_RECHECK is ever sent: the FE never drives a step.
     client.startRun();
     await session.whenSettled();
+    // The WING presses carry the walk to the seller's consent and stop there — the return from WING is a
+    // navigation, not a completion. ONE command from the FE finishes it, and it is the seller answering
+    // "may we store the key": the capability rides the real WS in the single payload field v2 admits for it.
+    await waitFor(() => atConsent(client.view));
+    client.send("REQUEST_STEP_RECHECK", { credentialHandoffAuthorization: "f".repeat(32) });
+    await session.whenSettled();
     await waitFor(() => client.view?.status === "COMPLETED");
     expect(client.view?.status).toBe("COMPLETED");
     expect(client.view?.blocker).toBeUndefined();
@@ -295,8 +322,9 @@ describe("Coupang issuance carrier over the real Bridge WS (dev-host boot wiring
       .filter((f) => f.kind === "aw_view")
       .map((f) => (f as { view: ActionWindowRunView }).view.status);
     expect(statuses).toContain("WAITING_FOR_HUMAN");
-    // PROOF the FE never drove a step: the ONLY command it sent (and got a result for) was the single START_RUN.
-    expect(client.commandResults).toHaveLength(1);
+    // PROOF the FE never drove a STEP. Two commands cross the wire in the whole walk and neither advances
+    // anything in WING: START_RUN, and the seller's consent to store the key. (and got a result for) was the single START_RUN.
+    expect(client.commandResults).toHaveLength(2);
 
     // Every frame that crossed the real (serialize/deserialize) wire is contract-valid and value-free.
     assertSanitizedWire(client, "coupang-ws-happy");

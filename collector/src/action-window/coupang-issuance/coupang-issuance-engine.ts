@@ -519,10 +519,35 @@ export class CoupangIssuanceEngine {
         this.currentTarget = "credentials";
         return { guide: "credentials" };
       // The LAST step. Its own CTA performs the return, so there is no step after it to advance to — pressing
-      // it completes the walk. The seller is sent back to SellerOps by `returnToSellerOps`, not by a step.
+      // **The return to SellerOps is a NAVIGATION, and completing the run here was the defect.**
+      //
+      // It used to call `complete()`: the seller pressed the WING panel's button, the walk finished, and the
+      // product asked them to TYPE the three values that were on screen in front of them — the manual path,
+      // arrived at automatically, for a seller whose keys were readable (live 2026-08-20). The credential was
+      // not stored, so "complete" was also not true.
+      //
+      // The run now rests on ONE decision instead, in the place the seller is authenticated to make it. Nothing
+      // completes until the credential is actually in the vault and the connection verified — see
+      // {@link completeAfterCredentialHandoff}.
       case "credentials":
-        return this.complete();
+        this.stage = "awaiting_handoff_consent";
+        this.emit("RUN_STATUS_CHANGED", { status: "WAITING_FOR_HUMAN" });
+        return "NONE";
     }
+  }
+
+  /**
+   * **The credential is in the vault and the connection was checked. NOW the walk is done.**
+   *
+   * The one transition out of {@link CoupangIssuanceStage} `awaiting_handoff_consent`, and the only place this
+   * run may complete on the happy path. It is called by the session AFTER the handoff reports a stored
+   * credential — never on a press, never on a navigation, and never on a read that did not reach the vault.
+   *
+   * Refused from anywhere else: a run that has not been resting on the seller's consent has nothing to complete.
+   */
+  completeAfterCredentialHandoff(): CoupangIssuanceEffect {
+    if (this.stage !== "awaiting_handoff_consent") return "NONE";
+    return this.complete();
   }
 
   private complete(): CoupangIssuanceEffect {

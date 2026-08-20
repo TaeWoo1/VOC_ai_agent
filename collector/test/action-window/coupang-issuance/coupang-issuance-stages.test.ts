@@ -42,6 +42,7 @@ const ALL_STAGES: CoupangIssuanceStage[] = [
   "checkpoint_issue_key",
   "guiding_copy_keys",
   "return_to_sellerops",
+  "awaiting_handoff_consent",
   "guidance_complete",
   "target_not_found",
   "page_mismatch",
@@ -69,6 +70,8 @@ describe("coupang issuance stages — run-status projection", () => {
     target_not_found: "WAITING_FOR_HUMAN",
     page_mismatch: "WAITING_FOR_HUMAN",
     credential_state_unknown: "WAITING_FOR_HUMAN",
+    // The run is waiting on ONE decision, in SellerOps: may we store the key. That is a human.
+    awaiting_handoff_consent: "WAITING_FOR_HUMAN",
     operator_aborted: "CANCELLED",
   };
   it.each(ALL_STAGES)("%s", (stage) => {
@@ -95,6 +98,7 @@ describe("coupang issuance stages — step-status projection", () => {
     target_not_found: "AWAITING_USER",
     page_mismatch: "AWAITING_USER",
     credential_state_unknown: "AWAITING_USER",
+    awaiting_handoff_consent: "AWAITING_USER",
     operator_aborted: "PENDING",
   };
   it.each(ALL_STAGES)("%s", (stage) => {
@@ -125,6 +129,7 @@ describe("coupang issuance stages — ALL_STAGES really is all of them", () => {
       target_not_found: "",
       page_mismatch: "",
       credential_state_unknown: "",
+      awaiting_handoff_consent: "",
       operator_aborted: "",
     };
     expect([...ALL_STAGES].sort()).toEqual(Object.keys(mapped).sort());

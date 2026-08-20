@@ -153,6 +153,24 @@ export type CoupangIssuanceStage =
   | "guiding_copy_keys"
   /** Seller barrier: they return to SellerOps to paste the credential into the masked form. */
   | "return_to_sellerops"
+  /**
+   * **The walk is done in WING, and now rests on ONE consent in SellerOps: may we store the key?**
+   *
+   * The last barrier used to complete the run: the seller pressed "SellerOps로 연결" on the WING panel, the walk
+   * finished, and the product asked them to TYPE the three values they had just been shown — which is the manual
+   * path, arrived at automatically, for a seller whose keys were on screen and readable. Live 2026-08-20.
+   *
+   * So the return is now a NAVIGATION and nothing more. The run stays open here, deliberately and persistently:
+   * a window the seller might come back to in a minute is not a run that should have finished without them.
+   *
+   * It is NOT a park (it carries no blocker and nothing failed), NOT an observed wait (nothing is being watched
+   * in WING), and NOT terminal (the credential is not in the vault yet). It is the seller's own decision,
+   * pending, in the one place they are authenticated to make it.
+   *
+   * Leaves only two ways: the handoff stores AND verifies, which completes the run; or the seller chooses the
+   * manual form themselves (`SWITCH_TO_MANUAL`) or cancels. Nothing falls through on its own.
+   */
+  | "awaiting_handoff_consent"
   /** Terminal: the guidance walk finished (NOT that a credential was stored or a connection made). */
   | "guidance_complete"
   /** Recoverable park: the control the tutorial must highlight could not be found. */
@@ -329,6 +347,8 @@ export function coupangIssuanceStageToRunStatus(stage: CoupangIssuanceStage): Ru
     case "target_not_found":
     case "page_mismatch":
     case "credential_state_unknown":
+    // The seller is being asked one question, in SellerOps. That is a human the run is waiting on.
+    case "awaiting_handoff_consent":
       return "WAITING_FOR_HUMAN";
     case "guidance_complete":
       return "COMPLETED";
@@ -357,6 +377,7 @@ export function coupangIssuanceStageToStepStatus(stage: CoupangIssuanceStage): S
     case "target_not_found":
     case "page_mismatch":
     case "credential_state_unknown":
+    case "awaiting_handoff_consent":
       return "AWAITING_USER";
     case "guidance_complete":
       return "COMPLETED";
@@ -394,6 +415,16 @@ export function coupangIssuanceAllowedCommands(stage: CoupangIssuanceStage): rea
   // open anything — `LazyCoupangIssuanceDriver.focusSurface` refuses unless a window is ALREADY open, so a run
   // whose window the seller closed answers `false` instead of launching a marketplace window at the end of it.
   if (isCoupangIssuanceTerminal(stage)) return ["FIND_CURRENT_STEP"];
+  // **The consent stage, and its list is deliberately short.**
+  //
+  // `REQUEST_STEP_RECHECK` is what the seller's "키 읽어서 저장하기" press sends (carrying the one-shot
+  // capability); without it here the press could not be made at all. `SWITCH_TO_MANUAL` is the seller CHOOSING
+  // the typing path — which is the only way this run reaches the manual form now, because falling through to it
+  // by itself was the defect. No `PAUSE_RUN` and no `SET_GUIDANCE_ENABLED`: nothing is being guided in WING any
+  // more, and a pause on a run that is only waiting for one press means nothing.
+  if (stage === "awaiting_handoff_consent") {
+    return ["REQUEST_STEP_RECHECK", "SWITCH_TO_MANUAL", "CANCEL_RUN", "FIND_CURRENT_STEP"];
+  }
   if (isCoupangIssuancePark(stage) || isCoupangIssuanceObservedWait(stage)) {
     return ["REQUEST_STEP_RECHECK", "CANCEL_RUN", "SWITCH_TO_MANUAL", "SET_GUIDANCE_ENABLED", "FIND_CURRENT_STEP"];
   }
