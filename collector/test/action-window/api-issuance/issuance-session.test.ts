@@ -57,7 +57,7 @@ function build(script: IssuanceFixtureScript = {}) {
   const io = loopback();
   const engine = new IssuanceEngine({ runId: RUN_ID, channelCode: "naver" }, { clock: makeIssuanceClock() });
   const driver = new IssuanceFixtureDriver(script);
-  const session = new IssuanceGuidanceSession(engine, driver, io.transport, { rearmDelayMs: 1 });
+  const session = new IssuanceGuidanceSession(engine, driver, io.transport, { rearmDelayMs: 1, panelPollMs: 0 });
   session.attach();
   return { io, engine, driver, session };
 }
@@ -130,7 +130,11 @@ describe("issuance session — the app-exists path", () => {
     await session.whenSettled();
     // Step 2 (open_app) is the ONLY observed transition (observe:open_app + wait:open_app). api_group /
     // credentials / return are same-page viewport checkpoints — the runtime highlights the section and RESTS
-    // (no observe/wait); the operator advances each with "다음".
+    // (no observe/wait); the seller advances each with "다음", now on the API-centre panel itself.
+    //
+    // `armPanel:` appears at every barrier because ARMING is what makes a press readable, and it must happen
+    // before the watch: a latch left over from the previous step would otherwise be read as this step's advance.
+    // (`open_app` arms too — the session does not know which steps have a button; the real driver no-ops there.)
     await pressNextToComplete(io, engine, session);
 
     expect(engine.currentStage()).toBe("guidance_complete");
@@ -140,18 +144,29 @@ describe("issuance session — the app-exists path", () => {
       "readApplications",
       "locate:open_app",
       "highlight:open_app",
+      "armPanel:open_app",
       "observe:open_app",
       "wait:open_app",
       "probeSurface", // VERIFY_OPEN: confirm the seller reached app_detail
+      // Step 3 has no control to ring, so it gets a DOCKED panel of its own rather than living only in the
+      // SellerOps tab — it would otherwise be the one step that still required crossing back.
+      "appUsageNotice:existing",
       "locate:api_group",
       "highlight:api_group", // checkpoint — rest (no observe/wait); "다음" advances
+      "armPanel:api_group",
       "locate:application_id",
       "highlight:application_id", // checkpoint — copy the Application ID
+      "armPanel:application_id",
       "locate:application_secret",
       "highlight:application_secret", // checkpoint — view + copy the Secret
+      "armPanel:application_secret",
       "locate:return",
       "highlight:return", // checkpoint
+      "armPanel:return",
       "cleanup",
+      // …and the walk says so on the window it happened in. NAVER cannot hand the values over, so this panel is
+      // copy-only: what is left is the seller typing them into SellerOps.
+      "completionNotice",
     ]);
     // Step 2 used the OPEN copy/target for an existing application.
     const step2 = io.views().find((v) => v.currentStep?.stepNumber === 2)?.currentStep;
@@ -881,5 +896,105 @@ describe("naver issuance session — a RELEASED session stops touching the surfa
     command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision, "late");
     for (let i = 0; i < 20; i++) await tick();
     expect(driver.calls.slice(callsAfterStop)).toEqual([]);
+  });
+});
+
+/* ─────────────────── the guided panel lives on the API centre, like the WING walk's ─────────────────── */
+
+describe("the seller advances on the window they are working in", () => {
+  it("**the on-page 다음 advances the checkpoint** — the same command the SellerOps button sends", async () => {
+    // Every step of this walk used to end with "SellerOps에서 '다음'을 누르세요": a round trip per step, on the
+    // last walk that still had one. The press is read where the seller is and turned into the SAME
+    // REQUEST_STEP_RECHECK — the engine still decides, and the FE button still works.
+    const { io, engine, driver, session } = build(EXISTING);
+    startRun(io);
+    await session.whenSettled();
+    await passUsageCheck(io, engine, session);
+    expect(engine.currentStage()).toBe("guiding_api_group");
+
+    driver.setPanelAdvance("api_group", true);
+    await session.whenPanelWatchSettled();
+
+    expect(engine.currentStage()).toBe("guiding_application_id");
+  });
+
+  it("ARMS the latch before watching it — a press left over from the previous step cannot skip this one", async () => {
+    const { io, engine, driver, session } = build(EXISTING);
+    startRun(io);
+    await session.whenSettled();
+    await passUsageCheck(io, engine, session);
+
+    const arm = driver.calls.indexOf("armPanel:api_group");
+    const watch = driver.calls.indexOf("panel?:api_group");
+    expect(arm).toBeGreaterThan(-1);
+    // The watch may not have polled yet (it is a timer); if it has, it must come after the arm.
+    if (watch > -1) expect(arm).toBeLessThan(watch);
+  });
+
+  it("**stops watching when the barrier moves on** — a late press cannot advance a step the run has left", async () => {
+    const { io, engine, driver, session } = build(EXISTING);
+    startRun(io);
+    await session.whenSettled();
+    await passUsageCheck(io, engine, session);
+    // The seller advances from the SellerOps tab instead; the walk moves to the next control.
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision, "fe");
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("guiding_application_id");
+
+    // …and only NOW the old step's latch reads pressed. It must change nothing.
+    driver.setPanelAdvance("api_group", true);
+    await session.whenPanelWatchSettled();
+
+    expect(engine.currentStage()).toBe("guiding_application_id");
+  });
+});
+
+describe("a parked NAVER walk stays visible on the window the seller is in", () => {
+  it("draws the park notice once, and only for a code it will draw", async () => {
+    // Same rule as the WING walk's: fail-closed AND invisible is the defect. The notice says what SellerOps
+    // could not do; it never offers the parked step's own control.
+    const { io, driver, session } = build({ ...EXISTING, locate: { open_app: { count: 0 } } });
+    startRun(io);
+    await session.whenSettled();
+
+    const notices = driver.calls.filter((c) => c.startsWith("parkNotice:"));
+    expect(notices).toEqual(["parkNotice:TARGET_NOT_FOUND"]);
+  });
+
+  it("draws NO notice over a login screen — the one page where a seller is typing a password", async () => {
+    const { io, driver, session } = build({ probe: { ok: false, pageCategory: "login", blockerCode: "LOGIN_REQUIRED" } });
+    startRun(io);
+    await session.whenSettled();
+
+    expect(driver.calls.filter((c) => c.startsWith("parkNotice:"))).toEqual([]);
+  });
+});
+
+describe("step 3 — the advisory with no control to ring", () => {
+  it("**paints its own panel and advances on the press there** — the last step that lived only in the other tab", async () => {
+    const { io, engine, driver, session } = build(EXISTING);
+    startRun(io);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("guiding_app_usage_check");
+    expect(driver.calls).toContain("appUsageNotice:existing");
+
+    driver.setAppUsageAdvance(true);
+    await session.whenPanelWatchSettled();
+
+    expect(engine.currentStage()).toBe("guiding_api_group");
+  });
+
+  it("uses the NEW-app copy for a seller who just created one", async () => {
+    const { io, engine, driver, session } = build(EMPTY);
+    startRun(io);
+    await session.whenSettled();
+    // create_app is a checkpoint; advance it the way the seller does, on its own panel — which is what lands
+    // the run on step 3 and paints the advisory.
+    driver.setPanelAdvance("create_app", true);
+    await session.whenPanelWatchSettled();
+    await session.whenSettled();
+
+    expect(engine.currentStage()).toBe("guiding_app_usage_check");
+    expect(driver.calls).toContain("appUsageNotice:new");
   });
 });

@@ -42,6 +42,10 @@ export interface IssuanceFixtureScript {
   locateThrows?: Partial<Record<IssuanceTarget, number>>;
   /** Same, for `highlightTarget(target)` — a race that throws AFTER a clean locate. Missing → never throws. */
   highlightThrows?: Partial<Record<IssuanceTarget, number>>;
+  /** Whether the seller has pressed a step's ON-PAGE "다음" (the guided panel's own button). */
+  panelAdvance?: Partial<Record<IssuanceTarget, boolean>>;
+  /** Whether the seller has pressed step 3's on-page 확인했어요 · 다음 (the usage-state advisory). */
+  appUsageAdvance?: boolean;
 }
 
 /** Deterministic 16-hex signature per target — opaque, and stable across a run so drift is detectable. */
@@ -69,6 +73,8 @@ export class IssuanceFixtureDriver implements IssuanceProbeDriver {
   private readonly script: IssuanceFixtureScript;
   /** Every call, in order — so a test can assert the runtime never armed a control it should not have. */
   readonly calls: string[] = [];
+  /** Polled call signatures already recorded once — see {@link recordOnce}. */
+  private readonly polled = new Set<string>();
   /** How many times `settleSurface` was called (the session settles before each guide). */
   settleCount = 0;
   /**
@@ -141,6 +147,63 @@ export class IssuanceFixtureDriver implements IssuanceProbeDriver {
 
   async clearHighlight(): Promise<void> {
     this.calls.push("clearHighlight");
+  }
+
+  /** Re-arm the on-page latch for this step. Recorded, because the ORDER (arm, then watch) is the property. */
+  async armPanelAdvance(target: IssuanceTarget): Promise<void> {
+    this.calls.push(`armPanel:${target}`);
+  }
+
+  /**
+   * Has the seller pressed this step's on-page "다음"? Fail-closed default: no.
+   *
+   * Recorded ONCE per target — it is a POLL, and a `calls` sequence carrying one entry per tick would bury
+   * everything it exists to show.
+   */
+  async readPanelAdvance(target: IssuanceTarget): Promise<boolean> {
+    this.recordOnce(`panel?:${target}`);
+    return this.script.panelAdvance?.[target] ?? false;
+  }
+
+  /** Record the parked-run notice, painted. A test that cares about a FAILED paint says so explicitly. */
+  async showParkNotice(code: string): Promise<boolean> {
+    this.calls.push(`parkNotice:${code}`);
+    return true;
+  }
+
+  /** Record the completion notice. */
+  async showCompletionNotice(): Promise<boolean> {
+    this.calls.push("completionNotice");
+    return true;
+  }
+
+  /** Step 3's advisory panel, painted. Recorded with the branch, because the copy differs by it. */
+  async showAppUsageNotice(branch: "existing" | "new"): Promise<boolean> {
+    this.calls.push(`appUsageNotice:${branch}`);
+    return true;
+  }
+
+  /** Has the seller pressed the advisory's button? Fail-closed default: no. Polled ⇒ recorded once. */
+  async readAppUsageAdvance(): Promise<boolean> {
+    this.recordOnce("appUsage?");
+    return this.script.appUsageAdvance ?? false;
+  }
+
+  /** Test helper: the seller presses the advisory's 확인했어요 · 다음. */
+  setAppUsageAdvance(pressed: boolean): void {
+    this.script.appUsageAdvance = pressed;
+  }
+
+  /** Record a POLLED call the first time it happens, so a repeated poll does not drown the sequence. */
+  private recordOnce(entry: string): void {
+    if (this.polled.has(entry)) return;
+    this.polled.add(entry);
+    this.calls.push(entry);
+  }
+
+  /** Test helper: the seller presses this step's on-page "다음". */
+  setPanelAdvance(target: IssuanceTarget, pressed: boolean): void {
+    this.script.panelAdvance = { ...(this.script.panelAdvance ?? {}), [target]: pressed };
   }
 
   async armObserve(target: IssuanceTarget): Promise<void> {

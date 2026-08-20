@@ -149,4 +149,77 @@ export interface IssuanceProbeDriver {
    * re-arming an observation on a dead page. A driver with no window (every scripted test driver) omits it.
    */
   whenSurfaceClosed?(): Promise<void>;
+
+  /**
+   * **Optional: re-arm this step's on-page advance latch.**
+   *
+   * The guided panel now lives on the API-centre window, like the WING walk's, and carries the step's own
+   * "다음". Arming clears any press left over from a previous step, so a stale one can never skip the next.
+   *
+   * A driver with no page omits it, and the session then behaves exactly as it did: the seller's "다음" comes
+   * from the SellerOps tab.
+   */
+  armPanelAdvance?(target: IssuanceTarget): Promise<void>;
+
+  /**
+   * **Optional: did the seller press THIS step's on-page "다음"?** A value-free equality poll on an opaque
+   * per-step token — no page content crosses this boundary.
+   *
+   * What the press MEANS is unchanged: it is the same "I did it, look again" the SellerOps button has always
+   * sent, and the runtime still verifies before completing anything. Only its location changed, to the window
+   * the seller is actually working in.
+   */
+  readPanelAdvance?(target: IssuanceTarget): Promise<boolean>;
+
+  /**
+   * **Optional: keep a docked, NON-INTERACTIVE notice on the marketplace window while the run is parked.**
+   *
+   * A park takes the guidance down, and what the seller is then looking at is a NAVER screen with nothing of
+   * SellerOps on it while the explanation sits in the other tab. Same capability, same fail-closed rule and the
+   * same excluded codes as the WING walk's: no advance button, no ring, no call to action.
+   *
+   * Returns whether the notice was actually PAINTED — an unverified mount is how this walk reported guidance it
+   * had not drawn (2026-08-19).
+   */
+  showParkNotice?(code: NaverIssuanceParkNotice): Promise<boolean>;
+
+  /**
+   * Optional: the walk is over — say so on the window the seller is in, and say what is left.
+   *
+   * Copy-only by construction. The WING walk's completion panel carries a return button because that carrier
+   * injects a real navigation; this one does not, and a button that recorded a press and moved nothing is the
+   * exact defect that walk had to fix.
+   */
+  showCompletionNotice?(): Promise<boolean>;
+
+  /**
+   * **Optional: step 3's panel — the text-only usage-state advisory.**
+   *
+   * The one step with no control to ring, so nothing ever mounted a panel for it: its instruction and its button
+   * lived only in the SellerOps tab. With every other step now advancing on the marketplace window, this would
+   * have been the single step that still required going back — and, once that screen stopped carrying a per-step
+   * control, the step nothing could get past.
+   *
+   * It carries a button, unlike a park notice: the seller is being asked to check something and say they did.
+   */
+  showAppUsageNotice?(branch: "existing" | "new"): Promise<boolean>;
+
+  /** Optional: has the seller pressed that advisory's button? Fail-closed on every other reading. */
+  readAppUsageAdvance?(): Promise<boolean>;
+}
+
+/**
+ * The parks a NAVER API-centre notice exists for — a closed set, and deliberately NOT every blocker code.
+ *
+ * `LOGIN_REQUIRED` is absent for the same reason it is on the WING walk: SellerOps does not put a floating
+ * panel over a screen where someone is typing a password.
+ */
+export const NAVER_ISSUANCE_PARK_NOTICES = ["TARGET_NOT_FOUND", "UI_DRIFT"] as const;
+export type NaverIssuanceParkNotice = (typeof NAVER_ISSUANCE_PARK_NOTICES)[number];
+
+/** Narrow a published blocker code to one this walk will draw. Anything else ⇒ no notice, never a guess. */
+export function naverIssuanceParkNotice(code: string | undefined): NaverIssuanceParkNotice | null {
+  return (NAVER_ISSUANCE_PARK_NOTICES as readonly string[]).includes(code ?? "")
+    ? (code as NaverIssuanceParkNotice)
+    : null;
 }

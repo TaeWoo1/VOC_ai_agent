@@ -16,7 +16,7 @@ import { validateCommandEnvelope } from "../../../../contracts/action-window/v2/
 import type { AwClientFrame, AwServerTransport } from "../../../../contracts/action-window/v2/transport";
 import { log } from "../../log";
 import type { IssuanceEffect, IssuanceEngine } from "./issuance-engine";
-import { TARGET_BARRIER_STAGE, type IssuanceProbeDriver, type IssuanceTarget } from "./issuance-driver";
+import { TARGET_BARRIER_STAGE, naverIssuanceParkNotice, type IssuanceProbeDriver, type IssuanceTarget } from "./issuance-driver";
 import { isIssuanceTerminal } from "./issuance-stages";
 
 export interface IssuanceSessionOptions {
@@ -27,7 +27,15 @@ export interface IssuanceSessionOptions {
    * would otherwise spin at full speed. A re-arm is never a hot path, so a pause costs nothing.
    */
   rearmDelayMs?: number;
+  /** Cadence of the on-page advance-latch poll. A safety floor like `rearmDelayMs`, not a tuning knob. */
+  panelPollMs?: number;
 }
+
+/**
+ * How long the on-page advance latch is polled at one barrier. The seated-operator window, in polls rather than
+ * milliseconds so a zero-delay cadence (which tests use) cannot loop forever.
+ */
+const PANEL_ADVANCE_MAX_POLLS = 1_200;
 
 export class IssuanceGuidanceSession {
   private readonly engine: IssuanceEngine;
@@ -74,6 +82,16 @@ export class IssuanceGuidanceSession {
    * its own.
    */
   private surfaceClosed = false;
+  /** The park notice currently on the window, so it is drawn once per park rather than once per tick. */
+  private parkNoticeShown: string | null = null;
+  /** Which checkpoint's on-page latch is being watched, so two guides cannot start two watchers on one step. */
+  private panelWatching: IssuanceTarget | null = null;
+  /** The panel-advance watch, held so a test can await it. The run never does. */
+  private panelWatch: Promise<void> | null = null;
+  /** One advisory watcher at a time — several would each paint the panel and each issue their own recheck. */
+  private appUsageWatching = false;
+  /** How often the on-page latch is polled. A poll, not a hot path; tests set it to 0. */
+  private readonly panelPollMs: number;
 
   constructor(engine: IssuanceEngine, driver: IssuanceProbeDriver, transport: AwServerTransport, opts?: IssuanceSessionOptions) {
     this.engine = engine;
@@ -83,6 +101,7 @@ export class IssuanceGuidanceSession {
     this.started = engine.isStarted();
     this.onStatePublished = opts?.onStatePublished;
     this.rearmDelayMs = opts?.rearmDelayMs ?? 250;
+    this.panelPollMs = opts?.panelPollMs ?? 500;
   }
 
   attach(): () => void {
@@ -145,6 +164,7 @@ export class IssuanceGuidanceSession {
     });
     this.publishState();
     if (command.type === "START_RUN" && outcome.ok) this.started = true;
+    if (outcome.ok && "effect" in outcome && isNoop(outcome.effect)) this.afterChain();
     if (outcome.ok && "effect" in outcome && !isNoop(outcome.effect)) {
       this.busyCount += 1;
       void this.drive(outcome.effect)
@@ -223,16 +243,175 @@ export class IssuanceGuidanceSession {
       }
       case "CLEAR_HIGHLIGHT": {
         await this.driver.clearHighlight();
+        this.afterChain();
         return;
       }
       case "CLEANUP": {
         await this.driver.cleanup();
+        // The walk is over, and the seller is looking at the API centre — not at SellerOps. Cleanup takes every
+        // panel down, so this goes up on the far side of it, saying what is left to do.
+        await this.showCompletionNotice();
         return;
       }
       case "NONE":
       default:
+        this.afterChain();
         return;
     }
+  }
+
+  /**
+   * **What runs where a drive chain ENDS** — whichever effect ended it, and whether or not there was one.
+   *
+   * Both of these are decisions about the state the run has just SETTLED into, so they belong at the end of the
+   * chain rather than beside each effect that might produce that state. Keeping them here is also what stopped
+   * them being missed: `enterAppUsageCheck` returns `NONE`, so a command whose whole effect was to reach step 3
+   * never entered `drive` at all, and the advisory it needed was never painted.
+   */
+  private afterChain(): void {
+    this.showParkNoticeIfParked();
+    this.watchAppUsageCheck();
+  }
+
+  /**
+   * **Step 3's advisory, on the window the seller is in.**
+   *
+   * It is the one step with no control to ring, so nothing mounted a panel for it and its "다음" lived only in
+   * the SellerOps tab. Every other step advances on the API-centre panel now; leaving this one behind would
+   * have made it the single step that still required crossing tabs, and — once that screen stopped carrying a
+   * per-step control — the step nothing could get past.
+   *
+   * The press is turned into the same `REQUEST_STEP_RECHECK` the FE button sends. Nothing here reads or asserts
+   * the application's state; the panel says so, and the runtime still never claims the app is active.
+   */
+  private watchAppUsageCheck(): void {
+    if (this.stopped || this.surfaceClosed) return;
+    if (this.engine.currentStage() !== "guiding_app_usage_check" || this.engine.isPaused()) return;
+    const show = this.driver.showAppUsageNotice;
+    const read = this.driver.readAppUsageAdvance;
+    if (!show || !read || this.appUsageWatching) return;
+    this.appUsageWatching = true;
+    const branch = this.engine.view().appBranch === "existing" ? "existing" : "new";
+    this.panelWatch = (async () => {
+      try {
+        const painted = await show.call(this.driver, branch).catch(() => false);
+        log("aw_issuance_app_usage_notice", { branch, painted });
+        for (let i = 0; i < PANEL_ADVANCE_MAX_POLLS; i++) {
+          await new Promise<void>((resolve) => setTimeout(resolve, this.panelPollMs));
+          if (this.stopped || this.surfaceClosed) return;
+          if (this.engine.currentStage() !== "guiding_app_usage_check") return;
+          if (!(await read.call(this.driver).catch(() => false))) continue;
+          log("aw_issuance_panel_advance", { target: "app_usage_check" });
+          const outcome = this.engine.command({ type: "REQUEST_STEP_RECHECK", expectedRevision: this.engine.view().revision });
+          if (!outcome.ok) return;
+          this.publishState();
+          if ("effect" in outcome && outcome.effect !== "NONE") {
+            this.busyCount += 1;
+            try {
+              await this.drive(outcome.effect);
+            } catch (e) {
+              await this.onDriveError(e);
+            } finally {
+              this.busyCount -= 1;
+            }
+          } else {
+            this.afterChain();
+          }
+          return;
+        }
+      } finally {
+        this.appUsageWatching = false;
+      }
+    })();
+  }
+
+  /**
+   * **What the seller sees on the API centre while the run is parked.**
+   *
+   * A park takes the guidance down — `CLEAR_HIGHLIGHT` unmounts the panel — and what is left in front of the
+   * seller is a NAVER screen with nothing of SellerOps on it, while the explanation sits in the other tab. The
+   * WING walk had exactly this and fixed it on 2026-08-20; this is the same fix on the sibling that still had it.
+   *
+   * Mounted once per park, not once per tick, and never on a window the seller closed.
+   */
+  private showParkNoticeIfParked(): void {
+    if (this.stopped || this.surfaceClosed) return;
+    const show = this.driver.showParkNotice;
+    if (!show) return;
+    const code = naverIssuanceParkNotice(this.engine.view().blocker?.code);
+    if (code === this.parkNoticeShown) return;
+    this.parkNoticeShown = code;
+    if (code === null) return;
+    void show
+      .call(this.driver, code)
+      .then((painted) => log("aw_issuance_park_notice", { code, painted }))
+      .catch(() => log("aw_issuance_park_notice", { code, painted: false }, "warn"));
+  }
+
+  /** Say the walk is finished, on the window it happened in. Never opens one; never claims an unpainted mount. */
+  private async showCompletionNotice(): Promise<void> {
+    if (this.stopped || this.surfaceClosed) return;
+    const show = this.driver.showCompletionNotice;
+    if (!show) return;
+    const painted = await show.call(this.driver).catch(() => false);
+    log("aw_issuance_completion_notice", { painted });
+  }
+
+  /**
+   * **Watch this checkpoint's on-page "다음" — the same press the SellerOps button sends, where the seller is.**
+   *
+   * A viewport checkpoint arms no NAVER-click observation (the engine says so, and fails closed if one ever
+   * reported), so until now the ONLY way past one was a `REQUEST_STEP_RECHECK` from the SellerOps tab. That is a
+   * round trip per step, on the last walk that still had one.
+   *
+   * So the press is read here and turned into exactly that command — not into a completion. The engine still
+   * decides, `advanceCheckpoint` is still the only path, and the FE button still works: this removes the NEED to
+   * cross tabs, never the ability.
+   *
+   * Not counted as a drive: the run is RESTING on a person, and counting it would stop `whenSettled` from ever
+   * reporting a settled barrier.
+   */
+  private watchPanelAdvance(target: IssuanceTarget): void {
+    if (this.stopped || this.surfaceClosed) return;
+    const read = this.driver.readPanelAdvance;
+    if (!read || this.panelWatching === target) return;
+    this.panelWatching = target;
+    this.panelWatch = (async () => {
+      try {
+        for (let i = 0; i < PANEL_ADVANCE_MAX_POLLS; i++) {
+          await new Promise<void>((resolve) => setTimeout(resolve, this.panelPollMs));
+          if (this.stopped || this.surfaceClosed) return;
+          // The barrier moved on (the FE's own 다음, a park, a cancel) — stop rather than press into a step the
+          // run has already left.
+          if (!this.stillWaitingOn(target)) return;
+          if (!(await read.call(this.driver, target).catch(() => false))) continue;
+          log("aw_issuance_panel_advance", { target });
+          const outcome = this.engine.command({ type: "REQUEST_STEP_RECHECK", expectedRevision: this.engine.view().revision });
+          if (!outcome.ok) return;
+          this.publishState();
+          if ("effect" in outcome && outcome.effect !== "NONE") {
+            this.busyCount += 1;
+            try {
+              await this.drive(outcome.effect);
+            } catch (e) {
+              await this.onDriveError(e);
+            } finally {
+              this.busyCount -= 1;
+            }
+          } else {
+            this.afterChain();
+          }
+          return;
+        }
+      } finally {
+        if (this.panelWatching === target) this.panelWatching = null;
+      }
+    })();
+  }
+
+  /** The panel-advance watch, awaitable by tests. The run never awaits it — it waits on a person. */
+  async whenPanelWatchSettled(): Promise<void> {
+    await this.panelWatch;
   }
 
   /**
@@ -253,6 +432,13 @@ export class IssuanceGuidanceSession {
       const hl = await this.driver.highlightTarget(target);
       const afterHl = this.engine.onTargetHighlighted(target, hl);
       this.publishState();
+      // A fresh barrier is a fresh press: re-arm this step's latch (dropping anything left over from the last
+      // one) and then watch it. Ordered so a stale press can never be read as this step's advance.
+      if (this.engine.currentStage() === TARGET_BARRIER_STAGE[target] && this.engine.activeTarget() === target) {
+        this.parkNoticeShown = null;
+        await this.driver.armPanelAdvance?.(target).catch(() => undefined);
+        this.watchPanelAdvance(target);
+      }
       return this.drive(afterHl);
     }
     // Locate parked (target_not_found) — publish the park and follow whatever it returned.

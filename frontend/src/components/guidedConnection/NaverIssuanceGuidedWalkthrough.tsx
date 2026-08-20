@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useBridge } from "../../hooks/useBridge";
 import type { ActionWindowRunView, CommandType } from "../../lib/actionWindow/contract";
 import type { IssuanceAppBranch } from "../../../../contracts/action-window/v2/index";
-import { blockerView, issuanceStepDetail } from "../../lib/actionWindow/copy";
-import { OperationRunTimeline } from "../actionWindow/OperationRunTimeline";
+import { blockerView } from "../../lib/actionWindow/copy";
 import { ActionWindowControlPanel } from "../actionWindow/ActionWindowControlPanel";
 import { BlockerNotice } from "../actionWindow/BlockerNotice";
 import { AgentPairingPanel } from "../reviewImport/AgentPairingPanel";
@@ -18,11 +17,14 @@ import { classifyAgentEnv, type AgentEnvStatus, type GuidedEvent } from "../../l
  *
  * This is the ONLY place the Local Agent participates in the order connection. It pairs the agent here (via
  * `useBridge` + the shared `AgentPairingPanel`), and once the agent is hosting an issuance run it renders the
- * SAME Action Window surfaces the review-import world uses — `OperationRunTimeline`, `ActionWindowControlPanel`
- * (controls strictly from `run.allowedCommands`, including the abort/CANCEL_RUN control), and `BlockerNotice` —
- * so a step, a blocker, and the allowed commands are shown identically. Step prose is resolved by copy key
- * (never authored from runtime prose), and `REQUEST_STEP_RECHECK` only reports "I did it" — the runtime alone
- * completes a step.
+ * SAME surfaces the Coupang walk renders — a status section, `BlockerNotice`, and `ActionWindowControlPanel`
+ * with controls strictly from `run.allowedCommands`.
+ *
+ * **The step-by-step guidance is NOT here.** It is on the API-centre window, in the shared guided panel: channel
+ * name, step counter, what to do now, and the step's own "다음". This screen used to mirror all of that AND own
+ * the only button that advanced a step, which made every step of this walk end with "now go to the other
+ * window". `REQUEST_STEP_RECHECK` still means only "I did it, look again" — the runtime alone completes a step —
+ * and it is surfaced here at a recoverable blocker, where recovery genuinely is this screen's job.
  *
  * ## The order connection stays Local-Agent-free
  *
@@ -177,12 +179,14 @@ export function NaverIssuanceGuidedWalkthrough({
     dispatch({ type: "ISSUANCE_APP_BRANCH_OBSERVED", branch: observedBranch });
   }, [observedBranch, dispatch]);
 
-  // The commands this walkthrough surfaces from the run's `allowedCommands` — the same curation the import
-  // sibling uses (`GuidedImportCard.OFFERED_COMMANDS`). A barrier's raw `allowedCommands` also includes
-  // PAUSE/RESUME, SET_GUIDANCE_ENABLED, FIND_CURRENT_STEP, and SWITCH_TO_MANUAL; SET_GUIDANCE_ENABLED/
-  // FIND_CURRENT_STEP are inert here, and SWITCH_TO_MANUAL is reached only through the failure-only text
-  // fallback (`toText`), which aborts the run cleanly before advancing to text. So only these two render.
-  const OFFERED_COMMANDS: readonly CommandType[] = ["REQUEST_STEP_RECHECK", "CANCEL_RUN"];
+  // **The FE is no longer the per-step controller.** Step advance happens ON the API-centre page — the guided
+  // panel's own "다음" — exactly as it does on the Coupang walk, so this screen surfaces no per-step control
+  // during a healthy barrier. At a recoverable blocker recovery IS the FE's job, so it additionally offers
+  // REQUEST_STEP_RECHECK ("다시 확인"), which re-probes and re-guides and never completes a step.
+  const isBlocked = !!effectiveRun?.blocker;
+  const OFFERED_COMMANDS: readonly CommandType[] = isBlocked
+    ? ["REQUEST_STEP_RECHECK", "CANCEL_RUN"]
+    : ["CANCEL_RUN"];
   const controlExclude = effectiveRun
     ? effectiveRun.allowedCommands.filter((c) => !OFFERED_COMMANDS.includes(c))
     : [];
@@ -295,18 +299,29 @@ export function NaverIssuanceGuidedWalkthrough({
       {/* A hosted run → the shared Action Window surfaces. */}
       {effectiveRun && (
         <>
-          <OperationRunTimeline run={effectiveRun} />
-          {/* FULL instruction for the current step, so this screen is self-sufficient and the seller does not
-              have to decode the in-NAVER highlight (which only points at a control). FE-owned copy by step key;
-              a step with no detail renders nothing. */}
-          {(() => {
-            const detail = issuanceStepDetail(effectiveRun.currentStep?.copyKey);
-            return detail ? (
-              <p className="rounded-lg bg-canvas px-4 py-3 text-sm text-ink break-keep" role="note">
-                {detail}
+          {/* Healthy barrier: STATUS ONLY, the same shape the Coupang walk shows. The step-by-step guidance and
+              the "다음" button live ON the NAVER page now, so mirroring them here would be two products asking
+              for one press — and the seller is looking at the other one. */}
+          {effectiveRun.status !== "COMPLETED" && !effectiveRun.blocker && (
+            <section
+              className="space-y-1 rounded-xl bg-canvas px-4 py-3"
+              role="status"
+              aria-label="화면 안내 진행 상태"
+            >
+              <p className="text-sm font-medium text-ink break-keep">
+                네이버 창에서 화면 안내를 따라 진행하세요
               </p>
-            ) : null;
-          })()}
+              <p className="text-xs text-muted break-keep">
+                열린 네이버 커머스 API 창의 안내(하이라이트와 '다음' 버튼)를 따라가시면 됩니다. 각 단계는 그
+                화면에서 직접 진행되고, 이 화면은 진행 상태만 보여줍니다.
+              </p>
+              {effectiveRun.progress && (
+                <p className="text-xs text-muted">
+                  {effectiveRun.progress.completedSteps} / {effectiveRun.progress.totalSteps} 단계 완료
+                </p>
+              )}
+            </section>
+          )}
           {effectiveRun.blocker && (
             <BlockerNotice
               title={blockerView(effectiveRun.blocker.code).title}
@@ -315,15 +330,24 @@ export function NaverIssuanceGuidedWalkthrough({
               variant="standalone"
             />
           )}
-          <ActionWindowControlPanel
-            run={effectiveRun}
-            exclude={controlExclude}
-            onCommand={(type) => effectiveCommand?.(type)}
-          />
+          {effectiveRun.status !== "COMPLETED" && (
+            <ActionWindowControlPanel
+              run={effectiveRun}
+              exclude={controlExclude}
+              onCommand={(type) => effectiveCommand?.(type)}
+            />
+          )}
           {effectiveRun.status === "COMPLETED" && (
             <div className="space-y-2">
               <p className="text-sm font-medium text-ink break-keep" role="status">
                 {reuseExistingApp ? "기존 애플리케이션 확인 완료" : "애플리케이션 발급 완료"}
+              </p>
+              {/* **The honest ending for this channel.** NAVER shows the two values on a page SellerOps has no
+                  way to hand over from — there is no credential handoff here and inventing the appearance of
+                  one would be the fake capability the walk's own panel is careful not to claim. So the walk
+                  finishes by bringing the seller to the form they fill in themselves. */}
+              <p className="text-sm text-muted break-keep">
+                복사해 두신 애플리케이션 ID와 시크릿을 입력하면 연결이 끝납니다.
               </p>
               <button
                 type="button"
@@ -331,7 +355,7 @@ export function NaverIssuanceGuidedWalkthrough({
                 onClick={() => dispatch({ type: "ISSUANCE_COMPLETE" })}
                 disabled={busy}
               >
-                SellerOps로 돌아가 연결 정보 입력하기
+                연결 정보 입력하기
               </button>
             </div>
           )}

@@ -49,6 +49,8 @@ import {
   mountOverlay,
   unmountOverlay,
   overlayMounted,
+  resetOverlayAdvance,
+  readOverlayAdvancePressed,
   readMountSubStage,
   fingerprintMountFault,
   sanitizeMountMessage,
@@ -76,6 +78,7 @@ import type {
   IssuanceProbeDriver,
   IssuanceSurfaceProbe,
   IssuanceTarget,
+  NaverIssuanceParkNotice,
 } from "./api-issuance/issuance-driver";
 import type { LocateResult } from "./engine";
 
@@ -234,14 +237,153 @@ const OVERLAY_STEP: Readonly<Record<IssuanceTarget, number>> = {
  * only in-window guidance). Diagnostic aid only — NOT the product FE's localized copy. The SELLER performs
  * every step; SellerOps never copies the Client ID / Secret (a separate masked SellerOps form does that).
  */
-const OPERATOR_STEP_LABELS: Readonly<Record<IssuanceTarget, string>> = {
-  create_app: "표시된 'API 애플리케이션 등록' 위치입니다. 직접 생성한 뒤 SellerOps에서 '다음'을 누르세요.",
-  open_app: "기존 API 애플리케이션을 직접 여세요. (SellerOps가 상세 화면 진입을 관찰합니다.)",
-  api_group: "표시된 '커머스 API' 그룹 위치를 확인한 뒤 SellerOps에서 '다음'을 누르세요.",
-  application_id: "표시된 애플리케이션 ID 행을 직접 복사한 뒤 SellerOps에서 '다음'을 누르세요 (도구는 값을 읽지 않습니다).",
-  application_secret: "표시된 시크릿 보기/복사 위치에서 직접 확인·복사한 뒤 SellerOps에서 '다음'을 누르세요 (도구는 값을 읽지 않습니다).",
-  return: "SellerOps로 돌아와 '다음'을 누르세요.",
+/**
+ * **Which walk this panel belongs to**, shown in the shared shell's header beside the step counter. The Coupang
+ * walk names itself the same way on the same shell — a seller connecting both channels meets one product.
+ */
+const NAVER_CHANNEL_NAME = "네이버 커머스 API";
+
+/**
+ * **The panel's one visible line per step** — what to do now, on the window the seller is working in.
+ *
+ * These are SELLER copy, and they were not before. They said "SellerOps에서 '다음'을 누르세요" because the only
+ * button that advanced a step was in the other tab: a walk whose every step ended with "now go to the other
+ * window" is the round trip the WING walk removed and this one kept. The advance button is on this panel now,
+ * so the copy names it.
+ *
+ * What has NOT changed is the boundary each line states: the seller creates the application, opens it, selects
+ * the group and copies the two values. SellerOps highlights, observes a page transition, and reads nothing.
+ */
+const NAVER_STEP_BRIEF: Readonly<Record<IssuanceTarget, string>> = {
+  create_app: "'애플리케이션 등록'을 직접 눌러 애플리케이션을 만드세요. 다 만드셨으면 아래 '다음'을 누르세요.",
+  open_app: "연결할 애플리케이션을 직접 여세요. 상세 화면이 열리면 자동으로 넘어갑니다.",
+  api_group: "표시된 '커머스 API' 그룹이 선택돼 있는지 확인하세요.",
+  application_id: "표시된 애플리케이션 ID를 직접 복사해 두세요. SellerOps는 값을 읽지 않습니다.",
+  application_secret: "'보기'를 눌러 시크릿을 확인하고 직접 복사해 두세요. SellerOps는 값을 읽지 않습니다.",
+  return: "복사한 두 값을 SellerOps 창에 입력하면 연결이 끝납니다.",
 };
+
+/**
+ * **The rest of each step, behind the panel's `자세히` disclosure.**
+ *
+ * These are the frontend's own step strings, VERBATIM — the same relationship the WING walk has
+ * (`OPERATOR_STEP_LABELS` ↔ `frontend/src/lib/actionWindow/copy.ts`, asserted by a crossstack parity test), and
+ * for the same reason: this copy carries safety claims the seller acts on ("SellerOps는 시크릿 값도, 클립보드도
+ * 읽지 않습니다"), and two places wording one step is how one of them quietly loses a clause.
+ *
+ * They moved here rather than being rewritten because they were already the vetted seller copy. What changed is
+ * WHERE the seller reads them: on the window they are working in, instead of the tab they had to go back to.
+ */
+export const NAVER_STEP_DETAIL: Readonly<Record<IssuanceTarget, string>> = {
+  create_app:
+    "새 애플리케이션을 하나 만드세요. 스토어당 애플리케이션은 1개만 만들 수 있고 삭제할 수 없으니, 이미 만든 앱이 있으면 새로 만들지 말고 그 앱을 사용하세요.",
+  open_app:
+    "이미 만들어 둔 애플리케이션의 상세 화면을 여세요. 새 애플리케이션을 만들지 마세요 — 스토어당 1개만 가능하고 삭제할 수 없습니다.",
+  api_group:
+    "이 애플리케이션에 상품·주문(판매자) 관련 API 그룹이 포함돼 있는지 확인하고, 없으면 추가하세요. 정확한 그룹 이름은 화면마다 다를 수 있으니 '주문'·'판매자'가 포함된 항목을 찾아 선택하면 됩니다.",
+  application_id:
+    "애플리케이션 ID를 복사해 주세요. 표시된 애플리케이션 ID 행에서 값을 직접 복사하시면 됩니다. SellerOps는 이 값을 읽지 않습니다 — 복사는 직접 하시고, 마지막에 SellerOps 보안 입력란에 붙여넣으세요.",
+  application_secret:
+    "애플리케이션 시크릿을 확인하고 복사해 주세요. 표시된 '보기/복사' 컨트롤에서 시크릿을 직접 확인·복사하시면 됩니다. SellerOps는 시크릿 값도, 클립보드도 읽지 않습니다. 확인이 어려우면 시크릿 재발급이 필요할 수 있습니다.",
+  // **The honest ending, and it is deliberately different from the WING walk's.** Coupang shows the three
+  // values on a page SellerOps can read under the seller's consent, so that walk ends with one press. NAVER
+  // does not: the seller types the two values in themselves, and a panel that implied otherwise would be
+  // promising a capability this channel does not have.
+  return: "두 값을 복사했다면 SellerOps로 돌아가 주세요. 안내가 끝나면 연결 정보 입력 화면으로 이동합니다.",
+};
+
+/**
+ * **Step 3, the text-only usage-state advisory — the one step with no control to ring.**
+ *
+ * It has no target, so nothing highlights and nothing mounted a panel for it: the instruction lived ONLY in the
+ * SellerOps tab, and its button did too. Moving the other steps onto the API-centre window without moving this
+ * one would have left exactly one step that still required going back — and, with the per-step control gone
+ * from that screen, no way past it at all.
+ *
+ * Verbatim from the frontend's own copy, like {@link NAVER_STEP_DETAIL}, including the claim that matters most
+ * here: SellerOps does not read the app's state and never asserts it is active.
+ */
+export const NAVER_APP_USAGE_COPY = Object.freeze({
+  existing: {
+    brief: "애플리케이션 상태를 확인해 주세요.",
+    detail:
+      "애플리케이션 상태를 확인해 주세요. 화면에 '다시사용' 버튼이 보인다면 직접 눌러 앱을 활성화해 주세요. 버튼이 보이지 않더라도 SellerOps가 활성 상태라고 단정하지 않습니다. 확인했다면 다음으로 진행해 주세요.",
+    badge: "애플리케이션 상태 확인",
+  },
+  new: {
+    brief: "방금 만든 애플리케이션의 상태를 확인해 주세요.",
+    detail:
+      "방금 만든 애플리케이션의 상태를 확인해 주세요. 새로 만든 앱은 보통 바로 사용할 수 있지만, 혹시 화면에 '다시사용' 버튼이 보이면 직접 눌러 활성화해 주세요. 버튼이 보이지 않더라도 SellerOps가 활성 상태라고 단정하지 않습니다. 확인했다면 다음으로 진행해 주세요.",
+    badge: "생성 직후 상태 확인",
+  },
+});
+
+/** The advisory's own latch token — its own namespace, like every other press in this walk. */
+const APP_USAGE_ADVANCE_TOKEN = "naver-issuance-advance:app_usage_check";
+
+/**
+ * The panel's advance button per step. `open_app` has NONE: it is the one step that auto-advances on the
+ * observed `app_list → app_detail` navigation, and a button beside an observation is a second way to claim a
+ * thing the runtime is already measuring.
+ */
+const NAVER_ADVANCE_LABEL: Readonly<Partial<Record<IssuanceTarget, string>>> = {
+  create_app: "만들었어요 · 다음",
+  api_group: "확인했어요 · 다음",
+  application_id: "복사했어요 · 다음",
+  application_secret: "복사했어요 · 다음",
+  return: "SellerOps에서 입력할게요 · 완료",
+};
+
+/** The chip above the ring: which step this is, never an abbreviated instruction (the panel carries that). */
+export const NAVER_STEP_TITLE: Readonly<Record<IssuanceTarget, string>> = {
+  create_app: "애플리케이션 만들기 (스토어당 1개)",
+  open_app: "발급한 애플리케이션 열기",
+  api_group: "주문·판매자 관련 API 그룹 추가",
+  application_id: "애플리케이션 ID 복사",
+  application_secret: "애플리케이션 시크릿 확인·복사",
+  return: "SellerOps로 돌아와 입력",
+};
+
+/**
+ * **What a parked NAVER walk says on the API-centre window**, and what a finished one does.
+ *
+ * Same rule as the WING walk's park notices: it says what SellerOps could not do and points at the seller's own
+ * 다시 확인 — never at a NAVER control. `LOGIN_REQUIRED` is absent for the same reason there too: SellerOps does
+ * not put a floating panel over a screen where someone is typing a password.
+ */
+const NAVER_PARK_NOTICE_COPY: Readonly<Record<NaverIssuanceParkNotice, { badge: string; brief: string; detail: string }>> =
+  Object.freeze({
+    TARGET_NOT_FOUND: {
+      badge: "안내 멈춤",
+      brief: "이 화면에서 다음 위치를 찾지 못했어요.",
+      detail: "화면이 모두 뜬 뒤 SellerOps에서 '다시 확인'을 눌러 주세요.",
+    },
+    UI_DRIFT: {
+      badge: "안내 멈춤",
+      brief: "네이버 화면이 예상과 달라요.",
+      detail: "연결할 애플리케이션의 상세 화면인지 확인한 뒤, SellerOps에서 '다시 확인'을 눌러 주세요.",
+    },
+  });
+
+/**
+ * The walk is over. Copy-only, and that is a decision rather than an omission: the WING walk's completion panel
+ * carries a `SellerOps로 돌아가기` button because that carrier injects a real navigation. This one does not, and
+ * a button that recorded a press and moved nothing is exactly the defect the WING walk had to fix on 2026-08-12.
+ */
+const NAVER_COMPLETION_COPY = Object.freeze({
+  badge: "확인 완료",
+  brief: "✓ 네이버 API 확인 완료",
+  detail: "SellerOps 창으로 돌아가 애플리케이션 ID와 시크릿을 입력하면 연결이 끝납니다. 이 창은 닫으셔도 됩니다.",
+});
+
+/**
+ * The opaque per-step latch token for this walk's panel advance button. Value-free — a fixed derived string,
+ * compared only for equality. Distinct per target so a stale press cannot satisfy the next step's poll, and in
+ * its own `naver-issuance` namespace so it can never collide with the WING walk's.
+ */
+function naverAdvanceToken(target: IssuanceTarget): string {
+  return `naver-issuance-advance:${target}`;
+}
 
 /** A browser context whose newest tab may hold the step the seller opened. Structural subset of Playwright's. */
 export interface IssuanceContextLike {
@@ -321,6 +463,8 @@ const IN_PAGE_APP_ENTRY_COUNT = `(function () {
 })()`;
 
 export class NaverIssuanceDriver implements IssuanceProbeDriver {
+  /** The step the walk was last guiding — so a park notice keeps its place in the walk. */
+  private lastStepNumber = 1;
   private readonly page: Page;
   private readonly opts: NaverIssuanceDriverOptions;
   private readonly closed: Promise<void>;
@@ -624,6 +768,10 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
    * catch and every downstream recovery path behave exactly as before — this only observes on the way out.
    */
   private async mountStepOverlay(page: Page, target: IssuanceTarget, dockedPanelOnly = false): Promise<void> {
+    // Remembered for the park notice: a park keeps the walk's own step number rather than resetting the counter
+    // to 1, which would read as the run having started over.
+    this.lastStepNumber = OVERLAY_STEP[target];
+    const buttonLabel = NAVER_ADVANCE_LABEL[target];
     try {
       await mountOverlay(page, {
         // Set only for a step with no anchor to ring; without it the mount finds no target and paints nothing.
@@ -631,8 +779,18 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
         stepNumber: OVERLAY_STEP[target],
         totalSteps: ISSUANCE_TOTAL_STEPS,
         copyKey: `actionWindow.issuance.step.${target}`,
-        label: OPERATOR_STEP_LABELS[target],
+        // The BRIEF leads and the full copy sits behind the panel's disclosure — the same split the WING walk
+        // uses, so a step that must be READ is not five sentences docked over the seller's work.
+        label: NAVER_STEP_BRIEF[target],
+        detail: NAVER_STEP_DETAIL[target],
+        badgeLabel: NAVER_STEP_TITLE[target],
         guidanceEnabled: this.opts.guidanceEnabled ?? true,
+        // The shared guided panel shell: the seller reads the step and advances it ON the window they are
+        // working in. This walk used to say "SellerOps에서 '다음'을 누르세요" at every step — a round trip per
+        // step, on the only walk that still had one.
+        residentPanel: true,
+        channelName: NAVER_CHANNEL_NAME,
+        ...(buttonLabel ? { advance: { buttonLabel, token: naverAdvanceToken(target) } } : {}),
       });
     } catch (e) {
       // Localize the mount fault to a sub-stage + fixed reason (both sanitized) — the evidence the next unit needs.
@@ -650,6 +808,101 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
       });
       throw e; // re-throw the SAME error — control flow unchanged for every caller
     }
+  }
+
+  /**
+   * Re-arm this step's on-page advance latch, so a press left over from an earlier step (or an earlier arm
+   * window) can never be misread as this step's. Value-free: it writes an opaque token and drops a latch.
+   */
+  async armPanelAdvance(target: IssuanceTarget): Promise<void> {
+    if (!NAVER_ADVANCE_LABEL[target]) return;
+    await resetOverlayAdvance(this.activePage(), naverAdvanceToken(target)).catch(() => undefined);
+  }
+
+  /** Did the seller press THIS step's panel button? Value-free equality poll; an unreadable page ⇒ `false`. */
+  async readPanelAdvance(target: IssuanceTarget): Promise<boolean> {
+    if (!NAVER_ADVANCE_LABEL[target]) return false;
+    return readOverlayAdvancePressed(this.activePage(), naverAdvanceToken(target)).catch(() => false);
+  }
+
+  /**
+   * **What the seller sees on the API centre while the run is parked.** A docked panel and nothing else: the
+   * ring is cleared first, there is no button, and the copy names no NAVER control.
+   *
+   * The paint is VERIFIED before it is reported — a notice that claims to be on screen when it is not leaves
+   * the seller exactly where this method exists to stop leaving them.
+   */
+  async showParkNotice(code: NaverIssuanceParkNotice): Promise<boolean> {
+    const copy = NAVER_PARK_NOTICE_COPY[code];
+    const page = this.activePage();
+    await this.evalStr(page, IN_PAGE_CLEAR_TAG).catch(() => undefined);
+    await mountOverlay(page, {
+      dockedPanelOnly: true,
+      stepNumber: this.lastStepNumber,
+      totalSteps: ISSUANCE_TOTAL_STEPS,
+      copyKey: `actionWindow.issuance.park.${code}`,
+      label: copy.brief,
+      detail: copy.detail,
+      badgeLabel: copy.badge,
+      guidanceEnabled: this.opts.guidanceEnabled ?? true,
+      residentPanel: true,
+      channelName: NAVER_CHANNEL_NAME,
+    }).catch(() => undefined);
+    return overlayMounted(page).catch(() => false);
+  }
+
+  /**
+   * **Step 3's panel — the advisory with no control to ring.**
+   *
+   * Docked (there is nothing to point at) and it DOES carry a button, unlike a park notice: this step asks the
+   * seller to check something and say they did, which is exactly what a barrier is. The press means what the
+   * SellerOps "다음" meant, and the runtime still asserts nothing about the app's state.
+   */
+  async showAppUsageNotice(branch: "existing" | "new"): Promise<boolean> {
+    const copy = NAVER_APP_USAGE_COPY[branch];
+    const page = this.activePage();
+    await this.evalStr(page, IN_PAGE_CLEAR_TAG).catch(() => undefined);
+    await resetOverlayAdvance(page, APP_USAGE_ADVANCE_TOKEN).catch(() => undefined);
+    await mountOverlay(page, {
+      dockedPanelOnly: true,
+      stepNumber: 3,
+      totalSteps: ISSUANCE_TOTAL_STEPS,
+      copyKey: "actionWindow.issuance.appUsageCheck",
+      label: copy.brief,
+      detail: copy.detail,
+      detailExpanded: true,
+      badgeLabel: copy.badge,
+      guidanceEnabled: this.opts.guidanceEnabled ?? true,
+      residentPanel: true,
+      channelName: NAVER_CHANNEL_NAME,
+      advance: { buttonLabel: "확인했어요 · 다음", token: APP_USAGE_ADVANCE_TOKEN },
+    }).catch(() => undefined);
+    this.lastStepNumber = 3;
+    return overlayMounted(page).catch(() => false);
+  }
+
+  /** Has the seller pressed the advisory's button? Value-free equality poll; an unreadable page ⇒ `false`. */
+  async readAppUsageAdvance(): Promise<boolean> {
+    return readOverlayAdvancePressed(this.activePage(), APP_USAGE_ADVANCE_TOKEN).catch(() => false);
+  }
+
+  /** The walk is done. Copy-only — see {@link NAVER_COMPLETION_COPY} for why there is no button here. */
+  async showCompletionNotice(): Promise<boolean> {
+    const page = this.activePage();
+    await this.evalStr(page, IN_PAGE_CLEAR_TAG).catch(() => undefined);
+    await mountOverlay(page, {
+      dockedPanelOnly: true,
+      stepNumber: ISSUANCE_TOTAL_STEPS,
+      totalSteps: ISSUANCE_TOTAL_STEPS,
+      copyKey: "actionWindow.issuance.complete",
+      label: NAVER_COMPLETION_COPY.brief,
+      detail: NAVER_COMPLETION_COPY.detail,
+      badgeLabel: NAVER_COMPLETION_COPY.badge,
+      guidanceEnabled: this.opts.guidanceEnabled ?? true,
+      residentPanel: true,
+      channelName: NAVER_CHANNEL_NAME,
+    }).catch(() => undefined);
+    return overlayMounted(page).catch(() => false);
   }
 
   async clearHighlight(): Promise<void> {

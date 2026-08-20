@@ -25,6 +25,7 @@ import type {
   IssuanceProbeDriver,
   IssuanceSurfaceProbe,
   IssuanceTarget,
+  NaverIssuanceParkNotice,
 } from "./issuance-driver";
 
 export interface LazyNaverIssuanceDriverDeps {
@@ -121,6 +122,44 @@ export class LazyNaverIssuanceDriver implements IssuanceProbeDriver {
 
   async armObserve(target: IssuanceTarget): Promise<void> {
     await (await this.driver()).armObserve(target);
+  }
+
+  /**
+   * The panel's own latch, armed and read ONLY on a window that already exists — `isOpen()`, never `driver()`.
+   * A poll for a press that could open a marketplace window is the resurrection the whole lazy layer exists to
+   * prevent, and a press cannot exist on a window that does not.
+   */
+  async armPanelAdvance(target: IssuanceTarget): Promise<void> {
+    if (!this.isOpen()) return;
+    await (await this.driver()).armPanelAdvance(target);
+  }
+
+  async readPanelAdvance(target: IssuanceTarget): Promise<boolean> {
+    if (!this.isOpen()) return false;
+    return (await this.driver()).readPanelAdvance(target);
+  }
+
+  /** Drawn only on a surface that already exists — a "we stopped" panel is of no use on a closed window. */
+  async showParkNotice(code: NaverIssuanceParkNotice): Promise<boolean> {
+    if (!this.isOpen()) return false;
+    return (await this.driver()).showParkNotice(code);
+  }
+
+  /** Same rule for the completion notice: a finished walk opens nothing to announce itself. */
+  async showCompletionNotice(): Promise<boolean> {
+    if (!this.isOpen()) return false;
+    return (await this.driver()).showCompletionNotice();
+  }
+
+  /** Step 3's advisory, and its press. Both only on a window that already exists. */
+  async showAppUsageNotice(branch: "existing" | "new"): Promise<boolean> {
+    if (!this.isOpen()) return false;
+    return (await this.driver()).showAppUsageNotice(branch);
+  }
+
+  async readAppUsageAdvance(): Promise<boolean> {
+    if (!this.isOpen()) return false;
+    return (await this.driver()).readAppUsageAdvance();
   }
 
   async observeUserAction(target: IssuanceTarget): Promise<boolean> {

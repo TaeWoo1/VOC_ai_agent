@@ -90,13 +90,15 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("NaverIssuanceGuidedWalkthrough", () => {
-  it("renders the AW timeline + controls from a fixture issuance run view (step copy by key)", () => {
+  it("**shows STATUS, not the walk** — the step-by-step guidance is on the window the seller is in", () => {
+    // The step prose, the step counter as a timeline, and the per-step 다음 all used to live here, which meant
+    // every step of this walk ended with "now go to the other window". They are on the API-centre panel now —
+    // channel name, step counter, what to do next, and one CTA — and this screen reports progress.
     render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} run={issuanceRun()} onCommand={vi.fn()} />);
-    expect(screen.getByRole("region", { name: "진행 단계" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "가능한 동작" })).toBeInTheDocument();
-    // Step 2's copy resolved from its key (FE-owned), not runtime prose.
-    expect(screen.getByText("애플리케이션 만들기 (스토어당 1개)")).toBeInTheDocument();
-    expect(screen.getByText("1 / 7")).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "화면 안내 진행 상태" })).toBeInTheDocument();
+    expect(screen.getByText("네이버 창에서 화면 안내를 따라 진행하세요")).toBeInTheDocument();
+    expect(screen.getByText("1 / 7 단계 완료")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "진행 단계" })).toBeNull();
   });
 
   it("shows a persistent call-IP advisory with the advertised IP (M2: guided path, not only the text checklist)", () => {
@@ -119,59 +121,19 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
     expect(screen.queryByText(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)).toBeNull();
   });
 
-  it("renders the FULL per-step instruction under the timeline (self-sufficient — no need to decode the highlight)", () => {
-    // createApp step → its complete instruction, not just the terse title.
-    render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} run={issuanceRun()} onCommand={vi.fn()} />);
-    expect(screen.getByText(/스토어당 애플리케이션은 1개만 만들 수 있고 삭제할 수 없/)).toBeInTheDocument();
-  });
+  /**
+   * The per-step instruction, the secret-step privacy claim and the two step-3 advisories were asserted here
+   * while this screen rendered them. They are the PANEL's copy now — and they are still the same strings: the
+   * runtime's tables are pinned to this file's `ISSUANCE_STEP_DETAIL` character for character by
+   * `collector/test/crossstack/naver-issuance-fe-copy-parity.test.ts`, which is where those claims are asserted.
+   */
 
-  it("the application-secret step detail states SellerOps reads no secret value / clipboard", () => {
-    render(
-      <NaverIssuanceGuidedWalkthrough
-        dispatch={vi.fn()}
-        run={issuanceRun({ currentStep: { stepId: "aw.issuance_application_secret", stepNumber: 6, totalSteps: 7, copyKey: "actionWindow.issuance.applicationSecret", status: "AWAITING_USER" } })}
-        onCommand={vi.fn()}
-      />,
-    );
-    expect(screen.getByText(/SellerOps는 시크릿 값도, 클립보드도 읽지 않습니다/)).toBeInTheDocument();
-  });
-
-  it("the usage-state advisory step (step 3) shows the reactivate guidance and never claims the app is active", () => {
-    // Existing-app branch: the step-3 advisory copy resolves from its key — it points at '다시사용' but does NOT
-    // assert the app is active (absence ≠ active). It is text-only (no highlight to decode).
-    render(
-      <NaverIssuanceGuidedWalkthrough
-        dispatch={vi.fn()}
-        run={issuanceRun({
-          appBranch: "existing",
-          currentStep: { stepId: "aw.issuance_app_usage_check", stepNumber: 3, totalSteps: 7, copyKey: "actionWindow.issuance.appUsageCheck", status: "AWAITING_USER" },
-        })}
-        onCommand={vi.fn()}
-      />,
-    );
-    expect(screen.getByText(/'다시사용' 버튼이 보인다면 직접 눌러/)).toBeInTheDocument();
-    expect(screen.getByText(/활성 상태라고 단정하지 않습니다/)).toBeInTheDocument();
-  });
-
-  it("the NEW-app usage-state advisory (step 3) uses the just-created copy", () => {
-    render(
-      <NaverIssuanceGuidedWalkthrough
-        dispatch={vi.fn()}
-        run={issuanceRun({
-          appBranch: "new",
-          currentStep: { stepId: "aw.issuance_app_usage_check", stepNumber: 3, totalSteps: 7, copyKey: "actionWindow.issuance.appUsageCheckNew", status: "AWAITING_USER" },
-        })}
-        onCommand={vi.fn()}
-      />,
-    );
-    expect(screen.getByText(/방금 만든 애플리케이션의 상태를 확인/)).toBeInTheDocument();
-    expect(screen.getByText(/활성 상태라고 단정하지 않습니다/)).toBeInTheDocument();
-  });
-
-  it("shows the abort (CANCEL_RUN) control when allowed, and the recheck control", () => {
+  it("**offers no per-step control at a healthy barrier** — one 다음, and it is on the NAVER window", () => {
+    // Two screens offering the same press is how a seller ends up pressing it twice, and only one of them is
+    // the screen they are working on. 취소 stays: leaving is always this screen's to offer.
     render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} run={issuanceRun()} onCommand={vi.fn()} />);
     expect(screen.getByRole("button", { name: "취소" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "확인 완료" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "확인 완료" })).toBeNull();
   });
 
   it("commands come ONLY from allowedCommands — a view without CANCEL_RUN shows no abort", () => {
@@ -183,13 +145,12 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
       />,
     );
     expect(screen.queryByRole("button", { name: "취소" })).toBeNull();
-    expect(screen.getByRole("button", { name: "확인 완료" })).toBeInTheDocument();
   });
 
-  it("forwards a command from the control panel to onCommand", async () => {
+  it("**at a recoverable blocker the recovery control IS here** — that part is this screen's job", async () => {
     const onCommand = vi.fn();
-    render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} run={issuanceRun()} onCommand={onCommand} />);
-    await userEvent.click(screen.getByRole("button", { name: "확인 완료" }));
+    render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} run={blocked("LOGIN_REQUIRED")} onCommand={onCommand} />);
+    await userEvent.click(screen.getByRole("button", { name: "다시 확인" }));
     expect(onCommand).toHaveBeenCalledWith("REQUEST_STEP_RECHECK");
   });
 
@@ -207,7 +168,7 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
         onCommand={vi.fn()}
       />,
     );
-    await userEvent.click(screen.getByRole("button", { name: "SellerOps로 돌아가 연결 정보 입력하기" }));
+    await userEvent.click(screen.getByRole("button", { name: "연결 정보 입력하기" }));
     expect(dispatch).toHaveBeenCalledWith({ type: "ISSUANCE_COMPLETE" });
   });
 
@@ -221,7 +182,7 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
     );
     expect(screen.getByText("애플리케이션 발급 완료")).toBeInTheDocument();
     // The shared CTA is path-agnostic.
-    expect(screen.getByRole("button", { name: "SellerOps로 돌아가 연결 정보 입력하기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "연결 정보 입력하기" })).toBeInTheDocument();
   });
 
   it("existing/saved completion reads 확인 완료 with NO '발급' anywhere on the completion screen", () => {
@@ -234,7 +195,7 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
       />,
     );
     expect(screen.getByText("기존 애플리케이션 확인 완료")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "SellerOps로 돌아가 연결 정보 입력하기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "연결 정보 입력하기" })).toBeInTheDocument();
     // The existing-app guided completion never says 발급 (label, CTA, or the container aria-label).
     expect(container.textContent ?? "").not.toContain("발급");
     expect(screen.queryByLabelText("화면 안내 발급")).toBeNull();
@@ -339,10 +300,12 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
       start();
       // After start: paired, no run yet → the preparing line.
       expect(screen.getByText("도우미가 연결됐어요. NAVER API 센터 안내를 준비하고 있어요.")).toBeInTheDocument();
-      // A published view drives the shared timeline + controls.
+      // A published view drives the status surface; the step-by-step guidance is on the NAVER window.
       act(() => host.publish(issuanceRun()));
-      expect(screen.getByText("애플리케이션 만들기 (스토어당 1개)")).toBeInTheDocument();
-      await userEvent.click(screen.getByRole("button", { name: "확인 완료" }));
+      expect(screen.getByText("네이버 창에서 화면 안내를 따라 진행하세요")).toBeInTheDocument();
+      // …and at a blocker, the recovery control forwards to the host.
+      act(() => host.publish(blocked("LOGIN_REQUIRED")));
+      await userEvent.click(screen.getByRole("button", { name: "다시 확인" }));
       expect(host.sent).toContain("REQUEST_STEP_RECHECK");
     });
 
@@ -403,7 +366,7 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
       expect(dispatch).toHaveBeenCalledWith({ type: "ISSUANCE_APP_BRANCH_OBSERVED", branch: "existing" });
     });
 
-    it("curates the control panel — a barrier's full allowedCommands renders only recheck + cancel", () => {
+    it("curates the control panel — a healthy barrier's full allowedCommands renders only 취소", () => {
       const host = fakeHost();
       render(<NaverIssuanceGuidedWalkthrough dispatch={vi.fn()} hostRuntime={host.runtime} />);
       start();
@@ -422,7 +385,8 @@ describe("NaverIssuanceGuidedWalkthrough", () => {
           }),
         ),
       );
-      expect(screen.getByRole("button", { name: "확인 완료" })).toBeInTheDocument();
+      // The 다음 is on the NAVER panel now, so a healthy barrier surfaces the ESCAPE and nothing else.
+      expect(screen.queryByRole("button", { name: "확인 완료" })).toBeNull();
       expect(screen.getByRole("button", { name: "취소" })).toBeInTheDocument();
       // Inert / dead-ending controls are NOT surfaced; SWITCH_TO_MANUAL is reached only via the failure-only text fallback.
       expect(screen.queryByRole("button", { name: "직접 진행" })).toBeNull();
@@ -470,7 +434,7 @@ describe("NaverIssuanceGuidedWalkthrough — an ENDED walk is never a dead end (
         onCommand={vi.fn()}
       />,
     );
-    expect(screen.getByRole("button", { name: "SellerOps로 돌아가 연결 정보 입력하기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "연결 정보 입력하기" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "텍스트로 직접 진행하기" })).toBeNull();
   });
 });
