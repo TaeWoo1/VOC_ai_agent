@@ -542,7 +542,7 @@ describe("CoupangIssuanceGuidedWalkthrough — the credential handoff", () => {
       currentStep: { stepId: "aw.coupang_credentials", stepNumber: 8, totalSteps: 8, copyKey: "k", status: "READY" },
     });
 
-  it("is NOT offered without an account to bind the authorization to", () => {
+  it("is NOT offered when the page could not produce an account at all", () => {
     const host = fakeHost();
     render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} />);
     start();
@@ -552,7 +552,7 @@ describe("CoupangIssuanceGuidedWalkthrough — the credential handoff", () => {
 
   it("is NOT offered before the walk reaches the credential step", () => {
     const host = fakeHost();
-    render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} accountId="acc-1" />);
+    render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} ensureAccountId={async () => "acc-1"} accountReady />);
     start();
     act(() => host.publish(issuanceRun()));
     expect(screen.queryByTestId("coupang-handoff-start")).toBeNull();
@@ -560,7 +560,7 @@ describe("CoupangIssuanceGuidedWalkthrough — the credential handoff", () => {
 
   it("is offered at the credential step — and the disclosure says what the press will do", () => {
     const host = fakeHost();
-    render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} accountId="acc-1" />);
+    render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} ensureAccountId={async () => "acc-1"} accountReady />);
     start();
     act(() => host.publish(atCredentialStep()));
 
@@ -571,5 +571,56 @@ describe("CoupangIssuanceGuidedWalkthrough — the credential handoff", () => {
     expect(disclosure).toContain("암호화해 저장");
     expect(disclosure).toContain("연결이 되는지");
     expect(disclosure).toContain("이 화면에 표시되지 않고");
+  });
+});
+
+/**
+ * The two ways out of the consent, and the fact that neither of them happens by itself.
+ */
+describe("CoupangIssuanceGuidedWalkthrough — the consent has a door that is not 취소", () => {
+  const start = () => act(() => fireEvent.click(screen.getByRole("button", { name: "쿠팡 연결 안내 시작" })));
+  const atCredentialStep = () =>
+    issuanceRun({
+      currentStep: { stepId: "aw.coupang_credentials", stepNumber: 8, totalSteps: 8, copyKey: "k", status: "READY" },
+    });
+
+  it("offers the manual path as an explicit CHOICE, and it forwards SWITCH_TO_MANUAL", async () => {
+    // No fall-through must not become no way out: a seller whose read keeps failing needs a door that is not
+    // 취소, and it has to be something they choose rather than somewhere they end up.
+    const host = fakeHost();
+    render(
+      <CoupangIssuanceGuidedWalkthrough
+        onIssued={vi.fn()}
+        hostRuntime={host.runtime}
+        ensureAccountId={async () => "acc-1"}
+        accountReady
+      />,
+    );
+    start();
+    act(() => host.publish(atCredentialStep()));
+
+    await userEvent.click(screen.getByTestId("coupang-handoff-manual"));
+    expect(host.sent).toContain("SWITCH_TO_MANUAL");
+  });
+
+  it("creates NO account by rendering — the account arrives on the press, never on a view", () => {
+    let calls = 0;
+    const host = fakeHost();
+    render(
+      <CoupangIssuanceGuidedWalkthrough
+        onIssued={vi.fn()}
+        hostRuntime={host.runtime}
+        ensureAccountId={async () => {
+          calls += 1;
+          return "acc-1";
+        }}
+        accountReady
+      />,
+    );
+    start();
+    act(() => host.publish(atCredentialStep()));
+
+    expect(screen.getByTestId("coupang-handoff-start")).toBeInTheDocument();
+    expect(calls).toBe(0);
   });
 });

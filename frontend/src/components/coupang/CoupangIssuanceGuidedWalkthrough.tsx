@@ -72,13 +72,21 @@ export interface CoupangIssuanceGuidedWalkthroughProps {
    *  generic guidance, never a fabricated IP. */
   advertisedEgressIps?: readonly string[];
   /**
-   * The seller account this walk is connecting, when the page has one.
+   * **Resolve — creating if needed — the seller account this walk is connecting.**
    *
-   * Needed for exactly one thing: asking the backend to authorize the credential handoff. Absent ⇒ the handoff
-   * control is not offered at all, because an authorization is bound to an account and there is nothing honest
-   * to bind it to yet.
+   * Needed for exactly one thing: the credential handoff authorization is bound to an account, so there has to
+   * be one before the seller can be asked. It is a CALLBACK rather than an id because a first-time seller has
+   * no account row until something makes one, and requiring the id up front hid this card from exactly the
+   * sellers it exists for (live 2026-08-21).
+   *
+   * Called only on the seller's press. Nothing is created by rendering the card.
    */
-  accountId?: string | null;
+  ensureAccountId?: () => Promise<string>;
+  /**
+   * Whether the page could produce an account at all (it knows the Coupang channel). False ⇒ the card is not
+   * offered, because pressing it could only fail.
+   */
+  accountReady?: boolean;
 }
 
 export function CoupangIssuanceGuidedWalkthrough({
@@ -88,7 +96,8 @@ export function CoupangIssuanceGuidedWalkthrough({
   hostRuntime,
   busy,
   advertisedEgressIps = [],
-  accountId = null,
+  ensureAccountId,
+  accountReady = false,
 }: CoupangIssuanceGuidedWalkthroughProps) {
   // GUIDED-FIRST start gate. Guided is the default path; a single CTA ("쿠팡 연결 안내 시작") begins pairing +
   // hosting. Pairing is deferred until the seller starts, so the dedicated WING window / agent handshake only
@@ -260,7 +269,8 @@ export function CoupangIssuanceGuidedWalkthrough({
   // actually reached the key screen.
   const showHandoff =
     !controlled &&
-    !!accountId &&
+    !!ensureAccountId &&
+    accountReady &&
     !!effectiveRun &&
     effectiveRun.status !== "COMPLETED" &&
     effectiveRun.currentStep?.stepNumber === effectiveRun.currentStep?.totalSteps;
@@ -273,9 +283,11 @@ export function CoupangIssuanceGuidedWalkthrough({
    * stored, never logged, and never put in a URL.
    */
   const startHandoff = async (): Promise<void> => {
-    if (!accountId || !effectiveRun) return;
+    if (!ensureAccountId || !effectiveRun) return;
     setHandoff({ phase: "working" });
     try {
+      // The account is resolved (or created) HERE, on the press — never by rendering the card.
+      const accountId = await ensureAccountId();
       const slot = await api.getAccountSessionSlot(accountId);
       const granted = await api.authorizeCoupangCredentialHandoff(slot.accountSlot, effectiveRun.runId);
       issuance.send("REQUEST_STEP_RECHECK", {
@@ -323,15 +335,30 @@ export function CoupangIssuanceGuidedWalkthrough({
               연결 정보를 저장했어요.
             </p>
           ) : (
-            <button
-              type="button"
-              disabled={handoff.phase === "working" || !accountId}
-              onClick={() => void startHandoff()}
-              data-testid="coupang-handoff-start"
-              className="self-start rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white transition disabled:opacity-60"
-            >
-              {handoff.phase === "working" ? "저장하는 중…" : "키 읽어서 저장하기"}
-            </button>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                disabled={handoff.phase === "working"}
+                onClick={() => void startHandoff()}
+                data-testid="coupang-handoff-start"
+                className="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white transition disabled:opacity-60"
+              >
+                {handoff.phase === "working" ? "저장하는 중…" : "키 읽어서 저장하기"}
+              </button>
+              {/* **The manual path, by explicit choice only.** The walk no longer falls through to the typing
+                  form on its own — that was the defect — but "no fall-through" must not become "no way out":
+                  a seller whose read keeps failing, or who simply prefers to type, needs a door that is not
+                  취소. This is that door, and it is a choice they make rather than a place they end up. */}
+              <button
+                type="button"
+                disabled={handoff.phase === "working"}
+                onClick={() => effectiveCommand?.("SWITCH_TO_MANUAL")}
+                data-testid="coupang-handoff-manual"
+                className="text-sm text-muted underline transition hover:text-ink disabled:opacity-60"
+              >
+                직접 입력할게요
+              </button>
+            </div>
           )}
         </section>
       )}

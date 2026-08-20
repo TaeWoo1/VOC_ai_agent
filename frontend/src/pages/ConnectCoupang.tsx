@@ -115,6 +115,30 @@ export function ConnectCoupang() {
   const [accountId, setAccountId] = useState<string | null>(null);
   const accountIdRef = useRef<string | null>(null); // synchronous mirror so a just-created id is usable at once
 
+  /**
+   * **The Coupang seller account, resolved or created — one place, two callers.**
+   *
+   * It used to live inside the credential submit, which was fine while typing the keys was the only way a
+   * credential could arrive. It is not any more: the guided walk now ends by asking the seller whether SellerOps
+   * may read and store the key, and that consent has to be bound to an account before it can be authorized.
+   *
+   * A first-time seller has no account row until something creates one, so the handoff card was invisible to
+   * exactly the sellers it exists for (live 2026-08-21: the walk reached 8/8, the card required an id that did
+   * not exist yet, and the run — correctly no longer falling through to the manual form — had nowhere to go).
+   *
+   * Creating it here is not a new commitment: it is the same row the manual path creates, at the same moment
+   * (the seller acting on the credential), just reachable from both paths.
+   */
+  const ensureAccountId = useCallback(async (): Promise<string> => {
+    const existing = accountIdRef.current;
+    if (existing) return existing;
+    if (!coupangChannelId) throw new Error("no COUPANG channel");
+    const created = await api.createApiChannelAccount(coupangChannelId);
+    accountIdRef.current = created.id;
+    setAccountId(created.id);
+    return created.id;
+  }, [coupangChannelId]);
+
   // First-sync progress. `inFlightRef` is the AUTHORITATIVE synchronous guard against a double-fire of any
   // action; `syncWatchRef` blocks a new trigger while a sync is observed (lags one render, but no trigger is
   // rendered during a watch, so inFlightRef alone already closes the window). The backend single-flight is
@@ -327,14 +351,7 @@ export function ConnectCoupang() {
       setBusy(true);
       setSubmitStage("storing");
       try {
-        let id = accountIdRef.current;
-        if (!id) {
-          if (!coupangChannelId) throw new Error("no COUPANG channel");
-          const created = await api.createApiChannelAccount(coupangChannelId);
-          id = created.id;
-          accountIdRef.current = id;
-          setAccountId(id);
-        }
+        const id = await ensureAccountId();
         await api.storeCredential(id, {
           connectorClass: template.connectorClass,
           authType: template.authType,
@@ -564,7 +581,8 @@ export function ConnectCoupang() {
               onIssued={onIssued}
               busy={busy}
               advertisedEgressIps={advertisedEgressIps}
-              accountId={accountId}
+              ensureAccountId={ensureAccountId}
+              accountReady={!!coupangChannelId}
             />
           ) : (
             <CoupangConnectTutorial
