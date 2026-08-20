@@ -128,6 +128,36 @@ describe("no driver call survives a closed surface — the guard sits where ever
     );
   });
 
+  it("**the NAVER walk's new panel paths are guarded too** — a panel is never a reason to open a window", () => {
+    // The guided panel moved onto the API-centre window, which gave this session four new driver paths: the
+    // step advance watch, the step-3 advisory, the park notice and the completion notice. Each is reached from
+    // somewhere `drive`'s guard does not cover — a timer, or the end of a chain — and each would have been a
+    // way for a finished or parked run to bring back a window the seller had closed.
+    const body = code(source("src/action-window/api-issuance/issuance-session.ts"));
+    for (const fn of [
+      "private watchPanelAdvance(",
+      "private watchAppUsageCheck(",
+      "private showParkNoticeIfParked(",
+      "private async showCompletionNotice(",
+    ]) {
+      const at = body.indexOf(fn);
+      expect(at, `no ${fn}`).toBeGreaterThan(-1);
+      const head = body.slice(at, body.indexOf("\n  }", at));
+      expect(head, `${fn} does not check the latch`).toMatch(/if \(this\.stopped \|\| this\.surfaceClosed\) return/);
+      const guardAt = head.search(/if \(this\.stopped \|\| this\.surfaceClosed\) return/);
+      const firstDriverCall = head.indexOf("this.driver.");
+      if (firstDriverCall > -1) expect(guardAt, `${fn}: the guard sits after a driver call`).toBeLessThan(firstDriverCall);
+    }
+    // …and both waits re-check on every tick: a loop that started before the close must END on it.
+    for (const fn of ["private watchPanelAdvance(", "private watchAppUsageCheck("]) {
+      const at = body.indexOf(fn);
+      const loopBody = body.slice(body.indexOf("for (", at), body.indexOf("\n  }", at));
+      expect(loopBody, `${fn} does not re-check surfaceClosed inside the loop`).toContain(
+        "if (this.stopped || this.surfaceClosed) return;",
+      );
+    }
+  });
+
   it("the park-recovery loops check the latch on EVERY tick, not only at entry", () => {
     // The 2026-08-20 defect exactly: `maybeRecoverPark` guarded before STARTING a loop, so a loop already
     // running when the seller closed the window kept driving — one blank window per tick.
