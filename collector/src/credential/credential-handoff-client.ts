@@ -65,15 +65,31 @@ export type CredentialHandoffAuth =
 /** The header the capability travels in. Deliberately NOT `authorization` — see the backend filter. */
 export const CREDENTIAL_HANDOFF_CAPABILITY_HEADER = "x-sellerops-handoff-authorization";
 
+/**
+ * Hand the secrets to the backend, which stores them through the existing vault path and runs the read-only
+ * connection check.
+ *
+ * **Two callers, two request shapes, chosen by how they authenticate** — and the difference is not cosmetic:
+ *
+ *  - `bearer` (the seated operator's harness) names the account by opaque slot and presents the run binding its
+ *    grant was armed with.
+ *  - `capability` (the product) names NO account. The capability was issued FOR one, so the server already knows
+ *    it from a value this caller cannot alter — and the resident helper has no business holding a seller-account
+ *    identifier. The backend REFUSES a capability request that carries one anyway.
+ *
+ * An HTTP error is RETURNED as a non-stored result carrying only the status code, rather than thrown: the caller
+ * has to record a value-free outcome either way, and a thrown `fetch`/JSON error is the classic route by which a
+ * response body reaches a log line.
+ */
 export async function postCoupangCredentialHandoff(
   baseUrl: string,
   auth: CredentialHandoffAuth,
-  accountSlot: string,
+  target:
+    | { readonly kind: "operator"; readonly accountSlot: string; readonly runBinding: CredentialHandoffRunBinding }
+    | { readonly kind: "seller"; readonly runId: string },
   channelCode: string,
   secrets: Readonly<Record<string, string>>,
-  runBinding: CredentialHandoffRunBinding | undefined,
   fetchImpl: FetchImpl = fetch,
-  runId?: string,
 ): Promise<CredentialHandoffResponse> {
   let res: Response;
   try {
@@ -85,15 +101,14 @@ export async function postCoupangCredentialHandoff(
           : { [CREDENTIAL_HANDOFF_CAPABILITY_HEADER]: auth.id }),
         "content-type": "application/json",
       },
-      // `runBinding` is the operator interlock and `runId` the seller one; a request carries exactly one of the
-      // two shapes, because the backend refuses one that presents both.
-      body: JSON.stringify({
-        accountSlot,
-        channelCode,
-        secrets,
-        ...(runBinding ? { runBinding } : {}),
-        ...(runId ? { runId } : {}),
-      }),
+      // Exactly one shape. The seller body has no `accountSlot` key at all — not an empty one, not a null one:
+      // the backend refuses a capability request that names an account, and a key that is present-but-empty is
+      // still the caller claiming to choose.
+      body: JSON.stringify(
+        target.kind === "operator"
+          ? { accountSlot: target.accountSlot, channelCode, secrets, runBinding: target.runBinding }
+          : { channelCode, secrets, runId: target.runId },
+      ),
     });
   } catch {
     // The caught error is not inspected: a fetch failure can quote the request it failed on.

@@ -45,7 +45,14 @@ export interface GuidedIssuanceRuntime {
    */
   ensureStarted(): void;
   /** Forward an operator command. Refuses anything the current view does not allow. */
-  send(type: CommandType): void;
+  /**
+   * Forward a command the current view allows.
+   *
+   * `payload` exists for exactly ONE command on this walk — the credential checkpoint's handoff capability —
+   * and is passed through verbatim. It is deliberately not a general escape hatch: the contract admits one
+   * payload variant here, and anything else would fail its own validation at the runtime.
+   */
+  send(type: CommandType, payload?: CommandEnvelope["payload"]): void;
   /** Ask the agent to replay the run it is hosting — recovers a guided view after a page refresh. */
   resync(): void;
   /** Release the view subscription and stop publishing. */
@@ -147,11 +154,11 @@ export function createGuidedIssuanceRuntime(
       phase = "resyncing";
       transport.send({ kind: "aw_resync", runId, sinceSequence: 0 });
     },
-    send(type) {
+    send(type, payload) {
       if (phase === "disposed") return;
       // The view is the authority on what is permitted right now.
       if (!latest?.allowedCommands.includes(type)) return;
-      transport.send({ kind: "aw_command", command: envelope(type) });
+      transport.send({ kind: "aw_command", command: envelope(type, payload) });
     },
     resync() {
       if (phase === "disposed") return;

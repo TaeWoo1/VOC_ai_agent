@@ -384,7 +384,13 @@ async function main(): Promise<void> {
       },
       read: () => driver.readCredentialValues(),
       post: (secrets) =>
-        postCoupangCredentialHandoff(backend.origin, { kind: "bearer", token }, slot, CHANNEL_CODE, secrets, handoffRunBinding()),
+        postCoupangCredentialHandoff(
+          backend.origin,
+          { kind: "bearer", token },
+          { kind: "operator", accountSlot: slot, runBinding: handoffRunBinding() },
+          CHANNEL_CODE,
+          secrets,
+        ),
     });
 
     // The barrier already printed its own refusal record; a second one would double-report the same stop.

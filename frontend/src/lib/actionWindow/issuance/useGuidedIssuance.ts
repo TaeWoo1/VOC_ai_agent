@@ -148,8 +148,8 @@ export function useGuidedIssuance(
     return attempt;
   }, [adopt, channelCode, carrier]);
 
-  const send = useCallback<GuidedIssuanceRuntime["send"]>((type) => {
-    runtimeRef.current?.send(type);
+  const send = useCallback<GuidedIssuanceRuntime["send"]>((type, payload) => {
+    runtimeRef.current?.send(type, payload);
   }, []);
 
   return { view, unavailable, attach, send };

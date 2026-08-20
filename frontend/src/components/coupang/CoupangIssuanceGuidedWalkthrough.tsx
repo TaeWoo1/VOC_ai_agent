@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useBridge } from "../../hooks/useBridge";
 import type { ActionWindowRunView, CommandType } from "../../lib/actionWindow/contract";
+import { api } from "../../lib/apiClient";
 import { blockerView } from "../../lib/actionWindow/copy";
 import { ActionWindowControlPanel } from "../actionWindow/ActionWindowControlPanel";
 import { BlockerNotice } from "../actionWindow/BlockerNotice";
@@ -70,6 +71,14 @@ export interface CoupangIssuanceGuidedWalkthroughProps {
    *  guided path (not just the text checklist) tells the seller to register the fixed call IP. Empty ⇒
    *  generic guidance, never a fabricated IP. */
   advertisedEgressIps?: readonly string[];
+  /**
+   * The seller account this walk is connecting, when the page has one.
+   *
+   * Needed for exactly one thing: asking the backend to authorize the credential handoff. Absent ⇒ the handoff
+   * control is not offered at all, because an authorization is bound to an account and there is nothing honest
+   * to bind it to yet.
+   */
+  accountId?: string | null;
 }
 
 export function CoupangIssuanceGuidedWalkthrough({
@@ -79,6 +88,7 @@ export function CoupangIssuanceGuidedWalkthrough({
   hostRuntime,
   busy,
   advertisedEgressIps = [],
+  accountId = null,
 }: CoupangIssuanceGuidedWalkthroughProps) {
   // GUIDED-FIRST start gate. Guided is the default path; a single CTA ("쿠팡 연결 안내 시작") begins pairing +
   // hosting. Pairing is deferred until the seller starts, so the dedicated WING window / agent handshake only
@@ -112,6 +122,14 @@ export function CoupangIssuanceGuidedWalkthrough({
   // announcement). Inert until `attach()` is called. `channelCode` here is the ASK, not the answer: the resident
   // SellerOps 도우미 hosts no carrier until a tab asks, and this is the tab asking for the Coupang guided walk —
   // the announced channelCode still decides what the run is.
+  /**
+   * **The credential handoff's own state, and it holds no value.**
+   *
+   * Three phases and nothing else: idle, working, and a terminal stored/failed. There is deliberately no field
+   * for a credential, a masked credential, a length, or a prefix — the values are read in the marketplace window
+   * by the local agent and put on one request to the backend. This screen learns a status.
+   */
+  const [handoff, setHandoff] = useState<{ phase: "idle" | "working" | "stored" | "failed" }>({ phase: "idle" });
   const issuance = useGuidedIssuance(hostRuntime, { channelCode: "coupang" });
   const attach = issuance.attach;
   // Attach exactly once, and only once the seller has started AND the agent is paired — a ref keeps
@@ -234,6 +252,42 @@ export function CoupangIssuanceGuidedWalkthrough({
     );
   }
 
+
+  // Offered only where it is real: the walk is resting on the credential step (the runtime's own evidence that
+  // the seller reached the key screen), there is an account to bind an authorization to, and this is a live run.
+  // Step 8 of 8 is the credential step. Read from the run's OWN progress rather than from anything this screen
+  // inferred: the runtime is the authority on where the walk is, and it is the only thing that knows the seller
+  // actually reached the key screen.
+  const showHandoff =
+    !controlled &&
+    !!accountId &&
+    !!effectiveRun &&
+    effectiveRun.status !== "COMPLETED" &&
+    effectiveRun.currentStep?.stepNumber === effectiveRun.currentStep?.totalSteps;
+
+  /**
+   * Ask the backend to authorize this handoff, then hand the capability to the agent.
+   *
+   * The capability is bound server-side to this org, this seller, this account, this channel and this run, lives
+   * for minutes, and is spent once. It goes straight from this call to the Action Window command — it is never
+   * stored, never logged, and never put in a URL.
+   */
+  const startHandoff = async (): Promise<void> => {
+    if (!accountId || !effectiveRun) return;
+    setHandoff({ phase: "working" });
+    try {
+      const slot = await api.getAccountSessionSlot(accountId);
+      const granted = await api.authorizeCoupangCredentialHandoff(slot.accountSlot, effectiveRun.runId);
+      issuance.send("REQUEST_STEP_RECHECK", {
+        credentialHandoffAuthorization: granted.authorizationId,
+      } as never);
+    } catch {
+      // The error is not surfaced verbatim: a backend refusal carries a safe reason code, but a transport
+      // failure can quote the request it failed on, and this path is one request away from three secrets.
+      setHandoff({ phase: "failed" });
+    }
+  };
+
   return (
     <div className="space-y-4" aria-label="화면 안내 발급">
       {/* The seller already had a key, so no issuance happened and none will. Said out loud: the rest of this
@@ -242,6 +296,44 @@ export function CoupangIssuanceGuidedWalkthrough({
         <p className="rounded-xl bg-ok/10 px-4 py-3 text-sm text-ink break-keep" role="status">
           이미 발급된 Open API 키가 있어요. 새로 발급하지 않고, 연결에 필요한 정보만 확인합니다.
         </p>
+      )}
+      {/* **The credential handoff — the last step, and the only one that moves a secret.**
+
+          It appears when the walk is resting on its credential step, which is the runtime's own evidence that
+          the seller reached the screen the keys are on. The press below is the BARRIER: it discloses the whole
+          chain it authorizes — SellerOps reads the three values from the 쿠팡 윙 창, sends them straight to the
+          vault, and runs a read-only connection check — and it is the only thing that starts any of it.
+
+          The values never reach this screen. They are read in the marketplace window by the local agent and put
+          on one request; what comes back here is a status. */}
+      {showHandoff && (
+        <section className="space-y-2 rounded-xl border border-line px-4 py-3" aria-label="연결 정보 저장">
+          <p className="text-sm font-medium text-ink">발급한 키를 SellerOps에 저장할까요?</p>
+          <p className="text-xs text-muted break-keep">
+            쿠팡 윙 창에 표시된 업체코드·Access Key·Secret Key를 SellerOps가 읽어 <strong>암호화해 저장</strong>하고,
+            연결이 되는지 한 번만 확인합니다. 값은 이 화면에 표시되지 않고, 저장 외에는 어디에도 남지 않아요.
+          </p>
+          {handoff.phase === "failed" && (
+            <p className="text-xs text-bad break-keep" role="status" data-testid="coupang-handoff-failed">
+              저장하지 못했어요. 쿠팡 윙 창에 키가 모두 보이는지 확인한 뒤 다시 시도해 주세요.
+            </p>
+          )}
+          {handoff.phase === "stored" ? (
+            <p className="text-sm text-ok" role="status" data-testid="coupang-handoff-stored">
+              연결 정보를 저장했어요.
+            </p>
+          ) : (
+            <button
+              type="button"
+              disabled={handoff.phase === "working" || !accountId}
+              onClick={() => void startHandoff()}
+              data-testid="coupang-handoff-start"
+              className="self-start rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white transition disabled:opacity-60"
+            >
+              {handoff.phase === "working" ? "저장하는 중…" : "키 읽어서 저장하기"}
+            </button>
+          )}
+        </section>
       )}
       {/* Persistent advisory: the guided path must also tell the seller to register the fixed call IP
           (the WING walkthrough covers the key issuance, but the 'API 호출 IP' field is easy to miss). */}

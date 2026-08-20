@@ -564,6 +564,7 @@ export function ConnectCoupang() {
               onIssued={onIssued}
               busy={busy}
               advertisedEgressIps={advertisedEgressIps}
+              accountId={accountId}
             />
           ) : (
             <CoupangConnectTutorial

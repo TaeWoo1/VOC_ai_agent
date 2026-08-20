@@ -527,3 +527,49 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
     });
   });
 });
+
+/**
+ * **The credential handoff barrier.** The press is what discloses and authorizes the whole chain — read the
+ * three values in the marketplace window, send them to the vault, verify read-only — so what this pins is that
+ * it is offered only where it is real, and that no value ever reaches this screen.
+ */
+describe("CoupangIssuanceGuidedWalkthrough — the credential handoff", () => {
+  /** The seller's own 시작 press — the walk does not host a run until they ask for one. */
+  const start = () => act(() => fireEvent.click(screen.getByRole("button", { name: "쿠팡 연결 안내 시작" })));
+
+  const atCredentialStep = () =>
+    issuanceRun({
+      currentStep: { stepId: "aw.coupang_credentials", stepNumber: 8, totalSteps: 8, copyKey: "k", status: "READY" },
+    });
+
+  it("is NOT offered without an account to bind the authorization to", () => {
+    const host = fakeHost();
+    render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} />);
+    start();
+    act(() => host.publish(atCredentialStep()));
+    expect(screen.queryByTestId("coupang-handoff-start")).toBeNull();
+  });
+
+  it("is NOT offered before the walk reaches the credential step", () => {
+    const host = fakeHost();
+    render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} accountId="acc-1" />);
+    start();
+    act(() => host.publish(issuanceRun()));
+    expect(screen.queryByTestId("coupang-handoff-start")).toBeNull();
+  });
+
+  it("is offered at the credential step — and the disclosure says what the press will do", () => {
+    const host = fakeHost();
+    render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} accountId="acc-1" />);
+    start();
+    act(() => host.publish(atCredentialStep()));
+
+    expect(screen.getByTestId("coupang-handoff-start")).toBeInTheDocument();
+    // Read → store → verify, and that the values do not come here. A barrier that does not say what it
+    // authorizes is not a barrier.
+    const disclosure = screen.getByLabelText("연결 정보 저장").textContent ?? "";
+    expect(disclosure).toContain("암호화해 저장");
+    expect(disclosure).toContain("연결이 되는지");
+    expect(disclosure).toContain("이 화면에 표시되지 않고");
+  });
+});

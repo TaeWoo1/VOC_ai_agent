@@ -50,10 +50,9 @@ describe("the credential handoff presents the run identity it was approved under
     await postCoupangCredentialHandoff(
       "http://localhost:18091",
       { kind: "bearer", token: "jwt" },
-      "0123456789abcdef01234567",
+      { kind: "operator", accountSlot: "0123456789abcdef01234567", runBinding: BINDING },
       "COUPANG",
       SECRETS,
-      BINDING,
       impl,
     );
     expect(calls).toHaveLength(1);
@@ -67,7 +66,14 @@ describe("the credential handoff presents the run identity it was approved under
 
   it("still sends exactly ONE request — the identity is a field, not a second round trip", async () => {
     const { impl, calls } = capturingFetch();
-    await postCoupangCredentialHandoff("http://localhost:18091", { kind: "bearer", token: "jwt" }, "0".repeat(24), "COUPANG", SECRETS, BINDING, impl);
+    await postCoupangCredentialHandoff(
+      "http://localhost:18091",
+      { kind: "bearer", token: "jwt" },
+      { kind: "operator", accountSlot: "0".repeat(24), runBinding: BINDING },
+      "COUPANG",
+      SECRETS,
+      impl,
+    );
     expect(calls).toHaveLength(1);
   });
 
@@ -135,12 +141,10 @@ describe("the seller path's capability", () => {
     await postCoupangCredentialHandoff(
       "http://localhost:18091",
       { kind: "capability", id: "a".repeat(32) },
-      "0".repeat(24),
+      { kind: "seller", runId: "run_wing0001" },
       "COUPANG",
       SECRETS,
-      undefined,
       impl,
-      "run_wing0001",
     );
 
     const headers = calls[0]!.headers;
@@ -154,17 +158,18 @@ describe("the seller path's capability", () => {
     await postCoupangCredentialHandoff(
       "http://localhost:18091",
       { kind: "capability", id: "b".repeat(32) },
-      "0".repeat(24),
+      { kind: "seller", runId: "run_wing0001" },
       "COUPANG",
       SECRETS,
-      undefined,
       impl,
-      "run_wing0001",
     );
 
     const body = calls[0]!.body;
     expect(body.runId).toBe("run_wing0001");
     expect(body.runBinding).toBeUndefined();
+    // The account is NOT named. Not empty, not null — absent, because the capability already names it and a
+    // present key is the caller claiming to choose.
+    expect("accountSlot" in body).toBe(false);
   });
 
   it("never puts the capability in the URL — it is a header, and a URL is a place things get logged", async () => {
@@ -172,12 +177,10 @@ describe("the seller path's capability", () => {
     await postCoupangCredentialHandoff(
       "http://localhost:18091",
       { kind: "capability", id: "c".repeat(32) },
-      "0".repeat(24),
+      { kind: "seller", runId: "run_wing0001" },
       "COUPANG",
       SECRETS,
-      undefined,
       impl,
-      "run_wing0001",
     );
     expect(calls[0]!.url).toBe("http://localhost:18091/api/agent/credential-handoff");
     expect(calls[0]!.url).not.toContain("c".repeat(8));

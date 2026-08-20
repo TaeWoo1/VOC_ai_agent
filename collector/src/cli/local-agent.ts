@@ -60,6 +60,7 @@ import { IssuanceEngine } from "../action-window/api-issuance/issuance-engine";
 import { IssuanceGuidanceSession } from "../action-window/api-issuance/issuance-session";
 import { CoupangIssuanceEngine } from "../action-window/coupang-issuance/coupang-issuance-engine";
 import { CoupangIssuanceGuidanceSession } from "../action-window/coupang-issuance/coupang-issuance-session";
+import { runResidentCredentialHandoff } from "../credential/resident-coupang-handoff";
 import { CoupangRenewalEngine } from "../action-window/coupang-renewal/coupang-renewal-engine";
 import { CoupangRenewalGuidanceSession } from "../action-window/coupang-renewal/coupang-renewal-session";
 import { LazyCoupangRenewalDriver } from "../action-window/coupang-renewal/lazy-coupang-renewal-driver";
@@ -406,6 +407,14 @@ export interface CoupangIssuanceLiveCarrier {
   closeSurface: () => Promise<void>;
   /** Sanitized: is the dedicated window up right now? `false` before the first open and after the seller closed it. */
   isSurfaceOpen: () => boolean;
+  /**
+   * The context this walk's window lives in, or `null` before one exists.
+   *
+   * Exposed for ONE consumer: the credential handoff, which must read the three values from the page the seller
+   * is looking at rather than from a window of its own. It never OPENS one — `null` means there is no screen and
+   * therefore no read, which is the fail-closed answer.
+   */
+  activeContext: () => BrowserContext | null;
 }
 
 export function buildCoupangIssuanceLiveConfig(): CoupangIssuanceLiveCarrier {
@@ -565,6 +574,9 @@ export function buildCoupangIssuanceLiveConfig(): CoupangIssuanceLiveCarrier {
     // its own open-ness is the honest reading — and it is the reading the on-demand host uses to decide that
     // the seller is done with the key screen.
     isSurfaceOpen: () => driver.isOpen(),
+    // READ-ONLY accessor, and never an opener: a walk that has not brought a window up answers `null`, and a
+    // handoff with no screen to read is a handoff that does not happen.
+    activeContext: () => walkContext,
   };
 }
 
@@ -595,7 +607,9 @@ export function activateCoupangGuidedWalk(
   const { runId, channelCode } = live.config;
   const endpoint = new ApiIssuanceEndpoint({ runId, channelCode });
   const engine = new CoupangIssuanceEngine({ runId, channelCode });
-  const session = new CoupangIssuanceGuidanceSession(engine, live.config.createDriver(), endpoint.transport);
+  const session = new CoupangIssuanceGuidanceSession(engine, live.config.createDriver(), endpoint.transport, {
+    credentialHandoff: (capability) => runResidentCredentialHandoff(live, runId, capability),
+  });
   const detach = session.attach();
   log("aw_coupang_issuance_run_hosted", { onDemand: true });
   let disposed = false;

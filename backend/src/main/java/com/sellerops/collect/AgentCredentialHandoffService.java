@@ -6,6 +6,7 @@ import com.sellerops.collect.dto.AgentCredentialHandoffRequest;
 import com.sellerops.collect.dto.AgentCredentialHandoffResultView;
 import com.sellerops.collect.dto.CredentialHandoffAuthorizationView;
 import com.sellerops.collect.dto.CredentialHandoffAuthorizeRequest;
+import com.sellerops.collect.dto.SellerCredentialHandoffRequest;
 import com.sellerops.collect.dto.ConnectionTestResultView;
 import com.sellerops.collect.dto.CredentialIntakeRequest;
 import com.sellerops.common.ApiException;
@@ -60,8 +61,6 @@ public class AgentCredentialHandoffService {
     /** The credential is stored; the read-only check could not be run at all (armed-interlock, provider, transport). */
     static final String TEST_STATUS_UNVERIFIED = "UNVERIFIED";
     static final String REASON_VERIFY_ERROR = "VERIFY_ERROR";
-    /** Both interlocks presented at once — the caller must be one kind of caller. */
-    static final String REASON_INTERLOCK_AMBIGUOUS = "HANDOFF_INTERLOCK_AMBIGUOUS";
 
     private final AccountSessionSlotRepository slots;
     private final SellerAccountRepository accounts;
@@ -93,64 +92,91 @@ public class AgentCredentialHandoffService {
     }
 
     /**
-     * Store the handed-off secrets and run the read-only connection check. The response carries a status and a
-     * safe reason code; never a secret, a provider body, or the seller-account id the slot stood in for.
+     * **The OPERATOR path.** A seated live proof, authenticated with a real seller token, presenting the run
+     * binding its grant was armed with out of band. It names the account by opaque slot, exactly as it always
+     * has; nothing about this path changed when the product path arrived beside it.
      */
-    public AgentCredentialHandoffResultView handOff(UUID orgId, UUID actorUserId, String capabilityId,
+    public AgentCredentialHandoffResultView handOff(UUID orgId, UUID actorUserId,
                                                     AgentCredentialHandoffRequest request) {
-        // **TWO interlocks, one caller, never both.** The operator's seated live proof presents a run binding
-        // armed out of band; a seller in the product presents a one-shot authorization this backend issued to
-        // them. They are different grants for different people and a request carrying both is asking the
-        // backend to choose which one it is spending — so that is refused rather than resolved.
-        boolean sellerPath = capabilityId != null && !capabilityId.isBlank();
-        boolean operatorPath = request.runBinding() != null && !request.runBinding().isBlank();
-        if (sellerPath && operatorPath) {
-            log.warn("Coupang credential handoff refused: reason={}", REASON_INTERLOCK_AMBIGUOUS);
-            throw ApiException.badRequest(
-                    "연결 정보 전달 승인이 두 가지로 제시되었습니다. 저장된 것은 없습니다. (" + REASON_INTERLOCK_AMBIGUOUS + ")");
-        }
-
-        // **FIRST, before anything else.** The interlock asks whether this handoff was approved and has not
-        // already spent its one use. It runs ahead of the slot resolution so an unauthorized caller cannot even
-        // learn whether a slot exists — and so the refusal it gets is about the approval rather than about the
-        // seller's data.
-        //
-        // The seller path asks the CALLER-shaped half here (does this authorization exist, is it fresh, unspent,
-        // and issued to this org and this user) and the account-shaped half below, once the slot has resolved.
-        // Splitting it is what keeps the original ordering property true for an interlock that is bound to more
-        // than the operator one is.
-        String refusal = sellerPath
-                ? authorizations.refusalForCaller(capabilityId, orgId, actorUserId)
-                : arming.refusalFor(request.runBinding());
+        // **FIRST, before anything else.** The interlock asks whether THIS run was approved, at THIS commit, for
+        // THIS phase, and has not already spent its one handoff. It runs ahead of the slot resolution so a
+        // request from an unapproved run cannot even learn whether a slot exists.
+        String refusal = arming.refusalFor(request.runBinding());
         if (refusal != null) {
-            // A safe constant. Neither the presented identity nor the authorization id is echoed back, and no
-            // secret exists on this path yet.
             log.warn("Coupang credential handoff refused by the run interlock: reason={}", refusal);
             throw ApiException.badRequest(
                     "이 실행은 연결 정보 전달 승인이 확인되지 않아 중단되었습니다. 저장된 것은 없습니다. (" + refusal + ")");
         }
-
         UUID sellerAccountId = resolveAccount(orgId, request.accountSlot());
         Channel channel = requireChannelOf(orgId, sellerAccountId);
+        return storeAndVerify(orgId, actorUserId, sellerAccountId, channel, request.channelCode(),
+                request.secrets(), null);
+    }
 
-        // The account-shaped half: this authorization was issued for THIS account, THIS channel and THIS run.
-        // A seller with two accounts cannot spend one account's authorization on the other, and an
-        // authorization cannot be carried from the walk that produced the key into a later sitting.
-        if (sellerPath) {
-            String bindingRefusal = authorizations.refusalFor(
-                    capabilityId,
-                    new CredentialHandoffAuthorizations.Binding(
-                            orgId, actorUserId, sellerAccountId, channel.getCode(), trimmedRunId(request.runId())));
-            if (bindingRefusal != null) {
-                log.warn("Coupang credential handoff refused by the run interlock: reason={}", bindingRefusal);
-                throw ApiException.badRequest(
-                        "이 실행은 연결 정보 전달 승인이 확인되지 않아 중단되었습니다. 저장된 것은 없습니다. (" + bindingRefusal + ")");
-            }
+    /**
+     * **The PRODUCT path**, and the account comes from ONE place: the capability.
+     *
+     * The capability was issued for one org, one seller, one account, one channel and one run, and the request
+     * that presents it names none of those. That is the point — the resident helper holds no seller identity and
+     * has no business holding a seller-account identifier either, and a second source for "which account" is a
+     * second thing that can disagree with the first.
+     *
+     * <p>So there is no slot to resolve and nothing to reconcile: the binding IS the account. What the request
+     * still carries is a channel GUARD (checked against the account's real channel, as on the operator path) and
+     * the run it belongs to, so a handoff cannot be carried out of the walk that produced the key.
+     *
+     * <p>The caller is not trusted for org or user either: both come from the same binding, not from the
+     * principal the filter derived from it — one read, one source, no chance of the two drifting.
+     */
+    public AgentCredentialHandoffResultView handOffWithCapability(String capabilityId,
+                                                                  SellerCredentialHandoffRequest request) {
+        // The PRECISE reason first: absent, unknown, expired, or already used are four different things to tell
+        // a seller, and only one of them ("expired") means "press it again".
+        String refusal = authorizations.refusalForId(capabilityId);
+        if (refusal != null) {
+            log.warn("Coupang credential handoff refused by the run interlock: reason={}", refusal);
+            throw ApiException.badRequest(
+                    "이 실행은 연결 정보 전달 승인이 확인되지 않아 중단되었습니다. 저장된 것은 없습니다. (" + refusal + ")");
         }
+        CredentialHandoffAuthorizations.Binding binding = authorizations.liveBindingOf(capabilityId);
+        if (binding == null) {
+            // Unreachable given the check above; kept because a null here must never become a NullPointerException
+            // on a path that is about to touch a vault.
+            throw ApiException.badRequest("이 실행은 연결 정보 전달 승인이 확인되지 않아 중단되었습니다. 저장된 것은 없습니다. ("
+                    + CredentialHandoffAuthorizations.REASON_UNKNOWN + ")");
+        }
+        // The run must be the one the capability was issued for. Same seller, same account, a later sitting is
+        // still a different handoff.
+        if (!binding.runId().equals(trimmedRunId(request.runId()))) {
+            log.warn("Coupang credential handoff refused by the run interlock: reason={}",
+                    CredentialHandoffAuthorizations.REASON_MISMATCH);
+            throw ApiException.badRequest("이 실행은 연결 정보 전달 승인이 확인되지 않아 중단되었습니다. 저장된 것은 없습니다. ("
+                    + CredentialHandoffAuthorizations.REASON_MISMATCH + ")");
+        }
+        Channel channel = requireChannelOf(binding.orgId(), binding.sellerAccountId());
+        return storeAndVerify(binding.orgId(), binding.userId(), binding.sellerAccountId(), channel,
+                request.channelCode(), request.secrets(), capabilityId);
+    }
 
-        // The declared channel is a GUARD against a mixed-up slot, not a routing key — the account's real
+    /**
+     * **Everything both paths share, in one place** — the channel guard, the template, the never-overwrite rule,
+     * the atomic claim on the near side of the store, the store, and the read-only verification.
+     *
+     * <p>One copy, deliberately: a second place that knows how to persist a credential is a second place that
+     * can persist one wrongly, and the two callers differ only in how they proved they were allowed to be here.
+     *
+     * @param capabilityId the seller's one-shot capability, or {@code null} on the operator path — the ONLY
+     *                     thing that distinguishes the two from here on, and only for which interlock is spent.
+     */
+    private AgentCredentialHandoffResultView storeAndVerify(UUID orgId, UUID actorUserId, UUID sellerAccountId,
+                                                            Channel channel, String declaredChannelCode,
+                                                            java.util.Map<String, String> secrets,
+                                                            String capabilityId) {
+        boolean sellerPath = capabilityId != null && !capabilityId.isBlank();
+
+        // The declared channel is a GUARD against a mixed-up account, not a routing key — the account's real
         // channel is the one that decides. A mismatch is refused before the vault is touched.
-        if (!channel.getCode().equals(request.channelCode())) {
+        if (!channel.getCode().equals(declaredChannelCode)) {
             throw ApiException.badRequest("연결하려는 채널이 이 판매 계정의 채널과 다릅니다. (" + REASON_CHANNEL_MISMATCH + ")");
         }
 
@@ -169,14 +195,11 @@ public class AgentCredentialHandoffService {
         // the agent sends only the values it read, and never a claim about how they should be stored. Expiry is
         // null (unknown), never an estimate.
         CredentialIntakeRequest intake = new CredentialIntakeRequest(
-                template.connectorClass(), template.authType(), request.secrets(), null, null);
-        // **CLAIMED here, on the near side of the store, and atomically.** `refusalFor` above only READS the
+                template.connectorClass(), template.authType(), secrets, null, null);
+        // **CLAIMED here, on the near side of the store, and atomically.** The checks above only READ the
         // one-shot flag, so claiming after the store would leave a window in which two concurrent requests both
-        // pass the check and both store. The unique constraint on `seller_account_id` closes that for ONE
-        // account and does nothing for two: two slots, one arming, two credentials.
-        //
-        // Everything that can refuse WITHOUT storing has already run, so a claim here is a claim on a store that
-        // is about to happen. What follows the store — the verification — never returns it: see the arming.
+        // pass and both store. The unique constraint on `seller_account_id` closes that for ONE account and does
+        // nothing for two: two accounts, one grant, two credentials.
         boolean claimed = sellerPath ? authorizations.claim(capabilityId) : arming.claim();
         if (!claimed) {
             String consumedReason = sellerPath
@@ -191,8 +214,7 @@ public class AgentCredentialHandoffService {
         } catch (RuntimeException e) {
             // Nothing was stored, so nothing was spent. This is the ONE case that hands a claim back, and it is
             // what keeps "a refusal before the store leaves the handoff retryable" true when the refusal comes
-            // from inside the store itself — the credential validator rejecting a malformed secret map, which
-            // means the resolver read something wrong and the operator deserves their retry.
+            // from inside the store itself.
             if (sellerPath) {
                 authorizations.releaseUnusedClaim(capabilityId);
             } else {
@@ -201,20 +223,10 @@ public class AgentCredentialHandoffService {
             throw e;
         }
 
-        // **From here the credential IS stored, and every exit must say so.**
-        //
-        // The store commits on its own (nothing here is transactional), and the verification that follows can
-        // throw for reasons that have nothing to do with the credential: `CoupangLiveCallGuard` refuses when the
-        // backend is not armed with a live approval id, and any provider/transport fault propagates the same way.
-        // Letting that reach the client turned a 500 into the agent's `STORE_FAILED`, whose own contract says
-        // "nothing is stored" — the opposite of the truth, in the one state the operator cannot retry out of: the
-        // read is one-shot, and a second handoff is refused with CREDENTIAL_ALREADY_STORED.
-        //
-        // So a failed VERIFICATION is reported as a stored-but-unverified credential with a safe reason. The
-        // operator can then re-run the connection test, or replace the credential through the renewal path, both
-        // of which exist. Nothing is fabricated: `stored` is true because it is, and the status is not SUCCESS.
+        // **From here the credential IS stored, and every exit must say so.** A failed VERIFICATION is reported
+        // as a stored-but-unverified credential with a safe reason: the store commits on its own, and the check
+        // that follows can throw for reasons that have nothing to do with the credential.
         try {
-            // The same manual, explicit check the operator's own button runs: read-only, no collection, no job.
             ConnectionTestResultView test = collect.testConnection(orgId, sellerAccountId);
             return new AgentCredentialHandoffResultView(true, test.status(), test.reasonCode());
         } catch (RuntimeException e) {

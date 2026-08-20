@@ -479,6 +479,33 @@ export const api = {
   // requires a live backend, and a dead endpoint must fail closed (never a fake
   // success). The caller redirects the browser to authorizationUrl. The response
   // carries only the pending account + consent URL: no code, state, token, or secret.
+  /** The account's stable opaque slot (and whether a credential is already stored against it). No secret. */
+  async getAccountSessionSlot(accountId: string): Promise<{ accountSlot: string; credentialPresent: boolean }> {
+    const { data } = await http.get<{ accountSlot: string; credentialPresent: boolean }>(
+      `/api/seller-accounts/${accountId}/session-slot`,
+    );
+    return data;
+  },
+  /**
+   * **Ask for a one-shot authorization to hand a just-issued Coupang credential to the vault.**
+   *
+   * The seller presses first; this is what their press does. The backend binds the authorization it returns to
+   * this org, this seller, this account, this channel and this run, gives it minutes to live, and lets it be
+   * spent once — so what comes back is a capability for a single write, not an identity.
+   *
+   * It carries no secret in either direction, and the id it returns must never be logged or put in a URL: it
+   * goes straight to the local agent over the Action Window, which forwards it in one request header.
+   */
+  async authorizeCoupangCredentialHandoff(
+    accountSlot: string,
+    runId: string,
+  ): Promise<{ authorizationId: string; expiresInMs: number }> {
+    const { data } = await http.post<{ authorizationId: string; expiresInMs: number }>(
+      "/api/agent/credential-handoff/authorize",
+      { accountSlot, channelCode: "COUPANG", runId },
+    );
+    return data;
+  },
   async startCafe24Connect(mallId: string): Promise<Cafe24ConnectStartView> {
     const { data } = await http.post<Cafe24ConnectStartView>("/api/connect/cafe24/start", {
       mallId,

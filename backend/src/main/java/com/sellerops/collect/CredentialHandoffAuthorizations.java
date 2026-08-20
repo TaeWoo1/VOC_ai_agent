@@ -236,6 +236,31 @@ public class CredentialHandoffAuthorizations {
     }
 
     /**
+     * **Why this id cannot be spent, on the id ALONE** — absent, unknown, expired, or already used.
+     *
+     * Separate from {@link #refusalForCaller} because the seller path derives org, user and account FROM the
+     * binding and so has nobody to compare against yet. Keeping the four apart matters: "expired, press again"
+     * and "already used, this handoff is done" are different things to tell a seller, and collapsing them into
+     * one answer was a real regression the split caused.
+     */
+    public String refusalForId(String authorizationId) {
+        if (authorizationId == null || authorizationId.isBlank()) {
+            return REASON_ABSENT;
+        }
+        Entry entry = live.get(keyFor(authorizationId));
+        if (entry == null) {
+            return REASON_UNKNOWN;
+        }
+        if (clock.instant().isAfter(entry.expiresAt)) {
+            return REASON_EXPIRED;
+        }
+        if (entry.consumed.get()) {
+            return REASON_CONSUMED;
+        }
+        return null;
+    }
+
+    /**
      * The binding behind a LIVE, unspent authorization — what the capability filter needs to know who is
      * calling, and nothing more. Absent for an id that is unknown, expired or already spent, so a filter built
      * on this cannot authenticate a request that the interlock is going to refuse anyway.

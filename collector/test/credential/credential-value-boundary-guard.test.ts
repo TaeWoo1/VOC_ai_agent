@@ -69,6 +69,17 @@ function filesContaining(token: string, except: readonly string[]): string[] {
   return ALL.filter((f) => !except.includes(f) && code(f).includes(token));
 }
 
+/**
+ * **The two callers, named.** The seated live-proof harness, and the resident helper's Coupang issuance
+ * activator — the product path, added 2026-08-20 so a seller can actually complete the connection the harness
+ * proved. Two entries, not a pattern and not a directory: the point of this sweep is that a THIRD caller has to
+ * be added here on purpose, by someone who has read why the list is short.
+ */
+const CREDENTIAL_CALLERS = [
+  "credential/resident-coupang-handoff.ts",
+  "instruments/live-runs/run-coupang-credential-handoff-live.ts",
+] as const;
+
 describe("the read exists in exactly one place, and is reached from exactly one place", () => {
   it("only the credential driver builds the value-reading script", () => {
     const users = filesContaining(
@@ -78,19 +89,19 @@ describe("the read exists in exactly one place, and is reached from exactly one 
     expect(users).toEqual(["action-window/coupang-wing-credential-driver.ts"]);
   });
 
-  it("only the handoff CLI calls the driver's read", () => {
+  it("only the two named callers call the driver's read", () => {
     const users = filesContaining("readCredentialValues(", ["action-window/coupang-wing-credential-driver.ts"]);
-    expect(users).toEqual(["instruments/live-runs/run-coupang-credential-handoff-live.ts"]);
+    expect(users).toEqual([...CREDENTIAL_CALLERS]);
   });
 
-  it("only the handoff CLI puts the values on a wire", () => {
+  it("only the two named callers put the values on a wire", () => {
     const users = filesContaining("postCoupangCredentialHandoff", ["credential/credential-handoff-client.ts"]);
-    expect(users).toEqual(["instruments/live-runs/run-coupang-credential-handoff-live.ts"]);
+    expect(users).toEqual([...CREDENTIAL_CALLERS]);
   });
 
-  it("only the handoff CLI runs the flow that holds them", () => {
+  it("only the two named callers run the flow that holds them", () => {
     const users = filesContaining("handOffCoupangCredential", ["credential/coupang-credential-handoff.ts"]);
-    expect(users).toEqual(["instruments/live-runs/run-coupang-credential-handoff-live.ts"]);
+    expect(users).toEqual([...CREDENTIAL_CALLERS]);
   });
 });
 
@@ -100,6 +111,7 @@ describe("nothing writes a value down", () => {
     "credential/coupang-credential-handoff.ts",
     "credential/credential-handoff-client.ts",
     "action-window/coupang-wing-credential-driver.ts",
+    "credential/resident-coupang-handoff.ts",
     "instruments/live-runs/run-coupang-credential-handoff-live.ts",
   ];
 

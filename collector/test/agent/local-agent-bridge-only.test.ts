@@ -171,6 +171,8 @@ function fixtureCarrier(): CoupangIssuanceLiveCarrier & { closed: number } {
     config: { runId: `run_${randomBytes(6).toString("hex")}`, channelCode: "coupang", createDriver: () => driver },
     closeSurface: async () => void c.closed++,
     isSurfaceOpen: () => false,
+    // No browser in a test, so no context — which is also the fail-closed answer the handoff seam needs.
+    activeContext: () => null,
   };
   return c;
 }

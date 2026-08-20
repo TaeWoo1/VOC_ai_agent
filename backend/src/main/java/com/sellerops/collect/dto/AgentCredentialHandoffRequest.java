@@ -18,6 +18,11 @@ import java.util.Map;
  * a request whose declared channel disagrees is refused rather than stored, so a mixed-up slot can never put
  * Coupang keys on a NAVER account.
  *
+ * <p><b>This is the OPERATOR contract.</b> The product path has its own record
+ * ({@code SellerCredentialHandoffRequest}) which names no account, because the capability it authenticates with
+ * already does. Two records rather than one with conditional fields: how you authenticated decides what you
+ * must send, and that is a fact worth being in the type.
+ *
  * <p>No expiry field: v1 stores {@code null} (unknown), because no expiry has been measured on the issued
  * screen and an inferred one would be a fabricated date in front of a renewal alert. The operator path for an
  * exact date already exists at {@code POST /credentials/expiry}. See
@@ -29,25 +34,7 @@ public record AgentCredentialHandoffRequest(
         @NotBlank @Pattern(regexp = "^[A-Z0-9_]{2,32}$", message = "채널 코드 형식이 올바르지 않습니다.")
         String channelCode,
         @NotEmpty Map<String, String> secrets,
-        CredentialHandoffRunBinding runBinding,
-        /**
-         * The Action Window run this handoff belongs to — the walk that produced the key. Checked against what
-         * the authorization was issued for, so a handoff cannot be carried from one sitting into another.
-         */
-        String runId) {
-
-    /**
-     * **The OPERATOR path's shape**: a run binding and no authorization.
-     *
-     * Kept as a real constructor rather than left to call sites passing two nulls, because "this caller presents
-     * no seller authorization" is a statement worth being able to read — and because the seated live-proof
-     * harness that uses this path is live-proven and should not have to change shape to accommodate a second
-     * kind of caller arriving beside it.
-     */
-    public AgentCredentialHandoffRequest(String accountSlot, String channelCode, Map<String, String> secrets,
-                                         CredentialHandoffRunBinding runBinding) {
-        this(accountSlot, channelCode, secrets, runBinding, null);
-    }
+        CredentialHandoffRunBinding runBinding) {
 
     /**
      * Masked — a request object must never be able to put a credential in a log line or a stack trace.
@@ -59,9 +46,6 @@ public record AgentCredentialHandoffRequest(
     public String toString() {
         return "AgentCredentialHandoffRequest[accountSlot=<masked>, channelCode=" + channelCode
                 + ", secrets=<masked:" + (secrets != null ? secrets.size() : 0) + ">"
-                + ", runBinding=" + runBinding
-                // The seller path's capability is NOT in this record at all — it arrives in its own header and
-                // lives on a request attribute, so there is nothing here that could reach a log line with it.
-                + ", runId=" + runId + "]";
+                + ", runBinding=" + runBinding + "]";
     }
 }
