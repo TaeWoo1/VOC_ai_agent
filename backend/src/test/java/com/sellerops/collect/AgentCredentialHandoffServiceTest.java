@@ -10,6 +10,7 @@ import com.sellerops.channel.ChannelStatus;
 import com.sellerops.collect.dto.AgentCredentialHandoffRequest;
 import com.sellerops.collect.dto.AgentCredentialHandoffResultView;
 import com.sellerops.collect.dto.ConnectionTestResultView;
+import com.sellerops.collect.dto.CredentialHandoffAuthorizeRequest;
 import com.sellerops.collect.dto.CredentialHandoffRunBinding;
 import com.sellerops.collect.dto.CredentialIntakeRequest;
 import com.sellerops.common.ApiException;
@@ -117,7 +118,8 @@ class AgentCredentialHandoffServiceTest {
                 new com.sellerops.connector.ConnectorAlertService(alerts, sellerAccounts, channels));
         this.collect = collect;
         this.arming = armedForThisRun();
-        service = new AgentCredentialHandoffService(slotRepo, sellerAccounts, channels, vault, collect, arming);
+        this.authorizations = new CredentialHandoffAuthorizations();
+        service = new AgentCredentialHandoffService(slotRepo, sellerAccounts, channels, vault, collect, arming, authorizations);
     }
 
     /**
@@ -166,6 +168,16 @@ class AgentCredentialHandoffServiceTest {
         return sellerAccounts.save(acc);
     }
 
+    /** A SECOND account on the SAME channel — `account()` cannot make one, because channel codes are unique. */
+    private SellerAccount siblingAccountOf(SellerAccount first) {
+        SellerAccount acc = new SellerAccount();
+        acc.setOrgId(first.getOrgId());
+        acc.setChannelId(first.getChannelId());
+        acc.setConnectionStatus(ChannelStatus.PENDING);
+        acc.setFileUpload(false);
+        return sellerAccounts.save(acc);
+    }
+
     private String slotFor(SellerAccount acc) {
         return slots.resolveSlot(acc.getOrgId(), acc.getId(), acc.getChannelId());
     }
@@ -177,6 +189,7 @@ class AgentCredentialHandoffServiceTest {
     static final String RUN_COMMIT = "04eded4b";
     private CollectControlService collect;
     private CredentialHandoffArming arming;
+    private CredentialHandoffAuthorizations authorizations;
 
     private static CredentialHandoffArming armedForThisRun() {
         return new CredentialHandoffArming(RUN_APPROVAL, RUN_ID, RUN_COMMIT,
@@ -189,6 +202,131 @@ class AgentCredentialHandoffServiceTest {
     private static CredentialHandoffRunBinding thisRun() {
         return new CredentialHandoffRunBinding(RUN_APPROVAL, RUN_ID, RUN_COMMIT,
                 CredentialHandoffArming.PHASE_CREDENTIAL_HANDOFF);
+    }
+
+    /* ── the SELLER interlock: a one-shot authorization this backend issued to this seller ─────────────── */
+
+    private static final String SELLER_RUN = "run_wing0001";
+
+    /** The product path's request: an authorization, no run binding. The two are never presented together. */
+    private static AgentCredentialHandoffRequest sellerRequest(String slot, String authorizationId) {
+        return new AgentCredentialHandoffRequest(slot, "COUPANG",
+                Map.of("access_key", ACCESS, "secret_key", SECRET, "vendor_id", VENDOR),
+                null, authorizationId, SELLER_RUN);
+    }
+
+    private String authorizeFor(SellerAccount acc) {
+        return service.authorize(org, actor,
+                new CredentialHandoffAuthorizeRequest(slotFor(acc), "COUPANG", SELLER_RUN)).authorizationId();
+    }
+
+    @Test
+    void aSellerAuthorizationStoresAndVerifies_theSamePathTheOperatorGrantTakes() {
+        // The whole point of the second interlock: everything past it is the code that was already live-proven.
+        SellerAccount acc = account(org, "COUPANG");
+        String auth = authorizeFor(acc);
+
+        AgentCredentialHandoffResultView result = service.handOff(org, actor, sellerRequest(slotFor(acc), auth));
+
+        assertThat(result.stored()).isTrue();
+        assertThat(vault.hasCredential(org, acc.getId())).isTrue();
+    }
+
+    @Test
+    void aSellerAuthorizationIsSpentAfterTheStore_andASecondHandoffIsRefused() {
+        SellerAccount acc = account(org, "COUPANG");
+        String auth = authorizeFor(acc);
+        assertThat(service.handOff(org, actor, sellerRequest(slotFor(acc), auth)).stored()).isTrue();
+
+        assertThatThrownBy(() -> service.handOff(org, actor, sellerRequest(slotFor(acc), auth)))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining(CredentialHandoffAuthorizations.REASON_CONSUMED);
+    }
+
+    @Test
+    void anAuthorizationForANOTHERAccountCannotStoreOnThisOne_andNothingIsWritten() {
+        // A seller with two accounts is the case this closes: same org, same user, same channel, wrong account.
+        SellerAccount mine = account(org, "COUPANG");
+        SellerAccount other = siblingAccountOf(mine);
+        String forOther = authorizeFor(other);
+
+        assertThatThrownBy(() -> service.handOff(org, actor, sellerRequest(slotFor(mine), forOther)))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining(CredentialHandoffAuthorizations.REASON_MISMATCH);
+
+        assertThat(vault.hasCredential(org, mine.getId())).isFalse();
+        assertThat(vault.hasCredential(org, other.getId())).isFalse();
+    }
+
+    @Test
+    void anAuthorizationFromANOTHERRunIsRefused_aHandoffBelongsToTheWalkThatProducedTheKey() {
+        SellerAccount acc = account(org, "COUPANG");
+        String auth = authorizeFor(acc);
+        AgentCredentialHandoffRequest laterSitting = new AgentCredentialHandoffRequest(slotFor(acc), "COUPANG",
+                Map.of("access_key", ACCESS, "secret_key", SECRET, "vendor_id", VENDOR),
+                null, auth, "run_a_later_one");
+
+        assertThatThrownBy(() -> service.handOff(org, actor, laterSitting))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining(CredentialHandoffAuthorizations.REASON_MISMATCH);
+        assertThat(vault.hasCredential(org, acc.getId())).isFalse();
+    }
+
+    @Test
+    void presentingBOTHInterlocksIsRefused_theCallerMustBeOneKindOfCaller() {
+        SellerAccount acc = account(org, "COUPANG");
+        String auth = authorizeFor(acc);
+        AgentCredentialHandoffRequest both = new AgentCredentialHandoffRequest(slotFor(acc), "COUPANG",
+                Map.of("access_key", ACCESS, "secret_key", SECRET, "vendor_id", VENDOR),
+                thisRun(), auth, SELLER_RUN);
+
+        assertThatThrownBy(() -> service.handOff(org, actor, both))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("HANDOFF_INTERLOCK_AMBIGUOUS");
+        assertThat(vault.hasCredential(org, acc.getId())).isFalse();
+    }
+
+    @Test
+    void presentingNEITHERInterlockIsRefused_thereIsNoUnauthorizedPath() {
+        SellerAccount acc = account(org, "COUPANG");
+        AgentCredentialHandoffRequest naked = new AgentCredentialHandoffRequest(slotFor(acc), "COUPANG",
+                Map.of("access_key", ACCESS, "secret_key", SECRET, "vendor_id", VENDOR), null, null, null);
+
+        assertThatThrownBy(() -> service.handOff(org, actor, naked)).isInstanceOf(ApiException.class);
+        assertThat(vault.hasCredential(org, acc.getId())).isFalse();
+    }
+
+    @Test
+    void authorizeRefusesWhenTheAccountALREADYHasACredential_ratherThanIssuingADoomedGrant() {
+        // The never-overwrite rule, asked early. Issuing here would walk a seller through a barrier and a screen
+        // read to reach a refusal that was knowable before any of it.
+        SellerAccount acc = account(org, "COUPANG");
+        service.handOff(org, actor, coupangRequest(slotFor(acc)));
+        assertThat(vault.hasCredential(org, acc.getId())).isTrue();
+
+        assertThatThrownBy(() -> authorizeFor(acc))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("CREDENTIAL_ALREADY_STORED");
+    }
+
+    @Test
+    void authorizeRefusesAChannelThatDisagreesWithTheAccount() {
+        SellerAccount naver = account(org, "NAVER");
+        assertThatThrownBy(() -> service.authorize(org, actor,
+                new CredentialHandoffAuthorizeRequest(slotFor(naver), "COUPANG", SELLER_RUN)))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("CHANNEL_MISMATCH");
+    }
+
+    @Test
+    void authorizeRefusesASlotFromANOTHEROrg_indistinguishablyFromOneThatDoesNotExist() {
+        UUID otherOrg = UUID.randomUUID();
+        SellerAccount theirs = account(otherOrg, "COUPANG");
+
+        assertThatThrownBy(() -> service.authorize(org, actor,
+                new CredentialHandoffAuthorizeRequest(slotFor(theirs), "COUPANG", SELLER_RUN)))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("UNKNOWN_ACCOUNT_SLOT");
     }
 
     private static AgentCredentialHandoffRequest coupangRequest(String slot) {
@@ -303,7 +441,8 @@ class AgentCredentialHandoffServiceTest {
         // handoff is refused with CREDENTIAL_ALREADY_STORED.
         SellerAccount acc = account(org, "COUPANG");
         AgentCredentialHandoffService throwing = new AgentCredentialHandoffService(
-                slotRepo, sellerAccounts, channels, vault, collectThatFailsVerification(), armedForThisRun());
+                slotRepo, sellerAccounts, channels, vault, collectThatFailsVerification(), armedForThisRun(),
+                new CredentialHandoffAuthorizations());
 
         AgentCredentialHandoffResultView result = throwing.handOff(org, actor, coupangRequest(slotFor(acc)));
 
@@ -343,7 +482,8 @@ class AgentCredentialHandoffServiceTest {
      * able to learn anything about the account either.
      */
     private AgentCredentialHandoffService serviceArmedWith(CredentialHandoffArming a) {
-        return new AgentCredentialHandoffService(slotRepo, sellerAccounts, channels, vault, collect, a);
+        return new AgentCredentialHandoffService(slotRepo, sellerAccounts, channels, vault, collect, a,
+                new CredentialHandoffAuthorizations());
     }
 
     private static AgentCredentialHandoffRequest requestPresenting(String slot, CredentialHandoffRunBinding b) {
@@ -486,7 +626,8 @@ class AgentCredentialHandoffServiceTest {
         SellerAccount acc = account(org, "COUPANG");
         CredentialHandoffArming a = armedForThisRun();
         AgentCredentialHandoffService throwing = new AgentCredentialHandoffService(
-                slotRepo, sellerAccounts, channels, vault, collectThatFailsVerification(), a);
+                slotRepo, sellerAccounts, channels, vault, collectThatFailsVerification(), a,
+                new CredentialHandoffAuthorizations());
 
         assertThat(throwing.handOff(org, actor, coupangRequest(slotFor(acc))).stored()).isTrue();
         assertThat(a.isArmed()).isFalse();
@@ -499,13 +640,15 @@ class AgentCredentialHandoffServiceTest {
         // seller_account_id closes that for ONE account and does nothing for two — two slots, one arming, two
         // credentials. Asserted structurally, because a timing test for this is a flaky test for this.
         String src = readServiceSource();
-        int claimAt = src.indexOf("arming.claim()");
+        // BOTH interlocks are claimed in the same place, on the near side of the store — the seller path did not
+        // get a second, looser claim site when it arrived beside the operator one.
+        int claimAt = src.indexOf("authorizations.claim(request.authorizationId()) : arming.claim()");
         int storeAt = src.indexOf("collect.storeCredential(");
         assertThat(claimAt).isGreaterThan(0);
         assertThat(storeAt).isGreaterThan(0);
         assertThat(claimAt).isLessThan(storeAt);
         // …and the claim's RESULT is acted on. Ignoring it would put the race straight back.
-        assertThat(src).contains("if (!arming.claim())");
+        assertThat(src).contains("if (!claimed)");
     }
 
     @Test

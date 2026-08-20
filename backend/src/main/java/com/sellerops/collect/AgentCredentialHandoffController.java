@@ -3,6 +3,8 @@ package com.sellerops.collect;
 import com.sellerops.auth.AuthPrincipal;
 import com.sellerops.collect.dto.AgentCredentialHandoffRequest;
 import com.sellerops.collect.dto.AgentCredentialHandoffResultView;
+import com.sellerops.collect.dto.CredentialHandoffAuthorizationView;
+import com.sellerops.collect.dto.CredentialHandoffAuthorizeRequest;
 import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -30,6 +32,19 @@ public class AgentCredentialHandoffController {
 
     public AgentCredentialHandoffController(AgentCredentialHandoffService service) {
         this.service = service;
+    }
+
+    /**
+     * **Issue the seller's one-shot authorization.** Called by the SellerOps frontend, by the authenticated
+     * seller, before the barrier they press — never by the agent, which holds no seller identity.
+     *
+     * <p>It reads nothing from the marketplace, stores nothing, and returns no secret: a capability bound to
+     * this org, this user, this account, this channel and this run, good for minutes and for one handoff.
+     */
+    @PostMapping("/credential-handoff/authorize")
+    public CredentialHandoffAuthorizationView authorize(@AuthenticationPrincipal AuthPrincipal principal,
+                                                        @Valid @RequestBody CredentialHandoffAuthorizeRequest request) {
+        return service.authorize(principal.orgId(), principal.userId(), request);
     }
 
     /** Write-only: stores the handed-off secrets, then runs the read-only connection check. */
