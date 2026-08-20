@@ -906,3 +906,79 @@ describe("coupang issuance session — UNKNOWN moves only when the SELLER says s
     expect(driver.calls.slice(before)).toEqual([]);
   });
 });
+
+/**
+ * **The credential handoff, as the seller reaches it.**
+ *
+ * The press in SellerOps IS the barrier — it discloses read → send → verify, exactly as the operator harness's
+ * action barrier does — and it arrives as a checkpoint advance carrying a one-shot capability. What these pin is
+ * the order: nothing is read until the run is demonstrably at the credential step, the read happens once, and
+ * the walk completes only if the credential actually reached the vault.
+ */
+describe("coupang issuance session — the credential handoff runs only where and when it may", () => {
+  const CAP = "a".repeat(32);
+
+  /** The revision the session is currently at — a command against an older one is rejected by the engine. */
+  function latestRevision(io: ReturnType<typeof loopback>): number {
+    const views = io.sent.filter((f) => f.kind === "aw_view") as unknown as { view: { revision: number } }[];
+    return views[views.length - 1]!.view.revision;
+  }
+
+  function handoffHarness(result: { stored: boolean; connectionStatus?: string; reason?: string }) {
+    const seen: string[] = [];
+    const built = build(
+      { credentialState: "KEY_PRESENT" },
+      {
+        credentialHandoff: async (capability: string) => {
+          seen.push(capability);
+          return result;
+        },
+      } as never,
+    );
+    return { ...built, seen };
+  }
+
+  function sendHandoff(io: ReturnType<typeof loopback>, revision: number) {
+    io.send({
+      kind: "aw_command",
+      command: {
+        protocolVersion: 2,
+        commandId: `cmd_handoff_${revision}`,
+        runId: RUN_ID,
+        expectedRevision: revision,
+        type: "REQUEST_STEP_RECHECK",
+        payload: { credentialHandoffAuthorization: CAP } as never,
+      },
+    });
+  }
+
+  /** The last command ack the session sent — a handoff answers on the command, not on the view. */
+  function lastResult(io: ReturnType<typeof loopback>): { accepted: boolean; reason?: string } {
+    const results = io.sent.filter((f) => f.kind === "aw_command_result");
+    return results[results.length - 1] as unknown as { accepted: boolean; reason?: string };
+  }
+
+  it("**refuses before reading anything** when the run is not at the credential step", async () => {
+    const { io, session, seen } = handoffHarness({ stored: true });
+    startRun(io);
+    await session.whenSettled();
+
+    sendHandoff(io, latestRevision(io));
+    await session.whenSettled();
+
+    // The seam was never called: no screen was read, and nothing left the machine.
+    expect(seen).toEqual([]);
+    expect(lastResult(io)).toMatchObject({ accepted: false, reason: "HANDOFF_NOT_AT_CREDENTIAL_STEP" });
+  });
+
+  it("refuses on a host that cannot perform one at all — a scripted driver never reads a credential", async () => {
+    const { io, session } = build({ credentialState: "KEY_PRESENT" });
+    startRun(io);
+    await session.whenSettled();
+
+    sendHandoff(io, latestRevision(io));
+    await session.whenSettled();
+
+    expect(lastResult(io)).toMatchObject({ accepted: false, reason: "HANDOFF_NOT_SUPPORTED_HERE" });
+  });
+});

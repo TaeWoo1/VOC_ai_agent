@@ -10,7 +10,7 @@
  * A `{ guide }` effect is handled here as ONE batched unit — locate, then (if the control was found) highlight —
  * publishing only once, so the frontend never sees a half-armed intermediate view.
  */
-import { validateCommandEnvelope } from "../../../../contracts/action-window/v2/index";
+import { validateCommandEnvelope, type CommandEnvelope } from "../../../../contracts/action-window/v2/index";
 import type { AwClientFrame, AwServerTransport } from "../../../../contracts/action-window/v2/transport";
 import { log } from "../../log";
 import type { CoupangIssuanceEffect, CoupangIssuanceEngine } from "./coupang-issuance-engine";
@@ -31,6 +31,26 @@ export interface CoupangIssuanceSessionOptions {
   surfaceWaitPollMs?: number;
   /** How long an observed wait keeps looking. The seated-operator window — never unbounded. */
   surfaceWaitTimeoutMs?: number;
+  /**
+   * **Perform the credential handoff for this run**, with the seller's one-shot capability.
+   *
+   * Injected rather than imported so this session holds no backend origin, no account slot and no credential
+   * reader — it decides WHEN a handoff may run and never how. Absent ⇒ the capability is refused, which is what
+   * every scripted test driver and every non-Coupang host gets.
+   *
+   * The seam returns a value-free outcome. It must never return a secret, and by its type it cannot.
+   */
+  credentialHandoff?: (capability: string) => Promise<CredentialHandoffSeamResult>;
+}
+
+/** What a handoff attempt reports back. Value-free by construction — no field here can hold a secret. */
+export interface CredentialHandoffSeamResult {
+  /** Whether the credential reached the vault. Only `true` lets the walk complete its final step. */
+  readonly stored: boolean;
+  /** The backend's safe connection status, when it answered one. Never a provider body. */
+  readonly connectionStatus?: string;
+  /** A safe reason code for a handoff that did not store. Never a value, never page text. */
+  readonly reason?: string;
 }
 
 export class CoupangIssuanceGuidanceSession {
@@ -42,6 +62,9 @@ export class CoupangIssuanceGuidanceSession {
   private readonly rearmDelayMs: number;
   private readonly surfaceWaitPollMs: number;
   private readonly surfaceWaitTimeoutMs: number;
+  private readonly credentialHandoff: ((capability: string) => Promise<CredentialHandoffSeamResult>) | undefined;
+  /** One handoff per run, latched here as well as at the backend — a second press must not read a screen again. */
+  private handoffAttempted = false;
   /** At most ONE park-recovery loop at a time — several would each issue their own recheck. */
   private recovering = false;
   /** At most ONE surface-wait loop at a time — several would each probe and each advance the run. */
@@ -91,6 +114,7 @@ export class CoupangIssuanceGuidanceSession {
     this.rearmDelayMs = opts?.rearmDelayMs ?? 250;
     this.surfaceWaitPollMs = opts?.surfaceWaitPollMs ?? 1_000;
     this.surfaceWaitTimeoutMs = opts?.surfaceWaitTimeoutMs ?? 10 * 60_000;
+    this.credentialHandoff = opts?.credentialHandoff;
   }
 
   attach(): () => void {
@@ -140,6 +164,17 @@ export class CoupangIssuanceGuidanceSession {
       this.transport.send({ kind: "aw_command_result", commandId: safeCommandId(command), accepted: false, reason: "INVALID_ENVELOPE" });
       return;
     }
+    // **The one command that may carry a credential-handoff capability**, and the only place it is read.
+    //
+    // The seller pressed "저장하기" in SellerOps, which minted a one-shot capability bound to them, this
+    // account and this run. The press is the barrier: it discloses that SellerOps will READ the three values
+    // from the WING screen, SEND them to the vault, and VERIFY the connection — the same chain the operator's
+    // own action barrier discloses. Nothing here reads anything until it has arrived.
+    const capability = credentialHandoffCapabilityOf(command);
+    if (capability !== null) {
+      void this.runCredentialHandoff(command, capability);
+      return;
+    }
     const outcome = this.engine.command(command);
     // An accepted command is the SELLER asking for something, which is the one thing that may re-open a window
     // they closed. Cleared before the drive, so the chain this command starts is allowed to bring it back up.
@@ -172,6 +207,76 @@ export class CoupangIssuanceGuidanceSession {
         .finally(() => {
           this.busyCount -= 1;
         });
+    }
+  }
+
+  /**
+   * **Read the credential the seller just issued, hand it to the vault, and only then complete the step.**
+   *
+   * Every refusal here happens BEFORE anything is read. The order is the whole safety argument:
+   *
+   *  1. this host must actually be able to perform a handoff (a scripted or non-Coupang host cannot);
+   *  2. the run must be resting on the credentials step — the walk's own evidence that the seller reached the
+   *      screen where the keys are, which is a stronger claim than any flag a caller could send;
+   *  3. one per run, latched here as well as at the backend — a second press must not read a screen again;
+   *  4. the marketplace window must be open, because a read needs a screen to read.
+   *
+   * The step completes only on a STORED credential. A handoff that did not store leaves the walk exactly where
+   * it was, with a safe reason on the command result — so the seller sees "저장하지 못했어요", not a finished
+   * walk with nothing in the vault.
+   */
+  private async runCredentialHandoff(command: CommandEnvelope, capability: string): Promise<void> {
+    const refuse = (reason: string): void => {
+      log("aw_coupang_issuance_handoff_refused", { runId: this.runId, reason });
+      this.transport.send({ kind: "aw_command_result", commandId: command.commandId, accepted: false, reason });
+    };
+    if (!this.credentialHandoff) return refuse("HANDOFF_NOT_SUPPORTED_HERE");
+    if (this.engine.activeTarget() !== "credentials") return refuse("HANDOFF_NOT_AT_CREDENTIAL_STEP");
+    if (this.handoffAttempted) return refuse("HANDOFF_ALREADY_ATTEMPTED");
+    if (this.surfaceClosed) return refuse("HANDOFF_SURFACE_CLOSED");
+    this.handoffAttempted = true;
+
+    this.busyCount += 1;
+    try {
+      // From here the seam owns the read. It is given the capability and nothing else, and it answers with an
+      // outcome that has no field a secret could travel in.
+      const result = await this.credentialHandoff(capability);
+      log("aw_coupang_issuance_handoff", {
+        runId: this.runId,
+        stored: result.stored,
+        ...(result.connectionStatus ? { connectionStatus: result.connectionStatus } : {}),
+        ...(result.reason ? { reason: result.reason } : {}),
+      });
+      if (!result.stored) {
+        this.transport.send({
+          kind: "aw_command_result",
+          commandId: command.commandId,
+          accepted: false,
+          reason: result.reason ?? "HANDOFF_STORE_FAILED",
+        });
+        return;
+      }
+      this.transport.send({ kind: "aw_command_result", commandId: command.commandId, accepted: true });
+      // Stored. NOW the checkpoint may complete — the walk's last step is "the credential is with SellerOps",
+      // and completing it before the store would say so while the vault was empty.
+      // Re-issued to the engine WITHOUT the payload: the capability has been spent and the engine's job is the
+      // ordinary checkpoint advance, which takes no payload and must not learn about capabilities at all.
+      const outcome = this.engine.command({ type: command.type, expectedRevision: command.expectedRevision });
+      this.publishState();
+      if (outcome.ok && "effect" in outcome && !isNoop(outcome.effect)) {
+        await this.drive(outcome.effect);
+      }
+    } catch (e) {
+      // The error is NOT echoed: a transport failure can quote the request it failed on.
+      log("aw_coupang_issuance_handoff", { runId: this.runId, stored: false, reason: errName(e) }, "warn");
+      this.transport.send({
+        kind: "aw_command_result",
+        commandId: command.commandId,
+        accepted: false,
+        reason: "HANDOFF_TRANSPORT_FAILED",
+      });
+    } finally {
+      this.busyCount -= 1;
     }
   }
 
@@ -585,4 +690,15 @@ function safeCommandId(command: unknown): string {
 function errName(e: unknown): string {
   if (e instanceof Error) return e.name || "Error";
   return typeof e;
+}
+
+/**
+ * The capability, if this command carries one. Read from the payload's own field and nowhere else — not from a
+ * header, not from the envelope, not from a bag of arbitrary auth. One field, one step, one walk.
+ */
+function credentialHandoffCapabilityOf(command: CommandEnvelope): string | null {
+  const payload = (command as { payload?: unknown }).payload;
+  if (!payload || typeof payload !== "object") return null;
+  const value = (payload as { credentialHandoffAuthorization?: unknown }).credentialHandoffAuthorization;
+  return typeof value === "string" && value.length > 0 ? value : null;
 }

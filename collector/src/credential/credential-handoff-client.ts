@@ -46,21 +46,54 @@ export class CredentialHandoffTransportError extends Error {
  * response body reaches a log line. A transport failure — where there is no response at all — throws
  * {@link CredentialHandoffTransportError}, which carries nothing.
  */
+/**
+ * **How this request authenticates**, and the two callers are deliberately different kinds of caller.
+ *
+ * - `bearer` — the seated operator's live harness, holding a real seller token from its own run environment.
+ * - `capability` — the PRODUCT path. The resident helper holds no seller identity and must never be given one:
+ *   a JWT on the loopback bridge would be a credential for every org-scoped route in the service, handed over
+ *   to authorize one vault write. It carries a one-shot capability instead, minted by the backend for one org,
+ *   one seller, one account, one channel and one run, and accepted on this endpoint alone.
+ *
+ * They are never combined. The backend refuses a request presenting both, and this type makes presenting both
+ * unrepresentable on the way out as well.
+ */
+export type CredentialHandoffAuth =
+  | { readonly kind: "bearer"; readonly token: string }
+  | { readonly kind: "capability"; readonly id: string };
+
+/** The header the capability travels in. Deliberately NOT `authorization` — see the backend filter. */
+export const CREDENTIAL_HANDOFF_CAPABILITY_HEADER = "x-sellerops-handoff-authorization";
+
 export async function postCoupangCredentialHandoff(
   baseUrl: string,
-  token: string,
+  auth: CredentialHandoffAuth,
   accountSlot: string,
   channelCode: string,
   secrets: Readonly<Record<string, string>>,
-  runBinding: CredentialHandoffRunBinding,
+  runBinding: CredentialHandoffRunBinding | undefined,
   fetchImpl: FetchImpl = fetch,
+  runId?: string,
 ): Promise<CredentialHandoffResponse> {
   let res: Response;
   try {
     res = await fetchImpl(`${baseUrl}/api/agent/credential-handoff`, {
       method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ accountSlot, channelCode, secrets, runBinding }),
+      headers: {
+        ...(auth.kind === "bearer"
+          ? { authorization: `Bearer ${auth.token}` }
+          : { [CREDENTIAL_HANDOFF_CAPABILITY_HEADER]: auth.id }),
+        "content-type": "application/json",
+      },
+      // `runBinding` is the operator interlock and `runId` the seller one; a request carries exactly one of the
+      // two shapes, because the backend refuses one that presents both.
+      body: JSON.stringify({
+        accountSlot,
+        channelCode,
+        secrets,
+        ...(runBinding ? { runBinding } : {}),
+        ...(runId ? { runId } : {}),
+      }),
     });
   } catch {
     // The caught error is not inspected: a fetch failure can quote the request it failed on.

@@ -184,15 +184,18 @@ describe("each promise is pinned to the code that keeps it", () => {
     // which two concurrent requests both passed the read-only check and both stored — harmless for one account
     // (the DB's unique constraint) and two credentials for two. The ordering is the promise.
     const storeAt = service.indexOf("collect.storeCredential(");
-    const claimAt = service.indexOf("arming.claim()");
+    // BOTH interlocks — the operator's env arming and the seller's one-shot capability — are claimed in the same
+    // place. The seller path did not arrive with a second, looser claim site.
+    const claimAt = service.indexOf("authorizations.claim(capabilityId) : arming.claim()");
     expect(storeAt).toBeGreaterThan(0);
     expect(claimAt).toBeGreaterThan(0);
     expect(claimAt).toBeLessThan(storeAt);
     // …and the claim's result is acted on, or the race is straight back.
-    expect(service).toContain("if (!arming.claim())");
+    expect(service).toContain("if (!claimed)");
     // A store that THREW hands the claim back — which is what keeps the "retryable" half of this promise true
-    // when the refusal comes from inside the store itself.
+    // when the refusal comes from inside the store itself. True of whichever interlock authorized it.
     expect(service).toContain("arming.releaseUnusedClaim()");
+    expect(service).toContain("authorizations.releaseUnusedClaim(capabilityId)");
   });
 
   it("the preflight reads the disclosure from the MANIFEST rather than re-typing it", () => {

@@ -331,6 +331,23 @@ export type CommandPayload =
       locateRef?: string;
     }
   | { enabled: boolean } // SET_GUIDANCE_ENABLED
+  /**
+   * **The seller's one-shot authorization to hand a just-issued credential to the vault.**
+   *
+   * Carried on the checkpoint advance at the Coupang issuance walk's credential step, and read there and
+   * nowhere else. It is minted by the BACKEND for one org, one seller, one account, one channel and this run,
+   * lives for minutes, and is spent once — so it is a capability for a single write, not an identity.
+   *
+   * **This is deliberately not a general auth field.** It is not `token`, not `authorization`, not a header bag,
+   * and it does not belong to the envelope: it is one payload variant for one step of one walk. The reason the
+   * resident helper needs it at all is that it holds no seller identity and must never be given one — a seller
+   * JWT on the loopback bridge would be a credential for every org-scoped route in the service, handed over to
+   * authorize one vault write. Widening this field would give that idea somewhere to grow.
+   *
+   * Never logged, never persisted, never put in a URL. The runtime forwards it in one request header and
+   * forgets it.
+   */
+  | { credentialHandoffAuthorization: string }
   | Record<string, never>; // commands with no payload
 
 export interface EventEnvelope {

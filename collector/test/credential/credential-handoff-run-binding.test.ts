@@ -28,9 +28,13 @@ const SECRETS = Object.freeze({ access_key: "A".repeat(32), secret_key: "B".repe
 
 /** A fetch that records the one request and answers a stored+SUCCESS result. */
 function capturingFetch() {
-  const calls: { url: string; body: Record<string, unknown> }[] = [];
-  const impl = (async (url: string, init: { body: string }) => {
-    calls.push({ url: String(url), body: JSON.parse(init.body) as Record<string, unknown> });
+  const calls: { url: string; body: Record<string, unknown>; headers: Record<string, string> }[] = [];
+  const impl = (async (url: string, init: { body: string; headers?: Record<string, string> }) => {
+    calls.push({
+      url: String(url),
+      body: JSON.parse(init.body) as Record<string, unknown>,
+      headers: init.headers ?? {},
+    });
     return {
       ok: true,
       status: 200,
@@ -45,7 +49,7 @@ describe("the credential handoff presents the run identity it was approved under
     const { impl, calls } = capturingFetch();
     await postCoupangCredentialHandoff(
       "http://localhost:18091",
-      "jwt",
+      { kind: "bearer", token: "jwt" },
       "0123456789abcdef01234567",
       "COUPANG",
       SECRETS,
@@ -63,7 +67,7 @@ describe("the credential handoff presents the run identity it was approved under
 
   it("still sends exactly ONE request — the identity is a field, not a second round trip", async () => {
     const { impl, calls } = capturingFetch();
-    await postCoupangCredentialHandoff("http://localhost:18091", "jwt", "0".repeat(24), "COUPANG", SECRETS, BINDING, impl);
+    await postCoupangCredentialHandoff("http://localhost:18091", { kind: "bearer", token: "jwt" }, "0".repeat(24), "COUPANG", SECRETS, BINDING, impl);
     expect(calls).toHaveLength(1);
   });
 
@@ -116,5 +120,66 @@ describe("the credential handoff presents the run identity it was approved under
     ]) {
       expect(code).toContain(assign);
     }
+  });
+});
+
+/**
+ * **The product path authenticates with a capability, and it is not a bearer.**
+ *
+ * The resident helper holds no seller identity and must never be given one — a JWT on the loopback bridge would
+ * be a credential for every org-scoped route in the service, handed over to authorize one vault write.
+ */
+describe("the seller path's capability", () => {
+  it("travels in its OWN header, and no Authorization header is sent at all", async () => {
+    const { impl, calls } = capturingFetch();
+    await postCoupangCredentialHandoff(
+      "http://localhost:18091",
+      { kind: "capability", id: "a".repeat(32) },
+      "0".repeat(24),
+      "COUPANG",
+      SECRETS,
+      undefined,
+      impl,
+      "run_wing0001",
+    );
+
+    const headers = calls[0]!.headers;
+    expect(headers["x-sellerops-handoff-authorization"]).toBe("a".repeat(32));
+    // Presenting both is what the backend refuses; this makes it unsendable in the first place.
+    expect(headers.authorization).toBeUndefined();
+  });
+
+  it("sends the seller's runId and NO operator run binding — one interlock per request", async () => {
+    const { impl, calls } = capturingFetch();
+    await postCoupangCredentialHandoff(
+      "http://localhost:18091",
+      { kind: "capability", id: "b".repeat(32) },
+      "0".repeat(24),
+      "COUPANG",
+      SECRETS,
+      undefined,
+      impl,
+      "run_wing0001",
+    );
+
+    const body = calls[0]!.body;
+    expect(body.runId).toBe("run_wing0001");
+    expect(body.runBinding).toBeUndefined();
+  });
+
+  it("never puts the capability in the URL — it is a header, and a URL is a place things get logged", async () => {
+    const { impl, calls } = capturingFetch();
+    await postCoupangCredentialHandoff(
+      "http://localhost:18091",
+      { kind: "capability", id: "c".repeat(32) },
+      "0".repeat(24),
+      "COUPANG",
+      SECRETS,
+      undefined,
+      impl,
+      "run_wing0001",
+    );
+    expect(calls[0]!.url).toBe("http://localhost:18091/api/agent/credential-handoff");
+    expect(calls[0]!.url).not.toContain("c".repeat(8));
   });
 });
