@@ -95,6 +95,28 @@ export interface OverlayOptions {
    * guidance-only panel (e.g. the reach step, which auto-advances on a page-category transition).
    */
   advance?: OverlayAdvance;
+  /**
+   * **The seller's OTHER way forward, when a step has one** — rendered as a quiet text link under the primary.
+   *
+   * Exactly one affordance may be the primary, because a panel with two equal buttons is a panel that has
+   * stopped saying what to do. But "one primary" must not become "one exit": the credential step's automatic
+   * handoff needs a door to the typing form that is not 취소, and a step whose seller simply prefers to do it
+   * themselves should not have to abandon the walk to say so.
+   *
+   * Its own latch (`__aw_secondary_pressed__`), its own token namespace, polled with
+   * {@link readOverlaySecondaryPressed} — so a press on one can never be read as a press on the other.
+   */
+  secondary?: OverlayAdvance;
+  /**
+   * **Which channel's walk this is** — the panel's own identity line, beside the step counter.
+   *
+   * The step counter used to live ONLY in the chip pinned over the ringed control, which `dockedPanelOnly`
+   * hides: a docked step (and every park notice) therefore showed no step number at all, on the panels where
+   * a seller is most likely to be lost. The header carries both, on every panel, for every channel.
+   *
+   * Absent ⇒ no header row, so a caller that has not adopted the shell renders exactly what it did before.
+   */
+  channelName?: string;
 }
 
 /** The WING-resident advance affordance (a labelled button + its opaque per-step latch token). */
@@ -564,6 +586,8 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
     if (prevPanel) prevPanel.remove();
     G["__aw_advance_token__"] = o.advance ? o.advance.token : "";
     delete G["__aw_advance_pressed__"];
+    G["__aw_secondary_token__"] = o.secondary ? o.secondary.token : "";
+    delete G["__aw_secondary_pressed__"];
     // The WING-resident panel is drawn ONLY on an explicit opt-in (residentPanel) — never inferred from a
     // label — so callers that pass only a diagnostic label (NAVER export / NAVER issuance / Coupang renewal)
     // keep the classic ring+badge and never get a new interactive fixed element on their marketplace page.
@@ -575,9 +599,29 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
       // A panel with no advance button has nothing to click, so it takes NO pointer events — otherwise a
       // copy-only panel (the deletion checkpoint, the reach step) could sit over the very control the seller
       // must press on a short page and block their manual progress. With a button it must stay clickable.
-      const panelPointerEvents = o.advance ? "auto" : "none";
+      const panelPointerEvents = o.advance || o.secondary ? "auto" : "none";
       panel.style.cssText =
         `position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:2147483001;pointer-events:${panelPointerEvents};box-sizing:border-box;max-width:min(560px,92vw);background:#0b1f4d;color:#fff;font:14px system-ui,-apple-system,sans-serif;padding:14px 16px;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,0.38);display:flex;flex-direction:column;gap:10px`;
+      // **The shell's header: whose guidance this is, and where in it the seller is.**
+      //
+      // One line, two facts, on every panel this shell draws — a step, a park notice, an outcome — and for every
+      // channel. It is what makes the step counter reachable on a DOCKED panel, where the chip that used to
+      // carry it is hidden.
+      if (o.channelName != null) {
+        const header = document.createElement("div");
+        header.setAttribute("data-aw-panel-header", "");
+        header.style.cssText =
+          "display:flex;gap:12px;align-items:baseline;justify-content:space-between;font:600 12px system-ui,-apple-system,sans-serif;color:#cfe0ff;letter-spacing:0.02em";
+        const who = document.createElement("span");
+        who.setAttribute("data-aw-panel-channel", "");
+        who.textContent = `SellerOps · ${o.channelName}`;
+        const where = document.createElement("span");
+        where.setAttribute("data-aw-panel-step", "");
+        where.textContent = `${o.stepNumber}/${o.totalSteps}`;
+        header.appendChild(who);
+        header.appendChild(where);
+        panel.appendChild(header);
+      }
       // The instruction, the disclosure and the advance button share ONE row; the detail (when open) is a second
       // row under it. That way a collapsed panel is exactly as tall as the old single-line one.
       const row = document.createElement("div");
@@ -640,6 +684,21 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
         detail.textContent = o.detail != null ? o.detail : "";
         detail.style.cssText = `line-height:1.5;font-size:13px;color:#e6eeff;border-top:1px solid rgba(255,255,255,0.18);padding-top:10px;display:${startOpen ? "block" : "none"}`;
         panel.appendChild(detail);
+      }
+      // The other way forward, under the primary and visibly quieter than it: a link, not a button. Its press
+      // sets its OWN latch, so nothing that polls the advance can mistake it for one.
+      if (o.secondary) {
+        const alt = document.createElement("button");
+        alt.setAttribute("type", "button");
+        alt.setAttribute("data-aw-secondary", "");
+        alt.textContent = o.secondary.buttonLabel;
+        alt.style.cssText =
+          "align-self:flex-start;background:transparent;color:#cfe0ff;border:0;padding:0;font:13px system-ui,-apple-system,sans-serif;text-decoration:underline;cursor:pointer";
+        alt.addEventListener("click", function () {
+          const w = window as unknown as Record<string, unknown>;
+          w["__aw_secondary_pressed__"] = w["__aw_secondary_token__"];
+        });
+        panel.appendChild(alt);
       }
       document.body.appendChild(panel);
       // The panel is built AFTER the first `reposition()`, so without this the occlusion check would not run
@@ -755,6 +814,8 @@ export async function unmountOverlay(page: PageOrFrame): Promise<void> {
     const g = window as unknown as Record<string, unknown>;
     delete g["__aw_advance_pressed__"];
     delete g["__aw_advance_token__"];
+    delete g["__aw_secondary_pressed__"];
+    delete g["__aw_secondary_token__"];
   });
 }
 
@@ -780,6 +841,26 @@ export async function resetOverlayAdvance(page: PageOrFrame, token: string): Pro
  */
 export async function readOverlayAdvancePressed(page: PageOrFrame, token: string): Promise<boolean> {
   return page.evaluate((t) => (window as unknown as Record<string, unknown>)["__aw_advance_pressed__"] === t, token);
+}
+
+/**
+ * Re-arm the panel's SECONDARY latch — the same value-free equality contract as {@link resetOverlayAdvance},
+ * in its own namespace so the two can never satisfy each other.
+ */
+export async function resetOverlaySecondary(page: PageOrFrame, token: string): Promise<void> {
+  await page.evaluate((t) => {
+    const g = window as unknown as Record<string, unknown>;
+    g["__aw_secondary_token__"] = t;
+    delete g["__aw_secondary_pressed__"];
+  }, token);
+}
+
+/**
+ * Did the seller take the step's OTHER way forward? Value-free equality poll, exactly like
+ * {@link readOverlayAdvancePressed}: an absent or non-matching latch reads back `false`.
+ */
+export async function readOverlaySecondaryPressed(page: PageOrFrame, token: string): Promise<boolean> {
+  return page.evaluate((t) => (window as unknown as Record<string, unknown>)["__aw_secondary_pressed__"] === t, token);
 }
 
 /**
