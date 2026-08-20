@@ -81,6 +81,14 @@ function issuanceRun(over: Partial<ActionWindowRunView> = {}): ActionWindowRunVi
 }
 
 const blocked = (code: BlockerCode) => issuanceRun({ blocker: { code, recoverable: true } });
+/**
+ * A v2-only blocker code, which every walk engine emits (they all import `contracts/action-window/v2`) but the
+ * frontend's own `contract.ts` — still the v1 holdout — cannot spell in its type. The FE renders these through
+ * `blockerView`'s v2 fallback table, which is exactly the path this asserts; the cast is the type system
+ * catching up with the wire, not a claim about it.
+ */
+const blockedV2 = (code: string) =>
+  issuanceRun({ blocker: { code: code as BlockerCode, recoverable: true } });
 
 describe("a walk the seller ENDED hands over to the text checklist (2026-08-19)", () => {
   // Live-observed on the first real on-demand walk: pressing 취소 left the screen saying "쿠팡(윙) 창에서 화면
@@ -249,10 +257,20 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
     expect(screen.queryByRole("button", { name: "쿠팡 윙 창 앞으로 가져오기" })).toBeNull();
   });
 
-  it("a recoverable blocker adds the recovery control (확인 완료) alongside 취소 — recovery is the FE's job", () => {
+  it("a recoverable blocker adds the recovery control (다시 확인) alongside 취소 — recovery is the FE's job", () => {
+    // 다시 확인, not 확인 완료: at a BARRIER the command reports "I did it", at a BLOCKER it is the recovery —
+    // and every blocker body tells the seller to press 다시 확인, which for a long time named no real button.
     render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} run={blocked("LOGIN_REQUIRED")} onCommand={vi.fn()} />);
-    expect(screen.getByRole("button", { name: "확인 완료" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "다시 확인" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "취소" })).toBeInTheDocument();
+  });
+
+  it("the CLOSED-WINDOW blocker names what the press DOES — 창 다시 열기, beside 취소", () => {
+    // The seller closed that window on purpose. A button that re-opens one has to say so before it does it.
+    render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} run={blockedV2("SURFACE_CLOSED")} onCommand={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "창 다시 열기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "취소" })).toBeInTheDocument();
+    expect(screen.getByText("판매자센터 창이 닫혔어요")).toBeInTheDocument();
   });
 
   it("commands come ONLY from allowedCommands — a blocked view without CANCEL_RUN shows recovery but no abort", () => {
@@ -264,13 +282,13 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
       />,
     );
     expect(screen.queryByRole("button", { name: "취소" })).toBeNull();
-    expect(screen.getByRole("button", { name: "확인 완료" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "다시 확인" })).toBeInTheDocument();
   });
 
   it("forwards the recovery command from a blocker to onCommand (recheck reports intent, never completes)", async () => {
     const onCommand = vi.fn();
     render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} run={blocked("LOGIN_REQUIRED")} onCommand={onCommand} />);
-    await userEvent.click(screen.getByRole("button", { name: "확인 완료" }));
+    await userEvent.click(screen.getByRole("button", { name: "다시 확인" }));
     expect(onCommand).toHaveBeenCalledWith("REQUEST_STEP_RECHECK");
   });
 
@@ -496,7 +514,7 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
       expect(screen.queryByRole("button", { name: "확인 완료" })).toBeNull();
       // At a recoverable blocker the recovery control forwards REQUEST_STEP_RECHECK to the host.
       act(() => host.publish(blocked("LOGIN_REQUIRED")));
-      await userEvent.click(screen.getByRole("button", { name: "확인 완료" }));
+      await userEvent.click(screen.getByRole("button", { name: "다시 확인" }));
       expect(host.sent).toContain("REQUEST_STEP_RECHECK");
     });
 

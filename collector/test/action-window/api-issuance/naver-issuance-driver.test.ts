@@ -636,7 +636,9 @@ describe("NaverIssuanceDriver — abort / recovery", () => {
     await session.whenSettled();
 
     expect(engine.currentStage()).toBe("page_mismatch");
-    expect(io.lastView()?.blocker).toEqual({ code: "UI_DRIFT", recoverable: true });
+    // SURFACE_CLOSED, not UI_DRIFT — the seller closed the window; they are not looking at a page that changed,
+    // and "화면이 바뀐 것 같아요" hides the one instruction that helps them ("다시 확인이 창을 다시 열어요").
+    expect(io.lastView()?.blocker).toEqual({ code: "SURFACE_CLOSED", recoverable: true });
     expect(io.events().map((e) => e.type)).not.toContain("RUN_FAILED");
     expect(page.clickCalls).toBe(0);
   });

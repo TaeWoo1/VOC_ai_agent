@@ -14,7 +14,12 @@ import { validateCommandEnvelope } from "../../../../contracts/action-window/v2/
 import type { AwClientFrame, AwServerTransport } from "../../../../contracts/action-window/v2/transport";
 import { log } from "../../log";
 import type { CoupangIssuanceEffect, CoupangIssuanceEngine } from "./coupang-issuance-engine";
-import { COUPANG_TARGET_BARRIER_STAGE, type CoupangIssuanceProbeDriver, type CoupangIssuanceTarget } from "./coupang-issuance-driver";
+import {
+  COUPANG_TARGET_BARRIER_STAGE,
+  coupangIssuanceParkNotice,
+  type CoupangIssuanceProbeDriver,
+  type CoupangIssuanceTarget,
+} from "./coupang-issuance-driver";
 import { isCoupangIssuancePark, isCoupangIssuanceTerminal } from "./coupang-issuance-stages";
 
 export interface CoupangIssuanceSessionOptions {
@@ -49,6 +54,8 @@ export class CoupangIssuanceGuidanceSession {
    * ever theirs to ask for.
    */
   private surfaceClosed = false;
+  /** The park notice currently on the WING window, so it is drawn once per park and not once per recovery tick. */
+  private parkNoticeShown: string | null = null;
 
   /**
    * **Stopped for good** — the host tore this session down (the resident helper releasing the walk, or the agent
@@ -192,6 +199,17 @@ export class CoupangIssuanceGuidanceSession {
     // A torn-down session drives nothing: every effect below either touches the driver (which would re-open a
     // window the host just closed) or publishes to a transport nobody is subscribed to.
     if (this.stopped) return;
+    // **THE choke point for a closed surface.** Every effect below reaches the driver, and the lazy driver
+    // brings a window up on ANY call — so "does this particular path re-open the window?" has to be answered
+    // once here, not per call site. It had been answered per call site three times (`awaitSurface`,
+    // `maybeRecoverPark`, and the close handler's own `CLEAR_HIGHLIGHT`) and a fourth path was always going to
+    // be missed: live 2026-08-20, a park-recovery loop that had STARTED before the close kept driving after it
+    // (`aw_coupang_walk_surface_closed` 06:48:49.756 → `landing_skipped ALREADY_NAVIGATED_ONCE` 06:48:50.014),
+    // and because the landing is once-per-carrier the window it brought back was blank.
+    //
+    // The latch is cleared in exactly one place — an ACCEPTED seller command (`handleFrame`) — so re-opening
+    // stays something the seller asks for and never something a timer does.
+    if (this.surfaceClosed) return;
     if (typeof effect === "object") {
       if ("guide" in effect) return this.guide(effect.guide);
       // `observe` rests at a seller barrier. The watcher runs detached so the drive chain unwinds and the run is
@@ -257,6 +275,7 @@ export class CoupangIssuanceGuidanceSession {
       }
       case "CLEAR_HIGHLIGHT": {
         await this.driver.clearHighlight();
+        this.showParkNoticeIfParked();
         this.maybeRecoverPark();
         return;
       }
@@ -266,6 +285,7 @@ export class CoupangIssuanceGuidanceSession {
       }
       case "NONE":
       default:
+        this.showParkNoticeIfParked();
         this.maybeRecoverPark();
         return;
     }
@@ -317,6 +337,35 @@ export class CoupangIssuanceGuidanceSession {
     const expired = this.engine.onSurfaceWaitExpired();
     this.publishState();
     return expired;
+  }
+
+  /**
+   * **A parked run still says so ON the marketplace window.**
+   *
+   * Fail-closed took the guidance down and left nothing behind: the seller reached the API-key page, the
+   * credential read came back `UNKNOWN`, the run parked exactly as it should — and the tutorial vanished, with
+   * the explanation sitting in a tab they were not looking at (live 2026-08-20). Parking is right; parking
+   * INVISIBLY is the defect. So the docked panel stays up, carrying what SellerOps could not do.
+   *
+   * It is deliberately not a step: no ring, no button, no next action. `showParkNotice` on the driver is what
+   * enforces that; this only decides WHEN.
+   *
+   * Mounted once per park, not once per recovery tick — the recovery loop re-parks on the same code every
+   * second, and re-drawing the panel at 1 Hz would make it flicker on the seller's screen.
+   */
+  private showParkNoticeIfParked(): void {
+    if (this.stopped || this.surfaceClosed) return;
+    const show = this.driver.showParkNotice;
+    if (!show) return;
+    const parked = isCoupangIssuancePark(this.engine.currentStage()) && !this.engine.isPaused();
+    const code = parked ? coupangIssuanceParkNotice(this.engine.view().blocker?.code) : null;
+    if (code === this.parkNoticeShown) return;
+    this.parkNoticeShown = code;
+    if (code === null) return;
+    void show
+      .call(this.driver, code)
+      .then((painted) => log("aw_coupang_issuance_park_notice", { code, painted }))
+      .catch((e) => log("aw_coupang_issuance_park_notice_failed", { code, reason: errName(e) }, "warn"));
   }
 
   /**
@@ -423,6 +472,11 @@ export class CoupangIssuanceGuidanceSession {
     for (let i = 0; i < maxPolls; i++) {
       await new Promise<void>((resolve) => setTimeout(resolve, this.surfaceWaitPollMs));
       if (this.stopped || this.engine.isPaused() || isCoupangIssuanceTerminal(this.engine.currentStage())) return;
+      // Checked EVERY iteration, not only at entry. `maybeRecoverPark` guards on the latch before starting a
+      // loop, which stops a loop from being born after a close — and does nothing about the loop already
+      // running, which is the one that fired on 2026-08-20. A window the seller closed must end this loop, not
+      // merely fail to start another.
+      if (this.surfaceClosed) return;
       if (!isCoupangIssuancePark(this.engine.currentStage())) return;
       const outcome = this.engine.command({ type: "REQUEST_STEP_RECHECK", expectedRevision: this.engine.view().revision });
       if (!outcome.ok) return;

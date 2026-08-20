@@ -1,5 +1,5 @@
 import type { ActionWindowRunView, CommandType } from "../../lib/actionWindow/contract";
-import { commandLabel, SECTION_TITLE } from "../../lib/actionWindow/copy";
+import { blockedCommandLabel, commandLabel, SECTION_TITLE } from "../../lib/actionWindow/copy";
 
 /**
  * Action Window control panel. Renders a control ONLY for each command in
@@ -40,7 +40,7 @@ export function ActionWindowControlPanel({
           style
         }
       >
-        {commandLabel(type)}
+        {run.blocker ? blockedCommandLabel(type, run.blocker.code) : commandLabel(type)}
       </button>
     );
   }

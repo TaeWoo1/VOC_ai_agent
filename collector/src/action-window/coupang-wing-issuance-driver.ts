@@ -117,7 +117,10 @@ import type {
   CoupangIssuanceTarget,
   WingSurfaceProbe,
 } from "./coupang-issuance/coupang-issuance-driver";
-import { isCoupangCheckpointTarget } from "./coupang-issuance/coupang-issuance-driver";
+import {
+  isCoupangCheckpointTarget,
+  type CoupangIssuanceParkNotice,
+} from "./coupang-issuance/coupang-issuance-driver";
 import type { LocateResult } from "./engine";
 
 /** The highlightable fixed-label targets (everything except the guidance-only `reach_open_api` / `return`). */
@@ -880,6 +883,42 @@ function advanceToken(target: CoupangIssuanceTarget): string {
  * `issue` and `credentials` deliberately confirm the seller's own manual act (press 발급 / copy the keys) — the
  * driver still presses nothing and reads no value.
  */
+/**
+ * **What a parked run says on the marketplace window.** Fixed strings, one per park this driver will draw.
+ *
+ * Every line here obeys the same two rules: it says what SellerOps could not do, and it points the seller at
+ * SellerOps' own 다시 확인 — never at a WING control. `CREDENTIAL_STATE_UNKNOWN` in particular must not read as
+ * "you have no key": nobody knows, that is the entire blocker, and a guess in that direction is how a seller
+ * ends up creating a second real credential.
+ *
+ * The wording matches the frontend's blocker copy for the same code (`frontend/src/lib/actionWindow/copy.ts`)
+ * so the two screens a seller is looking at say the same thing.
+ */
+const PARK_NOTICE_COPY: Readonly<Record<CoupangIssuanceParkNotice, { badge: string; brief: string; detail: string }>> =
+  Object.freeze({
+    CREDENTIAL_STATE_UNKNOWN: {
+      badge: "확인 중 멈춤",
+      brief: "발급된 키가 있는지 확인하지 못했어요.",
+      detail:
+        "화면이 모두 뜬 뒤 SellerOps에서 '다시 확인'을 눌러 주세요. 확인되기 전에는 발급 안내를 시작하지 않습니다.",
+    },
+    TARGET_NOT_FOUND: {
+      badge: "안내 멈춤",
+      brief: "이 화면에서 다음 버튼을 찾지 못했어요.",
+      detail: "화면이 모두 뜬 뒤 SellerOps에서 '다시 확인'을 눌러 주세요.",
+    },
+    UI_DRIFT: {
+      badge: "안내 멈춤",
+      brief: "쿠팡 윙 화면이 바뀐 것 같아요.",
+      detail: "SellerOps에서 '다시 확인'을 눌러 주세요.",
+    },
+    SURFACE_SETTLE_TIMEOUT: {
+      badge: "안내 멈춤",
+      brief: "화면이 아직 준비되지 않았어요.",
+      detail: "화면이 모두 뜬 뒤 SellerOps에서 '다시 확인'을 눌러 주세요.",
+    },
+  });
+
 const ADVANCE_BUTTON_LABEL: Readonly<Partial<Record<CoupangIssuanceTarget, string>>> = {
   issue: "발급 화면이 열렸어요 · 다음",
   confirm_purpose: "확인을 눌렀어요 · 다음",
@@ -1436,6 +1475,8 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
   private readonly closed: Promise<void>;
   /** Armed by {@link armObserve}, cancelled by the observe loop it is waiting for. See {@link armWatchdog}. */
   private observeWatchdog: ReturnType<typeof setTimeout> | null = null;
+  /** The step the docked panel last carried — so a park notice keeps the walk's place instead of resetting it. */
+  private lastStepNumber = 1;
   /**
    * How many times each repeating observation has been seen since it last changed. See {@link logThrottled}:
    * the poll loop writes a handful of these once a second, and the 2026-08-12 log is unreadable because of it.
@@ -2150,6 +2191,9 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     dockedPanelOnly = false,
     briefOverride?: string,
   ): Promise<void> {
+    // Remembered for {@link showParkNotice}: a park keeps the walk's own step number rather than resetting the
+    // counter to 1, which would read as the run having started over.
+    this.lastStepNumber = OVERLAY_STEP[target];
     const buttonLabel = ADVANCE_BUTTON_LABEL[target];
     // MARK the controls this step's panel must keep clear of, BEFORE the mount positions it — the placement runs
     // inside the mount, so marks written afterwards would only take effect on the next scroll. Every mount path
@@ -2198,6 +2242,43 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     const page = this.activePage();
     await timebox(unmountOverlay(page), undefined);
     await timebox(this.evalStr(page, IN_PAGE_CLEAR_TAG).then(() => undefined), undefined);
+  }
+
+  /**
+   * **What the seller sees on WING while the run is parked.**
+   *
+   * A docked panel, and nothing else: the ring is cleared first, there is no `advance` button, and the copy
+   * names no control. That combination is what makes it safe to leave up during a park whose whole meaning is
+   * "SellerOps does not know" — a panel with a button would be an instruction, and the one instruction that
+   * must never appear here is the parked step's own.
+   *
+   * The paint is VERIFIED before it is reported. A mount that silently drew nothing is the failure this walk's
+   * sibling shipped for a week (2026-08-19), and a notice that claims to be on screen when it is not leaves the
+   * seller exactly where this method exists to stop leaving them.
+   */
+  async showParkNotice(code: CoupangIssuanceParkNotice): Promise<boolean> {
+    const copy = PARK_NOTICE_COPY[code];
+    const page = this.activePage();
+    // Ring first: a park points at nothing, so a highlight left over from the step that parked would keep
+    // pointing at a control the seller must NOT be told to press.
+    await timebox(this.evalStr(page, IN_PAGE_CLEAR_TAG).then(() => undefined), undefined);
+    await timebox(
+      mountOverlay(page, {
+        dockedPanelOnly: true,
+        // The step this parked ON, so the panel keeps its place in the walk instead of resetting the counter.
+        stepNumber: this.lastStepNumber,
+        totalSteps: COUPANG_ISSUANCE_TOTAL_STEPS,
+        copyKey: `actionWindow.coupangIssuance.park.${code}`,
+        label: copy.brief,
+        detail: copy.detail,
+        badgeLabel: copy.badge,
+        guidanceEnabled: this.opts.guidanceEnabled ?? true,
+        residentPanel: true,
+        // NO `advance`: this panel takes no press and offers no next step.
+      }),
+      undefined,
+    );
+    return (await timebox(overlayMounted(page), false)) === true;
   }
 
   async armObserve(target: CoupangIssuanceTarget): Promise<void> {

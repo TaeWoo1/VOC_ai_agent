@@ -119,7 +119,7 @@ export class IssuanceEngine {
   /** The control the current barrier/checkpoint rests on, so a recheck/resume re-guides the right section. */
   private currentTarget: IssuanceTarget | null = null;
   private targetSig: Partial<Record<IssuanceTarget, string>> = {};
-  private blockerCode: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT" | null = null;
+  private blockerCode: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT" | "SURFACE_CLOSED" | null = null;
   private blockerRecoverable = false;
   /** A pause is an overlay on a barrier, not a 16th stage — the product's stage list is exactly 15. */
   private paused = false;
@@ -437,15 +437,23 @@ export class IssuanceEngine {
   }
 
   /**
-   * The seller closed the API-center window. Not a failure — the same shape as being off the expected page —
-   * so it parks recoverably on `page_mismatch`; re-opening and a `REQUEST_STEP_RECHECK` re-probe recovers.
-   * Idempotent on a terminal or already-parked run. Returns `CLEAR_HIGHLIGHT` so a parked run points at nothing.
+   * The seller closed the window. Not a failure — the same shape as being off the expected page — so it parks
+   * recoverably on `page_mismatch`; re-opening and a `REQUEST_STEP_RECHECK` recovers. Idempotent on a terminal
+   * or already-parked run.
+   *
+   * **`SURFACE_CLOSED`, not `UI_DRIFT`.** Different events, different fixes, and the seller reads the
+   * difference: `UI_DRIFT` says "화면이 바뀐 것 같아요" to someone who knows exactly what happened — they closed
+   * the window — while `SURFACE_CLOSED` says "판매자센터 창이 닫혔어요" and that 다시 확인 re-opens it. The code
+   * already existed in the shared v2 vocabulary and the frontend copy table; this walk was not using it.
+   *
+   * **Returns `NONE`, not `CLEAR_HIGHLIGHT`.** There is no page left to clear a highlight on, and asking for one
+   * is what re-opened the window: every driver call goes through the lazy wrapper, which brings a surface up on
+   * ANY call.
    */
   onSurfaceClosed(): IssuanceEffect {
     if (isIssuanceTerminal(this.stage)) return "NONE";
-    if (this.stage === "page_mismatch" && this.blockerCode === "UI_DRIFT") return "NONE";
-    this.park("page_mismatch", "UI_DRIFT");
-    return "CLEAR_HIGHLIGHT";
+    if (this.stage === "page_mismatch" && this.blockerCode === "SURFACE_CLOSED") return "NONE";
+    return this.park("page_mismatch", "SURFACE_CLOSED");
   }
 
   /**
@@ -496,7 +504,10 @@ export class IssuanceEngine {
    * Park recoverably at a seller-clearable stop. Emits `RUN_BLOCKED { recoverable: true }` and stops, never a
    * `RUN_FAILED`: the run is not over. A `REQUEST_STEP_RECHECK` re-probes the surface from the top.
    */
-  private park(stage: "waiting_login" | "target_not_found" | "page_mismatch", code: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT"): IssuanceEffect {
+  private park(
+    stage: "waiting_login" | "target_not_found" | "page_mismatch",
+    code: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT" | "SURFACE_CLOSED",
+  ): IssuanceEffect {
     // Idempotent while already parked on this exact cause.
     if (this.stage === stage && this.blockerCode === code) return "NONE";
     this.paused = false;

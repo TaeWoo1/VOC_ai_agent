@@ -276,6 +276,24 @@ export function commandLabel(type: CommandType): string {
   return COMMAND_LABEL[type];
 }
 
+/**
+ * **The label a command wears while the run is BLOCKED**, which is not the label it wears at a barrier.
+ *
+ * `REQUEST_STEP_RECHECK` does two jobs. At a barrier it means "I did it" — `확인 완료`. At a blocker it is the
+ * recovery, and every blocker body in this file has been telling the seller to press **'다시 확인'** while the
+ * button actually said 확인 완료: an instruction naming a control that is not on the screen. The bodies are the
+ * ones that read correctly, so the button follows them.
+ *
+ * `SURFACE_CLOSED` goes further and says what pressing it DOES. The seller closed the marketplace window on
+ * purpose; "다시 확인" invites them to re-check something, when what happens is that a window opens — and a
+ * window opening unannounced is precisely the thing this runtime spent 2026-08-20 making impossible without an
+ * explicit press. So the press has to be the one that says so.
+ */
+export function blockedCommandLabel(type: CommandType, blockerCode: BlockerCode | string | undefined): string {
+  if (type !== "REQUEST_STEP_RECHECK") return commandLabel(type);
+  return blockerCode === "SURFACE_CLOSED" ? "창 다시 열기" : "다시 확인";
+}
+
 export interface BlockerView {
   title: string;
   body: string;
@@ -339,7 +357,9 @@ const V2_ONLY_BLOCKER_VIEW: Record<string, BlockerView> = {
   },
   SURFACE_CLOSED: {
     title: "판매자센터 창이 닫혔어요",
-    body: "'다시 확인'을 누르면 판매자센터 창을 다시 열어 드릴게요.",
+    // Names the button that is actually on the screen, and says the window opens only because they pressed it —
+    // the runtime never re-opens a window the seller closed.
+    body: "'창 다시 열기'를 누르면 판매자센터 창을 다시 열어 드릴게요. 누르기 전에는 창이 열리지 않아요.",
   },
   // The issuance walk refused to go on because it could not tell whether this account already has a key. The
   // copy says what SellerOps could not do and what clears it — it does NOT say "키가 없는 것 같아요", because

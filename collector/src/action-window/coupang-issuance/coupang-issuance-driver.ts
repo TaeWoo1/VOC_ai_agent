@@ -250,4 +250,47 @@ export interface CoupangIssuanceProbeDriver {
    * observation on a dead page. A driver with no window (every scripted test driver) omits it.
    */
   whenSurfaceClosed?(): Promise<void>;
+
+  /**
+   * **Optional: keep a docked, NON-INTERACTIVE notice on the marketplace window while the run is parked.**
+   *
+   * A park takes the guidance down — `CLEAR_HIGHLIGHT` unmounts the panel — and what the seller is then looking
+   * at is a WING screen with nothing of SellerOps on it. Live 2026-08-20: the walk reached the API-key page,
+   * could not tell whether a key already existed (`LABEL_NOT_UNIQUE` on 업체코드), parked exactly as designed —
+   * and the tutorial simply vanished, with the explanation sitting in the OTHER tab. Fail-closed is right;
+   * fail-closed AND invisible is the defect.
+   *
+   * The panel this mounts carries **no advance button, no ring, and no call to action**. It says what SellerOps
+   * could not do and that the seller's own 다시 확인 in SellerOps is what clears it. It must never be used to
+   * offer the parked step's control — an `UNKNOWN` credential read that put a 발급 button in front of someone is
+   * exactly how a second real key gets created.
+   *
+   * Returns whether the notice was actually PAINTED, not whether a mount was attempted: an unverified mount is
+   * what let the NAVER walk report guidance it had not drawn (2026-08-19).
+   */
+  showParkNotice?(code: CoupangIssuanceParkNotice): Promise<boolean>;
+}
+
+/**
+ * The parks a marketplace-window notice exists for — a closed set, and deliberately NOT every blocker code.
+ *
+ * Two are absent on purpose:
+ *  - `SURFACE_CLOSED` — there is no window to draw on. Drawing is what re-opens it (`drive`'s own guard).
+ *  - `LOGIN_REQUIRED` — SellerOps does not put a panel over a login screen. It is the one WING page where the
+ *    seller is typing a credential, and a floating overlay there is both an obstacle and a thing that should
+ *    never learn to sit near a password field.
+ */
+export const COUPANG_ISSUANCE_PARK_NOTICES = [
+  "CREDENTIAL_STATE_UNKNOWN",
+  "TARGET_NOT_FOUND",
+  "UI_DRIFT",
+  "SURFACE_SETTLE_TIMEOUT",
+] as const;
+export type CoupangIssuanceParkNotice = (typeof COUPANG_ISSUANCE_PARK_NOTICES)[number];
+
+/** Narrow a published blocker code to one this driver will draw. Anything else ⇒ no notice, never a guess. */
+export function coupangIssuanceParkNotice(code: string | undefined): CoupangIssuanceParkNotice | null {
+  return (COUPANG_ISSUANCE_PARK_NOTICES as readonly string[]).includes(code ?? "")
+    ? (code as CoupangIssuanceParkNotice)
+    : null;
 }

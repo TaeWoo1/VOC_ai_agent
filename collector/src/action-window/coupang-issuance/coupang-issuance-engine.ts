@@ -145,6 +145,7 @@ export class CoupangIssuanceEngine {
     | "UI_DRIFT"
     | "SURFACE_SETTLE_TIMEOUT"
     | "CREDENTIAL_STATE_UNKNOWN"
+    | "SURFACE_CLOSED"
     | null = null;
   /**
    * What the runtime OBSERVED about this account's credentials, once it has been on a surface where that is
@@ -503,13 +504,23 @@ export class CoupangIssuanceEngine {
   /**
    * The seller closed the WING window. Not a failure — the same shape as being off the expected page — so it
    * parks recoverably on `page_mismatch`; re-opening and a `REQUEST_STEP_RECHECK` recovers. Idempotent on a
-   * terminal or already-parked run. Returns `CLEAR_HIGHLIGHT` so a parked run points at nothing.
+   * terminal or already-parked run.
+   *
+   * **`SURFACE_CLOSED`, not `UI_DRIFT`.** They are different events with different fixes, and the seller reads
+   * the difference: `UI_DRIFT` says "화면이 바뀐 것 같아요" to someone who knows perfectly well what they did —
+   * they closed the window — while `SURFACE_CLOSED` says "판매자센터 창이 닫혔어요" and that 다시 확인 re-opens
+   * it. The code already existed in the shared v2 vocabulary and in the frontend's copy table; this walk was
+   * simply not using it.
+   *
+   * **Returns `NONE`, not `CLEAR_HIGHLIGHT`.** There is no page left to clear a highlight on, and asking for one
+   * is what re-opened the window: every driver call goes through the lazy wrapper, which brings a surface up on
+   * ANY call. The session refuses driver work after a close anyway (`drive`), so this is the two of them
+   * agreeing rather than one of them compensating.
    */
   onSurfaceClosed(): CoupangIssuanceEffect {
     if (isCoupangIssuanceTerminal(this.stage)) return "NONE";
-    if (this.stage === "page_mismatch" && this.blockerCode === "UI_DRIFT") return "NONE";
-    this.park("page_mismatch", "UI_DRIFT");
-    return "CLEAR_HIGHLIGHT";
+    if (this.stage === "page_mismatch" && this.blockerCode === "SURFACE_CLOSED") return "NONE";
+    return this.park("page_mismatch", "SURFACE_CLOSED");
   }
 
   /**
@@ -617,7 +628,13 @@ export class CoupangIssuanceEngine {
 
   private park(
     stage: "waiting_login" | "target_not_found" | "page_mismatch" | "credential_state_unknown",
-    code: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT" | "SURFACE_SETTLE_TIMEOUT" | "CREDENTIAL_STATE_UNKNOWN",
+    code:
+      | "LOGIN_REQUIRED"
+      | "TARGET_NOT_FOUND"
+      | "UI_DRIFT"
+      | "SURFACE_SETTLE_TIMEOUT"
+      | "CREDENTIAL_STATE_UNKNOWN"
+      | "SURFACE_CLOSED",
   ): CoupangIssuanceEffect {
     if (this.stage === stage && this.blockerCode === code) return "NONE";
     this.paused = false;

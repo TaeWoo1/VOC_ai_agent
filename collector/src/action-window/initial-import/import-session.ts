@@ -108,6 +108,15 @@ export class ImportSegmentSession {
   private prepareWatchdog: ReturnType<typeof setTimeout> | null = null;
   /** Monotonic id of the window whose close-watch is current; a stale window's close is ignored. */
   private surfaceCloseToken = 0;
+  /**
+   * **Latched when the seller closes the marketplace window, cleared only by an accepted seller command.**
+   *
+   * Every driver call goes through the lazy wrapper, which brings a window up on ANY call — so after a close, a
+   * single highlight-clear or probe puts back the window the seller just dismissed, and because the landing runs
+   * once per carrier the window that comes back is BLANK. Proven on the Coupang walk 2026-08-20; the same shape
+   * existed here, in this file's own close handler.
+   */
+  private surfaceClosed = false;
   /** Set once the run has reached the seller with visible guidance, so `READY` is recorded only once. */
   private reachedReady = false;
   /**
@@ -196,13 +205,14 @@ export class ImportSegmentSession {
     // A window close is the most accurate reason to show, even if the run was already parked on a DIFFERENT
     // reliability cause (say OVERLAY_NOT_VISIBLE) — `reliabilityPark` replaces a different cause and no-ops on an
     // existing SURFACE_CLOSED, so re-entry is safe and the seller sees "창이 닫혔어요", not a stale reason.
+    // Latched BEFORE the park, so nothing that follows can reach the driver and put the window back.
+    this.surfaceClosed = true;
     recordFailure("SURFACE_CLOSED");
     this.engine.reliabilityPark("SURFACE_CLOSED");
-    // A parked run points at nothing; drop any stale highlight so the page does not keep a spotlight on a
-    // control the seller can no longer reach once they re-open.
-    void this.driver
-      .clearTargetHighlight()
-      .catch((e) => log("aw_import_clear_highlight_failed", { reason: errName(e) }, "warn"));
+    // **The highlight is NOT cleared here, and that is the fix.** It read as tidying up — "a parked run points at
+    // nothing" — but the page it would tidy no longer exists, so the call did the one thing it must not: it
+    // reached the lazy driver, which opens a window on ANY call, and put back the window the seller had just
+    // closed. Nothing is lost by skipping it: a re-open lands on a fresh page with no highlight on it.
     this.publishState();
   }
 
@@ -277,6 +287,9 @@ export class ImportSegmentSession {
       return;
     }
     const outcome = this.engine.command(command);
+    // An accepted command is the SELLER asking for something, which is the ONE thing that may re-open a window
+    // they closed. Cleared before the drive, so the chain this command starts is allowed to bring it back up.
+    if (outcome.ok) this.surfaceClosed = false;
     this.transport.send({
       kind: "aw_command_result",
       commandId: command.commandId,
@@ -339,6 +352,9 @@ export class ImportSegmentSession {
   }
 
   private async drive(effect: ImportEffect): Promise<void> {
+    // **THE choke point for a closed surface.** Every branch below reaches the driver, and the lazy driver opens
+    // a window on ANY call — so this is answered once here rather than at each of the seventeen call sites.
+    if (this.surfaceClosed) return;
     if (typeof effect === "object") {
       if ("locate" in effect) {
         const res = await this.driver.locateTarget(effect.locate);

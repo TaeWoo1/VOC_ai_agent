@@ -94,7 +94,7 @@ export class CoupangRenewalEngine {
   private guidanceEnabled = true;
   private currentTarget: CoupangRenewalTarget | null = null;
   private targetSig: Partial<Record<CoupangRenewalTarget, string>> = {};
-  private blockerCode: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT" | null = null;
+  private blockerCode: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT" | "SURFACE_CLOSED" | null = null;
   private blockerRecoverable = false;
   private paused = false;
   private readonly log: EventEnvelope[] = [];
@@ -295,12 +295,24 @@ export class CoupangRenewalEngine {
     return "CLEANUP";
   }
 
-  /** The seller closed the WING window. Parks recoverably on page_mismatch; re-opening + `다음` recovers. */
+  /**
+   * The seller closed the window. Not a failure — the same shape as being off the expected page — so it parks
+   * recoverably on `page_mismatch`; re-opening and a `REQUEST_STEP_RECHECK` recovers. Idempotent on a terminal
+   * or already-parked run.
+   *
+   * **`SURFACE_CLOSED`, not `UI_DRIFT`.** Different events, different fixes, and the seller reads the
+   * difference: `UI_DRIFT` says "화면이 바뀐 것 같아요" to someone who knows exactly what happened — they closed
+   * the window — while `SURFACE_CLOSED` says "판매자센터 창이 닫혔어요" and that 다시 확인 re-opens it. The code
+   * already existed in the shared v2 vocabulary and the frontend copy table; this walk was not using it.
+   *
+   * **Returns `NONE`, not `CLEAR_HIGHLIGHT`.** There is no page left to clear a highlight on, and asking for one
+   * is what re-opened the window: every driver call goes through the lazy wrapper, which brings a surface up on
+   * ANY call.
+   */
   onSurfaceClosed(): CoupangRenewalEffect {
     if (isCoupangRenewalTerminal(this.stage)) return "NONE";
-    if (this.stage === "page_mismatch" && this.blockerCode === "UI_DRIFT") return "NONE";
-    this.park("page_mismatch", "UI_DRIFT");
-    return "CLEAR_HIGHLIGHT";
+    if (this.stage === "page_mismatch" && this.blockerCode === "SURFACE_CLOSED") return "NONE";
+    return this.park("page_mismatch", "SURFACE_CLOSED");
   }
 
   /** A drive effect threw — most often a navigation RACE. Parks recoverably rather than leaving the run idle. */
@@ -339,7 +351,7 @@ export class CoupangRenewalEngine {
   /** Park recoverably at a seller-clearable stop. Emits RUN_BLOCKED { recoverable: true } — never RUN_FAILED. */
   private park(
     stage: "waiting_login" | "target_not_found" | "page_mismatch",
-    code: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT",
+    code: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT" | "SURFACE_CLOSED",
   ): CoupangRenewalEffect {
     if (this.stage === stage && this.blockerCode === code) return "NONE";
     this.paused = false;

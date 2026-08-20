@@ -20,6 +20,7 @@ import type { BrowserContext, Page } from "playwright";
 import { CoupangWingIssuanceDriver } from "../coupang-wing-issuance-driver";
 import type { LocateResult } from "../engine";
 import type {
+  CoupangIssuanceParkNotice,
   CoupangIssuanceProbeDriver,
   CoupangIssuanceTarget,
   WingSurfaceProbe,
@@ -133,6 +134,18 @@ export class LazyCoupangIssuanceDriver implements CoupangIssuanceProbeDriver {
   async probeCredentialState(): Promise<CoupangCredentialState> {
     const d = await this.driver();
     return (await d.probeCredentialState?.()) ?? "UNKNOWN";
+  }
+
+  /**
+   * Forwarded ONLY to a surface that already exists. `isOpen()` rather than `driver()` on purpose: the whole
+   * point of a park notice is to keep guidance on the window the seller is looking at, and going through the
+   * lazy accessor would OPEN one to draw a "we stopped" panel on — which is both absurd and the exact
+   * resurrection this runtime spent 2026-08-20 removing.
+   */
+  async showParkNotice(code: CoupangIssuanceParkNotice): Promise<boolean> {
+    if (!this.isOpen()) return false;
+    const d = await this.driver();
+    return (await d.showParkNotice?.(code)) ?? false;
   }
 
   async probeSurface(): Promise<WingSurfaceProbe> {

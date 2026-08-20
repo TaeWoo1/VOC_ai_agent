@@ -61,6 +61,19 @@ export class IssuanceGuidanceSession {
   private busyCount = 0;
   private unsubscribe: (() => void) | null = null;
   private surfaceCloseToken = 0;
+  /**
+   * **Latched when the seller closes the marketplace window, cleared only by an accepted seller command.**
+   *
+   * Every driver call goes through the lazy wrapper, which brings a surface up on ANY call — so after a close,
+   * one probe, one highlight-clear or one recovery tick is enough to put a window back on the seller's screen
+   * that they just dismissed. And because the landing runs once per carrier, the window that comes back is
+   * BLANK. Live 2026-08-20 on the Coupang walk: close at 06:48:49.756, `landing_skipped ALREADY_NAVIGATED_ONCE`
+   * at 06:48:50.014.
+   *
+   * `agentNavigations: 1` is the promise this keeps — the walk opens one window, at open, and never again on
+   * its own.
+   */
+  private surfaceClosed = false;
 
   constructor(engine: IssuanceEngine, driver: IssuanceProbeDriver, transport: AwServerTransport, opts?: IssuanceSessionOptions) {
     this.engine = engine;
@@ -121,6 +134,9 @@ export class IssuanceGuidanceSession {
       return;
     }
     const outcome = this.engine.command(command);
+    // An accepted command is the SELLER asking for something, which is the ONE thing that may re-open a window
+    // they closed. Cleared before the drive, so the chain this command starts is allowed to bring it back up.
+    if (outcome.ok) this.surfaceClosed = false;
     this.transport.send({
       kind: "aw_command_result",
       commandId: command.commandId,
@@ -164,6 +180,9 @@ export class IssuanceGuidanceSession {
 
   private async drive(effect: IssuanceEffect): Promise<void> {
     if (this.stopped) return;
+    // **THE choke point for a closed surface.** Every effect below reaches the driver, and the lazy driver opens
+    // a window on ANY call, so this is answered once here rather than at each call site (where it was missed).
+    if (this.surfaceClosed) return;
     if (typeof effect === "object") {
       if ("guide" in effect) return this.guide(effect.guide);
       // `observe` rests at a seller barrier. The watcher runs detached so the drive chain unwinds and the run
@@ -290,9 +309,10 @@ export class IssuanceGuidanceSession {
     if (this.stopped) return;
     if (token !== this.surfaceCloseToken) return;
     if (isIssuanceTerminal(this.engine.currentStage())) return;
-    // A closed API-center window is the seller not being where they can act. Park recoverably on
-    // page_mismatch (re-opening + a re-check re-probes and recovers) rather than spin an observation on a
-    // dead page. The engine returns CLEAR_HIGHLIGHT so the run stops pointing at a control they cannot reach.
+    // A closed API-center window is the seller not being where they can act. Park recoverably (re-opening + a
+    // re-check re-probes and recovers) rather than spin an observation on a dead page. Latched BEFORE the
+    // engine transition, so nothing the park produces can reach the driver and put the window back.
+    this.surfaceClosed = true;
     const effect = this.engine.onSurfaceClosed();
     this.publishState();
     if (!isNoop(effect)) {

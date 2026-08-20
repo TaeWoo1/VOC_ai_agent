@@ -338,10 +338,15 @@ describe("coupang issuance session — a window the SELLER closed is never re-op
     driver.closeSurface();
     await session.whenSettled();
     expect(engine.currentStage()).toBe("page_mismatch");
-    expect(io.blockers()).toContainEqual({ code: "UI_DRIFT", recoverable: true });
-    // Whatever the run did on the way into the park, it must then STOP: no locate, no highlight, no probe.
-    const after = driver.calls.slice(callsBefore);
-    expect(after.filter((c) => c.startsWith("locate:") || c.startsWith("highlight:") || c === "probeSurface")).toEqual([]);
+    // SURFACE_CLOSED, not UI_DRIFT: "화면이 바뀐 것 같아요" is the wrong thing to tell someone who knows exactly
+    // what happened — they closed the window — and it hides the one instruction that helps ("다시 확인을 누르면
+    // 창을 다시 열어 드릴게요").
+    expect(io.blockers()).toContainEqual({ code: "SURFACE_CLOSED", recoverable: true });
+    expect(io.blockers()).not.toContainEqual({ code: "UI_DRIFT", recoverable: true });
+    // Whatever the run did on the way into the park, it must then STOP — and "stop" means NO driver call at
+    // all, not merely no locate/highlight/probe: the lazy driver opens a window on ANY call, so a highlight
+    // clear or a credential read resurrects the window just as surely as a probe does.
+    expect(driver.calls.slice(callsBefore)).toEqual([]);
   });
 
   it("…and the seller's own re-check DOES recover it — the button is the one re-open that was theirs", async () => {
@@ -772,5 +777,65 @@ describe("coupang issuance session — a RELEASED session stops touching the sur
     command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision, "late");
     for (let i = 0; i < 20; i++) await tick();
     expect(driver.calls.slice(callsAfterStop)).toEqual([]);
+  });
+});
+
+/**
+ * **A parked run is fail-closed AND visible.** These two properties used to be traded against each other: the
+ * credential read could not decide, the run parked exactly as designed, and the seller's marketplace window
+ * went blank — the explanation was in the SellerOps tab they were not looking at (live 2026-08-20, WING API-key
+ * page, `LABEL_NOT_UNIQUE` on 업체코드). The safety is unchanged here; only the silence is.
+ */
+describe("coupang issuance session — a parked run keeps saying so on the marketplace window", () => {
+  it("**UNKNOWN parks AND leaves a notice up** — the walk stops without the guidance disappearing", async () => {
+    const { io, engine, driver, session } = build({ credentialState: "UNKNOWN" });
+    startRun(io);
+    await session.whenSettled();
+
+    expect(engine.currentStage()).toBe("credential_state_unknown");
+    expect(io.blockers()).toContainEqual({ code: "CREDENTIAL_STATE_UNKNOWN", recoverable: true });
+    expect(driver.calls).toContain("parkNotice:CREDENTIAL_STATE_UNKNOWN");
+  });
+
+  it("the notice offers NOTHING to press — no highlight, no locate, no step advance", async () => {
+    // The one thing this panel must never become is the parked step's own control: an `UNKNOWN` credential read
+    // that put a 발급 button in front of a seller is how a SECOND real key gets created.
+    const { io, engine, driver, session } = build({ credentialState: "UNKNOWN" });
+    startRun(io);
+    await session.whenSettled();
+
+    const after = driver.calls.slice(driver.calls.indexOf("parkNotice:CREDENTIAL_STATE_UNKNOWN"));
+    expect(after.filter((c) => c.startsWith("highlight:") || c.startsWith("observe:"))).toEqual([]);
+    // Step 1 (reaching the Open API page) legitimately completed BEFORE the credential read; what must not
+    // happen is the walk carrying on PAST the park. Nothing advances after the run is blocked.
+    // The walk never reaches the step it parked before: no locate, no highlight, no observation of 발급.
+    expect(driver.calls.filter((c) => c.endsWith(":issue"))).toEqual([]);
+    // And it stays parked. (The recovery loop re-verifies the step it already completed and re-parks on each
+    // tick, so the EVENT log churns; what matters — and what is asserted — is that the stage does not move.)
+    expect(engine.currentStage()).toBe("credential_state_unknown");
+  });
+
+  it("draws once per park, not once per recovery tick — a 1 Hz redraw would flicker on the seller's screen", async () => {
+    const { io, driver, session } = build({ credentialState: "UNKNOWN" }, { surfaceWaitPollMs: 5, surfaceWaitTimeoutMs: 60 });
+    startRun(io);
+    await session.whenSettled();
+    await new Promise((r) => setTimeout(r, 80));
+
+    const notices = driver.calls.filter((c) => c === "parkNotice:CREDENTIAL_STATE_UNKNOWN");
+    expect(notices.length).toBe(1);
+  });
+
+  it("**never draws on a window the seller closed** — drawing is what re-opens it", async () => {
+    const { io, driver, session } = build({ action: { issue: false } });
+    startRun(io);
+    await session.whenSettled();
+    const before = driver.calls.length;
+
+    driver.closeSurface();
+    await session.whenSettled();
+
+    // The run parks on SURFACE_CLOSED, and NOTHING reaches the driver — a park notice least of all, since the
+    // lazy driver opens a window on any call and the landing runs once, so what comes back is a blank tab.
+    expect(driver.calls.slice(before)).toEqual([]);
   });
 });

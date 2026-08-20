@@ -5,6 +5,7 @@ import {
   hasCopy,
   COPY_FALLBACK,
   commandLabel,
+  blockedCommandLabel,
   blockerView,
   runStatusView,
   stepStatusView,
@@ -146,6 +147,20 @@ describe("Guided Acquisition Reliability — blocker copy", () => {
   it("names the real Korean screen and one recovery action for the closed-window case", () => {
     const view = blockerView("SURFACE_CLOSED");
     expect(view.title).toContain("판매자센터");
-    expect(view.body).toContain("다시 확인");
+    // The body must name the button that is ACTUALLY on the screen. It used to say "다시 확인" while the button
+    // said "확인 완료" — an instruction pointing at a control that did not exist.
+    expect(view.body).toContain("창 다시 열기");
+    expect(blockedCommandLabel("REQUEST_STEP_RECHECK", "SURFACE_CLOSED")).toBe("창 다시 열기");
+    // …and it promises the window stays shut until they press it, which is the runtime's actual behaviour.
+    expect(view.body).toContain("누르기 전에는 창이 열리지 않아요");
+  });
+
+  it("a blocked recheck says 다시 확인; the SAME command at a barrier still says 확인 완료", () => {
+    // One command, two jobs. At a barrier it reports "I did it"; at a blocker it is the recovery — and every
+    // blocker body in this file names it 다시 확인.
+    expect(blockedCommandLabel("REQUEST_STEP_RECHECK", "CREDENTIAL_STATE_UNKNOWN")).toBe("다시 확인");
+    expect(commandLabel("REQUEST_STEP_RECHECK")).toBe("확인 완료");
+    // Nothing else is renamed by being blocked.
+    expect(blockedCommandLabel("CANCEL_RUN", "SURFACE_CLOSED")).toBe(commandLabel("CANCEL_RUN"));
   });
 });

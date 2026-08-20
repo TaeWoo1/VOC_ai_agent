@@ -1112,8 +1112,18 @@ describe("stale spotlight — the defect the dev-host live proof surfaced", () =
       const src = readFileSync(resolve(HERE, `../../../src/action-window/${f}`), "utf8");
       expect(src, f).not.toContain("dockedPanelOnly");
     }
-    // …and the issuance driver passes it ONLY on the text-guided path.
-    expect(DRV.split("dockedPanelOnly").length - 1).toBeLessThanOrEqual(4);
+    // …and the issuance driver passes it only where a panel legitimately claims NO location. That is now two
+    // places, and both are cases where there is nothing to point at:
+    //   - the text-guided step (4 mentions: the parameter, its default, the spread, and the call site), and
+    //   - `showParkNotice` (1), where the run has STOPPED and a ring would point at a control the seller must
+    //     not be told to press.
+    // The bound stays a bound: raised by exactly the one mention added, with the reason recorded here.
+    expect(DRV.split("dockedPanelOnly").length - 1).toBeLessThanOrEqual(5);
+    // And the park notice is docked BY CONSTRUCTION, not by a caller remembering to ask.
+    const notice = DRV.slice(DRV.indexOf("async showParkNotice("), DRV.indexOf("async armObserve("));
+    expect(notice).toContain("dockedPanelOnly: true");
+    // No advance button anywhere in it: a parked panel offers no press.
+    expect(notice).not.toContain("advance:");
   });
 
   it("only CALIBRATED targets are spotlit — the two with a locator, and no others", () => {

@@ -39,6 +39,8 @@ export interface CoupangIssuanceFixtureScript {
    * `KEY_PRESENT` sends the run straight to the hand-off step; `UNKNOWN` parks it.
    */
   credentialState?: CoupangCredentialState;
+  /** What a `showParkNotice` mount reports back — `true` (painted) unless a test asks for the failure. */
+  parkNoticePainted?: boolean;
   /** Per-target locate results. Missing → a single match with a deterministic signature. */
   locate?: Partial<Record<CoupangIssuanceTarget, LocateResult>>;
   /** Per-target highlight re-validation. Missing → the same result `locate` gave (no drift). */
@@ -153,6 +155,15 @@ export class CoupangIssuanceFixtureDriver implements CoupangIssuanceProbeDriver 
 
   async clearHighlight(): Promise<void> {
     this.calls.push("clearHighlight");
+  }
+
+  /**
+   * Record the parked-run notice. Answers `true` (painted) so a test that cares about the DIFFERENCE — a notice
+   * that failed to paint — has to say so explicitly rather than inheriting it from the fixture.
+   */
+  async showParkNotice(code: string): Promise<boolean> {
+    this.calls.push(`parkNotice:${code}`);
+    return this.script.parkNoticePainted ?? true;
   }
 
   async armObserve(target: CoupangIssuanceTarget): Promise<void> {
