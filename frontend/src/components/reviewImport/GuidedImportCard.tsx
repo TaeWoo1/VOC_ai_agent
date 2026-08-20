@@ -86,6 +86,8 @@ export interface GuidedImportCardProps {
     phase: string;
     confirmationCode?: string | null;
     maybeNeedsLocalNetworkAccess?: boolean;
+    attestedApproval?: boolean;
+    pairingHint?: "no_response";
     onConnect: () => void;
     onRetry: () => void;
   };
@@ -387,6 +389,8 @@ export function GuidedImportCard({
           phase={pairing.phase}
           confirmationCode={pairing.confirmationCode ?? null}
           maybeNeedsLocalNetworkAccess={pairing.maybeNeedsLocalNetworkAccess}
+          attestedApproval={pairing.attestedApproval}
+          pairingHint={pairing.pairingHint}
           onConnect={pairing.onConnect}
           onRetry={pairing.onRetry}
         />

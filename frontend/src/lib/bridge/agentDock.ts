@@ -100,6 +100,8 @@ export const DOCK_COPY = {
   reconnect: "다시 연결",
   retrying: "다시 연결하는 중…",
   pairing: "내 PC에 열린 창에서 아래 숫자가 같은지 확인하고 허용을 눌러 주세요.",
+  /** The macOS path: the seller decides IN the window, so there is no number to compare and none is shown. */
+  pairingAttested: "내 PC 화면에 뜬 SellerOps 창에서 [허용]을 눌러 주세요.",
   pairingWaiting: "확인을 기다리는 중…",
   pairingReopen: "허용 창이 안 열렸나요? 다시 열기",
   notice: {

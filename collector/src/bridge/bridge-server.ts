@@ -238,7 +238,9 @@ export class BridgeServer {
    * disk. Each caller then decides how to keep memory and disk consistent (roll back a non-durable confirm;
    * honor a revoke in-session but report it non-durable).
    */
-  private persistPairings(context: "confirm" | "revoke" | "auto_approve"): PairingStorePersistResult {
+  private persistPairings(
+    context: "confirm" | "revoke" | "auto_approve" | "attested_approval",
+  ): PairingStorePersistResult {
     const result = this.store.persist();
     if (result.status === "failed") log("bridge_persist_failed", { context, reason: result.reason });
     return result;
@@ -395,11 +397,47 @@ export class BridgeServer {
       sendJson(res, 403, { error: "approval_declined" });
       return;
     }
+    if (shown.status === "approved") {
+      // ATTESTED APPROVAL — the human pressed [허용] in a dialog this agent owns (see `PresentResult`). The
+      // check is NOT skipped: we run the ordinary `confirmPairing` allow with the real approval secret, the
+      // same constant-time comparison a retyped code goes through. The only thing that changed is who
+      // carried the secret across the boundary — this process, instead of the seller's hands.
+      //
+      // Same persist-then-commit discipline as `handleConfirm`: a pairing that did not reach disk is fully
+      // undone, so a poll never hands out a token for a pairing that was never stored.
+      const confirmed = this.store.registry.confirmPairing(minted.requestId, "allow", minted.approvalCode!);
+      if (!confirmed.ok) {
+        // Unreachable in practice (we just minted this request and hold its own secret), so it means an
+        // invariant broke rather than a human error. Fail closed and leave nothing confirmable behind.
+        this.store.registry.discardRequest(minted.requestId);
+        log("bridge_pair_refused", { reason: "attested_confirm_failed" });
+        sendJson(res, 500, { error: "pairing_failed" });
+        return;
+      }
+      if (this.persistPairings("attested_approval").status === "failed") {
+        this.store.registry.undoConfirm(minted.requestId);
+        log("bridge_pair_confirmed", { ok: false, allowed: true, durable: false, attested: true });
+        sendJson(res, 500, { error: "persist_failed" });
+        return;
+      }
+      log("bridge_pair_requested", { requestId: minted.requestId, approvalGated: true, attested: true });
+      log("bridge_pair_confirmed", { ok: true, allowed: true, attested: true });
+      this.sellerOpsConnected();
+      // `attested` tells the frontend that the approval is ALREADY done, so it must not send the seller to a
+      // code screen. No `confirmUrl` and no `confirmationCode` are returned: the confirmation page would be
+      // dead on arrival (the request is settled), and a code with nothing to type it into is an instruction
+      // to do something that cannot be done. The token is collected by the existing poll.
+      sendJson(res, 200, { requestId: minted.requestId, attested: true });
+      return;
+    }
     if (shown.status !== "presented") {
-      // The human never saw the code — roll the request back so it can never be confirmed, and refuse.
+      // The human never approved — roll the request back so it can never be confirmed, and refuse.
       this.store.registry.discardRequest(minted.requestId);
       log("bridge_pair_refused", { reason: shown.reason });
-      sendJson(res, 503, { error: "approval_unavailable" });
+      // `no_response` is a DIFFERENT fix from a missing channel: the prompt did appear and nobody answered
+      // it, so the seller should be told to try again, not that their machine cannot pair.
+      const error = shown.reason === "no_response" ? "approval_no_response" : "approval_unavailable";
+      sendJson(res, 503, { error });
       return;
     }
     log("bridge_pair_requested", { requestId: minted.requestId, approvalGated: true });

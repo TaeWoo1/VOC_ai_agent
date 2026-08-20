@@ -94,10 +94,14 @@ describe("macOS approval presenter — process invocation", () => {
     const proc = fakeProcess();
     await presenter({ process: proc }).present(PRESENTATION);
     const { args, input } = proc.calls[0]!;
-    // argv lands in the process table (`ps`) — a code there would be readable by any local process.
+    // The dialog ATTESTS, so nobody reads the code off it — and a secret with no reader is pure exposure.
+    // It must therefore appear in NEITHER channel: not argv (world-readable in `ps`), and not even the
+    // script on stdin. This is strictly stronger than the old "stdin only" rule it replaces.
     expect(JSON.stringify(args)).not.toContain("A1B2");
     expect(JSON.stringify(args)).not.toContain("C3D4");
-    expect(input).toContain("A1B2-C3D4");
+    expect(input).not.toContain("A1B2");
+    expect(input).not.toContain("C3D4");
+    expect(input).not.toContain("A1B2-C3D4");
   });
 
   it("passes every other dynamic value only on stdin too", async () => {
@@ -118,9 +122,11 @@ describe("macOS approval presenter — process invocation", () => {
 });
 
 describe("macOS approval presenter — verdict mapping", () => {
-  it("확인 (approved) → presented", async () => {
+  it("허용 (approved) → approved — an ATTESTATION, not merely 'the code was shown'", async () => {
+    // This is the whole point of the native channel: the press happened in a dialog this process owns, so
+    // the shell can complete the confirmation itself and the seller never retypes anything.
     const p = presenter({ process: fakeProcess(verdict("sellerops_approved")) });
-    expect(await p.present(PRESENTATION)).toEqual({ status: "presented" });
+    expect(await p.present(PRESENTATION)).toEqual({ status: "approved" });
   });
 
   it("취소 / Esc (declined) → declined, NOT presented and NOT unavailable", async () => {
@@ -130,11 +136,12 @@ describe("macOS approval presenter — verdict mapping", () => {
     expect(await p.present(PRESENTATION)).toEqual({ status: "declined" });
   });
 
-  it("ignored until auto-dismiss (gave up) → presented, NOT declined", async () => {
-    // The code was on screen long enough to read; the human may be typing it into the browser right now.
-    // Treating a give-up as refusal would kill a pairing the person completed correctly.
+  it("ignored until auto-dismiss (gave up) → no_response — and NOT declined, NOT approved", async () => {
+    // Terminal on an attesting channel: the dialog is the only place this request could be approved, so
+    // nobody is still finishing it elsewhere. It stays distinct from `declined` because "away from the desk"
+    // and "said no" are different facts and only the second should be shown to the seller as a refusal.
     const p = presenter({ process: fakeProcess(verdict("sellerops_gave_up")) });
-    expect(await p.present(PRESENTATION)).toEqual({ status: "presented" });
+    expect(await p.present(PRESENTATION)).toEqual({ status: "unavailable", reason: "no_response" });
   });
 
   it("tolerates surrounding whitespace on the verdict token", async () => {
@@ -170,9 +177,9 @@ describe("macOS approval presenter — fail-closed outcomes", () => {
 describe("buildApprovalScript — the cancel affordance", () => {
   it("defines a cancel button, without which Esc is inert (live-verified 2026-07-15)", () => {
     const script = buildApprovalScript(PRESENTATION, 30);
-    expect(script).toContain('buttons {"취소", "확인"}');
-    expect(script).toContain("cancel button 1"); // 취소 is button 1 → Esc maps to it
-    expect(script).toContain("default button 2"); // 확인 stays the default action
+    expect(script).toContain('buttons {"거부", "허용"}');
+    expect(script).toContain("cancel button 1"); // 거부 is button 1 → Esc maps to it
+    expect(script).toContain("default button 2"); // 허용 stays the default action
   });
 
   it("catches ONLY -128 (user cancelled) — any other error propagates and fails closed", () => {
@@ -256,27 +263,28 @@ describe("dialog body — structural integrity under long/hostile input", () => 
     // control chars are stripped), so it must be AppleScript syntax. Composing with "\n" silently produced
     // a run-on wall of text — the live dump caught it.
     expect(script).toContain("& linefeed &");
-    expect(script.match(/& linefeed &/g)!.length).toBe(8); // 9 body lines → 8 joins
+    expect(script.match(/& linefeed &/g)!.length).toBe(6); // 7 body lines → 6 joins
   });
 
-  it("a 5000-char workspace label cannot push out the code or the instructions", () => {
+  it("a 5000-char workspace label cannot push out the question or the refusal instruction", () => {
     const script = buildApprovalScript({ ...PRESENTATION, workspaceLabel: LONG }, 90);
-    expect(script).toContain("A1B2-C3D4"); // the code still renders IN FULL
-    expect(script).toContain("이 코드를 브라우저의 연결 확인 화면에 입력하세요.");
-    expect(script).toContain("요청한 적이 없다면 [취소]를 누르세요 (코드를 알려주지 마세요)."); // complete, not clipped
+    // What must survive is what the person decides ON: the question, and how to say no. A dialog whose
+    // question scrolled off would ask someone to approve something while showing them nothing.
+    expect(script).toContain("이 브라우저를 내 PC의 SellerOps 도우미에 연결할까요?");
+    expect(script).toContain("요청한 적이 없다면 [거부]를 누르세요."); // complete, not clipped
   });
 
-  it("a 5000-char origin cannot push out the code or the instructions", () => {
+  it("a 5000-char origin cannot push out the question or the refusal instruction", () => {
     const script = buildApprovalScript({ ...PRESENTATION, origin: `http://${LONG}` }, 90);
-    expect(script).toContain("A1B2-C3D4");
-    expect(script).toContain("요청한 적이 없다면 [취소]를 누르세요 (코드를 알려주지 마세요).");
+    expect(script).toContain("이 브라우저를 내 PC의 SellerOps 도우미에 연결할까요?");
+    expect(script).toContain("요청한 적이 없다면 [거부]를 누르세요.");
   });
 
   it("each untrusted field is capped INDEPENDENTLY — one long field cannot consume another's budget", () => {
     const script = buildApprovalScript({ ...PRESENTATION, origin: `http://${LONG}`, workspaceLabel: LONG }, 90);
-    // Both are long; both are individually bounded, and neither starves the other or the code.
+    // Both are long; both are individually bounded, and neither starves the other or the question.
     expect(script.match(/…/g)).toHaveLength(2);
-    expect(script).toContain("A1B2-C3D4");
+    expect(script).toContain("이 브라우저를 내 PC의 SellerOps 도우미에 연결할까요?");
     expect(script).not.toContain("훼".repeat(200));
   });
 
@@ -285,7 +293,7 @@ describe("dialog body — structural integrity under long/hostile input", () => 
     const benign = buildApprovalScript(PRESENTATION, 90);
     expect(script.split("\n")).toHaveLength(benign.split("\n").length); // no injected lines
     expect(script.match(/display dialog/g)).toHaveLength(1); // no second dialog term
-    expect(script.match(/& linefeed &/g)!.length).toBe(8); // no injected concatenation
+    expect(script.match(/& linefeed &/g)!.length).toBe(6); // no injected concatenation
 
     // The payload's TEXT legitimately appears inside the literal (it is what the human is shown). The real
     // property is that it contributes no literal DELIMITER: strip the escape sequences, and the remaining
@@ -299,8 +307,8 @@ describe("dialog body — structural integrity under long/hostile input", () => 
 
   it("the body keeps every line even when both untrusted fields are empty", () => {
     const script = buildApprovalScript({ ...PRESENTATION, origin: "", workspaceLabel: "" }, 90);
-    expect(script.match(/& linefeed &/g)!.length).toBe(8);
-    expect(script).toContain("A1B2-C3D4");
+    expect(script.match(/& linefeed &/g)!.length).toBe(6);
+    expect(script).toContain("이 브라우저를 내 PC의 SellerOps 도우미에 연결할까요?");
   });
 });
 
@@ -326,11 +334,12 @@ describe("buildApprovalScript", () => {
     expect(buildApprovalScript(PRESENTATION, 45)).toContain("giving up after 45");
   });
 
-  it("shows the code, origin and workspace to the human", () => {
+  it("shows the origin and workspace to the human — the two facts the decision rests on", () => {
     const script = buildApprovalScript(PRESENTATION, 30);
-    expect(script).toContain("A1B2-C3D4");
     expect(script).toContain("http://localhost:5173");
     expect(script).toContain("우리 회사");
+    // …and never the secret. The person is deciding, not transcribing.
+    expect(script).not.toContain("A1B2-C3D4");
   });
 });
 
@@ -364,14 +373,18 @@ describe("the approval dialog is brought to the front", () => {
   it("keeps the refusal contract intact — a cancel is still a DECLINE, not a timeout", () => {
     const script = buildApprovalScript(presentation, 90);
     expect(script).toContain("on error number -128");
-    expect(script).toContain('buttons {"취소", "확인"}');
+    expect(script).toContain('buttons {"거부", "허용"}');
     expect(script).toContain("cancel button 1");
     expect(script).toContain("giving up after 90");
   });
 
-  it("still carries the code and never the requestId", () => {
+  it("carries NEITHER the approval code NOR the requestId", () => {
     const script = buildApprovalScript(presentation, 90);
-    expect(script).toContain("0AE8-CDFA");
+    // The code is not needed by anyone reading this dialog, so it must not be on screen; the requestId was
+    // never display material. What the person sees is the origin, the workspace, and the question.
+    expect(script).not.toContain("0AE8-CDFA");
+    expect(script).not.toContain("0AE8");
     expect(script).not.toContain("req-1");
+    expect(script).toContain("http://localhost:5173");
   });
 });

@@ -249,6 +249,8 @@ export function NaverIssuanceGuidedWalkthrough({
           phase={phase}
           confirmationCode={bridge.state.confirmationCode ?? null}
           confirmUrl={bridge.state.confirmUrl ?? null}
+          attestedApproval={bridge.state.attestedApproval}
+          pairingHint={bridge.state.pairingHint}
           maybeNeedsLocalNetworkAccess={bridge.state.maybeNeedsLocalNetworkAccess}
           onConnect={bridge.requestPairing}
           onRetry={bridge.retry}

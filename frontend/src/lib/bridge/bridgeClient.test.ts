@@ -37,6 +37,11 @@ function make(opts: {
   routes: Record<string, (init?: RequestInit) => { status: number; body: unknown }>;
   storage?: StorageLike;
   secureNonLoopback?: boolean;
+  /** Default false in tests: most of these exercise DETECTION, and an automatic pairing attempt would
+   *  otherwise reach into a route table that is deliberately not serving one. The auto-pair behaviour has
+   *  its own describe block below, where it is turned on explicitly. */
+  autoPair?: boolean;
+  visible?: boolean;
 }) {
   let lastWs: FakeWs | null = null;
   const opened: string[] = [];
@@ -49,6 +54,8 @@ function make(opts: {
     openConfirmation: (url) => opened.push(url),
     wsFactory: (url) => (lastWs = new FakeWs(url)),
     storage: opts.storage ?? fakeStorage(),
+    autoPair: opts.autoPair ?? false,
+    isVisible: () => opts.visible ?? true,
   });
   return { client, ws: () => lastWs, opened };
 }
@@ -274,5 +281,148 @@ describe("the agent's approval page", () => {
       await client.pollPairingOnce();
       expect(client.getState().confirmUrl, `stale after ${status}`).toBeUndefined();
     }
+  });
+});
+
+/**
+ * **The production macOS path**: the agent asks the human in its own native window, and the browser never
+ * shows a code. These tests pin the two halves that make that safe to ship — the client must not send the
+ * seller to a code screen that has nothing to type into, and it must not be able to raise OS dialogs in a
+ * loop or from a tab nobody is looking at.
+ */
+describe("attested approval — the seller answers on their Mac, not in the browser", () => {
+  const ATTESTED = {
+    "/bridge/pair/request": () => ({ status: 200, body: { requestId: "r1", attested: true } }),
+    "/bridge/pair/poll": () => ({ status: 200, body: { status: "paired", pairingToken: "tok" } }),
+    "/bridge/ws-ticket": () => ({ status: 200, body: { ticket: "tk", expiresInMs: 10000 } }),
+  };
+
+  it("shows no code and opens no confirmation page — the approval already happened", async () => {
+    const { client, opened } = make({ routes: { ...HEALTH_OK, ...ATTESTED } });
+    await client.requestPairing();
+
+    expect(opened).toEqual([]); // no tab was sent anywhere
+    const s = client.getState();
+    expect(s.confirmationCode).toBeUndefined();
+    expect(s.confirmUrl).toBeUndefined();
+  });
+
+  it("collects the token immediately — one seller action, no polling wait", async () => {
+    const storage = fakeStorage();
+    const { client, ws } = make({ routes: { ...HEALTH_OK, ...ATTESTED }, storage });
+    await client.requestPairing();
+
+    expect(storage.getItem("sellerops_bridge_token")).toBe("tok");
+    expect(ws()).not.toBeNull(); // it went straight on to the socket
+  });
+
+  it("is already pairing_pending while the dialog is still on screen — the page is never blank", async () => {
+    // The agent holds this response open for as long as the dialog waits (up to 90s). If the client only set
+    // `pairing_pending` on the RESPONSE, the seller would sit on an unchanged screen for a minute and a half
+    // while a window waited for them on their own Mac. So the state is set before the request goes out.
+    let answer: ((v: { status: number; body: unknown }) => void) | null = null;
+    const held = new Promise<{ status: number; body: unknown }>((r) => (answer = r));
+    const fetchFn = ((url: string) => {
+      if (url.includes("/bridge/pair/request")) {
+        return held.then((r) => ({ ok: true, status: r.status, json: async () => r.body }));
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({ status: "pending" }) });
+    }) as unknown as typeof fetch;
+
+    const client = new BridgeClient({
+      httpBase: "http://127.0.0.1:47615",
+      wsBase: "ws://127.0.0.1:47615",
+      workspaceLabel: "테스트",
+      isSecureNonLoopbackOrigin: false,
+      fetchFn,
+      openConfirmation: () => undefined,
+      wsFactory: (url) => new FakeWs(url),
+      storage: fakeStorage(),
+      autoPair: false,
+    });
+
+    const pending = client.requestPairing();
+    // The dialog has NOT been answered yet, and the screen already says so.
+    expect(client.getState().phase).toBe("pairing_pending");
+    expect(client.getState().confirmationCode).toBeUndefined();
+
+    answer!({ status: 200, body: { requestId: "r1", attested: true } });
+    await pending;
+  });
+
+  it("a refusal is reported as a REFUSAL, not as a missing helper", async () => {
+    const { client } = make({
+      routes: { ...HEALTH_OK, "/bridge/pair/request": () => ({ status: 403, body: { error: "approval_declined" } }) },
+    });
+    await client.requestPairing();
+    expect(client.getState().phase).toBe("pairing_denied");
+  });
+
+  it("an unanswered dialog goes back to unpaired WITH a reason — the helper is demonstrably running", async () => {
+    // `unreachable` here would tell the seller to go start a helper that just put a window on their screen.
+    const { client } = make({
+      routes: { ...HEALTH_OK, "/bridge/pair/request": () => ({ status: 503, body: { error: "approval_no_response" } }) },
+    });
+    await client.requestPairing();
+    expect(client.getState()).toMatchObject({ phase: "unpaired", pairingHint: "no_response" });
+  });
+
+  it("an agent that cannot ask anyone is still reported as unreachable", async () => {
+    const { client } = make({
+      routes: { ...HEALTH_OK, "/bridge/pair/request": () => ({ status: 503, body: { error: "approval_unavailable" } }) },
+    });
+    await client.requestPairing();
+    expect(client.getState().phase).toBe("unreachable");
+  });
+});
+
+describe("automatic pairing is bounded — an OS dialog must never arrive in a loop", () => {
+  let requests = 0;
+  const routes = () => ({
+    ...HEALTH_OK,
+    "/bridge/pair/request": () => {
+      requests += 1;
+      return { status: 503, body: { error: "approval_no_response" } };
+    },
+  });
+
+  it("asks once, automatically, when it finds an unpaired agent", async () => {
+    requests = 0;
+    const { client } = make({ routes: routes(), autoPair: true });
+    await client.refresh();
+    expect(requests).toBe(1);
+  });
+
+  it("never asks a second time, however many times it re-detects the agent", async () => {
+    // `useBridge` re-polls every 1.5s. Without this bound, a seller who ignored one dialog would get one
+    // every poll for as long as the tab stays open.
+    requests = 0;
+    const { client } = make({ routes: routes(), autoPair: true });
+    await client.refresh();
+    await client.refresh();
+    await client.refresh();
+    expect(requests).toBe(1);
+  });
+
+  it("never asks from a tab the seller is not looking at", async () => {
+    // A dialog with no visible context is indistinguishable from malware.
+    requests = 0;
+    const { client } = make({ routes: routes(), autoPair: true, visible: false });
+    await client.refresh();
+    expect(requests).toBe(0);
+  });
+
+  it("does not ask at all when a pairing token is already stored", async () => {
+    // The whole point of persistence: a returning seller sees no approval UI of any kind.
+    requests = 0;
+    const storage = fakeStorage({ sellerops_bridge_token: "tok" });
+    const { client } = make({
+      routes: { ...routes(), "/bridge/ws-ticket": () => ({ status: 200, body: { ticket: "tk", expiresInMs: 1 } }) },
+      storage,
+      autoPair: true,
+    });
+    await client.refresh();
+    expect(requests).toBe(0);
+    expect(client.getState().phase).not.toBe("pairing_pending");
   });
 });

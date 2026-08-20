@@ -115,7 +115,9 @@ export function AgentDock() {
   if (view.kind === "pairing") {
     return (
       <section className="card p-4" aria-label="SellerOps 도우미 다시 연결" data-testid="agent-dock">
-        <p className="text-sm text-ink break-keep">{DOCK_COPY.pairing}</p>
+        <p className="text-sm text-ink break-keep">
+          {state.attestedApproval ? DOCK_COPY.pairingAttested : DOCK_COPY.pairing}
+        </p>
         {state.confirmationCode && (
           <p className="mt-2 rounded-lg bg-canvas px-3 py-2 text-center text-xl font-bold tracking-widest text-ink" data-testid="agent-dock-code">
             {state.confirmationCode}

@@ -20,6 +20,8 @@ function renderPanel(
     confirmationCode?: string | null;
     confirmUrl?: string | null;
     maybeNeedsLocalNetworkAccess?: boolean;
+    attestedApproval?: boolean;
+    pairingHint?: "no_response";
   } = {},
 ) {
   const onConnect = vi.fn();
@@ -30,6 +32,8 @@ function renderPanel(
       confirmationCode={extra.confirmationCode ?? null}
       confirmUrl={extra.confirmUrl ?? null}
       maybeNeedsLocalNetworkAccess={extra.maybeNeedsLocalNetworkAccess}
+      attestedApproval={extra.attestedApproval}
+      pairingHint={extra.pairingHint}
       onConnect={onConnect}
       onRetry={onRetry}
     />,
@@ -121,5 +125,31 @@ describe("AgentPairingPanel", () => {
   it("stays out of the way when the fix is an update rather than a connection", () => {
     renderPanel("incompatible_version");
     expect(screen.queryByTestId("agent-pairing")).toBeNull();
+  });
+});
+
+/**
+ * The production macOS path. What the seller must never see here is a number: on this channel the decision is
+ * made IN the window, so a code on screen matches nothing and asks them to do something impossible.
+ */
+describe("AgentPairingPanel — native approval", () => {
+  it("points at the window on the Mac and shows NO code", () => {
+    renderPanel("pairing_pending", { attestedApproval: true });
+    expect(screen.getByTestId("agent-pairing-instruction").textContent).toContain("SellerOps 창에서");
+    expect(screen.queryByTestId("agent-pairing-code")).toBeNull();
+    expect(screen.queryByTestId("agent-pairing-confirm-link")).toBeNull();
+  });
+
+  it("still shows the code on the DEV terminal path — the other channel is untouched", () => {
+    renderPanel("pairing_pending", { confirmationCode: "ABC-123" });
+    expect(screen.getByTestId("agent-pairing-code").textContent).toBe("ABC-123");
+    expect(screen.getByTestId("agent-pairing-instruction").textContent).toContain("숫자가 같은지");
+  });
+
+  it("says the window went unanswered instead of implying the helper is missing", () => {
+    renderPanel("unpaired", { pairingHint: "no_response" });
+    expect(screen.getByTestId("agent-pairing-no-response").textContent).toContain("응답이 없어");
+    // The action is still there: a second attempt opens the window again.
+    expect(screen.getByTestId("agent-pairing-connect")).toBeTruthy();
   });
 });

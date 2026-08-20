@@ -3,7 +3,7 @@
  * library handshake/framing and can fully control the handshake headers (Origin) and observe 101-vs-rejection.
  */
 import WebSocket from "ws";
-import type { ApprovalPresentation, ApprovalPresenter } from "../../src/bridge/approval-presenter";
+import type { ApprovalPresentation, ApprovalPresenter, PresentResult } from "../../src/bridge/approval-presenter";
 import type { PairingRegistry } from "../../src/bridge/pairing";
 
 export interface ConnectResult {
@@ -56,6 +56,32 @@ export function fakeApprovalPresenter(): {
       present: (p) => {
         shown.push(p);
         return { status: "presented" };
+      },
+    },
+  };
+}
+
+/**
+ * **Test stand-in for an ATTESTING human channel** (the macOS dialog). Unlike {@link fakeApprovalPresenter},
+ * which only claims the code was *shown*, this one returns a verdict the human gave in a surface the agent
+ * owns — so the bridge completes the confirmation itself and the caller never sees a code.
+ *
+ * `verdict` is what the fake human does. It defaults to approving; a test that wants a refusal or an
+ * unanswered dialog passes the corresponding result. Test-only, exactly like the fake above.
+ */
+export function attestingApprovalPresenter(verdict: PresentResult = { status: "approved" }): {
+  presenter: ApprovalPresenter;
+  shown: ApprovalPresentation[];
+} {
+  const shown: ApprovalPresentation[] = [];
+  return {
+    shown,
+    presenter: {
+      channel: "os_dialog",
+      available: () => true,
+      present: (p) => {
+        shown.push(p);
+        return verdict;
       },
     },
   };

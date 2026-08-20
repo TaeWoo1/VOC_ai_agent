@@ -1,8 +1,13 @@
 /**
- * **macOS native-dialog approval presenter (production adapter).** Shows the out-of-band pairing approval
- * secret in a native macOS dialog owned by the Local Agent process, so a human physically at the device sees
- * it. This is the first PRODUCTION-capable {@link ApprovalPresenter}: unlike the DEV stderr adapter it needs
- * no terminal, so a packaged agent can pair.
+ * **macOS native-dialog approval presenter (production adapter).** Asks the human physically at the device
+ * whether to pair, in a native dialog owned by the Local Agent process. This is the PRODUCTION
+ * {@link ApprovalPresenter}: unlike the DEV stderr adapter it needs no terminal, so a packaged agent can pair.
+ *
+ * **ATTESTING.** The dialog collects a verdict, so this presenter answers `approved` / `declined` rather than
+ * the weaker `presented`, and the seller never transports a code. What the approval secret protected is
+ * unchanged: a caller confined to the HTTP surface still cannot cause a pairing, because the only thing that
+ * confirms one is a press on a dialog THIS process put on screen. It can provoke that dialog — the origin it
+ * claims is shown in the body — but it cannot answer it. What is removed is the retyping, not the check.
  *
  * **No shell, ever.** We exec `/usr/bin/osascript` by absolute path with `shell: false`. No string is ever
  * handed to `/bin/sh`, so no shell metacharacter in any dynamic value can be interpreted — the classic
@@ -120,32 +125,35 @@ export function appleScriptLiteral(value: string): string {
  * defined (live-verified 2026-07-15 — with a single-button dialog, Esc was inert and the person had no way
  * to decline). Pressing 취소/Esc raises error -128, which we catch and turn into a `declined` verdict.
  *
- * `giving up after` still auto-dismisses an ignored dialog. That is reported as GAVE_UP → `presented`, not
- * declined: the code was on screen long enough to read, and the human may already be typing it into the
- * browser. Treating a give-up as refusal would kill a pairing the person completed correctly.
+ * `giving up after` still auto-dismisses an ignored dialog. That is reported as GAVE_UP → `unavailable
+ * (no_response)`: nobody answered, and on an attesting channel there is nowhere else the answer could arrive.
+ * It is deliberately NOT mapped to `declined` — "away from the desk" and "said no" are different facts, and
+ * only the second should be shown to the seller as a refusal.
  *
  * Any OTHER error (no GUI session, automation not permitted, …) is deliberately NOT caught — it propagates,
  * osascript exits non-zero, and the presenter fails closed.
  */
 export function buildApprovalScript(p: ApprovalPresentation, dialogSeconds: number): string {
   // Untrusted fields are capped INDIVIDUALLY here, before composition — see `sanitizeField`.
+  // The approval code is deliberately ABSENT from this dialog. On an attesting channel the [허용] press IS
+  // the approval, so displaying the secret would put it on screen for no reader — and a secret with no reader
+  // is pure exposure (a shoulder-surfer, a screen share, a screenshot). It stays inside the process and is
+  // consumed by the agent itself, which makes this flow strictly less exposed than the one it replaces.
   const lines = [
-    "SellerOps 로컬 에이전트 연결 승인",
+    "SellerOps 도우미 연결 요청",
     "",
     `요청 출처: ${sanitizeField(p.origin)}`,
     `워크스페이스: ${sanitizeField(p.workspaceLabel)}`,
     "",
-    `승인 코드: ${p.approvalCode}`,
-    "",
-    "이 코드를 브라우저의 연결 확인 화면에 입력하세요.",
-    "요청한 적이 없다면 [취소]를 누르세요 (코드를 알려주지 마세요).",
+    "이 브라우저를 내 PC의 SellerOps 도우미에 연결할까요?",
+    "요청한 적이 없다면 [거부]를 누르세요.",
   ];
   // Each line is its OWN literal, joined by AppleScript's `linefeed` constant. A line break cannot be a
   // character inside the literal — a raw newline is a syntax error, and `stripControlChars` would eat it
   // anyway — so the breaks must be built as AppleScript syntax. (Composing the body with "\n" and escaping
   // it wholesale silently produced a run-on, truncated wall of text; found by dumping the live script.)
   const body = lines.map((line) => appleScriptLiteral(line)).join(" & linefeed & ");
-  const title = appleScriptLiteral("SellerOps 연결 승인");
+  const title = appleScriptLiteral("SellerOps 도우미 연결");
   // The trailing bare `_verdict` is the script's result, which osascript prints on stdout.
   return [
     `set _verdict to ${appleScriptLiteral(VERDICT_GAVE_UP)}`,
@@ -157,7 +165,7 @@ export function buildApprovalScript(p: ApprovalPresentation, dialogSeconds: numb
     // displaying from inside that tell block is what puts it in front of the person it is asking.
     "  tell application \"System Events\"",
     "    activate",
-    `    set _r to display dialog ${body} with title ${title} buttons {"취소", "확인"} default button 2 cancel button 1 with icon note giving up after ${dialogSeconds}`,
+    `    set _r to display dialog ${body} with title ${title} buttons {"거부", "허용"} default button 2 cancel button 1 with icon note giving up after ${dialogSeconds}`,
     "  end tell",
     "  if gave up of _r then",
     `    set _verdict to ${appleScriptLiteral(VERDICT_GAVE_UP)}`,
@@ -234,11 +242,18 @@ export function createMacOsApprovalPresenter(opts: MacOsApprovalPresenterOptions
       }
       switch (outcome.stdout.trim()) {
         case VERDICT_APPROVED:
-          return { status: "presented" };
+          // ATTESTED: the person pressed [허용] in a dialog THIS process spawned. That is the same fact the
+          // out-of-band code was invented to establish — a human, at this device, said yes to this request —
+          // so the shell may complete the confirmation itself instead of asking them to carry the secret to
+          // the browser by hand. See `PresentResult.approved`.
+          return { status: "approved" };
         case VERDICT_GAVE_UP:
-          // Ignored until auto-dismiss. The code WAS on screen long enough to read and the human may be
-          // typing it right now — so this is a presentation, not a refusal.
-          return { status: "presented" };
+          // Nobody answered before the dialog auto-dismissed. On this channel that is terminal: the dialog is
+          // the ONLY place this request can be approved, so there is no second window the person might still
+          // be finishing in. (It was previously reported as `presented` because the person could have been
+          // mid-retype in the browser — an escape hatch that no longer exists, and treating an unanswered
+          // prompt as a live presentation would leave the seller watching a spinner until the request's TTL.)
+          return { status: "unavailable", reason: "no_response" };
         case VERDICT_DECLINED:
           return { status: "declined" };
         default:

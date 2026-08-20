@@ -51,6 +51,18 @@ export interface BridgeState {
    * `sameOriginConfirmUrl`); absent when the agent did not return a usable one.
    */
   confirmUrl?: string;
+  /**
+   * True while the pending approval is being answered in a surface the AGENT owns (the macOS dialog), so
+   * there is no code for the seller to read and nothing for them to type. The panel must not show a code
+   * screen in this mode — the only correct instruction is "answer the window on your Mac".
+   */
+  attestedApproval?: boolean;
+  /**
+   * Why the last pairing attempt ended without a pairing, when that needs different words than the phase
+   * alone carries. `no_response` is the one that matters: the prompt DID appear and nobody answered it, which
+   * asks the seller to try again — as opposed to a machine that cannot show a prompt at all.
+   */
+  pairingHint?: "no_response";
   maybeNeedsLocalNetworkAccess: boolean;
   snapshot?: BridgeSnapshot;
   agentProtocolVersion?: number;
@@ -89,15 +101,30 @@ export interface BridgeClientDeps {
   wsFactory?: (url: string) => WebSocketLike;
   storage?: StorageLike;
   clientProtocolVersion?: number;
+  /**
+   * Ask the agent to pair as soon as an UNPAIRED one is found, instead of waiting for the seller to press a
+   * button they should not have to know about. Default true — the product intent is that a seller who has a
+   * helper installed simply gets asked, once, in a native window.
+   *
+   * It is bounded on purpose: at most one automatic attempt per client (see `autoPairAttempted`), and never
+   * from a hidden tab (see `isVisible`). Both bounds exist because the attempt puts an OS-level dialog on the
+   * person's screen — the one kind of UI that must never be able to arrive in a loop or from a tab they are
+   * not looking at.
+   */
+  autoPair?: boolean;
+  /** Whether this tab is the one in front of the seller. Injected so tests need no document. */
+  isVisible?: () => boolean;
 }
 
 export class BridgeClient {
-  private readonly d: Required<Omit<BridgeClientDeps, "clientProtocolVersion">> & { clientProtocolVersion: number };
+  private readonly d: Required<BridgeClientDeps>;
   private state: BridgeState;
   private listeners = new Set<(s: BridgeState) => void>();
   private ws: WebSocketLike | null = null;
   private pairingRequestId: string | null = null;
   private stopped = false;
+  /** One automatic attempt per client, ever. Never reset — a second dialog must come from a human action. */
+  private autoPairAttempted = false;
 
   constructor(deps: BridgeClientDeps) {
     this.d = {
@@ -110,6 +137,8 @@ export class BridgeClient {
       wsFactory: deps.wsFactory ?? ((url) => new WebSocket(url) as unknown as WebSocketLike),
       storage: deps.storage ?? window.localStorage,
       clientProtocolVersion: deps.clientProtocolVersion ?? BRIDGE_PROTOCOL_VERSION,
+      autoPair: deps.autoPair ?? true,
+      isVisible: deps.isVisible ?? (() => typeof document === "undefined" || document.visibilityState !== "hidden"),
     };
     this.state = { phase: "connecting", maybeNeedsLocalNetworkAccess: false };
   }
@@ -161,6 +190,7 @@ export class BridgeClient {
     const token = this.token();
     if (!token) {
       this.set({ phase: "unpaired", maybeNeedsLocalNetworkAccess: false });
+      await this.maybeAutoPair();
       return;
     }
     await this.connectWs(token);
@@ -179,8 +209,41 @@ export class BridgeClient {
     return raw.startsWith(`${this.d.httpBase}/bridge/confirm?`) ? raw : undefined;
   }
 
-  /** Begin a pairing request, then open the agent-owned approval page the seller confirms on. */
+  /**
+   * **Ask ONCE, automatically, when an unpaired agent is found.** A seller who installed the helper should be
+   * asked whether to connect it — not be expected to discover a 연결 button for a component they never think
+   * about. The request is what raises the native window on their Mac.
+   *
+   * Both bounds are load-bearing, because what this triggers is an OS-level dialog:
+   *  - **once per client.** Never retried, never reset. A second prompt must come from a human pressing 연결.
+   *  - **only from the visible tab.** Two SellerOps tabs must not produce two dialogs, and a background tab
+   *    must never produce one at all — a dialog with no context on screen is indistinguishable from malware.
+   */
+  private async maybeAutoPair(): Promise<void> {
+    if (!this.d.autoPair || this.autoPairAttempted || this.stopped) return;
+    if (!this.d.isVisible()) return;
+    this.autoPairAttempted = true;
+    await this.requestPairing();
+  }
+
+  /**
+   * Begin a pairing request. Two shapes come back, and the difference is the seller's whole experience:
+   *
+   *  - **attested** (production macOS): the agent asked the human in its own native window and the answer is
+   *    already in. There is no code and no confirmation page — the poll below simply collects the token.
+   *  - **code + confirm page** (dev terminal): the long way, unchanged.
+   */
   async requestPairing(): Promise<void> {
+    // Pending is set BEFORE the request, not after it: on the attested path the agent holds this response
+    // open for as long as the dialog is on screen (up to 90s), and a seller staring at an unchanged screen
+    // while a window waits for them on their own Mac is the failure this ordering removes.
+    this.set({
+      phase: "pairing_pending",
+      confirmationCode: undefined,
+      confirmUrl: undefined,
+      attestedApproval: undefined,
+      pairingHint: undefined,
+    });
     try {
       const res = await this.d.fetchFn(`${this.d.httpBase}/bridge/pair/request`, {
         method: "POST",
@@ -188,13 +251,24 @@ export class BridgeClient {
         body: JSON.stringify({ workspaceLabel: this.d.workspaceLabel }),
       });
       if (!res.ok) {
-        this.set({ phase: "unreachable", maybeNeedsLocalNetworkAccess: this.d.isSecureNonLoopbackOrigin });
+        await this.reportPairingRefusal(res);
         return;
       }
-      const body = (await res.json()) as { requestId: string; confirmationCode: string; confirmUrl?: string };
+      const body = (await res.json()) as {
+        requestId: string;
+        confirmationCode?: string;
+        confirmUrl?: string;
+        attested?: boolean;
+      };
       this.pairingRequestId = body.requestId;
+      if (body.attested) {
+        // Already approved at the device. Nothing to show and nowhere to send them — the next poll pairs.
+        this.set({ phase: "pairing_pending", attestedApproval: true, confirmationCode: undefined, confirmUrl: undefined });
+        await this.pollPairingOnce();
+        return;
+      }
       const confirmUrl = this.sameOriginConfirmUrl(body.confirmUrl);
-      this.set({ phase: "pairing_pending", confirmationCode: body.confirmationCode, confirmUrl });
+      this.set({ phase: "pairing_pending", confirmationCode: body.confirmationCode, confirmUrl, attestedApproval: false });
       // Opened from inside the seller's own click on 연결, so the browser treats it as a user gesture rather
       // than a pop-up. It can still be blocked, which is why the panel keeps the URL as a visible affordance
       // instead of relying on this call having worked.
@@ -202,6 +276,33 @@ export class BridgeClient {
     } catch {
       this.set({ phase: "unreachable", maybeNeedsLocalNetworkAccess: this.d.isSecureNonLoopbackOrigin });
     }
+  }
+
+  /**
+   * Turn a refused pairing into the state whose FIX matches what happened. Previously every non-OK response
+   * collapsed to `unreachable` — "도우미를 찾지 못했어요" — which is the wrong instruction for all three of
+   * these: the agent was found, it answered, and it said something specific.
+   */
+  private async reportPairingRefusal(res: Response): Promise<void> {
+    let error = "";
+    try {
+      error = ((await res.json()) as { error?: string }).error ?? "";
+    } catch {
+      /* a refusal without a parseable body still gets a phase below */
+    }
+    if (error === "approval_declined") {
+      this.pairingRequestId = null;
+      this.set({ phase: "pairing_denied", confirmUrl: undefined, attestedApproval: undefined });
+      return;
+    }
+    if (error === "approval_no_response") {
+      // The window appeared and went unanswered. Back to unpaired — with the reason, so the seller is told
+      // to try again rather than being sent to look for a helper that is demonstrably running.
+      this.pairingRequestId = null;
+      this.set({ phase: "unpaired", confirmUrl: undefined, attestedApproval: undefined, pairingHint: "no_response" });
+      return;
+    }
+    this.set({ phase: "unreachable", maybeNeedsLocalNetworkAccess: this.d.isSecureNonLoopbackOrigin });
   }
 
   /** Poll the pending pairing once. On approval it stores the token and connects. */
@@ -224,15 +325,15 @@ export class BridgeClient {
     // send the seller to an error page and read as the pairing having broken.
     if (poll.status === "paired") {
       this.pairingRequestId = null;
-      this.set({ confirmUrl: undefined });
+      this.set({ confirmUrl: undefined, attestedApproval: undefined });
       this.d.storage.setItem(TOKEN_KEY, poll.pairingToken);
       await this.connectWs(poll.pairingToken);
     } else if (poll.status === "denied") {
       this.pairingRequestId = null;
-      this.set({ phase: "pairing_denied", confirmUrl: undefined });
+      this.set({ phase: "pairing_denied", confirmUrl: undefined, attestedApproval: undefined });
     } else if (poll.status === "expired") {
       this.pairingRequestId = null;
-      this.set({ phase: "unpaired", confirmUrl: undefined });
+      this.set({ phase: "unpaired", confirmUrl: undefined, attestedApproval: undefined });
     }
     // "pending" → caller polls again.
   }

@@ -36,6 +36,17 @@ export interface AgentPairingPanelProps {
    */
   confirmUrl?: string | null;
   /**
+   * `useBridge().state.attestedApproval` — true when the approval is being answered in the agent's own native
+   * window. There is then no code to compare and no page to open, so this branch must show neither: a number
+   * on screen that matches nothing, or a link to a page that is already settled, both read as a broken step.
+   */
+  attestedApproval?: boolean;
+  /**
+   * `useBridge().state.pairingHint` — why the previous attempt ended without a pairing, when the phase alone
+   * would give the seller the wrong instruction.
+   */
+  pairingHint?: "no_response";
+  /**
    * `useBridge().state.maybeNeedsLocalNetworkAccess` — true when the page is served from a secure, non-loopback
    * origin and the bridge is unreachable, which on Chrome is indistinguishable from a blocked Local Network
    * Access permission. When set, the searching branch adds the "허용해 주세요" hint so a seller whose helper IS
@@ -50,6 +61,8 @@ export function AgentPairingPanel({
   phase,
   confirmationCode,
   confirmUrl,
+  attestedApproval,
+  pairingHint,
   maybeNeedsLocalNetworkAccess,
   onConnect,
   onRetry,
@@ -67,8 +80,12 @@ export function AgentPairingPanel({
       <p className="text-sm font-semibold text-ink" data-testid="agent-pairing-title">SellerOps 도우미가 필요합니다</p>
       {phase === "pairing_pending" ? (
         <>
-          <p className="text-sm text-ink break-keep">
-            내 PC에 열린 창에서 아래 숫자가 같은지 확인하고 <strong>허용</strong>을 눌러 주세요.
+          <p className="text-sm text-ink break-keep" data-testid="agent-pairing-instruction">
+            {attestedApproval ? (
+              <>내 PC 화면에 뜬 SellerOps 창에서 <strong>허용</strong>을 눌러 주세요.</>
+            ) : (
+              <>내 PC에 열린 창에서 아래 숫자가 같은지 확인하고 <strong>허용</strong>을 눌러 주세요.</>
+            )}
           </p>
           {confirmationCode ? (
             <p
@@ -118,6 +135,13 @@ export function AgentPairingPanel({
         </>
       ) : (
         <>
+          {/* The window DID appear and nobody answered it. Saying "다시 연결" alone would leave the seller
+              guessing whether anything happened at all. */}
+          {pairingHint === "no_response" ? (
+            <p className="text-sm text-muted break-keep" data-testid="agent-pairing-no-response">
+              승인 창에 응답이 없어 연결이 취소됐어요. 다시 연결하면 창이 한 번 더 열려요.
+            </p>
+          ) : null}
           <p className="text-sm text-ink break-keep">
             {phase === "pairing_denied"
               ? "SellerOps 도우미 연결이 거부됐어요. 다시 연결하고, 내 PC에 열리는 창에서 허용을 눌러 주세요."

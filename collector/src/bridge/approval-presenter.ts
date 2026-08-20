@@ -42,11 +42,30 @@ export interface ApprovalPresentation {
  * - `no_human_channel` — this presenter has no human attached right now (e.g. stderr is not a TTY, so it is
  *   redirected to a file/pipe and no human would ever see the code).
  * - `presenter_failed` — a human channel existed but the delivery itself faulted.
+ * - `no_response` — a human channel existed, the prompt WAS shown, and nobody answered it before the channel
+ *   gave up. Distinct from the other two because the fix is different (the person was away, not the machine
+ *   misconfigured) and because on an ATTESTING channel it is the only non-answer outcome: there is no second
+ *   place for the person to finish, so an unanswered prompt is the end of that request rather than a state
+ *   they might still complete elsewhere.
  */
-export type PresenterUnavailable = "no_human_channel" | "presenter_failed";
+export type PresenterUnavailable = "no_human_channel" | "presenter_failed" | "no_response";
 
 /**
  * Sanitized outcome of one presentation attempt — a coarse status/reason only, never the code or a path.
+ *
+ * **`approved` is an ATTESTATION, and only a channel the agent itself owns may return it.** It means: a human
+ * was reached, and in a surface this process created and controls, they affirmatively said yes — as opposed to
+ * `presented`, which claims only that the secret was put somewhere a human could read it. The distinction is
+ * what lets the seller stop retyping the code: the out-of-band secret exists so that a caller confined to the
+ * HTTP surface cannot forge a human approval, and an attested verdict establishes exactly that same fact
+ * without the human having to carry the secret across the boundary by hand. The transport shell may therefore
+ * confirm the request itself, with the real secret, through the ordinary `confirmPairing` check — the
+ * verification is unchanged; only the courier is.
+ *
+ * A presenter that CANNOT distinguish "the person approved" from "the person dismissed it" (a console write,
+ * a notification, a log line) must never return `approved` — it returns `presented` and the human completes
+ * the confirmation the long way. Getting this wrong turns a dismissal into a pairing, which is why the two
+ * statuses are separate rather than one boolean.
  *
  * `declined` is deliberately distinct from `unavailable`: it means a human WAS reached and actively refused.
  * A channel that cannot express refusal leaves the person staring at a security prompt with no way to say
@@ -56,6 +75,7 @@ export type PresenterUnavailable = "no_human_channel" | "presenter_failed";
  */
 export type PresentResult =
   | { status: "presented" }
+  | { status: "approved" }
   | { status: "declined" }
   | { status: "unavailable"; reason: PresenterUnavailable };
 
@@ -77,8 +97,9 @@ export interface ApprovalPresenter {
    */
   available(): boolean;
   /**
-   * Deliver the approval secret to the human. Returning anything other than `{status:"presented"}` means the
-   * human did NOT receive it, and the caller MUST discard the pairing request.
+   * Deliver the approval to the human. `presented` (the secret is where a human can read it) and `approved`
+   * (a human affirmatively approved, in a surface this agent owns) are the two success shapes; anything else
+   * means no approval exists and the caller MUST discard the pairing request.
    *
    * May be async: a native adapter shells out to an OS dialog and must NOT block the event loop (that would
    * freeze every WS socket, the heartbeat, and any hosted run for the life of the dialog). Sync adapters may

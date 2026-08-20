@@ -174,6 +174,8 @@ export function ReviewImportPage() {
             phase: bridge.state.phase,
             confirmationCode: "confirmationCode" in bridge.state ? bridge.state.confirmationCode : null,
             maybeNeedsLocalNetworkAccess: bridge.state.maybeNeedsLocalNetworkAccess,
+            attestedApproval: bridge.state.attestedApproval,
+            pairingHint: bridge.state.pairingHint,
             onConnect: bridge.requestPairing,
             onRetry: bridge.retry,
           }}
