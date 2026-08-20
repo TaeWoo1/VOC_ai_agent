@@ -746,6 +746,15 @@ export class CoupangIssuanceEngine {
       intent: "API_ISSUANCE_GUIDANCE",
       // Deliberately NO appBranch — the Coupang walk is linear.
       ...(this.credentialState ? { credentialState: this.credentialState } : {}),
+      // **Which credential question is on the marketplace window right now.** Derived from the stage rather
+      // than stored, so it cannot drift from where the run actually is: the panel asks while the walk rests on
+      // the credential step, and the seller's press is the ONLY thing that moves it to the consent stage.
+      //
+      // The frontend acts on `CONSENTED` — it is the tab holding the seller's session, so it is the only place
+      // a one-shot capability can be minted, and it must mint one exactly when the seller asks. A step NUMBER
+      // could not tell it that: 8/8 reads the same before and after the press.
+      ...(this.stage === "guiding_copy_keys" ? { credentialHandoff: "AWAITING_CONSENT" as const } : {}),
+      ...(this.stage === "awaiting_handoff_consent" ? { credentialHandoff: "CONSENTED" as const } : {}),
       currentStep: {
         stepId: meta.stepId,
         stepNumber: meta.stepNumber,

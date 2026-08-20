@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useBridge } from "../../hooks/useBridge";
 import type { ActionWindowRunView, CommandType } from "../../lib/actionWindow/contract";
 import { api } from "../../lib/apiClient";
@@ -145,6 +145,8 @@ export function CoupangIssuanceGuidedWalkthrough({
   // StrictMode's double-invoke and any re-render from opening a second socket or starting a second walk (the
   // host also guards START_RUN itself).
   const attachedRef = useRef(false);
+  /** The live run's id, so the authorize call does not have to be rebuilt on every published revision. */
+  const runIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (controlled || !started || !paired || attachedRef.current) return;
     attachedRef.current = true;
@@ -162,8 +164,16 @@ export function CoupangIssuanceGuidedWalkthrough({
   // someone "발급 완료" when they issued nothing is a claim about their account that is not true.
   const credentialState = controlled ? null : (issuance.view?.credentialState ?? null);
   const alreadyHadKey = credentialState === "KEY_PRESENT";
+  // **Which credential question is on the 쿠팡 윙 창 right now** — the runtime's own answer, v2-only and
+  // issuance-only, so it is read from the v2 view before the cast like `credentialState` above.
+  //
+  // The consent is given THERE, in front of the values it is about. This screen's job at the end of the walk is
+  // therefore not to ask again — it is to mirror what is being asked, and to do the one thing the marketplace
+  // window cannot: mint the one-shot capability, because this is the tab that holds the seller's session.
+  const handoffState = controlled ? null : (issuance.view?.credentialHandoff ?? null);
   const effectiveRun = controlled ? (run ?? null) : liveView;
   const effectiveCommand = controlled ? onCommand : issuance.send;
+  runIdRef.current = effectiveRun?.runId ?? null;
   // The host refused (no carrier announced / wrong carrier / unreachable / START_RUN rejected) → guidance can't
   // run on this helper. WHICH of those it was is an internal agent-runtime fact (which carrier the resident
   // helper happens to host); a seller cannot act on it and is not shown it.
@@ -205,6 +215,84 @@ export function CoupangIssuanceGuidedWalkthrough({
   const controlExclude = effectiveRun
     ? effectiveRun.allowedCommands.filter((c) => !OFFERED_COMMANDS.includes(c))
     : [];
+
+  /**
+   * **Perform the handoff the seller has already consented to.**
+   *
+   * The consent happened on the 쿠팡 윙 panel, in front of the values it is about — this screen does not ask
+   * again, it acts. What it contributes is the one thing the marketplace window cannot do: it holds the
+   * seller's session, so it is the only place a one-shot capability can be minted.
+   *
+   * The capability is bound server-side to this org, this seller, this account, this channel and this run,
+   * lives for minutes, and is spent once. It is minted HERE, on the consent, never in advance; it goes straight
+   * into the Action Window command and is never stored, never logged, and never put in a URL.
+   */
+  const startHandoff = useCallback(async (): Promise<void> => {
+    if (!ensureAccountId || !runIdRef.current) return;
+    setHandoff({ phase: "working" });
+    try {
+      // The account is resolved (or created) at this moment — the seller acting on their credential is what
+      // makes an account row necessary, and a first-time seller has none until something makes one.
+      const accountId = await ensureAccountId();
+      const slot = await api.getAccountSessionSlot(accountId);
+      const granted = await api.authorizeCoupangCredentialHandoff(slot.accountSlot, runIdRef.current);
+      issuance.send("REQUEST_STEP_RECHECK", {
+        credentialHandoffAuthorization: granted.authorizationId,
+      } as never);
+    } catch {
+      // The error is not surfaced verbatim: a backend refusal carries a safe reason code, but a transport
+      // failure can quote the request it failed on, and this path is one request away from three secrets.
+      setHandoff({ phase: "failed" });
+    }
+  }, [ensureAccountId, issuance]);
+
+  // ONCE per run, and only on the seller's own press over in WING. A ref rather than the phase alone: the run
+  // view is republished on every revision, and a second authorize would mint a second capability for a handoff
+  // the runtime has already latched.
+  const handoffStartedRef = useRef(false);
+  useEffect(() => {
+    if (handoffState !== "CONSENTED" || handoffStartedRef.current) return;
+    if (!ensureAccountId || !accountReady) return;
+    handoffStartedRef.current = true;
+    void startHandoff();
+  }, [handoffState, ensureAccountId, accountReady, startHandoff]);
+
+  /**
+   * **What this screen says about the handoff while the seller is over in WING.**
+   *
+   * A mirror, never a second ask: the question and its buttons live on the marketplace panel, and two screens
+   * offering the same decision is how a seller ends up answering it twice. The states here are the runtime's
+   * (`AWAITING_CONSENT` / `CONSENTED`) plus what only this tab knows — that the authorize/command round trip
+   * failed before the agent ever read anything.
+   *
+   * `null` ⇒ nothing to say, and nothing is rendered.
+   */
+  const handoffMirror: { title: string; body: string; offerManual: boolean } | null =
+    handoff.phase === "failed"
+      ? {
+          title: "연결 정보를 저장하지 못했어요.",
+          body: "쿠팡 윙 창의 값은 저장되지 않았어요. 아래에서 직접 입력해 연결을 마칠 수 있습니다.",
+          offerManual: true,
+        }
+      : handoff.phase === "working"
+        ? {
+            title: "연결 정보를 저장하고 있어요…",
+            body: "쿠팡 윙 창에 표시된 값을 읽어 암호화해 저장하고, 연결이 되는지 한 번 확인합니다. 값은 이 화면에 표시되지 않아요.",
+            offerManual: false,
+          }
+        : handoffState === "AWAITING_CONSENT"
+          ? {
+              title: "쿠팡 윙 창에서 저장 여부를 선택해 주세요",
+              body: "발급된 업체코드·Access Key·Secret Key를 SellerOps에 저장할지, 쿠팡 윙 창의 안내에서 [SellerOps에 연결하기]로 알려 주세요.",
+              offerManual: false,
+            }
+          : handoffState === "CONSENTED"
+            ? {
+                title: "연결 정보를 저장하고 있어요…",
+                body: "쿠팡 윙 창에 표시된 값을 읽어 암호화해 저장하고, 연결이 되는지 한 번 확인합니다. 값은 이 화면에 표시되지 않아요.",
+                offerManual: false,
+              }
+            : null;
 
   const toText = () => {
     // Switching to text IS the manual path: if a guided run is live and the runtime accepts it, tell the
@@ -262,43 +350,6 @@ export function CoupangIssuanceGuidedWalkthrough({
   }
 
 
-  // Offered only where it is real: the walk is resting on the credential step (the runtime's own evidence that
-  // the seller reached the key screen), there is an account to bind an authorization to, and this is a live run.
-  // Step 8 of 8 is the credential step. Read from the run's OWN progress rather than from anything this screen
-  // inferred: the runtime is the authority on where the walk is, and it is the only thing that knows the seller
-  // actually reached the key screen.
-  const showHandoff =
-    !controlled &&
-    !!ensureAccountId &&
-    accountReady &&
-    !!effectiveRun &&
-    effectiveRun.status !== "COMPLETED" &&
-    effectiveRun.currentStep?.stepNumber === effectiveRun.currentStep?.totalSteps;
-
-  /**
-   * Ask the backend to authorize this handoff, then hand the capability to the agent.
-   *
-   * The capability is bound server-side to this org, this seller, this account, this channel and this run, lives
-   * for minutes, and is spent once. It goes straight from this call to the Action Window command — it is never
-   * stored, never logged, and never put in a URL.
-   */
-  const startHandoff = async (): Promise<void> => {
-    if (!ensureAccountId || !effectiveRun) return;
-    setHandoff({ phase: "working" });
-    try {
-      // The account is resolved (or created) HERE, on the press — never by rendering the card.
-      const accountId = await ensureAccountId();
-      const slot = await api.getAccountSessionSlot(accountId);
-      const granted = await api.authorizeCoupangCredentialHandoff(slot.accountSlot, effectiveRun.runId);
-      issuance.send("REQUEST_STEP_RECHECK", {
-        credentialHandoffAuthorization: granted.authorizationId,
-      } as never);
-    } catch {
-      // The error is not surfaced verbatim: a backend refusal carries a safe reason code, but a transport
-      // failure can quote the request it failed on, and this path is one request away from three secrets.
-      setHandoff({ phase: "failed" });
-    }
-  };
 
   return (
     <div className="space-y-4" aria-label="화면 안내 발급">
@@ -311,54 +362,33 @@ export function CoupangIssuanceGuidedWalkthrough({
       )}
       {/* **The credential handoff — the last step, and the only one that moves a secret.**
 
-          It appears when the walk is resting on its credential step, which is the runtime's own evidence that
-          the seller reached the screen the keys are on. The press below is the BARRIER: it discloses the whole
-          chain it authorizes — SellerOps reads the three values from the 쿠팡 윙 창, sends them straight to the
-          vault, and runs a read-only connection check — and it is the only thing that starts any of it.
+          The ASK is not here. It is on the 쿠팡 윙 panel, in front of the three values it is about, because that
+          is the window the seller is looking at and sending them to another tab to answer a question about what
+          is on this one is the round trip this walk exists to remove.
 
-          The values never reach this screen. They are read in the marketplace window by the local agent and put
-          on one request; what comes back here is a status. */}
-      {showHandoff && (
-        <section className="space-y-2 rounded-xl border border-line px-4 py-3" aria-label="연결 정보 저장">
-          <p className="text-sm font-medium text-ink">발급한 키를 SellerOps에 저장할까요?</p>
-          <p className="text-xs text-muted break-keep">
-            쿠팡 윙 창에 표시된 업체코드·Access Key·Secret Key를 SellerOps가 읽어 <strong>암호화해 저장</strong>하고,
-            연결이 되는지 한 번만 확인합니다. 값은 이 화면에 표시되지 않고, 저장 외에는 어디에도 남지 않아요.
+          What this screen does is mirror it, and act: it holds the seller's session, so it is the only place a
+          one-shot capability can be minted. The values never reach it — they are read in the marketplace window
+          by the local agent and put on one request; what comes back here is a status. */}
+      {handoffMirror && (
+        <section className="space-y-2 rounded-xl border border-line px-4 py-3" aria-label="연결 정보 저장" role="status">
+          <p className="text-sm font-medium text-ink" data-testid="coupang-handoff-mirror">
+            {handoffMirror.title}
           </p>
-          {handoff.phase === "failed" && (
-            <p className="text-xs text-bad break-keep" role="status" data-testid="coupang-handoff-failed">
-              저장하지 못했어요. 쿠팡 윙 창에 키가 모두 보이는지 확인한 뒤 다시 시도해 주세요.
-            </p>
-          )}
-          {handoff.phase === "stored" ? (
-            <p className="text-sm text-ok" role="status" data-testid="coupang-handoff-stored">
-              연결 정보를 저장했어요.
-            </p>
-          ) : (
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                disabled={handoff.phase === "working"}
-                onClick={() => void startHandoff()}
-                data-testid="coupang-handoff-start"
-                className="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white transition disabled:opacity-60"
-              >
-                {handoff.phase === "working" ? "저장하는 중…" : "키 읽어서 저장하기"}
-              </button>
-              {/* **The manual path, by explicit choice only.** The walk no longer falls through to the typing
-                  form on its own — that was the defect — but "no fall-through" must not become "no way out":
-                  a seller whose read keeps failing, or who simply prefers to type, needs a door that is not
-                  취소. This is that door, and it is a choice they make rather than a place they end up. */}
-              <button
-                type="button"
-                disabled={handoff.phase === "working"}
-                onClick={() => effectiveCommand?.("SWITCH_TO_MANUAL")}
-                data-testid="coupang-handoff-manual"
-                className="text-sm text-muted underline transition hover:text-ink disabled:opacity-60"
-              >
-                직접 입력할게요
-              </button>
-            </div>
+          <p className="text-xs text-muted break-keep">{handoffMirror.body}</p>
+          {/* **The manual path, by explicit choice only — and here it is the FAILURE's way out.**
+
+              The seller's ordinary way to the typing form is the 직접 입력할게요 on the 쿠팡 윙 panel, beside the
+              consent. This one exists because a failed read leaves them looking at whichever window they
+              happen to be in, and the one that says the read failed must also say what to do instead. */}
+          {handoffMirror.offerManual && (
+            <button
+              type="button"
+              onClick={() => effectiveCommand?.("SWITCH_TO_MANUAL")}
+              data-testid="coupang-handoff-manual"
+              className="text-sm text-muted underline transition hover:text-ink"
+            >
+              직접 입력할게요
+            </button>
           )}
         </section>
       )}

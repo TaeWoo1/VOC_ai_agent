@@ -210,6 +210,24 @@ export const ISSUANCE_CREDENTIAL_STATES = ["NO_KEY", "KEY_PRESENT", "UNKNOWN"] a
 export type IssuanceCredentialState = (typeof ISSUANCE_CREDENTIAL_STATES)[number];
 
 /**
+ * v2, ISSUANCE-SCOPED. **Where the credential handoff stands — as the RUNTIME sees it, not the frontend.**
+ *
+ * The consent for a handoff is given on the marketplace window, in front of the values it is about. That press
+ * is the only thing that produces `CONSENTED`, and the frontend needs to know it happened: it is the tab that
+ * holds the seller's session, so it is the only place a one-shot capability can be minted — and it must mint one
+ * exactly when the seller asks and never before.
+ *
+ * Two states, both facts the runtime observes:
+ *  - `AWAITING_CONSENT` — the walk is resting on the credential step; the panel is asking.
+ *  - `CONSENTED` — the seller pressed it. Nothing has been read yet.
+ *
+ * There is deliberately no `STORED`: a stored credential IS the run completing, and a second way to say so is a
+ * second thing that can disagree. Absent ⇒ the question has not come up, on an issuance run or any other.
+ */
+export const ISSUANCE_HANDOFF_STATES = ["AWAITING_CONSENT", "CONSENTED"] as const;
+export type IssuanceHandoffState = (typeof ISSUANCE_HANDOFF_STATES)[number];
+
+/**
  * Why a run stopped.
  *
  * <p>The last two are import-run additions, and both close a real hole rather than adding vocabulary:
@@ -434,6 +452,16 @@ export interface ActionWindowRunView {
    * value, no account identity.
    */
   credentialState?: IssuanceCredentialState;
+  /**
+   * v2, ISSUANCE-ONLY. Whether the seller has been ASKED to let SellerOps store the credential they just
+   * issued, and whether they have answered — see {@link ISSUANCE_HANDOFF_STATES}. Present ONLY on an
+   * `API_ISSUANCE_GUIDANCE` run.
+   *
+   * It carries no value, no account identity and no capability — it is the runtime saying which question is on
+   * the marketplace window right now, so the frontend can act at the moment the seller answers rather than
+   * inferring it from a step number that is equally true before and after.
+   */
+  credentialHandoff?: IssuanceHandoffState;
 
   currentStep?: {
     stepId: string;
@@ -725,6 +753,14 @@ export function validateRunView(input: unknown): ValidationResult {
       e.push(err("UNKNOWN_ENUM", "$.credentialState"));
     }
     if (input.intent !== "API_ISSUANCE_GUIDANCE") e.push(err("CONSTRAINT_VIOLATION", "$.credentialState"));
+  }
+  // credentialHandoff is issuance-scoped for the same reason again: only an issuance walk ever asks a seller
+  // whether SellerOps may store the key they just made.
+  if (input.credentialHandoff !== undefined) {
+    if (!(ISSUANCE_HANDOFF_STATES as readonly string[]).includes(input.credentialHandoff as string)) {
+      e.push(err("UNKNOWN_ENUM", "$.credentialHandoff"));
+    }
+    if (input.intent !== "API_ISSUANCE_GUIDANCE") e.push(err("CONSTRAINT_VIOLATION", "$.credentialHandoff"));
   }
   if (typeof input.guidanceEnabled !== "boolean") e.push(err("MISSING_FIELD", "$.guidanceEnabled"));
 

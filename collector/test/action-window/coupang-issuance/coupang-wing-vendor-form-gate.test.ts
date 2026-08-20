@@ -25,6 +25,8 @@ const FIELD_IDS = ["stage2.vendor_info.baseline", "stage2.vendor_url.url", "stag
  */
 class FakeVendorPage {
   pressed = false;
+  /** The seller pressed 직접 입력할게요 — a different latch, and a different answer. */
+  declined = false;
   /** Presses the page has seen cleared by the driver's re-arm. Proves the gate does not eat a press silently. */
   resets = 0;
   /** Mounted overlay briefs, in order. The gate's whole visible effect is the second one. */
@@ -84,6 +86,11 @@ class FakeVendorPage {
       // opaque step token); the mount takes the panel options object. Discriminating on the function body alone
       // would not work: the mount arms the same token global the re-arm writes, so it contains the same name.
       if (typeof arg === "string") {
+        // The panel now carries TWO latches — the advance and the step's quiet alternative — in separate
+        // globals. A fake that answered `pressed` to both would report every seller who advanced as having
+        // asked to leave, which is the opposite decision.
+        if (String(script).includes("__aw_secondary_pressed__")) return this.declined;
+        if (String(script).includes("__aw_secondary_token__")) return undefined;
         if (String(script).includes("delete")) {
           this.resets += 1;
           this.pressed = false;

@@ -17,6 +17,7 @@ import type { CoupangIssuanceEffect, CoupangIssuanceEngine } from "./coupang-iss
 import {
   COUPANG_TARGET_BARRIER_STAGE,
   coupangIssuanceParkNotice,
+  type CoupangHandoffPanelPhase,
   type CoupangIssuanceProbeDriver,
   type CoupangIssuanceTarget,
 } from "./coupang-issuance-driver";
@@ -79,6 +80,8 @@ export class CoupangIssuanceGuidanceSession {
   private surfaceClosed = false;
   /** The park notice currently on the WING window, so it is drawn once per park and not once per recovery tick. */
   private parkNoticeShown: string | null = null;
+  /** The outcome panel's return watch, if one is running. Held so a test can await it; the run never does. */
+  private handoffReturnWatch: Promise<void> | null = null;
 
   /**
    * **Stopped for good** — the host tore this session down (the resident helper releasing the walk, or the agent
@@ -243,6 +246,10 @@ export class CoupangIssuanceGuidanceSession {
 
     this.busyCount += 1;
     try {
+      // The seller consented on the WING panel and is looking at it. Say what is happening there, not in the
+      // other tab — a walk that took the decision on the marketplace window and reported the result somewhere
+      // else would have moved the round trip rather than removed it.
+      await this.showHandoffPanel("WORKING");
       // From here the seam owns the read. It is given the capability and nothing else, and it answers with an
       // outcome that has no field a secret could travel in.
       const result = await this.credentialHandoff(capability);
@@ -253,6 +260,10 @@ export class CoupangIssuanceGuidanceSession {
         ...(result.reason ? { reason: result.reason } : {}),
       });
       if (!result.stored) {
+        // The panel says so, and offers the one thing left: going back to SellerOps, where the typing form is.
+        // It never re-displays what it read — a failure that showed the values would be a leak dressed as help.
+        await this.showHandoffPanel("FAILED");
+        this.watchHandoffReturn("FAILED");
         this.transport.send({
           kind: "aw_command_result",
           commandId: command.commandId,
@@ -268,9 +279,16 @@ export class CoupangIssuanceGuidanceSession {
       const next = this.engine.completeAfterCredentialHandoff();
       this.publishState();
       if (!isNoop(next)) await this.drive(next);
+      // AFTER the cleanup effect, not before: completing drives `CLEANUP`, which unmounts every panel on the
+      // page. The success panel is what the seller sees at the end of the walk, so it is mounted on the far
+      // side of that — and it carries the walk's one remaining act, which is going back to SellerOps.
+      await this.showHandoffPanel("STORED");
+      this.watchHandoffReturn("STORED");
     } catch (e) {
       // The error is NOT echoed: a transport failure can quote the request it failed on.
       log("aw_coupang_issuance_handoff", { runId: this.runId, stored: false, reason: errName(e) }, "warn");
+      await this.showHandoffPanel("FAILED");
+      this.watchHandoffReturn("FAILED");
       this.transport.send({
         kind: "aw_command_result",
         commandId: command.commandId,
@@ -476,6 +494,83 @@ export class CoupangIssuanceGuidanceSession {
   }
 
   /**
+   * Paint one face of the handoff on the marketplace window — never opening one to do it.
+   *
+   * Guarded exactly like {@link showParkNoticeIfParked}: a torn-down session and a window the seller closed both
+   * draw nothing. The lazy driver refuses on its own too (`isOpen()`), so this is the two of them agreeing
+   * rather than one of them compensating.
+   */
+  private async showHandoffPanel(phase: CoupangHandoffPanelPhase): Promise<void> {
+    if (this.stopped || this.surfaceClosed) return;
+    const show = this.driver.showHandoffPanel;
+    if (!show) return;
+    // The panel is the seller's feedback, not the walk's correctness: a page that will not paint must not turn
+    // a stored credential into a failed handoff.
+    const painted = await show.call(this.driver, phase).catch(() => false);
+    log("aw_coupang_issuance_handoff_panel", { runId: this.runId, phase, painted });
+  }
+
+  /**
+   * **Watch the outcome panel's one button — the walk's only return to SellerOps.**
+   *
+   * It is a poll rather than an event because the panel is a page element and the press is a value-free latch,
+   * exactly like every other press in this walk. Three things bound it: the seller pressing it, the window
+   * being closed, and the wait running out. None of them can OPEN a window — every read goes through the lazy
+   * driver's `isOpen()` refusal, and the surface latch ends the loop the same way it ends the park recovery.
+   *
+   * Detached on purpose: the handoff has finished either way, and a return that fails must not turn a stored
+   * credential into a failed run. What it must not do is fail silently, hence the log line.
+   */
+  private watchHandoffReturn(phase: CoupangHandoffPanelPhase): void {
+    // Not merely re-checked inside the loop — a loop is not STARTED against a window the seller has closed.
+    if (this.stopped || this.surfaceClosed) return;
+    const read = this.driver.readHandoffPanelPressed;
+    const go = this.driver.returnToSellerOpsNow;
+    if (!read || !go) return;
+    const maxPolls = Math.max(1, Math.ceil(this.surfaceWaitTimeoutMs / Math.max(1, this.surfaceWaitPollMs)));
+    // **NOT counted as a drive.** `busyCount` means "the run is doing something"; this is the run WAITING on a
+    // person, for as long as they take. Counting it would make `whenSettled` — the settle signal the host and
+    // every test rely on — never resolve on a finished walk, which is the opposite of what it reports.
+    this.handoffReturnWatch = (async () => {
+      for (let i = 0; i < maxPolls; i++) {
+        await new Promise<void>((resolve) => setTimeout(resolve, this.surfaceWaitPollMs));
+        if (this.stopped || this.surfaceClosed) return;
+        if (!(await read.call(this.driver, phase).catch(() => false))) continue;
+        log("aw_coupang_issuance_handoff_return", { runId: this.runId, phase });
+        await go.call(this.driver).catch(() => undefined);
+        return;
+      }
+    })();
+  }
+
+  /** The outcome panel's return watch, awaitable by tests. Never awaited by the run — it waits on a person. */
+  async whenHandoffReturnSettled(): Promise<void> {
+    await this.handoffReturnWatch;
+  }
+
+  /**
+   * **The seller chose to type the credential in themselves.**
+   *
+   * The walk stopped falling through to the typing form on its own — that was the defect — and this is what
+   * keeps "no fall-through" from becoming "no way out". It is the seller's own press on the credential panel's
+   * quiet second button, and it means exactly what `SWITCH_TO_MANUAL` from the SellerOps tab has always meant.
+   *
+   * Returns whether the run MOVED, so the barrier watcher stops rather than re-arming an observation on a step
+   * the seller has just left.
+   */
+  private async consumeStepDecline(target: CoupangIssuanceTarget): Promise<boolean> {
+    const read = this.driver.readStepDeclined;
+    if (!read || this.stopped || this.surfaceClosed) return false;
+    if (!(await read.call(this.driver, target).catch(() => false))) return false;
+    log("aw_coupang_issuance_step_declined", { runId: this.runId, target, choice: "MANUAL_ENTRY" });
+    const outcome = this.engine.command({ type: "SWITCH_TO_MANUAL", expectedRevision: this.engine.view().revision });
+    if (!outcome.ok) return false;
+    this.publishState();
+    if ("effect" in outcome && !isNoop(outcome.effect)) await this.drive(outcome.effect);
+    return true;
+  }
+
+  /**
    * **Take the seller's declaration off the WING panel and let the walk continue.**
    *
    * The runtime could not tell whether this account already holds a key, so it parked — and for a page whose
@@ -570,6 +665,10 @@ export class CoupangIssuanceGuidanceSession {
     let acted = await this.driver.observeUserAction(target);
     while (!acted) {
       if (this.stopped || !this.stillWaitingOn(target)) return;
+      // **Before re-arming, check whether the seller asked for the OTHER way forward.** The driver's observe
+      // loop returns early on that press precisely so this is noticed in one re-arm delay rather than after a
+      // ten-minute observation window: someone who pressed 직접 입력할게요 is waiting for a form.
+      if (await this.consumeStepDecline(target)) return;
       await new Promise<void>((resolve) => setTimeout(resolve, this.rearmDelayMs));
       if (this.stopped || !this.stillWaitingOn(target)) return;
       await this.driver.armObserve(target);

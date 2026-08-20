@@ -53,6 +53,7 @@ import {
   overlayMounted,
   resetOverlayAdvance,
   readOverlayAdvancePressed,
+  readOverlaySecondaryPressed,
   readOverlayAdvanceDiagnostics,
   type OverlayAdvanceDiagnostics,
 } from "./overlay";
@@ -119,6 +120,7 @@ import type {
 } from "./coupang-issuance/coupang-issuance-driver";
 import {
   isCoupangCheckpointTarget,
+  type CoupangHandoffPanelPhase,
   type CoupangIssuanceParkNotice,
 } from "./coupang-issuance/coupang-issuance-driver";
 import type { LocateResult } from "./engine";
@@ -886,6 +888,19 @@ function parkConfirmToken(code: CoupangIssuanceParkNotice): string {
 }
 
 /**
+ * The latch token for a step's SECONDARY affordance — its own namespace again, for the same reason: the way out
+ * and the way forward sit on one panel, and a press on either must be unable to satisfy the other's poll.
+ */
+function stepSecondaryToken(target: CoupangIssuanceTarget): string {
+  return `coupang-issuance-alt:${target}`;
+}
+
+/** The latch token for one of the handoff outcome panels. Value-free and derived, like every other. */
+function handoffPanelToken(phase: CoupangHandoffPanelPhase): string {
+  return `coupang-issuance-handoff:${phase}`;
+}
+
+/**
  * The WING-resident advance button caption per checkpoint — the button the seller presses ON THE WING PAGE to
  * advance the guided walk (so they never bounce back to the SellerOps tab to press "다음"). `reach_open_api` has
  * NO button: it is the one step that auto-advances on the observed `wing_home → open_api_issuance` navigation.
@@ -933,6 +948,48 @@ const PARK_NOTICE_COPY: Readonly<
     },
   });
 
+/**
+ * **Which walk this panel belongs to**, shown in the shared shell's header beside the step counter. The NAVER
+ * walk names itself the same way on the same shell — a seller connecting both channels meets one product.
+ */
+const WING_CHANNEL_NAME = "쿠팡 윙";
+
+/**
+ * **The three faces of the handoff, on the window where the seller consented to it.**
+ *
+ * `WORKING` carries no button because nothing is being asked. `STORED` carries the walk's single remaining act
+ * — going back to SellerOps — and it is the ONLY place in this walk that button appears now. `FAILED` carries
+ * the same button for the opposite reason: the automatic path is spent for this run (one read per run, latched
+ * in the session and at the vault), so the way to finish is the typing form in SellerOps.
+ *
+ * None of them names a value, and `FAILED` in particular must not: a failure that re-displayed what it had just
+ * read would be a leak dressed as help.
+ *
+ * The phase enum itself lives on the driver PORT — the session decides which face is showing, and it must not
+ * import this live-browser module to name one.
+ */
+const HANDOFF_PANEL_COPY: Readonly<
+  Record<CoupangHandoffPanelPhase, { badge: string; brief: string; detail: string; confirm?: string }>
+> = Object.freeze({
+  WORKING: {
+    badge: "저장 중",
+    brief: "SellerOps가 연결 정보를 저장하고 있어요.",
+    detail: "이 창을 닫지 말고 잠시만 기다려 주세요. 값은 어디에도 표시되지 않습니다.",
+  },
+  STORED: {
+    badge: "연결 완료",
+    brief: "✓ 쿠팡 연결 완료",
+    detail: "업체코드·Access Key·Secret Key를 암호화해 저장하고, 연결이 되는지 확인했어요. 값은 화면에 표시되지 않았고 기록에도 남지 않았습니다.",
+    confirm: "SellerOps로 돌아가기",
+  },
+  FAILED: {
+    badge: "저장 실패",
+    brief: "연결 정보를 저장하지 못했어요.",
+    detail: "이 창의 값은 SellerOps에 저장되지 않았습니다. SellerOps에서 직접 입력해 연결을 마칠 수 있어요.",
+    confirm: "SellerOps로 돌아가기",
+  },
+});
+
 const ADVANCE_BUTTON_LABEL: Readonly<Partial<Record<CoupangIssuanceTarget, string>>> = {
   issue: "발급 화면이 열렸어요 · 다음",
   confirm_purpose: "확인을 눌렀어요 · 다음",
@@ -944,16 +1001,23 @@ const ADVANCE_BUTTON_LABEL: Readonly<Partial<Record<CoupangIssuanceTarget, strin
   // that did not change the way the measurement says it should.
   vendor_confirm: "확인을 눌렀어요 · 다음",
   /**
-   * **The walk's last button, and the handoff's own CTA.**
+   * **The walk's last button, and the CONSENT itself.**
    *
-   * It said `복사했어요 · 다음` while the panel told the seller to copy three keys by hand. That is the thing
-   * this unit removes: SellerOps fetches them, under a confirmation the seller presses on a SellerOps surface,
-   * so asking a person to transcribe a 40-character secret is work the product created for itself.
+   * Three captions in three units, and the reason is one idea arriving in stages. `복사했어요 · 다음` asked the
+   * seller to transcribe a 40-character secret. `SellerOps로 돌아가기` stopped asking that — but moved the
+   * decision to the other tab, so a seller looking at their own keys had to go somewhere else to say "yes,
+   * save them", and the walk finished on the way.
    *
-   * Pressing this returns to SellerOps — there is no separate return step any more. Two consecutive buttons
-   * both meaning "go to SellerOps" is exactly the confusion the old `return` step's own comment warned about.
+   * This is the decision, in front of the evidence for it. Pressing it does not return, does not complete the
+   * run, and reads nothing by itself: it records the seller's consent, and SellerOps — where the seller is
+   * authenticated — performs the read, the vault write and the connection check under it.
    */
-  credentials: "SellerOps로 돌아가기",
+  credentials: "SellerOps에 연결하기",
+};
+
+/** The seller's OTHER way forward at the credential step: type the three values in themselves. */
+const SECONDARY_BUTTON_LABEL: Readonly<Partial<Record<CoupangIssuanceTarget, string>>> = {
+  credentials: "직접 입력할게요",
 };
 
 /**
@@ -1199,7 +1263,7 @@ export const OPERATOR_STEP_LABELS: Readonly<Record<CoupangIssuanceTarget, string
   vendor_confirm: "업체명 · URL을 입력하고, IP 주소는 입력한 뒤 옆의 '추가'를 눌러 등록하세요 — 추가하지 않으면 IP가 등록되지 않습니다. 그 다음 '확인'을 직접 누르세요. ⚠ 여기서 실제 API 키가 발급되어 라이브 계정 상태가 바뀝니다(지우려면 나중에 별도의 삭제 작업이 필요합니다). SellerOps는 이 버튼을 절대 누르지 않고, 입력란에 아무것도 쓰지 않습니다. 키가 화면에 표시되면 자동으로 넘어갑니다.",
   // No copy request. The seller issued the key; SellerOps fetches what it needs, and the ASKING happens on a
   // SellerOps surface where a press can be verified — not here, on a marketplace page.
-  credentials: "API 키 발급이 확인됐습니다. 아래 버튼을 누르면 SellerOps로 돌아갑니다. 키를 읽어 저장할지는 거기서 여쭙고, 승인하시기 전에는 아무것도 읽지 않습니다.",
+  credentials: "SellerOps는 이 화면에 표시된 업체코드·Access Key·Secret Key만 읽어 곧바로 암호화해 저장하고, 저장한 뒤 연결이 되는지 한 번만 확인합니다. 값은 SellerOps 화면에 표시되지 않고, 기록에도 남지 않습니다. 아래 'SellerOps에 연결하기'를 누르시기 전에는 아무것도 읽지 않습니다. 직접 입력하고 싶으시면 그 아래 버튼을 누르세요.",
 };
 
 /**
@@ -1227,7 +1291,7 @@ export const OPERATOR_STEP_BRIEF: Readonly<Record<CoupangIssuanceTarget, string>
   // with an empty form.
   vendor_method: "'자체개발(직접입력)'을 직접 선택한 뒤, 업체명 · URL을 입력하고 IP는 '추가'까지 누르세요. 다 채우면 자동으로 넘어갑니다.",
   vendor_confirm: "⚠ 이 화면의 '확인'에서 실제 API 키가 발급됩니다. 업체명 · URL을 입력하고 IP는 '추가'까지 누른 뒤, '확인'을 직접 누르세요.",
-  credentials: "SellerOps로 돌아가 키 저장을 승인해 주세요.",
+  credentials: "API 정보가 발급됐어요. 업체코드·Access Key·Secret Key를 SellerOps에 암호화해 저장하고 연결을 한 번 확인합니다. 값은 화면에 표시하지 않습니다.",
 };
 
 /**
@@ -1237,7 +1301,7 @@ export const OPERATOR_STEP_BRIEF: Readonly<Record<CoupangIssuanceTarget, string>
  * credential, and the one immediately before it that is routinely mistaken for it. Everywhere else the
  * disclosure starts closed, which is where the lightening actually comes from — seven steps, not nine.
  */
-export const STEPS_WITH_DETAIL_OPEN: readonly CoupangIssuanceTarget[] = ["issue_final", "vendor_confirm"];
+export const STEPS_WITH_DETAIL_OPEN: readonly CoupangIssuanceTarget[] = ["issue_final", "vendor_confirm", "credentials"];
 
 /**
  * **What the panel says when the seller asks to move on and the form still reads empty.**
@@ -1285,7 +1349,7 @@ export const OPERATOR_STEP_TITLES: Readonly<Record<CoupangIssuanceTarget, string
   // The one chip in the walk that names a CONSEQUENCE, because this control creates a real credential.
   // Every other chip names the control; this is the exception the panel copy alone should not have to carry.
   vendor_confirm: "'확인' 누르기 (키 발급)",
-  credentials: "SellerOps로 돌아가기",
+  credentials: "SellerOps에 연결하기",
 };
 
 /** A browser context whose newest tab may hold the step the seller opened. Structural subset of Playwright's. */
@@ -2209,6 +2273,7 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     // counter to 1, which would read as the run having started over.
     this.lastStepNumber = OVERLAY_STEP[target];
     const buttonLabel = ADVANCE_BUTTON_LABEL[target];
+    const secondaryLabel = SECONDARY_BUTTON_LABEL[target];
     // MARK the controls this step's panel must keep clear of, BEFORE the mount positions it — the placement runs
     // inside the mount, so marks written afterwards would only take effect on the next scroll. Every mount path
     // funnels through here, including the re-anchor and the vendor-form reminder, so the marks are rewritten as
@@ -2236,11 +2301,78 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
       // long string and the chip's copy ran off the viewport.
       badgeLabel: OPERATOR_STEP_TITLES[target],
       guidanceEnabled: this.opts.guidanceEnabled ?? true,
-      // Opt in to the WING-resident guidance panel (this driver is the only one that does); the button is
-      // added only for a checkpoint (a target with an advance label). The reach step gets a copy-only panel.
+      // Opt in to the shared guided panel shell; the button is added only for a checkpoint (a target with an
+      // advance label). The reach step gets a copy-only panel.
       residentPanel: true,
+      channelName: WING_CHANNEL_NAME,
       ...(buttonLabel ? { advance: { buttonLabel, token: advanceToken(target) } } : {}),
+      ...(secondaryLabel ? { secondary: { buttonLabel: secondaryLabel, token: stepSecondaryToken(target) } } : {}),
     });
+  }
+
+  /**
+   * **Did the seller take this step's OTHER way forward?** Today exactly one step offers one: the credential
+   * step's 직접 입력할게요.
+   *
+   * Same fail-closed shape as {@link readParkNoticeConfirmed}: a step that offers no alternative can never
+   * report a press, whatever is latched, and an unreadable page answers `false`.
+   */
+  async readStepDeclined(target: CoupangIssuanceTarget): Promise<boolean> {
+    if (!SECONDARY_BUTTON_LABEL[target]) return false;
+    return (
+      (await timebox(readOverlaySecondaryPressed(this.activePage(), stepSecondaryToken(target)), false)) === true
+    );
+  }
+
+  /**
+   * **What the seller sees on WING while — and after — SellerOps performs the handoff.**
+   *
+   * The consent was given here, so its outcome belongs here too. A walk that took the decision on the
+   * marketplace window and then reported the result in the other tab would have moved the round trip rather
+   * than removed it.
+   *
+   * Docked, like a park notice, and drawn from the same shell: the ring is cleared first (there is nothing left
+   * to point at), and the panel carries at most ONE button. `WORKING` carries none — nothing is being asked.
+   */
+  async showHandoffPanel(phase: CoupangHandoffPanelPhase): Promise<boolean> {
+    const copy = HANDOFF_PANEL_COPY[phase]!;
+    const page = this.activePage();
+    await timebox(this.evalStr(page, IN_PAGE_CLEAR_TAG).then(() => undefined), undefined);
+    const token = handoffPanelToken(phase);
+    if (copy.confirm) await timebox(resetOverlayAdvance(page, token).catch(() => undefined), undefined);
+    await timebox(
+      mountOverlay(page, {
+        dockedPanelOnly: true,
+        stepNumber: this.lastStepNumber,
+        totalSteps: COUPANG_ISSUANCE_TOTAL_STEPS,
+        copyKey: `actionWindow.coupangIssuance.handoff.${phase}`,
+        label: copy.brief,
+        detail: copy.detail,
+        detailExpanded: true,
+        badgeLabel: copy.badge,
+        guidanceEnabled: this.opts.guidanceEnabled ?? true,
+        residentPanel: true,
+        channelName: WING_CHANNEL_NAME,
+        ...(copy.confirm ? { advance: { buttonLabel: copy.confirm, token } } : {}),
+      }),
+      undefined,
+    );
+    return (await timebox(overlayMounted(page), false)) === true;
+  }
+
+  /** Has the seller pressed the outcome panel's one button? Value-free equality poll; unreadable ⇒ `false`. */
+  async readHandoffPanelPressed(phase: CoupangHandoffPanelPhase): Promise<boolean> {
+    if (!HANDOFF_PANEL_COPY[phase]?.confirm) return false;
+    return (await timebox(readOverlayAdvancePressed(this.activePage(), handoffPanelToken(phase)), false)) === true;
+  }
+
+  /**
+   * Take the seller back to SellerOps — the outcome panel's own button, and the ONLY press in this walk that
+   * performs it. Public because the session owns the poll that reads the press; the navigation itself is still
+   * the injected capability, screened to a loopback SellerOps origin.
+   */
+  async returnToSellerOpsNow(): Promise<void> {
+    await this.returnToSellerOps();
   }
 
   /**
@@ -2292,6 +2424,7 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
         badgeLabel: copy.badge,
         guidanceEnabled: this.opts.guidanceEnabled ?? true,
         residentPanel: true,
+        channelName: WING_CHANNEL_NAME,
         // A button ONLY where the park asks the seller a question — today exactly one does. Every other park
         // renders copy alone, because there is nothing there for a seller to answer and a button that does not
         // ask anything is just a control sitting on their marketplace screen.
@@ -2535,6 +2668,16 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
       } else {
         unreadable = 0;
       }
+      // **The step's OTHER way forward ends this observation immediately.**
+      //
+      // The session reads the decline between re-arms, so it must not have to wait out a ten-minute observation
+      // window to see one: a seller who pressed 직접 입력할게요 is waiting for a form, not for a timeout. Returning
+      // `false` (not acted) is exactly right — nothing on this step was done — and the session's own poll turns
+      // the press into the SWITCH_TO_MANUAL the seller asked for.
+      if (SECONDARY_BUTTON_LABEL[target] && (await this.readStepDeclined(target))) {
+        log("aw_coupang_step_declined", { target });
+        return false;
+      }
       if (latch === "PRESSED") {
         // **THE FORM GATE.** Step ⑦ rings `확인` — the control that ISSUES THE KEY — and the seller reaches it
         // by pressing this button. On 2026-08-12 that ring appeared over three empty fields, and the operator
@@ -2565,10 +2708,10 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
           }
           log("aw_coupang_vendor_form_ready", { target, readiness });
         }
-        // The one step whose button promises something OUTSIDE this page — now the LAST step rather than a
-        // step after it. Performed on the press and nowhere else, so nothing moves the seller's window while
-        // they still have work on WING.
-        if (target === "credentials") await this.returnToSellerOps();
+        // **Nothing navigates here any more.** This press USED to take the seller to SellerOps, which made the
+        // return the walk's last act and the credential barrier's completion at once — so a seller who had just
+        // been shown their keys arrived in the other tab to be asked to type them. The press is now the consent
+        // and only the consent; the return is the outcome panel's button, after the credential is in the vault.
         return true;
       }
       if (i % screenEvery === 0) {

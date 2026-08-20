@@ -103,6 +103,31 @@ describe("no driver call survives a closed surface — the guard sits where ever
     }
   });
 
+  it("**the handoff outcome loop is guarded the same way** — a walk that ENDED cannot re-open a window either", () => {
+    // The credential handoff paints its result on the marketplace window and then waits for one press. Both are
+    // driver calls, on a run that is finishing, on paths no earlier guard covers: `showHandoffPanel` is reached
+    // from the command handler rather than from `drive`, and `watchHandoffReturn` is a timer that outlives the
+    // run. Either one could have brought a closed window back — the last place in this walk where that was
+    // still possible.
+    const body = code(source("src/action-window/coupang-issuance/coupang-issuance-session.ts"));
+    for (const fn of ["private async showHandoffPanel(", "private watchHandoffReturn("]) {
+      const at = body.indexOf(fn);
+      expect(at, `no ${fn}`).toBeGreaterThan(-1);
+      const head = body.slice(at, body.indexOf("\n  }", at));
+      expect(head, `${fn} does not check the latch`).toMatch(/if \(this\.stopped \|\| this\.surfaceClosed\) return/);
+      const guardAt = head.search(/if \(this\.stopped \|\| this\.surfaceClosed\) return/);
+      const firstDriverCall = head.indexOf("this.driver.");
+      if (firstDriverCall > -1) expect(guardAt, `${fn}: the guard sits after a driver call`).toBeLessThan(firstDriverCall);
+    }
+    // …and the wait re-checks on every tick, for the same reason the park recovery does: a loop that started
+    // before the close must END on it, not merely fail to start again.
+    const at = body.indexOf("private watchHandoffReturn(");
+    const loopBody = body.slice(body.indexOf("for (", at), body.indexOf("\n  }", at));
+    expect(loopBody, "watchHandoffReturn does not re-check surfaceClosed inside the loop").toContain(
+      "if (this.stopped || this.surfaceClosed) return;",
+    );
+  });
+
   it("the park-recovery loops check the latch on EVERY tick, not only at entry", () => {
     // The 2026-08-20 defect exactly: `maybeRecoverPark` guarded before STARTING a loop, so a loop already
     // running when the seller closed the window kept driving — one blank window per tick.

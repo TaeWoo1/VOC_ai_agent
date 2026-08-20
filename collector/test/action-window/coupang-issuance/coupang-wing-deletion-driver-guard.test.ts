@@ -269,7 +269,10 @@ describe("삭제 calibration landing — the flip cannot outrun its evidence", (
     expect(codeOnly(DRIVER), "checking the ring instead of the panel would pass with nothing legible painted").not.toContain(
       "overlayMounted",
     );
-    expect(overlay).toContain('const panelPointerEvents = o.advance ? "auto" : "none";');
+    // The gate widened when the shell gained a quiet alternative: a panel offering ONE control the seller can
+    // press must take clicks, and a panel offering none still must not. The deletion checkpoint passes neither,
+    // so it is on the `none` side of this either way — which the assertions below prove for this driver.
+    expect(overlay).toContain('const panelPointerEvents = o.advance || o.secondary ? "auto" : "none";');
     expect(overlay).toContain("pointer-events:${panelPointerEvents}");
     // …and the deletion driver must not smuggle in an advance button, which would flip it back to `auto`.
     expect(codeOnly(DRIVER)).not.toContain("advance:");

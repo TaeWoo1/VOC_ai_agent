@@ -202,12 +202,18 @@ describe("coupang issuance session — the full linear walkthrough (offline)", (
       "observe:vendor_confirm",
       "wait:vendor_confirm", // …the seller presses it; only now can a credential exist
       "locate:credentials",
-      // The LAST step: the keys are on screen, and its CTA (`SellerOps에 연결`) returns the seller. There is no
-      // separate return step — it existed only because this one used to ask for a hand-copy.
+      // The LAST step: the keys are on screen and its CTA is the seller's CONSENT, pressed where the values
+      // are. It navigates nothing and completes nothing — SellerOps performs the handoff under it.
       "highlight:credentials",
       "observe:credentials",
       "wait:credentials",
+      // …and from here the walk is about the handoff, on the same window: it says it is working, the run
+      // completes (cleanup), and the success panel goes up. The press that returns the seller is watched for
+      // afterwards and is deliberately NOT part of this sequence — the run is settled by then, waiting on a
+      // person for as long as they take (see the outcome-panel test below).
+      "handoffPanel:WORKING",
       "cleanup",
+      "handoffPanel:STORED",
     ]);
     // PROOF the FE never drove a STEP. Two commands reach the session across the whole walk and neither one
     // advances anything in WING: the seller's START_RUN, and their consent to store the key at the end. Every
@@ -1086,5 +1092,91 @@ describe("coupang issuance session — the credential handoff runs only where an
     await session.whenSettled();
 
     expect(lastResult(io)).toMatchObject({ accepted: false, reason: "HANDOFF_NOT_SUPPORTED_HERE" });
+  });
+});
+
+/* ────────────────── the consent lives on the marketplace window, and so does its outcome ────────────────── */
+
+describe("the credential consent, and what the seller sees on WING after it", () => {
+  /** Walk to the credential step and stop there — the panel asking, nobody having answered. */
+  async function walkToConsent(opts?: { stepDeclined?: boolean }) {
+    const built = build({
+      ...(opts?.stepDeclined ? { action: { credentials: false }, stepDeclined: { credentials: true } } : {}),
+    });
+    startRun(built.io);
+    await built.session.whenSettled();
+    return built;
+  }
+
+  it("**the run publishes WHICH question is on the WING window** — asking, then answered", async () => {
+    // The frontend acts on this and on nothing else. It is the tab holding the seller's session, so it is the
+    // only place a one-shot capability can be minted — and it must mint one when the seller presses the panel's
+    // button, not before. A step number could not tell it that: 8/8 reads the same on both sides of the press.
+    const { io, engine, driver, session } = build({ action: { credentials: false } });
+    startRun(io);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("guiding_copy_keys");
+    expect(io.lastView()!.credentialHandoff).toBe("AWAITING_CONSENT");
+
+    // The seller presses `SellerOps에 연결하기` on the WING panel.
+    driver.setAction("credentials", true);
+    await session.whenSettled();
+
+    expect(engine.currentStage()).toBe("awaiting_handoff_consent");
+    expect(io.lastView()!.credentialHandoff).toBe("CONSENTED");
+    // Nothing has been read, nothing stored, and the run has NOT finished — it is waiting on SellerOps.
+    expect(driver.calls).not.toContain("cleanup");
+  });
+
+  it("consent → the panel says it is working, then that it is done, and only THEN does the run complete", async () => {
+    const { io, engine, driver, session } = await walkToConsent();
+    expect(engine.currentStage()).toBe("awaiting_handoff_consent");
+    expect(io.lastView()!.credentialHandoff).toBe("CONSENTED");
+
+    await consentToHandoff(io, session);
+
+    expect(engine.currentStage()).toBe("guidance_complete");
+    // ORDER matters: the success panel is mounted on the far side of the cleanup the completion drives, or the
+    // seller would watch it be removed a moment after it appeared.
+    const panels = driver.calls.filter((c) => c.startsWith("handoffPanel:") || c === "cleanup");
+    expect(panels).toEqual(["handoffPanel:WORKING", "cleanup", "handoffPanel:STORED"]);
+    // …and the completed view no longer carries a pending question.
+    expect(io.lastView()!.credentialHandoff).toBeUndefined();
+  });
+
+  it("**the return happens on the seller's press, and the run is SETTLED while it waits for it**", async () => {
+    // The success panel's button is the walk's only return to SellerOps, and the wait for it must not read as
+    // the run still working: a walk that has stored the credential is finished, and the seller may sit on their
+    // keys as long as they like.
+    const { io, driver, session } = build();
+    driver.setHandoffPanelPressed("STORED", true);
+    startRun(io);
+    await session.whenSettled();
+    await consentToHandoff(io, session);
+
+    await session.whenHandoffReturnSettled();
+
+    expect(driver.calls).toContain("returnToSellerOps");
+  });
+
+  it("**a failed handoff paints the failure and completes nothing** — the vault is empty and the run says so", async () => {
+    const { io, engine, driver, session } = build({}, { credentialHandoff: async () => ({ stored: false, reason: "READ_FAILED" }) });
+    startRun(io);
+    await session.whenSettled();
+    await consentToHandoff(io, session);
+
+    expect(engine.currentStage()).toBe("awaiting_handoff_consent");
+    expect(driver.calls.filter((c) => c.startsWith("handoffPanel:"))).toEqual(["handoffPanel:WORKING", "handoffPanel:FAILED"]);
+    expect(driver.calls).not.toContain("cleanup");
+  });
+
+  it("**the seller's 직접 입력할게요 leaves the walk for the typing form** — a choice, never a fall-through", async () => {
+    // "No automatic fall-through" must not become "no way out". This is the seller asking, and it means exactly
+    // what SWITCH_TO_MANUAL from the SellerOps tab has always meant.
+    const { io, engine, session } = await walkToConsent({ stepDeclined: true });
+    await session.whenSettled();
+
+    expect(engine.currentStage()).toBe("operator_aborted");
+    expect(io.lastView()!.status).toBe("CANCELLED");
   });
 });

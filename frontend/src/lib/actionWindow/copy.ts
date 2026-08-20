@@ -59,10 +59,11 @@ const COPY: Record<string, string> = {
   // asserted from a button label, was refuted when that button was pressed and issued nothing, and belongs to
   // the control that actually does it.
   "actionWindow.coupangIssuance.vendorConfirm": "'확인' 직접 누르기 (키 발급)",
-  // The walk's LAST step. It said "액세스 키·시크릿 키·업체코드 복사" while the panel asked the seller to
-  // transcribe a 40-character secret by hand; SellerOps fetches them now, under a confirmation pressed on a
-  // SellerOps surface. The separate `return` step is gone — this step's CTA performs the return.
-  "actionWindow.coupangIssuance.copyKeys": "SellerOps로 돌아가기",
+  // The walk's LAST step, and its name has followed the step twice. It said "액세스 키·시크릿 키·업체코드 복사"
+  // while the panel asked the seller to transcribe a 40-character secret by hand, then "SellerOps로 돌아가기"
+  // while the decision lived in the other tab. The decision is now made where the values are, so the step is
+  // the consent — and the return is the outcome panel's button, after the credential is actually stored.
+  "actionWindow.coupangIssuance.copyKeys": "SellerOps에 연결하기",
 
   // Coupang WING Open API key RENEWAL guidance (Action Window). Entered from an already-connected account
   // whose credential is expiring. The renewal step plan reuses the issuance runtime but highlights 유효기간
@@ -147,7 +148,7 @@ const ISSUANCE_STEP_DETAIL: Record<string, string> = {
   "actionWindow.coupangIssuance.vendorConfirm":
     "업체명 · URL을 입력하고, IP 주소는 입력한 뒤 옆의 '추가'를 눌러 등록하세요 — 추가하지 않으면 IP가 등록되지 않습니다. 그 다음 '확인'을 직접 누르세요. ⚠ 여기서 실제 API 키가 발급되어 라이브 계정 상태가 바뀝니다(지우려면 나중에 별도의 삭제 작업이 필요합니다). SellerOps는 이 버튼을 절대 누르지 않고, 입력란에 아무것도 쓰지 않습니다. 키가 화면에 표시되면 자동으로 넘어갑니다.",
   "actionWindow.coupangIssuance.copyKeys":
-    "API 키 발급이 확인됐습니다. 아래 버튼을 누르면 SellerOps로 돌아갑니다. 키를 읽어 저장할지는 거기서 여쭙고, 승인하시기 전에는 아무것도 읽지 않습니다.",
+    "SellerOps는 이 화면에 표시된 업체코드·Access Key·Secret Key만 읽어 곧바로 암호화해 저장하고, 저장한 뒤 연결이 되는지 한 번만 확인합니다. 값은 SellerOps 화면에 표시되지 않고, 기록에도 남지 않습니다. 아래 'SellerOps에 연결하기'를 누르시기 전에는 아무것도 읽지 않습니다. 직접 입력하고 싶으시면 그 아래 버튼을 누르세요.",
 
   // Coupang 고객문의 답변 — FULL per-step instruction. Deliberately vaguer than the issuance walk about
   // WHERE things are: no sitting has measured this screen, so naming a menu path would be asserting a

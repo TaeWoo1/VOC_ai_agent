@@ -252,9 +252,10 @@ describe("the fail-closed ordering survives the repair", () => {
       resolve(dirname(fileURLToPath(import.meta.url)), "../../../src/action-window/overlay.ts"),
       "utf8",
     );
-    // overlay.ts creates EVERY button it has under a gate that requires `advance` — there are two now (the
-    // panel's `자세히` disclosure and the advance button itself), and the invariant is about all of them, not
-    // about whichever one happens to come first in the file.
+    // overlay.ts creates EVERY button it has under a gate — there are three now (the panel's `자세히`
+    // disclosure, the advance button, and the step's optional quiet alternative), and the invariant is about
+    // all of them, not about whichever one happens to come first in the file. What it protects is unchanged:
+    // this driver passes neither `advance` nor `secondary`, so none of those gates can open on its panel.
     const buttonSites: number[] = [];
     for (let at = overlaySrc.indexOf('document.createElement("button")'); at > -1; ) {
       buttonSites.push(at);
@@ -265,7 +266,7 @@ describe("the fail-closed ordering survives the repair", () => {
     // one stays exactly as non-interactive as it was.
     expect(overlaySrc).toContain("const detailShown = o.detail != null && o.advance != null;");
     for (const at of buttonSites) {
-      expect(overlaySrc.slice(0, at)).toMatch(/if \((o\.advance|detailShown)\)\s*\{[^}]*$/);
+      expect(overlaySrc.slice(0, at)).toMatch(/if \((o\.advance|o\.secondary|detailShown)\)\s*\{[^}]*$/);
     }
     // … and this driver never passes one. Adding `advance` here would put a clickable SellerOps control in front
     // of a seller mid-action on a live marketplace page, AND make actionControlCount count our own DOM.

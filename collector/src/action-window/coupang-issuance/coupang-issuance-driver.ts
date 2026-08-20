@@ -28,7 +28,8 @@ import type { CoupangIssuanceStage } from "./coupang-issuance-stages";
  *    configuration step instead, and that `self_dev` / `vendor_info` / `call_ip` are not on the surface where
  *    this walk expects them. Left unchanged pending the Stage-2 observation — see `coupang-issuance-stages.ts`.
  *  - `credentials` — the region where the Access Key / Secret Key / 업체코드 appear (NEVER read any value).
- *    It is the walk's LAST step: its CTA returns the seller to SellerOps, in the handoff-ready state.
+ *    It is the walk's LAST step, and its CTA is the seller's CONSENT to the handoff — given here, on the window
+ *    the values are on. It navigates nothing and completes nothing by itself.
  */
 export type CoupangIssuanceTarget =
   | "reach_open_api"
@@ -73,8 +74,8 @@ export type CoupangIssuanceTarget =
   /**
    * There is no `return` target. It existed because `credentials` told the seller to copy three keys and go
    * type them in, so the walk needed a step afterwards to send them back. The keys are no longer copied by
-   * hand — `credentials` ends with `SellerOps에 연결`, which performs the return itself — and two consecutive
-   * buttons both meaning "go to SellerOps" is the confusion the old `return` step's own comment warned about.
+   * hand, and the return is no longer a STEP at all: `credentials` ends with the consent, and the one button
+   * that goes back to SellerOps is on the outcome panel that follows a stored credential.
    */
   ;
 
@@ -113,7 +114,7 @@ export const COUPANG_ISSUANCE_TRANSITION_OBSERVE_TARGET: CoupangIssuanceTarget =
  * the driver OBSERVES the value-free press and the checkpoint advances — the seller never bounces back to the
  * SellerOps tab. (A FE `REQUEST_STEP_RECHECK` stays valid as a fallback/recovery path — e.g. at a park.) `issue`
  * is here too — the 발급 button is highlighted and the seller presses it themselves, then the on-page "다음".
- * `credentials` is the LAST one: its button hands focus back to SellerOps.
+ * `credentials` is the LAST one: its button is the seller's consent to the handoff, pressed where the values are.
  */
 export const COUPANG_ISSUANCE_CHECKPOINT_TARGETS: readonly CoupangIssuanceTarget[] = [
   "issue",
@@ -287,7 +288,49 @@ export interface CoupangIssuanceProbeDriver {
    * `false`. A press is only ever a press.
    */
   readParkNoticeConfirmed?(code: CoupangIssuanceParkNotice): Promise<boolean>;
+
+  /**
+   * **Optional: did the seller take this step's OTHER way forward?**
+   *
+   * Exactly one step offers one — the credential step's 직접 입력할게요 — and it exists because "the walk never
+   * falls through to the typing form on its own" must not become "the walk has no way to the typing form". The
+   * seller choosing it is not the same event as the walk arriving there by itself.
+   *
+   * A value-free latch, in its own token namespace, read exactly like {@link readParkNoticeConfirmed}: a step
+   * that offers no alternative, a driver without the capability, or a window that is gone all answer `false`.
+   */
+  readStepDeclined?(target: CoupangIssuanceTarget): Promise<boolean>;
+
+  /**
+   * **Optional: show the handoff's own state on the marketplace window.**
+   *
+   * The consent is given on that window, so its outcome belongs there. A walk that took the decision on the
+   * marketplace surface and then reported the result in the SellerOps tab would have moved the round trip
+   * rather than removed it.
+   *
+   * `WORKING` is a copy-only panel. `STORED` and `FAILED` each carry ONE button, and it is the same button —
+   * the return to SellerOps — which is the only place in this walk that button now appears.
+   *
+   * Returns whether the panel was actually PAINTED, for the same reason the park notice does.
+   */
+  showHandoffPanel?(phase: CoupangHandoffPanelPhase): Promise<boolean>;
+
+  /** Optional: has the seller pressed that panel's one button? Fail-closed on every other reading. */
+  readHandoffPanelPressed?(phase: CoupangHandoffPanelPhase): Promise<boolean>;
+
+  /**
+   * Optional: perform the return to SellerOps — the outcome panel's button, and the ONLY press in this walk
+   * that performs it. A driver with no window, or no injected navigation, does nothing and says so.
+   */
+  returnToSellerOpsNow?(): Promise<void>;
 }
+
+/**
+ * The three faces of the credential handoff on the marketplace window. Declared here (not only in the WING
+ * driver) because the SESSION decides which one is showing, and it must not import a live-browser module to
+ * name them.
+ */
+export type CoupangHandoffPanelPhase = "WORKING" | "STORED" | "FAILED";
 
 /**
  * The parks a marketplace-window notice exists for — a closed set, and deliberately NOT every blocker code.

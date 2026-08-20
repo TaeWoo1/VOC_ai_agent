@@ -20,6 +20,7 @@ import type { BrowserContext, Page } from "playwright";
 import { CoupangWingIssuanceDriver } from "../coupang-wing-issuance-driver";
 import type { LocateResult } from "../engine";
 import type {
+  CoupangHandoffPanelPhase,
   CoupangIssuanceParkNotice,
   CoupangIssuanceProbeDriver,
   CoupangIssuanceTarget,
@@ -153,6 +154,38 @@ export class LazyCoupangIssuanceDriver implements CoupangIssuanceProbeDriver {
     if (!this.isOpen()) return false;
     const d = await this.driver();
     return (await d.readParkNoticeConfirmed?.(code)) ?? false;
+  }
+
+  /** Same rule, same reason: a press can only exist on a window that exists. */
+  async readStepDeclined(target: CoupangIssuanceTarget): Promise<boolean> {
+    if (!this.isOpen()) return false;
+    const d = await this.driver();
+    return (await d.readStepDeclined?.(target)) ?? false;
+  }
+
+  /**
+   * Drawn ONLY on a surface that already exists — `isOpen()`, never `driver()`. Opening a marketplace window to
+   * paint "저장 중" on it would be the resurrection this class exists to prevent, and the handoff's outcome is
+   * of no use on a window the seller has closed.
+   */
+  async showHandoffPanel(phase: CoupangHandoffPanelPhase): Promise<boolean> {
+    if (!this.isOpen()) return false;
+    const d = await this.driver();
+    return (await d.showHandoffPanel?.(phase)) ?? false;
+  }
+
+  /** Read-only, and only from a window that exists. */
+  async readHandoffPanelPressed(phase: CoupangHandoffPanelPhase): Promise<boolean> {
+    if (!this.isOpen()) return false;
+    const d = await this.driver();
+    return (await d.readHandoffPanelPressed?.(phase)) ?? false;
+  }
+
+  /** The return the outcome panel offers. A walk with no window has nobody to return, so it does nothing. */
+  async returnToSellerOpsNow(): Promise<void> {
+    if (!this.isOpen()) return;
+    const d = await this.driver();
+    await d.returnToSellerOpsNow?.();
   }
 
   async probeSurface(): Promise<WingSurfaceProbe> {

@@ -1112,13 +1112,15 @@ describe("stale spotlight — the defect the dev-host live proof surfaced", () =
       const src = readFileSync(resolve(HERE, `../../../src/action-window/${f}`), "utf8");
       expect(src, f).not.toContain("dockedPanelOnly");
     }
-    // …and the issuance driver passes it only where a panel legitimately claims NO location. That is now two
-    // places, and both are cases where there is nothing to point at:
-    //   - the text-guided step (4 mentions: the parameter, its default, the spread, and the call site), and
+    // …and the issuance driver passes it only where a panel legitimately claims NO location. That is now three
+    // places, and all three are cases where there is nothing to point at:
+    //   - the text-guided step (4 mentions: the parameter, its default, the spread, and the call site),
     //   - `showParkNotice` (1), where the run has STOPPED and a ring would point at a control the seller must
-    //     not be told to press.
+    //     not be told to press, and
+    //   - `showHandoffPanel` (1), where the walk is over and what is left to say is about SellerOps, not about
+    //     any WING control.
     // The bound stays a bound: raised by exactly the one mention added, with the reason recorded here.
-    expect(DRV.split("dockedPanelOnly").length - 1).toBeLessThanOrEqual(5);
+    expect(DRV.split("dockedPanelOnly").length - 1).toBeLessThanOrEqual(6);
     // And the park notice is docked BY CONSTRUCTION, not by a caller remembering to ask.
     const notice = DRV.slice(DRV.indexOf("async showParkNotice("), DRV.indexOf("async armObserve("));
     expect(notice).toContain("dockedPanelOnly: true");
@@ -1128,7 +1130,7 @@ describe("stale spotlight — the defect the dev-host live proof surfaced", () =
     // Exactly ONE park asks. If a second ever does, this fails and the safety argument gets re-read rather than
     // inherited: the whole point of `CREDENTIAL_STATE_UNKNOWN` is that nobody knows, and the button says the
     // SELLER looked — a claim that has to be true for each park that makes it.
-    const copyTable = DRV.slice(DRV.indexOf("const PARK_NOTICE_COPY"), DRV.indexOf("const ADVANCE_BUTTON_LABEL"));
+    const copyTable = DRV.slice(DRV.indexOf("const PARK_NOTICE_COPY"), DRV.indexOf("const HANDOFF_PANEL_COPY"));
     expect(copyTable.split("confirm:").length - 1).toBe(1);
     // …and it is not the parked step's own control. `발급` never appears as a button caption here.
     expect(copyTable).toContain("키가 없는 걸 확인했어요");

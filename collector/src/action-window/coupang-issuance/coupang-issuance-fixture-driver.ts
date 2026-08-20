@@ -13,7 +13,12 @@
  * leaves this module.
  */
 import { CANDIDATE_WING_TARGET_SELECTORS } from "../../cli/coupang-wing-classifier";
-import type { CoupangIssuanceProbeDriver, CoupangIssuanceTarget, WingSurfaceProbe } from "./coupang-issuance-driver";
+import type {
+  CoupangHandoffPanelPhase,
+  CoupangIssuanceProbeDriver,
+  CoupangIssuanceTarget,
+  WingSurfaceProbe,
+} from "./coupang-issuance-driver";
 import type { CoupangCredentialState } from "../coupang-credential-state";
 import type { LocateResult } from "../engine";
 
@@ -43,6 +48,10 @@ export interface CoupangIssuanceFixtureScript {
   parkNoticePainted?: boolean;
   /** Whether the seller pressed the park notice's confirmation button (the one park that asks a question). */
   parkNoticeConfirmed?: boolean;
+  /** Whether the seller took a step's OTHER way forward (today: 직접 입력할게요 on the credential step). */
+  stepDeclined?: Partial<Record<CoupangIssuanceTarget, boolean>>;
+  /** Whether the seller pressed the handoff outcome panel's one button, per phase. */
+  handoffPanelPressed?: Partial<Record<CoupangHandoffPanelPhase, boolean>>;
   /** Per-target locate results. Missing → a single match with a deterministic signature. */
   locate?: Partial<Record<CoupangIssuanceTarget, LocateResult>>;
   /** Per-target highlight re-validation. Missing → the same result `locate` gave (no drift). */
@@ -90,6 +99,8 @@ export class CoupangIssuanceFixtureDriver implements CoupangIssuanceProbeDriver 
   private closeResolve: (() => void) | null = null;
   /** Latches once the seller has "reached" the open-API page, so the next probe reports the landing page. */
   private reachedOpenApi = false;
+  /** Polled call signatures already recorded once — see {@link recordOnce}. */
+  private readonly polled = new Set<string>();
   private readonly locateThrowsLeft: Partial<Record<CoupangIssuanceTarget, number>>;
   private readonly highlightThrowsLeft: Partial<Record<CoupangIssuanceTarget, number>>;
 
@@ -174,6 +185,42 @@ export class CoupangIssuanceFixtureDriver implements CoupangIssuanceProbeDriver 
     return this.script.parkNoticeConfirmed ?? false;
   }
 
+  /**
+   * Did the seller ask for the typing form instead? Fail-closed default: no.
+   *
+   * Recorded ONCE per target, like the outcome-panel poll below. Both are POLLS — the session asks again on
+   * every re-arm and every tick — and a `calls` sequence that carried one entry per tick would say nothing
+   * about what the runtime did while burying everything that did.
+   */
+  async readStepDeclined(target: CoupangIssuanceTarget): Promise<boolean> {
+    this.recordOnce(`declined?:${target}`);
+    return this.script.stepDeclined?.[target] ?? false;
+  }
+
+  /** Record which face of the handoff the run painted on the marketplace window. */
+  async showHandoffPanel(phase: CoupangHandoffPanelPhase): Promise<boolean> {
+    this.calls.push(`handoffPanel:${phase}`);
+    return true;
+  }
+
+  /** The seller's press on that panel. Fail-closed default: they have not pressed it. */
+  async readHandoffPanelPressed(phase: CoupangHandoffPanelPhase): Promise<boolean> {
+    this.recordOnce(`handoffPress?:${phase}`);
+    return this.script.handoffPanelPressed?.[phase] ?? false;
+  }
+
+  /** Record a POLLED call the first time it happens, so a repeated poll does not drown the sequence. */
+  private recordOnce(entry: string): void {
+    if (this.polled.has(entry)) return;
+    this.polled.add(entry);
+    this.calls.push(entry);
+  }
+
+  /** The return itself — recorded, never performed (there is no window here to move). */
+  async returnToSellerOpsNow(): Promise<void> {
+    this.calls.push("returnToSellerOps");
+  }
+
   async armObserve(target: CoupangIssuanceTarget): Promise<void> {
     this.calls.push(`observe:${target}`);
   }
@@ -222,5 +269,15 @@ export class CoupangIssuanceFixtureDriver implements CoupangIssuanceProbeDriver 
    */
   setAction(target: CoupangIssuanceTarget, acted: boolean): void {
     this.script.action = { ...(this.script.action ?? {}), [target]: acted };
+  }
+
+  /** Test helper: the seller presses the outcome panel's 'SellerOps로 돌아가기'. */
+  setHandoffPanelPressed(phase: CoupangHandoffPanelPhase, pressed: boolean): void {
+    this.script.handoffPanelPressed = { ...(this.script.handoffPanelPressed ?? {}), [phase]: pressed };
+  }
+
+  /** Test helper: the seller presses a step's 직접 입력할게요. */
+  setStepDeclined(target: CoupangIssuanceTarget, declined: boolean): void {
+    this.script.stepDeclined = { ...(this.script.stepDeclined ?? {}), [target]: declined };
   }
 }

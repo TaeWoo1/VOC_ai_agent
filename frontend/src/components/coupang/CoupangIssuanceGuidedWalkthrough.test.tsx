@@ -529,81 +529,49 @@ describe("CoupangIssuanceGuidedWalkthrough", () => {
 });
 
 /**
- * **The credential handoff barrier.** The press is what discloses and authorizes the whole chain — read the
- * three values in the marketplace window, send them to the vault, verify read-only — so what this pins is that
- * it is offered only where it is real, and that no value ever reaches this screen.
+ * **The credential handoff.** The ASK lives on the 쿠팡 윙 panel, in front of the three values it is about; this
+ * screen mirrors it and does the one thing that window cannot — mint the one-shot capability, because this is
+ * the tab holding the seller's session. What is pinned here is that it never asks a second time, that it acts
+ * only on the seller's own press over in WING, and that no value ever reaches this screen.
  */
 describe("CoupangIssuanceGuidedWalkthrough — the credential handoff", () => {
   /** The seller's own 시작 press — the walk does not host a run until they ask for one. */
   const start = () => act(() => fireEvent.click(screen.getByRole("button", { name: "쿠팡 연결 안내 시작" })));
 
-  const atCredentialStep = () =>
+  const asking = () =>
     issuanceRun({
-      currentStep: { stepId: "aw.coupang_credentials", stepNumber: 8, totalSteps: 8, copyKey: "k", status: "READY" },
+      currentStep: { stepId: "aw.coupang_credentials", stepNumber: 8, totalSteps: 8, copyKey: "k", status: "AWAITING_USER" },
+      ...({ credentialHandoff: "AWAITING_CONSENT" } as Partial<ActionWindowRunView>),
+    });
+  const consented = () =>
+    issuanceRun({
+      currentStep: { stepId: "aw.coupang_credentials", stepNumber: 8, totalSteps: 8, copyKey: "k", status: "AWAITING_USER" },
+      ...({ credentialHandoff: "CONSENTED" } as Partial<ActionWindowRunView>),
     });
 
-  it("is NOT offered when the page could not produce an account at all", () => {
+  it("**never asks a second time** — there is no consent button on this screen", () => {
+    // Two screens offering the same decision is how a seller answers it twice, and the one that can actually
+    // show them the values is the marketplace window. This screen mirrors; it does not ask.
     const host = fakeHost();
-    render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} />);
+    render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} ensureAccountId={async () => "acc-1"} accountReady />);
     start();
-    act(() => host.publish(atCredentialStep()));
+    act(() => host.publish(asking()));
+
     expect(screen.queryByTestId("coupang-handoff-start")).toBeNull();
+    expect(screen.getByTestId("coupang-handoff-mirror").textContent).toContain("쿠팡 윙 창에서");
   });
 
-  it("is NOT offered before the walk reaches the credential step", () => {
+  it("says nothing about the handoff before the walk gets there", () => {
     const host = fakeHost();
     render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} ensureAccountId={async () => "acc-1"} accountReady />);
     start();
     act(() => host.publish(issuanceRun()));
-    expect(screen.queryByTestId("coupang-handoff-start")).toBeNull();
+    expect(screen.queryByTestId("coupang-handoff-mirror")).toBeNull();
   });
 
-  it("is offered at the credential step — and the disclosure says what the press will do", () => {
-    const host = fakeHost();
-    render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} ensureAccountId={async () => "acc-1"} accountReady />);
-    start();
-    act(() => host.publish(atCredentialStep()));
-
-    expect(screen.getByTestId("coupang-handoff-start")).toBeInTheDocument();
-    // Read → store → verify, and that the values do not come here. A barrier that does not say what it
-    // authorizes is not a barrier.
-    const disclosure = screen.getByLabelText("연결 정보 저장").textContent ?? "";
-    expect(disclosure).toContain("암호화해 저장");
-    expect(disclosure).toContain("연결이 되는지");
-    expect(disclosure).toContain("이 화면에 표시되지 않고");
-  });
-});
-
-/**
- * The two ways out of the consent, and the fact that neither of them happens by itself.
- */
-describe("CoupangIssuanceGuidedWalkthrough — the consent has a door that is not 취소", () => {
-  const start = () => act(() => fireEvent.click(screen.getByRole("button", { name: "쿠팡 연결 안내 시작" })));
-  const atCredentialStep = () =>
-    issuanceRun({
-      currentStep: { stepId: "aw.coupang_credentials", stepNumber: 8, totalSteps: 8, copyKey: "k", status: "READY" },
-    });
-
-  it("offers the manual path as an explicit CHOICE, and it forwards SWITCH_TO_MANUAL", async () => {
-    // No fall-through must not become no way out: a seller whose read keeps failing needs a door that is not
-    // 취소, and it has to be something they choose rather than somewhere they end up.
-    const host = fakeHost();
-    render(
-      <CoupangIssuanceGuidedWalkthrough
-        onIssued={vi.fn()}
-        hostRuntime={host.runtime}
-        ensureAccountId={async () => "acc-1"}
-        accountReady
-      />,
-    );
-    start();
-    act(() => host.publish(atCredentialStep()));
-
-    await userEvent.click(screen.getByTestId("coupang-handoff-manual"));
-    expect(host.sent).toContain("SWITCH_TO_MANUAL");
-  });
-
-  it("creates NO account by rendering — the account arrives on the press, never on a view", () => {
+  it("**mints NOTHING while the panel is still asking** — the capability is created by the seller's press", async () => {
+    // THE ordering property. A capability minted in advance is a live one-shot write authorization sitting
+    // around for a decision nobody has made yet.
     let calls = 0;
     const host = fakeHost();
     render(
@@ -618,9 +586,55 @@ describe("CoupangIssuanceGuidedWalkthrough — the consent has a door that is no
       />,
     );
     start();
-    act(() => host.publish(atCredentialStep()));
+    act(() => host.publish(asking()));
 
-    expect(screen.getByTestId("coupang-handoff-start")).toBeInTheDocument();
     expect(calls).toBe(0);
+  });
+
+  it("acts the moment the runtime reports the seller CONSENTED, and only once", async () => {
+    let calls = 0;
+    const host = fakeHost();
+    render(
+      <CoupangIssuanceGuidedWalkthrough
+        onIssued={vi.fn()}
+        hostRuntime={host.runtime}
+        ensureAccountId={async () => {
+          calls += 1;
+          return "acc-1";
+        }}
+        accountReady
+      />,
+    );
+    start();
+    act(() => host.publish(asking()));
+    await act(async () => {
+      host.publish(consented());
+    });
+    // A republished view (any revision bump) must not mint a second capability for one handoff.
+    await act(async () => {
+      host.publish(consented());
+    });
+
+    expect(calls).toBe(1);
+    expect(screen.getByTestId("coupang-handoff-mirror").textContent).toContain("저장하고 있어요");
+  });
+
+  it("the mirror points at the panel while it asks, and states the terms while it acts — never a value", async () => {
+    // The ASKING face sends the seller to the window the decision is on; the ACTING face is the one that has to
+    // say what is being done with what was read. Neither ever renders a credential: this screen is one request
+    // away from three secrets and receives a status.
+    const host = fakeHost();
+    render(<CoupangIssuanceGuidedWalkthrough onIssued={vi.fn()} hostRuntime={host.runtime} ensureAccountId={async () => "acc-1"} accountReady />);
+    start();
+    act(() => host.publish(asking()));
+    expect(screen.getByLabelText("연결 정보 저장").textContent ?? "").toContain("[SellerOps에 연결하기]");
+
+    await act(async () => {
+      host.publish(consented());
+    });
+
+    const acting = screen.getByLabelText("연결 정보 저장").textContent ?? "";
+    expect(acting).toContain("암호화해 저장");
+    expect(acting).toContain("이 화면에 표시되지 않");
   });
 });

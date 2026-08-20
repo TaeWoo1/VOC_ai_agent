@@ -277,20 +277,22 @@ describe("the panel's brief — shorter, and still safe to act on alone", () => 
     expect(OPERATOR_STEP_BRIEF.issue_final).not.toContain("키가 발급됩니다.");
   });
 
-  it("**the disclosure opens by itself on exactly the two safety-bearing steps**", async () => {
-    // The two are the walk's safety copy: the control that creates the credential, and the one immediately
-    // before it that is routinely mistaken for it.
-    expect([...STEPS_WITH_DETAIL_OPEN].sort()).toEqual(["issue_final", "vendor_confirm"]);
+  it("**the disclosure opens by itself on exactly the three steps whose copy has to be READ**", async () => {
+    // Two are the walk's safety copy: the control that creates the credential, and the one immediately before
+    // it that is routinely mistaken for it. The third is the credential step, and it is there for a different
+    // reason of the same kind — that panel asks for CONSENT to read three values and send them to a vault, and
+    // a consent whose terms sit behind a `자세히` press is a consent nobody read.
+    expect([...STEPS_WITH_DETAIL_OPEN].sort()).toEqual(["credentials", "issue_final", "vendor_confirm"]);
     // …and the wiring is real, not a constant nobody reads: mounted expanded here, absent everywhere else.
-    const expanded = driverWith(true);
-    await expanded.driver.highlightTarget("issue_final");
-    expect(expanded.page.mounts[0]?.detailExpanded).toBe(true);
-    for (const target of ["issue", "credentials"] as CoupangIssuanceTarget[]) {
+    for (const target of ["issue_final", "credentials"] as CoupangIssuanceTarget[]) {
       const { driver, page } = driverWith(true);
       await driver.highlightTarget(target);
-      expect(page.mounts[0]?.detail, target).toBe(OPERATOR_STEP_LABELS[target]);
-      expect(page.mounts[0]?.detailExpanded, target).toBeUndefined();
+      expect(page.mounts[0]?.detailExpanded, target).toBe(true);
     }
+    const { driver, page } = driverWith(true);
+    await driver.highlightTarget("issue");
+    expect(page.mounts[0]?.detail).toBe(OPERATOR_STEP_LABELS["issue"]);
+    expect(page.mounts[0]?.detailExpanded).toBeUndefined();
   });
 });
 

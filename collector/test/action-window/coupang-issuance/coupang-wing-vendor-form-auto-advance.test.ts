@@ -21,6 +21,8 @@ const FIELD_IDS = ["stage2.vendor_info.baseline", "stage2.vendor_url.url", "stag
 
 class FakeVendorPage {
   pressed = false;
+  /** The seller pressed 직접 입력할게요 — a different latch, and a different answer. */
+  declined = false;
   /** Whether the vendor-method markers paint — i.e. whether this IS the screen step ⑥ is about. */
   onVendorScreen = true;
   filled = new Set<string>();
@@ -87,6 +89,10 @@ class FakeVendorPage {
     }
     if (arg !== undefined) {
       if (typeof arg === "string") {
+        // TWO latches now — the advance and the step's quiet alternative — in separate globals. A fake that
+        // answered `pressed` to both would report every seller who advanced as having asked to leave instead.
+        if (String(script).includes("__aw_secondary_pressed__")) return this.declined;
+        if (String(script).includes("__aw_secondary_token__")) return undefined;
         if (String(script).includes("delete")) {
           this.pressed = false;
           return undefined;
