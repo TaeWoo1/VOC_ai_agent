@@ -21,6 +21,7 @@ import org.springframework.security.oauth2.client.web.DefaultOAuth2Authorization
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestRedirectFilter;
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestResolver;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest;
+import com.sellerops.collect.CredentialHandoffCapabilityFilter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
@@ -31,18 +32,21 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
+    private final ObjectProvider<CredentialHandoffCapabilityFilter> credentialHandoffCapabilityFilter;
     private final String corsOrigin;
     private final ObjectProvider<ClientRegistrationRepository> clientRegistrations;
     private final ObjectProvider<SocialLoginSuccessHandler> socialSuccess;
     private final ObjectProvider<SocialLoginFailureHandler> socialFailure;
 
     public SecurityConfig(JwtAuthFilter jwtAuthFilter,
+                          ObjectProvider<CredentialHandoffCapabilityFilter> credentialHandoffCapabilityFilter,
                           @Value("${sellerops.cors.origin}") String corsOrigin,
                           ObjectProvider<ClientRegistrationRepository> clientRegistrations,
                           ObjectProvider<SocialLoginSuccessHandler> socialSuccess,
                           ObjectProvider<SocialLoginFailureHandler> socialFailure) {
         this.jwtAuthFilter = jwtAuthFilter;
         this.corsOrigin = corsOrigin;
+        this.credentialHandoffCapabilityFilter = credentialHandoffCapabilityFilter;
         this.clientRegistrations = clientRegistrations;
         this.socialSuccess = socialSuccess;
         this.socialFailure = socialFailure;
@@ -83,6 +87,18 @@ public class SecurityConfig {
                         (request, response, ex) ->
                                 response.sendError(HttpServletResponse.SC_UNAUTHORIZED)))
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+
+        // BEFORE the JWT filter, and it owns any request that presents a handoff capability: it either
+        // authenticates that one write or ends the request. Placing it first is what makes "no fallback"
+        // structural — a refused capability never reaches a filter that might authenticate it another way.
+        //
+        // Resolved through an ObjectProvider, like the social-login handlers below, so a sliced test context that
+        // does not import the collect package still builds a filter chain. Absent ⇒ the capability header
+        // authenticates nothing at all and the endpoint is JWT-only, which is the safe direction to be missing in.
+        CredentialHandoffCapabilityFilter capabilityFilter = credentialHandoffCapabilityFilter.getIfAvailable();
+        if (capabilityFilter != null) {
+            http.addFilterBefore(capabilityFilter, JwtAuthFilter.class);
+        }
         // oauth2Login only when the deployer configured a provider — the existing email/password/JWT system
         // is untouched either way; success mints a one-time code, never a session or a JWT in a URL
         // (docs/auth_growth_instrumentation_v1.md §2-1).

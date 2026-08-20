@@ -5,6 +5,7 @@ import com.sellerops.collect.dto.AgentCredentialHandoffRequest;
 import com.sellerops.collect.dto.AgentCredentialHandoffResultView;
 import com.sellerops.collect.dto.CredentialHandoffAuthorizationView;
 import com.sellerops.collect.dto.CredentialHandoffAuthorizeRequest;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -50,7 +51,12 @@ public class AgentCredentialHandoffController {
     /** Write-only: stores the handed-off secrets, then runs the read-only connection check. */
     @PostMapping("/credential-handoff")
     public AgentCredentialHandoffResultView handOff(@AuthenticationPrincipal AuthPrincipal principal,
+                                                    HttpServletRequest http,
                                                     @Valid @RequestBody AgentCredentialHandoffRequest request) {
-        return service.handOff(principal.orgId(), principal.userId(), request);
+        // The capability, when there is one, comes from the FILTER that already validated it — never from the
+        // body. One source, and it is the one the authentication was derived from.
+        Object capability = http.getAttribute(CredentialHandoffCapabilityFilter.ATTRIBUTE);
+        return service.handOff(principal.orgId(), principal.userId(),
+                capability instanceof String s ? s : null, request);
     }
 }

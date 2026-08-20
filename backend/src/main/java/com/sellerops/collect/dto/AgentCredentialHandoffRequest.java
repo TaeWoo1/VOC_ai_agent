@@ -31,19 +31,6 @@ public record AgentCredentialHandoffRequest(
         @NotEmpty Map<String, String> secrets,
         CredentialHandoffRunBinding runBinding,
         /**
-         * **The seller path's one-shot authorization**, issued by
-         * {@code POST /api/agent/credential-handoff/authorize} to this seller, for this account, on this run.
-         *
-         * <p>Present INSTEAD of {@code runBinding}, never as well: the two are different interlocks for
-         * different callers — an operator's seated live proof, and a seller in the product — and a request that
-         * presented both would be asking the backend to pick which grant it is spending.
-         *
-         * <p>It is a capability, so it is compared whole and never logged. It authorizes exactly one stored
-         * credential and nothing else; every other gate in the service still runs after it.
-         */
-        @Pattern(regexp = "^[0-9a-f]{32}$", message = "연결 정보 전달 승인 형식이 올바르지 않습니다.")
-        String authorizationId,
-        /**
          * The Action Window run this handoff belongs to — the walk that produced the key. Checked against what
          * the authorization was issued for, so a handoff cannot be carried from one sitting into another.
          */
@@ -59,7 +46,7 @@ public record AgentCredentialHandoffRequest(
      */
     public AgentCredentialHandoffRequest(String accountSlot, String channelCode, Map<String, String> secrets,
                                          CredentialHandoffRunBinding runBinding) {
-        this(accountSlot, channelCode, secrets, runBinding, null, null);
+        this(accountSlot, channelCode, secrets, runBinding, null);
     }
 
     /**
@@ -73,9 +60,8 @@ public record AgentCredentialHandoffRequest(
         return "AgentCredentialHandoffRequest[accountSlot=<masked>, channelCode=" + channelCode
                 + ", secrets=<masked:" + (secrets != null ? secrets.size() : 0) + ">"
                 + ", runBinding=" + runBinding
-                // The authorization is a CAPABILITY: whoever holds it can spend this handoff, so it is masked
-                // exactly like the secrets. Its presence is the only thing worth printing.
-                + ", authorizationId=<masked:" + (authorizationId != null && !authorizationId.isBlank()) + ">"
+                // The seller path's capability is NOT in this record at all — it arrives in its own header and
+                // lives on a request attribute, so there is nothing here that could reach a log line with it.
                 + ", runId=" + runId + "]";
     }
 }

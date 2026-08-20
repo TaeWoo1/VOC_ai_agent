@@ -1,5 +1,7 @@
 package com.sellerops.collect;
 
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
@@ -84,6 +86,31 @@ public class CredentialHandoffAuthorizations {
 
     private static final int ID_BYTES = 16;
 
+    /**
+     * **The raw capability is never stored.** The map is keyed by the SHA-256 of the id, exactly as the pairing
+     * registry keeps only a token hash: a heap dump, a debugger, or a future `toString` on this component can
+     * then reveal which authorizations exist and for whom, but not the value that spends them. The id itself
+     * exists in the issue response, in the browser that asked for it, and in the one request that presents it.
+     *
+     * <p>It is not a password — there is no user-chosen entropy to protect and no offline attack to slow down —
+     * so a plain digest is the right primitive and a KDF would be cargo. What it buys is precisely that the
+     * server does not hold a spendable copy of every live capability.
+     */
+    private static String digest(String raw) {
+        try {
+            byte[] out = MessageDigest.getInstance("SHA-256").digest(raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(out);
+        } catch (NoSuchAlgorithmException e) {
+            // SHA-256 is mandated by the platform; if it is absent this process cannot safely hold capabilities.
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+
+    /** Normalize then hash. A presented id is compared only as a digest, never as text. */
+    private static String keyFor(String authorizationId) {
+        return digest(authorizationId.trim().toLowerCase(Locale.ROOT));
+    }
+
     private final Map<String, Entry> live = new ConcurrentHashMap<>();
     private final SecureRandom random;
     private final Clock clock;
@@ -142,7 +169,8 @@ public class CredentialHandoffAuthorizations {
         byte[] raw = new byte[ID_BYTES];
         random.nextBytes(raw);
         String id = HexFormat.of().formatHex(raw);
-        live.put(id, new Entry(binding, clock.instant().plus(TTL)));
+        // The DIGEST is the key. `id` is returned to the caller and then forgotten by this component.
+        live.put(digest(id), new Entry(binding, clock.instant().plus(TTL)));
         return id;
     }
 
@@ -161,7 +189,7 @@ public class CredentialHandoffAuthorizations {
         if (authorizationId == null || authorizationId.isBlank()) {
             return REASON_ABSENT;
         }
-        Entry entry = live.get(authorizationId.trim().toLowerCase(Locale.ROOT));
+        Entry entry = live.get(keyFor(authorizationId));
         if (entry == null) {
             return REASON_UNKNOWN;
         }
@@ -191,7 +219,7 @@ public class CredentialHandoffAuthorizations {
         if (authorizationId == null || authorizationId.isBlank()) {
             return REASON_ABSENT;
         }
-        Entry entry = live.get(authorizationId.trim().toLowerCase(Locale.ROOT));
+        Entry entry = live.get(keyFor(authorizationId));
         if (entry == null) {
             return REASON_UNKNOWN;
         }
@@ -208,12 +236,30 @@ public class CredentialHandoffAuthorizations {
     }
 
     /**
+     * The binding behind a LIVE, unspent authorization — what the capability filter needs to know who is
+     * calling, and nothing more. Absent for an id that is unknown, expired or already spent, so a filter built
+     * on this cannot authenticate a request that the interlock is going to refuse anyway.
+     *
+     * <p>Read-only: it neither claims nor extends anything. The one-shot is still spent at the store.
+     */
+    Binding liveBindingOf(String authorizationId) {
+        if (authorizationId == null || authorizationId.isBlank()) {
+            return null;
+        }
+        Entry entry = live.get(keyFor(authorizationId));
+        if (entry == null || clock.instant().isAfter(entry.expiresAt) || entry.consumed.get()) {
+            return null;
+        }
+        return entry.binding;
+    }
+
+    /**
      * **Claim it, atomically.** Called immediately BEFORE the store it authorizes, never after. Returns whether
      * THIS call was the one that claimed it; a caller that ignores the result has put back the race this method
      * exists to remove.
      */
     public boolean claim(String authorizationId) {
-        Entry entry = authorizationId == null ? null : live.get(authorizationId.trim().toLowerCase(Locale.ROOT));
+        Entry entry = authorizationId == null || authorizationId.isBlank() ? null : live.get(keyFor(authorizationId));
         return entry != null && entry.consumed.compareAndSet(false, true);
     }
 
@@ -225,7 +271,7 @@ public class CredentialHandoffAuthorizations {
      * path where a credential might have been written.
      */
     void releaseUnusedClaim(String authorizationId) {
-        Entry entry = authorizationId == null ? null : live.get(authorizationId.trim().toLowerCase(Locale.ROOT));
+        Entry entry = authorizationId == null || authorizationId.isBlank() ? null : live.get(keyFor(authorizationId));
         if (entry != null) {
             entry.consumed.set(false);
         }

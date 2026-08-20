@@ -96,13 +96,13 @@ public class AgentCredentialHandoffService {
      * Store the handed-off secrets and run the read-only connection check. The response carries a status and a
      * safe reason code; never a secret, a provider body, or the seller-account id the slot stood in for.
      */
-    public AgentCredentialHandoffResultView handOff(UUID orgId, UUID actorUserId,
+    public AgentCredentialHandoffResultView handOff(UUID orgId, UUID actorUserId, String capabilityId,
                                                     AgentCredentialHandoffRequest request) {
         // **TWO interlocks, one caller, never both.** The operator's seated live proof presents a run binding
         // armed out of band; a seller in the product presents a one-shot authorization this backend issued to
         // them. They are different grants for different people and a request carrying both is asking the
         // backend to choose which one it is spending — so that is refused rather than resolved.
-        boolean sellerPath = request.authorizationId() != null && !request.authorizationId().isBlank();
+        boolean sellerPath = capabilityId != null && !capabilityId.isBlank();
         boolean operatorPath = request.runBinding() != null && !request.runBinding().isBlank();
         if (sellerPath && operatorPath) {
             log.warn("Coupang credential handoff refused: reason={}", REASON_INTERLOCK_AMBIGUOUS);
@@ -120,7 +120,7 @@ public class AgentCredentialHandoffService {
         // Splitting it is what keeps the original ordering property true for an interlock that is bound to more
         // than the operator one is.
         String refusal = sellerPath
-                ? authorizations.refusalForCaller(request.authorizationId(), orgId, actorUserId)
+                ? authorizations.refusalForCaller(capabilityId, orgId, actorUserId)
                 : arming.refusalFor(request.runBinding());
         if (refusal != null) {
             // A safe constant. Neither the presented identity nor the authorization id is echoed back, and no
@@ -138,7 +138,7 @@ public class AgentCredentialHandoffService {
         // authorization cannot be carried from the walk that produced the key into a later sitting.
         if (sellerPath) {
             String bindingRefusal = authorizations.refusalFor(
-                    request.authorizationId(),
+                    capabilityId,
                     new CredentialHandoffAuthorizations.Binding(
                             orgId, actorUserId, sellerAccountId, channel.getCode(), trimmedRunId(request.runId())));
             if (bindingRefusal != null) {
@@ -177,7 +177,7 @@ public class AgentCredentialHandoffService {
         //
         // Everything that can refuse WITHOUT storing has already run, so a claim here is a claim on a store that
         // is about to happen. What follows the store — the verification — never returns it: see the arming.
-        boolean claimed = sellerPath ? authorizations.claim(request.authorizationId()) : arming.claim();
+        boolean claimed = sellerPath ? authorizations.claim(capabilityId) : arming.claim();
         if (!claimed) {
             String consumedReason = sellerPath
                     ? CredentialHandoffAuthorizations.REASON_CONSUMED
@@ -194,7 +194,7 @@ public class AgentCredentialHandoffService {
             // from inside the store itself — the credential validator rejecting a malformed secret map, which
             // means the resolver read something wrong and the operator deserves their retry.
             if (sellerPath) {
-                authorizations.releaseUnusedClaim(request.authorizationId());
+                authorizations.releaseUnusedClaim(capabilityId);
             } else {
                 arming.releaseUnusedClaim();
             }

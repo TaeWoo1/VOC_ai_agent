@@ -209,10 +209,10 @@ class AgentCredentialHandoffServiceTest {
     private static final String SELLER_RUN = "run_wing0001";
 
     /** The product path's request: an authorization, no run binding. The two are never presented together. */
-    private static AgentCredentialHandoffRequest sellerRequest(String slot, String authorizationId) {
+    /** The product path's request body: a run id and NO interlock — the capability travels in its own header. */
+    private static AgentCredentialHandoffRequest sellerRequest(String slot) {
         return new AgentCredentialHandoffRequest(slot, "COUPANG",
-                Map.of("access_key", ACCESS, "secret_key", SECRET, "vendor_id", VENDOR),
-                null, authorizationId, SELLER_RUN);
+                Map.of("access_key", ACCESS, "secret_key", SECRET, "vendor_id", VENDOR), null, SELLER_RUN);
     }
 
     private String authorizeFor(SellerAccount acc) {
@@ -226,7 +226,7 @@ class AgentCredentialHandoffServiceTest {
         SellerAccount acc = account(org, "COUPANG");
         String auth = authorizeFor(acc);
 
-        AgentCredentialHandoffResultView result = service.handOff(org, actor, sellerRequest(slotFor(acc), auth));
+        AgentCredentialHandoffResultView result = service.handOff(org, actor, auth, sellerRequest(slotFor(acc)));
 
         assertThat(result.stored()).isTrue();
         assertThat(vault.hasCredential(org, acc.getId())).isTrue();
@@ -236,9 +236,9 @@ class AgentCredentialHandoffServiceTest {
     void aSellerAuthorizationIsSpentAfterTheStore_andASecondHandoffIsRefused() {
         SellerAccount acc = account(org, "COUPANG");
         String auth = authorizeFor(acc);
-        assertThat(service.handOff(org, actor, sellerRequest(slotFor(acc), auth)).stored()).isTrue();
+        assertThat(service.handOff(org, actor, auth, sellerRequest(slotFor(acc))).stored()).isTrue();
 
-        assertThatThrownBy(() -> service.handOff(org, actor, sellerRequest(slotFor(acc), auth)))
+        assertThatThrownBy(() -> service.handOff(org, actor, auth, sellerRequest(slotFor(acc))))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining(CredentialHandoffAuthorizations.REASON_CONSUMED);
     }
@@ -250,7 +250,7 @@ class AgentCredentialHandoffServiceTest {
         SellerAccount other = siblingAccountOf(mine);
         String forOther = authorizeFor(other);
 
-        assertThatThrownBy(() -> service.handOff(org, actor, sellerRequest(slotFor(mine), forOther)))
+        assertThatThrownBy(() -> service.handOff(org, actor, forOther, sellerRequest(slotFor(mine))))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining(CredentialHandoffAuthorizations.REASON_MISMATCH);
 
@@ -263,10 +263,9 @@ class AgentCredentialHandoffServiceTest {
         SellerAccount acc = account(org, "COUPANG");
         String auth = authorizeFor(acc);
         AgentCredentialHandoffRequest laterSitting = new AgentCredentialHandoffRequest(slotFor(acc), "COUPANG",
-                Map.of("access_key", ACCESS, "secret_key", SECRET, "vendor_id", VENDOR),
-                null, auth, "run_a_later_one");
+                Map.of("access_key", ACCESS, "secret_key", SECRET, "vendor_id", VENDOR), null, "run_a_later_one");
 
-        assertThatThrownBy(() -> service.handOff(org, actor, laterSitting))
+        assertThatThrownBy(() -> service.handOff(org, actor, auth, laterSitting))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining(CredentialHandoffAuthorizations.REASON_MISMATCH);
         assertThat(vault.hasCredential(org, acc.getId())).isFalse();
@@ -277,10 +276,9 @@ class AgentCredentialHandoffServiceTest {
         SellerAccount acc = account(org, "COUPANG");
         String auth = authorizeFor(acc);
         AgentCredentialHandoffRequest both = new AgentCredentialHandoffRequest(slotFor(acc), "COUPANG",
-                Map.of("access_key", ACCESS, "secret_key", SECRET, "vendor_id", VENDOR),
-                thisRun(), auth, SELLER_RUN);
+                Map.of("access_key", ACCESS, "secret_key", SECRET, "vendor_id", VENDOR), thisRun(), SELLER_RUN);
 
-        assertThatThrownBy(() -> service.handOff(org, actor, both))
+        assertThatThrownBy(() -> service.handOff(org, actor, auth, both))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("HANDOFF_INTERLOCK_AMBIGUOUS");
         assertThat(vault.hasCredential(org, acc.getId())).isFalse();
@@ -290,9 +288,9 @@ class AgentCredentialHandoffServiceTest {
     void presentingNEITHERInterlockIsRefused_thereIsNoUnauthorizedPath() {
         SellerAccount acc = account(org, "COUPANG");
         AgentCredentialHandoffRequest naked = new AgentCredentialHandoffRequest(slotFor(acc), "COUPANG",
-                Map.of("access_key", ACCESS, "secret_key", SECRET, "vendor_id", VENDOR), null, null, null);
+                Map.of("access_key", ACCESS, "secret_key", SECRET, "vendor_id", VENDOR), null, null);
 
-        assertThatThrownBy(() -> service.handOff(org, actor, naked)).isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> service.handOff(org, actor, null, naked)).isInstanceOf(ApiException.class);
         assertThat(vault.hasCredential(org, acc.getId())).isFalse();
     }
 
@@ -301,7 +299,7 @@ class AgentCredentialHandoffServiceTest {
         // The never-overwrite rule, asked early. Issuing here would walk a seller through a barrier and a screen
         // read to reach a refusal that was knowable before any of it.
         SellerAccount acc = account(org, "COUPANG");
-        service.handOff(org, actor, coupangRequest(slotFor(acc)));
+        service.handOff(org, actor, null, coupangRequest(slotFor(acc)));
         assertThat(vault.hasCredential(org, acc.getId())).isTrue();
 
         assertThatThrownBy(() -> authorizeFor(acc))
@@ -338,7 +336,7 @@ class AgentCredentialHandoffServiceTest {
     void storesTheHandedOffSecretsThroughTheExistingVaultAndRunsTheConnectionCheck() {
         SellerAccount acc = account(org, "COUPANG");
 
-        AgentCredentialHandoffResultView result = service.handOff(org, actor, coupangRequest(slotFor(acc)));
+        AgentCredentialHandoffResultView result = service.handOff(org, actor, null, coupangRequest(slotFor(acc)));
 
         assertThat(result.stored()).isTrue();
         // The mock connector is not a ConnectionVerifier, so the check resolves UNSUPPORTED rather than a
@@ -357,7 +355,7 @@ class AgentCredentialHandoffServiceTest {
 
     @Test
     void anUnknownSlotIsNotFound() {
-        assertThatThrownBy(() -> service.handOff(org, actor, coupangRequest("0123456789abcdef01234567")))
+        assertThatThrownBy(() -> service.handOff(org, actor, null, coupangRequest("0123456789abcdef01234567")))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("UNKNOWN_ACCOUNT_SLOT");
     }
@@ -368,7 +366,7 @@ class AgentCredentialHandoffServiceTest {
         String slot = slotFor(foreign);
 
         // Same exception, same message: the endpoint cannot be used to learn whether a slot is real.
-        assertThatThrownBy(() -> service.handOff(org, actor, coupangRequest(slot)))
+        assertThatThrownBy(() -> service.handOff(org, actor, null, coupangRequest(slot)))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("UNKNOWN_ACCOUNT_SLOT");
         assertThat(vault.hasCredential(foreign.getOrgId(), foreign.getId())).isFalse();
@@ -378,7 +376,7 @@ class AgentCredentialHandoffServiceTest {
     void aDeclaredChannelThatDisagreesWithTheAccountIsRefusedBeforeTheVaultIsTouched() {
         SellerAccount naver = account(org, "NAVER");
 
-        assertThatThrownBy(() -> service.handOff(org, actor, coupangRequest(slotFor(naver))))
+        assertThatThrownBy(() -> service.handOff(org, actor, null, coupangRequest(slotFor(naver))))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("CHANNEL_MISMATCH");
         assertThat(vault.hasCredential(org, naver.getId())).isFalse();
@@ -390,7 +388,7 @@ class AgentCredentialHandoffServiceTest {
         acc.setFileUpload(true);
         sellerAccounts.save(acc);
 
-        assertThatThrownBy(() -> service.handOff(org, actor, coupangRequest(slotFor(acc))))
+        assertThatThrownBy(() -> service.handOff(org, actor, null, coupangRequest(slotFor(acc))))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("UNSUPPORTED_CHANNEL");
         assertThat(vault.hasCredential(org, acc.getId())).isFalse();
@@ -404,7 +402,7 @@ class AgentCredentialHandoffServiceTest {
                 Map.of("access_key", "old-access", "secret_key", "old-secret", "vendor_id", "A00000001"),
                 null, null, actor);
 
-        assertThatThrownBy(() -> service.handOff(org, actor, coupangRequest(slotFor(acc))))
+        assertThatThrownBy(() -> service.handOff(org, actor, null, coupangRequest(slotFor(acc))))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("CREDENTIAL_ALREADY_STORED");
         // Replacing a working credential is a different operation with rollback (`/credentials/replace`). The
@@ -418,7 +416,7 @@ class AgentCredentialHandoffServiceTest {
         AgentCredentialHandoffRequest bad = new AgentCredentialHandoffRequest(slotFor(acc), "COUPANG",
                 Map.of("access_key", ACCESS, "secret_key", SECRET, "vendor_id", VENDOR, "smuggled", "x"), thisRun());
 
-        assertThatThrownBy(() -> service.handOff(org, actor, bad)).isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> service.handOff(org, actor, null, bad)).isInstanceOf(ApiException.class);
         assertThat(vault.hasCredential(org, acc.getId())).isFalse();
     }
 
@@ -428,7 +426,7 @@ class AgentCredentialHandoffServiceTest {
         AgentCredentialHandoffRequest partial = new AgentCredentialHandoffRequest(slotFor(acc), "COUPANG",
                 Map.of("access_key", ACCESS, "secret_key", SECRET), thisRun());
 
-        assertThatThrownBy(() -> service.handOff(org, actor, partial)).isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> service.handOff(org, actor, null, partial)).isInstanceOf(ApiException.class);
         assertThat(vault.hasCredential(org, acc.getId())).isFalse();
     }
 
@@ -444,7 +442,7 @@ class AgentCredentialHandoffServiceTest {
                 slotRepo, sellerAccounts, channels, vault, collectThatFailsVerification(), armedForThisRun(),
                 new CredentialHandoffAuthorizations());
 
-        AgentCredentialHandoffResultView result = throwing.handOff(org, actor, coupangRequest(slotFor(acc)));
+        AgentCredentialHandoffResultView result = throwing.handOff(org, actor, null, coupangRequest(slotFor(acc)));
 
         assertThat(result.stored()).isTrue();
         assertThat(result.connectionStatus()).isEqualTo("UNVERIFIED");
@@ -467,7 +465,7 @@ class AgentCredentialHandoffServiceTest {
     @Test
     void theResultViewCarriesNoValueOnAnyPath() {
         SellerAccount acc = account(org, "COUPANG");
-        AgentCredentialHandoffResultView result = service.handOff(org, actor, coupangRequest(slotFor(acc)));
+        AgentCredentialHandoffResultView result = service.handOff(org, actor, null, coupangRequest(slotFor(acc)));
         String rendered = result.toString();
         assertThat(rendered).doesNotContain(ACCESS).doesNotContain(SECRET).doesNotContain(VENDOR);
         // …and it does not leak the seller-account id the opaque slot stood in for, either.
@@ -495,7 +493,7 @@ class AgentCredentialHandoffServiceTest {
     void theCorrectIdentityIsWhatLetsAHandoffThrough() {
         SellerAccount acc = account(org, "COUPANG");
 
-        AgentCredentialHandoffResultView result = service.handOff(org, actor, coupangRequest(slotFor(acc)));
+        AgentCredentialHandoffResultView result = service.handOff(org, actor, null, coupangRequest(slotFor(acc)));
 
         assertThat(result.stored()).isTrue();
         assertThat(vault.hasCredential(org, acc.getId())).isTrue();
@@ -514,7 +512,7 @@ class AgentCredentialHandoffServiceTest {
                         CredentialHandoffArming.PHASE_CREDENTIAL_HANDOFF));
 
         for (CredentialHandoffRunBinding b : wrong) {
-            assertThatThrownBy(() -> service.handOff(org, actor, requestPresenting(slotFor(acc), b)))
+            assertThatThrownBy(() -> service.handOff(org, actor, null, requestPresenting(slotFor(acc), b)))
                     .isInstanceOf(ApiException.class)
                     .hasMessageContaining(CredentialHandoffArming.REASON_BINDING_MISMATCH);
             assertThat(vault.hasCredential(org, acc.getId())).isFalse();
@@ -530,7 +528,7 @@ class AgentCredentialHandoffServiceTest {
                 "COUPANG_WING_CREDENTIAL_CELL_CALIBRATION", NOW.getEpochSecond(),
                 java.time.Clock.fixed(NOW, java.time.ZoneOffset.UTC));
 
-        assertThatThrownBy(() -> serviceArmedWith(calibration).handOff(org, actor, coupangRequest(slotFor(acc))))
+        assertThatThrownBy(() -> serviceArmedWith(calibration).handOff(org, actor, null, coupangRequest(slotFor(acc))))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining(CredentialHandoffArming.REASON_ARMING_WRONG_PHASE);
         assertThat(vault.hasCredential(org, acc.getId())).isFalse();
@@ -549,7 +547,7 @@ class AgentCredentialHandoffServiceTest {
                 CredentialHandoffArming.PHASE_CREDENTIAL_HANDOFF, NOW.plusSeconds(600).getEpochSecond(), clock);
 
         for (CredentialHandoffArming a : List.of(stale, future)) {
-            assertThatThrownBy(() -> serviceArmedWith(a).handOff(org, actor, coupangRequest(slotFor(acc))))
+            assertThatThrownBy(() -> serviceArmedWith(a).handOff(org, actor, null, coupangRequest(slotFor(acc))))
                     .isInstanceOf(ApiException.class)
                     .hasMessageContaining(CredentialHandoffArming.REASON_ARMING_EXPIRED);
             assertThat(vault.hasCredential(org, acc.getId())).isFalse();
@@ -562,7 +560,7 @@ class AgentCredentialHandoffServiceTest {
         java.time.Clock clock = java.time.Clock.fixed(NOW, java.time.ZoneOffset.UTC);
         // Nothing armed at all — the default state of every backend that was not prepared for this run.
         CredentialHandoffArming none = new CredentialHandoffArming("", "", "", "", 0, clock);
-        assertThatThrownBy(() -> serviceArmedWith(none).handOff(org, actor, coupangRequest(slotFor(acc))))
+        assertThatThrownBy(() -> serviceArmedWith(none).handOff(org, actor, null, coupangRequest(slotFor(acc))))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining(CredentialHandoffArming.REASON_NOT_ARMED);
 
@@ -576,7 +574,7 @@ class AgentCredentialHandoffServiceTest {
                 new CredentialHandoffArming("APR-4C57D35545F8", RUN_ID, RUN_COMMIT,
                         CredentialHandoffArming.PHASE_CREDENTIAL_HANDOFF, NOW.getEpochSecond(), clock));
         for (CredentialHandoffArming a : notArmings) {
-            assertThatThrownBy(() -> serviceArmedWith(a).handOff(org, actor, coupangRequest(slotFor(acc))))
+            assertThatThrownBy(() -> serviceArmedWith(a).handOff(org, actor, null, coupangRequest(slotFor(acc))))
                     .isInstanceOf(ApiException.class)
                     .hasMessageContaining(CredentialHandoffArming.REASON_ARMING_MALFORMED);
         }
@@ -587,7 +585,7 @@ class AgentCredentialHandoffServiceTest {
     void aRequestThatPresentsNOIdentityIsRefusedBeforeTheSlotIsEvenResolved() {
         SellerAccount acc = account(org, "COUPANG");
 
-        assertThatThrownBy(() -> service.handOff(org, actor, requestPresenting(slotFor(acc), null)))
+        assertThatThrownBy(() -> service.handOff(org, actor, null, requestPresenting(slotFor(acc), null)))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining(CredentialHandoffArming.REASON_BINDING_ABSENT);
         assertThat(vault.hasCredential(org, acc.getId())).isFalse();
@@ -596,11 +594,11 @@ class AgentCredentialHandoffServiceTest {
     @Test
     void theArmingIsONESHOT_spentAtTheStore() {
         SellerAccount first = account(org, "COUPANG");
-        assertThat(service.handOff(org, actor, coupangRequest(slotFor(first))).stored()).isTrue();
+        assertThat(service.handOff(org, actor, null, coupangRequest(slotFor(first))).stored()).isTrue();
 
         // A DIFFERENT account, so the never-overwrite rule is not what refuses this. The arming is spent.
         SellerAccount second = account(org, "COUPANG");
-        assertThatThrownBy(() -> service.handOff(org, actor, coupangRequest(slotFor(second))))
+        assertThatThrownBy(() -> service.handOff(org, actor, null, coupangRequest(slotFor(second))))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining(CredentialHandoffArming.REASON_ARMING_CONSUMED);
         assertThat(vault.hasCredential(org, second.getId())).isFalse();
@@ -614,9 +612,9 @@ class AgentCredentialHandoffServiceTest {
         AgentCredentialHandoffRequest wrongChannel = new AgentCredentialHandoffRequest(slotFor(acc), "NAVER",
                 Map.of("access_key", ACCESS, "secret_key", SECRET, "vendor_id", VENDOR), thisRun());
 
-        assertThatThrownBy(() -> service.handOff(org, actor, wrongChannel)).isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> service.handOff(org, actor, null, wrongChannel)).isInstanceOf(ApiException.class);
         assertThat(arming.isArmed()).isTrue();
-        assertThat(service.handOff(org, actor, coupangRequest(slotFor(acc))).stored()).isTrue();
+        assertThat(service.handOff(org, actor, null, coupangRequest(slotFor(acc))).stored()).isTrue();
     }
 
     @Test
@@ -629,7 +627,7 @@ class AgentCredentialHandoffServiceTest {
                 slotRepo, sellerAccounts, channels, vault, collectThatFailsVerification(), a,
                 new CredentialHandoffAuthorizations());
 
-        assertThat(throwing.handOff(org, actor, coupangRequest(slotFor(acc))).stored()).isTrue();
+        assertThat(throwing.handOff(org, actor, null, coupangRequest(slotFor(acc))).stored()).isTrue();
         assertThat(a.isArmed()).isFalse();
     }
 
@@ -642,7 +640,7 @@ class AgentCredentialHandoffServiceTest {
         String src = readServiceSource();
         // BOTH interlocks are claimed in the same place, on the near side of the store — the seller path did not
         // get a second, looser claim site when it arrived beside the operator one.
-        int claimAt = src.indexOf("authorizations.claim(request.authorizationId()) : arming.claim()");
+        int claimAt = src.indexOf("authorizations.claim(capabilityId) : arming.claim()");
         int storeAt = src.indexOf("collect.storeCredential(");
         assertThat(claimAt).isGreaterThan(0);
         assertThat(storeAt).isGreaterThan(0);
@@ -660,13 +658,13 @@ class AgentCredentialHandoffServiceTest {
         AgentCredentialHandoffRequest bad = new AgentCredentialHandoffRequest(slotFor(acc), "COUPANG",
                 Map.of("access_key", ACCESS, "secret_key", SECRET, "vendor_id", VENDOR, "smuggled", "x"), thisRun());
 
-        assertThatThrownBy(() -> service.handOff(org, actor, bad)).isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> service.handOff(org, actor, null, bad)).isInstanceOf(ApiException.class);
 
         assertThat(vault.hasCredential(org, acc.getId())).isFalse();
         // The handoff is still the operator's to spend…
         assertThat(arming.isArmed()).isTrue();
         // …and spending it works.
-        assertThat(service.handOff(org, actor, coupangRequest(slotFor(acc))).stored()).isTrue();
+        assertThat(service.handOff(org, actor, null, coupangRequest(slotFor(acc))).stored()).isTrue();
         assertThat(arming.isArmed()).isFalse();
     }
 
