@@ -148,6 +148,13 @@ export class LazyCoupangIssuanceDriver implements CoupangIssuanceProbeDriver {
     return (await d.showParkNotice?.(code)) ?? false;
   }
 
+  /** Read-only, and only from a window that exists. No surface ⇒ no press ⇒ `false`, never an opened window. */
+  async readParkNoticeConfirmed(code: CoupangIssuanceParkNotice): Promise<boolean> {
+    if (!this.isOpen()) return false;
+    const d = await this.driver();
+    return (await d.readParkNoticeConfirmed?.(code)) ?? false;
+  }
+
   async probeSurface(): Promise<WingSurfaceProbe> {
     return (await this.driver()).probeSurface();
   }

@@ -1122,8 +1122,16 @@ describe("stale spotlight — the defect the dev-host live proof surfaced", () =
     // And the park notice is docked BY CONSTRUCTION, not by a caller remembering to ask.
     const notice = DRV.slice(DRV.indexOf("async showParkNotice("), DRV.indexOf("async armObserve("));
     expect(notice).toContain("dockedPanelOnly: true");
-    // No advance button anywhere in it: a parked panel offers no press.
-    expect(notice).not.toContain("advance:");
+    // A parked panel offers a press ONLY where the park asks the seller a question, and it is conditional on the
+    // copy declaring one — so a park that asks nothing cannot grow a button by accident.
+    expect(notice).toContain("...(copy.confirm ? { advance: { buttonLabel: copy.confirm, token } } : {})");
+    // Exactly ONE park asks. If a second ever does, this fails and the safety argument gets re-read rather than
+    // inherited: the whole point of `CREDENTIAL_STATE_UNKNOWN` is that nobody knows, and the button says the
+    // SELLER looked — a claim that has to be true for each park that makes it.
+    const copyTable = DRV.slice(DRV.indexOf("const PARK_NOTICE_COPY"), DRV.indexOf("const ADVANCE_BUTTON_LABEL"));
+    expect(copyTable.split("confirm:").length - 1).toBe(1);
+    // …and it is not the parked step's own control. `발급` never appears as a button caption here.
+    expect(copyTable).toContain("키가 없는 걸 확인했어요");
   });
 
   it("only CALIBRATED targets are spotlit — the two with a locator, and no others", () => {

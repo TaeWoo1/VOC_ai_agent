@@ -839,3 +839,70 @@ describe("coupang issuance session — a parked run keeps saying so on the marke
     expect(driver.calls.slice(before)).toEqual([]);
   });
 });
+
+/**
+ * **The one park that asks a question, and the only answer that moves it.**
+ *
+ * Without this the WING label census refusing (`LABEL_NOT_UNIQUE` on 업체코드, live 2026-08-20) was a dead end
+ * for that seller: every re-check re-read the same ambiguity, forever. The exit is the seller reading their own
+ * screen and saying so — on the page where the answer is written, with a button that presses nothing on the
+ * marketplace. What must NOT happen is the walk taking that step on its own.
+ */
+describe("coupang issuance session — UNKNOWN moves only when the SELLER says so", () => {
+  it("no press ⇒ the walk stays parked, however long the recovery loop runs", async () => {
+    const { io, engine, driver, session } = build(
+      { credentialState: "UNKNOWN" },
+      { surfaceWaitPollMs: 5, surfaceWaitTimeoutMs: 60 },
+    );
+    startRun(io);
+    await session.whenSettled();
+    await new Promise((r) => setTimeout(r, 80));
+
+    // It ASKED — repeatedly — and got no answer, so it did not move.
+    expect(driver.calls).toContain("parkConfirm?:CREDENTIAL_STATE_UNKNOWN");
+    expect(engine.currentStage()).toBe("credential_state_unknown");
+    expect(driver.calls.filter((c) => c.endsWith(":issue"))).toEqual([]);
+  });
+
+  it("**the press starts the issuance guidance** — and only the press does", async () => {
+    const { io, engine, driver, session } = build(
+      { credentialState: "UNKNOWN", parkNoticeConfirmed: true },
+      { surfaceWaitPollMs: 5, surfaceWaitTimeoutMs: 60 },
+    );
+    startRun(io);
+    await session.whenSettled();
+    await new Promise((r) => setTimeout(r, 40));
+
+    expect(driver.calls).toContain("highlight:issue");
+    expect(engine.currentStage()).not.toBe("credential_state_unknown");
+  });
+
+  it("the declaration is NOT recorded as a measurement — credentialState stays UNKNOWN on the view", async () => {
+    // The seller's statement is theirs; SellerOps still read nothing. Writing NO_KEY here would turn a human
+    // claim into a reading the runtime never took, and every downstream reader would repeat it.
+    const { io, session } = build(
+      { credentialState: "UNKNOWN", parkNoticeConfirmed: true },
+      { surfaceWaitPollMs: 5, surfaceWaitTimeoutMs: 60 },
+    );
+    startRun(io);
+    await session.whenSettled();
+    await new Promise((r) => setTimeout(r, 40));
+
+    const view = io.views()[io.views().length - 1] as { credentialState?: string };
+    expect(view.credentialState).toBe("UNKNOWN");
+  });
+
+  it("a press on a CLOSED window is never read — the answer needs a screen to be given on", async () => {
+    const { io, driver, session } = build(
+      { credentialState: "UNKNOWN", parkNoticeConfirmed: true },
+      { surfaceWaitPollMs: 5, surfaceWaitTimeoutMs: 60 },
+    );
+    startRun(io);
+    await session.whenSettled();
+    driver.closeSurface();
+    const before = driver.calls.length;
+    await new Promise((r) => setTimeout(r, 40));
+
+    expect(driver.calls.slice(before)).toEqual([]);
+  });
+});

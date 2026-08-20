@@ -369,6 +369,35 @@ export class CoupangIssuanceGuidanceSession {
   }
 
   /**
+   * **Take the seller's declaration off the WING panel and let the walk continue.**
+   *
+   * The runtime could not tell whether this account already holds a key, so it parked — and for a page whose
+   * label census refuses (live 2026-08-20: `LABEL_NOT_UNIQUE` on 업체코드) that park had no exit at all: every
+   * re-check re-read the same ambiguity. The exit is the seller answering, on the page where the answer is
+   * written, with a SellerOps button that presses nothing on the marketplace.
+   *
+   * Returns whether the run MOVED, so the recovery loop stops rather than issuing a recheck into a walk that is
+   * now guiding a step.
+   */
+  private async consumeParkConfirmation(): Promise<boolean> {
+    const read = this.driver.readParkNoticeConfirmed;
+    if (!read || this.surfaceClosed) return false;
+    const code = coupangIssuanceParkNotice(this.engine.view().blocker?.code);
+    if (code !== "CREDENTIAL_STATE_UNKNOWN") return false;
+    const pressed = await read.call(this.driver, code).catch(() => false);
+    if (!pressed) return false;
+    // Sanitized: WHAT was declared and that a human declared it — never a page reading, because there is none.
+    log("aw_coupang_issuance_credential_declared", { runId: this.runId, by: "SELLER_ON_SURFACE", state: "NO_KEY" });
+    const next = this.engine.confirmCredentialAbsent();
+    // The notice is being replaced by the step's own guidance; forget it so a later park re-draws.
+    this.parkNoticeShown = null;
+    this.publishState();
+    if (isNoop(next)) return false;
+    await this.drive(next);
+    return true;
+  }
+
+  /**
    * Start the park recovery loop if the run has settled into one, and only one loop at a time.
    *
    * Called where a drive chain ENDS, because that is where a park becomes visible: the effect that produced it
@@ -477,6 +506,9 @@ export class CoupangIssuanceGuidanceSession {
       // running, which is the one that fired on 2026-08-20. A window the seller closed must end this loop, not
       // merely fail to start another.
       if (this.surfaceClosed) return;
+      // **The seller's own answer beats another re-read.** On the one park that asks a question, check for the
+      // press BEFORE spending the tick on a recheck that would re-read the same ambiguity it already refused.
+      if (await this.consumeParkConfirmation()) return;
       if (!isCoupangIssuancePark(this.engine.currentStage())) return;
       const outcome = this.engine.command({ type: "REQUEST_STEP_RECHECK", expectedRevision: this.engine.view().revision });
       if (!outcome.ok) return;

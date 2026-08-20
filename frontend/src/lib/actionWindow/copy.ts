@@ -373,7 +373,10 @@ const V2_ONLY_BLOCKER_VIEW: Record<string, BlockerView> = {
   },
   CREDENTIAL_STATE_UNKNOWN: {
     title: "발급된 키가 있는지 확인하지 못했어요",
-    body: "쿠팡 윙의 Open API 화면이 모두 뜬 뒤 '다시 확인'을 눌러 주세요. 확인되기 전에는 발급 안내를 시작하지 않습니다.",
+    // Points at the WING window, because that is where the answer is and where the button now is. SellerOps
+    // cannot read this one, so it does not pretend a re-check will settle it — for an ambiguous label it never
+    // does, and that dead end is what this wording used to hide.
+    body: "쿠팡 윙 창에서 업체코드·Access Key 칸을 직접 확인해 주세요. 키가 없다면 그 창의 '키가 없는 걸 확인했어요' 버튼으로 발급 안내를 시작할 수 있어요. 이미 키가 있다면 새로 발급하지 마세요.",
   },
 };
 

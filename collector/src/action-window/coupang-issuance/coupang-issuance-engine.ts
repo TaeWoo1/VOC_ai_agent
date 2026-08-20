@@ -445,6 +445,40 @@ export class CoupangIssuanceEngine {
     return this.park("credential_state_unknown", "CREDENTIAL_STATE_UNKNOWN");
   }
 
+  /**
+   * **The seller read the screen themselves and says there is no key.**
+   *
+   * This is the ONLY way out of `credential_state_unknown` other than the runtime managing to read it. It exists
+   * because the alternative was a dead end: the census refuses on an ambiguous label (live 2026-08-20,
+   * `LABEL_NOT_UNIQUE` on 업체코드), a re-check re-reads the same ambiguity, and the walk could never proceed for
+   * that seller no matter how many times they pressed anything.
+   *
+   * **What is NOT weakened.** `UNKNOWN` still never counts as permission — {@link onCredentialStateProbed} is
+   * untouched, and no reading, timer, retry or default reaches here. The only thing that does is a press on a
+   * SellerOps button rendered on the WING page itself, next to the table the answer is written in. That is the
+   * Action Window pattern exactly: the seller supplies what only a human at the screen can supply, and SellerOps
+   * presses nothing on the marketplace.
+   *
+   * **`credentialState` stays `UNKNOWN` on the view, deliberately.** That field says what the RUNTIME observed,
+   * and the runtime still has not observed anything. Writing `NO_KEY` here would turn the seller's statement
+   * into a measurement SellerOps never took — and every downstream reader (the frontend's `alreadyHadKey`, the
+   * evidence record) would then be repeating a claim with no reading behind it.
+   *
+   * Idempotent, and refused anywhere else: only from this park, and only if the branch has not been taken.
+   */
+  confirmCredentialAbsent(): CoupangIssuanceEffect {
+    if (this.stage !== "credential_state_unknown") return "NONE";
+    if (this.credentialBranchTaken) return "NONE";
+    this.credentialBranchTaken = true;
+    this.blockerCode = null;
+    this.blockerRecoverable = false;
+    this.activeStepIndex = 2;
+    this.currentTarget = "issue";
+    this.stage = "locating_open_api";
+    this.emit("RUN_STATUS_CHANGED", { status: "RUNNING" });
+    return { guide: "issue" };
+  }
+
   /** Where the run goes once a barrier's control has been acted on. */
   private advanceAfterBarrier(target: CoupangIssuanceTarget): CoupangIssuanceEffect {
     switch (target) {

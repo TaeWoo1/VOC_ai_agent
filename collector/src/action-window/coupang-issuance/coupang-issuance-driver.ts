@@ -269,6 +269,24 @@ export interface CoupangIssuanceProbeDriver {
    * what let the NAVER walk report guidance it had not drawn (2026-08-19).
    */
   showParkNotice?(code: CoupangIssuanceParkNotice): Promise<boolean>;
+
+  /**
+   * **Read the one answer the seller can give on that notice, if this park asks for one.**
+   *
+   * Exactly one park does: `CREDENTIAL_STATE_UNKNOWN`. The runtime could not read whether a key already exists,
+   * and the person who CAN read it is standing in front of the table — so the question is asked where the
+   * evidence is, and the answer is a press on a SellerOps button rendered on that page.
+   *
+   * What this returns is that press and nothing else. It is a value-free latch (an opaque per-park token
+   * compared for equality), so nothing about the page's contents crosses this boundary — the seller's
+   * declaration does, and it is the seller's to make. SellerOps still presses no marketplace control and still
+   * reads no credential cell; the `credentialState` the run publishes stays `UNKNOWN`, because that remains
+   * what the runtime OBSERVED.
+   *
+   * Fail-closed: an unreadable page, a driver without the capability, or a window that is gone all answer
+   * `false`. A press is only ever a press.
+   */
+  readParkNoticeConfirmed?(code: CoupangIssuanceParkNotice): Promise<boolean>;
 }
 
 /**

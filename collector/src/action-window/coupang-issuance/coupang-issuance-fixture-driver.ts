@@ -41,6 +41,8 @@ export interface CoupangIssuanceFixtureScript {
   credentialState?: CoupangCredentialState;
   /** What a `showParkNotice` mount reports back — `true` (painted) unless a test asks for the failure. */
   parkNoticePainted?: boolean;
+  /** Whether the seller pressed the park notice's confirmation button (the one park that asks a question). */
+  parkNoticeConfirmed?: boolean;
   /** Per-target locate results. Missing → a single match with a deterministic signature. */
   locate?: Partial<Record<CoupangIssuanceTarget, LocateResult>>;
   /** Per-target highlight re-validation. Missing → the same result `locate` gave (no drift). */
@@ -164,6 +166,12 @@ export class CoupangIssuanceFixtureDriver implements CoupangIssuanceProbeDriver 
   async showParkNotice(code: string): Promise<boolean> {
     this.calls.push(`parkNotice:${code}`);
     return this.script.parkNoticePainted ?? true;
+  }
+
+  /** The seller's answer on that notice. Fail-closed default: nobody pressed anything. */
+  async readParkNoticeConfirmed(code: string): Promise<boolean> {
+    this.calls.push(`parkConfirm?:${code}`);
+    return this.script.parkNoticeConfirmed ?? false;
   }
 
   async armObserve(target: CoupangIssuanceTarget): Promise<void> {

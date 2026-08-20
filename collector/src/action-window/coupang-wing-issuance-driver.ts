@@ -877,6 +877,15 @@ function advanceToken(target: CoupangIssuanceTarget): string {
 }
 
 /**
+ * The latch token for a PARK's confirmation button. A separate namespace from {@link advanceToken} on purpose:
+ * a stale press left over from a checkpoint must never be able to satisfy a park's question, and a press on a
+ * park must never advance a checkpoint. Value-free and derived, exactly like the other one.
+ */
+function parkConfirmToken(code: CoupangIssuanceParkNotice): string {
+  return `coupang-issuance-park-confirm:${code}`;
+}
+
+/**
  * The WING-resident advance button caption per checkpoint — the button the seller presses ON THE WING PAGE to
  * advance the guided walk (so they never bounce back to the SellerOps tab to press "다음"). `reach_open_api` has
  * NO button: it is the one step that auto-advances on the observed `wing_home → open_api_issuance` navigation.
@@ -894,13 +903,18 @@ function advanceToken(target: CoupangIssuanceTarget): string {
  * The wording matches the frontend's blocker copy for the same code (`frontend/src/lib/actionWindow/copy.ts`)
  * so the two screens a seller is looking at say the same thing.
  */
-const PARK_NOTICE_COPY: Readonly<Record<CoupangIssuanceParkNotice, { badge: string; brief: string; detail: string }>> =
+const PARK_NOTICE_COPY: Readonly<
+  Record<CoupangIssuanceParkNotice, { badge: string; brief: string; detail: string; confirm?: string }>
+> =
   Object.freeze({
     CREDENTIAL_STATE_UNKNOWN: {
       badge: "확인 중 멈춤",
       brief: "발급된 키가 있는지 확인하지 못했어요.",
       detail:
-        "화면이 모두 뜬 뒤 SellerOps에서 '다시 확인'을 눌러 주세요. 확인되기 전에는 발급 안내를 시작하지 않습니다.",
+        "이 화면의 업체코드·Access Key 칸을 직접 확인해 주세요. 이미 키가 있다면 새로 발급하지 마세요 — 기존 키가 무효화될 수 있어요. 키가 없다면 아래 버튼으로 발급 안내를 시작할 수 있어요.",
+      // The ONE park that asks the seller a question, because it is the one whose answer is on the screen in
+      // front of them and not readable by us. Its wording carries the whole claim being made: they LOOKED.
+      confirm: "키가 없는 걸 확인했어요 · 발급 안내 시작",
     },
     TARGET_NOT_FOUND: {
       badge: "안내 멈춤",
@@ -2262,6 +2276,10 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
     // Ring first: a park points at nothing, so a highlight left over from the step that parked would keep
     // pointing at a control the seller must NOT be told to press.
     await timebox(this.evalStr(page, IN_PAGE_CLEAR_TAG).then(() => undefined), undefined);
+    const token = parkConfirmToken(code);
+    // Cleared BEFORE the mount: a latch surviving from an earlier notice would read as an answer the seller has
+    // not given yet, on a question they have not seen yet.
+    if (copy.confirm) await timebox(resetOverlayAdvance(page, token).catch(() => undefined), undefined);
     await timebox(
       mountOverlay(page, {
         dockedPanelOnly: true,
@@ -2274,11 +2292,30 @@ export class CoupangWingIssuanceDriver implements CoupangIssuanceProbeDriver {
         badgeLabel: copy.badge,
         guidanceEnabled: this.opts.guidanceEnabled ?? true,
         residentPanel: true,
-        // NO `advance`: this panel takes no press and offers no next step.
+        // A button ONLY where the park asks the seller a question — today exactly one does. Every other park
+        // renders copy alone, because there is nothing there for a seller to answer and a button that does not
+        // ask anything is just a control sitting on their marketplace screen.
+        //
+        // Note what this button is NOT: it is not the parked step's control. It never presses 발급, and it never
+        // reads a cell. It records that the seller looked.
+        ...(copy.confirm ? { advance: { buttonLabel: copy.confirm, token } } : {}),
       }),
       undefined,
     );
     return (await timebox(overlayMounted(page), false)) === true;
+  }
+
+  /**
+   * Has the seller answered this park's question? Fail-closed on every other reading.
+   *
+   * A park that asks nothing can never report a press, whatever is latched: the question is what gives the
+   * press meaning, so a notice with no question has no answer to read.
+   */
+  async readParkNoticeConfirmed(code: CoupangIssuanceParkNotice): Promise<boolean> {
+    if (!PARK_NOTICE_COPY[code]?.confirm) return false;
+    return (
+      (await timebox(readOverlayAdvancePressed(this.activePage(), parkConfirmToken(code)), false)) === true
+    );
   }
 
   async armObserve(target: CoupangIssuanceTarget): Promise<void> {
