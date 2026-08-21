@@ -2,6 +2,7 @@
 // the same code that drove the live-verified connection and collection flows. Only the file they
 // live in changed; no call, no order, no condition was rewritten.
 import { type FormEvent, useState } from "react";
+import { CredentialDiagnosisPanel } from "./CredentialDiagnosisPanel";
 import { Section } from "../Section";
 import { HealthBadge } from "../HealthBadge";
 import { api } from "../../lib/apiClient";
@@ -27,10 +28,12 @@ import {
 
 /** 연결 상태 — health figures plus the last failure the server reported. */
 export function ChannelStatusSection({
+  accountId,
   status,
   loading,
   error,
 }: {
+  accountId: string;
   status: ConnectionStatusView | null;
   loading: boolean;
   error: boolean;
@@ -73,6 +76,12 @@ export function ChannelStatusSection({
             <p className="mt-4 rounded-xl bg-bad/5 px-4 py-3 text-base text-bad">
               {status.lastError}
             </p>
+          ) : null}
+          {/* Only when something is actually failing, and only above the raw message it explains.
+              The backend sentence stays — it is what an operator greps for — but it is no longer the
+              only thing the seller has to act on. */}
+          {status && status.consecutiveFailures > 0 ? (
+            <CredentialDiagnosisPanel accountId={accountId} />
           ) : null}
         </>
       )}

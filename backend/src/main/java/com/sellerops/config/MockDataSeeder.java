@@ -179,6 +179,7 @@ public class MockDataSeeder implements ApplicationRunner {
         int i = 1;
         for (String name : names) {
             Product p = new Product();
+            p.setDataOrigin(DataOrigin.DEMO_SEED);
             p.setOrgId(orgId);
             p.setName(name);
             p.setSku("MLD-" + String.format("%03d", i++));

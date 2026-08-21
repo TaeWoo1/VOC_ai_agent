@@ -1625,3 +1625,33 @@ export interface TriageBehaviorEvent {
   reviewId: string;
   kind: TriageBehaviorKind;
 }
+
+/**
+ * Why a stored credential can or cannot be opened — the answer to "연결했는데 왜 안 되나요?".
+ *
+ * The three failures a seller experiences identically ("복호화 실패") need three completely different
+ * responses: a server-side key configuration fix, a key recovery, or an actual reconnection. Sending
+ * a seller to re-do OAuth for a problem that was a server env var is the specific waste this exists
+ * to prevent — on the demo org that mistake would have cost a reconnect and fixed nothing.
+ *
+ * Fingerprints are one-way HMACs of master keys: they say whether two keys are the same key and
+ * carry no part of either, which is why they are safe to show.
+ */
+export interface CredentialDiagnosisView {
+  status:
+    | "OK"
+    | "NO_CREDENTIAL"
+    | "NO_KEY_CONFIGURED"
+    | "KEY_NOT_AVAILABLE"
+    | "KEY_MISMATCH"
+    | "KEY_UNVERIFIABLE"
+    | "INVALID_CREDENTIAL";
+  keyId: string | null;
+  activeKeyId: string | null;
+  sealedKeyFingerprint: string | null;
+  availableKeyFingerprint: string | null;
+  lastRotatedAt: string | null;
+  tokenExpiresAt: string | null;
+  /** The specific next action, in seller/operator language. Null when the credential opens. */
+  remedy: string | null;
+}

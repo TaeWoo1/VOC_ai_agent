@@ -16,6 +16,9 @@ vi.mock("../../lib/apiClient", () => ({
     manualSync: vi.fn(),
     retryRun: vi.fn(),
     getChannelCapabilityOverview: (code: string) => getChannelCapabilityOverview(code),
+    // The status section asks why a failing credential is failing. Healthy here, so the diagnosis
+    // panel renders nothing and these assertions stay about the figures they were written for.
+    getCredentialDiagnosis: () => Promise.resolve({ status: "OK", remedy: null }),
   },
   getToken: () => null,
 }));
@@ -50,7 +53,7 @@ beforeEach(() => {
 
 describe("연결 상태 섹션", () => {
   it("shows the figures the server reported", () => {
-    wrap(<ChannelStatusSection status={STATUS} loading={false} error={false} />);
+    wrap(<ChannelStatusSection accountId="acct-1" status={STATUS} loading={false} error={false} />);
     expect(screen.getByText("마지막 수집")).toBeInTheDocument();
     expect(screen.getByText("다음 자동 수집")).toBeInTheDocument();
     expect(screen.getByText("0회")).toBeInTheDocument();
@@ -58,13 +61,13 @@ describe("연결 상태 섹션", () => {
 
   it("keeps loading, failed and loaded as three distinct renders", () => {
     const { rerender } = wrap(
-      <ChannelStatusSection status={null} loading={true} error={false} />,
+      <ChannelStatusSection accountId="acct-1" status={null} loading={true} error={false} />,
     );
     expect(screen.getByText("불러오는 중…")).toBeInTheDocument();
 
     rerender(
       <MemoryRouter>
-        <ChannelStatusSection status={null} loading={false} error={true} />
+        <ChannelStatusSection accountId="acct-1" status={null} loading={false} error={true} />
       </MemoryRouter>,
     );
     expect(screen.getByText(/연결 상태를 불러오지 못했습니다/)).toBeInTheDocument();
@@ -75,6 +78,7 @@ describe("연결 상태 섹션", () => {
   it("surfaces the last failure the server reported", () => {
     wrap(
       <ChannelStatusSection
+        accountId="acct-1"
         status={{ ...STATUS, consecutiveFailures: 3, lastError: "인증이 만료되었습니다" } as ConnectionStatusView}
         loading={false}
         error={false}
@@ -86,7 +90,7 @@ describe("연결 상태 섹션", () => {
 
   it("has no axe violations", async () => {
     const { container } = wrap(
-      <ChannelStatusSection status={STATUS} loading={false} error={false} />,
+      <ChannelStatusSection accountId="acct-1" status={STATUS} loading={false} error={false} />,
     );
     await expectNoAxeViolations(container);
   });

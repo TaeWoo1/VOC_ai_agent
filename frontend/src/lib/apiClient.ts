@@ -1,5 +1,6 @@
 import axios, { isAxiosError } from "axios";
 import type {
+  CredentialDiagnosisView,
   AccountDashboardSummary,
   ArticleListResponse,
   AuthResponse,
@@ -331,6 +332,19 @@ export const api = {
     }
     const { data } = await http.get<ConnectionStatusView>(
       `/api/seller-accounts/${accountId}/connection-status`,
+    );
+    return data;
+  },
+  /**
+   * Why this account's stored credential can or cannot be opened right now.
+   *
+   * NO mock fallback and no swallowing: a diagnosis that guessed would be worse than none, because
+   * the whole point is to stop sending sellers to re-do OAuth for problems that were server-side
+   * configuration. Reads no secret material and makes no channel call.
+   */
+  async getCredentialDiagnosis(accountId: string): Promise<CredentialDiagnosisView> {
+    const { data } = await http.get<CredentialDiagnosisView>(
+      `/api/seller-accounts/${accountId}/credential-diagnosis`,
     );
     return data;
   },

@@ -42,13 +42,20 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
      * violation, so a concurrent creation of the same SKU never poisons the enclosing
      * transaction and never overwrites the existing product's name. Callers re-select
      * the row afterwards.
+     *
+     * <p>{@code data_origin} is written explicitly. A native statement bypasses the entity, so the
+     * field initializer that supplies REAL everywhere else does not apply here — and REAL is exactly
+     * right for this path: every caller of this method is resolving a product out of data that
+     * actually arrived (an import row, an ingested inquiry). Omitting the column made every product
+     * created this way fail the NOT NULL constraint, which is a better failure than the alternative
+     * of a nullable column quietly admitting unclassified rows past the filter.
      */
     @Modifying
     @Query(value = "merge into products t "
             + "using (values (:id, :orgId, :name, :sku, :now)) s(id, org_id, name, sku, ts) "
             + "on t.org_id = s.org_id and t.sku = s.sku "
-            + "when not matched then insert (id, org_id, name, sku, status, created_at, updated_at) "
-            + "values (s.id, s.org_id, s.name, s.sku, 'ACTIVE', s.ts, s.ts)",
+            + "when not matched then insert (id, org_id, name, sku, status, created_at, updated_at, data_origin) "
+            + "values (s.id, s.org_id, s.name, s.sku, 'ACTIVE', s.ts, s.ts, 'REAL')",
             nativeQuery = true)
     int insertIfAbsent(@Param("id") UUID id, @Param("orgId") UUID orgId, @Param("name") String name,
                        @Param("sku") String sku, @Param("now") Instant now);

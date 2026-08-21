@@ -283,7 +283,12 @@ export function ChannelWorkspace() {
         </>
       ) : null}
 
-      <ChannelStatusSection status={status} loading={loadingCollection} error={collectionError} />
+      <ChannelStatusSection
+        accountId={accountId}
+        status={status}
+        loading={loadingCollection}
+        error={collectionError}
+      />
 
       <div ref={credentialRef}>
         <ConnectionInfoSection
