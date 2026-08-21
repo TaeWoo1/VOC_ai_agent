@@ -20,6 +20,7 @@ import java.time.Instant;
  * @param lastRotatedAt           when the stored secret was last written
  * @param tokenExpiresAt          the credential's own expiry, when known
  * @param remedy                  the specific next action, in seller/operator language
+ * @param grantedScopes           what the provider said this connection may read; null = unobserved
  */
 public record CredentialDiagnosis(
         CredentialKeyStatus status,
@@ -29,7 +30,14 @@ public record CredentialDiagnosis(
         String availableKeyFingerprint,
         Instant lastRotatedAt,
         Instant tokenExpiresAt,
-        String remedy) {
+        String remedy,
+        /**
+         * Scopes the provider reported granting, or null when none was ever observed.
+         *
+         * <p>Null is not empty. A credential stored before scopes were recorded has a grant nobody
+         * wrote down, and reporting that as "no permissions" would call working connections broken.
+         */
+        java.util.List<String> grantedScopes) {
 
     public boolean openable() {
         return status == CredentialKeyStatus.OK;

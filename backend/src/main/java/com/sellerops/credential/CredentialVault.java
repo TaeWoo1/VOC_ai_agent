@@ -149,6 +149,27 @@ public class CredentialVault {
         return mask(credentials.save(row));
     }
 
+    /**
+     * Record which scopes the provider reported granting — metadata only, touching no secret material
+     * and needing no master key.
+     *
+     * <p>Separate from {@link #store} deliberately. Scopes arrive with every token, including every
+     * runtime refresh, long after the credential was first written; folding them into the write path
+     * would mean a refresh had to re-seal a payload it has no reason to touch. Passing null or an
+     * empty list leaves the recorded set ALONE rather than clearing it — a provider that returned no
+     * scope list told us nothing, and overwriting a known set with silence would manufacture a
+     * regression out of a quiet response.
+     */
+    public CredentialMetadata recordGrantedScopes(UUID orgId, UUID sellerAccountId,
+                                                  java.util.List<String> scopes) {
+        ConnectorCredential row = load(orgId, sellerAccountId);
+        if (scopes != null && !scopes.isEmpty()) {
+            row.setGrantedScopes(String.join(",", scopes));
+            return mask(credentials.save(row));
+        }
+        return mask(row);
+    }
+
     /** Metadata only — what an API or UI may show about a stored credential. */
     public CredentialMetadata readMasked(UUID orgId, UUID sellerAccountId) {
         return mask(load(orgId, sellerAccountId));
@@ -241,14 +262,28 @@ public class CredentialVault {
             }
         }
         return diagnosis(CredentialKeyStatus.OK, rowKeyId, sealed, availableFp,
-                row.getLastRotatedAt(), row.getTokenExpiresAt(), null);
+                row.getLastRotatedAt(), row.getTokenExpiresAt(), null, scopesOf(row));
+    }
+
+    /** Recorded scopes as a list; null (never observed) stays null rather than becoming empty. */
+    private static java.util.List<String> scopesOf(ConnectorCredential row) {
+        String raw = row.getGrantedScopes();
+        return raw == null || raw.isBlank() ? null : java.util.List.of(raw.split(","));
     }
 
     private CredentialDiagnosis diagnosis(CredentialKeyStatus status, String rowKeyId, String sealedFp,
                                           String availableFp, Instant lastRotatedAt,
                                           Instant tokenExpiresAt, String remedy) {
+        return diagnosis(status, rowKeyId, sealedFp, availableFp, lastRotatedAt, tokenExpiresAt,
+                remedy, null);
+    }
+
+    private CredentialDiagnosis diagnosis(CredentialKeyStatus status, String rowKeyId, String sealedFp,
+                                          String availableFp, Instant lastRotatedAt,
+                                          Instant tokenExpiresAt, String remedy,
+                                          java.util.List<String> grantedScopes) {
         return new CredentialDiagnosis(status, rowKeyId, keyRing.activeKeyId(), sealedFp, availableFp,
-                lastRotatedAt, tokenExpiresAt, remedy);
+                lastRotatedAt, tokenExpiresAt, remedy, grantedScopes);
     }
 
     /**

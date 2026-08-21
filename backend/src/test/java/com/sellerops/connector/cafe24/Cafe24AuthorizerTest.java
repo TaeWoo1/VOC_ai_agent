@@ -54,7 +54,7 @@ class Cafe24AuthorizerTest {
     void happyPathRefreshesAndPersistsTheRotatedToken() {
         when(vault.open(org, account)).thenReturn(credentialWith("R1"));
         when(tokenClient.refresh(MALL, APP_ID, APP_SECRET, "R1"))
-                .thenReturn(new Cafe24TokenResult("access-1", "R2", null, null));
+                .thenReturn(new Cafe24TokenResult("access-1", "R2", null, null, java.util.List.of()));
 
         Cafe24Authorizer.Authorized authorized = authorizer.authorize(org, account);
 
@@ -74,7 +74,7 @@ class Cafe24AuthorizerTest {
                 .thenReturn(credentialWith("R2"));  // re-read after invalid_grant (sibling rotated to R2)
         when(tokenClient.refresh(MALL, APP_ID, APP_SECRET, "R1")).thenThrow(invalidGrant());
         when(tokenClient.refresh(MALL, APP_ID, APP_SECRET, "R2"))
-                .thenReturn(new Cafe24TokenResult("access-2", "R3", null, null));
+                .thenReturn(new Cafe24TokenResult("access-2", "R3", null, null, java.util.List.of()));
 
         Cafe24Authorizer.Authorized authorized = authorizer.authorize(org, account);
 

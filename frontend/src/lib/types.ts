@@ -1654,4 +1654,11 @@ export interface CredentialDiagnosisView {
   tokenExpiresAt: string | null;
   /** The specific next action, in seller/operator language. Null when the credential opens. */
   remedy: string | null;
+  /**
+   * Scopes the provider reported granting, or null when none was ever observed.
+   *
+   * Null is not empty — a credential stored before scopes were recorded has a grant nobody wrote
+   * down, and reporting that as "no permissions" would call a working connection broken.
+   */
+  grantedScopes?: string[] | null;
 }

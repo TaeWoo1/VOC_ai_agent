@@ -12,7 +12,17 @@ public record Cafe24TokenResult(
         String accessToken,
         String refreshToken,
         String expiresAt,
-        String refreshTokenExpiresAt) {
+        String refreshTokenExpiresAt,
+        /**
+         * The scopes the mall actually GRANTED, as returned with the token.
+         *
+         * <p>Requesting a scope and holding it are different facts, and until this was parsed the
+         * product only had the first. The second was discovered at call time, months later, as an
+         * {@code insufficient_scope} on a product read — by which point the seller had long since
+         * finished consenting and the only remedy was to ask them back. Empty when the provider
+         * returned none; never inferred from what was requested.
+         */
+        java.util.List<String> grantedScopes) {
 
     /** True when the provider returned a replacement for the given token. */
     public boolean rotatedFrom(String previousRefreshToken) {
@@ -26,6 +36,7 @@ public record Cafe24TokenResult(
         return "Cafe24TokenResult[accessToken=<masked>"
                 + ", refreshToken=" + (refreshToken != null ? "<masked>" : "null")
                 + ", expiresAt=" + expiresAt
-                + ", refreshTokenExpiresAt=" + refreshTokenExpiresAt + "]";
+                + ", refreshTokenExpiresAt=" + refreshTokenExpiresAt
+                + ", grantedScopes=" + grantedScopes + "]";
     }
 }

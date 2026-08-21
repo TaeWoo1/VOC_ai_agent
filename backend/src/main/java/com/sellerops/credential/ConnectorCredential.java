@@ -52,6 +52,25 @@ public class ConnectorCredential extends BaseEntity {
     @Column(name = "encryption_key_fingerprint")
     private String encryptionKeyFingerprint;
 
+    /**
+     * Scopes the provider reported granting, comma-separated. Non-secret: it says what this
+     * connection may read, never what it read or what it holds.
+     *
+     * <p>Null means never observed — NOT none. A credential stored before this existed has a scope
+     * set nobody recorded, and reading that as "no permissions" would report working connections as
+     * broken.
+     */
+    @Column(name = "granted_scopes")
+    private String grantedScopes;
+
+    public String getGrantedScopes() {
+        return grantedScopes;
+    }
+
+    public void setGrantedScopes(String grantedScopes) {
+        this.grantedScopes = grantedScopes;
+    }
+
     public String getEncryptionKeyFingerprint() {
         return encryptionKeyFingerprint;
     }

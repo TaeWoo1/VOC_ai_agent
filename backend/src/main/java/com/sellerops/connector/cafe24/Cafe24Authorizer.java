@@ -112,6 +112,10 @@ public class Cafe24Authorizer {
             rotated.put("refresh_token", token.refreshToken());
             vault.rotateSecrets(orgId, sellerAccountId, rotated);
         }
+        // Scopes ride on every token, not just the first, so a grant the seller later narrowed shows
+        // up here rather than as an unexplained 403 on the next product read. A response carrying no
+        // scope list leaves the recorded set alone — silence is not a revocation.
+        vault.recordGrantedScopes(orgId, sellerAccountId, token.grantedScopes());
         return new Authorized(mallId, token.accessToken());
     }
 

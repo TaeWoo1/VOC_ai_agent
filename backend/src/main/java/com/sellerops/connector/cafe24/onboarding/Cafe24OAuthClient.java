@@ -108,7 +108,8 @@ public class Cafe24OAuthClient {
             throw new IllegalStateException("카페24 인증 코드 응답을 해석할 수 없습니다.");
         }
         return new Cafe24TokenResult(token.accessToken(), token.refreshToken(),
-                token.expiresAt(), token.refreshTokenExpiresAt());
+                token.expiresAt(), token.refreshTokenExpiresAt(),
+                token.scopes() == null ? java.util.List.of() : java.util.List.copyOf(token.scopes()));
     }
 
     private void requireMallId(String mallId) {
@@ -136,13 +137,16 @@ public class Cafe24OAuthClient {
             @JsonProperty("access_token") String accessToken,
             @JsonProperty("expires_at") String expiresAt,
             @JsonProperty("refresh_token") String refreshToken,
-            @JsonProperty("refresh_token_expires_at") String refreshTokenExpiresAt) {
+            @JsonProperty("refresh_token_expires_at") String refreshTokenExpiresAt,
+            /** What the mall granted. Non-secret, unlike every other field on this record. */
+            @JsonProperty("scopes") java.util.List<String> scopes) {
 
         @Override
         public String toString() {
             return "TokenResponse[access_token=<masked>, refresh_token=<masked>"
                     + ", expires_at=" + expiresAt
-                    + ", refresh_token_expires_at=" + refreshTokenExpiresAt + "]";
+                    + ", refresh_token_expires_at=" + refreshTokenExpiresAt
+                    + ", scopes=" + scopes + "]";
         }
     }
 }

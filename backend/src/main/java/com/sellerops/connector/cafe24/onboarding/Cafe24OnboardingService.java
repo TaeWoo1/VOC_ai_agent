@@ -274,6 +274,11 @@ public class Cafe24OnboardingService {
                 // prior credential; CONNECTED is set only after it succeeds.
                 vault.store(state.getOrgId(), account.getId(), "API", "OAUTH2",
                         secrets, null, null, state.getInitiatedBy());
+                // What the mall actually GRANTED, as opposed to what we asked for. Recorded here
+                // because this is the only moment it is knowable cheaply — after this the answer
+                // costs a failed API call, and by then the seller has finished consenting and the
+                // only remedy is to bring them back.
+                vault.recordGrantedScopes(state.getOrgId(), account.getId(), tokens.grantedScopes());
                 account.setConnectionStatus(ChannelStatus.CONNECTED);
                 accounts.save(account);
                 connectedOrg[0] = state.getOrgId();

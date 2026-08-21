@@ -94,7 +94,8 @@ public class Cafe24TokenClient {
         }
         return new Cafe24TokenResult(
                 token.accessToken(), token.refreshToken(),
-                token.expiresAt(), token.refreshTokenExpiresAt());
+                token.expiresAt(), token.refreshTokenExpiresAt(),
+                token.scopes() == null ? java.util.List.of() : java.util.List.copyOf(token.scopes()));
     }
 
     static URI tokenUri(String mallId) {
@@ -122,7 +123,9 @@ public class Cafe24TokenClient {
             @JsonProperty("access_token") String accessToken,
             @JsonProperty("expires_at") String expiresAt,
             @JsonProperty("refresh_token") String refreshToken,
-            @JsonProperty("refresh_token_expires_at") String refreshTokenExpiresAt) {
+            @JsonProperty("refresh_token_expires_at") String refreshTokenExpiresAt,
+            /** What the mall grants THIS token — re-read on every refresh, so a revoked scope shows. */
+            @JsonProperty("scopes") java.util.List<String> scopes) {
 
         @Override
         public String toString() {
