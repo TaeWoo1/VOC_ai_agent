@@ -678,6 +678,33 @@ export function buildNaverIssuanceLiveConfig(): NaverIssuanceLiveCarrier {
   let walkContext: BrowserContext | null = null;
   let navigated = false;
   const driver = new LazyNaverIssuanceDriver({
+    /**
+     * **The walk's last step, made real** — the same screened hand-off the WING carrier performs, for the same
+     * reasons and with the same three properties: the API-centre window is NOT touched (not navigated, no tab
+     * added, nothing raised over the values the seller is copying); the destination is screened to a LOOPBACK
+     * SellerOps origin, origin-only and fail-closed, then screened again by `planOsOpen` before an argv exists;
+     * and it is a LOCAL hand-off, not a marketplace navigation.
+     *
+     * This channel has no credential handoff, so the walk ends where the seller finishes the connection
+     * themselves. Getting them there is the difference between a CTA and a label.
+     */
+    returnToSellerOps: async () => {
+      const screened = screenSellerOpsReturnUrl(loadConfig().appUrl);
+      if (!screened.ok) {
+        // Nothing opens. A refused destination leaves the seller on the API centre with their two values,
+        // which is a worse ending than a working button and a much better one than a browser sent somewhere
+        // unvouched for.
+        log("aw_issuance_return_refused", { reason: screened.reason }, "warn");
+        return;
+      }
+      const plan = planOsOpen(screened.url, process.platform);
+      if (!plan.ok) {
+        log("aw_issuance_return_refused", { reason: plan.reason }, "warn");
+        return;
+      }
+      const opened = await openInDefaultBrowser(plan.command, plan.args);
+      log("aw_issuance_returned_to_sellerops", { opened, surface: "DEFAULT_BROWSER" });
+    },
     open: async () => {
       if (!walkContext) {
         // `followWindow` for the same live-measured reason the WING walk needs it: without it Playwright pins

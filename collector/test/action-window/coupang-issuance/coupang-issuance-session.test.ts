@@ -1180,3 +1180,57 @@ describe("the credential consent, and what the seller sees on WING after it", ()
     expect(io.lastView()!.status).toBe("CANCELLED");
   });
 });
+
+/* ───────────────────── the consent can only be given where the credentials are ───────────────────── */
+
+describe("nothing but the seller's own press on the WING panel produces a consent", () => {
+  it("**a REQUEST_STEP_RECHECK does not advance the credential step** — the one checkpoint a command cannot pass", async () => {
+    // Every other checkpoint honours "다음" from either screen: "I read the highlighted section" is a claim the
+    // seller can make from either. This one is different — advancing it IS "read my three values and store
+    // them" — and that answer is only meaningful from the window the values are on.
+    //
+    // What this closes: any client on the local bridge (a second tab, a stale client, a frontend that re-adds
+    // a 다음 here) could otherwise have produced a consent the seller never gave, and the frontend would then
+    // have minted a capability for it.
+    const { io, engine, driver, session } = build({ action: { credentials: false } });
+    startRun(io);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("guiding_copy_keys");
+
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision, "fe-next");
+    await session.whenSettled();
+
+    expect(engine.currentStage()).toBe("guiding_copy_keys");
+    expect(io.lastView()!.credentialHandoff).toBe("AWAITING_CONSENT");
+    expect(driver.calls).not.toContain("handoffPanel:WORKING");
+  });
+
+  it("every OTHER checkpoint still advances on a command — the walk is not made unusable by this", async () => {
+    const { io, engine, driver, session } = build({ action: { issue: false } });
+    startRun(io);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("checkpoint_reveal_issuance_form");
+
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision, "fe-next");
+    await session.whenSettled();
+
+    expect(engine.currentStage()).not.toBe("checkpoint_reveal_issuance_form");
+    expect(driver.calls).toContain("locate:confirm_purpose");
+  });
+
+  it("**a capability presented at the barrier is refused** — it is not a way to skip the consent either", async () => {
+    // The capability-carrying command is intercepted before the engine sees it, so it cannot advance the
+    // checkpoint; and the handoff itself requires the run to be RESTING on the consent, which it is not.
+    const { io, engine, session } = build({ action: { credentials: false } });
+    startRun(io);
+    await session.whenSettled();
+
+    await consentToHandoff(io, session, "early");
+
+    expect(engine.currentStage()).toBe("guiding_copy_keys");
+    const results = io.sent.filter((f) => f.kind === "aw_command_result") as { commandId: string; accepted: boolean; reason?: string }[];
+    const refusal = results.find((r) => r.commandId === "early");
+    expect(refusal?.accepted).toBe(false);
+    expect(refusal?.reason).toBe("HANDOFF_NOT_AT_CREDENTIAL_STEP");
+  });
+});

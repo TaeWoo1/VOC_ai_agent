@@ -158,10 +158,13 @@ class CredentialHandoffAuthorizationsTest {
 
     @Test
     void theLiveMapIsBounded_andExpiredEntriesFreeTheirSlots() {
+        // DISTINCT bindings, because one binding can no longer occupy more than one slot — a repeated ask for
+        // the same seller/account/run supersedes itself (see `repeatedAsksForOneBindingCannotFillTheStore`).
+        // Filling the map is therefore what it says on the tin: that many sellers mid-handoff at once.
         Movable clock = new Movable();
         CredentialHandoffAuthorizations auth = store(clock);
         for (int i = 0; i < CredentialHandoffAuthorizations.MAX_LIVE; i++) {
-            assertThat(auth.issue(binding())).isNotNull();
+            assertThat(auth.issue(new Binding(ORG, USER, UUID.randomUUID(), "COUPANG", RUN))).isNotNull();
         }
         // At capacity nothing is issued — a refusal, never an eviction of someone else's live authorization.
         assertThat(auth.issue(binding())).isNull();
@@ -169,5 +172,79 @@ class CredentialHandoffAuthorizationsTest {
         clock.advance(CredentialHandoffAuthorizations.TTL.plusSeconds(1));
         assertThat(auth.liveCount()).isZero();
         assertThat(auth.issue(binding())).isNotNull();
+    }
+
+    /* ───────────────── at most one LIVE capability per binding ───────────────── */
+
+    @Test
+    void aSecondIssueForTheSameBindingSupersedesTheFirst() {
+        // One seller, one account, one run, one consent — but the ASK can arrive more than once for it: a
+        // second SellerOps tab attached to the same run, a refresh that re-observes the consent, a retried
+        // request. Each used to leave another spendable capability behind for its full five minutes.
+        //
+        // The handoff was already at-most-once (the runtime latches one per run, and the claim is a CAS), so
+        // nothing was ever stored twice. "At most one credential written" and "at most one live write
+        // authorization" are different properties, and this is the second one.
+        CredentialHandoffAuthorizations auth = store(new Movable());
+
+        String first = auth.issue(binding());
+        String second = auth.issue(binding());
+
+        assertThat(second).isNotEqualTo(first);
+        assertThat(auth.refusalFor(second, binding())).isNull();
+        assertThat(auth.refusalFor(first, binding()))
+                .isEqualTo(CredentialHandoffAuthorizations.REASON_UNKNOWN);
+        assertThat(auth.liveCount()).isEqualTo(1);
+    }
+
+    @Test
+    void supersedingIsPerBinding_aDifferentRunOrAccountIsUntouched() {
+        // The revocation must be as narrow as the binding is. Two sellers mid-handoff, or one seller on two
+        // runs, are two separate consents and both capabilities stay live.
+        CredentialHandoffAuthorizations auth = store(new Movable());
+        Binding otherRun = new Binding(ORG, USER, ACCOUNT, "COUPANG", "run_0therrun1");
+        Binding otherAccount = new Binding(ORG, USER, UUID.randomUUID(), "COUPANG", RUN);
+
+        String a = auth.issue(binding());
+        String b = auth.issue(otherRun);
+        String c = auth.issue(otherAccount);
+
+        assertThat(auth.refusalFor(a, binding())).isNull();
+        assertThat(auth.refusalFor(b, otherRun)).isNull();
+        assertThat(auth.refusalFor(c, otherAccount)).isNull();
+        assertThat(auth.liveCount()).isEqualTo(3);
+    }
+
+    @Test
+    void repeatedAsksForOneBindingCannotFillTheStore() {
+        // The cap exists so a caller asking in a loop cannot grow the map without bound. Superseding makes that
+        // stronger than a refusal at 64: the loop never gets there, because it never holds more than one.
+        CredentialHandoffAuthorizations auth = store(new Movable());
+
+        String last = null;
+        for (int i = 0; i < CredentialHandoffAuthorizations.MAX_LIVE * 2; i++) {
+            last = auth.issue(binding());
+            assertThat(last).isNotNull();
+        }
+
+        assertThat(auth.liveCount()).isEqualTo(1);
+        assertThat(auth.refusalFor(last, binding())).isNull();
+    }
+
+    @Test
+    void supersedingSurvivesTheSweep_theIndexDoesNotOutliveWhatItPointsAt() {
+        // The index points INTO the live map, so an entry that ages out leaves a pointer to nothing. If those
+        // are not dropped the index becomes the unbounded map the cap exists to prevent.
+        Movable clock = new Movable();
+        CredentialHandoffAuthorizations auth = store(clock);
+        auth.issue(binding());
+
+        clock.advance(CredentialHandoffAuthorizations.TTL.plusSeconds(1));
+        assertThat(auth.liveCount()).isZero();
+
+        // …and a fresh ask after the sweep still works, rather than superseding a ghost.
+        String after = auth.issue(binding());
+        assertThat(auth.refusalFor(after, binding())).isNull();
+        assertThat(auth.liveCount()).isEqualTo(1);
     }
 }

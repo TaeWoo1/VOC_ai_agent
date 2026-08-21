@@ -331,7 +331,12 @@ const NAVER_ADVANCE_LABEL: Readonly<Partial<Record<IssuanceTarget, string>>> = {
   api_group: "확인했어요 · 다음",
   application_id: "복사했어요 · 다음",
   application_secret: "복사했어요 · 다음",
-  return: "SellerOps에서 입력할게요 · 완료",
+  // **The walk's last button, and the only one in it that moves the seller.** It is a CTA rather than a
+  // "완료" because what is left is not a step of this walk — it is the connection, finished in SellerOps, where
+  // the seller types the two values they just copied. The navigation behind it is real (see
+  // `returnToSellerOps`); a button here that recorded a press and moved nothing is the defect the sibling walk
+  // had to fix on 2026-08-12.
+  return: "SellerOps에서 연결 마무리하기",
 };
 
 /** The chip above the ring: which step this is, never an abbreviated instruction (the panel carries that). */
@@ -404,6 +409,18 @@ export interface NaverIssuanceDriverOptions {
   inpageRetryMs?: number;
   /** Pause between VERIFY_OPEN settle-polls. Defaults to {@link VERIFY_POLL_MS}; tests set 0. */
   verifyPollMs?: number;
+  /**
+   * **The last step's `SellerOps에서 연결 마무리하기`, injected.**
+   *
+   * The same shape, and the same reasons, as the WING walk's: this driver's source guard forbids `.goto(` and
+   * `window.open` outright and should keep forbidding them, so the one navigation the last step promises is
+   * owned by the carrier — screened to a LOOPBACK SellerOps origin, fail-closed, and handed to the seller's own
+   * default browser rather than to this window (which is a dedicated profile that has never signed in).
+   *
+   * Called at most ONCE, and only after the seller presses that button. Absent ⇒ the step behaves as it did
+   * and says so in the log, rather than silently pretending it returned.
+   */
+  returnToSellerOps?: () => Promise<void>;
 }
 
 /**
@@ -879,6 +896,23 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
     }).catch(() => undefined);
     this.lastStepNumber = 3;
     return overlayMounted(page).catch(() => false);
+  }
+
+  /**
+   * Take the seller to SellerOps — the last step's CTA, and the only navigation this walk performs for them.
+   *
+   * Bounded and swallowing, deliberately: the walk is over by the time this runs and the seller has their two
+   * values, so a return that fails must not turn a finished walk into a failed one. What it must not do is fail
+   * silently, hence the log line either way.
+   */
+  async returnToSellerOpsNow(): Promise<void> {
+    const go = this.opts.returnToSellerOps;
+    if (!go) {
+      log("aw_issuance_return_not_wired", {});
+      return;
+    }
+    log("aw_issuance_return_to_sellerops", {});
+    await go().catch(() => undefined);
   }
 
   /** Has the seller pressed the advisory's button? Value-free equality poll; an unreadable page ⇒ `false`. */

@@ -47,6 +47,37 @@ import {
   type CoupangIssuanceStage,
 } from "./coupang-issuance-stages";
 
+/**
+ * Where a checkpoint advance came from: the runtime OBSERVING the seller's press on the marketplace window, or a
+ * COMMAND arriving over the Action Window transport.
+ */
+type CheckpointAdvanceSource = "OBSERVED" | "COMMAND";
+
+/**
+ * **The checkpoints a COMMAND may advance — and the one it may not.**
+ *
+ * `REQUEST_STEP_RECHECK` means "I did it, look again", and at a same-page checkpoint the runtime has always
+ * honoured it as the seller's own 다음: there is no marketplace action to re-observe, and the claim ("I read the
+ * highlighted section") is one the seller can make from either screen.
+ *
+ * `credentials` stopped being that kind of step when its press became the CONSENT to read three values off the
+ * screen and put them in a vault. A consent is only meaningful from the surface the evidence is on, and this
+ * list is what makes that structural rather than a matter of which buttons a frontend happens to render: the
+ * ONLY way into `awaiting_handoff_consent` is the runtime observing the seller's press on the WING panel.
+ *
+ * What that closes: any client on the local bridge — a second tab, a stale client, a future frontend that
+ * re-adds a "다음" at this barrier — could otherwise have produced a consent the seller never gave, and the
+ * frontend would then have minted a capability for it.
+ */
+const COMMAND_ADVANCE: readonly CoupangIssuanceTarget[] = [
+  "issue",
+  "confirm_purpose",
+  "terms_consent",
+  "issue_final",
+  "vendor_method",
+  "vendor_confirm",
+];
+
 /** What the session should do next. Every one is observation or annotation — never a marketplace action. */
 export type CoupangIssuanceEffect =
   | "PROBE"
@@ -242,7 +273,7 @@ export class CoupangIssuanceEngine {
       // action to re-observe — the seller acted on the highlighted section — so it COMPLETES the checkpoint and
       // guides the next control. At the transition-observe barrier (reach_open_api) it re-arms the navigation
       // observation (the runtime alone decides the transition happened, by observing it).
-      if (isCoupangCheckpointTarget(this.currentTarget)) return this.advanceCheckpoint(this.currentTarget);
+      if (isCoupangCheckpointTarget(this.currentTarget)) return this.advanceCheckpoint(this.currentTarget, "COMMAND");
       return { observe: this.currentTarget };
     }
     return "NONE";
@@ -250,11 +281,17 @@ export class CoupangIssuanceEngine {
 
   /**
    * "다음" at a viewport checkpoint: the operator confirmed they acted on the highlighted section (자체개발 / 업체명
-   * / 호출 IP / 발급 / keys / return). No WING click was observed — a checkpoint is a same-page pointer — so this
+   * / 호출 IP / 발급 / keys). No WING click was observed — a checkpoint is a same-page pointer — so this
    * COMPLETES the step and guides the next control. Only meaningful while resting on that checkpoint's barrier.
+   *
+   * **`source` is not bookkeeping — it is the consent boundary.** Every other checkpoint may be advanced either
+   * way, because "the seller acted on the highlighted section" is a claim they can equally make from either
+   * screen. The credential step cannot: advancing it IS the seller saying "read my three values and store
+   * them", and that answer is only meaningful from the window the values are on. See {@link COMMAND_ADVANCE}.
    */
-  private advanceCheckpoint(target: CoupangIssuanceTarget): CoupangIssuanceEffect {
+  private advanceCheckpoint(target: CoupangIssuanceTarget, source: CheckpointAdvanceSource = "OBSERVED"): CoupangIssuanceEffect {
     if (this.currentTarget !== target || this.stage !== TARGET_BARRIER[target]) return "NONE";
+    if (source === "COMMAND" && !COMMAND_ADVANCE.includes(target)) return "NONE";
     this.completedSteps = this.activeStepIndex;
     this.emit("STEP_COMPLETED", { stepId: this.stepId(), stepStatus: "COMPLETED" });
     return this.advanceAfterBarrier(target);

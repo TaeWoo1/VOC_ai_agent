@@ -206,6 +206,16 @@ export interface IssuanceProbeDriver {
 
   /** Optional: has the seller pressed that advisory's button? Fail-closed on every other reading. */
   readAppUsageAdvance?(): Promise<boolean>;
+
+  /**
+   * Optional: perform the last step's `SellerOps에서 연결 마무리하기`.
+   *
+   * NAVER has no credential handoff — the seller types the two values in themselves — so this walk ends by
+   * taking them to the screen where they do that. It is the ONLY navigation the walk performs for the seller,
+   * it happens on their press and nowhere else, and a driver with no window (or no injected navigation) does
+   * nothing and says so rather than pretending.
+   */
+  returnToSellerOpsNow?(): Promise<void>;
 }
 
 /**

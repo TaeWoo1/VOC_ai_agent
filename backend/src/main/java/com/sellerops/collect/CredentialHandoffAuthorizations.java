@@ -153,6 +153,21 @@ public class CredentialHandoffAuthorizations {
     }
 
     /**
+     * A stable key for a BINDING — the same five identities, hashed the same way the id is. It carries no
+     * secret (a binding is identities and codes), and hashing it keeps this index the same shape as the map it
+     * points into rather than holding org/user/account ids in a second place.
+     */
+    private static String bindingKey(Binding b) {
+        return digest(b.orgId() + "|" + b.userId() + "|" + b.sellerAccountId() + "|" + b.channelCode() + "|" + b.runId());
+    }
+
+    /**
+     * **At most ONE live authorization per binding**, so a repeated ask cannot leave several spendable
+     * capabilities behind. Maps a binding key to the `live` key of the newest authorization for it.
+     */
+    private final Map<String, String> newestForBinding = new ConcurrentHashMap<>();
+
+    /**
      * Issue an authorization for exactly this seller, account, channel and run.
      *
      * <p>The caller has already resolved the account inside the org and guarded the channel — this does not
@@ -169,8 +184,28 @@ public class CredentialHandoffAuthorizations {
         byte[] raw = new byte[ID_BYTES];
         random.nextBytes(raw);
         String id = HexFormat.of().formatHex(raw);
+        String key = digest(id);
         // The DIGEST is the key. `id` is returned to the caller and then forgotten by this component.
-        live.put(digest(id), new Entry(binding, clock.instant().plus(TTL)));
+        live.put(key, new Entry(binding, clock.instant().plus(TTL)));
+        // **…and the previous authorization for the same binding stops working, now.**
+        //
+        // One seller, one account, one run, one consent — but the ASK can arrive more than once for it: a second
+        // SellerOps tab attached to the same run, a refresh that re-observes the consent, a retried request.
+        // Each of those used to mint another capability, and every one of them stayed spendable for its full
+        // five minutes. The handoff itself was already at-most-once (the runtime latches one per run and the
+        // claim is a CAS), so nothing was ever stored twice — but "at most one credential written" and "at most
+        // one live write authorization" are different properties, and only the first one held.
+        //
+        // Revoking rather than returning the existing id is what keeps this component from holding a spendable
+        // copy: it stores digests, so it cannot hand back an id it never kept. Superseding is also the stricter
+        // half of the choice — the older capability dies at once instead of living out its TTL beside the new one.
+        //
+        // Order matters: the new entry is published BEFORE the index is swapped, so two concurrent issues for
+        // one binding leave exactly one survivor whichever way they interleave.
+        String superseded = newestForBinding.put(bindingKey(binding), key);
+        if (superseded != null && !superseded.equals(key)) {
+            live.remove(superseded);
+        }
         return id;
     }
 
@@ -306,6 +341,9 @@ public class CredentialHandoffAuthorizations {
     private void sweep() {
         Instant now = clock.instant();
         live.entrySet().removeIf(e -> now.isAfter(e.getValue().expiresAt));
+        // The index only ever points INTO `live`, so an entry that aged out leaves a pointer to nothing. Drop
+        // those too, or the index becomes the unbounded map the cap exists to prevent.
+        newestForBinding.values().removeIf(key -> !live.containsKey(key));
     }
 
     /** Live count — for tests and for a capacity refusal that can say what it refused on. Never the ids. */

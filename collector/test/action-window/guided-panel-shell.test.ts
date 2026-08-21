@@ -35,13 +35,19 @@ function within(root: { children: { hasAttribute(n: string): boolean }[] }): { h
   return kids.flatMap((k) => [k, ...within(k as never)]);
 }
 
-/** Press one of the panel's buttons the way a seller does — through the listener the mount registered. */
-function press(doc: Doc, attr: string, env: { run: (fn: () => void) => void }): void {
+/**
+ * Press one of the panel's buttons through the listener the mount registered.
+ *
+ * `trusted` is the whole point of the parameter: a person's press carries the user agent's own `isTrusted`, a
+ * script's does not, and the panel honours only the first.
+ */
+function press(doc: Doc, attr: string, env: { run: (fn: () => void) => void }, trusted = true): void {
   const panel = doc.getElementById("__aw_advance_panel__")!;
-  const btn = (within(panel) as never as { hasAttribute(n: string): boolean; listeners: { type: string; fn: () => void }[] }[])
-    .find((c) => c.hasAttribute(attr)) ?? null;
+  const btn =
+    (within(panel) as never as { hasAttribute(n: string): boolean; listeners: { type: string; fn: (ev: { isTrusted: boolean }) => void }[] }[])
+      .find((c) => c.hasAttribute(attr)) ?? null;
   if (!btn) throw new Error(`no ${attr} button on the panel`);
-  env.run(() => btn.listeners.filter((l) => l.type === "click").forEach((l) => l.fn()));
+  env.run(() => btn.listeners.filter((l) => l.type === "click").forEach((l) => l.fn({ isTrusted: trusted })));
 }
 
 describe("the panel header — channel and step, on every panel", () => {
@@ -180,5 +186,36 @@ describe("the secondary — one quiet way out, in its own latch namespace", () =
     const panel = doc.getElementById("__aw_advance_panel__")!;
     expect(panel.style["pointer-events"]).toBe("none");
     expect(panel.children.some((c) => c.hasAttribute("data-aw-secondary"))).toBe(false);
+  });
+});
+
+describe("a press is a PERSON pressing — the floor under the consent", () => {
+  it("**a synthetic click records nothing** — `el.click()` and a dispatched event both read untrusted", async () => {
+    // On the credential step this press IS the consent to read three values off the screen and store them, so
+    // the naive scripted press is the one the panel must not honour.
+    const doc = new Doc();
+    tagged(doc, rect(0, 0, 10, 10));
+    const { page, env } = fakePage(doc);
+    await mountOverlay(page as never, {
+      ...PANEL,
+      secondary: { buttonLabel: "직접 입력할게요", token: "alt-tok" },
+    });
+
+    press(doc, "data-aw-advance", env, false);
+    press(doc, "data-aw-secondary", env, false);
+
+    expect(await readOverlayAdvancePressed(page as never, "tok")).toBe(false);
+    expect(await readOverlaySecondaryPressed(page as never, "alt-tok")).toBe(false);
+  });
+
+  it("…and the seller's own press still goes through", async () => {
+    const doc = new Doc();
+    tagged(doc, rect(0, 0, 10, 10));
+    const { page, env } = fakePage(doc);
+    await mountOverlay(page as never, PANEL);
+
+    press(doc, "data-aw-advance", env);
+
+    expect(await readOverlayAdvancePressed(page as never, "tok")).toBe(true);
   });
 });

@@ -119,6 +119,24 @@ export interface OverlayOptions {
   channelName?: string;
 }
 
+/**
+ * **What the in-page latch can and cannot prove.**
+ *
+ * The panel's buttons record a press by writing an opaque per-step token into a window global the driver polls.
+ * The listener honours only `isTrusted` events, so a programmatic press or a dispatched `MouseEvent` records
+ * nothing. That is the floor, and it is worth having.
+ *
+ * It is NOT a trust boundary, and this file should not pretend otherwise: anything running JavaScript in the
+ * marketplace page's own world can write the global directly, or dispatch an event with `isTrusted` redefined
+ * on it. Nothing stored in that world can be hidden from it, and every mechanism the driver uses to READ the
+ * latch runs in that same world. Making the press unforgeable would mean moving the panel's listener and latch
+ * into an isolated world — a different mount, not a stricter one.
+ *
+ * So the latch is treated as evidence of a press, and the things that actually bound what a forged press can
+ * cause live outside the page: the one-shot capability is minted by the authenticated SellerOps tab (which a
+ * marketplace page cannot reach), it is bound to org/user/account/channel/run, the runtime performs at most one
+ * handoff per run, and the values it reads go to that seller's own vault and are never returned to the page.
+ */
 /** The WING-resident advance affordance (a labelled button + its opaque per-step latch token). */
 export interface OverlayAdvance {
   /** The button caption the seller presses to advance (e.g. "다음", "발급 완료 · 다음"). */
@@ -663,7 +681,13 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
         btn.textContent = o.advance.buttonLabel;
         btn.style.cssText =
           "flex:0 0 auto;background:#2b6cff;color:#fff;border:0;border-radius:8px;padding:10px 18px;font:600 14px system-ui,-apple-system,sans-serif;cursor:pointer";
-        btn.addEventListener("click", function () {
+        btn.addEventListener("click", function (ev: Event) {
+          // **A PERSON pressed this, not a script.** `isTrusted` is the user agent's own statement that the
+          // event came from real input; a programmatic press and a dispatched `MouseEvent` both read false. It
+          // raises the floor rather than sealing it — see the note on the panel's latch — but the naive
+          // synthetic press is the one this walk must not honour, because on the credential step this press IS
+          // the consent to read three values off the screen.
+          if (!ev || ev.isTrusted !== true) return;
           const w = window as unknown as Record<string, unknown>;
           w["__aw_advance_pressed__"] = w["__aw_advance_token__"];
           // A COUNT of presses, kept beside the latch and never cleared by a re-arm.
@@ -694,7 +718,8 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
         alt.textContent = o.secondary.buttonLabel;
         alt.style.cssText =
           "align-self:flex-start;background:transparent;color:#cfe0ff;border:0;padding:0;font:13px system-ui,-apple-system,sans-serif;text-decoration:underline;cursor:pointer";
-        alt.addEventListener("click", function () {
+        alt.addEventListener("click", function (ev: Event) {
+          if (!ev || ev.isTrusted !== true) return;
           const w = window as unknown as Record<string, unknown>;
           w["__aw_secondary_pressed__"] = w["__aw_secondary_token__"];
         });

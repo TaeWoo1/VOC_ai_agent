@@ -351,8 +351,10 @@ describe("the guidance panel's disclosure", () => {
     await mountOverlay(page as never, WITH_DETAIL);
     sizePanel(doc, rect(400, 676, 400, 100));
     const toggle = toggleOf(doc)!;
+    // The disclosure toggle takes no trust decision — it opens and closes copy — but the double now delivers a
+    // real event to every listener, so the press is spelled the same way everywhere.
     const press = toggle.listeners.find((l) => l.type === "click")!.fn;
-    env.run(press);
+    env.run(() => press({ isTrusted: true }));
     expect(detailOf(doc)?.style["display"]).toBe("block");
     expect(toggle.textContent).toBe("간단히");
     // …and the placement ran: the control under the bottom dock pushed the panel to the top.

@@ -92,9 +92,13 @@ class El {
   scrollIntoView(): void {
     /* read-only reveal; irrelevant here */
   }
-  /** Recorded, never auto-fired: the disclosure test presses the toggle deliberately; nothing else is pressed. */
-  readonly listeners: { type: string; fn: () => void }[] = [];
-  addEventListener(type: string, fn: () => void): void {
+  /**
+   * Recorded, never auto-fired: a test presses deliberately, and it must say WHAT KIND of press it is — the
+   * panel's buttons honour only `isTrusted` events, so a double that delivered no event (or an untrusted one)
+   * would model a page where nothing is pressable at all.
+   */
+  readonly listeners: { type: string; fn: (ev: { isTrusted: boolean }) => void }[] = [];
+  addEventListener(type: string, fn: (ev: { isTrusted: boolean }) => void): void {
     this.listeners.push({ type, fn });
   }
   getBoundingClientRect(): Rect {

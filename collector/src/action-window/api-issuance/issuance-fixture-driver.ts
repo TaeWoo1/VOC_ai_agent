@@ -201,6 +201,11 @@ export class IssuanceFixtureDriver implements IssuanceProbeDriver {
     this.calls.push(entry);
   }
 
+  /** The return itself — recorded, never performed (there is no window here to move). */
+  async returnToSellerOpsNow(): Promise<void> {
+    this.calls.push("returnToSellerOps");
+  }
+
   /** Test helper: the seller presses this step's on-page "다음". */
   setPanelAdvance(target: IssuanceTarget, pressed: boolean): void {
     this.script.panelAdvance = { ...(this.script.panelAdvance ?? {}), [target]: pressed };

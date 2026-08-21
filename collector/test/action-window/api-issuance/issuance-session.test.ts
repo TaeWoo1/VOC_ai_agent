@@ -998,3 +998,41 @@ describe("step 3 — the advisory with no control to ring", () => {
     expect(driver.calls).toContain("appUsageNotice:new");
   });
 });
+
+describe("the last step's CTA actually moves the seller", () => {
+  it("**presses `SellerOps에서 연결 마무리하기` → the return happens, then the run completes**", async () => {
+    // NAVER has no credential handoff: the seller types the two values in themselves. So the walk ends by
+    // taking them to the screen where they do that — a CTA rather than a label, which is the difference the
+    // sibling walk had to learn on 2026-08-12.
+    const { io, engine, driver, session } = build(EXISTING);
+    startRun(io);
+    await session.whenSettled();
+    await passUsageCheck(io, engine, session);
+    for (const target of ["api_group", "application_id", "application_secret"] as const) {
+      driver.setPanelAdvance(target, true);
+      await session.whenPanelWatchSettled();
+      await session.whenSettled();
+    }
+    expect(engine.currentStage()).toBe("return_to_sellerops");
+
+    driver.setPanelAdvance("return", true);
+    await session.whenPanelWatchSettled();
+    await session.whenSettled();
+
+    expect(engine.currentStage()).toBe("guidance_complete");
+    // BEFORE the completion, so the browser is already moving while the run finishes.
+    expect(driver.calls.indexOf("returnToSellerOps")).toBeLessThan(driver.calls.indexOf("completionNotice"));
+  });
+
+  it("no OTHER step's press returns the seller — nothing moves while they still have work on the page", async () => {
+    const { io, engine, driver, session } = build(EXISTING);
+    startRun(io);
+    await session.whenSettled();
+    await passUsageCheck(io, engine, session);
+
+    driver.setPanelAdvance("api_group", true);
+    await session.whenPanelWatchSettled();
+
+    expect(driver.calls).not.toContain("returnToSellerOps");
+  });
+});

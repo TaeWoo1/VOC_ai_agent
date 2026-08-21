@@ -386,6 +386,11 @@ export class IssuanceGuidanceSession {
           if (!this.stillWaitingOn(target)) return;
           if (!(await read.call(this.driver, target).catch(() => false))) continue;
           log("aw_issuance_panel_advance", { target });
+          // **The last step's press is also the walk's one navigation.** NAVER has no credential handoff — the
+          // seller types the two values in themselves — so `return`'s CTA takes them to the screen where they
+          // do that. Performed BEFORE the command, so the browser is already moving while the run completes;
+          // and performed here rather than in the poll, so a read never has a side effect.
+          if (target === "return") await this.driver.returnToSellerOpsNow?.().catch(() => undefined);
           const outcome = this.engine.command({ type: "REQUEST_STEP_RECHECK", expectedRevision: this.engine.view().revision });
           if (!outcome.ok) return;
           this.publishState();

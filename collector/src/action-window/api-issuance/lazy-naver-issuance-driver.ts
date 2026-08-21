@@ -31,6 +31,15 @@ import type {
 export interface LazyNaverIssuanceDriverDeps {
   /** Bring up the dedicated window. Called at most once per open cycle. */
   open(): Promise<{ context: BrowserContext; page: Page }>;
+  /**
+   * The last step's `SellerOps에서 연결 마무리하기`: open the SellerOps connect screen in the seller's OWN default
+   * browser, where their session is. Never in THIS window — it is a dedicated profile that has never signed in,
+   * so opening the connect screen here delivers a login page.
+   *
+   * Passed straight through to {@link NaverIssuanceDriver}, which calls it only when the seller presses that
+   * button. Absent ⇒ the step behaves as it did, and says so in the log.
+   */
+  returnToSellerOps?: () => Promise<void>;
 }
 
 export class LazyNaverIssuanceDriver implements IssuanceProbeDriver {
@@ -75,7 +84,10 @@ export class LazyNaverIssuanceDriver implements IssuanceProbeDriver {
     if (this.opened) return this.opened;
     if (!this.opening) {
       this.opening = this.deps.open().then(({ context, page }) => {
-        const d = new NaverIssuanceDriver(page, { context });
+        const d = new NaverIssuanceDriver(page, {
+          context,
+          ...(this.deps.returnToSellerOps ? { returnToSellerOps: this.deps.returnToSellerOps } : {}),
+        });
         this.opened = d;
         this.context = context;
         return d;
@@ -160,6 +172,12 @@ export class LazyNaverIssuanceDriver implements IssuanceProbeDriver {
   async readAppUsageAdvance(): Promise<boolean> {
     if (!this.isOpen()) return false;
     return (await this.driver()).readAppUsageAdvance();
+  }
+
+  /** The last step's CTA. A walk with no window has nobody to return, so it does nothing. */
+  async returnToSellerOpsNow(): Promise<void> {
+    if (!this.isOpen()) return;
+    await (await this.driver()).returnToSellerOpsNow();
   }
 
   async observeUserAction(target: IssuanceTarget): Promise<boolean> {
