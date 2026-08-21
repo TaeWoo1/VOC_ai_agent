@@ -186,8 +186,44 @@ npm run serve                         # http://127.0.0.1:8787
 | 6 | 채널 연결 `/connect` | three rows NAVER · 쿠팡 · 카페24 with one state word each and one verb; 정기 자료 가져오기; 리뷰 수집 실행 panel → `/connect/imports` (read-only without the agent: "로컬 에이전트가 연결되어 있지 않아 …", persisted 최근 가져오기 기록) | "A channel on screen is a channel that is actually usable." |
 | 7 | 주문 `/orders`, 설정 `/settings` | honest empty orders; settings = facts and links, no toggles | — |
 
-Suggested duration 10–12 minutes. Do not open `/agent`, `/memory`, `/reports` unless asked; they are
-off the primary menu and not part of the assembled story.
+Suggested duration 10–12 minutes for the assembled story above. `/memory` and `/reports` stay off the
+primary menu; do not open them unless asked.
+
+### 3.1 운영 에이전트 `/agent` — the Operator (optional 3-minute extension, 2026-08-21)
+
+Off the primary menu and reached by an in-screen action, exactly as `docs/product_assembly_ia_v1.md` §3
+says. Show it only when the audience asks "이 도구가 스스로 판단도 하나요"; the seven screens above are
+still the product.
+
+| # | Ask | Show | Say |
+|---|---|---|---|
+| A | "오늘 뭐부터 봐야 해?" | 운영 판단 card: 답변이 필요한 문의 N건 + 반복 문제, each with its 근거 line (source · count · date · provenance) | "숫자마다 어디서 왔는지가 같이 나옵니다. 근거가 없는 문장은 아예 나오지 않습니다." |
+| B | "<상품명> 상품 요즘 문제 있어?" | the product's issues and trend, and — on a product whose channel data is not product-linked — **"일부 데이터는 판단할 수 없습니다"** instead of a clean bill of health | "'문제 없음'과 '연결되지 않아 판단할 수 없음'을 구분합니다. 비어 있다고 괜찮다는 뜻이 아닙니다." |
+| C | "문의 답변 초안 만들어줘" | the existing 문의 답변 초안 card (unchanged path), with its provenance label 규칙 기반 / AI 생성 read from the run | "초안을 누가 썼는지 화면이 임의로 말하지 않고 실행 기록에서 읽습니다." |
+| D | "이번 주 대표에게 보고할 내용 정리해줘" | 미답변·반복 문제·FAQ 후보를 한 카드로; the same numbers `/reports` prints | "리포트 화면과 같은 정의를 읽습니다. 두 화면이 다른 숫자를 말하지 않습니다." |
+
+**Say this if asked what it can do to the store: 아무것도 바꾸지 않습니다.** The Operator's tool catalogue
+is READ-only — there is no send, no FAQ edit, no product-page change, and no credential or Action Window
+tool in it. That is structural (`OperatorToolRegistry` refuses a WRITE tool at construction), not a
+setting. Reply approval and reply preparation stay where they were, on the review and inquiry screens.
+
+**Honest caveats to state, not hide.** With the planner/judge model capabilities off — the default, and
+what a plain demo runs — goal interpretation is the deterministic keyword table and judging is the rule
+judge, and the card labels itself 규칙 해석 accordingly. The four asks above work in that mode; a
+free-form sentence outside them answers "이 요청은 아직 지원하지 않습니다".
+
+> ⚠ **v2 landed 2026-08-21 and this paragraph is now HISTORICAL.**
+> `docs/sellerops_operator_graph_v2.md` removed the deterministic planner: with the planner capability
+> off, Agent chat does **not** degrade to keyword routing — the run **fails** and the screen says so
+> (proven live: 5/5 free-text asks FAILED, while the button-driven intent lane still ran). A v2 demo
+> therefore needs the planner capability enabled for the demo org, and **"the four asks" is no longer a
+> completion criterion** — the criterion is that different questions produce different investigations
+> (v2 §18). The rule-judge fallback is unaffected and stays: it can only make the Operator quieter.
+>
+> **What to show instead.** Ask the same product three different questions — a spec question, an
+> exchange-policy question, and "전에 산 것과 색이 달라요" — and show that the 확인한 항목 list differs
+> each time. Then turn the planner off and show the honest failure. Evidence:
+> `docs/operator_graph_v2_local_integration_proof.md` §3.
 
 ## 4. Proof levels (say only what the row says)
 
@@ -202,6 +238,8 @@ off the primary menu and not part of the assembled story.
 | 문의 답변 방향 제안 (response workflow) | test-proven; **not demonstrable in the demo org** — work items exist only for connector-ingested inquiries and the demo org's one OPEN item is outside the 500-row feed window | this file |
 | 리뷰 수집 (Action Window export run) | live-proven (NAVER, 2026-07); needs collector agent + `dev:bridge`; the plain demo shows the workbench read-only with persisted import history | `docs/action-window-runtime/HANDOFF.md`, `docs/workstreams/action-window-frontend/live-verification-protocol.md` |
 | 주문 · 매출 | test-proven; no demo data | — |
+| 운영 에이전트 `/agent` — Operator 답변 (§3.1) | **integration-proven on real SellerOps data 2026-08-21** (one org, 7,136 real utterances, local PG; scenarios ①②④ with traceable evidence, planner/judge OFF **and** ON); **no marketplace run** — nothing here contacted a channel | `docs/operator_graph_v1_local_integration_proof.md` |
+| 반복 문의 detection · customer memory recall | **integration-proven 2026-08-21** — 7,136 rows indexed, 7 real repeat candidates (품질 523 · 사이즈 473 · 배송 240 …). An org whose data predates the index needs one `POST /api/customer-memory/backfill` pass; until then recall reports 판단 불가, not "처음 있는 일". **Recall is topic-level on real inquiries**: 0 of 3,220 produced an aspect:problem signature (the documented rule-extractor gap, not the index) | `docs/operator_graph_v1_local_integration_proof.md` §3, §8 |
 | Cafe24 / Coupang connect wizards, OAuth | live-proven earlier (own workstreams); not part of the 10-minute path | `docs/slices/*`, roadmap §4.1 |
 
 ## 5. Segments that need the local agent (not in the plain demo)

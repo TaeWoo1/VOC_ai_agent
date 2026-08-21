@@ -15,6 +15,7 @@ import { RunStoreProvider, ProductionStoreNotConfiguredError } from "../../src/h
 import type { RuntimeConfig } from "../../src/http/config";
 import { FakeSpringClient } from "../support/FakeSpringClient";
 import { FakeReviewSpringClient } from "../support/FakeReviewSpringClient";
+import { FakeOperatorSpringClient } from "../support/FakeOperatorSpringClient";
 import { FakeIssueSpringClient } from "../support/FakeIssueSpringClient";
 import { twoInquiries, PHONE_TOKEN } from "../support/fixtures";
 import { twoReviews } from "../support/reviewFixtures";
@@ -45,6 +46,7 @@ function buildService(): AgentRunService {
     review,
     issue,
     identity: { whoami: async () => ({ userId: "u-1", orgId: "org-http-test" }) },
+    operator: new FakeOperatorSpringClient(),
   });
   return new AgentRunService({ storeProvider: new RunStoreProvider(CONFIG), clientFactory, env: "development" });
 }
@@ -77,7 +79,7 @@ describe("HTTP server contract", () => {
     const res = await fetch(`${base}/capabilities`);
     expect(res.status).toBe(200);
     const body = await json(res);
-    expect(body.intents).toHaveLength(4);
+    expect(body.intents).toHaveLength(5); // + OPERATOR (Operator Graph v1)
     expect(body.externalSend).toBe("disabled");
   });
 

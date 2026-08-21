@@ -1,6 +1,8 @@
 package com.sellerops.ingest;
 
 import com.sellerops.community.CommunitySourceKind;
+import com.sellerops.product.Product;
+import com.sellerops.product.ProductService;
 import com.sellerops.review.Review;
 import com.sellerops.review.ReviewReplyState;
 import com.sellerops.review.ReviewRepository;
@@ -20,8 +22,17 @@ import org.springframework.stereotype.Component;
  * (never a failed save — {@code reviews.body} is NOT NULL and an empty body carries no issue signal).
  * The promoted review is tagged with its true CAFE24 channel and a Cafe24 external id, {@code
  * dedupKeyVersion=V1} (Cafe24 dedups by the stable {@code article_no}), {@code replyState=UNKNOWN}
- * (never inferred from the board reply_status), and {@code productId=null} — it is a genuine review in
- * the channel-neutral store, not a NAVER disguise.
+ * (never inferred from the board reply_status) — it is a genuine review in the channel-neutral store,
+ * not a NAVER disguise.
+ *
+ * <p><b>Product linkage (2026-08-21, Operator Graph v2).</b> This used to set {@code productId = null}
+ * with the note "Cafe24 carries a source product_no, not our product UUID". That was true and it was
+ * also an inconsistency: {@code Cafe24InquiryArticleMapper} takes the SAME {@code product_no} and uses
+ * it AS the SKU, so within one org the identical key became a product on the inquiry path and was
+ * discarded on the review path. Cafe24 reviews therefore counted as unattributable
+ * ({@code UNCERTAIN_PRODUCT_UNLINKED}) against products the inquiry path had already created. This is
+ * not a new mapping policy — it is the existing one applied consistently. A row with no
+ * {@code product_no} still links to nothing, which remains the honest answer for it.
  */
 @Component
 public class Cafe24ReviewPromoter {
@@ -35,9 +46,23 @@ public class Cafe24ReviewPromoter {
     }
 
     private final ReviewRepository reviews;
+    private final ProductService products;
 
-    public Cafe24ReviewPromoter(ReviewRepository reviews) {
+    /** Full production wiring. Explicitly annotated because a second constructor now exists. */
+    @org.springframework.beans.factory.annotation.Autowired
+    public Cafe24ReviewPromoter(ReviewRepository reviews, ProductService products) {
         this.reviews = reviews;
+        this.products = products;
+    }
+
+    /**
+     * Promotion without product resolution — the shape every caller had before Operator Graph v2.
+     *
+     * <p>Kept so the tests that exercise promotion itself do not have to stand up a product service.
+     * A promoter built this way links nothing, which is exactly what the old behaviour was.
+     */
+    public Cafe24ReviewPromoter(ReviewRepository reviews) {
+        this(reviews, null);
     }
 
     /** Stable canonical external id for a Cafe24 community article. */
@@ -52,6 +77,19 @@ public class Cafe24ReviewPromoter {
      */
     public Outcome promote(UUID orgId, UUID channelId, String sourceKind, int boardNo, long articleNo,
                            String content, Integer rating, Instant sourceCreatedAt) {
+        return promote(orgId, channelId, sourceKind, boardNo, articleNo, content, rating,
+                sourceCreatedAt, null);
+    }
+
+    /**
+     * As above, with the article's own {@code product_no} so the promoted review can be attributed.
+     *
+     * <p>Resolution goes through {@link ProductService#resolveOrCreateWithinTransaction} — the same
+     * call {@code IngestionService} makes for every other ingested row — with the product number as the
+     * SKU, exactly as the Cafe24 inquiry path already does. A null {@code productNo} links to nothing.
+     */
+    public Outcome promote(UUID orgId, UUID channelId, String sourceKind, int boardNo, long articleNo,
+                           String content, Integer rating, Instant sourceCreatedAt, Long productNo) {
         if (CommunitySourceKind.normalize(sourceKind) != CommunitySourceKind.REVIEW) {
             return Outcome.SKIPPED_NOT_REVIEW;
         }
@@ -68,7 +106,7 @@ public class Cafe24ReviewPromoter {
         Review review = new Review();
         review.setOrgId(orgId);
         review.setChannelId(channelId);
-        review.setProductId(null); // Cafe24 carries a source product_no, not our product UUID
+        review.setProductId(resolveProduct(orgId, productNo));
         review.setBody(content);
         review.setRating(rating);
         review.setNegative(rating != null && rating <= 2);
@@ -79,5 +117,22 @@ public class Cafe24ReviewPromoter {
         review.setReplyState(ReviewReplyState.UNKNOWN);
         reviews.save(review);
         return Outcome.PROMOTED;
+    }
+
+    /**
+     * {@code product_no} → the SellerOps product, or null.
+     *
+     * <p>Resolve-or-create rather than resolve-only, because the Cafe24 inquiry path creates products
+     * from this very key: a review-only product would otherwise be permanently unattributable while an
+     * inquiry on the same listing produced a product row. The name falls back to the number itself,
+     * which is what {@code ProductService} already stores for a nameless source.
+     */
+    private UUID resolveProduct(UUID orgId, Long productNo) {
+        if (products == null || productNo == null || productNo <= 0) {
+            return null;
+        }
+        String sku = Long.toString(productNo);
+        Product product = products.resolveOrCreateWithinTransaction(orgId, null, sku);
+        return product == null ? null : product.getId();
     }
 }

@@ -31,6 +31,7 @@ import com.sellerops.inquiry.workitem.InquiryWorkItemAuditRepository;
 import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
 import com.sellerops.inquiry.workitem.InquiryWorkItemWriter;
 import com.sellerops.itemanalysis.ItemAnalysisRepository;
+import com.sellerops.ingest.IngestFollowUp;
 import com.sellerops.itemanalysis.ItemAnalysisService;
 import com.sellerops.itemanalysis.RuleBasedInboxItemAnalyzer;
 import com.sellerops.order.OrderDailySummaryRepository;
@@ -158,7 +159,8 @@ class ExportToAttentionChainTest {
         ItemAnalysisService analysis = new ItemAnalysisService(inquiries, reviews, analyses,
                 new RuleBasedInboxItemAnalyzer());
         connector = new FileUploadConnector(channels, new FileParser(), new ReviewRowMapper(),
-                new InquiryRowMapper(), new OrderSummaryRowMapper(), ingestion, runs, analysis);
+                new InquiryRowMapper(), new OrderSummaryRowMapper(), ingestion, runs,
+                new IngestFollowUp(analysis, null, null));
         // Both sources registered, as in production: NAVER resolves to the ingested-review
         // source; CAFE24 would still reach the community store.
         attention = new OperatorAttentionService(sellerAccounts, channels,

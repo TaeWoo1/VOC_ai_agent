@@ -69,7 +69,8 @@ public class Cafe24ReviewIssueBridge {
         for (CanonicalCommunityArticle article : articles) {
             if (promoter.promote(orgId, channelId, article.sourceKind(), article.boardNo(),
                     article.articleNo(), article.content(), article.rating(),
-                    article.sourceCreatedAt()) == Cafe24ReviewPromoter.Outcome.PROMOTED) {
+                    article.sourceCreatedAt(), article.productNo())
+                    == Cafe24ReviewPromoter.Outcome.PROMOTED) {
                 promoted++;
             }
         }

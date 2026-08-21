@@ -16,6 +16,13 @@ package com.sellerops.attention;
  *   <li>{@link #UNCERTAIN_UNSUPPORTED_CHANNEL} — the channel has no attention source adapter (e.g.
  *       ESM+/GMARKET, whose reviews land in the store but raise no signals). "No source" is a
  *       capability gap, not evidence that nothing needs a look.</li>
+ *   <li>{@link #UNCERTAIN_PRODUCT_UNLINKED} — the scope is a PRODUCT, and the rows that would answer
+ *       for it carry no product link, so they cannot be attributed to this product or to any other.
+ *       Added 2026-08-21 for the Operator Graph's product specialist, which faces the same shape of
+ *       false calm one level down: Cafe24 reviews are promoted with {@code productId = null} by
+ *       {@code Cafe24ReviewPromoter} and Coupang review rows sit on an option-id axis, so "this
+ *       product has no issues" and "this product's channel data was never linked to a product" would
+ *       otherwise be the same empty answer.</li>
  * </ul>
  *
  * <p>{@link #COVERED} is the ONLY value on which an empty signal list may honestly mean "nothing
@@ -29,7 +36,9 @@ public enum AttentionCoverage {
     /** More than one seller account shares this channel — reviews cannot be attributed per account. */
     UNCERTAIN_MULTI_ACCOUNT,
     /** No attention source serves this channel — review attention is not supported here yet. */
-    UNCERTAIN_UNSUPPORTED_CHANNEL;
+    UNCERTAIN_UNSUPPORTED_CHANNEL,
+    /** The rows that would answer for this product carry no product link — nothing can be attributed. */
+    UNCERTAIN_PRODUCT_UNLINKED;
 
     /** True when the surface must decline to answer instead of rendering a (false) calm empty state. */
     public boolean isUncertain() {

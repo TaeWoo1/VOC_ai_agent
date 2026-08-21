@@ -1,11 +1,17 @@
 /**
- * Goal parsing — deterministic, no LLM.
+ * Intent validation — the DASHBOARD lane.
  *
- * "Goal parsing" in this slice means mapping an operator request onto one of a small,
- * closed set of supported intents. There is no natural-language model here: an explicit
- * `intent` is validated directly, and a free-text `text` is matched against a fixed
- * keyword table. An unrecognized request is rejected (fail closed) rather than guessed.
- * A real LLM planner can replace this later behind the same `parseGoal` seam.
+ * <b>This file no longer interprets natural language, and that is the point.</b> Until Operator Graph
+ * v2 it also held a keyword table that mapped a free sentence onto one of the closed intents. That
+ * table is gone: under invariant I2 the interpretation of a seller's own words is done by an LLM
+ * planner or not at all, and a keyword table kept "for tests" or "for emergencies" is exactly the
+ * escape hatch that would make the invariant a comment (see `docs/sellerops_operator_graph_v2.md` §12.2).
+ *
+ * <b>What remains is not interpretation.</b> An explicit `intent` is a closed enum a BUTTON sent — a
+ * value the frontend chose from `/capabilities`, not a sentence a person typed. Validating it against
+ * the known set is a contract check, and rejecting an unknown one is the same fail-closed behaviour it
+ * always had. Free text does not enter here at all: it goes to the Operator, whose planner is the only
+ * thing allowed to decide what it means.
  */
 
 /** The closed set of intents the runtime can currently orchestrate. */
@@ -13,10 +19,18 @@ export type AgentIntent =
   | "HANDLE_UNANSWERED_INQUIRIES"
   | "PREPARE_INQUIRY_DRAFT"
   | "HANDLE_REVIEW_REPLIES"
-  | "HANDLE_OPERATIONS_ISSUES";
+  | "HANDLE_OPERATIONS_ISSUES"
+  /**
+   * The Operator goal — anything a seller types in their own words.
+   *
+   * Reached by an explicit intent, or by the HTTP layer for ANY free text (`AgentRunService.route`).
+   * The four intents above each name one SUBGRAPH with its own contract (a checkpoint, a draft, a
+   * brief); this one names the orchestrator that plans, and its planning is LLM-only.
+   */
+  | "OPERATOR_GOAL";
 
 /** The subgraph domain an intent routes to. */
-export type AgentDomain = "INQUIRY" | "INQUIRY_DRAFT" | "REVIEW" | "ISSUE";
+export type AgentDomain = "INQUIRY" | "INQUIRY_DRAFT" | "REVIEW" | "ISSUE" | "OPERATOR";
 
 export interface AgentGoal {
   readonly intent: AgentIntent;
@@ -52,66 +66,19 @@ export class UnrecognizedGoalError extends Error {
   }
 }
 
-/**
- * Fixed keyword table for the free-text path. Deterministic; the first matching row wins.
- * Ordered review → issue → inquiry-draft → inquiry so that a request mentioning both a review word
- * and the broad inquiry "답변" resolves to review; the issue row sits before inquiry so an operations
- * request is never shadowed by a broad inquiry word; the inquiry-draft row (a "초안"/draft request)
- * sits before the broad inquiry row so "문의 답변 초안 만들어줘" prepares a draft rather than starting
- * the full approve loop. The keyword sets are mutually substring-free (no set's keyword contains, or
- * is contained by, another set's — "초안"/"draft" appear in no other set, and "답변 초안" contains no
- * bare keyword), so canonical requests route the same regardless of order.
- */
-const INTENT_KEYWORDS: ReadonlyArray<{ intent: AgentIntent; keywords: readonly string[] }> = [
-  {
-    intent: "HANDLE_REVIEW_REPLIES",
-    keywords: ["리뷰", "후기", "리뷰 답변", "답글", "review", "review reply", "review replies"],
-  },
-  {
-    // Operations-issue signals. Listed before the inquiry rows so an issue request that also says
-    // a broad inquiry word does not get shadowed; none of these keywords overlaps the review or
-    // inquiry rows, so the examples ("악화된 상품 문제", "반복되는 고객 불만", "먼저 확인할 운영
-    // 이슈") resolve here regardless of order.
-    intent: "HANDLE_OPERATIONS_ISSUES",
-    keywords: [
-      "운영 이슈",
-      "이슈",
-      "악화",
-      "반복",
-      "고객 불만",
-      "불만",
-      "상품 문제",
-      "먼저 확인",
-      "operations issue",
-      "issue",
-      "recurring",
-      "worsening",
-      "complaint",
-    ],
-  },
-  {
-    // Draft-preparation: read one inquiry and show a rule-based answer DRAFT, ending at the human
-    // checkpoint with no send. Listed BEFORE the broad inquiry row so a "초안"/draft request prepares
-    // a draft instead of entering the full unanswered-inquiry approve loop.
-    intent: "PREPARE_INQUIRY_DRAFT",
-    keywords: ["초안", "답변 초안", "draft", "reply draft"],
-  },
-  {
-    intent: "HANDLE_UNANSWERED_INQUIRIES",
-    keywords: ["미답변", "문의", "답변 필요", "unanswered", "inquiry", "inquiries"],
-  },
-];
-
 const KNOWN_INTENTS: ReadonlySet<string> = new Set<AgentIntent>([
   "HANDLE_UNANSWERED_INQUIRIES",
   "PREPARE_INQUIRY_DRAFT",
   "HANDLE_REVIEW_REPLIES",
   "HANDLE_OPERATIONS_ISSUES",
+  "OPERATOR_GOAL",
 ]);
 
-/** Map an intent onto the subgraph domain that handles it — the goal router's core. */
+/** Map an intent onto the subgraph domain that handles it. A contract mapping, not a routing guess. */
 export function routeIntent(intent: AgentIntent): AgentDomain {
   switch (intent) {
+    case "OPERATOR_GOAL":
+      return "OPERATOR";
     case "HANDLE_REVIEW_REPLIES":
       return "REVIEW";
     case "HANDLE_OPERATIONS_ISSUES":
@@ -124,9 +91,11 @@ export function routeIntent(intent: AgentIntent): AgentDomain {
 }
 
 /**
- * Parse an operator request into a supported goal. Precedence: an explicit `intent`
- * wins; otherwise the `text` is matched against the keyword table. Neither present, or
- * no match → {@link UnrecognizedGoalError}.
+ * Validate an explicit intent, or recognise that this request is free text.
+ *
+ * An `intent` is checked against the closed set. Text with no intent resolves to `OPERATOR_GOAL` —
+ * not because anything here understood it, but because the Operator is where understanding happens.
+ * Neither present → {@link UnrecognizedGoalError}.
  */
 export function parseGoal(request: GoalRequest): AgentGoal {
   const paging = {
@@ -143,14 +112,8 @@ export function parseGoal(request: GoalRequest): AgentGoal {
     return { intent: request.intent as AgentIntent, ...paging };
   }
 
-  if (request.text) {
-    const lower = request.text.toLowerCase();
-    for (const row of INTENT_KEYWORDS) {
-      if (row.keywords.some((k) => lower.includes(k.toLowerCase()))) {
-        return { intent: row.intent, ...paging };
-      }
-    }
-    throw new UnrecognizedGoalError("no supported intent matched the request text");
+  if (request.text && request.text.trim().length > 0) {
+    return { intent: "OPERATOR_GOAL", ...paging };
   }
 
   throw new UnrecognizedGoalError("request carried neither an intent nor text");

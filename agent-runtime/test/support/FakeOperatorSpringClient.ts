@@ -1,0 +1,245 @@
+/**
+ * A contract-faithful in-memory stand-in for the Spring OPERATOR backend.
+ *
+ * It mirrors the reads the Operator's specialists make, plus the two model seams. Every method is
+ * deterministic: the same call returns the same value, so an Operator run is reproducible and two runs
+ * of the same goal can be compared.
+ *
+ * <b>It has no write method, and cannot be given one</b> — the interface it implements has none. That
+ * is the same property {@code FakeIssueSpringClient} carries and for the same reason: a fake that could
+ * mutate would let a test pass that a real deployment could not.
+ *
+ * `calls` counts every read, which is how the budget tests observe that a run stopped spending rather
+ * than merely stopped reporting.
+ */
+import type {
+  AgentJudgeView,
+  AgentPlanView,
+  CustomerMemorySearch,
+  InboxSummary,
+  ProductFact,
+  ProductKnowledge,
+  ProductSignals,
+  ProductSummary,
+  RepeatedInquiry,
+} from "../../src/spring/types";
+import type {
+  CustomerMemorySearchParams,
+  InquiryThreadContext,
+  OperatorSpringClient,
+} from "../../src/spring/OperatorSpringClient";
+
+export interface FakeOperatorSeed {
+  readonly inbox?: InboxSummary;
+  readonly products?: ProductSummary[];
+  readonly signals?: Record<string, ProductSignals>;
+  readonly customerMemory?: CustomerMemorySearch;
+  readonly repeats?: RepeatedInquiry[];
+  readonly itemAnalyses?: unknown[];
+  readonly dashboard?: { topProductIssues?: unknown[] };
+  /** Product Knowledge by product id — identity, listings, variants, facts and per-facet coverage. */
+  readonly knowledge?: Record<string, ProductKnowledge>;
+  readonly inquiryContext?: InquiryThreadContext;
+  /**
+   * When absent, the client has NO planGoal method at all.
+   *
+   * <b>In v2 that is no longer a "fallback" case — it is a FAILING one.</b> A seed without a plan is how
+   * a test reproduces "the planner capability is off", and the expected outcome is a FAILED run, not a
+   * keyword-routed answer. There is no keyword route to fall back to.
+   */
+  readonly plan?: AgentPlanView;
+  /**
+   * Plans keyed by goal text, for the recorded-plan suites.
+   *
+   * <b>The fake is a TRANSPORT, never a strategy.</b> These are plans a real model actually produced,
+   * replayed byte-for-byte, so CI runs with no vendor key while the only planning strategy in the
+   * process stays the real one. A `FakePlanner` implementing `Planner` would defeat `plannerFence`,
+   * which is exactly why this seam is here and not there.
+   */
+  readonly plansByGoal?: Record<string, AgentPlanView>;
+  /** When absent, the client has NO judgeFinding method at all. */
+  readonly judge?: AgentJudgeView;
+}
+
+export class FakeOperatorSpringClient implements OperatorSpringClient {
+  readonly calls = {
+    inbox: 0, products: 0, signals: 0, memory: 0, repeats: 0, analyses: 0, dashboard: 0,
+    plan: 0, judge: 0, knowledge: 0, facts: 0, inquiryContext: 0,
+  };
+
+  /** Every digest the judge was sent, so a test can assert what actually left for a vendor. */
+  readonly judgeDigests: string[] = [];
+  /** Every catalogue the planner was sent — the payload floor's runtime half. */
+  readonly planCatalogues: string[][] = [];
+  /** Every goal sentence the planner was asked about. */
+  readonly planGoals: string[] = [];
+  /** Every re-plan progress line — asserted to be need ids and statuses only. */
+  readonly planPriorContexts: string[] = [];
+
+  private readonly seed: FakeOperatorSeed;
+
+  constructor(seed: FakeOperatorSeed = {}) {
+    this.seed = seed;
+    // The two seams are attached ONLY when seeded. A client without them is indistinguishable from a
+    // backend that predates the endpoint, which is exactly the fallback path worth testing.
+    if (seed.plan || seed.plansByGoal) {
+      (this as OperatorSpringClient).planGoal = async (request) => {
+        this.calls.plan += 1;
+        this.planCatalogues.push([...request.toolCatalogue]);
+        this.planGoals.push(request.goalText);
+        if (request.priorContext) {
+          this.planPriorContexts.push(request.priorContext);
+        }
+        const recorded = seed.plansByGoal?.[request.goalText];
+        if (recorded) {
+          return recorded;
+        }
+        if (seed.plan) {
+          return seed.plan;
+        }
+        // Seeded with recorded plans but asked about a goal none of them covers. Answering with any
+        // other plan would make the suite measure this fake's improvisation rather than a model's.
+        return { available: false, supported: false, specialists: [], tools: [],
+          rationale: null, providerVersion: null };
+      };
+    }
+    if (seed.judge) {
+      (this as OperatorSpringClient).judgeFinding = async (request) => {
+        this.calls.judge += 1;
+        this.judgeDigests.push(request.evidenceDigest);
+        return seed.judge!;
+      };
+    }
+  }
+
+  async getInbox(): Promise<InboxSummary> {
+    this.calls.inbox += 1;
+    return this.seed.inbox ?? { items: [], total: 0, unansweredInquiries: 0 };
+  }
+
+  /**
+   * Mirrors {@code ProductQueryService.rank}: exact SKU, then exact name, then substring, ties broken by
+   * name. <b>Faithful ranking is the point, not a detail.</b> An earlier version of this fake filtered by
+   * substring and returned seed order, which made a test pass while production picked a different
+   * product — precisely the failure the live run found, and a fake that cannot express it cannot guard
+   * against it. One real product name being a prefix of another is ordinary in a seller's catalog.
+   */
+  async searchProducts(query: string, limit?: number): Promise<ProductSummary[]> {
+    this.calls.products += 1;
+    const needle = query.trim().toLowerCase();
+    const rank = (p: ProductSummary): number => {
+      const sku = (p.sku ?? "").toLowerCase();
+      const name = p.name.toLowerCase();
+      if (sku.length > 0 && sku === needle) return 0;
+      if (name === needle) return 1;
+      if (name.includes(needle)) return 2;
+      return Number.MAX_SAFE_INTEGER;
+    };
+    return (this.seed.products ?? [])
+      .filter((p) => rank(p) < Number.MAX_SAFE_INTEGER)
+      .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name))
+      .slice(0, limit ?? 10);
+  }
+
+  async getProductSignals(productId: string): Promise<ProductSignals> {
+    this.calls.signals += 1;
+    const found = this.seed.signals?.[productId];
+    if (!found) {
+      throw new Error(`no seeded signals for product ${productId}`);
+    }
+    return found;
+  }
+
+  async searchCustomerMemory(_params: CustomerMemorySearchParams): Promise<CustomerMemorySearch> {
+    this.calls.memory += 1;
+    return (
+      this.seed.customerMemory ?? {
+        cueSignatureKey: null,
+        cueTopic: null,
+        hits: [],
+        coverage: {
+          signal: "CUSTOMER_MEMORY",
+          coverage: "UNCERTAIN_UNSUPPORTED_CHANNEL",
+          linked: 0,
+          unlinked: 0,
+          provenance: "customer-memory/LEXICAL:v1",
+        },
+      }
+    );
+  }
+
+  async listRepeatedInquiries(): Promise<RepeatedInquiry[]> {
+    this.calls.repeats += 1;
+    return this.seed.repeats ?? [];
+  }
+
+  async listItemAnalyses(): Promise<unknown[]> {
+    this.calls.analyses += 1;
+    return this.seed.itemAnalyses ?? [];
+  }
+
+  async getDashboardSummary(): Promise<{ topProductIssues?: unknown[] }> {
+    this.calls.dashboard += 1;
+    return this.seed.dashboard ?? { topProductIssues: [] };
+  }
+
+  async getProductKnowledge(productId: string): Promise<ProductKnowledge> {
+    this.calls.knowledge += 1;
+    const found = this.seed.knowledge?.[productId];
+    if (found) {
+      return found;
+    }
+    // A product with signals but no seeded catalogue is a REAL state (the derivation has not run, or
+    // the channel has no product read), so the fake models it as empty-with-UNAVAILABLE rather than by
+    // throwing. A throw would make "we do not hold this" untestable.
+    const signals = this.seed.signals?.[productId];
+    if (!signals) {
+      throw new Error(`no seeded knowledge or signals for product ${productId}`);
+    }
+    return {
+      productId,
+      name: signals.productName,
+      sku: signals.sku,
+      status: "ACTIVE",
+      listings: [],
+      variants: [],
+      facts: [],
+      signals,
+      knowledgeCoverage: [
+        { facet: "IDENTITY", coverage: signals.sku ? "AVAILABLE" : "PARTIAL", known: 1,
+          newestObservedAt: null, provenance: "products" },
+        { facet: "LISTING", coverage: "UNAVAILABLE", known: 0, newestObservedAt: null, provenance: "" },
+        { facet: "SPEC", coverage: "UNAVAILABLE", known: 0, newestObservedAt: null, provenance: "" },
+        { facet: "VARIANT", coverage: "UNAVAILABLE", known: 0, newestObservedAt: null, provenance: "" },
+      ],
+    };
+  }
+
+  async searchProductFacts(productId: string, factKeys: string[]): Promise<ProductFact[]> {
+    this.calls.facts += 1;
+    const all = this.seed.knowledge?.[productId]?.facts ?? [];
+    if (factKeys.length === 0) {
+      return all;
+    }
+    // Mirrors the backend's expansion: a bare name matches its namespaced key. A fake that required the
+    // full key would let a specialist ship a lookup that silently finds nothing in production.
+    return all.filter((f) => factKeys.some((k) => f.factKey === k || f.factKey.endsWith(`:${k}`)));
+  }
+
+  async getInquiryThreadContext(workItemId: string): Promise<InquiryThreadContext> {
+    this.calls.inquiryContext += 1;
+    return this.seed.inquiryContext ?? {
+      workItemId,
+      inquiryId: "inq-fake",
+      channelCode: null,
+      productId: null,
+      productName: null,
+      status: "UNANSWERED",
+      phase: "OPEN",
+      receivedAt: "2026-08-01T00:00:00Z",
+      isSecret: null,
+      precedentCount: 0,
+      hasApprovedPastReply: false,
+    };
+  }
+}

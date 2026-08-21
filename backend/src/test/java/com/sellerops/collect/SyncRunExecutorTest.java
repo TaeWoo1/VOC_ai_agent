@@ -709,7 +709,7 @@ class SyncRunExecutorTest {
         com.sellerops.selfpilot.SellerAccountReauthService reauth =
                 new com.sellerops.selfpilot.SellerAccountReauthService(sellerAccounts, schedules, connectionStatus, alerts, txManager);
         return new SyncRunExecutor(sellerAccounts, channels, registry, ingestion, orderIngestion, syncJobs, cursors,
-                connectionStatus, null, null, null, null, null, reauth);
+                connectionStatus, null, null, null, null, null, reauth, null);
     }
 
     private com.sellerops.sync.SyncSchedule enabledSchedule(SellerAccount acc, DataType type) {

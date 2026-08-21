@@ -9,6 +9,7 @@ import { productAccounts } from "../lib/productAccounts";
 import { agentRuntime, AgentRuntimeError } from "../lib/agentRuntime/agentClient";
 import type {
   AgentRunView,
+  OperatorAnswer,
   DraftProvenance,
   InquiryCheckpointView,
   InquiryDraftPreparationView,
@@ -63,6 +64,15 @@ export function Agent() {
   const [command, setCommand] = useState("");
   const [accountId, setAccountId] = useState("");
   const [run, setRun] = useState<AgentRunView | null>(null);
+  /**
+   * Whether free-text planning is known to be unavailable for THIS org.
+   *
+   * Learned from a run rather than from `/capabilities`, because that route is public and the planner
+   * capability is per-org: a service-level "enabled" would tell one seller that a capability their org
+   * does not have is available. Once a run has failed for that reason the input is disabled, so the
+   * seller is not invited to type a second sentence that is guaranteed to fail the same way.
+   */
+  const plannerUnavailable = run?.status === "FAILED" && run.failureCode === "PLANNER_CAPABILITY_OFF";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -94,6 +104,30 @@ export function Agent() {
    * reads and drafts only — it never proposes, saves, or sends — and finishes at a terminal human
    * checkpoint where the draft is shown. Each call mints a fresh run, so "초안 다시 만들기" reuses this.
    */
+  /**
+   * Run a Dashboard-lane capability by INTENT.
+   *
+   * It never goes through the planner, so it keeps working when the planning capability is off — which
+   * is the whole reason the two lanes are separate.
+   */
+  async function runIntent(intent: string) {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const view = await agentRuntime.startRun({
+        intent,
+        ...(accountId ? { accountId } : {}),
+      });
+      setRun(view);
+    } catch (err) {
+      setRun(null);
+      setError(explain(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function prepareDraft() {
     if (busy) return;
     setBusy(true);
@@ -143,9 +177,11 @@ export function Agent() {
             id="agent-command"
             className="w-full rounded-xl border border-line bg-canvas p-3 text-ink"
             rows={2}
-            placeholder="예: 미답변 문의 처리해줘 / 리뷰 답변 준비해줘 / 지금 먼저 확인할 운영 이슈는 뭐야"
+            placeholder="예: 오늘 뭐부터 봐야 해? / 이 상품 폭이 몇 mm예요? / 이번 주 대표 보고 정리해줘"
             value={command}
             onChange={(e) => setCommand(e.target.value)}
+            disabled={plannerUnavailable}
+            aria-describedby={plannerUnavailable ? "agent-planner-off" : undefined}
           />
           <div className="flex flex-wrap items-end gap-3">
             <div>
@@ -166,11 +202,34 @@ export function Agent() {
                 ))}
               </select>
             </div>
-            <button type="submit" className="btn-primary" disabled={busy || !command.trim()}>
+            <button
+              type="submit"
+              className="btn-primary"
+              disabled={busy || !command.trim() || plannerUnavailable}
+            >
               {busy ? "실행 중…" : "실행"}
             </button>
           </div>
-          {caps.data ? <ExampleChips onPick={setCommand} /> : null}
+          {caps.data ? (
+            <ExampleChips onPick={setCommand} onRunIntent={runIntent} busy={busy} />
+          ) : null}
+          {plannerUnavailable ? (
+            /*
+              Not an error banner: a capability being off is a configuration state, not a failure of the
+              request. It stays visible after the failed run so the seller is not left re-typing the same
+              sentence — and it says what still works, because the rest of the product does.
+            */
+            <div id="agent-planner-off" className="rounded-xl border border-warn/40 bg-warn/5 p-3" role="status">
+              {/*
+                Says why the INPUT is disabled, and stops there. The run card below carries the run's own
+                reason; repeating that sentence here would print one fact twice and make the shorter,
+                more actionable line harder to find.
+              */}
+              <p className="text-sm text-muted">
+                지금은 문장으로 요청할 수 없습니다. 아래 바로가기를 사용해 주세요.
+              </p>
+            </div>
+          ) : null}
         </form>
       </Section>
 
@@ -201,6 +260,219 @@ export function Agent() {
   );
 }
 
+/**
+ * 운영 판단 — the Operator's answer.
+ *
+ * Three rules this card exists to keep, each of them a rule the product has already had to learn:
+ *
+ * 1. <b>A statement is shown with its evidence, or not at all.</b> Every finding renders the evidence
+ *    it cites, and the evidence renders where it came from. A number with no traceable source is the
+ *    thing this whole design is built to avoid.
+ * 2. <b>확인 필요 is not 확인됨.</b> A `NEEDS_REVIEW` finding is labelled and styled as something to
+ *    check, never as an assertion. The judge's reason is printed when there is one, because "왜 이건
+ *    확정이 아닌가"는 셀러가 물을 첫 질문이다.
+ * 3. <b>판단 불가 is not 문제 없음.</b> A coverage row that is not COVERED renders an explicit notice,
+ *    the same decline-to-answer the review attention surface renders instead of an empty state.
+ *
+ * No customer 원문 appears here and none can: the answer's own types cannot carry one.
+ */
+function OperatorAnswerCard({ answer }: { answer: OperatorAnswer }) {
+  const evidenceById = new Map(answer.evidence.map((e) => [e.evidenceId, e]));
+  const uncertain = answer.coverage.filter((c) => c.coverage !== "COVERED");
+  // SIGNALS is the attribution axis and is already covered by `uncertain` above; repeating it here
+  // would print the same limitation twice under two different headings.
+  const missingKnowledge = (answer.knowledgeCoverage ?? []).filter(
+    (c) => c.facet !== "SIGNALS" && (c.coverage === "UNAVAILABLE" || c.coverage === "STALE"),
+  );
+
+  return (
+    <section className="mt-4 rounded-lg border border-line bg-surface p-4">
+      <header className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-base font-bold text-ink">운영 판단</h3>
+        <span className="text-xs text-muted">
+          {/*
+            One planner, so one label — and it is still read from the run rather than written here, the
+            same rule draftKindLabel follows. The "규칙 해석" branch is gone with the deterministic
+            planner it described: under Operator Graph v2 a run either had an AI plan or it FAILED, so a
+            rendered answer can only have been interpreted one way.
+          */}
+          AI 해석 · 조회 {answer.budget.toolCalls}회
+        </span>
+      </header>
+
+      {answer.clarification ? (
+        // Asking back IS the answer. Rendering it as "found nothing" would hide a question the seller
+        // can actually resolve in one sentence.
+        <div className="mt-3 rounded border border-accent/40 bg-accent/5 p-3">
+          <p className="break-keep leading-relaxed text-ink">{answer.clarification}</p>
+        </div>
+      ) : null}
+
+      {answer.needs.length > 0 ? <InvestigationPlanList needs={answer.needs} /> : null}
+
+      {answer.findings.length === 0 && !answer.clarification ? (
+        <p className="mt-3 text-muted">{answer.note ?? "말씀드릴 만한 것을 찾지 못했습니다."}</p>
+      ) : answer.findings.length === 0 ? null : (
+        <ul className="mt-3 space-y-3">
+          {answer.findings.map((finding) => (
+            <li key={finding.findingId} className="rounded border border-line bg-bg p-3">
+              <div className="flex items-start gap-2">
+                <span
+                  className={
+                    finding.confidence === "SUPPORTED"
+                      ? "mt-0.5 shrink-0 rounded-full bg-good/10 px-2 py-0.5 text-xs font-medium text-good"
+                      : "mt-0.5 shrink-0 rounded-full bg-warn/10 px-2 py-0.5 text-xs font-medium text-warn"
+                  }
+                >
+                  {finding.confidence === "SUPPORTED" ? "확인됨" : "확인 필요"}
+                </span>
+                <p className="break-keep leading-relaxed text-ink">{finding.statement}</p>
+              </div>
+
+              {finding.verdict?.unsafeReason ? (
+                <p className="mt-2 text-xs text-muted">
+                  단정하지 않은 이유: {finding.verdict.unsafeReason}
+                </p>
+              ) : null}
+
+              <ul className="mt-2 space-y-1">
+                {finding.evidenceIds.map((id) => {
+                  const ref = evidenceById.get(id);
+                  if (!ref) return null;
+                  return (
+                    <li key={id} className="text-xs text-muted">
+                      근거 {ref.evidenceId} · {ref.locator.label ?? ref.kind}
+                      {ref.locator.count != null ? ` ${ref.locator.count}건` : ""}
+                      {ref.observedOn ? ` · ${ref.observedOn}` : ""}
+                      {ref.coverage !== "COVERED" ? " · 판단 불가 구간" : ""}
+                      {" · "}
+                      {ref.provenance}
+                    </li>
+                  );
+                })}
+              </ul>
+
+              {finding.surfaceLink ? (
+                <Link
+                  to={finding.surfaceLink}
+                  className="mt-2 inline-block text-sm font-medium text-accent hover:underline"
+                >
+                  근거 화면 열기
+                </Link>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {uncertain.length > 0 ? (
+        <div className="mt-4 rounded border border-warn/40 bg-warn/5 p-3">
+          <p className="text-sm font-medium text-ink">일부 데이터는 판단할 수 없습니다.</p>
+          <ul className="mt-1 space-y-0.5">
+            {uncertain.map((c) => (
+              <li key={c.signal} className="text-xs text-muted">
+                {c.signal}: 연결되지 않은 자료 {c.unlinked}건. 비어 있는 것이 문제가 없다는 뜻은 아닙니다.
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {missingKnowledge.length > 0 ? (
+        <div className="mt-4 rounded border border-line bg-bg p-3">
+          {/*
+            The AVAILABILITY axis, rendered separately from the attribution one above. They answer
+            different questions and have different remedies — "채널을 연결하세요" vs "상품 정보를
+            가져오세요" — so a merged notice would leave a seller unable to act on either.
+          */}
+          <p className="text-sm font-medium text-ink">아직 갖고 있지 않은 상품 정보가 있습니다.</p>
+          <ul className="mt-1 space-y-0.5">
+            {missingKnowledge.map((c) => (
+              <li key={c.facet} className="text-xs text-muted">
+                {FACET_LABEL[c.facet] ?? c.facet}:{" "}
+                {c.coverage === "STALE"
+                  ? `마지막으로 확인한 지 오래됐습니다${c.newestObservedAt ? ` (${c.newestObservedAt.slice(0, 10)})` : ""}.`
+                  : "SellerOps가 이 정보를 갖고 있지 않습니다. 상품에 그 값이 없다는 뜻은 아닙니다."}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {answer.nextActions.length > 0 ? (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {answer.nextActions.map((action) => (
+            <Link
+              key={action.surfaceLink}
+              to={action.surfaceLink}
+              className="rounded-full border border-line px-3 py-1 text-sm text-ink hover:bg-surface"
+            >
+              {action.label}
+            </Link>
+          ))}
+        </div>
+      ) : null}
+
+      {/* Printed whenever present. A run that stopped early must never look like one that finished. */}
+      {answer.note && (answer.findings.length > 0 || answer.clarification) ? (
+        <p className="mt-3 text-xs text-muted">{answer.note}</p>
+      ) : null}
+
+      <p className="mt-3 text-[11px] text-muted">계획: {answer.plannerVersion}</p>
+    </section>
+  );
+}
+
+/** Korean labels for the knowledge facets. A raw enum on screen is a leak of a storage detail. */
+const FACET_LABEL: Record<string, string> = {
+  IDENTITY: "상품 식별",
+  LISTING: "채널 등록 정보",
+  PRICE: "가격",
+  VARIANT: "옵션",
+  TAXONOMY: "브랜드·카테고리",
+  DESCRIPTION: "상품 설명",
+  SPEC: "규격·스펙",
+};
+
+/**
+ * What the agent decided it had to find out, and whether it did.
+ *
+ * <b>This is the part a seller can actually audit.</b> A findings list says what came back; this says
+ * what was LOOKED FOR — so an answer that quietly covered two of three questions is visible as such
+ * rather than reading as a complete reply. A required need left unanswered is called out in words, not
+ * only by an icon, because the whole point is that it be readable.
+ */
+function InvestigationPlanList({ needs }: { needs: OperatorAnswer["needs"] }) {
+  return (
+    <details className="mt-3 rounded border border-line bg-bg p-3">
+      <summary className="cursor-pointer text-sm font-medium text-ink">
+        확인한 항목 {needs.filter((n) => n.status === "SATISFIED").length}/{needs.length}
+      </summary>
+      <ul className="mt-2 space-y-1">
+        {needs.map((need) => (
+          <li key={need.id} className="flex items-start gap-2 text-xs">
+            <span
+              className={
+                need.status === "SATISFIED"
+                  ? "shrink-0 rounded-full bg-good/10 px-2 py-0.5 font-medium text-good"
+                  : need.status === "UNSATISFIABLE"
+                    ? "shrink-0 rounded-full bg-warn/10 px-2 py-0.5 font-medium text-warn"
+                    : "shrink-0 rounded-full bg-surface px-2 py-0.5 font-medium text-muted"
+              }
+            >
+              {need.status === "SATISFIED" ? "확인" : need.status === "UNSATISFIABLE" ? "불가" : "미확인"}
+            </span>
+            <span className="break-keep text-muted">
+              {need.question}
+              {need.reason ? ` — ${need.reason}` : ""}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 function CapabilityMeta({ store }: { store: { durable: boolean; multiInstanceSafe: boolean } }) {
   return (
     <>
@@ -215,11 +487,35 @@ function CapabilityMeta({ store }: { store: { durable: boolean; multiInstanceSaf
   );
 }
 
-function ExampleChips({ onPick }: { onPick: (c: string) => void }) {
-  const examples = ["미답변 문의 처리해줘", "리뷰 답변 준비해줘", "지금 먼저 확인할 운영 이슈는 뭐야"];
+/**
+ * Starting points — and the two LANES made visible.
+ *
+ * <b>The first two fill the box; the last two run a capability directly.</b> That is not cosmetic. Until
+ * Operator Graph v2, "미답변 문의 처리해줘" was a SENTENCE that a keyword table happened to route to the
+ * approve loop. With the table gone, a sentence goes to the planner — so a chip that still typed those
+ * words would silently change what the button does. A Dashboard-lane shortcut names its intent, the way
+ * a menu item does.
+ *
+ * The two free-text chips are illustrations, not a supported list: anything may be typed, and the
+ * planner interprets it or the run fails and says so.
+ */
+function ExampleChips({
+  onPick,
+  onRunIntent,
+  busy,
+}: {
+  onPick: (c: string) => void;
+  onRunIntent: (intent: string) => void;
+  busy: boolean;
+}) {
+  const goals = ["오늘 뭐부터 봐야 해?", "이번 주 대표에게 보고할 내용 정리해줘"];
+  const shortcuts: Array<{ label: string; intent: string }> = [
+    { label: "미답변 문의 처리", intent: "HANDLE_UNANSWERED_INQUIRIES" },
+    { label: "리뷰 답변 준비", intent: "HANDLE_REVIEW_REPLIES" },
+  ];
   return (
     <div className="flex flex-wrap gap-2 pt-1">
-      {examples.map((ex) => (
+      {goals.map((ex) => (
         <button
           key={ex}
           type="button"
@@ -229,11 +525,23 @@ function ExampleChips({ onPick }: { onPick: (c: string) => void }) {
           {ex}
         </button>
       ))}
+      {shortcuts.map((s) => (
+        <button
+          key={s.intent}
+          type="button"
+          disabled={busy}
+          className="rounded-full border border-accent/40 bg-accent/5 px-3 py-1 text-sm text-ink hover:bg-accent/10"
+          onClick={() => onRunIntent(s.intent)}
+        >
+          {s.label}
+        </button>
+      ))}
     </div>
   );
 }
 
 const DOMAIN_LABEL: Record<string, string> = {
+  OPERATOR: "운영 판단",
   INQUIRY: "문의 응답",
   INQUIRY_DRAFT: "문의 답변 초안",
   REVIEW: "리뷰 답변",
@@ -254,9 +562,11 @@ function RunView({
   const statusLabel =
     run.status === "AWAITING_APPROVAL"
       ? "확인 필요"
-      : run.domain === "INQUIRY_DRAFT"
-        ? "초안 준비됨"
-        : "완료";
+      : run.status === "FAILED"
+        ? "처리하지 못함"
+        : run.domain === "INQUIRY_DRAFT"
+          ? "초안 준비됨"
+          : "완료";
   return (
     <section className="card space-y-4" aria-label="에이전트 실행" role="region">
       <div className="flex flex-wrap items-center gap-2">
@@ -267,6 +577,19 @@ function RunView({
       </div>
 
       <RunTrail trail={run.trail} />
+
+      {run.status === "FAILED" ? (
+        /*
+          A run that could not be planned. Rendered as its own state rather than as an empty answer,
+          because an empty answer says "확인했고 아무것도 없었다" — a different and false claim. The
+          reason comes from the run; this component does not compose one.
+        */
+        <div role="status" className="rounded-xl border border-warn/40 bg-warn/5 p-3">
+          <p className="break-keep leading-relaxed text-ink">
+            {run.failureReason ?? "요청을 처리하지 못했습니다."}
+          </p>
+        </div>
+      ) : null}
 
       {run.status === "AWAITING_APPROVAL" && run.checkpoint?.kind === "INQUIRY_REPLY_APPROVAL" ? (
         <InquiryCheckpointCard
@@ -291,6 +614,10 @@ function RunView({
       ) : null}
 
       {run.status === "DONE" && run.domain === "ISSUE" && run.brief ? <IssueBriefCard brief={run.brief} /> : null}
+
+      {run.status === "DONE" && run.domain === "OPERATOR" && run.answer ? (
+        <OperatorAnswerCard answer={run.answer} />
+      ) : null}
 
       {run.status === "DONE" && run.domain !== "ISSUE" && run.domain !== "INQUIRY_DRAFT" ? (
         <OutcomeCard domain={run.domain} outcome={run.outcome ?? null} />

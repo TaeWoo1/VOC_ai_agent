@@ -68,6 +68,19 @@ public class Cafe24OAuthException extends RuntimeException {
     }
 
     /**
+     * A classified failure raised by a RESOURCE endpoint rather than the token endpoint.
+     *
+     * <p>A grant that is missing a scope does not fail at the token call — the token mints fine and the
+     * resource read returns 401/403. Product reads are the first capability in this connector to need a
+     * scope the existing grants do not carry ({@code mall.read_product}), so this is the first place the
+     * distinction shows up outside the token flow. Same {@link Kind} vocabulary, so downstream handling
+     * ("판매자가 다시 동의해야 합니다" vs "다시 연결해야 합니다") is unchanged.
+     */
+    public static Cafe24OAuthException resourceScope(int statusCode, String message) {
+        return new Cafe24OAuthException(Kind.INSUFFICIENT_SCOPE, statusCode, message);
+    }
+
+    /**
      * Build a classified exception from a token-endpoint error response. The body is parsed
      * only for the standard {@code error} field; a recognized value sets the kind, anything
      * else (including an unparseable body) is {@link Kind#UNKNOWN}.

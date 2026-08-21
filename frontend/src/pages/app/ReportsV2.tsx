@@ -9,7 +9,7 @@ import { useReviewAttention } from "../../hooks/useReviewAttention";
 import { buildWeeklyReport } from "../../lib/reportView";
 import type { TodayBreakdown } from "../../lib/todayInbox";
 import { SEVERITY_LABEL_KO, changeBadges } from "../../lib/reviewIssuesView";
-import type { FeedItem, ItemAnalysis, ReviewIssueView } from "../../lib/types";
+import type { FeedItem, ItemAnalysis, ReviewIssueView, TopProductIssue } from "../../lib/types";
 
 const UNAVAILABLE = "이 항목은 지금 확인할 수 없습니다.";
 
@@ -111,7 +111,23 @@ function IssueLine({ issue }: { issue: ReviewIssueView }) {
 export function ReportsV2() {
   const [issues, setIssues] = useState<ReviewIssueView[] | null>(null);
   const [inbox, setInbox] = useState<FeedItem[] | null>(null);
+  // The SERVER's uncapped 미답변 문의 count, kept separately from the feed rows. The feed is capped by
+  // `limit`; this number is not, and it is the one 홈 prints. Counting the capped rows here is what
+  // made the same words show ≤50 on this page and 3,208 on 홈.
+  const [unansweredInquiries, setUnansweredInquiries] = useState<number | null>(null);
   const [analyses, setAnalyses] = useState<ItemAnalysis[]>([]);
+  /**
+   * 상품별 이슈 — the consumer restored.
+   *
+   * `DashboardService.buildTopProductIssues()` and `GET /api/dashboard/summary` never stopped working
+   * and `ExportToReportChainTest` has been pinning their values the whole time; what disappeared in the
+   * A1–A7 product assembly was every FRONTEND caller (`getDashboardSummary` was defined once and called
+   * zero times). This is that caller, not a reimplementation.
+   *
+   * Null = the read failed, and the section renders "확인할 수 없음" rather than an empty list, per this
+   * page's standing rule.
+   */
+  const [productIssues, setProductIssues] = useState<TopProductIssue[] | null>(null);
   const [loading, setLoading] = useState(true);
   // 확인이 필요한 리뷰: the shared canonical source (per account, attention-filtered) — same as 홈.
   const reviewSources = useReviewAttention(1);
@@ -122,13 +138,20 @@ export function ReportsV2() {
       api.getReviewIssuesStrict(),
       api.getInboxStrict(),
       api.getItemAnalysisStrict(),
-    ]).then(([issueResult, inboxResult, analysisResult]) => {
+      api.getDashboardSummary(),
+    ]).then(([issueResult, inboxResult, analysisResult, dashboardResult]) => {
       if (!active) {
         return;
       }
       setIssues(issueResult.status === "fulfilled" ? issueResult.value : null);
       setInbox(inboxResult.status === "fulfilled" ? inboxResult.value.items : null);
+      setUnansweredInquiries(
+        inboxResult.status === "fulfilled" ? inboxResult.value.unansweredInquiries : null,
+      );
       setAnalyses(analysisResult.status === "fulfilled" ? analysisResult.value : []);
+      setProductIssues(
+        dashboardResult.status === "fulfilled" ? dashboardResult.value.topProductIssues : null,
+      );
       setLoading(false);
     });
     return () => {
@@ -136,7 +159,14 @@ export function ReportsV2() {
     };
   }, []);
 
-  const report = buildWeeklyReport(issues, inbox, analyses, reviewSources === undefined ? null : reviewSources);
+  const report = buildWeeklyReport(
+    issues,
+    inbox,
+    analyses,
+    reviewSources === undefined ? null : reviewSources,
+    undefined,
+    unansweredInquiries,
+  );
 
   if (loading || reviewSources === undefined) {
     return (
@@ -230,6 +260,31 @@ export function ReportsV2() {
             </ul>
           </div>
         ) : null}
+      </Panel>
+
+      <Panel
+        title="상품별로 몰린 이슈"
+        description="같은 문제가 특정 상품에 모여 있는지 봅니다."
+      >
+        {productIssues === null ? (
+          <p className="text-muted">{UNAVAILABLE}</p>
+        ) : productIssues.length > 0 ? (
+          <ul className="space-y-1">
+            {productIssues.map((row) => (
+              <li
+                key={`${row.productName}-${row.issueLabel}`}
+                className="flex items-baseline justify-between gap-3 break-keep py-1 leading-relaxed"
+              >
+                <span className="text-ink">
+                  {row.productName} — {row.issueLabel}
+                </span>
+                <span className="shrink-0 tabular-nums text-muted">{row.count}건</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-muted">상품별로 몰린 이슈는 확인되지 않았습니다.</p>
+        )}
       </Panel>
 
       <Panel

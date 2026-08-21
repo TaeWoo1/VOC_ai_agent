@@ -41,7 +41,11 @@ public class Cafe24OnboardingConfiguration {
             @Value("${sellerops.connector.cafe24.oauth.client-secret:}") String clientSecret,
             @Value("${sellerops.connector.cafe24.oauth.redirect-uri:http://localhost:8080/api/connect/cafe24/callback}")
             String redirectUri,
-            @Value("${sellerops.connector.cafe24.oauth.scopes:mall.read_community,mall.read_order}") String scopes,
+            // mall.read_product is new in Operator Graph v2. A connection made before it granted only the
+            // first two, so its token mints fine and the product read returns insufficient_scope —
+            // surfaced to the seller as a re-consent item, never worked around. New connections
+            // consent to all three at once.
+            @Value("${sellerops.connector.cafe24.oauth.scopes:mall.read_community,mall.read_order,mall.read_product}") String scopes,
             @Value("${sellerops.connector.cafe24.oauth.state-ttl-seconds:600}") long stateTtlSeconds,
             ObjectProvider<SellerAccountReauthService> reauth) {
         Cafe24OnboardingService service = new Cafe24OnboardingService(accounts, channels, states, vault,

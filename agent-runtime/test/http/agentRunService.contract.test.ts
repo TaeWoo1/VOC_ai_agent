@@ -23,6 +23,7 @@ import { clearLogSink, getLogSink } from "../../src/log";
 import { FakeSpringClient } from "../support/FakeSpringClient";
 import { FakeReviewSpringClient } from "../support/FakeReviewSpringClient";
 import { FakeIssueSpringClient } from "../support/FakeIssueSpringClient";
+import { FakeOperatorSpringClient } from "../support/FakeOperatorSpringClient";
 import { twoInquiries, PHONE_TOKEN, EMAIL_TOKEN } from "../support/fixtures";
 import { twoReviews } from "../support/reviewFixtures";
 import { fourIssues } from "../support/issueFixtures";
@@ -66,8 +67,7 @@ function factoryFor(fakes: Fakes, orgId: string): SpringClientFactory {
     inquiry: fakes.inquiry,
     review: fakes.review,
     issue: fakes.issue,
-    identity: identityFor(orgId),
-  });
+    identity: identityFor(orgId), operator: new FakeOperatorSpringClient() });
 }
 
 function serviceWith(fakes: Fakes, provider: RunStoreProvider, orgId = ORG_A): AgentRunService {
@@ -87,14 +87,18 @@ describe("AgentRunService contract", () => {
 
   afterEach(() => clearLogSink());
 
-  it("capabilities lists four intents, fail-closed send, store mode", () => {
+  it("capabilities lists every intent, fail-closed send, store mode", () => {
     const cap = service.capabilities();
+    // OPERATOR joined the catalogue with Operator Graph v1 (2026-08-21). It is listed with
+    // hasCheckpoint: false because every tool behind it is READ — there is nothing to authorize.
     expect(cap.intents.map((i) => i.domain).sort()).toEqual([
       "INQUIRY",
       "INQUIRY_DRAFT",
       "ISSUE",
+      "OPERATOR",
       "REVIEW",
     ]);
+    expect(cap.intents.find((i) => i.domain === "OPERATOR")!.hasCheckpoint).toBe(false);
     expect(cap.externalSend).toBe("disabled");
     expect(cap.runStore.kind).toBe("memory");
     expect(cap.intents.find((i) => i.domain === "REVIEW")!.requiresAccountScope).toBe(true);
@@ -148,7 +152,9 @@ describe("AgentRunService contract", () => {
   });
 
   it("inquiry: start parks at a checkpoint exposing only the templated reply — no customer 원문", async () => {
-    const view = await service.start("tok", { goalText: "미답변 문의 처리해줘" });
+    // Reached by INTENT, not by a sentence: since Operator Graph v2 free text goes to the Operator and
+    // the approve loop is a Dashboard-lane capability a button names outright.
+    const view = await service.start("tok", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
     expect(view.domain).toBe("INQUIRY");
     expect(view.status).toBe("AWAITING_APPROVAL");
     expect(view.checkpoint?.kind).toBe("INQUIRY_REPLY_APPROVAL");
@@ -202,7 +208,7 @@ describe("AgentRunService contract", () => {
   });
 
   it("issue: run returns a quote-free brief straight to DONE; resume is a 409 (no checkpoint)", async () => {
-    const view = await service.start("tok", { goalText: "지금 먼저 확인할 운영 이슈는 뭐야", size: 3 });
+    const view = await service.start("tok", { intent: "HANDLE_OPERATIONS_ISSUES", size: 3 });
     expect(view.domain).toBe("ISSUE");
     expect(view.status).toBe("DONE");
     expect(view.brief!.selectedCount).toBeGreaterThan(0);
@@ -256,6 +262,7 @@ describe("AgentRunService contract", () => {
         review: fakes.review,
         issue: fakes.issue,
         identity: { whoami: async () => { throw new SpringApiError(401, "HTTP_401", "unauthorized"); } },
+        operator: new FakeOperatorSpringClient(),
       }),
       env: "test",
     });

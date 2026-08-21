@@ -27,6 +27,9 @@ import { ReviewAgentRuntime } from "../reviewRuntime";
 import type { ReviewRunResult } from "../reviewRuntime";
 import { IssueAgentRuntime } from "../issueRuntime";
 import type { IssueRunResult } from "../issueRuntime";
+import { OperatorAgentRuntime } from "../operator/operatorRuntime";
+import type { OperatorRunResult } from "../operator/operatorRuntime";
+import type { OperatorSpringClient } from "../spring/OperatorSpringClient";
 import { SpringDraftProvider } from "../provider/SpringDraftProvider";
 import { parseGoal, routeIntent, UnrecognizedGoalError } from "../goal/parseGoal";
 import type { GoalRequest } from "../goal/parseGoal";
@@ -57,6 +60,7 @@ export interface SpringClientBundle {
   readonly review: ReviewSpringClient;
   readonly issue: IssueSpringClient;
   readonly identity: IdentitySpringClient;
+  readonly operator: OperatorSpringClient;
 }
 
 /** Builds the backend clients for a forwarded operator token. Injectable for tests. */
@@ -68,35 +72,53 @@ export interface AgentRunServiceDeps {
   readonly env: string;
 }
 
-/** The static intent catalogue, also surfaced on /capabilities so the frontend can discover it. */
+/**
+ * The static intent catalogue, also surfaced on /capabilities so the frontend can discover it.
+ *
+ * <b>`sampleGoals` are illustrations, not a menu.</b> The Operator's entry is free text interpreted by
+ * a planner; there is no set of blessed sentences, and the field was renamed from `examples` because
+ * the old name was being read as one — the frontend turned three of them into chips and a demo script
+ * turned four of them into an acceptance criterion.
+ */
 const INTENT_CATALOGUE: CapabilitiesView["intents"] = [
+  {
+    intent: "OPERATOR_GOAL",
+    domain: "OPERATOR",
+    hasCheckpoint: false,
+    requiresAccountScope: false,
+    sampleGoals: [
+      "오늘 뭐부터 봐야 해?",
+      "A상품 요즘 문제 있어?",
+      "이번 주 대표에게 보고할 내용 정리해줘",
+    ],
+  },
   {
     intent: "HANDLE_UNANSWERED_INQUIRIES",
     domain: "INQUIRY",
     hasCheckpoint: true,
     requiresAccountScope: false,
-    examples: ["미답변 문의 처리해줘", "답변 필요한 문의 보여줘"],
+    sampleGoals: ["미답변 문의 처리해줘", "답변 필요한 문의 보여줘"],
   },
   {
     intent: "PREPARE_INQUIRY_DRAFT",
     domain: "INQUIRY_DRAFT",
     hasCheckpoint: false,
     requiresAccountScope: false,
-    examples: ["Cafe24 문의 답변 초안 만들어줘", "문의 답변 초안 준비해줘"],
+    sampleGoals: ["Cafe24 문의 답변 초안 만들어줘", "문의 답변 초안 준비해줘"],
   },
   {
     intent: "HANDLE_REVIEW_REPLIES",
     domain: "REVIEW",
     hasCheckpoint: true,
     requiresAccountScope: true,
-    examples: ["리뷰 답변 초안 만들어줘", "후기 답글 준비해줘"],
+    sampleGoals: ["리뷰 답변 초안 만들어줘", "후기 답글 준비해줘"],
   },
   {
     intent: "HANDLE_OPERATIONS_ISSUES",
     domain: "ISSUE",
     hasCheckpoint: false,
     requiresAccountScope: false,
-    examples: ["최근 악화된 상품 문제 알려줘", "지금 먼저 확인할 운영 이슈는 뭐야"],
+    sampleGoals: ["최근 악화된 상품 문제 알려줘", "지금 먼저 확인할 운영 이슈는 뭐야"],
   },
 ];
 
@@ -111,6 +133,11 @@ export class AgentRunService {
       env: this.deps.env,
       intents: INTENT_CATALOGUE,
       runStore: { kind: p.kind, durable: p.durable, multiInstanceSafe: p.multiInstanceSafe },
+      // `unknown` without a probe: this route is public and unauthenticated, and the planner capability
+      // is per-ORG. Reporting "enabled" from a service-level guess would tell one seller that a
+      // capability their org does not have is available. The frontend learns the real answer from its
+      // first run, which fails honestly and says why.
+      freeTextPlanning: "unknown",
       externalSend: "disabled",
     };
   }
@@ -129,12 +156,21 @@ export class AgentRunService {
   }
 
   private runtimes(bundle: SpringClientBundle, stores: RunStores): {
+    operator: OperatorAgentRuntime;
     inquiry: InquiryAgentRuntime;
     inquiryDraft: InquiryDraftAgentRuntime;
     review: ReviewAgentRuntime;
     issue: IssueAgentRuntime;
   } {
     return {
+      // The Operator takes no store from the durable provider: every tool it can reach is READ, so a
+      // run has nothing to authorize, nothing to pause for, and nothing a restart could lose. Same
+      // reasoning as the draft-preparation runtime below.
+      operator: new OperatorAgentRuntime({
+        operator: bundle.operator,
+        inquiry: bundle.inquiry,
+        issue: bundle.issue,
+      }),
       inquiry: new InquiryAgentRuntime({
         client: bundle.inquiry,
         runStore: stores.inquiry,
@@ -164,7 +200,16 @@ export class AgentRunService {
     };
   }
 
-  /** Route without running — used by the server to validate/log the target domain. */
+  /**
+   * Route without running — used by the server to validate/log the target domain.
+   *
+   * <b>Two lanes, and this method is the fork.</b> An explicit `intent` is a value a BUTTON sent: it is
+   * validated against the closed catalogue and an unknown one is still a 400, because a client naming
+   * an intent is asserting it knows the catalogue and a silent reroute would hide its bug. Free TEXT is
+   * a sentence a person typed, and it always goes to the OPERATOR — not as a fallback for text the
+   * keyword table refused (there is no keyword table since v2), but because interpreting a sentence is
+   * the Operator's job and nothing else in this process is allowed to do it.
+   */
   route(input: StartRunRequest): AgentRunDomain {
     try {
       return routeIntent(parseGoal(this.goalRequest(input)).intent);
@@ -189,6 +234,7 @@ export class AgentRunService {
     log("http_start", { domain, hasThreadId: input.threadId != null, hasAccount: request.accountId != null });
     const rt = this.runtimes(bundle, stores);
 
+    if (domain === "OPERATOR") return this.operatorView(threadId, await rt.operator.run(threadId, request));
     if (domain === "INQUIRY") return this.inquiryView(threadId, await rt.inquiry.start(threadId, request));
     if (domain === "INQUIRY_DRAFT") return this.draftView(threadId, await rt.inquiryDraft.run(threadId, request));
     if (domain === "REVIEW") return this.reviewView(threadId, await rt.review.start(threadId, request));
@@ -201,6 +247,9 @@ export class AgentRunService {
     if (!domain) throw new HttpError(404, "UNKNOWN_THREAD", "no run found for this thread");
     if (domain === "ISSUE") {
       throw new HttpError(409, "NO_CHECKPOINT", "issue-memory runs have no checkpoint to resume; start again to refresh");
+    }
+    if (domain === "OPERATOR") {
+      throw new HttpError(409, "NO_CHECKPOINT", "operator runs have no checkpoint to resume; start again to re-answer");
     }
 
     const rt = this.runtimes(bundle, stores);
@@ -351,6 +400,31 @@ export class AgentRunService {
       return { threadId, domain: "REVIEW", status: "AWAITING_APPROVAL", trail: result.trail, checkpoint };
     }
     return { threadId, domain: "REVIEW", status: "DONE", trail: result.trail, outcome: result.outcome };
+  }
+
+  /**
+   * The operator answer as surfaced over HTTP.
+   *
+   * No filtering happens here and none is needed: every channel this projects from is already
+   * sanitized by construction (ids, closed-vocabulary labels, counts, dates, and sentences SellerOps
+   * composed). A projection that had to strip fields would mean the state upstream was carrying
+   * something it should not have been.
+   */
+  private operatorView(threadId: string, result: OperatorRunResult): AgentRunView {
+    if (result.status === "FAILED") {
+      // A failure is a first-class outcome on this surface, not an HTTP error: the run was accepted,
+      // executed and honestly could not answer. Returning 500 would make an off-by-default capability
+      // look like an outage, and returning DONE-with-nothing would make it look like a clean answer.
+      return {
+        threadId,
+        domain: "OPERATOR",
+        status: "FAILED",
+        trail: result.trail,
+        failureCode: result.failureCode,
+        failureReason: result.reason,
+      };
+    }
+    return { threadId, domain: "OPERATOR", status: "DONE", trail: result.trail, answer: result.answer };
   }
 
   private issueView(threadId: string, result: IssueRunResult): AgentRunView {

@@ -21,7 +21,7 @@ import com.sellerops.ingest.map.ReviewRowMapper;
 import com.sellerops.ingest.map.RowError;
 import com.sellerops.ingest.parse.FileParser;
 import com.sellerops.ingest.parse.ParsedTable;
-import com.sellerops.itemanalysis.ItemAnalysisService;
+import com.sellerops.ingest.IngestFollowUp;
 import com.sellerops.sync.SyncJob;
 import java.io.InputStream;
 import java.util.ArrayList;
@@ -56,12 +56,12 @@ public class FileUploadConnector implements ChannelConnector {
     private final OrderSummaryRowMapper orderMapper;
     private final IngestionService ingestionService;
     private final CollectionRunService collectionRuns;
-    private final ItemAnalysisService itemAnalysis;
+    private final IngestFollowUp followUp;
 
     public FileUploadConnector(ChannelRepository channels, FileParser fileParser,
                                ReviewRowMapper reviewMapper, InquiryRowMapper inquiryMapper,
                                OrderSummaryRowMapper orderMapper, IngestionService ingestionService,
-                               CollectionRunService collectionRuns, ItemAnalysisService itemAnalysis) {
+                               CollectionRunService collectionRuns, IngestFollowUp followUp) {
         this.channels = channels;
         this.fileParser = fileParser;
         this.reviewMapper = reviewMapper;
@@ -69,7 +69,7 @@ public class FileUploadConnector implements ChannelConnector {
         this.orderMapper = orderMapper;
         this.ingestionService = ingestionService;
         this.collectionRuns = collectionRuns;
-        this.itemAnalysis = itemAnalysis;
+        this.followUp = followUp;
     }
 
     @Override
@@ -117,10 +117,14 @@ public class FileUploadConnector implements ChannelConnector {
                 default -> throw ApiException.badRequest("지원하지 않는 업로드 유형입니다.");
             }
 
-            // Enrich exactly the rows this upload inserted with rule-based item-analysis.
-            // Best-effort: enrichment failure must never fail the upload (rows are saved).
-            if (type == UploadType.REVIEW || type == UploadType.INQUIRY) {
-                triggerAnalysis(orgId, type.name(), outcome.insertedIds());
+            // Follow up exactly the rows this upload inserted: item-analysis, issue-memory refresh,
+            // customer-memory index. Moved into IngestFollowUp so the API-sync and Coupang-handoff
+            // paths do the SAME three things — they each used to do a different subset, which is
+            // audit defects B and C. Best-effort inside: the rows are saved either way.
+            switch (type) {
+                case REVIEW -> followUp.afterReviewIngest(orgId, channelId, outcome.insertedIds());
+                case INQUIRY -> followUp.afterInquiryIngest(orgId, outcome.insertedIds());
+                default -> { /* order summaries carry no customer utterance to analyse or index */ }
             }
 
             // Both mapping errors (bad rows) and per-row persistence errors are surfaced.
@@ -155,23 +159,6 @@ public class FileUploadConnector implements ChannelConnector {
             throw ApiException.badRequest("업로드에는 API 수집 방식을 사용할 수 없습니다.");
         }
         return method;
-    }
-
-    /**
-     * Trigger rule-based item-analysis on the newly inserted source ids. Deliberately
-     * swallows failures (logged): the upload has already persisted its rows, and
-     * enrichment is best-effort — {@code /inbox} loads analyses fail-soft.
-     */
-    private void triggerAnalysis(UUID orgId, String sourceType, List<UUID> insertedIds) {
-        if (insertedIds == null || insertedIds.isEmpty()) {
-            return;
-        }
-        try {
-            itemAnalysis.analyzeForSources(orgId, sourceType, insertedIds);
-        } catch (Exception e) {
-            log.warn("upload-triggered item-analysis failed org={} type={} count={}: {}",
-                    orgId, sourceType, insertedIds.size(), e.getMessage());
-        }
     }
 
     /**

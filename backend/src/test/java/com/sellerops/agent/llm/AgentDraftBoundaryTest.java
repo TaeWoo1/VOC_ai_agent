@@ -27,35 +27,100 @@ class AgentDraftBoundaryTest {
     }
 
     /**
-     * Nothing in production reaches the vendor around the org allow-list.
+     * Every LLM capability has exactly ONE door, and nothing reaches a vendor around it.
      *
-     * <p>{@link AgentDraftService} is the door — it is where {@code isEnabledFor(orgId)} is checked —
-     * and this asserts it is the ONLY one, so a future service cannot hold an
-     * {@link AgentDraftGenerator} directly and draft for an org that never opted in.
+     * <p><b>Generalized 2026-08-21 (Operator Graph v1), and widened rather than weakened.</b> This test
+     * used to assert one pair — {@code AgentDraftService} is the only class that may construct
+     * {@code AgentDraftGenerator}. The Operator adds two more capabilities with the same shape (plan,
+     * judge), each with its own flag, key, prompt and payload floor, so the assertion became a TABLE of
+     * (generator, door) pairs. It now checks three doors instead of one; nothing it used to forbid is
+     * allowed now.
+     *
+     * <p>The property in each row is the same one: the org allow-list is checked at the door, so a
+     * future service holding a generator directly would be an allow-list nobody runs.
      */
+    private static final List<String[]> CAPABILITIES = List.of(
+            new String[] {"AgentDraftGenerator", "AgentDraftService.java", "AgentDraftGenerator.java"},
+            new String[] {"AgentPlanGenerator", "AgentPlanService.java", "AgentPlanGenerator.java"},
+            new String[] {"AgentJudgeGenerator", "AgentJudgeService.java", "AgentJudgeGenerator.java"},
+            // The fourth capability (Operator Graph v2): it sends ONE CUSTOMER'S OWN inquiry text and
+            // receives two closed-vocabulary labels. Heaviest of the four exposures, so it gets the same
+            // one-door treatment rather than riding on the draft capability's door.
+            new String[] {"InquirySignalGenerator", "LlmInquirySignatureClassifier.java",
+                    "InquirySignalGenerator.java"});
+
+    /**
+     * The classes allowed to name {@code AgentLlmTransport} beside a {@code .post(} call: the three
+     * generators (each makes the one call its capability needs), the JDK implementation, and the
+     * {@code @Bean} factory. Everything else that does both is reaching the vendor directly.
+     */
+    private static final List<String> TRANSPORT_HOLDERS = List.of(
+            "AgentDraftGenerator.java", "AgentPlanGenerator.java", "AgentJudgeGenerator.java",
+            "InquirySignalGenerator.java",
+            "JdkAgentLlmTransport.java", "AgentLlmConfiguration.java");
+
     @Test
-    @DisplayName("only AgentDraftService constructs the generator or holds the transport")
+    @DisplayName("each capability's service is the only door to its generator, and only generators post")
     void theServiceIsTheOnlyDoor() throws IOException {
         List<String> offenders = new ArrayList<>();
         try (Stream<Path> walk = Files.walk(MAIN)) {
             for (Path source : walk.filter(p -> p.toString().endsWith(".java")).toList()) {
                 String name = source.getFileName().toString();
-                if (name.equals("AgentDraftService.java") || name.equals("AgentDraftGenerator.java")) {
-                    continue;
-                }
                 String code = stripComments(Files.readString(source));
-                if (code.contains("new AgentDraftGenerator(") || code.contains("AgentDraftGenerator::new")) {
-                    offenders.add(name + " (constructs the generator)");
+                for (String[] capability : CAPABILITIES) {
+                    String generator = capability[0];
+                    if (name.equals(capability[1]) || name.equals(capability[2])) {
+                        continue;
+                    }
+                    if (code.contains("new " + generator + "(") || code.contains(generator + "::new")) {
+                        offenders.add(name + " (constructs " + generator + ")");
+                    }
                 }
-                // The transport may be DECLARED (the @Bean factory) but only the generator may call it.
-                if (!name.equals("JdkAgentLlmTransport.java") && !name.equals("AgentLlmConfiguration.java")
+                // The transport may be DECLARED (the @Bean factory) but only a generator may call it.
+                if (!TRANSPORT_HOLDERS.contains(name)
                         && code.contains("AgentLlmTransport") && code.contains(".post(")) {
                     offenders.add(name + " (calls the transport directly)");
                 }
             }
         }
         assertThat(offenders)
-                .as("a caller holding the generator directly would be an allow-list nobody runs")
+                .as("a caller holding a generator directly would be an allow-list nobody runs")
+                .isEmpty();
+    }
+
+    /**
+     * The three capabilities stay separable — no one flag turns on another's exposure.
+     *
+     * <p>They send different things: a review's rating and body (triage), an inquiry's title and body
+     * (draft), an operator's own sentence (plan), a SellerOps-composed claim plus metadata (judge), and
+     * one customer inquiry's text for classification (inquiry signature). A deployment must be able to
+     * run any subset, which is only true while no file reads another capability's property key — and the
+     * fifth one matters most: a deployment that wanted goal interpretation must not thereby be sending
+     * customer questions to a vendor.
+     */
+    @Test
+    @DisplayName("no LLM capability reads another capability's flag")
+    void theCapabilitiesStaySeparable() throws IOException {
+        List<String> offenders = new ArrayList<>();
+        List<String[]> flags = List.of(
+                new String[] {"sellerops.agent.draft.", "AgentDraftProperties.java"},
+                new String[] {"sellerops.agent.plan.", "AgentPlanProperties.java"},
+                new String[] {"sellerops.agent.judge.", "AgentJudgeProperties.java"},
+                new String[] {"sellerops.triage.ai-pilot", "AiTriagePilotProperties.java"},
+                new String[] {"sellerops.inquiry.signature.", "InquirySignalProperties.java"});
+        try (Stream<Path> walk = Files.walk(MAIN)) {
+            for (Path source : walk.filter(p -> p.toString().endsWith(".java")).toList()) {
+                String name = source.getFileName().toString();
+                String code = stripComments(Files.readString(source));
+                for (String[] flag : flags) {
+                    if (!name.equals(flag[1]) && code.contains(flag[0])) {
+                        offenders.add(name + " reads " + flag[0]);
+                    }
+                }
+            }
+        }
+        assertThat(offenders)
+                .as("one file reading two capabilities' flags is how two exposures become indivisible")
                 .isEmpty();
     }
 

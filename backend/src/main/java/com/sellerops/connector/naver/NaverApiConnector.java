@@ -51,13 +51,28 @@ public class NaverApiConnector implements PullConnector, ConnectionVerifier {
 
     private final NaverTokenClient tokenClient;
     private final NaverOrdersClient ordersClient;
+    private final NaverProductsClient productsClient;
     private final CredentialVault vault;
 
     public NaverApiConnector(NaverTokenClient tokenClient, NaverOrdersClient ordersClient,
-                             CredentialVault vault) {
+                             NaverProductsClient productsClient, CredentialVault vault) {
         this.tokenClient = tokenClient;
         this.ordersClient = ordersClient;
+        this.productsClient = productsClient;
         this.vault = vault;
+    }
+
+    /**
+     * Order-only wiring — a deployment (or a test) with no product client.
+     *
+     * <p>The capability table below then does NOT advertise PRODUCT, and {@code fetch} refuses it as
+     * unsupported. That is the honest shape: a capability whose client is absent is a capability this
+     * connector does not have, and advertising it and then failing at call time is how a scheduler ends
+     * up retrying something that can never work.
+     */
+    public NaverApiConnector(NaverTokenClient tokenClient, NaverOrdersClient ordersClient,
+                             CredentialVault vault) {
+        this(tokenClient, ordersClient, null, vault);
     }
 
     @Override
@@ -72,18 +87,36 @@ public class NaverApiConnector implements PullConnector, ConnectionVerifier {
 
     @Override
     public ConnectorCapabilities capabilities(String channelCode) {
+        if (productsClient == null) {
+            return new ConnectorCapabilities(
+                    CONNECTOR_CLASS,
+                    Set.of(DataType.ORDER_SUMMARY),
+                    Map.of(DataType.ORDER_SUMMARY, "CONFIRMED"),
+                    "Slice 1b: ORDER_SUMMARY via the official two-call flow. No product client wired,"
+                            + " so PRODUCT is not offered rather than offered-and-failing.");
+        }
         return new ConnectorCapabilities(
                 CONNECTOR_CLASS,
-                Set.of(DataType.ORDER_SUMMARY),
-                Map.of(DataType.ORDER_SUMMARY, "CONFIRMED"),
+                Set.of(DataType.ORDER_SUMMARY, DataType.PRODUCT),
+                Map.of(DataType.ORDER_SUMMARY, "CONFIRMED",
+                        // Implemented and offline-verified; the wire shape has not been observed live
+                        // from this repository, and the seller's application must hold the product API
+                        // permission (a seller grant, never worked around).
+                        DataType.PRODUCT, "NEEDS_VERIFICATION"),
                 "Slice 1b: ORDER_SUMMARY via the official two-call flow"
-                        + " (last-changed-statuses → product-orders/query)."
-                        + " REVIEW has no official API; INQUIRY/PRODUCT/SALES deferred.");
+                        + " (last-changed-statuses → product-orders/query). PRODUCT reads the seller's"
+                        + " own channel-product catalogue (identity, listing name, url, price, status,"
+                        + " brand/manufacturer, category, option combinations) for the Product Knowledge"
+                        + " layer — read-only, page-indexed, NEEDS_VERIFICATION."
+                        + " REVIEW has no official API; INQUIRY/SALES deferred.");
     }
 
     @Override
     public FetchPage fetch(FetchRequest request) {
-        if (!CHANNEL_CODE.equals(request.channelCode()) || request.dataType() != DataType.ORDER_SUMMARY) {
+        boolean routable = CHANNEL_CODE.equals(request.channelCode())
+                && (request.dataType() == DataType.ORDER_SUMMARY
+                    || (request.dataType() == DataType.PRODUCT && productsClient != null));
+        if (!routable) {
             throw new UnsupportedDataTypeException(request.channelCode(), request.dataType());
         }
 
@@ -98,6 +131,9 @@ public class NaverApiConnector implements PullConnector, ConnectionVerifier {
 
         try {
             String accessToken = tokenClient.accessToken(clientId, clientSecret);
+            if (request.dataType() == DataType.PRODUCT) {
+                return productsClient.fetchProductPage(accessToken, request.cursorValue());
+            }
             return ordersClient.fetchOrderSummaryPage(accessToken, request.cursorValue());
         } catch (NaverRateLimitedException e) {
             // Cursor unchanged — a throttled attempt must re-request the same position.

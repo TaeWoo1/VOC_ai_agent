@@ -1,0 +1,212 @@
+/**
+ * Seeds for the Operator's end-to-end tests: an org with a real-shaped mix of signals, including the
+ * partial product linkage that makes the coverage verdicts matter.
+ */
+import type {
+  CustomerMemorySearch,
+  InboxSummary,
+  ProductKnowledge,
+  ProductSignals,
+  ProductSummary,
+  RepeatedInquiry,
+  ReviewIssueSummary,
+} from "../../src/spring/types";
+
+export const MOLDING: ProductSummary = {
+  id: "p-molding", name: "전선몰딩 1호", sku: "SKU-77", status: "ACTIVE",
+};
+export const CABLE: ProductSummary = {
+  id: "p-cable", name: "케이블타이 2호", sku: "SKU-88", status: "ACTIVE",
+};
+
+export function issue(overrides: Partial<ReviewIssueSummary> = {}): ReviewIssueSummary {
+  return {
+    id: "issue-adhesion",
+    title: "접착 탈락",
+    aspect: "접착",
+    problem: "탈락",
+    severity: "HIGH",
+    lifecycleState: "NEEDS_REVIEW",
+    lifecycleLabelKo: "확인 필요",
+    evidenceCount: 12,
+    firstEvidenceOn: "2026-06-18",
+    lastEvidenceOn: "2026-08-14",
+    dominantProductId: MOLDING.id,
+    dominantProductName: MOLDING.name,
+    dismissed: false,
+    extractorKind: "RULE_BASED",
+    change: {
+      kinds: ["SURGING"], labelsKo: ["증가 중"], highSurge: true,
+      surgeWindowCount: 6, surgeBaselineWeekly: 1.2,
+    },
+    ...overrides,
+  };
+}
+
+export const INBOX: InboxSummary = { items: [], total: 0, unansweredInquiries: 3208 };
+
+/** A product whose issue signal is COVERED but whose review linkage is partial — the Cafe24 case. */
+export function coveredSignals(): ProductSignals {
+  return {
+    productId: MOLDING.id,
+    productName: MOLDING.name,
+    sku: MOLDING.sku,
+    referenceDate: "2026-08-21",
+    issues: [issue()],
+    recommendedActions: [{ recommendedAction: "FAQ 후보", count: 4 }],
+    volume: { reviews: 40, inquiries: 12, unansweredInquiries: 5, issueEvidence: 12 },
+    linkedChannels: ["NAVER"],
+    coverage: [
+      { signal: "REVIEW_ISSUE", coverage: "COVERED", linked: 12, unlinked: 0, provenance: "issue-memory/RULE_BASED" },
+      { signal: "ITEM_ANALYSIS", coverage: "COVERED", linked: 40, unlinked: 0, provenance: "item-analysis/RULE_BASED:v1" },
+      { signal: "REVIEW", coverage: "COVERED", linked: 40, unlinked: 0, provenance: "review-store/INGEST:canonical" },
+      { signal: "INQUIRY", coverage: "COVERED", linked: 12, unlinked: 0, provenance: "inquiry-store/INGEST:canonical" },
+      { signal: "CUSTOMER_MEMORY", coverage: "COVERED", linked: 52, unlinked: 0, provenance: "customer-memory/LEXICAL:v1" },
+    ],
+  };
+}
+
+/** A product with NO linked rows and a real unlinked backlog — the false-calm case. */
+export function unlinkedSignals(): ProductSignals {
+  return {
+    productId: CABLE.id,
+    productName: CABLE.name,
+    sku: CABLE.sku,
+    referenceDate: "2026-08-21",
+    issues: [],
+    recommendedActions: [],
+    volume: { reviews: 0, inquiries: 0, unansweredInquiries: 0, issueEvidence: 0 },
+    linkedChannels: [],
+    coverage: [
+      { signal: "REVIEW_ISSUE", coverage: "UNCERTAIN_PRODUCT_UNLINKED", linked: 0, unlinked: 214, provenance: "issue-memory/RULE_BASED" },
+      { signal: "REVIEW", coverage: "UNCERTAIN_PRODUCT_UNLINKED", linked: 0, unlinked: 980, provenance: "review-store/INGEST:canonical" },
+      { signal: "INQUIRY", coverage: "UNCERTAIN_PRODUCT_UNLINKED", linked: 0, unlinked: 3208, provenance: "inquiry-store/INGEST:canonical" },
+      { signal: "ITEM_ANALYSIS", coverage: "UNCERTAIN_PRODUCT_UNLINKED", linked: 0, unlinked: 0, provenance: "item-analysis/NONE" },
+      { signal: "CUSTOMER_MEMORY", coverage: "UNCERTAIN_PRODUCT_UNLINKED", linked: 0, unlinked: 52, provenance: "customer-memory/LEXICAL:v1" },
+    ],
+  };
+}
+
+export const REPEATS: RepeatedInquiry[] = [
+  {
+    axis: "SIGNATURE", key: "접착:탈락", labelKo: "접착 탈락", occurrences: 6,
+    answeredOccurrences: 4, firstSeenOn: "2026-07-30", lastSeenOn: "2026-08-19", windowDays: 28,
+  },
+  {
+    axis: "TOPIC", key: "배송", labelKo: "배송", occurrences: 3,
+    answeredOccurrences: 3, firstSeenOn: "2026-08-02", lastSeenOn: "2026-08-18", windowDays: 28,
+  },
+];
+
+export const MEMORY: CustomerMemorySearch = {
+  cueSignatureKey: "접착:탈락",
+  cueTopic: "품질",
+  hits: [
+    {
+      kind: "INQUIRY", sourceId: "inq-past-1", productId: MOLDING.id, productName: MOLDING.name,
+      channelCode: "CAFE24", topic: "품질", signatureKey: "접착:탈락", severity: "HIGH",
+      occurredOn: "2026-07-12", answered: true,
+      answer: "안녕하세요. 시공 면의 먼지를 먼저 닦아 주신 뒤 부착해 주세요.",
+      retrieverKind: "LEXICAL", retrieverVersion: "customer-memory-lexical/v1",
+    },
+  ],
+  coverage: {
+    signal: "CUSTOMER_MEMORY", coverage: "COVERED", linked: 52, unlinked: 0,
+    provenance: "customer-memory/LEXICAL:v1",
+  },
+};
+
+export const ANALYSES = [
+  { recommendedAction: "FAQ 후보" },
+  { recommendedAction: "FAQ 후보" },
+  { recommendedAction: "상세페이지 개선 후보" },
+  { recommendedAction: "확인 필요" },
+];
+
+
+/* ─────────────────────────── Product Knowledge (Operator Graph v2) ─────────────────────────── */
+
+/**
+ * A product SellerOps genuinely knows: a channel listing, two options, and two stated specs.
+ *
+ * The two specs carry different `confidence` values on purpose — one stated by a channel, one parsed
+ * out of the listing title — because a surface that cannot tell them apart would present a parse as a
+ * catalogue fact.
+ */
+export function knownProduct(): ProductKnowledge {
+  return {
+    productId: MOLDING.id,
+    name: MOLDING.name,
+    sku: MOLDING.sku,
+    status: "ACTIVE",
+    listings: [
+      {
+        channelCode: "NAVER", channelNameKo: "네이버", channelProductId: "6473457702",
+        listingName: "선바로 일체형 전선몰딩 2m", productUrl: "https://smartstore.naver.com/x/6473457702",
+        price: 12900, currency: "KRW", sellingStatus: "SELLING",
+        source: "NAVER:PRODUCT_API:v1", observedAt: "2026-08-20T02:00:00Z",
+      },
+    ],
+    variants: [
+      { channelCode: "NAVER", externalVariantId: "opt-1", optionName: "화이트 / 2m", sku: "SKU-77-W",
+        price: 12900, sellingStatus: "SELLING", source: "NAVER:PRODUCT_API:v1",
+        observedAt: "2026-08-20T02:00:00Z" },
+      { channelCode: "NAVER", externalVariantId: "opt-2", optionName: "블랙 / 2m", sku: "SKU-77-B",
+        price: 13900, sellingStatus: "SELLING", source: "NAVER:PRODUCT_API:v1",
+        observedAt: "2026-08-20T02:00:00Z" },
+    ],
+    facts: [
+      { factKey: "spec:길이", value: "2", unit: "m", source: "DERIVED:TITLE", sourceRef: "SKU-77",
+        observedAt: "2026-08-20T02:00:00Z", confidence: "DERIVED" },
+      { factKey: "spec:원산지", value: "대한민국", unit: null, source: "NAVER:PRODUCT_API:v1",
+        sourceRef: "6473457702", observedAt: "2026-08-20T02:00:00Z", confidence: "SOURCE_STATED" },
+    ],
+    signals: coveredSignals(),
+    knowledgeCoverage: [
+      { facet: "IDENTITY", coverage: "AVAILABLE", known: 2, newestObservedAt: null, provenance: "products" },
+      { facet: "LISTING", coverage: "AVAILABLE", known: 1, newestObservedAt: "2026-08-20T02:00:00Z",
+        provenance: "NAVER:PRODUCT_API:v1" },
+      { facet: "PRICE", coverage: "AVAILABLE", known: 1, newestObservedAt: "2026-08-20T02:00:00Z",
+        provenance: "NAVER:PRODUCT_API:v1" },
+      { facet: "VARIANT", coverage: "AVAILABLE", known: 2, newestObservedAt: "2026-08-20T02:00:00Z",
+        provenance: "NAVER:PRODUCT_API:v1" },
+      { facet: "SPEC", coverage: "PARTIAL", known: 2, newestObservedAt: "2026-08-20T02:00:00Z",
+        provenance: "DERIVED:TITLE+NAVER:PRODUCT_API:v1" },
+      { facet: "DESCRIPTION", coverage: "UNAVAILABLE", known: 0, newestObservedAt: null, provenance: "" },
+      { facet: "SIGNALS", coverage: "AVAILABLE", known: 5, newestObservedAt: null, provenance: "issue-memory/RULE_BASED" },
+    ],
+  };
+}
+
+/**
+ * A product SellerOps knows almost nothing about — no listing, no option, no spec.
+ *
+ * This is the COMMON case on a real org, not an edge one: before the PRODUCT read runs (or on a channel
+ * that has none), a product is a name and a SKU. Every facet reads UNAVAILABLE, and the assertion that
+ * matters is that an answer built on it says "갖고 있지 않습니다" rather than "없습니다".
+ */
+export function unknownProduct(): ProductKnowledge {
+  return {
+    productId: CABLE.id,
+    name: CABLE.name,
+    sku: CABLE.sku,
+    status: "ACTIVE",
+    listings: [],
+    variants: [],
+    facts: [],
+    signals: unlinkedSignals(),
+    knowledgeCoverage: [
+      { facet: "IDENTITY", coverage: "AVAILABLE", known: 2, newestObservedAt: null, provenance: "products" },
+      { facet: "LISTING", coverage: "UNAVAILABLE", known: 0, newestObservedAt: null, provenance: "" },
+      { facet: "PRICE", coverage: "UNAVAILABLE", known: 0, newestObservedAt: null, provenance: "" },
+      { facet: "VARIANT", coverage: "UNAVAILABLE", known: 0, newestObservedAt: null, provenance: "" },
+      { facet: "SPEC", coverage: "UNAVAILABLE", known: 0, newestObservedAt: null, provenance: "" },
+      { facet: "DESCRIPTION", coverage: "UNAVAILABLE", known: 0, newestObservedAt: null, provenance: "" },
+    ],
+  };
+}
+
+export const KNOWLEDGE: Record<string, ProductKnowledge> = {
+  [MOLDING.id]: knownProduct(),
+  [CABLE.id]: unknownProduct(),
+};

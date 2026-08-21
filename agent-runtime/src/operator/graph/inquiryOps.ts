@@ -1,0 +1,231 @@
+/**
+ * InquiryOps — what customers are asking, what we said before, and what keeps coming back.
+ *
+ * <b>v2 removes the fixed retrieval order, which was the specialist's real defect.</b> v1 always read
+ * the inbox and then the repeats, in that order, for every goal that reached it. So "폭이 몇
+ * mm인가요?", "교환 가능한가요?" and "전에 산 것과 색이 달라요" produced the same two reads and the
+ * same two sentences. Now the planner declares needs and their order, and this specialist runs one
+ * step per need it can serve — a volume question reads the inbox, a history question reads precedents,
+ * and a question about a product's spec is not this specialist's at all.
+ *
+ * <b>It still reuses the existing inquiry graphs rather than re-implementing them.</b> The approve loop
+ * and the draft graph are untouched and still reached through their own intents. What this adds is the
+ * READ half an Operator answer needs.
+ *
+ * <b>The customer's words never reach this file.</b> The queue read returns work-item metadata, the
+ * context read is explicitly body-free, and the recall read returns closed-vocabulary cues plus the
+ * operator's own past approved reply.
+ */
+import type { EvidenceRef, Finding, SpecialistResult } from "../state/OperatorState";
+import type { NeedState } from "../plan/InvestigationPlan";
+import { OPERATOR_TOOL } from "../tools/OperatorTools";
+import type { SpecialistInput } from "./specialistInput";
+import type { CustomerMemorySearch, InboxSummary, RepeatedInquiry } from "../../spring/types";
+import { log } from "../../log";
+
+/** The need kinds this specialist answers. */
+export const INQUIRY_NEEDS = ["INQUIRY_VOLUME", "CUSTOMER_HISTORY", "REPEAT_PATTERN", "POLICY"] as const;
+
+export interface InquiryOpsResult extends SpecialistResult {
+  readonly needStates: readonly NeedState[];
+}
+
+export async function runInquiryOps(input: SpecialistInput): Promise<InquiryOpsResult> {
+  const { registry, budget, evidence, allowedTools } = input;
+  const findings: Finding[] = [];
+  const refs: EvidenceRef[] = [];
+  const notes: string[] = [];
+  const needStates: NeedState[] = [];
+
+  for (const need of input.needs) {
+    if (need.kind === "INQUIRY_VOLUME") {
+      if (!budget.spend("tool")) {
+        needStates.push({ id: need.id, status: "PENDING", evidenceIds: [] });
+        continue;
+      }
+      const inbox = await registry.invoke<InboxSummary>(OPERATOR_TOOL.GET_TODAY_INBOX, {}, allowedTools);
+      const ref = evidence.add({
+        kind: "INBOX_COUNT",
+        sourceTool: OPERATOR_TOOL.GET_TODAY_INBOX,
+        args: {},
+        locator: { count: inbox.unansweredInquiries, label: "미답변 문의" },
+        // The org-wide unanswered count is a server-side total with no attribution question, so its
+        // coverage is genuinely COVERED — unlike anything product- or account-scoped.
+        coverage: "COVERED",
+        provenance: "inbox/SERVER:unansweredInquiries",
+      });
+      refs.push(ref);
+      if (inbox.unansweredInquiries > 0) {
+        findings.push({
+          findingId: `f-${ref.evidenceId}`,
+          specialist: "INQUIRY_OPS",
+          // The server's uncapped number — the SAME one the home screen prints. A report that
+          // recounted it off a page printed ≤50 under the same label; that is the defect this pins.
+          statement: `답변이 필요한 문의가 ${inbox.unansweredInquiries}건 있습니다.`,
+          evidenceIds: [ref.evidenceId],
+          confidence: "NEEDS_REVIEW",
+          verdict: null,
+          surfaceLink: "/inquiries?state=NEEDS_REPLY",
+          needId: need.id,
+        });
+        needStates.push({ id: need.id, status: "SATISFIED", evidenceIds: [ref.evidenceId] });
+      } else {
+        notes.push("답변이 필요한 문의는 없습니다.");
+        needStates.push({ id: need.id, status: "SATISFIED", evidenceIds: [ref.evidenceId] });
+      }
+      continue;
+    }
+
+    if (need.kind === "REPEAT_PATTERN") {
+      if (!budget.spend("tool")) {
+        needStates.push({ id: need.id, status: "PENDING", evidenceIds: [] });
+        continue;
+      }
+      const repeats = await registry.invoke<RepeatedInquiry[]>(
+        OPERATOR_TOOL.LIST_REPEATED_INQUIRIES,
+        { ...(input.referenceDate ? { referenceDate: input.referenceDate } : {}) },
+        allowedTools,
+      );
+      const cited: string[] = [];
+      for (const repeat of repeats.slice(0, 3)) {
+        const ref = evidence.add({
+          kind: "REPEATED_INQUIRY",
+          sourceTool: OPERATOR_TOOL.LIST_REPEATED_INQUIRIES,
+          args: { referenceDate: input.referenceDate ?? null },
+          locator: { count: repeat.occurrences, label: repeat.labelKo },
+          observedOn: repeat.lastSeenOn,
+          coverage: "COVERED",
+          provenance: `customer-memory/${repeat.axis}`,
+        });
+        refs.push(ref);
+        cited.push(ref.evidenceId);
+        findings.push({
+          findingId: `f-${ref.evidenceId}`,
+          specialist: "INQUIRY_OPS",
+          // A fully-answered repeat is a documentation gap; a partly-answered one is a backlog. Saying
+          // which is the difference between "FAQ에 넣으세요" and "답변이 밀렸습니다".
+          statement: repeat.answeredOccurrences >= repeat.occurrences
+            ? `"${repeat.labelKo}" 문의가 최근 ${repeat.windowDays}일 동안 ${repeat.occurrences}건 반복됐고 모두 답변했습니다.`
+            : `"${repeat.labelKo}" 문의가 최근 ${repeat.windowDays}일 동안 ${repeat.occurrences}건 반복됐습니다`
+              + ` (${repeat.answeredOccurrences}건 답변 완료).`,
+          evidenceIds: [ref.evidenceId],
+          confidence: "NEEDS_REVIEW",
+          verdict: null,
+          surfaceLink: "/inquiries",
+          needId: need.id,
+        });
+      }
+      if (repeats.length === 0) {
+        notes.push("반복해서 들어온 문의는 확인되지 않았습니다.");
+      }
+      needStates.push({
+        id: need.id,
+        status: cited.length > 0 ? "SATISFIED" : "UNSATISFIABLE",
+        evidenceIds: cited,
+        ...(cited.length === 0 ? { reason: "이 기간에 반복 패턴이 확인되지 않았습니다." } : {}),
+      });
+      continue;
+    }
+
+    if (need.kind === "CUSTOMER_HISTORY") {
+      if (!budget.spend("tool")) {
+        needStates.push({ id: need.id, status: "PENDING", evidenceIds: [] });
+        continue;
+      }
+      // The cue comes from a resolved product when there is one, and from the plan's own topic mention
+      // otherwise. A customer sentence is never a query string — that is the contract the backend's
+      // search endpoint enforces by not having a free-text parameter at all.
+      const product = input.resolved.find((e) => e.kind === "PRODUCT");
+      const recall = await registry.invoke<CustomerMemorySearch>(
+        OPERATOR_TOOL.SEARCH_CUSTOMER_MEMORY,
+        { ...(product ? { productId: product.id } : {}), limit: 5 },
+        allowedTools,
+      );
+      const cited: string[] = [];
+      for (const hit of recall.hits.slice(0, 3)) {
+        const ref = evidence.add({
+          kind: "CUSTOMER_MEMORY",
+          sourceTool: OPERATOR_TOOL.SEARCH_CUSTOMER_MEMORY,
+          args: { productId: product?.id ?? null },
+          locator: {
+            ...(hit.productId ? { productId: hit.productId } : {}),
+            ...(hit.productName ? { productName: hit.productName } : {}),
+            ...(hit.channelCode ? { channelCode: hit.channelCode } : {}),
+            label: hit.signatureKey ?? hit.topic ?? "과거 사례",
+          },
+          observedOn: hit.occurredOn,
+          coverage: recall.coverage.coverage,
+          provenance: `${recall.coverage.provenance}/${hit.retrieverKind}:${hit.retrieverVersion}`,
+        });
+        refs.push(ref);
+        cited.push(ref.evidenceId);
+        findings.push({
+          findingId: `f-${ref.evidenceId}`,
+          specialist: "INQUIRY_OPS",
+          statement: hit.answered
+            ? `"${hit.signatureKey ?? hit.topic}" 건은 과거에 같은 유형으로 답변한 적이 있습니다`
+              + `${hit.occurredOn ? ` (${hit.occurredOn})` : ""}.`
+            : `"${hit.signatureKey ?? hit.topic}" 건이 과거에도 있었고 아직 답변되지 않았습니다`
+              + `${hit.occurredOn ? ` (${hit.occurredOn})` : ""}.`,
+          evidenceIds: [ref.evidenceId],
+          confidence: "NEEDS_REVIEW",
+          verdict: null,
+          surfaceLink: "/memory",
+          needId: need.id,
+        });
+      }
+      if (recall.hits.length === 0) {
+        notes.push("같은 유형의 과거 대응 기록은 찾지 못했습니다.");
+      }
+      needStates.push({
+        id: need.id,
+        status: cited.length > 0 ? "SATISFIED" : "UNSATISFIABLE",
+        evidenceIds: cited,
+        ...(cited.length === 0 ? { reason: "색인된 과거 사례가 없습니다." } : {}),
+      });
+      continue;
+    }
+
+    // POLICY — declared, and honestly unanswerable today.
+    //
+    // Nothing in this repository stores a seller or channel policy: not the exchange window, not the
+    // return conditions, not the warranty. v2 lets the planner DECLARE that need — which is what makes
+    // "교환 가능한가요?" a structurally different investigation from "폭이 몇 mm인가요?" — and then says
+    // plainly that it cannot be met. Answering it from a review or a past reply would be inventing a
+    // policy from anecdote, which is the exact failure invariant I3 forbids.
+    const ref = evidence.add({
+      kind: "PRODUCT_KNOWLEDGE_GAP",
+      sourceTool: OPERATOR_TOOL.GET_INQUIRY_CONTEXT,
+      args: { need: need.id },
+      locator: { facet: "POLICY", label: "정책" },
+      coverage: "COVERED",
+      provenance: "policy-store/UNAVAILABLE",
+    });
+    refs.push(ref);
+    findings.push({
+      findingId: `f-${ref.evidenceId}`,
+      specialist: "INQUIRY_OPS",
+      statement: "교환·반품·보증 같은 판매 정책은 SellerOps가 아직 보관하고 있지 않아 확인할 수 없습니다.",
+      evidenceIds: [ref.evidenceId],
+      confidence: "NEEDS_REVIEW",
+      verdict: null,
+      surfaceLink: null,
+      claimsCoverageLimit: true,
+      needId: need.id,
+    });
+    needStates.push({
+      id: need.id, status: "UNSATISFIABLE", evidenceIds: [ref.evidenceId],
+      reason: "판매 정책이 저장돼 있지 않습니다.",
+    });
+  }
+
+  log("inquiry_ops", { needs: input.needs.length, findings: findings.length });
+  return {
+    specialist: "INQUIRY_OPS",
+    findings,
+    evidence: refs,
+    coverage: [],
+    needStates,
+    ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
+  };
+}

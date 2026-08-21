@@ -10,6 +10,7 @@ import com.sellerops.community.CommunityReplyStatus;
 import com.sellerops.ingest.canonical.CanonicalCommunityArticle;
 import com.sellerops.ingest.canonical.CanonicalInquiry;
 import com.sellerops.ingest.canonical.CanonicalOrderSummary;
+import com.sellerops.ingest.canonical.CanonicalProduct;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -108,15 +109,28 @@ public class Cafe24ApiConnector implements PullConnector {
     private final Cafe24Authorizer authorizer;
     private final Cafe24OrdersClient ordersClient;
     private final Cafe24BoardArticlesClient articlesClient;
+    private final Cafe24ProductsClient productsClient;
     private final Clock clock;
 
     public Cafe24ApiConnector(Cafe24Authorizer authorizer,
                               Cafe24OrdersClient ordersClient, Cafe24BoardArticlesClient articlesClient,
-                              Clock clock) {
+                              Cafe24ProductsClient productsClient, Clock clock) {
         this.authorizer = authorizer;
         this.ordersClient = ordersClient;
         this.articlesClient = articlesClient;
+        this.productsClient = productsClient;
         this.clock = clock;
+    }
+
+    /**
+     * Order + board wiring — a deployment (or a test) with no product client.
+     *
+     * <p>PRODUCT is then absent from the capability table rather than advertised and failing at call
+     * time. It is also the shape a mall that has not granted {@code mall.read_product} effectively has.
+     */
+    public Cafe24ApiConnector(Cafe24Authorizer authorizer, Cafe24OrdersClient ordersClient,
+                              Cafe24BoardArticlesClient articlesClient, Clock clock) {
+        this(authorizer, ordersClient, articlesClient, null, clock);
     }
 
     @Override
@@ -133,10 +147,18 @@ public class Cafe24ApiConnector implements PullConnector {
     public ConnectorCapabilities capabilities(String channelCode) {
         return new ConnectorCapabilities(
                 CONNECTOR_CLASS,
-                Set.of(DataType.ORDER_SUMMARY, DataType.REVIEW, DataType.INQUIRY),
-                Map.of(DataType.ORDER_SUMMARY, "CONFIRMED",
-                        DataType.REVIEW, "CONFIRMED",
-                        DataType.INQUIRY, "CONFIRMED"),
+                productsClient == null
+                        ? Set.of(DataType.ORDER_SUMMARY, DataType.REVIEW, DataType.INQUIRY)
+                        : Set.of(DataType.ORDER_SUMMARY, DataType.REVIEW, DataType.INQUIRY, DataType.PRODUCT),
+                productsClient == null
+                        ? Map.of(DataType.ORDER_SUMMARY, "CONFIRMED", DataType.REVIEW, "CONFIRMED",
+                                DataType.INQUIRY, "CONFIRMED")
+                        // The catalogue read is implemented and offline-verified; its wire shape has NOT
+                        // been observed on a live mall from this repository, and the scope it needs
+                        // (mall.read_product) is not in any existing grant. Claiming CONFIRMED here would
+                        // be the exact over-statement the capability vocabulary exists to prevent.
+                        : Map.of(DataType.ORDER_SUMMARY, "CONFIRMED", DataType.REVIEW, "CONFIRMED",
+                                DataType.INQUIRY, "CONFIRMED", DataType.PRODUCT, "NEEDS_VERIFICATION"),
                 "Cafe24 Admin orders → daily ORDER_SUMMARY (payment_amount summed by order_date, KST),"
                         + " CONFIRMED by a gated live run. REVIEW (board 4 구매후기) collects community"
                         + " board articles into CanonicalCommunityArticle (community/VOC store). INQUIRY"
@@ -148,7 +170,12 @@ public class Cafe24ApiConnector implements PullConnector {
                         + " stays excluded (PII + endpoint uncertainty). reply_status: the confirmed"
                         + " unanswered N maps to UNANSWERED; the answered token is unobserved, so any"
                         + " not-yet-seen token also stays UNANSWERED (conservative, never guessed as"
-                        + " answered). Product/sales remain deferred.");
+                        + " answered). PRODUCT reads the Admin product catalogue into CanonicalProduct"
+                        + " (identity, listing name, price, selling status, brand/manufacturer, summary"
+                        + " description) for the Product Knowledge layer — read-only, offset-paged, and"
+                        + " requiring the mall.read_product scope that connections made before Operator"
+                        + " Graph v2 do not carry (seller re-consent, never worked around). Wire shape is"
+                        + " NEEDS_VERIFICATION. SALES remains deferred.");
     }
 
     @Override
@@ -162,7 +189,13 @@ public class Cafe24ApiConnector implements PullConnector {
             // canonical inquiry so it opens an OPEN work item on the shared reply path.
             case REVIEW -> fetchReviewArticles(request);
             case INQUIRY -> fetchInquiries(request);
-            case PRODUCT, SALES -> throw new UnsupportedDataTypeException(
+            case PRODUCT -> {
+                if (productsClient == null) {
+                    throw new UnsupportedDataTypeException(request.channelCode(), request.dataType());
+                }
+                yield fetchProducts(request);
+            }
+            case SALES -> throw new UnsupportedDataTypeException(
                     request.channelCode(), request.dataType());
         };
     }
@@ -231,6 +264,53 @@ public class Cafe24ApiConnector implements PullConnector {
      */
     private FetchPage fetchInquiries(FetchRequest request) {
         return fetchArticlePage(request, Cafe24InquiryArticleMapper::toCanonicalInquiry, false);
+    }
+
+    /**
+     * PRODUCT: one page of the mall's catalogue, offset-paged.
+     *
+     * <p>The cursor is the plain next offset — the catalogue has no window and no natural key order to
+     * resume from, so an integer is the honest cursor rather than an opaque wrapper implying more state
+     * than exists. A short page ends the sweep.
+     *
+     * <p>An {@code insufficient_scope} failure is NOT swallowed: the mall has not granted product access
+     * and the seller has to re-consent, which is a decision to surface rather than a condition to retry.
+     */
+    private FetchPage fetchProducts(FetchRequest request) {
+        int offset = parseOffset(request.cursorValue());
+        try {
+            Cafe24Authorizer.Authorized auth = authorize(request);
+            List<Cafe24ProductRow> rows = productsClient.fetchPage(
+                    auth.accessToken(), auth.mallId(), Cafe24ProductsClient.PAGE_LIMIT, offset);
+            java.time.Instant now = clock.instant();
+            List<CanonicalProduct> records = new ArrayList<>();
+            int sourceRow = 1;
+            for (Cafe24ProductRow row : rows) {
+                CanonicalProduct canonical = Cafe24ProductMapper.toCanonical(row, sourceRow++, now);
+                if (canonical != null) {
+                    records.add(canonical);
+                }
+            }
+            boolean hasMore = rows.size() >= Cafe24ProductsClient.PAGE_LIMIT;
+            int next = offset + rows.size();
+            log.info("카페24 상품 수집: fetched={} mapped={} offset={} hasMore={}",
+                    rows.size(), records.size(), offset, hasMore);
+            return FetchPage.of(DataType.PRODUCT, records, Integer.toString(next), hasMore, KIND);
+        } catch (Cafe24RateLimitedException e) {
+            return rateLimited(request, e);
+        }
+    }
+
+    /** A cursor that is not an offset is a cursor from another data type — start over, never guess. */
+    private static int parseOffset(String cursorValue) {
+        if (cursorValue == null || cursorValue.isBlank()) {
+            return 0;
+        }
+        try {
+            return Math.max(Integer.parseInt(cursorValue.strip()), 0);
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     /**

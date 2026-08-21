@@ -23,9 +23,18 @@ import type { DraftProvenance } from "../provider/DraftModelSeam";
 import type { RunOutcome } from "../state/AgentState";
 import type { ReviewRunOutcome } from "../state/ReviewAgentState";
 import type { IssueOperationsBrief } from "../state/IssueAgentState";
+import type { OperatorAnswer } from "../operator/state/OperatorState";
 
-export type AgentRunDomain = "INQUIRY" | "INQUIRY_DRAFT" | "REVIEW" | "ISSUE";
-export type AgentRunStatus = "AWAITING_APPROVAL" | "DONE";
+export type AgentRunDomain = "OPERATOR" | "INQUIRY" | "INQUIRY_DRAFT" | "REVIEW" | "ISSUE";
+/**
+ * How a run ended, on the wire.
+ *
+ * <b>`FAILED` is new in Operator Graph v2 and it is load-bearing.</b> An Agent-chat run whose plan
+ * cannot be made does not degrade to a keyword route and does not return an empty success — it fails,
+ * and the frontend renders the reason. Adding the state to the union is what stops a client from
+ * having to infer failure from "DONE with no findings", which is a different and much worse thing.
+ */
+export type AgentRunStatus = "AWAITING_APPROVAL" | "DONE" | "FAILED";
 
 // --------------------------------------------------------------------------- requests
 
@@ -167,6 +176,21 @@ export interface AgentRunView {
   readonly brief?: IssueOperationsBrief;
   /** Present for the inquiry-draft domain (no checkpoint): the sanitized draft-preparation result. */
   readonly draftPreparation?: InquiryDraftPreparationView;
+  /**
+   * Present for the operator domain (no checkpoint): findings, the evidence behind each one, the
+   * coverage verdict of every source consulted, and what the run spent.
+   *
+   * Sanitized by construction rather than by filtering here: an {@code EvidenceRef} can only hold ids,
+   * closed-vocabulary labels, counts and dates, and a {@code Finding.statement} is a sentence SellerOps
+   * composed. No customer 원문 can reach this field because no channel upstream of it can carry one.
+   */
+  readonly answer?: OperatorAnswer;
+  /**
+   * Present only when `status` is FAILED. `failureCode` is for the client's logic, `failureReason` is
+   * the seller-facing sentence — never a vendor message and never the request text.
+   */
+  readonly failureCode?: string;
+  readonly failureReason?: string;
 }
 
 /** GET /capabilities — static service metadata. Reveals no seller data and no secret. */
@@ -179,8 +203,26 @@ export interface CapabilitiesView {
     readonly domain: AgentRunDomain;
     readonly hasCheckpoint: boolean;
     readonly requiresAccountScope: boolean;
-    readonly examples: readonly string[];
+    /**
+     * Sentences a seller might type — <b>illustrations, not a supported list</b>.
+     *
+     * Renamed from `examples` in Operator Graph v2 because the old name was being read as a menu: the
+     * frontend rendered the three Operator strings as chips and a demo script treated "the four
+     * questions" as the acceptance criterion. There is no list of supported sentences any more; an
+     * LLM planner interprets whatever is typed, and the only honest thing this field can be is a prompt
+     * for someone who does not know what to ask.
+     */
+    readonly sampleGoals: readonly string[];
   }>;
+  /**
+   * Whether Agent chat can run at all right now.
+   *
+   * Free text needs a plan, and a plan needs the backend planner capability. When it is off this is
+   * false and the frontend disables the input with a reason instead of letting a seller type a sentence
+   * that is guaranteed to fail. Dashboard shortcuts are unaffected — they send an intent, not a
+   * sentence.
+   */
+  readonly freeTextPlanning: "enabled" | "unavailable" | "unknown";
   readonly runStore: { readonly kind: string; readonly durable: boolean; readonly multiInstanceSafe: boolean };
   /**
    * Structural guarantee: this service has no send tool and its only backend writes are

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseGoal, routeIntent } from "../../src/goal/parseGoal";
+import { OperatorAgentRuntime } from "../../src/operator/operatorRuntime";
+import { FakeOperatorSpringClient } from "../support/FakeOperatorSpringClient";
 import { AgentRouter } from "../../src/router";
 import { InquiryAgentRuntime } from "../../src/runtime";
 import { InquiryDraftAgentRuntime } from "../../src/inquiryDraftRuntime";
@@ -20,16 +22,21 @@ describe("review goal parsing + routing", () => {
     expect(routeIntent(g.intent)).toBe("REVIEW");
   });
 
-  it("maps review free-text to the review intent (ko + en)", () => {
-    expect(parseGoal({ text: "리뷰 답변 좀 준비해줘" }).intent).toBe("HANDLE_REVIEW_REPLIES");
-    expect(parseGoal({ text: "후기에 답글 달아줘" }).intent).toBe("HANDLE_REVIEW_REPLIES");
-    expect(parseGoal({ text: "prepare the review replies" }).intent).toBe("HANDLE_REVIEW_REPLIES");
+  it("a review-shaped sentence is NOT routed here — it goes to the Operator", () => {
+    // These three used to be pinned to HANDLE_REVIEW_REPLIES by a keyword table. Operator Graph v2
+    // deleted the table: a sentence is interpreted by the planner or not at all, and the review approve
+    // loop is now reached the way a button reaches it — by intent.
+    for (const text of ["리뷰 답변 좀 준비해줘", "후기에 답글 달아줘", "prepare the review replies"]) {
+      expect(parseGoal({ text }).intent).toBe("OPERATOR_GOAL");
+    }
   });
 
-  it("maps operations-issue free-text to the issue intent (the three example requests)", () => {
-    expect(parseGoal({ text: "최근 악화된 상품 문제 알려줘" }).intent).toBe("HANDLE_OPERATIONS_ISSUES");
-    expect(parseGoal({ text: "반복되는 고객 불만 보여줘" }).intent).toBe("HANDLE_OPERATIONS_ISSUES");
-    expect(parseGoal({ text: "지금 먼저 확인할 운영 이슈는 뭐야" }).intent).toBe("HANDLE_OPERATIONS_ISSUES");
+  it("an operations-issue sentence likewise goes to the Operator", () => {
+    for (const text of [
+      "최근 악화된 상품 문제 알려줘", "반복되는 고객 불만 보여줘", "지금 먼저 확인할 운영 이슈는 뭐야",
+    ]) {
+      expect(parseGoal({ text }).intent).toBe("OPERATOR_GOAL");
+    }
   });
 
   it("routes inquiry vs review vs issue intents to three distinct domains", () => {
@@ -38,11 +45,12 @@ describe("review goal parsing + routing", () => {
     expect(routeIntent("HANDLE_OPERATIONS_ISSUES")).toBe("ISSUE");
   });
 
-  it("keeps review keywords winning over inquiry, and issue keywords distinct from both", () => {
-    // "리뷰" (review) must not be shadowed by the broad inquiry "답변"; issue words never collide.
-    expect(parseGoal({ text: "리뷰 답변 준비" }).intent).toBe("HANDLE_REVIEW_REPLIES");
-    expect(parseGoal({ text: "미답변 문의 처리" }).intent).toBe("HANDLE_UNANSWERED_INQUIRIES");
-    expect(parseGoal({ text: "운영 이슈 브리핑" }).intent).toBe("HANDLE_OPERATIONS_ISSUES");
+  it("the three subgraphs are reached by intent, and each keeps its own domain", () => {
+    // What used to be a keyword-precedence test ("리뷰 must beat the broad 답변") is now a contract test:
+    // there is no precedence because there is no matching. A button names the domain outright.
+    expect(routeIntent(parseGoal({ intent: "HANDLE_REVIEW_REPLIES" }).intent)).toBe("REVIEW");
+    expect(routeIntent(parseGoal({ intent: "HANDLE_UNANSWERED_INQUIRIES" }).intent)).toBe("INQUIRY");
+    expect(routeIntent(parseGoal({ intent: "HANDLE_OPERATIONS_ISSUES" }).intent)).toBe("ISSUE");
   });
 });
 
@@ -57,6 +65,11 @@ describe("AgentRouter coexistence", () => {
     const review = new FakeReviewSpringClient(twoReviews());
     const issue = new FakeIssueSpringClient(fourIssues());
     const r = new AgentRouter({
+      operator: new OperatorAgentRuntime({
+        operator: new FakeOperatorSpringClient(),
+        inquiry,
+        issue,
+      }),
       inquiry: new InquiryAgentRuntime({ client: inquiry }),
       inquiryDraft: new InquiryDraftAgentRuntime({ client: inquiry }),
       review: new ReviewAgentRuntime({ client: review }),

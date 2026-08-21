@@ -19,18 +19,22 @@ import { ReviewAgentRuntime } from "./reviewRuntime";
 import type { ReviewRunResult } from "./reviewRuntime";
 import { IssueAgentRuntime } from "./issueRuntime";
 import type { IssueRunResult } from "./issueRuntime";
+import { OperatorAgentRuntime } from "./operator/operatorRuntime";
+import type { OperatorRunResult } from "./operator/operatorRuntime";
 import { parseGoal, routeIntent } from "./goal/parseGoal";
 import type { AgentDomain, GoalRequest } from "./goal/parseGoal";
 import type { CheckpointDecision } from "./checkpoint/CheckpointContract";
 import { log } from "./log";
 
 export type RouterRunResult =
+  | { readonly domain: "OPERATOR"; readonly result: OperatorRunResult }
   | { readonly domain: "INQUIRY"; readonly result: RunResult }
   | { readonly domain: "INQUIRY_DRAFT"; readonly result: InquiryDraftRunResult }
   | { readonly domain: "REVIEW"; readonly result: ReviewRunResult }
   | { readonly domain: "ISSUE"; readonly result: IssueRunResult };
 
 export interface AgentRouterDeps {
+  readonly operator: OperatorAgentRuntime;
   readonly inquiry: InquiryAgentRuntime;
   readonly inquiryDraft: InquiryDraftAgentRuntime;
   readonly review: ReviewAgentRuntime;
@@ -45,6 +49,7 @@ export class UnknownThreadError extends Error {
 }
 
 export class AgentRouter {
+  readonly operator: OperatorAgentRuntime;
   readonly inquiry: InquiryAgentRuntime;
   readonly inquiryDraft: InquiryDraftAgentRuntime;
   readonly review: ReviewAgentRuntime;
@@ -52,6 +57,7 @@ export class AgentRouter {
   private readonly threadDomain = new Map<string, AgentDomain>();
 
   constructor(deps: AgentRouterDeps) {
+    this.operator = deps.operator;
     this.inquiry = deps.inquiry;
     this.inquiryDraft = deps.inquiryDraft;
     this.review = deps.review;
@@ -68,6 +74,11 @@ export class AgentRouter {
     const domain = this.route(request);
     this.threadDomain.set(threadId, domain);
     log("router_start", { domain });
+    if (domain === "OPERATOR") {
+      // The Operator has no checkpoint either: every tool it can reach is READ, so there is nothing to
+      // authorize and nothing to pause for. It runs straight to a DONE answer.
+      return { domain, result: await this.operator.run(threadId, request) };
+    }
     if (domain === "REVIEW") {
       return { domain, result: await this.review.start(threadId, request) };
     }
@@ -95,6 +106,11 @@ export class AgentRouter {
   async resume(threadId: string, decision: CheckpointDecision): Promise<RouterRunResult> {
     const domain = this.threadDomain.get(threadId);
     if (!domain) throw new UnknownThreadError(threadId);
+    if (domain === "OPERATOR") {
+      throw new Error(
+        `thread ${threadId} is an operator run: it has no checkpoint to resume. Start again to re-answer.`,
+      );
+    }
     if (domain === "ISSUE") {
       throw new Error(
         `thread ${threadId} is an issue-memory run: it has no checkpoint to resume. Start again to refresh the brief.`,

@@ -63,6 +63,18 @@ export function buildWeeklyReport(
   analyses: readonly ItemAnalysis[],
   reviewSources: readonly ReviewSource[] | null,
   topLimit = 5,
+  /**
+   * The SERVER's uncapped unanswered count (`InboxResponse.unansweredInquiries`).
+   *
+   * Passing it is what makes this report agree with 홈. Counting `needsReply` over `inbox` — which is
+   * what this did — counts only the rows the feed returned, and the feed is capped (`limit`, default
+   * 50). On the demo org that printed "답변이 필요한 문의 ≤50건" here and 3,208 on 홈, under the same
+   * words and pointing at the same screen. `buildInquiryToday` has always used the server number; this
+   * parameter moves that rule here rather than re-deriving it.
+   *
+   * Null means the inbox read failed, and the section renders unavailable exactly as before.
+   */
+  serverUnanswered: number | null = null,
 ): WeeklyReport {
   const issuesAvailable = issues !== null;
   const inboxAvailable = inbox !== null;
@@ -77,7 +89,13 @@ export function buildWeeklyReport(
   const improvedList = issuesAvailable
     ? improvedIssues([...(issues as ReviewIssueView[])]).slice(0, topLimit)
     : [];
-  const unanswered = inboxAvailable ? (inbox as FeedItem[]).filter(needsReply).length : 0;
+  // The server's number when we have it; the feed-derived count only as a fallback for a caller that
+  // has not been updated. The fallback is deliberately kept rather than made required: a call site
+  // that forgets the argument gets the old (small) number, not a crash — but every call site in the
+  // app passes it, and `reportView.test.ts` pins that the two disagree so nobody re-derives it here.
+  const unanswered = inboxAvailable
+    ? (serverUnanswered ?? (inbox as FeedItem[]).filter(needsReply).length)
+    : 0;
   const faq = inboxAvailable ? countAction(analyses, FAQ_CANDIDATE) : 0;
   const detailPage = inboxAvailable ? countAction(analyses, DETAIL_PAGE_CANDIDATE) : 0;
 

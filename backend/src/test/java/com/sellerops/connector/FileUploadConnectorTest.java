@@ -26,6 +26,7 @@ import com.sellerops.ingest.map.ReviewRowMapper;
 import com.sellerops.ingest.map.RowError;
 import com.sellerops.ingest.parse.FileParser;
 import com.sellerops.ingest.parse.ParsedTable;
+import com.sellerops.ingest.IngestFollowUp;
 import com.sellerops.itemanalysis.ItemAnalysisService;
 import com.sellerops.itemanalysis.dto.RunResult;
 import com.sellerops.sync.SyncJob;
@@ -73,7 +74,8 @@ class FileUploadConnectorTest {
         itemAnalysis = mock(ItemAnalysisService.class);
 
         connector = new FileUploadConnector(channels, fileParser, reviewMapper, inquiryMapper,
-                orderMapper, ingestionService, collectionRuns, itemAnalysis);
+                orderMapper, ingestionService, collectionRuns,
+                new IngestFollowUp(itemAnalysis, null, null));
 
         when(channels.existsById(channel)).thenReturn(true);
         when(collectionRuns.open(any())).thenReturn(new SyncJob());

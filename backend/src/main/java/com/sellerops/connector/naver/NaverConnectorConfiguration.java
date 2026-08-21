@@ -67,8 +67,16 @@ public class NaverConnectorConfiguration {
     }
 
     @Bean
+    NaverProductsClient naverProductsClient(
+            NaverHttpClient http,
+            @Value("${sellerops.connector.naver.base-url:https://api.commerce.naver.com}") String baseUrl) {
+        return new NaverProductsClient(http, Clock.systemUTC(), baseUrl);
+    }
+
+    @Bean
     NaverApiConnector naverApiConnector(NaverTokenClient tokenClient, NaverOrdersClient ordersClient,
+                                        NaverProductsClient productsClient,
                                         CredentialVault vault) {
-        return new NaverApiConnector(tokenClient, ordersClient, vault);
+        return new NaverApiConnector(tokenClient, ordersClient, productsClient, vault);
     }
 }

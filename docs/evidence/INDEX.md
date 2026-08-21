@@ -100,6 +100,9 @@ instruments with no promotion path (`docs/channel_integration_completeness_audit
 | 2026-07-27 | Acquisition supervisor ↔ live import boot | offline proof record | `docs/action-window-runtime/acquisition-supervisor-runtime-integration-proof-record.md` |
 | 2026-07-27 | NAVER repeated review-operations loop | design + proof record for turning the live import vertical into a repeatable loop | `docs/action-window-runtime/review-operations-loop.md` |
 | 2026-07-28 | Guided acquisition reliability | **offline-complete; live proof PENDING** a fresh single-use in-turn approval — recorded so the gap is not mistaken for a result | `docs/action-window-runtime/guided-acquisition-reliability.md` |
+| 2026-08-21 | **Operator Graph v1 — local integration proof** (`feat/operator-graph-v1`, local PG 15.13 `sellerops`, org `7146c50f…d8e0`): Flyway V47 on real PostgreSQL; the derived-state chain over one org's **7,136 real customer utterances**; the four Operator scenarios; planner/judge OFF vs ON | **`PASS`, 5 blockers found and patched.** V47 applied (44ms, 4 indexes). Item analysis 640 → 7,136; issue memory 0 → 19 issues / 81 evidence; customer memory 0 → 7,136. Scenarios ①②④ answered with traceable evidence and correct coverage; **③ NOT PROVEN** — the org's OPEN work-item queue is empty (3,199 DISMISSED), the residual `demo_runbook_v1.md` §4 already records. ON vs OFF changed plan breadth and provenance labels but **no number, no evidence, no coverage verdict**. **No marketplace contact, no credential read, no WRITE added or executed.** Moves no §4.1 status | `docs/operator_graph_v1_local_integration_proof.md` |
+| 2026-08-21 | **Operator Graph v2 — local integration proof** (`feat/operator-graph-v2`, local PG 15.13 `sellerops`, org `7146c50f…d8e0`): Flyway V48/V49/V50; Product Knowledge derived with **zero marketplace contact**; investigation divergence across three question classes with a live LLM planner; 15 paraphrases; planner OFF; the inquiry semantic classifier measured against `contracts/inquiry-issue/v1/RUBRIC.md` | **`PASS` on the runtime invariants; `LIMITATION` on repeat-inquiry detection.** `channel_products` 0 → **58** (a table empty since V1), `product_facts` 0 → 9 (all `DERIVED:TITLE`, parsed not guessed). **Three question classes produced three different investigations** — a policy question called no product tool in 15/15 runs; planner OFF ⇒ **5/5 free-text runs FAILED with no answer** while the Dashboard intent lane still ran. Repeat detection: **19/19 genuine inquiries classified, 0/3,201 spam** — and the corpus finding is the headline: **3,201 of this org's 3,220 "inquiries" are spam board posts**. RUBRIC G3 **미달** (4 repeated signatures, needs 5) ⇒ reported as a limitation, not as done. **9 defects found on real data, all patched with regressions.** **No marketplace contact, no credential read, WRITE tools 0.** Moves no §4.1 status — the new PRODUCT reads stay `NEEDS_VERIFICATION` | `docs/operator_graph_v2_local_integration_proof.md` |
+
 
 ### 3.1 Action Window R4 — the NAVER export/reply runs, one row each
 
@@ -165,6 +168,26 @@ The guided walk that ships today, and its idle→activate→release runtime, are
 document is their complete successor.
 | 2026-07-27 | Acquisition supervisor ↔ runtime integration | proof record | `docs/action-window-runtime/acquisition-supervisor-runtime-integration-proof-record.md` |
 | 2026-08-13 | Coupang live approval harness | `docs/sellerops_live_approval_contract.md` | — |
+
+---
+
+## 4. Repository audits (not live runs)
+
+**Why this section exists, and why these rows are not in §1.** §1–§3 record **runs** — something that
+happened against a real marketplace account, a real database, or a real runtime. A repository audit is
+not a run: it establishes nothing new about a seller account, and its `Outcome` column would have
+nothing to report in the run's own words (rule 4). But rule 1's *purpose* — **no evidence document is
+ever left with zero inbound references**, the mechanical cause of the Coupang `ORDER_SUMMARY` record
+staying wrong for two weeks — applies to an audit exactly as it applies to a run. So audits are indexed
+here, in their own section, where nothing can mistake one for a live proof.
+
+A row here records **what was true of the code at one commit**. It never moves a capability status, a
+운영 지원 level, or a 셀러 표기; `docs/multi-channel-connector-roadmap.md` §4.1 keeps all three.
+
+| Date | Commit audited | Scope | Outcome | Evidence |
+|---|---|---|---|---|
+| 2026-08-19 | `main` + PR #469/#471 | NAVER / Coupang / Cafe24 연결 · 로컬 에이전트 capability의 **도달 가능성** (`IMPLEMENTED_AND_WIRED` / `IMPLEMENTED_BUT_UNWIRED` / `ONLY_PROBE_OR_FIXTURE` / `NEVER_IMPLEMENTED`) | 19 capabilities 분류; Coupang `ORDER_SUMMARY`·order-access 오기록 **정정**; Coupang 갱신 walk가 첫 발급 walk로 mis-route되던 결함 발견 | `docs/channel_integration_completeness_audit_v1.md` |
+| **2026-08-21** | **`main @ 2491f1ab`** | **Demo Baseline이 약속하는 6개 제품 capability** (수집 · 상품/채널 grouping · 미답변·부정·반복 triage · RAG 검색 · AI 답변 초안 · 주간 리포트) — 각각 구현 위치 · API/data/UI 연결 · 테스트 · 마지막 live proof | 수집 `LIVE` · 채널 grouping `LIVE` · 상품 grouping `DISCONNECTED` · 미답변/리뷰 triage `LIVE` · 반복 `DISCONNECTED`(리뷰)·`MISSING`(문의) · RAG `MISSING`(의도된 부재) · AI 초안 부분 `LIVE`(제품화면 미연결) · 주간 리포트 `IMPLEMENTED` 중 2곳 `BROKEN`. 단절 10건(A~J)을 **소실/단절 5 · 미결 결정 2 · 의도된 미구현 3**으로 분리하고 4단계 최소 복구 순서를 확정. **코드 변경 0** | **`docs/demo_baseline_recovery_audit_2026-08-21.md`** |
 
 ---
 

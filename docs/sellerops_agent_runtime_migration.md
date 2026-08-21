@@ -2,6 +2,11 @@
 
 **Status:** slices 1–2 (inquiry) merged (PR #376); the review-reply subgraph (§8) is the
 second journey, coexisting via a goal router.
+**HISTORICAL on goal routing (2026-08-21).** This document describes `parseGoal`'s keyword table as
+the runtime's goal router. That was true when it was written and is **no longer the product contract**:
+`docs/sellerops_operator_graph_v2.md` makes Agent-chat planning LLM-only, deletes the free-text keyword
+table, and fails a run whose plan cannot be made. Read every "keyword table" sentence here as lineage.
+Explicit `intent` validation survives (the Dashboard lane). Nothing else in this document is affected.
 **Scope of this document:** the target architecture for moving SellerOps' intelligence /
 orchestration layer onto LangChain + LangGraph — **whole-service**, not NAVER-only — the
 first vertical slice that proves the pattern, and the second subgraph that reuses it.

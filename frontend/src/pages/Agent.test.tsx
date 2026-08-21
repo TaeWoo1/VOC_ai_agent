@@ -30,9 +30,9 @@ const CAPS: CapabilitiesView = {
   version: "test",
   env: "test",
   intents: [
-    { intent: "HANDLE_UNANSWERED_INQUIRIES", domain: "INQUIRY", hasCheckpoint: true, requiresAccountScope: false, examples: [] },
-    { intent: "HANDLE_REVIEW_REPLIES", domain: "REVIEW", hasCheckpoint: true, requiresAccountScope: true, examples: [] },
-    { intent: "HANDLE_OPERATIONS_ISSUES", domain: "ISSUE", hasCheckpoint: false, requiresAccountScope: false, examples: [] },
+    { intent: "HANDLE_UNANSWERED_INQUIRIES", domain: "INQUIRY", hasCheckpoint: true, requiresAccountScope: false, sampleGoals: [] },
+    { intent: "HANDLE_REVIEW_REPLIES", domain: "REVIEW", hasCheckpoint: true, requiresAccountScope: true, sampleGoals: [] },
+    { intent: "HANDLE_OPERATIONS_ISSUES", domain: "ISSUE", hasCheckpoint: false, requiresAccountScope: false, sampleGoals: [] },
   ],
   runStore: { kind: "file", durable: true, multiInstanceSafe: false },
   externalSend: "disabled",

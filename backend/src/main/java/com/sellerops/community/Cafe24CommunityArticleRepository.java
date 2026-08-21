@@ -18,6 +18,13 @@ public interface Cafe24CommunityArticleRepository extends JpaRepository<Cafe24Co
 
     List<Cafe24CommunityArticle> findAllByOrgId(UUID orgId);
 
+    /**
+     * Stored articles for one org and board by article number — the lookup behind the review-product
+     * link backfill. Bounded by the caller's batch.
+     */
+    List<Cafe24CommunityArticle> findByOrgIdAndBoardNoAndArticleNoIn(
+            UUID orgId, int boardNo, java.util.Collection<Long> articleNos);
+
     List<Cafe24CommunityArticle> findAllByOrgIdAndSellerAccountIdAndBoardNo(
             UUID orgId, UUID sellerAccountId, int boardNo);
 

@@ -20,7 +20,7 @@
 | 1 | **`backend/`** | Spring Boot (Java 17, Gradle, Postgres/Flyway, JWT) | The system of record: connectors, ingest, dedupe, work queues, scheduling, auth — **and the only LLM egress in the repository** | `docs/multi-channel-connector-roadmap.md` (connectors) · `docs/self_pilot_runtime_v1.md` (scheduling) · `docs/workstreams/review_ai_triage_demo.md` (AI triage) · `docs/service_readiness_v1.md` |
 | 2 | **`frontend/`** | React + Vite operations UI | 홈 · 리뷰 · 문의 · 주문 · 채널 연결 (+ `/settings`, `/agent`, `/memory`, `/reports`) | `docs/product_assembly_ia_v1.md` (IA, screens, visible channels) · `docs/sellerops_frontend_spec.md` (states, language, a11y) |
 | 3 | **`collector/`** | TypeScript local agent (Node + Playwright), run on the seller's own machine | Channel acquisition and the **Action Window**: the resident helper, the bridge, and the per-carrier guided walks | `docs/sellerops_local_agent_runtime_adr.md` (boundaries) · `docs/resident_helper_on_demand_carrier_v1.md` (the on-demand carrier seam) |
-| 4 | **`agent-runtime/`** | Standalone Node/TypeScript LangGraph orchestration service (port 8787) | Four compiled `StateGraph`s (inquiry, inquiry-draft, review reply, issue memory) with human `interrupt`/resume; tools are thin adapters onto Spring | `docs/sellerops_agent_runtime_migration.md` · **`docs/decisions/agent-runtime-langgraph-llm-split.md`** |
+| 4 | **`agent-runtime/`** | Standalone Node/TypeScript LangGraph orchestration service (port 8787) — **SellerOps의 AI Operator 실행 구조** (2026-08-21) | The `OperatorGraph` (goal → **LLM plan** → plan validation → specialists → evidence judge → answer, bounded) over the four checkpointed `StateGraph`s; tools are thin adapters onto Spring, and the Operator's own catalogue is READ-only. **Agent chat has no deterministic planner** — no plan, no run; a button's `intent` runs without one | **`docs/sellerops_operator_graph_v2.md`** (제품 행동 계약 · Planner · Product Knowledge) · `docs/sellerops_operator_graph_v1.md` (구성·tool·evidence 계약 · 구현 기록) · `docs/sellerops_agent_runtime_migration.md` · `docs/decisions/agent-runtime-langgraph-llm-split.md` |
 | 5 | **`contracts/`** | Hand-written ESM TypeScript + JSON fixtures + golden vectors | The shared shapes: Action Window v1/v2, acquisition, session readiness, review-import journey, fingerprints, triage rubrics | the per-family `README.md` / `SPEC.md` / `CONTRACT.md` beside each |
 
 Plus `tools/` — operator harnesses, validation scripts, and calibration instruments — and `docs/`.
@@ -58,11 +58,15 @@ Plus `tools/` — operator harnesses, validation scripts, and calibration instru
 
 ## The two facts most often mis-remembered
 
-1. **`agent-runtime/` contains no LLM call.** It is a deterministic, human-checkpointed workflow engine
-   that happens to be built on LangGraph. Goal parsing is a keyword table (`goal/parseGoal.ts`); drafting
-   is a template table (`provider/DraftModelSeam.ts`). The repository's only model call lives in Spring
-   (`review/triage/llm/ApiTriageClassifier.java`) and never touches LangChain. Open question, deliberately
-   undecided: `docs/decisions/agent-runtime-langgraph-llm-split.md`.
+1. **`agent-runtime/` holds no credential, and the backend is still the only LLM egress.** This line
+   used to read "`agent-runtime/` contains no LLM call", and that stopped being true on 2026-08-20:
+   `provider/SpringDraftProvider.ts` produces a real inquiry draft. It does so by calling the BACKEND
+   (`POST /api/agent/inquiry-draft`) with the operator's forwarded bearer — the model, the key, the
+   prompt, the per-org flag and the payload floor all live in Spring (`agent/llm/**`), and this service
+   still holds no vendor key of any kind. That — not "no model is involved" — is the property to check
+   when reading it. `docs/decisions/agent-runtime-langgraph-llm-split.md` records the decision;
+   `docs/sellerops_operator_graph_v1.md` (and v2) extends the same rule to the Operator planner and evidence
+   judge (their own flags, their own prompts, their own payload floors, all in Spring).
 2. **A channel in the connector layer is not a channel on screen.** The seller-visible set is exactly
    NAVER / Coupang / Cafe24 (`ProductChannels.java`, `frontend/src/lib/productChannels.ts`). ESM/Gmarket,
    11번가, SSG, 오늘의집 and the FILE_UPLOAD meta-channel stay in the catalog and the connector layer by
@@ -84,6 +88,9 @@ Not a layer — a set of gates, each in code, each fail-closed. The fences thems
 | Triage channel gate | `backend/.../review/triage/llm/ReviewTriageChannelGate.java` | any channel outside NAVER/Cafe24/Coupang, before egress |
 | Triage payload floor | `TriagePrompt` + `TriagePayloadFloorTest` | anything beyond rating + body leaving for a vendor |
 | Classifier boundary | `ClassifierBoundaryTest` | any class but the gate constructing the classifier (build fails) |
+| LLM capability doors | `AgentDraftBoundaryTest` | any class but a capability's own service constructing its generator, or anything but a generator calling the transport (three capabilities: draft · plan · judge) |
+| Operator WRITE fence | `OperatorToolRegistry` + `operatorToolRegistry.test.ts` | a WRITE-classed tool at registry construction; a tool outside the run's plan; the whole privileged plane (credentials, Action Window, guided-submission mint) from the Operator catalogue |
+| Evidence digest floor | `EvidenceDigestFloor` + `AgentOperatorPayloadFloorTest` | any judge request whose evidence digest is not `key=value` metadata — prose is refused before the vendor call, not masked |
 
 ## Verification architecture
 

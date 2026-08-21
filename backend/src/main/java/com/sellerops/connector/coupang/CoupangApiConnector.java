@@ -55,13 +55,26 @@ public class CoupangApiConnector implements PullConnector, ConnectionVerifier {
 
     private final CoupangOrdersClient ordersClient;
     private final CoupangInquiriesClient inquiriesClient;
+    private final CoupangSellerProductsClient sellerProductsClient;
     private final CredentialVault vault;
 
     public CoupangApiConnector(CoupangOrdersClient ordersClient, CoupangInquiriesClient inquiriesClient,
-                               CredentialVault vault) {
+                               CoupangSellerProductsClient sellerProductsClient, CredentialVault vault) {
         this.ordersClient = ordersClient;
         this.inquiriesClient = inquiriesClient;
+        this.sellerProductsClient = sellerProductsClient;
         this.vault = vault;
+    }
+
+    /**
+     * Order + inquiry wiring — a deployment (or a test) with no seller-product client.
+     *
+     * <p>PRODUCT is then absent from the capability table rather than advertised and failing at call
+     * time; see {@code NaverApiConnector}'s equivalent constructor for the argument.
+     */
+    public CoupangApiConnector(CoupangOrdersClient ordersClient, CoupangInquiriesClient inquiriesClient,
+                               CredentialVault vault) {
+        this(ordersClient, inquiriesClient, null, vault);
     }
 
     @Override
@@ -78,13 +91,20 @@ public class CoupangApiConnector implements PullConnector, ConnectionVerifier {
     public ConnectorCapabilities capabilities(String channelCode) {
         return new ConnectorCapabilities(
                 CONNECTOR_CLASS,
-                Set.of(DataType.ORDER_SUMMARY, DataType.INQUIRY),
+                sellerProductsClient == null
+                        ? Set.of(DataType.ORDER_SUMMARY, DataType.INQUIRY)
+                        : Set.of(DataType.ORDER_SUMMARY, DataType.INQUIRY, DataType.PRODUCT),
                 // INQUIRY was promoted to CONFIRMED by the live proof of 2026-08-14, not by the code
                 // being written: a real account collected real inquiries through the official v5 path,
                 // and a re-sweep of the same window inserted nothing and skipped every row.
                 // See docs/coupang_inquiry_live_proof_v1.md.
-                Map.of(DataType.ORDER_SUMMARY, "CONFIRMED",
-                        DataType.INQUIRY, "CONFIRMED"),
+                sellerProductsClient == null
+                        ? Map.of(DataType.ORDER_SUMMARY, "CONFIRMED", DataType.INQUIRY, "CONFIRMED")
+                        // Implemented and offline-verified; wire shape not observed live from this
+                        // repository. CONFIRMED here would be the over-statement the vocabulary exists
+                        // to prevent.
+                        : Map.of(DataType.ORDER_SUMMARY, "CONFIRMED", DataType.INQUIRY, "CONFIRMED",
+                                DataType.PRODUCT, "NEEDS_VERIFICATION"),
                 "ORDER_SUMMARY via the official v5 ordersheets day-paging flow"
                         + " (createdAt window ≤31d, per-status sweep, nextToken paging)."
                         + " INQUIRY via the official v5 onlineInquiries 상품별 고객문의 flow"
@@ -108,7 +128,8 @@ public class CoupangApiConnector implements PullConnector, ConnectionVerifier {
     @Override
     public FetchPage fetch(FetchRequest request) {
         boolean routable = CHANNEL_CODE.equals(request.channelCode())
-                && (request.dataType() == DataType.ORDER_SUMMARY || request.dataType() == DataType.INQUIRY);
+                && (request.dataType() == DataType.ORDER_SUMMARY || request.dataType() == DataType.INQUIRY
+                    || (request.dataType() == DataType.PRODUCT && sellerProductsClient != null));
         if (!routable) {
             throw new UnsupportedDataTypeException(request.channelCode(), request.dataType());
         }
@@ -121,6 +142,11 @@ public class CoupangApiConnector implements PullConnector, ConnectionVerifier {
                         credential.accessKey(), credential.secretKey(), credential.vendorId(),
                         request.cursorValue());
                 case INQUIRY -> inquiriesClient.fetchInquiryPage(
+                        credential.accessKey(), credential.secretKey(), credential.vendorId(),
+                        request.cursorValue());
+                // The vendor's own catalogue. Read-only, small pages, and the option axis it uniquely
+                // provides is what finally resolves reviews.source_option_id (V37).
+                case PRODUCT -> sellerProductsClient.fetchProductPage(
                         credential.accessKey(), credential.secretKey(), credential.vendorId(),
                         request.cursorValue());
                 default -> throw new UnsupportedDataTypeException(request.channelCode(), request.dataType());

@@ -17,12 +17,15 @@ import com.sellerops.connector.FetchPage;
 import com.sellerops.connector.FetchRequest;
 import com.sellerops.connector.PullConnector;
 import com.sellerops.ingest.IngestOutcome;
+import com.sellerops.ingest.IngestFollowUp;
 import com.sellerops.ingest.IngestionService;
 import com.sellerops.ingest.map.RowError;
 import com.sellerops.ingest.canonical.CanonicalCommunityArticle;
 import com.sellerops.ingest.canonical.CanonicalInquiry;
 import com.sellerops.ingest.canonical.CanonicalOrder;
 import com.sellerops.ingest.canonical.CanonicalOrderSummary;
+import com.sellerops.ingest.canonical.CanonicalProduct;
+import com.sellerops.product.ProductKnowledgeWriter;
 import com.sellerops.ingest.canonical.CanonicalReview;
 import com.sellerops.ingest.Cafe24ReviewIssueBridge;
 import com.sellerops.ingest.Cafe24ReviewPromotionReconciler;
@@ -107,6 +110,21 @@ public class SyncRunExecutor {
      */
     private final SellerAccountReauthService reauth;
 
+    /**
+     * The shared post-ingest follow-up (item-analysis · issue-memory refresh · customer-memory index).
+     * Nullable for the same reason {@code reviewIssueBridge} is: the bridge-less test constructors
+     * below pass null and the ingest path null-guards, so a test that only exercises collection does
+     * not have to stand up the analysis stack.
+     */
+    private final IngestFollowUp followUp;
+
+    /**
+     * The Product Knowledge write side (Operator Graph v2). Nullable for the same reason
+     * {@code followUp} is: a test that only exercises collection should not have to stand up the
+     * catalogue stack. A null writer makes a PRODUCT page a counted no-op rather than a failure.
+     */
+    private final ProductKnowledgeWriter knowledgeWriter;
+
     /** Full production wiring (Spring). Every optional collaborator is present here. */
     @Autowired
     public SyncRunExecutor(SellerAccountRepository sellerAccounts, ChannelRepository channels,
@@ -119,7 +137,9 @@ public class SyncRunExecutor {
                            NaverConnectionLifecycle naverLifecycle,
                            CoupangConnectionLifecycle coupangLifecycle,
                            SyncRunGate runGate,
-                           SellerAccountReauthService reauth) {
+                           SellerAccountReauthService reauth,
+                           IngestFollowUp followUp,
+                           ProductKnowledgeWriter knowledgeWriter) {
         this.sellerAccounts = sellerAccounts;
         this.channels = channels;
         this.registry = registry;
@@ -134,6 +154,26 @@ public class SyncRunExecutor {
         this.coupangLifecycle = coupangLifecycle;
         this.runGate = runGate;
         this.reauth = reauth;
+        this.followUp = followUp;
+        this.knowledgeWriter = knowledgeWriter;
+    }
+
+    /** Pre-v2 signature (no Product Knowledge writer) — a PRODUCT page is then a counted no-op. */
+    public SyncRunExecutor(SellerAccountRepository sellerAccounts, ChannelRepository channels,
+                           ConnectorRegistry registry, IngestionService ingestionService,
+                           ChannelOrderIngestionService orderIngestionService,
+                           SyncJobRepository syncJobs, SyncCursorRepository cursors,
+                           ChannelConnectionStatusRepository connectionStatus,
+                           Cafe24ReviewIssueBridge reviewIssueBridge,
+                           Cafe24ReviewPromotionReconciler reviewIssueReconciler,
+                           NaverConnectionLifecycle naverLifecycle,
+                           CoupangConnectionLifecycle coupangLifecycle,
+                           SyncRunGate runGate,
+                           SellerAccountReauthService reauth,
+                           IngestFollowUp followUp) {
+        this(sellerAccounts, channels, registry, ingestionService, orderIngestionService, syncJobs, cursors,
+                connectionStatus, reviewIssueBridge, reviewIssueReconciler, naverLifecycle, coupangLifecycle,
+                runGate, reauth, followUp, null);
     }
 
     /** Pre-Self-Pilot signature (no reauth service) — kept for the tests that construct it directly. */
@@ -149,7 +189,7 @@ public class SyncRunExecutor {
                            SyncRunGate runGate) {
         this(sellerAccounts, channels, registry, ingestionService, orderIngestionService, syncJobs, cursors,
                 connectionStatus, reviewIssueBridge, reviewIssueReconciler, naverLifecycle, coupangLifecycle,
-                runGate, null);
+                runGate, null, null, null);
     }
 
     /**
@@ -166,7 +206,7 @@ public class SyncRunExecutor {
                            NaverConnectionLifecycle naverLifecycle) {
         this(sellerAccounts, channels, registry, ingestionService, orderIngestionService,
                 syncJobs, cursors, connectionStatus, reviewIssueBridge, reviewIssueReconciler,
-                naverLifecycle, null, null);
+                naverLifecycle, null, null, null, null, null);
     }
 
     /**
@@ -181,7 +221,7 @@ public class SyncRunExecutor {
                            SyncJobRepository syncJobs, SyncCursorRepository cursors,
                            ChannelConnectionStatusRepository connectionStatus) {
         this(sellerAccounts, channels, registry, ingestionService, orderIngestionService,
-                syncJobs, cursors, connectionStatus, null, null, null, null, null);
+                syncJobs, cursors, connectionStatus, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -427,12 +467,43 @@ public class SyncRunExecutor {
             return outcome;
         }
         return switch (page.dataType()) {
-            case REVIEW -> ingestionService.ingestReviews(orgId, channelId, typed(page, CanonicalReview.class));
-            case INQUIRY -> ingestionService.ingestInquiries(orgId, channelId, sellerAccountId,
-                    typed(page, CanonicalInquiry.class));
+            case REVIEW -> {
+                IngestOutcome outcome =
+                        ingestionService.ingestReviews(orgId, channelId, typed(page, CanonicalReview.class));
+                // The API-collection path used to do NO follow-up at all: item-analysis ran only for
+                // file uploads, so FAQ/상세페이지 후보 were structurally always 0 for a connector org,
+                // and the repeated-issue memory only ever saw NAVER imports and Cafe24 board-4 (audit
+                // defects B and C). Same three follow-ups as every other ingest path now. Best-effort
+                // inside — a follow-up must never fail a sync or move its cursor.
+                if (followUp != null) {
+                    followUp.afterReviewIngest(orgId, channelId, outcome.insertedIds());
+                }
+                yield outcome;
+            }
+            case INQUIRY -> {
+                IngestOutcome outcome = ingestionService.ingestInquiries(orgId, channelId, sellerAccountId,
+                        typed(page, CanonicalInquiry.class));
+                if (followUp != null) {
+                    followUp.afterInquiryIngest(orgId, outcome.insertedIds());
+                }
+                yield outcome;
+            }
             case ORDER_SUMMARY -> ingestOrderPage(page, orgId, channelId, sellerAccountId);
+            case PRODUCT -> {
+                // The catalogue read (Operator Graph v2). It writes listings, variants and facts rather
+                // than a customer row, so it produces no insertedIds for the review/inquiry follow-ups —
+                // and must not, since none of them apply to a product. A null writer (a connector-only
+                // test wiring) makes this a no-op, the same convention `followUp` follows.
+                if (knowledgeWriter == null) {
+                    yield new IngestOutcome(0, 0, 0, List.of(), List.of());
+                }
+                List<CanonicalProduct> rows = typed(page, CanonicalProduct.class);
+                ProductKnowledgeWriter.WriteResult result =
+                        knowledgeWriter.write(orgId, channelId, rows);
+                yield new IngestOutcome(rows.size(), 0, 0, List.of(), List.copyOf(result.productIds()));
+            }
             // No canonical type yet; the mock returns empty pages. Routing is deferred.
-            case PRODUCT, SALES -> new IngestOutcome(0, 0, 0, List.of(), List.of());
+            case SALES -> new IngestOutcome(0, 0, 0, List.of(), List.of());
         };
     }
 

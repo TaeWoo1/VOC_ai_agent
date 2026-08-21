@@ -44,12 +44,24 @@ one place on disk and are **not** recoverable from git.
   runtime's draft seam).
 - `frontend/` — React/Vite operations UI.
 - `collector/` — TypeScript local agent: channel acquisition + Action Window (NAVER, ESM, Cafe24).
-- `agent-runtime/` — standalone Node/TS **LangGraph** orchestration service (port 8787): four compiled
-  graphs with human `interrupt`/resume, tools adapting onto Spring. It is a docker-compose service with
-  its own CI status check and a live `/agent` route. It **holds no credential of any kind**: since
-  2026-08-20 one node of two graphs produces a real LLM draft, and it does so by calling the BACKEND
-  with the operator's forwarded bearer — so "the backend is the only LLM egress" is still the property
-  to check here (`docs/decisions/agent-runtime-langgraph-llm-split.md`).
+- `agent-runtime/` — standalone Node/TS **LangGraph** orchestration service (port 8787), and since
+  2026-08-21 SellerOps's **AI Operator 실행 구조**: an `OperatorGraph` that interprets a goal **with an
+  LLM planner and no deterministic fallback** (v2 — no plan, no run), chooses
+  specialists (ProductOps · ReviewOps · InquiryOps · ReportOpsNode) and tools, keeps **evidence as
+  first-class state**, judges what may be said, and stops on a bounded budget — over the four existing
+  compiled graphs with human `interrupt`/resume, whose contracts are unchanged. Tools adapt onto Spring.
+  A docker-compose service with its own CI status check and a live `/agent` route. It **holds no
+  credential of any kind**: the draft, planner and judge models are all BACKEND capabilities reached
+  with the operator's forwarded bearer, so "the backend is the only LLM egress" is still the property to
+  check here. **The Operator's tool catalogue is 100% READ — there is no WRITE tool and a structural
+  test refuses one** (`OperatorToolRegistry`, `operatorToolRegistry.test.ts`); credential handoff, Action
+  Window commands and guided-submission mints are deliberately absent from it (`privilegedPlaneFence`).
+  **Two lanes, and they are not the same product:** a button sends a closed `intent` and runs
+  deterministically; a typed sentence is planned by the LLM or the run **fails**. Canonical:
+  **`docs/sellerops_operator_graph_v2.md`** (제품 행동 계약 — Agent chat의 계획은 **반드시 LLM Planner**가
+  세우고, 세울 수 없으면 run은 실패한다; 결정론 goal/keyword planner는 test·fallback 용도로도 존재하지
+  않는다) · `docs/sellerops_operator_graph_v1.md`(구현·라이브 증명 기록, runtime semantics는 v2가 대체) ·
+  `docs/decisions/agent-runtime-langgraph-llm-split.md`.
 - `contracts/` — shared contracts (Action Window, review fingerprint).
 - `tools/` — dev/support tooling.
 - `docs/` — current SellerOps docs; `docs/archive/` holds historical material.
@@ -98,10 +110,10 @@ document is not on this path and nothing here links to it, it does not carry cur
 | # | Stop | Owns | Document |
 |---|---|---|---|
 | 0 | orientation | what SellerOps is, who for, channel posture, user journey — **points, owns nothing** | `docs/product_operating_model.md` |
-| 1 | **product scope / journeys** | identity, strategy, honest state, authority · the scope contract | `docs/sellerops_canonical_reference.md` · `docs/product-scope-v1.md` (**scope lock v1.11**) |
+| 1 | **product scope / journeys** | identity, strategy, honest state, authority · the scope contract | `docs/sellerops_canonical_reference.md` · `docs/product-scope-v1.md` (**scope lock v1.13**) |
 | 2 | **architecture** | the five runtimes, how they connect, the fail-closed gates — **a pointer page** | `docs/architecture.md` |
 | 3 | **capability truth** | channel × DataType × method × status — **the single declaration** | `docs/multi-channel-connector-roadmap.md` §4.1 |
-| 4 | **decisions** | ADRs and standing contracts | `docs/decisions/` · `docs/sellerops_live_approval_contract.md` · `docs/sellerops_local_agent_runtime_adr.md` · `docs/sellerops_local_to_pilot_connectivity_decision.md` (NAVER egress IP · Cafe24 callback) · `docs/coupang_review_policy_gate_v1.md` |
+| 4 | **decisions** | ADRs and standing contracts | `docs/decisions/` · **`docs/sellerops_operator_graph_v2.md`** (AI Operator 제품 행동 계약 — LLM-first planning · Product Knowledge · 2026-08-21) · `docs/sellerops_operator_graph_v1.md` (실행 구조 · 구현 기록) · `docs/sellerops_live_approval_contract.md` · `docs/sellerops_local_agent_runtime_adr.md` · `docs/sellerops_local_to_pilot_connectivity_decision.md` (NAVER egress IP · Cafe24 callback) · `docs/coupang_review_policy_gate_v1.md` |
 | 5 | **evidence** | every live run: date, channel, capability, commit, approval id, outcome | `docs/evidence/INDEX.md` |
 
 **Screens:** `docs/product_assembly_ia_v1.md` owns product IA, screen responsibility and the visible

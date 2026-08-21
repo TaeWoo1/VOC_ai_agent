@@ -87,6 +87,79 @@ sellerops:
       # uselessly, a rule-based fallback on every inquiry.
       max-output-tokens: ${SELLEROPS_AGENT_DRAFT_MAX_OUTPUT_TOKENS:4000}
       reasoning-effort: ${SELLEROPS_AGENT_DRAFT_REASONING_EFFORT:low}
+    # ── Operator Graph v1 (2026-08-21): goal interpretation and evidence judging ──────────────────
+    #
+    # TWO MORE separate switches and separate keys, for the reason the draft one is separate from the
+    # triage pilot: they are different exposures and a deployment must be able to run any subset.
+    #   * plan  sends the OPERATOR'S OWN typed sentence plus a static tool catalogue. No seller row at all.
+    #   * judge sends a sentence SellerOps composed plus closed-vocabulary evidence metadata (labels,
+    #     counts, coverage verdicts, ISO dates). `EvidenceDigestFloor` refuses the request outright if the
+    #     digest is not metadata, so prose cannot leave through it.
+    # Neither carries a customer utterance, and both floors are asserted on the serialized request bytes
+    # by AgentOperatorPayloadFloorTest.
+    #
+    # OFF by default, and what "off" MEANS changed in Operator Graph v2:
+    #   * plan off  ⇒ Agent chat does NOT degrade to keyword routing. There is no deterministic planner
+    #     any more, in product, test or emergency use. A run whose plan cannot be made ends FAILED and
+    #     the screen says so. Dashboard shortcuts (button-sent `intent`) keep working normally.
+    #   * judge off ⇒ the deterministic rule judge decides, exactly as before. That fallback STAYS: the
+    #     rule judge is withhold-only, so losing the model makes the Operator quieter, never bolder.
+    # The asymmetry is deliberate — a missing planner would have to INVENT a plan, while a missing judge
+    # only has to refuse more.
+    plan:
+      enabled: ${SELLEROPS_AGENT_PLAN_ENABLED:false}
+      enabled-org-ids: ${SELLEROPS_AGENT_PLAN_ORG_IDS:}
+      vendor: ${SELLEROPS_AGENT_PLAN_VENDOR:OPENAI}
+      model: ${SELLEROPS_AGENT_PLAN_MODEL:gpt-5-2025-08-07}
+      api-key: ${SELLEROPS_AGENT_PLAN_API_KEY:}
+      # 2000 was sized for v1's four-field plan. The v2 InvestigationPlan carries information needs, a
+      # retrieval order and evidence requirements, and on a reasoning model the budget is SHARED with
+      # internal reasoning — so the answer was cut off before it was emitted. Measured live 2026-08-21:
+      # the spec question planned fine and the policy/difference questions both returned
+      # `budget_exhausted`, which the runtime correctly reported as a FAILED run rather than guessing.
+      max-output-tokens: ${SELLEROPS_AGENT_PLAN_MAX_OUTPUT_TOKENS:6000}
+      reasoning-effort: ${SELLEROPS_AGENT_PLAN_REASONING_EFFORT:low}
+    judge:
+      enabled: ${SELLEROPS_AGENT_JUDGE_ENABLED:false}
+      enabled-org-ids: ${SELLEROPS_AGENT_JUDGE_ORG_IDS:}
+      vendor: ${SELLEROPS_AGENT_JUDGE_VENDOR:OPENAI}
+      model: ${SELLEROPS_AGENT_JUDGE_MODEL:gpt-5-2025-08-07}
+      api-key: ${SELLEROPS_AGENT_JUDGE_API_KEY:}
+      max-output-tokens: ${SELLEROPS_AGENT_JUDGE_MAX_OUTPUT_TOKENS:2000}
+      reasoning-effort: ${SELLEROPS_AGENT_JUDGE_REASONING_EFFORT:low}
+    # ── Inquiry semantic signature (Operator Graph v2, 2026-08-21) ───────────────────────────────
+    #
+    # A FOURTH separate switch and separate key. This is the heaviest of the four exposures: it sends ONE
+    # CUSTOMER'S OWN inquiry text and receives two closed-vocabulary labels. It gets its own flag for the
+    # reason every other one does — a deployment that wants goal interpretation must not thereby be
+    # sending customer questions to a vendor.
+    #
+    # Bounded three ways: a text is classified AT MOST ONCE ever (content-hash cache — a privacy control
+    # before a cost one), a single text is truncated rather than split, and one backfill page classifies at
+    # most `max-batch-per-call`. Off ⇒ an inquiry's signature stays null, exactly as it was before v2 —
+    # never a default topic, because a default would let a classification gap become a "repeat" a seller
+    # is shown (measured: 기타 x 1,777 on real data).
+  inquiry:
+    signature:
+      enabled: ${SELLEROPS_INQUIRY_SIGNATURE_ENABLED:false}
+      enabled-org-ids: ${SELLEROPS_INQUIRY_SIGNATURE_ORG_IDS:}
+      vendor: ${SELLEROPS_INQUIRY_SIGNATURE_VENDOR:OPENAI}
+      model: ${SELLEROPS_INQUIRY_SIGNATURE_MODEL:gpt-5-2025-08-07}
+      api-key: ${SELLEROPS_INQUIRY_SIGNATURE_API_KEY:}
+      # Shared with internal reasoning on a reasoning model, so a budget sized for the two-label answer
+      # is spent before any answer is emitted — arriving as `budget_exhausted`. The draft capability
+      # documents the identical trap; measured again here on 2026-08-21 before the value was raised.
+      max-output-tokens: ${SELLEROPS_INQUIRY_SIGNATURE_MAX_OUTPUT_TOKENS:2000}
+      reasoning-effort: ${SELLEROPS_INQUIRY_SIGNATURE_REASONING_EFFORT:low}
+      max-text-chars: ${SELLEROPS_INQUIRY_SIGNATURE_MAX_TEXT_CHARS:2000}
+      max-batch-per-call: ${SELLEROPS_INQUIRY_SIGNATURE_MAX_BATCH:200}
+  customermemory:
+    retriever:
+      # Retrieval strategy behind the CustomerMemoryRetriever port. `lexical` is the only implementation:
+      # deterministic, over closed vocabulary that never left this database, no vendor call. An embedding
+      # implementation would send customer bodies to a vendor in bulk — a data-minimization decision scope
+      # lock v1.12 deliberately left closed. Naming a provider that does not exist stops the boot loudly.
+      provider: ${SELLEROPS_CUSTOMER_MEMORY_RETRIEVER:lexical}
   vault:
     # Credential vault master key: base64-encoded 32 bytes (AES-256). Local
     # throwaway only — never commit a real key; KMS-backed keys are a later

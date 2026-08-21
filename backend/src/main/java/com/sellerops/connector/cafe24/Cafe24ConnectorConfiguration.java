@@ -62,11 +62,17 @@ public class Cafe24ConnectorConfiguration {
     }
 
     @Bean
+    Cafe24ProductsClient cafe24ProductsClient(Cafe24HttpClient http) {
+        return new Cafe24ProductsClient(http);
+    }
+
+    @Bean
     Cafe24ApiConnector cafe24ApiConnector(
-            Cafe24Authorizer authorizer,
-            Cafe24OrdersClient ordersClient, Cafe24BoardArticlesClient articlesClient) {
+            Cafe24Authorizer authorizer, Cafe24OrdersClient ordersClient,
+            Cafe24BoardArticlesClient articlesClient, Cafe24ProductsClient productsClient) {
         // System UTC clock; the connector applies the explicit KST zone for date math.
-        return new Cafe24ApiConnector(authorizer, ordersClient, articlesClient, Clock.systemUTC());
+        return new Cafe24ApiConnector(authorizer, ordersClient, articlesClient, productsClient,
+                Clock.systemUTC());
     }
 
     // Board Discovery (community read) infrastructure — wired behind the same

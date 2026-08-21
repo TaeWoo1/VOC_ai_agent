@@ -10,7 +10,11 @@ import com.sellerops.collect.dto.AgentReviewHandoffRequest;
 import com.sellerops.collect.dto.AgentReviewHandoffResultView;
 import com.sellerops.common.ApiException;
 import com.sellerops.community.Cafe24CommunityArticleRepository;
+import com.sellerops.ingest.IngestFollowUp;
 import com.sellerops.ingest.IngestionService;
+import com.sellerops.itemanalysis.ItemAnalysisRepository;
+import com.sellerops.itemanalysis.ItemAnalysisService;
+import com.sellerops.itemanalysis.RuleBasedInboxItemAnalyzer;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.workitem.InquiryWorkItemAuditRepository;
 import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
@@ -71,6 +75,7 @@ class AgentReviewHandoffServiceTest {
     @Autowired PlatformTransactionManager txManager;
     @Autowired SyncJobRepository syncJobs;
     @Autowired AccountSessionSlotRepository slotRepo;
+    @Autowired ItemAnalysisRepository analyses;
 
     private static final String BODY_A = "배송도 빠르고 포장도 꼼꼼해서 아주 만족합니다";
     private static final String BODY_SHORT = "좋아요";
@@ -86,7 +91,11 @@ class AgentReviewHandoffServiceTest {
         slots = new AccountSessionSlotService(slotRepo);
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products),
                 communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
-        service = new AgentReviewHandoffService(slotRepo, sellerAccounts, channels, ingestion, syncJobs);
+        // A follow-up with only item-analysis wired: this test is about the handoff's storage and
+        // gates, not about the analysis stack. IngestFollowUpTest covers the follow-up itself.
+        service = new AgentReviewHandoffService(slotRepo, sellerAccounts, channels, ingestion, syncJobs,
+                new IngestFollowUp(new ItemAnalysisService(inquiries, reviews, analyses,
+                        new RuleBasedInboxItemAnalyzer()), null, null));
     }
 
     /* ───────────────────────────── fixtures ───────────────────────────── */

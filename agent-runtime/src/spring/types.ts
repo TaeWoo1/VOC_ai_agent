@@ -400,3 +400,264 @@ export interface AgentDraftView {
   readonly comments: string | null;
   readonly providerVersion: string | null;
 }
+
+/* ─────────────────────────── Operator Graph v1 (2026-08-21) ─────────────────────────── */
+
+/**
+ * Whether one signal source can safely answer for a scope — the mirror of the backend's
+ * `AttentionCoverage` (`com.sellerops.attention.AttentionCoverage`).
+ *
+ * <b>The Operator reads this before it reads any count.</b> `COVERED` is the ONLY value on which an
+ * empty result may be reported as "문제 없음"; every other value means the data could not be
+ * attributed, and an agent that treated them the same would confidently tell a seller nothing is
+ * wrong on the strength of rows it was never able to see.
+ */
+export type AttentionCoverage =
+  | "COVERED"
+  | "UNCERTAIN_MULTI_ACCOUNT"
+  | "UNCERTAIN_UNSUPPORTED_CHANNEL"
+  | "UNCERTAIN_PRODUCT_UNLINKED";
+
+/** Mirror of `SignalCoverageView`: one source's verdict, its linked/unlinked split, its provenance. */
+export interface SignalCoverage {
+  readonly signal: string;
+  readonly coverage: AttentionCoverage;
+  readonly linked: number;
+  readonly unlinked: number;
+  readonly provenance: string;
+}
+
+/** Mirror of `ProductSummaryView` — identity only; what is happening to it is a separate read. */
+export interface ProductSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly sku: string | null;
+  readonly status: string;
+}
+
+/** Mirror of `RecommendedActionCountView` — a tally of a stored verdict, not a new one. */
+export interface RecommendedActionCount {
+  readonly recommendedAction: string;
+  readonly count: number;
+}
+
+/** Mirror of `ProductVolumeView`. Weigh these only together with the matching {@link SignalCoverage}. */
+export interface ProductVolume {
+  readonly reviews: number;
+  readonly inquiries: number;
+  readonly unansweredInquiries: number;
+  readonly issueEvidence: number;
+}
+
+/**
+ * Mirror of `ProductSignalsView` — everything about one product, and what could not be seen.
+ *
+ * Every list here must be read with `coverage`: an empty `issues` under
+ * `UNCERTAIN_PRODUCT_UNLINKED` says nothing about the product at all.
+ */
+export interface ProductSignals {
+  readonly productId: string;
+  readonly productName: string;
+  readonly sku: string | null;
+  readonly referenceDate: string | null;
+  readonly issues: ReviewIssueSummary[];
+  readonly recommendedActions: RecommendedActionCount[];
+  readonly volume: ProductVolume;
+  readonly linkedChannels: string[];
+  readonly coverage: SignalCoverage[];
+}
+
+/* ─────────────────────── Product Knowledge (Operator Graph v2, 2026-08-21) ─────────────────────── */
+
+/**
+ * Whether SellerOps HOLDS a product fact — the AVAILABILITY axis, mirror of the backend's
+ * `KnowledgeCoverage`.
+ *
+ * <b>Read alongside {@link AttentionCoverage}, never instead of it.</b> That enum answers "can this
+ * signal be attributed to this product"; this one answers "do we have this fact and how old is it". A
+ * product can have perfect attribution and no catalogue at all, or a full catalogue read and
+ * unattributable reviews, and one enum could not say both.
+ *
+ * `UNAVAILABLE` is the load-bearing value: it means "we have never held this", NOT "the product does
+ * not have this". The judge refuses a sentence that asserts a fact over an UNAVAILABLE or STALE facet.
+ */
+export type KnowledgeCoverage = "AVAILABLE" | "PARTIAL" | "UNAVAILABLE" | "STALE";
+
+/** Which facet a coverage verdict is about. Mirror of the backend's `ProductKnowledgeFacet`. */
+export type ProductKnowledgeFacet =
+  | "IDENTITY" | "LISTING" | "PRICE" | "VARIANT" | "TAXONOMY" | "DESCRIPTION" | "SPEC" | "SIGNALS";
+
+/** Mirror of `KnowledgeCoverageView`. */
+export interface KnowledgeCoverageRow {
+  readonly facet: ProductKnowledgeFacet;
+  readonly coverage: KnowledgeCoverage;
+  readonly known: number;
+  readonly newestObservedAt: string | null;
+  readonly provenance: string;
+}
+
+/** Mirror of `ProductListingView` — one channel's listing. Nullable everywhere a channel says nothing. */
+export interface ProductListing {
+  readonly channelCode: string;
+  readonly channelNameKo: string | null;
+  readonly channelProductId: string | null;
+  readonly listingName: string | null;
+  readonly productUrl: string | null;
+  readonly price: number | null;
+  readonly currency: string | null;
+  readonly sellingStatus: string | null;
+  readonly source: string | null;
+  readonly observedAt: string | null;
+}
+
+/** Mirror of `ProductVariantView`. A derived variant carries an id and no name — see the backend doc. */
+export interface ProductVariantRow {
+  readonly channelCode: string;
+  readonly externalVariantId: string | null;
+  readonly optionName: string | null;
+  readonly sku: string | null;
+  readonly price: number | null;
+  readonly sellingStatus: string | null;
+  readonly source: string | null;
+  readonly observedAt: string | null;
+}
+
+/**
+ * Mirror of `ProductFactView` — one stated fact and its origin.
+ *
+ * `source` and `observedAt` are what make a fact citable: Operator Graph v2 treats a product fact as
+ * evidence, and the judge refuses a sentence resting on a fact whose origin it cannot name.
+ */
+export interface ProductFact {
+  readonly factKey: string;
+  readonly value: string;
+  readonly unit: string | null;
+  readonly source: string;
+  readonly sourceRef: string | null;
+  readonly observedAt: string;
+  readonly confidence: "SOURCE_STATED" | "DERIVED" | "INFERRED";
+}
+
+/** Mirror of `ProductKnowledgeView` — what SellerOps knows about one product, and what it does not. */
+export interface ProductKnowledge {
+  readonly productId: string;
+  readonly name: string;
+  readonly sku: string | null;
+  readonly status: string;
+  readonly listings: ProductListing[];
+  readonly variants: ProductVariantRow[];
+  readonly facts: ProductFact[];
+  readonly signals: ProductSignals;
+  readonly knowledgeCoverage: KnowledgeCoverageRow[];
+}
+
+/**
+ * Mirror of `CustomerMemoryHitView` — one precedent.
+ *
+ * `answer` is the operator's own approved past reply (masked at the backend), which is why it may be
+ * carried; the customer's question is NOT here and is read only on the authorized detail screen.
+ */
+export interface CustomerMemoryHit {
+  readonly kind: string;
+  readonly sourceId: string;
+  readonly productId: string | null;
+  readonly productName: string | null;
+  readonly channelCode: string | null;
+  readonly topic: string | null;
+  readonly signatureKey: string | null;
+  readonly severity: string | null;
+  readonly occurredOn: string | null;
+  readonly answered: boolean;
+  readonly answer: string | null;
+  readonly retrieverKind: string;
+  readonly retrieverVersion: string;
+}
+
+/** Mirror of `CustomerMemorySearchView`. An empty `hits` under uncertain coverage is "판단 불가". */
+export interface CustomerMemorySearch {
+  readonly cueSignatureKey: string | null;
+  readonly cueTopic: string | null;
+  readonly hits: CustomerMemoryHit[];
+  readonly coverage: SignalCoverage;
+}
+
+/** Mirror of `RepeatedInquiryView` — a repeat candidate, never a diagnosis. */
+export interface RepeatedInquiry {
+  readonly axis: string;
+  readonly key: string;
+  readonly labelKo: string;
+  readonly occurrences: number;
+  readonly answeredOccurrences: number;
+  readonly firstSeenOn: string | null;
+  readonly lastSeenOn: string | null;
+  readonly windowDays: number;
+}
+
+/** Mirror of `InboxResponse`. `unansweredInquiries` is server-side and NEVER capped by `limit`. */
+export interface InboxSummary {
+  readonly items: unknown[];
+  readonly total: number;
+  readonly unansweredInquiries: number;
+}
+
+/**
+ * What `POST /api/agent/plan` answers — the planner seam's server side (Operator Graph v2 schema).
+ *
+ * <b>`available: false` no longer means "route deterministically instead".</b> There is no deterministic
+ * router any more; it means the run FAILS. The two sub-cases are kept apart only so the screen can say
+ * which: `providerVersion` present ⇒ the capability is on and the model declined this goal; absent ⇒ the
+ * capability is off for this org.
+ *
+ * <b>Every field beyond `available` is optional on the wire.</b> A model that omits one produces an
+ * empty list here and the validator then refuses the plan — which is the correct outcome. Filling a gap
+ * with a plausible default on this side would be the client doing the planning.
+ */
+export interface AgentPlanView {
+  readonly available: boolean;
+  readonly supported: boolean;
+  readonly userGoal?: string | null;
+  readonly unresolvedEntities?: Array<{ kind?: string; mention: string }>;
+  readonly informationNeeds?: Array<{
+    id?: string;
+    question?: string;
+    kind?: string;
+    why?: string;
+    required?: boolean;
+  }>;
+  readonly specialists: string[];
+  readonly tools: string[];
+  readonly retrievalOrder?: string[];
+  readonly retrievalParallel?: string[];
+  readonly retrievalStopWhen?: string | null;
+  readonly evidenceRequirements?: Array<{
+    needId?: string;
+    minEvidence?: number;
+    acceptableKinds?: string[];
+  }>;
+  readonly riskClass?: string | null;
+  readonly maxIterations?: number;
+  readonly maxToolCalls?: number;
+  readonly stopWhenEnough?: string | null;
+  readonly clarificationNeeded?: boolean;
+  readonly clarificationReason?: string | null;
+  readonly rationale: string | null;
+  readonly providerVersion: string | null;
+}
+
+/**
+ * What `POST /api/agent/judge` answers — the Evidence Judge's server side.
+ *
+ * `available: false` means the rule judge decides instead. That is the conservative direction: the
+ * rule judge can withhold a finding but never approves one the model would have refused.
+ */
+export interface AgentJudgeView {
+  readonly available: boolean;
+  readonly hasEvidence: boolean;
+  readonly supportingEvidenceIds: string[];
+  readonly unsafeAssertion: boolean;
+  readonly unsafeReason: string | null;
+  readonly needsMore: boolean;
+  readonly needsMoreTool: string | null;
+  readonly needsMoreReason: string | null;
+  readonly providerVersion: string | null;
+}

@@ -10,6 +10,15 @@
 > is still the deterministic keyword table; `ApiTriageClassifier` still owns review triage and was not
 > moved behind a graph; no graph was added, removed, or restructured.
 >
+> **AMENDED twice, 2026-08-21.** (a) The open `parseGoal` item was CLOSED by Operator Graph v1, which
+> added an LLM planner **above** the keyword table. (b) **`docs/sellerops_operator_graph_v2.md` then
+> removed the table itself**: in v2 the Agent-chat planner is LLM-only, there is no deterministic
+> planner in product, test or emergency use, and a run whose plan cannot be made **fails** instead of
+> being routed by keywords. Every sentence below that says the keyword table answers when the planner
+> is off — including "the deterministic keyword table" above and the fail-closed note in the Decision
+> section — is **historical**, true of `4b84bf2e`/v1 and false under v2. Explicit `intent` validation
+> (a closed enum sent by a button) survives and is the Dashboard lane, not goal interpretation.
+>
 > This ADR owns **one question**. Capability truth stays `docs/multi-channel-connector-roadmap.md` §4.1;
 > the AI triage pilot's canonical home stays `docs/workstreams/review_ai_triage_demo.md`; the migration
 > narrative stays `docs/sellerops_agent_runtime_migration.md`.
@@ -142,8 +151,18 @@ unchanged, which is why the fix had to go here.
 
 ### Still open, and deliberately
 
-- **`parseGoal`** — untouched. Free-text routing is still a keyword table that fails closed on an
-  unrecognized request. Filling it is the same shape of decision and has not been made.
+> **Partially superseded 2026-08-21 — see the `parseGoal` row below.** The Operator Graph v1 decision
+> (`docs/sellerops_operator_graph_v1.md`) closes the first of these three. The other two stay open,
+> and this ADR keeps owning them.
+
+- **`parseGoal`** — ~~untouched~~ **DECIDED 2026-08-21 (Operator Graph v1).** A planner now goes behind
+  this seam, as the seam's own docblock reserved it for. The shape follows this ADR exactly rather than
+  departing from it: the planner is a BACKEND capability (`sellerops.agent.plan.*` — its own flag, key,
+  prompt, parser and payload floor, asserted on the serialized bytes), reached with the operator's
+  forwarded bearer, so `agent-runtime/` still holds no vendor key and the backend is still the only LLM
+  egress. And the fail-closed half is unchanged: **with the planner off, the deterministic keyword table
+  is still what answers**, and an unrecognized request is still refused rather than guessed. Contract:
+  `docs/sellerops_operator_graph_v1.md` §4.1, §9.
 - **Review triage** — untouched. Option 4 stays rejected for the reason recorded above: the
   classifier's value is its narrowness, and a graph would have to preserve all of it.
 - **`reviewGraph`'s draft body** — still the backend's own rule-based suggestion, not this seam.

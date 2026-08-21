@@ -355,6 +355,71 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
 
     long countByOrgIdAndNegativeTrue(UUID orgId);
 
+    /**
+     * Reviews linked to one product. Org-scoped in the same query rather than after it:
+     * {@code reviews.product_id} is a bare FK with no org constraint in the schema (see
+     * {@code ProductRepository.findAllByOrgIdAndIdIn}), so a product id alone is not proof of
+     * same-org ownership.
+     */
+    long countByOrgIdAndProductId(UUID orgId, UUID productId);
+
+    /**
+     * Reviews this org holds that carry NO product link at all — the denominator behind
+     * {@code UNCERTAIN_PRODUCT_UNLINKED}. Counted rather than inferred, because "this product has no
+     * reviews" and "no review in this org was ever linked to a product" are different answers and only
+     * this number tells them apart.
+     */
+    long countByOrgIdAndProductIdIsNull(UUID orgId);
+
+    /**
+     * Bounded review ids for one product, newest first. Bounded on purpose: the caller tallies stored
+     * analyses over these ids, and an unbounded list would make a product page's cost the product's
+     * whole review history. The caller reports the cap rather than hiding it.
+     */
+    @Query("select r.id from Review r where r.orgId = :orgId and r.productId = :productId "
+            + "order by r.receivedAt desc, r.id asc")
+    List<UUID> findIdsByProduct(@Param("orgId") UUID orgId, @Param("productId") UUID productId,
+                                Pageable pageable);
+
+    /** Distinct channels that have product-linked reviews for one product — the positive coverage half. */
+    @Query("select distinct r.channelId from Review r where r.orgId = :orgId and r.productId = :productId")
+    List<UUID> distinctChannelIdsByProduct(@Param("orgId") UUID orgId, @Param("productId") UUID productId);
+
+    /**
+     * Distinct purchased options observed for one product — the variant axis Product Knowledge derives
+     * when no channel PRODUCT read is available.
+     *
+     * <p>{@code source_option_id} has been stored since V37 (Coupang 상품평) with nothing to resolve it
+     * against. These are the option ids customers actually bought, which is a weaker but real statement
+     * than a catalogue option list: it says "this option exists and was sold", not "these are all the
+     * options". The caller records that difference as {@code DERIVED} confidence.
+     */
+    @Query("""
+            select distinct r.channelId, r.sourceOptionId
+            from Review r
+            where r.orgId = :orgId and r.productId = :productId and r.sourceOptionId is not null
+            """)
+    List<Object[]> distinctOptionsByProduct(@Param("orgId") UUID orgId,
+                                            @Param("productId") UUID productId);
+
+    /**
+     * Which channels a product's rows came from, and the newest row date per channel — the derivation
+     * source for a listing when the channel has no PRODUCT read.
+     *
+     * <p>It states only what is true: this product was seen on this channel, most recently on this date.
+     * It does NOT claim the listing is live, priced, or named a particular way — those stay UNAVAILABLE
+     * until a real product read fills them.
+     */
+    @Query("""
+            select r.channelId, max(r.receivedAt)
+            from Review r
+            where r.orgId = :orgId and r.productId in :productIds
+            group by r.channelId, r.productId
+            """)
+    List<Object[]> channelObservationsForProducts(@Param("orgId") UUID orgId,
+                                                  @Param("productIds") java.util.Collection<UUID> productIds);
+
+
     List<Review> findAllByOrgId(UUID orgId);
 
     /** Reviews for this org that have no item_analyses row yet (bounded by {@code pageable}). */
@@ -389,6 +454,20 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
     boolean existsByOrgIdAndChannelIdAndContentHash(UUID orgId, UUID channelId, String contentHash);
 
     /** The stored row a duplicate import matches, so its reply state can be refreshed forward. */
+    /**
+     * Promoted Cafe24 reviews that carry no product link — the backfill work list.
+     *
+     * <p>Matched on the external-id prefix rather than on a channel code, because the prefix IS the
+     * promotion contract ({@code Cafe24ReviewPromoter.externalId}) while a channel row can be renamed.
+     * Ordered by id so paging stays stable while collection continues underneath it.
+     */
+    @Query("""
+            select r from Review r
+            where r.orgId = :orgId and r.productId is null and r.externalId like 'cafe24:b%'
+            order by r.id asc
+            """)
+    List<Review> findUnlinkedCafe24Reviews(@Param("orgId") UUID orgId, Pageable pageable);
+
     Optional<Review> findByOrgIdAndChannelIdAndExternalId(UUID orgId, UUID channelId, String externalId);
 
     /** As above for the no-external-id path, keyed on the content hash. */

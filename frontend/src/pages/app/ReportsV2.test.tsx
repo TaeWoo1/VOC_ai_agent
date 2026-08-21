@@ -13,6 +13,8 @@ const getSellerAccountsStrict = vi.fn();
 const getChannelsStrict = vi.fn();
 const getChannelReviewsStrict = vi.fn();
 
+const getDashboardSummary = vi.fn();
+
 vi.mock("../../lib/apiClient", () => ({
   api: {
     getReviewIssuesStrict: () => getReviewIssuesStrict(),
@@ -21,6 +23,7 @@ vi.mock("../../lib/apiClient", () => ({
     getSellerAccountsStrict: () => getSellerAccountsStrict(),
     getChannelsStrict: () => getChannelsStrict(),
     getChannelReviewsStrict: (accountId: string, params: unknown) => getChannelReviewsStrict(accountId, params),
+    getDashboardSummary: () => getDashboardSummary(),
   },
   getToken: () => null,
 }));
@@ -107,7 +110,14 @@ function attentionPage(total: number) {
 
 beforeEach(() => {
   getReviewIssuesStrict.mockResolvedValue([ISSUE]);
-  getInboxStrict.mockResolvedValue({ items: INBOX, total: INBOX.length });
+  // The server's uncapped 미답변 count is a SEPARATE field from the feed rows, and the report must read
+  // it rather than counting the rows — see "홈과 같은 미답변 수" below.
+  getInboxStrict.mockResolvedValue({
+    items: INBOX,
+    total: INBOX.length,
+    unansweredInquiries: INBOX.filter((item) => item.type === "INQUIRY" && item.status === "UNANSWERED").length,
+  });
+  getDashboardSummary.mockResolvedValue({ topProductIssues: [] });
   getItemAnalysisStrict.mockResolvedValue(ANALYSES);
   getChannelsStrict.mockResolvedValue([
     { id: "nv", code: "NAVER", nameKo: "네이버 스마트스토어", status: "CONNECTED", dataBadges: [], lastSyncedAt: null, actionLabel: "", support: { autoCollectSupported: false, autoCollectDataTypes: [], fileUploadSupported: true, fileUploadDataTypes: [], connectionCheckSupported: false, credentialSetupSupported: false } },

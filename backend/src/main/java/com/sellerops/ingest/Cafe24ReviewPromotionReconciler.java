@@ -88,7 +88,7 @@ public class Cafe24ReviewPromotionReconciler {
                 eligible++;
                 Cafe24ReviewPromoter.Outcome outcome = promoter.promote(
                         orgId, a.getChannelId(), a.getSourceKind(), a.getBoardNo(), a.getArticleNo(),
-                        a.getContent(), a.getRating(), a.getSourceCreatedAt());
+                        a.getContent(), a.getRating(), a.getSourceCreatedAt(), a.getProductNo());
                 switch (outcome) {
                     case PROMOTED -> {
                         promoted++;

@@ -8,6 +8,7 @@ import com.sellerops.collect.runtime.CollectionMethod;
 import com.sellerops.common.ApiException;
 import com.sellerops.connector.coupang.CoupangApiConnector;
 import com.sellerops.ingest.IngestOutcome;
+import com.sellerops.ingest.IngestFollowUp;
 import com.sellerops.ingest.IngestionService;
 import com.sellerops.ingest.canonical.CanonicalReview;
 import com.sellerops.review.ReviewReplyState;
@@ -66,17 +67,20 @@ public class AgentReviewHandoffService {
     private final ChannelRepository channels;
     private final IngestionService ingestion;
     private final SyncJobRepository syncJobs;
+    private final IngestFollowUp followUp;
 
     public AgentReviewHandoffService(AccountSessionSlotRepository slots,
                                      SellerAccountRepository accounts,
                                      ChannelRepository channels,
                                      IngestionService ingestion,
-                                     SyncJobRepository syncJobs) {
+                                     SyncJobRepository syncJobs,
+                                     IngestFollowUp followUp) {
         this.slots = slots;
         this.accounts = accounts;
         this.channels = channels;
         this.ingestion = ingestion;
         this.syncJobs = syncJobs;
+        this.followUp = followUp;
     }
 
     /**
@@ -111,6 +115,12 @@ public class AgentReviewHandoffService {
         // just stored 22 reviews rendered "새 상품평 0". Found live; the clock was the bug, not the query.
         Instant startedAt = Instant.now();
         IngestOutcome outcome = ingestion.ingestReviews(orgId, channel.getId(), rows);
+
+        // The acquired reviews get the SAME follow-up every other ingest path gets: item-analysis,
+        // the issue-memory refresh event, and the customer-memory index. Until now this path did
+        // none of the three, so 22 live-acquired Coupang 상품평 could never reach the repeated-issue
+        // memory (audit defect C) and never produced an analysis row (defect B). Best-effort inside.
+        followUp.afterReviewIngest(orgId, channel.getId(), outcome.insertedIds());
 
         SyncJob record = recordImport(orgId, channel.getId(), sellerAccountId, request, rows.size(), outcome,
                 startedAt);

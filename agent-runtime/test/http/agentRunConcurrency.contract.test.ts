@@ -17,6 +17,7 @@ import { FakeAgentRunStateBackend } from "../support/FakeAgentRunStateBackend";
 import { FakeSpringClient } from "../support/FakeSpringClient";
 import { FakeReviewSpringClient } from "../support/FakeReviewSpringClient";
 import { FakeIssueSpringClient } from "../support/FakeIssueSpringClient";
+import { FakeOperatorSpringClient } from "../support/FakeOperatorSpringClient";
 import { twoInquiries } from "../support/fixtures";
 import { twoReviews } from "../support/reviewFixtures";
 import { fourIssues } from "../support/issueFixtures";
@@ -51,8 +52,7 @@ function factory(fakes: Fakes, orgId: string): SpringClientFactory {
     inquiry: fakes.inquiry,
     review: fakes.review,
     issue: fakes.issue,
-    identity: identityFor(orgId),
-  });
+    identity: identityFor(orgId), operator: new FakeOperatorSpringClient() });
 }
 
 function providerOver(backend: FakeAgentRunStateBackend, env: RuntimeConfig["env"] = "development"): RunStoreProvider {

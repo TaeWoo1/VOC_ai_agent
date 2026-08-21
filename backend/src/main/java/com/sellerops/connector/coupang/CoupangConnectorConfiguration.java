@@ -73,9 +73,24 @@ public class CoupangConnectorConfiguration {
     }
 
     @Bean
+    CoupangSellerProductsClient coupangSellerProductsClient(
+            CoupangHttpClient http, CoupangSigner signer,
+            @Value("${sellerops.connector.coupang.base-url:https://api-gateway.coupang.com}") String baseUrl,
+            @Value("${sellerops.connector.coupang.live-approval-id:}") String liveApprovalId,
+            @Value("${sellerops.self-pilot.enabled:false}") boolean selfPilotEnabled,
+            @Value("${sellerops.self-pilot.read-grant-id:}") String standingReadGrantId) {
+        // Same base URL and same live-call interlock as the order and inquiry clients. The catalogue is
+        // a READ, so the standing READ grant covers it exactly as it covers the other two — and with the
+        // runtime off it arms nothing, per effectiveReadGrant.
+        return new CoupangSellerProductsClient(http, signer, Clock.systemUTC(), baseUrl, liveApprovalId,
+                effectiveReadGrant(selfPilotEnabled, standingReadGrantId));
+    }
+
+    @Bean
     CoupangApiConnector coupangApiConnector(CoupangOrdersClient ordersClient,
                                             CoupangInquiriesClient inquiriesClient,
+                                            CoupangSellerProductsClient sellerProductsClient,
                                             CredentialVault vault) {
-        return new CoupangApiConnector(ordersClient, inquiriesClient, vault);
+        return new CoupangApiConnector(ordersClient, inquiriesClient, sellerProductsClient, vault);
     }
 }

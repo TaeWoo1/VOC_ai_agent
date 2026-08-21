@@ -35,6 +35,7 @@ import com.sellerops.inquiry.workitem.InquiryWorkItemAuditRepository;
 import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
 import com.sellerops.inquiry.workitem.InquiryWorkItemWriter;
 import com.sellerops.itemanalysis.ItemAnalysisRepository;
+import com.sellerops.ingest.IngestFollowUp;
 import com.sellerops.itemanalysis.ItemAnalysisService;
 import com.sellerops.itemanalysis.RuleBasedInboxItemAnalyzer;
 import com.sellerops.order.OrderDailySummaryRepository;
@@ -144,7 +145,8 @@ class ReviewAcquisitionSpineTest {
         ItemAnalysisService analysis = new ItemAnalysisService(inquiries, reviews, analyses,
                 new RuleBasedInboxItemAnalyzer());
         connector = new FileUploadConnector(channels, new FileParser(), new ReviewRowMapper(),
-                new InquiryRowMapper(), new OrderSummaryRowMapper(), ingestion, runs, analysis);
+                new InquiryRowMapper(), new OrderSummaryRowMapper(), ingestion, runs,
+                new IngestFollowUp(analysis, null, null));
         // Both sources registered, as in production. The registry is first-wins, which is exactly what
         // the NAVER-only scope assertion below depends on.
         attention = new OperatorAttentionService(sellerAccounts, channels,

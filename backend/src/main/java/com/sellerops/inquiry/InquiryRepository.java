@@ -19,6 +19,54 @@ public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
 
     long countByOrgIdAndStatus(UUID orgId, String status);
 
+    /** Inquiries linked to one product. Org-scoped in the query — {@code product_id} is a bare FK. */
+    long countByOrgIdAndProductId(UUID orgId, UUID productId);
+
+    /** Inquiries linked to one product and still in a status (e.g. UNANSWERED). */
+    long countByOrgIdAndProductIdAndStatus(UUID orgId, UUID productId, String status);
+
+    /**
+     * Inquiries this org holds that carry no product link — the denominator behind
+     * {@code UNCERTAIN_PRODUCT_UNLINKED} on the inquiry axis.
+     */
+    long countByOrgIdAndProductIdIsNull(UUID orgId);
+
+    /**
+     * Every inquiry in a stable total order — the paging primitive behind a bounded corpus pass.
+     *
+     * Twin of {@code ReviewRepository.findForIssueExtraction}, and it carries the same tiebreak for the
+     * same reason: without a total order successive pages can revisit rows while others are never
+     * reached, and a resumable batch that never converges is worse than no batch — it looks like progress.
+     */
+    @Query("select q from Inquiry q where q.orgId = :orgId order by q.receivedAt desc, q.id asc")
+    List<Inquiry> findForMemoryIndexing(@Param("orgId") UUID orgId, Pageable pageable);
+
+    /** Bounded inquiry ids for one product, newest first. Bounded for the reason the review twin is. */
+    @Query("select q.id from Inquiry q where q.orgId = :orgId and q.productId = :productId "
+            + "order by q.receivedAt desc, q.id asc")
+    List<UUID> findIdsByProduct(@Param("orgId") UUID orgId, @Param("productId") UUID productId,
+                                Pageable pageable);
+
+    /** Distinct channels that have product-linked inquiries for one product. */
+    @Query("select distinct q.channelId from Inquiry q where q.orgId = :orgId and q.productId = :productId")
+    List<UUID> distinctChannelIdsByProduct(@Param("orgId") UUID orgId, @Param("productId") UUID productId);
+
+    /**
+     * Which channels a product's inquiries came from, newest first per channel — the inquiry half of the
+     * Product Knowledge derivation (the review half is {@code ReviewRepository.channelObservationsForProducts}).
+     * Cafe24 and Coupang inquiries carry a channel product number; their reviews often do not, so both
+     * corpora have to be asked or a Cafe24-only product would derive no listing at all.
+     */
+    @Query("""
+            select q.channelId, max(q.receivedAt)
+            from Inquiry q
+            where q.orgId = :orgId and q.productId in :productIds
+            group by q.channelId, q.productId
+            """)
+    List<Object[]> channelObservationsForProducts(@Param("orgId") UUID orgId,
+                                                  @Param("productIds") java.util.Collection<UUID> productIds);
+
+
     /**
      * Dashboard counts that exclude secret (비밀글) inquiries. A null {@code is_secret}
      * (non-Cafe24 / legacy) is treated as non-secret, so existing behavior is preserved.

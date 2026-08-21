@@ -19,6 +19,7 @@ import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
 import com.sellerops.inquiry.workitem.InquiryWorkItemWriter;
 import org.springframework.transaction.PlatformTransactionManager;
 import com.sellerops.itemanalysis.ItemAnalysisRepository;
+import com.sellerops.ingest.IngestFollowUp;
 import com.sellerops.itemanalysis.ItemAnalysisService;
 import com.sellerops.itemanalysis.RuleBasedInboxItemAnalyzer;
 import com.sellerops.order.OrderDailySummaryRepository;
@@ -98,7 +99,8 @@ class FileUploadConnectorReviewIngestFlowTest {
         ItemAnalysisService analysis = new ItemAnalysisService(inquiries, reviews, analyses,
                 new RuleBasedInboxItemAnalyzer());
         connector = new FileUploadConnector(channels, new FileParser(), new ReviewRowMapper(),
-                new InquiryRowMapper(), new OrderSummaryRowMapper(), ingestion, runs, analysis);
+                new InquiryRowMapper(), new OrderSummaryRowMapper(), ingestion, runs,
+                new IngestFollowUp(analysis, null, null));
         channelId = seedGmarketChannel();
     }
 

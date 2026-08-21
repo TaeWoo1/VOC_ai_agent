@@ -64,6 +64,27 @@ public interface ReviewIssueEvidenceRepository extends JpaRepository<ReviewIssue
                                              @Param("fromInclusive") LocalDate fromInclusive,
                                              @Param("toInclusive") LocalDate toInclusive);
 
+    /**
+     * The issues one product has evidence for, most evidence first — the product specialist's entry
+     * point into the issue memory. All-time, like {@code countByOrgIdAndIssueId}: a product question
+     * is "무슨 문제가 있었나", and windowing it here would silently answer a different question than the
+     * one {@code IssueWindows} already owns for trend.
+     */
+    @Query("""
+            select e.issueId, count(e) from ReviewIssueEvidence e
+            where e.orgId = :orgId and e.productId = :productId
+            group by e.issueId
+            order by count(e) desc, e.issueId asc
+            """)
+    List<Object[]> issueEvidenceCountsByProduct(@Param("orgId") UUID orgId,
+                                                @Param("productId") UUID productId);
+
+    /** Evidence rows this org holds that carry no product link — the unlinked coverage denominator. */
+    long countByOrgIdAndProductIdIsNull(UUID orgId);
+
+    /** All evidence rows this org holds — the coverage denominator's other half. */
+    long countByOrgId(UUID orgId);
+
     /** Evidence for one issue, newest first, for the drill-down that renders 대표 고객 표현. */
     List<ReviewIssueEvidence> findByOrgIdAndIssueIdOrderByOccurredOnDesc(UUID orgId, UUID issueId);
 }

@@ -1,11 +1,73 @@
-# Product Scope v1.11 — Drift Guard
+# Product Scope v1.13 — Drift Guard
 
 SellerOps 제품 범위를 **하나의 합의된 정의로 고정**하기 위한 문서. 목적은 "무엇을 만드는가"보다
 **"무엇을 지금 만들지 않는가"를 못 박는 것**이다. 멀티채널 확장(`docs/multi-channel-connector-roadmap.md`)이
 구체화되면서 범위가 넓어지는 자연스러운 drift를 막는다.
 
-> Status: SCOPE LOCK **v1.11** (planning only). 본 문서는 코드를 바꾸지 않으며, 라이브 접속/브라우저/업로드/
+> Status: SCOPE LOCK **v1.13** (planning only). 본 문서는 코드를 바꾸지 않으며, 라이브 접속/브라우저/업로드/
 > DB 변경을 지시하지 않는다. 범위 변경은 이 문서를 고쳐 합의한 뒤에만 이뤄진다.
+>
+> v1.13 변경 (2026-08-21, 제품 오너 결정 반영): **SellerOps Operator Graph v2.** 정본:
+> `docs/sellerops_operator_graph_v2.md`. v1.12를 **대체하지 않고 조인다** — v1.12의 ①③④⑤는 그대로이고,
+> 아래 다섯 항이 추가된다.
+>
+> ⑥ **LLM-first Planning을 invariant로 못 박는다.** Agent chat(자연어 입력)의 목표 해석과 조사 계획은
+> **반드시 LLM Planner**가 수행한다. **결정론 goal planner · keyword planner · phrase routing ·
+> command fallback은 product runtime뿐 아니라 test/emergency/fallback 용도로도 존재하지 않는다.**
+> Planner를 사용할 수 없으면 **Agent run은 실패한다** — 대체 답변을 만들지 않는다. 이는 v1.12의 완화가
+> 아니라 **v1이 남긴 결정론 폴백의 폐지**다.
+>
+> ⑦ **Dashboard 레인과 Agent 레인을 분리한다.** 버튼·메뉴·명시적 `intent`로 도달하는 Dashboard shortcut은
+> **결정론적 API/rule 기반이어도 된다.** 기존 4개 subgraph(미답변 문의 · 문의 초안 · 리뷰 답변 ·
+> 운영 이슈)는 이 레인으로 이동하며 그 checkpoint·승인·멱등 계약은 **불변**이다. **Planner 없이
+> dashboard capability를 조합해 Agent 답변처럼 반환하는 것은 금지**한다.
+>
+> ⑧ **Product Knowledge 계층을 연다.** ProductOps는 productId 기반 신호 조회를 넘어 SellerOps가
+> "무엇을 팔고 있는지"를 아는 최소 계층으로 확장된다 — identity · 채널별 listing · option/variant ·
+> 상품 설명/spec · 상품별 신호 · **coverage(AVAILABLE / PARTIAL / UNAVAILABLE / STALE)와 사실별
+> source·observedAt**. **재고·창고·생산 lot·생산계획 등 ERP 영역은 범위 밖**이며, "정보가 없음"과
+> "사실이 아님"을 혼동하는 표현은 금지한다. **§4.1 capability 표의 어떤 칸도 옮기지 않는다** — v2는
+> 이미 저장된 행에서 파생 조립만 하고, 채널 공식 seller-product API(새 PRODUCT DataType)는 **별도 결정
+> 전 금지**로 남는다.
+>
+> ⑨ **반복 문의 detection의 완료 조건은 "파이프라인 존재"가 아니라 "실제 corpus에서 의미 있는 반복
+> 이슈를 찾는 것"이다.** 실제 문의 3,220건에서 signature 0건인 현재 rule extractor만으로는 제품 목표를
+> 만족했다고 보지 않는다. 구현은 기존 `IssueSignatureExtractor` port의 두 번째 구현체로 하며,
+> **임베딩 금지(v1.12 ②)는 유지**된다. 다만 **문의 본문의 corpus 단위 의미 분류는 현행 건별 초안과
+> 다른 노출 등급이므로 별도 product-owner 결정 전 구현하지 않는다**(v2 §21-B1).
+>
+> ⑩ **WRITE tool 0개 · credential/trusted seller interaction privileged plane 비노출은 그대로**이며,
+> v2는 investigate / reason / recommend / prepare 까지만 한다. A7 FE freeze(새 라우트·새 메뉴 0)도 그대로.
+>
+> v1.12 변경 (2026-08-21, 제품 오너 결정 반영): **SellerOps Operator Graph v1.** 정본:
+> `docs/sellerops_operator_graph_v1.md`. LangGraph를 **AI Operator 실행 구조**로 채택한다 —
+> `OperatorGraph` + `ProductOpsGraph` / `ReviewOpsGraph` / `InquiryOpsGraph` / `ReportOpsNode`.
+> Spring Backend는 사실·규칙·데이터·트랜잭션의 source of truth로 남고, Graph는 목표 해석·planning·
+> tool 선택·specialist orchestration·evidence 판단·다음 행동 결정만 한다(기존 business logic 재구현 금지,
+> DB 비노출, 검증된 capability만 업무 단위 tool로).
+>
+> ① **행동 등급 READ / PREPARE / WRITE 를 도입한다.** READ(상태 무변경)·PREPARE(SellerOps 내부 산출물만 —
+> 초안·승인 기록)는 허용하고, **WRITE(답변 발송·FAQ 수정·상품페이지 변경 등 SellerOps 밖으로 나가는 행동)는
+> v1에서 tool 자체를 만들지 않는다.** HITL approval 구조는 설계·구현해도 되나 외부 write capability는 disabled를
+> 유지한다. 이는 §7.2(채널로의 쓰기 금지)의 **완화가 아니라 명문화**다.
+>
+> ② **§5.1·§7.10의 RAG 금지 조항이 조건부로 해제된다.** 두 조항의 문구는 *"향후 RAG는 맥락형 운영 메모리
+> 패널로만, **별도 승인 전 구현 금지**"*였고, 이번 결정이 그 **별도 승인**이다. 해제 범위는 정확히:
+> **과거 문의/답변/관련 리뷰에 대한 retrieval-backed customer memory** 와 **반복 문의 detection** 을,
+> **Operator 실행 경로와 문의 답변 초안의 컨텍스트로서** 구현하는 것. **1차 내비게이션의 standalone
+> "AI 검색" 페이지 금지는 계속 유효하다.** `/memory` 화면의 검색창 부재 계약
+> (`frontend/src/pages/app/CustomerMemory.tsx` scope fence + `memoryScope.test.tsx`)도 **그대로 유지**된다 —
+> v1의 retrieval은 그 화면에 검색창을 만들지 않는다. v1 retrieval은 **결정론적 lexical**이며(신규 vendor
+> egress 없음), 임베딩 기반 구현은 새로운 데이터 노출이므로 **별도 결정 전 금지**로 남는다.
+>
+> ③ **실제 LLM 문의 답변 초안을 제품 흐름에 연결한다.** backend가 유일한 LLM egress라는 성질은 그대로이며,
+> Operator planner·evidence judge도 각각 **자기 flag·자기 prompt·자기 payload floor**를 가진 backend
+> capability로만 존재한다(`sellerops.agent.plan.*`, `sellerops.agent.judge.*`). 리뷰 축 LLM 초안은 v1 범위 밖.
+>
+> ④ **§7.18(OperationRun 도메인 조기 구현 금지)은 그대로다.** Operator Graph는 `agent-runtime/`의 orchestration
+> 구조이고 §1.7의 backend OperationRun 도메인이 아니다. 둘을 같은 것으로 다루지 않는다.
+>
+> ⑤ 마켓 WRITE 승인 경계, 채널 집합(NAVER/Coupang/Cafe24), A7 FE freeze, capability 표기 규율은 그대로.
 >
 > v1.11 변경 (2026-08-19, 제품 오너 결정 반영): **Service Readiness v1.** 정본: `docs/service_readiness_v1.md`.
 > 새 핵심 기능·채널 없음. 일반 SaaS 수준의 가입/운영/계측 기반 마무리: Sentry(frontend+backend, env 있을 때만,
@@ -517,6 +579,9 @@ Seller Track의 1차 surface. **"판매자센터를 대체"가 아니라 "여러
 - 채널로의 쓰기 액션(답변 전송/상태 변경) — 읽기·식별까지(§2).
 - **standalone "AI 검색" 페이지** — 1차 내비게이션에서 제외. 향후 RAG는 각 화면에 맥락으로 붙는
   **"운영 메모리" 패널**로만 설계한다(별도 승인 전 구현 금지).
+  **(v1.12, 2026-08-21 — 조건부 해제)** 그 "별도 승인"이 내려졌다: retrieval은 **Operator 실행 경로와 문의
+  답변 초안의 컨텍스트**로 구현한다(`docs/sellerops_operator_graph_v1.md` §10). **standalone "AI 검색"
+  페이지 금지와 `/memory` 검색창 부재 계약은 그대로 유지된다.**
 - 실시간 스트리밍 업데이트(배치/새로고침 기반 유지).
 - 임의 차트 빌더/커스텀 리포트 디자이너.
 - 권한/역할 세분화(멀티 유저 RBAC) — v1은 org 단위 단순 모델.
@@ -603,8 +668,12 @@ method는 "미지원"으로 표기하거나 숨김(`no_roadmap_language_in_ui`, 
 8. **두 Track을 위한 수집 코어 분기** — 수집·dedup은 단일 경로 유지. Track은 뷰에서만 분기.
 9. **라이브 채널 접속을 표준 안전 규칙으로 자동 진행** — 모든 라이브 실행은 1회성 명시 승인
    (Connector Roadmap §8). Stop-hook 목표 압박은 승인이 아니다.
-10. **standalone "AI 검색" 페이지의 부활** — 1차 내비게이션에 독립 AI 검색을 두지 않는다. 향후
-    RAG는 맥락형 "운영 메모리" 패널로만(§5), 별도 승인 전 구현 금지.
+10. **standalone "AI 검색" 페이지의 부활** — 1차 내비게이션에 독립 AI 검색을 두지 않는다.
+    **이 금지는 유지된다.** (v1.12, 2026-08-21) 뒤따르던 *"향후 RAG는 맥락형 운영 메모리 패널로만,
+    별도 승인 전 구현 금지"*는 **조건부로 해제됐다** — retrieval-backed customer memory와 반복 문의
+    detection은 **Operator 실행 경로·문의 초안 컨텍스트**로 구현한다
+    (`docs/sellerops_operator_graph_v1.md`). 새 화면도, 새 1차 메뉴도, `/memory`의 검색창도 만들지 않는다.
+    **임베딩 기반 retrieval은 별도 결정 전 계속 금지.**
 11. **production 읽기의 mock 강등** — mock/시드 데이터는 명시적으로 분리된 데모/개발 모드 전용.
     production을 향하는 화면이 백엔드 장애 시 mock으로 조용히 강등되는 경로를 새로 만들지 않고,
     잔존 경로는 제거 대상으로 다룬다(Frontend Spec §13).
@@ -623,6 +692,8 @@ method는 "미지원"으로 표기하거나 숨김(`no_roadmap_language_in_ui`, 
 17. **한 사용자 행동을 마켓 클릭 시퀀스로 확장** — Action Window는 사용자 직접 클릭이 기본이며, SellerOps가
     한 행동을 몰래 여러 마켓 클릭으로 번역하지 않는다(§1.5). 감독형 단일 클릭 원칙(정확히 1개, 서명 일치 시)만 예외.
 18. **OperationRun 도메인의 조기 구현** — §1.7은 방향 기록이며, 실행 모드·체크포인트 안정 전 코드 착수 금지.
+    **(v1.12) 이것은 Operator Graph와 다른 것이다.** Operator Graph(`agent-runtime/`)는 orchestration 구조이고
+    OperationRun은 backend 도메인이다. Operator Graph v1 착수가 §7.18의 해제를 뜻하지 않는다.
 19. **API key 삭제를 제품 기능으로 다루기** (2026-08-08 제품 오너 정정) — `COUPANG_WING_KEY_DELETION`은
     **internal live-proof / diagnostic tooling**이며 판매자 onboarding 기능이 아니다. 운영자 소유 테스트 계정을
     실제 no-key 상태로 만들어 **신규 판매자 발급 화면을 라이브 보정**하기 위해서만 존재한다. 따라서:

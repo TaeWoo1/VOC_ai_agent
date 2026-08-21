@@ -14,6 +14,13 @@
  */
 import type {
   AgentDraftView,
+  AgentJudgeView,
+  AgentPlanView,
+  CustomerMemorySearch,
+  InboxSummary,
+  ProductSignals,
+  ProductSummary,
+  RepeatedInquiry,
   ConfirmPublishRequest,
   InquiryDetail,
   InquiryQueueResponse,
@@ -35,10 +42,17 @@ import type {
   ReviewReplySubmissionRunResponse,
   ReviewReplyWorkResponse,
   UserIdentity,
+  ProductFact,
+  ProductKnowledge,
 } from "./types";
 import type { ListReplyWorkParams, ReviewSpringClient } from "./ReviewSpringClient";
 import type { IssueSpringClient, ListReviewIssuesParams } from "./IssueSpringClient";
 import type { IdentitySpringClient } from "./IdentitySpringClient";
+import type {
+  CustomerMemorySearchParams,
+  InquiryThreadContext,
+  OperatorSpringClient,
+} from "./OperatorSpringClient";
 
 export interface ListInquiriesParams {
   readonly phase?: string;
@@ -97,7 +111,9 @@ export interface HttpSpringClientOptions {
  * exercised by `npm test` (which injects a fake). Live cross-process integration
  * against a running backend is the next step and is intentionally out of this slice.
  */
-export class HttpSpringClient implements SpringClient, ReviewSpringClient, IssueSpringClient, IdentitySpringClient {
+export class HttpSpringClient
+  implements SpringClient, ReviewSpringClient, IssueSpringClient, IdentitySpringClient, OperatorSpringClient
+{
   private readonly baseUrl: string;
   private readonly token: string;
   private readonly fetchImpl: typeof fetch;
@@ -254,6 +270,98 @@ export class HttpSpringClient implements SpringClient, ReviewSpringClient, Issue
       "GET",
       `/api/review-issues/${encodeURIComponent(issueId)}/trend${suffix}`,
     );
+  }
+
+  // ─────────────────────────── Operator domain (all READ) ───────────────────────────
+  // Every one of these maps onto an existing endpoint, and none of them mutates anything. The two
+  // model seams below (plan/judge) look nothing up and store nothing either — they are the same
+  // shape as generateInquiryDraft: the runtime holds no vendor key, so a model call is one more
+  // backend capability reached with the operator's own forwarded bearer.
+
+  async getInbox(limit?: number): Promise<InboxSummary> {
+    const suffix = limit != null ? `?limit=${encodeURIComponent(String(limit))}` : "";
+    return this.request<InboxSummary>("GET", `/api/inbox${suffix}`);
+  }
+
+  async searchProducts(query: string, limit?: number): Promise<ProductSummary[]> {
+    const q = new URLSearchParams();
+    if (query) q.set("q", query);
+    if (limit != null) q.set("limit", String(limit));
+    const suffix = q.toString() ? `?${q.toString()}` : "";
+    return this.request<ProductSummary[]>("GET", `/api/products${suffix}`);
+  }
+
+  async getProductSignals(productId: string, referenceDate?: string): Promise<ProductSignals> {
+    const suffix = referenceDate ? `?referenceDate=${encodeURIComponent(referenceDate)}` : "";
+    return this.request<ProductSignals>(
+      "GET",
+      `/api/products/${encodeURIComponent(productId)}/signals${suffix}`,
+    );
+  }
+
+  async getProductKnowledge(productId: string, referenceDate?: string): Promise<ProductKnowledge> {
+    const suffix = referenceDate ? `?referenceDate=${encodeURIComponent(referenceDate)}` : "";
+    return this.request<ProductKnowledge>(
+      "GET",
+      `/api/products/${encodeURIComponent(productId)}/knowledge${suffix}`,
+    );
+  }
+
+  async searchProductFacts(productId: string, factKeys: string[]): Promise<ProductFact[]> {
+    const q = new URLSearchParams();
+    for (const key of factKeys) {
+      if (key && key.trim().length > 0) q.append("keys", key.trim());
+    }
+    const suffix = q.toString() ? `?${q.toString()}` : "";
+    return this.request<ProductFact[]>(
+      "GET",
+      `/api/products/${encodeURIComponent(productId)}/facts${suffix}`,
+    );
+  }
+
+  async getInquiryThreadContext(workItemId: string): Promise<InquiryThreadContext> {
+    return this.request<InquiryThreadContext>(
+      "GET",
+      `/api/inquiries/${encodeURIComponent(workItemId)}/context`,
+    );
+  }
+
+  async searchCustomerMemory(params: CustomerMemorySearchParams): Promise<CustomerMemorySearch> {
+    const q = new URLSearchParams();
+    if (params.inquiryId) q.set("inquiryId", params.inquiryId);
+    if (params.signatureKey) q.set("signatureKey", params.signatureKey);
+    if (params.topic) q.set("topic", params.topic);
+    if (params.productId) q.set("productId", params.productId);
+    if (params.limit != null) q.set("limit", String(params.limit));
+    return this.request<CustomerMemorySearch>("GET", `/api/customer-memory/search?${q.toString()}`);
+  }
+
+  async listRepeatedInquiries(referenceDate?: string, windowDays?: number): Promise<RepeatedInquiry[]> {
+    const q = new URLSearchParams();
+    if (referenceDate) q.set("referenceDate", referenceDate);
+    if (windowDays != null) q.set("windowDays", String(windowDays));
+    const suffix = q.toString() ? `?${q.toString()}` : "";
+    return this.request<RepeatedInquiry[]>("GET", `/api/customer-memory/repeats${suffix}`);
+  }
+
+  async listItemAnalyses(): Promise<unknown[]> {
+    return this.request<unknown[]>("GET", `/api/item-analysis`);
+  }
+
+  async getDashboardSummary(): Promise<{ topProductIssues?: unknown[] }> {
+    return this.request<{ topProductIssues?: unknown[] }>("GET", `/api/dashboard/summary`);
+  }
+
+  async planGoal(request: {
+    goalText: string;
+    toolCatalogue: string[];
+    priorContext?: string;
+  }): Promise<AgentPlanView> {
+    return this.request<AgentPlanView>("POST", `/api/agent/plan`, request);
+  }
+
+  async judgeFinding(request: { finding: string; evidenceDigest: string }): Promise<AgentJudgeView> {
+    return this.request<AgentJudgeView>("POST", `/api/agent/judge`, request);
   }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {

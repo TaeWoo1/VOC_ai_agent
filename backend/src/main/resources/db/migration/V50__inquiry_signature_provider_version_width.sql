@@ -1,0 +1,23 @@
+-- The provider-version column was too narrow for the version string this capability actually produces.
+--
+-- FOUND LIVE 2026-08-21, on the first real classification of the first real inquiry: the insert failed
+-- with `value too long for type character varying(64)`. The version a generator stamps is deliberately
+-- composite — capability + vendor + model + prompt version + schema + token budget + reasoning effort —
+-- because a measurement recorded against "the model" is unreproducible the moment any of those changes,
+-- and `contracts/inquiry-issue/v1/RUBRIC.md` requires a run to be re-derivable from what it recorded.
+-- For the current model that string is ~95 characters:
+--   inquiry-signal/v1+openai:<model>+inquiry-signal-prompt/v1+schema/v1+out200+effort:low
+--
+-- 64 was copied from `review_issues.extractor_version`, whose values are short by construction
+-- (`issue-rules-v1`). That was the wrong precedent: a rule extractor's version names one thing, and a
+-- model capability's version names six.
+--
+-- 256 rather than 128: the composite grows by one segment every time a capability gains a knob, and a
+-- column that has to be widened twice is a column that was sized by the current value rather than by
+-- the shape of the value. Nothing indexes it.
+--
+-- ============================================================================================
+-- VERSION NUMBERING — V50, the next free version above V49. Forward-only; V49 is already applied on
+-- the local database, so widening it in place there would not re-run.
+-- ============================================================================================
+alter table inquiry_signature_cache alter column provider_version type varchar(256);
