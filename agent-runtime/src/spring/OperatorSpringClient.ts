@@ -48,6 +48,38 @@ export interface InquiryThreadContext {
   readonly hasApprovedPastReply: boolean;
 }
 
+/**
+ * One Channel Knowledge entry as the Operator sees it.
+ *
+ * `source` and `verifiedAt` ride along deliberately. The Operator can and does quote these to a
+ * seller, and a menu label someone half-remembered must not read exactly like a scope requirement
+ * proven on a live run — the judge weighs them differently, and so should the answer.
+ */
+export interface ChannelKnowledgeHit {
+  readonly id: string;
+  readonly channel: string;
+  readonly topic: string;
+  readonly kind: string;
+  readonly title: string;
+  readonly summary: string;
+  readonly body: string | null;
+  readonly capabilities: string[];
+  readonly source: string;
+  readonly sourceRef: string;
+  readonly verifiedAt: string | null;
+}
+
+/** What SellerOps can do with one data type on one channel, composed from the backend's registries. */
+export interface ChannelCapabilityAnswer {
+  readonly channel: string;
+  readonly dataType: string;
+  readonly supported: boolean;
+  readonly verificationStatus: string | null;
+  readonly acquisitionPaths: { method: string; verificationStatus: string; recurrence: string }[];
+  readonly apiGaps: string[];
+  readonly knowledge: ChannelKnowledgeHit[];
+}
+
 export interface CustomerMemorySearchParams {
   /** Derive the cue from this inquiry's own index row — no customer text ever becomes a query string. */
   readonly inquiryId?: string;
@@ -89,6 +121,28 @@ export interface OperatorSpringClient {
   getDashboardSummary(): Promise<{ topProductIssues?: unknown[] }>;
   /** One inquiry's operational context — metadata, product link and past-response summary. No body. */
   getInquiryThreadContext(workItemId: string): Promise<InquiryThreadContext>;
+
+  /**
+   * Search platform knowledge about how a sales channel works.
+   *
+   * Platform knowledge, not seller data: nothing here is scoped to an org, and nothing here is about
+   * what this seller sells or what their customers said. Those are Product Knowledge and Customer
+   * Operations Memory, and keeping the three apart is what stops one seller's shipping policy being
+   * answered from another seller's channel documentation.
+   */
+  searchChannelKnowledge?(params: {
+    query?: string;
+    channel?: string;
+    topic?: string;
+    capability?: string;
+    limit?: number;
+  }): Promise<ChannelKnowledgeHit[]>;
+
+  /** What SellerOps can do with one data type on one channel — from the registries, not from prose. */
+  getChannelCapability?(channel: string, dataType: string): Promise<ChannelCapabilityAnswer>;
+
+  /** What connecting this channel requires, and what to check first when it fails. */
+  getConnectionGuidance?(channel: string): Promise<ChannelKnowledgeHit[]>;
 
   /**
    * Ask the backend's planner seam to interpret a goal.

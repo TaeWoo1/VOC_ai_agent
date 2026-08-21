@@ -50,6 +50,36 @@ public final class AcquisitionPathRegistry {
         MANUAL,
     }
 
+    /**
+     * Once history is in, does anything NEW arrive by this path — and does it need the seller?
+     *
+     * <p>The axis the product was missing. {@code Method} says how data gets here and
+     * {@code Verification} says whether that was ever proven, but neither distinguishes a connector
+     * that polls hourly from an export a seller performs when they remember to. Both were rendered as
+     * "수집됨", which is how the demo org came to show 3,858 NAVER reviews whose newest was five weeks
+     * old with nothing wrong and nothing scheduled.
+     *
+     * <p>This is a statement about the CHANNEL's rules, not about how well SellerOps has implemented
+     * anything. NAVER and Coupang publish no seller review API; for them {@link #SCHEDULED} is not a
+     * thing to build later, it is a thing that does not exist. A completion bar of "every data type on
+     * an unattended schedule" would therefore mark honest products permanently incomplete, which is
+     * why the bar is instead: the channel's own best path, proven, on the current connection.
+     */
+    public enum Recurrence {
+        /** Unattended and repeatable — a schedule can run it with nobody present. */
+        SCHEDULED,
+        /**
+         * The same seller action, as often as the seller chooses to repeat it. New data CAN keep
+         * arriving; nothing arrives on its own. Exports and Action Windows live here.
+         */
+        SELLER_REPEATED,
+        /**
+         * Brings history once and nothing after. A migration, not a sync — if this is a type's only
+         * path, the corpus ages from the day it lands and the product must say so.
+         */
+        ONE_OFF,
+    }
+
     /** What backs the claim that a path works. Never optimistic: absence of proof is not proof. */
     public enum Verification {
         /** The path exists in code but no live sitting has confirmed it end to end. */
@@ -63,8 +93,28 @@ public final class AcquisitionPathRegistry {
      * what is planned.
      */
     private static final Map<String, List<AcquisitionPath>> PATHS = Map.of(
+            // Coupang publishes no seller review API. The Action Window is not a workaround for a
+            // missing integration — it IS the channel's acquisition path, and the seller opens it.
+            // Evidence: docs/coupang_review_acquisition_v1.md §6.6 (2026-08-15, 533cafc2).
             key("COUPANG", DataType.REVIEW),
-            List.of(new AcquisitionPath(Method.ACTION_WINDOW.name(), Verification.LIVE_PROVEN.name())));
+            List.of(path(Method.ACTION_WINDOW, Verification.LIVE_PROVEN, Recurrence.SELLER_REPEATED)),
+
+            // NAVER publishes no seller review API either (스마트스토어 공식 관리자, 2024-08-30). The real
+            // path is the Seller Center export the seller downloads and hands over, and it has been
+            // the product's actual source all along: every one of the demo org's 3,858 real NAVER
+            // reviews arrived through it, across 21 upload jobs.
+            //
+            // Registering it late is the correction. While it was absent, the one surface that exists
+            // to say how a type is acquired said NOTHING for the channel carrying the most review data
+            // in the system — so a corpus with no schedule and no automatic refresh read as if it had
+            // both. Evidence: docs/action-window-runtime/naver-initial-review-import-live-proof-record.md
+            // (2026-07-25/26 — 1 segment, 62 new rows through the guided single-CTA flow).
+            key("NAVER", DataType.REVIEW),
+            List.of(path(Method.EXPORT, Verification.LIVE_PROVEN, Recurrence.SELLER_REPEATED)));
+
+    private static AcquisitionPath path(Method method, Verification verification, Recurrence recurrence) {
+        return new AcquisitionPath(method.name(), verification.name(), recurrence.name());
+    }
 
     private AcquisitionPathRegistry() {
     }

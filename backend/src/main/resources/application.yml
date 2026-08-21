@@ -295,7 +295,15 @@ sellerops:
         client-id: ${SELLEROPS_CONNECTOR_CAFE24_CLIENT_ID:}
         client-secret: ${SELLEROPS_CONNECTOR_CAFE24_CLIENT_SECRET:}
         redirect-uri: ${SELLEROPS_CONNECTOR_CAFE24_REDIRECT_URI:http://localhost:8080/api/connect/cafe24/callback}
-        scopes: ${SELLEROPS_CONNECTOR_CAFE24_SCOPES:mall.read_community,mall.read_order}
+        # READ-ONLY by contract — a value containing "write" fails the service closed at startup.
+        #
+        # mall.read_product must be here. Cafe24OnboardingConfiguration's own @Value default has listed
+        # all three since Operator Graph v2, with a comment promising "new connections consent to all
+        # three at once" — but a @Value default only applies when the property is ABSENT, and this line
+        # has always supplied one. So the promise was false in every deployment: a seller who
+        # reconnected would consent to two scopes, the product read would keep returning
+        # insufficient_scope, and they would be asked to reconnect a second time to fix it.
+        scopes: ${SELLEROPS_CONNECTOR_CAFE24_SCOPES:mall.read_community,mall.read_order,mall.read_product}
         result-redirect-url: ${SELLEROPS_CONNECTOR_CAFE24_RESULT_URL:http://localhost:3000/connect/cafe24/result}
         state-ttl-seconds: ${SELLEROPS_CONNECTOR_CAFE24_STATE_TTL_SECONDS:600}
     esm:

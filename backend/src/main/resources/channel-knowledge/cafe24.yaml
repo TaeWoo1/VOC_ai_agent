@@ -1,0 +1,293 @@
+# Cafe24 자사몰 — Channel Knowledge v1
+#
+# Platform knowledge only — no seller-specific policy. Cafe24 is the only one of the three channels
+# with a rotating credential and an OAuth scope grant, so its CONNECTION and TROUBLESHOOTING entries
+# carry more weight here than on the other two.
+version: v1
+updatedAt: "2026-08-22"
+entries:
+
+  # ---------------------------------------------------------------- CAPABILITY
+  - id: cafe24-cap-order
+    topic: CAPABILITY
+    kind: FACT
+    title: 주문은 공식 Admin API로 수집합니다
+    summary: >-
+      Cafe24 ORDER_SUMMARY는 OAuth 연결로 수집하며, 토큰 회전과 금액 대사를 포함해 E2E 라이브
+      검증되었습니다.
+    capabilities: [ORDER_SUMMARY]
+    tags: [주문, 수집, api, oauth]
+    source: LIVE_OBSERVATION
+    sourceRef: docs/sellerops_cafe24_live_verification.md
+    verifiedAt: "2026-06-25"
+
+  - id: cafe24-cap-review-board4
+    topic: CAPABILITY
+    kind: FACT
+    title: 리뷰는 게시판 4번(구매후기)에서 읽습니다
+    summary: >-
+      Cafe24는 세 채널 중 유일하게 리뷰를 공식 API로 읽을 수 있습니다. 게시판 4번의 글을 읽어
+      리뷰로 저장합니다.
+    body: >-
+      게시판 번호는 몰마다 다르게 쓰일 수 있습니다. 4번에서 0건이 돌아오는 것은 실패가 아니라
+      "그 게시판에 글이 없다"는 응답이며, 후기를 다른 게시판에 받는 몰일 가능성을 먼저 확인해야
+      합니다. 비밀글은 fail-closed로 제외됩니다.
+    capabilities: [REVIEW]
+    tags: [리뷰, 게시판, board4, 구매후기]
+    source: LIVE_OBSERVATION
+    sourceRef: docs/sellerops_cafe24_review_acquisition_completion_live_proof.md
+    verifiedAt: "2026-07-31"
+
+  - id: cafe24-cap-inquiry-board6
+    topic: CAPABILITY
+    kind: FACT
+    title: 문의는 게시판 6번(문의사항)에서 읽습니다
+    summary: >-
+      게시판 6번의 글을 문의로 저장하고 작업 항목을 만듭니다. 게시판 9번은 수집하지 않습니다.
+    body: >-
+      비밀글도 수집하되 경계가 있습니다 — 받은 문의함에는 보이고, 대시보드 집계와 분석에서는
+      제외됩니다. 이것은 누락이 아니라 의도된 경계입니다.
+    capabilities: [INQUIRY]
+    tags: [문의, 게시판, board6, 비밀글]
+    source: LIVE_OBSERVATION
+    sourceRef: docs/sellerops_cafe24_inquiry_read_live_proof.md
+    verifiedAt: "2026-07-31"
+
+  - id: cafe24-cap-product
+    topic: CAPABILITY
+    kind: LIMITATION
+    title: 상품 조회에는 mall.read_product 재동의가 필요합니다
+    summary: >-
+      Cafe24 상품 API는 구현되어 있지만, mall.read_product 스코프가 없는 기존 연결에서는
+      insufficient_scope가 돌아옵니다. 판매자의 재동의가 필요하며 우회하지 않습니다.
+    body: >-
+      Operator Graph v2 이전에 만들어진 연결은 mall.read_community, mall.read_order 두 개만
+      가지고 있습니다. 그 연결의 토큰은 정상적으로 발급되므로 "연결됨"으로 보이지만 상품 읽기만
+      실패합니다 — 연결 상태를 보고 원인을 찾으면 안 되는 대표적인 경우입니다.
+    capabilities: [PRODUCT]
+    tags: [상품, 스코프, 재동의, insufficient_scope]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: com.sellerops.connector.cafe24.Cafe24ProductsClient
+    verifiedAt: "2026-08-21"
+
+  # ---------------------------------------------------------------- CONNECTION
+  - id: cafe24-conn-oauth-scopes
+    topic: CONNECTION
+    kind: FACT
+    title: 연결은 OAuth이고 스코프는 세 개입니다
+    summary: >-
+      mall.read_order(주문), mall.read_community(문의·리뷰 게시판), mall.read_product(상품).
+      전부 읽기 전용이며, write를 포함한 값은 서비스가 시작 시점에 실패합니다.
+    body: >-
+      스코프는 동의 시점에 고정됩니다. 나중에 필요한 스코프가 늘어나면 기존 토큰을 갱신하는 것으로는
+      해결되지 않고, 판매자가 다시 동의해야 합니다.
+    capabilities: [ORDER_SUMMARY, INQUIRY, REVIEW, PRODUCT]
+    tags: [연결, oauth, 스코프, 권한]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: sellerops.connector.cafe24.oauth.scopes (application.yml)
+    verifiedAt: "2026-08-22"
+
+  - id: cafe24-conn-refresh-token-rotates
+    topic: CONNECTION
+    kind: FACT
+    title: 리프레시 토큰은 쓸 때마다 회전하고 만료됩니다
+    summary: >-
+      Cafe24 리프레시 토큰은 1회용입니다. 사용하면 새 값으로 바뀌고 이전 값은 즉시 죽습니다.
+      오래 쓰지 않으면 만료되어 재동의가 필요합니다.
+    body: >-
+      세 채널 중 유일하게 "가만히 두면 연결이 끊기는" 채널입니다. NAVER 애플리케이션 키는 만료되지
+      않고, 쿠팡 키는 만료되지만 정해진 유효기간이 있습니다. Cafe24만 사용 이력에 따라 달라집니다.
+      따라서 오랫동안 수집이 멈춰 있던 Cafe24 연결은 다시 켜는 것만으로 살아나지 않을 수 있습니다.
+    capabilities: [ORDER_SUMMARY, INQUIRY, REVIEW, PRODUCT]
+    tags: [연결, 토큰, 회전, 만료, 재동의]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: com.sellerops.connector.cafe24.Cafe24Authorizer · CredentialVault.rotateSecrets
+    verifiedAt: "2026-08-22"
+
+  - id: cafe24-conn-mall-id
+    topic: CONNECTION
+    kind: FACT
+    title: API 주소는 몰 아이디로 만들어집니다
+    summary: >-
+      Cafe24 API 호스트는 https://{mall_id}.cafe24api.com 형태로 몰마다 다릅니다. 몰 아이디가
+      틀리면 인증 이전에 호스트부터 틀립니다.
+    capabilities: [ORDER_SUMMARY, INQUIRY, REVIEW, PRODUCT]
+    tags: [연결, mall_id, 호스트, 주소]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: application.yml (cafe24 base-url) · frontend/src/lib/cafe24Tutorial/mallId.ts
+    verifiedAt: "2026-08-22"
+
+  # ---------------------------------------------------------------- NAVIGATION
+  - id: cafe24-nav-consent
+    topic: NAVIGATION
+    kind: PROCEDURE
+    title: 연결은 SellerOps에서 시작해 Cafe24 동의 화면에서 끝납니다
+    summary: >-
+      판매자가 몰 아이디를 입력하면 SellerOps가 Cafe24 공식 동의 화면으로 보내고, 판매자가 동의하면
+      돌아옵니다. 판매자는 SellerOps에 Cafe24 비밀번호를 입력하지 않습니다.
+    body: >-
+      동의 화면에 표시되는 권한 목록이 곧 이 연결이 갖게 될 스코프입니다. 상품 정보를 쓰려면 그
+      목록에 상품 읽기가 포함되어 있어야 합니다.
+    capabilities: [ORDER_SUMMARY, INQUIRY, REVIEW, PRODUCT]
+    tags: [연결, 동의, oauth, 위치]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: frontend/src/pages/Cafe24Tutorial.tsx · Cafe24OnboardingService
+    verifiedAt: "2026-08-22"
+
+  - id: cafe24-nav-board-numbers
+    topic: NAVIGATION
+    kind: GUIDANCE
+    title: 게시판 번호는 쇼핑몰 관리자의 게시판 관리에서 확인합니다
+    summary: >-
+      후기·문의가 몇 번 게시판에 있는지는 몰마다 다릅니다. 관리자에서 게시판 목록을 열면 번호를
+      확인할 수 있습니다.
+    body: >-
+      정확한 메뉴 이름은 버전에 따라 다를 수 있습니다. 4번에서 리뷰가 0건인데 몰에는 후기가 있다면
+      가장 먼저 확인할 것이 이것입니다.
+    capabilities: [REVIEW, INQUIRY]
+    tags: [게시판, 번호, 관리자, 위치]
+    source: UNVERIFIED
+    sourceRef: 게시판 번호가 몰별로 다르다는 사실은 확인됨; 관리자 메뉴 라벨은 미확정
+    verifiedAt: "2026-08-22"
+
+  # ---------------------------------------------------------- STATUS_SEMANTICS
+  - id: cafe24-status-reply-tokens
+    topic: STATUS_SEMANTICS
+    kind: FACT
+    title: 답변 상태 토큰이 예상과 다르면 UNKNOWN으로 둡니다
+    summary: >-
+      게시판 글의 답변 상태로 N/P/C 토큰을 기대했지만, 라이브에서 실제로 관측된 것은 UNKNOWN뿐이었고
+      기대는 철회되었습니다.
+    body: >-
+      SellerOps는 알아보지 못한 값을 그럴듯한 값으로 바꾸지 않습니다. 답변 여부가 중요한 판단이라면
+      쇼핑몰 관리자에서 확인해야 합니다.
+    capabilities: [REVIEW, INQUIRY]
+    tags: [상태, 답변, unknown, 토큰]
+    source: LIVE_OBSERVATION
+    sourceRef: docs/sellerops_cafe24_review_acquisition_completion_live_proof.md
+    verifiedAt: "2026-07-30"
+
+  - id: cafe24-status-absence-not-deletion
+    topic: STATUS_SEMANTICS
+    kind: FACT
+    title: 문의가 응답에서 사라졌다고 삭제로 판정하지 않습니다
+    summary: >-
+      수집 결과에 없는 글은 "없어졌다"가 아니라 "이번 조회 범위에서 보이지 않았다"입니다.
+      SellerOps는 이를 자동으로 삭제로 해석하지 않습니다.
+    body: >-
+      조회 창, 게시판 번호, 권한, 페이징 중 어느 하나만 달라져도 같은 글이 응답에서 빠질 수 있기
+      때문입니다. 부재를 삭제로 읽으면 살아 있는 문의가 조용히 사라집니다.
+    capabilities: [INQUIRY]
+    tags: [문의, 삭제, 부재, 판정]
+    source: PRODUCT_DECISION
+    sourceRef: docs/inquiry_operational_truth_v1.md
+    verifiedAt: "2026-08-22"
+
+  # ------------------------------------------------------------------ GLOSSARY
+  - id: cafe24-glossary-product-no
+    topic: GLOSSARY
+    kind: TERM
+    title: product_no는 몰 안에서만 유효한 상품 번호입니다
+    summary: >-
+      Cafe24 상품은 몰 내부 번호 product_no로 식별됩니다. 다른 몰의 같은 번호는 전혀 다른 상품입니다.
+    capabilities: [PRODUCT]
+    tags: [식별자, 상품, product_no]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: com.sellerops.connector.cafe24.Cafe24ProductRow
+    verifiedAt: "2026-08-21"
+
+  - id: cafe24-glossary-board-article
+    topic: GLOSSARY
+    kind: TERM
+    title: board_no는 게시판, article_no는 그 안의 글입니다
+    summary: >-
+      글 하나는 (board_no, article_no) 쌍으로 식별됩니다. article_no만으로는 어느 게시판의 글인지
+      알 수 없습니다.
+    capabilities: [REVIEW, INQUIRY]
+    tags: [식별자, 게시판, board_no, article_no]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: com.sellerops.connector.cafe24.Cafe24BoardArticlesClient
+    verifiedAt: "2026-08-22"
+
+  # ----------------------------------------------------------- TROUBLESHOOTING
+  - id: cafe24-trouble-insufficient-scope
+    topic: TROUBLESHOOTING
+    kind: GUIDANCE
+    title: 상품 정보만 안 들어오면 스코프를 확인하세요
+    summary: >-
+      주문·문의는 되는데 상품만 실패한다면 원인은 거의 항상 mall.read_product 스코프 부재입니다.
+      연결 자체는 정상입니다.
+    body: >-
+      조치는 판매자의 재동의입니다. 재동의 화면의 권한 목록에 상품 읽기가 포함되어 있는지 확인해야
+      하며, 포함되지 않은 채로 다시 동의하면 같은 상태로 돌아옵니다.
+    capabilities: [PRODUCT]
+    tags: [오류, 스코프, 상품, 재동의]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: com.sellerops.connector.cafe24.Cafe24OAuthException
+    verifiedAt: "2026-08-22"
+
+  - id: cafe24-trouble-all-failing
+    topic: TROUBLESHOOTING
+    kind: GUIDANCE
+    title: 모든 Cafe24 수집이 실패하면 토큰과 서버 키를 구분해서 봅니다
+    summary: >-
+      두 가지 다른 원인이 같은 증상을 냅니다 — 리프레시 토큰 만료(판매자 재동의 필요)와 서버의
+      자격 증명 키 문제(서버 설정 문제, 판매자와 무관).
+    body: >-
+      SellerOps의 자격 증명 진단이 KEY_NOT_AVAILABLE 또는 KEY_MISMATCH를 말하면 서버 문제이며
+      판매자가 다시 연결할 필요가 없습니다. 진단이 OK인데도 호출이 실패하면 그때가 토큰 문제입니다.
+      순서를 바꾸면 판매자에게 불필요한 재동의를 요구하게 됩니다.
+    capabilities: [ORDER_SUMMARY, INQUIRY, REVIEW, PRODUCT]
+    tags: [오류, 토큰, 키, 진단, 재동의]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: com.sellerops.credential.CredentialDiagnosis
+    verifiedAt: "2026-08-22"
+
+  - id: cafe24-trouble-review-zero
+    topic: TROUBLESHOOTING
+    kind: GUIDANCE
+    title: 리뷰가 0건이면 게시판 번호부터 확인합니다
+    summary: >-
+      게시판 4번 조회가 성공하고 0건을 돌려주는 것은 정상 응답입니다. 몰이 후기를 다른 게시판에 받고
+      있을 수 있습니다.
+    body: >-
+      확인 순서 — (1) 쇼핑몰에 실제로 후기가 있는가, (2) 있다면 몇 번 게시판인가, (3) 비밀글만 있는
+      것은 아닌가(비밀글은 제외됩니다). 권한이나 토큰을 의심하는 것은 마지막입니다 — 그 경우라면
+      0건이 아니라 오류가 났을 것입니다.
+    capabilities: [REVIEW]
+    tags: [리뷰, 0건, 게시판, 진단]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: com.sellerops.connector.cafe24.Cafe24BoardArticlesClient
+    verifiedAt: "2026-08-22"
+
+  # ------------------------------------------------------------------ WORKFLOW
+  - id: cafe24-workflow-inquiry-answer
+    topic: WORKFLOW
+    kind: FACT
+    title: 문의 답변은 쇼핑몰 관리자에서 판매자가 게시합니다
+    summary: >-
+      SellerOps의 Cafe24 스코프는 전부 읽기 전용입니다. 답변 초안은 만들지만 SellerOps가 글을
+      쓰지는 않습니다.
+    capabilities: [INQUIRY]
+    tags: [문의, 답변, 읽기전용, 워크플로]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: sellerops.connector.cafe24.oauth.scopes (READ-ONLY 계약)
+    verifiedAt: "2026-08-22"
+
+  # ---------------------------------------------------------------- OPERATIONS
+  - id: cafe24-ops-reconnect-cost
+    topic: OPERATIONS
+    kind: GUIDANCE
+    title: 재동의를 요청하기 전에 서버 쪽 원인을 먼저 배제하세요
+    summary: >-
+      재동의는 판매자의 시간을 쓰는 일이며, 되돌릴 수 없는 스코프 결정을 다시 하는 순간이기도 합니다.
+    body: >-
+      실제로 있었던 일 — Cafe24 수집이 128회 연속 실패했고 원인은 서버의 자격 증명 키였습니다.
+      판매자에게 재동의를 요청했다면 아무것도 고쳐지지 않았을 것입니다. 그리고 재동의를 하게 된다면
+      그 한 번에 필요한 스코프가 전부 포함되어 있어야 합니다 — 상품 읽기를 빠뜨리면 판매자를 두 번
+      부르게 됩니다.
+    capabilities: [ORDER_SUMMARY, INQUIRY, REVIEW, PRODUCT]
+    tags: [운영, 재동의, 판단, 순서]
+    source: LIVE_OBSERVATION
+    sourceRef: docs/demo_org_and_channel_knowledge_v1.md (vault 진단, 2026-08-22)
+    verifiedAt: "2026-08-22"

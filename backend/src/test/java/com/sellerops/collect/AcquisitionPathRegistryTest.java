@@ -22,7 +22,44 @@ class AcquisitionPathRegistryTest {
                     // docs/coupang_review_acquisition_v1.md §6.6 (22 stored), not the locate re-proof,
                     // which deliberately stored nothing.
                     assertThat(path.verificationStatus()).isEqualTo("LIVE_PROVEN");
+                    // Not SCHEDULED, and never will be: Coupang publishes no seller review API, so
+                    // new 상품평 arrive when the seller opens the window and not otherwise. Rendering
+                    // this as an ordinary sync would promise a refresh nobody can deliver.
+                    assertThat(path.recurrence()).isEqualTo("SELLER_REPEATED");
                 });
+    }
+
+    /**
+     * NAVER's Seller Center export is the product's real review source and went unregistered until
+     * 2026-08-22 — while every one of the demo org's 3,858 real NAVER reviews had arrived through it.
+     * The one surface that exists to say how a type is acquired said nothing for the channel carrying
+     * the most review data in the system, so a corpus with no schedule read as though it had one.
+     */
+    @Test
+    void naverReviewIsAcquiredThroughTheSellerCenterExport() {
+        assertThat(AcquisitionPathRegistry.pathsFor("NAVER", DataType.REVIEW))
+                .singleElement()
+                .satisfies(path -> {
+                    assertThat(path.method()).isEqualTo("EXPORT");
+                    assertThat(path.verificationStatus()).isEqualTo("LIVE_PROVEN");
+                    assertThat(path.recurrence()).isEqualTo("SELLER_REPEATED");
+                });
+    }
+
+    /**
+     * No entry anywhere claims SCHEDULED, and that is a fact about the channels rather than a gap in
+     * the product: this registry exists precisely for types their channel does NOT serve by API. An
+     * entry claiming an unattended schedule here would be describing the pull connector, which has its
+     * own answer and must not be restated.
+     */
+    @Test
+    void noRegisteredPathClaimsToRunUnattended() {
+        for (String channel : new String[] {"COUPANG", "NAVER", "CAFE24"}) {
+            for (DataType type : DataType.values()) {
+                assertThat(AcquisitionPathRegistry.pathsFor(channel, type))
+                        .allSatisfy(p -> assertThat(p.recurrence()).isNotEqualTo("SCHEDULED"));
+            }
+        }
     }
 
     @Test
@@ -30,9 +67,11 @@ class AcquisitionPathRegistryTest {
         // Same channel, other types.
         assertThat(AcquisitionPathRegistry.pathsFor("COUPANG", DataType.ORDER_SUMMARY)).isEmpty();
         assertThat(AcquisitionPathRegistry.pathsFor("COUPANG", DataType.INQUIRY)).isEmpty();
-        // Same type, other channels — including NAVER, which also has no review API but has no proven
-        // acquisition path either. Absence of an API must not be read as presence of another route.
-        assertThat(AcquisitionPathRegistry.pathsFor("NAVER", DataType.REVIEW)).isEmpty();
+        // NAVER INQUIRY has no API and no proven alternative route either — absence of an API must
+        // not be read as presence of another one. The demo org's 8 NAVER inquiries were seed rows.
+        assertThat(AcquisitionPathRegistry.pathsFor("NAVER", DataType.INQUIRY)).isEmpty();
+        // Cafe24 serves reviews through its own connector (board 4), and the registry deliberately
+        // does not restate what the pull connector already answers.
         assertThat(AcquisitionPathRegistry.pathsFor("CAFE24", DataType.REVIEW)).isEmpty();
         assertThat(AcquisitionPathRegistry.pathsFor("GMARKET", DataType.REVIEW)).isEmpty();
     }

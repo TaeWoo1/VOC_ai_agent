@@ -52,6 +52,8 @@ import type {
   CustomerMemorySearchParams,
   InquiryThreadContext,
   OperatorSpringClient,
+  ChannelKnowledgeHit,
+  ChannelCapabilityAnswer,
 } from "./OperatorSpringClient";
 
 export interface ListInquiriesParams {
@@ -350,6 +352,37 @@ export class HttpSpringClient
 
   async getDashboardSummary(): Promise<{ topProductIssues?: unknown[] }> {
     return this.request<{ topProductIssues?: unknown[] }>("GET", `/api/dashboard/summary`);
+  }
+
+  async searchChannelKnowledge(params: {
+    query?: string;
+    channel?: string;
+    topic?: string;
+    capability?: string;
+    limit?: number;
+  }): Promise<ChannelKnowledgeHit[]> {
+    const q = new URLSearchParams();
+    if (params.query) q.set("q", params.query);
+    if (params.channel) q.set("channel", params.channel);
+    if (params.topic) q.set("topic", params.topic);
+    if (params.capability) q.set("capability", params.capability);
+    if (params.limit != null) q.set("limit", String(params.limit));
+    const suffix = q.toString() ? `?${q.toString()}` : "";
+    return this.request<ChannelKnowledgeHit[]>("GET", `/api/channel-knowledge/search${suffix}`);
+  }
+
+  async getChannelCapability(channel: string, dataType: string): Promise<ChannelCapabilityAnswer> {
+    return this.request<ChannelCapabilityAnswer>(
+      "GET",
+      `/api/channel-knowledge/channels/${encodeURIComponent(channel)}/capabilities/${encodeURIComponent(dataType)}`,
+    );
+  }
+
+  async getConnectionGuidance(channel: string): Promise<ChannelKnowledgeHit[]> {
+    return this.request<ChannelKnowledgeHit[]>(
+      "GET",
+      `/api/channel-knowledge/channels/${encodeURIComponent(channel)}/connection`,
+    );
   }
 
   async planGoal(request: {

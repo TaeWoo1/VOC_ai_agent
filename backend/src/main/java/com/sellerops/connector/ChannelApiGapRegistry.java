@@ -29,10 +29,10 @@ import java.util.Map;
  * screen shows side by side — 상품평 수집 경로 확인됨 · Action Window, and 리뷰 API 없음 — and folding
  * either into the other is what produced the contradiction in the first place.
  *
- * <p>Deliberately narrow. NAVER's missing review API is just as real (the official maintainer said
- * so on 2024-08-30, recorded in {@code V3__scheduled_collection.sql}'s seed), and it is not listed
- * here: adding a channel changes that channel's operator screen and belongs to that channel's own
- * unit, with its own regression. An entry appears when someone has looked.
+ * <p>Deliberately narrow: an entry appears when someone has looked. NAVER's missing review API was
+ * left out on exactly that principle and has since been looked at — Channel Knowledge v1 states it as
+ * a LIMITATION a seller and the Agent both read, and a fact asserted there while the code registry
+ * stayed silent is the drift this file was built to prevent. It is listed now.
  */
 public final class ChannelApiGapRegistry {
 
@@ -45,7 +45,13 @@ public final class ChannelApiGapRegistry {
      * two surfaces cannot drift apart into two slightly different sentences about one fact.
      */
     private static final Map<String, List<UnsupportedScope>> GAPS = Map.of(
-            "COUPANG", List.of(new UnsupportedScope("REVIEW_API", "리뷰 API 없음 (쿠팡 미제공)")));
+            "COUPANG", List.of(new UnsupportedScope("REVIEW_API", "리뷰 API 없음 (쿠팡 미제공)")),
+            // NAVER: stated by the official 스마트스토어 maintainer on 2024-08-30 and carried in
+            // connector_capabilities as UNSUPPORTED ever since. Registered here so the absence
+            // survives the connector being off, exactly as it must for Coupang — the demo org's 3,858
+            // NAVER reviews all arrived by export, and a screen that showed the acquisition badge
+            // without the missing-API note would read as though a sync existed and was merely idle.
+            "NAVER", List.of(new UnsupportedScope("REVIEW_API", "리뷰 API 없음 (네이버 미제공)")));
 
     private ChannelApiGapRegistry() {
     }

@@ -59,9 +59,14 @@ public record ChannelCapabilityOverview(
      * <p>The status rides on the path rather than beside a list of methods: several paths can serve
      * one data type at once, and each is proven on its own. {@code method} is an
      * {@code AcquisitionPathRegistry.Method} name, {@code verificationStatus} a
-     * {@code Verification} name.
+     * {@code Verification} name, {@code recurrence} a {@code Recurrence} name.
+     *
+     * <p>{@code recurrence} answers the question the other two cannot: once history is in, does
+     * anything NEW arrive by this path, and does it need the seller? A proven path that only ever
+     * runs when a seller exports a file is not the same product as an hourly sync, and reporting them
+     * identically is how "리뷰 수집됨" came to describe a corpus whose newest row was five weeks old.
      */
-    public record AcquisitionPath(String method, String verificationStatus) {
+    public record AcquisitionPath(String method, String verificationStatus, String recurrence) {
     }
 
     /** A deliberate boundary the connector does not cover (board, write action, …). */

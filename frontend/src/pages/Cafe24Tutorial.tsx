@@ -245,9 +245,15 @@ export function Cafe24Tutorial() {
 
         {state.phase === "permissions" ? (
           <div className="space-y-4">
+            {/* These three must match sellerops.connector.cafe24.oauth.scopes exactly — the consent
+                screen shows what the backend requests, and a list here that disagrees teaches the
+                seller to expect a different screen than the one they get. Pinned by
+                ChannelKnowledgeConsistencyTest, which caught this page listing two of the three
+                while the deployment had been requesting a set that matched neither. */}
             <ul className="space-y-2 text-base text-ink">
               <li>• 주문 요약 읽기 (mall.read_order)</li>
               <li>• 문의·리뷰 게시판 읽기 (mall.read_community)</li>
+              <li>• 상품 정보 읽기 (mall.read_product)</li>
             </ul>
             <div className="rounded-xl bg-line/10 px-4 py-3 text-sm text-muted">
               글쓰기·답변 등록 권한은 요청하지 않습니다. 1:1 맞춤상담 게시판은 수집하지 않습니다.

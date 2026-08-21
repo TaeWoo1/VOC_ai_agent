@@ -100,6 +100,10 @@ function ScheduleRow({
   // A route the seller runs themselves on the marketplace. It is why this row can be uncollectable
   // on a cadence and collected all the same; it never makes the row schedulable.
   const operatorRunPath = acquisitionPaths.some((p) => p.method === "ACTION_WINDOW");
+  // A proven route that only the seller can repeat — an export they download, a window they open.
+  // Shown so a row with no schedule reads as "이 채널은 이렇게 가져옵니다" instead of as a gap; the demo
+  // org's 3,858 NAVER reviews all arrived this way while the screen said nothing about how.
+  const sellerRepeatedPath = acquisitionPaths.find((p) => p.recurrence === "SELLER_REPEATED");
   const enabled = schedule?.enabled ?? false;
   // One guard for the whole row: a save and a manual sync must not overlap.
   const rowBusy = saving || syncing;
@@ -163,7 +167,9 @@ function ScheduleRow({
         <p className="text-sm text-muted">
           {operatorRunPath
             ? "Action Window는 판매자가 직접 실행하는 수집 경로라 자동 수집 주기 대상이 아닙니다."
-            : capability?.notes ?? "이 데이터는 파일 업로드로 채울 수 있습니다."}
+            : sellerRepeatedPath?.method === "EXPORT"
+              ? "이 채널은 리뷰 API를 제공하지 않습니다. 판매자 센터에서 내려받은 파일을 올리는 방식이 정식 수집 경로이며, 새 데이터는 다시 올릴 때 들어옵니다."
+              : capability?.notes ?? "이 데이터는 파일 업로드로 채울 수 있습니다."}
         </p>
       ) : (
         <div className="flex flex-wrap items-center gap-3">

@@ -38,6 +38,9 @@ export const OPERATOR_TOOL = {
   GET_PRODUCT_KNOWLEDGE: "get_product_knowledge",
   SEARCH_PRODUCT_FACTS: "search_product_facts",
   GET_INQUIRY_CONTEXT: "get_inquiry_thread_context",
+  SEARCH_CHANNEL_KNOWLEDGE: "search_channel_knowledge",
+  GET_CHANNEL_CAPABILITY: "get_channel_capability",
+  GET_CONNECTION_GUIDANCE: "get_connection_guidance",
 } as const;
 
 export type OperatorToolName = (typeof OPERATOR_TOOL)[keyof typeof OPERATOR_TOOL];
@@ -215,6 +218,60 @@ export function buildOperatorTools(deps: OperatorToolDeps): ClassifiedTool[] {
         + "무엇을 더 조사할지 정할 때 원문을 열지 않고 판단하기 위한 도구. "
         + "필요한 정보: CUSTOMER_HISTORY.",
       schema: z.object({ workItemId: z.string().min(1) }),
+    })),
+
+    // ---- Channel Knowledge ------------------------------------------------------------------
+    //
+    // The third knowledge axis, and the boundary is what makes it useful: Product Knowledge answers
+    // "무엇을 파는가", Customer Memory answers "고객이 무엇을 말해왔는가", and these answer "이 채널은
+    // 어떻게 작동하는가". None of the three reads seller data here — these tools take no org, no
+    // product and no inquiry, because a platform fact is the same for every seller on the channel.
+    //
+    // Not injected into every run. A planner selects them when the goal is about the channel itself —
+    // "왜 안 들어와", "여기서 답변이 되나", "어디서 확인해" — and leaves them out otherwise. Attaching
+    // channel documentation to every question would crowd out the seller's own data with prose.
+    read(tool(async ({ query, channel, topic, capability }:
+      { query?: string; channel?: string; topic?: string; capability?: string }) =>
+      deps.operator.searchChannelKnowledge?.({ query, channel, topic, capability, limit: 6 }) ?? [], {
+      name: OPERATOR_TOOL.SEARCH_CHANNEL_KNOWLEDGE,
+      description:
+        "채널이 어떻게 작동하는지에 대한 플랫폼 지식 — 무엇이 되고 무엇이 안 되는지, 상태 값의 의미, "
+        + "식별자, 판매자 센터 어디를 봐야 하는지, 흔한 오류의 실제 원인. **판매자 데이터가 아니다** "
+        + "(상품·리뷰·문의는 다른 도구). 각 항목은 출처와 마지막 확인 날짜를 함께 준다 — 라이브로 증명된 "
+        + "사실과 미확인 메뉴 이름을 같은 무게로 말하지 말 것. 필요한 정보: CHANNEL_KNOWLEDGE.",
+      schema: z.object({
+        query: z.string().min(1).optional(),
+        channel: z.enum(["NAVER", "COUPANG", "CAFE24"]).optional(),
+        topic: z.enum([
+          "CAPABILITY", "WORKFLOW", "STATUS_SEMANTICS", "CONNECTION",
+          "NAVIGATION", "TROUBLESHOOTING", "GLOSSARY", "OPERATIONS",
+        ]).optional(),
+        capability: z.enum(["REVIEW", "INQUIRY", "ORDER_SUMMARY", "PRODUCT"]).optional(),
+      }),
+    })),
+
+    read(tool(async ({ channel, dataType }: { channel: string; dataType: string }) =>
+      deps.operator.getChannelCapability?.(channel, dataType) ?? null, {
+      name: OPERATOR_TOOL.GET_CHANNEL_CAPABILITY,
+      description:
+        "이 채널에서 이 데이터를 실제로 어떻게 가져오는지 — 공식 API로 자동 수집되는지, 판매자가 매번 "
+        + "직접 해야 하는 경로인지(recurrence: SCHEDULED / SELLER_REPEATED / ONE_OFF), 검증되었는지, "
+        + "그리고 그 채널에 아예 없는 API가 무엇인지. '리뷰가 왜 안 늘어' 같은 질문은 대개 고장이 아니라 "
+        + "이 답이다. 필요한 정보: CHANNEL_KNOWLEDGE.",
+      schema: z.object({
+        channel: z.enum(["NAVER", "COUPANG", "CAFE24"]),
+        dataType: z.enum(["REVIEW", "INQUIRY", "ORDER_SUMMARY", "PRODUCT"]),
+      }),
+    })),
+
+    read(tool(async ({ channel }: { channel: string }) =>
+      deps.operator.getConnectionGuidance?.(channel) ?? [], {
+      name: OPERATOR_TOOL.GET_CONNECTION_GUIDANCE,
+      description:
+        "이 채널을 연결하려면 무엇이 필요한지와, 안 될 때 무엇부터 확인해야 하는지 — 자격 증명 종류, "
+        + "OAuth 스코프, 호출 IP 제한, 만료·재동의 규칙. 연결 안내 화면과 같은 사실을 읽는다. "
+        + "필요한 정보: CHANNEL_KNOWLEDGE.",
+      schema: z.object({ channel: z.enum(["NAVER", "COUPANG", "CAFE24"]) }),
     })),
   ];
 }

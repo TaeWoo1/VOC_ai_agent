@@ -1,0 +1,296 @@
+# Coupang WING / Open API — Channel Knowledge v1
+#
+# Platform knowledge only — no seller-specific policy. Coupang is the channel where the gap between
+# "SellerOps가 못 한다"와 "쿠팡이 제공하지 않는다" matters most, so limitations here are written as
+# facts about the channel and are the most load-bearing entries in the pack.
+version: v1
+updatedAt: "2026-08-22"
+entries:
+
+  # ---------------------------------------------------------------- CAPABILITY
+  - id: coupang-cap-order
+    topic: CAPABILITY
+    kind: FACT
+    title: 주문은 공식 v5 ordersheets API로 수집합니다
+    summary: >-
+      Coupang ORDER_SUMMARY는 공식 v5 ordersheets 엔드포인트로 구현되어 있고 2026-08-06에 라이브
+      검증되었습니다. 일자 페이징 + 상태별 sweep + shipmentBoxId 중복 제거를 사용합니다.
+    body: >-
+      매 실행마다 6개 주문 상태를 전부 훑습니다(ACCEPT · INSTRUCT · DEPARTURE · DELIVERING ·
+      FINAL_DELIVERY · NONE_TRACKING). 한 상태만 조회하면 이미 배송이 진행된 주문이 통째로 빠집니다.
+    capabilities: [ORDER_SUMMARY]
+    tags: [주문, 수집, api, ordersheets]
+    source: LIVE_OBSERVATION
+    sourceRef: docs/coupang_final_main_first_connection_order_routine_proof_v1.md
+    verifiedAt: "2026-08-06"
+
+  - id: coupang-cap-review-no-api
+    topic: CAPABILITY
+    kind: LIMITATION
+    title: 쿠팡은 판매자용 리뷰 API를 제공하지 않습니다
+    summary: >-
+      2026-08-14에 공식 문서 11개 카테고리를 전수 확인했고 리뷰 엔드포인트는 없습니다. 공식 내보내기도
+      없고, 판매자 답글 기능도 없습니다.
+    body: >-
+      결과적으로 쿠팡 상품평은 SellerOps에서 수집·분석 전용이며 답변 채널이 아닙니다. "쿠팡 리뷰에
+      답변해 줘"라는 요청에는 기능이 없다고 답해야 하며, 다른 채널의 답변 흐름을 유추해 적용하면
+      안 됩니다.
+    capabilities: [REVIEW]
+    tags: [리뷰, api없음, 답글불가, 한계]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: docs/coupang_review_feasibility_v1.md · ChannelApiGapRegistry (REVIEW_API)
+    verifiedAt: "2026-08-14"
+
+  - id: coupang-cap-review-action-window
+    topic: CAPABILITY
+    kind: PROCEDURE
+    title: 상품평은 Action Window로 취득합니다
+    summary: >-
+      판매자가 자기 WING 화면을 열고 페이지를 넘기면 SellerOps가 읽어 저장합니다. 취득 경로는
+      ACTION_WINDOW · LIVE_PROVEN · SELLER_REPEATED로 등록되어 있습니다.
+    body: >-
+      2026-08-15 라이브 검증 — 3페이지·24행에서 22건 저장, 동일 범위 재수집 시 저장 0 / 건너뜀 22.
+      페이지 넘김은 판매자가 하고, 마켓플레이스 클릭·입력·전송은 0입니다. 완주 판정은 pager를
+      읽어서 하며, pager를 읽지 못하면 coverage를 주장하지 않고 중단합니다. 자동 주기 대상이 아니며,
+      그렇게 표시해서도 안 됩니다.
+    capabilities: [REVIEW]
+    tags: [리뷰, 상품평, action window, 취득]
+    source: LIVE_OBSERVATION
+    sourceRef: docs/coupang_review_acquisition_v1.md §6.6
+    verifiedAt: "2026-08-15"
+
+  - id: coupang-cap-inquiry
+    topic: CAPABILITY
+    kind: FACT
+    title: 문의는 공식 v5 onlineInquiries로 수집합니다
+    summary: >-
+      상품별 고객문의(onlineInquiries)를 7일 창 backfill로 수집합니다. 2026-08-14 라이브 검증
+      완료(2건 수집, 동일 창 재수집 시 insert 0 / skip 2).
+    body: >-
+      고객센터 문의(callCenterInquiries)는 PII를 담고 있어 호출하지 않습니다. 이것은 구현 누락이
+      아니라 data-minimization 결정입니다.
+    capabilities: [INQUIRY]
+    tags: [문의, 수집, api, onlineInquiries]
+    source: LIVE_OBSERVATION
+    sourceRef: docs/coupang_inquiry_live_proof_v1.md
+    verifiedAt: "2026-08-14"
+
+  - id: coupang-cap-product
+    topic: CAPABILITY
+    kind: FACT
+    title: 상품 조회는 구현되어 있으나 아직 라이브로 관측된 적이 없습니다
+    summary: >-
+      CoupangSellerProductsClient가 seller-products 목록 + 상세를 읽고, 옵션축으로 vendorItemId를
+      포함합니다. 상태는 NEEDS_VERIFICATION입니다.
+    capabilities: [PRODUCT]
+    tags: [상품, 카탈로그, 검증필요]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: docs/multi-channel-connector-roadmap.md §4.1 (Coupang/PRODUCT)
+    verifiedAt: "2026-08-21"
+
+  # ---------------------------------------------------------------- CONNECTION
+  - id: coupang-conn-credentials
+    topic: CONNECTION
+    kind: FACT
+    title: 연결에는 액세스 키·시크릿 키·업체코드 세 값이 필요합니다
+    summary: >-
+      쿠팡은 HMAC 서명 방식이며 Access Key, Secret Key, Vendor ID(업체코드) 세 값을 사용합니다.
+      OAuth가 아니므로 재동의 화면이 없습니다.
+    body: >-
+      시크릿 키는 발급 시 한 번만 표시됩니다. 놓치면 재발급해야 하고, 재발급하면 기존 키는 무효가
+      됩니다. SellerOps는 발급·재발급을 대신하지 않습니다 — 판매자가 직접 누릅니다.
+    capabilities: [ORDER_SUMMARY, INQUIRY, PRODUCT]
+    tags: [연결, 인증, hmac, 키]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: com.sellerops.connector.coupang.CoupangSigner · CredentialTemplates
+    verifiedAt: "2026-08-12"
+
+  - id: coupang-conn-expiry
+    topic: CONNECTION
+    kind: FACT
+    title: 쿠팡 오픈API 키에는 유효기간이 있습니다
+    summary: >-
+      키가 만료되면 모든 수집이 멈춥니다. 만료일은 발급 화면에서 확인할 수 있고, SellerOps는 그
+      날짜를 추정하지 않고 판매자가 확인한 값만 저장합니다.
+    body: >-
+      NAVER와 다른 점입니다 — NAVER 애플리케이션 키는 만료되지 않습니다. 쿠팡 연결이 갑자기 전부
+      실패하기 시작했다면 만료를 먼저 의심해야 합니다.
+    capabilities: [ORDER_SUMMARY, INQUIRY, PRODUCT]
+    tags: [연결, 만료, 재발급, 유효기간]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: frontend/src/lib/coupangExpiry.ts · CoupangCredentialExpiryAlert
+    verifiedAt: "2026-08-22"
+
+  - id: coupang-conn-call-ip
+    topic: CONNECTION
+    kind: FACT
+    title: 등록된 호출 IP에서만 API 요청이 허용됩니다
+    summary: >-
+      발급 화면의 'API 호출 IP'에 SellerOps 고정 IP를 등록해야 합니다. 등록하지 않으면 첫 수집이
+      실패합니다.
+    capabilities: [ORDER_SUMMARY, INQUIRY, PRODUCT]
+    tags: [ip, 호출ip, 연결오류]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: frontend/src/lib/guidedConnection/tutorial.ts (COUPANG_ISSUANCE_TUTORIAL)
+    verifiedAt: "2026-08-22"
+
+  # ---------------------------------------------------------------- NAVIGATION
+  - id: coupang-nav-open-api
+    topic: NAVIGATION
+    kind: PROCEDURE
+    title: 키는 WING의 판매자정보 → 오픈API 키 발급에서 만듭니다
+    summary: >-
+      https://wing.coupang.com/ 에서 '판매자정보'의 오픈API 키 발급 영역으로 이동하고, 연동 방식은
+      '자체개발'을 선택합니다.
+    body: >-
+      자체개발은 솔루션사(대행) 연동이 아니라 내 시스템에서 직접 호출하는 방식이며, 별도 심사 없이
+      바로 발급할 수 있습니다. 정확한 메뉴 이름은 화면 버전에 따라 다를 수 있으니 '오픈API'·'키 발급'이
+      포함된 항목을 찾으세요.
+    capabilities: [ORDER_SUMMARY, INQUIRY, PRODUCT]
+    tags: [wing, 판매자센터, 발급, 위치, 자체개발]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: frontend/src/lib/guidedConnection/tutorial.ts (COUPANG_WING_URL)
+    verifiedAt: "2026-08-12"
+
+  # ---------------------------------------------------------- STATUS_SEMANTICS
+  - id: coupang-status-order-statuses
+    topic: STATUS_SEMANTICS
+    kind: TERM
+    title: 주문 상태 6단계의 의미
+    summary: >-
+      ACCEPT(결제완료) → INSTRUCT(상품준비중) → DEPARTURE(배송지시) → DELIVERING(배송중) →
+      FINAL_DELIVERY(배송완료). NONE_TRACKING은 송장 추적이 없는 배송입니다.
+    body: >-
+      SellerOps는 매 수집마다 6개 상태를 전부 훑습니다. 한 주문은 시간이 지나며 상태가 바뀌므로,
+      "어제 조회했는데 오늘 없다"가 사라졌다는 뜻은 아닙니다 — 다른 상태로 옮겨간 것입니다.
+    capabilities: [ORDER_SUMMARY]
+    tags: [주문상태, 배송, 의미]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: com.sellerops.connector.coupang.CoupangOrdersClient.STATUSES
+    verifiedAt: "2026-08-06"
+
+  - id: coupang-status-review-rating-only
+    topic: STATUS_SEMANTICS
+    kind: FACT
+    title: 본문 없이 별점만 있는 상품평이 많습니다
+    summary: >-
+      라이브 검증한 계정에서는 상품평의 86%가 별점만이었습니다. 쿠팡이 그 자리에 찍는 안내 문장은
+      리뷰 본문으로 저장하지 않습니다.
+    body: >-
+      따라서 "리뷰 내용이 비어 있다"는 수집 실패가 아니라 실제 데이터의 모습입니다. 별점만 리뷰는
+      옵션ID를 포함한 별도 dedupe 방식(v3)을 쓰며, 같은 옵션·같은 날·같은 별점의 별점만 리뷰는
+      병합될 수 있습니다 — 알려진 한계입니다.
+    capabilities: [REVIEW]
+    tags: [리뷰, 별점, 본문없음, 중복]
+    source: LIVE_OBSERVATION
+    sourceRef: docs/coupang_review_acquisition_v1.md §6.6
+    verifiedAt: "2026-08-15"
+
+  # ------------------------------------------------------------------ GLOSSARY
+  - id: coupang-glossary-product-ids
+    topic: GLOSSARY
+    kind: TERM
+    title: sellerProductId · productId · vendorItemId는 서로 다른 층입니다
+    summary: >-
+      sellerProductId는 판매자가 등록한 상품, productId는 쿠팡이 노출하는 상품, vendorItemId는
+      옵션(변형) 단위입니다. 재고·가격은 vendorItemId 층에 있습니다.
+    body: >-
+      "이 상품 왜 판매중지야?"를 답하려면 어느 층이 멈춘 것인지 구분해야 합니다 — 옵션 하나가
+      품절인 것과 상품 전체가 판매중지인 것은 다른 상태이고, 판매자가 확인할 화면도 다릅니다.
+      SellerOps는 옵션축으로 vendorItemId를 저장합니다.
+    capabilities: [PRODUCT]
+    tags: [식별자, 상품, 옵션, vendorItemId, sellerProductId]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: com.sellerops.connector.coupang.CoupangSellerProductsClient
+    verifiedAt: "2026-08-21"
+
+  - id: coupang-glossary-shipment-box
+    topic: GLOSSARY
+    kind: TERM
+    title: shipmentBoxId는 주문이 아니라 배송 묶음입니다
+    summary: >-
+      ordersheets는 배송 묶음(shipmentBox) 단위로 돌아옵니다. 한 주문이 여러 묶음으로 나뉠 수 있어,
+      SellerOps는 shipmentBoxId로 중복을 제거합니다.
+    capabilities: [ORDER_SUMMARY]
+    tags: [식별자, 주문, 배송, shipmentBoxId]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: com.sellerops.connector.coupang.CoupangOrdersClient
+    verifiedAt: "2026-08-06"
+
+  # ----------------------------------------------------------- TROUBLESHOOTING
+  - id: coupang-trouble-all-failing
+    topic: TROUBLESHOOTING
+    kind: GUIDANCE
+    title: 쿠팡 수집이 전부 실패하면 만료 → IP → 서명 순으로 확인합니다
+    summary: >-
+      한꺼번에 전부 실패하는 것은 데이터 문제가 아니라 인증 문제입니다.
+    body: >-
+      (1) 키 유효기간이 지났는가 — 가장 흔합니다. (2) 호출 IP가 등록되어 있는가. (3) 업체코드가
+      키와 같은 계정의 것인가 — 다른 계정의 vendorId를 넣으면 서명은 만들어지지만 요청은 거부됩니다.
+      429는 호출 제한이며 잘못된 설정이 아닙니다 — 커서는 그대로 두고 다시 시도합니다.
+    capabilities: [ORDER_SUMMARY, INQUIRY, PRODUCT]
+    tags: [오류, 인증실패, 만료, 429]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: com.sellerops.connector.coupang (CoupangSigner · CoupangRateLimitedException)
+    verifiedAt: "2026-08-22"
+
+  - id: coupang-trouble-review-not-growing
+    topic: TROUBLESHOOTING
+    kind: GUIDANCE
+    title: 상품평이 늘지 않는 것은 고장이 아닙니다
+    summary: >-
+      쿠팡 상품평은 판매자가 Action Window를 열 때만 들어옵니다. 자동으로 늘어나지 않는 것이 정상입니다.
+    body: >-
+      확인할 것은 마지막 취득 시점이며, 조치는 다음 세션을 안내하는 것입니다. API 키나 IP를 확인하는
+      것은 무관합니다 — 이 경로는 API를 쓰지 않습니다.
+    capabilities: [REVIEW]
+    tags: [리뷰, 최신화, action window, freshness]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: AcquisitionPathRegistry (COUPANG/REVIEW = ACTION_WINDOW · SELLER_REPEATED)
+    verifiedAt: "2026-08-22"
+
+  # ------------------------------------------------------------------ WORKFLOW
+  - id: coupang-workflow-inquiry-reply
+    topic: WORKFLOW
+    kind: FACT
+    title: 문의 답변은 가능하고, 리뷰 답변은 불가능합니다
+    summary: >-
+      쿠팡은 상품 문의에 대한 답변 경로는 제공하지만 리뷰 답글 기능은 제공하지 않습니다. 두 가지를
+      섞으면 안 됩니다.
+    body: >-
+      SellerOps의 답변은 언제나 초안 → 사람의 승인 → 전송이며, 승인 없이 전송되는 경로는 없습니다.
+    capabilities: [INQUIRY, REVIEW]
+    tags: [문의, 답변, 리뷰, 워크플로]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: com.sellerops.inquiry.publish.CoupangChannelReplyAdapter · docs/coupang_review_feasibility_v1.md
+    verifiedAt: "2026-08-14"
+
+  # ---------------------------------------------------------------- OPERATIONS
+  - id: coupang-ops-review-policy-gate
+    topic: OPERATIONS
+    kind: GUIDANCE
+    title: 상품평 수집은 파일럿 범위에서만 허용된 제품 결정입니다
+    summary: >-
+      쿠팡 리뷰 취득은 DEVELOPMENT = PILOT_ALLOWED / GA = POLICY_GATED입니다. 판매자 본인 WING
+      화면만 사용하고, 작성자 값은 저장하지 않으며, 원본 HTML·스크린샷은 저장하지 않습니다.
+    body: >-
+      이것은 법적 확정이 아니라 제품 결정입니다. 범위를 넓히는 판단은 SellerOps가 스스로 내리지
+      않습니다. public scraping은 이용약관이 명시적으로 금지하므로 채택하지 않습니다.
+    capabilities: [REVIEW]
+    tags: [정책, 파일럿, 제한, 운영]
+    source: PRODUCT_DECISION
+    sourceRef: docs/coupang_review_policy_gate_v1.md
+    verifiedAt: "2026-08-17"
+
+  - id: coupang-ops-what-api-cannot-tell
+    topic: OPERATIONS
+    kind: GUIDANCE
+    title: API로 알 수 없는 것은 WING 화면에서 확인합니다
+    summary: >-
+      쿠팡 API로는 상품평과 리뷰 답변 가능 여부를 알 수 없습니다. 상품 노출 상태의 세부 사유도
+      API 응답만으로는 판단하지 않는 편이 안전합니다.
+    capabilities: [REVIEW, PRODUCT]
+    tags: [운영, 판단, 한계, wing]
+    source: SELLEROPS_EVIDENCE
+    sourceRef: docs/multi-channel-connector-roadmap.md §4.1
+    verifiedAt: "2026-08-22"

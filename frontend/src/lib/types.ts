@@ -528,6 +528,12 @@ export interface DataTypeCapability {
 export interface AcquisitionPathView {
   method: string; // API | ACTION_WINDOW | EXPORT | MANUAL
   verificationStatus: string; // NEEDS_VERIFICATION | LIVE_PROVEN
+  /**
+   * SCHEDULED | SELLER_REPEATED | ONE_OFF — whether anything NEW arrives by this route once history
+   * is in, and whether it needs the seller. A channel with no review API can still be fully collected,
+   * just never unattended; saying so is the difference between an honest screen and a promise.
+   */
+  recurrence?: string;
 }
 
 export interface ScopeNote {

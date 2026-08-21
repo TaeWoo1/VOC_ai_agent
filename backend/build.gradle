@@ -31,6 +31,10 @@ dependencies {
     implementation 'org.flywaydb:flyway-core'
     implementation 'org.flywaydb:flyway-database-postgresql'
 
+    // Channel Knowledge packs ship as versioned YAML resources reviewed beside the code they describe
+    // (docs/demo_org_and_channel_knowledge_v1.md). Spring Boot manages the version.
+    implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml'
+
     // File ingestion: CSV (Commons CSV) + XLSX (Apache POI)
     implementation 'org.apache.commons:commons-csv:1.11.0'
     implementation 'org.apache.poi:poi-ooxml:5.3.0'
