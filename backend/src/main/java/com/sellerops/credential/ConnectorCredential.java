@@ -43,6 +43,23 @@ public class ConnectorCredential extends BaseEntity {
     @Column(name = "encryption_key_id")
     private String encryptionKeyId;
 
+    /**
+     * Non-secret fingerprint of the master key that sealed this row (see
+     * {@code EnvelopeCipher#fingerprint}). Null on rows written before V53, which is why
+     * {@link CredentialKeyStatus#KEY_UNVERIFIABLE} exists. The key <i>id</i> alone proved unreliable:
+     * it is a label a deployment chooses, and a label can name a key that is not the key.
+     */
+    @Column(name = "encryption_key_fingerprint")
+    private String encryptionKeyFingerprint;
+
+    public String getEncryptionKeyFingerprint() {
+        return encryptionKeyFingerprint;
+    }
+
+    public void setEncryptionKeyFingerprint(String encryptionKeyFingerprint) {
+        this.encryptionKeyFingerprint = encryptionKeyFingerprint;
+    }
+
     @Column(name = "iv")
     private byte[] iv;
 

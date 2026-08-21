@@ -106,6 +106,19 @@ wait_for() {
 }
 
 cmd_up() {
+  # Keys that sealed EXISTING credentials, so a deployment whose active key has since changed can still
+  # open them instead of reporting every connection as broken. Read-only: `.env.local` still decides
+  # which key NEW credentials are written under. Skipped when the caller already set a ring, and silent
+  # when the Keychain holds nothing — a checkout with no local keys is the default posture.
+  #
+  # Not printed, ever: the ring string is master-key material. Only the ids are named.
+  if [ -z "${SELLEROPS_VAULT_KEY_RING:-}" ] && [ -x "$REPO_ROOT/tools/vault/keyring-from-keychain.sh" ]; then
+    SELLEROPS_VAULT_KEY_RING="$("$REPO_ROOT/tools/vault/keyring-from-keychain.sh" 2>/dev/null || true)"
+    if [ -n "$SELLEROPS_VAULT_KEY_RING" ]; then
+      export SELLEROPS_VAULT_KEY_RING
+      echo "backend: vault key-ring loaded from Keychain (ids: $(printf '%s' "$SELLEROPS_VAULT_KEY_RING" | tr ',' '\n' | cut -d: -f1 | paste -sd, -))"
+    fi
+  fi
   start_one backend backend ./gradlew bootRun
   # The runtime FAILS CLOSED at boot under APP_ENV=production on a file/memory store, and its spring store
   # needs the backend up — so it waits for backend health rather than racing it.

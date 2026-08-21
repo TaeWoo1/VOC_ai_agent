@@ -5,10 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sellerops.common.ApiException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.Base64;
 import java.util.Map;
 import java.util.UUID;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -33,24 +32,35 @@ import org.springframework.stereotype.Service;
 @Service
 public class CredentialVault {
 
-    static final int MASTER_KEY_LENGTH = 32;
-
     private static final TypeReference<Map<String, String>> SECRETS_TYPE = new TypeReference<>() {
     };
 
     private final ConnectorCredentialRepository credentials;
     private final ObjectMapper objectMapper;
-    private final String masterKeyBase64;
-    private final String keyId;
+    private final VaultKeyRing keyRing;
 
+    @Autowired
     public CredentialVault(ConnectorCredentialRepository credentials,
                            ObjectMapper objectMapper,
-                           @Value("${sellerops.vault.master-key-base64:}") String masterKeyBase64,
-                           @Value("${sellerops.vault.key-id:local-dev-1}") String keyId) {
+                           VaultKeyRing keyRing) {
         this.credentials = credentials;
         this.objectMapper = objectMapper;
-        this.masterKeyBase64 = masterKeyBase64;
-        this.keyId = keyId;
+        this.keyRing = keyRing;
+    }
+
+    /**
+     * Single-key construction — a vault that can open only what it writes.
+     *
+     * <p>Kept for callers that legitimately have one key and no rotation history to carry: tests, and
+     * any tool that seals and opens within one process. Production wiring uses the key-ring
+     * constructor above, because a deployment that has ever changed its key needs to open rows sealed
+     * under the old one.
+     */
+    public CredentialVault(ConnectorCredentialRepository credentials,
+                           ObjectMapper objectMapper,
+                           String masterKeyBase64,
+                           String keyId) {
+        this(credentials, objectMapper, new VaultKeyRing(masterKeyBase64, keyId, ""));
     }
 
     /**
@@ -90,7 +100,8 @@ public class CredentialVault {
         row.setAuthType(authType);
         row.setEncryptedPayload(envelope);
         row.setIv(EnvelopeCipher.payloadIv(envelope));
-        row.setEncryptionKeyId(keyId);
+        row.setEncryptionKeyId(keyRing.activeKeyId());
+        row.setEncryptionKeyFingerprint(EnvelopeCipher.fingerprint(masterKey));
         row.setTokenExpiresAt(tokenExpiresAt);
         row.setRefreshTokenEnc(refreshToken != null
                 ? EnvelopeCipher.seal(masterKey, refreshToken.getBytes(StandardCharsets.UTF_8))
@@ -119,7 +130,8 @@ public class CredentialVault {
         byte[] envelope = EnvelopeCipher.seal(masterKey, toJsonBytes(secrets));
         row.setEncryptedPayload(envelope);
         row.setIv(EnvelopeCipher.payloadIv(envelope));
-        row.setEncryptionKeyId(keyId);
+        row.setEncryptionKeyId(keyRing.activeKeyId());
+        row.setEncryptionKeyFingerprint(EnvelopeCipher.fingerprint(masterKey));
         row.setLastRotatedAt(Instant.now());
         return mask(credentials.save(row));
     }
@@ -158,13 +170,126 @@ public class CredentialVault {
      */
     public DecryptedCredential open(UUID orgId, UUID sellerAccountId) {
         ConnectorCredential row = load(orgId, sellerAccountId);
-        byte[] masterKey = masterKey();
-        Map<String, String> secrets = fromJsonBytes(EnvelopeCipher.open(masterKey, row.getEncryptedPayload()));
-        String refreshToken = row.getRefreshTokenEnc() != null
-                ? new String(EnvelopeCipher.open(masterKey, row.getRefreshTokenEnc()), StandardCharsets.UTF_8)
-                : null;
+        byte[] masterKey = openingKey(row);
+        Map<String, String> secrets;
+        String refreshToken;
+        try {
+            secrets = fromJsonBytes(EnvelopeCipher.open(masterKey, row.getEncryptedPayload()));
+            refreshToken = row.getRefreshTokenEnc() != null
+                    ? new String(EnvelopeCipher.open(masterKey, row.getRefreshTokenEnc()), StandardCharsets.UTF_8)
+                    : null;
+        } catch (IllegalStateException e) {
+            // The key material we hold for this row's id is the right key by fingerprint (openingKey
+            // proved that), so a failure here is about the stored bytes, not the key. Saying so is
+            // the difference between "re-enter the credential" and a fruitless key hunt.
+            throw new CredentialUnavailableException(CredentialKeyStatus.INVALID_CREDENTIAL,
+                    row.getEncryptionKeyId(),
+                    "저장된 자격 증명을 복호화할 수 없습니다 (키는 일치하지만 저장된 값이 손상되었습니다). 자격 증명을 다시 입력해 주세요.");
+        }
         return new DecryptedCredential(
                 row.getConnectorClass(), row.getAuthType(), secrets, refreshToken, row.getTokenExpiresAt());
+    }
+
+    /**
+     * What can be said about a stored credential without decrypting it — the operational answer to
+     * "why is this connection failing?".
+     *
+     * <p>Deliberately cheap and side-effect free: it resolves key material and compares fingerprints,
+     * and only attempts a decryption for rows too old to carry one. A troubleshooting surface, a
+     * connection page, or an operator can call it freely without touching secret material.
+     */
+    public CredentialDiagnosis diagnose(UUID orgId, UUID sellerAccountId) {
+        ConnectorCredential row = credentials.findByOrgIdAndSellerAccountId(orgId, sellerAccountId)
+                .orElse(null);
+        if (row == null) {
+            return diagnosis(CredentialKeyStatus.NO_CREDENTIAL, null, null, null, null, null,
+                    "이 계정에 저장된 자격 증명이 없습니다. 채널 연결을 먼저 완료해 주세요.");
+        }
+        String rowKeyId = row.getEncryptionKeyId();
+        String sealed = row.getEncryptionKeyFingerprint();
+        if (keyRing.isEmpty()) {
+            return diagnosis(CredentialKeyStatus.NO_KEY_CONFIGURED, rowKeyId, sealed, null,
+                    row.getLastRotatedAt(), row.getTokenExpiresAt(),
+                    "이 서버에 자격 증명 마스터 키가 설정되어 있지 않습니다 (SELLEROPS_VAULT_MASTER_KEY). "
+                            + "서버 설정 문제이며, 셀러가 다시 연결할 필요는 없습니다.");
+        }
+        byte[] available = keyRing.keyFor(rowKeyId).orElse(null);
+        if (available == null) {
+            return diagnosis(CredentialKeyStatus.KEY_NOT_AVAILABLE, rowKeyId, sealed, null,
+                    row.getLastRotatedAt(), row.getTokenExpiresAt(),
+                    "이 자격 증명은 키 '" + rowKeyId + "' 로 봉인되어 있으나 현재 서버에는 그 키가 없습니다. "
+                            + "해당 키를 sellerops.vault.key-ring 에 등록하면 그대로 복구됩니다. "
+                            + "설정 문제이며, 셀러가 다시 연결할 필요는 없습니다.");
+        }
+        String availableFp = EnvelopeCipher.fingerprint(available);
+        if (sealed != null && !sealed.equals(availableFp)) {
+            return diagnosis(CredentialKeyStatus.KEY_MISMATCH, rowKeyId, sealed, availableFp,
+                    row.getLastRotatedAt(), row.getTokenExpiresAt(),
+                    "이 자격 증명은 키 '" + rowKeyId + "' 라는 이름으로 저장되어 있지만, 현재 그 이름의 키는 "
+                            + "봉인에 쓰인 키가 아닙니다 (지문 " + sealed + " ≠ " + availableFp + "). "
+                            + "원래 키를 찾아 key-ring 에 등록하거나, 셀러가 채널을 다시 연결해야 합니다.");
+        }
+        if (sealed == null) {
+            // Pre-V53 row: the only way to tell a wrong key from a damaged payload is to try.
+            try {
+                EnvelopeCipher.open(available, row.getEncryptedPayload());
+            } catch (IllegalStateException e) {
+                return diagnosis(CredentialKeyStatus.KEY_UNVERIFIABLE, rowKeyId, null, availableFp,
+                        row.getLastRotatedAt(), row.getTokenExpiresAt(),
+                        "이 자격 증명은 키 지문이 기록되기 전에 저장되어, 키가 틀린 것인지 값이 손상된 것인지 "
+                                + "구분할 수 없습니다. 다른 마스터 키를 key-ring 에 등록해 보거나, 채널을 다시 연결해 주세요.");
+            }
+        }
+        return diagnosis(CredentialKeyStatus.OK, rowKeyId, sealed, availableFp,
+                row.getLastRotatedAt(), row.getTokenExpiresAt(), null);
+    }
+
+    private CredentialDiagnosis diagnosis(CredentialKeyStatus status, String rowKeyId, String sealedFp,
+                                          String availableFp, Instant lastRotatedAt,
+                                          Instant tokenExpiresAt, String remedy) {
+        return new CredentialDiagnosis(status, rowKeyId, keyRing.activeKeyId(), sealedFp, availableFp,
+                lastRotatedAt, tokenExpiresAt, remedy);
+    }
+
+    /**
+     * The master key that can open {@code row}, or a classified failure saying why none can.
+     *
+     * <p>Resolution is by the row's own key id, not by whatever this runtime happens to write with.
+     * That is the correction: the column was written from the first release and consulted by nothing,
+     * so a key change turned every stored credential into an unopenable blob whose error message
+     * blamed the credential.
+     */
+    private byte[] openingKey(ConnectorCredential row) {
+        if (keyRing.isEmpty()) {
+            throw new CredentialUnavailableException(CredentialKeyStatus.NO_KEY_CONFIGURED,
+                    row.getEncryptionKeyId(),
+                    "자격 증명 저장소 마스터 키가 설정되지 않았습니다 (SELLEROPS_VAULT_MASTER_KEY).");
+        }
+        String rowKeyId = row.getEncryptionKeyId();
+        byte[] key = keyRing.keyFor(rowKeyId).orElseThrow(() ->
+                new CredentialUnavailableException(CredentialKeyStatus.KEY_NOT_AVAILABLE, rowKeyId,
+                        "자격 증명이 키 '" + rowKeyId + "' 로 봉인되어 있으나 이 서버에 해당 키가 없습니다. "
+                                + "사용 가능한 키: " + keyRing.knownKeyIds()));
+        String sealed = row.getEncryptionKeyFingerprint();
+        if (sealed != null) {
+            String availableFp = EnvelopeCipher.fingerprint(key);
+            if (!sealed.equals(availableFp)) {
+                throw new CredentialUnavailableException(CredentialKeyStatus.KEY_MISMATCH, rowKeyId,
+                        "키 '" + rowKeyId + "' 의 현재 값은 이 자격 증명을 봉인한 키가 아닙니다 "
+                                + "(지문 " + sealed + " ≠ " + availableFp + ").");
+            }
+            return key;
+        }
+        // Pre-V53 row carrying no fingerprint: try, and if it fails say honestly that the cause
+        // cannot be narrowed rather than blaming the stored value.
+        try {
+            EnvelopeCipher.open(key, row.getEncryptedPayload());
+            return key;
+        } catch (IllegalStateException e) {
+            throw new CredentialUnavailableException(CredentialKeyStatus.KEY_UNVERIFIABLE, rowKeyId,
+                    "자격 증명을 열 수 없습니다. 이 자격 증명은 키 지문 기록 이전에 저장되어 키 불일치와 값 손상을 "
+                            + "구분할 수 없습니다 (키 id '" + rowKeyId + "').");
+        }
     }
 
     private ConnectorCredential load(UUID orgId, UUID sellerAccountId) {
@@ -185,22 +310,15 @@ public class CredentialVault {
                 row.getRefreshTokenEnc() != null);
     }
 
-    /** Fail closed: vault operations are unavailable until a key is configured. */
+    /**
+     * The active key, used for writes only. Fail closed: vault writes are unavailable until a key is
+     * configured. Reads resolve through {@link #openingKey} instead — a credential must be opened
+     * with the key that sealed it, which is not necessarily the one being written with today.
+     */
     private byte[] masterKey() {
-        if (masterKeyBase64 == null || masterKeyBase64.isBlank()) {
-            throw new IllegalStateException(
-                    "자격 증명 저장소 마스터 키가 설정되지 않았습니다 (SELLEROPS_VAULT_MASTER_KEY).");
-        }
-        byte[] key;
-        try {
-            key = Base64.getDecoder().decode(masterKeyBase64);
-        } catch (IllegalArgumentException e) {
-            throw new IllegalStateException("마스터 키가 올바른 base64 형식이 아닙니다.");
-        }
-        if (key.length != MASTER_KEY_LENGTH) {
-            throw new IllegalStateException("마스터 키는 32바이트(AES-256)여야 합니다.");
-        }
-        return key;
+        return keyRing.activeKey().orElseThrow(() -> new CredentialUnavailableException(
+                CredentialKeyStatus.NO_KEY_CONFIGURED, keyRing.activeKeyId(),
+                "자격 증명 저장소 마스터 키가 설정되지 않았습니다 (SELLEROPS_VAULT_MASTER_KEY)."));
     }
 
     private byte[] toJsonBytes(Map<String, String> secrets) {

@@ -2,6 +2,8 @@ package com.sellerops.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.sellerops.common.SyntheticDataVisibility;
+
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.order.OrderDailySummaryRepository;
@@ -57,15 +59,54 @@ class MockDataSeederTest {
         assertThat(orderSummaries.count()).isZero();
     }
 
+    /**
+     * A demo deployment both writes synthetic content and shows it — one flag decides both, because
+     * a deployment that seeds demo data and then hides it is a configuration that means nothing.
+     *
+     * <p>The override is needed only here: this test builds the seeder by hand rather than from
+     * configuration, so the two halves of that single flag have to be set separately. In a running
+     * app both read {@code sellerops.seed.demo-content} and cannot disagree.
+     */
     @Test
-    void demoContentOn_seedsContent() {
-        seeder(true, true).run(null);
+    void demoContentOn_seedsContentAndShowsIt() {
+        SyntheticDataVisibility.overrideForTest(true);
+        try {
+            seeder(true, true).run(null);
 
-        assertThat(organizations.count()).isEqualTo(1);
-        assertThat(products.count()).isGreaterThan(0);
-        assertThat(reviews.count()).isGreaterThan(0);
-        assertThat(inquiries.count()).isGreaterThan(0);
-        assertThat(orderSummaries.count()).isGreaterThan(0);
+            assertThat(organizations.count()).isEqualTo(1);
+            assertThat(products.count()).isGreaterThan(0);
+            assertThat(reviews.count()).isGreaterThan(0);
+            assertThat(inquiries.count()).isGreaterThan(0);
+            assertThat(orderSummaries.count()).isGreaterThan(0);
+        } finally {
+            SyntheticDataVisibility.overrideForTest(false);
+        }
+    }
+
+    /**
+     * The other half, and the one that matters for the canonical demo org: seeded rows are written
+     * and then simply not part of what an ordinary read returns. They are still there — this is a
+     * projection, not a delete — which {@code findById} and the audit surfaces rely on.
+     */
+    @Test
+    void seededContentIsInvisibleToOrdinaryReadsWhenSyntheticIsHidden() {
+        SyntheticDataVisibility.overrideForTest(true);
+        try {
+            seeder(true, true).run(null);
+        } finally {
+            SyntheticDataVisibility.overrideForTest(false);
+        }
+
+        assertThat(reviews.count()).isZero();
+        assertThat(inquiries.count()).isZero();
+        assertThat(orderSummaries.count()).isZero();
+        // Still on disk, and still reachable when a deployment asks for them.
+        SyntheticDataVisibility.overrideForTest(true);
+        try {
+            assertThat(reviews.count()).isGreaterThan(0);
+        } finally {
+            SyntheticDataVisibility.overrideForTest(false);
+        }
     }
 
     @Test

@@ -1,9 +1,14 @@
 package com.sellerops.itemanalysis;
 
 import com.sellerops.common.BaseEntity;
+import com.sellerops.common.DataOrigin;
+import com.sellerops.common.RealDataOnly;
 import jakarta.persistence.Column;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.EnumType;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.Filter;
 import java.util.UUID;
 import lombok.Getter;
 import lombok.Setter;
@@ -21,7 +26,25 @@ import lombok.Setter;
 @Setter
 @Entity
 @Table(name = "item_analyses")
+@Filter(name = RealDataOnly.NAME, condition = RealDataOnly.CONDITION)
 public class ItemAnalysis extends BaseEntity {
+    /**
+     * Inherited from the row this was derived from — a verdict about synthetic text is itself
+     * synthetic. Kept as a column rather than resolved by a join because {@code sourceId} is a
+     * polymorphic reference with no foreign key, so there is no single source table to join to.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "data_origin", nullable = false)
+    private DataOrigin dataOrigin = DataOrigin.REAL;
+
+    public DataOrigin getDataOrigin() {
+        return dataOrigin;
+    }
+
+    public void setDataOrigin(DataOrigin dataOrigin) {
+        this.dataOrigin = dataOrigin;
+    }
+
 
     @Column(name = "org_id", nullable = false)
     private UUID orgId;

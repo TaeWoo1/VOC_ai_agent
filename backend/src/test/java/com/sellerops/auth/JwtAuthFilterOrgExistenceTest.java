@@ -43,6 +43,8 @@ class JwtAuthFilterOrgExistenceTest {
 
     @Autowired MockMvc mockMvc;
     @MockBean SellerAccountService sellerAccounts;
+    // The controller now also serves credential diagnosis; this slice tests auth, not the vault.
+    @MockBean com.sellerops.credential.CredentialVault credentialVault;
     @MockBean JwtTokenProvider tokenProvider;
     @MockBean OrganizationRepository organizations;
 

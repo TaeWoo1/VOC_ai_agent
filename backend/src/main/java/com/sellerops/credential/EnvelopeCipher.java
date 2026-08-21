@@ -1,9 +1,12 @@
 package com.sellerops.credential;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
+import java.util.Base64;
 import javax.crypto.Cipher;
+import javax.crypto.Mac;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
@@ -30,6 +33,9 @@ final class EnvelopeCipher {
     private static final int WRAPPED_DEK_LENGTH = DEK_LENGTH + GCM_TAG_BITS / 8;
     private static final int HEADER_LENGTH = 1 + IV_LENGTH + WRAPPED_DEK_LENGTH + IV_LENGTH;
     private static final String TRANSFORMATION = "AES/GCM/NoPadding";
+    /** Fixed so a fingerprint depends on the key alone; versioned so the scheme can change. */
+    private static final String FINGERPRINT_LABEL = "sellerops-vault-key-fingerprint-v1";
+    private static final int FINGERPRINT_BYTES = 16;
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
@@ -77,6 +83,32 @@ final class EnvelopeCipher {
             return gcm(Cipher.DECRYPT_MODE, dek, payloadIv, ciphertext);
         } catch (GeneralSecurityException e) {
             throw new IllegalStateException("자격 증명 복호화에 실패했습니다.", e);
+        }
+    }
+
+    /**
+     * A short, non-secret identifier for a master key: HMAC-SHA256 of a fixed label under the key,
+     * base64url-encoded and truncated.
+     *
+     * <p>This is what lets the vault say "sealed under a different key" instead of "decryption
+     * failed". Comparing two fingerprints answers "same key?" definitively and without attempting a
+     * decryption, so the verdict is proof rather than inference from a GCM failure — which cannot
+     * tell a wrong key from a damaged payload.
+     *
+     * <p>Safe to store, log, and show a seller: HMAC is one-way, the label is constant so no chosen
+     * input is possible, and the truncation to 128 bits leaves collision resistance far beyond what
+     * distinguishing a handful of local keys requires. It identifies a key; it carries none of it.
+     */
+    static String fingerprint(byte[] masterKey) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(masterKey, "HmacSHA256"));
+            byte[] full = mac.doFinal(FINGERPRINT_LABEL.getBytes(StandardCharsets.UTF_8));
+            byte[] truncated = new byte[FINGERPRINT_BYTES];
+            System.arraycopy(full, 0, truncated, 0, FINGERPRINT_BYTES);
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(truncated);
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException("키 지문 계산에 실패했습니다.", e);
         }
     }
 

@@ -25,6 +25,7 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import com.sellerops.common.DataOrigin;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -206,6 +207,7 @@ public class MockDataSeeder implements ApplicationRunner {
             Channel c = chans.get(i % chans.size());
             boolean neg = (i % 4 == 0);
             Review r = new Review();
+            r.setDataOrigin(DataOrigin.DEMO_SEED);
             r.setOrgId(orgId);
             r.setChannelId(c.getId());
             r.setProductId(p.getId());
@@ -232,6 +234,7 @@ public class MockDataSeeder implements ApplicationRunner {
             Product p = productList.get(i % productList.size());
             Channel c = chans.get(i % chans.size());
             Inquiry q = new Inquiry();
+            q.setDataOrigin(DataOrigin.DEMO_SEED);
             q.setOrgId(orgId);
             q.setChannelId(c.getId());
             q.setProductId(p.getId());
@@ -254,6 +257,7 @@ public class MockDataSeeder implements ApplicationRunner {
                 int base = 18 + ((d * 3 + ci * 7) % 24);
                 long unitPrice = 12_900L + ci * 3_000L;
                 OrderDailySummary s = new OrderDailySummary();
+                s.setDataOrigin(DataOrigin.DEMO_SEED);
                 s.setOrgId(orgId);
                 s.setChannelId(c.getId());
                 s.setSummaryDate(date);

@@ -44,7 +44,7 @@ class CredentialVaultTest {
     }
 
     private static String randomKeyBase64() {
-        byte[] key = new byte[CredentialVault.MASTER_KEY_LENGTH];
+        byte[] key = new byte[32]; // AES-256 master key
         new SecureRandom().nextBytes(key);
         return Base64.getEncoder().encodeToString(key);
     }
@@ -205,18 +205,26 @@ class CredentialVaultTest {
         assertThat(credentials.count()).isZero();
     }
 
+    /**
+     * A key of the wrong size stops construction, not the first write.
+     *
+     * <p>The timing moved deliberately. A malformed key is a configuration typo, and letting the
+     * process boot on one only defers the discovery to whenever a credential is next touched — which
+     * on this system means a scheduled sync at 3am reporting a credential problem that is nothing of
+     * the kind. An UNSET key still boots (see {@link #missingMasterKeyFailsClosedWithoutWriting}),
+     * because running without credentials is a legitimate configuration; a mistyped one is not.
+     */
     @Test
-    void wrongSizedMasterKeyIsRejected() {
-        CredentialVault shortKey = vaultWithKey(Base64.getEncoder().encodeToString(new byte[16]));
-        assertThatThrownBy(() -> shortKey.store(org, account, "API", "HMAC", secrets, null, null, null))
+    void wrongSizedMasterKeyIsRejectedAtConstruction() {
+        assertThatThrownBy(() -> vaultWithKey(Base64.getEncoder().encodeToString(new byte[16])))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("32바이트");
+        assertThat(credentials.count()).isZero();
     }
 
     @Test
-    void malformedBase64MasterKeyFailsClosed() {
-        CredentialVault garbled = vaultWithKey("not-base64!!!");
-        assertThatThrownBy(() -> garbled.store(org, account, "API", "HMAC", secrets, null, null, null))
+    void malformedBase64MasterKeyFailsClosedAtConstruction() {
+        assertThatThrownBy(() -> vaultWithKey("not-base64!!!"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("base64");
         assertThat(credentials.count()).isZero();
