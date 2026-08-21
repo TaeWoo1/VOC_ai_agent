@@ -8,6 +8,7 @@ import com.sellerops.channel.ChannelRepository;
 import com.sellerops.channel.ChannelStatus;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
+import com.sellerops.inquiry.lifecycle.InquiryOperationalStateProjector;
 import com.sellerops.inquiry.workitem.InquiryWorkItem;
 import com.sellerops.inquiry.workitem.InquiryWorkItemAudit;
 import com.sellerops.inquiry.workitem.InquiryWorkItemAuditRepository;
@@ -69,7 +70,8 @@ class InquiryWorkItemDismissalRollbackTest {
     @Test
     void batchTransitionsAndAuditsRollBackTogetherOnOneItemFailure() {
         InquiryWorkItemDismissalService service = new InquiryWorkItemDismissalService(
-                workItems, audits, batches, accounts, channels, txManager);
+                workItems, inquiries, new InquiryOperationalStateProjector(),
+                audits, batches, accounts, channels, txManager);
 
         UUID org = UUID.randomUUID();
         Channel cafe24 = new Channel();

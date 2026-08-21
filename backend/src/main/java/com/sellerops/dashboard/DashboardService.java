@@ -50,7 +50,9 @@ public class DashboardService {
         LocalDate today = LocalDate.now();
 
         // Secret (비밀글) inquiries are worked in the queue but excluded from dashboard
-        // aggregates; a null flag (non-Cafe24 / legacy) counts as non-secret.
+        // aggregates; a null flag (non-Cafe24 / legacy) counts as non-secret. Inquiries the seller
+        // dismissed (disposition SPAM) are excluded too — the repository carries that predicate, so
+        // 홈, Today Inbox, the report and the Operator all count the same corpus.
         long unanswered = inquiries.countByOrgIdAndStatusExcludingSecret(orgId, "UNANSWERED");
         long negative = reviews.countByOrgIdAndNegativeTrue(orgId);
 

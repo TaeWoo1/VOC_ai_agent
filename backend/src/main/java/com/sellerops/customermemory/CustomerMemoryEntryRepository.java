@@ -12,6 +12,31 @@ import org.springframework.data.repository.query.Param;
 
 public interface CustomerMemoryEntryRepository extends JpaRepository<CustomerMemoryEntry, UUID> {
 
+    /**
+     * The predicate that keeps a dismissed inquiry out of <b>current</b> retrieval while its entry
+     * stays in the index.
+     *
+     * <p>Memory is history, and history is not rewritten here — the 3,201 entries this org holds for
+     * Cafe24 board-6 spam are not deleted by anything in this package. What changes is what a
+     * <em>current</em> question is allowed to answer from: "what are customers repeatedly asking" must
+     * not be answered out of posts the seller already dismissed as spam. Before this, the demo org's
+     * largest "repeat" was 기타 with 1,779 occurrences, every one of them a spam board post.
+     *
+     * <p><b>Expressed as a subquery on the inquiry, not as a flag on the entry.</b> A copy of the
+     * exclusion here would be a second place to be wrong about it, and the two would drift the first
+     * time a dismissal was reversed. The inquiry's {@code operational_state} is the projection; this
+     * reads it. Review entries are unaffected — the guard only applies to the INQUIRY axis.
+     *
+     * <p><b>Written as "not exists an excluded source", not "exists an active source".</b> The two
+     * differ only for an entry whose inquiry row is gone, and there the second form would drop the
+     * entry — turning a missing row into evidence of a dismissal that was never made. Absence of the
+     * record is not the record, which is the same rule that keeps a null {@code is_secret} visible.
+     */
+    String ACTIVE_SOURCE = " and not exists (select 1 from com.sellerops.inquiry.Inquiry q "
+            + "where q.id = e.sourceId "
+            + "and e.entryKind = com.sellerops.customermemory.CustomerMemoryKind.INQUIRY "
+            + "and q.operationalState <> com.sellerops.inquiry.InquiryOperationalState.ACTIVE) ";
+
     /** The idempotency probe behind re-indexing: one entry per source row. */
     Optional<CustomerMemoryEntry> findByOrgIdAndEntryKindAndSourceId(
             UUID orgId, CustomerMemoryKind entryKind, UUID sourceId);
@@ -35,6 +60,7 @@ public interface CustomerMemoryEntryRepository extends JpaRepository<CustomerMem
                     (:signatureKey is not null and e.signatureKey = :signatureKey)
                  or (:topic is not null and e.topic = :topic)
               )
+            """ + ACTIVE_SOURCE + """
             order by e.occurredOn desc, e.id asc
             """)
     List<CustomerMemoryEntry> findCandidates(@Param("orgId") UUID orgId,
@@ -57,6 +83,7 @@ public interface CustomerMemoryEntryRepository extends JpaRepository<CustomerMem
               and e.entryKind = com.sellerops.customermemory.CustomerMemoryKind.INQUIRY
               and e.signatureKey is not null
               and e.occurredOn between :fromInclusive and :toInclusive
+            """ + ACTIVE_SOURCE + """
             group by e.signatureKey
             order by count(e) desc, e.signatureKey asc
             """)
@@ -83,6 +110,7 @@ public interface CustomerMemoryEntryRepository extends JpaRepository<CustomerMem
               and e.topic is not null
               and e.topic <> :fallbackTopic
               and e.occurredOn between :fromInclusive and :toInclusive
+            """ + ACTIVE_SOURCE + """
             group by e.topic
             order by count(e) desc, e.topic asc
             """)
@@ -92,8 +120,14 @@ public interface CustomerMemoryEntryRepository extends JpaRepository<CustomerMem
                                          @Param("fallbackTopic") String fallbackTopic);
 
     /** Entries for one product — the ProductOps read. Newest first, bounded by the caller. */
+    @Query("""
+            select e from CustomerMemoryEntry e
+            where e.orgId = :orgId and e.productId = :productId
+            """ + ACTIVE_SOURCE + """
+            order by e.occurredOn desc, e.id asc
+            """)
     List<CustomerMemoryEntry> findByOrgIdAndProductIdOrderByOccurredOnDesc(
-            UUID orgId, UUID productId, Pageable pageable);
+            @Param("orgId") UUID orgId, @Param("productId") UUID productId, Pageable pageable);
 
     /**
      * Indexed inquiries that actually carry a signature — the rubric's recall numerator.
@@ -106,12 +140,18 @@ public interface CustomerMemoryEntryRepository extends JpaRepository<CustomerMem
             where e.orgId = :orgId
               and e.entryKind = com.sellerops.customermemory.CustomerMemoryKind.INQUIRY
               and e.signatureKey is not null
+            """ + ACTIVE_SOURCE + """
             """)
     long countSignedInquiries(@Param("orgId") UUID orgId);
 
     /** How many entries of a kind this org has indexed at all — the coverage denominator. */
-    long countByOrgIdAndEntryKind(UUID orgId, CustomerMemoryKind entryKind);
+    @Query("select count(e) from CustomerMemoryEntry e where e.orgId = :orgId "
+            + "and e.entryKind = :entryKind" + ACTIVE_SOURCE)
+    long countByOrgIdAndEntryKind(@Param("orgId") UUID orgId, @Param("entryKind") CustomerMemoryKind entryKind);
 
     /** How many of them carry no product link — the coverage numerator ProductOps must report. */
-    long countByOrgIdAndEntryKindAndProductIdIsNull(UUID orgId, CustomerMemoryKind entryKind);
+    @Query("select count(e) from CustomerMemoryEntry e where e.orgId = :orgId "
+            + "and e.entryKind = :entryKind and e.productId is null" + ACTIVE_SOURCE)
+    long countByOrgIdAndEntryKindAndProductIdIsNull(@Param("orgId") UUID orgId,
+                                                    @Param("entryKind") CustomerMemoryKind entryKind);
 }

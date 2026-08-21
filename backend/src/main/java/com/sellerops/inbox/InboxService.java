@@ -54,14 +54,18 @@ public class InboxService {
     public InboxResponse inbox(UUID orgId, String type, int limit) {
         int size = Math.max(1, Math.min(MAX_LIMIT, limit));
         List<FeedItem> items = recentFeed(orgId, size, true, type);
-        // Counted, not derived from the capped rows: the number is the same however few rows a page asked for.
+        // Counted, not derived from the capped rows: the number is the same however few rows a page
+        // asked for. Seller-dismissed inquiries are not counted — the repository carries that predicate
+        // (see InquiryRepository.ACTIVE), so this is the same corpus 홈 and the report count.
         long unanswered = inquiries.countByOrgIdAndStatus(orgId, "UNANSWERED");
         return new InboxResponse(items, items.size(), unanswered);
     }
 
     @Transactional(readOnly = true)
     public List<FeedItem> recentFeed(UUID orgId, int limit) {
-        // The inbox work queue keeps secret (비밀글) inquiries — the seller still works them.
+        // The inbox work queue keeps secret (비밀글) inquiries — the seller still works them. It does
+        // NOT keep dismissed ones: those are work the seller decided not to do, and the feed is a list
+        // of work. The exclusion lives in the repository read, not here.
         return recentFeed(orgId, limit, true);
     }
 

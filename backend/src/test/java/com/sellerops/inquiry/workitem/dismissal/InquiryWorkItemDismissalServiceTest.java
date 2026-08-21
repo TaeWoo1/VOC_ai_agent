@@ -9,6 +9,7 @@ import com.sellerops.channel.ChannelStatus;
 import com.sellerops.common.ApiException;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
+import com.sellerops.inquiry.lifecycle.InquiryOperationalStateProjector;
 import com.sellerops.inquiry.workitem.InquiryWorkItem;
 import com.sellerops.inquiry.workitem.InquiryWorkItemAudit;
 import com.sellerops.inquiry.workitem.InquiryWorkItemAuditRepository;
@@ -70,7 +71,8 @@ class InquiryWorkItemDismissalServiceTest {
     @BeforeEach
     void setUp() {
         service = new InquiryWorkItemDismissalService(
-                workItems, audits, batches, accounts, channels, txManager);
+                workItems, inquiries, new InquiryOperationalStateProjector(),
+                audits, batches, accounts, channels, txManager);
         cafe24ChannelId = channel("CAFE24", "카페24").getId();
         esmChannelId = channel("GMARKET", "ESM").getId();
         cafe24Account = account(org, cafe24ChannelId).getId();

@@ -305,6 +305,27 @@ The seam (smallest safe, zero churn to other connectors):
   `request.limit()` contract, widening the blast radius beyond this slice. A long
   range simply pages internally at 50 under the `MAX_PAGES` guard.
 
+### Cursor lanes — amended 2026-08-22
+
+Everything below about seeding a window still holds, with one correction that changes what a backfill
+means for ongoing collection.
+
+**The seed no longer lands in the routine cursor.** `sync_cursors` now carries two keys per
+(org, account, data type): `primary` is routine collection's place, `backfill` is a historical run's.
+`SyncRunExecutor` picks the lane by whether the run carries a seed, and the invariant is that **a
+historical backfill must never redefine the starting cursor or window of routine collection**.
+
+Why it changed: the single slot meant a one-off `[2025-03-23, 2025-03-25]` backfill became the permanent
+definition of where routine collection starts, because nothing cleared the window afterwards. Found live
+on the demo org's Cafe24 account — INQUIRY parked at `b6:o2:s2025-03-23:e2025-03-25` with an hourly
+schedule enabled, so 3,201 inquiries collected on 2026-07-06 were never re-observed once and no
+reply-status change on any of them could land. **V52** moves existing windowed `primary` values into the
+backfill lane and clears the routine one. Full record: `docs/inquiry_operational_truth_v1.md` §3.
+
+The consequence for the design below: a re-seeded trailing overlap window is still the mechanism for
+catching up on a range, but it is now a **backfill-lane** operation and does not move routine progress.
+Routine incremental (a per-board high-water mark) remains unwired, exactly as stated below.
+
 ### Incremental sync (design)
 
 Incremental re-uses the **same mechanism**: re-seed a **trailing overlap window**

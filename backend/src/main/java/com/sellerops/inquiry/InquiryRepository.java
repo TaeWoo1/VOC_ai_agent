@@ -10,26 +10,67 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
-    List<Inquiry> findTop50ByOrgIdOrderByReceivedAtDesc(UUID orgId);
 
-    /** Newest first, caller-sized — the inbox feed's read (product assembly A4). */
-    List<Inquiry> findByOrgIdOrderByReceivedAtDesc(UUID orgId, org.springframework.data.domain.Pageable pageable);
+    /**
+     * The predicate every <b>current operational truth</b> read carries.
+     *
+     * <p>An inquiry the seller dismissed as spam is not work, so it is not counted as work — not on 홈,
+     * not in the Today Inbox, not in a product's signals, not in repeat analysis, not in item analysis,
+     * and not in an Operator finding. The decision itself lives on the work item; this is the
+     * projection of it ({@link InquiryOperationalState}).
+     *
+     * <p><b>Three kinds of read deliberately do NOT carry it.</b> Dedup keys
+     * ({@code existsByOrgIdAndChannelId…}, {@code findByOrgIdAndChannelIdAndExternalId}) must see every
+     * stored row or a re-collected spam post would insert a second copy of itself on every sweep.
+     * Id-driven reads ({@code findAllById}) are given their ids by a caller that has already decided
+     * what it is asking about. And historical/audit reads keep the whole corpus by design — exclusion
+     * is a state, never a delete.
+     */
+    String ACTIVE = " and q.operationalState = com.sellerops.inquiry.InquiryOperationalState.ACTIVE ";
 
-    long countByOrgIdAndReceivedAtAfter(UUID orgId, Instant after);
+    /** Newest first, caller-sized — the item-analysis sweep's read. Current truth only. */
+    @Query("select q from Inquiry q where q.orgId = :orgId" + ACTIVE + "order by q.receivedAt desc, q.id asc")
+    List<Inquiry> findRecentActive(@Param("orgId") UUID orgId, Pageable pageable);
 
-    long countByOrgIdAndStatus(UUID orgId, String status);
+    /**
+     * The 50 newest active inquiries. Kept as a name rather than a Pageable at every call site because
+     * the 50 is the analyzer's per-pass budget, not the caller's choice.
+     */
+    default List<Inquiry> findTop50ByOrgIdOrderByReceivedAtDesc(UUID orgId) {
+        return findRecentActive(orgId, org.springframework.data.domain.PageRequest.of(0, 50));
+    }
+
+    /** Newest first, caller-sized — the inbox feed's read (product assembly A4). Current truth only. */
+    @Query("select q from Inquiry q where q.orgId = :orgId" + ACTIVE + "order by q.receivedAt desc, q.id asc")
+    List<Inquiry> findByOrgIdOrderByReceivedAtDesc(@Param("orgId") UUID orgId, Pageable pageable);
+
+    @Query("select count(q) from Inquiry q where q.orgId = :orgId and q.receivedAt > :after" + ACTIVE)
+    long countByOrgIdAndReceivedAtAfter(@Param("orgId") UUID orgId, @Param("after") Instant after);
+
+    @Query("select count(q) from Inquiry q where q.orgId = :orgId and q.status = :status" + ACTIVE)
+    long countByOrgIdAndStatus(@Param("orgId") UUID orgId, @Param("status") String status);
 
     /** Inquiries linked to one product. Org-scoped in the query — {@code product_id} is a bare FK. */
-    long countByOrgIdAndProductId(UUID orgId, UUID productId);
+    @Query("select count(q) from Inquiry q where q.orgId = :orgId and q.productId = :productId" + ACTIVE)
+    long countByOrgIdAndProductId(@Param("orgId") UUID orgId, @Param("productId") UUID productId);
 
     /** Inquiries linked to one product and still in a status (e.g. UNANSWERED). */
-    long countByOrgIdAndProductIdAndStatus(UUID orgId, UUID productId, String status);
+    @Query("select count(q) from Inquiry q where q.orgId = :orgId and q.productId = :productId "
+            + "and q.status = :status" + ACTIVE)
+    long countByOrgIdAndProductIdAndStatus(@Param("orgId") UUID orgId, @Param("productId") UUID productId,
+                                           @Param("status") String status);
 
     /**
      * Inquiries this org holds that carry no product link — the denominator behind
      * {@code UNCERTAIN_PRODUCT_UNLINKED} on the inquiry axis.
      */
-    long countByOrgIdAndProductIdIsNull(UUID orgId);
+    @Query("select count(q) from Inquiry q where q.orgId = :orgId and q.productId is null" + ACTIVE)
+    long countByOrgIdAndProductIdIsNull(@Param("orgId") UUID orgId);
+
+    /** Ids in one operational state — the projection backfill's reversal candidates. */
+    @Query("select q.id from Inquiry q where q.orgId = :orgId and q.operationalState = :state")
+    List<UUID> findIdsByOrgIdAndOperationalState(@Param("orgId") UUID orgId,
+                                                 @Param("state") InquiryOperationalState state);
 
     /**
      * Every inquiry in a stable total order — the paging primitive behind a bounded corpus pass.
@@ -38,17 +79,17 @@ public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
      * same reason: without a total order successive pages can revisit rows while others are never
      * reached, and a resumable batch that never converges is worse than no batch — it looks like progress.
      */
-    @Query("select q from Inquiry q where q.orgId = :orgId order by q.receivedAt desc, q.id asc")
+    @Query("select q from Inquiry q where q.orgId = :orgId" + ACTIVE + "order by q.receivedAt desc, q.id asc")
     List<Inquiry> findForMemoryIndexing(@Param("orgId") UUID orgId, Pageable pageable);
 
     /** Bounded inquiry ids for one product, newest first. Bounded for the reason the review twin is. */
-    @Query("select q.id from Inquiry q where q.orgId = :orgId and q.productId = :productId "
+    @Query("select q.id from Inquiry q where q.orgId = :orgId and q.productId = :productId" + ACTIVE
             + "order by q.receivedAt desc, q.id asc")
     List<UUID> findIdsByProduct(@Param("orgId") UUID orgId, @Param("productId") UUID productId,
                                 Pageable pageable);
 
     /** Distinct channels that have product-linked inquiries for one product. */
-    @Query("select distinct q.channelId from Inquiry q where q.orgId = :orgId and q.productId = :productId")
+    @Query("select distinct q.channelId from Inquiry q where q.orgId = :orgId and q.productId = :productId" + ACTIVE)
     List<UUID> distinctChannelIdsByProduct(@Param("orgId") UUID orgId, @Param("productId") UUID productId);
 
     /**
@@ -61,6 +102,7 @@ public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
             select q.channelId, max(q.receivedAt)
             from Inquiry q
             where q.orgId = :orgId and q.productId in :productIds
+              and q.operationalState = com.sellerops.inquiry.InquiryOperationalState.ACTIVE
             group by q.channelId, q.productId
             """)
     List<Object[]> channelObservationsForProducts(@Param("orgId") UUID orgId,
@@ -72,11 +114,11 @@ public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
      * (non-Cafe24 / legacy) is treated as non-secret, so existing behavior is preserved.
      */
     @Query("select count(q) from Inquiry q where q.orgId = :orgId and q.status = :status "
-            + "and (q.secret is null or q.secret = false)")
+            + "and (q.secret is null or q.secret = false)" + ACTIVE)
     long countByOrgIdAndStatusExcludingSecret(@Param("orgId") UUID orgId, @Param("status") String status);
 
     @Query("select count(q) from Inquiry q where q.orgId = :orgId and q.receivedAt > :after "
-            + "and (q.secret is null or q.secret = false)")
+            + "and (q.secret is null or q.secret = false)" + ACTIVE)
     long countByOrgIdAndReceivedAtAfterExcludingSecret(@Param("orgId") UUID orgId,
                                                        @Param("after") Instant after);
 
@@ -84,13 +126,13 @@ public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
      * Inquiries for this org that have no item_analyses row yet (bounded by {@code pageable}).
      * Secret (비밀글) inquiries are excluded from general analysis; a null flag stays included.
      */
-    @Query("select q from Inquiry q where q.orgId = :orgId and (q.secret is null or q.secret = false) "
+    @Query("select q from Inquiry q where q.orgId = :orgId and (q.secret is null or q.secret = false)" + ACTIVE
             + "and not exists (select 1 from ItemAnalysis a where a.orgId = q.orgId "
             + "and a.sourceType = 'INQUIRY' and a.sourceId = q.id) order by q.receivedAt desc")
     List<Inquiry> findUnanalyzedByOrgId(@Param("orgId") UUID orgId, Pageable pageable);
 
     /** Count of non-secret inquiries for this org still missing an item_analyses row. */
-    @Query("select count(q) from Inquiry q where q.orgId = :orgId and (q.secret is null or q.secret = false) "
+    @Query("select count(q) from Inquiry q where q.orgId = :orgId and (q.secret is null or q.secret = false)" + ACTIVE
             + "and not exists (select 1 from ItemAnalysis a where a.orgId = q.orgId "
             + "and a.sourceType = 'INQUIRY' and a.sourceId = q.id)")
     long countUnanalyzedByOrgId(@Param("orgId") UUID orgId);

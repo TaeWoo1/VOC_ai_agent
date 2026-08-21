@@ -168,11 +168,17 @@ npm run serve                         # http://127.0.0.1:8787
 - Org "데모 제조사", operator "데모 운영자". Seller accounts on the three product channels
   (NAVER 스마트스토어 · 쿠팡 · 카페24 자사몰) plus a hidden G마켓 account the product surface never
   shows (visible-channel gate).
-- Data shape as of 2026-08-18 (local PG): NAVER 3,880 reviews (15 확인 필요), Coupang 22 상품평
-  (11 확인 필요), Cafe24 3 reviews; 3,208 unanswered inquiries of which most are Cafe24 board posts
-  (spam-like community articles) — the 문의 count is honest but dominated by them; **no order data**
-  (주문 shows 0 for every range); one prior NAVER reply-work row (approved draft) and whatever the
-  presenter marks during the demo.
+- Data shape as of **2026-08-22** (local PG): NAVER 3,880 reviews (15 확인 필요), Coupang 22 상품평
+  (11 확인 필요), Cafe24 3 reviews; **9 unanswered inquiries**; **no order data** (주문 shows 0 for every
+  range); one prior NAVER reply-work row (approved draft) and whatever the presenter marks during the
+  demo.
+- **The 문의 count changed from 3,208 to 9 on 2026-08-22, and it is not a data reset.** 3,199 Cafe24
+  board posts (spam community articles) had been dismissed by the seller as SPAM on 2026-07-06 through
+  approved dismissal batches; until this date no current-truth read honoured that decision, so 홈 and
+  Today Inbox counted work the seller had already decided not to do. The rows are all still there —
+  nothing was deleted — they are marked `EXCLUDED_SPAM` and excluded from current reads only. Record:
+  `docs/inquiry_operational_truth_v1.md`. If a walkthrough on an older snapshot shows 3,208, that
+  snapshot predates the projection; run `POST /api/inquiries/operational-state/backfill` (idempotent).
 
 ## 3. Screen order (the walkthrough)
 

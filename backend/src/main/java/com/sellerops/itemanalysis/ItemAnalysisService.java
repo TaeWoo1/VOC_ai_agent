@@ -338,8 +338,12 @@ public class ItemAnalysisService {
         }
         if (INQUIRY.equals(row.getSourceType())) {
             Inquiry q = inquiries.findById(row.getSourceId()).orElse(null);
-            // Skip orphan, cross-org, and secret (비밀글) inquiries — secret is out of analysis scope.
-            if (q == null || !orgId.equals(q.getOrgId()) || Boolean.TRUE.equals(q.getSecret())) {
+            // Skip orphan, cross-org, secret (비밀글), and operationally excluded inquiries. Secret is
+            // out of analysis scope; excluded is out of CURRENT scope — re-deriving an FAQ candidate
+            // from a post the seller dismissed as spam is how the stored verdict starts disagreeing
+            // with the screen that reads it.
+            if (q == null || !orgId.equals(q.getOrgId()) || Boolean.TRUE.equals(q.getSecret())
+                    || !q.getOperationalState().isActive()) {
                 return null;
             }
             return new Recomputed(
@@ -355,6 +359,11 @@ public class ItemAnalysisService {
         // Secret (비밀글) inquiries are worked only in the queue, never in general analysis.
         // A null flag (non-Cafe24 / legacy) is not secret and is analyzed as before.
         if (Boolean.TRUE.equals(q.getSecret())) {
+            return false;
+        }
+        // Operationally excluded (seller-dismissed) inquiries are not current work, so they produce no
+        // current verdict. The repository reads above already filter them; this is the id-driven path.
+        if (!q.getOperationalState().isActive()) {
             return false;
         }
         if (analyses.existsByOrgIdAndSourceTypeAndSourceId(orgId, INQUIRY, q.getId())) {

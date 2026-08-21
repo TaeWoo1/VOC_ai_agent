@@ -69,8 +69,29 @@ public class SyncRunExecutor {
     private static final org.slf4j.Logger log =
             org.slf4j.LoggerFactory.getLogger(SyncRunExecutor.class);
 
-    /** Single cursor per (account, data type); the connector owns the value's meaning. */
+    /**
+     * The <b>routine</b> collection lane: where ongoing sync keeps its place. The connector owns the
+     * value's meaning; this class owns which lane it is written to.
+     */
     static final String CURSOR_KEY = "primary";
+
+    /**
+     * The <b>historical backfill</b> lane, and the reason there are two.
+     *
+     * <p>A backfill seed used to be written into the routine cursor, and nothing ever cleared it. So a
+     * one-off "collect 2025-03-23..25" silently became the permanent definition of where routine
+     * collection starts: every later scheduled run decoded that window and swept a closed range in the
+     * past. Measured on the demo org's Cafe24 account — INQUIRY parked at
+     * {@code b6:o2:s2025-03-23:e2025-03-25} under an hourly schedule, which is why 3,201 inquiries
+     * collected on 2026-07-06 were never re-observed once and no reply-status change on any of them
+     * could land, though the upsert that would have applied it has existed since V34.
+     *
+     * <p><b>The invariant: a historical backfill must never redefine the starting cursor or window of
+     * routine collection.</b> Two keys in one table is the smallest thing that enforces it — the seed
+     * and every advance still share the one {@code sync_cursors} path, so there is still exactly one
+     * writer, and a backfill can still resume across pages within its own lane.
+     */
+    static final String BACKFILL_CURSOR_KEY = "backfill";
     private static final int PAGE_LIMIT = 50;
     private static final int MAX_PAGES = 10_000;
 
@@ -322,7 +343,11 @@ public class SyncRunExecutor {
                              SellerAccount account, Channel channel, DataType dataType,
                              String backfillSeed) {
         UUID channelId = channel.getId();
-        SyncCursor cursor = loadOrCreateCursor(orgId, account.getId(), dataType);
+        // Which lane this run keeps its place in. A backfill advances only its own cursor, so a routine
+        // run that follows it resumes exactly where routine collection left off — never inside the
+        // operator's historical window.
+        String cursorKey = backfillSeed != null ? BACKFILL_CURSOR_KEY : CURSOR_KEY;
+        SyncCursor cursor = loadOrCreateCursor(orgId, account.getId(), dataType, cursorKey);
         if (backfillSeed != null) {
             // A backfill re-seeds the window at offset 0; this seed write and every
             // subsequent advance below go through the one sync_cursors path.
@@ -571,15 +596,16 @@ public class SyncRunExecutor {
         return "SUCCESS";
     }
 
-    private SyncCursor loadOrCreateCursor(UUID orgId, UUID sellerAccountId, DataType dataType) {
+    private SyncCursor loadOrCreateCursor(UUID orgId, UUID sellerAccountId, DataType dataType,
+                                          String cursorKey) {
         return cursors
-                .findByOrgIdAndSellerAccountIdAndDataTypeAndCursorKey(orgId, sellerAccountId, dataType.name(), CURSOR_KEY)
+                .findByOrgIdAndSellerAccountIdAndDataTypeAndCursorKey(orgId, sellerAccountId, dataType.name(), cursorKey)
                 .orElseGet(() -> {
                     SyncCursor c = new SyncCursor();
                     c.setOrgId(orgId);
                     c.setSellerAccountId(sellerAccountId);
                     c.setDataType(dataType.name());
-                    c.setCursorKey(CURSOR_KEY);
+                    c.setCursorKey(cursorKey);
                     return c;
                 });
     }

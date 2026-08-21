@@ -12,7 +12,25 @@ public interface ItemAnalysisRepository extends JpaRepository<ItemAnalysis, UUID
 
     boolean existsByOrgIdAndSourceTypeAndSourceId(UUID orgId, String sourceType, UUID sourceId);
 
-    List<ItemAnalysis> findAllByOrgIdOrderByCreatedAtDesc(UUID orgId);
+    /**
+     * The org-wide current read (the 리포트's FAQ / 상세페이지 후보 counts and the analysis list).
+     *
+     * <p>An analysis of an inquiry the seller dismissed as spam is a stored verdict about work that is
+     * no longer work. The row is kept — this is a projection of current truth, not a purge — but it is
+     * not counted here, so this list, 홈 and Today Inbox describe one corpus. Measured on the demo org:
+     * 3,208 of 7,136 stored verdicts were "답변 필요" over dismissed spam.
+     *
+     * <p>Review analyses are untouched; the guard names the INQUIRY axis explicitly.
+     */
+    @Query("""
+            select a from ItemAnalysis a
+            where a.orgId = :orgId
+              and not exists (select 1 from com.sellerops.inquiry.Inquiry q
+                              where q.id = a.sourceId and a.sourceType = 'INQUIRY'
+                                and q.operationalState <> com.sellerops.inquiry.InquiryOperationalState.ACTIVE)
+            order by a.createdAt desc
+            """)
+    List<ItemAnalysis> findAllByOrgIdOrderByCreatedAtDesc(@Param("orgId") UUID orgId);
 
     /**
      * Scoped read for the inbox: analyses for this org of one source type whose source id is

@@ -3,6 +3,8 @@ package com.sellerops.inquiry.workitem.dismissal;
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.common.ApiException;
+import com.sellerops.inquiry.InquiryRepository;
+import com.sellerops.inquiry.lifecycle.InquiryOperationalStateProjector;
 import com.sellerops.inquiry.workitem.InquiryWorkItem;
 import com.sellerops.inquiry.workitem.InquiryWorkItemAudit;
 import com.sellerops.inquiry.workitem.InquiryWorkItemAuditRepository;
@@ -72,6 +74,8 @@ public class InquiryWorkItemDismissalService {
     private static final String CAFE24_CHANNEL_CODE = "CAFE24";
 
     private final InquiryWorkItemRepository workItems;
+    private final InquiryRepository inquiries;
+    private final InquiryOperationalStateProjector projector;
     private final InquiryWorkItemAuditRepository audits;
     private final InquiryWorkItemDismissalBatchRepository batches;
     private final SellerAccountRepository accounts;
@@ -79,12 +83,16 @@ public class InquiryWorkItemDismissalService {
     private final TransactionTemplate tx;
 
     public InquiryWorkItemDismissalService(InquiryWorkItemRepository workItems,
+                                           InquiryRepository inquiries,
+                                           InquiryOperationalStateProjector projector,
                                            InquiryWorkItemAuditRepository audits,
                                            InquiryWorkItemDismissalBatchRepository batches,
                                            SellerAccountRepository accounts,
                                            ChannelRepository channels,
                                            PlatformTransactionManager txManager) {
         this.workItems = workItems;
+        this.inquiries = inquiries;
+        this.projector = projector;
         this.audits = audits;
         this.batches = batches;
         this.accounts = accounts;
@@ -206,11 +214,26 @@ public class InquiryWorkItemDismissalService {
         });
     }
 
-    /** Transition a single OPEN item to DISMISSED and append its batch-linked audit. */
+    /**
+     * Transition a single OPEN item to DISMISSED, project the consequence onto the inquiry, and append
+     * the batch-linked audit — one transaction, so the seller's decision and the number that reflects
+     * it can never be out of step.
+     *
+     * <p>The projection is a copy, not a second decision: this method is where the ledger is written,
+     * and {@link InquiryOperationalStateProjector} reads it back. That is why the projection is
+     * rebuildable — {@code InquiryOperationalStateBackfill} runs exactly this derivation over rows
+     * dismissed before the column existed.
+     */
     private void dismissOne(InquiryWorkItem item, DismissalCommand command, UUID batchId) {
         item.setPhase(InquiryWorkItemPhase.DISMISSED);
         item.setDisposition(command.disposition());
         workItems.save(item);
+
+        inquiries.findById(item.getInquiryId()).ifPresent(inquiry -> {
+            if (projector.apply(inquiry, item)) {
+                inquiries.save(inquiry);
+            }
+        });
 
         InquiryWorkItemAudit audit = new InquiryWorkItemAudit();
         audit.setOrgId(item.getOrgId());

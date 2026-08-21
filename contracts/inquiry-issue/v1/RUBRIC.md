@@ -83,6 +83,38 @@ A LIMITATION result is reported in the package's completion report and in
 `docs/sellerops_operator_graph_v2.md` §16 — it does not block the rest of the package, and it does not
 get rounded up to "done".
 
+## 5a. Measurements taken
+
+| date | org | corpus | model / prompt | G1 | G2 | G3 | G4 | decision |
+|---|---|---|---|---|---|---|---|---|
+| 2026-08-21 | `7146c50f…` | **3,220 indexed** (contaminated) | `gpt-5-2025-08-07` / `inquiry-semantic/v1` | 19/3,220 = **0.006** | 1.00 on the genuine subset | **4** (needs 5) | 0 violations — 0/3,201 spam labelled | **LIMITATION** |
+| 2026-08-22 | `7146c50f…` | **21 indexed** (spam excluded) | unchanged | 19/21 = **0.905** | 1.00 | **4** (needs 5) | 0 violations | **LIMITATION** |
+
+**The two rows are kept side by side on purpose.** A measurement whose denominator changed is not the
+same measurement, and replacing the first with the second would hide that the *corpus* moved, not the
+classifier. What happened between them is
+`docs/inquiry_operational_truth_v1.md`: 3,199 of this org's inquiries were seller-dismissed spam that
+every current-truth read was still counting.
+
+**G1 moved from 0.006 to 0.905 without a single classification changing.** The 3,201 spam posts were
+already refused (that is G4 passing, not G1 failing); they were simply in the denominator. The honest
+reading of the 2026-08-21 row is that it measured recall against a corpus that was 99% not inquiries.
+
+**G3 did not move, and that is the finding.** Removing rows the classifier had already refused cannot
+add a repeated signature. What the cleanup actually fixed is the **TOPIC axis** — the rule-based
+extractor's output, which *was* counting spam and reported `품질 ×523 · 사이즈 ×473 · 배송 ×240 ·
+가격 ×195` as customer patterns. The remaining constraint on G3 is the size of the genuine corpus
+(**21 indexed, 19 signed**), not contamination. The capability stays a **LIMITATION**, now for a stated
+and different reason: there is not yet enough real inquiry volume in this org to establish five
+operationally meaningful repeats. Re-measuring needs either a longer collection window on a reconnected
+account or a second org.
+
+**Annotation provenance for both rows:** no human gold set exists yet. G1/G2 above are measured against
+the classifier's own refusals and the operator's reading of 19 genuine inquiries — a **single reader**,
+which §3's warning applies to in full. The ≥200-inquiry seeded gold set remains unbuilt.
+
+---
+
 ## 6. Cost and exposure bounds (not quality gates, but conditions of running at all)
 
 - One inquiry text is classified **at most once, ever** (`inquiry_signature_cache`, keyed by a one-way

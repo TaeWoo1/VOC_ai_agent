@@ -68,8 +68,9 @@ class Cafe24ArticleBackfillFlowTest {
 
     private static final LocalDate START = LocalDate.parse("2026-01-01");
     private static final LocalDate END = LocalDate.parse("2026-06-25");
-    /** Mirrors SyncRunExecutor.CURSOR_KEY (package-private there). */
+    /** Mirrors SyncRunExecutor.CURSOR_KEY / BACKFILL_CURSOR_KEY (package-private there). */
     private static final String CURSOR_KEY = "primary";
+    private static final String BACKFILL_CURSOR_KEY = "backfill";
 
     @Autowired SellerAccountRepository sellerAccounts;
     @Autowired ChannelRepository channels;
@@ -141,9 +142,13 @@ class Cafe24ArticleBackfillFlowTest {
         http.enqueue(FakeCafe24HttpClient.articlesOk(articleObjects));
     }
 
+    /**
+     * The BACKFILL lane's cursor. A seeded backfill advances only this one — the routine lane it used
+     * to overwrite is asserted untouched by {@code SyncCursorLaneTest}.
+     */
     private SyncCursor cursor(DataType type) {
         return cursors.findByOrgIdAndSellerAccountIdAndDataTypeAndCursorKey(
-                org, account.getId(), type.name(), CURSOR_KEY).orElseThrow();
+                org, account.getId(), type.name(), BACKFILL_CURSOR_KEY).orElseThrow();
     }
 
     @Test

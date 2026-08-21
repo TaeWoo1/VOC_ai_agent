@@ -3,6 +3,8 @@ package com.sellerops.inquiry;
 import com.sellerops.common.BaseEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
@@ -78,4 +80,33 @@ public class Inquiry extends BaseEntity {
      */
     @Column(name = "is_secret")
     private Boolean secret;
+
+    /**
+     * Whether this inquiry belongs to the seller's current operational truth.
+     *
+     * <p>A projection of the work item's dismissal disposition — see {@link InquiryOperationalState}
+     * for why it is stored here and why {@link
+     * com.sellerops.inquiry.lifecycle.InquiryOperationalStateProjector} is its only writer. Ingestion
+     * never sets it: a re-collected spam post stays excluded, because the seller's decision is about
+     * the inquiry and not about how many times the platform served it to us.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "operational_state", nullable = false)
+    private InquiryOperationalState operationalState = InquiryOperationalState.ACTIVE;
+
+    /** When {@link #operationalState} last changed. Null while the row has never left ACTIVE. */
+    @Column(name = "operational_state_at")
+    private Instant operationalStateAt;
+
+    /**
+     * When the source last showed us this row — <b>including runs where nothing about it changed</b>.
+     *
+     * <p>That inclusion is the entire point. The upsert skips the save when the source matches what is
+     * stored, so before this column an unchanged row and a deleted row were the same observation:
+     * silence. No reconciliation can distinguish them without a record of having looked. Null on rows
+     * ingested before the column existed — and null must never be read as "gone", only as "we have not
+     * observed this row since we started recording that we do".
+     */
+    @Column(name = "last_seen_at")
+    private Instant lastSeenAt;
 }

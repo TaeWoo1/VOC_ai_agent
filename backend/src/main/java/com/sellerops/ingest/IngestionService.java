@@ -197,12 +197,20 @@ public class IngestionService {
                     if (existingOpt.isPresent()) {
                         Inquiry existing = existingOpt.get();
                         if (sourceUnchanged(existing, row)) {
+                            // Nothing about the inquiry changed — but the SOURCE STILL SHOWED IT TO US,
+                            // and that is a different fact from silence. Before this line an unchanged
+                            // row and a deleted row left exactly the same trace (none), which is why no
+                            // absence-based reconciliation could be built on top of this path. Recording
+                            // it costs one column write; not recording it costs the distinction.
+                            existing.setLastSeenAt(Instant.now());
+                            inquiries.save(existing);
                             tally.skip();
                             continue;
                         }
                         boolean becameAnswered = "ANSWERED".equals(row.status())
                                 && !"ANSWERED".equals(existing.getStatus());
                         applyInquirySource(existing, row);
+                        existing.setLastSeenAt(Instant.now());
                         if (becameAnswered && sellerAccountId != null) {
                             // Reflect the platform answer and complete the OPEN work item
                             // (absent/OPEN only) atomically — never reopen, never reply.
@@ -228,6 +236,7 @@ public class IngestionService {
                 entity.setReceivedAt(row.receivedAt() != null ? row.receivedAt() : Instant.now());
                 entity.setExternalId(hasExternal ? row.externalId() : null);
                 entity.setContentHash(hash);
+                entity.setLastSeenAt(Instant.now());
                 // A work item is a seller task: open one only for an actionable
                 // (UNANSWERED) inquiry on an exact connection. Already-answered
                 // inquiries are stored as history without opening a task.
@@ -329,7 +338,12 @@ public class IngestionService {
                 if (existing.isPresent()) {
                     Cafe24CommunityArticle entity = existing.get();
                     if (hash.equals(entity.getSourceHash())) {
-                        // Nothing mutable changed — no-op.
+                        // Nothing mutable changed — but record that we looked and it was still there.
+                        // `collected_at` is this table's observation primitive (the twin of
+                        // `inquiries.last_seen_at`); leaving it stale on a no-op made "unchanged" and
+                        // "gone" indistinguishable here for the same reason it did there.
+                        entity.setCollectedAt(Instant.now());
+                        communityArticles.save(entity);
                         tally.skip();
                         continue;
                     }

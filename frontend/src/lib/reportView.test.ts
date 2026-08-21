@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DETAIL_PAGE_CANDIDATE, FAQ_CANDIDATE, buildWeeklyReport } from "./reportView";
 import type { ChannelReviewPageView, FeedItem, ItemAnalysis, ReviewIssueView, SellerAccountResponse } from "./types";
-import type { ReviewSource } from "./todayInbox";
+import { buildInquiryToday, type ReviewSource } from "./todayInbox";
 
 function issue(over: Partial<ReviewIssueView> & Pick<ReviewIssueView, "id">): ReviewIssueView {
   return {
@@ -84,6 +84,27 @@ describe("weekly report — every figure comes from a source that loaded", () =>
     expect(report.reviewsToCheck).toEqual({ available: true, value: 7 });
     expect(report.reviewsToCheckTo).toBe("/reviews/acc-nv?tier=NEEDS_ATTENTION");
     expect(report.summaryLines.join("\n")).toContain("확인이 필요한 리뷰 7건");
+  });
+
+  it("prints the server's uncapped count, so 리포트 · 홈 · Agent say the same number", () => {
+    // The feed is capped (default limit 50); the count beside it is not. Deriving 답변이 필요한 문의 from
+    // the returned rows is what printed "≤50" here and 3,208 on 홈 under the same words, pointing at the
+    // same screen. 홈 (buildInquiryToday) and the Operator's inbox tool both read the server number; this
+    // is the assertion that keeps this page on it.
+    const report = buildWeeklyReport([], [unanswered], [], [], 5, 3208);
+    const home = buildInquiryToday({ items: [unanswered], unansweredInquiries: 3208 }, new Map());
+
+    expect(report.unansweredInquiries).toEqual({ available: true, value: 3208 });
+    expect(home.signal).toEqual({ kind: "READY", count: 3208 });
+    expect(report.unansweredInquiries.value).toBe(
+      home.signal.kind === "READY" ? home.signal.count : -1,
+    );
+  });
+
+  it("a failed inbox read stays unavailable even when a count is passed", () => {
+    // The count is meaningless without knowing the read succeeded — an unavailable section is the
+    // honest render, never a number with no corpus behind it.
+    expect(buildWeeklyReport([], null, [], [], 5, 3208).unansweredInquiries.available).toBe(false);
   });
 
   it("spreads the review figure over accounts with exact links when there are several", () => {
