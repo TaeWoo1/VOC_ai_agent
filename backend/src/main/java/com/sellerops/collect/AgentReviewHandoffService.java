@@ -80,6 +80,17 @@ public class AgentReviewHandoffService {
      * live sitting for it would throw away every page the operator turned by hand.
      */
     static final String REASON_UNRESOLVED_PRODUCT = "UNRESOLVED_DISPLAY_PRODUCT_ID";
+    /**
+     * A row whose 노출상품ID belongs to more than one product. Counted with the unresolved, and it is a
+     * real state of the seller's catalogue, not a defect: Coupang lets several 등록상품 sit behind one
+     * exposure page, and 5 of this org's 63 display ids did on 2026-08-23.
+     *
+     * <p>Attaching the review to either candidate would be a coin toss written into the product's own
+     * history, and the 상품평 screen's other column — the 옵션ID — is a second key that could break the
+     * tie. Using it is a product decision that has not been taken, so this fails closed and says which
+     * rows it could not place.
+     */
+    static final String REASON_AMBIGUOUS_PRODUCT = "AMBIGUOUS_DISPLAY_PRODUCT_ID";
 
     /** The one channel this path serves. Widening it is a decision, not a configuration. */
     static final String SUPPORTED_CHANNEL = CoupangApiConnector.CHANNEL_CODE;
@@ -238,7 +249,7 @@ public class AgentReviewHandoffService {
     /**
      * 노출상품ID → the SKU of the product that listing belongs to, or null when this org holds no such listing.
      *
-     * <p>Three fail-closed steps, and none of them creates anything. The listing lookup is org-scoped and
+     * <p>Four fail-closed steps, and none of them creates anything. The listing lookup is org-scoped and
      * passes through the {@code RealDataOnly} filter, so a synthetic listing cannot answer for a real review.
      * A listing whose product has since gone, or a product with no SKU to identify it by, is treated the same
      * as no listing at all: this method exists to hand the ingestion spine a key that means exactly one
@@ -248,12 +259,21 @@ public class AgentReviewHandoffService {
         if (displayProductId == null || displayProductId.isBlank()) {
             return null;
         }
-        ChannelProduct listing = channelProducts
-                .findByOrgIdAndChannelIdAndExternalDisplayProductId(orgId, channelId, displayProductId)
-                .orElse(null);
-        if (listing == null) {
+        List<ChannelProduct> listings = channelProducts
+                .findAllByOrgIdAndChannelIdAndExternalDisplayProductId(orgId, channelId, displayProductId);
+        if (listings.isEmpty()) {
             return null;
         }
+        // Several listings behind one exposure page are fine as long as they are the SAME product — that
+        // is one product listed twice, and the review belongs to it either way. Two products is a
+        // question this row cannot answer, and a guess would be indistinguishable from a fact afterwards.
+        List<UUID> candidates = listings.stream().map(ChannelProduct::getProductId).distinct().toList();
+        if (candidates.size() > 1) {
+            log.warn("Coupang review handoff: a 노출상품ID maps to {} products ({})",
+                    candidates.size(), REASON_AMBIGUOUS_PRODUCT);
+            return null;
+        }
+        ChannelProduct listing = listings.get(0);
         // findAllByOrgIdAndIdIn, deliberately, and NOT findById: a Hibernate filter does not touch a
         // findById, so the id-lookup would hand back a synthetic product the listing lookup had just
         // refused to return. Same filter on both sides, or the fence has a door in it.

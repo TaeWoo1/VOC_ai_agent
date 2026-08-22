@@ -563,8 +563,8 @@ class AgentReviewHandoffServiceTest {
         // Take the real catalogue out of the way, then leave only a synthetic listing wearing the same
         // display id. Before the filter mattered, this is the row that would have answered.
         ChannelProduct real = channelProducts
-                .findByOrgIdAndChannelIdAndExternalDisplayProductId(org, acc.getChannelId(), PRODUCT)
-                .orElseThrow();
+                .findAllByOrgIdAndChannelIdAndExternalDisplayProductId(org, acc.getChannelId(), PRODUCT)
+                .get(0);
         real.setExternalDisplayProductId(null);
         channelProducts.save(real);
 
@@ -592,14 +592,65 @@ class AgentReviewHandoffServiceTest {
         assertThat(reviews.findAll()).isEmpty();
     }
 
+    /**
+     * Two 등록상품 behind one exposure page, pointing at two products. Measured on the live catalogue —
+     * 5 of the canonical demo org's 63 Coupang display ids look exactly like this — and it is the case
+     * that used to throw, because the finder returned an Optional over a column with no unique key.
+     */
+    @Test
+    void a_display_id_shared_by_two_products_is_refused_rather_than_guessed() {
+        SellerAccount acc = account(org, "COUPANG");
+        Product other = new Product();
+        other.setOrgId(org);
+        other.setName("무선 이어폰 (재등록)");
+        other.setSku("78123456790");
+        other.setStatus("ACTIVE");
+        products.save(other);
+        ChannelProduct second = new ChannelProduct();
+        second.setOrgId(org);
+        second.setChannelId(acc.getChannelId());
+        second.setProductId(other.getId());
+        second.setExternalProductId("78123456790");
+        second.setExternalDisplayProductId(PRODUCT);   // the SAME exposure page
+        channelProducts.save(second);
+
+        AgentReviewHandoffResultView result =
+                service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
+
+        assertThat(result.received()).isEqualTo(1);
+        assertThat(result.stored()).isZero();
+        assertThat(result.failed()).isEqualTo(1);
+        assertThat(reviews.findAll()).isEmpty();
+    }
+
+    /** The same product listed twice behind one exposure page is NOT ambiguous — it is one answer. */
+    @Test
+    void two_listings_for_one_product_still_resolve() {
+        SellerAccount acc = account(org, "COUPANG");
+        UUID product = products.findByOrgIdAndSku(org, SELLER_PRODUCT_ID).orElseThrow().getId();
+        ChannelProduct twin = new ChannelProduct();
+        twin.setOrgId(org);
+        twin.setChannelId(acc.getChannelId());
+        twin.setProductId(product);                    // same product
+        twin.setExternalProductId("78123456790");
+        twin.setExternalDisplayProductId(PRODUCT);
+        channelProducts.save(twin);
+
+        AgentReviewHandoffResultView result =
+                service.handOff(org, request(slotFor(acc), true, List.of(review(BODY_A, 5, "2026-08-11"))));
+
+        assertThat(result.stored()).isEqualTo(1);
+        assertThat(reviews.findAll().get(0).getProductId()).isEqualTo(product);
+    }
+
     /** Another org's listing carrying the same display id is not this org's product. */
     @Test
     void a_listing_in_another_org_does_not_answer() {
         SellerAccount acc = account(org, "COUPANG");
         UUID otherOrg = UUID.randomUUID();
         ChannelProduct mine = channelProducts
-                .findByOrgIdAndChannelIdAndExternalDisplayProductId(org, acc.getChannelId(), PRODUCT)
-                .orElseThrow();
+                .findAllByOrgIdAndChannelIdAndExternalDisplayProductId(org, acc.getChannelId(), PRODUCT)
+                .get(0);
         mine.setOrgId(otherOrg);
         channelProducts.save(mine);
 
