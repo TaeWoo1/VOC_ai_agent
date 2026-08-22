@@ -132,7 +132,7 @@ public class NaverOrdersClient {
      * @throws NaverRateLimitedException on HTTP 429 from either order call
      */
     public FetchPage fetchOrderSummaryPage(String accessToken, String cursorValue) {
-        Instant now = clock.instant();
+        Instant now = now();
         NaverOrdersCursor cursor = parseCursor(cursorValue, now);
         cursor = withRoutineFreshnessFloor(cursor, now);
         if (cursor.isCaughtUp(now)) {
@@ -207,7 +207,7 @@ public class NaverOrdersClient {
      * accepted — it is {@link OrderAccessProbe#UNAVAILABLE} (inconclusive).
      */
     public OrderAccessProbe probeOrderAccess(String accessToken) {
-        NaverOrdersCursor window = NaverOrdersCursor.probeWindow(clock.instant(), KST, PROBE_WINDOW);
+        NaverOrdersCursor window = NaverOrdersCursor.probeWindow(now(), KST, PROBE_WINDOW);
         Map<String, String> params = new LinkedHashMap<>();
         params.put("lastChangedFrom", window.windowFrom());
         params.put("lastChangedTo", window.windowTo());
@@ -532,6 +532,16 @@ public class NaverOrdersClient {
 
     // --- plumbing ---
 
+    /**
+     * "Now", at the only resolution a cursor can write down.
+     *
+     * <p>Every instant this class hands to a cursor comes through here. See
+     * {@link NaverOrdersCursor#WIRE_RESOLUTION} for what a microsecond of extra precision cost.
+     */
+    private Instant now() {
+        return NaverOrdersCursor.atWireResolution(clock.instant());
+    }
+
     private NaverOrdersCursor parseCursor(String cursorValue, Instant now) {
         if (cursorValue == null || cursorValue.isBlank()) {
             return NaverOrdersCursor.initial(now, KST);
@@ -559,7 +569,7 @@ public class NaverOrdersClient {
      * built anywhere else would be a second place for the format to be wrong.
      */
     public String boundedWindowSeed(LocalDate startDate, LocalDate endDate) {
-        return serialize(NaverOrdersCursor.bounded(startDate, endDate, clock.instant(), KST));
+        return serialize(NaverOrdersCursor.bounded(startDate, endDate, now(), KST));
     }
 
     private String serialize(NaverOrdersCursor cursor) {

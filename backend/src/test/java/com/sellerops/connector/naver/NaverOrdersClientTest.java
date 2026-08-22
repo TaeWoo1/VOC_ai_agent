@@ -291,6 +291,80 @@ class NaverOrdersClientTest {
         assertThat(cursor).contains("2026-06-12T15:00:00.000+09:00"); // caught up to NOW
     }
 
+    // --- the run must END (sub-millisecond clock) ---
+
+    /**
+     * <b>Every other test in this file uses a round-millisecond clock, and that is why this defect
+     * shipped.</b>
+     *
+     * <p>The cursor writes exactly three millisecond digits (NAVER's required format), so an instant
+     * that goes into it comes back out truncated. Production reads {@code Clock.systemUTC()}, which
+     * ticks in MICROseconds, so the truncated {@code windowFrom} was permanently before {@code now},
+     * {@code isCaughtUp} answered false forever, and {@code hasMore} never went false — a routine run
+     * paged until the executor's 10,000-page guard, one live marketplace request at a time.
+     *
+     * <p>Observed twice on the demo org: 2026-06-14, 13 minutes 30 seconds and 0 rows, recorded
+     * SUCCESS; and again on 2026-08-22 the moment the routine lane could reach "now" at all.
+     *
+     * <p>The fake fails the test on any un-enqueued call, so a regression here surfaces as a runaway
+     * rather than a silent pass.
+     */
+    @Test
+    void aRunThatCatchesUpStopsEvenWhenTheClockIsFinerThanTheCursorCanWrite() {
+        // 2026-06-12 15:00:00.409075 KST — a real wall clock, microseconds and all.
+        Instant subMillis = Instant.parse("2026-06-12T06:00:00.409075Z");
+        NaverOrdersClient fine = new NaverOrdersClient(http, Clock.fixed(subMillis, ZoneOffset.UTC),
+                BASE_URL, 100);
+
+        // One 24h window ending at "now": the initial cursor's whole job, and it must finish it.
+        http.enqueue(FakeNaverHttpClient.ok(lcsBody(null)));
+        FetchPage page = fine.fetchOrderSummaryPage(TOKEN, null);
+
+        assertThat(http.sent).hasSize(1);
+        assertThat(page.hasMore())
+                .as("a window that reached now is caught up — sub-millisecond remainder is not work")
+                .isFalse();
+
+        // And the cursor it produced reports caught up to the SAME clock, so the next run makes no call.
+        FetchPage next = fine.fetchOrderSummaryPage(TOKEN, page.nextCursorValue());
+        assertThat(http.sent).as("no HTTP for a caught-up cursor").hasSize(1);
+        assertThat(next.hasMore()).isFalse();
+    }
+
+    /**
+     * The same guarantee for the path that actually spun: a routine restart walks a BOUNDED number of
+     * windows and then stops, on a microsecond clock.
+     */
+    @Test
+    void aRoutineRestartWalksABoundedNumberOfWindowsAndThenStops() {
+        Instant subMillis = Instant.parse("2026-06-12T06:00:00.409075Z");
+        NaverOrdersClient fine = new NaverOrdersClient(http, Clock.fixed(subMillis, ZoneOffset.UTC),
+                BASE_URL, 100);
+        String stale = "{\"windowFrom\":\"2026-04-01T13:00:00.000+09:00\","
+                + "\"windowTo\":\"2026-04-01T13:00:00.000+09:00\",\"moreFrom\":null,"
+                + "\"moreSequence\":null,\"dayTotals\":{}}";
+
+        // The restart opens at 2026-05-29 00:00 KST and must reach 2026-06-12 15:00 KST: 15 windows.
+        // One more response than that is enqueued, so an off-by-one would be visible rather than fatal.
+        int expectedWindows = 15;
+        for (int i = 0; i <= expectedWindows; i++) {
+            http.enqueue(FakeNaverHttpClient.ok(lcsBody(null)));
+        }
+
+        String cursor = stale;
+        int pages = 0;
+        boolean hasMore = true;
+        while (hasMore && pages < 40) { // the loop the executor runs, with a guard that FAILS the test
+            FetchPage page = fine.fetchOrderSummaryPage(TOKEN, cursor);
+            cursor = page.nextCursorValue();
+            hasMore = page.hasMore();
+            pages++;
+        }
+
+        assertThat(hasMore).as("the run must end on its own, not on a page guard").isFalse();
+        assertThat(pages).isEqualTo(expectedWindows);
+    }
+
     @Test
     void twoCallFlowMapsToDailySummariesGroupedByKstPaymentDate() {
         http.enqueue(FakeNaverHttpClient.ok(lcsBody(null,

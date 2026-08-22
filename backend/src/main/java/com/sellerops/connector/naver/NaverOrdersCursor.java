@@ -7,6 +7,7 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -90,6 +91,27 @@ record NaverOrdersCursor(
             return OffsetDateTime.parse(toExclusive).toInstant();
         }
     }
+
+    /**
+     * The resolution this cursor can actually represent — and therefore the ONLY resolution its
+     * arithmetic may use.
+     *
+     * <p>{@link #NAVER_DATETIME} renders exactly three millisecond digits because that is what NAVER's
+     * order query requires. So every instant that goes into a cursor comes back out truncated, and a
+     * truncated instant is FOREVER before the full-precision {@code now} it was made from —
+     * {@code Clock.systemUTC()} on this JVM ticks in microseconds. {@link #isCaughtUp} compares exactly
+     * those two values, so it answered "not caught up" every time, {@code hasMore} stayed true, and a
+     * routine run paged until the executor's 10,000-page guard.
+     *
+     * <p>Not hypothetical and not new: the demo org's last "successful" NAVER order collection
+     * (2026-06-14) ran <b>13 minutes 30 seconds and returned 0 rows</b>, and was recorded SUCCESS. It
+     * was invisible because the lane never reached "now" again afterwards. Every test missed it because
+     * every test clock was a round millisecond, which round-trips exactly.
+     *
+     * <p>The fix is not a tolerance. A cursor may only reason about time it can write down, so the
+     * clock is read at this resolution and the comparison becomes exact.
+     */
+    static final ChronoUnit WIRE_RESOLUTION = ChronoUnit.MILLIS;
 
     /** Officially confirmed maximum query window. */
     static final Duration MAX_WINDOW = Duration.ofHours(24);
@@ -313,6 +335,11 @@ record NaverOrdersCursor(
     private static Instant windowEnd(Instant from, Instant now) {
         Instant cap = from.plus(MAX_WINDOW);
         return now.isBefore(cap) ? now : cap;
+    }
+
+    /** The one place an outside instant enters this cursor's arithmetic. See {@link #WIRE_RESOLUTION}. */
+    static Instant atWireResolution(Instant instant) {
+        return instant.truncatedTo(WIRE_RESOLUTION);
     }
 
     private static String iso(Instant instant, ZoneId zone) {
