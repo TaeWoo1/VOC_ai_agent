@@ -1484,3 +1484,90 @@ downstream까지 도는 첫 라이브 사례가 된다.** Agent 쪽 가시성은
 
 **여기서 멈춘다.** WING 상호작용 전에 필요한 것은 두 가지다 — (1) 위 A/B/C 중 하나에 대한
 제품 결정, (2) 이 실행에 대한 단회 라이브 승인.
+
+---
+
+### 5j. 노출상품ID 보존 (선택지 **C**) + Coupang PRODUCT 동일범위 재수집 (2026-08-23 03:57 KST) — **재수집 PASS**, REVIEW 앞에서 정지
+
+제품 결정: **C**. 세 식별자를 섞지 않고, 노출상품ID를 **listing 수준의 별도 alias**로 보존한 뒤
+리뷰를 그것으로 **찾는다**. `products.sku = 등록상품ID` 계약은 그대로 두고,
+`external_variant_id`로 resolve하는 B는 채택하지 않았다.
+
+#### Phase 1 — 코드 (마켓플레이스 접촉 0회) · `b3fd468b` · `1ee5daa3`
+
+| 무엇 | 어디 |
+|---|---|
+| 컬럼 추가 | `V60` — `channel_products.external_display_product_id` (nullable, 부분 인덱스). **identity 아님**: 리스팅 키는 여전히 `external_product_id` |
+| 와이어 읽기 | `CoupangSellerProductsClient` — 상세 `$.data.productId` 우선, 목록 행 fallback. **등록상품ID로 대체하지 않는다**(둘 다 없으면 null) |
+| 저장 | `ProductKnowledgeWriter` — present-overwrites / absent-preserves. 상세 호출이 실패한 주기가 이전 alias를 지우지 못한다 |
+| 리뷰 resolve | `AgentReviewHandoffService` — 노출상품ID로 **listing을 찾고**, 그 listing이 속한 product의 **sku를 우리 DB에서 읽어** 스파인에 넘긴다. 클라이언트가 보낸 값은 **조회 키로만** 쓰인다 |
+| product 생성 | **불가능해졌다.** 못 찾은 행은 `failed`로 세고 import는 `PARTIAL`. 조용히 버리지도, 새로 만들지도 않는다 |
+| 필터 | 두 조회 모두 `RealDataOnly`를 통과한다 — `findById`는 필터를 타지 않아 리스팅 조회가 거부한 synthetic product를 id 조회가 돌려줬을 것이다 |
+
+`CanonicalProduct`의 새 component는 **맨 뒤**에 뒀다. 컴파일러가 9개 생성 지점을 전부 다시 보게
+하려는 것이고, 실제로 **5개**를 잡았다.
+
+**offline 고정** — 요청하신 6개 전부 + 라이브가 추가로 요구한 2개:
+productId 저장 · 동일 product 재관측(alias 유지·행 불변) · exact review resolution ·
+wrong productId 미매칭 · DEMO_SEED 미승격 · 기존 sellerProductId/vendorItemId semantics 불변 ·
+**한 노출상품ID가 두 product일 때 거부** · **같은 product의 리스팅 둘은 모호하지 않음**.
+회귀: **backend 2,712 · collector 9,164 · frontend 2,246, 전부 green.**
+
+#### Phase 2 — 동일범위 one-shot 재수집 (라이브)
+
+run `d329ff9e` · MANUAL · **SUCCESS 68/68/0/0** · 24.7초 ·
+`쿠팡 상품 수집: listed=68 mapped=68 hasMore=false requests=69 budget=69/250` ·
+`product-knowledge write … rows=68 **listings=0** variants=405 facts=188`.
+
+| 기대 | 실측 | |
+|---|---|---|
+| REAL listing 68 재관측 | **68** | ✅ |
+| 신규 listing / product 0 | **listings=0 신규** · products REAL **300 불변** | ✅ |
+| productId 68/68 저장 | **68/68** | ✅ |
+| variants 405 중복 0 | **405 / distinct 405** | ✅ |
+| facts idempotent | **188 불변** | ✅ |
+| synthetic 불변 | DEMO_SEED 리스팅 3 · product 8 · 상품평 22 **전부 불변** | ✅ |
+| cursor sweep 완료 | `PRODUCT` 커서 **null** | ✅ |
+| 401/403/429/WARN/ERROR | **0** | ✅ |
+| request count | **69** (목록 1 + 상세 68), `BUDGET_EXHAUSTED` 미발생 | ✅ |
+| WRITE 0 · PRODUCT schedule 0 | 승인 id 미무장 · 스케줄 여전히 INQUIRY·ORDER_SUMMARY 60분 둘뿐 | ✅ |
+
+#### 예측이 맞았다는 증거 — 그리고 예측하지 못한 것
+
+저장된 노출상품ID는 **8~10자리**, 등록상품ID는 **11자리**다.
+**`external_display_product_id = external_product_id`인 리스팅은 0건.** 즉 이 컬럼이 없었다면
+수집된 상품평은 68개 중 **단 하나도** 기존 product를 찾지 못했을 것이다. 예측은 반증되지 않았다.
+
+**예측하지 못한 것: 노출상품ID는 1:1이 아니다.**
+
+> 리스팅 68개가 노출상품ID 68개를 갖는데 **distinct는 63**이다. 5개의 노출상품ID가 각각
+> **등록상품 2개**를 앞에 두고 있고, 그 둘은 **서로 다른 product**를 가리킨다(리스팅 10개 = 14.7%).
+
+이것이 드러낸 결함은 즉시 고쳤다 — Optional finder는 그 5건에서 `NonUniqueResultException`을
+던졌을 것이고, 병합된 리스팅의 상품평 하나가 **판매자가 손으로 넘긴 모든 페이지를 500 하나로**
+날렸을 것이다. 이제 List를 돌려주고, 호출자가 판정한다: **같은 product의 리스팅 둘 = 답 하나(해결),
+서로 다른 product 둘 = 답할 수 없음(거부)**.
+
+#### §4.1 판정 — **`CONFIRMED`로 올릴 수 있다**
+
+기다리던 바 하나(동일 범위 재수집 멱등)가 충족됐다. INQUIRY가 넘었던 기준(재수집이 행을 늘리지
+않음)의 PRODUCT판이며, 실측은 신규 리스팅 0 · 신규 product 0 · 옵션 405 불변 · fact 188 불변 ·
+커서 완주다. **정직한 단서 하나**: 이 두 번째 주기는 새 컬럼 1개를 처음으로 채웠으므로 "바이트
+단위로 아무것도 쓰지 않은" 재수집은 아니다. 바뀐 것은 **identity가 아니라 alias**이고, 행 수는
+어느 테이블에서도 움직이지 않았다.
+
+#### REVIEW 앞에서 정지 — 규칙대로
+
+"Phase 1에서 identity가 예상과 다르면 REVIEW로 진행하지 말고 멈춰"에 해당한다. 노출상품ID가
+1:1이라는 전제가 **58/63에서만** 성립한다.
+
+지금 실행하면 그 5개 노출상품ID에 달린 상품평은 `failed`로 세어지고 import는 `PARTIAL`이 된다 —
+안전하고, 조용하지 않고, 되돌릴 것도 없다. 다만 **판정은 제품 결정이다**:
+
+| | 무엇을 | 결과 |
+|---|---|---|
+| **C-1** | 그대로 진행. 모호한 5건은 fail-closed | 리스팅 68개 중 58개(85%)에서 상품평이 붙는다. 나머지는 수집돼도 저장되지 않는다 |
+| **C-2** | 모호할 때만 **옵션ID로 tie-break** (후보 안에서만; B의 전면 채택이 아님) | 405개 옵션ID는 전부 distinct하므로 5건이 전부 해소된다. 2026-08-15 라이브에서 옵션ID는 전 행에 찍혔다 |
+
+C-2는 옵션ID를 **1차 키로 쓰지 않는다** — 노출상품ID가 고른 후보 2개 사이에서만 쓴다. 그래도
+채택 여부는 결정 사항이라 여기서 정하지 않았다.
