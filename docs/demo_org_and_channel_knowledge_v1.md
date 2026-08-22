@@ -906,3 +906,29 @@ SellerOps는 이 구간에서 **아무것도 누르지 않는다.** 발급 런�
 | 확인할 것 | credential 저장 · vault fingerprint == `self-pilot-1` · account binding · PENDING → PREPARING → CONNECTED · 첫 수집 rows/중복 0 · REAL provenance · secret/PII/provider-body 유출 0 |
 | 자동으로 뒤따르는 것 | CONNECTED 5분 내 self-pilot이 **ORDER_SUMMARY + INQUIRY 60분 schedule을 자동 생성**한다 (5a §5의 경고). 원치 않으면 그 자리에서 끈다. |
 
+#### 제품 소유자 결정 (2026-08-23)
+
+5a와 5c가 제기한 두 지점은 결정됐다. **이 결정 때문에 코드를 바꾸지 않는다** — 둘 다 이미 그렇게
+동작하고 있고, 바뀐 것은 그것을 결함으로 볼지 정상으로 볼지다.
+
+1. **CONNECTED 후 routine schedule 자동 생성을 허용한다.** 첫 실제 수집으로 CONNECTED가 되면
+   ORDER_SUMMARY / INQUIRY 60분 schedule이 self-pilot에 의해 자동 생성되는 것을 **§6a standing READ
+   grant의 정상 production-like 동작**으로 취급한다. 다만 **첫 automatic cycle은 반드시 로그·DB로
+   관찰한다** — 이상한 DataType만 fail-closed로 pause하고 정상 schedule은 유지한다.
+2. **저장 직후의 read-only GET 1회를 허용한다.** credential 저장에 이어지는 인증 확인 + 주문 조회
+   권한 확인은 허용한다. **store-only 경로를 새로 만들지 않는다.** 첫 실제 collection은 계속
+   **별도의 사용자 action**으로 유지한다.
+
+#### 검증 순서 (credential 입력 직후, 첫 수집 **전**)
+
+credential 값 자체는 로그·보고 어디에도 출력하지 않는다. 확인하는 것은 여섯 가지다 —
+기존 account `3e2ddaaa…` 재사용 · credential sealed/open 진단 · vendor/account binding ·
+auth verification 결과 · order-access permission 결과 · duplicate account 0. 여기까지 끝나면
+이 manifest를 갱신하고 **멈춘다.**
+
+#### 다음 live proof의 범위
+
+canonical Demo Org의 **REAL** 데이터로 **PRODUCT · ORDER_SUMMARY · INQUIRY**를 검증한다. REVIEW는
+공식 API가 없으므로 기존 Action Window acquisition을 **별도 단계**로 유지한다. 이번 목표는 Coupang
+Demo Spine 조립이며, Product enrichment / 다른 채널 polishing / historical backfill로 넓히지 않는다.
+
