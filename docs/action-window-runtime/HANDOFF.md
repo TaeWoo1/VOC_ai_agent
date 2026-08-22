@@ -30,6 +30,15 @@ any status claim later in the file.
   session and the seller already on the 상품평 목록 page), Coupang credential renewal (FE complete, no
   carrier hosts it), NAVER guided review reply (marketplace WRITE — the stop rule). Each is a
   **product-owner decision**; the seam they would attach to is `activateResidentCarrier`.
+- **Open functional blockers on NAVER review import (2026-08-23, live):** the guided flow stops after the
+  scope re-read reports `MATCH` — the in-page panel disappears, the export/consent barriers never render,
+  and because the download listener is armed at the CONSENT barrier, a seller who exports anyway produces a
+  file the runtime cannot see. The run stays a **silent PENDING**, not a failure. The manual fallback cannot
+  rescue it either: NAVER's export downloads with **no filename extension** and both the file input
+  (`accept=".xlsx,.csv"`) and `FileParser` dispatch on extension. Recorded with the live numbers in
+  [`../demo_org_and_channel_knowledge_v1.md`](../demo_org_and_channel_knowledge_v1.md) §4g; being fixed as
+  the "NAVER Review Acquisition Completion Hardening" package. UI discoverability / screen density /
+  month-segmentation sizing are **separate** (Connection/Acquisition UX Polish backlog) and are not blockers.
 - **Live evidence:** every run is indexed in [`../evidence/INDEX.md`](../evidence/INDEX.md). The r4
   dispatch records in this directory are indexed there as a group.
 

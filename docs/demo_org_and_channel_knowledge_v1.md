@@ -586,6 +586,94 @@ run이 `SUCCESS`로 남은 이유가 그거다 — `sync_jobs`에는 행 수만 
 - NAVER INQUIRY는 **UNSUPPORTED** 유지.
 - 리뷰는 자동 수집 주기 대상이 아니다 — `SELLER_REPEATED`이고, 셀러가 실행할 때만 들어온다.
 
+## 4g. NAVER REVIEW refresh 라이브 실행 (2026-08-23) — 데이터는 들어왔고, 경로는 아직 완주 못 한다
+
+§4e가 준비한 것을 실제로 돌렸다. **데이터는 전부 들어왔다. 그러나 가이드형 취득은 스스로 완주하지
+못했고, 사람이 API로 밀어 넣어서 끝냈다.** 그 둘을 섞어서 기록하면 다음 refresh가 같은 자리에서
+멈춘다.
+
+### 들어온 것 (사실)
+
+| | before | after |
+|---|---|---|
+| NAVER REAL 리뷰 | 3,858 | **4,340** (+482) |
+| 최신 리뷰 날짜 | 2026-07-15 | **2026-08-22** |
+| DEMO_SEED | 22 | 22 (불변) |
+
+| 구간 | 신규 / 중복 / 실패 | 상태 |
+|---|---|---|
+| `2026-07-01 ~ 2026-07-31` | **295 / 55 / 0** | `COMPLETED` · `COVERED` 350행 |
+| `2026-08-01 ~ 2026-08-22` | **187 / 11 / 0** | `COMPLETED` · `COVERED` 198행 |
+| **합계** | **482 / 66 / 0** | 계획 `COMPLETED` |
+
+- **중복 0** — `리뷰글번호`(external_id) 기준 0건, content hash 기준 0건. 겹치는 구간(7월 파일이
+  08-01까지 포함)이 있었지만 dedup이 흡수했다
+- **product attribution 100%** — 537/537이 상품에 연결됐고 미연결 0건, 상품 23종. **신규 상품 생성 0**
+  (252행 불변) — 리뷰가 상품을 만들어내지 않았다
+- **REAL provenance 유지**
+- **CustomerMemory +482**, ReviewIssues 19건 갱신(newly raised 0), issue evidence 2건이 새 리뷰에서
+- **ReviewOps `upToDate: true`** — `lastCoveredDate 2026-08-22`, `missingRanges []`,
+  `issueMemoryReady: true`, new 482 / dup 66 / failed 0 (독립 집계와 정확히 일치)
+
+### reply_state — 채널 지식이 틀려 있었다
+
+새로 들어온 537건이 **PENDING 499 · ANSWERED 38**로 실제 답변 상태를 가진다. 내보내기 파일에
+**`답글여부`·`답글등록일시` 컬럼이 있고** 매퍼가 읽고 있다. 이전 3,803건만 `UNKNOWN`이다.
+
+`naver-status-review-reply-unknown`이 "내보내기 파일에는 답변 여부가 담기지 않는다"고 단언하고 있었다.
+현재 export에는 담긴다. 관측에 맞춰 고쳤다(`LIVE_OBSERVATION` · 2026-08-23). **UNKNOWN은 여전히
+"미답변"이 아니다** — 그 3,803건은 답변 여부를 말해주지 않는 소스에서 왔을 뿐이다.
+
+### ⚠️ NAVER Review acquisition은 **COMPLETE가 아니다**
+
+482건이 들어왔다는 것과 **경로가 반복 가능하다**는 것은 다른 주장이다. 이번 실행에서 가이드형 흐름은
+셀러를 끝까지 데려가지 못했고, 마지막 두 단계는 파일을 손으로 찾아 API로 ingest해서 메웠다. 아래 두
+결함이 살아 있는 한 §4.1의 REVIEW 행은 움직이지 않는다.
+
+#### 결함 1 — guided flow가 scope MATCH 이후 진행되지 않는다
+
+```
+00:07:31  aw_import_scope_verdict {"match":"MATCH","datesParsed":2,"spanDiffers":false}
+(이후 아무 이벤트도 없음)
+```
+
+계약상 다음은 `LOCATE_EXPORT → HIGHLIGHT_EXPORT → WAIT_FOR_EXPORT → …CONSENT → DETECT_DOWNLOAD`다.
+실제로는 **패널이 사라졌고**(셀러 관측: "구간 설정 완료하니까 사라졌어") run은 조용히 멈췄다.
+
+치명적인 부분은 그 다음이다. 다운로드는 **consent 단계에서 무장되는 race**가 잡고,
+`detectDownload()`는 그 race가 없으면 **fail closed**로 "못 봤다"를 반환하며 **두 번째 리스너를 절대
+새로 걸지 않는다**(의도된 설계 — 두 리스너는 서로 모순되는 답을 낸다). 그래서:
+
+- 안내가 끊긴 자리에서 셀러는 스스로 엑셀 내보내기를 눌렀고
+- **에이전트 자신의 Chrome이 파일을 정상 수신했는데도**(Playwright 임시 디렉터리에서 3개 확인)
+- 런타임은 듣고 있지 않았으므로 구조적으로 감지 불가였다
+- run은 실패로 표시되지도 않았다 — **silent PENDING**
+
+즉 **안내가 끊기는 순간 그 run은 조용히 완주 불가 상태가 된다.**
+
+#### 결함 2 — manual fallback이 실제 NAVER export 파일을 다루지 못한다
+
+NAVER는 `Content-Disposition`에 파일명을 주지 않아 다운로드가 **확장자 없는 UUID**로 저장된다
+(`f532f7b3-55e9-4f02-94db-78a4a78c3f2e`, 39KB, 내용은 정상 OOXML XLSX).
+
+| 지점 | 결과 |
+|---|---|
+| `SegmentImportPanel`의 `accept=".xlsx,.csv"` | 파일 선택창에서 **고를 수조차 없다** |
+| `FileParser.parse` | 파일명 확장자로만 분기 ⇒ **거절** |
+| 자동 경로 | 런타임이 매직바이트로 검증하고 **자기 파일명을 붙여** 올리므로 통과 |
+
+**두 경로가 서로 다른 파일 판별 계약을 쓰고 있다.** 그래서 "자동이 실패하면 수동으로"가 성립하지
+않는다 — 자동이 실패한 바로 그 파일을 수동은 받지 못한다.
+
+### 후속: NAVER Review Acquisition Completion Hardening
+
+위 **결함 2개만** 하나의 작은 패키지로 고친다(2026-08-23 결정). 그 회귀가 green이면 그때
+"다음 refresh도 반복 가능"으로 판정하고 NAVER Demo Spine을 닫는다.
+
+**섞지 않는다** — UI 발견성(`/connect/review-history` 진입점이 문장 속 ghost 링크), 화면 복잡도,
+월 단위 segmentation 최적화(한 번에 되는 크기면 한 구간)는 **Connection/Acquisition UX Polish
+backlog**로 분리한다. 그것들은 불편이고, 위 둘은 완주 불가다.
+
 ## 5. 아직 라이브 경계 너머에 있는 것
 
 이 문서가 기록하는 작업에서 **마켓플레이스 접촉은 0회**였다. 남은 것은 전부 셀러/운영자의 행위가
