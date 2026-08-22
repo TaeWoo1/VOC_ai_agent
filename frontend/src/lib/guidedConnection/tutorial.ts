@@ -139,14 +139,29 @@ export const NAVER_EXISTING_APP_TUTORIAL: readonly TutorialStep[] = [
 export const COUPANG_WING_URL = "https://wing.coupang.com/";
 
 /**
- * Coupang WING Open API key text-fallback checklist (mirrors {@link NAVER_ISSUANCE_TUTORIAL}). The seller
- * issues the key entirely at WING: reach the Open API key issuance screen, choose 자체개발, fill the
- * vendor/URL fields, register SellerOps' fixed call IP, click 발급 THEMSELVES (SellerOps never issues), copy
- * the Access Key / Secret Key / Vendor ID, and return to SellerOps to paste them into the masked form.
+ * Coupang WING Open API key text-fallback checklist — shown when guided in-screen help is impossible
+ * (no local agent), when the seller switches to text, or after they end the walk. The seller issues the
+ * key entirely at WING and returns to paste the three values into the masked form. SellerOps never
+ * scripts WING, never presses a control, and never reads a key value here.
  *
- * Same shape as the NAVER checklist — one step opens the official center in a new tab (`opensCenter`), the
- * call-IP step reuses the `register_call_ip` id so the shared {@link AdvertisedCallIpPanel} renders there,
- * and progress is transient checkbox state that NEVER holds a key value or an account id. Hedged labels:
+ * **The order is the MEASURED order.** Until 2026-08-23 this list was the pre-measurement plan, and it
+ * survived every correction the guided walk received because nothing pinned it: the Action Window copy is
+ * held character-for-character against the runtime by a cross-stack parity test, and this checklist was
+ * held against nothing. It carried the three claims five live READ_ONLY walks refuted
+ * (`collector/src/action-window/coupang-issuance/coupang-issuance-stages.ts`):
+ *
+ *   1. It put `자체개발` third, as the 연동 방식 choice. The screen there is 사용 목적, which offers
+ *      `OPEN API` (the default) and `플레이오토 웹 솔루션` — no 자체개발. The real control is
+ *      `자체개발(직접입력)` under 업체 입력 방식, five screens later.
+ *   2. It asked for 업체명 / URL / 호출 IP before 발급. Those fields belong to the vendor-method screen and
+ *      appear only after `자체개발(직접입력)` is chosen — which is after the terms consent.
+ *   3. It called 발급 the key-creating press and then told the seller to copy their keys. 발급 opens the
+ *      purpose screen; `약관 동의 및 Key 발급받기` opens the vendor-method screen (pressed on two live walks,
+ *      issued nothing); the key is created by that screen's `확인`. The seller was being told to copy keys
+ *      that did not exist yet.
+ *
+ * The step ids are checklist state only and never surfaced, EXCEPT `register_call_ip`, which
+ * {@link CoupangIssuanceTutorial} keys the shared {@link AdvertisedCallIpPanel} off. Labels stay hedged —
  * exact WING menu/button names differ by screen version.
  */
 export const COUPANG_ISSUANCE_TUTORIAL: readonly TutorialStep[] = [
@@ -162,24 +177,39 @@ export const COUPANG_ISSUANCE_TUTORIAL: readonly TutorialStep[] = [
     hint: "쿠팡 윙에서 '판매자정보'의 오픈API 키 발급 영역으로 이동합니다. 정확한 메뉴 이름은 화면 버전에 따라 다를 수 있으니 '오픈API'·'키 발급'이 포함된 항목을 찾으세요.",
   },
   {
-    id: "self_dev",
-    title: "연동 방식 '자체개발' 선택",
-    hint: "연동 방식으로 '자체개발'을 선택합니다. 솔루션사(대행) 연동이 아니라 내 시스템에서 직접 호출하는 방식이며, 별도 심사 없이 바로 발급할 수 있습니다.",
+    id: "reveal_form",
+    title: "'API Key 발급 받기' 직접 누르기",
+    hint: "'API Key 발급 받기'를 직접 누르세요. 이 버튼은 키를 만들지 않고 사용 목적을 고르는 화면만 엽니다. 아직 계정에 바뀌는 것은 없습니다.",
   },
   {
-    id: "vendor_info",
-    title: "업체명·URL 정보 입력",
-    hint: "발급 화면에 필요한 업체명과 URL 정보를 입력합니다. 안전하게 입력하는 값이며, 화면에 표시된 항목만 채우면 됩니다.",
+    id: "confirm_purpose",
+    title: "사용 목적 확인 후 '확인' 누르기",
+    hint: "사용 목적이 'OPEN API'인지 확인하세요 — 기본으로 선택되어 있습니다. 이 화면에는 '자체개발' 항목이 없습니다(그 선택은 뒤에 따로 나옵니다). 확인했으면 '확인'을 누르세요. 이 버튼도 키를 만들지 않고 약관 화면을 엽니다.",
+  },
+  {
+    id: "terms_consent",
+    title: "약관 2건 직접 읽고 동의",
+    hint: "약관을 직접 읽고 판단하신 뒤 동의 체크박스 2개를 선택하세요. SellerOps는 약관을 읽지도, 대신 동의하지도 않습니다.",
+  },
+  {
+    id: "terms_issue_button",
+    title: "'약관 동의 및 Key 발급받기' 직접 누르기",
+    hint: "'약관 동의 및 Key 발급받기'를 직접 누르세요. 버튼 이름과 달리 이 단계에서는 키가 발급되지 않고, 업체 정보를 입력하는 화면이 열립니다(라이브 진행 2회에서 그렇게 확인되었습니다). 여기까지는 취소해도 계정에 남는 것이 없습니다.",
+  },
+  {
+    id: "vendor_method",
+    title: "입력 방식 '자체개발(직접입력)' 선택",
+    hint: "'업체 입력 방식'에서 '자체개발(직접입력)'을 선택하세요. 솔루션사(대행) 연동이 아니라 내 시스템에서 직접 호출하는 방식입니다. 선택하면 URL과 IP 주소 입력란이 더 나타납니다(업체명 칸은 이미 화면에 있습니다).",
   },
   {
     id: "register_call_ip",
-    title: "API 호출 IP에 SellerOps 고정 IP 등록",
-    hint: "쿠팡은 등록된 호출 IP에서만 API 요청을 허용합니다. 발급 화면의 'API 호출 IP'에 아래에 표시된 SellerOps 고정 IP를 그대로 등록하세요. 표시된 IP가 없으면 아직 준비 중이므로 이 단계는 건너뛰고 담당자에게 문의하세요. (등록하지 않으면 첫 주문 수집이 호출 IP 오류로 실패할 수 있습니다.)",
+    title: "업체명·URL 입력 + 호출 IP 등록",
+    hint: "업체명과 URL을 입력하고, 'IP 주소'에 아래 SellerOps 고정 IP를 넣은 뒤 옆의 '추가'까지 누르세요 — '추가'를 누르지 않으면 IP가 등록되지 않고, 나중에 첫 주문 수집이 호출 IP 오류로 실패합니다. 아래에 표시된 IP가 없으면 아직 준비 중이므로 담당자에게 문의하세요.",
   },
   {
     id: "issue_checkpoint",
-    title: "발급 버튼 직접 누르기",
-    hint: "입력한 내용을 한 번 더 확인한 뒤, 발급 버튼을 직접 누르세요. SellerOps는 대신 발급하지 않습니다 — 발급은 반드시 판매자 본인이 진행합니다.",
+    title: "'확인' 직접 누르기 (여기서 키가 발급됩니다)",
+    hint: "입력한 내용을 한 번 더 확인한 뒤 '확인'을 직접 누르세요. ⚠ 이 버튼에서 실제 API 키가 발급되어 쿠팡 계정 상태가 바뀝니다(지우려면 나중에 별도의 삭제 작업이 필요합니다). SellerOps는 대신 누르지 않습니다 — 발급은 반드시 판매자 본인이 진행합니다.",
   },
   {
     id: "copy_keys",

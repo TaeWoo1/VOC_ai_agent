@@ -22,6 +22,10 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { OPERATOR_STEP_LABELS } from "../../src/action-window/coupang-wing-issuance-driver";
+import {
+  COUPANG_ISSUANCE_KEY_CREATION_STEP,
+  coupangIssuanceStepPlan,
+} from "../../src/action-window/coupang-issuance/coupang-issuance-stages";
 import type { CoupangIssuanceTarget } from "../../src/action-window/coupang-issuance/coupang-issuance-driver";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -134,5 +138,110 @@ describe("the guided walk's return marker survives the trip to the frontend", ()
   it("the FE reader is where the FE says it is — a renamed export would pass the string check alone", () => {
     const fe = readFileSync(FE_TUTORIAL, "utf8");
     expect(fe).toContain("export function isIssuanceResumeReturn(search: string): boolean");
+  });
+});
+
+/* ─────────── D3: the TEXT fallback checklist and the measured screen order ─────────── */
+
+/**
+ * **The guided walk was corrected by five live walks; the text fallback was not, because nothing held it.**
+ *
+ * `frontend/src/lib/guidedConnection/tutorial.ts` carries the checklist a seller lands on the moment guided
+ * in-screen help is impossible (no local agent), or when they switch to text, or after they end the walk. It
+ * is the SAME issuance, described twice — and until 2026-08-23 the second description was the pre-measurement
+ * plan: 자체개발 third (a screen that has none), 업체명/URL/호출 IP before 발급 (fields that appear five screens
+ * later), and 발급 named as the press that creates the key, with "copy your keys" straight after it.
+ *
+ * The copy pin above is what kept the Action Window honest. This is the same pin for the fallback: the
+ * checklist must walk the runtime's measured screens IN THE RUNTIME'S ORDER. It deliberately checks order and
+ * not wording — the fallback is a manual checklist and says more per step than a highlight panel can — so the
+ * copy stays free to improve while the sequence cannot silently diverge again.
+ */
+describe("the text-fallback checklist walks the runtime's measured screen order", () => {
+  const FE_TUTORIAL = resolve(HERE, "../../../frontend/src/lib/guidedConnection/tutorial.ts");
+
+  /** The checklist's step ids, in order, read out of the FE source. */
+  function checklistIds(src: string): string[] {
+    const from = src.indexOf("export const COUPANG_ISSUANCE_TUTORIAL");
+    expect(from, "COUPANG_ISSUANCE_TUTORIAL not found").toBeGreaterThan(-1);
+    const to = src.indexOf("\n] as const;", from);
+    expect(to, "COUPANG_ISSUANCE_TUTORIAL is not closed").toBeGreaterThan(from);
+    return [...src.slice(from, to).matchAll(/id:\s*"([^"]+)"/g)].map((m) => m[1]!);
+  }
+
+  /**
+   * Which checklist step stands on which runtime screen. The two bookends (`open_wing`,
+   * `return_to_sellerops`) have no runtime step — the walk never leaves SellerOps to open a tab, and its
+   * return is a button, not a checkbox — and `register_call_ip` splits the vendor screen's fields out of
+   * `vendor_method` so the shared call-IP panel has somewhere to render.
+   */
+  const SCREEN_FOR_STEP: Readonly<Record<string, CoupangIssuanceTarget>> = {
+    reach_open_api: "reach_open_api",
+    reveal_form: "issue",
+    confirm_purpose: "confirm_purpose",
+    terms_consent: "terms_consent",
+    terms_issue_button: "issue_final",
+    vendor_method: "vendor_method",
+    register_call_ip: "vendor_method",
+    issue_checkpoint: "vendor_confirm",
+    copy_keys: "credentials",
+  };
+
+  const ids = checklistIds(readFileSync(FE_TUTORIAL, "utf8"));
+
+  it("the parser finds the checklist (it cannot pass by finding nothing)", () => {
+    expect(ids.length).toBeGreaterThan(5);
+    expect(ids[0]).toBe("open_wing");
+  });
+
+  it("every checklist step stands on a known runtime screen — a new step must be placed, not ignored", () => {
+    const unplaced = ids.filter((id) => !(id in SCREEN_FOR_STEP) && id !== "open_wing" && id !== "return_to_sellerops");
+    expect(unplaced, "checklist steps with no runtime screen").toEqual([]);
+  });
+
+  /**
+   * The screen a runtime step stands on. Step 1 carries no highlighted control (it guides by text), so it has
+   * no `copyParams.targetKind`; its stepId suffix names the screen instead. Reading both is what keeps step 1
+   * inside the comparison rather than silently dropping out of it.
+   */
+  function screenOf(step: ReturnType<typeof coupangIssuanceStepPlan>[number]): CoupangIssuanceTarget {
+    const named = step.copyParams?.targetKind as CoupangIssuanceTarget | undefined;
+    return named ?? (step.stepId.replace(/^aw\.coupang_issuance_/, "") as CoupangIssuanceTarget);
+  }
+
+  /** Screen → the runtime step number that first reaches it. */
+  const runtimeOrder = new Map<CoupangIssuanceTarget, number>();
+  coupangIssuanceStepPlan().forEach((s) => {
+    const t = screenOf(s);
+    if (!runtimeOrder.has(t)) runtimeOrder.set(t, s.stepNumber);
+  });
+
+  it("covers every screen the runtime guides — none may be dropped from the manual path", () => {
+    const covered = new Set(ids.map((id) => SCREEN_FOR_STEP[id]).filter(Boolean));
+    for (const target of runtimeOrder.keys()) {
+      expect(covered.has(target), `screen ${target} missing from the checklist`).toBe(true);
+    }
+  });
+
+  it("visits those screens in the runtime's order (this is what 자체개발-third violated)", () => {
+    const walked = ids
+      .map((id) => SCREEN_FOR_STEP[id])
+      .filter((t): t is CoupangIssuanceTarget => Boolean(t))
+      .map((t) => {
+        const n = runtimeOrder.get(t);
+        expect(n, `screen ${t} is not in the runtime step plan`).toBeDefined();
+        return n!;
+      });
+    expect(walked).toEqual([...walked].sort((a, b) => a - b));
+  });
+
+  it("the key-creating step sits where the runtime says the key is created, and copying follows it", () => {
+    const keyScreen = screenOf(coupangIssuanceStepPlan()[COUPANG_ISSUANCE_KEY_CREATION_STEP - 1]!);
+    const createIndex = ids.findIndex((id) => SCREEN_FOR_STEP[id] === keyScreen);
+    expect(createIndex).toBeGreaterThan(-1);
+    // Nothing before it may be described as producing a key…
+    expect(ids.slice(0, createIndex).some((id) => SCREEN_FOR_STEP[id] === "credentials")).toBe(false);
+    // …and reading the values comes after it, never before.
+    expect(ids.indexOf("copy_keys")).toBeGreaterThan(createIndex);
   });
 });

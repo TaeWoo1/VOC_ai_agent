@@ -1,6 +1,8 @@
 // Tutorial content invariants (honesty + privacy). Pure/node-env.
 import { describe, it, expect } from "vitest";
 import {
+  COUPANG_ISSUANCE_TUTORIAL,
+  COUPANG_WING_URL,
   NAVER_API_CENTER_URL,
   NAVER_EXISTING_APP_TUTORIAL,
   NAVER_ISSUANCE_TUTORIAL,
@@ -79,5 +81,91 @@ describe("NAVER issuance tutorial content", () => {
       expect(s.hint.length).toBeGreaterThan(0);
     }
     expect(TUTORIAL_HINT_QUALIFIER).toMatch(/다를 수 있으니/);
+  });
+});
+
+/**
+ * **The Coupang checklist had no test at all, and that is why it stayed wrong.**
+ *
+ * The guided Action Window copy is pinned character-for-character to the runtime by a cross-stack parity
+ * test, so every live measurement reached it. This checklist — the text fallback the seller lands on the
+ * moment guidance is impossible — was pinned to nothing, and kept the pre-measurement plan through every
+ * correction: 자체개발 as the third step, 업체명/URL/호출 IP before 발급, and 발급 named as the press that
+ * creates the key with "copy your keys" immediately after it.
+ *
+ * These assertions are about ORDER and CLAIMS, not phrasing, so the copy can still be improved.
+ */
+describe("Coupang WING issuance checklist content", () => {
+  const ids = COUPANG_ISSUANCE_TUTORIAL.map((s) => s.id);
+  const at = (id: string) => ids.indexOf(id);
+
+  it("the WING URL is the official seller center over https", () => {
+    expect(COUPANG_WING_URL).toMatch(/^https:\/\/wing\.coupang\.com\/?$/);
+  });
+
+  it("exactly one step opens WING, and it is the first step", () => {
+    expect(COUPANG_ISSUANCE_TUTORIAL.filter((s) => s.opensCenter)).toHaveLength(1);
+    expect(COUPANG_ISSUANCE_TUTORIAL[0]?.opensCenter).toBe(true);
+  });
+
+  it("walks the measured screen order: 발급 → 사용 목적 → 약관 → 업체 입력 방식 → 확인 → 복사", () => {
+    expect(ids).toEqual([
+      "open_wing",
+      "reach_open_api",
+      "reveal_form",
+      "confirm_purpose",
+      "terms_consent",
+      "terms_issue_button",
+      "vendor_method",
+      "register_call_ip",
+      "issue_checkpoint",
+      "copy_keys",
+      "return_to_sellerops",
+    ]);
+  });
+
+  it("never offers 자체개발 before the vendor-method screen — the purpose screen does not have it", () => {
+    for (const step of COUPANG_ISSUANCE_TUTORIAL.slice(0, at("vendor_method"))) {
+      const text = `${step.title} ${step.hint}`;
+      // An earlier step may NAME 자체개발 only to say the screen has none — never to ask for it.
+      if (/자체개발/.test(text)) expect(text).toMatch(/자체개발.*없습니다/);
+    }
+    // …and the purpose step says so out loud, because a seller who has read the old wording will look.
+    const purpose = COUPANG_ISSUANCE_TUTORIAL[at("confirm_purpose")]!;
+    expect(purpose.hint).toMatch(/OPEN API/);
+    expect(purpose.hint).toMatch(/자체개발.*없습니다/);
+  });
+
+  it("names 자체개발(직접입력) with its measured label, on the 업체 입력 방식 screen", () => {
+    const step = COUPANG_ISSUANCE_TUTORIAL[at("vendor_method")]!;
+    expect(`${step.title} ${step.hint}`).toMatch(/자체개발\(직접입력\)/);
+    expect(step.hint).toMatch(/업체 입력 방식/);
+  });
+
+  it("does not claim 발급 or '약관 동의 및 Key 발급받기' creates the key — both were refuted live", () => {
+    for (const id of ["reveal_form", "terms_issue_button"]) {
+      const step = COUPANG_ISSUANCE_TUTORIAL[at(id)]!;
+      expect(step.hint).toMatch(/키[가를].*(만들지 않|발급되지 않)/);
+    }
+  });
+
+  it("puts the key-creating 확인 after the vendor fields and before copying anything", () => {
+    expect(at("issue_checkpoint")).toBeGreaterThan(at("register_call_ip"));
+    expect(at("issue_checkpoint")).toBeLessThan(at("copy_keys"));
+    const step = COUPANG_ISSUANCE_TUTORIAL[at("issue_checkpoint")]!;
+    expect(`${step.title} ${step.hint}`).toMatch(/발급됩니다|발급되어/); // the one place that claims it
+    expect(step.hint).toMatch(/SellerOps는 대신 누르지 않습니다/); // …and never on the seller's behalf
+  });
+
+  it("registers the call IP on the screen that actually has the field, and requires the '추가' press", () => {
+    expect(at("register_call_ip")).toBeGreaterThan(at("vendor_method"));
+    const step = COUPANG_ISSUANCE_TUTORIAL[at("register_call_ip")]!;
+    expect(step.hint).toMatch(/추가/); // without it the IP is never registered
+    expect(step.hint).toMatch(/표시된 IP가 없으면|담당자에게 문의/); // fail-safe, never a fabricated IP
+    expect(step.opensCenter).not.toBe(true);
+  });
+
+  it("every step carries an actionable hint", () => {
+    for (const s of COUPANG_ISSUANCE_TUTORIAL) expect(s.hint.length).toBeGreaterThan(0);
   });
 });

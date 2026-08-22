@@ -767,21 +767,142 @@ fixture는 **합성**이다. 실제 export의 헤더 행(컬럼명은 개인정�
 3·4는 **Connection/Acquisition UX Polish backlog**다. 셋 다 불편이지, 경로가 막히는 문제가 아니다 —
 그 구분이 §4h가 무엇만 고쳤는지를 설명한다.
 
-## 5. 다음 — Coupang
+## 5. Coupang 최초 연결
 
-이 문서가 기록하는 작업에서 **마켓플레이스 접촉은** 라이브 증명 구간(§4c·§4f·§4g)을 빼면 **0회**였다.
+3채널 canonical Demo Org의 마지막 칸이다. **끝난 것** (2026-08-22 ~ 08-23): Cafe24 read 1회 +
+`mall.read_product` 재동의(§4a) · NAVER credential 재입력 → 연결 → PRODUCT → 최근 14일 주문(§4c) ·
+NAVER routine schedule ORDER 60분 / PRODUCT 1440분 running(§4f) · NAVER REVIEW REAL 4,340 / 최신
+2026-08-22(§4g) + completion hardening(§4h). **남은 것은 Coupang 하나**이고, 그것은 셀러의 행위를
+요구한다.
 
-**끝난 것** (2026-08-22 ~ 08-23):
+### 5a. offline 감사 (2026-08-23) — 마켓플레이스 접촉 **0회**
 
-1. ~~Cafe24 read 1회 + `mall.read_product` 재동의~~ — 완료 (§4a).
-2. ~~NAVER credential 재입력~~ — 완료. 연결 → PRODUCT → 최근 14일 주문 라이브 증명 (§4c).
-3. ~~NAVER routine schedule~~ — ORDER 60분 · PRODUCT 1440분 running (§4f).
-4. ~~NAVER REVIEW refresh~~ — REAL 4,340 / 최신 2026-08-22 (§4g), completion hardening 완료 (§4h).
+기존 baseline에서 이어 감사했다. Coupang 최초 연결·주문 routine은 이미 라이브 증명돼 있다
+(2026-08-06, `docs/coupang_final_main_first_connection_order_routine_proof_v1.md`) — **단
+disposable DB에서다.** canonical Demo Org에서는 아직 한 번도 없었다.
 
-**남은 것** — 셀러/운영자의 행위가 필요하다:
+**출발 상태 (실측).** Demo Org `7146c50f…`:
 
-1. **Coupang 최초 연결** — credential 행이 없다. 발급 walk는 라이브 증명됨(2026-08-12).
-   3채널 canonical Demo Org의 마지막 칸이고, **지금의 목표다**.
+| 사실 | 값 |
+|---|---|
+| Coupang seller account | `3e2ddaaa…` · **PENDING** · 2026-08-16 생성 |
+| `connector_credentials` | **행 없음** |
+| REAL 데이터 | **0** — `channel_products` 3 · `order_daily_summaries` 14 · `reviews` 22 · `inquiries` 8+3 은 전부 `DEMO_SEED`/`VERIFY_FIXTURE` |
+| Coupang sync_schedules | **없음** (NAVER 2 · Cafe24 3만 running) |
 
-Coupang이 붙기 전에는 12칸 전부가 "canonical Demo Org에서 현재 연결로 fresh proof"를 갖지 못한다.
-그것이 이 문서가 어떤 capability 상태도 옮기지 않는 이유다.
+**1 · guided connection / tutorial regression.** 전부 green — backend `*Coupang*`+`*CredentialHandoff*`,
+collector 42 files / 1,526, FE 11 files / 169. 전체 회귀도 green (collector 9,164 · FE 2,246).
+
+**2 · account 생성/재사용 semantics.** `SellerAccountService.registerApiChannel`은 **find-or-create**다.
+채널 행을 `SELECT … FOR UPDATE`로 먼저 잠가 두 탭/재시도가 직렬화되고, partial unique index
+`uq_seller_accounts_api_org_channel (org_id, channel_id) WHERE is_file_upload = false`가 fail-closed
+backstop이다. 정착된 CONNECTED / RECONNECT_REQUIRED를 PENDING으로 되돌리지 않는다. ⇒ **새 계정을 만들지
+않고 기존 `3e2ddaaa…`를 재사용한다.**
+
+**3 · credential 입력과 첫 collection의 분리.** 분리돼 있다. `CollectControlService.storeCredential`은
+vault 저장만 하고 test도 sync도 부르지 않는다. 첫 수집은 셀러가 따로 누른다 —
+`coupangTutorial.ts`의 reducer가 `SUBMIT_OK → preparing`에서 멈추고 주석이 그대로 말한다:
+`NO auto-sync: the seller starts it explicitly (step 4)`. **단 저장과 연결 확인은 한 번의 press다** —
+5c 참조.
+
+**4 · 고정 egress IP · API 권한 · credential diagnosis.** `/api/connect/coupang/setup` 실측:
+`advertisedEgressIps` **1개 광고 중** · `connectorEnabled: true` · `approvalArmed: false` ·
+`credentialHandoff.armed: false`. `…/credential-diagnosis` 실측: `status: NO_CREDENTIAL` ·
+`activeKeyId: self-pilot-1` — 지금 저장하면 **활성 키로 봉인되어 fingerprint가 일치**한다
+(§2의 vault key diagnosis 계약).
+
+**5 · 연결 후 가능한 취득 경로.**
+
+| DataType | 경로 | 상태 | 연결 후 |
+|---|---|---|---|
+| ORDER_SUMMARY | API v5 `ordersheets` 일자 페이징 | `CONFIRMED` · 라이브 2026-08-06 | **첫 수집이 연결을 완성한다** (PREPARING → CONNECTED) |
+| INQUIRY | API v5 `onlineInquiries` (상품별). PII를 담은 `callCenterInquiries`는 **호출하지 않음** | `CONFIRMED` · 라이브 2026-08-14 | routine 가능 |
+| PRODUCT | API seller-products list + detail | **`NEEDS_VERIFICATION`** — wire shape 미관측 | 구현돼 있으나 미검증. self-pilot이 자동 스케줄하지 **않는다** |
+| REVIEW | 공식 API **없음**. Action Window (seller-owned WING READ_ONLY) | `LIVE_PROVEN` 2026-08-15 | 셀러가 직접 실행. 스케줄 대상 아님 |
+
+운영 화면의 capability overview에 PRODUCT가 없는 것은 결함이 아니다 — `OVERVIEW_DATA_TYPES`는 운영
+3종(주문·리뷰·문의)이고 NAVER도 같다. PRODUCT는 배경 지식이지 셀러 워크플로 화면이 아니다.
+
+> **연결이 완성되는 순간 routine이 저절로 열린다.** 이 배포는 `SELLEROPS_SELF_PILOT_SCOPE=LOCAL_SINGLE_USER`
+> — 이 DB의 **모든 org**가 대상이다. `SelfPilotReconciler`는 5분마다 돌며, CONNECTED이고 전용 커넥터가
+>붙는 계정에 REVIEW/INQUIRY/ORDER_SUMMARY 중 커넥터가 지원하는 타입의 schedule을 **없을 때만** 만들고,
+> 만든 schedule은 **즉시 due**다. 따라서 첫 주문 수집이 끝나 CONNECTED가 되면 5분 안에 Coupang
+> **ORDER_SUMMARY + INQUIRY 60분 schedule이 자동 생성되어 곧바로 돈다**(REVIEW는 커넥터 미지원이라
+> 제외). 설계대로이고 NAVER·Cafe24도 이렇게 열렸다 — 그러나 **첫 연결 전에 알고 있어야 하는 사실**이지
+> 끝난 뒤에 발견할 사실이 아니다. 원치 않으면 CONNECTED 직후 해당 schedule을 끄면 되고, 꺼 둔 행은
+> reconciler가 다시 켜지 않는다.
+
+**6 · synthetic 제외.** 실측으로 확인했다 — Coupang 계정의 리뷰 화면은 `total: 0`을 반환한다.
+같은 시점 테이블에는 `DEMO_SEED` 22건이 그대로 있다. `realDataOnly` Hibernate 필터가 auto-enable이고
+가시성은 `sellerops.seed.demo-content`(기본 `false`, 이 배포에서 미설정) 하나에 묶여 있다. **쓰는 스위치와
+숨기는 스위치가 같다.**
+
+### 5b. 발견한 결함 — 텍스트 fallback 체크리스트가 반박된 계획 그대로였다
+
+`COUPANG_ISSUANCE_TUTORIAL`(`frontend/src/lib/guidedConnection/tutorial.ts`)은 셀러가 **guided 안내가
+불가능해지는 순간 자동으로 떨어지는** 화면이다(로컬 에이전트 없음 · 텍스트 전환 · 안내 종료 후).
+같은 발급을 두 번 설명하는데, 두 번째 설명이 라이브로 반박된 계획을 그대로 들고 있었다:
+
+1. **`자체개발`을 세 번째 단계로** 놓았다. 그 자리의 화면은 `사용 목적`이고 `OPEN API`(기본값)와
+   `플레이오토 웹 솔루션`뿐 — 자체개발이 없다. 진짜 컨트롤은 다섯 화면 뒤 `업체 입력 방식`의
+   `자체개발(직접입력)`이다.
+2. **업체명 / URL / 호출 IP를 발급 전에** 요구했다. 그 입력란들은 `자체개발(직접입력)`을 고른 뒤에야
+   나타난다 — 약관 동의보다 뒤다.
+3. **`발급`을 키가 만들어지는 press로** 부르고 바로 다음 단계에서 키를 복사하라고 했다. `발급`은 사용
+   목적 화면을 열 뿐이고, `약관 동의 및 Key 발급받기`는 업체 입력 화면을 열 뿐이며(라이브 2회에서 눌러
+   키가 나오지 않았다), 키는 그 화면의 `확인`이 만든다. **셀러는 아직 존재하지 않는 키를 복사하라는
+   말을 듣고 있었다.**
+
+**왜 여기만 남았는가.** Action Window copy는 cross-stack parity 테스트가 런타임 문자열에 문자 단위로
+고정하고 있어서 다섯 번의 라이브 측정이 전부 도달했다. 이 체크리스트는 **아무것도 고정하지 않았다** —
+Coupang 체크리스트를 검증하는 테스트가 저장소에 하나도 없었다.
+
+**수정.** 체크리스트를 측정된 순서로 다시 썼고(발급 → 사용 목적 → 약관 2건 → 약관 동의 및 Key
+발급받기 → 업체 입력 방식 → 업체명·URL·IP(`추가`까지) → `확인`(키 발급) → 복사), `ConnectCoupang`의
+step 1 문구도 같은 사실로 고쳤다. 그리고 **다시 어긋날 수 없게 고정**했다:
+
+- `tutorial.test.ts` — 순서·주장 9건(자체개발이 vendor 화면 앞에서 지시되지 않을 것, `발급`과 `약관
+  동의 및 Key 발급받기`가 키 생성을 주장하지 않을 것, 키 생성 press가 복사보다 앞일 것, 호출 IP 단계가
+  `추가`를 요구할 것 …).
+- `coupang-issuance-fe-copy-parity.test.ts` — **체크리스트의 화면 순서를 런타임의 측정된
+  `coupangIssuanceStepPlan()`에 고정**한다. 이제 런타임이 교정되면 체크리스트가 따라오지 않는 한
+  빌드가 깨진다. 수정 전 파일로 되돌려 실제로 실패하는 것을 확인했다(2 failed).
+
+갱신 대상이 아닌 것: 재발급(`COUPANG_RENEWAL_TUTORIAL`)은 다른 흐름이고 반박된 주장을 담고 있지 않다.
+
+### 5c. 셀러가 WING에서 해야 할 최소 행동
+
+SellerOps는 이 구간에서 **아무것도 누르지 않는다.** 발급 런타임은 구조적으로 클릭·입력·값 읽기가
+불가능하다(`coupang-issuance-guard.test.ts`가 소스 수준에서 강제).
+
+1. 쿠팡 윙 › 판매자정보 › **오픈API 키 발급**으로 이동.
+2. **`API Key 발급 받기`** — 사용 목적 화면이 열린다. *키는 아직 없다.*
+3. 사용 목적이 **`OPEN API`**(기본값)인지 확인 → **`확인`** — 약관 화면이 열린다. *키는 아직 없다.*
+4. **약관 2건을 직접 읽고 동의.** SellerOps는 읽지도 대신 동의하지도 않는다.
+5. **`약관 동의 및 Key 발급받기`** — 업체 입력 화면이 열린다. *여기까지 취소하면 계정에 남는 것이 없다.*
+6. **`업체 입력 방식` → `자체개발(직접입력)`** 선택 → URL · IP 입력란이 나타난다.
+7. 업체명 · URL 입력, **`IP 주소`에 SellerOps 고정 IP를 넣고 옆의 `추가`까지 누른다.** 누르지 않으면
+   등록되지 않고 첫 수집이 호출 IP 오류로 실패한다. IP 값은 SellerOps 화면이 그 자리에 표시한다.
+8. **`확인`** — ⚠ **여기서 실제 API 키가 발급되어 라이브 계정 상태가 바뀐다.** 되돌리려면 별도의 삭제
+   작업이 필요하다. 이 press는 반드시 판매자 본인이 한다.
+9. 화면의 **업체코드 · Access Key · Secret Key**를 SellerOps로 가져온다. Secret Key는 이때 한 번만
+   표시된다.
+
+### 5d. Coupang read-only live proof manifest (준비)
+
+**상태: 준비됨 — 실행은 셀러 행위 대기.** 저장 뒤 마켓플레이스 호출을 자동으로 돌리지 않는다.
+
+| 필드 | 값 |
+|---|---|
+| channel | `COUPANG` |
+| org / account | canonical Demo Org · 기존 `3e2ddaaa…` **재사용** (새로 만들지 않음) |
+| surface | 제품 UI `/connect/coupang` (CLI 하네스 아님) |
+| operation | 최초 연결 — credential 저장 → 연결 확인 → 첫 `ORDER_SUMMARY` 수집 |
+| mode | **`READ_ONLY`** |
+| SellerOps의 라이브 액션 | 서명된 GET만: 연결 확인 1회(`returnShippingCenters` → `ordersheets` fallback), 첫 수집 1회. **WRITE 0.** |
+| 백엔드 interlock | `CoupangLiveCallGuard.ensureLiveReadAllowed` — **standing READ grant로 이미 열려 있다**(`SELLEROPS_SELF_PILOT_READ_GRANT_ID`, 계약 §6a). per-run `…_LIVE_APPROVAL_ID`는 **필요 없고 무장돼 있지도 않다** — WRITE gate는 standing grant를 절대 받지 않으므로 write는 여전히 닫혀 있다. |
+| 셀러의 라이브 액션 | WING 키 발급 1회 (5c의 8번). SellerOps가 아니라 셀러가, 자기 브라우저에서. |
+| 되돌릴 수 없는 것 | 발급된 API 키 1개. 삭제하려면 별도 walk(`coupang_wing_key_deletion_live_v1.md`). |
+| 확인할 것 | credential 저장 · vault fingerprint == `self-pilot-1` · account binding · PENDING → PREPARING → CONNECTED · 첫 수집 rows/중복 0 · REAL provenance · secret/PII/provider-body 유출 0 |
+| 자동으로 뒤따르는 것 | CONNECTED 5분 내 self-pilot이 **ORDER_SUMMARY + INQUIRY 60분 schedule을 자동 생성**한다 (5a §5의 경고). 원치 않으면 그 자리에서 끈다. |
+
