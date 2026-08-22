@@ -134,6 +134,16 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
   private readonly sigs = new Map<ImportTarget, string>();
   /** Cached result of the one consent+download race — see the module note. */
   private consentRace: DownloadDetectResult | null = null;
+  /**
+   * The in-flight race, started when the EXPORT barrier opens rather than at consent.
+   *
+   * Detection is a race against the browser's download event, so it has to exist before the click that
+   * fires it. Starting it at the consent barrier was one barrier too late: on 2026-08-23 the run stopped
+   * before consent, the seller pressed 내보내기 anyway, and the agent's own browser received a file nothing
+   * was listening for. Held as the promise (not the result) so `waitForTargetAction("consent")` awaits the
+   * SAME race rather than starting a second one.
+   */
+  private downloadRace: Promise<DownloadDetectResult> | null = null;
   private stepNumber = 1;
   private badgeTotalSteps: number | null = null;
 
@@ -480,9 +490,24 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
    * non-detection is reported as "the seller did not act", which the engine turns into a barrier that
    * simply never advanced rather than a failure it cannot explain.
    */
+  /**
+   * Start listening for the download before the seller can produce one. Idempotent — a second call joins
+   * the race already running, because two races answer differently and only one of them can win the event.
+   */
+  async armDownloadDetection(): Promise<void> {
+    if (this.downloadRace) return;
+    this.downloadRace = this.proven.detectDownload();
+    // The promise is deliberately NOT awaited: it resolves when the seller acts, which is the whole point.
+    // A rejection is captured here so an unhandled rejection can never take the process down while the
+    // barrier is still open; `waitForTargetAction` reports it as "the seller did not act".
+    this.downloadRace = this.downloadRace.catch(() => ({ detected: false }) as DownloadDetectResult);
+  }
+
   async waitForTargetAction(target: ImportTarget): Promise<boolean> {
     if (target === "consent") {
-      this.consentRace = await this.proven.detectDownload();
+      // Join the race armed at the export barrier. Falling back to starting one here keeps a driver used
+      // without the session's arming call working exactly as before.
+      this.consentRace = await (this.downloadRace ?? this.proven.detectDownload());
       return this.consentRace.detected;
     }
     if (target === "start_date" || target === "end_date") {
@@ -639,6 +664,7 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
 
   async cleanup(): Promise<void> {
     this.consentRace = null;
+    this.downloadRace = null;
     this.sigs.clear();
     // The panel goes with the run. A finished run's instructions left on the seller's page would be the
     // in-marketplace version of the stale highlight this slice exists to remove.

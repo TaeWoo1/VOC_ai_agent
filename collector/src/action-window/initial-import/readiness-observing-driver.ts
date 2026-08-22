@@ -86,6 +86,10 @@ export class ReadinessObservingImportDriver implements ImportProbeDriver {
     return this.inner.readSelectedScope(required);
   }
 
+  armDownloadDetection(): Promise<void> {
+    return this.inner.armDownloadDetection?.() ?? Promise.resolve();
+  }
+
   detectDownload(): Promise<DownloadDetectResult> {
     return this.inner.detectDownload();
   }

@@ -50,16 +50,29 @@ public class FileParser {
         return h.strip().toLowerCase();
     }
 
+    /**
+     * Parse an upload, deciding its format from its <b>bytes</b> — the filename is not consulted.
+     *
+     * <p>It used to be, and that made the manual review-import path unable to accept the only file NAVER
+     * actually produces: the Seller Center export arrives with no filename at all, so the browser saves it
+     * as a bare UUID and {@code endsWith(".xlsx")} was false for a perfectly valid workbook. The guided
+     * path escaped it only because the runtime renames the file before uploading — so the two paths were
+     * answering "what is this file" differently, and the fallback could not rescue what the primary
+     * dropped. {@link UploadFormat} is now the single answer both use.
+     *
+     * <p>Not a loosening: a file must positively prove it is an OOXML workbook or delimited UTF-8 text.
+     * The refusal message is unchanged, and {@code filename} is kept only for diagnostics.
+     */
     public ParsedTable parse(String filename, InputStream data) {
-        String name = filename == null ? "" : filename.toLowerCase();
-        try (InputStream in = new BufferedInputStream(data)) {
-            if (name.endsWith(".xlsx")) {
-                return parseXlsx(in);
-            }
-            if (name.endsWith(".csv")) {
-                return parseCsv(in);
-            }
-            throw ApiException.badRequest("지원하지 않는 파일 형식입니다. CSV 또는 XLSX 파일을 올려주세요.");
+        try (BufferedInputStream in = new BufferedInputStream(data)) {
+            UploadFormat format = UploadFormat.detect(in);
+            return switch (format) {
+                case XLSX -> parseXlsx(in);
+                case CSV -> parseCsv(in);
+                // An outcome, not a bad request — see UnsupportedUploadFormatException.
+                case UNKNOWN -> throw new UnsupportedUploadFormatException(
+                        "지원하지 않는 파일 형식입니다. CSV 또는 XLSX 파일을 올려주세요.");
+            };
         } catch (IOException e) {
             throw ApiException.badRequest("파일을 읽지 못했습니다: " + e.getMessage());
         }

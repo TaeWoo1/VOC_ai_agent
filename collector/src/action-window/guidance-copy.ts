@@ -79,7 +79,40 @@ export function panelCommandLabel(
  * whether one remains — `nextLine` being non-empty is the frontend's answer to that, since it is the only side
  * that can see the plan.
  */
+/**
+ * A run that ended in FAILURE, still said in the marketplace page.
+ *
+ * <p>Terminal used to mean COMPLETED-or-nothing here, so a failed run projected to `null` and the panel came
+ * off the seller's screen. That is how the 2026-08-23 live run looked from where the seller was standing:
+ * the guidance simply vanished mid-journey, and with no instruction left they pressed 엑셀 내보내기 on their
+ * own. Announcing the failure only on the SellerOps card is announcing it in the window they are not
+ * looking at.
+ *
+ * <p>The runtime still authors nothing: the blocker sentence comes from the pack when the frontend named
+ * one, and when it did not, the panel carries the chrome's own blocked label and no invented explanation.
+ * A terminal run allows no commands, so it offers no buttons — the recovery is a fresh run, started from
+ * SellerOps.
+ */
+function failurePanelFrom(view: ActionWindowRunView, pack: AwGuidancePack): GuidancePanelState | null {
+  const code = view.blocker?.code ?? null;
+  const copy = code ? pack.blockers[code] : undefined;
+  return {
+    product: pack.chrome.product,
+    stepLine: "",
+    instruction: "",
+    requiredRange: "",
+    blocked: {
+      label: pack.chrome.blockedLabel,
+      title: copy?.title ?? "",
+      fix: copy?.fix ?? "",
+    },
+    completion: null,
+    actions: [],
+  };
+}
+
 function completionPanelFrom(view: ActionWindowRunView, pack: AwGuidancePack): GuidancePanelState | null {
+  if (view.status === "FAILED") return failurePanelFrom(view, pack);
   if (view.status !== "COMPLETED") return null;
   const done = pack.continuation;
   if (!done) return null;

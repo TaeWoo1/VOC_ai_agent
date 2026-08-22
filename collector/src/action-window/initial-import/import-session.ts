@@ -322,7 +322,20 @@ export class ImportSegmentSession {
       this.publishState();
       return;
     }
-    void this.fatalCleanup();
+    // Anything else is a fault we cannot interpret — and the ONE thing it must not be is invisible.
+    // This used to be a bare `fatalCleanup()`: the panel was unmounted, no RUN_FAILED was emitted, and the
+    // stage stayed where it had got to, so the run became a silent PENDING on a page where the seller was
+    // still standing (live, 2026-08-23 — the export locate threw right after the scope gate passed). The
+    // failure is now stated in the panel the seller is reading, and only the highlight comes off: leaving a
+    // spotlight on a control nothing is waiting for is the defect the clear exists for, while unmounting the
+    // panel is what made the run silent.
+    log("aw_import_runtime_fault", { reason: errName(e) }, "warn");
+    this.engine.runtimeFault();
+    this.publishState();
+    this.queuePanelRender();
+    void this.driver
+      .clearTargetHighlight()
+      .catch((err) => log("aw_import_fault_clear_failed", { reason: errName(err) }, "warn"));
   }
 
   /** Arm (or re-arm) the PREPARE watchdog for the current prepare. A `0` guard disables it (offline tests). */
@@ -383,6 +396,15 @@ export class ImportSegmentSession {
       if (!this.reachedReady) {
         this.reachedReady = true;
         recordStage("READY");
+      }
+      // **Arm the download listener BEFORE the export barrier opens.** The detector is a race against the
+      // browser's download event, and it used to be started at the CONSENT barrier — one barrier too late.
+      // A seller who pressed 내보내기 before the consent highlight appeared (or on a run that never reached
+      // it) produced a download nothing was listening for, and `detectDownload` fails closed rather than
+      // start a second race that could contradict the first. So the file arrived in the agent's own browser
+      // and was structurally unseeable. Armed here, the seller cannot get ahead of it.
+      if (effect.observe === "export") {
+        await this.driver.armDownloadDetection?.();
       }
       await this.driver.armTargetObserve(effect.observe);
       void this.watchBarrier(effect.observe);

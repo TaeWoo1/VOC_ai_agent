@@ -87,4 +87,14 @@ describe("SegmentImportPanel — the scope-confirmation gate", () => {
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
     expect(onImported).not.toHaveBeenCalled();
   });
+
+  it("lets the seller pick the file NAVER actually gave them — no extension", async () => {
+    // NAVER's export has no filename, so the browser saves it as a bare UUID. An `accept=".xlsx,.csv"`
+    // filter greys that file out in the picker, which made this fallback unable to accept the one file it
+    // exists for (measured live, 2026-08-23). Format is decided server-side from the bytes instead.
+    render(<SegmentImportPanel segment={segment} onImported={() => {}} />);
+
+    const input = screen.getByLabelText("내보낸 리뷰 파일");
+    expect(input).not.toHaveAttribute("accept");
+  });
 });

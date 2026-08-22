@@ -55,8 +55,12 @@ export function SegmentImportPanel({
         NAVER에서 <span className="font-semibold">{rangeText}</span> 범위를 직접 내보낸 뒤 파일을 올려 주세요.
       </p>
       <p className="mt-1 text-sm text-muted break-keep">
-        내보내기·확인 클릭은 항상 판매자가 직접 합니다(자동 클릭 없음). 내보내기 화면에서 실제 범위(readExportScope)가
+        내보내기·확인 클릭은 항상 판매자가 직접 합니다(자동 클릭 없음). 내보내기 화면에서 실제 범위가
         이 구간과 같은지 확인하세요.
+      </p>
+      <p className="mt-1 text-sm text-muted break-keep">
+        NAVER에서 받은 파일은 이름에 확장자가 없을 수 있습니다. 그대로 올리시면 됩니다 — 파일 내용을 보고
+        엑셀/CSV인지 확인합니다.
       </p>
 
       <label className="mt-3 flex items-start gap-2 text-sm text-ink">
@@ -76,7 +80,11 @@ export function SegmentImportPanel({
         <input
           ref={inputRef}
           type="file"
-          accept=".xlsx,.csv"
+          // No `accept` filter, deliberately. NAVER's review export arrives with no filename at all, so
+          // the browser saves it as a bare UUID — and `accept=".xlsx,.csv"` greys that file out in the
+          // picker, making the fallback unable to accept the one file it exists for (measured live,
+          // 2026-08-23). The server decides format from the bytes (`UploadFormat`), which is a stronger
+          // check than an extension ever was, and refuses anything else with a legible failure.
           aria-label="내보낸 리뷰 파일"
           onChange={(e) => setFile(e.target.files?.[0] ?? null)}
           className="text-sm text-ink file:mr-3 file:rounded-lg file:border-0 file:bg-surface file:px-3 file:py-2 file:text-sm file:text-ink"

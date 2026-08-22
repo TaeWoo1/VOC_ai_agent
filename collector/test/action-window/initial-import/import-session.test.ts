@@ -118,6 +118,9 @@ describe("import segment session — the happy path", () => {
       "scope:2026-01-01..2026-01-31",
       "locate:export",
       "highlight:export",
+      // Armed BEFORE the barrier opens: the download race has to exist before the click that fires it.
+      // It used to start at the consent barrier, one barrier too late (live, 2026-08-23).
+      "armDownloadDetection",
       "observe:export",
       "wait:export",
       "locate:consent",

@@ -275,6 +275,16 @@ export const BLOCKER_CODES = [
   "OVERLAY_NOT_VISIBLE",
   "SURFACE_CLOSED",
   /**
+   * A driver fault the run cannot interpret — terminal, and not one of the recoverable parks above.
+   *
+   * It exists so an unexplainable failure is still SAID. A guided import used to answer an unexpected driver
+   * throw by tearing down silently: the marketplace-page guidance panel was unmounted, no {@code RUN_FAILED}
+   * was emitted, and the run stayed pending with an unspent ticket (live, 2026-08-23). The seller was left
+   * mid-journey with no instruction and acted anyway. A run that cannot continue has to say so where the
+   * seller is standing; the recovery is a fresh run on the same segment.
+   */
+  "RUNTIME_FAULT",
+  /**
    * The runtime could not determine whether the account already holds an API credential, so an issuance walk
    * that ends at a key-creating control will not proceed. Recoverable: a re-check re-reads the surface.
    */

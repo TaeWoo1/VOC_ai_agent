@@ -182,6 +182,15 @@ export class LazyImportDriver implements ImportProbeDriver {
     return (await this.surface()).readSelectedScope(required);
   }
 
+  /**
+   * Forwarded like every other call, and it matters more than most: the download race has to be armed
+   * before the export barrier opens, so a lazy driver that quietly dropped it would put the listener back
+   * one barrier late — the exact defect this method exists to close.
+   */
+  async armDownloadDetection(): Promise<void> {
+    await (await this.surface()).armDownloadDetection?.();
+  }
+
   async detectDownload(): Promise<DownloadDetectResult> {
     return (await this.surface()).detectDownload();
   }

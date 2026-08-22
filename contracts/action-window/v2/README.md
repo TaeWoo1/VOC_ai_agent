@@ -80,7 +80,9 @@ absent value fails closed rather than defaulting.
 - **ExecutionMode:** `AUTOMATIC_OPERATION · ACTION_WINDOW · FILE_IMPORT · INTEGRATION_PENDING`.
 - **BlockerCode:** `LOGIN_REQUIRED · UI_DRIFT · TARGET_NOT_FOUND · TARGET_AMBIGUOUS ·
   SESSION_EXPIRED · UNSUPPORTED_STATE · DOWNLOAD_TIMEOUT · ARTIFACT_INVALID · SCOPE_MISMATCH ·
-  INGEST_FAILED`, plus the **Guided Acquisition Reliability** codes (2026-07-27) `SURFACE_OPEN_FAILED ·
+  INGEST_FAILED · RUNTIME_FAULT` (the last one terminal — a driver fault the run cannot interpret, added
+  2026-08-23 so an unexplainable failure is still SAID rather than torn down silently), plus the
+  **Guided Acquisition Reliability** codes (2026-07-27) `SURFACE_OPEN_FAILED ·
   PREPARE_NOT_STARTED · SURFACE_SETTLE_TIMEOUT · GUIDANCE_PACK_REJECTED · OVERLAY_MOUNT_FAILED ·
   OVERLAY_NOT_VISIBLE · SURFACE_CLOSED` — the seller-facing projection of the sanitized
   `AcquisitionFailureState` diagnostics (`../../acquisition/v1/reliability`), each a *recoverable* park

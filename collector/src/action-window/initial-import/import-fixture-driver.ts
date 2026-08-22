@@ -52,6 +52,14 @@ export interface ImportFixtureScript {
   /** When set, `prepareSurface` never resolves nor rejects — models the surface that just never comes up, the
    * case the session's PREPARE watchdog is the last backstop for. */
   prepareHang?: boolean;
+  /**
+   * Throw a PLAIN error (not a {@link ReliabilityFailure}) from `locateTarget` for these targets.
+   *
+   * Models the live 2026-08-23 fault: the export locate threw something the session could not classify,
+   * right after the scope gate reported MATCH. The distinction from `highlightFail` is the whole point —
+   * a reliability failure parks recoverably, and this one used to be swallowed into a silent teardown.
+   */
+  locateThrow?: Partial<Record<ImportTarget, string>>;
 }
 
 /** Deterministic 16-hex signature per target — opaque, and stable across a run so drift is detectable. */
@@ -127,6 +135,8 @@ export class ImportFixtureDriver implements ImportProbeDriver {
 
   async locateTarget(target: ImportTarget): Promise<LocateResult> {
     this.calls.push(`locate:${target}`);
+    const thrown = this.script.locateThrow?.[target];
+    if (thrown) throw new Error(thrown);
     return this.script.locate?.[target] ?? { count: 1, sig: sigFor(target) };
   }
 
@@ -158,6 +168,12 @@ export class ImportFixtureDriver implements ImportProbeDriver {
     // driver's rule that raw selected dates do not leave the read.
     this.calls.push(`scope:${required.start}..${required.end}`);
     return this.script.scope ?? "MATCH";
+  }
+
+  async armDownloadDetection(): Promise<void> {
+    // Recorded, not simulated: what the ordering test needs is that this happened BEFORE the export
+    // barrier was opened to the seller.
+    this.calls.push("armDownloadDetection");
   }
 
   async detectDownload(): Promise<DownloadDetectResult> {

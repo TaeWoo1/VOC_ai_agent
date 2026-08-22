@@ -140,9 +140,37 @@ describe("guidancePanelStateFrom", () => {
   });
 
   it("hides the panel on a terminal run rather than leaving its last instruction up", () => {
-    for (const status of ["COMPLETED", "FAILED", "CANCELLED", "OPERATOR_REPORTED"] as const) {
+    // FAILED is deliberately NOT here any more — see the test below.
+    for (const status of ["COMPLETED", "CANCELLED", "OPERATOR_REPORTED"] as const) {
       expect(guidancePanelStateFrom(view({ status }), PACK), status).toBeNull();
     }
+  });
+
+  /**
+   * **A failed run says so where the seller is standing.**
+   *
+   * FAILED used to project to `null` like every other non-COMPLETED terminal status, so the panel came off
+   * the marketplace page the moment a run died. That is what the 2026-08-23 live run looked like from the
+   * seller's side: guidance vanished mid-journey with no explanation, and they pressed 엑셀 내보내기 on
+   * their own — producing a download the run was no longer listening for. Announcing a failure only on the
+   * SellerOps card announces it in the window they are not looking at.
+   */
+  it("keeps the panel on a FAILED run and shows that it stopped", () => {
+    const state = guidancePanelStateFrom(view({ status: "FAILED" }), PACK);
+
+    expect(state).not.toBeNull();
+    expect(state?.blocked?.label).toBe(PACK.chrome.blockedLabel);
+    // Terminal ⇒ no commands, so no buttons. The recovery is a fresh run, started from SellerOps.
+    expect(state?.actions).toEqual([]);
+    expect(state?.completion).toBeNull();
+  });
+
+  /** …and the runtime still authors nothing: an unnamed blocker leaves the copy empty, never invented. */
+  it("writes no sentence of its own for a blocker the frontend did not name", () => {
+    const state = guidancePanelStateFrom(view({ status: "FAILED", blocker: { code: "RUNTIME_FAULT", recoverable: false } }), PACK);
+
+    expect(state?.blocked?.title).toBe("");
+    expect(state?.blocked?.fix).toBe("");
   });
 
   /** Guidance off is the seller asking not to be guided. It must silence the marketplace-side panel too. */
@@ -207,9 +235,13 @@ describe("guidancePanelStateFrom — a finished segment hands on to the next", (
    * panel comes down exactly as before.
    */
   it("hands nothing on from a run that did not complete", () => {
-    for (const status of ["FAILED", "CANCELLED", "OPERATOR_REPORTED"] as const) {
+    for (const status of ["CANCELLED", "OPERATOR_REPORTED"] as const) {
       expect(guidancePanelStateFrom(view({ status }), withContinuation()), status).toBeNull();
     }
+    // FAILED keeps a panel now, but it is a stop notice — never a hand-off to the next segment.
+    const failed = guidancePanelStateFrom(view({ status: "FAILED" }), withContinuation());
+    expect(failed?.completion).toBeNull();
+    expect(failed?.actions).toEqual([]);
   });
 
   it("stays silent when the frontend sent no continuation at all", () => {

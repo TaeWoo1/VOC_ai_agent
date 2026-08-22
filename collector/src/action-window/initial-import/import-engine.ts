@@ -77,6 +77,10 @@ export type ImportBlockerCode =
   | "DOWNLOAD_TIMEOUT"
   | "ARTIFACT_INVALID"
   | "INGEST_FAILED"
+  // A driver fault the run cannot interpret. Terminal, and NOT a reliability park — the recoverable parks
+  // each name a known stall with a known repair, and inventing a repair for an unknown cause would be a
+  // guess. See ImportSegmentEngine#runtimeFault for why it must nonetheless be visible.
+  | "RUNTIME_FAULT"
   // Guided Acquisition Reliability parks — every one a place the run used to fall silent. All recoverable
   // (re-check re-runs PREPARE). `SESSION_NOT_READY` is deliberately absent: a login/expired session already
   // has `LOGIN_REQUIRED` / `SESSION_EXPIRED`, so it reuses those rather than a redundant code.
@@ -549,6 +553,25 @@ export class ImportSegmentEngine {
     this.emit("RUN_BLOCKED", { code, recoverable: true });
     this.emit("RUN_STATUS_CHANGED", { status: "WAITING_FOR_HUMAN" });
     return "NONE";
+  }
+
+  /**
+   * **A driver fault the run cannot interpret — and must still SHOW.**
+   *
+   * The session used to answer an unexpected driver throw with a silent teardown: the guidance panel was
+   * unmounted, no `RUN_FAILED` was emitted, and the stage stayed wherever it had got to. Measured live on
+   * 2026-08-23 — the export locate threw after the scope gate reported MATCH, the panel vanished from the
+   * seller's marketplace page mid-run, and the run sat as a **silent PENDING** with an unspent ticket. The
+   * seller, left with no instruction, exported by hand; the download listener had never been armed, so the
+   * file their own browser received could not be seen.
+   *
+   * A run that cannot continue has to say so where the seller is standing. This is terminal — the cause is
+   * by definition not one of the recoverable stalls — so the recovery is a fresh run on the same segment,
+   * which the card offers once it sees the failure.
+   */
+  runtimeFault(): ImportEffect {
+    if (this.isTerminal()) return "NONE";
+    return this.fail("RUNTIME_FAULT");
   }
 
   private fail(code: ImportBlockerCode): ImportEffect {

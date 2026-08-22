@@ -124,6 +124,20 @@ export interface ImportProbeDriver {
    */
   readSelectedScope(required: RequiredRange): Promise<ScopeMatch>;
 
+  /**
+   * **Start listening for the download before the seller can produce one.** Optional.
+   *
+   * Detection is a race against the browser's download event, so it has to exist before the click that
+   * fires it. It used to be started inside the consent barrier — one barrier too late — and a seller who
+   * pressed 내보내기 first produced a download nothing was listening for. Because {@link #detectDownload}
+   * fails closed rather than start a second race (two races answer differently), that file was structurally
+   * unseeable even though the agent's own browser had received it. The session calls this as the export
+   * barrier opens; {@link #detectDownload} then reports whatever it caught.
+   *
+   * Idempotent: arming twice must not start a second race. Drivers with no browser omit it.
+   */
+  armDownloadDetection?(): Promise<void>;
+
   /** Observe whether the seller's clicks produced a download. Never triggers one. */
   detectDownload(): Promise<DownloadDetectResult>;
 

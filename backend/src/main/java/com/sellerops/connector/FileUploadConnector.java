@@ -20,6 +20,7 @@ import com.sellerops.ingest.map.OrderSummaryRowMapper;
 import com.sellerops.ingest.map.ReviewRowMapper;
 import com.sellerops.ingest.map.RowError;
 import com.sellerops.ingest.parse.FileParser;
+import com.sellerops.ingest.parse.UnsupportedUploadFormatException;
 import com.sellerops.ingest.parse.ParsedTable;
 import com.sellerops.ingest.IngestFollowUp;
 import com.sellerops.sync.SyncJob;
@@ -137,6 +138,11 @@ public class FileUploadConnector implements ChannelConnector {
 
             return finish(job, channelCode, type, resolvedMethod, outcome.success(), outcome.skipped(),
                     failed, errorMessage, sample(allErrors));
+        } catch (UnsupportedUploadFormatException e) {
+            // The bytes are not a readable export. That is this RUN's outcome, so it lands as a recorded
+            // FAILED attempt with its reason rather than a 400 with no trace — the seller sees a failure
+            // they can retry, and a parse failure never reads as an honest zero.
+            return finish(job, channelCode, type, resolvedMethod, 0, 0, 0, e.getMessage(), List.of());
         } catch (ApiException e) {
             finish(job, channelCode, type, resolvedMethod, 0, 0, 0, e.getMessage(), List.of());
             throw e;

@@ -674,6 +674,62 @@ NAVER는 `Content-Disposition`에 파일명을 주지 않아 다운로드가 **�
 월 단위 segmentation 최적화(한 번에 되는 크기면 한 구간)는 **Connection/Acquisition UX Polish
 backlog**로 분리한다. 그것들은 불편이고, 위 둘은 완주 불가다.
 
+## 4h. NAVER Review Acquisition Completion Hardening (2026-08-23) — 마켓플레이스 접촉 0회
+
+§4g가 기록한 **completion blocker 2개만** 고친다. UI 발견성·화면 복잡도·월 단위 segmentation은 섞지
+않았다(그 셋은 Connection/Acquisition UX Polish backlog).
+
+### A. guided flow가 완주하거나, 못 한다고 말한다
+
+**찾은 것은 두 층이었다.**
+
+1. `onDriveError`가 분류하지 못한 driver fault를 **조용한 teardown**으로 처리했다 — 패널을 내리고,
+   `RUN_FAILED`도 emit하지 않고, stage는 있던 자리에 그대로. 그게 silent PENDING의 정체다.
+2. 설령 실패를 emit했더라도 **패널에는 아무것도 안 뜬다**. `guidancePanelStateFrom`이 COMPLETED가
+   아닌 모든 terminal 상태를 `null`로 투영하고 있었다. 즉 실패는 **셀러가 보고 있지 않은 창**
+   (SellerOps 카드)에만 알려졌다.
+
+| 고친 것 | |
+|---|---|
+| `RUNTIME_FAULT` blocker code | terminal이고 recoverable park이 **아니다** — 원인을 모르는데 복구법을 지어내지 않는다 |
+| `ImportSegmentEngine#runtimeFault()` | 세션이 명시적으로 실패시킨다. `RUN_BLOCKED` + `RUN_FAILED` |
+| `onDriveError` | teardown 대신 **fail → publish → 패널 다시 그림 → 하이라이트만 제거**. 패널은 남는다 |
+| `failurePanelFrom` | FAILED도 패널을 투영한다. 런타임은 여전히 **한 문장도 짓지 않는다** — 프론트가 이름 붙이지 않은 blocker는 chrome의 `blockedLabel`만 남고 설명은 비워 둔다 |
+
+**download listener를 export barrier에서 무장한다.** 감지는 브라우저 download 이벤트와의 race이므로
+그것을 발생시킬 클릭보다 **먼저 존재해야 한다.** consent barrier에서 시작하던 것을 한 단계 앞으로
+옮겼다(`armDownloadDetection`, idempotent — race 두 개는 서로 다른 답을 내고 하나만 이벤트를 잡는다).
+이제 셀러가 안내보다 앞서가도 파일은 잡힌다.
+
+### B. 확장자 없는 NAVER export
+
+파일명을 **믿지 않는다**. `UploadFormat`이 바이트로 판정하고, **자동 경로와 수동 경로가 같은 계약을
+공유**한다(둘 다 백엔드 `FileParser`를 지난다 — 자동 경로가 자기 파일명을 붙여 통과하던 것이 drift의
+정체였다).
+
+| 판정 | 조건 |
+|---|---|
+| `XLSX` | ZIP local header **그리고** OOXML `[Content_Types].xml` 마커 |
+| `CSV` | 엄격한 UTF-8 디코딩 + 비어 있지 않은 첫 줄 + 그 줄에 구분자 |
+| `UNKNOWN` | 그 외 전부 — JPEG·PDF·일반 ZIP·빈 파일·산문 |
+
+**느슨한 우회가 아니다.** 파일은 둘 중 하나임을 적극적으로 증명해야 하고, `accept=".xlsx,.csv"`가
+사라진 자리를 바이트 검증이 대신한다(확장자보다 강한 검사다). 읽을 수 없는 파일은 **기록된 FAILED
+attempt**가 된다 — 400 토스트로 흔적 없이 사라지지 않는다(`UnsupportedUploadFormatException`).
+"읽지 못했다"가 "아무것도 없었다"로 읽히지 않아야 한다는 기존 불변식 그대로다.
+
+fixture는 **합성**이다. 실제 export의 헤더 행(컬럼명은 개인정보가 아니다)에 지어낸 셀을 넣어
+테스트가 워크북을 직접 만든다 — 저장소에 고객 리뷰 원문은 한 바이트도 들어가지 않는다.
+
+### 회귀
+
+| | |
+|---|---|
+| collector | **9,159** 통과 / 150 skip |
+| backend | **2,679** 통과 / 22 skip |
+| frontend | **2,237** 통과 |
+| 새 fence가 수정 전 코드에서 실패함 | **확인** — A는 5개, B는 파서 계약 전체 |
+
 ## 5. 아직 라이브 경계 너머에 있는 것
 
 이 문서가 기록하는 작업에서 **마켓플레이스 접촉은 0회**였다. 남은 것은 전부 셀러/운영자의 행위가
