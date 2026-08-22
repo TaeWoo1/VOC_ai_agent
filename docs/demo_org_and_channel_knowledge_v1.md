@@ -193,6 +193,27 @@ Operator tool 3개, 전부 READ:
   `CHANNEL_KNOWLEDGE`를 선언하므로, 채널 자체에 대한 목표만 여기로 라우팅된다.
 - LLM-first planning invariant는 그대로다. planner가 계획을 세울 수 없으면 run은 실패한다.
 
+## 4a. 라이브 검증 기록 (2026-08-22)
+
+세 번의 승인된 라이브 run과 그 결과. 행 단위 기록은 `docs/evidence/INDEX.md` §1.
+
+| 무엇 | 결과 |
+|---|---|
+| **OAuth 재동의** | 기존 account 재사용(중복 0) · credential `OK` · **granted scope 3종 확인** — 요청이 아니라 몰이 부여한 값 |
+| **PRODUCT 1회 read** | 144 listings · 이름/가격/판매상태 100% · **URL·옵션·카테고리 0** (목록 리소스 미제공) |
+| **INQUIRY routine 창** | primary가 `o113` → `s2026-08-08:e2026-08-22:r1` · backfill 불변 · 0건이 정상 |
+| **첫 automatic cycle** | ORDER 7 · INQUIRY 0 · REVIEW 수신1/저장0/skip1 · 재관측 proof · ERROR 0 |
+
+**타임스탬프 계약 (V58·V59).** `observedAt` = SellerOps가 읽은 시각(모든 채널 동일).
+`sourceUpdatedAt` = 채널이 말하는 최종 변경 시각, 없으면 **null**. freshness는 전자로만 판정한다.
+셋이 한 컬럼이었을 때 2.1초 만에 읽은 144건이 전부 `STALE`로 보고됐다 — 상품의 나이와 읽기의 신선도를
+혼동한 것이다. 기존 행 보정은 관측 시각이 **기록된 경우에만**(run이 자기 행을 만든 `created_at`) 수행했다.
+
+**Product 귀속 계약.** 리뷰는 **카탈로그를 통해서만** 상품에 연결된다(`channel_products.external_product_id`).
+resolve-or-create는 금지 — `product_no`를 SKU로 삼아 만들면 이름이 자기 번호인 상품("24", "181")이 생기고
+Product Knowledge가 그것을 판매 중인 상품으로 센다. 카탈로그가 모르는 `product_no`는 **unresolved로 남긴다**;
+article이 `product_no`를 보존하므로 다음 카탈로그 read가 무료로 relink한다.
+
 ## 5. 아직 라이브 경계 너머에 있는 것
 
 이 문서가 기록하는 작업에서 **마켓플레이스 접촉은 0회**였다. 남은 것은 전부 셀러/운영자의 행위가
