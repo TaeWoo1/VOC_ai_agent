@@ -441,4 +441,19 @@ class NaverApiConnectorTest {
         assertThat(page.rateLimited()).isTrue();
         assertThat(page.nextCursorValue()).isEqualTo(resumeCursor);
     }
+
+    @Test
+    void backfillCursorSeedsOnlyOrderSummary_andRefusesAnInvertedRange() {
+        assertThat(connector.backfillCursor(DataType.ORDER_SUMMARY,
+                java.time.LocalDate.of(2026, 8, 8), java.time.LocalDate.of(2026, 8, 22)))
+                .isPresent();
+        // PRODUCT is a catalogue snapshot, not a time range — a windowed backfill is not its shape,
+        // and returning empty makes the executor fail the run closed instead of sweeping everything.
+        assertThat(connector.backfillCursor(DataType.PRODUCT,
+                java.time.LocalDate.of(2026, 8, 8), java.time.LocalDate.of(2026, 8, 22)))
+                .isEmpty();
+        assertThat(connector.backfillCursor(DataType.ORDER_SUMMARY,
+                java.time.LocalDate.of(2026, 8, 22), java.time.LocalDate.of(2026, 8, 8)))
+                .isEmpty();
+    }
 }

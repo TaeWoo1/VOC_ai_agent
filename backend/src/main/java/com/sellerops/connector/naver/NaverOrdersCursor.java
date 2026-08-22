@@ -44,6 +44,16 @@ import java.util.TreeMap;
  * accumulates this window's boundary-stamped product orders;
  * {@link #advanced} promotes them to {@code dedupeIds}, which the next window
  * skips — bounded (boundary-exact timestamps only), so the cursor stays small.
+ *
+ * <p><b>{@code bounds}</b> — present only on an operator's bounded window (a
+ * {@code backfill}-lane run), absent (null) on the routine stream, where it changes
+ * nothing. A routine cursor walks 24h at a time until it reaches "now" and has no
+ * other end; a bounded run needs one, or an operator asking for two recent weeks gets
+ * a walk from wherever the cursor happened to be stuck. It also pins the emission
+ * floor to the operator's own start date: without that, the {@link #DAY_TOTAL_RETENTION_DAYS}
+ * carry lets the first window emit totals for the two days BEFORE the requested range,
+ * counting only the orders that happened to change inside it — and ingestion overwrites
+ * daily totals by (channel, date), so a partial recount would replace a complete one.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 record NaverOrdersCursor(
@@ -53,7 +63,27 @@ record NaverOrdersCursor(
         String moreSequence,
         Map<String, DayTotal> dayTotals,
         List<String> dedupeIds,
-        List<String> edgeIds) {
+        List<String> edgeIds,
+        Bounds bounds) {
+
+    /**
+     * An operator's explicit window. {@code from} is the first KST calendar date whose
+     * daily total this run may write; {@code toExclusive} is the instant the walk stops at.
+     *
+     * @param from        inclusive KST calendar date — the emission floor
+     * @param toExclusive ISO instant (this cursor's wire format) the walk never passes
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record Bounds(String from, String toExclusive) {
+
+        LocalDate fromDate() {
+            return LocalDate.parse(from);
+        }
+
+        Instant toInstant() {
+            return OffsetDateTime.parse(toExclusive).toInstant();
+        }
+    }
 
     /** Officially confirmed maximum query window. */
     static final Duration MAX_WINDOW = Duration.ofHours(24);
@@ -99,7 +129,28 @@ record NaverOrdersCursor(
     static NaverOrdersCursor probeWindow(Instant now, ZoneId zone, Duration span) {
         Instant from = now.minus(span);
         return new NaverOrdersCursor(
-                iso(from, zone), iso(now, zone), null, null, Map.of(), List.of(), List.of());
+                iso(from, zone), iso(now, zone), null, null, Map.of(), List.of(), List.of(), null);
+    }
+
+    /**
+     * Seed for an operator's bounded window over {@code [startDate, endDate]} (inclusive KST
+     * calendar dates), starting at the range's first instant and walking no further than its
+     * last. Capped at {@code now}: a range reaching into the future would otherwise ask NAVER
+     * for a window it cannot answer.
+     *
+     * <p>Lives on its own cursor lane, so the routine stream's place is untouched — the point
+     * of the whole thing. An operator reading the last two weeks must not become the routine
+     * cursor's new idea of where it is.
+     */
+    static NaverOrdersCursor bounded(LocalDate startDate, LocalDate endDate, Instant now, ZoneId zone) {
+        Instant from = startDate.atStartOfDay(zone).toInstant();
+        Instant toExclusive = endDate.plusDays(1).atStartOfDay(zone).toInstant();
+        if (toExclusive.isAfter(now)) {
+            toExclusive = now;
+        }
+        return new NaverOrdersCursor(
+                iso(from, zone), iso(windowEnd(from, toExclusive), zone), null, null,
+                Map.of(), List.of(), List.of(), new Bounds(startDate.toString(), iso(toExclusive, zone)));
     }
 
     /** First-ever cursor: one backfill window ending now. */
@@ -107,7 +158,7 @@ record NaverOrdersCursor(
         Instant from = now.minus(INITIAL_BACKFILL);
         return new NaverOrdersCursor(
                 iso(from, zone), iso(windowEnd(from, now), zone), null, null,
-                Map.of(), List.of(), List.of());
+                Map.of(), List.of(), List.of(), null);
     }
 
     /**
@@ -124,7 +175,7 @@ record NaverOrdersCursor(
                                 Map<String, DayTotal> mergedTotals,
                                 List<String> newEdgeIds, List<String> nextDedupeIds) {
         return new NaverOrdersCursor(windowFrom, windowTo, nextMoreFrom, nextMoreSequence,
-                mergedTotals, nextDedupeIds, union(edgeIds, newEdgeIds));
+                mergedTotals, nextDedupeIds, union(edgeIds, newEdgeIds), bounds);
     }
 
     /**
@@ -134,12 +185,12 @@ record NaverOrdersCursor(
     NaverOrdersCursor advanced(Instant now, ZoneId zone,
                                Map<String, DayTotal> mergedTotals, List<String> newEdgeIds) {
         Instant nextFrom = windowToInstant();
-        Instant nextTo = windowEnd(nextFrom, now);
+        Instant nextTo = windowEnd(nextFrom, limit(now));
         LocalDate pruneBefore = nextFrom.atZone(zone).toLocalDate().minusDays(DAY_TOTAL_RETENTION_DAYS);
         Map<String, DayTotal> pruned = new TreeMap<>(mergedTotals);
         pruned.keySet().removeIf(date -> LocalDate.parse(date).isBefore(pruneBefore));
         return new NaverOrdersCursor(iso(nextFrom, zone), iso(nextTo, zone), null, null,
-                pruned, union(edgeIds, newEdgeIds), List.of());
+                pruned, union(edgeIds, newEdgeIds), List.of(), bounds);
     }
 
     /**
@@ -154,8 +205,17 @@ record NaverOrdersCursor(
      */
     NaverOrdersCursor withWindowThrough(Instant now, ZoneId zone) {
         Instant from = windowFromInstant();
-        return new NaverOrdersCursor(iso(from, zone), iso(windowEnd(from, now), zone),
-                moreFrom, moreSequence, dayTotals, dedupeIds, edgeIds);
+        return new NaverOrdersCursor(iso(from, zone), iso(windowEnd(from, limit(now)), zone),
+                moreFrom, moreSequence, dayTotals, dedupeIds, edgeIds, bounds);
+    }
+
+    /** How far this cursor may read: "now", or the operator's end bound when it is nearer. */
+    private Instant limit(Instant now) {
+        if (bounds == null) {
+            return now;
+        }
+        Instant end = bounds.toInstant();
+        return end.isBefore(now) ? end : now;
     }
 
     Instant windowFromInstant() {
@@ -172,12 +232,22 @@ record NaverOrdersCursor(
 
     /** True when this cursor has caught up to {@code now} (nothing to query yet). */
     boolean isCaughtUp(Instant now) {
-        return !isContinuation() && !windowFromInstant().isBefore(now);
+        return !isContinuation() && !windowFromInstant().isBefore(limit(now));
     }
 
     /** Dates before this are final — their items are skipped, never re-emitted. */
     LocalDate emissionHorizon(ZoneId zone) {
-        return windowFromInstant().atZone(zone).toLocalDate().minusDays(DAY_TOTAL_RETENTION_DAYS);
+        LocalDate carried = windowFromInstant().atZone(zone).toLocalDate().minusDays(DAY_TOTAL_RETENTION_DAYS);
+        if (bounds == null) {
+            return carried;
+        }
+        // A bounded run never writes a daily total for a date outside the range it was asked for.
+        // The two-day carry is there so a routine window's partial recount converges; for a window
+        // that starts cold at an operator's date it would instead emit the two preceding days
+        // counting only the orders that changed inside the range — and ingestion overwrites by
+        // (channel, date), so that lands as a complete-looking undercount.
+        LocalDate floor = bounds.fromDate();
+        return carried.isBefore(floor) ? floor : carried;
     }
 
     private static List<String> union(List<String> base, List<String> additions) {

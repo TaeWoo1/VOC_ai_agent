@@ -513,6 +513,18 @@ public class NaverOrdersClient {
         return cursor;
     }
 
+    /**
+     * The serialized seed for an operator's bounded ORDER_SUMMARY window over
+     * {@code [startDate, endDate]} (inclusive KST calendar dates). The executor writes it to
+     * the {@code backfill} cursor lane, so the routine stream keeps its own place.
+     *
+     * <p>Serialization lives here because this class owns the cursor's wire format — a seed
+     * built anywhere else would be a second place for the format to be wrong.
+     */
+    public String boundedWindowSeed(LocalDate startDate, LocalDate endDate) {
+        return serialize(NaverOrdersCursor.bounded(startDate, endDate, clock.instant(), KST));
+    }
+
     private String serialize(NaverOrdersCursor cursor) {
         try {
             return mapper.writeValueAsString(cursor);

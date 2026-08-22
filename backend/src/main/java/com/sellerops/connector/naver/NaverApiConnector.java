@@ -11,7 +11,9 @@ import com.sellerops.connector.VerifyContext;
 import com.sellerops.connector.VerifyOutcome;
 import com.sellerops.credential.CredentialVault;
 import com.sellerops.credential.DecryptedCredential;
+import java.time.LocalDate;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -109,6 +111,27 @@ public class NaverApiConnector implements PullConnector, ConnectionVerifier {
                         + " brand/manufacturer, category, option combinations) for the Product Knowledge"
                         + " layer — read-only, page-indexed, NEEDS_VERIFICATION."
                         + " REVIEW has no official API; INQUIRY/SALES deferred.");
+    }
+
+    /**
+     * Seed a bounded ORDER_SUMMARY window for an operator's explicit date range.
+     *
+     * <p>Without this, the only way to read NAVER orders was to resume the routine cursor from
+     * wherever it stood — which on the canonical demo org meant walking 70 days forward from a
+     * position frozen in June to answer a question about this week. A bounded run reads the range
+     * it was asked for, on its own cursor lane, and leaves the routine stream's place alone.
+     *
+     * <p>PRODUCT self-windows (it is a catalogue snapshot, not a time range) and the remaining
+     * types are not collected here, so both return empty and the executor fails the run closed
+     * rather than falling through to an unbounded sweep.
+     */
+    @Override
+    public Optional<String> backfillCursor(DataType dataType, LocalDate startDate, LocalDate endDate) {
+        if (dataType != DataType.ORDER_SUMMARY || startDate == null || endDate == null
+                || endDate.isBefore(startDate)) {
+            return Optional.empty();
+        }
+        return Optional.of(ordersClient.boundedWindowSeed(startDate, endDate));
     }
 
     @Override

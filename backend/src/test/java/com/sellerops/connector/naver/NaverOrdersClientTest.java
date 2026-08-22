@@ -116,6 +116,71 @@ class NaverOrdersClientTest {
         }
     }
 
+    /**
+     * The bounded lane exists because the only way to read NAVER orders was to resume the routine
+     * cursor from wherever it stood. On the canonical demo org that meant walking 70 days forward
+     * from a position frozen in June to answer a question about this week.
+     */
+    @Test
+    void aBoundedWindowStartsAtTheRequestedDateAndStopsAtIt() {
+        // NOW is 2026-06-12 15:00 KST. Ask for a two-day range that ENDS before now.
+        String seed = client.boundedWindowSeed(LocalDate.of(2026, 6, 9), LocalDate.of(2026, 6, 10));
+        http.enqueue(FakeNaverHttpClient.ok(lcsBody(null)));
+
+        FetchPage first = client.fetchOrderSummaryPage(TOKEN, seed);
+
+        // It starts at the requested date's first KST instant — not at "now minus 24h".
+        assertThat(http.sent.get(0).uri().getQuery())
+                .contains("lastChangedFrom=2026-06-09T00:00:00.000+09:00");
+        // Two days of 24h windows: one more to walk.
+        assertThat(first.hasMore()).isTrue();
+
+        http.enqueue(FakeNaverHttpClient.ok(lcsBody(null)));
+        FetchPage second = client.fetchOrderSummaryPage(TOKEN, first.nextCursorValue());
+
+        assertThat(http.sent.get(1).uri().getQuery())
+                .contains("lastChangedFrom=2026-06-10T00:00:00.000+09:00")
+                .contains("lastChangedTo=2026-06-11T00:00:00.000+09:00");
+        // And it STOPS at the end of the requested range rather than continuing to "now".
+        assertThat(second.hasMore()).isFalse();
+    }
+
+    @Test
+    void aBoundedWindowReachingTodayStopsAtNowRatherThanAskingForTheFuture() {
+        String seed = client.boundedWindowSeed(LocalDate.of(2026, 6, 12), LocalDate.of(2026, 6, 12));
+        http.enqueue(FakeNaverHttpClient.ok(lcsBody(null)));
+
+        FetchPage page = client.fetchOrderSummaryPage(TOKEN, seed);
+
+        assertThat(http.sent.get(0).uri().getQuery())
+                .contains("lastChangedFrom=2026-06-12T00:00:00.000+09:00")
+                .contains("lastChangedTo=2026-06-12T15:00:00.000+09:00"); // = NOW, not tomorrow
+        assertThat(page.hasMore()).isFalse();
+    }
+
+    /**
+     * Ingestion overwrites daily totals by (channel, date). A bounded run that emitted the two days
+     * BEFORE its range — which the routine two-day carry would have it do — would replace whatever
+     * is stored for those dates with a count of only the orders that changed inside the range.
+     */
+    @Test
+    void aBoundedWindowNeverWritesADailyTotalBeforeItsOwnStartDate() {
+        String seed = client.boundedWindowSeed(LocalDate.of(2026, 6, 10), LocalDate.of(2026, 6, 10));
+        // Two orders changed inside the window: one placed inside the range, one placed before it.
+        http.enqueue(FakeNaverHttpClient.ok(lcsBody(null,
+                lcsItem("PO-IN", "O-1", "2026-06-10T09:00:00.000+09:00"),
+                lcsItem("PO-BEFORE", "O-2", "2026-06-08T09:00:00.000+09:00"))));
+        http.enqueue(FakeNaverHttpClient.ok(detailBody(
+                detailItem("PO-IN", 12000L), detailItem("PO-BEFORE", 34000L))));
+
+        FetchPage page = client.fetchOrderSummaryPage(TOKEN, seed);
+
+        assertThat(page.records()).hasSize(1);
+        CanonicalOrderSummary only = (CanonicalOrderSummary) page.records().get(0);
+        assertThat(only.summaryDate()).isEqualTo(LocalDate.of(2026, 6, 10));
+        assertThat(only.orderCount()).isEqualTo(1);
+    }
+
     @Test
     void twoCallFlowMapsToDailySummariesGroupedByKstPaymentDate() {
         http.enqueue(FakeNaverHttpClient.ok(lcsBody(null,
