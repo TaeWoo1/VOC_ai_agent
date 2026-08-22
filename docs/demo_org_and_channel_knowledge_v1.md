@@ -932,3 +932,54 @@ canonical Demo Org의 **REAL** 데이터로 **PRODUCT · ORDER_SUMMARY · INQUIR
 공식 API가 없으므로 기존 Action Window acquisition을 **별도 단계**로 유지한다. 이번 목표는 Coupang
 Demo Spine 조립이며, Product enrichment / 다른 채널 polishing / historical backfill로 넓히지 않는다.
 
+### 5e. credential 검증 결과 (2026-08-23 02:08 KST) — **통과**, 첫 수집 전 정지
+
+셀러가 WING에서 키를 발급하고 입력했다. 검증만 하고 **멈췄다** — 첫 collection은 실행하지 않았다.
+
+| # | 확인 항목 | 결과 |
+|---|---|---|
+| 1 | 기존 account `3e2ddaaa…` 재사용 | ✅ Coupang 계정 수 **1** · 새 행 0 |
+| 2 | duplicate account | ✅ **0** |
+| 3 | credential sealed/open 진단 | ✅ `OK` · keyId `self-pilot-1` == activeKeyId · sealed fingerprint == available |
+| 4 | vendor / account binding | ✅ credential 1행이 이 계정에만 · `API`/`HMAC` · payload+IV 존재 |
+| 5 | auth verification | ✅ **SUCCESS** — `PENDING → PREPARING` (02:08:05) |
+| 6 | order-access permission | ✅ **CONFIRMED** — `ordersheets` 200 |
+| — | 부수효과 | sync_jobs **0** · schedules **0** · alerts **0** · `channel_orders` **0** · Coupang 행은 전부 `DEMO_SEED`/`VERIFY_FIXTURE` 그대로 |
+
+**probe 형태는 2026-08-06 증명과 동일하다.** `returnShippingCenters` **400 CLIENT_ERROR** →
+`ordersheets` fallback **200 CONFIRMED**. 그 엔드포인트는 이 vendor에게 맞지 않고, 권위 있는 답은
+우리가 실제로 쓰는 `ordersheets`가 준다 — 커넥터가 400을 "auth 판정 없음"으로 두고 보조 probe로
+넘기는 설계가 그대로 작동했다.
+
+#### 도달 과정에서 드러난 것 셋
+
+**① SellerOps는 자기가 광고하는 호출 IP를 실제 송신 IP와 대조하지 않는다.** `.env.local`의 값이
+낡아 있었고 — 실제 송신 대역과 **다른 /8** 이었다 — 화면은 그 값을 그대로 안내했다. 셀러는 **동작할
+수 없는 IP를 등록**했다. NAVER 쪽 값도 낡았고 Coupang 것과도 다른 값이다(이 머신의 공인 IP가 최소
+두 번 바뀌었다는 뜻). NAVER가 살아 있는 것은 호출 IP 허용목록을 같은 방식으로 강제하지 않기 때문이지
+설정이 맞아서가 아니다. 설정만 고쳤고 **제품 코드는 손대지 않았다** — 자기가 주장하는 사실을 검증할
+수 있는데 하지 않는다는 결함은 남아 있다.
+
+**② 쿠팡의 IP 거부 403이 `not allowed ip` 마커를 담지 않았다.** 분류기는 공식 영문 문자열을
+대소문자 무시로 찾는데 **두 번 다 안 잡혔다**. 설계된 hedge가 작동해 두 원인을 모두 안내하는
+`ORDER_ACCESS_DENIED`로 degrade했지만, 그 문장은 **"애플리케이션의 주문 API 그룹 권한"을 먼저**
+말한다 — NAVER 어휘이고(`CollectControlService`의 채널 공용 문구), 측정된 WING 발급 흐름에는 API
+그룹을 고르는 화면이 없다. 셀러를 엉뚱한 화면으로 보낸다.
+
+**③ 등록이 즉시 반영되지 않는 것으로 보인다.** 셀러가 IP를 고쳤다고 알린 **뒤**의 02:03 시도는
+403/403이었고, 4분 뒤 02:08 시도는 400/200이었다. 그 사이 SellerOps 쪽에서 바뀐 것은 **없다** —
+백엔드 프로세스 동일(pid 58991), credential 행 동일(id·bytes·`updated_at` 01:51:15 불변). 남은
+설명은 WING 쪽 반영 지연이다. **관측 1회·계정 1곳이므로 단정하지 않는다** — 다음 연결 때 다시 본다.
+
+①②③ 모두 **채널 지식 후보**이고, 이번 범위에서는 기록만 한다.
+
+#### manifest 상태 갱신
+
+| 필드 | 값 |
+|---|---|
+| mode | `READ_ONLY` — 유지 |
+| 실행된 SellerOps 라이브 액션 | 서명된 GET **4회** (연결 확인 2회 실패 + 1회 성공, 각 최대 2 엔드포인트). **WRITE 0** |
+| 남은 액션 | 첫 `ORDER_SUMMARY` 수집 **1회** — 아직 실행 안 함 |
+| 계정 상태 | `PREPARING` (두 신호 중 하나 확보) |
+| 다음 단계에서 관찰할 것 | 첫 수집 rows / 중복 0 / REAL provenance / `PREPARING → CONNECTED` / 그리고 **CONNECTED 5분 내 self-pilot이 만드는 첫 automatic cycle** (5d 결정 1) |
+
