@@ -11,6 +11,7 @@ import com.sellerops.customermemory.CustomerMemoryEntryRepository;
 import com.sellerops.ingest.canonical.CanonicalInquiry;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.itemanalysis.ItemAnalysisRepository;
+import com.sellerops.product.ChannelProduct;
 import com.sellerops.product.ChannelProductRepository;
 import com.sellerops.product.KnowledgeCoverage;
 import com.sellerops.product.Product;
@@ -89,7 +90,7 @@ class ProductKnowledgeChainTest {
         channelId = seedChannel();
         productService = new ProductService(products);
         promoter = new Cafe24ReviewPromoter(reviews, productService);
-        linkBackfill = new ReviewProductLinkBackfill(reviews, articles, productService);
+        linkBackfill = new ReviewProductLinkBackfill(reviews, articles, listings);
         derivation = new ProductKnowledgeDerivation(products, listings, variants, facts, reviews, inquiries);
         ProductQueryService query = new ProductQueryService(products);
         ReviewIssueQueryService issueQuery = new ReviewIssueQueryService(issues, evidence, stateEvents,
@@ -98,11 +99,33 @@ class ProductKnowledgeChainTest {
                 evidence, analyses, reviews, inquiries, memory, channels), listings, variants, facts, channels);
     }
 
+    /**
+     * A catalogue listing for {@code productNo} on this channel — the bridge the backfill resolves
+     * through. Seeded explicitly because that is the real precondition now: a mall whose catalogue has
+     * never been read cannot attribute its reviews, and saying so is more honest than inventing a
+     * product named after a number.
+     */
+    private Product seedListing(long productNo, String name) {
+        Product product = productService.resolveOrCreate(org, name, "sku-" + productNo);
+        ChannelProduct listing = new ChannelProduct();
+        listing.setOrgId(org);
+        listing.setChannelId(channelId);
+        listing.setProductId(product.getId());
+        listing.setExternalProductId(Long.toString(productNo));
+        listing.setChannelProductName(name);
+        listing.setSourceKind("CAFE24:PRODUCT_API:v2");
+        listing.setObservedAt(java.time.Instant.parse("2026-08-22T00:00:00Z"));
+        listings.save(listing);
+        return product;
+    }
+
     @Test
-    @DisplayName("a Cafe24 review promoted before the fix is linked by the backfill, using the inquiry path's own key")
+    @DisplayName("a Cafe24 review promoted before the fix is linked by the backfill, through the catalogue listing")
     void theBackfillLinksWhatThePromoterUsedToDrop() {
-        // The inquiry path creates the product from product_no — this is the existing behaviour.
-        Product fromInquiry = productService.resolveOrCreate(org, null, "77");
+        // The catalogue read is what makes attribution possible: product_no is the LISTING's external
+        // id, so a mall whose catalogue has been read answers this exactly. Resolving by creating a
+        // product named after the number instead is what manufactured "24", "181", "27" on the demo org.
+        Product catalogued = seedListing(77L, "전선몰딩 1호");
         // Article 4001 is ABOUT product 77 — the two numbers are different axes, and conflating them is
         // how a linkage repair silently attaches a review to the wrong product.
         storeArticle(4001L, 77L);
@@ -117,8 +140,8 @@ class ProductKnowledgeChainTest {
         assertThat(result.linked()).isEqualTo(1);
         assertThat(reviews.findAllByOrgId(org)).singleElement()
                 .satisfies(r -> assertThat(r.getProductId())
-                        .as("the same product number that made a product on the inquiry path")
-                        .isEqualTo(fromInquiry.getId()));
+                        .as("the product the catalogue says this listing is")
+                        .isEqualTo(catalogued.getId()));
     }
 
     @Test
@@ -136,6 +159,7 @@ class ProductKnowledgeChainTest {
     @Test
     @DisplayName("the backfill is idempotent — a linked review leaves the work list")
     void theBackfillIsIdempotent() {
+        seedListing(79L, "몰딩 코너 세트");
         storeArticle(4003L, 79L);
         promoteWithoutProduct(4003L);
 
@@ -148,7 +172,8 @@ class ProductKnowledgeChainTest {
     @Test
     @DisplayName("link → derive → read: the knowledge layer sees a channel it could not see before")
     void theChainEndsInAReadableKnowledgeView() {
-        Product product = productService.resolveOrCreate(org, "전선몰딩 2m", "4004");
+        // The catalogue knows this listing; that is the precondition attribution now rests on.
+        Product product = seedListing(4004L, "전선몰딩 2m");
         storeArticle(4004L, 4004L);
         promoteWithoutProduct(4004L);
 

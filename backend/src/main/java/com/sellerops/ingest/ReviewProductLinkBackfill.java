@@ -51,13 +51,13 @@ public class ReviewProductLinkBackfill {
 
     private final ReviewRepository reviews;
     private final Cafe24CommunityArticleRepository articles;
-    private final ProductService products;
+    private final com.sellerops.product.ChannelProductRepository channelProducts;
 
     public ReviewProductLinkBackfill(ReviewRepository reviews, Cafe24CommunityArticleRepository articles,
-                                     ProductService products) {
+                                     com.sellerops.product.ChannelProductRepository channelProducts) {
         this.reviews = reviews;
         this.articles = articles;
-        this.products = products;
+        this.channelProducts = channelProducts;
     }
 
     /**
@@ -73,7 +73,7 @@ public class ReviewProductLinkBackfill {
         List<Review> batch = reviews.findUnlinkedCafe24Reviews(orgId,
                 PageRequest.of(Math.max(page, 0), safeLimit));
         if (batch.isEmpty()) {
-            return new LinkResult(0, 0, 0);
+            return new LinkResult(0, 0, 0, 0);
         }
 
         Map<Integer, List<Long>> byBoard = new HashMap<>();
@@ -101,6 +101,7 @@ public class ReviewProductLinkBackfill {
 
         int linked = 0;
         int noProductNo = 0;
+        int unknownProduct = 0;
         for (Review review : batch) {
             long[] addr = address.get(review.getId());
             if (addr == null) {
@@ -113,17 +114,38 @@ public class ReviewProductLinkBackfill {
                 noProductNo++;
                 continue;
             }
-            Product product = products.resolveOrCreateWithinTransaction(orgId, null, Long.toString(productNo));
-            review.setProductId(product.getId());
+            // Resolve through the CATALOGUE, never by creating. `product_no` is the listing's
+            // external id, so a mall whose catalogue has been read answers this exactly; one that has
+            // not leaves the review unresolved, which is the true statement about it.
+            //
+            // This used to resolve-or-create by treating product_no as a SKU. That manufactured a
+            // product named after its own number for every unknown one — "24", "181" — and Product
+            // Knowledge then counted them as things the seller sells. The catalogue read is what makes
+            // the honest version possible: on the demo org all 27 distinct board-4 product_no matched a
+            // real listing, so all 124 unresolved reviews resolved to named products.
+            var listing = channelProducts.findByChannelIdAndExternalProductId(
+                    review.getChannelId(), Long.toString(productNo));
+            if (listing.isEmpty() || listing.get().getProductId() == null) {
+                unknownProduct++;
+                continue;
+            }
+            review.setProductId(listing.get().getProductId());
             reviews.save(review);
             linked++;
         }
-        log.info("cafe24 review-product link backfill org={} page={} scanned={} linked={} noProductNo={}",
-                orgId, page, batch.size(), linked, noProductNo);
-        return new LinkResult(batch.size(), linked, noProductNo);
+        log.info("cafe24 review-product link backfill org={} page={} scanned={} linked={} noProductNo={} "
+                        + "unknownProduct={}",
+                orgId, page, batch.size(), linked, noProductNo, unknownProduct);
+        return new LinkResult(batch.size(), linked, noProductNo, unknownProduct);
     }
 
     /** {@code scanned < limit} means the work list is exhausted. */
-    public record LinkResult(int scanned, int linked, int noProductNo) {
+    /**
+     * @param noProductNo   the article names no product — the honest answer for that review
+     * @param unknownProduct the article names a product the CATALOGUE does not know. Distinct from
+     *     {@code noProductNo} on purpose: this one is fixed by reading the catalogue, the other is not
+     *     fixable at all, and collapsing them would hide which.
+     */
+    public record LinkResult(int scanned, int linked, int noProductNo, int unknownProduct) {
     }
 }
