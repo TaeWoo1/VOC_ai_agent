@@ -1170,3 +1170,114 @@ vendorItemId 전부 부재), Coupang 주문 매퍼의 `OrderItem` 레코드는 `
 #### 정지
 
 여기서 멈춘다. 실제 Coupang PRODUCT 호출에는 **새로운 단회 승인**이 필요하다.
+
+### 5h. Coupang PRODUCT one-shot live proof (2026-08-23 03:00 KST) — **PASS**, split 없음
+
+`sync_job cb71ffbb` · MANUAL · **SUCCESS 68 / 68 / 0 / 0** · 28.0초 · commit `14d29567` ·
+승인 "Seated and ready." + 이 턴의 단회 승인.
+
+| | 값 |
+|---|---|
+| listings / products / options | **68 / 68 / 405** (옵션 최소 1, 최대 **140**) |
+| marketplace requests | **69** = 목록 1 + 상세 68. 한 페이지로 끝(`hasMore=false`) |
+| budget | **69 / 250.** `BUDGET_EXHAUSTED` 미발생. 순회 완료로 커서 초기화 → 다음 순회는 다시 250에서 시작 |
+| 401 / 403 / 429 / WARN / ERROR | **0** |
+| WRITE | **0** — 신규 `inquiry_execution`(최신 2026-08-20) · `review_reply_submission_ref`(최신 2026-07-21) 없음 |
+| PRODUCT schedule | **생성 0.** 계정의 schedule은 여전히 `ORDER_SUMMARY` · `INQUIRY` 둘뿐, 둘 다 enabled·`paused_reason` 없음 |
+| REVIEW | **호출 0** |
+
+옛 page size 10이었다면 같은 카탈로그에 목록 7 + 상세 68 = **75회**가 들었다. 페이지를 키운 것이
+요청을 줄였고, 요청을 실제로 묶는 것은 페이지가 아니라 상한이다.
+
+#### wire shape — 처음으로 실물과 대조했다
+
+관측자는 **키 이름·노드 종류·개수만** 기록한다(값 0건, `CoupangWireShapeObserverTest`가 상품명·가격·
+SKU·본문·식별자·토큰을 하나도 찾지 못함을 단언한다). 아래는 그 집계다.
+
+**매퍼의 부정 단정 4개 중 2개가 틀렸다.**
+
+| 단정 | 실제 응답 | 판정 |
+|---|---|---|
+| "manufacturer is not on this resource" | `$.data.manufacture` **present 68/68, 채움 39** (57%) | **틀렸다** |
+| "description lives in a separate contents resource" | `$.data.items[].contents` **405/405**, 본문 블록 **1,196개**가 같은 상세 응답 안에 | **틀렸다** |
+| "the seller API states no storefront URL" | 상품 페이지 URL 키 **없음**(`images[].cdnPath`는 이미지) | **맞다** |
+| "the resource states no last-modified time" | 수정시각 키 **없음**(`createdAt`·`saleStartedAt`·`saleEndedAt`뿐) | **맞다** |
+
+**읽지 않고 지나간 것들** — 전부 100% 채워져 있다: `productId`(노출상품ID) 68/68 ·
+`sellerProductItemId` 405/405 · `itemId` 405/405 · `images` 1,751개 · `notices` 2,046개 ·
+`searchTags` 842개.
+
+**채움 비율이 낮은 것들**(매퍼가 읽는 것 중): `brand` **34/68**(50%) ·
+`attributes[].attributeValueName` **1,020 / 6,570**(15.5%) — 속성 항목은 6,570개가 선언돼 있지만
+값이 든 것은 1/6이다. 그래서 spec fact가 86개(38개 상품)에 그친다. 빈 속성을 사실로 적지 않은
+결과이지 누락이 아니다.
+
+#### identity — **split 없음 (green)**
+
+예측했던 두 갈래 중 어느 쪽인지가 한 필드로 갈렸다:
+
+> `$.data.items[].externalVendorSku` — **present 405/405, non-null 0.**
+> 이 셀러는 어떤 옵션에도 자기 SKU를 넣지 않았다.
+
+따라서 카탈로그 행의 `sku`는 전부 `sellerProductId`로 떨어졌고, 문의가 만들어 둔 product identity와
+정확히 같은 키가 됐다.
+
+- REAL 리스팅 68건 전부 `products.sku == channel_products.external_product_id` (**다른 것 0건**)
+- 리스팅 68 ↔ product 68, **1:1**
+- 문의로 생긴 REAL product 2개는 각각 **리스팅 1 + 옵션 1**을 얻었다 — 새 product가 생기지 않고
+  기존 identity에 붙었다. **실제 외부 식별자가 일치하는 정당한 reconciliation.**
+- product 총계 242 → 308 (**+66 신규, 2개 재사용**) — 68이 아니라 66인 것이 위 문장의 산술적 증거다.
+
+**단, 이것은 이 셀러의 데이터가 그랬다는 뜻이지 결함이 없다는 뜻이 아니다.** `externalVendorSku`가
+채워진 셀러에서는 §5g가 예측한 분열이 그대로 일어난다. 이번 proof는 그 조건을 **재현하지 못했을 뿐**
+반증하지 못했다. blocker로 판정하지 않는 이유는 조건이 성립하지 않았기 때문이고, 조건이 성립하는
+셀러가 나타나면 그때는 blocker다.
+
+#### provenance — 임의 승격 0
+
+- Coupang 리스팅 **71 = REAL 68 + DEMO_SEED 3.** 기존 3건은 `DEMO_SEED` · `DERIVED:INGEST` 그대로 —
+  외부 id가 시드 패턴이라 숫자 `sellerProductId`와 충돌할 수 없었다(§5g 예측대로).
+- `DEMO_SEED` product **8건 불변**. REAL로 올라간 행 **0**.
+- 역방향도 없음: REAL 리스팅이 `DEMO_SEED` product에 붙어 가려진 경우 **0**.
+- 신규 행의 provenance: `source_kind = COUPANG:SELLER_PRODUCTS:v1`, `observed_at` = 읽은 시각,
+  `source_updated_at` = **null 68/68**(채널이 말하지 않으므로).
+- `product_variants` / `product_facts`의 `data_origin` 부재는 **이번에 건드리지 않았다.** 운영 화면
+  혼입은 관측되지 않았다 — 이 두 테이블은 product를 거쳐서만 읽히고, 그 product는 필터를 받는다.
+
+#### Product Knowledge · Agent 가시성
+
+facts **188** = `taxonomy` 102(브랜드 34 + 카테고리 68 — wire의 채움 수와 정확히 일치) +
+`spec` 86, 전부 `SOURCE_STATED`. variants 405, `vendorItemId` **중복 0**.
+
+문의가 붙어 있는 product의 `/api/products/{id}/knowledge`:
+
+| facet | 판정 | provenance |
+|---|---|---|
+| IDENTITY · LISTING · PRICE · VARIANT · TAXONOMY | **AVAILABLE** (`statable`) | `COUPANG:SELLER_PRODUCTS:v1` |
+| DESCRIPTION · SPEC | **UNAVAILABLE** | — |
+| SIGNALS | AVAILABLE | customer-memory · inquiry-store · issue-memory · item-analysis · review-store |
+
+DESCRIPTION이 `UNAVAILABLE`인 것은 **정직한 답이면서 동시에 낭비의 증거다** — 본문 1,196블록이
+이미 응답에 들어왔는데 매퍼가 읽지 않아 저장되지 않았다.
+
+Agent의 `get_product_knowledge`는 `SpringClient`에서 이 엔드포인트로 그대로 나가는 READ 도구
+(`/api/products/{id}/knowledge`)다. 위 응답을 운영자 토큰으로 직접 확인했으므로 가시성은 확인됐다 —
+**LLM planner를 돌려서 확인한 것은 아니다.**
+
+#### 이번에 드러난 결함 둘 (backlog, 이번 흐름에서 고치지 않음)
+
+1. **Coupang 판매상태가 68건 전부 `UNKNOWN`이다.** wire에는 `statusName`이 68/68 채워져 있다.
+   매퍼는 그 **한글 표시명**을 `SellingStatus.normalize`에 넘기는데, 그 함수의 Coupang 항목은
+   `APPROVED` / `PARTIAL_APPROVED` 같은 **영문 enum**이다. 그리고 상세 응답에는 그 enum으로 보이는
+   `$.data.status`가 **68/68 존재하는데 읽히지 않는다.** 채널이 말한 사실이 저장 단계에서 통째로
+   "확인되지 않음"이 됐다.
+2. **가려진 product를 물으면 404가 아니라 500이 온다.** `DEMO_SEED` product의 `/knowledge`는
+   `UnexpectedRollbackException`(rollback-only 트랜잭션 안에서 `notFound`를 던진 결과)으로 끝난다.
+   **데이터는 새지 않는다** — synthetic 제외는 정상 동작한다. 잘못된 것은 실패 방식뿐이고, 이번
+   PRODUCT 읽기가 만든 문제도 아니다.
+
+#### 판정
+
+PRODUCT는 **green**이고 identity split은 **없다**. Coupang Demo Spine의 남은 하나는
+**REVIEW Action Window acquisition**이다. `docs/multi-channel-connector-roadmap.md` §4.1의
+Coupang PRODUCT 상태 이동은 이 문서가 하지 않는다 — 상태는 §4.1이 소유한다.
