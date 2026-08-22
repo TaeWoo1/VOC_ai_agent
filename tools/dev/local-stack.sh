@@ -119,6 +119,27 @@ cmd_up() {
       echo "backend: vault key-ring loaded from Keychain (ids: $(printf '%s' "$SELLEROPS_VAULT_KEY_RING" | tr ',' '\n' | cut -d: -f1 | paste -sd, -))"
     fi
   fi
+  # Cafe24's OAuth callback must be an externally reachable HTTPS URL — the connectivity decision
+  # (docs/sellerops_local_to_pilot_connectivity_decision.md §2.2) settled that, which is why a public
+  # tunnel exists at all. The consequence is that the application.yml default
+  # (http://localhost:8080/...) is WRONG for this deployment, and the symptom is not a local error: the
+  # seller gets as far as Cafe24 and is told "The redirect_uri added by Cafe24 Developers is invalid",
+  # after the consent screen, with nothing on our side logged.
+  #
+  # The registered value lives in the Keychain rather than in a file because it belongs to the Cafe24
+  # app registration, not to a checkout — and because reading it here means a reboot cannot silently
+  # revert to a default that has never worked. Absent Keychain entry ⇒ silent skip; a machine that has
+  # no Cafe24 app configured should still start the stack.
+  if [ -z "${SELLEROPS_CONNECTOR_CAFE24_REDIRECT_URI:-}" ]; then
+    _cb="$(security find-generic-password -s sellerops-cafe24-oauth -a redirect-uri -w 2>/dev/null || true)"
+    if [ -n "$_cb" ]; then
+      export SELLEROPS_CONNECTOR_CAFE24_REDIRECT_URI="$_cb"
+      # Host only — the full URL is app-registration config, not something to scatter through logs.
+      echo "backend: cafe24 callback host $(printf '%s' "$_cb" | sed -E 's#^https?://([^/]+).*#\1#') (from Keychain)"
+    fi
+    unset _cb
+  fi
+
   start_one backend backend ./gradlew bootRun
   # The runtime FAILS CLOSED at boot under APP_ENV=production on a file/memory store, and its spring store
   # needs the backend up — so it waits for backend health rather than racing it.
