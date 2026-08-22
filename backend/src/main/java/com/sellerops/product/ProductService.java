@@ -24,6 +24,21 @@ public class ProductService {
      * merged by name, and the SKU string is stored verbatim so leading zeros survive.
      * Falls back to name resolution only when no SKU is present.
      */
+    /**
+     * Find by SKU within the org, WITHOUT creating anything.
+     *
+     * <p>For callers that would rather record "we do not know this product" than manufacture one. The
+     * Cafe24 review promotion is the case that motivated it: a bare {@code product_no} with no
+     * catalogue entry is the absence of a product, and turning it into a row named after its own number
+     * makes that absence look like a listing.
+     */
+    public java.util.Optional<Product> findBySku(UUID orgId, String sku) {
+        if (sku == null || sku.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        return products.findByOrgIdAndSku(orgId, sku);
+    }
+
     public Product resolveOrCreateWithinTransaction(UUID orgId, String name, String sku) {
         if (sku != null && !sku.isBlank()) {
             Product existing = products.findByOrgIdAndSku(orgId, sku).orElse(null);

@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -37,6 +38,15 @@ public class GlobalExceptionHandler {
         // Malformed query/path param (e.g. a non-ISO date or non-UUID) — a client
         // error, not a server fault. Echo only the parameter name, never the value.
         return body(HttpStatus.BAD_REQUEST, "요청 파라미터 형식이 올바르지 않습니다: " + ex.getName());
+    }
+
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<Map<String, Object>> handleMissingParam(MissingServletRequestParameterException ex) {
+        // A required query parameter the caller omitted — a client error, and the sibling of the
+        // multipart case below. The catch-all reported it as 500, which is actively misleading: it
+        // sends whoever hit it looking for a server fault, and it hides which parameter was missing
+        // behind "서버 오류가 발생했습니다". Echo only the parameter NAME, never a value.
+        return body(HttpStatus.BAD_REQUEST, "필수 요청 파라미터가 없습니다: " + ex.getParameterName());
     }
 
     @ExceptionHandler(MissingServletRequestPartException.class)

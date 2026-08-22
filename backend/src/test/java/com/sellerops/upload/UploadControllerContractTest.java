@@ -170,6 +170,29 @@ class UploadControllerContractTest {
         verifyNoInteractions(connector);
     }
 
+    /**
+     * The query-parameter sibling of the case above, pinned here because it is the same handler and the
+     * same mistake.
+     *
+     * <p>A missing required query parameter was reported as 500 "서버 오류가 발생했습니다" — which sends
+     * whoever hit it looking for a server fault and hides WHICH parameter was missing. It cost two
+     * wrong diagnoses in ten minutes on 2026-08-22 while driving the Cafe24 reconcile and attention
+     * endpoints by hand.
+     */
+    @Test
+    void aMissingQueryParameterIsRejectedWith400NamingTheParameter() throws Exception {
+        mockMvc.perform(multipart("/api/uploads")
+                        .file(xlsxPart("file"))
+                        // channelId omitted
+                        .param("uploadType", "REVIEW")
+                        .header("Authorization", "Bearer " + TOKEN))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value("필수 요청 파라미터가 없습니다: channelId"));
+
+        verifyNoInteractions(connector);
+    }
+
     @Test
     void aBearerTokenThatDoesNotParseIsAlsoRejectedWith401() throws Exception {
         // JwtTokenProvider.parse returns null (never throws) on any malformed token —

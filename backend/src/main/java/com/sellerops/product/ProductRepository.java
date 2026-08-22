@@ -52,7 +52,15 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
      */
     @Modifying
     @Query(value = "merge into products t "
-            + "using (values (:id, :orgId, :name, :sku, :now)) s(id, org_id, name, sku, ts) "
+            // Every parameter is CAST explicitly. A bare parameter inside a VALUES row constructor has
+            // no column to take its type from — PostgreSQL resolves it to `text`, and the failure lands
+            // far away as "column created_at is of type timestamp with time zone but expression is of
+            // type text". It was invisible for as long as it was: the tests run on H2, which infers the
+            // types happily, and this statement is only reached when a genuinely NEW sku appears. On the
+            // demo org that was the Cafe24 review promotion — 133 real articles that silently promoted
+            // none, three sync runs in a row, logged as a swallowed warning.
+            + "using (values (cast(:id as uuid), cast(:orgId as uuid), cast(:name as varchar), "
+            + "cast(:sku as varchar), cast(:now as timestamp with time zone))) s(id, org_id, name, sku, ts) "
             + "on t.org_id = s.org_id and t.sku = s.sku "
             + "when not matched then insert (id, org_id, name, sku, status, created_at, updated_at, data_origin) "
             + "values (s.id, s.org_id, s.name, s.sku, 'ACTIVE', s.ts, s.ts, 'REAL')",

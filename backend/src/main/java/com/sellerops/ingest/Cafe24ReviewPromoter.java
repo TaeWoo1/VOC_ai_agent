@@ -120,19 +120,30 @@ public class Cafe24ReviewPromoter {
     }
 
     /**
-     * {@code product_no} → the SellerOps product, or null.
+     * {@code product_no} → the SellerOps product, or null when the catalogue does not know it.
      *
-     * <p>Resolve-or-create rather than resolve-only, because the Cafe24 inquiry path creates products
-     * from this very key: a review-only product would otherwise be permanently unattributable while an
-     * inquiry on the same listing produced a product row. The name falls back to the number itself,
-     * which is what {@code ProductService} already stores for a nameless source.
+     * <p><b>Resolve-only.</b> It used to resolve-or-CREATE, and on the canonical demo org promoting 133
+     * real board-4 reviews manufactured 24 products whose name and sku were both a bare Cafe24 number —
+     * "24", "181", "27". Those are not catalogue entries; they are the absence of one, wearing a
+     * product's shape. An Agent reading them says "상품 '181'에 부정 리뷰가 3건" and has told the seller
+     * nothing, while Product Knowledge counts them as things the seller sells.
+     *
+     * <p>Nothing is lost by declining. The article keeps its own {@code product_no}
+     * ({@code cafe24_community_articles.product_no}), so a review left unresolved here is relinked for
+     * free the moment a real catalogue read lands — which is precisely what the Cafe24 PRODUCT
+     * capability is for. An invented row, by contrast, would have to be found and merged.
+     *
+     * <p>The Cafe24 INQUIRY path still resolve-or-creates through the same key and has produced ~50
+     * such placeholders since July. That is the same defect and is deliberately NOT changed here: it
+     * would silently unlink existing inquiry attributions, which is a product-owner decision rather
+     * than a promotion detail.
      */
     private UUID resolveProduct(UUID orgId, Long productNo) {
         if (products == null || productNo == null || productNo <= 0) {
             return null;
         }
-        String sku = Long.toString(productNo);
-        Product product = products.resolveOrCreateWithinTransaction(orgId, null, sku);
-        return product == null ? null : product.getId();
+        return products.findBySku(orgId, Long.toString(productNo))
+                .map(Product::getId)
+                .orElse(null);
     }
 }
