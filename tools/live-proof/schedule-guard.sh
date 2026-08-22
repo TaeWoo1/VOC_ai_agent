@@ -34,10 +34,16 @@ ACCOUNT="${2:-}"
 [ -n "$CMD" ] && [ -n "$ACCOUNT" ] || { echo "usage: schedule-guard.sh <report|pause|restore> <accountId>" >&2; exit 2; }
 STATE_FILE="$STATE_DIR/paused-$ACCOUNT.json"
 
+# A safety tool must fail legibly. A backend that is still booting answers with an error page, not
+# JSON, and a raw traceback there reads like the guard itself is broken — which invites skipping it.
 token() {
   curl -s --max-time 8 -X POST -H 'Content-Type: application/json' \
     -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" "$BACKEND_ORIGIN/api/auth/login" \
-    | python3 -c 'import sys,json; print(json.load(sys.stdin).get("token",""))'
+    | python3 -c 'import sys,json
+try:
+    print(json.load(sys.stdin).get("token",""))
+except Exception:
+    print("")'
 }
 
 TOKEN="$(token)"
