@@ -166,7 +166,8 @@ public class NaverProductsClient {
                     blankToNull(listing.detailContent()),
                     attributes,
                     variants,
-                    observedAt(listing, now),
+                    now,
+                    sourceUpdatedAt(listing),
                     SOURCE,
                     row++));
         }
@@ -186,12 +187,15 @@ public class NaverProductsClient {
         return parts.isEmpty() ? null : String.join(" / ", parts);
     }
 
-    private static Instant observedAt(ChannelProductRow listing, Instant fallback) {
+    /**
+     * When the CHANNEL says this listing last changed, or null when it says nothing parseable.
+     *
+     * <p>No fallback to "now": that would assert the product changed at the moment we looked at it.
+     * The read time is {@code observedAt}, which every row carries separately.
+     */
+    private static Instant sourceUpdatedAt(ChannelProductRow listing) {
         Instant parsed = parseInstant(listing.modifiedDate());
-        if (parsed == null) {
-            parsed = parseInstant(listing.regDate());
-        }
-        return parsed == null ? fallback : parsed;
+        return parsed != null ? parsed : parseInstant(listing.regDate());
     }
 
     /** No offset ⇒ null, never an assumed zone: this value feeds a staleness verdict. */

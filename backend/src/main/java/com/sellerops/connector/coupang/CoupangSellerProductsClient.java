@@ -211,6 +211,9 @@ public class CoupangSellerProductsClient {
                 attributes,
                 variants,
                 now,
+                // The seller-products resource states no last-modified time. Null, not the read
+                // instant — "we do not know when it changed" is not "it changed just now".
+                null,
                 SOURCE,
                 sourceRow);
     }

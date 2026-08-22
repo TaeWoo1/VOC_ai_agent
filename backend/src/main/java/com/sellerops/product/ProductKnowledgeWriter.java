@@ -145,6 +145,10 @@ public class ProductKnowledgeWriter {
         }
         listing.setSourceKind(row.sourceKind());
         listing.setObservedAt(observed);
+        listing.setSourceUpdatedAt(row.sourceUpdatedAt());
+        // The observation primitives take the READ time, not the channel's last-changed time. They
+        // used to take the latter, which made last_seen_at — the one field whose entire job is
+        // "when did we last see this" — report a date the channel chose.
         listing.setLastSeenAt(observed);
         if (fresh || listing.getFirstSeenAt() == null) {
             listing.setFirstSeenAt(observed);
@@ -181,6 +185,7 @@ public class ProductKnowledgeWriter {
             }
             entity.setSource(row.sourceKind());
             entity.setObservedAt(observed);
+            entity.setSourceUpdatedAt(row.sourceUpdatedAt());
             variants.save(entity);
             written++;
         }
@@ -223,6 +228,7 @@ public class ProductKnowledgeWriter {
         entity.setSource(row.sourceKind());
         entity.setSourceRef(row.externalProductId());
         entity.setObservedAt(observed);
+        entity.setSourceUpdatedAt(row.sourceUpdatedAt());
         entity.setConfidence(FactConfidence.SOURCE_STATED);
         facts.save(entity);
         return 1;

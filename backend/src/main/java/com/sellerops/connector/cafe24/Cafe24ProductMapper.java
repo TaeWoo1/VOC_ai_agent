@@ -16,9 +16,14 @@ import java.util.Map;
  * the true statement. A mapper that substituted an empty string would turn "we do not know the
  * description" into "the description is empty", and only one of those is a fact.
  *
- * <p>{@code observedAt} is the row's own {@code updated_date} when the mall states one, and the
- * collection instant otherwise. Staleness is computed from it, so defaulting it to "now" for a row
- * that actually carries a date would make an old catalogue look freshly read.
+ * <p>{@code observedAt} is the collection instant — when SellerOps read the row. The mall's own
+ * {@code updated_date} is a different fact and is carried separately as {@code sourceUpdatedAt}, null
+ * when the mall states none rather than defaulted to the read time.
+ *
+ * <p>They used to be one field holding the mall's date, and staleness was computed from it. So the
+ * 2026-08-22 catalogue read produced 144 listings stamped as far back as 2014 and every freshness
+ * verdict said STALE — about rows that had just been read successfully. The age of a PRODUCT is not
+ * the freshness of a READ.
  */
 public final class Cafe24ProductMapper {
 
@@ -29,17 +34,16 @@ public final class Cafe24ProductMapper {
     }
 
     /** Null when the row carries no {@code product_no} — a listing with no identity cannot be stored. */
-    public static CanonicalProduct toCanonical(Cafe24ProductRow row, int sourceRow, Instant fallbackNow) {
+    public static CanonicalProduct toCanonical(Cafe24ProductRow row, int sourceRow, Instant readAt) {
         if (row == null || row.productNo() == null || row.productNo() <= 0) {
             return null;
         }
         String externalId = Long.toString(row.productNo());
-        Instant observed = parseOffsetInstant(row.updatedDate());
-        if (observed == null) {
-            observed = parseOffsetInstant(row.createdDate());
-        }
-        if (observed == null) {
-            observed = fallbackNow;
+        // We observed this row NOW. The mall's own last-changed time is a different fact and rides
+        // beside it; a product untouched since 2014 that we just read successfully is not stale data.
+        Instant sourceUpdated = parseOffsetInstant(row.updatedDate());
+        if (sourceUpdated == null) {
+            sourceUpdated = parseOffsetInstant(row.createdDate());
         }
 
         Map<String, String> attributes = new LinkedHashMap<>();
@@ -63,7 +67,8 @@ public final class Cafe24ProductMapper {
                 firstPresent(blankToNull(row.summaryDescription()), blankToNull(row.simpleDescription())),
                 attributes,
                 List.of(), // variants come from /products/{no}/variants — a separate, bounded read
-                observed,
+                readAt,
+                sourceUpdated,
                 SOURCE,
                 sourceRow);
     }

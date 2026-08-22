@@ -89,6 +89,24 @@ public class ChannelProduct extends BaseEntity {
     @Column(name = "observed_at")
     private Instant observedAt;
 
+    /**
+     * When the CHANNEL says the underlying row last changed, or null when it states none.
+     *
+     * <p>Distinct from {@code observedAt}, which is when WE read it. They were one field, and freshness
+     * was computed from it — so a catalogue read produced listings stamped 2014 and every verdict said
+     * STALE about rows that had just been read successfully.
+     */
+    @Column(name = "source_updated_at")
+    private java.time.Instant sourceUpdatedAt;
+
+    public java.time.Instant getSourceUpdatedAt() {
+        return sourceUpdatedAt;
+    }
+
+    public void setSourceUpdatedAt(java.time.Instant sourceUpdatedAt) {
+        this.sourceUpdatedAt = sourceUpdatedAt;
+    }
+
     @Column(name = "first_seen_at")
     private Instant firstSeenAt;
 

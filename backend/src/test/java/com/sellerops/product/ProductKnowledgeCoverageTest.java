@@ -128,7 +128,9 @@ class ProductKnowledgeCoverageTest {
         CanonicalProduct old = new CanonicalProduct(
                 "6473457702", "전선몰딩 1호", "SELLER-CODE-1", null, new BigDecimal("12900"), "KRW",
                 "SALE", null, null, null, null, Map.of(), List.of(),
-                Instant.now().minus(200, ChronoUnit.DAYS), "NAVER:PRODUCT_API:v1", 1);
+                // OBSERVED 200 days ago — that is what makes it stale. The channel's own
+                // last-changed time is irrelevant to freshness and is deliberately absent here.
+                Instant.now().minus(200, ChronoUnit.DAYS), null, "NAVER:PRODUCT_API:v1", 1);
         writer.write(org, channelId, List.of(old));
         Product product = products.findByOrgIdAndSku(org, "SELLER-CODE-1").orElseThrow();
 
@@ -243,6 +245,51 @@ class ProductKnowledgeCoverageTest {
         assertThat(knowledge.factsFor(org, product.getId(), List.of("존재하지않는키"))).isEmpty();
     }
 
+    /**
+     * A product the mall has not touched in years, read successfully today, is NOT stale.
+     *
+     * <p>This is the exact shape of the 2026-08-22 Cafe24 catalogue read: 144 listings fetched in two
+     * seconds, the oldest last modified in 2014, and every coverage verdict came back STALE — because
+     * "when we read it" and "when the channel says it changed" were the same column and freshness was
+     * computed from it. The age of a PRODUCT is not the freshness of a READ.
+     */
+    @Test
+    @DisplayName("an old product read just now is AVAILABLE — freshness follows the read, not the product")
+    void aFreshReadOfAnOldProductIsNotStale() {
+        CanonicalProduct oldProductFreshlyRead = new CanonicalProduct(
+                "186", "원터치 디스펜서 종이컵 보관함", "186", null, new BigDecimal("10500"), "KRW",
+                "SELLING", null, null, null, null, Map.of("상품무게", "1.00"), List.of(),
+                Instant.now(),                              // read: now
+                Instant.parse("2014-09-17T01:34:38Z"),      // channel says: untouched since 2014
+                "CAFE24:PRODUCT_API:v2", 1);
+
+        writer.write(org, channelId, List.of(oldProductFreshlyRead));
+
+        Product product = products.findByOrgIdAndSku(org, "186").orElseThrow();
+        ProductKnowledgeView view = knowledge.knowledge(org, product.getId(), null).orElseThrow();
+
+        assertThat(facet(view, ProductKnowledgeFacet.LISTING).coverage())
+                .isEqualTo(KnowledgeCoverage.AVAILABLE);
+        assertThat(facet(view, ProductKnowledgeFacet.PRICE).coverage())
+                .isEqualTo(KnowledgeCoverage.AVAILABLE);
+    }
+
+    /** The channel's own last-changed time is kept — it is a real fact, just not a freshness one. */
+    @Test
+    void theChannelsLastChangedTimeIsStoredBesideTheObservation() {
+        Instant sourceChanged = Instant.parse("2014-09-17T01:34:38Z");
+        writer.write(org, channelId, List.of(new CanonicalProduct(
+                "187", "오래된 상품", "187", null, null, null, "SELLING", null, null, null, null,
+                Map.of(), List.of(), Instant.now(), sourceChanged, "CAFE24:PRODUCT_API:v2", 1)));
+
+        ChannelProduct listing = listings.findByChannelIdAndExternalProductId(channelId, "187").orElseThrow();
+
+        assertThat(listing.getSourceUpdatedAt()).isEqualTo(sourceChanged);
+        // The observation primitives record when WE looked, which is the whole point of the split.
+        assertThat(listing.getObservedAt()).isAfter(sourceChanged);
+        assertThat(listing.getLastSeenAt()).isAfter(sourceChanged);
+    }
+
     // ───────────────────────────────────────────────────────────── helpers
 
     private CanonicalProduct fullCatalogueRow() {
@@ -253,7 +300,10 @@ class ProductKnowledgeCoverageTest {
                 Map.of("길이", "2m", "원산지", "대한민국"),
                 List.of(new CanonicalProductVariant("opt-1", "화이트 / 2m", "SKU-77-W",
                         new BigDecimal("12900"), "SALE")),
-                Instant.parse("2026-08-20T02:00:00Z"), "NAVER:PRODUCT_API:v1", 1);
+                // Read on 08-20; the channel says the listing itself last changed on 07-01. Freshness
+                // follows the first, never the second.
+                Instant.parse("2026-08-20T02:00:00Z"), Instant.parse("2026-07-01T00:00:00Z"),
+                "NAVER:PRODUCT_API:v1", 1);
     }
 
     private static KnowledgeCoverageView facet(ProductKnowledgeView view, ProductKnowledgeFacet facet) {

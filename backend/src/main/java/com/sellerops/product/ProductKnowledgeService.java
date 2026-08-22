@@ -105,7 +105,8 @@ public class ProductKnowledgeService {
                         l.getCurrency(),
                         l.getSellingStatus(),
                         l.getSourceKind(),
-                        l.getObservedAt()))
+                        l.getObservedAt(),
+                        l.getSourceUpdatedAt()))
                 .toList();
 
         List<ProductVariantView> variantViews = variantRows.stream()

@@ -36,7 +36,24 @@ public record CanonicalProduct(
         String description,
         Map<String, String> attributes,
         List<CanonicalProductVariant> variants,
+        /**
+         * When SELLEROPS read this row from the channel — the collection instant, always.
+         *
+         * <p>Not the channel's own "last modified". The two were one field, and each connector filled
+         * it differently: Cafe24 with {@code updated_date}, NAVER with {@code modifiedDate}, Coupang
+         * with the read time. So a catalogue read on 2026-08-22 produced listings stamped 2014, and
+         * every staleness verdict computed from them said STALE about a product that had just been
+         * read successfully — the freshness of the READ confused with the age of the PRODUCT.
+         */
         Instant observedAt,
+        /**
+         * When the CHANNEL says the row last changed, or null when it does not say.
+         *
+         * <p>Null is the honest answer for a channel that publishes no such field; it is never derived
+         * from {@code observedAt}, which would assert that the product changed at the moment we
+         * happened to look at it.
+         */
+        Instant sourceUpdatedAt,
         String sourceKind,
         int sourceRow) {
 
@@ -48,7 +65,14 @@ public record CanonicalProduct(
     /** Identity only — the shape a channel that lists products but details them separately emits. */
     public static CanonicalProduct identity(String externalProductId, String name, String sku,
                                             Instant observedAt, String sourceKind, int sourceRow) {
+        return identity(externalProductId, name, sku, observedAt, null, sourceKind, sourceRow);
+    }
+
+    /** Identity plus the channel's own last-changed time, when it states one. */
+    public static CanonicalProduct identity(String externalProductId, String name, String sku,
+                                            Instant observedAt, Instant sourceUpdatedAt,
+                                            String sourceKind, int sourceRow) {
         return new CanonicalProduct(externalProductId, name, sku, null, null, null, null, null, null,
-                null, null, Map.of(), List.of(), observedAt, sourceKind, sourceRow);
+                null, null, Map.of(), List.of(), observedAt, sourceUpdatedAt, sourceKind, sourceRow);
     }
 }

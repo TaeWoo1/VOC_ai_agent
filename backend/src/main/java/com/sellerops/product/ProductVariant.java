@@ -57,4 +57,22 @@ public class ProductVariant extends BaseEntity {
 
     @Column(name = "observed_at", nullable = false)
     private Instant observedAt;
+
+    /**
+     * When the CHANNEL says the underlying row last changed, or null when it states none.
+     *
+     * <p>Distinct from {@link #observedAt}, which is when WE read it. They were one field, and freshness
+     * was computed from it — so a catalogue read produced rows stamped 2014 and every verdict said STALE
+     * about data that had just been read successfully.
+     */
+    @Column(name = "source_updated_at")
+    private Instant sourceUpdatedAt;
+
+    public Instant getSourceUpdatedAt() {
+        return sourceUpdatedAt;
+    }
+
+    public void setSourceUpdatedAt(Instant sourceUpdatedAt) {
+        this.sourceUpdatedAt = sourceUpdatedAt;
+    }
 }

@@ -14,5 +14,13 @@ import java.time.Instant;
 public record ProductListingView(String channelCode, String channelNameKo, String channelProductId,
                                  String listingName, String productUrl, BigDecimal price,
                                  String currency, String sellingStatus, String source,
-                                 Instant observedAt) {
+                                 /** When SellerOps read this listing — what freshness is judged on. */
+                                 Instant observedAt,
+                                 /**
+                                  * When the CHANNEL says the listing last changed, or null when it says
+                                  * nothing. A real fact about the product, and deliberately NOT the one
+                                  * freshness uses: a catalogue untouched since 2014 and read this
+                                  * morning is current data about an old product.
+                                  */
+                                 Instant sourceUpdatedAt) {
 }
