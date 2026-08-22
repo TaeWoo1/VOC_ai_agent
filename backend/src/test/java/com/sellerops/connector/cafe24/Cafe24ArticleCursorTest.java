@@ -83,4 +83,53 @@ class Cafe24ArticleCursorTest {
         assertThat(Cafe24ArticleCursor.decode("b4:o0:s2026-13-99:e2026-06-25", 4))
                 .isEqualTo(Cafe24ArticleCursor.start(4));
     }
+
+    /**
+     * The routine flag is what lets one cursor format serve two lanes. The runtime picks the lane and
+     * hands the connector an opaque value, so without this marker a recent-window sweep and an
+     * operator's approved historical window are indistinguishable — and the connector would either
+     * rewind the operator's window or carry the routine one forward forever.
+     */
+    @Test
+    void aRoutineWindowRoundTripsAndStaysDistinctFromABackfillWindow() {
+        Cafe24ArticleCursor routine =
+                Cafe24ArticleCursor.routineWindow(4, LocalDate.parse("2026-08-08"), LocalDate.parse("2026-08-22"));
+
+        assertThat(routine.encode()).isEqualTo("b4:o0:s2026-08-08:e2026-08-22:r1");
+        Cafe24ArticleCursor decoded = Cafe24ArticleCursor.decode(routine.encode(), 4);
+        assertThat(decoded.routine()).isTrue();
+        assertThat(decoded).isEqualTo(routine);
+
+        Cafe24ArticleCursor backfill =
+                Cafe24ArticleCursor.window(4, LocalDate.parse("2026-08-08"), LocalDate.parse("2026-08-22"));
+        assertThat(backfill.encode()).isEqualTo("b4:o0:s2026-08-08:e2026-08-22");
+        assertThat(Cafe24ArticleCursor.decode(backfill.encode(), 4).routine()).isFalse();
+    }
+
+    @Test
+    void advancingPreservesWhichLaneTheWindowBelongsTo() {
+        Cafe24ArticleCursor routine =
+                Cafe24ArticleCursor.routineWindow(6, LocalDate.parse("2026-08-08"), LocalDate.parse("2026-08-22"));
+
+        assertThat(routine.advance(50).encode()).isEqualTo("b6:o50:s2026-08-08:e2026-08-22:r1");
+    }
+
+    /** A routine flag with no window would let a bare offset sweep claim to be the recent lane. */
+    @Test
+    void aRoutineFlagWithoutAWindowIsDiscarded() {
+        assertThat(Cafe24ArticleCursor.decode("b4:o10:r1", 4).routine()).isFalse();
+    }
+
+    @Test
+    void aRoutineWindowKnowsWhetherItStillReachesToday() {
+        Cafe24ArticleCursor cursor =
+                Cafe24ArticleCursor.routineWindow(4, LocalDate.parse("2026-08-08"), LocalDate.parse("2026-08-22"));
+
+        assertThat(cursor.routineWindowCovers(LocalDate.parse("2026-08-22"))).isTrue();
+        // Yesterday's window must be replaced, not resumed — otherwise the lane stops at the day it
+        // was last computed and never sees anything posted after it.
+        assertThat(cursor.routineWindowCovers(LocalDate.parse("2026-08-23"))).isFalse();
+        assertThat(Cafe24ArticleCursor.window(4, LocalDate.parse("2026-08-08"), LocalDate.parse("2026-08-22"))
+                .routineWindowCovers(LocalDate.parse("2026-08-22"))).isFalse();
+    }
 }

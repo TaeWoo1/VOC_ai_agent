@@ -417,7 +417,7 @@ class Cafe24ApiConnectorTest {
         assertThat(page.rateLimited()).isFalse();
         assertThat(page.hasMore()).isFalse();
         assertThat(page.source()).isEqualTo(Cafe24ApiConnector.KIND);
-        assertThat(page.nextCursorValue()).isEqualTo("b4:o1");
+        assertThat(page.nextCursorValue()).isEqualTo("b4:o0:s2026-06-09:e2026-06-23:r1");
 
         List<CanonicalCommunityArticle> rows = articles(page);
         assertThat(rows).hasSize(1);
@@ -449,7 +449,7 @@ class Cafe24ApiConnectorTest {
         FetchPage page = connector.fetch(request(DataType.INQUIRY, null));
 
         assertThat(page.dataType()).isEqualTo(DataType.INQUIRY);
-        assertThat(page.nextCursorValue()).isEqualTo("b6:o1");
+        assertThat(page.nextCursorValue()).isEqualTo("b6:o0:s2026-06-09:e2026-06-23:r1");
         // INQUIRY now leaves the community path — records are canonical inquiries, so
         // the executor routes them to the OPEN work-queue ingest, not the VOC store.
         assertThat(page.records().get(0)).isInstanceOf(CanonicalInquiry.class);
@@ -481,22 +481,64 @@ class Cafe24ApiConnectorTest {
         FetchPage page = connector.fetch(request(DataType.REVIEW, null));
 
         assertThat(page.hasMore()).isTrue();
-        assertThat(page.nextCursorValue()).isEqualTo("b4:o50");
+        // Mid-sweep: the offset advances INSIDE the routine window, which rides along.
+        assertThat(page.nextCursorValue()).isEqualTo("b4:o50:s2026-06-09:e2026-06-23:r1");
         assertThat(articles(page)).hasSize(50);
     }
 
     @Test
-    void articleFetchResumesFromTheCursorOffset() {
+    void articleFetchResumesFromTheCursorOffsetWithinTheRoutineWindow() {
         storeCafe24Credential();
         http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
         http.enqueue(FakeCafe24HttpClient.articlesOk()); // empty tail
 
-        FetchPage page = connector.fetch(request(DataType.REVIEW, "b4:o50"));
+        FetchPage page = connector.fetch(request(DataType.REVIEW, "b4:o50:s2026-06-09:e2026-06-23:r1"));
 
         assertThat(page.hasMore()).isFalse();
-        assertThat(page.nextCursorValue()).isEqualTo("b4:o50");
         assertThat(articles(page)).isEmpty();
         assertThat(http.sent.get(1).uri().toString()).contains("offset=50");
+        // The sweep finished, so the next run starts a freshly-computed window at 0 rather than
+        // carrying 50 forward — carrying it would skip the first 50 rows of the next window.
+        assertThat(page.nextCursorValue()).isEqualTo("b4:o0:s2026-06-09:e2026-06-23:r1");
+    }
+
+    /**
+     * A stored cursor with no window is the routine lane's first run (or a reset), and must become a
+     * recent window — not the whole-board offset sweep it used to become. That sweep is what walked the
+     * demo org's inquiry board from 2014 forward while the lane's job was to notice what is new.
+     */
+    @Test
+    void anUnwindowedCursorStartsTheRoutineWindowRatherThanAWholeBoardSweep() {
+        storeCafe24Credential();
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk());
+
+        FetchPage page = connector.fetch(request(DataType.REVIEW, "b4:o900"));
+
+        assertThat(http.sent.get(1).uri().toString())
+                .contains("start_date=2026-06-09").contains("end_date=2026-06-23")
+                .contains("offset=0");
+        assertThat(page.nextCursorValue()).isEqualTo("b4:o0:s2026-06-09:e2026-06-23:r1");
+    }
+
+    /**
+     * An operator's backfill window is NOT the routine one and must survive untouched — its dates are
+     * what was approved, and silently replacing them with "the last 14 days" would collect something
+     * other than the sanctioned range.
+     */
+    @Test
+    void anOperatorBackfillWindowIsNeverReplacedByTheRoutineWindow() {
+        storeCafe24Credential();
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk());
+
+        FetchPage page = connector.fetch(request(DataType.REVIEW, "b4:o10:s2025-01-01:e2025-01-31"));
+
+        assertThat(http.sent.get(1).uri().toString())
+                .contains("start_date=2025-01-01").contains("end_date=2025-01-31")
+                .contains("offset=10");
+        // No rewind either: a finished backfill page keeps its position, as before.
+        assertThat(page.nextCursorValue()).isEqualTo("b4:o10:s2025-01-01:e2025-01-31");
     }
 
     @Test
@@ -514,7 +556,7 @@ class Cafe24ApiConnectorTest {
         List<CanonicalCommunityArticle> rows = articles(page);
         assertThat(rows).hasSize(1);
         assertThat(rows.get(0).articleNo()).isEqualTo(1001L);
-        assertThat(page.nextCursorValue()).isEqualTo("b4:o2");
+        assertThat(page.nextCursorValue()).isEqualTo("b4:o0:s2026-06-09:e2026-06-23:r1");
     }
 
     @Test
@@ -541,7 +583,7 @@ class Cafe24ApiConnectorTest {
         });
         // The cursor advances by the number of rows FETCHED (4), not stored (1), so a
         // mixed public/private page still pages correctly.
-        assertThat(page.nextCursorValue()).isEqualTo("b4:o4");
+        assertThat(page.nextCursorValue()).isEqualTo("b4:o0:s2026-06-09:e2026-06-23:r1");
         assertThat(page.hasMore()).isFalse();
     }
 
@@ -556,7 +598,7 @@ class Cafe24ApiConnectorTest {
         FetchPage page = connector.fetch(request(DataType.REVIEW, null));
 
         assertThat(articles(page)).isEmpty();
-        assertThat(page.nextCursorValue()).isEqualTo("b4:o2");
+        assertThat(page.nextCursorValue()).isEqualTo("b4:o0:s2026-06-09:e2026-06-23:r1");
         assertThat(page.hasMore()).isFalse();
     }
 
@@ -573,7 +615,7 @@ class Cafe24ApiConnectorTest {
 
         assertThat(page.records()).hasSize(1);
         assertThat(page.records().get(0)).isInstanceOf(CanonicalInquiry.class);
-        assertThat(page.nextCursorValue()).isEqualTo("b6:o1");
+        assertThat(page.nextCursorValue()).isEqualTo("b6:o0:s2026-06-09:e2026-06-23:r1");
         assertThat(http.sent.get(1).uri().toString()).contains("/api/v2/admin/boards/6/articles?");
     }
 

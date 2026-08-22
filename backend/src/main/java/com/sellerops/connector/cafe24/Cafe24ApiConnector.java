@@ -90,6 +90,20 @@ public class Cafe24ApiConnector implements PullConnector {
     /** v1 collects a fixed trailing window; re-collection upserts (idempotent). */
     static final int LOOKBACK_DAYS = 14;
     /**
+     * The ROUTINE board lane's trailing window, in KST days.
+     *
+     * <p>Same span as the order lookback and for the same reason: re-reading a fixed recent window
+     * every run and upserting is idempotent, self-healing for a late edit, and — the part the board
+     * lanes were missing — bounded by DATE rather than by position.
+     *
+     * <p>Before this, an empty routine cursor meant "offset 0, no window", so the ongoing lane walked
+     * the board from its OLDEST article forward. On the demo org that produced 111 inquiries dated
+     * 2014-10-28 to 2025-02-19 from a lane whose entire job is to notice what is new, while the newest
+     * stored inquiry stayed at 2026-05-06. Historical completeness is the backfill lane's work, and it
+     * must never be paid for with the freshness of the routine one.
+     */
+    static final int ROUTINE_WINDOW_DAYS = 14;
+    /**
      * Cafe24 Admin list endpoints cap {@code limit} at the documented 100; the
      * connector pages internally (offset) to cover the window. A full page (==
      * this limit) means "there may be more, fetch the next"; a short page ends
@@ -331,7 +345,9 @@ public class Cafe24ApiConnector implements PullConnector {
     private FetchPage fetchArticlePage(FetchRequest request, ArticleRecordMapper mapper,
                                        boolean excludeSecret) {
         int boardNo = primaryBoard(request.dataType());
-        Cafe24ArticleCursor cursor = Cafe24ArticleCursor.decode(request.cursorValue(), boardNo);
+        LocalDate today = LocalDate.now(clock.withZone(KST));
+        Cafe24ArticleCursor cursor = routineOrBackfill(
+                Cafe24ArticleCursor.decode(request.cursorValue(), boardNo), boardNo, today);
         try {
             Cafe24Authorizer.Authorized auth = authorize(request);
             // A windowed cursor (backfill seed) bounds the sweep to [start, end]; an
@@ -373,7 +389,8 @@ public class Cafe24ApiConnector implements PullConnector {
                 // only on a windowed backfill cursor; a null/unparseable created_date fails
                 // closed (treated as out-of-window), never assumed in-window.
                 if (cursor.hasWindow()
-                        && !withinWindow(row.createdDate(), cursor.windowStart(), cursor.windowEnd())) {
+                        && !withinWindow(row.createdDate(), cursor.windowStart(), cursor.windowEnd(),
+                                cursor.routine())) {
                     outOfWindow++;
                     continue;
                 }
@@ -407,8 +424,16 @@ public class Cafe24ApiConnector implements PullConnector {
                         replyStatusStored.get(CommunityReplyStatus.UNKNOWN));
             }
             boolean hasMore = rows.size() == request.limit();
-            String nextCursor = cursor.advance(rows.size()).encode();
-            return FetchPage.of(request.dataType(), records, nextCursor, hasMore, KIND);
+            // A finished ROUTINE sweep rewinds to the start of a freshly-computed window rather than
+            // carrying its offset forward. Carrying it forward is what turns "what is new" into "where
+            // I stopped": the next run would skip as many rows as this one read, and a newly posted
+            // article that lands anywhere but the very end of the page order would never be reached.
+            // Overlap is the intended cost — the upsert is idempotent, and re-reading is also what
+            // re-observes last_seen_at and picks up a source-side status change.
+            Cafe24ArticleCursor next = cursor.routine() && !hasMore
+                    ? routineWindowFor(boardNo, today)
+                    : cursor.advance(rows.size());
+            return FetchPage.of(request.dataType(), records, next.encode(), hasMore, KIND);
         } catch (Cafe24RateLimitedException e) {
             // Cursor unchanged → the next run re-requests the same offset.
             return rateLimited(request, e);
@@ -416,15 +441,59 @@ public class Cafe24ApiConnector implements PullConnector {
     }
 
     /**
-     * Whether an article's {@code created_date} falls inside the operator backfill
-     * window {@code [windowStart, windowEnd]} (both ends inclusive), evaluated as a
-     * Cafe24 (KST) calendar date. Fail-closed: a missing or non-offset-bearing
-     * {@code created_date} is out-of-window (never assumed in-window).
+     * Decide which lane this cursor belongs to, and keep the routine one pointed at NOW.
+     *
+     * <p>The runtime chooses the lane and hands the connector an opaque value, so the cursor itself has
+     * to carry the distinction. Three cases:
+     * <ul>
+     *   <li><b>An operator backfill window</b> (windowed, not routine) is returned untouched. Its dates
+     *       are the operator's and moving them would silently change what was approved.</li>
+     *   <li><b>A routine window that no longer reaches today</b> — yesterday's, or one left by a run
+     *       days ago — is replaced by a fresh one at offset 0.</li>
+     *   <li><b>No window at all</b> is the routine lane's first run (or a reset), and gets a fresh
+     *       window rather than the whole-board offset sweep it used to get.</li>
+     * </ul>
      */
-    private static boolean withinWindow(String createdDate, LocalDate windowStart, LocalDate windowEnd) {
+    private Cafe24ArticleCursor routineOrBackfill(Cafe24ArticleCursor decoded, int boardNo,
+                                                  LocalDate today) {
+        if (decoded.hasWindow() && !decoded.routine()) {
+            return decoded;
+        }
+        if (decoded.routineWindowCovers(today)) {
+            return decoded;
+        }
+        return routineWindowFor(boardNo, today);
+    }
+
+    /** The trailing recent window the routine lane sweeps, in the explicit Cafe24 (KST) calendar. */
+    private static Cafe24ArticleCursor routineWindowFor(int boardNo, LocalDate today) {
+        return Cafe24ArticleCursor.routineWindow(boardNo, today.minusDays(ROUTINE_WINDOW_DAYS), today);
+    }
+
+    /**
+     * Whether an article's {@code created_date} falls inside {@code [windowStart, windowEnd]} (both
+     * ends inclusive), evaluated as a Cafe24 (KST) calendar date.
+     *
+     * <p>This client-side check is not redundant with the {@code start_date}/{@code end_date} request
+     * params: a live run observed the endpoint returning rows past {@code end_date}, which is why the
+     * window is re-checked here rather than trusted.
+     *
+     * <p><b>A row whose date cannot be read is treated differently by lane, and deliberately.</b>
+     * <ul>
+     *   <li><b>Backfill</b> — excluded, unchanged. Its window is an operator's approved scope, and a
+     *       row that cannot be proven inside it must not be admitted.</li>
+     *   <li><b>Routine</b> — kept. The defensive check exists to catch rows the server returned with a
+     *       date OUTSIDE the range; an absent date is not evidence of that. Excluding it here would not
+     *       defer the row to a later run, it would drop it from the recent lane forever — and the
+     *       routine lane's whole purpose is not missing something new. An extra idempotent upsert is
+     *       the cheaper mistake.</li>
+     * </ul>
+     */
+    private static boolean withinWindow(String createdDate, LocalDate windowStart, LocalDate windowEnd,
+                                        boolean routine) {
         LocalDate created = Cafe24BoardArticleMapper.parseKstDate(createdDate);
         if (created == null) {
-            return false;
+            return routine;
         }
         return !created.isBefore(windowStart) && !created.isAfter(windowEnd);
     }
