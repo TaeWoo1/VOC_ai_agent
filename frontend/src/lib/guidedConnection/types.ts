@@ -90,6 +90,9 @@ export type GuidedFailureReason =
   | "SECRET_UNRECOVERABLE"
   | "TEMPORARY_PROVIDER_ERROR"
   | "PROVIDER_UNAVAILABLE"
+  /** SellerOps could not open the stored credential and the cause is on SellerOps' side. The channel
+   *  was never called, so nothing the seller does — including reconnecting — changes it. */
+  | "CREDENTIAL_UNREADABLE"
   | "TEST_UNSUPPORTED"
   | "NOT_CONFIGURED"
   | "SYNC_FAILED"
@@ -114,6 +117,17 @@ export interface GuidedConnectionState {
   milestones: GuidedMilestones;
   /** Which discovery path the seller is on (§discovery) — decides existing-vs-new entry on a failure. */
   path: GuidedPath;
+  /**
+   * The seller has explicitly asked for the first ORDER_SUMMARY collection to run.
+   *
+   * A verified credential and a collected order are two different facts, and only the first is a
+   * consequence of what the seller just typed. Until this is true the journey sits at
+   * `first_order_sync` showing a CTA and SellerOps has called NAVER exactly as many times as the
+   * connection test needed — the page's sync effect is gated on it. Transient by design: it is not
+   * persisted, and `first_order_sync` is not a restorable phase, so a refresh re-derives from the
+   * backend rather than resuming an intent the seller may not have formed.
+   */
+  syncRequested: boolean;
 }
 
 /** Sync status vocabulary consumed from the backend `SyncRunView.status` (mapped by the caller). */
@@ -169,6 +183,9 @@ export type GuidedEvent =
   | { type: "CREDENTIAL_REGISTERED" }
   | { type: "REGISTRATION_FAILED" }
   | { type: "TEST_RESULT"; status: ConnectionTestStatus; reasonCode: string | null }
+  /** The seller pressed 지금 수집 시작 at the first-sync checkpoint. The ONLY thing that authorizes the
+   *  first ORDER_SUMMARY collection — a successful connection test no longer implies it. */
+  | { type: "SYNC_START" }
   | { type: "SYNC_RESULT"; status: GuidedSyncStatus }
   | { type: "CONTINUE_TO_REVIEW_EXPORT" }
   | { type: "UI_DRIFT" }

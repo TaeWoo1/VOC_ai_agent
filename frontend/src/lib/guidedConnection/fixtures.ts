@@ -55,6 +55,9 @@ export const HAPPY_PATH_EVENTS: GuidedEvent[] = [
   { type: "SUBMIT_CREDENTIALS" },
   { type: "CREDENTIAL_REGISTERED" },
   { type: "TEST_RESULT", status: "SUCCESS", reasonCode: null },
+  // The first-collection checkpoint. A verified credential parks the journey here; the seller presses
+  // 지금 첫 주문 수집 and only then does an order leave NAVER.
+  { type: "SYNC_START" },
   { type: "SYNC_RESULT", status: "SUCCESS" },
 ];
 

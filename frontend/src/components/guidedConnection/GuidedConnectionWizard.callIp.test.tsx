@@ -17,6 +17,7 @@ function stateAt(phase: GuidedPhase, failureReason: GuidedFailureReason | null =
     failureReason,
     milestones: { registered: false, tested: false, synced: false },
     path: "unknown",
+    syncRequested: false,
   };
 }
 

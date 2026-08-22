@@ -13,6 +13,7 @@ function at(phase: GuidedPhase, path: GuidedConnectionState["path"] = "unknown")
     failureReason: null,
     milestones: { registered: false, tested: false, synced: false },
     path,
+    syncRequested: false,
   };
 }
 

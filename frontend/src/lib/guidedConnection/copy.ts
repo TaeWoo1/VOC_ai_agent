@@ -70,7 +70,7 @@ export const PHASE_COPY: Record<GuidedPhase, { title: string; body: string }> = 
     body: "연결 정보는 정상이지만 주문 API 접근이 거부되었습니다. 애플리케이션에 주문 관련 API 그룹 권한이 있는지, 그리고 SellerOps 고정 호출 IP가 'API 호출 IP'에 등록되어 있는지 두 가지를 모두 확인한 뒤 다시 시도해 주세요.",
   },
   first_order_sync: {
-    title: "첫 주문 수집 중",
+    title: "첫 주문 수집",
     body: "주문 요약 데이터를 처음으로 가져오고 있습니다.",
   },
   completed: {
@@ -133,6 +133,21 @@ export const DISCONNECT_GUARDRAIL_COPY = {
  * attributed to the connection test alone: that test's order-access probe reports success for rate-limited /
  * temporarily-unavailable responses too, so a passing test does not by itself prove the IP is allowed.
  */
+/**
+ * The first-collection checkpoint. Shown after the connection test passes and before ANY order is read.
+ *
+ * The two facts are separate: "the credential works" is proven by the test, "your orders are in
+ * SellerOps" is not — and reading a seller's orders is an action they should press a button for. The
+ * copy therefore reports what has already happened, says plainly what pressing will do, and offers
+ * leaving it to the schedule as an equal option rather than a way out.
+ */
+export const FIRST_SYNC_CHECKPOINT_COPY = {
+  heading: "연결 정보가 확인되었습니다",
+  body: "이제 최근 주문을 한 번 가져올 수 있습니다. 아래를 누르면 그때 네이버에서 주문 요약을 읽어옵니다.",
+  cta: "지금 첫 주문 수집",
+  note: "지금 하지 않아도 됩니다. 자동 수집 일정을 켜 두면 예정된 시각에 같은 수집이 실행됩니다.",
+} as const;
+
 export const CALL_IP_COPY = {
   registerTitle: "아래 고정 IP를 애플리케이션의 'API 호출 IP'에 등록하세요.",
   advertisedUnsetTitle: "SellerOps 고정 호출 IP가 아직 설정되지 않았습니다.",
@@ -224,6 +239,10 @@ export const FAILURE_COPY: Record<GuidedFailureReason, string> = {
   SECRET_UNRECOVERABLE: "시크릿을 확보하지 못했습니다. 기존 애플리케이션의 시크릿을 다시 확인하거나, 확인이 어려우면 시크릿을 재발급해 주세요. (앱 삭제는 필요하지 않으며 NAVER도 제공하지 않습니다. 단, 재발급은 같은 앱을 쓰는 모든 프로그램의 연결을 함께 끊습니다.)",
   TEMPORARY_PROVIDER_ERROR: "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
   PROVIDER_UNAVAILABLE: "NAVER 서비스에 일시적으로 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+  // Deliberately does NOT say "다시 시도해 주세요": the retry cannot work until someone changes a
+  // server setting, and inviting one is how a seller spends an afternoon on a problem that is not theirs.
+  CREDENTIAL_UNREADABLE:
+    "SellerOps가 저장된 연결 정보를 열지 못했습니다. SellerOps 서버 설정 문제이며, 다시 연결해도 해결되지 않습니다. 담당자에게 문의해 주세요.",
   TEST_UNSUPPORTED: "이 연결 방식은 아직 지원되지 않습니다.",
   NOT_CONFIGURED: "저장된 연결 정보가 없습니다. 연결 정보를 입력해 주세요.",
   SYNC_FAILED: "첫 주문 수집에 실패했습니다. 잠시 후 다시 시도해 주세요.",

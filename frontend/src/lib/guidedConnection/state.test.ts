@@ -32,7 +32,7 @@ function at(
   phase: GuidedConnectionState["phase"],
   path: GuidedConnectionState["path"] = "unknown",
 ): GuidedConnectionState {
-  return { phase, actor: actorFor(phase), failureReason: null, milestones: NO_MILESTONES, path };
+  return { phase, actor: actorFor(phase), failureReason: null, milestones: NO_MILESTONES, path, syncRequested: false };
 }
 
 /** The read-only capability snapshot showed no stored key → guided-first entry. */
@@ -415,6 +415,16 @@ describe("test-connection result mapping (§12, §5)", () => {
     expect(opaque.phase).toBe("connection_testing"); // never invents permission/IP from an unknown code
   });
 
+  it("CREDENTIAL_UNREADABLE stays on the test step and names SellerOps, not the channel", () => {
+    // The channel was never contacted. Routing this to a credential re-entry would ask the seller to
+    // retype a credential that is probably fine, and routing it to a transient error would invite a
+    // retry that cannot work until someone changes a server setting.
+    const s = reduce(run(toTest), { type: "TEST_RESULT", status: "FAILED", reasonCode: "CREDENTIAL_UNREADABLE" });
+    expect(s.phase).toBe("connection_testing");
+    expect(s.failureReason).toBe("CREDENTIAL_UNREADABLE");
+    expect(s.milestones.tested).toBe(false);
+  });
+
   it("NOT_CONFIGURED → credential entry; UNSUPPORTED → unsupported_state", () => {
     expect(reduce(run(toTest), { type: "TEST_RESULT", status: "NOT_CONFIGURED", reasonCode: null }).phase).toBe("sellerops_credential_entry");
     expect(reduce(run(toTest), { type: "TEST_RESULT", status: "UNSUPPORTED", reasonCode: null }).phase).toBe("unsupported_state");
@@ -422,7 +432,29 @@ describe("test-connection result mapping (§12, §5)", () => {
 });
 
 describe("first sync — 0-count SUCCESS vs failure (§12, §17.9)", () => {
-  const toSync = HAPPY_PATH_EVENTS.slice(0, 7); // reach first_order_sync
+  const toCheckpoint = HAPPY_PATH_EVENTS.slice(0, 7); // a verified credential parks at the checkpoint
+  const toSync = HAPPY_PATH_EVENTS.slice(0, 8); // ...and the seller released the collection
+
+  it("a verified credential parks at the checkpoint UNRELEASED — nothing authorizes a collection yet", () => {
+    const s = run(toCheckpoint);
+    expect(s.phase).toBe("first_order_sync");
+    expect(s.syncRequested).toBe(false);
+    expect(s.milestones.tested).toBe(true);
+    // The phase belongs to the seller until they release it.
+    expect(s.actor).toBe("USER_REQUIRED");
+  });
+
+  it("SYNC_START releases it, and is idempotent", () => {
+    const released = reduce(run(toCheckpoint), { type: "SYNC_START" });
+    expect(released.syncRequested).toBe(true);
+    expect(released.phase).toBe("first_order_sync");
+    expect(reduce(released, { type: "SYNC_START" })).toBe(released);
+  });
+
+  it("SYNC_START anywhere else is a no-op — it cannot pre-authorize a collection", () => {
+    const beforeTest = run(HAPPY_PATH_EVENTS.slice(0, 6));
+    expect(reduce(beforeTest, { type: "SYNC_START" })).toBe(beforeTest);
+  });
 
   it("SUCCESS (incl. zero new orders) → completed", () => {
     expect(reduce(run(toSync), { type: "SYNC_RESULT", status: "SUCCESS" }).phase).toBe("completed");
@@ -436,6 +468,9 @@ describe("first sync — 0-count SUCCESS vs failure (§12, §17.9)", () => {
     const s = reduce(run(toSync), { type: "SYNC_RESULT", status: "FAILED" });
     expect(s.phase).toBe("first_order_sync");
     expect(s.failureReason).toBe("SYNC_FAILED");
+    // A failure does not re-close the checkpoint: the seller already released this collection, so the
+    // screen offers 다시 시도 rather than asking for the same permission again.
+    expect(s.syncRequested).toBe(true);
   });
 });
 

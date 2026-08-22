@@ -92,6 +92,9 @@ export function loadGuidedInitialState(): GuidedConnectionState {
     phase: persisted.phase,
     actor: actorFor(persisted.phase),
     failureReason: null,
+    // A restored phase is always pre-registration, so no first collection can be pending — and an
+    // intent to collect is never resumed from storage. `first_order_sync` is not restorable anyway.
+    syncRequested: false,
     milestones: NO_MILESTONES,
     path: persisted.path,
   };

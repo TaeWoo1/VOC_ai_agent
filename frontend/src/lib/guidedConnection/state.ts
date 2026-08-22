@@ -47,7 +47,8 @@ const ACTOR_BY_PHASE: Record<GuidedPhase, GuidedActor> = {
   permission_review_required: "USER_REQUIRED",
   call_environment_mismatch: "USER_REQUIRED",
   order_access_denied: "USER_REQUIRED",
-  first_order_sync: "SELLEROPS_AUTOMATED",
+  // The seller decides when the first collection runs (see `syncRequested`); SellerOps then performs it.
+  first_order_sync: "USER_REQUIRED",
   completed: "SELLEROPS_AUTOMATED",
   review_export_readiness: "SELLEROPS_GUIDED",
   recoverable_ui_drift: "USER_REQUIRED",
@@ -65,8 +66,9 @@ function state(
   milestones: GuidedMilestones,
   failureReason: GuidedFailureReason | null = null,
   path: GuidedPath = "unknown",
+  syncRequested = false,
 ): GuidedConnectionState {
-  return { phase, actor: ACTOR_BY_PHASE[phase], failureReason, milestones, path };
+  return { phase, actor: ACTOR_BY_PHASE[phase], failureReason, milestones, path, syncRequested };
 }
 
 export const INITIAL_STATE: GuidedConnectionState = state("check_saved_credential", NO_MILESTONES);
@@ -114,6 +116,11 @@ function afterTestFailure(
   // route to the hedged, re-testable state that guides checking BOTH — never a silent transient retry.
   if (reasonCode === "ORDER_ACCESS_DENIED") {
     return state("order_access_denied", cleared, "ORDER_ACCESS_DENIED", path);
+  }
+  // SellerOps could not open its own stored credential. It stays on the test step (an operator fix
+  // makes the same button work) but says whose problem it is instead of blaming the channel.
+  if (reasonCode === "CREDENTIAL_UNREADABLE") {
+    return state("connection_testing", cleared, "CREDENTIAL_UNREADABLE", path);
   }
   const reason: GuidedFailureReason =
     reasonCode === "PROVIDER_UNAVAILABLE" ? "PROVIDER_UNAVAILABLE" : "TEMPORARY_PROVIDER_ERROR";
@@ -173,7 +180,7 @@ export function guidedConnectionReducer(
         // test or starts a second sync, and `completed` is still reached only when the sync actually settles.
         // The `credentialPresent` conjunct is belt-and-suspenders: a running sync implies a stored key, so we
         // never claim `tested` from `syncing` alone (matching the `completed` branch's stricter preconditions).
-        return state("first_order_sync", { registered: true, tested: true, synced: false }, null, "saved");
+        return state("first_order_sync", { registered: true, tested: true, synced: false }, null, "saved", true);
       }
       if (event.credentialPresent) {
         // A stored key exists but the connection was never completed. Land on the connection test as a
@@ -193,7 +200,9 @@ export function guidedConnectionReducer(
 
   // The three-path fork and the test-retry phases handle TEST_RESULT uniformly.
   if (TEST_RESULT_PHASES.has(prev.phase) && event.type === "TEST_RESULT") {
-    if (event.status === "SUCCESS") return state("first_order_sync", { ...m, tested: true }, null, p);
+    // A verified credential does NOT start collecting. The journey stops at the first-sync checkpoint
+    // with `syncRequested: false`; only an explicit SYNC_START releases it.
+    if (event.status === "SUCCESS") return state("first_order_sync", { ...m, tested: true }, null, p, false);
     return afterTestFailure(event.status, event.reasonCode, m, p);
   }
 
@@ -303,6 +312,10 @@ export function guidedConnectionReducer(
       return prev;
 
     case "first_order_sync":
+      if (event.type === "SYNC_START") {
+        // Idempotent: a second press while a run is already authorized changes nothing.
+        return prev.syncRequested ? prev : state("first_order_sync", m, null, p, true);
+      }
       if (event.type === "SYNC_RESULT") {
         // 0-count SUCCESS is still success; only FAILED/RUNNING do not advance (§12).
         if (event.status === "SUCCESS" || event.status === "PARTIAL") {
@@ -313,7 +326,7 @@ export function guidedConnectionReducer(
               // but if it ever happened we fail closed rather than falsely claim completion.
               state("unsupported_state", milestones, "UNKNOWN_STATE", p);
         }
-        if (event.status === "FAILED") return state("first_order_sync", m, "SYNC_FAILED", p);
+        if (event.status === "FAILED") return state("first_order_sync", m, "SYNC_FAILED", p, prev.syncRequested);
       }
       return prev;
 

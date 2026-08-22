@@ -326,20 +326,38 @@ export function ConnectNaver() {
     }
   }, []);
 
-  // The connection-test STEP (unguarded); on SUCCESS it chains straight into the first sync.
-  const testStep = useCallback(
-    async (id: string) => {
-      setNaverCalls((n) => n + 1);
-      try {
-        const result = await api.testConnection(id);
-        dispatch({ type: "TEST_RESULT", status: result.status, reasonCode: result.reasonCode });
-        if (result.status === "SUCCESS") await firstSyncStep(id);
-      } catch {
-        dispatch({ type: "TEST_RESULT", status: "FAILED", reasonCode: "TEMPORARY_PROVIDER_ERROR" });
-      }
-    },
-    [firstSyncStep],
-  );
+  // The connection-test STEP (unguarded). A SUCCESS advances to the first-sync CHECKPOINT and stops
+  // there — it does NOT start collecting. Storing a credential and collecting a seller's orders are two
+  // different acts, and only the first is something the seller just asked for by typing. Chaining them
+  // meant a credential submit produced an outbound order read the seller never pressed anything for; on
+  // Cafe24 the same shape produced four unapproved marketplace reads in a minute. The seller releases
+  // the collection from the checkpoint with `onStartFirstSync`.
+  const testStep = useCallback(async (id: string) => {
+    setNaverCalls((n) => n + 1);
+    try {
+      const result = await api.testConnection(id);
+      dispatch({ type: "TEST_RESULT", status: result.status, reasonCode: result.reasonCode });
+    } catch {
+      dispatch({ type: "TEST_RESULT", status: "FAILED", reasonCode: "TEMPORARY_PROVIDER_ERROR" });
+    }
+  }, []);
+
+  // Public entry: the seller releases the first collection at the checkpoint. Records the intent in the
+  // journey (so the checkpoint stops offering itself) and then runs the one sync. Guarded like every
+  // other entry.
+  const onStartFirstSync = useCallback(async () => {
+    const id = accountIdRef.current;
+    if (!id || inFlightRef.current || syncWatchRef.current) return;
+    dispatch({ type: "SYNC_START" });
+    inFlightRef.current = true;
+    setBusy(true);
+    try {
+      await firstSyncStep(id);
+    } finally {
+      inFlightRef.current = false;
+      setBusy(false);
+    }
+  }, [firstSyncStep]);
 
   // Public entry: run only the first sync (the sync-retry CTA). Guarded so a double-click / an in-flight or
   // being-observed sync never fires a second job.
@@ -552,6 +570,7 @@ export function ConnectNaver() {
             onSubmitCredentials={onSubmitCredentials}
             onRetryTest={runTest}
             onRetrySync={runFirstSync}
+            onStartFirstSync={onStartFirstSync}
             onGoToReviewExport={onGoToReviewExport}
             syncProgress={syncProgress}
             onRecheckSync={onRecheckSync}

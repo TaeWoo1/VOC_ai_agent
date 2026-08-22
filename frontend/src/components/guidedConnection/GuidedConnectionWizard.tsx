@@ -14,6 +14,7 @@ import {
   CALL_IP_COPY,
   DISCONNECT_GUARDRAIL_COPY,
   FAILURE_COPY,
+  FIRST_SYNC_CHECKPOINT_COPY,
   NAVER_EXISTING_APP_TUTORIAL,
   PHASE_COPY,
   REVIEW_SETUP_COPY,
@@ -59,6 +60,9 @@ export interface GuidedConnectionWizardProps {
   onSubmitCredentials: (secrets: Record<string, string>) => void;
   onRetryTest: () => void;
   onRetrySync: () => void;
+  /** The seller releases the FIRST order collection at the checkpoint. Absent ⇒ the checkpoint renders
+   *  read-only (no way to start a collection), never an auto-start. */
+  onStartFirstSync?: () => void;
   onGoToReviewExport: () => void;
   /**
    * Live first-sync progress while a sync is being watched — the initial run OR a resumed RUNNING job.
@@ -141,11 +145,12 @@ export function GuidedConnectionWizard({
   onSubmitCredentials,
   onRetryTest,
   onRetrySync,
+  onStartFirstSync,
   onGoToReviewExport,
   syncProgress = null,
   onRecheckSync,
 }: GuidedConnectionWizardProps) {
-  const { phase, failureReason } = state;
+  const { phase, failureReason, syncRequested } = state;
 
   return (
     <section className="card p-6" aria-label="NAVER 연결 마법사">
@@ -370,6 +375,19 @@ export function GuidedConnectionWizard({
               // Actively running (initial run or a resumed RUNNING job): show progress, never a retry — a
               // second trigger here would only duplicate work the single-flight backend already coalesces.
               <FirstSyncProgress progress={syncProgress} onRecheck={onRecheckSync} />
+            ) : !syncRequested ? (
+              // The checkpoint. The test passed and nothing has been collected yet; NOTHING here runs on
+              // its own. The button is the only thing in the journey that reads a seller's orders.
+              <div className="space-y-3" data-testid="first-sync-checkpoint">
+                <p className="font-medium text-ink">{FIRST_SYNC_CHECKPOINT_COPY.heading}</p>
+                <p className="text-muted">{FIRST_SYNC_CHECKPOINT_COPY.body}</p>
+                {onStartFirstSync && (
+                  <button type="button" className="btn-primary" onClick={onStartFirstSync} disabled={busy}>
+                    {FIRST_SYNC_CHECKPOINT_COPY.cta}
+                  </button>
+                )}
+                <p className="text-sm text-muted">{FIRST_SYNC_CHECKPOINT_COPY.note}</p>
+              </div>
             ) : (
               <p className="text-muted">{PHASE_COPY.first_order_sync.body}</p>
             )}

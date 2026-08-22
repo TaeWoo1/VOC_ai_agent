@@ -171,6 +171,16 @@ async function enterCredentials(secret = SECRET) {
   await userEvent.type(screen.getByLabelText(/Client Secret/), secret);
   await userEvent.click(screen.getByRole("button", { name: "연결 정보 저장" }));
 }
+/** The seller releases the first ORDER_SUMMARY collection at the checkpoint. Nothing reads an order
+ *  before this click — a verified credential and a collected order are separate facts. */
+async function startFirstSync() {
+  await userEvent.click(await screen.findByRole("button", { name: "지금 첫 주문 수집" }));
+}
+/** Credential entry followed by the released first collection — what used to be one act, now two. */
+async function enterCredentialsAndCollect(secret = SECRET) {
+  await enterCredentials(secret);
+  await startFirstSync();
+}
 
 describe("ConnectNaver — Local-Agent-free order connection", () => {
   it("fetches deployment-global setup (advertised call IP) on load, so the issuance tutorial can show it", async () => {
@@ -197,7 +207,7 @@ describe("ConnectNaver — Local-Agent-free order connection", () => {
     expect(screen.queryByRole("button", { name: "처음 발급할게요" })).toBeNull();
     expect(screen.queryByRole("button", { name: "로그인했어요" })).toBeNull();
     await newAppPath();
-    await enterCredentials();
+    await enterCredentialsAndCollect();
     expect(await screen.findByRole("heading", { name: "주문 연결 완료" })).toBeInTheDocument();
     expect(api.storeCredential).toHaveBeenCalledWith("acc-1", {
       connectorClass: NAVER_LIKE_TEMPLATE.connectorClass,
@@ -214,7 +224,7 @@ describe("ConnectNaver — Local-Agent-free order connection", () => {
     mockTestAndSyncSuccess();
     renderPage();
     await newAppPath();
-    await enterCredentials();
+    await enterCredentialsAndCollect();
     await screen.findByRole("heading", { name: "주문 연결 완료" });
     const panel = await screen.findByRole("status", { name: "연결 역량 결과" });
     expect(panel).toHaveTextContent("설정 필요"); // REVIEW_IMPORT SETUP_REQUIRED (agent not usable)
@@ -225,7 +235,7 @@ describe("ConnectNaver — Local-Agent-free order connection", () => {
     vi.mocked(api.manualSync).mockResolvedValue(syncRun("acc-1", { totalRows: 0, successRows: 0 }));
     renderPage();
     await newAppPath();
-    await enterCredentials();
+    await enterCredentialsAndCollect();
     expect(await screen.findByRole("heading", { name: "주문 연결 완료" })).toBeInTheDocument();
   });
 
@@ -244,7 +254,7 @@ describe("ConnectNaver — Local-Agent-free order connection", () => {
     const setItem = vi.spyOn(Storage.prototype, "setItem");
     renderPage();
     await newAppPath();
-    await enterCredentials();
+    await enterCredentialsAndCollect();
     await screen.findByRole("heading", { name: "주문 연결 완료" });
     await waitFor(() => {
       for (const call of setItem.mock.calls) expect(JSON.stringify(call)).not.toContain(SECRET);
@@ -273,10 +283,14 @@ describe("ConnectNaver — page load / refresh is READ-ONLY (no test/sync re-run
     expect(await screen.findByRole("button", { name: "연결 확인" })).toBeInTheDocument();
     expect(api.testConnection).not.toHaveBeenCalled();
     expect(api.manualSync).not.toHaveBeenCalled();
-    // The seller triggers it explicitly → one test + one sync → completed.
+    // The seller triggers the test explicitly → one test, and STILL no collection: the journey stops at
+    // the checkpoint, where a second explicit press releases the one sync.
     await userEvent.click(screen.getByRole("button", { name: "연결 확인" }));
-    expect(await screen.findByRole("heading", { name: "주문 연결 완료" })).toBeInTheDocument();
+    expect(await screen.findByTestId("first-sync-checkpoint")).toBeInTheDocument();
     expect(api.testConnection).toHaveBeenCalledTimes(1);
+    expect(api.manualSync).not.toHaveBeenCalled();
+    await startFirstSync();
+    expect(await screen.findByRole("heading", { name: "주문 연결 완료" })).toBeInTheDocument();
     expect(api.manualSync).toHaveBeenCalledTimes(1);
   });
 
@@ -338,7 +352,7 @@ describe("ConnectNaver — reuse an existing connection / application (§discove
     expect(await screen.findByRole("heading", { name: "기존 연결 정보 입력" })).toBeInTheDocument();
     // The post-guided input copy, not a guided/text choice.
     expect(screen.getByText("방금 복사한 애플리케이션 ID와 시크릿을 입력해 주세요.")).toBeInTheDocument();
-    await enterCredentials();
+    await enterCredentialsAndCollect();
     expect(await screen.findByRole("heading", { name: "주문 연결 완료" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "발급을 완료했어요" })).toBeNull();
   });
@@ -374,7 +388,7 @@ describe("ConnectNaver — connection start creates the account when a first-tim
     mockTestAndSyncSuccess("acc-new");
     renderPage();
     await newAppPath();
-    await enterCredentials();
+    await enterCredentialsAndCollect();
     await screen.findByRole("heading", { name: "주문 연결 완료" });
     expect(api.createApiChannelAccount).toHaveBeenCalledWith("ch-naver");
     expect(api.storeCredential).toHaveBeenCalledWith("acc-new", {
@@ -401,7 +415,7 @@ describe("ConnectNaver — completion surfaces capability + review handoff", () 
     });
     renderPage();
     await newAppPath();
-    await enterCredentials();
+    await enterCredentialsAndCollect();
     expect(await screen.findByText("정상 수집 중")).toBeInTheDocument();
     expect(screen.getByText(/마지막 성공 수집: .*분 전/)).toBeInTheDocument();
   });
@@ -417,7 +431,7 @@ describe("ConnectNaver — completion surfaces capability + review handoff", () 
       </MemoryRouter>,
     );
     await newAppPath();
-    await enterCredentials();
+    await enterCredentialsAndCollect();
     await screen.findByRole("heading", { name: "주문 연결 완료" });
     await userEvent.click(screen.getByRole("button", { name: "리뷰 가져오기 설정으로 이동" }));
     await userEvent.click(await screen.findByRole("button", { name: "리뷰 내보내기로 이동" }));
@@ -430,7 +444,7 @@ describe("ConnectNaver — completion surfaces capability + review handoff", () 
     mockTestAndSyncSuccess();
     renderPage();
     await newAppPath();
-    await enterCredentials();
+    await enterCredentialsAndCollect();
     await screen.findByRole("heading", { name: "주문 연결 완료" });
     const panel = await screen.findByRole("status", { name: "연결 역량 결과" });
     expect(panel).toHaveTextContent("자격 증명 인증됨");
@@ -448,7 +462,7 @@ describe("ConnectNaver — completion surfaces capability + review handoff", () 
     mockTestAndSyncSuccess();
     renderPage();
     await newAppPath();
-    await enterCredentials();
+    await enterCredentialsAndCollect();
     await screen.findByRole("heading", { name: "주문 연결 완료" });
     const panel = await screen.findByRole("status", { name: "연결 역량 결과" });
     expect(panel).toHaveTextContent("작업 창에서 직접 진행");
@@ -460,9 +474,44 @@ describe("ConnectNaver — completion surfaces capability + review handoff", () 
     mockTestAndSyncSuccess();
     renderPage();
     await newAppPath();
-    await enterCredentials();
+    await enterCredentialsAndCollect();
     expect(await screen.findByRole("heading", { name: "주문 연결 완료" })).toBeInTheDocument();
     expect(screen.queryByRole("status", { name: "연결 역량 결과" })).toBeNull();
+  });
+});
+
+describe("ConnectNaver — the first collection is released by the seller, never by a passing test", () => {
+  // The defect this pins: submitting a credential used to chain credential → test → ORDER_SUMMARY sync,
+  // so typing a Client Secret produced an outbound read of the seller's orders that nothing on screen
+  // had asked for. The same shape on Cafe24 produced four unapproved marketplace reads inside a minute.
+  it("credential submit + a PASSING test performs ZERO collection until the checkpoint is pressed", async () => {
+    mockTestAndSyncSuccess();
+    renderPage();
+    await newAppPath();
+    await enterCredentials();
+
+    // The credential is stored and the test ran — and no order has been read.
+    expect(await screen.findByTestId("first-sync-checkpoint")).toBeInTheDocument();
+    expect(api.storeCredential).toHaveBeenCalledTimes(1);
+    expect(api.testConnection).toHaveBeenCalledTimes(1);
+    expect(api.manualSync).not.toHaveBeenCalled();
+    // And the connection is NOT claimed complete on a verified credential alone.
+    expect(screen.queryByRole("heading", { name: "주문 연결 완료" })).toBeNull();
+
+    await startFirstSync();
+    expect(await screen.findByRole("heading", { name: "주문 연결 완료" })).toBeInTheDocument();
+    expect(api.manualSync).toHaveBeenCalledTimes(1);
+    expect(api.manualSync).toHaveBeenCalledWith("acc-1", "ORDER_SUMMARY");
+  });
+
+  it("the checkpoint says the collection has not happened yet, and that skipping it is allowed", async () => {
+    mockTestAndSyncSuccess();
+    renderPage();
+    await newAppPath();
+    await enterCredentials();
+    const checkpoint = await screen.findByTestId("first-sync-checkpoint");
+    expect(checkpoint).toHaveTextContent("연결 정보가 확인되었습니다");
+    expect(checkpoint).toHaveTextContent(/지금 하지 않아도 됩니다/);
   });
 });
 
@@ -472,8 +521,8 @@ describe("ConnectNaver — connection test and first sync are separated (distinc
     vi.mocked(api.manualSync).mockResolvedValue(syncRun("acc-1", { status: "FAILED" }));
     renderPage();
     await newAppPath();
-    await enterCredentials();
-    expect(await screen.findByRole("heading", { name: "첫 주문 수집 중" })).toBeInTheDocument();
+    await enterCredentialsAndCollect();
+    expect(await screen.findByRole("heading", { name: "첫 주문 수집" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "주문 연결 완료" })).toBeNull();
     expect(screen.getByRole("alert")).toHaveTextContent(/첫 주문 수집에 실패/);
     expect(screen.getByRole("button", { name: "다시 시도" })).toBeInTheDocument();
@@ -488,7 +537,7 @@ describe("ConnectNaver — connection test and first sync are separated (distinc
       .mockResolvedValue(syncRun("acc-1", { status: "SUCCESS" }));
     renderPage();
     await newAppPath();
-    await enterCredentials();
+    await enterCredentialsAndCollect();
     await userEvent.click(await screen.findByRole("button", { name: "다시 시도" }));
     expect(await screen.findByRole("heading", { name: "주문 연결 완료" })).toBeInTheDocument();
     expect(api.manualSync).toHaveBeenCalledTimes(2);
@@ -551,7 +600,7 @@ describe("ConnectNaver — first-sync progress + resume (NAVER First Sync Progre
       await settle(); // flush mount resolve + resume
 
       // In-progress screen restored from the RUNNING snapshot — NOT completed, and nothing was re-triggered.
-      expect(screen.getByRole("heading", { name: "첫 주문 수집 중" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "첫 주문 수집" })).toBeInTheDocument();
       expect(screen.getByText(/경과 시간/)).toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: "주문 연결 완료" })).toBeNull();
       expect(api.testConnection).not.toHaveBeenCalled();
@@ -578,7 +627,7 @@ describe("ConnectNaver — first-sync progress + resume (NAVER First Sync Progre
         .mockResolvedValue(failedSyncCapability());
       renderPage();
       await settle();
-      expect(screen.getByRole("heading", { name: "첫 주문 수집 중" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "첫 주문 수집" })).toBeInTheDocument();
 
       await vi.advanceTimersByTimeAsync(POLL); // poll → FAILED
       expect(screen.getByRole("alert")).toHaveTextContent(/첫 주문 수집에 실패/);
@@ -600,14 +649,19 @@ describe("ConnectNaver — first-sync progress + resume (NAVER First Sync Progre
       renderPage();
       await settle();
 
-      // Native click (userEvent's internal delays deadlock under fake timers) + flush the test→sync chain.
+      // Native click (userEvent's internal delays deadlock under fake timers) + flush the test, then
+      // release the collection at the checkpoint — a passing test no longer starts one.
       await act(async () => {
         screen.getByRole("button", { name: "연결 확인" }).click();
         await settle();
       });
+      await act(async () => {
+        screen.getByRole("button", { name: "지금 첫 주문 수집" }).click();
+        await settle();
+      });
 
       // Coalesced RUNNING is NOT treated as success — the progress screen shows and one sync was fired.
-      expect(screen.getByRole("heading", { name: "첫 주문 수집 중" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "첫 주문 수집" })).toBeInTheDocument();
       expect(screen.getByText(/경과 시간/)).toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: "주문 연결 완료" })).toBeNull();
       expect(api.manualSync).toHaveBeenCalledTimes(1);
@@ -626,7 +680,7 @@ describe("ConnectNaver — first-sync progress + resume (NAVER First Sync Progre
       vi.mocked(api.getConnectionCapabilityStrict).mockResolvedValue(runningCapability()); // always RUNNING
       renderPage();
       await settle();
-      expect(screen.getByRole("heading", { name: "첫 주문 수집 중" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "첫 주문 수집" })).toBeInTheDocument();
 
       // Advance past the 12-min poll timeout → stalled screen (no new sync ever created).
       await vi.advanceTimersByTimeAsync(13 * 60_000);
@@ -668,9 +722,13 @@ describe("ConnectNaver — first-sync progress + resume (NAVER First Sync Progre
         screen.getByRole("button", { name: "연결 확인" }).click();
         await settle();
       });
+      await act(async () => {
+        screen.getByRole("button", { name: "지금 첫 주문 수집" }).click();
+        await settle();
+      });
 
       // The dropped request did NOT surface as a failure — the job is RUNNING, so we observe instead.
-      expect(screen.getByRole("heading", { name: "첫 주문 수집 중" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "첫 주문 수집" })).toBeInTheDocument();
       expect(screen.queryByRole("alert")).toBeNull();
       expect(api.manualSync).toHaveBeenCalledTimes(1); // and it is never re-fired
 
@@ -684,14 +742,21 @@ describe("ConnectNaver — first-sync progress + resume (NAVER First Sync Progre
     }
   });
 
-  it("double-click on the connection-test CTA fires exactly one test + one sync (client single-flight)", async () => {
+  it("double-click on each CTA fires exactly one test and exactly one sync (client single-flight)", async () => {
     vi.mocked(api.getConnectionCapabilityStrict).mockResolvedValue(savedKeyIncompleteCapability());
     // Terminal SUCCESS so no polling is needed — this test is purely about the double-click guard.
     mockTestAndSyncSuccess();
     renderPage();
-    const btn = await screen.findByRole("button", { name: "연결 확인" });
+    const test = await screen.findByRole("button", { name: "연결 확인" });
     // Two rapid clicks before the first chain settles — the guard must collapse them to one run.
-    await Promise.all([userEvent.click(btn), userEvent.click(btn)]);
+    await Promise.all([userEvent.click(test), userEvent.click(test)]);
+    expect(await screen.findByTestId("first-sync-checkpoint")).toBeInTheDocument();
+    expect(api.testConnection).toHaveBeenCalledTimes(1);
+    expect(api.manualSync).not.toHaveBeenCalled();
+
+    // The checkpoint carries its own guard: a double-press must not collect twice either.
+    const collect = screen.getByRole("button", { name: "지금 첫 주문 수집" });
+    await Promise.all([userEvent.click(collect), userEvent.click(collect)]);
     expect(await screen.findByRole("heading", { name: "주문 연결 완료" })).toBeInTheDocument();
     expect(api.testConnection).toHaveBeenCalledTimes(1);
     expect(api.manualSync).toHaveBeenCalledTimes(1);
@@ -761,7 +826,7 @@ describe("ConnectNaver — walkthrough environment binding (VITE_WALKTHROUGH_MOD
       </MemoryRouter>,
     );
     await newAppPath();
-    await enterCredentials();
+    await enterCredentialsAndCollect();
     await screen.findByRole("heading", { name: "주문 연결 완료" });
     await userEvent.click(screen.getByRole("button", { name: "리뷰 가져오기 설정으로 이동" }));
     await userEvent.click(await screen.findByRole("button", { name: "리뷰 내보내기로 이동" }));
