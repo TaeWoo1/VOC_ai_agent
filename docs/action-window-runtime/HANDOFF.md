@@ -30,7 +30,15 @@ any status claim later in the file.
   session and the seller already on the 상품평 목록 page), Coupang credential renewal (FE complete, no
   carrier hosts it), NAVER guided review reply (marketplace WRITE — the stop rule). Each is a
   **product-owner decision**; the seam they would attach to is `activateResidentCarrier`.
-- **Open functional blockers on NAVER review import (2026-08-23, live):** the guided flow stops after the
+- **NAVER review import — the two 2026-08-23 blockers are FIXED (`bf63c764`), live re-proof still owed.**
+  A driver fault now fails the run as `RUNTIME_FAULT` and the marketplace-side panel keeps showing that
+  failure instead of vanishing; the download listener is armed as the export barrier opens rather than at
+  consent; and upload format is decided from the bytes, so the guided and manual paths share one detector
+  and an extension-less NAVER export is accepted by both. Regression is green and every new fence was run
+  against the pre-fix code and fails there. What is NOT yet done: the guided path has not been driven
+  end-to-end against the marketplace since the fix — the demo org's plan is COMPLETED, so the next real
+  refresh is the re-proof. History of the defects (with the live numbers) below.
+- **The blockers as observed (2026-08-23, live):** the guided flow stops after the
   scope re-read reports `MATCH` — the in-page panel disappears, the export/consent barriers never render,
   and because the download listener is armed at the CONSENT barrier, a seller who exports anyway produces a
   file the runtime cannot see. The run stays a **silent PENDING**, not a failure. The manual fallback cannot
