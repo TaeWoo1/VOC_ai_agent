@@ -1281,3 +1281,206 @@ Agent의 `get_product_knowledge`는 `SpringClient`에서 이 엔드포인트로 
 PRODUCT는 **green**이고 identity split은 **없다**. Coupang Demo Spine의 남은 하나는
 **REVIEW Action Window acquisition**이다. `docs/multi-channel-connector-roadmap.md` §4.1의
 Coupang PRODUCT 상태 이동은 이 문서가 하지 않는다 — 상태는 §4.1이 소유한다.
+
+---
+
+### 5i. Coupang **REVIEW** Action Window acquisition — offline 회귀 + manifest (준비) — WING 접촉 **전 정지**
+
+**상태: 준비됨. 실행하지 않았다.** 이 절을 쓰는 동안 Coupang(WING·API 모두)에 나간 요청은 **0회**다.
+아래는 전부 코드·DB·테스트에서 확인한 사실이다.
+
+#### 회귀 — 기존 LIVE-PROVEN 경로가 현재 코드에서 그대로 서 있는가
+
+2026-08-15에 라이브로 증명된 취득 경로(`docs/coupang_review_acquisition_v1.md` §6.6, 22건 저장)를
+현재 HEAD에서 오프라인으로 다시 돌렸다.
+
+| 스위트 | 결과 |
+|---|---|
+| collector 전체 | **9,164 passed · 150 skipped · 0 failed** (378/397 파일) |
+| 그중 상품평 취득 계열 6개 파일 | 165 passed · 0 failed |
+| backend `AgentReviewHandoffServiceTest` · `CoupangReviewPrivacyRegressionTest` · `ReviewAcquisitionSpineTest` · dedup-key | **BUILD SUCCESSFUL** |
+
+경로 자체는 **무결하다.** 아래에서 blocker로 판정하는 것은 이 경로의 결함이 아니라, 이 경로가
+설계될 당시 **존재하지 않았던 것** — 같은 org 안의 실제 Coupang 상품 카탈로그 68개 — 과 만나면서
+생기는 identity 문제다.
+
+#### 이것은 NAVER와 **같은 기계가 아니다**
+
+| | NAVER REVIEW | **Coupang REVIEW** |
+|---|---|---|
+| 취득 형태 | 마켓 화면에서 **export → 파일 다운로드 → 파싱** | **화면을 읽는다.** 파일이 없다 |
+| 날짜 범위 | 필수. 지정 → 재읽기 검증(`readSelectedScope`) | **개념 자체가 없다.** 실화면 드롭다운 4개는 기간 필터가 아님이 이미 측정됐다(`docs/coupang_review_policy_gate_v1.md` §9.4) |
+| 순회 | 파일 1개 | **pager. 셀러가 넘기고 SellerOps는 읽기만 한다** |
+| 완주 판정 | 파일이 곧 범위 | **pager를 읽어서만.** 못 읽으면 coverage를 주장하지 않는다(`PAGER_UNRESOLVED`) |
+| ingest | download detect → validate → ingest | **끝에 POST 1회** `/api/agent/review-handoff` |
+| 안내 | in-page guidance panel | **operator-confirm 탭 — 페이지마다 확인 1회** |
+| resident helper carrier | `import/naver` | **없다.** `RESIDENT_CARRIER_ACTIVATORS`에 상품평 취득 carrier가 없다 |
+| 진입점 | 제품 화면 | **CLI 전용** — `src/cli/acquire-coupang-reviews.ts` |
+
+⇒ 요청하신 확인 항목 중 **3(파일 scope/date 재검증)과 4의 download detection은 이 채널에 존재하지
+않는다.** 없는 것을 "확인했다"고 적지 않는다. 대응물은 각각 **pager 재읽기**와 **단일 handoff POST**다.
+
+#### 1. 셀러가 WING에서 해야 하는 최소 행동
+
+1. 열린 창에서 **WING 로그인** (SellerOps는 이 창을 조작하지 않는다)
+2. **상품평 목록 화면**을 띄운다
+3. `현재 화면 확인` 누름 → SellerOps가 **그 페이지만** 읽는다
+4. **직접 다음 페이지로 넘긴다** → 다시 누름 → (마지막 페이지까지 반복)
+5. (선택) 저장된 상품평 1건을 화면에서 찾아 테두리 치는 locate 1회
+
+셀러가 하지 않는 것: 내보내기·다운로드·업로드·양식 선택·기간 지정. **그런 단계가 없다.**
+SellerOps가 하지 않는 것: 클릭·입력·전송·페이지 넘김·창 열린 뒤의 이동 — 선언된 marketplace action은
+**0개**(`COUPANG_WING_REVIEW_ACQUISITION_SCOPE.maxActions`).
+
+#### 2. Action Window가 안내/검증하는 범위 — 정확히 어디까지인가
+
+| 단계 | 안내 | 검증 |
+|---|---|---|
+| 창 열기 | 전용 창 1개 | `screenWingUrl` — URL 화이트리스트 통과 못 하면 **브라우저를 열지 않는다** |
+| 승인 | 매니페스트 표시 + **run-level 누름**(`confirmRunGrant`) | 누르지 않으면 exit 7, 아무것도 읽지 않음 |
+| 페이지마다 | "읽을 목록이 보이면 눌러 주세요" + 무엇을 읽는지 7줄 | 열은 **쿠팡 자체 머리글 단어**로 해석. 해석 실패 → `PAGE_UNREADABLE`, 저장 없이 중단 |
+| 구매자 열 | — | **찾아서 제외하기 위해서만 해석한다.** 와이어·canonical·DB 어디에도 작성자 자리가 없다 |
+| 완주 | "마지막 페이지까지 읽으면 자동으로 끝납니다" | pager를 **읽어서** 판정. 못 읽으면 `complete=false` — 반올림 없음 |
+| 저장 후 | locate 1회 제안 (건너뛰기 가능) | 5개 필드 동시 일치 · **정확히 1행일 때만** 표시 |
+
+FE에는 **취득 진입점이 없다.** `/reviews` 계열의 Coupang 항목은 **읽기 기록 + `[쿠팡에서 보기]`
+locate**만 제공한다(`frontend/src/lib/reviewRecord.ts`). 취득은 오퍼레이터가 CLI로 연다.
+
+#### 3. pager 재읽기 (NAVER의 scope 재검증에 대응)
+
+매 페이지 pager를 다시 읽는다. 중단 사유는 닫힌 목록이다 — `FINAL_PAGE_REACHED` ·
+`OPERATOR_FINISHED` **(완주 2개)** / `PAGE_UNREADABLE` · `PAGER_UNRESOLVED` · `PAGE_DID_NOT_ADVANCE` ·
+`PAGE_LIMIT_REACHED` · `REVIEW_LIMIT_REACHED` **(미완주 5개)**. 미완주는 `sync_jobs.status =
+PARTIAL` + `error_message = stopReason`으로 남는다.
+
+**v1은 첫 backfill과 재수집이 같은 일을 한다** — 정렬 순서가 라이브로 증명된 적 없어, 아는 리뷰가
+나온 페이지에서 멈추면 "다 봤다"는 거짓 주장이 되기 때문이다.
+
+#### 4. ingest contract
+
+`POST /api/agent/review-handoff` **1회, 걷기가 끝난 뒤에.** 페이지마다 보내지 않는 이유는 실패한
+걷기가 coverage 주장 없이 목록의 앞부분만 저장하는 상태를 만들기 때문이다.
+
+와이어 행: `writtenOn` · `rating` · `body` · `textless` · `productId` · `vendorItemId` ·
+`productName` · `mediaCount`. **작성자 필드는 존재하지 않는다**(unknown property는 400).
+상한: 한 handoff **500건**(백엔드 `@Size`와 agent `MAX_ACQUISITION_REVIEWS`가 같은 수), 페이지 100,
+페이지당 행 200, 본문 8,000자. 매핑은 **전부-아니면-전무** — 날짜 1건이 깨지면 배치 전체 거부.
+
+#### 5. identifier topology — **이번 준비에서 나온 blocker**
+
+Coupang은 상품 식별자를 셋 쓰고, 셋은 서로 다른 값이다.
+
+| 식별자 | 어디서 오는가 | 지금 저장되는가 |
+|---|---|---|
+| **등록상품ID** `sellerProductId` (11자리) | seller-products API | ✅ `products.sku` · `channel_products.external_product_id` — REAL 68건 |
+| **옵션ID** `vendorItemId` (11자리) | seller-products 상세 `items[]` | ✅ `product_variants.external_variant_id` — 405건 |
+| **노출상품ID** `productId` | 상세 응답에 **68/68 존재**(§5h에서 관측) · WING 상품평 화면의 `노출상품ID (옵션ID)` 컬럼 | ❌ **어디에도 저장되지 않는다.** 매퍼가 읽지 않고, 담을 컬럼도 없다 |
+
+그런데 **상품평 handoff는 노출상품ID를 `sku`로 보낸다**(`AgentReviewHandoffService.mapRows` →
+`CanonicalReview.sku`), 그리고 `ProductService.resolveOrCreate`는 **sku가 있으면 sku로만** 찾는다
+(이름 fallback은 sku가 없을 때만).
+
+> **예측 (반증 가능):** 노출상품ID는 카탈로그가 저장한 등록상품ID와 **다른 식별자 공간**이므로
+> 어떤 행도 매칭되지 않고, 수집된 상품평은 **자기 상품 행을 새로 만든다.** 노출 상품 수만큼,
+> 최대 **+68 products**. 조건이 성립하지 않는 유일한 경우는 이 셀러에서 노출상품ID = 등록상품ID인
+> 경우인데, 쿠팡 API가 두 키를 **같은 객체에 동시에** 싣는다는 사실이 그 가능성을 사실상 배제한다.
+
+**즉 요청하신 6번(기존 REAL product 68개에 resolve되는가)과 7번(새 product를 만들지 않는가)은
+실행 전에 이미 `FAIL`로 예측된다.** 이것은 §5h에서 PRODUCT가 통과한 바로 그 시험의 REVIEW 축이고,
+그때는 `externalVendorSku`가 전부 null이라 조건이 성립하지 않았을 뿐이다.
+
+##### 왜 "일단 수집하고 나중에 고친다"가 비싼가
+
+`ReviewDedupKey.contentHash`에 **resolve된 product의 id가 들어간다.** 지금 수집해서 새 product에
+붙인 뒤 identity를 고치면, 같은 상품평이 다른 product로 resolve되어 **해시가 바뀌고 재수집 때
+두 번째 사본으로 저장된다.** `docs/coupang_review_acquisition_v1.md` 한계 7이 기록한 해시 경계
+사고와 같은 종류이며, 그때와 달리 이번에는 노출 행 수가 0이 아니다.
+
+##### 선택지 — **제품 결정 사항. 여기서 정하지 않는다**
+
+| | 무엇을 한다 | 마켓 호출 | 스키마 | 결과 |
+|---|---|---|---|---|
+| **A** | 그대로 실행하고 split을 **측정한다** | 0 (리뷰 읽기 외) | 없음 | products +N. 이후 identity 수정 시 **중복 재저장 마이그레이션 필요** |
+| **B** (권고) | handoff resolve를 **`product_variants.external_variant_id`(옵션ID) 우선**으로 바꾸고 sku fallback 유지 | **0** | **없음** — 405행이 이미 저장돼 있다 | 리뷰가 기존 68 product에 붙는다. 옵션ID가 비면 A로 떨어짐 |
+| **C** | PRODUCT 응답의 `productId`(노출상품ID)를 저장한 뒤 그것으로 resolve | PRODUCT 재수집 1회 | 컬럼 1개 | 정공법. **§4.1이 기다리는 동일범위 재수집(멱등) 증명과 같은 호출로 처리됨** |
+
+B의 근거는 측정된 사실이다 — 2026-08-15 라이브에서 **옵션ID가 전 행에 찍혔고**(`docs/coupang_review_acquisition_v1.md`
+§74·§250), 이 계정에는 옵션 405개가 이미 저장돼 있다. 다만 **이 계정 화면에서 옵션ID coverage가
+100%라는 것은 아직 확인되지 않았다**(다른 계정의 관측이다).
+
+#### 6~7. resolve / placeholder
+
+위 5번이 답이다. 만들어지는 행은 `data_origin = REAL`(엔티티 기본값)이고 이름은 화면의 상품명이라
+**"synthetic placeholder"는 아니지만 중복 product**다. 결과로 `get_product_signals` ·
+`get_product_knowledge`가 **서로 다른 두 product 행**을 가리키게 된다 — 카탈로그 쪽에는 리뷰가 0건,
+리뷰 쪽에는 knowledge·옵션·facts가 0건.
+
+#### 8. provenance
+
+`Review.dataOrigin` 기본값 **`REAL`**. synthetic 22건(DEMO_SEED, product 3개, sku 7자리)과는 값
+공간이 겹치지 않는다(실계정은 11자리). `sync_jobs`에 `method = SELLER_CENTER_READ` ·
+`trigger = ACTION_WINDOW` · `job_type = AGENT_HANDOFF`로 남는다 — **파일을 받은 게 아니라 화면을
+읽었다**는 정직한 출처 표기.
+
+#### 9. 중복 처리
+
+`external_id`가 **없다**(화면에 리뷰 번호가 없다) ⇒ 공용 ingest spine의 content hash로 떨어진다.
+본문 있는 리뷰 **v2**, 별점만 리뷰 **v3**(옵션ID 포함). DB가 dedupe 권위이고 걷기는 알려진 키를
+미리 싣지 않는다 — 2026-08-15 재수집이 `stored=0 / skipped=22`로 증명했다.
+알려진 한계 그대로: **같은 옵션·같은 날·같은 별점의 별점만 리뷰는 병합된다.**
+
+#### 10. downstream — **라이브에서 한 번도 돈 적 없다**
+
+`IngestFollowUp.afterReviewIngest`가 세 가지를 순서대로 부른다: item-analysis → customer-memory
+index → `ReviewSegmentIngestedEvent`(반복이슈 메모리 갱신). 전부 결정론(외부 LLM 호출 없음),
+전부 best-effort.
+
+**이 배선은 2026-08-21(`c8165291`)에 들어왔다 — 2026-08-15 라이브 취득보다 늦다.** 즉 그때 저장된
+22건은 셋 중 어느 것도 받지 못했고(그것이 그 감사가 찾은 결함 B·C다), **이번이 Coupang 상품평이
+downstream까지 도는 첫 라이브 사례가 된다.** Agent 쪽 가시성은 `search_review_issues` ·
+`get_review_issue_trend` · `get_review_issue_evidence_summary` · `list_item_analysis` ·
+`get_dashboard_product_issues` · `search_customer_memory` — 전부 READ.
+
+#### 11. WRITE 0
+
+마켓플레이스 WRITE는 **선언상 0이고 구조상 0**이다: 이 CLI에는 클릭·입력·전송·페이지넘김 코드가
+없고, 승인 매니페스트가 `0 marketplace actions`를 명시하며, 쿠팡 API 자격증명은 이 경로에 아예
+등장하지 않는다(handoff는 셀러 자신의 SellerOps 세션으로 간다). SellerOps 자기 DB로의 쓰기는
+있고, 매니페스트가 그것을 숨기지 않는다.
+
+#### NAVER에서 겪은 결함 4개 — Coupang 경로에서 재발하는가
+
+| NAVER 결함 | Coupang | 근거 |
+|---|---|---|
+| 안내가 중간에 사라지는 **silent PENDING** | ⚠️ **부분적으로 열려 있다** | `main()`의 walk 블록은 `try … finally`이고 **`catch`가 없다.** reader 자체는 방어적이지만(예외 → `UNREADABLE`), 셀러가 창을 닫는 등으로 confirm 탭이 죽으면 예외가 그대로 올라가 **핸드오프 전에 프로세스가 끝나고, 읽은 상품평은 전부 사라지며, 문서화된 exit code(0/5/6/7) 어디에도 해당하지 않는다** |
+| listener는 export **전에** armed | ✅ **해당 없음/충족** | 다운로드가 없다. 대응물인 reader는 첫 확인 요청 **전에** 생성된다 |
+| **확장자 없는** 파일도 같은 parser 계약 | ✅ **해당 없음** | 파일이 없다 |
+| terminal failure가 **보이는 상태로 남는다** | ⚠️ **위와 같은 구멍** | 정상 종료 경로는 전부 보인다(`PARTIAL` + `stopReason`, exit code, 요약 1줄). 분류되지 않은 fault만 조용하다 |
+
+**이 구멍은 이번 흐름에서 고치지 않는다** — 범위를 넘는다. 기록해 두고, 실행 시에는 **셀러에게
+"창을 닫지 마세요"를 구두로 고지**하는 것으로 대응한다.
+
+#### 매니페스트 (실행 시)
+
+| 필드 | 값 |
+|---|---|
+| phase | `COUPANG_WING_REVIEW_ACQUISITION` |
+| channel / org / account | `COUPANG` · canonical Demo Org `7146c50f…` · 기존 `3e2ddaaa…` **재사용** |
+| surface | Coupang WING 상품평 |
+| mode | `READ_ONLY` — **marketplace action 0** |
+| CLI | `src/cli/acquire-coupang-reviews.ts` |
+| 계정 슬롯 | 이 준비 중 발급 완료 (24-hex, find-or-create 멱등, 마켓 접촉 0회). **값은 여기 적지 않는다** |
+| 백엔드 세션 | `demo@sellerops.ai` — 로컬 로그인 200 확인 |
+| 상한 | 페이지 100 · 리뷰 500 · 행/페이지 200 · 본문 8,000자 |
+| 되돌릴 수 없는 것 | 저장된 상품평과 **(선택지 A일 경우) 새로 생기는 product 행** |
+
+**실행 전 조건**: 트리가 **clean**해야 한다(`verifyRepoIdentity`가 `DIRTY_TREE`로 거부) · 환경변수
+`SELLEROPS_APPROVAL_PHASE` = `SELLEROPS_WING_APPROVED_PHASE` = phase, `WALKTHROUGH_APPROVAL_ID` /
+`WALKTHROUGH_RUN_ID` / `WALKTHROUGH_GIT_COMMIT`(= HEAD), `COUPANG_WING_URL`,
+`SELLEROPS_REVIEW_ACCOUNT_SLOT` · 이 저장소에는 브라우저 프로필이 없으므로 **셀러가 창에서 직접
+로그인**한다.
+
+#### 정지
+
+**여기서 멈춘다.** WING 상호작용 전에 필요한 것은 두 가지다 — (1) 위 A/B/C 중 하나에 대한
+제품 결정, (2) 이 실행에 대한 단회 라이브 승인.
