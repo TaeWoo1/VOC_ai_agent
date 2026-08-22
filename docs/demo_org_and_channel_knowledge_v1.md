@@ -214,6 +214,64 @@ resolve-or-create는 금지 — `product_no`를 SKU로 삼아 만들면 이름�
 Product Knowledge가 그것을 판매 중인 상품으로 센다. 카탈로그가 모르는 `product_no`는 **unresolved로 남긴다**;
 article이 `product_no`를 보존하므로 다음 카탈로그 read가 무료로 relink한다.
 
+## 4b. NAVER 조립 — 마켓플레이스 접촉 0회 준비 (2026-08-22)
+
+Cafe24가 production-like routine으로 돌기 시작한 뒤 NAVER로 넘어갔다. 이 절의 작업 중
+**NAVER 호출은 0회**다 — 실패가 전부 vault 안에서 끝나기 때문이다(`NaverApiConnector.fetch`의
+"Fail closed before any HTTP").
+
+### 무엇이 잘못돼 있었나
+
+| 발견 | 실제 상태 |
+|---|---|
+| **51회 연속 실패가 셀러에게 보이지 않았다** | credential이 `local-dev-1`로 봉인됐고 그 키가 이 배포에 없다 → vault에서 실패 → 채널이 401을 말할 기회가 없다 → auth 분류기가 한 번도 안 걸림. 계정은 계속 `CONNECTED` |
+| **연결 확인이 500이었다** | test-connection이 vault 예외를 그대로 던져, 화면에는 "일시적인 채널 응답 오류" — 재시도해도 절대 안 되는 조건 |
+| **연결 완료와 첫 수집이 한 동작이었다** | credential 제출 → test → `manualSync(ORDER_SUMMARY)` 자동 연쇄. 셀러가 누른 적 없는 주문 read |
+| **교체 경로가 막혀 있었다** | `replaceCredential`이 롤백용으로 옛 값을 먼저 열어야 해서, **열 수 없는 credential은 교체할 수 없었다** |
+| **API 호출 IP가 비어 있었다** | `advertisedEgressIps: []` → 튜토리얼의 IP 등록 단계가 "담당자에게 문의" |
+
+### 계약 — 첫 수집은 셀러가 푼다
+
+`first_order_sync`는 **released 상태로 도착하지 않는다**(`syncRequested: false`, `USER_REQUIRED`).
+`SYNC_START`만이 그것을 푼다. 검증된 credential은 "연결 정보가 맞다"만 증명하며, "이 판매자의 주문을
+읽어도 된다"는 별개의 사실이다. 실패한 수집은 released를 유지한다(재시도는 같은 허락을 두 번 묻지
+않는다); 새로고침은 의도를 복원하지 않는다.
+
+### 계약 — 누가 고칠 수 있는가는 한 곳에서 정한다
+
+`CredentialKeyStatus.sellerActionable()`. `KEY_UNVERIFIABLE`·`INVALID_CREDENTIAL`은 셀러가 재입력하면
+해결된다(재입력이 active key로 다시 봉인한다). `NO_KEY_CONFIGURED`·`KEY_NOT_AVAILABLE`·`KEY_MISMATCH`는
+**서버 문제이고, 다시 연결해도 해결되지 않는다** — 이 구분이 틀리면 셀러는 고칠 수 없는 것을 고치러
+마켓플레이스에 간다. 수집 분류기, 연결 확인, 진단 패널이 모두 이 하나를 읽는다.
+
+`CREDENTIAL_UNREADABLE`은 서버측 사유의 연결-확인 응답이다. 채널을 부르지 않았으므로 채널을 탓하지
+않고, 재시도를 권하지도 않는다.
+
+### schedule 상태 (복구 가능하게 기록)
+
+canonical Demo Org의 **NAVER `ORDER_SUMMARY` schedule만** 임시 pause했다 — Cafe24 3종은 손대지 않았고
+`enabled=t`로 계속 돈다.
+
+| 항목 | 값 |
+|---|---|
+| seller account | `bdccb7a7` (데모 제조사 · NAVER · 1개, 재사용) |
+| dataType / cadence | `ORDER_SUMMARY` / `INTERVAL` 60분 |
+| pause 방식 | `tools/live-proof/schedule-guard.sh pause bdccb7a7-…` |
+| `paused_reason` | **NULL** — 운영자 pause다 |
+| restore | `schedule-guard.sh restore bdccb7a7-…` (state file은 `tools/live-proof/.run/`, gitignore) |
+
+`paused_reason`이 NULL인 것이 중요하다. `SellerAccountReauthService.onReconnected`는
+**`paused_reason != null`인 schedule만** 재개하므로, credential 재입력·연결 확인 성공이
+이 schedule을 자동으로 켜지 않는다. Cafe24에서 승인 없는 read 4건을 만든 것이 바로 그 재개 경로였다.
+
+### 남은 것 — 셀러/운영자 행위
+
+- **NAVER credential 재입력** (client id + secret). 복구 불가: `local-dev-1`이라는 이름의 키는 링에
+  있지만 이 행을 봉인한 키가 아니다(지문 대조로 확인). 마켓플레이스 접촉 없이 되돌릴 방법이 없다.
+- **API 호출 IP 확인**. 개발 배포의 egress = 개발망 공인 IPv4이며 network가 바뀌면 수동 갱신이다
+  (`docs/sellerops_local_to_pilot_connectivity_decision.md` §3). 값은 `backend/.env.local`의
+  `SELLEROPS_CONNECTOR_NAVER_ADVERTISED_EGRESS_IPS`에만 있다 — **git·정본 문서·메모리에 기록하지 않는다.**
+
 ## 5. 아직 라이브 경계 너머에 있는 것
 
 이 문서가 기록하는 작업에서 **마켓플레이스 접촉은 0회**였다. 남은 것은 전부 셀러/운영자의 행위가

@@ -152,6 +152,9 @@ tools/coupang-local/.run/
 tools/self-pilot/.run/
 # Local dev stack pids + logs (tools/dev/local-stack.sh). Process state, never source.
 tools/dev/.run/
+# schedule-guard's record of what IT paused for a live proof. Deployment state, not source — restoring
+# from a committed file would re-enable schedules on a machine that never had them on.
+tools/live-proof/.run/
 
 # Calibration worksheet — real customer review text, generated locally by
 # tools/review-triage-calibration/draw-sample.mjs. Never committed; see that
