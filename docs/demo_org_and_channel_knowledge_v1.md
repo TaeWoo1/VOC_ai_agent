@@ -983,3 +983,63 @@ Demo Spine 조립이며, Product enrichment / 다른 채널 polishing / historic
 | 계정 상태 | `PREPARING` (두 신호 중 하나 확보) |
 | 다음 단계에서 관찰할 것 | 첫 수집 rows / 중복 0 / REAL provenance / `PREPARING → CONNECTED` / 그리고 **CONNECTED 5분 내 self-pilot이 만드는 첫 automatic cycle** (5d 결정 1) |
 
+### 5f. 첫 ORDER_SUMMARY 수집 + 첫 automatic cycle (2026-08-23 02:15~02:19 KST) — **전부 PASS**
+
+승인: manifest + `Seated and ready.` · mode `READ_ONLY` · 첫 수집 1회.
+
+#### 첫 수집 (MANUAL)
+
+run `1d6850c2` — **SUCCESS · 50 / 50 / 0 / 0** · 8.0초.
+
+| 신호 | 값 |
+|---|---|
+| `connection_status` | **`PREPARING → CONNECTED`** (02:15:32) — 두 신호 계약 완성 |
+| `channel_orders` | **50 · distinct external id 50 → 중복 0** |
+| 주문 날짜 범위 | 2026-08-16 … **2026-08-22** (최신 주문 = 어제) |
+| `order_daily_summaries` | **REAL 7일 / 50건** — 기존 `DEMO_SEED` 14일(2026-05-31…06-13)과 분리 유지 |
+| cursor | `primary {"initialized":true,"throughDate":"2026-08-23"}` — 2026-08-06 증명과 동형 |
+
+#### self-pilot의 자동 schedule 생성
+
+CONNECTED **2분 44초 뒤** (02:18:16) `ORDER_SUMMARY` · `INQUIRY` **60분**, `enabled`, `next_run_at` =
+생성 시각(즉시 due). **`REVIEW`는 만들지 않았다** — 커넥터가 지원하지 않으므로 Action Window로 남는다.
+5d 결정 1이 예고한 그대로다.
+
+#### 첫 automatic cycle (02:19:02, SCHEDULED)
+
+| data type | 결과 | 읽는 법 |
+|---|---|---|
+| `INQUIRY` | **SUCCESS · 2 / 2 / 0 / 0** | 이 org Coupang 문의의 **최초 실수집**. 초기 backfill이 한 cycle에 완주 — cursor `{"backfillComplete":true,"earliestSwept":"2026-07-24","throughDate":"2026-08-23"}`. 폭주 없음 |
+| `ORDER_SUMMARY` | **SUCCESS · 8 seen / 0 insert / 8 skip / 0 fail** | **멱등 재수집.** cursor가 증분 창으로 묶었고 8건 전부 `external_order_id`로 중복 제거. 주문 수 **50 불변** |
+
+`next_run_at` 양쪽 **03:19:02** (+60분), `paused_reason` 없음. **pause한 DataType은 없다** — 이상한
+것이 없었다.
+
+#### 검증 항목
+
+- **REAL provenance** ✅ 신규 주문 7일·문의 2건 전부 `REAL`. synthetic 행은 승격되지 않았다.
+- **inserted / updated / skipped** ✅ 위 표. 재수집 insert 0 / skip 8, 중복 0.
+- **최신 주문 날짜** ✅ 2026-08-22.
+- **401 / 403 / 429 / WARN / ERROR** ✅ **0건** — 첫 수집 구간과 automatic cycle 구간 양쪽 모두.
+- **synthetic exclusion** ✅ 두 방향으로 실측. 주문 화면이 보고한 쿠팡 매출이 **REAL 전용 합계와 정확히
+  일치**(₩1,044,550). 문의 화면의 쿠팡 항목은 **0건인데, 제외되지 않았다면 큐에 올랐을 synthetic
+  `UNANSWERED` 행이 5건 존재한다** — 제외 테스트가 공허하지 않다는 증거.
+- **`next_run_at`** ✅ +60분 정상.
+- **WRITE 0** ✅ 승인 id 미무장(standing grant는 WRITE gate를 열지 않음) · 오늘자 `inquiry_execution` /
+  `review_reply_submission_ref` 신규 행 **0**.
+- **downstream** ✅ 새 문의 2건을 `ItemAnalysis`와 `CustomerMemoryIndexer`가 각각 인덱싱했다.
+
+**request 수는 확인하지 못했다.** sync run에 `request_count` / `page_count` / `termination_reason`이
+없기 때문이며, 이것은 §4f에서 이미 기록한 운영 hardening 백로그 항목이다. 대신 관측 가능한 대리
+지표만 남긴다 — 8.0s / 2.4s / 1.9s, 429 **0건**, 페이지네이션은 이 창에서 소진되지 않음. **없는 계측을
+있는 것처럼 보고하지 않는다.**
+
+#### 판정 — Demo Spine은 **닫지 않는다**
+
+Coupang은 canonical Demo Org에서 처음으로 **REAL 데이터를 갖게 됐다**(주문 50 · 문의 2). 그러나
+남은 것이 둘이다: **PRODUCT one-shot live proof**(현재 `NEEDS_VERIFICATION`, wire shape 미관측),
+그다음 **REVIEW Action Window acquisition**(공식 API 없음). 그 둘이 끝나기 전에는 COMPLETE가 아니다.
+
+backlog 유지, 이번 흐름에서 확장하지 않음: **광고 IP drift 자가검증**(§5e ①) · **Coupang 오류 문구가
+NAVER 어휘를 쓰는 문제**(§5e ②) · sync run 요청 계측(§4f).
+
